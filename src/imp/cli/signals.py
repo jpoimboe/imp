@@ -133,30 +133,24 @@ def _feed_prompt_ctrl_c() -> None:
 
 
 @contextlib.asynccontextmanager
-async def sigint_cancels_scope() -> AsyncIterator[None]:
-    """Cancel the wrapped body on an out-of-band SIGINT and re-raise it as
-    KeyboardInterrupt.
+async def prompt_sigint_guard() -> AsyncIterator[None]:
+    """Bring an out-of-band SIGINT at a pre-coordinator prompt (the `imp new` /
+    `imp chat` opening prompt) under the 'never exits' invariant.
 
-    For a prompt window that runs BEFORE any InterruptCoordinator receiver
-    exists (the `imp new` / `imp chat` opening prompt), an OS SIGINT would
-    otherwise land in asyncio.Runner's default handling and escape as a raw
-    KeyboardInterrupt above the caller's cleanup arm. This installs a loop-level
-    SIGINT handler that cancels an anyio scope wrapping just the body; on exit it
-    removes the handler and RESTORES the prior signal disposition (not the
-    asyncio default that remove_signal_handler leaves), and if the scope was
-    cancelled by SIGINT it raises KeyboardInterrupt so the caller's
-    `except (EOFError, KeyboardInterrupt)` arm runs. Where add_signal_handler is
-    unsupported (Windows) it degrades to a no-op — no worse than before."""
-    import anyio
-
+    That prompt runs BEFORE any InterruptCoordinator receiver exists and uses
+    `prompt_async(handle_sigint=False)`, so an OS SIGINT would otherwise escape as
+    a raw KeyboardInterrupt above the caller's cleanup arm. This installs a
+    loop-level SIGINT handler that feeds a synthetic Ctrl-C into the running
+    prompt_toolkit app (its `c-c` binding clears the line / shows the ctrl-d hint),
+    exactly like a typed ctrl-c — it NEVER cancels the body and NEVER exits. Ctrl-d
+    (EOFError from the prompt) remains the only leave gesture. On exit the handler
+    is removed and the prior signal disposition RESTORED (not the asyncio default
+    that remove_signal_handler would leave). Where add_signal_handler is
+    unsupported (Windows) it degrades to a no-op."""
     loop = asyncio.get_running_loop()
-    scope = anyio.CancelScope()
-    hit_sigint = False
 
     def _on_sigint() -> None:
-        nonlocal hit_sigint
-        hit_sigint = True
-        scope.cancel()
+        _feed_prompt_ctrl_c()
 
     prev_handler = signal.getsignal(signal.SIGINT)
     supported = True
@@ -168,15 +162,12 @@ async def sigint_cancels_scope() -> AsyncIterator[None]:
         yield  # unsupported (Windows) — degrade to a no-op guard
         return
     try:
-        with scope:
-            yield
+        yield
     finally:
         with _suppress(NotImplementedError, RuntimeError, ValueError):
             loop.remove_signal_handler(signal.SIGINT)
         with _suppress(TypeError, ValueError, OSError):
             signal.signal(signal.SIGINT, prev_handler)
-    if hit_sigint:
-        raise KeyboardInterrupt
 
 
 def _reason_for_signal(sig: int) -> str:

@@ -23,7 +23,7 @@ import pytest
 from imp.cli.signals import (
     InterruptCoordinator,
     install_process_group,
-    sigint_cancels_scope,
+    prompt_sigint_guard,
 )
 
 
@@ -404,27 +404,29 @@ async def test_tty_quiesced_parks_reader_then_rearms(monkeypatch) -> None:
 
 
 @pytest.mark.anyio
-async def test_sigint_guard_cancels_prompt_and_restores_handler() -> None:
-    """An OS SIGINT delivered while inside the guard cancels the wrapped body and
-    surfaces as a KeyboardInterrupt (never a raw interpreter KBI); on exit the
-    guard restores the exact prior SIGINT disposition it found on entry."""
-    def _sentinel(_signum, _frame):  # a distinct prior handler to restore
+async def test_prompt_sigint_guard_sigint_does_not_raise_or_exit() -> None:
+    """An out-of-band SIGINT at the opening prompt is routed through the prompt's
+    own Ctrl-C binding (a no-op here — no prompt_toolkit app is running), NOT
+    re-raised as KeyboardInterrupt and NEVER exits. The guarded body runs to
+    completion, and the guard restores the exact prior SIGINT disposition."""
+    def _sentinel(_signum, _frame):
         raise AssertionError("prior handler must not actually fire")
 
     prev = signal.signal(signal.SIGINT, _sentinel)
     try:
         raised = False
+        completed = False
         async with asyncio.timeout(10):
             try:
-                async with sigint_cancels_scope():
+                async with prompt_sigint_guard():
                     os.kill(os.getpid(), signal.SIGINT)
-                    await asyncio.sleep(5)  # cancelled well before this elapses
+                    await asyncio.sleep(0.1)   # let the loop deliver the signal
+                    completed = True
             except KeyboardInterrupt:
                 raised = True
-        assert raised is True
-        # The guard restored the exact disposition present on entry — NOT the
-        # asyncio default that remove_signal_handler would otherwise leave.
-        assert signal.getsignal(signal.SIGINT) is _sentinel
+        assert raised is False        # SIGINT no longer exits the opening prompt
+        assert completed is True      # the body ran to completion
+        assert signal.getsignal(signal.SIGINT) is _sentinel   # disposition restored
     finally:
         signal.signal(signal.SIGINT, prev)
 
@@ -434,7 +436,7 @@ async def test_sigint_guard_clean_body_does_not_raise() -> None:
     """A body that completes with no SIGINT runs to completion and the guard
     raises nothing."""
     ran = False
-    async with sigint_cancels_scope():
+    async with prompt_sigint_guard():
         ran = True
     assert ran is True
 
@@ -450,7 +452,7 @@ async def test_sigint_guard_degrades_to_noop_when_unsupported(monkeypatch) -> No
 
     monkeypatch.setattr(loop, "add_signal_handler", _unsupported)
     ran = False
-    async with sigint_cancels_scope():
+    async with prompt_sigint_guard():
         ran = True
     assert ran is True
 
@@ -467,7 +469,7 @@ async def test_sigint_guard_passes_body_exception_through_and_restores() -> None
     prev = signal.signal(signal.SIGINT, _sentinel)
     try:
         with pytest.raises(EOFError):
-            async with sigint_cancels_scope():
+            async with prompt_sigint_guard():
                 raise EOFError
         assert signal.getsignal(signal.SIGINT) is _sentinel
     finally:
