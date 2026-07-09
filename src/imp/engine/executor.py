@@ -1287,7 +1287,15 @@ async def _route_agent(
             # edge's marker; cleared on the next forward Continue.
             state.resume_pending = state.step
             state.save(change.state_dir)
-        return Pause(interrupt=result.interrupt), None, {}
+        # A genuine your-turn yield gets its own reason so it stops sharing the
+        # "interrupt" token; a real interrupt (interrupt=True) or a
+        # subagent-suspend unwind (awaiting_user=False) keeps reason=None and
+        # still defaults to "interrupt" at the emit site.
+        return Pause(
+            reason="awaiting_user" if (
+                result.awaiting_user and not result.interrupt) else None,
+            interrupt=result.interrupt,
+        ), None, {}
     reincarnation_key = f"step:{step.phase}/{step.name}"
     if result.handoff_path is not None:
         # Tier A proactive handoff: the agent approached its window and (normally)

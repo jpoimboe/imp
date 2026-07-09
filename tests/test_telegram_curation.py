@@ -138,10 +138,22 @@ def test_pause_is_silent_predicate_reflects_denylist() -> None:
 def test_pause_silent_reasons_exact_set() -> None:
     expected = frozenset({
         "merge_blocked", "script_blocked", "agent_output_missing", "awaiting_turn",
-        "interrupt", "api", "quota", "content_filter", "loop", "terminated",
-        "unknown", "config", "internal_error", "retry_ceiling", "reauth_needed",
+        "interrupt", "awaiting_user", "api", "quota", "content_filter", "loop",
+        "terminated", "unknown", "config", "internal_error", "retry_ceiling",
+        "reauth_needed",
     })
     assert expected == imp_telegram._PAUSE_SILENT_REASONS
+
+
+def test_awaiting_user_pause_is_silent() -> None:
+    # A your-turn park is quiet in the stream — parity with the old "interrupt"
+    # tier — rather than newly buzzing. The "needs your input" buzz stays the
+    # real signal elsewhere.
+    assert imp_telegram.curate(
+        "workflow_paused", {"reason": "awaiting_user"}) == "silent"
+    assert imp_telegram._pause_is_silent({"reason": "awaiting_user"}) is True
+    assert imp_telegram.event_body(
+        "workflow_paused", {"reason": "awaiting_user"}) == ""
 
 
 def test_pause_reason_bodies_exact() -> None:

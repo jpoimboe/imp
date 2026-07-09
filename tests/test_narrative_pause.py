@@ -118,3 +118,35 @@ def test_pause_finalizes_open_folds_without_clearing_membership() -> None:
     # Narrower than the resume loop: membership entries are NOT cleared.
     assert "t1" in nb._open_sub_by_event
     assert "sub:t1" in nb._sub_by_agent_id
+
+
+def test_awaiting_user_pause_appends_no_pause_node() -> None:
+    pauses = _pause_nodes([
+        {"type": "workflow_paused", "payload": {"reason": "awaiting_user"}},
+    ])
+    assert pauses == []
+
+
+def test_awaiting_user_pause_still_finalizes_open_folds_and_sets_paused() -> None:
+    nb = NarrativeBuilder()
+    for e in [
+        _created(),
+        _started("s1", phase="design"),
+        {"id": "t1", "agent_id": "a", "type": "tool_call",
+         "payload": {"id": "t1", "name": "sub_agent",
+                     "input": {"subagent_name": "reviewer"}}},
+        {"id": "z", "agent_id": None, "type": "workflow_paused",
+         "payload": {"reason": "awaiting_user"}},
+    ]:
+        nb.add(e)
+    # Root still marked paused, open folds finalized exactly as for any pause...
+    assert nb.tree.root.status == "paused"
+    fold = nb._open_sub_by_event["t1"]
+    assert fold.running is False
+    assert fold.terminal_state == "interrupted"
+    # ...but NO PauseNode is appended (the redundant your-turn line is suppressed).
+    def _walk(node: object) -> bool:
+        if isinstance(node, PauseNode):
+            return True
+        return any(_walk(c) for c in getattr(node, "children", []))
+    assert _walk(nb.tree.root) is False
