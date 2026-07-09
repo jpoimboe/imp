@@ -972,35 +972,36 @@ def _backlog_run_only_flag(args: argparse.Namespace) -> str | None:
     return None
 
 
-def _auto_detect_base(control: Path) -> str | None:
-    """Runtime base guess: origin/HEAD, else `master`/`main` if they exist, else None."""
-    origin = worktree.origin_head_branch(control)
-    if origin is not None:
-        return origin
-    for candidate in ("master", "main"):
-        if worktree.branch_exists(control, candidate):
-            return candidate
-    return None
+class BaseResolutionError(Exception):
+    """imp new cannot resolve a valid base branch — `default-base` is missing,
+    or the resolved / `--base` override does not name an existing branch."""
 
 
-def _resolve_new_base(
-    control: Path, base_flag: str | None
-) -> tuple[str, str | None]:
-    """Resolve `imp new`'s base by priority; returns (base, notice) for the caller to print."""
-    current = worktree.current_branch(control)
+def _resolve_new_base(control: Path, base_flag: str | None) -> str:
+    """The validated branch `imp new` bases a Change on.
+
+    `--base BRANCH` overrides the configured `default-base`; either way the
+    branch must already exist. There is no runtime auto-detection and no
+    current-branch fallback — a missing `default-base` or a non-existent branch
+    is a hard error (BaseResolutionError), raised before any draft is created.
+    `.` and `HEAD` are ordinary names here: they fail the existence check like
+    any other unknown branch.
+    """
     if base_flag is not None:
-        return (current if base_flag in (".", "HEAD") else base_flag), None
-    resolved = (
-        parse_default_base(control / "imp" / "project.yaml")
-        or _auto_detect_base(control)
-    )
-    if resolved is None or resolved == current:
-        return current, None
-    notice = (
-        f"ℹ basing on {resolved}  "
-        f"(you're on {current} — use --base . to base here)"
-    )
-    return resolved, notice
+        if not worktree.branch_exists(control, base_flag):
+            raise BaseResolutionError(
+                f"--base {base_flag!r} does not name an existing branch.")
+        return base_flag
+    base = parse_default_base(control / "imp" / "project.yaml")
+    if base is None:
+        raise BaseResolutionError(
+            "no `default-base` in imp/project.yaml — run `imp init` to set the "
+            "branch changes integrate into.")
+    if not worktree.branch_exists(control, base):
+        raise BaseResolutionError(
+            f"default-base {base!r} (imp/project.yaml) does not name an existing "
+            "branch — update it or re-run `imp init`.")
+    return base
 
 
 async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -> int:
@@ -1010,7 +1011,11 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
     control = _control_root()
     worktree.check_preconditions(control)
     worktree.ensure_imp_ignored(control)
-    base, base_notice = _resolve_new_base(control, getattr(args, "base", None))
+    try:
+        base = _resolve_new_base(control, getattr(args, "base", None))
+    except BaseResolutionError as e:
+        print(f"imp: {e}", file=sys.stderr)
+        return 2
 
     wf_arg = getattr(args, "workflow", None)
     if wf_arg is not None and not validate_workflow_name(wf_arg):
@@ -1056,8 +1061,6 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
     opening_text = seed.seed_text
     color = should_use_color(sys.stdout)
 
-    if base_notice is not None:
-        print(base_notice)
     change_id = new_change_id()
     # No auto-name: an unnamed Change has an empty title. The agent
     # names it via rename_change once intent is clear, or the user passes --title.
@@ -2921,9 +2924,9 @@ def _build_parser() -> argparse.ArgumentParser:
                             "project default. A bundled name needs no commit; a "
                             "committed imp/workflows/NAME fork overrides it.")
     p_new.add_argument("--base", metavar="BRANCH", default=None,
-                       help="Base the Change on BRANCH instead of the resolved "
-                            "integration branch. Use --base . (or --base HEAD) "
-                            "to base on the currently checked-out branch.")
+                       help="Base the Change on an existing BRANCH instead of "
+                            "the configured default-base. BRANCH must already "
+                            "exist.")
     p_new.set_defaults(func=_cmd_new)
 
     p_chat = sub.add_parser(

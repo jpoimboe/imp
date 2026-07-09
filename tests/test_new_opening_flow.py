@@ -36,6 +36,7 @@ def stub_new(monkeypatch, tmp_path):
     monkeypatch.setattr(main.worktree, "check_preconditions", lambda *a, **k: None)
     monkeypatch.setattr(main.worktree, "ensure_imp_ignored", lambda *a, **k: None)
     monkeypatch.setattr(main.worktree, "current_branch", lambda *a, **k: "main")
+    monkeypatch.setattr(main, "_resolve_new_base", lambda *a, **k: "main")
     monkeypatch.setattr(main, "_preflight_imp_init", lambda **k: None)
     monkeypatch.setattr(main, "_test_cmd_fast_nudge", lambda **k: None)
     monkeypatch.setattr(main, "_is_interactive", lambda **k: True)

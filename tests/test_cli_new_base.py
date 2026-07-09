@@ -1,9 +1,18 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 from pathlib import Path
 
-from imp.cli.main import _build_parser, _record_idea, _resolve_new_base
+import pytest
+
+from imp.cli.main import (
+    BaseResolutionError,
+    _async_cmd_new,
+    _build_parser,
+    _record_idea,
+    _resolve_new_base,
+)
 from imp.engine.change import Change
 from tests.conftest import _git, _seed_control
 
@@ -24,73 +33,77 @@ def _write_default_base(root: Path, value: str) -> None:
         f"default-workflow: imp\ndefault-base: {value}\n")
 
 
-def test_explicit_base_flag_wins_over_everything(tmp_path: Path) -> None:
-    _repo(tmp_path, "main")
-    _write_default_base(tmp_path, "release/9")
-    base, notice = _resolve_new_base(tmp_path, "feature-x")
-    assert base == "feature-x"
-    assert notice is None
-
-
-def test_base_dot_means_current_branch(tmp_path: Path) -> None:
-    _repo(tmp_path, "main")
-    assert _resolve_new_base(tmp_path, ".") == ("main", None)
-
-
-def test_base_head_means_current_branch(tmp_path: Path) -> None:
-    _repo(tmp_path, "main")
-    assert _resolve_new_base(tmp_path, "HEAD") == ("main", None)
-
-
 def test_config_default_base_used_when_no_flag(tmp_path: Path) -> None:
     _repo(tmp_path, "main")
+    _git(tmp_path, "branch", "release/9")
     _write_default_base(tmp_path, "release/9")
-    base, notice = _resolve_new_base(tmp_path, None)
-    assert base == "release/9"
-    assert notice == (
-        "ℹ basing on release/9  (you're on main — use --base . to base here)")
+    assert _resolve_new_base(tmp_path, None) == "release/9"
 
 
-def test_config_default_base_equal_current_no_notice(tmp_path: Path) -> None:
+def test_missing_default_base_raises_pointing_at_init(tmp_path: Path) -> None:
+    _repo(tmp_path, "main")  # no default-base written
+    with pytest.raises(BaseResolutionError) as exc:
+        _resolve_new_base(tmp_path, None)
+    assert "imp init" in str(exc.value)
+
+
+def test_nonexistent_default_base_raises(tmp_path: Path) -> None:
+    _repo(tmp_path, "main")
+    _write_default_base(tmp_path, "ghost")  # no such branch
+    with pytest.raises(BaseResolutionError):
+        _resolve_new_base(tmp_path, None)
+
+
+def test_base_flag_overrides_default_base(tmp_path: Path) -> None:
     _repo(tmp_path, "main")
     _write_default_base(tmp_path, "main")
-    assert _resolve_new_base(tmp_path, None) == ("main", None)
+    _git(tmp_path, "branch", "feature-x")
+    assert _resolve_new_base(tmp_path, "feature-x") == "feature-x"
 
 
-def test_auto_detect_origin_head_when_no_config(tmp_path: Path) -> None:
+def test_base_flag_nonexistent_raises(tmp_path: Path) -> None:
     _repo(tmp_path, "main")
-    # `symbolic-ref <name> <target>` writes the ref without requiring <target>
-    # to exist; a non-`main` target proves origin/HEAD is what resolved.
-    _git(tmp_path, "symbolic-ref",
-         "refs/remotes/origin/HEAD", "refs/remotes/origin/upstream")
-    base, notice = _resolve_new_base(tmp_path, None)
-    assert base == "upstream"
-    assert notice == (
-        "ℹ basing on upstream  (you're on main — use --base . to base here)")
+    with pytest.raises(BaseResolutionError):
+        _resolve_new_base(tmp_path, "nope")
 
 
-def test_auto_detect_prefers_master_over_main(tmp_path: Path) -> None:
-    _repo(tmp_path, "work")
-    _git(tmp_path, "branch", "master")
-    _git(tmp_path, "branch", "main")
-    base, notice = _resolve_new_base(tmp_path, None)
-    assert base == "master"
-    assert notice == (
-        "ℹ basing on master  (you're on work — use --base . to base here)")
+def test_base_dot_is_ordinary_name_and_raises(tmp_path: Path) -> None:
+    _repo(tmp_path, "main")  # `.` is no longer current-branch magic
+    with pytest.raises(BaseResolutionError):
+        _resolve_new_base(tmp_path, ".")
 
 
-def test_auto_detect_main_when_master_absent(tmp_path: Path) -> None:
-    _repo(tmp_path, "work")
-    _git(tmp_path, "branch", "main")
-    base, notice = _resolve_new_base(tmp_path, None)
-    assert base == "main"
-    assert notice == (
-        "ℹ basing on main  (you're on work — use --base . to base here)")
+def test_base_head_is_ordinary_name_and_raises(tmp_path: Path) -> None:
+    _repo(tmp_path, "main")  # `HEAD` is no longer current-branch magic
+    with pytest.raises(BaseResolutionError):
+        _resolve_new_base(tmp_path, "HEAD")
 
 
-def test_fallback_to_current_head_when_nothing_resolves(tmp_path: Path) -> None:
-    _repo(tmp_path, "solo")
-    assert _resolve_new_base(tmp_path, None) == ("solo", None)
+def test_cmd_new_missing_default_base_exits_2_and_creates_no_draft(
+        tmp_path: Path, monkeypatch, capsys) -> None:
+    _seed_control(tmp_path)
+    # Drop the seed's default-base and re-commit so the tree stays clean
+    # (check_preconditions runs before base resolution).
+    (tmp_path / "imp" / "project.yaml").write_text("default-workflow: imp\n")
+    _git(tmp_path, "commit", "-aqm", "drop default-base")
+    monkeypatch.chdir(tmp_path)
+    rc = asyncio.run(_async_cmd_new(argparse.Namespace(base=None)))
+    assert rc == 2
+    assert not (tmp_path / ".imp" / "changes").exists()  # no draft created
+    assert "imp init" in capsys.readouterr().err
+
+
+def test_cmd_new_nonexistent_default_base_exits_2_and_creates_no_draft(
+        tmp_path: Path, monkeypatch, capsys) -> None:
+    _seed_control(tmp_path)
+    (tmp_path / "imp" / "project.yaml").write_text(
+        "default-workflow: imp\ndefault-base: ghost\n")
+    _git(tmp_path, "commit", "-aqm", "point default-base at a missing branch")
+    monkeypatch.chdir(tmp_path)
+    rc = asyncio.run(_async_cmd_new(argparse.Namespace(base=None)))
+    assert rc == 2
+    assert not (tmp_path / ".imp" / "changes").exists()  # no draft created
+    assert "does not name an existing branch" in capsys.readouterr().err
 
 
 def test_new_parser_accepts_base_flag() -> None:
@@ -103,17 +116,27 @@ def test_new_parser_base_defaults_none() -> None:
     assert args.base is None
 
 
+def test_new_parser_base_help_drops_dot_magic() -> None:
+    sub_action = next(
+        a for a in _build_parser()._actions
+        if isinstance(a, argparse._SubParsersAction))
+    action = next(
+        a for a in sub_action.choices["new"]._actions
+        if "--base" in a.option_strings)
+    assert "--base ." not in (action.help or "")
+
+
 def test_record_idea_uses_passed_base_not_current_branch(
         tmp_path: Path, monkeypatch) -> None:
     _seed_control(tmp_path)
     _git(tmp_path, "branch", "release/9")
     _git(tmp_path, "checkout", "-b", "work")
     monkeypatch.chdir(tmp_path)
-    ns = argparse.Namespace(idea="my idea", opening=None, depends_on=None, workflow=None)
+    ns = argparse.Namespace(
+        idea="my idea", opening=None, depends_on=None, workflow=None)
     rc = _record_idea(ns, tmp_path, "release/9")
     assert rc == 0
     ids = [p.name for p in (tmp_path / ".imp" / "changes").iterdir()]
     assert len(ids) == 1, ids
-    change_id = ids[0]
-    change = Change.load(tmp_path, change_id)
+    change = Change.load(tmp_path, ids[0])
     assert change.base_branch == "release/9"
