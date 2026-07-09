@@ -174,6 +174,23 @@ def test_watchdog_decoupled_from_tool_wallclock() -> None:
     assert AGENT_INACTIVITY_TIMEOUT_S < TOOL_WALLCLOCK_TIMEOUT_S
 
 
+def test_provider_request_ceiling_between_window_and_wallclock() -> None:
+    """The request-in-flight silence ceiling is finite (never inf) and sits
+    strictly between the 300 s general inactivity window and the 1800 s per-tool
+    wall-clock deadline: long enough that a healthy provider wait (~9 min observed
+    max) never false-kills, short enough to still tear down a dead-but-open
+    connection well before the wall-clock deadline."""
+    from imp.agents.tools.limits import (
+        AGENT_INACTIVITY_TIMEOUT_S,
+        PROVIDER_REQUEST_SILENCE_CEILING_S,
+        TOOL_WALLCLOCK_TIMEOUT_S,
+    )
+    assert PROVIDER_REQUEST_SILENCE_CEILING_S == 900.0
+    assert (AGENT_INACTIVITY_TIMEOUT_S
+            < PROVIDER_REQUEST_SILENCE_CEILING_S
+            < TOOL_WALLCLOCK_TIMEOUT_S)
+
+
 def test_bg_wait_budget_decoupled_from_watchdog() -> None:
     """Post-suspend invariant: a bash_output(wait=True) runs INSIDE a bracketed
     foreground tool call, so B.2 is frozen for the whole wait — the wait budget
