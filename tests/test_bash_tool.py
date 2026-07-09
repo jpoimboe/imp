@@ -133,28 +133,67 @@ def test_bash_terminates_on_runner_interrupt(tmp_path: Path) -> None:
     anyio.run(_scenario)
 
 
-def test_bash_caps_runaway_output(tmp_path: Path) -> None:
-    # A command that floods stdout far past 50 KB is killed AT the cap; the
-    # result is the head + marker, and it is NOT surfaced as an interrupt.
+def test_bash_over_cap_spills_full_output_and_previews_head(tmp_path: Path) -> None:
+    # Natural completion emitting > 50 KB (but < 5 MB): the FULL stream is
+    # spilled to tool-results/ (recoverable), the displayed stdout is the 50 KB
+    # head, a notice carries the spill path, and returncode is a normal 0.
     ctx = _ctx(tmp_path)
     out = json.loads(_run_bash(ctx, {
-        "command": "yes ABCDEFGHIJ | head -c 5000000"}))
-    assert "[output truncated at 50 KB]" in out["stdout"]
-    assert len(out["stdout"]) < 60_000          # bounded: 50 KB + slop + marker
-    assert out["returncode"] == 0               # cap is a NORMAL result, not a kill
+        "command": "yes ABCDEFGHIJ | head -c 100000"}))
+    assert out["returncode"] == 0
+    assert len(out["stdout"]) == 50_000              # 50 KB head display
+    assert "[output truncated" not in out["stdout"]  # marker replaced by notice
+    assert "tool-results" in out["notice"]
+    assert "read with read_file offset=1" in out["notice"]
+    assert ctx.running_processes == []
+    # The spill file holds the FULL 100 KB stream, not the truncated head.
+    spilled = list((tmp_path / "tool-results").iterdir())
+    assert len(spilled) == 1
+    data = spilled[0].read_bytes()
+    assert len(data) == 100_000
+    assert data.startswith(b"ABCDEFGHIJ")
+
+
+def test_bash_over_cap_spill_labels_stdout_and_stderr(tmp_path: Path) -> None:
+    # When stderr is non-empty, the single spill file carries BOTH tails under
+    # labeled sections so one read_file recovers each.
+    ctx = _ctx(tmp_path)
+    out = json.loads(_run_bash(ctx, {
+        "command": "yes OUT | head -c 40000; yes ERR | head -c 40000 1>&2"}))
+    assert "notice" in out
+    spilled = list((tmp_path / "tool-results").iterdir())
+    assert len(spilled) == 1
+    content = spilled[0].read_text(encoding="utf-8")
+    assert "=== stdout ===" in content
+    assert "=== stderr ===" in content
+    assert "OUT" in content and "ERR" in content
+
+
+def test_bash_caps_runaway_output(tmp_path: Path) -> None:
+    # A command that floods stdout past the 5 MB kill ceiling is killed AT the
+    # ceiling; the displayed stdout is the 50 KB head + a spill notice (the old
+    # inline marker is gone), and it is NOT surfaced as an interrupt.
+    ctx = _ctx(tmp_path)
+    out = json.loads(_run_bash(ctx, {"command": "yes ABCDEFGHIJ"}))
+    assert "[output truncated" not in out["stdout"]
+    assert "notice" in out
+    assert (tmp_path / "tool-results").exists()
+    assert len(out["stdout"]) == 50_000
+    assert out["returncode"] == 0                    # cap is a NORMAL result
     assert ctx.running_processes == []
 
 
 def test_bash_caps_runaway_stderr(tmp_path: Path) -> None:
-    # S2: a stderr-dominant flood must mark stderr (the stream that crossed the
-    # cap), NOT leave a truncation marker on an empty stdout.
+    # A stderr-dominant flood past the ceiling truncates the displayed stderr to
+    # the 50 KB head and emits a spill notice; no inline marker on either stream.
     ctx = _ctx(tmp_path)
-    out = json.loads(_run_bash(ctx, {
-        "command": "yes ABCDEFGHIJ | head -c 5000000 1>&2"}))
-    assert "[output truncated at 50 KB]" in out["stderr"]
+    out = json.loads(_run_bash(ctx, {"command": "yes ABCDEFGHIJ 1>&2"}))
+    assert "[output truncated" not in out["stderr"]
     assert "[output truncated" not in out["stdout"]
-    assert len(out["stderr"]) < 60_000          # bounded: 50 KB + slop + marker
-    assert out["returncode"] == 0               # cap is a NORMAL result, not a kill
+    assert "notice" in out
+    assert (tmp_path / "tool-results").exists()
+    assert len(out["stderr"]) == 50_000
+    assert out["returncode"] == 0                    # cap is a NORMAL result
     assert ctx.running_processes == []
 
 
@@ -177,6 +216,7 @@ def test_bash_normal_output_uncapped(tmp_path: Path) -> None:
     out = json.loads(_run_bash(ctx, {"command": "echo hello"}))
     assert out["stdout"].strip() == "hello"
     assert "[output truncated" not in out["stdout"]
+    assert "notice" not in out                       # <= 50 KB is unchanged
     assert out["returncode"] == 0
 
 
@@ -303,6 +343,47 @@ def test_bash_midcommand_pause_kills_and_returns_tombstone(tmp_path: Path) -> No
     assert out["status"] == "killed"
     assert out["kill_reason"] == "interrupted"
     assert out["returncode"] < 0               # real signal kill, not massaged to 0
+    assert ctx.running_processes == []
+
+
+def test_bash_midcommand_pause_over_cap_spills_tombstone(tmp_path: Path) -> None:
+    # A pause landing mid-command after the command already emitted > 50 KB must
+    # spill the full output like the normal path: the tombstone keeps its
+    # status/kill_reason but its displayed stdout is the 50 KB head + a notice,
+    # not up to the 5 MB kill ceiling inline.
+    class _Coord:
+        should_pause = False
+
+    coord = _Coord()
+    ctx = _ctx(tmp_path)
+    ctx.coordinator = coord
+    holder: dict[str, dict] = {}
+
+    async def _scenario() -> None:
+        with anyio.fail_after(10):
+            async with anyio.create_task_group() as tg:
+                async def _runner() -> None:
+                    holder["out"] = json.loads(
+                        await get_registry()["bash"].async_invoke(
+                            ctx, {"command":
+                                  "yes ABCDEFGHIJ | head -c 100000; sleep 30"}))
+
+                async def _pauser() -> None:
+                    await anyio.sleep(0.5)      # let the 100 KB flush first
+                    coord.should_pause = True
+
+                tg.start_soon(_runner)
+                tg.start_soon(_pauser)
+
+    anyio.run(_scenario)
+    out = holder["out"]
+    assert out["status"] == "killed"
+    assert out["kill_reason"] == "interrupted"
+    assert len(out["stdout"]) == 50_000              # 50 KB head display
+    assert "notice" in out
+    spilled = list((tmp_path / "tool-results").iterdir())
+    assert len(spilled) == 1
+    assert len(spilled[0].read_bytes()) == 100_000   # FULL output recoverable
     assert ctx.running_processes == []
 
 

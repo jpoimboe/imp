@@ -18,18 +18,20 @@ import signal
 from dataclasses import dataclass
 from pathlib import Path
 from subprocess import PIPE
+from uuid import uuid4
 
 import anyio
 
 from imp.agents.tools import imp_tool
 from imp.agents.tools.context import ToolContext, kill_process_tree
 from imp.agents.tools.limits import (
-    OUTPUT_TRUNCATION_MARKER,
+    BG_STREAM_FILE_CAP_BYTES,
     TOOL_OUTPUT_CAP_BYTES,
     TOOL_WALLCLOCK_TIMEOUT_S,
     ToolAborted,
     tool_checkpoint,
 )
+from imp.agents.tools.spill import spill_tool_output
 from imp.engine.env import engine_env, overlay_engine_env
 from imp.engine.sandbox import build_sandbox_argv
 
@@ -37,12 +39,11 @@ from imp.engine.sandbox import build_sandbox_argv
 @dataclass
 class _Counter:
     """Shared combined-output state for the two drain tasks. `total` is the
-    running byte count across BOTH sinks; `capped` flips once it crosses the cap;
-    `which` records the stream that crossed it (so the marker lands on it)."""
+    running byte count across BOTH sinks; `capped` flips once it crosses the
+    kill ceiling (BG_STREAM_FILE_CAP_BYTES) and the process group is killed."""
 
     total: int = 0
     capped: bool = False
-    which: str = "stdout"
 
 
 _PAUSE_POLL_S = 0.05      # mid-command coordinator.should_pause poll cadence
@@ -53,8 +54,11 @@ _PAUSE_POLL_S = 0.05      # mid-command coordinator.should_pause poll cadence
     name="bash",
     description=(
         "Run a shell command. Foreground (default): returns JSON {stdout, "
-        "stderr, returncode}; combined output capped at 50 KB; interruptible "
-        "(SIGTERM to the process group, 4 s grace, SIGKILL). "
+        "stderr, returncode}; each displayed stream is the 50 KB head — when "
+        "combined output exceeds 50 KB the full output is spilled to a file and "
+        "a `notice` field carries a read_file-able path to recover the tail "
+        "(runaway output is killed at 5 MB); interruptible (SIGTERM to the "
+        "process group, 4 s grace, SIGKILL). "
         "With run_in_background=true: returns immediately with JSON {id, pid, "
         "command, status, out_path, err_path} while the process keeps "
         "running; read incremental output with bash_output(id), stop it with "
@@ -134,21 +138,23 @@ async def bash(
     # kill_process_group can os.killpg(pid, …) without os.getpgid. If a future
     # caller ever registers a NON-setsid proc, revisit kill_process_group.
     ctx.running_processes.append(proc)
-    cap = TOOL_OUTPUT_CAP_BYTES
+    kill_cap = BG_STREAM_FILE_CAP_BYTES
     # Combined running counter across BOTH sinks: counting separately would let
-    # the total reach 2x the cap. When the combined total crosses the cap and the
-    # process is still producing, kill the GROUP (cleanup) and stop draining.
-    # N5: peak buffered bytes is cap + up to one in-flight chunk PER stream (both
-    # drains can append before either observes `capped`), i.e. <= ~cap + 2*READ
-    # chunk (~50 KB + ~128 KB). Bounded and expected — that is the "slop" the
-    # final stdout[:cap] slice trims off before returning.
+    # the total reach 2x the ceiling. When the combined total crosses the 5 MB
+    # kill ceiling and the process is still producing, kill the GROUP (cleanup)
+    # and stop draining. A foreground process is short-lived, so the ~5 MB peak
+    # buffer is the same bound background processes already accept.
+    # N5: peak buffered bytes is kill_cap + up to one in-flight chunk PER stream
+    # (both drains can append before either observes `capped`), i.e.
+    # <= ~5 MB + 2*READ chunk. The 50 KB display truncation happens later, on the
+    # assemble path, independent of whether this ceiling was hit.
     # Single mutable record shared by both drains. Typed fields (not a bag of
-    # `object`) so the `int(...)` arithmetic below stays mypy-clean.
+    # `object`) so the arithmetic below stays mypy-clean.
     counter = _Counter()
     stdout_chunks: list[bytes] = []
     stderr_chunks: list[bytes] = []
 
-    async def _drain(stream: object, sink: list[bytes], name: str) -> None:
+    async def _drain(stream: object, sink: list[bytes]) -> None:
         if stream is None:
             return
         # Post-cap the loop keeps consuming (discarding) to EOF: asyncio only
@@ -162,9 +168,8 @@ async def bash(
                 continue
             sink.append(chunk)
             counter.total += len(chunk)
-            if counter.total >= cap:
+            if counter.total >= kill_cap:
                 counter.capped = True
-                counter.which = name           # S2: which stream crossed the cap
                 await kill_process_tree(proc, signal.SIGKILL)
 
     # Decision 10 ticker (pinned lifecycle): sweeps the background registry
@@ -216,10 +221,8 @@ async def bash(
         try:
             with anyio.fail_after(TOOL_WALLCLOCK_TIMEOUT_S):
                 async with anyio.create_task_group() as tg:
-                    # NOTE: keep the "stdout"/"stderr" name args from Task 6 —
-                    # they drive the S2 capped-stream marker (counter.which).
-                    tg.start_soon(_drain, proc.stdout, stdout_chunks, "stdout")
-                    tg.start_soon(_drain, proc.stderr, stderr_chunks, "stderr")
+                    tg.start_soon(_drain, proc.stdout, stdout_chunks)
+                    tg.start_soon(_drain, proc.stderr, stderr_chunks)
                     if has_bg:
                         tg.start_soon(_bg_ticker)
                     if coordinator is not None:
@@ -244,8 +247,10 @@ async def bash(
         with contextlib.suppress(ValueError):
             ctx.running_processes.remove(proc)
 
-    stdout = b"".join(stdout_chunks).decode("utf-8", "replace")
-    stderr = b"".join(stderr_chunks).decode("utf-8", "replace")
+    out_bytes = b"".join(stdout_chunks)
+    err_bytes = b"".join(stderr_chunks)
+    stdout = out_bytes.decode("utf-8", "replace")
+    stderr = err_bytes.decode("utf-8", "replace")
     if paused:
         # A pause landed mid-command: the poller SIGKILL'd the group. Return the
         # terminated-by-pause tombstone (status/kill_reason) — the same shape
@@ -253,33 +258,38 @@ async def bash(
         # why its command died. returncode stays the real negative signal (an
         # honest kill: unlike the cap path, this IS why the command died, so the
         # provider's returncode<0 -> tool_killed heuristic firing is correct).
-        return json.dumps({
+        result: dict[str, object] = {
             "stdout": stdout,
             "stderr": stderr,
             "status": "killed",
             "kill_reason": "interrupted",
             "returncode": (proc.returncode if proc.returncode is not None
                            else -signal.SIGKILL),
-        }, ensure_ascii=False)
-    if counter.capped:
-        # Head-only: bound BOTH decoded streams to the cap and append the marker to
-        # the one that actually crossed it (S2: a stderr-dominant flood must not
-        # leave a "truncated" marker on an empty stdout). Report returncode 0 — a
-        # cap-truncation is a NORMAL result; the SIGKILL we issued was cleanup and
-        # must NOT read as `tool_killed` (the provider keys that on returncode < 0;
-        # see anthropic.py:704).
-        stdout = stdout[:cap]
-        stderr = stderr[:cap]
-        if counter.which == "stderr":
-            stderr += OUTPUT_TRUNCATION_MARKER
-        else:
-            stdout += OUTPUT_TRUNCATION_MARKER
-        returncode = 0
+        }
     else:
-        returncode = proc.returncode if proc.returncode is not None else -signal.SIGKILL
+        # returncode 0 on a cap-kill — a cap-truncation is a NORMAL result; the
+        # SIGKILL we issued was cleanup and must NOT read as `tool_killed` (the
+        # provider keys that on returncode < 0; see anthropic.py:704).
+        returncode = 0 if counter.capped else (
+            proc.returncode if proc.returncode is not None else -signal.SIGKILL)
+        result = {
+            "stdout": stdout,
+            "stderr": stderr,
+            "returncode": returncode,
+        }
+    if len(out_bytes) + len(err_bytes) > TOOL_OUTPUT_CAP_BYTES:
+        # Over the 50 KB display cap: spill the FULL decoded output so the
+        # truncated tail is recoverable with an ordinary read_file, then bound
+        # each displayed stream to the 50 KB head. When stderr is non-empty the
+        # spill file carries both tails under labeled sections; otherwise it is
+        # just the full stdout. The notice supersedes the old inline marker. This
+        # also covers the pause tombstone: a pause landing mid-flood must not
+        # return up to the 5 MB kill ceiling inline.
+        full = (f"=== stdout ===\n{stdout}\n=== stderr ===\n{stderr}"
+                if stderr else stdout)
+        result["notice"] = spill_tool_output(
+            ctx, uuid4().hex, full, preview_bytes=0)
+        result["stdout"] = stdout[:TOOL_OUTPUT_CAP_BYTES]
+        result["stderr"] = stderr[:TOOL_OUTPUT_CAP_BYTES]
 
-    return json.dumps({
-        "stdout": stdout,
-        "stderr": stderr,
-        "returncode": returncode,
-    }, ensure_ascii=False)
+    return json.dumps(result, ensure_ascii=False)
