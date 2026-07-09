@@ -25,12 +25,13 @@ def render_pending_question(messages: list[Message]) -> str | None:
 
 
 def render_inert_question(text: str, *, width: int, color: bool) -> str:
-    """Render the pending bare-turn-end question as markdown→ANSI for the inert
-    resume preview. Without this the raw markdown source (code fences, lists,
-    emphasis) is dumped verbatim; here it reads as prose, matching the live
-    driver's question styling once the session attaches."""
-    from imp.cli.render_text import render_question_block
-    return "\n".join(render_question_block(text, width, 0, color))
+    """Render the pending bare-turn-end question for the inert resume preview
+    through `_render_markdown_block` — the same renderer every other agent turn
+    uses — so the preview shows the bold `• ` turn bullet and a 2-column
+    hang-indent, and reads as prose (markdown→ANSI) rather than raw markdown
+    source. Called at depth 0, so the gutter is empty."""
+    from imp.cli.render_text import _render_markdown_block
+    return "\n".join(_render_markdown_block(text, width, 0, color))
 
 
 def bare_turn_end_question(change: Change) -> str | None:
