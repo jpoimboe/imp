@@ -110,6 +110,7 @@ async def test_run_session_client_answers_gate_and_returns_completed_rc(
     class _Driver:
         def on_event(self, _event: dict[str, Any]) -> None: ...
         def finish(self) -> None: ...
+        def seed_pending_reply(self, _text: str) -> None: ...
 
     async def _solicit(_prompt: str) -> str:
         return "imp"
@@ -160,6 +161,7 @@ async def test_run_session_client_starts_status_tick_when_provided(
     class _Driver:
         def on_event(self, _event: dict[str, Any]) -> None: ...
         def finish(self) -> None: ...
+        def seed_pending_reply(self, _text: str) -> None: ...
 
     async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
         with anyio.fail_after(10):
@@ -211,6 +213,7 @@ async def test_run_session_client_returns_130_when_user_interrupted(
     class _Driver:
         def on_event(self, _event: dict[str, Any]) -> None: ...
         def finish(self) -> None: ...
+        def seed_pending_reply(self, _text: str) -> None: ...
 
     async def _solicit(_prompt: str) -> str:  # pragma: no cover
         return ""
@@ -340,6 +343,7 @@ async def test_run_session_client_threads_resume_into_attach(
     class _Driver:
         def on_event(self, _event: dict[str, Any]) -> None: ...
         def finish(self) -> None: ...
+        def seed_pending_reply(self, _text: str) -> None: ...
 
     async def _solicit(_prompt: str) -> str:  # pragma: no cover
         return ""
@@ -357,6 +361,7 @@ async def test_run_session_client_threads_resume_into_attach(
 class _NullDriver:
     def on_event(self, _e: dict[str, Any]) -> None: ...
     def finish(self) -> None: ...
+    def seed_pending_reply(self, _text: str) -> None: ...
 
 
 async def _never(*_a: Any) -> str:
@@ -688,6 +693,7 @@ async def test_run_session_client_threads_autonomous_into_attach(
     class _Driver:
         def on_event(self, _event: dict[str, Any]) -> None: ...
         def finish(self) -> None: ...
+        def seed_pending_reply(self, _text: str) -> None: ...
 
     async def _solicit(_prompt: str) -> str:  # pragma: no cover
         return ""
@@ -744,3 +750,31 @@ def test_infer_session_result_completed_from_archive_when_home_reaped(tmp_path: 
     change = _make_change(tmp_path, change_id)
     assert not change.state_dir.exists()
     assert infer_session_result(change) is RunResult.COMPLETED
+
+
+@pytest.mark.anyio
+async def test_run_session_client_wires_seed_pending_reply_as_local_echo(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _seed_control(tmp_path)
+    change = Change.create_draft(
+        tmp_path, title="Draft", change_id="e1", base_branch="main")
+    change.event_log().append(
+        agent_id=None, type="user_message",
+        payload={"role": "user", "content": "hi"})
+
+    captured: dict[str, object] = {}
+
+    async def _capture(**kwargs: Any) -> None:
+        captured.update(kwargs)
+
+    monkeypatch.setattr("imp.cli.session_run.run_terminal_client", _capture)
+    monkeypatch.setattr("imp.cli.main._session_exit_code", lambda *_: 0)
+
+    driver = _NullDriver()
+    coord = InterruptCoordinator()
+    rc = await run_session_client(
+        change, driver=driver, coord=coord, solicit=lambda _p: _never())
+
+    assert captured["local_echo"] == driver.seed_pending_reply
+    assert rc == 0
