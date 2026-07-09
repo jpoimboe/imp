@@ -49,9 +49,12 @@ def _ensure_git_repo(
     project_root: Path, *,
     input_fn: Callable[[str], str],
     output_fn: Callable[[str], None],
-) -> None:
+) -> bool:
+    """Ensure `project_root` is a git repo. Returns True iff this call ran
+    `git init` (a fresh repo was created this run), False if one already
+    existed. Raises GitSetupDeclined when the user declines the offer."""
     if _in_git_repo(project_root):
-        return
+        return False
     answer = input_fn("Initialize a git repository here? [Y/n] ").strip().lower()
     if answer in ("n", "no"):
         raise GitSetupDeclined(
@@ -60,6 +63,7 @@ def _ensure_git_repo(
     subprocess.run(["git", "init"], cwd=project_root, check=True,
                    capture_output=True, text=True)
     output_fn("Initialized a git repository.")
+    return True
 
 
 def _commit_init_files(project_root: Path) -> bool:
