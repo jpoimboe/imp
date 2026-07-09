@@ -3973,7 +3973,7 @@ def test_build_options_enables_partial_messages(tmp_path: Path) -> None:
 
 
 @pytest.mark.anyio
-async def test_receive_loop_pulses_note_activity_per_message(tmp_path: Path) -> None:
+async def test_receive_loop_is_request_bracketed(tmp_path: Path) -> None:
     from imp.cli.signals import InterruptCoordinator
 
     (tmp_path / "art").mkdir()
@@ -3989,8 +3989,10 @@ async def test_receive_loop_pulses_note_activity_per_message(tmp_path: Path) -> 
         return FakeClaudeSDKClient(opts, scripted_messages=scripted)
 
     coord = InterruptCoordinator()
-    pulses: list[int] = []
-    coord.add_activity_listener(lambda: pulses.append(1))
+    # begin_request_watchdog snapshots request_active True just before each await
+    # for the next received SDK message.
+    snaps: list[bool] = []
+    coord.add_activity_listener(lambda: snaps.append(coord.request_active))
 
     inv = replace(_inv(tmp_path), coordinator=coord)
     runner = ClaudeCodeAgentRunner(
@@ -3999,9 +4001,12 @@ async def test_receive_loop_pulses_note_activity_per_message(tmp_path: Path) -> 
     events = [ev async for ev in runner.run(inv)]
 
     assert events[-1]["type"] == "agent_output"
-    # receive_response() yields the assistant message then the ResultMessage —
-    # two received SDK messages, so two liveness pulses for this single turn.
-    assert len(pulses) == 2
+    # receive_response() is consumed through request_bracketed, so request_active
+    # is armed while awaiting each of the two received SDK messages (the
+    # assistant message and the ResultMessage) — >=2 True snapshots.
+    assert sum(1 for s in snaps if s) >= 2
+    # …and cleared once the turn completes.
+    assert coord.request_active is False
 
 
 @pytest.mark.anyio
