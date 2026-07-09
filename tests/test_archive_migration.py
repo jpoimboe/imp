@@ -56,6 +56,47 @@ def _write_legacy_v0_db(db_path: Path) -> None:
     # user_version defaults to 0 -> reads back as a stale legacy db.
 
 
+def _write_stale_v2_db(db_path: Path) -> None:
+    """A v2 db: changes/deps present but NO content column, user_version 2, a
+    bogus 'stale' row. Records/blobs on disk carry the real events, so a rebuild
+    backfills content for the real rows and drops 'stale'."""
+    db_path.unlink(missing_ok=True)
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.execute(
+            "CREATE TABLE changes (id TEXT PRIMARY KEY, title TEXT, base TEXT,"
+            " created_at TEXT, status TEXT, step TEXT, events_hash TEXT,"
+            " ingested_at TEXT, last_event_ts TEXT)")
+        conn.execute("CREATE TABLE deps (change_id TEXT, depends_on_id TEXT)")
+        conn.execute("INSERT INTO changes (id, title) VALUES ('stale', 'Stale')")
+        conn.execute("PRAGMA user_version = 2")
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _seed_prose_change(control: Path, cid: str, body: str) -> None:
+    """Archive one change whose events carry an assistant prose line."""
+    events = control / f"{cid}.jsonl"
+    events.write_text(json.dumps({
+        "id": f"{cid}-e0", "timestamp": "2026-06-01T00:00:01+00:00",
+        "type": "llm_response",
+        "payload": {"provider": "anthropic", "raw": {
+            "content": [{"type": "text", "text": body}],
+            "stop_reason": "end_turn",
+            "usage": {"input_tokens": 1, "output_tokens": 1}}}}) + "\n")
+    change_json = control / f"{cid}-change.json"
+    change_json.write_text(json.dumps({
+        "id": cid, "title": "", "base_branch": "main",
+        "created_at": "2026-06-01T00:00:00+00:00", "depends_on": []}))
+    state_json = control / f"{cid}-state.json"
+    state_json.write_text(json.dumps({
+        "id": cid, "status": "completed", "step": "finalize"}))
+    archive.archive_change(
+        control, cid, events_path=events,
+        change_json_path=change_json, state_json_path=state_json)
+
+
 def _user_version(db: Path) -> int:
     conn = sqlite3.connect(db)
     try:
@@ -88,7 +129,7 @@ def _rows_by_id(db: Path) -> dict[str, str | None]:
 
 def test_ensure_current_fast_path_skips_rebuild(tmp_path: Path, monkeypatch) -> None:
     _seed_change(tmp_path, "alpha", "2026-06-01T00:00:01+00:00")
-    assert _user_version(archive.index_path(tmp_path)) == 2  # fresh ingest stamped v2
+    assert _user_version(archive.index_path(tmp_path)) == 3  # fresh ingest stamped v3
 
     calls: list[int] = []
     monkeypatch.setattr(archive, "rebuild_index", lambda _root: calls.append(1))
@@ -110,7 +151,7 @@ def test_ensure_current_migrates_legacy_v0_db(tmp_path: Path) -> None:
     archive.ensure_current(tmp_path)
 
     assert "events" not in _table_names(db)
-    assert _user_version(db) == 2
+    assert _user_version(db) == 3
     rows = _rows_by_id(db)
     assert "stale" not in rows                       # rebuilt from records, not the old db
     assert rows["alpha"] == "2026-06-01T00:00:01+00:00"  # last_event_ts denormalized
@@ -124,10 +165,10 @@ def test_completed_rows_migrates_before_query(tmp_path: Path) -> None:
     rows = read.completed_rows(tmp_path)
 
     # Migration ran first: the new last_event_ts query would OperationalError on
-    # the legacy schema; instead it returns the rebuilt v2 rows.
+    # the legacy schema; instead it returns the rebuilt v3 rows.
     ids = {r[0] for r in rows}
     assert ids == {"alpha"}            # rebuilt from records; 'stale' dropped
-    assert _user_version(db) == 2
+    assert _user_version(db) == 3
 
 
 def test_search_archive_migrates_before_query(tmp_path: Path) -> None:
@@ -140,7 +181,7 @@ def test_search_archive_migrates_before_query(tmp_path: Path) -> None:
     # Without the gate the legacy db has no 'alpha' row -> []. With it, the
     # rebuild restores 'alpha' (title "Alpha") and the search finds it.
     assert [h[0] for h in hits] == ["alpha"]
-    assert _user_version(db) == 2
+    assert _user_version(db) == 3
 
 
 def test_archive_change_on_legacy_v0_db_migrates_and_ingests(tmp_path: Path) -> None:
@@ -153,7 +194,7 @@ def test_archive_change_on_legacy_v0_db_migrates_and_ingests(tmp_path: Path) -> 
     _seed_change(tmp_path, "gamma", "2026-06-02T00:00:02+00:00")
 
     assert "events" not in _table_names(db)
-    assert _user_version(db) == 2
+    assert _user_version(db) == 3
     rows = _rows_by_id(db)
     assert set(rows) == {"alpha", "gamma"}        # 'stale' dropped by the rebuild
     assert rows["alpha"] == "2026-06-01T00:00:01+00:00"
@@ -207,3 +248,21 @@ def test_concurrent_migration_reads_and_ingest_lose_nothing(tmp_path: Path) -> N
     assert missing_db == []  # no reader ever saw a missing index across the swap
     final_ids = {r[0] for r in read.completed_rows(control)}
     assert final_ids == set(seeded) | {"writer"}  # migration lost no row, gained the finalize
+
+
+def test_rebuild_backfills_content_column(tmp_path: Path) -> None:
+    _seed_prose_change(tmp_path, "alpha", "the 300s deadline is enforced")
+    db = archive.index_path(tmp_path)
+    _write_stale_v2_db(db)                        # v2 db, no content column, 'stale' row
+    assert _user_version(db) == 2
+
+    archive.ensure_current(tmp_path)              # stale -> one-time rebuild
+
+    assert _user_version(db) == 3
+    conn = sqlite3.connect(db)
+    try:
+        rows = {r[0]: r[1] for r in conn.execute("SELECT id, content FROM changes")}
+    finally:
+        conn.close()
+    assert "stale" not in rows                    # rebuilt from records, not the old db
+    assert "300s" in rows["alpha"]                # content backfilled from the blob

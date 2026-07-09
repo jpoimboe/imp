@@ -133,7 +133,7 @@ def _help(out: Callable[[str], None]) -> None:
     out("  /help              Show this message")
     out("  /skills            List loadable skills")
     out("  /list [-a]         List your changes (-a adds completed/abandoned)")
-    out("  /search <query>    Search archived changes by title or id")
+    out("  /search <query>    Search archived changes by content, title, or id")
     out("  /save              Save this conversation to your Backlog")
     out("  /clear             Park this chat and start a fresh one")
     out("  /abandon           Abandon the current change")

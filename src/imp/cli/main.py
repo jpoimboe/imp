@@ -2583,14 +2583,25 @@ def _cmd_status(args: argparse.Namespace, _control: Path | None = None) -> int:
     return 0
 
 
+def _inflight_prose(control: Path, change_id: str) -> str:
+    """Same prose extractor as the archive ingest, so both search paths agree."""
+    from imp.cli.render_helpers import conversation_prose
+    try:
+        raw = (_change_home(control, change_id) / "events.jsonl").read_bytes()
+    except OSError:
+        return ""
+    return conversation_prose(_parse_jsonl(raw))
+
+
 def _search_inflight(control: Path, query: str) -> list[tuple[str, str, str, str]]:
-    """In-flight Change rows (id, title, status, created) whose id or title
-    contains `query` (case-insensitive) — the live counterpart to the archive
-    search, which never sees an un-archived Change."""
+    """In-flight Change rows (id, title, status, created) whose id, title, or
+    conversation prose contains `query` (case-insensitive) — the live
+    counterpart to the archive search, which never sees an un-archived Change."""
     q = query.lower()
     hits: list[tuple[str, str, str, str]] = []
     for r in _status_rows(control):
-        if q in r[0].lower() or q in r[4].lower():
+        if (q in r[0].lower() or q in r[4].lower()
+                or q in _inflight_prose(control, r[0]).lower()):
             hits.append((r[0], r[4], r[1], r[5]))
     return hits
 

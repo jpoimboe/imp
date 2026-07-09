@@ -34,3 +34,28 @@ def render_llm_response(payload: dict[str, Any]) -> RenderedMessage:
 def user_message_text(payload: dict[str, Any]) -> str:
     return "".join(b.get("text", "") for b in (payload.get("content") or [])
                    if b.get("type") == "text")
+
+
+def conversation_prose(events: list[Any]) -> str:
+    parts: list[str] = []
+    for ev in events:
+        if not isinstance(ev, dict):
+            continue
+        payload = ev.get("payload")
+        if not isinstance(payload, dict):
+            continue
+        etype = ev.get("type")
+        try:
+            if etype == "opening_intent":
+                text = str(payload.get("text", ""))
+            elif etype == "user_message":
+                text = user_message_text(payload)
+            elif etype == "llm_response":
+                text = "\n".join(render_llm_response(payload).texts)
+            else:
+                continue
+        except Exception:
+            continue
+        if text:
+            parts.append(text)
+    return "\n".join(parts)
