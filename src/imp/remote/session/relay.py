@@ -26,7 +26,7 @@ class SessionRelay:
         self._socket_path = socket_path
         self._change_id = change_id
         self._title = title
-        self._curator = EventCurator(id=change_id, title=title, events=events)
+        self._curator = EventCurator(id=change_id, title_provider=lambda: title, events=events)
         self._sink = sink
         self._is_subscribed = is_subscribed
         self._lease_poll_gap = lease_poll_gap
