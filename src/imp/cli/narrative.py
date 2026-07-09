@@ -435,6 +435,11 @@ class NarrativeBuilder:
         self._latest_prompt_tokens: int | None = None
         self._latest_context_pct: float | None = None
         self._latest_context_window: int | None = None
+        # Occupancy (tokens, window) of the most recent llm_response from ANY
+        # agent — subagents included, unlike the gauge fields above. Feeds the
+        # reincarnating line so it can report the context that actually crossed
+        # the checkpoint, which is frequently a subagent's turn (see loko19).
+        self._last_llm_context: tuple[int, int] | None = None
         self._latest_checkpoint_threshold: float | int | None = None
         self._current_phase: PhaseNode | None = None
         # Stack of open StepNode containers. step_started pushes one;
@@ -696,6 +701,13 @@ class NarrativeBuilder:
                 cwin = payload.get("context_window")
                 if cwin is not None:
                     self._latest_context_window = cwin
+            # Separate from the top-level gauge above (which drops subagents):
+            # remember this turn's occupancy regardless of agent, so a following
+            # reincarnating event can name the context that crossed the checkpoint.
+            ctoks = payload.get("context_tokens")
+            cwin_any = payload.get("context_window")
+            if ctoks is not None and cwin_any:
+                self._last_llm_context = (ctoks, cwin_any)
         elif etype == "query_result":
             # Authoritative per-query totals/cost from claude_code. Accumulated
             # BEFORE sub-routing so a subagent's query_result still folds in.
@@ -936,10 +948,21 @@ def _h_test_lane_acquired(
 NarrativeBuilder._HANDLERS["test_lane_acquired"] = _h_test_lane_acquired
 
 
+def _fmt_ctx_tokens(n: int) -> str:
+    """Compact token count for the reincarnating line: '167k' at/above 1k, else bare."""
+    return f"{round(n / 1000)}k" if n >= 1000 else str(n)
+
+
 def _h_reincarnating(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
     self._flush_burst()
     reason = p.get("reason")
     text = f"reincarnating — {reason}" if reason else "reincarnating"
+    # Name the occupancy that crossed the checkpoint (tokens/window), so the line
+    # is self-explaining and the window is unambiguous — no re-deriving it from
+    # cumulative token counters, which read far larger than the live context.
+    ctx = self._last_llm_context
+    if ctx is not None and ctx[1]:
+        text += f" ({_fmt_ctx_tokens(ctx[0])}/{_fmt_ctx_tokens(ctx[1])})"
     self._append(LiteralTextNode(text=text, color_role="lifecycle"))
 
 
