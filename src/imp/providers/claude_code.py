@@ -1765,7 +1765,7 @@ class ClaudeCodeAgentRunner:
         # AssistantMessage objects (thinking, then text, then tool_use) — see
         # _merge_assistant_fragments. Accumulate the whole turn into pending_*
         # and flush EXACTLY ONCE at the ResultMessage boundary (true end-of-turn).
-        guard = LoopGuard()
+        guard = LoopGuard(interactive=invocation.interactive)
         pending_text = ""
         pending_tools: dict[str, ToolOutcome] = {}
         pending_complete = False

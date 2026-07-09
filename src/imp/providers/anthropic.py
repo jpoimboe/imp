@@ -657,7 +657,7 @@ class AnthropicAgentRunner:
         # agent_def -> workflow.defaults -> None and passes the result via
         # invocation.max_tool_calls.
         ceiling = invocation.max_tool_calls  # may be None (no cap)
-        guard = LoopGuard()
+        guard = LoopGuard(interactive=invocation.interactive)
 
         web_specs = anthropic_web_tool_specs(invocation.agent_def)
         web_headers = anthropic_beta_headers(invocation.agent_def)
