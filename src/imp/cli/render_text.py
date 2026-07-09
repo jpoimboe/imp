@@ -515,6 +515,11 @@ def subagent_outcome_lines(sub: nv.SubagentFold, *, depth: int, color: bool,
     except (ValueError, TypeError):
         data = None
     if not isinstance(data, dict):
+        # A plain-string SUCCESS return is exactly the nested transcript's final
+        # prose turn — echoing it here double-prints it (§4). Surface a non-dict
+        # outcome only on the error path, where there may be no final prose turn.
+        if not sub.is_error:
+            return
         yield from _wrap(_caret_escape(raw), width, depth, color, *codes, gutters=gutters)
         return
     scalars: list[str] = []

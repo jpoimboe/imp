@@ -1762,6 +1762,7 @@ def test_subagent_outcome_nondict_prose_control_bytes_escaped() -> None:
     sub = nv.SubagentFold(subagent_name="reviewer", event_id="e1", block_id="b1",
                           nested=nv.NarrativeBuilder())
     sub.outcome = "dispatch failed\x07 hard\x00"
+    sub.is_error = True   # §4: a non-dict outcome only renders on the error path
     out = "\n".join(rt.subagent_outcome_lines(sub, depth=0, color=False, width=80))
     assert "\x07" not in out
     assert "\x00" not in out
@@ -2515,3 +2516,31 @@ def test_full_subagent_header_clips_and_collapses_task_description() -> None:
     ml_out = list(rt._render_subagent(multiline, depth=0, full=True,
                                       color=False, width=80))
     assert ml_out[0] == "▾ explorer · Map the auth module"
+
+
+def test_subagent_outcome_plain_string_success_suppressed() -> None:
+    # §4: a plain-string SUCCESS return is exactly the nested transcript's final
+    # prose turn; the raw outcome block must not double-print it.
+    assert list(rt.subagent_outcome_lines(
+        _sub(outcome="found the auth module", is_error=False),
+        depth=1, color=False, width=80)) == []
+
+
+def test_full_subagent_plain_string_success_shown_once() -> None:
+    # Acceptance #4 (end-to-end): in --full a plain-string success return equals
+    # the subagent's final prose turn and appears exactly once — no raw outcome
+    # echo beneath it.
+    events = [
+        _ev("2", "step_started", step="s", kind="agent", phase="p",
+            model="m", provider="anthropic"),
+        _ev("tk1", "tool_call", agent_id="step:p/s", id="b1", name="sub_agent",
+            input={"subagent_name": "explorer",
+                   "task_description": "Map the billing module"}),
+        _ev("su1", "llm_response", agent_id="sub:tk1", provider="anthropic",
+            model="m", stop_reason="end_turn", usage={},
+            raw={"content": [{"type": "text", "text": "found the auth module"}]}),
+        _ev("r1", "tool_result", agent_id="step:p/s", id="b1",
+            content="found the auth module", error=False),
+    ]
+    full = "\n".join(_lines(events, full=True))
+    assert full.count("found the auth module") == 1
