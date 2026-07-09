@@ -45,6 +45,7 @@ async def run_terminal_client(
     leave_state: dict[str, str] | None = None,
     leave_mode: str | None = None,
     title: TerminalTitle | None = None,
+    local_echo: Callable[[str], None] | None = None,
 ) -> None:
     gate_send, gate_recv = anyio.create_memory_object_stream[str](
         max_buffer_size=math.inf)
@@ -151,6 +152,8 @@ async def run_terminal_client(
                                     leave_state["intent"] = "clear"
                                 coord.escalation_event.set()
                                 return
+                            if local_echo is not None:
+                                local_echo(reply)
                             await client.send_input(reply)
                     except EOFError:
                         # A non-tty solicit (prompt_toolkit add_reader on a piped

@@ -1876,3 +1876,227 @@ async def test_awaiting_user_input_resets_client_gesture_latch(
 
     assert at_solicit["should_pause"] is False        # latch cleared on yield
     assert at_solicit["first_gesture_at"] is None
+
+
+@pytest.mark.anyio
+async def test_local_echo_invoked_with_reply_on_local_send_path(
+    tmp_path: Path,
+) -> None:
+    sock = str(tmp_path / "s.sock")
+    server = SessionServer(sock, hibernate=False)
+    received: list[str] = []
+
+    async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
+        with anyio.fail_after(5):
+            while server.attached_count == 0:
+                await anyio.sleep(0.02)
+        on_event({"type": "awaiting_user_input", "payload": {"prompt": "name?"}})
+        reply = await user_chat_input_fn("name?")
+        received.append(reply)
+        on_event({"type": "user_message", "payload": {"text": reply}})
+        return reply
+
+    echoed: list[str] = []
+
+    class _Driver:
+        def on_event(self, _event: dict[str, Any]) -> None: ...
+        def finish(self) -> None: ...
+
+    async def _attach(
+        on_event: Callable[[dict[str, Any]], None],
+    ) -> SessionClient:
+        client = SessionClient(sock, "c1", "T", on_event=on_event)
+        await client.connect()
+        return client
+
+    async def _solicit(_prompt: str) -> str:
+        return "imp"
+
+    coord = InterruptCoordinator()
+    with anyio.fail_after(10):
+        async with anyio.create_task_group() as tg:
+            await server.open()
+            tg.start_soon(server.serve, run_fn)
+
+            async def _client() -> None:
+                await run_terminal_client(
+                    attach=_attach, driver=_Driver(), coord=coord,
+                    solicit=_solicit, change_id="c1", local_echo=echoed.append)
+
+            tg.start_soon(_client)
+
+    # The reply was forwarded to the daemon AND echoed locally, exactly once.
+    assert received == ["imp"]
+    assert echoed == ["imp"]
+
+
+@pytest.mark.anyio
+async def test_local_echo_not_invoked_when_answered_elsewhere(
+    tmp_path: Path,
+) -> None:
+    sock = str(tmp_path / "s.sock")
+    server = SessionServer(sock, hibernate=False)
+    received: list[str] = []
+    gate_reached = anyio.Event()
+    echoed: list[str] = []
+
+    async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
+        with anyio.fail_after(5):
+            while server.attached_count == 0:
+                await anyio.sleep(0.02)
+        on_event({"type": "awaiting_user_input", "payload": {"prompt": "answer?"}})
+        gate_reached.set()
+        reply = await user_chat_input_fn("answer?")
+        received.append(reply)
+        on_event({"type": "user_message", "payload": {"text": reply}})
+        return reply
+
+    class _Driver:
+        def on_event(self, _event: dict[str, Any]) -> None: ...
+        def finish(self) -> None: ...
+
+    async def _attach(
+        on_event: Callable[[dict[str, Any]], None],
+    ) -> SessionClient:
+        client = SessionClient(sock, "cA", "T", on_event=on_event)
+        await client.connect()
+        return client
+
+    async def _solicit(_prompt: str) -> str:
+        await anyio.sleep_forever()
+        return ""  # unreachable: cancelled when the gate is answered elsewhere
+
+    coord = InterruptCoordinator()
+    with anyio.fail_after(10):
+        async with anyio.create_task_group() as tg:
+            await server.open()
+            tg.start_soon(server.serve, run_fn)
+
+            async def _client() -> None:
+                await run_terminal_client(
+                    attach=_attach, driver=_Driver(), coord=coord,
+                    solicit=_solicit, change_id="cA", local_echo=echoed.append)
+
+            tg.start_soon(_client)
+            await gate_reached.wait()
+            # A second raw client answers the open gate remotely.
+            raw = await anyio.connect_unix(sock)
+            await raw.send((encode_attach("cB", "T", True) + "\n").encode())
+            await raw.send((encode_input("remote-answer") + "\n").encode())
+            with anyio.fail_after(5):
+                while not received:
+                    await anyio.sleep(0.02)
+            await raw.aclose()
+
+    # The remote client answered; the local client never sent nor echoed.
+    assert received == ["remote-answer"]
+    assert echoed == []
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("command", ["/save", "/clear"])
+async def test_local_echo_not_invoked_on_leave_command(
+    tmp_path: Path, command: str,
+) -> None:
+    # A leave command (/save, /clear) detaches the client and returns BEFORE the
+    # local_echo / send_input line, so no optimistic echo fires. (/abandon shares
+    # the same pre-send early-return placement and is covered by the next test.)
+    sock = str(tmp_path / "s.sock")
+    server = SessionServer(sock, hibernate=False)
+    echoed: list[str] = []
+
+    async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
+        with anyio.fail_after(5):
+            while server.attached_count == 0:
+                await server.wait_for_attach_change()
+        on_event({"type": "awaiting_user_input", "payload": {"prompt": "reply?"}})
+        # The leave command detaches the client; the run survives — no input frame.
+        with anyio.fail_after(5):
+            while server.attached_count != 0:
+                await server.wait_for_attach_change()
+        return "done"
+
+    class _Driver:
+        def on_event(self, _event: dict[str, Any]) -> None: ...
+        def finish(self) -> None: ...
+
+    async def _attach(
+        on_event: Callable[[dict[str, Any]], None],
+    ) -> SessionClient:
+        client = SessionClient(sock, "c1", "T", on_event=on_event)
+        await client.connect()
+        return client
+
+    async def _solicit(_prompt: str) -> str:
+        return command
+
+    coord = InterruptCoordinator()
+    leave_state: dict[str, str] = {}
+    with anyio.fail_after(15):
+        async with anyio.create_task_group() as tg:
+            await server.open()
+            tg.start_soon(server.serve, run_fn)
+
+            async def _client() -> None:
+                await run_terminal_client(
+                    attach=_attach, driver=_Driver(), coord=coord,
+                    solicit=_solicit, change_id="c1", leave_state=leave_state,
+                    local_echo=echoed.append)
+
+            tg.start_soon(_client)
+
+    # The leave command detached the client before send_input; no local echo fired.
+    assert leave_state["intent"] == command.lstrip("/")
+    assert echoed == []
+
+
+@pytest.mark.anyio
+async def test_local_echo_not_invoked_on_abandon(
+    tmp_path: Path,
+) -> None:
+    # /abandon cancels the serve scope via controls.abandon() and returns BEFORE
+    # the local_echo / send_input line, so no optimistic echo fires. No
+    # control_root is needed for the abandon control frame itself.
+    sock = str(tmp_path / "s.sock")
+    server = SessionServer(sock, hibernate=False)
+    echoed: list[str] = []
+
+    async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
+        with anyio.fail_after(5):
+            while server.attached_count == 0:
+                await server.wait_for_attach_change()
+        on_event({"type": "awaiting_user_input", "payload": {"prompt": "reply?"}})
+        # CONTROL_ABANDON cancels the serve scope before user_chat_input_fn returns.
+        return await user_chat_input_fn("reply?")
+
+    coord = InterruptCoordinator()
+
+    async def _attach(
+        on_event: Callable[[dict[str, Any]], None],
+    ) -> SessionClient:
+        client = SessionClient(sock, "c1", "T", on_event=on_event)
+        await client.connect()
+        return client
+
+    async def _solicit(_prompt: str) -> str:
+        return "/abandon"
+
+    class _Driver:
+        def on_event(self, _event: dict[str, Any]) -> None: ...
+        def finish(self) -> None: ...
+
+    with anyio.fail_after(10):
+        async with anyio.create_task_group() as tg:
+            await server.open()
+            tg.start_soon(server.serve, run_fn)
+
+            async def _client() -> None:
+                await run_terminal_client(
+                    attach=_attach, driver=_Driver(), coord=coord,
+                    solicit=_solicit, change_id="c1", local_echo=echoed.append)
+
+            tg.start_soon(_client)
+
+    # /abandon detached the client before send_input; no local echo fired.
+    assert server.abandoned
+    assert echoed == []
