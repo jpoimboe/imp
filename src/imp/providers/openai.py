@@ -652,7 +652,7 @@ class OpenAIAgentRunner:
         # spec->plan title rename and would bust the cache mid-conversation
         # (spec §9). [AC 10]
         prompt_cache_key = _prompt_cache_key(invocation.change_context.id, aid)
-        guard = LoopGuard()
+        guard = LoopGuard(interactive=invocation.interactive)
 
         while not self._cancel:
             client = self._get_client()

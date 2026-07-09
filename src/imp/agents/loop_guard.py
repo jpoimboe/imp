@@ -114,6 +114,11 @@ class TurnRecord:
 class LoopGuard:
     repeat_k: int = DEFAULT_REPEAT_K
     noprogress_n: int = DEFAULT_NOPROGRESS_N
+    # When True (an interactive: true step), both detectors are disabled: an
+    # interactive step is human-gated on every turn and cannot run away, so the
+    # detectors can only produce false positives. observe() returns None before
+    # any progress evaluation or state mutation.
+    interactive: bool = False
     _repeat_count: int = 0
     _noprogress_count: int = 0
     _last_sig: str | None = None
@@ -126,6 +131,11 @@ class LoopGuard:
         Both detectors hold per-invocation state only (they never consult
         reloaded history), so resume cannot trip them spuriously.
         """
+        # An interactive step is human-gated on every turn and cannot run away;
+        # both detectors would only ever false-positive here. Return before any
+        # progress evaluation or per-turn state mutation.
+        if self.interactive:
+            return None
         # Lazy import: importing imp.providers.errors at module scope pulls in
         # the imp.providers package __init__, which eagerly imports the provider
         # modules — and those import this module, forming an import cycle. Import

@@ -1678,3 +1678,15 @@ async def test_drive_invocation_blind_backoff_not_delay_hinted(tmp_path: Path) -
                                  prior_backoff_attempts=0)
     assert res.delay is not None
     assert res.delay_hinted is False
+
+
+def test_build_agent_invocation_sets_interactive_on_invocation(
+    tmp_path: Path,
+) -> None:
+    assert _build_inv(tmp_path, interactive=True).interactive is True
+
+
+def test_build_agent_invocation_interactive_defaults_false(
+    tmp_path: Path,
+) -> None:
+    assert _build_inv(tmp_path).interactive is False

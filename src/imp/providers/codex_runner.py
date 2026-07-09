@@ -597,7 +597,7 @@ class CodexAgentRunner:
         except ImportError:
             self._abort_controller = None
 
-        guard = LoopGuard()
+        guard = LoopGuard(interactive=invocation.interactive)
 
         # Tier A proactive-handoff watch state (Mechanism 3). handoff_phase is
         # None until the threshold crosses, then "instruction_sent" for the one

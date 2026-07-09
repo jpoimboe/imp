@@ -628,6 +628,7 @@ def build_agent_invocation(
         coordinator=coordinator,
         test_gates=test_gates,
         headless=headless,
+        interactive=interactive,
         sandbox_policy=sandbox_policy,
         checkpoint_threshold=checkpoint_threshold,
     )
