@@ -2784,6 +2784,19 @@ def test_current_activity_position_segments_for_a_position_label_step() -> None:
     assert act.counter == "task 2/3"          # the position_label counter leaf (step-blue)
 
 
+def test_current_activity_counter_prefers_pushed_live_label() -> None:
+    b = nv.NarrativeBuilder()
+    b.add(ev("1", "change_created", change_id=1, title="x"))
+    b.add(ev("2", "step_started", step="task-lead", kind="agent", phase="code",
+             model="m", provider="anthropic", label="task 2/3",
+             phase_label="implementation phase · plan 1/1", position_label=True))
+    b.add(ev("3", "step_label_updated", label="task 3/3"))
+    act = b.current_activity()
+    assert act.counter == "task 3/3"
+    assert act.phase == "implementation phase"
+    assert act.plan == "plan 1/1"
+
+
 def test_current_activity_position_segments_when_phase_has_no_plan() -> None:
     b = nv.NarrativeBuilder()
     b.add(ev("1", "change_created", change_id=1, title="x"))
