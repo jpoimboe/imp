@@ -46,7 +46,11 @@ from imp.agents.subagents import make_task_tool, raise_if_suspended
 from imp.agents.tools import Tool, get_registry
 from imp.agents.tools import bg as _bg
 from imp.agents.tools.complete_step import make_complete_step_tool
-from imp.agents.tools.context import ToolContext, change_home_path
+from imp.agents.tools.context import (
+    ToolContext,
+    change_home_path,
+    request_bracketed,
+)
 from imp.agents.tools.load_skill import make_load_skill_tool
 from imp.agents.transcript import (
     Transcript,
@@ -674,7 +678,8 @@ class OpenAIAgentRunner:
                         # invoke-time arg validation (is_error on malformed input).
                         parallel_tool_calls=True,
                     ) as stream:
-                        async for _event in stream:
+                        async for _event in request_bracketed(
+                                invocation.coordinator, stream):
                             if invocation.coordinator is not None:
                                 invocation.coordinator.note_activity()
                         response = await stream.get_final_response()

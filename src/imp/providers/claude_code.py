@@ -85,6 +85,7 @@ from imp.agents.tools.context import (
     ToolContext,
     change_home_path,
     kill_process_group,
+    request_bracketed,
     suspend_inactivity_watchdog,
 )
 from imp.agents.tools.errors import FatalToolError
@@ -1868,7 +1869,8 @@ class ClaudeCodeAgentRunner:
                 await client.query(next_query)
                 requery = False
 
-                async for sdk_msg in client.receive_response():
+                async for sdk_msg in request_bracketed(
+                        invocation.coordinator, client.receive_response()):
                     if self._cancel:
                         yield {"type": "error", "payload": {
                             "category": "config",

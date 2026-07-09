@@ -13,7 +13,7 @@ from __future__ import annotations
 import contextlib
 import os
 import signal as _signal
-from collections.abc import Iterable, Iterator
+from collections.abc import AsyncIterator, Iterable, Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
@@ -204,6 +204,40 @@ def suspend_inactivity_watchdog(ctx: ToolContext | None) -> Iterator[None]:
     finally:
         if coord is not None:
             coord.end_tool_watchdog()
+
+
+async def request_bracketed(
+    coordinator: Any, aiter: Any
+) -> AsyncIterator[Any]:
+    """Yield items from `aiter` while holding the coordinator's
+    provider-request watchdog state across each await for the NEXT item — and
+    only across that await, never across the yield.
+
+    begin_request_watchdog() is called just before each `await it.__anext__()`,
+    so while imp is blocked awaiting the provider's next response event the
+    finite request-in-flight ceiling applies (see agent_run._bump). The instant
+    the item arrives (or the stream ends, errors, or is cancelled) the finally
+    calls end_request_watchdog(), releasing the state BEFORE the item is yielded
+    — so consumer-side processing of each item runs under the normal window.
+    Because depth is never held across a yield, no request depth leaks if the
+    consumer breaks or raises mid-iteration, and cleanup is deterministic
+    (try/finally) rather than dependent on async-generator finalization. A None coordinator
+    — or one lacking the begin/end request-watchdog methods — degrades to a plain pass-through.
+    """
+    begin = getattr(coordinator, "begin_request_watchdog", None)
+    end = getattr(coordinator, "end_request_watchdog", None)
+    it = aiter.__aiter__()
+    while True:
+        if begin is not None:
+            begin()
+        try:
+            item = await it.__anext__()
+        except StopAsyncIteration:
+            return
+        finally:
+            if end is not None:
+                end()
+        yield item
 
 
 def change_home_path(change_home: str | None) -> Path | None:

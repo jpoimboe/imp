@@ -269,6 +269,16 @@ class InterruptCoordinator:
         # inactivity watchdog freezes its deadline to inf (see
         # agent_run._pull_with_inactivity_watchdog), exactly like solicit.
         self._tool_depth = 0
+        # Suspend-during-provider-request (this Change): depth counter mirroring
+        # _tool_depth. > 0 while imp has issued a model request (or handed a tool
+        # result back) and is awaiting the provider's response. Unlike the
+        # solicit/tool freezes (which go to math.inf), while this is > 0 the
+        # per-pull inactivity watchdog installs a FINITE 15-minute ceiling
+        # (PROVIDER_REQUEST_SILENCE_CEILING_S) — see
+        # agent_run._pull_with_inactivity_watchdog. Depth-counted so overlapping
+        # request scopes stay correct; the ceiling only lifts back to the plain
+        # finite window when the LAST in-flight request completes.
+        self._request_depth = 0
 
     def add_activity_listener(self, fn: Any) -> Any:
         """Register a no-arg callback fired on each `note_activity()`. Returns
@@ -326,6 +336,28 @@ class InterruptCoordinator:
         in-flight tool returns (depth back to 0), the next bump installs a fresh
         finite window. Fires note_activity() so the per-pull bump re-evaluates."""
         self._tool_depth -= 1
+        self.note_activity()
+
+    @property
+    def request_active(self) -> bool:
+        """True while one or more provider requests are in flight (awaiting a
+        response)."""
+        return self._request_depth > 0
+
+    def begin_request_watchdog(self) -> None:
+        """Enter a provider request-in-flight wait: apply the finite silence
+        ceiling to the inactivity watchdog. Depth-counted so overlapping request
+        scopes each hold it. Fires note_activity() so every registered per-pull
+        bump re-evaluates NOW and installs the ceiling deadline."""
+        self._request_depth += 1
+        self.note_activity()
+
+    def end_request_watchdog(self) -> None:
+        """Leave a provider request-in-flight wait: decrement the depth. When the
+        LAST in-flight request completes (depth back to 0), the next bump installs
+        a fresh finite window. Fires note_activity() so the per-pull bump
+        re-evaluates."""
+        self._request_depth -= 1
         self.note_activity()
 
     def set_at_prompt(self, value: bool) -> None:

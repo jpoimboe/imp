@@ -54,6 +54,17 @@ TOOL_WALLCLOCK_TIMEOUT_S = 1800.0        # B.1: per-tool-call deadline (30 min)
 # BG_WAIT_MAX_S (1200) < TOOL_WALLCLOCK_TIMEOUT_S (1800) so the existing
 # decoupling-order tests still hold.
 AGENT_INACTIVITY_TIMEOUT_S = 300.0       # B.2: per-activity no-events window
+# The finite inactivity ceiling for the request-in-flight-awaiting-response
+# state: while imp has issued a model request (or handed a tool result back) and
+# is awaiting the provider's next response event, the watchdog uses THIS window
+# instead of the 300 s general one. Distinct from the 300 s window
+# (AGENT_INACTIVITY_TIMEOUT_S) and from the math.inf freeze the solicit/tool
+# states use. Every legitimate provider wait observed topped out ~9 min, so 15
+# min never false-kills a healthy wait; the finite ceiling still eventually tears
+# down a genuinely dead-but-open connection, narrowing the watchdog rather than
+# gutting it. Held strictly between AGENT_INACTIVITY_TIMEOUT_S (300) and
+# TOOL_WALLCLOCK_TIMEOUT_S (1800) — tests/test_tool_limits.py pins that ordering.
+PROVIDER_REQUEST_SILENCE_CEILING_S = 900.0   # request-in-flight silence ceiling (15 min)
 PROCESS_KILL_GRACE_S = 4.0               # C-ii: SIGTERM -> wait -> SIGKILL grace
 
 # --- Background execution (bg.py) -------------------------------------------
