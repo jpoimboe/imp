@@ -68,11 +68,7 @@ spec-writer · opus
 
 spec-writer · complete · 1m 44s
 
-spec-verify-commit
-
 spec-verify-commit · complete
-
-fast-path-spec-gate
 
 fast-path-spec-gate · complete
 
@@ -150,8 +146,6 @@ spec-writer · opus
 
 spec-writer · complete · 22s
 
-spec-verify-commit
-
 spec-verify-commit · complete
 
 spec phase complete · 3m 9s
@@ -186,11 +180,7 @@ plan-writer · opus
 
 plan-writer · complete · 2m 16s
 
-plan-verify-commit
-
 plan-verify-commit · complete
-
-fast-path-plan-gate
 
 fast-path-plan-gate · complete
 
@@ -278,8 +268,6 @@ plan-writer · opus
 
 plan-writer · complete · 39s
 
-plan-verify-commit
-
 plan-verify-commit · complete
 
 plan phase complete · 4m 7s
@@ -359,15 +347,9 @@ task-lead · sonnet
 
 task-lead · complete · 9m 36s
 
-commit-check
-
 commit-check · complete
 
-run-tests
-
 run-tests · complete
-
-fast-path-cycle-gate
 
 fast-path-cycle-gate · complete
 
@@ -394,11 +376,7 @@ implement phase complete · 10m 17s
 
 ── review phase ───
 
-autosquash
-
 autosquash · complete
-
-stamp-trailers
 
 stamp-trailers · complete
 
