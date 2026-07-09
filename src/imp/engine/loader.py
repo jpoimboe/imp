@@ -656,6 +656,10 @@ def _parse_step(
     if _interactive_raw is not None and kind != "agent":
         raise LoadError("interactive: only valid on an agent step", source)
     interactive = _interactive_raw if _interactive_raw is not None else False
+    _rotate_phrase_raw = _parse_optional_bool_flag(raw, "rotate_phrase", source)
+    if _rotate_phrase_raw is not None and kind != "agent":
+        raise LoadError("rotate_phrase: only valid on an agent step", source)
+    rotate_phrase = _rotate_phrase_raw
     output_schema = None
     if "output" in raw:
         if kind != "script":
@@ -735,6 +739,7 @@ def _parse_step(
             interruptible=interruptible,
             clean_tree=clean_tree,
             interactive=interactive,
+            rotate_phrase=rotate_phrase,
         )
     elif kind == "script":
         step = Step(
