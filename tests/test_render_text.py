@@ -400,50 +400,124 @@ def test_resumed_step_reemit_awaiting_user_input_shows_caret() -> None:
     assert step.interactive is True
 
 
-def test_chrome_step_collapses_to_single_breadcrumb() -> None:
-    # §4: a chrome step (script/branch/merge gate) now prints a start header AND
-    # a `complete` breadcrumb, just like any agent step.
-    out = "\n".join(_lines([
+def test_chrome_step_collapses_to_single_line() -> None:
+    out = _lines([
         _ev("1", "change_created", title="t"),
         _ev("2", "step_started", step="spec-verify-commit", kind="script", phase="spec"),
         _ev("3", "step_completed", step="spec-verify-commit", kind="script",
             action={"verb": "continue"}),
-    ]))
-    assert "spec-verify-commit" in out
-    assert "spec-verify-commit · complete" in out   # show_complete now unconditional, dotted
-
-
-def test_open_chrome_step_shows_header() -> None:
-    # §4: an OPEN chrome step (step_started seen, no step_completed yet) renders
-    # its header line — just like any other open step. The old `name · running`
-    # line is gone; the header is the step name, carrying the step color.
-    out = _lines([
-        _ev("1", "change_created", title="t"),
-        _ev("2", "step_started", step="run-tests", kind="script",
-            phase="implement"),
     ])
-    hits = [ln for ln in out if "run-tests" in ln]
-    assert len(hits) == 1
-    assert "running" not in hits[0]
-    # The header carries the STEP color (not breadcrumb gray).
+    hits = [ln for ln in out if "spec-verify-commit" in ln]
+    assert hits == ["spec-verify-commit · complete"]   # header+breadcrumb collapsed
+
+
+def test_open_chrome_step_shows_header_then_collapses_on_complete() -> None:
+    open_out = _lines([
+        _ev("1", "change_created", title="t"),
+        _ev("2", "step_started", step="run-tests", kind="script", phase="implement"),
+    ])
+    open_hits = [ln for ln in open_out if "run-tests" in ln]
+    assert len(open_hits) == 1
+    assert "complete" not in open_hits[0]              # in-flight, not "complete"
     colored = list(render_tree(nv.build_tree([
         _ev("1", "change_created", title="t"),
-        _ev("2", "step_started", step="run-tests", kind="script",
-            phase="implement"),
+        _ev("2", "step_started", step="run-tests", kind="script", phase="implement"),
     ]), full=False, color=True, width=80))
-    header_ln = next(ln for ln in colored if "run-tests" in ln)
-    assert pal._ANSI["step"] in header_ln
-    # Once the gate completes, both header and `complete` breadcrumb appear.
-    out2 = _lines([
+    assert pal._ANSI["step"] in next(ln for ln in colored if "run-tests" in ln)
+    done_out = _lines([
         _ev("1", "change_created", title="t"),
-        _ev("2", "step_started", step="run-tests", kind="script",
-            phase="implement"),
+        _ev("2", "step_started", step="run-tests", kind="script", phase="implement"),
         _ev("3", "step_completed", step="run-tests", kind="script",
             action={"verb": "continue"}),
     ])
-    hits2 = [ln for ln in out2 if "run-tests" in ln]
-    assert len(hits2) == 2                       # header + breadcrumb
-    assert any("complete" in ln for ln in hits2)
+    done_hits = [ln for ln in done_out if "run-tests" in ln]
+    assert done_hits == ["run-tests · complete"]       # collapsed to one line
+
+
+def test_step_has_body_ignores_only_the_trailing_breadcrumb() -> None:
+    node = nv.StepNode(name="s", kind="script")
+    assert rt.step_has_body(node) is False
+    node.children.append(nv.BreadcrumbLine(step_name="s", elapsed_s=0.0,
+                                           action={"verb": "continue"}))
+    assert rt.step_has_body(node) is False           # a breadcrumb is not a body
+    node.children.append(nv.LiteralTextNode(text="hi"))
+    assert rt.step_has_body(node) is True
+
+
+def test_deferred_leaf_holds_empty_script_not_bodied_or_agent() -> None:
+    empty = nv.StepNode(name="verify", kind="script", show_label=True)
+    assert rt.deferred_leaf(empty) is True            # body-less script → collapsible
+    empty.children.append(nv.LiteralTextNode(text="surfaced output"))
+    assert rt.deferred_leaf(empty) is False           # a real body → not collapsed
+    agent = nv.StepNode(name="spec", kind="agent", show_label=True)
+    assert rt.deferred_leaf(agent) is False           # agents always emit a body
+
+
+def test_deferred_leaf_keeps_hidden_body_emitting_step_atomic() -> None:
+    # A HIDDEN step that emits an error body must STAY a leaf (body-insensitive) so
+    # the live driver renders it atomically at close — reveal-on-pause == imp log.
+    node = nv.StepNode(name="merge-guard", kind="script", show_label=False)
+    assert rt.deferred_leaf(node) is True
+    node.children.append(nv.ErrorNode(message="boom", category="script"))
+    assert rt.deferred_leaf(node) is True             # error body does NOT unhold it
+
+
+def test_collapsed_step_line_two_tone_label_and_gray_tail() -> None:
+    node = nv.StepNode(name="verify", kind="script", label="running tests",
+                       show_label=True, closed=True,
+                       start_ts="2026-06-10T00:00:00", end_ts="2026-06-10T00:00:05")
+    assert rt.collapsed_step_line(node, depth=1, color=False) == \
+        "  running tests · complete · 5s"
+    colored = rt.collapsed_step_line(node, depth=1, color=True)
+    assert pal._ANSI["step"] in colored               # label in step color
+    assert pal._ANSI["gray"] in colored               # tail in breadcrumb gray
+
+
+def test_body_less_visible_step_collapses_to_one_line() -> None:
+    out = _lines([
+        _ev("1", "change_created", title="t"),
+        _ev("2", "step_started", step="verify", kind="script", phase="implement",
+            label="running tests"),
+        _ev("3", "step_completed", step="verify", kind="script",
+            action={"verb": "continue"}),
+    ])
+    hits = [ln for ln in out if "running tests" in ln]
+    assert hits == ["running tests · complete"]       # header+breadcrumb collapsed
+
+
+def test_visible_step_with_body_renders_header_not_collapsed() -> None:
+    out = _lines([
+        _ev("1", "change_created", title="t"),
+        _ev("2", "step_started", step="plan-finalized", kind="script", phase="plan",
+            label="finalizing plan", show_output=True),
+        _ev("3", "script_output", step="plan-finalized", stdout="plan 1/2 · 3 tasks"),
+        _ev("4", "step_completed", step="plan-finalized", kind="script",
+            action={"verb": "continue"}),
+    ])
+    joined = "\n".join(out)
+    assert "plan 1/2 · 3 tasks" in joined              # body survives
+    assert "finalizing plan · complete" in joined      # breadcrumb, not a collapsed line
+    hits = [ln for ln in out if "finalizing plan" in ln]
+    assert len(hits) >= 2                              # header line + breadcrumb line
+
+
+def test_visible_show_output_false_step_with_error_body_renders_full_frame() -> None:
+    # Exercises the `not step_has_body` disjunct of deferred_leaf: a script step
+    # with show_output=False (step_no_body=True) gains a body via an ErrorNode child,
+    # so deferred_leaf flips False and the full frame (header + body + breadcrumb) renders.
+    out = _lines([
+        _ev("1", "change_created", title="t"),
+        _ev("2", "step_started", step="verify-build", kind="script", phase="implement",
+            label="verifying build"),
+        _ev("3", "error", message="build failed: missing dependency", category="runner"),
+        _ev("4", "step_completed", step="verify-build", kind="script",
+            action={"verb": "continue"}),
+    ])
+    joined = "\n".join(out)
+    assert "build failed: missing dependency" in joined  # error body rendered
+    assert "verifying build · complete" in joined        # breadcrumb present
+    hits = [ln for ln in out if "verifying build" in ln]
+    assert len(hits) >= 2                                # header line + breadcrumb line
 
 
 def test_breadcrumb_and_fallback_recede_to_gray() -> None:
@@ -1575,31 +1649,28 @@ def test_route_reason_rides_target_step_header() -> None:
     assert hdr.strip().endswith("· addressing review feedback")
 
 
-def test_header_line_falls_back_to_name_when_no_phase_or_position() -> None:
-    # With no phase_label and position_label=False the header collapses to node.name.
+def test_header_line_shows_step_label_else_raw_name() -> None:
+    # A1: the header shows the step's OWN label (phase name rides the phase rule).
     labeled = nv.StepNode(name="code-reviewer", kind="agent", label="reviewing code")
-    assert rt.header_line(labeled, depth=1, color=False) == "  code-reviewer"
+    assert rt.header_line(labeled, depth=1, color=False) == "  reviewing code"
+    # A2: a visible step with no label falls back — loudly — to its raw slug.
     unlabeled = nv.StepNode(name="commit-check", kind="script")
     assert rt.header_line(unlabeled, depth=1, color=False) == "  commit-check"
 
 
 def test_header_line_appends_gray_resume_marker() -> None:
-    # No phase_label, position_label=False: base collapses to node.name.
     node = nv.StepNode(name="code-reviewer", kind="agent",
                        label="reviewing code", model="opus", resumed=True)
-    # plain text: marker sits after the name, before the model suffix.
-    assert rt.header_line(node, depth=0, color=False) == "code-reviewer (resume) · opus"
-    # color: the " (resume)" span is chrome gray (theme-resolved).
+    assert rt.header_line(node, depth=0, color=False) == "reviewing code (resume) · opus"
     colored = rt.header_line(node, depth=0, color=True)
     assert pal.ansi(" (resume)", "gray") in colored
-    # a non-resumed step carries no marker.
     fresh = nv.StepNode(name="code-reviewer", kind="agent",
                         label="reviewing code", model="opus")
     assert "(resume)" not in rt.header_line(fresh, depth=0, color=False)
-    # a resumed step with no model has no model tail.
+    # a resumed step with no model has no model tail (label shown, not raw name).
     no_model = nv.StepNode(name="commit-check", kind="script",
                            label="checking commit", resumed=True)
-    assert rt.header_line(no_model, depth=0, color=False) == "commit-check (resume)"
+    assert rt.header_line(no_model, depth=0, color=False) == "checking commit (resume)"
 
 
 def test_caret_escape_maps_control_bytes_to_caret_notation() -> None:
@@ -2011,26 +2082,25 @@ def test_warning_node_renders_warning_wordmark_in_all_themes() -> None:
 
 
 def test_header_line_appends_route_label_suffix() -> None:
-    # No phase_label, position_label=False: base collapses to node.name.
     # Forward-routed header: yellow " · <reason>" rides last, after the model.
     fwd = nv.StepNode(name="task-lead", kind="agent", label="implementing the plan",
                       model="opus", route_label="addressing review feedback")
     assert rt.header_line(fwd, depth=0, color=False) == \
-        "task-lead · opus · addressing review feedback"
+        "implementing the plan · opus · addressing review feedback"
     # Resume header: " (resume)", then the model, then the reason — always last.
     res = nv.StepNode(name="task-lead", kind="agent", label="implementing the plan",
                       model="opus", resumed=True,
                       route_label="addressing review feedback")
     assert rt.header_line(res, depth=0, color=False) == \
-        "task-lead (resume) · opus · addressing review feedback"
+        "implementing the plan (resume) · opus · addressing review feedback"
     # The reason segment is painted lifecycle (yellow), distinct from the step color.
     colored = rt.header_line(fwd, depth=0, color=True)
     assert pal.ansi(" · addressing review feedback",
                     *pal.NODE_COLORS["lifecycle"]) in colored
-    # No route_label → byte-identical to today (no trailing segment).
+    # No route_label → label and model only.
     bare = nv.StepNode(name="task-lead", kind="agent", label="implementing the plan",
                        model="opus")
-    assert rt.header_line(bare, depth=0, color=False) == "task-lead · opus"
+    assert rt.header_line(bare, depth=0, color=False) == "implementing the plan · opus"
 
 
 def test_phase_end_rule_collapses_when_subsecond() -> None:
@@ -2064,13 +2134,13 @@ def test_compose_label_joins_present_segments() -> None:
     assert rt.compose_label(["", None]) == ""
 
 
-def test_header_line_composes_phase_label_into_step_header() -> None:
-    # With position_label=False the verb label drops; only phase_label remains.
+def test_header_line_shows_label_not_phase_for_verb_step() -> None:
     step = nv.StepNode(name="finalize", kind="agent",
                        phase_label="implementation phase · plan 1/3",
                        label="finalizing")
-    assert rt.header_line(step, depth=1, color=False) == (
-        "  implementation phase · plan 1/3")
+    line = rt.header_line(step, depth=1, color=False)
+    assert line == "  finalizing"
+    assert "implementation phase" not in line
 
 
 def test_phase_divider_uses_phase_label() -> None:
@@ -2104,15 +2174,14 @@ def test_opening_intent_renders_under_first_step_header_before_narration() -> No
     assert step_idx < intent_idx < narr_idx
 
 
-def test_breadcrumb_completion_composes_phase_label() -> None:
+def test_breadcrumb_completion_omits_phase_label() -> None:
     bc = nv.BreadcrumbLine(
         step_name="finalize", kind="agent", elapsed_s=0.0,
         action={"verb": "continue"}, step_label="finalizing",
         phase_label="implementation phase · plan 1/3", show_complete=True)
     out = list(rt._render(bc, depth=1, full=False, color=False, width=80))
-    assert out
-    assert out[0].strip().startswith(
-        "implementation phase · plan 1/3 · finalizing · complete")
+    assert out == ["  finalizing · complete"]
+    assert "implementation phase" not in out[0]
 
 
 def test_breadcrumb_without_phase_label_is_unchanged() -> None:
@@ -2180,24 +2249,21 @@ def test_render_tree_caps_hr_while_prose_stays_unwrapped() -> None:
     assert not any(ln.count("─") > 40 for ln in out)
 
 
-def test_step_header_drops_verb_label_for_verb_step() -> None:
-    from imp.cli import narrative as nv
-    from imp.cli.render_text import header_line
+def test_step_header_shows_verb_label_for_verb_step() -> None:
     node = nv.StepNode(name="plan-writer", kind="agent", label="writing plan",
                        phase_label="planning phase · plan 2/4", position_label=False)
-    line = header_line(node, depth=0, color=False)
-    assert line.strip() == "planning phase · plan 2/4"
-    assert "writing plan" not in line
+    line = rt.header_line(node, depth=0, color=False)
+    assert line.strip() == "writing plan"
+    assert "planning phase" not in line
 
 
-def test_step_header_keeps_position_label_for_position_step() -> None:
-    from imp.cli import narrative as nv
-    from imp.cli.render_text import header_line
+def test_step_header_shows_position_counter_without_phase() -> None:
     node = nv.StepNode(name="task-lead", kind="agent", label="task 2/3",
                        phase_label="implementation phase · plan 1/1",
                        position_label=True)
-    line = header_line(node, depth=0, color=False)
-    assert line.strip() == "implementation phase · plan 1/1 · task 2/3"
+    line = rt.header_line(node, depth=0, color=False)
+    assert line.strip() == "task 2/3"
+    assert "implementation phase" not in line
 
 
 def test_step_header_position_label_without_phase_falls_to_label() -> None:
@@ -2544,3 +2610,45 @@ def test_full_subagent_plain_string_success_shown_once() -> None:
     ]
     full = "\n".join(_lines(events, full=True))
     assert full.count("found the auth module") == 1
+
+
+def test_subagent_model_is_public() -> None:
+    import imp.cli.render_text as rt
+    assert callable(rt.subagent_model)
+    assert not hasattr(rt, "_subagent_model")   # the private alias is gone
+
+
+def test_header_line_paints_model_in_gray() -> None:
+    node = nv.StepNode(name="plan-writer", kind="agent", label="writing plan", model="opus")
+    colored = rt.header_line(node, depth=0, color=True)
+    assert pal.ansi(" · opus", "gray") in colored                         # model dim gray (C3)
+    assert pal.ansi("writing plan", *pal.NODE_COLORS["step"]) in colored  # label stays step-blue
+    assert rt.header_line(node, depth=0, color=False) == "writing plan · opus"  # plain unchanged
+    # a resumed step's model is gray too (not step-blue).
+    resumed = nv.StepNode(name="code-reviewer", kind="agent", label="reviewing code",
+                          model="opus", resumed=True)
+    assert pal.ansi(" · opus", "gray") in rt.header_line(resumed, depth=0, color=True)
+
+
+def test_subagent_status_row_paints_model_and_frozen_elapsed_gray() -> None:
+    b = nv.NarrativeBuilder()
+    b.add(ev("1", "change_created", change_id=1, title="x"))
+    b.add(ev("2", "step_started", step="s", kind="agent", phase="p",
+             model="m", provider="anthropic"))
+    b.add(ev("t1", "tool_call", agent_id="step:p/s", id="blk", name="sub_agent",
+             input={"subagent_name": "reviewer"}))
+    b.add(ev("r1", "llm_response", agent_id="sub:t1", provider="anthropic", model="opus",
+             stop_reason="end_turn", usage={},
+             raw={"content": [{"type": "text", "text": "hi"}]}))
+    fold = b.running_subagents()[0]
+    running = rt.subagent_status_row(fold, depth=0, color=True)
+    assert pal.ansi(" · opus", "gray") in running                          # model dim gray (C3)
+    assert pal.ansi("  reviewer", *pal.NODE_COLORS["subagent"]) in running  # name stays magenta
+
+    # A finished fold (empty nested → no model): the frozen run duration prints dim gray.
+    done = nv.SubagentFold(subagent_name="reviewer", event_id="e", block_id="b",
+                           nested=nv.NarrativeBuilder(), running=False,
+                           start_ts="2026-01-01T00:00:00", end_ts="2026-01-01T00:00:42")
+    finished = rt.subagent_status_row(done, depth=0, color=True)
+    assert pal.ansi(" · 42s", "gray") in finished  # frozen elapsed dim gray
+    assert rt.subagent_status_row(done, depth=0, color=False) == "  reviewer · 42s"

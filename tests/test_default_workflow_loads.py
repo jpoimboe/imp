@@ -138,7 +138,7 @@ def test_every_shown_step_has_its_label() -> None:
     wf = _wf()
     by = {s.name: s for s in wf.flat_steps()}
     expected = {
-        "threshold": "<random>",
+        "threshold": "scoping the change",
         "spec-finalizer": "finalizing spec",
         "spec-reviewer": "reviewing spec",
         "plan-writer": "writing plan",
@@ -193,6 +193,14 @@ def test_stateless_verify_gates_are_interruptible() -> None:
     # Commit gates mutate the tree and must stay run-to-completion.
     for name in ("spec-verify-commit", "plan-verify-commit"):
         assert by[name].interruptible is False, name
+
+
+def test_rotate_phrase_opt_in_on_task_lead_and_threshold_defaults() -> None:
+    by = {s.name: s for s in _wf().flat_steps()}
+    assert by["task-lead"].rotate_phrase is True         # explicit opt-in (bare counter label)
+    assert by["threshold"].rotate_phrase is None         # unset; rotation defaults off interactive
+    assert by["threshold"].interactive is True
+    assert by["plan-writer"].rotate_phrase is None   # non-interactive agent step never rotates
 
 
 def test_phase_labels_assigned() -> None:

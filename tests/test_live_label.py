@@ -43,15 +43,46 @@ def test_breadcrumb_reads_frozen_label_not_live_label() -> None:
     assert "task 3/6" not in (crumbs[0].step_label or "")
 
 
-def test_live_label_cleared_on_resume() -> None:
+def test_live_label_preserved_on_resume_re_emit_continuation() -> None:
+    # Branch 1 (on-stack re-emit, no workflow_resumed window open): a resumed
+    # step_started WITHOUT `restarted` is a plain pause/resume continuation and
+    # must keep the pushed `task 3/6` live label, not revert to frozen `task 1/6`.
     b = _build()
-    # Push a live label
     b.add(ev("3", "step_label_updated", agent_id="step:code/task-lead",
              label="task 3/6 · coding"))
     assert "task 3/6 · coding" in (b.current_activity().position or "")
-    # Resume the same step — live_label must reset to the frozen label
     b.add(ev("4", "step_started", step="task-lead", kind="agent", phase="code",
              model="m", provider="anthropic", label="task 1/6 · thinking",
              phase_label="implementation phase · plan 2/4", resumed=True,
              position_label=True))
-    assert "task 1/6 · thinking" in (b.current_activity().position or "")
+    assert "task 3/6 · coding" in (b.current_activity().position or "")
+
+
+def test_live_label_preserved_on_genuine_resume_continuation() -> None:
+    # Branch 2 (workflow_resumed window open): the real resume path. A
+    # continuation (`restarted` absent/False) preserves the pushed counter.
+    b = _build()
+    b.add(ev("3", "step_label_updated", agent_id="step:code/task-lead",
+             label="task 3/6 · coding"))
+    b.add(ev("4", "workflow_resumed"))
+    b.add(ev("5", "step_started", step="task-lead", kind="agent", phase="code",
+             model="m", provider="anthropic", label="task 1/6 · thinking",
+             phase_label="implementation phase · plan 2/4", resumed=True,
+             restarted=False, position_label=True))
+    assert "task 3/6 · coding" in (b.current_activity().position or "")
+
+
+def test_live_label_cleared_on_genuine_resume_restart() -> None:
+    # Branch 2 restart: a genuine re-run from scratch (`restarted` True) still
+    # wipes the stale pushed label and falls back to the frozen static label.
+    b = _build()
+    b.add(ev("3", "step_label_updated", agent_id="step:code/task-lead",
+             label="task 3/6 · coding"))
+    b.add(ev("4", "workflow_resumed"))
+    b.add(ev("5", "step_started", step="task-lead", kind="agent", phase="code",
+             model="m", provider="anthropic", label="task 1/6 · thinking",
+             phase_label="implementation phase · plan 2/4", resumed=True,
+             restarted=True, position_label=True))
+    pos = b.current_activity().position or ""
+    assert "task 1/6 · thinking" in pos
+    assert "task 3/6" not in pos

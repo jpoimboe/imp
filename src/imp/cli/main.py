@@ -1545,12 +1545,11 @@ def _resolve_intent(events: list[dict[str, Any]]) -> str | None:
     return _first_genuine_human_turn(events)
 
 
-def _latest_phase(events: list[dict[str, Any]]) -> str | None:
-    phase = None
-    for ev in events:
+def _latest_phase_label(events: list[dict[str, Any]]) -> str | None:
+    for ev in reversed(events):
         if ev.get("type") == "step_started":
-            phase = (ev.get("payload") or {}).get("phase") or phase
-    return phase
+            return (ev.get("payload") or {}).get("phase_label")
+    return None
 
 
 def _change_meta(control: Path, change_id: str) -> dict[str, Any] | None:
@@ -1644,7 +1643,7 @@ def _change_card(control: Path, change_id: str, *, now: datetime) -> list[str]:
     row = _row_for_id(control, change_id)
     if row is None:
         return []
-    _id, status, step, last, title, created, _step_label = row
+    _id, status, step, last, title, created, step_label = row
     events = _load_events_for_id(control, change_id) or []
     lines = [
         f"id:            {_id}",
@@ -1652,8 +1651,10 @@ def _change_card(control: Path, change_id: str, *, now: datetime) -> list[str]:
         f"status:        {status}",
     ]
     if status in _INFLIGHT and step not in ("", "-"):
-        phase = _latest_phase(events)
-        lines.append(f"step:          {step}" + (f" ({phase})" if phase else ""))
+        phase_label = _latest_phase_label(events)
+        step_text = step_label or step
+        position = f"{phase_label} · {step_text}" if phase_label else step_text
+        lines.append(pal.clip_display(f"step:          {position}", _display_width()))
     lines.append(
         f"created:       {change_row.format_timestamp(created)} "
         f"({change_row.relative_age(created, now=now)})")

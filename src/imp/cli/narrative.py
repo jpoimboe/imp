@@ -122,6 +122,7 @@ class StepNode:
     children: list[Any] = field(default_factory=list)
     outcome: OutcomeLine | None = None
     start_ts: str | None = None        # ISO-8601 from step_started.timestamp (issue 3)
+    run_start_ts: str | None = None    # test-lane run clock; phase_elapsed reads start_ts
     end_ts: str | None = None          # ISO-8601 from step_completed.timestamp (§7)
     agent_output: dict[str, Any] | None = None  # stashed complete_step args (issues 5/6)
     show_label: bool = True            # step frame (header + breadcrumb) shown
@@ -130,11 +131,12 @@ class StepNode:
     label: str | None = None           # step display label (step_started.payload.label)
     live_label: str | None = None      # agent-pushed live status label; None when unset
     lane_waiting_node: Any = None      # in-place merge-queue transcript node; None when unset
+    lane_wait: bool = False            # parked in a lane semaphore wait (test or merge); live-only
     phase_label: str | None = None     # owning phase's rendered label
     command: str | None = None         # script step's shell command shown on the status line
     resumed: bool = False              # engine resume re-entry (step_started.payload.resumed)
     route_label: str | None = None     # route reason (rule label) of the entering rule
-    rotate_phrase: bool = False        # opt-in (<random>): rotate status phrase per work segment
+    rotate_phrase: bool = False        # opt-in: rotate status phrase per work segment
     rotated_phrase: str | None = None  # per-segment phrase; live status line only, never persisted
     closed: bool = False
     interrupted: bool = False
@@ -227,11 +229,25 @@ class Activity:
     detail: str | None = None
     model: str | None = None
     countdown_total: float | None = None
+    kind: str | None = None            # active step kind, for context-bar gating at compose time
+    lane_wait: bool = False            # active step parked in a lane semaphore wait (test or merge)
+    # Row-3 position segments, pre-split (compare=False) so the driver never re-slices `position`.
+    phase: str | None = field(default=None, compare=False)     # phase head (gold)
+    plan: str | None = field(default=None, compare=False)      # plan counter (step-blue)
+    counter: str | None = field(default=None, compare=False)   # position_label leaf (step-blue)
 
 
 def _join(*parts: str | None) -> str | None:
     out = " · ".join(p for p in parts if p)
     return out or None
+
+
+def _split_phase_label(label: str | None) -> tuple[str | None, str | None]:
+    """Split "<name> phase · plan i/t" into phase head and optional plan-counter tail."""
+    if not label:
+        return None, None
+    head, _sep, tail = label.partition(" · ")
+    return head, (tail or None)
 
 
 @dataclass
@@ -422,13 +438,16 @@ class NarrativeBuilder:
     Routing order in add() (design §5.3):
       0. accumulate token usage for EVERY llm_response (before sub routing, so
          subagent tokens count toward the change total — F2). latest_prompt_tokens
-         (the context-bar value) updates for TOP-LEVEL turns only; a sub: turn
-         folds into the cumulative total but does not move the bar.
+         (the context-bar value) updates for THIS builder's own agent only: the
+         top-level builder (own_agent_id None) records its non-sub: turns, a nested
+         builder records the sub: turns of the subagent it represents; a turn that
+         belongs to a registered child folds into the cumulative total but does not
+         move this builder's bar.
       1. if agent_id is a registered child subagent fold → delegate down.
       2. else dispatch by event type at the current open scope.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, *, own_agent_id: str | None = None) -> None:
         self._root = WorkflowNode()
         self._warnings: list[str] = []
         self._warnings_flushed: bool = False
@@ -443,6 +462,11 @@ class NarrativeBuilder:
         # the checkpoint, which is frequently a subagent's turn (see loko19).
         self._last_llm_context: tuple[int, int] | None = None
         self._latest_checkpoint_threshold: float | int | None = None
+        # The "sub:<event_id>" this builder represents (a dispatched subagent's own
+        # turns); None on the top-level builder. Gates which llm_response readings move
+        # THIS builder's context gauge: the top level records its own (non-sub:) turns;
+        # a nested builder records the turns of the subagent it stands for.
+        self._own_agent_id = own_agent_id
         self._current_phase: PhaseNode | None = None
         # Stack of open StepNode containers. step_started pushes one;
         # step_completed pops it. Every kind (agent/script/branch) is a
@@ -485,7 +509,7 @@ class NarrativeBuilder:
         # None on the streaming path.
         self._pending_reply_node: UserMessageNode | None = None
         self._first_step: StepNode | None = None
-        # <random> rotation: work seen this segment, consumed at each prose/user-message boundary.
+        # phrase rotation: work seen this segment, consumed at each prose/user-message boundary.
         self._segment_had_work = False
 
     # -- public API -----------------------------------------------------------
@@ -531,9 +555,18 @@ class NarrativeBuilder:
         elapsed even though the subagents never stopped (w7f56t over-reset)."""
         return any(f.running for f in self._open_sub_by_event.values())
 
+    def running_subagents(self) -> list[SubagentFold]:
+        """Running dispatched subagent folds, in dispatch order (the footer's indented rows)."""
+        return [f for f in self._open_sub_by_event.values() if f.running]
+
     def current_activity(self) -> Activity | None:
         """Current activity for the live status footer; None when idle."""
         top = self._step_stack[-1] if self._step_stack else None
+        top_kind = top.kind if top is not None else None
+        top_lane_wait = top.lane_wait if top is not None else False
+        top_phase, top_plan = _split_phase_label(top.phase_label if top is not None else None)
+        top_counter = ((top.live_label or top.label)
+                       if (top is not None and top.position_label) else None)
         if self._reset_wait is not None:
             position = _join(top.phase_label, top.live_label or top.label) if top else None
             return Activity(
@@ -541,6 +574,8 @@ class NarrativeBuilder:
                 verb=self._reset_wait.verb,
                 model=top.model if top else None,
                 countdown_total=self._reset_wait.total_seconds,
+                kind=top_kind, lane_wait=top_lane_wait,
+                phase=top_phase, plan=top_plan, counter=top_counter,
             )
         if top is not None:
             model = top.model
@@ -560,19 +595,25 @@ class NarrativeBuilder:
 
         running = [f for f in self._open_sub_by_event.values() if f.running]
         if running:
+            n = len(running)
+            if n > 1:
+                return Activity(position=position, verb=f"running {n} subagents",
+                                model=model,
+                                kind=top_kind, lane_wait=top_lane_wait,
+                                phase=top_phase, plan=top_plan, counter=top_counter)
             f = running[0]
-            verb = f.label if f.label else f"subagent({f.subagent_name})"
+            verb = f.label or _subagent_verb(f.subagent_name) or f"subagent({f.subagent_name})"
             nested = f.nested.current_activity()
             detail = nested.detail if nested is not None else None
-            extra = len(running) - 1
-            if extra:
-                noun = "subagent" if extra == 1 else "subagents"
-                detail = _join(detail, f"+{extra} {noun}")
             if nested is not None and nested.countdown_total is not None:
                 return Activity(position=position, verb=nested.verb,
                                 detail=detail, model=model,
-                                countdown_total=nested.countdown_total)
-            return Activity(position=position, verb=verb, detail=detail, model=model)
+                                countdown_total=nested.countdown_total,
+                                kind=top_kind, lane_wait=top_lane_wait,
+                                phase=top_phase, plan=top_plan, counter=top_counter)
+            return Activity(position=position, verb=verb, detail=detail, model=model,
+                            kind=top_kind, lane_wait=top_lane_wait,
+                            phase=top_phase, plan=top_plan, counter=top_counter)
 
         detail = None
         burst = self._current_burst
@@ -594,9 +635,13 @@ class NarrativeBuilder:
         if top is not None:
             if top.kind in CHROME_KINDS:
                 return Activity(position=position, verb=static_verb or top.command,
-                                detail=detail, model=model)
+                                detail=detail, model=model,
+                                kind=top_kind, lane_wait=top_lane_wait,
+                                phase=top_phase, plan=top_plan, counter=top_counter)
             return Activity(position=position, verb=static_verb or "thinking",
-                            detail=detail, model=model)
+                            detail=detail, model=model,
+                            kind=top_kind, lane_wait=top_lane_wait,
+                            phase=top_phase, plan=top_plan, counter=top_counter)
         # No step on this builder. A dispatched subagent's nested builder reaches
         # here — carry the in-flight tool tail so the PARENT can read `nested.detail`
         # and concatenate it onto the subagent's verb.
@@ -682,7 +727,9 @@ class NarrativeBuilder:
 
         # 0. token accumulation — before sub routing (F2) so subagent events fold
         #    into the change total. The context-bar value (_latest_prompt_tokens)
-        #    tracks the TOP-LEVEL agent only; a sub:-prefixed turn never moves it.
+        #    tracks THIS builder's own agent: the top level (own_agent_id None) records
+        #    its non-sub: turns; a nested builder records the turns of the subagent it
+        #    represents (agent_id == own_agent_id). A registered child's turn never moves it.
         if etype == "llm_response":
             usage = payload.get("usage")
             # claude_code's coalesced usage is streaming-partial; its authoritative
@@ -694,7 +741,7 @@ class NarrativeBuilder:
             # pt==0 is an all-zero "empty reply" (e.g. freshly-resumed
             # claude_code) — no gauge signal, hold last good values. pt is None
             # (usage absent) is distinct: context_pct/window may still update.
-            if pt != 0 and not is_subagent:
+            if pt != 0 and (not is_subagent or agent_id == self._own_agent_id):
                 if pt is not None:
                     self._latest_prompt_tokens = pt
                 cpct = payload.get("context_pct")
@@ -917,6 +964,7 @@ def _h_lane_waiting(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, 
             step.lane_waiting_node = node
     if step is not None:
         step.live_label = text
+        step.lane_wait = True
 
 
 NarrativeBuilder._HANDLERS["lane_waiting"] = _h_lane_waiting
@@ -926,12 +974,12 @@ def _h_waiting_for_test_lane(
     self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]
 ) -> None:
     self._flush_burst()
-    self._append(LiteralTextNode(text="waiting for a test slot", color_role="lifecycle"))
-    # The step's `started` already fired, so current_activity() reads the step's
-    # "running tests" phrase — wrong while we're blocked on the lane. Override the
-    # live footer verb until test_lane_acquired clears it back.
+    # Lane-waits are live-footer-only: no scrollback node. The step's `started`
+    # already fired, so current_activity() reads its "running tests" phrase —
+    # override the footer verb with "waiting to test" until test_lane_acquired clears it.
     if self._step_stack:
-        self._step_stack[-1].live_label = "waiting for a test slot"
+        self._step_stack[-1].live_label = "waiting to test"
+        self._step_stack[-1].lane_wait = True
 
 
 NarrativeBuilder._HANDLERS["waiting_for_test_lane"] = _h_waiting_for_test_lane
@@ -941,10 +989,17 @@ def _h_test_lane_acquired(
     self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]
 ) -> None:
     self._flush_burst()
-    # Slot in hand — drop the "waiting for a test slot" override so the footer
-    # reverts to the step's phrase ("running tests").
+    # Slot in hand — drop the "waiting to test" override so the footer reverts to the
+    # step's phrase ("running tests"), and store the acquisition time in run_start_ts
+    # (the run clock the breadcrumb reads), leaving start_ts intact so phase_elapsed
+    # still measures the phase's full wall-clock span including the queue wait.
     if self._step_stack:
-        self._step_stack[-1].live_label = None
+        top = self._step_stack[-1]
+        top.live_label = None
+        top.lane_wait = False
+        ts = event.get("timestamp")
+        if ts is not None:
+            top.run_start_ts = ts
 
 
 NarrativeBuilder._HANDLERS["test_lane_acquired"] = _h_test_lane_acquired
@@ -981,6 +1036,7 @@ def _h_lane_acquired(self: NarrativeBuilder, event: dict[str, Any], p: dict[str,
         top = self._step_stack[-1]
         top.live_label = None
         top.lane_waiting_node = None
+        top.lane_wait = False
 
 
 NarrativeBuilder._HANDLERS["lane_acquired"] = _h_lane_acquired
@@ -1039,7 +1095,8 @@ def _h_step_started(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, 
         top = self._step_stack[-1]
         if not top.closed and top.name == name:
             if p.get("resumed"):
-                top.live_label = None
+                if p.get("restarted"):
+                    top.live_label = None
                 top.lane_waiting_node = None
                 top.label = p.get("label")
                 top.resumed = True
@@ -1065,7 +1122,6 @@ def _h_step_started(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, 
             existing.closed = False
             existing.interrupted = False
             existing.label = p.get("label")
-            existing.live_label = None
             existing.lane_waiting_node = None
             existing.resumed = True
             if p.get("restarted"):
@@ -1073,12 +1129,14 @@ def _h_step_started(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, 
                 # interrupted partial, so wipe it, restamp the clock, and reset
                 # the re-run-only fields. Interactivity is re-sourced from the
                 # event stream (a re-emitted awaiting_user_input re-arms it).
+                existing.live_label = None
                 existing.children.clear()
                 existing.kind = kind
                 existing.model = p.get("model")
                 existing.provider = p.get("provider")
                 existing.interactive = False
                 existing.start_ts = event.get("timestamp")
+                existing.run_start_ts = None
                 existing.agent_output = None
                 existing.command = p.get("command")
                 existing.show_label = bool(p.get("show_label", True))
@@ -1140,7 +1198,7 @@ def _h_step_completed(self: NarrativeBuilder, event: dict[str, Any], p: dict[str
         # RENDERED outcome is subsumed by the merged breadcrumb (issue 3).
         node.outcome = OutcomeLine(action=action)
         node.end_ts = event.get("timestamp")
-        elapsed = elapsed_seconds(node.start_ts, event.get("timestamp"))
+        elapsed = elapsed_seconds(node.run_start_ts or node.start_ts, event.get("timestamp"))
         breadcrumb = BreadcrumbLine(
             step_name=node.name, kind=node.kind, elapsed_s=elapsed, action=action,
             extras=_breadcrumb_extras(node.agent_output),
@@ -1374,6 +1432,12 @@ def _draw_status_phrase() -> str:
     # Lazy import keeps `import narrative` free of agent-package weight (design D3).
     from imp.agents.random_status import random_status_phrase
     return random_status_phrase()
+
+
+def _subagent_verb(role: str) -> str | None:
+    # Lazy import keeps `import narrative` free of agent-package weight (design D3).
+    from imp.agents.subagent_verbs import subagent_verb
+    return subagent_verb(role)
 
 
 def _rotate_status_phrase(self: NarrativeBuilder) -> None:
@@ -1941,7 +2005,8 @@ def _open_subagent_fold(self: NarrativeBuilder, event: dict[str, Any], p: dict[s
     inp = p.get("input") or {}
     fold = SubagentFold(
         subagent_name=str(inp.get("subagent_name", "?")),
-        event_id=event_id, block_id=block_id, nested=NarrativeBuilder(),
+        event_id=event_id, block_id=block_id,
+        nested=NarrativeBuilder(own_agent_id=f"sub:{event_id}"),
         opener_agent_id=agent_id if isinstance(agent_id, str) else None,
         start_ts=event.get("timestamp"),
         awaits_result=p.get("id_ns") == "block",

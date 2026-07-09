@@ -6,6 +6,7 @@ import io
 import json
 
 from imp.cli import narrative as nv
+from imp.cli import palette as pal
 from imp.cli.live_driver import LiveDriver
 from imp.cli.live_status import LiveStatus
 from imp.cli.render_text import render_tree
@@ -698,9 +699,9 @@ def test_tty_chrome_steps_no_committed_status_no_double_blanks(monkeypatch) -> N
     rows = [ln.rstrip() for ln in screen.display]
     # The transient spinner line never gets committed to scroll-back.
     assert not any("working" in r for r in rows), f"committed status line: {rows}"
-    # Each chrome step now prints both a header and a `complete` breadcrumb (§4).
-    assert sum("spec-verify-commit" in r for r in rows) == 2
-    assert sum("fast-path-gate" in r for r in rows) == 2
+    # Each body-less chrome step now collapses to a single `<label> · complete` row.
+    assert sum("spec-verify-commit" in r for r in rows) == 1
+    assert sum("fast-path-gate" in r for r in rows) == 1
     # No two blank content rows in a row (trailing screen padding excluded).
     content = rows[:max(i for i, r in enumerate(rows) if r.strip()) + 1]
     assert not any(not content[i].strip() and not content[i + 1].strip()
@@ -805,7 +806,7 @@ def test_prose_does_not_restart_span_while_a_subagent_runs() -> None:
     assert calls == ["restart"]                                          # only step_started
 
 
-def test_chrome_step_header_streams_live_and_matches_log() -> None:
+def test_chrome_step_collapses_live_and_matches_log() -> None:
     drv, out = _driver()
     events = [
         ev("2", "step_started", step="gate", kind="script", phase="verify"),
@@ -816,9 +817,9 @@ def test_chrome_step_header_streams_live_and_matches_log() -> None:
         drv.on_event(e)
     drv.finish()
     body = _body(out)
-    assert any("gate" in ln and "complete" not in ln for ln in body)   # start header
-    assert any("gate · complete" in ln for ln in body)                  # breadcrumb
-    assert body == _render_body(events)                                 # live == imp log
+    gate_hits = [ln for ln in body if "gate" in ln]
+    assert gate_hits == ["gate · complete"]            # one collapsed line
+    assert body == _render_body(events)                # live == imp log
 
 
 def test_prepare_for_prompt_flushes_separator_with_indent_bytes() -> None:
@@ -1965,7 +1966,8 @@ def test_mid_step_position_change_re_emits_a_header() -> None:
     drv.on_event(ev("3", "step_label_updated", agent_id="step:code/task-lead",
                      label="task 2/2"))
     body = "\n".join(_body(out))
-    assert "implementation phase · plan 1/1 · task 2/2" in body
+    assert "task 2/2" in body                          # new position re-emitted
+    assert "implementation phase" not in body          # phase rides the rule, not the header
 
 
 def test_unchanged_position_push_emits_no_duplicate_header() -> None:
@@ -2258,3 +2260,178 @@ def test_prose_reflows_to_live_width_between_emissions() -> None:
     assert max(len(ln) for ln in first_lines) > 24, first_lines
     assert len(second_lines) >= 4, body            # reflowed, not one wide line
     assert max(len(ln) for ln in second_lines) <= 24, second_lines
+
+
+# --------------------------------------------------------------------------- #
+# compose_position_row                                                        #
+# --------------------------------------------------------------------------- #
+
+
+def _pos_activity(**kw):
+    base = dict(phase="implementation phase", plan="plan 1/1", counter="task 1/3",
+                model="m", kind="agent")
+    base.update(kw)
+    return nv.Activity(**base)
+
+
+def test_compose_position_row_flushes_identity_right() -> None:
+    from imp.cli.live_driver import compose_position_row
+    row = compose_position_row(activity=_pos_activity(), change_id="z9gixx",
+                               title="streaming footer", prompt_tokens=None,
+                               color=False, width=80)
+    assert "implementation phase · plan 1/1 · task 1/3 · m" in row
+    assert "z9gixx" in row and "streaming footer" in row
+    assert row.index("z9gixx") > row.index("implementation phase")
+
+
+def test_compose_position_row_context_bar_only_for_agent_kind() -> None:
+    from imp.cli.live_driver import compose_position_row
+    agent = compose_position_row(activity=_pos_activity(kind="agent"), change_id="z",
+                                 title="t", prompt_tokens=None, color=False, width=80,
+                                 context_pct=42.0)
+    script = compose_position_row(activity=_pos_activity(kind="script"), change_id="z",
+                                  title="t", prompt_tokens=None, color=False, width=80,
+                                  context_pct=42.0)
+    assert "42%" in agent
+    assert "%" not in script
+    assert "implementation phase" in script
+
+
+def test_compose_position_row_context_bar_absent_during_lane_wait() -> None:
+    from imp.cli.live_driver import compose_position_row
+    row = compose_position_row(activity=_pos_activity(kind="agent", lane_wait=True),
+                               change_id="z", title="t", prompt_tokens=None,
+                               color=False, width=80, context_pct=42.0)
+    assert "%" not in row
+    assert "implementation phase" in row
+
+
+def test_compose_position_row_narrow_truncates_title_before_dropping_id() -> None:
+    from imp.cli.live_driver import compose_position_row
+    row = compose_position_row(
+        activity=nv.Activity(phase="p", kind="agent"), change_id="z9gixx",
+        title="a very long streaming footer title", prompt_tokens=None,
+        color=False, width=25)
+    assert "z9gixx" in row
+    assert "…" in row
+    assert "a very long streaming footer title" not in row
+    assert row.startswith("p")
+
+
+def test_compose_position_row_narrow_drops_right_group_before_clipping_left() -> None:
+    from imp.cli.live_driver import compose_position_row
+    row = compose_position_row(activity=nv.Activity(phase="p", kind="agent"),
+                               change_id="z9gixx", title="t", prompt_tokens=None,
+                               color=False, width=8)
+    assert "z9gixx" not in row
+    assert row.startswith("p")
+
+
+def test_compose_position_row_colors_match_the_scrollback_palette() -> None:
+    from imp.cli.live_driver import compose_position_row
+    try:
+        pal.set_theme("ansi")
+        row = compose_position_row(
+            activity=_pos_activity(phase="planning phase", plan="plan 3/6",
+                                   counter="task 2/3", model="m", kind="agent"),
+            change_id="z9gixx", title="t", prompt_tokens=None, color=True,
+            width=120, context_pct=42.0)
+    finally:
+        pal.set_theme("ansi")
+    parts = row.split(" · ")
+    assert "\x1b[33m" in parts[0] and "\x1b[34m" not in parts[0]  # phase: gold, not blue
+    assert "\x1b[34m" in parts[1]                                   # plan: step-blue
+    assert "\x1b[34m" in parts[2]                                   # counter: step-blue
+    assert "\x1b[90m" in parts[3] and "\x1b[34m" not in parts[3]  # model: gray, not blue
+    assert "\x1b[33m" in parts[4]                                   # id (z9gixx): gold
+
+
+def _sub_builder(*subs, readings=(), start_ts=None):
+    """A builder with an agent step and one running sub_agent fold per (event_id, name)."""
+    b = nv.NarrativeBuilder()
+    b.add(ev("1", "change_created", change_id=1, title="x"))
+    b.add(ev("2", "step_started", step="s", kind="agent", phase="p",
+             model="m", provider="anthropic"))
+    for eid, name in subs:
+        b.add(ev(eid, "tool_call", agent_id="step:p/s", id=f"blk-{eid}",
+                 name="sub_agent", input={"subagent_name": name},
+                 timestamp=start_ts))
+    for r in readings:
+        b.add(r)
+    return b
+
+
+def test_compose_subagent_rows_one_per_running_subagent() -> None:
+    from imp.cli.live_driver import compose_subagent_rows
+    b = _sub_builder(("t1", "coder"), ("t2", "explorer"))
+    rows = compose_subagent_rows(b, color=False, now_iso="2026-01-01T00:00:00+00:00")
+    assert len(rows) == 2
+    assert any("coder" in r and "writing code" in r for r in rows)   # role + role verb
+    assert any("explorer" in r and "exploring" in r for r in rows)
+
+
+def test_compose_subagent_rows_number_colliding_roles() -> None:
+    from imp.cli.live_driver import compose_subagent_rows
+    b = _sub_builder(("t1", "explorer"), ("t2", "explorer"))
+    rows = compose_subagent_rows(b, color=False, now_iso="2026-01-01T00:00:00+00:00")
+    joined = "\n".join(rows)
+    assert "explorer 1" in joined and "explorer 2" in joined
+
+
+def test_compose_subagent_rows_carry_own_context_and_elapsed() -> None:
+    from imp.cli.live_driver import compose_subagent_rows
+    reading = ev("r1", "llm_response", agent_id="sub:t1", provider="anthropic", model="m",
+                 stop_reason="end_turn",
+                 usage={"input_tokens": 60000, "output_tokens": 5,
+                        "cache_read_input_tokens": 20000, "cache_creation_input_tokens": 0},
+                 context_pct=42.0, context_window=200_000)
+    b = _sub_builder(("t1", "coder"), readings=[reading],
+                     start_ts="2026-01-01T00:00:00+00:00")
+    rows = compose_subagent_rows(b, color=False, now_iso="2026-01-01T00:00:05+00:00")
+    assert len(rows) == 1
+    assert "42%" in rows[0]     # the subagent's OWN context gauge (Part 2)
+    assert "5s" in rows[0]      # its own elapsed (start_ts .. now_iso)
+
+
+def test_compose_subagent_rows_empty_when_none_running() -> None:
+    from imp.cli.live_driver import compose_subagent_rows
+    b = _sub_builder()
+    assert compose_subagent_rows(b, color=False, now_iso="2026-01-01T00:00:00+00:00") == []
+
+
+def test_compose_status_appends_a_row_per_running_subagent() -> None:
+    drv, _ = _driver()
+    drv.on_event(ev("1", "change_created", change_id=1, title="t"))
+    drv.on_event(ev("2", "step_started", step="s", kind="agent", phase="p",
+                     model="m", provider="anthropic", label="writing spec",
+                     phase_label="design phase"))
+    drv.on_event(ev("3", "tool_call", agent_id="step:p/s", id="b1", name="sub_agent",
+                     input={"subagent_name": "coder"}))
+    block = drv.compose_status(0, 5.0)
+    assert isinstance(block, list) and len(block) == 4   # row1, blank, row3, + one subagent row
+    assert "coder" in block[3] and "writing code" in block[3]
+
+
+def test_test_lane_wait_and_acquire_each_restart_the_status_span() -> None:
+    """C1: the test-lane queue wait is excluded from the step. restart_span() fires at
+    queue entry (fresh wait clock) AND at slot acquisition (fresh run clock), on top of
+    the step_started reset — mirroring the agent_retry span-reset."""
+    calls: list[str] = []
+
+    class _CountingStatus(LiveStatus):
+        def restart_span(self) -> None:
+            calls.append("restart")
+            super().restart_span()
+
+    out = _Pipe()
+    status = _CountingStatus(out)
+    drv = LiveDriver(stream=out, color=False, width=80, status=status)
+    for e in [
+        ev("1", "change_created", change_id=1, title="x"),
+        ev("2", "step_started", step="integration-tests", kind="script",
+           phase="integration", label="running tests"),          # restart (step clock)
+        ev("3", "waiting_for_test_lane", step="integration-tests"),  # restart (wait clock)
+        ev("4", "test_lane_acquired", step="integration-tests"),     # restart (run clock)
+    ]:
+        drv.on_event(e)
+    assert calls == ["restart", "restart", "restart"]

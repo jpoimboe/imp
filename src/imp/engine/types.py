@@ -193,6 +193,7 @@ class Step:
     interruptible: bool = False  # script-only: gate is safe to kill mid-run on interrupt
     clean_tree: bool = True  # agent-only: bounce the step if the worktree is left dirty
     interactive: bool = False  # agent-only
+    rotate_phrase: bool | None = None  # agent-only tri-state; None inherits interactive
 
 
 @dataclass(frozen=True, slots=True)

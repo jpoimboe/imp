@@ -24,7 +24,6 @@ from typing import TYPE_CHECKING, Any
 
 import jinja2
 
-from imp.agents.random_status import STATUS_PHRASE_LABEL, random_status_phrase
 from imp.engine.state import EventLog, State
 
 if TYPE_CHECKING:
@@ -163,15 +162,12 @@ def render_label(
     label: str | None, change: Change | None, log: EventLog | None,
     state: State | None = None,
 ) -> str | None:
-    if label == STATUS_PHRASE_LABEL:
-        return random_status_phrase()
     if label is None or "{{" not in label:
         return label
     if change is None or log is None:
         # No change/log context (the State.step_label seed path): render with no
         # template context. A label that needs vars/change raises UndefinedError
-        # under StrictUndefined and falls back to the raw template text. (The
-        # "<random>" sentinel is resolved above, before this template path.)
+        # under StrictUndefined and falls back to the raw template text.
         try:
             return _env_for(None).from_string(label).render()
         except jinja2.exceptions.TemplateError:

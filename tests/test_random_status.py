@@ -1,11 +1,7 @@
 from __future__ import annotations
 
 from imp.agents import prompts
-from imp.agents.random_status import (
-    RANDOM_STATUS_PHRASES,
-    STATUS_PHRASE_LABEL,
-    random_status_phrase,
-)
+from imp.agents.random_status import RANDOM_STATUS_PHRASES, random_status_phrase
 
 
 def test_pool_is_108_unique_in_character_phrases() -> None:
@@ -30,18 +26,5 @@ def test_render_label_without_context_leaves_var_templates_raw() -> None:
     assert prompts.render_label(raw, change=None, log=None) == raw
 
 
-def test_sentinel_label_resolves_to_a_pool_member_without_context() -> None:
-    out = prompts.render_label(STATUS_PHRASE_LABEL, change=None, log=None)
-    assert out in RANDOM_STATUS_PHRASES
-
-
-def test_sentinel_label_resolution_is_a_fresh_draw_each_call() -> None:
-    draws = {prompts.render_label(STATUS_PHRASE_LABEL, change=None, log=None)
-             for _ in range(300)}
-    assert len(draws) > 1
-    assert draws <= set(RANDOM_STATUS_PHRASES)
-    assert STATUS_PHRASE_LABEL not in draws          # never echoes the sentinel
-
-
-def test_plain_label_is_unaffected_by_the_sentinel_branch() -> None:
+def test_plain_label_passes_through_unchanged() -> None:
     assert prompts.render_label("implementing", change=None, log=None) == "implementing"

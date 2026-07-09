@@ -308,7 +308,7 @@ def test_show_live_default_renders_card(
     assert "new" in out
 
 
-def test_show_step_line_prints_raw_step_name_not_label(
+def test_show_step_line_prints_human_labels_not_raw_slugs(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -316,11 +316,132 @@ def test_show_step_line_prints_raw_step_name_not_label(
     ch = Change.create(tmp_path, title="Feat", change_id="shwstp", base_branch="main")
     st = State.load(ch.state_dir)
     st.step = "write_spec"
-    st.step_label = "writing spec"  # label differs from the raw name
+    st.step_label = "writing spec"  # label differs from the raw slug
     st.save(ch.state_dir)
+    with ch.events_path.open("a", encoding="utf-8") as fh:
+        fh.write(
+            json.dumps(
+                {
+                    "type": "step_started",
+                    "agent_id": None,
+                    "payload": {
+                        "step": "write_spec",
+                        "phase": "spec",
+                        "phase_label": "spec phase",
+                    },
+                }
+            )
+            + "\n"
+        )
     out = _run(monkeypatch, tmp_path, "show", "shwstp")
-    assert "write_spec" in out  # imp show prints the RAW step name
-    assert "writing spec" not in out  # never the label
+    assert "spec phase · writing spec" in out  # <phase label> · <step label>
+    assert "write_spec" not in out  # never the raw step slug
+
+
+def test_show_step_line_omits_phase_when_no_phase_label(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # No step_started event carries a phase_label -> show the step label alone,
+    # with no raw phase slug and no leading separator.
+    _seed_control(tmp_path)
+    ch = Change.create(tmp_path, title="Feat", change_id="shwnop", base_branch="main")
+    st = State.load(ch.state_dir)
+    st.step = "write_spec"
+    st.step_label = "writing spec"
+    st.save(ch.state_dir)
+    out = _run(monkeypatch, tmp_path, "show", "shwnop")
+    step_line = next(ln for ln in out.splitlines() if ln.startswith("step:"))
+    assert "·" not in step_line  # no phase segment and no leading separator
+    assert step_line.endswith("writing spec")  # step label alone, nothing trailing
+
+
+def test_show_step_line_omits_stale_phase_label_across_phase_change(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # A prior labeled phase then a current UNLABELED phase (its step_started
+    # carries no phase_label): the stale prior label must not bleed forward.
+    _seed_control(tmp_path)
+    ch = Change.create(tmp_path, title="Feat", change_id="shwstl", base_branch="main")
+    st = State.load(ch.state_dir)
+    st.step = "verify"
+    st.step_label = "verifying"
+    st.save(ch.state_dir)
+    with ch.events_path.open("a", encoding="utf-8") as fh:
+        fh.write(
+            json.dumps(
+                {
+                    "type": "step_started",
+                    "agent_id": None,
+                    "payload": {
+                        "step": "write_spec",
+                        "phase": "spec",
+                        "phase_label": "spec phase",
+                    },
+                }
+            )
+            + "\n"
+        )
+        fh.write(
+            json.dumps(
+                {
+                    "type": "step_started",
+                    "agent_id": None,
+                    "payload": {"step": "verify", "phase": "verify"},
+                }
+            )
+            + "\n"
+        )
+    out = _run(monkeypatch, tmp_path, "show", "shwstl")
+    step_line = next(ln for ln in out.splitlines() if ln.startswith("step:"))
+    assert "spec phase" not in step_line  # stale prior-phase label must not bleed
+    assert "·" not in step_line  # current phase is unlabeled -> no phase segment
+    assert step_line.endswith("verifying")  # step label alone
+
+
+def test_show_step_line_truncates_to_terminal_width(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _seed_control(tmp_path)
+    ch = Change.create(tmp_path, title="Feat", change_id="shwtrn", base_branch="main")
+    st = State.load(ch.state_dir)
+    st.step = "write_spec"
+    st.step_label = "writing spec " + "x" * 200  # far wider than the 80-col test terminal
+    st.save(ch.state_dir)
+    out = _run(monkeypatch, tmp_path, "show", "shwtrn")
+    step_line = next(ln for ln in out.splitlines() if ln.startswith("step:"))
+    assert len(step_line) <= 80  # clipped to the (test) 80-col terminal width
+    assert step_line.endswith("…")
+
+
+def test_show_status_stays_bare_word_not_labels(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # `imp show <id> status` is the parseable form: bare status word only.
+    _seed_control(tmp_path)
+    ch = Change.create(tmp_path, title="Feat", change_id="shwsta", base_branch="main")
+    st = State.load(ch.state_dir)
+    st.step = "write_spec"
+    st.step_label = "writing spec"
+    st.save(ch.state_dir)
+    out = _run(monkeypatch, tmp_path, "show", "shwsta", "status").strip()
+    assert out == "new"
+    assert "·" not in out
+    assert "writing spec" not in out
+
+
+def test_latest_phase_label_returns_last_step_started_label() -> None:
+    from imp.cli.main import _latest_phase_label
+
+    events = [
+        {"type": "step_started", "payload": {"phase_label": "spec phase"}},
+        {"type": "user_message", "payload": {}},
+        {"type": "step_started", "payload": {"phase_label": "planning phase · plan 2/6"}},
+    ]
+    assert _latest_phase_label(events) == "planning phase · plan 2/6"
 
 
 def test_show_spec_and_plan_from_wip_ref_when_home_absent(

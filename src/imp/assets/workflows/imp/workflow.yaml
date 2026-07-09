@@ -43,7 +43,7 @@ phases:
       - name: threshold
         file: agents/threshold.md
         tier: high
-        label: "<random>"
+        label: "scoping the change"
         interactive: true
         rules:
           - {if: {ceremony: express}, set: {fast_path: true}, goto: plan-writer, label: "writing plan", feedback: "Plan this from the spec drafted with the user:"}
@@ -146,6 +146,7 @@ phases:
         file: agents/task-lead.md
         tier: high
         label: "task 1/{{ vars.task_total }}"
+        rotate_phrase: true
         rules:
           - {if: {verify_tolerated: true}, goto: check-next-plan}
           - {else: true, continue: true}

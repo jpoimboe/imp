@@ -26,6 +26,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Any
 
 from imp.cli import narrative as nv
@@ -122,6 +123,95 @@ def compose_position_bar(*, activity: nv.Activity, change_id: str | None,
         if body_dw < target:
             body = body + " " * (target - body_dw)
     return f"{bg}{body}{_RESET}" if bg else body
+
+
+def _fit_right(id_seg: str | None, title: str | None, avail: int) -> str | None:
+    """Widest identity group fitting `avail` columns; degrades title-first, else None."""
+    if not id_seg or avail < 1:
+        return None
+    id_w = pal.display_width(id_seg)
+    if id_w > avail:
+        return None
+    if title:
+        full = f"{id_seg} · {title}"
+        if pal.display_width(full) <= avail:
+            return full
+        budget = avail - id_w - 3          # width of the " · " separator
+        if budget >= 1:
+            return f"{id_seg} · {pal.clip_display(title, budget)}"
+    return id_seg
+
+
+def _split_pad(left: str, id_seg: str | None, title: str | None, *, width: int) -> str:
+    """Compose `left` with a flush-right identity group, degrading right-first."""
+    target = width - 2                     # largest width clip_display(_, width-1) keeps intact
+    left_w = pal.display_width(left)
+    avail = target - left_w - 1            # at least one space between the two groups
+    right = _fit_right(id_seg, title, avail)
+    if not right:
+        return left
+    gap = max(1, target - left_w - pal.display_width(right))
+    return f"{left}{' ' * gap}{right}"
+
+
+def compose_position_row(*, activity: nv.Activity, change_id: str | None,
+                         title: str, prompt_tokens: int | None, color: bool,
+                         width: int, context_pct: float | None = None,
+                         checkpoint_threshold: float | int | None = None) -> str:
+    """Row 3 of the live footer: structural position (left) + id·title identity (right)."""
+    bg = pal.user_bg_open(enabled=color)
+    over = bool(bg)
+    phase_seg = (_paint(activity.phase, "wordmark", color=color, over_bg=over)
+                 if activity.phase else None)
+    plan_seg = (_paint(activity.plan, *pal.NODE_COLORS["step"], color=color, over_bg=over)
+                if activity.plan else None)
+    counter_seg = (_paint(activity.counter, *pal.NODE_COLORS["step"], color=color, over_bg=over)
+                   if activity.counter else None)
+    model_seg = (_paint(activity.model, "gray", color=color, over_bg=over)
+                 if activity.model else None)
+    bar = None
+    if activity.kind == "agent" and not activity.lane_wait:
+        bar = context_bar(activity.model, prompt_tokens, context_pct=context_pct,
+                          checkpoint_threshold=checkpoint_threshold,
+                          color=color, over_bg=over)
+    left = rt.compose_label([phase_seg, plan_seg, counter_seg, model_seg, bar])
+    id_seg = _paint(change_id, "wordmark", color=color, over_bg=over) if change_id else None
+    body = _split_pad(left, id_seg, title or None, width=width)
+    return f"{bg}{body}{_RESET}" if bg else body
+
+
+def compose_subagent_rows(builder: nv.NarrativeBuilder, *, color: bool,
+                          now_iso: str) -> list[str]:
+    """One indented row per running subagent (B4/AC5); colliding roles numbered."""
+    from imp.agents.subagent_verbs import subagent_verb
+    folds = builder.running_subagents()
+    if not folds:
+        return []
+    counts: dict[str, int] = {}
+    for f in folds:
+        counts[f.subagent_name] = counts.get(f.subagent_name, 0) + 1
+    seen: dict[str, int] = {}
+    rows: list[str] = []
+    for f in folds:
+        name = f.subagent_name
+        if counts[name] > 1:
+            seen[name] = seen.get(name, 0) + 1
+            role = f"{name} {seen[name]}"
+        else:
+            role = name
+        role_seg = _paint(role, *pal.NODE_COLORS["subagent"], color=color, over_bg=False)
+        verb = f.label or subagent_verb(name) or f"subagent({name})"
+        verb_seg = _paint(verb, "wordmark", color=color, over_bg=False)
+        model = rt.subagent_model(f)
+        model_seg = _paint(model, "gray", color=color, over_bg=False) if model else None
+        bar = context_bar(model, f.nested.latest_prompt_tokens,
+                          context_pct=f.nested.latest_context_pct,
+                          color=color, over_bg=False)
+        secs = nv.elapsed_seconds(f.start_ts, now_iso)
+        el = rt.fmt_seconds(secs) if secs is not None else None
+        el_seg = _paint(el, "dim", color=color, over_bg=False) if el else None
+        rows.append("  " + rt.compose_label([role_seg, verb_seg, model_seg, bar, el_seg]))
+    return rows
 
 
 def compose_activity_status(
@@ -238,6 +328,13 @@ class LiveDriver:
                 if (isinstance(payload, dict) and nv.llm_response_has_prose(payload)
                         and not self._builder.has_running_subagent):
                     self._status.restart_span()
+            elif etype in ("waiting_for_test_lane", "test_lane_acquired"):
+                # C1: exclude the test-lane queue wait from the step clock. Zero the
+                # span at queue entry so the footer's `waiting to test · <t>` counts its
+                # own wait, and again at slot acquisition so `running tests · <t>`
+                # measures pure run time. Reuses the same restart_span() the rate-limit
+                # (agent_retry) wait uses.
+                self._status.restart_span()
             elif etype == "agent_retry":
                 # Zero the span at wait entry so compose_activity_line's countdown
                 # (countdown_total - elapsed) measures time-since-wait-start. Mirror
@@ -269,12 +366,17 @@ class LiveDriver:
         a_line = compose_activity_line(activity=activity, elapsed=elapsed,
                                        frame=frame, color=self._color)
         root = self._builder.tree.root
-        p_bar = compose_position_bar(
+        p_row = compose_position_row(
             activity=activity, change_id=root.id, title=root.title,
             prompt_tokens=self._builder.latest_prompt_tokens,
             color=self._color, width=term_width(),
-            context_pct=self._builder.latest_context_pct)
-        return [a_line, "", p_bar]
+            context_pct=self._builder.latest_context_pct,
+            checkpoint_threshold=self._builder.latest_checkpoint_threshold)
+        rows = [a_line, "", p_row]
+        rows += compose_subagent_rows(
+            self._builder, color=self._color,
+            now_iso=datetime.now(UTC).isoformat())
+        return rows
 
     def compose_toolbar_static(self) -> str | None:
         # Position bar only — no spinner, no elapsed (AC5).

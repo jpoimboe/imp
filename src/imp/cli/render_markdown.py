@@ -69,7 +69,7 @@ def _tool_call_text(c: nv.ToolCall) -> str:
 
 def _subagent_status_md(sub: nv.SubagentFold) -> str:
     label = sub.subagent_name
-    model = rt._subagent_model(sub)
+    model = rt.subagent_model(sub)
     if model:
         label += f" · {model}"
     if sub.running:

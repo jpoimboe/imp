@@ -289,10 +289,23 @@ def step_no_body(node: nv.StepNode) -> bool:
     return node.kind != "agent" and not node.show_output
 
 
+def step_has_body(node: nv.StepNode) -> bool:
+    """True once the step has recorded any child other than its trailing completion
+    breadcrumb — prose, surfaced script output, a lane-wait node, an error, a
+    subagent fold, a tool burst. A step whose only child is a breadcrumb (or which
+    has no children) has emitted no body."""
+    return any(not isinstance(c, nv.BreadcrumbLine) for c in node.children)
+
+
 def deferred_leaf(node: nv.StepNode) -> bool:
-    """A hidden-frame, no-body step renders as a single deferred leaf: silent on a
-    linear outcome, its frame revealed only on a non-linear one."""
-    return step_hidden(node) and step_no_body(node)
+    """A step the renderers hold as a single atomic leaf (blocked until close, then
+    rendered in one shot by `_render`) rather than a streamed container. Two cases:
+    a HIDDEN chrome step is always a leaf, body-INSENSITIVE (reveal-on-pause parity);
+    a VISIBLE body-capable-of-being-empty step is held until it gains a body or
+    completes empty (then collapses to one line). `step_no_body` is the outer gate,
+    so agents and show_output steps are never held; the live driver calls this
+    unchanged, so it flows through both paths."""
+    return step_no_body(node) and (step_hidden(node) or not step_has_body(node))
 
 
 def frame_suppressed(node: Any) -> bool:
@@ -409,6 +422,30 @@ def phase_breadcrumb_line(node: nv.PhaseNode, *, depth: int, color: bool,
                  *pal.NODE_COLORS["breadcrumb"], gutters=gutters)
 
 
+def _step_header_label(node: nv.StepNode) -> str:
+    """The step's own scrollback label — its position counter (live or static) for
+    a `position_label` step, else its plain label. The raw step name is the loud
+    fallback when a visible step somehow has no label, so the omission is
+    caught and fixed. The phase name is NOT prefixed here: it already rides the
+    phase rule drawn above the step."""
+    step_label = (node.live_label or node.label) if node.position_label else node.label
+    return step_label or node.name
+
+
+def collapsed_step_line(node: nv.StepNode, *, depth: int, color: bool,
+                        gutters: tuple[int, ...] = ()) -> str:
+    """The single line a body-less visible step collapses to on completion:
+    `<label> · complete · <elapsed>` — label in the step color, the
+    ` · complete · <elapsed>` tail in the existing breadcrumb gray."""
+    label = _step_header_label(node)
+    done = fmt_seconds_done(nv.elapsed_seconds(node.run_start_ts or node.start_ts, node.end_ts))
+    tail = " · complete" + (f" · {done}" if done else "")
+    indent = _gutter_indent(depth, gutters, color)
+    return (indent
+            + pal.ansi(label, *pal.NODE_COLORS["step"], enabled=color)
+            + pal.ansi(tail, *pal.NODE_COLORS["breadcrumb"], enabled=color))
+
+
 def header_line(node: Any, *, depth: int, color: bool,
                 gutters: tuple[int, ...] = ()) -> str:
     """The single header line for a container node (PhaseNode / StepNode /
@@ -424,24 +461,25 @@ def header_line(node: Any, *, depth: int, color: bool,
     if isinstance(node, nv.SubagentFold):
         return _line(f"· {node.subagent_name}", depth, color,
                      *pal.NODE_COLORS["subagent"], gutters=gutters)
-    step_position = (node.live_label or node.label) if node.position_label else None
-    label = compose_label([node.phase_label, step_position]) or node.name
+    label = _step_header_label(node)
     route = (pal.ansi(f" · {node.route_label}", *pal.NODE_COLORS["lifecycle"],
                       enabled=color)
              if node.route_label else "")
     if not node.resumed:
-        text = f"{label} · {node.model}" if node.model else label
-        return _line(text, depth, color, *pal.NODE_COLORS["step"],
-                     gutters=gutters) + route
+        head = pal.ansi(label, *pal.NODE_COLORS["step"], enabled=color)
+        if node.model:
+            # Gray to match the footer's model segment.
+            head += pal.ansi(f" · {node.model}", "gray", enabled=color)
+        return _gutter_indent(depth, gutters, color) + head + route
     indent = _gutter_indent(depth, gutters, color)
     parts = [pal.ansi(label, *pal.NODE_COLORS["step"], enabled=color),
              pal.ansi(" (resume)", "gray", enabled=color)]
     if node.model:
-        parts.append(pal.ansi(f" · {node.model}", *pal.NODE_COLORS["step"], enabled=color))
+        parts.append(pal.ansi(f" · {node.model}", "gray", enabled=color))
     return indent + "".join(parts) + route
 
 
-def _subagent_model(sub: nv.SubagentFold) -> str | None:
+def subagent_model(sub: nv.SubagentFold) -> str | None:
     """The subagent's model, dug out of its nested narrative (its step_context /
     step carries provider+model). Returns the first model found, or None."""
     def find(nodes: list[Any]) -> str | None:
@@ -471,26 +509,27 @@ def subagent_status_row(sub: nv.SubagentFold, *, depth: int, color: bool,
     abnormal terminal state (running-at-pause, failed, stalled, interrupted, context exhausted)
     appends a plain `(state)` tag so a subagent that didn't cleanly finish still
     stands out."""
-    label = f"  {sub.subagent_name}"
-    model = _subagent_model(sub)
+    sub_c = pal.NODE_COLORS["subagent"]
+    parts = [pal.ansi(f"  {sub.subagent_name}", *sub_c, enabled=color)]
+    model = subagent_model(sub)
     if model:
-        # Show the subagent's model on the row, the same way a step header does.
-        label += f" · {model}"
+        # Gray, like the step header's model.
+        parts.append(pal.ansi(f" · {model}", "gray", enabled=color))
     if sub.running:
-        label += " (running)"
+        parts.append(pal.ansi(" (running)", *sub_c, enabled=color))
     elif sub.terminal_state == "stalled":
-        label += " (stalled)"
+        parts.append(pal.ansi(" (stalled)", *sub_c, enabled=color))
     elif sub.terminal_state == "interrupted":
-        label += " (interrupted)"
+        parts.append(pal.ansi(" (interrupted)", *sub_c, enabled=color))
     elif sub.terminal_state == "context_exhausted":
-        label += " (context exhausted)"
+        parts.append(pal.ansi(" (context exhausted)", *sub_c, enabled=color))
     elif sub.is_error:
-        label += " (failed)"
+        parts.append(pal.ansi(" (failed)", *sub_c, enabled=color))
     elapsed = nv.elapsed_seconds(sub.start_ts, sub.end_ts)
     done = "" if sub.running else fmt_seconds_done(elapsed)
     if done:
-        label += f" · {done}"
-    return _line(label, depth, color, *pal.NODE_COLORS["subagent"], gutters=gutters)
+        parts.append(pal.ansi(f" · {done}", "gray", enabled=color))
+    return _gutter_indent(depth, gutters, color) + "".join(parts)
 
 
 def subagent_outcome_lines(sub: nv.SubagentFold, *, depth: int, color: bool,
@@ -558,7 +597,15 @@ def _render(node: Any, *, depth: int, full: bool, color: bool,
 
     if isinstance(node, nv.StepNode):
         if deferred_leaf(node) and quiet_step_is_silent(node):
-            return
+            if step_hidden(node):
+                return                       # hidden chrome: silent on a linear outcome
+            if node.closed:
+                yield collapsed_step_line(node, depth=depth, color=color,
+                                          gutters=gutters)
+                return
+            # A visible body-less step still open at render time (a force-flush at
+            # run end, or a truncated log) falls through to render just its header —
+            # an in-flight step must not be labelled "complete".
         # A suppressed-frame step that yielded to a non-linear outcome (a pause/error) falls
         # through here and renders its full block, just like a loud step.
         # A step's content flows at the step's OWN indent (no +1): the header is a
@@ -700,7 +747,7 @@ def _render(node: Any, *, depth: int, full: bool, color: bool,
         if done:
             parts.append(done)
         # Route reason rides the next step's header, not a line beneath the completion.
-        yield _line(compose_label([node.phase_label, *parts]), depth, color,
+        yield _line(compose_label(parts), depth, color,
                     *pal.NODE_COLORS["breadcrumb"], gutters=gutters)
         return
 

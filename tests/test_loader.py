@@ -1980,3 +1980,58 @@ def test_glyph_non_string_is_load_error(tmp_path: Path) -> None:
         """)
     with pytest.raises(LoadError, match="glyph"):
         load_workflow(wf)
+
+
+def test_rotate_phrase_true_parses_on_agent_step(tmp_path: Path) -> None:
+    wf = _write(tmp_path, """\
+        name: t
+        description: t
+        phases:
+          - name: p
+            steps:
+              - {name: s, file: agents/spec-writer.md, rotate_phrase: true}
+        """, agents={"spec-writer": _WRITER})
+    by = {s.name: s for s in load_workflow(wf).flat_steps()}
+    assert by["s"].rotate_phrase is True
+
+
+def test_rotate_phrase_false_parses_on_agent_step(tmp_path: Path) -> None:
+    wf = _write(tmp_path, """\
+        name: t
+        description: t
+        phases:
+          - name: p
+            steps:
+              - {name: s, file: agents/spec-writer.md, rotate_phrase: false}
+        """, agents={"spec-writer": _WRITER})
+    by = {s.name: s for s in load_workflow(wf).flat_steps()}
+    assert by["s"].rotate_phrase is False
+
+
+def test_rotate_phrase_unset_defaults_to_none(tmp_path: Path) -> None:
+    wf = _write(tmp_path, """\
+        name: t
+        description: t
+        phases:
+          - name: p
+            steps:
+              - {name: s, file: agents/spec-writer.md}
+        """, agents={"spec-writer": _WRITER})
+    by = {s.name: s for s in load_workflow(wf).flat_steps()}
+    assert by["s"].rotate_phrase is None
+
+
+def test_rotate_phrase_on_script_step_is_load_error(tmp_path: Path) -> None:
+    wf = _write(tmp_path, """\
+        name: t
+        description: t
+        phases:
+          - name: p
+            steps:
+              - name: s
+                rotate_phrase: true
+                rules:
+                  - {else: true, continue: true}
+        """)
+    with pytest.raises((LoadError, LoadErrors), match="rotate_phrase"):
+        load_workflow(wf)
