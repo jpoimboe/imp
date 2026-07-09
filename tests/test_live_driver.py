@@ -2339,7 +2339,7 @@ def test_compose_position_row_colors_match_the_scrollback_palette() -> None:
     finally:
         pal.set_theme("ansi")
     parts = row.split(" · ")
-    assert "\x1b[33m" in parts[0] and "\x1b[34m" not in parts[0]  # phase: gold, not blue
+    assert "\x1b[34m" in parts[0] and "\x1b[33m" not in parts[0]  # phase: step-blue, not gold
     assert "\x1b[34m" in parts[1]                                   # plan: step-blue
     assert "\x1b[34m" in parts[2]                                   # counter: step-blue
     assert "\x1b[90m" in parts[3] and "\x1b[34m" not in parts[3]  # model: gray, not blue

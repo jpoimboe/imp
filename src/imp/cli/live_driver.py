@@ -161,7 +161,7 @@ def compose_position_row(*, activity: nv.Activity, change_id: str | None,
     """Row 3 of the live footer: structural position (left) + id·title identity (right)."""
     bg = pal.user_bg_open(enabled=color)
     over = bool(bg)
-    phase_seg = (_paint(activity.phase, "wordmark", color=color, over_bg=over)
+    phase_seg = (_paint(activity.phase, *pal.NODE_COLORS["step"], color=color, over_bg=over)
                  if activity.phase else None)
     plan_seg = (_paint(activity.plan, *pal.NODE_COLORS["step"], color=color, over_bg=over)
                 if activity.plan else None)
