@@ -26,6 +26,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Any
 
 from imp.cli import narrative as nv
@@ -179,6 +180,40 @@ def compose_position_row(*, activity: nv.Activity, change_id: str | None,
     return f"{bg}{body}{_RESET}" if bg else body
 
 
+def compose_subagent_rows(builder: nv.NarrativeBuilder, *, color: bool,
+                          now_iso: str) -> list[str]:
+    """One indented row per running subagent (B4/AC5); colliding roles numbered."""
+    from imp.agents.subagent_verbs import subagent_verb
+    folds = builder.running_subagents()
+    if not folds:
+        return []
+    counts: dict[str, int] = {}
+    for f in folds:
+        counts[f.subagent_name] = counts.get(f.subagent_name, 0) + 1
+    seen: dict[str, int] = {}
+    rows: list[str] = []
+    for f in folds:
+        name = f.subagent_name
+        if counts[name] > 1:
+            seen[name] = seen.get(name, 0) + 1
+            role = f"{name} {seen[name]}"
+        else:
+            role = name
+        role_seg = _paint(role, *pal.NODE_COLORS["subagent"], color=color, over_bg=False)
+        verb = f.label or subagent_verb(name) or f"subagent({name})"
+        verb_seg = _paint(verb, "wordmark", color=color, over_bg=False)
+        model = rt.subagent_model(f)
+        model_seg = _paint(model, "gray", color=color, over_bg=False) if model else None
+        bar = context_bar(model, f.nested.latest_prompt_tokens,
+                          context_pct=f.nested.latest_context_pct,
+                          color=color, over_bg=False)
+        secs = nv.elapsed_seconds(f.start_ts, now_iso)
+        el = rt.fmt_seconds(secs) if secs is not None else None
+        el_seg = _paint(el, "dim", color=color, over_bg=False) if el else None
+        rows.append("  " + rt.compose_label([role_seg, verb_seg, model_seg, bar, el_seg]))
+    return rows
+
+
 def compose_activity_status(
     builder: nv.NarrativeBuilder, *, frame: int, elapsed: float, color: bool,
     width: int | None = None,
@@ -330,7 +365,11 @@ class LiveDriver:
             color=self._color, width=term_width(),
             context_pct=self._builder.latest_context_pct,
             checkpoint_threshold=self._builder.latest_checkpoint_threshold)
-        return [a_line, "", p_row]
+        rows = [a_line, "", p_row]
+        rows += compose_subagent_rows(
+            self._builder, color=self._color,
+            now_iso=datetime.now(UTC).isoformat())
+        return rows
 
     def compose_toolbar_static(self) -> str | None:
         # Position bar only — no spinner, no elapsed (AC5).

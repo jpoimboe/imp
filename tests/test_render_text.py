@@ -2591,3 +2591,9 @@ def test_full_subagent_plain_string_success_shown_once() -> None:
     ]
     full = "\n".join(_lines(events, full=True))
     assert full.count("found the auth module") == 1
+
+
+def test_subagent_model_is_public() -> None:
+    import imp.cli.render_text as rt
+    assert callable(rt.subagent_model)
+    assert not hasattr(rt, "_subagent_model")   # the private alias is gone

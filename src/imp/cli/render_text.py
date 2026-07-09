@@ -477,7 +477,7 @@ def header_line(node: Any, *, depth: int, color: bool,
     return indent + "".join(parts) + route
 
 
-def _subagent_model(sub: nv.SubagentFold) -> str | None:
+def subagent_model(sub: nv.SubagentFold) -> str | None:
     """The subagent's model, dug out of its nested narrative (its step_context /
     step carries provider+model). Returns the first model found, or None."""
     def find(nodes: list[Any]) -> str | None:
@@ -508,7 +508,7 @@ def subagent_status_row(sub: nv.SubagentFold, *, depth: int, color: bool,
     appends a plain `(state)` tag so a subagent that didn't cleanly finish still
     stands out."""
     label = f"  {sub.subagent_name}"
-    model = _subagent_model(sub)
+    model = subagent_model(sub)
     if model:
         # Show the subagent's model on the row, the same way a step header does.
         label += f" · {model}"

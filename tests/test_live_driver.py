@@ -2341,3 +2341,69 @@ def test_compose_position_row_colors_match_the_scrollback_palette() -> None:
     assert "\x1b[33m" in row        # phase + id in wordmark gold
     assert "\x1b[34m" in row        # plan + counter in step blue
     assert "\x1b[90m" in row        # model (and bar track) in gray
+
+
+def _sub_builder(*subs, readings=(), start_ts=None):
+    """A builder with an agent step and one running sub_agent fold per (event_id, name)."""
+    b = nv.NarrativeBuilder()
+    b.add(ev("1", "change_created", change_id=1, title="x"))
+    b.add(ev("2", "step_started", step="s", kind="agent", phase="p",
+             model="m", provider="anthropic"))
+    for eid, name in subs:
+        b.add(ev(eid, "tool_call", agent_id="step:p/s", id=f"blk-{eid}",
+                 name="sub_agent", input={"subagent_name": name},
+                 timestamp=start_ts))
+    for r in readings:
+        b.add(r)
+    return b
+
+
+def test_compose_subagent_rows_one_per_running_subagent() -> None:
+    from imp.cli.live_driver import compose_subagent_rows
+    b = _sub_builder(("t1", "coder"), ("t2", "explorer"))
+    rows = compose_subagent_rows(b, color=False, now_iso="2026-01-01T00:00:00+00:00")
+    assert len(rows) == 2
+    assert any("coder" in r and "writing code" in r for r in rows)   # role + role verb
+    assert any("explorer" in r and "exploring" in r for r in rows)
+
+
+def test_compose_subagent_rows_number_colliding_roles() -> None:
+    from imp.cli.live_driver import compose_subagent_rows
+    b = _sub_builder(("t1", "explorer"), ("t2", "explorer"))
+    rows = compose_subagent_rows(b, color=False, now_iso="2026-01-01T00:00:00+00:00")
+    joined = "\n".join(rows)
+    assert "explorer 1" in joined and "explorer 2" in joined
+
+
+def test_compose_subagent_rows_carry_own_context_and_elapsed() -> None:
+    from imp.cli.live_driver import compose_subagent_rows
+    reading = ev("r1", "llm_response", agent_id="sub:t1", provider="anthropic", model="m",
+                 stop_reason="end_turn",
+                 usage={"input_tokens": 60000, "output_tokens": 5,
+                        "cache_read_input_tokens": 20000, "cache_creation_input_tokens": 0},
+                 context_pct=42.0, context_window=200_000)
+    b = _sub_builder(("t1", "coder"), readings=[reading],
+                     start_ts="2026-01-01T00:00:00+00:00")
+    rows = compose_subagent_rows(b, color=False, now_iso="2026-01-01T00:00:05+00:00")
+    assert len(rows) == 1
+    assert "42%" in rows[0]     # the subagent's OWN context gauge (Part 2)
+    assert "5s" in rows[0]      # its own elapsed (start_ts .. now_iso)
+
+
+def test_compose_subagent_rows_empty_when_none_running() -> None:
+    from imp.cli.live_driver import compose_subagent_rows
+    b = _sub_builder()
+    assert compose_subagent_rows(b, color=False, now_iso="2026-01-01T00:00:00+00:00") == []
+
+
+def test_compose_status_appends_a_row_per_running_subagent() -> None:
+    drv, _ = _driver()
+    drv.on_event(ev("1", "change_created", change_id=1, title="t"))
+    drv.on_event(ev("2", "step_started", step="s", kind="agent", phase="p",
+                     model="m", provider="anthropic", label="writing spec",
+                     phase_label="design phase"))
+    drv.on_event(ev("3", "tool_call", agent_id="step:p/s", id="b1", name="sub_agent",
+                     input={"subagent_name": "coder"}))
+    block = drv.compose_status(0, 5.0)
+    assert isinstance(block, list) and len(block) == 4   # row1, blank, row3, + one subagent row
+    assert "coder" in block[3] and "writing code" in block[3]

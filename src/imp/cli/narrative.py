@@ -554,6 +554,10 @@ class NarrativeBuilder:
         elapsed even though the subagents never stopped (w7f56t over-reset)."""
         return any(f.running for f in self._open_sub_by_event.values())
 
+    def running_subagents(self) -> list[SubagentFold]:
+        """Running dispatched subagent folds, in dispatch order (the footer's indented rows)."""
+        return [f for f in self._open_sub_by_event.values() if f.running]
+
     def current_activity(self) -> Activity | None:
         """Current activity for the live status footer; None when idle."""
         top = self._step_stack[-1] if self._step_stack else None
