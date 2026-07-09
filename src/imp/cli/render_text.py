@@ -709,7 +709,7 @@ def _render(node: Any, *, depth: int, full: bool, color: bool,
         if done:
             parts.append(done)
         # Route reason rides the next step's header, not a line beneath the completion.
-        yield _line(compose_label([node.phase_label, *parts]), depth, color,
+        yield _line(compose_label(parts), depth, color,
                     *pal.NODE_COLORS["breadcrumb"], gutters=gutters)
         return
 

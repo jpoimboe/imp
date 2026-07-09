@@ -751,7 +751,7 @@ async def test_full_run_transcript_hides_quiet_plumbing(tmp_path: Path) -> None:
     # A loud clean forward goto is UNLABELED -> silent: spec-reviewer (label:
     # "reviewing spec") renders only its gray completion line, with no own-line "→ …".
     spec_rev_i = next(
-        (i for i, ln in enumerate(body) if "spec phase · reviewing spec · complete" in ln),
+        (i for i, ln in enumerate(body) if "reviewing spec · complete" in ln),
         None,
     )
     assert spec_rev_i is not None, (

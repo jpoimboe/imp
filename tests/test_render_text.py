@@ -2100,15 +2100,14 @@ def test_opening_intent_renders_under_first_step_header_before_narration() -> No
     assert step_idx < intent_idx < narr_idx
 
 
-def test_breadcrumb_completion_composes_phase_label() -> None:
+def test_breadcrumb_completion_omits_phase_label() -> None:
     bc = nv.BreadcrumbLine(
         step_name="finalize", kind="agent", elapsed_s=0.0,
         action={"verb": "continue"}, step_label="finalizing",
         phase_label="implementation phase · plan 1/3", show_complete=True)
     out = list(rt._render(bc, depth=1, full=False, color=False, width=80))
-    assert out
-    assert out[0].strip().startswith(
-        "implementation phase · plan 1/3 · finalizing · complete")
+    assert out == ["  finalizing · complete"]
+    assert "implementation phase" not in out[0]
 
 
 def test_breadcrumb_without_phase_label_is_unchanged() -> None:
