@@ -1254,6 +1254,112 @@ async def test_pull_watchdog_treats_swallowed_cancel_fallthrough_as_stall(
 
 
 @pytest.mark.anyio
+async def test_pull_watchdog_request_in_flight_survives_under_ceiling(monkeypatch) -> None:
+    """While request_active is True, a silence gap OVER the 300 s general window
+    but UNDER the request ceiling does NOT trip the watchdog. A single begin call
+    with no further activity, then a sleep between the two windows, distinguishes
+    the ceiling from the plain now+window bump (which would expire at ~1 general
+    window and stall)."""
+    import imp.engine.agent_run as ar
+
+    monkeypatch.setattr(ar, "AGENT_INACTIVITY_TIMEOUT_S", 0.2)
+    monkeypatch.setattr(ar, "PROVIDER_REQUEST_SILENCE_CEILING_S", 1.0)
+    coord = InterruptCoordinator()
+    interrupted = {"called": False}
+
+    class _Runner:
+        async def interrupt(self) -> None:
+            interrupted["called"] = True
+
+    async def _gen():
+        coord.begin_request_watchdog()   # ceiling (single call, no further activity)
+        await anyio.sleep(0.5)           # > 2x general window, < ceiling
+        coord.end_request_watchdog()
+        yield {"type": "agent_output", "payload": {"status": "Success"}}
+
+    stall = {"hit": False}
+    events = []
+    with anyio.fail_after(5):
+        async for ev in ar._pull_with_inactivity_watchdog(
+                _gen(), runner=_Runner(), stall=stall, coordinator=coord):
+            events.append(ev)
+
+    assert stall["hit"] is False
+    assert interrupted["called"] is False
+    assert events == [{"type": "agent_output", "payload": {"status": "Success"}}]
+
+
+@pytest.mark.anyio
+async def test_pull_watchdog_request_in_flight_stalls_over_ceiling(monkeypatch) -> None:
+    """The request ceiling is FINITE, not inf: with request_active True, a silence
+    gap that exceeds the ceiling still tears the agent down and drives the same
+    teardown as a plain stall."""
+    import imp.engine.agent_run as ar
+
+    monkeypatch.setattr(ar, "AGENT_INACTIVITY_TIMEOUT_S", 0.2)
+    monkeypatch.setattr(ar, "PROVIDER_REQUEST_SILENCE_CEILING_S", 0.4)
+    coord = InterruptCoordinator()
+    interrupted = {"called": False}
+
+    class _Runner:
+        async def interrupt(self) -> None:
+            interrupted["called"] = True
+
+    async def _gen():
+        coord.begin_request_watchdog()
+        await anyio.sleep(3600)          # silent past the ceiling -> must stall
+        yield {"type": "agent_output", "payload": {}}  # unreached
+
+    stall = {"hit": False}
+    events = []
+    with anyio.fail_after(5):
+        async for ev in ar._pull_with_inactivity_watchdog(
+                _gen(), runner=_Runner(), stall=stall, coordinator=coord):
+            events.append(ev)
+
+    assert stall["hit"] is True
+    assert interrupted["called"] is True
+    assert events == []
+
+
+@pytest.mark.anyio
+async def test_pull_watchdog_solicit_precedence_wins_over_request(monkeypatch) -> None:
+    """Precedence: solicit_active (-> inf) wins over request_active (-> ceiling).
+    With BOTH active, a silence gap OVER the (small) ceiling does NOT stall,
+    because the inf freeze takes precedence. If request precedence wrongly won,
+    the gap would exceed the ceiling and stall. tool_active shares this branch."""
+    import imp.engine.agent_run as ar
+
+    monkeypatch.setattr(ar, "AGENT_INACTIVITY_TIMEOUT_S", 0.2)
+    monkeypatch.setattr(ar, "PROVIDER_REQUEST_SILENCE_CEILING_S", 0.4)
+    coord = InterruptCoordinator()
+    interrupted = {"called": False}
+
+    class _Runner:
+        async def interrupt(self) -> None:
+            interrupted["called"] = True
+
+    async def _gen():
+        coord.begin_request_watchdog()
+        coord.begin_solicit_watchdog()   # inf freeze must win over the ceiling
+        await anyio.sleep(0.8)           # > ceiling: would stall if request won
+        coord.end_solicit_watchdog()
+        coord.end_request_watchdog()
+        yield {"type": "agent_output", "payload": {"status": "Success"}}
+
+    stall = {"hit": False}
+    events = []
+    with anyio.fail_after(5):
+        async for ev in ar._pull_with_inactivity_watchdog(
+                _gen(), runner=_Runner(), stall=stall, coordinator=coord):
+            events.append(ev)
+
+    assert stall["hit"] is False
+    assert interrupted["called"] is False
+    assert events == [{"type": "agent_output", "payload": {"status": "Success"}}]
+
+
+@pytest.mark.anyio
 async def test_inline_solicit_raises_awaiting_when_no_channel() -> None:
     from imp.engine.agent_run import build_inline_solicit
     from imp.engine.awaiting_user_input import AwaitingUserInput

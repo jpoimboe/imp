@@ -35,6 +35,7 @@ from imp.agents.runner import AgentInvocation, ChangeContext, Message, TextBlock
 from imp.agents.tools.limits import (
     AGENT_INACTIVITY_TIMEOUT_S,
     PROCESS_KILL_GRACE_S,
+    PROVIDER_REQUEST_SILENCE_CEILING_S,
 )
 from imp.engine.awaiting_user_input import AwaitingUserInput
 from imp.engine.completion import (  # re-exports for claude_code.py
@@ -302,19 +303,25 @@ async def _pull_with_inactivity_watchdog(
                         # of genuine inactivity, so this is the correct stall.
                         if _scope.cancel_called:
                             return
-                        # Read AGENT_INACTIVITY_TIMEOUT_S at call time so a
-                        # monkeypatched window (tests) and the live value agree.
-                        # Freeze the in-flight deadline to inf while EITHER an
-                        # attended agent is blocked awaiting a human reply
-                        # (solicit_active) OR a foreground tool call is in flight
-                        # (tool_active): both are periodic-activity-free blocked
-                        # awaits, so a one-shot finite bump would expire one window
-                        # later and re-introduce the false kill. end_solicit_/
-                        # end_tool_watchdog's note_activity re-fires this with the
-                        # flag cleared, restoring a fresh finite window.
+                        # Read the module globals at call time so monkeypatched
+                        # windows (tests) and the live values agree. Three-way
+                        # precedence: solicit_active/tool_active are
+                        # periodic-activity-free blocked awaits -> freeze to inf
+                        # (they win, and end_solicit/end_tool's note_activity then
+                        # re-fires this with the flag cleared, restoring a finite
+                        # window). Else a provider request in flight -> a FINITE
+                        # ceiling, longer than the general window so a healthy wait
+                        # never false-kills, but still finite so a dead-but-open
+                        # connection is eventually torn down. Else the plain general
+                        # window. request_active read via getattr so a partial/None
+                        # coordinator degrades to today's behavior.
                         if (getattr(coordinator, "solicit_active", False)
                                 or getattr(coordinator, "tool_active", False)):
                             _scope.deadline = math.inf
+                        elif getattr(coordinator, "request_active", False):
+                            _scope.deadline = (
+                                anyio.current_time()
+                                + PROVIDER_REQUEST_SILENCE_CEILING_S)
                         else:
                             _scope.deadline = (
                                 anyio.current_time() + AGENT_INACTIVITY_TIMEOUT_S)
