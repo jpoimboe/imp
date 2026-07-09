@@ -422,13 +422,16 @@ class NarrativeBuilder:
     Routing order in add() (design §5.3):
       0. accumulate token usage for EVERY llm_response (before sub routing, so
          subagent tokens count toward the change total — F2). latest_prompt_tokens
-         (the context-bar value) updates for TOP-LEVEL turns only; a sub: turn
-         folds into the cumulative total but does not move the bar.
+         (the context-bar value) updates for THIS builder's own agent only: the
+         top-level builder (own_agent_id None) records its non-sub: turns, a nested
+         builder records the sub: turns of the subagent it represents; a turn that
+         belongs to a registered child folds into the cumulative total but does not
+         move this builder's bar.
       1. if agent_id is a registered child subagent fold → delegate down.
       2. else dispatch by event type at the current open scope.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, *, own_agent_id: str | None = None) -> None:
         self._root = WorkflowNode()
         self._warnings: list[str] = []
         self._warnings_flushed: bool = False
@@ -443,6 +446,11 @@ class NarrativeBuilder:
         # the checkpoint, which is frequently a subagent's turn (see loko19).
         self._last_llm_context: tuple[int, int] | None = None
         self._latest_checkpoint_threshold: float | int | None = None
+        # The "sub:<event_id>" this builder represents (a dispatched subagent's own
+        # turns); None on the top-level builder. Gates which llm_response readings move
+        # THIS builder's context gauge: the top level records its own (non-sub:) turns;
+        # a nested builder records the turns of the subagent it stands for.
+        self._own_agent_id = own_agent_id
         self._current_phase: PhaseNode | None = None
         # Stack of open StepNode containers. step_started pushes one;
         # step_completed pops it. Every kind (agent/script/branch) is a
@@ -682,7 +690,9 @@ class NarrativeBuilder:
 
         # 0. token accumulation — before sub routing (F2) so subagent events fold
         #    into the change total. The context-bar value (_latest_prompt_tokens)
-        #    tracks the TOP-LEVEL agent only; a sub:-prefixed turn never moves it.
+        #    tracks THIS builder's own agent: the top level (own_agent_id None) records
+        #    its non-sub: turns; a nested builder records the turns of the subagent it
+        #    represents (agent_id == own_agent_id). A registered child's turn never moves it.
         if etype == "llm_response":
             usage = payload.get("usage")
             # claude_code's coalesced usage is streaming-partial; its authoritative
@@ -694,7 +704,7 @@ class NarrativeBuilder:
             # pt==0 is an all-zero "empty reply" (e.g. freshly-resumed
             # claude_code) — no gauge signal, hold last good values. pt is None
             # (usage absent) is distinct: context_pct/window may still update.
-            if pt != 0 and not is_subagent:
+            if pt != 0 and (not is_subagent or agent_id == self._own_agent_id):
                 if pt is not None:
                     self._latest_prompt_tokens = pt
                 cpct = payload.get("context_pct")
@@ -1940,7 +1950,8 @@ def _open_subagent_fold(self: NarrativeBuilder, event: dict[str, Any], p: dict[s
     inp = p.get("input") or {}
     fold = SubagentFold(
         subagent_name=str(inp.get("subagent_name", "?")),
-        event_id=event_id, block_id=block_id, nested=NarrativeBuilder(),
+        event_id=event_id, block_id=block_id,
+        nested=NarrativeBuilder(own_agent_id=f"sub:{event_id}"),
         opener_agent_id=agent_id if isinstance(agent_id, str) else None,
         start_ts=event.get("timestamp"),
         awaits_result=p.get("id_ns") == "block",

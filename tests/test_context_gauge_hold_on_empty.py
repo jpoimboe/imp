@@ -69,6 +69,26 @@ def test_subagent_reading_never_moves_the_gauge() -> None:
     assert b.latest_context_window == 200_000
 
 
+def test_nested_subagent_builder_records_its_own_context() -> None:
+    b = nv.NarrativeBuilder()
+    b.add(_ev("st", "step_started", step="s", kind="agent", phase="p",
+              model="m", provider="anthropic"))
+    b.add(_good("a"))                                      # top-level gauge -> 42% / 80k
+    b.add(_ev("tk1", "tool_call", agent_id="step:p/s", id="b1",
+              name="sub_agent", input={"subagent_name": "coder"}))
+    # The subagent's OWN reading (agent_id sub:tk1) is routed to the nested builder,
+    # which — after the fix — records it as its own context.
+    b.add(_reading("s2", input_tokens=99_000, cache_read=1_000,
+                   context_pct=88.0, context_window=200_000,
+                   agent_id="sub:tk1"))
+    nested = b._sub_by_agent_id["sub:tk1"].nested
+    assert nested.latest_context_pct == 88.0              # nested records its own gauge
+    assert nested.latest_prompt_tokens == 100_000
+    # The top-level gauge is unmoved by the subagent's reading.
+    assert b.latest_context_pct == 42.0
+    assert b.latest_prompt_tokens == 80_000
+
+
 def test_token_totals_are_untouched_by_the_gauge_guard() -> None:
     b = nv.NarrativeBuilder()
     # provider "anthropic" accumulates llm_response usage into _tokens.
