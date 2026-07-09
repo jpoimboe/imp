@@ -574,14 +574,15 @@ class NarrativeBuilder:
 
         running = [f for f in self._open_sub_by_event.values() if f.running]
         if running:
+            n = len(running)
+            if n > 1:
+                return Activity(position=position, verb=f"running {n} subagents",
+                                model=model,
+                                kind=top_kind, lane_wait=top_lane_wait)
             f = running[0]
             verb = f.label or _subagent_verb(f.subagent_name) or f"subagent({f.subagent_name})"
             nested = f.nested.current_activity()
             detail = nested.detail if nested is not None else None
-            extra = len(running) - 1
-            if extra:
-                noun = "subagent" if extra == 1 else "subagents"
-                detail = _join(detail, f"+{extra} {noun}")
             if nested is not None and nested.countdown_total is not None:
                 return Activity(position=position, verb=nested.verb,
                                 detail=detail, model=model,

@@ -1639,10 +1639,9 @@ def test_resume_drops_interrupted_fold_membership_so_late_events_dont_reattach()
     assert dangling.event_count == count_before
 
 
-def test_current_activity_suffix_counts_extra_running_subagents() -> None:
-    # AC40: one running fold → no suffix; two → "(+1 subagent)"; three →
-    # "(+2 subagents)" (singular/plural). The named detail is the FIRST
-    # running fold's; the suffix counts the rest.
+def test_current_activity_several_running_subagents_show_a_count() -> None:
+    # keke66 B1: one running fold -> its own verb; several -> a "running N subagents"
+    # count on row 1 (each subagent's detail moves to the indented per-subagent rows).
     def _task(eid: str, bid: str, name: str) -> dict:
         return _ev(eid, "tool_call", agent_id="step:p/s", id=bid, name="sub_agent",
                    input={"subagent_name": name, "task_description": "go"})
@@ -1652,18 +1651,16 @@ def test_current_activity_suffix_counts_extra_running_subagents() -> None:
               model="m", provider="anthropic"))
     b.add(_task("tk1", "b1", "reviewer"))
     one = b.current_activity()
-    assert one.verb == "subagent(reviewer)"
-    assert one.detail is None or "+" not in (one.detail or "")   # single fold: no suffix
+    assert one.verb == "subagent(reviewer)"               # single fold: its own verb
 
     b.add(_task("tk2", "b2", "tester"))
     two = b.current_activity()
-    assert "subagent(reviewer)" in (two.verb or "")       # first running fold's verb
-    assert "+1 subagent" in (two.detail or "")            # singular (no parens in new model)
-    assert "+1 subagents" not in (two.detail or "")
+    assert two.verb == "running 2 subagents"              # several -> a count
+    assert "subagent(reviewer)" not in (two.verb or "")
 
     b.add(_task("tk3", "b3", "researcher"))
     three = b.current_activity()
-    assert "+2 subagents" in (three.detail or "")         # plural
+    assert three.verb == "running 3 subagents"            # plural count grows with N
 
 
 def test_interrupt_config_event_suppresses_error_and_marks_step() -> None:
@@ -2516,7 +2513,7 @@ def test_current_activity_script_step_verb_is_the_label() -> None:
     assert act.position == "implementation phase · plan 1/1"
 
 
-def test_current_activity_extra_running_subagents_append_to_detail() -> None:
+def test_current_activity_two_running_subagents_show_the_count_not_a_detail() -> None:
     b = nv.NarrativeBuilder()
     b.add(ev("1", "change_created", change_id=1, title="x"))
     b.add(ev("2", "step_started", step="task-lead", kind="agent", phase="code",
@@ -2527,8 +2524,8 @@ def test_current_activity_extra_running_subagents_append_to_detail() -> None:
     b.add(ev("4", "tool_call", agent_id="step:code/task-lead", id="t2", name="sub_agent",
              input={"subagent_name": "code-reviewer"}, label="reviewing"))
     act = b.current_activity()
-    assert act.verb == "coding"
-    assert act.detail is not None and "+1 subagent" in act.detail
+    assert act.verb == "running 2 subagents"              # count, not the first fold's verb
+    assert act.detail is None or "+" not in (act.detail or "")   # no "+N subagents" tail
 
 
 def test_claude_code_totals_come_from_query_result_not_llm_response() -> None:
