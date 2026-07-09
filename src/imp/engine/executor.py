@@ -27,7 +27,6 @@ from typing import TYPE_CHECKING, Any
 import anyio
 
 from imp.agents.prompts import build_context, render_label, render_prompt
-from imp.agents.random_status import STATUS_PHRASE_LABEL
 from imp.agents.runner import (
     ChangeContext,
     Message,
@@ -719,7 +718,8 @@ def _step_started_payload(
                "show_label": step.show_label,
                "show_output": step.show_output,
                "label": render_label(step.label, change, log, state)}
-    if step.label == STATUS_PHRASE_LABEL:
+    rotate = step.rotate_phrase if step.rotate_phrase is not None else step.interactive
+    if rotate:
         payload["rotate_phrase"] = True
     if step.kind == "script":
         payload["command"] = step.command
