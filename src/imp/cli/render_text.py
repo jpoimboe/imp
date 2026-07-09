@@ -600,8 +600,19 @@ def _render(node: Any, *, depth: int, full: bool, color: bool,
 
     if isinstance(node, nv.UserMessageNode):
         if not node.interactive:
-            # Synthetic engine prompt (the "begin" kickoff, a resume nudge) — not
-            # something the human typed, so it never renders as a `>` turn.
+            # A non-interactive message is an injected prompt, not a human turn:
+            # the top-level agent's real instructions, or (inside a fold) the
+            # parent's task_description to a subagent. Lean/live keep dropping it;
+            # --full surfaces it as a dim `injected message:` labeled verbatim
+            # block, mirroring the step_context metadata dump. Body is text, not
+            # markdown — it is a verbatim prompt. An empty/whitespace-only body
+            # renders nothing, leaving adjacency state untouched.
+            if not (full and node.text.strip()):
+                return
+            yield _line("injected message:", depth, color,
+                        *pal.NODE_COLORS["metadata"], gutters=gutters)
+            yield from _wrap(_caret_escape(node.text), width, depth + 1, color,
+                             *pal.NODE_COLORS["metadata"], gutters=gutters)
             return
         # A brand-orange `>` caret marks the human turn on the first line only; it
         # sits OUTSIDE the slate. The separating space + the wrapped text sit ON the

@@ -2396,3 +2396,68 @@ def test_full_view_whitespace_thinking_leaves_spacing_intact() -> None:
     i = next(k for k, ln in enumerate(out) if "Second prose turn." in ln)
     assert out[i - 1].strip() == "", "one blank separates the prose turns"
     assert out[i - 2].strip() != "", "no doubled blank around the empty thinking fold"
+
+
+def test_full_view_whitespace_injected_message_leaves_spacing_intact() -> None:
+    # A whitespace-only non-interactive user_message renders nothing in --full and must
+    # not create a doubled or missing blank between the prose turns around it.
+    out = _lines([
+        _ev("1", "step_started", step="s", kind="agent", phase="p"),
+        _ev("2", "llm_response", agent_id="a",
+            raw={"content": [{"type": "text", "text": "First prose turn."}]}, usage={}),
+        _ev("3", "user_message", agent_id="step:p/s",
+            content=[{"type": "text", "text": "   \n  "}]),  # whitespace-only → renders nothing
+        _ev("4", "llm_response", agent_id="a",
+            raw={"content": [{"type": "text", "text": "Second prose turn."}]}, usage={}),
+    ], full=True)
+    i = next(k for k, ln in enumerate(out) if "Second prose turn." in ln)
+    assert out[i - 1].strip() == "", "one blank separates the prose turns"
+    assert out[i - 2].strip() != "", "no doubled blank around the empty injected message"
+
+
+def test_full_view_renders_injected_top_level_prompt() -> None:
+    # In --full a non-interactive user_message (no preceding awaiting_user_input)
+    # is the agent's injected prompt: it renders under a dim `injected message:`
+    # label with its verbatim body visible. The lean view still drops it entirely
+    # (spec acceptance #2, #5).
+    events = [
+        _ev("1", "step_started", step="s", kind="agent", phase="p",
+            model="m", provider="anthropic"),
+        _ev("2", "user_message", agent_id="step:p/s",
+            content=[{"type": "text", "text": "REAL PROMPT: build the widget"}]),
+    ]
+    full = "\n".join(_lines(events, full=True))
+    assert "injected message:" in full
+    assert "REAL PROMPT: build the widget" in full
+
+    lean = "\n".join(_lines(events))
+    assert "injected message:" not in lean
+    assert "REAL PROMPT: build the widget" not in lean
+
+
+def test_full_view_renders_subagent_task_description_injected() -> None:
+    # A subagent's first injected message is the parent's task_description to it.
+    # It routes into the fold's nested tree (agent_id "sub:<event-id>") and, in
+    # --full, renders as an `injected message:` block INSIDE the expanded fold.
+    # The lean view drops it (spec acceptance #2, #5).
+    events = [
+        _ev("1", "step_started", step="s", kind="agent", phase="p",
+            model="m", provider="anthropic"),
+        _ev("tk1", "tool_call", agent_id="step:p/s", id="b1", name="sub_agent",
+            input={"subagent_name": "explorer", "task_description": "go"}),
+        _ev("um1", "user_message", agent_id="sub:tk1",
+            content=[{"type": "text", "text": "map the auth module end to end"}]),
+        _ev("su1", "llm_response", agent_id="sub:tk1", provider="anthropic",
+            model="m", stop_reason="end_turn", usage={},
+            raw={"content": [{"type": "text", "text": "found it"}]}),
+        _ev("r1", "tool_result", agent_id="step:p/s", id="b1",
+            content='{"status":"Success"}', error=False),
+    ]
+    full = "\n".join(_lines(events, full=True))
+    assert "▾ explorer" in full
+    assert "injected message:" in full
+    assert "map the auth module end to end" in full
+
+    lean = "\n".join(_lines(events))
+    assert "map the auth module end to end" not in lean
+    assert "injected message:" not in lean
