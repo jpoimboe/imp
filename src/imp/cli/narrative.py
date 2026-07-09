@@ -234,7 +234,7 @@ class Activity:
     # Row-3 position segments, pre-split (compare=False) so the driver never re-slices `position`.
     phase: str | None = field(default=None, compare=False)     # phase head (gold)
     plan: str | None = field(default=None, compare=False)      # plan counter (step-blue)
-    counter: str | None = field(default=None, compare=False)   # position_label leaf (step-blue)
+    counter: str | None = field(default=None, compare=False)   # running step's label (step-blue)
 
 
 def _join(*parts: str | None) -> str | None:
@@ -565,8 +565,7 @@ class NarrativeBuilder:
         top_kind = top.kind if top is not None else None
         top_lane_wait = top.lane_wait if top is not None else False
         top_phase, top_plan = _split_phase_label(top.phase_label if top is not None else None)
-        top_counter = ((top.live_label or top.label)
-                       if (top is not None and top.position_label) else None)
+        top_counter = (top.live_label or top.label) if top is not None else None
         if self._reset_wait is not None:
             position = _join(top.phase_label, top.live_label or top.label) if top else None
             return Activity(

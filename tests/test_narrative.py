@@ -2768,7 +2768,7 @@ def test_current_activity_position_segments_for_a_plan_phase_step() -> None:
     act = b.current_activity()
     assert act.phase == "planning phase"      # phase head (gold)
     assert act.plan == "plan 3/6"             # plan-counter tail (step-blue)
-    assert act.counter is None                # not a position_label step -> no step leaf
+    assert act.counter == "writing plan"      # every step's label rides the position row
     assert act.position == "planning phase · plan 3/6"   # composed string unchanged
 
 
@@ -2806,7 +2806,31 @@ def test_current_activity_position_segments_when_phase_has_no_plan() -> None:
     act = b.current_activity()
     assert act.phase == "design phase"
     assert act.plan is None                   # no plan counter in the phase label
-    assert act.counter is None
+    assert act.counter == "writing spec"      # every step's label rides the position row
+
+
+def test_current_activity_counter_carries_a_non_position_step_label() -> None:
+    b = nv.NarrativeBuilder()
+    b.add(ev("1", "change_created", change_id=1, title="x"))
+    b.add(ev("2", "step_started", step="verify", kind="script",
+             phase="integration", label="running tests",
+             phase_label="integration phase"))
+    act = b.current_activity()
+    assert act.counter == "running tests"     # a non-position step's label rides the position row
+    assert act.phase == "integration phase"
+    assert act.plan is None
+    assert act.position == "integration phase"  # composed breadcrumb string unchanged
+
+
+def test_current_activity_counter_prefers_pushed_live_label_for_non_position_step() -> None:
+    b = nv.NarrativeBuilder()
+    b.add(ev("1", "change_created", change_id=1, title="x"))
+    b.add(ev("2", "step_started", step="verify", kind="script",
+             phase="integration", label="running tests",
+             phase_label="integration phase"))
+    b.add(ev("3", "step_label_updated", label="running 42 tests"))
+    act = b.current_activity()
+    assert act.counter == "running 42 tests"
 
 
 def test_engine_continuation_produces_no_narrative_node() -> None:
