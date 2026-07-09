@@ -158,17 +158,17 @@ def _default_detect_theme() -> str:
         return "ansi"
 
 
-def _build_project_config(default_base: str | None = None) -> dict[str, Any]:
-    """The committed imp/project.yaml: workflow ref + resolved integration
-    branch (when detected) + empty vars. No bindings (the provider-code floor
-    supplies tiers); no theme (user-homed). `default-base` is omitted entirely
-    when init could not resolve a branch — the runtime auto-detect fallback in
-    `imp new` covers that case."""
-    cfg: dict[str, Any] = {"default-workflow": "imp"}
-    if default_base is not None:
-        cfg["default-base"] = default_base
-    cfg["vars"] = {}
-    return cfg
+def _build_project_config(default_base: str) -> dict[str, Any]:
+    """The committed imp/project.yaml: workflow ref + the resolved integration
+    branch + empty vars. No bindings (the provider-code floor supplies tiers);
+    no theme (user-homed). `default-base` is always written now — `imp init`
+    resolves it up front (detect / ask / error), so `imp new` consumes it
+    directly with no runtime fallback."""
+    return {
+        "default-workflow": "imp",
+        "default-base": default_base,
+        "vars": {},
+    }
 
 
 def _build_user_config(
@@ -333,7 +333,8 @@ def run_init(
     project_file = imp_dir / "project.yaml"
     already_initialized = project_file.is_file()
 
-    _ensure_git_repo(project_root, input_fn=input_fn, output_fn=output_fn)
+    git_created = _ensure_git_repo(
+        project_root, input_fn=input_fn, output_fn=output_fn)
 
     output_fn(f"Setting up imp in {project_root}")
 
@@ -375,16 +376,14 @@ def run_init(
 
     # --- committed project file (idempotent: never overwrite an existing one) ---
     if not already_initialized:
+        # Establish the mandatory integration branch first: origin/HEAD when it
+        # resolves, the current/unborn branch on fresh setup, else a prompt.
+        # Resolving before mkdir keeps the non-TTY failure path from creating any
+        # imp/ artifact.
+        default_base = _resolve_init_base(
+            project_root, git_created=git_created, input_fn=input_fn)
+        output_fn(f"Integration branch: {default_base}")
         imp_dir.mkdir(parents=True, exist_ok=True)
-        # Detect the integration branch: prefer the remote default (origin/HEAD),
-        # else the currently checked-out branch (unborn-tolerant, since init runs
-        # before the first commit). Omit the key entirely when nothing resolves.
-        default_base = (
-            worktree.origin_head_branch(project_root)
-            or worktree.checked_out_branch(project_root)
-        )
-        if default_base is not None:
-            output_fn(f"Integration branch: {default_base}")
         body = yaml.safe_dump(
             _build_project_config(default_base),
             sort_keys=False, default_flow_style=False)

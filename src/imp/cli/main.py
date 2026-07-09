@@ -34,7 +34,7 @@ from imp.cli.inert_resume import (
     render_inert_question,
     run_inert_resume,
 )
-from imp.cli.init import GitSetupDeclined, run_init
+from imp.cli.init import GitSetupDeclined, IntegrationBranchUnresolved, run_init
 from imp.cli.live_driver import LiveDriver
 from imp.cli.live_status import LiveStatus
 from imp.cli.palette import ansi, should_use_color
@@ -649,7 +649,7 @@ def _cmd_init(args: argparse.Namespace) -> int:
     project = _project_root()
     try:
         run_init(project, input_fn=input, output_fn=print)
-    except GitSetupDeclined as e:
+    except (GitSetupDeclined, IntegrationBranchUnresolved) as e:
         print(f"imp: {e}", file=sys.stderr)
         return 2
     except FileExistsError as e:
