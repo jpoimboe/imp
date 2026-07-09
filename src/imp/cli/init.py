@@ -38,6 +38,11 @@ class GitSetupDeclined(Exception):
     """The user declined `imp init`'s offer to set up a git repository."""
 
 
+class IntegrationBranchUnresolved(Exception):
+    """imp init needs an integration branch but couldn't determine one — the
+    prompt couldn't read input (non-TTY / EOF), or no branch was resolvable."""
+
+
 def _in_git_repo(project_root: Path) -> bool:
     return subprocess.run(
         ["git", "rev-parse", "--git-dir"],
@@ -64,6 +69,55 @@ def _ensure_git_repo(
                    capture_output=True, text=True)
     output_fn("Initialized a git repository.")
     return True
+
+
+def _repo_is_unborn(project_root: Path) -> bool:
+    """True when the repo has no commits yet — `git rev-parse --verify HEAD` fails."""
+    return subprocess.run(
+        ["git", "rev-parse", "--verify", "HEAD"],
+        cwd=project_root, capture_output=True, text=True,
+    ).returncode != 0
+
+
+def _resolve_init_base(
+    project_root: Path, *, git_created: bool,
+    input_fn: Callable[[str], str],
+) -> str:
+    """The integration branch to record as `default-base` on a fresh init.
+
+    1. origin/HEAD resolves -> use it, no prompt.
+    2. Fresh setup (git init this run) or an unborn repo -> use the current /
+       unborn branch, no prompt (no other candidate exists).
+    3. Otherwise (existing repo with commits, no remote default) -> prompt,
+       suggesting the current branch; Enter accepts it, a typed name overrides.
+
+    Raises IntegrationBranchUnresolved when the prompt cannot read input, or
+    when the user gives no branch and there is no current branch to fall back on.
+    """
+    remote = worktree.origin_head_branch(project_root)
+    if remote is not None:
+        return remote
+    current = worktree.checked_out_branch(project_root)
+    if (git_created or _repo_is_unborn(project_root)) and current is not None:
+        return current
+    suffix = f" [{current}]" if current else ""
+    try:
+        answer = input_fn(
+            f"Which branch should changes integrate into?{suffix} "
+        ).strip()
+    except EOFError as e:
+        raise IntegrationBranchUnresolved(
+            "imp init needs an integration branch but can't read input "
+            "(non-interactive terminal). Re-run `imp init` interactively, or add "
+            "`default-base: <branch>` to imp/project.yaml."
+        ) from e
+    resolved = answer or current
+    if not resolved:
+        raise IntegrationBranchUnresolved(
+            "imp init needs an integration branch but none was given. Re-run "
+            "`imp init` and name the branch changes should integrate into."
+        )
+    return resolved
 
 
 def _commit_init_files(project_root: Path) -> bool:
