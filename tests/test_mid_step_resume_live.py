@@ -81,6 +81,7 @@ def _seed_project(tmp_path: Path) -> None:
     """))
     (tmp_path / "imp" / "project.yaml").write_text(textwrap.dedent("""\
         default-workflow: imp
+        default-base: main
         providers: [anthropic]
         tiers:
           low: {anthropic: claude-haiku-4-5-20251001}
@@ -271,6 +272,7 @@ def test_ctrl_c_during_bash_pauses_then_resume_completes_openai(
     # follows the bash-then-complete sequence reliably.
     (tmp_path / "imp" / "project.yaml").write_text(textwrap.dedent("""\
         default-workflow: imp
+        default-base: main
         providers: [openai]
         tiers:
           low: {openai: gpt-5.4-mini}
@@ -354,6 +356,7 @@ def test_ctrl_c_during_bash_pauses_then_resume_completes_claude_code(
     # tree) carries the claude_code pin.
     (tmp_path / "imp" / "project.yaml").write_text(textwrap.dedent("""\
         default-workflow: imp
+        default-base: main
         providers: [claude_code]
         tiers:
           low: {claude_code: claude-haiku-4-5-20251001}
