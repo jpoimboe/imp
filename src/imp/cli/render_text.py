@@ -318,21 +318,26 @@ def is_prose_leaf(node: Any) -> bool:
 def spaces_after(node: Any, *, full: bool) -> bool:
     """A "spaced block": one a blank separator follows (and precedes, when it
     trails another spaced block). Prose leaves and user turns always qualify; a
-    collapsed tool-burst summary qualifies in the lean view, where it sits as a
-    single line between two prose turns and wants air on both sides (so the run
-    reads `…prose / · burst / prose…` rather than bunching). Structural chrome —
-    a phase header/complete line, a step (which ends on its completion
-    breadcrumb), and errors — is surrounded by blank lines so each stands clear of
-    the prose around it. The batch walk and the live driver both key spacing off
-    this, so they stay identical (StepNode/PhaseNode matter only to the batch
-    walk, which treats a container as one child; live keys off the last leaf —
-    the breadcrumb — instead, and they agree)."""
+    tool burst with calls qualifies in either view (lean: a single recap line
+    between two prose turns; full: an expanded fold that wants air on both
+    sides). Under ``full`` the everything-view also spaces the config-dump
+    (``StepContextNode``) and expanded ``thinking`` (``ThinkingFold``) so unlike
+    block kinds don't bunch. Structural chrome — a phase header/complete line, a
+    step (which ends on its completion breadcrumb), and errors — is surrounded by
+    blank lines so each stands clear of the prose around it. The batch walk and
+    the live driver both key spacing off this, so they stay identical
+    (StepNode/PhaseNode matter only to the batch walk, which treats a container
+    as one child; live keys off the last leaf — the breadcrumb — instead, and
+    they agree). A node that renders nothing (whitespace-only thinking) still
+    leaves adjacency untouched: `_render_children` skips empty emissions before
+    this value is consulted, so a True here on an empty render is inert."""
     return bool(
         is_prose_leaf(node)
         or isinstance(node, (nv.UserMessageNode, nv.SkillLoadNode, nv.SubagentFold,
                              nv.PhaseNode, nv.StepNode, nv.BreadcrumbLine,
                              nv.ErrorNode, nv.PauseNode, nv.RenameNode))
-        or (isinstance(node, nv.ToolBurstFold) and not full and node.calls)
+        or (isinstance(node, nv.ToolBurstFold) and node.calls)
+        or (full and isinstance(node, (nv.ThinkingFold, nv.StepContextNode)))
     )
 
 
@@ -510,6 +515,11 @@ def subagent_outcome_lines(sub: nv.SubagentFold, *, depth: int, color: bool,
     except (ValueError, TypeError):
         data = None
     if not isinstance(data, dict):
+        # A plain-string SUCCESS return is exactly the nested transcript's final
+        # prose turn — echoing it here double-prints it (§4). Surface a non-dict
+        # outcome only on the error path, where there may be no final prose turn.
+        if not sub.is_error:
+            return
         yield from _wrap(_caret_escape(raw), width, depth, color, *codes, gutters=gutters)
         return
     scalars: list[str] = []
@@ -595,8 +605,19 @@ def _render(node: Any, *, depth: int, full: bool, color: bool,
 
     if isinstance(node, nv.UserMessageNode):
         if not node.interactive:
-            # Synthetic engine prompt (the "begin" kickoff, a resume nudge) — not
-            # something the human typed, so it never renders as a `>` turn.
+            # A non-interactive message is an injected prompt, not a human turn:
+            # the top-level agent's real instructions, or (inside a fold) the
+            # parent's task_description to a subagent. Lean/live keep dropping it;
+            # --full surfaces it as a dim `injected message:` labeled verbatim
+            # block, mirroring the step_context metadata dump. Body is text, not
+            # markdown — it is a verbatim prompt. An empty/whitespace-only body
+            # renders nothing, leaving adjacency state untouched.
+            if not (full and node.text.strip()):
+                return
+            yield _line("injected message:", depth, color,
+                        *pal.NODE_COLORS["metadata"], gutters=gutters)
+            yield from _wrap(_caret_escape(node.text), width, depth + 1, color,
+                             *pal.NODE_COLORS["metadata"], gutters=gutters)
             return
         # A brand-orange `>` caret marks the human turn on the first line only; it
         # sits OUTSIDE the slate. The separating space + the wrapped text sit ON the
@@ -795,6 +816,7 @@ def _render(node: Any, *, depth: int, full: bool, color: bool,
 
 _ARG_VALUE_CLIP = 120        # §2: per-arg-value clip on the --full args line
 _OUTPUT_LINE_CLIP = 400      # §2: per-source-line clip in the --full output block
+_SUBAGENT_TASK_CLIP = 60     # §3: per-header clip on the --full subagent task description
 _OUTPUT_MAX_LINES = 10       # §2: source lines shown before the "+N more" tail
 _SCRIPT_DETAIL_TAIL_LINES = 15   # lean view: last N lines of a blocked-script detail
 
@@ -920,8 +942,13 @@ def _render_subagent(sub: nv.SubagentFold, *, depth: int, full: bool,
     # --full: expanded `▾ {name}` fold header, full recursion of the subagent's
     # narrative (nested thinking/tools expanded), then the structured return value.
     # --full stays a superset of the lean view.
-    yield _line(f"{pal.fold_glyph(expanded=True)} {sub.subagent_name}",
-                depth, color, *pal.NODE_COLORS["subagent"], gutters=gutters)
+    header = f"{pal.fold_glyph(expanded=True)} {sub.subagent_name}"
+    task = " ".join(sub.task_description.split()) if sub.task_description else ""
+    if task:
+        if len(task) > _SUBAGENT_TASK_CLIP:
+            task = task[:_SUBAGENT_TASK_CLIP] + "…"
+        header += f" · {_caret_escape(task)}"
+    yield _line(header, depth, color, *pal.NODE_COLORS["subagent"], gutters=gutters)
     yield from _render_children(sub.tree.root.children, depth=depth + 1, full=full,
                                 color=color, width=width, display_width=display_width,
                                 gutters=(*gutters, depth), live_viewer=live_viewer)

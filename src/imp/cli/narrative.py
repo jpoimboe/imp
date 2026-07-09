@@ -277,6 +277,8 @@ class SubagentFold:
     start_ts: str | None = None        # parent `task` tool_call.timestamp
     end_ts: str | None = None          # parent `task` tool_result.timestamp
     label: str | None = None
+    task_description: str | None = None  # parent's task prompt to this subagent;
+                                         # shown truncated on the --full fold header
     collapsible = True
 
     @property
@@ -1943,7 +1945,8 @@ def _open_subagent_fold(self: NarrativeBuilder, event: dict[str, Any], p: dict[s
         opener_agent_id=agent_id if isinstance(agent_id, str) else None,
         start_ts=event.get("timestamp"),
         awaits_result=p.get("id_ns") == "block",
-        label=p.get("label"))
+        label=p.get("label"),
+        task_description=str(inp["task_description"]) if inp.get("task_description") else None)
     self._append(fold)
     self._sub_by_agent_id[f"sub:{event_id}"] = fold
     # Register in both dicts: always by event id (unique per mint), by block id

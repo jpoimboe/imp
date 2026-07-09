@@ -1762,6 +1762,7 @@ def test_subagent_outcome_nondict_prose_control_bytes_escaped() -> None:
     sub = nv.SubagentFold(subagent_name="reviewer", event_id="e1", block_id="b1",
                           nested=nv.NarrativeBuilder())
     sub.outcome = "dispatch failed\x07 hard\x00"
+    sub.is_error = True   # §4: a non-dict outcome only renders on the error path
     out = "\n".join(rt.subagent_outcome_lines(sub, depth=0, color=False, width=80))
     assert "\x07" not in out
     assert "\x00" not in out
@@ -2347,3 +2348,199 @@ def test_begin_kickoff_never_replays_as_human_turn_from_events_jsonl(tmp_path) -
     out = "\n".join(render_tree(tree, full=False, color=False, width=80))
     assert "> INTERNAL STEP B KICKOFF" not in out
     assert "INTERNAL STEP B KICKOFF" not in out
+
+
+def test_full_view_spaces_unlike_block_kinds() -> None:
+    # --full must put exactly ONE blank line between adjacent unlike block kinds.
+    # step_context, a thinking fold, an expanded tool burst, and prose turns used
+    # to bunch with no separator; each adjacent pair now gets a single blank and
+    # none is doubled. (spec acceptance #1)
+    out = _lines([
+        _ev("1", "step_started", step="s", kind="agent", phase="p",
+            model="m", provider="anthropic"),
+        _ev("2", "step_context", agent_id="step:p/s", provider="anthropic",
+            model="claude", system_prompt="SYS", tools_schema=[{"name": "bash"}],
+            params={}, max_tool_calls=50),
+        _ev("3", "thinking", agent_id="step:p/s", content="deep thoughts"),
+        _ev("4", "tool_call", agent_id="step:p/s", id="b1", name="bash",
+            input={"command": "ls"}),
+        _ev("5", "tool_result", agent_id="step:p/s", id="b1", content="ok", error=False),
+        _ev("6", "llm_response", agent_id="step:p/s",
+            raw={"content": [{"type": "text", "text": "First prose turn."}]}, usage={}),
+        _ev("7", "llm_response", agent_id="step:p/s",
+            raw={"content": [{"type": "text", "text": "Second prose turn."}]}, usage={}),
+    ], full=True)
+
+    def blank_above(marker: str) -> None:
+        i = next(k for k, ln in enumerate(out) if marker in ln)
+        assert i >= 2, f"{marker!r} found too early to check blanks"
+        assert out[i - 1].strip() == "", f"{marker!r} must have one blank line above it"
+        assert out[i - 2].strip() != "", f"{marker!r} must not have a doubled blank above it"
+
+    blank_above("▾ thinking")          # step_context → thinking
+    blank_above("▾ tools")             # thinking → expanded burst
+    blank_above("First prose turn.")   # burst → prose
+    blank_above("Second prose turn.")  # prose → prose
+
+
+def test_full_view_whitespace_thinking_leaves_spacing_intact() -> None:
+    # A whitespace-only thinking fold renders nothing in --full and must not create
+    # a doubled or missing blank between the prose turns around it. (spec acceptance #1)
+    out = _lines([
+        _ev("1", "step_started", step="s", kind="agent", phase="p"),
+        _ev("2", "llm_response", agent_id="a",
+            raw={"content": [{"type": "text", "text": "First prose turn."}]}, usage={}),
+        _ev("3", "thinking", agent_id="a", content="   "),   # whitespace-only → renders nothing
+        _ev("4", "llm_response", agent_id="a",
+            raw={"content": [{"type": "text", "text": "Second prose turn."}]}, usage={}),
+    ], full=True)
+    i = next(k for k, ln in enumerate(out) if "Second prose turn." in ln)
+    assert out[i - 1].strip() == "", "one blank separates the prose turns"
+    assert out[i - 2].strip() != "", "no doubled blank around the empty thinking fold"
+
+
+def test_full_view_whitespace_injected_message_leaves_spacing_intact() -> None:
+    # A whitespace-only non-interactive user_message renders nothing in --full and must
+    # not create a doubled or missing blank between the prose turns around it.
+    out = _lines([
+        _ev("1", "step_started", step="s", kind="agent", phase="p"),
+        _ev("2", "llm_response", agent_id="a",
+            raw={"content": [{"type": "text", "text": "First prose turn."}]}, usage={}),
+        _ev("3", "user_message", agent_id="step:p/s",
+            content=[{"type": "text", "text": "   \n  "}]),  # whitespace-only → renders nothing
+        _ev("4", "llm_response", agent_id="a",
+            raw={"content": [{"type": "text", "text": "Second prose turn."}]}, usage={}),
+    ], full=True)
+    i = next(k for k, ln in enumerate(out) if "Second prose turn." in ln)
+    assert out[i - 1].strip() == "", "one blank separates the prose turns"
+    assert out[i - 2].strip() != "", "no doubled blank around the empty injected message"
+
+
+def test_full_view_renders_injected_top_level_prompt() -> None:
+    # In --full a non-interactive user_message (no preceding awaiting_user_input)
+    # is the agent's injected prompt: it renders under a dim `injected message:`
+    # label with its verbatim body visible. The lean view still drops it entirely
+    # (spec acceptance #2, #5).
+    events = [
+        _ev("1", "step_started", step="s", kind="agent", phase="p",
+            model="m", provider="anthropic"),
+        _ev("2", "user_message", agent_id="step:p/s",
+            content=[{"type": "text", "text": "REAL PROMPT: build the widget"}]),
+    ]
+    full = "\n".join(_lines(events, full=True))
+    assert "injected message:" in full
+    assert "REAL PROMPT: build the widget" in full
+
+    lean = "\n".join(_lines(events))
+    assert "injected message:" not in lean
+    assert "REAL PROMPT: build the widget" not in lean
+
+
+def test_full_view_renders_subagent_task_description_injected() -> None:
+    # A subagent's first injected message is the parent's task_description to it.
+    # It routes into the fold's nested tree (agent_id "sub:<event-id>") and, in
+    # --full, renders as an `injected message:` block INSIDE the expanded fold.
+    # The lean view drops it (spec acceptance #2, #5).
+    events = [
+        _ev("1", "step_started", step="s", kind="agent", phase="p",
+            model="m", provider="anthropic"),
+        _ev("tk1", "tool_call", agent_id="step:p/s", id="b1", name="sub_agent",
+            input={"subagent_name": "explorer", "task_description": "go"}),
+        _ev("um1", "user_message", agent_id="sub:tk1",
+            content=[{"type": "text", "text": "map the auth module end to end"}]),
+        _ev("su1", "llm_response", agent_id="sub:tk1", provider="anthropic",
+            model="m", stop_reason="end_turn", usage={},
+            raw={"content": [{"type": "text", "text": "found it"}]}),
+        _ev("r1", "tool_result", agent_id="step:p/s", id="b1",
+            content='{"status":"Success"}', error=False),
+    ]
+    full = "\n".join(_lines(events, full=True))
+    assert "▾ explorer" in full
+    assert "injected message:" in full
+    assert "map the auth module end to end" in full
+
+    lean = "\n".join(_lines(events))
+    assert "map the auth module end to end" not in lean
+    assert "injected message:" not in lean
+
+
+def test_full_parallel_subagents_show_distinct_task_descriptions() -> None:
+    # Acceptance #3: two concurrently-dispatched explorers with different
+    # task_descriptions render as two folds whose expanded headers each carry
+    # their own description; the lean rows carry none.
+    events = [
+        _ev("2", "step_started", step="s", kind="agent", phase="p",
+            model="m", provider="anthropic"),
+        _ev("tk1", "tool_call", agent_id="step:p/s", id="b1", name="sub_agent",
+            input={"subagent_name": "explorer",
+                   "task_description": "Map the auth module"}),
+        _ev("tk2", "tool_call", agent_id="step:p/s", id="b2", name="sub_agent",
+            input={"subagent_name": "explorer",
+                   "task_description": "Map the billing module"}),
+        _ev("su1", "llm_response", agent_id="sub:tk1", provider="anthropic", model="m",
+            stop_reason="end_turn", usage={},
+            raw={"content": [{"type": "text", "text": "found auth"}]}),
+        _ev("su2", "llm_response", agent_id="sub:tk2", provider="anthropic", model="m",
+            stop_reason="end_turn", usage={},
+            raw={"content": [{"type": "text", "text": "found billing"}]}),
+        _ev("r1", "tool_result", agent_id="step:p/s", id="b1",
+            content='{"status":"Success"}', error=False),
+        _ev("r2", "tool_result", agent_id="step:p/s", id="b2",
+            content='{"status":"Success"}', error=False),
+    ]
+    full = "\n".join(_lines(events, full=True))
+    assert "▾ explorer · Map the auth module" in full
+    assert "▾ explorer · Map the billing module" in full
+
+    lean = "\n".join(_lines(events, full=False))
+    # Lean subagent_status_row is unchanged: the name row survives, the
+    # task description does not.
+    assert "  explorer" in lean
+    assert "Map the auth module" not in lean
+    assert "Map the billing module" not in lean
+
+
+def test_full_subagent_header_clips_and_collapses_task_description() -> None:
+    # Long descriptions clip to _SUBAGENT_TASK_CLIP chars + ellipsis; internal
+    # whitespace (incl. newlines) collapses to single spaces.
+    long_sub = nv.SubagentFold(
+        subagent_name="explorer", event_id="e", block_id="b",
+        nested=nv.NarrativeBuilder(), task_description="x" * 200)
+    long_out = list(rt._render_subagent(long_sub, depth=0, full=True,
+                                        color=False, width=80))
+    assert long_out[0] == "▾ explorer · " + "x" * rt._SUBAGENT_TASK_CLIP + "…"
+
+    multiline = nv.SubagentFold(
+        subagent_name="explorer", event_id="e", block_id="b",
+        nested=nv.NarrativeBuilder(), task_description="Map  the\nauth   module")
+    ml_out = list(rt._render_subagent(multiline, depth=0, full=True,
+                                      color=False, width=80))
+    assert ml_out[0] == "▾ explorer · Map the auth module"
+
+
+def test_subagent_outcome_plain_string_success_suppressed() -> None:
+    # §4: a plain-string SUCCESS return is exactly the nested transcript's final
+    # prose turn; the raw outcome block must not double-print it.
+    assert list(rt.subagent_outcome_lines(
+        _sub(outcome="found the auth module", is_error=False),
+        depth=1, color=False, width=80)) == []
+
+
+def test_full_subagent_plain_string_success_shown_once() -> None:
+    # Acceptance #4 (end-to-end): in --full a plain-string success return equals
+    # the subagent's final prose turn and appears exactly once — no raw outcome
+    # echo beneath it.
+    events = [
+        _ev("2", "step_started", step="s", kind="agent", phase="p",
+            model="m", provider="anthropic"),
+        _ev("tk1", "tool_call", agent_id="step:p/s", id="b1", name="sub_agent",
+            input={"subagent_name": "explorer",
+                   "task_description": "Map the billing module"}),
+        _ev("su1", "llm_response", agent_id="sub:tk1", provider="anthropic",
+            model="m", stop_reason="end_turn", usage={},
+            raw={"content": [{"type": "text", "text": "found the auth module"}]}),
+        _ev("r1", "tool_result", agent_id="step:p/s", id="b1",
+            content="found the auth module", error=False),
+    ]
+    full = "\n".join(_lines(events, full=True))
+    assert full.count("found the auth module") == 1
