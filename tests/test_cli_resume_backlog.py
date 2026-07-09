@@ -4,6 +4,7 @@ from pathlib import Path
 
 from imp.cli import main
 from imp.engine.change import Change
+from imp.engine.state import State
 from tests.conftest import _seed_control
 
 
@@ -41,7 +42,11 @@ def test_resume_opens_fresh_false_when_seeded_home_already_conversed(tmp_path: P
     ch = Change.create_draft(
         tmp_path, title="Idea", change_id="2026-06-16-idea55",
         base_branch="main", origin="idea", seed_opening="Idea")
-    _user_message(ch, "more context")
+    # "Has run" is the durable State.has_started fact now, not the presence of a
+    # user_message event: a seeded draft that has run >=1 step must replay.
+    st = State.load(ch.state_dir)
+    st.has_started = True
+    st.save(ch.state_dir)
     assert main._resume_opens_fresh(ch) is False
 
 

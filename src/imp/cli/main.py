@@ -1159,13 +1159,14 @@ def _cmd_chat(args: argparse.Namespace) -> int:
 def _resume_opens_fresh(change: Change) -> bool:
     """Whether a resume should open a fresh seeded session rather than replay history.
 
-    True for an un-materialized home that carries a seed and has no prior
-    conversation; False for a materialized change, a home without a seed, or any
-    home that already holds a conversation (those resume into their event-log)."""
+    True only for an un-materialized seed draft that has never run a step; a
+    change that has ever run (and is therefore archived-resumable) always
+    replays. Reads the durable per-change fact (State.has_started) from the
+    persisted state.json the resume flow already rehydrated -- never a re-scan
+    of events.jsonl."""
     if change.materialized or not change.seed_opening:
         return False
-    events = _load_events_for_id(change.control_root, change.id) or []
-    return _first_user_message(events) is None
+    return not State.load(change.state_dir).has_started
 
 
 def _warn_if_blocked(change: Change) -> None:
