@@ -579,11 +579,13 @@ class NarrativeBuilder:
         if top is not None:
             model = top.model
             if top.position_label:
-                # A position step's label is a counter — never a phrase. rotated_phrase is
-                # a verb-phrase concept, so it is deliberately excluded here so a rotating
-                # phrase can never land a verb on the position breadcrumb.
+                # The label is a counter that rides the position row (Activity.counter),
+                # never the spinner verb. The rotating phrase drives the spinner line
+                # instead; the counter label (live_label/label) is kept off static_verb so
+                # it can never leak onto the spinner. Before the first rotation
+                # rotated_phrase is None and the generic "thinking" fallback applies.
                 position = _join(top.phase_label, top.live_label or top.label)
-                static_verb: str | None = None
+                static_verb: str | None = top.rotated_phrase
             else:
                 position = top.phase_label
                 static_verb = top.live_label or top.rotated_phrase or top.label
