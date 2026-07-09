@@ -400,50 +400,105 @@ def test_resumed_step_reemit_awaiting_user_input_shows_caret() -> None:
     assert step.interactive is True
 
 
-def test_chrome_step_collapses_to_single_breadcrumb() -> None:
-    # §4: a chrome step (script/branch/merge gate) now prints a start header AND
-    # a `complete` breadcrumb, just like any agent step.
-    out = "\n".join(_lines([
+def test_chrome_step_collapses_to_single_line() -> None:
+    out = _lines([
         _ev("1", "change_created", title="t"),
         _ev("2", "step_started", step="spec-verify-commit", kind="script", phase="spec"),
         _ev("3", "step_completed", step="spec-verify-commit", kind="script",
             action={"verb": "continue"}),
-    ]))
-    assert "spec-verify-commit" in out
-    assert "spec-verify-commit · complete" in out   # show_complete now unconditional, dotted
-
-
-def test_open_chrome_step_shows_header() -> None:
-    # §4: an OPEN chrome step (step_started seen, no step_completed yet) renders
-    # its header line — just like any other open step. The old `name · running`
-    # line is gone; the header is the step name, carrying the step color.
-    out = _lines([
-        _ev("1", "change_created", title="t"),
-        _ev("2", "step_started", step="run-tests", kind="script",
-            phase="implement"),
     ])
-    hits = [ln for ln in out if "run-tests" in ln]
-    assert len(hits) == 1
-    assert "running" not in hits[0]
-    # The header carries the STEP color (not breadcrumb gray).
+    hits = [ln for ln in out if "spec-verify-commit" in ln]
+    assert hits == ["spec-verify-commit · complete"]   # header+breadcrumb collapsed
+
+
+def test_open_chrome_step_shows_header_then_collapses_on_complete() -> None:
+    open_out = _lines([
+        _ev("1", "change_created", title="t"),
+        _ev("2", "step_started", step="run-tests", kind="script", phase="implement"),
+    ])
+    open_hits = [ln for ln in open_out if "run-tests" in ln]
+    assert len(open_hits) == 1
+    assert "complete" not in open_hits[0]              # in-flight, not "complete"
     colored = list(render_tree(nv.build_tree([
         _ev("1", "change_created", title="t"),
-        _ev("2", "step_started", step="run-tests", kind="script",
-            phase="implement"),
+        _ev("2", "step_started", step="run-tests", kind="script", phase="implement"),
     ]), full=False, color=True, width=80))
-    header_ln = next(ln for ln in colored if "run-tests" in ln)
-    assert pal._ANSI["step"] in header_ln
-    # Once the gate completes, both header and `complete` breadcrumb appear.
-    out2 = _lines([
+    assert pal._ANSI["step"] in next(ln for ln in colored if "run-tests" in ln)
+    done_out = _lines([
         _ev("1", "change_created", title="t"),
-        _ev("2", "step_started", step="run-tests", kind="script",
-            phase="implement"),
+        _ev("2", "step_started", step="run-tests", kind="script", phase="implement"),
         _ev("3", "step_completed", step="run-tests", kind="script",
             action={"verb": "continue"}),
     ])
-    hits2 = [ln for ln in out2 if "run-tests" in ln]
-    assert len(hits2) == 2                       # header + breadcrumb
-    assert any("complete" in ln for ln in hits2)
+    done_hits = [ln for ln in done_out if "run-tests" in ln]
+    assert done_hits == ["run-tests · complete"]       # collapsed to one line
+
+
+def test_step_has_body_ignores_only_the_trailing_breadcrumb() -> None:
+    node = nv.StepNode(name="s", kind="script")
+    assert rt.step_has_body(node) is False
+    node.children.append(nv.BreadcrumbLine(step_name="s", elapsed_s=0.0,
+                                           action={"verb": "continue"}))
+    assert rt.step_has_body(node) is False           # a breadcrumb is not a body
+    node.children.append(nv.LiteralTextNode(text="hi"))
+    assert rt.step_has_body(node) is True
+
+
+def test_deferred_leaf_holds_empty_script_not_bodied_or_agent() -> None:
+    empty = nv.StepNode(name="verify", kind="script", show_label=True)
+    assert rt.deferred_leaf(empty) is True            # body-less script → collapsible
+    empty.children.append(nv.LiteralTextNode(text="surfaced output"))
+    assert rt.deferred_leaf(empty) is False           # a real body → not collapsed
+    agent = nv.StepNode(name="spec", kind="agent", show_label=True)
+    assert rt.deferred_leaf(agent) is False           # agents always emit a body
+
+
+def test_deferred_leaf_keeps_hidden_body_emitting_step_atomic() -> None:
+    # A HIDDEN step that emits an error body must STAY a leaf (body-insensitive) so
+    # the live driver renders it atomically at close — reveal-on-pause == imp log.
+    node = nv.StepNode(name="merge-guard", kind="script", show_label=False)
+    assert rt.deferred_leaf(node) is True
+    node.children.append(nv.ErrorNode(message="boom", category="script"))
+    assert rt.deferred_leaf(node) is True             # error body does NOT unhold it
+
+
+def test_collapsed_step_line_two_tone_label_and_gray_tail() -> None:
+    node = nv.StepNode(name="verify", kind="script", label="running tests",
+                       show_label=True, closed=True,
+                       start_ts="2026-06-10T00:00:00", end_ts="2026-06-10T00:00:05")
+    assert rt.collapsed_step_line(node, depth=1, color=False) == \
+        "  running tests · complete · 5s"
+    colored = rt.collapsed_step_line(node, depth=1, color=True)
+    assert pal._ANSI["step"] in colored               # label in step color
+    assert pal._ANSI["gray"] in colored               # tail in breadcrumb gray
+
+
+def test_body_less_visible_step_collapses_to_one_line() -> None:
+    out = _lines([
+        _ev("1", "change_created", title="t"),
+        _ev("2", "step_started", step="verify", kind="script", phase="implement",
+            label="running tests"),
+        _ev("3", "step_completed", step="verify", kind="script",
+            action={"verb": "continue"}),
+    ])
+    hits = [ln for ln in out if "running tests" in ln]
+    assert hits == ["running tests · complete"]       # header+breadcrumb collapsed
+
+
+def test_visible_step_with_body_renders_header_not_collapsed() -> None:
+    out = _lines([
+        _ev("1", "change_created", title="t"),
+        _ev("2", "step_started", step="plan-finalized", kind="script", phase="plan",
+            label="finalizing plan", show_output=True),
+        _ev("3", "script_output", step="plan-finalized", stdout="plan 1/2 · 3 tasks"),
+        _ev("4", "step_completed", step="plan-finalized", kind="script",
+            action={"verb": "continue"}),
+    ])
+    joined = "\n".join(out)
+    assert "plan 1/2 · 3 tasks" in joined              # body survives
+    assert "finalizing plan · complete" in joined      # breadcrumb, not a collapsed line
+    hits = [ln for ln in out if "finalizing plan" in ln]
+    assert len(hits) >= 2                              # header line + breadcrumb line
 
 
 def test_breadcrumb_and_fallback_recede_to_gray() -> None:

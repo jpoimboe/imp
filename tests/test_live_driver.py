@@ -698,9 +698,9 @@ def test_tty_chrome_steps_no_committed_status_no_double_blanks(monkeypatch) -> N
     rows = [ln.rstrip() for ln in screen.display]
     # The transient spinner line never gets committed to scroll-back.
     assert not any("working" in r for r in rows), f"committed status line: {rows}"
-    # Each chrome step now prints both a header and a `complete` breadcrumb (§4).
-    assert sum("spec-verify-commit" in r for r in rows) == 2
-    assert sum("fast-path-gate" in r for r in rows) == 2
+    # Each body-less chrome step now collapses to a single `<label> · complete` row.
+    assert sum("spec-verify-commit" in r for r in rows) == 1
+    assert sum("fast-path-gate" in r for r in rows) == 1
     # No two blank content rows in a row (trailing screen padding excluded).
     content = rows[:max(i for i, r in enumerate(rows) if r.strip()) + 1]
     assert not any(not content[i].strip() and not content[i + 1].strip()
@@ -805,7 +805,7 @@ def test_prose_does_not_restart_span_while_a_subagent_runs() -> None:
     assert calls == ["restart"]                                          # only step_started
 
 
-def test_chrome_step_header_streams_live_and_matches_log() -> None:
+def test_chrome_step_collapses_live_and_matches_log() -> None:
     drv, out = _driver()
     events = [
         ev("2", "step_started", step="gate", kind="script", phase="verify"),
@@ -816,9 +816,9 @@ def test_chrome_step_header_streams_live_and_matches_log() -> None:
         drv.on_event(e)
     drv.finish()
     body = _body(out)
-    assert any("gate" in ln and "complete" not in ln for ln in body)   # start header
-    assert any("gate · complete" in ln for ln in body)                  # breadcrumb
-    assert body == _render_body(events)                                 # live == imp log
+    gate_hits = [ln for ln in body if "gate" in ln]
+    assert gate_hits == ["gate · complete"]            # one collapsed line
+    assert body == _render_body(events)                # live == imp log
 
 
 def test_prepare_for_prompt_flushes_separator_with_indent_bytes() -> None:

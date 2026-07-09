@@ -289,10 +289,23 @@ def step_no_body(node: nv.StepNode) -> bool:
     return node.kind != "agent" and not node.show_output
 
 
+def step_has_body(node: nv.StepNode) -> bool:
+    """True once the step has recorded any child other than its trailing completion
+    breadcrumb — prose, surfaced script output, a lane-wait node, an error, a
+    subagent fold, a tool burst. A step whose only child is a breadcrumb (or which
+    has no children) has emitted no body."""
+    return any(not isinstance(c, nv.BreadcrumbLine) for c in node.children)
+
+
 def deferred_leaf(node: nv.StepNode) -> bool:
-    """A hidden-frame, no-body step renders as a single deferred leaf: silent on a
-    linear outcome, its frame revealed only on a non-linear one."""
-    return step_hidden(node) and step_no_body(node)
+    """A step the renderers hold as a single atomic leaf (blocked until close, then
+    rendered in one shot by `_render`) rather than a streamed container. Two cases:
+    a HIDDEN chrome step is always a leaf, body-INSENSITIVE (reveal-on-pause parity);
+    a VISIBLE body-capable-of-being-empty step is held until it gains a body or
+    completes empty (then collapses to one line). `step_no_body` is the outer gate,
+    so agents and show_output steps are never held; the live driver calls this
+    unchanged, so it flows through both paths."""
+    return step_no_body(node) and (step_hidden(node) or not step_has_body(node))
 
 
 def frame_suppressed(node: Any) -> bool:
@@ -417,6 +430,20 @@ def _step_header_label(node: nv.StepNode) -> str:
     phase rule drawn above the step."""
     step_label = (node.live_label or node.label) if node.position_label else node.label
     return step_label or node.name
+
+
+def collapsed_step_line(node: nv.StepNode, *, depth: int, color: bool,
+                        gutters: tuple[int, ...] = ()) -> str:
+    """The single line a body-less visible step collapses to on completion:
+    `<label> · complete · <elapsed>` — label in the step color, the
+    ` · complete · <elapsed>` tail in the existing breadcrumb gray."""
+    label = _step_header_label(node)
+    done = fmt_seconds_done(nv.elapsed_seconds(node.start_ts, node.end_ts))
+    tail = " · complete" + (f" · {done}" if done else "")
+    indent = _gutter_indent(depth, gutters, color)
+    return (indent
+            + pal.ansi(label, *pal.NODE_COLORS["step"], enabled=color)
+            + pal.ansi(tail, *pal.NODE_COLORS["breadcrumb"], enabled=color))
 
 
 def header_line(node: Any, *, depth: int, color: bool,
@@ -567,7 +594,15 @@ def _render(node: Any, *, depth: int, full: bool, color: bool,
 
     if isinstance(node, nv.StepNode):
         if deferred_leaf(node) and quiet_step_is_silent(node):
-            return
+            if step_hidden(node):
+                return                       # hidden chrome: silent on a linear outcome
+            if node.closed:
+                yield collapsed_step_line(node, depth=depth, color=color,
+                                          gutters=gutters)
+                return
+            # A visible body-less step still open at render time (a force-flush at
+            # run end, or a truncated log) falls through to render just its header —
+            # an in-flight step must not be labelled "complete".
         # A suppressed-frame step that yielded to a non-linear outcome (a pause/error) falls
         # through here and renders its full block, just like a loud step.
         # A step's content flows at the step's OWN indent (no +1): the header is a

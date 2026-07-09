@@ -57,10 +57,10 @@ def test_show_label_false_agent_shows_prose_without_step_header() -> None:
 
 # --- predicate unit tests ---
 
-def test_default_step_not_hidden_not_deferred() -> None:
+def test_visible_body_less_script_is_collapsible_leaf() -> None:
     node = nv.StepNode(name="s", kind="script", show_label=True)
     assert step_hidden(node) is False
-    assert deferred_leaf(node) is False
+    assert deferred_leaf(node) is True                 # body-less → collapsible
 
 
 
