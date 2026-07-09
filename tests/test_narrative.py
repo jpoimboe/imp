@@ -2731,7 +2731,7 @@ def test_waiting_for_test_lane_leaves_no_lifecycle_line() -> None:
     b.add(_ev("1", "step_started", step="verify", kind="script", phase="build"))
     b.add(_ev("2", "waiting_for_test_lane", step="verify"))
     lits = _all_literals(b.tree.root)
-    assert not any(n.text == "waiting for a test slot" for n in lits)
+    assert not any(n.text == "waiting to test" for n in lits)
 
 
 def test_current_activity_position_segments_for_a_plan_phase_step() -> None:

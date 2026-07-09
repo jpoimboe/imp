@@ -975,9 +975,9 @@ def _h_waiting_for_test_lane(
     self._flush_burst()
     # Lane-waits are live-footer-only: no scrollback node. The step's `started`
     # already fired, so current_activity() reads its "running tests" phrase —
-    # override the live footer verb until test_lane_acquired clears it back.
+    # override the footer verb with "waiting to test" until test_lane_acquired clears it.
     if self._step_stack:
-        self._step_stack[-1].live_label = "waiting for a test slot"
+        self._step_stack[-1].live_label = "waiting to test"
         self._step_stack[-1].lane_wait = True
 
 

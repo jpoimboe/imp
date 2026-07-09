@@ -28,13 +28,13 @@ def test_footer_verb_before_waiting_is_running_tests() -> None:
 def test_waiting_for_test_lane_overrides_footer_verb() -> None:
     b = _build()
     b.add(ev("3", "waiting_for_test_lane", step="integration-tests"))
-    assert b.current_activity().verb == "waiting for a test slot"
+    assert b.current_activity().verb == "waiting to test"
 
 
 def test_test_lane_acquired_restores_footer_verb() -> None:
     b = _build()
     b.add(ev("3", "waiting_for_test_lane", step="integration-tests"))
-    assert b.current_activity().verb == "waiting for a test slot"
+    assert b.current_activity().verb == "waiting to test"
     b.add(ev("4", "test_lane_acquired", step="integration-tests"))
     assert b.current_activity().verb == "running tests"
 
@@ -59,4 +59,4 @@ def test_waiting_for_test_lane_leaves_no_narrative_node() -> None:
     b = _build()
     b.add(ev("3", "waiting_for_test_lane", step="integration-tests"))
     out = "\n".join(render_tree(b.tree, full=False, color=False, width=80))
-    assert "waiting for a test slot" not in out
+    assert "waiting to test" not in out
