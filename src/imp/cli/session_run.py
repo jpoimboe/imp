@@ -65,7 +65,8 @@ async def run_session_client(
             await run_terminal_client(
                 attach=attach, driver=driver, coord=coord, solicit=solicit,
                 change_id=change.id, control_root=change.control_root,
-                leave_state=leave_state, leave_mode=leave_mode, title=title)
+                leave_state=leave_state, leave_mode=leave_mode, title=title,
+                local_echo=driver.seed_pending_reply)
         except TimeoutError:
             startup_failed = True
             # attach raised before run_terminal_client's teardown finally runs.
