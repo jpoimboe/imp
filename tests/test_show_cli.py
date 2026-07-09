@@ -563,3 +563,154 @@ def test_filter_events_non_positive_limit_returns_all() -> None:
     events = [{"type": "tick", "agent_id": "a"} for _ in range(5)]
     assert len(_filter_events(events, limit=0)) == 5
     assert len(_filter_events(events, limit=-1)) == 5
+
+
+def _seed_events(ch: Change, events: list[dict]) -> None:
+    with ch.events_path.open("a", encoding="utf-8") as fh:
+        for e in events:
+            fh.write(json.dumps(e) + "\n")
+
+
+def test_show_events_digest_by_default(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _seed_control(tmp_path)
+    ch = _seed_with_artifacts(tmp_path, _ID, "Feat")
+    _seed_events(ch, [
+        {"type": "user_message", "agent_id": "step:plan/plan-writer",
+         "timestamp": "2026-06-01T00:00:00+00:00",
+         "payload": {"role": "user",
+                     "content": [{"type": "text", "text": "hello world"}]}},
+    ])
+    out = _run(monkeypatch, tmp_path, "show", _ID, "events")
+    # A digest line: envelope + summarized text, NOT a raw JSONL dump.
+    assert "user_message" in out
+    assert "hello world" in out
+    assert '{"type"' not in out
+
+
+def test_show_events_full_prints_raw_json(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _seed_control(tmp_path)
+    ch = _seed_with_artifacts(tmp_path, _ID, "Feat")
+    _seed_events(ch, [
+        {"type": "user_message", "agent_id": "a",
+         "timestamp": "2026-06-01T00:00:00+00:00",
+         "payload": {"role": "user",
+                     "content": [{"type": "text", "text": "hi"}]}},
+    ])
+    # --type isolates the seeded event from the change_created event that
+    # Change.create writes; --full then renders it as raw JSON via full_line.
+    out = _run(monkeypatch, tmp_path, "show", _ID, "events",
+               "--type", "user_message", "--full")
+    lines = [ln for ln in out.splitlines() if ln]
+    assert len(lines) == 1
+    obj = json.loads(lines[0])
+    assert obj["type"] == "user_message"
+    assert obj["payload"]["content"][0]["text"] == "hi"
+
+
+def test_show_events_full_redacts_step_context(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _seed_control(tmp_path)
+    ch = _seed_with_artifacts(tmp_path, _ID, "Feat")
+    _seed_events(ch, [
+        {"type": "step_context", "agent_id": "step:plan/plan-writer",
+         "timestamp": "2026-06-01T00:00:00+00:00",
+         "payload": {"provider": "p", "model": "m",
+                     "system_prompt": "TOP SECRET PROMPT",
+                     "tools_schema": [{"name": "x"}]}},
+    ])
+    out = _run(monkeypatch, tmp_path, "show", _ID, "events", "--full")
+    assert "TOP SECRET PROMPT" not in out
+    assert "[redacted]" in out
+
+
+def test_show_events_type_filter(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _seed_control(tmp_path)
+    ch = _seed_with_artifacts(tmp_path, _ID, "Feat")
+    _seed_events(ch, [
+        {"type": "user_message", "agent_id": "a",
+         "timestamp": "2026-06-01T00:00:00+00:00",
+         "payload": {"role": "user",
+                     "content": [{"type": "text", "text": "keep-me"}]}},
+        {"type": "tool_call", "agent_id": "b",
+         "timestamp": "2026-06-01T00:00:01+00:00",
+         "payload": {"id": "t1", "name": "read_file", "input": {}}},
+    ])
+    out = _run(monkeypatch, tmp_path, "show", _ID, "events",
+               "--type", "user_message")
+    assert "keep-me" in out
+    assert "read_file" not in out
+
+
+def test_show_events_agent_filter(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _seed_control(tmp_path)
+    ch = _seed_with_artifacts(tmp_path, _ID, "Feat")
+    _seed_events(ch, [
+        {"type": "tool_call", "agent_id": "step:plan/plan-writer",
+         "timestamp": "2026-06-01T00:00:00+00:00",
+         "payload": {"id": "t1", "name": "read_file", "input": {}}},
+        {"type": "tool_call", "agent_id": "sub:abc123",
+         "timestamp": "2026-06-01T00:00:01+00:00",
+         "payload": {"id": "t2", "name": "write_file", "input": {}}},
+    ])
+    out = _run(monkeypatch, tmp_path, "show", _ID, "events", "--agent", "sub:")
+    assert "write_file" in out
+    assert "read_file" not in out
+
+
+def test_show_events_limit_keeps_last_n(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _seed_control(tmp_path)
+    ch = _seed_with_artifacts(tmp_path, _ID, "Feat")
+    _seed_events(ch, [
+        {"type": "tick", "agent_id": "a",
+         "timestamp": f"2026-06-01T00:00:0{i}+00:00",
+         "payload": {"seq": i}}
+        for i in range(5)
+    ])
+    out = _run(monkeypatch, tmp_path, "show", _ID, "events", "--limit", "2")
+    lines = [ln for ln in out.splitlines() if ln]
+    assert len(lines) == 2
+    assert "seq=3" in out
+    assert "seq=4" in out
+    assert "seq=0" not in out
+
+
+def test_show_events_digest_from_archive(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _seed_control(tmp_path)
+    events = tmp_path / "arch-events.jsonl"
+    events.write_text(
+        json.dumps({
+            "id": "arch01", "type": "user_message",
+            "agent_id": "step:plan/plan-writer",
+            "timestamp": "2026-06-01T00:00:00+00:00",
+            "payload": {"role": "user",
+                        "content": [{"type": "text", "text": "archived hello"}]},
+        }) + "\n"
+    )
+    cj = tmp_path / "arch-change.json"
+    cj.write_text(json.dumps({
+        "id": "arch01", "title": "Arch", "base_branch": "main",
+        "created_at": "2026-06-01T00:00:00+00:00", "depends_on": [],
+    }))
+    sj = tmp_path / "arch-state.json"
+    sj.write_text(json.dumps({"id": "arch01", "status": "completed", "step": None}))
+    archive.archive_change(
+        tmp_path, "arch01", events_path=events, change_json_path=cj,
+        state_json_path=sj,
+    )
+    out = _run(monkeypatch, tmp_path, "show", "arch01", "events")
+    assert "user_message" in out
+    assert "archived hello" in out
+    assert '{"type"' not in out

@@ -61,6 +61,7 @@ from imp.engine.awaiting_user_input import AwaitingUserInput
 from imp.engine.change import Change
 from imp.engine.change_id import new_change_id
 from imp.engine.errors import LayoutMismatch, LoadError, LoadErrors
+from imp.engine.events_digest import digest_event, full_line
 from imp.engine.executor import RunResult
 from imp.engine.project_root import find_project_root
 from imp.engine.state import LockHeld, State, lock_is_live
@@ -1722,7 +1723,15 @@ def _cmd_show(args: argparse.Namespace) -> int:
         rel = _show_newest_plan_rel(control, change_id)
         data = _show_artifact(control, change_id, rel) if rel else None
     elif resource == "events":
-        data = _show_runtime(control, change_id, "events.jsonl")
+        events = _load_events_for_id(control, change_id)
+        if events is None:
+            print(f"imp: no events for {change_id!r}", file=sys.stderr)
+            return 2
+        events = _filter_events(
+            events, types=args.type, agent=args.agent, limit=args.limit)
+        render = full_line if args.full else digest_event
+        _page_or_print([render(e) for e in events], no_pager=args.no_pager)
+        return 0
     elif resource == "status":
         raw = _show_runtime(control, change_id, "state.json")
         if raw is None:
@@ -3034,6 +3043,21 @@ def _build_parser() -> argparse.ArgumentParser:
     p_show.add_argument(
         "--no-pager", action="store_true",
         help="Disable the pager even when stdout is a TTY.")
+    p_show.add_argument(
+        "--full", action="store_true",
+        help="For the events resource: print raw event payloads (step_context "
+             "redacted, byte-capped) instead of digest lines.")
+    p_show.add_argument(
+        "--type", default=None,
+        help="For the events resource: keep only these event types "
+             "(comma-separated).")
+    p_show.add_argument(
+        "--agent", default=None,
+        help="For the events resource: keep only events whose agent id "
+             "contains this substring.")
+    p_show.add_argument(
+        "--limit", type=int, default=None,
+        help="For the events resource: keep only the last N events.")
     p_show.set_defaults(func=_cmd_show)
 
     p_search = sub.add_parser(
