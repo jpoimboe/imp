@@ -1965,7 +1965,8 @@ def test_mid_step_position_change_re_emits_a_header() -> None:
     drv.on_event(ev("3", "step_label_updated", agent_id="step:code/task-lead",
                      label="task 2/2"))
     body = "\n".join(_body(out))
-    assert "implementation phase · plan 1/1 · task 2/2" in body
+    assert "task 2/2" in body                          # new position re-emitted
+    assert "implementation phase" not in body          # phase rides the rule, not the header
 
 
 def test_unchanged_position_push_emits_no_duplicate_header() -> None:

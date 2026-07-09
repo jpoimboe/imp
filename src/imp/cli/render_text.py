@@ -409,6 +409,16 @@ def phase_breadcrumb_line(node: nv.PhaseNode, *, depth: int, color: bool,
                  *pal.NODE_COLORS["breadcrumb"], gutters=gutters)
 
 
+def _step_header_label(node: nv.StepNode) -> str:
+    """The step's own scrollback label — its position counter (live or static) for
+    a `position_label` step, else its plain label. The raw step name is the loud
+    fallback when a visible step somehow has no label, so the omission is
+    caught and fixed. The phase name is NOT prefixed here: it already rides the
+    phase rule drawn above the step."""
+    step_label = (node.live_label or node.label) if node.position_label else node.label
+    return step_label or node.name
+
+
 def header_line(node: Any, *, depth: int, color: bool,
                 gutters: tuple[int, ...] = ()) -> str:
     """The single header line for a container node (PhaseNode / StepNode /
@@ -424,8 +434,7 @@ def header_line(node: Any, *, depth: int, color: bool,
     if isinstance(node, nv.SubagentFold):
         return _line(f"· {node.subagent_name}", depth, color,
                      *pal.NODE_COLORS["subagent"], gutters=gutters)
-    step_position = (node.live_label or node.label) if node.position_label else None
-    label = compose_label([node.phase_label, step_position]) or node.name
+    label = _step_header_label(node)
     route = (pal.ansi(f" · {node.route_label}", *pal.NODE_COLORS["lifecycle"],
                       enabled=color)
              if node.route_label else "")
