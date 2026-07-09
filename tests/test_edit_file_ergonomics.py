@@ -248,3 +248,147 @@ def test_short_old_repr_stays_full_and_escaped(tmp_path: Path) -> None:
     (tmp_path / "x.py").write_text("content\n")
     with pytest.raises(ValueError, match=r"'nope\\nx' not found in 'x\.py'"):
         _edit(_ctx(tmp_path), path="x.py", old="nope\nx", new="y")
+
+
+def test_apply_edit_helper_computes_body_count_and_labels() -> None:
+    from imp.agents.tools.fs import _apply_edit
+
+    # Default mode: unique match -> replaced once, count reported.
+    edited, count = _apply_edit("a b a", "b", "X", "f.py", False)
+    assert (edited, count) == ("a X a", 1)
+
+    # replace_all: every occurrence replaced, count is the number found.
+    edited, count = _apply_edit("a a a", "a", "Q", "f.py", True)
+    assert (edited, count) == ("Q Q Q", 3)
+
+    # Not-found carries the label prefix and the pinned path-bearing message.
+    with pytest.raises(ValueError, match=r"edit #2: 'z' not found in 'f\.py'"):
+        _apply_edit("abc", "z", "Y", "f.py", False, label="edit #2: ")
+
+    # Non-unique without replace_all carries the label prefix and count.
+    with pytest.raises(
+        ValueError,
+        match=r"edit #3: 'a' not unique in 'f\.py' \(found 2 occurrences\)",
+    ):
+        _apply_edit("a a", "a", "Y", "f.py", False, label="edit #3: ")
+
+
+def test_batch_three_edits_single_write_and_final_text(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import imp.agents.tools.fs as fs
+
+    writes: list[str] = []
+    real = fs._atomic_write_bytes
+
+    def spy(resolved: Path, data: bytes, *, display_path: str) -> None:
+        writes.append(display_path)
+        real(resolved, data, display_path=display_path)
+
+    monkeypatch.setattr(fs, "_atomic_write_bytes", spy)
+    (tmp_path / "x.py").write_text("one\ntwo\nthree\n")
+    out = _edit(_ctx(tmp_path), path="x.py", edits=[
+        {"old": "one", "new": "1"},
+        {"old": "two", "new": "2"},
+        {"old": "three", "new": "3"},
+    ])
+    assert out == "applied 3 edits to x.py"
+    assert (tmp_path / "x.py").read_text() == "1\n2\n3\n"
+    assert len(writes) == 1  # exactly one atomic write for the whole batch
+
+
+def test_batch_sequential_dependency(tmp_path: Path) -> None:
+    # edit 2's `old` only exists AFTER edit 1 runs; passing proves edits are
+    # applied to the running in-memory body, not independently to the original.
+    (tmp_path / "x.py").write_text("foo\n")
+    out = _edit(_ctx(tmp_path), path="x.py", edits=[
+        {"old": "foo", "new": "bar"},
+        {"old": "bar", "new": "baz"},
+    ])
+    assert out == "applied 2 edits to x.py"
+    assert (tmp_path / "x.py").read_text() == "baz\n"
+
+
+def test_batch_mid_failure_writes_nothing(tmp_path: Path) -> None:
+    p = tmp_path / "x.py"
+    p.write_text("alpha\nbeta\n")
+    before = p.read_text()
+    with pytest.raises(ValueError, match=r"edit #2: 'ZZZ' not found in 'x\.py'"):
+        _edit(_ctx(tmp_path), path="x.py", edits=[
+            {"old": "alpha", "new": "A"},
+            {"old": "ZZZ", "new": "Z"},
+        ])
+    assert p.read_text() == before  # all-or-nothing: original intact
+
+
+def test_batch_item_replace_all_replaces_every_occurrence(tmp_path: Path) -> None:
+    (tmp_path / "x.py").write_text("a a a\nb\n")
+    out = _edit(_ctx(tmp_path), path="x.py", edits=[
+        {"old": "a", "new": "X", "replace_all": True},
+        {"old": "b", "new": "Y"},
+    ])
+    assert out == "applied 2 edits to x.py"
+    assert (tmp_path / "x.py").read_text() == "X X X\nY\n"
+
+
+def test_batch_item_without_replace_all_rejects_non_unique(tmp_path: Path) -> None:
+    p = tmp_path / "x.py"
+    p.write_text("a a\n")
+    before = p.read_text()
+    with pytest.raises(
+        ValueError, match=r"edit #1: 'a' not unique in 'x\.py' \(found 2 occurrences\)"
+    ):
+        _edit(_ctx(tmp_path), path="x.py", edits=[{"old": "a", "new": "X"}])
+    assert p.read_text() == before
+
+
+def test_batch_rejects_top_level_old_new(tmp_path: Path) -> None:
+    (tmp_path / "x.py").write_text("a\n")
+    with pytest.raises(ValueError, match=r"pass either edits .* or old/new"):
+        _edit(_ctx(tmp_path), path="x.py", old="a", new="b",
+              edits=[{"old": "a", "new": "b"}])
+    assert (tmp_path / "x.py").read_text() == "a\n"  # nothing written
+
+
+def test_batch_rejects_top_level_replace_all(tmp_path: Path) -> None:
+    (tmp_path / "x.py").write_text("a\n")
+    with pytest.raises(ValueError, match=r"pass either edits .* not both"):
+        _edit(_ctx(tmp_path), path="x.py",
+              edits=[{"old": "a", "new": "b"}], replace_all=True)
+    assert (tmp_path / "x.py").read_text() == "a\n"
+
+
+def test_single_mode_requires_both_old_and_new(tmp_path: Path) -> None:
+    (tmp_path / "x.py").write_text("a\n")
+    with pytest.raises(ValueError, match="requires both old and new"):
+        _edit(_ctx(tmp_path), path="x.py", old="a")  # new omitted -> None
+    assert (tmp_path / "x.py").read_text() == "a\n"
+
+
+@pytest.mark.parametrize("edits,msg", [
+    ([], r"edits must not be empty"),
+    ("nope", r"edits must be a list"),
+    ([42], r"edit #1: each edit must be a dict"),
+    ([{"old": "a"}], r"edit #1: missing required key 'old' or 'new'"),
+    ([{"old": "", "new": "x"}], r"edit #1: old must not be empty"),
+    ([{"old": 1, "new": "x"}], r"edit #1: old and new must be strings"),
+    ([{"old": "a", "new": "b", "replace_all": "yes"}],
+     r"edit #1: replace_all must be a bool"),
+])
+def test_batch_malformed_rejected_before_write(
+    tmp_path: Path, edits: object, msg: str
+) -> None:
+    p = tmp_path / "x.py"
+    p.write_text("a\n")
+    before = p.read_text()
+    with pytest.raises(ValueError, match=msg):
+        _edit(_ctx(tmp_path), path="x.py", edits=edits)
+    assert p.read_text() == before
+
+
+def test_edit_file_description_documents_edits_batch() -> None:
+    desc = get_registry()["edit_file"].description
+    assert "edits" in desc
+    assert "replace_all?" in desc
+    assert "sequential" in desc.lower()
+    assert "all-or-nothing" in desc.lower()

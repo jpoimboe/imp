@@ -285,6 +285,47 @@ def _short_repr(s: str, cap: int = 200) -> str:
     return f"{s[:cap]!r}… [{len(s)} chars total]"
 
 
+def _apply_edit(
+    body: str, old: str, new: str, path: str, replace_all: bool, *, label: str = "",
+) -> tuple[str, int]:
+    """Count/find/replace `old`->`new` in an in-memory `body`. Returns the edited
+    body and the occurrence count. `label` prefixes error messages (empty for the
+    single-edit path -> today's exact text; `edit #N: ` for a batch item). Assumes
+    `old` is non-empty — callers validate that before invoking."""
+    count = body.count(old)
+    if count == 0:
+        raise ValueError(f"{label}{_short_repr(old)} not found in {path!r}")
+    if not replace_all and count > 1:
+        raise ValueError(f"{label}{_short_repr(old)} not unique in {path!r} "
+                         f"(found {count} occurrences)")
+    edited = body.replace(old, new) if replace_all else body.replace(old, new, 1)
+    return edited, count
+
+
+def _validate_batch(edits: object) -> None:
+    """Structural + empty-`old` validation for a batch, run BEFORE any file read
+    so a malformed batch never touches disk. Type/shape errors here are the only
+    ones raised pre-read; count/find/uniqueness are checked per edit during
+    sequential application (still before the single write)."""
+    if not isinstance(edits, list):
+        raise ValueError("edits must be a list of {old, new, replace_all?} dicts")
+    if not edits:
+        raise ValueError("edits must not be empty")
+    for i, item in enumerate(edits, 1):
+        label = f"edit #{i}: "
+        if not isinstance(item, dict):
+            raise ValueError(f"{label}each edit must be a dict with keys "
+                             f"old, new, optional replace_all")
+        if "old" not in item or "new" not in item:
+            raise ValueError(f"{label}missing required key 'old' or 'new'")
+        if not isinstance(item["old"], str) or not isinstance(item["new"], str):
+            raise ValueError(f"{label}old and new must be strings")
+        if item["old"] == "":
+            raise ValueError(f"{label}old must not be empty")
+        if not isinstance(item.get("replace_all", False), bool):
+            raise ValueError(f"{label}replace_all must be a bool")
+
+
 def _atomic_write_bytes(resolved: Path, data: bytes, *, display_path: str) -> None:
     """Atomic write-back: temp file + os.replace.
 
@@ -340,18 +381,39 @@ def _atomic_write_bytes(resolved: Path, data: bytes, *, display_path: str) -> No
         "retrying edit_file on it will keep failing). `old` must be "
         "file-faithful text — never read_file/grep display output with its "
         "line-number prefixes, `…[truncated]` suffixes, or U+FFFD "
-        "characters; those exist only in the display and will never match."
+        "characters; those exist only in the display and will never match. "
+        "To batch several edits to one file in a single call, pass `edits`: a "
+        "list of items, each `{old, new, replace_all?}` with the same match "
+        "rules as a single edit. The file is read once, the edits apply "
+        "sequentially (each edit sees the result of the earlier ones), and the "
+        "batch is all-or-nothing — if any edit fails its match rule the file is "
+        "left untouched. Pass EITHER `edits` OR top-level `old`/`new`, not both."
     ),
 )
-async def edit_file(ctx: ToolContext, path: str, old: str, new: str, *,
-                    replace_all: bool = False) -> str:
-    if old == "":
-        # "abc".count("") == len+1, so an empty old is never "absent" — and
-        # under replace_all, body.replace("", new) would insert `new` between
-        # EVERY character of the file. (Previously only the accidental
-        # count("") > 1 uniqueness error blocked this, with a misleading
-        # message; replace_all=True removes exactly that accident.)
-        raise ValueError("old must not be empty")
+async def edit_file(ctx: ToolContext, path: str, old: str | None = None,
+                    new: str | None = None, *, replace_all: bool = False,
+                    edits: list[dict[str, object]] | None = None) -> str:
+    plan: list[tuple[str, str, bool]]
+    if edits is not None:
+        # Mutual exclusion: batch mode owns the whole call. Checked before any
+        # FS access so a mis-shaped call never reads or writes.
+        if old is not None or new is not None or replace_all:
+            raise ValueError("edit_file: pass either edits (batch) or "
+                             "old/new/replace_all (single), not both")
+        _validate_batch(edits)
+        plan = [(str(e["old"]), str(e["new"]), bool(e.get("replace_all", False))) for e in edits]
+    else:
+        if old is None or new is None:
+            raise ValueError("edit_file requires both old and new "
+                             "(or an edits batch)")
+        if old == "":
+            # "abc".count("") == len+1, so an empty old is never "absent" — and
+            # under replace_all, body.replace("", new) would insert `new` between
+            # EVERY character of the file. (Previously only the accidental
+            # count("") > 1 uniqueness error blocked this, with a misleading
+            # message; replace_all=True removes exactly that accident.)
+            raise ValueError("old must not be empty")
+        plan = [(old, new, replace_all)]
     resolved = ctx.authorize_fs(("read", "write"), path)
     coordinator = getattr(ctx, "coordinator", None)
     deadline = anyio.current_time() + TOOL_WALLCLOCK_TIMEOUT_S
@@ -385,14 +447,11 @@ async def edit_file(ctx: ToolContext, path: str, old: str, new: str, *,
             f"{path} is not valid UTF-8; edit_file refuses to rewrite it "
             f"(the write-back would corrupt non-UTF-8 bytes) — use bash instead"
         ) from None
-    count = body.count(old)
-    if count == 0:
-        raise ValueError(f"{_short_repr(old)} not found in {path!r}")
-    if not replace_all and count > 1:
-        raise ValueError(f"{_short_repr(old)} not unique in {path!r} "
-                         f"(found {count} occurrences)")
-    edited = body.replace(old, new) if replace_all else body.replace(old, new, 1)
-    new_bytes = edited.encode("utf-8")
+    count = 0
+    for i, (o, n, ra) in enumerate(plan, 1):
+        label = f"edit #{i}: " if edits is not None else ""
+        body, count = _apply_edit(body, o, n, path, ra, label=label)
+    new_bytes = body.encode("utf-8")
     # Bytes-faithful write-back: encode and write BYTES (no platform newline
     # translation — the old read_text() path mangled CRLF files).
     _atomic_write_bytes(resolved, new_bytes, display_path=path)
@@ -401,6 +460,8 @@ async def edit_file(ctx: ToolContext, path: str, old: str, new: str, *,
         content_sha256=hashlib.sha256(new_bytes).hexdigest(),
         full=True,
     )
+    if edits is not None:
+        return f"applied {len(edits)} edits to {path}"
     if replace_all:
         return f"replaced {count} occurrences in {path}"
     return f"replaced 1 occurrence in {path}"
