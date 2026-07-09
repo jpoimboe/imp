@@ -94,11 +94,15 @@ def resolve_change_id(
 
 
 def format_outbound(event: dict[str, Any], handle: str, body: str | None = None) -> str:
-    """Render one event as outbound chat text, appending the reply handle. A given
-    `body` overrides the event's own body (e.g. an empty awaiting_user_input prompt
-    that fell back to the preceding narration)."""
+    """Render one event as outbound chat text. The reply handle (↩ @handle) is
+    appended ONLY for awaiting_user_input gates — the one event that asks the user
+    to act; every other event renders with no handle line. A given `body` overrides
+    the event's own body (the alert-all path passes the preceding narration for a
+    prompt-less gate)."""
     message = format_event_message(event) if body is None else _compose_message(event, body)
-    return f"{message}\n↩ @{handle}"
+    if event.get("type") == "awaiting_user_input":
+        return f"{message}\n↩ @{handle}"
+    return message
 
 
 def format_replay_event(event: dict[str, Any]) -> str | None:
@@ -202,10 +206,12 @@ class TelegramNorthAdapter:
         full curated path below (buzz + silent, deduped via Subscriptions.seen). An
         unsubscribed Change no longer returns here — it falls through to
         _alert_all_event, which delivers only buzz events and only while alert-all
-        is on. A prompt-less awaiting_user_input on the subscribed path falls back
-        to that Change's preceding llm_response narration; the per-Change
-        _last_narration map is sender-thread-only, like _offset, so it needs no
-        lock."""
+        is on. A subscribed Change streams every llm_response as its own quiet
+        message, so a gate (awaiting_user_input) is delivered terse — its label and
+        reply handle, with no re-dump of the preceding narration. The _last_narration
+        write is kept: it still feeds the alert-all path across a subscribe/
+        unsubscribe toggle. That per-Change map is sender-thread-only, like _offset,
+        so it needs no lock."""
         change = event.get("change") or {}
         change_id = change.get("id")
         if not change_id:
@@ -230,17 +236,14 @@ class TelegramNorthAdapter:
                 self._send(divider, True)
             return
         body = event_body(etype, event.get("payload") or {})
-        override: str | None = None
         if etype == "llm_response" and body.strip():
             self._last_narration[change_id] = body
-        elif etype == "awaiting_user_input" and not body.strip():
-            body = override = self._last_narration.get(change_id, "")
         if kind == "silent" and not body.strip():
             return
         handle = handle_for(change_id)
         with self._lock:
             self._handle_to_change[handle] = change_id
-        full = f"{header_line(event)}\n{format_outbound(event, handle, override)}"
+        full = f"{header_line(event)}\n{format_outbound(event, handle)}"
         message_id = self._send(full, kind == "silent")
         with self._lock:
             if message_id is not None:
@@ -257,9 +260,11 @@ class TelegramNorthAdapter:
         re-surfaces this blocked Change would be permanently suppressed. A
         prompt-less awaiting_user_input falls back to this Change's preceding
         llm_response narration (recorded before the enabled gate so the first
-        alert after /alerts on carries current context), mirroring the subscribed
-        path; with no prior narration it renders the '[title] needs your input'
-        header alone, still a useful alert."""
+        alert after /alerts on carries current context). An unsubscribed Change
+        never streamed that narration, so the gate carries it as its only copy
+        (unlike the subscribed path, which streams narration live and keeps its gate
+        terse); with no prior narration it renders the 'needs your input' label
+        alone, still a useful alert."""
         if event.get("_replay"):
             event_id = event.get("id")
             if event_id is not None:

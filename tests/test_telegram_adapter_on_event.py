@@ -103,13 +103,18 @@ def _prompt_less_await() -> dict:
             "payload": {"prompt": ""}}
 
 
-def test_prompt_less_await_falls_back_to_preceding_narration() -> None:
+def test_subscribed_prompt_less_await_is_terse_not_narration() -> None:
     sent: list = []
     adapter = _adapter(sent)
     adapter.on_event(_narration("Should I merge the branch?"))
     adapter.on_event(_prompt_less_await())
     loud = [text for text, silent in sent if not silent]
-    assert any("Should I merge the branch?" in text for text in loud)
+    # The subscribed path already streamed the narration as its own quiet message,
+    # so the gate is terse: it must NOT re-dump the preceding narration.
+    assert len(loud) == 1
+    assert "Should I merge the branch?" not in loud[0]
+    assert "needs your input" in loud[0]
+    assert loud[0].endswith("↩ @k3f9qa")
 
 
 def test_prompt_less_await_with_no_narration_sends_header_only() -> None:
@@ -120,7 +125,7 @@ def test_prompt_less_await_with_no_narration_sends_header_only() -> None:
     assert len(loud) == 1
 
 
-def test_consecutive_prompt_less_awaits_reuse_last_narration() -> None:
+def test_consecutive_subscribed_prompt_less_awaits_are_terse() -> None:
     sent: list = []
     adapter = _adapter(sent)
     adapter.on_event(_narration("Proceed with the merge?"))
@@ -128,7 +133,8 @@ def test_consecutive_prompt_less_awaits_reuse_last_narration() -> None:
     adapter.on_event(_prompt_less_await())
     loud = [text for text, silent in sent if not silent]
     assert len(loud) == 2
-    assert all("Proceed with the merge?" in text for text in loud)
+    assert all("Proceed with the merge?" not in text for text in loud)
+    assert all("needs your input" in text for text in loud)
 
 
 def _step_started(
@@ -309,3 +315,20 @@ def test_replayed_event_marks_alert_all_seen_even_when_alert_all_is_off() -> Non
     adapter.on_event(REPLAY_LOUD)              # unsubscribed → alert-all path, history
     assert sent == []                          # never sends
     assert alert.seen("k3f9qa", "L1") is True  # marked even though alert-all is off
+
+
+def test_subscribed_change_merged_is_header_and_done_no_handle() -> None:
+    sent: list = []
+    adapter = _adapter(sent, subscriptions=_subs("k3f9qa"))
+    adapter.on_event({
+        "id": "m1", "type": "change_merged", "timestamp": TS,
+        "change": {"id": "k3f9qa", "title": "Dark mode"}, "payload": {}})
+    assert len(sent) == 1
+    text, silent = sent[0]
+    assert silent is False
+    assert text.startswith("k3f9qa · Dark mode · ")  # single identity, in the header
+    assert text.endswith("done")                      # label-only body
+    assert "[Dark mode]" not in text                  # no doubled title bracket
+    assert "↩" not in text                            # done is not a gate: no handle
+    assert adapter._handle_to_change == {"k3f9qa": "k3f9qa"}
+    assert adapter._msg_to_change == {42: "k3f9qa"}
