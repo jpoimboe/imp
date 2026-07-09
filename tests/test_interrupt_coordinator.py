@@ -224,6 +224,29 @@ def test_begin_end_tool_watchdog_depth_counter_and_listeners() -> None:
     assert fired["n"] == 4  # note_activity fired again on the final end
 
 
+def test_begin_end_request_watchdog_depth_counter_and_listeners() -> None:
+    coord = InterruptCoordinator()
+    assert coord.request_active is False  # default
+    fired = {"n": 0}
+    coord.add_activity_listener(lambda: fired.__setitem__("n", fired["n"] + 1))
+
+    coord.begin_request_watchdog()
+    assert coord.request_active is True
+    assert fired["n"] == 1  # note_activity fired on begin
+
+    coord.begin_request_watchdog()  # a second overlapping request scope
+    assert coord.request_active is True
+    assert fired["n"] == 2
+
+    coord.end_request_watchdog()  # one request still in flight
+    assert coord.request_active is True  # depth still > 0 -> NOT a bare bool
+    assert fired["n"] == 3
+
+    coord.end_request_watchdog()  # the last in-flight request completes
+    assert coord.request_active is False  # depth back to 0
+    assert fired["n"] == 4  # note_activity fired again on the final end
+
+
 @pytest.mark.anyio
 async def test_leave_mid_run_stamps_reason_and_takes_leave_path() -> None:
     coord = InterruptCoordinator()
