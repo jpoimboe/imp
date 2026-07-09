@@ -501,6 +501,25 @@ def test_visible_step_with_body_renders_header_not_collapsed() -> None:
     assert len(hits) >= 2                              # header line + breadcrumb line
 
 
+def test_visible_show_output_false_step_with_error_body_renders_full_frame() -> None:
+    # Exercises the `not step_has_body` disjunct of deferred_leaf: a script step
+    # with show_output=False (step_no_body=True) gains a body via an ErrorNode child,
+    # so deferred_leaf flips False and the full frame (header + body + breadcrumb) renders.
+    out = _lines([
+        _ev("1", "change_created", title="t"),
+        _ev("2", "step_started", step="verify-build", kind="script", phase="implement",
+            label="verifying build"),
+        _ev("3", "error", message="build failed: missing dependency", category="runner"),
+        _ev("4", "step_completed", step="verify-build", kind="script",
+            action={"verb": "continue"}),
+    ])
+    joined = "\n".join(out)
+    assert "build failed: missing dependency" in joined  # error body rendered
+    assert "verifying build · complete" in joined        # breadcrumb present
+    hits = [ln for ln in out if "verifying build" in ln]
+    assert len(hits) >= 2                                # header line + breadcrumb line
+
+
 def test_breadcrumb_and_fallback_recede_to_gray() -> None:
     # the per-step completion line now recedes to chrome gray; stray event
     # (fallback) lines stay dark-gray chrome too.
