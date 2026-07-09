@@ -47,7 +47,7 @@ from imp.cli.session_run import (
     run_session_client,
 )
 from imp.cli.session_terminal import run_terminal_client
-from imp.cli.signals import install_process_group, sigint_cancels_scope
+from imp.cli.signals import install_process_group, prompt_sigint_guard
 from imp.cli.slash import ask_line_with_slash
 from imp.cli.terminal_title import TerminalTitle
 from imp.cli.tui_app import TuiApp
@@ -547,7 +547,7 @@ def _print_leave_disposition(
 def _session_exit_code(change: Change, coord: Any) -> int:
     result = infer_session_result(change)
     outcome = _handle_terminal_outcome(change, result, coord)
-    if result is RunResult.PAUSED and coord.should_pause:
+    if result is RunResult.PAUSED and coord.interrupted:
         return 130
     return outcome
 
@@ -1074,7 +1074,7 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
     header_printed = False
     if _should_prompt_opening(seed_text=seed.seed_text, interactive=interactive):
         try:
-            async with sigint_cancels_scope():
+            async with prompt_sigint_guard():
                 reply = await _read_opening_message(
                     change, leave_mode=leave_mode, banner_shown=interactive,
                     color=color, width=_term_width(),

@@ -14,23 +14,28 @@ def anyio_backend() -> str:
     return "asyncio"
 
 
-def test_runner_attached_saves_and_restores_previous() -> None:
+def _tops(coord: InterruptCoordinator) -> list:
+    return [att.interrupt for att in coord._runner_stack]
+
+
+def test_runner_attached_pushes_and_pops() -> None:
     coord = InterruptCoordinator()
 
     async def parent_interrupt() -> None: ...
     async def child_interrupt() -> None: ...
 
     coord.attach_runner(parent_interrupt)
-    assert coord._runner_interrupt is parent_interrupt
+    assert _tops(coord) == [parent_interrupt]
 
     with coord.runner_attached(child_interrupt):
-        assert coord._runner_interrupt is child_interrupt
+        # innermost is on top; the parent is still on the stack (full-chain).
+        assert _tops(coord) == [parent_interrupt, child_interrupt]
 
-    # Restored, NOT cleared to None.
-    assert coord._runner_interrupt is parent_interrupt
+    # child popped, parent remains (restored, NOT cleared).
+    assert _tops(coord) == [parent_interrupt]
 
 
-def test_runner_attached_restores_on_exception() -> None:
+def test_runner_attached_pops_on_exception() -> None:
     coord = InterruptCoordinator()
 
     async def parent_interrupt() -> None: ...
@@ -42,17 +47,30 @@ def test_runner_attached_restores_on_exception() -> None:
             raise RuntimeError("boom")
     except RuntimeError:
         pass
-    assert coord._runner_interrupt is parent_interrupt
+    assert _tops(coord) == [parent_interrupt]
 
 
-def test_runner_attached_from_empty_restores_none() -> None:
+def test_runner_attached_from_empty_pops_to_empty() -> None:
     coord = InterruptCoordinator()
 
     async def child_interrupt() -> None: ...
 
     with coord.runner_attached(child_interrupt):
-        assert coord._runner_interrupt is child_interrupt
-    assert coord._runner_interrupt is None
+        assert _tops(coord) == [child_interrupt]
+    assert _tops(coord) == []
+
+
+def test_runner_attached_carries_force_kill_and_agent_id() -> None:
+    coord = InterruptCoordinator()
+
+    async def i() -> None: ...
+    async def fk() -> None: ...
+
+    with coord.runner_attached(i, force_kill=fk, agent_id="agent-7"):
+        att = coord._runner_stack[-1]
+        assert att.interrupt is i
+        assert att.force_kill is fk
+        assert att.agent_id == "agent-7"
 
 
 def test_reason_for_signal_maps_sigint_and_sigterm() -> None:
@@ -241,3 +259,97 @@ def test_dispatch_signal_leave_branch_stamps_the_trigger() -> None:
         coord2.set_escalation_hook(lambda: None)
         coord2._dispatch_signal(sighup)
         assert coord2.leave_reason == "sighup"
+
+
+@pytest.mark.anyio
+async def test_on_received_signal_force_sentinel_forwards_force() -> None:
+    from imp.cli.signals import _FORCE_FORWARD
+
+    coord = InterruptCoordinator()
+    forwarded = {"n": 0}
+
+    async def _force() -> None:
+        forwarded["n"] += 1
+
+    coord.set_force_forward_hook(_force)
+    await coord._on_received_signal(_FORCE_FORWARD)
+
+    assert forwarded["n"] == 1
+    assert coord.should_pause is False   # a force forward never sets the pause flag
+
+
+@pytest.mark.anyio
+async def test_on_received_signal_ordinary_signal_takes_pause_path() -> None:
+    import signal
+
+    coord = InterruptCoordinator()
+    await coord._on_received_signal(signal.SIGINT)
+
+    assert coord.should_pause is True
+    assert coord.pause_reason == "ctrl-c"
+
+
+def test_end_gesture_round_clears_latch_for_a_fresh_round() -> None:
+    """When the run yields to the paused prompt the ctrl-c round is over: the
+    latch clears so the next gesture is a fresh first gesture. Narrower than
+    reset() — leave_reason / escalated / _yielded are left untouched."""
+    coord = InterruptCoordinator()
+    # A controlled clock: _first_gesture_at is stamped at 123.0 and "now" is 123.5,
+    # WITHIN the 1s suppression window. So if end_gesture_round did NOT clear the
+    # window, _register_gesture would return False (suppressed); only a genuine
+    # clear-to-None makes the next gesture a fresh first gesture that returns True.
+    coord._now = lambda: 123.5
+    coord._should_pause = True
+    coord.pause_reason = "ctrl-c"
+    coord._first_gesture_at = 123.0
+    coord.leave_reason = "sigterm"
+    coord.escalated = True
+    _yielded_sentinel = object()
+    coord._yielded = _yielded_sentinel
+    coord._interrupted = True
+
+    coord.end_gesture_round()
+
+    assert coord.should_pause is False
+    assert coord.pause_reason is None
+    assert coord._first_gesture_at is None
+    assert coord.leave_reason == "sigterm"          # narrower than reset()
+    assert coord.escalated is True                  # narrower than reset()
+    assert coord._yielded is _yielded_sentinel      # narrower than reset()
+    assert coord.interrupted is True                 # durable 130 signal, narrower than reset()
+    # Falsifiable now: without the clear, _now()=123.5 is <1s from 123.0 → False.
+    assert coord._register_gesture(kind="ctrl-c") is True   # fresh first gesture
+
+
+@pytest.mark.anyio
+async def test_signal_pause_dispatches_to_innermost_runner_only() -> None:
+    """Pins no-spawner inline dispatch to the top of the attach stack, not the parent."""
+    coord = InterruptCoordinator()
+    calls: list[str] = []
+
+    async def parent_interrupt() -> None:
+        calls.append("parent")
+
+    async def child_interrupt() -> None:
+        calls.append("child")
+
+    coord.attach_runner(parent_interrupt)
+    with coord.runner_attached(child_interrupt):
+        await coord.signal_pause(reason="ctrl-c")
+
+    assert calls == ["child"]
+
+
+@pytest.mark.anyio
+async def test_interrupted_flag_survives_end_gesture_round() -> None:
+    """Regression: end_gesture_round clears the live gesture latch (should_pause)
+    so the next ctrl-c is a fresh gesture, but must PRESERVE the durable
+    `interrupted` flag that _session_exit_code reads to return 130 for an
+    interrupt-paused session."""
+    coord = InterruptCoordinator()
+    await coord.signal_pause(reason="ctrl-c")   # no runner attached: sets flags, returns
+    assert coord.should_pause is True
+    assert coord.interrupted is True
+    coord.end_gesture_round()
+    assert coord.should_pause is False   # live latch cleared (fresh next gesture)
+    assert coord.interrupted is True     # durable signal survives -> rc 130 preserved

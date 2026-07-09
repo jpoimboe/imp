@@ -17,6 +17,7 @@ those line up the runner is happy.
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 from typing import Any
 
@@ -254,8 +255,8 @@ class CooperativeClient:
     and queries to prove the SAME live client continued (no re-run)."""
 
     def __init__(self, opts: Any, *, after_steer: list[Any],
-                 order: list[str] | None = None) -> None:
-        import asyncio
+                 order: list[str] | None = None,
+                 land_gate: asyncio.Event | None = None) -> None:
         self.opts = opts
         self.queries: list[Any] = []
         self.closed = False
@@ -265,6 +266,7 @@ class CooperativeClient:
         self._after_steer = list(after_steer)
         self._turn = 0
         self._released = asyncio.Event()
+        self._land_gate = land_gate
 
     async def __aenter__(self) -> CooperativeClient:
         return self
@@ -286,6 +288,8 @@ class CooperativeClient:
         self._turn += 1
         if self._turn == 1:
             await self._released.wait()
+            if self._land_gate is not None:
+                await self._land_gate.wait()
             yield FakeResultMessage(
                 subtype="error_during_execution", is_error=True)
             return

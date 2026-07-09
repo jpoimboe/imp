@@ -79,6 +79,7 @@ async def serve_change_session(
     coordinator = InterruptCoordinator()
     socket_path = str(session_socket_path(change.control_root, change.id))
     attach_log = change.event_log()
+    coordinator.set_event_log(attach_log)
 
     def _on_first_attach() -> None:
         attach_log.append(agent_id=None, type="cli_attached", payload={})
@@ -135,6 +136,7 @@ async def serve_change_session(
                 wait_for_turn_fn=server.wait_for_turn,
                 **run_kwargs,
             )
+            coordinator.note_yield()  # run_change returned -> the run has yielded
             prompt = _hold_prompt(result, coordinator)
         while prompt is not None:
             on_event({"type": "awaiting_user_input",
@@ -169,6 +171,7 @@ async def serve_change_session(
                 wait_for_turn_fn=server.wait_for_turn,
                 **run_kwargs,
             )
+            coordinator.note_yield()  # run_change returned -> the run has yielded
             prompt = _hold_prompt(result, coordinator)
         return result
 

@@ -11,6 +11,7 @@ import imp.agents.tools.bash  # noqa: F401
 from imp.agents.runner import ChangeContext
 from imp.agents.tools import get_registry
 from imp.agents.tools.context import ToolContext
+from imp.agents.tools.limits import ToolAborted
 
 
 def _ctx(tmp_path: Path) -> ToolContext:
@@ -228,6 +229,21 @@ def test_bash_bare_when_no_policy(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
     assert captured["argv"] == ["sh", "-c", "echo hi"]
 
 
+def test_bash_pending_pause_never_spawns_child(tmp_path: Path) -> None:
+    # §4 pre-spawn contract: a pending pause aborts before the child spawns.
+    class _PausedCoord:
+        should_pause = True
+
+    ctx = _ctx(tmp_path)
+    ctx.coordinator = _PausedCoord()
+    sentinel = tmp_path / "ran"
+    with pytest.raises(ToolAborted) as ei:
+        _run_bash(ctx, {"command": f"touch {sentinel}"})
+    assert ei.value.reason == "interrupted"
+    assert not sentinel.exists()          # child never spawned
+    assert ctx.running_processes == []
+
+
 def test_bash_editor_git_op_completes_without_blocking(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -250,3 +266,59 @@ def test_bash_editor_git_op_completes_without_blocking(
     # Observable consequence: the amend kept the single seed commit intact.
     log = json.loads(_run_bash(ctx, {"command": "git log --format=%s"}))
     assert log["stdout"].split() == ["seed"]
+
+
+def test_bash_midcommand_pause_kills_and_returns_tombstone(tmp_path: Path) -> None:
+    # §4 mid-command contract: a pause landing WHILE a command runs kills the
+    # child's group and returns the terminated-by-pause tombstone (status:
+    # killed, kill_reason: interrupted) — the same shape
+    # terminate_background_processes writes — instead of blocking to the wall
+    # clock. fail_after(10) makes the "poller absent" regression a fast failure
+    # rather than a 30s hang.
+    class _Coord:
+        should_pause = False
+
+    coord = _Coord()
+    ctx = _ctx(tmp_path)
+    ctx.coordinator = coord
+    holder: dict[str, dict] = {}
+
+    async def _scenario() -> None:
+        with anyio.fail_after(10):
+            async with anyio.create_task_group() as tg:
+                async def _runner() -> None:
+                    holder["out"] = json.loads(
+                        await get_registry()["bash"].async_invoke(
+                            ctx, {"command": "sleep 30"}))
+
+                async def _pauser() -> None:
+                    await anyio.sleep(0.3)      # let bash spawn + register first
+                    coord.should_pause = True
+
+                tg.start_soon(_runner)
+                tg.start_soon(_pauser)
+
+    anyio.run(_scenario)
+    out = holder["out"]
+    assert out["status"] == "killed"
+    assert out["kill_reason"] == "interrupted"
+    assert out["returncode"] < 0               # real signal kill, not massaged to 0
+    assert ctx.running_processes == []
+
+
+def test_bash_with_coordinator_no_pause_completes_normally(tmp_path: Path) -> None:
+    # Regression: with a coordinator present but NO pause, the poller must stay
+    # out of the way — the command completes normally and returns the ordinary
+    # {stdout, stderr, returncode} result (no tombstone fields), and the call
+    # returns (the poller is cancelled, not left holding the task group open).
+    class _Coord:
+        should_pause = False
+
+    ctx = _ctx(tmp_path)
+    ctx.coordinator = _Coord()
+    out = json.loads(_run_bash(ctx, {"command": "echo hi"}))
+    assert out["returncode"] == 0
+    assert "hi" in out["stdout"]
+    assert "status" not in out                 # normal result, not a tombstone
+    assert "kill_reason" not in out
+    assert ctx.running_processes == []

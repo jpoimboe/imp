@@ -264,17 +264,16 @@ async def ask_line_with_slash(
                                     prompt, exit_evt, width=width, indent=indent,
                                     bottom_toolbar=toolbar, hint=hint)
                         except KeyboardInterrupt:
-                            # A KeyboardInterrupt reaching here is normally the
-                            # exit-event-won synthesis from _ask_or_exit: an out-of-band
-                            # SIGINT at the prompt now lands in the coordinator's loop
-                            # handler (handle_sigint=False), which (via _at_prompt) calls
-                            # request_exit("ctrl-c") → fires the exit event → _ask_or_exit
-                            # cancels the read and raises KeyboardInterrupt. The c-c key
-                            # binding handles TYPED Ctrl-C (no KBI). request_exit here is a
-                            # defensive idempotent re-assert (first-wins pause_reason keeps
-                            # "ctrl-c") covering any path that raises a bare KBI; we then
-                            # re-raise so the CLI's except-KeyboardInterrupt arm runs
-                            # pause_and_exit. The finally still resets _at_prompt.
+                            # No ctrl-c gesture reaches this arm anymore: an out-of-band
+                            # SIGINT at the prompt is fed as a SYNTHETIC ctrl-c by the
+                            # coordinator's _at_prompt branch (clear line / ctrl-d hint, no
+                            # request_exit, no KBI — ctrl-c never exits at a prompt), and a
+                            # TYPED ctrl-c is handled by prompt.py's c-c binding (no KBI).
+                            # This arm is a defensive backstop for an UNEXPECTED bare
+                            # KeyboardInterrupt from any other path: idempotently re-assert
+                            # pause_reason ("ctrl-c", first-wins) and re-raise so the CLI's
+                            # except-KeyboardInterrupt arm runs pause_and_exit. The finally
+                            # still resets _at_prompt.
                             if coord is not None:
                                 coord.request_exit("ctrl-c")
                             raise

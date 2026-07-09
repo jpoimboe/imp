@@ -77,6 +77,8 @@ def build_inline_solicit(
         if event_log is not None:
             event_log.append(agent_id=agent_id, type="awaiting_user_input",
                              payload={"prompt": steer_prompt})
+        if coordinator is not None:
+            coordinator.note_yield()
 
     async def _solicit() -> str:
         assert user_input_fn is not None

@@ -1231,7 +1231,6 @@ class ClaudeCodeAgentRunner:
         *,
         client_factory: Any = None,
         user_input_fn: Any = None,
-        steer_timeout: float = 2.0,
     ) -> None:
         self.model = model_name
         self._client_factory = client_factory
@@ -1239,12 +1238,11 @@ class ClaudeCodeAgentRunner:
         self._last_no_result_diag: dict[str, Any] = {}
         self._cancel = False
         self._ctx: ToolContext | None = None
-        # The live SDK client while a turn streams. The cooperative tier of
-        # interrupt() signals the running query (client.interrupt()) WITHOUT
-        # disconnecting: the subprocess stays connected and the turn closes
-        # balanced, so a steer or handoff continues with a plain increment. Only the
-        # hard-interrupt escalation disconnects, to break a frozen
-        # receive_response(). None outside an active `async with client_ctx`.
+        # The live SDK client while a turn streams. interrupt() signals the
+        # running query (client.interrupt()) WITHOUT disconnecting: the subprocess
+        # stays connected and the turn closes balanced, so a steer or handoff
+        # continues with a plain increment. None outside an active
+        # `async with client_ctx`.
         self._client: Any = None
         self._impty_driver: Any = None
         # Per-step capture of the nested `claude` CLI's stderr. Built in
@@ -1256,12 +1254,9 @@ class ClaudeCodeAgentRunner:
         # Cooperative-interrupt (steer) state. _steer_requested is the distinct
         # intent flag (separate from _cancel, which keeps meaning hard-cancel /
         # teardown); the receive loop sets _steer_unblocked when the
-        # post-interrupt ResultMessage arrives, letting interrupt() return
-        # without escalating. _steer_timeout bounds that wait (injectable so the
-        # escalation tests drive it deterministically).
+        # post-interrupt ResultMessage arrives, letting interrupt() return.
         self._steer_requested = False
         self._steer_unblocked = asyncio.Event()
-        self._steer_timeout = steer_timeout
         # Tier A proactive-handoff intent flag (separate from _steer_requested):
         # set when the threshold watchdog interrupts the live turn, consumed at the
         # generalized balanced-close site to continue with a handoff-instruction
@@ -2216,11 +2211,6 @@ class ClaudeCodeAgentRunner:
                             # Discard the interrupted turn's partial accumulators
                             # so they don't bleed into the next turn's loop-guard.
                             _flush_pending()
-                            # Consume the pause: the steer is resolved inside
-                            # this live invocation, so the run continues rather
-                            # than returning PAUSED.
-                            if invocation.coordinator is not None:
-                                invocation.coordinator.clear_pause()
                             # Reap leaked subprocesses only AFTER interrupt():
                             # a killed-process tool_result must not race the stop.
                             from imp.agents.tools.bg import terminate_background_processes
@@ -2243,6 +2233,9 @@ class ClaudeCodeAgentRunner:
                             reply = await steer(last_text)
                             if self._interrupted():
                                 return
+                            # Brake holds until reply is in hand: clear only now.
+                            if invocation.coordinator is not None:
+                                invocation.coordinator.clear_pause()
                             user_msg = Message(
                                 role="user",
                                 content=(TextBlock(text=reply),))
@@ -2512,58 +2505,23 @@ class ClaudeCodeAgentRunner:
         return self._cancel
 
     async def interrupt(self) -> None:
-        # Cooperative tier (the first move): ask the SDK to end the turn
-        # balanced — no subprocess kill, no torn transcript. The receive loop
-        # sets _steer_unblocked when the post-interrupt ResultMessage arrives.
-        # Wait a bounded interval; only a genuinely frozen claude-p (no unblock)
-        # falls through to the hard-kill escalation. Fire client.interrupt()
-        # BEFORE any process termination, so a killed-process tool_result can
-        # never race the interrupt and carry the turn past the stop.
+        # Cooperative tier ONLY: ask the SDK to end the turn balanced and wait for
+        # the receive loop to set _steer_unblocked. Deliberately UNBOUNDED — every
+        # caller wraps this in an outer deadline (the coordinator's 2s cooperative
+        # budget; the stall watchdog's grace) and escalates to force_kill() on
+        # overrun. Fire client.interrupt() BEFORE any process termination so a
+        # killed-process tool_result can never race the interrupt past the stop.
         client = self._client
-        if client is not None and hasattr(client, "interrupt"):
-            self._steer_requested = True
-            # Reset the unblock latch on EVERY interrupt: a prior cooperative
-            # steer left it set, and a stale-set Event would make this wait_for
-            # return immediately and skip escalation on a SECOND interrupt (a
-            # re-steer, or the watchdog firing on a later genuine freeze). Clear
-            # it before client.interrupt() so only THIS turn's post-interrupt
-            # ResultMessage can satisfy the wait.
-            self._steer_unblocked.clear()
-            with contextlib.suppress(Exception):
-                await client.interrupt()
-            try:
-                await asyncio.wait_for(
-                    self._steer_unblocked.wait(), timeout=self._steer_timeout)
-                return
-            except TimeoutError:
-                self._steer_requested = False
-        await self._hard_interrupt()
-
-    async def _hard_interrupt(self) -> None:
-        from imp.agents.tools.bg import terminate_background_processes
-        from imp.agents.tools.context import terminate_running_processes
-        self._cancel = True
-        try:
-            if self._ctx is not None:
-                await terminate_running_processes(self._ctx)
-                # Decision 7: pause kills background processes too (leak
-                # resistance); the persisted tombstones give the resumed agent an
-                # explanation. Idempotent vs the run() finally (both fire on pause).
-                await terminate_background_processes(self._ctx)
-        finally:
-            # disconnect() must fire even if a teardown raises: _cancel is only
-            # observed BETWEEN SDK messages, so a stalled agent parked in
-            # receive_response() awaiting a message that never comes (the
-            # watchdog's exact case) never sees it. Killing the transport
-            # subprocess is the only effect that breaks that parked read — the
-            # claude_code analog of codex's AbortController.abort(). Without it
-            # the CLI child leaks past teardown and races the step's restart.
-            # Idempotent vs the `async with` __aexit__ that also disconnects.
-            client = self._client
-            if client is not None:
-                await _reap_transport_group(client)
-                with contextlib.suppress(Exception):
-                    await client.disconnect()
+        if client is None or not hasattr(client, "interrupt"):
+            self._cancel = True
+            return
+        self._steer_requested = True
+        # Reset the latch on EVERY interrupt: a prior steer left it set, and a
+        # stale-set Event would make the wait return immediately.
+        self._steer_unblocked.clear()
+        with contextlib.suppress(Exception):
+            await client.interrupt()
+        await self._steer_unblocked.wait()
 
     async def force_kill(self) -> None:
         """Non-waiting SIGKILL of the claude-p transport group on teardown overrun;

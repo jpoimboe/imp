@@ -173,3 +173,17 @@ def test_control_reason_round_trips_with_and_without_reason() -> None:
     # Unknown reason strings are display/journal data, not dispatch: accepted verbatim.
     line3 = encode_control(CONTROL_INTERRUPT_LEAVE, "future-trigger")
     assert parse_client_message(line3).reason == "future-trigger"
+
+
+def test_interrupt_force_control_round_trips() -> None:
+    from imp.remote.session.protocol import (
+        CONTROL_INTERRUPT_FORCE,
+        Control,
+        encode_control,
+        parse_client_message,
+    )
+
+    assert CONTROL_INTERRUPT_FORCE == "interrupt-force"
+    line = encode_control(CONTROL_INTERRUPT_FORCE)
+    msg = parse_client_message(line)
+    assert msg == Control(action="interrupt-force", reason=None)

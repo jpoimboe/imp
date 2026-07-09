@@ -31,6 +31,7 @@ import os
 import signal
 import time
 from collections.abc import AsyncIterator, Iterator
+from dataclasses import dataclass
 from typing import Any
 
 from anyio import TASK_STATUS_IGNORED
@@ -43,6 +44,10 @@ _suppress = contextlib.suppress
 
 _SUPPRESS_WINDOW_S = 1.0  # anti-double-tap: a 2nd gesture within this window is dropped
 _READ_TIMEOUT_S = 0.05  # cbreak select() poll window: lets the loop see quiesce state
+_COOPERATIVE_DEADLINE_S = 2.0   # per-runner cooperative interrupt() budget
+_YIELD_DEADLINE_S = 5.0         # gesture -> run-actually-yields watchdog
+_FORCE_FORWARD = -1   # sentinel on the signal stream: a 2nd ctrl-c forwards
+                      # CONTROL_INTERRUPT_FORCE (signal numbers are always > 0)
 
 # Terminal/blocked at-rest statuses an interrupt must NOT clobber. Anything else
 # (a `new` or `paused` run) becomes `paused` on interrupt.
@@ -104,31 +109,48 @@ def install_process_group() -> None:
         os.setpgrp()
 
 
+def _feed_prompt_ctrl_c() -> None:
+    """Route an out-of-band SIGINT at a prompt through the SAME path as a typed
+    Ctrl-C: feed a synthetic ControlC key into the running prompt_toolkit app so
+    its `c-c` binding (clear line / show the ctrl-d hint, prompt.py) runs. With no
+    app running (or prompt_toolkit unavailable) this is a harmless no-op. NEVER
+    raises, NEVER exits — ctrl-c never exits at a prompt."""
+    try:
+        from prompt_toolkit.application import get_app
+        from prompt_toolkit.key_binding.key_processor import KeyPress
+        from prompt_toolkit.keys import Keys
+    except Exception:
+        return
+    try:
+        app = get_app()
+    except Exception:
+        return
+    if not getattr(app, "is_running", False):
+        return   # get_app() returns a non-running dummy when no prompt is active
+    with _suppress(Exception):
+        app.key_processor.feed(KeyPress(Keys.ControlC))
+        app.key_processor.process_keys()
+
+
 @contextlib.asynccontextmanager
-async def sigint_cancels_scope() -> AsyncIterator[None]:
-    """Cancel the wrapped body on an out-of-band SIGINT and re-raise it as
-    KeyboardInterrupt.
+async def prompt_sigint_guard() -> AsyncIterator[None]:
+    """Bring an out-of-band SIGINT at a pre-coordinator prompt (the `imp new` /
+    `imp chat` opening prompt) under the 'never exits' invariant.
 
-    For a prompt window that runs BEFORE any InterruptCoordinator receiver
-    exists (the `imp new` / `imp chat` opening prompt), an OS SIGINT would
-    otherwise land in asyncio.Runner's default handling and escape as a raw
-    KeyboardInterrupt above the caller's cleanup arm. This installs a loop-level
-    SIGINT handler that cancels an anyio scope wrapping just the body; on exit it
-    removes the handler and RESTORES the prior signal disposition (not the
-    asyncio default that remove_signal_handler leaves), and if the scope was
-    cancelled by SIGINT it raises KeyboardInterrupt so the caller's
-    `except (EOFError, KeyboardInterrupt)` arm runs. Where add_signal_handler is
-    unsupported (Windows) it degrades to a no-op — no worse than before."""
-    import anyio
-
+    That prompt runs BEFORE any InterruptCoordinator receiver exists and uses
+    `prompt_async(handle_sigint=False)`, so an OS SIGINT would otherwise escape as
+    a raw KeyboardInterrupt above the caller's cleanup arm. This installs a
+    loop-level SIGINT handler that feeds a synthetic Ctrl-C into the running
+    prompt_toolkit app (its `c-c` binding clears the line / shows the ctrl-d hint),
+    exactly like a typed ctrl-c — it NEVER cancels the body and NEVER exits. Ctrl-d
+    (EOFError from the prompt) remains the only leave gesture. On exit the handler
+    is removed and the prior signal disposition RESTORED (not the asyncio default
+    that remove_signal_handler would leave). Where add_signal_handler is
+    unsupported (Windows) it degrades to a no-op."""
     loop = asyncio.get_running_loop()
-    scope = anyio.CancelScope()
-    hit_sigint = False
 
     def _on_sigint() -> None:
-        nonlocal hit_sigint
-        hit_sigint = True
-        scope.cancel()
+        _feed_prompt_ctrl_c()
 
     prev_handler = signal.getsignal(signal.SIGINT)
     supported = True
@@ -140,15 +162,12 @@ async def sigint_cancels_scope() -> AsyncIterator[None]:
         yield  # unsupported (Windows) — degrade to a no-op guard
         return
     try:
-        with scope:
-            yield
+        yield
     finally:
         with _suppress(NotImplementedError, RuntimeError, ValueError):
             loop.remove_signal_handler(signal.SIGINT)
         with _suppress(TypeError, ValueError, OSError):
             signal.signal(signal.SIGINT, prev_handler)
-    if hit_sigint:
-        raise KeyboardInterrupt
 
 
 def _reason_for_signal(sig: int) -> str:
@@ -168,6 +187,15 @@ def _leave_reason_for_signal(sig: int) -> str:
     return "sigterm"
 
 
+@dataclass(frozen=True, slots=True, eq=False)
+class _Attached:
+    """A runner attached for one drive: cooperative interrupt, wait-free force_kill, agent_id."""
+    # eq=False: identity equality — .remove(att) pops this exact entry
+    interrupt: Any
+    force_kill: Any = None
+    agent_id: str | None = None
+
+
 class InterruptCoordinator:
     """Signal-driven pause coordinator.
 
@@ -183,13 +211,19 @@ class InterruptCoordinator:
     """
 
     def __init__(self) -> None:
-        self._runner_interrupt: Any = None
+        self._runner_stack: list[_Attached] = []
         self._ctrl_d_reader: Any = None  # CtrlDReader | None — CLI cbreak /dev/tty reader
         # Client-side leave trigger, stamped at gesture time (distinct from the
         # first-wins pause_reason). The single choke point in run_terminal_client
         # reads it to fill the CONTROL_INTERRUPT_LEAVE frame's reason.
         self.leave_reason: str | None = None
         self._should_pause = False
+        # Durable "an interrupt/leave gesture drove a pause this session" signal
+        # for the 130 exit code (_session_exit_code). Set alongside should_pause on
+        # a gesture; unlike should_pause it SURVIVES end_gesture_round (which clears
+        # the live latch so the next ctrl-c is fresh), so a paused non-interactive
+        # session still exits 130 after the prompt posts.
+        self._interrupted = False
         self.pause_reason: str | None = None
         self._loop: Any = None          # event loop owning the signal handlers
         self._sig_send: Any = None      # memory-stream send half (loop cb -> task)
@@ -200,6 +234,7 @@ class InterruptCoordinator:
         self.escalation_event: Any = None   # anyio.Event set on escalation (C4)
         self._trigger_escalation: Any = None
         self._trigger_exit: Any = None
+        self._forward_force: Any = None   # client force-forward hook (SessionControls)
         self._now = time.monotonic      # injectable for tests
         self._ack_hook: Any = None
         # True ONLY while an interactive prompt is being awaited (set/cleared by
@@ -217,6 +252,9 @@ class InterruptCoordinator:
         # is why a busy subtree no longer trips the parent's watchdog. Shared
         # subtree-wide (one coordinator per run), so a child's appends push every
         # ancestor watchdog's deadline. Same-event-loop, single-threaded => no lock.
+        self._event_log: Any = None
+        self._spawn: Any = None       # fire-and-forget task spawner (start_soon shape)
+        self._yielded: Any = None     # anyio.Event set when the run yields (watchdog)
         self._activity_listeners: list[Any] = []
         # Suspend-during-solicit (this Change): True ONLY while an attended agent
         # is blocked awaiting a human reply at the bare-turn-end gate.
@@ -347,10 +385,12 @@ class InterruptCoordinator:
         after run_change returns, before the prompt. Does NOT clear queued
         interjects."""
         self._should_pause = False
+        self._interrupted = False
         self.pause_reason = None
         self.leave_reason = None
         self._first_gesture_at = None
         self.escalated = False
+        self._yielded = None
 
     def clear_pause(self) -> None:
         """Consume a pause that a cooperative interrupt resolved inline. The
@@ -359,21 +399,36 @@ class InterruptCoordinator:
         escalation window untouched so a follow-up force-quit Ctrl-C still
         escalates."""
         self._should_pause = False
+        self._interrupted = False
         self.pause_reason = None
 
-    def attach_runner(self, interrupt_fn: Any) -> None:
-        """interrupt_fn is an `async def () -> None` callable. All three V1
-        runners (AnthropicAgentRunner / OpenAIAgentRunner /
-        ClaudeCodeAgentRunner) declare `async def interrupt(self) -> None`
-        per the AgentRunner protocol (`src/imp/agents/runner.py:172`).
+    def end_gesture_round(self) -> None:
+        """Client round-over reset: the run yielded and the paused prompt is up,
+        so the ctrl-c round is done. Clear the gesture latch (should_pause /
+        pause_reason / first-gesture window) so the NEXT ctrl-c starts a fresh
+        round and forwards a new CONTROL_INTERRUPT. Distinct from the daemon's
+        brake (which holds until the reply is accepted, §3) and narrower than
+        reset() — leave_reason / escalated / _yielded AND the durable _interrupted
+        flag (the 130 exit-code signal) are left untouched."""
+        self._should_pause = False
+        self.pause_reason = None
+        self._first_gesture_at = None
 
-        The run-level attach/detach API; the per-drive wrapper is
-        `runner_attached` (used by `drive_invocation`), which the executor and
-        dispatch_task now go through instead of calling this directly."""
-        self._runner_interrupt = interrupt_fn
+    def attach_runner(self, interrupt_fn: Any) -> None:
+        """Push a run-level runner. `interrupt_fn` is an `async def () -> None`
+        callable; all three V1 runners (AnthropicAgentRunner / OpenAIAgentRunner
+        / ClaudeCodeAgentRunner) declare `async def interrupt(self) -> None` per
+        the AgentRunner protocol (`src/imp/agents/runner.py:172`).
+
+        The run-level attach API; the per-drive wrapper is `runner_attached`
+        (used by `drive_invocation`), which the executor and dispatch_task go
+        through instead of calling this directly. The client's
+        forward-interrupt uses this."""
+        self._runner_stack.append(_Attached(interrupt_fn))
 
     def detach_runner(self) -> None:
-        self._runner_interrupt = None
+        if self._runner_stack:
+            self._runner_stack.pop()
 
     def attach_ctrl_d_reader(self, reader: Any) -> None:
         self._ctrl_d_reader = reader
@@ -397,46 +452,200 @@ class InterruptCoordinator:
     def set_exit_hook(self, fn: Any) -> None:
         self._trigger_exit = fn
 
+    def set_force_forward_hook(self, fn: Any) -> None:
+        """Register the client's CONTROL_INTERRUPT_FORCE forwarder (a network frame
+        send). Invoked by the receiver on the _FORCE_FORWARD sentinel — a repeat
+        ctrl-c hard-kills the run via the daemon and the client stays attached."""
+        self._forward_force = fn
+
+    def set_event_log(self, log: Any) -> None:
+        """Attach the EventLog so interrupt delivery is journaled."""
+        self._event_log = log
+
+    def set_delivery_spawner(self, spawn: Any) -> None:
+        """Register an owning task group's start_soon for fire-and-forget delivery."""
+        self._spawn = spawn
+
+    def clear_delivery_spawner(self) -> None:
+        self._spawn = None
+
+    def _emit(self, etype: str, payload: dict[str, Any]) -> None:
+        log = self._event_log
+        if log is not None:
+            with _suppress(Exception):
+                log.append(agent_id=None, type=etype, payload=payload)
+
+    async def _deliver_interrupt(self) -> None:
+        """Tiered bounded delivery down the attach stack, innermost first."""
+        import anyio
+
+        for att in reversed(list(self._runner_stack)):
+            outcome = "ok"
+            t0 = self._now()
+            with anyio.move_on_after(_COOPERATIVE_DEADLINE_S) as scope:
+                try:
+                    await att.interrupt()
+                except Exception:
+                    outcome = "error"
+            if scope.cancelled_caught:
+                outcome = "timeout"
+            self._emit("interrupt_delivered", {
+                "agent_id": att.agent_id, "tier": "cooperative",
+                "outcome": outcome,
+                "duration_ms": int((self._now() - t0) * 1000)})
+            if outcome != "ok":
+                # Only a genuine timeout with a force_kill present gets the
+                # cooperative_timeout escalation record; an "error" outcome
+                # escalates via the hard record only.
+                if outcome == "timeout" and att.force_kill is not None:
+                    self._emit("interrupt_escalated", {
+                        "reason": "cooperative_timeout", "killed": [att.agent_id]})
+                await self._hard_kill(att)
+
+    async def _hard_kill(self, att: _Attached) -> None:
+        """Wait-free hard tier: run force_kill() (no waits); no-op when None."""
+        fk = att.force_kill
+        if fk is None:
+            return
+        outcome = "ok"
+        t0 = self._now()
+        try:
+            await fk()
+        except Exception:
+            outcome = "error"
+        self._emit("interrupt_delivered", {
+            "agent_id": att.agent_id, "tier": "hard",
+            "outcome": outcome,
+            "duration_ms": int((self._now() - t0) * 1000)})
+
+    async def signal_force(self) -> None:
+        """Second-gesture FORCE (CONTROL_INTERRUPT_FORCE): skip the cooperative
+        tier and hard-kill the whole attach stack now. Wait-free — each force_kill
+        is a non-waiting SIGKILL, so awaiting this inline never blocks the daemon
+        control loop. Journals one interrupt_delivered{hard} per runner (via
+        _hard_kill) and a single interrupt_escalated{reason: second_gesture,
+        killed:[...]}, then disarms the yield watchdog the first gesture armed."""
+        self._should_pause = True
+        killed: list[str | None] = []
+        for att in list(self._runner_stack):
+            if att.force_kill is not None:
+                await self._hard_kill(att)
+                killed.append(att.agent_id)
+        self._emit("interrupt_escalated",
+                   {"reason": "second_gesture", "killed": killed})
+        self.note_yield()
+
+    async def _yield_watchdog(self) -> None:
+        """Hard-kill the whole attach stack if the run doesn't yield within 5s of the gesture."""
+        import anyio
+
+        started = self._first_gesture_at if self._first_gesture_at is not None else self._now()
+        remaining = (started + _YIELD_DEADLINE_S) - self._now()
+        evt = self._yielded
+        yielded = False
+        if evt is not None:
+            if remaining > 0:
+                with anyio.move_on_after(remaining):
+                    await evt.wait()
+                    yielded = True
+            else:
+                yielded = evt.is_set()
+        if yielded:
+            return
+        # Sweep the whole stack (order-independent: a hard kill of any runner
+        # unblocks a parked run); list only agents whose force_kill succeeded.
+        killed: list[str | None] = []
+        for att in list(self._runner_stack):
+            if att.force_kill is not None:
+                with _suppress(Exception):
+                    await att.force_kill()
+                    killed.append(att.agent_id)  # only list what was actually killed
+        self._emit("interrupt_escalated", {"reason": "no_yield", "killed": killed})
+
+    def note_yield(self) -> None:
+        """The run yielded (steer solicit posted, or run_change returned). Disarms
+        the yield watchdog for the current round; no-op with no interrupt in flight."""
+        evt = self._yielded
+        if evt is not None:
+            evt.set()
+
     def request_exit(self, reason: str) -> None:
         """Route an out-of-band stop (prompt-level SIGINT) to the exit path —
         sets pause state + fires the exit event the actuator watches."""
         if self.pause_reason is None:
             self.pause_reason = reason
         self._should_pause = True
+        self._interrupted = True
         fn = self._trigger_exit
         if fn is not None:
             fn(reason)
 
     @contextlib.contextmanager
-    def runner_attached(self, interrupt_fn: Any) -> Iterator[None]:
-        """Attach `interrupt_fn` for the duration of a single drive, then
-        RESTORE the previous attachment (not clear it). Nesting-safe: a nested
-        subagent drive saves the parent's interrupt and reinstates it on exit,
-        so a Ctrl-C stays clean for the parent after a subagent returns, and a
-        Ctrl-C mid-subagent cancels the subagent runner."""
-        prev = self._runner_interrupt
-        self._runner_interrupt = interrupt_fn
+    def runner_attached(
+        self, interrupt_fn: Any, *, force_kill: Any = None,
+        agent_id: str | None = None,
+    ) -> Iterator[None]:
+        """Push `interrupt_fn` (with optional wait-free `force_kill` and `agent_id`)
+        for one drive, then pop it. Nesting-safe: a nested subagent drive pushes on
+        top so delivery interrupts the innermost runner first, each ancestor after;
+        on exit the exact entry is removed, restoring the parent as the chain top."""
+        att = _Attached(interrupt_fn, force_kill, agent_id)
+        self._runner_stack.append(att)
         try:
             yield
         finally:
-            self._runner_interrupt = prev
+            with _suppress(ValueError):
+                self._runner_stack.remove(att)
 
     @property
     def should_pause(self) -> bool:
         return self._should_pause
 
-    async def signal_pause(self, *, reason: str = "ctrl-c") -> None:
-        """Fired by the signal receiver. Records the originating `reason`
-        (first-wins; later calls do not overwrite), calls the attached runner's
-        interrupt (if any), then flips the pause flag. Idempotent across
-        repeated calls."""
-        fn = self._runner_interrupt
-        if self.pause_reason is None:
+    @property
+    def interrupted(self) -> bool:
+        """Durable session-lifetime signal: an interrupt/leave gesture drove a
+        pause. Read by _session_exit_code for the 130 exit code; survives
+        end_gesture_round (unlike should_pause)."""
+        return self._interrupted
+
+    async def signal_pause(self, *, reason: str = "ctrl-c",
+                           via: str = "signal") -> None:
+        """Fired by the signal receiver or a daemon control frame."""
+        first = self.pause_reason is None
+        if first:
             self.pause_reason = reason
             self._note_gesture_ack(force_quit_available=False)
+            if self._first_gesture_at is None:
+                self._first_gesture_at = self._now()
         self._should_pause = True
-        if fn is not None:
-            await fn()
+        self._interrupted = True
+        if not first:
+            return
+        import anyio
+
+        self._emit("interrupt_requested", {"source": reason, "via": via})
+        if not self._runner_stack:
+            # Nothing attached: the run already yielded (e.g. a ctrl-d leave at a
+            # turn-end / resume-hold prompt). The pause flags above are the whole
+            # effect — do NOT arm the watchdog against an empty stack: nothing would
+            # post a yield to disarm it, so it would false-fire interrupt_escalated
+            # after the window AND stall the pump task group's close for the window.
+            return
+        spawn = self._spawn
+        if spawn is not None:
+            # Owning task group present (the daemon): deliver fire-and-forget so the
+            # control loop proceeds to the next frame. The yield watchdog is armed
+            # from the gesture time recorded above.
+            self._yielded = anyio.Event()
+            spawn(self._deliver_interrupt)
+            spawn(self._yield_watchdog)
+        else:
+            # No spawner => client/local coordinator: only an INSTANT interrupt fn is
+            # ever attached here (SessionControls._forward_interrupt, a network frame
+            # send). A provider interrupt() is UNBOUNDED and only ever runs on the
+            # daemon's spawner path (bounded by _deliver_interrupt's 2s deadline), so an
+            # inline await here cannot wedge. Do NOT register a slow interrupt_fn here.
+            await self._runner_stack[-1].interrupt()
 
     async def leave_mid_run(self, *, reason: str = "ctrl-d") -> None:
         """Ctrl-D mid-run suspend & leave: stamp the leave trigger and take the
@@ -479,8 +688,9 @@ class InterruptCoordinator:
         rule does — so this path never touches pause state and is never suppressed.
 
         Intent A — "interrupt the run" (SIGINT): if a stop is already unwinding,
-        apply the suppression/escalation gate HERE (signal_pause can wedge on the
-        cancellation-immune interrupt()); at a prompt, route through the exit path;
+        apply the suppression/force-forward gate HERE (signal_pause can wedge on the
+        cancellation-immune interrupt()); at a prompt, feed a synthetic Ctrl-C
+        into the running app (clear line / hint) — it never exits;
         otherwise enqueue for the receiver (→ signal_pause → runner interrupt →
         pause-to-prompt)."""
         if sig in _leave_signals():
@@ -490,21 +700,30 @@ class InterruptCoordinator:
                 fn()
             return
         if self._should_pause:
-            # A stop is already unwinding. Gate the repeat gesture synchronously.
+            # A stop is already unwinding. A repeat ctrl-c does NOT force-quit the
+            # client to bash (ctrl-c never exits) — it enqueues a FORCE forward so
+            # the daemon skips the cooperative tier and hard-kills now, while the
+            # client stays attached. Gate synchronously; forward only past the
+            # suppression window. The leave path above keeps _trigger_escalation.
             if self._register_gesture(kind="ctrl-c"):
                 self._note_gesture_ack(force_quit_available=True)
-                esc = self._trigger_escalation
-                if esc is not None:
-                    esc()
-            return  # suppressed or escalated — never re-enter a wedged interrupt()
+                send = self._sig_send
+                if send is not None:
+                    with _suppress(Exception):  # WouldBlock / closed stream
+                        send.send_nowait(_FORCE_FORWARD)
+            return  # suppressed or force-forwarded — never re-enter interrupt()
         if self._at_prompt:
             # At an interactive prompt, prompt_toolkit no longer owns SIGINT
-            # (handle_sigint=False), so an out-of-band SIGINT lands here. Route it
-            # through the coordinator exit path. Register the gesture first so a
-            # SECOND out-of-band SIGINT still hits the escalation/suppression gate
-            # above (force-quit).
-            self._register_gesture(kind="ctrl-c")
-            self.request_exit("ctrl-c")
+            # (handle_sigint=False), so an out-of-band SIGINT lands here. Ctrl-c
+            # NEVER exits at a prompt: route it through the prompt's own Ctrl-C
+            # binding (clear line / ctrl-d hint), exactly like a typed ctrl-c — do
+            # NOT request_exit. Do NOT register the gesture either: a prompt-time
+            # SIGINT must leave the gesture/suppression window untouched so the
+            # NEXT run round's <1s double-tap suppression stays accurate (AC4) —
+            # _first_gesture_at is stamped only by a real in-run gesture, and the
+            # prompt path no longer escalates, so it needs no gesture record.
+            # Ctrl-d remains the only leave gesture.
+            _feed_prompt_ctrl_c()
             return
         # First gesture during a run: record it and enqueue for the receiver.
         self._register_gesture(kind="ctrl-c")
@@ -520,6 +739,17 @@ class InterruptCoordinator:
         after it stops (`_loop is None`). Called from the interactive-prompt choke
         point (`ask_line_with_slash`) so mid-run Ctrl-C survives every prompt."""
         self._install_loop_signal_handlers()
+
+    async def _on_received_signal(self, sig: int) -> None:
+        """Dispatch one item read from the signal stream. The _FORCE_FORWARD
+        sentinel forwards a CONTROL_INTERRUPT_FORCE frame (second-gesture hard
+        kill); any real signal number takes the normal pause path."""
+        if sig == _FORCE_FORWARD:
+            fn = self._forward_force
+            if fn is not None:
+                await fn()
+            return
+        await self.signal_pause(reason=_reason_for_signal(sig))
 
     async def run_signal_receiver(self) -> None:
         """Long-running task: install the coordinator's loop signal handlers.
@@ -540,7 +770,7 @@ class InterruptCoordinator:
         try:
             async with recv:
                 async for sig in recv:
-                    await self.signal_pause(reason=_reason_for_signal(sig))
+                    await self._on_received_signal(sig)
         finally:
             loop = self._loop
             if loop is not None:

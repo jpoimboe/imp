@@ -348,8 +348,8 @@ async def test_headless_path_threads_title(stub_new, monkeypatch) -> None:
 
 
 @pytest.mark.anyio
-async def test_opening_prompt_wrapped_in_sigint_guard(stub_new, monkeypatch) -> None:
-    """The opening prompt is read INSIDE sigint_cancels_scope, so a
+async def test_opening_prompt_wrapped_in_prompt_sigint_guard(stub_new, monkeypatch) -> None:
+    """The opening prompt is read INSIDE prompt_sigint_guard, so a
     pre-coordinator OS SIGINT is caught by the guard rather than escaping. Assert
     the guard is active while the prompt is awaited."""
     m = stub_new
@@ -362,7 +362,7 @@ async def test_opening_prompt_wrapped_in_sigint_guard(stub_new, monkeypatch) -> 
         entered["v"] = True
         yield
 
-    monkeypatch.setattr(m, "sigint_cancels_scope", _fake_guard)
+    monkeypatch.setattr(m, "prompt_sigint_guard", _fake_guard)
 
     prompt_ran = {"v": False}
 
