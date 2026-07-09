@@ -122,6 +122,7 @@ class StepNode:
     children: list[Any] = field(default_factory=list)
     outcome: OutcomeLine | None = None
     start_ts: str | None = None        # ISO-8601 from step_started.timestamp (issue 3)
+    run_start_ts: str | None = None    # test-lane run clock; phase_elapsed reads start_ts
     end_ts: str | None = None          # ISO-8601 from step_completed.timestamp (§7)
     agent_output: dict[str, Any] | None = None  # stashed complete_step args (issues 5/6)
     show_label: bool = True            # step frame (header + breadcrumb) shown
@@ -989,16 +990,16 @@ def _h_test_lane_acquired(
 ) -> None:
     self._flush_burst()
     # Slot in hand — drop the "waiting to test" override so the footer reverts to the
-    # step's phrase ("running tests"), and restart the step clock (C1): overwrite
-    # start_ts with the acquisition time so the completion breadcrumb
-    # (elapsed_seconds(start_ts, end_ts)) measures pure run time, excluding the queue wait.
+    # step's phrase ("running tests"), and store the acquisition time in run_start_ts
+    # (the run clock the breadcrumb reads), leaving start_ts intact so phase_elapsed
+    # still measures the phase's full wall-clock span including the queue wait.
     if self._step_stack:
         top = self._step_stack[-1]
         top.live_label = None
         top.lane_wait = False
         ts = event.get("timestamp")
         if ts is not None:
-            top.start_ts = ts
+            top.run_start_ts = ts
 
 
 NarrativeBuilder._HANDLERS["test_lane_acquired"] = _h_test_lane_acquired
@@ -1135,6 +1136,7 @@ def _h_step_started(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, 
                 existing.provider = p.get("provider")
                 existing.interactive = False
                 existing.start_ts = event.get("timestamp")
+                existing.run_start_ts = None
                 existing.agent_output = None
                 existing.command = p.get("command")
                 existing.show_label = bool(p.get("show_label", True))
@@ -1196,7 +1198,7 @@ def _h_step_completed(self: NarrativeBuilder, event: dict[str, Any], p: dict[str
         # RENDERED outcome is subsumed by the merged breadcrumb (issue 3).
         node.outcome = OutcomeLine(action=action)
         node.end_ts = event.get("timestamp")
-        elapsed = elapsed_seconds(node.start_ts, event.get("timestamp"))
+        elapsed = elapsed_seconds(node.run_start_ts or node.start_ts, event.get("timestamp"))
         breadcrumb = BreadcrumbLine(
             step_name=node.name, kind=node.kind, elapsed_s=elapsed, action=action,
             extras=_breadcrumb_extras(node.agent_output),

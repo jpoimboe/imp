@@ -1176,6 +1176,31 @@ def test_phase_elapsed_from_first_start_to_last_end() -> None:
     assert nv.phase_elapsed(phase) == 10.0
 
 
+def test_phase_elapsed_includes_queue_wait_when_test_lane_step_is_first() -> None:
+    # Regression: _h_test_lane_acquired must NOT overwrite start_ts or phase_elapsed
+    # under-counts by the entire queue wait.  t0=start, t1=acquired (+5s), t2=done (+5s).
+    b = nv.NarrativeBuilder()
+    b.add(ev("a", "step_started", step="s1", kind="script", phase="build",
+             timestamp="2026-06-03T00:00:00+00:00"))
+    b.add(ev("b", "test_lane_acquired", step="s1",
+             timestamp="2026-06-03T00:00:05+00:00"))
+    b.add(ev("c", "step_completed", step="s1", kind="script",
+             action={"verb": "continue"}, var_mutations={},
+             timestamp="2026-06-03T00:00:10+00:00"))
+    phase = b.tree.root.children[0]
+    assert isinstance(phase, nv.PhaseNode)
+    # phase_elapsed must span the whole wall-clock window (queue wait included).
+    assert nv.phase_elapsed(phase) == 10.0
+    step = phase.children[0]
+    assert isinstance(step, nv.StepNode)
+    crumb = next(
+        c for c in step.children
+        if isinstance(c, nv.BreadcrumbLine) and c.elapsed_s is not None
+    )
+    # Breadcrumb elapsed must show only the post-acquisition run time (5 s).
+    assert crumb.elapsed_s == 5.0
+
+
 def test_subagent_fold_terminal_state_defaults_none():
     fold = nv.SubagentFold(subagent_name="x", event_id="e", block_id="b",
                            nested=nv.NarrativeBuilder())
