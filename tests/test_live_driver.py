@@ -1943,9 +1943,9 @@ def test_compose_status_returns_activity_line_blank_then_position_bar() -> None:
     assert "thinking" not in block[2]
 
 
-def test_compose_toolbar_static_is_position_bar_only() -> None:
+def test_compose_toolbar_static_uses_the_position_row_layout() -> None:
     drv, _ = _driver()
-    drv.on_event(ev("1", "change_created", change_id=1, title="t"))
+    drv.on_event(ev("1", "change_created", id="z9gixx", title="t"))
     drv.on_event(ev("2", "step_started", step="task-lead", kind="agent", phase="code",
                      model="claude-sonnet-4-5", provider="anthropic", label="task 1/3",
                      phase_label="implementation phase · plan 1/1", position_label=True))
@@ -1953,6 +1953,8 @@ def test_compose_toolbar_static_is_position_bar_only() -> None:
     assert toolbar is not None
     assert "implementation phase · plan 1/1 · task 1/3" in toolbar
     assert "thinking" not in toolbar
+    # Right-flushed: id·title sits AFTER the structural left group (bar puts id first).
+    assert toolbar.index("z9gixx") > toolbar.index("implementation phase")
 
 
 def test_mid_step_position_change_re_emits_a_header() -> None:

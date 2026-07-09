@@ -387,16 +387,17 @@ class LiveDriver:
         return rows
 
     def compose_toolbar_static(self) -> str | None:
-        # Position bar only — no spinner, no elapsed (AC5).
+        # Position ROW — right-flushed footer layout, no spinner, no elapsed (AC5).
         activity = self._builder.current_activity()
         if activity is None:
             return None
         root = self._builder.tree.root
-        return compose_position_bar(
+        return compose_position_row(
             activity=activity, change_id=root.id, title=root.title,
             prompt_tokens=self._builder.latest_prompt_tokens,
             color=self._color, width=term_width(),
-            context_pct=self._builder.latest_context_pct)
+            context_pct=self._builder.latest_context_pct,
+            checkpoint_threshold=self._builder.latest_checkpoint_threshold)
 
     # -- emission -------------------------------------------------------------
     def _cur_width(self) -> int:
