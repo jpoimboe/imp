@@ -334,3 +334,51 @@ def test_noprogress_streak_tracks_consecutive_nonprogress() -> None:
     # Progress resets the streak.
     g.observe(TurnRecord(assistant_text="", tools=[], has_complete_step=True))
     assert g.noprogress_streak == 0
+
+
+def test_interactive_guard_never_trips_no_progress() -> None:
+    # Ten consecutive distinct no-progress turns (would trip no_progress at N=6
+    # on a non-interactive guard) return None on every call.
+    g = LoopGuard(interactive=True)
+    for i in range(10):
+        assert g.observe(_text_turn(f"thinking step {i}")) is None
+
+
+def test_interactive_guard_never_trips_repeated_failure() -> None:
+    # Ten identical error turns (would trip repeated_failure at K=3 on a
+    # non-interactive guard) return None on every call.
+    g = LoopGuard(interactive=True)
+    for _ in range(10):
+        assert g.observe(_err_turn("API Error: 400 x")) is None
+
+
+def test_interactive_guard_records_no_per_turn_state() -> None:
+    # A no-op observe must not mutate the read/write dedup sets or the counters.
+    g = LoopGuard(interactive=True)
+    g.observe(_write_turn("t-new"))
+    g.observe(_text_turn("prose"))
+    assert g._seen_write_ids == set()
+    assert g._seen_read_keys == set()
+    assert g._noprogress_count == 0
+    assert g._repeat_count == 0
+    assert g._last_sig is None
+
+
+def test_non_interactive_guard_still_trips_no_progress() -> None:
+    # Regression guard: default (interactive=False) still trips no_progress at N.
+    g = LoopGuard(interactive=False)
+    last = None
+    for i in range(DEFAULT_NOPROGRESS_N):
+        last = g.observe(_text_turn(f"thinking step {i}"))
+    assert last is not None
+    assert getattr(last, "kind", "") == "no_progress"
+
+
+def test_non_interactive_guard_still_trips_repeated_failure() -> None:
+    # Regression guard: default still trips repeated_failure at K.
+    g = LoopGuard(interactive=False)
+    assert g.observe(_err_turn("API Error: 400 x")) is None
+    assert g.observe(_err_turn("API Error: 400 x")) is None
+    err = g.observe(_err_turn("API Error: 400 x"))
+    assert err is not None
+    assert getattr(err, "kind", "") == "repeated_failure"
