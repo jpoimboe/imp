@@ -2677,14 +2677,13 @@ def _all_literals(node):
     return out
 
 
-def test_waiting_for_test_lane_renders_lifecycle_line() -> None:
+def test_waiting_for_test_lane_leaves_no_lifecycle_line() -> None:
     b = nv.NarrativeBuilder()
     b.add(_ev("0", "change_created", change_id=1, title="x"))
     b.add(_ev("1", "step_started", step="verify", kind="script", phase="build"))
     b.add(_ev("2", "waiting_for_test_lane", step="verify"))
     lits = _all_literals(b.tree.root)
-    assert any(n.text == "waiting for a test slot" and n.color_role == "lifecycle"
-               for n in lits)
+    assert not any(n.text == "waiting for a test slot" for n in lits)
 
 
 def test_engine_continuation_produces_no_narrative_node() -> None:

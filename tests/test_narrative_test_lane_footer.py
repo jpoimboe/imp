@@ -39,9 +39,9 @@ def test_test_lane_acquired_restores_footer_verb() -> None:
     assert b.current_activity().verb == "running tests"
 
 
-def test_waiting_for_test_lane_still_renders_narrative_node() -> None:
+def test_waiting_for_test_lane_leaves_no_narrative_node() -> None:
     from imp.cli.render_text import render_tree
     b = _build()
     b.add(ev("3", "waiting_for_test_lane", step="integration-tests"))
     out = "\n".join(render_tree(b.tree, full=False, color=False, width=80))
-    assert "waiting for a test slot" in out
+    assert "waiting for a test slot" not in out
