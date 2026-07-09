@@ -64,3 +64,33 @@ def test_introspect_names_the_read_commands() -> None:
     assert "imp show --all" in body
     assert "imp search" in body
     assert "imp show <id> [spec|plan|events|status|review]" in body
+
+
+def test_introspect_documents_the_three_tier_split() -> None:
+    body = load_agent_skill(_skills_dir(), "imp-introspect").lower()
+    # narrative / digest / raw are the three named timeline tiers
+    for tier in ("narrative", "digest", "raw"):
+        assert tier in body, tier
+    # narrative tier names imp log; digest tier names both front doors
+    assert "imp log <id>" in body
+    assert "imp show <id> events" in body
+
+
+def test_introspect_documents_the_cross_change_query() -> None:
+    body = load_agent_skill(_skills_dir(), "imp-introspect")
+    # in-loop cross-change front door, keyword-form as an agent would call it
+    assert "query_events(change_id=" in body
+    # bash cross-change front door
+    assert "imp show <id> events" in body
+
+
+def test_introspect_documents_bounded_output_techniques() -> None:
+    body = load_agent_skill(_skills_dir(), "imp-introspect")
+    # scope-the-query flags, in both CLI and tool spelling
+    for flag in ("--limit", "--type", "--agent"):
+        assert flag in body, flag
+    for kw in ("`limit`", "`type`", "`agent_id`"):
+        assert kw in body, kw
+    # scan-then-zoom: raw tier is opt-in, in both spellings
+    assert "--full" in body
+    assert "full=True" in body

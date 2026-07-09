@@ -1,17 +1,56 @@
-"""query_events (spec §6.6). Reads events.jsonl from the current Change."""
+"""query_events (spec §6.6). Reads a Change's event timeline — the current
+change by default, or another change via change_id."""
 
 from __future__ import annotations
 
 import json
 from collections import deque
+from collections.abc import Iterable
+from pathlib import Path
 from typing import Any
 
 from imp.agents.tools import imp_tool
 from imp.agents.tools.context import ToolContext
+from imp.engine.archive import read as archive_read
+from imp.engine.change import Change
+from imp.engine.errors import LoadError
 from imp.engine.events_digest import digest_event, full_line
-from imp.engine.state import JsonlEventLog
+from imp.engine.state import JsonlEventLog, parse_events_jsonl
 
 _DEFAULT_LIMIT = 100
+
+
+def _resolve_other_change_events(
+    control_root: Path, change_id: str,
+) -> list[dict[str, Any]] | None:
+    """Worktree-first (Change.load), then archive (archive_read.read_events),
+    mirroring the CLI's _load_events_for_id. None if the id is in neither."""
+    try:
+        change = Change.load(control_root, change_id)
+    except LoadError:
+        change = None
+    if change is not None:
+        return list(change.event_log().read())
+    raw = archive_read.read_events(control_root, change_id)
+    if raw is None:
+        return None
+    return parse_events_jsonl(raw)
+
+
+def _filter_and_limit(
+    events: Iterable[dict[str, Any]],
+    types: set[str] | None,
+    agent_id: str | None,
+    n: int,
+) -> list[dict[str, Any]]:
+    buf: deque[dict[str, Any]] = deque(maxlen=n)
+    for e in events:
+        if types is not None and e.get("type") not in types:
+            continue
+        if agent_id and agent_id not in (e.get("agent_id") or ""):
+            continue
+        buf.append(e)
+    return list(buf)
 
 
 @imp_tool(
@@ -23,8 +62,10 @@ _DEFAULT_LIMIT = 100
         "payloads (each capped at ~2 KB, marked when truncated). Narrow the "
         "result with type (an event type, or a comma-separated list of them), "
         "agent_id (a substring matched against an event's role/phase id), and "
-        "limit (the last N events; default 100). A history channel, not a status "
-        "one — for current state, prefer your durable working files."
+        "limit (the last N events; default 100). By default it reads the current "
+        "change; pass change_id to read another change's timeline. A history "
+        "channel, not a status one — for current state, prefer your durable "
+        "working files."
     ),
 )
 def query_events(
@@ -33,8 +74,8 @@ def query_events(
     agent_id: str | None = None,
     limit: int | None = None,
     full: bool = False,
+    change_id: str | None = None,
 ) -> str:
-    log = JsonlEventLog(ctx.events_path)
     if limit is None:
         n = _DEFAULT_LIMIT
     else:
@@ -50,17 +91,25 @@ def query_events(
             n = _DEFAULT_LIMIT
 
     types = {t.strip() for t in type.split(",") if t.strip()} if type else None
-    if types is None and not agent_id:
-        events = log.tail(n)
+
+    current_id = ctx.events_path.parent.name
+    # Truthy (not `is not None`): a blank change_id="" routes to the current-change
+    # path — otherwise it would reach Change.load, where <control>/.imp/changes is a
+    # real dir so .is_dir() passes and the missing change.json raises FileNotFoundError,
+    # escaping the LoadError catch and breaking the "does not raise" contract.
+    if change_id and change_id != current_id:
+        # <control>/.imp/changes/<id>/events.jsonl -> parents[3] == <control>.
+        control_root = ctx.events_path.parents[3]
+        resolved = _resolve_other_change_events(control_root, change_id)
+        if resolved is None:
+            return json.dumps({"error": f"no such change {change_id!r}"})
+        events = _filter_and_limit(resolved, types, agent_id, n)
     else:
-        buf: deque[dict[str, Any]] = deque(maxlen=n)
-        for e in log.read():
-            if types is not None and e.get("type") not in types:
-                continue
-            if agent_id and agent_id not in (e.get("agent_id") or ""):
-                continue
-            buf.append(e)
-        events = list(buf)
+        log = JsonlEventLog(ctx.events_path)
+        if types is None and not agent_id:
+            events = log.tail(n)
+        else:
+            events = _filter_and_limit(log.read(), types, agent_id, n)
 
     render = full_line if full else digest_event
     return "\n".join(render(e) for e in events)
