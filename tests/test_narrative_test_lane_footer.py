@@ -39,6 +39,21 @@ def test_test_lane_acquired_restores_footer_verb() -> None:
     assert b.current_activity().verb == "running tests"
 
 
+def test_waiting_for_test_lane_sets_activity_lane_wait() -> None:
+    b = _build()
+    b.add(ev("3", "waiting_for_test_lane", step="integration-tests"))
+    act = b.current_activity()
+    assert act.lane_wait is True
+    assert act.kind == "script"
+
+
+def test_test_lane_acquired_clears_activity_lane_wait() -> None:
+    b = _build()
+    b.add(ev("3", "waiting_for_test_lane", step="integration-tests"))
+    b.add(ev("4", "test_lane_acquired", step="integration-tests"))
+    assert b.current_activity().lane_wait is False
+
+
 def test_waiting_for_test_lane_leaves_no_narrative_node() -> None:
     from imp.cli.render_text import render_tree
     b = _build()

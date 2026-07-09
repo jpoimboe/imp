@@ -130,6 +130,7 @@ class StepNode:
     label: str | None = None           # step display label (step_started.payload.label)
     live_label: str | None = None      # agent-pushed live status label; None when unset
     lane_waiting_node: Any = None      # in-place merge-queue transcript node; None when unset
+    lane_wait: bool = False            # parked in a lane semaphore wait (test or merge); live-only
     phase_label: str | None = None     # owning phase's rendered label
     command: str | None = None         # script step's shell command shown on the status line
     resumed: bool = False              # engine resume re-entry (step_started.payload.resumed)
@@ -227,6 +228,8 @@ class Activity:
     detail: str | None = None
     model: str | None = None
     countdown_total: float | None = None
+    kind: str | None = None            # active step kind, for context-bar gating at compose time
+    lane_wait: bool = False            # active step parked in a lane semaphore wait (test or merge)
 
 
 def _join(*parts: str | None) -> str | None:
@@ -542,6 +545,8 @@ class NarrativeBuilder:
     def current_activity(self) -> Activity | None:
         """Current activity for the live status footer; None when idle."""
         top = self._step_stack[-1] if self._step_stack else None
+        top_kind = top.kind if top is not None else None
+        top_lane_wait = top.lane_wait if top is not None else False
         if self._reset_wait is not None:
             position = _join(top.phase_label, top.live_label or top.label) if top else None
             return Activity(
@@ -549,6 +554,7 @@ class NarrativeBuilder:
                 verb=self._reset_wait.verb,
                 model=top.model if top else None,
                 countdown_total=self._reset_wait.total_seconds,
+                kind=top_kind, lane_wait=top_lane_wait,
             )
         if top is not None:
             model = top.model
@@ -579,8 +585,10 @@ class NarrativeBuilder:
             if nested is not None and nested.countdown_total is not None:
                 return Activity(position=position, verb=nested.verb,
                                 detail=detail, model=model,
-                                countdown_total=nested.countdown_total)
-            return Activity(position=position, verb=verb, detail=detail, model=model)
+                                countdown_total=nested.countdown_total,
+                                kind=top_kind, lane_wait=top_lane_wait)
+            return Activity(position=position, verb=verb, detail=detail, model=model,
+                            kind=top_kind, lane_wait=top_lane_wait)
 
         detail = None
         burst = self._current_burst
@@ -602,9 +610,11 @@ class NarrativeBuilder:
         if top is not None:
             if top.kind in CHROME_KINDS:
                 return Activity(position=position, verb=static_verb or top.command,
-                                detail=detail, model=model)
+                                detail=detail, model=model,
+                                kind=top_kind, lane_wait=top_lane_wait)
             return Activity(position=position, verb=static_verb or "thinking",
-                            detail=detail, model=model)
+                            detail=detail, model=model,
+                            kind=top_kind, lane_wait=top_lane_wait)
         # No step on this builder. A dispatched subagent's nested builder reaches
         # here — carry the in-flight tool tail so the PARENT can read `nested.detail`
         # and concatenate it onto the subagent's verb.
@@ -927,6 +937,7 @@ def _h_lane_waiting(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, 
             step.lane_waiting_node = node
     if step is not None:
         step.live_label = text
+        step.lane_wait = True
 
 
 NarrativeBuilder._HANDLERS["lane_waiting"] = _h_lane_waiting
@@ -941,6 +952,7 @@ def _h_waiting_for_test_lane(
     # override the live footer verb until test_lane_acquired clears it back.
     if self._step_stack:
         self._step_stack[-1].live_label = "waiting for a test slot"
+        self._step_stack[-1].lane_wait = True
 
 
 NarrativeBuilder._HANDLERS["waiting_for_test_lane"] = _h_waiting_for_test_lane
@@ -954,6 +966,7 @@ def _h_test_lane_acquired(
     # reverts to the step's phrase ("running tests").
     if self._step_stack:
         self._step_stack[-1].live_label = None
+        self._step_stack[-1].lane_wait = False
 
 
 NarrativeBuilder._HANDLERS["test_lane_acquired"] = _h_test_lane_acquired
@@ -990,6 +1003,7 @@ def _h_lane_acquired(self: NarrativeBuilder, event: dict[str, Any], p: dict[str,
         top = self._step_stack[-1]
         top.live_label = None
         top.lane_waiting_node = None
+        top.lane_wait = False
 
 
 NarrativeBuilder._HANDLERS["lane_acquired"] = _h_lane_acquired

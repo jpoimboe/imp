@@ -533,7 +533,43 @@ def test_current_activity_idle_gap_between_nodes() -> None:
     ]:
         b.add(e)
     assert b.current_burst is None
-    assert b.current_activity() == nv.Activity(verb="thinking", model="m")
+    assert b.current_activity() == nv.Activity(verb="thinking", model="m", kind="agent")
+
+
+def test_current_activity_carries_agent_step_kind() -> None:
+    b = nv.NarrativeBuilder()
+    b.add(ev("1", "change_created", change_id=1, title="x"))
+    b.add(ev("2", "step_started", step="spec", kind="agent", phase="design",
+             model="m", provider="anthropic"))
+    act = b.current_activity()
+    assert act.kind == "agent"
+    assert act.lane_wait is False
+
+
+def test_current_activity_carries_script_step_kind() -> None:
+    b = nv.NarrativeBuilder()
+    b.add(ev("1", "change_created", change_id=1, title="x"))
+    b.add(ev("2", "step_started", step="verify", kind="script", phase="implement",
+             label="running tests"))
+    act = b.current_activity()
+    assert act.kind == "script"
+    assert act.lane_wait is False
+
+
+def test_current_activity_carries_kind_while_a_subagent_runs() -> None:
+    b = nv.NarrativeBuilder()
+    for e in [
+        ev("1", "change_created", change_id=1, title="x"),
+        ev("2", "step_started", step="spec", kind="agent", phase="design",
+           model="m", provider="anthropic"),
+        ev("3", "tool_call", agent_id="step:design/spec", id="t1",
+           name="sub_agent", input={"subagent_name": "coder"}),
+    ]:
+        b.add(e)
+    act = b.current_activity()
+    assert act.verb == "writing code"       # running-subagent path
+    assert act.kind == "agent"              # the parent step's kind is carried through
+    assert act.lane_wait is False
 
 
 def test_current_activity_none_when_no_step() -> None:
@@ -551,7 +587,7 @@ def test_current_activity_agent_step_with_thinking_child_emits_no_verb() -> None
         ev("4", "thinking", agent_id="step:design/spec", content="reasoning..."),
     ]:
         b.add(e)
-    assert b.current_activity() == nv.Activity(verb="thinking", model="m")
+    assert b.current_activity() == nv.Activity(verb="thinking", model="m", kind="agent")
 
 
 
@@ -1299,13 +1335,13 @@ def test_current_activity_all_killed_basis_is_bare_count() -> None:
 def test_current_activity_agent_step_no_burst_is_thinking() -> None:
     b = nv.NarrativeBuilder()
     b.add(ev("1", "step_started", step="s", kind="agent", phase="p"))
-    assert b.current_activity() == nv.Activity(verb="thinking")
+    assert b.current_activity() == nv.Activity(verb="thinking", kind="agent")
 
 
 def test_current_activity_chrome_step_is_running() -> None:
     b = nv.NarrativeBuilder()
     b.add(ev("1", "step_started", step="g", kind="merge_and_exit_worktree", phase="p"))
-    assert b.current_activity() == nv.Activity()
+    assert b.current_activity() == nv.Activity(kind="merge_and_exit_worktree")
 
 
 def _wfu_step(b):
@@ -1809,7 +1845,7 @@ def test_agent_step_activity_has_no_step_prefix() -> None:
         ev("3", "thinking", agent_id="step:review/plan-review", content="hmm"),
     ]:
         b.add(e)
-    assert b.current_activity() == nv.Activity(verb="thinking", model="m")
+    assert b.current_activity() == nv.Activity(verb="thinking", model="m", kind="agent")
 
 
 def test_current_activity_command_less_chrome_step_emits_no_verb() -> None:
@@ -1819,14 +1855,14 @@ def test_current_activity_command_less_chrome_step_emits_no_verb() -> None:
         ev("2", "step_started", step="merge-it", kind="merge_and_exit_worktree", phase="integrate"),
     ]:
         b.add(e)
-    assert b.current_activity() == nv.Activity()
+    assert b.current_activity() == nv.Activity(kind="merge_and_exit_worktree")
 
 
 def test_current_activity_agent_no_burst_emits_no_verb() -> None:
     b = nv.NarrativeBuilder()
     b.add(ev("1", "step_started", step="spec", kind="agent", phase="design",
              label="speccing"))
-    assert b.current_activity() == nv.Activity(verb="speccing")
+    assert b.current_activity() == nv.Activity(verb="speccing", kind="agent")
 
 
 def test_current_activity_script_step_names_the_command() -> None:
@@ -1834,7 +1870,7 @@ def test_current_activity_script_step_names_the_command() -> None:
     b.add(ev("1", "step_started", step="gate", kind="script", phase="verify",
              label="testing", command="make check"))
     # Label wins over command as the verb; in the new model verb = label
-    assert b.current_activity() == nv.Activity(verb="testing")
+    assert b.current_activity() == nv.Activity(verb="testing", kind="script")
 
 
 def test_subagent_activity_has_no_step_prefix() -> None:

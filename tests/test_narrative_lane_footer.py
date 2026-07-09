@@ -140,3 +140,11 @@ def test_restarted_reentry_clears_node_ref_so_next_wait_starts_fresh() -> None:
     assert reopened.lane_waiting_node is not None
     assert reopened.lane_waiting_node is not stale_node
     assert reopened.lane_waiting_node.text == "waiting to merge · 1 ahead"
+
+
+def test_lane_wait_toggles_through_merge_lane_handlers() -> None:
+    b = _acquire_open()
+    b.add(ev("3", "lane_waiting", base="main", ahead=2))
+    assert b.current_activity().lane_wait is True
+    b.add(ev("4", "lane_acquired", base="main"))
+    assert b.current_activity().lane_wait is False
