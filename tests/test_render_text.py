@@ -2347,3 +2347,52 @@ def test_begin_kickoff_never_replays_as_human_turn_from_events_jsonl(tmp_path) -
     out = "\n".join(render_tree(tree, full=False, color=False, width=80))
     assert "> INTERNAL STEP B KICKOFF" not in out
     assert "INTERNAL STEP B KICKOFF" not in out
+
+
+def test_full_view_spaces_unlike_block_kinds() -> None:
+    # --full must put exactly ONE blank line between adjacent unlike block kinds.
+    # step_context, a thinking fold, an expanded tool burst, and prose turns used
+    # to bunch with no separator; each adjacent pair now gets a single blank and
+    # none is doubled. (spec acceptance #1)
+    out = _lines([
+        _ev("1", "step_started", step="s", kind="agent", phase="p",
+            model="m", provider="anthropic"),
+        _ev("2", "step_context", agent_id="step:p/s", provider="anthropic",
+            model="claude", system_prompt="SYS", tools_schema=[{"name": "bash"}],
+            params={}, max_tool_calls=50),
+        _ev("3", "thinking", agent_id="step:p/s", content="deep thoughts"),
+        _ev("4", "tool_call", agent_id="step:p/s", id="b1", name="bash",
+            input={"command": "ls"}),
+        _ev("5", "tool_result", agent_id="step:p/s", id="b1", content="ok", error=False),
+        _ev("6", "llm_response", agent_id="step:p/s",
+            raw={"content": [{"type": "text", "text": "First prose turn."}]}, usage={}),
+        _ev("7", "llm_response", agent_id="step:p/s",
+            raw={"content": [{"type": "text", "text": "Second prose turn."}]}, usage={}),
+    ], full=True)
+
+    def blank_above(marker: str) -> None:
+        i = next(k for k, ln in enumerate(out) if marker in ln)
+        assert i >= 2, f"{marker!r} found too early to check blanks"
+        assert out[i - 1].strip() == "", f"{marker!r} must have one blank line above it"
+        assert out[i - 2].strip() != "", f"{marker!r} must not have a doubled blank above it"
+
+    blank_above("▾ thinking")          # step_context → thinking
+    blank_above("▾ tools")             # thinking → expanded burst
+    blank_above("First prose turn.")   # burst → prose
+    blank_above("Second prose turn.")  # prose → prose
+
+
+def test_full_view_whitespace_thinking_leaves_spacing_intact() -> None:
+    # A whitespace-only thinking fold renders nothing in --full and must not create
+    # a doubled or missing blank between the prose turns around it. (spec acceptance #1)
+    out = _lines([
+        _ev("1", "step_started", step="s", kind="agent", phase="p"),
+        _ev("2", "llm_response", agent_id="a",
+            raw={"content": [{"type": "text", "text": "First prose turn."}]}, usage={}),
+        _ev("3", "thinking", agent_id="a", content="   "),   # whitespace-only → renders nothing
+        _ev("4", "llm_response", agent_id="a",
+            raw={"content": [{"type": "text", "text": "Second prose turn."}]}, usage={}),
+    ], full=True)
+    i = next(k for k, ln in enumerate(out) if "Second prose turn." in ln)
+    assert out[i - 1].strip() == "", "one blank separates the prose turns"
+    assert out[i - 2].strip() != "", "no doubled blank around the empty thinking fold"

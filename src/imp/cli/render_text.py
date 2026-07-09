@@ -318,21 +318,26 @@ def is_prose_leaf(node: Any) -> bool:
 def spaces_after(node: Any, *, full: bool) -> bool:
     """A "spaced block": one a blank separator follows (and precedes, when it
     trails another spaced block). Prose leaves and user turns always qualify; a
-    collapsed tool-burst summary qualifies in the lean view, where it sits as a
-    single line between two prose turns and wants air on both sides (so the run
-    reads `…prose / · burst / prose…` rather than bunching). Structural chrome —
-    a phase header/complete line, a step (which ends on its completion
-    breadcrumb), and errors — is surrounded by blank lines so each stands clear of
-    the prose around it. The batch walk and the live driver both key spacing off
-    this, so they stay identical (StepNode/PhaseNode matter only to the batch
-    walk, which treats a container as one child; live keys off the last leaf —
-    the breadcrumb — instead, and they agree)."""
+    tool burst with calls qualifies in either view (lean: a single recap line
+    between two prose turns; full: an expanded fold that wants air on both
+    sides). Under ``full`` the everything-view also spaces the config-dump
+    (``StepContextNode``) and expanded ``thinking`` (``ThinkingFold``) so unlike
+    block kinds don't bunch. Structural chrome — a phase header/complete line, a
+    step (which ends on its completion breadcrumb), and errors — is surrounded by
+    blank lines so each stands clear of the prose around it. The batch walk and
+    the live driver both key spacing off this, so they stay identical
+    (StepNode/PhaseNode matter only to the batch walk, which treats a container
+    as one child; live keys off the last leaf — the breadcrumb — instead, and
+    they agree). A node that renders nothing (whitespace-only thinking) still
+    leaves adjacency untouched: `_render_children` skips empty emissions before
+    this value is consulted, so a True here on an empty render is inert."""
     return bool(
         is_prose_leaf(node)
         or isinstance(node, (nv.UserMessageNode, nv.SkillLoadNode, nv.SubagentFold,
                              nv.PhaseNode, nv.StepNode, nv.BreadcrumbLine,
                              nv.ErrorNode, nv.PauseNode, nv.RenameNode))
-        or (isinstance(node, nv.ToolBurstFold) and not full and node.calls)
+        or (isinstance(node, nv.ToolBurstFold) and node.calls)
+        or (full and isinstance(node, (nv.ThinkingFold, nv.StepContextNode)))
     )
 
 
