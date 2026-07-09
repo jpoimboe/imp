@@ -633,7 +633,7 @@ class JsonlEventLog(_BaseEventLog):
     def read(self) -> Iterator[dict[str, Any]]:
         if not self.path.exists():
             return
-        with self.path.open() as f:
+        with self.path.open(encoding="utf-8", errors="replace") as f:
             for line in f:
                 line = line.strip()
                 if not line:
