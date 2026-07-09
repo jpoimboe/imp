@@ -2338,9 +2338,12 @@ def test_compose_position_row_colors_match_the_scrollback_palette() -> None:
             width=120, context_pct=42.0)
     finally:
         pal.set_theme("ansi")
-    assert "\x1b[33m" in row        # phase + id in wordmark gold
-    assert "\x1b[34m" in row        # plan + counter in step blue
-    assert "\x1b[90m" in row        # model (and bar track) in gray
+    parts = row.split(" · ")
+    assert "\x1b[33m" in parts[0] and "\x1b[34m" not in parts[0]  # phase: gold, not blue
+    assert "\x1b[34m" in parts[1]                                   # plan: step-blue
+    assert "\x1b[34m" in parts[2]                                   # counter: step-blue
+    assert "\x1b[90m" in parts[3] and "\x1b[34m" not in parts[3]  # model: gray, not blue
+    assert "\x1b[33m" in parts[4]                                   # id (z9gixx): gold
 
 
 def _sub_builder(*subs, readings=(), start_ts=None):
