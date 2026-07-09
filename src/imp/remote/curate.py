@@ -1,13 +1,17 @@
 """Curate raw engine events: filter by allowlist, track step/status, augment with change context."""
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any
 
 
 class EventCurator:
-    def __init__(self, *, id: str, title: str, events: tuple[str, ...]) -> None:
+    def __init__(
+        self, *, id: str, title_provider: Callable[[], str], events: tuple[str, ...],
+    ) -> None:
         self._id = id
-        self._title = title
+        self._title_provider = title_provider
+        self._title = ""
         self._events = events
         self._step: str | None = None
         self._status = "running"
@@ -20,6 +24,9 @@ class EventCurator:
         self._track(event)
         if not self._allowed(etype):
             return None
+        # Re-read while empty to catch a mid-session rename; freeze on first non-empty.
+        if not self._title:
+            self._title = self._title_provider()
         # Change context is namespaced under "change" so it never clobbers the
         # event's OWN id/payload fields (events carry their own log id).
         return {

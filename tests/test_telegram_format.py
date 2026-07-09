@@ -16,9 +16,10 @@ def test_format_awaiting_user_input_uses_real_prompt_payload() -> None:
         "change": {"title": "My Change", "id": "2026-06-11-abc"},
         "payload": {"prompt": "Which DB should I use?"},
     }
-    # The loud header is humanized — "needs your input", not the raw event type.
+    # The loud body is the humanized label alone — "needs your input", not the raw
+    # event type, and NO "[title]" bracket (identity rides the header_line).
     assert imp_telegram.format_event_message(event) == (
-        "[My Change] needs your input\nWhich DB should I use?")
+        "needs your input\nWhich DB should I use?")
 
 
 def test_format_llm_response_renders_assistant_text_without_type_header() -> None:
@@ -45,12 +46,13 @@ def test_format_merge_blocked_surfaces_reason_and_detail() -> None:
                     "detail": "CONFLICT (content): merge conflict in x.py"},
     }
     assert imp_telegram.format_event_message(event) == (
-        "[T] merge blocked\nconflict\nCONFLICT (content): merge conflict in x.py")
+        "merge blocked\nconflict\nCONFLICT (content): merge conflict in x.py")
 
 
-def test_format_falls_back_to_change_id_then_header_only() -> None:
+def test_format_loud_body_is_label_only_no_title_bracket() -> None:
+    # No '[title]' bracket regardless of the change block — the body is the label.
     event = {"type": "change_merged", "change": {"id": "2026-06-11-abc"}, "payload": {}}
-    assert imp_telegram.format_event_message(event) == "[2026-06-11-abc] done"
+    assert imp_telegram.format_event_message(event) == "done"
 
 
 def test_clamp_text_leaves_short_text_unchanged() -> None:
@@ -67,9 +69,9 @@ def test_clamp_text_truncates_overflow_and_marks_it() -> None:
     assert out.endswith("[truncated]")            # the cut is visible to the reader
 
 
-def test_format_falls_back_to_imp_when_no_title_and_no_id() -> None:
+def test_format_loud_body_is_label_only_even_with_empty_change_block() -> None:
     event = {"type": "change_merged", "change": {}, "payload": {}}
-    assert imp_telegram.format_event_message(event) == "[imp] done"
+    assert imp_telegram.format_event_message(event) == "done"
 
 
 def test_format_uses_payload_message_key_as_body() -> None:
@@ -78,7 +80,7 @@ def test_format_uses_payload_message_key_as_body() -> None:
         "change": {"title": "T"},
         "payload": {"message": "wrapped up"},
     }
-    assert imp_telegram.format_event_message(event) == "[T] done\nwrapped up"
+    assert imp_telegram.format_event_message(event) == "done\nwrapped up"
 
 
 def test_clamp_text_passes_exactly_max_length_unchanged() -> None:
@@ -172,20 +174,31 @@ def test_header_line_renders_id_name_and_event_local_time(set_tz) -> None:
     assert header_line(event) == "tozi28 · Telegram subscriptions · 2:32pm"
 
 
-def test_header_line_name_falls_back_to_the_id(set_tz) -> None:
+def test_header_line_collapses_to_id_time_when_no_title(set_tz) -> None:
     from imp.remote.drivers.telegram import header_line
 
     set_tz("UTC")
+    # No title yet (session started before the rename): collapse to 'id · time',
+    # never 'id · id · time'.
     event = {"change": {"id": "abc123"}, "timestamp": "2026-06-25T11:05:00+00:00"}
-    assert header_line(event) == "abc123 · abc123 · 11:05am"
+    assert header_line(event) == "abc123 · 11:05am"
 
 
-def test_header_line_name_falls_back_to_imp_when_no_id_or_title(set_tz) -> None:
+def test_header_line_collapses_when_title_equals_id(set_tz) -> None:
+    from imp.remote.drivers.telegram import header_line
+
+    set_tz("UTC")
+    event = {"change": {"id": "abc123", "title": "abc123"},
+             "timestamp": "2026-06-25T11:05:00+00:00"}
+    assert header_line(event) == "abc123 · 11:05am"
+
+
+def test_header_line_collapses_when_no_id_or_title(set_tz) -> None:
     from imp.remote.drivers.telegram import header_line
 
     set_tz("UTC")
     event = {"change": {}, "timestamp": "2026-06-25T11:05:00+00:00"}
-    assert header_line(event) == " · imp · 11:05am"
+    assert header_line(event) == " · 11:05am"
 
 
 def test_header_line_uses_event_time_in_daemon_local_zone(set_tz) -> None:

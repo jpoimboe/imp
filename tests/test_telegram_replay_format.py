@@ -31,17 +31,20 @@ def _event(etype: str, payload: dict) -> dict:
     }
 
 
-def test_silent_agent_output_renders_header_body_and_footer(set_tz) -> None:
+def test_silent_agent_output_renders_header_and_body_no_footer(set_tz) -> None:
     set_tz("UTC")
+    # A silent narrative event carries no reply footer — only the awaiting_user_input
+    # gate appends ↩ @handle.
     assert format_replay_event(_event("agent_output", {"text": "hello"})) == (
-        "tozi28 · T · 2:32pm\nhello\n↩ @tozi28")
+        "tozi28 · T · 2:32pm\nhello")
 
 
 def test_buzz_event_renders_header_label_and_footer(set_tz) -> None:
     set_tz("UTC")
+    # The gate keeps its ↩ footer; the body is the label alone (no '[T]' bracket).
     assert format_replay_event(
         _event("awaiting_user_input", {"prompt": "go?"})) == (
-        "tozi28 · T · 2:32pm\n[T] needs your input\ngo?\n↩ @tozi28")
+        "tozi28 · T · 2:32pm\nneeds your input\ngo?\n↩ @tozi28")
 
 
 def test_step_started_renders_the_header_less_divider() -> None:

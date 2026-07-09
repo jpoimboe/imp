@@ -85,7 +85,7 @@ def recent_narrative(control_root: Path, change_id: str, n: int) -> list[dict[st
     ]
     snap = snapshot(control_root, change_id)
     title = snap[2] if snap is not None else ""
-    curator = EventCurator(id=change_id, title=title, events=("all",))
+    curator = EventCurator(id=change_id, title_provider=lambda: title, events=("all",))
     out: list[dict[str, Any]] = []
     for event in selected[-n:]:
         augmented = curator.curate(event)
@@ -115,7 +115,7 @@ def full_history(control_root: Path, change_id: str) -> list[dict[str, Any]]:
         return []
     snap = snapshot(control_root, change_id)
     title = snap[2] if snap is not None else ""
-    curator = EventCurator(id=change_id, title=title, events=("all",))
+    curator = EventCurator(id=change_id, title_provider=lambda: title, events=("all",))
     out: list[dict[str, Any]] = []
     for event in events:
         augmented = curator.curate(event)

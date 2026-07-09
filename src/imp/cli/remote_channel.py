@@ -144,7 +144,7 @@ class RemoteChannel:
     ) -> None:
         self._command = command
         self._startup_timeout = startup_timeout
-        self._curator = EventCurator(id=id, title=title, events=events)
+        self._curator = EventCurator(id=id, title_provider=lambda: title, events=events)
         self._on_error = on_error
         self._proc: Any = None
 

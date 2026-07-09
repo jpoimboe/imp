@@ -17,7 +17,7 @@ class SessionRelay:
         *,
         socket_path: str,
         change_id: str,
-        title: str,
+        title_provider: Callable[[], str],
         events: tuple[str, ...],
         sink: Callable[[dict[str, Any]], None],
         is_subscribed: Callable[[], bool] | None = None,
@@ -25,8 +25,10 @@ class SessionRelay:
     ) -> None:
         self._socket_path = socket_path
         self._change_id = change_id
-        self._title = title
-        self._curator = EventCurator(id=change_id, title=title, events=events)
+        # Hello is a one-shot attach frame: resolve once here; curator keeps the live provider.
+        self._title = title_provider()
+        self._curator = EventCurator(
+            id=change_id, title_provider=title_provider, events=events)
         self._sink = sink
         self._is_subscribed = is_subscribed
         self._lease_poll_gap = lease_poll_gap

@@ -110,13 +110,13 @@ def test_paused_body_missing_reason_is_bare_paused() -> None:
     assert imp_telegram.event_body("workflow_paused", {}) == "paused"
 
 
-def test_paused_message_has_header_and_plain_speak_body() -> None:
+def test_paused_message_is_label_and_plain_speak_body_no_title_bracket() -> None:
     event = {
         "type": "workflow_paused",
         "change": {"title": "Foo"},
         "payload": {"reason": "max_loops"},
     }
-    assert imp_telegram.format_event_message(event) == "[Foo] paused\nstuck in a loop"
+    assert imp_telegram.format_event_message(event) == "paused\nstuck in a loop"
 
 
 # A silenced pause must produce no body, so the adapter's

@@ -221,12 +221,16 @@ async def test_replay_renders_each_event_through_the_common_envelope() -> None:
     first = responses.get_nowait()
     second = responses.get_nowait()
     assert responses.empty()
-    # Full envelope (id · title · time / body / reply footer), not a bare body.
+    # Full envelope: id · title · time header + body. A narrative (llm_response)
+    # event carries NO reply footer (only awaiting_user_input gates append the
+    # handle); routing still works via the Notice's change_id tag, asserted below.
     assert isinstance(first, Notice) and isinstance(second, Notice)
     assert first.text.startswith("k3f9qa · Dark mode · ")
-    assert first.text.endswith("\none\n↩ @k3f9qa")
+    assert first.text.endswith("\none")
+    assert "↩" not in first.text
     assert second.text.startswith("k3f9qa · Dark mode · ")
-    assert second.text.endswith("\ntwo\n↩ @k3f9qa")
+    assert second.text.endswith("\ntwo")
+    assert "↩" not in second.text
     # Each replayed Notice is tagged so a reply routes back to the Change.
     assert first.change_id == "k3f9qa"
     assert second.change_id == "k3f9qa"

@@ -257,3 +257,40 @@ async def test_supervisor_leases_only_subscribed_changes(
         assert sock.leased_count == 1
         tg.cancel_scope.cancel()
     await sock.close()
+
+
+@pytest.mark.anyio
+async def test_supervisor_reflects_late_title_via_live_provider(
+    tmp_path: Path,
+) -> None:
+    # The supervisor's title_for returns "" at first (session began before the
+    # rename) and a real title later. The relay's live provider must reflect the
+    # rename on a later event — the frozen-empty-title bug would keep "".
+    cid = "renamed-mid"
+    _make_home(tmp_path, cid)
+    sock = SessionSocket(str(session_socket_path(tmp_path, cid)))
+    await sock.open()
+    holder = {"title": ""}
+    sink: list[dict[str, Any]] = []
+    sup = RelaySupervisor(
+        control_root=tmp_path, sink=sink.append, events=("all",),
+        title_for=lambda _cid: holder["title"], poll_gap=0.02)
+    async with anyio.create_task_group() as tg:
+        tg.start_soon(sock.serve)
+        tg.start_soon(sup.run)
+        with anyio.fail_after(5):
+            while sock.attached_count == 0:
+                await anyio.sleep(0.02)
+        sock.broadcast({"id": "e1", "type": "agent_output", "payload": {}})
+        with anyio.fail_after(5):
+            while len(sink) < 1:
+                await anyio.sleep(0.02)
+        holder["title"] = "Real Title"
+        sock.broadcast({"id": "e2", "type": "agent_output", "payload": {}})
+        with anyio.fail_after(5):
+            while len(sink) < 2:
+                await anyio.sleep(0.02)
+        tg.cancel_scope.cancel()
+    await sock.close()
+    assert sink[0]["change"]["title"] == ""
+    assert sink[1]["change"]["title"] == "Real Title"
