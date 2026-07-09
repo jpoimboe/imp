@@ -17,6 +17,7 @@ those line up the runner is happy.
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 from typing import Any
 
@@ -255,8 +256,7 @@ class CooperativeClient:
 
     def __init__(self, opts: Any, *, after_steer: list[Any],
                  order: list[str] | None = None,
-                 land_gate: "asyncio.Event | None" = None) -> None:
-        import asyncio
+                 land_gate: asyncio.Event | None = None) -> None:
         self.opts = opts
         self.queries: list[Any] = []
         self.closed = False
