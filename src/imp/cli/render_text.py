@@ -466,14 +466,16 @@ def header_line(node: Any, *, depth: int, color: bool,
                       enabled=color)
              if node.route_label else "")
     if not node.resumed:
-        text = f"{label} · {node.model}" if node.model else label
-        return _line(text, depth, color, *pal.NODE_COLORS["step"],
-                     gutters=gutters) + route
+        head = pal.ansi(label, *pal.NODE_COLORS["step"], enabled=color)
+        if node.model:
+            # Gray to match the footer's model segment.
+            head += pal.ansi(f" · {node.model}", "gray", enabled=color)
+        return _gutter_indent(depth, gutters, color) + head + route
     indent = _gutter_indent(depth, gutters, color)
     parts = [pal.ansi(label, *pal.NODE_COLORS["step"], enabled=color),
              pal.ansi(" (resume)", "gray", enabled=color)]
     if node.model:
-        parts.append(pal.ansi(f" · {node.model}", *pal.NODE_COLORS["step"], enabled=color))
+        parts.append(pal.ansi(f" · {node.model}", "gray", enabled=color))
     return indent + "".join(parts) + route
 
 
@@ -507,26 +509,27 @@ def subagent_status_row(sub: nv.SubagentFold, *, depth: int, color: bool,
     abnormal terminal state (running-at-pause, failed, stalled, interrupted, context exhausted)
     appends a plain `(state)` tag so a subagent that didn't cleanly finish still
     stands out."""
-    label = f"  {sub.subagent_name}"
+    sub_c = pal.NODE_COLORS["subagent"]
+    parts = [pal.ansi(f"  {sub.subagent_name}", *sub_c, enabled=color)]
     model = subagent_model(sub)
     if model:
-        # Show the subagent's model on the row, the same way a step header does.
-        label += f" · {model}"
+        # Gray, like the step header's model.
+        parts.append(pal.ansi(f" · {model}", "gray", enabled=color))
     if sub.running:
-        label += " (running)"
+        parts.append(pal.ansi(" (running)", *sub_c, enabled=color))
     elif sub.terminal_state == "stalled":
-        label += " (stalled)"
+        parts.append(pal.ansi(" (stalled)", *sub_c, enabled=color))
     elif sub.terminal_state == "interrupted":
-        label += " (interrupted)"
+        parts.append(pal.ansi(" (interrupted)", *sub_c, enabled=color))
     elif sub.terminal_state == "context_exhausted":
-        label += " (context exhausted)"
+        parts.append(pal.ansi(" (context exhausted)", *sub_c, enabled=color))
     elif sub.is_error:
-        label += " (failed)"
+        parts.append(pal.ansi(" (failed)", *sub_c, enabled=color))
     elapsed = nv.elapsed_seconds(sub.start_ts, sub.end_ts)
     done = "" if sub.running else fmt_seconds_done(elapsed)
     if done:
-        label += f" · {done}"
-    return _line(label, depth, color, *pal.NODE_COLORS["subagent"], gutters=gutters)
+        parts.append(pal.ansi(f" · {done}", "gray", enabled=color))
+    return _gutter_indent(depth, gutters, color) + "".join(parts)
 
 
 def subagent_outcome_lines(sub: nv.SubagentFold, *, depth: int, color: bool,

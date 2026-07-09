@@ -2597,3 +2597,39 @@ def test_subagent_model_is_public() -> None:
     import imp.cli.render_text as rt
     assert callable(rt.subagent_model)
     assert not hasattr(rt, "_subagent_model")   # the private alias is gone
+
+
+def test_header_line_paints_model_in_gray() -> None:
+    node = nv.StepNode(name="plan-writer", kind="agent", label="writing plan", model="opus")
+    colored = rt.header_line(node, depth=0, color=True)
+    assert pal.ansi(" · opus", "gray") in colored                         # model dim gray (C3)
+    assert pal.ansi("writing plan", *pal.NODE_COLORS["step"]) in colored  # label stays step-blue
+    assert rt.header_line(node, depth=0, color=False) == "writing plan · opus"  # plain unchanged
+    # a resumed step's model is gray too (not step-blue).
+    resumed = nv.StepNode(name="code-reviewer", kind="agent", label="reviewing code",
+                          model="opus", resumed=True)
+    assert pal.ansi(" · opus", "gray") in rt.header_line(resumed, depth=0, color=True)
+
+
+def test_subagent_status_row_paints_model_and_frozen_elapsed_gray() -> None:
+    b = nv.NarrativeBuilder()
+    b.add(ev("1", "change_created", change_id=1, title="x"))
+    b.add(ev("2", "step_started", step="s", kind="agent", phase="p",
+             model="m", provider="anthropic"))
+    b.add(ev("t1", "tool_call", agent_id="step:p/s", id="blk", name="sub_agent",
+             input={"subagent_name": "reviewer"}))
+    b.add(ev("r1", "llm_response", agent_id="sub:t1", provider="anthropic", model="opus",
+             stop_reason="end_turn", usage={},
+             raw={"content": [{"type": "text", "text": "hi"}]}))
+    fold = b.running_subagents()[0]
+    running = rt.subagent_status_row(fold, depth=0, color=True)
+    assert pal.ansi(" · opus", "gray") in running                          # model dim gray (C3)
+    assert pal.ansi("  reviewer", *pal.NODE_COLORS["subagent"]) in running  # name stays magenta
+
+    # A finished fold (empty nested → no model): the frozen run duration prints dim gray.
+    done = nv.SubagentFold(subagent_name="reviewer", event_id="e", block_id="b",
+                           nested=nv.NarrativeBuilder(), running=False,
+                           start_ts="2026-01-01T00:00:00", end_ts="2026-01-01T00:00:42")
+    finished = rt.subagent_status_row(done, depth=0, color=True)
+    assert pal.ansi(" · 42s", "gray") in finished  # frozen elapsed dim gray
+    assert rt.subagent_status_row(done, depth=0, color=False) == "  reviewer · 42s"
