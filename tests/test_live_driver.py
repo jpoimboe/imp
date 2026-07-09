@@ -6,6 +6,7 @@ import io
 import json
 
 from imp.cli import narrative as nv
+from imp.cli import palette as pal
 from imp.cli.live_driver import LiveDriver
 from imp.cli.live_status import LiveStatus
 from imp.cli.render_text import render_tree
@@ -2259,3 +2260,84 @@ def test_prose_reflows_to_live_width_between_emissions() -> None:
     assert max(len(ln) for ln in first_lines) > 24, first_lines
     assert len(second_lines) >= 4, body            # reflowed, not one wide line
     assert max(len(ln) for ln in second_lines) <= 24, second_lines
+
+
+# --------------------------------------------------------------------------- #
+# compose_position_row                                                        #
+# --------------------------------------------------------------------------- #
+
+
+def _pos_activity(**kw):
+    base = dict(phase="implementation phase", plan="plan 1/1", counter="task 1/3",
+                model="m", kind="agent")
+    base.update(kw)
+    return nv.Activity(**base)
+
+
+def test_compose_position_row_flushes_identity_right() -> None:
+    from imp.cli.live_driver import compose_position_row
+    row = compose_position_row(activity=_pos_activity(), change_id="z9gixx",
+                               title="streaming footer", prompt_tokens=None,
+                               color=False, width=80)
+    assert "implementation phase · plan 1/1 · task 1/3 · m" in row
+    assert "z9gixx" in row and "streaming footer" in row
+    assert row.index("z9gixx") > row.index("implementation phase")
+
+
+def test_compose_position_row_context_bar_only_for_agent_kind() -> None:
+    from imp.cli.live_driver import compose_position_row
+    agent = compose_position_row(activity=_pos_activity(kind="agent"), change_id="z",
+                                 title="t", prompt_tokens=None, color=False, width=80,
+                                 context_pct=42.0)
+    script = compose_position_row(activity=_pos_activity(kind="script"), change_id="z",
+                                  title="t", prompt_tokens=None, color=False, width=80,
+                                  context_pct=42.0)
+    assert "42%" in agent
+    assert "%" not in script
+    assert "implementation phase" in script
+
+
+def test_compose_position_row_context_bar_absent_during_lane_wait() -> None:
+    from imp.cli.live_driver import compose_position_row
+    row = compose_position_row(activity=_pos_activity(kind="agent", lane_wait=True),
+                               change_id="z", title="t", prompt_tokens=None,
+                               color=False, width=80, context_pct=42.0)
+    assert "%" not in row
+    assert "implementation phase" in row
+
+
+def test_compose_position_row_narrow_truncates_title_before_dropping_id() -> None:
+    from imp.cli.live_driver import compose_position_row
+    row = compose_position_row(
+        activity=nv.Activity(phase="p", kind="agent"), change_id="z9gixx",
+        title="a very long streaming footer title", prompt_tokens=None,
+        color=False, width=25)
+    assert "z9gixx" in row
+    assert "…" in row
+    assert "a very long streaming footer title" not in row
+    assert row.startswith("p")
+
+
+def test_compose_position_row_narrow_drops_right_group_before_clipping_left() -> None:
+    from imp.cli.live_driver import compose_position_row
+    row = compose_position_row(activity=nv.Activity(phase="p", kind="agent"),
+                               change_id="z9gixx", title="t", prompt_tokens=None,
+                               color=False, width=8)
+    assert "z9gixx" not in row
+    assert row.startswith("p")
+
+
+def test_compose_position_row_colors_match_the_scrollback_palette() -> None:
+    from imp.cli.live_driver import compose_position_row
+    try:
+        pal.set_theme("ansi")
+        row = compose_position_row(
+            activity=_pos_activity(phase="planning phase", plan="plan 3/6",
+                                   counter="task 2/3", model="m", kind="agent"),
+            change_id="z9gixx", title="t", prompt_tokens=None, color=True,
+            width=120, context_pct=42.0)
+    finally:
+        pal.set_theme("ansi")
+    assert "\x1b[33m" in row        # phase + id in wordmark gold
+    assert "\x1b[34m" in row        # plan + counter in step blue
+    assert "\x1b[90m" in row        # model (and bar track) in gray
