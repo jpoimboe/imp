@@ -1094,7 +1094,8 @@ def _h_step_started(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, 
         top = self._step_stack[-1]
         if not top.closed and top.name == name:
             if p.get("resumed"):
-                top.live_label = None
+                if p.get("restarted"):
+                    top.live_label = None
                 top.lane_waiting_node = None
                 top.label = p.get("label")
                 top.resumed = True
@@ -1120,7 +1121,6 @@ def _h_step_started(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, 
             existing.closed = False
             existing.interrupted = False
             existing.label = p.get("label")
-            existing.live_label = None
             existing.lane_waiting_node = None
             existing.resumed = True
             if p.get("restarted"):
@@ -1128,6 +1128,7 @@ def _h_step_started(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, 
                 # interrupted partial, so wipe it, restamp the clock, and reset
                 # the re-run-only fields. Interactivity is re-sourced from the
                 # event stream (a re-emitted awaiting_user_input re-arms it).
+                existing.live_label = None
                 existing.children.clear()
                 existing.kind = kind
                 existing.model = p.get("model")
