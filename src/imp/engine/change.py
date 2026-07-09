@@ -209,6 +209,10 @@ class Change:
         Idempotent: a no-op returning False once already materialized."""
         if self.materialized:
             return False
+        if not self.title.strip():
+            raise ValueError(
+                f"change {self.id} has no title; call rename_change to name it "
+                "before going live")
         current_tip = worktree.head_of(self.control_root, self.base_branch)
         head_changed = current_tip != self.orig_base_head
         wt_path = worktree.create_worktree(self.control_root, self.id, self.base_branch)
