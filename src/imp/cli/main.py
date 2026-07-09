@@ -1877,11 +1877,164 @@ _LOG_EXPORT_DEFAULT = object()
 """Sentinel `const` for `--html`/`--md` given without a FILE argument."""
 
 
+def _follow_conflict(args: argparse.Namespace) -> str | None:
+    """Return the first output-mode flag `--follow` conflicts with, or None."""
+    for name, present in (
+        ("--summary", args.summary),
+        ("--full", args.full),
+        ("--html", args.html is not None),
+        ("--md", args.md is not None),
+    ):
+        if present:
+            return name
+    return None
+
+
+def _follow_log(events: list[dict[str, Any]]) -> int:
+    """Replay a Change's narrative through the live run view's renderer."""
+    status = LiveStatus(sys.stdout)
+    driver = LiveDriver(
+        stream=sys.stdout, color=should_use_color(sys.stdout),
+        width=_term_width, display_width=_display_width, status=status)
+    for event in events:
+        driver.on_event(event)
+    driver.finish()
+    return 0
+
+
+class _EventTail:
+    """Offset-tracked, partial-line-tolerant reader for a live events.jsonl.
+
+    Reads only complete, newline-terminated lines from a kept-open descriptor.
+    A complete line that fails to parse (a transient btrfs+zstd read fault, or a
+    torn append) halts consumption at that byte offset and is retried on the
+    next read — it never raises. `emitted` counts every event handed out."""
+
+    def __init__(self, path: Path) -> None:
+        self._path = path
+        self._fp: Any = None
+        self._offset = 0
+        self.emitted = 0
+
+    def read_new(self) -> list[dict[str, Any]]:
+        if self._fp is None:
+            try:
+                self._fp = self._path.open("rb")
+            except FileNotFoundError:
+                return []
+        self._fp.seek(self._offset)
+        data = self._fp.read()
+        events: list[dict[str, Any]] = []
+        consumed = 0
+        for chunk in data.split(b"\n")[:-1]:
+            try:
+                events.append(json.loads(chunk.decode("utf-8")))
+            except (json.JSONDecodeError, UnicodeDecodeError):
+                break
+            consumed += len(chunk) + 1
+        self._offset += consumed
+        self.emitted += len(events)
+        return events
+
+
+_FOLLOW_TERMINAL = frozenset({"completed", "abandoned", "saved"})
+
+
+def _follow_paused_status(change_id: str) -> Callable[[int, float], list[str]]:
+    """A static one-row footer composer shown while the run is paused."""
+    line = f"paused — resume with imp resume {change_id}"
+    return lambda frame, elapsed: [line]
+
+
+def _drain_from_archive(driver: LiveDriver, tail: _EventTail,
+                        control: Path, change_id: str) -> int:
+    """The home vanished mid-follow: feed the archived events beyond the count
+    already emitted (none if the id is not archived), finish, and exit 0."""
+    raw = archive_read.read_events(control, change_id)
+    if raw is not None:
+        for event in _parse_jsonl(raw)[tail.emitted:]:
+            driver.on_event(event)
+    driver.finish()
+    return 0
+
+
+def _follow_step(driver: LiveDriver, tail: _EventTail, status: LiveStatus,
+                 control: Path, change_id: str, home: Path) -> int | None:
+    """One poll iteration. Feeds newly-appended events through the driver and
+    drives the footer from the lock's liveness. Returns an exit code when the
+    follow should stop (terminal status, or the home vanished into the archive),
+    else None to keep polling."""
+    if not home.exists():
+        return _drain_from_archive(driver, tail, control, change_id)
+    for event in tail.read_new():
+        driver.on_event(event)
+    try:
+        state_status = State.load(home / "state").status
+    except FileNotFoundError:
+        return _drain_from_archive(driver, tail, control, change_id)
+    if state_status in _FOLLOW_TERMINAL:
+        for event in tail.read_new():
+            driver.on_event(event)
+        driver.finish()
+        return 0
+    if lock_is_live(home / "lock"):
+        status.update(driver.compose_status)
+    else:
+        status.update(_follow_paused_status(change_id))
+    return None
+
+
+_FOLLOW_POLL_INTERVAL = 0.3
+
+
+def _follow_live(control: Path, change_id: str, home: Path) -> int:
+    """Replay a live Change's narrative through LiveDriver, then tail
+    events.jsonl until a terminal status or the home is archived away. Ctrl-C
+    clears the footer and exits 130."""
+    status = LiveStatus(sys.stdout)
+    driver = LiveDriver(
+        stream=sys.stdout, color=should_use_color(sys.stdout),
+        width=_term_width, display_width=_display_width, status=status)
+    tail = _EventTail(home / "events.jsonl")
+    try:
+        return anyio.run(
+            _follow_poll_loop, driver, tail, status, control, change_id, home)
+    except KeyboardInterrupt:
+        status.reset()
+        return 130
+
+
+async def _follow_poll_loop(
+    driver: LiveDriver, tail: _EventTail, status: LiveStatus,
+    control: Path, change_id: str, home: Path,
+) -> int:
+    """Advance the spinner (LiveStatus.tick) concurrently with a poll loop that
+    feeds new events and checks exit conditions every _FOLLOW_POLL_INTERVAL."""
+    rc = 0
+    async with anyio.create_task_group() as tg:
+        tg.start_soon(status.tick)
+        while True:
+            step = _follow_step(driver, tail, status, control, change_id, home)
+            if step is not None:
+                rc = step
+                break
+            await anyio.sleep(_FOLLOW_POLL_INTERVAL)
+        tg.cancel_scope.cancel()
+    return rc
+
+
 def _cmd_log(args: argparse.Namespace) -> int:
     from imp.cli import narrative
     from imp.cli.render_text import render_tree
 
     control = _control_root()
+    if args.follow:
+        conflict = _follow_conflict(args)
+        if conflict is not None:
+            print(f"imp log: error: argument -f/--follow: not allowed with "
+                  f"argument {conflict}", file=sys.stderr)
+            return 2
+        args.no_pager = True
     change_id: str | None
     if args.token is not None:
         try:
@@ -1907,6 +2060,12 @@ def _cmd_log(args: argparse.Namespace) -> int:
     if events is None:
         print(f"imp: no such Change {change_id!r}", file=sys.stderr)
         return 2
+
+    if args.follow:
+        home = _change_home(control, change_id)
+        if home.exists():
+            return _follow_live(control, change_id, home)
+        return _follow_log(events)
 
     if args.html is not None or args.md is not None:
         return _write_log_export(args, control, change_id, events)
@@ -2803,6 +2962,12 @@ def _build_parser() -> argparse.ArgumentParser:
     p_log.add_argument(
         "--no-pager", action="store_true",
         help="Disable the pager even when stdout is a TTY.",
+    )
+    p_log.add_argument(
+        "-f", "--follow", action="store_true",
+        help="Live-tail the narrative (tail -f): replay it, then stream new "
+             "events until the Change reaches a terminal status. Renders the "
+             "live run view; implies --no-pager.",
     )
     p_log_export = p_log.add_mutually_exclusive_group()
     p_log_export.add_argument(
