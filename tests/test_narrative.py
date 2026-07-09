@@ -569,7 +569,7 @@ def test_subagent_current_activity_includes_nested_detail() -> None:
         b.add(e)
     act = b.current_activity()
     assert act is not None
-    assert act.verb == "subagent(coder)"
+    assert act.verb == "writing code"                   # coder's role verb (D2)
     assert act.detail is not None and "executor.py" in act.detail
 
 
@@ -594,7 +594,7 @@ def test_subagent_activity_uses_label_when_present() -> None:
     assert "subagent(" not in (act.verb or "")
 
 
-def test_subagent_activity_falls_back_to_subagent_name() -> None:
+def test_subagent_activity_uses_role_verb() -> None:
     b = nv.NarrativeBuilder()
     for e in [
         ev("1", "change_created", change_id=1, title="x"),
@@ -606,8 +606,23 @@ def test_subagent_activity_falls_back_to_subagent_name() -> None:
         b.add(e)
     act = b.current_activity()
     assert act is not None
-    assert act.verb == "subagent(explorer)"
+    assert act.verb == "exploring"                       # explorer's role verb (D2)
     assert "task →" not in (act.verb or "")
+
+
+def test_subagent_activity_unmapped_role_falls_back_to_subagent_name() -> None:
+    b = nv.NarrativeBuilder()
+    for e in [
+        ev("1", "change_created", change_id=1, title="x"),
+        ev("3", "step_started", step="spec", kind="agent", phase="design",
+           model="m", provider="anthropic"),
+        _ev("4", "tool_call", agent_id="step:design/spec", id="t1",
+            name="sub_agent", input={"subagent_name": "mystery"}),
+    ]:
+        b.add(e)
+    act = b.current_activity()
+    assert act is not None
+    assert act.verb == "subagent(mystery)"               # no role verb -> generic fallback
 
 
 def test_summarize_result_flattens_text_block_list_in_burst() -> None:

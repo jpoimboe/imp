@@ -569,7 +569,7 @@ class NarrativeBuilder:
         running = [f for f in self._open_sub_by_event.values() if f.running]
         if running:
             f = running[0]
-            verb = f.label if f.label else f"subagent({f.subagent_name})"
+            verb = f.label or _subagent_verb(f.subagent_name) or f"subagent({f.subagent_name})"
             nested = f.nested.current_activity()
             detail = nested.detail if nested is not None else None
             extra = len(running) - 1
@@ -1383,6 +1383,12 @@ def _draw_status_phrase() -> str:
     # Lazy import keeps `import narrative` free of agent-package weight (design D3).
     from imp.agents.random_status import random_status_phrase
     return random_status_phrase()
+
+
+def _subagent_verb(role: str) -> str | None:
+    # Lazy import keeps `import narrative` free of agent-package weight (design D3).
+    from imp.agents.subagent_verbs import subagent_verb
+    return subagent_verb(role)
 
 
 def _rotate_status_phrase(self: NarrativeBuilder) -> None:
