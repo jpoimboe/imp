@@ -152,6 +152,24 @@ async def test_make_buffered_solicit_delivers_first_line_then_delegates() -> Non
     assert calls == ["prompt-2", "prompt-3"]   # every later reply delegates
 
 
+def test_render_inert_question_prefixes_turn_bullet() -> None:
+    # The preview must lead with the bold "• " turn bullet on its first non-blank
+    # line, matching every other agent-turn rendering.
+    out = render_inert_question("Which DB should I use?", width=80, color=False)
+    first = next(line for line in out.splitlines() if line.strip())
+    assert first.startswith("• ")
+
+
+def test_render_inert_question_hang_indents_continuation() -> None:
+    # A multi-line message hangs its continuation lines 2 columns in, under the
+    # first word — not flush-left and without a second bullet.
+    out = render_inert_question("line one\nline two", width=80, color=False)
+    lines = [line for line in out.splitlines() if line.strip()]
+    assert lines[0].startswith("• line one")
+    assert lines[1].startswith("  line two")
+    assert not lines[1].startswith("• ")
+
+
 @pytest.mark.anyio
 async def test_run_inert_resume_launches_with_first_line(capsys) -> None:
     launched: list[str] = []
