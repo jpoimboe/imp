@@ -125,13 +125,17 @@ def step_divider(event: Mapping[str, Any]) -> str | None:
 
 
 def header_line(event: Mapping[str, Any]) -> str:
-    """The per-message header 'id · name · time'; time is the event's own send time."""
+    """The per-message header 'id · title · time'; time is the event's own send
+    time. Collapses to 'id · time' when no title exists yet or the title just equals
+    the id, so a not-yet-renamed Change never renders 'id · id · time'."""
     change = event.get("change") or {}
     cid = str(change.get("id") or "")
-    name = change.get("title") or cid or "imp"
+    title = str(change.get("title") or "")
     ts = event.get("timestamp")
     when = format_time_of_day(ts) if ts else ""
-    return f"{cid} · {name} · {when}"
+    if title and title != cid:
+        return f"{cid} · {title} · {when}"
+    return f"{cid} · {when}"
 
 
 def _pause_is_silent(payload: Mapping[str, Any]) -> bool:
@@ -253,24 +257,24 @@ def _compose_message(event: Mapping[str, Any], body: str) -> str:
     """Render the message text for an event.
 
     Silent narrative events (the quiet running commentary — llm_response,
-    agent_output) are sent as their prose alone: the body *is* the message, so
-    there is no technical '[title] llm_response' header to leak the internal event
-    type into the chat. Loud lifecycle events keep a '[title] label' header — the
-    type name is the signal, humanized via _EVENT_LABELS (e.g. "needs your input",
-    "merge blocked"). Title falls back to the change id, then to 'imp'."""
+    agent_output) are sent as their prose alone: the body *is* the message. Loud
+    lifecycle events render as their humanized label alone (via _EVENT_LABELS —
+    "needs your input", "merge blocked", "done"), optionally followed by the body.
+    Identity (id · title · time) is carried once by the always-prepended
+    header_line, so no '[title]' bracket is embedded here."""
     body = body.strip() if isinstance(body, str) else ""
     if event.get("type") in _SILENT:
         return body
-    change = event.get("change") or {}
-    title = change.get("title") or change.get("id") or "imp"
     etype = event.get("type") or "event"
-    header = f"[{title}] {_EVENT_LABELS.get(etype, etype)}"
-    return f"{header}\n{body}" if body else header
+    label = _EVENT_LABELS.get(etype, etype)
+    return f"{label}\n{body}" if body else label
 
 
 def format_event_message(event: Mapping[str, Any]) -> str:
-    """Render one imp event as Telegram message text: a '[title] type' header plus
-    the event's human-readable body (resolved per event type)."""
+    """Render one imp event as Telegram message text: for a loud event, the
+    humanized label plus the event's human-readable body (resolved per event type);
+    for a silent narrative event, the body alone. Identity rides the prepended
+    header_line, so no '[title]' bracket is embedded here."""
     payload = event.get("payload") or {}
     return _compose_message(event, event_body(event.get("type"), payload))
 

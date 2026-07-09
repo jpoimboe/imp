@@ -13,10 +13,10 @@ EVENT = {
 
 
 def test_format_outbound_carries_body_and_handle() -> None:
-    out = format_outbound(EVENT, "k3f9qa")
-    assert "Need your call" in out   # the event body survives
-    assert "Dark mode" in out        # the loud-event title header survives
-    assert "k3f9qa" in out           # the reply handle is carried (spec)
+    # The gate body is the humanized label alone (no '[title]' bracket — identity
+    # rides the header_line); the reply handle is still appended for the gate.
+    assert format_outbound(EVENT, "k3f9qa") == (
+        "needs your input\nNeed your call\n↩ @k3f9qa")
 
 
 def test_send_message_returns_the_new_message_id(monkeypatch: Any) -> None:
