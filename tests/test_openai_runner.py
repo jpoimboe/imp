@@ -483,7 +483,7 @@ async def test_interrupt_cancels_in_flight_request(tmp_path: Path) -> None:
 
 
 @pytest.mark.anyio
-async def test_streaming_pulses_note_activity_per_event(tmp_path: Path) -> None:
+async def test_response_wait_is_request_bracketed(tmp_path: Path) -> None:
     import dataclasses
 
     from imp.cli.signals import InterruptCoordinator
@@ -494,8 +494,10 @@ async def test_streaming_pulses_note_activity_per_event(tmp_path: Path) -> None:
                            '{"status": "Success", "note": "ok"}'),
     )], stream_events=3)
     coord = InterruptCoordinator()
-    pulses: list[int] = []
-    coord.add_activity_listener(lambda: pulses.append(1))
+    # begin_request_watchdog snapshots request_active True just before each await
+    # for the next stream event; end/body pulses snapshot False.
+    snaps: list[bool] = []
+    coord.add_activity_listener(lambda: snaps.append(coord.request_active))
 
     runner = OpenAIAgentRunner(model_name="gpt-4o-mini",
                                client_factory=lambda: fake)
@@ -503,13 +505,9 @@ async def test_streaming_pulses_note_activity_per_event(tmp_path: Path) -> None:
     events = [e async for e in runner.run(inv)]
 
     assert events[-1]["type"] == "agent_output"
-    # 3 stream-loop pulses (one per streamed event) PLUS 2 from complete_step's
-    # dispatch: the direct-API runners route complete_step through
-    # dispatch_one_tool_use → `with suspend_inactivity_watchdog(ctx)`, whose
-    # enter/exit each call coordinator.note_activity(). The ctx.coordinator IS
-    # this test's coord, so that adds exactly 2. Removing the stream-loop pulse
-    # line would drop the count to 2 — the assertion stays falsifiable.
-    assert len(pulses) == 5
+    # request_active is armed while awaiting each of the 3 streamed events.
+    assert sum(1 for s in snaps if s) >= 3
+    assert coord.request_active is False
 
 
 @pytest.mark.anyio
