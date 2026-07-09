@@ -481,3 +481,19 @@ def test_state_roundtrips_has_started(tmp_path: Path) -> None:
     (tmp_path / "state.json").write_text(
         '{"id":"c","step":null,"step_attempt":0,"status":"new"}')
     assert State.load(tmp_path).has_started is False  # absent key -> default
+
+
+def test_parse_events_jsonl_parses_and_marks_malformed() -> None:
+    from imp.engine.state import parse_events_jsonl
+
+    raw = b'{"type": "a", "payload": {}}\n\n  \n{bad\n'
+    assert parse_events_jsonl(raw) == [
+        {"type": "a", "payload": {}},
+        {"_malformed": True, "raw": "{bad"},
+    ]
+
+
+def test_parse_events_jsonl_empty_is_empty_list() -> None:
+    from imp.engine.state import parse_events_jsonl
+
+    assert parse_events_jsonl(b"") == []

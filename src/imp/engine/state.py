@@ -601,6 +601,19 @@ class _BaseEventLog:
         raise NotImplementedError
 
 
+def parse_events_jsonl(raw: bytes) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    for line in raw.decode("utf-8", errors="replace").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            out.append(json.loads(line))
+        except json.JSONDecodeError:
+            out.append({"_malformed": True, "raw": line})
+    return out
+
+
 class JsonlEventLog(_BaseEventLog):
     """File-backed append-only event log."""
 
