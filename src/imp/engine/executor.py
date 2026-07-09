@@ -410,6 +410,13 @@ async def run_change(
             # var_mutations was ALREADY applied to state.vars and logged inside the
             # _route_* body — run_change receives it for visibility only and must NOT
             # re-apply it (double-apply trap). The third element is otherwise unused.
+            # A step is about to begin executing: record the durable run fact the
+            # first time any step dispatches, so resume can distinguish a
+            # never-run seed draft from a conversation that must replay. Persisted
+            # now (before dispatch) so even a crash mid-step leaves it set.
+            if not state.has_started:
+                state.has_started = True
+                state.save(change.state_dir)
             action, feedback_text, _var_mutations = await _dispatch_step(
                 step, workflow, change, state, log, is_resume=is_resume,
                 user_chat_input_fn=user_chat_input_fn, coordinator=coordinator,

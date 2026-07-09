@@ -463,3 +463,21 @@ def test_max_clean_tree_bounces_defaults_to_three(tmp_path: Path) -> None:
     assert s.max_clean_tree_bounces == 3
     s.save(tmp_path)
     assert State.load(tmp_path).max_clean_tree_bounces == 3
+
+
+def test_state_roundtrips_has_started(tmp_path: Path) -> None:
+    default = State(id="c", step=None, step_attempt=0, status="new")
+    assert default.has_started is False          # field defaults to not-yet-run
+    default.save(tmp_path)
+    assert State.load(tmp_path).has_started is False
+
+    started = State(id="c", step="chat", step_attempt=0, status="new",
+                    has_started=True)
+    started.save(tmp_path)
+    raw = json.loads((tmp_path / "state.json").read_text())
+    assert raw["has_started"] is True            # persisted to the JSON payload
+    assert State.load(tmp_path).has_started is True
+
+    (tmp_path / "state.json").write_text(
+        '{"id":"c","step":null,"step_attempt":0,"status":"new"}')
+    assert State.load(tmp_path).has_started is False  # absent key -> default

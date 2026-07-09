@@ -151,6 +151,7 @@ class State:
     held_lane: str | None = None          # lane key (base branch) this change holds
     held_acquire_step: str | None = None  # the acquiring step to rewind to on eviction
     route_label: str | None = None  # rule label threaded to the next step_started (consume-on-read)
+    has_started: bool = False  # durable: True once >=1 step has begun executing
     completion_pending: bool = False  # §3: navigation ran off the end under an
     # in-flight interrupt; re-entry finalizes via _complete (no dispatch/wipe).
     reincarnations: dict[str, int] = field(default_factory=dict)  # per-session
@@ -225,6 +226,7 @@ class State:
             "route_label": self.route_label,
             "step_attempt": self.step_attempt,
             "status": self.status,
+            "has_started": self.has_started,
             "vars": self.vars,
             "loop_counts": self.loop_counts,
             "outcome_history": self.outcome_history,

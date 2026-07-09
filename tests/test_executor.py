@@ -251,6 +251,17 @@ async def test_run_change_completes_minimal_workflow(tmp_path: Path) -> None:
 
 
 @pytest.mark.anyio
+async def test_run_change_sets_has_started_at_dispatch(tmp_path: Path) -> None:
+    change, _, _ = _seed_minimal_workflow(tmp_path)
+    assert State.load(change.state_dir).has_started is False   # never-run seed
+    _register_fake({"status": "Success"})
+
+    await run_change(change, on_event=lambda _e: None)
+
+    assert State.load(change.state_dir).has_started is True     # a step ran
+
+
+@pytest.mark.anyio
 async def test_continue_off_last_step_completes(tmp_path: Path) -> None:
     """A single agent step with no rules → continue → COMPLETED, and the
     steps/ tree is removed at completion."""

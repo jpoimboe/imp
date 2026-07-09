@@ -20,6 +20,7 @@ clean_tree_bounces
 completion_pending
 current_step
 guidance
+has_started
 held_acquire_step
 held_lane
 id
