@@ -183,7 +183,6 @@ def compose_position_row(*, activity: nv.Activity, change_id: str | None,
 def compose_subagent_rows(builder: nv.NarrativeBuilder, *, color: bool,
                           now_iso: str) -> list[str]:
     """One indented row per running subagent (B4/AC5); colliding roles numbered."""
-    from imp.agents.subagent_verbs import subagent_verb
     folds = builder.running_subagents()
     if not folds:
         return []
@@ -200,8 +199,6 @@ def compose_subagent_rows(builder: nv.NarrativeBuilder, *, color: bool,
         else:
             role = name
         role_seg = _paint(role, *pal.NODE_COLORS["subagent"], color=color, over_bg=False)
-        verb = f.label or subagent_verb(name) or f"subagent({name})"
-        verb_seg = _paint(verb, "wordmark", color=color, over_bg=False)
         model = rt.subagent_model(f)
         model_seg = _paint(model, "gray", color=color, over_bg=False) if model else None
         bar = context_bar(model, f.nested.latest_prompt_tokens,
@@ -210,7 +207,7 @@ def compose_subagent_rows(builder: nv.NarrativeBuilder, *, color: bool,
         secs = nv.elapsed_seconds(f.start_ts, now_iso)
         el = rt.fmt_seconds(secs) if secs is not None else None
         el_seg = _paint(el, "dim", color=color, over_bg=False) if el else None
-        rows.append("  " + rt.compose_label([role_seg, verb_seg, model_seg, bar, el_seg]))
+        rows.append("  " + rt.compose_label([role_seg, model_seg, bar, el_seg]))
     return rows
 
 

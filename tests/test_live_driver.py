@@ -2368,8 +2368,11 @@ def test_compose_subagent_rows_one_per_running_subagent() -> None:
     b = _sub_builder(("t1", "coder"), ("t2", "explorer"))
     rows = compose_subagent_rows(b, color=False, now_iso="2026-01-01T00:00:00+00:00")
     assert len(rows) == 2
-    assert any("coder" in r and "writing code" in r for r in rows)   # role + role verb
-    assert any("explorer" in r and "exploring" in r for r in rows)
+    joined = "\n".join(rows)
+    assert "coder" in joined      # role still identifies each row
+    assert "explorer" in joined
+    assert "writing code" not in joined                 # verb segment dropped
+    assert "exploring" not in joined
 
 
 def test_compose_subagent_rows_number_colliding_roles() -> None:
@@ -2411,7 +2414,8 @@ def test_compose_status_appends_a_row_per_running_subagent() -> None:
                      input={"subagent_name": "coder"}))
     block = drv.compose_status(0, 5.0)
     assert isinstance(block, list) and len(block) == 4   # row1, blank, row3, + one subagent row
-    assert "coder" in block[3] and "writing code" in block[3]
+    assert "coder" in block[3]              # role present
+    assert "writing code" not in block[3]   # verb segment dropped
 
 
 def test_test_lane_wait_and_acquire_each_restart_the_status_span() -> None:
