@@ -258,31 +258,33 @@ async def bash(
         # why its command died. returncode stays the real negative signal (an
         # honest kill: unlike the cap path, this IS why the command died, so the
         # provider's returncode<0 -> tool_killed heuristic firing is correct).
-        return json.dumps({
+        result: dict[str, object] = {
             "stdout": stdout,
             "stderr": stderr,
             "status": "killed",
             "kill_reason": "interrupted",
             "returncode": (proc.returncode if proc.returncode is not None
                            else -signal.SIGKILL),
-        }, ensure_ascii=False)
-    # returncode 0 on a cap-kill — a cap-truncation is a NORMAL result; the
-    # SIGKILL we issued was cleanup and must NOT read as `tool_killed` (the
-    # provider keys that on returncode < 0; see anthropic.py:704).
-    returncode = 0 if counter.capped else (
-        proc.returncode if proc.returncode is not None else -signal.SIGKILL)
-
-    result: dict[str, object] = {
-        "stdout": stdout,
-        "stderr": stderr,
-        "returncode": returncode,
-    }
+        }
+    else:
+        # returncode 0 on a cap-kill — a cap-truncation is a NORMAL result; the
+        # SIGKILL we issued was cleanup and must NOT read as `tool_killed` (the
+        # provider keys that on returncode < 0; see anthropic.py:704).
+        returncode = 0 if counter.capped else (
+            proc.returncode if proc.returncode is not None else -signal.SIGKILL)
+        result = {
+            "stdout": stdout,
+            "stderr": stderr,
+            "returncode": returncode,
+        }
     if len(out_bytes) + len(err_bytes) > TOOL_OUTPUT_CAP_BYTES:
         # Over the 50 KB display cap: spill the FULL decoded output so the
         # truncated tail is recoverable with an ordinary read_file, then bound
         # each displayed stream to the 50 KB head. When stderr is non-empty the
         # spill file carries both tails under labeled sections; otherwise it is
-        # just the full stdout. The notice supersedes the old inline marker.
+        # just the full stdout. The notice supersedes the old inline marker. This
+        # also covers the pause tombstone: a pause landing mid-flood must not
+        # return up to the 5 MB kill ceiling inline.
         full = (f"=== stdout ===\n{stdout}\n=== stderr ===\n{stderr}"
                 if stderr else stdout)
         result["notice"] = spill_tool_output(

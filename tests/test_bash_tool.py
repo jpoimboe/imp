@@ -346,6 +346,47 @@ def test_bash_midcommand_pause_kills_and_returns_tombstone(tmp_path: Path) -> No
     assert ctx.running_processes == []
 
 
+def test_bash_midcommand_pause_over_cap_spills_tombstone(tmp_path: Path) -> None:
+    # A pause landing mid-command after the command already emitted > 50 KB must
+    # spill the full output like the normal path: the tombstone keeps its
+    # status/kill_reason but its displayed stdout is the 50 KB head + a notice,
+    # not up to the 5 MB kill ceiling inline.
+    class _Coord:
+        should_pause = False
+
+    coord = _Coord()
+    ctx = _ctx(tmp_path)
+    ctx.coordinator = coord
+    holder: dict[str, dict] = {}
+
+    async def _scenario() -> None:
+        with anyio.fail_after(10):
+            async with anyio.create_task_group() as tg:
+                async def _runner() -> None:
+                    holder["out"] = json.loads(
+                        await get_registry()["bash"].async_invoke(
+                            ctx, {"command":
+                                  "yes ABCDEFGHIJ | head -c 100000; sleep 30"}))
+
+                async def _pauser() -> None:
+                    await anyio.sleep(0.5)      # let the 100 KB flush first
+                    coord.should_pause = True
+
+                tg.start_soon(_runner)
+                tg.start_soon(_pauser)
+
+    anyio.run(_scenario)
+    out = holder["out"]
+    assert out["status"] == "killed"
+    assert out["kill_reason"] == "interrupted"
+    assert len(out["stdout"]) == 50_000              # 50 KB head display
+    assert "notice" in out
+    spilled = list((tmp_path / "tool-results").iterdir())
+    assert len(spilled) == 1
+    assert len(spilled[0].read_bytes()) == 100_000   # FULL output recoverable
+    assert ctx.running_processes == []
+
+
 def test_bash_with_coordinator_no_pause_completes_normally(tmp_path: Path) -> None:
     # Regression: with a coordinator present but NO pause, the poller must stay
     # out of the way — the command completes normally and returns the ordinary
