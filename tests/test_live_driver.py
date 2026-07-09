@@ -2407,3 +2407,28 @@ def test_compose_status_appends_a_row_per_running_subagent() -> None:
     block = drv.compose_status(0, 5.0)
     assert isinstance(block, list) and len(block) == 4   # row1, blank, row3, + one subagent row
     assert "coder" in block[3] and "writing code" in block[3]
+
+
+def test_test_lane_wait_and_acquire_each_restart_the_status_span() -> None:
+    """C1: the test-lane queue wait is excluded from the step. restart_span() fires at
+    queue entry (fresh wait clock) AND at slot acquisition (fresh run clock), on top of
+    the step_started reset — mirroring the agent_retry span-reset."""
+    calls: list[str] = []
+
+    class _CountingStatus(LiveStatus):
+        def restart_span(self) -> None:
+            calls.append("restart")
+            super().restart_span()
+
+    out = _Pipe()
+    status = _CountingStatus(out)
+    drv = LiveDriver(stream=out, color=False, width=80, status=status)
+    for e in [
+        ev("1", "change_created", change_id=1, title="x"),
+        ev("2", "step_started", step="integration-tests", kind="script",
+           phase="integration", label="running tests"),          # restart (step clock)
+        ev("3", "waiting_for_test_lane", step="integration-tests"),  # restart (wait clock)
+        ev("4", "test_lane_acquired", step="integration-tests"),     # restart (run clock)
+    ]:
+        drv.on_event(e)
+    assert calls == ["restart", "restart", "restart"]

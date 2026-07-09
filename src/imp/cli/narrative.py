@@ -988,11 +988,17 @@ def _h_test_lane_acquired(
     self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]
 ) -> None:
     self._flush_burst()
-    # Slot in hand — drop the "waiting for a test slot" override so the footer
-    # reverts to the step's phrase ("running tests").
+    # Slot in hand — drop the "waiting to test" override so the footer reverts to the
+    # step's phrase ("running tests"), and restart the step clock (C1): overwrite
+    # start_ts with the acquisition time so the completion breadcrumb
+    # (elapsed_seconds(start_ts, end_ts)) measures pure run time, excluding the queue wait.
     if self._step_stack:
-        self._step_stack[-1].live_label = None
-        self._step_stack[-1].lane_wait = False
+        top = self._step_stack[-1]
+        top.live_label = None
+        top.lane_wait = False
+        ts = event.get("timestamp")
+        if ts is not None:
+            top.start_ts = ts
 
 
 NarrativeBuilder._HANDLERS["test_lane_acquired"] = _h_test_lane_acquired

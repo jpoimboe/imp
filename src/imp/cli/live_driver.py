@@ -328,6 +328,13 @@ class LiveDriver:
                 if (isinstance(payload, dict) and nv.llm_response_has_prose(payload)
                         and not self._builder.has_running_subagent):
                     self._status.restart_span()
+            elif etype in ("waiting_for_test_lane", "test_lane_acquired"):
+                # C1: exclude the test-lane queue wait from the step clock. Zero the
+                # span at queue entry so the footer's `waiting to test · <t>` counts its
+                # own wait, and again at slot acquisition so `running tests · <t>`
+                # measures pure run time. Reuses the same restart_span() the rate-limit
+                # (agent_retry) wait uses.
+                self._status.restart_span()
             elif etype == "agent_retry":
                 # Zero the span at wait entry so compose_activity_line's countdown
                 # (countdown_total - elapsed) measures time-since-wait-start. Mirror
