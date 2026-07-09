@@ -2461,3 +2461,57 @@ def test_full_view_renders_subagent_task_description_injected() -> None:
     lean = "\n".join(_lines(events))
     assert "map the auth module end to end" not in lean
     assert "injected message:" not in lean
+
+
+def test_full_parallel_subagents_show_distinct_task_descriptions() -> None:
+    # Acceptance #3: two concurrently-dispatched explorers with different
+    # task_descriptions render as two folds whose expanded headers each carry
+    # their own description; the lean rows carry none.
+    events = [
+        _ev("2", "step_started", step="s", kind="agent", phase="p",
+            model="m", provider="anthropic"),
+        _ev("tk1", "tool_call", agent_id="step:p/s", id="b1", name="sub_agent",
+            input={"subagent_name": "explorer",
+                   "task_description": "Map the auth module"}),
+        _ev("tk2", "tool_call", agent_id="step:p/s", id="b2", name="sub_agent",
+            input={"subagent_name": "explorer",
+                   "task_description": "Map the billing module"}),
+        _ev("su1", "llm_response", agent_id="sub:tk1", provider="anthropic", model="m",
+            stop_reason="end_turn", usage={},
+            raw={"content": [{"type": "text", "text": "found auth"}]}),
+        _ev("su2", "llm_response", agent_id="sub:tk2", provider="anthropic", model="m",
+            stop_reason="end_turn", usage={},
+            raw={"content": [{"type": "text", "text": "found billing"}]}),
+        _ev("r1", "tool_result", agent_id="step:p/s", id="b1",
+            content='{"status":"Success"}', error=False),
+        _ev("r2", "tool_result", agent_id="step:p/s", id="b2",
+            content='{"status":"Success"}', error=False),
+    ]
+    full = "\n".join(_lines(events, full=True))
+    assert "▾ explorer · Map the auth module" in full
+    assert "▾ explorer · Map the billing module" in full
+
+    lean = "\n".join(_lines(events, full=False))
+    # Lean subagent_status_row is unchanged: the name row survives, the
+    # task description does not.
+    assert "  explorer" in lean
+    assert "Map the auth module" not in lean
+    assert "Map the billing module" not in lean
+
+
+def test_full_subagent_header_clips_and_collapses_task_description() -> None:
+    # Long descriptions clip to _SUBAGENT_TASK_CLIP chars + ellipsis; internal
+    # whitespace (incl. newlines) collapses to single spaces.
+    long_sub = nv.SubagentFold(
+        subagent_name="explorer", event_id="e", block_id="b",
+        nested=nv.NarrativeBuilder(), task_description="x" * 200)
+    long_out = list(rt._render_subagent(long_sub, depth=0, full=True,
+                                        color=False, width=80))
+    assert long_out[0] == "▾ explorer · " + "x" * rt._SUBAGENT_TASK_CLIP + "…"
+
+    multiline = nv.SubagentFold(
+        subagent_name="explorer", event_id="e", block_id="b",
+        nested=nv.NarrativeBuilder(), task_description="Map  the\nauth   module")
+    ml_out = list(rt._render_subagent(multiline, depth=0, full=True,
+                                      color=False, width=80))
+    assert ml_out[0] == "▾ explorer · Map the auth module"

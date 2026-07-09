@@ -29,7 +29,7 @@ spec · claude-sonnet-4-6
   → auth.py
     main.py
 
-▾ reviewer
+▾ reviewer · Review the draft spec for completeness.
 │ ▾ context · anthropic/claude-sonnet-4-6 · max_tool_calls=10
 │   system_prompt:
 │     You are a reviewer.

@@ -811,6 +811,7 @@ def _render(node: Any, *, depth: int, full: bool, color: bool,
 
 _ARG_VALUE_CLIP = 120        # §2: per-arg-value clip on the --full args line
 _OUTPUT_LINE_CLIP = 400      # §2: per-source-line clip in the --full output block
+_SUBAGENT_TASK_CLIP = 60     # §3: per-header clip on the --full subagent task description
 _OUTPUT_MAX_LINES = 10       # §2: source lines shown before the "+N more" tail
 _SCRIPT_DETAIL_TAIL_LINES = 15   # lean view: last N lines of a blocked-script detail
 
@@ -936,8 +937,13 @@ def _render_subagent(sub: nv.SubagentFold, *, depth: int, full: bool,
     # --full: expanded `▾ {name}` fold header, full recursion of the subagent's
     # narrative (nested thinking/tools expanded), then the structured return value.
     # --full stays a superset of the lean view.
-    yield _line(f"{pal.fold_glyph(expanded=True)} {sub.subagent_name}",
-                depth, color, *pal.NODE_COLORS["subagent"], gutters=gutters)
+    header = f"{pal.fold_glyph(expanded=True)} {sub.subagent_name}"
+    task = " ".join(sub.task_description.split()) if sub.task_description else ""
+    if task:
+        if len(task) > _SUBAGENT_TASK_CLIP:
+            task = task[:_SUBAGENT_TASK_CLIP] + "…"
+        header += f" · {_caret_escape(task)}"
+    yield _line(header, depth, color, *pal.NODE_COLORS["subagent"], gutters=gutters)
     yield from _render_children(sub.tree.root.children, depth=depth + 1, full=full,
                                 color=color, width=width, display_width=display_width,
                                 gutters=(*gutters, depth), live_viewer=live_viewer)
