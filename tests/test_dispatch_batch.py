@@ -568,3 +568,124 @@ def test_spawn_tool_offered_as_sub_agent() -> None:
     from imp.agents.subagents import make_task_tool
     assert make_task_tool().name == "sub_agent"
 
+
+@pytest.mark.anyio
+async def test_batch_over_cap_result_spilled_and_previewed(tmp_path: Path) -> None:
+    """AC: a >50 KB subagent result on the concurrent batch path is wrapped as a
+    preview + notice, and the FULL result is spilled to tool-results/<tu.id>."""
+    reset_parallelism_cache()
+    big = "A" * 60_000
+
+    async def _fake(ctx, name, desc, *, tool_call_event_id="", tier=None):
+        return big
+
+    monkey = dispatch_mod.dispatch_task
+    dispatch_mod.dispatch_task = _fake  # type: ignore[assignment]
+    try:
+        ctx = _ctx(tmp_path, spawn=_slow_spawn({"active": 0, "peak": 0}, 0.0))
+        elog = InMemoryEventLog()
+        tool_results: list = []
+        state = TurnState(tool_calls_used=0)
+        async for _ in dispatch_task_batch(
+                ctx=ctx, elog=elog, aid="step:p/s", task_tus=[_task_tu("t1")],
+                tool_results=tool_results, state=state, ceiling=None):
+            pass
+    finally:
+        dispatch_mod.dispatch_task = monkey  # type: ignore[assignment]
+    block = tool_results[0]
+    assert block.is_error is False
+    assert len(block.content) < len(big)              # previewed, not the full 60 KB
+    assert "read with read_file offset=1" in block.content
+    assert "tool-results/t1" in block.content         # keyed by tu.id, root-relative
+    # The spill file holds the FULL result, recoverable with read_file.
+    spilled = tmp_path / "tool-results" / "t1"
+    assert spilled.read_text(encoding="utf-8") == big
+    reset_parallelism_cache()
+
+
+@pytest.mark.anyio
+async def test_inline_over_cap_result_spilled_and_previewed(tmp_path: Path) -> None:
+    """AC: the parallelism=1 inline kill-switch path spills + previews a >50 KB
+    result identically to the batch path (the two sites cannot drift)."""
+    reset_parallelism_cache()
+    big = "B" * 60_000
+
+    async def _fake(ctx, name, desc, *, tool_call_event_id="", tier=None):
+        return big
+
+    monkey = dispatch_mod.dispatch_task
+    dispatch_mod.dispatch_task = _fake  # type: ignore[assignment]
+    try:
+        ctx = _ctx(tmp_path, spawn=_slow_spawn({"active": 0, "peak": 0}, 0.0))
+        elog = InMemoryEventLog()
+        tool_results: list = []
+        state = TurnState(tool_calls_used=0)
+        await _dispatch_one_task_inline(
+            ctx=ctx, elog=elog, aid="step:p/s", tu=_task_tu("t1"),
+            tool_results=tool_results, state=state, ceiling=None)
+    finally:
+        dispatch_mod.dispatch_task = monkey  # type: ignore[assignment]
+    block = tool_results[0]
+    assert block.is_error is False
+    assert len(block.content) < len(big)
+    assert "read with read_file offset=1" in block.content
+    assert "tool-results/t1" in block.content
+    assert (tmp_path / "tool-results" / "t1").read_text(encoding="utf-8") == big
+    reset_parallelism_cache()
+
+
+@pytest.mark.anyio
+async def test_batch_under_cap_result_unchanged(tmp_path: Path) -> None:
+    """AC: a <=50 KB result is byte-for-byte unchanged and never spills."""
+    reset_parallelism_cache()
+    small = json.dumps({"status": "Success", "echo": "hi"})
+
+    async def _fake(ctx, name, desc, *, tool_call_event_id="", tier=None):
+        return small
+
+    monkey = dispatch_mod.dispatch_task
+    dispatch_mod.dispatch_task = _fake  # type: ignore[assignment]
+    try:
+        ctx = _ctx(tmp_path, spawn=_slow_spawn({"active": 0, "peak": 0}, 0.0))
+        elog = InMemoryEventLog()
+        tool_results: list = []
+        state = TurnState(tool_calls_used=0)
+        async for _ in dispatch_task_batch(
+                ctx=ctx, elog=elog, aid="step:p/s", task_tus=[_task_tu("t1")],
+                tool_results=tool_results, state=state, ceiling=None):
+            pass
+    finally:
+        dispatch_mod.dispatch_task = monkey  # type: ignore[assignment]
+    assert tool_results[0].content == small           # byte-for-byte unchanged
+    assert not (tmp_path / "tool-results").exists()    # nothing spilled
+    reset_parallelism_cache()
+
+
+@pytest.mark.anyio
+async def test_batch_error_result_not_wrapped(tmp_path: Path) -> None:
+    """AC: an is_error result keeps its short error text and never spills (the
+    error arm bypasses the wrapper)."""
+    reset_parallelism_cache()
+
+    async def _fake(ctx, name, desc, *, tool_call_event_id="", tier=None):
+        raise RuntimeError("boom")
+
+    monkey = dispatch_mod.dispatch_task
+    dispatch_mod.dispatch_task = _fake  # type: ignore[assignment]
+    try:
+        ctx = _ctx(tmp_path, spawn=_slow_spawn({"active": 0, "peak": 0}, 0.0))
+        elog = InMemoryEventLog()
+        tool_results: list = []
+        state = TurnState(tool_calls_used=0)
+        async for _ in dispatch_task_batch(
+                ctx=ctx, elog=elog, aid="step:p/s", task_tus=[_task_tu("t1")],
+                tool_results=tool_results, state=state, ceiling=None):
+            pass
+    finally:
+        dispatch_mod.dispatch_task = monkey  # type: ignore[assignment]
+    block = tool_results[0]
+    assert block.is_error is True
+    assert block.content == "RuntimeError: boom"
+    assert not (tmp_path / "tool-results").exists()
+    reset_parallelism_cache()
+
