@@ -8,12 +8,6 @@ from imp.engine.state import State
 from tests.conftest import _seed_control
 
 
-def _user_message(ch: Change, text: str) -> None:
-    ch.event_log().append(
-        agent_id=None, type="user_message",
-        payload={"content": [{"type": "text", "text": text}]})
-
-
 def test_resume_opens_fresh_true_for_fresh_idea_home(tmp_path: Path) -> None:
     _seed_control(tmp_path)
     ch = Change.create_draft(
@@ -27,7 +21,6 @@ def test_resume_opens_fresh_false_for_unseeded_draft(tmp_path: Path) -> None:
     ch = Change.create_draft(
         tmp_path, title="Draft", change_id="2026-06-16-drf33",
         base_branch="main", origin="draft")
-    _user_message(ch, "let's scope this")
     assert main._resume_opens_fresh(ch) is False
 
 
