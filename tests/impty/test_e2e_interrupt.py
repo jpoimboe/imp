@@ -39,4 +39,4 @@ def test_midrun_sigint_pauses_with_exit_130_and_a_resume_hint(tmp_path: Path) ->
         rc = s.run_to_completion(hard=20.0)
 
         assert rc == 130                                   # interrupt → exit 130
-        assert_screen(s, contains=("Paused", "imp resume"))  # paused + resumable
+        assert_screen(s, contains=("resume:", "imp resume"))  # resumable hint; rc==130 is pause

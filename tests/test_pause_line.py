@@ -6,30 +6,55 @@ from imp.cli.main import _pause_lines, _phase_from_events
 from tests._event_fixtures import ev
 
 
-def test_pause_lines_name_phase_and_resume_command_plain() -> None:
-    lines = _pause_lines("add-version-flag", "implement", "yaitd7", color=False)
+def test_pause_lines_named_change_renders_id_middot_title_plain() -> None:
+    lines = _pause_lines("dufa26", "implement", "dufa26",
+                         title="Add version flag", color=False)
     assert lines == [
-        "Paused  add-version-flag  at implement",
-        "   resume:  imp resume yaitd7",
+        "dufa26 · Add version flag  at implement",
+        "   resume:  imp resume dufa26",
     ]
 
 
+def test_pause_lines_unnamed_change_renders_bare_id_no_middot() -> None:
+    lines = _pause_lines("dufa26", "implement", "dufa26", color=False)
+    assert lines[0] == "dufa26  at implement"
+    assert " · " not in lines[0]
+
+
 def test_pause_lines_without_a_phase_drop_the_at_clause() -> None:
-    lines = _pause_lines("add-version-flag", None, "yaitd7", color=False)
-    assert lines[0] == "Paused  add-version-flag"
+    lines = _pause_lines("dufa26", None, "dufa26",
+                         title="Add version flag", color=False)
+    assert lines[0] == "dufa26 · Add version flag"
 
 
-def test_pause_lines_color_lifecycle_yellow_with_glyph_on_headline() -> None:
-    lines = _pause_lines("add-version-flag", "implement", "yaitd7", color=True)
-    assert lines[0] == "\x1b[33m⏸ Paused  add-version-flag  at implement\x1b[0m"
-    assert lines[1] == "\x1b[33m   resume:  imp resume yaitd7\x1b[0m"
-    assert "⏸" not in lines[1]                 # glyph leads only the headline
+def test_pause_lines_reason_joins_with_a_middot_not_parens() -> None:
+    lines = _pause_lines("dufa26", "implement", "dufa26",
+                         title="Add version flag",
+                         reason="internal_error: cannot access 'ev'",
+                         color=False)
+    assert lines[0] == (
+        "dufa26 · Add version flag  at implement · "
+        "internal_error: cannot access 'ev'")
+    assert "(" not in lines[0]
 
 
-def test_pause_lines_color_lifecycle_yellow_with_reason() -> None:
-    lines = _pause_lines("add-version-flag", "implement", "yaitd7",
-                         reason="ctrl-c", color=True)
-    assert lines[0] == "\x1b[33m⏸ Paused  add-version-flag  at implement  (ctrl-c)\x1b[0m"
+def test_pause_lines_color_tints_headline_no_glyph_no_paused_word() -> None:
+    lines = _pause_lines("dufa26", "implement", "dufa26",
+                         title="Add version flag", color=True)
+    assert lines[0] == "\x1b[33mdufa26 · Add version flag  at implement\x1b[0m"
+    assert lines[1] == "\x1b[33m   resume:  imp resume dufa26\x1b[0m"
+    assert "⏸" not in lines[0]
+    assert "Paused" not in lines[0]
+
+
+def test_pause_lines_color_with_reason_tints_whole_headline() -> None:
+    lines = _pause_lines("dufa26", "implement", "dufa26",
+                         title="Add version flag",
+                         reason="internal_error: cannot access 'ev'",
+                         color=True)
+    assert lines[0] == (
+        "\x1b[33mdufa26 · Add version flag  at implement · "
+        "internal_error: cannot access 'ev'\x1b[0m")
 
 
 def test_phase_from_events_takes_the_last_step_started_phase() -> None:
@@ -45,12 +70,6 @@ def test_phase_from_events_none_when_no_step_started() -> None:
     assert _phase_from_events([ev("1", "change_created", change_id=1, title="x")]) is None
 
 
-def test_pause_lines_include_reason_when_given() -> None:
-    lines = _pause_lines("add-version-flag", "implement", "yaitd7",
-                         reason="ctrl-c", color=False)
-    assert lines[0] == "Paused  add-version-flag  at implement  (ctrl-c)"
-
-
 def test_pause_facts_unnamed_change_shows_bare_id(tmp_path: Path) -> None:
     from imp.cli.main import _pause_facts
     from imp.engine.change import Change
@@ -58,9 +77,10 @@ def test_pause_facts_unnamed_change_shows_bare_id(tmp_path: Path) -> None:
     change = Change(id="qzbscf", title="", base_branch="main",
                     control_root=tmp_path, project_root=tmp_path,
                     change_dir=tmp_path / ".imp" / "change")
-    name, _phase, token, _reason = _pause_facts(change)
+    name, title, _phase, token, _reason = _pause_facts(change)
     assert name == "qzbscf"
     assert token == "qzbscf"
+    assert title == ""
 
 
 def test_pause_facts_named_change_shows_bare_id(tmp_path: Path) -> None:
@@ -71,9 +91,10 @@ def test_pause_facts_named_change_shows_bare_id(tmp_path: Path) -> None:
                     base_branch="main", control_root=tmp_path,
                     project_root=tmp_path,
                     change_dir=tmp_path / ".imp" / "change")
-    name, _phase, token, _reason = _pause_facts(change)
+    name, title, _phase, token, _reason = _pause_facts(change)
     assert name == "qzbscf"          # the bare id, not a slugified handle
     assert token == "qzbscf"
+    assert title == "Add version flag"
 
 
 def test_pause_reason_terminated_appends_first_line_of_last_agent_text() -> None:
@@ -245,7 +266,7 @@ def test_pause_facts_stale_with_crash_stderr_renders_unexpected_death_banner(
     change = Change(id="mona44", title="", base_branch="main",
                     control_root=tmp_path, project_root=tmp_path,
                     change_dir=change_dir)
-    name, phase, token, reason = _pause_facts(change)
+    name, _title, phase, token, reason = _pause_facts(change)
     assert name == "mona44"
     assert phase == "converge"
     assert token == "mona44"
@@ -275,7 +296,7 @@ def test_pause_facts_stale_clean_detach_renders_calm_interrupt(
     change = Change(id="mona44", title="", base_branch="main",
                     control_root=tmp_path, project_root=tmp_path,
                     change_dir=change_dir)
-    _name, _phase, _token, reason = _pause_facts(change)
+    _name, _title, _phase, _token, reason = _pause_facts(change)
     assert reason == "interrupt"
     assert "daemon.stderr" not in (reason or "")
     assert "ended unexpectedly" not in (reason or "")
@@ -326,12 +347,13 @@ def test_pause_facts_deliberate_leave_renders_trigger_over_stale(tmp_path: Path)
     ]
     (change_dir / "events.jsonl").write_text(
         "\n".join(json.dumps(e) for e in events) + "\n")
-    change = Change(id="krol99", title="", base_branch="main",
+    change = Change(id="krol99", title="Leave now", base_branch="main",
                     control_root=tmp_path, project_root=tmp_path,
                     change_dir=change_dir)
 
-    name, phase, token, reason = _pause_facts(change, leave_trigger="sigterm")
+    name, title, phase, token, reason = _pause_facts(change, leave_trigger="sigterm")
     assert name == "krol99"
+    assert title == "Leave now"          # title carried on the deliberate-leave path
     assert phase == "implement"          # last-seen phase, local knowledge
     assert token == "krol99"
     assert reason == "sigterm"           # the client's trigger, NOT "ended unexpectedly"
