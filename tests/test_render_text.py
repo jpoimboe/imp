@@ -473,6 +473,16 @@ def test_collapsed_step_line_two_tone_label_and_gray_tail() -> None:
     assert pal._ANSI["gray"] in colored               # tail in breadcrumb gray
 
 
+def test_collapsed_step_line_stays_phase_free_with_phase_label() -> None:
+    node = nv.StepNode(name="verify", kind="script", label="running tests",
+                       phase_label="integration phase · plan 1/1",
+                       show_label=True, closed=True,
+                       start_ts="2026-06-10T00:00:00", end_ts="2026-06-10T00:00:05")
+    line = rt.collapsed_step_line(node, depth=1, color=False)
+    assert line == "  running tests · complete · 5s"
+    assert "integration phase" not in line
+
+
 def test_body_less_visible_step_collapses_to_one_line() -> None:
     out = _lines([
         _ev("1", "change_created", title="t"),
@@ -2134,13 +2144,12 @@ def test_compose_label_joins_present_segments() -> None:
     assert rt.compose_label(["", None]) == ""
 
 
-def test_header_line_shows_label_not_phase_for_verb_step() -> None:
+def test_header_line_prepends_phase_label_for_verb_step() -> None:
     step = nv.StepNode(name="finalize", kind="agent",
                        phase_label="implementation phase · plan 1/3",
                        label="finalizing")
     line = rt.header_line(step, depth=1, color=False)
-    assert line == "  finalizing"
-    assert "implementation phase" not in line
+    assert line == "  implementation phase · plan 1/3 · finalizing"
 
 
 def test_phase_divider_uses_phase_label() -> None:
@@ -2249,21 +2258,19 @@ def test_render_tree_caps_hr_while_prose_stays_unwrapped() -> None:
     assert not any(ln.count("─") > 40 for ln in out)
 
 
-def test_step_header_shows_verb_label_for_verb_step() -> None:
+def test_step_header_prepends_phase_for_verb_step() -> None:
     node = nv.StepNode(name="plan-writer", kind="agent", label="writing plan",
                        phase_label="planning phase · plan 2/4", position_label=False)
     line = rt.header_line(node, depth=0, color=False)
-    assert line.strip() == "writing plan"
-    assert "planning phase" not in line
+    assert line.strip() == "planning phase · plan 2/4 · writing plan"
 
 
-def test_step_header_shows_position_counter_without_phase() -> None:
+def test_step_header_prepends_phase_for_position_counter() -> None:
     node = nv.StepNode(name="task-lead", kind="agent", label="task 2/3",
                        phase_label="implementation phase · plan 1/1",
                        position_label=True)
     line = rt.header_line(node, depth=0, color=False)
-    assert line.strip() == "task 2/3"
-    assert "implementation phase" not in line
+    assert line.strip() == "implementation phase · plan 1/1 · task 2/3"
 
 
 def test_step_header_position_label_without_phase_falls_to_label() -> None:
@@ -2273,6 +2280,29 @@ def test_step_header_position_label_without_phase_falls_to_label() -> None:
                        phase_label=None, position_label=True)
     line = header_line(node, depth=0, color=False)
     assert line.strip() == "task 2/3"
+
+
+def test_header_line_prepends_phase_in_resumed_and_model_forms() -> None:
+    # Non-resumed: phase · label · model — phase and label share one step-blue run.
+    node = nv.StepNode(name="task-lead", kind="agent", label="task 3/3",
+                       phase_label="implementation phase · plan 1/1",
+                       model="claude", position_label=True)
+    assert rt.header_line(node, depth=0, color=False) == \
+        "implementation phase · plan 1/1 · task 3/3 · claude"
+    # Resumed: the (resume) marker still rides right after the phase·label group.
+    resumed = nv.StepNode(name="task-lead", kind="agent", label="task 3/3",
+                          phase_label="implementation phase · plan 1/1",
+                          model="claude", position_label=True, resumed=True)
+    assert rt.header_line(resumed, depth=0, color=False) == \
+        "implementation phase · plan 1/1 · task 3/3 (resume) · claude"
+    # No phase_label → unchanged step-label-only header (fallback).
+    bare = nv.StepNode(name="task-lead", kind="agent", label="task 3/3",
+                       phase_label=None, position_label=True)
+    assert rt.header_line(bare, depth=0, color=False) == "task 3/3"
+    # The phase+label group is painted step-blue as one run (not the phase alone).
+    colored = rt.header_line(node, depth=0, color=True)
+    assert pal.ansi("implementation phase · plan 1/1 · task 3/3",
+                    *pal.NODE_COLORS["step"]) in colored
 
 
 def test_reauth_needed_pause_renders_plain_speak_copy() -> None:

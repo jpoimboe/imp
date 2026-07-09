@@ -1969,7 +1969,7 @@ def test_mid_step_position_change_re_emits_a_header() -> None:
                      label="task 2/2"))
     body = "\n".join(_body(out))
     assert "task 2/2" in body                          # new position re-emitted
-    assert "implementation phase" not in body          # phase rides the rule, not the header
+    assert "implementation phase · plan 1/1 · task 2/2" in body  # phase now prefixes the header
 
 
 def test_unchanged_position_push_emits_no_duplicate_header() -> None:
