@@ -1771,6 +1771,26 @@ def _load_events_for_id(control: Path, change_id: str) -> list[dict[str, Any]] |
     return _parse_jsonl(raw)
 
 
+def _filter_events(
+    events: list[dict[str, Any]],
+    *,
+    types: str | None = None,
+    agent: str | None = None,
+    limit: int | None = None,
+) -> list[dict[str, Any]]:
+    tset = {t.strip() for t in types.split(",") if t.strip()} if types else None
+    out: list[dict[str, Any]] = []
+    for e in events:
+        if tset is not None and e.get("type") not in tset:
+            continue
+        if agent and agent not in (e.get("agent_id") or ""):
+            continue
+        out.append(e)
+    if limit is not None and limit > 0:
+        out = out[-limit:]
+    return out
+
+
 def _resolve_default_id(control: Path) -> str | None:
     """No-arg default: most-recent change home by its events.jsonl mtime, else
     the most-recent archived id (by the index's last_event_ts), else None."""

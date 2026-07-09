@@ -501,3 +501,65 @@ def test_show_default_card_renders_summary_after_archive(
     worktree.remove_worktree(tmp_path, _ID)
     assert not (tmp_path / ".imp" / "worktrees" / _ID).exists()
     assert "SUMMARY BODY" in _run(monkeypatch, tmp_path, "show", _ID)
+
+
+def test_filter_events_type_set_selects_named_types() -> None:
+    from imp.cli.main import _filter_events
+
+    events = [
+        {"type": "user_message", "agent_id": "a"},
+        {"type": "tool_call", "agent_id": "b"},
+        {"type": "llm_response", "agent_id": "c"},
+    ]
+    out = _filter_events(events, types="tool_call,llm_response")
+    assert [e["type"] for e in out] == ["tool_call", "llm_response"]
+
+
+def test_filter_events_agent_is_substring_match() -> None:
+    from imp.cli.main import _filter_events
+
+    events = [
+        {"type": "x", "agent_id": "step:plan/plan-writer"},
+        {"type": "y", "agent_id": "sub:abc123"},
+        {"type": "z", "agent_id": None},
+    ]
+    out = _filter_events(events, agent="sub:")
+    assert [e["type"] for e in out] == ["y"]
+
+
+def test_filter_events_limit_keeps_last_n() -> None:
+    from imp.cli.main import _filter_events
+
+    events = [{"type": "tick", "agent_id": "a", "seq": i} for i in range(5)]
+    out = _filter_events(events, limit=2)
+    assert [e["seq"] for e in out] == [3, 4]
+
+
+def test_filter_events_no_limit_returns_all() -> None:
+    from imp.cli.main import _filter_events
+
+    events = [{"type": "tick", "agent_id": "a"} for _ in range(5)]
+    assert len(_filter_events(events)) == 5
+
+
+def test_filter_events_combines_type_agent_then_limit() -> None:
+    from imp.cli.main import _filter_events
+
+    events = [
+        {"type": "tool_call", "agent_id": "sub:1"},
+        {"type": "tool_call", "agent_id": "step:plan"},
+        {"type": "tool_call", "agent_id": "sub:2"},
+        {"type": "user_message", "agent_id": "sub:3"},
+    ]
+    # type==tool_call AND agent contains "sub:" -> [sub:1, sub:2]; last 1 -> [sub:2].
+    out = _filter_events(events, types="tool_call", agent="sub:", limit=1)
+    assert len(out) == 1
+    assert out[0]["agent_id"] == "sub:2"
+
+
+def test_filter_events_non_positive_limit_returns_all() -> None:
+    from imp.cli.main import _filter_events
+
+    events = [{"type": "tick", "agent_id": "a"} for _ in range(5)]
+    assert len(_filter_events(events, limit=0)) == 5
+    assert len(_filter_events(events, limit=-1)) == 5
