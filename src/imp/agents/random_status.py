@@ -1,15 +1,8 @@
-"""A pool of random status phrases, drawn for a step's live display label.
-
-Any workflow step opts into rotation by declaring the reserved
-`STATUS_PHRASE_LABEL` sentinel as its label: the engine then draws one phrase
-for the step's frozen display label, and the live renderer rotates a fresh
-phrase per work segment within the turn. The pool stays imp-owned here; the
-generic renderer is told only "rotate this step's phrase" via a payload flag."""
+"""A pool of in-character status phrases, drawn one at a time by the live status
+footer while a step's `rotate_phrase` flag is set."""
 from __future__ import annotations
 
 import random
-
-STATUS_PHRASE_LABEL = "<random>"
 
 RANDOM_STATUS_PHRASES: tuple[str, ...] = (
     "scheming", "plotting", "brooding", "hatching plans", "laying groundwork",
