@@ -71,7 +71,7 @@ class RelaySupervisor:
         relay = SessionRelay(
             socket_path=str(session_socket_path(self._control_root, change_id)),
             change_id=change_id,
-            title=self._title_for(change_id),
+            title_provider=lambda: self._title_for(change_id),
             events=self._events,
             sink=self._sink,
             is_subscribed=self._subscribed_probe(change_id),
