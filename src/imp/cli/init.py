@@ -38,6 +38,11 @@ class GitSetupDeclined(Exception):
     """The user declined `imp init`'s offer to set up a git repository."""
 
 
+class IntegrationBranchUnresolved(Exception):
+    """imp init needs an integration branch but couldn't determine one — the
+    prompt couldn't read input (non-TTY / EOF), or no branch was resolvable."""
+
+
 def _in_git_repo(project_root: Path) -> bool:
     return subprocess.run(
         ["git", "rev-parse", "--git-dir"],
@@ -49,9 +54,12 @@ def _ensure_git_repo(
     project_root: Path, *,
     input_fn: Callable[[str], str],
     output_fn: Callable[[str], None],
-) -> None:
+) -> bool:
+    """Ensure `project_root` is a git repo. Returns True iff this call ran
+    `git init` (a fresh repo was created this run), False if one already
+    existed. Raises GitSetupDeclined when the user declines the offer."""
     if _in_git_repo(project_root):
-        return
+        return False
     answer = input_fn("Initialize a git repository here? [Y/n] ").strip().lower()
     if answer in ("n", "no"):
         raise GitSetupDeclined(
@@ -60,6 +68,56 @@ def _ensure_git_repo(
     subprocess.run(["git", "init"], cwd=project_root, check=True,
                    capture_output=True, text=True)
     output_fn("Initialized a git repository.")
+    return True
+
+
+def _repo_is_unborn(project_root: Path) -> bool:
+    """True when the repo has no commits yet — `git rev-parse --verify HEAD` fails."""
+    return subprocess.run(
+        ["git", "rev-parse", "--verify", "HEAD"],
+        cwd=project_root, capture_output=True, text=True,
+    ).returncode != 0
+
+
+def _resolve_init_base(
+    project_root: Path, *, git_created: bool,
+    input_fn: Callable[[str], str],
+) -> str:
+    """The integration branch to record as `default-base` on a fresh init.
+
+    1. origin/HEAD resolves -> use it, no prompt.
+    2. Fresh setup (git init this run) or an unborn repo -> use the current /
+       unborn branch, no prompt (no other candidate exists).
+    3. Otherwise (existing repo with commits, no remote default) -> prompt,
+       suggesting the current branch; Enter accepts it, a typed name overrides.
+
+    Raises IntegrationBranchUnresolved when the prompt cannot read input, or
+    when the user gives no branch and there is no current branch to fall back on.
+    """
+    remote = worktree.origin_head_branch(project_root)
+    if remote is not None:
+        return remote
+    current = worktree.checked_out_branch(project_root)
+    if (git_created or _repo_is_unborn(project_root)) and current is not None:
+        return current
+    suffix = f" [{current}]" if current else ""
+    try:
+        answer = input_fn(
+            f"Which branch should changes integrate into?{suffix} "
+        ).strip()
+    except EOFError as e:
+        raise IntegrationBranchUnresolved(
+            "imp init needs an integration branch but can't read input "
+            "(non-interactive terminal). Re-run `imp init` interactively, or add "
+            "`default-base: <branch>` to imp/project.yaml."
+        ) from e
+    resolved = answer or current
+    if not resolved:
+        raise IntegrationBranchUnresolved(
+            "imp init needs an integration branch but none was given. Re-run "
+            "`imp init` and name the branch changes should integrate into."
+        )
+    return resolved
 
 
 def _commit_init_files(project_root: Path) -> bool:
@@ -100,17 +158,17 @@ def _default_detect_theme() -> str:
         return "ansi"
 
 
-def _build_project_config(default_base: str | None = None) -> dict[str, Any]:
-    """The committed imp/project.yaml: workflow ref + resolved integration
-    branch (when detected) + empty vars. No bindings (the provider-code floor
-    supplies tiers); no theme (user-homed). `default-base` is omitted entirely
-    when init could not resolve a branch — the runtime auto-detect fallback in
-    `imp new` covers that case."""
-    cfg: dict[str, Any] = {"default-workflow": "imp"}
-    if default_base is not None:
-        cfg["default-base"] = default_base
-    cfg["vars"] = {}
-    return cfg
+def _build_project_config(default_base: str) -> dict[str, Any]:
+    """The committed imp/project.yaml: workflow ref + the resolved integration
+    branch + empty vars. No bindings (the provider-code floor supplies tiers);
+    no theme (user-homed). `default-base` is always written now — `imp init`
+    resolves it up front (detect / ask / error), so `imp new` consumes it
+    directly with no runtime fallback."""
+    return {
+        "default-workflow": "imp",
+        "default-base": default_base,
+        "vars": {},
+    }
 
 
 def _build_user_config(
@@ -275,7 +333,8 @@ def run_init(
     project_file = imp_dir / "project.yaml"
     already_initialized = project_file.is_file()
 
-    _ensure_git_repo(project_root, input_fn=input_fn, output_fn=output_fn)
+    git_created = _ensure_git_repo(
+        project_root, input_fn=input_fn, output_fn=output_fn)
 
     output_fn(f"Setting up imp in {project_root}")
 
@@ -317,16 +376,14 @@ def run_init(
 
     # --- committed project file (idempotent: never overwrite an existing one) ---
     if not already_initialized:
+        # Establish the mandatory integration branch first: origin/HEAD when it
+        # resolves, the current/unborn branch on fresh setup, else a prompt.
+        # Resolving before mkdir keeps the non-TTY failure path from creating any
+        # imp/ artifact.
+        default_base = _resolve_init_base(
+            project_root, git_created=git_created, input_fn=input_fn)
+        output_fn(f"Integration branch: {default_base}")
         imp_dir.mkdir(parents=True, exist_ok=True)
-        # Detect the integration branch: prefer the remote default (origin/HEAD),
-        # else the currently checked-out branch (unborn-tolerant, since init runs
-        # before the first commit). Omit the key entirely when nothing resolves.
-        default_base = (
-            worktree.origin_head_branch(project_root)
-            or worktree.checked_out_branch(project_root)
-        )
-        if default_base is not None:
-            output_fn(f"Integration branch: {default_base}")
         body = yaml.safe_dump(
             _build_project_config(default_base),
             sort_keys=False, default_flow_style=False)

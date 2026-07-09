@@ -62,6 +62,7 @@ def _seed_cc_project(root: Path) -> None:
     """))
     (root / "imp" / "project.yaml").write_text(textwrap.dedent("""\
         default-workflow: imp
+        default-base: main
         providers: [claude_code]
         tiers:
           low: {claude_code: claude-haiku-4-5-20251001}

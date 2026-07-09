@@ -56,3 +56,16 @@ def test_existing_repo_skips_the_prompt(tmp_path: Path) -> None:
              output_fn=lambda _m: None, picker_fn=lambda _a: ["anthropic"],
              detect_verify_fn=lambda _p: None)
     assert not any("Initialize a git repository" in p for p in prompts)
+
+
+def test_ensure_git_repo_reports_creation(tmp_path: Path) -> None:
+    from imp.cli.init import _ensure_git_repo
+
+    created = _ensure_git_repo(
+        tmp_path, input_fn=lambda _p: "", output_fn=lambda _m: None)
+    assert created is True                       # this call ran `git init`
+    assert (tmp_path / ".git").is_dir()
+
+    again = _ensure_git_repo(
+        tmp_path, input_fn=lambda _p: "", output_fn=lambda _m: None)
+    assert again is False                        # repo already present

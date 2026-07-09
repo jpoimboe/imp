@@ -216,7 +216,8 @@ def _seed_control(root: Path) -> None:
         "phases:\n  - name: p\n    steps:\n      - {name: s, file: agents/stub.md}\n"
     )
     # Config layers: committed marker + gitignored local layer.
-    (root / "imp" / "project.yaml").write_text("default-workflow: imp\n")
+    (root / "imp" / "project.yaml").write_text(
+        "default-workflow: imp\ndefault-base: main\n")
     (root / ".imp").mkdir(exist_ok=True)
     (root / ".imp" / "config.yaml").write_text(
         "providers: [anthropic]\n"

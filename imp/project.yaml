@@ -1,4 +1,5 @@
 default-workflow: imp
+default-base: master
 
 guidance: |
   imp is pre-release with no external users. Skip backward-compatibility entirely

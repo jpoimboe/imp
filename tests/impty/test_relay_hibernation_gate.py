@@ -98,7 +98,8 @@ def _seed_scripted_gate_project(root: Path) -> Path:
         "phases:\n  - name: work\n    steps:\n"
         "      - name: gate\n        file: agents/gate.md\n        tier: low\n"
         "        interactive: true\n")
-    (root / "imp" / "project.yaml").write_text("default-workflow: imp\n")
+    (root / "imp" / "project.yaml").write_text(
+        "default-workflow: imp\ndefault-base: main\n")
     (root / ".imp").mkdir(exist_ok=True)
     (root / ".imp" / "config.yaml").write_text(_MINIMAL_CONFIG)
     script_path = root / "script.json"
