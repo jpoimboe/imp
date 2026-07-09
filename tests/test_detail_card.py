@@ -79,12 +79,17 @@ def _live_change(control: Path, change_id: str) -> None:
                 "type": "step_started",
                 "agent_id": None,
                 "timestamp": "2026-06-20T11:00:01+00:00",
-                "payload": {"step": "spec-writer", "phase": "spec"},
+                "payload": {
+                    "step": "spec-writer",
+                    "phase": "spec",
+                    "phase_label": "spec phase",
+                },
             }
         )
         + "\n"
     )
-    State(id=change_id, status="paused", step="spec-writer", step_attempt=0).save(cdir / "state")
+    State(id=change_id, status="paused", step="spec-writer", step_label="writing spec",
+          step_attempt=0).save(cdir / "state")
 
 
 def _live_change_task_prompt(control: Path, change_id: str) -> None:
@@ -149,8 +154,9 @@ def test_detail_card_live_source(tmp_path: Path) -> None:
     assert "2026-06-20-live01" in card
     assert "Build widget" in card
     assert "paused" in card
-    assert "spec-writer" in card  # step
-    assert "spec-writer (spec)" in card  # step + phase rendered together
+    assert "spec phase · writing spec" in card  # <phase label> · <step label>
+    assert "spec-writer" not in card  # never the raw step slug
+    assert "(spec)" not in card  # never the old "<step> (<phase>)" raw-slug format
     assert "main" in card  # base_branch
     assert "2026-06-16-dep001" in card  # depends_on
     assert "build a widget please" in card  # originating prompt = first user_message
