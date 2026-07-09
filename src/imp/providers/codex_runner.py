@@ -39,7 +39,12 @@ from imp.agents.runner import (
 )
 from imp.agents.subagents import raise_if_suspended
 from imp.agents.tools import bg as _bg
-from imp.agents.tools.context import ToolContext, change_home_path, terminate_running_processes
+from imp.agents.tools.context import (
+    ToolContext,
+    change_home_path,
+    request_bracketed,
+    terminate_running_processes,
+)
 from imp.engine.agent_run import _resolve_wait_reply
 from imp.engine.awaiting_user_input import AwaitingUserInput
 from imp.engine.state import JsonlEventLog
@@ -616,7 +621,8 @@ class CodexAgentRunner:
             need_nudge = False  # set when turn ends without complete_step
             handoff_turn_queued = False  # set when a Tier A handoff turn is queued
             nudge_requery = False  # set when a malformed complete_step re-drives
-            async for event in streamed.events:
+            async for event in request_bracketed(
+                    invocation.coordinator, streamed.events):
                 # Dead-server poll: if the MCP server task has ended, bail
                 # immediately rather than letting codex's retry-loop be
                 # misread as "missing complete_step".

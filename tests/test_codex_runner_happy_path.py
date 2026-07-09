@@ -203,7 +203,7 @@ async def test_run_fails_fast_with_network_error_when_self_ping_fails(
 
 
 @pytest.mark.anyio
-async def test_streamed_events_pulse_note_activity_per_event(tmp_path: Path) -> None:
+async def test_response_wait_is_request_bracketed(tmp_path: Path) -> None:
     import dataclasses
 
     from imp.cli.signals import InterruptCoordinator
@@ -228,17 +228,21 @@ async def test_streamed_events_pulse_note_activity_per_event(tmp_path: Path) -> 
     runner._canonical_auth_override = canonical
 
     coord = InterruptCoordinator()
-    pulses: list[int] = []
-    coord.add_activity_listener(lambda: pulses.append(1))
+    # begin_request_watchdog snapshots request_active True just before each await
+    # for the next streamed event.
+    snaps: list[bool] = []
+    coord.add_activity_listener(lambda: snaps.append(coord.request_active))
 
     inv = dataclasses.replace(
         _build_invocation(tmp_path, event_log=elog), coordinator=coord)
     events = [e async for e in runner.run(inv)]
 
     assert events[-1]["type"] == "agent_output"
-    # One pulse per streamed event in the turn: thread.started, the agent_message
-    # item, the complete_step mcp item, and turn.completed.
-    assert len(pulses) == 4
+    # request_bracketed arms request_active while awaiting each of the 4 streamed
+    # events (thread.started, the agent_message item, the complete_step item,
+    # turn.completed).
+    assert sum(1 for s in snaps if s) >= 4
+    assert coord.request_active is False
 
 
 @pytest.mark.anyio
