@@ -549,3 +549,41 @@ def test_set_depends_on_rewrites_change_json(tmp_path: Path) -> None:
     change.set_depends_on([])
     meta = _json.loads((change.change_dir / "change.json").read_text())
     assert meta["depends_on"] == []
+
+
+def test_materialize_raises_on_empty_title_and_creates_nothing(tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+    ch = Change.create_draft(tmp_path, title="   ", change_id="ttl1", base_branch="main")
+    with pytest.raises(ValueError, match="rename_change"):
+        ch.materialize()
+    # Nothing was created and the change stays un-materialized.
+    assert ch.materialized is False
+    assert not (tmp_path / ".imp" / "worktrees" / "ttl1").exists()
+    assert "imp/ttl1" not in _git(tmp_path, "branch", "--list", "imp/ttl1").stdout
+    meta = json.loads((ch.change_dir / "change.json").read_text())
+    assert meta["materialized"] is False
+
+
+def test_materialize_untitled_then_named_recovery(tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+    ch = Change.create_draft(tmp_path, title="", change_id="ttl2", base_branch="main")
+    with pytest.raises(ValueError):
+        ch.materialize()
+    ch.rename("Real title", log=ch.event_log())
+    head_changed = ch.materialize()
+    wt = tmp_path / ".imp" / "worktrees" / "ttl2"
+    assert wt.exists()
+    assert ch.materialized is True and ch.project_root == wt
+    assert head_changed is False
+
+
+def test_materialize_idempotent_no_op_never_raises_even_when_title_emptied(
+    tmp_path: Path,
+) -> None:
+    _seed_control(tmp_path)
+    ch = Change.create_draft(tmp_path, title="Titled", change_id="ttl3", base_branch="main")
+    ch.materialize()
+    root_after_first = ch.project_root
+    ch.rename("   ", log=ch.event_log())          # blank the title AFTER materializing
+    assert ch.materialize() is False              # idempotent no-op, no raise
+    assert ch.project_root == root_after_first

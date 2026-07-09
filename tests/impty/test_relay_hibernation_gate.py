@@ -135,7 +135,8 @@ def test_relay_hibernate_gate_then_resume_reengages(tmp_path: Path) -> None:
     )
 
     s = TerminalSession(
-        [sys.executable, "-m", "imp", "new", "relay-hibernate-gate"],
+        [sys.executable, "-m", "imp", "new", "relay-hibernate-gate",
+         "--title", "relay hibernate gate"],
         cwd=str(tmp_path), env=env, cols=80, rows=24,
     )
     try:
