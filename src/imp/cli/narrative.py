@@ -230,11 +230,23 @@ class Activity:
     countdown_total: float | None = None
     kind: str | None = None            # active step kind, for context-bar gating at compose time
     lane_wait: bool = False            # active step parked in a lane semaphore wait (test or merge)
+    # Row-3 position segments, pre-split (compare=False) so the driver never re-slices `position`.
+    phase: str | None = field(default=None, compare=False)     # phase head (gold)
+    plan: str | None = field(default=None, compare=False)      # plan counter (step-blue)
+    counter: str | None = field(default=None, compare=False)   # position_label leaf (step-blue)
 
 
 def _join(*parts: str | None) -> str | None:
     out = " · ".join(p for p in parts if p)
     return out or None
+
+
+def _split_phase_label(label: str | None) -> tuple[str | None, str | None]:
+    """Split "<name> phase · plan i/t" into phase head and optional plan-counter tail."""
+    if not label:
+        return None, None
+    head, _sep, tail = label.partition(" · ")
+    return head, (tail or None)
 
 
 @dataclass
@@ -547,6 +559,9 @@ class NarrativeBuilder:
         top = self._step_stack[-1] if self._step_stack else None
         top_kind = top.kind if top is not None else None
         top_lane_wait = top.lane_wait if top is not None else False
+        top_phase, top_plan = _split_phase_label(top.phase_label if top is not None else None)
+        top_counter = ((top.live_label or top.label)
+                       if (top is not None and top.position_label) else None)
         if self._reset_wait is not None:
             position = _join(top.phase_label, top.live_label or top.label) if top else None
             return Activity(
@@ -555,6 +570,7 @@ class NarrativeBuilder:
                 model=top.model if top else None,
                 countdown_total=self._reset_wait.total_seconds,
                 kind=top_kind, lane_wait=top_lane_wait,
+                phase=top_phase, plan=top_plan, counter=top_counter,
             )
         if top is not None:
             model = top.model
@@ -578,7 +594,8 @@ class NarrativeBuilder:
             if n > 1:
                 return Activity(position=position, verb=f"running {n} subagents",
                                 model=model,
-                                kind=top_kind, lane_wait=top_lane_wait)
+                                kind=top_kind, lane_wait=top_lane_wait,
+                                phase=top_phase, plan=top_plan, counter=top_counter)
             f = running[0]
             verb = f.label or _subagent_verb(f.subagent_name) or f"subagent({f.subagent_name})"
             nested = f.nested.current_activity()
@@ -587,9 +604,11 @@ class NarrativeBuilder:
                 return Activity(position=position, verb=nested.verb,
                                 detail=detail, model=model,
                                 countdown_total=nested.countdown_total,
-                                kind=top_kind, lane_wait=top_lane_wait)
+                                kind=top_kind, lane_wait=top_lane_wait,
+                                phase=top_phase, plan=top_plan, counter=top_counter)
             return Activity(position=position, verb=verb, detail=detail, model=model,
-                            kind=top_kind, lane_wait=top_lane_wait)
+                            kind=top_kind, lane_wait=top_lane_wait,
+                            phase=top_phase, plan=top_plan, counter=top_counter)
 
         detail = None
         burst = self._current_burst
@@ -612,10 +631,12 @@ class NarrativeBuilder:
             if top.kind in CHROME_KINDS:
                 return Activity(position=position, verb=static_verb or top.command,
                                 detail=detail, model=model,
-                                kind=top_kind, lane_wait=top_lane_wait)
+                                kind=top_kind, lane_wait=top_lane_wait,
+                                phase=top_phase, plan=top_plan, counter=top_counter)
             return Activity(position=position, verb=static_verb or "thinking",
                             detail=detail, model=model,
-                            kind=top_kind, lane_wait=top_lane_wait)
+                            kind=top_kind, lane_wait=top_lane_wait,
+                            phase=top_phase, plan=top_plan, counter=top_counter)
         # No step on this builder. A dispatched subagent's nested builder reaches
         # here — carry the in-flight tool tail so the PARENT can read `nested.detail`
         # and concatenate it onto the subagent's verb.

@@ -2734,6 +2734,43 @@ def test_waiting_for_test_lane_leaves_no_lifecycle_line() -> None:
     assert not any(n.text == "waiting for a test slot" for n in lits)
 
 
+def test_current_activity_position_segments_for_a_plan_phase_step() -> None:
+    b = nv.NarrativeBuilder()
+    b.add(ev("1", "change_created", change_id=1, title="x"))
+    b.add(ev("2", "step_started", step="plan-writer", kind="agent", phase="plan",
+             model="m", provider="anthropic", label="writing plan",
+             phase_label="planning phase · plan 3/6"))
+    act = b.current_activity()
+    assert act.phase == "planning phase"      # phase head (gold)
+    assert act.plan == "plan 3/6"             # plan-counter tail (step-blue)
+    assert act.counter is None                # not a position_label step -> no step leaf
+    assert act.position == "planning phase · plan 3/6"   # composed string unchanged
+
+
+def test_current_activity_position_segments_for_a_position_label_step() -> None:
+    b = nv.NarrativeBuilder()
+    b.add(ev("1", "change_created", change_id=1, title="x"))
+    b.add(ev("2", "step_started", step="task-lead", kind="agent", phase="code",
+             model="m", provider="anthropic", label="task 2/3",
+             phase_label="implementation phase · plan 1/1", position_label=True))
+    act = b.current_activity()
+    assert act.phase == "implementation phase"
+    assert act.plan == "plan 1/1"
+    assert act.counter == "task 2/3"          # the position_label counter leaf (step-blue)
+
+
+def test_current_activity_position_segments_when_phase_has_no_plan() -> None:
+    b = nv.NarrativeBuilder()
+    b.add(ev("1", "change_created", change_id=1, title="x"))
+    b.add(ev("2", "step_started", step="spec", kind="agent", phase="design",
+             model="m", provider="anthropic", label="writing spec",
+             phase_label="design phase"))
+    act = b.current_activity()
+    assert act.phase == "design phase"
+    assert act.plan is None                   # no plan counter in the phase label
+    assert act.counter is None
+
+
 def test_engine_continuation_produces_no_narrative_node() -> None:
     tree = nv.build_tree([
         _ev("1", "step_started", step="s", kind="agent", phase="p"),
