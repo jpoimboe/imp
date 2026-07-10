@@ -232,7 +232,7 @@ class Activity:
     kind: str | None = None            # active step kind, for context-bar gating at compose time
     lane_wait: bool = False            # active step parked in a lane semaphore wait (test or merge)
     # Row-3 position segments, pre-split (compare=False) so the driver never re-slices `position`.
-    phase: str | None = field(default=None, compare=False)     # phase head (gold)
+    phase: str | None = field(default=None, compare=False)     # phase head (step-blue)
     plan: str | None = field(default=None, compare=False)      # plan counter (step-blue)
     counter: str | None = field(default=None, compare=False)   # running step's label (step-blue)
 

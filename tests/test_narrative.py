@@ -2766,7 +2766,7 @@ def test_current_activity_position_segments_for_a_plan_phase_step() -> None:
              model="m", provider="anthropic", label="writing plan",
              phase_label="planning phase · plan 3/6"))
     act = b.current_activity()
-    assert act.phase == "planning phase"      # phase head (gold)
+    assert act.phase == "planning phase"      # phase head (step-blue)
     assert act.plan == "plan 3/6"             # plan-counter tail (step-blue)
     assert act.counter == "writing plan"      # every step's label rides the position row
     assert act.position == "planning phase · plan 3/6"   # composed string unchanged
