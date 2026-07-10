@@ -1,7 +1,12 @@
 # tests/test_classify.py
 from __future__ import annotations
 
-from imp.agents.classify import ResumeState, classify_resume, count_tool_uses
+from imp.agents.classify import (
+    ResumeState,
+    _contains_tool_result,
+    classify_resume,
+    count_tool_uses,
+)
 from imp.agents.runner import Message, TextBlock, ToolResultBlock, ToolUseBlock
 
 
@@ -175,3 +180,16 @@ def test_earlier_lap_complete_step_buried_deep_is_awaiting_user() -> None:
         Message(role="assistant", content=(TextBlock(text="what should I do?"),)),
     ]
     assert classify_resume(msgs) is ResumeState.AWAITING_USER
+
+
+def test_contains_tool_result_distinguishes_tail_shape() -> None:
+    tool_result_tail = Message(
+        role="user", content=(ToolResultBlock(tool_use_id="t1", content="x"),))
+    text_tail = Message(role="user", content=(TextBlock(text="ignore"),))
+    mixed_tail = Message(
+        role="user",
+        content=(TextBlock(text="note"),
+                 ToolResultBlock(tool_use_id="t2", content="y")))
+    assert _contains_tool_result(tool_result_tail) is True
+    assert _contains_tool_result(text_tail) is False
+    assert _contains_tool_result(mixed_tail) is True

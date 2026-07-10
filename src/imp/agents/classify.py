@@ -78,6 +78,10 @@ def _trailing_prose_over_resolved_complete_step(messages: list[Message]) -> bool
     )
 
 
+def _contains_tool_result(msg: Message) -> bool:
+    return any(isinstance(b, ToolResultBlock) for b in msg.content)
+
+
 def count_tool_uses(messages: list[Message]) -> int:
     """Count tool_use blocks across all assistant messages in a transcript.
 

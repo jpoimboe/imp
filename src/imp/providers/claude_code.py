@@ -44,7 +44,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
-from imp.agents.classify import ResumeState, classify_resume
+from imp.agents.classify import ResumeState, _contains_tool_result, classify_resume
 from imp.agents.loop_guard import (
     LoopGuard,
     ToolOutcome,
@@ -408,10 +408,6 @@ def _tail_has_complete_step(messages: list[Message]) -> bool:
         isinstance(b, ToolUseBlock) and _canon_tool_name(b.name) == "complete_step"
         for b in last.content
     )
-
-
-def _contains_tool_result(msg: Message) -> bool:
-    return any(isinstance(b, ToolResultBlock) for b in msg.content)
 
 
 def _drain_interject_message(coordinator: Any, elog: Any,

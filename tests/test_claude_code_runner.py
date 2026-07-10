@@ -574,8 +574,8 @@ async def test_bare_turn_end_resume_no_channel_errors(tmp_path: Path) -> None:
 
 
 def test_contains_tool_result_discriminates_turn_kinds() -> None:
+    from imp.agents.classify import _contains_tool_result
     from imp.agents.runner import ToolResultBlock
-    from imp.providers.claude_code import _contains_tool_result
 
     tool_result_turn = Message(
         role="user",
