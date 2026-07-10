@@ -223,6 +223,15 @@ def test_threshold_renames_early_on_design_formation() -> None:
     assert "a fallback for when you went" in body
 
 
+def test_spec_reviewer_blocks_on_scope_ac_cross_walk() -> None:
+    body = _agent_prompt("spec-reviewer")
+    # the cross-walk is a review check, run in both directions
+    assert "Scope↔AC cross-walk in both directions" in body
+    # a broad AC over a narrow Scope is a blocking Major inconsistency
+    assert "A broad AC over a narrow Scope" in body
+    assert "blocking inconsistency (Major)" in body
+
+
 def test_spec_finalizer_requires_checkable_ac_clauses_and_cross_walk() -> None:
     body = _agent_prompt("spec-finalizer")
     # independently-checkable clauses; compound criteria split or sub-lettered
