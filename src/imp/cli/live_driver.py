@@ -225,8 +225,8 @@ def compose_activity_status(
     builder: nv.NarrativeBuilder, *, frame: int, elapsed: float, color: bool,
     width: int | None = None,
 ) -> str | None:
-    """Single combined status line for the TUI status bar: the activity line joined with
-    the position bar. The streaming live view uses the multi-row footer instead."""
+    """Single combined status line: the activity line joined with the position bar.
+    The streaming live view uses the multi-row footer instead."""
     activity = builder.current_activity()
     if activity is None:
         return None

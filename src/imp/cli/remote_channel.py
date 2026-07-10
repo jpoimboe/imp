@@ -31,7 +31,7 @@ _log = logging.getLogger("imp.remote")
 _CRASH_PROBE_SECONDS = 0.2   # bound on the spawn-then-immediately-crash check
 _TERM_GRACE_SECONDS = 2.0    # SIGTERM → grace → SIGKILL window at teardown
 
-# A driver's stderr is DEBUG by default (silent; keeps the --tui alt-screen clean),
+# A driver's stderr is DEBUG by default (silent; keeps the streaming output clean),
 # but a driver may opt a structural failure into visibility by prefixing the line
 # with one of these tags. Each is matched only at the very start of the line.
 _STDERR_LEVEL_TAGS = (("ERROR:", logging.ERROR), ("WARNING:", logging.WARNING))
@@ -216,9 +216,9 @@ class RemoteChannel:
     async def _stderr_drain(self) -> None:
         """Drain the driver's stderr for the channel's lifetime. The driver is
         imp's subprocess but its diagnostics are NOT imp's output: inheriting its
-        stderr onto imp's controlling terminal corrupts a `--tui` alternate screen
-        and interleaves with streaming output (and an undrained PIPE would fill and
-        wedge a chatty driver). Lines go to the `imp.remote` logger at DEBUG —
+        stderr onto imp's controlling terminal interleaves with the streaming
+        output (and an undrained PIPE would fill and wedge a chatty driver). Lines
+        go to the `imp.remote` logger at DEBUG —
         default-silent (imp installs no handler), recoverable with debug logging.
         A driver may tag a structural failure (`WARNING:`/`ERROR:`) to promote that
         line to a level Python's lastResort handler surfaces by default (see

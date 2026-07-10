@@ -24,7 +24,7 @@ def _new_args() -> Namespace:
     return Namespace(
         description=None, idea=None, workflow=None,
         non_interactive=False,
-        title=None, opening=None, message=None, tui=False)
+        title=None, opening=None, message=None)
 
 
 @pytest.fixture
@@ -51,7 +51,6 @@ def stub_new(monkeypatch, tmp_path):
             id="z9y8x7", title="", workflow_dir=tmp_path,
             set_seed_opening=lambda text: None)))
     monkeypatch.setattr(main, "_select_headless", lambda args: (False, False))
-    monkeypatch.setattr(main, "_tui_requested", lambda args: False)
     return main
 
 
@@ -104,7 +103,7 @@ async def test_new_persists_finalized_opening_intent(
 
 
 @pytest.mark.anyio
-@pytest.mark.parametrize("route", ["interactive", "headless", "tui", "non_interactive"])
+@pytest.mark.parametrize("route", ["interactive", "headless", "non_interactive"])
 async def test_run_header_emitted_exactly_once(stub_new, monkeypatch, route) -> None:
     m = stub_new
     calls = {"header": 0}
@@ -131,12 +130,9 @@ async def test_run_header_emitted_exactly_once(stub_new, monkeypatch, route) -> 
     monkeypatch.setattr(m, "make_headless_solicit", lambda *a, **k: None)
     monkeypatch.setattr(m, "LiveStatus", lambda *a, **k: SimpleNamespace())
     monkeypatch.setattr(m, "LiveDriver", lambda *a, **k: SimpleNamespace())
-    monkeypatch.setattr(m, "_run_tui_session", _ok)
 
     if route == "headless":
         monkeypatch.setattr(m, "_select_headless", lambda args: (True, False))
-    elif route == "tui":
-        monkeypatch.setattr(m, "_tui_requested", lambda args: True)
     elif route == "non_interactive":
         monkeypatch.setattr(m, "_is_interactive", lambda **k: False)
 
@@ -144,7 +140,7 @@ async def test_run_header_emitted_exactly_once(stub_new, monkeypatch, route) -> 
 
     assert rc == 0
     # The prompt path prints the header; every dispatch branch (interactive,
-    # headless, tui) is guarded by `if not header_printed`, so it stays at 1.
+    # headless) is guarded by `if not header_printed`, so it stays at 1.
     assert calls["header"] == 1
 
 
@@ -286,35 +282,6 @@ async def test_cancel_at_opening_prompt_resets_title(stub_new, monkeypatch, exc)
 
     assert rc == 130
     assert reset == ["reset"]
-
-
-@pytest.mark.anyio
-async def test_tui_path_builds_no_title(stub_new, monkeypatch) -> None:
-    m = stub_new
-    monkeypatch.setattr(m, "_tui_requested", lambda args: True)
-
-    def _no_title(*a: object, **k: object) -> object:
-        raise AssertionError("no TerminalTitle may be constructed on the TUI path")
-
-    monkeypatch.setattr(m, "TerminalTitle", _no_title)
-    monkeypatch.setattr(m, "_print_run_header", lambda *a, **k: None)
-    monkeypatch.setattr(m, "_print_opening", lambda *a, **k: None)
-
-    class _FakePrompt:
-        def __init__(self, **kwargs: object) -> None: ...
-
-        async def ask_async(self, **kwargs: object) -> str:
-            return "do the thing"
-
-    monkeypatch.setattr(m, "Prompt", _FakePrompt)
-
-    async def _ok(*a: object, **k: object) -> int:
-        return 0
-
-    monkeypatch.setattr(m, "_run_tui_session", _ok)
-
-    rc = await m._async_cmd_new(_new_args(), leave_mode="new")
-    assert rc == 0
 
 
 @pytest.mark.anyio

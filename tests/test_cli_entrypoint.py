@@ -38,6 +38,13 @@ def test_bare_imp_prints_overview_rc0(capsys) -> None:
     assert "error:" not in out.lower()
 
 
+def test_tui_flag_removed_from_new_chat_resume() -> None:
+    parser = _build_parser()
+    for cmd in ("new", "chat", "resume"):
+        with pytest.raises(SystemExit):
+            parser.parse_args([cmd, "--tui"])
+
+
 def test_version_flag_prints_version_rc0() -> None:
     r = subprocess.run(
         [sys.executable, "-m", "imp", "--version"],
@@ -171,35 +178,6 @@ async def test_run_fresh_session_threads_autonomous(
 
 
 @pytest.mark.anyio
-async def test_run_fresh_session_tui_branch_threads_autonomous(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from types import SimpleNamespace
-
-    import imp.cli.main as m
-
-    captured: dict[str, object] = {}
-
-    async def _fake_tui(change: object, **kw: object) -> int:
-        captured.update(kw)
-        return 0
-
-    async def _fake_clear_loop(control: object, *, tui: bool, first: object) -> int:
-        return await first({})
-
-    monkeypatch.setattr(m, "_tui_requested", lambda _a: True)
-    monkeypatch.setattr(m, "_clear_loop", _fake_clear_loop)
-    monkeypatch.setattr(m, "_run_tui_session", _fake_tui)
-
-    args = m._build_parser().parse_args(["new", "--tui", "--autonomous"])
-    rc = await m._run_fresh_session(
-        SimpleNamespace(id="x", title="t", control_root=None, seed_opening=None),
-        args=args)
-    assert rc == 0
-    assert captured.get("autonomous") is True
-
-
-@pytest.mark.anyio
 async def test_run_fresh_session_interactive_branch_threads_autonomous(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -213,11 +191,10 @@ async def test_run_fresh_session_interactive_branch_threads_autonomous(
         captured.update(kw)
         return 0
 
-    async def _fake_clear_loop(control: object, *, tui: bool, first: object) -> int:
+    async def _fake_clear_loop(control: object, *, first: object) -> int:
         return await first({})
 
     monkeypatch.setattr(m, "_select_headless", lambda _a: (False, False))
-    monkeypatch.setattr(m, "_tui_requested", lambda _a: False)
     monkeypatch.setattr(m, "_clear_loop", _fake_clear_loop)
     monkeypatch.setattr(m, "make_interactive_solicit", lambda *a, **k: (lambda _: None))
     monkeypatch.setattr(m, "run_session_client", _fake_rsc)

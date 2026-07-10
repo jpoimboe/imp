@@ -2355,24 +2355,6 @@ def test_current_activity_model_none_without_a_step() -> None:
     assert act is None or act.model is None
 
 
-def test_seeded_opening_intent_reconciles_in_place_under_first_step() -> None:
-    b = nv.NarrativeBuilder()
-    b.seed_opening_intent("typed text")
-    b.add({"id": "oi", "agent_id": None, "type": "opening_intent",
-           "payload": {"text": "authoritative text"}})
-    b.add(_ev("s1", "step_started", step="spec", kind="agent", phase="design",
-              model="m", provider="anthropic"))
-    tree = b.tree
-    # No stray echo left at root: the seeded node relocated into the first step.
-    assert not any(isinstance(c, nv.UserMessageNode) for c in tree.root.children)
-    phase = next(c for c in tree.root.children if isinstance(c, nv.PhaseNode))
-    step = next(c for c in phase.children if isinstance(c, nv.StepNode))
-    intents = [c for c in step.children if isinstance(c, nv.UserMessageNode)]
-    # Exactly one node, carrying the AUTHORITATIVE event text (not the seed).
-    assert len(intents) == 1
-    assert intents[0].text == "authoritative text"
-    assert intents[0].interactive is True
-
 
 def test_unseeded_opening_intent_still_creates_single_node() -> None:
     b = nv.NarrativeBuilder()
@@ -2864,3 +2846,17 @@ def test_test_lane_acquired_emits_no_visible_line() -> None:
     fbs = [n for n in _walk(b.tree.root)
            if isinstance(n, nv.FallbackLine) and n.event_type == "test_lane_acquired"]
     assert fbs == []
+
+
+def test_seed_opening_intent_removed_and_event_creates_node() -> None:
+    assert not hasattr(nv.NarrativeBuilder, "seed_opening_intent")
+
+    b = nv.NarrativeBuilder()
+    b.add(ev("oi", "opening_intent", text="ship the thing"))
+
+    roots = b._root.children
+    assert len(roots) == 1
+    node = roots[0]
+    assert isinstance(node, nv.UserMessageNode)
+    assert node.text == "ship the thing"
+    assert node.interactive is True

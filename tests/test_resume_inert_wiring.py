@@ -39,7 +39,6 @@ def _patch_common(monkeypatch, tmp_path: Path, ch: Change) -> None:
     monkeypatch.setattr(m, "_load_or_rehydrate", lambda control, cid: ch)
     monkeypatch.setattr(m, "_resume_opens_fresh", lambda change: False)
     monkeypatch.setattr(m, "_select_headless", lambda args: (False, False))
-    monkeypatch.setattr(m, "_tui_requested", lambda args: False)
 
 
 @pytest.mark.anyio
@@ -67,7 +66,6 @@ async def test_resume_skips_inert_when_not_bare_turn_end(
         monkeypatch, tmp_path: Path) -> None:
     ch = _seed(tmp_path)
     _patch_common(monkeypatch, tmp_path, ch)
-    monkeypatch.setattr(m, "_warn_if_tui_unavailable", lambda args, stream: None)
     monkeypatch.setattr(m, "_print_splash_banner", lambda **k: False)
     monkeypatch.setattr(m, "bare_turn_end_question", lambda change: None)
 
@@ -76,7 +74,7 @@ async def test_resume_skips_inert_when_not_bare_turn_end(
 
     monkeypatch.setattr(m, "_resume_inert", boom_inert)
 
-    async def fake_clear_loop(control_root, *, tui, first):
+    async def fake_clear_loop(control_root, *, first):
         return 9
 
     monkeypatch.setattr(m, "_clear_loop", fake_clear_loop)
@@ -91,7 +89,6 @@ async def test_resume_skips_inert_when_message_supplied(
         monkeypatch, tmp_path: Path) -> None:
     ch = _seed(tmp_path)
     _patch_common(monkeypatch, tmp_path, ch)
-    monkeypatch.setattr(m, "_warn_if_tui_unavailable", lambda args, stream: None)
     monkeypatch.setattr(m, "_print_splash_banner", lambda **k: False)
     monkeypatch.setattr(m, "bare_turn_end_question", lambda change: "Pending Q?")
 
@@ -100,7 +97,7 @@ async def test_resume_skips_inert_when_message_supplied(
 
     monkeypatch.setattr(m, "_resume_inert", boom_inert_msg)
 
-    async def fake_clear_loop(control_root, *, tui, first):
+    async def fake_clear_loop(control_root, *, first):
         return 7
 
     monkeypatch.setattr(m, "_clear_loop", fake_clear_loop)

@@ -77,7 +77,7 @@ def test_new_idea_with_title_flag_is_error(
     rc = asyncio.run(main._async_cmd_new(
         argparse.Namespace(idea="A title", opening=None, depends_on=[],
                            title="conflicting", base_branch=None,
-                           non_interactive=True, message=None, tui=False,
+                           non_interactive=True, message=None,
                            workflow=None)))
     assert rc == 2
     assert not (tmp_path / ".imp" / "changes").exists()
@@ -122,7 +122,7 @@ def test_async_cmd_new_routes_to_record_idea(tmp_path: Path, monkeypatch) -> Non
     rc = asyncio.run(main._async_cmd_new(
         argparse.Namespace(idea="b", opening=None, depends_on=[], title=None,
                            base_branch=None, non_interactive=False, message=None,
-                           autonomous=False, tui=False, workflow=None)))
+                           autonomous=False, workflow=None)))
     assert rc == 0
     assert captured
     assert captured[0][2] == "main"
@@ -140,7 +140,7 @@ def test_backlog_with_run_only_flag_errors(
     monkeypatch.chdir(tmp_path)
     ns = dict(idea="My title", opening=None, title=None, depends_on=[],
               non_interactive=False, message=None, autonomous=False,
-              tui=False, workflow=None)
+              workflow=None)
     ns.update(flag)
     rc = asyncio.run(main._async_cmd_new(argparse.Namespace(**ns)))
     assert rc == 2
@@ -176,7 +176,7 @@ def test_non_backlog_non_interactive_runs_headless(
     rc = anyio.run(cli_main._async_cmd_new, argparse.Namespace(
         idea=None, opening=None, title=None, depends_on=[],
         non_interactive=True, message="reply one", autonomous=False,
-        tui=False, workflow=None))
+        workflow=None))
 
     assert rc == 0
     assert captured["non_interactive"] is True
@@ -210,7 +210,6 @@ def test_interactive_backlog_files_instantly_no_session(
         raise AssertionError("backlog must not run a session")
 
     monkeypatch.setattr(cli_main, "run_session_client", _no_session)
-    monkeypatch.setattr(cli_main, "_run_tui_session", _no_session)
 
     orig_in, orig_out = sys.stdin.isatty, sys.stdout.isatty
     sys.stdin.isatty = lambda: True   # type: ignore[method-assign]
@@ -218,7 +217,7 @@ def test_interactive_backlog_files_instantly_no_session(
     try:
         rc = anyio.run(cli_main._async_cmd_new, argparse.Namespace(
             idea="My backlog item", opening="a longer brief", title=None,
-            non_interactive=False, message=None, autonomous=False, tui=False,
+            non_interactive=False, message=None, autonomous=False,
             depends_on=["2026-06-16-dep001"], workflow=None))
     finally:
         sys.stdin.isatty = orig_in    # type: ignore[method-assign]

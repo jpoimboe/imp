@@ -19,7 +19,7 @@ import shutil
 import signal
 import subprocess
 import sys
-from collections.abc import Awaitable, Callable, Iterable, Iterator
+from collections.abc import Awaitable, Callable, Iterable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -48,11 +48,9 @@ from imp.cli.session_run import (
     make_interactive_solicit,
     run_session_client,
 )
-from imp.cli.session_terminal import run_terminal_client
 from imp.cli.signals import install_process_group, prompt_sigint_guard
 from imp.cli.slash import ask_line_with_slash
 from imp.cli.terminal_title import TerminalTitle
-from imp.cli.tui_app import TuiApp
 from imp.engine import backlog, worktree
 from imp.engine.abandon import (
     discard_conversation,
@@ -73,7 +71,6 @@ from imp.providers.config import (
     validate_workflow_name,
 )
 from imp.remote.daemon.directory import session_is_resident
-from imp.remote.session.attach import build_session_attach
 
 
 class ReplyInterjectRouter:
@@ -717,99 +714,8 @@ async def _read_opening_message(
     return _normalize_opening_reply(reply)
 
 
-def _warn_if_tui_unavailable(args: argparse.Namespace, stream: Any) -> None:
-    if getattr(args, "tui", False) and not getattr(stream, "isatty", lambda: False)():
-        print("imp: --tui needs an interactive terminal; streaming instead.",
-              file=sys.stderr)
-
-
-def _tui_requested(args: argparse.Namespace) -> bool:
-    return bool(getattr(args, "tui", False)) and sys.stdout.isatty()
-
-
-def _is_benign_interrupt_teardown(exc: BaseException | None) -> bool:
-    """True when exc is interrupt-teardown noise that must not surface in --tui (modal wedge)."""
-    import asyncio
-    if isinstance(exc, asyncio.InvalidStateError):
-        return True
-    if exc is None:
-        return False
-    name = type(exc).__name__
-    if name == "CLIConnectionError" and "terminated process" in str(exc):
-        return True
-    if name == "ProcessError" and getattr(exc, "exit_code", None) == 143:
-        return True
-    return "(exit code: 143)" in str(exc)
-
-
-@contextlib.contextmanager
-def _benign_interrupt_loop_handler(coord: Any) -> Iterator[None]:
-    import asyncio
-    loop = asyncio.get_running_loop()
-    prev = loop.get_exception_handler()
-
-    def handler(lp: Any, context: dict[str, Any]) -> None:
-        if coord.should_pause or _is_benign_interrupt_teardown(
-                context.get("exception")):
-            return
-        if prev is not None:
-            prev(lp, context)
-        else:
-            lp.default_exception_handler(context)
-
-    loop.set_exception_handler(handler)
-    try:
-        yield
-    finally:
-        loop.set_exception_handler(prev)
-
-
-async def _run_tui_session(
-        change: Change, *, seed_opening: str | None = None,
-        resume: bool = False,
-        leave_mode: str | None = None,
-        autonomous: bool = False,
-        leave_state: dict[str, str] | None = None) -> int:
-    from imp.cli.signals import InterruptCoordinator
-
-    coord = InterruptCoordinator()
-    app = TuiApp(coord=coord, color=should_use_color(sys.stdout), width=_term_width(),
-                 seed_opening=seed_opening, display_width=_display_width())
-    attach = build_session_attach(
-        change, resume=resume,
-        autonomous=autonomous, lease=True)
-    leave_state = {} if leave_state is None else leave_state
-
-    async def _solicit(_prompt: str) -> str:
-        return await app.solicit(change)
-
-    with _benign_interrupt_loop_handler(coord):
-        async with anyio.create_task_group() as tg:
-            tg.start_soon(coord.run_signal_receiver)
-
-            async def _run() -> None:
-                try:
-                    with contextlib.suppress(TimeoutError):
-                        await run_terminal_client(
-                            attach=attach, driver=app, coord=coord, solicit=_solicit,
-                            change_id=change.id, control_root=change.control_root,
-                            leave_state=leave_state, leave_mode=leave_mode)
-                finally:
-                    app.exit()
-
-            tg.start_soon(_run)
-            await app.run_async()
-            tg.cancel_scope.cancel()
-
-    app.print_collapsed_transcript(sys.stdout)
-    disposition_rc = _print_leave_disposition(change, leave_state)
-    if disposition_rc is not None:
-        return disposition_rc
-    return _session_exit_code(change, coord)
-
-
 async def _run_cleared_session(
-    control: Path, base: str, *, tui: bool, leave_state: dict[str, str],
+    control: Path, base: str, *, leave_state: dict[str, str],
     leave_mode: str = "new",
 ) -> int:
     """Open a fresh imp new-style draft in place after /clear."""
@@ -823,8 +729,7 @@ async def _run_cleared_session(
     try:
         print(_run_header_line(change.id, change.title, leave_mode, color=color))
         _print_splash_banner(interactive=True)
-        term_title = None if tui else TerminalTitle(
-            sys.stdout, change.id, change.title)
+        term_title = TerminalTitle(sys.stdout, change.id, change.title)
         prompt = Prompt(skills_dir=change.workflow_dir / "skills",
                         editing_mode=_editing_mode(control), color=color)
         try:
@@ -840,10 +745,6 @@ async def _run_cleared_session(
         # Persist the intent durably so the reopened chat's opening step seeds from
         # change.json (mirroring the imp new path), surviving any later resume.
         change.set_seed_opening(opening_text)
-        if tui:
-            return await _run_tui_session(
-                change, seed_opening=opening_text,
-                leave_mode=leave_mode, leave_state=leave_state)
         status = LiveStatus(sys.stdout)
         driver = LiveDriver(
             stream=sys.stdout, color=color, width=_term_width,
@@ -864,7 +765,6 @@ async def _run_cleared_session(
 async def _clear_loop(
     control: Path,
     *,
-    tui: bool,
     first: Callable[[dict[str, str]], Awaitable[int]],
     leave_mode: str = "new",
 ) -> int:
@@ -875,7 +775,7 @@ async def _clear_loop(
         leave_state = {}
         base = worktree.current_branch(control)
         rc = await _run_cleared_session(
-            control, base, tui=tui, leave_state=leave_state, leave_mode=leave_mode)
+            control, base, leave_state=leave_state, leave_mode=leave_mode)
     return rc
 
 
@@ -907,8 +807,6 @@ def _select_headless(
     stdin = sys.stdin if stdin is None else stdin
     stdout = sys.stdout if stdout is None else stdout
     non_interactive = bool(getattr(args, "non_interactive", False))
-    if getattr(args, "tui", False):
-        return False, False  # explicit --tui: let _tui_requested decide availability
     interactive = not non_interactive and stdin.isatty() and stdout.isatty()
     headless = non_interactive or not interactive
     return headless, headless and not non_interactive
@@ -918,10 +816,9 @@ async def _run_fresh_session(
     change: Change, *, args: argparse.Namespace,
 ) -> int:
     """Run a freshly-created change (new / materialized backlog) through
-    the per-change session daemon, dispatching on headless / --tui / interactive."""
+    the per-change session daemon, dispatching on headless / interactive."""
     from imp.cli.signals import InterruptCoordinator
 
-    _warn_if_tui_unavailable(args, sys.stdout)
     _print_run_header(
         change.id, change.title, "new", color=should_use_color(sys.stdout))
     headless, auto_headless = _select_headless(args)
@@ -940,13 +837,6 @@ async def _run_fresh_session(
             change, driver=driver, coord=coord, solicit=solicit,
             status=status, non_interactive=True,
             autonomous=autonomous)
-    if _tui_requested(args):
-        async def _first_tui(leave_state: dict[str, str]) -> int:
-            return await _run_tui_session(
-                change, seed_opening=change.seed_opening, leave_state=leave_state,
-                autonomous=autonomous)
-
-        return await _clear_loop(change.control_root, tui=True, first=_first_tui)
 
     async def _first(leave_state: dict[str, str]) -> int:
         status = LiveStatus(sys.stdout)
@@ -961,7 +851,7 @@ async def _run_fresh_session(
             status=status, leave_state=leave_state,
             autonomous=autonomous)
 
-    return await _clear_loop(change.control_root, tui=False, first=_first)
+    return await _clear_loop(change.control_root, first=_first)
 
 
 def _backlog_run_only_flag(args: argparse.Namespace) -> str | None:
@@ -1078,8 +968,7 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
 
     # Build the title before the opening prompt so the escape is written at startup,
     # not after the user answers.
-    term_title = None if _tui_requested(args) else TerminalTitle(
-        sys.stdout, change.id, change.title)
+    term_title = TerminalTitle(sys.stdout, change.id, change.title)
 
     # Print the run header before the prompt so erase/reprint causes no layout jump.
     header_printed = False
@@ -1106,7 +995,6 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
     # forms; an empty/absent reply persists as None/empty (unseeded).
     change.set_seed_opening(opening_text)
 
-    _warn_if_tui_unavailable(args, sys.stdout)
     headless, auto_headless = _select_headless(args)
     if headless:
         if auto_headless:
@@ -1127,18 +1015,6 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
             title=term_title,
             non_interactive=True, autonomous=autonomous)
 
-    if _tui_requested(args):
-        if not header_printed:
-            _print_opening(change, leave_mode, interactive=interactive, color=color)
-
-        async def _first_tui(leave_state: dict[str, str]) -> int:
-            return await _run_tui_session(
-                change, seed_opening=opening_text,
-                leave_mode=leave_mode,
-                leave_state=leave_state, autonomous=autonomous)
-
-        return await _clear_loop(control, tui=True, first=_first_tui, leave_mode=leave_mode)
-
     if not header_printed:
         _print_opening(change, leave_mode, interactive=interactive, color=color)
 
@@ -1156,7 +1032,7 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
             leave_mode=leave_mode,
             leave_state=leave_state, title=term_title, autonomous=autonomous)
 
-    return await _clear_loop(control, tui=False, first=_first, leave_mode=leave_mode)
+    return await _clear_loop(control, first=_first, leave_mode=leave_mode)
 
 
 def _cmd_new(args: argparse.Namespace) -> int:
@@ -1243,16 +1119,6 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
         return await run_session_client(
             change, driver=driver, coord=coord, solicit=solicit,
             resume=True, status=status, non_interactive=True, autonomous=autonomous)
-    if _tui_requested(args):
-        print(_run_header_line(
-            change.id, change.title, "resuming", color=should_use_color(sys.stdout)))
-
-        async def _first_tui(leave_state: dict[str, str]) -> int:
-            return await _run_tui_session(
-                change, resume=True, leave_state=leave_state, autonomous=autonomous)
-
-        return await _clear_loop(change.control_root, tui=True, first=_first_tui)
-
     if not getattr(args, "message", None):
         question = bare_turn_end_question(change)
         if question is not None:
@@ -1260,7 +1126,6 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
 
     # Interactive resume: a thin session-client; the daemon owns the worktree +
     # lock and runs resume prep + the agent loop.
-    _warn_if_tui_unavailable(args, sys.stdout)
     color = should_use_color(sys.stdout)
     print(_run_header_line(change.id, change.title, "resuming", color=color))
     splash_shown = _print_splash_banner(interactive=_is_interactive(
@@ -1281,7 +1146,7 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
             resume=True, status=status, leave_state=leave_state,
             autonomous=autonomous)
 
-    return await _clear_loop(change.control_root, tui=False, first=_first)
+    return await _clear_loop(change.control_root, first=_first)
 
 
 def _cmd_resume(args: argparse.Namespace) -> int:
@@ -1325,7 +1190,7 @@ async def _resume_inert(
                 resume=True, status=status, leave_state=leave_state,
                 autonomous=autonomous)
 
-        return await _clear_loop(change.control_root, tui=False, first=_first)
+        return await _clear_loop(change.control_root, first=_first)
 
     return await run_inert_resume(
         question=question,
@@ -3018,9 +2883,6 @@ def _build_parser() -> argparse.ArgumentParser:
                        help="Headless reply consumed by the first bare-turn-end prompt; "
                             "pause then resume with another --message. "
                             "Requires --non-interactive.")
-    p_new.add_argument("--tui", action="store_true",
-                       help="Render the run in a full-screen, scrollable viewer "
-                            "(expanded steps); falls back to streaming on a non-tty.")
     p_new.add_argument("--backlog", metavar="TITLE", default=None, dest="idea",
                        help="File an idea for your backlog with this TITLE and "
                             "exit immediately without running (the positional "
@@ -3057,9 +2919,6 @@ def _build_parser() -> argparse.ArgumentParser:
     p_chat.add_argument("--message", metavar="TEXT", default=None,
                         help="Headless reply consumed by the first bare-turn-end prompt; "
                              "requires --non-interactive.")
-    p_chat.add_argument("--tui", action="store_true",
-                        help="Render the conversation in a full-screen, scrollable "
-                             "viewer; falls back to streaming on a non-tty.")
     p_chat.set_defaults(func=_cmd_chat)
 
     p_resume = sub.add_parser(
@@ -3082,10 +2941,6 @@ def _build_parser() -> argparse.ArgumentParser:
                           help="Headless reply consumed by the first bare-turn-end prompt; "
                                "pause+resume with another --message. "
                                "Requires --non-interactive.")
-    p_resume.add_argument("--tui", action="store_true",
-                          help="Render the run in a full-screen, scrollable viewer "
-                               "(expanded steps); falls back to streaming on a non-tty.")
-
     p_resume.set_defaults(func=_cmd_resume)
 
     p_log = sub.add_parser(
@@ -3327,7 +3182,7 @@ def _init_logging() -> None:
     `providers/codex_mcp.py`), so the first such instantiation would otherwise
     install a stderr RichHandler at INFO and paint propagated third-party INFO
     logs — notably the Claude Agent SDK's "Using bundled Claude Code CLI" — over
-    the live TUI. We pre-empt that by owning root logging here, before the
+    the live streaming output. We pre-empt that by owning root logging here, before the
     command path imports any of those modules.
 
     `IMP_DEBUG=1` opts into stderr logging for development; otherwise records are

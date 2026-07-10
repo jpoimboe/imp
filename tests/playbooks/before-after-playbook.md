@@ -1,7 +1,7 @@
 # before / after playbook — visual showcase for an imp change
 
 > **You are producing a before/after visual showcase.** Given any imp Change,
-> render the user-visible CLI/TUI surfaces it touched — once from the code *before*
+> render the user-visible CLI surfaces it touched — once from the code *before*
 > the change, once *after* — and assemble them into one self-contained HTML page in
 > `/tmp`. The screenshots come from imp's **real** render code (the same functions
 > the live CLI calls) through the impty pyte→PNG pipeline, so the page shows exactly

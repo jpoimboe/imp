@@ -20,8 +20,8 @@ Playbooks shine for two kinds of test that are hard to express as deterministic 
 
 ## The two kinds in this suite
 
-- **Surface polish pass** (`imp-ux-playbook.md`) — open-ended, judgment-led. Walk a surface
-  (CLI or TUI) with fresh eyes and emit an agent-authored **PASS/FAIL verdict** plus a
+- **Surface polish pass** (`imp-ux-playbook.md`) — open-ended, judgment-led. Walk the CLI
+  surface with fresh eyes and emit an agent-authored **PASS/FAIL verdict** plus a
   suggestions list → `docs/issues/`.
 - **Correctness matrix** (`interrupt-playbook.md`) — exhaustive and binary. Fire every
   (provider × state × trigger) combination, grep for orphans and event-log classification,
@@ -32,7 +32,7 @@ Playbooks shine for two kinds of test that are hard to express as deterministic 
 - **A playbook is durable and re-runnable**, named `<name>-playbook.md`, with no date prefix
   (unlike the dated specs/plans/runbooks under `docs/superpowers/`). Most playbooks pair 1:1
   with a feature spec in `imp/specs/` and are named after it. **But a playbook may instead be a
-  *surface* or *cross-cutting* test** — `imp-ux-playbook.md` is surface-selectable (CLI or TUI)
+  *surface* or *cross-cutting* test** — `imp-ux-playbook.md` is a CLI-surface pass
   and not tied to a single feature. Name such a playbook after the surface or concern it covers,
   not one feature.
 - **The agent drives `imp` through the impty MCP server** (`mcp__impty__start` / `send` /
@@ -42,7 +42,7 @@ Playbooks shine for two kinds of test that are hard to express as deterministic 
 - **Run in a throwaway standalone `git clone`** — see the throwaway-clone reference below.
 - **Reports land in the main checkout** so they survive clone deletion: correctness matrices →
   `docs/bugs/<YYYY-MM-DD>-<name>-playbook-results.md`; polish passes →
-  `docs/issues/<YYYY-MM-DD>-imp-ux-<mode>-notes.md`. **A clean run is still a report** — write
+  `docs/issues/<YYYY-MM-DD>-imp-ux-cli-notes.md`. **A clean run is still a report** — write
   the matrix/verdict and an explicit "no defects observed" note. A passing run that produces no
   artifact is the most likely failure of this convention.
 
@@ -60,12 +60,6 @@ fidelity caveats live here once:
   also degrades prompt_toolkit's CPR handshake, so in **cooked-mode** runs mid-run keystroke
   Ctrl-C/ESC delivery is unreliable — use `send_signal(2)` there. ESC has no signal equivalent,
   so the keystroke is always the faithful ESC test.
-- **Raw-mode (`--tui`) fidelity.** A `--tui` full-screen app owns the tty in raw mode and binds
-  the keys itself, so `send("\x1b")` / `send("\x03")` are delivered as keys and are correct (not
-  `send_signal`). `TERM` must be exported or prompt_toolkit degrades; a bare ESC is held by the
-  ~0.5s escape-flush timeout before it fires; impty can drop the odd keystroke (re-send once,
-  record only if it persists). `view()`'s `regime` header reads `screen` in the alt-screen,
-  `scroll` otherwise — the in-TUI / out-of-TUI signal.
 - **`exec` in shell-wrapped spawns.** If you spawn through `bash -lc`, `exec` is mandatory —
   without it bash (not imp) leads the foreground group and Ctrl-C/ESC never reach imp.
 
@@ -98,7 +92,7 @@ symbols or branch paths into a playbook.
 *(Append every new playbook here — this list is hand-maintained.)*
 
 - `before-after-playbook.md` — before/after visual showcase for an imp change: render the
-  user-visible CLI/TUI surfaces it touched, before vs after, into one self-contained HTML page.
+  user-visible CLI surfaces it touched, before vs after, into one self-contained HTML page.
   A communication artifact, not a pass/fail test.
 - `dogfood-playbook.md` — run-to-completion outcome/e2e acceptance test: drive a full `imp new` run
   to completion + merge, judge the produced work with fresh eyes, run `check_dogfood_invariants.py`,
@@ -108,7 +102,7 @@ symbols or branch paths into a playbook.
   `/list` / `/new` / `/abandon` / the unknown-command notice / the unroutable-message hint, judge
   the multi-Change chat UX, and write a PASS/FAIL + UX verdict → `docs/bugs/`. Validates
   `imp/specs/2026-06-14-remote-control-chat-commands.md`.
-- `imp-ux-playbook.md` — surface polish pass: walk a CLI or TUI surface with fresh eyes and emit an
+- `imp-ux-playbook.md` — surface polish pass: walk the CLI surface with fresh eyes and emit an
   agent-authored PASS/FAIL verdict plus a suggestions list → `docs/issues/`.
 - `interrupt-playbook.md` — correctness matrix: fire every (provider × state × trigger)
   combination, grep for orphans and event-log classification, pass/fail each cell → `docs/bugs/`.
