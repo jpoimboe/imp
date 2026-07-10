@@ -1545,13 +1545,10 @@ def _opening_intent_events():
 
 
 def test_opening_intent_does_not_drop_following_step_output() -> None:
-    # Regression (change fbb6r4): the opening_intent UserMessageNode is appended at
-    # the workflow root; the live cursor emits it and advances PAST its slot. The
-    # next step_started then re-homes that node under the step (_inject_opening_intent)
-    # and inserts the PhaseNode at the index the cursor has ALREADY passed, so the
-    # whole step subtree — phase header, step header, and every llm_response — slips
-    # behind the monotonic cursor and is never emitted. The live view sat blank while
-    # imp log (full re-walk) showed all the activity. BOTH the opening prompt AND the
+    # Root-placement world (was change fbb6r4): the opening_intent UserMessageNode
+    # lives at the workflow root, ahead of the first phase, and emits immediately.
+    # It is never re-homed under the first step, so the monotonic-cursor skip that
+    # once blanked the live view cannot occur. BOTH the opening prompt AND the
     # agent's output must render live.
     drv, out = _driver()
     events = [
@@ -1570,7 +1567,14 @@ def test_opening_intent_does_not_drop_following_step_output() -> None:
     drv.finish()
     body = _body(out)
     assert any("build the parser" in ln for ln in body)      # opening prompt
-    assert any("drafting the spec now" in ln for ln in body)  # step output (was dropped)
+    assert any("drafting the spec now" in ln for ln in body)  # step output
+    # Placement: opening intent is a child of root, not under the step.
+    tree = drv._builder.tree
+    intents = [c for c in tree.root.children if isinstance(c, nv.UserMessageNode)]
+    assert len(intents) == 1
+    phase = next(c for c in tree.root.children if isinstance(c, nv.PhaseNode))
+    step = next(c for c in phase.children if isinstance(c, nv.StepNode))
+    assert not any(isinstance(c, nv.UserMessageNode) for c in step.children)
     # The live body must match imp log's full re-walk exactly (shared render path).
     assert body == _render_body(events)
 
@@ -1643,6 +1647,11 @@ def test_suppress_replay_hides_replayed_opening_intent() -> None:
     body = _body(out)
     assert not any("build the parser" in ln for ln in body)
     assert any(ln == "── plan phase ───" for ln in body)
+    # Root-placement world: the replayed opening intent lives at root (visually
+    # suppressed here, not re-homed under a step).
+    tree = drv._builder.tree
+    intents = [c for c in tree.root.children if isinstance(c, nv.UserMessageNode)]
+    assert len(intents) == 1
 
 
 def test_suppress_replay_with_no_replay_prefix_renders_full_history() -> None:
@@ -2769,3 +2778,36 @@ def test_body_less_deferred_leaf_emits_no_separate_header() -> None:
     hits = [ln for ln in body if "waiting in merge queue" in ln]
     assert hits == ["integration phase · waiting in merge queue · complete"]
     assert body == _render_body(events)   # live == imp log (single collapsed leaf)
+
+
+def test_seed_opening_intent_emits_at_root_before_any_event() -> None:
+    drv, out = _driver()
+    # Optimistic echo fires at submit time — before any step_started / opening_intent
+    # event arrives from the daemon.
+    drv.seed_opening_intent("build the parser")
+    assert out.getvalue().count("build the parser") == 1
+    # It lives at root (no step exists yet), rendered as an interactive user turn.
+    tree = drv._builder.tree
+    intents = [c for c in tree.root.children if isinstance(c, nv.UserMessageNode)]
+    assert len(intents) == 1
+    assert intents[0].text == "build the parser"
+    assert intents[0].interactive is True
+
+
+def test_seed_opening_intent_reconciles_with_daemon_event_no_duplicate() -> None:
+    drv, out = _driver()
+    drv.seed_opening_intent("build the parser")
+    assert out.getvalue().count("build the parser") == 1
+    # The daemon's authoritative opening_intent event adopts the seeded node in
+    # place: no second line, no second node.
+    drv.on_event(ev("e1", "opening_intent", text="build the parser"))
+    assert out.getvalue().count("build the parser") == 1
+    # And the first step_started does not re-home it — still exactly one at root.
+    drv.on_event(ev("3", "step_started", step="spec-writer", kind="agent",
+                    phase="spec", model="m", provider="anthropic"))
+    tree = drv._builder.tree
+    intents = [c for c in tree.root.children if isinstance(c, nv.UserMessageNode)]
+    assert len(intents) == 1
+    phase = next(c for c in tree.root.children if isinstance(c, nv.PhaseNode))
+    step = next(c for c in phase.children if isinstance(c, nv.StepNode))
+    assert not any(isinstance(c, nv.UserMessageNode) for c in step.children)
