@@ -648,7 +648,7 @@ def test_argv_binds_match_bind_plan():
     assert _parse_argv_binds(argv) == p.bind_plan()
 
 
-def test_resolve_policy_binds_change_home_rw(tmp_path):
+def test_resolve_policy_binds_quest_home_rw(tmp_path):
     control, wt = _layout(tmp_path)
     home = control / ".imp" / "changes" / "abc"
     pol = resolve_policy(
@@ -656,7 +656,7 @@ def test_resolve_policy_binds_change_home_rw(tmp_path):
         cfg=SandboxConfig(), engine_env_result={}, environ={},
         available=True, quest_dir=home,
     )
-    assert pol.change_home == str(home)
+    assert pol.quest_home == str(home)
     # An artifact write under the home is permitted by the in-process mirror...
     assert pol.allows_write(home / "artifacts" / "spec" / "x.md")
     # ...and the bwrap argv carries the matching rw bind.
@@ -675,10 +675,10 @@ def test_readonly_overlay_denies_write_inside_allows_sibling():
     assert p.allows_write(Path("/wt/docs/readme.md")) is True   # sibling stays rw
 
 
-def test_readonly_overlay_whole_worktree_keeps_change_home_writable():
+def test_readonly_overlay_whole_worktree_keeps_quest_home_writable():
     p = _policy(
         worktree="/ctl/.imp/worktrees/abc",
-        change_home="/ctl/.imp/changes/abc",
+        quest_home="/ctl/.imp/changes/abc",
         git_common_dir="/ctl/.git",
         git_ro_remask=(), writable_caches=(), extra_readable=(),
         extra_writable=(), secret_dirs=(), secret_files=(),
@@ -686,7 +686,7 @@ def test_readonly_overlay_whole_worktree_keeps_change_home_writable():
     )
     # Whole-worktree ro overlay: source is locked...
     assert p.allows_write(Path("/ctl/.imp/worktrees/abc/src/x.py")) is False
-    # ...but change_home lives OUTSIDE the worktree, so it stays rw.
+    # ...but quest_home lives OUTSIDE the worktree, so it stays rw.
     assert p.allows_write(Path("/ctl/.imp/changes/abc/progress.md")) is True
 
 
@@ -886,10 +886,10 @@ def test_resolve_policy_draft_change_skips_ref_protection(tmp_path):
 
 def test_ephemeral_home_emitted_early_and_writable():
     # A spike-shaped hand-built policy: ephemeral tmpfs home under which the
-    # worktree, change_home and a credential dir all live.
+    # worktree, quest_home and a credential dir all live.
     p = _policy(
         worktree="/home/u/proj/.imp/worktrees/abc",
-        change_home="/home/u/proj/.imp/changes/abc",
+        quest_home="/home/u/proj/.imp/changes/abc",
         git_common_dir="/home/u/proj/.git",
         git_ro_remask=(), writable_caches=(), extra_readable=(),
         extra_writable=(), secret_dirs=("/run/user/1000",), secret_files=(),
@@ -909,7 +909,7 @@ def test_ephemeral_home_emitted_early_and_writable():
     assert i_home < i_ch < i_claude
     assert i_claude < i_mask                 # secret masks remain last
     # allows_write: everything under the tmpfs home is writable (re-exposed),
-    # the worktree/change_home (under home) win over the tmpfs, and the cred
+    # the worktree/quest_home (under home) win over the tmpfs, and the cred
     # dirs are writable — the only real-home paths a spike can write.
     assert p.allows_write(Path("/home/u/.local/bin/x")) is True
     assert p.allows_write(Path("/home/u/proj/.imp/worktrees/abc/src/a.py")) is True
@@ -983,8 +983,8 @@ def test_resolve_policy_spike_makes_home_a_writable_tmpfs(tmp_path):
     assert pol.allows_write(home / ".local" / "bin" / "x") is True
 
 
-def test_resolve_policy_spike_reexposes_worktree_and_change_home_under_home(tmp_path):
-    # AC 2: project root under $HOME → worktree and change_home re-expose over the
+def test_resolve_policy_spike_reexposes_worktree_and_quest_home_under_home(tmp_path):
+    # AC 2: project root under $HOME → worktree and quest_home re-expose over the
     # early home tmpfs and stay writable.
     home = tmp_path / "home"
     control = home / "proj"
@@ -992,16 +992,16 @@ def test_resolve_policy_spike_reexposes_worktree_and_change_home_under_home(tmp_
     wt.mkdir(parents=True)
     (control / ".git" / "hooks").mkdir(parents=True)
     (control / ".git" / "config").write_text("")
-    change_home = control / ".imp" / "changes" / "abc"
+    quest_home = control / ".imp" / "changes" / "abc"
     pol = resolve_policy(
         worktree=wt, control_root=control, quest_id="abc",
         cfg=SandboxConfig(home=home), engine_env_result={}, environ={},
-        available=True, quest_dir=change_home, spike=True,
+        available=True, quest_dir=quest_home, spike=True,
     )
     plan = pol.bind_plan()
     assert plan.index((str(home), "tmpfs_rw")) < plan.index((str(wt), "rw"))
     assert pol.allows_write(wt / "src" / "a.py") is True
-    assert pol.allows_write(change_home / "progress.md") is True
+    assert pol.allows_write(quest_home / "progress.md") is True
 
 
 def test_resolve_policy_spike_binds_existing_cred_dirs_writethrough(tmp_path):
@@ -1164,7 +1164,7 @@ def test_resolve_policy_workflow_snapshot_denies_write_siblings_writable(tmp_pat
     assert pol.allows_write(quest_dir / "artifacts" / "spec" / "x.md") is True
 
 
-def test_resolve_policy_workflow_ro_bind_emitted_after_change_home(tmp_path):
+def test_resolve_policy_workflow_ro_bind_emitted_after_quest_home(tmp_path):
     control, wt = _layout(tmp_path)
     quest_dir = control / ".imp" / "changes" / "abc"
     snapshot = quest_dir / "workflow"
@@ -1175,11 +1175,11 @@ def test_resolve_policy_workflow_ro_bind_emitted_after_change_home(tmp_path):
         available=True, quest_dir=quest_dir,
     )
     argv = " ".join(build_sandbox_argv("x", cwd=str(wt), policy=pol, engine_env={}))
-    change_home_bind = f"--bind {quest_dir} {quest_dir}"
+    quest_home_bind = f"--bind {quest_dir} {quest_dir}"
     snapshot_bind = f"--ro-bind {snapshot} {snapshot}"
-    assert change_home_bind in argv
+    assert quest_home_bind in argv
     assert snapshot_bind in argv
-    assert argv.index(change_home_bind) < argv.index(snapshot_bind)
+    assert argv.index(quest_home_bind) < argv.index(snapshot_bind)
 
 
 def test_resolve_policy_omits_workflow_overlay_when_workflow_is_plain_file(tmp_path):

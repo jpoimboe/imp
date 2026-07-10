@@ -108,7 +108,7 @@ def test_threshold_infers_intent_from_pasted_context(tmp_path) -> None:
     # recital — never blankly re-ask.
     out = render_prompt(body, build_context(
         change_title="t", event_log=log, quest_id="abc",
-        change_home=".imp/changes/abc", project_facts={},
+        quest_home=".imp/changes/abc", project_facts={},
         opening="pasted imp log for change abc"),
         workflow_dir=bundled_workflow_dir("imp"))
     assert "Pasted material" in out
@@ -564,7 +564,7 @@ def test_spec_writer_handoff_renders_drift_branch_on_moved_base(tmp_path) -> Non
     log = JsonlEventLog(tmp_path / "events.jsonl")
     moved = render_prompt(body, build_context(
         change_title="t", event_log=log, quest_id="abc",
-        change_home=".imp/changes/abc",
+        quest_home=".imp/changes/abc",
         cur_base_head="NEW", orig_base_head="OLD",
         project_facts={}),
         workflow_dir=bundled_workflow_dir("imp")).lower()
@@ -578,7 +578,7 @@ def test_spec_writer_handoff_renders_drift_branch_on_moved_base(tmp_path) -> Non
 
     same = render_prompt(body, build_context(
         change_title="t", event_log=log, quest_id="abc",
-        change_home=".imp/changes/abc",
+        quest_home=".imp/changes/abc",
         cur_base_head="SAME", orig_base_head="SAME",
         project_facts={}),
         workflow_dir=bundled_workflow_dir("imp")).lower()
@@ -589,7 +589,7 @@ def test_spec_writer_handoff_renders_drift_branch_on_moved_base(tmp_path) -> Non
     # whether or not the run is autonomous (the conditional was removed).
     autonomous_moved = render_prompt(body, build_context(
         change_title="t", event_log=log, quest_id="abc",
-        change_home=".imp/changes/abc",
+        quest_home=".imp/changes/abc",
         cur_base_head="NEW", orig_base_head="OLD",
         autonomous=True,
         project_facts={}),
@@ -662,7 +662,7 @@ def test_threshold_adopts_discovered_work_by_default(tmp_path) -> None:
     log = JsonlEventLog(tmp_path / "events.jsonl")
     attended = render_prompt(body, build_context(
         change_title="t", event_log=log, quest_id="abc",
-        change_home=".imp/changes/abc", project_facts={}),
+        quest_home=".imp/changes/abc", project_facts={}),
         workflow_dir=bundled_workflow_dir("imp"))
     # Adoption is the unmarked default: discovered work folds into the current change.
     assert "## Keep discovered work here by default" in attended
@@ -683,7 +683,7 @@ def test_threshold_adopts_discovered_work_by_default(tmp_path) -> None:
     # block was dropped.
     autonomous = render_prompt(body, build_context(
         change_title="t", event_log=log, quest_id="abc",
-        change_home=".imp/changes/abc", autonomous=True,
+        quest_home=".imp/changes/abc", autonomous=True,
         project_facts={}),
         workflow_dir=bundled_workflow_dir("imp"))
     assert "## Keep discovered work here by default" not in autonomous
@@ -736,7 +736,7 @@ def test_authoring_agent_renders_human_decision_partial(
         body,
         build_context(
             change_title="t", event_log=log, quest_id="abc",
-            change_home=".imp/changes/abc",
+            quest_home=".imp/changes/abc",
             cur_base_head="X", orig_base_head="X",
             vars={"fast_path": False, "plan_index": 1, "plan_total": 1,
                   "task_total": 1, "integration_fork": "P"},
@@ -811,7 +811,7 @@ def test_finalize_auto_resolves_needs_decision_only_under_autonomy(
         def render(autonomous: bool, body: str = body, wdir: Path = wdir) -> str:
             return render_prompt(body, build_context(
                 change_title="t", event_log=log, quest_id="abc",
-                change_home=".imp/changes/abc",
+                quest_home=".imp/changes/abc",
                 project_facts={}, autonomous=autonomous,
                 vars={"auto_merge": True}),
                 workflow_dir=wdir).lower()

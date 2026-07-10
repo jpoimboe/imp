@@ -412,7 +412,7 @@ def test_cmd_log_follow_routes_archived_only_to_follow_log(
     monkeypatch.setattr(
         m, "_load_events_for_id",
         lambda c, i: [{"type": "change_created", "payload": {}}])
-    monkeypatch.setattr(m, "_change_home", lambda c, i: tmp_path / "absent")
+    monkeypatch.setattr(m, "_quest_home", lambda c, i: tmp_path / "absent")
     monkeypatch.setattr(m, "_follow_log", lambda events: 9)
     rc = m.main(["log", "-f", "arch"])
     assert rc == 9

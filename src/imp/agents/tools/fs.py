@@ -203,10 +203,10 @@ async def _read_image(
             f"[image: {Path(path).name} — {width}×{height} "
             f"{_media_label(media_type)}, {kb} KB. "
             f"The active model can't display images.]")
-    if ctx.change_home is None:
+    if ctx.quest_home is None:
         raise ValueError(
             f"cannot read image {path}: no change home is set for blob storage")
-    part = image_tools.store_image(data, ctx.change_home / "blobs")
+    part = image_tools.store_image(data, ctx.quest_home / "blobs")
     summary = TextPart(
         text=f"{Path(path).name} — {part.width}×{part.height} {_media_label(part.media_type)}")
     return [summary, part]

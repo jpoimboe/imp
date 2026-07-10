@@ -41,7 +41,7 @@ from imp.agents.subagents import raise_if_suspended
 from imp.agents.tools import bg as _bg
 from imp.agents.tools.context import (
     ToolContext,
-    change_home_path,
+    quest_home_path,
     request_bracketed,
     terminate_running_processes,
 )
@@ -279,7 +279,7 @@ class CodexAgentRunner:
             parent_transcript_dir=invocation.transcript_dir,
             agent_id=aid,
             background_enabled=True,  # full bg surface wired: injection + sweeps + teardown
-            change_home=change_home_path(invocation.change_context.change_home),
+            quest_home=quest_home_path(invocation.change_context.quest_home),
         )
         ctx.change_context = invocation.change_context
         ctx.change_state = invocation.change_state

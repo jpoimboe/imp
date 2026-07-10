@@ -77,7 +77,7 @@ def _ctx(tmp_path: Path, change: Change, *, name: str, agent: AgentDef,
     ctx.change = change
     ctx.change_context = ChangeContext(
         id=change.id, title=change.title, project_root=change.project_root,
-        change_home=f".imp/changes/{change.id}",
+        quest_home=f".imp/changes/{change.id}",
         workflow_dir=change.workflow_dir)
     ctx.sandbox_policy = None
     ctx.spawn_subagent = spawn
@@ -107,7 +107,7 @@ def test_isolated_dispatch_runs_in_throwaway_with_distinct_policy(
     assert pol.network is True
     assert pol.worktree == str(throwaway)
     # the DURABLE change home is the rw-bound change dir (survives teardown)
-    assert pol.change_home == str(change.quest_dir)
+    assert pol.quest_home == str(change.quest_dir)
     # teardown: throwaway worktree + its branch are gone
     assert not throwaway.exists()
     assert "imp/spike-prb001-1" not in _git(

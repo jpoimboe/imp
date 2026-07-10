@@ -195,18 +195,18 @@ def test_dunder_raises_attributeerror() -> None:
         _ = ns.__html__
 
 
-def test_renders_change_home(tmp_path: Path) -> None:
+def test_renders_quest_home(tmp_path: Path) -> None:
     log = _log(tmp_path / "events.jsonl", [])
     ctx = build_context(
         quest_id="abc123", change_title="My Change",
-        change_home="/ctl/.imp/changes/abc123", event_log=log,
+        quest_home="/ctl/.imp/changes/abc123", event_log=log,
     )
     assert render_prompt(
         "spec at {{ change.home }}/artifacts/spec/{{ change.id }}.md", ctx,
     ) == "spec at /ctl/.imp/changes/abc123/artifacts/spec/abc123.md"
 
 
-def test_change_home_defaults_empty(tmp_path: Path) -> None:
+def test_quest_home_defaults_empty(tmp_path: Path) -> None:
     log = _log(tmp_path / "events.jsonl", [])
     ctx = build_context(quest_id="t", change_title="t", event_log=log)
     assert render_prompt("{{ change.home }}", ctx) == ""

@@ -79,7 +79,7 @@ class ToolContext:
     # rename_change tool mutates change.title + rewrites change.json through it.
     # Distinct from change_context, which is the FROZEN render-time snapshot.
     change: Any = None
-    change_home: Path | None = None
+    quest_home: Path | None = None
     # The runner injects this callable as the bare-turn-end / AWAITING_USER
     # resume input channel, used to read the user's reply. None for subagents.
     user_input_fn: Any = None
@@ -240,8 +240,8 @@ async def request_bracketed(
         yield item
 
 
-def change_home_path(change_home: str | None) -> Path | None:
-    return Path(change_home) if change_home else None
+def quest_home_path(quest_home: str | None) -> Path | None:
+    return Path(quest_home) if quest_home else None
 
 
 def _supports_killpg() -> bool:

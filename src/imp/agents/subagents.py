@@ -262,7 +262,7 @@ async def dispatch_task(
         prompt_ctx = build_context(
             quest_id=cc.id,
             change_title=cc.title,   # dispatch label is the title now [item 11]
-            change_home=cc.change_home,
+            quest_home=cc.quest_home,
             event_log=JsonlEventLog(ctx.events_path),
             vars=ctx.change_state.vars if ctx.change_state is not None else {},
             project_facts=cc.project_facts,

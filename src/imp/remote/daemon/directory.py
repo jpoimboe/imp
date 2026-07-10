@@ -14,9 +14,9 @@ def session_is_resident(control_root: Path, quest_id: str) -> bool:
 
 def resident_session_ids(control_root: Path) -> set[str]:
     """Change ids with a live session socket; scans live homes only, never the archive."""
-    from imp.cli.main import _list_change_homes
+    from imp.cli.main import _list_quest_homes
     return {
         cid
-        for cid in _list_change_homes(control_root)
+        for cid in _list_quest_homes(control_root)
         if socket_is_live(session_socket_path(control_root, cid))
     }

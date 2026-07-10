@@ -88,7 +88,7 @@ async def bash(
         quest_id=src.id if src else "",
         change_title=src.title if src else "",
         quest_dir=(getattr(src, "quest_dir", None)
-                    or (Path(h) if (h := getattr(src, "change_home", None)) else None)),
+                    or (Path(h) if (h := getattr(src, "quest_home", None)) else None)),
         test_gates=ctx.test_gates,
     )
     env = overlay_engine_env(os.environ, eng)

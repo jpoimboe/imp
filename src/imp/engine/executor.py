@@ -875,7 +875,7 @@ async def _route_script(
     if "{{" in command:
         command = render_prompt(command, build_context(
             change_title=change.title, event_log=log,
-            quest_id=change.id, change_home=f".imp/changes/{change.id}",
+            quest_id=change.id, quest_home=f".imp/changes/{change.id}",
             cur_base_head=change.cur_base_head,
             orig_base_head=change.orig_base_head, vars=state.vars,
         ))
@@ -1517,7 +1517,7 @@ async def _run_agent_invocation(
     else:
         ctx = build_context(
             quest_id=change.id, change_title=change.title,
-            change_home=f".imp/changes/{change.id}",
+            quest_home=f".imp/changes/{change.id}",
             cur_base_head=change.cur_base_head,
             orig_base_head=change.orig_base_head,
             event_log=log, vars=state.vars,
@@ -1567,7 +1567,7 @@ async def _run_agent_invocation(
         initial_messages=initial_messages,
         change_context=ChangeContext(
             id=change.id, title=change.title,
-            change_home=f".imp/changes/{change.id}",
+            quest_home=f".imp/changes/{change.id}",
             project_root=change.project_root, workflow_dir=change.workflow_dir,
             project_facts=project_facts or {}, guidance=guidance,
             persona_source=workflow.persona_source,

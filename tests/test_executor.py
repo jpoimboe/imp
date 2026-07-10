@@ -2682,7 +2682,7 @@ async def test_executor_passes_autonomous_to_prompt(tmp_path: Path) -> None:
 
 
 @pytest.mark.anyio
-async def test_change_home_renders_worktree_relative(tmp_path: Path) -> None:
+async def test_quest_home_renders_worktree_relative(tmp_path: Path) -> None:
     wf = tmp_path / "imp" / "workflows" / "imp"
     (wf / "agents").mkdir(parents=True)
     (wf / "agents" / "writer.md").write_text(
@@ -2707,11 +2707,11 @@ async def test_change_home_renders_worktree_relative(tmp_path: Path) -> None:
     assert result is RunResult.COMPLETED
 
     inv = sink[0]
-    assert inv.change_context.change_home == ".imp/changes/test-change"
+    assert inv.change_context.quest_home == ".imp/changes/test-change"
     assert "home=.imp/changes/test-change" in inv.initial_messages[0].content[0].text
     # worktree-anchored: relative, never absolute, never a parent escape.
-    assert not inv.change_context.change_home.startswith("/")
-    assert ".." not in inv.change_context.change_home
+    assert not inv.change_context.quest_home.startswith("/")
+    assert ".." not in inv.change_context.quest_home
 
 
 @pytest.mark.anyio

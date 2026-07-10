@@ -1283,18 +1283,18 @@ def _display_width() -> int:
         return 80
 
 
-def _list_change_homes(control: Path) -> list[str]:
+def _list_quest_homes(control: Path) -> list[str]:
     """Ids of changes with a permanent root home under .imp/changes/."""
     return live_quest_ids(control)
 
 
-def _change_home(control: Path, quest_id: str) -> Path:
+def _quest_home(control: Path, quest_id: str) -> Path:
     return control / ".imp" / "changes" / quest_id
 
 
 def _iter_quest_ids(control: Path) -> list[str]:
     """All known Change ids: permanent homes first, then archived ids not live."""
-    live = _list_change_homes(control)
+    live = _list_quest_homes(control)
     seen = set(live)
     out = list(live)
     for cid in archive_read.archived_ids(control):
@@ -1306,7 +1306,7 @@ def _iter_quest_ids(control: Path) -> list[str]:
 
 def _title_for_id(control: Path, quest_id: str) -> str | None:
     """Read a Change's current title (worktree home first, archive second)."""
-    cdir = _change_home(control, quest_id)
+    cdir = _quest_home(control, quest_id)
     cj = cdir / "change.json"
     if cj.exists():
         try:
@@ -1371,7 +1371,7 @@ def _parse_jsonl(raw: bytes) -> list[dict[str, Any]]:
 
 
 def _show_artifact(control: Path, quest_id: str, rel: str) -> bytes | None:
-    live = _change_home(control, quest_id) / "artifacts" / rel
+    live = _quest_home(control, quest_id) / "artifacts" / rel
     if live.is_file():
         return live.read_bytes()
     return archive_read.read_artifact(control, quest_id, rel)
@@ -1380,7 +1380,7 @@ def _show_artifact(control: Path, quest_id: str, rel: str) -> bytes | None:
 def _show_newest_plan_rel(control: Path, quest_id: str) -> str | None:
     """plans/<id>-plan-N.md for the highest N: live worktree first, then the
     retained wip ref. Returns None when no plan exists anywhere."""
-    live_dir = _change_home(control, quest_id) / "artifacts" / "plans"
+    live_dir = _quest_home(control, quest_id) / "artifacts" / "plans"
     if live_dir.is_dir():
         pick = archive_read.pick_newest_plan(
             quest_id, [p.name for p in live_dir.iterdir() if p.is_file()])
@@ -1393,7 +1393,7 @@ def _show_newest_plan_rel(control: Path, quest_id: str) -> str | None:
 
 
 def _show_runtime(control: Path, quest_id: str, name: str) -> bytes | None:
-    change = _change_home(control, quest_id)
+    change = _quest_home(control, quest_id)
     live = change / "state" / "state.json" if name == "state.json" else change / name
     if live.is_file():
         return live.read_bytes()
@@ -1451,7 +1451,7 @@ def _resolve_intent(events: list[dict[str, Any]]) -> str | None:
 
 
 def _change_meta(control: Path, quest_id: str) -> dict[str, Any] | None:
-    cdir = _change_home(control, quest_id)
+    cdir = _quest_home(control, quest_id)
     raw: bytes | None
     if (cdir / "change.json").exists():
         raw = (cdir / "change.json").read_bytes()
@@ -1491,7 +1491,7 @@ def _unstarted_backlog_meta(control: Path, quest_id: str) -> dict[str, Any] | No
     `status: backlog` brief instead of a History item. None for any archived-only
     id or any home the shared backlog predicate rejects (materialized,
     draft-origin, already-conversed, or lock-live)."""
-    cdir = _change_home(control, quest_id)
+    cdir = _quest_home(control, quest_id)
     cj = cdir / "change.json"
     if not cj.exists():
         return None
@@ -1709,9 +1709,9 @@ def _filter_events(
 def _resolve_default_id(control: Path) -> str | None:
     """No-arg default: most-recent change home by its events.jsonl mtime, else
     the most-recent archived id (by the index's last_event_ts), else None."""
-    homes = _list_change_homes(control)
+    homes = _list_quest_homes(control)
     if homes:
-        return max(homes, key=lambda s: (_change_home(control, s)
+        return max(homes, key=lambda s: (_quest_home(control, s)
                                          / "events.jsonl").stat().st_mtime)
     return archive_read.most_recent_archived_id(control)
 
@@ -2003,7 +2003,7 @@ def _cmd_log(args: argparse.Namespace) -> int:
         return 2
 
     if args.follow:
-        home = _change_home(control, quest_id)
+        home = _quest_home(control, quest_id)
         if home.exists():
             return _follow_live(control, quest_id, home)
         return _follow_log(events)
@@ -2245,12 +2245,12 @@ def _events_have_user_message(events_path: Path) -> bool:
     return False
 
 
-def _scan_change_homes(control: Path) -> list[_HomeScan]:
+def _scan_quest_homes(control: Path) -> list[_HomeScan]:
     """Read and parse every live change home once, so the overview's three row
     builders share a single pass instead of re-reading each home three times."""
     scanned: list[_HomeScan] = []
-    for quest_id in _list_change_homes(control):
-        cdir = _change_home(control, quest_id)
+    for quest_id in _list_quest_homes(control):
+        cdir = _quest_home(control, quest_id)
         try:
             change_json = (cdir / "change.json").read_bytes()
             meta = json.loads(change_json)
@@ -2286,7 +2286,7 @@ def _status_row(quest_id: str, state_json: bytes, change_json: bytes,
 
 
 def _row_for_id(control: Path, quest_id: str) -> _Row | None:
-    cdir = _change_home(control, quest_id)
+    cdir = _quest_home(control, quest_id)
     # archive_read returns bytes | None; the live change-home branch always finds
     # the files. Annotate so the None-guard below stays reachable (not dead code).
     state_json: bytes | None
@@ -2294,7 +2294,7 @@ def _row_for_id(control: Path, quest_id: str) -> _Row | None:
     if (cdir / "change.json").exists():
         # A change home mid-creation has change.json written but state.json not
         # yet (Change.create is not atomic across the two files). The daemon's
-        # scan loop can hit that window, so tolerate it like _scan_change_homes
+        # scan loop can hit that window, so tolerate it like _scan_quest_homes
         # rather than crashing the whole listing.
         try:
             state_json = (cdir / "state" / "state.json").read_bytes()
@@ -2317,12 +2317,12 @@ def _row_for_id(control: Path, quest_id: str) -> _Row | None:
 
 
 def _status_rows(control: Path, scanned: list[_HomeScan] | None = None) -> list[_Row]:
-    homes = _scan_change_homes(control) if scanned is None else scanned
+    homes = _scan_quest_homes(control) if scanned is None else scanned
     rows: list[_Row] = []
     for h in homes:
         if h.state_json is None:
             continue
-        cdir = _change_home(control, h.quest_id)
+        cdir = _quest_home(control, h.quest_id)
         if _is_backlog_home(h.meta, conversed=h.has_user_message,
                             lock_live=lambda: lock_is_live(cdir / "lock")):  # noqa: B023
             continue  # un-materialized, never-conversed, unlocked seed -> Backlog
@@ -2765,11 +2765,11 @@ def _cmd_edit(args: argparse.Namespace) -> int:
 
 
 def _backlog_rows(control: Path, scanned: list[_HomeScan] | None = None) -> list[_Row]:
-    homes = _scan_change_homes(control) if scanned is None else scanned
+    homes = _scan_quest_homes(control) if scanned is None else scanned
     rows: list[_Row] = []
     for h in homes:
         meta = h.meta
-        cdir = _change_home(control, h.quest_id)
+        cdir = _quest_home(control, h.quest_id)
         if not _is_backlog_home(meta, conversed=h.has_user_message,
                                 lock_live=lambda: lock_is_live(cdir / "lock")):  # noqa: B023
             continue  # materialized / draft-origin / conversed / lock-live -> Active
@@ -2803,7 +2803,7 @@ def _history_rows(control: Path, *, show_all: bool,
 def _overview_lines(control: Path, *, show_all: bool, now: datetime,
                     color: bool) -> list[str]:
     """Overview lines across all zones, sharing one content-sized STATUS/NAME width."""
-    scanned = _scan_change_homes(control)
+    scanned = _scan_quest_homes(control)
     status_rows = _status_rows(control, scanned)
     inflight = _sort_rows_newest_first(status_rows)
     backlog_rows = _sort_rows_newest_first(_backlog_rows(control, scanned))
@@ -2880,7 +2880,7 @@ def _inflight_prose(control: Path, quest_id: str) -> str:
     """Same prose extractor as the archive ingest, so both search paths agree."""
     from imp.cli.render_helpers import conversation_prose
     try:
-        raw = (_change_home(control, quest_id) / "events.jsonl").read_bytes()
+        raw = (_quest_home(control, quest_id) / "events.jsonl").read_bytes()
     except OSError:
         return ""
     return conversation_prose(_parse_jsonl(raw))
@@ -2921,7 +2921,7 @@ def _search_active(control: Path, query: str) -> list[_SearchHit]:
 
 
 def _backlog_seed_opening(control: Path, quest_id: str) -> str:
-    cj = _change_home(control, quest_id) / "change.json"
+    cj = _quest_home(control, quest_id) / "change.json"
     try:
         meta = json.loads(cj.read_bytes())
     except (OSError, ValueError, TypeError):

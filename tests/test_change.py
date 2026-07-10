@@ -43,7 +43,7 @@ def test_create_change_makes_worktree_and_state(tmp_path: Path) -> None:
     assert state.id == "abc123" and state.step == "s" and state.status == "new"
 
 
-def test_change_home_lives_at_control_root_outside_worktree(tmp_path: Path) -> None:
+def test_quest_home_lives_at_control_root_outside_worktree(tmp_path: Path) -> None:
     _seed_control(tmp_path)
     ch = Change.create(tmp_path, title="X", quest_id="hom123", base_branch="main")
     assert ch.quest_dir == tmp_path / ".imp" / "changes" / "hom123"

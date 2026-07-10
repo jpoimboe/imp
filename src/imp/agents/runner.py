@@ -125,7 +125,7 @@ class ChangeContext:
     project_root: Path
     workflow_dir: Path
     id: str = ""
-    change_home: str = ""
+    quest_home: str = ""
     project_facts: dict[str, str] = field(hash=False, default_factory=dict)
     guidance: str = ""
     persona_source: str = ""

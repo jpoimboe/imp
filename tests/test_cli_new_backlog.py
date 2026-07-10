@@ -22,7 +22,7 @@ def _only_new_id(control: Path) -> str:
     return next(p.name for p in (control / ".imp" / "changes").iterdir())
 
 
-def test_new_idea_creates_change_home_with_origin_idea(
+def test_new_idea_creates_quest_home_with_origin_idea(
         tmp_path: Path, monkeypatch, capsys) -> None:
     _seed_control(tmp_path)
     monkeypatch.chdir(tmp_path)

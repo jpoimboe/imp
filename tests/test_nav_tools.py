@@ -790,7 +790,7 @@ def test_grep_binary_skip_on_escape_hatch_path(tmp_path: Path) -> None:
     assert "bin.dat" not in out
 
 
-def test_glob_surfaces_sanctioned_change_home_symlink(tmp_path: Path) -> None:
+def test_glob_surfaces_sanctioned_quest_home_symlink(tmp_path: Path) -> None:
     root = tmp_path / "wt"
     root.mkdir()
     _init_git_repo(root, ".imp/\n")
@@ -821,7 +821,7 @@ def test_glob_drops_nonsanctioned_escape_symlink(tmp_path: Path) -> None:
     assert "link" not in out                    # escape guard still drops it
 
 
-def test_grep_surfaces_sanctioned_change_home_symlink(tmp_path: Path) -> None:
+def test_grep_surfaces_sanctioned_quest_home_symlink(tmp_path: Path) -> None:
     root = tmp_path / "wt"
     root.mkdir()
     _init_git_repo(root, ".imp/\n")

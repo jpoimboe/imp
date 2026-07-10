@@ -10,7 +10,7 @@ from tests.conftest import _seed_control
 def test_row_for_id_tolerates_missing_state_json(tmp_path: Path) -> None:
     """A change home mid-creation has change.json written but state/state.json
     not yet — the remote daemon's scan loop must not crash on that window
-    (matches _scan_change_homes, which already tolerates it)."""
+    (matches _scan_quest_homes, which already tolerates it)."""
     _seed_control(tmp_path)
     ch = Change.create(tmp_path, title="X", quest_id="partial", base_branch="main")
     (ch.state_dir / "state.json").unlink()  # simulate the mid-creation window

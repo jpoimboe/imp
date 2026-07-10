@@ -41,7 +41,7 @@ class SandboxPolicy:
     setenv: tuple[tuple[str, str], ...]       # resolved env allowlist key/value pairs
     network: bool                             # True → no --unshare-net
     note: str = ""                            # "" | "unsandboxed_by_config" | "sandbox_disabled"
-    change_home: str = ""                     # <control>/.imp/changes/<id> rw bind ("" → none)
+    quest_home: str = ""                     # <control>/.imp/changes/<id> rw bind ("" → none)
     readonly_overlays: tuple[str, ...] = ()  # ro subtrees; after git_ro_remask, before caches
     git_ref_reexpose: tuple[str, ...] = ()   # rw re-expose of refs/heads/imp; after git_ro_remask
     ephemeral_home: str = ""                 # spike: writable tmpfs over $HOME ("" → none)
@@ -72,7 +72,7 @@ class SandboxPolicy:
             *([(self.ephemeral_home, "tmpfs_rw")] if self.ephemeral_home else []),
             (self.worktree, "rw"),
             (self.git_common_dir, "rw"),
-            *([(self.change_home, "rw")] if self.change_home else []),
+            *([(self.quest_home, "rw")] if self.quest_home else []),
             *[(p, "ro") for p in self.git_ro_remask],
             *[(p, "rw") for p in self.git_ref_reexpose],
             *[(p, "ro") for p in self.readonly_overlays],
@@ -344,7 +344,7 @@ def resolve_policy(
         claude_dir = Path(claude_override) if claude_override else home / ".claude"
         cred_writethrough = _existing([str(claude_dir), str(home / ".codex")])
 
-    # ro overlay of workflow snapshot — bind_plan emits it after the change_home rw
+    # ro overlay of workflow snapshot — bind_plan emits it after the quest_home rw
     # bind, so last-covering-wins makes only workflow/ read-only.
     readonly_overlays: tuple[str, ...] = ()
     if quest_dir is not None and (quest_dir / "workflow").is_dir():
@@ -354,7 +354,7 @@ def resolve_policy(
         active=True,
         worktree=str(worktree),
         git_common_dir=str(git),
-        change_home=str(quest_dir) if quest_dir is not None else "",
+        quest_home=str(quest_dir) if quest_dir is not None else "",
         git_ro_remask=tuple(remask),
         git_ref_reexpose=git_ref_reexpose,
         readonly_overlays=readonly_overlays,

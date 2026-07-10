@@ -90,7 +90,7 @@ def handle_slash_line(
         if not args:
             output_fn("Usage: /resume <id|query>")
             return REPROMPT
-        from imp.cli.main import _change_home, _iter_quest_ids
+        from imp.cli.main import _quest_home, _iter_quest_ids
         from imp.engine.archive import read as archive_read
         from imp.engine.archive import record, records_root
         control = change.control_root
@@ -102,7 +102,7 @@ def handle_slash_line(
                 output_fn(f"{args!r} is ambiguous: {', '.join(matches)}")
             return REPROMPT
         target = matches[0]
-        if _change_home(control, target).exists():
+        if _quest_home(control, target).exists():
             output_fn(f"{target} is live; continue it with `imp resume {target}`.")
             return REPROMPT
         rec = record.read_record(records_root(control), target)

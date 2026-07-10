@@ -62,12 +62,12 @@ def test_live_stems_exclude_the_archive(tmp_path: Path) -> None:
     assert "zaka" not in stems
 
 
-def test_list_change_homes_delegates_to_live_quest_ids(tmp_path: Path) -> None:
-    from imp.cli.main import _list_change_homes
+def test_list_quest_homes_delegates_to_live_quest_ids(tmp_path: Path) -> None:
+    from imp.cli.main import _list_quest_homes
 
     _live_home(tmp_path, "wibo10")
     _live_home(tmp_path, "kobe47")
-    assert _list_change_homes(tmp_path) == ["kobe47", "wibo10"]
+    assert _list_quest_homes(tmp_path) == ["kobe47", "wibo10"]
 
 
 def test_mint_composition_avoids_live_stems(tmp_path: Path) -> None:

@@ -10,7 +10,7 @@ from imp.engine.archive import ensure_current, index, index_path
 
 def reap_archived_homes(control_root: Path) -> int:
     """Reap live change homes already terminal and durable in the archive; return the count."""
-    from imp.cli.main import _INFLIGHT, _change_home, _list_change_homes
+    from imp.cli.main import _INFLIGHT, _quest_home, _list_quest_homes
 
     ensure_current(control_root)
     db = index_path(control_root)
@@ -19,8 +19,8 @@ def reap_archived_homes(control_root: Path) -> int:
     conn = index.connect(db)
     try:
         reaped = 0
-        for cid in _list_change_homes(control_root):
-            home = _change_home(control_root, cid)
+        for cid in _list_quest_homes(control_root):
+            home = _quest_home(control_root, cid)
             try:
                 state = json.loads((home / "state" / "state.json").read_bytes())
             except (FileNotFoundError, json.JSONDecodeError):

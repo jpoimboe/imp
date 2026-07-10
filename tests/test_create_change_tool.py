@@ -35,7 +35,7 @@ def test_registered_and_top_level_only() -> None:
     assert "create_change" in TOP_LEVEL_CAPS
 
 
-def test_create_change_writes_change_home_and_emits_event(tmp_path: Path) -> None:
+def test_create_change_writes_quest_home_and_emits_event(tmp_path: Path) -> None:
     ch, state = _make(tmp_path)
     ctx = _ctx(ch, state)
     tool = get_registry()["create_change"]
