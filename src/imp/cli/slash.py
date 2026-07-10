@@ -146,6 +146,7 @@ def _help(out: Callable[[str], None]) -> None:
     out("  /search <query>    Search archived changes by content, title, or id")
     out("  /save              Save this conversation to your Backlog")
     out("  /clear             Park this chat and start a fresh one")
+    out("  /model <model>     Switch this step's model (or provider:model)")
     out("  /abandon           Abandon the current change")
     out("  /resume <id|query> Rehydrate a saved/archived conversation to continue")
     out("  /<name> [args]     Load a skill (trailing args appended to it)")

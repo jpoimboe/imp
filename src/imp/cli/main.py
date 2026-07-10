@@ -132,7 +132,7 @@ class ReplyInterjectRouter:
             self._coord.enqueue_interject(line)
 
 
-OPENING_HINT = "type a message, or /help for commands"
+OPENING_HINT = "type a message, /help for commands, or /model to switch models"
 _OPENING_SESSION_VERBS = ("/save", "/clear", "/abandon")
 
 
