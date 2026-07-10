@@ -31,12 +31,11 @@ def test_researcher_agent_has_web_tools_read_only() -> None:
     assert a.output_schema.fields == ()
 
 
-def test_subagents_have_no_static_tier() -> None:
-    agents_dir = bundled_workflow_dir("imp") / "agents"
-    for name in ("explorer", "researcher"):
-        text = (agents_dir / f"{name}.md").read_text()
-        # No frontmatter tier: each inherits the dispatching agent's model.
-        assert "\ntier:" not in text
+def test_subagents_have_pinned_static_tier() -> None:
+    wf = _wf()
+    assert wf.agents["explorer"].tier == "medium"
+    assert wf.agents["researcher"].tier == "high"
+    assert wf.agents["spiker"].tier == "high"
 
 
 def test_plan_writer_declares_research_subagents() -> None:
