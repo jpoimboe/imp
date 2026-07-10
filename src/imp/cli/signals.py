@@ -225,6 +225,7 @@ class InterruptCoordinator:
         # session still exits 130 after the prompt posts.
         self._interrupted = False
         self.pause_reason: str | None = None
+        self._pending_model: str | None = None
         self._loop: Any = None          # event loop owning the signal handlers
         self._sig_send: Any = None      # memory-stream send half (loop cb -> task)
         self._interjects: list[str] = []
@@ -298,6 +299,16 @@ class InterruptCoordinator:
         for fn in tuple(self._activity_listeners):
             with _suppress(Exception):
                 fn()
+
+    def set_pending_model(self, arg: str) -> None:
+        """Stash a /model argument for the hold loop to apply on the next park."""
+        self._pending_model = arg
+
+    def take_pending_model(self) -> str | None:
+        """Read and clear the pending /model argument (one-shot)."""
+        arg = self._pending_model
+        self._pending_model = None
+        return arg
 
     @property
     def solicit_active(self) -> bool:
