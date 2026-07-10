@@ -151,6 +151,8 @@ class State:
     phase_label: str | None = None
     held_lane: str | None = None          # lane key (base branch) this change holds
     held_acquire_step: str | None = None  # the acquiring step to rewind to on eviction
+    # Consume-once: last pause kept the held merge lane; entry guard honors it once.
+    lane_retained: bool = False
     route_label: str | None = None  # rule label threaded to the next step_started (consume-on-read)
     has_started: bool = False  # durable: True once >=1 step has begun executing
     completion_pending: bool = False  # §3: navigation ran off the end under an
@@ -253,6 +255,7 @@ class State:
             "merge_commit": self.merge_commit,
             "held_lane": self.held_lane,
             "held_acquire_step": self.held_acquire_step,
+            "lane_retained": self.lane_retained,
             "completion_pending": self.completion_pending,
             "reincarnations": self.reincarnations,
             "max_reincarnations": self.max_reincarnations,

@@ -516,3 +516,23 @@ def test_state_phase_label_defaults_none(tmp_path: Path) -> None:
     raw = json.loads((tmp_path / "state.json").read_text())
     assert raw["phase_label"] is None
     assert State.load(tmp_path).phase_label is None
+
+
+def test_state_lane_retained_roundtrip(tmp_path: Path) -> None:
+    s = State(id="c", step="integration-verify", step_attempt=0, status="paused",
+              held_lane="main", held_acquire_step="wait-for-head",
+              lane_retained=True)
+    s.save(tmp_path)
+    loaded = State.load(tmp_path)
+    assert loaded.lane_retained is True
+    # Written into the on-disk payload (not a load-only synthesized default).
+    raw = json.loads((tmp_path / "state.json").read_text())
+    assert raw["lane_retained"] is True
+
+
+def test_state_lane_retained_defaults_false(tmp_path: Path) -> None:
+    s = State(id="c", step=None, step_attempt=0, status="new")
+    s.save(tmp_path)
+    assert State.load(tmp_path).lane_retained is False
+    raw = json.loads((tmp_path / "state.json").read_text())
+    assert raw["lane_retained"] is False
