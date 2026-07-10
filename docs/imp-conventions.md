@@ -1,6 +1,6 @@
 # imp conventions
 
-Read this when working on imp's TUI, terminal output, or any user-facing copy.
+Read this when working on imp's terminal output or any user-facing copy.
 
 ## Visual identity
 

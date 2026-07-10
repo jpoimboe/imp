@@ -91,7 +91,7 @@ One event→tree fold feeds both the live view and `imp log`, so they can't dive
 flowchart LR
   LOG[("events.jsonl")] --> NB["narrative.py<br/>NarrativeBuilder<br/>events → node tree"]
   NB --> RT["render_text.py"]
-  RT --> DRV["LiveDriver / TuiDriver"]
+  RT --> DRV["LiveDriver"]
   DRV --> term([terminal])
   SIG["cli/signals.py<br/>InterruptCoordinator<br/>ESC · SIGINT · watchdog"] -.->|"pause"| DRV
 ```
@@ -100,7 +100,7 @@ flowchart LR
 
 | Layer | Module(s) | Role |
 |---|---|---|
-| Entry / drivers | `cli/main.py`, `cli/live_driver.py`, `cli/tui_app.py` | Command dispatch; live / TUI / headless rendering + signal wiring around `run_change`. |
+| Entry / drivers | `cli/main.py`, `cli/live_driver.py` | Command dispatch; live / headless rendering + signal wiring around `run_change`. |
 | Executor | `engine/executor.py` | Step loop: load → resolve providers → dispatch → route. Returns `COMPLETED \| PAUSED \| ERRORED`. |
 | Change / state | `engine/change.py`, `engine/state.py` | Per-run identity + worktree; execution cursor, vars, resolved tiers (atomic `save()`); append-only `EventLog`. |
 | Workflow load | `engine/loader.py`, `engine/types.py` | Parse `workflow.yaml` + `agents/*.md` into a frozen `Workflow` (phases → steps, agents, vars, rules). |
