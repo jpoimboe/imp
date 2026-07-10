@@ -1850,7 +1850,14 @@ def _h_error(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -
         target = last.strip()
         if target:
             children = self._container().children
-            idx = _last_narration_index(children)
+            # A deferred rename flushed right after the held narration (see
+            # _flush_pending_rename in _h_llm_response) leaves a trailing
+            # RenameNode; skip it so the held-prose lookup still lands on the
+            # narration. Trimming only the tail keeps indices aligned for del.
+            end = len(children)
+            if end and isinstance(children[end - 1], RenameNode):
+                end -= 1
+            idx = _last_narration_index(children[:end])
             if (idx is not None and children[idx].held
                     and children[idx].text.strip().startswith(target)):
                 del children[idx]

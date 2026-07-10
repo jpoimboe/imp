@@ -96,6 +96,30 @@ def test_network_error_without_last_agent_text_keeps_narration() -> None:
     assert "error: [network]" not in _render(events)
 
 
+def test_auth_error_drops_held_prose_even_behind_a_flushed_rename() -> None:
+    # A change_renamed stashes a pending rename that _h_llm_response flushes as a
+    # RenameNode right AFTER the held auth narration, so the container tail is
+    # [held_auth_prose, RenameNode]. The held-prose lookup must skip that trailing
+    # RenameNode and still drop the prose; the rename line itself survives.
+    events = [
+        _ev("n1", "change_renamed", agent_id=None, new_title="A better title"),
+        _ev("a1", "llm_response", agent_id=None,
+            raw={"content": [{"type": "text", "text": AUTH_PROSE}]}, usage={}),
+        _ev("e1", "error", agent_id=None,
+            category="auth", kind="http_401", message="claude CLI: 401",
+            detail={"last_agent_text": AUTH_PROSE}),
+        _ev("r1", "agent_retry", agent_id=None,
+            category="auth", attempt=1, backoff_seconds=1.0),
+    ]
+    tree = nv.build_tree(events)
+    assert AUTH_PROSE not in _agent_texts(tree.root)           # prose still dropped
+    rename_nodes = [c for c in tree.root.children if isinstance(c, nv.RenameNode)]
+    assert len(rename_nodes) == 1                               # rename line preserved
+    out = _render(events)
+    assert "error: [auth]" not in out
+    assert AUTH_PROSE not in out
+
+
 def test_api_error_still_renders_hard_error_line() -> None:
     # Boundary: `api` is NOT a backoff-retry category — its hard error line stays.
     out = _render([
