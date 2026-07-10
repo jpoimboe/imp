@@ -531,7 +531,10 @@ class CodexAgentRunner:
         # triggers replay-and-continue (nudge injected as the resumed prompt).
         if invocation.balance_on_resume:
             from imp.agents.classify import ResumeState
-            from imp.providers.codex_resume import derive_codex_resume_state
+            from imp.providers.codex_resume import (
+                derive_codex_resume_state,
+                pending_human_reply,
+            )
             rstate, _ = derive_codex_resume_state(
                 invocation.events_path, aid,
                 subagent_depth=invocation.subagent_depth)
@@ -546,15 +549,20 @@ class CodexAgentRunner:
                 # when the queue is empty. _resolve_wait_reply owns the SOLE
                 # awaiting_user_input emit (fired only when it actually solicits);
                 # the resume-branch duplicate is dropped (Part 1 is centralized).
+                pending = pending_human_reply(invocation.events_path, aid)
                 reply, source = await _resolve_wait_reply(
                     invocation.coordinator, invocation.user_input_fn,
                     invocation.resume_should_continue,
-                    elog=elog, agent_id=aid)
+                    elog=elog, agent_id=aid, pending_reply=pending)
                 if source == "nudge":
                     # Internal continuation, not a human turn: journal an internal
                     # engine_continuation event (no `>` caret), not a user_message.
                     elog.append(agent_id=aid, type="engine_continuation",
                                 payload={"text": reply})
+                elif source == "pending_reply":
+                    # The reply's user_message is already durable in events.jsonl
+                    # from the prior attempt; re-journaling would duplicate it.
+                    pass
                 else:
                     user_msg = Message(
                         role="user", content=(TextBlock(text=reply),))

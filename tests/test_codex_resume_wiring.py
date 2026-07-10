@@ -369,3 +369,76 @@ async def test_awaiting_user_retry_continue_journals_engine_continuation_not_use
     # The resumed prompt is the nudge, so the run continues and completes.
     assert _CONTINUATION_NUDGE in str(fake.thread.run_calls[0][0])
     assert any(e.get("type") == "agent_output" for e in events)
+
+
+@pytest.mark.anyio
+async def test_awaiting_user_retry_redrives_pending_reply_not_nudge(
+    tmp_path: Path,
+) -> None:
+    """codex retry at an AWAITING_USER resume whose events.jsonl tail carries an
+    un-answered solicited reply: the resume drives the REPLY text (not the
+    continuation nudge), emits no engine_continuation, and does NOT re-journal
+    the reply's user_message (it is already durable in events.jsonl)."""
+    from imp.engine.agent_run import _CONTINUATION_NUDGE
+
+    _seed_git_and_auth(tmp_path)
+    tx = tmp_path / "tx"
+    rel = "sessions/2026/06/05/rollout-2026-06-05T00-00-00-thr-pr-1.jsonl"
+    (tx / "codex_thread.json").write_text(
+        json.dumps({"thread_id": "thr-pr-1", "rollout_relpath": rel}))
+    saved = tx / "codex_rollout" / rel
+    saved.parent.mkdir(parents=True, exist_ok=True)
+    saved.write_text('{"id": "thr-pr-1"}\n')
+
+    # events.jsonl deriving AWAITING_USER with a trailing solicited reply:
+    # llm_response(question) -> awaiting_user_input -> user_message(reply),
+    # no complete_step, no llm_response after the reply.
+    _write_events(tmp_path / "events.jsonl", [
+        {"agent_id": "step:t", "type": "llm_response",
+         "payload": {"raw": {"content": [{"type": "text", "text": "which file?"}]}}},
+        {"agent_id": "step:t", "type": "awaiting_user_input",
+         "payload": {"prompt": "which file?"}},
+        {"agent_id": "step:t", "type": "user_message",
+         "payload": {"role": "user",
+                     "content": [{"type": "text", "text": "use config.py"}]}},
+    ])
+
+    elog = InMemoryEventLog()
+    scripted = [[
+        thread_started("thr-pr-1"),
+        agent_message("resumed with the reply; calling complete_step"),
+        mcp_call(name="complete_step", args={"answer": "42"},
+                 result="ok", item_id="cs-1"),
+        turn_completed(input_tokens=1, output_tokens=1),
+    ]]
+    fake = FakeCodex(scripted_turns=scripted)
+    runner = CodexAgentRunner(
+        model_name="gpt-5.5", client_factory=lambda options=None: fake)
+    runner._canonical_auth_override = tmp_path / "auth.json"
+
+    def _must_not_solicit(_prompt):
+        raise AssertionError("a recovered pending reply must not solicit again")
+
+    inv = _build_invocation(tmp_path, event_log=elog, balance_on_resume=True)
+    object.__setattr__(inv, "resume_should_continue", True)
+    object.__setattr__(inv, "user_input_fn", _must_not_solicit)
+
+    async for _ev in runner.run(inv):
+        pass
+
+    # The resumed prompt is the recovered reply, NOT the continuation nudge.
+    driven = str(fake.thread.run_calls[0][0])
+    assert "use config.py" in driven
+    assert _CONTINUATION_NUDGE not in driven
+
+    types = [e["type"] for e in elog.read()]
+    # Recovered-reply path journals nothing: no engine_continuation, and the
+    # reply is not re-journaled into the fresh in-memory log (it lives in the
+    # on-disk events.jsonl the classifier read).
+    assert "engine_continuation" not in types
+    assert not any(
+        e["type"] == "user_message"
+        and "use config.py" in json.dumps(e.get("payload", {}), ensure_ascii=False)
+        for e in elog.read())
+    # No new gate emitted by the resume branch.
+    assert "awaiting_user_input" not in types
