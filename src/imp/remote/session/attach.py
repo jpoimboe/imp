@@ -20,6 +20,7 @@ SpawnFn = Callable[[Change], None]
 def spawn_session_daemon(
     change: Change, *, resume: bool = False,
     non_interactive: bool = False, autonomous: bool = False,
+    model: str | None = None,
 ) -> None:
     argv = [
         sys.executable, "-m", "imp.remote.session.daemon",
@@ -32,6 +33,8 @@ def spawn_session_daemon(
         argv.append("--non-interactive")
     if autonomous:
         argv.append("--autonomous")
+    if model is not None:
+        argv += ["--model", model]
     env = overlay_engine_env(os.environ, {})
     env.pop("IMP_REMOTE_CONTROL_SOCK", None)
     change.change_dir.mkdir(parents=True, exist_ok=True)
@@ -79,6 +82,7 @@ def build_session_attach(
     non_interactive: bool = False,
     autonomous: bool = False,
     lease: bool = False,
+    model: str | None = None,
 ) -> Callable[[Callable[[dict[str, Any]], None]], Awaitable[SessionClient]]:
     async def attach(on_event: Callable[[dict[str, Any]], None]) -> SessionClient:
         return await attach_or_spawn(
@@ -87,7 +91,8 @@ def build_session_attach(
             lease=lease,
             spawn_fn=lambda ch: spawn_session_daemon(
                 ch, resume=resume,
-                non_interactive=non_interactive, autonomous=autonomous),
+                non_interactive=non_interactive, autonomous=autonomous,
+                model=model),
         )
 
     return attach
