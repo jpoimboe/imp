@@ -25,6 +25,7 @@ held_acquire_step
 held_lane
 id
 interrupt_pending
+lane_retained
 loop_counts
 max_clean_tree_bounces
 max_reincarnations
