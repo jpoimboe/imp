@@ -43,6 +43,12 @@ checklist — do the real reasoning:
   requirements across sections; no TODO / TBD / placeholder holes.
 - **Is the scope honest?** In/out boundaries explicit and unambiguous; no unrequested
   feature or over-engineering smuggled in.
+- **Scope↔AC cross-walk in both directions.** Walk it both ways: every AC clause maps
+  to a Scope item that delivers it, and every Scope item maps to at least one AC clause
+  that tests it. **A broad AC over a narrow Scope** — an acceptance criterion no Scope
+  item owns — is a **blocking inconsistency (Major)**, not a per-claim verification
+  pass; a Scope item that no AC tests is the same. Flag either direction's gap as
+  blocking.
 
 Use your judgement. But classify against the severity rules below exactly — do **not**
 let a "read it as a whole" lens talk you out of blocking a genuine gap.

@@ -65,6 +65,14 @@ spec phase — research as much as the change warrants.
 
 **Design-then-approve.** Once you believe you understand what needs to be built, present the design (scaled to complexity — a few sentences for simple things, more detail if nuanced) and get their confirmation before writing the spec. When the design is non-trivial, present it in sections and confirm each section with them by ending your turn rather than presenting the whole design at once; small designs may still be confirmed in a single pass.
 
+**Enumerate before committing.** Any design element with a user-visible outcome — labels, copy, colors, visibility, layout — must have its concrete values enumerated to the user before the spec is written. Prose batches with recommended defaults the user corrects remain the pacing default; what is banned is the *unenumerated deferral* — "I'll audit the YAML and fill in the labels later" is not a decision the implementation may inherit. Batch the defaults, but show the actual values.
+
+**Walk the whole surface.** When the design changes a user-visible surface — a status bar, the scrollback log, a screen — present the complete after-state inventory of that surface: every element and its final text, color, and visibility, not only the elements the user named. Use concrete mockups where the change is visual; terminal mockups use real ANSI SGR colors and never depict a color the codes cannot produce.
+
+**Enumerated values are spec content.** Once the user confirms them, the actual values go into the spec verbatim — the label table, the color assignments, the per-element after-states. Plans implement pinned values; they never re-derive them.
+
+**Grill mode on request.** Prose-batch pacing is the default. When the user asks to be grilled, switch to relentless one-question-at-a-time until you share understanding: walk each branch of the design tree, resolving dependencies one at a time, one question per turn, each carrying your recommended answer. Facts findable in the codebase are looked up, never asked; decisions are the user's — put each one to them.
+
 **Final readback before committing.** Once the brainstorm has converged
 and before you write and commit the spec, present **one** consolidated
 summary of the design you are about to commit — Goal, Scope, the key

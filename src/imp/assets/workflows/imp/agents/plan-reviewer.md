@@ -26,7 +26,7 @@ Spec file: `{{ change.home }}/artifacts/spec/{{ change.id }}.md`
 
 Read exactly these two artifacts — the newest plan and the spec. Do not read prior or future
 plan files: a requirement absent here may belong to another plan, and reading the whole
-series wastes your attention. You are read-only: do not write or modify any files.
+series wastes your attention. You are read-only with a single exception — the sole file you may write is `{{ change.home }}/deferred.md`, and only to append an untagged scope-out line as the backstop below describes. Do not write or modify any other file.
 
 ## Review the prescribed code like a diff (primary)
 
@@ -58,6 +58,18 @@ incomplete implementations:
   without the code, no "similar to Task N" shortcut standing in for real code.
 - **Scope** — the plan stays within the spec; no unrequested feature or
   over-engineering.
+- **Scope-out recorded** — every spec item the plan under review does not deliver is
+  either assigned to a later plan by the spec's `## Plan outline` or recorded on an
+  untagged `- [ ] DEFERRED …: … [scope: change]` line in `{{ change.home }}/deferred.md`.
+  An unrecorded scope-out of a spec-mandated item is a gap — apply the backstop below.
+
+## Backstop: record an unrecorded scope-out
+
+You are read-only with a single exception: `{{ change.home }}/deferred.md`. When you find a spec-mandated item the plan neither delivers nor assigns to a later plan by the spec's `## Plan outline`, and it is recorded on **no** untagged DEFERRED line, that is an unrecorded scope-out. If the finding is otherwise **non-blocking**, do not merely hope a rework lap records it — append the untagged line yourself, with source `plan-reviewer`:
+
+`- [ ] DEFERRED plan-reviewer: <item, citing the spec AC/scope ref> [scope: change]`
+
+This is the one file you may write and the only write you may make. `gap-check` still enforces the clause regardless; the untagged line makes the scope-out durable so the sweep can drain it and the user is never re-asked.
 
 ## The Decisions section
 

@@ -221,3 +221,99 @@ def test_threshold_renames_early_on_design_formation() -> None:
     assert "so they never rename" in body
     # The go-live rename survives as a fallback for straight-to-build.
     assert "a fallback for when you went" in body
+
+
+def test_spec_reviewer_blocks_on_scope_ac_cross_walk() -> None:
+    body = _agent_prompt("spec-reviewer")
+    # the cross-walk is a review check, run in both directions
+    assert "Scope↔AC cross-walk in both directions" in body
+    # a broad AC over a narrow Scope is a blocking Major inconsistency
+    assert "A broad AC over a narrow Scope" in body
+    assert "blocking inconsistency (Major)" in body
+
+
+def test_spec_finalizer_requires_checkable_ac_clauses_and_cross_walk() -> None:
+    body = _agent_prompt("spec-finalizer")
+    # independently-checkable clauses; compound criteria split or sub-lettered
+    assert "independently checkable clauses" in body
+    assert "sub-lettered" in body
+    # every AC clause names / maps to its delivering Scope item
+    assert "Scope item that delivers" in body
+    # both-directions cross-walk before finalizing
+    assert "cross-walk Scope↔AC in **both directions**" in body
+    # a too-narrow Scope is reconciled, not treated as a wrong AC
+    assert "Scope section is too narrow" in body
+    # the threshold-handoff checklist references the cross-walk so it fires on
+    # the standard adopt path (phrase appears in both the checklist and the section)
+    assert body.count("cross-walk Scope↔AC") >= 2
+
+
+def test_plan_writer_documents_untagged_scope_out_form() -> None:
+    body = _agent_prompt("plan-writer")
+    # scheduling a spec-mandated item into a later plan is legitimate
+    assert "Slicing spec-mandated work into a later plan is legitimate" in body
+    # the whether is never in play, only the when
+    assert "the **whether** is never in play, only the **when**" in body
+    # the required destination path, unique to this new section
+    assert (
+        "append the plain **untagged** DEFERRED line to `{{ change.home }}/deferred.md`"
+        in body
+    )
+    # the plain untagged form (no needs-decision marker), citing the spec ref
+    assert (
+        "DEFERRED plan-writer: <item, citing the spec AC/scope ref> [scope: change]"
+        in body
+    )
+    # prose in the Decisions section does not count — only the untagged line records it
+    assert "Prose in the plan's `## Decisions` section does not count" in body
+
+
+def test_plan_reviewer_backstops_unrecorded_scope_out() -> None:
+    body = _agent_prompt("plan-reviewer")
+    # the blanket read-only clause is reconciled to a deferred.md-only exception
+    assert "You are read-only with a single exception" in body
+    assert "You are read-only: do not write or modify any files." not in body
+    # the destination path, unique to the new carve-out clause
+    assert (
+        "the sole file you may write is `{{ change.home }}/deferred.md`"
+        in body
+    )
+    # the scope-out checklist item
+    assert "Scope-out recorded" in body
+    assert "assigned to a later plan by the spec's `## Plan outline`" in body
+    # the backstop write authority: append the untagged line itself, source plan-reviewer
+    assert "unrecorded scope-out" in body
+    assert (
+        "DEFERRED plan-reviewer: <item, citing the spec AC/scope ref> [scope: change]"
+        in body
+    )
+
+
+def test_gap_check_walks_acceptance_criteria_clause_by_clause() -> None:
+    body = _agent_prompt("gap-check")
+    # a dedicated AC-walk section, splitting compound criteria into checkable clauses
+    assert "Walk the acceptance criteria clause by clause" in body
+    assert "independently checkable clauses" in body
+    # verify every clause against committed code, at the production site not the compute site
+    assert "against the committed code" in body
+    assert "the line that emits or renders the behavior, not the line that computes it" in body
+    # deferred.md is corroboration only
+    assert "read `deferred.md` as corroboration only" in body
+    # dispositions: needs-decision parks/suppresses; any other unmet clause drives more_plans
+    assert "does not drive a plan" in body
+    # the unparked-unmet disposition drives a corrective plan (unique to the new bullet)
+    assert "corrective plan that covers it" in body
+    # sole lever unchanged: never writes deferred.md
+    assert "read `deferred.md` and never write it" in body
+
+
+def test_deferred_sweep_protects_spec_cited_untagged_items() -> None:
+    body = _agent_prompt("deferred-sweep")
+    # (a) the source note names plan-writer and plan-reviewer as originators
+    assert "plan-writer, and plan-reviewer append it" in body
+    # (b) a spec-cited untagged item may be fixed or escalated, never dismissed
+    assert "cites spec scope" in body
+    assert "never dismissed" in body
+    # (c) an item already landed by a corrective plan is closed fixed, not dismissed
+    assert "already landed by a corrective plan" in body
+    assert "close it `— fixed <sha>`" in body
