@@ -1,21 +1,13 @@
 # tests/test_resume_startup_spinner.py
 from __future__ import annotations
 
-import io
 import re
 
 from imp.cli.live_driver import LiveDriver
 from imp.cli.live_status import LiveStatus
-
-# The live-driver tests define _two_phase_events; re-import it here.
-from tests.test_live_driver import _two_phase_events
+from tests._event_fixtures import _TTY, _two_phase_events
 
 _CSI = re.compile(r"\x1b\[([0-9?]*)([A-Za-z])")
-
-
-class _TTY(io.StringIO):
-    def isatty(self) -> bool:
-        return True
 
 
 class Screen:

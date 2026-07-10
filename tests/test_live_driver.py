@@ -10,17 +10,12 @@ from imp.cli import palette as pal
 from imp.cli.live_driver import LiveDriver
 from imp.cli.live_status import LiveStatus
 from imp.cli.render_text import render_tree
-from tests._event_fixtures import ev
+from tests._event_fixtures import _TTY, _two_phase_events, ev
 
 
 class _Pipe(io.StringIO):
     def isatty(self) -> bool:
         return False
-
-
-class _TTY(io.StringIO):
-    def isatty(self) -> bool:
-        return True
 
 
 def _driver():
@@ -1511,25 +1506,6 @@ def test_multiphase_subagent_reentry_live_log_parity() -> None:
     assert sum(1 for ln in body if ln.strip() == "── implement phase ───") == 2  # re-entry rule
     end_rule = next(ln for ln in body if "implement phase complete" in ln)
     assert end_rule.startswith("implement phase complete")  # gray end line flush at column 0
-
-def _two_phase_events():
-    return [
-        {"type": "change_created", "agent_id": None, "payload": {"title": "t"},
-         "id": "e0", "timestamp": "2026-06-03T00:00:00+00:00"},
-        {"type": "step_started", "agent_id": None,
-         "payload": {"step": "draft", "kind": "branch", "phase": "spec"},
-         "id": "e1", "timestamp": "2026-06-03T00:00:00+00:00"},
-        {"type": "step_completed", "agent_id": None,
-         "payload": {"step": "draft", "kind": "branch", "action": {"verb": "continue"}},
-         "id": "e2", "timestamp": "2026-06-03T00:00:05+00:00"},
-        {"type": "step_started", "agent_id": None,
-         "payload": {"step": "refine", "kind": "branch", "phase": "plan"},
-         "id": "e3", "timestamp": "2026-06-03T00:00:05+00:00"},
-        {"type": "step_completed", "agent_id": None,
-         "payload": {"step": "refine", "kind": "branch", "action": {"verb": "continue"}},
-         "id": "e4", "timestamp": "2026-06-03T00:00:09+00:00"},
-    ]
-
 
 def _opening_intent_events():
     # opening_intent is emitted BEFORE the first step_started, so its

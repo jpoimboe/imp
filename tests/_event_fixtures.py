@@ -9,7 +9,32 @@ resolved route lives in step_completed.payload.action (a dict {verb, target?}).
 Applied set: results live in the sibling step_completed.payload.var_mutations."""
 from __future__ import annotations
 
+import io
 from typing import Any
+
+
+class _TTY(io.StringIO):
+    def isatty(self) -> bool:
+        return True
+
+
+def _two_phase_events():
+    return [
+        {"type": "change_created", "agent_id": None, "payload": {"title": "t"},
+         "id": "e0", "timestamp": "2026-06-03T00:00:00+00:00"},
+        {"type": "step_started", "agent_id": None,
+         "payload": {"step": "draft", "kind": "branch", "phase": "spec"},
+         "id": "e1", "timestamp": "2026-06-03T00:00:00+00:00"},
+        {"type": "step_completed", "agent_id": None,
+         "payload": {"step": "draft", "kind": "branch", "action": {"verb": "continue"}},
+         "id": "e2", "timestamp": "2026-06-03T00:00:05+00:00"},
+        {"type": "step_started", "agent_id": None,
+         "payload": {"step": "refine", "kind": "branch", "phase": "plan"},
+         "id": "e3", "timestamp": "2026-06-03T00:00:05+00:00"},
+        {"type": "step_completed", "agent_id": None,
+         "payload": {"step": "refine", "kind": "branch", "action": {"verb": "continue"}},
+         "id": "e4", "timestamp": "2026-06-03T00:00:09+00:00"},
+    ]
 
 
 def ev(eid: str, etype: str, agent_id: str | None = None, **payload: Any) -> dict[str, Any]:
