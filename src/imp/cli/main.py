@@ -2905,28 +2905,27 @@ def _search_list_line(hit: _SearchHit) -> str:
     return f"{hit.change_id}  {hit.title or '(untitled)'}  [{hit.zone}]"
 
 
-def _search_inflight(control: Path, query: str) -> list[tuple[str, str, str, str]]:
-    """In-flight Change rows (id, title, status, created) whose id, title, or
-    conversation prose contains `query` (case-insensitive) — the live
-    counterpart to the archive search, which never sees an un-archived Change."""
-    q = query.lower()
-    hits: list[tuple[str, str, str, str]] = []
-    for r in _status_rows(control):
-        if (q in r[0].lower() or q in r[4].lower()
-                or q in _inflight_prose(control, r[0]).lower()):
-            hits.append((r[0], r[4], r[1], r[5]))
-    return hits
-
-
 def _cmd_search(args: argparse.Namespace, _control: Path | None = None) -> int:
     control = _control if _control is not None else _control_root()
-    hits = _search_inflight(control, args.query) + archive_read.search_archive(
-        control, args.query)
+    zones = _selected_search_zones(args)
+    hits: list[_SearchHit] = []
+    if "active" in zones:
+        hits += _search_active(control, args.query)
+    if "backlog" in zones:
+        hits += _search_backlog(control, args.query)
+    if "archive" in zones:
+        hits += _search_archived(control, args.query)
     if not hits:
         print(f"No changes match {args.query!r}.")
         return 0
-    for change_id, title, status, _created in hits:
-        print(f"{change_id}  {title or '(untitled)'}  [{status or '-'}]")
+    if args.list:
+        lines = [_search_list_line(h) for h in hits]
+    else:
+        color = should_use_color(sys.stdout)
+        lines = []
+        for h in hits:
+            lines.extend(_render_search_hit(h, args.query, color=color))
+    _page_or_print(lines, no_pager=args.no_pager)
     return 0
 
 
@@ -3181,14 +3180,31 @@ def _build_parser() -> argparse.ArgumentParser:
 
     p_search = sub.add_parser(
         "search",
-        help="Search archived changes by title or id.",
+        help="Search changes by id, title, or conversation content.",
         description=(
-            "Search the archive (completed, abandoned, and left conversations) "
-            "for changes whose title or id contains the query substring."),
+            "Search active (in-flight + drafts), backlog, and archived changes "
+            "for the query as a case-insensitive substring of a change's id, "
+            "title, or conversation content. With no zone flag, all three zones "
+            "are searched."),
     )
     p_search.add_argument(
         "query", metavar="QUERY",
-        help="Substring matched case-insensitively against a change's title or id.")
+        help="Substring matched case-insensitively against id, title, and content.")
+    p_search.add_argument(
+        "--active", action="store_true",
+        help="Search in-flight and draft changes.")
+    p_search.add_argument(
+        "--backlog", action="store_true",
+        help="Search backlog changes.")
+    p_search.add_argument(
+        "--archived", action="store_true",
+        help="Search archived (completed, abandoned, left) changes.")
+    p_search.add_argument(
+        "-l", "--list", action="store_true", dest="list",
+        help="One terse line per change (id, title, zone); no excerpts.")
+    p_search.add_argument(
+        "--no-pager", action="store_true",
+        help="Disable the pager even when stdout is a TTY.")
     p_search.set_defaults(func=_cmd_search)
 
     p_config = sub.add_parser(
