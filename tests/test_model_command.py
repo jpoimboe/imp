@@ -97,3 +97,42 @@ def test_print_model_roster_threads_cache_and_current(monkeypatch, tmp_path) -> 
     # the resolved current step's model is marked current
     assert any("Current: claude_code · opus" in line for line in out)
     assert any("  claude_code" in line for line in out)
+
+
+def test_validate_model_available_rejects_unavailable_provider() -> None:
+    from imp.cli.model_command import validate_model_available
+
+    reason = validate_model_available(
+        "openai:gpt-5.5", available=["anthropic", "claude_code"])
+    assert reason is not None
+    assert "openai" in reason
+    assert "not available" in reason
+
+
+def test_validate_model_available_allows_available_provider() -> None:
+    from imp.cli.model_command import validate_model_available
+
+    assert validate_model_available(
+        "anthropic:claude-fable-5", available=["anthropic"]) is None
+
+
+def test_validate_model_available_allows_bare_model() -> None:
+    from imp.cli.model_command import validate_model_available
+
+    # No `provider:` — nothing to check; passes through regardless of `available`.
+    assert validate_model_available(
+        "claude-fable-5", available=["anthropic"]) is None
+
+
+def test_validate_model_arg_still_rejects_unavailable_via_delegation(
+    monkeypatch,
+) -> None:
+    # The existing change-based entry keeps its behavior after the refactor.
+    import imp.cli.model_command as mod
+    from imp.cli.model_command import validate_model_arg
+
+    monkeypatch.setattr(mod, "_available_for_change", lambda change: ["anthropic"])
+    reason = validate_model_arg("openai:gpt-5.5", change=object())
+    assert reason is not None
+    assert "openai" in reason
+    assert "not available" in reason

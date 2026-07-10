@@ -67,14 +67,16 @@ def _available_for_change(change: Any) -> list[str]:
     return available_providers(config)
 
 
+def validate_model_available(arg: str, *, available: list[str]) -> str | None:
+    provider = parse_model_arg(arg).provider
+    if provider is not None and provider not in available:
+        return f"provider {provider!r} is not available — nothing changed"
+    return None
+
+
 def validate_model_arg(arg: str, *, change: Any) -> str | None:
     try:
-        parsed = parse_model_arg(arg)
+        parse_model_arg(arg)
     except ModelArgError as exc:
         return str(exc)
-    if parsed.provider is None:
-        return None
-    if parsed.provider not in _available_for_change(change):
-        return (f"provider {parsed.provider!r} is not available — "
-                f"nothing changed")
-    return None
+    return validate_model_available(arg, available=_available_for_change(change))
