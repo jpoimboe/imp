@@ -11,7 +11,7 @@ import pytest
 
 from imp.cli.main import main
 from imp.engine import archive, worktree
-from imp.engine.change import Change
+from imp.engine.quest import Quest
 from imp.engine.state import State
 from tests.conftest import _seed_control
 
@@ -31,8 +31,8 @@ def _git_wip_present(control: Path, quest_id: str) -> bool:
     )
 
 
-def _seed_with_artifacts(control: Path, quest_id: str, title: str) -> Change:
-    ch = Change.create(control, title=title, quest_id=quest_id, base_branch="main")
+def _seed_with_artifacts(control: Path, quest_id: str, title: str) -> Quest:
+    ch = Quest.create(control, title=title, quest_id=quest_id, base_branch="main")
     spec = ch.quest_dir / "artifacts" / "spec"
     spec.mkdir(parents=True)
     (spec / f"{quest_id}.md").write_text("# SPEC BODY\n")
@@ -152,7 +152,7 @@ def test_show_spec_falls_back_after_archive(
         quest_json_path=ch.quest_dir / "quest.json",
         state_json_path=ch.state_dir / "state.json",
     )
-    # The per-Change artifact ref is RETAINED at archive (spec AC 3).
+    # The per-Quest artifact ref is RETAINED at archive (spec AC 3).
     assert _git_wip_present(tmp_path, _ID)
     worktree.remove_worktree(tmp_path, _ID)
     assert not (tmp_path / ".imp" / "worktrees" / _ID).exists()
@@ -180,7 +180,7 @@ def test_show_backlog_default_renders_card(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _seed_control(tmp_path)
-    Change.create_draft(
+    Quest.create_draft(
         tmp_path,
         title="Add OAuth",
         quest_id="2026-06-16-bkg111",
@@ -200,7 +200,7 @@ def test_show_backlog_status_prints_bare_word(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _seed_control(tmp_path)
-    Change.create_draft(
+    Quest.create_draft(
         tmp_path,
         title="Add OAuth",
         quest_id="2026-06-16-bkg111",
@@ -220,7 +220,7 @@ def test_show_backlog_spec_errors(
 
     _seed_control(tmp_path)
     monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
-    Change.create_draft(
+    Quest.create_draft(
         tmp_path,
         title="Add OAuth",
         quest_id="2026-06-16-bkg111",
@@ -317,7 +317,7 @@ def test_show_step_line_prints_human_labels_not_raw_slugs(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _seed_control(tmp_path)
-    ch = Change.create(tmp_path, title="Feat", quest_id="shwstp", base_branch="main")
+    ch = Quest.create(tmp_path, title="Feat", quest_id="shwstp", base_branch="main")
     st = State.load(ch.state_dir)
     st.step = "write_spec"
     st.step_label = "writing spec"  # label differs from the raw slug
@@ -350,7 +350,7 @@ def test_show_step_line_omits_phase_when_no_phase_label(
     # No step_started event carries a phase_label -> show the step label alone,
     # with no raw phase slug and no leading separator.
     _seed_control(tmp_path)
-    ch = Change.create(tmp_path, title="Feat", quest_id="shwnop", base_branch="main")
+    ch = Quest.create(tmp_path, title="Feat", quest_id="shwnop", base_branch="main")
     st = State.load(ch.state_dir)
     st.step = "write_spec"
     st.step_label = "writing spec"
@@ -368,7 +368,7 @@ def test_show_step_line_omits_stale_phase_label_across_phase_change(
     # A prior labeled phase then a current UNLABELED phase (its step_started
     # carries no phase_label): the stale prior label must not bleed forward.
     _seed_control(tmp_path)
-    ch = Change.create(tmp_path, title="Feat", quest_id="shwstl", base_branch="main")
+    ch = Quest.create(tmp_path, title="Feat", quest_id="shwstl", base_branch="main")
     st = State.load(ch.state_dir)
     st.step = "verify"
     st.step_label = "verifying"
@@ -410,7 +410,7 @@ def test_show_step_line_truncates_to_terminal_width(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _seed_control(tmp_path)
-    ch = Change.create(tmp_path, title="Feat", quest_id="shwtrn", base_branch="main")
+    ch = Quest.create(tmp_path, title="Feat", quest_id="shwtrn", base_branch="main")
     st = State.load(ch.state_dir)
     st.step = "write_spec"
     st.step_label = "writing spec " + "x" * 200  # far wider than the 80-col test terminal
@@ -427,7 +427,7 @@ def test_show_status_stays_bare_word_not_labels(
 ) -> None:
     # `imp show <id> status` is the parseable form: bare status word only.
     _seed_control(tmp_path)
-    ch = Change.create(tmp_path, title="Feat", quest_id="shwsta", base_branch="main")
+    ch = Quest.create(tmp_path, title="Feat", quest_id="shwsta", base_branch="main")
     st = State.load(ch.state_dir)
     st.step = "write_spec"
     st.step_label = "writing spec"
@@ -496,7 +496,7 @@ def test_show_abandoned_backlog_is_not_a_live_brief(
 
     _seed_control(tmp_path)
     monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
-    change = Change.create_draft(
+    change = Quest.create_draft(
         tmp_path,
         title="Add OAuth",
         quest_id="2026-06-16-bkg111",
@@ -680,7 +680,7 @@ def test_filter_events_non_positive_limit_returns_all() -> None:
     assert len(_filter_events(events, limit=-1)) == 5
 
 
-def _seed_events(ch: Change, events: list[dict]) -> None:
+def _seed_events(ch: Quest, events: list[dict]) -> None:
     with ch.events_path.open("a", encoding="utf-8") as fh:
         for e in events:
             fh.write(json.dumps(e) + "\n")
@@ -716,7 +716,7 @@ def test_show_events_full_prints_raw_json(
                      "content": [{"type": "text", "text": "hi"}]}},
     ])
     # --type isolates the seeded event from the change_created event that
-    # Change.create writes; --full then renders it as raw JSON via full_line.
+    # Quest.create writes; --full then renders it as raw JSON via full_line.
     out = _run(monkeypatch, tmp_path, "show", _ID, "events",
                "--type", "user_message", "--full")
     lines = [ln for ln in out.splitlines() if ln]

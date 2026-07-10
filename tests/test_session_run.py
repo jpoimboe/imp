@@ -16,7 +16,7 @@ from imp.cli.session_run import (
 )
 from imp.cli.signals import InterruptCoordinator
 from imp.engine import archive
-from imp.engine.change import Change
+from imp.engine.quest import Quest
 from imp.engine.executor import RunResult
 from imp.engine.state import State
 from imp.remote.session.discover import session_socket_path
@@ -29,8 +29,8 @@ def anyio_backend() -> str:
     return "asyncio"
 
 
-def _make_change(tmp_path: Path, quest_id: str) -> Change:
-    return Change(
+def _make_change(tmp_path: Path, quest_id: str) -> Quest:
+    return Quest(
         id=quest_id,
         title="T",
         base_branch="main",
@@ -324,7 +324,7 @@ async def test_run_session_client_threads_resume_into_attach(
     captured: dict[str, object] = {}
 
     def _fake_build(
-        ch: Change, *, resume: bool = False,
+        ch: Quest, *, resume: bool = False,
         non_interactive: bool = False, autonomous: bool = False,
         lease: bool = False, model: str | None = None,
     ) -> Any:
@@ -437,7 +437,7 @@ async def test_run_session_client_forwards_new_leave_mode_to_terminal(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _seed_control(tmp_path)
-    change = Change.create_draft(
+    change = Quest.create_draft(
         tmp_path, title="Draft", quest_id="d1", base_branch="main")
     change.event_log().append(
         agent_id=None, type="user_message",
@@ -467,7 +467,7 @@ async def test_run_session_client_forwards_chat_leave_mode_to_terminal(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _seed_control(tmp_path)
-    change = Change.create_draft(
+    change = Quest.create_draft(
         tmp_path, title="Draft", quest_id="c1", base_branch="main")
     change.event_log().append(
         agent_id=None, type="opening_intent", payload={"text": "a question"})
@@ -677,7 +677,7 @@ async def test_run_session_client_threads_autonomous_into_attach(
     captured: dict[str, object] = {}
 
     def _fake_build(
-        ch: Change, *, resume: bool = False,
+        ch: Quest, *, resume: bool = False,
         non_interactive: bool = False, autonomous: bool = False,
         lease: bool = False, model: str | None = None,
     ) -> Any:
@@ -751,7 +751,7 @@ def test_infer_session_result_completed_from_archive_when_home_reaped(tmp_path: 
         tmp_path, quest_id, events_path=events_file,
         quest_json_path=quest_json, state_json_path=state_json)
 
-    # Build the Change WITHOUT creating the live home/state dir — State.load raises
+    # Build the Quest WITHOUT creating the live home/state dir — State.load raises
     # FileNotFoundError, forcing the archive fallback branch.
     change = _make_change(tmp_path, quest_id)
     assert not change.state_dir.exists()
@@ -763,7 +763,7 @@ async def test_run_session_client_wires_seed_pending_reply_as_local_echo(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _seed_control(tmp_path)
-    change = Change.create_draft(
+    change = Quest.create_draft(
         tmp_path, title="Draft", quest_id="e1", base_branch="main")
     change.event_log().append(
         agent_id=None, type="user_message",

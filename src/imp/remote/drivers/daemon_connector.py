@@ -1,4 +1,4 @@
-"""imp-daemon-connector — bridges a Change's NDJSON stdio to the per-repo daemon socket.
+"""imp-daemon-connector — bridges a Quest's NDJSON stdio to the per-repo daemon socket.
 
 The connector owns daemon liveness. It polls for the socket, attaches whenever the
 daemon is up, and re-attaches across daemon restarts. While the daemon is down it

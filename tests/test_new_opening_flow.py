@@ -46,7 +46,7 @@ def stub_new(monkeypatch, tmp_path):
     monkeypatch.setattr(main, "_editing_mode", lambda *a, **k: "emacs")
     monkeypatch.setattr(main, "new_quest_id", lambda existing_stems=frozenset(): "z9y8x7")
     monkeypatch.setattr(
-        main.Change, "create_draft",
+        main.Quest, "create_draft",
         staticmethod(lambda *a, **k: SimpleNamespace(
             id="z9y8x7", title="", workflow_dir=tmp_path, seed_opening=None,
             set_seed_opening=lambda text: None)))
@@ -75,7 +75,7 @@ async def test_new_persists_finalized_opening_intent(
             id="z9y8x7", title="", workflow_dir=tmp_path, seed_opening=None,
             set_seed_opening=lambda text: recorded.__setitem__("text", text))
 
-    monkeypatch.setattr(m.Change, "create_draft", staticmethod(_make_draft))
+    monkeypatch.setattr(m.Quest, "create_draft", staticmethod(_make_draft))
 
     class _FakePrompt:
         def __init__(self, **kwargs: object) -> None: ...

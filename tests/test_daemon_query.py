@@ -4,14 +4,14 @@ import json
 import os
 from pathlib import Path
 
-from imp.engine.change import LAYOUT_VERSION
+from imp.engine.quest import LAYOUT_VERSION
 from imp.remote.daemon import discover
 from imp.remote.drivers.telegram import event_body
 from tests.conftest import _seed_control
 
 
 def _seed_change(tmp_path: Path) -> str:
-    """Create a minimal live Change worktree under tmp_path and return its id."""
+    """Create a minimal live Quest worktree under tmp_path and return its id."""
     _seed_control(tmp_path)
     cid = "2026-06-14-aaaaaa"
     cdir = tmp_path / ".imp" / "quests" / cid

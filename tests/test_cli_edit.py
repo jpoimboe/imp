@@ -8,18 +8,18 @@ import pytest
 
 from imp.cli import main
 from imp.engine import worktree
-from imp.engine.change import Change
+from imp.engine.quest import Quest
 from tests.conftest import _seed_control
 
 
-def _make_draft(control: Path, quest_id: str, *, origin: str = "draft") -> Change:
+def _make_draft(control: Path, quest_id: str, *, origin: str = "draft") -> Quest:
     base = worktree.current_branch(control)
-    return Change.create_draft(
+    return Quest.create_draft(
         control, title="Original", quest_id=quest_id, base_branch=base,
         origin=origin)
 
 
-def _meta(change: Change) -> dict:
+def _meta(change: Quest) -> dict:
     return json.loads((change.quest_dir / "quest.json").read_text())
 
 
@@ -36,7 +36,7 @@ def test_edit_title_rewrites_title(tmp_path: Path, monkeypatch) -> None:
     _make_draft(tmp_path, "2026-06-24-edit01")
     rc = main._cmd_edit(_edit_args("2026-06-24-edit01", title="Renamed"))
     assert rc == 0
-    assert Change.load(tmp_path, "2026-06-24-edit01").title == "Renamed"
+    assert Quest.load(tmp_path, "2026-06-24-edit01").title == "Renamed"
 
 
 def test_edit_backlog_moves_to_idea_zone(tmp_path: Path, monkeypatch) -> None:
@@ -45,7 +45,7 @@ def test_edit_backlog_moves_to_idea_zone(tmp_path: Path, monkeypatch) -> None:
     _make_draft(tmp_path, "2026-06-24-edit02", origin="draft")
     rc = main._cmd_edit(_edit_args("2026-06-24-edit02", backlog=True))
     assert rc == 0
-    assert Change.load(tmp_path, "2026-06-24-edit02").origin == "idea"
+    assert Quest.load(tmp_path, "2026-06-24-edit02").origin == "idea"
 
 
 def test_edit_active_moves_to_draft_zone(tmp_path: Path, monkeypatch) -> None:
@@ -54,7 +54,7 @@ def test_edit_active_moves_to_draft_zone(tmp_path: Path, monkeypatch) -> None:
     _make_draft(tmp_path, "2026-06-24-edit03", origin="idea")
     rc = main._cmd_edit(_edit_args("2026-06-24-edit03", active=True))
     assert rc == 0
-    assert Change.load(tmp_path, "2026-06-24-edit03").origin == "draft"
+    assert Quest.load(tmp_path, "2026-06-24-edit03").origin == "draft"
 
 
 def test_edit_zone_rejected_for_materialized(
@@ -69,7 +69,7 @@ def test_edit_zone_rejected_for_materialized(
     rc = main._cmd_edit(_edit_args("2026-06-24-edit04", backlog=True))
     assert rc == 2
     assert "imp:" in capsys.readouterr().err
-    assert Change.load(tmp_path, "2026-06-24-edit04").origin == "draft"
+    assert Quest.load(tmp_path, "2026-06-24-edit04").origin == "draft"
 
 
 def test_edit_depends_on_replaces_list(tmp_path: Path, monkeypatch) -> None:
@@ -78,7 +78,7 @@ def test_edit_depends_on_replaces_list(tmp_path: Path, monkeypatch) -> None:
     _make_draft(tmp_path, "2026-06-24-edit05")
     rc = main._cmd_edit(_edit_args("2026-06-24-edit05", depends_on=["A", "B"]))
     assert rc == 0
-    assert _meta(Change.load(tmp_path, "2026-06-24-edit05"))["depends_on"] == ["A", "B"]
+    assert _meta(Quest.load(tmp_path, "2026-06-24-edit05"))["depends_on"] == ["A", "B"]
 
 
 def test_edit_clear_deps_empties_list(tmp_path: Path, monkeypatch) -> None:
@@ -88,7 +88,7 @@ def test_edit_clear_deps_empties_list(tmp_path: Path, monkeypatch) -> None:
     change.set_depends_on(["A"])
     rc = main._cmd_edit(_edit_args("2026-06-24-edit06", clear_deps=True))
     assert rc == 0
-    assert _meta(Change.load(tmp_path, "2026-06-24-edit06"))["depends_on"] == []
+    assert _meta(Quest.load(tmp_path, "2026-06-24-edit06"))["depends_on"] == []
 
 
 def test_edit_no_flags_is_error(tmp_path: Path, monkeypatch, capsys) -> None:
@@ -98,7 +98,7 @@ def test_edit_no_flags_is_error(tmp_path: Path, monkeypatch, capsys) -> None:
     rc = main._cmd_edit(_edit_args("2026-06-24-edit07"))
     assert rc == 2
     assert "imp:" in capsys.readouterr().err
-    assert Change.load(tmp_path, "2026-06-24-edit07").title == "Original"
+    assert Quest.load(tmp_path, "2026-06-24-edit07").title == "Original"
 
 
 def test_edit_combined_title_zone_and_deps(tmp_path: Path, monkeypatch) -> None:
@@ -108,7 +108,7 @@ def test_edit_combined_title_zone_and_deps(tmp_path: Path, monkeypatch) -> None:
     rc = main._cmd_edit(_edit_args(
         "2026-06-24-edit08", title="Combined", backlog=True, depends_on=["X"]))
     assert rc == 0
-    change = Change.load(tmp_path, "2026-06-24-edit08")
+    change = Quest.load(tmp_path, "2026-06-24-edit08")
     assert change.title == "Combined"
     assert change.origin == "idea"
     assert _meta(change)["depends_on"] == ["X"]
@@ -127,7 +127,7 @@ def test_edit_materialized_title_and_zone_rejects_whole_invocation(
         _edit_args("2026-06-24-edit09", title="Renamed", backlog=True))
     assert rc == 2
     assert "imp:" in capsys.readouterr().err
-    reloaded = Change.load(tmp_path, "2026-06-24-edit09")
+    reloaded = Quest.load(tmp_path, "2026-06-24-edit09")
     assert reloaded.title == "Original"
     assert reloaded.origin == "draft"
 

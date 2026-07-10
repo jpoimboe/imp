@@ -12,7 +12,7 @@ from typing import Any
 import anyio
 import pytest
 
-from imp.engine.change import Change
+from imp.engine.quest import Quest
 from imp.engine.executor import RunResult, run_change
 from imp.engine.state import State
 
@@ -26,7 +26,7 @@ class EngineBoom(Exception):
     """Stand-in for an engine bug raised during dispatch."""
 
 
-def _make_change(root: Path) -> Change:
+def _make_change(root: Path) -> Quest:
     from imp.engine.loader import load_workflow
     from imp.providers.effective import load_effective_config
 
@@ -69,7 +69,7 @@ def _make_change(root: Path) -> Change:
         status="running", vars=dict(workflow.vars.defaults()), loop_counts={},
     ).save(quest_dir / "state")
 
-    change = Change(
+    change = Quest(
         id="c", title="t", base_branch="main",
         control_root=root, project_root=root, quest_dir=quest_dir,
     )

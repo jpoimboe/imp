@@ -395,7 +395,7 @@ def run_init(
             test_block = (
                 "\n# Fast test gate: lint + typecheck + fast tests, run after each\n"
                 "# implement loop to catch regressions. Empty string opts out.\n"
-                "# The slow gate (test_cmd_slow) runs the full suite once per Change\n"
+                "# The slow gate (test_cmd_slow) runs the full suite once per Quest\n"
                 "# and falls back to test_cmd_fast when unset. Timeouts default to\n"
                 "# 120s (fast) / 300s (slow) — override with test_cmd_fast_timeout /\n"
                 "# test_cmd_slow_timeout.\n"

@@ -18,13 +18,13 @@ from pathlib import Path
 import pytest
 
 from imp.agents.runner import AgentInvocation, AgentRunner, Event
-from imp.engine.change import Change
+from imp.engine.quest import Quest
 from imp.engine.executor import RunResult, run_change
 from imp.engine.state import State
 
 
-def _make_change(root: Path, *, quest_id: str = "test-change", title: str = "t") -> Change:
-    """Construct a Change directly on disk without git worktrees. The workflow is
+def _make_change(root: Path, *, quest_id: str = "test-change", title: str = "t") -> Quest:
+    """Construct a Quest directly on disk without git worktrees. The workflow is
     read from root/imp/workflows/imp (the branch-dir model — workflow_dir =
     project_root/imp/workflows/imp), so there is no snapshot copy to make."""
     from imp.engine.loader import load_workflow
@@ -45,7 +45,7 @@ def _make_change(root: Path, *, quest_id: str = "test-change", title: str = "t")
 
     workflow = load_workflow(wf_dir, configured_tiers=configured_tiers)
     flat = workflow.flat_steps()
-    # NOTE: production Change.create uses apply_var_overrides(...); this
+    # NOTE: production Quest.create uses apply_var_overrides(...); this
     # characterization fixture keeps the simpler defaults() form (unchanged from
     # the prior fixture) — the exhaustion invariant doesn't depend on overrides.
     State(
@@ -53,7 +53,7 @@ def _make_change(root: Path, *, quest_id: str = "test-change", title: str = "t")
         status="running", vars=dict(workflow.vars.defaults()), loop_counts={},
     ).save(quest_dir / "state")
 
-    change = Change(
+    change = Quest(
         id=quest_id, title=title, base_branch="main",
         control_root=root, project_root=root, quest_dir=quest_dir,
     )

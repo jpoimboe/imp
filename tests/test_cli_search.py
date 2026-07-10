@@ -9,7 +9,7 @@ import pytest
 
 from imp.cli.main import _build_parser, _cmd_search, _command_names
 from imp.engine import archive
-from imp.engine.change import Change
+from imp.engine.quest import Quest
 from tests.conftest import _seed_control
 
 
@@ -85,7 +85,7 @@ def test_cmd_search_no_match_prints_notice(tmp_path: Path, capsys) -> None:
 
 def test_cmd_search_includes_matching_inflight_change(tmp_path: Path, capsys) -> None:
     _seed_control(tmp_path)
-    Change.create(tmp_path, title="Dark mode inflight",
+    Quest.create(tmp_path, title="Dark mode inflight",
                   quest_id="liveid", base_branch="main")
     rc = _cmd_search(_ns("dark"), tmp_path)
     out = capsys.readouterr().out
@@ -96,7 +96,7 @@ def test_cmd_search_includes_matching_inflight_change(tmp_path: Path, capsys) ->
 
 def test_cmd_search_includes_matching_backlog_change(tmp_path: Path, capsys) -> None:
     _seed_control(tmp_path)
-    Change.create_draft(
+    Quest.create_draft(
         tmp_path, title="Flaky tracker", quest_id="bk1", base_branch="main",
         origin="idea", seed_opening="Flaky tracker\n\ntracking test_widget_timeout")
     rc = _cmd_search(_ns("test_widget_timeout"), tmp_path)
@@ -108,9 +108,9 @@ def test_cmd_search_includes_matching_backlog_change(tmp_path: Path, capsys) -> 
 
 def test_cmd_search_zone_flag_scopes_to_backlog_only(tmp_path: Path, capsys) -> None:
     _seed_control(tmp_path)
-    Change.create(tmp_path, title="Dark active", quest_id="darkactive",
+    Quest.create(tmp_path, title="Dark active", quest_id="darkactive",
                   base_branch="main")
-    Change.create_draft(
+    Quest.create_draft(
         tmp_path, title="Dark backlog", quest_id="darkbk", base_branch="main",
         origin="idea", seed_opening="Dark backlog")
     _archive(tmp_path, "darkarc", "Dark archived")
@@ -123,7 +123,7 @@ def test_cmd_search_zone_flag_scopes_to_backlog_only(tmp_path: Path, capsys) -> 
 
 def test_cmd_search_default_shows_excerpt_but_list_is_terse(tmp_path: Path, capsys) -> None:
     _seed_control(tmp_path)
-    live = Change.create(tmp_path, title="Quiet chat", quest_id="liveid",
+    live = Quest.create(tmp_path, title="Quiet chat", quest_id="liveid",
                          base_branch="main")
     live.events_path.write_text(_user_msg_line("please wire a 300s deadline soon"))
 
@@ -152,9 +152,9 @@ def test_cmd_search_routes_through_pager(tmp_path: Path) -> None:
 
 def test_cmd_search_composes_two_zone_flags(tmp_path: Path, capsys) -> None:
     _seed_control(tmp_path)
-    Change.create(tmp_path, title="Dark active", quest_id="darkactive",
+    Quest.create(tmp_path, title="Dark active", quest_id="darkactive",
                   base_branch="main")
-    Change.create_draft(
+    Quest.create_draft(
         tmp_path, title="Dark backlog", quest_id="darkbk", base_branch="main",
         origin="idea", seed_opening="Dark backlog")
     _archive(tmp_path, "darkarc", "Dark archived")

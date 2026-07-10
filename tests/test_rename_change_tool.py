@@ -5,12 +5,12 @@ import pytest
 
 from imp.agents.tools import get_registry
 from imp.agents.tools.context import ToolContext
-from imp.engine.change import Change
+from imp.engine.quest import Quest
 from imp.engine.state import State
 from tests.conftest import _seed_control
 
 
-def _ctx(ch: Change, state: State) -> ToolContext:
+def _ctx(ch: Quest, state: State) -> ToolContext:
     ctx = ToolContext(project_root=ch.project_root,
                       events_path=ch.events_path)
     ctx.change = ch
@@ -19,9 +19,9 @@ def _ctx(ch: Change, state: State) -> ToolContext:
     return ctx
 
 
-def _make(tmp_path: Path, title: str = "") -> tuple[Change, State]:
+def _make(tmp_path: Path, title: str = "") -> tuple[Quest, State]:
     _seed_control(tmp_path)
-    ch = Change.create(tmp_path, title=title,
+    ch = Quest.create(tmp_path, title=title,
                        quest_id="bbb111", base_branch="main")
     return ch, State.load(ch.state_dir)
 

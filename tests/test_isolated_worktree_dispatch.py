@@ -11,7 +11,7 @@ from imp.agents.runner import QuestContext
 from imp.agents.subagents import dispatch_task
 from imp.agents.tools.context import ToolContext
 from imp.cli.signals import InterruptCoordinator
-from imp.engine.change import Change
+from imp.engine.quest import Quest
 from imp.engine.types import AgentDef, OutputSchema, SourceLoc
 from tests.conftest import _git, _seed_control
 
@@ -59,13 +59,13 @@ def _spawn(events, *, on_run=None, capture=None):
     return _s
 
 
-def _make_change(tmp_path: Path) -> Change:
+def _make_change(tmp_path: Path) -> Quest:
     _seed_control(tmp_path)
-    return Change.create(tmp_path, title="T", quest_id="prb001",
+    return Quest.create(tmp_path, title="T", quest_id="prb001",
                          base_branch="main")
 
 
-def _ctx(tmp_path: Path, change: Change, *, name: str, agent: AgentDef,
+def _ctx(tmp_path: Path, change: Quest, *, name: str, agent: AgentDef,
          spawn) -> ToolContext:
     ctx = ToolContext(project_root=change.project_root,
                       events_path=change.events_path)

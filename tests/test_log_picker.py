@@ -91,7 +91,7 @@ def test_cmd_log_tty_no_token_routes_to_picker(
 
     def fake_load(control, quest_id):
         seen["id"] = quest_id
-        return None  # → "no such Change" rc 2, but proves the routing
+        return None  # → "no such Quest" rc 2, but proves the routing
 
     monkeypatch.setattr(m, "_load_events_for_id", fake_load)
     rc = m._cmd_log(argparse.Namespace(token=None, full=False, follow=False))

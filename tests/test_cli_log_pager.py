@@ -16,7 +16,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from imp.engine.change import LAYOUT_VERSION
+from imp.engine.quest import LAYOUT_VERSION
 
 
 def _fake_tty_stdout(monkeypatch: pytest.MonkeyPatch, *, isatty: bool) -> None:
@@ -360,7 +360,7 @@ def test_keyboard_interrupt_in_wait_does_not_raise(
 
 
 def _make_change_worktree(control: Path, slug: str, title: str) -> Path:
-    """Create a minimal on-disk Change home under control/.imp/quests/<slug>
+    """Create a minimal on-disk Quest home under control/.imp/quests/<slug>
     with one rendered step (phase "spec") so the narrative reaches output."""
     quest_dir = control / ".imp" / "quests" / slug
     quest_dir.mkdir(parents=True)
@@ -512,15 +512,15 @@ def test_main_log_backlog_routes_through_pager(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """A backlog Change (no conversation) renders its card through
+    """A backlog Quest (no conversation) renders its card through
     _page_or_print on a TTY (Popen once, cleanup ran)."""
     import imp.cli.main as m
-    from imp.engine.change import Change
+    from imp.engine.quest import Quest
     from tests.conftest import _seed_control
 
     slug = "backlog-only"
     _seed_control(tmp_path)
-    Change.create_draft(
+    Quest.create_draft(
         tmp_path, title="queued work", quest_id=slug, base_branch="main",
         origin="followup", seed_opening="queued work")
     monkeypatch.chdir(tmp_path)

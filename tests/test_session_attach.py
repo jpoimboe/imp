@@ -8,7 +8,7 @@ from typing import Any
 import anyio
 import pytest
 
-from imp.engine.change import Change
+from imp.engine.quest import Quest
 from imp.remote.session.attach import attach_or_spawn, build_session_attach, spawn_session_daemon
 from imp.remote.session.discover import session_socket_path
 from imp.remote.session.reply import deliver_session_reply
@@ -20,8 +20,8 @@ def anyio_backend() -> str:
     return "asyncio"
 
 
-def _make_change(tmp_path: Path, quest_id: str) -> Change:
-    return Change(
+def _make_change(tmp_path: Path, quest_id: str) -> Quest:
+    return Quest(
         id=quest_id,
         title="T",
         base_branch="main",
@@ -69,7 +69,7 @@ async def test_attaches_to_resident_daemon_without_spawning(tmp_path: Path) -> N
     change = _make_change(tmp_path, "2026-06-15-res")
     sock = str(session_socket_path(change.control_root, change.id))
     server = SessionSocket(sock)
-    spawned: list[Change] = []
+    spawned: list[Quest] = []
     async with anyio.create_task_group() as tg:
         await server.open()
         tg.start_soon(server.serve)
@@ -98,9 +98,9 @@ async def test_spawns_then_attaches_when_no_daemon_resident(tmp_path: Path) -> N
             holder["server"] = server
             await server.serve()
 
-        spawned: list[Change] = []
+        spawned: list[Quest] = []
 
-        def fake_spawn(ch: Change) -> None:
+        def fake_spawn(ch: Quest) -> None:
             spawned.append(ch)
             tg.start_soon(_start_server)
 
@@ -161,7 +161,7 @@ async def test_build_session_attach_uses_resident_daemon_without_spawning(
 
     change = _make_change(tmp_path, "2026-06-15-warm")
     sock = str(session_socket_path(change.control_root, change.id))
-    spawned: list[Change] = []
+    spawned: list[Quest] = []
     monkeypatch.setattr(
         attach_mod, "spawn_session_daemon",
         lambda ch, *, resume=False,
@@ -211,7 +211,7 @@ async def test_build_session_attach_threads_resume_into_spawn(
             await server.serve()
 
         def fake_spawn(
-            ch: Change, *, resume: bool = False,
+            ch: Quest, *, resume: bool = False,
             non_interactive: bool = False, autonomous: bool = False,
             model: str | None = None,
         ) -> None:

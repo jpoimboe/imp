@@ -127,7 +127,7 @@ def step_divider(event: Mapping[str, Any]) -> str | None:
 def header_line(event: Mapping[str, Any]) -> str:
     """The per-message header 'id · title · time'; time is the event's own send
     time. Collapses to 'id · time' when no title exists yet or the title just equals
-    the id, so a not-yet-renamed Change never renders 'id · id · time'."""
+    the id, so a not-yet-renamed Quest never renders 'id · id · time'."""
     change = event.get("change") or {}
     cid = str(change.get("id") or "")
     title = str(change.get("title") or "")

@@ -4,7 +4,7 @@ import json
 import os
 from pathlib import Path
 
-from imp.engine.change import LAYOUT_VERSION, Change
+from imp.engine.quest import LAYOUT_VERSION, Quest
 from tests.conftest import _seed_control
 
 _GOLDEN = Path(__file__).parent / "fixtures" / "layout_guard_golden.txt"
@@ -29,7 +29,7 @@ def test_observed_layout_matches_golden_and_version_is_paired(tmp_path: Path) ->
     golden_version = int(header.split("LAYOUT_VERSION:")[1].strip())
 
     _seed_control(tmp_path)
-    ch = Change.create(tmp_path, title="X", quest_id="golden", base_branch="main")
+    ch = Quest.create(tmp_path, title="X", quest_id="golden", base_branch="main")
     observed = _observe_layout(ch.quest_dir)
 
     # structural drift fails until golden body and LAYOUT_VERSION constant are updated together

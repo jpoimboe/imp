@@ -187,7 +187,7 @@ async def test_subscribe_to_unknown_handle_errors_without_subscribing() -> None:
     await _handle_command(Subscribe("bogus"), control, responses)
     notice = responses.get_nowait()
     assert isinstance(notice, Notice)
-    assert notice.text == "No Change @bogus — send /list to see what's running."
+    assert notice.text == "No Quest @bogus — send /list to see what's running."
     assert responses.empty()
     assert control.subscriptions.contains("bogus") is False
 
@@ -230,7 +230,7 @@ async def test_replay_renders_each_event_through_the_common_envelope() -> None:
     assert second.text.startswith("k3f9qa · Dark mode · ")
     assert second.text.endswith("\ntwo")
     assert "↩" not in second.text
-    # Each replayed Notice is tagged so a reply routes back to the Change.
+    # Each replayed Notice is tagged so a reply routes back to the Quest.
     assert first.quest_id == "k3f9qa"
     assert second.quest_id == "k3f9qa"
 

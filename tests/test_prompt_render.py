@@ -21,11 +21,11 @@ def _log(path: Path, events: list[tuple[str, dict]]) -> EventLog:
 def test_renders_change_namespace(tmp_path: Path) -> None:
     log = _log(tmp_path / "events.jsonl", [])
     ctx = build_context(
-        quest_title="My Change", event_log=log, quest_id="myid01",
+        quest_title="My Quest", event_log=log, quest_id="myid01",
     )
     assert render_prompt(
         "Hello {{ change.title }} ({{ change.id }})", ctx,
-    ) == "Hello My Change (myid01)"
+    ) == "Hello My Quest (myid01)"
 
 
 def test_renders_events_namespace(tmp_path: Path) -> None:
@@ -198,7 +198,7 @@ def test_dunder_raises_attributeerror() -> None:
 def test_renders_quest_home(tmp_path: Path) -> None:
     log = _log(tmp_path / "events.jsonl", [])
     ctx = build_context(
-        quest_id="abc123", quest_title="My Change",
+        quest_id="abc123", quest_title="My Quest",
         quest_home="/ctl/.imp/quests/abc123", event_log=log,
     )
     assert render_prompt(

@@ -7,7 +7,7 @@ from pathlib import Path
 import anyio
 
 import imp.cli.main as m
-from imp.engine.change import LAYOUT_VERSION, Change
+from imp.engine.quest import LAYOUT_VERSION, Quest
 from tests.conftest import _seed_control
 
 
@@ -15,7 +15,7 @@ def test_resume_layout_mismatch_prints_actionable_not_resume_gone(
     tmp_path: Path, monkeypatch, capsys,
 ) -> None:
     _seed_control(tmp_path)
-    ch = Change.create(tmp_path, title="x", quest_id="feat", base_branch="main")
+    ch = Quest.create(tmp_path, title="x", quest_id="feat", base_branch="main")
     meta_path = ch.quest_dir / "quest.json"
     meta = json.loads(meta_path.read_text())
     meta["layout_version"] = 999                 # contradictory stored version
@@ -36,4 +36,4 @@ def test_resume_layout_mismatch_prints_actionable_not_resume_gone(
     assert "999" in err and str(LAYOUT_VERSION) in err     # both versions surfaced
     assert "cafef00d" in err                                # imp_commit breadcrumb
     assert "imp log" in err                                  # recovery recipe
-    assert "no Change matches" not in err                   # did NOT fall to _resume_gone
+    assert "no Quest matches" not in err                   # did NOT fall to _resume_gone

@@ -14,7 +14,7 @@ import pytest
 
 from imp.agents.runner import AgentInvocation, AgentRunner, Event, Message, TextBlock
 from imp.agents.transcript import Transcript
-from imp.engine.change import Change
+from imp.engine.quest import Quest
 from imp.engine.executor import run_change
 from imp.engine.state import State
 
@@ -65,7 +65,7 @@ def _seed_interactive_change(root: Path, *, armed: bool, started: bool = True):
     st.has_started = started
     st.resume_pending = flat[0].name if armed else None
     st.save(quest_dir / "state")
-    change = Change(id="c", title="t", base_branch="main",
+    change = Quest(id="c", title="t", base_branch="main",
                     control_root=root, project_root=root, quest_dir=quest_dir,
                     seed_opening=SEED)
     change.event_log().append(agent_id=None, type="change_created",
@@ -73,7 +73,7 @@ def _seed_interactive_change(root: Path, *, armed: bool, started: bool = True):
     return change, flat[0].name
 
 
-def _write_awaiting_user_transcript(change: Change, step_name: str) -> Path:
+def _write_awaiting_user_transcript(change: Quest, step_name: str) -> Path:
     """A non-empty AWAITING_USER transcript + a native claude_session store under it,
     plus the stored step_context the armed resume path replays."""
     tdir = change.quest_dir / "steps" / "only" / step_name

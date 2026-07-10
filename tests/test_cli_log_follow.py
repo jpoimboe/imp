@@ -14,7 +14,7 @@ import pytest
 
 from imp.cli.live_driver import LiveDriver
 from imp.cli.live_status import LiveStatus
-from imp.engine.change import LAYOUT_VERSION
+from imp.engine.quest import LAYOUT_VERSION
 from tests.conftest import FIXTURES
 
 
@@ -31,7 +31,7 @@ def _fake_tty(monkeypatch: pytest.MonkeyPatch, *, isatty: bool) -> None:
 
 
 def _make_live_home(control: Path, slug: str) -> Path:
-    """Minimal live Change home with a 2-event narrative so _cmd_log resolves
+    """Minimal live Quest home with a 2-event narrative so _cmd_log resolves
     the id to a live worktree (materialized default → not a backlog card)."""
     d = control / ".imp" / "quests" / slug
     d.mkdir(parents=True)

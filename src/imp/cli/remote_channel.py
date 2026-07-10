@@ -7,7 +7,7 @@ engine/. It owns the driver subprocess lifecycle and NDJSON framing. "Driver" is
 reserved for the external process; imp's side is the channel/host. Best-effort by
 construction: no remote.driver block → unused; a
 driver that fails to spawn or dies mid-run is logged and the run continues on the
-local TTY. The driver can never fail a Change.
+local TTY. The driver can never fail a Quest.
 """
 from __future__ import annotations
 
@@ -78,7 +78,7 @@ def select_driver_config(
     title: str,
     env: MutableMapping[str, str],
 ) -> DriverConfig | None:
-    """Choose the driver for one terminal Change.
+    """Choose the driver for one terminal Quest.
 
     A configured driver is ALWAYS run through the daemon-connector: the connector
     polls for the per-repo daemon socket and attaches whenever the daemon is up

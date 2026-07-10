@@ -2339,7 +2339,7 @@ def test_reauth_needed_pause_renders_plain_speak_copy() -> None:
         _ev("1", "workflow_paused", reason="reauth_needed"),
     ]))
     assert "authentication kept failing" in out
-    assert "the Change is paused and resumable" in out
+    assert "the Quest is paused and resumable" in out
     assert "re-authenticate to Claude" in out
     assert "then resume" in out
     # The raw internal token never reaches the user.

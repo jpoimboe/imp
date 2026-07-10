@@ -10,7 +10,7 @@ from imp.agents.runner import AgentInvocation, AgentRunner, Event, Message, Text
 from imp.agents.transcript import Transcript
 from imp.engine.abandon import archive_conversation
 from imp.engine.archive.read import rehydrate_quest
-from imp.engine.change import Change
+from imp.engine.quest import Quest
 from imp.engine.executor import RunResult, run_change
 from imp.engine.state import State
 from tests.conftest import _seed_control
@@ -25,7 +25,7 @@ def anyio_backend() -> str:
 async def test_paused_conversation_round_trips_and_replays_on_resume(
         tmp_path: Path, provider_registry) -> None:
     _seed_control(tmp_path)
-    ch = Change.create_draft(
+    ch = Quest.create_draft(
         tmp_path, title="Conv", quest_id="conv", base_branch="main")
 
     # _seed_control workflow: phase "p", step "s"
@@ -46,7 +46,7 @@ async def test_paused_conversation_round_trips_and_replays_on_resume(
     restored = quest_dir / "steps" / "p" / "s" / "transcript.jsonl"
     assert restored.read_bytes() == seeded_bytes
 
-    change = Change.load(tmp_path, "conv")
+    change = Quest.load(tmp_path, "conv")
     state = State.load(change.state_dir)
     state.resume_pending = state.step   # "s" → replay, not re-seed
     state.save(change.state_dir)

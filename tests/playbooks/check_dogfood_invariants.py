@@ -111,7 +111,7 @@ def check_no_artifacts_on_code_branch(repo: str, base: str) -> Result:
 
 
 def archived_quest_ids(repo: str) -> list[str]:
-    """Change ids from the archive index (new primary store)."""
+    """Quest ids from the archive index (new primary store)."""
     db = os.path.join(repo, ".imp", "archive", "index.db")
     if not os.path.exists(db):
         return []

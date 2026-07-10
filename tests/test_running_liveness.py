@@ -9,7 +9,7 @@ import subprocess
 from pathlib import Path
 
 import imp.cli.main as m
-from imp.engine.change import Change
+from imp.engine.quest import Quest
 from tests.conftest import _seed_control
 
 
@@ -44,7 +44,7 @@ def test_resumable_and_inflight_include_new_not_errored() -> None:
 
 def test_status_rows_surfaces_crashed_run_as_at_rest_not_errored(tmp_path: Path) -> None:
     _seed_control(tmp_path)
-    ch = Change.create(tmp_path, title="Crashed run",
+    ch = Quest.create(tmp_path, title="Crashed run",
                        quest_id="2026-06-11-deadaa", base_branch="main")
     # Simulate a crash: a leftover lock file naming a dead holder pid.
     (ch.quest_dir / "lock").write_text(str(_dead_pid()))
@@ -56,7 +56,7 @@ def test_status_rows_surfaces_crashed_run_as_at_rest_not_errored(tmp_path: Path)
 def test_created_draft_with_no_lock_is_draft_never_running(tmp_path: Path) -> None:
     # Regression (m6rmch): a created draft with no lock must never show running.
     _seed_control(tmp_path)
-    Change.create_draft(tmp_path, title="D", quest_id="m6rmch", base_branch="main")
+    Quest.create_draft(tmp_path, title="D", quest_id="m6rmch", base_branch="main")
     row = m._row_for_id(tmp_path, "m6rmch")
     assert row is not None
     assert row[1] == "draft"

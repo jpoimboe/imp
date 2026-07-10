@@ -36,7 +36,7 @@ def test_render_empty_listresult_says_nothing_running() -> None:
 
 
 def test_render_notice_is_plain_text() -> None:
-    assert render_response(Notice("Spawning a new Change…")) == "Spawning a new Change…"
+    assert render_response(Notice("Spawning a new Quest…")) == "Spawning a new Quest…"
 
 
 def test_on_response_sends_the_rendered_text_silently() -> None:
@@ -125,7 +125,7 @@ def test_on_response_notice_with_quest_id_is_reply_routable() -> None:
     adapter.on_response(Notice("replayed body", quest_id="k3f9qa"))
     # Still sent silently — a catch-up must not buzz.
     assert sent == [("replayed body", True)]
-    # The recorded message id (1, from the fake send) routes a reply to the Change,
+    # The recorded message id (1, from the fake send) routes a reply to the Quest,
     assert adapter.resolve(
         Inbound(text="ok", reply_to_message_id=1)) == ("k3f9qa", "ok")
     # and so does an @handle prefix.

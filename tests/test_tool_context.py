@@ -163,7 +163,7 @@ def test_resolve_path_relative_still_maps_under_root(tmp_path: Path) -> None:
 
 def test_resolve_path_expands_home(tmp_path: Path, monkeypatch) -> None:
     # A `~`-home path resolves to the literal host location, NOT under the
-    # worktree root — so an agent in a Change worktree can reach a file the user
+    # worktree root — so an agent in a Quest worktree can reach a file the user
     # named by ~/path in their main checkout.
     home = tmp_path / "home" / "u"
     monkeypatch.setenv("HOME", str(home))

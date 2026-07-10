@@ -723,7 +723,7 @@ def test_spec_finalizer_replaces_spec_writer() -> None:
     # Brainstorm-entry sections are gone.
     assert "## Brainstorm Discipline" not in body
     assert "## Build now or save for later" not in body
-    assert "## Naming the Change" not in body
+    assert "## Naming the Quest" not in body
     # Its finalize core remains.
     assert "Threshold handoff" in body
     assert "imp artifact-commit" not in body

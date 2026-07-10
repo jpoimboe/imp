@@ -1,4 +1,4 @@
-"""Ephemeral alert-all mode: deliver buzz alerts for every Change while the
+"""Ephemeral alert-all mode: deliver buzz alerts for every Quest while the
 daemon runs (no persistence across restarts).
 
 Transport-agnostic. Owned by run_daemon; read in the sender thread

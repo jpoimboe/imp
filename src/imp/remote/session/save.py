@@ -1,4 +1,4 @@
-"""Save a (possibly resident) Change to the Backlog."""
+"""Save a (possibly resident) Quest to the Backlog."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -6,7 +6,7 @@ from pathlib import Path
 import anyio
 
 from imp.engine.abandon import save_to_backlog
-from imp.engine.change import Change
+from imp.engine.quest import Quest
 from imp.remote.daemon.directory import session_is_resident
 from imp.remote.session.client import SessionClient
 from imp.remote.session.discover import session_socket_path
@@ -17,7 +17,7 @@ def save_change(control_root: Path, quest_id: str) -> None:
     if session_is_resident(control_root, quest_id):
         _deliver_save_resident(control_root, quest_id)
     else:
-        ch = Change.load(control_root, quest_id)
+        ch = Quest.load(control_root, quest_id)
         if ch.materialized:
             return
         save_to_backlog(ch)

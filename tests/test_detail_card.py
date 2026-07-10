@@ -5,7 +5,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from imp.cli import main
-from imp.engine.change import LAYOUT_VERSION, Change
+from imp.engine.quest import LAYOUT_VERSION, Quest
 from imp.engine.state import State
 from tests.conftest import _seed_control
 
@@ -14,7 +14,7 @@ _NOW = datetime(2026, 6, 20, 12, 0, 0, tzinfo=UTC)
 
 def test_detail_card_backlog_source(tmp_path: Path) -> None:
     _seed_control(tmp_path)
-    Change.create_draft(
+    Quest.create_draft(
         tmp_path,
         title="Add OAuth",
         quest_id="2026-06-16-bkg111",

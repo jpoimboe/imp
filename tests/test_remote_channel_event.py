@@ -32,7 +32,7 @@ class _FakeStdin:
 def _channel(write_fd: int, *, events: tuple[str, ...]) -> RemoteChannel:
     ch = RemoteChannel(
         command=("x",), events=events, startup_timeout=1.0,
-        id="2026-06-11-abc", title="My Change")
+        id="2026-06-11-abc", title="My Quest")
     ch._proc = _FakeProc(write_fd)  # inject a live fake process; _write_nonblocking sets O_NONBLOCK
     return ch
 
@@ -50,7 +50,7 @@ def test_on_event_writes_ndjson_with_quest_context() -> None:
     assert obj["type"] == "agent_output"
     # ...and change context is namespaced under "change" (spec AC 2).
     assert obj["change"] == {
-        "id": "2026-06-11-abc", "title": "My Change",
+        "id": "2026-06-11-abc", "title": "My Quest",
         "step": None, "status": "running"}
     os.close(r)
     os.close(w)

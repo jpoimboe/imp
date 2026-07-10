@@ -46,7 +46,7 @@ def test_cli_new_help_does_not_name_the_old_spec_writer() -> None:
     import pathlib
     text = pathlib.Path("src/imp/cli/main.py").read_text()
     assert "handed verbatim to the spec-writer" not in text
-    assert "the spec-writer names the Change" not in text
+    assert "the spec-writer names the Quest" not in text
     assert "spec-writer's opening intent" not in text
     assert "the spec-writer opens" not in text
 

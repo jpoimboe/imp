@@ -33,7 +33,7 @@ def test_resume_gone_unknown_keeps_no_match(monkeypatch, tmp_path: Path, capsys)
     rc = m._resume_gone(tmp_path, "2026-06-11-yaitd7")
     out, err = capsys.readouterr()
     assert rc == 2
-    assert "imp: no Change matches '2026-06-11-yaitd7'" in err
+    assert "imp: no Quest matches '2026-06-11-yaitd7'" in err
     assert out == ""
 
 

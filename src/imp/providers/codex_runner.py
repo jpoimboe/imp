@@ -283,7 +283,7 @@ class CodexAgentRunner:
         )
         ctx.quest_context = invocation.quest_context
         ctx.change_state = invocation.change_state
-        ctx.change = invocation.change          # live Change for rename_change
+        ctx.change = invocation.change          # live Quest for rename_change
         ctx.spawn_subagent = spawn_subagent_via_registry
         ctx.resolved_tiers = invocation.resolved_tiers
         ctx.subagent_depth = invocation.subagent_depth
@@ -1123,7 +1123,7 @@ def process_event(
         state["thread_id"] = getattr(event, "thread_id", None)
         return
 
-    # `item.started` — open the task fold keyed on the SDK item id (Change 2).
+    # `item.started` — open the task fold keyed on the SDK item id (Quest 2).
     # The codex SDK emits item.started (status="in_progress") for an mcp_tool_call
     # before item.completed, carrying the SAME id; opening the task tool_call here
     # lets out-of-order sibling completion pair by id with no re-key. Non-task
@@ -1218,7 +1218,7 @@ def process_event(
             call_id = sdk_id
             task_id_ns: str | None
             if name == "sub_agent":
-                # Change 2: the task tool_call was opened at item.started keyed on
+                # Quest 2: the task tool_call was opened at item.started keyed on
                 # this same SDK id; close the fold here with the matching result
                 # (id_ns="event" marks the codex namespace for the §3 fold probe).
                 # A task item with no prior item.started (the no-pair path) still

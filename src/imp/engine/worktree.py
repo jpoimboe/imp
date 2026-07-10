@@ -1,5 +1,5 @@
-"""All git mechanics for per-Change worktrees (spec §4), behind a small
-interface so Change, the executor, and the CLI stay git-agnostic. Every
+"""All git mechanics for per-Quest worktrees (spec §4), behind a small
+interface so Quest, the executor, and the CLI stay git-agnostic. Every
 shared-repo mutation runs under RepoGitLock.
 """
 
@@ -105,7 +105,7 @@ def origin_head_branch(control_root: Path) -> str | None:
 
 
 def commit_count(control_root: Path, quest_id: str, base: str) -> int:
-    """Commits on imp/<id> not reachable from base — the Change's own work."""
+    """Commits on imp/<id> not reachable from base — the Quest's own work."""
     proc = _git(control_root, "rev-list", "--count", f"{base}..imp/{quest_id}")
     if proc.returncode != 0:
         return 0
@@ -164,7 +164,7 @@ def delete_branch(control_root: Path, quest_id: str) -> None:
 
 def destroy_worktree(control_root: Path, quest_id: str) -> None:
     """Full teardown: remove the worktree AND delete its branch imp/<id>,
-    leaving nothing behind. Used to roll back a failed Change.create — unlike
+    leaving nothing behind. Used to roll back a failed Quest.create — unlike
     remove_worktree, which deliberately KEEPS the branch after a successful run.
     Best-effort git calls (not _git_ok) so a teardown hiccup never masks the
     LoadError that triggered the rollback — a teardown failure may therefore
@@ -271,7 +271,7 @@ def uncommitted_paths(worktree: Path) -> str:
 
 def is_dirty(worktree: Path) -> bool:
     """True if the worktree has staged/unstaged/untracked changes. Public so
-    `_complete` can refuse to merge a Change with uncommitted work."""
+    `_complete` can refuse to merge a Quest with uncommitted work."""
     return bool(uncommitted_paths(worktree))
 
 

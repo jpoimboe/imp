@@ -13,7 +13,7 @@ def session_is_resident(control_root: Path, quest_id: str) -> bool:
 
 
 def resident_session_ids(control_root: Path) -> set[str]:
-    """Change ids with a live session socket; scans live homes only, never the archive."""
+    """Quest ids with a live session socket; scans live homes only, never the archive."""
     from imp.cli.main import _list_quest_homes
     return {
         cid

@@ -1,4 +1,4 @@
-"""Per-run subscribed-Change set + per-key replayed-event-id dedup; in-memory, no persistence."""
+"""Per-run subscribed-Quest set + per-key replayed-event-id dedup; in-memory, no persistence."""
 from __future__ import annotations
 
 import threading

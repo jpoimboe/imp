@@ -11,7 +11,7 @@ from typing import Any
 
 import pytest
 
-from imp.engine.change import Change
+from imp.engine.quest import Quest
 from imp.engine.executor import RunResult, run_change
 from imp.engine.state import State
 
@@ -35,7 +35,7 @@ _SINGLE_WF = (
 )
 
 
-def _make_change(root: Path, *, agents: dict[str, str], workflow_yaml: str) -> Change:
+def _make_change(root: Path, *, agents: dict[str, str], workflow_yaml: str) -> Quest:
     from imp.engine.loader import load_workflow
     from imp.providers.effective import load_effective_config
 
@@ -71,7 +71,7 @@ def _make_change(root: Path, *, agents: dict[str, str], workflow_yaml: str) -> C
         status="running", vars=dict(workflow.vars.defaults()), loop_counts={},
     ).save(quest_dir / "state")
 
-    change = Change(
+    change = Quest(
         id="c", title="t", base_branch="main",
         control_root=root, project_root=root, quest_dir=quest_dir,
     )

@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from imp.engine.change import Change
+from imp.engine.quest import Quest
 from imp.engine.executor import RunResult, run_change
 from tests._live import opted_in
 from tests.conftest import _git
@@ -80,7 +80,7 @@ async def test_live_minimal_change_completes_one_step(
     )
     _git(tmp_path, "add", "-A")
     _git(tmp_path, "commit", "-qm", "seed")
-    change = Change.create(
+    change = Quest.create(
         tmp_path, title="live-smoke", quest_id="live-smoke", base_branch="main")
 
     result = await run_change(change)

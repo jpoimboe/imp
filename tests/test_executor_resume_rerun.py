@@ -9,7 +9,7 @@ import pytest
 
 from imp.agents.runner import AgentInvocation, AgentRunner, Event, Message, TextBlock, ToolUseBlock
 from imp.agents.transcript import Transcript
-from imp.engine.change import Change
+from imp.engine.quest import Quest
 from imp.engine.executor import RunResult, _resume_replays_transcript, run_change
 from imp.engine.state import State
 
@@ -63,7 +63,7 @@ def anyio_backend() -> str:
     return "asyncio"
 
 
-def _seed_single_agent(root: Path) -> Change:
+def _seed_single_agent(root: Path) -> Quest:
     from imp.engine.loader import load_workflow
     from imp.providers.effective import load_effective_config
     wf = root / "imp" / "workflows" / "imp"
@@ -92,7 +92,7 @@ def _seed_single_agent(root: Path) -> Change:
     flat = workflow.flat_steps()
     State(id="c", step=flat[0].name, step_attempt=0, status="running",
           vars=dict(workflow.vars.defaults()), loop_counts={}).save(quest_dir / "state")
-    change = Change(id="c", title="t", base_branch="main",
+    change = Quest(id="c", title="t", base_branch="main",
                     control_root=root, project_root=root, quest_dir=quest_dir)
     change.event_log().append(agent_id=None, type="change_created",
                               payload={"id": "c", "title": "t"})

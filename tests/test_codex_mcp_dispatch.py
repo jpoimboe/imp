@@ -181,7 +181,7 @@ def test_complete_step_preserves_non_none_optional_arg(tmp_path: Path) -> None:
 def test_task_dispatch_returns_output_and_appends_no_tool_call(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Change 2: dispatch_tool runs the subagent and returns its output; it does
+    """Quest 2: dispatch_tool runs the subagent and returns its output; it does
     NOT touch the event log for the task tool_call/result pair (process_event owns
     that now)."""
     elog = InMemoryEventLog()
@@ -204,7 +204,7 @@ def test_task_dispatch_returns_output_and_appends_no_tool_call(
 def test_task_dispatch_suspension_propagates(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Change 1: a subagent-origin pause propagates out of dispatch_tool so FastMCP
+    """Quest 1: a subagent-origin pause propagates out of dispatch_tool so FastMCP
     wraps it as an isError tool result — dispatch_tool no longer captures it."""
     from imp.engine.agent_run import SubagentSuspended
 

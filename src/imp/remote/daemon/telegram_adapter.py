@@ -202,15 +202,15 @@ class TelegramNorthAdapter:
     def on_event(self, event: dict[str, Any]) -> None:
         """Curate one event and deliver it to chat.
 
-        Membership is the first decision (spec §2): a subscribed Change takes the
+        Membership is the first decision (spec §2): a subscribed Quest takes the
         full curated path below (buzz + silent, deduped via Subscriptions.seen). An
-        unsubscribed Change no longer returns here — it falls through to
+        unsubscribed Quest no longer returns here — it falls through to
         _alert_all_event, which delivers only buzz events and only while alert-all
-        is on. A subscribed Change streams every llm_response as its own quiet
+        is on. A subscribed Quest streams every llm_response as its own quiet
         message, so a gate (awaiting_user_input) is delivered terse — its label and
         reply handle, with no re-dump of the preceding narration. The _last_narration
         write is kept: it still feeds the alert-all path across a subscribe/
-        unsubscribe toggle. That per-Change map is sender-thread-only, like _offset,
+        unsubscribe toggle. That per-Quest map is sender-thread-only, like _offset,
         so it needs no lock."""
         change = event.get("change") or {}
         quest_id = change.get("id")
@@ -250,17 +250,17 @@ class TelegramNorthAdapter:
                 self._msg_to_change[message_id] = quest_id
 
     def _alert_all_event(self, quest_id: str, event: dict[str, Any]) -> None:
-        """An unsubscribed Change: deliver a buzz alert loud iff alert-all is on,
+        """An unsubscribed Quest: deliver a buzz alert loud iff alert-all is on,
         recording the same reply maps the subscribed path records and deduping on
         (quest_id, event id) against the AlertAll log. Silent narrative stays
-        suppressed for an unsubscribed Change. An event with no id is best-effort
+        suppressed for an unsubscribed Quest. An event with no id is best-effort
         (delivered, not deduped). mark fires only on a successful send (message_id
         is not None), mirroring the map write: a send that fails without raising
         must not record the event as delivered, or the re-attach replay that
-        re-surfaces this blocked Change would be permanently suppressed. A
-        prompt-less awaiting_user_input falls back to this Change's preceding
+        re-surfaces this blocked Quest would be permanently suppressed. A
+        prompt-less awaiting_user_input falls back to this Quest's preceding
         llm_response narration (recorded before the enabled gate so the first
-        alert after /alerts on carries current context). An unsubscribed Change
+        alert after /alerts on carries current context). An unsubscribed Quest
         never streamed that narration, so the gate carries it as its only copy
         (unlike the subscribed path, which streams narration live and keeps its gate
         terse); with no prior narration it renders the 'needs your input' label

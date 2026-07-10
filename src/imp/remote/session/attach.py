@@ -9,16 +9,16 @@ from typing import Any
 
 import anyio
 
-from imp.engine.change import Change
+from imp.engine.quest import Quest
 from imp.engine.env import overlay_engine_env
 from imp.remote.session.client import SessionClient
 from imp.remote.session.discover import session_socket_path
 
-SpawnFn = Callable[[Change], None]
+SpawnFn = Callable[[Quest], None]
 
 
 def spawn_session_daemon(
-    change: Change, *, resume: bool = False,
+    change: Quest, *, resume: bool = False,
     non_interactive: bool = False, autonomous: bool = False,
     model: str | None = None,
 ) -> None:
@@ -51,7 +51,7 @@ def spawn_session_daemon(
 
 
 async def attach_or_spawn(
-    change: Change,
+    change: Quest,
     *,
     on_event: Callable[[dict[str, Any]], None],
     spawn_fn: SpawnFn = spawn_session_daemon,
@@ -76,7 +76,7 @@ async def attach_or_spawn(
 
 
 def build_session_attach(
-    change: Change,
+    change: Quest,
     *,
     resume: bool = False,
     non_interactive: bool = False,

@@ -26,7 +26,7 @@ from imp.cli.leave import resolve_leave_action
 from imp.cli.session_controls import SessionControls
 from imp.cli.signals import InterruptCoordinator
 from imp.cli.terminal_title import TerminalTitle
-from imp.engine.change import Change
+from imp.engine.quest import Quest
 from imp.engine.errors import LoadError, LoadErrors
 from imp.remote.session.client import SessionClient
 from imp.remote.session.protocol import CONTROL_INTERRUPT_LEAVE
@@ -133,7 +133,7 @@ async def run_terminal_client(
                                     leave_state["intent"] = "abandon"
                                     if control_root is not None:
                                         try:
-                                            reloaded = Change.load(
+                                            reloaded = Quest.load(
                                                 control_root, quest_id)
                                             leave_state["materialized"] = (
                                                 "1" if reloaded.materialized

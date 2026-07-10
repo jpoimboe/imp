@@ -49,7 +49,7 @@ def _seed_project(tmp_path: Path) -> None:
 
     imp new needs >=1 commit with HEAD on a branch (worktree.check_preconditions)
     and reads the workflow + config from the control root's WORKING TREE
-    (Change.create copies imp/workflows/imp; the runtime reads the merged
+    (Quest.create copies imp/workflows/imp; the runtime reads the merged
     config from imp/project.yaml — the project layer of load_effective_config).
     Committing them is the clean choice. _init_repo already commits a README +
     .gitignore with `.imp/`, so .imp/ is durably ignored and `imp new` won't add

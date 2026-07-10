@@ -7,20 +7,20 @@ import pytest
 
 from imp.agents.tools import get_registry
 from imp.agents.tools.context import ToolContext
-from imp.engine.change import Change
+from imp.engine.quest import Quest
 from imp.engine.loader import TOP_LEVEL_CAPS
 from imp.engine.state import State
 from tests.conftest import _seed_control
 
 
-def _make(tmp_path: Path) -> tuple[Change, State]:
+def _make(tmp_path: Path) -> tuple[Quest, State]:
     _seed_control(tmp_path)
-    ch = Change.create(tmp_path, title="Parent",
+    ch = Quest.create(tmp_path, title="Parent",
                        quest_id="2026-06-16-par111", base_branch="main")
     return ch, State.load(ch.state_dir)
 
 
-def _ctx(ch: Change, state: State | None) -> ToolContext:
+def _ctx(ch: Quest, state: State | None) -> ToolContext:
     ctx = ToolContext(project_root=ch.project_root,
                       events_path=ch.events_path)
     ctx.change = ch
@@ -50,7 +50,7 @@ def test_create_change_writes_quest_home_and_emits_event(tmp_path: Path) -> None
     new_id = new_ids[0]
     assert new_id in msg
 
-    created = Change.load(ch.control_root, new_id)
+    created = Quest.load(ch.control_root, new_id)
     assert created.materialized is False
     assert created.origin == "followup"
     assert created.title == "Follow-up: extract helper"
@@ -75,7 +75,7 @@ def test_create_change_defaults_no_deps(tmp_path: Path) -> None:
     tool.invoke(_ctx(ch, state), {"title": "T", "description": "b"})
     new_id = next(p.name for p in (ch.control_root / ".imp" / "quests").iterdir()
                   if p.name != ch.id)
-    meta = json.loads((Change.load(ch.control_root, new_id).quest_dir
+    meta = json.loads((Quest.load(ch.control_root, new_id).quest_dir
                        / "quest.json").read_text())
     assert meta["depends_on"] == []
 

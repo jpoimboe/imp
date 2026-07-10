@@ -31,7 +31,7 @@ async def test_deliver_to_session_loads_the_change_and_injects_the_reply(
         captured["change"] = change
         captured["text"] = text
 
-    monkeypatch.setattr(runner, "Change", _FakeChange)
+    monkeypatch.setattr(runner, "Quest", _FakeChange)
     monkeypatch.setattr(runner, "deliver_session_reply", _fake_deliver)
 
     await runner.deliver_to_session(tmp_path, "2026-06-13-abc", "approved")

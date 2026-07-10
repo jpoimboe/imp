@@ -1,12 +1,12 @@
 from pathlib import Path
 
-from imp.engine.change import Change
+from imp.engine.quest import Quest
 from tests.conftest import _seed_control
 
 
 def test_quest_home_and_meta_file_at_quests_path(tmp_path: Path) -> None:
     _seed_control(tmp_path)
-    ch = Change.create(tmp_path, title="X", quest_id="que123", base_branch="main")
+    ch = Quest.create(tmp_path, title="X", quest_id="que123", base_branch="main")
     assert ch.quest_dir == tmp_path / ".imp" / "quests" / "que123"
     assert (ch.quest_dir / "quest.json").exists()
     assert not (ch.quest_dir / "change.json").exists()

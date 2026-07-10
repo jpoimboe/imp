@@ -1,15 +1,15 @@
-"""Abandon a Change: mark abandoned, archive a non-resumable tombstone, drop the
+"""Abandon a Quest: mark abandoned, archive a non-resumable tombstone, drop the
 live home; on a built-out change also pop the merge queue and remove the worktree + branch."""
 from __future__ import annotations
 
 import shutil
 
 from imp.engine import merge_queue, worktree
-from imp.engine.change import Change
+from imp.engine.quest import Quest
 from imp.engine.state import ProjectLock, State
 
 
-def tear_down_change(change: Change) -> None:
+def tear_down_change(change: Quest) -> None:
     """Destroy a change: mark abandoned, archive a non-resumable tombstone, drop the
     live home. On a built-out change also pop the merge queue (waking the next head if
     this change was the head), remove the worktree, and delete the branch; on a draft
@@ -41,7 +41,7 @@ def tear_down_change(change: Change) -> None:
     shutil.rmtree(change.quest_dir, ignore_errors=True)
 
 
-def archive_conversation(change: Change) -> None:
+def archive_conversation(change: Quest) -> None:
     """Archive a left conversation as resumable (paused, not abandoned); drop the live home."""
     control = change.control_root
     quest_id = change.id
@@ -70,7 +70,7 @@ def archive_conversation(change: Change) -> None:
     shutil.rmtree(change.quest_dir, ignore_errors=True)
 
 
-def save_to_backlog(change: Change) -> None:
+def save_to_backlog(change: Quest) -> None:
     """Pause a conversation: the un-materialized change-home is kept (not archived) and
     remains resumable. Zone is derived from both `materialized` and `origin` — no bespoke
     status string is needed for zone placement."""
@@ -83,7 +83,7 @@ def save_to_backlog(change: Change) -> None:
             agent_id=None, type="conversation_saved", payload={})
 
 
-def discard_conversation(change: Change) -> None:
+def discard_conversation(change: Quest) -> None:
     """Discard a zero-exchange open — no archive, no record; raises LockHeld if runner is live."""
     with ProjectLock(change.quest_dir / "lock").acquire():
         pass

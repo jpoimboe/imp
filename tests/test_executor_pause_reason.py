@@ -10,14 +10,14 @@ from pathlib import Path
 import pytest
 
 from imp.agents.runner import AgentInvocation, AgentRunner, Event
-from imp.engine.change import Change
+from imp.engine.quest import Quest
 from imp.engine.executor import RunResult, run_change
 from imp.engine.state import State
 from imp.engine.types import Continue, Goto, Pause
 
 
-def _make_change(root: Path, *, quest_id: str = "test-change", title: str = "t") -> Change:
-    """Construct a Change directly on disk without git worktrees."""
+def _make_change(root: Path, *, quest_id: str = "test-change", title: str = "t") -> Quest:
+    """Construct a Quest directly on disk without git worktrees."""
     from imp.engine.loader import load_workflow
     from imp.providers.effective import load_effective_config
 
@@ -41,7 +41,7 @@ def _make_change(root: Path, *, quest_id: str = "test-change", title: str = "t")
         status="running", vars=dict(workflow.vars.defaults()), loop_counts={},
     ).save(quest_dir / "state")
 
-    change = Change(
+    change = Quest(
         id=quest_id, title=title, base_branch="main",
         control_root=root, project_root=root, quest_dir=quest_dir,
     )
@@ -87,7 +87,7 @@ def test_emit_branch_for_non_pause_action_is_interrupt() -> None:
 # the assertions follow the real fixture's values.
 
 
-def _seed_single_agent(root: Path) -> Change:
+def _seed_single_agent(root: Path) -> Quest:
     wf = root / "imp" / "workflows" / "imp"
     (wf / "agents").mkdir(parents=True)
     (wf / "agents" / "writer.md").write_text(

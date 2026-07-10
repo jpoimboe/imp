@@ -3,7 +3,7 @@ import threading
 from pathlib import Path
 
 from imp.engine import merge_queue as mq
-from imp.engine.change import Change
+from imp.engine.quest import Quest
 from tests.conftest import _seed_control
 
 
@@ -63,10 +63,10 @@ def test_concurrent_enqueue_preserves_all_entries(tmp_path: Path) -> None:
 
 def test_pop_and_wake_removes_self_and_wakes_new_head(tmp_path: Path) -> None:
     _seed_control(tmp_path)
-    # Change.load runs before spawn_fn, so real worktrees are required.
-    from imp.engine.change import Change
-    Change.create(tmp_path, title="a", quest_id="a", base_branch="main")
-    Change.create(tmp_path, title="b", quest_id="b", base_branch="main")
+    # Quest.load runs before spawn_fn, so real worktrees are required.
+    from imp.engine.quest import Quest
+    Quest.create(tmp_path, title="a", quest_id="a", base_branch="main")
+    Quest.create(tmp_path, title="b", quest_id="b", base_branch="main")
     mq.enqueue_if_absent(tmp_path, "a", "main")
     mq.enqueue_if_absent(tmp_path, "b", "main")
     woken: list[str] = []
@@ -149,8 +149,8 @@ def test_pop_and_wake_absent_noop(tmp_path: Path) -> None:
 
 def test_ensure_head_driven_spawns_current_head_with_resume(tmp_path) -> None:
     _seed_control(tmp_path)
-    Change.create(tmp_path, title="a", quest_id="a", base_branch="main")
-    Change.create(tmp_path, title="b", quest_id="b", base_branch="main")
+    Quest.create(tmp_path, title="a", quest_id="a", base_branch="main")
+    Quest.create(tmp_path, title="b", quest_id="b", base_branch="main")
     mq.enqueue_if_absent(tmp_path, "a", "main")
     mq.enqueue_if_absent(tmp_path, "b", "main")
     spawned: list = []
@@ -171,8 +171,8 @@ def test_ensure_head_driven_empty_lane_is_noop(tmp_path) -> None:
 
 def test_pop_and_wake_tolerates_vanished_next_head(tmp_path) -> None:
     _seed_control(tmp_path)
-    Change.create(tmp_path, title="a", quest_id="a", base_branch="main")
-    Change.create(tmp_path, title="b", quest_id="b", base_branch="main")
+    Quest.create(tmp_path, title="a", quest_id="a", base_branch="main")
+    Quest.create(tmp_path, title="b", quest_id="b", base_branch="main")
     mq.enqueue_if_absent(tmp_path, "a", "main")        # head
     mq.enqueue_if_absent(tmp_path, "b", "main")        # next
     shutil.rmtree(tmp_path / ".imp" / "quests" / "b")   # next vanishes → load fails
@@ -187,7 +187,7 @@ def test_pop_and_wake_tolerates_vanished_next_head(tmp_path) -> None:
 
 def test_ensure_head_driven_tolerates_vanished_head(tmp_path) -> None:
     _seed_control(tmp_path)
-    Change.create(tmp_path, title="a", quest_id="a", base_branch="main")
+    Quest.create(tmp_path, title="a", quest_id="a", base_branch="main")
     mq.enqueue_if_absent(tmp_path, "a", "main")
     shutil.rmtree(tmp_path / ".imp" / "quests" / "a")   # records gone → load fails
     spawned: list = []

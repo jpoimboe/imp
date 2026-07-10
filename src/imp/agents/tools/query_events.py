@@ -1,4 +1,4 @@
-"""query_events (spec §6.6). Reads a Change's event timeline — the current
+"""query_events (spec §6.6). Reads a Quest's event timeline — the current
 change by default, or another change via quest_id."""
 
 from __future__ import annotations
@@ -12,7 +12,7 @@ from typing import Any
 from imp.agents.tools import imp_tool
 from imp.agents.tools.context import ToolContext
 from imp.engine.archive import read as archive_read
-from imp.engine.change import Change
+from imp.engine.quest import Quest
 from imp.engine.errors import LoadError
 from imp.engine.events_digest import digest_event, full_line
 from imp.engine.state import JsonlEventLog, parse_events_jsonl
@@ -23,10 +23,10 @@ _DEFAULT_LIMIT = 100
 def _resolve_other_change_events(
     control_root: Path, quest_id: str,
 ) -> list[dict[str, Any]] | None:
-    """Worktree-first (Change.load), then archive (archive_read.read_events),
+    """Worktree-first (Quest.load), then archive (archive_read.read_events),
     mirroring the CLI's _load_events_for_id. None if the id is in neither."""
     try:
-        change = Change.load(control_root, quest_id)
+        change = Quest.load(control_root, quest_id)
     except LoadError:
         change = None
     if change is not None:
@@ -94,7 +94,7 @@ def query_events(
 
     current_id = ctx.events_path.parent.name
     # Truthy (not `is not None`): a blank quest_id="" routes to the current-change
-    # path — otherwise it would reach Change.load, where <control>/.imp/quests is a
+    # path — otherwise it would reach Quest.load, where <control>/.imp/quests is a
     # real dir so .is_dir() passes and the missing quest.json raises FileNotFoundError,
     # escaping the LoadError catch and breaking the "does not raise" contract.
     if quest_id and quest_id != current_id:

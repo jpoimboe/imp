@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 import imp.cli.main as m
-from imp.engine.change import Change
+from imp.engine.quest import Quest
 from tests.conftest import _seed_control
 
 
@@ -25,7 +25,7 @@ def _row(cid: str, last: str = "2026-06-11T00:00:00+00:00",
 def test_abandon_match_rows_filters_by_token(tmp_path: Path) -> None:
     _seed_control(tmp_path)
     for cid in ("lodo40", "lodo77", "tavo12"):
-        Change.create_draft(tmp_path, title=cid, quest_id=cid,
+        Quest.create_draft(tmp_path, title=cid, quest_id=cid,
                             base_branch="main", origin="idea")
     ids = {r[0] for r in m._abandon_match_rows(tmp_path, "lodo")}
     assert ids == {"lodo40", "lodo77"}
@@ -178,4 +178,4 @@ def test_cmd_abandon_zero_matches_unknown_exits_2(
     monkeypatch.setattr(m, "_abandon", boom_abandon)
     rc = m._cmd_abandon(argparse.Namespace(token="zzzz", yes=False))
     assert rc == 2
-    assert "no Change matches" in capsys.readouterr().err
+    assert "no Quest matches" in capsys.readouterr().err

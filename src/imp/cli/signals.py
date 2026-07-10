@@ -37,7 +37,7 @@ from typing import Any
 from anyio import TASK_STATUS_IGNORED
 from anyio.abc import TaskStatus
 
-from imp.engine.change import Change
+from imp.engine.quest import Quest
 from imp.engine.state import State
 
 _suppress = contextlib.suppress
@@ -70,7 +70,7 @@ def _handled_signals() -> tuple[int, ...]:
     return (signal.SIGINT, *_leave_signals())
 
 
-def _open_pause_exists(change: Change) -> bool:
+def _open_pause_exists(change: Quest) -> bool:
     for event in reversed(list(change.event_log().read())):
         etype = event.get("type")
         if etype == "workflow_paused":
@@ -80,7 +80,7 @@ def _open_pause_exists(change: Change) -> bool:
     return False
 
 
-def pause_and_exit(change: Change, *, reason: str) -> None:
+def pause_and_exit(change: Quest, *, reason: str) -> None:
     """Save state as `paused` (from any active status; a terminal/blocked status
     in _PRESERVE_ON_PAUSE is left untouched) and append workflow_paused UNLESS the
     journal already holds an open pause (a workflow_paused with no intervening
@@ -257,20 +257,20 @@ class InterruptCoordinator:
         self._spawn: Any = None       # fire-and-forget task spawner (start_soon shape)
         self._yielded: Any = None     # anyio.Event set when the run yields (watchdog)
         self._activity_listeners: list[Any] = []
-        # Suspend-during-solicit (this Change): True ONLY while an attended agent
+        # Suspend-during-solicit (this Quest): True ONLY while an attended agent
         # is blocked awaiting a human reply at the bare-turn-end gate.
         # While True the per-pull inactivity watchdog freezes its deadline to inf
         # (see agent_run._pull_with_inactivity_watchdog). Name-identical to the
         # unrelated ReplyInterjectRouter.solicit_active (reply routing) — distinct.
         self._solicit_active = False
-        # Suspend-during-tools (this Change): depth counter, NOT a bool, because
+        # Suspend-during-tools (this Quest): depth counter, NOT a bool, because
         # foreground tool calls can run concurrently (the parallel arm of
         # dispatch_turn_tool_uses). The finite inactivity window only re-arms when
         # the LAST in-flight foreground tool returns. While > 0 the per-pull
         # inactivity watchdog freezes its deadline to inf (see
         # agent_run._pull_with_inactivity_watchdog), exactly like solicit.
         self._tool_depth = 0
-        # Suspend-during-provider-request (this Change): depth counter mirroring
+        # Suspend-during-provider-request (this Quest): depth counter mirroring
         # _tool_depth. > 0 while imp has issued a model request (or handed a tool
         # result back) and is awaiting the provider's response. Unlike the
         # solicit/tool freezes (which go to math.inf), while this is > 0 the

@@ -174,11 +174,11 @@ def test_slash_alerts_arg_is_case_insensitive() -> None:
 
 def test_help_text_mentions_alerts() -> None:
     assert (
-        "/alerts on|off — alert on every Change, not just the ones you follow (default: on)"
+        "/alerts on|off — alert on every Quest, not just the ones you follow (default: on)"
         in HELP_TEXT)
 
 
 def test_help_text_mentions_subscribe_streams_from_now() -> None:
     assert (
-        "/subscribe @handle — follow a Change (streams from now; /replay for history)"
+        "/subscribe @handle — follow a Quest (streams from now; /replay for history)"
         in HELP_TEXT)

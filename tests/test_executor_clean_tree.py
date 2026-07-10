@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from imp.engine.change import Change
+from imp.engine.quest import Quest
 from imp.engine.executor import _enforce_clean_tree
 from imp.engine.state import InMemoryEventLog, State
 from imp.engine.types import Goto, Pause, SourceLoc, Step
@@ -19,9 +19,9 @@ def _agent_step(*, name: str = "task-lead", phase: str = "implement",
     )
 
 
-def _materialized_change(tmp_path: Path) -> Change:
+def _materialized_change(tmp_path: Path) -> Quest:
     _seed_control(tmp_path)
-    return Change.create(tmp_path, title="x", quest_id="feat", base_branch="main")
+    return Quest.create(tmp_path, title="x", quest_id="feat", base_branch="main")
 
 
 def _key(step: Step) -> str:
@@ -81,7 +81,7 @@ def test_no_worktree_before_go_live_is_noop(tmp_path: Path) -> None:
     _seed_control(tmp_path)
     quest_dir = tmp_path / ".imp" / "quests" / "draft"
     (quest_dir / "state").mkdir(parents=True)
-    ch = Change(
+    ch = Quest(
         id="draft", title="t", base_branch="main",
         control_root=tmp_path, project_root=tmp_path, quest_dir=quest_dir,
         materialized=False,
@@ -104,7 +104,7 @@ def test_non_git_flipped_project_root_is_noop(tmp_path: Path) -> None:
     fake_root.mkdir()
     quest_dir = control / ".imp" / "quests" / "flip"
     (quest_dir / "state").mkdir(parents=True)
-    ch = Change(
+    ch = Quest(
         id="flip", title="t", base_branch="main",
         control_root=control, project_root=fake_root, quest_dir=quest_dir,
         materialized=True,

@@ -6,19 +6,19 @@ from pathlib import Path
 
 import imp.cli.main as m
 from imp.engine import archive
-from imp.engine.change import Change
+from imp.engine.quest import Quest
 from tests.conftest import _seed_control
 
 
 def test_scan_quest_homes_parses_each_home_once(tmp_path: Path) -> None:
     _seed_control(tmp_path)
-    Change.create(tmp_path, title="A", quest_id="alpha", base_branch="main")
-    Change.create(tmp_path, title="B", quest_id="beta", base_branch="main")
-    ch_a = Change.load(tmp_path, "alpha")
+    Quest.create(tmp_path, title="A", quest_id="alpha", base_branch="main")
+    Quest.create(tmp_path, title="B", quest_id="beta", base_branch="main")
+    ch_a = Quest.load(tmp_path, "alpha")
     ch_a.events_path.write_text('{"timestamp":"2026-06-05T12:00:00+00:00"}\n')
-    # Change.create seeds a timestamped change_created event; truncate beta's
+    # Quest.create seeds a timestamped change_created event; truncate beta's
     # events.jsonl to exercise the empty-file -> "" branch of _scan_quest_homes.
-    Change.load(tmp_path, "beta").events_path.write_text("")
+    Quest.load(tmp_path, "beta").events_path.write_text("")
 
     scan = {h.quest_id: h for h in m._scan_quest_homes(tmp_path)}
     assert set(scan) == {"alpha", "beta"}
@@ -30,7 +30,7 @@ def test_scan_quest_homes_parses_each_home_once(tmp_path: Path) -> None:
 
 def test_scan_quest_homes_missing_state_json(tmp_path: Path) -> None:
     _seed_control(tmp_path)
-    Change.create(tmp_path, title="No State", quest_id="noState", base_branch="main")
+    Quest.create(tmp_path, title="No State", quest_id="noState", base_branch="main")
     state_file = tmp_path / ".imp" / "quests" / "noState" / "state" / "state.json"
     state_file.unlink()
 
@@ -41,7 +41,7 @@ def test_scan_quest_homes_missing_state_json(tmp_path: Path) -> None:
 
 def test_scan_quest_homes_drops_malformed_quest_json(tmp_path: Path) -> None:
     _seed_control(tmp_path)
-    Change.create(tmp_path, title="Bad JSON", quest_id="badJson", base_branch="main")
+    Quest.create(tmp_path, title="Bad JSON", quest_id="badJson", base_branch="main")
     change_file = tmp_path / ".imp" / "quests" / "badJson" / "quest.json"
     change_file.write_bytes(b"bad json")
 
@@ -51,8 +51,8 @@ def test_scan_quest_homes_drops_malformed_quest_json(tmp_path: Path) -> None:
 
 def test_status_rows_uses_passed_scan(tmp_path: Path) -> None:
     _seed_control(tmp_path)
-    Change.create(tmp_path, title="A", quest_id="alpha", base_branch="main")
-    Change.create(tmp_path, title="B", quest_id="beta", base_branch="main")
+    Quest.create(tmp_path, title="A", quest_id="alpha", base_branch="main")
+    Quest.create(tmp_path, title="B", quest_id="beta", base_branch="main")
 
     scan = m._scan_quest_homes(tmp_path)
     # Threaded scan and internal scan produce identical rows.
@@ -65,9 +65,9 @@ def test_status_rows_uses_passed_scan(tmp_path: Path) -> None:
 
 def test_backlog_rows_uses_passed_scan(tmp_path: Path) -> None:
     _seed_control(tmp_path)
-    Change.create_draft(tmp_path, title="Brief", quest_id="bk1",
+    Quest.create_draft(tmp_path, title="Brief", quest_id="bk1",
                         base_branch="main", origin="idea", seed_opening="Brief")
-    Change.create_draft(tmp_path, title="Brief2", quest_id="bk2",
+    Quest.create_draft(tmp_path, title="Brief2", quest_id="bk2",
                         base_branch="main", origin="idea", seed_opening="Brief2")
 
     scan = m._scan_quest_homes(tmp_path)
@@ -199,8 +199,8 @@ def test_history_rows_threads_live_ids(tmp_path: Path) -> None:
 
 def test_overview_lines_scans_homes_once(tmp_path: Path, monkeypatch) -> None:
     _seed_control(tmp_path)
-    Change.create(tmp_path, title="A", quest_id="alpha", base_branch="main")
-    Change.create_draft(tmp_path, title="Brief", quest_id="bk1",
+    Quest.create(tmp_path, title="A", quest_id="alpha", base_branch="main")
+    Quest.create_draft(tmp_path, title="Brief", quest_id="bk1",
                         base_branch="main", origin="idea", seed_opening="Brief")
 
     real = m._scan_quest_homes
@@ -219,8 +219,8 @@ def test_overview_lines_scans_homes_once(tmp_path: Path, monkeypatch) -> None:
 
 def test_overview_lines_renders_inflight_and_backlog(tmp_path: Path) -> None:
     _seed_control(tmp_path)
-    Change.create(tmp_path, title="A", quest_id="alpha", base_branch="main")
-    Change.create_draft(tmp_path, title="Brief", quest_id="bk1",
+    Quest.create(tmp_path, title="A", quest_id="alpha", base_branch="main")
+    Quest.create_draft(tmp_path, title="Brief", quest_id="bk1",
                         base_branch="main", origin="idea", seed_opening="Brief")
 
     lines = m._overview_lines(tmp_path, show_all=False,

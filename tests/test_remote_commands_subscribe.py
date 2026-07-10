@@ -52,7 +52,7 @@ def test_subscribe_with_no_handle_is_route_hint() -> None:
 
 
 def test_subscribe_reply_to_is_not_a_subscribe_target() -> None:
-    # reply_to 42 resolves a Change for reply/abandon, but never for subscribe.
+    # reply_to 42 resolves a Quest for reply/abandon, but never for subscribe.
     assert parse(
         "/subscribe", 42, fake_resolve, parse_subscribe_handle
     ) == Notice(ROUTE_HINT)

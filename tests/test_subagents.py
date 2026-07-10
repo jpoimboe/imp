@@ -94,7 +94,7 @@ def _dispatch_ctx(tmp_path: Path) -> ToolContext:
     ctx.spawn_subagent = _spawn_yielding(
         [{"type": "agent_output", "payload": {"text": "ok"}}])
     ctx.quest_context = QuestContext(
-        id="change-42", title="Change 42", project_root=tmp_path,
+        id="change-42", title="Quest 42", project_root=tmp_path,
         workflow_dir=tmp_path / ".imp" / "change" / "workflow")
     return ctx
 
@@ -157,7 +157,7 @@ async def test_dispatch_task_awaits_spawn_subagent(tmp_path: Path) -> None:
         [{"type": "agent_output", "payload": {"text": "ok"}}],
         capture=capture)
     ctx.quest_context = QuestContext(
-        id="change-42", title="Change 42", project_root=tmp_path,
+        id="change-42", title="Quest 42", project_root=tmp_path,
         workflow_dir=tmp_path / ".imp" / "change" / "workflow")
 
     out = await dispatch_task(ctx, "reviewer", "please review")
@@ -214,7 +214,7 @@ events_path=tmp_path / "events.jsonl",
         provider_name="anthropic", model_name="claude-sonnet-4-6",
         parent_transcript_dir=tmp_path / "parent",
         quest_context=QuestContext(
-            id="change-7", title="Change 7", project_root=tmp_path,
+            id="change-7", title="Quest 7", project_root=tmp_path,
             workflow_dir=tmp_path / ".imp" / "change" / "workflow",
         ),
     )

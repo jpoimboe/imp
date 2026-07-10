@@ -7,7 +7,7 @@ from collections.abc import Awaitable, Callable
 from imp.agents.classify import ResumeState, classify_resume
 from imp.agents.runner import Message, TextBlock
 from imp.agents.transcript import Transcript
-from imp.engine.change import Change
+from imp.engine.quest import Quest
 from imp.engine.state import State
 
 
@@ -34,7 +34,7 @@ def render_inert_question(text: str, *, width: int, color: bool) -> str:
     return "\n".join(_render_markdown_block(text, width, 0, color))
 
 
-def bare_turn_end_question(change: Change) -> str | None:
+def bare_turn_end_question(change: Quest) -> str | None:
     """Pending question if `change` is paused at a bare-turn-end yield, else None."""
     state = State.load(change.state_dir)
     if state.status != "paused" or state.current_step is None:

@@ -4,11 +4,11 @@ from pathlib import Path
 
 from imp.agents.tools import get_registry
 from imp.agents.tools.context import ToolContext
-from imp.engine.change import Change
+from imp.engine.quest import Quest
 from tests.conftest import _seed_control
 
 
-def _ctx(ch: Change) -> ToolContext:
+def _ctx(ch: Quest) -> ToolContext:
     ctx = ToolContext(project_root=ch.project_root,
                       events_path=ch.events_path)
     ctx.event_log = ch.event_log()
@@ -16,9 +16,9 @@ def _ctx(ch: Change) -> ToolContext:
     return ctx
 
 
-def _change(tmp_path: Path) -> Change:
+def _change(tmp_path: Path) -> Quest:
     _seed_control(tmp_path)
-    return Change.create(tmp_path, title="t", quest_id="aaa111", base_branch="main")
+    return Quest.create(tmp_path, title="t", quest_id="aaa111", base_branch="main")
 
 
 def test_tool_is_registered() -> None:

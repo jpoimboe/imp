@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from imp.engine.change import Change
+from imp.engine.quest import Quest
 from imp.engine.executor import RunResult, run_change
 from tests._live import opted_in
 from tests.conftest import _git
@@ -87,7 +87,7 @@ async def test_one_step_walk_against_openai(
     )
     _git(tmp_path, "add", "-A")
     _git(tmp_path, "commit", "-qm", "seed")
-    change = Change.create(
+    change = Quest.create(
         tmp_path, title="live-openai", quest_id="live-openai", base_branch="main")
 
     result = await run_change(change)

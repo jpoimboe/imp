@@ -28,15 +28,15 @@ from imp.agents.runner import (
 )
 from imp.agents.tools import get_registry  # noqa: F401 - ensures tools registered
 from imp.agents.transcript import Transcript
-from imp.engine.change import Change
+from imp.engine.quest import Quest
 from imp.engine.state import InMemoryEventLog, JsonlEventLog, State
 from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
 from imp.providers.anthropic import AnthropicAgentRunner
 from tests.anthropic_fakes import FakeAsyncAnthropic, response, text, tool_use
 
 
-def _make_change(root: Path, *, quest_id: str = "test-change", title: str = "t") -> Change:
-    """Construct a Change directly on disk without git worktrees."""
+def _make_change(root: Path, *, quest_id: str = "test-change", title: str = "t") -> Quest:
+    """Construct a Quest directly on disk without git worktrees."""
     from imp.engine.loader import load_workflow
     from imp.providers.effective import load_effective_config
 
@@ -60,7 +60,7 @@ def _make_change(root: Path, *, quest_id: str = "test-change", title: str = "t")
         status="running", vars=dict(workflow.vars.defaults()), loop_counts={},
     ).save(quest_dir / "state")
 
-    change = Change(
+    change = Quest(
         id=quest_id, title=title, base_branch="main",
         control_root=root, project_root=root, quest_dir=quest_dir,
     )

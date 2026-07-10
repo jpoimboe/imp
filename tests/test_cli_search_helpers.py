@@ -11,7 +11,7 @@ from imp.cli.main import (
     _selected_search_zones,
 )
 from imp.engine import archive
-from imp.engine.change import Change
+from imp.engine.quest import Quest
 from tests.conftest import _seed_control
 
 
@@ -47,7 +47,7 @@ def test_selected_zones_are_composable() -> None:
 
 def test_search_active_labels_zone_and_carries_prose(tmp_path: Path) -> None:
     _seed_control(tmp_path)
-    Change.create(tmp_path, title="Dark mode inflight",
+    Quest.create(tmp_path, title="Dark mode inflight",
                   quest_id="liveid", base_branch="main")
     hits = _search_active(tmp_path, "dark")
     assert [h.quest_id for h in hits] == ["liveid"]
@@ -57,7 +57,7 @@ def test_search_active_labels_zone_and_carries_prose(tmp_path: Path) -> None:
 
 def test_search_backlog_matches_seed_opening_body(tmp_path: Path) -> None:
     _seed_control(tmp_path)
-    Change.create_draft(
+    Quest.create_draft(
         tmp_path, title="Flaky tracker", quest_id="bk1", base_branch="main",
         origin="idea", seed_opening="Flaky tracker\n\ntracking test_widget_timeout")
     # Term lives only in the description body, not the id or title.
@@ -69,7 +69,7 @@ def test_search_backlog_matches_seed_opening_body(tmp_path: Path) -> None:
 
 def test_search_backlog_excludes_nonmatching(tmp_path: Path) -> None:
     _seed_control(tmp_path)
-    Change.create_draft(
+    Quest.create_draft(
         tmp_path, title="Unrelated idea", quest_id="bk2", base_branch="main",
         origin="idea", seed_opening="Unrelated idea")
     assert _search_backlog(tmp_path, "zzznope") == []
@@ -92,7 +92,7 @@ def _user_msg_line(text: str, *, human: bool = True) -> str:
 
 def test_search_active_matches_conversation_prose_only(tmp_path: Path) -> None:
     _seed_control(tmp_path)
-    live = Change.create(tmp_path, title="Quiet chat", quest_id="liveid",
+    live = Quest.create(tmp_path, title="Quiet chat", quest_id="liveid",
                          base_branch="main")
     live.events_path.write_text(_user_msg_line("please wire a 300s deadline soon"))
     # "300s" is in neither the id nor the title — only the conversation prose.
@@ -104,7 +104,7 @@ def test_search_active_matches_conversation_prose_only(tmp_path: Path) -> None:
 
 def test_search_active_excludes_nonhuman_user_message(tmp_path: Path) -> None:
     _seed_control(tmp_path)
-    live = Change.create(tmp_path, title="Quiet chat", quest_id="liveid",
+    live = Quest.create(tmp_path, title="Quiet chat", quest_id="liveid",
                          base_branch="main")
     live.events_path.write_text(_user_msg_line("cover-check injected prompt", human=False))
     # The term lives only in a non-human (injected) user_message -> not searchable,

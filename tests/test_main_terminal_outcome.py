@@ -66,7 +66,7 @@ def test_emit_completed_merge_lines_render_lifecycle_wordmark(monkeypatch, capsy
             main._emit_completed(_Change([]), "shipped it", merged=True)
             out = capsys.readouterr().out
             assert "✓ Merged 2026-06-12-run-x into master." in out
-            assert "Change 2026-06-12-run-x: shipped it" in out
+            assert "Quest 2026-06-12-run-x: shipped it" in out
             assert pal.sgr("wordmark", enabled=True) in out
             assert pal._ANSI["green"] not in out
         finally:
@@ -78,7 +78,7 @@ def test_emit_completed_non_merge_stays_green(monkeypatch, capsys) -> None:
     monkeypatch.setattr(main, "should_use_color", lambda stream: True)
     main._emit_completed(_Change([]), "all done", merged=False)
     out = capsys.readouterr().out
-    assert "Change 2026-06-12-run-x: all done" in out
+    assert "Quest 2026-06-12-run-x: all done" in out
     assert pal._ANSI["green"] in out
     assert pal._ANSI["yellow"] not in out
 
@@ -185,7 +185,7 @@ def test_emit_completed_appends_warning_count_suffix(monkeypatch, capsys) -> Non
     monkeypatch.setattr(main, "should_use_color", lambda stream: False)
     main._emit_completed(_Change([]), "all done", merged=False, warnings=2)
     out = capsys.readouterr().out
-    assert "Change 2026-06-12-run-x: all done  (2 warnings)" in out
+    assert "Quest 2026-06-12-run-x: all done  (2 warnings)" in out
 
 
 def test_emit_completed_warning_suffix_singular(monkeypatch, capsys) -> None:
@@ -208,7 +208,7 @@ def test_emit_completed_appends_warning_suffix_on_merged_line(monkeypatch, capsy
     monkeypatch.setattr(main, "should_use_color", lambda stream: False)
     main._emit_completed(_Change([]), "all done", merged=True, warnings=2)
     out = capsys.readouterr().out
-    assert "Change 2026-06-12-run-x: all done  (2 warnings)" in out
+    assert "Quest 2026-06-12-run-x: all done  (2 warnings)" in out
 
 
 def test_handle_terminal_outcome_threads_runner_warning_count(monkeypatch) -> None:

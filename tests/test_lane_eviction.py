@@ -4,7 +4,7 @@ import anyio
 
 import imp.remote.session.attach as attach_mod
 from imp.engine import merge_queue as mq
-from imp.engine.change import Change
+from imp.engine.quest import Quest
 from imp.engine.executor import RunResult, _evict_if_holding, run_change
 from imp.engine.state import JsonlEventLog, State
 from tests.conftest import _git, _seed_control
@@ -12,8 +12,8 @@ from tests.conftest import _git, _seed_control
 
 def test_evict_releases_lane_and_rewinds(tmp_path: Path, monkeypatch) -> None:
     _seed_control(tmp_path)
-    a = Change.create(tmp_path, title="a", quest_id="aaa", base_branch="main")
-    Change.create(tmp_path, title="b", quest_id="bbb", base_branch="main")
+    a = Quest.create(tmp_path, title="a", quest_id="aaa", base_branch="main")
+    Quest.create(tmp_path, title="b", quest_id="bbb", base_branch="main")
     mq.enqueue_if_absent(tmp_path, "aaa", "main")   # head
     mq.enqueue_if_absent(tmp_path, "bbb", "main")   # next
     # eviction pops the head and wakes the next head; stub the real daemon spawn.
@@ -37,7 +37,7 @@ def test_evict_releases_lane_and_rewinds(tmp_path: Path, monkeypatch) -> None:
 
 def test_evict_noop_when_not_holding(tmp_path: Path) -> None:
     _seed_control(tmp_path)
-    ch = Change.create(tmp_path, title="x", quest_id="feat", base_branch="main")
+    ch = Quest.create(tmp_path, title="x", quest_id="feat", base_branch="main")
     state = State.load(ch.state_dir)      # held_lane is None
     assert _evict_if_holding(ch, state, JsonlEventLog(ch.events_path)) is False
 
@@ -72,7 +72,7 @@ def test_pause_in_held_region_evicts_and_rewinds(tmp_path: Path, provider_regist
     provider_registry("anthropic", lambda: True, lambda model: _FakeProvider(model))
     _seed_control(tmp_path)
     _write_serialize_workflow(tmp_path, "false")   # touch-base fails -> pause
-    ch = Change.create(tmp_path, title="x", quest_id="feat", base_branch="main")
+    ch = Quest.create(tmp_path, title="x", quest_id="feat", base_branch="main")
     result = anyio.run(run_change, ch)
     assert result is RunResult.PAUSED
     reloaded = State.load(ch.state_dir)
@@ -86,7 +86,7 @@ def test_crash_resume_with_held_mark_evicts_at_entry(tmp_path: Path, provider_re
     provider_registry("anthropic", lambda: True, lambda model: _FakeProvider(model))
     _seed_control(tmp_path)
     _write_serialize_workflow(tmp_path, "true")    # touch-base succeeds
-    ch = Change.create(tmp_path, title="x", quest_id="feat", base_branch="main")
+    ch = Quest.create(tmp_path, title="x", quest_id="feat", base_branch="main")
     # Simulate a crash WHILE holding: mark set, cursor mid-held-region, still running.
     mq.enqueue_if_absent(tmp_path, "feat", "main")
     state = State.load(ch.state_dir)

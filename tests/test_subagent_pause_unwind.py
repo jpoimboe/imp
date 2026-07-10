@@ -10,7 +10,7 @@ import pytest
 
 from imp.agents.runner import AgentInvocation, AgentRunner, Event
 from imp.agents.subagents import SubagentSuspended
-from imp.engine.change import Change
+from imp.engine.quest import Quest
 from imp.engine.executor import RunResult, run_change
 from imp.engine.state import State
 
@@ -119,7 +119,7 @@ async def test_batched_child_suspension_degrades_to_is_error(tmp_path) -> None:
     assert error_results, "expected an is_error tool_result containing SubagentSuspended"
 
 
-def _seed_single_step(root: Path) -> Change:
+def _seed_single_step(root: Path) -> Quest:
     from imp.engine.loader import load_workflow
     from imp.providers.effective import load_effective_config
 
@@ -153,7 +153,7 @@ def _seed_single_step(root: Path) -> Change:
     flat = workflow.flat_steps()
     State(id="s", step=flat[0].name, step_attempt=0, status="running",
           vars=dict(workflow.vars.defaults()), loop_counts={}).save(quest_dir / "state")
-    change = Change(id="s", title="t", base_branch="main", control_root=root,
+    change = Quest(id="s", title="t", base_branch="main", control_root=root,
                     project_root=root, quest_dir=quest_dir)
     change.event_log().append(agent_id=None, type="change_created",
                               payload={"id": "s", "title": "t"})

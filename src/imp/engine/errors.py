@@ -60,7 +60,7 @@ class LayoutMismatch(LoadError):
         self.quest_dir = quest_dir
         breadcrumb = imp_commit or "(unknown)"
         super().__init__(
-            f"Change at {quest_dir} has layout_version {stored}, but this imp "
+            f"Quest at {quest_dir} has layout_version {stored}, but this imp "
             f"engine speaks layout_version {engine}; refusing to resume it under "
             f"a contradictory engine.\n"
             f"  birth imp_commit: {breadcrumb}\n"

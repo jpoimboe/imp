@@ -7,7 +7,7 @@ import pytest
 
 import imp.cli.main as m
 from imp.cli.main import main
-from imp.engine.change import LAYOUT_VERSION
+from imp.engine.quest import LAYOUT_VERSION
 
 
 def _make_worktree(control: Path, slug: str, status: str = "paused") -> None:
@@ -71,7 +71,7 @@ def test_summary_unknown_id_errors(tmp_path, monkeypatch, capsys):
     _setup(tmp_path, monkeypatch)
     rc = main(["log", "-s", "no-such-token"])
     assert rc == 2
-    assert "no Change matches" in capsys.readouterr().err
+    assert "no Quest matches" in capsys.readouterr().err
 
 
 def test_summary_paused_open_step_reads_paused_not_running(tmp_path, monkeypatch, capsys):

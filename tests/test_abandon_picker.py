@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 import imp.cli.main as m
-from imp.engine.change import Change
+from imp.engine.quest import Quest
 from tests.conftest import _seed_control
 
 
@@ -141,8 +141,8 @@ def test_cmd_abandon_with_token_skips_picker(
 
 def test_abandon_rows_include_backlog_ideas(tmp_path: Path) -> None:
     _seed_control(tmp_path)
-    Change.create(tmp_path, title="Built", quest_id="feat", base_branch="main")
-    Change.create_draft(tmp_path, title="Idea one", quest_id="idea1",
+    Quest.create(tmp_path, title="Built", quest_id="feat", base_branch="main")
+    Quest.create_draft(tmp_path, title="Idea one", quest_id="idea1",
                         base_branch="main", origin="idea")
     ids = {r[0] for r in m._abandon_rows(tmp_path)}
     assert {"feat", "idea1"} <= ids

@@ -230,7 +230,7 @@ async def test_relay_set_lease_tracks_subscription_changes(tmp_path: Path) -> No
 @pytest.mark.anyio
 async def test_relay_reflects_title_rename_after_start(tmp_path: Path) -> None:
     # The relay's provider starts empty (session began before the brainstorm named
-    # the Change) and later returns a real title. The FIRST event carries "", and a
+    # the Quest) and later returns a real title. The FIRST event carries "", and a
     # LATER event carries the rename — the frozen-empty-title bug would keep "".
     sock = str(tmp_path / "s.sock")
     socket = SessionSocket(sock)

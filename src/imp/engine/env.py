@@ -1,7 +1,7 @@
 """Engine-provided environment variables.
 
 These are the variables the engine guarantees to every subprocess it spawns on
-behalf of a Change — script gates (`run_script_gate`) and the agent `bash` tool.
+behalf of a Quest — script gates (`run_script_gate`) and the agent `bash` tool.
 Centralizing them here keeps the two execution paths consistent and gives future
 engine vars a single home.
 
@@ -119,7 +119,7 @@ def engine_env(
 
     Variables:
         IMP_PROJECT_ROOT  — absolute path of the project root on the host.
-        IMP_QUEST_ID      — the stable, immutable Change identity; hook authors
+        IMP_QUEST_ID      — the stable, immutable Quest identity; hook authors
                             MUST key on this.
         IMP_QUEST_TITLE   — human-readable title for the change.
         IMP_QUEST_DIR     — absolute host path of the change state directory;

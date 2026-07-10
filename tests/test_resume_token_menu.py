@@ -8,7 +8,7 @@ import pytest
 import imp.cli.main as m
 from imp.engine.abandon import archive_conversation
 from imp.engine.archive import archive_quest
-from imp.engine.change import Change
+from imp.engine.quest import Quest
 from tests.conftest import _seed_control
 
 
@@ -140,7 +140,7 @@ async def test_zero_matches_resolve_id_systemexit_returns_2(
 async def test_real_single_live_resumable_resolves_directly(tmp_path: Path) -> None:
     # AC 7
     _seed_control(tmp_path)
-    Change.create_draft(tmp_path, title="A", quest_id="lodo40",
+    Quest.create_draft(tmp_path, title="A", quest_id="lodo40",
                         base_branch="main", origin="idea")
     assert await m._resolve_resume_target(
         tmp_path, "lodo", non_interactive=True) == "lodo40"
@@ -153,7 +153,7 @@ async def test_real_archived_resumable_resolves_by_stem_and_full_id(
     # AC 9: archived-but-resumable reachable by both a shorter unique stem and a
     # full-id token.
     _seed_control(tmp_path)
-    ch = Change.create_draft(tmp_path, title="Left", quest_id="lodo40",
+    ch = Quest.create_draft(tmp_path, title="Left", quest_id="lodo40",
                              base_branch="main")
     archive_conversation(ch)
     assert await m._resolve_resume_target(
@@ -182,12 +182,12 @@ async def test_real_lone_archived_terminal_falls_through_to_resume_gone(
 async def test_real_unknown_token_returns_2(tmp_path: Path, capsys) -> None:
     # AC 12
     _seed_control(tmp_path)
-    Change.create_draft(tmp_path, title="A", quest_id="lodo40",
+    Quest.create_draft(tmp_path, title="A", quest_id="lodo40",
                         base_branch="main", origin="idea")
     rc = await m._resolve_resume_target(
         tmp_path, "zzzzzz", non_interactive=True)
     assert rc == 2
-    assert "no Change matches" in capsys.readouterr().err
+    assert "no Quest matches" in capsys.readouterr().err
 
 
 @pytest.mark.anyio
@@ -195,7 +195,7 @@ async def test_real_blank_token_behaves_like_no_token(tmp_path: Path) -> None:
     # AC 13: "" resolves identically to None (both the full picker; a lone
     # resumable auto-selects on a non-tty).
     _seed_control(tmp_path)
-    Change.create_draft(tmp_path, title="A", quest_id="lodo40",
+    Quest.create_draft(tmp_path, title="A", quest_id="lodo40",
                         base_branch="main", origin="idea")
     none_res = await m._resolve_resume_target(
         tmp_path, None, non_interactive=True)

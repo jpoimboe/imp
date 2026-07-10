@@ -13,7 +13,7 @@ from pathlib import Path
 import pytest
 
 from imp.cli.main import main
-from imp.engine.change import LAYOUT_VERSION
+from imp.engine.quest import LAYOUT_VERSION
 
 # ── resume renders through LiveDriver (no replay) ────────────────────────────
 
@@ -27,8 +27,8 @@ def test_replay_current_step_removed() -> None:
 
 def _make_change_worktree(control: Path, quest_id: str, title: str,
                            status: str = "paused") -> Path:
-    """Create a minimal on-disk Change home (no real git worktree needed —
-    Change.load only reads the permanent .imp/quests/<id>/ directory)."""
+    """Create a minimal on-disk Quest home (no real git worktree needed —
+    Quest.load only reads the permanent .imp/quests/<id>/ directory)."""
     from imp.engine.state import State
 
     quest_dir = control / ".imp" / "quests" / quest_id
@@ -110,7 +110,7 @@ def test_cli_log_pipes_through_narrative(
 ) -> None:
     """End-to-end: ``imp log`` reads events.jsonl and prints narrative lines.
 
-    Constructs a minimal Change directory by hand (no engine spinup) and
+    Constructs a minimal Quest directory by hand (no engine spinup) and
     invokes ``main([..])`` directly.  The narrative view renders
     change_created as the workflow header "#<slug>  <title>" and phase_started
     as the phase name — no raw JSON braces.
@@ -424,12 +424,12 @@ def test_log_backlog_id_renders_card(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture,
 ) -> None:
     import imp.cli.main as m
-    from imp.engine.change import Change
+    from imp.engine.quest import Quest
     from tests.conftest import _seed_control
     _seed_control(tmp_path)
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
-    Change.create_draft(
+    Quest.create_draft(
         tmp_path, title="Add OAuth", quest_id="2026-06-16-bkg111",
         base_branch="main", origin="followup",
         seed_opening="Add OAuth\n\nwire up OAuth login")
@@ -438,17 +438,17 @@ def test_log_backlog_id_renders_card(
     out = capsys.readouterr().out
     assert "Add OAuth" in out
     assert "wire up OAuth login" in out
-    assert "no such Change" not in out
+    assert "no such Quest" not in out
 
 
 def test_log_picker_rows_include_backlog(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     import imp.cli.main as m
-    from imp.engine.change import Change
+    from imp.engine.quest import Quest
     from tests.conftest import _seed_control
     _seed_control(tmp_path)
-    Change.create_draft(
+    Quest.create_draft(
         tmp_path, title="Add OAuth", quest_id="2026-06-16-bkg111",
         base_branch="main", origin="idea", seed_opening="Add OAuth")
     captured: dict = {}

@@ -72,9 +72,9 @@ def test_phase_from_events_none_when_no_step_started() -> None:
 
 def test_pause_facts_unnamed_change_shows_bare_id(tmp_path: Path) -> None:
     from imp.cli.main import _pause_facts
-    from imp.engine.change import Change
+    from imp.engine.quest import Quest
 
-    change = Change(id="qzbscf", title="", base_branch="main",
+    change = Quest(id="qzbscf", title="", base_branch="main",
                     control_root=tmp_path, project_root=tmp_path,
                     quest_dir=tmp_path / ".imp" / "change")
     name, title, _phase, token, _reason = _pause_facts(change)
@@ -85,9 +85,9 @@ def test_pause_facts_unnamed_change_shows_bare_id(tmp_path: Path) -> None:
 
 def test_pause_facts_named_change_shows_bare_id(tmp_path: Path) -> None:
     from imp.cli.main import _pause_facts
-    from imp.engine.change import Change
+    from imp.engine.quest import Quest
 
-    change = Change(id="qzbscf", title="Add version flag",
+    change = Quest(id="qzbscf", title="Add version flag",
                     base_branch="main", control_root=tmp_path,
                     project_root=tmp_path,
                     quest_dir=tmp_path / ".imp" / "change")
@@ -249,7 +249,7 @@ def test_pause_facts_stale_with_crash_stderr_renders_unexpected_death_banner(
     import json
 
     from imp.cli.main import _pause_facts
-    from imp.engine.change import Change
+    from imp.engine.quest import Quest
 
     quest_dir = tmp_path / ".imp" / "quests" / "mona44"
     quest_dir.mkdir(parents=True)
@@ -263,7 +263,7 @@ def test_pause_facts_stale_with_crash_stderr_renders_unexpected_death_banner(
     # A genuine death: the daemon left a traceback in its stderr.
     (quest_dir / "daemon.stderr").write_text(
         "Traceback (most recent call last):\n  ...\nRuntimeError: boom\n")
-    change = Change(id="mona44", title="", base_branch="main",
+    change = Quest(id="mona44", title="", base_branch="main",
                     control_root=tmp_path, project_root=tmp_path,
                     quest_dir=quest_dir)
     name, _title, phase, token, reason = _pause_facts(change)
@@ -279,7 +279,7 @@ def test_pause_facts_stale_clean_detach_renders_calm_interrupt(
     import json
 
     from imp.cli.main import _pause_facts
-    from imp.engine.change import Change
+    from imp.engine.quest import Quest
 
     quest_dir = tmp_path / ".imp" / "quests" / "mona44"
     quest_dir.mkdir(parents=True)
@@ -293,7 +293,7 @@ def test_pause_facts_stale_clean_detach_renders_calm_interrupt(
         "\n".join(json.dumps(e) for e in events) + "\n")
     # ...but daemon.stderr holds only benign INFO chatter — a clean detach.
     (quest_dir / "daemon.stderr").write_text("Using bundled Claude Code CLI\n")
-    change = Change(id="mona44", title="", base_branch="main",
+    change = Quest(id="mona44", title="", base_branch="main",
                     control_root=tmp_path, project_root=tmp_path,
                     quest_dir=quest_dir)
     _name, _title, _phase, _token, reason = _pause_facts(change)
@@ -306,7 +306,7 @@ def test_pause_facts_stale_empty_stderr_renders_calm_interrupt(tmp_path: Path) -
     import json
 
     from imp.cli.main import _pause_facts
-    from imp.engine.change import Change
+    from imp.engine.quest import Quest
 
     # daemon.stderr present but EMPTY (0 bytes): no crash traceback, so a clean
     # detach — the calm interrupt reason, no pointer (the empty-read path,
@@ -321,7 +321,7 @@ def test_pause_facts_stale_empty_stderr_renders_calm_interrupt(tmp_path: Path) -
     (quest_dir / "events.jsonl").write_text(
         "\n".join(json.dumps(e) for e in events) + "\n")
     (quest_dir / "daemon.stderr").write_bytes(b"")
-    change = Change(id="mona44", title="", base_branch="main",
+    change = Quest(id="mona44", title="", base_branch="main",
                     control_root=tmp_path, project_root=tmp_path,
                     quest_dir=quest_dir)
     *_, reason = _pause_facts(change)
@@ -333,7 +333,7 @@ def test_pause_facts_deliberate_leave_renders_trigger_over_stale(tmp_path: Path)
     import json
 
     from imp.cli.main import _pause_facts
-    from imp.engine.change import Change
+    from imp.engine.quest import Quest
 
     # Event log that, WITHOUT a deliberate-leave signal, reads as STALE (a pause
     # followed by a resume) — the daemon-derived path would render the
@@ -347,7 +347,7 @@ def test_pause_facts_deliberate_leave_renders_trigger_over_stale(tmp_path: Path)
     ]
     (quest_dir / "events.jsonl").write_text(
         "\n".join(json.dumps(e) for e in events) + "\n")
-    change = Change(id="krol99", title="Leave now", base_branch="main",
+    change = Quest(id="krol99", title="Leave now", base_branch="main",
                     control_root=tmp_path, project_root=tmp_path,
                     quest_dir=quest_dir)
 

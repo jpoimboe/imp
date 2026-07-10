@@ -4,7 +4,7 @@ distinct ids with no retry loop (spec §5, AC 7)."""
 import re
 from pathlib import Path
 
-from imp.engine.change import Change
+from imp.engine.quest import Quest
 from imp.engine.quest_id import new_quest_id
 from tests.conftest import _seed_control
 
@@ -14,7 +14,7 @@ _ID_RE = re.compile(r"[a-z0-9]{6}")
 def test_new_mints_unique_dateless_id(tmp_path: Path) -> None:
     _seed_control(tmp_path)
     quest_id = new_quest_id()
-    change = Change.create(tmp_path, title="Add OAuth", quest_id=quest_id,
+    change = Quest.create(tmp_path, title="Add OAuth", quest_id=quest_id,
                            base_branch="main")
     assert change.id == quest_id
     assert _ID_RE.fullmatch(change.id)
@@ -26,9 +26,9 @@ def test_new_mints_unique_dateless_id(tmp_path: Path) -> None:
 def test_two_new_calls_make_distinct_ids(tmp_path: Path) -> None:
     _seed_control(tmp_path)
     id1 = new_quest_id()
-    Change.create(tmp_path, title="One", quest_id=id1, base_branch="main")
+    Quest.create(tmp_path, title="One", quest_id=id1, base_branch="main")
     id2 = new_quest_id()
-    Change.create(tmp_path, title="Two", quest_id=id2, base_branch="main")
+    Quest.create(tmp_path, title="Two", quest_id=id2, base_branch="main")
     ids = [p.name for p in (tmp_path / ".imp" / "worktrees").iterdir() if p.is_dir()]
     assert len(ids) == 2 and len(set(ids)) == 2
     assert all(_ID_RE.fullmatch(i) for i in ids)

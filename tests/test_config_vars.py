@@ -1,6 +1,6 @@
 """config.yaml `vars:` override layer (spec §10, §11, §14): parsed by
 parse_config_layer, validated + applied over the workflow's declared defaults at
-Change creation."""
+Quest creation."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from imp.engine.change import Change
+from imp.engine.quest import Quest
 from imp.engine.errors import LoadError
 from imp.engine.state import State
 from imp.engine.types import SourceLoc, VarDecl, Vars
@@ -96,7 +96,7 @@ def test_override_lands_in_state_at_change_creation(tmp_path: Path) -> None:
         "vars:\n  flag_var: {type: bool, default: true}\n"
         "phases:\n  - name: p\n    steps:\n      - {name: s, file: agents/stub.md}\n"
     )
-    # Change.create reads the merged config via load_effective_config. Put the
+    # Quest.create reads the merged config via load_effective_config. Put the
     # vars override on the local layer (.imp/config.yaml, gitignored control-root)
     # so the reader sees it.
     (tmp_path / ".imp" / "config.yaml").write_text(
@@ -110,7 +110,7 @@ def test_override_lands_in_state_at_change_creation(tmp_path: Path) -> None:
     _git(tmp_path, "add", "-A")
     _git(tmp_path, "commit", "-qm", "vars")
 
-    ch = Change.create(tmp_path, title="X", quest_id="x", base_branch="main")
+    ch = Quest.create(tmp_path, title="X", quest_id="x", base_branch="main")
     st = State.load(ch.state_dir)
     assert st.vars["flag_var"] is False
 

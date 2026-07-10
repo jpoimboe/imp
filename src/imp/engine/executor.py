@@ -41,7 +41,7 @@ from imp.engine.agent_run import (
 from imp.engine.backoff import (
     interruptible_sleep as _interruptible_sleep,
 )
-from imp.engine.change import Change
+from imp.engine.quest import Quest
 from imp.engine.env import TestGates, engine_env, overlay_engine_env
 from imp.engine.error_policy import budget_for
 from imp.engine.errors import LoadError, summarize_exception
@@ -101,7 +101,7 @@ def _record_outcome(
     del hist[:-OUTCOME_HISTORY_K]
 
 
-def _worktree_head(change: Change) -> str:
+def _worktree_head(change: Quest) -> str:
     """Worktree HEAD sha, or "" when HEAD is absent/unborn (like change._imp_commit)."""
     from imp.engine import worktree
     proc = worktree._git(change.project_root, "rev-parse", "HEAD")
@@ -125,7 +125,7 @@ def _latest_step_context_system_prompt(log: EventLog, agent_id: str) -> str | No
     """The verbatim system_prompt from the LATEST step_context for this agent_id,
     or None if none exists. 'Latest' matters: a goto re-entry renders afresh and
     emits a newer step_context; resume must replay the newest, not an earlier row.
-    Resume is not a hot path and the log is per-Change, so a linear scan is fine."""
+    Resume is not a hot path and the log is per-Quest, so a linear scan is fine."""
     found: str | None = None
     for e in log.read():
         if e.get("type") == "step_context" and e.get("agent_id") == agent_id:
@@ -196,7 +196,7 @@ def _trees_identical(a: Path, b: Path) -> bool:
     )
 
 
-def _refresh_workflow_snapshot(change: Change) -> bool:
+def _refresh_workflow_snapshot(change: Quest) -> bool:
     """Re-snapshot the live workflow into quest_dir/workflow at a run_change
     entry. Returns True only when an EXISTING snapshot's content was replaced
     (a fresh change's initial copy returns False); best-effort and crash-safe."""
@@ -265,7 +265,7 @@ def _reconcile_resolved_run(
 
 def _backfill_var_defaults(state: State, decls: Vars) -> list[str]:
     """Seed any workflow-declared var whose key is absent from state.vars with its
-    declared default. Vars are seeded from the workflow only at Change creation
+    declared default. Vars are seeded from the workflow only at Quest creation
     (change.py); a var added to the workflow later is missing from an in-flight
     change's persisted vars, so a template referencing it under StrictUndefined
     (`{{ vars.x }}`) raises "'dict object' has no attribute 'x'" on resume. An
@@ -278,7 +278,7 @@ def _backfill_var_defaults(state: State, decls: Vars) -> list[str]:
 
 
 async def run_change(
-    change: Change,
+    change: Quest,
     *,
     on_event: EventCallback | None = None,
     user_chat_input_fn: Callable[[str], str | Awaitable[str]] | None = None,
@@ -313,7 +313,7 @@ async def run_change(
         # Tier A handoff watch always sees the configured threshold without
         # persisting it (the resolved_tiers block below is skipped on resume).
         state.checkpoint_threshold = config.context_checkpoint_threshold()
-        # Freeze once per Change: resume reuses the facts/guidance the first run saw.
+        # Freeze once per Quest: resume reuses the facts/guidance the first run saw.
         if state.project_facts is None:
             state.project_facts = config.project_facts
             state.guidance = config.guidance
@@ -628,7 +628,7 @@ async def run_change(
 
 
 def _complete_or_park(
-    change: Change, state: State, log: EventLog, coordinator: Any,
+    change: Quest, state: State, log: EventLog, coordinator: Any,
 ) -> RunResult:
     """Navigation ran off the end. Normally finalize via _complete(); but an
     in-flight interrupt parks at completion instead (§3): set completion_pending,
@@ -645,7 +645,7 @@ def _complete_or_park(
     return _complete(change, state, log)
 
 
-def _complete(change: Change, state: State, log: EventLog) -> RunResult:
+def _complete(change: Quest, state: State, log: EventLog) -> RunResult:
     """Terminal handler. Two paths:
     - No merge happened (merge-to-base was never reached, or the gate never set
       it): mark completed, drop steps/, COMPLETED — unchanged legacy behaviour.
@@ -707,7 +707,7 @@ def _apply_readonly_overlay(policy: Any, step: Step, project_root: Path) -> Any:
 
 
 async def _dispatch_step(
-    step: Step, workflow: Workflow, change: Change,
+    step: Step, workflow: Workflow, change: Quest,
     state: State, log: EventLog, *, is_resume: bool,
     user_chat_input_fn: Callable[[str], str | Awaitable[str]] | None,
     coordinator: Any,
@@ -758,7 +758,7 @@ async def _dispatch_step(
 
 def _step_started_payload(
     step: Step, state: State,
-    change: Change | None = None, log: EventLog | None = None,
+    change: Quest | None = None, log: EventLog | None = None,
 ) -> dict[str, Any]:
     payload = {"step": step.name, "kind": step.kind, "phase": step.phase,
                "show_label": step.show_label,
@@ -783,7 +783,7 @@ def _step_started_payload(
 
 
 def _emit_started(
-    log: EventLog, step: Step, state: State, change: Change, **extra: Any,
+    log: EventLog, step: Step, state: State, change: Quest, **extra: Any,
 ) -> dict[str, Any]:
     return _emit(log, "step_started",
                  {**_step_started_payload(step, state, change, log), **extra},
@@ -791,7 +791,7 @@ def _emit_started(
 
 
 def _harvest_artifacts(
-    change: Change, step: Step, warn: Callable[[str], None] | None = None
+    change: Quest, step: Step, warn: Callable[[str], None] | None = None
 ) -> None:
     """Journal quest_dir/artifacts/** to the change's artifact ref (no-op if none)."""
     from imp.engine import worktree
@@ -808,7 +808,7 @@ def _harvest_artifacts(
 
 
 def _finish(
-    log: EventLog, step: Step, change: Change, match: Any, state: State
+    log: EventLog, step: Step, change: Quest, match: Any, state: State
 ) -> tuple[Action, str | None, dict[str, object]]:
     def _warn(msg: str) -> None:
         _emit(log, "warning",
@@ -832,7 +832,7 @@ def _finish(
 
 
 def _route_branch(
-    step: Step, change: Change, state: State, log: EventLog
+    step: Step, change: Quest, state: State, log: EventLog
 ) -> tuple[Action, str | None, dict[str, object]]:
     _emit_started(log, step, state, change)
     match = evaluate_rules(step.rules, vars=state.vars, output=None)
@@ -863,7 +863,7 @@ def _read_script_output(output_path: Path, schema: OutputSchema) -> dict[str, An
 
 
 async def _route_script(
-    step: Step, change: Change, state: State, log: EventLog,
+    step: Step, change: Quest, state: State, log: EventLog,
     *, test_gates: TestGates | None = None,
     sandbox_policy: Any = None,
     max_parallel_test_runs: int = 1,
@@ -988,14 +988,14 @@ async def _headless_wait_for_turn(predicate: Callable[[], bool]) -> None:
     raise AwaitingUserInput()
 
 
-def _resolve_lane(value: str, change: Change) -> str:
+def _resolve_lane(value: str, change: Quest) -> str:
     if value == "merge-lane":
         return change.base_branch
     raise RuntimeError(f"unknown lane keyword {value!r}")
 
 
 async def _route_acquire(
-    step: Step, change: Change, state: State, log: EventLog,
+    step: Step, change: Quest, state: State, log: EventLog,
     wait_for_turn_fn: Callable[[Callable[[], bool]], Awaitable[None]] | None,
 ) -> tuple[Action, str | None, dict[str, object]]:
     """Enqueue in lane; proceed as head, marking the hold; hibernate if unattended non-head."""
@@ -1043,7 +1043,7 @@ async def _route_acquire(
 
 
 def _release_held_lane(
-    lane_keyword: str, change: Change, state: State, log: EventLog, *, step_name: str,
+    lane_keyword: str, change: Quest, state: State, log: EventLog, *, step_name: str,
 ) -> None:
     """Pop the held lane and clear the hold mark, waking the next head."""
     from imp.engine import merge_queue
@@ -1055,13 +1055,13 @@ def _release_held_lane(
     _emit(log, "lane_released", {"base": lane, "step": step_name})
 
 
-def _release_lane(step: Step, change: Change, state: State, log: EventLog) -> None:
+def _release_lane(step: Step, change: Quest, state: State, log: EventLog) -> None:
     """Pop the lane before the step body, clearing the hold mark."""
     assert step.release is not None
     _release_held_lane(step.release, change, state, log, step_name=step.name)
 
 
-def _evict_if_holding(change: Change, state: State, log: EventLog) -> bool:
+def _evict_if_holding(change: Quest, state: State, log: EventLog) -> bool:
     """Release a held lane on pause/crash and rewind the resume cursor to the acquiring step."""
     if state.held_lane is None:
         return False
@@ -1077,7 +1077,7 @@ def _evict_if_holding(change: Change, state: State, log: EventLog) -> bool:
     return True
 
 
-def _exit_worktree(change: Change) -> None:
+def _exit_worktree(change: Quest) -> None:
     """Idempotent: remove_worktree(force=True) tolerates an already-absent worktree."""
     from imp.engine import worktree
     worktree.remove_worktree(change.control_root, change.id, force=True)
@@ -1086,7 +1086,7 @@ def _exit_worktree(change: Change) -> None:
 
 
 def _merge_blocked_pause(
-    log: EventLog, step: Step, change: Change, status: str, detail: str | None,
+    log: EventLog, step: Step, change: Quest, status: str, detail: str | None,
     *, note: str | None = None,
 ) -> tuple[Action, str | None, dict[str, object]]:
     reason = "worktree_dirty" if status == "DIRTY" else status.lower()
@@ -1102,7 +1102,7 @@ def _merge_blocked_pause(
 
 
 async def _route_merge_and_exit_worktree(
-    step: Step, change: Change, state: State, log: EventLog,
+    step: Step, change: Quest, state: State, log: EventLog,
 ) -> tuple[Action, str | None, dict[str, object]]:
     from imp.engine import worktree
     _emit_started(log, step, state, change)
@@ -1152,7 +1152,7 @@ async def _route_merge_and_exit_worktree(
 
 
 def _enforce_clean_tree(
-    step: Step, change: Change, state: State, log: EventLog,
+    step: Step, change: Quest, state: State, log: EventLog,
 ) -> tuple[Action, str | None, dict[str, object]] | None:
     """Post-step clean-tree invariant: None to proceed to rules, else a
     bounce-or-pause (action, feedback, muts) tuple."""
@@ -1193,7 +1193,7 @@ def _enforce_clean_tree(
 
 
 async def _route_agent(
-    step: Step, workflow: Workflow, change: Change,
+    step: Step, workflow: Workflow, change: Quest,
     state: State, log: EventLog, *,
     user_chat_input_fn: Callable[[str], str | Awaitable[str]] | None,
     coordinator: Any, wrapper_text: str | None, is_resume: bool,
@@ -1469,7 +1469,7 @@ async def _run_agent_invocation(
     tier: str,
     step_name: str,
     workflow: Workflow,
-    change: Change,
+    change: Quest,
     state: State,
     log: EventLog,
     transcript_dir: Any,
@@ -1631,7 +1631,7 @@ def _emit_paused_event(
     _emit(log, "workflow_paused", payload)
 
 
-def _build_sandbox_policy(change: Change, config: Any, log: EventLog) -> Any:
+def _build_sandbox_policy(change: Quest, config: Any, log: EventLog) -> Any:
     """Resolve the SandboxPolicy for the current spawn point (IMP_* are
     change-stable, but project_root can flip on go-live, triggering a rebuild).
     Emit a durable posture event; on a hard-fail posture, emit + re-raise so the

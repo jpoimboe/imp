@@ -28,7 +28,7 @@ from typing import Any, NamedTuple, NoReturn
 import anyio
 
 from imp import __version__
-from imp.cli import change_row, resume_select, splash
+from imp.cli import quest_row, resume_select, splash
 from imp.cli import palette as pal
 from imp.cli.inert_resume import (
     bare_turn_end_question,
@@ -58,7 +58,7 @@ from imp.engine.abandon import (
 )
 from imp.engine.archive import read as archive_read
 from imp.engine.awaiting_user_input import AwaitingUserInput
-from imp.engine.change import Change, live_quest_ids, live_stems
+from imp.engine.quest import Quest, live_quest_ids, live_stems
 from imp.engine.quest_id import new_quest_id
 from imp.engine.errors import LayoutMismatch, LoadError, LoadErrors
 from imp.engine.events_digest import digest_event, full_line
@@ -100,7 +100,7 @@ class ReplyInterjectRouter:
     mid-run is therefore not supported (do it at the next solicit boundary); a
     mid-run `/...` line reaches the agent as literal text. This is a deliberate
     scope boundary: intercepting slash on the interject path would require
-    coupling the Change/event-log and a status-suspending print into the raw-tty
+    coupling the Quest/event-log and a status-suspending print into the raw-tty
     reader, on the one path already known to CPR-degrade.
     """
 
@@ -231,7 +231,7 @@ def make_message_reply_fn(message: str | None) -> Callable[[], Awaitable[str]]:
 # decoration is gated on `should_use_color` (TTY + NO_COLOR aware), so piped /
 # redirected output stays plain and script-parseable. Shared by `new`/`resume`.
 
-def _emit_completed(change: Change, value: str, *, merged: bool, warnings: int = 0) -> None:
+def _emit_completed(change: Quest, value: str, *, merged: bool, warnings: int = 0) -> None:
     """Run finished cleanly — ✓ on the headline."""
     color = should_use_color(sys.stdout)
     mark = "✓ " if color else ""
@@ -242,10 +242,10 @@ def _emit_completed(change: Change, value: str, *, merged: bool, warnings: int =
     if merged:
         print(ansi(f"{mark}Merged {change.id} into {change.base_branch}.",
                    *pal.NODE_COLORS["lifecycle"], enabled=color))
-        print(ansi(f"Change {change.id}: {value}{suffix}",
+        print(ansi(f"Quest {change.id}: {value}{suffix}",
                    *pal.NODE_COLORS["lifecycle"], enabled=color))
     else:
-        print(ansi(f"{mark}Change {change.id}: {value}{suffix}", "green", enabled=color))
+        print(ansi(f"{mark}Quest {change.id}: {value}{suffix}", "green", enabled=color))
 
 
 def _phase_from_events(events: list[dict[str, Any]]) -> str | None:
@@ -365,7 +365,7 @@ def _daemon_stderr_has_crash(path: Path) -> bool:
 
 
 def _pause_facts(
-    change: Change, leave_trigger: str | None = None,
+    change: Quest, leave_trigger: str | None = None,
 ) -> tuple[str, str, str | None, str, str | None]:
     name = change.id
     events = list(change.event_log().read())
@@ -387,7 +387,7 @@ def _pause_facts(
     return name, change.title, phase, change.id, reason
 
 
-def _emit_paused_summary(change: Change, leave_trigger: str | None = None) -> None:
+def _emit_paused_summary(change: Quest, leave_trigger: str | None = None) -> None:
     """The trailing run-status line on a non-interactive pause / merge-block."""
     color = should_use_color(sys.stdout)
     name, title, phase, token, reason = _pause_facts(change, leave_trigger)
@@ -396,7 +396,7 @@ def _emit_paused_summary(change: Change, leave_trigger: str | None = None) -> No
 
 
 def _emit_merge_blocked(
-    change: Change, reason: str | None, detail: str | None = None,
+    change: Quest, reason: str | None, detail: str | None = None,
     note: str | None = None,
 ) -> None:
     """Merge couldn't complete — the user must act: wordmark, ⚠.
@@ -420,10 +420,10 @@ def _emit_merge_blocked(
     elif reason == "conflict":
         msg = (f"`imp/{cid}` doesn't auto-merge into `{base}`. imp can't resolve "
                f"conflicts in this version — merge `imp/{cid}` into `{base}` manually, "
-               f"then the Change is done (its worktree at `.imp/worktrees/{cid}` "
+               f"then the Quest is done (its worktree at `.imp/worktrees/{cid}` "
                f"can be removed).")
     else:
-        msg = f"Change {cid}: merge_blocked. Resolve, then `imp resume {cid}`."
+        msg = f"Quest {cid}: merge_blocked. Resolve, then `imp resume {cid}`."
     if note:
         msg = f"{msg}\n{note}"
     if detail and reason in ("refused", "conflict"):
@@ -462,7 +462,7 @@ def _last_script_blocked(
 
 
 def _handle_terminal_outcome(
-    change: Change, result: RunResult, coord: Any,
+    change: Quest, result: RunResult, coord: Any,
 ) -> int:
     """Render the terminal outcome of a settled run and return its rc.
 
@@ -514,7 +514,7 @@ def _handle_terminal_outcome(
 
 
 def _print_leave_disposition(
-    change: Change, leave_state: dict[str, str],
+    change: Quest, leave_state: dict[str, str],
 ) -> int | None:
     """Print the optimistic leave message for a daemon-applied disposition.
 
@@ -549,7 +549,7 @@ def _print_leave_disposition(
     return None
 
 
-def _session_exit_code(change: Change, coord: Any) -> int:
+def _session_exit_code(change: Quest, coord: Any) -> int:
     result = infer_session_result(change)
     outcome = _handle_terminal_outcome(change, result, coord)
     if result is RunResult.PAUSED and coord.interrupted:
@@ -674,7 +674,7 @@ def _print_run_header(quest_id: str, title: str, marker: str,
     print()
 
 
-def _print_opening(change: Change, marker: str, *, interactive: bool, color: bool) -> bool:
+def _print_opening(change: Quest, marker: str, *, interactive: bool, color: bool) -> bool:
     """Lead with the run header, then the splash scene+phrase when interactive, so
     the change identity is the first thing on screen. The header already emits its
     trailing blank line, so the splash is printed without its own leading one.
@@ -697,13 +697,13 @@ async def _read_intent_line(
             continue
         if line in _OPENING_SESSION_VERBS:
             print(f"{line} isn't available at the opening prompt — "
-                  f"describe your Change, or /help for commands.")
+                  f"describe your Quest, or /help for commands.")
             continue
         return line
 
 
 async def _read_opening_message(
-    change: Change, *, leave_mode: str, banner_shown: bool, color: bool,
+    change: Quest, *, leave_mode: str, banner_shown: bool, color: bool,
     width: int, editing_mode: str,
     model_sink: dict[str, str] | None = None,
     _prompt_factory: Callable[[], Any] | None = None,
@@ -729,7 +729,7 @@ async def _run_cleared_session(
     from imp.cli.signals import InterruptCoordinator
 
     color = should_use_color(sys.stdout)
-    change = Change.create_draft(
+    change = Quest.create_draft(
         control, title="", quest_id=new_quest_id(existing_stems=live_stems(control)),
         base_branch=base, origin="draft")
     _session_started = False
@@ -801,7 +801,7 @@ def _record_idea(args: argparse.Namespace, control: Path, base: str) -> int:
     seed = backlog.seed_opening({"title": title, "description": description})
     quest_id = new_quest_id(existing_stems=live_stems(control))
     try:
-        Change.create_draft(
+        Quest.create_draft(
             control, title=title, quest_id=quest_id, base_branch=base,
             depends_on=list(getattr(args, "depends_on", None) or []),
             workflow=getattr(args, "workflow", None),
@@ -809,7 +809,7 @@ def _record_idea(args: argparse.Namespace, control: Path, base: str) -> int:
     except (LoadError, LoadErrors) as e:
         print(f"imp: {e}", file=sys.stderr)
         return 2
-    print(f"imp: recorded backlog Change {quest_id} "
+    print(f"imp: recorded backlog Quest {quest_id} "
           f"(start it with `imp resume {quest_id}`)")
     return 0
 
@@ -826,7 +826,7 @@ def _select_headless(
 
 
 async def _run_fresh_session(
-    change: Change, *, args: argparse.Namespace,
+    change: Quest, *, args: argparse.Namespace,
 ) -> int:
     """Run a freshly-created change (new / materialized backlog) through
     the per-change session daemon, dispatching on headless / interactive."""
@@ -887,7 +887,7 @@ class BaseResolutionError(Exception):
 
 
 def _resolve_new_base(control: Path, base_flag: str | None) -> str:
-    """The validated branch `imp new` bases a Change on.
+    """The validated branch `imp new` bases a Quest on.
 
     `--base BRANCH` overrides the configured `default-base`; either way the
     branch must already exist. There is no runtime auto-detection and no
@@ -984,11 +984,11 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
     color = should_use_color(sys.stdout)
 
     quest_id = new_quest_id(existing_stems=live_stems(control))
-    # No auto-name: an unnamed Change has an empty title. The agent
+    # No auto-name: an unnamed Quest has an empty title. The agent
     # names it via rename_change once intent is clear, or the user passes --title.
     title = seed.title if seed.title is not None else ""
     try:
-        change = Change.create_draft(
+        change = Quest.create_draft(
             control, title=title, quest_id=quest_id, base_branch=base,
             workflow=wf_arg, origin="draft",
             depends_on=None, seed_opening=None)
@@ -1087,7 +1087,7 @@ def _cmd_chat(args: argparse.Namespace) -> int:
     return anyio.run(functools.partial(_async_cmd_new, leave_mode="chat"), args)
 
 
-def _resume_opens_fresh(change: Change) -> bool:
+def _resume_opens_fresh(change: Quest) -> bool:
     """Whether a resume should open a fresh seeded session rather than replay history.
 
     True only for an un-materialized seed draft that has never run a step; a
@@ -1100,14 +1100,14 @@ def _resume_opens_fresh(change: Change) -> bool:
     return not State.load(change.state_dir).has_started
 
 
-def _warn_if_blocked(change: Change) -> None:
+def _warn_if_blocked(change: Quest) -> None:
     try:
         deps = json.loads((change.quest_dir / "quest.json").read_bytes()).get("depends_on", [])
     except (FileNotFoundError, json.JSONDecodeError):
         return
     ready, unmerged = backlog.readiness(change.control_root, deps)
     if not ready:
-        print(f"imp: backlog Change {change.id} is blocked on unmerged dep(s): "
+        print(f"imp: backlog Quest {change.id} is blocked on unmerged dep(s): "
               f"{', '.join(unmerged)}; starting anyway.", file=sys.stderr)
 
 
@@ -1134,7 +1134,7 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
     # time); a crashed run is left at its resumable at-rest status (new/paused).
     if state.status not in RESUMABLE:
         print(
-            f"imp: Change {change.id} status is {state.status!r}; "
+            f"imp: Quest {change.id} status is {state.status!r}; "
             "nothing to resume",
             file=sys.stderr,
         )
@@ -1196,7 +1196,7 @@ def _cmd_resume(args: argparse.Namespace) -> int:
     return anyio.run(_async_cmd_resume, args)
 
 
-async def _inert_ask_line(change: Change) -> str | None:
+async def _inert_ask_line(change: Quest) -> str | None:
     """Read one prompt-toolkit line at inert resume; EOF / Ctrl-C maps to None."""
     prompt = Prompt(
         skills_dir=change.workflow_dir / "skills",
@@ -1209,7 +1209,7 @@ async def _inert_ask_line(change: Change) -> str | None:
 
 
 async def _resume_inert(
-    change: Change, question: str, *, autonomous: bool = False,
+    change: Quest, question: str, *, autonomous: bool = False,
 ) -> int:
     """AC8 inert resume: show the pending question, wait for a reply, launch live session."""
     from imp.cli.signals import InterruptCoordinator
@@ -1293,7 +1293,7 @@ def _quest_home(control: Path, quest_id: str) -> Path:
 
 
 def _iter_quest_ids(control: Path) -> list[str]:
-    """All known Change ids: permanent homes first, then archived ids not live."""
+    """All known Quest ids: permanent homes first, then archived ids not live."""
     live = _list_quest_homes(control)
     seen = set(live)
     out = list(live)
@@ -1305,7 +1305,7 @@ def _iter_quest_ids(control: Path) -> list[str]:
 
 
 def _title_for_id(control: Path, quest_id: str) -> str | None:
-    """Read a Change's current title (worktree home first, archive second)."""
+    """Read a Quest's current title (worktree home first, archive second)."""
     cdir = _quest_home(control, quest_id)
     cj = cdir / "quest.json"
     if cj.exists():
@@ -1323,18 +1323,18 @@ def _title_for_id(control: Path, quest_id: str) -> str | None:
 
 
 def _resolve_id(control: Path, token: str) -> str:
-    """Resolve a user-typed token to a Change id (spec AC 7): it must be an
+    """Resolve a user-typed token to a Quest id (spec AC 7): it must be an
     unambiguous substring of exactly one change's id. Multiple matches exit
     non-zero listing candidates; none errors."""
     if not token.strip():
-        print(f"imp: no Change matches {token!r}", file=sys.stderr)
+        print(f"imp: no Quest matches {token!r}", file=sys.stderr)
         raise SystemExit(2)
     matches = [cid for cid in _iter_quest_ids(control) if token in cid]
     if len(matches) == 1:
         return matches[0]
     if len(matches) > 1:
         _exit_ambiguous(token, matches, control)
-    print(f"imp: no Change matches {token!r}", file=sys.stderr)
+    print(f"imp: no Quest matches {token!r}", file=sys.stderr)
     raise SystemExit(2)
 
 
@@ -1342,16 +1342,16 @@ def _exit_ambiguous(token: str, candidates: list[str], control: Path) -> NoRetur
     print(f"imp: {token!r} is ambiguous; candidates:", file=sys.stderr)
     color = should_use_color(sys.stderr)
     now = datetime.now(UTC)
-    print(change_row.header_line(color=color), file=sys.stderr)
+    print(quest_row.header_line(color=color), file=sys.stderr)
     for cid in sorted(candidates):
         row = _row_for_id(control, cid)
         if row is None:
             print(f"  {cid}", file=sys.stderr)
             continue
-        print(change_row.format_change_line(
+        print(quest_row.format_quest_line(
             quest_id=row[0], title=row[4], status=row[1], step=row[2],
             step_label=row[6], last_iso=row[3], now=now, color=color,
-            name_width=change_row.name_budget()), file=sys.stderr)
+            name_width=quest_row.name_budget()), file=sys.stderr)
     raise SystemExit(2)
 
 
@@ -1502,7 +1502,7 @@ def _unstarted_backlog_meta(control: Path, quest_id: str) -> dict[str, Any] | No
     if meta.get("materialized", True):
         return None  # materialized homes are never Backlog; skip the event-log read
     try:
-        change = Change.load(control, quest_id)
+        change = Quest.load(control, quest_id)
     except (LoadError, LoadErrors):
         return None
     conversed = _first_user_message(list(change.event_log().read())) is not None
@@ -1522,8 +1522,8 @@ def _backlog_card(meta: dict[str, Any], control: Path, *, now: datetime) -> list
         "status:     backlog",
         f"provenance: {meta.get('origin', 'draft')}",
         f"readiness:  {readiness}",
-        f"created:    {change_row.format_timestamp(created)} "
-        f"({change_row.relative_age(created, now=now)})",
+        f"created:    {quest_row.format_timestamp(created)} "
+        f"({quest_row.relative_age(created, now=now)})",
     ]
     if meta.get("depends_on"):
         lines.append(f"depends_on: {', '.join(meta['depends_on'])}")
@@ -1553,9 +1553,9 @@ def _change_card(control: Path, quest_id: str, *, now: datetime) -> list[str]:
         position = f"{phase_label} · {step_text}" if phase_label else step_text
         lines.append(pal.clip_display(f"step:          {position}", _display_width()))
     lines.append(
-        f"created:       {change_row.format_timestamp(created)} "
-        f"({change_row.relative_age(created, now=now)})")
-    lines.append(f"last activity: {change_row.relative_age(last, now=now)}")
+        f"created:       {quest_row.format_timestamp(created)} "
+        f"({quest_row.relative_age(created, now=now)})")
+    lines.append(f"last activity: {quest_row.relative_age(last, now=now)}")
     meta = _quest_meta(control, quest_id) or {}
     if meta.get("base_branch"):
         lines.append(f"base_branch:   {meta['base_branch']}")
@@ -1675,7 +1675,7 @@ def _load_events_for_id(control: Path, quest_id: str) -> list[dict[str, Any]] | 
     removal), so the only overlap is a crash mid-sequence where worktree-first
     harmlessly returns identical content."""
     try:
-        change = Change.load(control, quest_id)
+        change = Quest.load(control, quest_id)
     except LoadError:
         change = None
     if change is not None:
@@ -1832,7 +1832,7 @@ def _follow_conflict(args: argparse.Namespace) -> str | None:
 
 
 def _follow_log(events: list[dict[str, Any]]) -> int:
-    """Replay a Change's narrative through the live run view's renderer."""
+    """Replay a Quest's narrative through the live run view's renderer."""
     status = LiveStatus(sys.stdout)
     driver = LiveDriver(
         stream=sys.stdout, color=should_use_color(sys.stdout),
@@ -1929,7 +1929,7 @@ _FOLLOW_POLL_INTERVAL = 0.3
 
 
 def _follow_live(control: Path, quest_id: str, home: Path) -> int:
-    """Replay a live Change's narrative through LiveDriver, then tail
+    """Replay a live Quest's narrative through LiveDriver, then tail
     events.jsonl until a terminal status or the home is archived away. Ctrl-C
     clears the footer and exits 130."""
     status = LiveStatus(sys.stdout)
@@ -1999,7 +1999,7 @@ def _cmd_log(args: argparse.Namespace) -> int:
         return 0
     events = _load_events_for_id(control, quest_id)
     if events is None:
-        print(f"imp: no such Change {quest_id!r}", file=sys.stderr)
+        print(f"imp: no such Quest {quest_id!r}", file=sys.stderr)
         return 2
 
     if args.follow:
@@ -2151,25 +2151,25 @@ def _resume_gone(control: Path, quest_id: str) -> int:
     if status is not None:
         print(f"{title} is already completed; nothing to resume.")
         return 0
-    print(f"imp: no Change matches {quest_id!r}", file=sys.stderr)
+    print(f"imp: no Quest matches {quest_id!r}", file=sys.stderr)
     return 2
 
 
-def _rehydrate_resumable(control: Path, quest_id: str) -> Change | None:
+def _rehydrate_resumable(control: Path, quest_id: str) -> Quest | None:
     from imp.engine.archive import record, records_root
     rec = record.read_record(records_root(control), quest_id)
     if rec is None or not rec.get("resumable"):
         return None
     try:
         archive_read.rehydrate_quest(control, quest_id)
-        return Change.load(control, quest_id)
+        return Quest.load(control, quest_id)
     except (FileExistsError, LoadError, LoadErrors):
         return None
 
 
-def _load_or_rehydrate(control: Path, quest_id: str) -> Change | int:
+def _load_or_rehydrate(control: Path, quest_id: str) -> Quest | int:
     try:
-        return Change.load(control, quest_id)
+        return Quest.load(control, quest_id)
     except LayoutMismatch as e:
         print(f"imp: {e}", file=sys.stderr)
         return 2
@@ -2204,7 +2204,7 @@ def resolve_display_status(
 
 # Row = (id, status, step, last_activity, title, created_at, step_label, phase_label).
 # created_at is the trailing sort key only; step_label + phase_label feed the
-# merged STATUS cell's ` (phase · step)` suffix (see change_row). The step slot
+# merged STATUS cell's ` (phase · step)` suffix (see quest_row). The step slot
 # stays the RAW step name so imp list keeps printing it.
 _Row = tuple[str, str, str, str, str, str, str | None, str | None]
 
@@ -2272,7 +2272,7 @@ def _status_row(quest_id: str, state_json: bytes, quest_json: bytes,
     """Pure (id, status, step, last_activity, title, created_at) extractor, fed
     by either worktree file bytes or archive bytes. The archived state.json and
     quest.json are schema-identical to the in-flight ones (both written by
-    State.save / Change.create), so the two sections can't silently drift.
+    State.save / Quest.create), so the two sections can't silently drift.
     Returns None on malformed/incomplete JSON so a single corrupt entry can't
     crash the whole `imp list` listing (callers skip None)."""
     try:
@@ -2293,7 +2293,7 @@ def _row_for_id(control: Path, quest_id: str) -> _Row | None:
     quest_json: bytes | None
     if (cdir / "quest.json").exists():
         # A change home mid-creation has quest.json written but state.json not
-        # yet (Change.create is not atomic across the two files). The daemon's
+        # yet (Quest.create is not atomic across the two files). The daemon's
         # scan loop can hit that window, so tolerate it like _scan_quest_homes
         # rather than crashing the whole listing.
         try:
@@ -2430,10 +2430,10 @@ def _resume_picker_non_tty(rows: list[_Row]) -> str | int:
     print("Multiple resumable Changes — pass a token:", file=sys.stderr)
     color = should_use_color(sys.stderr)
     now = datetime.now(UTC)
-    print(change_row.header_line(color=color), file=sys.stderr)
-    name_w = change_row.name_budget()
+    print(quest_row.header_line(color=color), file=sys.stderr)
+    name_w = quest_row.name_budget()
     for r in rows:
-        print(change_row.format_change_line(
+        print(quest_row.format_quest_line(
             quest_id=r[0], title=r[4], status=r[1], step=r[2], step_label=r[6],
             last_iso=r[3], now=now, color=color, name_width=name_w), file=sys.stderr)
     return 2
@@ -2525,20 +2525,20 @@ def _deliver_abandon_resident(control: Path, quest_id: str) -> None:
 
 
 def _abandon(control: Path, quest_id: str, *, yes: bool = False) -> int:
-    """Tear down a Change (worktree, branch, state) as one logged operation.
+    """Tear down a Quest (worktree, branch, state) as one logged operation.
 
     Order is pinned by git (spec §2): archive the runtime snapshot BEFORE
     worktree removal (records live inside the worktree); `git branch -D` AFTER
     (git refuses to delete a branch checked out in a worktree). Idempotent /
     crash-tolerant: re-running after any mid-sequence crash converges."""
     try:
-        change = Change.load(control, quest_id)
+        change = Quest.load(control, quest_id)
     except (LoadError, LoadErrors):
-        # No live or un-materialized change-home: Change.load failed because the
+        # No live or un-materialized change-home: Quest.load failed because the
         # home directory is absent (already fully torn down, or never existed).
         # Idempotent teardown — reap a possibly-orphaned branch and exit 0.
         worktree.delete_branch(control, quest_id)
-        print(f"Change {quest_id} already gone; ensured branch imp/{quest_id} is removed.")
+        print(f"Quest {quest_id} already gone; ensured branch imp/{quest_id} is removed.")
         return 0
 
     token = change.id
@@ -2561,7 +2561,7 @@ def _abandon(control: Path, quest_id: str, *, yes: bool = False) -> int:
     try:
         tear_down_change(change)
     except LockHeld as e:
-        print(f"imp: Change {quest_id} is running (pid {e.held_by_pid or '?'}); "
+        print(f"imp: Quest {quest_id} is running (pid {e.held_by_pid or '?'}); "
               f"stop it before abandoning", file=sys.stderr)
         return 2
     print(f"Abandoned {token}.")
@@ -2677,10 +2677,10 @@ async def _pick_show_matches(control: Path, matches: list[str]) -> str | int:
         print("imp: ambiguous token; candidates:", file=sys.stderr)
         color = should_use_color(sys.stderr)
         now = datetime.now(UTC)
-        print(change_row.header_line(color=color), file=sys.stderr)
-        name_w = change_row.name_budget()
+        print(quest_row.header_line(color=color), file=sys.stderr)
+        name_w = quest_row.name_budget()
         for r in rows:
-            print(change_row.format_change_line(
+            print(quest_row.format_quest_line(
                 quest_id=r[0], title=r[4], status=r[1], step=r[2],
                 step_label=r[6], last_iso=r[3], now=now, color=color,
                 name_width=name_w), file=sys.stderr)
@@ -2716,7 +2716,7 @@ def _cmd_abandon(args: argparse.Namespace) -> int:
         quest_id = _resolve_id(control, token)
     except SystemExit:
         # No live/backlog match, and _resolve_id found nothing live either. A
-        # Change whose worktree was already removed (crash between abandon's
+        # Quest whose worktree was already removed (crash between abandon's
         # remove and branch-delete) is unresolvable there — but abandon archived
         # the id before removal, so recover it from the archive to still reap an
         # orphaned branch (AC 15c). Exact id, else unique suffix match.
@@ -2726,7 +2726,7 @@ def _cmd_abandon(args: argparse.Namespace) -> int:
         if len(hits) == 1:
             return _abandon(control, hits[0], yes=yes)
         # Truly unknown (never existed, or ambiguous) — nothing to reap.
-        print(f"imp: no Change matches {token!r}", file=sys.stderr)
+        print(f"imp: no Quest matches {token!r}", file=sys.stderr)
         return 2
     return _abandon(control, quest_id, yes=yes)
 
@@ -2734,7 +2734,7 @@ def _cmd_abandon(args: argparse.Namespace) -> int:
 def _cmd_edit(args: argparse.Namespace) -> int:
     control = _control_root()
     quest_id = _resolve_id(control, args.token)
-    change = Change.load(control, quest_id)
+    change = Quest.load(control, quest_id)
 
     zone_change = args.backlog or args.active
     dep_change = args.depends_on is not None or args.clear_deps
@@ -2826,19 +2826,19 @@ def _overview_lines(control: Path, *, show_all: bool, now: datetime,
 
     specs: list[tuple[str, str | None, str]] = []
     for r in inflight:
-        specs.append((r[1], change_row.compose_status_label(r[2], r[6], r[7]),
+        specs.append((r[1], quest_row.compose_status_label(r[2], r[6], r[7]),
                       _name_text(r)))
     for r in backlog_rows:
-        specs.append((r[1], change_row.compose_status_label(r[2], r[6], None),
+        specs.append((r[1], quest_row.compose_status_label(r[2], r[6], None),
                       _name_text(r)))
     for r in history:
         specs.append((_DISPOSITION[r[1]], None, _name_text(r)))
 
-    status_width, name_width = change_row.overview_widths(specs)
+    status_width, name_width = quest_row.overview_widths(specs)
 
-    lines = [change_row.header_line(color=color, status_width=status_width)]
+    lines = [quest_row.header_line(color=color, status_width=status_width)]
     for r in inflight:
-        lines.append(change_row.format_change_line(
+        lines.append(quest_row.format_quest_line(
             quest_id=r[0], title=r[4], status=r[1], step=r[2], step_label=r[6],
             phase_label=r[7], last_iso=r[3], now=now, color=color,
             name_width=name_width, status_width=status_width,
@@ -2847,7 +2847,7 @@ def _overview_lines(control: Path, *, show_all: bool, now: datetime,
         lines.append("")
         lines.append(pal.ansi("Backlog", "dim", enabled=color))
         for r in backlog_rows:
-            lines.append(change_row.format_change_line(
+            lines.append(quest_row.format_quest_line(
                 quest_id=r[0], title=r[4], status=r[1], step=r[2],
                 step_label=r[6], phase_label=None, last_iso=r[3], now=now,
                 color=color, name_width=name_width, status_width=status_width))
@@ -2856,7 +2856,7 @@ def _overview_lines(control: Path, *, show_all: bool, now: datetime,
         label = "history" if show_all else "recently merged"
         lines.append(pal.ansi(label, "dim", enabled=color))
         for r in history:
-            lines.append(change_row.format_change_line(
+            lines.append(quest_row.format_quest_line(
                 quest_id=r[0], title=r[4], status=_DISPOSITION[r[1]], step="-",
                 last_iso=r[3], now=now, color=color, name_width=name_width,
                 status_width=status_width, dim=True))
@@ -3045,11 +3045,11 @@ def _cmd_config(args: argparse.Namespace) -> int:
 _OVERVIEW_COMMANDS: tuple[tuple[str, str], ...] = (
     ("chat", "Open a conversation with imp — ask questions, scout work, or scope a change."),
     ("new", "Scope a new change in conversation (optional opening message)."),
-    ("resume", "Continue an in-flight Change (the sole resumable one, else a picker)."),
+    ("resume", "Continue an in-flight Quest (the sole resumable one, else a picker)."),
     ("list", "List your changes: in-flight, backlog, and recently merged."),
     ("show", "Show one change's detail or a named artifact (imp show <id>)."),
-    ("log", "Show a Change's narrative as plain text."),
-    ("abandon", "Tear down a Change's worktree, branch, and state."),
+    ("log", "Show a Quest's narrative as plain text."),
+    ("abandon", "Tear down a Quest's worktree, branch, and state."),
     ("config", "Show the effective configuration."),
 )
 
@@ -3103,15 +3103,15 @@ def _build_parser() -> argparse.ArgumentParser:
     p_init.set_defaults(func=_cmd_init)
 
     p_new = sub.add_parser(
-        "new", help="Start a new Change: run the workflow from an opening intent.")
+        "new", help="Start a new Quest: run the workflow from an opening intent.")
     p_new.add_argument(
         "opening", nargs="?", metavar="MESSAGE",
         help="Opening intent handed verbatim to the workflow's opening step "
              "as its first message; omit to start with an interactive prompt. "
              "Distinct from --message, which is a headless reply to the first solicit.")
     p_new.add_argument("--title", metavar="TEXT", default=None,
-                       help="Set the Change title explicitly; the workflow's "
-                            "opening step names the Change if omitted.")
+                       help="Set the Quest title explicitly; the workflow's "
+                            "opening step names the Quest if omitted.")
     p_new.add_argument("--non-interactive", action="store_true",
                        help="Run headless: no live prompt; supply the first reply "
                             "via --message.")
@@ -3130,15 +3130,15 @@ def _build_parser() -> argparse.ArgumentParser:
                             "with `imp resume <id>`.")
     p_new.add_argument("--depends-on", metavar="ID", action="append",
                        default=None, dest="depends_on",
-                       help="A change id this backlog Change depends on "
+                       help="A change id this backlog Quest depends on "
                             "(repeatable). Gates ready/blocked; never changes the "
                             "base branch.")
     p_new.add_argument("--workflow", metavar="NAME", default=None,
-                       help="Run this Change on workflow NAME instead of the "
+                       help="Run this Quest on workflow NAME instead of the "
                             "project default. A bundled name needs no commit; a "
                             "committed imp/workflows/NAME fork overrides it.")
     p_new.add_argument("--base", metavar="BRANCH", default=None,
-                       help="Base the Change on an existing BRANCH instead of "
+                       help="Base the Quest on an existing BRANCH instead of "
                             "the configured default-base. BRANCH must already "
                             "exist.")
     p_new.add_argument("--model", metavar="ARG", default=None, type=_model_arg_type,
@@ -3171,14 +3171,14 @@ def _build_parser() -> argparse.ArgumentParser:
 
     p_resume = sub.add_parser(
         "resume",
-        help="Resume a paused or interrupted Change by id or token.",
+        help="Resume a paused or interrupted Quest by id or token.",
         description=(
-            "Resume a paused or interrupted Change, replaying its narrative and "
+            "Resume a paused or interrupted Quest, replaying its narrative and "
             "continuing the workflow where it stopped. With no token on a tty, "
             "pick from a list of resumable Changes."))
     p_resume.add_argument(
         "token", nargs="?",
-        help="Change id or resume token identifying which Change to resume.")
+        help="Quest id or resume token identifying which Quest to resume.")
     p_resume.add_argument("--non-interactive", action="store_true",
                           help="Headless: no live prompt; supply the reply via --message.")
     p_resume.add_argument("--autonomous", action="store_true",
@@ -3193,16 +3193,16 @@ def _build_parser() -> argparse.ArgumentParser:
 
     p_log = sub.add_parser(
         "log",
-        help="Show the narrative for a Change.",
+        help="Show the narrative for a Quest.",
         description=(
-            "Show the narrative for a Change as plain text. --full starts every "
+            "Show the narrative for a Quest as plain text. --full starts every "
             "fold expanded. Set NO_COLOR=1 to disable colors. "
             "Tip: imp log <id> --full | grep ... for line-oriented scripting."
         ),
     )
     p_log.add_argument(
         "token", nargs="?",
-        help="Change id or its short token (omit for the most recent Change).")
+        help="Quest id or its short token (omit for the most recent Quest).")
     p_log_mode = p_log.add_mutually_exclusive_group()
     p_log_mode.add_argument(
         "--full", action="store_true",
@@ -3220,7 +3220,7 @@ def _build_parser() -> argparse.ArgumentParser:
     p_log.add_argument(
         "-f", "--follow", action="store_true",
         help="Live-tail the narrative (tail -f): replay it, then stream new "
-             "events until the Change reaches a terminal status. Renders the "
+             "events until the Quest reaches a terminal status. Renders the "
              "live run view; implies --no-pager.",
     )
     p_log_export = p_log.add_mutually_exclusive_group()
@@ -3267,7 +3267,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     p_show.add_argument(
         "token", nargs="?", default=None,
-        help="Change id or its short token.")
+        help="Quest id or its short token.")
     p_show.add_argument(
         "resource", nargs="?", default=None,
         choices=["spec", "plan", "events", "status", "summary"],
@@ -3341,38 +3341,38 @@ def _build_parser() -> argparse.ArgumentParser:
 
     p_abandon = sub.add_parser(
         "abandon",
-        help="Tear down a Change's worktree, branch, and state (logged).",
+        help="Tear down a Quest's worktree, branch, and state (logged).",
         description=(
-            "Tear down a materialized Change — its worktree, branch, and state — "
+            "Tear down a materialized Quest — its worktree, branch, and state — "
             "or discard a pure backlog idea. On a tty, confirm before tearing "
-            "down a materialized Change; pass --yes to skip. With no token, pick "
+            "down a materialized Quest; pass --yes to skip. With no token, pick "
             "from a list."),
     )
     p_abandon.add_argument(
         "token", nargs="?",
-        help="Change id or short token identifying which Change to abandon "
+        help="Quest id or short token identifying which Quest to abandon "
              "(omit on a tty to pick from a list).")
     p_abandon.add_argument(
         "--yes", action="store_true",
-        help="Skip the confirmation prompt before tearing down a materialized Change.")
+        help="Skip the confirmation prompt before tearing down a materialized Quest.")
     p_abandon.set_defaults(func=_cmd_abandon)
 
     p_edit = sub.add_parser(
         "edit",
-        help="Edit a Change's title, backlog membership, or dependencies.",
+        help="Edit a Quest's title, backlog membership, or dependencies.",
         description=(
-            "Edit a Change's title, backlog membership, or dependencies. Zone "
+            "Edit a Quest's title, backlog membership, or dependencies. Zone "
             "moves (--backlog/--active) apply to un-materialized Changes only."))
-    p_edit.add_argument("token", help="Change id or its short token.")
+    p_edit.add_argument("token", help="Quest id or its short token.")
     p_edit.add_argument("--title", metavar="TEXT", default=None,
-                        help="Set the Change title.")
+                        help="Set the Quest title.")
     p_edit_zone = p_edit.add_mutually_exclusive_group()
     p_edit_zone.add_argument(
         "--backlog", action="store_true",
-        help="Move an un-materialized Change to the Backlog zone (origin=idea).")
+        help="Move an un-materialized Quest to the Backlog zone (origin=idea).")
     p_edit_zone.add_argument(
         "--active", action="store_true",
-        help="Return an un-materialized Change to the Active zone (origin=draft).")
+        help="Return an un-materialized Quest to the Active zone (origin=draft).")
     p_edit_deps = p_edit.add_mutually_exclusive_group()
     p_edit_deps.add_argument(
         "--depends-on", metavar="ID", action="append", default=None,

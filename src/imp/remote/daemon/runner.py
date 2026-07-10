@@ -17,7 +17,7 @@ import anyio
 
 from imp.engine.archive import maintenance as archive_maintenance
 from imp.engine.archive import read as archive_read
-from imp.engine.change import Change
+from imp.engine.quest import Quest
 from imp.engine.errors import LoadError
 from imp.remote.daemon import discover, spawn
 from imp.remote.daemon.alert_all import AlertAll
@@ -194,8 +194,8 @@ def _make_telegram_adapter(
 
 
 def _make_on_attach(subscriptions: Subscriptions) -> Callable[[str, bool], None]:
-    """Auto-subscribe a freshly attached Change whose hello set autosubscribe (spec
-    §6). Membership only — a freshly attached Change has no prior history. No
+    """Auto-subscribe a freshly attached Quest whose hello set autosubscribe (spec
+    §6). Membership only — a freshly attached Quest has no prior history. No
     on_detach hook: a detach is process churn, not an intent to stop following."""
     def on_attach(quest_id: str, autosubscribe: bool) -> None:
         if autosubscribe:
@@ -298,7 +298,7 @@ async def _handle_command(
         handle = handle_for(command.quest_id)
         if await anyio.to_thread.run_sync(control.snapshot, command.quest_id) is None:
             responses.put(Notice(
-                f"No Change @{handle} — send /list to see what's running."))
+                f"No Quest @{handle} — send /list to see what's running."))
             return
         await anyio.to_thread.run_sync(
             control.subscriptions.snapshot_and_add,
@@ -327,7 +327,7 @@ async def _handle_command(
                     responses.put(Notice(text, quest_id=quest_id))
     elif isinstance(command, Create):
         control.create(command.prompt)
-        responses.put(Notice("Spawning a new Change… watch for its first question"))
+        responses.put(Notice("Spawning a new Quest… watch for its first question"))
     elif isinstance(command, Abandon):
         handle = handle_for(command.quest_id)
         rc = await anyio.to_thread.run_sync(control.abandon, command.quest_id)
@@ -430,7 +430,7 @@ async def deliver_to_session(
     control_root: Path, quest_id: str, text: str,
 ) -> None:
     """Deliver one reply into quest_id's session daemon, rehydrating if hibernated."""
-    change = await anyio.to_thread.run_sync(Change.load, control_root, quest_id)
+    change = await anyio.to_thread.run_sync(Quest.load, control_root, quest_id)
     await deliver_session_reply(change, text)
 
 
@@ -475,7 +475,7 @@ async def run_daemon(
     alert_all = AlertAll()
 
     # on_event is a no-op: events now arrive via the supervisor's directory pull.
-    # on_attach auto-subscribes a Change whose hello set autosubscribe (spec §6).
+    # on_attach auto-subscribes a Quest whose hello set autosubscribe (spec §6).
     hub = SouthHub(
         str(spath), on_event=lambda cid, line: None,
         on_attach=_make_on_attach(subscriptions))

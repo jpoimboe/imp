@@ -7,14 +7,14 @@ import pytest
 import imp.cli.main as m
 from imp.engine.abandon import discard_conversation, save_to_backlog
 from imp.engine.archive import record, records_root
-from imp.engine.change import Change
+from imp.engine.quest import Quest
 from imp.engine.state import LockHeld, ProjectLock, State
 from tests.conftest import _seed_control
 
 
 def test_save_to_backlog_sets_paused_status_and_keeps_home(tmp_path: Path) -> None:
     _seed_control(tmp_path)
-    ch = Change.create_draft(tmp_path, title="Draft", quest_id="d1", base_branch="main")
+    ch = Quest.create_draft(tmp_path, title="Draft", quest_id="d1", base_branch="main")
     assert State.load(ch.state_dir).status == "new"
 
     save_to_backlog(ch)
@@ -28,21 +28,21 @@ def test_save_to_backlog_sets_paused_status_and_keeps_home(tmp_path: Path) -> No
 
 def test_save_to_backlog_raises_lock_held_when_lock_is_held(tmp_path: Path) -> None:
     _seed_control(tmp_path)
-    ch = Change.create_draft(tmp_path, title="Draft", quest_id="d3", base_branch="main")
+    ch = Quest.create_draft(tmp_path, title="Draft", quest_id="d3", base_branch="main")
     with ProjectLock(ch.quest_dir / "lock").acquire(), pytest.raises(LockHeld):
         save_to_backlog(ch)
 
 
 def test_discard_conversation_raises_lock_held_when_lock_is_held(tmp_path: Path) -> None:
     _seed_control(tmp_path)
-    ch = Change.create_draft(tmp_path, title="Draft", quest_id="d4", base_branch="main")
+    ch = Quest.create_draft(tmp_path, title="Draft", quest_id="d4", base_branch="main")
     with ProjectLock(ch.quest_dir / "lock").acquire(), pytest.raises(LockHeld):
         discard_conversation(ch)
 
 
 def test_discard_conversation_drops_home_and_leaves_no_record(tmp_path: Path) -> None:
     _seed_control(tmp_path)
-    ch = Change.create_draft(tmp_path, title="Draft", quest_id="d2", base_branch="main")
+    ch = Quest.create_draft(tmp_path, title="Draft", quest_id="d2", base_branch="main")
 
     discard_conversation(ch)
 
@@ -50,8 +50,8 @@ def test_discard_conversation_drops_home_and_leaves_no_record(tmp_path: Path) ->
     assert record.read_record(records_root(tmp_path), "d2") is None  # zero-exchange → no record
 
 
-def _draft_with_exchange(tmp_path: Path, quest_id: str) -> Change:
-    ch = Change.create_draft(
+def _draft_with_exchange(tmp_path: Path, quest_id: str) -> Quest:
+    ch = Quest.create_draft(
         tmp_path, title="Draft", quest_id=quest_id, base_branch="main")
     ch.event_log().append(
         agent_id=None, type="user_message",
@@ -63,7 +63,7 @@ def test_disposition_abandon_prints_prebuild_recover_line(
     tmp_path: Path, capsys: pytest.CaptureFixture[str],
 ) -> None:
     _seed_control(tmp_path)
-    ch = Change.create_draft(
+    ch = Quest.create_draft(
         tmp_path, title="Dark mode", quest_id="ab1", base_branch="main")
     rc = m._print_leave_disposition(ch, {"intent": "abandon"})
     assert rc is None
@@ -77,7 +77,7 @@ def test_disposition_abandon_prints_materialized_torndown_line(
     tmp_path: Path, capsys: pytest.CaptureFixture[str],
 ) -> None:
     _seed_control(tmp_path)
-    ch = Change.create_draft(
+    ch = Quest.create_draft(
         tmp_path, title="Big feature", quest_id="ab2", base_branch="main")
     rc = m._print_leave_disposition(ch, {"intent": "abandon", "materialized": "1"})
     assert rc is None
@@ -149,7 +149,7 @@ def test_print_leave_disposition_send_failed_prints_running_line(
 
 def test_save_to_backlog_arms_resume_pending(tmp_path: Path) -> None:
     _seed_control(tmp_path)
-    ch = Change.create_draft(tmp_path, title="Draft", quest_id="bkarm", base_branch="main")
+    ch = Quest.create_draft(tmp_path, title="Draft", quest_id="bkarm", base_branch="main")
     initial = State.load(ch.state_dir)
     step = initial.step
     assert step is not None

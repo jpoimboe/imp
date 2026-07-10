@@ -249,7 +249,7 @@ def test_cmd_show_empty_token_skips_picker_and_errors(
     rc = m._cmd_show(_ns(""))
     err = capsys.readouterr().err
     assert rc == 2
-    assert "no Change matches" in err
+    assert "no Quest matches" in err
 
 
 def test_cmd_show_no_token_non_tty_errors(

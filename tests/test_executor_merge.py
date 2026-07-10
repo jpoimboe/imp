@@ -9,7 +9,7 @@ from pathlib import Path
 
 import anyio
 
-from imp.engine.change import Change
+from imp.engine.quest import Quest
 from imp.engine.executor import _complete, _route_merge_and_exit_worktree
 from imp.engine.loader import load_workflow
 from imp.engine.state import JsonlEventLog, State
@@ -39,7 +39,7 @@ def _ctx(ch) -> tuple:
 
 def test_merge_step_merges_then_complete_archives_and_removes(tmp_path: Path) -> None:
     _seed_control(tmp_path)
-    ch = Change.create(tmp_path, title="x", quest_id="feat", base_branch="main")
+    ch = Quest.create(tmp_path, title="x", quest_id="feat", base_branch="main")
     (ch.project_root / "feature.txt").write_text("hi")
     _git(ch.project_root, "add", "-A")
     _git(ch.project_root, "commit", "-qm", "feat")
@@ -82,7 +82,7 @@ def test_merge_step_conflict_routes_to_recovery(tmp_path: Path) -> None:
     # A real merge conflict now routes back to integrate-rebase for a re-rebase,
     # emitting merge_retry — NOT a hardcoded merge_blocked pause.
     _seed_control(tmp_path)
-    ch = Change.create(tmp_path, title="x", quest_id="feat", base_branch="main")
+    ch = Quest.create(tmp_path, title="x", quest_id="feat", base_branch="main")
     (ch.project_root / "README.md").write_text("branch")
     _git(ch.project_root, "add", "-A")
     _git(ch.project_root, "commit", "-qm", "b")
@@ -112,7 +112,7 @@ def test_merge_step_dirty_routes_to_recovery(tmp_path: Path) -> None:
     # Uncommitted work in the worktree now routes back to the reconciler to
     # commit its leftover resolution, emitting merge_retry. Nothing is dropped.
     _seed_control(tmp_path)
-    ch = Change.create(tmp_path, title="x", quest_id="feat", base_branch="main")
+    ch = Quest.create(tmp_path, title="x", quest_id="feat", base_branch="main")
     (ch.project_root / "uncommitted.txt").write_text("not committed")  # left dirty
     state, log = _ctx(ch)
     state.held_lane = "main"   # simulates holding the lane heading into merge
@@ -137,7 +137,7 @@ def test_merge_dirty_recovers_then_completes(tmp_path: Path) -> None:
     # Recovery-then-success: a DIRTY first pass routes to recovery (not a pause);
     # after the leftover work is committed, a re-run merges and _complete finalizes.
     _seed_control(tmp_path)
-    ch = Change.create(tmp_path, title="x", quest_id="feat", base_branch="main")
+    ch = Quest.create(tmp_path, title="x", quest_id="feat", base_branch="main")
     (ch.project_root / "f.txt").write_text("v")  # dirty -> first attempt recovers
     state, log = _ctx(ch)
     action, _fb, _muts = _run_merge(_merge_step(), ch, state, log)
@@ -159,7 +159,7 @@ def test_merge_dirty_recovers_then_completes(tmp_path: Path) -> None:
 def test_merge_step_refused_pauses(tmp_path: Path, monkeypatch) -> None:
     from imp.engine import worktree
     _seed_control(tmp_path)
-    ch = Change.create(tmp_path, title="x", quest_id="feat", base_branch="main")
+    ch = Quest.create(tmp_path, title="x", quest_id="feat", base_branch="main")
     monkeypatch.setattr(
         worktree, "merge_to_base",
         lambda *a, **k: worktree.MergeResult("REFUSED", detail="fatal: refusing"))
@@ -182,7 +182,7 @@ def test_merge_step_idempotent_when_commit_already_recorded(tmp_path: Path) -> N
     # _complete finalized. Re-entering the merge step must NOT re-merge; it routes
     # MERGED via the short-circuit and falls through to _complete.
     _seed_control(tmp_path)
-    ch = Change.create(tmp_path, title="x", quest_id="feat", base_branch="main")
+    ch = Quest.create(tmp_path, title="x", quest_id="feat", base_branch="main")
     (ch.project_root / "feature.txt").write_text("hi")
     _git(ch.project_root, "add", "-A")
     _git(ch.project_root, "commit", "-qm", "feat")
@@ -258,7 +258,7 @@ def test_route_merge_does_not_block_event_loop(tmp_path: Path, monkeypatch) -> N
 
 def test_complete_merged_reaps_whole_home(tmp_path: Path) -> None:
     _seed_control(tmp_path)
-    ch = Change.create(tmp_path, title="x", quest_id="feat", base_branch="main")
+    ch = Quest.create(tmp_path, title="x", quest_id="feat", base_branch="main")
     (ch.project_root / "feature.txt").write_text("hi")
     _git(ch.project_root, "add", "-A")
     _git(ch.project_root, "commit", "-qm", "feat")
@@ -313,7 +313,7 @@ def test_merge_step_recovery_exhausted_pauses(tmp_path: Path, monkeypatch) -> No
     # one attempt before the generic max_loops backstop would fire.
     from imp.engine import worktree
     _seed_control(tmp_path)
-    ch = Change.create(tmp_path, title="x", quest_id="feat", base_branch="main")
+    ch = Quest.create(tmp_path, title="x", quest_id="feat", base_branch="main")
     monkeypatch.setattr(
         worktree, "merge_to_base",
         lambda *a, **k: worktree.MergeResult("CONFLICT", detail="merge conflict in f"))

@@ -16,7 +16,7 @@ from imp.engine.abandon import (
     save_to_backlog,
     tear_down_change,
 )
-from imp.engine.change import Change
+from imp.engine.quest import Quest
 from imp.engine.errors import LoadError, LoadErrors
 from imp.engine.executor import RunResult, run_change
 from imp.engine.merge_queue import ensure_head_driven
@@ -67,14 +67,14 @@ def _hold_prompt(result: Any, coordinator: Any) -> str | None:
 
 
 async def serve_change_session(
-    change: Change,
+    change: Quest,
     *,
     run_fn: RunFn = run_change,
     hibernate: bool = True,
-    tear_down: Callable[[Change], None] = tear_down_change,
-    archive_left: Callable[[Change], None] = archive_conversation,
-    save_left: Callable[[Change], None] = save_to_backlog,
-    discard_left: Callable[[Change], None] = discard_conversation,
+    tear_down: Callable[[Quest], None] = tear_down_change,
+    archive_left: Callable[[Quest], None] = archive_conversation,
+    save_left: Callable[[Quest], None] = save_to_backlog,
+    discard_left: Callable[[Quest], None] = discard_conversation,
     resume: bool = False,
     non_interactive: bool = False,
     autonomous: bool = False,
@@ -233,7 +233,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--model", default=None)
     ns = parser.parse_args(argv)
     try:
-        change = Change.load(Path(ns.control_root), ns.quest_id)
+        change = Quest.load(Path(ns.control_root), ns.quest_id)
     except LoadError as exc:
         print(f"imp: {exc}", file=sys.stderr)
         return 2

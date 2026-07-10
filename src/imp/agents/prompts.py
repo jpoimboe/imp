@@ -27,7 +27,7 @@ import jinja2
 from imp.engine.state import EventLog, State
 
 if TYPE_CHECKING:
-    from imp.engine.change import Change
+    from imp.engine.quest import Quest
 
 
 class PromptRenderError(Exception):
@@ -159,7 +159,7 @@ def build_context(
 
 
 def render_label(
-    label: str | None, change: Change | None, log: EventLog | None,
+    label: str | None, change: Quest | None, log: EventLog | None,
     state: State | None = None,
 ) -> str | None:
     if label is None or "{{" not in label:

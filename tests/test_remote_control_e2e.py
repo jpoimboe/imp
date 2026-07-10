@@ -107,7 +107,7 @@ async def test_e2e_chat_commands_round_trip(
             fake.inject_reply("approved", reply_to_message_id=m1)
             await _wait(lambda: delivered == [(CHANGE, "approved")])
 
-            # /abandon, addressed by replying to the Change's message.
+            # /abandon, addressed by replying to the Quest's message.
             fake.inject_reply("/abandon", reply_to_message_id=m1)
             await _wait(lambda: abandoned == [CHANGE])
             await _wait(lambda: _text_in_outbox(fake, "Abandoned @zzzzzz."))

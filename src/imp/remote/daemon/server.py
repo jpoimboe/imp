@@ -1,4 +1,4 @@
-"""SouthHub — the per-repo Unix-socket multiplexer for live Change connections."""
+"""SouthHub — the per-repo Unix-socket multiplexer for live Quest connections."""
 from __future__ import annotations
 
 import contextlib

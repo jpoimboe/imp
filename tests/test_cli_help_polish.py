@@ -15,7 +15,7 @@ def _subparser(name: str) -> argparse.ArgumentParser:
 
 def test_abandon_documents_token_positional() -> None:
     help_text = _subparser("abandon").format_help()
-    assert "which Change to abandon" in help_text
+    assert "which Quest to abandon" in help_text
 
 
 def test_list_documents_overview() -> None:

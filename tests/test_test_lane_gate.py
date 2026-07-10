@@ -4,7 +4,7 @@ import anyio
 
 from imp.engine import merge_queue as mq
 from imp.engine import test_lane
-from imp.engine.change import Change
+from imp.engine.quest import Quest
 from imp.engine.executor import RunResult, run_change
 from imp.engine.state import JsonlEventLog
 from tests.conftest import _git, _seed_control
@@ -41,7 +41,7 @@ def test_free_slot_runs_gate_without_waiting_or_merge_queue(
     _register_fake_provider(provider_registry)
     _seed_control(tmp_path)
     _write_testlane_workflow(tmp_path)
-    ch = Change.create(tmp_path, title="x", quest_id="feat", base_branch="main")
+    ch = Quest.create(tmp_path, title="x", quest_id="feat", base_branch="main")
 
     result = anyio.run(run_change, ch)
 
@@ -60,7 +60,7 @@ def test_contended_gate_emits_wait_then_proceeds(
     _register_fake_provider(provider_registry)
     _seed_control(tmp_path)
     _write_testlane_workflow(tmp_path)
-    ch = Change.create(tmp_path, title="x", quest_id="feat", base_branch="main")
+    ch = Quest.create(tmp_path, title="x", quest_id="feat", base_branch="main")
     held = test_lane.try_acquire(tmp_path, 1)            # occupy the sole slot
     assert held is not None
     result: list = []

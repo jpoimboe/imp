@@ -54,13 +54,13 @@ def test_persona_injected_between_head_and_tail(tmp_path):
 def test_persona_renders_change_and_vars_namespaces(tmp_path):
     # AC#4: persona body may reference the Jinja namespaces.
     log = JsonlEventLog(tmp_path / "events.jsonl")
-    ctx = build_context(quest_title="My Change", event_log=log,
+    ctx = build_context(quest_title="My Quest", event_log=log,
                         vars={"point_of_novelty": "a widget"})
     rendered = render_prompt(
         "Title {{ change.title }}; novelty {{ vars.point_of_novelty }}", ctx)
-    assert rendered == "Title My Change; novelty a widget"
+    assert rendered == "Title My Quest; novelty a widget"
     sp = _build(tmp_path, rendered_persona=rendered).system_prompt
-    assert "Title My Change; novelty a widget" in sp
+    assert "Title My Quest; novelty a widget" in sp
 
 
 def test_persona_can_include_partials(tmp_path):

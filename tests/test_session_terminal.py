@@ -15,7 +15,7 @@ import pytest
 from imp.cli.session_terminal import run_terminal_client
 from imp.cli.signals import InterruptCoordinator
 from imp.cli.terminal_title import GLYPH_BUSY, GLYPH_IDLE, TerminalTitle
-from imp.engine.change import Change
+from imp.engine.quest import Quest
 from imp.remote.session.client import SessionClient
 from imp.remote.session.protocol import encode_attach, encode_input
 from imp.remote.session.server import SessionServer
@@ -609,7 +609,7 @@ async def test_title_flips_busy_idle_back_to_busy_and_resets(
         return "imp"
 
     s = _TTYStream()
-    title = TerminalTitle(s, "term1", "My Change")
+    title = TerminalTitle(s, "term1", "My Quest")
     coord = InterruptCoordinator()
     with anyio.fail_after(10):
         async with anyio.create_task_group() as tg:
@@ -624,8 +624,8 @@ async def test_title_flips_busy_idle_back_to_busy_and_resets(
             tg.start_soon(_client)
 
     out = s.getvalue()
-    busy = f"\x1b]2;{GLYPH_BUSY} imp · term1 · My Change\x07"
-    idle = f"\x1b]2;{GLYPH_IDLE} imp · term1 · My Change\x07"
+    busy = f"\x1b]2;{GLYPH_BUSY} imp · term1 · My Quest\x07"
+    idle = f"\x1b]2;{GLYPH_IDLE} imp · term1 · My Quest\x07"
     reset = "\x1b]2;\x07"
     assert busy in out
     assert idle in out
@@ -666,7 +666,7 @@ async def test_replayed_awaiting_does_not_flip_to_idle(
         raise AssertionError("a replayed gate must not solicit")
 
     s = _TTYStream()
-    title = TerminalTitle(s, "term1", "My Change")
+    title = TerminalTitle(s, "term1", "My Quest")
     coord = InterruptCoordinator()
     with anyio.fail_after(10):
         async with anyio.create_task_group() as tg:
@@ -680,7 +680,7 @@ async def test_replayed_awaiting_does_not_flip_to_idle(
 
             tg.start_soon(_client)
 
-    idle = f"\x1b]2;{GLYPH_IDLE} imp · term1 · My Change\x07"
+    idle = f"\x1b]2;{GLYPH_IDLE} imp · term1 · My Quest\x07"
     assert idle not in s.getvalue()
 
 
@@ -689,7 +689,7 @@ async def test_abandon_records_materialized_false_for_unmaterialized_draft(
     tmp_path: Path,
 ) -> None:
     _seed_control(tmp_path)
-    Change.create_draft(tmp_path, title="D", quest_id="ab1", base_branch="main")
+    Quest.create_draft(tmp_path, title="D", quest_id="ab1", base_branch="main")
     sock = str(tmp_path / "s.sock")
     server = SessionServer(sock, hibernate=False)
 
@@ -738,7 +738,7 @@ async def test_abandon_records_materialized_true_for_materialized_change(
     tmp_path: Path,
 ) -> None:
     _seed_control(tmp_path)
-    ch = Change.create_draft(tmp_path, title="D", quest_id="ab2", base_branch="main")
+    ch = Quest.create_draft(tmp_path, title="D", quest_id="ab2", base_branch="main")
     meta_path = ch.quest_dir / "quest.json"
     meta = json.loads(meta_path.read_text())
     meta["materialized"] = True
@@ -844,7 +844,7 @@ async def test_eoferror_leave_sends_archive_frame_and_records_disposition(
     tmp_path: Path,
 ) -> None:
     _seed_control(tmp_path)
-    ch = Change.create_draft(tmp_path, title="D", quest_id="c1", base_branch="main")
+    ch = Quest.create_draft(tmp_path, title="D", quest_id="c1", base_branch="main")
     ch.event_log().append(
         agent_id=None, type="user_message",
         payload={"role": "user", "content": "hi"})
@@ -894,7 +894,7 @@ async def test_eoferror_leave_sends_archive_frame_and_records_disposition(
 @pytest.mark.anyio
 async def test_natural_completion_sends_no_disposition_frame(tmp_path: Path) -> None:
     _seed_control(tmp_path)
-    Change.create_draft(tmp_path, title="D", quest_id="c2", base_branch="main")
+    Quest.create_draft(tmp_path, title="D", quest_id="c2", base_branch="main")
     sock = str(tmp_path / "s.sock")
     server = SessionServer(sock, hibernate=False)
 
@@ -950,7 +950,7 @@ async def test_ctrl_d_returns_while_daemon_teardown_still_in_progress(
     from imp.remote.session.discover import session_socket_path
 
     _seed_control(tmp_path)
-    change = Change.create_draft(
+    change = Quest.create_draft(
         tmp_path, title="D", quest_id="slow1", base_branch="main")
     change.event_log().append(
         agent_id=None, type="user_message",
@@ -961,13 +961,13 @@ async def test_ctrl_d_returns_while_daemon_teardown_still_in_progress(
     release_archive = threading.Event()
     archived: list[str] = []
 
-    def slow_archive(ch: Change) -> None:
+    def slow_archive(ch: Quest) -> None:
         archive_started.set()
         release_archive.wait(5)
         archived.append(ch.id)
 
     async def fake_run(
-        change: Change, *, on_event: Any, user_chat_input_fn: Any,
+        change: Quest, *, on_event: Any, user_chat_input_fn: Any,
         coordinator: Any, wait_for_turn_fn: Any = None,
     ) -> str:
         on_event({"type": "awaiting_user_input", "payload": {"prompt": "reply?"}})
@@ -1115,7 +1115,7 @@ async def test_change_renamed_updates_terminal_title(tmp_path: Path) -> None:
                 await anyio.sleep(0.02)
         on_event({"type": "step_started", "payload": {}})
         on_event({"type": "change_renamed",
-                   "payload": {"new_title": "Renamed Change"}})
+                   "payload": {"new_title": "Renamed Quest"}})
         await anyio.sleep(0.1)
         return "done"
 
@@ -1148,7 +1148,7 @@ async def test_change_renamed_updates_terminal_title(tmp_path: Path) -> None:
 
             tg.start_soon(_client)
 
-    renamed = f"\x1b]2;{GLYPH_BUSY} imp · term1 · Renamed Change\x07"
+    renamed = f"\x1b]2;{GLYPH_BUSY} imp · term1 · Renamed Quest\x07"
     assert renamed in s.getvalue()
 
 
@@ -1162,7 +1162,7 @@ async def test_replayed_change_renamed_does_not_update_title(tmp_path: Path) -> 
             while server.attached_count == 0:
                 await anyio.sleep(0.02)
         on_event({"type": "change_renamed", "_replay": True,
-                   "payload": {"new_title": "Renamed Change"}})
+                   "payload": {"new_title": "Renamed Quest"}})
         on_event({"type": "step_started", "payload": {}})
         await anyio.sleep(0.1)
         return "done"
@@ -1196,7 +1196,7 @@ async def test_replayed_change_renamed_does_not_update_title(tmp_path: Path) -> 
 
             tg.start_soon(_client)
 
-    renamed = f"\x1b]2;{GLYPH_BUSY} imp · term1 · Renamed Change\x07"
+    renamed = f"\x1b]2;{GLYPH_BUSY} imp · term1 · Renamed Quest\x07"
     assert renamed not in s.getvalue()
 
 
@@ -1468,7 +1468,7 @@ async def test_lane_acquired_sets_hold_glyph(tmp_path: Path) -> None:
         raise AssertionError("no gate should fire")
 
     s = _TTYStream()
-    title = TerminalTitle(s, "term1", "My Change")
+    title = TerminalTitle(s, "term1", "My Quest")
     coord = InterruptCoordinator()
     with anyio.fail_after(10):
         async with anyio.create_task_group() as tg:
@@ -1482,7 +1482,7 @@ async def test_lane_acquired_sets_hold_glyph(tmp_path: Path) -> None:
 
             tg.start_soon(_client)
 
-    hold = "\x1b]2;⛙ imp · term1 · My Change\x07"
+    hold = "\x1b]2;⛙ imp · term1 · My Quest\x07"
     assert hold in s.getvalue()
 
 
@@ -1515,7 +1515,7 @@ async def test_replayed_lane_acquired_sets_hold_glyph(tmp_path: Path) -> None:
         raise AssertionError("no gate should fire")
 
     s = _TTYStream()
-    title = TerminalTitle(s, "term1", "My Change")
+    title = TerminalTitle(s, "term1", "My Quest")
     coord = InterruptCoordinator()
     with anyio.fail_after(10):
         async with anyio.create_task_group() as tg:
@@ -1529,7 +1529,7 @@ async def test_replayed_lane_acquired_sets_hold_glyph(tmp_path: Path) -> None:
 
             tg.start_soon(_client)
 
-    hold = "\x1b]2;⛙ imp · term1 · My Change\x07"
+    hold = "\x1b]2;⛙ imp · term1 · My Quest\x07"
     assert hold in s.getvalue()
 
 
@@ -1549,8 +1549,8 @@ async def test_lane_released_clears_hold_glyph(tmp_path: Path) -> None:
                    "payload": {"base": "main", "step": "merge"}})
         # Wait for the post-release working re-render to flush before returning,
         # else teardown can race ahead of the client processing the release.
-        hold_r = "\x1b]2;⛙ imp · term1 · My Change\x07"
-        busy_r = f"\x1b]2;{GLYPH_BUSY} imp · term1 · My Change\x07"
+        hold_r = "\x1b]2;⛙ imp · term1 · My Quest\x07"
+        busy_r = f"\x1b]2;{GLYPH_BUSY} imp · term1 · My Quest\x07"
         with anyio.fail_after(5):
             while not (hold_r in s.getvalue() and busy_r in s.getvalue()
                        and s.getvalue().rindex(busy_r) > s.getvalue().index(hold_r)):
@@ -1572,7 +1572,7 @@ async def test_lane_released_clears_hold_glyph(tmp_path: Path) -> None:
         raise AssertionError("no gate should fire")
 
     s = _TTYStream()
-    title = TerminalTitle(s, "term1", "My Change")
+    title = TerminalTitle(s, "term1", "My Quest")
     coord = InterruptCoordinator()
     with anyio.fail_after(10):
         async with anyio.create_task_group() as tg:
@@ -1587,8 +1587,8 @@ async def test_lane_released_clears_hold_glyph(tmp_path: Path) -> None:
             tg.start_soon(_client)
 
     out = s.getvalue()
-    hold = "\x1b]2;⛙ imp · term1 · My Change\x07"
-    busy = f"\x1b]2;{GLYPH_BUSY} imp · term1 · My Change\x07"
+    hold = "\x1b]2;⛙ imp · term1 · My Quest\x07"
+    busy = f"\x1b]2;{GLYPH_BUSY} imp · term1 · My Quest\x07"
     assert hold in out
     assert out.rindex(busy) > out.index(hold)
 
@@ -1609,8 +1609,8 @@ async def test_lane_evicted_clears_hold_glyph_like_released(tmp_path: Path) -> N
                    "payload": {"base": "main", "step": "wait-for-head"}})
         # Wait for the post-evict working re-render to flush before returning,
         # else teardown can race ahead of the client processing the eviction.
-        hold_r = "\x1b]2;⛙ imp · term1 · My Change\x07"
-        busy_r = f"\x1b]2;{GLYPH_BUSY} imp · term1 · My Change\x07"
+        hold_r = "\x1b]2;⛙ imp · term1 · My Quest\x07"
+        busy_r = f"\x1b]2;{GLYPH_BUSY} imp · term1 · My Quest\x07"
         with anyio.fail_after(5):
             while not (hold_r in s.getvalue() and busy_r in s.getvalue()
                        and s.getvalue().rindex(busy_r) > s.getvalue().index(hold_r)):
@@ -1632,7 +1632,7 @@ async def test_lane_evicted_clears_hold_glyph_like_released(tmp_path: Path) -> N
         raise AssertionError("no gate should fire")
 
     s = _TTYStream()
-    title = TerminalTitle(s, "term1", "My Change")
+    title = TerminalTitle(s, "term1", "My Quest")
     coord = InterruptCoordinator()
     with anyio.fail_after(10):
         async with anyio.create_task_group() as tg:
@@ -1647,8 +1647,8 @@ async def test_lane_evicted_clears_hold_glyph_like_released(tmp_path: Path) -> N
             tg.start_soon(_client)
 
     out = s.getvalue()
-    hold = "\x1b]2;⛙ imp · term1 · My Change\x07"
-    busy = f"\x1b]2;{GLYPH_BUSY} imp · term1 · My Change\x07"
+    hold = "\x1b]2;⛙ imp · term1 · My Quest\x07"
+    busy = f"\x1b]2;{GLYPH_BUSY} imp · term1 · My Quest\x07"
     assert hold in out
     assert out.rindex(busy) > out.index(hold)
 
@@ -1686,7 +1686,7 @@ async def test_replayed_ordinary_event_does_not_flip_to_busy(
         return "imp"
 
     s = _TTYStream()
-    title = TerminalTitle(s, "term1", "My Change")
+    title = TerminalTitle(s, "term1", "My Quest")
     coord = InterruptCoordinator()
     with anyio.fail_after(10):
         async with anyio.create_task_group() as tg:
@@ -1701,8 +1701,8 @@ async def test_replayed_ordinary_event_does_not_flip_to_busy(
             tg.start_soon(_client)
 
     out = s.getvalue()
-    idle = f"\x1b]2;{GLYPH_IDLE} imp · term1 · My Change\x07"
-    busy = f"\x1b]2;{GLYPH_BUSY} imp · term1 · My Change\x07"
+    idle = f"\x1b]2;{GLYPH_IDLE} imp · term1 · My Quest\x07"
+    busy = f"\x1b]2;{GLYPH_BUSY} imp · term1 · My Quest\x07"
     assert idle in out
     post_gate = out[out.index(idle) + len(idle):]
     assert busy not in post_gate

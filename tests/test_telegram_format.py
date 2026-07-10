@@ -13,7 +13,7 @@ def test_format_awaiting_user_input_uses_real_prompt_payload() -> None:
     # "text"/"message"), so the body must come from "prompt".
     event = {
         "type": "awaiting_user_input",
-        "change": {"title": "My Change", "id": "2026-06-11-abc"},
+        "change": {"title": "My Quest", "id": "2026-06-11-abc"},
         "payload": {"prompt": "Which DB should I use?"},
     }
     # The loud body is the humanized label alone — "needs your input", not the raw

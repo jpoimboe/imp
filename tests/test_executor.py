@@ -10,7 +10,7 @@ import pytest
 
 from imp.agents.runner import AgentInvocation, AgentRunner, Event
 from imp.agents.transcript import Transcript
-from imp.engine.change import Change
+from imp.engine.quest import Quest
 from imp.engine.executor import RunResult, run_change
 from imp.engine.feedback import COMPLETION_BACKSTOP
 from imp.engine.state import State
@@ -38,8 +38,8 @@ def _persist_initial(invocation: AgentInvocation) -> None:
             tools_schema=[], params={}, max_tool_calls=None)
 
 
-def _make_change(root: Path, *, quest_id: str = "test-change", title: str = "t") -> Change:
-    """Construct a Change directly on disk without git worktrees.
+def _make_change(root: Path, *, quest_id: str = "test-change", title: str = "t") -> Quest:
+    """Construct a Quest directly on disk without git worktrees.
 
     The test sets up the workflow under root/imp/workflows/imp BEFORE
     calling _make_change; this helper seeds the State so run_change can be
@@ -80,7 +80,7 @@ def _make_change(root: Path, *, quest_id: str = "test-change", title: str = "t")
         loop_counts={},
     ).save(quest_dir / "state")
 
-    change = Change(
+    change = Quest(
         id=quest_id, title=title, base_branch="main",
         control_root=root, project_root=root, quest_dir=quest_dir,
     )
@@ -211,9 +211,9 @@ def _seed_minimal_workflow(
     phase_name: str = "only",
     step_name: str = "w",
     agent_stem: str = "writer",
-) -> tuple[Change, str, str]:
+) -> tuple[Quest, str, str]:
     """Create a minimal single-step workflow on disk and snapshot it into a
-    Change. Returns ``(change, phase_name, step_name)``."""
+    Quest. Returns ``(change, phase_name, step_name)``."""
     wf_dir = root / "imp" / "workflows" / "imp"
     (wf_dir / "agents").mkdir(parents=True)
     (wf_dir / "agents" / f"{agent_stem}.md").write_text(
@@ -313,7 +313,7 @@ async def test_set_mutation_persists_to_state_vars(tmp_path: Path) -> None:
 # ── branch routing on a var ─────────────────────────────────────────────────
 
 
-def _seed_branch_loop_workflow(root: Path) -> Change:
+def _seed_branch_loop_workflow(root: Path) -> Quest:
     """writer(agent); the branch loops back via resume: writer. writer sets
     review_done=true; a branch step continues while review_done is false, and
     gotos the trailing `done` phase once it's true."""
@@ -365,7 +365,7 @@ async def test_branch_routes_on_var(tmp_path: Path) -> None:
     assert branch_started[0]["payload"]["kind"] == "branch"
 
 
-def _seed_lane_release_workflow(root: Path) -> Change:
+def _seed_lane_release_workflow(root: Path) -> Quest:
     wf = root / "imp" / "workflows" / "imp"
     (wf / "agents").mkdir(parents=True, exist_ok=True)
     (wf / "agents" / "worker.md").write_text(
@@ -1226,7 +1226,7 @@ async def test_fresh_start_puts_task_in_first_user_message(
 
 def _seed_back_edge_workflow(
     root: Path, verb: str, feedback: str | None = None
-) -> Change:
+) -> Quest:
     """coder(agent) -> reviewer(agent). reviewer rules: on rework, <verb>: coder;
     else continue. `verb` is 'goto' or 'resume'. `feedback` is an optional
     preamble string for the back edge (§6); None means bare (forwards nothing)."""
@@ -1704,7 +1704,7 @@ def test_last_script_blocked_returns_last_match() -> None:
 
 @pytest.mark.anyio
 async def test_first_run_snapshots_the_workflow(tmp_path: Path) -> None:
-    """The first run copies the live workflow dir into the gitignored per-Change
+    """The first run copies the live workflow dir into the gitignored per-Quest
     snapshot at .imp/change/workflow/ (taken once, at run-start)."""
     change, _, _ = _seed_minimal_workflow(tmp_path)
     _register_fake({"status": "Success"})
@@ -2476,7 +2476,7 @@ def _register_flip(sink: list[str], wt: Path) -> None:
     )
 
 
-def _seed_two_step_workflow(root: Path) -> Change:
+def _seed_two_step_workflow(root: Path) -> Quest:
     wf_dir = root / "imp" / "workflows" / "imp"
     (wf_dir / "agents").mkdir(parents=True)
     (wf_dir / "agents" / "writer.md").write_text(
@@ -2761,7 +2761,7 @@ async def test_route_label_threads_to_next_step_started(tmp_path: Path) -> None:
 
 @pytest.mark.anyio
 async def test_continue_renders_templated_target_label(tmp_path: Path) -> None:
-    from imp.cli.change_row import _status_segment
+    from imp.cli.quest_row import _status_segment
 
     wf = tmp_path / "imp" / "workflows" / "imp"
     (wf / "agents").mkdir(parents=True)

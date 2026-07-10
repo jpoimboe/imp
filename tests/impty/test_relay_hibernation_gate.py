@@ -31,7 +31,7 @@ from pathlib import Path
 
 import pytest
 
-from imp.engine.change import Change
+from imp.engine.quest import Quest
 from impty import TerminalSession
 from tests._live import _await_worktree
 from tests.impty.e2e_support import _MINIMAL_CONFIG, _git, can_pty, clean_env
@@ -143,7 +143,7 @@ def test_relay_hibernate_gate_then_resume_reengages(tmp_path: Path) -> None:
     try:
         wt = _await_worktree(tmp_path, timeout=30.0)
         slug = wt.name
-        change = Change.load(tmp_path, slug)
+        change = Quest.load(tmp_path, slug)
         events = change.quest_dir / "events.jsonl"
         state_path = change.quest_dir / "state" / "state.json"
         lock_path = change.quest_dir / "lock"

@@ -6,8 +6,8 @@ from pathlib import Path
 
 import pytest
 
-from imp.engine.change import (
-    Change,
+from imp.engine.quest import (
+    Quest,
     _migrate_v4_to_v5,
     _write_quest_json,
 )
@@ -32,7 +32,7 @@ def test_write_quest_json_replaces_existing_content(tmp_path: Path) -> None:
     _write_quest_json(meta_path, {"layout_version": 2, "title": "renamed"})
     reloaded = json.loads(meta_path.read_text())
     assert reloaded == {"layout_version": 2, "title": "renamed"}
-    assert not list(tmp_path.glob(".change-*"))  # no temp file left behind
+    assert not list(tmp_path.glob(".quest-*"))  # no temp file left behind
 
 
 def test_write_quest_json_preserves_original_on_replace_failure(
@@ -46,12 +46,12 @@ def test_write_quest_json_preserves_original_on_replace_failure(
         _write_quest_json(meta_path, {"layout_version": 2})
     # Live file untouched, and the transient temp file was cleaned up.
     assert meta_path.read_text() == original
-    assert not list(tmp_path.glob(".change-*"))
+    assert not list(tmp_path.glob(".quest-*"))
 
 
 def test_migration_advances_version_and_leaves_no_temp(tmp_path: Path) -> None:
     _seed_control(tmp_path)
-    ch = Change.create(tmp_path, title="x", quest_id="mig01", base_branch="main")
+    ch = Quest.create(tmp_path, title="x", quest_id="mig01", base_branch="main")
     meta_path = ch.quest_dir / "quest.json"
     meta = json.loads(meta_path.read_text())
     meta["layout_version"] = 4                       # pretend it was written by v4
@@ -61,14 +61,14 @@ def test_migration_advances_version_and_leaves_no_temp(tmp_path: Path) -> None:
 
     reloaded = json.loads(meta_path.read_text())     # still valid JSON
     assert reloaded["layout_version"] == 5
-    assert not list(ch.quest_dir.glob(".change-*"))
+    assert not list(ch.quest_dir.glob(".quest-*"))
 
 
 def test_rename_setter_preserves_quest_json_on_replace_failure(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _seed_control(tmp_path)
-    ch = Change.create(tmp_path, title="Original", quest_id="atom01",
+    ch = Quest.create(tmp_path, title="Original", quest_id="atom01",
                        base_branch="main")
     meta_path = ch.quest_dir / "quest.json"
     original = meta_path.read_text()
@@ -83,14 +83,14 @@ def test_rename_setter_preserves_quest_json_on_replace_failure(
     # live quest.json is byte-for-byte the pre-rename content and no temp leaks.
     assert meta_path.read_text() == original
     assert "Renamed" not in meta_path.read_text()
-    assert not list(ch.quest_dir.glob(".change-*"))
+    assert not list(ch.quest_dir.glob(".quest-*"))
 
 
 def test_migration_preserves_quest_json_on_replace_failure(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _seed_control(tmp_path)
-    ch = Change.create(tmp_path, title="x", quest_id="mig02", base_branch="main")
+    ch = Quest.create(tmp_path, title="x", quest_id="mig02", base_branch="main")
     meta_path = ch.quest_dir / "quest.json"
     meta = json.loads(meta_path.read_text())
     meta["layout_version"] = 4
@@ -105,4 +105,4 @@ def test_migration_preserves_quest_json_on_replace_failure(
     # unchanged (still layout_version 4) and no temp file leaks.
     assert meta_path.read_text() == original
     assert json.loads(meta_path.read_text())["layout_version"] == 4
-    assert not list(ch.quest_dir.glob(".change-*"))
+    assert not list(ch.quest_dir.glob(".quest-*"))

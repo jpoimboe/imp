@@ -1,7 +1,7 @@
 """The hello-frame codec shared by the south-side connector and the daemon hub.
 
 A south connection opens with exactly one hello frame — a single JSON line naming
-the Change — after which every line is a verbatim NDJSON event (connector → hub) or
+the Quest — after which every line is a verbatim NDJSON event (connector → hub) or
 a plain reply line (hub → connector). Only the hello is structured here; everything
 else is forwarded uninterpreted (spec Decision 3)."""
 from __future__ import annotations
@@ -11,7 +11,7 @@ import json
 
 def make_hello(quest_id: str, title: str, autosubscribe: bool = False) -> str:
     """The opening frame a connector sends after dialing: a single JSON line (no
-    trailing newline — the caller frames it) identifying the Change."""
+    trailing newline — the caller frames it) identifying the Quest."""
     return json.dumps({
         "type": "hello", "quest_id": quest_id, "title": title,
         "autosubscribe": autosubscribe})

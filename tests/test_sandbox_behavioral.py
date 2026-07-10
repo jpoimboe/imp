@@ -381,7 +381,7 @@ def test_gate_sees_post_rename_title_not_frozen_empty() -> None:
 
 
 def test_bash_tool_uses_live_quest_title_not_stale_snapshot() -> None:
-    """Regression: the bash tool must read IMP_QUEST_TITLE from the LIVE Change, not
+    """Regression: the bash tool must read IMP_QUEST_TITLE from the LIVE Quest, not
     the frozen quest_context snapshot that rename_change never updates. Without the
     fix the agent's own bash sees the empty name-on-intent title inside the sandbox.
     """
@@ -392,7 +392,7 @@ def test_bash_tool_uses_live_quest_title_not_stale_snapshot() -> None:
         pol = _active_policy(root)
         ctx = _ctx(root, pol)
         # quest_context = the pre-rename snapshot (empty title); ctx.change = the
-        # live, renamed Change. The bash tool must prefer the live one.
+        # live, renamed Quest. The bash tool must prefer the live one.
         ctx.quest_context = QuestContext(
             id="2026-06-10-x", title="",
             project_root=root, workflow_dir=root / ".imp" / "wf")
@@ -731,7 +731,7 @@ def test_change_and_spike_branch_writes_succeed() -> None:
     try:
         ctx, _pol = _refprot_ctx(control, wt_path)
 
-        # Change branch: two commits then an autosquash rebase onto main. The
+        # Quest branch: two commits then an autosquash rebase onto main. The
         # inline GIT_SEQUENCE_EDITOR/GIT_EDITOR=: keep rebase -i non-interactive
         # (they are shell-assignment prefixes, independent of the --clearenv jail).
         r1 = _bash(

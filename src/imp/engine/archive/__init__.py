@@ -1,4 +1,4 @@
-"""Per-Change archive: content-addressed blobs + SQLite index + record files."""
+"""Per-Quest archive: content-addressed blobs + SQLite index + record files."""
 
 from __future__ import annotations
 
@@ -53,7 +53,7 @@ def archive_quest(
     steps_dir: Path | None = None,
     resumable: bool = False,
 ) -> None:
-    """Finalize one completed/abandoned/left Change into the archive. Idempotent."""
+    """Finalize one completed/abandoned/left Quest into the archive. Idempotent."""
     events_bytes = events_path.read_bytes() if events_path.exists() else b""
     store = LocalBlobStore(blobs_root(control_root))
     events_hash = store.put(events_bytes)

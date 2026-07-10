@@ -36,7 +36,7 @@ def connect(index_path: Path) -> sqlite3.Connection:
 def ingest(
     conn: sqlite3.Connection, record: dict[str, Any], events: list[dict[str, Any]],
 ) -> None:
-    """Idempotently load one Change's record + events into the index."""
+    """Idempotently load one Quest's record + events into the index."""
     cid = record["id"]
     conn.execute("DELETE FROM quests WHERE id = ?", (cid,))
     conn.execute("DELETE FROM deps WHERE quest_id = ?", (cid,))

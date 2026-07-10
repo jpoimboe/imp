@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 import imp.cli.main as m
-from imp.engine.change import Change
+from imp.engine.quest import Quest
 from imp.engine.state import State
 from tests.conftest import _seed_control
 
@@ -24,15 +24,15 @@ def _args_with_message(cid: str, msg: str) -> argparse.Namespace:
     return argparse.Namespace(token=cid, message=msg, non_interactive=False)
 
 
-def _seed(tmp_path: Path) -> Change:
+def _seed(tmp_path: Path) -> Quest:
     _seed_control(tmp_path)
-    ch = Change.create_draft(
+    ch = Quest.create_draft(
         tmp_path, title="C", quest_id="c", base_branch="main")
     State(id="c", step="s", step_attempt=0, status="paused").save(ch.state_dir)
     return ch
 
 
-def _patch_common(monkeypatch, tmp_path: Path, ch: Change) -> None:
+def _patch_common(monkeypatch, tmp_path: Path, ch: Quest) -> None:
     monkeypatch.setattr(m, "install_process_group", lambda: None)
     monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
     monkeypatch.setattr(m, "_resolve_id", lambda control, token: "c")

@@ -5,14 +5,14 @@ import pytest
 from imp.cli.main import _abandon, _build_parser, _status_rows
 from imp.engine import worktree
 from imp.engine.abandon import tear_down_change
-from imp.engine.change import Change
+from imp.engine.quest import Quest
 from imp.engine.state import ProjectLock, State
 from tests.conftest import _git, _seed_control
 
 
 def test_remove_worktree_force_tolerates_dirty_tree(tmp_path: Path) -> None:
     _seed_control(tmp_path)
-    ch = Change.create(tmp_path, title="x", quest_id="feat", base_branch="main")
+    ch = Quest.create(tmp_path, title="x", quest_id="feat", base_branch="main")
     (ch.project_root / "dirty.txt").write_text("uncommitted")  # plain remove would error
     worktree.remove_worktree(tmp_path, "feat", force=True)
     assert not (tmp_path / ".imp" / "worktrees" / "feat").exists()
@@ -20,7 +20,7 @@ def test_remove_worktree_force_tolerates_dirty_tree(tmp_path: Path) -> None:
 
 def test_remove_worktree_force_tolerates_absent_worktree(tmp_path: Path) -> None:
     _seed_control(tmp_path)
-    Change.create(tmp_path, title="x", quest_id="feat", base_branch="main")
+    Quest.create(tmp_path, title="x", quest_id="feat", base_branch="main")
     worktree.remove_worktree(tmp_path, "feat", force=True)
     # Second call: worktree already gone + stale metadata; must not raise.
     worktree.remove_worktree(tmp_path, "feat", force=True)
@@ -28,7 +28,7 @@ def test_remove_worktree_force_tolerates_absent_worktree(tmp_path: Path) -> None
 
 def test_delete_branch_removes_and_is_idempotent(tmp_path: Path) -> None:
     _seed_control(tmp_path)
-    Change.create(tmp_path, title="x", quest_id="feat", base_branch="main")
+    Quest.create(tmp_path, title="x", quest_id="feat", base_branch="main")
     worktree.remove_worktree(tmp_path, "feat", force=True)  # branch must be uncheckedout first
     worktree.delete_branch(tmp_path, "feat")
     assert _git(tmp_path, "branch", "--list", "imp/feat").stdout.strip() == ""
@@ -38,7 +38,7 @@ def test_delete_branch_removes_and_is_idempotent(tmp_path: Path) -> None:
 
 def test_abandon_happy_path_tears_down_and_archives(tmp_path: Path) -> None:
     _seed_control(tmp_path)
-    Change.create(tmp_path, title="x", quest_id="feat", base_branch="main")
+    Quest.create(tmp_path, title="x", quest_id="feat", base_branch="main")
 
     rc = _abandon(tmp_path, "feat")
     assert rc == 0
@@ -56,7 +56,7 @@ def test_abandon_happy_path_tears_down_and_archives(tmp_path: Path) -> None:
 
 def test_abandon_surfaces_as_completed_not_inflight(tmp_path: Path) -> None:
     _seed_control(tmp_path)
-    Change.create(tmp_path, title="x", quest_id="feat", base_branch="main")
+    Quest.create(tmp_path, title="x", quest_id="feat", base_branch="main")
     _abandon(tmp_path, "feat")
 
     assert all(r[0] != "feat" for r in _status_rows(tmp_path))           # not in-flight
@@ -67,7 +67,7 @@ def test_abandon_surfaces_as_completed_not_inflight(tmp_path: Path) -> None:
 
 def test_abandon_allowed_from_completed_status(tmp_path: Path) -> None:
     _seed_control(tmp_path)
-    ch = Change.create(tmp_path, title="x", quest_id="feat", base_branch="main")
+    ch = Quest.create(tmp_path, title="x", quest_id="feat", base_branch="main")
     st = State.load(ch.state_dir)
     st.status = "completed"          # completed-but-not-merged: abandon is the only verb
     st.save(ch.state_dir)
@@ -77,7 +77,7 @@ def test_abandon_allowed_from_completed_status(tmp_path: Path) -> None:
 
 def test_abandon_refuses_when_lock_held(tmp_path: Path) -> None:
     _seed_control(tmp_path)
-    ch = Change.create(tmp_path, title="x", quest_id="feat", base_branch="main")
+    ch = Quest.create(tmp_path, title="x", quest_id="feat", base_branch="main")
     with ProjectLock(ch.quest_dir / "lock").acquire():     # simulate a live runner
         rc = _abandon(tmp_path, "feat")
     assert rc == 2
@@ -86,7 +86,7 @@ def test_abandon_refuses_when_lock_held(tmp_path: Path) -> None:
 
 def test_abandon_already_gone_is_idempotent_and_reaps_branch(tmp_path: Path) -> None:
     _seed_control(tmp_path)
-    Change.create(tmp_path, title="x", quest_id="feat", base_branch="main")
+    Quest.create(tmp_path, title="x", quest_id="feat", base_branch="main")
     # Simulate a crash between (d) worktree removal and (e) branch deletion:
     # worktree gone, branch orphaned.
     worktree.remove_worktree(tmp_path, "feat", force=True)
@@ -108,7 +108,7 @@ def test_abandon_materialized_confirms_on_tty(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     _seed_control(tmp_path)
-    Change.create(tmp_path, title="x", quest_id="feat", base_branch="main")
+    Quest.create(tmp_path, title="x", quest_id="feat", base_branch="main")
     monkeypatch.setattr("imp.cli.main._interactive", lambda: True)
     monkeypatch.setattr("builtins.input", lambda _p: "y")
     rc = _abandon(tmp_path, "feat")
@@ -122,7 +122,7 @@ def test_abandon_declined_keeps_change(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     _seed_control(tmp_path)
-    Change.create(tmp_path, title="x", quest_id="feat", base_branch="main")
+    Quest.create(tmp_path, title="x", quest_id="feat", base_branch="main")
     monkeypatch.setattr("imp.cli.main._interactive", lambda: True)
     monkeypatch.setattr("builtins.input", lambda _p: "n")
     rc = _abandon(tmp_path, "feat")
@@ -135,7 +135,7 @@ def test_abandon_yes_flag_skips_confirm(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _seed_control(tmp_path)
-    Change.create(tmp_path, title="x", quest_id="feat", base_branch="main")
+    Quest.create(tmp_path, title="x", quest_id="feat", base_branch="main")
     monkeypatch.setattr("imp.cli.main._interactive", lambda: True)
 
     def _boom(_p: str) -> str:
@@ -149,7 +149,7 @@ def test_abandon_yes_flag_skips_confirm(
 
 def test_commit_count_reflects_branch_commits(tmp_path: Path) -> None:
     _seed_control(tmp_path)
-    Change.create(tmp_path, title="x", quest_id="feat", base_branch="main")
+    Quest.create(tmp_path, title="x", quest_id="feat", base_branch="main")
     # Fresh worktree sits on main with no new commits.
     assert worktree.commit_count(tmp_path, "feat", "main") == 0
     wt = tmp_path / ".imp" / "worktrees" / "feat"
@@ -163,7 +163,7 @@ def test_abandon_resident_routes_through_daemon(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     import imp.cli.main as _m
     _seed_control(tmp_path)
-    Change.create(tmp_path, title="x", quest_id="feat", base_branch="main")
+    Quest.create(tmp_path, title="x", quest_id="feat", base_branch="main")
     delivered: list[str] = []
     monkeypatch.setattr(_m, "session_is_resident", lambda _ctrl, cid: True)
     monkeypatch.setattr(_m, "_deliver_abandon_resident",
@@ -179,7 +179,7 @@ def test_abandon_falls_through_when_resident_daemon_never_acks(
     import imp.cli.main as main_mod
 
     _seed_control(tmp_path)
-    Change.create(tmp_path, title="x", quest_id="feat", base_branch="main")
+    Quest.create(tmp_path, title="x", quest_id="feat", base_branch="main")
 
     monkeypatch.setattr(main_mod, "session_is_resident", lambda c, cid: True)
 
@@ -199,7 +199,7 @@ def test_tear_down_change_destroys_worktree_branch_and_archives(
     tmp_path: Path,
 ) -> None:
     _seed_control(tmp_path)
-    ch = Change.create(tmp_path, title="x", quest_id="feat", base_branch="main")
+    ch = Quest.create(tmp_path, title="x", quest_id="feat", base_branch="main")
 
     tear_down_change(ch)
 
@@ -217,7 +217,7 @@ def test_abandon_refuses_when_lock_held_on_idea(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     _seed_control(tmp_path)
-    ch = Change.create_draft(tmp_path, title="An idea", quest_id="idea1",
+    ch = Quest.create_draft(tmp_path, title="An idea", quest_id="idea1",
                              base_branch="main", origin="idea",
                              seed_opening="An idea\n\ndo a thing")
     with ProjectLock(ch.quest_dir / "lock").acquire():
@@ -229,7 +229,7 @@ def test_abandon_refuses_when_lock_held_on_idea(
 
 def test_abandon_retires_backlog_item(tmp_path: Path) -> None:
     _seed_control(tmp_path)
-    Change.create_draft(tmp_path, title="Backlog brief", quest_id="bk1",
+    Quest.create_draft(tmp_path, title="Backlog brief", quest_id="bk1",
                         base_branch="main", origin="followup",
                         seed_opening="Backlog brief\n\ndo a thing")
     rc = _abandon(tmp_path, "bk1")
@@ -241,7 +241,7 @@ def test_abandon_backlog_reports_message(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     _seed_control(tmp_path)
-    Change.create_draft(tmp_path, title="Backlog brief", quest_id="bk1",
+    Quest.create_draft(tmp_path, title="Backlog brief", quest_id="bk1",
                         base_branch="main", origin="followup",
                         seed_opening="Backlog brief")
     rc = _abandon(tmp_path, "bk1")
@@ -269,7 +269,7 @@ def test_tear_down_change_on_draft_skips_worktree_teardown(
 ) -> None:
     from imp.engine import merge_queue, worktree
     _seed_control(tmp_path)
-    ch = Change.create_draft(
+    ch = Quest.create_draft(
         tmp_path, title="An idea", quest_id="idea1", base_branch="main",
         origin="idea", seed_opening="An idea\n\ndo a thing")
 
@@ -300,7 +300,7 @@ def test_abandon_draft_confirm_copy_on_tty(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     _seed_control(tmp_path)
-    Change.create_draft(tmp_path, title="An idea", quest_id="idea1",
+    Quest.create_draft(tmp_path, title="An idea", quest_id="idea1",
                         base_branch="main", origin="idea",
                         seed_opening="An idea\n\ndo a thing")
     monkeypatch.setattr("imp.cli.main._interactive", lambda: True)
@@ -319,14 +319,14 @@ def test_resume_refuses_abandoned_draft(
     from imp.cli.main import _load_or_rehydrate
 
     _seed_control(tmp_path)
-    Change.create_draft(tmp_path, title="An idea", quest_id="idea1",
+    Quest.create_draft(tmp_path, title="An idea", quest_id="idea1",
                         base_branch="main", origin="idea",
                         seed_opening="An idea\n\ndo a thing")
     assert _abandon(tmp_path, "idea1") == 0
     capsys.readouterr()  # drop the abandon output
 
     result = _load_or_rehydrate(tmp_path, "idea1")
-    assert result == 0  # int refusal code, not a rehydrated Change
+    assert result == 0  # int refusal code, not a rehydrated Quest
     assert "was abandoned; nothing to resume." in capsys.readouterr().out
 
 
@@ -338,7 +338,7 @@ def test_search_finds_abandoned_draft(
     from imp.cli.main import _cmd_search
 
     _seed_control(tmp_path)
-    Change.create_draft(tmp_path, title="Zephyr idea", quest_id="idea1",
+    Quest.create_draft(tmp_path, title="Zephyr idea", quest_id="idea1",
                         base_branch="main", origin="idea",
                         seed_opening="Zephyr idea\n\ndo a thing")
     assert _abandon(tmp_path, "idea1") == 0

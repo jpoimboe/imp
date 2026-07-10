@@ -43,7 +43,7 @@ def test_render_marks_selection_and_uses_shared_formatter() -> None:
     lines = ResumePicker(_cands(), now=_NOW, color=False, header=_HEADER).render().splitlines()
     assert lines[0].startswith("▸ ")             # selected (newest) gets the marker
     assert lines[1].startswith("  ")             # unselected gets blank gutter
-    assert "Add version flag" in lines[0]        # TITLE via change_row formatter
+    assert "Add version flag" in lines[0]        # TITLE via quest_row formatter
     assert "aaa111" in lines[0]                  # ID = resume token (modern-id suffix)
     assert "15m" in lines[0]                     # relative AGE (11:45 vs 12:00 _NOW)
 

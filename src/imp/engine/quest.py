@@ -1,4 +1,4 @@
-"""Change lifecycle (spec §3, §5): immutable id identity, free-form title, worktree
+"""Quest lifecycle (spec §3, §5): immutable id identity, free-form title, worktree
 creation, permanent state home at <control_root>/.imp/quests/<id>/."""
 
 from __future__ import annotations
@@ -25,7 +25,7 @@ LAYOUT_VERSION = 5  # bump in the SAME commit as any breaking change-home layout
 
 def _write_quest_json(meta_path: Path, meta: dict[str, Any]) -> None:
     """Atomically rewrite quest.json (tmp file, fsync, os.replace); mirrors State.save."""
-    fd, tmp_name = tempfile.mkstemp(prefix=".change-", dir=meta_path.parent)
+    fd, tmp_name = tempfile.mkstemp(prefix=".quest-", dir=meta_path.parent)
     try:
         with os.fdopen(fd, "w") as f:
             json.dump(meta, f, indent=2, sort_keys=True)
@@ -161,7 +161,7 @@ def migrate(old_v: int, new_v: int, quest_dir: Path) -> None:
 
 
 @dataclass
-class Change:
+class Quest:
     id: str                      # immutable identity (spec §1), minted at imp new
     title: str                   # mutable human name
     base_branch: str
@@ -171,7 +171,7 @@ class Change:
     materialized: bool = True    # False only for an un-materialized draft (no worktree)
     orig_base_head: str = ""     # base tip captured at draft creation; NEVER a diff base
     cur_base_head: str = ""      # the SHA the branch is currently planted on (the fork)
-    workflow: str | None = None  # per-Change workflow name; None = project default
+    workflow: str | None = None  # per-Quest workflow name; None = project default
     origin: str = "draft"        # provenance: idea | draft | followup (Backlog only)
     seed_opening: str | None = None  # title+description seed for a fresh resume open
 
@@ -285,7 +285,7 @@ class Change:
     def create(
         cls, control_root: Path, *, title: str, quest_id: str, base_branch: str,
         depends_on: list[str] | None = None, workflow: str | None = None,
-    ) -> Change:
+    ) -> Quest:
         """Create branch imp/<id> + worktree .imp/worktrees/<id>, then seed
         internal state at the control root (.imp/quests/<id>). Raises
         worktree.BranchExists on the (effectively impossible) id collision —
@@ -363,7 +363,7 @@ class Change:
         cls, control_root: Path, *, title: str, quest_id: str, base_branch: str,
         depends_on: list[str] | None = None, workflow: str | None = None,
         origin: str = "draft", seed_opening: str | None = None,
-    ) -> Change:
+    ) -> Quest:
         """An un-materialized draft: NO branch, NO worktree. State is seeded at the
         permanent home; project_root points at the main checkout so the spec
         brainstorm runs read-only there. The base branch's current tip is recorded
@@ -441,10 +441,10 @@ class Change:
         return change
 
     @classmethod
-    def load(cls, control_root: Path, quest_id: str) -> Change:
+    def load(cls, control_root: Path, quest_id: str) -> Quest:
         quest_dir = control_root / ".imp" / "quests" / quest_id
         if not quest_dir.is_dir():
-            raise LoadError(f"no such Change {quest_id!r}", SourceLoc(file=quest_dir, line=1))
+            raise LoadError(f"no such Quest {quest_id!r}", SourceLoc(file=quest_dir, line=1))
         meta = json.loads((quest_dir / "quest.json").read_text())
         stored = meta.get("layout_version", 0)
         if stored != LAYOUT_VERSION:

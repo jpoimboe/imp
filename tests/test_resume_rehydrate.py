@@ -6,7 +6,7 @@ from pathlib import Path
 import imp.cli.main as m
 from imp.engine import archive
 from imp.engine.abandon import archive_conversation
-from imp.engine.change import Change
+from imp.engine.quest import Quest
 from imp.engine.state import State
 from tests.conftest import _seed_control
 
@@ -27,7 +27,7 @@ def _archive_terminal(tmp_path: Path, quest_id: str, status: str) -> None:
 
 def test_rehydrate_resumable_rebuilds_and_loads(tmp_path: Path) -> None:
     _seed_control(tmp_path)
-    ch = Change.create_draft(tmp_path, title="Conv", quest_id="conv",
+    ch = Quest.create_draft(tmp_path, title="Conv", quest_id="conv",
                              base_branch="main")
     archive_conversation(ch)                              # resumable, live home dropped
     assert not (tmp_path / ".imp" / "quests" / "conv").exists()
@@ -60,18 +60,18 @@ def test_load_or_rehydrate_returns_resume_gone_rc_for_terminal(tmp_path: Path) -
 
 def test_load_or_rehydrate_returns_loaded_change_for_resumable(tmp_path: Path) -> None:
     _seed_control(tmp_path)
-    ch = Change.create_draft(tmp_path, title="Conv", quest_id="conv",
+    ch = Quest.create_draft(tmp_path, title="Conv", quest_id="conv",
                              base_branch="main")
     archive_conversation(ch)
     result = m._load_or_rehydrate(tmp_path, "conv")
-    assert isinstance(result, Change)                     # resumed, not an rc
+    assert isinstance(result, Quest)                     # resumed, not an rc
     assert result.id == "conv"
 
 
 def test_load_or_rehydrate_returns_loaded_change_when_live(tmp_path: Path) -> None:
     _seed_control(tmp_path)
-    Change.create_draft(tmp_path, title="Conv", quest_id="conv",
+    Quest.create_draft(tmp_path, title="Conv", quest_id="conv",
                         base_branch="main")
     result = m._load_or_rehydrate(tmp_path, "conv")
-    assert isinstance(result, Change)
+    assert isinstance(result, Quest)
     assert result.id == "conv"

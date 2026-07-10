@@ -13,7 +13,7 @@ import anyio
 import pytest
 
 from imp.cli import main as cli_main
-from imp.engine.change import Change
+from imp.engine.quest import Quest
 from tests.conftest import _seed_control
 
 
@@ -44,7 +44,7 @@ def test_new_non_interactive_routes_through_session_client(
     captured: dict[str, object] = {}
 
     async def _fake_run_session_client(
-        change: Change, *, driver: object, coord: object, solicit: object,
+        change: Quest, *, driver: object, coord: object, solicit: object,
         seed_opening: object = None, status: object = None,
         leave_mode: object = None,
         title: object = None,
@@ -78,7 +78,7 @@ def test_new_interactive_routes_through_session_client(
     made: dict[str, object] = {}
 
     def _fake_make_interactive_solicit(
-        change: Change, *, status: object, driver: object, coord: object,
+        change: Quest, *, status: object, driver: object, coord: object,
     ) -> Any:
         made["quest_id"] = change.id
 
@@ -93,7 +93,7 @@ def test_new_interactive_routes_through_session_client(
     captured: dict[str, object] = {}
 
     async def _fake_run_session_client(
-        change: Change, *, driver: object, coord: object, solicit: object,
+        change: Quest, *, driver: object, coord: object, solicit: object,
         seed_opening: object = None, status: object = None,
         leave_mode: object = None,
         leave_state: object = None, title: object = None,
@@ -121,4 +121,4 @@ def test_new_interactive_routes_through_session_client(
     assert rc == 5
     assert made["quest_id"] == captured["quest_id"]   # solicit bound to the same change
     # The opening intent is now persisted durably (quest.json), not a run param.
-    assert Change.load(tmp_path, captured["quest_id"]).seed_opening == "add a thing"
+    assert Quest.load(tmp_path, captured["quest_id"]).seed_opening == "add a thing"

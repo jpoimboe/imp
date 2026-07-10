@@ -339,7 +339,7 @@ async def test_claude_code_load_skill_via_wrap_one(tmp_path: Path) -> None:
         events_path=events_path,
     )
     ctx.quest_context = QuestContext(
-        title="Test Change", project_root=tmp_path,
+        title="Test Quest", project_root=tmp_path,
         workflow_dir=workflow_dir,
     )
     ctx.event_log = JsonlEventLog(events_path)
@@ -396,7 +396,7 @@ async def test_claude_code_load_skill_flush_orders_below_narration(
         events_path=events_path,
     )
     ctx.quest_context = QuestContext(
-        title="Test Change", project_root=tmp_path,
+        title="Test Quest", project_root=tmp_path,
         workflow_dir=workflow_dir,
     )
     ctx.event_log = JsonlEventLog(events_path)

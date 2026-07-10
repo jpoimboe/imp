@@ -5,14 +5,14 @@ from types import SimpleNamespace
 
 from imp.agents.prompts import render_label
 from imp.assets import bundled_workflow_dir
-from imp.engine.change import Change
+from imp.engine.quest import Quest
 from imp.engine.loader import load_workflow
 from tests.conftest import _seed_control
 
 
-def _change(tmp_path: Path) -> Change:
+def _change(tmp_path: Path) -> Quest:
     _seed_control(tmp_path)
-    return Change.create(tmp_path, title="t", quest_id="aaa111", base_branch="main")
+    return Quest.create(tmp_path, title="t", quest_id="aaa111", base_branch="main")
 
 
 def _state(**vars: object) -> SimpleNamespace:

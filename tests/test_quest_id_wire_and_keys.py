@@ -47,7 +47,7 @@ def test_discover_exposes_quest_info_and_list_quests() -> None:
     names = set(vars(discover))
     assert "QuestInfo" in names
     assert "list_quests" in names
-    assert "Change" "Info" not in names    # split literal so the rename sweep can't rewrite this guard
+    assert "Quest" "Info" not in names    # split literal so the rename sweep can't rewrite this guard
     assert "list_chang" "es" not in names  # split literal so the rename sweep can't rewrite this guard
 
 

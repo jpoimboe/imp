@@ -85,7 +85,7 @@ def run_script(
     """Run a script step; return {exit, stdout, stderr} for rule evaluation.
 
     The command string is an explicit shell expression read live from the
-    Change's own worktree (principal-based trust: the Change author and workflow
+    Quest's own worktree (principal-based trust: the Quest author and workflow
     author are the same V0 principal). When `policy` is active it is wrapped with
     bwrap (build_sandbox_argv appends `sh -c <command>`); otherwise the bare
     `sh -c` runs.

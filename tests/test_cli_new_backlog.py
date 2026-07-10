@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from imp.cli import main
-from imp.engine.change import Change
+from imp.engine.quest import Quest
 from tests.conftest import _seed_control
 
 
@@ -29,7 +29,7 @@ def test_new_idea_creates_quest_home_with_origin_idea(
     rc = main._record_idea(_args(), tmp_path, "main")
     assert rc == 0
     new_id = _only_new_id(tmp_path)
-    change = Change.load(tmp_path, new_id)
+    change = Quest.load(tmp_path, new_id)
     assert change.materialized is False
     assert change.origin == "idea"
     assert change.title == "Wire OAuth login"
@@ -44,7 +44,7 @@ def test_new_idea_description_populates_seed_opening(
     _seed_control(tmp_path)
     monkeypatch.chdir(tmp_path)
     main._record_idea(_args(opening="the longer brief"), tmp_path, "main")
-    change = Change.load(tmp_path, _only_new_id(tmp_path))
+    change = Quest.load(tmp_path, _only_new_id(tmp_path))
     assert change.seed_opening == "Wire OAuth login\n\nthe longer brief"
 
 
@@ -52,7 +52,7 @@ def test_new_idea_no_deps(tmp_path: Path, monkeypatch) -> None:
     _seed_control(tmp_path)
     monkeypatch.chdir(tmp_path)
     main._record_idea(_args(depends_on=None), tmp_path, "main")
-    meta = json.loads((Change.load(tmp_path, _only_new_id(tmp_path)).quest_dir
+    meta = json.loads((Quest.load(tmp_path, _only_new_id(tmp_path)).quest_dir
                        / "quest.json").read_text())
     assert meta["depends_on"] == []
 
@@ -225,7 +225,7 @@ def test_interactive_backlog_files_instantly_no_session(
         sys.stdout.isatty = orig_out  # type: ignore[method-assign]
 
     assert rc == 0
-    change = Change.load(tmp_path, _only_new_id(tmp_path))
+    change = Quest.load(tmp_path, _only_new_id(tmp_path))
     assert change.origin == "idea"
     assert change.title == "My backlog item"
     assert change.materialized is False

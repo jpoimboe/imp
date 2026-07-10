@@ -20,7 +20,7 @@ def _ctx(tmp_path: Path) -> ToolContext:
         events_path=tmp_path / "events.jsonl",
     )
     ctx.quest_context = QuestContext(
-        id="test01", title="Test Change", project_root=tmp_path,
+        id="test01", title="Test Quest", project_root=tmp_path,
         workflow_dir=tmp_path / ".imp" / "change" / "workflow",
     )
     return ctx

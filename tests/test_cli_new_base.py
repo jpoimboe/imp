@@ -13,7 +13,7 @@ from imp.cli.main import (
     _record_idea,
     _resolve_new_base,
 )
-from imp.engine.change import Change
+from imp.engine.quest import Quest
 from tests.conftest import _git, _seed_control
 
 
@@ -138,5 +138,5 @@ def test_record_idea_uses_passed_base_not_current_branch(
     assert rc == 0
     ids = [p.name for p in (tmp_path / ".imp" / "quests").iterdir()]
     assert len(ids) == 1, ids
-    change = Change.load(tmp_path, ids[0])
+    change = Quest.load(tmp_path, ids[0])
     assert change.base_branch == "release/9"

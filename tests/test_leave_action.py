@@ -9,7 +9,7 @@ from imp.cli.leave import (
     leave_control_action,
     resolve_leave_action,
 )
-from imp.engine.change import Change
+from imp.engine.quest import Quest
 from tests.conftest import _seed_control
 
 
@@ -21,8 +21,8 @@ class _Log:
         return list(self._events)
 
 
-def _draft(tmp_path: Path, quest_id: str, *, exchange: bool) -> Change:
-    ch = Change.create_draft(
+def _draft(tmp_path: Path, quest_id: str, *, exchange: bool) -> Quest:
+    ch = Quest.create_draft(
         tmp_path, title="D", quest_id=quest_id, base_branch="main")
     if exchange:
         ch.event_log().append(
@@ -100,7 +100,7 @@ def test_materialized_change_returns_none(tmp_path: Path) -> None:
     meta = json.loads(meta_path.read_text())
     meta["materialized"] = True
     meta_path.write_text(json.dumps(meta))
-    reloaded = Change.load(tmp_path, "mat1")
+    reloaded = Quest.load(tmp_path, "mat1")
     assert leave_control_action(reloaded, "chat", None) is None
 
 

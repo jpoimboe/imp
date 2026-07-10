@@ -11,7 +11,7 @@ from typing import Any
 import pytest
 
 from imp.agents.runner import AgentInvocation, AgentRunner
-from imp.engine.change import Change
+from imp.engine.quest import Quest
 from imp.engine.executor import RunResult, run_change
 from imp.engine.state import State
 from imp.providers.claude_code import ClaudeCodeAgentRunner
@@ -23,7 +23,7 @@ def anyio_backend() -> str:
     return "asyncio"
 
 
-def _seed_single_agent(root: Path) -> Change:
+def _seed_single_agent(root: Path) -> Quest:
     from imp.engine.loader import load_workflow
     from imp.providers.effective import load_effective_config
 
@@ -71,7 +71,7 @@ def _seed_single_agent(root: Path) -> Change:
         status="running", vars=dict(workflow.vars.defaults()), loop_counts={},
     ).save(quest_dir / "state")
 
-    change = Change(
+    change = Quest(
         id="c", title="t", base_branch="main",
         control_root=root, project_root=root, quest_dir=quest_dir,
     )
