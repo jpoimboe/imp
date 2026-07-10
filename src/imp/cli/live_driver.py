@@ -161,7 +161,7 @@ def compose_position_row(*, activity: nv.Activity, change_id: str | None,
     """Row 3 of the live footer: structural position (left) + id·title identity (right)."""
     bg = pal.user_bg_open(enabled=color)
     over = bool(bg)
-    phase_seg = (_paint(activity.phase, "wordmark", color=color, over_bg=over)
+    phase_seg = (_paint(activity.phase, *pal.NODE_COLORS["step"], color=color, over_bg=over)
                  if activity.phase else None)
     plan_seg = (_paint(activity.plan, *pal.NODE_COLORS["step"], color=color, over_bg=over)
                 if activity.plan else None)
@@ -181,9 +181,10 @@ def compose_position_row(*, activity: nv.Activity, change_id: str | None,
 
 
 def compose_subagent_rows(builder: nv.NarrativeBuilder, *, color: bool,
-                          now_iso: str) -> list[str]:
-    """One indented row per running subagent (B4/AC5); colliding roles numbered."""
-    from imp.agents.subagent_verbs import subagent_verb
+                          width: int, now_iso: str) -> list[str]:
+    """One indented row per running subagent (B4/AC5); colliding roles numbered.
+    Each row carries the parent position row's slate background, padded to width-2
+    so the slate spans the full footer width and aligns with the row above it."""
     folds = builder.running_subagents()
     if not folds:
         return []
@@ -192,6 +193,8 @@ def compose_subagent_rows(builder: nv.NarrativeBuilder, *, color: bool,
         counts[f.subagent_name] = counts.get(f.subagent_name, 0) + 1
     seen: dict[str, int] = {}
     rows: list[str] = []
+    bg = pal.user_bg_open(enabled=color)
+    over = bool(bg)
     for f in folds:
         name = f.subagent_name
         if counts[name] > 1:
@@ -199,18 +202,22 @@ def compose_subagent_rows(builder: nv.NarrativeBuilder, *, color: bool,
             role = f"{name} {seen[name]}"
         else:
             role = name
-        role_seg = _paint(role, *pal.NODE_COLORS["subagent"], color=color, over_bg=False)
-        verb = f.label or subagent_verb(name) or f"subagent({name})"
-        verb_seg = _paint(verb, "wordmark", color=color, over_bg=False)
+        role_seg = _paint(role, *pal.NODE_COLORS["subagent"], color=color, over_bg=over)
         model = rt.subagent_model(f)
-        model_seg = _paint(model, "gray", color=color, over_bg=False) if model else None
+        model_seg = _paint(model, "gray", color=color, over_bg=over) if model else None
         bar = context_bar(model, f.nested.latest_prompt_tokens,
                           context_pct=f.nested.latest_context_pct,
-                          color=color, over_bg=False)
+                          color=color, over_bg=over)
         secs = nv.elapsed_seconds(f.start_ts, now_iso)
         el = rt.fmt_seconds(secs) if secs is not None else None
-        el_seg = _paint(el, "dim", color=color, over_bg=False) if el else None
-        rows.append("  " + rt.compose_label([role_seg, verb_seg, model_seg, bar, el_seg]))
+        el_seg = _paint(el, "dim", color=color, over_bg=over) if el else None
+        inner = "  " + rt.compose_label([role_seg, model_seg, bar, el_seg])
+        if bg:
+            pad = width - 2 - pal.display_width(inner)
+            if pad > 0:
+                inner += " " * pad
+            inner = f"{bg}{inner}{_RESET}"
+        rows.append(inner)
     return rows
 
 
@@ -374,29 +381,31 @@ class LiveDriver:
         a_line = compose_activity_line(activity=activity, elapsed=elapsed,
                                        frame=frame, color=self._color)
         root = self._builder.tree.root
+        w = term_width()
         p_row = compose_position_row(
+            activity=activity, change_id=root.id, title=root.title,
+            prompt_tokens=self._builder.latest_prompt_tokens,
+            color=self._color, width=w,
+            context_pct=self._builder.latest_context_pct,
+            checkpoint_threshold=self._builder.latest_checkpoint_threshold)
+        rows = [a_line, "", p_row]
+        rows += compose_subagent_rows(
+            self._builder, color=self._color, width=w,
+            now_iso=datetime.now(UTC).isoformat())
+        return rows
+
+    def compose_toolbar_static(self) -> str | None:
+        # Position ROW — right-flushed footer layout, no spinner, no elapsed (AC5).
+        activity = self._builder.current_activity()
+        if activity is None:
+            return None
+        root = self._builder.tree.root
+        return compose_position_row(
             activity=activity, change_id=root.id, title=root.title,
             prompt_tokens=self._builder.latest_prompt_tokens,
             color=self._color, width=term_width(),
             context_pct=self._builder.latest_context_pct,
             checkpoint_threshold=self._builder.latest_checkpoint_threshold)
-        rows = [a_line, "", p_row]
-        rows += compose_subagent_rows(
-            self._builder, color=self._color,
-            now_iso=datetime.now(UTC).isoformat())
-        return rows
-
-    def compose_toolbar_static(self) -> str | None:
-        # Position bar only — no spinner, no elapsed (AC5).
-        activity = self._builder.current_activity()
-        if activity is None:
-            return None
-        root = self._builder.tree.root
-        return compose_position_bar(
-            activity=activity, change_id=root.id, title=root.title,
-            prompt_tokens=self._builder.latest_prompt_tokens,
-            color=self._color, width=term_width(),
-            context_pct=self._builder.latest_context_pct)
 
     # -- emission -------------------------------------------------------------
     def _cur_width(self) -> int:

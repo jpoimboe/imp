@@ -1943,9 +1943,9 @@ def test_compose_status_returns_activity_line_blank_then_position_bar() -> None:
     assert "thinking" not in block[2]
 
 
-def test_compose_toolbar_static_is_position_bar_only() -> None:
+def test_compose_toolbar_static_uses_the_position_row_layout() -> None:
     drv, _ = _driver()
-    drv.on_event(ev("1", "change_created", change_id=1, title="t"))
+    drv.on_event(ev("1", "change_created", id="z9gixx", title="t"))
     drv.on_event(ev("2", "step_started", step="task-lead", kind="agent", phase="code",
                      model="claude-sonnet-4-5", provider="anthropic", label="task 1/3",
                      phase_label="implementation phase · plan 1/1", position_label=True))
@@ -1953,6 +1953,8 @@ def test_compose_toolbar_static_is_position_bar_only() -> None:
     assert toolbar is not None
     assert "implementation phase · plan 1/1 · task 1/3" in toolbar
     assert "thinking" not in toolbar
+    # Right-flushed: id·title sits AFTER the structural left group (bar puts id first).
+    assert toolbar.index("z9gixx") > toolbar.index("implementation phase")
 
 
 def test_mid_step_position_change_re_emits_a_header() -> None:
@@ -1967,7 +1969,7 @@ def test_mid_step_position_change_re_emits_a_header() -> None:
                      label="task 2/2"))
     body = "\n".join(_body(out))
     assert "task 2/2" in body                          # new position re-emitted
-    assert "implementation phase" not in body          # phase rides the rule, not the header
+    assert "implementation phase · plan 1/1 · task 2/2" in body  # phase now prefixes the header
 
 
 def test_unchanged_position_push_emits_no_duplicate_header() -> None:
@@ -2339,7 +2341,7 @@ def test_compose_position_row_colors_match_the_scrollback_palette() -> None:
     finally:
         pal.set_theme("ansi")
     parts = row.split(" · ")
-    assert "\x1b[33m" in parts[0] and "\x1b[34m" not in parts[0]  # phase: gold, not blue
+    assert "\x1b[34m" in parts[0] and "\x1b[33m" not in parts[0]  # phase: step-blue, not gold
     assert "\x1b[34m" in parts[1]                                   # plan: step-blue
     assert "\x1b[34m" in parts[2]                                   # counter: step-blue
     assert "\x1b[90m" in parts[3] and "\x1b[34m" not in parts[3]  # model: gray, not blue
@@ -2364,16 +2366,21 @@ def _sub_builder(*subs, readings=(), start_ts=None):
 def test_compose_subagent_rows_one_per_running_subagent() -> None:
     from imp.cli.live_driver import compose_subagent_rows
     b = _sub_builder(("t1", "coder"), ("t2", "explorer"))
-    rows = compose_subagent_rows(b, color=False, now_iso="2026-01-01T00:00:00+00:00")
+    rows = compose_subagent_rows(b, color=False, width=120,
+                                 now_iso="2026-01-01T00:00:00+00:00")
     assert len(rows) == 2
-    assert any("coder" in r and "writing code" in r for r in rows)   # role + role verb
-    assert any("explorer" in r and "exploring" in r for r in rows)
+    joined = "\n".join(rows)
+    assert "coder" in joined      # role still identifies each row
+    assert "explorer" in joined
+    assert "writing code" not in joined                 # verb segment dropped
+    assert "exploring" not in joined
 
 
 def test_compose_subagent_rows_number_colliding_roles() -> None:
     from imp.cli.live_driver import compose_subagent_rows
     b = _sub_builder(("t1", "explorer"), ("t2", "explorer"))
-    rows = compose_subagent_rows(b, color=False, now_iso="2026-01-01T00:00:00+00:00")
+    rows = compose_subagent_rows(b, color=False, width=120,
+                                 now_iso="2026-01-01T00:00:00+00:00")
     joined = "\n".join(rows)
     assert "explorer 1" in joined and "explorer 2" in joined
 
@@ -2387,7 +2394,8 @@ def test_compose_subagent_rows_carry_own_context_and_elapsed() -> None:
                  context_pct=42.0, context_window=200_000)
     b = _sub_builder(("t1", "coder"), readings=[reading],
                      start_ts="2026-01-01T00:00:00+00:00")
-    rows = compose_subagent_rows(b, color=False, now_iso="2026-01-01T00:00:05+00:00")
+    rows = compose_subagent_rows(b, color=False, width=120,
+                                 now_iso="2026-01-01T00:00:05+00:00")
     assert len(rows) == 1
     assert "42%" in rows[0]     # the subagent's OWN context gauge (Part 2)
     assert "5s" in rows[0]      # its own elapsed (start_ts .. now_iso)
@@ -2396,7 +2404,39 @@ def test_compose_subagent_rows_carry_own_context_and_elapsed() -> None:
 def test_compose_subagent_rows_empty_when_none_running() -> None:
     from imp.cli.live_driver import compose_subagent_rows
     b = _sub_builder()
-    assert compose_subagent_rows(b, color=False, now_iso="2026-01-01T00:00:00+00:00") == []
+    assert compose_subagent_rows(b, color=False, width=120,
+                                 now_iso="2026-01-01T00:00:00+00:00") == []
+
+
+def test_compose_subagent_rows_carry_the_slate_and_align_under_dark_theme() -> None:
+    from imp.cli import palette as pal
+    from imp.cli.live_driver import compose_subagent_rows
+    b = _sub_builder(("t1", "coder"))
+    try:
+        pal.set_theme("dark")
+        rows = compose_subagent_rows(b, color=True, width=120,
+                                     now_iso="2026-01-01T00:00:00+00:00")
+    finally:
+        pal.set_theme("ansi")
+    assert len(rows) == 1
+    assert rows[0].startswith("\x1b[48;2;43;47;58m")   # the position row's slate open
+    assert rows[0].endswith("\x1b[0m")
+    assert pal.display_width(rows[0]) == 118           # padded to width-2, aligned with parent
+
+
+def test_compose_subagent_rows_render_plain_without_slate_under_ansi_theme() -> None:
+    from imp.cli import palette as pal
+    from imp.cli.live_driver import compose_subagent_rows
+    b = _sub_builder(("t1", "coder"))
+    try:
+        pal.set_theme("ansi")
+        rows = compose_subagent_rows(b, color=True, width=120,
+                                     now_iso="2026-01-01T00:00:00+00:00")
+    finally:
+        pal.set_theme("ansi")
+    assert len(rows) == 1
+    assert not rows[0].startswith("\x1b[48")   # 16-color theme has no slate background
+    assert rows[0].startswith("  ")            # still indented like the parent
 
 
 def test_compose_status_appends_a_row_per_running_subagent() -> None:
@@ -2409,7 +2449,8 @@ def test_compose_status_appends_a_row_per_running_subagent() -> None:
                      input={"subagent_name": "coder"}))
     block = drv.compose_status(0, 5.0)
     assert isinstance(block, list) and len(block) == 4   # row1, blank, row3, + one subagent row
-    assert "coder" in block[3] and "writing code" in block[3]
+    assert "coder" in block[3]              # role present
+    assert "writing code" not in block[3]   # verb segment dropped
 
 
 def test_test_lane_wait_and_acquire_each_restart_the_status_span() -> None:

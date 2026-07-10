@@ -232,9 +232,9 @@ class Activity:
     kind: str | None = None            # active step kind, for context-bar gating at compose time
     lane_wait: bool = False            # active step parked in a lane semaphore wait (test or merge)
     # Row-3 position segments, pre-split (compare=False) so the driver never re-slices `position`.
-    phase: str | None = field(default=None, compare=False)     # phase head (gold)
+    phase: str | None = field(default=None, compare=False)     # phase head (step-blue)
     plan: str | None = field(default=None, compare=False)      # plan counter (step-blue)
-    counter: str | None = field(default=None, compare=False)   # position_label leaf (step-blue)
+    counter: str | None = field(default=None, compare=False)   # running step's label (step-blue)
 
 
 def _join(*parts: str | None) -> str | None:
@@ -565,8 +565,7 @@ class NarrativeBuilder:
         top_kind = top.kind if top is not None else None
         top_lane_wait = top.lane_wait if top is not None else False
         top_phase, top_plan = _split_phase_label(top.phase_label if top is not None else None)
-        top_counter = ((top.live_label or top.label)
-                       if (top is not None and top.position_label) else None)
+        top_counter = (top.live_label or top.label) if top is not None else None
         if self._reset_wait is not None:
             position = _join(top.phase_label, top.live_label or top.label) if top else None
             return Activity(
@@ -580,11 +579,13 @@ class NarrativeBuilder:
         if top is not None:
             model = top.model
             if top.position_label:
-                # A position step's label is a counter — never a phrase. rotated_phrase is
-                # a verb-phrase concept, so it is deliberately excluded here so a rotating
-                # phrase can never land a verb on the position breadcrumb.
+                # The label is a counter that rides the position row (Activity.counter),
+                # never the spinner verb. The rotating phrase drives the spinner line
+                # instead; the counter label (live_label/label) is kept off static_verb so
+                # it can never leak onto the spinner. Before the first rotation
+                # rotated_phrase is None and the generic "thinking" fallback applies.
                 position = _join(top.phase_label, top.live_label or top.label)
-                static_verb: str | None = None
+                static_verb: str | None = top.rotated_phrase
             else:
                 position = top.phase_label
                 static_verb = top.live_label or top.rotated_phrase or top.label

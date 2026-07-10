@@ -116,3 +116,20 @@ def test_resume_reentry_resets_rotate_phrase_and_rotated_phrase(monkeypatch) -> 
     assert b._step_stack[-1] is step        # same node reused
     assert step.rotated_phrase is None      # cleared on resume re-entry
     assert step.rotate_phrase is True       # re-armed from the new payload
+
+
+def test_position_label_step_spinner_shows_rotated_phrase_and_keeps_counter(monkeypatch) -> None:
+    _deterministic_draws(monkeypatch)
+    b = nv.NarrativeBuilder()
+    b.add(ev("1", "change_created", change_id=1, title="x"))
+    b.add(ev("2", "step_started", step="task-lead", kind="agent", phase="code",
+             model="m", provider="anthropic", label="task 2/3",
+             phase_label="implementation phase · plan 1/1",
+             position_label=True, rotate_phrase=True))
+    b.add(_tool("3", "c1"))
+    b.add(_prose("4"))                # first work segment -> rotated_phrase == "rot1"
+    act = b.current_activity()
+    assert act.verb == "rot1"         # task-lead's rotating phrase drives the spinner line
+    assert act.verb != "thinking"
+    assert act.counter == "task 2/3"  # the counter still rides the position row
+    assert "task" not in act.verb     # the counter label never leaks onto the spinner
