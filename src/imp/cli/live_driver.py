@@ -327,8 +327,12 @@ class LiveDriver:
                 # the current burst between user inputs (across tools, thinks, and
                 # multiple llm_response blocks within one interactive turn). Non-
                 # interactive runs never fire user_message, so today's per-step
-                # reset behavior is preserved as a side effect.
-                self._status.restart_span()
+                # reset behavior is preserved as a side effect. Guarded — like the
+                # llm_response branch below — so a dispatched subagent's own
+                # step_started/user_message can't zero the shared burst timer while
+                # background subagents are in flight.
+                if not self._builder.has_running_subagent:
+                    self._status.restart_span()
             elif etype == "llm_response":
                 # A genuine prose turn restarts the span (w7f56t) — but NOT while
                 # a dispatched subagent is still running: the parent narrating in

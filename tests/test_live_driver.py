@@ -806,6 +806,34 @@ def test_prose_does_not_restart_span_while_a_subagent_runs() -> None:
     assert calls == ["restart"]                                          # only step_started
 
 
+def test_subagent_step_and_user_message_do_not_restart_span_while_running() -> None:
+    """A dispatched subagent's own step_started (and any user_message) must NOT
+    zero the shared `(+N subagents) · Ns` burst timer while the subagent runs;
+    only the parent's pre-dispatch step_started restarts it."""
+    calls: list[str] = []
+
+    class _CountingStatus(LiveStatus):
+        def restart_span(self) -> None:
+            calls.append("restart")
+            super().restart_span()
+
+    out = _Pipe()
+    status = _CountingStatus(out)
+    drv = LiveDriver(stream=out, color=False, width=80, status=status)
+    for e in [
+        ev("1", "change_created", change_id=1, title="x"),
+        ev("2", "step_started", step="spec", kind="agent", phase="p",
+           model="m", provider="anthropic"),                              # restart
+        ev("3", "tool_call", agent_id="a", id="t1", name="sub_agent",
+           input={"subagent_name": "reviewer"}),                         # fold runs
+        ev("4", "step_started", agent_id="sub:3", step="rev", kind="agent",
+           phase="p", model="m", provider="anthropic"),                  # NO restart
+        ev("5", "user_message", content=[{"type": "text", "text": "reply"}]),  # NO restart
+    ]:
+        drv.on_event(e)
+    assert calls == ["restart"]                                          # only step 2
+
+
 def test_chrome_step_collapses_live_and_matches_log() -> None:
     drv, out = _driver()
     events = [
