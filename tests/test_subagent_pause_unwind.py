@@ -10,8 +10,8 @@ import pytest
 
 from imp.agents.runner import AgentInvocation, AgentRunner, Event
 from imp.agents.subagents import SubagentSuspended
-from imp.engine.quest import Quest
 from imp.engine.executor import RunResult, run_change
+from imp.engine.quest import Quest
 from imp.engine.state import State
 
 
@@ -59,7 +59,7 @@ def _e2e_agent_def(name, *, tools, subagents=()):
 
 @pytest.mark.anyio
 async def test_batched_child_suspension_degrades_to_is_error(tmp_path) -> None:
-    from imp.agents.runner import QuestContext, Message, TextBlock
+    from imp.agents.runner import Message, QuestContext, TextBlock
     from imp.cli.signals import InterruptCoordinator
     from imp.providers import resolve
     from imp.providers.anthropic import AnthropicAgentRunner

@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from imp.agents.runner import QuestContext, Message, TextBlock
+from imp.agents.runner import Message, QuestContext, TextBlock
 from imp.engine.agent_run import build_agent_invocation
 from tests.test_agent_run import _agent
 

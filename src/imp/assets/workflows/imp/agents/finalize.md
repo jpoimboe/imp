@@ -114,7 +114,7 @@ re-raises it.
 cover-check has already run, so any verify-family toleration confirmed as tracked
 elsewhere is already marked `— covered-by <id>` and is **not** re-seeded. Hand every
 remaining **needs-decision** item (the closed set from §1) to the backlog: call
-`create_change(title="<short title>", description="<self-contained brief that needs no
+`create_quest(title="<short title>", description="<self-contained brief that needs no
 other context>", depends_on=["{{ change.id }}"])` — group related items into one Change
 or split unrelated ones across several, whatever fits best. When the item is a
 verify-family toleration, the `description` must embed the failing test's identity
@@ -167,7 +167,7 @@ item:
     leave its `deferred.md` line `needs-decision` (it rides the rework and is
     re-evaluated next pass).
   - **defer** — hand it to a new backlog Change. Call
-    `create_change(title="<short title>", description="<self-contained brief that needs
+    `create_quest(title="<short title>", description="<self-contained brief that needs
     no other context>", depends_on=["{{ change.id }}"])`, then rewrite the item's
     line to `- [x] DEFERRED <src>: <desc> [scope: …] — seeded <new-change-id>`,
     and tell them it is startable via `imp resume <new-change-id>` once this

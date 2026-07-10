@@ -16,8 +16,8 @@ from pathlib import Path
 import anyio
 import pytest
 
-from imp.engine.quest import Quest
 from imp.engine.executor import RunResult, run_change
+from imp.engine.quest import Quest
 from tests.conftest import _git, _init_repo, write_agent_md
 
 

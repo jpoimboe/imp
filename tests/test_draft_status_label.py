@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from imp.cli import quest_row
 from imp.cli import main as m
+from imp.cli import quest_row
 from imp.engine.quest import Quest
 from imp.engine.state import State
 from tests.conftest import _seed_control

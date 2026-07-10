@@ -6,9 +6,9 @@ import anyio
 
 import imp.remote.session.attach as attach_mod
 from imp.engine import merge_queue as mq
-from imp.engine.quest import Quest
 from imp.engine.executor import RunResult, _complete, _route_merge_and_exit_worktree
 from imp.engine.loader import load_workflow
+from imp.engine.quest import Quest
 from imp.engine.state import JsonlEventLog, State
 from tests.conftest import _git, _seed_control
 

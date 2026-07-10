@@ -107,7 +107,7 @@ def test_clearenv_and_setenv_allowlist():
 def test_live_engine_env_supersedes_frozen_imp_vars():
     # Regression (name-on-intent + sandbox): a Quest is created with an empty
     # title, so the policy is frozen with IMP_QUEST_TITLE="" at run start. After
-    # rename_change the live per-spawn engine_env carries the real title;
+    # rename_quest the live per-spawn engine_env carries the real title;
     # build_sandbox_argv sources IMP_* from it authoritatively, so a title-dependent
     # gate never sees the frozen "".
     pol = _policy(setenv=(("PATH", "/usr/bin"),

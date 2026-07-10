@@ -7,8 +7,8 @@ from typing import Any
 import anyio
 import pytest
 
-from imp.engine.quest import Quest
 from imp.engine.executor import RunResult
+from imp.engine.quest import Quest
 from imp.engine.state import State
 from imp.remote.session.client import SessionClient
 from imp.remote.session.daemon import _is_interrupt_pause, serve_change_session

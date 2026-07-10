@@ -17,8 +17,8 @@ import anyio
 
 from imp.engine.archive import maintenance as archive_maintenance
 from imp.engine.archive import read as archive_read
-from imp.engine.quest import Quest
 from imp.engine.errors import LoadError
+from imp.engine.quest import Quest
 from imp.remote.daemon import discover, spawn
 from imp.remote.daemon.alert_all import AlertAll
 from imp.remote.daemon.commands import (
@@ -457,7 +457,7 @@ async def run_daemon(
     env = os.environ if env is None else env
     shutdown = anyio.Event() if shutdown is None else shutdown
     deliver = deliver or (lambda cid, text: deliver_to_session(control_root, cid, text))
-    create = create or (lambda prompt: spawn.create_change(control_root, prompt))
+    create = create or (lambda prompt: spawn.create_quest(control_root, prompt))
     abandon = abandon or (lambda cid: spawn.abandon_change(control_root, cid))
     list_quests = list_quests or (lambda: discover.list_quests(control_root))
     resident_ids = resident_ids or (

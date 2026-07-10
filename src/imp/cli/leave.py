@@ -8,8 +8,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from imp.engine.quest import Quest
 from imp.engine.errors import LoadError, LoadErrors
+from imp.engine.quest import Quest
 from imp.remote.session.protocol import (
     CONTROL_ARCHIVE,
     CONTROL_DISCARD,

@@ -11,8 +11,8 @@ from typing import Any
 import pytest
 
 from imp.agents.runner import AgentInvocation, AgentRunner
-from imp.engine.quest import Quest
 from imp.engine.executor import RunResult, run_change
+from imp.engine.quest import Quest
 from imp.engine.state import State
 from imp.providers.claude_code import ClaudeCodeAgentRunner
 from tests.cc_fakes import FakeClaudeSDKClient, assistant, result, text, tool_use

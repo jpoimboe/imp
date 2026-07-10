@@ -524,7 +524,7 @@ class OpenAIAgentRunner:
         )
         ctx.quest_context = invocation.quest_context
         ctx.change_state = invocation.change_state
-        ctx.change = invocation.change          # live Quest for rename_change
+        ctx.change = invocation.change          # live Quest for rename_quest
         ctx.spawn_subagent = spawn_subagent_via_registry
         ctx.resolved_tiers = invocation.resolved_tiers
         ctx.subagent_depth = invocation.subagent_depth

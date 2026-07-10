@@ -1,4 +1,4 @@
-"""rename_change tool (spec §3, §10). Applies the rename IMMEDIATELY inside the
+"""rename_quest tool (spec §3, §10). Applies the rename IMMEDIATELY inside the
 tool call and returns the Quest id so the agent writes the spec at the
 change-home's artifacts/spec/<id>.md in-band, same turn. Content-only: rewrites the
 gitignored quest.json, touches no git. Top-level only — raises for subagents
@@ -13,7 +13,7 @@ from imp.engine.state import JsonlEventLog
 
 
 @imp_tool(
-    name="rename_change",
+    name="rename_quest",
     description=(
         "Rename this Quest to a meaningful title once you understand the work. "
         "A title is a short human-readable phrase — a few words with spaces, "
@@ -23,12 +23,12 @@ from imp.engine.state import JsonlEventLog
         "this same turn."
     ),
 )
-def rename_change(ctx: Any, name: str) -> str:
+def rename_quest(ctx: Any, name: str) -> str:
     title = name.strip()
     if not title:
-        raise ValueError("rename_change requires a non-empty name")
+        raise ValueError("rename_quest requires a non-empty name")
     if ctx.change_state is None:
-        raise RuntimeError("rename_change is only available to top-level Quest steps")
+        raise RuntimeError("rename_quest is only available to top-level Quest steps")
     change = ctx.change
     if title == change.title:
         return f"already named {change.id}"

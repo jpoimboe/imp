@@ -22,8 +22,8 @@ from pathlib import Path
 
 import pytest
 
-from imp.engine.quest import Quest
 from imp.engine.executor import RunResult, run_change
+from imp.engine.quest import Quest
 from imp.engine.state import State
 from imp.providers import resolve
 from imp.providers.anthropic import AnthropicProvider

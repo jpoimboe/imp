@@ -13,7 +13,7 @@ from pathlib import Path
 import pytest
 
 from imp.agents.parallel import reset_parallelism_cache
-from imp.agents.runner import QuestContext, ImagePart, TextPart
+from imp.agents.runner import ImagePart, QuestContext, TextPart
 from imp.agents.subagents import make_task_tool
 from imp.agents.tools import Tool
 from imp.agents.tools.complete_step import make_complete_step_tool

@@ -10,9 +10,9 @@ import pytest
 
 from imp.agents.runner import AgentInvocation, AgentRunner, Event
 from imp.agents.transcript import Transcript
-from imp.engine.quest import Quest
 from imp.engine.executor import RunResult, run_change
 from imp.engine.feedback import COMPLETION_BACKSTOP
+from imp.engine.quest import Quest
 from imp.engine.state import State
 
 

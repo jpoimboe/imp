@@ -40,7 +40,7 @@ from typing import Any
 
 import pytest
 
-from imp.agents.runner import AgentInvocation, QuestContext, Message, TextBlock
+from imp.agents.runner import AgentInvocation, Message, QuestContext, TextBlock
 from imp.agents.tools import get_registry  # noqa: F401
 from imp.agents.tools.context import ToolContext
 from imp.agents.tools.load_skill import make_load_skill_tool

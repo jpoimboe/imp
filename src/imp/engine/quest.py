@@ -226,7 +226,7 @@ class Quest:
             return False
         if not self.title.strip():
             raise ValueError(
-                f"change {self.id} has no title; call rename_change to name it "
+                f"change {self.id} has no title; call rename_quest to name it "
                 "before going live")
         current_tip = worktree.head_of(self.control_root, self.base_branch)
         head_changed = current_tip != self.orig_base_head

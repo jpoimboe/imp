@@ -9,8 +9,8 @@ import pytest
 
 from imp.agents.runner import AgentInvocation, AgentRunner, Event, Message, TextBlock, ToolUseBlock
 from imp.agents.transcript import Transcript
-from imp.engine.quest import Quest
 from imp.engine.executor import RunResult, _resume_replays_transcript, run_change
+from imp.engine.quest import Quest
 from imp.engine.state import State
 
 

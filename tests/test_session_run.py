@@ -16,8 +16,8 @@ from imp.cli.session_run import (
 )
 from imp.cli.signals import InterruptCoordinator
 from imp.engine import archive
-from imp.engine.quest import Quest
 from imp.engine.executor import RunResult
+from imp.engine.quest import Quest
 from imp.engine.state import State
 from imp.remote.session.discover import session_socket_path
 from imp.remote.session.server import SessionServer

@@ -61,8 +61,8 @@ def test_round_trip_tool_use_and_result() -> None:
 def test_agent_invocation_audit_fields_default_safely(tmp_path) -> None:
     from imp.agents.runner import (
         AgentInvocation,
-        QuestContext,
         Message,
+        QuestContext,
         TextBlock,
     )
     from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
@@ -91,7 +91,7 @@ def test_agent_invocation_audit_fields_default_safely(tmp_path) -> None:
 def test_agent_invocation_has_continuation_fn_default_none() -> None:
     from pathlib import Path
 
-    from imp.agents.runner import AgentInvocation, QuestContext, Message, TextBlock
+    from imp.agents.runner import AgentInvocation, Message, QuestContext, TextBlock
     from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
 
     schema = OutputSchema(

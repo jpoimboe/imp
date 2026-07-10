@@ -5,8 +5,8 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from imp.cli import palette as pal
-from imp.cli.quest_row import STATUS_COLORS
 from imp.cli.narrative import TokenTotals, elapsed_seconds
+from imp.cli.quest_row import STATUS_COLORS
 from imp.cli.render_text import fmt_seconds
 
 

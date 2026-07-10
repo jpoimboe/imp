@@ -6,7 +6,7 @@ import anyio
 import pytest
 
 from imp.agents.reflow import reflow_markdown
-from imp.agents.runner import QuestContext, Message, TextBlock
+from imp.agents.runner import Message, QuestContext, TextBlock
 from imp.cli.signals import InterruptCoordinator
 from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
 

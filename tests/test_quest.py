@@ -4,8 +4,8 @@ from pathlib import Path
 
 import pytest
 
-from imp.engine.quest import Quest
 from imp.engine.errors import LoadError, LoadErrors
+from imp.engine.quest import Quest
 from imp.engine.state import State
 from tests.conftest import _git, _init_repo, _seed_control
 
@@ -25,7 +25,7 @@ def _seed_control_without_workflow(root: Path) -> None:
     _git(root, "commit", "-qm", "config only")
 
 
-def test_create_change_makes_worktree_and_state(tmp_path: Path) -> None:
+def test_create_quest_makes_worktree_and_state(tmp_path: Path) -> None:
     _seed_control(tmp_path)
     ch = Quest.create(tmp_path, title="Add OAuth",
                        quest_id="abc123", base_branch="main")
@@ -554,7 +554,7 @@ def test_set_depends_on_rewrites_quest_json(tmp_path: Path) -> None:
 def test_materialize_raises_on_empty_title_and_creates_nothing(tmp_path: Path) -> None:
     _seed_control(tmp_path)
     ch = Quest.create_draft(tmp_path, title="   ", quest_id="ttl1", base_branch="main")
-    with pytest.raises(ValueError, match="rename_change"):
+    with pytest.raises(ValueError, match="rename_quest"):
         ch.materialize()
     # Nothing was created and the change stays un-materialized.
     assert ch.materialized is False

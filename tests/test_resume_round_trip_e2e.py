@@ -10,8 +10,8 @@ from imp.agents.runner import AgentInvocation, AgentRunner, Event, Message, Text
 from imp.agents.transcript import Transcript
 from imp.engine.abandon import archive_conversation
 from imp.engine.archive.read import rehydrate_quest
-from imp.engine.quest import Quest
 from imp.engine.executor import RunResult, run_change
+from imp.engine.quest import Quest
 from imp.engine.state import State
 from tests.conftest import _seed_control
 

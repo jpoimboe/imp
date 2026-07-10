@@ -12,9 +12,9 @@ from typing import Any
 from imp.agents.tools import imp_tool
 from imp.agents.tools.context import ToolContext
 from imp.engine.archive import read as archive_read
-from imp.engine.quest import Quest
 from imp.engine.errors import LoadError
 from imp.engine.events_digest import digest_event, full_line
+from imp.engine.quest import Quest
 from imp.engine.state import JsonlEventLog, parse_events_jsonl
 
 _DEFAULT_LIMIT = 100

@@ -104,7 +104,7 @@ def default_workflow_script(sentinel: str) -> dict[str, Any]:
     return {
         "steps": {
             "threshold": [{"text": "threshold", "tools": [
-                {"name": "rename_change", "input": {"name": "demo change"}},
+                {"name": "rename_quest", "input": {"name": "demo change"}},
                 {"name": "create_and_enter_worktree", "input": {}},
                 bash(spec_cmd),
                 done(ceremony="express"),

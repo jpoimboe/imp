@@ -31,7 +31,7 @@ from typing import Any
 import anyio
 
 from imp.agents.reflow import reflow_markdown
-from imp.agents.runner import AgentInvocation, QuestContext, Message, TextBlock
+from imp.agents.runner import AgentInvocation, Message, QuestContext, TextBlock
 from imp.agents.tools.limits import (
     AGENT_INACTIVITY_TIMEOUT_S,
     PROCESS_KILL_GRACE_S,

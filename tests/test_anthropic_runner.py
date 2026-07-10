@@ -12,8 +12,8 @@ import pytest
 from imp.agents.classify import ResumeState, classify_resume
 from imp.agents.runner import (
     AgentInvocation,
-    QuestContext,
     Message,
+    QuestContext,
     TextBlock,
     ToolResultBlock,
     ToolUseBlock,

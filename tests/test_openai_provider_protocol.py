@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from imp.agents.runner import AgentInvocation, AgentRunner, QuestContext, Message, TextBlock
+from imp.agents.runner import AgentInvocation, AgentRunner, Message, QuestContext, TextBlock
 from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
 from imp.providers.base import Provider
 from imp.providers.openai import OpenAIAgentRunner, OpenAIProvider

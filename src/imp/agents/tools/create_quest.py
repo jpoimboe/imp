@@ -10,7 +10,7 @@ from imp.engine.state import JsonlEventLog
 
 
 @imp_tool(
-    name="create_change",
+    name="create_quest",
     description=(
         "Record a durable follow-up backlog Quest (no branch/worktree yet). "
         "Give it a short title and a self-contained description that needs no "
@@ -18,11 +18,11 @@ from imp.engine.state import JsonlEventLog
         "new id; it is startable later with `imp resume <id>`."
     ),
 )
-def create_change(
+def create_quest(
     ctx: Any, title: str, description: str, depends_on: list[str] | None = None,
 ) -> str:
     if ctx.change_state is None:
-        raise RuntimeError("create_change is only available to top-level Quest steps")
+        raise RuntimeError("create_quest is only available to top-level Quest steps")
     parent = ctx.change
     new_id = new_quest_id(existing_stems=live_stems(parent.control_root))
     deps = list(depends_on or [])

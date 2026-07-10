@@ -6,7 +6,7 @@ from typing import Any
 
 import pytest
 
-from imp.agents.runner import AgentInvocation, QuestContext, Message, TextBlock
+from imp.agents.runner import AgentInvocation, Message, QuestContext, TextBlock
 from imp.engine.state import State
 from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
 

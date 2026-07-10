@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from imp.engine.quest import Quest
 from imp.engine.executor import _enforce_clean_tree
+from imp.engine.quest import Quest
 from imp.engine.state import InMemoryEventLog, State
 from imp.engine.types import Goto, Pause, SourceLoc, Step
 from tests.conftest import _seed_control

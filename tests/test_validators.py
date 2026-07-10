@@ -420,7 +420,7 @@ def test_v_step_tier_configured_flags_subagent_role() -> None:
 
 # ── _v_subagent_forbidden_tools ───────────────────────────────────────────────
 
-def test_top_level_rename_change_agent_not_dispatched_is_allowed(tmp_path: Path) -> None:
+def test_top_level_rename_quest_agent_not_dispatched_is_allowed(tmp_path: Path) -> None:
     wf = _wf(tmp_path, """\
         name: t
         description: t
@@ -456,7 +456,7 @@ def test_subagent_declaring_wait_for_user_no_longer_rejected(tmp_path: Path) -> 
     load_workflow(wf)  # must not raise
 
 
-def test_dual_role_agent_as_step_and_subagent_with_rename_change_is_error(tmp_path: Path) -> None:
+def test_dual_role_agent_as_step_and_subagent_with_rename_quest_is_error(tmp_path: Path) -> None:
     wf = _wf(tmp_path, """\
         name: t
         description: t
@@ -471,7 +471,7 @@ def test_dual_role_agent_as_step_and_subagent_with_rename_change_is_error(tmp_pa
     with pytest.raises((LoadError, LoadErrors)) as ei:
         load_workflow(wf)
     assert any(
-        "renamer" in str(e) and "rename_change" in str(e)
+        "renamer" in str(e) and "rename_quest" in str(e)
         for e in ei.value.errors
     )
 
@@ -513,7 +513,7 @@ prompt body
 _RENAMER_SUBAGENT = """\
 ---
 name: renamer
-tools: [rename_change, complete_step]
+tools: [rename_quest, complete_step]
 output:
   status: {type: enum, values: [Success, Error]}
 ---
@@ -577,7 +577,7 @@ def test_dispatchable_subagent_with_task_is_error(tmp_path: Path) -> None:
     assert any("tasker" in str(e) and "sub_agent" in str(e) for e in ei.value.errors)
 
 
-def test_dispatchable_subagent_with_rename_change_is_error(tmp_path: Path) -> None:
+def test_dispatchable_subagent_with_rename_quest_is_error(tmp_path: Path) -> None:
     wf = _wf(tmp_path, """\
         name: t
         description: t
@@ -590,7 +590,7 @@ def test_dispatchable_subagent_with_rename_change_is_error(tmp_path: Path) -> No
     with pytest.raises((LoadError, LoadErrors)) as ei:
         load_workflow(wf)
     assert any(
-        "renamer" in str(e) and "rename_change" in str(e) for e in ei.value.errors)
+        "renamer" in str(e) and "rename_quest" in str(e) for e in ei.value.errors)
 
 
 def test_default_resolved_subagent_has_no_forbidden_tools(tmp_path: Path) -> None:

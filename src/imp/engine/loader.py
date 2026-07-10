@@ -189,12 +189,12 @@ BASE_CAPS: frozenset[str] = frozenset({
     "update_step_label", "symbol_outline",
 })
 TOP_LEVEL_CAPS: frozenset[str] = frozenset(
-    {"rename_change", "create_change", "create_and_enter_worktree"})
+    {"rename_quest", "create_quest", "create_and_enter_worktree"})
 
 # The maximal default grant any agent can receive. deny_tools only ever
 # subtracts from this set, so a deny entry outside it is a silent no-op
 # (almost always a typo). Validated at parse time. Subagents receive a
-# subset of this, so denying e.g. rename_change on a subagent is a harmless
+# subset of this, so denying e.g. rename_quest on a subagent is a harmless
 # no-op rather than an error — the name is real, just not in that context.
 DENYABLE_TOOLS: frozenset[str] = BASE_CAPS | TOP_LEVEL_CAPS | frozenset({"sub_agent"})
 

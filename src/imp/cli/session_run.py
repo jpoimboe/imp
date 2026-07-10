@@ -12,8 +12,8 @@ from imp.cli.session_terminal import run_terminal_client
 from imp.cli.signals import InterruptCoordinator
 from imp.cli.slash import ask_line_with_slash
 from imp.cli.terminal_title import TerminalTitle
-from imp.engine.quest import Quest
 from imp.engine.executor import RunResult
+from imp.engine.quest import Quest
 from imp.engine.state import State
 from imp.remote.session.attach import build_session_attach
 

@@ -5,8 +5,8 @@ from types import SimpleNamespace
 
 from imp.agents.prompts import render_label
 from imp.assets import bundled_workflow_dir
-from imp.engine.quest import Quest
 from imp.engine.loader import load_workflow
+from imp.engine.quest import Quest
 from tests.conftest import _seed_control
 
 

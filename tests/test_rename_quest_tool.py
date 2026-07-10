@@ -28,7 +28,7 @@ def _make(tmp_path: Path, title: str = "") -> tuple[Quest, State]:
 
 def test_rename_applies_immediately_and_returns_id(tmp_path: Path) -> None:
     ch, state = _make(tmp_path)
-    tool = get_registry()["rename_change"]
+    tool = get_registry()["rename_quest"]
     msg = tool.invoke(_ctx(ch, state), {"name": "Add version flag"})
 
     assert ch.title == "Add version flag"            # stored verbatim
@@ -42,14 +42,14 @@ def test_rename_applies_immediately_and_returns_id(tmp_path: Path) -> None:
 
 def test_rename_strips_outer_whitespace(tmp_path: Path) -> None:
     ch, state = _make(tmp_path)
-    tool = get_registry()["rename_change"]
+    tool = get_registry()["rename_quest"]
     tool.invoke(_ctx(ch, state), {"name": "  Add OAuth  "})
     assert ch.title == "Add OAuth"
 
 
 def test_rename_noop_when_title_unchanged(tmp_path: Path) -> None:
     ch, state = _make(tmp_path, title="Add OAuth")
-    tool = get_registry()["rename_change"]
+    tool = get_registry()["rename_quest"]
     # Same title after stripping outer whitespace must NOT churn.
     msg = tool.invoke(_ctx(ch, state), {"name": "  Add OAuth  "})
     assert "already named" in msg.lower()
@@ -59,7 +59,7 @@ def test_rename_noop_when_title_unchanged(tmp_path: Path) -> None:
 def test_double_rename_to_same_title_is_noop(tmp_path: Path) -> None:
     ch, state = _make(tmp_path)
     ctx = _ctx(ch, state)
-    tool = get_registry()["rename_change"]
+    tool = get_registry()["rename_quest"]
     tool.invoke(ctx, {"name": "First Title"})
     msg2 = tool.invoke(ctx, {"name": "First Title"})   # identical title
     assert "already named" in msg2.lower()
@@ -70,13 +70,13 @@ def test_double_rename_to_same_title_is_noop(tmp_path: Path) -> None:
 
 def test_rename_rejects_empty(tmp_path: Path) -> None:
     ch, state = _make(tmp_path)
-    tool = get_registry()["rename_change"]
+    tool = get_registry()["rename_quest"]
     with pytest.raises(ValueError):
         tool.invoke(_ctx(ch, state), {"name": "   "})   # whitespace-only → empty
 
 
 def test_rename_description_drops_hardcoded_quest_dir() -> None:
-    tool = get_registry()["rename_change"]
+    tool = get_registry()["rename_quest"]
     assert ".imp/change" not in tool.description
 
 
@@ -86,6 +86,6 @@ def test_rename_from_subagent_raises(tmp_path: Path) -> None:
                       events_path=ch.events_path)
     ctx.change = ch
     ctx.change_state = None              # subagent: no rename authority
-    tool = get_registry()["rename_change"]
+    tool = get_registry()["rename_quest"]
     with pytest.raises(RuntimeError):
         tool.invoke(ctx, {"name": "Whatever"})

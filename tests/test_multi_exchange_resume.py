@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from imp.agents.runner import AgentInvocation, QuestContext, Message, TextBlock
+from imp.agents.runner import AgentInvocation, Message, QuestContext, TextBlock
 from imp.agents.transcript import Transcript
 from imp.cli.inert_resume import make_buffered_solicit
 from imp.engine.completion import build_continuation_fn

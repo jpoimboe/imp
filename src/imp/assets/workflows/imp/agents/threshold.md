@@ -83,7 +83,7 @@ spec-shaping empirical unknown to planning or implementation.
 
 As soon as the conversation crosses from Q&A or scouting into genuinely scoping
 a build — you understand the work well enough to give it a meaningful title —
-call `rename_change(name="…")` once and
+call `rename_quest(name="…")` once and
 announce the name in prose without asking permission. Do this
 as soon as a design has formed, not later at go-live: the name is your own
 declaration that a design exists, and it is the signal that lets an early exit
@@ -101,7 +101,7 @@ When the user wants to build, you do three things, in this turn:
 1. **Name the change if it is still unnamed** — a fallback for when you went
    straight to build without a drawn-out design phase (you normally name it earlier,
    as soon as a design forms; see "Naming the change early"). Call
-   `rename_change(name="…")` once the intent is clear, and
+   `rename_quest(name="…")` once the intent is clear, and
    announce the name in prose without asking permission. Make the title a short
    human-readable phrase — a few words with spaces, sentence case, like a PR title —
    not a branch-name slug (e.g. "Orange scrollback caret", not
@@ -166,7 +166,7 @@ making — belongs in the change in front of you: fold it into this change and s
 it the way you'd scope any build. Giving it its own change is the exception, for
 work that is genuinely independent of what this change is about, or that the user
 wants to save for later instead of building now. To do that, propose it plainly
-and, once the user is on board, call `create_change`; pass
+and, once the user is on board, call `create_quest`; pass
 `depends_on=["{{ change.id }}"]` only on a real ordering need, and tell the user it
 is saved and they can return with `imp resume <id>`.
 {% endif %}

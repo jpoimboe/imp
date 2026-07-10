@@ -28,8 +28,8 @@ import anyio
 
 from imp.agents.prompts import build_context, render_label, render_prompt
 from imp.agents.runner import (
-    QuestContext,
     Message,
+    QuestContext,
 )
 from imp.agents.skills import overlay_project_skills
 from imp.engine import test_lane as _test_lane
@@ -41,7 +41,6 @@ from imp.engine.agent_run import (
 from imp.engine.backoff import (
     interruptible_sleep as _interruptible_sleep,
 )
-from imp.engine.quest import Quest
 from imp.engine.env import TestGates, engine_env, overlay_engine_env
 from imp.engine.error_policy import budget_for
 from imp.engine.errors import LoadError, summarize_exception
@@ -59,6 +58,7 @@ from imp.engine.gates import (
     run_script,
 )
 from imp.engine.loader import load_workflow
+from imp.engine.quest import Quest
 from imp.engine.reincarnation import reincarnation_seed, stash_transcript
 from imp.engine.sandbox import (
     SandboxUnavailable,

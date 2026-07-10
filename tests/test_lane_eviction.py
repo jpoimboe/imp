@@ -4,8 +4,8 @@ import anyio
 
 import imp.remote.session.attach as attach_mod
 from imp.engine import merge_queue as mq
-from imp.engine.quest import Quest
 from imp.engine.executor import RunResult, _evict_if_holding, run_change
+from imp.engine.quest import Quest
 from imp.engine.state import JsonlEventLog, State
 from tests.conftest import _git, _seed_control
 

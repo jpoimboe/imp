@@ -6,10 +6,10 @@ from pathlib import Path
 
 import pytest
 
-from imp.engine.quest import Quest
 from imp.engine.errors import LoadError
 from imp.engine.executor import _step_started_payload
 from imp.engine.loader import _parse_phase_label, load_workflow
+from imp.engine.quest import Quest
 from imp.engine.types import Continue, SourceLoc, Step
 from tests.conftest import _seed_control
 

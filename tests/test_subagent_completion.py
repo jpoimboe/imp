@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from imp.agents.runner import AgentInvocation, QuestContext, Message, TextBlock
+from imp.agents.runner import AgentInvocation, Message, QuestContext, TextBlock
 from imp.agents.subagents import dispatch_task, make_task_tool
 from imp.agents.tools.context import ToolContext
 from imp.cli.signals import InterruptCoordinator

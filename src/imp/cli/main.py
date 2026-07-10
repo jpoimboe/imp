@@ -28,8 +28,8 @@ from typing import Any, NamedTuple, NoReturn
 import anyio
 
 from imp import __version__
-from imp.cli import quest_row, resume_select, splash
 from imp.cli import palette as pal
+from imp.cli import quest_row, resume_select, splash
 from imp.cli.inert_resume import (
     bare_turn_end_question,
     make_buffered_solicit,
@@ -58,12 +58,12 @@ from imp.engine.abandon import (
 )
 from imp.engine.archive import read as archive_read
 from imp.engine.awaiting_user_input import AwaitingUserInput
-from imp.engine.quest import Quest, live_quest_ids, live_stems
-from imp.engine.quest_id import new_quest_id
 from imp.engine.errors import LayoutMismatch, LoadError, LoadErrors
 from imp.engine.events_digest import digest_event, full_line
 from imp.engine.executor import RunResult
 from imp.engine.project_root import find_project_root
+from imp.engine.quest import Quest, live_quest_ids, live_stems
+from imp.engine.quest_id import new_quest_id
 from imp.engine.state import LockHeld, State, lock_is_live
 from imp.providers.config import (
     parse_default_base,
@@ -985,7 +985,7 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
 
     quest_id = new_quest_id(existing_stems=live_stems(control))
     # No auto-name: an unnamed Quest has an empty title. The agent
-    # names it via rename_change once intent is clear, or the user passes --title.
+    # names it via rename_quest once intent is clear, or the user passes --title.
     title = seed.title if seed.title is not None else ""
     try:
         change = Quest.create_draft(

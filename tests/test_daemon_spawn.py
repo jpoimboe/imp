@@ -17,9 +17,9 @@ def _capture(monkeypatch: Any) -> list[dict[str, Any]]:
     return calls
 
 
-def test_create_change_spawns_imp_new(monkeypatch: Any, tmp_path: Path) -> None:
+def test_create_quest_spawns_imp_new(monkeypatch: Any, tmp_path: Path) -> None:
     calls = _capture(monkeypatch)
-    spawn.create_change(tmp_path, "add dark mode")
+    spawn.create_quest(tmp_path, "add dark mode")
     assert calls[0]["argv"] == [
         sys.executable, "-m", "imp", "new", "--non-interactive",
         "--message", "add dark mode"]

@@ -13,7 +13,7 @@ def test_palette_node_colors_keyed_on_quest_id() -> None:
 def test_daemon_hello_carries_quest_id() -> None:
     from imp.remote.daemon.protocol import make_hello, parse_hello
     line = make_hello("kobe47", "Title")
-    qid, title, auto = parse_hello(line)
+    qid, _title, _auto = parse_hello(line)
     assert qid == "kobe47"
     assert json.loads(line)["quest_id"] == "kobe47"
     assert "change_id" not in json.loads(line)
@@ -47,8 +47,8 @@ def test_discover_exposes_quest_info_and_list_quests() -> None:
     names = set(vars(discover))
     assert "QuestInfo" in names
     assert "list_quests" in names
-    assert "Quest" "Info" not in names    # split literal so the rename sweep can't rewrite this guard
-    assert "list_chang" "es" not in names  # split literal so the rename sweep can't rewrite this guard
+    assert "Chang" "eInfo" not in names   # split literal: dodges the rename sweep
+    assert "list_chang" "es" not in names  # split literal: dodges the rename sweep
 
 
 def test_build_record_uses_quest_meta_key() -> None:
@@ -62,7 +62,7 @@ def test_build_record_uses_quest_meta_key() -> None:
 def test_archive_read_exposes_read_quest_json() -> None:
     from imp.engine.archive import read as ar
     assert hasattr(ar, "read_quest_json")
-    assert not hasattr(ar, "read_change_" "json")  # split literal: change_json broken so rename sweep can't rewrite this guard
+    assert not hasattr(ar, "read_change_" "json")  # split literal: dodges the rename sweep
 
 
 def test_archive_index_has_quests_table(tmp_path: Path) -> None:

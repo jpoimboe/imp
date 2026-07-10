@@ -22,7 +22,7 @@ fold, a quiet step whose routing never fills), not just the specific bug:
 
 The corpus is real opus/sonnet runs (large string bodies truncated for size —
 the invariants are structural, not byte-goldens). Real LLM event shape (prose
-interleaved with thinking/tools, wait_for_user, rename_change) is exactly what
+interleaved with thinking/tools, wait_for_user, rename_quest) is exactly what
 the curated single-fixture goldens did not exercise.
 """
 from __future__ import annotations

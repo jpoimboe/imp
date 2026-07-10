@@ -352,7 +352,7 @@ def test_gate_writing_in_its_cwd_succeeds() -> None:
 
 def test_gate_sees_post_rename_title_not_frozen_empty() -> None:
     """Regression: name-on-intent freezes the policy with IMP_QUEST_TITLE="" at run
-    start; after rename_change the gate's fresh env_extra carries the real title.
+    start; after rename_quest the gate's fresh env_extra carries the real title.
     Reproduces the dogfood failure where a `${IMP_QUEST_*:?not set by engine}`
     guard fired inside the bwrap --clearenv jail.
     """
@@ -382,7 +382,7 @@ def test_gate_sees_post_rename_title_not_frozen_empty() -> None:
 
 def test_bash_tool_uses_live_quest_title_not_stale_snapshot() -> None:
     """Regression: the bash tool must read IMP_QUEST_TITLE from the LIVE Quest, not
-    the frozen quest_context snapshot that rename_change never updates. Without the
+    the frozen quest_context snapshot that rename_quest never updates. Without the
     fix the agent's own bash sees the empty name-on-intent title inside the sandbox.
     """
     import types as _t

@@ -44,7 +44,7 @@ def test_default_agents_resolve_to_position_appropriate_tools(tmp_path: Path) ->
     shutil.copytree(asset, tmp_path / "wf")
     wf = load_workflow(tmp_path / "wf")
 
-    top_leaf = BASE_CAPS | {"rename_change", "create_change",
+    top_leaf = BASE_CAPS | {"rename_quest", "create_quest",
                             "create_and_enter_worktree"}
     top_dispatcher = top_leaf | {"sub_agent"}
     subagents = {
@@ -399,7 +399,7 @@ def test_no_goto_spec_finalizer_edge() -> None:
     from pathlib import Path
     wf = Path("src/imp/assets/workflows/imp/workflow.yaml").read_text()
     # Rework edges back into spec-finalizer must be `resume:` (transcript kept), so a
-    # resumed spec-finalizer always has its rename_change result in history. The one
+    # resumed spec-finalizer always has its rename_quest result in history. The one
     # permitted `goto: spec-finalizer` is threshold's forward entry on the full path.
     assert wf.count("goto: spec-finalizer") == 1  # only threshold's forward entry
     assert "goto: spec_finalizer" not in wf
@@ -993,7 +993,7 @@ def test_spiker_is_isolated_dispatchable_subagent() -> None:
     assert spiker.tools == BASE_CAPS
     assert {"write_file", "edit_file", "bash", "web_fetch"} <= spiker.tools
     assert "sub_agent" not in spiker.tools
-    assert "rename_change" not in spiker.tools
+    assert "rename_quest" not in spiker.tools
     # spiker must have a label
     assert spiker.label
 

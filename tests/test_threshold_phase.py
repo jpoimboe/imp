@@ -77,7 +77,7 @@ def test_threshold_agent_prose_carries_the_three_hats_and_handoff() -> None:
     for hat in ("concierge", "scout", "brainstorm"):
         assert hat in low, hat
     assert "create_and_enter_worktree" in body         # go-live tool
-    assert "rename_change" in body                      # names the change
+    assert "rename_quest" in body                      # names the change
     assert "{{ change.home }}/artifacts/spec/{{ change.id }}.md" in body
     # AC10: a standing directive never to leak internal vocabulary to the user.
     assert "never surface these internal terms" in low
@@ -94,7 +94,7 @@ def test_threshold_adoption_section_omitted_on_autonomous_runs(tmp_path) -> None
         workflow_dir=bundled_workflow_dir("imp"))
     # Attended runs render the adoption-first section.
     assert "## Keep discovered work here by default" in attended
-    assert "create_change" in attended
+    assert "create_quest" in attended
 
     autonomous = render_prompt(body, build_context(
         quest_title="t", event_log=log, quest_id="abc",
@@ -103,10 +103,10 @@ def test_threshold_adoption_section_omitted_on_autonomous_runs(tmp_path) -> None
         workflow_dir=bundled_workflow_dir("imp"))
     # Autonomous runs omit the whole {% if not run.autonomous %} block.
     assert "## Keep discovered work here by default" not in autonomous
-    assert "create_change" not in autonomous
+    assert "create_quest" not in autonomous
     # The retired unconditional / spin-off-first heading and phrasing are gone.
     assert "## Splitting off a separate change" not in attended
-    assert "ending your turn to yield** before calling `create_change`" not in attended
+    assert "ending your turn to yield** before calling `create_quest`" not in attended
 
 
 def test_threshold_has_no_headless_branch(tmp_path) -> None:

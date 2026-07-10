@@ -37,7 +37,7 @@ def _imp(*args: str) -> list[str]:
     return [sys.executable, "-m", "imp", *args]
 
 
-def create_change(control_root: Path, prompt: str) -> None:
+def create_quest(control_root: Path, prompt: str) -> None:
     env = _base_env()
     env["IMP_REMOTE_AUTOSUBSCRIBE"] = "1"
     _spawn_detached(

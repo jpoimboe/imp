@@ -8,8 +8,8 @@ from pathlib import Path
 import anyio
 import pytest
 
-from imp.engine.quest import Quest
 from imp.engine.executor import RunResult, _complete, run_change
+from imp.engine.quest import Quest
 from imp.engine.state import JsonlEventLog, State
 from tests.conftest import _git, _seed_control
 

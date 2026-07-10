@@ -7,8 +7,8 @@ import pytest
 
 from imp.agents.tools import get_registry
 from imp.agents.tools.context import ToolContext
-from imp.engine.quest import Quest
 from imp.engine.loader import TOP_LEVEL_CAPS
+from imp.engine.quest import Quest
 from imp.engine.state import State
 from tests.conftest import _seed_control
 
@@ -31,14 +31,14 @@ def _ctx(ch: Quest, state: State | None) -> ToolContext:
 
 
 def test_registered_and_top_level_only() -> None:
-    assert "create_change" in get_registry()
-    assert "create_change" in TOP_LEVEL_CAPS
+    assert "create_quest" in get_registry()
+    assert "create_quest" in TOP_LEVEL_CAPS
 
 
-def test_create_change_writes_quest_home_and_emits_event(tmp_path: Path) -> None:
+def test_create_quest_writes_quest_home_and_emits_event(tmp_path: Path) -> None:
     ch, state = _make(tmp_path)
     ctx = _ctx(ch, state)
-    tool = get_registry()["create_change"]
+    tool = get_registry()["create_quest"]
     msg = tool.invoke(ctx, {
         "title": "Follow-up: extract helper",
         "description": "extract the duplicated parser into one function",
@@ -69,9 +69,9 @@ def test_create_change_writes_quest_home_and_emits_event(tmp_path: Path) -> None
     assert parent_events[0]["payload"]["depends_on"] == [ch.id]
 
 
-def test_create_change_defaults_no_deps(tmp_path: Path) -> None:
+def test_create_quest_defaults_no_deps(tmp_path: Path) -> None:
     ch, state = _make(tmp_path)
-    tool = get_registry()["create_change"]
+    tool = get_registry()["create_quest"]
     tool.invoke(_ctx(ch, state), {"title": "T", "description": "b"})
     new_id = next(p.name for p in (ch.control_root / ".imp" / "quests").iterdir()
                   if p.name != ch.id)
@@ -80,14 +80,14 @@ def test_create_change_defaults_no_deps(tmp_path: Path) -> None:
     assert meta["depends_on"] == []
 
 
-def test_create_change_from_subagent_raises(tmp_path: Path) -> None:
+def test_create_quest_from_subagent_raises(tmp_path: Path) -> None:
     ch, _ = _make(tmp_path)
-    tool = get_registry()["create_change"]
+    tool = get_registry()["create_quest"]
     with pytest.raises(RuntimeError):
         tool.invoke(_ctx(ch, None), {"title": "T", "description": "b"})  # subagent: state=None
 
 
-def test_create_change_avoids_live_cvcv_stem(
+def test_create_quest_avoids_live_cvcv_stem(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     # End-to-end mint guard: the tool must pass the live-stem avoid-set to
     # new_quest_id, so a minted backlog id never reuses a live CVCV stem. A
@@ -104,7 +104,7 @@ def test_create_change_avoids_live_cvcv_stem(
     stems = iter(["kobe", "mira", "mira"])
     monkeypatch.setattr(quest_id, "_draw_clean_stem", lambda rng: next(stems))
 
-    get_registry()["create_change"].invoke(
+    get_registry()["create_quest"].invoke(
         _ctx(ch, state), {"title": "T", "description": "b"})
 
     new_id = next(p.name for p in (ch.control_root / ".imp" / "quests").iterdir()

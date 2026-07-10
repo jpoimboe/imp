@@ -8,8 +8,8 @@ from pathlib import Path
 
 import pytest
 
-from imp.engine.quest import Quest
 from imp.engine.errors import LoadError
+from imp.engine.quest import Quest
 from imp.engine.state import State
 from imp.engine.types import SourceLoc, VarDecl, Vars
 from imp.providers.config import apply_var_overrides, parse_config_layer

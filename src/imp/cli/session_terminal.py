@@ -26,8 +26,8 @@ from imp.cli.leave import resolve_leave_action
 from imp.cli.session_controls import SessionControls
 from imp.cli.signals import InterruptCoordinator
 from imp.cli.terminal_title import TerminalTitle
-from imp.engine.quest import Quest
 from imp.engine.errors import LoadError, LoadErrors
+from imp.engine.quest import Quest
 from imp.remote.session.client import SessionClient
 from imp.remote.session.protocol import CONTROL_INTERRUPT_LEAVE
 

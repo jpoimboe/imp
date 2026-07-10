@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from imp.agents.loop_guard import DEFAULT_REPEAT_K
-from imp.agents.runner import AgentInvocation, QuestContext, Message, TextBlock
+from imp.agents.runner import AgentInvocation, Message, QuestContext, TextBlock
 from imp.engine.types import (
     AgentDef,
     OutputField,

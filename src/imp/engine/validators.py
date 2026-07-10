@@ -290,7 +290,7 @@ def _v_differ_from_targets_exist(
             )
 
 
-_SUBAGENT_FORBIDDEN_TOOLS = ("sub_agent", "rename_change")
+_SUBAGENT_FORBIDDEN_TOOLS = ("sub_agent", "rename_quest")
 
 
 def _v_subagent_forbidden_tools(

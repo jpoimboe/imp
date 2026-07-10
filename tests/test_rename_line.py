@@ -82,7 +82,7 @@ def test_rename_renders_after_narration_in_sdk_order() -> None:
            model="m", stop_reason="end_turn", usage={},
            raw={"content": [{"type": "text", "text": "Naming this change now."}]}),
         ev("5", "tool_call", agent_id="step:design/spec", id="c1",
-           name="rename_change", input={"name": "Order the rename"}),
+           name="rename_quest", input={"name": "Order the rename"}),
         ev("6", "tool_result", agent_id="step:design/spec", id="c1",
            content="ok", error=False),
         ev("7", "step_completed", step="spec", kind="agent",

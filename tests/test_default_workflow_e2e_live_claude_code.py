@@ -11,8 +11,8 @@ from pathlib import Path
 
 import pytest
 
-from imp.engine.quest import Quest
 from imp.engine.executor import RunResult, run_change
+from imp.engine.quest import Quest
 from tests._live import opted_in
 from tests.conftest import _git
 

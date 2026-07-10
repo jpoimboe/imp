@@ -5,8 +5,8 @@ import anyio
 import imp.remote.session.attach as attach_mod
 from imp.engine import merge_queue as mq
 from imp.engine.awaiting_user_input import AwaitingUserInput
-from imp.engine.quest import Quest
 from imp.engine.executor import _release_lane, _route_acquire
+from imp.engine.quest import Quest
 from imp.engine.state import InMemoryEventLog, JsonlEventLog, State
 from imp.engine.types import Continue, Pause, Rule, SourceLoc, Step
 from tests.conftest import _seed_control

@@ -7,8 +7,8 @@ from pathlib import Path
 import pytest
 
 from imp.assets import bundled_workflow_dir, is_bundled_workflow
-from imp.engine.quest import Quest
 from imp.engine.errors import LoadError
+from imp.engine.quest import Quest
 from imp.providers.config import parse_default_base, parse_default_workflow
 from tests.conftest import _git, _seed_control
 

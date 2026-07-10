@@ -8,8 +8,8 @@ import pytest
 from imp.engine import archive
 from imp.engine.abandon import archive_conversation
 from imp.engine.archive import read as archive_read
-from imp.engine.quest import Quest
 from imp.engine.executor import _resume_replays_transcript
+from imp.engine.quest import Quest
 from imp.engine.state import State
 from tests.conftest import _seed_control
 

@@ -18,7 +18,7 @@ from typing import Any, cast
 
 from imp.agents.parallel import emit_parallelism_warning_once
 from imp.agents.prompts import build_context, render_prompt
-from imp.agents.runner import QuestContext, Message, TextBlock
+from imp.agents.runner import Message, QuestContext, TextBlock
 from imp.agents.tools import Tool
 from imp.agents.tools.context import ToolContext
 from imp.agents.transcript import Transcript

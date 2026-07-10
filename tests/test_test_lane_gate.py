@@ -4,8 +4,8 @@ import anyio
 
 from imp.engine import merge_queue as mq
 from imp.engine import test_lane
-from imp.engine.quest import Quest
 from imp.engine.executor import RunResult, run_change
+from imp.engine.quest import Quest
 from imp.engine.state import JsonlEventLog
 from tests.conftest import _git, _seed_control
 

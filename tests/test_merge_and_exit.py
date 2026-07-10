@@ -2,8 +2,8 @@ from pathlib import Path
 
 import anyio
 
-from imp.engine.quest import Quest
 from imp.engine.executor import _route_merge_and_exit_worktree
+from imp.engine.quest import Quest
 from imp.engine.state import JsonlEventLog, State
 from imp.engine.types import Continue, Pause, Rule, SourceLoc, Step
 from tests.conftest import _git, _seed_control

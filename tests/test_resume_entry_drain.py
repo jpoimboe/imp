@@ -44,8 +44,8 @@ async def test_anthropic_resume_entry_drain_before_first_send(tmp_path: Path) ->
     call, not one turn late."""
     from imp.agents.runner import (
         AgentInvocation,
-        QuestContext,
         Message,
+        QuestContext,
         TextBlock,
         ToolResultBlock,
         ToolUseBlock,
@@ -182,8 +182,8 @@ async def test_openai_resume_entry_drain_before_first_send(tmp_path: Path) -> No
     call, not one turn late."""
     from imp.agents.runner import (
         AgentInvocation,
-        QuestContext,
         Message,
+        QuestContext,
         TextBlock,
         ToolResultBlock,
         ToolUseBlock,
@@ -321,8 +321,8 @@ async def test_claude_code_resume_entry_drain_before_first_query(
 
     from imp.agents.runner import (
         AgentInvocation,
-        QuestContext,
         Message,
+        QuestContext,
         TextBlock,
         ToolResultBlock,
         ToolUseBlock,
@@ -681,8 +681,8 @@ async def test_anthropic_bare_turn_end_resume_joins_pending_interjects(
     NOT called."""
     from imp.agents.runner import (
         AgentInvocation,
-        QuestContext,
         Message,
+        QuestContext,
         TextBlock,
     )
     from imp.agents.tools import get_registry  # noqa: F401 — ensures tools registered

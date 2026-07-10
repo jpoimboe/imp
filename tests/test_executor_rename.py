@@ -12,9 +12,9 @@ import pytest
 
 from imp.agents.runner import AgentInvocation, AgentRunner, Event, Message, TextBlock
 from imp.agents.transcript import Transcript
-from imp.engine.quest import Quest
 from imp.engine.errors import LoadError
 from imp.engine.executor import RunResult, run_change
+from imp.engine.quest import Quest
 from imp.engine.state import State
 from tests.conftest import _git
 

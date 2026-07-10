@@ -5,8 +5,8 @@ from pathlib import Path
 
 import pytest
 
-from imp.engine.quest import LAYOUT_VERSION, Quest, migrate
 from imp.engine.errors import LayoutMismatch, LoadError
+from imp.engine.quest import LAYOUT_VERSION, Quest, migrate
 from tests.conftest import _seed_control
 
 

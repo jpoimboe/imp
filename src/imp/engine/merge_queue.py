@@ -82,8 +82,8 @@ def ensure_head_driven(
     *, spawn_fn: Callable[..., Any] | None = None,
 ) -> None:
     """Spawn a live driver for this lane's current head; tolerant and never-raising."""
-    from imp.engine.quest import Quest
     from imp.engine.errors import LoadError
+    from imp.engine.quest import Quest
     with RepoGitLock(control_root).acquire():
         lane = _lane(read(control_root), base_branch)
         head_id = lane[0]["quest_id"] if lane else None

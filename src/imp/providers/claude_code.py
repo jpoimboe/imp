@@ -83,8 +83,8 @@ from imp.agents.tools import bg as _bg
 from imp.agents.tools.complete_step import make_complete_step_tool
 from imp.agents.tools.context import (
     ToolContext,
-    quest_home_path,
     kill_process_group,
+    quest_home_path,
     request_bracketed,
     suspend_inactivity_watchdog,
 )
@@ -1489,7 +1489,7 @@ class ClaudeCodeAgentRunner:
         )
         ctx.quest_context = invocation.quest_context
         ctx.change_state = invocation.change_state
-        ctx.change = invocation.change          # live Quest for rename_change
+        ctx.change = invocation.change          # live Quest for rename_quest
         ctx.spawn_subagent = spawn_subagent_via_registry
         ctx.resolved_tiers = invocation.resolved_tiers
         ctx.subagent_depth = invocation.subagent_depth
