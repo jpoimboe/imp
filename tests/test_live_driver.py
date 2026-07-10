@@ -1668,6 +1668,33 @@ def test_suppress_replay_pure_replay_renders_nothing() -> None:
     assert all(not ln for ln in _body(out))
 
 
+def test_suppress_replay_keeps_footer_dark_until_live_event() -> None:
+    """Regression: on a TTY resume the transient status footer must NOT redraw
+    once per replayed event (walking the whole prior run's history). _refresh_status
+    is guarded on self._suppressing, so it writes nothing through the _replay-marked
+    prefix — even a marked step_started whose activity WOULD otherwise draw the
+    footer — and draws only when the first live event lifts suppression."""
+    out = _TTYPipe()
+    drv = LiveDriver(stream=out, color=False, width=80, status=LiveStatus(out),
+                     suppress_replay=True)
+    # Replayed prefix (marked _replay). The step_started makes current_activity()
+    # non-None, so an unguarded _refresh_status would draw the footer on this TTY.
+    replayed = [
+        ev("1", "change_created", change_id=1, title="x"),
+        ev("2", "step_started", step="spec", kind="agent", phase="p",
+           model="m", provider="anthropic"),
+    ]
+    for e in replayed:
+        drv.on_event({**e, "_replay": True})
+    assert drv._builder.current_activity() is not None   # footer WOULD draw if unguarded
+    assert out.getvalue() == ""                          # but stays dark through replay
+    # First live (un-marked) event: the walk reaches the new node, lifts suppression,
+    # emits it, and then _refresh_status draws the footer.
+    drv.on_event(ev("3", "llm_response", agent_id="a",
+                    raw={"content": [{"type": "text", "text": "working..."}]}, usage={}))
+    assert out.getvalue() != ""                          # footer draws on first live event
+
+
 def test_resume_with_preceding_blank_omits_driver_leading_separator() -> None:
     # Interactive resume: the rendered splash already emitted the single pre-
     # first-emission blank (preceded_by_blank=True). The first LIVE node after

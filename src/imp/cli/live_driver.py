@@ -701,6 +701,13 @@ class LiveDriver:
         # block spacing is owned entirely by _print_lines; the status never adds to
         # it. `_prev_prose` is left untouched so the next block still gets its one
         # separator blank (which lands on the row the status was using).
+        if self._suppressing:
+            # During a suppressed replay the footer stays dark: the compose callback
+            # is left unset (LiveStatus._draw early-returns on compose is None), so the
+            # replayed prefix never walks the footer through the whole prior run's
+            # history. _maybe_lift clears this flag at the first live node — reached in
+            # _walk, before this call — so the first live event draws the footer.
+            return
         if self._builder.current_activity() is not None:
             self._status.update(self.compose_status)
         else:
