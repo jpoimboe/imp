@@ -2344,6 +2344,11 @@ def _resumable_match_rows(control: Path, token: str) -> list[_Row]:
     return _sort_rows_newest_first(rows)
 
 
+def _abandon_match_rows(control: Path, token: str) -> list[_Row]:
+    """Abandon rows (live homes + backlog) whose id contains `token`."""
+    return [r for r in _abandon_rows(control) if token in r[0]]
+
+
 def _past_change_count(control: Path) -> int:
     return len(_completed_rows(control))
 
@@ -2534,34 +2539,67 @@ def _abandon_picker_non_tty(rows: list[_Row]) -> int:
     return 2
 
 
+_ABANDON_PICKER_HEADER = (
+    "Abandon which change?  (↑/↓ to move · enter to select · q to cancel)"
+)
+
+
 async def _pick_abandon_target(control: Path) -> str | int:
     return await _pick_change_target(
         control=control,
         rows=_abandon_rows(control),
-        header="Abandon which change?  (↑/↓ to move · enter to select · q to cancel)",
+        header=_ABANDON_PICKER_HEADER,
         on_empty=_abandon_picker_empty,
         on_non_tty=_abandon_picker_non_tty,
+    )
+
+
+async def _pick_abandon_matches(
+    control: Path, token: str, rows: list[_Row],
+) -> str | int:
+    """Scoped abandon picker over the token's live matches. On a non-tty it
+    errors with a token-specific message (distinct from the no-token
+    `_abandon_picker_non_tty` copy, which reads wrong when a token was given)."""
+    def _non_tty(_rows: list[_Row]) -> int:
+        print(f"imp: {token!r} matches multiple Changes; pass a more specific token",
+              file=sys.stderr)
+        return 2
+
+    return await _pick_change_target(
+        control=control,
+        rows=rows,
+        header=_ABANDON_PICKER_HEADER,
+        on_empty=_abandon_picker_empty,
+        on_non_tty=_non_tty,
     )
 
 
 def _cmd_abandon(args: argparse.Namespace) -> int:
     control = _control_root()
     yes = args.yes
-    if args.token is None:
+    token = args.token
+    if token is None or not token.strip():
         target = anyio.run(_pick_abandon_target, control)
         if isinstance(target, int):
             return target
         return _abandon(control, target, yes=yes)
+    matches = _abandon_match_rows(control, token)
+    if len(matches) >= 2:
+        target = anyio.run(_pick_abandon_matches, control, token, matches)
+        if isinstance(target, int):
+            return target
+        return _abandon(control, target, yes=yes)
+    if len(matches) == 1:
+        return _abandon(control, matches[0][0], yes=yes)
     try:
-        change_id = _resolve_id(control, args.token)
+        change_id = _resolve_id(control, token)
     except SystemExit:
-        # _resolve_id scans live worktrees only. A Change whose worktree was
-        # already removed (crash between abandon's remove and branch-delete)
-        # is unresolvable there — but abandon archived the id before removal,
-        # so recover it from the archive to still reap an orphaned branch
-        # (AC #12). Exact id, else unique suffix match.
+        # No live/backlog match, and _resolve_id found nothing live either. A
+        # Change whose worktree was already removed (crash between abandon's
+        # remove and branch-delete) is unresolvable there — but abandon archived
+        # the id before removal, so recover it from the archive to still reap an
+        # orphaned branch (AC 15c). Exact id, else unique suffix match.
         ids = archive_read.archived_ids(control)
-        token = args.token
         hits = [cid for cid in ids if cid == token] or \
                [cid for cid in ids if cid.endswith(token)]
         if len(hits) == 1:
