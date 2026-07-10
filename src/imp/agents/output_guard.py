@@ -119,29 +119,31 @@ def recover_folded_fields(
 ) -> dict[str, Any]:
     """Return a repaired COPY of `args` with decoder-folded fields un-folded.
 
-    For any string field whose value carries the fold fingerprint — its own
-    name-mirrored close `</c>` followed (after optional whitespace) by a
+    For any string field whose value carries the fold fingerprint — the earliest
+    close tag (the field's own name-mirror close `</c>` OR a generic
+    `</parameter>`) that is immediately followed (after optional whitespace) by a
     `<parameter name="...">` opener — the container's true value is the text
-    before `</c>`, and each `<parameter name="Y">` in the tail is extracted up to
-    the earliest terminator and injected as Y (only if Y is a declared field
-    currently absent or null, coerced to Y's type). Never mutates `args`."""
+    before that close tag, and each `<parameter name="Y">` in the tail is
+    extracted up to the earliest terminator and injected as Y (only if Y is a
+    declared field currently absent or null, coerced to Y's type). Never mutates
+    `args`."""
     declared = {f.name: f for f in schema.fields}
     repaired = dict(args)
     for name, value in args.items():
         if not isinstance(value, str):
             continue
-        close = f"</{name}>"
-        idx = value.find(close)
-        if idx == -1:
+        boundary = re.compile(
+            r'</(?:parameter|' + re.escape(name) + r')>\s*(?=<parameter\s+name=")'
+        )
+        m = boundary.search(value)
+        if m is None:
             continue
-        tail = value[idx + len(close):]
-        if not _PARAM_OPEN_PREFIX.match(tail):
-            continue
-        repaired[name] = value[:idx]
-        for m in _PARAM_OPEN.finditer(tail):
-            y = m.group(1)
-            end = _earliest_terminator(tail, m.end(), y)
-            cleaned = _clean_value(tail[m.end():end], y, 0)
+        repaired[name] = value[: m.start()]
+        tail = value[m.end():]
+        for pm in _PARAM_OPEN.finditer(tail):
+            y = pm.group(1)
+            end = _earliest_terminator(tail, pm.end(), y)
+            cleaned = _clean_value(tail[pm.end():end], y, 0)
             if cleaned is None:
                 continue
             field = declared.get(y)
