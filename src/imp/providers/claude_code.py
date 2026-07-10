@@ -1717,8 +1717,13 @@ class ClaudeCodeAgentRunner:
             # a no-message resume continues the step instead of bare-turn-ending on
             # a clarifying question. A drained human interject already drives
             # continuation, so it wins (parity with AWAITING_USER).
+            pending_human_tail = (
+                messages[-1].role == "user"
+                and not _contains_tool_result(messages[-1])
+            )
             if (resume_state is not ResumeState.AWAITING_USER
-                    and invocation.resume_should_continue and drained == 0):
+                    and invocation.resume_should_continue and drained == 0
+                    and not pending_human_tail):
                 deliver_engine_continuation(
                     messages, transcript, elog, aid,
                     _CONTINUATION_NUDGE)
