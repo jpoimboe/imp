@@ -2146,6 +2146,15 @@ def test_compose_label_joins_present_segments() -> None:
     assert rt.compose_label(["", None]) == ""
 
 
+def test_join_space_single_space_and_none_when_empty() -> None:
+    assert rt.join_space("sonnet", "████░░░░░░ 42%") == "sonnet ████░░░░░░ 42%"
+    assert rt.join_space(None, "████░░░░░░ 42%") == "████░░░░░░ 42%"
+    assert rt.join_space("sonnet", None) == "sonnet"
+    assert rt.join_space(None, None) is None
+    assert rt.join_space("", "42%") == "42%"
+    assert rt.join_space("", None) is None
+
+
 def test_header_line_prepends_phase_label_for_verb_step() -> None:
     step = nv.StepNode(name="finalize", kind="agent",
                        phase_label="implementation phase · plan 1/3",

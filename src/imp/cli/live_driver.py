@@ -104,7 +104,7 @@ def compose_position_bar(*, activity: nv.Activity, change_id: str | None,
                          width: int, context_pct: float | None = None,
                          checkpoint_threshold: float | int | None = None,
                          pad_slate: bool = True) -> str:
-    """Position bar: id · title · position · model · context bar (no spinner, no elapsed)."""
+    """Position bar: id · title · position · model context-bar (no spinner, no elapsed)."""
     bg = pal.user_bg_open(enabled=color)
     over = bool(bg)
     id_seg = _paint(change_id, "wordmark", color=color, over_bg=over) if change_id else None
@@ -116,7 +116,8 @@ def compose_position_bar(*, activity: nv.Activity, change_id: str | None,
     bar = context_bar(activity.model, prompt_tokens, context_pct=context_pct,
                       checkpoint_threshold=checkpoint_threshold,
                       color=color, over_bg=over)
-    body = rt.compose_label([id_seg, title_seg, position_seg, model_seg, bar])
+    body = rt.compose_label([id_seg, title_seg, position_seg,
+                             rt.join_space(model_seg, bar)])
     if pad_slate and bg:
         body_dw = pal.display_width(body)
         target = width - 2
@@ -174,7 +175,8 @@ def compose_position_row(*, activity: nv.Activity, change_id: str | None,
         bar = context_bar(activity.model, prompt_tokens, context_pct=context_pct,
                           checkpoint_threshold=checkpoint_threshold,
                           color=color, over_bg=over)
-    left = rt.compose_label([phase_seg, plan_seg, counter_seg, model_seg, bar])
+    left = rt.compose_label([phase_seg, plan_seg, counter_seg,
+                             rt.join_space(model_seg, bar)])
     id_seg = _paint(change_id, "wordmark", color=color, over_bg=over) if change_id else None
     body = _split_pad(left, id_seg, title or None, width=width)
     return f"{bg}{body}{_RESET}" if bg else body
@@ -211,7 +213,8 @@ def compose_subagent_rows(builder: nv.NarrativeBuilder, *, color: bool,
         secs = nv.elapsed_seconds(f.start_ts, now_iso)
         el = rt.fmt_seconds(secs) if secs is not None else None
         el_seg = _paint(el, "dim", color=color, over_bg=over) if el else None
-        inner = "  " + rt.compose_label([role_seg, model_seg, bar, el_seg])
+        inner = "  " + rt.compose_label([role_seg,
+                                         rt.join_space(model_seg, bar), el_seg])
         if bg:
             pad = width - 2 - pal.display_width(inner)
             if pad > 0:
@@ -324,8 +327,12 @@ class LiveDriver:
                 # the current burst between user inputs (across tools, thinks, and
                 # multiple llm_response blocks within one interactive turn). Non-
                 # interactive runs never fire user_message, so today's per-step
-                # reset behavior is preserved as a side effect.
-                self._status.restart_span()
+                # reset behavior is preserved as a side effect. Guarded — like the
+                # llm_response branch below — so a dispatched subagent's own
+                # step_started/user_message can't zero the shared burst timer while
+                # background subagents are in flight.
+                if not self._builder.has_running_subagent:
+                    self._status.restart_span()
             elif etype == "llm_response":
                 # A genuine prose turn restarts the span (w7f56t) — but NOT while
                 # a dispatched subagent is still running: the parent narrating in

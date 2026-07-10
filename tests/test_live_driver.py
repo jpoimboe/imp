@@ -806,6 +806,34 @@ def test_prose_does_not_restart_span_while_a_subagent_runs() -> None:
     assert calls == ["restart"]                                          # only step_started
 
 
+def test_subagent_step_and_user_message_do_not_restart_span_while_running() -> None:
+    """A dispatched subagent's own step_started (and any user_message) must NOT
+    zero the shared `(+N subagents) · Ns` burst timer while the subagent runs;
+    only the parent's pre-dispatch step_started restarts it."""
+    calls: list[str] = []
+
+    class _CountingStatus(LiveStatus):
+        def restart_span(self) -> None:
+            calls.append("restart")
+            super().restart_span()
+
+    out = _Pipe()
+    status = _CountingStatus(out)
+    drv = LiveDriver(stream=out, color=False, width=80, status=status)
+    for e in [
+        ev("1", "change_created", change_id=1, title="x"),
+        ev("2", "step_started", step="spec", kind="agent", phase="p",
+           model="m", provider="anthropic"),                              # restart
+        ev("3", "tool_call", agent_id="a", id="t1", name="sub_agent",
+           input={"subagent_name": "reviewer"}),                         # fold runs
+        ev("4", "step_started", agent_id="sub:3", step="rev", kind="agent",
+           phase="p", model="m", provider="anthropic"),                  # NO restart
+        ev("5", "user_message", content=[{"type": "text", "text": "reply"}]),  # NO restart
+    ]:
+        drv.on_event(e)
+    assert calls == ["restart"]                                          # only step 2
+
+
 def test_chrome_step_collapses_live_and_matches_log() -> None:
     drv, out = _driver()
     events = [
@@ -1816,6 +1844,59 @@ def test_compose_position_bar_includes_change_id_title_position_model() -> None:
     assert "sonnet" in bar       # model appears in position bar
 
 
+def test_position_bar_separates_model_from_graph_with_a_single_space() -> None:
+    from imp.cli.live_driver import compose_position_bar, context_bar
+    act = nv.Activity(position="implementation phase", model="sonnet")
+    line = compose_position_bar(activity=act, change_id="z9gixx", title="t",
+                                prompt_tokens=26000, color=False, width=120)
+    bar = context_bar("sonnet", 26000, color=False, over_bg=False)
+    assert bar is not None
+    assert f"sonnet {bar}" in line          # single space binds model to graph
+    assert "sonnet · " not in line          # no middle-dot before the graph
+
+
+def test_position_row_separates_model_from_graph_with_a_single_space() -> None:
+    from imp.cli.live_driver import compose_position_row, context_bar
+    act = nv.Activity(kind="agent", model="sonnet", phase="review")
+    line = compose_position_row(activity=act, change_id="z9gixx", title="t",
+                                prompt_tokens=26000, color=False, width=200)
+    bar = context_bar("sonnet", 26000, color=False, over_bg=False)
+    assert bar is not None
+    assert f"sonnet {bar}" in line
+    assert "sonnet · " not in line
+
+
+def test_subagent_row_single_space_model_graph_keeps_trailing_elapsed() -> None:
+    from imp.cli import render_text as rt
+    from imp.cli.live_driver import compose_subagent_rows, context_bar
+    b = nv.NarrativeBuilder()
+    b.add(ev("1", "change_created", change_id=1, title="x"))
+    b.add(ev("2", "step_started", step="s", kind="agent", phase="p",
+             model="m", provider="anthropic"))
+    b.add(ev("t1", "tool_call", agent_id="step:p/s", id="blk-t1",
+             name="sub_agent", input={"subagent_name": "coder"},
+             timestamp="2026-01-01T00:00:00+00:00"))
+    b.add(ev("r1", "llm_response", agent_id="sub:t1", provider="anthropic",
+             model="sonnet", stop_reason="end_turn",
+             raw={"content": [{"type": "text", "text": "hi"}]},
+             usage={"input_tokens": 60000, "output_tokens": 5,
+                    "cache_read_input_tokens": 20000,
+                    "cache_creation_input_tokens": 0},
+             context_pct=42.0, context_window=200_000))
+    f = b.running_subagents()[0]
+    model = rt.subagent_model(f)
+    assert model == "sonnet"                # sanity: model resolvable in this row
+    bar = context_bar(model, f.nested.latest_prompt_tokens,
+                      context_pct=f.nested.latest_context_pct,
+                      color=False, over_bg=False)
+    assert bar is not None
+    rows = compose_subagent_rows(b, color=False, width=200,
+                                 now_iso="2026-01-01T00:00:05+00:00")
+    assert f"sonnet {bar}" in rows[0]       # single space binds model to graph
+    assert "sonnet · " not in rows[0]       # no middle-dot before the graph
+    assert rows[0].rstrip().endswith("· 5s")  # trailing elapsed still ` · `-joined
+
+
 def test_compose_toolbar_static_uses_frame_zero_and_status_elapsed() -> None:
     out = _Pipe()
     status = LiveStatus(out, now=lambda: 7.0)
@@ -2344,8 +2425,10 @@ def test_compose_position_row_colors_match_the_scrollback_palette() -> None:
     assert "\x1b[34m" in parts[0] and "\x1b[33m" not in parts[0]  # phase: step-blue, not gold
     assert "\x1b[34m" in parts[1]                                   # plan: step-blue
     assert "\x1b[34m" in parts[2]                                   # counter: step-blue
+    # model+bar are now space-joined into parts[3]; id (z9gixx) is flush-right
+    # via spaces so it lands in the same ` · `-split bucket as model+bar.
     assert "\x1b[90m" in parts[3] and "\x1b[34m" not in parts[3]  # model: gray, not blue
-    assert "\x1b[33m" in parts[4]                                   # id (z9gixx): gold
+    assert "\x1b[33m" in parts[3]                                   # id (z9gixx): gold
 
 
 def _sub_builder(*subs, readings=(), start_ts=None):

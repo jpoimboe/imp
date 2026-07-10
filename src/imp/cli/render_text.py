@@ -400,6 +400,11 @@ def compose_label(segments: Iterable[str | None]) -> str:
     return " · ".join(s for s in segments if s)
 
 
+def join_space(*segments: str | None) -> str | None:
+    present = [s for s in segments if s]
+    return " ".join(present) if present else None
+
+
 def _phase_rule(label: str) -> str:
     """Fixed-width by design — the navigational landmark is the yellow
     `lifecycle` color, not a full-width bar."""
