@@ -19,6 +19,7 @@ import signal
 import subprocess
 import sys
 from collections.abc import Awaitable, Callable, Iterable, Iterator
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, NamedTuple, NoReturn
@@ -2788,6 +2789,69 @@ def _inflight_prose(control: Path, change_id: str) -> str:
     except OSError:
         return ""
     return conversation_prose(_parse_jsonl(raw))
+
+
+_SEARCH_ZONES = ("active", "backlog", "archive")
+
+
+@dataclass(frozen=True)
+class _SearchHit:
+    change_id: str
+    title: str
+    zone: str      # one of _SEARCH_ZONES
+    content: str   # searchable prose for excerpting ("" when the zone has none)
+
+
+def _selected_search_zones(args: argparse.Namespace) -> set[str]:
+    picked = {
+        zone for zone, on in (
+            ("active", args.active),
+            ("backlog", args.backlog),
+            ("archive", args.archived),
+        ) if on
+    }
+    return picked or set(_SEARCH_ZONES)
+
+
+def _search_active(control: Path, query: str) -> list[_SearchHit]:
+    """In-flight + draft-origin changes whose id, title, or conversation prose
+    contains `query` (case-insensitive)."""
+    q = query.lower()
+    hits: list[_SearchHit] = []
+    for r in _status_rows(control):
+        prose = _inflight_prose(control, r[0])
+        if q in r[0].lower() or q in r[4].lower() or q in prose.lower():
+            hits.append(_SearchHit(r[0], r[4], "active", prose))
+    return hits
+
+
+def _backlog_seed_opening(control: Path, change_id: str) -> str:
+    cj = _change_home(control, change_id) / "change.json"
+    try:
+        meta = json.loads(cj.read_bytes())
+    except (OSError, ValueError, TypeError):
+        return ""
+    return str(meta.get("seed_opening") or "")
+
+
+def _search_backlog(control: Path, query: str) -> list[_SearchHit]:
+    """Backlog changes whose id, title, or seed_opening body (title + description)
+    contains `query` (case-insensitive)."""
+    q = query.lower()
+    hits: list[_SearchHit] = []
+    for r in _backlog_rows(control):
+        change_id, title = r[0], r[4]
+        seed = _backlog_seed_opening(control, change_id)
+        if q in change_id.lower() or q in title.lower() or q in seed.lower():
+            hits.append(_SearchHit(change_id, title, "backlog", seed))
+    return hits
+
+
+def _search_archived(control: Path, query: str) -> list[_SearchHit]:
+    return [
+        _SearchHit(cid, title, "archive", content)
+        for (cid, title, content) in archive_read.search_archive_content(control, query)
+    ]
 
 
 def _search_inflight(control: Path, query: str) -> list[tuple[str, str, str, str]]:
