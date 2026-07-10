@@ -511,6 +511,8 @@ class NarrativeBuilder:
         self._first_step: StepNode | None = None
         # phrase rotation: work seen this segment, consumed at each prose/user-message boundary.
         self._segment_had_work = False
+        # Deferred rename: rendered after its narration, not at the change_renamed position.
+        self._pending_rename: RenameNode | None = None
 
     # -- public API -----------------------------------------------------------
     @property
@@ -848,12 +850,20 @@ class NarrativeBuilder:
         self._warnings_flushed = True
 
     def finalize(self) -> None:
-        """End-of-stream flush of the root warnings summary, only for a reasoned terminal pause."""
+        """End-of-stream flush of a deferred rename and the warnings summary on a pause."""
+        self._flush_pending_rename()
         if self._root.status == "paused" and self._pause_outcome_shown:
             self._flush_warnings_summary()
 
     def _flush_burst(self) -> None:
         self._current_burst = None
+
+    def _flush_pending_rename(self) -> None:
+        # Append the deferred rename here, not in _flush_burst (which runs before the narration).
+        if self._pending_rename is None:
+            return
+        self._append(self._pending_rename)
+        self._pending_rename = None
 
     def _pop_step(self, name: str | None) -> StepNode | None:
         """Pop the top open step. `name` is accepted for symmetry with the event
@@ -901,13 +911,15 @@ def _h_change_renamed(self: NarrativeBuilder, event: dict[str, Any], p: dict[str
     if new_title is None:
         return
     self._root.title = new_title
-    self._append(RenameNode(name=new_title))
+    # Stash the rename; flushed after the narration or at the next boundary; latest title wins.
+    self._pending_rename = RenameNode(name=new_title)
 
 
 NarrativeBuilder._HANDLERS["change_renamed"] = _h_change_renamed
 
 
 def _h_change_merged(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
+    self._flush_pending_rename()
     self._flush_burst()
     self._root.status = "completed"
     descriptor = self._root.id or ""
@@ -921,6 +933,7 @@ NarrativeBuilder._HANDLERS["change_merged"] = _h_change_merged
 
 
 def _h_workflow_completed(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
+    self._flush_pending_rename()
     self._flush_burst()
     self._root.status = "completed"
     descriptor = self._root.id or ""
@@ -935,6 +948,7 @@ NarrativeBuilder._HANDLERS["workflow_completed"] = _h_workflow_completed
 
 def _h_merge_blocked(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
     # _emit_merge_blocked already renders the friendly ⚠ block; suppress the raw fallthrough.
+    self._flush_pending_rename()
     self._flush_burst()
 
 
@@ -1069,6 +1083,7 @@ def _ensure_phase(self: NarrativeBuilder, name: str,
 
 
 def _h_step_started(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
+    self._flush_pending_rename()
     self._flush_burst()
     self._span_start_ts = event.get("timestamp")
     self._segment_had_work = False
@@ -1177,6 +1192,7 @@ def _h_step_started(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, 
 
 
 def _h_step_completed(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
+    self._flush_pending_rename()
     self._flush_burst()
     # D1: an awaiting-reply arm is valid only within the step that raised it — a
     # solicit is always answered before its step ends. If the arm was never
@@ -1219,6 +1235,7 @@ NarrativeBuilder._HANDLERS["step_completed"] = _h_step_completed
 def _h_step_transition(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
     # Backward transition (engine-declared): the source step was already popped,
     # so _append lands the marker in the open phase (or root) — the bounce point.
+    self._flush_pending_rename()
     self._flush_burst()
     frm = p.get("from_step", "?")
     to = p.get("target_step", "?")
@@ -1240,6 +1257,7 @@ def _h_workflow_paused(self: NarrativeBuilder, event: dict[str, Any], p: dict[st
     # line; for an error-driven pause the underlying failure was already shown as
     # its own `error:` event just above, so re-stating it as an error here would
     # both double up and mismatch the live view (the bug this fixes).
+    self._flush_pending_rename()
     self._flush_burst()
     self._root.status = "paused"
     reason = p.get("interrupt_reason") or p.get("reason")
@@ -1508,6 +1526,8 @@ def _h_llm_response(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, 
             c.held = False
     node.held = True
     self._append(node)
+    # Re-attach the deferred rename after its narration; not in _flush_burst, which ran earlier.
+    self._flush_pending_rename()
 
 
 def _h_thinking(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:

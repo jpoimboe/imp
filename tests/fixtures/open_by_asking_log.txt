@@ -58,13 +58,13 @@ spec-writer · opus
 
   4 calls · rename_change · write_file · bash · complete_step · 25s
 
-• Set name to "add-version-flag"
-
 • Spec written and committed as imp/specs/2026-06-06-add-version-flag.md. It
   captures the top-level --version/-V flag, version resolution via
   importlib.metadata.version("imp"), the imp unknown fallback on
   PackageNotFoundError (still exit 0), and tests covering both the success and
   fallback paths.
+
+• Set name to "add-version-flag"
 
 spec-writer · complete · 1m 44s
 
