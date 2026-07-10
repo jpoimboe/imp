@@ -106,10 +106,10 @@ UNKNOWN_COMMAND = "Unknown command. Try /help."
 ALERTS_ON_REPLY = "Alerts: all Changes."
 ALERTS_OFF_REPLY = "Alerts: subscribed Changes only."
 ROUTE_HINT = (
-    "Couldn't route that — reply to a Change's message, prefix @handle, or send /show.")
+    "Couldn't route that — reply to a Change's message, prefix @handle, or send /list.")
 HELP_TEXT = (
     "Commands:\n"
-    "/show — show running changes (● = subscribed)\n"
+    "/list — show running changes (● = subscribed)\n"
     "/new <prompt> — start a Change\n"
     "/subscribe @handle — follow a Change (streams from now; /replay for history)\n"
     "/unsubscribe (reply or @handle) — stop all messages for a Change\n"
@@ -151,7 +151,7 @@ def parse(
         word, _, rest = stripped.partition(" ")
         rest = rest.strip()
         verb = word[1:].lower()
-        if verb == "show":
+        if verb == "list":
             return ListChanges()
         if verb == "help":
             return Help()
