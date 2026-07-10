@@ -473,14 +473,16 @@ def test_collapsed_step_line_two_tone_label_and_gray_tail() -> None:
     assert pal._ANSI["gray"] in colored               # tail in breadcrumb gray
 
 
-def test_collapsed_step_line_stays_phase_free_with_phase_label() -> None:
+def test_collapsed_step_line_prepends_phase_label() -> None:
     node = nv.StepNode(name="verify", kind="script", label="running tests",
                        phase_label="integration phase · plan 1/1",
                        show_label=True, closed=True,
                        start_ts="2026-06-10T00:00:00", end_ts="2026-06-10T00:00:05")
-    line = rt.collapsed_step_line(node, depth=1, color=False)
-    assert line == "  running tests · complete · 5s"
-    assert "integration phase" not in line
+    assert rt.collapsed_step_line(node, depth=1, color=False) == \
+        "  integration phase · plan 1/1 · running tests · complete · 5s"
+    colored = rt.collapsed_step_line(node, depth=1, color=True)
+    assert pal._ANSI["step"] in colored   # phase · label portion in step color
+    assert pal._ANSI["gray"] in colored   # ` · complete · 5s` tail in breadcrumb gray
 
 
 def test_body_less_visible_step_collapses_to_one_line() -> None:
@@ -2183,14 +2185,30 @@ def test_opening_intent_renders_under_first_step_header_before_narration() -> No
     assert step_idx < intent_idx < narr_idx
 
 
-def test_breadcrumb_completion_omits_phase_label() -> None:
+def test_breadcrumb_completion_includes_phase_label() -> None:
     bc = nv.BreadcrumbLine(
         step_name="finalize", kind="agent", elapsed_s=0.0,
         action={"verb": "continue"}, step_label="finalizing",
         phase_label="implementation phase · plan 1/3", show_complete=True)
     out = list(rt._render(bc, depth=1, full=False, color=False, width=80))
-    assert out == ["  finalizing · complete"]
-    assert "implementation phase" not in out[0]
+    assert out == ["  implementation phase · plan 1/3 · finalizing · complete"]
+
+
+def test_breadcrumb_blocked_includes_phase_label() -> None:
+    bc = nv.BreadcrumbLine(step_name="merge-to-base", elapsed_s=None,
+                           action={"verb": "pause"}, extras=[],
+                           kind="merge_and_exit_worktree",
+                           phase_label="review phase · plan 1/1")
+    line = "\n".join(rt._render(bc, depth=1, full=False, color=False, width=80))
+    assert line == "  review phase · plan 1/1 · merge-to-base blocked"
+
+
+def test_breadcrumb_interrupted_includes_phase_label() -> None:
+    bc = nv.BreadcrumbLine(step_name="implement", kind="agent", elapsed_s=None,
+                           action={"verb": "pause"}, extras=[], interrupted=True,
+                           phase_label="implementation phase · task 3/3")
+    line = "\n".join(rt._render(bc, depth=1, full=False, color=False, width=80))
+    assert line == "  implementation phase · task 3/3 · implement interrupted"
 
 
 def test_breadcrumb_without_phase_label_is_unchanged() -> None:

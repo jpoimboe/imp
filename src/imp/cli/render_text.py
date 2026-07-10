@@ -426,9 +426,9 @@ def _step_header_label(node: nv.StepNode) -> str:
     """The step's own scrollback label — its position counter (live or static) for
     a `position_label` step, else its plain label. The raw step name is the loud
     fallback when a visible step somehow has no label, so the omission is
-    caught and fixed. This helper stays phase-free — `collapsed_step_line`'s
-    one-line collapse keeps a phase-free label — while `header_line` prepends the
-    owning phase's label to the printed step header."""
+    caught and fixed. This helper returns a phase-free label; both
+    `collapsed_step_line` and `header_line` prepend the owning phase's label (via
+    `compose_label`) to this result."""
     step_label = (node.live_label or node.label) if node.position_label else node.label
     return step_label or node.name
 
@@ -438,7 +438,7 @@ def collapsed_step_line(node: nv.StepNode, *, depth: int, color: bool,
     """The single line a body-less visible step collapses to on completion:
     `<label> · complete · <elapsed>` — label in the step color, the
     ` · complete · <elapsed>` tail in the existing breadcrumb gray."""
-    label = _step_header_label(node)
+    label = compose_label([node.phase_label, _step_header_label(node)])
     done = fmt_seconds_done(nv.elapsed_seconds(node.run_start_ts or node.start_ts, node.end_ts))
     tail = " · complete" + (f" · {done}" if done else "")
     indent = _gutter_indent(depth, gutters, color)
@@ -736,12 +736,14 @@ def _render(node: Any, *, depth: int, full: bool, color: bool,
         act = node.action if isinstance(node.action, dict) else None
         blocked = (node.kind == "merge_and_exit_worktree" and act is not None
                    and act.get("verb") == "pause")
+        parts: list[str | None]
         if node.interrupted:
             parts = [f"{name} interrupted"]
         elif blocked:
             parts = [f"{name} blocked"]
         else:
             parts = [f"{name} · complete" if node.show_complete else name]
+        parts.insert(0, node.phase_label)
         if full:
             parts.extend(_caret_escape(e) for e in node.extras)
         if not (node.interrupted or blocked) and (act is None or act.get("verb") != "goto"):
