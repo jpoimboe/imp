@@ -278,8 +278,12 @@ async def test_ctrl_backslash_deliberately_detaches_and_run_survives(
     async def _solicit(_prompt: str) -> str:
         raise AssertionError("no gate fired; solicit must not be called")
 
+    stepped = anyio.Event()
+
     class _Driver:
-        def on_event(self, _event: dict[str, Any]) -> None: ...
+        def on_event(self, event: dict[str, Any]) -> None:
+            if event.get("type") == "step_started":
+                stepped.set()
         def finish(self) -> None: ...
 
     with anyio.fail_after(10):
@@ -300,6 +304,12 @@ async def test_ctrl_backslash_deliberately_detaches_and_run_survives(
             # attached_count == 1 proves the trap is live — SIG_DFL here would
             # core-dump the test process; in red (no trap), the assert fires first.
             assert signal.getsignal(signal.SIGQUIT) != signal.SIG_DFL
+            # Fire only after run_fn has emitted step_started: that proves it left
+            # its first attach-wait loop and is parked waiting for the detach.
+            # Firing on attached_count == 1 alone lets a load-starved run_fn miss
+            # the whole attach->detach round and hang in its first loop (the flake).
+            with anyio.fail_after(5):
+                await stepped.wait()
             os.kill(os.getpid(), signal.SIGQUIT)   # Ctrl-\ deliberate-detach gesture
 
     assert survived == [True]
@@ -1223,8 +1233,12 @@ async def test_sigterm_detaches_client_as_a_leave_and_run_survives(
     async def _solicit(_prompt: str) -> str:
         raise AssertionError("no gate fired; solicit must not be called")
 
+    stepped = anyio.Event()
+
     class _Driver:
-        def on_event(self, _event: dict[str, Any]) -> None: ...
+        def on_event(self, event: dict[str, Any]) -> None:
+            if event.get("type") == "step_started":
+                stepped.set()
         def finish(self) -> None: ...
 
     with anyio.fail_after(15):
@@ -1248,6 +1262,10 @@ async def test_sigterm_detaches_client_as_a_leave_and_run_survives(
                        or server.attached_count != 1
                        or signal.SIGTERM not in loop._signal_handlers):
                     await anyio.sleep(0.02)
+            # ...and until run_fn has emitted step_started, so it is parked in the
+            # detach-wait loop and cannot miss the attach->detach round under load.
+            with anyio.fail_after(5):
+                await stepped.wait()
             os.kill(os.getpid(), signal.SIGTERM)   # leave gesture
             with anyio.fail_after(5):
                 while not survived:
@@ -1289,8 +1307,12 @@ async def test_sighup_detaches_client_as_a_leave_and_run_survives(
     async def _solicit(_prompt: str) -> str:
         raise AssertionError("no gate fired; solicit must not be called")
 
+    stepped = anyio.Event()
+
     class _Driver:
-        def on_event(self, _event: dict[str, Any]) -> None: ...
+        def on_event(self, event: dict[str, Any]) -> None:
+            if event.get("type") == "step_started":
+                stepped.set()
         def finish(self) -> None: ...
 
     with anyio.fail_after(15):
@@ -1311,6 +1333,10 @@ async def test_sighup_detaches_client_as_a_leave_and_run_survives(
                        or server.attached_count != 1
                        or signal.SIGHUP not in loop._signal_handlers):
                     await anyio.sleep(0.02)
+            # ...and until run_fn has emitted step_started, so it is parked in the
+            # detach-wait loop and cannot miss the attach->detach round under load.
+            with anyio.fail_after(5):
+                await stepped.wait()
             os.kill(os.getpid(), signal.SIGHUP)   # hangup = leave gesture
             with anyio.fail_after(5):
                 while not survived:
