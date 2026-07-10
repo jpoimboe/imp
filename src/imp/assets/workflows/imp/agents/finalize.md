@@ -46,9 +46,9 @@ Populate the audit fields:
   `— needs-decision: <why>` items — one per line with its reason. These include items
   `spec-finalizer`/`plan-writer` appended directly in reader form (they reach you even on
   a `fast_path` change where `deferred-sweep` never ran) **and tolerations** the
-  `verify` / `sweep-verify` / `converge-verify` / `integration-verify` gates recorded as
-  `- [ ] DEFERRED verify: …` / `- [ ] DEFERRED sweep-verify: …` /
-  `- [ ] DEFERRED converge-verify: …` / `- [ ] DEFERRED integration-verify: … — needs-decision: …`
+  `verify` / `converge-verify` / `integration-verify` gates recorded as
+  `- [ ] DEFERRED verify: …` / `- [ ] DEFERRED converge-verify: …` /
+  `- [ ] DEFERRED integration-verify: … — needs-decision: …`
   lines; present them all
   identically. A toleration is an admission of non-attribution: do **not**
   re-run the failure and do **not** editorialize about its current status
@@ -112,7 +112,7 @@ chose to ignore it," not "the human chose ignore."
 
 Then work through the **needs-decision** items. This walk has a **closed set**
 of inputs: the `— needs-decision: <why>` lines in `{{ change.home }}/deferred.md`
-(including tolerations the `verify` / `sweep-verify` / `converge-verify` / `integration-verify` gates recorded there) — and
+(including tolerations the `verify` / `converge-verify` / `integration-verify` gates recorded there) — and
 nothing else. Do not add an item here from something you noticed while reading the
 diff. Drive the conversation however reads best — there is no required one-item-per-turn
 cadence; take the items in whatever order and grouping the discussion warrants. For each

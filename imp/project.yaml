@@ -18,7 +18,7 @@ guidance: |
 # lint_command: "make lint"
 #
 # Tiered test gates: test_cmd_fast (lint + typecheck + fast tests) runs at every
-# per-plan gate (verify, sweep-verify); test_cmd_slow — the complete run, a
+# per-plan gate (verify); test_cmd_slow — the complete run, a
 # superset — runs once per Change at integration-verify. Each tier has its own
 # wall-clock timeout in seconds; on timeout the gate pauses to a human (exit 124)
 # rather than looping against an unwinnable clock. Set explicitly above the schema

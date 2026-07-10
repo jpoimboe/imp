@@ -225,8 +225,8 @@ def test_run_verify_fast_skips_on_unchanged_tree(tmp_path: Path) -> None:
 
 
 def test_two_fast_invocations_share_tree_skip_cache(tmp_path: Path) -> None:
-    # `verify` and `sweep-verify` both pass the fast tier, so they share the
-    # last_green_tree_fast cache: a second fast invocation at the same tree skips.
+    # Two fast-tier invocations at the same tree share the last_green_tree_fast
+    # cache: the second fast invocation at the unchanged tree skips.
     project = tmp_path / "proj"
     project.mkdir()
     _git_init(project)
@@ -241,11 +241,11 @@ def test_two_fast_invocations_share_tree_skip_cache(tmp_path: Path) -> None:
     assert verify.returncode == 0, verify.stderr
     assert counter.read_text().count("x") == 1
 
-    sweep_verify = _run("run-verify.sh", "fast", env_extra={
+    second_fast = _run("run-verify.sh", "fast", env_extra={
         "IMP_PROJECT_ROOT": str(project), "IMP_TEST_CMD_FAST": cmd,
         "IMP_CHANGE_DIR": str(project / ".imp" / "change")})
-    assert sweep_verify.returncode == 0, sweep_verify.stderr
-    assert "fast gate skipped — tree unchanged since last green run" in sweep_verify.stdout
+    assert second_fast.returncode == 0, second_fast.stderr
+    assert "fast gate skipped — tree unchanged since last green run" in second_fast.stdout
     assert counter.read_text().count("x") == 1   # second fast invocation did NOT re-run
 
 

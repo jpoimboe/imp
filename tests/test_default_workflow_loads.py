@@ -149,7 +149,6 @@ def test_every_shown_step_has_its_label() -> None:
         "gap-check": "checking plan coverage",
         "change-review": "reviewing change",
         "deferred-sweep": "sweeping deferred tasks",
-        "sweep-verify": "running tests",
         "converge-verify": "running tests",
         "summarizer": "summarizing change",
         "finalize": "finalizing",
@@ -187,7 +186,7 @@ def test_route_labels_assigned() -> None:
 
 def test_stateless_verify_gates_are_interruptible() -> None:
     by = {s.name: s for s in _wf().flat_steps()}
-    for name in ("verify", "sweep-verify", "converge-verify", "integration-verify"):
+    for name in ("verify", "converge-verify", "integration-verify"):
         assert by[name].interruptible is True, name
     # Commit gates mutate the tree and must stay run-to-completion.
     for name in ("spec-verify-commit", "plan-verify-commit"):

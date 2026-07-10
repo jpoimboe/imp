@@ -15,7 +15,7 @@ from imp.engine.gates import evaluate_rules
 from imp.engine.loader import load_workflow
 from imp.engine.schema import validate_agent_output
 from imp.engine.state import JsonlEventLog
-from imp.engine.types import Continue, Goto
+from imp.engine.types import Goto
 
 AGENTS = Path("src/imp/assets/workflows/imp/agents")
 _TIERS = frozenset({"low", "medium", "high"})
@@ -49,12 +49,11 @@ def test_review_sweep_and_finalize_left_the_implement_loop() -> None:
     impl_names = [s.name for s in next(p for p in wf.phases if p.name == "implement").steps]
     assert impl_names[-1] == "check-next-plan"
     for gone in ("change-review", "plan-code-reviewer", "gap-check",
-                 "deferred-sweep", "sweep-verify", "summarizer", "finalize"):
+                 "deferred-sweep", "summarizer", "finalize"):
         assert gone not in impl_names, gone
     conv_names = [s.name for s in next(p for p in wf.phases if p.name == "converge").steps]
     assert conv_names == [
-        "gap-check", "change-review", "deferred-sweep", "sweep-verify",
-        "converge-verify",
+        "gap-check", "change-review", "deferred-sweep", "converge-verify",
     ]
 
 
@@ -137,14 +136,10 @@ def test_plan_code_reviewer_pins_deferred_observation_format() -> None:
     assert "deferred-sweep" in text.lower()   # names the consumer step
 
 
-def test_deferred_sweep_step_then_sweep_verify() -> None:
+def test_deferred_sweep_step() -> None:
     steps = _steps(_wf())
     sweep = steps["deferred-sweep"]
     assert sweep.kind == "agent" and sweep.file.name == "deferred-sweep.md"
-    st = steps["sweep-verify"]
-    assert st.kind == "script" and st.command.endswith("run-verify.sh fast")
-    assert isinstance(st.rules[-1].action, Goto)
-    assert st.rules[-1].action.target == "deferred-sweep" and st.rules[-1].action.resume is True
 
 
 def test_gap_check_routes_coverage_at_change_end() -> None:
@@ -291,12 +286,3 @@ def test_converge_cleanup_steps_removed() -> None:
     assert "cleanup-sweep" not in names
     assert "autosquash-resolve-sweep" not in names
 
-
-def test_sweep_verify_green_continues_into_converge_verify() -> None:
-    wf = _wf()
-    conv = next(p for p in wf.phases if p.name == "converge")
-    names = [s.name for s in conv.steps]
-    # sweep-verify continues positionally into converge-verify (no cleanup between).
-    assert names.index("sweep-verify") + 1 == names.index("converge-verify")
-    sv = _steps(wf)["sweep-verify"]
-    assert isinstance(evaluate_rules(sv.rules, vars={}, output={"exit": 0}).action, Continue)
