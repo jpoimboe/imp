@@ -77,13 +77,13 @@ def test_show_status_live(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> No
     assert "new" in _run(monkeypatch, tmp_path, "show", _ID, "status")
 
 
-def test_show_events_and_review_live(
+def test_show_events_live(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _seed_control(tmp_path)
     ch = _seed_with_artifacts(tmp_path, _ID, "Feat")
-    # Append a review-phase step event and a non-review one.
+    # Append step events so the events resource has lines to show.
     with ch.events_path.open("a", encoding="utf-8") as fh:
         fh.write(
             json.dumps(
@@ -107,10 +107,14 @@ def test_show_events_and_review_live(
         )
     # events: the raw line is present.
     assert "plan-reviewer" in _run(monkeypatch, tmp_path, "show", _ID, "events")
-    # review: only review-phase steps are listed.
-    review_out = _run(monkeypatch, tmp_path, "show", _ID, "review")
-    assert "plan-reviewer" in review_out
-    assert "task-lead" not in review_out
+
+
+def test_show_rejects_review_resource(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    with pytest.raises(SystemExit):
+        main(["show", _ID, "review"])
+    assert "invalid choice: 'review'" in capsys.readouterr().err
 
 
 def test_show_spec_falls_back_after_archive(

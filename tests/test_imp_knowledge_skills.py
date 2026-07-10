@@ -63,7 +63,7 @@ def test_introspect_names_the_read_commands() -> None:
     assert "imp show" in body
     assert "imp show --all" in body
     assert "imp search" in body
-    assert "imp show <id> [spec|plan|events|status|review]" in body
+    assert "imp show <id> [spec|plan|events|status]" in body
 
 
 def test_introspect_documents_the_three_tier_split() -> None:

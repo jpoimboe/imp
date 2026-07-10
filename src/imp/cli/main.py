@@ -1361,12 +1361,6 @@ def _show_runtime(control: Path, change_id: str, name: str) -> bytes | None:
     return archive_read.read_events(control, change_id)
 
 
-_REVIEW_STEPS = frozenset({
-    "spec-reviewer", "plan-reviewer", "plan-code-reviewer", "deferred-sweep",
-    "gap-check", "finalize",
-})
-
-
 def _user_message_text(payload: dict[str, Any]) -> str:
     return "".join(
         b.get("text", "") for b in (payload.get("content") or [])
@@ -1610,19 +1604,6 @@ def _cmd_show(args: argparse.Namespace) -> int:
             return 2
         _page_or_print([json.loads(raw).get("status", "unknown")],
                        no_pager=args.no_pager)
-        return 0
-    elif resource == "review":
-        raw = _show_runtime(control, change_id, "events.jsonl")
-        if raw is None:
-            print(f"imp: no events for {change_id!r}", file=sys.stderr)
-            return 2
-        review_lines = []
-        for ev in _parse_jsonl(raw):
-            payload = ev.get("payload") or {}
-            if ev.get("type") == "step_started" and \
-                    payload.get("step") in _REVIEW_STEPS:
-                review_lines.append(f"{payload.get('phase', '?')}/{payload.get('step')}")
-        _page_or_print(review_lines, no_pager=args.no_pager)
         return 0
     if data is None:
         print(f"imp: no {resource} for {change_id!r}", file=sys.stderr)
@@ -3009,7 +2990,7 @@ def _build_parser() -> argparse.ArgumentParser:
         description=(
             "With no argument, show an overview of your changes — in-flight, the "
             "Backlog, and recently merged. With an id, print that change's detail "
-            "card, or name an artifact (spec/plan/review/events/status/summary) "
+            "card, or name an artifact (spec/plan/events/status/summary) "
             "to print just that. Reads the live worktree files while a change is "
             "in flight and falls back to the archive once it is merged."),
     )
@@ -3018,7 +2999,7 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Change id or its short token (omit for an overview of all changes).")
     p_show.add_argument(
         "resource", nargs="?", default=None,
-        choices=["spec", "plan", "review", "events", "status", "summary"],
+        choices=["spec", "plan", "events", "status", "summary"],
         help="Which artifact to print (default: a detail card).")
     p_show.add_argument(
         "-a", "--all", action="store_true",
