@@ -339,3 +339,115 @@ def test_run_verify_success_summary_is_silent(tmp_path: Path) -> None:
     assert "ran-ok" in proc.stdout
     assert "gate ceiling" not in proc.stdout
     assert "gate failed" not in proc.stdout
+
+
+def _head_tree(project: Path) -> str:
+    out = subprocess.run(["git", "rev-parse", "HEAD^{tree}"], cwd=project,
+                         capture_output=True, text=True, check=True)
+    return out.stdout.strip()
+
+
+def test_run_verify_slow_records_verified_tree_on_pass(tmp_path: Path) -> None:
+    project = tmp_path / "proj"
+    project.mkdir()
+    _git_init(project)
+    (project / "a.txt").write_text("1")
+    _git_commit_all(project, "c1")
+    change_dir = project / ".imp" / "change"
+    proc = _run("run-verify.sh", "slow", env_extra={
+        "IMP_PROJECT_ROOT": str(project), "IMP_TEST_CMD_SLOW": "true",
+        "IMP_CHANGE_DIR": str(change_dir)})
+    assert proc.returncode == 0, proc.stderr
+    tree = _head_tree(project)
+    assert (change_dir / "last_verified_tree_slow").read_text().strip() == tree
+    assert (change_dir / "last_green_tree_slow").read_text().strip() == tree
+
+
+def test_run_verify_slow_records_verified_tree_on_fail(tmp_path: Path) -> None:
+    project = tmp_path / "proj"
+    project.mkdir()
+    _git_init(project)
+    (project / "a.txt").write_text("1")
+    _git_commit_all(project, "c1")
+    change_dir = project / ".imp" / "change"
+    proc = _run("run-verify.sh", "slow", env_extra={
+        "IMP_PROJECT_ROOT": str(project), "IMP_TEST_CMD_SLOW": "false",
+        "IMP_CHANGE_DIR": str(change_dir)})
+    assert proc.returncode != 0
+    tree = _head_tree(project)
+    assert (change_dir / "last_verified_tree_slow").read_text().strip() == tree
+    assert not (change_dir / "last_green_tree_slow").exists()   # red => no green stamp
+
+
+def test_run_verify_slow_timeout_records_verified_tree_not_green(tmp_path: Path) -> None:
+    # A slow gate TIMEOUT (exit 124) still stamps last_verified_tree_slow (the tree
+    # was run) but never last_green_tree_slow (a killed run is not green) — the
+    # intentionally-inert timeout stamp path.
+    project = tmp_path / "proj"
+    project.mkdir()
+    _git_init(project)
+    (project / "a.txt").write_text("1")
+    _git_commit_all(project, "c1")
+    change_dir = project / ".imp" / "change"
+    proc = _run("run-verify.sh", "slow", env_extra={
+        "IMP_PROJECT_ROOT": str(project), "IMP_TEST_CMD_SLOW": "sleep 5",
+        "IMP_TEST_CMD_SLOW_TIMEOUT": "1",
+        "IMP_CHANGE_DIR": str(change_dir)})
+    assert proc.returncode == 124, proc.stderr
+    tree = _head_tree(project)
+    assert (change_dir / "last_verified_tree_slow").read_text().strip() == tree
+    assert not (change_dir / "last_green_tree_slow").exists()   # timeout => no green stamp
+
+
+def test_run_verify_fast_does_not_record_verified_tree_slow(tmp_path: Path) -> None:
+    project = tmp_path / "proj"
+    project.mkdir()
+    _git_init(project)
+    (project / "a.txt").write_text("1")
+    _git_commit_all(project, "c1")
+    change_dir = project / ".imp" / "change"
+    proc = _run("run-verify.sh", "fast", env_extra={
+        "IMP_PROJECT_ROOT": str(project), "IMP_TEST_CMD_FAST": "true",
+        "IMP_CHANGE_DIR": str(change_dir)})
+    assert proc.returncode == 0, proc.stderr
+    assert not (change_dir / "last_verified_tree_slow").exists()   # slow-only stamp
+
+
+def test_run_verify_slow_no_command_stamps_tree_as_cleared(tmp_path: Path) -> None:
+    """An opt-out project (no slow/fast command) runs no gate but still stamps
+    HEAD's tree green + verified, so the pre-merge clearance backstop treats an
+    unconfigured project as cleared rather than deadlocking every merge."""
+    project = tmp_path / "proj"
+    project.mkdir()
+    _git_init(project)
+    (project / "a.txt").write_text("1")
+    _git_commit_all(project, "c1")
+    change_dir = project / ".imp" / "change"
+    proc = _run("run-verify.sh", "slow",
+                env_extra={"IMP_PROJECT_ROOT": str(project),
+                           "IMP_CHANGE_DIR": str(change_dir)},
+                env_remove=("IMP_TEST_CMD_FAST", "IMP_TEST_CMD_SLOW"))
+    assert proc.returncode == 0, proc.stderr
+    assert "no test command configured" in proc.stdout
+    tree = _head_tree(project)
+    assert (change_dir / "last_green_tree_slow").read_text().strip() == tree
+    assert (change_dir / "last_verified_tree_slow").read_text().strip() == tree
+
+
+def test_run_verify_fast_no_command_stamps_only_its_tier(tmp_path: Path) -> None:
+    """A no-op FAST gate stamps only its own tier's green marker, never the slow
+    clearance stamps."""
+    project = tmp_path / "proj"
+    project.mkdir()
+    _git_init(project)
+    (project / "a.txt").write_text("1")
+    _git_commit_all(project, "c1")
+    change_dir = project / ".imp" / "change"
+    proc = _run("run-verify.sh", "fast",
+                env_extra={"IMP_PROJECT_ROOT": str(project),
+                           "IMP_CHANGE_DIR": str(change_dir)},
+                env_remove=("IMP_TEST_CMD_FAST",))
+    assert proc.returncode == 0, proc.stderr
+    assert (change_dir / "last_green_tree_fast").read_text().strip() == _head_tree(project)
+    assert not (change_dir / "last_green_tree_slow").exists()
+    assert not (change_dir / "last_verified_tree_slow").exists()

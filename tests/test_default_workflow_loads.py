@@ -213,3 +213,39 @@ def test_phase_labels_assigned() -> None:
     )
     assert by["converge"].label == "convergence phase"
     assert by["integrate"].label == "integration phase"
+
+
+def test_slow_verify_tolerated_var_declared_default_false() -> None:
+    wf = _wf()
+    assert wf.vars.defaults()["slow_verify_tolerated"] is False
+
+
+def test_converge_tolerate_edge_sets_slow_verify_tolerated() -> None:
+    from imp.engine.gates import evaluate_rules
+    from imp.engine.types import Goto
+    wf = _wf()
+    step = {s.name: s for s in wf.flat_steps()}["deferred-sweep"]
+    base = {v.name: wf.vars.defaults()[v.name] for v in wf.vars.decls}
+    out = {"status": "Success",
+           "converge_verify_tolerated": True, "summary": ""}
+    m = evaluate_rules(step.rules, vars=base, output=out)
+    assert isinstance(m.action, Goto) and m.action.target == "wait-for-head"
+    assert m.var_mutations == {"slow_verify_tolerated": True}
+
+
+def test_integration_reviewer_accept_edge_records_tolerated() -> None:
+    from imp.engine.gates import evaluate_rules
+    from imp.engine.types import Goto
+    wf = _wf()
+    step = {s.name: s for s in wf.flat_steps()}["integration-reviewer"]
+    base = {v.name: wf.vars.defaults()[v.name] for v in wf.vars.decls}
+    clean = {"status": "Success", "findings": "", "blocking": False,
+             "has_minor_findings": False, "tolerated": False}
+    m = evaluate_rules(step.rules, vars=base, output=clean)
+    assert isinstance(m.action, Goto) and m.action.target == "summarizer"
+    assert m.var_mutations == {"slow_verify_tolerated": False}
+
+    tol = {**clean, "tolerated": True}
+    m2 = evaluate_rules(step.rules, vars=base, output=tol)
+    assert isinstance(m2.action, Goto) and m2.action.target == "summarizer"
+    assert m2.var_mutations == {"slow_verify_tolerated": True}

@@ -16,11 +16,19 @@ def _git(cwd: Path, *args: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True, check=False)
 
 
-def _run(project_root: Path) -> subprocess.CompletedProcess[str]:
+def _run(project_root: Path, tolerated: str = "false") -> subprocess.CompletedProcess[str]:
     env = {**os.environ, "IMP_PROJECT_ROOT": str(project_root),
            "IMP_CHANGE_DIR": str(_home(project_root))}
-    return subprocess.run(["bash", str(SCRIPT)], cwd=project_root.parent,
+    return subprocess.run(["bash", str(SCRIPT), tolerated], cwd=project_root.parent,
                           env=env, capture_output=True, text=True, check=False)
+
+
+def _stamp(project_root: Path, name: str) -> None:
+    """Write HEAD's tree SHA into a run-verify stamp file under the change dir."""
+    tree = _git(project_root, "rev-parse", "HEAD^{tree}").stdout.strip()
+    cd = _home(project_root)
+    cd.mkdir(parents=True, exist_ok=True)
+    (cd / name).write_text(tree + "\n")
 
 
 def _seed(project_root: Path, *, base_ahead: bool, conflict: bool) -> None:
@@ -56,11 +64,12 @@ def _seed(project_root: Path, *, base_ahead: bool, conflict: bool) -> None:
         {"id": "x", "title": "t", "base_branch": "main", "cur_base_head": fork}))
 
 
-def test_base_unmoved_exits_2(tmp_path: Path) -> None:
+def test_base_unmoved_cleared_by_green_stamp_exits_2(tmp_path: Path) -> None:
     pr = tmp_path / "wt"
     _seed(pr, base_ahead=False, conflict=False)
+    _stamp(pr, "last_green_tree_slow")          # HEAD tree verified green
     r = _run(pr)
-    assert r.returncode == 2    # empty base-side diff -> merge directly
+    assert r.returncode == 2                    # cleared -> merge directly
 
 
 def test_bad_base_ref_exits_3(tmp_path: Path) -> None:
@@ -137,12 +146,54 @@ def test_conflict_prints_fork_sha_and_keeps_cur_base_head(tmp_path: Path) -> Non
     assert after == before                                      # untouched on exit 6
 
 
-def test_base_unmoved_keeps_cur_base_head_and_prints_no_fork(tmp_path: Path) -> None:
+def test_base_unmoved_cleared_keeps_cur_base_head_and_prints_no_fork(tmp_path: Path) -> None:
     pr = tmp_path / "wt"
     _seed(pr, base_ahead=False, conflict=False)
+    _stamp(pr, "last_green_tree_slow")
     before = json.loads((_home(pr) / "change.json").read_text())["cur_base_head"]
     r = _run(pr)
     assert r.returncode == 2
     after = json.loads((_home(pr) / "change.json").read_text())["cur_base_head"]
     assert after == before                                      # untouched on exit 2
-    assert r.stdout.strip() == ""
+    assert r.stdout.strip() == ""                               # no fork SHA on the fast path
+
+
+def test_base_unmoved_uncleared_exits_7_and_prints_fork(tmp_path: Path) -> None:
+    """Base unmoved, no stamp, not tolerated -> exit 7, prints fork SHA, cur_base_head untouched."""
+    pr = tmp_path / "wt"
+    _seed(pr, base_ahead=False, conflict=False)
+    before = json.loads((_home(pr) / "change.json").read_text())["cur_base_head"]
+    r = _run(pr)                                # tolerated defaults false, no stamp
+    assert r.returncode == 7, r.stderr
+    assert r.stdout.strip() == before
+    after = json.loads((_home(pr) / "change.json").read_text())["cur_base_head"]
+    assert after == before
+
+
+def test_base_unmoved_tolerated_red_on_this_tree_exits_2(tmp_path: Path) -> None:
+    """Tolerated red whose last_verified_tree_slow matches HEAD's tree -> cleared, exit 2."""
+    pr = tmp_path / "wt"
+    _seed(pr, base_ahead=False, conflict=False)
+    _stamp(pr, "last_verified_tree_slow")       # slow ran on THIS tree (red, tolerated)
+    r = _run(pr, tolerated="true")
+    assert r.returncode == 2, r.stderr
+
+
+def test_base_unmoved_tolerated_but_stale_verified_tree_exits_7(tmp_path: Path) -> None:
+    """Toleration set but last_verified_tree_slow is a different tree -> exit 7."""
+    pr = tmp_path / "wt"
+    _seed(pr, base_ahead=False, conflict=False)
+    cd = _home(pr)
+    cd.mkdir(parents=True, exist_ok=True)
+    (cd / "last_verified_tree_slow").write_text("deadbeef\n")   # some other tree
+    r = _run(pr, tolerated="true")
+    assert r.returncode == 7, r.stderr
+
+
+def test_base_unmoved_tolerated_flag_normalized_from_capitalized_bool(tmp_path: Path) -> None:
+    """Capitalized 'True' is lowercased by the script so toleration is recognized."""
+    pr = tmp_path / "wt"
+    _seed(pr, base_ahead=False, conflict=False)
+    _stamp(pr, "last_verified_tree_slow")
+    r = _run(pr, tolerated="True")
+    assert r.returncode == 2, r.stderr

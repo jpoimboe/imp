@@ -41,6 +41,9 @@ def test_integrate_rebase_routing_into_summarizer_and_gate() -> None:
     assert isinstance(m.action, Goto) and m.action.target == "integration-verify"
     assert "review_base" not in m.var_mutations
     assert m.var_mutations.get("integration_fork") == "forkSHA"
+    m = evaluate_rules(rules, vars={}, output={"exit": 7, "stdout": "forkSHA"})
+    assert isinstance(m.action, Goto) and m.action.target == "integration-verify"
+    assert m.var_mutations.get("integration_fork") == "forkSHA"
     m = evaluate_rules(rules, vars={}, output={"exit": 6, "stdout": "forkSHA"})
     assert isinstance(m.action, Continue)
     assert "review_base" not in m.var_mutations
@@ -91,7 +94,7 @@ def test_integration_verify_routes_failure_to_integration_reviewer() -> None:
 def test_integration_review_routes_blocking_and_minor_to_reconciler() -> None:
     wf = load_workflow(WF)
     rules = _rules(wf, "integration-reviewer")
-    base = {"status": "Success", "findings": ""}
+    base = {"status": "Success", "findings": "", "tolerated": False}
     m = evaluate_rules(rules, vars={},
                        output={**base, "blocking": True, "has_minor_findings": False})
     assert isinstance(m.action, Goto) and m.action.target == "reconciler"
@@ -106,7 +109,8 @@ def test_integration_review_routes_blocking_and_minor_to_reconciler() -> None:
     assert isinstance(m.action, Goto) and m.action.target == "summarizer"
     m = evaluate_rules(rules, vars={},
                        output={"status": "Error", "findings": "",
-                               "blocking": False, "has_minor_findings": False})
+                               "blocking": False, "has_minor_findings": False,
+                               "tolerated": False})
     assert isinstance(m.action, Pause)
 
 
@@ -147,7 +151,7 @@ def test_assert_stamped_is_readonly_gate_before_merge() -> None:
     assert names.index("assert-stamped") == names.index("merge-to-base") - 1
     step = next(s for s in wf.flat_steps() if s.name == "assert-stamped")
     assert step.kind == "script"
-    assert step.command == "./scripts/assert-stamped.sh"
+    assert step.command == './scripts/assert-stamped.sh "{{ vars.slow_verify_tolerated }}"'
     m0 = evaluate_rules(step.rules, vars={}, output={"exit": 0})
     assert isinstance(m0.action, Continue)
     m1 = evaluate_rules(step.rules, vars={}, output={"exit": 1})

@@ -63,6 +63,15 @@ esac
 
 if [[ -z "$cmd" ]]; then
   echo "no test command configured; skipping $tier gate"
+  # A no-op gate is trivially green: stamp HEAD's tree so the pre-merge clearance gate treats an opt-out project as verified rather than deadlocking every merge.
+  tree="$(git rev-parse 'HEAD^{tree}' 2>/dev/null || true)"
+  if [[ -n "$tree" && -n "${IMP_CHANGE_DIR:-}" ]]; then
+    mkdir -p "$IMP_CHANGE_DIR" || true
+    if [[ "$tier" == "slow" ]]; then
+      echo "$tree" > "$IMP_CHANGE_DIR/last_verified_tree_slow" || true
+    fi
+    echo "$tree" > "$IMP_CHANGE_DIR/last_green_tree_${tier}" || true
+  fi
   exit 0
 fi
 
@@ -96,6 +105,11 @@ elif (( rc != 0 )); then
   printf '%s\n' "$out" | tail -n 15
 fi
 
+# Record the tree of every slow run (pass or fail) so a later pre-merge gate will be able to
+# tell an explicitly-tolerated red on THIS tree from a stale toleration on a different tree.
+if [[ "$tier" == "slow" && -n "$tree" ]]; then
+  mkdir -p "$IMP_CHANGE_DIR" && echo "$tree" > "$IMP_CHANGE_DIR/last_verified_tree_slow" || true
+fi
 if (( rc == 0 )) && [[ -n "$tree" ]]; then
   mkdir -p "$IMP_CHANGE_DIR" && echo "$tree" > "$cache" || true
 fi
