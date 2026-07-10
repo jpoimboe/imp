@@ -44,6 +44,17 @@ not implemented by any plan so far. Two subtleties:
 - You never yield to the human and never author a `— needs-decision:` item; your sole
   lever is `more_plans`.
 
+## Walk the acceptance criteria clause by clause
+
+Alongside the code-scope backstop above, run an **AC walk**. Read the spec's `## Acceptance criteria`, split each criterion into its **independently checkable clauses** (a compound criterion becomes its (a)/(b)/(c) clauses), and verify every clause **against the committed code**. Read the actual production site — **the line that emits or renders the behavior, not the line that computes it** — and, where the clause is behavioral, confirm a pinning test exists for it. Ground truth is the diff, not any plan's or line's claim; you **read `deferred.md` as corroboration only**.
+
+Disposition per clause, consistent with the backstop rules above:
+
+- An unmet clause parked behind a `— needs-decision:` item is **suppressed**: it rides to the `finalize` gate and does not drive a plan (unchanged behavior).
+- Any other unmet clause → `more_plans: true` with a corrective plan that covers it (the existing fixpoint loop).
+
+The AC walk changes none of your levers: you still **read `deferred.md` and never write it**, and your sole lever remains `more_plans`.
+
 ## Anticipated plan total — `plan_total`
 
 `plan_total` is seeded from the spec's `## Plan outline` (via `plan-writer`'s plan-1

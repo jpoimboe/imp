@@ -287,3 +287,21 @@ def test_plan_reviewer_backstops_unrecorded_scope_out() -> None:
         "DEFERRED plan-reviewer: <item, citing the spec AC/scope ref> [scope: change]"
         in body
     )
+
+
+def test_gap_check_walks_acceptance_criteria_clause_by_clause() -> None:
+    body = _agent_prompt("gap-check")
+    # a dedicated AC-walk section, splitting compound criteria into checkable clauses
+    assert "Walk the acceptance criteria clause by clause" in body
+    assert "independently checkable clauses" in body
+    # verify every clause against committed code, at the production site not the compute site
+    assert "against the committed code" in body
+    assert "the line that emits or renders the behavior, not the line that computes it" in body
+    # deferred.md is corroboration only
+    assert "read `deferred.md` as corroboration only" in body
+    # dispositions: needs-decision parks/suppresses; any other unmet clause drives more_plans
+    assert "does not drive a plan" in body
+    # the unparked-unmet disposition drives a corrective plan (unique to the new bullet)
+    assert "corrective plan that covers it" in body
+    # sole lever unchanged: never writes deferred.md
+    assert "read `deferred.md` and never write it" in body
