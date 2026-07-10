@@ -369,9 +369,10 @@ def test_finalize_surfaces_tolerated_failures_as_needs_decision() -> None:
     assert "tolerated-failures.md" not in text
     assert "Surface tolerated verification failures" not in text
     assert "<signature>: <justification>" not in text
-    # They reach finalize as DEFERRED verify:/sweep-verify needs-decision lines.
+    # They reach finalize as DEFERRED verify: / DEFERRED converge-verify: needs-decision lines.
     assert "DEFERRED verify:" in text
-    assert "sweep-verify" in text
+    assert "DEFERRED converge-verify:" in text
+    assert "sweep-verify" not in text
     assert "needs-decision" in low
     # finalize must not re-run the failure or editorialize its current status.
     assert "already fixed" in low
@@ -452,12 +453,10 @@ def test_deferred_sweep_names_code_reviewer_as_producer() -> None:
 def test_deferred_sweep_documents_verify_triage() -> None:
     text = SWEEP.read_text()
     low = text.lower()
-    # The toleration is a Deferred Followups line sourced `sweep-verify`; the
+    # The toleration is a Deferred Followups line sourced `converge-verify`; the
     # separate record is retired.
     assert "tolerated-failures.md" not in text
-    assert "DEFERRED sweep-verify:" in text
-    assert "sweep_tolerated: true" in text
-    assert "sweep_tolerated: false" in text
+    assert "DEFERRED converge-verify:" in text
     # The single attributability judgment, against the diff.
     assert "attributable" in low
     assert "cur_base_head..HEAD" in text
@@ -465,7 +464,7 @@ def test_deferred_sweep_documents_verify_triage() -> None:
     assert "[baseline]" not in text
     assert "[flaky]" not in text
     assert "green at baseline" not in low
-    # Feedback-gated: a fresh entry drains the list; a resumed (sweep-verify) entry
+    # Feedback-gated: a fresh entry drains the list; a resumed (converge-verify) entry
     # does triage only and does NOT re-drain.
     assert "injected feedback" in low
     assert "triage only" in low

@@ -4,7 +4,7 @@
 #
 #   fast → IMP_TEST_CMD_FAST under IMP_TEST_CMD_FAST_TIMEOUT (default 120s). The
 #          cheap gate (lint + typecheck + fast tests); runs at the frequent
-#          per-plan gates (verify, sweep-verify).
+#          per-plan gate (verify).
 #   slow → IMP_TEST_CMD_SLOW under IMP_TEST_CMD_SLOW_TIMEOUT (default 300s). The
 #          complete run (a superset of fast); runs once per Change at
 #          integration-verify. When IMP_TEST_CMD_SLOW is empty it falls back to

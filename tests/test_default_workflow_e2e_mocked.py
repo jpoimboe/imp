@@ -50,7 +50,7 @@ def _canned_anthropic(**overrides):
         "complexity": "standard",
         "plan_path": "stub-plan.md", "plan_number": 1,
         "done": True, "verify_tolerated": False,
-        "stuck": False, "sweep_tolerated": False,
+        "stuck": False,
         "converge_verify_tolerated": False, "summary": "ok",
         "more_plans": False, "rationale": "ok", "plan_total": 1, "task_total": 1,
         "blocking": False, "has_minor_findings": False,
@@ -114,7 +114,7 @@ def _openai_step_aware(**kwargs):
         "complexity": "standard",
         "plan_path": "stub-plan.md", "plan_number": 1,
         "done": True, "verify_tolerated": False,
-        "stuck": False, "sweep_tolerated": False,
+        "stuck": False,
         "converge_verify_tolerated": False, "summary": "ok",
         "more_plans": False, "rationale": "ok", "plan_total": 1, "task_total": 1,
         "blocking": False, "has_minor_findings": False,
@@ -358,7 +358,7 @@ async def test_full_default_workflow_completes_with_canned_claude_code(
                     "complexity": "standard",
                     "plan_path": "stub-plan.md", "plan_number": 1,
                     "done": True, "verify_tolerated": False,
-                    "stuck": False, "sweep_tolerated": False,
+                    "stuck": False,
                     "converge_verify_tolerated": False, "summary": "ok",
                     "more_plans": False, "rationale": "ok", "plan_total": 1, "task_total": 1,
                     "blocking": False, "has_minor_findings": False,
@@ -501,7 +501,8 @@ async def test_express_runs_full_implement_pipeline_with_change_panel(
     assert "task-lead" in started, started
     assert "change-review" in started, started
     assert "deferred-sweep" in started, started
-    assert "sweep-verify" in started, started
+    assert "converge-verify" in started, started
+    assert started.index("converge-verify") > started.index("deferred-sweep"), started
     assert "gap-check" in started, started
     assert "summarizer" in started, started
     # Single plan: gap-check runs exactly once in converge and fires the change-wide

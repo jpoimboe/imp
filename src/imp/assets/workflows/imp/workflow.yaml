@@ -9,8 +9,8 @@ description: |
 # (last plan done) enters converge. converge runs ONCE per change: gap-check (the
 # sole coverage backstop; latches coverage_settled) -> change-review (the single
 # change-wide code review, reusing agents/plan-code-reviewer.md) -> deferred-sweep
-# (drains the whole change's Deferred list once) -> sweep-verify (fast) ->
-# converge-verify (slow, on the change's own base). integrate then
+# (drains the whole change's Deferred list once) -> converge-verify (slow, on the
+# change's own base). integrate then
 # acquires the merge lane, rebases, slow-re-verifies only when the base moved,
 # reviews the integration, and ends at the human gate (summarizer -> finalize) so
 # the human blesses the locked, rebased, slow-tested state. cleanup.sh folds
@@ -207,23 +207,11 @@ phases:
         label: sweeping deferred tasks
         rules:
           - {if: {converge_verify_tolerated: true}, goto: wait-for-head}
-          - {if: {sweep_tolerated: true}, goto: converge-verify}
           - {else: true, continue: true}
 
-      - name: sweep-verify
-        command: ./scripts/run-verify.sh fast
-        interruptible: true
-        acquire: test-lane
-        label: running tests
-        max_loops: 5
-        rules:
-          - {if: {exit: 0}, continue: true}
-          - {if: {exit: 124}, pause: true}
-          - {else: true, resume: deferred-sweep, feedback: "The fast verify gate (sweep-verify) failed on your sweep fix commits. Triage fix-vs-tolerate:"}
-
       # Slow tests on the change's own base (off-lock). Clean -> enter integrate. A failure
-      # resumes deferred-sweep in slow-gate triage: a fix loops back through sweep-verify ->
-      # converge-verify; a "not ours" toleration emits converge_verify_tolerated
+      # resumes deferred-sweep in slow-gate triage: a fix loops back through converge-verify;
+      # a "not ours" toleration emits converge_verify_tolerated
       # -> wait-for-head (forward escape; this gate never re-runs).
       - name: converge-verify
         command: ./scripts/run-verify.sh slow

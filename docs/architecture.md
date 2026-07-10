@@ -200,9 +200,7 @@ flowchart TD
   RVW -->|task_gap| TL
   RVW -->|plan_gap| toplan
   RVW --> DS["deferred-sweep"]
-  DS --> SV{{"sweep-verify"}}
-  SV -. fail .-> DS
-  SV --> ST{{"stamp-trailers"}}
+  DS --> ST{{"stamp-trailers"}}
   ST --> PCC{"plan-cycle-check"}
   PCC -->|"more_plans (supercycle)"| toplan
   PCC -->|"whole-change pass"| RVW

@@ -7,7 +7,7 @@ from pathlib import Path
 
 from imp.engine.gates import evaluate_rules
 from imp.engine.loader import load_workflow
-from imp.engine.types import Continue, Goto, Pause
+from imp.engine.types import Continue, Goto
 
 
 def _steps(wf):
@@ -307,7 +307,7 @@ def test_verify_gate_timeout_pauses_not_loops() -> None:
     wf = load_workflow(bundled_workflow_dir("imp"))
     steps = _steps(wf)
     vars_ = _BASE_VARS
-    for name in ("verify", "sweep-verify", "integration-verify"):
+    for name in ("verify", "integration-verify"):
         rules = steps[name].rules
         timed_out = evaluate_rules(rules, vars=vars_,
                                    output={"exit": 124, "stdout": "", "stderr": ""})
@@ -581,38 +581,24 @@ def test_check_next_plan_mid_change_advances_to_plan_writer():
     assert m.var_mutations["plan_index"] == 2
 
 
-def test_deferred_sweep_declares_sweep_tolerated_output() -> None:
+def test_deferred_sweep_declares_converge_verify_tolerated_output() -> None:
     from imp.assets import bundled_workflow_dir
     wf = load_workflow(bundled_workflow_dir("imp"))
     fields = wf.agents["deferred-sweep"].output_schema.field_names()
-    assert "sweep_tolerated" in fields
     assert "converge_verify_tolerated" in fields
-
-
-def test_deferred_sweep_tolerated_routes_to_converge_verify() -> None:
-    from imp.assets import bundled_workflow_dir
-    wf = load_workflow(bundled_workflow_dir("imp"))
-    rules = _steps(wf)["deferred-sweep"].rules
-    # All sweep failures tolerated: deferred-sweep made NO fix and routes straight to
-    # converge-verify, skipping the sweep-verify gate; it carries no var.
-    m = evaluate_rules(rules, vars=_BASE_VARS,
-                       output={"status": "Success", "sweep_tolerated": True,
-                               "converge_verify_tolerated": False})
-    assert isinstance(m.action, Goto)
-    assert m.action.target == "converge-verify" and m.action.resume is False
-    assert m.var_mutations == {}
+    assert "sweep_tolerated" not in fields
 
 
 def test_deferred_sweep_normal_return_continues_without_carry() -> None:
     from imp.assets import bundled_workflow_dir
     wf = load_workflow(bundled_workflow_dir("imp"))
     rules = _steps(wf)["deferred-sweep"].rules
-    # A normal sweep entry (no toleration) continues to sweep-verify and sets no carry.
+    # A normal sweep entry (no toleration) continues positionally into converge-verify.
     m = evaluate_rules(rules, vars=_BASE_VARS,
-                       output={"status": "Success", "sweep_tolerated": False,
+                       output={"status": "Success",
                                "converge_verify_tolerated": False})
     assert isinstance(m.action, Continue)
-    assert "sweep_tolerated_carry" not in m.var_mutations
+    assert m.var_mutations == {}
 
 
 def test_deferred_sweep_slow_tolerated_routes_to_wait_for_head():
@@ -620,26 +606,10 @@ def test_deferred_sweep_slow_tolerated_routes_to_wait_for_head():
     wf = load_workflow(bundled_workflow_dir("imp"))
     step = _steps(wf)["deferred-sweep"]
     m = evaluate_rules(step.rules, vars=_BASE_VARS,
-                       output={"status": "Success", "sweep_tolerated": False,
+                       output={"status": "Success",
                                "converge_verify_tolerated": True})
     assert isinstance(m.action, Goto)
     assert m.action.target == "wait-for-head"
-
-
-def test_sweep_verify_has_max_loops_5() -> None:
-    from imp.assets import bundled_workflow_dir
-    wf = load_workflow(bundled_workflow_dir("imp"))
-    assert _steps(wf)["sweep-verify"].max_loops == 5
-
-
-def test_sweep_verify_red_resumes_deferred_sweep() -> None:
-    from imp.assets import bundled_workflow_dir
-    wf = load_workflow(bundled_workflow_dir("imp"))
-    rules = _steps(wf)["sweep-verify"].rules
-    m = evaluate_rules(rules, vars=_BASE_VARS,
-                       output={"exit": 1, "stdout": "", "stderr": ""})
-    assert isinstance(m.action, Goto)
-    assert m.action.target == "deferred-sweep" and m.action.resume is True
 
 
 def test_dispatched_subagents_carry_frontmatter_labels() -> None:
@@ -656,15 +626,6 @@ def test_dispatched_subagents_carry_frontmatter_labels() -> None:
         if name in ("plan-writer", "threshold"):
             continue
         assert a.label, f"agent {name!r} has no label"
-
-
-def test_sweep_verify_timeout_pauses() -> None:
-    from imp.assets import bundled_workflow_dir
-    wf = load_workflow(bundled_workflow_dir("imp"))
-    rules = _steps(wf)["sweep-verify"].rules
-    m = evaluate_rules(rules, vars=_BASE_VARS,
-                       output={"exit": 124, "stdout": "", "stderr": ""})
-    assert isinstance(m.action, Pause)
 
 
 def test_no_bundled_agent_prompt_references_the_change_handle() -> None:
@@ -999,7 +960,6 @@ def test_imp_gate_steps_pass_tier_arg() -> None:
     from imp.assets import bundled_workflow_dir
     steps = _steps(load_workflow(bundled_workflow_dir("imp")))
     assert steps["verify"].command == "./scripts/run-verify.sh fast"
-    assert steps["sweep-verify"].command == "./scripts/run-verify.sh fast"
     assert steps["converge-verify"].command == "./scripts/run-verify.sh slow"
     assert steps["integration-verify"].command == "./scripts/run-verify.sh slow"
 
