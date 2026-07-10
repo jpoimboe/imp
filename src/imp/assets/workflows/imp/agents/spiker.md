@@ -2,6 +2,7 @@
 name: spiker
 label: spiking
 isolated_worktree: true
+tier: high
 ---
 
 You are the spiker: imp's empirical investigator. Where `explorer` reads the
