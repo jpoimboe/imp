@@ -32,6 +32,15 @@ def _threshold_builder() -> nv.NarrativeBuilder:
     return b
 
 
+def test_initial_frame_shows_seeded_phrase_not_the_label(monkeypatch) -> None:
+    _deterministic_draws(monkeypatch)
+    b = _threshold_builder()
+    # Before any tool/thinking work segment, the spinner verb is already a drawn
+    # phrase — not the frozen "frozen0" step label.
+    assert b.current_activity().verb == "rot1"
+    assert b._step_stack[-1].rotated_phrase == "rot1"
+
+
 def test_phrase_rotates_after_each_tool_work_segment(monkeypatch) -> None:
     _deterministic_draws(monkeypatch)
     b = _threshold_builder()
@@ -42,9 +51,9 @@ def test_phrase_rotates_after_each_tool_work_segment(monkeypatch) -> None:
     b.add(_tool("5", "c2"))
     b.add(_prose("6"))
     seg3 = b.current_activity().verb
-    assert seg1 == "frozen0"          # initial frozen phrase shows through segment 1
-    assert seg2 == "rot1"             # fresh draw at the first segment boundary
-    assert seg3 == "rot2"             # a different fresh draw at the second
+    assert seg1 == "rot1"             # seeded phrase shows through segment 1
+    assert seg2 == "rot2"             # fresh draw at the first segment boundary
+    assert seg3 == "rot3"             # a different fresh draw at the second
     assert seg2 != seg3
 
 
@@ -53,21 +62,21 @@ def test_pure_thinking_segment_advances_the_phrase(monkeypatch) -> None:
     b = _threshold_builder()
     b.add(ev("3", "thinking", agent_id="a", content="hmm"))
     b.add(_prose("4"))
-    assert b.current_activity().verb == "rot1"
+    assert b.current_activity().verb == "rot2"
 
 
 def test_no_rotation_when_a_segment_has_no_work(monkeypatch) -> None:
-    monkeypatch.setattr(_PHRASE_FN, lambda: "SHOULD_NOT_DRAW")
+    _deterministic_draws(monkeypatch)
     b = _threshold_builder()
     b.add(_prose("3"))                # prose boundary, no tool_call/thinking before it
-    assert b.current_activity().verb == "frozen0"
+    assert b.current_activity().verb == "rot1"   # seeded phrase persists, no re-draw
 
 
 def test_pushed_live_label_beats_the_rotated_phrase(monkeypatch) -> None:
     _deterministic_draws(monkeypatch)
     b = _threshold_builder()
     b.add(_tool("3", "c1"))
-    b.add(_prose("4"))                # rotated_phrase == "rot1"
+    b.add(_prose("4"))                # rotated_phrase == "rot2"
     b.add(ev("5", "step_label_updated", agent_id="a", label="pushed"))
     assert b.current_activity().verb == "pushed"
 
@@ -78,7 +87,7 @@ def test_rotation_leaves_the_frozen_journal_label_untouched(monkeypatch) -> None
     b.add(_tool("3", "c1"))
     b.add(_prose("4"))
     step = b._step_stack[-1]
-    assert step.rotated_phrase == "rot1"   # live phrase advanced
+    assert step.rotated_phrase == "rot2"   # live phrase advanced past the seed
     assert step.label == "frozen0"         # frozen label read by static imp log
 
 
@@ -88,6 +97,7 @@ def test_step_without_rotate_phrase_keeps_its_label(monkeypatch) -> None:
     b.add(ev("1", "change_created", change_id=1, title="x"))
     b.add(ev("2", "step_started", step="task-lead", kind="agent", phase="code",
              model="m", provider="anthropic", label="task 1/6"))
+    assert b.current_activity().verb == "task 1/6"   # no seed drawn without rotate_phrase
     b.add(_tool("3", "c1"))
     b.add(_prose("4"))
     assert b.current_activity().verb == "task 1/6"
@@ -99,26 +109,41 @@ def test_phrase_rotates_at_a_user_message_boundary(monkeypatch) -> None:
     b.add(_tool("3", "c1"))
     b.add(ev("4", "user_message", agent_id="a", role="user",
              content=[{"type": "text", "text": "go"}]))
-    assert b.current_activity().verb == "rot1"
+    assert b.current_activity().verb == "rot2"
 
 
-def test_resume_reentry_resets_rotate_phrase_and_rotated_phrase(monkeypatch) -> None:
+def test_resume_reentry_reseeds_rotate_phrase_and_rotated_phrase(monkeypatch) -> None:
     _deterministic_draws(monkeypatch)
     b = _threshold_builder()
     b.add(_tool("3", "c1"))
     b.add(_prose("4"))
     step = b._step_stack[-1]
-    assert step.rotated_phrase == "rot1"    # phrase advanced before resume
+    assert step.rotated_phrase == "rot2"    # phrase advanced before resume
     b.add(ev("5", "workflow_resumed"))
     b.add(ev("6", "step_started", step="threshold", kind="agent",
              phase="threshold", model="m2", provider="anthropic",
              label="frozen1", rotate_phrase=True, restarted=True))
     assert b._step_stack[-1] is step        # same node reused
-    assert step.rotated_phrase is None      # cleared on resume re-entry
+    assert step.rotated_phrase == "rot3"    # re-seeded (not None) on resume re-entry
     assert step.rotate_phrase is True       # re-armed from the new payload
 
 
-def test_position_label_step_spinner_shows_rotated_phrase_and_keeps_counter(monkeypatch) -> None:
+def test_resume_continuation_preserves_the_rotated_phrase(monkeypatch) -> None:
+    _deterministic_draws(monkeypatch)
+    b = _threshold_builder()
+    b.add(_tool("3", "c1"))
+    b.add(_prose("4"))
+    step = b._step_stack[-1]
+    assert step.rotated_phrase == "rot2"    # phrase advanced before resume
+    b.add(ev("5", "workflow_resumed"))
+    b.add(ev("6", "step_started", step="threshold", kind="agent",
+             phase="threshold", model="m2", provider="anthropic",
+             label="frozen1", rotate_phrase=True, restarted=False))
+    assert b._step_stack[-1] is step        # same node reused
+    assert step.rotated_phrase == "rot2"  # continuation keeps the pre-interrupt phrase
+
+
+def test_position_label_step_seeds_phrase_and_keeps_counter(monkeypatch) -> None:
     _deterministic_draws(monkeypatch)
     b = nv.NarrativeBuilder()
     b.add(ev("1", "change_created", change_id=1, title="x"))
@@ -126,10 +151,15 @@ def test_position_label_step_spinner_shows_rotated_phrase_and_keeps_counter(monk
              model="m", provider="anthropic", label="task 2/3",
              phase_label="implementation phase · plan 1/1",
              position_label=True, rotate_phrase=True))
+    # Initial frame: seeded phrase drives the spinner, not the "thinking" fallback.
+    init = b.current_activity()
+    assert init.verb == "rot1"
+    assert init.verb != "thinking"
+    assert init.counter == "task 2/3"
     b.add(_tool("3", "c1"))
-    b.add(_prose("4"))                # first work segment -> rotated_phrase == "rot1"
+    b.add(_prose("4"))                # first work segment -> rotated_phrase == "rot2"
     act = b.current_activity()
-    assert act.verb == "rot1"         # task-lead's rotating phrase drives the spinner line
+    assert act.verb == "rot2"         # task-lead's rotating phrase drives the spinner line
     assert act.verb != "thinking"
     assert act.counter == "task 2/3"  # the counter still rides the position row
     assert "task" not in act.verb     # the counter label never leaks onto the spinner
