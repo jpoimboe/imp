@@ -825,3 +825,53 @@ def test_finalize_auto_resolves_needs_decision_only_under_autonomy(
         assert "no human at the gate" in autonomous
         assert "seeded <new-change-id>" in autonomous
         assert "pauses** for a human even under" in autonomous
+
+
+def test_finalize_cover_check_two_stage_funnel() -> None:
+    text = FINALIZE.read_text()
+    low = text.lower()
+    # A dedicated cover-check runs before §2 decides the gate.
+    assert "cover-check" in low
+    # Stage 1: candidate finder — imp search -l over active + backlog, excluding self.
+    assert "imp search --active --backlog -l" in text
+    assert "candidate finder" in low
+    assert "{{ change.id }}" in text
+    # Stage 2: confirm intent by reading the candidate's stated purpose.
+    assert "imp show <id>" in text
+    assert "imp show <id> spec" in text
+    assert "incidental mention" in low
+    # Only verify-family tolerations are cover-eligible; design/spec ones never are.
+    assert "verify-family toleration" in low
+    assert "never** cover-checked" in low
+    assert "spec-finalizer" in low
+    assert "plan-writer" in low
+
+
+def test_finalize_cover_check_fails_safe_to_surface() -> None:
+    text = FINALIZE.read_text()
+    low = text.lower()
+    assert "surface, never suppress" in low
+    assert "positively confirmed" in low
+    # A confirmed cover rewrites the line to the covered-by terminal marker,
+    # drops it from open_items, and notes the auto-cover.
+    assert "— covered-by <id>" in text
+    assert "drop it from `open_items`" in text
+    assert "note the auto-cover" in low
+
+
+def test_finalize_seed_paths_embed_test_identity() -> None:
+    text = FINALIZE.read_text()
+    low = text.lower()
+    # Both the autonomous seed and the interactive defer embed the test identity
+    # in the new change's create_change description.
+    assert low.count("must embed the failing test's identity") >= 2
+    assert "node id / name / signature" in low
+
+
+def test_finalize_covered_by_is_terminal_marker() -> None:
+    text = FINALIZE.read_text()
+    low = text.lower()
+    # The terminal-marker note names covered-by alongside the existing gate markers.
+    assert "`covered-by <id>` are all **terminal**" in text
+    assert "seeded <id>" in low
+    assert "ignored-at-gate" in low
