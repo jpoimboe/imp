@@ -202,3 +202,44 @@ def test_running_subagent_wait_propagates_to_parent() -> None:
     # position is the phase label alone: the step label rides as the fold verb here.
     assert act.position == "convergence phase"
     assert act.model == "claude"
+
+
+def _build_two_subagents() -> nv.NarrativeBuilder:
+    b = _build()
+    for eid, name in (("tk1", "coder"), ("tk2", "reviewer")):
+        b.add({"id": eid, "agent_id": "step:convergence/deferred-sweep",
+               "type": "tool_call",
+               "payload": {"id": eid, "name": "sub_agent",
+                           "input": {"subagent_name": name,
+                                     "task_description": "x"}}})
+    return b
+
+
+def test_first_waiting_subagent_surfaced_among_many() -> None:
+    b = _build_two_subagents()
+    # Only the SECOND subagent retries (short, unhinted auth backoff).
+    b.add(ev("r1", "agent_retry", agent_id="sub:tk2", category="auth",
+             attempt=1, backoff_seconds=8.0))
+    act = b.current_activity()
+    assert act.verb == "waiting for re-authentication"
+    assert act.countdown_total == 8.0
+
+
+def test_first_waiting_subagent_wins_when_both_wait() -> None:
+    # Both subagents are parked in a backoff wait with distinct verbs; the FIRST
+    # in dispatch order (tk1) must surface, not tk2.
+    b = _build_two_subagents()
+    b.add(ev("r1", "agent_retry", agent_id="sub:tk1", category="network",
+             attempt=1, backoff_seconds=16.0))
+    b.add(ev("r2", "agent_retry", agent_id="sub:tk2", category="auth",
+             attempt=1, backoff_seconds=8.0))
+    act = b.current_activity()
+    assert act.verb == "network - waiting to retry"
+    assert act.countdown_total == 16.0
+
+
+def test_multiple_running_subagents_none_waiting_shows_count() -> None:
+    b = _build_two_subagents()
+    act = b.current_activity()
+    assert act.verb == "running 2 subagents"
+    assert act.countdown_total is None

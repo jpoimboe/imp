@@ -2619,6 +2619,32 @@ def test_compose_subagent_rows_freeze_elapsed_during_backoff_wait() -> None:
     assert row20 == row10
 
 
+def test_subagent_backoff_wait_surfaces_to_activity_not_rows() -> None:
+    from imp.cli.live_driver import (
+        compose_activity_line,
+        compose_position_row,
+        compose_subagent_rows,
+    )
+    b = _sub_builder(("t1", "code-reviewer"), start_ts="2026-01-01T00:00:00+00:00")
+    b.add(ev("r1", "agent_retry", agent_id="sub:t1", category="auth",
+             attempt=1, backoff_seconds=30.0,
+             timestamp="2026-01-01T00:00:05+00:00"))
+    row = compose_subagent_rows(b, color=False, width=120,
+                                now_iso="2026-01-01T00:00:10+00:00")[0]
+    # No verb / countdown tag lands on the subagent row.
+    assert "left" not in row
+    assert "waiting for re-authentication" not in row
+    act = b.current_activity()
+    # No countdown tag on the position row either.
+    pos = compose_position_row(activity=act, change_id="gizo14", title="t",
+                               prompt_tokens=None, color=False, width=120)
+    assert "left" not in pos
+    # The wait surfaces on the activity line instead.
+    line = compose_activity_line(activity=act, frame=0, elapsed=5.0, color=False)
+    assert "waiting for re-authentication" in line
+    assert "25s left" in line          # 30 - 5 = 25s remaining
+
+
 def test_compose_status_appends_a_row_per_running_subagent() -> None:
     drv, _ = _driver()
     drv.on_event(ev("1", "change_created", change_id=1, title="t"))

@@ -620,6 +620,17 @@ class NarrativeBuilder:
 
         running = [f for f in self._open_sub_by_event.values() if f.running]
         if running:
+            # Surface the first running subagent (dispatch order) that is itself
+            # parked in a backoff wait, so its verb + countdown reach the top-level
+            # activity line even when several subagents are in flight.
+            for f in running:
+                nested = f.nested.current_activity()
+                if nested is not None and nested.countdown_total is not None:
+                    return Activity(position=position, verb=nested.verb,
+                                    detail=nested.detail, model=model,
+                                    countdown_total=nested.countdown_total,
+                                    kind=top_kind, lane_wait=top_lane_wait,
+                                    phase=top_phase, plan=top_plan, counter=top_counter)
             n = len(running)
             if n > 1:
                 return Activity(position=position, verb=f"running {n} subagents",
@@ -630,12 +641,6 @@ class NarrativeBuilder:
             verb = f.label or f"subagent({f.subagent_name})"
             nested = f.nested.current_activity()
             detail = nested.detail if nested is not None else None
-            if nested is not None and nested.countdown_total is not None:
-                return Activity(position=position, verb=nested.verb,
-                                detail=detail, model=model,
-                                countdown_total=nested.countdown_total,
-                                kind=top_kind, lane_wait=top_lane_wait,
-                                phase=top_phase, plan=top_plan, counter=top_counter)
             return Activity(position=position, verb=verb, detail=detail, model=model,
                             kind=top_kind, lane_wait=top_lane_wait,
                             phase=top_phase, plan=top_plan, counter=top_counter)
