@@ -955,6 +955,19 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
         print(f"imp: {block}", file=sys.stderr)
         return 2
 
+    model_arg = getattr(args, "model", None)
+    if model_arg is not None:
+        from imp.cli.model_command import validate_model_available
+        from imp.providers.effective import load_effective_config
+        from imp.providers.resolve import available_providers
+        config = load_effective_config(
+            project_root=control, control_root=control).config
+        reason = validate_model_available(
+            model_arg, available=available_providers(config))
+        if reason is not None:
+            print(f"imp: {reason}", file=sys.stderr)
+            return 2
+
     non_interactive = bool(getattr(args, "non_interactive", False))
     autonomous = bool(getattr(args, "autonomous", False))
     _test_cmd_fast_nudge(
@@ -1011,7 +1024,7 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
         # An empty reply falls back to the unseeded path (the opening step
         # opens by asking); a real answer becomes the opening intent.
         opening_text = reply
-    opening_model = opening_model_sink.get("model")
+    opening_model = opening_model_sink.get("model") or model_arg
 
     # Persist the finalized intent so it survives any resume (including a restart
     # from an errored transcript). Covers both the positional and interactive
