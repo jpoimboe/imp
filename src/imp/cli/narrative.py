@@ -611,6 +611,7 @@ class NarrativeBuilder:
                 countdown_total=self._reset_wait.total_seconds,
                 kind=top_kind, lane_wait=top_lane_wait,
                 phase=top_phase, plan=top_plan, counter=top_counter,
+                start_ts=self._backoff_wait_start,
             )
         if top is not None:
             model = top.model
@@ -643,20 +644,24 @@ class NarrativeBuilder:
                                     detail=nested.detail, model=model,
                                     countdown_total=nested.countdown_total,
                                     kind=top_kind, lane_wait=top_lane_wait,
-                                    phase=top_phase, plan=top_plan, counter=top_counter)
+                                    phase=top_phase, plan=top_plan, counter=top_counter,
+                                    start_ts=nested.start_ts)
             n = len(running)
             if n > 1:
+                earliest = min(running, key=lambda fld: fld.start_ts or "9999")
                 return Activity(position=position, verb=f"running {n} subagents",
                                 model=model,
                                 kind=top_kind, lane_wait=top_lane_wait,
-                                phase=top_phase, plan=top_plan, counter=top_counter)
+                                phase=top_phase, plan=top_plan, counter=top_counter,
+                                start_ts=earliest.start_ts, backoff_source=earliest.nested)
             f = running[0]
             verb = f.label or f"subagent({f.subagent_name})"
             nested = f.nested.current_activity()
             detail = nested.detail if nested is not None else None
             return Activity(position=position, verb=verb, detail=detail, model=model,
                             kind=top_kind, lane_wait=top_lane_wait,
-                            phase=top_phase, plan=top_plan, counter=top_counter)
+                            phase=top_phase, plan=top_plan, counter=top_counter,
+                            start_ts=f.start_ts, backoff_source=f.nested)
 
         detail = None
         burst = self._current_burst
@@ -676,15 +681,27 @@ class NarrativeBuilder:
                 detail = _join(count, tool)
 
         if top is not None:
+            if top.lane_wait:
+                # lane_wait_start_ts is set by the lane handlers; the fallback keeps
+                # a lane_wait that somehow lacks it from regressing to a 0s timer.
+                p_start = top.lane_wait_start_ts or self._stretch_start_ts or top.start_ts
+                p_src, p_base = None, 0.0
+            elif top.run_start_ts is not None:
+                p_start, p_src, p_base = top.run_start_ts, None, 0.0
+            else:
+                p_start = self._stretch_start_ts or top.start_ts
+                p_src, p_base = self, self._stretch_backoff_base
             if top.kind in CHROME_KINDS:
                 return Activity(position=position, verb=static_verb or top.command,
                                 detail=detail, model=model,
                                 kind=top_kind, lane_wait=top_lane_wait,
-                                phase=top_phase, plan=top_plan, counter=top_counter)
+                                phase=top_phase, plan=top_plan, counter=top_counter,
+                                start_ts=p_start, backoff_source=p_src, backoff_base=p_base)
             return Activity(position=position, verb=static_verb or "thinking",
                             detail=detail, model=model,
                             kind=top_kind, lane_wait=top_lane_wait,
-                            phase=top_phase, plan=top_plan, counter=top_counter)
+                            phase=top_phase, plan=top_plan, counter=top_counter,
+                            start_ts=p_start, backoff_source=p_src, backoff_base=p_base)
         # No step on this builder. A dispatched subagent's nested builder reaches
         # here — carry the in-flight tool tail so the PARENT can read `nested.detail`
         # and concatenate it onto the subagent's verb.
