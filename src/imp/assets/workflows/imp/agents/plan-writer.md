@@ -277,6 +277,14 @@ On the **express / self-scope path** there is no outline, so size the single pla
 yourself by the same principle: one coherent, independently-committable unit at
 its natural dependency boundary; default `plan_total = 1`.
 
+## Scheduling spec-mandated work into a later plan
+
+Slicing spec-mandated work into a later plan is legitimate — the **whether** is never in play, only the **when**; `gap-check` enforces the clause regardless. But a scope-out must leave a machine-parseable trace: when this plan does not deliver a spec-mandated item, you **must** append the plain **untagged** DEFERRED line to `{{ change.home }}/deferred.md`:
+
+`- [ ] DEFERRED plan-writer: <item, citing the spec AC/scope ref> [scope: change]`
+
+This is the plain **untagged** form — no `— needs-decision:` marker — distinct from the human-decision line under **Surfacing a decision you cannot resolve** above. Prose in the plan's `## Decisions` section does not count; only the untagged line in `{{ change.home }}/deferred.md` records the scope-out durably. Untagged means the sweep may fix it, `gap-check` enforces it, and the user is never re-asked.
+
 ## First-run plan_total estimate
 
 Always emit `plan_total` in your output contract — an integer `>= 1` (it is a required

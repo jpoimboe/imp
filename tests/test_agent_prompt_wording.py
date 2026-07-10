@@ -246,3 +246,23 @@ def test_spec_finalizer_requires_checkable_ac_clauses_and_cross_walk() -> None:
     # the threshold-handoff checklist references the cross-walk so it fires on
     # the standard adopt path (phrase appears in both the checklist and the section)
     assert body.count("cross-walk Scope↔AC") >= 2
+
+
+def test_plan_writer_documents_untagged_scope_out_form() -> None:
+    body = _agent_prompt("plan-writer")
+    # scheduling a spec-mandated item into a later plan is legitimate
+    assert "Slicing spec-mandated work into a later plan is legitimate" in body
+    # the whether is never in play, only the when
+    assert "the **whether** is never in play, only the **when**" in body
+    # the required destination path, unique to this new section
+    assert (
+        "append the plain **untagged** DEFERRED line to `{{ change.home }}/deferred.md`"
+        in body
+    )
+    # the plain untagged form (no needs-decision marker), citing the spec ref
+    assert (
+        "DEFERRED plan-writer: <item, citing the spec AC/scope ref> [scope: change]"
+        in body
+    )
+    # prose in the Decisions section does not count — only the untagged line records it
+    assert "Prose in the plan's `## Decisions` section does not count" in body
