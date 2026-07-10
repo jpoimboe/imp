@@ -37,11 +37,11 @@ def test_hinted_rate_limit_retry_sets_wait_and_countdown() -> None:
     assert act.model == "claude"
 
 
-def test_hinted_auth_retry_uses_retry_wording() -> None:
+def test_hinted_auth_retry_uses_reauthentication_wording() -> None:
     b = _build()
     b.add(ev("3", "agent_retry", category="auth", attempt=1,
              backoff_seconds=300.0, hinted=True))
-    assert b.current_activity().verb == "waiting to retry"
+    assert b.current_activity().verb == "waiting for re-authentication"
 
 
 def test_long_backoff_without_hint_flag_sets_wait() -> None:
@@ -53,21 +53,44 @@ def test_long_backoff_without_hint_flag_sets_wait() -> None:
     assert act.countdown_total == 7200.0
 
 
-def test_short_blind_retry_leaves_wait_unset() -> None:
+def test_short_blind_retry_now_sets_wait() -> None:
+    # A short, unhinted exponential backoff must now surface the wait + countdown
+    # (this is the motivating auth/network series that previously showed nothing).
     b = _build()
     b.add(ev("3", "agent_retry", category="rate_limit", attempt=3,
-             backoff_seconds=60.0))
+             backoff_seconds=8.0))
     act = b.current_activity()
-    assert act.verb == "sweeping deferred tasks"
-    assert act.countdown_total is None
-    assert b._reset_wait is None
+    assert act.verb == "waiting for limit reset"
+    assert act.countdown_total == 8.0
+    assert b._reset_wait is not None
 
 
-def test_stalled_retry_leaves_wait_unset() -> None:
+def test_stalled_retry_now_sets_wait() -> None:
+    # stalled gains the activity-line verb + countdown; its calm scrollback
+    # breadcrumb is preserved separately (test_narrative_agent_retry.py).
     b = _build()
     b.add(ev("3", "agent_retry", category="stalled", attempt=2,
              backoff_seconds=4.0))
-    assert b._reset_wait is None
+    act = b.current_activity()
+    assert act.verb == "stalled - waiting to retry"
+    assert act.countdown_total == 4.0
+    assert b._reset_wait is not None
+
+
+def test_network_retry_uses_network_wording() -> None:
+    b = _build()
+    b.add(ev("3", "agent_retry", category="network", attempt=1,
+             backoff_seconds=16.0))
+    assert b.current_activity().verb == "network - waiting to retry"
+
+
+def test_retry_verb_maps_each_category_and_falls_back() -> None:
+    assert nv._retry_verb("rate_limit") == "waiting for limit reset"
+    assert nv._retry_verb("auth") == "waiting for re-authentication"
+    assert nv._retry_verb("network") == "network - waiting to retry"
+    assert nv._retry_verb("stalled") == "stalled - waiting to retry"
+    # any category not named above (a future backoff category) → generic verb
+    assert nv._retry_verb("something_else") == "waiting to retry"
 
 
 def test_second_hinted_retry_overwrites_countdown() -> None:
@@ -179,3 +202,44 @@ def test_running_subagent_wait_propagates_to_parent() -> None:
     # position is the phase label alone: the step label rides as the fold verb here.
     assert act.position == "convergence phase"
     assert act.model == "claude"
+
+
+def _build_two_subagents() -> nv.NarrativeBuilder:
+    b = _build()
+    for eid, name in (("tk1", "coder"), ("tk2", "reviewer")):
+        b.add({"id": eid, "agent_id": "step:convergence/deferred-sweep",
+               "type": "tool_call",
+               "payload": {"id": eid, "name": "sub_agent",
+                           "input": {"subagent_name": name,
+                                     "task_description": "x"}}})
+    return b
+
+
+def test_first_waiting_subagent_surfaced_among_many() -> None:
+    b = _build_two_subagents()
+    # Only the SECOND subagent retries (short, unhinted auth backoff).
+    b.add(ev("r1", "agent_retry", agent_id="sub:tk2", category="auth",
+             attempt=1, backoff_seconds=8.0))
+    act = b.current_activity()
+    assert act.verb == "waiting for re-authentication"
+    assert act.countdown_total == 8.0
+
+
+def test_first_waiting_subagent_wins_when_both_wait() -> None:
+    # Both subagents are parked in a backoff wait with distinct verbs; the FIRST
+    # in dispatch order (tk1) must surface, not tk2.
+    b = _build_two_subagents()
+    b.add(ev("r1", "agent_retry", agent_id="sub:tk1", category="network",
+             attempt=1, backoff_seconds=16.0))
+    b.add(ev("r2", "agent_retry", agent_id="sub:tk2", category="auth",
+             attempt=1, backoff_seconds=8.0))
+    act = b.current_activity()
+    assert act.verb == "network - waiting to retry"
+    assert act.countdown_total == 16.0
+
+
+def test_multiple_running_subagents_none_waiting_shows_count() -> None:
+    b = _build_two_subagents()
+    act = b.current_activity()
+    assert act.verb == "running 2 subagents"
+    assert act.countdown_total is None

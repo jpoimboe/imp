@@ -443,7 +443,10 @@ def collapsed_step_line(node: nv.StepNode, *, depth: int, color: bool,
     `<label> · complete · <elapsed>` — label in the step color, the
     ` · complete · <elapsed>` tail in the existing breadcrumb gray."""
     label = compose_label([node.phase_label, _step_header_label(node)])
-    done = fmt_seconds_done(nv.elapsed_seconds(node.run_start_ts or node.start_ts, node.end_ts))
+    raw = nv.elapsed_seconds(node.run_start_ts or node.start_ts, node.end_ts)
+    if raw is not None:
+        raw = max(0.0, raw - node.backoff_wait_s)
+    done = fmt_seconds_done(raw)
     tail = " · complete" + (f" · {done}" if done else "")
     indent = _gutter_indent(depth, gutters, color)
     return (indent
@@ -535,6 +538,8 @@ def subagent_status_row(sub: nv.SubagentFold, *, depth: int, color: bool,
     elif sub.is_error:
         parts.append(pal.ansi(" (failed)", *sub_c, enabled=color))
     elapsed = nv.elapsed_seconds(sub.start_ts, sub.end_ts)
+    if elapsed is not None:
+        elapsed = max(0.0, elapsed - sub.nested.backoff_wait_seconds(sub.end_ts))
     done = "" if sub.running else fmt_seconds_done(elapsed)
     if done:
         parts.append(pal.ansi(f" · {done}", "gray", enabled=color))

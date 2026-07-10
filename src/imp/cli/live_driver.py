@@ -92,7 +92,8 @@ def compose_activity_line(*, activity: nv.Activity, elapsed: float,
         parts.append(_paint(activity.detail, "gray", color=color, over_bg=False))
     if activity.countdown_total is not None:
         remaining = max(0.0, activity.countdown_total - elapsed)
-        tail = f"{nv._fmt_hm(remaining)} left" if remaining >= 60 else "<1m left"
+        tail = (f"{nv._fmt_hm(remaining)} left" if remaining >= 60
+                else f"{rt.fmt_seconds(remaining)} left")
     else:
         tail = rt.fmt_seconds(elapsed)
     parts.append(_paint(tail, "dim", color=color, over_bg=False))
@@ -207,6 +208,8 @@ def compose_subagent_rows(builder: nv.NarrativeBuilder, *, color: bool,
                           context_pct=f.nested.latest_context_pct,
                           color=color, over_bg=over)
         secs = nv.elapsed_seconds(f.start_ts, now_iso)
+        if secs is not None:
+            secs = max(0.0, secs - f.nested.backoff_wait_seconds(now_iso))
         el = rt.fmt_seconds(secs) if secs is not None else None
         el_seg = _paint(el, "dim", color=color, over_bg=over) if el else None
         arrow = _paint("↳", *pal.NODE_COLORS["subagent"], color=color, over_bg=over)
@@ -348,15 +351,15 @@ class LiveDriver:
                 self._status.restart_span()
             elif etype == "agent_retry":
                 # Zero the span at wait entry so compose_activity_line's countdown
-                # (countdown_total - elapsed) measures time-since-wait-start. Mirror
-                # the exact condition under which the builder's _h_agent_retry sets
-                # _reset_wait (skips stalled, requires numeric backoff), so the
-                # wait-verb and its baseline can never disagree.
+                # (countdown_total - elapsed) measures time-since-this-wait-start.
+                # Mirror _h_agent_retry's new wait-state gate exactly — every
+                # retry-with-backoff category (stalled included) with a numeric
+                # delay — so the wait verb and its countdown baseline can never
+                # disagree.
+                from imp.engine.error_policy import is_retry_with_backoff
                 payload = event.get("payload") or {}
                 secs = payload.get("backoff_seconds")
-                hinted = bool(payload.get("hinted")) or (
-                    isinstance(secs, (int, float)) and secs >= 120)
-                if (payload.get("category") != "stalled" and hinted
+                if (is_retry_with_backoff(str(payload.get("category")))
                         and isinstance(secs, (int, float))):
                     self._status.restart_span()
         self._walk()

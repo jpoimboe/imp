@@ -2302,18 +2302,19 @@ def test_compose_activity_line_counts_down_when_countdown_total_set() -> None:
     assert "11m 0s" not in line
 
 
-def test_compose_activity_line_clamps_countdown_to_under_a_minute() -> None:
+def test_compose_activity_line_countdown_second_granularity_under_a_minute() -> None:
     from imp.cli.live_driver import compose_activity_line
-    # remaining reaches zero (reset moment passed before the agent produced an event)
+    # Use a hyphen-free verb so the negative-countdown guard (`"-" not in over`)
+    # tests the tail alone — a hyphenated verb like "network - waiting to retry"
+    # would itself put a "-" on the line and defeat that assertion.
     act = nv.Activity(verb="waiting for limit reset", countdown_total=100.0)
-    reached = compose_activity_line(activity=act, frame=0, elapsed=100.0, color=False)
-    assert "<1m left" in reached
-    # a positive-but-sub-minute remaining also clamps
-    partial = compose_activity_line(activity=act, frame=0, elapsed=70.0, color=False)
-    assert "<1m left" in partial
-    # never negative / never a stray minus sign in the tail
+    # 100 - 92 = 8s remaining -> second granularity, not the old "<1m left" collapse
+    line = compose_activity_line(activity=act, frame=0, elapsed=92.0, color=False)
+    assert "8s left" in line
+    assert "<1m left" not in line
+    # remaining clamps at zero once the reset moment has passed: "0s left", never negative
     over = compose_activity_line(activity=act, frame=0, elapsed=500.0, color=False)
-    assert "<1m left" in over
+    assert "0s left" in over
     assert "-" not in over
 
 
@@ -2336,9 +2337,10 @@ def test_compose_activity_line_unchanged_when_no_countdown() -> None:
     assert "left" not in line
 
 
-def test_status_span_restarts_on_hinted_agent_retry_only() -> None:
-    """The span restarts at wait entry (hinted flag OR backoff >= 120) so the
-    countdown baseline is zeroed; a short blind retry does not restart it."""
+def test_status_span_restarts_on_every_backoff_retry() -> None:
+    """The span restarts at every backoff wait entry (any retry-with-backoff
+    category with a numeric delay, stalled included) so each attempt's countdown
+    baseline is zeroed; a non-numeric backoff does not restart it."""
     calls: list[str] = []
 
     class _CountingStatus(LiveStatus):
@@ -2352,20 +2354,20 @@ def test_status_span_restarts_on_hinted_agent_retry_only() -> None:
     for e in [
         ev("1", "change_created", change_id=1, title="x"),
         ev("2", "step_started", step="spec", kind="agent", phase="p",
-           model="m", provider="anthropic"),  # restart
+           model="m", provider="anthropic"),          # restart (step_started)
         ev("3", "agent_retry", category="rate_limit", attempt=1,
-           backoff_seconds=2940.0, hinted=True),  # restart (hinted flag)
+           backoff_seconds=2940.0, hinted=True),       # restart (backoff, numeric)
         ev("4", "agent_retry", category="rate_limit", attempt=2,
-           backoff_seconds=60.0),  # NO restart (short blind)
+           backoff_seconds=60.0),                      # restart (short blind, numeric)
         ev("5", "agent_retry", category="rate_limit", attempt=3,
-           backoff_seconds=7200.0),  # restart (>= 120)
+           backoff_seconds=7200.0),                    # restart (numeric)
         ev("6", "agent_retry", category="stalled", attempt=4,
-           backoff_seconds=7200.0, hinted=True),  # NO restart (stalled)
+           backoff_seconds=7200.0, hinted=True),       # restart (stalled is backoff)
         ev("7", "agent_retry", category="rate_limit", attempt=5,
-           hinted=True),  # NO restart (non-numeric backoff)
+           hinted=True),                               # NO restart (non-numeric backoff)
     ]:
         drv.on_event(e)
-    assert calls == ["restart", "restart", "restart"]
+    assert calls == ["restart"] * 5
 
 
 def test_prose_reflows_to_live_width_between_emissions() -> None:
@@ -2598,6 +2600,49 @@ def test_compose_subagent_rows_render_plain_without_slate_under_ansi_theme() -> 
     assert not rows[0].startswith("\x1b[48")   # 16-color theme has no slate background
     assert not rows[0].startswith(" ")         # no leading indent; row begins at the arrow
     assert "↳" in rows[0]                       # child arrow present
+
+
+def test_compose_subagent_rows_freeze_elapsed_during_backoff_wait() -> None:
+    from imp.cli.live_driver import compose_subagent_rows
+    b = _sub_builder(("t1", "coder"), start_ts="2026-01-01T00:00:00+00:00")
+    # The subagent retries 5s in; its agent_retry routes into the nested builder.
+    b.add(ev("r1", "agent_retry", agent_id="sub:t1", category="auth",
+             attempt=1, backoff_seconds=30.0,
+             timestamp="2026-01-01T00:00:05+00:00"))
+    row10 = compose_subagent_rows(b, color=False, width=120,
+                                  now_iso="2026-01-01T00:00:10+00:00")[0]
+    row20 = compose_subagent_rows(b, color=False, width=120,
+                                  now_iso="2026-01-01T00:00:20+00:00")[0]
+    assert "· 5s" in row10   # 10s wall - 5s wait (05..10); exact segment, not "15s"
+    # As now advances the in-progress wait advances with it, so the honest working
+    # time — and thus the whole row — is byte-identical (rules out partial subtraction).
+    assert row20 == row10
+
+
+def test_subagent_backoff_wait_surfaces_to_activity_not_rows() -> None:
+    from imp.cli.live_driver import (
+        compose_activity_line,
+        compose_position_row,
+        compose_subagent_rows,
+    )
+    b = _sub_builder(("t1", "code-reviewer"), start_ts="2026-01-01T00:00:00+00:00")
+    b.add(ev("r1", "agent_retry", agent_id="sub:t1", category="auth",
+             attempt=1, backoff_seconds=30.0,
+             timestamp="2026-01-01T00:00:05+00:00"))
+    row = compose_subagent_rows(b, color=False, width=120,
+                                now_iso="2026-01-01T00:00:10+00:00")[0]
+    # No verb / countdown tag lands on the subagent row.
+    assert "left" not in row
+    assert "waiting for re-authentication" not in row
+    act = b.current_activity()
+    # No countdown tag on the position row either.
+    pos = compose_position_row(activity=act, change_id="gizo14", title="t",
+                               prompt_tokens=None, color=False, width=120)
+    assert "left" not in pos
+    # The wait surfaces on the activity line instead.
+    line = compose_activity_line(activity=act, frame=0, elapsed=5.0, color=False)
+    assert "waiting for re-authentication" in line
+    assert "25s left" in line          # 30 - 5 = 25s remaining
 
 
 def test_compose_status_appends_a_row_per_running_subagent() -> None:
