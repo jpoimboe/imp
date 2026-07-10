@@ -2875,18 +2875,16 @@ def _excerpts(
     """Up to `limit` grep-style match spans, whitespace-collapsed and query-highlighted."""
     if not query:
         return []
-    ql = query.lower()
-    low = content.lower()
     spans: list[str] = []
-    i = 0
-    while len(spans) < limit and (j := low.find(ql, i)) != -1:
-        start = max(0, j - context)
-        end = min(len(content), j + len(query) + context)
+    for m in re.finditer(re.escape(query), content, flags=re.IGNORECASE):
+        if len(spans) >= limit:
+            break
+        start = max(0, m.start() - context)
+        end = min(len(content), m.end() + context)
         body = " ".join(content[start:end].split())
         prefix = "… " if start > 0 else ""
         suffix = " …" if end < len(content) else ""
         spans.append(prefix + _highlight(body, query, color=color) + suffix)
-        i = j + len(query)
     return spans
 
 
