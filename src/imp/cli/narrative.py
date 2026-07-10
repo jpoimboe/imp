@@ -253,8 +253,8 @@ def _split_phase_label(label: str | None) -> tuple[str | None, str | None]:
 
 @dataclass
 class ResetWait:
-    verb: str             # "waiting for limit reset" | "waiting to retry"
-    total_seconds: float  # backoff_seconds from the hinted agent_retry
+    verb: str             # a wait verb from _RETRY_VERB (any of the five)
+    total_seconds: float  # backoff_seconds from the agent_retry (any backoff cat)
 
 
 @dataclass
@@ -1921,16 +1921,34 @@ def _fmt_hm(seconds: float) -> str:
     return f"{minutes}m"
 
 
+_RETRY_VERB: dict[str, str] = {
+    "rate_limit": "waiting for limit reset",
+    "auth": "waiting for re-authentication",
+    "network": "network - waiting to retry",
+    "stalled": "stalled - waiting to retry",
+}
+
+
+def _retry_verb(category: str) -> str:
+    """Wait verb for a retry-with-backoff category; unnamed ones get the generic verb."""
+    return _RETRY_VERB.get(category, "waiting to retry")
+
+
 def _h_agent_retry(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
     # Non-terminal: a transient error was retried with backoff. Render inline so
     # a self-healed network/rate_limit blip doesn't look like a failure.
     cat = p.get("category", "?")
     # lazy import keeps narrative.py module-level-import-free.
     from imp.engine.error_policy import is_retry_with_backoff
-    if is_retry_with_backoff(str(cat)) and self._backoff_wait_start is None:
+    backoff = is_retry_with_backoff(str(cat))
+    if backoff and self._backoff_wait_start is None:
         self._backoff_wait_start = event.get("timestamp")
     attempt = p.get("attempt", "?")
     secs = p.get("backoff_seconds", "?")
+    # Wait state is uniform per backoff category; only the breadcrumb stays category-specific.
+    if backoff and isinstance(secs, (int, float)):
+        self._reset_wait = ResetWait(verb=_retry_verb(str(cat)),
+                                     total_seconds=float(secs))
     if cat == "stalled":
         # Stalled retry is the calm resume re-entry breadcrumb, not a technical retry line.
         self._append(ErrorNode(
@@ -1942,8 +1960,6 @@ def _h_agent_retry(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, A
         self._append(ErrorNode(
             message=f"[{cat}] waiting for limit reset — retry {attempt} in {_fmt_hm(secs)}",
             category=cat, is_warning=True))
-        verb = "waiting for limit reset" if cat == "rate_limit" else "waiting to retry"
-        self._reset_wait = ResetWait(verb=verb, total_seconds=float(secs))
         return
     self._append(ErrorNode(
         message=f"[{cat}] retry {attempt} ({secs}s)", category=cat, is_warning=True))

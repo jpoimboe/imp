@@ -37,11 +37,11 @@ def test_hinted_rate_limit_retry_sets_wait_and_countdown() -> None:
     assert act.model == "claude"
 
 
-def test_hinted_auth_retry_uses_retry_wording() -> None:
+def test_hinted_auth_retry_uses_reauthentication_wording() -> None:
     b = _build()
     b.add(ev("3", "agent_retry", category="auth", attempt=1,
              backoff_seconds=300.0, hinted=True))
-    assert b.current_activity().verb == "waiting to retry"
+    assert b.current_activity().verb == "waiting for re-authentication"
 
 
 def test_long_backoff_without_hint_flag_sets_wait() -> None:
@@ -53,21 +53,44 @@ def test_long_backoff_without_hint_flag_sets_wait() -> None:
     assert act.countdown_total == 7200.0
 
 
-def test_short_blind_retry_leaves_wait_unset() -> None:
+def test_short_blind_retry_now_sets_wait() -> None:
+    # A short, unhinted exponential backoff must now surface the wait + countdown
+    # (this is the motivating auth/network series that previously showed nothing).
     b = _build()
     b.add(ev("3", "agent_retry", category="rate_limit", attempt=3,
-             backoff_seconds=60.0))
+             backoff_seconds=8.0))
     act = b.current_activity()
-    assert act.verb == "sweeping deferred tasks"
-    assert act.countdown_total is None
-    assert b._reset_wait is None
+    assert act.verb == "waiting for limit reset"
+    assert act.countdown_total == 8.0
+    assert b._reset_wait is not None
 
 
-def test_stalled_retry_leaves_wait_unset() -> None:
+def test_stalled_retry_now_sets_wait() -> None:
+    # stalled gains the activity-line verb + countdown; its calm scrollback
+    # breadcrumb is preserved separately (test_narrative_agent_retry.py).
     b = _build()
     b.add(ev("3", "agent_retry", category="stalled", attempt=2,
              backoff_seconds=4.0))
-    assert b._reset_wait is None
+    act = b.current_activity()
+    assert act.verb == "stalled - waiting to retry"
+    assert act.countdown_total == 4.0
+    assert b._reset_wait is not None
+
+
+def test_network_retry_uses_network_wording() -> None:
+    b = _build()
+    b.add(ev("3", "agent_retry", category="network", attempt=1,
+             backoff_seconds=16.0))
+    assert b.current_activity().verb == "network - waiting to retry"
+
+
+def test_retry_verb_maps_each_category_and_falls_back() -> None:
+    assert nv._retry_verb("rate_limit") == "waiting for limit reset"
+    assert nv._retry_verb("auth") == "waiting for re-authentication"
+    assert nv._retry_verb("network") == "network - waiting to retry"
+    assert nv._retry_verb("stalled") == "stalled - waiting to retry"
+    # any category not named above (a future backoff category) → generic verb
+    assert nv._retry_verb("something_else") == "waiting to retry"
 
 
 def test_second_hinted_retry_overwrites_countdown() -> None:
