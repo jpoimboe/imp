@@ -21,7 +21,7 @@ def test_imp_producers_file_deferred_items_to_deferred_md() -> None:
     # The forward-note (NEEDS-REPLAN) lifecycle handle is read from deferred.md.
     assert "note in `{{ change.home }}/deferred.md` (a `task-lead` needs-replan that" in pw
 
-    pcr = _imp("plan-code-reviewer.md")
+    pcr = _imp("batch-code-reviewer.md")
     assert "**Deferred Followups** list in `{{ change.home }}/deferred.md` so the" in pcr
     assert "`{{ change.home }}/deferred.md` (the Deferred Followups append above)" in pcr
     # progress.md is now described as completed tasks only; the ledger is its own file.

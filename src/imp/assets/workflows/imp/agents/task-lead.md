@@ -41,8 +41,8 @@ progress.md. Two feedback sources resume you here:
 - a gate failure (the `verify` gate `resume`s you with its stderr on failing
   tests, or the engine's clean-tree invariant bounces you back when your turn
   left an uncommitted file);
-- the plan-code-reviewer's `task_gap` — the whole-diff `review` step `goto`s you with the
-  preamble "The plan-code-reviewer found an implemented task needs rework. Findings:"
+- the batch-code-reviewer's `task_gap` — the whole-diff `review` step `goto`s you with the
+  preamble "The batch-code-reviewer found an implemented task needs rework. Findings:"
   when it adjudicated a blocking finding as a bounded fix. Re-open the task its
   findings name, fix it, and let the loop carry the fix back through review.
 
@@ -120,7 +120,7 @@ unimplemented task, or the re-opened task from injected feedback):
    **One reviewer.** Dispatch ONLY `code-reviewer` at the **`medium` tier**:
    `sub_agent(subagent_name="code-reviewer", tier="medium", …)`. (Trivial diffs
    waived new tests, so spec-conformance is least likely to be the failure mode;
-   end-of-run spec coverage now lives in the whole-diff plan-code-reviewer.)
+   end-of-run spec coverage now lives in the whole-diff batch-code-reviewer.)
    {% else %}
    Dispatch the `code-reviewer` at the **`medium` tier**:
    `sub_agent(subagent_name="code-reviewer", tier="medium", …)`.

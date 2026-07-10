@@ -102,14 +102,14 @@ def test_no_agent_prompt_references_code_branch_artifact_paths() -> None:
         assert "imp/plans/" not in body, f"{name} still references imp/plans/"
 
 
-def test_plan_code_reviewer_has_no_ambient_head_in_diff_ranges() -> None:
-    body = _agent_prompt("plan-code-reviewer")
+def test_batch_code_reviewer_has_no_ambient_head_in_diff_ranges() -> None:
+    body = _agent_prompt("batch-code-reviewer")
     assert "..HEAD" not in body
     assert body.count("..imp/{{ change.id }}") == 1
 
 
-def test_plan_code_reviewer_renders_change_diff(tmp_path) -> None:
-    body = _agent_prompt("plan-code-reviewer")
+def test_batch_code_reviewer_renders_change_diff(tmp_path) -> None:
+    body = _agent_prompt("batch-code-reviewer")
     log = JsonlEventLog(tmp_path / "events.jsonl")
     out = render_prompt(body, build_context(
         change_title="t", event_log=log, change_id="abc",
@@ -163,10 +163,10 @@ def test_gap_check_change_review_is_unconditional() -> None:
     assert "once-only change-wide review." in body
 
 
-def test_plan_code_reviewer_description_is_whole_diff() -> None:
+def test_batch_code_reviewer_description_is_whole_diff() -> None:
     from imp.engine.loader import parse_agent_file
     desc = parse_agent_file(
-        pathlib.Path("src/imp/assets/workflows/imp/agents/plan-code-reviewer.md").resolve()
+        pathlib.Path("src/imp/assets/workflows/imp/agents/batch-code-reviewer.md").resolve()
     ).description
     assert "per-batch" not in desc
     assert "whole diff" in desc

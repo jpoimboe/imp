@@ -8,7 +8,7 @@ description: |
 # fast-verified, then check-next-plan either starts the next outline plan or
 # (last plan done) enters converge. converge runs ONCE per change: gap-check (the
 # sole coverage backstop; latches coverage_settled) -> change-review (the single
-# change-wide code review, reusing agents/plan-code-reviewer.md) -> deferred-sweep
+# change-wide code review, reusing agents/batch-code-reviewer.md) -> deferred-sweep
 # (drains the whole change's Deferred list once) -> converge-verify (slow, on the
 # change's own base). integrate then
 # acquires the merge lane, rebases, slow-re-verifies only when the base moved,
@@ -190,15 +190,15 @@ phases:
           - {if: {more_plans: true}, set: {plan_total: "output.plan_total", plan_index: "var.plan_index + 1"}, goto: plan-writer, label: "writing plan", feedback: "More plans are needed for this spec. Coverage assessment:"}
           - {else: true, set: {coverage_settled: true}, goto: change-review}
 
-      # The single change-wide code review (cur_base_head..HEAD), reusing plan-code-reviewer.md.
+      # The single change-wide code review (cur_base_head..HEAD), reusing batch-code-reviewer.md.
       # approve -> deferred-sweep; task_gap -> task-lead rework.
       - name: change-review
-        file: agents/plan-code-reviewer.md
+        file: agents/batch-code-reviewer.md
         tier: high
         label: reviewing change
         max_loops: 6
         rules:
-          - {if: {verdict: task_gap}, goto: task-lead, label: "addressing code review feedback", feedback: "The plan-code-reviewer found an implemented task needs rework. Findings:"}
+          - {if: {verdict: task_gap}, goto: task-lead, label: "addressing code review feedback", feedback: "The batch-code-reviewer found an implemented task needs rework. Findings:"}
           - {if: {status: Error}, pause: true}
           - {else: true, goto: deferred-sweep}
 

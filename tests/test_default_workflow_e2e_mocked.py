@@ -463,10 +463,10 @@ async def test_express_runs_full_implement_pipeline_with_change_panel(
     # plan-writer, skipping the spec beat (spec-finalizer + spec-reviewer) and plan
     # review (plan-verify-commit fast-path rule). The implement-side fast_path ->
     # finalize shortcut is GONE: express now runs the full pipeline. The single
-    # forward plan SKIPS plan-code-reviewer (coverage_settled unset -> deferred-sweep);
+    # forward plan SKIPS batch-code-reviewer (coverage_settled unset -> deferred-sweep);
     # gap-check then latches coverage_settled, sets review_scope=change, and fires the
-    # change-wide plan-code-reviewer pass (the plan_total>1 gate is gone), which routes
-    # to summarizer. So plan-code-reviewer still runs exactly once -- now the change-wide
+    # change-wide batch-code-reviewer pass (the plan_total>1 gate is gone), which routes
+    # to summarizer. So batch-code-reviewer still runs exactly once -- now the change-wide
     # pass, not a per-plan pass.
     def _default_trivial(**kwargs):
         if _prompt_carries_ir(**kwargs):

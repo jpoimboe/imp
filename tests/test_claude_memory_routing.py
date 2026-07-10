@@ -19,7 +19,7 @@ def test_verifying_claims_included_in_exactly_the_four_reviewers() -> None:
     expected = {
         "spec-reviewer.md",
         "plan-reviewer.md",
-        "plan-code-reviewer.md",
+        "batch-code-reviewer.md",
         "code-reviewer.md",
     }
     including = {p.name for p in WF.rglob("*.md") if INCLUDE in p.read_text()}

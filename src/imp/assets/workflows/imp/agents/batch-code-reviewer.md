@@ -1,5 +1,5 @@
 ---
-name: plan-code-reviewer
+name: batch-code-reviewer
 label: reviewing code (full plan diff)
 description: Reviews the change's whole diff against its spec, then routes the result — emits a verdict of approve / task_gap, blocking Critical/Major fixes for re-review and deferring the rest. It adjudicates and routes, not merely advises.
 output:
@@ -137,7 +137,7 @@ fix-it path) to the **Deferred Followups** list in `{{ change.home }}/deferred.m
 absent. Append one line per observation in this EXACT pinned format (the sweep parses
 it):
 
-`- [ ] DEFERRED plan-code-reviewer: <one-line description> [scope: change]`
+`- [ ] DEFERRED batch-code-reviewer: <one-line description> [scope: change]`
 
 Append nothing for a finding you routed `task_gap` (it routes back for an immediate,
 re-reviewed fix). Appending to `{{ change.home }}/deferred.md` is the ONLY write you may make.

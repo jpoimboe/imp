@@ -913,7 +913,7 @@ def test_gap_check_agent_is_end_of_change_backstop() -> None:
     assert "outline" in low
     assert "plan-cycle-check" not in low          # no residual old name
     assert "task-lead" not in low                 # the dropped agent is not referenced
-    assert "plan-code-reviewer" in text           # the code-reviewer rename target
+    assert "batch-code-reviewer" in text           # the code-reviewer rename target
     assert "sole" in low and "completeness" in low
     assert "uncovered" in low
     assert "needs-decision" in low and "suppress" in low

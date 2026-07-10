@@ -28,7 +28,7 @@ SKILLS_DIR = Path("src/imp/assets/workflows/imp/skills")
 # proves the marker exists somewhere in the file; section placement is left to
 # author self-review and the reviewer pass.
 FALSIFIABILITY_MARKERS = [
-    (AGENTS_DIR / "plan-code-reviewer.md", "falsifiab"),                  # C: whole-change backstop
+    (AGENTS_DIR / "batch-code-reviewer.md", "falsifiab"),                # C: whole-change backstop
     (AGENTS_DIR / "code-reviewer.md", "falsifiab"),                      # C: per-task tripwire
     (AGENTS_DIR / "plan-writer.md", "falsifiab"),                        # B: anti-transcription
     (SKILLS_DIR / "agent" / "test-driven-development.md", "plan-echo"),        # A: anti-pattern 6
@@ -112,7 +112,7 @@ def test_threshold_infers_intent_from_pasted_context(tmp_path) -> None:
 
 
 TURN_TERMINAL_REVIEWERS = [
-    "plan-code-reviewer.md", "code-reviewer.md", "plan-reviewer.md",
+    "batch-code-reviewer.md", "code-reviewer.md", "plan-reviewer.md",
     "spec-reviewer.md", "gap-check.md",
 ]
 
@@ -260,7 +260,7 @@ def test_finalize_has_no_fyi_or_veto_vocabulary() -> None:
             f"reintroduced stale finalize vocabulary: {stale!r}")
 
 
-CODE_REVIEWER = AGENTS_DIR / "plan-code-reviewer.md"
+CODE_REVIEWER = AGENTS_DIR / "batch-code-reviewer.md"
 
 
 def test_task_lead_collapses_completed_plans_into_bounded_section() -> None:
@@ -446,7 +446,7 @@ def test_finalize_presents_spec_plan_authored_needs_decision() -> None:
 
 def test_deferred_sweep_names_code_reviewer_as_producer() -> None:
     text = SWEEP.read_text()
-    assert "plan-code-reviewer, plan-writer, and plan-reviewer append it" in text
+    assert "batch-code-reviewer, plan-writer, and plan-reviewer append it" in text
     assert "review-panel" not in text
 
 
@@ -502,7 +502,7 @@ def test_integration_prompts_use_recorded_endpoints() -> None:
 
 RUBRIC_PARTIAL = Path("src/imp/assets/workflows/imp/partials/severity.md")
 RUBRIC_REVIEWERS = [
-    "spec-reviewer.md", "plan-reviewer.md", "plan-code-reviewer.md",
+    "spec-reviewer.md", "plan-reviewer.md", "batch-code-reviewer.md",
     "code-reviewer.md", "integration-review.md",
 ]
 
