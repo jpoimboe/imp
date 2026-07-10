@@ -1945,6 +1945,43 @@ def test_compose_toolbar_static_none_when_idle() -> None:
     assert drv.compose_toolbar_static() is None    # no activity -> no toolbar
 
 
+def test_compose_toolbar_static_identity_bar_before_first_activity() -> None:
+    out = _Pipe()
+    drv = LiveDriver(stream=out, color=False, width=80, status=LiveStatus(out))
+    # A change id exists (change_created replayed) but no step has started yet.
+    drv.on_event(ev("1", "change_created", id="z9gixx", title="Fix bug"))
+    toolbar = drv.compose_toolbar_static()
+    assert toolbar == "z9gixx · Fix bug"   # minimal identity bar, no phase/model
+
+
+def test_compose_toolbar_static_identity_bar_degrades_to_id_when_unnamed() -> None:
+    out = _Pipe()
+    drv = LiveDriver(stream=out, color=False, width=80, status=LiveStatus(out))
+    drv.on_event(ev("1", "change_created", id="z9gixx"))   # no title yet
+    toolbar = drv.compose_toolbar_static()
+    assert toolbar == "z9gixx"             # unnamed change -> id alone
+
+
+def test_compose_identity_toolbar_carries_slate_and_padding_under_dark_theme() -> None:
+    from imp.cli.live_driver import compose_identity_toolbar
+    try:
+        pal.set_theme("dark")
+        bar = compose_identity_toolbar(change_id="z9gixx", title="t",
+                                       color=True, width=120)
+    finally:
+        pal.set_theme("ansi")
+    assert bar is not None
+    assert bar.startswith("\x1b[48;2;43;47;58m")   # same slate open as the position row
+    assert bar.endswith("\x1b[0m")
+    assert pal.display_width(bar) == 118           # padded to width-2, aligned with the footer
+
+
+def test_compose_identity_toolbar_none_without_change_id() -> None:
+    from imp.cli.live_driver import compose_identity_toolbar
+    assert compose_identity_toolbar(change_id=None, title="t",
+                                    color=False, width=80) is None
+
+
 def test_live_driver_caps_hr_at_display_width() -> None:
     out = _Pipe()
     drv = LiveDriver(stream=out, color=False, width=10000, display_width=40,
@@ -2061,8 +2098,8 @@ def test_compose_toolbar_static_uses_the_position_row_layout() -> None:
     assert toolbar is not None
     assert "implementation phase · plan 1/1 · task 1/3" in toolbar
     assert "thinking" not in toolbar
-    # Right-flushed: id·title sits AFTER the structural left group (bar puts id first).
-    assert toolbar.index("z9gixx") > toolbar.index("implementation phase")
+    # Flat, identity-first: id·title precede the structural group.
+    assert toolbar.index("z9gixx") < toolbar.index("implementation phase")
 
 
 def test_mid_step_position_change_re_emits_a_header() -> None:
@@ -2384,14 +2421,37 @@ def _pos_activity(**kw):
     return nv.Activity(**base)
 
 
-def test_compose_position_row_flushes_identity_right() -> None:
+def test_compose_position_row_is_flat_and_identity_first() -> None:
     from imp.cli.live_driver import compose_position_row
     row = compose_position_row(activity=_pos_activity(), change_id="z9gixx",
                                title="streaming footer", prompt_tokens=None,
                                color=False, width=80)
-    assert "implementation phase · plan 1/1 · task 1/3 · m" in row
-    assert "z9gixx" in row and "streaming footer" in row
-    assert row.index("z9gixx") > row.index("implementation phase")
+    # One flat left-aligned line, identity first, no right-flush gap.
+    assert row == ("z9gixx · streaming footer · implementation phase · "
+                   "plan 1/1 · task 1/3 · m")
+
+
+def test_compose_position_row_omits_title_segment_when_untitled() -> None:
+    from imp.cli.live_driver import compose_position_row
+    row = compose_position_row(activity=_pos_activity(), change_id="z9gixx",
+                               title="", prompt_tokens=None, color=False, width=80)
+    # No title -> no segment and no stray separator between id and phase.
+    assert row == ("z9gixx · implementation phase · plan 1/1 · task 1/3 · m")
+
+
+def test_compose_position_row_starts_with_title_when_change_id_is_none() -> None:
+    from imp.cli.live_driver import compose_position_row
+    titled = compose_position_row(activity=_pos_activity(), change_id=None,
+                                  title="streaming footer", prompt_tokens=None,
+                                  color=False, width=80)
+    # No id -> row starts with the title, no leading separator.
+    assert titled == ("streaming footer · implementation phase · plan 1/1 · "
+                      "task 1/3 · m")
+    untitled = compose_position_row(activity=_pos_activity(), change_id=None,
+                                    title="", prompt_tokens=None, color=False,
+                                    width=80)
+    # No id and no title -> row starts with the phase.
+    assert untitled == "implementation phase · plan 1/1 · task 1/3 · m"
 
 
 def test_compose_position_row_context_bar_only_for_agent_kind() -> None:
@@ -2416,27 +2476,6 @@ def test_compose_position_row_context_bar_absent_during_lane_wait() -> None:
     assert "implementation phase" in row
 
 
-def test_compose_position_row_narrow_truncates_title_before_dropping_id() -> None:
-    from imp.cli.live_driver import compose_position_row
-    row = compose_position_row(
-        activity=nv.Activity(phase="p", kind="agent"), change_id="z9gixx",
-        title="a very long streaming footer title", prompt_tokens=None,
-        color=False, width=25)
-    assert "z9gixx" in row
-    assert "…" in row
-    assert "a very long streaming footer title" not in row
-    assert row.startswith("p")
-
-
-def test_compose_position_row_narrow_drops_right_group_before_clipping_left() -> None:
-    from imp.cli.live_driver import compose_position_row
-    row = compose_position_row(activity=nv.Activity(phase="p", kind="agent"),
-                               change_id="z9gixx", title="t", prompt_tokens=None,
-                               color=False, width=8)
-    assert "z9gixx" not in row
-    assert row.startswith("p")
-
-
 def test_compose_position_row_colors_match_the_scrollback_palette() -> None:
     from imp.cli.live_driver import compose_position_row
     try:
@@ -2449,13 +2488,13 @@ def test_compose_position_row_colors_match_the_scrollback_palette() -> None:
     finally:
         pal.set_theme("ansi")
     parts = row.split(" · ")
-    assert "\x1b[34m" in parts[0] and "\x1b[33m" not in parts[0]  # phase: step-blue, not gold
-    assert "\x1b[34m" in parts[1]                                   # plan: step-blue
-    assert "\x1b[34m" in parts[2]                                   # counter: step-blue
-    # model+bar are now space-joined into parts[3]; id (z9gixx) is flush-right
-    # via spaces so it lands in the same ` · `-split bucket as model+bar.
-    assert "\x1b[90m" in parts[3] and "\x1b[34m" not in parts[3]  # model: gray, not blue
-    assert "\x1b[33m" in parts[3]                                   # id (z9gixx): gold
+    # Flat order: id · title · phase · plan · counter · (model bar).
+    assert "\x1b[33m" in parts[0]                                  # id: wordmark gold
+    assert "\x1b[90m" in parts[1] and "\x1b[33m" not in parts[1]   # title: gray
+    assert "\x1b[34m" in parts[2] and "\x1b[33m" not in parts[2]   # phase: step-blue
+    assert "\x1b[34m" in parts[3]                                  # plan: step-blue
+    assert "\x1b[34m" in parts[4]                                  # counter: step-blue
+    assert "\x1b[90m" in parts[5] and "\x1b[34m" not in parts[5]   # model: gray, not blue
 
 
 def _sub_builder(*subs, readings=(), start_ts=None):
@@ -2534,6 +2573,17 @@ def test_compose_subagent_rows_carry_the_slate_and_align_under_dark_theme() -> N
     assert pal.display_width(rows[0]) == 118           # padded to width-2, aligned with parent
 
 
+def test_compose_subagent_rows_prefix_child_arrow() -> None:
+    from imp.cli.live_driver import compose_subagent_rows
+    b = _sub_builder(("t1", "coder"))
+    rows = compose_subagent_rows(b, color=False, width=120,
+                                 now_iso="2026-01-01T00:00:00+00:00")
+    assert len(rows) == 1
+    # Two-column indent, then the child arrow marking the parent position row.
+    assert rows[0].startswith("  ↳ ")
+    assert rows[0][4:].lstrip().startswith("coder")   # role follows the arrow
+
+
 def test_compose_subagent_rows_render_plain_without_slate_under_ansi_theme() -> None:
     from imp.cli import palette as pal
     from imp.cli.live_driver import compose_subagent_rows
@@ -2547,6 +2597,7 @@ def test_compose_subagent_rows_render_plain_without_slate_under_ansi_theme() -> 
     assert len(rows) == 1
     assert not rows[0].startswith("\x1b[48")   # 16-color theme has no slate background
     assert rows[0].startswith("  ")            # still indented like the parent
+    assert "↳" in rows[0]                       # child arrow present
 
 
 def test_compose_status_appends_a_row_per_running_subagent() -> None:

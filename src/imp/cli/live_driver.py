@@ -126,42 +126,40 @@ def compose_position_bar(*, activity: nv.Activity, change_id: str | None,
     return f"{bg}{body}{_RESET}" if bg else body
 
 
-def _fit_right(id_seg: str | None, title: str | None, avail: int) -> str | None:
-    """Widest identity group fitting `avail` columns; degrades title-first, else None."""
-    if not id_seg or avail < 1:
-        return None
-    id_w = pal.display_width(id_seg)
-    if id_w > avail:
-        return None
-    if title:
-        full = f"{id_seg} · {title}"
-        if pal.display_width(full) <= avail:
-            return full
-        budget = avail - id_w - 3          # width of the " · " separator
-        if budget >= 1:
-            return f"{id_seg} · {pal.clip_display(title, budget)}"
-    return id_seg
+def _slate_wrap(body: str, bg: str, width: int) -> str:
+    """Pad `body` to width-2 and wrap it in the slate bg/reset pair; no-op when bg is empty."""
+    if not bg:
+        return body
+    body_dw = pal.display_width(body)
+    target = width - 2
+    if body_dw < target:
+        body = body + " " * (target - body_dw)
+    return f"{bg}{body}{_RESET}"
 
 
-def _split_pad(left: str, id_seg: str | None, title: str | None, *, width: int) -> str:
-    """Compose `left` with a flush-right identity group, degrading right-first."""
-    target = width - 2                     # largest width clip_display(_, width-1) keeps intact
-    left_w = pal.display_width(left)
-    avail = target - left_w - 1            # at least one space between the two groups
-    right = _fit_right(id_seg, title, avail)
-    if not right:
-        return left
-    gap = max(1, target - left_w - pal.display_width(right))
-    return f"{left}{' ' * gap}{right}"
+def compose_identity_toolbar(*, change_id: str | None, title: str, color: bool,
+                             width: int) -> str | None:
+    """Minimal id · title identity bar for the opening prompt, before any activity exists."""
+    if not change_id:
+        return None
+    bg = pal.user_bg_open(enabled=color)
+    over = bool(bg)
+    id_seg = _paint(change_id, "wordmark", color=color, over_bg=over)
+    title_seg = _paint(title, "gray", color=color, over_bg=over) if title else None
+    body = rt.compose_label([id_seg, title_seg])
+    return _slate_wrap(body, bg, width)
 
 
 def compose_position_row(*, activity: nv.Activity, change_id: str | None,
                          title: str, prompt_tokens: int | None, color: bool,
                          width: int, context_pct: float | None = None,
                          checkpoint_threshold: float | int | None = None) -> str:
-    """Row 3 of the live footer: structural position (left) + id·title identity (right)."""
+    """Row 3 of the live footer: one flat, left-aligned line ordered
+    id · title · phase · plan · counter · model context-bar."""
     bg = pal.user_bg_open(enabled=color)
     over = bool(bg)
+    id_seg = _paint(change_id, "wordmark", color=color, over_bg=over) if change_id else None
+    title_seg = _paint(title, "gray", color=color, over_bg=over) if title else None
     phase_seg = (_paint(activity.phase, *pal.NODE_COLORS["step"], color=color, over_bg=over)
                  if activity.phase else None)
     plan_seg = (_paint(activity.plan, *pal.NODE_COLORS["step"], color=color, over_bg=over)
@@ -175,11 +173,9 @@ def compose_position_row(*, activity: nv.Activity, change_id: str | None,
         bar = context_bar(activity.model, prompt_tokens, context_pct=context_pct,
                           checkpoint_threshold=checkpoint_threshold,
                           color=color, over_bg=over)
-    left = rt.compose_label([phase_seg, plan_seg, counter_seg,
+    body = rt.compose_label([id_seg, title_seg, phase_seg, plan_seg, counter_seg,
                              rt.join_space(model_seg, bar)])
-    id_seg = _paint(change_id, "wordmark", color=color, over_bg=over) if change_id else None
-    body = _split_pad(left, id_seg, title or None, width=width)
-    return f"{bg}{body}{_RESET}" if bg else body
+    return _slate_wrap(body, bg, width)
 
 
 def compose_subagent_rows(builder: nv.NarrativeBuilder, *, color: bool,
@@ -213,8 +209,9 @@ def compose_subagent_rows(builder: nv.NarrativeBuilder, *, color: bool,
         secs = nv.elapsed_seconds(f.start_ts, now_iso)
         el = rt.fmt_seconds(secs) if secs is not None else None
         el_seg = _paint(el, "dim", color=color, over_bg=over) if el else None
-        inner = "  " + rt.compose_label([role_seg,
-                                         rt.join_space(model_seg, bar), el_seg])
+        arrow = _paint("↳", *pal.NODE_COLORS["subagent"], color=color, over_bg=over)
+        inner = "  " + arrow + " " + rt.compose_label(
+            [role_seg, rt.join_space(model_seg, bar), el_seg])
         if bg:
             pad = width - 2 - pal.display_width(inner)
             if pad > 0:
@@ -402,11 +399,14 @@ class LiveDriver:
         return rows
 
     def compose_toolbar_static(self) -> str | None:
-        # Position ROW — right-flushed footer layout, no spinner, no elapsed (AC5).
+        # The flat position row under the interactive prompt (no spinner/elapsed).
+        # Before any activity, fall back to a minimal id · title identity bar.
         activity = self._builder.current_activity()
-        if activity is None:
-            return None
         root = self._builder.tree.root
+        if activity is None:
+            return compose_identity_toolbar(
+                change_id=root.id, title=root.title,
+                color=self._color, width=term_width())
         return compose_position_row(
             activity=activity, change_id=root.id, title=root.title,
             prompt_tokens=self._builder.latest_prompt_tokens,
