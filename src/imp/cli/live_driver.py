@@ -180,7 +180,7 @@ def compose_position_row(*, activity: nv.Activity, change_id: str | None,
 
 def compose_subagent_rows(builder: nv.NarrativeBuilder, *, color: bool,
                           width: int, now_iso: str) -> list[str]:
-    """One indented row per running subagent (B4/AC5); colliding roles numbered.
+    """One row per running subagent (B4/AC5); colliding roles numbered.
     Each row carries the parent position row's slate background, padded to width-2
     so the slate spans the full footer width and aligns with the row above it."""
     folds = builder.running_subagents()
@@ -210,7 +210,7 @@ def compose_subagent_rows(builder: nv.NarrativeBuilder, *, color: bool,
         el = rt.fmt_seconds(secs) if secs is not None else None
         el_seg = _paint(el, "dim", color=color, over_bg=over) if el else None
         arrow = _paint("↳", *pal.NODE_COLORS["subagent"], color=color, over_bg=over)
-        inner = "  " + arrow + " " + rt.compose_label(
+        inner = arrow + " " + rt.compose_label(
             [role_seg, rt.join_space(model_seg, bar), el_seg])
         if bg:
             pad = width - 2 - pal.display_width(inner)
