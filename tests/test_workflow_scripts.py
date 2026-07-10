@@ -379,6 +379,26 @@ def test_run_verify_slow_records_verified_tree_on_fail(tmp_path: Path) -> None:
     assert not (change_dir / "last_green_tree_slow").exists()   # red => no green stamp
 
 
+def test_run_verify_slow_timeout_records_verified_tree_not_green(tmp_path: Path) -> None:
+    # A slow gate TIMEOUT (exit 124) still stamps last_verified_tree_slow (the tree
+    # was run) but never last_green_tree_slow (a killed run is not green) — the
+    # intentionally-inert timeout stamp path.
+    project = tmp_path / "proj"
+    project.mkdir()
+    _git_init(project)
+    (project / "a.txt").write_text("1")
+    _git_commit_all(project, "c1")
+    change_dir = project / ".imp" / "change"
+    proc = _run("run-verify.sh", "slow", env_extra={
+        "IMP_PROJECT_ROOT": str(project), "IMP_TEST_CMD_SLOW": "sleep 5",
+        "IMP_TEST_CMD_SLOW_TIMEOUT": "1",
+        "IMP_CHANGE_DIR": str(change_dir)})
+    assert proc.returncode == 124, proc.stderr
+    tree = _head_tree(project)
+    assert (change_dir / "last_verified_tree_slow").read_text().strip() == tree
+    assert not (change_dir / "last_green_tree_slow").exists()   # timeout => no green stamp
+
+
 def test_run_verify_fast_does_not_record_verified_tree_slow(tmp_path: Path) -> None:
     project = tmp_path / "proj"
     project.mkdir()
