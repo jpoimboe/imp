@@ -462,7 +462,7 @@ async def test_replayed_gates_do_not_crash_only_live_gate_solicits(
 
     assert prompts == ["live?"]      # only the live gate solicited
     assert result["r"] == "answer"   # the reply reached the still-open gate
-    assert _Driver.event_count == 4  # 3 replayed + 1 live gate all flow to driver
+    assert _Driver.event_count == 5  # 3 replayed gates + replay_complete boundary + 1 live gate
 
 
 @pytest.mark.anyio

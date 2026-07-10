@@ -24,7 +24,9 @@ def test_capture_frames_every_complete_line(tmp_path: Path) -> None:
     recs = [{"id": str(i), "type": "x", "payload": {"i": i}} for i in range(5)]
     _write_jsonl(p, recs)
     lines = ReplaySnapshot.capture(p).wire_bytes().decode().splitlines()
-    assert [parse_event(ln) for ln in lines] == [{**r, "_replay": True} for r in recs]
+    events = [parse_event(ln) for ln in lines]
+    assert events[:-1] == [{**r, "_replay": True} for r in recs]
+    assert events[-1] == {"type": "replay_complete"}
 
 
 def test_capture_includes_lines_that_never_broadcast(tmp_path: Path) -> None:
@@ -40,13 +42,7 @@ def test_capture_includes_lines_that_never_broadcast(tmp_path: Path) -> None:
     _write_jsonl(p, recs)
     lines = ReplaySnapshot.capture(p).wire_bytes().decode().splitlines()
     assert [parse_event(ln)["type"] for ln in lines] == [
-        "change_created", "workflow_resumed", "step_started"]
-
-
-def test_capture_empty_file_is_empty(tmp_path: Path) -> None:
-    p = tmp_path / "events.jsonl"
-    p.write_text("")
-    assert ReplaySnapshot.capture(p).wire_bytes() == b""
+        "change_created", "workflow_resumed", "step_started", "replay_complete"]
 
 
 def test_capture_ignores_partial_trailing_line(tmp_path: Path) -> None:
@@ -54,14 +50,37 @@ def test_capture_ignores_partial_trailing_line(tmp_path: Path) -> None:
     good = json.dumps({"id": "a", "type": "x", "payload": {}})
     p.write_text(good + "\n" + '{"id":"b","type":"part')  # partial, no newline
     lines = ReplaySnapshot.capture(p).wire_bytes().decode().splitlines()
-    assert [parse_event(ln) for ln in lines] == [{**json.loads(good), "_replay": True}]
+    events = [parse_event(ln) for ln in lines]
+    assert events[:-1] == [{**json.loads(good), "_replay": True}]
+    assert events[-1] == {"type": "replay_complete"}
 
 
-def test_capture_missing_file_yields_empty_and_warns(
+def test_capture_appends_replay_complete_boundary_as_final_frame(tmp_path: Path) -> None:
+    p = tmp_path / "events.jsonl"
+    recs = [{"id": str(i), "type": "x", "payload": {"i": i}} for i in range(3)]
+    _write_jsonl(p, recs)
+    lines = ReplaySnapshot.capture(p).wire_bytes().decode().splitlines()
+    events = [parse_event(ln) for ln in lines]
+    # every replayed record is framed first, marked _replay...
+    assert events[:-1] == [{**r, "_replay": True} for r in recs]
+    # ...and the single trailing frame is the boundary (no _replay key)
+    assert events[-1] == {"type": "replay_complete"}
+
+
+def test_capture_empty_log_still_emits_boundary(tmp_path: Path) -> None:
+    p = tmp_path / "events.jsonl"
+    p.write_text("")
+    lines = ReplaySnapshot.capture(p).wire_bytes().decode().splitlines()
+    assert [parse_event(ln) for ln in lines] == [{"type": "replay_complete"}]
+
+
+def test_capture_unreadable_log_still_emits_boundary(
     tmp_path: Path, caplog: pytest.LogCaptureFixture,
 ) -> None:
     with caplog.at_level(logging.WARNING):
-        assert ReplaySnapshot.capture(tmp_path / "nope.jsonl").wire_bytes() == b""
+        lines = ReplaySnapshot.capture(
+            tmp_path / "nope.jsonl").wire_bytes().decode().splitlines()
+    assert [parse_event(ln) for ln in lines] == [{"type": "replay_complete"}]
     assert any("replay" in r.message.lower() for r in caplog.records)
 
 
@@ -75,7 +94,9 @@ def test_on_attach_pulse_returns_snapshot_of_current_disk(tmp_path: Path) -> Non
     snap = server._on_attach_pulse(None, sent.append)   # no open(): pulse is a no-op
     assert snap is not None
     lines = snap.wire_bytes().decode().splitlines()
-    assert [parse_event(ln) for ln in lines] == [{**r, "_replay": True} for r in recs]
+    events = [parse_event(ln) for ln in lines]
+    assert events[:-1] == [{**r, "_replay": True} for r in recs]
+    assert events[-1] == {"type": "replay_complete"}
 
 
 def test_on_attach_pulse_without_events_path_returns_none(tmp_path: Path) -> None:
@@ -135,6 +156,10 @@ async def test_late_attach_replays_full_disk_prefix_then_live_tail(
                 seen.append(parse_event(
                     (await buf.receive_until(b"\n", 1 << 20)).decode()))
         assert [s["id"] for s in seen] == ["e0", "e1", "e2"]   # full disk prefix, in order
+        with anyio.fail_after(5):                              # boundary closes the replay
+            boundary = parse_event(
+                (await buf.receive_until(b"\n", 1 << 20)).decode())
+        assert boundary == {"type": "replay_complete"}         # arrives before any live event
         attached.set()
         with anyio.fail_after(5):
             seen.append(parse_event(
@@ -180,6 +205,10 @@ async def test_resume_attach_replays_entire_prior_journal(tmp_path: Path) -> Non
                 seen.append(parse_event(
                     (await buf.receive_until(b"\n", 1 << 20)).decode()))
         assert [s["id"] for s in seen] == [f"p{i}" for i in range(20)] + ["wr"]
+        with anyio.fail_after(5):                              # boundary closes the replay
+            boundary = parse_event(
+                (await buf.receive_until(b"\n", 1 << 20)).decode())
+        assert boundary == {"type": "replay_complete"}         # arrives before any live event
         attached.set()
         with anyio.fail_after(5):
             seen.append(parse_event(
@@ -194,8 +223,8 @@ def test_capture_marks_every_record_as_replay(tmp_path: Path) -> None:
     p = tmp_path / "events.jsonl"
     recs = [{"id": "a", "type": "awaiting_user_input", "payload": {"prompt": "q"}}]
     _write_jsonl(p, recs)
-    [line] = ReplaySnapshot.capture(p).wire_bytes().decode().splitlines()
-    event = parse_event(line)
+    lines = ReplaySnapshot.capture(p).wire_bytes().decode().splitlines()
+    event = parse_event(lines[0])
     assert event["_replay"] is True
     assert event["type"] == "awaiting_user_input"
     assert event["payload"] == {"prompt": "q"}
