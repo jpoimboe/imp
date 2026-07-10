@@ -31,7 +31,7 @@ def _change(root: Path, quest_id: str) -> SimpleNamespace:
     # The harvest helper only reads .control_root, .quest_dir and .id.
     return SimpleNamespace(
         control_root=root,
-        quest_dir=root / ".imp" / "changes" / quest_id,
+        quest_dir=root / ".imp" / "quests" / quest_id,
         id=quest_id,
     )
 

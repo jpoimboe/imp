@@ -120,5 +120,5 @@ def test_new_interactive_routes_through_session_client(
 
     assert rc == 5
     assert made["quest_id"] == captured["quest_id"]   # solicit bound to the same change
-    # The opening intent is now persisted durably (change.json), not a run param.
+    # The opening intent is now persisted durably (quest.json), not a run param.
     assert Change.load(tmp_path, captured["quest_id"]).seed_opening == "add a thing"

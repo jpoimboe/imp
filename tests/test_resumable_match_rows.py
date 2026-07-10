@@ -16,7 +16,7 @@ def _archive_terminal(control: Path, cid: str, status: str) -> None:
     archive record resumable defaults False."""
     events = control / f"{cid}.jsonl"
     events.write_text("")
-    cj = control / f"{cid}.change.json"
+    cj = control / f"{cid}.quest.json"
     cj.write_text(json.dumps({
         "id": cid, "title": cid.title(), "base_branch": "main",
         "created_at": "2026-06-01T00:00:00+00:00", "depends_on": []}))
@@ -44,7 +44,7 @@ def test_match_rows_include_archived_resumable(tmp_path: Path) -> None:
     ch = Change.create_draft(tmp_path, title="Left", quest_id="lodo40",
                              base_branch="main")
     archive_conversation(ch)
-    assert not (tmp_path / ".imp" / "changes" / "lodo40").exists()
+    assert not (tmp_path / ".imp" / "quests" / "lodo40").exists()
     ids = {r[0] for r in m._resumable_match_rows(tmp_path, "lodo")}
     assert ids == {"lodo40"}
 

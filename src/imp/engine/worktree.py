@@ -151,7 +151,7 @@ def remove_worktree(control_root: Path, quest_id: str, *, force: bool = False) -
 def delete_branch(control_root: Path, quest_id: str) -> None:
     """`git branch -D imp/<id>` (abandon-only; remove_worktree keeps the
     branch). Tolerates an already-deleted branch so abandon is idempotent, and
-    needs only the id — callable even when the worktree/change.json is gone
+    needs only the id — callable even when the worktree/quest.json is gone
     (the (remove -> delete) crash-recovery path)."""
     with RepoGitLock(control_root).acquire():
         # rc ignored deliberately: tolerates "branch not found" (already
@@ -492,7 +492,7 @@ def _write_exclude(control_root: Path) -> None:
 def ensure_imp_ignored(control_root: Path) -> None:
     """Guarantee .imp/ is ignored in a way fresh worktrees inherit (spec §8).
     Correctness depends on it: nested worktrees must not show as untracked, and
-    the inner .imp/changes/ state must never be captured by `git add -A`."""
+    the inner .imp/quests/ state must never be captured by `git add -A`."""
     if _imp_ignored_durably(control_root):
         return
     with RepoGitLock(control_root).acquire():

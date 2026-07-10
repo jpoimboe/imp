@@ -458,7 +458,7 @@ async def test_run_session_client_forwards_new_leave_mode_to_terminal(
 
     assert captured["leave_mode"] == "new"
     # The foreground does NOT apply the disposition — the daemon owns it.
-    assert (tmp_path / ".imp" / "changes" / "d1").exists()
+    assert (tmp_path / ".imp" / "quests" / "d1").exists()
     assert rc == 0
 
 
@@ -486,7 +486,7 @@ async def test_run_session_client_forwards_chat_leave_mode_to_terminal(
         solicit=lambda _p: _never(), leave_mode="chat")
 
     assert captured["leave_mode"] == "chat"
-    assert (tmp_path / ".imp" / "changes" / "c1").exists()
+    assert (tmp_path / ".imp" / "quests" / "c1").exists()
     assert rc == 0
 
 
@@ -741,7 +741,7 @@ def test_infer_session_result_completed_from_archive_when_home_reaped(tmp_path: 
         '"timestamp":"2026-06-01T00:00:01+00:00","type":"change_created",'
         f'"payload":{{"id":"{quest_id}"}}}}\n'.encode()
     )
-    quest_json = tmp_path / f"{quest_id}-change.json"
+    quest_json = tmp_path / f"{quest_id}-quest.json"
     quest_json.write_text(json.dumps({
         "id": quest_id, "title": "Reaped", "base_branch": "main",
         "created_at": "2026-06-01T00:00:00+00:00", "depends_on": []}))

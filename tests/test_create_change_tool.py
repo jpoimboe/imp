@@ -44,7 +44,7 @@ def test_create_change_writes_quest_home_and_emits_event(tmp_path: Path) -> None
         "description": "extract the duplicated parser into one function",
         "depends_on": [ch.id]})
 
-    new_ids = [p.name for p in (ch.control_root / ".imp" / "changes").iterdir()
+    new_ids = [p.name for p in (ch.control_root / ".imp" / "quests").iterdir()
                if p.name != ch.id]
     assert len(new_ids) == 1
     new_id = new_ids[0]
@@ -57,7 +57,7 @@ def test_create_change_writes_quest_home_and_emits_event(tmp_path: Path) -> None
     assert created.seed_opening == (
         "Follow-up: extract helper\n\n"
         "extract the duplicated parser into one function")
-    meta = json.loads((created.quest_dir / "change.json").read_text())
+    meta = json.loads((created.quest_dir / "quest.json").read_text())
     assert meta["depends_on"] == [ch.id]
 
     parent_events = [e for e in ch.event_log().read()
@@ -73,10 +73,10 @@ def test_create_change_defaults_no_deps(tmp_path: Path) -> None:
     ch, state = _make(tmp_path)
     tool = get_registry()["create_change"]
     tool.invoke(_ctx(ch, state), {"title": "T", "description": "b"})
-    new_id = next(p.name for p in (ch.control_root / ".imp" / "changes").iterdir()
+    new_id = next(p.name for p in (ch.control_root / ".imp" / "quests").iterdir()
                   if p.name != ch.id)
     meta = json.loads((Change.load(ch.control_root, new_id).quest_dir
-                       / "change.json").read_text())
+                       / "quest.json").read_text())
     assert meta["depends_on"] == []
 
 
@@ -95,9 +95,9 @@ def test_create_change_avoids_live_cvcv_stem(
     from imp.engine import quest_id
 
     ch, state = _make(tmp_path)
-    home = ch.control_root / ".imp" / "changes" / "kobe10"
+    home = ch.control_root / ".imp" / "quests" / "kobe10"
     home.mkdir(parents=True)
-    (home / "change.json").write_text(json.dumps({"id": "kobe10", "title": "Seed"}))
+    (home / "quest.json").write_text(json.dumps({"id": "kobe10", "title": "Seed"}))
 
     # First stem draw collides with the seeded live stem; avoidance must
     # resample past it to the next (distinct) stem.
@@ -107,6 +107,6 @@ def test_create_change_avoids_live_cvcv_stem(
     get_registry()["create_change"].invoke(
         _ctx(ch, state), {"title": "T", "description": "b"})
 
-    new_id = next(p.name for p in (ch.control_root / ".imp" / "changes").iterdir()
+    new_id = next(p.name for p in (ch.control_root / ".imp" / "quests").iterdir()
                   if p.name not in {ch.id, "kobe10"})
     assert new_id[:4] == "mira"

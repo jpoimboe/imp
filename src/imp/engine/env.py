@@ -66,9 +66,9 @@ HEADLESS_ENV = {
 # and falsely enable the gate. Use `overlay_engine_env` to merge, not a raw dict spread.
 ENGINE_ENV_VARS = frozenset({
     "IMP_PROJECT_ROOT",
-    "IMP_CHANGE_ID",
-    "IMP_CHANGE_TITLE",
-    "IMP_CHANGE_DIR",
+    "IMP_QUEST_ID",
+    "IMP_QUEST_TITLE",
+    "IMP_QUEST_DIR",
     "IMP_OUTPUT",
     "IMP_TEST_CMD_FAST",
     "IMP_TEST_CMD_SLOW",
@@ -119,10 +119,10 @@ def engine_env(
 
     Variables:
         IMP_PROJECT_ROOT  — absolute path of the project root on the host.
-        IMP_CHANGE_ID     — the stable, immutable Change identity; hook authors
+        IMP_QUEST_ID      — the stable, immutable Change identity; hook authors
                             MUST key on this.
-        IMP_CHANGE_TITLE  — human-readable title for the change.
-        IMP_CHANGE_DIR    — absolute host path of the change state directory;
+        IMP_QUEST_TITLE   — human-readable title for the change.
+        IMP_QUEST_DIR     — absolute host path of the change state directory;
                             injected only when quest_dir is provided. Scripts
                             anchor on this instead of a cwd-relative .imp/change/
                             so the state directory survives worktree relocation.
@@ -149,12 +149,12 @@ def engine_env(
     """
     env = {
         "IMP_PROJECT_ROOT": str(project_root),
-        "IMP_CHANGE_ID": quest_id,
-        "IMP_CHANGE_TITLE": quest_title,
+        "IMP_QUEST_ID": quest_id,
+        "IMP_QUEST_TITLE": quest_title,
         **HEADLESS_ENV,
     }
     if quest_dir is not None:
-        env["IMP_CHANGE_DIR"] = str(quest_dir)
+        env["IMP_QUEST_DIR"] = str(quest_dir)
     if output_path is not None:
         env["IMP_OUTPUT"] = str(output_path)
     if test_gates is not None:

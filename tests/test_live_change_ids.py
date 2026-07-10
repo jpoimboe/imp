@@ -8,9 +8,9 @@ from imp.engine.change import live_quest_ids, live_stems
 
 
 def _live_home(control: Path, cid: str) -> None:
-    home = control / ".imp" / "changes" / cid
+    home = control / ".imp" / "quests" / cid
     home.mkdir(parents=True)
-    (home / "change.json").write_text(json.dumps({"id": cid, "title": cid}))
+    (home / "quest.json").write_text(json.dumps({"id": cid, "title": cid}))
 
 
 def _archive_one(control: Path, cid: str) -> None:
@@ -22,7 +22,7 @@ def _archive_one(control: Path, cid: str) -> None:
         '"timestamp":"2026-06-01T00:00:00+00:00","type":"change_created",'
         f'"payload":{{"id":"{cid}"}}}}\n'.encode()
     )
-    cj = control / f"{cid}-change.json"
+    cj = control / f"{cid}-quest.json"
     cj.write_text(json.dumps({
         "id": cid, "title": cid.title(), "base_branch": "main",
         "created_at": "2026-06-01T00:00:00+00:00", "depends_on": []}))
@@ -36,9 +36,9 @@ def _archive_one(control: Path, cid: str) -> None:
 def test_live_quest_ids_lists_only_homes_with_quest_json(tmp_path: Path) -> None:
     _live_home(tmp_path, "wibo10")
     _live_home(tmp_path, "kobe47")
-    # A stray dir without change.json and a hidden dir are both excluded.
-    (tmp_path / ".imp" / "changes" / "junk").mkdir(parents=True)
-    (tmp_path / ".imp" / "changes" / ".hidden").mkdir()
+    # A stray dir without quest.json and a hidden dir are both excluded.
+    (tmp_path / ".imp" / "quests" / "junk").mkdir(parents=True)
+    (tmp_path / ".imp" / "quests" / ".hidden").mkdir()
     assert live_quest_ids(tmp_path) == ["kobe47", "wibo10"]
 
 

@@ -40,7 +40,7 @@ are two git trees you check out side by side.
 REPO=$(git rev-parse --show-toplevel)
 ID=2026-06-11-9k6zii                 # the Change id (see `imp list --all`)
 BR=imp/$ID                           # the Change's branch
-BASE=$(python3 -c "import json;print(json.load(open('$REPO/.imp/worktrees/$ID/.imp/change/change.json'))['base_branch'])" 2>/dev/null || echo master)
+BASE=$(python3 -c "import json;print(json.load(open('$REPO/.imp/worktrees/$ID/.imp/change/quest.json'))['base_branch'])" 2>/dev/null || echo master)
 
 # AFTER tree: the Change's live worktree if it still exists (in-flight), else a
 # fresh worktree at the branch tip (works for a merged Change too — the ref lives on).

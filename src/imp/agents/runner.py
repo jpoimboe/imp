@@ -139,7 +139,7 @@ class AgentInvocation:
     system_prompt: str
     initial_messages: tuple[Message, ...]
     quest_context: QuestContext
-    transcript_dir: Path                   # .imp/changes/<id>/steps/<phase>/<step>/
+    transcript_dir: Path                   # .imp/quests/<id>/steps/<phase>/<step>/
     events_path: Path
     subagent_defs: dict[str, AgentDef] = field(default_factory=dict)
     # resolved by engine (Task 27a/28); None means no tool-count cap (opt-in only)

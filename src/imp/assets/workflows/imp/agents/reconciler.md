@@ -37,7 +37,7 @@ and any injected feedback:
 
 In `bash`:
 - `git status` — rebase in progress? unmerged paths?
-- `BASE=$(python3 -c "import json;print(json.load(open('{{ change.home }}/change.json'))['base_branch'])")`.
+- `BASE=$(python3 -c "import json;print(json.load(open('{{ change.home }}/quest.json'))['base_branch'])")`.
 - `git log --oneline -8` and `git diff` (the conflicted hunks).
 - Recover the integration endpoints. The pre-rebase fork point `P` is the workflow var
   `{{ vars.integration_fork }}` — the SHA the branch was planted on before this
@@ -106,8 +106,8 @@ Drive to a clean state, then verify it:
   **Never leave uncommitted changes** and never leave a rebase half-done.
 - If you drove a rebase to completion this round (the conflicted-rebase context),
   record the new plant after the branch is clean and linear on base: set
-  `cur_base_head := B` in `change.json`:
-  `python3 -c "import json,sys;p='{{ change.home }}/change.json';m=json.load(open(p));m['cur_base_head']=sys.argv[1];json.dump(m,open(p,'w'),indent=2,sort_keys=True)" "$B"`.
+  `cur_base_head := B` in `quest.json`:
+  `python3 -c "import json,sys;p='{{ change.home }}/quest.json';m=json.load(open(p));m['cur_base_head']=sys.argv[1];json.dump(m,open(p,'w'),indent=2,sort_keys=True)" "$B"`.
   In the resumed context the branch is already planted on `B`; leave `cur_base_head`
   unchanged.
 

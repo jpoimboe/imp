@@ -14,9 +14,9 @@ from imp.remote.session.socket_server import SessionSocket
 
 
 def _make_home(control_root: Path, quest_id: str) -> Path:
-    home = control_root / ".imp" / "changes" / quest_id
+    home = control_root / ".imp" / "quests" / quest_id
     home.mkdir(parents=True, exist_ok=True)
-    (home / "change.json").write_text("{}")
+    (home / "quest.json").write_text("{}")
     return home
 
 

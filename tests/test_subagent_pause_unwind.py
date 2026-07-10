@@ -143,7 +143,7 @@ def _seed_single_step(root: Path) -> Change:
     quest_dir = root / ".imp" / "change"
     quest_dir.mkdir(parents=True, exist_ok=True)
     (quest_dir / "state").mkdir(exist_ok=True)
-    (quest_dir / "change.json").write_text(json.dumps(
+    (quest_dir / "quest.json").write_text(json.dumps(
         {"id": "s", "title": "t", "base_branch": "main"}, indent=2, sort_keys=True))
     configured: list[str] = []
     with contextlib.suppress(Exception):

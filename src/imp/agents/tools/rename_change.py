@@ -1,7 +1,7 @@
 """rename_change tool (spec §3, §10). Applies the rename IMMEDIATELY inside the
 tool call and returns the Change id so the agent writes the spec at the
 change-home's artifacts/spec/<id>.md in-band, same turn. Content-only: rewrites the
-gitignored change.json, touches no git. Top-level only — raises for subagents
+gitignored quest.json, touches no git. Top-level only — raises for subagents
 (no change_state)."""
 
 from __future__ import annotations

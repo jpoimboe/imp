@@ -41,7 +41,7 @@ _WORKTREE_SRC = str(Path(__file__).parent.parent.parent / "src")
 
 # Bounded poll (~20s ceiling, then exit 0) on the change's events.jsonl for a
 # cli_attached marker that is FRESH for the current daemon instance. The journal
-# is at $IMP_CHANGE_DIR/events.jsonl (the permanent control-root home).
+# is at $IMP_QUEST_DIR/events.jsonl (the permanent control-root home).
 #
 # cli_attached is written to the PERSISTENT journal and survives hibernation, so
 # the first-run marker is still present on the resume leg. The SAME scripted
@@ -65,7 +65,7 @@ _WORKTREE_SRC = str(Path(__file__).parent.parent.parent / "src")
 # matches only the real daemon event records and never this command's self-echo.
 # `: ?` tolerates either json separator spacing.
 _ATTACH_POLL = (
-    'J="${IMP_CHANGE_DIR}/events.jsonl"; '
+    'J="${IMP_QUEST_DIR}/events.jsonl"; '
     "for _ in $(seq 200); do "
     "base=$(grep -nE '\"type\": ?\"workflow_resumed\"' \"$J\" 2>/dev/null "
     "| tail -1 | cut -d: -f1); base=${base:-0}; "

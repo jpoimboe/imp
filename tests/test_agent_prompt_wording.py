@@ -99,7 +99,7 @@ def test_batch_code_reviewer_renders_change_diff(tmp_path) -> None:
     log = JsonlEventLog(tmp_path / "events.jsonl")
     out = render_prompt(body, build_context(
         quest_title="t", event_log=log, quest_id="abc",
-        quest_home=".imp/changes/abc", cur_base_head="BASE",
+        quest_home=".imp/quests/abc", cur_base_head="BASE",
         vars={"fast_path": False}),
         workflow_dir=bundled_workflow_dir("imp"))
     assert "git diff BASE..imp/abc" in out
@@ -326,7 +326,7 @@ def _render_agent(name: str, tmp_path) -> str:
             quest_title="t",
             event_log=log,
             quest_id="abc",
-            quest_home=".imp/changes/abc",
+            quest_home=".imp/quests/abc",
             cur_base_head="BASE",
             vars={"fast_path": False, "task_total": 0},
         ),

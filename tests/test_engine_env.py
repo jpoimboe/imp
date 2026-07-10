@@ -10,8 +10,8 @@ def test_engine_env_exposes_id_and_title_no_artifacts() -> None:
                      quest_title="Add OAuth")
     assert env == {
         "IMP_PROJECT_ROOT": "/wt",
-        "IMP_CHANGE_ID": "eee555",
-        "IMP_CHANGE_TITLE": "Add OAuth",
+        "IMP_QUEST_ID": "eee555",
+        "IMP_QUEST_TITLE": "Add OAuth",
         "GIT_EDITOR": "true",
         "GIT_TERMINAL_PROMPT": "0",
         "EDITOR": "true",
@@ -23,7 +23,7 @@ def test_engine_env_exposes_id_and_title_no_artifacts() -> None:
 def test_engine_env_exposes_quest_id() -> None:
     env = engine_env(project_root=Path("/wt"), quest_id="2026-06-04-eee555",
                      quest_title="t")
-    assert env["IMP_CHANGE_ID"] == "2026-06-04-eee555"
+    assert env["IMP_QUEST_ID"] == "2026-06-04-eee555"
 
 
 def test_engine_env_injects_worktree_src_on_pythonpath_for_imp_checkout(
@@ -91,31 +91,31 @@ def test_overlay_dedups_worktree_src_already_in_inherited_pythonpath(
 
 
 def test_overlay_strips_inherited_quest_dir_when_unset() -> None:
-    stale = {"IMP_CHANGE_DIR": "/old/home", "OTHER": "x"}
+    stale = {"IMP_QUEST_DIR": "/old/home", "OTHER": "x"}
     result = overlay_engine_env(
         stale,
         engine_env(project_root=Path("/wt"), quest_id="2026-06-04-eee555",
                    quest_title="t"),
     )
-    assert "IMP_CHANGE_DIR" not in result
+    assert "IMP_QUEST_DIR" not in result
 
 
 def test_engine_env_includes_quest_dir_when_given() -> None:
     env = engine_env(project_root=Path("/wt"), quest_id="2026-06-04-eee555",
                      quest_title="t",
-                     quest_dir=Path("/ctl/.imp/changes/2026-06-04-eee555"))
-    assert env["IMP_CHANGE_DIR"] == "/ctl/.imp/changes/2026-06-04-eee555"
+                     quest_dir=Path("/ctl/.imp/quests/2026-06-04-eee555"))
+    assert env["IMP_QUEST_DIR"] == "/ctl/.imp/quests/2026-06-04-eee555"
 
 
 def test_engine_env_omits_quest_dir_when_absent() -> None:
     env = engine_env(project_root=Path("/wt"), quest_id="2026-06-04-eee555",
                      quest_title="t")
-    assert "IMP_CHANGE_DIR" not in env
+    assert "IMP_QUEST_DIR" not in env
 
 
 def test_quest_dir_is_engine_managed() -> None:
     from imp.engine.env import ENGINE_ENV_VARS
-    assert "IMP_CHANGE_DIR" in ENGINE_ENV_VARS
+    assert "IMP_QUEST_DIR" in ENGINE_ENV_VARS
 
 
 def test_engine_env_injects_test_cmd_fast_when_set() -> None:
@@ -230,7 +230,7 @@ def test_output_path_var_is_engine_managed() -> None:
 
 def test_engine_env_emits_headless_vars_unconditionally() -> None:
     # Emitted for every subprocess with no gates/dir/output — the four headless
-    # vars are unconditional, unlike IMP_TEST_CMD_* / IMP_CHANGE_DIR.
+    # vars are unconditional, unlike IMP_TEST_CMD_* / IMP_QUEST_DIR.
     env = engine_env(project_root=Path("/wt"), quest_id="c", quest_title="t")
     assert env["GIT_EDITOR"] == "true"
     assert env["GIT_TERMINAL_PROMPT"] == "0"

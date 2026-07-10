@@ -41,7 +41,7 @@ class SandboxPolicy:
     setenv: tuple[tuple[str, str], ...]       # resolved env allowlist key/value pairs
     network: bool                             # True → no --unshare-net
     note: str = ""                            # "" | "unsandboxed_by_config" | "sandbox_disabled"
-    quest_home: str = ""                     # <control>/.imp/changes/<id> rw bind ("" → none)
+    quest_home: str = ""                     # <control>/.imp/quests/<id> rw bind ("" → none)
     readonly_overlays: tuple[str, ...] = ()  # ro subtrees; after git_ro_remask, before caches
     git_ref_reexpose: tuple[str, ...] = ()   # rw re-expose of refs/heads/imp; after git_ro_remask
     ephemeral_home: str = ""                 # spike: writable tmpfs over $HOME ("" → none)
@@ -118,7 +118,7 @@ def build_sandbox_argv(
     is the single source of truth for the sandbox's `IMP_*` vars: every IMP_*-
     prefixed key it carries is emitted via --setenv, authoritatively superseding
     whatever was baked into `policy.setenv` at run start. The policy is resolved
-    once per run (the stat-once design), but name-on-intent makes IMP_CHANGE_TITLE
+    once per run (the stat-once design), but name-on-intent makes IMP_QUEST_TITLE
     mutate mid-run on a rename — so a gate or tool spawned after
     the rename MUST see the live values, not the empty ones frozen at run start.
 

@@ -36,7 +36,7 @@ def test_mental_model_names_the_three_left_draft_dispositions() -> None:
 
 def test_mental_model_covers_home_zones_materialize_and_vocabulary() -> None:
     body = load_agent_skill(_skills_dir(), "imp-mental-model").lower()
-    assert ".imp/changes/" in body
+    assert ".imp/quests/" in body
     assert "backlog" in body
     assert "materialize" in body
     for term in ("spec", "plan", "phase", "step", "lane"):

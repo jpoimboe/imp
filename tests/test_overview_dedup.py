@@ -31,7 +31,7 @@ def test_scan_quest_homes_parses_each_home_once(tmp_path: Path) -> None:
 def test_scan_quest_homes_missing_state_json(tmp_path: Path) -> None:
     _seed_control(tmp_path)
     Change.create(tmp_path, title="No State", quest_id="noState", base_branch="main")
-    state_file = tmp_path / ".imp" / "changes" / "noState" / "state" / "state.json"
+    state_file = tmp_path / ".imp" / "quests" / "noState" / "state" / "state.json"
     state_file.unlink()
 
     scan = {h.quest_id: h for h in m._scan_quest_homes(tmp_path)}
@@ -42,7 +42,7 @@ def test_scan_quest_homes_missing_state_json(tmp_path: Path) -> None:
 def test_scan_quest_homes_drops_malformed_quest_json(tmp_path: Path) -> None:
     _seed_control(tmp_path)
     Change.create(tmp_path, title="Bad JSON", quest_id="badJson", base_branch="main")
-    change_file = tmp_path / ".imp" / "changes" / "badJson" / "change.json"
+    change_file = tmp_path / ".imp" / "quests" / "badJson" / "quest.json"
     change_file.write_bytes(b"bad json")
 
     ids = {h.quest_id for h in m._scan_quest_homes(tmp_path)}
@@ -83,7 +83,7 @@ def _archive_completed(control: Path, cid: str) -> None:
         f'{{"id":"{cid}-e0","parent_id":null,"agent_id":null,'
         '"timestamp":"2026-06-01T00:00:09+00:00","type":"step_started",'
         f'"payload":{{"id":"{cid}"}}}}\n'.encode())
-    quest_json = control / f"{cid}-change.json"
+    quest_json = control / f"{cid}-quest.json"
     quest_json.write_text(json.dumps({
         "id": cid, "title": cid.title(), "base_branch": "main",
         "created_at": "2026-06-01T00:00:00+00:00", "depends_on": [],
@@ -104,7 +104,7 @@ def _archive_paused(
         f'{{"id":"{cid}-e0","parent_id":null,"agent_id":null,'
         f'"timestamp":"{last_ts}","type":"step_started",'
         f'"payload":{{"id":"{cid}"}}}}\n'.encode())
-    quest_json = control / f"{cid}-change.json"
+    quest_json = control / f"{cid}-quest.json"
     quest_json.write_text(json.dumps({
         "id": cid, "title": cid.title(), "base_branch": "main",
         "created_at": "2026-06-02T00:00:00+00:00", "depends_on": [],

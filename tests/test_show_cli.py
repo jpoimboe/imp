@@ -149,7 +149,7 @@ def test_show_spec_falls_back_after_archive(
         tmp_path,
         _ID,
         events_path=ch.events_path,
-        quest_json_path=ch.quest_dir / "change.json",
+        quest_json_path=ch.quest_dir / "quest.json",
         state_json_path=ch.state_dir / "state.json",
     )
     # The per-Change artifact ref is RETAINED at archive (spec AC 3).
@@ -463,7 +463,7 @@ def test_show_spec_and_plan_from_wip_ref_when_home_absent(
         '{"id":"ghost01","timestamp":"2026-06-01T00:00:00+00:00",'
         '"type":"change_created","payload":{}}\n'
     )
-    cj = tmp_path / "ghost-change.json"
+    cj = tmp_path / "ghost-quest.json"
     cj.write_text(
         json.dumps(
             {
@@ -505,7 +505,7 @@ def test_show_abandoned_backlog_is_not_a_live_brief(
         seed_opening="Add OAuth",
     )
     tear_down_change(change)
-    assert not (tmp_path / ".imp" / "changes" / "2026-06-16-bkg111").exists()
+    assert not (tmp_path / ".imp" / "quests" / "2026-06-16-bkg111").exists()
     out = _run(monkeypatch, tmp_path, "show", "2026-06-16-bkg111", "status")
     assert out.strip() != "backlog"  # History item, not a queued Backlog brief
     # log renders the archived conversation, not a brief
@@ -567,7 +567,7 @@ def test_show_summary_falls_back_after_archive(
         tmp_path,
         _ID,
         events_path=ch.events_path,
-        quest_json_path=ch.quest_dir / "change.json",
+        quest_json_path=ch.quest_dir / "quest.json",
         state_json_path=ch.state_dir / "state.json",
     )
     assert _git_wip_present(tmp_path, _ID)
@@ -609,7 +609,7 @@ def test_show_default_card_renders_summary_after_archive(
         tmp_path,
         _ID,
         events_path=ch.events_path,
-        quest_json_path=ch.quest_dir / "change.json",
+        quest_json_path=ch.quest_dir / "quest.json",
         state_json_path=ch.state_dir / "state.json",
     )
     assert _git_wip_present(tmp_path, _ID)
@@ -814,7 +814,7 @@ def test_show_events_digest_from_archive(
                         "content": [{"type": "text", "text": "archived hello"}]},
         }) + "\n"
     )
-    cj = tmp_path / "arch-change.json"
+    cj = tmp_path / "arch-quest.json"
     cj.write_text(json.dumps({
         "id": "arch01", "title": "Arch", "base_branch": "main",
         "created_at": "2026-06-01T00:00:00+00:00", "depends_on": [],

@@ -28,13 +28,13 @@ def test_replay_current_step_removed() -> None:
 def _make_change_worktree(control: Path, quest_id: str, title: str,
                            status: str = "paused") -> Path:
     """Create a minimal on-disk Change home (no real git worktree needed —
-    Change.load only reads the permanent .imp/changes/<id>/ directory)."""
+    Change.load only reads the permanent .imp/quests/<id>/ directory)."""
     from imp.engine.state import State
 
-    quest_dir = control / ".imp" / "changes" / quest_id
+    quest_dir = control / ".imp" / "quests" / quest_id
     quest_dir.mkdir(parents=True)
     (quest_dir / "state").mkdir()
-    (quest_dir / "change.json").write_text(
+    (quest_dir / "quest.json").write_text(
         json.dumps({"id": quest_id, "title": title, "base_branch": "main",
                     "layout_version": LAYOUT_VERSION})
     )
@@ -118,9 +118,9 @@ def test_cli_log_pipes_through_narrative(
     import imp.cli.main as m
 
     slug = "my-smoke"
-    quest_dir = tmp_path / ".imp" / "changes" / slug
+    quest_dir = tmp_path / ".imp" / "quests" / slug
     quest_dir.mkdir(parents=True)
-    (quest_dir / "change.json").write_text(
+    (quest_dir / "quest.json").write_text(
         json.dumps({"id": slug, "title": "smoke", "base_branch": "main",
                     "layout_version": LAYOUT_VERSION}),
     )
@@ -162,9 +162,9 @@ def test_imp_log_skips_malformed_lines_in_events_jsonl(
     import imp.cli.main as m
 
     slug = "my-smoke"
-    quest_dir = tmp_path / ".imp" / "changes" / slug
+    quest_dir = tmp_path / ".imp" / "quests" / slug
     quest_dir.mkdir(parents=True)
-    (quest_dir / "change.json").write_text(
+    (quest_dir / "quest.json").write_text(
         json.dumps({"id": slug, "title": "smoke", "base_branch": "main",
                     "layout_version": LAYOUT_VERSION}),
     )
@@ -211,9 +211,9 @@ def test_cli_log_subprocess_no_color_on_pipe(tmp_path: Path) -> None:
     _seed_control(tmp_path)
 
     slug = "my-sub"
-    quest_dir = tmp_path / ".imp" / "changes" / slug
+    quest_dir = tmp_path / ".imp" / "quests" / slug
     quest_dir.mkdir(parents=True)
-    (quest_dir / "change.json").write_text(
+    (quest_dir / "quest.json").write_text(
         json.dumps({"id": slug, "title": "sub", "base_branch": "main",
                     "layout_version": LAYOUT_VERSION}),
     )
@@ -303,9 +303,9 @@ def test_cmd_log_auto_picks_latest_by_mtime(
     slugs_titles = [("first-change", "first"), ("second-change", "second"),
                     ("tenth-change", "tenth")]
     for slug, title in slugs_titles:
-        quest_dir = tmp_path / ".imp" / "changes" / slug
+        quest_dir = tmp_path / ".imp" / "quests" / slug
         quest_dir.mkdir(parents=True)
-        (quest_dir / "change.json").write_text(
+        (quest_dir / "quest.json").write_text(
             json.dumps({"id": slug, "title": title, "base_branch": "main",
                         "layout_version": LAYOUT_VERSION}),
         )
@@ -498,9 +498,9 @@ def test_log_uses_display_width_for_hr_and_term_width_for_wrap(
     import imp.cli.main as m
 
     slug = "wide-demo"
-    quest_dir = tmp_path / ".imp" / "changes" / slug
+    quest_dir = tmp_path / ".imp" / "quests" / slug
     quest_dir.mkdir(parents=True)
-    (quest_dir / "change.json").write_text(json.dumps(
+    (quest_dir / "quest.json").write_text(json.dumps(
         {"id": slug, "title": "demo", "base_branch": "main",
          "layout_version": LAYOUT_VERSION}))
     long_line = "X" * 200  # no spaces: only wraps if the wrap width forces it

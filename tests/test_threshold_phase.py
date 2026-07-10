@@ -90,7 +90,7 @@ def test_threshold_adoption_section_omitted_on_autonomous_runs(tmp_path) -> None
 
     attended = render_prompt(body, build_context(
         quest_title="t", event_log=log, quest_id="abc",
-        quest_home=".imp/changes/abc", project_facts={}),
+        quest_home=".imp/quests/abc", project_facts={}),
         workflow_dir=bundled_workflow_dir("imp"))
     # Attended runs render the adoption-first section.
     assert "## Keep discovered work here by default" in attended
@@ -98,7 +98,7 @@ def test_threshold_adoption_section_omitted_on_autonomous_runs(tmp_path) -> None
 
     autonomous = render_prompt(body, build_context(
         quest_title="t", event_log=log, quest_id="abc",
-        quest_home=".imp/changes/abc", autonomous=True,
+        quest_home=".imp/quests/abc", autonomous=True,
         project_facts={}),
         workflow_dir=bundled_workflow_dir("imp"))
     # Autonomous runs omit the whole {% if not run.autonomous %} block.
@@ -117,7 +117,7 @@ def test_threshold_has_no_headless_branch(tmp_path) -> None:
     for autonomous in (False, True):
         out = render_prompt(body, build_context(
             quest_title="t", event_log=log, quest_id="abc",
-            quest_home=".imp/changes/abc", autonomous=autonomous,
+            quest_home=".imp/quests/abc", autonomous=autonomous,
             project_facts={}),
             workflow_dir=bundled_workflow_dir("imp")).lower()
         assert "the ceremony is predetermined" not in out
@@ -135,7 +135,7 @@ def test_threshold_renders_full_brainstorm_depth(tmp_path) -> None:
     log = JsonlEventLog(tmp_path / "events.jsonl")
     out = render_prompt(body, build_context(
         quest_title="t", event_log=log, quest_id="abc",
-        quest_home=".imp/changes/abc",
+        quest_home=".imp/quests/abc",
         project_facts={}),
         workflow_dir=bundled_workflow_dir("imp"))
     low = out.lower()
@@ -164,7 +164,7 @@ def test_threshold_prose_names_spec_finalizer_not_spec_writer(tmp_path) -> None:
     log = JsonlEventLog(tmp_path / "events.jsonl")
     out = render_prompt(body, build_context(
         quest_title="t", event_log=log, quest_id="abc",
-        quest_home=".imp/changes/abc",
+        quest_home=".imp/quests/abc",
         project_facts={}),
         workflow_dir=bundled_workflow_dir("imp"))
     assert "spec-writer" not in out
@@ -178,7 +178,7 @@ def test_threshold_bare_open_keeps_concierge_and_scout_hats(tmp_path) -> None:
     log = JsonlEventLog(tmp_path / "events.jsonl")
     out = render_prompt(body, build_context(
         quest_title="t", event_log=log, quest_id="abc",
-        quest_home=".imp/changes/abc", project_facts={}),
+        quest_home=".imp/quests/abc", project_facts={}),
         workflow_dir=bundled_workflow_dir("imp"))
     low = out.lower()
     assert "do not read any files, do not explore the codebase" not in low
@@ -228,7 +228,7 @@ def test_threshold_live_gate_conventions_relocated_to_partial(tmp_path) -> None:
     log = JsonlEventLog(tmp_path / "events.jsonl")
     out = render_prompt(body, build_context(
         quest_title="t", event_log=log, quest_id="abc",
-        quest_home=".imp/changes/abc",
+        quest_home=".imp/quests/abc",
         project_facts={}),
         workflow_dir=bundled_workflow_dir("imp"))
     assert "no co-equal dangling alternative" in out

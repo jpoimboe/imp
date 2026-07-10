@@ -29,7 +29,7 @@ def tear_down_change(change: Change) -> None:
         archive.archive_quest(
             control, quest_id,
             events_path=change.events_path,
-            quest_json_path=change.quest_dir / "change.json",
+            quest_json_path=change.quest_dir / "quest.json",
             state_json_path=change.state_dir / "state.json",
         )
     if materialized:
@@ -58,7 +58,7 @@ def archive_conversation(change: Change) -> None:
         archive.archive_quest(
             control, quest_id,
             events_path=change.events_path,
-            quest_json_path=change.quest_dir / "change.json",
+            quest_json_path=change.quest_dir / "quest.json",
             state_json_path=change.state_dir / "state.json",
             steps_dir=change.quest_dir / "steps",
             resumable=True,

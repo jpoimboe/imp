@@ -191,7 +191,7 @@ def newest_plan_name(control_root: Path, quest_id: str) -> str | None:
 
 def rehydrate_quest(control_root: Path, quest_id: str) -> Path:
     """Recreate a live scratch dir from the archive so a left conversation can be resumed."""
-    quest_dir = control_root / ".imp" / "changes" / quest_id
+    quest_dir = control_root / ".imp" / "quests" / quest_id
     if quest_dir.exists():
         raise FileExistsError(f"live home for {quest_id!r} already exists")
     quest_json = read_quest_json(control_root, quest_id)
@@ -200,7 +200,7 @@ def rehydrate_quest(control_root: Path, quest_id: str) -> Path:
     state_json = read_state_json(control_root, quest_id)
     events = read_events(control_root, quest_id)
     (quest_dir / "state").mkdir(parents=True)
-    (quest_dir / "change.json").write_bytes(quest_json)
+    (quest_dir / "quest.json").write_bytes(quest_json)
     (quest_dir / "state" / "state.json").write_bytes(state_json or b"{}")
     (quest_dir / "events.jsonl").write_bytes(events or b"")
     for rel, blob in read_step_blobs(control_root, quest_id).items():

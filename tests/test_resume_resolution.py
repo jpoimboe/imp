@@ -58,7 +58,7 @@ def _archive_with_last_ts(control: Path, cid: str, last_ts: str) -> None:
         f'{{"id":"{cid}-e1","timestamp":"{last_ts}",'
         '"type":"step_started","payload":{"step":"plan-writer"}}\n'
     ).encode())
-    cj = control / f"{cid}-change.json"
+    cj = control / f"{cid}-quest.json"
     cj.write_text(json.dumps({
         "id": cid, "title": cid.title(), "base_branch": "main",
         "created_at": "2026-06-01T00:00:00+00:00", "depends_on": []}))

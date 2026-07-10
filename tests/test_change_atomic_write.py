@@ -21,13 +21,13 @@ def _boom(*_a, **_k):
 def test_write_quest_json_output_is_byte_identical(tmp_path: Path) -> None:
     # Keys deliberately out of order + nested to pin sort_keys=True and indent=2.
     meta = {"b": 2, "a": 1, "nested": {"y": [3, 2, 1], "x": "v"}}
-    meta_path = tmp_path / "change.json"
+    meta_path = tmp_path / "quest.json"
     _write_quest_json(meta_path, meta)
     assert meta_path.read_text() == json.dumps(meta, indent=2, sort_keys=True)
 
 
 def test_write_quest_json_replaces_existing_content(tmp_path: Path) -> None:
-    meta_path = tmp_path / "change.json"
+    meta_path = tmp_path / "quest.json"
     meta_path.write_text(json.dumps({"layout_version": 1}, indent=2, sort_keys=True))
     _write_quest_json(meta_path, {"layout_version": 2, "title": "renamed"})
     reloaded = json.loads(meta_path.read_text())
@@ -38,7 +38,7 @@ def test_write_quest_json_replaces_existing_content(tmp_path: Path) -> None:
 def test_write_quest_json_preserves_original_on_replace_failure(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    meta_path = tmp_path / "change.json"
+    meta_path = tmp_path / "quest.json"
     original = json.dumps({"layout_version": 1}, indent=2, sort_keys=True)
     meta_path.write_text(original)
     monkeypatch.setattr(os, "replace", _boom)
@@ -52,7 +52,7 @@ def test_write_quest_json_preserves_original_on_replace_failure(
 def test_migration_advances_version_and_leaves_no_temp(tmp_path: Path) -> None:
     _seed_control(tmp_path)
     ch = Change.create(tmp_path, title="x", quest_id="mig01", base_branch="main")
-    meta_path = ch.quest_dir / "change.json"
+    meta_path = ch.quest_dir / "quest.json"
     meta = json.loads(meta_path.read_text())
     meta["layout_version"] = 4                       # pretend it was written by v4
     meta_path.write_text(json.dumps(meta, indent=2, sort_keys=True))
@@ -70,7 +70,7 @@ def test_rename_setter_preserves_quest_json_on_replace_failure(
     _seed_control(tmp_path)
     ch = Change.create(tmp_path, title="Original", quest_id="atom01",
                        base_branch="main")
-    meta_path = ch.quest_dir / "change.json"
+    meta_path = ch.quest_dir / "quest.json"
     original = meta_path.read_text()
     assert '"title": "Original"' in original
 
@@ -80,7 +80,7 @@ def test_rename_setter_preserves_quest_json_on_replace_failure(
         ch.rename("Renamed", log=ch.event_log())
 
     # The setter routed through the atomic helper: os.replace raised, so the
-    # live change.json is byte-for-byte the pre-rename content and no temp leaks.
+    # live quest.json is byte-for-byte the pre-rename content and no temp leaks.
     assert meta_path.read_text() == original
     assert "Renamed" not in meta_path.read_text()
     assert not list(ch.quest_dir.glob(".change-*"))
@@ -91,7 +91,7 @@ def test_migration_preserves_quest_json_on_replace_failure(
 ) -> None:
     _seed_control(tmp_path)
     ch = Change.create(tmp_path, title="x", quest_id="mig02", base_branch="main")
-    meta_path = ch.quest_dir / "change.json"
+    meta_path = ch.quest_dir / "quest.json"
     meta = json.loads(meta_path.read_text())
     meta["layout_version"] = 4
     meta_path.write_text(json.dumps(meta, indent=2, sort_keys=True))

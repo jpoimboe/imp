@@ -87,19 +87,19 @@ EXCLUDED_DIRS = frozenset({".imp", ".git"})
 
 def within_artifacts(rel: Path) -> bool:
     """True when `rel` (worktree-relative) IS a change's artifacts subtree or sits
-    inside it: .imp/changes/<id>/artifacts[/...]."""
+    inside it: .imp/quests/<id>/artifacts[/...]."""
     parts = rel.parts
     return (len(parts) >= 4 and parts[0] == ".imp"
-            and parts[1] == "changes" and parts[3] == "artifacts")
+            and parts[1] == "quests" and parts[3] == "artifacts")
 
 
 def leads_to_or_within_artifacts(rel: Path) -> bool:
-    """`within_artifacts` plus the ancestor dirs (.imp, .imp/changes,
-    .imp/changes/<id>) that lead down to a change's artifacts subtree."""
+    """`within_artifacts` plus the ancestor dirs (.imp, .imp/quests,
+    .imp/quests/<id>) that lead down to a change's artifacts subtree."""
     parts = rel.parts
-    if parts in {(".imp",), (".imp", "changes")}:
+    if parts in {(".imp",), (".imp", "quests")}:
         return True
-    if len(parts) == 3 and parts[0] == ".imp" and parts[1] == "changes":
+    if len(parts) == 3 and parts[0] == ".imp" and parts[1] == "quests":
         return True
     return within_artifacts(rel)
 

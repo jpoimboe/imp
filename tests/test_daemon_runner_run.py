@@ -53,9 +53,9 @@ async def test_run_daemon_relays_a_resident_session_event_and_cleans_up(
 ) -> None:
     _seed_control(tmp_path)
     cid = "2026-06-13-abc"
-    home = tmp_path / ".imp" / "changes" / cid
+    home = tmp_path / ".imp" / "quests" / cid
     home.mkdir(parents=True, exist_ok=True)
-    (home / "change.json").write_text("{}")
+    (home / "quest.json").write_text("{}")
     monkeypatch.setattr(
         "imp.remote.daemon.discover.snapshot",
         lambda _cr, c: ("running", "plan", "T") if c == cid else None)
@@ -311,9 +311,9 @@ async def test_run_daemon_reaps_archived_homes_at_startup(tmp_path: Path) -> Non
 
     _seed_control(tmp_path)
     cid = "archived-leftover"
-    home = tmp_path / ".imp" / "changes" / cid
+    home = tmp_path / ".imp" / "quests" / cid
     (home / "state").mkdir(parents=True)
-    (home / "change.json").write_text(json.dumps({
+    (home / "quest.json").write_text(json.dumps({
         "id": cid, "title": cid, "base_branch": "main",
         "created_at": "2026-06-01T00:00:00+00:00"}))
     (home / "state" / "state.json").write_text(json.dumps({
@@ -324,7 +324,7 @@ async def test_run_daemon_reaps_archived_homes_at_startup(tmp_path: Path) -> Non
         '"payload":{"id":"archived-leftover"}}\n')
     archive.archive_quest(
         tmp_path, cid, events_path=home / "events.jsonl",
-        quest_json_path=home / "change.json",
+        quest_json_path=home / "quest.json",
         state_json_path=home / "state" / "state.json")
 
     shutdown = anyio.Event()

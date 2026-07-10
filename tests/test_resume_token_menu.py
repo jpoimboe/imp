@@ -27,7 +27,7 @@ def _row(cid: str, last: str = "2026-06-11T00:00:00+00:00",
 def _archive_terminal(control: Path, cid: str, status: str) -> None:
     events = control / f"{cid}.jsonl"
     events.write_text("")
-    cj = control / f"{cid}.change.json"
+    cj = control / f"{cid}.quest.json"
     cj.write_text(json.dumps({
         "id": cid, "title": cid.title(), "base_branch": "main",
         "created_at": "2026-06-01T00:00:00+00:00", "depends_on": []}))

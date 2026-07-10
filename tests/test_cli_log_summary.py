@@ -13,9 +13,9 @@ from imp.engine.change import LAYOUT_VERSION
 def _make_worktree(control: Path, slug: str, status: str = "paused") -> None:
     from imp.engine.state import State
 
-    quest_dir = control / ".imp" / "changes" / slug
+    quest_dir = control / ".imp" / "quests" / slug
     (quest_dir / "state").mkdir(parents=True)
-    (quest_dir / "change.json").write_text(
+    (quest_dir / "quest.json").write_text(
         json.dumps({"id": slug, "title": slug, "base_branch": "main",
                     "created_at": "2026-01-01T00:00:00+00:00",
                     "layout_version": LAYOUT_VERSION}))
@@ -78,9 +78,9 @@ def test_summary_paused_open_step_reads_paused_not_running(tmp_path, monkeypatch
     from imp.engine.state import State
 
     cid = "paused-open"
-    quest_dir = tmp_path / ".imp" / "changes" / cid
+    quest_dir = tmp_path / ".imp" / "quests" / cid
     (quest_dir / "state").mkdir(parents=True)
-    (quest_dir / "change.json").write_text(json.dumps(
+    (quest_dir / "quest.json").write_text(json.dumps(
         {"id": cid, "title": cid, "base_branch": "main",
          "created_at": "2026-01-01T00:00:00+00:00", "layout_version": LAYOUT_VERSION}))
     events = [

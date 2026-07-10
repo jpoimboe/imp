@@ -54,7 +54,7 @@ def test_run_verify_fast_command_succeeds(tmp_path: Path) -> None:
     project.mkdir()
     proc = _run("run-verify.sh", "fast", env_extra={
         "IMP_PROJECT_ROOT": str(project), "IMP_TEST_CMD_FAST": "true",
-        "IMP_CHANGE_DIR": str(project / ".imp" / "change")})
+        "IMP_QUEST_DIR": str(project / ".imp" / "change")})
     assert proc.returncode == 0, proc.stderr
 
 
@@ -63,7 +63,7 @@ def test_run_verify_fast_command_fails(tmp_path: Path) -> None:
     project.mkdir()
     proc = _run("run-verify.sh", "fast", env_extra={
         "IMP_PROJECT_ROOT": str(project), "IMP_TEST_CMD_FAST": "false",
-        "IMP_CHANGE_DIR": str(project / ".imp" / "change")})
+        "IMP_QUEST_DIR": str(project / ".imp" / "change")})
     assert proc.returncode != 0
 
 
@@ -80,7 +80,7 @@ def test_run_verify_timeout_exits_124_with_per_tier_diagnosis(
     project.mkdir()
     proc = _run("run-verify.sh", tier, env_extra={
         "IMP_PROJECT_ROOT": str(project), cmd_var: "sleep 5",
-        timeout_var: "1", "IMP_CHANGE_DIR": str(project / ".imp" / "change")})
+        timeout_var: "1", "IMP_QUEST_DIR": str(project / ".imp" / "change")})
     assert proc.returncode == 124, proc.stderr
     assert key in proc.stdout
     assert "gate ceiling" in proc.stdout
@@ -126,7 +126,7 @@ def test_run_verify_slow_uses_slow_command(tmp_path: Path) -> None:
         "IMP_PROJECT_ROOT": str(project),
         "IMP_TEST_CMD_FAST": f'sh -c "echo f > {fast_marker}"',
         "IMP_TEST_CMD_SLOW": f'sh -c "echo s > {slow_marker}"',
-        "IMP_CHANGE_DIR": str(project / ".imp" / "change")})
+        "IMP_QUEST_DIR": str(project / ".imp" / "change")})
     assert proc.returncode == 0, proc.stderr
     assert slow_marker.exists()
     assert not fast_marker.exists()   # fast command never ran under the slow tier
@@ -142,7 +142,7 @@ def test_run_verify_slow_falls_back_to_fast_command_when_slow_empty(
     proc = _run("run-verify.sh", "slow", env_extra={
         "IMP_PROJECT_ROOT": str(project),
         "IMP_TEST_CMD_FAST": f'sh -c "echo ok > {marker}"',
-        "IMP_CHANGE_DIR": str(project / ".imp" / "change")},
+        "IMP_QUEST_DIR": str(project / ".imp" / "change")},
         env_remove=("IMP_TEST_CMD_SLOW",))
     assert proc.returncode == 0, proc.stderr
     assert marker.read_text().strip() == "ok"   # fast command executed under slow tier
@@ -155,7 +155,7 @@ def test_run_verify_slow_timeout_default_when_unset(tmp_path: Path) -> None:
     project.mkdir()
     proc = _run("run-verify.sh", "slow", env_extra={
         "IMP_PROJECT_ROOT": str(project), "IMP_TEST_CMD_SLOW": "sleep 2",
-        "IMP_CHANGE_DIR": str(project / ".imp" / "change")},
+        "IMP_QUEST_DIR": str(project / ".imp" / "change")},
         env_remove=("IMP_TEST_CMD_SLOW_TIMEOUT",))
     assert proc.returncode == 0, proc.stderr
     assert "gate ceiling" not in proc.stdout
@@ -176,14 +176,14 @@ def test_fast_and_slow_skip_caches_are_independent(tmp_path: Path) -> None:
     fast = _run("run-verify.sh", "fast", env_extra={
         "IMP_PROJECT_ROOT": str(project),
         "IMP_TEST_CMD_FAST": f'sh -c "echo x >> {fast_counter}"',
-        "IMP_CHANGE_DIR": str(quest_dir)})
+        "IMP_QUEST_DIR": str(quest_dir)})
     assert fast.returncode == 0, fast.stderr
     assert fast_counter.read_text().count("x") == 1
 
     slow = _run("run-verify.sh", "slow", env_extra={
         "IMP_PROJECT_ROOT": str(project),
         "IMP_TEST_CMD_SLOW": f'sh -c "echo y >> {slow_counter}"',
-        "IMP_CHANGE_DIR": str(quest_dir)})
+        "IMP_QUEST_DIR": str(quest_dir)})
     assert slow.returncode == 0, slow.stderr
     assert slow_counter.read_text().count("y") == 1   # slow ran despite fast's green cache
     assert "skipped" not in slow.stdout
@@ -204,13 +204,13 @@ def test_run_verify_fast_skips_on_unchanged_tree(tmp_path: Path) -> None:
 
     first = _run("run-verify.sh", "fast", env_extra={
         "IMP_PROJECT_ROOT": str(project), "IMP_TEST_CMD_FAST": cmd,
-        "IMP_CHANGE_DIR": str(project / ".imp" / "change")})
+        "IMP_QUEST_DIR": str(project / ".imp" / "change")})
     assert first.returncode == 0
     assert counter.read_text().count("x") == 1
 
     second = _run("run-verify.sh", "fast", env_extra={
         "IMP_PROJECT_ROOT": str(project), "IMP_TEST_CMD_FAST": cmd,
-        "IMP_CHANGE_DIR": str(project / ".imp" / "change")})
+        "IMP_QUEST_DIR": str(project / ".imp" / "change")})
     assert second.returncode == 0
     assert "fast gate skipped — tree unchanged since last green run" in second.stdout
     assert counter.read_text().count("x") == 1   # command NOT re-run
@@ -219,7 +219,7 @@ def test_run_verify_fast_skips_on_unchanged_tree(tmp_path: Path) -> None:
     _git_commit_all(project, "c2")
     third = _run("run-verify.sh", "fast", env_extra={
         "IMP_PROJECT_ROOT": str(project), "IMP_TEST_CMD_FAST": cmd,
-        "IMP_CHANGE_DIR": str(project / ".imp" / "change")})
+        "IMP_QUEST_DIR": str(project / ".imp" / "change")})
     assert third.returncode == 0
     assert counter.read_text().count("x") == 2   # tree changed => re-ran
 
@@ -237,13 +237,13 @@ def test_two_fast_invocations_share_tree_skip_cache(tmp_path: Path) -> None:
 
     verify = _run("run-verify.sh", "fast", env_extra={
         "IMP_PROJECT_ROOT": str(project), "IMP_TEST_CMD_FAST": cmd,
-        "IMP_CHANGE_DIR": str(project / ".imp" / "change")})
+        "IMP_QUEST_DIR": str(project / ".imp" / "change")})
     assert verify.returncode == 0, verify.stderr
     assert counter.read_text().count("x") == 1
 
     second_fast = _run("run-verify.sh", "fast", env_extra={
         "IMP_PROJECT_ROOT": str(project), "IMP_TEST_CMD_FAST": cmd,
-        "IMP_CHANGE_DIR": str(project / ".imp" / "change")})
+        "IMP_QUEST_DIR": str(project / ".imp" / "change")})
     assert second_fast.returncode == 0, second_fast.stderr
     assert "fast gate skipped — tree unchanged since last green run" in second_fast.stdout
     assert counter.read_text().count("x") == 1   # second fast invocation did NOT re-run
@@ -258,7 +258,7 @@ def test_run_verify_writes_per_tier_cache_to_quest_dir(tmp_path: Path) -> None:
     home = tmp_path / "home"
     proc = _run("run-verify.sh", "fast", env_extra={
         "IMP_PROJECT_ROOT": str(project), "IMP_TEST_CMD_FAST": "true",
-        "IMP_CHANGE_DIR": str(home)})
+        "IMP_QUEST_DIR": str(home)})
     assert proc.returncode == 0, proc.stderr
     assert (home / "last_green_tree_fast").exists()
     assert not (home / "last_green_tree_slow").exists()   # slow tier untouched
@@ -269,7 +269,7 @@ def test_run_verify_unknown_tier_errors(tmp_path: Path) -> None:
     project.mkdir()
     proc = _run("run-verify.sh", "bogus", env_extra={
         "IMP_PROJECT_ROOT": str(project), "IMP_TEST_CMD_FAST": "true",
-        "IMP_CHANGE_DIR": str(project / ".imp" / "change")})
+        "IMP_QUEST_DIR": str(project / ".imp" / "change")})
     assert proc.returncode == 2
     assert "unknown tier" in proc.stderr
 
@@ -279,7 +279,7 @@ def test_run_verify_no_tier_arg_errors(tmp_path: Path) -> None:
     project.mkdir()
     proc = _run("run-verify.sh", env_extra={
         "IMP_PROJECT_ROOT": str(project), "IMP_TEST_CMD_FAST": "true",
-        "IMP_CHANGE_DIR": str(project / ".imp" / "change")})
+        "IMP_QUEST_DIR": str(project / ".imp" / "change")})
     assert proc.returncode != 0
     assert "usage" in proc.stderr
 
@@ -290,7 +290,7 @@ def test_run_verify_merges_gate_stderr_into_stdout(tmp_path: Path) -> None:
     proc = _run("run-verify.sh", "fast", env_extra={
         "IMP_PROJECT_ROOT": str(project),
         "IMP_TEST_CMD_FAST": "echo to-out; echo to-err >&2; exit 1",
-        "IMP_CHANGE_DIR": str(project / ".imp" / "change")})
+        "IMP_QUEST_DIR": str(project / ".imp" / "change")})
     assert proc.returncode != 0
     assert "to-out" in proc.stdout
     assert "to-err" in proc.stdout          # gate stderr merged onto stdout
@@ -303,7 +303,7 @@ def test_run_verify_failure_tail_is_last_on_stdout(tmp_path: Path) -> None:
     proc = _run("run-verify.sh", "fast", env_extra={
         "IMP_PROJECT_ROOT": str(project),
         "IMP_TEST_CMD_FAST": "echo the-failure-line; exit 1",
-        "IMP_CHANGE_DIR": str(project / ".imp" / "change")})
+        "IMP_QUEST_DIR": str(project / ".imp" / "change")})
     assert proc.returncode == 1
     assert "the-failure-line" in proc.stdout
     assert "gate failed (exit 1)" in proc.stdout
@@ -318,7 +318,7 @@ def test_run_verify_timeout_guidance_is_last_line_block_on_stdout(tmp_path: Path
         "IMP_PROJECT_ROOT": str(project),
         "IMP_TEST_CMD_FAST": "echo early-output; sleep 5",
         "IMP_TEST_CMD_FAST_TIMEOUT": "1",
-        "IMP_CHANGE_DIR": str(project / ".imp" / "change")})
+        "IMP_QUEST_DIR": str(project / ".imp" / "change")})
     assert proc.returncode == 124
     assert "early-output" in proc.stdout
     assert "test_cmd_fast_timeout" in proc.stdout
@@ -334,7 +334,7 @@ def test_run_verify_success_summary_is_silent(tmp_path: Path) -> None:
     proc = _run("run-verify.sh", "fast", env_extra={
         "IMP_PROJECT_ROOT": str(project),
         "IMP_TEST_CMD_FAST": "echo ran-ok; true",
-        "IMP_CHANGE_DIR": str(project / ".imp" / "change")})
+        "IMP_QUEST_DIR": str(project / ".imp" / "change")})
     assert proc.returncode == 0
     assert "ran-ok" in proc.stdout
     assert "gate ceiling" not in proc.stdout
@@ -356,7 +356,7 @@ def test_run_verify_slow_records_verified_tree_on_pass(tmp_path: Path) -> None:
     quest_dir = project / ".imp" / "change"
     proc = _run("run-verify.sh", "slow", env_extra={
         "IMP_PROJECT_ROOT": str(project), "IMP_TEST_CMD_SLOW": "true",
-        "IMP_CHANGE_DIR": str(quest_dir)})
+        "IMP_QUEST_DIR": str(quest_dir)})
     assert proc.returncode == 0, proc.stderr
     tree = _head_tree(project)
     assert (quest_dir / "last_verified_tree_slow").read_text().strip() == tree
@@ -372,7 +372,7 @@ def test_run_verify_slow_records_verified_tree_on_fail(tmp_path: Path) -> None:
     quest_dir = project / ".imp" / "change"
     proc = _run("run-verify.sh", "slow", env_extra={
         "IMP_PROJECT_ROOT": str(project), "IMP_TEST_CMD_SLOW": "false",
-        "IMP_CHANGE_DIR": str(quest_dir)})
+        "IMP_QUEST_DIR": str(quest_dir)})
     assert proc.returncode != 0
     tree = _head_tree(project)
     assert (quest_dir / "last_verified_tree_slow").read_text().strip() == tree
@@ -392,7 +392,7 @@ def test_run_verify_slow_timeout_records_verified_tree_not_green(tmp_path: Path)
     proc = _run("run-verify.sh", "slow", env_extra={
         "IMP_PROJECT_ROOT": str(project), "IMP_TEST_CMD_SLOW": "sleep 5",
         "IMP_TEST_CMD_SLOW_TIMEOUT": "1",
-        "IMP_CHANGE_DIR": str(quest_dir)})
+        "IMP_QUEST_DIR": str(quest_dir)})
     assert proc.returncode == 124, proc.stderr
     tree = _head_tree(project)
     assert (quest_dir / "last_verified_tree_slow").read_text().strip() == tree
@@ -408,7 +408,7 @@ def test_run_verify_fast_does_not_record_verified_tree_slow(tmp_path: Path) -> N
     quest_dir = project / ".imp" / "change"
     proc = _run("run-verify.sh", "fast", env_extra={
         "IMP_PROJECT_ROOT": str(project), "IMP_TEST_CMD_FAST": "true",
-        "IMP_CHANGE_DIR": str(quest_dir)})
+        "IMP_QUEST_DIR": str(quest_dir)})
     assert proc.returncode == 0, proc.stderr
     assert not (quest_dir / "last_verified_tree_slow").exists()   # slow-only stamp
 
@@ -425,7 +425,7 @@ def test_run_verify_slow_no_command_stamps_tree_as_cleared(tmp_path: Path) -> No
     quest_dir = project / ".imp" / "change"
     proc = _run("run-verify.sh", "slow",
                 env_extra={"IMP_PROJECT_ROOT": str(project),
-                           "IMP_CHANGE_DIR": str(quest_dir)},
+                           "IMP_QUEST_DIR": str(quest_dir)},
                 env_remove=("IMP_TEST_CMD_FAST", "IMP_TEST_CMD_SLOW"))
     assert proc.returncode == 0, proc.stderr
     assert "no test command configured" in proc.stdout
@@ -445,7 +445,7 @@ def test_run_verify_fast_no_command_stamps_only_its_tier(tmp_path: Path) -> None
     quest_dir = project / ".imp" / "change"
     proc = _run("run-verify.sh", "fast",
                 env_extra={"IMP_PROJECT_ROOT": str(project),
-                           "IMP_CHANGE_DIR": str(quest_dir)},
+                           "IMP_QUEST_DIR": str(quest_dir)},
                 env_remove=("IMP_TEST_CMD_FAST",))
     assert proc.returncode == 0, proc.stderr
     assert (quest_dir / "last_green_tree_fast").read_text().strip() == _head_tree(project)

@@ -79,7 +79,7 @@ def test_no_worktree_before_go_live_is_noop(tmp_path: Path) -> None:
     # A draft: project_root == control_root (no dedicated worktree yet). Even a
     # dirty control root must not trigger the check.
     _seed_control(tmp_path)
-    quest_dir = tmp_path / ".imp" / "changes" / "draft"
+    quest_dir = tmp_path / ".imp" / "quests" / "draft"
     (quest_dir / "state").mkdir(parents=True)
     ch = Change(
         id="draft", title="t", base_branch="main",
@@ -102,7 +102,7 @@ def test_non_git_flipped_project_root_is_noop(tmp_path: Path) -> None:
     control.mkdir()
     fake_root = tmp_path / "flipped"      # bare dir, never git-inited
     fake_root.mkdir()
-    quest_dir = control / ".imp" / "changes" / "flip"
+    quest_dir = control / ".imp" / "quests" / "flip"
     (quest_dir / "state").mkdir(parents=True)
     ch = Change(
         id="flip", title="t", base_branch="main",

@@ -36,9 +36,9 @@ def test_session_is_resident_tracks_a_live_session_socket(tmp_path: Path) -> Non
 
 
 def _make_home(control_root: Path, quest_id: str) -> Path:
-    home = control_root / ".imp" / "changes" / quest_id
+    home = control_root / ".imp" / "quests" / quest_id
     home.mkdir(parents=True, exist_ok=True)
-    (home / "change.json").write_text(json.dumps({"title": quest_id}))
+    (home / "quest.json").write_text(json.dumps({"title": quest_id}))
     return home
 
 

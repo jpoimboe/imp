@@ -377,7 +377,7 @@ def _pause_facts(
     if reason_val is _PauseBanner.STALE:
         if _daemon_stderr_has_crash(change.quest_dir / "daemon.stderr"):
             reason: str | None = (
-                f"ended unexpectedly — see .imp/changes/{change.id}/daemon.stderr")
+                f"ended unexpectedly — see .imp/quests/{change.id}/daemon.stderr")
         else:
             # A resumed-without-pause segment with no crash traceback is a clean
             # deliberate detach — render the calm interrupt reason, no pointer.
@@ -755,7 +755,7 @@ async def _run_cleared_session(
         cleared_model = cleared_model_sink.get("model")
         opening_text = _normalize_opening_reply(reply)
         # Persist the intent durably so the reopened chat's opening step seeds from
-        # change.json (mirroring the imp new path), surviving any later resume.
+        # quest.json (mirroring the imp new path), surviving any later resume.
         change.set_seed_opening(opening_text)
         status = LiveStatus(sys.stdout)
         driver = LiveDriver(
@@ -1102,7 +1102,7 @@ def _resume_opens_fresh(change: Change) -> bool:
 
 def _warn_if_blocked(change: Change) -> None:
     try:
-        deps = json.loads((change.quest_dir / "change.json").read_bytes()).get("depends_on", [])
+        deps = json.loads((change.quest_dir / "quest.json").read_bytes()).get("depends_on", [])
     except (FileNotFoundError, json.JSONDecodeError):
         return
     ready, unmerged = backlog.readiness(change.control_root, deps)
@@ -1284,12 +1284,12 @@ def _display_width() -> int:
 
 
 def _list_quest_homes(control: Path) -> list[str]:
-    """Ids of changes with a permanent root home under .imp/changes/."""
+    """Ids of changes with a permanent root home under .imp/quests/."""
     return live_quest_ids(control)
 
 
 def _quest_home(control: Path, quest_id: str) -> Path:
-    return control / ".imp" / "changes" / quest_id
+    return control / ".imp" / "quests" / quest_id
 
 
 def _iter_quest_ids(control: Path) -> list[str]:
@@ -1307,7 +1307,7 @@ def _iter_quest_ids(control: Path) -> list[str]:
 def _title_for_id(control: Path, quest_id: str) -> str | None:
     """Read a Change's current title (worktree home first, archive second)."""
     cdir = _quest_home(control, quest_id)
-    cj = cdir / "change.json"
+    cj = cdir / "quest.json"
     if cj.exists():
         try:
             return str(json.loads(cj.read_bytes())["title"])
@@ -1453,8 +1453,8 @@ def _resolve_intent(events: list[dict[str, Any]]) -> str | None:
 def _quest_meta(control: Path, quest_id: str) -> dict[str, Any] | None:
     cdir = _quest_home(control, quest_id)
     raw: bytes | None
-    if (cdir / "change.json").exists():
-        raw = (cdir / "change.json").read_bytes()
+    if (cdir / "quest.json").exists():
+        raw = (cdir / "quest.json").read_bytes()
     else:
         raw = archive_read.read_quest_json(control, quest_id)
     if raw is None:
@@ -1484,15 +1484,15 @@ def _is_backlog_home(
 
 
 def _unstarted_backlog_meta(control: Path, quest_id: str) -> dict[str, Any] | None:
-    """change.json of a LIVE un-materialized, non-draft-origin, never-conversed,
+    """quest.json of a LIVE un-materialized, non-draft-origin, never-conversed,
     unlocked Backlog home (idea or followup) — sourced from the worktree home
     only, never the archive: an abandoned home leaves an archived
-    materialized:false change.json that would otherwise render as a queued
+    materialized:false quest.json that would otherwise render as a queued
     `status: backlog` brief instead of a History item. None for any archived-only
     id or any home the shared backlog predicate rejects (materialized,
     draft-origin, already-conversed, or lock-live)."""
     cdir = _quest_home(control, quest_id)
-    cj = cdir / "change.json"
+    cj = cdir / "quest.json"
     if not cj.exists():
         return None
     try:
@@ -2213,7 +2213,7 @@ class _HomeScan(NamedTuple):
     """One live change home parsed exactly once for the overview's row builders.
 
     quest_json/state_json are the raw bytes (state_json is None when a home has
-    no state.json yet); meta is the parsed change.json (homes whose change.json
+    no state.json yet); meta is the parsed quest.json (homes whose quest.json
     is missing or malformed are dropped from the scan, so meta is always valid);
     has_user_message records whether events.jsonl holds any user_message event,
     the conversed signal the shared backlog predicate consumes."""
@@ -2252,7 +2252,7 @@ def _scan_quest_homes(control: Path) -> list[_HomeScan]:
     for quest_id in _list_quest_homes(control):
         cdir = _quest_home(control, quest_id)
         try:
-            quest_json = (cdir / "change.json").read_bytes()
+            quest_json = (cdir / "quest.json").read_bytes()
             meta = json.loads(quest_json)
         except (FileNotFoundError, json.JSONDecodeError):
             continue
@@ -2271,7 +2271,7 @@ def _status_row(quest_id: str, state_json: bytes, quest_json: bytes,
                 last_activity: str) -> _Row | None:
     """Pure (id, status, step, last_activity, title, created_at) extractor, fed
     by either worktree file bytes or archive bytes. The archived state.json and
-    change.json are schema-identical to the in-flight ones (both written by
+    quest.json are schema-identical to the in-flight ones (both written by
     State.save / Change.create), so the two sections can't silently drift.
     Returns None on malformed/incomplete JSON so a single corrupt entry can't
     crash the whole `imp list` listing (callers skip None)."""
@@ -2291,14 +2291,14 @@ def _row_for_id(control: Path, quest_id: str) -> _Row | None:
     # the files. Annotate so the None-guard below stays reachable (not dead code).
     state_json: bytes | None
     quest_json: bytes | None
-    if (cdir / "change.json").exists():
-        # A change home mid-creation has change.json written but state.json not
+    if (cdir / "quest.json").exists():
+        # A change home mid-creation has quest.json written but state.json not
         # yet (Change.create is not atomic across the two files). The daemon's
         # scan loop can hit that window, so tolerate it like _scan_quest_homes
         # rather than crashing the whole listing.
         try:
             state_json = (cdir / "state" / "state.json").read_bytes()
-            quest_json = (cdir / "change.json").read_bytes()
+            quest_json = (cdir / "quest.json").read_bytes()
         except FileNotFoundError:
             return None
         last = _last_event_iso(cdir / "events.jsonl") or ""
@@ -2921,7 +2921,7 @@ def _search_active(control: Path, query: str) -> list[_SearchHit]:
 
 
 def _backlog_seed_opening(control: Path, quest_id: str) -> str:
-    cj = _quest_home(control, quest_id) / "change.json"
+    cj = _quest_home(control, quest_id) / "quest.json"
     try:
         meta = json.loads(cj.read_bytes())
     except (OSError, ValueError, TypeError):

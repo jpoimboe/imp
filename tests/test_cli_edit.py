@@ -20,7 +20,7 @@ def _make_draft(control: Path, quest_id: str, *, origin: str = "draft") -> Chang
 
 
 def _meta(change: Change) -> dict:
-    return json.loads((change.quest_dir / "change.json").read_text())
+    return json.loads((change.quest_dir / "quest.json").read_text())
 
 
 def _edit_args(token: str, **kw) -> argparse.Namespace:
@@ -64,7 +64,7 @@ def test_edit_zone_rejected_for_materialized(
     change = _make_draft(tmp_path, "2026-06-24-edit04", origin="draft")
     meta = _meta(change)
     meta["materialized"] = True
-    (change.quest_dir / "change.json").write_text(json.dumps(meta, indent=2,
+    (change.quest_dir / "quest.json").write_text(json.dumps(meta, indent=2,
                                                               sort_keys=True))
     rc = main._cmd_edit(_edit_args("2026-06-24-edit04", backlog=True))
     assert rc == 2
@@ -121,7 +121,7 @@ def test_edit_materialized_title_and_zone_rejects_whole_invocation(
     change = _make_draft(tmp_path, "2026-06-24-edit09", origin="draft")
     meta = _meta(change)
     meta["materialized"] = True
-    (change.quest_dir / "change.json").write_text(json.dumps(meta, indent=2,
+    (change.quest_dir / "quest.json").write_text(json.dumps(meta, indent=2,
                                                               sort_keys=True))
     rc = main._cmd_edit(
         _edit_args("2026-06-24-edit09", title="Renamed", backlog=True))

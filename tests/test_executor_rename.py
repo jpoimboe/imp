@@ -25,7 +25,7 @@ def test_change_rename_is_content_only(tmp_path: Path) -> None:
     ch = Change.create(tmp_path, title="orig",
                        quest_id="aaa111", base_branch="main")
     created_before = json.loads(
-        (ch.quest_dir / "change.json").read_text())["created_at"]
+        (ch.quest_dir / "quest.json").read_text())["created_at"]
     id_before, root_before = ch.id, ch.project_root
 
     returned = ch.rename("Add OAuth", log=ch.event_log())
@@ -34,7 +34,7 @@ def test_change_rename_is_content_only(tmp_path: Path) -> None:
     assert ch.title == "Add OAuth"
     assert ch.id == id_before                       # id never changes
     assert ch.project_root == root_before           # no worktree move
-    meta = json.loads((ch.quest_dir / "change.json").read_text())
+    meta = json.loads((ch.quest_dir / "quest.json").read_text())
     assert meta["title"] == "Add OAuth"
     assert meta["created_at"] == created_before
     assert "id" in meta and "slug" not in meta
@@ -117,7 +117,7 @@ def test_run_change_rename_keeps_id_and_path(
     result = anyio.run(run_change, ch)
     assert result is RunResult.COMPLETED
     assert os.getcwd() == cwd_before
-    # Reload to confirm the rename persisted to change.json (the in-memory ch is
+    # Reload to confirm the rename persisted to quest.json (the in-memory ch is
     # the same object the runner mutated; reloading proves durability).
     reloaded = Change.load(tmp_path, "ccc333")
     assert reloaded.title == "Renamed Thing"

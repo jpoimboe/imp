@@ -251,7 +251,7 @@ def test_pause_facts_stale_with_crash_stderr_renders_unexpected_death_banner(
     from imp.cli.main import _pause_facts
     from imp.engine.change import Change
 
-    quest_dir = tmp_path / ".imp" / "changes" / "mona44"
+    quest_dir = tmp_path / ".imp" / "quests" / "mona44"
     quest_dir.mkdir(parents=True)
     events = [
         ev("1", "step_started", step="task-lead", kind="agent", phase="converge"),
@@ -270,7 +270,7 @@ def test_pause_facts_stale_with_crash_stderr_renders_unexpected_death_banner(
     assert name == "mona44"
     assert phase == "converge"
     assert token == "mona44"
-    assert reason == "ended unexpectedly — see .imp/changes/mona44/daemon.stderr"
+    assert reason == "ended unexpectedly — see .imp/quests/mona44/daemon.stderr"
 
 
 def test_pause_facts_stale_clean_detach_renders_calm_interrupt(
@@ -281,7 +281,7 @@ def test_pause_facts_stale_clean_detach_renders_calm_interrupt(
     from imp.cli.main import _pause_facts
     from imp.engine.change import Change
 
-    quest_dir = tmp_path / ".imp" / "changes" / "mona44"
+    quest_dir = tmp_path / ".imp" / "quests" / "mona44"
     quest_dir.mkdir(parents=True)
     # Same resumed-without-pause STALE event shape as a crash...
     events = [
@@ -311,7 +311,7 @@ def test_pause_facts_stale_empty_stderr_renders_calm_interrupt(tmp_path: Path) -
     # daemon.stderr present but EMPTY (0 bytes): no crash traceback, so a clean
     # detach — the calm interrupt reason, no pointer (the empty-read path,
     # distinct from the missing-file OSError path).
-    quest_dir = tmp_path / ".imp" / "changes" / "mona44"
+    quest_dir = tmp_path / ".imp" / "quests" / "mona44"
     quest_dir.mkdir(parents=True)
     events = [
         ev("1", "step_started", step="task-lead", kind="agent", phase="converge"),
@@ -338,7 +338,7 @@ def test_pause_facts_deliberate_leave_renders_trigger_over_stale(tmp_path: Path)
     # Event log that, WITHOUT a deliberate-leave signal, reads as STALE (a pause
     # followed by a resume) — the daemon-derived path would render the
     # unexpected-death banner. The stamped trigger must win instead.
-    quest_dir = tmp_path / ".imp" / "changes" / "krol99"
+    quest_dir = tmp_path / ".imp" / "quests" / "krol99"
     quest_dir.mkdir(parents=True)
     events = [
         ev("1", "step_started", step="task-lead", kind="agent", phase="implement"),

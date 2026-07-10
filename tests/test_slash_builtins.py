@@ -129,7 +129,7 @@ def test_resume_builtin_rehydrates_resumable_match(tmp_path: Path) -> None:
     out: list[str] = []
     result = handle_slash_line("/resume conv1", change=change, output_fn=out.append)
     assert result is REPROMPT
-    assert (tmp_path / ".imp" / "changes" / "conv1").exists()       # rehydrated live home
+    assert (tmp_path / ".imp" / "quests" / "conv1").exists()       # rehydrated live home
     assert any("imp resume conv1" in line for line in out)          # how to continue
 
 
@@ -153,7 +153,7 @@ def test_resume_builtin_refuses_non_resumable(tmp_path: Path) -> None:
     out: list[str] = []
     result = handle_slash_line("/resume done1", change=change, output_fn=out.append)
     assert result is REPROMPT
-    assert not (tmp_path / ".imp" / "changes" / "done1").exists()   # never rehydrated
+    assert not (tmp_path / ".imp" / "quests" / "done1").exists()   # never rehydrated
     assert any("not resumable" in line for line in out)
 
 
@@ -210,7 +210,7 @@ def test_resume_builtin_live_match_skips_rehydration(tmp_path: Path) -> None:
     assert result is REPROMPT
     assert any("live" in line and "imp resume live1" in line for line in out)
     # live home is still there (not removed/re-created by rehydrate)
-    assert (tmp_path / ".imp" / "changes" / "live1").exists()
+    assert (tmp_path / ".imp" / "quests" / "live1").exists()
 
 
 def test_save_builtin_returns_literal_for_the_gate_loop(tmp_path: Path) -> None:

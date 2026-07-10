@@ -20,7 +20,7 @@ prompt a human; end with `complete_step`.
 ## Orient
 
 In `bash`:
-- `BASE=$(python3 -c "import json;print(json.load(open('{{ change.home }}/change.json'))['base_branch'])")`
+- `BASE=$(python3 -c "import json;print(json.load(open('{{ change.home }}/quest.json'))['base_branch'])")`
 - The base-side incoming diff — what base changed since this branch forked — is
   `git diff "{{ vars.integration_fork }}" "$B"`, where `{{ vars.integration_fork }}` is
   the pre-rebase fork point `P` (carried in the workflow var) and

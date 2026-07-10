@@ -40,7 +40,7 @@ async def test_paused_conversation_round_trips_and_replays_on_resume(
     seeded_bytes = (tdir / "transcript.jsonl").read_bytes()
 
     archive_conversation(ch)
-    assert not (tmp_path / ".imp" / "changes" / "conv").exists()
+    assert not (tmp_path / ".imp" / "quests" / "conv").exists()
 
     quest_dir = rehydrate_quest(tmp_path, "conv")
     restored = quest_dir / "steps" / "p" / "s" / "transcript.jsonl"

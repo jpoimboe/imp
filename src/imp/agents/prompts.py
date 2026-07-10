@@ -175,7 +175,7 @@ def render_label(
     try:
         return render_prompt(label, build_context(
             quest_title=change.title, event_log=log,
-            quest_id=change.id, quest_home=f".imp/changes/{change.id}",
+            quest_id=change.id, quest_home=f".imp/quests/{change.id}",
             cur_base_head=change.cur_base_head,
             orig_base_head=change.orig_base_head,
             vars=state.vars if state is not None else {},

@@ -8,7 +8,7 @@ file is only the durable picture.
 ## Change and its home
 
 A **Change** is one unit of work imp tracks from idea to merge. Each Change has a
-per-change home on disk at `.imp/changes/<id>/` holding its spec, plans, events,
+per-change home on disk at `.imp/quests/<id>/` holding its spec, plans, events,
 and state — its whole record lives there.
 
 ## Statuses

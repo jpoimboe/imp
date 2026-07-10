@@ -48,7 +48,7 @@ def test_discover_exposes_quest_info_and_list_quests() -> None:
     assert "QuestInfo" in names
     assert "list_quests" in names
     assert "Change" "Info" not in names    # split literal so the rename sweep can't rewrite this guard
-    assert "list_" "changes" not in names  # same
+    assert "list_chang" "es" not in names  # split literal so the rename sweep can't rewrite this guard
 
 
 def test_build_record_uses_quest_meta_key() -> None:
@@ -62,4 +62,12 @@ def test_build_record_uses_quest_meta_key() -> None:
 def test_archive_read_exposes_read_quest_json() -> None:
     from imp.engine.archive import read as ar
     assert hasattr(ar, "read_quest_json")
-    assert not hasattr(ar, "read_change_" "json")  # split literal: quest_json broken so rename sweep can't rewrite this guard
+    assert not hasattr(ar, "read_change_" "json")  # split literal: change_json broken so rename sweep can't rewrite this guard
+
+
+def test_archive_index_has_quests_table(tmp_path: Path) -> None:
+    from imp.engine.archive.index import connect
+    conn = connect(tmp_path / "index.db")
+    names = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    assert "quests" in names
+    assert "chang" "es" not in names  # split literal: dodges the rename sweep + straggler grep

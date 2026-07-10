@@ -359,7 +359,7 @@ async def run_change(
 
         flat = workflow.flat_steps()
         index_of = {s.name: i for i, s in enumerate(flat)}
-        # Durable source of truth: the intent survives any resume via change.json,
+        # Durable source of truth: the intent survives any resume via quest.json,
         # not the transient run parameter (which resume loops never re-pass).
         pending_seed = change.seed_opening  # one-shot: consumed at the entry step's fresh render
         opening_step = next((s.name for s in flat if s.kind == "agent"), None)
@@ -686,7 +686,7 @@ def _complete(change: Change, state: State, log: EventLog) -> RunResult:
     archive.archive_quest(
         change.control_root, change.id,
         events_path=change.events_path,
-        quest_json_path=change.quest_dir / "change.json",
+        quest_json_path=change.quest_dir / "quest.json",
         state_json_path=change.state_dir / "state.json",
     )
     shutil.rmtree(change.quest_dir, ignore_errors=True)
@@ -875,7 +875,7 @@ async def _route_script(
     if "{{" in command:
         command = render_prompt(command, build_context(
             quest_title=change.title, event_log=log,
-            quest_id=change.id, quest_home=f".imp/changes/{change.id}",
+            quest_id=change.id, quest_home=f".imp/quests/{change.id}",
             cur_base_head=change.cur_base_head,
             orig_base_head=change.orig_base_head, vars=state.vars,
         ))
@@ -1517,7 +1517,7 @@ async def _run_agent_invocation(
     else:
         ctx = build_context(
             quest_id=change.id, quest_title=change.title,
-            quest_home=f".imp/changes/{change.id}",
+            quest_home=f".imp/quests/{change.id}",
             cur_base_head=change.cur_base_head,
             orig_base_head=change.orig_base_head,
             event_log=log, vars=state.vars,
@@ -1567,7 +1567,7 @@ async def _run_agent_invocation(
         initial_messages=initial_messages,
         quest_context=QuestContext(
             id=change.id, title=change.title,
-            quest_home=f".imp/changes/{change.id}",
+            quest_home=f".imp/quests/{change.id}",
             project_root=change.project_root, workflow_dir=change.workflow_dir,
             project_facts=project_facts or {}, guidance=guidance,
             persona_source=workflow.persona_source,

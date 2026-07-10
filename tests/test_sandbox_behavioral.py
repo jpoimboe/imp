@@ -351,9 +351,9 @@ def test_gate_writing_in_its_cwd_succeeds() -> None:
 
 
 def test_gate_sees_post_rename_title_not_frozen_empty() -> None:
-    """Regression: name-on-intent freezes the policy with IMP_CHANGE_TITLE="" at run
+    """Regression: name-on-intent freezes the policy with IMP_QUEST_TITLE="" at run
     start; after rename_change the gate's fresh env_extra carries the real title.
-    Reproduces the dogfood failure where a `${IMP_CHANGE_*:?not set by engine}`
+    Reproduces the dogfood failure where a `${IMP_QUEST_*:?not set by engine}`
     guard fired inside the bwrap --clearenv jail.
     """
     import dataclasses
@@ -364,16 +364,16 @@ def test_gate_sees_post_rename_title_not_frozen_empty() -> None:
     root = _make_root("imp-test-title-")
     try:
         pol = _active_policy(root)
-        pol = dataclasses.replace(pol, setenv=(*pol.setenv, ("IMP_CHANGE_TITLE", "")))
+        pol = dataclasses.replace(pol, setenv=(*pol.setenv, ("IMP_QUEST_TITLE", "")))
         step = Step(
             name="g", phase="p", kind="script", rules=(), on_max_retries=Pause(),
             max_loops=1, source=SourceLoc(file=Path(__file__), line=1),
-            command=': "${IMP_CHANGE_TITLE:?IMP_CHANGE_TITLE not set by engine}"; '
-                    'printf %s "$IMP_CHANGE_TITLE"',
+            command=': "${IMP_QUEST_TITLE:?IMP_QUEST_TITLE not set by engine}"; '
+                    'printf %s "$IMP_QUEST_TITLE"',
             timeout_seconds=30,
         )
         result = run_script(step, cwd=root, policy=pol,
-                            env_extra={"IMP_CHANGE_TITLE": "Live mode log polish"})
+                            env_extra={"IMP_QUEST_TITLE": "Live mode log polish"})
         assert result["exit"] == 0, f"gate exited {result['exit']}: {result}"
         assert result["stdout"] == "Live mode log polish"
     finally:
@@ -381,7 +381,7 @@ def test_gate_sees_post_rename_title_not_frozen_empty() -> None:
 
 
 def test_bash_tool_uses_live_quest_title_not_stale_snapshot() -> None:
-    """Regression: the bash tool must read IMP_CHANGE_TITLE from the LIVE Change, not
+    """Regression: the bash tool must read IMP_QUEST_TITLE from the LIVE Change, not
     the frozen quest_context snapshot that rename_change never updates. Without the
     fix the agent's own bash sees the empty name-on-intent title inside the sandbox.
     """
@@ -398,7 +398,7 @@ def test_bash_tool_uses_live_quest_title_not_stale_snapshot() -> None:
             project_root=root, workflow_dir=root / ".imp" / "wf")
         ctx.change = _t.SimpleNamespace(
             id="2026-06-10-x", handle="", title="renamed")
-        out = _bash(ctx, 'printf %s "$IMP_CHANGE_TITLE"')
+        out = _bash(ctx, 'printf %s "$IMP_QUEST_TITLE"')
         assert out["returncode"] == 0, out
         assert out["stdout"] == "renamed"
     finally:

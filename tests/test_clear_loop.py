@@ -69,9 +69,9 @@ async def test_run_cleared_session_opens_fresh_new_draft(
     assert captured["leave_state"] is ls              # threads the loop's dict
     change = captured["change"]
     # The typed intent is persisted durably so the reopened chat's opening step
-    # seeds from change.json (survives resume), not via a transient run parameter.
+    # seeds from quest.json (survives resume), not via a transient run parameter.
     assert Change.load(tmp_path, change.id).seed_opening == "build a parser"
-    assert (tmp_path / ".imp" / "changes" / change.id).exists()  # a brand-new draft home
+    assert (tmp_path / ".imp" / "quests" / change.id).exists()  # a brand-new draft home
     assert change.title == ""                          # imp new-style: unnamed draft
 
 
@@ -95,7 +95,7 @@ async def test_run_cleared_session_cancel_returns_130_no_draft(
     rc = await m._run_cleared_session(tmp_path, "main", leave_state={})
 
     assert rc == 130
-    changes_dir = tmp_path / ".imp" / "changes"
+    changes_dir = tmp_path / ".imp" / "quests"
     entries = list(changes_dir.iterdir()) if changes_dir.exists() else []
     assert entries == []
 

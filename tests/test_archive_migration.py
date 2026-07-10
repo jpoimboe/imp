@@ -16,7 +16,7 @@ def _seed_change(control: Path, cid: str, last_ts: str) -> None:
     events.write_text(
         f'{{"id":"{cid}-e0","timestamp":"{last_ts}","type":"change_created",'
         f'"payload":{{}}}}\n')
-    quest_json = control / f"{cid}-change.json"
+    quest_json = control / f"{cid}-quest.json"
     quest_json.write_text(json.dumps({
         "id": cid, "title": cid.title(), "base_branch": "main",
         "created_at": "2026-06-01T00:00:00+00:00", "depends_on": []}))
@@ -36,7 +36,7 @@ def _write_legacy_v0_db(db_path: Path) -> None:
     conn = sqlite3.connect(db_path)
     try:
         conn.execute(
-            "CREATE TABLE changes (id TEXT PRIMARY KEY, title TEXT, base TEXT,"
+            "CREATE TABLE quests (id TEXT PRIMARY KEY, title TEXT, base TEXT,"
             " created_at TEXT, status TEXT, step TEXT, events_hash TEXT,"
             " ingested_at TEXT)")
         conn.execute("CREATE TABLE deps (quest_id TEXT, depends_on_id TEXT)")
@@ -46,7 +46,7 @@ def _write_legacy_v0_db(db_path: Path) -> None:
         conn.execute(
             "CREATE INDEX idx_events_change_seq ON events(quest_id, seq)")
         conn.execute(
-            "INSERT INTO changes (id, title, status) VALUES"
+            "INSERT INTO quests (id, title, status) VALUES"
             " ('stale', 'Stale Bogus', 'completed')")
         conn.execute(
             "INSERT INTO events (quest_id, seq, ts) VALUES ('stale', 0, 'x')")
@@ -57,18 +57,18 @@ def _write_legacy_v0_db(db_path: Path) -> None:
 
 
 def _write_stale_v2_db(db_path: Path) -> None:
-    """A v2 db: changes/deps present but NO content column, user_version 2, a
+    """A v2 db: quests/deps present but NO content column, user_version 2, a
     bogus 'stale' row. Records/blobs on disk carry the real events, so a rebuild
     backfills content for the real rows and drops 'stale'."""
     db_path.unlink(missing_ok=True)
     conn = sqlite3.connect(db_path)
     try:
         conn.execute(
-            "CREATE TABLE changes (id TEXT PRIMARY KEY, title TEXT, base TEXT,"
+            "CREATE TABLE quests (id TEXT PRIMARY KEY, title TEXT, base TEXT,"
             " created_at TEXT, status TEXT, step TEXT, events_hash TEXT,"
             " ingested_at TEXT, last_event_ts TEXT)")
         conn.execute("CREATE TABLE deps (quest_id TEXT, depends_on_id TEXT)")
-        conn.execute("INSERT INTO changes (id, title) VALUES ('stale', 'Stale')")
+        conn.execute("INSERT INTO quests (id, title) VALUES ('stale', 'Stale')")
         conn.execute("PRAGMA user_version = 2")
         conn.commit()
     finally:
@@ -85,7 +85,7 @@ def _seed_prose_change(control: Path, cid: str, body: str) -> None:
             "content": [{"type": "text", "text": body}],
             "stop_reason": "end_turn",
             "usage": {"input_tokens": 1, "output_tokens": 1}}}}) + "\n")
-    quest_json = control / f"{cid}-change.json"
+    quest_json = control / f"{cid}-quest.json"
     quest_json.write_text(json.dumps({
         "id": cid, "title": "", "base_branch": "main",
         "created_at": "2026-06-01T00:00:00+00:00", "depends_on": []}))
@@ -119,10 +119,10 @@ def _rows_by_id(db: Path) -> dict[str, str | None]:
     try:
         try:
             return {r[0]: r[1] for r in conn.execute(
-                "SELECT id, last_event_ts FROM changes")}
+                "SELECT id, last_event_ts FROM quests")}
         except sqlite3.OperationalError:
             # Legacy v0 schema lacks last_event_ts; return ids with None values.
-            return {r[0]: None for r in conn.execute("SELECT id FROM changes")}
+            return {r[0]: None for r in conn.execute("SELECT id FROM quests")}
     finally:
         conn.close()
 
@@ -160,7 +160,7 @@ def test_ensure_current_migrates_legacy_v0_db(tmp_path: Path) -> None:
 def test_completed_rows_migrates_before_query(tmp_path: Path) -> None:
     _seed_change(tmp_path, "alpha", "2026-06-01T00:00:01+00:00")
     db = archive.index_path(tmp_path)
-    _write_legacy_v0_db(db)  # legacy 'changes' has no last_event_ts column
+    _write_legacy_v0_db(db)  # legacy db (user_version 0) lacks last_event_ts column
 
     rows = read.completed_rows(tmp_path)
 
@@ -213,7 +213,7 @@ def test_concurrent_migration_reads_and_ingest_lose_nothing(tmp_path: Path) -> N
     w_events.write_text(
         '{"id":"writer-e0","timestamp":"2026-06-02T00:00:00+00:00",'
         '"type":"change_created","payload":{}}\n')
-    w_change = control / "writer-change.json"
+    w_change = control / "writer-quest.json"
     w_change.write_text(json.dumps({
         "id": "writer", "title": "Writer", "base_branch": "main",
         "created_at": "2026-06-02T00:00:00+00:00", "depends_on": []}))
@@ -261,7 +261,7 @@ def test_rebuild_backfills_content_column(tmp_path: Path) -> None:
     assert _user_version(db) == 4
     conn = sqlite3.connect(db)
     try:
-        rows = {r[0]: r[1] for r in conn.execute("SELECT id, content FROM changes")}
+        rows = {r[0]: r[1] for r in conn.execute("SELECT id, content FROM quests")}
     finally:
         conn.close()
     assert "stale" not in rows                    # rebuilt from records, not the old db
@@ -287,7 +287,7 @@ def test_schema_bump_reindexes_and_drops_injected_prompt(tmp_path: Path) -> None
                       "payload": {"content": [{"type": "text",
                                                "text": "please use HUMANTERM"}],
                                   "human": True}}) + "\n")
-    quest_json = control / f"{cid}-change.json"
+    quest_json = control / f"{cid}-quest.json"
     quest_json.write_text(json.dumps({
         "id": cid, "title": "", "base_branch": "main",
         "created_at": "2026-06-01T00:00:00+00:00", "depends_on": []}))
@@ -301,7 +301,7 @@ def test_schema_bump_reindexes_and_drops_injected_prompt(tmp_path: Path) -> None
     db = archive.index_path(control)
     conn = sqlite3.connect(db)
     try:
-        conn.execute("UPDATE changes SET content = ? WHERE id = ?",
+        conn.execute("UPDATE quests SET content = ? WHERE id = ?",
                      ("INJECTED cover-check prompt\nplease use HUMANTERM", cid))
         conn.execute("PRAGMA user_version = 3")   # pre-bump index
         conn.commit()
@@ -314,7 +314,7 @@ def test_schema_bump_reindexes_and_drops_injected_prompt(tmp_path: Path) -> None
     conn = sqlite3.connect(db)
     try:
         content = conn.execute(
-            "SELECT content FROM changes WHERE id = ?", (cid,)).fetchone()[0]
+            "SELECT content FROM quests WHERE id = ?", (cid,)).fetchone()[0]
     finally:
         conn.close()
     assert "INJECTED" not in content              # injected prompt dropped by reindex

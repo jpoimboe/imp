@@ -14,7 +14,7 @@ from tests.conftest import _seed_control
 def _archive_terminal(tmp_path: Path, quest_id: str, status: str) -> None:
     events = tmp_path / f"{quest_id}.jsonl"
     events.write_text("")
-    cj = tmp_path / f"{quest_id}.change.json"
+    cj = tmp_path / f"{quest_id}.quest.json"
     cj.write_text(json.dumps({
         "id": quest_id, "title": quest_id.title(), "base_branch": "main",
         "created_at": "2026-06-01T00:00:00+00:00", "depends_on": []}))
@@ -30,19 +30,19 @@ def test_rehydrate_resumable_rebuilds_and_loads(tmp_path: Path) -> None:
     ch = Change.create_draft(tmp_path, title="Conv", quest_id="conv",
                              base_branch="main")
     archive_conversation(ch)                              # resumable, live home dropped
-    assert not (tmp_path / ".imp" / "changes" / "conv").exists()
+    assert not (tmp_path / ".imp" / "quests" / "conv").exists()
 
     loaded = m._rehydrate_resumable(tmp_path, "conv")
     assert loaded is not None
     assert loaded.id == "conv"
-    assert (tmp_path / ".imp" / "changes" / "conv").exists()   # live home rebuilt
+    assert (tmp_path / ".imp" / "quests" / "conv").exists()   # live home rebuilt
     assert State.load(loaded.state_dir).status == "paused"     # the resumable resting status
 
 
 def test_rehydrate_resumable_returns_none_for_terminal_record(tmp_path: Path) -> None:
     _archive_terminal(tmp_path, "done", "completed")
     assert m._rehydrate_resumable(tmp_path, "done") is None
-    assert not (tmp_path / ".imp" / "changes" / "done").exists()   # never rebuilt
+    assert not (tmp_path / ".imp" / "quests" / "done").exists()   # never rebuilt
 
 
 def test_rehydrate_resumable_unknown_returns_none(tmp_path: Path) -> None:
@@ -55,7 +55,7 @@ def test_load_or_rehydrate_returns_resume_gone_rc_for_terminal(tmp_path: Path) -
     # completed"), NOT a rehydrate.
     result = m._load_or_rehydrate(tmp_path, "done")
     assert result == 0
-    assert not (tmp_path / ".imp" / "changes" / "done").exists()
+    assert not (tmp_path / ".imp" / "quests" / "done").exists()
 
 
 def test_load_or_rehydrate_returns_loaded_change_for_resumable(tmp_path: Path) -> None:

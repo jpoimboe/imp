@@ -16,7 +16,7 @@ def test_resume_layout_mismatch_prints_actionable_not_resume_gone(
 ) -> None:
     _seed_control(tmp_path)
     ch = Change.create(tmp_path, title="x", quest_id="feat", base_branch="main")
-    meta_path = ch.quest_dir / "change.json"
+    meta_path = ch.quest_dir / "quest.json"
     meta = json.loads(meta_path.read_text())
     meta["layout_version"] = 999                 # contradictory stored version
     meta["imp_commit"] = "cafef00d"

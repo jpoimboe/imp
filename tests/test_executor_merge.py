@@ -70,9 +70,9 @@ def test_merge_step_merges_then_complete_archives_and_removes(tmp_path: Path) ->
     conn = index.connect(archive.index_path(tmp_path))
     try:
         assert conn.execute(
-            "SELECT status FROM changes WHERE id='feat'").fetchone() == ("completed",)
+            "SELECT status FROM quests WHERE id='feat'").fetchone() == ("completed",)
         assert conn.execute(
-            "SELECT last_event_ts FROM changes WHERE id='feat'"
+            "SELECT last_event_ts FROM quests WHERE id='feat'"
         ).fetchone()[0] is not None
     finally:
         conn.close()

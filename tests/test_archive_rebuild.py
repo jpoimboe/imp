@@ -39,7 +39,7 @@ def _archive_one(control: Path, cid: str, dep: str, etype: str) -> None:
         f'{{"id":"{cid}-e0","parent_id":null,"agent_id":null,'
         f'"timestamp":"2026-06-01T00:00:01+00:00","type":"{etype}",'
         f'"payload":{{}}}}\n')
-    quest_json = control / f"{cid}-change.json"
+    quest_json = control / f"{cid}-quest.json"
     quest_json.write_text(json.dumps({
         "id": cid, "title": cid.title(), "base_branch": "main",
         "created_at": "2026-06-01T00:00:00+00:00", "depends_on": [dep]}))
@@ -53,9 +53,9 @@ def _archive_one(control: Path, cid: str, dep: str, etype: str) -> None:
 
 def _snapshot(conn) -> dict:
     return {
-        "changes": sorted(conn.execute(
+        "quests": sorted(conn.execute(
             "SELECT id, title, base, created_at, status, step, events_hash,"
-            " last_event_ts FROM changes").fetchall()),
+            " last_event_ts FROM quests").fetchall()),
         "deps": sorted(conn.execute(
             "SELECT quest_id, depends_on_id FROM deps").fetchall()),
     }
@@ -82,8 +82,8 @@ def test_rebuild_reproduces_index_contents(tmp_path: Path) -> None:
         conn.close()
 
     assert after == before
-    assert after["changes"]  # non-empty: the rebuild actually loaded rows
-    assert all(row[7] for row in after["changes"])  # last_event_ts populated
+    assert after["quests"]  # non-empty: the rebuild actually loaded rows
+    assert all(row[7] for row in after["quests"])  # last_event_ts populated
 
 
 def test_rebuild_keeps_original_rows_queryable_during_ingest(
@@ -104,7 +104,7 @@ def test_rebuild_keeps_original_rows_queryable_during_ingest(
             reader = sqlite3.connect(archive.index_path(tmp_path))
             try:
                 observed["ids"] = {
-                    r[0] for r in reader.execute("SELECT id FROM changes")}
+                    r[0] for r in reader.execute("SELECT id FROM quests")}
             finally:
                 reader.close()
         return real_ingest(conn, rec, events)
@@ -120,7 +120,7 @@ def test_rebuild_keeps_original_rows_queryable_during_ingest(
     # Final content reproduced from records + blobs.
     conn = index.connect(archive.index_path(tmp_path))
     try:
-        ids = {r[0] for r in conn.execute("SELECT id FROM changes")}
+        ids = {r[0] for r in conn.execute("SELECT id FROM quests")}
     finally:
         conn.close()
     assert ids == {"alpha", "gamma"}
@@ -155,8 +155,8 @@ def test_rebuild_on_non_tty_emits_nothing_and_indexes(tmp_path: Path, monkeypatc
 
     conn = index.connect(archive.index_path(tmp_path))
     try:
-        ids = {r[0] for r in conn.execute("SELECT id FROM changes")}
-        ts = {r[0] for r in conn.execute("SELECT last_event_ts FROM changes")}
+        ids = {r[0] for r in conn.execute("SELECT id FROM quests")}
+        ts = {r[0] for r in conn.execute("SELECT last_event_ts FROM quests")}
     finally:
         conn.close()
     assert ids == {"alpha", "gamma"}   # index still correct/queryable

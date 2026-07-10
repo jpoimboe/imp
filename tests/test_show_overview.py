@@ -31,9 +31,9 @@ def _term(monkeypatch, cols):
 
 def _inflight_home(control, cid, *, title, phase_label, step_label,
                    step="write", intent=None):
-    cdir = control / ".imp" / "changes" / cid
+    cdir = control / ".imp" / "quests" / cid
     (cdir / "state").mkdir(parents=True)
-    (cdir / "change.json").write_text(json.dumps({
+    (cdir / "quest.json").write_text(json.dumps({
         "id": cid, "title": title, "base_branch": "main",
         "created_at": "2026-06-20T11:00:00+00:00",
         "materialized": True, "layout_version": LAYOUT_VERSION}))

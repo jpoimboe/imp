@@ -106,19 +106,19 @@ def test_clearenv_and_setenv_allowlist():
 
 def test_live_engine_env_supersedes_frozen_imp_vars():
     # Regression (name-on-intent + sandbox): a Change is created with an empty
-    # title, so the policy is frozen with IMP_CHANGE_TITLE="" at run start. After
+    # title, so the policy is frozen with IMP_QUEST_TITLE="" at run start. After
     # rename_change the live per-spawn engine_env carries the real title;
     # build_sandbox_argv sources IMP_* from it authoritatively, so a title-dependent
     # gate never sees the frozen "".
     pol = _policy(setenv=(("PATH", "/usr/bin"),
-                          ("IMP_CHANGE_TITLE", ""),
+                          ("IMP_QUEST_TITLE", ""),
                           ("TMPDIR", "/tmp")))
     argv = build_sandbox_argv(
         "x", cwd="/wt", policy=pol,
-        engine_env={"IMP_CHANGE_TITLE": "Live mode log polish",
+        engine_env={"IMP_QUEST_TITLE": "Live mode log polish",
                     "PYTHONPATH": "/wt/src"})
-    assert argv.count("IMP_CHANGE_TITLE") == 1       # not duplicated
-    i = argv.index("IMP_CHANGE_TITLE")
+    assert argv.count("IMP_QUEST_TITLE") == 1       # not duplicated
+    i = argv.index("IMP_QUEST_TITLE")
     assert argv[i + 1] == "Live mode log polish"   # fresh value wins
     # the single deliberate non-IMP_ passthrough
     assert "--setenv PYTHONPATH /wt/src" in " ".join(argv)
@@ -650,7 +650,7 @@ def test_argv_binds_match_bind_plan():
 
 def test_resolve_policy_binds_quest_home_rw(tmp_path):
     control, wt = _layout(tmp_path)
-    home = control / ".imp" / "changes" / "abc"
+    home = control / ".imp" / "quests" / "abc"
     pol = resolve_policy(
         worktree=wt, control_root=control, quest_id="abc",
         cfg=SandboxConfig(), engine_env_result={}, environ={},
@@ -678,7 +678,7 @@ def test_readonly_overlay_denies_write_inside_allows_sibling():
 def test_readonly_overlay_whole_worktree_keeps_quest_home_writable():
     p = _policy(
         worktree="/ctl/.imp/worktrees/abc",
-        quest_home="/ctl/.imp/changes/abc",
+        quest_home="/ctl/.imp/quests/abc",
         git_common_dir="/ctl/.git",
         git_ro_remask=(), writable_caches=(), extra_readable=(),
         extra_writable=(), secret_dirs=(), secret_files=(),
@@ -687,7 +687,7 @@ def test_readonly_overlay_whole_worktree_keeps_quest_home_writable():
     # Whole-worktree ro overlay: source is locked...
     assert p.allows_write(Path("/ctl/.imp/worktrees/abc/src/x.py")) is False
     # ...but quest_home lives OUTSIDE the worktree, so it stays rw.
-    assert p.allows_write(Path("/ctl/.imp/changes/abc/progress.md")) is True
+    assert p.allows_write(Path("/ctl/.imp/quests/abc/progress.md")) is True
 
 
 def test_writable_cache_wins_over_readonly_overlay():
@@ -889,7 +889,7 @@ def test_ephemeral_home_emitted_early_and_writable():
     # worktree, quest_home and a credential dir all live.
     p = _policy(
         worktree="/home/u/proj/.imp/worktrees/abc",
-        quest_home="/home/u/proj/.imp/changes/abc",
+        quest_home="/home/u/proj/.imp/quests/abc",
         git_common_dir="/home/u/proj/.git",
         git_ro_remask=(), writable_caches=(), extra_readable=(),
         extra_writable=(), secret_dirs=("/run/user/1000",), secret_files=(),
@@ -902,7 +902,7 @@ def test_ephemeral_home_emitted_early_and_writable():
     assert plan[1] == ("/home/u", "tmpfs_rw")
     i_home = plan.index(("/home/u", "tmpfs_rw"))
     i_wt = plan.index(("/home/u/proj/.imp/worktrees/abc", "rw"))
-    i_ch = plan.index(("/home/u/proj/.imp/changes/abc", "rw"))
+    i_ch = plan.index(("/home/u/proj/.imp/quests/abc", "rw"))
     i_claude = plan.index(("/home/u/.claude", "rw"))
     i_mask = plan.index(("/run/user/1000", "mask_dir"))
     assert i_home < i_wt < i_claude          # tmpfs first, cred write-through later
@@ -913,7 +913,7 @@ def test_ephemeral_home_emitted_early_and_writable():
     # dirs are writable — the only real-home paths a spike can write.
     assert p.allows_write(Path("/home/u/.local/bin/x")) is True
     assert p.allows_write(Path("/home/u/proj/.imp/worktrees/abc/src/a.py")) is True
-    assert p.allows_write(Path("/home/u/proj/.imp/changes/abc/progress.md")) is True
+    assert p.allows_write(Path("/home/u/proj/.imp/quests/abc/progress.md")) is True
     assert p.allows_write(Path("/home/u/.claude/.credentials.json")) is True
     assert p.allows_write(Path("/home/u/.codex/auth.json")) is True
     # /run/user mask (emitted last, absolute) still denies.
@@ -992,7 +992,7 @@ def test_resolve_policy_spike_reexposes_worktree_and_quest_home_under_home(tmp_p
     wt.mkdir(parents=True)
     (control / ".git" / "hooks").mkdir(parents=True)
     (control / ".git" / "config").write_text("")
-    quest_home = control / ".imp" / "changes" / "abc"
+    quest_home = control / ".imp" / "quests" / "abc"
     pol = resolve_policy(
         worktree=wt, control_root=control, quest_id="abc",
         cfg=SandboxConfig(home=home), engine_env_result={}, environ={},
@@ -1118,7 +1118,7 @@ def test_resolve_policy_non_spike_default_has_no_spike_binds(tmp_path):
 
 def test_resolve_policy_bakes_workflow_snapshot_overlay(tmp_path):
     control, wt = _layout(tmp_path)
-    quest_dir = control / ".imp" / "changes" / "abc"
+    quest_dir = control / ".imp" / "quests" / "abc"
     (quest_dir / "workflow").mkdir(parents=True)
     pol = resolve_policy(
         worktree=wt, control_root=control, quest_id="abc",
@@ -1130,7 +1130,7 @@ def test_resolve_policy_bakes_workflow_snapshot_overlay(tmp_path):
 
 def test_resolve_policy_omits_workflow_overlay_when_snapshot_absent(tmp_path):
     control, wt = _layout(tmp_path)
-    quest_dir = control / ".imp" / "changes" / "abc"
+    quest_dir = control / ".imp" / "quests" / "abc"
     quest_dir.mkdir(parents=True)   # change home exists, but no workflow/ subtree
     pol = resolve_policy(
         worktree=wt, control_root=control, quest_id="abc",
@@ -1153,7 +1153,7 @@ def test_resolve_policy_omits_workflow_overlay_when_quest_dir_unset(tmp_path):
 
 def test_resolve_policy_workflow_snapshot_denies_write_siblings_writable(tmp_path):
     control, wt = _layout(tmp_path)
-    quest_dir = control / ".imp" / "changes" / "abc"
+    quest_dir = control / ".imp" / "quests" / "abc"
     (quest_dir / "workflow").mkdir(parents=True)
     pol = resolve_policy(
         worktree=wt, control_root=control, quest_id="abc",
@@ -1166,7 +1166,7 @@ def test_resolve_policy_workflow_snapshot_denies_write_siblings_writable(tmp_pat
 
 def test_resolve_policy_workflow_ro_bind_emitted_after_quest_home(tmp_path):
     control, wt = _layout(tmp_path)
-    quest_dir = control / ".imp" / "changes" / "abc"
+    quest_dir = control / ".imp" / "quests" / "abc"
     snapshot = quest_dir / "workflow"
     snapshot.mkdir(parents=True)
     pol = resolve_policy(
@@ -1184,7 +1184,7 @@ def test_resolve_policy_workflow_ro_bind_emitted_after_quest_home(tmp_path):
 
 def test_resolve_policy_omits_workflow_overlay_when_workflow_is_plain_file(tmp_path):
     control, wt = _layout(tmp_path)
-    quest_dir = control / ".imp" / "changes" / "abc"
+    quest_dir = control / ".imp" / "quests" / "abc"
     quest_dir.mkdir(parents=True)
     (quest_dir / "workflow").write_text("")   # a plain file, not a directory
     pol = resolve_policy(

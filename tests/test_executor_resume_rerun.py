@@ -82,7 +82,7 @@ def _seed_single_agent(root: Path) -> Change:
         "providers: [fake]\ntiers:\n  low: {fake: m}\n  medium: {fake: m}\n  high: {fake: m}\n")
     quest_dir = root / ".imp" / "change"
     (quest_dir / "state").mkdir(parents=True, exist_ok=True)
-    (quest_dir / "change.json").write_text(json.dumps(
+    (quest_dir / "quest.json").write_text(json.dumps(
         {"id": "c", "title": "t", "base_branch": "main"}, sort_keys=True))
     configured: list[str] = []
     with contextlib.suppress(Exception):

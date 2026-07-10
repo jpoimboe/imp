@@ -739,7 +739,7 @@ async def test_abandon_records_materialized_true_for_materialized_change(
 ) -> None:
     _seed_control(tmp_path)
     ch = Change.create_draft(tmp_path, title="D", quest_id="ab2", base_branch="main")
-    meta_path = ch.quest_dir / "change.json"
+    meta_path = ch.quest_dir / "quest.json"
     meta = json.loads(meta_path.read_text())
     meta["materialized"] = True
     meta_path.write_text(json.dumps(meta))

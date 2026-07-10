@@ -11,7 +11,7 @@ from imp.engine.state import State
 def _change(tmp_path: Path, status: str) -> Change:
     cd = tmp_path / ".imp" / "change"
     (cd / "state").mkdir(parents=True, exist_ok=True)
-    (cd / "change.json").write_text(json.dumps(
+    (cd / "quest.json").write_text(json.dumps(
         {"id": "c", "title": "t", "base_branch": "main"}))
     State(id="c", step="s", step_attempt=0, status=status).save(cd / "state")
     return Change(id="c", title="t", base_branch="main",

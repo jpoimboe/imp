@@ -118,7 +118,7 @@ def archived_quest_ids(repo: str) -> list[str]:
     try:
         conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
         try:
-            return [r[0] for r in conn.execute("SELECT id FROM changes ORDER BY id")]
+            return [r[0] for r in conn.execute("SELECT id FROM quests ORDER BY id")]
         finally:
             conn.close()
     except Exception:

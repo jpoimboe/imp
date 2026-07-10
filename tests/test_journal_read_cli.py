@@ -54,7 +54,7 @@ def _complete_and_archive(control: Path, slug: str, status: str = "completed") -
     archive.archive_quest(
         control, slug,
         events_path=ch.events_path,
-        quest_json_path=ch.quest_dir / "change.json",
+        quest_json_path=ch.quest_dir / "quest.json",
         state_json_path=ch.state_dir / "state.json")
     worktree.remove_worktree(control, slug)
 
@@ -158,7 +158,7 @@ def test_status_inflight_takes_precedence_over_archive(
     archive.archive_quest(
         tmp_path, "both",
         events_path=ch.events_path,
-        quest_json_path=ch.quest_dir / "change.json",
+        quest_json_path=ch.quest_dir / "quest.json",
         state_json_path=ch.state_dir / "state.json")
 
     monkeypatch.chdir(tmp_path)
@@ -651,8 +651,8 @@ def test_quest_meta_resolves_archived_from_archive(tmp_path: Path) -> None:
     _seed_control(tmp_path)
     Change.create(tmp_path, title="Meta One", quest_id="meta-one",
                   base_branch="main")
-    home = tmp_path / ".imp" / "changes" / "meta-one"
-    assert (home / "change.json").exists()
+    home = tmp_path / ".imp" / "quests" / "meta-one"
+    assert (home / "quest.json").exists()
     _complete_and_archive(tmp_path, "meta-one")
     shutil.rmtree(home)                       # abandon path: permanent home gone
     assert not home.exists()

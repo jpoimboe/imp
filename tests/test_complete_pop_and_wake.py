@@ -66,7 +66,7 @@ def test_complete_finalizes_even_when_next_head_vanishes(tmp_path, monkeypatch) 
     assert state.merge_commit is not None                   # finalize path will run
 
     # Next head's records vanish in the pop->spawn window.
-    shutil.rmtree(tmp_path / ".imp" / "changes" / "bbb")
+    shutil.rmtree(tmp_path / ".imp" / "quests" / "bbb")
 
     result = _complete(a, state, log)                       # must NOT raise
 

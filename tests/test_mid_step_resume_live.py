@@ -194,7 +194,7 @@ def test_ctrl_c_during_bash_pauses_then_resume_completes(tmp_path: Path) -> None
     )
     try:
         # imp new starts an un-materialized draft: no worktree, state+events live
-        # at the permanent control-root home .imp/changes/<id>/.
+        # at the permanent control-root home .imp/quests/<id>/.
         quest_dir = _await_change_dir(tmp_path, timeout=30.0)
         slug = quest_dir.name
         events = quest_dir / "events.jsonl"
@@ -301,7 +301,7 @@ def test_ctrl_c_during_bash_pauses_then_resume_completes_openai(
     )
     try:
         # imp new starts an un-materialized draft: no worktree, state+events live
-        # at the permanent control-root home .imp/changes/<id>/.
+        # at the permanent control-root home .imp/quests/<id>/.
         quest_dir = _await_change_dir(tmp_path, timeout=30.0)
         slug = quest_dir.name
         events = quest_dir / "events.jsonl"
@@ -382,7 +382,7 @@ def test_ctrl_c_during_bash_pauses_then_resume_completes_claude_code(
     )
     try:
         # imp new starts an un-materialized draft: no worktree, state+events live
-        # at the permanent control-root home .imp/changes/<id>/.
+        # at the permanent control-root home .imp/quests/<id>/.
         quest_dir = _await_change_dir(tmp_path, timeout=30.0)
         slug = quest_dir.name
         events = quest_dir / "events.jsonl"

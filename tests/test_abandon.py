@@ -44,7 +44,7 @@ def test_abandon_happy_path_tears_down_and_archives(tmp_path: Path) -> None:
     assert rc == 0
     assert not (tmp_path / ".imp" / "worktrees" / "feat").exists()       # worktree gone
     assert _git(tmp_path, "branch", "--list", "imp/feat").stdout.strip() == ""  # branch gone
-    assert not (tmp_path / ".imp" / "changes" / "feat").exists()   # root home dropped
+    assert not (tmp_path / ".imp" / "quests" / "feat").exists()   # root home dropped
 
     # Durable: change_abandoned event + abandoned status retrievable via archive.
     from imp.engine.archive import read as archive_read
@@ -205,7 +205,7 @@ def test_tear_down_change_destroys_worktree_branch_and_archives(
 
     assert not (tmp_path / ".imp" / "worktrees" / "feat").exists()       # worktree gone
     assert _git(tmp_path, "branch", "--list", "imp/feat").stdout.strip() == ""  # branch gone
-    assert not (tmp_path / ".imp" / "changes" / "feat").exists()   # root home dropped
+    assert not (tmp_path / ".imp" / "quests" / "feat").exists()   # root home dropped
     from imp.engine.archive import read as archive_read
     state_json = archive_read.read_state_json(tmp_path, "feat")
     assert state_json is not None and b'"abandoned"' in state_json
@@ -223,7 +223,7 @@ def test_abandon_refuses_when_lock_held_on_idea(
     with ProjectLock(ch.quest_dir / "lock").acquire():
         rc = _abandon(tmp_path, "idea1")
     assert rc == 2
-    assert (tmp_path / ".imp" / "changes" / "idea1").exists()  # untouched
+    assert (tmp_path / ".imp" / "quests" / "idea1").exists()  # untouched
     assert "stop it before abandoning" in capsys.readouterr().err
 
 
@@ -234,7 +234,7 @@ def test_abandon_retires_backlog_item(tmp_path: Path) -> None:
                         seed_opening="Backlog brief\n\ndo a thing")
     rc = _abandon(tmp_path, "bk1")
     assert rc == 0
-    assert not (tmp_path / ".imp" / "changes" / "bk1").exists()
+    assert not (tmp_path / ".imp" / "quests" / "bk1").exists()
 
 
 def test_abandon_backlog_reports_message(
@@ -284,7 +284,7 @@ def test_tear_down_change_on_draft_skips_worktree_teardown(
     tear_down_change(ch)
 
     assert calls == []  # no built-out teardown on a draft
-    assert not (tmp_path / ".imp" / "changes" / "idea1").exists()   # live home dropped
+    assert not (tmp_path / ".imp" / "quests" / "idea1").exists()   # live home dropped
     from imp.engine.archive import read as archive_read
     assert archive_read.status_of(tmp_path, "idea1") == "abandoned"  # tombstone marked abandoned
     assert archive_read.is_archived(tmp_path, "idea1")               # findable in the archive
@@ -310,7 +310,7 @@ def test_abandon_draft_confirm_copy_on_tty(
     assert rc == 0
     assert "Abandon idea1? This permanently discards it." in out   # draft-specific copy
     assert "worktree, branch, and state" not in out                # not the built-out copy
-    assert not (tmp_path / ".imp" / "changes" / "idea1").exists()   # torn down
+    assert not (tmp_path / ".imp" / "quests" / "idea1").exists()   # torn down
 
 
 def test_resume_refuses_abandoned_draft(

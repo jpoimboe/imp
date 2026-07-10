@@ -55,7 +55,7 @@ def _make_change(root: Path, *, quest_id: str = "test-change", title: str = "t")
     (quest_dir / "state").mkdir(exist_ok=True)
 
     # Write change metadata
-    (quest_dir / "change.json").write_text(json.dumps({
+    (quest_dir / "quest.json").write_text(json.dumps({
         "id": quest_id, "title": title, "base_branch": "main",
     }, indent=2, sort_keys=True))
 
@@ -2707,8 +2707,8 @@ async def test_quest_home_renders_worktree_relative(tmp_path: Path) -> None:
     assert result is RunResult.COMPLETED
 
     inv = sink[0]
-    assert inv.quest_context.quest_home == ".imp/changes/test-change"
-    assert "home=.imp/changes/test-change" in inv.initial_messages[0].content[0].text
+    assert inv.quest_context.quest_home == ".imp/quests/test-change"
+    assert "home=.imp/quests/test-change" in inv.initial_messages[0].content[0].text
     # worktree-anchored: relative, never absolute, never a parent escape.
     assert not inv.quest_context.quest_home.startswith("/")
     assert ".." not in inv.quest_context.quest_home

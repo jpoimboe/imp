@@ -77,7 +77,7 @@ def _ctx(tmp_path: Path, change: Change, *, name: str, agent: AgentDef,
     ctx.change = change
     ctx.quest_context = QuestContext(
         id=change.id, title=change.title, project_root=change.project_root,
-        quest_home=f".imp/changes/{change.id}",
+        quest_home=f".imp/quests/{change.id}",
         workflow_dir=change.workflow_dir)
     ctx.sandbox_policy = None
     ctx.spawn_subagent = spawn
@@ -124,7 +124,7 @@ def test_isolated_dispatch_parks_artifact_surviving_teardown(
     def _park(inv) -> None:
         seen["root"] = inv.quest_context.project_root
         # write through the planted change-home symlink inside the throwaway
-        home = inv.quest_context.project_root / ".imp" / "changes" / change.id
+        home = inv.quest_context.project_root / ".imp" / "quests" / change.id
         dest = home / "artifacts" / "spike" / "finding.md"
         dest.parent.mkdir(parents=True, exist_ok=True)
         dest.write_text("empirical result: 42\n")

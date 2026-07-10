@@ -222,8 +222,8 @@ def test_description_frames_provenance_documents_new_params() -> None:
 
 
 def _control_events_path(control: Path, cid: str) -> Path:
-    """Build <control>/.imp/changes/<cid>/ and return its events.jsonl path."""
-    d = control / ".imp" / "changes" / cid
+    """Build <control>/.imp/quests/<cid>/ and return its events.jsonl path."""
+    d = control / ".imp" / "quests" / cid
     d.mkdir(parents=True, exist_ok=True)
     return d / "events.jsonl"
 
@@ -237,13 +237,13 @@ def _call_at(events_path: Path, **args) -> str:
 
 
 def _make_live_change(control: Path, cid: str, events: list[dict]) -> None:
-    """A live change home with a minimal change.json (layout_version pinned to
+    """A live change home with a minimal quest.json (layout_version pinned to
     the current LAYOUT_VERSION so Change.load skips migrate) and events."""
     from imp.engine.change import LAYOUT_VERSION
 
-    d = control / ".imp" / "changes" / cid
+    d = control / ".imp" / "quests" / cid
     d.mkdir(parents=True, exist_ok=True)
-    (d / "change.json").write_text(json.dumps({
+    (d / "quest.json").write_text(json.dumps({
         "id": cid, "title": cid.title(), "base_branch": "main",
         "project_root": str(control), "layout_version": LAYOUT_VERSION}))
     log = JsonlEventLog(d / "events.jsonl")
@@ -259,13 +259,13 @@ def _git_init(root: Path) -> None:
 
 
 def _archive_quest(control: Path, cid: str, events_bytes: bytes) -> None:
-    """Archive a change (NO live .imp/changes/<cid> home) so resolution falls
+    """Archive a change (NO live .imp/quests/<cid> home) so resolution falls
     through Change.load (LoadError) to the archive path."""
     from imp.engine import archive
 
     events = control / f"{cid}.jsonl"
     events.write_bytes(events_bytes)
-    quest_json = control / f"{cid}-change.json"
+    quest_json = control / f"{cid}-quest.json"
     quest_json.write_text(json.dumps({
         "id": cid, "title": cid.title(), "base_branch": "main"}))
     state_json = control / f"{cid}-state.json"
@@ -315,7 +315,7 @@ def test_quest_id_unresolvable_returns_error_naming_id(tmp_path: Path) -> None:
 
 
 def test_quest_id_naming_current_reads_current_events(tmp_path: Path) -> None:
-    # The current change home has NO change.json; without the short-circuit the
+    # The current change home has NO quest.json; without the short-circuit the
     # resolver would hit Change.load and blow up, so this pins the short-circuit.
     cur = _control_events_path(tmp_path, "curr000")
     log = JsonlEventLog(cur)

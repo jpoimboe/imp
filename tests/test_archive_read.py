@@ -28,7 +28,7 @@ def _archive_with_last_ts(control: Path, cid: str, last_ts: str) -> None:
         f'"timestamp":"{last_ts}","type":"step_started",'
         '"payload":{"step":"plan-writer"}}\n'
     ).encode())
-    cj = control / f"{cid}-change.json"
+    cj = control / f"{cid}-quest.json"
     cj.write_text(json.dumps({
         "id": cid, "title": cid.title(), "base_branch": "main",
         "created_at": "2026-06-01T00:00:00+00:00", "depends_on": []}))
@@ -55,7 +55,7 @@ def _archive(control: Path, cid: str, status: str) -> bytes:
 
     events = control / f"{cid}.jsonl"
     events.write_bytes(_events_bytes(cid))
-    quest_json = control / f"{cid}-change.json"
+    quest_json = control / f"{cid}-quest.json"
     quest_json.write_text(json.dumps({
         "id": cid, "title": cid.title(), "base_branch": "main",
         "created_at": "2026-06-01T00:00:00+00:00", "depends_on": ["dep1"],
@@ -127,7 +127,7 @@ def test_read_quest_json_prefers_stored_meta(tmp_path: Path) -> None:
 
     events = tmp_path / "events.jsonl"
     events.write_text("")
-    quest_json = tmp_path / "change.json"
+    quest_json = tmp_path / "quest.json"
     quest_json.write_text(json.dumps({
         "id": "conv", "title": "Conv", "base_branch": "main",
         "created_at": "2026-06-01T00:00:00+00:00", "depends_on": [],

@@ -19,7 +19,7 @@ def test_archive_conversation_materialized_tears_down_resumable(tmp_path: Path) 
 
     assert not (tmp_path / ".imp" / "worktrees" / "conv").exists()          # worktree gone
     assert _git(tmp_path, "branch", "--list", "imp/conv").stdout.strip() == ""  # branch gone
-    assert not (tmp_path / ".imp" / "changes" / "conv").exists()            # live home dropped
+    assert not (tmp_path / ".imp" / "quests" / "conv").exists()            # live home dropped
 
     # Archived, resumable, NOT abandoned.
     rec = archive_read.read_quest_json(tmp_path, "conv")
@@ -39,7 +39,7 @@ def test_archive_conversation_unmaterialized_draft_has_no_worktree(tmp_path: Pat
 
     archive_conversation(ch)  # must not raise on absent worktree/branch
 
-    assert not (tmp_path / ".imp" / "changes" / "draft").exists()
+    assert not (tmp_path / ".imp" / "quests" / "draft").exists()
     full = record.read_record(records_root(tmp_path), "draft")
     assert full is not None
     assert full["resumable"] is True

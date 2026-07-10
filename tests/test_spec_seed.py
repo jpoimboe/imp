@@ -108,7 +108,7 @@ def test_new_positional_delivers_verbatim_seed(
     rc = anyio.run(cli_main._async_cmd_new, args)
 
     assert rc == 0
-    # The intent is persisted durably to change.json, not threaded as a run param.
+    # The intent is persisted durably to quest.json, not threaded as a run param.
     assert captured["change"].seed_opening == "add a dark-mode toggle"  # type: ignore[union-attr]
     assert captured["change"].title == ""  # type: ignore[union-attr]
 
@@ -174,7 +174,7 @@ def test_threshold_opening_conditioned_on_message(tmp_path) -> None:
     log = JsonlEventLog(tmp_path / "events.jsonl")
     out = render_prompt(body, build_context(
         quest_title="t", event_log=log, quest_id="abc",
-        quest_home=".imp/changes/abc", project_facts={}),
+        quest_home=".imp/quests/abc", project_facts={}),
         workflow_dir=bundled_workflow_dir("imp"))
     # Rendered with no opening -> the unseeded (bare-open) branch, no <imp:begin/>.
     assert "<imp:begin/>" not in out
@@ -182,7 +182,7 @@ def test_threshold_opening_conditioned_on_message(tmp_path) -> None:
     # Rendered WITH an opening -> the seeded branch carries the verbatim intent.
     seeded = render_prompt(body, build_context(
         quest_title="t", event_log=log, quest_id="abc",
-        quest_home=".imp/changes/abc", project_facts={},
+        quest_home=".imp/quests/abc", project_facts={},
         opening="wire up telemetry"),
         workflow_dir=bundled_workflow_dir("imp"))
     assert "wire up telemetry" in seeded
@@ -195,7 +195,7 @@ def test_threshold_prompt_has_verbatim_opening_branch(tmp_path) -> None:
     log = JsonlEventLog(tmp_path / "events.jsonl")
     out = render_prompt(body, build_context(
         quest_title="t", event_log=log, quest_id="abc",
-        quest_home=".imp/changes/abc", project_facts={}),
+        quest_home=".imp/quests/abc", project_facts={}),
         workflow_dir=bundled_workflow_dir("imp"))
     # Unseeded render -> the bare-open branch. The seeded branch no longer uses
     # "verbatim opening intent" wording; it is titled "Opening message in hand".
@@ -204,7 +204,7 @@ def test_threshold_prompt_has_verbatim_opening_branch(tmp_path) -> None:
     assert "Open by asking" in out
     seeded = render_prompt(body, build_context(
         quest_title="t", event_log=log, quest_id="abc",
-        quest_home=".imp/changes/abc", project_facts={},
+        quest_home=".imp/quests/abc", project_facts={},
         opening="wire up telemetry"),
         workflow_dir=bundled_workflow_dir("imp"))
     assert "Opening message in hand" in seeded     # seeded branch title
@@ -220,7 +220,7 @@ def test_threshold_prompt_has_read_and_verify_section(tmp_path) -> None:
     log = JsonlEventLog(tmp_path / "events.jsonl")
     out = render_prompt(body, build_context(
         quest_title="t", event_log=log, quest_id="abc",
-        quest_home=".imp/changes/abc", project_facts={}),
+        quest_home=".imp/quests/abc", project_facts={}),
         workflow_dir=bundled_workflow_dir("imp"))
     # The seeded/adopt marker is gone; a named spec is read and verified instead.
     assert "Reading a referenced spec file" in out
@@ -337,4 +337,4 @@ def test_new_creates_unmaterialized_draft(
     assert change.materialized is False                                  # type: ignore[union-attr]
     assert not (tmp_path / ".imp" / "worktrees" / cid).exists()          # no worktree
     assert _git(tmp_path, "branch", "--list", f"imp/{cid}").stdout.strip() == ""  # no branch
-    assert (tmp_path / ".imp" / "changes" / cid / "change.json").exists()  # permanent home
+    assert (tmp_path / ".imp" / "quests" / cid / "quest.json").exists()  # permanent home

@@ -3,7 +3,7 @@
 Persists claude-p session entries under the change so a resumed step can drive
 claude-p's NATIVE session resume from imp-owned bytes — never from
 ~/.claude/projects/. One JSONL per SessionKey under
-`.imp/changes/<id>/steps/<step>/claude_session/`; subagent transcripts ride
+`.imp/quests/<id>/steps/<step>/claude_session/`; subagent transcripts ride
 `subpath` keys. Only `append`/`load` are required by the SDK; `delete` and
 `list_subkeys` (added in later tasks) cover lifecycle + subagent discovery on
 resume. The SDK duck-types the adapter (no isinstance check), so this class need

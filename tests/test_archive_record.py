@@ -70,7 +70,7 @@ def test_build_record_stores_full_meta_and_resumable_flag() -> None:
     meta = {**_quest_meta(), "materialized": False, "orig_base_head": "abc999"}
     rec = record.build_record(meta, _final_state(), "h", resumable=True)
     assert rec["resumable"] is True
-    assert rec["quest_meta"] == meta            # whole change.json preserved
+    assert rec["quest_meta"] == meta            # whole quest.json preserved
     assert rec["quest_meta"]["orig_base_head"] == "abc999"
 
 

@@ -19,10 +19,10 @@ def test_rehydrate_restores_loadable_draft_from_archive(tmp_path: Path) -> None:
     ch = Change.create_draft(tmp_path, title="Conv", quest_id="draft", base_branch="main")
     orig_head = ch.orig_base_head
     archive_conversation(ch)  # drops the live home into the archive
-    assert not (tmp_path / ".imp" / "changes" / "draft").exists()
+    assert not (tmp_path / ".imp" / "quests" / "draft").exists()
 
     quest_dir = archive_read.rehydrate_quest(tmp_path, "draft")
-    assert quest_dir == tmp_path / ".imp" / "changes" / "draft"
+    assert quest_dir == tmp_path / ".imp" / "quests" / "draft"
 
     # The rehydrated home is a faithful, loadable Change.
     loaded = Change.load(tmp_path, "draft")
@@ -50,7 +50,7 @@ def test_rehydrate_unknown_change_raises(tmp_path: Path) -> None:
 def _archive_with_steps(control: Path, cid: str, steps: Path, *, resumable: bool) -> None:
     events = control / f"{cid}.jsonl"
     events.write_bytes(b"")
-    quest_json = control / f"{cid}-change.json"
+    quest_json = control / f"{cid}-quest.json"
     quest_json.write_text(json.dumps(
         {"id": cid, "title": "C", "base_branch": "main", "materialized": False}))
     state_json = control / f"{cid}-state.json"

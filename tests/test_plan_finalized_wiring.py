@@ -82,8 +82,8 @@ def test_plan_finalized_script_counts_highest_plan_and_writes_output(tmp_path, w
     out_file = tmp_path / "out.json"
     env = {**os.environ,
            "IMP_PROJECT_ROOT": str(tmp_path),
-           "IMP_CHANGE_DIR": str(tmp_path),
-           "IMP_CHANGE_ID": "abc",
+           "IMP_QUEST_DIR": str(tmp_path),
+           "IMP_QUEST_ID": "abc",
            "IMP_OUTPUT": str(out_file)}
     r = subprocess.run(["bash", str(script), "2", "3"],
                        capture_output=True, text=True, env=env)

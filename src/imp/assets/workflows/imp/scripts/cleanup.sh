@@ -13,13 +13,13 @@
 #        cannot be folded, or a hard rebase/stamp failure
 set -uo pipefail
 cd "${IMP_PROJECT_ROOT:?IMP_PROJECT_ROOT not set by engine}" || exit 1
-CHANGE_DIR="${IMP_CHANGE_DIR:?IMP_CHANGE_DIR not set by engine}"
-ID="${IMP_CHANGE_ID:?IMP_CHANGE_ID not set by engine}"
-STATE="$CHANGE_DIR/state"
+QUEST_DIR="${IMP_QUEST_DIR:?IMP_QUEST_DIR not set by engine}"
+ID="${IMP_QUEST_ID:?IMP_QUEST_ID not set by engine}"
+STATE="$QUEST_DIR/state"
 
-# Range base: the change fork (cur_base_head from change.json). The whole change is
+# Range base: the change fork (cur_base_head from quest.json). The whole change is
 # in range, so any in-range fixup! folds.
-FORK=$(python3 -c "import json,os;print(json.load(open(os.path.join(os.environ['IMP_CHANGE_DIR'],'change.json')))['cur_base_head'])")
+FORK=$(python3 -c "import json,os;print(json.load(open(os.path.join(os.environ['IMP_QUEST_DIR'],'quest.json')))['cur_base_head'])")
 [ -n "$FORK" ] || { echo "empty fork (no cur_base_head)" >&2; exit 1; }
 
 # grep -q in a pipeline with pipefail is unreliable (SIGPIPE makes git log fail even

@@ -34,7 +34,7 @@ def test_rename_applies_immediately_and_returns_id(tmp_path: Path) -> None:
     assert ch.title == "Add version flag"            # stored verbatim
     assert "bbb111" in msg                           # returns the id
     assert f"{ch.quest_dir}/artifacts/spec/bbb111.md" in msg
-    meta = json.loads((ch.quest_dir / "change.json").read_text())
+    meta = json.loads((ch.quest_dir / "quest.json").read_text())
     assert meta["title"] == "Add version flag"
     renamed = [e for e in ch.event_log().read() if e["type"] == "change_renamed"]
     assert renamed and renamed[-1]["payload"]["new_title"] == "Add version flag"

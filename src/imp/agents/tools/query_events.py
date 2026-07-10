@@ -94,11 +94,11 @@ def query_events(
 
     current_id = ctx.events_path.parent.name
     # Truthy (not `is not None`): a blank quest_id="" routes to the current-change
-    # path — otherwise it would reach Change.load, where <control>/.imp/changes is a
-    # real dir so .is_dir() passes and the missing change.json raises FileNotFoundError,
+    # path — otherwise it would reach Change.load, where <control>/.imp/quests is a
+    # real dir so .is_dir() passes and the missing quest.json raises FileNotFoundError,
     # escaping the LoadError catch and breaking the "does not raise" contract.
     if quest_id and quest_id != current_id:
-        # <control>/.imp/changes/<id>/events.jsonl -> parents[3] == <control>.
+        # <control>/.imp/quests/<id>/events.jsonl -> parents[3] == <control>.
         control_root = ctx.events_path.parents[3]
         resolved = _resolve_other_change_events(control_root, quest_id)
         if resolved is None:

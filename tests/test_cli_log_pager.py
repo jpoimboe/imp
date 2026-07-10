@@ -360,11 +360,11 @@ def test_keyboard_interrupt_in_wait_does_not_raise(
 
 
 def _make_change_worktree(control: Path, slug: str, title: str) -> Path:
-    """Create a minimal on-disk Change home under control/.imp/changes/<slug>
+    """Create a minimal on-disk Change home under control/.imp/quests/<slug>
     with one rendered step (phase "spec") so the narrative reaches output."""
-    quest_dir = control / ".imp" / "changes" / slug
+    quest_dir = control / ".imp" / "quests" / slug
     quest_dir.mkdir(parents=True)
-    (quest_dir / "change.json").write_text(
+    (quest_dir / "quest.json").write_text(
         json.dumps({"id": slug, "title": title, "base_branch": "main",
                     "layout_version": LAYOUT_VERSION,
                     "created_at": "2026-05-27T10:00:00+00:00"}),

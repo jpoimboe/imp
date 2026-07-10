@@ -17,7 +17,7 @@ def _setup_change(control: Path) -> tuple[Path, Path, Path]:
         '{"id":"e1","parent_id":"e0","agent_id":"plan-writer",'
         '"timestamp":"2026-06-01T00:00:02+00:00","type":"step_started",'
         '"payload":{"step":"plan-writer"}}\n')
-    quest_json = control / "change.json"
+    quest_json = control / "quest.json"
     quest_json.write_text(json.dumps({
         "id": "alpha", "title": "Alpha", "base_branch": "main",
         "created_at": "2026-06-01T00:00:00+00:00", "depends_on": ["beta"]}))
@@ -51,7 +51,7 @@ def test_archive_quest_writes_blob_record_and_index(tmp_path: Path) -> None:
     conn = index.connect(archive.index_path(tmp_path))
     try:
         assert conn.execute(
-            "SELECT status, events_hash FROM changes WHERE id='alpha'"
+            "SELECT status, events_hash FROM quests WHERE id='alpha'"
         ).fetchone() == ("completed", expected_hash)
     finally:
         conn.close()
@@ -68,7 +68,7 @@ def test_archive_quest_is_idempotent(tmp_path: Path) -> None:
     assert len(blobs) == 1
     conn = index.connect(archive.index_path(tmp_path))
     try:
-        assert conn.execute("SELECT COUNT(*) FROM changes").fetchone()[0] == 1
+        assert conn.execute("SELECT COUNT(*) FROM quests").fetchone()[0] == 1
     finally:
         conn.close()
 
@@ -99,7 +99,7 @@ def test_archive_quest_missing_events_file(tmp_path: Path) -> None:
     conn = index.connect(archive.index_path(tmp_path))
     try:
         assert conn.execute(
-            "SELECT COUNT(*) FROM changes WHERE id='alpha'"
+            "SELECT COUNT(*) FROM quests WHERE id='alpha'"
         ).fetchone()[0] == 1
     finally:
         conn.close()
@@ -200,6 +200,6 @@ def test_archive_quest_resumable_steps_idempotent(tmp_path: Path) -> None:
     assert len(blobs) == 2
     conn = index.connect(archive.index_path(tmp_path))
     try:
-        assert conn.execute("SELECT COUNT(*) FROM changes").fetchone()[0] == 1
+        assert conn.execute("SELECT COUNT(*) FROM quests").fetchone()[0] == 1
     finally:
         conn.close()

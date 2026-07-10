@@ -34,7 +34,7 @@ def _make_change(root: Path, *, quest_id: str = "test-change", title: str = "t")
     quest_dir = root / ".imp" / "change"
     quest_dir.mkdir(parents=True, exist_ok=True)
     (quest_dir / "state").mkdir(exist_ok=True)
-    (quest_dir / "change.json").write_text(json.dumps({
+    (quest_dir / "quest.json").write_text(json.dumps({
         "id": quest_id, "title": title, "base_branch": "main",
     }, indent=2, sort_keys=True))
 

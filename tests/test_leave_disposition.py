@@ -20,7 +20,7 @@ def test_save_to_backlog_sets_paused_status_and_keeps_home(tmp_path: Path) -> No
     save_to_backlog(ch)
 
     assert State.load(ch.state_dir).status == "paused"            # resting Backlog state
-    assert (tmp_path / ".imp" / "changes" / "d1").exists()       # live home KEPT
+    assert (tmp_path / ".imp" / "quests" / "d1").exists()       # live home KEPT
     assert record.read_record(records_root(tmp_path), "d1") is None  # NOT archived
     events = ch.event_log().read()
     assert any(e.get("type") == "conversation_saved" for e in events)
@@ -46,7 +46,7 @@ def test_discard_conversation_drops_home_and_leaves_no_record(tmp_path: Path) ->
 
     discard_conversation(ch)
 
-    assert not (tmp_path / ".imp" / "changes" / "d2").exists()   # home gone
+    assert not (tmp_path / ".imp" / "quests" / "d2").exists()   # home gone
     assert record.read_record(records_root(tmp_path), "d2") is None  # zero-exchange → no record
 
 
@@ -98,7 +98,7 @@ def test_print_leave_disposition_archive_is_lock_free(
         rc = m._print_leave_disposition(ch, {"disposition": "archive"})
     assert rc == 0
     # The foreground did NOT archive — the daemon owns the disposition.
-    assert (tmp_path / ".imp" / "changes" / "fast1").exists()
+    assert (tmp_path / ".imp" / "quests" / "fast1").exists()
     assert record.read_record(records_root(tmp_path), "fast1") is None
     out = capsys.readouterr().out
     assert "conversation saved" in out

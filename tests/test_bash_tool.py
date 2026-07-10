@@ -61,7 +61,7 @@ def test_bash_exposes_imp_project_root(tmp_path: Path) -> None:
 
 def test_bash_exposes_imp_quest_id(tmp_path: Path) -> None:
     ctx = _ctx(tmp_path)
-    out = json.loads(_run_bash(ctx, {"command": "echo $IMP_CHANGE_ID"}))
+    out = json.loads(_run_bash(ctx, {"command": "echo $IMP_QUEST_ID"}))
     assert out["returncode"] == 0
     assert "test01" in out["stdout"]
 

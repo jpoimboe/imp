@@ -168,13 +168,13 @@ def test_run_script_refreshes_stale_imp_slug_in_sandbox(tmp_path, monkeypatch) -
                         git_common_dir=str(tmp_path), git_ro_remask=(),
                         writable_caches=(), extra_readable=(), extra_writable=(),
                         secret_dirs=(), secret_files=(),
-                        setenv=(("IMP_CHANGE_ID", ""),), network=True, note="")
+                        setenv=(("IMP_QUEST_ID", ""),), network=True, note="")
     step = _script_step("echo hi")
     run_script(step, cwd=tmp_path, policy=pol,
-               env_extra={"IMP_CHANGE_ID": "realid01"})
+               env_extra={"IMP_QUEST_ID": "realid01"})
     argv = captured["argv"]
-    assert argv.count("IMP_CHANGE_ID") == 1
-    assert argv[argv.index("IMP_CHANGE_ID") + 1] == "realid01"
+    assert argv.count("IMP_QUEST_ID") == 1
+    assert argv[argv.index("IMP_QUEST_ID") + 1] == "realid01"
 
 
 def test_run_script_timeout_kills_group(tmp_path) -> None:

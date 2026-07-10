@@ -1,5 +1,5 @@
 """Change lifecycle (spec §3, §5): immutable id identity, free-form title, worktree
-creation, permanent state home at <control_root>/.imp/changes/<id>/."""
+creation, permanent state home at <control_root>/.imp/quests/<id>/."""
 
 from __future__ import annotations
 
@@ -24,7 +24,7 @@ LAYOUT_VERSION = 5  # bump in the SAME commit as any breaking change-home layout
 
 
 def _write_quest_json(meta_path: Path, meta: dict[str, Any]) -> None:
-    """Atomically rewrite change.json (tmp file, fsync, os.replace); mirrors State.save."""
+    """Atomically rewrite quest.json (tmp file, fsync, os.replace); mirrors State.save."""
     fd, tmp_name = tempfile.mkstemp(prefix=".change-", dir=meta_path.parent)
     try:
         with os.fdopen(fd, "w") as f:
@@ -51,8 +51,8 @@ def _fold_phantom(phantom: Path, home: Path) -> None:
 
 
 def link_quest_home(worktree_path: Path, quest_dir: Path) -> None:
-    """Create idempotent id-scoped symlink <worktree>/.imp/changes/<id> → quest_dir."""
-    link = worktree_path / ".imp" / "changes" / quest_dir.name
+    """Create idempotent id-scoped symlink <worktree>/.imp/quests/<id> → quest_dir."""
+    link = worktree_path / ".imp" / "quests" / quest_dir.name
     target = quest_dir.resolve()
     link.parent.mkdir(parents=True, exist_ok=True)
     if link.is_symlink():
@@ -74,13 +74,13 @@ def _imp_commit(control_root: Path) -> str:
 
 
 def live_quest_ids(control_root: Path) -> list[str]:
-    """Live change-home ids: dirs under .imp/changes/ holding a change.json (archive excluded)."""
-    root = control_root / ".imp" / "changes"
+    """Live change-home ids: dirs under .imp/quests/ holding a quest.json (archive excluded)."""
+    root = control_root / ".imp" / "quests"
     if not root.is_dir():
         return []
     return sorted(p.name for p in root.iterdir()
                   if p.is_dir() and not p.name.startswith(".")
-                  and (p / "change.json").exists())
+                  and (p / "quest.json").exists())
 
 
 def live_stems(control_root: Path) -> frozenset[str]:
@@ -91,7 +91,7 @@ def live_stems(control_root: Path) -> frozenset[str]:
 def _migrate_v1_to_v2(quest_dir: Path) -> None:
     """v1->v2: rename base_head->orig_base_head and backfill cur_base_head via
     `git merge-base base_branch HEAD` in the change's project_root."""
-    meta_path = quest_dir / "change.json"
+    meta_path = quest_dir / "quest.json"
     meta = json.loads(meta_path.read_text())
     meta["orig_base_head"] = meta.pop("base_head", "")
     cur = ""
@@ -109,7 +109,7 @@ def _migrate_v1_to_v2(quest_dir: Path) -> None:
 def _migrate_v2_to_v3(quest_dir: Path) -> None:
     """v2->v3: state.json gained `reincarnations` (auto-defaulted on State.load);
     only the recorded layout_version advances."""
-    meta_path = quest_dir / "change.json"
+    meta_path = quest_dir / "quest.json"
     meta = json.loads(meta_path.read_text())
     meta["layout_version"] = 3
     _write_quest_json(meta_path, meta)
@@ -118,7 +118,7 @@ def _migrate_v2_to_v3(quest_dir: Path) -> None:
 def _migrate_v3_to_v4(quest_dir: Path) -> None:
     """v3->v4: state.json gained `max_reincarnations` (auto-defaulted on
     State.load); only the recorded layout_version advances."""
-    meta_path = quest_dir / "change.json"
+    meta_path = quest_dir / "quest.json"
     meta = json.loads(meta_path.read_text())
     meta["layout_version"] = 4
     _write_quest_json(meta_path, meta)
@@ -127,7 +127,7 @@ def _migrate_v3_to_v4(quest_dir: Path) -> None:
 def _migrate_v4_to_v5(quest_dir: Path) -> None:
     """v4->v5: state.json gained `resume_target` (auto-defaulted on State.load);
     only the recorded layout_version advances."""
-    meta_path = quest_dir / "change.json"
+    meta_path = quest_dir / "quest.json"
     meta = json.loads(meta_path.read_text())
     meta["layout_version"] = 5
     _write_quest_json(meta_path, meta)
@@ -145,7 +145,7 @@ def migrate(old_v: int, new_v: int, quest_dir: Path) -> None:
     """Chain step-by-step migrations old_v→old_v+1→…→new_v.
     Raises LayoutMismatch when stored > engine or when any hop has no migration."""
     def _mismatch() -> LayoutMismatch:
-        meta = json.loads((quest_dir / "change.json").read_text())
+        meta = json.loads((quest_dir / "quest.json").read_text())
         return LayoutMismatch(stored=old_v, engine=new_v,
                               imp_commit=meta.get("imp_commit", ""),
                               quest_dir=quest_dir)
@@ -167,7 +167,7 @@ class Change:
     base_branch: str
     control_root: Path
     project_root: Path           # the worktree
-    quest_dir: Path             # permanent home <control_root>/.imp/changes/<id>
+    quest_dir: Path             # permanent home <control_root>/.imp/quests/<id>
     materialized: bool = True    # False only for an un-materialized draft (no worktree)
     orig_base_head: str = ""     # base tip captured at draft creation; NEVER a diff base
     cur_base_head: str = ""      # the SHA the branch is currently planted on (the fork)
@@ -176,12 +176,12 @@ class Change:
     seed_opening: str | None = None  # title+description seed for a fresh resume open
 
     def rename(self, name: str, *, log: JsonlEventLog) -> str:
-        """Content-only rename (no git): set title, rewrite change.json under the
+        """Content-only rename (no git): set title, rewrite quest.json under the
         gitignored .imp/ (never dirties the tracked worktree), emit change_renamed.
         Returns the id. The id is immutable, so nothing else moves."""
         old_title = self.title
         self.title = name
-        meta_path = self.quest_dir / "change.json"
+        meta_path = self.quest_dir / "quest.json"
         meta = json.loads(meta_path.read_text())
         meta["title"] = name
         _write_quest_json(meta_path, meta)
@@ -192,27 +192,27 @@ class Change:
 
     def set_project_root(self, new_root: Path) -> None:
         self.project_root = new_root
-        meta_path = self.quest_dir / "change.json"
+        meta_path = self.quest_dir / "quest.json"
         meta = json.loads(meta_path.read_text())
         meta["project_root"] = str(new_root)
         _write_quest_json(meta_path, meta)
 
     def set_origin(self, origin: str) -> None:
         self.origin = origin
-        meta_path = self.quest_dir / "change.json"
+        meta_path = self.quest_dir / "quest.json"
         meta = json.loads(meta_path.read_text())
         meta["origin"] = origin
         _write_quest_json(meta_path, meta)
 
     def set_depends_on(self, depends_on: list[str]) -> None:
-        meta_path = self.quest_dir / "change.json"
+        meta_path = self.quest_dir / "quest.json"
         meta = json.loads(meta_path.read_text())
         meta["depends_on"] = list(depends_on)
         _write_quest_json(meta_path, meta)
 
     def set_seed_opening(self, text: str | None) -> None:
         self.seed_opening = text
-        meta_path = self.quest_dir / "change.json"
+        meta_path = self.quest_dir / "quest.json"
         meta = json.loads(meta_path.read_text())
         meta["seed_opening"] = text
         _write_quest_json(meta_path, meta)
@@ -234,7 +234,7 @@ class Change:
         self.project_root = wt_path
         self.materialized = True
         self.cur_base_head = current_tip
-        meta_path = self.quest_dir / "change.json"
+        meta_path = self.quest_dir / "quest.json"
         meta = json.loads(meta_path.read_text())
         meta["project_root"] = str(wt_path)
         meta["materialized"] = True
@@ -287,16 +287,16 @@ class Change:
         depends_on: list[str] | None = None, workflow: str | None = None,
     ) -> Change:
         """Create branch imp/<id> + worktree .imp/worktrees/<id>, then seed
-        internal state at the control root (.imp/changes/<id>). Raises
+        internal state at the control root (.imp/quests/<id>). Raises
         worktree.BranchExists on the (effectively impossible) id collision —
         the caller reports a clean error."""
         wt_path = worktree.create_worktree(control_root, quest_id, base_branch)
         cur_base_head = worktree.head_of(control_root, base_branch)
-        quest_dir = control_root / ".imp" / "changes" / quest_id
+        quest_dir = control_root / ".imp" / "quests" / quest_id
         quest_dir.mkdir(parents=True)
         (quest_dir / "state").mkdir()
 
-        (quest_dir / "change.json").write_text(json.dumps({
+        (quest_dir / "quest.json").write_text(json.dumps({
             "id": quest_id, "title": title, "base_branch": base_branch,
             "created_at": datetime.now(UTC).isoformat(),
             "depends_on": list(depends_on or []),
@@ -370,7 +370,7 @@ class Change:
         as orig_base_head for the later go-live head_changed check. Validates the
         workflow against the main checkout; with no branch/worktree to roll back,
         a bad/absent workflow drops the just-created home and re-raises."""
-        quest_dir = control_root / ".imp" / "changes" / quest_id
+        quest_dir = control_root / ".imp" / "quests" / quest_id
         quest_dir.mkdir(parents=True)
         (quest_dir / "state").mkdir()
         try:
@@ -379,7 +379,7 @@ class Change:
             shutil.rmtree(quest_dir, ignore_errors=True)
             raise
 
-        (quest_dir / "change.json").write_text(json.dumps({
+        (quest_dir / "quest.json").write_text(json.dumps({
             "id": quest_id, "title": title, "base_branch": base_branch,
             "created_at": datetime.now(UTC).isoformat(),
             "depends_on": list(depends_on or []),
@@ -442,14 +442,14 @@ class Change:
 
     @classmethod
     def load(cls, control_root: Path, quest_id: str) -> Change:
-        quest_dir = control_root / ".imp" / "changes" / quest_id
+        quest_dir = control_root / ".imp" / "quests" / quest_id
         if not quest_dir.is_dir():
             raise LoadError(f"no such Change {quest_id!r}", SourceLoc(file=quest_dir, line=1))
-        meta = json.loads((quest_dir / "change.json").read_text())
+        meta = json.loads((quest_dir / "quest.json").read_text())
         stored = meta.get("layout_version", 0)
         if stored != LAYOUT_VERSION:
             migrate(stored, LAYOUT_VERSION, quest_dir)
-            meta = json.loads((quest_dir / "change.json").read_text())
+            meta = json.loads((quest_dir / "quest.json").read_text())
         project_root = (
             Path(meta["project_root"]) if meta.get("project_root")
             else (control_root / ".imp" / "worktrees" / quest_id).resolve()

@@ -11,15 +11,15 @@ _GOLDEN = Path(__file__).parent / "fixtures" / "layout_guard_golden.txt"
 
 
 def _observe_layout(quest_dir: Path) -> str:
-    """Sorted on-disk paths + key-sets of change.json and state.json; values excluded."""
+    """Sorted on-disk paths + key-sets of quest.json and state.json; values excluded."""
     files = sorted(
         str(p.relative_to(quest_dir)).replace(os.sep, "/")
         for p in quest_dir.rglob("*") if p.is_file()
     )
-    change_keys = sorted(json.loads((quest_dir / "change.json").read_text()))
+    change_keys = sorted(json.loads((quest_dir / "quest.json").read_text()))
     state_keys = sorted(json.loads((quest_dir / "state" / "state.json").read_text()))
     lines = ["[paths]", *files,
-             "[change.json]", *change_keys,
+             "[quest.json]", *change_keys,
              "[state.json]", *state_keys]
     return "\n".join(lines) + "\n"
 

@@ -37,10 +37,10 @@ def test_detail_card_backlog_source(tmp_path: Path) -> None:
 
 
 def _live_change(control: Path, quest_id: str) -> None:
-    cdir = control / ".imp" / "changes" / quest_id
+    cdir = control / ".imp" / "quests" / quest_id
     cdir.mkdir(parents=True)
     (cdir / "state").mkdir()
-    (cdir / "change.json").write_text(
+    (cdir / "quest.json").write_text(
         json.dumps(
             {
                 "id": quest_id,
@@ -96,10 +96,10 @@ def _live_change_task_prompt(control: Path, quest_id: str) -> None:
     """A live change whose sole user_message is the composed task prompt (no
     opening_intent, no awaiting_user_input, no interject) -- the resumed-from-
     backlog shape whose card must show no prompt dump."""
-    cdir = control / ".imp" / "changes" / quest_id
+    cdir = control / ".imp" / "quests" / quest_id
     cdir.mkdir(parents=True)
     (cdir / "state").mkdir()
-    (cdir / "change.json").write_text(
+    (cdir / "quest.json").write_text(
         json.dumps(
             {
                 "id": quest_id,
@@ -164,9 +164,9 @@ def test_detail_card_live_source(tmp_path: Path) -> None:
 
 def test_detail_card_sources_phase_from_persisted_state(tmp_path: Path) -> None:
     _seed_control(tmp_path)
-    cdir = tmp_path / ".imp" / "changes" / "2026-06-20-src01"
+    cdir = tmp_path / ".imp" / "quests" / "2026-06-20-src01"
     (cdir / "state").mkdir(parents=True)
-    (cdir / "change.json").write_text(json.dumps({
+    (cdir / "quest.json").write_text(json.dumps({
         "id": "2026-06-20-src01", "title": "Widget", "base_branch": "main",
         "created_at": "2026-06-20T11:00:00+00:00", "layout_version": LAYOUT_VERSION}))
     # The event log's phase_label ("EVENT PHASE") must NOT be the card's source.
@@ -189,9 +189,9 @@ def test_latest_phase_label_helper_removed() -> None:
 
 def test_detail_card_created_trims_microseconds_and_offset(tmp_path: Path) -> None:
     _seed_control(tmp_path)
-    cdir = tmp_path / ".imp" / "changes" / "2026-06-20-tsx001"
+    cdir = tmp_path / ".imp" / "quests" / "2026-06-20-tsx001"
     (cdir / "state").mkdir(parents=True)
-    (cdir / "change.json").write_text(json.dumps({
+    (cdir / "quest.json").write_text(json.dumps({
         "id": "2026-06-20-tsx001", "title": "Widget", "base_branch": "main",
         "created_at": "2026-06-20T11:00:00.123456+00:00",
         "layout_version": LAYOUT_VERSION}))

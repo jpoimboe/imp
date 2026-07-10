@@ -23,7 +23,7 @@ def _user_msg_line(text: str) -> str:
 def _archive(tmp_path: Path, quest_id: str, title: str) -> None:
     events = tmp_path / f"{quest_id}.jsonl"
     events.write_text("")
-    quest_json = tmp_path / f"{quest_id}.change.json"
+    quest_json = tmp_path / f"{quest_id}.quest.json"
     quest_json.write_text(json.dumps({
         "id": quest_id, "title": title, "base_branch": "main",
         "created_at": "2026-06-01T00:00:00+00:00", "depends_on": []}))
