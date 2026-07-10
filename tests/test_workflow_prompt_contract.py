@@ -445,7 +445,7 @@ def test_finalize_presents_spec_plan_authored_needs_decision() -> None:
 
 def test_deferred_sweep_names_code_reviewer_as_producer() -> None:
     text = SWEEP.read_text()
-    assert "plan-code-reviewer append it" in text
+    assert "plan-code-reviewer, plan-writer, and plan-reviewer append it" in text
     assert "review-panel" not in text
 
 

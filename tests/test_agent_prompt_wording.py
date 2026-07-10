@@ -305,3 +305,15 @@ def test_gap_check_walks_acceptance_criteria_clause_by_clause() -> None:
     assert "corrective plan that covers it" in body
     # sole lever unchanged: never writes deferred.md
     assert "read `deferred.md` and never write it" in body
+
+
+def test_deferred_sweep_protects_spec_cited_untagged_items() -> None:
+    body = _agent_prompt("deferred-sweep")
+    # (a) the source note names plan-writer and plan-reviewer as originators
+    assert "plan-writer, and plan-reviewer append it" in body
+    # (b) a spec-cited untagged item may be fixed or escalated, never dismissed
+    assert "cites spec scope" in body
+    assert "never dismissed" in body
+    # (c) an item already landed by a corrective plan is closed fixed, not dismissed
+    assert "already landed by a corrective plan" in body
+    assert "close it `— fixed <sha>`" in body

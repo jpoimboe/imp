@@ -25,7 +25,7 @@ Read first:
 ## The pinned line format
 
 Each deferred item is a Markdown task-list line under a `## Deferred Followups`
-heading, in this EXACT shape (task-lead and plan-code-reviewer append it):
+heading, in this EXACT shape (task-lead, plan-code-reviewer, plan-writer, and plan-reviewer append it):
 
 `- [ ] DEFERRED <source>: <one-line description> [scope: <task|plan|change>]`
 
@@ -86,6 +86,12 @@ scope. Decide one of:
 
 3. **dismissed** — you considered it and judged it **not an improvement, or not
    worth the diff**. Record it for audit; it is never surfaced.
+
+### Spec-cited scope is not the sweep's to drop
+
+An untagged item that **cites spec scope** — it names an AC clause or a Scope ref — may be **fixed** or escalated to **`— needs-decision:`**, but it is **never dismissed**: agreed scope is not the sweep's to drop. This overrides the ordinary **dismissed** disposition for spec-cited items only; an item citing no spec scope is dispositioned exactly as the three cases above.
+
+By the time the sweep runs, the `gap-check` → corrective-plan fixpoint has usually already landed such an item. When an untagged spec-cited item was **already landed by a corrective plan**, close it `— fixed <sha>` within this existing re-evaluation — resolve `<sha>` to the corrective plan's commit that landed the item (find it with `git log`), **not** `git rev-parse HEAD`, since the sweep made no new commit for it; otherwise record it exactly as the **fixed** disposition prescribes; do not re-implement it and do not dismiss it.
 
 {% include "partials/human-decision.md" %}
 
