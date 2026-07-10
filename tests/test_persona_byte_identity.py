@@ -27,7 +27,7 @@ def _agent(tools):
 
 def _rendered_imp_persona(tmp_path: Path) -> str:
     log = JsonlEventLog(tmp_path / "events.jsonl")
-    ctx = build_context(change_title="t", event_log=log)
+    ctx = build_context(quest_title="t", event_log=log)
     return render_prompt((_ASSET / "persona.md").read_text(), ctx,
                          workflow_dir=_ASSET)
 

@@ -678,7 +678,7 @@ def test_spec_reviewer_renders_canonical_severity_rubric() -> None:
     from imp.engine.state import InMemoryEventLog
     wf_dir = bundled_workflow_dir("imp")
     body = load_workflow(wf_dir).agents["spec-reviewer"].prompt_template_source
-    ctx = build_context(change_title="t", event_log=InMemoryEventLog())
+    ctx = build_context(quest_title="t", event_log=InMemoryEventLog())
     out = render_prompt(body, ctx, workflow_dir=wf_dir)
     assert "behavioral impact, not file type" in out
     for term in ("**Critical**", "**Major**", "**Minor**", "**Nit**"):
@@ -704,7 +704,7 @@ def test_code_reviewer_renders_canonical_severity_rubric() -> None:
     from imp.engine.state import InMemoryEventLog
     wf_dir = bundled_workflow_dir("imp")
     body = load_workflow(wf_dir).agents["code-reviewer"].prompt_template_source
-    ctx = build_context(change_title="t", event_log=InMemoryEventLog())
+    ctx = build_context(quest_title="t", event_log=InMemoryEventLog())
     out = render_prompt(body, ctx, workflow_dir=wf_dir)
     assert "behavioral impact, not file type" in out
     for term in ("**Critical**", "**Major**", "**Minor**", "**Nit**"):
@@ -944,7 +944,7 @@ def test_task_lead_coder_tier_defaults_medium_not_task_count(tmp_path: Path) -> 
 
     def render(task_total: int) -> str:
         return render_prompt(body, build_context(
-            change_title="t", event_log=log, quest_id="abc",
+            quest_title="t", event_log=log, quest_id="abc",
             quest_home=".imp/changes/abc",
             vars={"task_total": task_total, "fast_path": False}),
             workflow_dir=bundled_workflow_dir("imp"))

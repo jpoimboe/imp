@@ -57,7 +57,7 @@ def _render_finalize(tmp_path: Path, *, auto_merge: bool, autonomous: bool) -> s
     body = (wf_dir / "agents" / "finalize.md").read_text()
     log = JsonlEventLog(tmp_path / "events.jsonl")
     ctx = build_context(
-        quest_id="x", change_title="t", quest_home="/ctl/.imp/changes/x",
+        quest_id="x", quest_title="t", quest_home="/ctl/.imp/changes/x",
         event_log=log, vars={"auto_merge": auto_merge}, autonomous=autonomous,
     )
     return render_prompt(body, ctx, workflow_dir=wf_dir)

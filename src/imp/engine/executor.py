@@ -874,7 +874,7 @@ async def _route_script(
     assert command is not None, "script step must have a command"
     if "{{" in command:
         command = render_prompt(command, build_context(
-            change_title=change.title, event_log=log,
+            quest_title=change.title, event_log=log,
             quest_id=change.id, quest_home=f".imp/changes/{change.id}",
             cur_base_head=change.cur_base_head,
             orig_base_head=change.orig_base_head, vars=state.vars,
@@ -914,7 +914,7 @@ async def _route_script(
                 run_script, step, cwd=change.workflow_dir,
                 env_extra=engine_env(project_root=change.project_root,
                                      quest_id=change.id,
-                                     change_title=change.title,
+                                     quest_title=change.title,
                                      quest_dir=change.quest_dir,
                                      output_path=output_path,
                                      test_gates=test_gates),
@@ -1516,7 +1516,7 @@ async def _run_agent_invocation(
         system_prompt_override: str | None = stored
     else:
         ctx = build_context(
-            quest_id=change.id, change_title=change.title,
+            quest_id=change.id, quest_title=change.title,
             quest_home=f".imp/changes/{change.id}",
             cur_base_head=change.cur_base_head,
             orig_base_head=change.orig_base_head,
@@ -1640,7 +1640,7 @@ def _build_sandbox_policy(change: Change, config: Any, log: EventLog) -> Any:
     eng = overlay_engine_env(
         os.environ,
         engine_env(project_root=change.project_root, quest_id=change.id,
-                   change_title=change.title,
+                   quest_title=change.title,
                    quest_dir=change.quest_dir,
                    test_gates=TestGates.from_config(config)),
     )

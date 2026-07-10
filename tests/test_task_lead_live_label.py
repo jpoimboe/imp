@@ -11,7 +11,7 @@ def _render_task_lead(**var_overrides) -> str:
     body = wf.agents["task-lead"].prompt_template_source
     vars = {"fast_path": False, "plan_index": 2, "plan_total": 4, "task_total": 6,
             **var_overrides}
-    ctx = build_context(change_title="t", event_log=InMemoryEventLog(),
+    ctx = build_context(quest_title="t", event_log=InMemoryEventLog(),
                         quest_id="chg", quest_home=".imp/changes/chg",
                         vars=vars)
     return render_prompt(body, ctx, workflow_dir=bundled_workflow_dir("imp"))

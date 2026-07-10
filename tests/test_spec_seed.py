@@ -113,7 +113,7 @@ def test_new_positional_delivers_verbatim_seed(
     assert captured["change"].title == ""  # type: ignore[union-attr]
 
 
-def test_new_title_flag_sets_change_title(
+def test_new_title_flag_sets_quest_title(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     _seed_control(tmp_path)
     monkeypatch.chdir(tmp_path)
@@ -173,7 +173,7 @@ def test_threshold_opening_conditioned_on_message(tmp_path) -> None:
         "threshold"].prompt_template_source
     log = JsonlEventLog(tmp_path / "events.jsonl")
     out = render_prompt(body, build_context(
-        change_title="t", event_log=log, quest_id="abc",
+        quest_title="t", event_log=log, quest_id="abc",
         quest_home=".imp/changes/abc", project_facts={}),
         workflow_dir=bundled_workflow_dir("imp"))
     # Rendered with no opening -> the unseeded (bare-open) branch, no <imp:begin/>.
@@ -181,7 +181,7 @@ def test_threshold_opening_conditioned_on_message(tmp_path) -> None:
     assert "Open by asking" in out
     # Rendered WITH an opening -> the seeded branch carries the verbatim intent.
     seeded = render_prompt(body, build_context(
-        change_title="t", event_log=log, quest_id="abc",
+        quest_title="t", event_log=log, quest_id="abc",
         quest_home=".imp/changes/abc", project_facts={},
         opening="wire up telemetry"),
         workflow_dir=bundled_workflow_dir("imp"))
@@ -194,7 +194,7 @@ def test_threshold_prompt_has_verbatim_opening_branch(tmp_path) -> None:
         "threshold"].prompt_template_source
     log = JsonlEventLog(tmp_path / "events.jsonl")
     out = render_prompt(body, build_context(
-        change_title="t", event_log=log, quest_id="abc",
+        quest_title="t", event_log=log, quest_id="abc",
         quest_home=".imp/changes/abc", project_facts={}),
         workflow_dir=bundled_workflow_dir("imp"))
     # Unseeded render -> the bare-open branch. The seeded branch no longer uses
@@ -203,7 +203,7 @@ def test_threshold_prompt_has_verbatim_opening_branch(tmp_path) -> None:
     assert "Opening message in hand" not in out
     assert "Open by asking" in out
     seeded = render_prompt(body, build_context(
-        change_title="t", event_log=log, quest_id="abc",
+        quest_title="t", event_log=log, quest_id="abc",
         quest_home=".imp/changes/abc", project_facts={},
         opening="wire up telemetry"),
         workflow_dir=bundled_workflow_dir("imp"))
@@ -219,7 +219,7 @@ def test_threshold_prompt_has_read_and_verify_section(tmp_path) -> None:
         "threshold"].prompt_template_source
     log = JsonlEventLog(tmp_path / "events.jsonl")
     out = render_prompt(body, build_context(
-        change_title="t", event_log=log, quest_id="abc",
+        quest_title="t", event_log=log, quest_id="abc",
         quest_home=".imp/changes/abc", project_facts={}),
         workflow_dir=bundled_workflow_dir("imp"))
     # The seeded/adopt marker is gone; a named spec is read and verified instead.

@@ -19,6 +19,6 @@ def test_render_uses_change_namespace(tmp_path: Path) -> None:
     )
     agent = parse_agent_file(p)
     log = JsonlEventLog(tmp_path / "events.jsonl")
-    ctx = build_context(change_title="foo", event_log=log, quest_id="my-id")
+    ctx = build_context(quest_title="foo", event_log=log, quest_id="my-id")
     rendered = render_prompt(agent.prompt_template_source, ctx)
     assert "Change my-id: foo" in rendered

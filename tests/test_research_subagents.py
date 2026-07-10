@@ -54,7 +54,7 @@ def test_spec_writer_prose_relaxes_throttle_and_adds_research(tmp_path) -> None:
     body = _wf().agents["threshold"].prompt_template_source
     log = JsonlEventLog(tmp_path / "events.jsonl")
     out = render_prompt(body, build_context(
-        change_title="t", event_log=log, quest_id="abc",
+        quest_title="t", event_log=log, quest_id="abc",
         quest_home=".imp/changes/abc", project_facts={}),
         workflow_dir=bundled_workflow_dir("imp"))
     assert "no more than 3 question rounds" not in out
@@ -109,7 +109,7 @@ def test_spec_writer_design_quality_and_coverage_guidance(tmp_path) -> None:
     body = _wf().agents["threshold"].prompt_template_source
     log = JsonlEventLog(tmp_path / "events.jsonl")
     out = render_prompt(body, build_context(
-        change_title="t", event_log=log, quest_id="abc",
+        quest_title="t", event_log=log, quest_id="abc",
         quest_home=".imp/changes/abc", project_facts={}),
         workflow_dir=bundled_workflow_dir("imp"))
     assert "present it in sections" in out

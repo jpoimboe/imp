@@ -491,7 +491,7 @@ async def test_run_session_client_forwards_chat_leave_mode_to_terminal(
 
 
 @pytest.mark.anyio
-async def test_run_session_client_passes_terminal_title_from_change_title(
+async def test_run_session_client_passes_terminal_title_from_quest_title(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from imp.cli.terminal_title import TerminalTitle

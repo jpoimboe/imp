@@ -110,7 +110,7 @@ def overlay_engine_env(
 
 
 def engine_env(
-    *, project_root: Path, quest_id: str, change_title: str,
+    *, project_root: Path, quest_id: str, quest_title: str,
     quest_dir: Path | None = None,
     output_path: Path | None = None,
     test_gates: TestGates | None = None,
@@ -150,7 +150,7 @@ def engine_env(
     env = {
         "IMP_PROJECT_ROOT": str(project_root),
         "IMP_CHANGE_ID": quest_id,
-        "IMP_CHANGE_TITLE": change_title,
+        "IMP_CHANGE_TITLE": quest_title,
         **HEADLESS_ENV,
     }
     if quest_dir is not None:

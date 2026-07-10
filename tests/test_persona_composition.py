@@ -54,7 +54,7 @@ def test_persona_injected_between_head_and_tail(tmp_path):
 def test_persona_renders_change_and_vars_namespaces(tmp_path):
     # AC#4: persona body may reference the Jinja namespaces.
     log = JsonlEventLog(tmp_path / "events.jsonl")
-    ctx = build_context(change_title="My Change", event_log=log,
+    ctx = build_context(quest_title="My Change", event_log=log,
                         vars={"point_of_novelty": "a widget"})
     rendered = render_prompt(
         "Title {{ change.title }}; novelty {{ vars.point_of_novelty }}", ctx)
@@ -69,7 +69,7 @@ def test_persona_can_include_partials(tmp_path):
     (wf / "partials").mkdir(parents=True)
     (wf / "partials" / "frag.md").write_text("SHARED FRAGMENT")
     log = JsonlEventLog(tmp_path / "events.jsonl")
-    ctx = build_context(change_title="t", event_log=log)
+    ctx = build_context(quest_title="t", event_log=log)
     rendered = render_prompt('{% include "partials/frag.md" %}', ctx,
                              workflow_dir=wf)
     assert rendered == "SHARED FRAGMENT"

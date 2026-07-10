@@ -107,7 +107,7 @@ def test_threshold_infers_intent_from_pasted_context(tmp_path) -> None:
     # agent to infer intent from the substance and ban the classification
     # recital — never blankly re-ask.
     out = render_prompt(body, build_context(
-        change_title="t", event_log=log, quest_id="abc",
+        quest_title="t", event_log=log, quest_id="abc",
         quest_home=".imp/changes/abc", project_facts={},
         opening="pasted imp log for change abc"),
         workflow_dir=bundled_workflow_dir("imp"))
@@ -563,7 +563,7 @@ def test_spec_writer_handoff_renders_drift_branch_on_moved_base(tmp_path) -> Non
     body = _read("spec-finalizer.md")
     log = JsonlEventLog(tmp_path / "events.jsonl")
     moved = render_prompt(body, build_context(
-        change_title="t", event_log=log, quest_id="abc",
+        quest_title="t", event_log=log, quest_id="abc",
         quest_home=".imp/changes/abc",
         cur_base_head="NEW", orig_base_head="OLD",
         project_facts={}),
@@ -577,7 +577,7 @@ def test_spec_writer_handoff_renders_drift_branch_on_moved_base(tmp_path) -> Non
     assert "adopt near-silently" not in moved
 
     same = render_prompt(body, build_context(
-        change_title="t", event_log=log, quest_id="abc",
+        quest_title="t", event_log=log, quest_id="abc",
         quest_home=".imp/changes/abc",
         cur_base_head="SAME", orig_base_head="SAME",
         project_facts={}),
@@ -588,7 +588,7 @@ def test_spec_writer_handoff_renders_drift_branch_on_moved_base(tmp_path) -> Non
     # Autonomy no longer changes this branch — the drift-reconcile prompt is identical
     # whether or not the run is autonomous (the conditional was removed).
     autonomous_moved = render_prompt(body, build_context(
-        change_title="t", event_log=log, quest_id="abc",
+        quest_title="t", event_log=log, quest_id="abc",
         quest_home=".imp/changes/abc",
         cur_base_head="NEW", orig_base_head="OLD",
         autonomous=True,
@@ -661,7 +661,7 @@ def test_threshold_adopts_discovered_work_by_default(tmp_path) -> None:
         "threshold"].prompt_template_source
     log = JsonlEventLog(tmp_path / "events.jsonl")
     attended = render_prompt(body, build_context(
-        change_title="t", event_log=log, quest_id="abc",
+        quest_title="t", event_log=log, quest_id="abc",
         quest_home=".imp/changes/abc", project_facts={}),
         workflow_dir=bundled_workflow_dir("imp"))
     # Adoption is the unmarked default: discovered work folds into the current change.
@@ -682,7 +682,7 @@ def test_threshold_adopts_discovered_work_by_default(tmp_path) -> None:
     # create_change appears nowhere else in threshold.md, its absence proves the
     # block was dropped.
     autonomous = render_prompt(body, build_context(
-        change_title="t", event_log=log, quest_id="abc",
+        quest_title="t", event_log=log, quest_id="abc",
         quest_home=".imp/changes/abc", autonomous=True,
         project_facts={}),
         workflow_dir=bundled_workflow_dir("imp"))
@@ -735,7 +735,7 @@ def test_authoring_agent_renders_human_decision_partial(
     rendered = render_prompt(
         body,
         build_context(
-            change_title="t", event_log=log, quest_id="abc",
+            quest_title="t", event_log=log, quest_id="abc",
             quest_home=".imp/changes/abc",
             cur_base_head="X", orig_base_head="X",
             vars={"fast_path": False, "plan_index": 1, "plan_total": 1,
@@ -795,7 +795,7 @@ def test_dispatched_subagents_have_no_schema_or_complete_step(tree: str) -> None
 
 def test_run_namespace_no_longer_exposes_non_interactive(tmp_path: Path) -> None:
     log = JsonlEventLog(tmp_path / "events.jsonl")
-    ctx = build_context(change_title="t", event_log=log)
+    ctx = build_context(quest_title="t", event_log=log)
     with pytest.raises(PromptRenderError):
         render_prompt("{{ run.non_interactive }}", ctx)
 
@@ -810,7 +810,7 @@ def test_finalize_auto_resolves_needs_decision_only_under_autonomy(
 
         def render(autonomous: bool, body: str = body, wdir: Path = wdir) -> str:
             return render_prompt(body, build_context(
-                change_title="t", event_log=log, quest_id="abc",
+                quest_title="t", event_log=log, quest_id="abc",
                 quest_home=".imp/changes/abc",
                 project_facts={}, autonomous=autonomous,
                 vars={"auto_merge": True}),

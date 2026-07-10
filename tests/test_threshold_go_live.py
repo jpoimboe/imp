@@ -14,7 +14,7 @@ def _render(tmp_path: Path, *, autonomous: bool = False) -> str:
     log = JsonlEventLog(tmp_path / "events.jsonl")
     return render_prompt(
         body,
-        build_context(change_title="t", event_log=log, quest_id="abc",
+        build_context(quest_title="t", event_log=log, quest_id="abc",
                       quest_home=".imp/changes/abc",
                       autonomous=autonomous,
                       project_facts={}),

@@ -380,7 +380,7 @@ def test_gate_sees_post_rename_title_not_frozen_empty() -> None:
         shutil.rmtree(root, ignore_errors=True)
 
 
-def test_bash_tool_uses_live_change_title_not_stale_snapshot() -> None:
+def test_bash_tool_uses_live_quest_title_not_stale_snapshot() -> None:
     """Regression: the bash tool must read IMP_CHANGE_TITLE from the LIVE Change, not
     the frozen change_context snapshot that rename_change never updates. Without the
     fix the agent's own bash sees the empty name-on-intent title inside the sandbox.

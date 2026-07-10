@@ -180,7 +180,7 @@ def _build_spike_policy(change: Any, worktree_path: Path, test_gates: Any) -> An
     eng = overlay_engine_env(
         os.environ,
         engine_env(project_root=worktree_path, quest_id=change.id,
-                   change_title=change.title, quest_dir=change.quest_dir,
+                   quest_title=change.title, quest_dir=change.quest_dir,
                    test_gates=test_gates),
     )
     return resolve_policy(
@@ -261,7 +261,7 @@ async def dispatch_task(
         # for {{ events.* }} — NOT ctx.event_log, which is the shared WRITE instance.
         prompt_ctx = build_context(
             quest_id=cc.id,
-            change_title=cc.title,   # dispatch label is the title now [item 11]
+            quest_title=cc.title,   # dispatch label is the title now [item 11]
             quest_home=cc.quest_home,
             event_log=JsonlEventLog(ctx.events_path),
             vars=ctx.change_state.vars if ctx.change_state is not None else {},

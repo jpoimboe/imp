@@ -86,7 +86,7 @@ async def bash(
     eng = engine_env(
         project_root=ctx.project_root,
         quest_id=src.id if src else "",
-        change_title=src.title if src else "",
+        quest_title=src.title if src else "",
         quest_dir=(getattr(src, "quest_dir", None)
                     or (Path(h) if (h := getattr(src, "quest_home", None)) else None)),
         test_gates=ctx.test_gates,

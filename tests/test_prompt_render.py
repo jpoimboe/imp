@@ -21,7 +21,7 @@ def _log(path: Path, events: list[tuple[str, dict]]) -> EventLog:
 def test_renders_change_namespace(tmp_path: Path) -> None:
     log = _log(tmp_path / "events.jsonl", [])
     ctx = build_context(
-        change_title="My Change", event_log=log, quest_id="myid01",
+        quest_title="My Change", event_log=log, quest_id="myid01",
     )
     assert render_prompt(
         "Hello {{ change.title }} ({{ change.id }})", ctx,
@@ -38,7 +38,7 @@ def test_renders_events_namespace(tmp_path: Path) -> None:
         ],
     )
     ctx = build_context(
-        change_title="t",
+        quest_title="t",
         event_log=log,
     )
     assert render_prompt(
@@ -48,7 +48,7 @@ def test_renders_events_namespace(tmp_path: Path) -> None:
 
 def test_events_missing_step_renders_empty(tmp_path: Path) -> None:
     ctx = build_context(
-        change_title="t",
+        quest_title="t",
         event_log=_log(tmp_path / "events.jsonl", []),
     )
     assert render_prompt("{{ events['nope'].field }}", ctx) == ""
@@ -56,7 +56,7 @@ def test_events_missing_step_renders_empty(tmp_path: Path) -> None:
 
 def test_undefined_top_level_raises(tmp_path: Path) -> None:
     ctx = build_context(
-        change_title="t",
+        quest_title="t",
         event_log=_log(tmp_path / "events.jsonl", []),
     )
     with pytest.raises(PromptRenderError):
@@ -65,7 +65,7 @@ def test_undefined_top_level_raises(tmp_path: Path) -> None:
 
 def test_renders_vars_namespace(tmp_path: Path) -> None:
     log = _log(tmp_path / "events.jsonl", [])
-    ctx = build_context(change_title="t", event_log=log,
+    ctx = build_context(quest_title="t", event_log=log,
                         vars={"fast_path": True})
     assert render_prompt("{{ vars.fast_path }}", ctx) == "True"
     assert render_prompt("{% if vars.fast_path %}fast{% endif %}", ctx) == "fast"
@@ -73,7 +73,7 @@ def test_renders_vars_namespace(tmp_path: Path) -> None:
 
 def test_vars_typo_raises_strict_within(tmp_path: Path) -> None:
     log = _log(tmp_path / "events.jsonl", [])
-    ctx = build_context(change_title="t", event_log=log,
+    ctx = build_context(quest_title="t", event_log=log,
                         vars={"fast_path": False})
     with pytest.raises(PromptRenderError):
         render_prompt("{{ vars.fastpath }}", ctx)
@@ -81,7 +81,7 @@ def test_vars_typo_raises_strict_within(tmp_path: Path) -> None:
 
 def test_vars_default_empty_when_omitted(tmp_path: Path) -> None:
     log = _log(tmp_path / "events.jsonl", [])
-    ctx = build_context(change_title="t", event_log=log)
+    ctx = build_context(quest_title="t", event_log=log)
     # An unknown var still raises (strict-within over an empty map).
     with pytest.raises(PromptRenderError):
         render_prompt("{{ vars.anything }}", ctx)
@@ -100,12 +100,12 @@ def test_coder_prompt_gates_tdd_on_fast_path(tmp_path: Path) -> None:
 
     fast = render_prompt(
         body,
-        build_context(change_title="t", event_log=log,
+        build_context(quest_title="t", event_log=log,
                       vars={"fast_path": True}),
     )
     slow = render_prompt(
         body,
-        build_context(change_title="t", event_log=log,
+        build_context(quest_title="t", event_log=log,
                       vars={"fast_path": False}),
     )
     # fast-path: no new tests, TDD skill NOT loaded; the coder does NOT run
@@ -132,7 +132,7 @@ def test_events_render_skips_torn_trailing_line(tmp_path: Path) -> None:
     # Simulate a crash mid-append: a partial JSON line, no trailing newline.
     with path.open("a") as f:
         f.write('{"type": "agent_output", "payload": {"summa')
-    ctx = build_context(change_title="t", event_log=log)
+    ctx = build_context(quest_title="t", event_log=log)
     assert render_prompt(
         "Prev: {{ events['spec-writer'].summary }}", ctx,
     ) == "Prev: good"
@@ -140,7 +140,7 @@ def test_events_render_skips_torn_trailing_line(tmp_path: Path) -> None:
 
 def test_renders_project_facts(tmp_path: Path) -> None:
     ctx = build_context(
-        change_title="t",
+        quest_title="t",
         event_log=_log(tmp_path / "events.jsonl", []),
         project_facts={"test_command": "make test"},
     )
@@ -151,7 +151,7 @@ def test_project_guidance_reference_raises(tmp_path: Path) -> None:
     # guidance is no longer a template fact: a stale reference fails loudly at
     # render (strict project namespace) instead of silently rendering empty.
     ctx = build_context(
-        change_title="t",
+        quest_title="t",
         event_log=_log(tmp_path / "events.jsonl", []),
     )
     with pytest.raises(PromptRenderError):
@@ -160,7 +160,7 @@ def test_project_guidance_reference_raises(tmp_path: Path) -> None:
 
 def test_missing_fact_attr_raises(tmp_path: Path) -> None:
     ctx = build_context(
-        change_title="t",
+        quest_title="t",
         event_log=_log(tmp_path / "events.jsonl", []),
         project_facts={"a": "1"},
     )
@@ -170,7 +170,7 @@ def test_missing_fact_attr_raises(tmp_path: Path) -> None:
 
 def test_missing_fact_item_raises(tmp_path: Path) -> None:
     ctx = build_context(
-        change_title="t",
+        quest_title="t",
         event_log=_log(tmp_path / "events.jsonl", []),
         project_facts={"a": "1"},
     )
@@ -180,7 +180,7 @@ def test_missing_fact_item_raises(tmp_path: Path) -> None:
 
 def test_default_filter_does_not_rescue_strict_namespace(tmp_path: Path) -> None:
     ctx = build_context(
-        change_title="t",
+        quest_title="t",
         event_log=_log(tmp_path / "events.jsonl", []),
         project_facts={"a": "1"},
     )
@@ -198,7 +198,7 @@ def test_dunder_raises_attributeerror() -> None:
 def test_renders_quest_home(tmp_path: Path) -> None:
     log = _log(tmp_path / "events.jsonl", [])
     ctx = build_context(
-        quest_id="abc123", change_title="My Change",
+        quest_id="abc123", quest_title="My Change",
         quest_home="/ctl/.imp/changes/abc123", event_log=log,
     )
     assert render_prompt(
@@ -208,14 +208,14 @@ def test_renders_quest_home(tmp_path: Path) -> None:
 
 def test_quest_home_defaults_empty(tmp_path: Path) -> None:
     log = _log(tmp_path / "events.jsonl", [])
-    ctx = build_context(quest_id="t", change_title="t", event_log=log)
+    ctx = build_context(quest_id="t", quest_title="t", event_log=log)
     assert render_prompt("{{ change.home }}", ctx) == ""
 
 
 
 def test_missing_run_attr_raises(tmp_path: Path) -> None:
     ctx = build_context(
-        change_title="t", event_log=_log(tmp_path / "events.jsonl", []),
+        quest_title="t", event_log=_log(tmp_path / "events.jsonl", []),
     )
     with pytest.raises(PromptRenderError):
         render_prompt("{{ run.bogus }}", ctx)
@@ -223,13 +223,13 @@ def test_missing_run_attr_raises(tmp_path: Path) -> None:
 
 def test_renders_cur_base_head(tmp_path: Path) -> None:
     log = _log(tmp_path / "events.jsonl", [])
-    ctx = build_context(change_title="t", event_log=log, cur_base_head="deadbeef")
+    ctx = build_context(quest_title="t", event_log=log, cur_base_head="deadbeef")
     assert render_prompt("{{ change.cur_base_head }}", ctx) == "deadbeef"
 
 
 def test_cur_base_head_defaults_empty(tmp_path: Path) -> None:
     ctx = build_context(
-        change_title="t", event_log=_log(tmp_path / "events.jsonl", []),
+        quest_title="t", event_log=_log(tmp_path / "events.jsonl", []),
     )
     assert render_prompt("{{ change.cur_base_head }}", ctx) == ""
 
@@ -238,7 +238,7 @@ def test_render_resolves_include_with_workflow_dir(tmp_path: Path) -> None:
     (tmp_path / "partials").mkdir()
     (tmp_path / "partials" / "frag.md").write_text("SHARED-FRAGMENT\n")
     log = _log(tmp_path / "events.jsonl", [])
-    ctx = build_context(change_title="t", event_log=log)
+    ctx = build_context(quest_title="t", event_log=log)
     out = render_prompt(
         '{% include "partials/frag.md" %}', ctx, workflow_dir=tmp_path)
     assert "SHARED-FRAGMENT" in out
@@ -246,7 +246,7 @@ def test_render_resolves_include_with_workflow_dir(tmp_path: Path) -> None:
 
 def test_render_without_workflow_dir_cannot_resolve_include(tmp_path: Path) -> None:
     log = _log(tmp_path / "events.jsonl", [])
-    ctx = build_context(change_title="t", event_log=log)
+    ctx = build_context(quest_title="t", event_log=log)
     with pytest.raises(PromptRenderError):
         render_prompt('{% include "partials/frag.md" %}', ctx)
 
@@ -259,7 +259,7 @@ def test_plain_gate_asks_build_affirmative(tmp_path: Path) -> None:
     log = _log(tmp_path / "events.jsonl", [])
     rendered = render_prompt(
         src,
-        build_context(change_title="t", event_log=log),
+        build_context(quest_title="t", event_log=log),
         workflow_dir=bundled_workflow_dir("imp"))
     assert "Want me to build this out now?" in rendered
     assert "save this to your backlog" not in rendered
@@ -267,7 +267,7 @@ def test_plain_gate_asks_build_affirmative(tmp_path: Path) -> None:
 
 def test_renders_run_autonomous_true(tmp_path: Path) -> None:
     log = _log(tmp_path / "events.jsonl", [])
-    ctx = build_context(change_title="t", event_log=log, autonomous=True)
+    ctx = build_context(quest_title="t", event_log=log, autonomous=True)
     assert render_prompt("{{ run.autonomous }}", ctx) == "True"
     assert render_prompt(
         "{% if run.autonomous %}take{% else %}confirm{% endif %}", ctx) == "take"
@@ -275,7 +275,7 @@ def test_renders_run_autonomous_true(tmp_path: Path) -> None:
 
 def test_renders_run_autonomous_false_default(tmp_path: Path) -> None:
     log = _log(tmp_path / "events.jsonl", [])
-    ctx = build_context(change_title="t", event_log=log)
+    ctx = build_context(quest_title="t", event_log=log)
     assert render_prompt("{{ run.autonomous }}", ctx) == "False"
     assert render_prompt(
         "{% if run.autonomous %}take{% else %}confirm{% endif %}", ctx) == "confirm"
@@ -287,7 +287,7 @@ def test_change_namespace_exposes_orig_base_head(tmp_path) -> None:
 
     log = JsonlEventLog(tmp_path / "events.jsonl")
     ctx = build_context(
-        change_title="t", event_log=log, quest_id="abc",
+        quest_title="t", event_log=log, quest_id="abc",
         cur_base_head="NEWTIP", orig_base_head="OLDTIP")
     # Both heads render, so a template can branch on whether the base moved.
     out = render_prompt(
@@ -297,7 +297,7 @@ def test_change_namespace_exposes_orig_base_head(tmp_path) -> None:
     assert out == "OLDTIP|NEWTIP|MOVED"
 
     same = build_context(
-        change_title="t", event_log=log, quest_id="abc",
+        quest_title="t", event_log=log, quest_id="abc",
         cur_base_head="X", orig_base_head="X")
     out2 = render_prompt(
         "{% if change.cur_base_head != change.orig_base_head %}MOVED{% else %}SAME{% endif %}",
@@ -311,7 +311,7 @@ def test_build_or_save_attended_build_default_yields(tmp_path: Path) -> None:
     ).read_text()
     log = _log(tmp_path / "events.jsonl", [])
     rendered = render_prompt(
-        src, build_context(change_title="t", event_log=log),
+        src, build_context(quest_title="t", event_log=log),
         workflow_dir=bundled_workflow_dir("imp"))
     assert "Want me to build this out now?" in rendered
     assert "end your turn to yield" in rendered
@@ -323,7 +323,7 @@ def test_build_or_save_attended_build_default_yields(tmp_path: Path) -> None:
 
 def test_renders_run_opening_when_present(tmp_path: Path) -> None:
     log = _log(tmp_path / "events.jsonl", [])
-    ctx = build_context(change_title="t", event_log=log,
+    ctx = build_context(quest_title="t", event_log=log,
                         opening="add a dark-mode toggle")
     assert ctx.run.opening == "add a dark-mode toggle"
     assert render_prompt(
@@ -333,7 +333,7 @@ def test_renders_run_opening_when_present(tmp_path: Path) -> None:
 
 def test_run_opening_defaults_empty_and_selects_bare_branch(tmp_path: Path) -> None:
     log = _log(tmp_path / "events.jsonl", [])
-    ctx = build_context(change_title="t", event_log=log)
+    ctx = build_context(quest_title="t", event_log=log)
     assert ctx.run.opening == ""
     assert render_prompt(
         "{% if run.opening %}SEED{% else %}BARE{% endif %}", ctx) == "BARE"
@@ -341,7 +341,7 @@ def test_run_opening_defaults_empty_and_selects_bare_branch(tmp_path: Path) -> N
 
 def test_step_namespace_defaults_to_lap_one(tmp_path: Path) -> None:
     log = _log(tmp_path / "events.jsonl", [])
-    ctx = build_context(change_title="t", event_log=log)
+    ctx = build_context(quest_title="t", event_log=log)
     assert render_prompt("{{ step.lap }}", ctx) == "1"
     assert render_prompt("{{ step.prior_laps | length }}", ctx) == "0"
 
@@ -349,7 +349,7 @@ def test_step_namespace_defaults_to_lap_one(tmp_path: Path) -> None:
 def test_step_namespace_lap_is_last_recorded_plus_one(tmp_path: Path) -> None:
     log = _log(tmp_path / "events.jsonl", [])
     ctx = build_context(
-        change_title="t", event_log=log,
+        quest_title="t", event_log=log,
         prior_laps=[
             {"lap": 2, "outcome": "first draft", "head": "cafe1234"},
             {"lap": 3, "outcome": "reworked", "head": "beef5678"},
@@ -371,7 +371,7 @@ def test_step_namespace_lap_tracks_recorded_lap_not_list_length(tmp_path: Path) 
     # (len-based derivation would wrongly yield 5).
     log = _log(tmp_path / "events.jsonl", [])
     ctx = build_context(
-        change_title="t", event_log=log,
+        quest_title="t", event_log=log,
         prior_laps=[
             {"lap": 3, "outcome": "l3", "head": "aaa3"},
             {"lap": 4, "outcome": "l4", "head": "aaa4"},
@@ -389,7 +389,7 @@ def test_build_or_save_autonomous_takes_build_default(tmp_path: Path) -> None:
     ).read_text()
     log = _log(tmp_path / "events.jsonl", [])
     rendered = render_prompt(
-        src, build_context(change_title="t", event_log=log, autonomous=True),
+        src, build_context(quest_title="t", event_log=log, autonomous=True),
         workflow_dir=bundled_workflow_dir("imp"))
     assert "take the default and proceed without yielding" in rendered
     assert "Want me to build this out now?" not in rendered
