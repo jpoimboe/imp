@@ -93,13 +93,17 @@ def completed_rows(
     ]
 
 
-def search(
-    conn: sqlite3.Connection, query: str,
-) -> list[tuple[str, str, str, str]]:
+def _like_pattern(query: str) -> str:
     # Escape LIKE metacharacters so a `%`/`_`/`\` in the user's query matches
     # literally instead of acting as a wildcard.
     escaped = query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
-    like = f"%{escaped}%"
+    return f"%{escaped}%"
+
+
+def search(
+    conn: sqlite3.Connection, query: str,
+) -> list[tuple[str, str, str, str]]:
+    like = _like_pattern(query)
     rows = conn.execute(
         "SELECT id, title, status, created_at FROM changes"
         " WHERE id LIKE ? ESCAPE '\\' OR title LIKE ? ESCAPE '\\'"
@@ -109,4 +113,20 @@ def search(
     return [
         (cid, title or "", status or "", created or "")
         for (cid, title, status, created) in rows
+    ]
+
+
+def search_content(
+    conn: sqlite3.Connection, query: str,
+) -> list[tuple[str, str, str]]:
+    like = _like_pattern(query)
+    rows = conn.execute(
+        "SELECT id, title, content FROM changes"
+        " WHERE id LIKE ? ESCAPE '\\' OR title LIKE ? ESCAPE '\\'"
+        " OR content LIKE ? ESCAPE '\\'"
+        " ORDER BY created_at DESC, id",
+        (like, like, like)).fetchall()
+    return [
+        (cid, title or "", content or "")
+        for (cid, title, content) in rows
     ]

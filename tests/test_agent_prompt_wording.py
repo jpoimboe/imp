@@ -317,3 +317,15 @@ def test_deferred_sweep_protects_spec_cited_untagged_items() -> None:
     # (c) an item already landed by a corrective plan is closed fixed, not dismissed
     assert "already landed by a corrective plan" in body
     assert "close it `— fixed <sha>`" in body
+
+
+def test_finalize_cover_check_marks_covered_by() -> None:
+    body = _agent_prompt("finalize")
+    low = body.lower()
+    # The cover-check consumes imp search's terse -l list across active + backlog.
+    assert "imp search --active --backlog -l" in body
+    # A confirmed cover writes the covered-by terminal marker.
+    assert "— covered-by <id>" in body
+    # Fail-safe: only a positively confirmed tracker suppresses the human ask.
+    assert "surface, never suppress" in low
+    assert "positively confirmed" in low

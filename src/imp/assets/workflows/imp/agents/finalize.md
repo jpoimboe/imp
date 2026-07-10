@@ -72,15 +72,52 @@ triage did **not converge** — an unrecognized flake or a hard regression that 
 neither fixed nor tolerated. Read it as a non-converging triage that needs a human,
 not a transient.
 
+## 1a. Cover-check — drop a redundant ask already tracked elsewhere
+
+Before §2 decides the gate, run a **cover-check** over the **verify-family
+tolerations** in the §1 surfaced set — the `— needs-decision:` lines whose source is
+`verify` / `converge-verify` / `integration-verify`. Design/spec `— needs-decision:`
+items authored by `spec-finalizer` / `plan-writer` are **never** cover-checked; they
+always surface. The check asks one question per toleration: is the failing test
+**already tracked or fixed by another active or backlog change**? If so, re-asking a
+human here is redundant. It is a **two-stage funnel**:
+
+1. **Find candidates.** Run `imp search --active --backlog -l "<test identity>"` on the
+   failing test's identity (its node id / name / signature, read from the toleration
+   line), and **exclude the change being finalized** (`{{ change.id }}`) from the
+   results. This is a **candidate finder** only — a substring match — so it also returns
+   changes that merely *mention* the test.
+2. **Confirm intent.** For each candidate, read its stated purpose — `imp show <id>` for
+   a backlog change's title + description, `imp show <id> spec` for an in-flight change's
+   goal — and confirm it is genuinely **about fixing or tracking this specific test's
+   flakiness**, matched on the test's identity, not an incidental mention.
+
+**Fail safe = surface, never suppress.** The cover-check only ever *removes* a human
+ask, so its default is *not* to remove one. Only a **positively confirmed** tracker
+counts: no candidate, an ambiguous one, or one you cannot verify → the item stays
+uncovered and is surfaced exactly as an untracked toleration. On a **confirmed cover**,
+rewrite the line to `- [x] DEFERRED <src>: <desc> [scope: …] — covered-by <id>`,
+drop it from `open_items`, neither present it at the gate nor seed a change for it, and
+note the auto-cover in `comments`.
+
+`— covered-by <id>` is **terminal**, joining `— seeded <id>` / `— ignored-at-gate` /
+`— dismissed`: a later `deferred-sweep` or `finalize` pass treats it as inert and never
+re-raises it.
+
 ## 2. Decide the gate
 
 {% if run.autonomous %}
-**Autonomous run — no human at the gate.** Do not yield or solicit a decision. Hand
-every **needs-decision** item (the closed set from §1) to the backlog: call
+**Autonomous run — no human at the gate.** Do not yield or solicit a decision. The §1a
+cover-check has already run, so any verify-family toleration confirmed as tracked
+elsewhere is already marked `— covered-by <id>` and is **not** re-seeded. Hand every
+remaining **needs-decision** item (the closed set from §1) to the backlog: call
 `create_change(title="<short title>", description="<self-contained brief that needs no
 other context>", depends_on=["{{ change.id }}"])` — group related items into one Change
-or split unrelated ones across several, whatever fits best — then rewrite each item's
-`deferred.md` line to `- [x] DEFERRED <src>: <desc> [scope: …] — seeded <new-change-id>`.
+or split unrelated ones across several, whatever fits best. When the item is a
+verify-family toleration, the `description` must embed the failing test's identity
+(node id / name / signature) so a later change's cover-check can match it instead of
+seeding another duplicate. Then rewrite each item's `deferred.md` line to
+`- [x] DEFERRED <src>: <desc> [scope: …] — seeded <new-change-id>`.
 With every item now either trusted-and-merged or seeded to the backlog, take the
 **merge** disposition. The one exception is an **unrecoverable problem** (e.g. the
 non-converging verify-triage case above) — that still **pauses** for a human even under
@@ -88,7 +125,8 @@ autonomy; do not force it through. Then route on the dispositions below.
 {% else %}
 {% if vars.auto_merge %}
 **Auto-merge — this run merges clean changes without asking.** When the §1
-**needs-decision** closed set is empty AND there is no unrecoverable problem (e.g.
+**needs-decision** closed set — as already reduced by the §1a cover-check — is empty
+AND there is no unrecoverable problem (e.g.
 the non-converging verify-triage case above), do **not** open the live gate or solicit
 a decision: take the **merge** disposition directly and route on the dispositions
 below. Still emit the full audit record (`verify_status` / `open_items` (empty) /
@@ -130,7 +168,9 @@ item:
     no other context>", depends_on=["{{ change.id }}"])`, then rewrite the item's
     line to `- [x] DEFERRED <src>: <desc> [scope: …] — seeded <new-change-id>`,
     and tell them it is startable via `imp resume <new-change-id>` once this
-    change merges.
+    change merges. When the item is a verify-family toleration, the `description`
+    must embed the failing test's identity (node id / name / signature) so a later
+    change's cover-check can match it.
   - **ignore** — drop it. Rewrite the line to
     `- [x] DEFERRED <src>: <desc> [scope: …] — ignored-at-gate`.
 - **Clarifying questions are first-class.** When the human asks to understand
@@ -140,7 +180,7 @@ item:
   do not minimize it ("negligible", "within normal noise") or argue it down to defend
   your recommendation. One restrained line.
 
-Both `seeded <id>` and `ignored-at-gate` are **terminal**: a later
+`seeded <id>`, `ignored-at-gate`, and `covered-by <id>` are all **terminal**: a later
 `deferred-sweep` or `finalize` pass treats them like `dismissed` and never
 re-raises them, so a rework pass re-surfaces only the fix-now work — no
 double-seeding, no re-asking.

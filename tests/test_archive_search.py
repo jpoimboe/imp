@@ -76,3 +76,31 @@ def test_search_archive_content_percent_is_literal(tmp_path: Path) -> None:
     _archive(tmp_path, "pct", "", events_text=_prose_line("throughput up 50% today"))
     _archive(tmp_path, "plain", "", events_text=_prose_line("50 items processed"))
     assert [h[0] for h in archive_read.search_archive(tmp_path, "50%")] == ["pct"]
+
+
+def test_search_content_carries_conversation_body(tmp_path: Path) -> None:
+    _archive(tmp_path, "quiet", "", events_text=_prose_line("the 300s deadline holds"))
+    _archive(tmp_path, "other", "Login flow")
+    hits = archive_read.search_archive_content(tmp_path, "300s")
+    assert [h[0] for h in hits] == ["quiet"]           # body term filters
+    assert hits[0][1] == ""                            # title carried (empty here)
+    assert "300s deadline holds" in hits[0][2]         # content column carried for excerpting
+
+
+def test_search_content_matches_title_and_returns_triples(tmp_path: Path) -> None:
+    _archive(tmp_path, "alpha", "Dark mode toggle")
+    hits = archive_read.search_archive_content(tmp_path, "dark")
+    assert [h[0] for h in hits] == ["alpha"]
+    assert hits[0][1] == "Dark mode toggle"
+    assert len(hits[0]) == 3                            # (id, title, content), no status/created
+
+
+def test_search_content_missing_index_returns_empty(tmp_path: Path) -> None:
+    assert archive_read.search_archive_content(tmp_path, "anything") == []
+
+
+def test_search_content_percent_is_literal(tmp_path: Path) -> None:
+    # A `%` in the query must match a literal percent, not act as a wildcard.
+    _archive(tmp_path, "pct", "", events_text=_prose_line("throughput up 50% today"))
+    _archive(tmp_path, "plain", "", events_text=_prose_line("50 items processed"))
+    assert [h[0] for h in archive_read.search_archive_content(tmp_path, "50%")] == ["pct"]

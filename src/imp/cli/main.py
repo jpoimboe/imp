@@ -13,12 +13,14 @@ import functools
 import json
 import logging
 import os
+import re
 import shlex
 import shutil
 import signal
 import subprocess
 import sys
 from collections.abc import Awaitable, Callable, Iterable, Iterator
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, NamedTuple, NoReturn
@@ -2790,28 +2792,138 @@ def _inflight_prose(control: Path, change_id: str) -> str:
     return conversation_prose(_parse_jsonl(raw))
 
 
-def _search_inflight(control: Path, query: str) -> list[tuple[str, str, str, str]]:
-    """In-flight Change rows (id, title, status, created) whose id, title, or
-    conversation prose contains `query` (case-insensitive) — the live
-    counterpart to the archive search, which never sees an un-archived Change."""
+_SEARCH_ZONES = ("active", "backlog", "archive")
+
+
+@dataclass(frozen=True)
+class _SearchHit:
+    change_id: str
+    title: str
+    zone: str      # one of _SEARCH_ZONES
+    content: str   # searchable prose for excerpting ("" when the zone has none)
+
+
+def _selected_search_zones(args: argparse.Namespace) -> set[str]:
+    picked = {
+        zone for zone, on in (
+            ("active", args.active),
+            ("backlog", args.backlog),
+            ("archive", args.archived),
+        ) if on
+    }
+    return picked or set(_SEARCH_ZONES)
+
+
+def _search_active(control: Path, query: str) -> list[_SearchHit]:
+    """In-flight + draft-origin changes whose id, title, or conversation prose
+    contains `query` (case-insensitive)."""
     q = query.lower()
-    hits: list[tuple[str, str, str, str]] = []
+    hits: list[_SearchHit] = []
     for r in _status_rows(control):
-        if (q in r[0].lower() or q in r[4].lower()
-                or q in _inflight_prose(control, r[0]).lower()):
-            hits.append((r[0], r[4], r[1], r[5]))
+        prose = _inflight_prose(control, r[0])
+        if q in r[0].lower() or q in r[4].lower() or q in prose.lower():
+            hits.append(_SearchHit(r[0], r[4], "active", prose))
     return hits
+
+
+def _backlog_seed_opening(control: Path, change_id: str) -> str:
+    cj = _change_home(control, change_id) / "change.json"
+    try:
+        meta = json.loads(cj.read_bytes())
+    except (OSError, ValueError, TypeError):
+        return ""
+    return str(meta.get("seed_opening") or "")
+
+
+def _search_backlog(control: Path, query: str) -> list[_SearchHit]:
+    """Backlog changes whose id, title, or seed_opening body (title + description)
+    contains `query` (case-insensitive)."""
+    q = query.lower()
+    hits: list[_SearchHit] = []
+    for r in _backlog_rows(control):
+        change_id, title = r[0], r[4]
+        seed = _backlog_seed_opening(control, change_id)
+        if q in change_id.lower() or q in title.lower() or q in seed.lower():
+            hits.append(_SearchHit(change_id, title, "backlog", seed))
+    return hits
+
+
+def _search_archived(control: Path, query: str) -> list[_SearchHit]:
+    return [
+        _SearchHit(cid, title, "archive", content)
+        for (cid, title, content) in archive_read.search_archive_content(control, query)
+    ]
+
+
+def _highlight(text: str, query: str, *, color: bool) -> str:
+    """Wrap every case-insensitive occurrence of `query` in `text` with a bold-yellow accent."""
+    if not color or not query:
+        return text
+    out: list[str] = []
+    last = 0
+    for m in re.finditer(re.escape(query), text, flags=re.IGNORECASE):
+        out.append(text[last:m.start()])
+        out.append(pal.ansi(m.group(), "bold", "yellow", enabled=True))
+        last = m.end()
+    out.append(text[last:])
+    return "".join(out)
+
+
+def _excerpts(
+    content: str, query: str, *, color: bool, context: int = 40, limit: int = 3,
+) -> list[str]:
+    """Up to `limit` grep-style match spans, whitespace-collapsed and query-highlighted."""
+    if not query:
+        return []
+    spans: list[str] = []
+    for m in re.finditer(re.escape(query), content, flags=re.IGNORECASE):
+        if len(spans) >= limit:
+            break
+        start = max(0, m.start() - context)
+        end = min(len(content), m.end() + context)
+        body = " ".join(content[start:end].split())
+        prefix = "… " if start > 0 else ""
+        suffix = " …" if end < len(content) else ""
+        spans.append(prefix + _highlight(body, query, color=color) + suffix)
+    return spans
+
+
+def _render_search_hit(
+    hit: _SearchHit, query: str, *, color: bool,
+) -> list[str]:
+    header = _search_list_line(hit)
+    spans = _excerpts(hit.content, query, color=color)
+    if spans:
+        return [header, *(f"    {s}" for s in spans)]
+    field = "id" if query.lower() in hit.change_id.lower() else "title"
+    return [header, f"    (matched on {field})"]
+
+
+def _search_list_line(hit: _SearchHit) -> str:
+    return f"{hit.change_id}  {hit.title or '(untitled)'}  [{hit.zone}]"
 
 
 def _cmd_search(args: argparse.Namespace, _control: Path | None = None) -> int:
     control = _control if _control is not None else _control_root()
-    hits = _search_inflight(control, args.query) + archive_read.search_archive(
-        control, args.query)
+    zones = _selected_search_zones(args)
+    hits: list[_SearchHit] = []
+    if "active" in zones:
+        hits += _search_active(control, args.query)
+    if "backlog" in zones:
+        hits += _search_backlog(control, args.query)
+    if "archive" in zones:
+        hits += _search_archived(control, args.query)
     if not hits:
         print(f"No changes match {args.query!r}.")
         return 0
-    for change_id, title, status, _created in hits:
-        print(f"{change_id}  {title or '(untitled)'}  [{status or '-'}]")
+    if args.list:
+        lines = [_search_list_line(h) for h in hits]
+    else:
+        color = should_use_color(sys.stdout)
+        lines = []
+        for h in hits:
+            lines.extend(_render_search_hit(h, args.query, color=color))
+    _page_or_print(lines, no_pager=args.no_pager)
     return 0
 
 
@@ -3066,14 +3178,31 @@ def _build_parser() -> argparse.ArgumentParser:
 
     p_search = sub.add_parser(
         "search",
-        help="Search archived changes by title or id.",
+        help="Search changes by id, title, or conversation content.",
         description=(
-            "Search the archive (completed, abandoned, and left conversations) "
-            "for changes whose title or id contains the query substring."),
+            "Search active (in-flight + drafts), backlog, and archived changes "
+            "for the query as a case-insensitive substring of a change's id, "
+            "title, or conversation content. With no zone flag, all three zones "
+            "are searched."),
     )
     p_search.add_argument(
         "query", metavar="QUERY",
-        help="Substring matched case-insensitively against a change's title or id.")
+        help="Substring matched case-insensitively against id, title, and content.")
+    p_search.add_argument(
+        "--active", action="store_true",
+        help="Search in-flight and draft changes.")
+    p_search.add_argument(
+        "--backlog", action="store_true",
+        help="Search backlog changes.")
+    p_search.add_argument(
+        "--archived", action="store_true",
+        help="Search archived (completed, abandoned, left) changes.")
+    p_search.add_argument(
+        "-l", "--list", action="store_true", dest="list",
+        help="One terse line per change (id, title, zone); no excerpts.")
+    p_search.add_argument(
+        "--no-pager", action="store_true",
+        help="Disable the pager even when stdout is a TTY.")
     p_search.set_defaults(func=_cmd_search)
 
     p_config = sub.add_parser(
