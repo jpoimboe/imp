@@ -2061,8 +2061,8 @@ def test_compose_toolbar_static_uses_the_position_row_layout() -> None:
     assert toolbar is not None
     assert "implementation phase · plan 1/1 · task 1/3" in toolbar
     assert "thinking" not in toolbar
-    # Right-flushed: id·title sits AFTER the structural left group (bar puts id first).
-    assert toolbar.index("z9gixx") > toolbar.index("implementation phase")
+    # Flat, identity-first: id·title precede the structural group.
+    assert toolbar.index("z9gixx") < toolbar.index("implementation phase")
 
 
 def test_mid_step_position_change_re_emits_a_header() -> None:
@@ -2384,14 +2384,22 @@ def _pos_activity(**kw):
     return nv.Activity(**base)
 
 
-def test_compose_position_row_flushes_identity_right() -> None:
+def test_compose_position_row_is_flat_and_identity_first() -> None:
     from imp.cli.live_driver import compose_position_row
     row = compose_position_row(activity=_pos_activity(), change_id="z9gixx",
                                title="streaming footer", prompt_tokens=None,
                                color=False, width=80)
-    assert "implementation phase · plan 1/1 · task 1/3 · m" in row
-    assert "z9gixx" in row and "streaming footer" in row
-    assert row.index("z9gixx") > row.index("implementation phase")
+    # One flat left-aligned line, identity first, no right-flush gap.
+    assert row == ("z9gixx · streaming footer · implementation phase · "
+                   "plan 1/1 · task 1/3 · m")
+
+
+def test_compose_position_row_omits_title_segment_when_untitled() -> None:
+    from imp.cli.live_driver import compose_position_row
+    row = compose_position_row(activity=_pos_activity(), change_id="z9gixx",
+                               title="", prompt_tokens=None, color=False, width=80)
+    # No title -> no segment and no stray separator between id and phase.
+    assert row == ("z9gixx · implementation phase · plan 1/1 · task 1/3 · m")
 
 
 def test_compose_position_row_context_bar_only_for_agent_kind() -> None:
@@ -2416,27 +2424,6 @@ def test_compose_position_row_context_bar_absent_during_lane_wait() -> None:
     assert "implementation phase" in row
 
 
-def test_compose_position_row_narrow_truncates_title_before_dropping_id() -> None:
-    from imp.cli.live_driver import compose_position_row
-    row = compose_position_row(
-        activity=nv.Activity(phase="p", kind="agent"), change_id="z9gixx",
-        title="a very long streaming footer title", prompt_tokens=None,
-        color=False, width=25)
-    assert "z9gixx" in row
-    assert "…" in row
-    assert "a very long streaming footer title" not in row
-    assert row.startswith("p")
-
-
-def test_compose_position_row_narrow_drops_right_group_before_clipping_left() -> None:
-    from imp.cli.live_driver import compose_position_row
-    row = compose_position_row(activity=nv.Activity(phase="p", kind="agent"),
-                               change_id="z9gixx", title="t", prompt_tokens=None,
-                               color=False, width=8)
-    assert "z9gixx" not in row
-    assert row.startswith("p")
-
-
 def test_compose_position_row_colors_match_the_scrollback_palette() -> None:
     from imp.cli.live_driver import compose_position_row
     try:
@@ -2449,13 +2436,13 @@ def test_compose_position_row_colors_match_the_scrollback_palette() -> None:
     finally:
         pal.set_theme("ansi")
     parts = row.split(" · ")
-    assert "\x1b[34m" in parts[0] and "\x1b[33m" not in parts[0]  # phase: step-blue, not gold
-    assert "\x1b[34m" in parts[1]                                   # plan: step-blue
-    assert "\x1b[34m" in parts[2]                                   # counter: step-blue
-    # model+bar are now space-joined into parts[3]; id (z9gixx) is flush-right
-    # via spaces so it lands in the same ` · `-split bucket as model+bar.
-    assert "\x1b[90m" in parts[3] and "\x1b[34m" not in parts[3]  # model: gray, not blue
-    assert "\x1b[33m" in parts[3]                                   # id (z9gixx): gold
+    # Flat order: id · title · phase · plan · counter · (model bar).
+    assert "\x1b[33m" in parts[0]                                  # id: wordmark gold
+    assert "\x1b[90m" in parts[1] and "\x1b[33m" not in parts[1]   # title: gray
+    assert "\x1b[34m" in parts[2] and "\x1b[33m" not in parts[2]   # phase: step-blue
+    assert "\x1b[34m" in parts[3]                                  # plan: step-blue
+    assert "\x1b[34m" in parts[4]                                  # counter: step-blue
+    assert "\x1b[90m" in parts[5] and "\x1b[34m" not in parts[5]   # model: gray, not blue
 
 
 def _sub_builder(*subs, readings=(), start_ts=None):
