@@ -125,7 +125,3 @@ complete_step(findings="No findings. Plan is complete and ready for implementati
 # Blocking issues:
 complete_step(findings="Critical: … / Major: …", blocking=true, has_minor_findings=false)
 ```
-
----
-
-> Ported from superpowers (MIT, Jesse Vincent): writing-plans.

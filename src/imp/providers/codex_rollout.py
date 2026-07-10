@@ -6,8 +6,7 @@ per-run CODEX_HOME and `shutil.rmtree`s it at teardown, so the rollout — the
 actual conversation context — is deleted at the pause. To resume, imp must own
 that file across the pause: copy it (and the thread_id) into the durable
 `transcript_dir` on pause, restore it into the fresh CODEX_HOME on resume, then
-call `Codex.resume_thread(thread_id)`. Mechanics verified by
-`docs/superpowers/spikes/codex/spike_codex_rollout_restore.py`.
+call `Codex.resume_thread(thread_id)`.
 """
 from __future__ import annotations
 

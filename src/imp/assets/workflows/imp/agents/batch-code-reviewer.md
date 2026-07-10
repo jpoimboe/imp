@@ -1,6 +1,6 @@
 ---
-name: plan-code-reviewer
-label: reviewing code (full plan diff)
+name: batch-code-reviewer
+label: reviewing entire diff
 description: Reviews the change's whole diff against its spec, then routes the result — emits a verdict of approve / task_gap, blocking Critical/Major fixes for re-review and deferring the rest. It adjudicates and routes, not merely advises.
 output:
   status: {type: enum, values: [Success, Error]}
@@ -137,7 +137,7 @@ fix-it path) to the **Deferred Followups** list in `{{ change.home }}/deferred.m
 absent. Append one line per observation in this EXACT pinned format (the sweep parses
 it):
 
-`- [ ] DEFERRED plan-code-reviewer: <one-line description> [scope: change]`
+`- [ ] DEFERRED batch-code-reviewer: <one-line description> [scope: change]`
 
 Append nothing for a finding you routed `task_gap` (it routes back for an immediate,
 re-reviewed fix). Appending to `{{ change.home }}/deferred.md` is the ONLY write you may make.
@@ -184,7 +184,3 @@ Call `complete_step` with:
 - `status`: `Success` (or `Error` only if you could not complete the review).
 - `verdict`: `task_gap` if any kept finding blocks merge, else `approve`.
 - `findings`: the structured prose above, with your keep/dismiss/defer decisions.
-
----
-
-> Ported from superpowers (MIT, Jesse Vincent): requesting-code-review.

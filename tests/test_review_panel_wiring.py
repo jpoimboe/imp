@@ -1,5 +1,5 @@
 """The per-plan implement loop carries no code review or sweep; the single
-change-wide code review (`change-review`, reusing plan-code-reviewer.md) runs once
+change-wide code review (`change-review`, reusing batch-code-reviewer.md) runs once
 in the converge phase after gap-check latches coverage, paired with the
 once-per-change deferred sweep."""
 from __future__ import annotations
@@ -48,7 +48,7 @@ def test_review_sweep_and_finalize_left_the_implement_loop() -> None:
     wf = _wf()
     impl_names = [s.name for s in next(p for p in wf.phases if p.name == "implement").steps]
     assert impl_names[-1] == "check-next-plan"
-    for gone in ("change-review", "plan-code-reviewer", "gap-check",
+    for gone in ("change-review", "batch-code-reviewer", "gap-check",
                  "deferred-sweep", "summarizer", "finalize"):
         assert gone not in impl_names, gone
     conv_names = [s.name for s in next(p for p in wf.phases if p.name == "converge").steps]
@@ -66,7 +66,7 @@ def test_review_step_uses_code_reviewer_at_high_tier() -> None:
     wf = _wf()
     step = _steps(wf)["change-review"]
     assert step.tier == "high"
-    assert step.file is not None and step.file.name == "plan-code-reviewer.md"
+    assert step.file is not None and step.file.name == "batch-code-reviewer.md"
 
 
 def test_review_step_routes_two_way_no_plan_gap() -> None:
@@ -82,7 +82,7 @@ def test_review_step_routes_two_way_no_plan_gap() -> None:
 
 def test_review_parse_contract_routes_declared_schema() -> None:
     wf = _wf()
-    schema = wf.agents["plan-code-reviewer"].output_schema
+    schema = wf.agents["batch-code-reviewer"].output_schema
     rules = _steps(wf)["change-review"].rules
     for verdict in ("approve", "task_gap"):
         payload = {"status": "Success", "verdict": verdict, "findings": "x"}
@@ -90,8 +90,8 @@ def test_review_parse_contract_routes_declared_schema() -> None:
         assert evaluate_rules(rules, vars=_BASE_VARS, output=payload).action is not None
 
 
-def test_plan_code_reviewer_verdict_enum_is_two_way() -> None:
-    schema = _wf().agents["plan-code-reviewer"].output_schema
+def test_batch_code_reviewer_verdict_enum_is_two_way() -> None:
+    schema = _wf().agents["batch-code-reviewer"].output_schema
     verdict_field = next(f for f in schema.fields if f.name == "verdict")
     assert set(verdict_field.values) == {"approve", "task_gap"}
     assert all(f.name != "blocking" for f in schema.fields)  # blocking replaced by verdict
@@ -100,8 +100,8 @@ def test_plan_code_reviewer_verdict_enum_is_two_way() -> None:
             {"status": "Success", "verdict": "plan_gap", "findings": "x"}, schema)
 
 
-def test_plan_code_reviewer_adjudicates_and_routes() -> None:
-    text = (AGENTS / "plan-code-reviewer.md").read_text()
+def test_batch_code_reviewer_adjudicates_and_routes() -> None:
+    text = (AGENTS / "batch-code-reviewer.md").read_text()
     low = text.lower()
     assert "receiving-code-review" in text
     # guardrail
@@ -123,15 +123,15 @@ def test_gap_verdicts_route_in_workflow_yaml() -> None:
 
 def test_workflow_comment_describes_single_reviewer() -> None:
     text = (AGENTS.parent / "workflow.yaml").read_text()
-    assert "agents/plan-code-reviewer.md" in text
+    assert "agents/batch-code-reviewer.md" in text
     assert "agents/review-panel.md" not in text
     assert "opus" not in text          # the opus-panel framing is gone
     assert "4-member" not in text
 
 
-def test_plan_code_reviewer_pins_deferred_observation_format() -> None:
-    text = (AGENTS / "plan-code-reviewer.md").read_text()
-    assert "- [ ] DEFERRED plan-code-reviewer:" in text
+def test_batch_code_reviewer_pins_deferred_observation_format() -> None:
+    text = (AGENTS / "batch-code-reviewer.md").read_text()
+    assert "- [ ] DEFERRED batch-code-reviewer:" in text
     assert "[scope:" in text
     assert "deferred-sweep" in text.lower()   # names the consumer step
 
@@ -178,8 +178,8 @@ def test_check_next_plan_routes_settled_batch_to_change_review() -> None:
     assert isinstance(fresh.action, Goto) and fresh.action.target == "gap-check"
 
 
-def test_plan_code_reviewer_reads_review_scope_not_integration_pass() -> None:
-    text = (AGENTS / "plan-code-reviewer.md").read_text()
+def test_batch_code_reviewer_reads_review_scope_not_integration_pass() -> None:
+    text = (AGENTS / "batch-code-reviewer.md").read_text()
     assert "integration_pass" not in text
     assert "panel_done" not in text                 # the re-verify dial is gone
 
@@ -198,7 +198,7 @@ def test_reconciler_is_a_rebase_conflict_resolver() -> None:
 
 def _render_reviewer(tmp_path, *, cur_base_head: str = "forkSHA") -> str:
     wf = _wf()
-    body = wf.agents["plan-code-reviewer"].prompt_template_source
+    body = wf.agents["batch-code-reviewer"].prompt_template_source
     log = JsonlEventLog(tmp_path / "events.jsonl")
     ctx = build_context(change_title="t", event_log=log, cur_base_head=cur_base_head,
                         change_id="chg",
@@ -248,7 +248,7 @@ def test_task_lead_step0_admits_panel_task_gap() -> None:
     # the task_gap rework is a recognized Step-0 feedback source, matching the exact
     # preamble workflow.yaml emits for verdict: task_gap (kept verbatim — task-lead.md
     # is out of scope for this change).
-    assert "The plan-code-reviewer found an implemented task needs rework." in text
+    assert "The batch-code-reviewer found an implemented task needs rework." in text
     assert 'gate failure (the `verify`' in text
     assert "human finalize decision" not in text
 
@@ -265,8 +265,8 @@ def test_panel_and_slice_files_are_deleted() -> None:
         assert not (AGENTS / gone).exists(), gone
 
 
-def test_plan_code_reviewer_is_not_a_pure_advisor() -> None:
-    text = (AGENTS / "plan-code-reviewer.md").read_text()
+def test_batch_code_reviewer_is_not_a_pure_advisor() -> None:
+    text = (AGENTS / "batch-code-reviewer.md").read_text()
     low = text.lower()
     assert "pure advisor" not in low          # it routes now, not merely advises
     assert "verdict" in low                    # owns the keep/dismiss/defer call
@@ -274,7 +274,7 @@ def test_plan_code_reviewer_is_not_a_pure_advisor() -> None:
 
 
 
-def test_plan_code_reviewer_renders_canonical_severity_rubric(tmp_path) -> None:
+def test_batch_code_reviewer_renders_canonical_severity_rubric(tmp_path) -> None:
     out = _render_reviewer(tmp_path)
     assert "behavioral impact, not file type" in out
     for term in ("**Critical**", "**Major**", "**Minor**", "**Nit**"):

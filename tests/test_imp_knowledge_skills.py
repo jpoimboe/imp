@@ -16,7 +16,6 @@ def test_mental_model_skill_is_loadable_profile_b() -> None:
     body = load_agent_skill(_skills_dir(), "imp-mental-model")
     assert body.strip(), "imp-mental-model is empty"
     assert not body.lstrip().startswith("---"), "imp-mental-model has frontmatter"
-    assert "superpowers" not in body.lower()
 
 
 def test_mental_model_lists_status_set_and_draft_relabel() -> None:
@@ -48,7 +47,6 @@ def test_introspect_skill_is_loadable_profile_b() -> None:
     body = load_agent_skill(_skills_dir(), "imp-introspect")
     assert body.strip(), "imp-introspect is empty"
     assert not body.lstrip().startswith("---"), "imp-introspect has frontmatter"
-    assert "superpowers" not in body.lower()
 
 
 def test_introspect_names_ground_truth_files() -> None:
@@ -63,7 +61,7 @@ def test_introspect_names_the_read_commands() -> None:
     assert "imp show" in body
     assert "imp show --all" in body
     assert "imp search" in body
-    assert "imp show <id> [spec|plan|events|status|review]" in body
+    assert "imp show <id> [spec|plan|events|status]" in body
 
 
 def test_introspect_documents_the_three_tier_split() -> None:

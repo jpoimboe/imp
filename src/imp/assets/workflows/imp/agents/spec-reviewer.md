@@ -105,7 +105,3 @@ complete_step(findings="No findings. Spec is complete and ready for planning.", 
 # Blocking issues:
 complete_step(findings="Critical: … / Major: …", blocking=true, has_minor_findings=false)
 ```
-
----
-
-> Ported from superpowers (MIT, Jesse Vincent): brainstorming.

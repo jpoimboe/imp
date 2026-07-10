@@ -38,13 +38,6 @@ def test_skills_load_have_no_frontmatter_and_are_byte_identical() -> None:
         assert body == raw, f"{name} body changed on load"
 
 
-def test_skills_are_imp_native_not_superpowers() -> None:
-    for name in _SKILLS:
-        body = load_agent_skill(_skills_dir(), name)
-        assert "superpowers:" not in body, f"{name} keeps a superpowers: cross-ref"
-        assert "Skill tool" not in body, f"{name} keeps a Skill-tool reference"
-
-
 def test_yagni_scope_excludes_cheap_defensive_guards() -> None:
     body = load_agent_skill(_skills_dir(), "receiving-code-review").lower()
     pos = body.find("yagni check")

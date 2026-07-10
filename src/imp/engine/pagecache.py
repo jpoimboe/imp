@@ -1,6 +1,6 @@
 """Best-effort page-cache eviction for transient read-fault recovery.
 
-Forensics (docs/superpowers/specs/2026-06-28-state-load-hardening-design.md):
+Forensics:
 btrfs+zstd can transiently serve a mis-decompressed cached copy of a file that
 is valid on disk — the observed signature is the content minus its first byte
 (head-drop). Dropping the file's cached pages forces the next read to re-fetch

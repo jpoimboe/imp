@@ -1,6 +1,6 @@
 ---
 name: code-reviewer
-label: reviewing
+label: reviewing code
 description: Per-task code-quality review (read-only); reports severity-classified findings to the task-lead.
 ---
 
@@ -77,7 +77,3 @@ structured as:
 ## You Are Strictly Read-Only
 
 `bash` is for inspection only (e.g. running a linter). **NEVER commit, `git add`/stage, or edit files.** Report only — the task-lead adjudicates and the coder applies fixes.
-
----
-
-> Ported from superpowers (MIT, Jesse Vincent): subagent-driven-development.

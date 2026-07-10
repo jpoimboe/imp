@@ -53,7 +53,7 @@ def test_default_workflow_script_covers_the_fast_path_agents() -> None:
     script = default_workflow_script("IMP_DOGFOOD_t2t2t2")
     steps = script["steps"]
     for agent in ("threshold", "spec-finalizer", "plan-writer", "task-lead",
-                  "plan-code-reviewer", "deferred-sweep", "gap-check", "finalize"):
+                  "batch-code-reviewer", "deferred-sweep", "gap-check", "finalize"):
         assert agent in steps, f"{agent} missing from the default-workflow script"
 
     # threshold goes live and chooses the express ceremony → fast path.

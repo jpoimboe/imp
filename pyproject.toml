@@ -82,7 +82,7 @@ target-version = "py311"
 # Throwaway de-risking spikes are preserved as reference artifacts, not
 # maintained code — don't hold them to lint standards (keeps `make lint` and the
 # workflow's pre-commit lint gate green; mypy already only checks `src/`).
-extend-exclude = ["spikes", "docs/superpowers/spikes"]
+extend-exclude = ["spikes"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]

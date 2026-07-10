@@ -35,9 +35,9 @@ finished); do not invent changes that the commands did not list.
 
 ## Detail on one change
 
-`imp show <id> [spec|plan|events|status|review]` — the subcommand selects the
+`imp show <id> [spec|plan|events|status]` — the subcommand selects the
 facet: `spec` for the spec, `plan` for the plan(s), `events` for the timeline,
-`status` for where it stands, `review` for review findings. Read the facet the
+`status` for where it stands. Read the facet the
 user asked about and answer from it.
 
 ## Reading an event timeline — three tiers

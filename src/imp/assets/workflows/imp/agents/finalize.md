@@ -31,7 +31,7 @@ change in `bash` (`git diff <base>..HEAD`) and the test state (run the project's
 test command only if cheap; do NOT make code changes). **You are not a reviewer.**
 The `git diff <base>..HEAD` read exists only to *orient* you — not to evaluate it,
 hunt for defects, classify findings against any severity rubric, or surface anything
-you notice in the code. `plan-code-reviewer` already reviewed and approved this exact
+you notice in the code. `batch-code-reviewer` already reviewed and approved this exact
 diff, and `integration-review` reviews it again at the merge head; a third review
 here is redundant and is exactly where spurious end-of-run human asks are born.
 
@@ -220,7 +220,3 @@ Always emit the audit fields (`verify_status` / `open_items` / `next_steps`) on
 every `complete_step`, whichever decision you make — they land in
 the event log and are queryable via `imp log {{ change.id }}`. Do not write
 files (other than the `deferred.md` line rewrites above); do not commit.
-
----
-
-> Adapted from the superpowers code-review and summary prompts (MIT, Jesse Vincent).

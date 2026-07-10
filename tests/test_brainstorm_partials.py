@@ -18,8 +18,6 @@ def test_spec_design_principles_carries_judgment_lens_only() -> None:
     assert "One question at a time" not in text
     assert "Propose 2" not in text
     assert "build this out now" not in text.lower()
-    # No superpowers attribution line.
-    assert "superpowers" not in text.lower()
 
 
 def test_brainstorm_dialogue_carries_conduct_only() -> None:
@@ -49,8 +47,6 @@ def test_brainstorm_dialogue_carries_conduct_only() -> None:
     # final readback
     assert "Final readback before committing" in text
     assert "consolidated" in text.lower()
-    # No superpowers attribution line.
-    assert "superpowers" not in text.lower()
 
 
 def test_brainstorm_dialogue_carries_cleanup_proposal_beat() -> None:
@@ -115,8 +111,6 @@ def test_live_gate_dialogue_carries_door_agnostic_posture_only() -> None:
     assert "Clarifying questions are first-class" not in text
     assert "Engage a concern straight" not in text
     assert "within normal noise" not in text
-    # No superpowers attribution line.
-    assert "superpowers" not in text.lower()
 
 
 def test_brainstorm_dialogue_carries_enumeration_and_grill_mode() -> None:

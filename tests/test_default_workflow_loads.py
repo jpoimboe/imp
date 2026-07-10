@@ -147,7 +147,7 @@ def test_every_shown_step_has_its_label() -> None:
         "verify": "running tests",
         "autosquash-resolve-merge": "resolving merge fixups",
         "gap-check": "checking plan coverage",
-        "change-review": "reviewing change",
+        "change-review": "reviewing entire diff",
         "deferred-sweep": "sweeping deferred tasks",
         "converge-verify": "running tests",
         "summarizer": "summarizing change",
@@ -177,7 +177,7 @@ def test_route_labels_assigned() -> None:
     # plan-reviewer: blocking; minors (has_minor_findings rule)
     assert by["plan-reviewer"].rules[0].label == "addressing plan review feedback"
     assert by["plan-reviewer"].rules[2].label == "addressing plan review feedback"
-    # plan-code-reviewer task_gap -> task-lead
+    # batch-code-reviewer task_gap -> task-lead
     assert by["change-review"].rules[0].label == "addressing code review feedback"
     # finalize: merge label + rework label
     assert by["finalize"].rules[0].label == "preparing to merge"

@@ -24,7 +24,7 @@ Read first:
 ## The pinned line format
 
 Each deferred item is a Markdown task-list line under a `## Deferred Followups`
-heading, in this EXACT shape (task-lead, plan-code-reviewer, plan-writer, and plan-reviewer append it):
+heading, in this EXACT shape (task-lead, batch-code-reviewer, plan-writer, and plan-reviewer append it):
 
 `- [ ] DEFERRED <source>: <one-line description> [scope: <task|plan|change>]`
 
@@ -242,7 +242,3 @@ dismissed. When a subagent's final message reports
 `NEEDS_CONTEXT` or `BLOCKED`, re-pack the full context into a fresh
 `sub_agent(...)` dispatch and re-dispatch — the next subagent inherits only what you
 write.
-
----
-
-> Ported from superpowers (MIT, Jesse Vincent): subagent-driven-development.

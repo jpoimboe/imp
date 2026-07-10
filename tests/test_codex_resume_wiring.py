@@ -1,7 +1,6 @@
 """Fix 1 gating test (spec T0). RED until Task 5 wires codex-native resume.
 
-The spike `docs/superpowers/spikes/codex/spike_codex_rollout_restore.py` proves
-that restoring codex's rollout + calling `resume_thread(thread_id)` recalls real
+Restoring codex's rollout + calling `resume_thread(thread_id)` recalls real
 prior context. This unit test guards the wiring that invokes that mechanism: on
 a resume edge (`balance_on_resume=True`) the runner MUST call `resume_thread`
 with the persisted thread_id and MUST NOT call `start_thread`. It runs in

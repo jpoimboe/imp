@@ -618,8 +618,9 @@ def test_dispatched_subagents_carry_frontmatter_labels() -> None:
     wf = load_workflow(bundled_workflow_dir("imp"))
     assert wf.agents["explorer"].label == "exploring codebase"
     assert wf.agents["researcher"].label == "researching"
-    assert wf.agents["coder"].label == "coding"
-    assert wf.agents["code-reviewer"].label == "reviewing"
+    assert wf.agents["coder"].label == "writing code"
+    assert wf.agents["code-reviewer"].label == "reviewing code"
+    assert wf.agents["batch-code-reviewer"].label == "reviewing entire diff"
     # plan-writer's label is on the workflow step, not the agent frontmatter;
     # threshold intentionally has no label so its live spinner rotates imp phrases.
     for name, a in wf.agents.items():
@@ -913,7 +914,7 @@ def test_gap_check_agent_is_end_of_change_backstop() -> None:
     assert "outline" in low
     assert "plan-cycle-check" not in low          # no residual old name
     assert "task-lead" not in low                 # the dropped agent is not referenced
-    assert "plan-code-reviewer" in text           # the code-reviewer rename target
+    assert "batch-code-reviewer" in text           # the code-reviewer rename target
     assert "sole" in low and "completeness" in low
     assert "uncovered" in low
     assert "needs-decision" in low and "suppress" in low
