@@ -58,7 +58,7 @@ from imp.engine.abandon import (
 )
 from imp.engine.archive import read as archive_read
 from imp.engine.awaiting_user_input import AwaitingUserInput
-from imp.engine.change import Change
+from imp.engine.change import Change, live_change_ids, live_stems
 from imp.engine.change_id import new_change_id
 from imp.engine.errors import LayoutMismatch, LoadError, LoadErrors
 from imp.engine.events_digest import digest_event, full_line
@@ -723,7 +723,7 @@ async def _run_cleared_session(
 
     color = should_use_color(sys.stdout)
     change = Change.create_draft(
-        control, title="", change_id=new_change_id(),
+        control, title="", change_id=new_change_id(existing_stems=live_stems(control)),
         base_branch=base, origin="draft")
     _session_started = False
     try:
@@ -787,7 +787,7 @@ def _record_idea(args: argparse.Namespace, control: Path, base: str) -> int:
         return 2
     description = getattr(args, "opening", None) or ""
     seed = backlog.seed_opening({"title": title, "description": description})
-    change_id = new_change_id()
+    change_id = new_change_id(existing_stems=live_stems(control))
     try:
         Change.create_draft(
             control, title=title, change_id=change_id, base_branch=base,
@@ -956,7 +956,7 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
     opening_text = seed.seed_text
     color = should_use_color(sys.stdout)
 
-    change_id = new_change_id()
+    change_id = new_change_id(existing_stems=live_stems(control))
     # No auto-name: an unnamed Change has an empty title. The agent
     # names it via rename_change once intent is clear, or the user passes --title.
     title = seed.title if seed.title is not None else ""
@@ -1082,17 +1082,12 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
     from imp.cli.signals import InterruptCoordinator
 
     control = _control_root()
-    if args.token is None:
-        target = await _pick_resume_target(
-            control, non_interactive=bool(getattr(args, "non_interactive", False)))
-        if isinstance(target, int):
-            return target
-        change_id = target
-    else:
-        try:
-            change_id = _resolve_id(control, args.token)
-        except SystemExit:
-            return 2
+    target = await _resolve_resume_target(
+        control, args.token,
+        non_interactive=bool(getattr(args, "non_interactive", False)))
+    if isinstance(target, int):
+        return target
+    change_id = target
     loaded = _load_or_rehydrate(control, change_id)
     if isinstance(loaded, int):
         return loaded
@@ -1249,12 +1244,7 @@ def _display_width() -> int:
 
 def _list_change_homes(control: Path) -> list[str]:
     """Ids of changes with a permanent root home under .imp/changes/."""
-    root = control / ".imp" / "changes"
-    if not root.is_dir():
-        return []
-    return sorted(p.name for p in root.iterdir()
-                  if p.is_dir() and not p.name.startswith(".")
-                  and (p / "change.json").exists())
+    return live_change_ids(control)
 
 
 def _change_home(control: Path, change_id: str) -> Path:
@@ -2330,6 +2320,35 @@ def _abandon_rows(control: Path) -> list[_Row]:
     return _sort_rows_newest_first(_status_rows(control) + _backlog_rows(control))
 
 
+def _resumable_match_rows(control: Path, token: str) -> list[_Row]:
+    """Rows for resumable Changes whose id contains `token`.
+
+    Spans live-resumable rows (`_resumable_rows`) AND archived-but-resumable
+    records — an archived id whose archive record reads `resumable=True` (a
+    "left" conversation whose live home was deleted). A live row wins when an id
+    appears in both. Archived completed/abandoned (non-resumable) ids are never
+    matches, so a terminal id sharing a stem never joins the menu."""
+    from imp.engine.archive import record, records_root
+
+    rows = [r for r in _resumable_rows(control) if token in r[0]]
+    live = {r[0] for r in rows}
+    for cid in archive_read.archived_ids(control):
+        if token not in cid or cid in live:
+            continue
+        rec = record.read_record(records_root(control), cid)
+        if rec is None or not rec.get("resumable"):
+            continue
+        row = _row_for_id(control, cid)
+        if row is not None:
+            rows.append(row)
+    return _sort_rows_newest_first(rows)
+
+
+def _abandon_match_rows(control: Path, token: str) -> list[_Row]:
+    """Abandon rows (live homes + backlog) whose id contains `token`."""
+    return [r for r in _abandon_rows(control) if token in r[0]]
+
+
 def _past_change_count(control: Path) -> int:
     return len(_completed_rows(control))
 
@@ -2391,15 +2410,43 @@ async def _pick_change_target(
     return chosen if chosen is not None else 2
 
 
+_RESUME_PICKER_HEADER = (
+    "Resume which change?  (↑/↓ to move · enter to resume · q to cancel)"
+)
+
+
 async def _pick_resume_target(control: Path, *, non_interactive: bool) -> str | int:
     return await _pick_change_target(
         control=control,
         rows=_resumable_rows(control),
-        header="Resume which change?  (↑/↓ to move · enter to resume · q to cancel)",
+        header=_RESUME_PICKER_HEADER,
         on_empty=lambda: _resume_picker_empty(control),
         on_non_tty=_resume_picker_non_tty,
         non_interactive=non_interactive,
     )
+
+
+async def _resolve_resume_target(
+    control: Path, token: str | None, *, non_interactive: bool,
+) -> str | int:
+    if token is None or not token.strip():
+        return await _pick_resume_target(control, non_interactive=non_interactive)
+    matches = _resumable_match_rows(control, token)
+    if len(matches) >= 2:
+        return await _pick_change_target(
+            control=control,
+            rows=matches,
+            header=_RESUME_PICKER_HEADER,
+            on_empty=lambda: _resume_picker_empty(control),
+            on_non_tty=_resume_picker_non_tty,
+            non_interactive=non_interactive,
+        )
+    if len(matches) == 1:
+        return matches[0][0]
+    try:
+        return _resolve_id(control, token)
+    except SystemExit:
+        return 2
 
 
 def _deliver_abandon_resident(control: Path, change_id: str) -> None:
@@ -2492,34 +2539,67 @@ def _abandon_picker_non_tty(rows: list[_Row]) -> int:
     return 2
 
 
+_ABANDON_PICKER_HEADER = (
+    "Abandon which change?  (↑/↓ to move · enter to select · q to cancel)"
+)
+
+
 async def _pick_abandon_target(control: Path) -> str | int:
     return await _pick_change_target(
         control=control,
         rows=_abandon_rows(control),
-        header="Abandon which change?  (↑/↓ to move · enter to select · q to cancel)",
+        header=_ABANDON_PICKER_HEADER,
         on_empty=_abandon_picker_empty,
         on_non_tty=_abandon_picker_non_tty,
+    )
+
+
+async def _pick_abandon_matches(
+    control: Path, token: str, rows: list[_Row],
+) -> str | int:
+    """Scoped abandon picker over the token's live matches. On a non-tty it
+    errors with a token-specific message (distinct from the no-token
+    `_abandon_picker_non_tty` copy, which reads wrong when a token was given)."""
+    def _non_tty(_rows: list[_Row]) -> int:
+        print(f"imp: {token!r} matches multiple Changes; pass a more specific token",
+              file=sys.stderr)
+        return 2
+
+    return await _pick_change_target(
+        control=control,
+        rows=rows,
+        header=_ABANDON_PICKER_HEADER,
+        on_empty=_abandon_picker_empty,
+        on_non_tty=_non_tty,
     )
 
 
 def _cmd_abandon(args: argparse.Namespace) -> int:
     control = _control_root()
     yes = args.yes
-    if args.token is None:
+    token = args.token
+    if token is None or not token.strip():
         target = anyio.run(_pick_abandon_target, control)
         if isinstance(target, int):
             return target
         return _abandon(control, target, yes=yes)
+    matches = _abandon_match_rows(control, token)
+    if len(matches) >= 2:
+        target = anyio.run(_pick_abandon_matches, control, token, matches)
+        if isinstance(target, int):
+            return target
+        return _abandon(control, target, yes=yes)
+    if len(matches) == 1:
+        return _abandon(control, matches[0][0], yes=yes)
     try:
-        change_id = _resolve_id(control, args.token)
+        change_id = _resolve_id(control, token)
     except SystemExit:
-        # _resolve_id scans live worktrees only. A Change whose worktree was
-        # already removed (crash between abandon's remove and branch-delete)
-        # is unresolvable there — but abandon archived the id before removal,
-        # so recover it from the archive to still reap an orphaned branch
-        # (AC #12). Exact id, else unique suffix match.
+        # No live/backlog match, and _resolve_id found nothing live either. A
+        # Change whose worktree was already removed (crash between abandon's
+        # remove and branch-delete) is unresolvable there — but abandon archived
+        # the id before removal, so recover it from the archive to still reap an
+        # orphaned branch (AC 15c). Exact id, else unique suffix match.
         ids = archive_read.archived_ids(control)
-        token = args.token
         hits = [cid for cid in ids if cid == token] or \
                [cid for cid in ids if cid.endswith(token)]
         if len(hits) == 1:

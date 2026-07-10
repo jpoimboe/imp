@@ -23,15 +23,37 @@ def _is_clean_stem(stem: str) -> bool:
     return stem not in _DENYLIST
 
 
-def new_change_id() -> str:
-    """6 ref-safe chars: consonant, vowel, consonant, vowel, digit, digit."""
+_STEM_DRAWS = 100  # bounded resamples for a distinct stem; saturation is impossible in practice
+
+
+def _draw_stem() -> str:
+    return (
+        secrets.choice(_CONSONANTS)
+        + secrets.choice(_VOWELS)
+        + secrets.choice(_CONSONANTS)
+        + secrets.choice(_VOWELS)
+    )
+
+
+def _draw_clean_stem() -> str:
+    """A denylist-clean CVCV stem (resamples past the denylist)."""
     while True:
-        stem = (
-            secrets.choice(_CONSONANTS)
-            + secrets.choice(_VOWELS)
-            + secrets.choice(_CONSONANTS)
-            + secrets.choice(_VOWELS)
-        )
+        stem = _draw_stem()
         if _is_clean_stem(stem):
+            return stem
+
+
+def new_change_id(existing_stems: frozenset[str] = frozenset()) -> str:
+    """6 ref-safe chars: consonant, vowel, consonant, vowel, digit, digit.
+
+    Resamples the stem past `existing_stems` (bounded to `_STEM_DRAWS` tries);
+    if every try collides (only reachable with a saturated set — impossible in
+    practice) it accepts the last clean stem, so termination is guaranteed. The
+    default empty set reproduces the prior no-argument behavior.
+    """
+    stem = _draw_clean_stem()
+    for _ in range(_STEM_DRAWS):
+        if stem not in existing_stems:
             break
+        stem = _draw_clean_stem()
     return stem + secrets.choice(_DIGITS) + secrets.choice(_DIGITS)

@@ -73,6 +73,21 @@ def _imp_commit(control_root: Path) -> str:
     return proc.stdout.strip() if proc.returncode == 0 else ""
 
 
+def live_change_ids(control_root: Path) -> list[str]:
+    """Live change-home ids: dirs under .imp/changes/ holding a change.json (archive excluded)."""
+    root = control_root / ".imp" / "changes"
+    if not root.is_dir():
+        return []
+    return sorted(p.name for p in root.iterdir()
+                  if p.is_dir() and not p.name.startswith(".")
+                  and (p / "change.json").exists())
+
+
+def live_stems(control_root: Path) -> frozenset[str]:
+    """Four-letter stems of every live change home — the mint avoid-set."""
+    return frozenset(cid[:4] for cid in live_change_ids(control_root))
+
+
 def _migrate_v1_to_v2(change_dir: Path) -> None:
     """v1->v2: rename base_head->orig_base_head and backfill cur_base_head via
     `git merge-base base_branch HEAD` in the change's project_root."""

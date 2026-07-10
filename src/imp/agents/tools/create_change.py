@@ -4,7 +4,7 @@ from typing import Any
 
 from imp.agents.tools import imp_tool
 from imp.engine import backlog
-from imp.engine.change import Change
+from imp.engine.change import Change, live_stems
 from imp.engine.change_id import new_change_id
 from imp.engine.state import JsonlEventLog
 
@@ -24,7 +24,7 @@ def create_change(
     if ctx.change_state is None:
         raise RuntimeError("create_change is only available to top-level Change steps")
     parent = ctx.change
-    new_id = new_change_id()
+    new_id = new_change_id(existing_stems=live_stems(parent.control_root))
     deps = list(depends_on or [])
     seed = backlog.seed_opening({"title": title, "description": description})
     Change.create_draft(
