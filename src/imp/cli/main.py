@@ -2594,14 +2594,16 @@ def _backlog_rows(control: Path, scanned: list[_HomeScan] | None = None) -> list
 _HISTORY_CAP = 10
 
 # Display-only disposition word for the overview history block.
-_DISPOSITION = {"completed": "merged", "abandoned": "abandoned"}
+_DISPOSITION = {"completed": "merged", "abandoned": "abandoned", "paused": "left"}
 
 
 def _history_rows(control: Path, *, show_all: bool,
                   live_ids: set[str] | None = None) -> list[_Row]:
-    """Terminal-disposition (completed/abandoned) rows for the history block."""
+    """History-block rows: completed/abandoned, plus left (paused) rows under --all."""
     rows = [r for r in _completed_rows(control, live_ids) if r[1] in _DISPOSITION]
-    if not show_all:
+    if show_all:
+        rows += _left_rows(control, live_ids)
+    else:
         rows = [r for r in rows if r[1] == "completed"]
     rows = _sort_rows_newest_first(rows)
     return rows if show_all else rows[:_HISTORY_CAP]
