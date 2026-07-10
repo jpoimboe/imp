@@ -305,6 +305,35 @@ def test_ack_over_block_then_redraw_climbs_one_row_and_preserves_blank() -> None
     assert v.rstrip().endswith("bar2")
 
 
+def test_stop_ack_on_skip_drawn_footer_draws_in_place_no_climb() -> None:
+    out = _TTY()
+    s = LiveStatus(out, now=lambda: 0.0)
+    s._width_fn = lambda: 80
+    s.skip_leading_blank()
+    s.update(lambda f, e: ["spinner row"])       # skip-drawn: owns no blank
+    assert s._owns_lead_blank is False
+    out.truncate(0)
+    out.seek(0)
+    s.show_stop_ack("stopped")
+    v = out.getvalue()
+    assert "\n" not in v                          # ack drawn in place, not pushed down a row
+    assert "stopped" in v
+    assert v.count("\x1b[1A") == 0                # no climb onto the committed blank
+
+
+def test_stop_ack_on_owned_blank_footer_still_pushes_leading_newline() -> None:
+    out = _TTY()
+    s = LiveStatus(out, now=lambda: 0.0)
+    s._width_fn = lambda: 80
+    s.update(lambda f, e: ["busy"])              # no skip -> owns its blank
+    assert s._owns_lead_blank is True
+    out.truncate(0)
+    out.seek(0)
+    s.show_stop_ack("stopped")
+    v = out.getvalue()
+    assert v.endswith("\n\r\x1b[K\x1b[2mstopped\x1b[0m")   # leading "\n" before the ack
+
+
 def test_hide_cursor_writes_hide_once_and_is_idempotent() -> None:
     out = _TTY()
     s = LiveStatus(out, now=lambda: 0.0)
@@ -455,3 +484,54 @@ def test_non_tty_emits_no_cursor_escapes() -> None:
         pass
     v = out.getvalue()
     assert "\x1b[?25l" not in v and "\x1b[?25h" not in v
+
+
+def test_skip_leading_blank_first_draw_omits_owned_blank() -> None:
+    out = _TTY()
+    s = LiveStatus(out, now=lambda: 0.0)
+    s._width_fn = lambda: 80
+    s.skip_leading_blank()
+    s.update(lambda f, e: ["spinner row"])
+    # No leading "\n": the row is drawn directly on the committed blank below.
+    assert out.getvalue() == "\x1b[?25l\r\x1b[Kspinner row"
+    assert s._owns_lead_blank is False
+
+
+def test_skip_drawn_footer_erase_stays_in_place_no_climb() -> None:
+    out = _TTY()
+    s = LiveStatus(out, now=lambda: 0.0)
+    s._width_fn = lambda: 80
+    s.skip_leading_blank()
+    s.update(lambda f, e: ["spinner row"])       # owns no blank
+    out.truncate(0)
+    out.seek(0)
+    s.hide()                                      # -> _erase()
+    v = out.getvalue()
+    assert v.count("\x1b[K") == 1                 # its one row cleared
+    assert v.count("\x1b[1A") == 0                # but NOT climbed onto the committed blank
+
+
+def test_skip_lead_is_one_shot_next_draw_owns_blank_again() -> None:
+    out = _TTY()
+    s = LiveStatus(out, now=lambda: 0.0)
+    s._width_fn = lambda: 80
+    s.skip_leading_blank()
+    s.update(lambda f, e: ["one row"])            # skip consumed here
+    out.truncate(0)
+    out.seek(0)
+    s.update(lambda f, e: ["a", "", "bar"])       # row-count change -> else path, owns blank
+    v = out.getvalue()
+    assert "\n\r\x1b[Ka" in v   # a leading owned blank was written
+    assert s._owns_lead_blank is True
+
+
+def test_default_footer_still_owns_blank_and_climbs() -> None:
+    out = _TTY()
+    s = LiveStatus(out, now=lambda: 0.0)
+    s._width_fn = lambda: 80
+    s.update(lambda f, e: ["busy"])               # no skip -> owns its blank
+    assert s._owns_lead_blank is True
+    out.truncate(0)
+    out.seek(0)
+    s.hide()
+    assert out.getvalue().count("\x1b[1A") == 1   # climbs onto the owned blank (unchanged)
