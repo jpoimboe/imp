@@ -101,6 +101,29 @@ def test_live_gate_dialogue_carries_door_agnostic_posture_only() -> None:
     assert "superpowers" not in text.lower()
 
 
+def test_brainstorm_dialogue_carries_enumeration_and_grill_mode() -> None:
+    text = (PARTIALS / "brainstorm-dialogue.md").read_text()
+    # (a) enumerate-before-commit for user-visible outcomes
+    assert "Enumerate before committing" in text
+    assert "unenumerated deferral" in text
+    # (b) whole-surface after-state inventory with the real-ANSI mockup constraint
+    assert "Walk the whole surface" in text
+    assert "after-state inventory" in text
+    assert "real ANSI SGR colors" in text
+    assert "never depict a color the codes cannot produce" in text
+    # (c) confirmed values are written into the spec verbatim
+    assert "Enumerated values are spec content" in text
+    assert "into the spec verbatim" in text
+    # (d) on-request grill mode; prose-batch pacing stated as the default
+    assert "Grill mode on request" in text
+    assert "Prose-batch pacing is the default" in text
+    assert "one-question-at-a-time" in text
+    assert "recommended answer" in text
+    assert "looked up, never asked" in text
+    # The grill copy must not collide with the case-exact ban other tests pin.
+    assert "One question at a time" not in text
+
+
 def test_brainstorm_dialogue_renders_seeded_vs_unseeded_branch() -> None:
     from imp.agents.prompts import build_context, render_prompt
     from imp.engine.state import InMemoryEventLog
