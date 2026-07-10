@@ -393,3 +393,27 @@ def test_interject_after_nudge_clears_bit_so_later_yield_re_nudges() -> None:
     assert fn("question two") == COMPLETION_NUDGE
     nudges = [e for e in log.events if e["type"] == "completion_nudge"]
     assert len(nudges) == 2
+
+
+def test_inline_steer_emit_carries_interrupt_true() -> None:
+    import anyio
+    log = _RecordingLog()
+    inline = build_inline_solicit(
+        event_log=log, agent_id="a1",
+        steer_prompt="interrupted", interrupt=True)
+    with pytest.raises(AwaitingUserInput):
+        anyio.run(inline, "last prose")
+    awaiting = [e for e in log.events if e["type"] == "awaiting_user_input"]
+    assert len(awaiting) == 1
+    assert awaiting[0]["payload"] == {"prompt": "interrupted", "interrupt": True}
+
+
+def test_inline_bare_turn_end_emit_carries_interrupt_false() -> None:
+    import anyio
+    log = _RecordingLog()
+    inline = build_inline_solicit(event_log=log, agent_id="a1")
+    with pytest.raises(AwaitingUserInput):
+        anyio.run(inline, "the final question")
+    awaiting = [e for e in log.events if e["type"] == "awaiting_user_input"]
+    assert len(awaiting) == 1
+    assert awaiting[0]["payload"] == {"prompt": "", "interrupt": False}
