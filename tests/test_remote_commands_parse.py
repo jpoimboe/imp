@@ -38,12 +38,16 @@ def fake_resolve(text: str, reply_to: int | None) -> tuple[str | None, str]:
     return (None, text)
 
 
-def test_slash_show_is_listchanges() -> None:
-    assert parse("/show", None, fake_resolve) == ListChanges()
+def test_slash_list_is_listchanges() -> None:
+    assert parse("/list", None, fake_resolve) == ListChanges()
+
+
+def test_slash_show_is_no_longer_recognized() -> None:
+    assert parse("/show", None, fake_resolve) == Notice(UNKNOWN_COMMAND)
 
 
 def test_leading_whitespace_still_selects_the_command_path() -> None:
-    assert parse("   /show", None, fake_resolve) == ListChanges()
+    assert parse("   /list", None, fake_resolve) == ListChanges()
 
 
 def test_slash_help_is_help() -> None:
@@ -139,8 +143,13 @@ def test_listresult_carries_the_resident_set() -> None:
     assert result.resident == frozenset({"a", "b"})
 
 
-def test_show_help_line_says_running_changes() -> None:
-    assert "/show — show running changes (● = subscribed)" in HELP_TEXT
+def test_list_help_line_says_running_changes() -> None:
+    assert "/list — show running changes (● = subscribed)" in HELP_TEXT
+
+
+def test_route_hint_points_at_list_not_show() -> None:
+    assert "send /list." in ROUTE_HINT
+    assert "/show" not in ROUTE_HINT
 
 
 def test_slash_alerts_on_parses_to_alerts_true() -> None:
