@@ -2302,18 +2302,19 @@ def test_compose_activity_line_counts_down_when_countdown_total_set() -> None:
     assert "11m 0s" not in line
 
 
-def test_compose_activity_line_clamps_countdown_to_under_a_minute() -> None:
+def test_compose_activity_line_countdown_second_granularity_under_a_minute() -> None:
     from imp.cli.live_driver import compose_activity_line
-    # remaining reaches zero (reset moment passed before the agent produced an event)
+    # Use a hyphen-free verb so the negative-countdown guard (`"-" not in over`)
+    # tests the tail alone — a hyphenated verb like "network - waiting to retry"
+    # would itself put a "-" on the line and defeat that assertion.
     act = nv.Activity(verb="waiting for limit reset", countdown_total=100.0)
-    reached = compose_activity_line(activity=act, frame=0, elapsed=100.0, color=False)
-    assert "<1m left" in reached
-    # a positive-but-sub-minute remaining also clamps
-    partial = compose_activity_line(activity=act, frame=0, elapsed=70.0, color=False)
-    assert "<1m left" in partial
-    # never negative / never a stray minus sign in the tail
+    # 100 - 92 = 8s remaining -> second granularity, not the old "<1m left" collapse
+    line = compose_activity_line(activity=act, frame=0, elapsed=92.0, color=False)
+    assert "8s left" in line
+    assert "<1m left" not in line
+    # remaining clamps at zero once the reset moment has passed: "0s left", never negative
     over = compose_activity_line(activity=act, frame=0, elapsed=500.0, color=False)
-    assert "<1m left" in over
+    assert "0s left" in over
     assert "-" not in over
 
 

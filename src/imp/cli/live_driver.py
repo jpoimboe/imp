@@ -92,7 +92,8 @@ def compose_activity_line(*, activity: nv.Activity, elapsed: float,
         parts.append(_paint(activity.detail, "gray", color=color, over_bg=False))
     if activity.countdown_total is not None:
         remaining = max(0.0, activity.countdown_total - elapsed)
-        tail = f"{nv._fmt_hm(remaining)} left" if remaining >= 60 else "<1m left"
+        tail = (f"{nv._fmt_hm(remaining)} left" if remaining >= 60
+                else f"{rt.fmt_seconds(remaining)} left")
     else:
         tail = rt.fmt_seconds(elapsed)
     parts.append(_paint(tail, "dim", color=color, over_bg=False))
