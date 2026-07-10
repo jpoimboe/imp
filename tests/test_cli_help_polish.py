@@ -2,8 +2,6 @@ from __future__ import annotations
 
 import argparse
 
-import pytest
-
 from imp.cli.main import _build_parser
 
 
@@ -20,20 +18,26 @@ def test_abandon_documents_token_positional() -> None:
     assert "which Change to abandon" in help_text
 
 
-def test_show_documents_overview_and_detail() -> None:
-    sp = _subparser("show")
+def test_list_documents_overview() -> None:
+    sp = _subparser("list")
     help_text = sp.format_help()
     assert "Backlog" in help_text
     assert sp.description is not None
 
 
-def test_show_resolves_and_list_is_gone() -> None:
-    from imp.cli.main import _build_parser, _cmd_show
+def test_show_documents_detail_only() -> None:
+    sp = _subparser("show")
+    help_text = sp.format_help()
+    assert "Backlog" not in help_text          # no overview language on show
+    assert "detail card" in help_text
+    assert sp.description is not None
+
+
+def test_list_and_show_both_resolve() -> None:
+    from imp.cli.main import _build_parser, _cmd_list, _cmd_show
     parser = _build_parser()
-    assert parser.parse_args(["show"]).func is _cmd_show
-    with pytest.raises(SystemExit) as exc:
-        parser.parse_args(["list"])
-    assert exc.value.code == 2
+    assert parser.parse_args(["list"]).func is _cmd_list
+    assert parser.parse_args(["show", "liveid"]).func is _cmd_show
 
 
 def test_config_has_description() -> None:

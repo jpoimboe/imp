@@ -1557,17 +1557,23 @@ def _detail_card(control: Path, change_id: str, *, now: datetime) -> list[str]:
     return _change_card(control, change_id, now=now)
 
 
+def _cmd_list(args: argparse.Namespace) -> int:
+    try:
+        control = _control_root()
+    except worktree.PreconditionError:
+        print(_NO_CHANGES_MESSAGE)
+        return 0
+    lines = _overview_lines(control, show_all=args.all, now=datetime.now(UTC),
+                            color=should_use_color(sys.stdout))
+    _page_or_print(lines, no_pager=args.no_pager)
+    return 0
+
+
 def _cmd_show(args: argparse.Namespace) -> int:
     if args.token is None:
-        try:
-            control = _control_root()
-        except worktree.PreconditionError:
-            print(_NO_CHANGES_MESSAGE)
-            return 0
-        lines = _overview_lines(control, show_all=args.all, now=datetime.now(UTC),
-                                color=should_use_color(sys.stdout))
-        _page_or_print(lines, no_pager=args.no_pager)
-        return 0
+        print("imp: 'imp show' needs a change id — run 'imp list' for an overview",
+              file=sys.stderr)
+        return 2
     control = _control_root()
     try:
         change_id = _resolve_id(control, args.token)
@@ -2161,7 +2167,7 @@ def resolve_display_status(
 # Row = (id, status, step, last_activity, title, created_at, step_label).
 # created_at is the trailing sort key only; step_label feeds the merged STATUS
 # cell's ` (label)` suffix (see change_row.format_change_line). The step slot
-# stays the RAW step name so imp show keeps printing it.
+# stays the RAW step name so imp list keeps printing it.
 _Row = tuple[str, str, str, str, str, str, str | None]
 
 
@@ -2230,7 +2236,7 @@ def _status_row(change_id: str, state_json: bytes, change_json: bytes,
     change.json are schema-identical to the in-flight ones (both written by
     State.save / Change.create), so the two sections can't silently drift.
     Returns None on malformed/incomplete JSON so a single corrupt entry can't
-    crash the whole `imp show` listing (callers skip None)."""
+    crash the whole `imp list` listing (callers skip None)."""
     try:
         st = json.loads(state_json)
         meta = json.loads(change_json)
@@ -2345,7 +2351,7 @@ def _resume_picker_empty(control: Path) -> int:
     if past:
         plural = "s" if past != 1 else ""
         print(pal.ansi(
-            f"({past} past change{plural} — see `imp show --all`)",
+            f"({past} past change{plural} — see `imp list --all`)",
             "dim", enabled=should_use_color(sys.stdout)))
     return 0
 
@@ -2821,7 +2827,8 @@ _OVERVIEW_COMMANDS: tuple[tuple[str, str], ...] = (
     ("chat", "Open a conversation with imp — ask questions, scout work, or scope a change."),
     ("new", "Scope a new change in conversation (optional opening message)."),
     ("resume", "Continue an in-flight Change (the sole resumable one, else a picker)."),
-    ("show", "Show your changes; `imp show <id>` for one change's detail."),
+    ("list", "List your changes: in-flight, backlog, and recently merged."),
+    ("show", "Show one change's detail or a named artifact (imp show <id>)."),
     ("log", "Show a Change's narrative as plain text."),
     ("abandon", "Tear down a Change's worktree, branch, and state."),
     ("config", "Show the effective configuration."),
@@ -2994,27 +3001,40 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     p_log.set_defaults(func=_cmd_log)
 
+    p_list = sub.add_parser(
+        "list",
+        help="List your changes: in-flight, backlog, and recently merged.",
+        description=(
+            "With no argument, an overview of your changes — in-flight, the "
+            "Backlog, and recently merged. -a/--all lifts the 10-cap and "
+            "includes abandoned/left changes (the block is then labelled "
+            "`history`)."),
+    )
+    p_list.add_argument(
+        "-a", "--all", action="store_true",
+        help="Lift the 10-cap and include abandoned changes "
+             "(the block is then labelled `history`).")
+    p_list.add_argument(
+        "--no-pager", action="store_true",
+        help="Disable the pager even when stdout is a TTY.")
+    p_list.set_defaults(func=_cmd_list)
+
     p_show = sub.add_parser(
         "show",
-        help="Show your changes, or one change's detail/artifact.",
+        help="Show one change's detail or a named artifact (imp show <id>).",
         description=(
-            "With no argument, show an overview of your changes — in-flight, the "
-            "Backlog, and recently merged. With an id, print that change's detail "
-            "card, or name an artifact (spec/plan/events/status/summary) "
-            "to print just that. Reads the live worktree files while a change is "
-            "in flight and falls back to the archive once it is merged."),
+            "Print a change's detail card, or name an artifact "
+            "(spec/plan/events/status/summary) to print just that. "
+            "Reads the live worktree files while a change is in flight and "
+            "falls back to the archive once it is merged."),
     )
     p_show.add_argument(
         "token", nargs="?", default=None,
-        help="Change id or its short token (omit for an overview of all changes).")
+        help="Change id or its short token.")
     p_show.add_argument(
         "resource", nargs="?", default=None,
         choices=["spec", "plan", "events", "status", "summary"],
         help="Which artifact to print (default: a detail card).")
-    p_show.add_argument(
-        "-a", "--all", action="store_true",
-        help="In the overview, lift the 10-cap and include abandoned changes "
-             "(the block is then labelled `history`).")
     p_show.add_argument(
         "--no-pager", action="store_true",
         help="Disable the pager even when stdout is a TTY.")
