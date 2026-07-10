@@ -2579,9 +2579,9 @@ def test_compose_subagent_rows_prefix_child_arrow() -> None:
     rows = compose_subagent_rows(b, color=False, width=120,
                                  now_iso="2026-01-01T00:00:00+00:00")
     assert len(rows) == 1
-    # Two-column indent, then the child arrow marking the parent position row.
-    assert rows[0].startswith("  ↳ ")
-    assert rows[0][4:].lstrip().startswith("coder")   # role follows the arrow
+    # No indent: the row content begins at the child arrow.
+    assert rows[0].startswith("↳ ")
+    assert rows[0][2:].lstrip().startswith("coder")   # role follows the arrow
 
 
 def test_compose_subagent_rows_render_plain_without_slate_under_ansi_theme() -> None:
@@ -2596,7 +2596,7 @@ def test_compose_subagent_rows_render_plain_without_slate_under_ansi_theme() -> 
         pal.set_theme("ansi")
     assert len(rows) == 1
     assert not rows[0].startswith("\x1b[48")   # 16-color theme has no slate background
-    assert rows[0].startswith("  ")            # still indented like the parent
+    assert not rows[0].startswith(" ")         # no leading indent; row begins at the arrow
     assert "↳" in rows[0]                       # child arrow present
 
 
