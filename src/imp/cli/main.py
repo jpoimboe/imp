@@ -58,7 +58,7 @@ from imp.engine.abandon import (
 )
 from imp.engine.archive import read as archive_read
 from imp.engine.awaiting_user_input import AwaitingUserInput
-from imp.engine.change import Change
+from imp.engine.change import Change, live_change_ids
 from imp.engine.change_id import new_change_id
 from imp.engine.errors import LayoutMismatch, LoadError, LoadErrors
 from imp.engine.events_digest import digest_event, full_line
@@ -1249,12 +1249,7 @@ def _display_width() -> int:
 
 def _list_change_homes(control: Path) -> list[str]:
     """Ids of changes with a permanent root home under .imp/changes/."""
-    root = control / ".imp" / "changes"
-    if not root.is_dir():
-        return []
-    return sorted(p.name for p in root.iterdir()
-                  if p.is_dir() and not p.name.startswith(".")
-                  and (p / "change.json").exists())
+    return live_change_ids(control)
 
 
 def _change_home(control: Path, change_id: str) -> Path:
