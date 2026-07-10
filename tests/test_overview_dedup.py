@@ -96,11 +96,74 @@ def _archive_completed(control: Path, cid: str) -> None:
         change_json_path=change_json, state_json_path=state_json)
 
 
+def _archive_paused(
+    control: Path, cid: str, *, last_ts: str = "2026-06-03T00:00:00+00:00"
+) -> None:
+    events = control / f"{cid}.jsonl"
+    events.write_bytes(
+        f'{{"id":"{cid}-e0","parent_id":null,"agent_id":null,'
+        f'"timestamp":"{last_ts}","type":"step_started",'
+        f'"payload":{{"id":"{cid}"}}}}\n'.encode())
+    change_json = control / f"{cid}-change.json"
+    change_json.write_text(json.dumps({
+        "id": cid, "title": cid.title(), "base_branch": "main",
+        "created_at": "2026-06-02T00:00:00+00:00", "depends_on": [],
+        "materialized": False}))
+    state_json = control / f"{cid}-state.json"
+    state_json.write_text(json.dumps({
+        "id": cid, "status": "paused", "step": None}))
+    archive.archive_change(
+        control, cid, events_path=events,
+        change_json_path=change_json, state_json_path=state_json)
+
+
 def test_completed_rows_honors_live_ids(tmp_path: Path) -> None:
     _seed_control(tmp_path)
     _archive_completed(tmp_path, "gamma")
     assert {r[0] for r in m._completed_rows(tmp_path)} == {"gamma"}
     assert m._completed_rows(tmp_path, live_ids={"gamma"}) == []
+
+
+def test_left_rows_selects_paused_not_live(tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+    _archive_paused(tmp_path, "delta")
+    _archive_completed(tmp_path, "epsilon")
+    # A left (archived `paused`) conversation is a left row; a completed one is
+    # NOT (this pins the `paused` filter — dropping it would surface epsilon).
+    left = m._left_rows(tmp_path)
+    assert {r[0] for r in left} == {"delta"}
+    assert all(r[1] == "paused" for r in left)
+    # The completed change is a completed row, not a left row (AC 4).
+    assert {r[0] for r in m._completed_rows(tmp_path)} == {"epsilon"}
+    # A resumed (now live) left conversation drops out via live_ids (AC 3).
+    assert m._left_rows(tmp_path, live_ids={"delta"}) == []
+
+
+def test_left_conversation_only_in_all_history(tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+    _archive_completed(tmp_path, "gamma")          # merged, last=2026-06-01
+    _archive_paused(tmp_path, "delta")             # left,   last=2026-06-03
+
+    # AC 1: under --all, delta appears in history, sorted newest-first (before
+    # the older merged gamma).
+    all_hist = m._history_rows(tmp_path, show_all=True)
+    assert [r[0] for r in all_hist] == ["delta", "gamma"]
+    assert dict((r[0], r[1]) for r in all_hist)["delta"] == "paused"
+
+    # AC 2: plain imp show never lists the left conversation.
+    plain_hist = m._history_rows(tmp_path, show_all=False)
+    assert {r[0] for r in plain_hist} == {"gamma"}
+
+    # AC 3: a resumed (now live) left conversation is not duplicated in history.
+    assert {r[0] for r in
+            m._history_rows(tmp_path, show_all=True, live_ids={"delta"})} == {"gamma"}
+
+    # AC 5: rendered overview tags it "left" under --all and omits it otherwise.
+    now = datetime(2026, 6, 28, tzinfo=UTC)
+    all_lines = m._overview_lines(tmp_path, show_all=True, now=now, color=False)
+    assert any(ln.startswith("delta") and "left" in ln for ln in all_lines)
+    plain_lines = m._overview_lines(tmp_path, show_all=False, now=now, color=False)
+    assert not any(ln.startswith("delta") for ln in plain_lines)
 
 
 def test_history_rows_threads_live_ids(tmp_path: Path) -> None:
