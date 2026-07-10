@@ -86,8 +86,7 @@ def usage_prompt_tokens(usage: dict[str, Any] | None) -> int | None:
 
 # ── nodes ───────────────────────────────────────────────────────────────────
 # `collapsible` is a class attribute (not a dataclass field) so isinstance-free
-# code can ask `node.collapsible`. The TUI memo keys on id(node), so nodes carry
-# no explicit id field.
+# code can ask `node.collapsible`. Nodes carry no explicit id field.
 
 _PROSE_THRESHOLD = 80  # issues 5/6: string output fields longer than this (or
                        # multi-line) render as a bold prose block; shorter scalars
@@ -505,8 +504,7 @@ class NarrativeBuilder:
         # drops a bare WAITING protocol reply (pure plumbing). Survives non-prose events.
         self._completion_nudge_pending = False
         self._opening_intent_node: UserMessageNode | None = None
-        # TUI-only optimistic reply echo: reconciled by the next user_message;
-        # None on the streaming path.
+        # Optimistic reply echo: reconciled by the next user_message.
         self._pending_reply_node: UserMessageNode | None = None
         self._first_step: StepNode | None = None
         # phrase rotation: work seen this segment, consumed at each prose/user-message boundary.
@@ -660,17 +658,9 @@ class NarrativeBuilder:
             return Activity(verb="working")
         return None
 
-    def seed_opening_intent(self, text: str) -> None:
-        """TUI-only optimistic echo: seed the committed opening-intent node at root
-        so frame one shows it; _h_opening_intent reconciles the authoritative event
-        into it."""
-        node = UserMessageNode(text=text, interactive=True)
-        self._opening_intent_node = node
-        self._root.children.append(node)
-
     def seed_pending_reply(self, text: str) -> None:
-        """Optimistic echo for a your-turn reply (TUI via _resolve_prompt, terminal
-        via LiveDriver.seed_pending_reply): append a pending interactive node; the
+        """Optimistic echo for a your-turn reply (terminal via
+        LiveDriver.seed_pending_reply): append a pending interactive node; the
         next user_message reconciles into it via the single-outstanding
         awaiting-reply invariant."""
         node = UserMessageNode(text=text, interactive=True)
@@ -1580,10 +1570,6 @@ def _inject_opening_intent(self: NarrativeBuilder, step: StepNode) -> None:
 
 def _h_opening_intent(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
     text = p.get("text", "")
-    if self._opening_intent_node is not None:
-        # Seeded by the TUI: adopt the authoritative text in place; never append a duplicate.
-        self._opening_intent_node.text = text
-        return
     node = UserMessageNode(text=text, interactive=True)
     self._opening_intent_node = node
     self._append(node)
