@@ -685,11 +685,16 @@ def _print_opening(change: Change, marker: str, *, interactive: bool, color: boo
 
 async def _read_intent_line(
     prompt: Any, change: Any, *, color: bool, width: int,
+    model_sink: dict[str, str] | None = None,
 ) -> str:
-    """Read one opening-intent line through the slash interceptor, no model turn spent."""
+    """Read one opening-intent line, capturing an opening `/model` selection into `model_sink`."""
     while True:
         line = await ask_line_with_slash(
             prompt, None, change, color=color, width=width, hint=OPENING_HINT)
+        if line.strip().startswith("/model "):
+            if model_sink is not None:
+                model_sink["model"] = line.strip()[len("/model "):].strip()
+            continue
         if line in _OPENING_SESSION_VERBS:
             print(f"{line} isn't available at the opening prompt — "
                   f"describe your Change, or /help for commands.")
@@ -700,6 +705,7 @@ async def _read_intent_line(
 async def _read_opening_message(
     change: Change, *, leave_mode: str, banner_shown: bool, color: bool,
     width: int, editing_mode: str,
+    model_sink: dict[str, str] | None = None,
     _prompt_factory: Callable[[], Any] | None = None,
 ) -> str | None:
     """Lead with the run header, then the splash (when interactive), then read the
@@ -710,7 +716,8 @@ async def _read_opening_message(
         lambda: Prompt(skills_dir=change.workflow_dir / "skills",
                        editing_mode=editing_mode, color=color))
     prompt = make()
-    reply = await _read_intent_line(prompt, change, color=color, width=width)
+    reply = await _read_intent_line(
+        prompt, change, color=color, width=width, model_sink=model_sink)
     return _normalize_opening_reply(reply)
 
 
@@ -733,15 +740,19 @@ async def _run_cleared_session(
             sys.stdout, change.id, change.title, initial="idle")
         prompt = Prompt(skills_dir=change.workflow_dir / "skills",
                         editing_mode=_editing_mode(control), color=color)
+        # A `/model` typed at this reopened prompt lands here; empty when none.
+        cleared_model_sink: dict[str, str] = {}
         try:
             reply = await _read_intent_line(
-                prompt, change, color=color, width=_term_width())
+                prompt, change, color=color, width=_term_width(),
+                model_sink=cleared_model_sink)
         except (EOFError, KeyboardInterrupt):
             if term_title is not None:
                 term_title.reset()
             print("imp: cancelled", file=sys.stderr)
             return 130
         _session_started = True
+        cleared_model = cleared_model_sink.get("model")
         opening_text = _normalize_opening_reply(reply)
         # Persist the intent durably so the reopened chat's opening step seeds from
         # change.json (mirroring the imp new path), surviving any later resume.
@@ -757,7 +768,7 @@ async def _run_cleared_session(
             change, driver=driver, coord=coord, solicit=solicit,
             status=status,
             leave_mode=leave_mode,
-            leave_state=leave_state, title=term_title)
+            leave_state=leave_state, title=term_title, model=cleared_model)
     finally:
         if not _session_started:
             discard_conversation(change)
@@ -980,13 +991,16 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
 
     # Print the run header before the prompt so erase/reprint causes no layout jump.
     header_printed = False
+    # A `/model` typed at the opening prompt lands here; empty when none was typed.
+    opening_model_sink: dict[str, str] = {}
     if show_opening_prompt:
         try:
             async with prompt_sigint_guard():
                 reply = await _read_opening_message(
                     change, leave_mode=leave_mode, banner_shown=interactive,
                     color=color, width=_term_width(),
-                    editing_mode=_editing_mode(control))
+                    editing_mode=_editing_mode(control),
+                    model_sink=opening_model_sink)
         except (EOFError, KeyboardInterrupt):
             if term_title is not None:
                 term_title.reset()
@@ -997,6 +1011,7 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
         # An empty reply falls back to the unseeded path (the opening step
         # opens by asking); a real answer becomes the opening intent.
         opening_text = reply
+    opening_model = opening_model_sink.get("model")
 
     # Persist the finalized intent so it survives any resume (including a restart
     # from an errored transcript). Covers both the positional and interactive
@@ -1021,7 +1036,7 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
             change, driver=driver, coord=coord, solicit=solicit,
             status=status,
             title=term_title,
-            non_interactive=True, autonomous=autonomous)
+            non_interactive=True, autonomous=autonomous, model=opening_model)
 
     if not header_printed:
         _print_opening(change, leave_mode, interactive=interactive, color=color)
@@ -1040,7 +1055,8 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
             change, driver=driver, coord=coord, solicit=solicit,
             status=status,
             leave_mode=leave_mode,
-            leave_state=leave_state, title=term_title, autonomous=autonomous)
+            leave_state=leave_state, title=term_title, autonomous=autonomous,
+            model=opening_model)
 
     return await _clear_loop(control, first=_first, leave_mode=leave_mode)
 

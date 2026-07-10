@@ -97,7 +97,8 @@ def test_new_positional_delivers_verbatim_seed(
                            status: object = None,
                            title: object = None,
                            non_interactive: object = False,
-                           autonomous: object = False) -> int:
+                           autonomous: object = False,
+                           model: str | None = None) -> int:
         captured["change"] = change
         return 0
 
@@ -124,7 +125,8 @@ def test_new_title_flag_sets_change_title(
                            status: object = None,
                            title: object = None,
                            non_interactive: object = False,
-                           autonomous: object = False) -> int:
+                           autonomous: object = False,
+                           model: str | None = None) -> int:
         captured["change"] = change
         return 0
 
@@ -150,7 +152,8 @@ def test_new_positional_with_message_legal(
                            status: object = None,
                            title: object = None,
                            non_interactive: object = False,
-                           autonomous: object = False) -> int:
+                           autonomous: object = False,
+                           model: str | None = None) -> int:
         captured["change"] = change
         captured["reply"] = await solicit("")  # type: ignore[operator]
         return 0
@@ -237,7 +240,8 @@ def test_opening_prompt_reply_wires_to_seed_opening(
                            leave_state: object = None,
                            title: object = None,
                            non_interactive: object = False,
-                           autonomous: object = False) -> int:
+                           autonomous: object = False,
+                           model: str | None = None) -> int:
         captured["change"] = change
         return 0
 
@@ -277,7 +281,8 @@ def test_opening_prompt_empty_reply_gives_none_seed_opening(
                            leave_state: object = None,
                            title: object = None,
                            non_interactive: object = False,
-                           autonomous: object = False) -> int:
+                           autonomous: object = False,
+                           model: str | None = None) -> int:
         captured["change"] = change
         return 0
 
@@ -315,7 +320,8 @@ def test_new_creates_unmaterialized_draft(
                            status: object = None,
                            title: object = None,
                            non_interactive: object = False,
-                           autonomous: object = False) -> int:
+                           autonomous: object = False,
+                           model: str | None = None) -> int:
         captured["change"] = change
         return 0
 
