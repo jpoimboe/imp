@@ -8,7 +8,7 @@ import anyio
 import pytest
 
 import imp.agents.tools.bash  # noqa: F401
-from imp.agents.runner import ChangeContext
+from imp.agents.runner import QuestContext
 from imp.agents.tools import get_registry
 from imp.agents.tools.context import ToolContext
 from imp.agents.tools.limits import ToolAborted
@@ -19,7 +19,7 @@ def _ctx(tmp_path: Path) -> ToolContext:
         project_root=tmp_path,
         events_path=tmp_path / "events.jsonl",
     )
-    ctx.change_context = ChangeContext(
+    ctx.quest_context = QuestContext(
         id="test01", title="Test Change", project_root=tmp_path,
         workflow_dir=tmp_path / ".imp" / "change" / "workflow",
     )

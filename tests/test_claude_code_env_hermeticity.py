@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from imp.agents.runner import AgentInvocation, ChangeContext
+from imp.agents.runner import AgentInvocation, QuestContext
 from imp.engine.types import AgentDef, OutputSchema, SourceLoc
 from imp.providers.claude_code import ClaudeCodeAgentRunner
 
@@ -36,7 +36,7 @@ def _invocation(project_root: Path, tier: str | None = None) -> AgentInvocation:
         model_name="claude-sonnet-4-5",
         system_prompt="be a coder",
         initial_messages=(),
-        change_context=ChangeContext(
+        quest_context=QuestContext(
             title="Test",
             project_root=project_root,
             workflow_dir=project_root / ".imp" / "change" / "workflow",

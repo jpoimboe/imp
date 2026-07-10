@@ -7,7 +7,7 @@ import pytest
 
 from imp.agents.runner import (
     AgentInvocation,
-    ChangeContext,
+    QuestContext,
     Message,
     TextBlock,
 )
@@ -114,7 +114,7 @@ def _inv(tmp_path: Path, *, event_log, coordinator, tools=None,
         provider_name="anthropic", model_name="claude-sonnet-4-6",
         system_prompt="be terse",
         initial_messages=(Message(role="user", content=(TextBlock(text="go"),)),),
-        change_context=ChangeContext(
+        quest_context=QuestContext(
             title="Test", project_root=tmp_path,
             workflow_dir=tmp_path / ".imp" / "change" / "workflow"),
         transcript_dir=tmp_path / "step",
@@ -175,7 +175,7 @@ async def test_anthropic_delivers_interject_at_turn_boundary(tmp_path: Path) -> 
 
 @pytest.mark.anyio
 async def test_openai_delivers_interject_at_turn_boundary(tmp_path: Path) -> None:
-    from imp.agents.runner import ChangeContext as _CC
+    from imp.agents.runner import QuestContext as _CC
     from imp.providers.openai import OpenAIAgentRunner
     from tests.openai_fakes import (
         FakeResponsesClient,
@@ -206,7 +206,7 @@ async def test_openai_delivers_interject_at_turn_boundary(tmp_path: Path) -> Non
         provider_name="openai", model_name="gpt-4o-mini",
         system_prompt="be terse",
         initial_messages=(Message(role="user", content=(TextBlock(text="go"),)),),
-        change_context=_CC(
+        quest_context=_CC(
             id="test", title="Test", project_root=tmp_path,
             workflow_dir=tmp_path / ".imp" / "change" / "workflow"),
         transcript_dir=tmp_path / "step",
@@ -249,7 +249,7 @@ async def test_claude_code_delivers_interject_at_requery_boundary(
 ) -> None:
     from dataclasses import replace
 
-    from imp.agents.runner import ChangeContext as _CC
+    from imp.agents.runner import QuestContext as _CC
     from imp.providers.claude_code import ClaudeCodeAgentRunner
     from tests.cc_fakes import (
         FakeClaudeSDKClient,
@@ -282,7 +282,7 @@ async def test_claude_code_delivers_interject_at_requery_boundary(
         provider_name="claude_code", model_name="claude-sonnet-4-5",
         system_prompt="be terse",
         initial_messages=(Message(role="user", content=(TextBlock(text="go"),)),),
-        change_context=_CC(
+        quest_context=_CC(
             title="Test", project_root=tmp_path,
             workflow_dir=tmp_path / ".imp" / "change" / "workflow"),
         transcript_dir=tmp_path / "step",
@@ -321,7 +321,7 @@ async def test_claude_code_delivers_interject_at_requery_boundary(
 async def test_codex_delivers_interject_at_turn_boundary(tmp_path: Path) -> None:
     import subprocess
 
-    from imp.agents.runner import ChangeContext as _CC
+    from imp.agents.runner import QuestContext as _CC
     from imp.engine.types import OutputField as _OF
     from imp.engine.types import OutputSchema as _OS
     from imp.providers.codex_runner import CodexAgentRunner
@@ -373,7 +373,7 @@ async def test_codex_delivers_interject_at_turn_boundary(tmp_path: Path) -> None
     inv = AgentInvocation(
         agent_def=adef, provider_name="codex", model_name="gpt-5.5",
         system_prompt="sp", initial_messages=(),
-        change_context=_CC(title="t", project_root=tmp_path,
+        quest_context=_CC(title="t", project_root=tmp_path,
                            workflow_dir=tmp_path, id="c1"),
         transcript_dir=tmp_path / "tx",
         events_path=tmp_path / "events.jsonl", agent_id="step:t",
@@ -448,7 +448,7 @@ async def test_anthropic_delivers_interject_on_nudge_branch(tmp_path: Path) -> N
 
 @pytest.mark.anyio
 async def test_openai_delivers_interject_on_nudge_branch(tmp_path: Path) -> None:
-    from imp.agents.runner import ChangeContext as _CC
+    from imp.agents.runner import QuestContext as _CC
     from imp.providers.openai import OpenAIAgentRunner
     from tests.openai_fakes import (
         FakeResponsesClient,
@@ -476,7 +476,7 @@ async def test_openai_delivers_interject_on_nudge_branch(tmp_path: Path) -> None
         provider_name="openai", model_name="gpt-4o-mini",
         system_prompt="be terse",
         initial_messages=(Message(role="user", content=(TextBlock(text="go"),)),),
-        change_context=_CC(
+        quest_context=_CC(
             id="test", title="Test", project_root=tmp_path,
             workflow_dir=tmp_path / ".imp" / "change" / "workflow"),
         transcript_dir=tmp_path / "step",

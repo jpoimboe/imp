@@ -40,3 +40,12 @@ def test_archive_index_deps_column_is_quest_id(tmp_path: Path) -> None:
     cols = {r[1] for r in conn.execute("PRAGMA table_info(deps)")}
     assert "quest_id" in cols
     assert "change_id" not in cols
+
+
+def test_discover_exposes_quest_info_and_list_quests() -> None:
+    from imp.remote.daemon import discover
+    names = set(vars(discover))
+    assert "QuestInfo" in names
+    assert "list_quests" in names
+    assert "Change" "Info" not in names    # split literal so the rename sweep can't rewrite this guard
+    assert "list_" "changes" not in names  # same

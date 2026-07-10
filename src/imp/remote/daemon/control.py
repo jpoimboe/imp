@@ -4,7 +4,7 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable
 from typing import Any
 
-from imp.remote.daemon.discover import ChangeInfo
+from imp.remote.daemon.discover import QuestInfo
 from imp.remote.daemon.subscriptions import Subscriptions
 
 
@@ -15,7 +15,7 @@ class ControlPlane:
         deliver: Callable[[str, str], Awaitable[None]],
         create: Callable[[str], None],
         abandon: Callable[[str], int],
-        list_changes: Callable[[], list[ChangeInfo]],
+        list_quests: Callable[[], list[QuestInfo]],
         subscriptions: Subscriptions,
         snapshot: Callable[[str], tuple[str, str, str] | None],
         recent_narrative: Callable[[str, int], list[dict[str, Any]]],
@@ -28,7 +28,7 @@ class ControlPlane:
         self._deliver = deliver
         self._create = create
         self._abandon = abandon
-        self._list_fn = list_changes
+        self._list_fn = list_quests
         self._resident_ids = resident_ids
         self.subscriptions = subscriptions
         self._snapshot = snapshot
@@ -70,7 +70,7 @@ class ControlPlane:
     def abandon(self, quest_id: str) -> int:
         return self._abandon(quest_id)
 
-    def list_changes(self) -> list[ChangeInfo]:
+    def list_quests(self) -> list[QuestInfo]:
         return self._list_fn()
 
     def resident_ids(self) -> frozenset[str]:

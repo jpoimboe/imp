@@ -40,7 +40,7 @@ from typing import Any
 
 import pytest
 
-from imp.agents.runner import AgentInvocation, ChangeContext, Message, TextBlock
+from imp.agents.runner import AgentInvocation, QuestContext, Message, TextBlock
 from imp.agents.tools import get_registry  # noqa: F401
 from imp.agents.tools.context import ToolContext
 from imp.agents.tools.load_skill import make_load_skill_tool
@@ -122,7 +122,7 @@ def _make_invocation(tmp_path: Path, provider_name: str, model: str) -> AgentInv
         provider_name=provider_name, model_name=model,
         system_prompt="be terse",
         initial_messages=(Message(role="user", content=(TextBlock(text="go"),)),),
-        change_context=ChangeContext(
+        quest_context=QuestContext(
             title="Test", project_root=tmp_path,
             workflow_dir=workflow_dir,
         ),
@@ -332,13 +332,13 @@ async def test_claude_code_load_skill_via_wrap_one(tmp_path: Path) -> None:
 
     events_path = tmp_path / "events.jsonl"
 
-    # Build ToolContext with change_context and a real event_log (same pattern
+    # Build ToolContext with quest_context and a real event_log (same pattern
     # as _ctx() in test_claude_code_wrap.py, plus event_log set explicitly).
     ctx = ToolContext(
         project_root=tmp_path,
         events_path=events_path,
     )
-    ctx.change_context = ChangeContext(
+    ctx.quest_context = QuestContext(
         title="Test Change", project_root=tmp_path,
         workflow_dir=workflow_dir,
     )
@@ -395,7 +395,7 @@ async def test_claude_code_load_skill_flush_orders_below_narration(
         project_root=tmp_path,
         events_path=events_path,
     )
-    ctx.change_context = ChangeContext(
+    ctx.quest_context = QuestContext(
         title="Test Change", project_root=tmp_path,
         workflow_dir=workflow_dir,
     )

@@ -9,7 +9,7 @@ import pytest
 import imp.agents.dispatch as dispatch_mod
 from imp.agents.dispatch import TurnState, dispatch_turn_tool_uses
 from imp.agents.parallel import reset_parallelism_cache
-from imp.agents.runner import ChangeContext, ToolUseBlock
+from imp.agents.runner import QuestContext, ToolUseBlock
 from imp.agents.subagents import SubagentSuspended
 from imp.agents.tools import Tool
 from imp.agents.tools.context import ToolContext
@@ -43,7 +43,7 @@ def _ctx(tmp_path: Path) -> ToolContext:
     ctx.parent_transcript_dir = tmp_path / "steps/p/s"
     ctx.coordinator = InterruptCoordinator()
     ctx.event_log = None
-    ctx.change_context = ChangeContext(
+    ctx.quest_context = QuestContext(
         title="C", project_root=tmp_path,
         workflow_dir=tmp_path / ".imp" / "change" / "workflow")
     return ctx

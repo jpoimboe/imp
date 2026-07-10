@@ -59,7 +59,7 @@ def _e2e_agent_def(name, *, tools, subagents=()):
 
 @pytest.mark.anyio
 async def test_batched_child_suspension_degrades_to_is_error(tmp_path) -> None:
-    from imp.agents.runner import ChangeContext, Message, TextBlock
+    from imp.agents.runner import QuestContext, Message, TextBlock
     from imp.cli.signals import InterruptCoordinator
     from imp.providers import resolve
     from imp.providers.anthropic import AnthropicAgentRunner
@@ -96,7 +96,7 @@ async def test_batched_child_suspension_degrades_to_is_error(tmp_path) -> None:
         provider_name="fake", model_name="m",        # subagent inherits -> fake
         system_prompt="be terse",
         initial_messages=(Message(role="user", content=(TextBlock(text="go"),)),),
-        change_context=ChangeContext(title="T", project_root=tmp_path,
+        quest_context=QuestContext(title="T", project_root=tmp_path,
                                      workflow_dir=tmp_path / "wf"),
         transcript_dir=tmp_path / "step",
         events_path=tmp_path / "events.jsonl",

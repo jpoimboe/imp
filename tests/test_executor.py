@@ -1892,9 +1892,9 @@ async def test_facts_render_into_main_agent_prompt(tmp_path: Path) -> None:
     assert any("run make check" in i.initial_messages[0].content[0].text for i in sink)
 
 
-def test_change_context_defaults_empty_facts() -> None:
-    from imp.agents.runner import ChangeContext
-    cc = ChangeContext(
+def test_quest_context_defaults_empty_facts() -> None:
+    from imp.agents.runner import QuestContext
+    cc = QuestContext(
         title="t", project_root=Path("/x"), workflow_dir=Path("/x"))
     assert cc.project_facts == {}
     assert cc.guidance == ""
@@ -2707,11 +2707,11 @@ async def test_quest_home_renders_worktree_relative(tmp_path: Path) -> None:
     assert result is RunResult.COMPLETED
 
     inv = sink[0]
-    assert inv.change_context.quest_home == ".imp/changes/test-change"
+    assert inv.quest_context.quest_home == ".imp/changes/test-change"
     assert "home=.imp/changes/test-change" in inv.initial_messages[0].content[0].text
     # worktree-anchored: relative, never absolute, never a parent escape.
-    assert not inv.change_context.quest_home.startswith("/")
-    assert ".." not in inv.change_context.quest_home
+    assert not inv.quest_context.quest_home.startswith("/")
+    assert ".." not in inv.quest_context.quest_home
 
 
 @pytest.mark.anyio

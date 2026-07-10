@@ -19,7 +19,7 @@ import pytest
 
 from imp.agents.runner import (
     AgentInvocation,
-    ChangeContext,
+    QuestContext,
     Message,
     TextBlock,
     ToolResultBlock,
@@ -79,7 +79,7 @@ def _live_inv(tmp_path: Path) -> AgentInvocation:
         # Ignored on the resume path (the runner uses the seeded transcript); a
         # required field, so a placeholder turn.
         initial_messages=(Message(role="user", content=(TextBlock(text="go"),)),),
-        change_context=ChangeContext(
+        quest_context=QuestContext(
             title="Test", project_root=tmp_path,
             workflow_dir=tmp_path / ".imp" / "change" / "workflow",
         ),
@@ -122,7 +122,7 @@ async def test_send_to_llm_store_backed_native_resume(
     # stream-json replay).
     inv = replace(inv, balance_on_resume=True)
     inv.transcript_dir.mkdir(parents=True, exist_ok=True)
-    skey = session_key(inv.change_context.project_root, "step:p/s")
+    skey = session_key(inv.quest_context.project_root, "step:p/s")
     store = session_store_for(inv.transcript_dir)
 
     # Transcript ends on a balanced user tool_result → SEND_TO_LLM.
@@ -207,7 +207,7 @@ async def test_dangling_tool_use_store_backed_native_resume(
     # stream-json replay).
     inv = replace(inv, balance_on_resume=True)
     inv.transcript_dir.mkdir(parents=True, exist_ok=True)
-    skey = session_key(inv.change_context.project_root, "step:p/s")
+    skey = session_key(inv.quest_context.project_root, "step:p/s")
     store = session_store_for(inv.transcript_dir)
 
     # Tail: a balanced read (t0) then an interrupted, unmatched tool_use (t1)
@@ -298,7 +298,7 @@ def _corrective_live_inv(tmp_path: Path) -> AgentInvocation:
             "status=Success now."
         ),
         initial_messages=(Message(role="user", content=(TextBlock(text="go"),)),),
-        change_context=ChangeContext(
+        quest_context=QuestContext(
             title="Test", project_root=tmp_path,
             workflow_dir=tmp_path / ".imp" / "change" / "workflow",
         ),
@@ -327,7 +327,7 @@ async def test_complete_step_handback_native_resume(
     inv = replace(inv, balance_on_resume=True,
                   retry_feedback="REVISE: confirm the work is done, then finish.")
     inv.transcript_dir.mkdir(parents=True, exist_ok=True)
-    skey = session_key(inv.change_context.project_root, "step:p/s")
+    skey = session_key(inv.quest_context.project_root, "step:p/s")
     store = session_store_for(inv.transcript_dir)
 
     # Transcript ends on a SUCCESSFUL complete_step tool_use (no result).
@@ -410,7 +410,7 @@ async def test_step_completed_native_resume_redrives_with_feedback(
             "Your recorded outcome needs revision. Call complete_step with "
             "status=Success now to re-record it; do not read any file."))
     inv.transcript_dir.mkdir(parents=True, exist_ok=True)
-    skey = session_key(inv.change_context.project_root, "step:p/s")
+    skey = session_key(inv.quest_context.project_root, "step:p/s")
     store = session_store_for(inv.transcript_dir)
 
     # Incident shape: resolved complete_step masked by one trailing prose turn.
@@ -493,7 +493,7 @@ async def test_midrun_interrupt_resume_continues_agent(
         inv, balance_on_resume=True, resume_should_continue=True,
         user_input_fn=_must_not_solicit)
     inv.transcript_dir.mkdir(parents=True, exist_ok=True)
-    skey = session_key(inv.change_context.project_root, "step:p/s")
+    skey = session_key(inv.quest_context.project_root, "step:p/s")
     store = session_store_for(inv.transcript_dir)
 
     # Bare-turn-end tail: a.txt was read and its result recorded, then the agent

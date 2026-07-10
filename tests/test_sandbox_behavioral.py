@@ -23,7 +23,7 @@ import anyio
 import pytest
 
 import imp.agents.tools.bash  # noqa: F401 — registers the tool
-from imp.agents.runner import ChangeContext
+from imp.agents.runner import QuestContext
 from imp.agents.tools import get_registry
 from imp.agents.tools.context import ToolContext
 from imp.engine import worktree as wt
@@ -92,7 +92,7 @@ def _ctx(worktree: Path, policy: SandboxPolicy) -> ToolContext:
         project_root=worktree,
         events_path=worktree / "events.jsonl",
     )
-    ctx.change_context = ChangeContext(
+    ctx.quest_context = QuestContext(
         title="Test",
         project_root=worktree,
         workflow_dir=worktree / ".imp" / "wf",
@@ -382,7 +382,7 @@ def test_gate_sees_post_rename_title_not_frozen_empty() -> None:
 
 def test_bash_tool_uses_live_quest_title_not_stale_snapshot() -> None:
     """Regression: the bash tool must read IMP_CHANGE_TITLE from the LIVE Change, not
-    the frozen change_context snapshot that rename_change never updates. Without the
+    the frozen quest_context snapshot that rename_change never updates. Without the
     fix the agent's own bash sees the empty name-on-intent title inside the sandbox.
     """
     import types as _t
@@ -391,9 +391,9 @@ def test_bash_tool_uses_live_quest_title_not_stale_snapshot() -> None:
     try:
         pol = _active_policy(root)
         ctx = _ctx(root, pol)
-        # change_context = the pre-rename snapshot (empty title); ctx.change = the
+        # quest_context = the pre-rename snapshot (empty title); ctx.change = the
         # live, renamed Change. The bash tool must prefer the live one.
-        ctx.change_context = ChangeContext(
+        ctx.quest_context = QuestContext(
             id="2026-06-10-x", title="",
             project_root=root, workflow_dir=root / ".imp" / "wf")
         ctx.change = _t.SimpleNamespace(
@@ -452,7 +452,7 @@ def test_git_commit_works_but_escape_vectors_blocked() -> None:
             project_root=wt_path,
             events_path=wt_path / "events.jsonl",
         )
-        ctx.change_context = ChangeContext(
+        ctx.quest_context = QuestContext(
             title="Escape Test",
             project_root=wt_path,
             workflow_dir=wt_path / ".imp" / "wf",
@@ -622,7 +622,7 @@ def _refprot_ctx(control: Path, worktree: Path) -> tuple[ToolContext, SandboxPol
     )
     ctx = ToolContext(
         project_root=worktree, events_path=worktree / "events.jsonl")
-    ctx.change_context = ChangeContext(
+    ctx.quest_context = QuestContext(
         title="Ref Test", project_root=worktree,
         workflow_dir=worktree / ".imp" / "wf")
     ctx.sandbox_policy = pol

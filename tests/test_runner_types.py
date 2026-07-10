@@ -61,7 +61,7 @@ def test_round_trip_tool_use_and_result() -> None:
 def test_agent_invocation_audit_fields_default_safely(tmp_path) -> None:
     from imp.agents.runner import (
         AgentInvocation,
-        ChangeContext,
+        QuestContext,
         Message,
         TextBlock,
     )
@@ -78,7 +78,7 @@ def test_agent_invocation_audit_fields_default_safely(tmp_path) -> None:
             source=SourceLoc(file=Path("a.md"), line=1)),
         provider_name="anthropic", model_name="m", system_prompt="s",
         initial_messages=(Message(role="user", content=(TextBlock(text="x"),)),),
-        change_context=ChangeContext(title="Test", project_root=tmp_path,
+        quest_context=QuestContext(title="Test", project_root=tmp_path,
                                      workflow_dir=tmp_path / ".imp" / "change" / "workflow"),
         transcript_dir=tmp_path,
         events_path=tmp_path / "events.jsonl",
@@ -91,7 +91,7 @@ def test_agent_invocation_audit_fields_default_safely(tmp_path) -> None:
 def test_agent_invocation_has_continuation_fn_default_none() -> None:
     from pathlib import Path
 
-    from imp.agents.runner import AgentInvocation, ChangeContext, Message, TextBlock
+    from imp.agents.runner import AgentInvocation, QuestContext, Message, TextBlock
     from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
 
     schema = OutputSchema(
@@ -108,7 +108,7 @@ def test_agent_invocation_has_continuation_fn_default_none() -> None:
         agent_def=agent_def, provider_name="anthropic", model_name="m",
         system_prompt="x",
         initial_messages=(Message(role="user", content=(TextBlock(text="go"),)),),
-        change_context=ChangeContext(title="Test", project_root=Path("."),
+        quest_context=QuestContext(title="Test", project_root=Path("."),
                                      workflow_dir=Path(".") / ".imp" / "change" / "workflow"),
         transcript_dir=Path("."),
 events_path=Path("e.jsonl"),
@@ -120,7 +120,7 @@ events_path=Path("e.jsonl"),
         agent_def=agent_def, provider_name="anthropic", model_name="m",
         system_prompt="x",
         initial_messages=(Message(role="user", content=(TextBlock(text="go"),)),),
-        change_context=ChangeContext(title="Test", project_root=Path("."),
+        quest_context=QuestContext(title="Test", project_root=Path("."),
                                      workflow_dir=Path(".") / ".imp" / "change" / "workflow"),
         transcript_dir=Path("."),
 events_path=Path("e.jsonl"),
@@ -152,7 +152,7 @@ def test_agent_invocation_has_tiers_field() -> None:
 def test_agent_invocation_resolved_tiers_defaults_none():
     from pathlib import Path
 
-    from imp.agents.runner import AgentInvocation, ChangeContext
+    from imp.agents.runner import AgentInvocation, QuestContext
     from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
     a = AgentDef(
         name="x", description="", tools=frozenset(), subagents=(),
@@ -165,7 +165,7 @@ def test_agent_invocation_resolved_tiers_defaults_none():
     inv = AgentInvocation(
         agent_def=a, provider_name="p", model_name="m", system_prompt="",
         initial_messages=(),
-        change_context=ChangeContext(title="x", project_root=Path("."),
+        quest_context=QuestContext(title="x", project_root=Path("."),
                                      workflow_dir=Path(".") / ".imp" / "change" / "workflow"),
         transcript_dir=Path("."),
         events_path=Path("e.jsonl"))

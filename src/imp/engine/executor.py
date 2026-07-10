@@ -28,7 +28,7 @@ import anyio
 
 from imp.agents.prompts import build_context, render_label, render_prompt
 from imp.agents.runner import (
-    ChangeContext,
+    QuestContext,
     Message,
 )
 from imp.agents.skills import overlay_project_skills
@@ -1565,7 +1565,7 @@ async def _run_agent_invocation(
         rendered_persona=rendered_persona,
         system_prompt_override=system_prompt_override,
         initial_messages=initial_messages,
-        change_context=ChangeContext(
+        quest_context=QuestContext(
             id=change.id, title=change.title,
             quest_home=f".imp/changes/{change.id}",
             project_root=change.project_root, workflow_dir=change.workflow_dir,

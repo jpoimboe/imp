@@ -23,7 +23,7 @@ from typing import Any
 
 import pytest
 
-from imp.agents.runner import AgentInvocation, ChangeContext
+from imp.agents.runner import AgentInvocation, QuestContext
 from imp.engine.awaiting_user_input import AwaitingUserInput
 from imp.engine.completion import build_continuation_fn
 from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
@@ -76,7 +76,7 @@ def _inv(tmp_path: Path) -> AgentInvocation:
             "any other tools and do not write any files."
         ),
         initial_messages=(),
-        change_context=ChangeContext(
+        quest_context=QuestContext(
             title="t", project_root=tmp_path,
             workflow_dir=tmp_path, id="c1",
         ),

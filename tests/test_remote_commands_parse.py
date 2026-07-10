@@ -21,7 +21,7 @@ from imp.remote.daemon.commands import (
     Search,
     parse,
 )
-from imp.remote.daemon.discover import ChangeInfo
+from imp.remote.daemon.discover import QuestInfo
 from imp.remote.daemon.telegram_adapter import parse_handle
 
 # A fake resolve_lookup: reply_to 42 -> change A; @good -> change B; else unresolved.
@@ -134,7 +134,7 @@ def test_slash_save_untargeted_carries_no_quest_id() -> None:
 
 
 def test_listresult_defaults_resident_to_empty_frozenset() -> None:
-    result = ListResult([ChangeInfo(id="a", title="A", status="running", step="plan")])
+    result = ListResult([QuestInfo(id="a", title="A", status="running", step="plan")])
     assert result.resident == frozenset()
 
 

@@ -37,7 +37,7 @@ def _channel(write_fd: int, *, events: tuple[str, ...]) -> RemoteChannel:
     return ch
 
 
-def test_on_event_writes_ndjson_with_change_context() -> None:
+def test_on_event_writes_ndjson_with_quest_context() -> None:
     r, w = os.pipe()
     ch = _channel(w, events=("all",))
     ch.on_event({"id": "ev1", "type": "agent_output",

@@ -1,6 +1,6 @@
 """OpenAI prompt-cache key is keyed on the immutable id, so a mid-run title
 rename does NOT rotate the key (spec §9, AC 10). The test varies the title
-across two ChangeContexts sharing one id and shows the id-derived key is stable
+across two QuestContexts sharing one id and shows the id-derived key is stable
 while a slug-derived key would NOT be — guarding the keying *choice*, not just
 the helper's purity."""
 
@@ -8,12 +8,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from imp.agents.runner import ChangeContext
+from imp.agents.runner import QuestContext
 from imp.providers.openai import _prompt_cache_key
 
 
-def _cc(title: str) -> ChangeContext:
-    return ChangeContext(
+def _cc(title: str) -> QuestContext:
+    return QuestContext(
         id="fff666", title=title,
         project_root=Path("/wt"), workflow_dir=Path("/wt/.imp/change/workflow"),
     )

@@ -7,7 +7,7 @@ from pathlib import Path
 import anyio
 import pytest
 
-from imp.agents.runner import ChangeContext
+from imp.agents.runner import QuestContext
 from imp.agents.subagents import dispatch_task
 from imp.agents.tools.context import ToolContext
 from imp.cli.signals import InterruptCoordinator
@@ -75,7 +75,7 @@ def _ctx(tmp_path: Path, change: Change, *, name: str, agent: AgentDef,
     ctx.parent_transcript_dir = tmp_path / "steps" / "p" / "s"
     ctx.coordinator = InterruptCoordinator()
     ctx.change = change
-    ctx.change_context = ChangeContext(
+    ctx.quest_context = QuestContext(
         id=change.id, title=change.title, project_root=change.project_root,
         quest_home=f".imp/changes/{change.id}",
         workflow_dir=change.workflow_dir)
@@ -102,7 +102,7 @@ def test_isolated_dispatch_runs_in_throwaway_with_distinct_policy(
     inv = capture["inv"]
     throwaway = (tmp_path / ".imp" / "worktrees" / "spike-prb001-1").resolve()
     # the subagent's working root is the disposable worktree
-    assert inv.change_context.project_root == throwaway
+    assert inv.quest_context.project_root == throwaway
     pol = inv.sandbox_policy
     assert pol.network is True
     assert pol.worktree == str(throwaway)
@@ -122,9 +122,9 @@ def test_isolated_dispatch_parks_artifact_surviving_teardown(
     seen: dict = {}
 
     def _park(inv) -> None:
-        seen["root"] = inv.change_context.project_root
+        seen["root"] = inv.quest_context.project_root
         # write through the planted change-home symlink inside the throwaway
-        home = inv.change_context.project_root / ".imp" / "changes" / change.id
+        home = inv.quest_context.project_root / ".imp" / "changes" / change.id
         dest = home / "artifacts" / "spike" / "finding.md"
         dest.parent.mkdir(parents=True, exist_ok=True)
         dest.write_text("empirical result: 42\n")
@@ -193,7 +193,7 @@ def test_non_isolated_subagent_inherits_parent_policy(tmp_path: Path) -> None:
 
     inv = capture["inv"]
     assert inv.sandbox_policy is sentinel                 # inherited unchanged
-    assert inv.change_context.project_root == change.project_root
+    assert inv.quest_context.project_root == change.project_root
     # no spike worktree was ever created
     assert list((tmp_path / ".imp" / "worktrees").glob("spike-*")) == []
 
@@ -225,7 +225,7 @@ def test_inactive_spike_policy_emits_sandbox_inactive_event(
     assert sandbox_events[0]["agent_id"] == "prober"
 
 
-def test_isolated_dispatch_without_change_context_raises(tmp_path: Path) -> None:
+def test_isolated_dispatch_without_quest_context_raises(tmp_path: Path) -> None:
     ctx = ToolContext(project_root=tmp_path, events_path=tmp_path / "e.jsonl")
     ctx.subagent_defs = {"prober": _isolated_agent("prober")}
     ctx.provider_name = "anthropic"
@@ -233,7 +233,7 @@ def test_isolated_dispatch_without_change_context_raises(tmp_path: Path) -> None
     ctx.parent_transcript_dir = tmp_path / "steps" / "p" / "s"
     ctx.coordinator = InterruptCoordinator()
     ctx.change = None                                     # nested-dispatch shape
-    ctx.change_context = ChangeContext(
+    ctx.quest_context = QuestContext(
         id="x", title="X", project_root=tmp_path, workflow_dir=tmp_path / "wf")
     ctx.spawn_subagent = _spawn([{"type": "agent_output", "payload": {"text": "ok"}}])
 

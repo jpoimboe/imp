@@ -23,7 +23,7 @@ from imp.remote.daemon.commands import (
     Subscribe,
     Unsubscribe,
 )
-from imp.remote.daemon.discover import ChangeInfo
+from imp.remote.daemon.discover import QuestInfo
 from imp.remote.daemon.runner import _dispatch_inbound, _handle_command
 from imp.remote.daemon.subscriptions import Subscriptions
 
@@ -35,7 +35,7 @@ def anyio_backend() -> str:
 
 class FakeControl:
     def __init__(
-        self, changes: list[ChangeInfo] | None = None, *, abandon_rc: int = 0,
+        self, changes: list[QuestInfo] | None = None, *, abandon_rc: int = 0,
         snapshots: dict | None = None, narratives: dict | None = None,
         resident: frozenset[str] | None = None,
     ) -> None:
@@ -70,7 +70,7 @@ class FakeControl:
         self.abandoned.append(quest_id)
         return self._abandon_rc
 
-    def list_changes(self) -> list[ChangeInfo]:
+    def list_quests(self) -> list[QuestInfo]:
         return self._changes
 
     def resident_ids(self) -> frozenset[str]:
@@ -120,7 +120,7 @@ async def test_abandon_running_change_enqueues_still_running_notice() -> None:
 
 @pytest.mark.anyio
 async def test_listchanges_calls_list_and_enqueues_a_listresult() -> None:
-    rows = [ChangeInfo(id="aaaaaa", title="T", status="running", step="plan")]
+    rows = [QuestInfo(id="aaaaaa", title="T", status="running", step="plan")]
     control = FakeControl(changes=rows, resident=frozenset({"aaaaaa"}))
     responses: queue.Queue = queue.Queue()
     await _handle_command(ListChanges(), control, responses)
@@ -337,8 +337,8 @@ async def test_alerts_bare_reports_on_state() -> None:
 @pytest.mark.anyio
 async def test_alerts_on_with_parked_changes_sends_only_confirmation() -> None:
     rows = [
-        ChangeInfo(id="aaaaaa", title="Alpha", status="paused", step="plan"),
-        ChangeInfo(id="cccccc", title="Gamma", status="merge_blocked", step="finalize"),
+        QuestInfo(id="aaaaaa", title="Alpha", status="paused", step="plan"),
+        QuestInfo(id="cccccc", title="Gamma", status="merge_blocked", step="finalize"),
     ]
     control = FakeControl(changes=rows)
     responses: queue.Queue = queue.Queue()
@@ -352,7 +352,7 @@ async def test_alerts_on_with_parked_changes_sends_only_confirmation() -> None:
 
 @pytest.mark.anyio
 async def test_alerts_on_with_no_parked_changes_sends_only_confirmation() -> None:
-    rows = [ChangeInfo(id="bbbbbb", title="Beta", status="running", step="implement")]
+    rows = [QuestInfo(id="bbbbbb", title="Beta", status="running", step="implement")]
     control = FakeControl(changes=rows)
     responses: queue.Queue = queue.Queue()
     await _handle_command(Alerts(True), control, responses, AlertAll())

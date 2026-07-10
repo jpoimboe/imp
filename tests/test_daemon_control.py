@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 
 from imp.remote.daemon.control import ControlPlane
-from imp.remote.daemon.discover import ChangeInfo
+from imp.remote.daemon.discover import QuestInfo
 from imp.remote.daemon.subscriptions import Subscriptions
 
 
@@ -11,7 +11,7 @@ async def _noop_deliver(cid: str, text: str) -> None: ...
 
 
 def _plane(*, delivered: list, created: list, abandoned: list,
-           infos: list[ChangeInfo], abandon_rc: int = 0) -> ControlPlane:
+           infos: list[QuestInfo], abandon_rc: int = 0) -> ControlPlane:
     def _abandon(cid: str) -> int:
         abandoned.append(cid)
         return abandon_rc
@@ -23,7 +23,7 @@ def _plane(*, delivered: list, created: list, abandoned: list,
         deliver=_deliver,
         create=lambda prompt: created.append(prompt),
         abandon=_abandon,
-        list_changes=lambda: infos,
+        list_quests=lambda: infos,
         subscriptions=Subscriptions(),
         snapshot=lambda cid: None,
         recent_narrative=lambda cid, n: [])
@@ -58,16 +58,16 @@ def test_abandon_targets_the_change_and_returns_exit_code() -> None:
 
 
 def test_list_returns_the_enumerated_changes() -> None:
-    infos = [ChangeInfo(id="a", title="A", status="running", step="plan")]
+    infos = [QuestInfo(id="a", title="A", status="running", step="plan")]
     plane = _plane(delivered=[], created=[], abandoned=[], infos=infos)
-    assert plane.list_changes() == infos
+    assert plane.list_quests() == infos
 
 
 def test_subscriptions_is_exposed_for_the_gate_and_handlers() -> None:
     subs = Subscriptions()
     plane = ControlPlane(
         deliver=_noop_deliver, create=lambda prompt: None, abandon=lambda cid: 0,
-        list_changes=lambda: [], subscriptions=subs,
+        list_quests=lambda: [], subscriptions=subs,
         snapshot=lambda cid: None, recent_narrative=lambda cid, n: [])
     assert plane.subscriptions is subs
 
@@ -79,7 +79,7 @@ def test_full_history_delegates_to_the_wired_callable() -> None:
         deliver=_noop_deliver,
         create=lambda prompt: None,
         abandon=lambda cid: 0,
-        list_changes=lambda: [],
+        list_quests=lambda: [],
         subscriptions=Subscriptions(),
         snapshot=lambda cid: None,
         recent_narrative=lambda cid, n: [],
@@ -92,7 +92,7 @@ def test_resident_ids_delegates_to_the_wired_callable() -> None:
     calls: list[int] = []
     plane = ControlPlane(
         deliver=_noop_deliver, create=lambda prompt: None, abandon=lambda cid: 0,
-        list_changes=lambda: [], subscriptions=Subscriptions(),
+        list_quests=lambda: [], subscriptions=Subscriptions(),
         snapshot=lambda cid: None, recent_narrative=lambda cid, n: [],
         resident_ids=lambda: (calls.append(1) or frozenset({"x"})))
     assert plane.resident_ids() == frozenset({"x"})

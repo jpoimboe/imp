@@ -16,7 +16,7 @@ from typing import Any
 
 import pytest
 
-from imp.agents.runner import AgentInvocation, ChangeContext, Message, TextBlock
+from imp.agents.runner import AgentInvocation, QuestContext, Message, TextBlock
 from imp.agents.tools import get_registry  # noqa: F401
 from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
 from imp.providers.anthropic import AnthropicAgentRunner
@@ -76,7 +76,7 @@ def _shared_invocation(tmp_path: Path, provider_name: str, model: str) -> AgentI
         provider_name=provider_name, model_name=model,
         system_prompt="be terse",
         initial_messages=(Message(role="user", content=(TextBlock(text="go"),)),),
-        change_context=ChangeContext(
+        quest_context=QuestContext(
             title="Test", project_root=tmp_path,
             workflow_dir=tmp_path / ".imp" / "change" / "workflow",
         ),

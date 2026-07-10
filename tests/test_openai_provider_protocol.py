@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from imp.agents.runner import AgentInvocation, AgentRunner, ChangeContext, Message, TextBlock
+from imp.agents.runner import AgentInvocation, AgentRunner, QuestContext, Message, TextBlock
 from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
 from imp.providers.base import Provider
 from imp.providers.openai import OpenAIAgentRunner, OpenAIProvider
@@ -32,7 +32,7 @@ def _inv(tmp_path: Path) -> AgentInvocation:
         provider_name="openai", model_name="gpt-4o-mini",
         system_prompt="hi",
         initial_messages=(Message(role="user", content=(TextBlock(text="go"),)),),
-        change_context=ChangeContext(title="Test", project_root=tmp_path,
+        quest_context=QuestContext(title="Test", project_root=tmp_path,
                                      workflow_dir=tmp_path / ".imp" / "change" / "workflow"),
         transcript_dir=tmp_path / "s",
 events_path=tmp_path / "events.jsonl",

@@ -4,7 +4,7 @@ import re
 from pathlib import Path
 
 from imp.agents.reflow import reflow_markdown
-from imp.agents.runner import ChangeContext
+from imp.agents.runner import QuestContext
 from imp.engine.agent_run import _CORE_HEAD, _CORE_TAIL, build_agent_invocation
 from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
 
@@ -26,7 +26,7 @@ def _build(tmp_path: Path, *, name: str, body: str):
     return build_agent_invocation(
         agent_def=_agent(name=name), provider_name="anthropic", model_name="m",
         rendered_system_prompt=body, initial_messages=(),
-        change_context=ChangeContext(title="t", project_root=tmp_path,
+        quest_context=QuestContext(title="t", project_root=tmp_path,
                                      workflow_dir=tmp_path / "wf"),
         user_chat_input_fn=None, transcript_dir=tmp_path / "td",
 events_path=tmp_path / "e.jsonl", subagent_defs={},

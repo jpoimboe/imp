@@ -18,7 +18,7 @@ from typing import Any, cast
 
 from imp.agents.parallel import emit_parallelism_warning_once
 from imp.agents.prompts import build_context, render_prompt
-from imp.agents.runner import ChangeContext, Message, TextBlock
+from imp.agents.runner import QuestContext, Message, TextBlock
 from imp.agents.tools import Tool
 from imp.agents.tools.context import ToolContext
 from imp.agents.transcript import Transcript
@@ -246,7 +246,7 @@ async def dispatch_task(
         else:
             dispatch_policy = ctx.sandbox_policy
 
-        cc = ctx.change_context or ChangeContext(
+        cc = ctx.quest_context or QuestContext(
             id="", title="", project_root=ctx.project_root,
             # No change context -> no quest_dir, no snapshot; live dir is the only option.
             workflow_dir=resolve_workflow_dir(
@@ -319,7 +319,7 @@ async def dispatch_task(
                 rendered_system_prompt=rendered_prompt,
                 rendered_persona=rendered_persona,
                 initial_messages=init_msgs,
-                change_context=cc,
+                quest_context=cc,
                 user_chat_input_fn=None,
                 transcript_dir=target,
                 events_path=ctx.events_path,

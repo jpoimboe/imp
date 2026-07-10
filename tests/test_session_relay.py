@@ -16,7 +16,7 @@ def anyio_backend() -> str:
 
 
 @pytest.mark.anyio
-async def test_relay_forwards_curated_events_with_change_context(
+async def test_relay_forwards_curated_events_with_quest_context(
     tmp_path: Path,
 ) -> None:
     sock = str(tmp_path / "s.sock")

@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from imp.agents.runner import AgentInvocation, ChangeContext, Message, TextBlock
+from imp.agents.runner import AgentInvocation, QuestContext, Message, TextBlock
 from imp.engine.completion import build_continuation_fn
 from imp.engine.state import InMemoryEventLog
 from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
@@ -38,7 +38,7 @@ def _inv(tmp_path: Path, *, event_log, user_input_fn) -> AgentInvocation:
         provider_name="scripted", model_name="x",
         system_prompt="be terse",
         initial_messages=(Message(role="user", content=(TextBlock(text="go"),)),),
-        change_context=ChangeContext(
+        quest_context=QuestContext(
             title="Test", project_root=tmp_path,
             workflow_dir=tmp_path / ".imp" / "change" / "workflow"),
         transcript_dir=tmp_path / "step",
@@ -107,7 +107,7 @@ async def test_scripted_bare_turn_end_noop_without_continuation_fn(
         provider_name="scripted", model_name="x",
         system_prompt="be terse",
         initial_messages=(Message(role="user", content=(TextBlock(text="go"),)),),
-        change_context=ChangeContext(
+        quest_context=QuestContext(
             title="Test", project_root=tmp_path,
             workflow_dir=tmp_path / ".imp" / "change" / "workflow"),
         transcript_dir=tmp_path / "step",

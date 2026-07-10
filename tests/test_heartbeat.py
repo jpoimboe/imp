@@ -16,7 +16,7 @@ import pytest
 
 from imp.agents.runner import (
     AgentInvocation,
-    ChangeContext,
+    QuestContext,
     Message,
     TextBlock,
 )
@@ -55,7 +55,7 @@ def _inv(tmp_path: Path, tools, *, event_log=None, max_tool_calls=None,
         provider_name="anthropic", model_name="m",
         system_prompt="be terse",
         initial_messages=(Message(role="user", content=(TextBlock(text="go"),)),),
-        change_context=ChangeContext(
+        quest_context=QuestContext(
             title="Test", project_root=tmp_path,
             workflow_dir=tmp_path / ".imp" / "change" / "workflow"),
         transcript_dir=tmp_path / transcript_dir,

@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from imp.agents.runner import AgentInvocation, ChangeContext
+from imp.agents.runner import AgentInvocation, QuestContext
 from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
 from imp.providers import resolve
 
@@ -63,7 +63,7 @@ def _inv(provider, model, tmp_path):
     return AgentInvocation(
         agent_def=_agent("rev"), provider_name=provider, model_name=model,
         system_prompt="", initial_messages=(),
-        change_context=ChangeContext(
+        quest_context=QuestContext(
             tmp_path, tmp_path, tmp_path / ".imp" / "change" / "workflow"),
         transcript_dir=tmp_path,
         events_path=tmp_path / "e.jsonl")
@@ -111,7 +111,7 @@ async def test_spawn_subagent_via_registry_returns_runner(tmp_path) -> None:
     inv = AgentInvocation(
         agent_def=agent, provider_name="fake", model_name="m",
         system_prompt="s", initial_messages=(),
-        change_context=ChangeContext(title="t",
+        quest_context=QuestContext(title="t",
                                      project_root=tmp_path,
                                      workflow_dir=tmp_path / "wf"),
         transcript_dir=tmp_path / "td",

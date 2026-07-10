@@ -6,7 +6,7 @@ from typing import Any
 
 import pytest
 
-from imp.agents.runner import AgentInvocation, ChangeContext
+from imp.agents.runner import AgentInvocation, QuestContext
 from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
 from imp.providers.codex_runner import CodexAgentRunner
 from tests.codex_fakes import (
@@ -58,7 +58,7 @@ def _build_invocation(tmp_path: Path) -> AgentInvocation:
         model_name="gpt-5.5",
         system_prompt="sp",
         initial_messages=(),
-        change_context=ChangeContext(
+        quest_context=QuestContext(
             title="t", project_root=tmp_path,
             workflow_dir=tmp_path, id="c1",
         ),

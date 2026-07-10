@@ -16,13 +16,13 @@ def test_resolve_project_path(tmp_path: Path) -> None:
     assert ctx.resolve_path("src/x.py") == (tmp_path / "src" / "x.py").resolve()
 
 
-def test_change_context_field(tmp_path: Path) -> None:
-    from imp.agents.runner import ChangeContext
+def test_quest_context_field(tmp_path: Path) -> None:
+    from imp.agents.runner import QuestContext
     ctx = _ctx(tmp_path)
-    assert ctx.change_context is None
-    ctx.change_context = ChangeContext(title="Test change", project_root=tmp_path,
+    assert ctx.quest_context is None
+    ctx.quest_context = QuestContext(title="Test change", project_root=tmp_path,
                                        workflow_dir=tmp_path / ".imp" / "change" / "workflow")
-    assert ctx.change_context.project_root == tmp_path
+    assert ctx.quest_context.project_root == tmp_path
 
 
 def _ctx(tmp_path: Path) -> ToolContext:

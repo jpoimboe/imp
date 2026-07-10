@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from imp.agents.runner import AgentInvocation, ChangeContext, Message, TextBlock
+from imp.agents.runner import AgentInvocation, QuestContext, Message, TextBlock
 from imp.engine.reincarnation import handoff_path_for
 from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
 from imp.providers.anthropic import AnthropicAgentRunner
@@ -33,7 +33,7 @@ def _invocation(tmp_path: Path, *, threshold: float | int | None) -> AgentInvoca
         provider_name="anthropic", model_name="sonnet",
         system_prompt="be terse",
         initial_messages=(Message(role="user", content=(TextBlock(text="go"),)),),
-        change_context=ChangeContext(title="T", project_root=tmp_path,
+        quest_context=QuestContext(title="T", project_root=tmp_path,
                                      workflow_dir=tmp_path / "wf"),
         transcript_dir=tmp_path / "step",
         events_path=tmp_path / "events.jsonl",

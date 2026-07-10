@@ -3,7 +3,7 @@ from __future__ import annotations
 from imp.remote.curate import EventCurator
 
 
-def test_curate_augments_allowed_event_with_change_context() -> None:
+def test_curate_augments_allowed_event_with_quest_context() -> None:
     curator = EventCurator(
         id="cid", title_provider=lambda: "My Change", events=("all",))
     out = curator.curate(

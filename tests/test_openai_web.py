@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from imp.agents.runner import AgentInvocation, ChangeContext, Message, TextBlock
+from imp.agents.runner import AgentInvocation, QuestContext, Message, TextBlock
 from imp.agents.tools import get_registry  # noqa: F401 ensures tools registered
 from imp.engine.state import InMemoryEventLog
 from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
@@ -72,7 +72,7 @@ def _web_inv(tmp_path: Path, *, event_log=None) -> AgentInvocation:
         provider_name="openai", model_name="gpt-4o-mini",
         system_prompt="be terse",
         initial_messages=(Message(role="user", content=(TextBlock(text="go"),)),),
-        change_context=ChangeContext(
+        quest_context=QuestContext(
             title="Test", project_root=tmp_path,
             workflow_dir=tmp_path / ".imp" / "change" / "workflow",
         ),

@@ -11,7 +11,7 @@ import anyio
 import pytest
 
 import imp.agents.tools.bash  # noqa: F401  (registers bash + bg builtins)
-from imp.agents.runner import ChangeContext
+from imp.agents.runner import QuestContext
 from imp.agents.tools import get_registry
 from imp.agents.tools.context import ToolContext
 
@@ -22,7 +22,7 @@ def _ctx(tmp_path: Path, agent_id: str = "step:t/coder") -> ToolContext:
     ctx = ToolContext(project_root=tmp_path,
                       events_path=run_dir / "events.jsonl", agent_id=agent_id,
                       background_enabled=True)
-    ctx.change_context = ChangeContext(
+    ctx.quest_context = QuestContext(
         title="T", project_root=tmp_path,
         workflow_dir=tmp_path / ".imp" / "change" / "workflow")
     return ctx

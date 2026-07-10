@@ -44,7 +44,7 @@ async def test_anthropic_resume_entry_drain_before_first_send(tmp_path: Path) ->
     call, not one turn late."""
     from imp.agents.runner import (
         AgentInvocation,
-        ChangeContext,
+        QuestContext,
         Message,
         TextBlock,
         ToolResultBlock,
@@ -121,7 +121,7 @@ async def test_anthropic_resume_entry_drain_before_first_send(tmp_path: Path) ->
         model_name="claude-sonnet-4-6",
         system_prompt="be terse",
         initial_messages=(Message(role="user", content=(TextBlock(text="go"),)),),
-        change_context=ChangeContext(
+        quest_context=QuestContext(
             title="Test", project_root=tmp_path,
             workflow_dir=tmp_path / ".imp" / "change" / "workflow",
         ),
@@ -182,7 +182,7 @@ async def test_openai_resume_entry_drain_before_first_send(tmp_path: Path) -> No
     call, not one turn late."""
     from imp.agents.runner import (
         AgentInvocation,
-        ChangeContext,
+        QuestContext,
         Message,
         TextBlock,
         ToolResultBlock,
@@ -260,7 +260,7 @@ async def test_openai_resume_entry_drain_before_first_send(tmp_path: Path) -> No
         model_name="gpt-4o-mini",
         system_prompt="be terse",
         initial_messages=(Message(role="user", content=(TextBlock(text="go"),)),),
-        change_context=ChangeContext(
+        quest_context=QuestContext(
             title="Test", project_root=tmp_path,
             workflow_dir=tmp_path / ".imp" / "change" / "workflow",
         ),
@@ -321,7 +321,7 @@ async def test_claude_code_resume_entry_drain_before_first_query(
 
     from imp.agents.runner import (
         AgentInvocation,
-        ChangeContext,
+        QuestContext,
         Message,
         TextBlock,
         ToolResultBlock,
@@ -417,7 +417,7 @@ async def test_claude_code_resume_entry_drain_before_first_query(
         model_name="claude-sonnet-4-5",
         system_prompt="be terse",
         initial_messages=(Message(role="user", content=(TextBlock(text="go"),)),),
-        change_context=ChangeContext(
+        quest_context=QuestContext(
             title="Test", project_root=tmp_path,
             workflow_dir=tmp_path / ".imp" / "change" / "workflow",
         ),
@@ -501,7 +501,7 @@ async def test_codex_resume_entry_drain_folds_into_first_prompt(
     import json
     import subprocess
 
-    from imp.agents.runner import AgentInvocation, ChangeContext
+    from imp.agents.runner import AgentInvocation, QuestContext
     from imp.engine.state import InMemoryEventLog
     from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
     from imp.providers.codex_runner import CodexAgentRunner
@@ -594,7 +594,7 @@ async def test_codex_resume_entry_drain_folds_into_first_prompt(
         model_name="gpt-5.5",
         system_prompt="be terse",
         initial_messages=(),
-        change_context=ChangeContext(
+        quest_context=QuestContext(
             title="t", project_root=tmp_path,
             workflow_dir=tmp_path, id="c1"),
         transcript_dir=tx,
@@ -681,7 +681,7 @@ async def test_anthropic_bare_turn_end_resume_joins_pending_interjects(
     NOT called."""
     from imp.agents.runner import (
         AgentInvocation,
-        ChangeContext,
+        QuestContext,
         Message,
         TextBlock,
     )
@@ -759,7 +759,7 @@ async def test_anthropic_bare_turn_end_resume_joins_pending_interjects(
         model_name="claude-sonnet-4-6",
         system_prompt="be terse",
         initial_messages=(Message(role="user", content=(TextBlock(text="go"),)),),
-        change_context=ChangeContext(
+        quest_context=QuestContext(
             title="Test", project_root=tmp_path,
             workflow_dir=tmp_path / ".imp" / "change" / "workflow",
         ),

@@ -31,7 +31,7 @@ from typing import Any
 import anyio
 
 from imp.agents.reflow import reflow_markdown
-from imp.agents.runner import AgentInvocation, ChangeContext, Message, TextBlock
+from imp.agents.runner import AgentInvocation, QuestContext, Message, TextBlock
 from imp.agents.tools.limits import (
     AGENT_INACTIVITY_TIMEOUT_S,
     PROCESS_KILL_GRACE_S,
@@ -523,7 +523,7 @@ def build_agent_invocation(
     rendered_persona: str = "",
     system_prompt_override: str | None = None,
     initial_messages: tuple[Message, ...],
-    change_context: ChangeContext,
+    quest_context: QuestContext,
     user_chat_input_fn: Callable[[str], str | Awaitable[str]] | None,
     transcript_dir: Path,
     events_path: Path,
@@ -576,7 +576,7 @@ def build_agent_invocation(
         # first user message replays from its logged user_message event.
         system_prompt = system_prompt_override
     else:
-        guidance_section = _compose_guidance_section(change_context.guidance)
+        guidance_section = _compose_guidance_section(quest_context.guidance)
         body_source = f"{guidance_section}{rendered_system_prompt}"
         persona = rendered_persona.strip("\n")
         if persona:
@@ -616,7 +616,7 @@ def build_agent_invocation(
         model_name=model_name,
         system_prompt=system_prompt,
         initial_messages=messages,
-        change_context=change_context,
+        quest_context=quest_context,
         transcript_dir=transcript_dir,
         events_path=events_path,
         subagent_defs=subagent_defs,

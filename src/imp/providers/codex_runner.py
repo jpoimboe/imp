@@ -260,7 +260,7 @@ class CodexAgentRunner:
 
         # 1. Preflight (auth / *-codex / non-git cwd) — raises PreflightError.
         canonical_auth = self._canonical_auth_path()
-        cwd = invocation.change_context.project_root
+        cwd = invocation.quest_context.project_root
         auth_mode = preflight(
             model=self.model, cwd=cwd, canonical_auth=canonical_auth,
             env=os.environ,
@@ -279,9 +279,9 @@ class CodexAgentRunner:
             parent_transcript_dir=invocation.transcript_dir,
             agent_id=aid,
             background_enabled=True,  # full bg surface wired: injection + sweeps + teardown
-            quest_home=quest_home_path(invocation.change_context.quest_home),
+            quest_home=quest_home_path(invocation.quest_context.quest_home),
         )
-        ctx.change_context = invocation.change_context
+        ctx.quest_context = invocation.quest_context
         ctx.change_state = invocation.change_state
         ctx.change = invocation.change          # live Change for rename_change
         ctx.spawn_subagent = spawn_subagent_via_registry

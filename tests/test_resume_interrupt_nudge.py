@@ -96,7 +96,7 @@ async def _run_anthropic(
     tmp_path: Path, *, resume_should_continue: bool, queued: list[str] | None,
     seed: Any = _seed_send_to_llm_transcript,
 ) -> list[str]:
-    from imp.agents.runner import AgentInvocation, ChangeContext, Message, TextBlock
+    from imp.agents.runner import AgentInvocation, QuestContext, Message, TextBlock
     from imp.agents.tools import get_registry  # noqa: F401 — ensures tools registered
     from imp.engine.state import InMemoryEventLog
     from imp.providers.anthropic import AnthropicAgentRunner
@@ -118,7 +118,7 @@ async def _run_anthropic(
         model_name="claude-sonnet-4-6",
         system_prompt="be terse",
         initial_messages=(Message(role="user", content=(TextBlock(text="go"),)),),
-        change_context=ChangeContext(
+        quest_context=QuestContext(
             title="Test", project_root=tmp_path,
             workflow_dir=tmp_path / ".imp" / "change" / "workflow",
         ),
@@ -179,7 +179,7 @@ async def test_anthropic_interject_wins_over_interrupt_nudge(
 async def test_claude_code_interrupt_resume_appends_continuation_nudge(
     tmp_path: Path,
 ) -> None:
-    from imp.agents.runner import AgentInvocation, ChangeContext, Message, TextBlock
+    from imp.agents.runner import AgentInvocation, QuestContext, Message, TextBlock
     from imp.agents.tools import get_registry  # noqa: F401 — ensures tools registered
     from imp.engine.state import InMemoryEventLog
     from imp.providers.claude_code import ClaudeCodeAgentRunner
@@ -214,7 +214,7 @@ async def test_claude_code_interrupt_resume_appends_continuation_nudge(
         model_name="claude-sonnet-4-5",
         system_prompt="be terse",
         initial_messages=(Message(role="user", content=(TextBlock(text="go"),)),),
-        change_context=ChangeContext(
+        quest_context=QuestContext(
             title="Test", project_root=tmp_path,
             workflow_dir=tmp_path / ".imp" / "change" / "workflow",
         ),
@@ -257,7 +257,7 @@ async def test_claude_code_interrupt_resume_appends_continuation_nudge(
 async def test_claude_code_pending_human_tail_suppresses_nudge(
     tmp_path: Path,
 ) -> None:
-    from imp.agents.runner import AgentInvocation, ChangeContext, Message, TextBlock
+    from imp.agents.runner import AgentInvocation, QuestContext, Message, TextBlock
     from imp.agents.tools import get_registry  # noqa: F401 — ensures tools registered
     from imp.engine.state import InMemoryEventLog
     from imp.providers.claude_code import ClaudeCodeAgentRunner
@@ -293,7 +293,7 @@ async def test_claude_code_pending_human_tail_suppresses_nudge(
         model_name="claude-sonnet-4-5",
         system_prompt="be terse",
         initial_messages=(Message(role="user", content=(TextBlock(text="go"),)),),
-        change_context=ChangeContext(
+        quest_context=QuestContext(
             title="Test", project_root=tmp_path,
             workflow_dir=tmp_path / ".imp" / "change" / "workflow",
         ),
@@ -351,7 +351,7 @@ async def _run_openai(
     tmp_path: Path, *, resume_should_continue: bool,
     seed: Any = _seed_send_to_llm_transcript,
 ) -> tuple[list[str], Any]:
-    from imp.agents.runner import AgentInvocation, ChangeContext, Message, TextBlock
+    from imp.agents.runner import AgentInvocation, QuestContext, Message, TextBlock
     from imp.agents.tools import get_registry  # noqa: F401 — ensures tools registered
     from imp.engine.state import InMemoryEventLog
     from imp.providers.openai import OpenAIAgentRunner
@@ -382,7 +382,7 @@ async def _run_openai(
         model_name="gpt-4o-mini",
         system_prompt="be terse",
         initial_messages=(Message(role="user", content=(TextBlock(text="go"),)),),
-        change_context=ChangeContext(
+        quest_context=QuestContext(
             title="Test", project_root=tmp_path,
             workflow_dir=tmp_path / ".imp" / "change" / "workflow",
         ),

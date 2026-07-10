@@ -4,7 +4,7 @@ from imp.agents.classify import ResumeState, classify_resume, count_tool_uses
 from imp.agents.runner import (
     AgentInvocation,
     AgentRunner,
-    ChangeContext,
+    QuestContext,
     ContentBlock,
     Event,
     Message,
@@ -17,7 +17,7 @@ from imp.agents.runner import (
 from imp.agents.transcript import Transcript
 
 __all__ = [
-    "AgentInvocation", "AgentRunner", "ChangeContext", "ContentBlock", "Event",
+    "AgentInvocation", "AgentRunner", "QuestContext", "ContentBlock", "Event",
     "Message", "ResumeState", "TextBlock", "ToolResultBlock", "ToolUseBlock",
     "Transcript", "classify_resume", "count_tool_uses",
     "message_from_json", "message_to_json",

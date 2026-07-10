@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from imp.agents.runner import AgentInvocation, ChangeContext, Message, TextBlock
+from imp.agents.runner import AgentInvocation, QuestContext, Message, TextBlock
 from imp.agents.subagents import dispatch_task, make_task_tool
 from imp.agents.tools.context import ToolContext
 from imp.cli.signals import InterruptCoordinator
@@ -45,7 +45,7 @@ def _sub_invocation(tmp_path: Path, *, event_log=None) -> AgentInvocation:
         provider_name="scripted", model_name="x",
         rendered_system_prompt="be terse",
         initial_messages=(Message(role="user", content=(TextBlock(text="go"),)),),
-        change_context=ChangeContext(
+        quest_context=QuestContext(
             title="Test", project_root=tmp_path,
             workflow_dir=tmp_path / ".imp" / "wf"),
         user_chat_input_fn=None,
@@ -173,7 +173,7 @@ async def test_dispatch_task_returns_raw_final_text(tmp_path: Path) -> None:
     ctx.model_name = "claude-sonnet-4-6"
     ctx.parent_transcript_dir = tmp_path / "steps/p/s"
     ctx.coordinator = InterruptCoordinator()
-    ctx.change_context = ChangeContext(
+    ctx.quest_context = QuestContext(
         id="c-1", title="C1", project_root=tmp_path,
         workflow_dir=tmp_path / ".imp" / "wf")
 

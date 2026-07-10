@@ -338,7 +338,7 @@ async def _handle_command(
                 f"@{handle} is still running — stop it first, then /abandon again."))
     elif isinstance(command, ListChanges):
         try:
-            changes = await anyio.to_thread.run_sync(control.list_changes)
+            changes = await anyio.to_thread.run_sync(control.list_quests)
             resident = await anyio.to_thread.run_sync(control.resident_ids)
             responses.put(ListResult(changes, resident))
         except Exception:
@@ -445,7 +445,7 @@ async def run_daemon(
     deliver: Callable[[str, str], Awaitable[None]] | None = None,
     create: Callable[[str], None] | None = None,
     abandon: Callable[[str], int] | None = None,
-    list_changes: Callable[[], list[discover.ChangeInfo]] | None = None,
+    list_quests: Callable[[], list[discover.QuestInfo]] | None = None,
     resident_ids: Callable[[], frozenset[str]] | None = None,
     search: Callable[[str], list[tuple[str, str, str, str]]] | None = None,
     resume: Callable[[str], str] | None = None,
@@ -459,7 +459,7 @@ async def run_daemon(
     deliver = deliver or (lambda cid, text: deliver_to_session(control_root, cid, text))
     create = create or (lambda prompt: spawn.create_change(control_root, prompt))
     abandon = abandon or (lambda cid: spawn.abandon_change(control_root, cid))
-    list_changes = list_changes or (lambda: discover.list_changes(control_root))
+    list_quests = list_quests or (lambda: discover.list_quests(control_root))
     resident_ids = resident_ids or (
         lambda: frozenset(resident_session_ids(control_root)))
     search = search or (lambda q: archive_read.search_archive(control_root, q))
@@ -487,7 +487,7 @@ async def run_daemon(
         subscriptions=subscriptions)
     control = ControlPlane(
         deliver=deliver, create=create,
-        abandon=abandon, list_changes=list_changes,
+        abandon=abandon, list_quests=list_quests,
         resident_ids=resident_ids,
         subscriptions=subscriptions,
         snapshot=lambda cid: discover.snapshot(control_root, cid),

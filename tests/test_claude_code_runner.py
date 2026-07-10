@@ -11,7 +11,7 @@ import pytest
 
 from imp.agents.runner import (
     AgentInvocation,
-    ChangeContext,
+    QuestContext,
     Message,
     TextBlock,
 )
@@ -80,7 +80,7 @@ def _inv(
         provider_name="claude_code", model_name="claude-sonnet-4-5",
         system_prompt="be terse",
         initial_messages=(Message(role="user", content=(TextBlock(text="go"),)),),
-        change_context=ChangeContext(
+        quest_context=QuestContext(
             title="Test", project_root=tmp_path,
             workflow_dir=tmp_path / ".imp" / "change" / "workflow",
         ),
@@ -1612,7 +1612,7 @@ async def test_resume_without_stored_session_passes_native_session_state(tmp_pat
     (tmp_path / "art").mkdir()
     inv = _inv(tmp_path, agent_id="step:p/s")
     inv.transcript_dir.mkdir(parents=True, exist_ok=True)
-    skey = session_key(inv.change_context.project_root, "step:p/s")
+    skey = session_key(inv.quest_context.project_root, "step:p/s")
     store = session_store_for(inv.transcript_dir)
     # No session store → reconstructs from the transcript and goes native.
 
@@ -1671,7 +1671,7 @@ async def test_native_resume_folds_mixed_tool_result_then_text_tail(
     (tmp_path / "art").mkdir()
     inv = _inv(tmp_path, agent_id="step:p/s")
     inv.transcript_dir.mkdir(parents=True, exist_ok=True)
-    skey = session_key(inv.change_context.project_root, "step:p/s")
+    skey = session_key(inv.quest_context.project_root, "step:p/s")
     store = session_store_for(inv.transcript_dir)
 
     t = Transcript(inv.transcript_dir / "transcript.jsonl")
@@ -1717,7 +1717,7 @@ async def test_native_resume_holds_back_plain_text_tail(tmp_path: Path) -> None:
     (tmp_path / "art").mkdir()
     inv = _inv(tmp_path, agent_id="step:p/s")
     inv.transcript_dir.mkdir(parents=True, exist_ok=True)
-    skey = session_key(inv.change_context.project_root, "step:p/s")
+    skey = session_key(inv.quest_context.project_root, "step:p/s")
     store = session_store_for(inv.transcript_dir)
 
     t = Transcript(inv.transcript_dir / "transcript.jsonl")
@@ -1758,7 +1758,7 @@ async def test_native_resume_folds_is_error_tool_result_tail(tmp_path: Path) -> 
     (tmp_path / "art").mkdir()
     inv = _inv(tmp_path, agent_id="step:p/s")
     inv.transcript_dir.mkdir(parents=True, exist_ok=True)
-    skey = session_key(inv.change_context.project_root, "step:p/s")
+    skey = session_key(inv.quest_context.project_root, "step:p/s")
     store = session_store_for(inv.transcript_dir)
 
     t = Transcript(inv.transcript_dir / "transcript.jsonl")
@@ -1900,7 +1900,7 @@ async def test_complete_step_tail_left_dangling_in_record_before_load(tmp_path: 
     from imp.providers.claude_code_session_store import session_key
 
     inv = _seed_complete_step_resume(tmp_path, retry_feedback="REVISE: rewrite plan.md")
-    skey = session_key(inv.change_context.project_root, "step:p/s")
+    skey = session_key(inv.quest_context.project_root, "step:p/s")
     store = session_store_for(inv.transcript_dir)
     scripted = [assistant(tool_use("c1", "complete_step", {"status": "Success"})), result()]
 
@@ -2110,7 +2110,7 @@ async def test_no_store_dangling_tail_injects_no_manifest(tmp_path: Path) -> Non
     (tmp_path / "art").mkdir()
     inv = _inv(tmp_path, agent_id="step:p/s")
     inv.transcript_dir.mkdir(parents=True, exist_ok=True)
-    skey = session_key(inv.change_context.project_root, "step:p/s")
+    skey = session_key(inv.quest_context.project_root, "step:p/s")
     store = session_store_for(inv.transcript_dir)
     t = Transcript(inv.transcript_dir / "transcript.jsonl")
     t.append(Message(role="user", content=(TextBlock(text="go"),)))
@@ -2184,7 +2184,7 @@ async def test_resume_with_stored_session_routes_native(tmp_path: Path) -> None:
     # A prior fresh run mirrored its session into the store under this step's key.
     store = session_store_for(inv.transcript_dir)
     await store.append(
-        session_key(inv.change_context.project_root, "step:p/s"),
+        session_key(inv.quest_context.project_root, "step:p/s"),
         [{"type": "user", "uuid": "m0",
           "message": {"role": "user", "content": "go"}}])
 
@@ -2239,7 +2239,7 @@ async def test_resume_without_stored_session_reconstructs_native(tmp_path: Path)
     (tmp_path / "art").mkdir()
     inv = _inv(tmp_path, agent_id="step:p/s")
     inv.transcript_dir.mkdir(parents=True, exist_ok=True)
-    skey = session_key(inv.change_context.project_root, "step:p/s")
+    skey = session_key(inv.quest_context.project_root, "step:p/s")
     store = session_store_for(inv.transcript_dir)
     # No session store pre-populated → reconstructs it from the transcript.
 
@@ -2300,7 +2300,7 @@ async def test_send_to_llm_resumes_natively(tmp_path: Path) -> None:
     (tmp_path / "art").mkdir()
     inv = _inv(tmp_path, agent_id="step:p/s")
     inv.transcript_dir.mkdir(parents=True, exist_ok=True)
-    skey = session_key(inv.change_context.project_root, "step:p/s")
+    skey = session_key(inv.quest_context.project_root, "step:p/s")
     store = session_store_for(inv.transcript_dir)
 
     msgs = [
@@ -2363,7 +2363,7 @@ async def test_dispatch_only_tail_selects_fresh_stream(tmp_path: Path) -> None:
     (tmp_path / "art").mkdir()
     inv = _inv(tmp_path, agent_id="step:p/s")
     inv.transcript_dir.mkdir(parents=True, exist_ok=True)
-    skey = session_key(inv.change_context.project_root, "step:p/s")
+    skey = session_key(inv.quest_context.project_root, "step:p/s")
     store = session_store_for(inv.transcript_dir)
 
     # Dispatch-only tail: the whole transcript is a single trailing user turn (the
@@ -2416,7 +2416,7 @@ async def test_backoff_respawns_do_not_accumulate_store(tmp_path: Path) -> None:
     (tmp_path / "art").mkdir()
     inv = _inv(tmp_path, agent_id="step:p/s")
     inv.transcript_dir.mkdir(parents=True, exist_ok=True)
-    skey = session_key(inv.change_context.project_root, "step:p/s")
+    skey = session_key(inv.quest_context.project_root, "step:p/s")
     store = session_store_for(inv.transcript_dir)
 
     dispatch = Message(role="user", content=(TextBlock(text="DISPATCH"),))
@@ -2476,7 +2476,7 @@ async def test_inplace_repair_resumes_natively_with_store(tmp_path: Path) -> Non
     (tmp_path / "art").mkdir()
     inv = _inv(tmp_path, agent_id="step:p/s")
     inv.transcript_dir.mkdir(parents=True, exist_ok=True)
-    skey = session_key(inv.change_context.project_root, "step:p/s")
+    skey = session_key(inv.quest_context.project_root, "step:p/s")
     store = session_store_for(inv.transcript_dir)
 
     msgs = [
@@ -2542,7 +2542,7 @@ async def test_inplace_repair_without_store_reconstructs_native(tmp_path: Path) 
     (tmp_path / "art").mkdir()
     inv = _inv(tmp_path, agent_id="step:p/s")
     inv.transcript_dir.mkdir(parents=True, exist_ok=True)
-    skey = session_key(inv.change_context.project_root, "step:p/s")
+    skey = session_key(inv.quest_context.project_root, "step:p/s")
     store = session_store_for(inv.transcript_dir)
     # No session store → reconstructs from the transcript and goes native.
 
@@ -2599,7 +2599,7 @@ async def test_dangling_tool_use_resumes_natively(tmp_path: Path) -> None:
     (tmp_path / "art").mkdir()
     inv = _inv(tmp_path, agent_id="step:p/s")
     inv.transcript_dir.mkdir(parents=True, exist_ok=True)
-    skey = session_key(inv.change_context.project_root, "step:p/s")
+    skey = session_key(inv.quest_context.project_root, "step:p/s")
     store = session_store_for(inv.transcript_dir)
 
     msgs = [
@@ -2673,7 +2673,7 @@ async def test_dangling_tool_use_without_store_reconstructs_native(tmp_path: Pat
     (tmp_path / "art").mkdir()
     inv = _inv(tmp_path, agent_id="step:p/s")
     inv.transcript_dir.mkdir(parents=True, exist_ok=True)
-    skey = session_key(inv.change_context.project_root, "step:p/s")
+    skey = session_key(inv.quest_context.project_root, "step:p/s")
     store = session_store_for(inv.transcript_dir)
     # No session store → reconstructs from the transcript and goes native.
 
@@ -3180,7 +3180,7 @@ async def test_native_resume_reconcile_idempotent_when_complete(tmp_path: Path) 
     (tmp_path / "art").mkdir()
     inv = _inv(tmp_path, agent_id="step:p/s")
     inv.transcript_dir.mkdir(parents=True, exist_ok=True)
-    skey = session_key(inv.change_context.project_root, "step:p/s")
+    skey = session_key(inv.quest_context.project_root, "step:p/s")
     store = session_store_for(inv.transcript_dir)
 
     msgs = [
@@ -3223,7 +3223,7 @@ async def test_native_resume_reconciles_partial_store(tmp_path: Path) -> None:
     (tmp_path / "art").mkdir()
     inv = _inv(tmp_path, agent_id="step:p/s")
     inv.transcript_dir.mkdir(parents=True, exist_ok=True)
-    skey = session_key(inv.change_context.project_root, "step:p/s")
+    skey = session_key(inv.quest_context.project_root, "step:p/s")
     store = session_store_for(inv.transcript_dir)
 
     msgs = [
@@ -3308,7 +3308,7 @@ async def test_native_resume_sets_standard_tool_mode(tmp_path: Path) -> None:
     # A prior fresh run mirrored its session into the store → native resume.
     store = session_store_for(inv.transcript_dir)
     await store.append(
-        session_key(inv.change_context.project_root, "step:p/s"),
+        session_key(inv.quest_context.project_root, "step:p/s"),
         [{"type": "user", "uuid": "m0",
           "message": {"role": "user", "content": "go"}}])
 
@@ -3363,7 +3363,7 @@ async def test_complete_step_tail_native_resumes_with_store_body(
     # path regardless, so ENABLE_TOOL_SEARCH=false must still be set.
     store = session_store_for(inv.transcript_dir)
     await store.append(
-        session_key(inv.change_context.project_root, "step:p/s"),
+        session_key(inv.quest_context.project_root, "step:p/s"),
         [{"type": "user", "uuid": "m0",
           "message": {"role": "user", "content": "go"}}])
 
@@ -3414,7 +3414,7 @@ async def test_drifted_store_native_resumes(tmp_path: Path) -> None:
         for i in range(4)
     ]
     await store.append(
-        session_key(inv.change_context.project_root, "step:p/s"), body)
+        session_key(inv.quest_context.project_root, "step:p/s"), body)
     scripted = [assistant(tool_use("c1", "complete_step", {"status": "Success"})), result()]
     created: list[FakeClaudeSDKClient] = []
 
@@ -3458,7 +3458,7 @@ async def test_balance_on_resume_send_to_llm_tail_native_resumes(
 
     store = session_store_for(inv.transcript_dir)
     await store.append(
-        session_key(inv.change_context.project_root, "step:p/s"),
+        session_key(inv.quest_context.project_root, "step:p/s"),
         [{"type": "user", "uuid": "m0",
           "message": {"role": "user", "content": "go"}}])
 
@@ -3511,7 +3511,7 @@ async def test_send_to_llm_tail_with_feedback_native_resumes_streaming_handback(
 
     store = session_store_for(inv.transcript_dir)
     await store.append(
-        session_key(inv.change_context.project_root, "step:p/s"),
+        session_key(inv.quest_context.project_root, "step:p/s"),
         [{"type": "user", "uuid": "m0",
           "message": {"role": "user", "content": "go"}}])
 
@@ -3557,7 +3557,7 @@ async def test_balance_on_resume_no_store_reconstructs_native(tmp_path: Path) ->
     inv = _inv(tmp_path, agent_id="step:p/s")
     inv = replace(inv, balance_on_resume=True)
     inv.transcript_dir.mkdir(parents=True, exist_ok=True)
-    skey = session_key(inv.change_context.project_root, "step:p/s")
+    skey = session_key(inv.quest_context.project_root, "step:p/s")
     store = session_store_for(inv.transcript_dir)
 
     t = Transcript(inv.transcript_dir / "transcript.jsonl")
@@ -4273,7 +4273,7 @@ async def test_resume_prefers_captured_result_over_synthetic(tmp_path: Path) -> 
     (tmp_path / "art").mkdir()
     inv = _inv(tmp_path, agent_id="step:p/s")
     inv.transcript_dir.mkdir(parents=True, exist_ok=True)
-    skey = session_key(inv.change_context.project_root, "step:p/s")
+    skey = session_key(inv.quest_context.project_root, "step:p/s")
     store = session_store_for(inv.transcript_dir)
 
     msgs = [

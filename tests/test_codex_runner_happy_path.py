@@ -6,7 +6,7 @@ from unittest.mock import patch as _patch
 
 import pytest
 
-from imp.agents.runner import AgentInvocation, ChangeContext
+from imp.agents.runner import AgentInvocation, QuestContext
 from imp.engine.state import InMemoryEventLog
 from imp.engine.types import (
     AgentDef,
@@ -77,7 +77,7 @@ def _build_invocation(
         model_name="gpt-5.5",
         system_prompt="you are a test agent",
         initial_messages=(),
-        change_context=ChangeContext(
+        quest_context=QuestContext(
             title="t", project_root=tmp_path,
             workflow_dir=tmp_path, id="c1"),
         transcript_dir=tmp_path / "tx",
@@ -315,7 +315,7 @@ async def test_codex_gen_close_runs_teardown(tmp_path: Path) -> None:
         tier=None,
     )
 
-    from imp.agents.runner import AgentInvocation, ChangeContext
+    from imp.agents.runner import AgentInvocation, QuestContext
     from imp.engine.state import InMemoryEventLog
 
     elog = InMemoryEventLog()
@@ -325,7 +325,7 @@ async def test_codex_gen_close_runs_teardown(tmp_path: Path) -> None:
         model_name="gpt-5.5",
         system_prompt="you are a test agent",
         initial_messages=(),
-        change_context=ChangeContext(
+        quest_context=QuestContext(
             title="t", project_root=tmp_path,
             workflow_dir=tmp_path, id="c1"),
         transcript_dir=tmp_path / "tx",

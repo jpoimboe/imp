@@ -4,7 +4,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from imp.remote.daemon.discover import ChangeInfo
+from imp.remote.daemon.discover import QuestInfo
 
 # resolve_lookup(text, reply_to) -> (quest_id | None, stripped_text). Supplied by
 # the adapter (its resolve over _msg_to_change / _handle_to_change); pure inputs to parse.
@@ -81,7 +81,7 @@ class Alerts:
 
 @dataclass(frozen=True)
 class ListResult:
-    changes: list[ChangeInfo]
+    changes: list[QuestInfo]
     resident: frozenset[str] = frozenset()
 
 

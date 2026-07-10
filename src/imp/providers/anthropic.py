@@ -520,7 +520,7 @@ class AnthropicAgentRunner:
         transcript = Transcript(invocation.transcript_dir / "transcript.jsonl")
         tools = _build_tools(invocation)
         ctx = ToolContext(
-            project_root=invocation.change_context.project_root,
+            project_root=invocation.quest_context.project_root,
             events_path=invocation.events_path,
             subagent_defs=invocation.subagent_defs,
             provider_name=invocation.provider_name,
@@ -528,9 +528,9 @@ class AnthropicAgentRunner:
             parent_transcript_dir=invocation.transcript_dir,
             agent_id=aid,
             background_enabled=True,  # full bg surface wired: injection + sweeps + teardown
-            quest_home=quest_home_path(invocation.change_context.quest_home),
+            quest_home=quest_home_path(invocation.quest_context.quest_home),
         )
-        ctx.change_context = invocation.change_context  # for subagent dispatch
+        ctx.quest_context = invocation.quest_context  # for subagent dispatch
         ctx.change_state = invocation.change_state
         ctx.change = invocation.change          # live Change for rename_change
         ctx.spawn_subagent = spawn_subagent_via_registry

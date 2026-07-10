@@ -6,15 +6,15 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from imp.agents.runner import ChangeContext, Message, TextBlock
+from imp.agents.runner import QuestContext, Message, TextBlock
 from imp.engine.agent_run import build_agent_invocation
 from tests.test_agent_run import _agent
 
 _HEAD = "## Project guidance"
 
 
-def _cc(tmp: Path, guidance: str) -> ChangeContext:
-    return ChangeContext(title="t", project_root=tmp,
+def _cc(tmp: Path, guidance: str) -> QuestContext:
+    return QuestContext(title="t", project_root=tmp,
                          workflow_dir=tmp / "wf", guidance=guidance)
 
 
@@ -26,7 +26,7 @@ def _inv(tmp: Path, *, guidance: str, subagent: bool, feedback_lead=None):
         initial_messages=(
             (Message(role="user", content=(TextBlock(text="SUB TASK"),)),)
             if subagent else ()),
-        change_context=_cc(tmp, guidance),
+        quest_context=_cc(tmp, guidance),
         user_chat_input_fn=None, transcript_dir=tmp / "td",
         events_path=tmp / "e.jsonl", subagent_defs={}, tiers=(),
         max_tool_calls=None, agent_id="step:p/s", event_log=None,

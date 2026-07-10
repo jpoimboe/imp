@@ -14,7 +14,7 @@ def socket_path(control_root: Path) -> Path:
 
 
 @dataclass(frozen=True)
-class ChangeInfo:
+class QuestInfo:
     """One Change as the `list` control verb reports it (spec control surface)."""
     id: str
     title: str
@@ -22,7 +22,7 @@ class ChangeInfo:
     step: str
 
 
-def list_changes(control_root: Path) -> list[ChangeInfo]:
+def list_quests(control_root: Path) -> list[QuestInfo]:
     """The in-flight Changes the `list` verb reports — those a user can still act on.
 
     `_iter_quest_ids` enumerates every known Change including the journal
@@ -31,7 +31,7 @@ def list_changes(control_root: Path) -> list[ChangeInfo]:
     (running / new / paused / merge_blocked / draft); `running` and
     `draft` are derived at display time — there is no persisted `errored`."""
     from imp.cli.main import _INFLIGHT, _iter_quest_ids, _row_for_id
-    out: list[ChangeInfo] = []
+    out: list[QuestInfo] = []
     for quest_id in _iter_quest_ids(control_root):
         try:
             row = _row_for_id(control_root, quest_id)
@@ -40,7 +40,7 @@ def list_changes(control_root: Path) -> list[ChangeInfo]:
             # whole directory — that would drop every resident session's relay
             # and (in the daemon's scan loop) crash the daemon. Skip it; a later
             # poll re-reads it once it settles.
-            _log.warning("list_changes: skipping %s (row read failed)",
+            _log.warning("list_quests: skipping %s (row read failed)",
                          quest_id, exc_info=True)
             continue
         if row is None:
@@ -48,7 +48,7 @@ def list_changes(control_root: Path) -> list[ChangeInfo]:
         quest_id_, status_, step_, _last, title_, _created, _step_label, _phase_label = row
         if status_ not in _INFLIGHT:
             continue
-        out.append(ChangeInfo(id=quest_id_, title=title_, status=status_, step=step_))
+        out.append(QuestInfo(id=quest_id_, title=title_, status=status_, step=step_))
     return out
 
 

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from imp.remote.daemon.alert_all import AlertAll
 from imp.remote.daemon.commands import ListResult, Notice
-from imp.remote.daemon.discover import ChangeInfo
+from imp.remote.daemon.discover import QuestInfo
 from imp.remote.daemon.subscriptions import Subscriptions
 from imp.remote.daemon.telegram_adapter import (
     Inbound,
@@ -25,7 +25,7 @@ def _adapter(
 
 def test_render_listresult_one_line_per_change() -> None:
     out = render_response(ListResult([
-        ChangeInfo(id="k3f9qa", title="Dark mode",
+        QuestInfo(id="k3f9qa", title="Dark mode",
                    status="running", step="implement")],
         frozenset({"k3f9qa"})))
     assert out == "Alerts: subscribed only\n@k3f9qa  Dark mode — running · implement"
@@ -53,8 +53,8 @@ def test_on_response_skips_empty_render() -> None:
 
 def test_render_listresult_marks_every_subscribed_change() -> None:
     out = render_response(ListResult([
-        ChangeInfo(id="aaaaaa", title="Alpha", status="paused", step="plan"),
-        ChangeInfo(id="bbbbbb", title="Beta", status="running", step="implement"),
+        QuestInfo(id="aaaaaa", title="Alpha", status="paused", step="plan"),
+        QuestInfo(id="bbbbbb", title="Beta", status="running", step="implement"),
     ], frozenset({"aaaaaa", "bbbbbb"})), ["bbbbbb"])
     assert out == (
         "Alerts: subscribed only\n"
@@ -64,20 +64,20 @@ def test_render_listresult_marks_every_subscribed_change() -> None:
 
 def test_render_hides_change_neither_resident_nor_subscribed() -> None:
     out = render_response(ListResult([
-        ChangeInfo(id="cccccc", title="Gamma", status="paused", step="plan")]))
+        QuestInfo(id="cccccc", title="Gamma", status="paused", step="plan")]))
     assert out == "Alerts: subscribed only\nNothing running."
 
 
 def test_render_shows_resident_unsubscribed_without_mark() -> None:
     out = render_response(ListResult([
-        ChangeInfo(id="dddddd", title="Delta", status="running", step="plan")],
+        QuestInfo(id="dddddd", title="Delta", status="running", step="plan")],
         frozenset({"dddddd"})))
     assert out == "Alerts: subscribed only\n@dddddd  Delta — running · plan"
 
 
 def test_render_shows_subscribed_not_resident_with_mark() -> None:
     out = render_response(ListResult([
-        ChangeInfo(id="eeeeee", title="Epsilon", status="paused", step="plan")]),
+        QuestInfo(id="eeeeee", title="Epsilon", status="paused", step="plan")]),
         ["eeeeee"])
     assert out == "Alerts: subscribed only\n● @eeeeee  Epsilon — paused · plan"
 
@@ -89,7 +89,7 @@ def test_on_response_marks_subscribed_rows() -> None:
     off.set(False)  # force OFF — default is now on
     sent: list = []
     _adapter(sent, subs, alert_all=off).on_response(ListResult([
-        ChangeInfo(id="bbbbbb", title="Beta", status="running", step="implement")]))
+        QuestInfo(id="bbbbbb", title="Beta", status="running", step="implement")]))
     assert sent == [(
         "Alerts: subscribed only\n● @bbbbbb  Beta — running · implement", True)]
 
@@ -99,7 +99,7 @@ def test_on_response_listresult_header_reflects_live_alert_all_mode() -> None:
     alert_all.set(True)
     sent: list = []
     _adapter(sent, alert_all=alert_all).on_response(ListResult([
-        ChangeInfo(id="bbbbbb", title="Beta", status="running", step="implement")],
+        QuestInfo(id="bbbbbb", title="Beta", status="running", step="implement")],
         frozenset({"bbbbbb"})))
     assert sent == [(
         "Alerts: all changes\n@bbbbbb  Beta — running · implement", True)]
@@ -107,14 +107,14 @@ def test_on_response_listresult_header_reflects_live_alert_all_mode() -> None:
 
 def test_render_listresult_header_reflects_alerts_on() -> None:
     out = render_response(ListResult([
-        ChangeInfo(id="k3f9qa", title="Dark mode", status="running", step="implement")],
+        QuestInfo(id="k3f9qa", title="Dark mode", status="running", step="implement")],
         frozenset({"k3f9qa"})), (), True)
     assert out == "Alerts: all changes\n@k3f9qa  Dark mode — running · implement"
 
 
 def test_render_listresult_header_reflects_alerts_off() -> None:
     out = render_response(ListResult([
-        ChangeInfo(id="k3f9qa", title="Dark mode", status="running", step="implement")],
+        QuestInfo(id="k3f9qa", title="Dark mode", status="running", step="implement")],
         frozenset({"k3f9qa"})), (), False)
     assert out == "Alerts: subscribed only\n@k3f9qa  Dark mode — running · implement"
 

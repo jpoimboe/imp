@@ -120,7 +120,7 @@ class Diagnostics:
 
 # Engine → runner boundary value. Frozen to make it safe to pass to subagents.
 @dataclass(frozen=True, slots=True)
-class ChangeContext:
+class QuestContext:
     title: str
     project_root: Path
     workflow_dir: Path
@@ -138,7 +138,7 @@ class AgentInvocation:
     model_name: str
     system_prompt: str
     initial_messages: tuple[Message, ...]
-    change_context: ChangeContext
+    quest_context: QuestContext
     transcript_dir: Path                   # .imp/changes/<id>/steps/<phase>/<step>/
     events_path: Path
     subagent_defs: dict[str, AgentDef] = field(default_factory=dict)

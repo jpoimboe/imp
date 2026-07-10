@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from imp.agents.runner import ChangeContext
+from imp.agents.runner import QuestContext
 from imp.agents.skills import SkillNameError, SkillNotFound
 from imp.agents.tools.context import ToolContext
 from imp.agents.tools.load_skill import make_load_skill_tool
@@ -22,7 +22,7 @@ def _ctx(tmp_path: Path) -> ToolContext:
         project_root=tmp_path,
         events_path=tmp_path / "events.jsonl",
     )
-    ctx.change_context = ChangeContext(
+    ctx.quest_context = QuestContext(
         title="t", project_root=tmp_path, workflow_dir=wf,
     )
     ctx.event_log = JsonlEventLog(tmp_path / "events.jsonl")
@@ -74,7 +74,7 @@ def test_load_skill_schema_declares_name(tmp_path: Path) -> None:
 
 def test_load_skill_falls_back_to_user_dir(tmp_path: Path) -> None:
     ctx = _ctx(tmp_path)
-    wf = ctx.change_context.workflow_dir
+    wf = ctx.quest_context.workflow_dir
     (wf / "skills" / "user" / "shared.md").write_text(
         "---\ndescription: shared\n---\n# Shared\nuser body\n"
     )
