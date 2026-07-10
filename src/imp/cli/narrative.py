@@ -236,6 +236,10 @@ class Activity:
     phase: str | None = field(default=None, compare=False)     # phase head (step-blue)
     plan: str | None = field(default=None, compare=False)      # plan counter (step-blue)
     counter: str | None = field(default=None, compare=False)   # running step's label (step-blue)
+    # Live-timer block-age source: block start_ts, the builder whose backoff to exclude, and backoff already accrued at start_ts.
+    start_ts: str | None = field(default=None, compare=False)
+    backoff_source: Any = field(default=None, compare=False)
+    backoff_base: float = field(default=0.0, compare=False)
 
 
 def _join(*parts: str | None) -> str | None:
@@ -1493,6 +1497,17 @@ def elapsed_seconds(start_ts: str | None, end_ts: Any) -> float | None:
                 - datetime.fromisoformat(start_ts)).total_seconds()
     except (ValueError, TypeError):
         return None
+
+
+def activity_elapsed(activity: Activity, now_iso: str) -> float:
+    """Block-age: now − start_ts, minus any backoff wait inside the block; 0.0 if start_ts missing, never negative."""
+    span = elapsed_seconds(activity.start_ts, now_iso)
+    if span is None:
+        return 0.0
+    if activity.backoff_source is not None:
+        span -= max(0.0, activity.backoff_source.backoff_wait_seconds(now_iso)
+                    - activity.backoff_base)
+    return max(0.0, span)
 
 
 def _draw_status_phrase() -> str:
