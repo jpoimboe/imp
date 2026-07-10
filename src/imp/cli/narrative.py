@@ -1016,7 +1016,7 @@ NarrativeBuilder._HANDLERS["merge_retry"] = _h_merge_retry
 
 def _h_lane_waiting(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
     self._flush_burst()
-    text = f"waiting to merge · {p.get('ahead', 0)} ahead"
+    text = f"waiting to merge ({p.get('ahead', 0)} ahead)"
     step = self._step_stack[-1] if self._step_stack else None
     if step is not None and step.lane_waiting_node is not None:
         step.lane_waiting_node.text = text
