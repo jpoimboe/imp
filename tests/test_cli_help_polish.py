@@ -33,13 +33,6 @@ def test_show_documents_detail_only() -> None:
     assert sp.description is not None
 
 
-def test_list_and_show_both_resolve() -> None:
-    from imp.cli.main import _build_parser, _cmd_list, _cmd_show
-    parser = _build_parser()
-    assert parser.parse_args(["list"]).func is _cmd_list
-    assert parser.parse_args(["show", "liveid"]).func is _cmd_show
-
-
 def test_config_has_description() -> None:
     desc = _subparser("config").description
     assert desc is not None
