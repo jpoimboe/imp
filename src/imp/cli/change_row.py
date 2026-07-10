@@ -38,6 +38,7 @@ ID_W = 6        # bare 6-char Change id
 STATUS_W = 35   # merged status + " (step-label)"; preserves the old 13+2+20 budget
 AGE_W = 7       # header "UPDATED" (7) aligns with the ≤4-char relative-age data
 NAME_MIN = 10   # never shrink the trailing NAME column below this
+NAME_CAP = 60   # cap a long name/intent's pull on the shared width so STATUS keeps its content
 
 # Fixed columns plus their three 2-space gaps; the NAME column gets whatever
 # terminal width remains after this.
@@ -72,6 +73,31 @@ def name_budget(*, indent: int = 0) -> int:
     """
     cols = shutil.get_terminal_size((80, 24)).columns
     return max(NAME_MIN, cols - _PREFIX_W - indent)
+
+
+def overview_widths(
+    rows: list[tuple[str, str | None, str]],
+) -> tuple[int, int]:
+    """Compute (status_width, name_width) for the overview from its rendered
+    rows. Each row is (status_word, inner_label_or_None, name_text). STATUS and
+    NAME share the flexible region left after the fixed ID/UPDATED columns and
+    the three 2-space gaps; NAME is the first claimant (capped at NAME_CAP for
+    sizing) and STATUS takes the leftover, floored at the status-word width and
+    grown only up to the width its own content needs."""
+    cols = shutil.get_terminal_size((80, 24)).columns
+    region = cols - (ID_W + AGE_W + 6)     # three 2-space gaps
+
+    def cell_len(status: str, label: str | None) -> int:
+        return len(status) if label is None else len(status) + len(label) + 3
+
+    status_floor = max([len("STATUS")] + [len(s) for s, _, _ in rows])
+    status_content = max([len("STATUS")] + [cell_len(s, lbl) for s, lbl, _ in rows])
+    name_content = min(NAME_CAP, max([0] + [len(n) for _, _, n in rows]))
+
+    status_width = min(max(region - name_content, status_floor), status_content)
+    status_width = min(status_width, max(status_floor, region - NAME_MIN))
+    name_width = max(NAME_MIN, region - status_width)
+    return status_width, name_width
 
 
 def header_line(*, color: bool, status_width: int = STATUS_W) -> str:
