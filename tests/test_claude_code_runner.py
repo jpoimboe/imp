@@ -4495,3 +4495,32 @@ async def test_interrupt_slow_landing_never_self_escalates(tmp_path: Path) -> No
     # interrupt() must never have called disconnect(), even after completion.
     assert "disconnect" not in holder["c"].order
     await asyncio.wait_for(task, timeout=2)
+
+
+@pytest.mark.anyio
+async def test_reclassified_auth_error_carries_last_agent_text_detail(
+    tmp_path: Path,
+) -> None:
+    """Substring/API-error reclassification attaches the prose to detail.last_agent_text."""
+    prose = "Failed to authenticate. API Error: 401 Invalid authentication credentials"
+    fake_messages = [assistant(text(prose)), result()]
+
+    def client_factory(opts: Any) -> FakeClaudeSDKClient:
+        return FakeClaudeSDKClient(opts, scripted_messages=fake_messages)
+
+    runner = ClaudeCodeAgentRunner(
+        model_name="claude-sonnet-4-6", client_factory=client_factory,
+    )
+    inv = _inv(tmp_path)
+
+    events: list[dict] = []
+    async for ev in runner.run(inv):
+        events.append(ev)
+
+    error_events = [e for e in events if e.get("type") == "error"]
+    assert len(error_events) == 1, (
+        f"expected 1 error event, got {[e.get('payload', {}) for e in error_events]}"
+    )
+    payload = error_events[0]["payload"]
+    assert payload["category"] == "auth"
+    assert payload["detail"]["last_agent_text"] == prose

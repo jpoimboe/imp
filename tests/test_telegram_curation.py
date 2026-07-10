@@ -31,7 +31,7 @@ def test_silent_event_types_stream_quietly(event_type: str) -> None:
     [
         "merge_blocked", "script_blocked", "agent_output_missing", "awaiting_turn",
         "interrupt", "api", "quota", "content_filter", "loop", "terminated",
-        "unknown", "config", "internal_error", "retry_ceiling", "reauth_needed",
+        "unknown", "config", "internal_error",
     ],
 )
 def test_workflow_paused_silent_when_companion_buzzed(reason: str) -> None:
@@ -122,7 +122,7 @@ def test_paused_message_is_label_and_plain_speak_body_no_title_bracket() -> None
 # A silenced pause must produce no body, so the adapter's
 # `kind == "silent" and not body.strip()` guard drops it (no redundant quiet line).
 @pytest.mark.parametrize(
-    "reason", ["merge_blocked", "script_blocked", "interrupt", "retry_ceiling", "reauth_needed"],
+    "reason", ["merge_blocked", "script_blocked", "interrupt"],
 )
 def test_silenced_paused_has_empty_body(reason: str) -> None:
     assert imp_telegram.event_body("workflow_paused", {"reason": reason}) == ""
@@ -139,8 +139,7 @@ def test_pause_silent_reasons_exact_set() -> None:
     expected = frozenset({
         "merge_blocked", "script_blocked", "agent_output_missing", "awaiting_turn",
         "interrupt", "awaiting_user", "api", "quota", "content_filter", "loop",
-        "terminated", "unknown", "config", "internal_error", "retry_ceiling",
-        "reauth_needed",
+        "terminated", "unknown", "config", "internal_error",
     })
     assert expected == imp_telegram._PAUSE_SILENT_REASONS
 
@@ -161,6 +160,8 @@ def test_pause_reason_bodies_exact() -> None:
         "context_window": "hit the context limit",
         "max_loops": "stuck in a loop",
         "unknown_step": "workflow error",
+        "reauth_needed": "needs you to re-authenticate",
+        "retry_ceiling": "gave up after repeated retries",
     }
 
 
@@ -216,3 +217,46 @@ def test_one_buzz_per_error_driven_stop(
     pause = imp_telegram.curate(
         "workflow_paused", {"reason": pause_reason, "kind": pause_kind})
     assert [companion, pause].count("buzz") == 1
+
+
+@pytest.mark.parametrize("category", ["auth", "network", "rate_limit", "stalled"])
+def test_backoff_retry_error_is_dropped(category: str) -> None:
+    # A transient retry-with-backoff error is about-nothing noise: drop it so the
+    # phone never buzzes for a self-healing blip.
+    assert imp_telegram.curate(
+        "error", {"category": category, "kind": "token_expired"}) is None
+
+
+@pytest.mark.parametrize("category", ["api", "quota", "loop", "terminated", "unknown"])
+def test_non_backoff_error_still_buzzes(category: str) -> None:
+    assert imp_telegram.curate(
+        "error", {"category": category, "kind": "boom"}) == "buzz"
+
+
+@pytest.mark.parametrize("payload", [{}, {"category": None}, {"kind": "boom"}])
+def test_error_with_absent_or_none_category_still_buzzes(payload: dict) -> None:
+    # Fail-safe: a missing/None category falls through the backoff-drop to buzz.
+    assert imp_telegram.curate("error", payload) == "buzz"
+
+
+def test_config_interrupted_error_still_dropped() -> None:
+    # The pre-existing nonterminal-interrupt exemption is untouched.
+    assert imp_telegram.curate(
+        "error", {"category": "config", "kind": "interrupted"}) is None
+
+
+@pytest.mark.parametrize("reason", ["reauth_needed", "retry_ceiling"])
+def test_retry_exhaustion_pause_now_buzzes(reason: str) -> None:
+    # The terminal give-up buzz moved off the (now-dropped) error onto the pause.
+    assert imp_telegram.curate("workflow_paused", {"reason": reason}) == "buzz"
+
+
+@pytest.mark.parametrize(
+    "reason,expected",
+    [
+        ("reauth_needed", "needs you to re-authenticate"),
+        ("retry_ceiling", "gave up after repeated retries"),
+    ],
+)
+def test_retry_exhaustion_pause_has_plain_english_body(reason: str, expected: str) -> None:
+    assert imp_telegram.event_body("workflow_paused", {"reason": reason}) == expected

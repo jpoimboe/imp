@@ -2376,6 +2376,10 @@ class ClaudeCodeAgentRunner:
                         # instead of after N nudges.
                         classified = _classify_agent_text(last_text)
                         if classified is not None:
+                            # Carry the offending prose so the narrative can
+                            # match-and-drop the held auth text (same [:500]
+                            # truncation the _termination_from_result path uses).
+                            classified.detail["last_agent_text"] = last_text[:500]
                             _roll_back_error_turn(messages, transcript)
                             yield perr.make_error_event(
                                 classified, kind=getattr(classified, "kind", ""))

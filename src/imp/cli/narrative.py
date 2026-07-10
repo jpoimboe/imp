@@ -1841,6 +1841,27 @@ def _h_error(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -
                      " — resuming; work already saved is preserved"),
             category="stalled", is_warning=True))
         return
+    from imp.engine.error_policy import is_retry_with_backoff
+    if is_retry_with_backoff(str(p.get("category") or "")):
+        # Transient backoff-retry error: suppress the red line and drop the held auth
+        # prose via a stripped PREFIX match (last_agent_text is stored [:500]).
+        d = p.get("detail")
+        last = str(d["last_agent_text"]) if isinstance(d, dict) and d.get("last_agent_text") else ""
+        target = last.strip()
+        if target:
+            children = self._container().children
+            # A deferred rename flushed right after the held narration (see
+            # _flush_pending_rename in _h_llm_response) leaves a trailing
+            # RenameNode; skip it so the held-prose lookup still lands on the
+            # narration. Trimming only the tail keeps indices aligned for del.
+            end = len(children)
+            if end and isinstance(children[end - 1], RenameNode):
+                end -= 1
+            idx = _last_narration_index(children[:end])
+            if (idx is not None and children[idx].held
+                    and children[idx].text.strip().startswith(target)):
+                del children[idx]
+        return
     detail = ""
     d = p.get("detail")
     if isinstance(d, dict):

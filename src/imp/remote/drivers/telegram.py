@@ -53,8 +53,6 @@ _PAUSE_SILENT_REASONS = frozenset({
     "unknown",               # terminal error companion buzzed
     "config",                # terminal config error companion buzzed
     "internal_error",        # terminal internal error companion buzzed
-    "retry_ceiling",         # last-retry terminal error companion buzzed
-    "reauth_needed",         # terminal auth error companion buzzed
 })
 
 # imp-canon plain-speak bodies for a buzzing workflow_paused (companion-less
@@ -64,6 +62,8 @@ _PAUSE_REASON_BODIES = {
     "context_window": "hit the context limit",  # reincarnation-cap stop (companion-less)
     "max_loops": "stuck in a loop",
     "unknown_step": "workflow error",
+    "reauth_needed": "needs you to re-authenticate",
+    "retry_ceiling": "gave up after repeated retries",
 }
 
 # Human-readable labels for buzz events — phone notifications read as plain English,
@@ -160,7 +160,16 @@ def curate(event_type: Any, payload: Mapping[str, Any]) -> str | None:
     'reason' — silent when a companion event already buzzed the stop, else buzz."""
     if event_type == "error":
         from imp.cli.render_summary import _is_nonterminal_error
-        return None if _is_nonterminal_error(dict(payload)) else "buzz"
+        from imp.engine.error_policy import is_retry_with_backoff
+        if _is_nonterminal_error(dict(payload)):
+            return None
+        # A transient retry-with-backoff error (auth / network / rate_limit /
+        # stalled) self-heals ~12/13 times; the eventual give-up buzzes on the
+        # workflow_paused instead. Kept local to curate so the imp log summary
+        # builder's _is_nonterminal_error use is untouched.
+        if is_retry_with_backoff(str(payload.get("category") or "")):
+            return None
+        return "buzz"
     if event_type == "workflow_paused":
         return "silent" if _pause_is_silent(payload) else "buzz"
     if event_type in _BUZZ:

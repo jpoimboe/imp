@@ -80,6 +80,16 @@ def budget_for(category: str) -> float | None:
     return policy.budget_seconds if policy is not None else None
 
 
+def is_retry_with_backoff(category: str) -> bool:
+    """True when the category's policy decision is RetryWithBackoff (`auth`,
+    `network`, `rate_limit`, `stalled`). Single source of truth for the
+    backoff-retry category set, keyed off ``_POLICY`` so live-narrative and
+    Telegram curation never drift. Accepts the plumbed-out ``ErrorInfo.category``
+    (a plain str); an unrecognized category yields False."""
+    policy = _POLICY.get(category)
+    return policy is not None and policy.decision is RetryWithBackoff
+
+
 def decide(
     category: Category,
     *,

@@ -212,3 +212,25 @@ def test_no_hint_blind_backoff_is_not_hinted() -> None:
     d = ep.decide("network", prior_backoff_attempts=3)
     assert isinstance(d, ep.RetryWithBackoff)
     assert d.delay_seconds == 8.0 and d.hinted is False
+
+
+def test_is_retry_with_backoff_true_for_backoff_categories() -> None:
+    for cat in ("auth", "network", "rate_limit", "stalled"):
+        assert ep.is_retry_with_backoff(cat) is True
+
+
+def test_is_retry_with_backoff_false_for_non_backoff_categories() -> None:
+    for cat in ("config", "quota", "content_filter", "context_window",
+                "api", "loop", "agent_output_missing", "terminated", "unknown"):
+        assert ep.is_retry_with_backoff(cat) is False
+
+
+def test_is_retry_with_backoff_false_for_unrecognized_category() -> None:
+    assert ep.is_retry_with_backoff("not_a_category") is False
+
+
+def test_is_retry_with_backoff_matches_policy_table() -> None:
+    for cat, policy in ep._POLICY.items():
+        assert ep.is_retry_with_backoff(cat) is (
+            policy.decision is ep.RetryWithBackoff
+        )
