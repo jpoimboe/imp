@@ -46,6 +46,10 @@ CLAUDE_CODE: dict[str, ModelInfo] = {
     # silently drops the beta (window falls back to 200k) and warns to stderr
     # every request ("Custom betas are only available for API key users").
     "claude-opus-4-8[1m]": ModelInfo(window=1_000_000),
+    # Fable 5: window-only, mirroring the opus entries. The bracketed form is a
+    # real CLI model id passed through as-is (no cli_model/betas indirection).
+    "claude-fable-5": ModelInfo(window=200_000),
+    "claude-fable-5[1m]": ModelInfo(window=1_000_000),
     "haiku": ModelInfo(window=200_000),
     "sonnet": ModelInfo(window=200_000),
     "opus": ModelInfo(window=200_000),
@@ -61,6 +65,16 @@ ANTHROPIC: dict[str, ModelInfo] = {
         cli_model="claude-opus-4-8",
         betas=("context-1m-2025-08-07",),
     ),
+    # Fable 5: 128k output cap confirmed live from /v1/models. The [1m] form is
+    # rejected by the raw API, so cli_model strips it and the context-1m beta
+    # header requests the 1M window (this provider is API-key-only).
+    "claude-fable-5[1m]": ModelInfo(
+        window=1_000_000,
+        max_output_tokens=128_000,
+        cli_model="claude-fable-5",
+        betas=("context-1m-2025-08-07",),
+    ),
+    "claude-fable-5": ModelInfo(window=200_000, max_output_tokens=128_000),
     "claude-haiku-4-5": ModelInfo(window=200_000, max_output_tokens=32_000),
     "claude-sonnet-4-6": ModelInfo(window=200_000, max_output_tokens=32_000),
     "claude-opus-4-8": ModelInfo(window=200_000, max_output_tokens=64_000),
@@ -112,6 +126,7 @@ _WINDOW_TOKENS: tuple[tuple[str, int], ...] = (
     ("haiku", 200_000),
     ("sonnet", 200_000),
     ("opus", 200_000),
+    ("fable", 200_000),
     ("gpt-5", 400_000),
 )
 
