@@ -94,6 +94,7 @@ def _seed_text_user_tail_transcript(inv_dir: Path) -> None:
 
 async def _run_anthropic(
     tmp_path: Path, *, resume_should_continue: bool, queued: list[str] | None,
+    seed: Any = _seed_send_to_llm_transcript,
 ) -> list[str]:
     from imp.agents.runner import AgentInvocation, ChangeContext, Message, TextBlock
     from imp.agents.tools import get_registry  # noqa: F401 — ensures tools registered
@@ -103,7 +104,7 @@ async def _run_anthropic(
 
     inv_dir = tmp_path / "step"
     inv_dir.mkdir(parents=True, exist_ok=True)
-    _seed_send_to_llm_transcript(inv_dir)
+    seed(inv_dir)
 
     fake = FakeAsyncAnthropic([
         response(tool_use("c1", "complete_step", {"status": "Success", "note": "ok"})),
@@ -333,3 +334,14 @@ async def test_claude_code_pending_human_tail_suppresses_nudge(
             all_texts.append(q)
     assert _CONTINUATION_NUDGE not in all_texts, all_texts
     assert "ignore" in all_texts, all_texts
+
+
+@pytest.mark.anyio
+async def test_anthropic_pending_human_tail_suppresses_nudge(
+    tmp_path: Path,
+) -> None:
+    texts = await _run_anthropic(
+        tmp_path, resume_should_continue=True, queued=None,
+        seed=_seed_text_user_tail_transcript)
+    assert _CONTINUATION_NUDGE not in texts, texts
+    assert "ignore" in texts, texts
