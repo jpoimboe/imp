@@ -1082,17 +1082,12 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
     from imp.cli.signals import InterruptCoordinator
 
     control = _control_root()
-    if args.token is None:
-        target = await _pick_resume_target(
-            control, non_interactive=bool(getattr(args, "non_interactive", False)))
-        if isinstance(target, int):
-            return target
-        change_id = target
-    else:
-        try:
-            change_id = _resolve_id(control, args.token)
-        except SystemExit:
-            return 2
+    target = await _resolve_resume_target(
+        control, args.token,
+        non_interactive=bool(getattr(args, "non_interactive", False)))
+    if isinstance(target, int):
+        return target
+    change_id = target
     loaded = _load_or_rehydrate(control, change_id)
     if isinstance(loaded, int):
         return loaded
@@ -2410,15 +2405,43 @@ async def _pick_change_target(
     return chosen if chosen is not None else 2
 
 
+_RESUME_PICKER_HEADER = (
+    "Resume which change?  (↑/↓ to move · enter to resume · q to cancel)"
+)
+
+
 async def _pick_resume_target(control: Path, *, non_interactive: bool) -> str | int:
     return await _pick_change_target(
         control=control,
         rows=_resumable_rows(control),
-        header="Resume which change?  (↑/↓ to move · enter to resume · q to cancel)",
+        header=_RESUME_PICKER_HEADER,
         on_empty=lambda: _resume_picker_empty(control),
         on_non_tty=_resume_picker_non_tty,
         non_interactive=non_interactive,
     )
+
+
+async def _resolve_resume_target(
+    control: Path, token: str | None, *, non_interactive: bool,
+) -> str | int:
+    if token is None or not token.strip():
+        return await _pick_resume_target(control, non_interactive=non_interactive)
+    matches = _resumable_match_rows(control, token)
+    if len(matches) >= 2:
+        return await _pick_change_target(
+            control=control,
+            rows=matches,
+            header=_RESUME_PICKER_HEADER,
+            on_empty=lambda: _resume_picker_empty(control),
+            on_non_tty=_resume_picker_non_tty,
+            non_interactive=non_interactive,
+        )
+    if len(matches) == 1:
+        return matches[0][0]
+    try:
+        return _resolve_id(control, token)
+    except SystemExit:
+        return 2
 
 
 def _deliver_abandon_resident(control: Path, change_id: str) -> None:
