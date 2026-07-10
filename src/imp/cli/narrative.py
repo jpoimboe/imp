@@ -122,6 +122,7 @@ class StepNode:
     outcome: OutcomeLine | None = None
     start_ts: str | None = None        # ISO-8601 from step_started.timestamp (issue 3)
     run_start_ts: str | None = None    # test-lane run clock; phase_elapsed reads start_ts
+    lane_wait_start_ts: str | None = None  # lane queue-entry clock (block-age for "waiting to test"/"waiting to merge")
     end_ts: str | None = None          # ISO-8601 from step_completed.timestamp (§7)
     agent_output: dict[str, Any] | None = None  # stashed complete_step args (issues 5/6)
     show_label: bool = True            # step frame (header + breadcrumb) shown
@@ -486,6 +487,11 @@ class NarrativeBuilder:
         # is the ISO timestamp the current in-progress wait began, or None.
         self._backoff_wait_accum: float = 0.0
         self._backoff_wait_start: str | None = None
+        # Parent-working stretch start + backoff accrued at that start. Set at the three
+        # parent boundaries (step_started, user_message, subagent-return); never advanced by
+        # within-stretch prose/thinking/tool bursts. Distinct from _span_start_ts (resets on prose).
+        self._stretch_start_ts: str | None = None
+        self._stretch_backoff_base: float = 0.0
         # subagent routing: "sub:<event_id>" -> fold (for delegating sub events)
         self._sub_by_agent_id: dict[str, SubagentFold] = {}
         # Two-dict open-fold registry. By block id (NON-EMPTY block ids only)
@@ -770,6 +776,7 @@ class NarrativeBuilder:
 
         etype = event["type"]
         agent_id = event.get("agent_id")
+        had_running = bool(self.running_subagents())
 
         if etype in _RESUMES_WAIT:
             if self._backoff_wait_start is not None:
@@ -869,6 +876,13 @@ class NarrativeBuilder:
             self._append(FallbackLine(event_type=etype, payload=payload))
             return
         handler(self, event, payload)
+
+        if had_running and not self.running_subagents():
+            # The parent regained the live block: its last subagent finished this
+            # event (canonical close, resume-close fallback, or step-end close).
+            # Start a fresh parent-working stretch here.
+            self._stretch_start_ts = event.get("timestamp")
+            self._stretch_backoff_base = self.backoff_wait_seconds(None)
 
     # -- scope helpers --------------------------------------------------------
     def _container(self) -> WorkflowNode | PhaseNode | StepNode:
@@ -1032,6 +1046,8 @@ def _h_lane_waiting(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, 
     if step is not None:
         step.live_label = text
         step.lane_wait = True
+        if step.lane_wait_start_ts is None:
+            step.lane_wait_start_ts = event.get("timestamp")
 
 
 NarrativeBuilder._HANDLERS["lane_waiting"] = _h_lane_waiting
@@ -1047,6 +1063,7 @@ def _h_waiting_for_test_lane(
     if self._step_stack:
         self._step_stack[-1].live_label = "waiting to test"
         self._step_stack[-1].lane_wait = True
+        self._step_stack[-1].lane_wait_start_ts = event.get("timestamp")
 
 
 NarrativeBuilder._HANDLERS["waiting_for_test_lane"] = _h_waiting_for_test_lane
@@ -1137,6 +1154,8 @@ def _h_step_started(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, 
     self._flush_pending_rename()
     self._flush_burst()
     self._span_start_ts = event.get("timestamp")
+    self._stretch_start_ts = event.get("timestamp")
+    self._stretch_backoff_base = self.backoff_wait_seconds(None)
     self._segment_had_work = False
     name = p.get("step", "?")
     kind = p.get("kind")
@@ -1528,6 +1547,8 @@ def _h_user_message(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, 
     self._flush_burst()
     _rotate_status_phrase(self)
     self._span_start_ts = event.get("timestamp")
+    self._stretch_start_ts = event.get("timestamp")
+    self._stretch_backoff_base = self.backoff_wait_seconds(None)
     interactive, self._awaiting_reply = self._awaiting_reply, False
     text = _user_message_text(p)
     if interactive and not text.strip():
