@@ -57,16 +57,15 @@ def test_retry_reentry_reuses_single_step_node_unnested() -> None:
         f"found nested: {[s.name for s in nested_steps]}"
     )
 
-    # Direct error/warning children must appear in the executor's emit order:
-    # error, agent_retry(warn), error, agent_retry(warn).
+    # The transient rate_limit ERROR lines are suppressed (backoff-retry
+    # errors render quiet); only the two agent_retry warnings survive as direct
+    # children, still in emit order under the single re-used StepNode.
     errs = [c for c in coder.children if isinstance(c, nv.ErrorNode)]
     assert [(e.category, e.is_warning) for e in errs] == [
-        ("rate_limit", False),
         ("rate_limit", True),
-        ("rate_limit", False),
         ("rate_limit", True),
     ], (
-        "rate_limit error/retry pairs must surface as direct children of the "
+        "the two rate_limit retry warnings must surface as direct children of the "
         f"single StepNode in order; got: {[(e.category, e.is_warning) for e in errs]}"
     )
 
@@ -94,15 +93,16 @@ def test_retry_reentry_preserves_first_attempt_start_ts() -> None:
 
 def test_retry_reentry_does_not_clear_existing_children() -> None:
     """Unlike resume re-entry (which clears because the executor re-runs from
-    scratch), retry re-entry must NOT clear prior error/warning children — every
-    attempt's lines stay visible."""
+    scratch), retry re-entry must NOT clear prior warning children — every
+    attempt's surviving line stays visible (the rate_limit error lines are now
+    suppressed, leaving one retry warning per attempt)."""
     tree = nv.build_tree(_retry_sequence())
     phase = next(c for c in tree.root.children if isinstance(c, nv.PhaseNode))
     coder = next(c for c in phase.children if isinstance(c, nv.StepNode))
     errs = [c for c in coder.children if isinstance(c, nv.ErrorNode)]
-    assert len(errs) == 4, (
-        f"all four error/warning lines (2 errors + 2 retry warnings) must remain "
-        f"as children after re-entry; got {len(errs)}"
+    assert len(errs) == 2, (
+        f"both retry warnings (one per attempt) must remain as children after "
+        f"re-entry; got {len(errs)}"
     )
 
 
@@ -128,8 +128,9 @@ def test_render_text_shows_coder_header_once_with_flat_error_indent() -> None:
     # render_text._INDENT). With color=False there is no ANSI wrapping.
     err_lines = [ln for ln in lines
                  if ln.lstrip().startswith(("error:", "warning:"))]
-    assert len(err_lines) == 4, (
-        f"expected 4 error/warning lines, got {len(err_lines)}: {err_lines!r}"
+    assert len(err_lines) == 2, (
+        f"expected 2 warning lines (rate_limit error lines suppressed), got "
+        f"{len(err_lines)}: {err_lines!r}"
     )
     indents = {len(ln) - len(ln.lstrip(" ")) for ln in err_lines}
     assert len(indents) == 1, (

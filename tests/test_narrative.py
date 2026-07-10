@@ -349,15 +349,19 @@ def test_subagent_running_until_task_result_arrives() -> None:
 
 
 def test_error_event_becomes_error_node() -> None:
+    # `api` is a Pause category (NOT backoff-retry), so its hard error line is
+    # untouched by the suppression — this test still pins the generic
+    # error->ErrorNode mapping. Auth/network/rate_limit suppression is covered by
+    # tests/test_narrative_retry_quiet.py.
     tree = nv.build_tree([
         _ev("1", "step_started", step="s", kind="agent", phase="p"),
-        _ev("2", "error", category="auth", message="Invalid API key"),
+        _ev("2", "error", category="api", message="API Error: 500"),
     ])
     step = tree.root.children[0].children[0]
     errs = [c for c in step.children if isinstance(c, nv.ErrorNode)]
     assert len(errs) == 1
-    assert errs[0].category == "auth"
-    assert errs[0].message == "Invalid API key"
+    assert errs[0].category == "api"
+    assert errs[0].message == "API Error: 500"
     assert errs[0].is_warning is False
 
 
