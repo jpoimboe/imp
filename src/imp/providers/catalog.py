@@ -117,6 +117,12 @@ def model_supports_vision(provider_name: str, model_name: str) -> bool:
     return model_info(catalog, model_name).supports_vision
 
 
+def catalog_aliases(provider_name: str) -> tuple[str, ...]:
+    """Alias keys for a provider in table order; () for an unknown provider."""
+    catalog = _CATALOGS.get(provider_name)
+    return tuple(catalog) if catalog is not None else ()
+
+
 # Provider-agnostic substring fallback for the renderer: an arbitrary model id
 # string (alias or dated id) maps to a window. Ordered so the "[1m]" marker
 # wins over the base-model tokens it always accompanies. This is the renderer's

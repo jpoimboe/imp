@@ -7,6 +7,7 @@ from imp.providers.catalog import (
     DEFAULT_WINDOW,
     OPENAI,
     ModelInfo,
+    catalog_aliases,
     checkpoint_fraction,
     context_tokens_from_usage,
     model_info,
@@ -259,3 +260,17 @@ def test_window_for_model_covers_fable() -> None:
     # structured tables per the module NOTE).
     assert window_for_model("claude-fable-5[1m]") == 1_000_000
     assert window_for_model("claude-fable-5") == 200_000
+
+
+def test_catalog_aliases_lists_provider_table_keys() -> None:
+    anthropic = catalog_aliases("anthropic")
+    assert "claude-fable-5[1m]" in anthropic
+    assert "claude-fable-5" in anthropic
+    assert "sonnet" in catalog_aliases("claude_code")
+    # codex shares the OPENAI table
+    assert catalog_aliases("codex") == catalog_aliases("openai")
+    assert "gpt-5" in catalog_aliases("openai")
+
+
+def test_catalog_aliases_unknown_provider_is_empty() -> None:
+    assert catalog_aliases("nope") == ()
