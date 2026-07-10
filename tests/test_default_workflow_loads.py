@@ -138,7 +138,6 @@ def test_every_shown_step_has_its_label() -> None:
     wf = _wf()
     by = {s.name: s for s in wf.flat_steps()}
     expected = {
-        "threshold": "scoping the change",
         "spec-finalizer": "finalizing spec",
         "spec-reviewer": "reviewing spec",
         "plan-writer": "writing plan",
@@ -163,7 +162,7 @@ def test_every_shown_step_has_its_label() -> None:
     for name, label in expected.items():
         assert by[name].label == label, name
     # Quiet plumbing steps stay label-free.
-    for name in ("spec-verify-commit", "plan-verify-commit",
+    for name in ("threshold", "spec-verify-commit", "plan-verify-commit",
                  "cleanup-merge", "check-next-plan",
                  "assert-stamped", "integrate-rebase"):
         assert by[name].label is None, name
