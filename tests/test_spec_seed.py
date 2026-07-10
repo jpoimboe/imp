@@ -42,7 +42,7 @@ def test_build_parser_new_rejects_spec_file() -> None:
 
 def _new_args(**kw: object) -> argparse.Namespace:
     base = {"opening": None, "title": None, "non_interactive": False,
-            "message": None, "tui": False}
+            "message": None}
     base.update(kw)
     return argparse.Namespace(**base)
 
@@ -163,33 +163,6 @@ def test_new_positional_with_message_legal(
     assert rc == 0
     assert captured["change"].seed_opening == "add dark mode"  # type: ignore[union-attr]
     assert captured["reply"] == "reply"
-
-
-def test_new_tui_delivers_seed(
-        tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-        capsys: pytest.CaptureFixture[str]) -> None:
-    _seed_control(tmp_path)
-    monkeypatch.chdir(tmp_path)
-
-    captured: dict[str, object] = {}
-
-    async def _fake_tui(change: object, *, seed_opening: str | None = None,
-                        resume: bool = False,
-                        leave_mode: str | None = None,
-                        leave_state: dict[str, str] | None = None,
-                        autonomous: bool = False) -> int:
-        captured["seed_opening"] = seed_opening
-        return 0
-
-    monkeypatch.setattr(cli_main, "_run_tui_session", _fake_tui)
-    monkeypatch.setattr(cli_main, "_tui_requested", lambda _a: True)
-
-    args = _new_args(opening="add dark mode", tui=True)
-    rc = anyio.run(cli_main._async_cmd_new, args)
-
-    assert rc == 0
-    assert captured["seed_opening"] == "add dark mode"
-    assert "--tui does not deliver" not in capsys.readouterr().err
 
 
 def test_threshold_opening_conditioned_on_message(tmp_path) -> None:

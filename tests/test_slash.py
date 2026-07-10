@@ -8,7 +8,6 @@ import anyio
 import pytest
 
 from imp.cli.slash import REPROMPT, handle_slash_line, is_slash_command
-from imp.cli.tui_app import HINT
 
 
 class _FakeChange:
@@ -335,9 +334,6 @@ def test_hint_and_help_describe_ctrlc_pause_without_esc(tmp_path: Path) -> None:
     assert "pause" in ctrl_c_line.lower()
     assert "Esc" not in ctrl_c_line
     assert "interrupt" not in ctrl_c_line.lower()
-    assert "pause" in HINT.lower()
-    assert "interrupt" not in HINT.lower()
-    assert "esc" not in HINT.lower()
 
 
 def test_ask_line_with_slash_pins_driver_toolbar_below_the_prompt(tmp_path: Path) -> None:
