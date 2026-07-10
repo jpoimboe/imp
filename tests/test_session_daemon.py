@@ -868,8 +868,15 @@ async def test_resident_save_applies_the_save_disposition(tmp_path: Path) -> Non
 def test_hold_prompt_resume_prompt_for_interrupt() -> None:
     import imp.remote.session.daemon as daemon
 
-    coord = SimpleNamespace(should_pause=True)
+    coord = SimpleNamespace(should_pause=True, pause_reason="ctrl-c")
     assert daemon._hold_prompt(RunResult.PAUSED, coord) == daemon._RESUME_PROMPT
+
+
+def test_hold_prompt_none_for_model_override() -> None:
+    import imp.remote.session.daemon as daemon
+
+    coord = SimpleNamespace(should_pause=True, pause_reason="model-override")
+    assert daemon._hold_prompt(RunResult.PAUSED, coord) is None
 
 
 def test_hold_prompt_none_for_script_blocked() -> None:
@@ -1569,3 +1576,44 @@ async def test_dispatch_set_model_stashes_arg_and_pauses(tmp_path: Path) -> None
     assert calls == [("model-override", "frame")]
     # Ordinary control: serve() is never cancelled by set-model.
     assert server.abandoned is server.saved is server.archived is server.discarded is False
+
+
+@pytest.mark.anyio
+async def test_model_override_pause_reenters_without_resume_prompt(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import imp.remote.session.daemon as daemon_mod
+
+    change = _make_change(tmp_path, "2026-06-15-mdl")
+
+    applied: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        daemon_mod, "apply_model_override",
+        lambda ch, state, arg, *, step_name: applied.append((arg, step_name)))
+
+    calls = {"n": 0}
+
+    async def _run_fn(
+        ch: Change, *, on_event: Any, user_chat_input_fn: Any, coordinator: Any,
+        wait_for_turn_fn: Any = None, **kw: Any,
+    ) -> RunResult:
+        calls["n"] += 1
+        if calls["n"] == 1:
+            # Seed the minimal state the hold loop's State.load reads.
+            State(id=ch.id, step="brainstorm", step_attempt=0,
+                  status="running").save(ch.state_dir)
+            coordinator.set_pending_model("anthropic:claude-fable-5")
+            await coordinator.signal_pause(reason="model-override", via="frame")
+            return RunResult.PAUSED
+        return RunResult.COMPLETED
+
+    # A wrong impl (treating the model-override pause as a ctrl-c hold) would emit
+    # _RESUME_PROMPT and block on user_chat_input_fn — with no client to answer,
+    # that blocks forever, so the deadline concretely enforces the no-prompt path.
+    with anyio.fail_after(5):
+        result = await serve_change_session(
+            change, run_fn=_run_fn, hibernate=False)
+
+    assert result is RunResult.COMPLETED
+    assert calls["n"] == 2                       # re-entered exactly once
+    assert applied == [("anthropic:claude-fable-5", "brainstorm")]
