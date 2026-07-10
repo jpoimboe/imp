@@ -329,6 +329,26 @@ def test_real_lock_timeout_maps_to_transient(
     assert path.read_bytes() == before
 
 
+def test_write_oserror_maps_to_transient(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = _write_creds(tmp_path, expires_at=NOW - 1)
+    before = path.read_bytes()
+
+    def _fake_refresh(refresh_token: str) -> dict[str, Any]:
+        return {"access_token": "new-access", "refresh_token": "new-refresh",
+                "expires_in": 3600}
+
+    def _raise_oserror(creds_path: Path, data: dict[str, Any]) -> None:
+        raise OSError("disk full")
+
+    monkeypatch.setattr(ctr, "_request_refresh", _fake_refresh)
+    monkeypatch.setattr(ctr, "_atomic_write_creds", _raise_oserror)
+    out = ctr.refresh_canonical_token(NOW, env=_env(tmp_path))
+    assert out.outcome == ctr.FAILED_TRANSIENT
+    assert path.read_bytes() == before
+
+
 def test_under_lock_recheck_skips_when_peer_refreshed(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:

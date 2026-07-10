@@ -189,3 +189,5 @@ def refresh_canonical_token(
             return RefreshOutcome(REFRESHED, expires_at)
     except LockTimeout:
         return RefreshOutcome(FAILED_TRANSIENT)
+    except OSError:
+        return RefreshOutcome(FAILED_TRANSIENT)
