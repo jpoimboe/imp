@@ -2126,3 +2126,70 @@ async def test_local_echo_not_invoked_on_abandon(
     # /abandon detached the client before send_input; no local echo fired.
     assert server.abandoned
     assert echoed == []
+
+
+@pytest.mark.anyio
+async def test_mid_conversation_model_sends_control_not_input(
+    tmp_path: Path,
+) -> None:
+    from imp.remote.session.protocol import CONTROL_SET_MODEL
+
+    sock = str(tmp_path / "s.sock")
+    controls_seen: list[tuple[str, str | None]] = []
+    inputs_seen: list[str] = []
+    server = SessionSocket(
+        sock, on_control=lambda a, r: controls_seen.append((a, r)))
+    coord = InterruptCoordinator()
+
+    async def _attach(on_event: Callable[[dict[str, Any]], None]) -> SessionClient:
+        client = SessionClient(sock, "c1", "T", on_event=on_event)
+        await client.connect()
+        return client
+
+    replies = iter(["/model anthropic:claude-fable-5", "done"])
+
+    async def _solicit(_prompt: str) -> str:
+        return next(replies)
+
+    class _Driver:
+        def on_event(self, _event: dict[str, Any]) -> None: ...
+        def finish(self) -> None: ...
+
+    with anyio.fail_after(10):
+        async with anyio.create_task_group() as tg:
+            await server.open()
+            tg.start_soon(server.serve)
+
+            async def _client() -> None:
+                await run_terminal_client(
+                    attach=_attach, driver=_Driver(),
+                    coord=coord, solicit=_solicit)
+
+            tg.start_soon(_client)
+
+            with anyio.fail_after(5):
+                while server.attached_count != 1:
+                    await anyio.sleep(0.02)
+            # Gate 1: the client answers with /model. It must leave as a
+            # set-model control carrying the raw arg, NOT an input frame.
+            server.broadcast(
+                {"type": "awaiting_user_input", "payload": {"prompt": "q1"}})
+            with anyio.fail_after(5):
+                while (CONTROL_SET_MODEL,
+                       "anthropic:claude-fable-5") not in controls_seen:
+                    await anyio.sleep(0.02)
+            # The control did not tear the client down: it stays attached and
+            # answers the next gate through the same loop.
+            assert server.attached_count == 1
+            # Gate 2: broadcast then arm next_input in the same task (the
+            # production emit->arm order) so the "done" reply cannot outrun the
+            # receiver. This reply IS delivered as an input frame.
+            server.broadcast(
+                {"type": "awaiting_user_input", "payload": {"prompt": "q2"}})
+            inputs_seen.append(await server.next_input())
+            await server.close()
+            tg.cancel_scope.cancel()
+
+    assert (CONTROL_SET_MODEL, "anthropic:claude-fable-5") in controls_seen
+    assert inputs_seen == ["done"]
+    assert "/model anthropic:claude-fable-5" not in inputs_seen

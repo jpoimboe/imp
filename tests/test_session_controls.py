@@ -135,3 +135,18 @@ async def test_force_gesture_forwards_interrupt_force_without_detaching(
         await client.aclose()
         await server.close()
         tg.cancel_scope.cancel()
+
+
+@pytest.mark.anyio
+async def test_set_model_sends_control_with_arg() -> None:
+    from imp.remote.session.protocol import CONTROL_SET_MODEL
+
+    sent: list[tuple[str, str | None]] = []
+
+    class _Client:
+        async def send_control(self, action: str, reason: str | None = None) -> None:
+            sent.append((action, reason))
+
+    controls = SessionControls(_Client(), InterruptCoordinator())
+    await controls.set_model("anthropic:claude-fable-5")
+    assert sent == [(CONTROL_SET_MODEL, "anthropic:claude-fable-5")]
