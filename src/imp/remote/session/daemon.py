@@ -153,10 +153,10 @@ async def serve_change_session(
                 # /model mid-conversation: executor parked+saved the step. Apply the
                 # override AFTER that save (no write race), then re-enter the same step.
                 arg = coordinator.take_pending_model()
-                assert arg, "model-override pause requires a pending model arg"
-                state = State.load(change.state_dir)
-                assert state.step is not None
-                apply_model_override(change, state, arg, step_name=state.step)
+                if arg:
+                    state = State.load(change.state_dir)
+                    assert state.step is not None
+                    apply_model_override(change, state, arg, step_name=state.step)
                 coordinator.reset()
             else:
                 on_event({"type": "awaiting_user_input",
