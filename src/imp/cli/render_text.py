@@ -6,8 +6,7 @@ prefixed (§9); structural chrome (headers, breadcrumbs) stays plain.
 
 Default: thinking and tool bursts are dropped; subagents expand (their prose +
 structured return value); context folds still collapse to a one-line summary.
---full: every fold expanded inline (Task 13). Same content the TUI shows after
-expand-all.
+--full: every fold expanded inline (Task 13).
 """
 from __future__ import annotations
 
