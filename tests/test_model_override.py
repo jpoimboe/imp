@@ -79,3 +79,38 @@ def test_apply_initializes_none_resolved_steps(monkeypatch) -> None:
 
     assert st.resolved_steps == {
         "brainstorm": ProviderModel("claude_code", "claude-fable-5")}
+
+
+def test_resolve_current_model_prefers_step_override() -> None:
+    from imp.engine.model_override import resolve_current_model
+
+    wf = _Workflow([_Step("brainstorm", "high")])
+    st = _state(
+        {"brainstorm": ProviderModel("openai", "gpt-5.5")},
+        {"high": ProviderModel("claude_code", "claude-opus-4-8[1m]")})
+    assert resolve_current_model(st, wf, object(), "brainstorm") == ProviderModel(
+        "openai", "gpt-5.5")
+
+
+def test_resolve_current_model_uses_tier_when_no_override() -> None:
+    from imp.engine.model_override import resolve_current_model
+
+    wf = _Workflow([_Step("brainstorm", "high")])
+    st = _state(
+        None, {"high": ProviderModel("claude_code", "claude-opus-4-8[1m]")})
+    assert resolve_current_model(st, wf, object(), "brainstorm") == ProviderModel(
+        "claude_code", "claude-opus-4-8[1m]")
+
+
+def test_resolve_current_model_resolves_tiers_when_unresolved(monkeypatch) -> None:
+    import imp.engine.model_override as mod
+    from imp.engine.model_override import resolve_current_model
+
+    wf = _Workflow([_Step("brainstorm", "high")])
+    st = _state(None, None)  # opening prompt: nothing resolved yet
+    monkeypatch.setattr(
+        mod, "resolve_run",
+        lambda workflow, config: (
+            {"high": ProviderModel("anthropic", "claude-fable-5[1m]")}, {}, {}))
+    assert resolve_current_model(st, wf, object(), "brainstorm") == ProviderModel(
+        "anthropic", "claude-fable-5[1m]")

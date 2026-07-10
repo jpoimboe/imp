@@ -7,6 +7,7 @@ from imp.engine.loader import load_workflow
 from imp.engine.state import State
 from imp.providers.config import ProviderModel
 from imp.providers.model_arg import parse_model_arg
+from imp.providers.resolve import resolve_run
 
 
 def current_provider_model(state: Any, workflow: Any, step_name: str) -> ProviderModel:
@@ -16,6 +17,20 @@ def current_provider_model(state: Any, workflow: Any, step_name: str) -> Provide
     step = next(s for s in workflow.flat_steps() if s.name == step_name)
     assert state.resolved_tiers is not None
     return cast(ProviderModel, state.resolved_tiers[step.tier])
+
+
+def resolve_current_model(
+    state: Any, workflow: Any, config: Any, step_name: str,
+) -> ProviderModel:
+    """step_name's current model: override, else tier default; total when unresolved."""
+    steps = state.resolved_steps or {}
+    if step_name in steps:
+        return cast(ProviderModel, steps[step_name])
+    tiers = state.resolved_tiers
+    if tiers is None:
+        tiers, _, _ = resolve_run(workflow, config)
+    step = next(s for s in workflow.flat_steps() if s.name == step_name)
+    return cast(ProviderModel, tiers[step.tier])
 
 
 def apply_model_override(
