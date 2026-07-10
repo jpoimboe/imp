@@ -1,23 +1,23 @@
 # imp operator notes
 
-Runbook for operating a running imp change.
+Runbook for operating a running imp Quest.
 
-## Unblocking a paused change
+## Unblocking a paused Quest
 
-- A running change executes from a **gitignored `.imp/change/workflow`
-  snapshot** that shadows its branch (`change.py` — `workflow_dir` returns the
+- A running Quest executes from a **gitignored `.imp/quest/workflow`
+  snapshot** that shadows its branch (`quest.py` — `workflow_dir` returns the
   snapshot when present, else `live_workflow_dir`). Engine *code* fixes deploy on
   ff-merge (editable pipx install → `main`'s `src/`); workflow *assets and
   scripts* do not — the snapshot wins.
-- **Consequence:** cherry-picking a workflow fix onto a paused change's branch is
-  **inert** when the change has a snapshot (the normal case). To unblock, edit
-  the snapshot directly (`.imp/change/workflow/workflow.yaml` plus `scripts/`); a
+- **Consequence:** cherry-picking a workflow fix onto a paused Quest's branch is
+  **inert** when the Quest has a snapshot (the normal case). To unblock, edit
+  the snapshot directly (`.imp/quest/workflow/workflow.yaml` plus `scripts/`); a
   config fix goes in the gitignored local layer `<worktree>/.imp/config.yaml`.
   The old cherry-pick-onto-branch recipe only works when there is *no* snapshot.
 - **Skew deadlock:** the snapshot is taken once and never auto-refreshed (the
   `--refresh-workflow` re-snapshot is unbuilt — `executor.py` references it only
-  as a hypothetical). A change that edits its own `plan-writer` / `spec-writer`
+  as a hypothetical). A Quest that edits its own `plan-writer` / `spec-writer`
   *and* adds an invariant runs the OLD writers while `review` enforces the NEW
   invariant, producing an infinite remove/restore loop; `max_loops` is the only
-  backstop. Recognize it when a change loops on "removing/restoring its own
+  backstop. Recognize it when a Quest loops on "removing/restoring its own
   plan/workflow file"; unblock by editing the snapshot.
