@@ -22,9 +22,13 @@ names rather than guessing them.
 - `imp show` — the board: active in-flight changes plus the Backlog (including
   parked / `saved` changes).
 - `imp show --all` — also includes completed and abandoned past changes.
-- `imp search <query>` — search the archive (completed, abandoned, and left
-  conversations) for changes whose title or id contains `<query>` (a required
-  substring; bare `imp search` errors).
+- `imp search <query>` — a live-and-archive scout: search **active** (in-flight +
+  drafts), **backlog**, and **archive** changes for `<query>` as a case-insensitive
+  substring of a change's id, title, or conversation content (a required substring;
+  bare `imp search` errors). Composable `--active` / `--backlog` / `--archived` flags
+  scope it to those zones; with none given, all three are searched. Default output is
+  grep-style matched excerpts per change; `-l` / `--list` prints one terse line per
+  change (`id  title  [zone]`).
 
 Summarize the rows in plain language (what is in flight, what is parked, what is
 finished); do not invent changes that the commands did not list.

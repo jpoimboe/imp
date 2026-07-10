@@ -94,3 +94,18 @@ def test_introspect_documents_bounded_output_techniques() -> None:
     # scan-then-zoom: raw tier is opt-in, in both spellings
     assert "--full" in body
     assert "full=True" in body
+
+
+def test_introspect_search_entry_spans_all_zones_and_content() -> None:
+    body = load_agent_skill(_skills_dir(), "imp-introspect")
+    low = body.lower()
+    # imp search now spans active + backlog + archive, not archive-only.
+    for zone in ("active", "backlog", "archive"):
+        assert zone in low, zone
+    # It matches conversation content, not just id/title.
+    assert "conversation content" in low
+    # Composable zone flags and the terse -l list are documented.
+    for flag in ("--active", "--backlog", "--archived", "-l"):
+        assert flag in body, flag
+    # The stale archive-only framing is gone.
+    assert "search the archive (completed, abandoned, and left" not in body
