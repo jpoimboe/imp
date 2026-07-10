@@ -2439,6 +2439,21 @@ def test_compose_position_row_omits_title_segment_when_untitled() -> None:
     assert row == ("z9gixx · implementation phase · plan 1/1 · task 1/3 · m")
 
 
+def test_compose_position_row_starts_with_title_when_change_id_is_none() -> None:
+    from imp.cli.live_driver import compose_position_row
+    titled = compose_position_row(activity=_pos_activity(), change_id=None,
+                                  title="streaming footer", prompt_tokens=None,
+                                  color=False, width=80)
+    # No id -> row starts with the title, no leading separator.
+    assert titled == ("streaming footer · implementation phase · plan 1/1 · "
+                      "task 1/3 · m")
+    untitled = compose_position_row(activity=_pos_activity(), change_id=None,
+                                    title="", prompt_tokens=None, color=False,
+                                    width=80)
+    # No id and no title -> row starts with the phase.
+    assert untitled == "implementation phase · plan 1/1 · task 1/3 · m"
+
+
 def test_compose_position_row_context_bar_only_for_agent_kind() -> None:
     from imp.cli.live_driver import compose_position_row
     agent = compose_position_row(activity=_pos_activity(kind="agent"), change_id="z",
