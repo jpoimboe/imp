@@ -9,6 +9,29 @@ from imp.engine.state import State
 from tests.conftest import _seed_control
 
 
+def _rewrite_phase_label(root: Path, label: str) -> None:
+    wf = root / "imp" / "workflows" / "imp" / "workflow.yaml"
+    wf.write_text(
+        "name: t\ndescription: \"\"\n"
+        "phases:\n"
+        f"  - name: p\n    label: {label}\n    steps:\n"
+        "      - {name: s, file: agents/stub.md}\n"
+    )
+
+
+def test_create_draft_seeds_phase_label_from_first_step(tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+    _rewrite_phase_label(tmp_path, "intake phase")
+    ch = Change.create_draft(tmp_path, title="X", change_id="phlbl1", base_branch="main")
+    assert State.load(ch.state_dir).phase_label == "intake phase"
+
+
+def test_create_draft_phase_label_none_when_phase_unlabeled(tmp_path: Path) -> None:
+    _seed_control(tmp_path)  # the seeded phase 'p' has no label
+    ch = Change.create_draft(tmp_path, title="X", change_id="phlbl0", base_branch="main")
+    assert State.load(ch.state_dir).phase_label is None
+
+
 def _park_draft(tmp_path: Path, cid: str) -> Change:
     ch = Change.create_draft(tmp_path, title="X", change_id=cid, base_branch="main")
     st = State.load(ch.state_dir)
