@@ -569,7 +569,12 @@ class NarrativeBuilder:
         top_phase, top_plan = _split_phase_label(top.phase_label if top is not None else None)
         top_counter = (top.live_label or top.label) if top is not None else None
         if self._reset_wait is not None:
-            position = _join(top.phase_label, top.live_label or top.label) if top else None
+            if top is None:
+                position = None
+            elif top.position_label:
+                position = _join(top.phase_label, top.live_label or top.label)
+            else:
+                position = top.phase_label
             return Activity(
                 position=position,
                 verb=self._reset_wait.verb,

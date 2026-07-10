@@ -2684,3 +2684,43 @@ def test_seed_pending_reply_lifts_replay_suppression_on_resume() -> None:
     # suppression at it and emits the echo.
     drv.seed_pending_reply("resume reply")
     assert out.getvalue().count("> resume reply") == 1
+
+
+def test_reset_wait_does_not_re_emit_running_step_header() -> None:
+    # A running non-position_label agent step interrupted by a hinted rate-limit
+    # wait keeps its single header; the wait banner must not print it a 2nd time.
+    drv, out = _driver()
+    for e in [
+        ev("1", "change_created", change_id=1, title="x"),
+        ev("2", "step_started", step="reviewer", kind="agent",
+           phase="integration", phase_label="integration phase",
+           label="reviewing merge conflicts", model="m", provider="anthropic"),
+        ev("3", "agent_retry", agent_id="step:integration/reviewer",
+           category="rate_limit", attempt=1, backoff_seconds=2940.0, hinted=True),
+    ]:
+        drv.on_event(e)
+    body = _body(out)
+    header_hits = [ln for ln in body if "reviewing merge conflicts" in ln]
+    assert len(header_hits) == 1
+
+
+def test_body_less_deferred_leaf_emits_no_separate_header() -> None:
+    # A visible body-less step (acquire, has a label, no command/agent) collapses
+    # to a single `<phase> · <label> · complete` leaf; the mid-step position
+    # header must NOT also print while it is the open top-of-stack.
+    drv, out = _driver()
+    events = [
+        ev("1", "change_created", change_id=1, title="x"),
+        ev("2", "step_started", step="wait-for-head", kind="acquire",
+           phase="integration", phase_label="integration phase",
+           label="waiting in merge queue"),
+        ev("3", "step_completed", step="wait-for-head", kind="acquire",
+           action={"verb": "continue"}, var_mutations={}),
+    ]
+    for e in events:
+        drv.on_event(e)
+    drv.finish()
+    body = _body(out)
+    hits = [ln for ln in body if "waiting in merge queue" in ln]
+    assert hits == ["integration phase · waiting in merge queue · complete"]
+    assert body == _render_body(events)   # live == imp log (single collapsed leaf)

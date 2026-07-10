@@ -679,7 +679,7 @@ class LiveDriver:
         if position is None or position == self._last_header_position:
             return
         top = self._builder._step_stack[-1]
-        if rt.frame_suppressed(top):
+        if rt.frame_suppressed(top) or rt.deferred_leaf(top):
             return
         self._prev_prose = True
         self._print_lines(

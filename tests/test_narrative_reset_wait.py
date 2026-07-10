@@ -31,8 +31,9 @@ def test_hinted_rate_limit_retry_sets_wait_and_countdown() -> None:
     act = b.current_activity()
     assert act.verb == "waiting for limit reset"
     assert act.countdown_total == 2940.0
-    # position breadcrumb and model are preserved (not None with a step on the stack)
-    assert act.position == "convergence phase · sweeping deferred tasks"
+    # position breadcrumb is the phase label alone for a non-position_label step
+    # (matches steady state, so entering the wait is position-neutral); model preserved
+    assert act.position == "convergence phase"
     assert act.model == "claude"
 
 
@@ -126,6 +127,37 @@ def test_non_resume_event_leaves_wait_set() -> None:
     b.add(ev("9", "warning", message="a transient note"))
     assert b._reset_wait is not None
     assert b.current_activity().verb == "waiting for limit reset"
+
+
+def test_reset_wait_position_matches_steady_state_for_non_position_label() -> None:
+    b = _build()
+    before = b.current_activity().position
+    b.add(ev("3", "agent_retry", category="rate_limit", attempt=1,
+             backoff_seconds=2940.0, hinted=True))
+    during = b.current_activity().position
+    assert before == "convergence phase"
+    assert during == before
+
+
+def _build_position_label() -> nv.NarrativeBuilder:
+    b = nv.NarrativeBuilder()
+    b.add(ev("1", "change_created", change_id=1, title="x"))
+    b.add(ev("2", "step_started", step="task-lead", kind="agent",
+             phase="planning", phase_label="planning phase",
+             label="plan 1/3", model="claude", position_label=True))
+    return b
+
+
+def test_reset_wait_position_matches_steady_state_for_position_label() -> None:
+    b = _build_position_label()
+    before = b.current_activity().position
+    b.add(ev("3", "agent_retry", category="rate_limit", attempt=1,
+             backoff_seconds=2940.0, hinted=True))
+    during = b.current_activity().position
+    # a position_label step carries its label as a position counter, so the
+    # breadcrumb joins phase + label in both steady state and the wait
+    assert before == "planning phase · plan 1/3"
+    assert during == before
 
 
 def test_running_subagent_wait_propagates_to_parent() -> None:
