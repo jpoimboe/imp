@@ -24,6 +24,7 @@ from typing import Any
 import pytest
 
 from imp.agents.runner import AgentInvocation, ChangeContext
+from imp.engine.awaiting_user_input import AwaitingUserInput
 from imp.engine.completion import build_continuation_fn
 from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
 from imp.providers.codex_runner import CodexAgentRunner
@@ -111,6 +112,7 @@ async def test_codex_live_round_trip_under_production_flags(tmp_path: Path) -> N
     ev_lines: list[str] = []
     tool_calls: list[Any] = []
     last_events: list[Any] = []
+    parked_attempts = 0
     for attempt in range(_ROUND_TRIP_ATTEMPTS):
         # Fresh per-attempt event log + transcript so a failed attempt's events
         # don't bleed into the assertions on the successful one.
@@ -123,10 +125,19 @@ async def test_codex_live_round_trip_under_production_flags(tmp_path: Path) -> N
             continuation_fn=nudge,
         )
         events: list[Any] = []
-        async for ev in runner.run(inv):
-            events.append(ev)
-            if ev.get("type") == "agent_output":
-                break
+        try:
+            async for ev in runner.run(inv):
+                events.append(ev)
+                if ev.get("type") == "agent_output":
+                    break
+        except AwaitingUserInput:
+            # Headless nudge-then-park backstop fired: the model ended two turns
+            # without complete_step. That is a non-completing attempt — the same
+            # failure a quiet loop exit produces, surfacing as an exception — so
+            # record the partial events and retry rather than aborting the test.
+            parked_attempts += 1
+            last_events = events
+            continue
         last_events = events
         ev_path = adir / "events.jsonl"
         ev_lines = ev_path.read_text().splitlines() if ev_path.exists() else []
@@ -142,8 +153,8 @@ async def test_codex_live_round_trip_under_production_flags(tmp_path: Path) -> N
     else:
         raise AssertionError(
             f"codex never completed the round-trip in {_ROUND_TRIP_ATTEMPTS} "
-            f"attempts (external codex/LLM nondeterminism). Last attempt's "
-            f"events: {last_events}"
+            f"attempts ({parked_attempts} parked after the nudge; external "
+            f"codex/LLM nondeterminism). Last attempt's events: {last_events}"
         )
 
     # The web_search assertions hold on any attempt; check them on the winner.
