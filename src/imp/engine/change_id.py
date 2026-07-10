@@ -7,6 +7,7 @@ create time, not avoided by a date."""
 
 from __future__ import annotations
 
+import random
 import secrets
 
 _CONSONANTS = "bdfghjklmnprstvz"
@@ -17,6 +18,10 @@ _DIGITS = "0123456789"
 # surfaces one. All four letters are drawn from _CONSONANTS / _VOWELS.
 _DENYLIST = frozenset({"puta", "kaka", "homo", "dodo", "nazi"})
 
+# A cryptographically strong RNG is the default so ids are unguessable; it is
+# injectable (any random.Random) purely so tests can seed for determinism.
+_SYSTEM_RANDOM = secrets.SystemRandom()
+
 
 def _is_clean_stem(stem: str) -> bool:
     """True when the four-letter CVCV stem is not in the denylist."""
@@ -26,34 +31,39 @@ def _is_clean_stem(stem: str) -> bool:
 _STEM_DRAWS = 100  # bounded resamples for a distinct stem; saturation is impossible in practice
 
 
-def _draw_stem() -> str:
+def _draw_stem(rng: random.Random) -> str:
     return (
-        secrets.choice(_CONSONANTS)
-        + secrets.choice(_VOWELS)
-        + secrets.choice(_CONSONANTS)
-        + secrets.choice(_VOWELS)
+        rng.choice(_CONSONANTS)
+        + rng.choice(_VOWELS)
+        + rng.choice(_CONSONANTS)
+        + rng.choice(_VOWELS)
     )
 
 
-def _draw_clean_stem() -> str:
+def _draw_clean_stem(rng: random.Random) -> str:
     """A denylist-clean CVCV stem (resamples past the denylist)."""
     while True:
-        stem = _draw_stem()
+        stem = _draw_stem(rng)
         if _is_clean_stem(stem):
             return stem
 
 
-def new_change_id(existing_stems: frozenset[str] = frozenset()) -> str:
+def new_change_id(
+    existing_stems: frozenset[str] = frozenset(),
+    rng: random.Random = _SYSTEM_RANDOM,
+) -> str:
     """6 ref-safe chars: consonant, vowel, consonant, vowel, digit, digit.
 
     Resamples the stem past `existing_stems` (bounded to `_STEM_DRAWS` tries);
     if every try collides (only reachable with a saturated set — impossible in
     practice) it accepts the last clean stem, so termination is guaranteed. The
-    default empty set reproduces the prior no-argument behavior.
+    default empty set reproduces the prior no-argument behavior. `rng` defaults
+    to a secrets-backed SystemRandom and is injectable only for deterministic
+    tests.
     """
-    stem = _draw_clean_stem()
+    stem = _draw_clean_stem(rng)
     for _ in range(_STEM_DRAWS):
         if stem not in existing_stems:
             break
-        stem = _draw_clean_stem()
-    return stem + secrets.choice(_DIGITS) + secrets.choice(_DIGITS)
+        stem = _draw_clean_stem(rng)
+    return stem + rng.choice(_DIGITS) + rng.choice(_DIGITS)
