@@ -68,3 +68,13 @@ def test_list_change_homes_delegates_to_live_change_ids(tmp_path: Path) -> None:
     _live_home(tmp_path, "wibo10")
     _live_home(tmp_path, "kobe47")
     assert _list_change_homes(tmp_path) == ["kobe47", "wibo10"]
+
+
+def test_mint_composition_avoids_live_stems(tmp_path: Path) -> None:
+    from imp.engine.change_id import new_change_id
+
+    for cid in ("kobe10", "mira20", "tavo30"):
+        _live_home(tmp_path, cid)
+    avoid = live_stems(tmp_path)
+    for _ in range(20000):
+        assert new_change_id(existing_stems=avoid)[:4] not in avoid

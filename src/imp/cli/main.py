@@ -58,7 +58,7 @@ from imp.engine.abandon import (
 )
 from imp.engine.archive import read as archive_read
 from imp.engine.awaiting_user_input import AwaitingUserInput
-from imp.engine.change import Change, live_change_ids
+from imp.engine.change import Change, live_change_ids, live_stems
 from imp.engine.change_id import new_change_id
 from imp.engine.errors import LayoutMismatch, LoadError, LoadErrors
 from imp.engine.events_digest import digest_event, full_line
@@ -723,7 +723,7 @@ async def _run_cleared_session(
 
     color = should_use_color(sys.stdout)
     change = Change.create_draft(
-        control, title="", change_id=new_change_id(),
+        control, title="", change_id=new_change_id(existing_stems=live_stems(control)),
         base_branch=base, origin="draft")
     _session_started = False
     try:
@@ -787,7 +787,7 @@ def _record_idea(args: argparse.Namespace, control: Path, base: str) -> int:
         return 2
     description = getattr(args, "opening", None) or ""
     seed = backlog.seed_opening({"title": title, "description": description})
-    change_id = new_change_id()
+    change_id = new_change_id(existing_stems=live_stems(control))
     try:
         Change.create_draft(
             control, title=title, change_id=change_id, base_branch=base,
@@ -956,7 +956,7 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
     opening_text = seed.seed_text
     color = should_use_color(sys.stdout)
 
-    change_id = new_change_id()
+    change_id = new_change_id(existing_stems=live_stems(control))
     # No auto-name: an unnamed Change has an empty title. The agent
     # names it via rename_change once intent is clear, or the user passes --title.
     title = seed.title if seed.title is not None else ""

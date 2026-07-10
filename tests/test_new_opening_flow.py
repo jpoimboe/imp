@@ -44,7 +44,7 @@ def stub_new(monkeypatch, tmp_path):
     monkeypatch.setattr(main, "should_use_color", lambda *a, **k: False)
     monkeypatch.setattr(main, "_term_width", lambda: 80)
     monkeypatch.setattr(main, "_editing_mode", lambda *a, **k: "emacs")
-    monkeypatch.setattr(main, "new_change_id", lambda: "z9y8x7")
+    monkeypatch.setattr(main, "new_change_id", lambda existing_stems=frozenset(): "z9y8x7")
     monkeypatch.setattr(
         main.Change, "create_draft",
         staticmethod(lambda *a, **k: SimpleNamespace(
