@@ -30,6 +30,7 @@ max_clean_tree_bounces
 max_reincarnations
 merge_commit
 outcome_history
+phase_label
 project_facts
 reincarnations
 resolved_steps
