@@ -139,6 +139,27 @@ def test_reset_wait_position_matches_steady_state_for_non_position_label() -> No
     assert during == before
 
 
+def _build_position_label() -> nv.NarrativeBuilder:
+    b = nv.NarrativeBuilder()
+    b.add(ev("1", "change_created", change_id=1, title="x"))
+    b.add(ev("2", "step_started", step="task-lead", kind="agent",
+             phase="planning", phase_label="planning phase",
+             label="plan 1/3", model="claude", position_label=True))
+    return b
+
+
+def test_reset_wait_position_matches_steady_state_for_position_label() -> None:
+    b = _build_position_label()
+    before = b.current_activity().position
+    b.add(ev("3", "agent_retry", category="rate_limit", attempt=1,
+             backoff_seconds=2940.0, hinted=True))
+    during = b.current_activity().position
+    # a position_label step carries its label as a position counter, so the
+    # breadcrumb joins phase + label in both steady state and the wait
+    assert before == "planning phase · plan 1/3"
+    assert during == before
+
+
 def test_running_subagent_wait_propagates_to_parent() -> None:
     b = _build()
     # Dispatch a subagent (no closing tool_result -> the fold stays running).
