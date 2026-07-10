@@ -2684,3 +2684,25 @@ def test_seed_pending_reply_lifts_replay_suppression_on_resume() -> None:
     # suppression at it and emits the echo.
     drv.seed_pending_reply("resume reply")
     assert out.getvalue().count("> resume reply") == 1
+
+
+def test_body_less_deferred_leaf_emits_no_separate_header() -> None:
+    # A visible body-less step (acquire, has a label, no command/agent) collapses
+    # to a single `<phase> · <label> · complete` leaf; the mid-step position
+    # header must NOT also print while it is the open top-of-stack.
+    drv, out = _driver()
+    events = [
+        ev("1", "change_created", change_id=1, title="x"),
+        ev("2", "step_started", step="wait-for-head", kind="acquire",
+           phase="integration", phase_label="integration phase",
+           label="waiting in merge queue"),
+        ev("3", "step_completed", step="wait-for-head", kind="acquire",
+           action={"verb": "continue"}, var_mutations={}),
+    ]
+    for e in events:
+        drv.on_event(e)
+    drv.finish()
+    body = _body(out)
+    hits = [ln for ln in body if "waiting in merge queue" in ln]
+    assert hits == ["integration phase · waiting in merge queue · complete"]
+    assert body == _render_body(events)   # live == imp log (single collapsed leaf)
