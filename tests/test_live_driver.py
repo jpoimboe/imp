@@ -2521,6 +2521,17 @@ def test_compose_subagent_rows_carry_the_slate_and_align_under_dark_theme() -> N
     assert pal.display_width(rows[0]) == 118           # padded to width-2, aligned with parent
 
 
+def test_compose_subagent_rows_prefix_child_arrow() -> None:
+    from imp.cli.live_driver import compose_subagent_rows
+    b = _sub_builder(("t1", "coder"))
+    rows = compose_subagent_rows(b, color=False, width=120,
+                                 now_iso="2026-01-01T00:00:00+00:00")
+    assert len(rows) == 1
+    # Two-column indent, then the child arrow marking the parent position row.
+    assert rows[0].startswith("  ↳ ")
+    assert rows[0][4:].lstrip().startswith("coder")   # role follows the arrow
+
+
 def test_compose_subagent_rows_render_plain_without_slate_under_ansi_theme() -> None:
     from imp.cli import palette as pal
     from imp.cli.live_driver import compose_subagent_rows
@@ -2534,6 +2545,7 @@ def test_compose_subagent_rows_render_plain_without_slate_under_ansi_theme() -> 
     assert len(rows) == 1
     assert not rows[0].startswith("\x1b[48")   # 16-color theme has no slate background
     assert rows[0].startswith("  ")            # still indented like the parent
+    assert "↳" in rows[0]                       # child arrow present
 
 
 def test_compose_status_appends_a_row_per_running_subagent() -> None:
