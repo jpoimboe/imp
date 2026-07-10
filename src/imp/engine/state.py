@@ -148,6 +148,7 @@ class State:
     guidance: str | None = None
     merge_commit: str | None = None
     step_label: str | None = None
+    phase_label: str | None = None
     held_lane: str | None = None          # lane key (base branch) this change holds
     held_acquire_step: str | None = None  # the acquiring step to rewind to on eviction
     route_label: str | None = None  # rule label threaded to the next step_started (consume-on-read)
@@ -223,6 +224,7 @@ class State:
             "id": self.id,
             "step": self.step,
             "step_label": self.step_label,
+            "phase_label": self.phase_label,
             "route_label": self.route_label,
             "step_attempt": self.step_attempt,
             "status": self.status,

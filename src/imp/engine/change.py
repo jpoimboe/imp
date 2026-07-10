@@ -313,6 +313,10 @@ class Change:
                 render_label(flat[0].label, change=None, log=None, state=None)
                 or flat[0].name
             ) if flat else None,
+            phase_label=(
+                render_label(flat[0].phase_label, change=None, log=None, state=None)
+                if flat[0].phase_label is not None else None
+            ) if flat else None,
             status="new",
             vars=apply_var_overrides(loaded_workflow.vars, config.var_overrides),
             loop_counts={},
@@ -390,6 +394,10 @@ class Change:
             step_label=(
                 render_label(flat[0].label, change=None, log=None, state=None)
                 or flat[0].name
+            ) if flat else None,
+            phase_label=(
+                render_label(flat[0].phase_label, change=None, log=None, state=None)
+                if flat[0].phase_label is not None else None
             ) if flat else None,
             status="new",
             vars=apply_var_overrides(loaded_workflow.vars, config.var_overrides),

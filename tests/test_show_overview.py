@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import io
+import json
+import os
 from contextlib import redirect_stdout
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -14,8 +17,36 @@ from imp.cli.main import (
     main,
     render_overview,
 )
-from imp.engine.change import Change
+from imp.engine.change import LAYOUT_VERSION, Change
+from imp.engine.state import State
 from tests.conftest import _seed_control
+
+_NOW = datetime(2026, 6, 20, 12, 0, 0, tzinfo=UTC)
+
+
+def _term(monkeypatch, cols):
+    monkeypatch.setattr("shutil.get_terminal_size",
+                        lambda fallback=(80, 24): os.terminal_size((cols, 24)))
+
+
+def _inflight_home(control, cid, *, title, phase_label, step_label,
+                   step="write", intent=None):
+    cdir = control / ".imp" / "changes" / cid
+    (cdir / "state").mkdir(parents=True)
+    (cdir / "change.json").write_text(json.dumps({
+        "id": cid, "title": title, "base_branch": "main",
+        "created_at": "2026-06-20T11:00:00+00:00",
+        "materialized": True, "layout_version": LAYOUT_VERSION}))
+    evs = [{"type": "step_started", "agent_id": None,
+            "timestamp": "2026-06-20T11:00:01+00:00",
+            "payload": {"step": step, "phase": "p", "phase_label": phase_label}}]
+    if intent is not None:
+        evs.insert(0, {"type": "opening_intent", "agent_id": None,
+                       "timestamp": "2026-06-20T11:00:00+00:00",
+                       "payload": {"text": intent}})
+    (cdir / "events.jsonl").write_text("\n".join(json.dumps(e) for e in evs) + "\n")
+    State(id=cid, status="running", step=step, step_attempt=0,
+          step_label=step_label, phase_label=phase_label).save(cdir / "state")
 
 
 def test_list_no_arg_renders_overview(tmp_path: Path, monkeypatch) -> None:
@@ -145,3 +176,43 @@ def test_no_pager_flag_propagates_to_pager(tmp_path: Path, monkeypatch) -> None:
     main(["show", "liveid"])
     main(["show", "liveid", "--no-pager"])
     assert captured == [False, True]
+
+
+def test_overview_shows_full_phase_and_step_on_wide_terminal(tmp_path, monkeypatch) -> None:
+    import imp.cli.main as m
+    _seed_control(tmp_path)
+    _inflight_home(tmp_path, "phid01", title="Widget",
+                   phase_label="implementation phase · plan 1/3 · task 1/5",
+                   step_label="coding")
+    _term(monkeypatch, 130)
+    out = "\n".join(m._overview_lines(tmp_path, show_all=False, now=_NOW, color=False))
+    assert "implementation phase · plan 1/3 · task 1/5 · coding" in out
+
+
+def test_overview_header_aligns_with_rows(tmp_path, monkeypatch) -> None:
+    import imp.cli.main as m
+    _seed_control(tmp_path)
+    _inflight_home(tmp_path, "algn01", title="ZZZ",
+                   phase_label="implementation phase · plan 1/3 · task 1/5",
+                   step_label="coding")
+    _term(monkeypatch, 80)
+    lines = m._overview_lines(tmp_path, show_all=False, now=_NOW, color=False)
+    header = lines[0]
+    row = next(ln for ln in lines if ln.startswith("algn01"))
+    # Same computed status_width -> NAME column starts at the same offset.
+    assert header.index("NAME") == row.index("ZZZ")
+
+
+def test_overview_subfloor_drops_suffix_no_overflow(tmp_path, monkeypatch) -> None:
+    import imp.cli.main as m
+    _seed_control(tmp_path)
+    intent = "please investigate the flaky integration test that keeps timing out on ci"
+    _inflight_home(tmp_path, "subf01", title="", phase_label="spec phase",
+                   step_label="writing spec", intent=intent)
+    _term(monkeypatch, 80)
+    lines = m._overview_lines(tmp_path, show_all=False, now=_NOW, color=False)
+    header = lines[0]
+    row = next(ln for ln in lines if ln.startswith("subf01"))
+    assert "spec phase" not in row                    # suffix dropped
+    assert "(" not in row.split("please")[0]          # no ` (…)` before NAME
+    assert header.index("NAME") == row.index("please")  # cell width == status_width

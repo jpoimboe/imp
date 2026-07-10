@@ -38,6 +38,7 @@ ID_W = 6        # bare 6-char Change id
 STATUS_W = 35   # merged status + " (step-label)"; preserves the old 13+2+20 budget
 AGE_W = 7       # header "UPDATED" (7) aligns with the ≤4-char relative-age data
 NAME_MIN = 10   # never shrink the trailing NAME column below this
+NAME_CAP = 60   # cap a long name/intent's pull on the shared width so STATUS keeps its content
 
 # Fixed columns plus their three 2-space gaps; the NAME column gets whatever
 # terminal width remains after this.
@@ -74,32 +75,80 @@ def name_budget(*, indent: int = 0) -> int:
     return max(NAME_MIN, cols - _PREFIX_W - indent)
 
 
-def header_line(*, color: bool) -> str:
-    text = (f"{'ID':<{ID_W}}  {'STATUS':<{STATUS_W}}  "
+def overview_widths(
+    rows: list[tuple[str, str | None, str]],
+) -> tuple[int, int]:
+    """Compute (status_width, name_width) for the overview from its rendered
+    rows. Each row is (status_word, inner_label_or_None, name_text). STATUS and
+    NAME share the flexible region left after the fixed ID/UPDATED columns and
+    the three 2-space gaps; NAME is the first claimant (capped at NAME_CAP for
+    sizing) and STATUS takes the leftover, floored at the status-word width and
+    grown only up to the width its own content needs."""
+    cols = shutil.get_terminal_size((80, 24)).columns
+    region = cols - (ID_W + AGE_W + 6)     # three 2-space gaps
+
+    def cell_len(status: str, label: str | None) -> int:
+        return len(status) if label is None else len(status) + len(label) + 3
+
+    status_floor = max([len("STATUS")] + [len(s) for s, _, _ in rows])
+    status_content = max([len("STATUS")] + [cell_len(s, lbl) for s, lbl, _ in rows])
+    name_content = min(NAME_CAP, max([0] + [len(n) for _, _, n in rows]))
+
+    status_width = min(max(region - name_content, status_floor), status_content)
+    status_width = min(status_width, max(status_floor, region - NAME_MIN))
+    name_width = max(NAME_MIN, region - status_width)
+    return status_width, name_width
+
+
+def header_line(*, color: bool, status_width: int = STATUS_W) -> str:
+    text = (f"{'ID':<{ID_W}}  {'STATUS':<{status_width}}  "
             f"{'UPDATED':<{AGE_W}}  NAME")
     return pal.ansi(text, "dim", enabled=color)
 
 
-def _status_segment(status: str, step: str, step_label: str | None) -> str:
-    """Status word plus dim ` (label)` suffix; bare word for stepless rows."""
+def compose_status_label(step: str, step_label: str | None,
+                         phase_label: str | None) -> str | None:
+    """The inner STATUS label: `phase_label · step` when a phase label is
+    present, else the step label (or the raw step name). None for a stepless
+    row so the caller renders the bare status word."""
     if not step or step == "-":
-        return status
+        return None
     label = step_label or step
-    budget = STATUS_W - len(status) - 3   # one space + "(" + ")"
-    if budget >= 1 and len(label) > budget:
+    return f"{phase_label} · {label}" if phase_label else label
+
+
+def _status_segment(status: str, step: str, step_label: str | None,
+                    *, phase_label: str | None = None,
+                    status_width: int = STATUS_W) -> str:
+    """Status word plus dim ` (label)` suffix; bare word for stepless rows.
+
+    When the cell is squeezed so tight there is no room for a ` (…)` suffix
+    (budget < 1), the suffix is dropped and the bare status word is returned,
+    so the segment length is always <= status_width and the cell never spills.
+    """
+    label = compose_status_label(step, step_label, phase_label)
+    if label is None:
+        return status
+    budget = status_width - len(status) - 3   # one space + "(" + ")"
+    if budget < 1:
+        return status
+    if len(label) > budget:
         label = _truncate(label, budget)
     return f"{status} ({label})"
 
 
 def format_change_line(*, change_id: str, title: str, status: str, step: str,
                        step_label: str | None = None,
+                       phase_label: str | None = None,
                        last_iso: str | None, now: datetime,
-                       color: bool, name_width: int = 80, dim: bool = False,
+                       color: bool, name_width: int = 80,
+                       status_width: int = STATUS_W, dim: bool = False,
                        intent: str | None = None) -> str:
     raw = title.strip()
     id_pad = f"{change_id:<{ID_W}}"
-    visible = _status_segment(status, step, step_label)
-    status_pad = f"{visible:<{STATUS_W}}"
+    visible = _status_segment(status, step, step_label,
+                              phase_label=phase_label, status_width=status_width)
+    status_pad = f"{visible:<{status_width}}"
     age_pad = f"{relative_age(last_iso, now=now):<{AGE_W}}"
     # NAME is the final column, so it needs no trailing pad — only a cap so a
     # very long name can't spill past the terminal's right edge.
@@ -115,7 +164,7 @@ def format_change_line(*, change_id: str, title: str, status: str, step: str,
         return pal.ansi(line, "dim", enabled=color)
     name_cell = pal.ansi(name_text, "dim", enabled=color) if not raw else name_text
     codes = STATUS_COLORS.get(status, ())
-    pad = " " * (STATUS_W - len(visible))
+    pad = " " * (status_width - len(visible))
     if color:
         suffix = visible[len(status):]            # " (label)" or ""
         status_word = pal.ansi(status, *codes, enabled=True) if codes else status

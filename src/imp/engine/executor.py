@@ -466,6 +466,10 @@ async def run_change(
                     render_label(flat[nxt].label, change, log, state)
                     or flat[nxt].name
                 )
+                state.phase_label = (
+                    render_label(flat[nxt].phase_label, change, log, state)
+                    if flat[nxt].phase_label is not None else None
+                )
                 state.resume_pending = None
                 state.interrupt_pending = False
                 state.retry_continue_pending = False
@@ -493,6 +497,10 @@ async def run_change(
                 state.step_label = (
                     render_label(flat[target_idx].label, change, log, state)
                     or flat[target_idx].name
+                )
+                state.phase_label = (
+                    render_label(flat[target_idx].phase_label, change, log, state)
+                    if flat[target_idx].phase_label is not None else None
                 )
                 if action.resume:
                     # Single-shot reset: a resumed step must not inherit a stale
@@ -626,6 +634,7 @@ def _complete(change: Change, state: State, log: EventLog) -> RunResult:
     state.held_acquire_step = None
     state.step = None
     state.step_label = None
+    state.phase_label = None
     state.route_label = None
     from imp.engine import merge_queue
     if not state.merge_commit:

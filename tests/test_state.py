@@ -497,3 +497,22 @@ def test_parse_events_jsonl_empty_is_empty_list() -> None:
     from imp.engine.state import parse_events_jsonl
 
     assert parse_events_jsonl(b"") == []
+
+
+def test_state_persists_phase_label(tmp_path: Path) -> None:
+    s = State(id="c1", step="finalize", step_attempt=0, status="running",
+              step_label="finalizing",
+              phase_label="implementation phase · plan 1/3")
+    s.save(tmp_path)
+    raw = json.loads((tmp_path / "state.json").read_text())
+    assert raw["phase_label"] == "implementation phase · plan 1/3"
+    back = State.load(tmp_path)
+    assert back.phase_label == "implementation phase · plan 1/3"
+
+
+def test_state_phase_label_defaults_none(tmp_path: Path) -> None:
+    s = State(id="c1", step=None, step_attempt=0, status="new")
+    s.save(tmp_path)
+    raw = json.loads((tmp_path / "state.json").read_text())
+    assert raw["phase_label"] is None
+    assert State.load(tmp_path).phase_label is None

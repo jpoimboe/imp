@@ -222,6 +222,47 @@ def test_unnamed_when_no_intent():
     assert "(unnamed)" in line
 
 
+def test_status_cell_includes_phase_label():
+    line = format_change_line(**_row(status="running", step="write_spec"),
+                              step_label="writing spec",
+                              phase_label="spec phase", color=False)
+    assert "running (spec phase · writing spec)" in line
+
+
+def test_status_cell_omits_phase_when_none():
+    line = format_change_line(**_row(status="running", step="write_spec"),
+                              step_label="writing spec",
+                              phase_label=None, color=False)
+    assert "running (writing spec)" in line
+    assert "·" not in line
+
+
+def test_status_width_narrows_label_budget():
+    # status_width 20 -> budget 20-7-3 = 10, so a 30-char label is clipped.
+    line = format_change_line(**_row(status="running", step="x"),
+                              step_label="a" * 30, status_width=20, color=False)
+    assert "…" in line
+    assert "a" * 30 not in line
+
+
+def test_status_subfloor_drops_suffix_no_overflow():
+    # status_width 8 -> budget 8-7-3 = -2 < 1, so the suffix is dropped and the
+    # bare status word is rendered (never the untruncated label).
+    line = format_change_line(**_row(status="running", step="x"),
+                              step_label="a very long label that will not fit",
+                              status_width=8, color=False)
+    assert "running" in line
+    assert "(" not in line            # suffix dropped entirely
+    assert "a very long label" not in line
+
+
+def test_header_line_honors_status_width():
+    from imp.cli.change_row import ID_W
+    h = header_line(color=False, status_width=25)
+    # UPDATED starts after ID + gap + STATUS(25) + gap.
+    assert h.index("UPDATED") == ID_W + 2 + 25 + 2
+
+
 def test_status_colors_have_new_and_no_errored() -> None:
     from imp.cli.change_row import STATUS_COLORS
     assert "new" in STATUS_COLORS
@@ -241,3 +282,74 @@ def test_status_colors_have_new_and_no_errored() -> None:
 def test_format_timestamp_trims_to_seconds(iso, expected):
     from imp.cli.change_row import format_timestamp
     assert format_timestamp(iso) == expected
+
+
+def test_status_cell_phase_label_color_path():
+    line = format_change_line(**_row(status="running", step="write_spec"),
+                              step_label="writing spec",
+                              phase_label="spec phase", color=True)
+    assert "\x1b[32mrunning\x1b[0m" in line
+    assert "\x1b[2m (spec phase · writing spec)\x1b[0m" in line
+
+
+def test_compose_status_label_variants():
+    from imp.cli.change_row import compose_status_label
+    assert compose_status_label("-", None, None) is None
+    assert compose_status_label("", "x", "p") is None
+    assert compose_status_label("write", "writing", None) == "writing"
+    assert compose_status_label("write", None, None) == "write"
+    assert compose_status_label("write", "writing", "spec phase") == "spec phase · writing"
+
+
+def _term(monkeypatch, cols):
+    import os
+    monkeypatch.setattr("shutil.get_terminal_size",
+                        lambda fallback=(80, 24): os.terminal_size((cols, 24)))
+
+
+def test_overview_widths_80col_name_full_status_clips(monkeypatch):
+    from imp.cli.change_row import overview_widths
+    _term(monkeypatch, 80)
+    # region = 80 - (6 + 7 + 6) = 61; name_content = 20; status_content = 7+40+3 = 50.
+    status_w, name_w = overview_widths([("running", "x" * 40, "y" * 20)])
+    assert (status_w, name_w) == (41, 20)
+
+
+def test_overview_widths_wide_terminal_shows_full_status(monkeypatch):
+    from imp.cli.change_row import overview_widths
+    _term(monkeypatch, 130)
+    # region = 111; status_content = 50 fits, so STATUS gets its content width.
+    status_w, name_w = overview_widths([("running", "x" * 40, "y" * 20)])
+    assert (status_w, name_w) == (50, 61)
+
+
+def test_overview_widths_name_cap_protects_status(monkeypatch):
+    from imp.cli.change_row import overview_widths
+    _term(monkeypatch, 130)
+    # An 80-char name is capped at 60 for sizing, so STATUS still gets its 50.
+    status_w, _name_w = overview_widths([("running", "x" * 40, "y" * 80)])
+    assert status_w == 50
+
+
+def test_overview_widths_subfloor_floors_status_to_word(monkeypatch):
+    from imp.cli.change_row import overview_widths
+    _term(monkeypatch, 80)
+    # region = 61; a long intent hits the 60 cap so STATUS floors to the word (7).
+    status_w, name_w = overview_widths([("running", "x" * 40, "i" * 80)])
+    assert (status_w, name_w) == (7, 54)
+
+
+def test_overview_widths_floors_name_at_min(monkeypatch):
+    from imp.cli.change_row import NAME_MIN, overview_widths
+    _term(monkeypatch, 20)
+    # region = 1; STATUS keeps its 6-wide header floor, NAME never drops below NAME_MIN.
+    status_w, name_w = overview_widths([("new", None, "a")])
+    assert name_w == NAME_MIN
+    assert status_w == 6
+
+
+def test_overview_widths_empty_rows(monkeypatch):
+    from imp.cli.change_row import overview_widths
+    _term(monkeypatch, 80)
+    # region = 61; no rows -> status_floor=status_content=6, name_content=0.
+    assert overview_widths([]) == (6, 55)

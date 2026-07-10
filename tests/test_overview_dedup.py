@@ -166,6 +166,30 @@ def test_left_conversation_only_in_all_history(tmp_path: Path) -> None:
     assert not any(ln.startswith("delta") for ln in plain_lines)
 
 
+def test_status_row_carries_phase_label() -> None:
+    import json
+
+    import imp.cli.main as m
+    state = json.dumps({"status": "running", "step": "s", "step_label": "L",
+                        "phase_label": "P"}).encode()
+    change = json.dumps({"title": "T", "created_at": "2026-06-20T11:00:00+00:00"}).encode()
+    row = m._status_row("cid", state, change, "2026-06-20T11:00:00+00:00")
+    assert len(row) == 8
+    assert row[7] == "P"
+
+
+def test_completed_rows_pad_phase_label_slot(tmp_path: Path, monkeypatch) -> None:
+    import imp.cli.main as m
+    from tests.conftest import _seed_control
+    _seed_control(tmp_path)
+    monkeypatch.setattr(
+        m.archive_read, "completed_rows",
+        lambda control: [("cid", "completed", "-", "iso", "Title", "created", None)])
+    monkeypatch.setattr(m, "_status_rows", lambda control: [])
+    rows = m._completed_rows(tmp_path)
+    assert rows == [("cid", "completed", "-", "iso", "Title", "created", None, None)]
+
+
 def test_history_rows_threads_live_ids(tmp_path: Path) -> None:
     _seed_control(tmp_path)
     _archive_completed(tmp_path, "gamma")
