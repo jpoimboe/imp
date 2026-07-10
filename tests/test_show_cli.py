@@ -33,10 +33,10 @@ def _git_wip_present(control: Path, quest_id: str) -> bool:
 
 def _seed_with_artifacts(control: Path, quest_id: str, title: str) -> Change:
     ch = Change.create(control, title=title, quest_id=quest_id, base_branch="main")
-    spec = ch.change_dir / "artifacts" / "spec"
+    spec = ch.quest_dir / "artifacts" / "spec"
     spec.mkdir(parents=True)
     (spec / f"{quest_id}.md").write_text("# SPEC BODY\n")
-    plans = ch.change_dir / "artifacts" / "plans"
+    plans = ch.quest_dir / "artifacts" / "plans"
     plans.mkdir(parents=True)
     (plans / f"{quest_id}-plan-1.md").write_text("# PLAN ONE\n")
     (plans / f"{quest_id}-plan-2.md").write_text("# PLAN TWO\n")
@@ -124,8 +124,8 @@ def test_show_spec_falls_back_after_archive(
     _seed_control(tmp_path)
     ch = _seed_with_artifacts(tmp_path, _ID, "Feat")
     files = {
-        str(p.relative_to(ch.change_dir / "artifacts")): p
-        for p in sorted((ch.change_dir / "artifacts").rglob("*"))
+        str(p.relative_to(ch.quest_dir / "artifacts")): p
+        for p in sorted((ch.quest_dir / "artifacts").rglob("*"))
         if p.is_file()
     }
     worktree.artifact_commit(tmp_path, _ID, files, message="artifact: spec")
@@ -149,7 +149,7 @@ def test_show_spec_falls_back_after_archive(
         tmp_path,
         _ID,
         events_path=ch.events_path,
-        change_json_path=ch.change_dir / "change.json",
+        change_json_path=ch.quest_dir / "change.json",
         state_json_path=ch.state_dir / "state.json",
     )
     # The per-Change artifact ref is RETAINED at archive (spec AC 3).
@@ -515,7 +515,7 @@ def test_show_abandoned_backlog_is_not_a_live_brief(
 def test_show_summary_live(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     _seed_control(tmp_path)
     ch = _seed_with_artifacts(tmp_path, _ID, "Feat")
-    summary = ch.change_dir / "artifacts" / "summary"
+    summary = ch.quest_dir / "artifacts" / "summary"
     summary.mkdir(parents=True)
     (summary / f"{_ID}.md").write_text("# SUMMARY BODY\n")
     assert "SUMMARY BODY" in _run(monkeypatch, tmp_path, "show", _ID, "summary")
@@ -526,7 +526,7 @@ def test_show_default_card_renders_summary(
 ) -> None:
     _seed_control(tmp_path)
     ch = _seed_with_artifacts(tmp_path, _ID, "Feat")
-    summary = ch.change_dir / "artifacts" / "summary"
+    summary = ch.quest_dir / "artifacts" / "summary"
     summary.mkdir(parents=True)
     (summary / f"{_ID}.md").write_text(
         "Gives every change a durable intent-level summary.\n")
@@ -540,12 +540,12 @@ def test_show_summary_falls_back_after_archive(
 ) -> None:
     _seed_control(tmp_path)
     ch = _seed_with_artifacts(tmp_path, _ID, "Feat")
-    summary = ch.change_dir / "artifacts" / "summary"
+    summary = ch.quest_dir / "artifacts" / "summary"
     summary.mkdir(parents=True)
     (summary / f"{_ID}.md").write_text("# SUMMARY BODY\n")
     files = {
-        str(p.relative_to(ch.change_dir / "artifacts")): p
-        for p in sorted((ch.change_dir / "artifacts").rglob("*"))
+        str(p.relative_to(ch.quest_dir / "artifacts")): p
+        for p in sorted((ch.quest_dir / "artifacts").rglob("*"))
         if p.is_file()
     }
     worktree.artifact_commit(tmp_path, _ID, files, message="artifact: summary")
@@ -567,7 +567,7 @@ def test_show_summary_falls_back_after_archive(
         tmp_path,
         _ID,
         events_path=ch.events_path,
-        change_json_path=ch.change_dir / "change.json",
+        change_json_path=ch.quest_dir / "change.json",
         state_json_path=ch.state_dir / "state.json",
     )
     assert _git_wip_present(tmp_path, _ID)
@@ -582,12 +582,12 @@ def test_show_default_card_renders_summary_after_archive(
 ) -> None:
     _seed_control(tmp_path)
     ch = _seed_with_artifacts(tmp_path, _ID, "Feat")
-    summary = ch.change_dir / "artifacts" / "summary"
+    summary = ch.quest_dir / "artifacts" / "summary"
     summary.mkdir(parents=True)
     (summary / f"{_ID}.md").write_text("# SUMMARY BODY\n")
     files = {
-        str(p.relative_to(ch.change_dir / "artifacts")): p
-        for p in sorted((ch.change_dir / "artifacts").rglob("*"))
+        str(p.relative_to(ch.quest_dir / "artifacts")): p
+        for p in sorted((ch.quest_dir / "artifacts").rglob("*"))
         if p.is_file()
     }
     worktree.artifact_commit(tmp_path, _ID, files, message="artifact: summary")
@@ -609,7 +609,7 @@ def test_show_default_card_renders_summary_after_archive(
         tmp_path,
         _ID,
         events_path=ch.events_path,
-        change_json_path=ch.change_dir / "change.json",
+        change_json_path=ch.quest_dir / "change.json",
         state_json_path=ch.state_dir / "state.json",
     )
     assert _git_wip_present(tmp_path, _ID)

@@ -7,21 +7,21 @@ from tests.conftest import _seed_control
 
 
 def _layout(tmp_path: Path) -> tuple[Path, Path]:
-    """Return (worktree, change_dir) with the permanent home seeded."""
-    change_dir = tmp_path / ".imp" / "changes" / "abc"
-    (change_dir / "artifacts" / "spec").mkdir(parents=True)
-    (change_dir / "artifacts" / "spec" / "s.md").write_text("home-spec\n")
+    """Return (worktree, quest_dir) with the permanent home seeded."""
+    quest_dir = tmp_path / ".imp" / "changes" / "abc"
+    (quest_dir / "artifacts" / "spec").mkdir(parents=True)
+    (quest_dir / "artifacts" / "spec" / "s.md").write_text("home-spec\n")
     worktree = tmp_path / ".imp" / "worktrees" / "abc"
     worktree.mkdir(parents=True)
-    return worktree, change_dir
+    return worktree, quest_dir
 
 
 def test_creates_id_scoped_symlink_not_blanket(tmp_path: Path) -> None:
-    worktree, change_dir = _layout(tmp_path)
-    link_change_home(worktree, change_dir)
+    worktree, quest_dir = _layout(tmp_path)
+    link_change_home(worktree, quest_dir)
     link = worktree / ".imp" / "changes" / "abc"
     assert link.is_symlink()
-    assert link.resolve() == change_dir.resolve()
+    assert link.resolve() == quest_dir.resolve()
     # Only the id leaf is a symlink; the parents are real dirs (never a blanket
     # <worktree>/.imp link).
     assert not (worktree / ".imp").is_symlink()
@@ -29,16 +29,16 @@ def test_creates_id_scoped_symlink_not_blanket(tmp_path: Path) -> None:
 
 
 def test_idempotent_reassert_is_noop(tmp_path: Path) -> None:
-    worktree, change_dir = _layout(tmp_path)
-    link_change_home(worktree, change_dir)
-    link_change_home(worktree, change_dir)          # second call must not raise
+    worktree, quest_dir = _layout(tmp_path)
+    link_change_home(worktree, quest_dir)
+    link_change_home(worktree, quest_dir)          # second call must not raise
     link = worktree / ".imp" / "changes" / "abc"
     assert link.is_symlink()
-    assert link.resolve() == change_dir.resolve()
+    assert link.resolve() == quest_dir.resolve()
 
 
 def test_legacy_phantom_folds_into_home_then_links(tmp_path: Path) -> None:
-    worktree, change_dir = _layout(tmp_path)
+    worktree, quest_dir = _layout(tmp_path)
     # A real phantom directory sits where the link belongs, carrying a file the
     # home does NOT have, plus a colliding file the home already owns.
     phantom = worktree / ".imp" / "changes" / "abc"
@@ -47,26 +47,26 @@ def test_legacy_phantom_folds_into_home_then_links(tmp_path: Path) -> None:
     (phantom / "artifacts" / "spec").mkdir(parents=True)
     (phantom / "artifacts" / "spec" / "s.md").write_text("phantom-spec\n")
 
-    link_change_home(worktree, change_dir)
+    link_change_home(worktree, quest_dir)
 
     link = worktree / ".imp" / "changes" / "abc"
-    assert link.is_symlink() and link.resolve() == change_dir.resolve()
+    assert link.is_symlink() and link.resolve() == quest_dir.resolve()
     # Phantom-only content was folded into the permanent home (no content loss).
-    assert (change_dir / "artifacts" / "plans" / "p.md").read_text() == "phantom-plan\n"
+    assert (quest_dir / "artifacts" / "plans" / "p.md").read_text() == "phantom-plan\n"
     # On collision the home's copy wins (it is authoritative).
-    assert (change_dir / "artifacts" / "spec" / "s.md").read_text() == "home-spec\n"
+    assert (quest_dir / "artifacts" / "spec" / "s.md").read_text() == "home-spec\n"
 
 
 def test_stale_symlink_is_replaced(tmp_path: Path) -> None:
-    worktree, change_dir = _layout(tmp_path)
+    worktree, quest_dir = _layout(tmp_path)
     stale_target = tmp_path / "other"
     stale_target.mkdir()
     link = worktree / ".imp" / "changes" / "abc"
     link.parent.mkdir(parents=True, exist_ok=True)
     link.symlink_to(stale_target)
-    link_change_home(worktree, change_dir)
+    link_change_home(worktree, quest_dir)
     assert link.is_symlink()
-    assert link.resolve() == change_dir.resolve()
+    assert link.resolve() == quest_dir.resolve()
 
 
 def test_create_links_worktree_home_no_phantom(tmp_path: Path) -> None:
@@ -74,7 +74,7 @@ def test_create_links_worktree_home_no_phantom(tmp_path: Path) -> None:
     ch = Change.create(tmp_path, title="X", quest_id="cre1", base_branch="main")
     link = ch.project_root / ".imp" / "changes" / "cre1"
     assert link.is_symlink()
-    assert link.resolve() == ch.change_dir.resolve()
+    assert link.resolve() == ch.quest_dir.resolve()
 
 
 def test_materialize_links_worktree_home(tmp_path: Path) -> None:
@@ -85,7 +85,7 @@ def test_materialize_links_worktree_home(tmp_path: Path) -> None:
     ch.materialize()
     link = ch.project_root / ".imp" / "changes" / "mat1"
     assert link.is_symlink()
-    assert link.resolve() == ch.change_dir.resolve()
+    assert link.resolve() == ch.quest_dir.resolve()
 
 
 def test_relative_edit_after_golive_lands_in_home(tmp_path: Path) -> None:
@@ -97,7 +97,7 @@ def test_relative_edit_after_golive_lands_in_home(tmp_path: Path) -> None:
     p = ch.project_root / ".imp" / "changes" / "gol1" / "artifacts" / "note.txt"
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text("via-symlink\n")
-    assert (ch.change_dir / "artifacts" / "note.txt").read_text() == "via-symlink\n"
+    assert (ch.quest_dir / "artifacts" / "note.txt").read_text() == "via-symlink\n"
 
 
 def test_relink_home_self_heals_legacy_phantom(tmp_path: Path) -> None:
@@ -113,8 +113,8 @@ def test_relink_home_self_heals_legacy_phantom(tmp_path: Path) -> None:
     ch.relink_home()
 
     assert link.is_symlink()
-    assert link.resolve() == ch.change_dir.resolve()
-    assert (ch.change_dir / "artifacts" / "stale.txt").read_text() == "stale\n"
+    assert link.resolve() == ch.quest_dir.resolve()
+    assert (ch.quest_dir / "artifacts" / "stale.txt").read_text() == "stale\n"
 
 
 def test_relink_home_noop_for_draft(tmp_path: Path) -> None:
@@ -125,15 +125,15 @@ def test_relink_home_noop_for_draft(tmp_path: Path) -> None:
 
 
 def test_relink_home_noop_when_project_root_is_control_root(tmp_path: Path) -> None:
-    change_dir = tmp_path / ".imp" / "changes" / "guard1"
-    change_dir.mkdir(parents=True)
+    quest_dir = tmp_path / ".imp" / "changes" / "guard1"
+    quest_dir.mkdir(parents=True)
     ch = Change(
         id="guard1",
         title="X",
         base_branch="main",
         control_root=tmp_path,
         project_root=tmp_path,
-        change_dir=change_dir,
+        quest_dir=quest_dir,
         materialized=True,
     )
     ch.relink_home()
@@ -147,9 +147,9 @@ def test_relative_home_location_is_worktree_symlink_to_home(tmp_path: Path) -> N
     rel = f".imp/changes/{ch.id}"
     link = ch.project_root / rel
     assert link.is_symlink()
-    assert link.resolve() == ch.change_dir.resolve()
+    assert link.resolve() == ch.quest_dir.resolve()
     # A write through the relative location lands in the permanent home.
     p = link / "artifacts" / "note.txt"
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text("via-rel\n")
-    assert (ch.change_dir / "artifacts" / "note.txt").read_text() == "via-rel\n"
+    assert (ch.quest_dir / "artifacts" / "note.txt").read_text() == "via-rel\n"

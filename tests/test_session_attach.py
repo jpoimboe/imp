@@ -27,7 +27,7 @@ def _make_change(tmp_path: Path, quest_id: str) -> Change:
         base_branch="main",
         control_root=tmp_path,
         project_root=tmp_path,
-        change_dir=tmp_path / ".imp" / "change",
+        quest_dir=tmp_path / ".imp" / "change",
     )
 
 
@@ -59,7 +59,7 @@ def test_spawn_session_daemon_launches_detached_module_entry(
     assert kw["stdin"] == subprocess.DEVNULL
     assert kw["stdout"] == subprocess.DEVNULL
     assert kw["stderr"] is not subprocess.DEVNULL
-    assert Path(kw["stderr"].name) == change.change_dir / "daemon.stderr"
+    assert Path(kw["stderr"].name) == change.quest_dir / "daemon.stderr"
     assert "IMP_TEST_CMD_FAST" not in kw["env"]
     assert "IMP_REMOTE_CONTROL_SOCK" not in kw["env"]
 
@@ -315,7 +315,7 @@ def test_spawn_session_daemon_captures_child_stderr_to_file(
 
     spawn_session_daemon(change)
 
-    captured = (change.change_dir / "daemon.stderr").read_bytes()
+    captured = (change.quest_dir / "daemon.stderr").read_bytes()
     assert b"Traceback (most recent call last):" in captured
     assert b"Boom" in captured
 
@@ -339,7 +339,7 @@ def test_spawn_session_daemon_truncates_stderr_file_on_respawn(
     monkeypatch.setattr(subprocess, "Popen", second)
     spawn_session_daemon(change)
 
-    captured = (change.change_dir / "daemon.stderr").read_bytes()
+    captured = (change.quest_dir / "daemon.stderr").read_bytes()
     assert captured == b"second\n"          # truncated ("wb"), not appended
     assert b"first-segment-crash" not in captured
 

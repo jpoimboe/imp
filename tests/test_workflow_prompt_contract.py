@@ -48,7 +48,7 @@ def test_no_agent_prompt_references_tolerated_failures_file(name: str) -> None:
 
 
 @pytest.mark.parametrize("name", ALL_AGENT_FILES)
-def test_no_hardcoded_change_dir_literal(name: str) -> None:
+def test_no_hardcoded_quest_dir_literal(name: str) -> None:
     text = (AGENTS_DIR / name).read_text()
     # `.imp/change` not followed by 's' — catches `.imp/change/` and the bare
     # `.imp/change` while allowing the relocated `.imp/changes/` home name.

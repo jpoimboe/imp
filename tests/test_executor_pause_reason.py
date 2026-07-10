@@ -22,10 +22,10 @@ def _make_change(root: Path, *, quest_id: str = "test-change", title: str = "t")
     from imp.providers.effective import load_effective_config
 
     src_wf = root / "imp" / "workflows" / "imp"
-    change_dir = root / ".imp" / "change"
-    change_dir.mkdir(parents=True, exist_ok=True)
-    (change_dir / "state").mkdir(exist_ok=True)
-    (change_dir / "change.json").write_text(json.dumps({
+    quest_dir = root / ".imp" / "change"
+    quest_dir.mkdir(parents=True, exist_ok=True)
+    (quest_dir / "state").mkdir(exist_ok=True)
+    (quest_dir / "change.json").write_text(json.dumps({
         "id": quest_id, "title": title, "base_branch": "main",
     }, indent=2, sort_keys=True))
 
@@ -39,11 +39,11 @@ def _make_change(root: Path, *, quest_id: str = "test-change", title: str = "t")
     State(
         id=quest_id, step=flat[0].name if flat else None, step_attempt=0,
         status="running", vars=dict(workflow.vars.defaults()), loop_counts={},
-    ).save(change_dir / "state")
+    ).save(quest_dir / "state")
 
     change = Change(
         id=quest_id, title=title, base_branch="main",
-        control_root=root, project_root=root, change_dir=change_dir,
+        control_root=root, project_root=root, quest_dir=quest_dir,
     )
     change.event_log().append(
         agent_id=None, type="change_created",

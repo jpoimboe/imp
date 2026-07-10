@@ -76,7 +76,7 @@ def test_pause_facts_unnamed_change_shows_bare_id(tmp_path: Path) -> None:
 
     change = Change(id="qzbscf", title="", base_branch="main",
                     control_root=tmp_path, project_root=tmp_path,
-                    change_dir=tmp_path / ".imp" / "change")
+                    quest_dir=tmp_path / ".imp" / "change")
     name, title, _phase, token, _reason = _pause_facts(change)
     assert name == "qzbscf"
     assert token == "qzbscf"
@@ -90,7 +90,7 @@ def test_pause_facts_named_change_shows_bare_id(tmp_path: Path) -> None:
     change = Change(id="qzbscf", title="Add version flag",
                     base_branch="main", control_root=tmp_path,
                     project_root=tmp_path,
-                    change_dir=tmp_path / ".imp" / "change")
+                    quest_dir=tmp_path / ".imp" / "change")
     name, title, _phase, token, _reason = _pause_facts(change)
     assert name == "qzbscf"          # the bare id, not a slugified handle
     assert token == "qzbscf"
@@ -251,21 +251,21 @@ def test_pause_facts_stale_with_crash_stderr_renders_unexpected_death_banner(
     from imp.cli.main import _pause_facts
     from imp.engine.change import Change
 
-    change_dir = tmp_path / ".imp" / "changes" / "mona44"
-    change_dir.mkdir(parents=True)
+    quest_dir = tmp_path / ".imp" / "changes" / "mona44"
+    quest_dir.mkdir(parents=True)
     events = [
         ev("1", "step_started", step="task-lead", kind="agent", phase="converge"),
         ev("2", "workflow_paused", reason="terminated", kind="terminated"),
         ev("3", "workflow_resumed"),
     ]
-    (change_dir / "events.jsonl").write_text(
+    (quest_dir / "events.jsonl").write_text(
         "\n".join(json.dumps(e) for e in events) + "\n")
     # A genuine death: the daemon left a traceback in its stderr.
-    (change_dir / "daemon.stderr").write_text(
+    (quest_dir / "daemon.stderr").write_text(
         "Traceback (most recent call last):\n  ...\nRuntimeError: boom\n")
     change = Change(id="mona44", title="", base_branch="main",
                     control_root=tmp_path, project_root=tmp_path,
-                    change_dir=change_dir)
+                    quest_dir=quest_dir)
     name, _title, phase, token, reason = _pause_facts(change)
     assert name == "mona44"
     assert phase == "converge"
@@ -281,21 +281,21 @@ def test_pause_facts_stale_clean_detach_renders_calm_interrupt(
     from imp.cli.main import _pause_facts
     from imp.engine.change import Change
 
-    change_dir = tmp_path / ".imp" / "changes" / "mona44"
-    change_dir.mkdir(parents=True)
+    quest_dir = tmp_path / ".imp" / "changes" / "mona44"
+    quest_dir.mkdir(parents=True)
     # Same resumed-without-pause STALE event shape as a crash...
     events = [
         ev("1", "step_started", step="task-lead", kind="agent", phase="converge"),
         ev("2", "workflow_paused", reason="terminated", kind="terminated"),
         ev("3", "workflow_resumed"),
     ]
-    (change_dir / "events.jsonl").write_text(
+    (quest_dir / "events.jsonl").write_text(
         "\n".join(json.dumps(e) for e in events) + "\n")
     # ...but daemon.stderr holds only benign INFO chatter — a clean detach.
-    (change_dir / "daemon.stderr").write_text("Using bundled Claude Code CLI\n")
+    (quest_dir / "daemon.stderr").write_text("Using bundled Claude Code CLI\n")
     change = Change(id="mona44", title="", base_branch="main",
                     control_root=tmp_path, project_root=tmp_path,
-                    change_dir=change_dir)
+                    quest_dir=quest_dir)
     _name, _title, _phase, _token, reason = _pause_facts(change)
     assert reason == "interrupt"
     assert "daemon.stderr" not in (reason or "")
@@ -311,19 +311,19 @@ def test_pause_facts_stale_empty_stderr_renders_calm_interrupt(tmp_path: Path) -
     # daemon.stderr present but EMPTY (0 bytes): no crash traceback, so a clean
     # detach — the calm interrupt reason, no pointer (the empty-read path,
     # distinct from the missing-file OSError path).
-    change_dir = tmp_path / ".imp" / "changes" / "mona44"
-    change_dir.mkdir(parents=True)
+    quest_dir = tmp_path / ".imp" / "changes" / "mona44"
+    quest_dir.mkdir(parents=True)
     events = [
         ev("1", "step_started", step="task-lead", kind="agent", phase="converge"),
         ev("2", "workflow_paused", reason="terminated", kind="terminated"),
         ev("3", "workflow_resumed"),
     ]
-    (change_dir / "events.jsonl").write_text(
+    (quest_dir / "events.jsonl").write_text(
         "\n".join(json.dumps(e) for e in events) + "\n")
-    (change_dir / "daemon.stderr").write_bytes(b"")
+    (quest_dir / "daemon.stderr").write_bytes(b"")
     change = Change(id="mona44", title="", base_branch="main",
                     control_root=tmp_path, project_root=tmp_path,
-                    change_dir=change_dir)
+                    quest_dir=quest_dir)
     *_, reason = _pause_facts(change)
     assert reason == "interrupt"
     assert "daemon.stderr" not in (reason or "")
@@ -338,18 +338,18 @@ def test_pause_facts_deliberate_leave_renders_trigger_over_stale(tmp_path: Path)
     # Event log that, WITHOUT a deliberate-leave signal, reads as STALE (a pause
     # followed by a resume) — the daemon-derived path would render the
     # unexpected-death banner. The stamped trigger must win instead.
-    change_dir = tmp_path / ".imp" / "changes" / "krol99"
-    change_dir.mkdir(parents=True)
+    quest_dir = tmp_path / ".imp" / "changes" / "krol99"
+    quest_dir.mkdir(parents=True)
     events = [
         ev("1", "step_started", step="task-lead", kind="agent", phase="implement"),
         ev("2", "workflow_paused", reason="terminated", kind="terminated"),
         ev("3", "workflow_resumed"),
     ]
-    (change_dir / "events.jsonl").write_text(
+    (quest_dir / "events.jsonl").write_text(
         "\n".join(json.dumps(e) for e in events) + "\n")
     change = Change(id="krol99", title="Leave now", base_branch="main",
                     control_root=tmp_path, project_root=tmp_path,
-                    change_dir=change_dir)
+                    quest_dir=quest_dir)
 
     name, title, phase, token, reason = _pause_facts(change, leave_trigger="sigterm")
     assert name == "krol99"

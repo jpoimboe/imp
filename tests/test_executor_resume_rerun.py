@@ -80,9 +80,9 @@ def _seed_single_agent(root: Path) -> Change:
     (root / ".imp").mkdir(parents=True, exist_ok=True)
     (root / ".imp" / "config.yaml").write_text(
         "providers: [fake]\ntiers:\n  low: {fake: m}\n  medium: {fake: m}\n  high: {fake: m}\n")
-    change_dir = root / ".imp" / "change"
-    (change_dir / "state").mkdir(parents=True, exist_ok=True)
-    (change_dir / "change.json").write_text(json.dumps(
+    quest_dir = root / ".imp" / "change"
+    (quest_dir / "state").mkdir(parents=True, exist_ok=True)
+    (quest_dir / "change.json").write_text(json.dumps(
         {"id": "c", "title": "t", "base_branch": "main"}, sort_keys=True))
     configured: list[str] = []
     with contextlib.suppress(Exception):
@@ -91,9 +91,9 @@ def _seed_single_agent(root: Path) -> Change:
     workflow = load_workflow(wf, configured_tiers=configured)
     flat = workflow.flat_steps()
     State(id="c", step=flat[0].name, step_attempt=0, status="running",
-          vars=dict(workflow.vars.defaults()), loop_counts={}).save(change_dir / "state")
+          vars=dict(workflow.vars.defaults()), loop_counts={}).save(quest_dir / "state")
     change = Change(id="c", title="t", base_branch="main",
-                    control_root=root, project_root=root, change_dir=change_dir)
+                    control_root=root, project_root=root, quest_dir=quest_dir)
     change.event_log().append(agent_id=None, type="change_created",
                               payload={"id": "c", "title": "t"})
     return change
@@ -106,7 +106,7 @@ async def test_resume_truncated_autonomous_replays_and_advances(
     state = State.load(change.state_dir)
     state.resume_pending = state.step
     state.save(change.state_dir)
-    tdir = change.change_dir / "steps" / "only" / "w"
+    tdir = change.quest_dir / "steps" / "only" / "w"
     tdir.mkdir(parents=True, exist_ok=True)
     Transcript(tdir / "transcript.jsonl").append(
         Message(role="assistant", content=(TextBlock(text="still working"),)))
@@ -157,7 +157,7 @@ async def test_resume_empty_transcript_with_stored_context_runs_fresh(
     state = State.load(change.state_dir)
     state.resume_pending = state.step
     state.save(change.state_dir)
-    tdir = change.change_dir / "steps" / "only" / "w"
+    tdir = change.quest_dir / "steps" / "only" / "w"
     tdir.mkdir(parents=True, exist_ok=True)
     change.event_log().append(
         agent_id="step:only/w", type="step_context",
@@ -201,7 +201,7 @@ async def test_resume_empty_transcript_seeds_fresh_and_advances(
     state.resume_pending = state.step
     state.save(change.state_dir)
     # Step's transcript dir exists but is empty — the never-ran case.
-    tdir = change.change_dir / "steps" / "only" / "w"
+    tdir = change.quest_dir / "steps" / "only" / "w"
     tdir.mkdir(parents=True, exist_ok=True)
 
     seen_initial_nonempty: list[bool] = []

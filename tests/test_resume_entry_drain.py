@@ -921,7 +921,7 @@ def test_script_step_route_does_not_drain_interjects(tmp_path) -> None:
     change = _types.SimpleNamespace(
         workflow_dir=tmp_path, project_root=tmp_path,
         id="test-id", handle="test", title="Test",
-        change_dir=tmp_path / ".imp" / "change",
+        quest_dir=tmp_path / ".imp" / "change",
     )
     step = Step(
         name="verify", phase="p", kind="script",

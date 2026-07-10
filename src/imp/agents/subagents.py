@@ -180,14 +180,14 @@ def _build_spike_policy(change: Any, worktree_path: Path, test_gates: Any) -> An
     eng = overlay_engine_env(
         os.environ,
         engine_env(project_root=worktree_path, quest_id=change.id,
-                   change_title=change.title, change_dir=change.change_dir,
+                   change_title=change.title, quest_dir=change.quest_dir,
                    test_gates=test_gates),
     )
     return resolve_policy(
         worktree=worktree_path, control_root=change.control_root,
         quest_id=change.id, cfg=cfg, engine_env_result=eng,
         environ=os.environ, available=sandbox_available(),
-        change_dir=change.change_dir, spike=True,
+        quest_dir=change.quest_dir, spike=True,
     )
 
 
@@ -236,7 +236,7 @@ async def dispatch_task(
         if isolated:
             from imp.engine.change import link_change_home
             assert spike_worktree is not None
-            link_change_home(spike_worktree, ctx.change.change_dir)
+            link_change_home(spike_worktree, ctx.change.quest_dir)
             dispatch_policy = _build_spike_policy(
                 ctx.change, spike_worktree, ctx.test_gates)
             if not dispatch_policy.active and ctx.event_log is not None:
@@ -248,7 +248,7 @@ async def dispatch_task(
 
         cc = ctx.change_context or ChangeContext(
             id="", title="", project_root=ctx.project_root,
-            # No change context -> no change_dir, no snapshot; live dir is the only option.
+            # No change context -> no quest_dir, no snapshot; live dir is the only option.
             workflow_dir=resolve_workflow_dir(
                 ctx.project_root,
                 parse_default_workflow(ctx.project_root / "imp" / "project.yaml"),

@@ -50,12 +50,12 @@ def _make_change(root: Path, *, quest_id: str = "test-change", title: str = "t")
     from imp.providers.effective import load_effective_config
 
     src_wf = root / "imp" / "workflows" / "imp"
-    change_dir = root / ".imp" / "change"
-    change_dir.mkdir(parents=True, exist_ok=True)
-    (change_dir / "state").mkdir(exist_ok=True)
+    quest_dir = root / ".imp" / "change"
+    quest_dir.mkdir(parents=True, exist_ok=True)
+    (quest_dir / "state").mkdir(exist_ok=True)
 
     # Write change metadata
-    (change_dir / "change.json").write_text(json.dumps({
+    (quest_dir / "change.json").write_text(json.dumps({
         "id": quest_id, "title": title, "base_branch": "main",
     }, indent=2, sort_keys=True))
 
@@ -78,11 +78,11 @@ def _make_change(root: Path, *, quest_id: str = "test-change", title: str = "t")
         status="running",
         vars=dict(workflow.vars.defaults()),
         loop_counts={},
-    ).save(change_dir / "state")
+    ).save(quest_dir / "state")
 
     change = Change(
         id=quest_id, title=title, base_branch="main",
-        control_root=root, project_root=root, change_dir=change_dir,
+        control_root=root, project_root=root, quest_dir=quest_dir,
     )
     change.event_log().append(
         agent_id=None, type="change_created",
@@ -270,7 +270,7 @@ async def test_continue_off_last_step_completes(tmp_path: Path) -> None:
 
     result = await run_change(change, on_event=lambda _e: None)
     assert result is RunResult.COMPLETED
-    assert not (change.change_dir / "steps").exists()
+    assert not (change.quest_dir / "steps").exists()
 
 
 # ── set: mutation persistence ───────────────────────────────────────────────
@@ -1708,7 +1708,7 @@ async def test_first_run_snapshots_the_workflow(tmp_path: Path) -> None:
     snapshot at .imp/change/workflow/ (taken once, at run-start)."""
     change, _, _ = _seed_minimal_workflow(tmp_path)
     _register_fake({"status": "Success"})
-    snapshot = change.change_dir / "workflow"
+    snapshot = change.quest_dir / "workflow"
     assert not snapshot.exists()
 
     result = await run_change(change, on_event=lambda _e: None)
@@ -1725,7 +1725,7 @@ async def test_snapshot_copy_cleans_stale_tmp_dir(tmp_path: Path) -> None:
     change, _, _ = _seed_minimal_workflow(tmp_path)
     _register_fake({"status": "Success"})
     # Simulate a partial copy left over from a prior crash.
-    tmp = change.change_dir / "workflow.tmp"
+    tmp = change.quest_dir / "workflow.tmp"
     tmp.mkdir()
     (tmp / "stale.yaml").write_text("garbage")
 
@@ -1735,7 +1735,7 @@ async def test_snapshot_copy_cleans_stale_tmp_dir(tmp_path: Path) -> None:
     # The stale tmp dir should be gone.
     assert not tmp.exists()
     # And the real snapshot should be present and correct.
-    snapshot = change.change_dir / "workflow"
+    snapshot = change.quest_dir / "workflow"
     assert (snapshot / "workflow.yaml").exists()
 
 
@@ -1771,7 +1771,7 @@ async def test_resume_runs_frozen_snapshot_after_live_workflow_deleted(
 
     r1 = await run_change(change, on_event=lambda _e: None)
     assert r1 is RunResult.PAUSED
-    snapshot = change.change_dir / "workflow"
+    snapshot = change.quest_dir / "workflow"
     assert (snapshot / "scripts" / "probe.sh").exists()
 
     # Mutate the live workflow out from under the run: delete script AND step.
@@ -2855,7 +2855,7 @@ async def test_first_run_overlays_project_skills_into_snapshot_user(
     (tmp_path / "imp" / "skills" / "mine.md").write_text("# Mine\nv1\n")
 
     assert await run_change(change, on_event=lambda _e: None) is RunResult.COMPLETED
-    overlaid = change.change_dir / "workflow" / "skills" / "user" / "mine.md"
+    overlaid = change.quest_dir / "workflow" / "skills" / "user" / "mine.md"
     assert overlaid.read_text() == "# Mine\nv1\n"
 
     # Resume re-snapshots (escape-hatch inversion): the changed source is picked
@@ -2925,7 +2925,7 @@ async def test_step_reincarnates_on_context_window_then_pauses_at_cap(tmp_path):
     reincarnating = [e for e in events if e["type"] == "reincarnating"]
     assert len(reincarnating) == 1
     assert reincarnating[0]["payload"]["reason"] == "context window exceeded"
-    assert (change.change_dir / "steps" / phase / f"{step}.attempt-1").exists()
+    assert (change.quest_dir / "steps" / phase / f"{step}.attempt-1").exists()
 
 
 @pytest.mark.anyio
@@ -2988,7 +2988,7 @@ async def test_step_reincarnates_on_handoff_then_pauses_at_cap(tmp_path):
     reincarnating = [e for e in events if e["type"] == "reincarnating"]
     assert len(reincarnating) == 1
     assert reincarnating[0]["payload"]["reason"] == "context threshold crossed"
-    assert (change.change_dir / "steps" / phase / f"{step}.attempt-1").exists()
+    assert (change.quest_dir / "steps" / phase / f"{step}.attempt-1").exists()
     cap_event = next(e for e in events if e["type"] == "step_completed")
     assert cap_event["payload"]["action"]["verb"] == "pause"
 
@@ -3039,7 +3039,7 @@ async def test_step_handoff_missing_note_degrades_to_reactive_reason(tmp_path):
     assert len(reincarnating) == 1
     assert reincarnating[0]["payload"]["reason"] == \
         "handoff failed — recovering from transcript"
-    assert (change.change_dir / "steps" / phase / f"{step}.attempt-1").exists()
+    assert (change.quest_dir / "steps" / phase / f"{step}.attempt-1").exists()
 
 
 @pytest.mark.anyio

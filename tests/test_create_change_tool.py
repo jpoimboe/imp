@@ -57,7 +57,7 @@ def test_create_change_writes_change_home_and_emits_event(tmp_path: Path) -> Non
     assert created.seed_opening == (
         "Follow-up: extract helper\n\n"
         "extract the duplicated parser into one function")
-    meta = json.loads((created.change_dir / "change.json").read_text())
+    meta = json.loads((created.quest_dir / "change.json").read_text())
     assert meta["depends_on"] == [ch.id]
 
     parent_events = [e for e in ch.event_log().read()
@@ -75,7 +75,7 @@ def test_create_change_defaults_no_deps(tmp_path: Path) -> None:
     tool.invoke(_ctx(ch, state), {"title": "T", "description": "b"})
     new_id = next(p.name for p in (ch.control_root / ".imp" / "changes").iterdir()
                   if p.name != ch.id)
-    meta = json.loads((Change.load(ch.control_root, new_id).change_dir
+    meta = json.loads((Change.load(ch.control_root, new_id).quest_dir
                        / "change.json").read_text())
     assert meta["depends_on"] == []
 

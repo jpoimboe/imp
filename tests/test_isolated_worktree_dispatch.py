@@ -107,7 +107,7 @@ def test_isolated_dispatch_runs_in_throwaway_with_distinct_policy(
     assert pol.network is True
     assert pol.worktree == str(throwaway)
     # the DURABLE change home is the rw-bound change dir (survives teardown)
-    assert pol.change_home == str(change.change_dir)
+    assert pol.change_home == str(change.quest_dir)
     # teardown: throwaway worktree + its branch are gone
     assert not throwaway.exists()
     assert "imp/spike-prb001-1" not in _git(
@@ -139,7 +139,7 @@ def test_isolated_dispatch_parks_artifact_surviving_teardown(
     # the write happened INSIDE the disposable worktree ...
     assert seen["root"] == throwaway
     # ... which is now gone, yet the parked artifact persists in the durable home
-    parked = change.change_dir / "artifacts" / "spike" / "finding.md"
+    parked = change.quest_dir / "artifacts" / "spike" / "finding.md"
     assert parked.read_text() == "empirical result: 42\n"
     assert not throwaway.exists()
 
@@ -273,7 +273,7 @@ def test_build_spike_policy_passes_spike_true(monkeypatch, tmp_path):
 
     change = SimpleNamespace(
         id="abc", title="T", project_root=tmp_path, control_root=tmp_path,
-        change_dir=tmp_path / "change", base_branch="master",
+        quest_dir=tmp_path / "change", base_branch="master",
     )
     result = subagents._build_spike_policy(change, tmp_path / "wt", test_gates=None)
 

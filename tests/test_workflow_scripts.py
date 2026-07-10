@@ -169,26 +169,26 @@ def test_fast_and_slow_skip_caches_are_independent(tmp_path: Path) -> None:
     _git_init(project)
     (project / "a.txt").write_text("1")
     _git_commit_all(project, "c1")
-    change_dir = project / ".imp" / "change"
+    quest_dir = project / ".imp" / "change"
     fast_counter = project / "fast_count"
     slow_counter = project / "slow_count"
 
     fast = _run("run-verify.sh", "fast", env_extra={
         "IMP_PROJECT_ROOT": str(project),
         "IMP_TEST_CMD_FAST": f'sh -c "echo x >> {fast_counter}"',
-        "IMP_CHANGE_DIR": str(change_dir)})
+        "IMP_CHANGE_DIR": str(quest_dir)})
     assert fast.returncode == 0, fast.stderr
     assert fast_counter.read_text().count("x") == 1
 
     slow = _run("run-verify.sh", "slow", env_extra={
         "IMP_PROJECT_ROOT": str(project),
         "IMP_TEST_CMD_SLOW": f'sh -c "echo y >> {slow_counter}"',
-        "IMP_CHANGE_DIR": str(change_dir)})
+        "IMP_CHANGE_DIR": str(quest_dir)})
     assert slow.returncode == 0, slow.stderr
     assert slow_counter.read_text().count("y") == 1   # slow ran despite fast's green cache
     assert "skipped" not in slow.stdout
-    assert (change_dir / "last_green_tree_fast").exists()
-    assert (change_dir / "last_green_tree_slow").exists()
+    assert (quest_dir / "last_green_tree_fast").exists()
+    assert (quest_dir / "last_green_tree_slow").exists()
 
 
 def test_run_verify_fast_skips_on_unchanged_tree(tmp_path: Path) -> None:
@@ -249,7 +249,7 @@ def test_two_fast_invocations_share_tree_skip_cache(tmp_path: Path) -> None:
     assert counter.read_text().count("x") == 1   # second fast invocation did NOT re-run
 
 
-def test_run_verify_writes_per_tier_cache_to_change_dir(tmp_path: Path) -> None:
+def test_run_verify_writes_per_tier_cache_to_quest_dir(tmp_path: Path) -> None:
     project = tmp_path / "proj"
     project.mkdir()
     _git_init(project)
@@ -353,14 +353,14 @@ def test_run_verify_slow_records_verified_tree_on_pass(tmp_path: Path) -> None:
     _git_init(project)
     (project / "a.txt").write_text("1")
     _git_commit_all(project, "c1")
-    change_dir = project / ".imp" / "change"
+    quest_dir = project / ".imp" / "change"
     proc = _run("run-verify.sh", "slow", env_extra={
         "IMP_PROJECT_ROOT": str(project), "IMP_TEST_CMD_SLOW": "true",
-        "IMP_CHANGE_DIR": str(change_dir)})
+        "IMP_CHANGE_DIR": str(quest_dir)})
     assert proc.returncode == 0, proc.stderr
     tree = _head_tree(project)
-    assert (change_dir / "last_verified_tree_slow").read_text().strip() == tree
-    assert (change_dir / "last_green_tree_slow").read_text().strip() == tree
+    assert (quest_dir / "last_verified_tree_slow").read_text().strip() == tree
+    assert (quest_dir / "last_green_tree_slow").read_text().strip() == tree
 
 
 def test_run_verify_slow_records_verified_tree_on_fail(tmp_path: Path) -> None:
@@ -369,14 +369,14 @@ def test_run_verify_slow_records_verified_tree_on_fail(tmp_path: Path) -> None:
     _git_init(project)
     (project / "a.txt").write_text("1")
     _git_commit_all(project, "c1")
-    change_dir = project / ".imp" / "change"
+    quest_dir = project / ".imp" / "change"
     proc = _run("run-verify.sh", "slow", env_extra={
         "IMP_PROJECT_ROOT": str(project), "IMP_TEST_CMD_SLOW": "false",
-        "IMP_CHANGE_DIR": str(change_dir)})
+        "IMP_CHANGE_DIR": str(quest_dir)})
     assert proc.returncode != 0
     tree = _head_tree(project)
-    assert (change_dir / "last_verified_tree_slow").read_text().strip() == tree
-    assert not (change_dir / "last_green_tree_slow").exists()   # red => no green stamp
+    assert (quest_dir / "last_verified_tree_slow").read_text().strip() == tree
+    assert not (quest_dir / "last_green_tree_slow").exists()   # red => no green stamp
 
 
 def test_run_verify_slow_timeout_records_verified_tree_not_green(tmp_path: Path) -> None:
@@ -388,15 +388,15 @@ def test_run_verify_slow_timeout_records_verified_tree_not_green(tmp_path: Path)
     _git_init(project)
     (project / "a.txt").write_text("1")
     _git_commit_all(project, "c1")
-    change_dir = project / ".imp" / "change"
+    quest_dir = project / ".imp" / "change"
     proc = _run("run-verify.sh", "slow", env_extra={
         "IMP_PROJECT_ROOT": str(project), "IMP_TEST_CMD_SLOW": "sleep 5",
         "IMP_TEST_CMD_SLOW_TIMEOUT": "1",
-        "IMP_CHANGE_DIR": str(change_dir)})
+        "IMP_CHANGE_DIR": str(quest_dir)})
     assert proc.returncode == 124, proc.stderr
     tree = _head_tree(project)
-    assert (change_dir / "last_verified_tree_slow").read_text().strip() == tree
-    assert not (change_dir / "last_green_tree_slow").exists()   # timeout => no green stamp
+    assert (quest_dir / "last_verified_tree_slow").read_text().strip() == tree
+    assert not (quest_dir / "last_green_tree_slow").exists()   # timeout => no green stamp
 
 
 def test_run_verify_fast_does_not_record_verified_tree_slow(tmp_path: Path) -> None:
@@ -405,12 +405,12 @@ def test_run_verify_fast_does_not_record_verified_tree_slow(tmp_path: Path) -> N
     _git_init(project)
     (project / "a.txt").write_text("1")
     _git_commit_all(project, "c1")
-    change_dir = project / ".imp" / "change"
+    quest_dir = project / ".imp" / "change"
     proc = _run("run-verify.sh", "fast", env_extra={
         "IMP_PROJECT_ROOT": str(project), "IMP_TEST_CMD_FAST": "true",
-        "IMP_CHANGE_DIR": str(change_dir)})
+        "IMP_CHANGE_DIR": str(quest_dir)})
     assert proc.returncode == 0, proc.stderr
-    assert not (change_dir / "last_verified_tree_slow").exists()   # slow-only stamp
+    assert not (quest_dir / "last_verified_tree_slow").exists()   # slow-only stamp
 
 
 def test_run_verify_slow_no_command_stamps_tree_as_cleared(tmp_path: Path) -> None:
@@ -422,16 +422,16 @@ def test_run_verify_slow_no_command_stamps_tree_as_cleared(tmp_path: Path) -> No
     _git_init(project)
     (project / "a.txt").write_text("1")
     _git_commit_all(project, "c1")
-    change_dir = project / ".imp" / "change"
+    quest_dir = project / ".imp" / "change"
     proc = _run("run-verify.sh", "slow",
                 env_extra={"IMP_PROJECT_ROOT": str(project),
-                           "IMP_CHANGE_DIR": str(change_dir)},
+                           "IMP_CHANGE_DIR": str(quest_dir)},
                 env_remove=("IMP_TEST_CMD_FAST", "IMP_TEST_CMD_SLOW"))
     assert proc.returncode == 0, proc.stderr
     assert "no test command configured" in proc.stdout
     tree = _head_tree(project)
-    assert (change_dir / "last_green_tree_slow").read_text().strip() == tree
-    assert (change_dir / "last_verified_tree_slow").read_text().strip() == tree
+    assert (quest_dir / "last_green_tree_slow").read_text().strip() == tree
+    assert (quest_dir / "last_verified_tree_slow").read_text().strip() == tree
 
 
 def test_run_verify_fast_no_command_stamps_only_its_tier(tmp_path: Path) -> None:
@@ -442,12 +442,12 @@ def test_run_verify_fast_no_command_stamps_only_its_tier(tmp_path: Path) -> None
     _git_init(project)
     (project / "a.txt").write_text("1")
     _git_commit_all(project, "c1")
-    change_dir = project / ".imp" / "change"
+    quest_dir = project / ".imp" / "change"
     proc = _run("run-verify.sh", "fast",
                 env_extra={"IMP_PROJECT_ROOT": str(project),
-                           "IMP_CHANGE_DIR": str(change_dir)},
+                           "IMP_CHANGE_DIR": str(quest_dir)},
                 env_remove=("IMP_TEST_CMD_FAST",))
     assert proc.returncode == 0, proc.stderr
-    assert (change_dir / "last_green_tree_fast").read_text().strip() == _head_tree(project)
-    assert not (change_dir / "last_green_tree_slow").exists()
-    assert not (change_dir / "last_verified_tree_slow").exists()
+    assert (quest_dir / "last_green_tree_fast").read_text().strip() == _head_tree(project)
+    assert not (quest_dir / "last_green_tree_slow").exists()
+    assert not (quest_dir / "last_verified_tree_slow").exists()

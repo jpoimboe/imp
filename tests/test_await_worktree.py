@@ -17,7 +17,7 @@ from tests._live import _await_worktree
 from tests.conftest import _seed_control
 
 
-def test_await_worktree_returns_the_change_dir(tmp_path: Path) -> None:
+def test_await_worktree_returns_the_quest_dir(tmp_path: Path) -> None:
     _seed_control(tmp_path)
     Change.create(tmp_path, title="Hello There", quest_id="hello-there", base_branch="main")
     wt = _await_worktree(tmp_path, timeout=5.0)

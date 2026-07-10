@@ -197,13 +197,13 @@ def _trees_identical(a: Path, b: Path) -> bool:
 
 
 def _refresh_workflow_snapshot(change: Change) -> bool:
-    """Re-snapshot the live workflow into change_dir/workflow at a run_change
+    """Re-snapshot the live workflow into quest_dir/workflow at a run_change
     entry. Returns True only when an EXISTING snapshot's content was replaced
     (a fresh change's initial copy returns False); best-effort and crash-safe."""
-    change_dir = change.change_dir
-    snapshot = change_dir / "workflow"
-    tmp = change_dir / "workflow.tmp"
-    old = change_dir / "workflow.old"
+    quest_dir = change.quest_dir
+    snapshot = quest_dir / "workflow"
+    tmp = quest_dir / "workflow.tmp"
+    old = quest_dir / "workflow.old"
 
     # 1. Recover crash artifacts from a prior interrupted swap.
     if tmp.exists():
@@ -674,7 +674,7 @@ def _complete(change: Change, state: State, log: EventLog) -> RunResult:
         state.status = "completed"
         state.save(change.state_dir)
         _emit(log, "workflow_completed", {})
-        shutil.rmtree(change.change_dir / "steps", ignore_errors=True)
+        shutil.rmtree(change.quest_dir / "steps", ignore_errors=True)
         return RunResult.COMPLETED
 
     state.status = "completed"
@@ -686,10 +686,10 @@ def _complete(change: Change, state: State, log: EventLog) -> RunResult:
     archive.archive_change(
         change.control_root, change.id,
         events_path=change.events_path,
-        change_json_path=change.change_dir / "change.json",
+        change_json_path=change.quest_dir / "change.json",
         state_json_path=change.state_dir / "state.json",
     )
-    shutil.rmtree(change.change_dir, ignore_errors=True)
+    shutil.rmtree(change.quest_dir, ignore_errors=True)
     return RunResult.COMPLETED
 
 
@@ -793,9 +793,9 @@ def _emit_started(
 def _harvest_artifacts(
     change: Change, step: Step, warn: Callable[[str], None] | None = None
 ) -> None:
-    """Journal change_dir/artifacts/** to the change's artifact ref (no-op if none)."""
+    """Journal quest_dir/artifacts/** to the change's artifact ref (no-op if none)."""
     from imp.engine import worktree
-    art_root = change.change_dir / "artifacts"
+    art_root = change.quest_dir / "artifacts"
     if not art_root.is_dir():
         return
     files = {
@@ -915,7 +915,7 @@ async def _route_script(
                 env_extra=engine_env(project_root=change.project_root,
                                      quest_id=change.id,
                                      change_title=change.title,
-                                     change_dir=change.change_dir,
+                                     quest_dir=change.quest_dir,
                                      output_path=output_path,
                                      test_gates=test_gates),
                 policy=sandbox_policy, command=command, abort=abort))
@@ -1113,7 +1113,7 @@ async def _route_merge_and_exit_worktree(
         state.vars.update(match.var_mutations)
         return _finish(log, step, change, match, state)
 
-    spec_path = change.change_dir / "artifacts" / "spec" / f"{change.id}.md"
+    spec_path = change.quest_dir / "artifacts" / "spec" / f"{change.id}.md"
     body = _decisions_body(spec_path)
     result = await anyio.to_thread.run_sync(
         functools.partial(
@@ -1209,7 +1209,7 @@ async def _route_agent(
     # _v_agent_has_file rejects inline prompt: agents this milestone.
     assert step.file is not None, "agent step must have a file this milestone"
     agent_def = workflow.agents[step.file.stem]
-    transcript_dir = change.change_dir / "steps" / step.phase / step.name
+    transcript_dir = change.quest_dir / "steps" / step.phase / step.name
 
     # Keep (replay) the transcript on every `resume:` entry that has a non-empty
     # one. A transcript that ended before complete_step is replayed and
@@ -1641,7 +1641,7 @@ def _build_sandbox_policy(change: Change, config: Any, log: EventLog) -> Any:
         os.environ,
         engine_env(project_root=change.project_root, quest_id=change.id,
                    change_title=change.title,
-                   change_dir=change.change_dir,
+                   quest_dir=change.quest_dir,
                    test_gates=TestGates.from_config(config)),
     )
     try:
@@ -1649,7 +1649,7 @@ def _build_sandbox_policy(change: Change, config: Any, log: EventLog) -> Any:
             worktree=change.project_root, control_root=change.control_root,
             quest_id=change.id, cfg=cfg, engine_env_result=eng,
             environ=os.environ, available=sandbox_available(),
-            change_dir=change.change_dir,
+            quest_dir=change.quest_dir,
         )
     except SandboxUnavailable as exc:
         _emit(log, "sandbox_unavailable", {"message": str(exc)}, agent_id=None)

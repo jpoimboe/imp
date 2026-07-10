@@ -33,8 +33,8 @@ def test_rename_applies_immediately_and_returns_id(tmp_path: Path) -> None:
 
     assert ch.title == "Add version flag"            # stored verbatim
     assert "bbb111" in msg                           # returns the id
-    assert f"{ch.change_dir}/artifacts/spec/bbb111.md" in msg
-    meta = json.loads((ch.change_dir / "change.json").read_text())
+    assert f"{ch.quest_dir}/artifacts/spec/bbb111.md" in msg
+    meta = json.loads((ch.quest_dir / "change.json").read_text())
     assert meta["title"] == "Add version flag"
     renamed = [e for e in ch.event_log().read() if e["type"] == "change_renamed"]
     assert renamed and renamed[-1]["payload"]["new_title"] == "Add version flag"
@@ -75,7 +75,7 @@ def test_rename_rejects_empty(tmp_path: Path) -> None:
         tool.invoke(_ctx(ch, state), {"name": "   "})   # whitespace-only → empty
 
 
-def test_rename_description_drops_hardcoded_change_dir() -> None:
+def test_rename_description_drops_hardcoded_quest_dir() -> None:
     tool = get_registry()["rename_change"]
     assert ".imp/change" not in tool.description
 

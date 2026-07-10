@@ -111,7 +111,7 @@ def overlay_engine_env(
 
 def engine_env(
     *, project_root: Path, quest_id: str, change_title: str,
-    change_dir: Path | None = None,
+    quest_dir: Path | None = None,
     output_path: Path | None = None,
     test_gates: TestGates | None = None,
 ) -> dict[str, str]:
@@ -123,7 +123,7 @@ def engine_env(
                             MUST key on this.
         IMP_CHANGE_TITLE  — human-readable title for the change.
         IMP_CHANGE_DIR    — absolute host path of the change state directory;
-                            injected only when change_dir is provided. Scripts
+                            injected only when quest_dir is provided. Scripts
                             anchor on this instead of a cwd-relative .imp/change/
                             so the state directory survives worktree relocation.
         IMP_OUTPUT        — path to the JSON file where a script writes its declared
@@ -153,8 +153,8 @@ def engine_env(
         "IMP_CHANGE_TITLE": change_title,
         **HEADLESS_ENV,
     }
-    if change_dir is not None:
-        env["IMP_CHANGE_DIR"] = str(change_dir)
+    if quest_dir is not None:
+        env["IMP_CHANGE_DIR"] = str(quest_dir)
     if output_path is not None:
         env["IMP_OUTPUT"] = str(output_path)
     if test_gates is not None:

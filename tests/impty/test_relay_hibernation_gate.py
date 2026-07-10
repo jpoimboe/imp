@@ -144,9 +144,9 @@ def test_relay_hibernate_gate_then_resume_reengages(tmp_path: Path) -> None:
         wt = _await_worktree(tmp_path, timeout=30.0)
         slug = wt.name
         change = Change.load(tmp_path, slug)
-        events = change.change_dir / "events.jsonl"
-        state_path = change.change_dir / "state" / "state.json"
-        lock_path = change.change_dir / "lock"
+        events = change.quest_dir / "events.jsonl"
+        state_path = change.quest_dir / "state" / "state.json"
+        lock_path = change.quest_dir / "lock"
 
         # The daemon journals cli_attached on the 0 -> 1 attach; the scripted
         # bash step blocks on that marker, so the provider only reaches

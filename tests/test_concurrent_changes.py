@@ -75,12 +75,12 @@ def test_per_change_lock_is_exclusive_but_cross_change_is_not(tmp_path: Path) ->
     _seed_control(tmp_path)
     a = Change.create(tmp_path, title="A", quest_id="alpha", base_branch="main")
     b = Change.create(tmp_path, title="B", quest_id="beta", base_branch="main")
-    with ProjectLock(a.change_dir / "lock").acquire():
+    with ProjectLock(a.quest_dir / "lock").acquire():
         # Same lock file: must raise LockHeld (timeout=0 → immediate)
-        with pytest.raises(LockHeld), ProjectLock(a.change_dir / "lock").acquire(timeout=0.2):
+        with pytest.raises(LockHeld), ProjectLock(a.quest_dir / "lock").acquire(timeout=0.2):
             pass
         # Different change's lock file: must succeed
-        with ProjectLock(b.change_dir / "lock").acquire(timeout=0.2):
+        with ProjectLock(b.quest_dir / "lock").acquire(timeout=0.2):
             pass
 
 

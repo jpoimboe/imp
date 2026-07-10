@@ -37,8 +37,8 @@ def spawn_session_daemon(
         argv += ["--model", model]
     env = overlay_engine_env(os.environ, {})
     env.pop("IMP_REMOTE_CONTROL_SOCK", None)
-    change.change_dir.mkdir(parents=True, exist_ok=True)
-    with open(change.change_dir / "daemon.stderr", "wb") as stderr_file:
+    change.quest_dir.mkdir(parents=True, exist_ok=True)
+    with open(change.quest_dir / "daemon.stderr", "wb") as stderr_file:
         subprocess.Popen(
             argv,
             env=env,

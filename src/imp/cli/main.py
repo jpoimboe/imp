@@ -375,7 +375,7 @@ def _pause_facts(
         return name, change.title, phase, change.id, leave_trigger
     reason_val = _pause_reason(events)
     if reason_val is _PauseBanner.STALE:
-        if _daemon_stderr_has_crash(change.change_dir / "daemon.stderr"):
+        if _daemon_stderr_has_crash(change.quest_dir / "daemon.stderr"):
             reason: str | None = (
                 f"ended unexpectedly — see .imp/changes/{change.id}/daemon.stderr")
         else:
@@ -1102,7 +1102,7 @@ def _resume_opens_fresh(change: Change) -> bool:
 
 def _warn_if_blocked(change: Change) -> None:
     try:
-        deps = json.loads((change.change_dir / "change.json").read_bytes()).get("depends_on", [])
+        deps = json.loads((change.quest_dir / "change.json").read_bytes()).get("depends_on", [])
     except (FileNotFoundError, json.JSONDecodeError):
         return
     ready, unmerged = backlog.readiness(change.control_root, deps)
@@ -2186,16 +2186,16 @@ RESUMABLE = ("new", "paused", "merge_blocked", "draft", "saved")
 
 
 def resolve_display_status(
-    status: str, change_dir: Path, *, materialized: bool
+    status: str, quest_dir: Path, *, materialized: bool
 ) -> str:
     """The one map from persisted (at-rest) status to display status.
 
-    `running` is derived, never persisted: a live process holds change_dir/lock
+    `running` is derived, never persisted: a live process holds quest_dir/lock
     with its pid inside for its whole run. A stale lock (file present, pid dead)
     reads as not-running, so the change shows its resumable at-rest status — no
     manufactured `errored`. An un-materialized new/paused change shows as
     `draft`, generalizing the already-accepted draft synthesis."""
-    if lock_is_live(change_dir / "lock"):
+    if lock_is_live(quest_dir / "lock"):
         return "running"
     if status in ("new", "paused") and not materialized:
         return "draft"

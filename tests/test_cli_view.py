@@ -31,17 +31,17 @@ def _make_change_worktree(control: Path, quest_id: str, title: str,
     Change.load only reads the permanent .imp/changes/<id>/ directory)."""
     from imp.engine.state import State
 
-    change_dir = control / ".imp" / "changes" / quest_id
-    change_dir.mkdir(parents=True)
-    (change_dir / "state").mkdir()
-    (change_dir / "change.json").write_text(
+    quest_dir = control / ".imp" / "changes" / quest_id
+    quest_dir.mkdir(parents=True)
+    (quest_dir / "state").mkdir()
+    (quest_dir / "change.json").write_text(
         json.dumps({"id": quest_id, "title": title, "base_branch": "main",
                     "layout_version": LAYOUT_VERSION})
     )
-    (change_dir / "events.jsonl").write_text("")
+    (quest_dir / "events.jsonl").write_text("")
     state = State(id=quest_id, status=status, step="spec", step_attempt=0)
-    state.save(change_dir / "state")
-    return change_dir
+    state.save(quest_dir / "state")
+    return quest_dir
 
 
 def test_resume_accepts_merge_blocked_status(tmp_path, monkeypatch) -> None:
@@ -118,13 +118,13 @@ def test_cli_log_pipes_through_narrative(
     import imp.cli.main as m
 
     slug = "my-smoke"
-    change_dir = tmp_path / ".imp" / "changes" / slug
-    change_dir.mkdir(parents=True)
-    (change_dir / "change.json").write_text(
+    quest_dir = tmp_path / ".imp" / "changes" / slug
+    quest_dir.mkdir(parents=True)
+    (quest_dir / "change.json").write_text(
         json.dumps({"id": slug, "title": "smoke", "base_branch": "main",
                     "layout_version": LAYOUT_VERSION}),
     )
-    (change_dir / "events.jsonl").write_text(
+    (quest_dir / "events.jsonl").write_text(
         json.dumps({
             "id": "e1", "agent_id": None,
             "timestamp": "2026-05-27T10:00:00+00:00",
@@ -162,13 +162,13 @@ def test_imp_log_skips_malformed_lines_in_events_jsonl(
     import imp.cli.main as m
 
     slug = "my-smoke"
-    change_dir = tmp_path / ".imp" / "changes" / slug
-    change_dir.mkdir(parents=True)
-    (change_dir / "change.json").write_text(
+    quest_dir = tmp_path / ".imp" / "changes" / slug
+    quest_dir.mkdir(parents=True)
+    (quest_dir / "change.json").write_text(
         json.dumps({"id": slug, "title": "smoke", "base_branch": "main",
                     "layout_version": LAYOUT_VERSION}),
     )
-    (change_dir / "events.jsonl").write_text(
+    (quest_dir / "events.jsonl").write_text(
         json.dumps({
             "id": "e1", "agent_id": None,
             "timestamp": "2026-05-27T10:00:00+00:00",
@@ -211,13 +211,13 @@ def test_cli_log_subprocess_no_color_on_pipe(tmp_path: Path) -> None:
     _seed_control(tmp_path)
 
     slug = "my-sub"
-    change_dir = tmp_path / ".imp" / "changes" / slug
-    change_dir.mkdir(parents=True)
-    (change_dir / "change.json").write_text(
+    quest_dir = tmp_path / ".imp" / "changes" / slug
+    quest_dir.mkdir(parents=True)
+    (quest_dir / "change.json").write_text(
         json.dumps({"id": slug, "title": "sub", "base_branch": "main",
                     "layout_version": LAYOUT_VERSION}),
     )
-    (change_dir / "events.jsonl").write_text(
+    (quest_dir / "events.jsonl").write_text(
         json.dumps({
             "id": "e1", "agent_id": None,
             "timestamp": "2026-05-27T10:00:00+00:00",
@@ -303,13 +303,13 @@ def test_cmd_log_auto_picks_latest_by_mtime(
     slugs_titles = [("first-change", "first"), ("second-change", "second"),
                     ("tenth-change", "tenth")]
     for slug, title in slugs_titles:
-        change_dir = tmp_path / ".imp" / "changes" / slug
-        change_dir.mkdir(parents=True)
-        (change_dir / "change.json").write_text(
+        quest_dir = tmp_path / ".imp" / "changes" / slug
+        quest_dir.mkdir(parents=True)
+        (quest_dir / "change.json").write_text(
             json.dumps({"id": slug, "title": title, "base_branch": "main",
                         "layout_version": LAYOUT_VERSION}),
         )
-        events_path = change_dir / "events.jsonl"
+        events_path = quest_dir / "events.jsonl"
         events_path.write_text(
             json.dumps({
                 "id": "e1", "agent_id": None,
@@ -498,13 +498,13 @@ def test_log_uses_display_width_for_hr_and_term_width_for_wrap(
     import imp.cli.main as m
 
     slug = "wide-demo"
-    change_dir = tmp_path / ".imp" / "changes" / slug
-    change_dir.mkdir(parents=True)
-    (change_dir / "change.json").write_text(json.dumps(
+    quest_dir = tmp_path / ".imp" / "changes" / slug
+    quest_dir.mkdir(parents=True)
+    (quest_dir / "change.json").write_text(json.dumps(
         {"id": slug, "title": "demo", "base_branch": "main",
          "layout_version": LAYOUT_VERSION}))
     long_line = "X" * 200  # no spaces: only wraps if the wrap width forces it
-    (change_dir / "events.jsonl").write_text(
+    (quest_dir / "events.jsonl").write_text(
         json.dumps({"id": "e1", "agent_id": None,
                     "timestamp": "2026-06-25T10:00:00+00:00",
                     "type": "step_started",

@@ -362,19 +362,19 @@ def test_keyboard_interrupt_in_wait_does_not_raise(
 def _make_change_worktree(control: Path, slug: str, title: str) -> Path:
     """Create a minimal on-disk Change home under control/.imp/changes/<slug>
     with one rendered step (phase "spec") so the narrative reaches output."""
-    change_dir = control / ".imp" / "changes" / slug
-    change_dir.mkdir(parents=True)
-    (change_dir / "change.json").write_text(
+    quest_dir = control / ".imp" / "changes" / slug
+    quest_dir.mkdir(parents=True)
+    (quest_dir / "change.json").write_text(
         json.dumps({"id": slug, "title": title, "base_branch": "main",
                     "layout_version": LAYOUT_VERSION,
                     "created_at": "2026-05-27T10:00:00+00:00"}),
     )
-    state_dir = change_dir / "state"
+    state_dir = quest_dir / "state"
     state_dir.mkdir()
     (state_dir / "state.json").write_text(
         json.dumps({"step": "-", "status": "paused"}),
     )
-    (change_dir / "events.jsonl").write_text(
+    (quest_dir / "events.jsonl").write_text(
         json.dumps({
             "timestamp": "2026-05-27T10:00:00+00:00",
             "type": "change_created",
@@ -388,7 +388,7 @@ def _make_change_worktree(control: Path, slug: str, title: str) -> Path:
                         "model": "m", "provider": "anthropic"},
         }) + "\n",
     )
-    return change_dir
+    return quest_dir
 
 
 def test_main_log_invokes_pager_on_tty(

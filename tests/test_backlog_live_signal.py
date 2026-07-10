@@ -31,7 +31,7 @@ def test_unstarted_backlog_meta_returns_meta_for_idle_seed(tmp_path: Path) -> No
 def test_unstarted_backlog_meta_none_when_lock_live(tmp_path: Path) -> None:
     _seed_control(tmp_path)
     ch = _idea_seed(tmp_path, "2026-06-20-lock01")
-    (ch.change_dir / "lock").write_text(str(os.getpid()))   # live holder pid
+    (ch.quest_dir / "lock").write_text(str(os.getpid()))   # live holder pid
     assert m._unstarted_backlog_meta(tmp_path, "2026-06-20-lock01") is None
 
 
@@ -59,7 +59,7 @@ def test_untouched_seed_stays_in_backlog(tmp_path: Path) -> None:
 def test_lock_live_seed_leaves_backlog_and_shows_running(tmp_path: Path) -> None:
     _seed_control(tmp_path)
     ch = _idea_seed(tmp_path, "2026-06-20-run01")
-    (ch.change_dir / "lock").write_text(str(os.getpid()))   # live holder pid
+    (ch.quest_dir / "lock").write_text(str(os.getpid()))   # live holder pid
     status_rows = {r[0]: r for r in m._status_rows(tmp_path)}
     assert "2026-06-20-run01" in status_rows
     assert status_rows["2026-06-20-run01"][1] == "running"

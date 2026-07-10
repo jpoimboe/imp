@@ -36,7 +36,7 @@ def _make_change(tmp_path: Path, quest_id: str) -> Change:
         base_branch="main",
         control_root=tmp_path,
         project_root=tmp_path,
-        change_dir=tmp_path / ".imp" / "change",
+        quest_dir=tmp_path / ".imp" / "change",
     )
 
 

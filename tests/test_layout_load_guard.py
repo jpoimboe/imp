@@ -10,8 +10,8 @@ from imp.engine.errors import LayoutMismatch, LoadError
 from tests.conftest import _seed_control
 
 
-def _set_stored_version(change_dir: Path, version: int) -> None:
-    meta_path = change_dir / "change.json"
+def _set_stored_version(quest_dir: Path, version: int) -> None:
+    meta_path = quest_dir / "change.json"
     meta = json.loads(meta_path.read_text())
     meta["layout_version"] = version
     meta_path.write_text(json.dumps(meta))
@@ -28,7 +28,7 @@ def test_migrate_always_raises_while_registry_empty(tmp_path: Path) -> None:
 def test_load_refuses_lower_stored_version(tmp_path: Path) -> None:
     _seed_control(tmp_path)
     ch = Change.create(tmp_path, title="X", quest_id="lo", base_branch="main")
-    _set_stored_version(ch.change_dir, 0)        # no (0, 2) migration -> refuse
+    _set_stored_version(ch.quest_dir, 0)        # no (0, 2) migration -> refuse
     with pytest.raises(LayoutMismatch):
         Change.load(tmp_path, "lo")
 
@@ -36,7 +36,7 @@ def test_load_refuses_lower_stored_version(tmp_path: Path) -> None:
 def test_load_refuses_higher_stored_version(tmp_path: Path) -> None:
     _seed_control(tmp_path)
     ch = Change.create(tmp_path, title="X", quest_id="hi", base_branch="main")
-    _set_stored_version(ch.change_dir, LAYOUT_VERSION + 999)
+    _set_stored_version(ch.quest_dir, LAYOUT_VERSION + 999)
     with pytest.raises(LayoutMismatch):
         Change.load(tmp_path, "hi")
 
@@ -44,7 +44,7 @@ def test_load_refuses_higher_stored_version(tmp_path: Path) -> None:
 def test_load_refuses_when_version_key_absent(tmp_path: Path) -> None:
     _seed_control(tmp_path)
     ch = Change.create(tmp_path, title="X", quest_id="old", base_branch="main")
-    meta_path = ch.change_dir / "change.json"
+    meta_path = ch.quest_dir / "change.json"
     meta = json.loads(meta_path.read_text())
     del meta["layout_version"]                 # a pre-guard change.json -> defaults to 0
     meta_path.write_text(json.dumps(meta))

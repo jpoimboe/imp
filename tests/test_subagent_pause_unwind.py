@@ -140,10 +140,10 @@ def _seed_single_step(root: Path) -> Change:
     (root / ".imp").mkdir(parents=True, exist_ok=True)
     (root / ".imp" / "config.yaml").write_text(_cfg)
 
-    change_dir = root / ".imp" / "change"
-    change_dir.mkdir(parents=True, exist_ok=True)
-    (change_dir / "state").mkdir(exist_ok=True)
-    (change_dir / "change.json").write_text(json.dumps(
+    quest_dir = root / ".imp" / "change"
+    quest_dir.mkdir(parents=True, exist_ok=True)
+    (quest_dir / "state").mkdir(exist_ok=True)
+    (quest_dir / "change.json").write_text(json.dumps(
         {"id": "s", "title": "t", "base_branch": "main"}, indent=2, sort_keys=True))
     configured: list[str] = []
     with contextlib.suppress(Exception):
@@ -152,9 +152,9 @@ def _seed_single_step(root: Path) -> Change:
     workflow = load_workflow(wf, configured_tiers=configured)
     flat = workflow.flat_steps()
     State(id="s", step=flat[0].name, step_attempt=0, status="running",
-          vars=dict(workflow.vars.defaults()), loop_counts={}).save(change_dir / "state")
+          vars=dict(workflow.vars.defaults()), loop_counts={}).save(quest_dir / "state")
     change = Change(id="s", title="t", base_branch="main", control_root=root,
-                    project_root=root, change_dir=change_dir)
+                    project_root=root, quest_dir=quest_dir)
     change.event_log().append(agent_id=None, type="change_created",
                               payload={"id": "s", "title": "t"})
     return change

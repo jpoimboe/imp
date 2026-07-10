@@ -53,12 +53,12 @@ def test_merge_step_merges_then_complete_archives_and_removes(tmp_path: Path) ->
     assert not (tmp_path / ".imp" / "worktrees" / "feat").exists() # worktree removed by route
     assert ch.project_root == ch.control_root                       # project_root reset
 
-    (ch.change_dir / "steps").mkdir(parents=True, exist_ok=True)
-    (ch.change_dir / "steps" / "001.json").write_text("{}")
+    (ch.quest_dir / "steps").mkdir(parents=True, exist_ok=True)
+    (ch.quest_dir / "steps" / "001.json").write_text("{}")
 
     result = _complete(ch, state, log)
     assert result.value == "completed"
-    assert not (ch.change_dir / "steps").exists()                  # transcript dir dropped
+    assert not (ch.quest_dir / "steps").exists()                  # transcript dir dropped
     assert "imp/feat" in _git(tmp_path, "branch", "--list", "imp/feat").stdout  # branch kept
 
     # Archive captured the terminal snapshot: record + blob + index rows.
@@ -220,7 +220,7 @@ def test_route_merge_does_not_block_event_loop(tmp_path: Path, monkeypatch) -> N
     monkeypatch.setattr(worktree, "merge_to_base", _blocking_merge)
 
     change = types.SimpleNamespace(
-        change_dir=tmp_path, control_root=tmp_path, id="feat", handle="feat",
+        quest_dir=tmp_path, control_root=tmp_path, id="feat", handle="feat",
         base_branch="main", title="x", project_root=tmp_path, state_dir=tmp_path,
     )
     step = _merge_step()
@@ -266,7 +266,7 @@ def test_complete_merged_reaps_whole_home(tmp_path: Path) -> None:
 
     _action, _fb, _muts = _run_merge(_merge_step(), ch, state, log)
     assert state.merge_commit is not None
-    home = ch.change_dir
+    home = ch.quest_dir
     assert home.exists()                       # home present before finalize
 
     result = _complete(ch, state, log)

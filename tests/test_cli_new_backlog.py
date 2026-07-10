@@ -34,7 +34,7 @@ def test_new_idea_creates_change_home_with_origin_idea(
     assert change.origin == "idea"
     assert change.title == "Wire OAuth login"
     assert change.seed_opening == "Wire OAuth login"
-    meta = json.loads((change.change_dir / "change.json").read_text())
+    meta = json.loads((change.quest_dir / "change.json").read_text())
     assert meta["depends_on"] == ["2026-06-16-dep001"]
     assert new_id in capsys.readouterr().out
 
@@ -52,7 +52,7 @@ def test_new_idea_no_deps(tmp_path: Path, monkeypatch) -> None:
     _seed_control(tmp_path)
     monkeypatch.chdir(tmp_path)
     main._record_idea(_args(depends_on=None), tmp_path, "main")
-    meta = json.loads((Change.load(tmp_path, _only_new_id(tmp_path)).change_dir
+    meta = json.loads((Change.load(tmp_path, _only_new_id(tmp_path)).quest_dir
                        / "change.json").read_text())
     assert meta["depends_on"] == []
 

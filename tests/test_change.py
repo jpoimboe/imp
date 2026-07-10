@@ -33,24 +33,24 @@ def test_create_change_makes_worktree_and_state(tmp_path: Path) -> None:
     assert ch.base_branch == "main"
     wtpath = tmp_path / ".imp" / "worktrees" / "abc123"
     assert ch.project_root == wtpath
-    assert (ch.change_dir / "change.json").exists()
+    assert (ch.quest_dir / "change.json").exists()
     # create() does not take a snapshot; no workflow/ snapshot dir yet.
-    assert not (ch.change_dir / "workflow").exists()
+    assert not (ch.quest_dir / "workflow").exists()
     # workflow_dir IS the branch's own tracked workflow dir.
     assert ch.workflow_dir == wtpath / "imp" / "workflows" / "imp"
     assert (ch.workflow_dir / "workflow.yaml").exists()
-    state = State.load(ch.change_dir / "state")
+    state = State.load(ch.quest_dir / "state")
     assert state.id == "abc123" and state.step == "s" and state.status == "new"
 
 
 def test_change_home_lives_at_control_root_outside_worktree(tmp_path: Path) -> None:
     _seed_control(tmp_path)
     ch = Change.create(tmp_path, title="X", quest_id="hom123", base_branch="main")
-    assert ch.change_dir == tmp_path / ".imp" / "changes" / "hom123"
+    assert ch.quest_dir == tmp_path / ".imp" / "changes" / "hom123"
     # The home is OUTSIDE the worktree: no inner .imp/change/ is created there.
     assert not (ch.project_root / ".imp" / "change").exists()
-    assert (ch.change_dir / "change.json").exists()
-    assert (ch.change_dir / "state" / "state.json").exists()
+    assert (ch.quest_dir / "change.json").exists()
+    assert (ch.quest_dir / "state" / "state.json").exists()
 
 
 def test_load_change_by_id(tmp_path: Path) -> None:
@@ -64,7 +64,7 @@ def test_change_json_has_no_slug_or_auto_titled(tmp_path: Path) -> None:
     import json
     _seed_control(tmp_path)
     ch = Change.create(tmp_path, title="X", quest_id="zzz999", base_branch="main")
-    meta = json.loads((ch.change_dir / "change.json").read_text())
+    meta = json.loads((ch.quest_dir / "change.json").read_text())
     assert set(meta) == {"id", "title", "base_branch", "created_at",
                          "depends_on", "project_root", "materialized",
                          "cur_base_head", "layout_version", "imp_commit",
@@ -78,7 +78,7 @@ def test_workflow_dir_is_live_dir_when_no_snapshot_exists(tmp_path: Path) -> Non
     assert ch.workflow_dir == ch.project_root / "imp" / "workflows" / "imp"
     assert "phases:" in (ch.workflow_dir / "workflow.yaml").read_text()
     # ...and there is no gitignored second copy.
-    assert not (ch.change_dir / "workflow").exists()
+    assert not (ch.quest_dir / "workflow").exists()
 
 
 def test_create_without_committed_workflow_resolves_bundled(tmp_path: Path) -> None:
@@ -122,7 +122,7 @@ def test_workflow_dir_prefers_snapshot_when_present(tmp_path: Path) -> None:
     _seed_control(tmp_path)
     ch = Change.create(tmp_path, title="X",
                        quest_id="snap01", base_branch="main")
-    snapshot = ch.change_dir / "workflow"
+    snapshot = ch.quest_dir / "workflow"
     snapshot.mkdir()
     (snapshot / "workflow.yaml").write_text("name: frozen\n")
     # Once the snapshot exists, workflow_dir resolves to it, NOT the live dir.
@@ -134,7 +134,7 @@ def test_create_persists_project_root(tmp_path: Path) -> None:
     import json
     _seed_control(tmp_path)
     ch = Change.create(tmp_path, title="X", quest_id="prr", base_branch="main")
-    meta = json.loads((ch.change_dir / "change.json").read_text())
+    meta = json.loads((ch.quest_dir / "change.json").read_text())
     assert meta["project_root"] == str((tmp_path / ".imp" / "worktrees" / "prr").resolve())
 
 
@@ -144,7 +144,7 @@ def test_load_reads_persisted_project_root(tmp_path: Path) -> None:
     ch = Change.create(tmp_path, title="X", quest_id="lrr", base_branch="main")
     # Rewrite the field to a sentinel to prove load READS it rather than
     # re-deriving project_root by worktree convention.
-    meta_path = ch.change_dir / "change.json"
+    meta_path = ch.quest_dir / "change.json"
     meta = json.loads(meta_path.read_text())
     meta["project_root"] = "/sentinel/root"
     meta_path.write_text(json.dumps(meta))
@@ -163,7 +163,7 @@ def test_live_workflow_dir_ignores_the_snapshot(tmp_path: Path) -> None:
     _seed_control(tmp_path)
     ch = Change.create(tmp_path, title="X",
                        quest_id="snap03", base_branch="main")
-    snapshot = ch.change_dir / "workflow"
+    snapshot = ch.quest_dir / "workflow"
     snapshot.mkdir()
     (snapshot / "workflow.yaml").write_text("name: frozen\n")
     # live_workflow_dir always points at the branch dir, even with a snapshot present.
@@ -198,7 +198,7 @@ def test_create_marks_materialized(tmp_path: Path) -> None:
     _seed_control(tmp_path)
     ch = Change.create(tmp_path, title="X", quest_id="mat1", base_branch="main")
     assert ch.materialized is True
-    meta = json.loads((ch.change_dir / "change.json").read_text())
+    meta = json.loads((ch.quest_dir / "change.json").read_text())
     assert meta["materialized"] is True
 
 
@@ -206,7 +206,7 @@ def test_load_defaults_materialized_true_when_absent(tmp_path: Path) -> None:
     import json
     _seed_control(tmp_path)
     ch = Change.create(tmp_path, title="X", quest_id="mat2", base_branch="main")
-    meta_path = ch.change_dir / "change.json"
+    meta_path = ch.quest_dir / "change.json"
     meta = json.loads(meta_path.read_text())
     del meta["materialized"]          # a pre-flag (legacy) change.json
     meta_path.write_text(json.dumps(meta))
@@ -222,9 +222,9 @@ def test_create_draft_makes_no_worktree_or_branch(tmp_path: Path) -> None:
     assert ch.project_root == tmp_path                       # the main checkout
     assert not (tmp_path / ".imp" / "worktrees" / "drf1").exists()
     assert "imp/drf1" not in _git(tmp_path, "branch", "--list", "imp/drf1").stdout
-    state = State.load(ch.change_dir / "state")
+    state = State.load(ch.quest_dir / "state")
     assert state.step == "s" and state.status == "new"   # seeded at the first step
-    events_text = (ch.change_dir / "events.jsonl").read_text()
+    events_text = (ch.quest_dir / "events.jsonl").read_text()
     events = [json.loads(line) for line in events_text.splitlines() if line.strip()]
     assert any(e["type"] == "change_created" for e in events)
 
@@ -234,7 +234,7 @@ def test_create_draft_records_orig_base_head(tmp_path: Path) -> None:
     _seed_control(tmp_path)
     tip = _git(tmp_path, "rev-parse", "HEAD").stdout.strip()
     ch = Change.create_draft(tmp_path, title="X", quest_id="drf2", base_branch="main")
-    meta = json.loads((ch.change_dir / "change.json").read_text())
+    meta = json.loads((ch.quest_dir / "change.json").read_text())
     assert meta["orig_base_head"] == tip
     assert "base_head" not in meta
     assert "cur_base_head" not in meta
@@ -289,7 +289,7 @@ def test_materialize_forks_worktree_and_flips_root(tmp_path: Path) -> None:
     assert wt.exists()
     assert "imp/mz1" in _git(tmp_path, "branch", "--list", "imp/mz1").stdout
     assert ch.project_root == wt and ch.materialized is True
-    meta = json.loads((ch.change_dir / "change.json").read_text())
+    meta = json.loads((ch.quest_dir / "change.json").read_text())
     assert meta["project_root"] == str(wt) and meta["materialized"] is True
     assert head_changed is False          # base unchanged since draft creation
 
@@ -316,7 +316,7 @@ def test_create_persists_cur_base_head(tmp_path: Path) -> None:
     _seed_control(tmp_path)
     tip = _git(tmp_path, "rev-parse", "HEAD").stdout.strip()
     ch = Change.create(tmp_path, title="X", quest_id="cbh1", base_branch="main")
-    meta = json.loads((ch.change_dir / "change.json").read_text())
+    meta = json.loads((ch.quest_dir / "change.json").read_text())
     assert meta["cur_base_head"] == tip
     assert ch.cur_base_head == tip
 
@@ -326,7 +326,7 @@ def test_materialize_persists_cur_base_head_and_reports_head_changed(tmp_path: P
     ch = Change.create_draft(tmp_path, title="X", quest_id="cbh2", base_branch="main")
     orig = _git(tmp_path, "rev-parse", "HEAD").stdout.strip()
     head_changed = ch.materialize()
-    meta = json.loads((ch.change_dir / "change.json").read_text())
+    meta = json.loads((ch.quest_dir / "change.json").read_text())
     assert meta["cur_base_head"] == orig
     assert ch.cur_base_head == orig
     assert head_changed == (meta["cur_base_head"] != meta["orig_base_head"])
@@ -347,7 +347,7 @@ def test_materialize_reports_head_changed_true(tmp_path: Path) -> None:
     head_changed = ch.materialize()
     assert head_changed is True
     assert ch.cur_base_head == new_tip
-    meta = json.loads((ch.change_dir / "change.json").read_text())
+    meta = json.loads((ch.quest_dir / "change.json").read_text())
     assert meta["cur_base_head"] == new_tip
 
 
@@ -364,7 +364,7 @@ def test_load_exposes_orig_and_cur_base_head(tmp_path: Path) -> None:
 def test_migrate_v1_to_v2(tmp_path: Path) -> None:
     _seed_control(tmp_path)
     ch = Change.create(tmp_path, title="X", quest_id="mig1", base_branch="main")
-    meta_path = ch.change_dir / "change.json"
+    meta_path = ch.quest_dir / "change.json"
     meta = json.loads(meta_path.read_text())
     # Reconstruct a v1 change.json: old `base_head` key, no orig/cur, version 1.
     old_tip = meta.pop("cur_base_head")
@@ -384,7 +384,7 @@ def test_migrate_v1_to_v2(tmp_path: Path) -> None:
 def test_migrate_v2_to_v3(tmp_path: Path) -> None:
     _seed_control(tmp_path)
     ch = Change.create(tmp_path, title="X", quest_id="mig2", base_branch="main")
-    meta_path = ch.change_dir / "change.json"
+    meta_path = ch.quest_dir / "change.json"
     meta = json.loads(meta_path.read_text())
     # Reconstruct a v2 change.json (before the reincarnations field bump).
     meta["layout_version"] = 2
@@ -397,7 +397,7 @@ def test_migrate_v2_to_v3(tmp_path: Path) -> None:
 def test_migrate_v3_to_v4(tmp_path: Path) -> None:
     _seed_control(tmp_path)
     ch = Change.create(tmp_path, title="X", quest_id="mig3", base_branch="main")
-    meta_path = ch.change_dir / "change.json"
+    meta_path = ch.quest_dir / "change.json"
     meta = json.loads(meta_path.read_text())
     # Reconstruct a v3 change.json (before the max_reincarnations field bump).
     meta["layout_version"] = 3
@@ -417,7 +417,7 @@ def test_create_draft_persists_and_resolves_workflow_override(tmp_path: Path) ->
     ch = Change.create_draft(tmp_path, title="X", quest_id="dft001",
                              base_branch="main", workflow="mine")
     assert ch.workflow == "mine"
-    meta = json.loads((ch.change_dir / "change.json").read_text())
+    meta = json.loads((ch.quest_dir / "change.json").read_text())
     assert meta["workflow"] == "mine"
     loaded = Change.load(tmp_path, "dft001")
     assert loaded.workflow == "mine"
@@ -443,7 +443,7 @@ def test_create_persists_and_resolves_workflow_override(tmp_path: Path) -> None:
     ch = Change.create(tmp_path, title="X", quest_id="crt001",
                        base_branch="main", workflow="mine")
     assert ch.workflow == "mine"
-    meta = json.loads((ch.change_dir / "change.json").read_text())
+    meta = json.loads((ch.quest_dir / "change.json").read_text())
     assert meta["workflow"] == "mine"
     loaded = Change.load(tmp_path, "crt001")
     assert loaded.workflow == "mine"
@@ -466,7 +466,7 @@ def test_create_draft_records_origin_and_seed_opening(tmp_path: Path) -> None:
         origin="idea", seed_opening="Add OAuth\n\nwire login")
     assert ch.origin == "idea"
     assert ch.seed_opening == "Add OAuth\n\nwire login"
-    meta = json.loads((ch.change_dir / "change.json").read_text())
+    meta = json.loads((ch.quest_dir / "change.json").read_text())
     assert meta["origin"] == "idea"
     assert meta["seed_opening"] == "Add OAuth\n\nwire login"
 
@@ -502,7 +502,7 @@ def test_set_origin_rewrites_change_json(tmp_path: Path) -> None:
         base_branch=base, origin="draft")
     change.set_origin("idea")
     assert change.origin == "idea"
-    meta = _json.loads((change.change_dir / "change.json").read_text())
+    meta = _json.loads((change.quest_dir / "change.json").read_text())
     assert meta["origin"] == "idea"
 
 
@@ -521,13 +521,13 @@ def test_set_seed_opening_rewrites_change_json(tmp_path: Path) -> None:
 
     change.set_seed_opening("add a --json flag")
     assert change.seed_opening == "add a --json flag"
-    meta = _json.loads((change.change_dir / "change.json").read_text())
+    meta = _json.loads((change.quest_dir / "change.json").read_text())
     assert meta["seed_opening"] == "add a --json flag"
 
     # An unseeded fallback persists as null.
     change.set_seed_opening(None)
     assert change.seed_opening is None
-    meta = _json.loads((change.change_dir / "change.json").read_text())
+    meta = _json.loads((change.quest_dir / "change.json").read_text())
     assert meta["seed_opening"] is None
 
 
@@ -544,10 +544,10 @@ def test_set_depends_on_rewrites_change_json(tmp_path: Path) -> None:
         tmp_path, title="X", quest_id="2026-06-24-deps01",
         base_branch=base, origin="draft")
     change.set_depends_on(["a", "b"])
-    meta = _json.loads((change.change_dir / "change.json").read_text())
+    meta = _json.loads((change.quest_dir / "change.json").read_text())
     assert meta["depends_on"] == ["a", "b"]
     change.set_depends_on([])
-    meta = _json.loads((change.change_dir / "change.json").read_text())
+    meta = _json.loads((change.quest_dir / "change.json").read_text())
     assert meta["depends_on"] == []
 
 
@@ -560,7 +560,7 @@ def test_materialize_raises_on_empty_title_and_creates_nothing(tmp_path: Path) -
     assert ch.materialized is False
     assert not (tmp_path / ".imp" / "worktrees" / "ttl1").exists()
     assert "imp/ttl1" not in _git(tmp_path, "branch", "--list", "imp/ttl1").stdout
-    meta = json.loads((ch.change_dir / "change.json").read_text())
+    meta = json.loads((ch.quest_dir / "change.json").read_text())
     assert meta["materialized"] is False
 
 
@@ -602,7 +602,7 @@ def test_control_workflow_dir_resolves_against_control_root(tmp_path: Path) -> N
         (root / "imp" / "project.yaml").write_text("default-workflow: imp\n")
     ch = Change(
         id="c", title="t", base_branch="main",
-        control_root=ctl, project_root=wt, change_dir=tmp_path / "cd",
+        control_root=ctl, project_root=wt, quest_dir=tmp_path / "cd",
     )
     assert ch.control_workflow_dir == ctl / "imp" / "workflows" / "imp"
     assert ch.live_workflow_dir == wt / "imp" / "workflows" / "imp"
@@ -617,6 +617,6 @@ def test_control_workflow_dir_falls_back_to_bundled(tmp_path: Path) -> None:
     (ctl / "imp" / "project.yaml").write_text("default-workflow: imp\n")
     ch = Change(
         id="c", title="t", base_branch="main",
-        control_root=ctl, project_root=tmp_path / "wt", change_dir=tmp_path / "cd",
+        control_root=ctl, project_root=tmp_path / "wt", quest_dir=tmp_path / "cd",
     )
     assert ch.control_workflow_dir == bundled_workflow_dir("imp")

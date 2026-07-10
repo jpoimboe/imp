@@ -78,7 +78,7 @@ def test_abandon_allowed_from_completed_status(tmp_path: Path) -> None:
 def test_abandon_refuses_when_lock_held(tmp_path: Path) -> None:
     _seed_control(tmp_path)
     ch = Change.create(tmp_path, title="x", quest_id="feat", base_branch="main")
-    with ProjectLock(ch.change_dir / "lock").acquire():     # simulate a live runner
+    with ProjectLock(ch.quest_dir / "lock").acquire():     # simulate a live runner
         rc = _abandon(tmp_path, "feat")
     assert rc == 2
     assert (tmp_path / ".imp" / "worktrees" / "feat").exists()  # untouched
@@ -220,7 +220,7 @@ def test_abandon_refuses_when_lock_held_on_idea(
     ch = Change.create_draft(tmp_path, title="An idea", quest_id="idea1",
                              base_branch="main", origin="idea",
                              seed_opening="An idea\n\ndo a thing")
-    with ProjectLock(ch.change_dir / "lock").acquire():
+    with ProjectLock(ch.quest_dir / "lock").acquire():
         rc = _abandon(tmp_path, "idea1")
     assert rc == 2
     assert (tmp_path / ".imp" / "changes" / "idea1").exists()  # untouched

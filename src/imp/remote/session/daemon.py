@@ -200,10 +200,10 @@ async def serve_change_session(
     # would always see a live pid and never detect the crash. `_bound` (defined
     # above) closes over `crashed`; it is read only when _bound runs, after this
     # assignment, so the forward reference is sound.
-    lock_path = change.change_dir / "lock"
+    lock_path = change.quest_dir / "lock"
     crashed = resume and lock_path.exists() and not lock_is_live(lock_path)
     try:
-        with ProjectLock(change.change_dir / "lock").acquire():
+        with ProjectLock(change.quest_dir / "lock").acquire():
             await server.open()
             result = await server.serve(_bound)
     except LockHeld:

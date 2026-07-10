@@ -47,7 +47,7 @@ def test_status_rows_surfaces_crashed_run_as_at_rest_not_errored(tmp_path: Path)
     ch = Change.create(tmp_path, title="Crashed run",
                        quest_id="2026-06-11-deadaa", base_branch="main")
     # Simulate a crash: a leftover lock file naming a dead holder pid.
-    (ch.change_dir / "lock").write_text(str(_dead_pid()))
+    (ch.quest_dir / "lock").write_text(str(_dead_pid()))
     rows = {r[0]: r for r in m._status_rows(tmp_path)}
     assert rows[ch.id][1] == "new"                       # at-rest, never errored
     assert ch.id in {r[0] for r in m._resumable_rows(tmp_path)}

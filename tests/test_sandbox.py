@@ -447,7 +447,7 @@ def _fake_change(tmp_path):
     return _types.SimpleNamespace(
         project_root=wt, control_root=control, id="abc",
         handle="abc-slug", title="Abc Title",
-        change_dir=wt / ".imp" / "change")
+        quest_dir=wt / ".imp" / "change")
 
 
 def _fake_config(**over):
@@ -654,7 +654,7 @@ def test_resolve_policy_binds_change_home_rw(tmp_path):
     pol = resolve_policy(
         worktree=wt, control_root=control, quest_id="abc",
         cfg=SandboxConfig(), engine_env_result={}, environ={},
-        available=True, change_dir=home,
+        available=True, quest_dir=home,
     )
     assert pol.change_home == str(home)
     # An artifact write under the home is permitted by the in-process mirror...
@@ -996,7 +996,7 @@ def test_resolve_policy_spike_reexposes_worktree_and_change_home_under_home(tmp_
     pol = resolve_policy(
         worktree=wt, control_root=control, quest_id="abc",
         cfg=SandboxConfig(home=home), engine_env_result={}, environ={},
-        available=True, change_dir=change_home, spike=True,
+        available=True, quest_dir=change_home, spike=True,
     )
     plan = pol.bind_plan()
     assert plan.index((str(home), "tmpfs_rw")) < plan.index((str(wt), "rw"))
@@ -1118,64 +1118,64 @@ def test_resolve_policy_non_spike_default_has_no_spike_binds(tmp_path):
 
 def test_resolve_policy_bakes_workflow_snapshot_overlay(tmp_path):
     control, wt = _layout(tmp_path)
-    change_dir = control / ".imp" / "changes" / "abc"
-    (change_dir / "workflow").mkdir(parents=True)
+    quest_dir = control / ".imp" / "changes" / "abc"
+    (quest_dir / "workflow").mkdir(parents=True)
     pol = resolve_policy(
         worktree=wt, control_root=control, quest_id="abc",
         cfg=SandboxConfig(), engine_env_result={}, environ={},
-        available=True, change_dir=change_dir,
+        available=True, quest_dir=quest_dir,
     )
-    assert str(change_dir / "workflow") in pol.readonly_overlays
+    assert str(quest_dir / "workflow") in pol.readonly_overlays
 
 
 def test_resolve_policy_omits_workflow_overlay_when_snapshot_absent(tmp_path):
     control, wt = _layout(tmp_path)
-    change_dir = control / ".imp" / "changes" / "abc"
-    change_dir.mkdir(parents=True)   # change home exists, but no workflow/ subtree
+    quest_dir = control / ".imp" / "changes" / "abc"
+    quest_dir.mkdir(parents=True)   # change home exists, but no workflow/ subtree
     pol = resolve_policy(
         worktree=wt, control_root=control, quest_id="abc",
         cfg=SandboxConfig(), engine_env_result={}, environ={},
-        available=True, change_dir=change_dir,
+        available=True, quest_dir=quest_dir,
     )
-    assert str(change_dir / "workflow") not in pol.readonly_overlays
+    assert str(quest_dir / "workflow") not in pol.readonly_overlays
     assert pol.readonly_overlays == ()
 
 
-def test_resolve_policy_omits_workflow_overlay_when_change_dir_unset(tmp_path):
+def test_resolve_policy_omits_workflow_overlay_when_quest_dir_unset(tmp_path):
     control, wt = _layout(tmp_path)
     pol = resolve_policy(
         worktree=wt, control_root=control, quest_id="abc",
         cfg=SandboxConfig(), engine_env_result={}, environ={},
-        available=True,   # change_dir defaults to None
+        available=True,   # quest_dir defaults to None
     )
     assert pol.readonly_overlays == ()
 
 
 def test_resolve_policy_workflow_snapshot_denies_write_siblings_writable(tmp_path):
     control, wt = _layout(tmp_path)
-    change_dir = control / ".imp" / "changes" / "abc"
-    (change_dir / "workflow").mkdir(parents=True)
+    quest_dir = control / ".imp" / "changes" / "abc"
+    (quest_dir / "workflow").mkdir(parents=True)
     pol = resolve_policy(
         worktree=wt, control_root=control, quest_id="abc",
         cfg=SandboxConfig(), engine_env_result={}, environ={},
-        available=True, change_dir=change_dir,
+        available=True, quest_dir=quest_dir,
     )
-    assert pol.allows_write(change_dir / "workflow" / "workflow.yaml") is False
-    assert pol.allows_write(change_dir / "artifacts" / "spec" / "x.md") is True
+    assert pol.allows_write(quest_dir / "workflow" / "workflow.yaml") is False
+    assert pol.allows_write(quest_dir / "artifacts" / "spec" / "x.md") is True
 
 
 def test_resolve_policy_workflow_ro_bind_emitted_after_change_home(tmp_path):
     control, wt = _layout(tmp_path)
-    change_dir = control / ".imp" / "changes" / "abc"
-    snapshot = change_dir / "workflow"
+    quest_dir = control / ".imp" / "changes" / "abc"
+    snapshot = quest_dir / "workflow"
     snapshot.mkdir(parents=True)
     pol = resolve_policy(
         worktree=wt, control_root=control, quest_id="abc",
         cfg=SandboxConfig(), engine_env_result={}, environ={},
-        available=True, change_dir=change_dir,
+        available=True, quest_dir=quest_dir,
     )
     argv = " ".join(build_sandbox_argv("x", cwd=str(wt), policy=pol, engine_env={}))
-    change_home_bind = f"--bind {change_dir} {change_dir}"
+    change_home_bind = f"--bind {quest_dir} {quest_dir}"
     snapshot_bind = f"--ro-bind {snapshot} {snapshot}"
     assert change_home_bind in argv
     assert snapshot_bind in argv
@@ -1184,12 +1184,12 @@ def test_resolve_policy_workflow_ro_bind_emitted_after_change_home(tmp_path):
 
 def test_resolve_policy_omits_workflow_overlay_when_workflow_is_plain_file(tmp_path):
     control, wt = _layout(tmp_path)
-    change_dir = control / ".imp" / "changes" / "abc"
-    change_dir.mkdir(parents=True)
-    (change_dir / "workflow").write_text("")   # a plain file, not a directory
+    quest_dir = control / ".imp" / "changes" / "abc"
+    quest_dir.mkdir(parents=True)
+    (quest_dir / "workflow").write_text("")   # a plain file, not a directory
     pol = resolve_policy(
         worktree=wt, control_root=control, quest_id="abc",
         cfg=SandboxConfig(), engine_env_result={}, environ={},
-        available=True, change_dir=change_dir,
+        available=True, quest_dir=quest_dir,
     )
     assert pol.readonly_overlays == ()

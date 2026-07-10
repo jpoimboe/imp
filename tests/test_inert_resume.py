@@ -77,7 +77,7 @@ def _seed_paused_change(
     _seed_control(tmp_path)
     ch = Change.create_draft(
         tmp_path, title="C", quest_id="c", base_branch="main")
-    tdir = ch.change_dir / "steps" / "p" / "s"
+    tdir = ch.quest_dir / "steps" / "p" / "s"
     tdir.mkdir(parents=True)
     t = Transcript(tdir / "transcript.jsonl")
     for m in messages:
@@ -122,7 +122,7 @@ def test_bare_turn_end_question_none_when_no_current_step(tmp_path: Path) -> Non
 def test_bare_turn_end_question_none_when_transcript_absent(tmp_path: Path) -> None:
     _seed_control(tmp_path)
     ch = Change.create_draft(tmp_path, title="C", quest_id="c", base_branch="main")
-    tdir = ch.change_dir / "steps" / "p" / "s"
+    tdir = ch.quest_dir / "steps" / "p" / "s"
     tdir.mkdir(parents=True)
     State(id="c", step="s", step_attempt=0, status="paused",
           current_step=CurrentStep(transcript_dir=tdir)).save(ch.state_dir)

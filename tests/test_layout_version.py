@@ -15,7 +15,7 @@ def test_create_stamps_version_and_imp_commit(tmp_path: Path) -> None:
     _seed_control(tmp_path)
     head = _git(tmp_path, "rev-parse", "HEAD").stdout.strip()
     ch = Change.create(tmp_path, title="X", quest_id="lv1", base_branch="main")
-    meta = json.loads((ch.change_dir / "change.json").read_text())
+    meta = json.loads((ch.quest_dir / "change.json").read_text())
     assert meta["layout_version"] == 5
     assert meta["imp_commit"] == head
 
@@ -24,7 +24,7 @@ def test_create_draft_stamps_version_and_imp_commit(tmp_path: Path) -> None:
     _seed_control(tmp_path)
     head = _git(tmp_path, "rev-parse", "HEAD").stdout.strip()
     ch = Change.create_draft(tmp_path, title="X", quest_id="lv2", base_branch="main")
-    meta = json.loads((ch.change_dir / "change.json").read_text())
+    meta = json.loads((ch.quest_dir / "change.json").read_text())
     assert meta["layout_version"] == 5
     assert meta["imp_commit"] == head
 

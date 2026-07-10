@@ -35,4 +35,4 @@ def rename_change(ctx: Any, name: str) -> str:
     log = ctx.event_log or JsonlEventLog(ctx.events_path)
     change.rename(title, log=log)
     return (f"renamed to {title!r}; use "
-            f"{change.change_dir}/artifacts/spec/{change.id}.md for the spec")
+            f"{change.quest_dir}/artifacts/spec/{change.id}.md for the spec")

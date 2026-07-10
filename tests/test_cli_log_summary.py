@@ -13,9 +13,9 @@ from imp.engine.change import LAYOUT_VERSION
 def _make_worktree(control: Path, slug: str, status: str = "paused") -> None:
     from imp.engine.state import State
 
-    change_dir = control / ".imp" / "changes" / slug
-    (change_dir / "state").mkdir(parents=True)
-    (change_dir / "change.json").write_text(
+    quest_dir = control / ".imp" / "changes" / slug
+    (quest_dir / "state").mkdir(parents=True)
+    (quest_dir / "change.json").write_text(
         json.dumps({"id": slug, "title": slug, "base_branch": "main",
                     "created_at": "2026-01-01T00:00:00+00:00",
                     "layout_version": LAYOUT_VERSION}))
@@ -29,9 +29,9 @@ def _make_worktree(control: Path, slug: str, status: str = "paused") -> None:
         {"type": "step_completed", "timestamp": "2026-01-01T00:04:45+00:00",
          "payload": {"step": "plan-writer", "action": {"verb": "continue"}}},
     ]
-    (change_dir / "events.jsonl").write_text(
+    (quest_dir / "events.jsonl").write_text(
         "".join(json.dumps(e) + "\n" for e in events))
-    State(id=slug, status=status, step="plan", step_attempt=0).save(change_dir / "state")
+    State(id=slug, status=status, step="plan", step_attempt=0).save(quest_dir / "state")
 
 
 def _setup(tmp_path, monkeypatch, slug="sum-smoke"):
@@ -78,9 +78,9 @@ def test_summary_paused_open_step_reads_paused_not_running(tmp_path, monkeypatch
     from imp.engine.state import State
 
     cid = "paused-open"
-    change_dir = tmp_path / ".imp" / "changes" / cid
-    (change_dir / "state").mkdir(parents=True)
-    (change_dir / "change.json").write_text(json.dumps(
+    quest_dir = tmp_path / ".imp" / "changes" / cid
+    (quest_dir / "state").mkdir(parents=True)
+    (quest_dir / "change.json").write_text(json.dumps(
         {"id": cid, "title": cid, "base_branch": "main",
          "created_at": "2026-01-01T00:00:00+00:00", "layout_version": LAYOUT_VERSION}))
     events = [
@@ -91,9 +91,9 @@ def test_summary_paused_open_step_reads_paused_not_running(tmp_path, monkeypatch
         {"type": "step_started", "timestamp": "2026-01-01T00:01:35+00:00",
          "payload": {"step": "plan-writer", "phase": "plan"}},
     ]
-    (change_dir / "events.jsonl").write_text(
+    (quest_dir / "events.jsonl").write_text(
         "".join(json.dumps(e) + "\n" for e in events))
-    State(id=cid, status="paused", step="plan", step_attempt=0).save(change_dir / "state")
+    State(id=cid, status="paused", step="plan", step_attempt=0).save(quest_dir / "state")
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
     monkeypatch.setenv("NO_COLOR", "1")

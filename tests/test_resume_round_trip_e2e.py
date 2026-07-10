@@ -29,7 +29,7 @@ async def test_paused_conversation_round_trips_and_replays_on_resume(
         tmp_path, title="Conv", quest_id="conv", base_branch="main")
 
     # _seed_control workflow: phase "p", step "s"
-    tdir = ch.change_dir / "steps" / "p" / "s"
+    tdir = ch.quest_dir / "steps" / "p" / "s"
     tdir.mkdir(parents=True)
     Transcript(tdir / "transcript.jsonl").append(
         Message(role="assistant", content=(TextBlock(text="still working"),)))
@@ -42,8 +42,8 @@ async def test_paused_conversation_round_trips_and_replays_on_resume(
     archive_conversation(ch)
     assert not (tmp_path / ".imp" / "changes" / "conv").exists()
 
-    change_dir = rehydrate_change(tmp_path, "conv")
-    restored = change_dir / "steps" / "p" / "s" / "transcript.jsonl"
+    quest_dir = rehydrate_change(tmp_path, "conv")
+    restored = quest_dir / "steps" / "p" / "s" / "transcript.jsonl"
     assert restored.read_bytes() == seeded_bytes
 
     change = Change.load(tmp_path, "conv")

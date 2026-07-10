@@ -17,9 +17,9 @@ T2 = "2026-01-01T00:01:30+00:00"
 def _make_worktree(control: Path, slug: str, status: str = "paused") -> None:
     from imp.engine.state import State
 
-    change_dir = control / ".imp" / "changes" / slug
-    (change_dir / "state").mkdir(parents=True)
-    (change_dir / "change.json").write_text(
+    quest_dir = control / ".imp" / "changes" / slug
+    (quest_dir / "state").mkdir(parents=True)
+    (quest_dir / "change.json").write_text(
         json.dumps({"id": slug, "title": slug, "base_branch": "main",
                     "created_at": T0, "layout_version": LAYOUT_VERSION}))
     events = [
@@ -34,10 +34,10 @@ def _make_worktree(control: Path, slug: str, status: str = "paused") -> None:
          "payload": {"step": "spec", "kind": "agent",
                      "action": {"verb": "continue"}, "var_mutations": {}}},
     ]
-    (change_dir / "events.jsonl").write_text(
+    (quest_dir / "events.jsonl").write_text(
         "".join(json.dumps(e) + "\n" for e in events))
     State(id=slug, status=status, step="design",
-          step_attempt=0).save(change_dir / "state")
+          step_attempt=0).save(quest_dir / "state")
 
 
 def _setup(tmp_path, monkeypatch, slug="exp-smoke"):

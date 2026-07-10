@@ -89,7 +89,7 @@ def test_trees_identical_detects_missing_path(tmp_path: Path) -> None:
 
 def test_refresh_fresh_change_makes_initial_copy_no_flag(tmp_path: Path) -> None:
     change, _, _ = _seed_minimal_workflow(tmp_path)
-    snapshot = change.change_dir / "workflow"
+    snapshot = change.quest_dir / "workflow"
     assert not snapshot.exists()
     # A fresh change's initial snapshot is NOT a "refresh": returns False so
     # run_change emits no workflow_refreshed event.
@@ -101,11 +101,11 @@ def test_refresh_fresh_change_makes_initial_copy_no_flag(tmp_path: Path) -> None
 def test_refresh_identical_source_no_swap(tmp_path: Path) -> None:
     change, _, _ = _seed_minimal_workflow(tmp_path)
     assert _refresh_workflow_snapshot(change) is False        # initial copy
-    snapshot = change.change_dir / "workflow"
+    snapshot = change.quest_dir / "workflow"
     before = (snapshot / "workflow.yaml").read_bytes()
     assert _refresh_workflow_snapshot(change) is False        # unchanged source
     assert (snapshot / "workflow.yaml").read_bytes() == before
-    assert not (change.change_dir / "workflow.tmp").exists()
+    assert not (change.quest_dir / "workflow.tmp").exists()
 
 
 def test_refresh_changed_source_replaces_snapshot(tmp_path: Path) -> None:
@@ -114,16 +114,16 @@ def test_refresh_changed_source_replaces_snapshot(tmp_path: Path) -> None:
     live_yaml = tmp_path / "imp" / "workflows" / "imp" / "workflow.yaml"
     live_yaml.write_text(live_yaml.read_text() + "# edited-live\n")
     assert _refresh_workflow_snapshot(change) is True
-    snapshot = change.change_dir / "workflow"
+    snapshot = change.quest_dir / "workflow"
     assert "# edited-live" in (snapshot / "workflow.yaml").read_text()
-    assert not (change.change_dir / "workflow.tmp").exists()
-    assert not (change.change_dir / "workflow.old").exists()
+    assert not (change.quest_dir / "workflow.tmp").exists()
+    assert not (change.quest_dir / "workflow.old").exists()
 
 
 def test_refresh_missing_live_source_keeps_snapshot(tmp_path: Path) -> None:
     change, _, _ = _seed_minimal_workflow(tmp_path)
     _refresh_workflow_snapshot(change)
-    snapshot = change.change_dir / "workflow"
+    snapshot = change.quest_dir / "workflow"
     before = (snapshot / "workflow.yaml").read_bytes()
     # Point the default workflow at a name with no committed dir and no bundle:
     # resolve_workflow_dir then RAISES (unknown workflow), so the live source is
@@ -138,7 +138,7 @@ def test_refresh_missing_live_source_keeps_snapshot(tmp_path: Path) -> None:
 def test_refresh_unresolvable_live_source_keeps_snapshot(tmp_path: Path) -> None:
     change, _, _ = _seed_minimal_workflow(tmp_path)
     _refresh_workflow_snapshot(change)
-    snapshot = change.change_dir / "workflow"
+    snapshot = change.quest_dir / "workflow"
     before = (snapshot / "workflow.yaml").read_bytes()
     # Malformed project.yaml makes parse_default_workflow RAISE LoadError,
     # which propagates through live_workflow_dir and is caught by the helper's
@@ -152,19 +152,19 @@ def test_refresh_unresolvable_live_source_keeps_snapshot(tmp_path: Path) -> None
 def test_refresh_cleans_stale_tmp(tmp_path: Path) -> None:
     change, _, _ = _seed_minimal_workflow(tmp_path)
     _refresh_workflow_snapshot(change)
-    tmp = change.change_dir / "workflow.tmp"
+    tmp = change.quest_dir / "workflow.tmp"
     tmp.mkdir()
     (tmp / "stale.yaml").write_text("garbage")
     _refresh_workflow_snapshot(change)
     assert not tmp.exists()
-    assert (change.change_dir / "workflow" / "workflow.yaml").exists()
+    assert (change.quest_dir / "workflow" / "workflow.yaml").exists()
 
 
 def test_refresh_recovers_workflow_old_when_workflow_missing(tmp_path: Path) -> None:
     change, _, _ = _seed_minimal_workflow(tmp_path)
     _refresh_workflow_snapshot(change)
-    snapshot = change.change_dir / "workflow"
-    old = change.change_dir / "workflow.old"
+    snapshot = change.quest_dir / "workflow"
+    old = change.quest_dir / "workflow.old"
     os.rename(snapshot, old)                                   # crash mid-swap
     # Make the live source unresolvable too (unknown workflow name), so the
     # snapshot can ONLY reappear if workflow.old was renamed back — never via a
@@ -181,8 +181,8 @@ def test_refresh_recovers_workflow_old_when_workflow_missing(tmp_path: Path) -> 
 def test_refresh_deletes_leftover_workflow_old(tmp_path: Path) -> None:
     change, _, _ = _seed_minimal_workflow(tmp_path)
     _refresh_workflow_snapshot(change)
-    snapshot = change.change_dir / "workflow"
-    old = change.change_dir / "workflow.old"
+    snapshot = change.quest_dir / "workflow"
+    old = change.quest_dir / "workflow.old"
     old.mkdir()
     (old / "junk.yaml").write_text("stale")
     _refresh_workflow_snapshot(change)
@@ -199,7 +199,7 @@ async def test_resume_refreshes_unloadable_snapshot(tmp_path: Path) -> None:
     _register_fake({"status": "Success"})
     # A snapshot using removed `chrome:` syntax: a mapping with no `phases`,
     # which load_workflow rejects with LoadError("missing 'phases' list").
-    snapshot = change.change_dir / "workflow"
+    snapshot = change.quest_dir / "workflow"
     snapshot.mkdir(parents=True, exist_ok=True)
     (snapshot / "workflow.yaml").write_text("chrome: removed-syntax\n")
 
@@ -246,7 +246,7 @@ async def test_refresh_dropping_cursor_step_pauses_unknown_step(tmp_path: Path) 
     # run_change's own entry refresh swapped the "w" snapshot to the new live
     # version, which is what drops the cursor step.
     assert "name: renamed" in (
-        change.change_dir / "workflow" / "workflow.yaml").read_text()
+        change.quest_dir / "workflow" / "workflow.yaml").read_text()
 
 
 @pytest.mark.anyio
@@ -263,7 +263,7 @@ async def test_self_edit_picked_up_on_reentry(tmp_path: Path) -> None:
 
     events: list[dict] = []
     await run_change(change, on_event=events.append)      # re-entry re-snapshots
-    snap_writer = change.change_dir / "workflow" / "agents" / "writer.md"
+    snap_writer = change.quest_dir / "workflow" / "agents" / "writer.md"
     assert "edited-by-self" in snap_writer.read_text()
     assert sum(1 for e in events if e["type"] == "workflow_refreshed") == 1
 
@@ -443,7 +443,7 @@ def test_refresh_sources_from_control_root_not_worktree(tmp_path: Path) -> None:
     change.project_root = wt
 
     assert _refresh_workflow_snapshot(change) is False   # initial copy, no flag
-    snap = change.change_dir / "workflow" / "workflow.yaml"
+    snap = change.quest_dir / "workflow" / "workflow.yaml"
     assert "WORKTREE-EDIT" not in snap.read_text()
     assert "name: t" in snap.read_text()                 # the control-root content
 
@@ -460,11 +460,11 @@ def test_refresh_ignores_worktree_edits_stays_noop(tmp_path: Path) -> None:
     change.project_root = wt
 
     assert _refresh_workflow_snapshot(change) is False   # initial copy from control
-    snap = change.change_dir / "workflow" / "workflow.yaml"
+    snap = change.quest_dir / "workflow" / "workflow.yaml"
     before = snap.read_bytes()
     # Edit ONLY the worktree; the control-root source is untouched.
     (wt_wf / "workflow.yaml").write_text("name: v2-worktree-edit\n")
 
     assert _refresh_workflow_snapshot(change) is False   # no-op: source unchanged
     assert snap.read_bytes() == before
-    assert not (change.change_dir / "workflow.tmp").exists()
+    assert not (change.quest_dir / "workflow.tmp").exists()

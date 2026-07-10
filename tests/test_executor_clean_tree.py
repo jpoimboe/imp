@@ -79,11 +79,11 @@ def test_no_worktree_before_go_live_is_noop(tmp_path: Path) -> None:
     # A draft: project_root == control_root (no dedicated worktree yet). Even a
     # dirty control root must not trigger the check.
     _seed_control(tmp_path)
-    change_dir = tmp_path / ".imp" / "changes" / "draft"
-    (change_dir / "state").mkdir(parents=True)
+    quest_dir = tmp_path / ".imp" / "changes" / "draft"
+    (quest_dir / "state").mkdir(parents=True)
     ch = Change(
         id="draft", title="t", base_branch="main",
-        control_root=tmp_path, project_root=tmp_path, change_dir=change_dir,
+        control_root=tmp_path, project_root=tmp_path, quest_dir=quest_dir,
         materialized=False,
     )
     State(id="draft", step="task-lead", step_attempt=0, status="running").save(ch.state_dir)
@@ -102,11 +102,11 @@ def test_non_git_flipped_project_root_is_noop(tmp_path: Path) -> None:
     control.mkdir()
     fake_root = tmp_path / "flipped"      # bare dir, never git-inited
     fake_root.mkdir()
-    change_dir = control / ".imp" / "changes" / "flip"
-    (change_dir / "state").mkdir(parents=True)
+    quest_dir = control / ".imp" / "changes" / "flip"
+    (quest_dir / "state").mkdir(parents=True)
     ch = Change(
         id="flip", title="t", base_branch="main",
-        control_root=control, project_root=fake_root, change_dir=change_dir,
+        control_root=control, project_root=fake_root, quest_dir=quest_dir,
         materialized=True,
     )
     State(id="flip", step="task-lead", step_attempt=0, status="running").save(ch.state_dir)

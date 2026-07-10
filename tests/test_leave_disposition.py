@@ -29,14 +29,14 @@ def test_save_to_backlog_sets_paused_status_and_keeps_home(tmp_path: Path) -> No
 def test_save_to_backlog_raises_lock_held_when_lock_is_held(tmp_path: Path) -> None:
     _seed_control(tmp_path)
     ch = Change.create_draft(tmp_path, title="Draft", quest_id="d3", base_branch="main")
-    with ProjectLock(ch.change_dir / "lock").acquire(), pytest.raises(LockHeld):
+    with ProjectLock(ch.quest_dir / "lock").acquire(), pytest.raises(LockHeld):
         save_to_backlog(ch)
 
 
 def test_discard_conversation_raises_lock_held_when_lock_is_held(tmp_path: Path) -> None:
     _seed_control(tmp_path)
     ch = Change.create_draft(tmp_path, title="Draft", quest_id="d4", base_branch="main")
-    with ProjectLock(ch.change_dir / "lock").acquire(), pytest.raises(LockHeld):
+    with ProjectLock(ch.quest_dir / "lock").acquire(), pytest.raises(LockHeld):
         discard_conversation(ch)
 
 
@@ -94,7 +94,7 @@ def test_print_leave_disposition_archive_is_lock_free(
     ch = _draft_with_exchange(tmp_path, "fast1")
     # The daemon is "still tearing down": it holds the per-change lock. The
     # old foreground retried ~10s on this lock; the new path must not touch it.
-    with ProjectLock(ch.change_dir / "lock").acquire():
+    with ProjectLock(ch.quest_dir / "lock").acquire():
         rc = m._print_leave_disposition(ch, {"disposition": "archive"})
     assert rc == 0
     # The foreground did NOT archive — the daemon owns the disposition.

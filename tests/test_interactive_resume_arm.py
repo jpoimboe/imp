@@ -48,9 +48,9 @@ def _seed_interactive_change(root: Path, *, armed: bool, started: bool = True):
     (root / ".imp" / "config.yaml").write_text(
         "providers: [fake]\ntiers:\n"
         "  low: {fake: m}\n  medium: {fake: m}\n  high: {fake: m}\n")
-    change_dir = root / ".imp" / "change"
-    (change_dir / "state").mkdir(parents=True, exist_ok=True)
-    (change_dir / "change.json").write_text(json.dumps(
+    quest_dir = root / ".imp" / "change"
+    (quest_dir / "state").mkdir(parents=True, exist_ok=True)
+    (quest_dir / "change.json").write_text(json.dumps(
         {"id": "c", "title": "t", "base_branch": "main", "seed_opening": SEED},
         sort_keys=True))
     configured: list[str] = []
@@ -64,9 +64,9 @@ def _seed_interactive_change(root: Path, *, armed: bool, started: bool = True):
                vars=dict(workflow.vars.defaults()), loop_counts={})
     st.has_started = started
     st.resume_pending = flat[0].name if armed else None
-    st.save(change_dir / "state")
+    st.save(quest_dir / "state")
     change = Change(id="c", title="t", base_branch="main",
-                    control_root=root, project_root=root, change_dir=change_dir,
+                    control_root=root, project_root=root, quest_dir=quest_dir,
                     seed_opening=SEED)
     change.event_log().append(agent_id=None, type="change_created",
                               payload={"id": "c", "title": "t"})
@@ -76,7 +76,7 @@ def _seed_interactive_change(root: Path, *, armed: bool, started: bool = True):
 def _write_awaiting_user_transcript(change: Change, step_name: str) -> Path:
     """A non-empty AWAITING_USER transcript + a native claude_session store under it,
     plus the stored step_context the armed resume path replays."""
-    tdir = change.change_dir / "steps" / "only" / step_name
+    tdir = change.quest_dir / "steps" / "only" / step_name
     tdir.mkdir(parents=True, exist_ok=True)
     t = Transcript(tdir / "transcript.jsonl")
     t.append(Message(role="user", content=(
@@ -158,7 +158,7 @@ async def test_fresh_run_delivers_seed_once(
     # Unarmed (resume_pending None), never started, no prior transcript: a genuine
     # first run => is_resume False, seed delivered exactly once.
     change, step_name = _seed_interactive_change(tmp_path, armed=False, started=False)
-    tdir = change.change_dir / "steps" / "only" / step_name
+    tdir = change.quest_dir / "steps" / "only" / step_name
     observed: dict = {}
     _register_observing_provider(provider_registry, tdir, observed)
 
@@ -175,7 +175,7 @@ async def test_armed_but_empty_transcript_starts_fresh(
     # Armed marker but NO transcript (draft that never produced a turn): keep gates
     # on a non-empty transcript, so it still starts fresh and re-delivers the seed.
     change, step_name = _seed_interactive_change(tmp_path, armed=True)
-    tdir = change.change_dir / "steps" / "only" / step_name
+    tdir = change.quest_dir / "steps" / "only" / step_name
     observed: dict = {}
     _register_observing_provider(provider_registry, tdir, observed)
 

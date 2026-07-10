@@ -25,7 +25,7 @@ def test_change_rename_is_content_only(tmp_path: Path) -> None:
     ch = Change.create(tmp_path, title="orig",
                        quest_id="aaa111", base_branch="main")
     created_before = json.loads(
-        (ch.change_dir / "change.json").read_text())["created_at"]
+        (ch.quest_dir / "change.json").read_text())["created_at"]
     id_before, root_before = ch.id, ch.project_root
 
     returned = ch.rename("Add OAuth", log=ch.event_log())
@@ -34,7 +34,7 @@ def test_change_rename_is_content_only(tmp_path: Path) -> None:
     assert ch.title == "Add OAuth"
     assert ch.id == id_before                       # id never changes
     assert ch.project_root == root_before           # no worktree move
-    meta = json.loads((ch.change_dir / "change.json").read_text())
+    meta = json.loads((ch.quest_dir / "change.json").read_text())
     assert meta["title"] == "Add OAuth"
     assert meta["created_at"] == created_before
     assert "id" in meta and "slug" not in meta
@@ -229,7 +229,7 @@ async def test_seed_opening_not_forwarded_to_downstream_step_on_resume(
     # takes the keep/replay branch, consuming the one-shot seed there; the seed
     # is scoped to the first agent step and is NEVER forwarded to the downstream
     # step s2 (the anti-leak invariant).
-    s1_dir = ch.change_dir / "steps" / "p" / "s1"
+    s1_dir = ch.quest_dir / "steps" / "p" / "s1"
     s1_dir.mkdir(parents=True, exist_ok=True)
     Transcript(s1_dir / "transcript.jsonl").append(
         Message(role="user", content=(TextBlock(text="prior turn"),)))

@@ -17,7 +17,7 @@ def test_spawn_against_held_lock_exits_without_opening_socket(tmp_path: Path) ->
     async def _scenario() -> object:
         # Simulate a RESIDENT change holding its ProjectLock; the wake-spawned
         # daemon must return harmlessly without binding the socket.
-        with ProjectLock(ch.change_dir / "lock").acquire():
+        with ProjectLock(ch.quest_dir / "lock").acquire():
             return await serve_change_session(ch, resume=True)
 
     result = anyio.run(_scenario)

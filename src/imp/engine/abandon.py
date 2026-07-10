@@ -18,7 +18,7 @@ def tear_down_change(change: Change) -> None:
     quest_id = change.id
     base_branch = change.base_branch
     materialized = change.materialized
-    with ProjectLock(change.change_dir / "lock").acquire():  # raises LockHeld if runner is live
+    with ProjectLock(change.quest_dir / "lock").acquire():  # raises LockHeld if runner is live
         state = State.load(change.state_dir)
         state.status = "abandoned"
         state.save(change.state_dir)
@@ -29,7 +29,7 @@ def tear_down_change(change: Change) -> None:
         archive.archive_change(
             control, quest_id,
             events_path=change.events_path,
-            change_json_path=change.change_dir / "change.json",
+            change_json_path=change.quest_dir / "change.json",
             state_json_path=change.state_dir / "state.json",
         )
     if materialized:
@@ -38,7 +38,7 @@ def tear_down_change(change: Change) -> None:
         # branch delete after worktree removal (git forbids deleting a checked-out branch)
         worktree.remove_worktree(control, quest_id, force=True)
         worktree.delete_branch(control, quest_id)
-    shutil.rmtree(change.change_dir, ignore_errors=True)
+    shutil.rmtree(change.quest_dir, ignore_errors=True)
 
 
 def archive_conversation(change: Change) -> None:
@@ -47,7 +47,7 @@ def archive_conversation(change: Change) -> None:
     quest_id = change.id
     base_branch = change.base_branch
     materialized = change.materialized
-    with ProjectLock(change.change_dir / "lock").acquire():  # raises LockHeld if runner is live
+    with ProjectLock(change.quest_dir / "lock").acquire():  # raises LockHeld if runner is live
         state = State.load(change.state_dir)
         state.status = "paused"
         state.arm_step_resume(interrupt=False)
@@ -58,23 +58,23 @@ def archive_conversation(change: Change) -> None:
         archive.archive_change(
             control, quest_id,
             events_path=change.events_path,
-            change_json_path=change.change_dir / "change.json",
+            change_json_path=change.quest_dir / "change.json",
             state_json_path=change.state_dir / "state.json",
-            steps_dir=change.change_dir / "steps",
+            steps_dir=change.quest_dir / "steps",
             resumable=True,
         )
     if materialized:
         merge_queue.pop_and_wake(control, quest_id, base_branch)
         worktree.remove_worktree(control, quest_id, force=True)
         worktree.delete_branch(control, quest_id)
-    shutil.rmtree(change.change_dir, ignore_errors=True)
+    shutil.rmtree(change.quest_dir, ignore_errors=True)
 
 
 def save_to_backlog(change: Change) -> None:
     """Pause a conversation: the un-materialized change-home is kept (not archived) and
     remains resumable. Zone is derived from both `materialized` and `origin` — no bespoke
     status string is needed for zone placement."""
-    with ProjectLock(change.change_dir / "lock").acquire():
+    with ProjectLock(change.quest_dir / "lock").acquire():
         state = State.load(change.state_dir)
         state.status = "paused"
         state.arm_step_resume(interrupt=False)
@@ -85,6 +85,6 @@ def save_to_backlog(change: Change) -> None:
 
 def discard_conversation(change: Change) -> None:
     """Discard a zero-exchange open — no archive, no record; raises LockHeld if runner is live."""
-    with ProjectLock(change.change_dir / "lock").acquire():
+    with ProjectLock(change.quest_dir / "lock").acquire():
         pass
-    shutil.rmtree(change.change_dir, ignore_errors=True)
+    shutil.rmtree(change.quest_dir, ignore_errors=True)

@@ -15,7 +15,7 @@ def _change(tmp_path: Path, status: str) -> Change:
         {"id": "c", "title": "t", "base_branch": "main"}))
     State(id="c", step="s", step_attempt=0, status=status).save(cd / "state")
     return Change(id="c", title="t", base_branch="main",
-                  control_root=tmp_path, project_root=tmp_path, change_dir=cd)
+                  control_root=tmp_path, project_root=tmp_path, quest_dir=cd)
 
 
 def test_terminal_status_is_preserved(tmp_path: Path) -> None:

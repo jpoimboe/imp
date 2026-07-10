@@ -54,7 +54,7 @@ def _complete_and_archive(control: Path, slug: str, status: str = "completed") -
     archive.archive_change(
         control, slug,
         events_path=ch.events_path,
-        change_json_path=ch.change_dir / "change.json",
+        change_json_path=ch.quest_dir / "change.json",
         state_json_path=ch.state_dir / "state.json")
     worktree.remove_worktree(control, slug)
 
@@ -158,7 +158,7 @@ def test_status_inflight_takes_precedence_over_archive(
     archive.archive_change(
         tmp_path, "both",
         events_path=ch.events_path,
-        change_json_path=ch.change_dir / "change.json",
+        change_json_path=ch.quest_dir / "change.json",
         state_json_path=ch.state_dir / "state.json")
 
     monkeypatch.chdir(tmp_path)
@@ -503,7 +503,7 @@ def test_abandon_archives_runtime_and_retains_wip(tmp_path: Path) -> None:
     _seed_control(tmp_path)
     ch = Change.create(tmp_path, title="Doomed", quest_id="doomed",
                        base_branch="main")
-    art = ch.change_dir / "artifacts" / "plans"
+    art = ch.quest_dir / "artifacts" / "plans"
     art.mkdir(parents=True)
     (art / "doomed-plan-1.md").write_text("# plan\n")
     worktree.artifact_commit(
@@ -583,10 +583,10 @@ def test_finalize_archives_runtime_and_retains_wip(tmp_path: Path) -> None:
     ch = Change.create(tmp_path, title="Doc Thing", quest_id="doc-thing",
                        base_branch="main")
     # An artifact accumulated on the wip ref during the run.
-    art = ch.change_dir / "artifacts" / "spec"
+    art = ch.quest_dir / "artifacts" / "spec"
     art.mkdir(parents=True)
     (art / "doc-thing.md").write_text("# the spec\n")
-    files = {str(p.relative_to(ch.change_dir / "artifacts")): p
+    files = {str(p.relative_to(ch.quest_dir / "artifacts")): p
              for p in (art / "doc-thing.md",)}
     worktree.artifact_commit(tmp_path, "doc-thing", files, message="artifact: spec")
     # Simulate a completed merge so _complete takes the finalize path.

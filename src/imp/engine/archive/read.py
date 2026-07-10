@@ -191,23 +191,23 @@ def newest_plan_name(control_root: Path, quest_id: str) -> str | None:
 
 def rehydrate_change(control_root: Path, quest_id: str) -> Path:
     """Recreate a live scratch dir from the archive so a left conversation can be resumed."""
-    change_dir = control_root / ".imp" / "changes" / quest_id
-    if change_dir.exists():
+    quest_dir = control_root / ".imp" / "changes" / quest_id
+    if quest_dir.exists():
         raise FileExistsError(f"live home for {quest_id!r} already exists")
     change_json = read_change_json(control_root, quest_id)
     if change_json is None:
         raise FileNotFoundError(f"no archived record for {quest_id!r}")
     state_json = read_state_json(control_root, quest_id)
     events = read_events(control_root, quest_id)
-    (change_dir / "state").mkdir(parents=True)
-    (change_dir / "change.json").write_bytes(change_json)
-    (change_dir / "state" / "state.json").write_bytes(state_json or b"{}")
-    (change_dir / "events.jsonl").write_bytes(events or b"")
+    (quest_dir / "state").mkdir(parents=True)
+    (quest_dir / "change.json").write_bytes(change_json)
+    (quest_dir / "state" / "state.json").write_bytes(state_json or b"{}")
+    (quest_dir / "events.jsonl").write_bytes(events or b"")
     for rel, blob in read_step_blobs(control_root, quest_id).items():
-        dest = change_dir / "steps" / rel
+        dest = quest_dir / "steps" / rel
         dest.parent.mkdir(parents=True, exist_ok=True)
         dest.write_bytes(blob)
-    return change_dir
+    return quest_dir
 
 
 def status_of(control_root: Path, quest_id: str) -> str | None:

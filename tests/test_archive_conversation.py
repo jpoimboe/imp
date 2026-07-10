@@ -50,7 +50,7 @@ def test_archive_conversation_unmaterialized_draft_has_no_worktree(tmp_path: Pat
 def test_archive_conversation_captures_steps_subtree(tmp_path: Path) -> None:
     _seed_control(tmp_path)
     ch = Change.create_draft(tmp_path, title="x", quest_id="draft", base_branch="main")
-    tdir = ch.change_dir / "steps" / "p" / "s"
+    tdir = ch.quest_dir / "steps" / "p" / "s"
     tdir.mkdir(parents=True)
     (tdir / "transcript.jsonl").write_bytes(b'{"role":"assistant"}\n')
 

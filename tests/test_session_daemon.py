@@ -33,7 +33,7 @@ def _make_change(tmp_path: Path, quest_id: str) -> Change:
         base_branch="main",
         control_root=tmp_path,
         project_root=tmp_path,
-        change_dir=tmp_path / ".imp" / "change",
+        quest_dir=tmp_path / ".imp" / "change",
     )
     State(id=quest_id, step=None, step_attempt=0, status="paused").save(
         change.state_dir)
@@ -119,7 +119,7 @@ async def test_zero_client_gate_hibernates_by_default(tmp_path: Path) -> None:
 @pytest.mark.anyio
 async def test_lock_is_held_during_run_and_released_after(tmp_path: Path) -> None:
     change = _make_change(tmp_path, "2026-06-15-ghi")
-    lock_path = change.change_dir / "lock"
+    lock_path = change.quest_dir / "lock"
     release = anyio.Event()
 
     async def fake_run(
@@ -436,7 +436,7 @@ async def test_resume_sets_resume_pending_for_a_stale_lock_crash(tmp_path: Path)
     st.save(change.state_dir)
     p = subprocess.Popen(["true"])           # dead pid ⇒ stale lock ⇒ crash
     p.wait()
-    (change.change_dir / "lock").write_text(str(p.pid))
+    (change.quest_dir / "lock").write_text(str(p.pid))
 
     seen: dict[str, object] = {}
 

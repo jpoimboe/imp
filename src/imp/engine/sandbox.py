@@ -260,7 +260,7 @@ def sandbox_config_from_raw(raw: Mapping[str, Any]) -> SandboxConfig:
 def resolve_policy(
     *, worktree: Path, control_root: Path, quest_id: str, cfg: SandboxConfig,
     engine_env_result: Mapping[str, str], environ: Mapping[str, str],
-    available: bool, change_dir: Path | None = None, spike: bool = False,
+    available: bool, quest_dir: Path | None = None, spike: bool = False,
 ) -> SandboxPolicy:
     """Stat once, bake a frozen SandboxPolicy. The ONE impure step (spec B.1).
 
@@ -347,14 +347,14 @@ def resolve_policy(
     # ro overlay of workflow snapshot — bind_plan emits it after the change_home rw
     # bind, so last-covering-wins makes only workflow/ read-only.
     readonly_overlays: tuple[str, ...] = ()
-    if change_dir is not None and (change_dir / "workflow").is_dir():
-        readonly_overlays = (str(change_dir / "workflow"),)
+    if quest_dir is not None and (quest_dir / "workflow").is_dir():
+        readonly_overlays = (str(quest_dir / "workflow"),)
 
     return SandboxPolicy(
         active=True,
         worktree=str(worktree),
         git_common_dir=str(git),
-        change_home=str(change_dir) if change_dir is not None else "",
+        change_home=str(quest_dir) if quest_dir is not None else "",
         git_ro_remask=tuple(remask),
         git_ref_reexpose=git_ref_reexpose,
         readonly_overlays=readonly_overlays,

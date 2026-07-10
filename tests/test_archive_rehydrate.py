@@ -21,8 +21,8 @@ def test_rehydrate_restores_loadable_draft_from_archive(tmp_path: Path) -> None:
     archive_conversation(ch)  # drops the live home into the archive
     assert not (tmp_path / ".imp" / "changes" / "draft").exists()
 
-    change_dir = archive_read.rehydrate_change(tmp_path, "draft")
-    assert change_dir == tmp_path / ".imp" / "changes" / "draft"
+    quest_dir = archive_read.rehydrate_change(tmp_path, "draft")
+    assert quest_dir == tmp_path / ".imp" / "changes" / "draft"
 
     # The rehydrated home is a faithful, loadable Change.
     loaded = Change.load(tmp_path, "draft")
@@ -30,7 +30,7 @@ def test_rehydrate_restores_loadable_draft_from_archive(tmp_path: Path) -> None:
     assert loaded.orig_base_head == orig_head
     state = State.load(loaded.state_dir)
     assert state.status == "paused"  # the left-conversation resting status
-    events = (change_dir / "events.jsonl").read_bytes()
+    events = (quest_dir / "events.jsonl").read_bytes()
     assert b"change_created" in events  # the original conversation events survive
 
 
@@ -71,9 +71,9 @@ def test_rehydrate_restores_steps_subtree_byte_for_byte(tmp_path: Path) -> None:
     (steps / "p" / "s" / "codex_rollout" / "sessions" / "rollout-1.jsonl").write_bytes(b"ROLL")
     _archive_with_steps(tmp_path, "conv", steps, resumable=True)
 
-    change_dir = archive_read.rehydrate_change(tmp_path, "conv")
+    quest_dir = archive_read.rehydrate_change(tmp_path, "conv")
 
-    sdir = change_dir / "steps" / "p" / "s"
+    sdir = quest_dir / "steps" / "p" / "s"
     assert (sdir / "transcript.jsonl").read_bytes() == b'{"role":"user"}\n'
     assert (sdir / "claude_session" / "x" / "sess.jsonl").read_bytes() == b"SESS"
     assert (sdir / "codex_rollout" / "sessions" / "rollout-1.jsonl").read_bytes() == b"ROLL"
@@ -87,6 +87,6 @@ def test_rehydrate_non_resumable_restores_no_steps(tmp_path: Path) -> None:
     (steps / "p" / "s" / "transcript.jsonl").write_bytes(b'{"role":"user"}\n')
     _archive_with_steps(tmp_path, "conv", steps, resumable=False)
 
-    change_dir = archive_read.rehydrate_change(tmp_path, "conv")
+    quest_dir = archive_read.rehydrate_change(tmp_path, "conv")
 
-    assert not (change_dir / "steps").exists()
+    assert not (quest_dir / "steps").exists()

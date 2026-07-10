@@ -10,14 +10,14 @@ from tests.conftest import _seed_control
 _GOLDEN = Path(__file__).parent / "fixtures" / "layout_guard_golden.txt"
 
 
-def _observe_layout(change_dir: Path) -> str:
+def _observe_layout(quest_dir: Path) -> str:
     """Sorted on-disk paths + key-sets of change.json and state.json; values excluded."""
     files = sorted(
-        str(p.relative_to(change_dir)).replace(os.sep, "/")
-        for p in change_dir.rglob("*") if p.is_file()
+        str(p.relative_to(quest_dir)).replace(os.sep, "/")
+        for p in quest_dir.rglob("*") if p.is_file()
     )
-    change_keys = sorted(json.loads((change_dir / "change.json").read_text()))
-    state_keys = sorted(json.loads((change_dir / "state" / "state.json").read_text()))
+    change_keys = sorted(json.loads((quest_dir / "change.json").read_text()))
+    state_keys = sorted(json.loads((quest_dir / "state" / "state.json").read_text()))
     lines = ["[paths]", *files,
              "[change.json]", *change_keys,
              "[state.json]", *state_keys]
@@ -30,7 +30,7 @@ def test_observed_layout_matches_golden_and_version_is_paired(tmp_path: Path) ->
 
     _seed_control(tmp_path)
     ch = Change.create(tmp_path, title="X", quest_id="golden", base_branch="main")
-    observed = _observe_layout(ch.change_dir)
+    observed = _observe_layout(ch.quest_dir)
 
     # structural drift fails until golden body and LAYOUT_VERSION constant are updated together
     assert observed == body

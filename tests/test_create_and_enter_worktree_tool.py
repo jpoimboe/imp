@@ -32,7 +32,7 @@ def test_tool_flips_project_root_to_worktree(tmp_path: Path) -> None:
     wt = tmp_path / ".imp" / "worktrees" / "t1"
     assert ctx.project_root == wt                         # flipped live, same turn
     assert ch.project_root == wt and ch.materialized is True
-    meta = json.loads((ch.change_dir / "change.json").read_text())
+    meta = json.loads((ch.quest_dir / "change.json").read_text())
     assert meta["project_root"] == str(wt) and meta["materialized"] is True
     assert "head_changed=false" in msg
 

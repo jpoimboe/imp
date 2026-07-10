@@ -342,7 +342,7 @@ not reach imp.
    grep -o '"interrupt_reason":"[a-z-]*"' "$ev" | tail  # workflow_paused trigger (ctrl-c|ctrl-d|sigterm)
    grep -o '"category":"unknown"'  "$ev" | tail     # expect NONE caused by the interrupt
    ```
-   (`change_dir` is `<control_root>/.imp/changes/<id>` and `events_path` is `events.jsonl` within it. If
+   (`quest_dir` is `<control_root>/.imp/changes/<id>` and `events_path` is `events.jsonl` within it. If
    you still can't locate it, fall back to `bash: cd "$WT" && imp log <id>` and judge from what
    it surfaces; note the limitation.)
 6. **Record the change id** for resume + abandon. The authoritative source is
