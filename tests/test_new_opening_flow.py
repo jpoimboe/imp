@@ -48,7 +48,7 @@ def stub_new(monkeypatch, tmp_path):
     monkeypatch.setattr(
         main.Change, "create_draft",
         staticmethod(lambda *a, **k: SimpleNamespace(
-            id="z9y8x7", title="", workflow_dir=tmp_path,
+            id="z9y8x7", title="", workflow_dir=tmp_path, seed_opening=None,
             set_seed_opening=lambda text: None)))
     monkeypatch.setattr(main, "_select_headless", lambda args: (False, False))
     return main
@@ -72,7 +72,7 @@ async def test_new_persists_finalized_opening_intent(
 
     def _make_draft(*a: object, **k: object) -> SimpleNamespace:
         return SimpleNamespace(
-            id="z9y8x7", title="", workflow_dir=tmp_path,
+            id="z9y8x7", title="", workflow_dir=tmp_path, seed_opening=None,
             set_seed_opening=lambda text: recorded.__setitem__("text", text))
 
     monkeypatch.setattr(m.Change, "create_draft", staticmethod(_make_draft))

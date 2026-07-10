@@ -844,6 +844,8 @@ async def _run_fresh_session(
         driver = LiveDriver(stream=sys.stdout,
                             color=should_use_color(sys.stdout),
                             width=_term_width, display_width=_display_width, status=status)
+        if change.seed_opening:
+            driver.seed_opening_intent(change.seed_opening)
         coord = InterruptCoordinator()
         solicit = make_interactive_solicit(
             change, status=status, driver=driver, coord=coord)
@@ -1029,6 +1031,8 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
         driver = LiveDriver(stream=sys.stdout,
                             color=should_use_color(sys.stdout),
                             width=_term_width, display_width=_display_width, status=status)
+        if change.seed_opening:
+            driver.seed_opening_intent(change.seed_opening)
         coord = InterruptCoordinator()
         solicit = make_interactive_solicit(
             change, status=status, driver=driver, coord=coord)

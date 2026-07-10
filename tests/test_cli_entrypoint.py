@@ -201,7 +201,7 @@ async def test_run_fresh_session_interactive_branch_threads_autonomous(
 
     args = m._build_parser().parse_args(["new", "--autonomous"])
     rc = await m._run_fresh_session(
-        SimpleNamespace(id="x", title="t", control_root=None),
+        SimpleNamespace(id="x", title="t", control_root=None, seed_opening=None),
         args=args)
     assert rc == 0
     assert captured.get("autonomous") is True
