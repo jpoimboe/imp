@@ -261,3 +261,53 @@ async def test_post_navigation_interrupt_keeps_lane(
     assert st.step == "after"                         # navigated-to step, not rewound
     assert st.lane_retained is True
     assert mq.is_head(tmp_path, "feat", "main")
+
+
+@pytest.mark.anyio
+async def test_retained_lane_resume_does_not_reevict_at_entry(
+    tmp_path: Path, provider_registry: Any, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """AC4: resuming from a retained-lane paused state runs the entry guard
+    WITHOUT evicting, keeps the lane, and clears lane_retained — persisted to disk
+    BEFORE the resumed step dispatches."""
+    # Sole holder never wakes a next head; stub the daemon spawn defensively.
+    monkeypatch.setattr(attach_mod, "spawn_session_daemon", lambda *a, **k: None)
+
+    class _SuccessRunner:
+        async def run(self, _inv: AgentInvocation) -> AsyncIterator[Event]:
+            yield {"type": "agent_output",
+                   "payload": {"outcome": "ok", "status": "Success"}}
+
+        async def interrupt(self) -> None:
+            pass
+
+    provider_registry("fake", env_check=lambda: True,
+                      factory=lambda _m: _provider(_SuccessRunner))
+    _seed_wf(tmp_path, _AGENT_HELD_WF)
+    ch = Change.create(tmp_path, title="x", change_id="feat", base_branch="main")
+
+    # Reconstruct the AC1 paused-with-retained state on disk.
+    mq.enqueue_if_absent(tmp_path, "feat", "main")
+    st = State.load(ch.state_dir)
+    st.held_lane = "main"
+    st.held_acquire_step = "lane"
+    st.step = "held"
+    st.resume_pending = "held"
+    st.lane_retained = True
+    st.status = "paused"
+    st.save(ch.state_dir)
+
+    disk_flag_at_dispatch: dict[str, Any] = {}
+
+    def _on_event(e: dict) -> None:
+        # At the first step dispatch after the entry guard, the cleared flag must
+        # already be on disk (persist-before-dispatch). Capture only the first.
+        if (e.get("type") == "step_started"
+                and "value" not in disk_flag_at_dispatch):
+            disk_flag_at_dispatch["value"] = State.load(ch.state_dir).lane_retained
+
+    await run_change(ch, on_event=_on_event)
+
+    assert "lane_evicted" not in _types(ch)           # entry guard did NOT evict
+    assert disk_flag_at_dispatch["value"] is False    # cleared + persisted first
+    assert State.load(ch.state_dir).lane_retained is False

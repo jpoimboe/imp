@@ -362,15 +362,25 @@ async def run_change(
         pending_seed = change.seed_opening  # one-shot: consumed at the entry step's fresh render
         opening_step = next((s.name for s in flat if s.kind == "agent"), None)
 
-        # A hold mark surviving to process entry means a prior run died while holding
-        # (a clean pause clears the mark). Don't evict when the merge already succeeded
-        # (merge_commit set) or the run is parked at completion — those finalize via
-        # the idempotent merge path / _complete.
+        # A hold mark surviving to process entry with lane_retained unset means a prior
+        # run crashed while holding; with lane_retained set it was a clean interrupt /
+        # give-up (consumed below, lane kept). Don't evict when the merge already
+        # succeeded (merge_commit set) or the run is parked at completion — those
+        # finalize via the idempotent merge path / _complete.
         if (state.held_lane is not None
                 and not state.completion_pending
                 and not state.merge_commit):
-            _evict_if_holding(change, state, log)
-            state.save(change.state_dir)
+            if state.lane_retained:
+                # A clean interrupt / give-up retained this lane. Consume the flag
+                # once and keep the lane. Persist the cleared flag BEFORE the
+                # resumed step dispatches: were it in-memory only, a SIGKILL
+                # mid-resumed-step would leave lane_retained=True on disk and the
+                # next entry would wrongly retain a possibly-mutated tree.
+                state.lane_retained = False
+                state.save(change.state_dir)
+            else:
+                _evict_if_holding(change, state, log)
+                state.save(change.state_dir)
 
         while True:
             if state.completion_pending:
