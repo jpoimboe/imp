@@ -567,15 +567,6 @@ class NarrativeBuilder:
         accessor for the live driver's finalization check and LiveStatus."""
         return self._current_burst
 
-    @property
-    def has_running_subagent(self) -> bool:
-        """True while at least one dispatched subagent fold is still running.
-        The live driver checks this to suppress the prose-turn timer reset while
-        background subagents are in flight — an interleaved prose llm_response
-        from the PARENT would otherwise zero the visible `(+N subagents) · Ns`
-        elapsed even though the subagents never stopped (w7f56t over-reset)."""
-        return any(f.running for f in self._open_sub_by_event.values())
-
     def running_subagents(self) -> list[SubagentFold]:
         """Running dispatched subagent folds, in dispatch order (the footer's indented rows)."""
         return [f for f in self._open_sub_by_event.values() if f.running]

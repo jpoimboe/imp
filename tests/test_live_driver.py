@@ -745,95 +745,6 @@ def test_refresh_status_no_output_on_non_tty() -> None:
     assert drv._prev_prose is True   # untouched
 
 
-def test_status_span_restarts_on_prose_turns_steps_and_user_replies() -> None:
-    """The status timer measures the agent's working burst since it last spoke.
-    restart_span() fires on step_started, user_message, AND a genuine prose
-    llm_response — but NOT on an empty-text (tool-use-carrier) llm_response."""
-    calls: list[str] = []
-
-    class _CountingStatus(LiveStatus):
-        def restart_span(self) -> None:
-            calls.append("restart")
-            super().restart_span()
-
-    out = _Pipe()
-    status = _CountingStatus(out)
-    drv = LiveDriver(stream=out, color=False, width=80, status=status)
-    for e in [
-        ev("1", "change_created", change_id=1, title="x"),
-        ev("2", "step_started", step="spec", kind="agent", phase="p",
-           model="m", provider="anthropic"),                              # restart
-        ev("3", "llm_response", agent_id="a",
-           raw={"content": [{"type": "tool_use", "id": "t", "name": "bash",
-                             "input": {}}]}, usage={}),                    # NO restart (no prose)
-        ev("4", "tool_call", agent_id="a", id="t", name="bash", input={}),
-        ev("5", "tool_result", agent_id="a", id="t", content="ok"),
-        ev("6", "llm_response", agent_id="a",
-           raw={"content": [{"type": "text", "text": "ask"}]}, usage={}),  # restart (prose)
-        ev("7", "user_message", content=[{"type": "text", "text": "reply"}]),  # restart
-        ev("8", "llm_response", agent_id="a",
-           raw={"content": [{"type": "text", "text": "ack"}]}, usage={}),  # restart (prose)
-    ]:
-        drv.on_event(e)
-    assert calls == ["restart", "restart", "restart", "restart"]
-
-
-def test_prose_does_not_restart_span_while_a_subagent_runs() -> None:
-    """A parent prose llm_response restarts the span normally — but NOT while a
-    dispatched subagent is still running, else the visible `(+N subagents) · Ns`
-    elapsed zeroes for work that never stopped."""
-    calls: list[str] = []
-
-    class _CountingStatus(LiveStatus):
-        def restart_span(self) -> None:
-            calls.append("restart")
-            super().restart_span()
-
-    out = _Pipe()
-    status = _CountingStatus(out)
-    drv = LiveDriver(stream=out, color=False, width=80, status=status)
-    for e in [
-        ev("1", "change_created", change_id=1, title="x"),
-        ev("2", "step_started", step="spec", kind="agent", phase="p",
-           model="m", provider="anthropic"),                              # restart
-        ev("3", "tool_call", agent_id="a", id="t1", name="sub_agent",
-           input={"subagent_name": "reviewer"}),                         # fold runs
-        ev("4", "llm_response", agent_id="a",
-           raw={"content": [{"type": "text", "text": "still working"}]},
-           usage={}),                                                    # NO restart
-    ]:
-        drv.on_event(e)
-    assert calls == ["restart"]                                          # only step_started
-
-
-def test_subagent_step_and_user_message_do_not_restart_span_while_running() -> None:
-    """A dispatched subagent's own step_started (and any user_message) must NOT
-    zero the shared `(+N subagents) · Ns` burst timer while the subagent runs;
-    only the parent's pre-dispatch step_started restarts it."""
-    calls: list[str] = []
-
-    class _CountingStatus(LiveStatus):
-        def restart_span(self) -> None:
-            calls.append("restart")
-            super().restart_span()
-
-    out = _Pipe()
-    status = _CountingStatus(out)
-    drv = LiveDriver(stream=out, color=False, width=80, status=status)
-    for e in [
-        ev("1", "change_created", change_id=1, title="x"),
-        ev("2", "step_started", step="spec", kind="agent", phase="p",
-           model="m", provider="anthropic"),                              # restart
-        ev("3", "tool_call", agent_id="a", id="t1", name="sub_agent",
-           input={"subagent_name": "reviewer"}),                         # fold runs
-        ev("4", "step_started", agent_id="sub:3", step="rev", kind="agent",
-           phase="p", model="m", provider="anthropic"),                  # NO restart
-        ev("5", "user_message", content=[{"type": "text", "text": "reply"}]),  # NO restart
-    ]:
-        drv.on_event(e)
-    assert calls == ["restart"]                                          # only step 2
-
-
 def test_chrome_step_collapses_live_and_matches_log() -> None:
     drv, out = _driver()
     events = [
@@ -2395,39 +2306,6 @@ def test_compose_activity_line_unchanged_when_no_countdown() -> None:
     assert "left" not in line
 
 
-def test_status_span_restarts_on_every_backoff_retry() -> None:
-    """The span restarts at every backoff wait entry (any retry-with-backoff
-    category with a numeric delay, stalled included) so each attempt's countdown
-    baseline is zeroed; a non-numeric backoff does not restart it."""
-    calls: list[str] = []
-
-    class _CountingStatus(LiveStatus):
-        def restart_span(self) -> None:
-            calls.append("restart")
-            super().restart_span()
-
-    out = _Pipe()
-    status = _CountingStatus(out)
-    drv = LiveDriver(stream=out, color=False, width=80, status=status)
-    for e in [
-        ev("1", "change_created", change_id=1, title="x"),
-        ev("2", "step_started", step="spec", kind="agent", phase="p",
-           model="m", provider="anthropic"),          # restart (step_started)
-        ev("3", "agent_retry", category="rate_limit", attempt=1,
-           backoff_seconds=2940.0, hinted=True),       # restart (backoff, numeric)
-        ev("4", "agent_retry", category="rate_limit", attempt=2,
-           backoff_seconds=60.0),                      # restart (short blind, numeric)
-        ev("5", "agent_retry", category="rate_limit", attempt=3,
-           backoff_seconds=7200.0),                    # restart (numeric)
-        ev("6", "agent_retry", category="stalled", attempt=4,
-           backoff_seconds=7200.0, hinted=True),       # restart (stalled is backoff)
-        ev("7", "agent_retry", category="rate_limit", attempt=5,
-           hinted=True),                               # NO restart (non-numeric backoff)
-    ]:
-        drv.on_event(e)
-    assert calls == ["restart"] * 5
-
-
 def test_prose_reflows_to_live_width_between_emissions() -> None:
     # Regression: the live driver must read the terminal width at each emission,
     # not freeze it at construction. Otherwise markdown printed AFTER a terminal
@@ -2715,31 +2593,6 @@ def test_compose_status_appends_a_row_per_running_subagent() -> None:
     assert isinstance(block, list) and len(block) == 4   # row1, blank, row3, + one subagent row
     assert "coder" in block[3]              # role present
     assert "writing code" not in block[3]   # verb segment dropped
-
-
-def test_test_lane_wait_and_acquire_each_restart_the_status_span() -> None:
-    """C1: the test-lane queue wait is excluded from the step. restart_span() fires at
-    queue entry (fresh wait clock) AND at slot acquisition (fresh run clock), on top of
-    the step_started reset — mirroring the agent_retry span-reset."""
-    calls: list[str] = []
-
-    class _CountingStatus(LiveStatus):
-        def restart_span(self) -> None:
-            calls.append("restart")
-            super().restart_span()
-
-    out = _Pipe()
-    status = _CountingStatus(out)
-    drv = LiveDriver(stream=out, color=False, width=80, status=status)
-    for e in [
-        ev("1", "change_created", change_id=1, title="x"),
-        ev("2", "step_started", step="integration-tests", kind="script",
-           phase="integration", label="running tests"),          # restart (step clock)
-        ev("3", "waiting_for_test_lane", step="integration-tests"),  # restart (wait clock)
-        ev("4", "test_lane_acquired", step="integration-tests"),     # restart (run clock)
-    ]:
-        drv.on_event(e)
-    assert calls == ["restart", "restart", "restart"]
 
 
 def test_seed_pending_reply_emits_once_and_reconciles() -> None:
