@@ -1,6 +1,6 @@
 ---
 name: code-reviewer
-label: reviewing
+label: reviewing code
 description: Per-task code-quality review (read-only); reports severity-classified findings to the task-lead.
 ---
 

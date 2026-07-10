@@ -195,7 +195,7 @@ phases:
       - name: change-review
         file: agents/batch-code-reviewer.md
         tier: high
-        label: reviewing change
+        label: reviewing entire diff
         max_loops: 6
         rules:
           - {if: {verdict: task_gap}, goto: task-lead, label: "addressing code review feedback", feedback: "The batch-code-reviewer found an implemented task needs rework. Findings:"}

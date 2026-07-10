@@ -147,7 +147,7 @@ def test_every_shown_step_has_its_label() -> None:
         "verify": "running tests",
         "autosquash-resolve-merge": "resolving merge fixups",
         "gap-check": "checking plan coverage",
-        "change-review": "reviewing change",
+        "change-review": "reviewing entire diff",
         "deferred-sweep": "sweeping deferred tasks",
         "converge-verify": "running tests",
         "summarizer": "summarizing change",

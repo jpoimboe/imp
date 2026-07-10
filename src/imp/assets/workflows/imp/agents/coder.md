@@ -1,6 +1,6 @@
 ---
 name: coder
-label: coding
+label: writing code
 description: Implement one task; apply the task-lead's directed fixes; commit the task with git.
 ---
 
