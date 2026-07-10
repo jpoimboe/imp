@@ -138,6 +138,8 @@ class StepNode:
     rotate_phrase: bool = False        # opt-in: rotate status phrase per work segment
     rotated_phrase: str | None = None  # per-segment phrase; live status line only, never persisted
     closed: bool = False
+    backoff_wait_s: float = 0.0        # this step's own accumulated backoff-wait
+                                       # seconds (timer honesty)
     interrupted: bool = False
     collapsible = False
 
@@ -474,6 +476,12 @@ class NarrativeBuilder:
         self._current_burst: ToolBurstFold | None = None
         self._span_start_ts: str | None = None
         self._reset_wait: ResetWait | None = None
+        # Per-agent backoff-wait accounting (timer honesty). This builder stands
+        # for exactly one agent, so it sees only that agent's agent_retry / resume
+        # events. `_accum` is the sum of completed wait spans (seconds); `_start`
+        # is the ISO timestamp the current in-progress wait began, or None.
+        self._backoff_wait_accum: float = 0.0
+        self._backoff_wait_start: str | None = None
         # subagent routing: "sub:<event_id>" -> fold (for delegating sub events)
         self._sub_by_agent_id: dict[str, SubagentFold] = {}
         # Two-dict open-fold registry. By block id (NON-EMPTY block ids only)
@@ -558,6 +566,16 @@ class NarrativeBuilder:
     def running_subagents(self) -> list[SubagentFold]:
         """Running dispatched subagent folds, in dispatch order (the footer's indented rows)."""
         return [f for f in self._open_sub_by_event.values() if f.running]
+
+    def backoff_wait_seconds(self, ref_iso: str | None) -> float:
+        """Total backoff-wait seconds for this builder's agent: completed spans
+        plus any in-progress span resolved against `ref_iso` (a live `now` or a
+        fold's `end_ts` when it closes mid-wait). A `None` ref_iso leaves an
+        in-progress span unresolved, counting only completed spans."""
+        if self._backoff_wait_start is not None:
+            return self._backoff_wait_accum + (
+                elapsed_seconds(self._backoff_wait_start, ref_iso) or 0.0)
+        return self._backoff_wait_accum
 
     def current_activity(self) -> Activity | None:
         """Current activity for the live status footer; None when idle."""
@@ -723,6 +741,12 @@ class NarrativeBuilder:
         agent_id = event.get("agent_id")
 
         if etype in _RESUMES_WAIT:
+            if self._backoff_wait_start is not None:
+                span = elapsed_seconds(self._backoff_wait_start, event.get("timestamp")) or 0.0
+                self._backoff_wait_accum += span
+                if self._step_stack:
+                    self._step_stack[-1].backoff_wait_s += span
+                self._backoff_wait_start = None
             self._reset_wait = None
 
         # 0. token accumulation — before sub routing (F2) so subagent events fold
@@ -1899,6 +1923,10 @@ def _h_agent_retry(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, A
     # Non-terminal: a transient error was retried with backoff. Render inline so
     # a self-healed network/rate_limit blip doesn't look like a failure.
     cat = p.get("category", "?")
+    # lazy import keeps narrative.py module-level-import-free.
+    from imp.engine.error_policy import is_retry_with_backoff
+    if is_retry_with_backoff(str(cat)) and self._backoff_wait_start is None:
+        self._backoff_wait_start = event.get("timestamp")
     attempt = p.get("attempt", "?")
     secs = p.get("backoff_seconds", "?")
     if cat == "stalled":
