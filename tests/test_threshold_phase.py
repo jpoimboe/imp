@@ -30,7 +30,7 @@ def test_threshold_is_first_phase_with_show_label_false() -> None:
     assert step.name == "threshold"
     assert step.kind == "agent"
     assert step.show_label is False           # inherits the phase's show_label:false default
-    assert step.label == "scoping the change"
+    assert step.label is None  # label removed; reveal-on-error falls back to raw step name
 
 
 def test_threshold_express_routes_to_plan_writer_and_sets_fast_path() -> None:
@@ -215,13 +215,6 @@ def test_threshold_routes_inline_satisfiable_requests_to_bare_turn_end_yield() -
     assert "go-live build terminator" in low
     assert "build *quickly*" in body
     assert "no-build exit" in low
-
-
-def test_threshold_label_renders_to_its_literal_value() -> None:
-    from imp.agents.prompts import render_label
-    step = _wf().phases[0].steps[0]
-    rendered = render_label(step.label, change=None, log=None)
-    assert rendered == "scoping the change"
 
 
 def test_threshold_live_gate_conventions_relocated_to_partial(tmp_path) -> None:

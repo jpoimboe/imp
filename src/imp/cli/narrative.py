@@ -584,8 +584,9 @@ class NarrativeBuilder:
                 # The label is a counter that rides the position row (Activity.counter),
                 # never the spinner verb. The rotating phrase drives the spinner line
                 # instead; the counter label (live_label/label) is kept off static_verb so
-                # it can never leak onto the spinner. Before the first rotation
-                # rotated_phrase is None and the generic "thinking" fallback applies.
+                # it can never leak onto the spinner. A rotate_phrase step has
+                # rotated_phrase seeded at step start; a position_label step
+                # without rotate_phrase leaves it None and falls back to "thinking".
                 position = _join(top.phase_label, top.live_label or top.label)
                 static_verb: str | None = top.rotated_phrase
             else:
@@ -1162,7 +1163,8 @@ def _h_step_started(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, 
                 existing.route_label = p.get("route_label")
                 existing.rotate_phrase = bool(p.get("rotate_phrase", False))
                 existing.position_label = bool(p.get("position_label", False))
-                existing.rotated_phrase = None
+                existing.rotated_phrase = (
+                    _draw_status_phrase() if existing.rotate_phrase else None)
                 if existing is self._first_step:
                     _inject_opening_intent(self, existing)
             self._step_stack = [existing]
@@ -1186,6 +1188,8 @@ def _h_step_started(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, 
                     rotate_phrase=bool(p.get("rotate_phrase", False)))
     self._append(node)
     self._step_stack.append(node)
+    if node.rotate_phrase:
+        node.rotated_phrase = _draw_status_phrase()
     if self._first_step is None:
         self._first_step = node
         _inject_opening_intent(self, node)

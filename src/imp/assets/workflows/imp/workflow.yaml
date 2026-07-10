@@ -43,7 +43,6 @@ phases:
       - name: threshold
         file: agents/threshold.md
         tier: high
-        label: "scoping the change"
         interactive: true
         rules:
           - {if: {ceremony: express}, set: {fast_path: true}, goto: plan-writer, label: "writing plan", feedback: "Plan this from the spec drafted with the user:"}

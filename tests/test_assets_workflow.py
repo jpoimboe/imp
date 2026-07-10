@@ -650,9 +650,10 @@ def test_dispatched_subagents_carry_frontmatter_labels() -> None:
     assert wf.agents["researcher"].label == "researching"
     assert wf.agents["coder"].label == "coding"
     assert wf.agents["code-reviewer"].label == "reviewing"
-    # plan-writer's label is on the workflow step, not the agent frontmatter
+    # plan-writer's label is on the workflow step, not the agent frontmatter;
+    # threshold intentionally has no label so its live spinner rotates imp phrases.
     for name, a in wf.agents.items():
-        if name == "plan-writer":
+        if name in ("plan-writer", "threshold"):
             continue
         assert a.label, f"agent {name!r} has no label"
 
