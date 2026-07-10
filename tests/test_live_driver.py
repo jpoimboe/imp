@@ -2600,6 +2600,23 @@ def test_compose_subagent_rows_render_plain_without_slate_under_ansi_theme() -> 
     assert "↳" in rows[0]                       # child arrow present
 
 
+def test_compose_subagent_rows_freeze_elapsed_during_backoff_wait() -> None:
+    from imp.cli.live_driver import compose_subagent_rows
+    b = _sub_builder(("t1", "coder"), start_ts="2026-01-01T00:00:00+00:00")
+    # The subagent retries 5s in; its agent_retry routes into the nested builder.
+    b.add(ev("r1", "agent_retry", agent_id="sub:t1", category="auth",
+             attempt=1, backoff_seconds=30.0,
+             timestamp="2026-01-01T00:00:05+00:00"))
+    row10 = compose_subagent_rows(b, color=False, width=120,
+                                  now_iso="2026-01-01T00:00:10+00:00")[0]
+    row20 = compose_subagent_rows(b, color=False, width=120,
+                                  now_iso="2026-01-01T00:00:20+00:00")[0]
+    assert "· 5s" in row10   # 10s wall - 5s wait (05..10); exact segment, not "15s"
+    # As now advances the in-progress wait advances with it, so the honest working
+    # time — and thus the whole row — is byte-identical (rules out partial subtraction).
+    assert row20 == row10
+
+
 def test_compose_status_appends_a_row_per_running_subagent() -> None:
     drv, _ = _driver()
     drv.on_event(ev("1", "change_created", change_id=1, title="t"))

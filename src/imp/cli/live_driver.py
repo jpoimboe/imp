@@ -207,6 +207,8 @@ def compose_subagent_rows(builder: nv.NarrativeBuilder, *, color: bool,
                           context_pct=f.nested.latest_context_pct,
                           color=color, over_bg=over)
         secs = nv.elapsed_seconds(f.start_ts, now_iso)
+        if secs is not None:
+            secs = max(0.0, secs - f.nested.backoff_wait_seconds(now_iso))
         el = rt.fmt_seconds(secs) if secs is not None else None
         el_seg = _paint(el, "dim", color=color, over_bg=over) if el else None
         arrow = _paint("↳", *pal.NODE_COLORS["subagent"], color=color, over_bg=over)
