@@ -2971,6 +2971,16 @@ def render_overview(color: bool) -> str:
     return "\n".join(lines)
 
 
+def _model_arg_type(value: str) -> str:
+    """argparse type= for --model: reject malformed provider:model syntax."""
+    from imp.providers.model_arg import ModelArgError, parse_model_arg
+    try:
+        parse_model_arg(value)
+    except ModelArgError as exc:
+        raise argparse.ArgumentTypeError(str(exc)) from exc
+    return value
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="imp")
     parser.add_argument("--version", action="version", version=f"imp {__version__}")
@@ -3030,6 +3040,10 @@ def _build_parser() -> argparse.ArgumentParser:
                        help="Base the Change on an existing BRANCH instead of "
                             "the configured default-base. BRANCH must already "
                             "exist.")
+    p_new.add_argument("--model", metavar="ARG", default=None, type=_model_arg_type,
+                       help="Run the opening step under a chosen model "
+                            "(provider:model or bare model); the same override as "
+                            "typing /model at the opening prompt.")
     p_new.set_defaults(func=_cmd_new)
 
     p_chat = sub.add_parser(
@@ -3048,6 +3062,10 @@ def _build_parser() -> argparse.ArgumentParser:
     p_chat.add_argument("--message", metavar="TEXT", default=None,
                         help="Headless reply consumed by the first bare-turn-end prompt; "
                              "requires --non-interactive.")
+    p_chat.add_argument("--model", metavar="ARG", default=None, type=_model_arg_type,
+                        help="Run the opening step under a chosen model "
+                             "(provider:model or bare model); the same override as "
+                             "typing /model at the opening prompt.")
     p_chat.set_defaults(func=_cmd_chat)
 
     p_resume = sub.add_parser(
