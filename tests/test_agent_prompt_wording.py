@@ -221,3 +221,19 @@ def test_threshold_renames_early_on_design_formation() -> None:
     assert "so they never rename" in body
     # The go-live rename survives as a fallback for straight-to-build.
     assert "a fallback for when you went" in body
+
+
+def test_spec_finalizer_requires_checkable_ac_clauses_and_cross_walk() -> None:
+    body = _agent_prompt("spec-finalizer")
+    # independently-checkable clauses; compound criteria split or sub-lettered
+    assert "independently checkable clauses" in body
+    assert "sub-lettered" in body
+    # every AC clause names / maps to its delivering Scope item
+    assert "Scope item that delivers" in body
+    # both-directions cross-walk before finalizing
+    assert "cross-walk Scope↔AC in **both directions**" in body
+    # a too-narrow Scope is reconciled, not treated as a wrong AC
+    assert "Scope section is too narrow" in body
+    # the threshold-handoff checklist references the cross-walk so it fires on
+    # the standard adopt path (phrase appears in both the checklist and the section)
+    assert body.count("cross-walk Scope↔AC") >= 2

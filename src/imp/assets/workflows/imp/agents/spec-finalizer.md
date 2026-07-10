@@ -61,7 +61,9 @@ questions.
 
 Normalize the draft just enough to imp's structure (ensure a **Goal** and
 **Acceptance criteria** are present), run the same pre-commit self-review as in
-"Writing the Spec", then **author the plan outline** (see **Author the plan outline**
+"Writing the Spec", cross-walk Scope↔AC in both directions (see **Acceptance
+criteria: checkable clauses and the Scope↔AC cross-walk** below), then **author
+the plan outline** (see **Author the plan outline**
 below), and finish with `complete_step(phase="written", …)`. You only write the
 spec file; the engine journals it at the step boundary. Pin `complexity` from the draft's shape (see **Pinning complexity** below).
 
@@ -86,6 +88,17 @@ Be concrete. Reference existing code paths when relevant. Do not modify any proj
 4. Ambiguity — could any requirement be read two different ways? Pick one and make it explicit.
 
 Fix issues inline; do not re-solicit the user.
+
+## Acceptance criteria: checkable clauses and the Scope↔AC cross-walk
+
+Write acceptance criteria as **independently checkable clauses**. A criterion that bundles two verifications is split into separate criteria or **sub-lettered** — (a), (b), (c) — so each clause is satisfied and audited on its own.
+
+Every AC clause must name — or map unambiguously to — the **Scope item that delivers it**. Before finalizing, cross-walk Scope↔AC in **both directions**:
+
+- every AC clause maps to a Scope item that delivers it, and
+- every Scope item maps to at least one AC clause that tests it.
+
+Reconcile any mismatch inline before you commit. An AC clause with no Scope owner means the **Scope section is too narrow** — widen Scope; the AC is not wrong. A Scope item that no AC tests means an AC is missing.
 
 ## Author the plan outline (inside the spec)
 
