@@ -163,19 +163,27 @@ def refresh_canonical_token(
         return RefreshOutcome(NOT_APPLICABLE)
     if not _needs_refresh(oauth, now_ms):
         return RefreshOutcome(SKIPPED_FRESH)
-    with _token_lock(base / _LOCK_FILE, timeout=_LOCK_TIMEOUT):
-        data = _load_credentials(creds_path)
-        oauth = _oauth_of(data)
-        refresh_token = None if oauth is None else _refresh_token_of(oauth)
-        if data is None or oauth is None or refresh_token is None:
-            return RefreshOutcome(NOT_APPLICABLE)
-        tokens = _request_refresh(refresh_token)
-        expires_at = now_ms + int(tokens["expires_in"]) * 1000
-        new_oauth = dict(oauth)
-        new_oauth["accessToken"] = tokens["access_token"]
-        new_oauth["refreshToken"] = tokens["refresh_token"]
-        new_oauth["expiresAt"] = expires_at
-        merged = dict(data)
-        merged["claudeAiOauth"] = new_oauth
-        _atomic_write_creds(creds_path, merged)
-        return RefreshOutcome(REFRESHED, expires_at)
+    try:
+        with _token_lock(base / _LOCK_FILE, timeout=_LOCK_TIMEOUT):
+            data = _load_credentials(creds_path)
+            oauth = _oauth_of(data)
+            refresh_token = None if oauth is None else _refresh_token_of(oauth)
+            if data is None or oauth is None or refresh_token is None:
+                return RefreshOutcome(NOT_APPLICABLE)
+            try:
+                tokens = _request_refresh(refresh_token)
+            except RefreshInvalidGrant:
+                return RefreshOutcome(FAILED_INVALID_GRANT)
+            except RefreshTransientError:
+                return RefreshOutcome(FAILED_TRANSIENT)
+            expires_at = now_ms + int(tokens["expires_in"]) * 1000
+            new_oauth = dict(oauth)
+            new_oauth["accessToken"] = tokens["access_token"]
+            new_oauth["refreshToken"] = tokens["refresh_token"]
+            new_oauth["expiresAt"] = expires_at
+            merged = dict(data)
+            merged["claudeAiOauth"] = new_oauth
+            _atomic_write_creds(creds_path, merged)
+            return RefreshOutcome(REFRESHED, expires_at)
+    except LockTimeout:
+        return RefreshOutcome(FAILED_TRANSIENT)

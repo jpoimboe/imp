@@ -195,3 +195,135 @@ def test_request_refresh_malformed_200_is_transient(
     monkeypatch.setattr(httpx, "Client", _FakeClient)
     with pytest.raises(ctr.RefreshTransientError):
         ctr._request_refresh("tok")
+
+
+def _raise_transient(refresh_token: str) -> dict[str, Any]:
+    raise ctr.RefreshTransientError("network down")
+
+
+def _raise_invalid_grant(refresh_token: str) -> dict[str, Any]:
+    raise ctr.RefreshInvalidGrant()
+
+
+def _client(*, response: Any = None, error: BaseException | None = None) -> Any:
+    class _FakeClient:
+        def __init__(self, timeout: Any = None) -> None:
+            pass
+
+        def __enter__(self) -> _FakeClient:
+            return self
+
+        def __exit__(self, *a: Any) -> bool:
+            return False
+
+        def post(self, url: str, data: Any = None) -> Any:
+            if error is not None:
+                raise error
+            return response
+
+    return _FakeClient
+
+
+def test_transient_error_proceeds_without_write(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = _write_creds(tmp_path, expires_at=NOW - 1)
+    before = path.read_bytes()
+    monkeypatch.setattr(ctr, "_request_refresh", _raise_transient)
+    out = ctr.refresh_canonical_token(NOW, env=_env(tmp_path))
+    assert out.outcome == ctr.FAILED_TRANSIENT
+    assert path.read_bytes() == before
+
+
+def test_lock_timeout_proceeds_without_http_or_write(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = _write_creds(tmp_path, expires_at=NOW - 1)
+    before = path.read_bytes()
+
+    def _no_http(refresh_token: str) -> dict[str, Any]:
+        raise AssertionError("no HTTP when the lock is unavailable")
+
+    def _timeout(*a: Any, **k: Any) -> Any:
+        raise ctr.LockTimeout()
+
+    monkeypatch.setattr(ctr, "_request_refresh", _no_http)
+    monkeypatch.setattr(ctr, "_token_lock", _timeout)
+    out = ctr.refresh_canonical_token(NOW, env=_env(tmp_path))
+    assert out.outcome == ctr.FAILED_TRANSIENT
+    assert path.read_bytes() == before
+
+
+def test_invalid_grant_proceeds_without_write(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = _write_creds(tmp_path, expires_at=NOW - 1, refresh_token="dead")
+    before = path.read_bytes()
+    monkeypatch.setattr(ctr, "_request_refresh", _raise_invalid_grant)
+    out = ctr.refresh_canonical_token(NOW, env=_env(tmp_path))
+    assert out.outcome == ctr.FAILED_INVALID_GRANT
+    assert path.read_bytes() == before
+
+
+def test_failure_never_mutates_credentials(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = _write_creds(tmp_path, expires_at=NOW - 1, refresh_token="keep-me")
+    before = path.read_bytes()
+    monkeypatch.setattr(ctr, "_request_refresh", _raise_transient)
+    ctr.refresh_canonical_token(NOW, env=_env(tmp_path))
+    assert path.read_bytes() == before
+    monkeypatch.setattr(ctr, "_request_refresh", _raise_invalid_grant)
+    ctr.refresh_canonical_token(NOW, env=_env(tmp_path))
+    assert path.read_bytes() == before
+
+
+def test_request_refresh_invalid_grant_classification(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    resp = httpx.Response(400, json={"error": "invalid_grant"},
+                          request=httpx.Request("POST", ctr._TOKEN_URL))
+    monkeypatch.setattr(httpx, "Client", _client(response=resp))
+    with pytest.raises(ctr.RefreshInvalidGrant):
+        ctr._request_refresh("dead")
+
+
+def test_request_refresh_server_error_is_transient(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    resp = httpx.Response(503, text="busy",
+                          request=httpx.Request("POST", ctr._TOKEN_URL))
+    monkeypatch.setattr(httpx, "Client", _client(response=resp))
+    with pytest.raises(ctr.RefreshTransientError):
+        ctr._request_refresh("tok")
+
+
+def test_request_refresh_network_error_is_transient(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    err = httpx.ConnectError(
+        "boom", request=httpx.Request("POST", ctr._TOKEN_URL))
+    monkeypatch.setattr(httpx, "Client", _client(error=err))
+    with pytest.raises(ctr.RefreshTransientError):
+        ctr._request_refresh("tok")
+
+
+def test_real_lock_timeout_maps_to_transient(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = _write_creds(tmp_path, expires_at=NOW - 1)
+    before = path.read_bytes()
+
+    def _no_http(refresh_token: str) -> dict[str, Any]:
+        raise AssertionError("no HTTP while a peer holds the lock")
+
+    monkeypatch.setattr(ctr, "_request_refresh", _no_http)
+    monkeypatch.setattr(ctr, "_LOCK_TIMEOUT", 0.1)
+    held = filelock.FileLock(str(tmp_path / ctr._LOCK_FILE))
+    held.acquire()
+    try:
+        out = ctr.refresh_canonical_token(NOW, env=_env(tmp_path))
+    finally:
+        held.release()
+    assert out.outcome == ctr.FAILED_TRANSIENT
+    assert path.read_bytes() == before
