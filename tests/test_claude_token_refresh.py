@@ -327,3 +327,29 @@ def test_real_lock_timeout_maps_to_transient(
         held.release()
     assert out.outcome == ctr.FAILED_TRANSIENT
     assert path.read_bytes() == before
+
+
+def test_under_lock_recheck_skips_when_peer_refreshed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    stale = {"claudeAiOauth": {
+        "accessToken": "old", "refreshToken": "old-r",
+        "expiresAt": NOW - 1, "scopes": [], "subscriptionType": "max"}}
+    fresh = {"claudeAiOauth": {
+        "accessToken": "peer", "refreshToken": "peer-r",
+        "expiresAt": NOW + 10 * 60 * 1000, "scopes": [],
+        "subscriptionType": "max"}}
+    # First read (pre-lock) sees the stale token; the read under the lock sees
+    # the token a peer refreshed while we waited for the lock.
+    seq = [stale, fresh]
+
+    def _load(creds_path: Path) -> dict[str, Any]:
+        return seq.pop(0) if seq else fresh
+
+    def _no_http(refresh_token: str) -> dict[str, Any]:
+        raise AssertionError("peer already refreshed; no HTTP expected")
+
+    monkeypatch.setattr(ctr, "_load_credentials", _load)
+    monkeypatch.setattr(ctr, "_request_refresh", _no_http)
+    out = ctr.refresh_canonical_token(NOW, env=_env(tmp_path))
+    assert out.outcome == ctr.SKIPPED_FRESH

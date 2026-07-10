@@ -170,6 +170,8 @@ def refresh_canonical_token(
             refresh_token = None if oauth is None else _refresh_token_of(oauth)
             if data is None or oauth is None or refresh_token is None:
                 return RefreshOutcome(NOT_APPLICABLE)
+            if not _needs_refresh(oauth, now_ms):
+                return RefreshOutcome(SKIPPED_FRESH)
             try:
                 tokens = _request_refresh(refresh_token)
             except RefreshInvalidGrant:
