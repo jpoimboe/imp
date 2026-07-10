@@ -443,7 +443,10 @@ def collapsed_step_line(node: nv.StepNode, *, depth: int, color: bool,
     `<label> · complete · <elapsed>` — label in the step color, the
     ` · complete · <elapsed>` tail in the existing breadcrumb gray."""
     label = compose_label([node.phase_label, _step_header_label(node)])
-    done = fmt_seconds_done(nv.elapsed_seconds(node.run_start_ts or node.start_ts, node.end_ts))
+    raw = nv.elapsed_seconds(node.run_start_ts or node.start_ts, node.end_ts)
+    if raw is not None:
+        raw = max(0.0, raw - node.backoff_wait_s)
+    done = fmt_seconds_done(raw)
     tail = " · complete" + (f" · {done}" if done else "")
     indent = _gutter_indent(depth, gutters, color)
     return (indent

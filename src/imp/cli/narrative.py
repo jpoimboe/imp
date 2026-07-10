@@ -1240,6 +1240,8 @@ def _h_step_completed(self: NarrativeBuilder, event: dict[str, Any], p: dict[str
         node.outcome = OutcomeLine(action=action)
         node.end_ts = event.get("timestamp")
         elapsed = elapsed_seconds(node.run_start_ts or node.start_ts, event.get("timestamp"))
+        if elapsed is not None:
+            elapsed = max(0.0, elapsed - node.backoff_wait_s)
         breadcrumb = BreadcrumbLine(
             step_name=node.name, kind=node.kind, elapsed_s=elapsed, action=action,
             extras=_breadcrumb_extras(node.agent_output),

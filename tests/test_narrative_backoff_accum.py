@@ -91,6 +91,40 @@ def test_step_backoff_attributed_to_stepnode() -> None:
     assert b._step_stack[-1].backoff_wait_s == 8.0
 
 
+def test_collapsed_step_line_excludes_backoff_wait() -> None:
+    from imp.cli.render_text import collapsed_step_line
+    node = nv.StepNode(name="review", kind="agent", label="reviewing",
+                       start_ts="2026-01-01T00:00:00+00:00",
+                       end_ts="2026-01-01T00:00:40+00:00",
+                       backoff_wait_s=30.0, closed=True)
+    line = collapsed_step_line(node, depth=0, color=False)
+    assert "· 10s" in line     # 40s wall - 30s wait
+    assert "40s" not in line
+
+
+def test_top_level_step_breadcrumb_excludes_backoff_wait() -> None:
+    from imp.cli.render_text import render_tree
+    events = [
+        ev("1", "change_created", change_id=1, title="x"),
+        ev("2", "step_started", step="review", kind="agent", phase="review",
+           phase_label="review phase", label="reviewing", model="m",
+           timestamp="2026-01-01T00:00:00+00:00"),
+        ev("3", "thinking", agent_id="step:review/review", content="hmm",
+           timestamp="2026-01-01T00:00:01+00:00"),
+        ev("4", "agent_retry", category="auth", attempt=1, backoff_seconds=30.0,
+           timestamp="2026-01-01T00:00:02+00:00"),
+        ev("5", "thinking", agent_id="step:review/review", content="back",
+           timestamp="2026-01-01T00:00:32+00:00"),          # +30 wait (02..32)
+        ev("6", "step_completed", step="review", kind="agent",
+           action={"verb": "continue"}, var_mutations={},
+           timestamp="2026-01-01T00:00:40+00:00"),
+    ]
+    tree = nv.build_tree(events)
+    body = "\n".join(render_tree(tree, full=False, color=False, width=80))
+    assert "10s" in body       # 40s wall - 30s wait, on the step breadcrumb
+    assert "40s" not in body
+
+
 def test_subagent_closed_row_excludes_backoff_wait() -> None:
     from imp.cli.render_text import subagent_status_row
     nested = nv.NarrativeBuilder()
