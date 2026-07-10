@@ -567,7 +567,7 @@ def test_current_activity_carries_kind_while_a_subagent_runs() -> None:
         ev("2", "step_started", step="spec", kind="agent", phase="design",
            model="m", provider="anthropic"),
         ev("3", "tool_call", agent_id="step:design/spec", id="t1",
-           name="sub_agent", input={"subagent_name": "coder"}),
+           name="sub_agent", input={"subagent_name": "coder"}, label="writing code"),
     ]:
         b.add(e)
     act = b.current_activity()
@@ -602,14 +602,14 @@ def test_subagent_current_activity_includes_nested_detail() -> None:
         ev("3", "step_started", step="spec", kind="agent", phase="design",
            model="m", provider="anthropic"),
         ev("4", "tool_call", agent_id="step:design/spec", id="t1",
-           name="sub_agent", input={"subagent_name": "coder"}),
+           name="sub_agent", input={"subagent_name": "coder"}, label="writing code"),
         ev("5", "tool_call", agent_id="sub:4", id="n1",
            name="edit_file", input={"path": "executor.py"}),
     ]:
         b.add(e)
     act = b.current_activity()
     assert act is not None
-    assert act.verb == "writing code"                   # coder's role verb (D2)
+    assert act.verb == "writing code"                   # sourced from the event's label
     assert act.detail is not None and "executor.py" in act.detail
 
 
@@ -634,7 +634,7 @@ def test_subagent_activity_uses_label_when_present() -> None:
     assert "subagent(" not in (act.verb or "")
 
 
-def test_subagent_activity_uses_role_verb() -> None:
+def test_subagent_without_label_falls_back_to_generic_name() -> None:
     b = nv.NarrativeBuilder()
     for e in [
         ev("1", "change_created", change_id=1, title="x"),
@@ -646,7 +646,7 @@ def test_subagent_activity_uses_role_verb() -> None:
         b.add(e)
     act = b.current_activity()
     assert act is not None
-    assert act.verb == "exploring"                       # explorer's role verb (D2)
+    assert act.verb == "subagent(explorer)"              # no label -> generic fallback
     assert "task →" not in (act.verb or "")
 
 
