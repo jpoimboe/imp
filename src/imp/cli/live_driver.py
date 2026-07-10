@@ -137,6 +137,19 @@ def _slate_wrap(body: str, bg: str, width: int) -> str:
     return f"{bg}{body}{_RESET}"
 
 
+def compose_identity_toolbar(*, change_id: str | None, title: str, color: bool,
+                             width: int) -> str | None:
+    """Minimal id · title identity bar for the opening prompt, before any activity exists."""
+    if not change_id:
+        return None
+    bg = pal.user_bg_open(enabled=color)
+    over = bool(bg)
+    id_seg = _paint(change_id, "wordmark", color=color, over_bg=over)
+    title_seg = _paint(title, "gray", color=color, over_bg=over) if title else None
+    body = rt.compose_label([id_seg, title_seg])
+    return _slate_wrap(body, bg, width)
+
+
 def compose_position_row(*, activity: nv.Activity, change_id: str | None,
                          title: str, prompt_tokens: int | None, color: bool,
                          width: int, context_pct: float | None = None,
@@ -386,11 +399,14 @@ class LiveDriver:
         return rows
 
     def compose_toolbar_static(self) -> str | None:
-        # Position ROW — right-flushed footer layout, no spinner, no elapsed (AC5).
+        # The flat position row under the interactive prompt (no spinner/elapsed).
+        # Before any activity, fall back to a minimal id · title identity bar.
         activity = self._builder.current_activity()
-        if activity is None:
-            return None
         root = self._builder.tree.root
+        if activity is None:
+            return compose_identity_toolbar(
+                change_id=root.id, title=root.title,
+                color=self._color, width=term_width())
         return compose_position_row(
             activity=activity, change_id=root.id, title=root.title,
             prompt_tokens=self._builder.latest_prompt_tokens,

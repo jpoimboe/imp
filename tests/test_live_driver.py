@@ -1945,6 +1945,43 @@ def test_compose_toolbar_static_none_when_idle() -> None:
     assert drv.compose_toolbar_static() is None    # no activity -> no toolbar
 
 
+def test_compose_toolbar_static_identity_bar_before_first_activity() -> None:
+    out = _Pipe()
+    drv = LiveDriver(stream=out, color=False, width=80, status=LiveStatus(out))
+    # A change id exists (change_created replayed) but no step has started yet.
+    drv.on_event(ev("1", "change_created", id="z9gixx", title="Fix bug"))
+    toolbar = drv.compose_toolbar_static()
+    assert toolbar == "z9gixx · Fix bug"   # minimal identity bar, no phase/model
+
+
+def test_compose_toolbar_static_identity_bar_degrades_to_id_when_unnamed() -> None:
+    out = _Pipe()
+    drv = LiveDriver(stream=out, color=False, width=80, status=LiveStatus(out))
+    drv.on_event(ev("1", "change_created", id="z9gixx"))   # no title yet
+    toolbar = drv.compose_toolbar_static()
+    assert toolbar == "z9gixx"             # unnamed change -> id alone
+
+
+def test_compose_identity_toolbar_carries_slate_and_padding_under_dark_theme() -> None:
+    from imp.cli.live_driver import compose_identity_toolbar
+    try:
+        pal.set_theme("dark")
+        bar = compose_identity_toolbar(change_id="z9gixx", title="t",
+                                       color=True, width=120)
+    finally:
+        pal.set_theme("ansi")
+    assert bar is not None
+    assert bar.startswith("\x1b[48;2;43;47;58m")   # same slate open as the position row
+    assert bar.endswith("\x1b[0m")
+    assert pal.display_width(bar) == 118           # padded to width-2, aligned with the footer
+
+
+def test_compose_identity_toolbar_none_without_change_id() -> None:
+    from imp.cli.live_driver import compose_identity_toolbar
+    assert compose_identity_toolbar(change_id=None, title="t",
+                                    color=False, width=80) is None
+
+
 def test_live_driver_caps_hr_at_display_width() -> None:
     out = _Pipe()
     drv = LiveDriver(stream=out, color=False, width=10000, display_width=40,
