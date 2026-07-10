@@ -103,13 +103,13 @@ UNSUBSCRIBE_USAGE = (
     "To unsubscribe, reply to one of its messages or use @handle "
     "(e.g. /unsubscribe @ab12cd).")
 UNKNOWN_COMMAND = "Unknown command. Try /help."
-ALERTS_ON_REPLY = "Alerts: all Changes."
-ALERTS_OFF_REPLY = "Alerts: subscribed Changes only."
+ALERTS_ON_REPLY = "Alerts: all Quests."
+ALERTS_OFF_REPLY = "Alerts: subscribed Quests only."
 ROUTE_HINT = (
     "Couldn't route that — reply to a Quest's message, prefix @handle, or send /list.")
 HELP_TEXT = (
     "Commands:\n"
-    "/list — show running changes (● = subscribed)\n"
+    "/list — show running Quests (● = subscribed)\n"
     "/new <prompt> — start a Quest\n"
     "/subscribe @handle — follow a Quest (streams from now; /replay for history)\n"
     "/unsubscribe (reply or @handle) — stop all messages for a Quest\n"

@@ -25,7 +25,7 @@ async def test_nothing_to_resume_prints_hint(monkeypatch, tmp_path: Path, capsys
     out = capsys.readouterr().out
     assert rc == 0
     assert "Nothing to resume." in out
-    assert "3 past changes" in out
+    assert "3 past Quests" in out
     assert "imp list --all" in out
 
 
@@ -39,7 +39,7 @@ async def test_nothing_to_resume_no_hint_when_no_past(
     out = capsys.readouterr().out
     assert rc == 0
     assert "Nothing to resume." in out
-    assert "past change" not in out
+    assert "past Quest" not in out
 
 
 @pytest.mark.anyio

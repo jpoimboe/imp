@@ -9,7 +9,7 @@ from imp.agents.tools import imp_tool
     name="create_and_enter_worktree",
     description=(
         "Go live on this draft: fork the branch and worktree from the base "
-        "branch's current tip and switch this change into it. Your subsequent "
+        "branch's current tip and switch this Quest into it. Your subsequent "
         "Read/Bash/edit tools operate in the new worktree immediately. Reports "
         "whether the base branch advanced since the draft was created "
         "(head_changed) so you can re-ground the spec against current code. "

@@ -80,7 +80,7 @@ async def test_abandon_picker_tty_multiple_uses_selection(
     monkeypatch.setattr(m, "_interactive", lambda: True)
 
     async def fake_picker(candidates, *, now, color, header, selected_index):
-        assert "Abandon which change?" in header
+        assert "Abandon which Quest?" in header
         return candidates[1].quest_id
 
     monkeypatch.setattr(m.resume_select, "run_picker", fake_picker)

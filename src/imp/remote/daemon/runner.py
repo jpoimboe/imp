@@ -292,7 +292,7 @@ async def _handle_command(
             await control.reply(command.quest_id, command.text)
         except LoadError:
             responses.put(Notice(
-                f"no such change `{command.quest_id}` — unknown or pruned"))
+                f"no such Quest `{command.quest_id}` — unknown or pruned"))
             return
     elif isinstance(command, Subscribe):
         handle = handle_for(command.quest_id)
@@ -343,7 +343,7 @@ async def _handle_command(
             responses.put(ListResult(changes, resident))
         except Exception:
             _log.warning("list or residency probe failed", exc_info=True)
-            responses.put(Notice("Error: could not list changes."))
+            responses.put(Notice("Error: could not list Quests."))
     elif isinstance(command, Search):
         hits = await anyio.to_thread.run_sync(control.search, command.query)
         if not hits:

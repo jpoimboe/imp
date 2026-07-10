@@ -125,7 +125,7 @@ def render_response(
     response: Response, subscribed_ids: Iterable[str] = (), alerts_on: bool = False,
 ) -> str:
     if isinstance(response, ListResult):
-        header = "Alerts: all changes" if alerts_on else "Alerts: subscribed only"
+        header = "Alerts: all Quests" if alerts_on else "Alerts: subscribed only"
         subscribed = set(subscribed_ids)
         visible = [
             c for c in response.changes

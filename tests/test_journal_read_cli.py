@@ -2,7 +2,7 @@
 worktree-removed) Quest.
 
 Seeds the per-Quest archive directly (the sole read source for completed
-Changes), then drives the CLI. No live providers needed.
+Quests), then drives the CLI. No live providers needed.
 """
 
 from __future__ import annotations
@@ -198,7 +198,7 @@ def test_status_empty_prints_no_changes(
 
     rc = m._cmd_status(type("NS", (), {"all": True})())
     assert rc == 0
-    assert capsys.readouterr().out == "No changes yet — start one with imp new\n"
+    assert capsys.readouterr().out == "No Quests yet — start one with imp new\n"
 
 
 def test_status_precondition_error_prints_no_changes(
@@ -217,7 +217,7 @@ def test_status_precondition_error_prints_no_changes(
 
     rc = m._cmd_status(type("NS", (), {"all": True})())
     assert rc == 0
-    assert capsys.readouterr().out == "No changes yet — start one with imp new\n"
+    assert capsys.readouterr().out == "No Quests yet — start one with imp new\n"
 
 
 def test_status_column_alignment_short_ids(
@@ -441,7 +441,7 @@ def test_overview_only_history_not_reported_empty(
 
     m._cmd_status(type("NS", (), {"all": False})(), tmp_path)
     out = capsys.readouterr().out
-    assert out != "No changes yet — start one with imp new\n"
+    assert out != "No Quests yet — start one with imp new\n"
     assert "done" in out and "merged" in out
 
 

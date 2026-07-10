@@ -23,7 +23,7 @@ class QuestInfo:
 
 
 def list_quests(control_root: Path) -> list[QuestInfo]:
-    """The in-flight Changes the `list` verb reports — those a user can still act on.
+    """The in-flight Quests the `list` verb reports — those a user can still act on.
 
     `_iter_quest_ids` enumerates every known Quest including the journal
     (completed / merged / abandoned), but those are terminal: surfacing them in a

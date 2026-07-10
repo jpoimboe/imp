@@ -364,7 +364,7 @@ def test_quest_id_applies_limit(tmp_path: Path) -> None:
     assert "i=0" not in lines[0]
 
 
-def test_description_documents_quest_id_and_current_change() -> None:
+def test_description_documents_quest_id_and_current_quest() -> None:
     desc = get_registry()["query_events"].description
     assert "quest_id" in desc
-    assert "current change" in desc.lower()
+    assert "current quest" in desc.lower()

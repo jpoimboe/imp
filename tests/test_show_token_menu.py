@@ -41,7 +41,7 @@ async def test_pick_show_target_empty_pool(
     monkeypatch, tmp_path: Path, capsys,
 ) -> None:
     # AC 8: bare `imp show` on an interactive tty with no changes prints
-    # "No changes to show." and returns 2, opening no menu.
+    # "No Quests to show." and returns 2, opening no menu.
     monkeypatch.setattr(m, "_show_all_rows", lambda c: [])
     monkeypatch.setattr(m, "_interactive", lambda: True)
 
@@ -51,7 +51,7 @@ async def test_pick_show_target_empty_pool(
     monkeypatch.setattr(m.resume_select, "run_picker", boom)
     rc = await m._pick_show_target(tmp_path)
     assert rc == 2
-    assert "No changes to show." in capsys.readouterr().out
+    assert "No Quests to show." in capsys.readouterr().out
 
 
 @pytest.mark.anyio
@@ -270,4 +270,4 @@ def test_cmd_show_no_token_non_tty_errors(
     rc = m._cmd_show(_ns(None))
     err = capsys.readouterr().err
     assert rc == 2
-    assert "needs a change id" in err
+    assert "needs a Quest id" in err

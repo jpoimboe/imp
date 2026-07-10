@@ -375,7 +375,7 @@ def test_read_image_with_no_quest_home_raises(tmp_path: Path) -> None:
     (tmp_path / "shot.png").write_bytes(_png_bytes(300, 200))
     ctx = _vision_ctx(tmp_path)
     ctx.quest_home = None
-    with pytest.raises(ValueError, match="change home"):
+    with pytest.raises(ValueError, match="quest home"):
         _read_file(ctx, path="shot.png")
 
 

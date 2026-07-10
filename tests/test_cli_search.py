@@ -80,7 +80,7 @@ def test_cmd_search_no_match_prints_notice(tmp_path: Path, capsys) -> None:
     rc = _cmd_search(_ns("nope"), tmp_path)
     out = capsys.readouterr().out
     assert rc == 0
-    assert "No changes match" in out
+    assert "No Quests match" in out
 
 
 def test_cmd_search_includes_matching_inflight_change(tmp_path: Path, capsys) -> None:

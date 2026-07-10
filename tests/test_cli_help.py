@@ -18,8 +18,8 @@ def test_top_level_help_describes_every_subcommand(
     out = _help_for(["-h"], capsys)
     assert "Start a new Quest" in out
     assert "Resume a paused" in out
-    assert "List your changes" in out
-    assert "one change's detail" in out
+    assert "List your Quests" in out
+    assert "one Quest's detail" in out
     assert "effective config" in out
 
 

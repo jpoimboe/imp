@@ -347,7 +347,7 @@ async def test_alerts_on_with_parked_changes_sends_only_confirmation() -> None:
     await _handle_command(Alerts(True), control, responses, alert_all)
     assert alert_all.enabled() is True
     assert responses.get_nowait() == Notice(ALERTS_ON_REPLY)
-    assert responses.empty()   # no catch-up even with parked Changes on disk
+    assert responses.empty()   # no catch-up even with parked Quests on disk
 
 
 @pytest.mark.anyio

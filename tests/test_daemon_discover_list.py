@@ -36,8 +36,8 @@ def test_list_quests_empty_when_no_changes(tmp_path: Path) -> None:
 
 
 def test_list_quests_excludes_terminal_changes(tmp_path: Path) -> None:
-    # Completed / abandoned / merged Changes are terminal — a remote `/list`
-    # should not surface them (only in-flight Changes a user can still act on).
+    # Completed / abandoned / merged Quests are terminal — a remote `/list`
+    # should not surface them (only in-flight Quests a user can still act on).
     _seed_control(tmp_path)
     live = Quest.create(tmp_path, title="Live", quest_id="live", base_branch="main")
     for terminal in ("completed", "abandoned", "merged"):

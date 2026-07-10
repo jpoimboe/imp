@@ -170,7 +170,7 @@ def test_resume_builtin_no_match(tmp_path: Path) -> None:
     out: list[str] = []
     result = handle_slash_line("/resume zzz999", change=change, output_fn=out.append)
     assert result is REPROMPT
-    assert any("No change matches" in line for line in out)
+    assert any("No Quest matches" in line for line in out)
 
 
 def test_resume_builtin_ambiguous_match(tmp_path: Path) -> None:

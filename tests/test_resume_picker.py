@@ -10,7 +10,7 @@ from prompt_toolkit.output import DummyOutput
 from imp.cli.resume_select import Candidate, ResumePicker, run_picker
 
 _NOW = datetime(2026, 6, 11, 12, 0, 0, tzinfo=UTC)
-_HEADER = "Resume which change?"
+_HEADER = "Resume which Quest?"
 
 
 def _cands() -> list[Candidate]:
@@ -104,8 +104,8 @@ async def test_picker_ctrl_c_cancels_to_none() -> None:
 
 def test_picker_stores_header_and_preselected_index() -> None:
     p = ResumePicker(_cands(), now=_NOW, color=False,
-                     header="Abandon which change?", selected_index=1)
-    assert p.header == "Abandon which change?"
+                     header="Abandon which Quest?", selected_index=1)
+    assert p.header == "Abandon which Quest?"
     assert p.index == 1
     assert p.selected().quest_id == "2026-06-10-bbb222"
 
@@ -115,5 +115,5 @@ async def test_picker_enter_with_preselect_returns_that_index() -> None:
     with create_pipe_input() as pipe, create_app_session(input=pipe, output=DummyOutput()):
         pipe.send_text("\r")                     # enter at once → the pre-selected row
         chosen = await run_picker(_cands(), now=_NOW, color=False,
-                                  header="Show log for which change?", selected_index=1)
+                                  header="Show log for which Quest?", selected_index=1)
     assert chosen == "2026-06-10-bbb222"

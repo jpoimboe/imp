@@ -19,7 +19,7 @@ from imp.engine.state import JsonlEventLog
         "A title is a short human-readable phrase — a few words with spaces, "
         "sentence case, like a PR title — not a branch-name slug (no kebab-case "
         "hyphens). Applies immediately and returns this Quest's id; use that id "
-        "to write and commit the spec at the change-home's artifacts/spec/<id>.md "
+        "to write and commit the spec at the quest-home's artifacts/spec/<id>.md "
         "this same turn."
     ),
 )

@@ -1595,7 +1595,7 @@ def _cmd_list(args: argparse.Namespace) -> int:
 def _cmd_show(args: argparse.Namespace) -> int:
     token = args.token
     if token is None and not _interactive():
-        print("imp: 'imp show' needs a change id — run 'imp list' for an overview",
+        print("imp: 'imp show' needs a Quest id — run 'imp list' for an overview",
               file=sys.stderr)
         return 2
     control = _control_root()
@@ -1716,7 +1716,7 @@ def _resolve_default_id(control: Path) -> str | None:
     return archive_read.most_recent_archived_id(control)
 
 
-_NO_CHANGES_MESSAGE = "No changes yet — start one with imp new"
+_NO_CHANGES_MESSAGE = "No Quests yet — start one with imp new"
 
 
 def _log_picker_empty() -> int:
@@ -1734,7 +1734,7 @@ async def _pick_log_target(control: Path) -> str | int:
     return await _pick_change_target(
         control=control,
         rows=rows,
-        header="Show log for which change?  (↑/↓ to move · enter to select · q to cancel)",
+        header="Show log for which Quest?  (↑/↓ to move · enter to select · q to cancel)",
         on_empty=_log_picker_empty,
         selected_index=selected_index,
     )
@@ -2180,7 +2180,7 @@ def _load_or_rehydrate(control: Path, quest_id: str) -> Quest | int:
         return change
 
 
-# Spec §10: in-flight statuses; completed Changes live in the archive.
+# Spec §10: in-flight statuses; completed Quests live in the archive.
 _INFLIGHT = ("running", "new", "paused", "merge_blocked", "draft")
 RESUMABLE = ("new", "paused", "merge_blocked", "draft", "saved")
 
@@ -2339,7 +2339,7 @@ def _status_rows(control: Path, scanned: list[_HomeScan] | None = None) -> list[
 
 
 def _completed_rows(control: Path, live_ids: set[str] | None = None) -> list[_Row]:
-    """Completed/abandoned Changes NOT currently surfaced in-flight, from a
+    """Completed/abandoned Quests NOT currently surfaced in-flight, from a
     SINGLE indexed archive query (spec AC 7). `live_ids` lets the overview reuse
     the in-flight id set it already computed instead of re-deriving it."""
     live = {r[0] for r in _status_rows(control)} if live_ids is None else live_ids
@@ -2419,7 +2419,7 @@ def _resume_picker_empty(control: Path) -> int:
     if past:
         plural = "s" if past != 1 else ""
         print(pal.ansi(
-            f"({past} past change{plural} — see `imp list --all`)",
+            f"({past} past Quest{plural} — see `imp list --all`)",
             "dim", enabled=should_use_color(sys.stdout)))
     return 0
 
@@ -2427,7 +2427,7 @@ def _resume_picker_empty(control: Path) -> int:
 def _resume_picker_non_tty(rows: list[_Row]) -> str | int:
     if len(rows) == 1:
         return rows[0][0]
-    print("Multiple resumable Changes — pass a token:", file=sys.stderr)
+    print("Multiple resumable Quests — pass a token:", file=sys.stderr)
     color = should_use_color(sys.stderr)
     now = datetime.now(UTC)
     print(quest_row.header_line(color=color), file=sys.stderr)
@@ -2467,7 +2467,7 @@ async def _pick_change_target(
 
 
 _RESUME_PICKER_HEADER = (
-    "Resume which change?  (↑/↓ to move · enter to resume · q to cancel)"
+    "Resume which Quest?  (↑/↓ to move · enter to resume · q to cancel)"
 )
 
 
@@ -2584,13 +2584,13 @@ def _abandon_picker_empty() -> int:
 
 
 def _abandon_picker_non_tty(rows: list[_Row]) -> int:
-    print("imp: abandon needs a change token on a non-interactive terminal",
+    print("imp: abandon needs a Quest token on a non-interactive terminal",
           file=sys.stderr)
     return 2
 
 
 _ABANDON_PICKER_HEADER = (
-    "Abandon which change?  (↑/↓ to move · enter to select · q to cancel)"
+    "Abandon which Quest?  (↑/↓ to move · enter to select · q to cancel)"
 )
 
 
@@ -2611,7 +2611,7 @@ async def _pick_abandon_matches(
     errors with a token-specific message (distinct from the no-token
     `_abandon_picker_non_tty` copy, which reads wrong when a token was given)."""
     def _non_tty(_rows: list[_Row]) -> int:
-        print(f"imp: {token!r} matches multiple Changes; pass a more specific token",
+        print(f"imp: {token!r} matches multiple Quests; pass a more specific token",
               file=sys.stderr)
         return 2
 
@@ -2630,7 +2630,7 @@ _SHOW_PICKER_HEADER = (
 
 
 def _show_picker_empty() -> int:
-    print("No changes to show.")
+    print("No Quests to show.")
     return 2
 
 
@@ -2638,7 +2638,7 @@ def _show_picker_non_tty(rows: list[_Row]) -> int:
     # Defensive parity only: _cmd_show handles the non-tty no-token case
     # directly (needs-a-change-id error), so _pick_show_target is invoked
     # solely on an interactive tty and this branch is never reached.
-    print("imp: 'imp show' needs a change id — run 'imp list' for an overview",
+    print("imp: 'imp show' needs a Quest id — run 'imp list' for an overview",
           file=sys.stderr)
     return 2
 
@@ -2745,7 +2745,7 @@ def _cmd_edit(args: argparse.Namespace) -> int:
 
     if zone_change and change.materialized:
         print(f"imp: {quest_id} is already built; zone moves apply to "
-              "un-materialized changes only (use abandon/pause instead)",
+              "un-materialized Quests only (use abandon/pause instead)",
               file=sys.stderr)
         return 2
 
@@ -3008,7 +3008,7 @@ def _cmd_search(args: argparse.Namespace, _control: Path | None = None) -> int:
     if "archive" in zones:
         hits += _search_archived(control, args.query)
     if not hits:
-        print(f"No changes match {args.query!r}.")
+        print(f"No Quests match {args.query!r}.")
         return 0
     if args.list:
         lines = [_search_list_line(h) for h in hits]
@@ -3043,11 +3043,11 @@ def _cmd_config(args: argparse.Namespace) -> int:
 
 
 _OVERVIEW_COMMANDS: tuple[tuple[str, str], ...] = (
-    ("chat", "Open a conversation with imp — ask questions, scout work, or scope a change."),
-    ("new", "Scope a new change in conversation (optional opening message)."),
+    ("chat", "Open a conversation with imp — ask questions, scout work, or scope a Quest."),
+    ("new", "Scope a new Quest in conversation (optional opening message)."),
     ("resume", "Continue an in-flight Quest (the sole resumable one, else a picker)."),
-    ("list", "List your changes: in-flight, backlog, and recently merged."),
-    ("show", "Show one change's detail or a named artifact (imp show <id>)."),
+    ("list", "List your Quests: in-flight, backlog, and recently merged."),
+    ("show", "Show one Quest's detail or a named artifact (imp show <id>)."),
     ("log", "Show a Quest's narrative as plain text."),
     ("abandon", "Tear down a Quest's worktree, branch, and state."),
     ("config", "Show the effective configuration."),
@@ -3130,7 +3130,7 @@ def _build_parser() -> argparse.ArgumentParser:
                             "with `imp resume <id>`.")
     p_new.add_argument("--depends-on", metavar="ID", action="append",
                        default=None, dest="depends_on",
-                       help="A change id this backlog Quest depends on "
+                       help="A quest id this backlog Quest depends on "
                             "(repeatable). Gates ready/blocked; never changes the "
                             "base branch.")
     p_new.add_argument("--workflow", metavar="NAME", default=None,
@@ -3150,7 +3150,7 @@ def _build_parser() -> argparse.ArgumentParser:
     p_chat = sub.add_parser(
         "chat",
         help="Open a conversation with imp (ask questions, scout work, or "
-             "scope a change).")
+             "scope a Quest).")
     p_chat.add_argument(
         "opening", nargs="?", metavar="MESSAGE",
         help="Optional opening message; omit to start with an interactive prompt.")
@@ -3175,7 +3175,7 @@ def _build_parser() -> argparse.ArgumentParser:
         description=(
             "Resume a paused or interrupted Quest, replaying its narrative and "
             "continuing the workflow where it stopped. With no token on a tty, "
-            "pick from a list of resumable Changes."))
+            "pick from a list of resumable Quests."))
     p_resume.add_argument(
         "token", nargs="?",
         help="Quest id or resume token identifying which Quest to resume.")
@@ -3240,16 +3240,16 @@ def _build_parser() -> argparse.ArgumentParser:
 
     p_list = sub.add_parser(
         "list",
-        help="List your changes: in-flight, backlog, and recently merged.",
+        help="List your Quests: in-flight, backlog, and recently merged.",
         description=(
-            "With no argument, an overview of your changes — in-flight, the "
+            "With no argument, an overview of your Quests — in-flight, the "
             "Backlog, and recently merged. -a/--all lifts the 10-cap and "
-            "includes abandoned/left changes (the block is then labelled "
+            "includes abandoned/left Quests (the block is then labelled "
             "`history`)."),
     )
     p_list.add_argument(
         "-a", "--all", action="store_true",
-        help="Lift the 10-cap and include abandoned changes "
+        help="Lift the 10-cap and include abandoned Quests "
              "(the block is then labelled `history`).")
     p_list.add_argument(
         "--no-pager", action="store_true",
@@ -3258,11 +3258,11 @@ def _build_parser() -> argparse.ArgumentParser:
 
     p_show = sub.add_parser(
         "show",
-        help="Show one change's detail or a named artifact (imp show <id>).",
+        help="Show one Quest's detail or a named artifact (imp show <id>).",
         description=(
-            "Print a change's detail card, or name an artifact "
+            "Print a Quest's detail card, or name an artifact "
             "(spec/plan/events/status/summary) to print just that. "
-            "Reads the live worktree files while a change is in flight and "
+            "Reads the live worktree files while a Quest is in flight and "
             "falls back to the archive once it is merged."),
     )
     p_show.add_argument(
@@ -3294,10 +3294,10 @@ def _build_parser() -> argparse.ArgumentParser:
 
     p_search = sub.add_parser(
         "search",
-        help="Search changes by id, title, or conversation content.",
+        help="Search Quests by id, title, or conversation content.",
         description=(
-            "Search active (in-flight + drafts), backlog, and archived changes "
-            "for the query as a case-insensitive substring of a change's id, "
+            "Search active (in-flight + drafts), backlog, and archived Quests "
+            "for the query as a case-insensitive substring of a Quest's id, "
             "title, or conversation content. With no zone flag, all three zones "
             "are searched."),
     )
@@ -3306,16 +3306,16 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Substring matched case-insensitively against id, title, and content.")
     p_search.add_argument(
         "--active", action="store_true",
-        help="Search in-flight and draft changes.")
+        help="Search in-flight and draft Quests.")
     p_search.add_argument(
         "--backlog", action="store_true",
-        help="Search backlog changes.")
+        help="Search backlog Quests.")
     p_search.add_argument(
         "--archived", action="store_true",
-        help="Search archived (completed, abandoned, left) changes.")
+        help="Search archived (completed, abandoned, left) Quests.")
     p_search.add_argument(
         "-l", "--list", action="store_true", dest="list",
-        help="One terse line per change (id, title, zone); no excerpts.")
+        help="One terse line per Quest (id, title, zone); no excerpts.")
     p_search.add_argument(
         "--no-pager", action="store_true",
         help="Disable the pager even when stdout is a TTY.")
@@ -3362,7 +3362,7 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Edit a Quest's title, backlog membership, or dependencies.",
         description=(
             "Edit a Quest's title, backlog membership, or dependencies. Zone "
-            "moves (--backlog/--active) apply to un-materialized Changes only."))
+            "moves (--backlog/--active) apply to un-materialized Quests only."))
     p_edit.add_argument("token", help="Quest id or its short token.")
     p_edit.add_argument("--title", metavar="TEXT", default=None,
                         help="Set the Quest title.")
@@ -3384,7 +3384,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
     p_rc = sub.add_parser(
         "remote-control",
-        help="Run the optional per-repo daemon that relays all Changes to one transport.",
+        help="Run the optional per-repo daemon that relays all Quests to one transport.",
     )
     rc_sub = p_rc.add_subparsers(dest="rc_action", required=True)
     p_rc_start = rc_sub.add_parser(

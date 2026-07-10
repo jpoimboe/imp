@@ -50,7 +50,7 @@ def resume_change(control_root: Path, token: str) -> str:
     matches = [cid for cid in _iter_quest_ids(control_root) if token in cid]
     if len(matches) != 1:
         if not matches:
-            return f"No change matches {token!r}."
+            return f"No Quest matches {token!r}."
         return f"{token!r} is ambiguous: {', '.join(matches)}"
     target = matches[0]
     env = _base_env()

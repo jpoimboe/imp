@@ -14,7 +14,7 @@ from imp.engine.state import JsonlEventLog
     description=(
         "Record a durable follow-up backlog Quest (no branch/worktree yet). "
         "Give it a short title and a self-contained description that needs no "
-        "other context; optionally list change ids it depends_on. Returns the "
+        "other context; optionally list quest ids it depends_on. Returns the "
         "new id; it is startable later with `imp resume <id>`."
     ),
 )

@@ -90,7 +90,7 @@ def test_bare_show_nudges_to_list(capsys) -> None:
     assert rc == 2
     err = capsys.readouterr().err
     assert err == (
-        "imp: 'imp show' needs a change id — run 'imp list' for an overview\n"
+        "imp: 'imp show' needs a Quest id — run 'imp list' for an overview\n"
     )
 
 
@@ -110,9 +110,9 @@ def test_list_and_show_both_resolve() -> None:
 
 def test_overview_lists_list_then_show_with_copy() -> None:
     text = render_overview(color=False)
-    assert "List your changes: in-flight, backlog, and recently merged." in text
-    assert "Show one change's detail or a named artifact (imp show <id>)." in text
-    assert text.index("List your changes") < text.index("Show one change's detail")
+    assert "List your Quests: in-flight, backlog, and recently merged." in text
+    assert "Show one Quest's detail or a named artifact (imp show <id>)." in text
+    assert text.index("List your Quests") < text.index("Show one Quest's detail")
 
 
 def test_show_status_word_errors_not_found(tmp_path: Path, monkeypatch, capsys) -> None:

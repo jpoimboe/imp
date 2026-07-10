@@ -102,14 +102,14 @@ def test_on_response_listresult_header_reflects_live_alert_all_mode() -> None:
         QuestInfo(id="bbbbbb", title="Beta", status="running", step="implement")],
         frozenset({"bbbbbb"})))
     assert sent == [(
-        "Alerts: all changes\n@bbbbbb  Beta — running · implement", True)]
+        "Alerts: all Quests\n@bbbbbb  Beta — running · implement", True)]
 
 
 def test_render_listresult_header_reflects_alerts_on() -> None:
     out = render_response(ListResult([
         QuestInfo(id="k3f9qa", title="Dark mode", status="running", step="implement")],
         frozenset({"k3f9qa"})), (), True)
-    assert out == "Alerts: all changes\n@k3f9qa  Dark mode — running · implement"
+    assert out == "Alerts: all Quests\n@k3f9qa  Dark mode — running · implement"
 
 
 def test_render_listresult_header_reflects_alerts_off() -> None:

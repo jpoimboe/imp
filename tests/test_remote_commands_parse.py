@@ -144,7 +144,7 @@ def test_listresult_carries_the_resident_set() -> None:
 
 
 def test_list_help_line_says_running_changes() -> None:
-    assert "/list — show running changes (● = subscribed)" in HELP_TEXT
+    assert "/list — show running Quests (● = subscribed)" in HELP_TEXT
 
 
 def test_route_hint_points_at_list_not_show() -> None:
