@@ -60,7 +60,7 @@ def test_load_change_by_id(tmp_path: Path) -> None:
     assert b.id == "mychng" and b.title == "X" and b.base_branch == "main"
 
 
-def test_change_json_has_no_slug_or_auto_titled(tmp_path: Path) -> None:
+def test_quest_json_has_no_slug_or_auto_titled(tmp_path: Path) -> None:
     import json
     _seed_control(tmp_path)
     ch = Change.create(tmp_path, title="X", quest_id="zzz999", base_branch="main")
@@ -151,7 +151,7 @@ def test_load_reads_persisted_project_root(tmp_path: Path) -> None:
     assert Change.load(tmp_path, "lrr").project_root == Path("/sentinel/root")
 
 
-def test_set_project_root_rewrites_change_json(tmp_path: Path) -> None:
+def test_set_project_root_rewrites_quest_json(tmp_path: Path) -> None:
     _seed_control(tmp_path)
     ch = Change.create(tmp_path, title="X", quest_id="spr", base_branch="main")
     ch.set_project_root(Path("/new/wt"))
@@ -488,7 +488,7 @@ def test_load_reads_origin_and_seed_opening(tmp_path: Path) -> None:
     assert loaded.seed_opening == "X\n\nbody"
 
 
-def test_set_origin_rewrites_change_json(tmp_path: Path) -> None:
+def test_set_origin_rewrites_quest_json(tmp_path: Path) -> None:
     import json as _json
 
     from imp.engine import worktree
@@ -506,7 +506,7 @@ def test_set_origin_rewrites_change_json(tmp_path: Path) -> None:
     assert meta["origin"] == "idea"
 
 
-def test_set_seed_opening_rewrites_change_json(tmp_path: Path) -> None:
+def test_set_seed_opening_rewrites_quest_json(tmp_path: Path) -> None:
     import json as _json
 
     from imp.engine import worktree
@@ -531,7 +531,7 @@ def test_set_seed_opening_rewrites_change_json(tmp_path: Path) -> None:
     assert meta["seed_opening"] is None
 
 
-def test_set_depends_on_rewrites_change_json(tmp_path: Path) -> None:
+def test_set_depends_on_rewrites_quest_json(tmp_path: Path) -> None:
     import json as _json
 
     from imp.engine import worktree

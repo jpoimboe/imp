@@ -258,21 +258,21 @@ def _git_init(root: Path) -> None:
     subprocess.run(["git", "config", "user.name", "t"], cwd=root, check=True)
 
 
-def _archive_change(control: Path, cid: str, events_bytes: bytes) -> None:
+def _archive_quest(control: Path, cid: str, events_bytes: bytes) -> None:
     """Archive a change (NO live .imp/changes/<cid> home) so resolution falls
     through Change.load (LoadError) to the archive path."""
     from imp.engine import archive
 
     events = control / f"{cid}.jsonl"
     events.write_bytes(events_bytes)
-    change_json = control / f"{cid}-change.json"
-    change_json.write_text(json.dumps({
+    quest_json = control / f"{cid}-change.json"
+    quest_json.write_text(json.dumps({
         "id": cid, "title": cid.title(), "base_branch": "main"}))
     state_json = control / f"{cid}-state.json"
     state_json.write_text(json.dumps({"id": cid, "status": "completed", "step": None}))
-    archive.archive_change(
+    archive.archive_quest(
         control, cid, events_path=events,
-        change_json_path=change_json, state_json_path=state_json)
+        quest_json_path=quest_json, state_json_path=state_json)
 
 
 def test_quest_id_live_returns_that_changes_digest(tmp_path: Path) -> None:
@@ -297,7 +297,7 @@ def test_quest_id_archived_resolves(tmp_path: Path) -> None:
         b' "timestamp": "2026-06-01T00:00:00+00:00", "type": "step_started",'
         b' "payload": {"step": "final-review"}}\n'
     )
-    _archive_change(tmp_path, "arch222", events_bytes)
+    _archive_quest(tmp_path, "arch222", events_bytes)
     lines = [ln for ln in _call_at(cur, quest_id="arch222").splitlines() if ln]
     assert len(lines) == 1
     assert "step_started" in lines[0]

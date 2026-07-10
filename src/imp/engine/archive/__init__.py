@@ -47,9 +47,9 @@ def _parse_events(raw: bytes) -> list[dict[str, Any]]:
     return out
 
 
-def archive_change(
+def archive_quest(
     control_root: Path, quest_id: str, *,
-    events_path: Path, change_json_path: Path, state_json_path: Path,
+    events_path: Path, quest_json_path: Path, state_json_path: Path,
     steps_dir: Path | None = None,
     resumable: bool = False,
 ) -> None:
@@ -65,10 +65,10 @@ def archive_change(
                 rel = path.relative_to(steps_dir).as_posix()
                 step_blobs[rel] = store.put(path.read_bytes())
 
-    change_meta = json.loads(change_json_path.read_text())
+    quest_meta = json.loads(quest_json_path.read_text())
     final_state = json.loads(state_json_path.read_text())
     rec = record.build_record(
-        change_meta, final_state, events_hash,
+        quest_meta, final_state, events_hash,
         resumable=resumable, step_blobs=step_blobs)
     record.write_record(records_root(control_root), rec)
 

@@ -16,16 +16,16 @@ def _seed_change(control: Path, cid: str, last_ts: str) -> None:
     events.write_text(
         f'{{"id":"{cid}-e0","timestamp":"{last_ts}","type":"change_created",'
         f'"payload":{{}}}}\n')
-    change_json = control / f"{cid}-change.json"
-    change_json.write_text(json.dumps({
+    quest_json = control / f"{cid}-change.json"
+    quest_json.write_text(json.dumps({
         "id": cid, "title": cid.title(), "base_branch": "main",
         "created_at": "2026-06-01T00:00:00+00:00", "depends_on": []}))
     state_json = control / f"{cid}-state.json"
     state_json.write_text(json.dumps({
         "id": cid, "status": "completed", "step": "finalize"}))
-    archive.archive_change(
+    archive.archive_quest(
         control, cid, events_path=events,
-        change_json_path=change_json, state_json_path=state_json)
+        quest_json_path=quest_json, state_json_path=state_json)
 
 
 def _write_legacy_v0_db(db_path: Path) -> None:
@@ -85,16 +85,16 @@ def _seed_prose_change(control: Path, cid: str, body: str) -> None:
             "content": [{"type": "text", "text": body}],
             "stop_reason": "end_turn",
             "usage": {"input_tokens": 1, "output_tokens": 1}}}}) + "\n")
-    change_json = control / f"{cid}-change.json"
-    change_json.write_text(json.dumps({
+    quest_json = control / f"{cid}-change.json"
+    quest_json.write_text(json.dumps({
         "id": cid, "title": "", "base_branch": "main",
         "created_at": "2026-06-01T00:00:00+00:00", "depends_on": []}))
     state_json = control / f"{cid}-state.json"
     state_json.write_text(json.dumps({
         "id": cid, "status": "completed", "step": "finalize"}))
-    archive.archive_change(
+    archive.archive_quest(
         control, cid, events_path=events,
-        change_json_path=change_json, state_json_path=state_json)
+        quest_json_path=quest_json, state_json_path=state_json)
 
 
 def _user_version(db: Path) -> int:
@@ -184,7 +184,7 @@ def test_search_archive_migrates_before_query(tmp_path: Path) -> None:
     assert _user_version(db) == 4
 
 
-def test_archive_change_on_legacy_v0_db_migrates_and_ingests(tmp_path: Path) -> None:
+def test_archive_quest_on_legacy_v0_db_migrates_and_ingests(tmp_path: Path) -> None:
     _seed_change(tmp_path, "alpha", "2026-06-01T00:00:01+00:00")
     db = archive.index_path(tmp_path)
     _write_legacy_v0_db(db)  # finalize must not run the v2 INSERT against this
@@ -208,7 +208,7 @@ def test_concurrent_migration_reads_and_ingest_lose_nothing(tmp_path: Path) -> N
         _seed_change(control, cid, f"2026-06-01T00:00:0{i}+00:00")
     _write_legacy_v0_db(archive.index_path(control))  # force a real migration
 
-    # Pre-stage one finalize's inputs; the writer thread runs archive_change.
+    # Pre-stage one finalize's inputs; the writer thread runs archive_quest.
     w_events = control / "writer.jsonl"
     w_events.write_text(
         '{"id":"writer-e0","timestamp":"2026-06-02T00:00:00+00:00",'
@@ -235,9 +235,9 @@ def test_concurrent_migration_reads_and_ingest_lose_nothing(tmp_path: Path) -> N
 
     def writer() -> None:
         start.wait()
-        archive.archive_change(
+        archive.archive_quest(
             control, "writer", events_path=w_events,
-            change_json_path=w_change, state_json_path=w_state)
+            quest_json_path=w_change, state_json_path=w_state)
 
     with ThreadPoolExecutor(max_workers=6) as ex:
         futs = [ex.submit(reader) for _ in range(5)]
@@ -287,16 +287,16 @@ def test_schema_bump_reindexes_and_drops_injected_prompt(tmp_path: Path) -> None
                       "payload": {"content": [{"type": "text",
                                                "text": "please use HUMANTERM"}],
                                   "human": True}}) + "\n")
-    change_json = control / f"{cid}-change.json"
-    change_json.write_text(json.dumps({
+    quest_json = control / f"{cid}-change.json"
+    quest_json.write_text(json.dumps({
         "id": cid, "title": "", "base_branch": "main",
         "created_at": "2026-06-01T00:00:00+00:00", "depends_on": []}))
     state_json = control / f"{cid}-state.json"
     state_json.write_text(json.dumps({
         "id": cid, "status": "completed", "step": "finalize"}))
-    archive.archive_change(
+    archive.archive_quest(
         control, cid, events_path=events,
-        change_json_path=change_json, state_json_path=state_json)
+        quest_json_path=quest_json, state_json_path=state_json)
 
     db = archive.index_path(control)
     conn = sqlite3.connect(db)

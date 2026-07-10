@@ -741,15 +741,15 @@ def test_infer_session_result_completed_from_archive_when_home_reaped(tmp_path: 
         '"timestamp":"2026-06-01T00:00:01+00:00","type":"change_created",'
         f'"payload":{{"id":"{quest_id}"}}}}\n'.encode()
     )
-    change_json = tmp_path / f"{quest_id}-change.json"
-    change_json.write_text(json.dumps({
+    quest_json = tmp_path / f"{quest_id}-change.json"
+    quest_json.write_text(json.dumps({
         "id": quest_id, "title": "Reaped", "base_branch": "main",
         "created_at": "2026-06-01T00:00:00+00:00", "depends_on": []}))
     state_json = tmp_path / f"{quest_id}-state.json"
     state_json.write_text(json.dumps({"id": quest_id, "status": "completed", "step": None}))
-    archive.archive_change(
+    archive.archive_quest(
         tmp_path, quest_id, events_path=events_file,
-        change_json_path=change_json, state_json_path=state_json)
+        quest_json_path=quest_json, state_json_path=state_json)
 
     # Build the Change WITHOUT creating the live home/state dir — State.load raises
     # FileNotFoundError, forcing the archive fallback branch.

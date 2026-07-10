@@ -234,9 +234,9 @@ async def dispatch_task(
 
     try:
         if isolated:
-            from imp.engine.change import link_change_home
+            from imp.engine.change import link_quest_home
             assert spike_worktree is not None
-            link_change_home(spike_worktree, ctx.change.quest_dir)
+            link_quest_home(spike_worktree, ctx.change.quest_dir)
             dispatch_policy = _build_spike_policy(
                 ctx.change, spike_worktree, ctx.test_gates)
             if not dispatch_policy.active and ctx.event_log is not None:

@@ -23,9 +23,9 @@ def _home(control: Path, cid: str, status: str) -> Path:
 
 
 def _archive(control: Path, home: Path, cid: str) -> None:
-    archive.archive_change(
+    archive.archive_quest(
         control, cid, events_path=home / "events.jsonl",
-        change_json_path=home / "change.json",
+        quest_json_path=home / "change.json",
         state_json_path=home / "state" / "state.json")
 
 

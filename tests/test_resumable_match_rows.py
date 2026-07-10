@@ -5,7 +5,7 @@ from pathlib import Path
 
 import imp.cli.main as m
 from imp.engine.abandon import archive_conversation
-from imp.engine.archive import archive_change
+from imp.engine.archive import archive_quest
 from imp.engine.archive import read as archive_read
 from imp.engine.change import Change
 from tests.conftest import _seed_control
@@ -22,8 +22,8 @@ def _archive_terminal(control: Path, cid: str, status: str) -> None:
         "created_at": "2026-06-01T00:00:00+00:00", "depends_on": []}))
     sj = control / f"{cid}.state.json"
     sj.write_text(json.dumps({"id": cid, "status": status, "step": "merge"}))
-    archive_change(control, cid, events_path=events,
-                   change_json_path=cj, state_json_path=sj)
+    archive_quest(control, cid, events_path=events,
+                   quest_json_path=cj, state_json_path=sj)
 
 
 def test_match_rows_include_live_resumable(tmp_path: Path) -> None:

@@ -27,7 +27,7 @@ def reap_archived_homes(control_root: Path) -> int:
                 continue
             if state.get("status") in _INFLIGHT:
                 continue
-            if not index.has_change(conn, cid):
+            if not index.has_quest(conn, cid):
                 continue
             shutil.rmtree(home, ignore_errors=True)
             reaped += 1

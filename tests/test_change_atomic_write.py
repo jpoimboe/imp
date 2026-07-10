@@ -9,7 +9,7 @@ import pytest
 from imp.engine.change import (
     Change,
     _migrate_v4_to_v5,
-    _write_change_json,
+    _write_quest_json,
 )
 from tests.conftest import _seed_control
 
@@ -18,24 +18,24 @@ def _boom(*_a, **_k):
     raise OSError("simulated crash before os.replace")
 
 
-def test_write_change_json_output_is_byte_identical(tmp_path: Path) -> None:
+def test_write_quest_json_output_is_byte_identical(tmp_path: Path) -> None:
     # Keys deliberately out of order + nested to pin sort_keys=True and indent=2.
     meta = {"b": 2, "a": 1, "nested": {"y": [3, 2, 1], "x": "v"}}
     meta_path = tmp_path / "change.json"
-    _write_change_json(meta_path, meta)
+    _write_quest_json(meta_path, meta)
     assert meta_path.read_text() == json.dumps(meta, indent=2, sort_keys=True)
 
 
-def test_write_change_json_replaces_existing_content(tmp_path: Path) -> None:
+def test_write_quest_json_replaces_existing_content(tmp_path: Path) -> None:
     meta_path = tmp_path / "change.json"
     meta_path.write_text(json.dumps({"layout_version": 1}, indent=2, sort_keys=True))
-    _write_change_json(meta_path, {"layout_version": 2, "title": "renamed"})
+    _write_quest_json(meta_path, {"layout_version": 2, "title": "renamed"})
     reloaded = json.loads(meta_path.read_text())
     assert reloaded == {"layout_version": 2, "title": "renamed"}
     assert not list(tmp_path.glob(".change-*"))  # no temp file left behind
 
 
-def test_write_change_json_preserves_original_on_replace_failure(
+def test_write_quest_json_preserves_original_on_replace_failure(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     meta_path = tmp_path / "change.json"
@@ -43,7 +43,7 @@ def test_write_change_json_preserves_original_on_replace_failure(
     meta_path.write_text(original)
     monkeypatch.setattr(os, "replace", _boom)
     with pytest.raises(OSError):
-        _write_change_json(meta_path, {"layout_version": 2})
+        _write_quest_json(meta_path, {"layout_version": 2})
     # Live file untouched, and the transient temp file was cleaned up.
     assert meta_path.read_text() == original
     assert not list(tmp_path.glob(".change-*"))
@@ -64,7 +64,7 @@ def test_migration_advances_version_and_leaves_no_temp(tmp_path: Path) -> None:
     assert not list(ch.quest_dir.glob(".change-*"))
 
 
-def test_rename_setter_preserves_change_json_on_replace_failure(
+def test_rename_setter_preserves_quest_json_on_replace_failure(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _seed_control(tmp_path)
@@ -86,7 +86,7 @@ def test_rename_setter_preserves_change_json_on_replace_failure(
     assert not list(ch.quest_dir.glob(".change-*"))
 
 
-def test_migration_preserves_change_json_on_replace_failure(
+def test_migration_preserves_quest_json_on_replace_failure(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _seed_control(tmp_path)

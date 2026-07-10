@@ -23,7 +23,7 @@ from imp.engine.types import SourceLoc
 LAYOUT_VERSION = 5  # bump in the SAME commit as any breaking change-home layout/schema change
 
 
-def _write_change_json(meta_path: Path, meta: dict[str, Any]) -> None:
+def _write_quest_json(meta_path: Path, meta: dict[str, Any]) -> None:
     """Atomically rewrite change.json (tmp file, fsync, os.replace); mirrors State.save."""
     fd, tmp_name = tempfile.mkstemp(prefix=".change-", dir=meta_path.parent)
     try:
@@ -50,7 +50,7 @@ def _fold_phantom(phantom: Path, home: Path) -> None:
         shutil.move(src, dest)
 
 
-def link_change_home(worktree_path: Path, quest_dir: Path) -> None:
+def link_quest_home(worktree_path: Path, quest_dir: Path) -> None:
     """Create idempotent id-scoped symlink <worktree>/.imp/changes/<id> → quest_dir."""
     link = worktree_path / ".imp" / "changes" / quest_dir.name
     target = quest_dir.resolve()
@@ -103,7 +103,7 @@ def _migrate_v1_to_v2(quest_dir: Path) -> None:
             cur = proc.stdout.strip()
     meta["cur_base_head"] = cur
     meta["layout_version"] = 2
-    _write_change_json(meta_path, meta)
+    _write_quest_json(meta_path, meta)
 
 
 def _migrate_v2_to_v3(quest_dir: Path) -> None:
@@ -112,7 +112,7 @@ def _migrate_v2_to_v3(quest_dir: Path) -> None:
     meta_path = quest_dir / "change.json"
     meta = json.loads(meta_path.read_text())
     meta["layout_version"] = 3
-    _write_change_json(meta_path, meta)
+    _write_quest_json(meta_path, meta)
 
 
 def _migrate_v3_to_v4(quest_dir: Path) -> None:
@@ -121,7 +121,7 @@ def _migrate_v3_to_v4(quest_dir: Path) -> None:
     meta_path = quest_dir / "change.json"
     meta = json.loads(meta_path.read_text())
     meta["layout_version"] = 4
-    _write_change_json(meta_path, meta)
+    _write_quest_json(meta_path, meta)
 
 
 def _migrate_v4_to_v5(quest_dir: Path) -> None:
@@ -130,7 +130,7 @@ def _migrate_v4_to_v5(quest_dir: Path) -> None:
     meta_path = quest_dir / "change.json"
     meta = json.loads(meta_path.read_text())
     meta["layout_version"] = 5
-    _write_change_json(meta_path, meta)
+    _write_quest_json(meta_path, meta)
 
 
 _MIGRATIONS: dict[tuple[int, int], Callable[[Path], None]] = {
@@ -184,7 +184,7 @@ class Change:
         meta_path = self.quest_dir / "change.json"
         meta = json.loads(meta_path.read_text())
         meta["title"] = name
-        _write_change_json(meta_path, meta)
+        _write_quest_json(meta_path, meta)
         log.append(agent_id=None, type="change_renamed",
                    payload={"id": self.id, "old_title": old_title,
                             "new_title": name})
@@ -195,27 +195,27 @@ class Change:
         meta_path = self.quest_dir / "change.json"
         meta = json.loads(meta_path.read_text())
         meta["project_root"] = str(new_root)
-        _write_change_json(meta_path, meta)
+        _write_quest_json(meta_path, meta)
 
     def set_origin(self, origin: str) -> None:
         self.origin = origin
         meta_path = self.quest_dir / "change.json"
         meta = json.loads(meta_path.read_text())
         meta["origin"] = origin
-        _write_change_json(meta_path, meta)
+        _write_quest_json(meta_path, meta)
 
     def set_depends_on(self, depends_on: list[str]) -> None:
         meta_path = self.quest_dir / "change.json"
         meta = json.loads(meta_path.read_text())
         meta["depends_on"] = list(depends_on)
-        _write_change_json(meta_path, meta)
+        _write_quest_json(meta_path, meta)
 
     def set_seed_opening(self, text: str | None) -> None:
         self.seed_opening = text
         meta_path = self.quest_dir / "change.json"
         meta = json.loads(meta_path.read_text())
         meta["seed_opening"] = text
-        _write_change_json(meta_path, meta)
+        _write_quest_json(meta_path, meta)
 
     def materialize(self) -> bool:
         """Go live: fork branch imp/<id> + worktree from base_branch's CURRENT tip,
@@ -239,14 +239,14 @@ class Change:
         meta["project_root"] = str(wt_path)
         meta["materialized"] = True
         meta["cur_base_head"] = current_tip
-        _write_change_json(meta_path, meta)
-        link_change_home(wt_path, self.quest_dir)
+        _write_quest_json(meta_path, meta)
+        link_quest_home(wt_path, self.quest_dir)
         return head_changed
 
     def relink_home(self) -> None:
         if not self.materialized or self.project_root == self.control_root:
             return
-        link_change_home(self.project_root, self.quest_dir)
+        link_quest_home(self.project_root, self.quest_dir)
 
     @property
     def live_workflow_dir(self) -> Path:
@@ -346,7 +346,7 @@ class Change:
             loop_counts={},
         ).save(quest_dir / "state")
 
-        link_change_home(wt_path, quest_dir)
+        link_quest_home(wt_path, quest_dir)
         change = cls(
             id=quest_id, title=title, base_branch=base_branch,
             control_root=control_root, project_root=wt_path, quest_dir=quest_dir,

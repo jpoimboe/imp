@@ -51,10 +51,10 @@ def _complete_and_archive(control: Path, slug: str, status: str = "completed") -
     st = State.load(ch.state_dir)
     st.status = status
     st.save(ch.state_dir)
-    archive.archive_change(
+    archive.archive_quest(
         control, slug,
         events_path=ch.events_path,
-        change_json_path=ch.quest_dir / "change.json",
+        quest_json_path=ch.quest_dir / "change.json",
         state_json_path=ch.state_dir / "state.json")
     worktree.remove_worktree(control, slug)
 
@@ -155,10 +155,10 @@ def test_status_inflight_takes_precedence_over_archive(
     _seed_control(tmp_path)
     ch = Change.create(tmp_path, title="Both", quest_id="both", base_branch="main")
     # Archive it but DON'T remove the worktree (simulates the crash window).
-    archive.archive_change(
+    archive.archive_quest(
         tmp_path, "both",
         events_path=ch.events_path,
-        change_json_path=ch.quest_dir / "change.json",
+        quest_json_path=ch.quest_dir / "change.json",
         state_json_path=ch.state_dir / "state.json")
 
     monkeypatch.chdir(tmp_path)
@@ -559,9 +559,9 @@ def test_show_events_and_status_from_archive(tmp_path, monkeypatch) -> None:
         "created_at": "2026-06-01T00:00:00+00:00", "depends_on": []}))
     sj = tmp_path / "s.json"
     sj.write_text(json.dumps({"id": "arch01", "status": "completed", "step": None}))
-    archive.archive_change(
+    archive.archive_quest(
         tmp_path, "arch01", events_path=events,
-        change_json_path=cj, state_json_path=sj)
+        quest_json_path=cj, state_json_path=sj)
 
     monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
 
@@ -601,7 +601,7 @@ def test_finalize_archives_runtime_and_retains_wip(tmp_path: Path) -> None:
     assert archive_read.read_artifact(tmp_path, "doc-thing", "spec/doc-thing.md") \
         == b"# the spec\n"
     assert archive_read.read_events(tmp_path, "doc-thing") is not None
-    assert archive_read.read_change_json(tmp_path, "doc-thing") is not None
+    assert archive_read.read_quest_json(tmp_path, "doc-thing") is not None
     assert subprocess.run(
         ["git", "rev-parse", "--verify", "--quiet",
          "refs/imp/artifacts/doc-thing"],
@@ -630,9 +630,9 @@ def test_log_reads_events_from_archive_blob(tmp_path: Path, monkeypatch) -> None
         "created_at": "2026-06-01T00:00:00+00:00", "depends_on": []}))
     sj = tmp_path / "s.json"
     sj.write_text(json.dumps({"id": "logtest", "status": "completed", "step": None}))
-    archive.archive_change(
+    archive.archive_quest(
         tmp_path, "logtest", events_path=events,
-        change_json_path=cj, state_json_path=sj)
+        quest_json_path=cj, state_json_path=sj)
 
     monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
     buf = io.StringIO()
@@ -643,8 +643,8 @@ def test_log_reads_events_from_archive_blob(tmp_path: Path, monkeypatch) -> None
     assert "plan-writer" in out    # rendered from the archive events blob
 
 
-def test_change_meta_resolves_archived_from_archive(tmp_path: Path) -> None:
-    """After abandon (permanent change home rmtree'd, worktree gone), _change_meta
+def test_quest_meta_resolves_archived_from_archive(tmp_path: Path) -> None:
+    """After abandon (permanent change home rmtree'd, worktree gone), _quest_meta
     resolves the Change's metadata from the archive record, not the retired journal."""
     import imp.cli.main as m
 
@@ -658,7 +658,7 @@ def test_change_meta_resolves_archived_from_archive(tmp_path: Path) -> None:
     assert not home.exists()
     assert not (tmp_path / ".imp" / "worktrees" / "meta-one").exists()
 
-    meta = m._change_meta(tmp_path, "meta-one")
+    meta = m._quest_meta(tmp_path, "meta-one")
     assert meta is not None
     assert meta["base_branch"] == "main"
     assert meta["title"] == "Meta One"
@@ -680,9 +680,9 @@ def test_status_all_lists_archived(tmp_path, monkeypatch) -> None:
         "created_at": "2026-06-02T00:00:00+00:00", "depends_on": []}))
     sj = tmp_path / "s.json"
     sj.write_text(json.dumps({"id": "arch01", "status": "completed", "step": None}))
-    archive.archive_change(
+    archive.archive_quest(
         tmp_path, "arch01", events_path=events,
-        change_json_path=cj, state_json_path=sj)
+        quest_json_path=cj, state_json_path=sj)
 
     monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
     buf = io.StringIO()

@@ -20,9 +20,9 @@ def _archive_terminal(tmp_path: Path, quest_id: str, status: str) -> None:
         "created_at": "2026-06-01T00:00:00+00:00", "depends_on": []}))
     sj = tmp_path / f"{quest_id}.state.json"
     sj.write_text(json.dumps({"id": quest_id, "status": status, "step": "merge"}))
-    archive.archive_change(
+    archive.archive_quest(
         tmp_path, quest_id, events_path=events,
-        change_json_path=cj, state_json_path=sj)          # resumable defaults False
+        quest_json_path=cj, state_json_path=sj)          # resumable defaults False
 
 
 def test_rehydrate_resumable_rebuilds_and_loads(tmp_path: Path) -> None:

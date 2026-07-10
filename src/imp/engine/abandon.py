@@ -26,10 +26,10 @@ def tear_down_change(change: Change) -> None:
             agent_id=None, type="change_abandoned", payload={})
         # archive before worktree removal (the runtime files live inside the worktree)
         from imp.engine import archive
-        archive.archive_change(
+        archive.archive_quest(
             control, quest_id,
             events_path=change.events_path,
-            change_json_path=change.quest_dir / "change.json",
+            quest_json_path=change.quest_dir / "change.json",
             state_json_path=change.state_dir / "state.json",
         )
     if materialized:
@@ -55,10 +55,10 @@ def archive_conversation(change: Change) -> None:
         change.event_log().append(
             agent_id=None, type="conversation_archived", payload={})
         from imp.engine import archive
-        archive.archive_change(
+        archive.archive_quest(
             control, quest_id,
             events_path=change.events_path,
-            change_json_path=change.quest_dir / "change.json",
+            quest_json_path=change.quest_dir / "change.json",
             state_json_path=change.state_dir / "state.json",
             steps_dir=change.quest_dir / "steps",
             resumable=True,

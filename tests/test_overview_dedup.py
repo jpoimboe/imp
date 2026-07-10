@@ -39,7 +39,7 @@ def test_scan_quest_homes_missing_state_json(tmp_path: Path) -> None:
     assert scan["noState"].state_json is None
 
 
-def test_scan_quest_homes_drops_malformed_change_json(tmp_path: Path) -> None:
+def test_scan_quest_homes_drops_malformed_quest_json(tmp_path: Path) -> None:
     _seed_control(tmp_path)
     Change.create(tmp_path, title="Bad JSON", quest_id="badJson", base_branch="main")
     change_file = tmp_path / ".imp" / "changes" / "badJson" / "change.json"
@@ -83,17 +83,17 @@ def _archive_completed(control: Path, cid: str) -> None:
         f'{{"id":"{cid}-e0","parent_id":null,"agent_id":null,'
         '"timestamp":"2026-06-01T00:00:09+00:00","type":"step_started",'
         f'"payload":{{"id":"{cid}"}}}}\n'.encode())
-    change_json = control / f"{cid}-change.json"
-    change_json.write_text(json.dumps({
+    quest_json = control / f"{cid}-change.json"
+    quest_json.write_text(json.dumps({
         "id": cid, "title": cid.title(), "base_branch": "main",
         "created_at": "2026-06-01T00:00:00+00:00", "depends_on": [],
         "materialized": True}))
     state_json = control / f"{cid}-state.json"
     state_json.write_text(json.dumps({
         "id": cid, "status": "completed", "step": None, "merge_commit": "c0ffee"}))
-    archive.archive_change(
+    archive.archive_quest(
         control, cid, events_path=events,
-        change_json_path=change_json, state_json_path=state_json)
+        quest_json_path=quest_json, state_json_path=state_json)
 
 
 def _archive_paused(
@@ -104,17 +104,17 @@ def _archive_paused(
         f'{{"id":"{cid}-e0","parent_id":null,"agent_id":null,'
         f'"timestamp":"{last_ts}","type":"step_started",'
         f'"payload":{{"id":"{cid}"}}}}\n'.encode())
-    change_json = control / f"{cid}-change.json"
-    change_json.write_text(json.dumps({
+    quest_json = control / f"{cid}-change.json"
+    quest_json.write_text(json.dumps({
         "id": cid, "title": cid.title(), "base_branch": "main",
         "created_at": "2026-06-02T00:00:00+00:00", "depends_on": [],
         "materialized": False}))
     state_json = control / f"{cid}-state.json"
     state_json.write_text(json.dumps({
         "id": cid, "status": "paused", "step": None}))
-    archive.archive_change(
+    archive.archive_quest(
         control, cid, events_path=events,
-        change_json_path=change_json, state_json_path=state_json)
+        quest_json_path=quest_json, state_json_path=state_json)
 
 
 def test_completed_rows_honors_live_ids(tmp_path: Path) -> None:

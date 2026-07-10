@@ -145,11 +145,11 @@ def test_show_spec_falls_back_after_archive(
         )
     from imp.engine import archive
 
-    archive.archive_change(
+    archive.archive_quest(
         tmp_path,
         _ID,
         events_path=ch.events_path,
-        change_json_path=ch.quest_dir / "change.json",
+        quest_json_path=ch.quest_dir / "change.json",
         state_json_path=ch.state_dir / "state.json",
     )
     # The per-Change artifact ref is RETAINED at archive (spec AC 3).
@@ -477,8 +477,8 @@ def test_show_spec_and_plan_from_wip_ref_when_home_absent(
     )
     sj = tmp_path / "ghost-state.json"
     sj.write_text(json.dumps({"id": "ghost01", "status": "completed", "step": None}))
-    archive.archive_change(
-        tmp_path, "ghost01", events_path=events, change_json_path=cj, state_json_path=sj
+    archive.archive_quest(
+        tmp_path, "ghost01", events_path=events, quest_json_path=cj, state_json_path=sj
     )
 
     assert "WIP-ONLY SPEC" in _run(monkeypatch, tmp_path, "show", "ghost01", "spec")
@@ -563,11 +563,11 @@ def test_show_summary_falls_back_after_archive(
             )
             + "\n"
         )
-    archive.archive_change(
+    archive.archive_quest(
         tmp_path,
         _ID,
         events_path=ch.events_path,
-        change_json_path=ch.quest_dir / "change.json",
+        quest_json_path=ch.quest_dir / "change.json",
         state_json_path=ch.state_dir / "state.json",
     )
     assert _git_wip_present(tmp_path, _ID)
@@ -605,11 +605,11 @@ def test_show_default_card_renders_summary_after_archive(
             )
             + "\n"
         )
-    archive.archive_change(
+    archive.archive_quest(
         tmp_path,
         _ID,
         events_path=ch.events_path,
-        change_json_path=ch.quest_dir / "change.json",
+        quest_json_path=ch.quest_dir / "change.json",
         state_json_path=ch.state_dir / "state.json",
     )
     assert _git_wip_present(tmp_path, _ID)
@@ -821,8 +821,8 @@ def test_show_events_digest_from_archive(
     }))
     sj = tmp_path / "arch-state.json"
     sj.write_text(json.dumps({"id": "arch01", "status": "completed", "step": None}))
-    archive.archive_change(
-        tmp_path, "arch01", events_path=events, change_json_path=cj,
+    archive.archive_quest(
+        tmp_path, "arch01", events_path=events, quest_json_path=cj,
         state_json_path=sj,
     )
     out = _run(monkeypatch, tmp_path, "show", "arch01", "events")

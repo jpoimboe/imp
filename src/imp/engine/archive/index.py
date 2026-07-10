@@ -63,7 +63,7 @@ def quest_ids(conn: sqlite3.Connection) -> list[str]:
     return [r[0] for r in conn.execute("SELECT id FROM changes ORDER BY id")]
 
 
-def has_change(conn: sqlite3.Connection, quest_id: str) -> bool:
+def has_quest(conn: sqlite3.Connection, quest_id: str) -> bool:
     return conn.execute(
         "SELECT 1 FROM changes WHERE id = ?", (quest_id,)).fetchone() is not None
 

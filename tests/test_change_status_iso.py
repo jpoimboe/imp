@@ -46,9 +46,9 @@ def test_journal_last_iso_returns_last_activity(tmp_path: Path):
         "created_at": "2026-06-01T00:00:00+00:00", "depends_on": []}))
     sj = tmp_path / "s.json"
     sj.write_text(json.dumps({"id": "some-id", "status": "completed", "step": None}))
-    archive.archive_change(
+    archive.archive_quest(
         tmp_path, "some-id", events_path=events,
-        change_json_path=cj, state_json_path=sj)
+        quest_json_path=cj, state_json_path=sj)
     assert _journal_last_iso(tmp_path, "some-id") == "2026-06-05T12:00:00+00:00"
 
 
@@ -71,9 +71,9 @@ def test_journal_last_iso_reads_index_not_blob(tmp_path: Path, monkeypatch) -> N
         "created_at": "2026-06-01T00:00:00+00:00", "depends_on": []}))
     sj = tmp_path / "s.json"
     sj.write_text(json.dumps({"id": "some-id", "status": "completed", "step": None}))
-    archive.archive_change(
+    archive.archive_quest(
         tmp_path, "some-id", events_path=events,
-        change_json_path=cj, state_json_path=sj)
+        quest_json_path=cj, state_json_path=sj)
 
     def _boom_get(self, digest):
         raise AssertionError("_journal_last_iso must not read an event blob")

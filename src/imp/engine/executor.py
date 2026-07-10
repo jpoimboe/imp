@@ -683,10 +683,10 @@ def _complete(change: Change, state: State, log: EventLog) -> RunResult:
           {"base": change.base_branch, "commit": state.merge_commit})
     merge_queue.pop_and_wake(change.control_root, change.id, change.base_branch)
     from imp.engine import archive
-    archive.archive_change(
+    archive.archive_quest(
         change.control_root, change.id,
         events_path=change.events_path,
-        change_json_path=change.quest_dir / "change.json",
+        quest_json_path=change.quest_dir / "change.json",
         state_json_path=change.state_dir / "state.json",
     )
     shutil.rmtree(change.quest_dir, ignore_errors=True)

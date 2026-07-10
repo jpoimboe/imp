@@ -49,3 +49,17 @@ def test_discover_exposes_quest_info_and_list_quests() -> None:
     assert "list_quests" in names
     assert "Change" "Info" not in names    # split literal so the rename sweep can't rewrite this guard
     assert "list_" "changes" not in names  # same
+
+
+def test_build_record_uses_quest_meta_key() -> None:
+    from imp.engine.archive.record import build_record
+    rec = build_record({"id": "kobe47", "title": "T", "base_branch": "main"}, {}, "deadbeef")
+    assert "quest_meta" in rec
+    assert "change_" "meta" not in rec  # split literal so rename sweep can't rewrite this guard
+    assert rec["quest_meta"]["id"] == "kobe47"
+
+
+def test_archive_read_exposes_read_quest_json() -> None:
+    from imp.engine.archive import read as ar
+    assert hasattr(ar, "read_quest_json")
+    assert not hasattr(ar, "read_change_" "json")  # split literal: quest_json broken so rename sweep can't rewrite this guard

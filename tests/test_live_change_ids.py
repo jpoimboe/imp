@@ -28,12 +28,12 @@ def _archive_one(control: Path, cid: str) -> None:
         "created_at": "2026-06-01T00:00:00+00:00", "depends_on": []}))
     sj = control / f"{cid}-state.json"
     sj.write_text(json.dumps({"id": cid, "status": "completed", "step": None}))
-    archive.archive_change(
+    archive.archive_quest(
         control, cid, events_path=events,
-        change_json_path=cj, state_json_path=sj)
+        quest_json_path=cj, state_json_path=sj)
 
 
-def test_live_quest_ids_lists_only_homes_with_change_json(tmp_path: Path) -> None:
+def test_live_quest_ids_lists_only_homes_with_quest_json(tmp_path: Path) -> None:
     _live_home(tmp_path, "wibo10")
     _live_home(tmp_path, "kobe47")
     # A stray dir without change.json and a hidden dir are both excluded.

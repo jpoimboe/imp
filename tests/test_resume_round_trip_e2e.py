@@ -9,7 +9,7 @@ import pytest
 from imp.agents.runner import AgentInvocation, AgentRunner, Event, Message, TextBlock
 from imp.agents.transcript import Transcript
 from imp.engine.abandon import archive_conversation
-from imp.engine.archive.read import rehydrate_change
+from imp.engine.archive.read import rehydrate_quest
 from imp.engine.change import Change
 from imp.engine.executor import RunResult, run_change
 from imp.engine.state import State
@@ -42,7 +42,7 @@ async def test_paused_conversation_round_trips_and_replays_on_resume(
     archive_conversation(ch)
     assert not (tmp_path / ".imp" / "changes" / "conv").exists()
 
-    quest_dir = rehydrate_change(tmp_path, "conv")
+    quest_dir = rehydrate_quest(tmp_path, "conv")
     restored = quest_dir / "steps" / "p" / "s" / "transcript.jsonl"
     assert restored.read_bytes() == seeded_bytes
 

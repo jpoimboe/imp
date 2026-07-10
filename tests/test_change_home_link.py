@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from imp.engine.change import Change, link_change_home
+from imp.engine.change import Change, link_quest_home
 from tests.conftest import _seed_control
 
 
@@ -18,7 +18,7 @@ def _layout(tmp_path: Path) -> tuple[Path, Path]:
 
 def test_creates_id_scoped_symlink_not_blanket(tmp_path: Path) -> None:
     worktree, quest_dir = _layout(tmp_path)
-    link_change_home(worktree, quest_dir)
+    link_quest_home(worktree, quest_dir)
     link = worktree / ".imp" / "changes" / "abc"
     assert link.is_symlink()
     assert link.resolve() == quest_dir.resolve()
@@ -30,8 +30,8 @@ def test_creates_id_scoped_symlink_not_blanket(tmp_path: Path) -> None:
 
 def test_idempotent_reassert_is_noop(tmp_path: Path) -> None:
     worktree, quest_dir = _layout(tmp_path)
-    link_change_home(worktree, quest_dir)
-    link_change_home(worktree, quest_dir)          # second call must not raise
+    link_quest_home(worktree, quest_dir)
+    link_quest_home(worktree, quest_dir)          # second call must not raise
     link = worktree / ".imp" / "changes" / "abc"
     assert link.is_symlink()
     assert link.resolve() == quest_dir.resolve()
@@ -47,7 +47,7 @@ def test_legacy_phantom_folds_into_home_then_links(tmp_path: Path) -> None:
     (phantom / "artifacts" / "spec").mkdir(parents=True)
     (phantom / "artifacts" / "spec" / "s.md").write_text("phantom-spec\n")
 
-    link_change_home(worktree, quest_dir)
+    link_quest_home(worktree, quest_dir)
 
     link = worktree / ".imp" / "changes" / "abc"
     assert link.is_symlink() and link.resolve() == quest_dir.resolve()
@@ -64,7 +64,7 @@ def test_stale_symlink_is_replaced(tmp_path: Path) -> None:
     link = worktree / ".imp" / "changes" / "abc"
     link.parent.mkdir(parents=True, exist_ok=True)
     link.symlink_to(stale_target)
-    link_change_home(worktree, quest_dir)
+    link_quest_home(worktree, quest_dir)
     assert link.is_symlink()
     assert link.resolve() == quest_dir.resolve()
 

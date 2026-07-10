@@ -28,15 +28,15 @@ def test_list_builtin_all_flag_includes_archived_completed(tmp_path: Path, capsy
     for cid, status in (("doneid", "completed"), ("deadid", "abandoned")):
         events = tmp_path / f"{cid}-e.jsonl"
         events.write_text("")
-        change_json = tmp_path / f"{cid}-c.json"
-        change_json.write_text(json.dumps({
+        quest_json = tmp_path / f"{cid}-c.json"
+        quest_json.write_text(json.dumps({
             "id": cid, "title": f"Title {cid}", "base_branch": "main",
             "created_at": "2026-06-01T00:00:00+00:00", "depends_on": []}))
         state_json = tmp_path / f"{cid}-s.json"
         state_json.write_text(json.dumps({"id": cid, "status": status, "step": "merge"}))
-        archive.archive_change(
+        archive.archive_quest(
             tmp_path, cid, events_path=events,
-            change_json_path=change_json, state_json_path=state_json)
+            quest_json_path=quest_json, state_json_path=state_json)
     change = SimpleNamespace(control_root=tmp_path)
 
     assert handle_slash_line("/list", change=change, output_fn=[].append) is REPROMPT
@@ -66,15 +66,15 @@ def test_search_builtin_prints_matching_archived_change(tmp_path: Path) -> None:
     from imp.engine import archive
     events = tmp_path / "e.jsonl"
     events.write_text("")
-    change_json = tmp_path / "c.json"
-    change_json.write_text(json.dumps({
+    quest_json = tmp_path / "c.json"
+    quest_json.write_text(json.dumps({
         "id": "darkid", "title": "Dark mode toggle", "base_branch": "main",
         "created_at": "2026-06-01T00:00:00+00:00", "depends_on": []}))
     state_json = tmp_path / "s.json"
     state_json.write_text(json.dumps({"id": "darkid", "status": "abandoned", "step": "spec"}))
-    archive.archive_change(
+    archive.archive_quest(
         tmp_path, "darkid", events_path=events,
-        change_json_path=change_json, state_json_path=state_json)
+        quest_json_path=quest_json, state_json_path=state_json)
 
     change = SimpleNamespace(control_root=tmp_path)
     out: list[str] = []
@@ -121,9 +121,9 @@ def test_resume_builtin_rehydrates_resumable_match(tmp_path: Path) -> None:
         "materialized": False}))
     sj = tmp_path / "s.json"
     sj.write_text(json.dumps({"id": "conv1", "status": "paused", "step": "threshold"}))
-    archive.archive_change(
+    archive.archive_quest(
         tmp_path, "conv1", events_path=events,
-        change_json_path=cj, state_json_path=sj, resumable=True)
+        quest_json_path=cj, state_json_path=sj, resumable=True)
 
     change = SimpleNamespace(control_root=tmp_path)
     out: list[str] = []
@@ -145,9 +145,9 @@ def test_resume_builtin_refuses_non_resumable(tmp_path: Path) -> None:
         "created_at": "2026-06-01T00:00:00+00:00", "depends_on": []}))
     sj = tmp_path / "s.json"
     sj.write_text(json.dumps({"id": "done1", "status": "completed", "step": "merge"}))
-    archive.archive_change(
+    archive.archive_quest(
         tmp_path, "done1", events_path=events,
-        change_json_path=cj, state_json_path=sj)                    # resumable False
+        quest_json_path=cj, state_json_path=sj)                    # resumable False
 
     change = SimpleNamespace(control_root=tmp_path)
     out: list[str] = []
@@ -187,9 +187,9 @@ def test_resume_builtin_ambiguous_match(tmp_path: Path) -> None:
             "created_at": "2026-06-01T00:00:00+00:00", "depends_on": []}))
         sj = tmp_path / f"{cid}s.json"
         sj.write_text(json.dumps({"id": cid, "status": "completed", "step": "merge"}))
-        archive.archive_change(
+        archive.archive_quest(
             tmp_path, cid, events_path=events,
-            change_json_path=cj, state_json_path=sj)
+            quest_json_path=cj, state_json_path=sj)
 
     change = SimpleNamespace(control_root=tmp_path)
     out: list[str] = []
@@ -256,15 +256,15 @@ def test_search_builtin_matches_archived_change_by_body_term(tmp_path: Path) -> 
             "content": [{"type": "text", "text": "the 300s deadline is enforced"}],
             "stop_reason": "end_turn",
             "usage": {"input_tokens": 1, "output_tokens": 1}}}}) + "\n")
-    change_json = tmp_path / "c.json"
-    change_json.write_text(json.dumps({
+    quest_json = tmp_path / "c.json"
+    quest_json.write_text(json.dumps({
         "id": "quietid", "title": "", "base_branch": "main",
         "created_at": "2026-06-01T00:00:00+00:00", "depends_on": []}))
     state_json = tmp_path / "s.json"
     state_json.write_text(json.dumps({"id": "quietid", "status": "abandoned", "step": "spec"}))
-    archive.archive_change(
+    archive.archive_quest(
         tmp_path, "quietid", events_path=events,
-        change_json_path=change_json, state_json_path=state_json)
+        quest_json_path=quest_json, state_json_path=state_json)
 
     change = SimpleNamespace(control_root=tmp_path)
     out: list[str] = []

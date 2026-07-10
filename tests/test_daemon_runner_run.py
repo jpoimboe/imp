@@ -322,9 +322,9 @@ async def test_run_daemon_reaps_archived_homes_at_startup(tmp_path: Path) -> Non
         '{"id":"e0","parent_id":null,"agent_id":null,'
         '"timestamp":"2026-06-01T00:00:01+00:00","type":"change_created",'
         '"payload":{"id":"archived-leftover"}}\n')
-    archive.archive_change(
+    archive.archive_quest(
         tmp_path, cid, events_path=home / "events.jsonl",
-        change_json_path=home / "change.json",
+        quest_json_path=home / "change.json",
         state_json_path=home / "state" / "state.json")
 
     shutdown = anyio.Event()

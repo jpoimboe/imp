@@ -1313,7 +1313,7 @@ def _title_for_id(control: Path, quest_id: str) -> str | None:
             return str(json.loads(cj.read_bytes())["title"])
         except (json.JSONDecodeError, KeyError):
             return None
-    raw = archive_read.read_change_json(control, quest_id)
+    raw = archive_read.read_quest_json(control, quest_id)
     if raw is None:
         return None
     try:
@@ -1450,13 +1450,13 @@ def _resolve_intent(events: list[dict[str, Any]]) -> str | None:
     return _first_genuine_human_turn(events)
 
 
-def _change_meta(control: Path, quest_id: str) -> dict[str, Any] | None:
+def _quest_meta(control: Path, quest_id: str) -> dict[str, Any] | None:
     cdir = _quest_home(control, quest_id)
     raw: bytes | None
     if (cdir / "change.json").exists():
         raw = (cdir / "change.json").read_bytes()
     else:
-        raw = archive_read.read_change_json(control, quest_id)
+        raw = archive_read.read_quest_json(control, quest_id)
     if raw is None:
         return None
     try:
@@ -1556,7 +1556,7 @@ def _change_card(control: Path, quest_id: str, *, now: datetime) -> list[str]:
         f"created:       {change_row.format_timestamp(created)} "
         f"({change_row.relative_age(created, now=now)})")
     lines.append(f"last activity: {change_row.relative_age(last, now=now)}")
-    meta = _change_meta(control, quest_id) or {}
+    meta = _quest_meta(control, quest_id) or {}
     if meta.get("base_branch"):
         lines.append(f"base_branch:   {meta['base_branch']}")
     if meta.get("depends_on"):
@@ -2161,7 +2161,7 @@ def _rehydrate_resumable(control: Path, quest_id: str) -> Change | None:
     if rec is None or not rec.get("resumable"):
         return None
     try:
-        archive_read.rehydrate_change(control, quest_id)
+        archive_read.rehydrate_quest(control, quest_id)
         return Change.load(control, quest_id)
     except (FileExistsError, LoadError, LoadErrors):
         return None
@@ -2212,13 +2212,13 @@ _Row = tuple[str, str, str, str, str, str, str | None, str | None]
 class _HomeScan(NamedTuple):
     """One live change home parsed exactly once for the overview's row builders.
 
-    change_json/state_json are the raw bytes (state_json is None when a home has
+    quest_json/state_json are the raw bytes (state_json is None when a home has
     no state.json yet); meta is the parsed change.json (homes whose change.json
     is missing or malformed are dropped from the scan, so meta is always valid);
     has_user_message records whether events.jsonl holds any user_message event,
     the conversed signal the shared backlog predicate consumes."""
     quest_id: str
-    change_json: bytes
+    quest_json: bytes
     state_json: bytes | None
     meta: dict[str, Any]
     last_iso: str
@@ -2252,8 +2252,8 @@ def _scan_quest_homes(control: Path) -> list[_HomeScan]:
     for quest_id in _list_quest_homes(control):
         cdir = _quest_home(control, quest_id)
         try:
-            change_json = (cdir / "change.json").read_bytes()
-            meta = json.loads(change_json)
+            quest_json = (cdir / "change.json").read_bytes()
+            meta = json.loads(quest_json)
         except (FileNotFoundError, json.JSONDecodeError):
             continue
         try:
@@ -2263,11 +2263,11 @@ def _scan_quest_homes(control: Path) -> list[_HomeScan]:
         last_iso = _last_event_iso(cdir / "events.jsonl") or ""
         has_um = _events_have_user_message(cdir / "events.jsonl")
         scanned.append(
-            _HomeScan(quest_id, change_json, state_json, meta, last_iso, has_um))
+            _HomeScan(quest_id, quest_json, state_json, meta, last_iso, has_um))
     return scanned
 
 
-def _status_row(quest_id: str, state_json: bytes, change_json: bytes,
+def _status_row(quest_id: str, state_json: bytes, quest_json: bytes,
                 last_activity: str) -> _Row | None:
     """Pure (id, status, step, last_activity, title, created_at) extractor, fed
     by either worktree file bytes or archive bytes. The archived state.json and
@@ -2277,7 +2277,7 @@ def _status_row(quest_id: str, state_json: bytes, change_json: bytes,
     crash the whole `imp list` listing (callers skip None)."""
     try:
         st = json.loads(state_json)
-        meta = json.loads(change_json)
+        meta = json.loads(quest_json)
         return (quest_id, st["status"], st.get("step") or "-", last_activity,
                 meta["title"], meta["created_at"], st.get("step_label"),
                 st.get("phase_label"))
@@ -2290,7 +2290,7 @@ def _row_for_id(control: Path, quest_id: str) -> _Row | None:
     # archive_read returns bytes | None; the live change-home branch always finds
     # the files. Annotate so the None-guard below stays reachable (not dead code).
     state_json: bytes | None
-    change_json: bytes | None
+    quest_json: bytes | None
     if (cdir / "change.json").exists():
         # A change home mid-creation has change.json written but state.json not
         # yet (Change.create is not atomic across the two files). The daemon's
@@ -2298,20 +2298,20 @@ def _row_for_id(control: Path, quest_id: str) -> _Row | None:
         # rather than crashing the whole listing.
         try:
             state_json = (cdir / "state" / "state.json").read_bytes()
-            change_json = (cdir / "change.json").read_bytes()
+            quest_json = (cdir / "change.json").read_bytes()
         except FileNotFoundError:
             return None
         last = _last_event_iso(cdir / "events.jsonl") or ""
     else:
         state_json = archive_read.read_state_json(control, quest_id)
-        change_json = archive_read.read_change_json(control, quest_id)
-        if state_json is None or change_json is None:
+        quest_json = archive_read.read_quest_json(control, quest_id)
+        if state_json is None or quest_json is None:
             return None
         last = _journal_last_iso(control, quest_id) or ""
-    row = _status_row(quest_id, state_json, change_json, last)
+    row = _status_row(quest_id, state_json, quest_json, last)
     if row is None:
         return None
-    materialized = json.loads(change_json).get("materialized", True)
+    materialized = json.loads(quest_json).get("materialized", True)
     status = resolve_display_status(row[1], cdir, materialized=materialized)
     return (row[0], status, *row[2:])
 
@@ -2326,7 +2326,7 @@ def _status_rows(control: Path, scanned: list[_HomeScan] | None = None) -> list[
         if _is_backlog_home(h.meta, conversed=h.has_user_message,
                             lock_live=lambda: lock_is_live(cdir / "lock")):  # noqa: B023
             continue  # un-materialized, never-conversed, unlocked seed -> Backlog
-        row = _status_row(h.quest_id, h.state_json, h.change_json, h.last_iso)
+        row = _status_row(h.quest_id, h.state_json, h.quest_json, h.last_iso)
         if row is None:
             continue
         status = resolve_display_status(

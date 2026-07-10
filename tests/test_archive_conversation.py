@@ -22,7 +22,7 @@ def test_archive_conversation_materialized_tears_down_resumable(tmp_path: Path) 
     assert not (tmp_path / ".imp" / "changes" / "conv").exists()            # live home dropped
 
     # Archived, resumable, NOT abandoned.
-    rec = archive_read.read_change_json(tmp_path, "conv")
+    rec = archive_read.read_quest_json(tmp_path, "conv")
     assert rec is not None
     assert archive_read.status_of(tmp_path, "conv") == "paused"             # not "abandoned"
     events = archive_read.read_events(tmp_path, "conv")
@@ -44,7 +44,7 @@ def test_archive_conversation_unmaterialized_draft_has_no_worktree(tmp_path: Pat
     assert full is not None
     assert full["resumable"] is True
     assert archive_read.status_of(tmp_path, "draft") == "paused"
-    assert full["change_meta"]["materialized"] is False        # faithful draft state preserved
+    assert full["quest_meta"]["materialized"] is False        # faithful draft state preserved
 
 
 def test_archive_conversation_captures_steps_subtree(tmp_path: Path) -> None:

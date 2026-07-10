@@ -109,7 +109,7 @@ def handle_slash_line(
         if rec is None or not rec.get("resumable"):
             output_fn(f"{target} is not resumable.")
             return REPROMPT
-        archive_read.rehydrate_change(control, target)
+        archive_read.rehydrate_quest(control, target)
         output_fn(f"Rehydrated {target}; continue it with `imp resume {target}`.")
         return REPROMPT
 

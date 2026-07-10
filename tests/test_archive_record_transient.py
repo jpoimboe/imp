@@ -19,7 +19,7 @@ import pytest
 from imp.engine.archive import record
 
 
-def _change_meta() -> dict:
+def _quest_meta() -> dict:
     return {
         "id": "alpha",
         "title": "Alpha",
@@ -30,7 +30,7 @@ def _change_meta() -> dict:
 
 def _rec() -> dict:
     return record.build_record(
-        _change_meta(), {"id": "alpha", "status": "completed"}, "hash123")
+        _quest_meta(), {"id": "alpha", "status": "completed"}, "hash123")
 
 
 def test_read_record_recovers_from_transient_head_drop(
