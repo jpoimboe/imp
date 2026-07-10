@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from imp.cli.main import _build_parser
+
+_ASSETS = Path("src/imp/assets/workflows/imp")
 
 
 def _help_for(cmd: str, capsys) -> str:
@@ -64,3 +68,26 @@ def test_tool_descriptions_name_quest() -> None:
     assert "switch this Quest into it" in reg["create_and_enter_worktree"].description
     assert "; the Quest's " in reg["glob"].description
     assert "; the Quest's " in reg["grep"].description
+
+
+def test_mental_model_primer_names_quest() -> None:
+    text = (_ASSETS / "skills/agent/imp-mental-model.md").read_text()
+    assert "## Quest and its home" in text
+    assert "A **Quest** is one unit of work imp tracks from idea to merge." in text
+    assert "per-quest home on disk at " in text
+    assert "**Change**" not in text
+    assert "## Change and its home" not in text
+
+
+def test_reviewer_prompts_label_quest_title() -> None:
+    for name in ("agents/plan-reviewer.md", "agents/spec-reviewer.md"):
+        text = (_ASSETS / name).read_text()
+        assert "Quest title (user's starting intent): `{{ change.title }}`" in text
+        assert "Change title" not in text
+
+
+def test_finalize_prompt_defers_to_backlog_quest() -> None:
+    text = (_ASSETS / "agents/finalize.md").read_text()
+    assert "group related items into one Quest" in text
+    assert "hand it to a new backlog Quest." in text
+    assert "backlog Change" not in text

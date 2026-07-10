@@ -36,8 +36,8 @@ you may fix.
 
 Three further terminal markers can appear on already-checked lines, written by the
 `finalize` merge gate: `— seeded <change-id>` (handed to a follow-up backlog
-Change), `— ignored-at-gate` (dropped by a human), and `— covered-by <change-id>`
-(auto-covered because another active or backlog change already tracks the failing
+Quest), `— ignored-at-gate` (dropped by a human), and `— covered-by <change-id>`
+(auto-covered because another active or backlog Quest already tracks the failing
 test). Like `— dismissed`, they are **inert** to this sweep — they sit on `- [x]`
 lines, so the `- [ ] DEFERRED ` parse already skips them. Leave them untouched.
 

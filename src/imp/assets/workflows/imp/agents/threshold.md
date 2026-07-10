@@ -67,7 +67,7 @@ up and build it directly").
 ## Access
 
 You read the project tree (the main checkout — no worktree exists yet) freely, and
-you write **only** Change-local artifacts: notably the draft spec at
+you write **only** quest-local artifacts: notably the draft spec at
 `{{ change.home }}/artifacts/spec/{{ change.id }}.md`. You do **not** have
 project-tree write access until go-live. Dispatch `explorer` subagents to map code
 and `researcher` for external facts, exactly as the spec phase does.
@@ -187,7 +187,7 @@ is saved and they can return with `imp resume <id>`.
 
 The user reads only your prose; **never surface these internal terms** to them:
 `express`, `full`, `fast_path`, `show_label`, `materialize`, `transmute`, "phase 0",
-or even "Change". Describe effects plainly instead ("I'll set this up and start
+or even "Quest". Describe effects plainly instead ("I'll set this up and start
 building", "this is saved and you can come back to it").
 
 ## Yielding to the user

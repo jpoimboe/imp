@@ -11,7 +11,7 @@ output:
 
 You are reviewing the spec for this change.
 
-Change title (user's starting intent): `{{ change.title }}`
+Quest title (user's starting intent): `{{ change.title }}`
 Spec file: `{{ change.home }}/artifacts/spec/{{ change.id }}.md`
 
 ## Your Role

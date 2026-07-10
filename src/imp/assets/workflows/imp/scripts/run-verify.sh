@@ -6,7 +6,7 @@
 #          cheap gate (lint + typecheck + fast tests); runs at the frequent
 #          per-plan gate (verify).
 #   slow → IMP_TEST_CMD_SLOW under IMP_TEST_CMD_SLOW_TIMEOUT (default 300s). The
-#          complete run (a superset of fast); runs once per Change at
+#          complete run (a superset of fast); runs once per Quest at
 #          integration-verify. When IMP_TEST_CMD_SLOW is empty it falls back to
 #          IMP_TEST_CMD_FAST under the slow timeout.
 #
@@ -35,7 +35,7 @@
 # overlay_engine_env and injected into script-gate env by the engine (all
 # IMP_-prefixed, so the sandbox allowlist passes them through unchanged).
 #
-# Script gates run with cwd set to the Change's tracked workflow dir; cd into the
+# Script gates run with cwd set to the Quest's tracked workflow dir; cd into the
 # project tree (IMP_PROJECT_ROOT, set by the engine) first.
 set -euo pipefail
 cd "${IMP_PROJECT_ROOT:?IMP_PROJECT_ROOT not set by engine}"

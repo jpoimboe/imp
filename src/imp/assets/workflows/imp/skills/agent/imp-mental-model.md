@@ -2,28 +2,28 @@
 
 The stable primer for how imp is organized. Load this when you need the shape of
 imp itself; load `imp-introspect` to derive a specific answer from live state.
-Everything specific (the live workflow, what changes exist) is read fresh — this
+Everything specific (the live workflow, what Quests exist) is read fresh — this
 file is only the durable picture.
 
-## Change and its home
+## Quest and its home
 
-A **Change** is one unit of work imp tracks from idea to merge. Each Change has a
-per-change home on disk at `.imp/quests/<id>/` holding its spec, plans, events,
+A **Quest** is one unit of work imp tracks from idea to merge. Each Quest has a
+per-quest home on disk at `.imp/quests/<id>/` holding its spec, plans, events,
 and state — its whole record lives there.
 
 ## Statuses
 
-A Change carries one at-rest status: `new`, `paused`, `saved`, `completed`,
+A Quest carries one at-rest status: `new`, `paused`, `saved`, `completed`,
 `merge_blocked`, `abandoned`. `running` is **derived** — a live process holds the
-change's lock — and is never stored. A **new** or **paused** Change that has not
+Quest's lock — and is never stored. A **new** or **paused** Quest that has not
 been built yet (un-materialized) is shown to the user as **draft**.
 
 ## Zones: active list, Backlog, archive
 
-Where a Change appears is **derived** — never a separate status string. Two facts
+Where a Quest appears is **derived** — never a separate status string. Two facts
 decide it: whether it has been **materialized**, and its **origin**.
 
-- **Active list** — Changes in flight, plus un-materialized **drafts**: a fresh
+- **Active list** — Quests in flight, plus un-materialized **drafts**: a fresh
   `imp new` draft has `origin: draft`, so it shows here relabeled `draft`, not in
   the Backlog.
 - **Backlog** — un-materialized **ideas / follow-ups** (`origin` of `idea` or
@@ -35,15 +35,15 @@ decide it: whether it has been **materialized**, and its **origin**.
 
 A draft has **no branch and no worktree** until the user builds it. Going live
 calls `create_and_enter_worktree`, which forks a fresh branch and worktree from
-the base branch's current tip and switches the Change into it. Before that, a
+the base branch's current tip and switches the Quest into it. Before that, a
 draft is just a conversation and its artifacts on disk.
 
 ## Entry points and what happens to a left draft
 
-- `imp new` — start a fresh change; a left draft stays in the active list, shown
+- `imp new` — start a fresh Quest; a left draft stays in the active list, shown
   as a `draft` (not the Backlog), resumable later.
 - `imp chat` — open the threshold conversation.
-- `imp resume <id>` — pick a parked or left Change back up.
+- `imp resume <id>` — pick a parked or left Quest back up.
 
 When a phase-0 conversation is left, its fate depends on what happened:
 
@@ -60,11 +60,11 @@ archived).
 
 ## Core vocabulary
 
-- **spec** — what the change must accomplish.
+- **spec** — what the Quest must accomplish.
 - **plan** — the step-by-step implementation a coder executes.
 - **phase** — a stage of the workflow (threshold, spec, plan, implement,
   integrate).
 - **step** — one agent or gate run inside a phase.
 - **lane** — a model tier a step runs at.
-- **workflow** — the ordered phases/steps imp drives a change through, defined in
-  the change's `workflow/workflow.yaml`.
+- **workflow** — the ordered phases/steps imp drives a Quest through, defined in
+  the Quest's `workflow/workflow.yaml`.
