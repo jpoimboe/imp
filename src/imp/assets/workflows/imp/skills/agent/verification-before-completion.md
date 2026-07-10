@@ -131,5 +131,3 @@ Skip any step = lying, not verifying
 Run the command via `bash`. Read the output. THEN claim the result or call `complete_step`.
 
 This is non-negotiable.
-
-> Ported from superpowers (MIT, Jesse Vincent): verification-before-completion.

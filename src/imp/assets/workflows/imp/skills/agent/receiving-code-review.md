@@ -209,5 +209,3 @@ You understand 1,2,3,6. Unclear on 4,5.
 Verify. Question. Then implement.
 
 No performative agreement. Technical rigor always.
-
-> Ported from superpowers (MIT, Jesse Vincent): receiving-code-review.

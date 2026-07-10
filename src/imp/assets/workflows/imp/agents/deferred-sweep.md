@@ -242,7 +242,3 @@ dismissed. When a subagent's final message reports
 `NEEDS_CONTEXT` or `BLOCKED`, re-pack the full context into a fresh
 `sub_agent(...)` dispatch and re-dispatch — the next subagent inherits only what you
 write.
-
----
-
-> Ported from superpowers (MIT, Jesse Vincent): subagent-driven-development.

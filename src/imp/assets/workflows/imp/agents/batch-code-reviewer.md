@@ -184,7 +184,3 @@ Call `complete_step` with:
 - `status`: `Success` (or `Error` only if you could not complete the review).
 - `verdict`: `task_gap` if any kept finding blocks merge, else `approve`.
 - `findings`: the structured prose above, with your keep/dismiss/defer decisions.
-
----
-
-> Ported from superpowers (MIT, Jesse Vincent): requesting-code-review.

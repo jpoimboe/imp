@@ -555,7 +555,3 @@ current `{{ vars.plan_total }}` (see *First-run plan_total estimate*).
 (On a **minors-integration pass** — `blocking: false` — the `complete_step` call
 is already specified in the *Minors-integration pass* section above; follow that
 section and do not also run the steps here.)
-
----
-
-> Ported from superpowers (MIT, Jesse Vincent): writing-plans.

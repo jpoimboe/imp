@@ -641,5 +641,3 @@ Otherwise → not TDD
 ```
 
 No exceptions without the user's permission.
-
-> Ported from superpowers (MIT, Jesse Vincent): test-driven-development.

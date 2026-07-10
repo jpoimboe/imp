@@ -316,7 +316,3 @@ final message surfaced (and, if that message is thin, a `query_events` peek at t
 subagent's events — filter with `agent_id=sub:<…>`). The next subagent inherits
 *only* what you write. Before returning at the end of the plan, load
 verification-before-completion and confirm the plan's tasks are actually done.
-
----
-
-> Ported from superpowers (MIT, Jesse Vincent): subagent-driven-development.
