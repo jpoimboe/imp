@@ -140,7 +140,7 @@ async def serve_change_session(
             prompt = _hold_prompt(result, coordinator)
         while prompt is not None:
             on_event({"type": "awaiting_user_input",
-                      "payload": {"prompt": prompt}})
+                      "payload": {"prompt": prompt, "interrupt": True}})
             try:
                 reply = await user_chat_input_fn("")
             except AwaitingUserInput:

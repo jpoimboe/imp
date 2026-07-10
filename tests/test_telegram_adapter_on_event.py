@@ -317,6 +317,48 @@ def test_replayed_event_marks_alert_all_seen_even_when_alert_all_is_off() -> Non
     assert alert.seen("k3f9qa", "L1") is True  # marked even though alert-all is off
 
 
+INTERRUPT_GATE = {
+    "id": "I1", "type": "awaiting_user_input", "timestamp": TS,
+    "payload": {"prompt": "interrupted — type to redirect", "interrupt": True},
+    "change": {"id": "k3f9qa", "title": "Dark mode"},
+}
+
+
+def test_subscribed_interrupt_gate_streams_silent_with_reply_handle() -> None:
+    sent: list = []
+    adapter = _adapter(sent)  # subscribed to k3f9qa
+    adapter.on_event(INTERRUPT_GATE)
+    assert len(sent) == 1
+    text, silent = sent[0]
+    assert silent is True                 # streamed quietly — no phone buzz
+    assert text.endswith("↩ @k3f9qa")     # reply handle intact: still steerable
+    assert "needs your input" in text
+    assert adapter._handle_to_change == {"k3f9qa": "k3f9qa"}
+
+
+def test_alert_all_on_drops_unsubscribed_interrupt_gate() -> None:
+    sent: list = []
+    adapter = _adapter(
+        sent, subscriptions=Subscriptions(), alert_all=_alert_all_on())
+    adapter.on_event(INTERRUPT_GATE)
+    assert sent == []                     # silent tier is suppressed on alert-all
+    assert adapter._handle_to_change == {}
+    assert adapter._msg_to_change == {}
+
+
+def test_genuine_gate_still_buzzes_on_both_paths() -> None:
+    # LOUD_EVENT carries no interrupt flag → genuine yield → buzz, unchanged.
+    subscribed: list = []
+    _adapter(subscribed).on_event(LOUD_EVENT)
+    assert subscribed and subscribed[0][1] is False   # loud on subscribed path
+
+    alerted: list = []
+    _adapter(
+        alerted, subscriptions=Subscriptions(), alert_all=_alert_all_on(),
+    ).on_event(LOUD_EVENT)
+    assert alerted and alerted[0][1] is False          # loud on alert-all path
+
+
 def test_subscribed_change_merged_is_header_and_done_no_handle() -> None:
     sent: list = []
     adapter = _adapter(sent, subscriptions=_subs("k3f9qa"))

@@ -1393,9 +1393,12 @@ async def test_resume_prompt_target_holds_before_running_agent(
                 await anyio.sleep(0.02)
         # The hold prompt is surfaced FIRST — the agent has not run yet.
         assert calls["n"] == 0
-        prompts = [e["payload"]["prompt"] for e in received
-                   if e.get("type") == "awaiting_user_input"]
+        gates = [e for e in received if e.get("type") == "awaiting_user_input"]
+        prompts = [e["payload"]["prompt"] for e in gates]
         assert prompts[-1] == daemon._RESUME_PROMPT
+        # The hold-loop resteer prompt is self-inflicted: flag it so Telegram
+        # curation silences it instead of buzzing the operator.
+        assert gates[-1]["payload"]["interrupt"] is True
         await client.send_input("steer me")
         with anyio.fail_after(5):
             while "r" not in result:

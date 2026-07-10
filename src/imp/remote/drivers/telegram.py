@@ -23,7 +23,7 @@ from typing import Any
 # Delivery tiers (spec §2). buzz = input prompts + status transitions (phone buzzes);
 # silent = narrative / script output / step dividers (streams quietly); everything else drops.
 _BUZZ = frozenset({
-    "awaiting_user_input", "merge_blocked", "script_blocked", "change_merged",
+    "merge_blocked", "script_blocked", "change_merged",
     "error",
 })
 _SILENT = frozenset({
@@ -172,6 +172,9 @@ def curate(event_type: Any, payload: Mapping[str, Any]) -> str | None:
         return "buzz"
     if event_type == "workflow_paused":
         return "silent" if _pause_is_silent(payload) else "buzz"
+    if event_type == "awaiting_user_input":
+        # interrupt=True is self-inflicted (silent); flag absent/false is a genuine yield (buzz).
+        return "silent" if payload.get("interrupt") else "buzz"
     if event_type in _BUZZ:
         return "buzz"
     if event_type in _SILENT:
