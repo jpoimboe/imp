@@ -7,8 +7,9 @@ PARTIALS = Path("src/imp/assets/workflows/imp/partials")
 
 def test_spec_design_principles_carries_judgment_lens_only() -> None:
     text = (PARTIALS / "spec-design-principles.md").read_text()
-    # design-for-clarity
-    assert "do not propose unrelated refactoring" in text
+    # design-for-clarity — the blunt guard is gone; the sentence ends at the touched code
+    assert "do not propose unrelated refactoring" not in text
+    assert "improvements to the code this change touches." in text
     # cover-the-design (the concrete coverage list)
     assert "architecture, components, data flow, error handling, and testing" in text
     # YAGNI
@@ -50,6 +51,23 @@ def test_brainstorm_dialogue_carries_conduct_only() -> None:
     assert "consolidated" in text.lower()
     # No superpowers attribution line.
     assert "superpowers" not in text.lower()
+
+
+def test_brainstorm_dialogue_carries_cleanup_proposal_beat() -> None:
+    text = (PARTIALS / "brainstorm-dialogue.md").read_text()
+    # The new discipline beat is present, verbatim in its load-bearing parts.
+    assert "**Propose the cleanup the change reveals.**" in text
+    assert "surface worthwhile cleanup you notice" in text
+    assert "Propose it even when it reaches code this change wouldn't otherwise touch" in text
+    assert "not an open-ended repo audit" in text
+    assert "they shouldn't have to think to ask" in text
+    # Placement: after the delegate-exploration include, before the Propose 2-3 beat.
+    idx_include = text.index('{% include "partials/delegate-exploration.md" %}')
+    idx_beat = text.index("**Propose the cleanup the change reveals.**")
+    idx_approaches = text.index("**Propose 2")
+    assert idx_include < idx_beat < idx_approaches
+    # It is a plain discipline paragraph, not a blockquote.
+    assert "> **Propose the cleanup the change reveals.**" not in text
 
 
 def test_brainstorm_dialogue_omits_finalizer_only_sections() -> None:

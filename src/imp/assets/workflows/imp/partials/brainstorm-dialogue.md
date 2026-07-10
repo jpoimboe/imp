@@ -61,6 +61,8 @@ spec phase — research as much as the change warrants.
 
 {% include "partials/delegate-exploration.md" %}
 
+**Propose the cleanup the change reveals.** As you map the code, surface worthwhile cleanup you notice — dead code the change orphans, a path that becomes single-source, a duplicated helper, a simplification the change makes possible or that simply sits nearby — and fold it into the design you propose. Propose it even when it reaches code this change wouldn't otherwise touch; bound it by what you notice while scoping *this* change, not an open-ended repo audit. It stays a proposal the user accepts or declines — they shouldn't have to think to ask.
+
 **Propose 2–3 approaches.** Before locking in a design direction, offer 2–3 concrete options with trade-offs and your recommendation. Let them confirm.
 
 **Design-then-approve.** Once you believe you understand what needs to be built, present the design (scaled to complexity — a few sentences for simple things, more detail if nuanced) and get their confirmation before writing the spec. When the design is non-trivial, present it in sections and confirm each section with them by ending your turn rather than presenting the whole design at once; small designs may still be confirmed in a single pass.
