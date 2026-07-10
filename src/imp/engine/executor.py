@@ -436,7 +436,16 @@ async def run_change(
 
             # §3 case 1 — mid-flight Pause: pause BEFORE navigation (as today).
             if isinstance(action, Pause):
-                evicted = _evict_if_holding(change, state, log)
+                # Retain the held lane on a clean interrupt or transient give-up:
+                # the step resumes in place on an untouched tree. should_pause is
+                # an OR term, so an interrupt wins over an otherwise-evicting reason.
+                retain = (coordinator.should_pause or action.interrupt
+                          or action.reason in ("retry_ceiling", "reauth_needed"))
+                if retain and state.held_lane is not None:
+                    state.lane_retained = True
+                    evicted = False
+                else:
+                    evicted = _evict_if_holding(change, state, log)
                 if not evicted and step.kind == "agent":
                     state.arm_step_resume(
                         interrupt=coordinator.should_pause or action.interrupt)
