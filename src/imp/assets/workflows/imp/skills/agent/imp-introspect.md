@@ -19,9 +19,9 @@ names rather than guessing them.
 
 ## What work exists
 
-- `imp show` — the board: active in-flight changes plus the Backlog (including
+- `imp list` — the board: active in-flight changes plus the Backlog (including
   parked / `saved` changes).
-- `imp show --all` — also includes completed and abandoned past changes.
+- `imp list --all` — also includes completed and abandoned past changes.
 - `imp search <query>` — a live-and-archive scout: search **active** (in-flight +
   drafts), **backlog**, and **archive** changes for `<query>` as a case-insensitive
   substring of a change's id, title, or conversation content (a required substring;
@@ -78,7 +78,7 @@ it deliberately:
 - **Scan, then zoom.** Read the digest first; drop to `--full` / `full=True`
   only for the handful of events whose exact payload you need.
 - **Prefer state over history.** When you only need where a change stands now —
-  not how it got there — reach for the board (`imp show`) or the `status` /
+  not how it got there — reach for the board (`imp list`) or the `status` /
   `spec` facets of `imp show <id>` instead of the event log.
 
 ## This change's own state

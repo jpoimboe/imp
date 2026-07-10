@@ -121,7 +121,7 @@ Run this top-to-bottom once on a real feature-sized intent:
 4. **Pause → steer → detach → `imp resume`** — with the agent working, pause it
    (`send_signal(2)`). You stay **attached** at a steer prompt — judge it
    with fresh eyes: is it obvious you can reply to redirect *or* detach? Then detach with
-   `send("\x04")` and grab the change id (`cd "$WT" && imp show`, the id column). Spawn
+   `send("\x04")` and grab the change id (`cd "$WT" && imp list`, the id column). Spawn
    `imp resume <id>`. Judge: does the resume banner make it obvious which
    Change you're continuing and where it left off — and does it land you back where you left
    it? Header parity with the live run?
@@ -147,9 +147,9 @@ to score).
   - `imp new -h` — the flag surface (`--backlog`, `--depends-on`, `--workflow`,
     `--autonomous`, `--non-interactive`/`--message`): can a new user tell which they need?
   - `imp chat` — the conversation surface (own item below).
-  - `imp show` — the overview: zones (in-flight / Backlog / recently merged) legible? ids vs
+  - `imp list` — the overview: zones (in-flight / Backlog / recently merged) legible? ids vs
     titles? Then `imp show <id>` (detail card) and one artifact view (e.g.
-    `imp show <id> status`), plus `-a`.
+    `imp show <id> status`), plus `imp list -a`.
   - `imp log <id>` — a readable story or a wall of internals? Also `imp log <id> --summary`
     (the per-step timeline) and `--full`.
   - `imp search <query>` — both a hit and a miss: is the no-match wording helpful?
@@ -160,7 +160,7 @@ to score).
     playbook — don't drive the daemon here.)
   - any command not listed here — cover it too; flag if its UX lags **and flag this list as
     stale in your report**.
-- **The pager** — `imp log` / `imp show` page through `less` on a tty: a long narrative holds
+- **The pager** — `imp log` / `imp list` page through `less` on a tty: a long narrative holds
   the screen (send `"q"` to quit); `--no-pager` prints straight through (use it or
   `view(full=True)` when *you* need to read). Judge that paging feels intentional, not broken.
 - **Slash commands at the interactive prompt** — at any imp prompt, including the opening
@@ -182,8 +182,8 @@ to score).
   `send("\x1b[B")` / `send("\x1b[A")` to move, Enter selects, ESC cancels (escape-flush
   caveat, §2). Judge the candidate rows: enough context to pick confidently?
 - **Backlog flow** — `imp new --backlog "some idea"` files an idea and exits: does the
-  message tell you how to start it later? Confirm it appears in `imp show`'s Backlog zone.
-- **Empty states** — `imp show` / `imp log` before any Change exists.
+  message tell you how to start it later? Confirm it appears in `imp list`'s Backlog zone.
+- **Empty states** — `imp list` / `imp log` before any Change exists.
 - **`NO_COLOR=1`** — rerun `imp log <id>` with `NO_COLOR=1` in the env: fully legible, no
   meaning carried by color alone?
 - **Log exports** — `imp log <id> --md -` (read it: honest, well-structured Markdown?) and
