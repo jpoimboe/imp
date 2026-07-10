@@ -18,8 +18,9 @@ _DIGITS = "0123456789"
 # surfaces one. All four letters are drawn from _CONSONANTS / _VOWELS.
 _DENYLIST = frozenset({"puta", "kaka", "homo", "dodo", "nazi"})
 
-# A cryptographically strong RNG is the default so ids are unguessable; it is
-# injectable (any random.Random) purely so tests can seed for determinism.
+# The same OS-entropy CSPRNG `secrets` uses, exposed with random.Random's
+# .choice interface — so a seeded Random can be injected in tests without
+# weakening production draws, which stay cryptographically secure.
 _SYSTEM_RANDOM = secrets.SystemRandom()
 
 
