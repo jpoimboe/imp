@@ -1540,3 +1540,32 @@ async def test_lease_drop_without_a_gesture_records_detached(tmp_path: Path) -> 
     # No leave frame — a client that vanished without a gesture (lease drop).
     await server._dispatch_control(_INTERNAL_PAUSE)
     assert coord.pause_reason == "detached"
+
+
+@pytest.mark.anyio
+async def test_dispatch_set_model_stashes_arg_and_pauses(tmp_path: Path) -> None:
+    from imp.remote.session.protocol import CONTROL_SET_MODEL
+    from imp.remote.session.server import SessionServer
+
+    calls: list[tuple[str, str]] = []
+
+    class _Coord:
+        def __init__(self) -> None:
+            self.pending: str | None = None
+
+        def set_pending_model(self, arg: str) -> None:
+            self.pending = arg
+
+        async def signal_pause(self, *, reason: str = "ctrl-c",
+                               via: str = "signal") -> None:
+            calls.append((reason, via))
+
+    coord = _Coord()
+    server = SessionServer(str(tmp_path / "unused.sock"), coordinator=coord)
+
+    await server._dispatch_control(CONTROL_SET_MODEL, "anthropic:claude-fable-5")
+
+    assert coord.pending == "anthropic:claude-fable-5"
+    assert calls == [("model-override", "frame")]
+    # Ordinary control: serve() is never cancelled by set-model.
+    assert server.abandoned is server.saved is server.archived is server.discarded is False
