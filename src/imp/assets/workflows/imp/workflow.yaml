@@ -268,7 +268,7 @@ phases:
       - name: integration-reviewer
         file: agents/integration-review.md
         tier: high
-        label: reviewing merge conflicts
+        label: reviewing merge
         max_loops: 6
         rules:
           - {if: {blocking: true}, resume: reconciler, label: "addressing integration review feedback", feedback: "Here's review feedback to address:"}

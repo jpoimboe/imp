@@ -155,7 +155,7 @@ def test_every_shown_step_has_its_label() -> None:
         "wait-for-head": "waiting in merge queue",
         "reconciler": "resolving merge conflicts",
         "integration-verify": "running tests",
-        "integration-reviewer": "reviewing merge conflicts",
+        "integration-reviewer": "reviewing merge",
         "merge-to-base": "merging",
     }
     for name, label in expected.items():
