@@ -442,10 +442,19 @@ def test_slash_model_invalid_reprompts(tmp_path, monkeypatch) -> None:
     assert any("not available" in line for line in out)
 
 
-def test_slash_model_bare_prints_usage(tmp_path) -> None:
+def test_slash_model_bare_prints_roster(tmp_path, monkeypatch) -> None:
     import imp.cli.slash as slash
+
+    calls: dict[str, object] = {}
+
+    def _fake(*, change, output_fn):
+        calls["change"] = change
+        output_fn("Current: claude_code · opus   (this step)")
+
+    monkeypatch.setattr(slash, "print_model_roster", _fake)
     change = _FakeChange(tmp_path)
     out: list[str] = []
     result = slash.handle_slash_line("/model", change=change, output_fn=out.append)
     assert result is slash.REPROMPT
-    assert any("/model" in line for line in out)
+    assert calls["change"] is change
+    assert any("Current:" in line for line in out)

@@ -16,7 +16,7 @@ from imp.agents.skills import (
     list_user_skills,
     load_user_skill,
 )
-from imp.cli.model_command import validate_model_arg
+from imp.cli.model_command import print_model_roster, validate_model_arg
 
 # Sentinel: the line was a builtin / unknown / not-found command that printed
 # and the caller should re-prompt (do NOT submit anything to the agent).
@@ -78,7 +78,7 @@ def handle_slash_line(
         return "/clear"
     if cmd == "model":
         if not args:
-            output_fn("Usage: /model <provider:model | model>")
+            print_model_roster(change=change, output_fn=output_fn)
             return REPROMPT
         err = validate_model_arg(args, change=change)
         if err is not None:
