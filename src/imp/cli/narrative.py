@@ -392,7 +392,7 @@ class FallbackLine:
 @dataclass
 class MergedNode:
     """Terminal change_merged event — rendered as the friendly footer in imp log only (F5)."""
-    change_id: str
+    quest_id: str
     base: str
     collapsible = False
 
@@ -411,7 +411,7 @@ class WarningsSummaryNode:
 @dataclass
 class CompletedNode:
     """Terminal workflow_completed footer (imp log only; live line owned by main.py)."""
-    change_id: str
+    quest_id: str
     collapsible = False
 
 
@@ -705,8 +705,8 @@ class NarrativeBuilder:
             return Activity(verb=self._seed_phrase)
         return None
 
-    def seed_identity(self, change_id: str, title: str) -> None:
-        self._root.id = change_id
+    def seed_identity(self, quest_id: str, title: str) -> None:
+        self._root.id = quest_id
         self._root.title = title
 
     def seed_opening_intent(self, text: str) -> None:
@@ -1004,7 +1004,7 @@ def _h_change_merged(self: NarrativeBuilder, event: dict[str, Any], p: dict[str,
     # Append at the WORKFLOW ROOT (not the still-open phase): the merged footer is a
     # run-level terminal line that ends the whole transcript, after every phase.
     self._flush_warnings_summary()
-    self._root.children.append(MergedNode(change_id=descriptor, base=str(p.get("base", ""))))
+    self._root.children.append(MergedNode(quest_id=descriptor, base=str(p.get("base", ""))))
 
 
 NarrativeBuilder._HANDLERS["change_merged"] = _h_change_merged
@@ -1018,7 +1018,7 @@ def _h_workflow_completed(self: NarrativeBuilder, event: dict[str, Any], p: dict
     # Append at the WORKFLOW ROOT: a run-level terminal line ending the whole
     # transcript, after every phase.
     self._flush_warnings_summary()
-    self._root.children.append(CompletedNode(change_id=descriptor))
+    self._root.children.append(CompletedNode(quest_id=descriptor))
 
 
 NarrativeBuilder._HANDLERS["workflow_completed"] = _h_workflow_completed
@@ -2225,7 +2225,7 @@ def structural_repr(node: Any) -> Any:
     if isinstance(node, FallbackLine):
         return {"t": t, "event_type": node.event_type, "payload": node.payload}
     if isinstance(node, MergedNode):
-        return {"t": t, "change_id": node.change_id, "base": node.base}
+        return {"t": t, "quest_id": node.quest_id, "base": node.base}
     if isinstance(node, CompletedNode):
-        return {"t": t, "change_id": node.change_id}
+        return {"t": t, "quest_id": node.quest_id}
     return {"t": t}

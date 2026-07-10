@@ -15,7 +15,7 @@ def test_save_change_non_resident_marks_status_paused(
     import imp.remote.session.save as savemod
 
     _seed_control(tmp_path)
-    change = Change.create_draft(tmp_path, title="x", change_id="feat", base_branch="main")
+    change = Change.create_draft(tmp_path, title="x", quest_id="feat", base_branch="main")
     monkeypatch.setattr(savemod, "session_is_resident", lambda *_a: False)
     savemod.save_change(tmp_path, "feat")
     assert State.load(change.state_dir).status == "paused"
@@ -27,7 +27,7 @@ def test_save_change_non_resident_ignores_materialized_change(
     import imp.remote.session.save as savemod
 
     _seed_control(tmp_path)
-    change = Change.create(tmp_path, title="x", change_id="feat2", base_branch="main")
+    change = Change.create(tmp_path, title="x", quest_id="feat2", base_branch="main")
     assert change.materialized  # confirm it starts materialized
     monkeypatch.setattr(savemod, "session_is_resident", lambda *_a: False)
     savemod.save_change(tmp_path, "feat2")

@@ -15,11 +15,11 @@ def _persisted_status(change: Change) -> str:
 
 def test_create_persists_new(tmp_path: Path) -> None:
     _seed_control(tmp_path)
-    ch = Change.create(tmp_path, title="X", change_id="brnnew", base_branch="main")
+    ch = Change.create(tmp_path, title="X", quest_id="brnnew", base_branch="main")
     assert _persisted_status(ch) == "new"
 
 
 def test_create_draft_persists_new(tmp_path: Path) -> None:
     _seed_control(tmp_path)
-    ch = Change.create_draft(tmp_path, title="X", change_id="brndrf", base_branch="main")
+    ch = Change.create_draft(tmp_path, title="X", quest_id="brndrf", base_branch="main")
     assert _persisted_status(ch) == "new"

@@ -875,7 +875,7 @@ async def _route_script(
     if "{{" in command:
         command = render_prompt(command, build_context(
             change_title=change.title, event_log=log,
-            change_id=change.id, change_home=f".imp/changes/{change.id}",
+            quest_id=change.id, change_home=f".imp/changes/{change.id}",
             cur_base_head=change.cur_base_head,
             orig_base_head=change.orig_base_head, vars=state.vars,
         ))
@@ -913,7 +913,7 @@ async def _route_script(
             functools.partial(
                 run_script, step, cwd=change.workflow_dir,
                 env_extra=engine_env(project_root=change.project_root,
-                                     change_id=change.id,
+                                     quest_id=change.id,
                                      change_title=change.title,
                                      change_dir=change.change_dir,
                                      output_path=output_path,
@@ -1516,7 +1516,7 @@ async def _run_agent_invocation(
         system_prompt_override: str | None = stored
     else:
         ctx = build_context(
-            change_id=change.id, change_title=change.title,
+            quest_id=change.id, change_title=change.title,
             change_home=f".imp/changes/{change.id}",
             cur_base_head=change.cur_base_head,
             orig_base_head=change.orig_base_head,
@@ -1639,7 +1639,7 @@ def _build_sandbox_policy(change: Change, config: Any, log: EventLog) -> Any:
     cfg = sandbox_config_from_raw(config.sandbox or {})
     eng = overlay_engine_env(
         os.environ,
-        engine_env(project_root=change.project_root, change_id=change.id,
+        engine_env(project_root=change.project_root, quest_id=change.id,
                    change_title=change.title,
                    change_dir=change.change_dir,
                    test_gates=TestGates.from_config(config)),
@@ -1647,7 +1647,7 @@ def _build_sandbox_policy(change: Change, config: Any, log: EventLog) -> Any:
     try:
         policy = resolve_policy(
             worktree=change.project_root, control_root=change.control_root,
-            change_id=change.id, cfg=cfg, engine_env_result=eng,
+            quest_id=change.id, cfg=cfg, engine_env_result=eng,
             environ=os.environ, available=sandbox_available(),
             change_dir=change.change_dir,
         )

@@ -109,9 +109,9 @@ def anyio_backend() -> str:
     return "asyncio"
 
 
-async def _attach(sock_path: str, change_id: str) -> SocketStream:
+async def _attach(sock_path: str, quest_id: str) -> SocketStream:
     client = await anyio.connect_unix(sock_path)
-    await client.send((encode_attach(change_id, "T") + "\n").encode())
+    await client.send((encode_attach(quest_id, "T") + "\n").encode())
     return client
 
 

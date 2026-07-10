@@ -13,7 +13,7 @@ _SCHEMA = (
     " status TEXT, step TEXT, events_hash TEXT, ingested_at TEXT,"
     " last_event_ts TEXT, content TEXT)",
     "CREATE TABLE IF NOT EXISTS deps ("
-    " change_id TEXT, depends_on_id TEXT)",
+    " quest_id TEXT, depends_on_id TEXT)",
 )
 
 _SCHEMA_VERSION = 4
@@ -39,7 +39,7 @@ def ingest(
     """Idempotently load one Change's record + events into the index."""
     cid = record["id"]
     conn.execute("DELETE FROM changes WHERE id = ?", (cid,))
-    conn.execute("DELETE FROM deps WHERE change_id = ?", (cid,))
+    conn.execute("DELETE FROM deps WHERE quest_id = ?", (cid,))
     final_state = record.get("final_state") or {}
     timestamps = [ts for ev in events if (ts := ev.get("timestamp")) is not None]
     last_event_ts = max(timestamps) if timestamps else None
@@ -54,18 +54,18 @@ def ingest(
          record.get("events_hash"), datetime.now(UTC).isoformat(), last_event_ts,
          content))
     for dep in record.get("depends_on") or []:
-        conn.execute("INSERT INTO deps (change_id, depends_on_id) VALUES (?, ?)",
+        conn.execute("INSERT INTO deps (quest_id, depends_on_id) VALUES (?, ?)",
                      (cid, dep))
     conn.commit()
 
 
-def change_ids(conn: sqlite3.Connection) -> list[str]:
+def quest_ids(conn: sqlite3.Connection) -> list[str]:
     return [r[0] for r in conn.execute("SELECT id FROM changes ORDER BY id")]
 
 
-def has_change(conn: sqlite3.Connection, change_id: str) -> bool:
+def has_change(conn: sqlite3.Connection, quest_id: str) -> bool:
     return conn.execute(
-        "SELECT 1 FROM changes WHERE id = ?", (change_id,)).fetchone() is not None
+        "SELECT 1 FROM changes WHERE id = ?", (quest_id,)).fetchone() is not None
 
 
 def most_recent_id(conn: sqlite3.Connection) -> str | None:
@@ -75,9 +75,9 @@ def most_recent_id(conn: sqlite3.Connection) -> str | None:
     return row[0] if row else None
 
 
-def last_event_ts(conn: sqlite3.Connection, change_id: str) -> str | None:
+def last_event_ts(conn: sqlite3.Connection, quest_id: str) -> str | None:
     row = conn.execute(
-        "SELECT last_event_ts FROM changes WHERE id = ?", (change_id,)).fetchone()
+        "SELECT last_event_ts FROM changes WHERE id = ?", (quest_id,)).fetchone()
     return row[0] if row and row[0] else None
 
 

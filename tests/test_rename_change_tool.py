@@ -22,7 +22,7 @@ def _ctx(ch: Change, state: State) -> ToolContext:
 def _make(tmp_path: Path, title: str = "") -> tuple[Change, State]:
     _seed_control(tmp_path)
     ch = Change.create(tmp_path, title=title,
-                       change_id="bbb111", base_branch="main")
+                       quest_id="bbb111", base_branch="main")
     return ch, State.load(ch.state_dir)
 
 

@@ -258,7 +258,7 @@ def sandbox_config_from_raw(raw: Mapping[str, Any]) -> SandboxConfig:
 
 
 def resolve_policy(
-    *, worktree: Path, control_root: Path, change_id: str, cfg: SandboxConfig,
+    *, worktree: Path, control_root: Path, quest_id: str, cfg: SandboxConfig,
     engine_env_result: Mapping[str, str], environ: Mapping[str, str],
     available: bool, change_dir: Path | None = None, spike: bool = False,
 ) -> SandboxPolicy:

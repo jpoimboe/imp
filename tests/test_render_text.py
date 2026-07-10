@@ -665,7 +665,7 @@ def test_tiers_resolved_attaches_at_root() -> None:
     # Fired before any step_started (agent_id=None) → lands at the workflow root.
     b = nv.NarrativeBuilder()
     b.add({"id": "e1", "agent_id": None, "type": "change_created",
-           "payload": {"change_id": 1, "title": "t"}})
+           "payload": {"quest_id": 1, "title": "t"}})
     b.add({"id": "e2", "agent_id": None, "type": "tiers_resolved",
            "payload": {"tiers": {
                "medium": {"provider": "anthropic", "model": "haiku",
@@ -1422,7 +1422,7 @@ def test_merge_step_pause_breadcrumb_pipeline() -> None:
 
 
 def test_merged_node_renders_friendly_footer() -> None:
-    node = nv.MergedNode(change_id="2026-06-12-run-x", base="master")
+    node = nv.MergedNode(quest_id="2026-06-12-run-x", base="master")
     plain = "\n".join(rt._render(node, depth=0, full=False, color=False, width=80))
     assert plain == "Merged 2026-06-12-run-x into master."
     colored = "\n".join(rt._render(node, depth=0, full=False, color=True, width=80))
@@ -1433,7 +1433,7 @@ def test_merged_node_renders_friendly_footer() -> None:
 
 def test_merged_node_renders_lifecycle_wordmark_in_all_themes() -> None:
     # the merge footer carries the theme's wordmark SGR (the warm accent, not green)
-    node = nv.MergedNode(change_id="2026-06-12-run-x", base="master")
+    node = nv.MergedNode(quest_id="2026-06-12-run-x", base="master")
     for theme in ("ansi", "dark", "light"):
         pal.set_theme(theme)
         try:
@@ -1641,7 +1641,7 @@ def test_breadcrumb_without_label_has_no_route_line() -> None:
 
 def test_route_reason_rides_target_step_header() -> None:
     events = [
-        _ev("1", "change_created", change_id=1, title="x"),
+        _ev("1", "change_created", quest_id=1, title="x"),
         _ev("2", "step_started", step="code-reviewer", kind="agent", phase="review",
             model="m", provider="anthropic"),
         _ev("3", "step_completed", step="code-reviewer", kind="agent",
@@ -2356,7 +2356,7 @@ def test_other_pause_reasons_still_render_verbatim() -> None:
 def test_result_less_complete_step_renders_closed_terminal() -> None:
     # Part A persists a result-less complete_step tail: the tool_call has no matching tool_result.
     events = [
-        ev("1", "change_created", change_id=1, title="fix"),
+        ev("1", "change_created", quest_id=1, title="fix"),
         ev("2", "step_started", step="coder", kind="agent", phase="implement",
            model="m", provider="claude_code",
            timestamp="2026-07-01T00:00:00+00:00"),
@@ -2691,7 +2691,7 @@ def test_header_line_paints_model_in_gray() -> None:
 
 def test_subagent_status_row_paints_model_and_frozen_elapsed_gray() -> None:
     b = nv.NarrativeBuilder()
-    b.add(ev("1", "change_created", change_id=1, title="x"))
+    b.add(ev("1", "change_created", quest_id=1, title="x"))
     b.add(ev("2", "step_started", step="s", kind="agent", phase="p",
              model="m", provider="anthropic"))
     b.add(ev("t1", "tool_call", agent_id="step:p/s", id="blk", name="sub_agent",

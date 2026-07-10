@@ -12,7 +12,7 @@ from tests._event_fixtures import ev
 def _build() -> nv.NarrativeBuilder:
     b = nv.NarrativeBuilder()
     for e in [
-        ev("1", "change_created", change_id=1, title="x"),
+        ev("1", "change_created", quest_id=1, title="x"),
         ev("2", "step_started", step="integration-tests", kind="script",
            phase="integration", label="running tests"),
     ]:
@@ -73,7 +73,7 @@ def _breadcrumbs(node) -> list[nv.BreadcrumbLine]:
 
 def test_test_lane_acquired_restarts_step_clock_excluding_queue_wait() -> None:
     b = nv.NarrativeBuilder()
-    b.add(ev("1", "change_created", change_id=1, title="x"))
+    b.add(ev("1", "change_created", quest_id=1, title="x"))
     b.add(ev("2", "step_started", step="integration-tests", kind="script",
              phase="integration", label="running tests",
              timestamp="2026-01-01T00:00:00+00:00"))

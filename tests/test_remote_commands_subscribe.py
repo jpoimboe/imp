@@ -24,7 +24,7 @@ def fake_resolve(text: str, reply_to: int | None) -> tuple[str | None, str]:
     return (None, text)
 
 
-def test_parse_subscribe_handle_returns_the_handle_as_change_id() -> None:
+def test_parse_subscribe_handle_returns_the_handle_as_quest_id() -> None:
     assert parse_subscribe_handle("@zzzzzz") == "zzzzzz"
 
 
@@ -88,7 +88,7 @@ def test_replay_at_handle_with_count() -> None:
     assert parse("/replay @good 4", None, fake_resolve) == Replay(B, 4)
 
 
-def test_replay_no_target_yields_none_change_id() -> None:
+def test_replay_no_target_yields_none_quest_id() -> None:
     assert parse("/replay 7", None, fake_resolve) == Replay(None, 7)
 
 

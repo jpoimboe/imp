@@ -6,14 +6,14 @@ from dataclasses import dataclass
 
 from imp.remote.daemon.discover import ChangeInfo
 
-# resolve_lookup(text, reply_to) -> (change_id | None, stripped_text). Supplied by
+# resolve_lookup(text, reply_to) -> (quest_id | None, stripped_text). Supplied by
 # the adapter (its resolve over _msg_to_change / _handle_to_change); pure inputs to parse.
 ResolveLookup = Callable[[str, int | None], tuple[str | None, str]]
 
 
 @dataclass(frozen=True)
 class Reply:
-    change_id: str
+    quest_id: str
     text: str
 
 
@@ -24,7 +24,7 @@ class Create:
 
 @dataclass(frozen=True)
 class Abandon:
-    change_id: str
+    quest_id: str
 
 
 @dataclass(frozen=True)
@@ -40,22 +40,22 @@ class Help:
 @dataclass(frozen=True)
 class Notice:
     text: str
-    change_id: str | None = None
+    quest_id: str | None = None
 
 
 @dataclass(frozen=True)
 class Subscribe:
-    change_id: str
+    quest_id: str
 
 
 @dataclass(frozen=True)
 class Unsubscribe:
-    change_id: str
+    quest_id: str
 
 
 @dataclass(frozen=True)
 class Replay:
-    change_id: str | None
+    quest_id: str | None
     n: int
 
 
@@ -71,7 +71,7 @@ class Resume:
 
 @dataclass(frozen=True)
 class Save:
-    change_id: str | None
+    quest_id: str | None
 
 
 @dataclass(frozen=True)
@@ -129,8 +129,8 @@ def _resolve_target(
     # An @handle needs a trailing token for parse_handle to strip it; filler stands in
     # as that token and is discarded.
     probe = f"{rest} {filler}" if rest else ""
-    change_id, _ = resolve_lookup(probe, reply_to)
-    return change_id
+    quest_id, _ = resolve_lookup(probe, reply_to)
+    return quest_id
 
 
 def _parse_replay_n(rest: str) -> int:
@@ -158,22 +158,22 @@ def parse(
         if verb == "new":
             return Create(rest) if rest else Notice(NEW_USAGE)
         if verb == "abandon":
-            change_id = _resolve_target(rest, reply_to, resolve_lookup, "abandon")
-            return Abandon(change_id) if change_id is not None else Notice(ABANDON_USAGE)
+            quest_id = _resolve_target(rest, reply_to, resolve_lookup, "abandon")
+            return Abandon(quest_id) if quest_id is not None else Notice(ABANDON_USAGE)
         if verb in ("subscribe", "sub"):
-            change_id = (
+            quest_id = (
                 resolve_handle(rest) if resolve_handle is not None
                 else _resolve_target(rest, None, resolve_lookup, "subscribe"))
-            return Subscribe(change_id) if change_id is not None else Notice(ROUTE_HINT)
+            return Subscribe(quest_id) if quest_id is not None else Notice(ROUTE_HINT)
         if verb in ("unsubscribe", "unsub", "mute"):
-            change_id = _resolve_target(rest, reply_to, resolve_lookup, "unsubscribe")
+            quest_id = _resolve_target(rest, reply_to, resolve_lookup, "unsubscribe")
             return (
-                Unsubscribe(change_id) if change_id is not None
+                Unsubscribe(quest_id) if quest_id is not None
                 else Notice(UNSUBSCRIBE_USAGE))
         if verb == "replay":
             n = _parse_replay_n(rest)
-            change_id = _resolve_target(rest, reply_to, resolve_lookup, "replay")
-            return Replay(change_id, n)
+            quest_id = _resolve_target(rest, reply_to, resolve_lookup, "replay")
+            return Replay(quest_id, n)
         if verb == "search":
             return Search(rest) if rest else Notice(SEARCH_USAGE)
         if verb == "resume":
@@ -188,5 +188,5 @@ def parse(
                 return Alerts(False)
             return Alerts(None)
         return Notice(UNKNOWN_COMMAND)
-    change_id, body = resolve_lookup(text, reply_to)
-    return Reply(change_id, body) if change_id is not None else Notice(ROUTE_HINT)
+    quest_id, body = resolve_lookup(text, reply_to)
+    return Reply(quest_id, body) if quest_id is not None else Notice(ROUTE_HINT)

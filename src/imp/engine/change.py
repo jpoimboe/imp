@@ -73,7 +73,7 @@ def _imp_commit(control_root: Path) -> str:
     return proc.stdout.strip() if proc.returncode == 0 else ""
 
 
-def live_change_ids(control_root: Path) -> list[str]:
+def live_quest_ids(control_root: Path) -> list[str]:
     """Live change-home ids: dirs under .imp/changes/ holding a change.json (archive excluded)."""
     root = control_root / ".imp" / "changes"
     if not root.is_dir():
@@ -85,7 +85,7 @@ def live_change_ids(control_root: Path) -> list[str]:
 
 def live_stems(control_root: Path) -> frozenset[str]:
     """Four-letter stems of every live change home — the mint avoid-set."""
-    return frozenset(cid[:4] for cid in live_change_ids(control_root))
+    return frozenset(cid[:4] for cid in live_quest_ids(control_root))
 
 
 def _migrate_v1_to_v2(change_dir: Path) -> None:
@@ -283,21 +283,21 @@ class Change:
 
     @classmethod
     def create(
-        cls, control_root: Path, *, title: str, change_id: str, base_branch: str,
+        cls, control_root: Path, *, title: str, quest_id: str, base_branch: str,
         depends_on: list[str] | None = None, workflow: str | None = None,
     ) -> Change:
         """Create branch imp/<id> + worktree .imp/worktrees/<id>, then seed
         internal state at the control root (.imp/changes/<id>). Raises
         worktree.BranchExists on the (effectively impossible) id collision —
         the caller reports a clean error."""
-        wt_path = worktree.create_worktree(control_root, change_id, base_branch)
+        wt_path = worktree.create_worktree(control_root, quest_id, base_branch)
         cur_base_head = worktree.head_of(control_root, base_branch)
-        change_dir = control_root / ".imp" / "changes" / change_id
+        change_dir = control_root / ".imp" / "changes" / quest_id
         change_dir.mkdir(parents=True)
         (change_dir / "state").mkdir()
 
         (change_dir / "change.json").write_text(json.dumps({
-            "id": change_id, "title": title, "base_branch": base_branch,
+            "id": quest_id, "title": title, "base_branch": base_branch,
             "created_at": datetime.now(UTC).isoformat(),
             "depends_on": list(depends_on or []),
             "project_root": str(wt_path),
@@ -327,12 +327,12 @@ class Change:
             )
         except (LoadError, LoadErrors):
             # State is not yet written; tear down the worktree so no orphan is left.
-            worktree.destroy_worktree(control_root, change_id)
+            worktree.destroy_worktree(control_root, quest_id)
             shutil.rmtree(change_dir, ignore_errors=True)
             raise
         flat = loaded_workflow.flat_steps()
         State(
-            id=change_id, step=flat[0].name if flat else None, step_attempt=0,
+            id=quest_id, step=flat[0].name if flat else None, step_attempt=0,
             step_label=(
                 render_label(flat[0].label, change=None, log=None, state=None)
                 or flat[0].name
@@ -348,19 +348,19 @@ class Change:
 
         link_change_home(wt_path, change_dir)
         change = cls(
-            id=change_id, title=title, base_branch=base_branch,
+            id=quest_id, title=title, base_branch=base_branch,
             control_root=control_root, project_root=wt_path, change_dir=change_dir,
             cur_base_head=cur_base_head, workflow=workflow,
         )
         change.event_log().append(
             agent_id=None, type="change_created",
-            payload={"id": change_id, "title": title},
+            payload={"id": quest_id, "title": title},
         )
         return change
 
     @classmethod
     def create_draft(
-        cls, control_root: Path, *, title: str, change_id: str, base_branch: str,
+        cls, control_root: Path, *, title: str, quest_id: str, base_branch: str,
         depends_on: list[str] | None = None, workflow: str | None = None,
         origin: str = "draft", seed_opening: str | None = None,
     ) -> Change:
@@ -370,7 +370,7 @@ class Change:
         as orig_base_head for the later go-live head_changed check. Validates the
         workflow against the main checkout; with no branch/worktree to roll back,
         a bad/absent workflow drops the just-created home and re-raises."""
-        change_dir = control_root / ".imp" / "changes" / change_id
+        change_dir = control_root / ".imp" / "changes" / quest_id
         change_dir.mkdir(parents=True)
         (change_dir / "state").mkdir()
         try:
@@ -380,7 +380,7 @@ class Change:
             raise
 
         (change_dir / "change.json").write_text(json.dumps({
-            "id": change_id, "title": title, "base_branch": base_branch,
+            "id": quest_id, "title": title, "base_branch": base_branch,
             "created_at": datetime.now(UTC).isoformat(),
             "depends_on": list(depends_on or []),
             "project_root": str(control_root),
@@ -414,7 +414,7 @@ class Change:
             raise
         flat = loaded_workflow.flat_steps()
         State(
-            id=change_id, step=flat[0].name if flat else None, step_attempt=0,
+            id=quest_id, step=flat[0].name if flat else None, step_attempt=0,
             step_label=(
                 render_label(flat[0].label, change=None, log=None, state=None)
                 or flat[0].name
@@ -429,22 +429,22 @@ class Change:
         ).save(change_dir / "state")
 
         change = cls(
-            id=change_id, title=title, base_branch=base_branch,
+            id=quest_id, title=title, base_branch=base_branch,
             control_root=control_root, project_root=control_root,
             change_dir=change_dir, materialized=False, orig_base_head=orig_base_head,
             workflow=workflow, origin=origin, seed_opening=seed_opening,
         )
         change.event_log().append(
             agent_id=None, type="change_created",
-            payload={"id": change_id, "title": title},
+            payload={"id": quest_id, "title": title},
         )
         return change
 
     @classmethod
-    def load(cls, control_root: Path, change_id: str) -> Change:
-        change_dir = control_root / ".imp" / "changes" / change_id
+    def load(cls, control_root: Path, quest_id: str) -> Change:
+        change_dir = control_root / ".imp" / "changes" / quest_id
         if not change_dir.is_dir():
-            raise LoadError(f"no such Change {change_id!r}", SourceLoc(file=change_dir, line=1))
+            raise LoadError(f"no such Change {quest_id!r}", SourceLoc(file=change_dir, line=1))
         meta = json.loads((change_dir / "change.json").read_text())
         stored = meta.get("layout_version", 0)
         if stored != LAYOUT_VERSION:
@@ -452,7 +452,7 @@ class Change:
             meta = json.loads((change_dir / "change.json").read_text())
         project_root = (
             Path(meta["project_root"]) if meta.get("project_root")
-            else (control_root / ".imp" / "worktrees" / change_id).resolve()
+            else (control_root / ".imp" / "worktrees" / quest_id).resolve()
         )
         return cls(
             id=meta["id"], title=meta["title"], base_branch=meta["base_branch"],

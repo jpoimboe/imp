@@ -10,7 +10,7 @@ from tests._event_fixtures import ev
 
 def _build() -> nv.NarrativeBuilder:
     b = nv.NarrativeBuilder()
-    b.add(ev("1", "change_created", change_id=1, title="x"))
+    b.add(ev("1", "change_created", quest_id=1, title="x"))
     b.add(ev("2", "step_started", step="deferred-sweep", kind="agent",
              phase="convergence", phase_label="convergence phase",
              label="sweeping deferred tasks", model="claude"))
@@ -104,7 +104,7 @@ def test_second_hinted_retry_overwrites_countdown() -> None:
 
 def test_wait_with_empty_stack_yields_none_position_and_model() -> None:
     b = nv.NarrativeBuilder()
-    b.add(ev("1", "change_created", change_id=1, title="x"))
+    b.add(ev("1", "change_created", quest_id=1, title="x"))
     b.add(ev("2", "agent_retry", category="rate_limit", attempt=1,
              backoff_seconds=2940.0, hinted=True))
     act = b.current_activity()
@@ -164,7 +164,7 @@ def test_reset_wait_position_matches_steady_state_for_non_position_label() -> No
 
 def _build_position_label() -> nv.NarrativeBuilder:
     b = nv.NarrativeBuilder()
-    b.add(ev("1", "change_created", change_id=1, title="x"))
+    b.add(ev("1", "change_created", quest_id=1, title="x"))
     b.add(ev("2", "step_started", step="task-lead", kind="agent",
              phase="planning", phase_label="planning phase",
              label="plan 1/3", model="claude", position_label=True))

@@ -35,10 +35,10 @@ class _Control:
         self.subscriptions = subscriptions
         self._history = history
 
-    def snapshot(self, change_id: str) -> tuple[str, str, str]:
+    def snapshot(self, quest_id: str) -> tuple[str, str, str]:
         return ("running", "plan", "T")
 
-    def full_history(self, change_id: str) -> list[dict]:
+    def full_history(self, quest_id: str) -> list[dict]:
         return self._history
 
 

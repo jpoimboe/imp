@@ -11,23 +11,23 @@ from imp.engine.state import State
 from tests.conftest import _seed_control
 
 
-def _archive_terminal(tmp_path: Path, change_id: str, status: str) -> None:
-    events = tmp_path / f"{change_id}.jsonl"
+def _archive_terminal(tmp_path: Path, quest_id: str, status: str) -> None:
+    events = tmp_path / f"{quest_id}.jsonl"
     events.write_text("")
-    cj = tmp_path / f"{change_id}.change.json"
+    cj = tmp_path / f"{quest_id}.change.json"
     cj.write_text(json.dumps({
-        "id": change_id, "title": change_id.title(), "base_branch": "main",
+        "id": quest_id, "title": quest_id.title(), "base_branch": "main",
         "created_at": "2026-06-01T00:00:00+00:00", "depends_on": []}))
-    sj = tmp_path / f"{change_id}.state.json"
-    sj.write_text(json.dumps({"id": change_id, "status": status, "step": "merge"}))
+    sj = tmp_path / f"{quest_id}.state.json"
+    sj.write_text(json.dumps({"id": quest_id, "status": status, "step": "merge"}))
     archive.archive_change(
-        tmp_path, change_id, events_path=events,
+        tmp_path, quest_id, events_path=events,
         change_json_path=cj, state_json_path=sj)          # resumable defaults False
 
 
 def test_rehydrate_resumable_rebuilds_and_loads(tmp_path: Path) -> None:
     _seed_control(tmp_path)
-    ch = Change.create_draft(tmp_path, title="Conv", change_id="conv",
+    ch = Change.create_draft(tmp_path, title="Conv", quest_id="conv",
                              base_branch="main")
     archive_conversation(ch)                              # resumable, live home dropped
     assert not (tmp_path / ".imp" / "changes" / "conv").exists()
@@ -60,7 +60,7 @@ def test_load_or_rehydrate_returns_resume_gone_rc_for_terminal(tmp_path: Path) -
 
 def test_load_or_rehydrate_returns_loaded_change_for_resumable(tmp_path: Path) -> None:
     _seed_control(tmp_path)
-    ch = Change.create_draft(tmp_path, title="Conv", change_id="conv",
+    ch = Change.create_draft(tmp_path, title="Conv", quest_id="conv",
                              base_branch="main")
     archive_conversation(ch)
     result = m._load_or_rehydrate(tmp_path, "conv")
@@ -70,7 +70,7 @@ def test_load_or_rehydrate_returns_loaded_change_for_resumable(tmp_path: Path) -
 
 def test_load_or_rehydrate_returns_loaded_change_when_live(tmp_path: Path) -> None:
     _seed_control(tmp_path)
-    Change.create_draft(tmp_path, title="Conv", change_id="conv",
+    Change.create_draft(tmp_path, title="Conv", quest_id="conv",
                         base_branch="main")
     result = m._load_or_rehydrate(tmp_path, "conv")
     assert isinstance(result, Change)

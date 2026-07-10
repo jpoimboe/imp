@@ -24,9 +24,9 @@ from imp.remote.drivers.telegram import (
 )
 
 
-def handle_for(change_id: str) -> str:
+def handle_for(quest_id: str) -> str:
     """Short routing token for a change: the bare id (dateless, already short)."""
-    return change_id
+    return quest_id
 
 
 def parse_handle(text: str) -> tuple[str | None, str]:
@@ -76,20 +76,20 @@ def extract_inbound(
     return items, new_offset
 
 
-def resolve_change_id(
+def resolve_quest_id(
     inbound: Inbound,
     msg_to_change: dict[int, str],
     handle_to_change: dict[str, str],
 ) -> tuple[str | None, str]:
     if inbound.reply_to_message_id is not None:
-        change_id = msg_to_change.get(inbound.reply_to_message_id)
-        if change_id is not None:
-            return change_id, inbound.text
+        quest_id = msg_to_change.get(inbound.reply_to_message_id)
+        if quest_id is not None:
+            return quest_id, inbound.text
     handle, rest = parse_handle(inbound.text)
     if handle is not None:
-        change_id = handle_to_change.get(handle)
-        if change_id is not None:
-            return change_id, rest
+        quest_id = handle_to_change.get(handle)
+        if quest_id is not None:
+            return quest_id, rest
     return None, inbound.text
 
 
@@ -213,18 +213,18 @@ class TelegramNorthAdapter:
         unsubscribe toggle. That per-Change map is sender-thread-only, like _offset,
         so it needs no lock."""
         change = event.get("change") or {}
-        change_id = change.get("id")
-        if not change_id:
+        quest_id = change.get("id")
+        if not quest_id:
             return
-        if not self._subscriptions.contains(change_id):
-            self._alert_all_event(change_id, event)
+        if not self._subscriptions.contains(quest_id):
+            self._alert_all_event(quest_id, event)
             return
         event_id = event.get("id")
         if event.get("_replay"):
             if event_id is not None:
-                self._subscriptions.mark_seen(change_id, event_id)
+                self._subscriptions.mark_seen(quest_id, event_id)
             return
-        if event_id is not None and self._subscriptions.seen(change_id, event_id):
+        if event_id is not None and self._subscriptions.seen(quest_id, event_id):
             return
         etype = event.get("type")
         kind = curate(etype, event.get("payload") or {})
@@ -237,22 +237,22 @@ class TelegramNorthAdapter:
             return
         body = event_body(etype, event.get("payload") or {})
         if etype == "llm_response" and body.strip():
-            self._last_narration[change_id] = body
+            self._last_narration[quest_id] = body
         if kind == "silent" and not body.strip():
             return
-        handle = handle_for(change_id)
+        handle = handle_for(quest_id)
         with self._lock:
-            self._handle_to_change[handle] = change_id
+            self._handle_to_change[handle] = quest_id
         full = f"{header_line(event)}\n{format_outbound(event, handle)}"
         message_id = self._send(full, kind == "silent")
         with self._lock:
             if message_id is not None:
-                self._msg_to_change[message_id] = change_id
+                self._msg_to_change[message_id] = quest_id
 
-    def _alert_all_event(self, change_id: str, event: dict[str, Any]) -> None:
+    def _alert_all_event(self, quest_id: str, event: dict[str, Any]) -> None:
         """An unsubscribed Change: deliver a buzz alert loud iff alert-all is on,
         recording the same reply maps the subscribed path records and deduping on
-        (change_id, event id) against the AlertAll log. Silent narrative stays
+        (quest_id, event id) against the AlertAll log. Silent narrative stays
         suppressed for an unsubscribed Change. An event with no id is best-effort
         (delivered, not deduped). mark fires only on a successful send (message_id
         is not None), mirroring the map write: a send that fails without raising
@@ -268,33 +268,33 @@ class TelegramNorthAdapter:
         if event.get("_replay"):
             event_id = event.get("id")
             if event_id is not None:
-                self._alert_all.mark(change_id, event_id)
+                self._alert_all.mark(quest_id, event_id)
             return
         etype = event.get("type")
         payload = event.get("payload") or {}
         body = event_body(etype, payload)
         if etype == "llm_response" and body.strip():
-            self._last_narration[change_id] = body
+            self._last_narration[quest_id] = body
         if not self._alert_all.enabled():
             return
         if curate(etype, payload) != "buzz":
             return
         event_id = event.get("id")
-        if event_id is not None and self._alert_all.seen(change_id, event_id):
+        if event_id is not None and self._alert_all.seen(quest_id, event_id):
             return
         override: str | None = None
         if etype == "awaiting_user_input" and not body.strip():
-            override = self._last_narration.get(change_id, "")
-        handle = handle_for(change_id)
+            override = self._last_narration.get(quest_id, "")
+        handle = handle_for(quest_id)
         with self._lock:
-            self._handle_to_change[handle] = change_id
+            self._handle_to_change[handle] = quest_id
         full = f"{header_line(event)}\n{format_outbound(event, handle, override)}"
         message_id = self._send(full, False)
         with self._lock:
             if message_id is not None:
-                self._msg_to_change[message_id] = change_id
+                self._msg_to_change[message_id] = quest_id
         if message_id is not None and event_id is not None:
-            self._alert_all.mark(change_id, event_id)
+            self._alert_all.mark(quest_id, event_id)
 
     def on_response(self, response: Response) -> None:
         text = render_response(
@@ -302,17 +302,17 @@ class TelegramNorthAdapter:
         if not text:
             return
         message_id = self._send(text, True)
-        if isinstance(response, Notice) and response.change_id is not None:
-            handle = handle_for(response.change_id)
+        if isinstance(response, Notice) and response.quest_id is not None:
+            handle = handle_for(response.quest_id)
             with self._lock:
-                self._handle_to_change[handle] = response.change_id
+                self._handle_to_change[handle] = response.quest_id
                 if message_id is not None:
-                    self._msg_to_change[message_id] = response.change_id
+                    self._msg_to_change[message_id] = response.quest_id
 
     def resolve(self, inbound: Inbound) -> tuple[str | None, str]:
-        """Resolve one inbound reply to (change_id, text) against the recorded maps."""
+        """Resolve one inbound reply to (quest_id, text) against the recorded maps."""
         with self._lock:
-            return resolve_change_id(
+            return resolve_quest_id(
                 inbound, self._msg_to_change, self._handle_to_change)
 
     def _resolve_text(self, text: str, reply_to: int | None) -> tuple[str | None, str]:

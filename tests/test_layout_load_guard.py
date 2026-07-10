@@ -27,7 +27,7 @@ def test_migrate_always_raises_while_registry_empty(tmp_path: Path) -> None:
 
 def test_load_refuses_lower_stored_version(tmp_path: Path) -> None:
     _seed_control(tmp_path)
-    ch = Change.create(tmp_path, title="X", change_id="lo", base_branch="main")
+    ch = Change.create(tmp_path, title="X", quest_id="lo", base_branch="main")
     _set_stored_version(ch.change_dir, 0)        # no (0, 2) migration -> refuse
     with pytest.raises(LayoutMismatch):
         Change.load(tmp_path, "lo")
@@ -35,7 +35,7 @@ def test_load_refuses_lower_stored_version(tmp_path: Path) -> None:
 
 def test_load_refuses_higher_stored_version(tmp_path: Path) -> None:
     _seed_control(tmp_path)
-    ch = Change.create(tmp_path, title="X", change_id="hi", base_branch="main")
+    ch = Change.create(tmp_path, title="X", quest_id="hi", base_branch="main")
     _set_stored_version(ch.change_dir, LAYOUT_VERSION + 999)
     with pytest.raises(LayoutMismatch):
         Change.load(tmp_path, "hi")
@@ -43,7 +43,7 @@ def test_load_refuses_higher_stored_version(tmp_path: Path) -> None:
 
 def test_load_refuses_when_version_key_absent(tmp_path: Path) -> None:
     _seed_control(tmp_path)
-    ch = Change.create(tmp_path, title="X", change_id="old", base_branch="main")
+    ch = Change.create(tmp_path, title="X", quest_id="old", base_branch="main")
     meta_path = ch.change_dir / "change.json"
     meta = json.loads(meta_path.read_text())
     del meta["layout_version"]                 # a pre-guard change.json -> defaults to 0
@@ -54,7 +54,7 @@ def test_load_refuses_when_version_key_absent(tmp_path: Path) -> None:
 
 def test_freshly_created_change_loads_without_raising(tmp_path: Path) -> None:
     _seed_control(tmp_path)
-    Change.create(tmp_path, title="X", change_id="ok", base_branch="main")
+    Change.create(tmp_path, title="X", quest_id="ok", base_branch="main")
     loaded = Change.load(tmp_path, "ok")
     assert loaded.id == "ok"
 

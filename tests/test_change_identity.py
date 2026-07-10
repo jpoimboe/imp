@@ -11,7 +11,7 @@ from tests.conftest import _git, _seed_control
 def test_title_change_keeps_id_and_paths(tmp_path: Path) -> None:
     _seed_control(tmp_path)
     ch = Change.create(tmp_path, title="First Name",
-                       change_id="k3f9qa", base_branch="main")
+                       quest_id="k3f9qa", base_branch="main")
     id_before = ch.id
     root_before = ch.project_root
 

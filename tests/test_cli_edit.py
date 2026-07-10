@@ -12,10 +12,10 @@ from imp.engine.change import Change
 from tests.conftest import _seed_control
 
 
-def _make_draft(control: Path, change_id: str, *, origin: str = "draft") -> Change:
+def _make_draft(control: Path, quest_id: str, *, origin: str = "draft") -> Change:
     base = worktree.current_branch(control)
     return Change.create_draft(
-        control, title="Original", change_id=change_id, base_branch=base,
+        control, title="Original", quest_id=quest_id, base_branch=base,
         origin=origin)
 
 

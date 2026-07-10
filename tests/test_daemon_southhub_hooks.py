@@ -76,7 +76,7 @@ async def test_detach_hook_does_not_fire_on_malformed_hello(tmp_path: Path) -> N
         await hub.open()
         tg.start_soon(hub.serve)
         client = await anyio.connect_unix(sock)
-        await client.send(b'{"type": "not_hello", "change_id": "x"}\n')
+        await client.send(b'{"type": "not_hello", "quest_id": "x"}\n')
         await client.aclose()
         await anyio.sleep(0.1)   # give the server time to process
         assert detached == []

@@ -71,7 +71,7 @@ def test_stale_symlink_is_replaced(tmp_path: Path) -> None:
 
 def test_create_links_worktree_home_no_phantom(tmp_path: Path) -> None:
     _seed_control(tmp_path)
-    ch = Change.create(tmp_path, title="X", change_id="cre1", base_branch="main")
+    ch = Change.create(tmp_path, title="X", quest_id="cre1", base_branch="main")
     link = ch.project_root / ".imp" / "changes" / "cre1"
     assert link.is_symlink()
     assert link.resolve() == ch.change_dir.resolve()
@@ -79,7 +79,7 @@ def test_create_links_worktree_home_no_phantom(tmp_path: Path) -> None:
 
 def test_materialize_links_worktree_home(tmp_path: Path) -> None:
     _seed_control(tmp_path)
-    ch = Change.create_draft(tmp_path, title="X", change_id="mat1", base_branch="main")
+    ch = Change.create_draft(tmp_path, title="X", quest_id="mat1", base_branch="main")
     # A draft gets no worktree link (project_root is the control root).
     assert not (ch.project_root / ".imp" / "changes" / "mat1").is_symlink()
     ch.materialize()
@@ -90,7 +90,7 @@ def test_materialize_links_worktree_home(tmp_path: Path) -> None:
 
 def test_relative_edit_after_golive_lands_in_home(tmp_path: Path) -> None:
     _seed_control(tmp_path)
-    ch = Change.create_draft(tmp_path, title="X", change_id="gol1", base_branch="main")
+    ch = Change.create_draft(tmp_path, title="X", quest_id="gol1", base_branch="main")
     ch.materialize()
     # A relative path through the worktree symlink writes into the permanent home,
     # not a phantom.
@@ -102,7 +102,7 @@ def test_relative_edit_after_golive_lands_in_home(tmp_path: Path) -> None:
 
 def test_relink_home_self_heals_legacy_phantom(tmp_path: Path) -> None:
     _seed_control(tmp_path)
-    ch = Change.create(tmp_path, title="X", change_id="heal1", base_branch="main")
+    ch = Change.create(tmp_path, title="X", quest_id="heal1", base_branch="main")
     link = ch.project_root / ".imp" / "changes" / "heal1"
     # Simulate an in-flight change whose worktree carries a legacy phantom dir
     # instead of the symlink (e.g. created before this feature shipped).
@@ -119,7 +119,7 @@ def test_relink_home_self_heals_legacy_phantom(tmp_path: Path) -> None:
 
 def test_relink_home_noop_for_draft(tmp_path: Path) -> None:
     _seed_control(tmp_path)
-    ch = Change.create_draft(tmp_path, title="X", change_id="heal2", base_branch="main")
+    ch = Change.create_draft(tmp_path, title="X", quest_id="heal2", base_branch="main")
     ch.relink_home()                              # must not raise, must not link
     assert not (ch.project_root / ".imp" / "changes" / "heal2").is_symlink()
 
@@ -142,7 +142,7 @@ def test_relink_home_noop_when_project_root_is_control_root(tmp_path: Path) -> N
 
 def test_relative_home_location_is_worktree_symlink_to_home(tmp_path: Path) -> None:
     _seed_control(tmp_path)
-    ch = Change.create_draft(tmp_path, title="X", change_id="rel1", base_branch="main")
+    ch = Change.create_draft(tmp_path, title="X", quest_id="rel1", base_branch="main")
     ch.materialize()
     rel = f".imp/changes/{ch.id}"
     link = ch.project_root / rel

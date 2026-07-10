@@ -27,11 +27,11 @@ class AlertAll:
             if not on:
                 self._delivered.clear()
 
-    def seen(self, change_id: str, event_id: str) -> bool:
+    def seen(self, quest_id: str, event_id: str) -> bool:
         with self._lock:
-            ids = self._delivered.get(change_id)
+            ids = self._delivered.get(quest_id)
             return ids is not None and event_id in ids
 
-    def mark(self, change_id: str, event_id: str) -> None:
+    def mark(self, quest_id: str, event_id: str) -> None:
         with self._lock:
-            self._delivered.setdefault(change_id, set()).add(event_id)
+            self._delivered.setdefault(quest_id, set()).add(event_id)

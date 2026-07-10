@@ -9,7 +9,7 @@ from tests.conftest import _seed_control
 
 
 def _idea_seed(tmp_path: Path, cid: str) -> Change:
-    return Change.create_draft(tmp_path, title="Idea", change_id=cid,
+    return Change.create_draft(tmp_path, title="Idea", quest_id=cid,
                                base_branch="main", origin="idea",
                                seed_opening="Idea")
 
@@ -44,7 +44,7 @@ def test_unstarted_backlog_meta_none_when_conversed(tmp_path: Path) -> None:
 
 def test_unstarted_backlog_meta_none_when_draft_origin(tmp_path: Path) -> None:
     _seed_control(tmp_path)
-    Change.create_draft(tmp_path, title="Draft", change_id="2026-06-20-drft01",
+    Change.create_draft(tmp_path, title="Draft", quest_id="2026-06-20-drft01",
                         base_branch="main", origin="draft", seed_opening="Draft")
     assert m._unstarted_backlog_meta(tmp_path, "2026-06-20-drft01") is None
 

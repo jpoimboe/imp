@@ -27,7 +27,7 @@ def test_encode_attach_is_single_line_kind_tagged_json() -> None:
     assert "\n" not in line
     assert json.loads(line) == {
         "kind": "attach",
-        "change_id": "2026-06-15-abc",
+        "quest_id": "2026-06-15-abc",
         "title": "Add dark mode",
         "lease": False,
     }

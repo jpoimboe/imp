@@ -77,7 +77,7 @@ def test_introspect_documents_the_three_tier_split() -> None:
 def test_introspect_documents_the_cross_change_query() -> None:
     body = load_agent_skill(_skills_dir(), "imp-introspect")
     # in-loop cross-change front door, keyword-form as an agent would call it
-    assert "query_events(change_id=" in body
+    assert "query_events(quest_id=" in body
     # bash cross-change front door
     assert "imp show <id> events" in body
 

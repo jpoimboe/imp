@@ -17,7 +17,7 @@ def test_enqueue_then_head_is_oldest_for_base(tmp_path: Path) -> None:
     assert mq.position(tmp_path, "b", "main") == 1
 
 
-def test_enqueue_is_idempotent_by_change_id(tmp_path: Path) -> None:
+def test_enqueue_is_idempotent_by_quest_id(tmp_path: Path) -> None:
     _seed_control(tmp_path)
     mq.enqueue_if_absent(tmp_path, "a", "main")
     mq.enqueue_if_absent(tmp_path, "a", "main")
@@ -51,22 +51,22 @@ def test_concurrent_enqueue_preserves_all_entries(tmp_path: Path) -> None:
         t.join()
 
     entries = mq.read(tmp_path)
-    got = sorted(e["change_id"] for e in entries if e["base_branch"] == "main")
+    got = sorted(e["quest_id"] for e in entries if e["base_branch"] == "main")
     assert got == sorted(ids)                          # no lost / no duplicated entries
     # ISO-8601 timestamps present and the lane is a strict FIFO by enqueued_at
     lane = [e for e in entries if e["base_branch"] == "main"]
     stamps = [e["enqueued_at"] for e in lane]
     assert all(isinstance(s, str) and "T" in s for s in stamps)
     assert stamps == sorted(stamps)
-    assert mq.position(tmp_path, lane[0]["change_id"], "main") == 0
+    assert mq.position(tmp_path, lane[0]["quest_id"], "main") == 0
 
 
 def test_pop_and_wake_removes_self_and_wakes_new_head(tmp_path: Path) -> None:
     _seed_control(tmp_path)
     # Change.load runs before spawn_fn, so real worktrees are required.
     from imp.engine.change import Change
-    Change.create(tmp_path, title="a", change_id="a", base_branch="main")
-    Change.create(tmp_path, title="b", change_id="b", base_branch="main")
+    Change.create(tmp_path, title="a", quest_id="a", base_branch="main")
+    Change.create(tmp_path, title="b", quest_id="b", base_branch="main")
     mq.enqueue_if_absent(tmp_path, "a", "main")
     mq.enqueue_if_absent(tmp_path, "b", "main")
     woken: list[str] = []
@@ -74,7 +74,7 @@ def test_pop_and_wake_removes_self_and_wakes_new_head(tmp_path: Path) -> None:
         tmp_path, "a", "main",
         spawn_fn=lambda change, **kw: woken.append((change.id, kw.get("resume"))),
     )
-    assert all(e["change_id"] != "a" for e in mq.read(tmp_path))   # self removed
+    assert all(e["quest_id"] != "a" for e in mq.read(tmp_path))   # self removed
     assert woken == [("b", True)]                                  # new head woken with resume
 
 
@@ -94,7 +94,7 @@ def test_pop_and_wake_no_wake_when_self_not_head(tmp_path: Path) -> None:
     woken: list[str] = []
     # 'b' (not head) removes itself: the head 'a' is untouched and not re-woken.
     mq.pop_and_wake(tmp_path, "b", "main", spawn_fn=lambda change, **kw: woken.append(change.id))
-    assert [e["change_id"] for e in mq.read(tmp_path)] == ["a"]
+    assert [e["quest_id"] for e in mq.read(tmp_path)] == ["a"]
     assert woken == []
 
 
@@ -103,7 +103,7 @@ def test_remove_drops_entry(tmp_path: Path) -> None:
     mq.enqueue_if_absent(tmp_path, "a", "main")
     mq.enqueue_if_absent(tmp_path, "b", "main")
     mq.remove(tmp_path, "a")
-    assert [e["change_id"] for e in mq.read(tmp_path)] == ["b"]
+    assert [e["quest_id"] for e in mq.read(tmp_path)] == ["b"]
 
 
 def test_position_absent_returns_lane_length(tmp_path: Path) -> None:
@@ -123,8 +123,8 @@ def test_pop_and_wake_cross_lane_isolation(tmp_path: Path) -> None:
         tmp_path, "a", "main",
         spawn_fn=lambda change, **kw: woken.append(change.id),
     )
-    assert all(e["change_id"] != "a" for e in mq.read(tmp_path))   # "a" removed
-    assert any(e["change_id"] == "b" for e in mq.read(tmp_path))   # "b" untouched
+    assert all(e["quest_id"] != "a" for e in mq.read(tmp_path))   # "a" removed
+    assert any(e["quest_id"] == "b" for e in mq.read(tmp_path))   # "b" untouched
     assert woken == []                                               # no cross-lane wake
 
 
@@ -132,7 +132,7 @@ def test_remove_absent_is_noop(tmp_path: Path) -> None:
     _seed_control(tmp_path)
     mq.enqueue_if_absent(tmp_path, "a", "main")
     mq.remove(tmp_path, "absent")
-    assert [e["change_id"] for e in mq.read(tmp_path)] == ["a"]
+    assert [e["quest_id"] for e in mq.read(tmp_path)] == ["a"]
 
 
 def test_pop_and_wake_absent_noop(tmp_path: Path) -> None:
@@ -142,15 +142,15 @@ def test_pop_and_wake_absent_noop(tmp_path: Path) -> None:
     from unittest.mock import Mock
     spawn_mock = Mock()
     mq.pop_and_wake(tmp_path, "absent", "main", spawn_fn=spawn_mock)
-    lane_ids = [e["change_id"] for e in mq.read(tmp_path) if e["base_branch"] == "main"]
+    lane_ids = [e["quest_id"] for e in mq.read(tmp_path) if e["base_branch"] == "main"]
     assert lane_ids == ["a", "b"]
     spawn_mock.assert_not_called()
 
 
 def test_ensure_head_driven_spawns_current_head_with_resume(tmp_path) -> None:
     _seed_control(tmp_path)
-    Change.create(tmp_path, title="a", change_id="a", base_branch="main")
-    Change.create(tmp_path, title="b", change_id="b", base_branch="main")
+    Change.create(tmp_path, title="a", quest_id="a", base_branch="main")
+    Change.create(tmp_path, title="b", quest_id="b", base_branch="main")
     mq.enqueue_if_absent(tmp_path, "a", "main")
     mq.enqueue_if_absent(tmp_path, "b", "main")
     spawned: list = []
@@ -171,8 +171,8 @@ def test_ensure_head_driven_empty_lane_is_noop(tmp_path) -> None:
 
 def test_pop_and_wake_tolerates_vanished_next_head(tmp_path) -> None:
     _seed_control(tmp_path)
-    Change.create(tmp_path, title="a", change_id="a", base_branch="main")
-    Change.create(tmp_path, title="b", change_id="b", base_branch="main")
+    Change.create(tmp_path, title="a", quest_id="a", base_branch="main")
+    Change.create(tmp_path, title="b", quest_id="b", base_branch="main")
     mq.enqueue_if_absent(tmp_path, "a", "main")        # head
     mq.enqueue_if_absent(tmp_path, "b", "main")        # next
     shutil.rmtree(tmp_path / ".imp" / "changes" / "b")   # next vanishes → load fails
@@ -180,14 +180,14 @@ def test_pop_and_wake_tolerates_vanished_next_head(tmp_path) -> None:
     # Must not raise even though the next head can no longer be loaded.
     mq.pop_and_wake(
         tmp_path, "a", "main", spawn_fn=lambda change, **kw: spawned.append(change.id))
-    assert all(e["change_id"] != "a" for e in mq.read(tmp_path))   # self still popped
+    assert all(e["quest_id"] != "a" for e in mq.read(tmp_path))   # self still popped
     assert spawned == []                                          # vanished head skipped
-    assert any(e["change_id"] == "b" for e in mq.read(tmp_path))   # b remains queued
+    assert any(e["quest_id"] == "b" for e in mq.read(tmp_path))   # b remains queued
 
 
 def test_ensure_head_driven_tolerates_vanished_head(tmp_path) -> None:
     _seed_control(tmp_path)
-    Change.create(tmp_path, title="a", change_id="a", base_branch="main")
+    Change.create(tmp_path, title="a", quest_id="a", base_branch="main")
     mq.enqueue_if_absent(tmp_path, "a", "main")
     shutil.rmtree(tmp_path / ".imp" / "changes" / "a")   # records gone → load fails
     spawned: list = []

@@ -26,16 +26,16 @@ def anyio_backend() -> str:
     return "asyncio"
 
 
-def _make_change(tmp_path: Path, change_id: str) -> Change:
+def _make_change(tmp_path: Path, quest_id: str) -> Change:
     change = Change(
-        id=change_id,
+        id=quest_id,
         title="T",
         base_branch="main",
         control_root=tmp_path,
         project_root=tmp_path,
         change_dir=tmp_path / ".imp" / "change",
     )
-    State(id=change_id, step=None, step_attempt=0, status="paused").save(
+    State(id=quest_id, step=None, step_attempt=0, status="paused").save(
         change.state_dir)
     return change
 
@@ -195,8 +195,8 @@ def test_main_loads_named_change_and_serves_it(
     loaded = object()
     calls: dict[str, Any] = {}
 
-    def fake_load(control_root: Path, change_id: str) -> object:
-        calls["load"] = (control_root, change_id)
+    def fake_load(control_root: Path, quest_id: str) -> object:
+        calls["load"] = (control_root, quest_id)
         return loaded
 
     def fake_run(fn: Any, arg: Any) -> None:
@@ -393,7 +393,7 @@ async def test_resume_journals_workflow_resumed_without_flipping_status(
     from tests.conftest import _seed_control
 
     _seed_control(tmp_path)
-    change = Change.create(tmp_path, title="x", change_id="feat", base_branch="main")
+    change = Change.create(tmp_path, title="x", quest_id="feat", base_branch="main")
     st = State.load(change.state_dir)
     st.status = "paused"
     st.save(change.state_dir)
@@ -428,7 +428,7 @@ async def test_resume_sets_resume_pending_for_a_stale_lock_crash(tmp_path: Path)
     from tests.conftest import _seed_control
 
     _seed_control(tmp_path)
-    change = Change.create(tmp_path, title="x", change_id="feat", base_branch="main")
+    change = Change.create(tmp_path, title="x", quest_id="feat", base_branch="main")
     st = State.load(change.state_dir)
     st.step = "review"
     st.status = "paused"
@@ -464,7 +464,7 @@ async def test_resume_with_no_lock_does_not_set_resume_pending(tmp_path: Path) -
     from tests.conftest import _seed_control
 
     _seed_control(tmp_path)
-    change = Change.create(tmp_path, title="x", change_id="feat", base_branch="main")
+    change = Change.create(tmp_path, title="x", quest_id="feat", base_branch="main")
     st = State.load(change.state_dir)
     st.step = "review"
     st.status = "paused"
@@ -495,7 +495,7 @@ async def test_default_spawn_does_no_resume_prep(tmp_path: Path) -> None:
     from tests.conftest import _seed_control
 
     _seed_control(tmp_path)
-    change = Change.create(tmp_path, title="x", change_id="feat", base_branch="main")
+    change = Change.create(tmp_path, title="x", quest_id="feat", base_branch="main")
     st = State.load(change.state_dir)
     st.status = "paused"
     st.save(change.state_dir)
@@ -530,7 +530,7 @@ def test_main_forwards_resume_flag_via_partial(
     loaded = object()
     captured: dict[str, Any] = {}
 
-    def fake_load(control_root: Path, change_id: str) -> object:
+    def fake_load(control_root: Path, quest_id: str) -> object:
         return loaded
 
     def fake_run(fn: Any) -> None:   # partial form takes a single positional
@@ -558,7 +558,7 @@ def test_append_workflow_resumed_is_idempotent_when_trailing(tmp_path: Path) -> 
     from tests.conftest import _seed_control
 
     _seed_control(tmp_path)
-    change = Change.create(tmp_path, title="x", change_id="feat", base_branch="main")
+    change = Change.create(tmp_path, title="x", quest_id="feat", base_branch="main")
     log = change.event_log()
     daemon._append_workflow_resumed(log)
     daemon._append_workflow_resumed(log)   # trailing already resumed → no-op
@@ -623,7 +623,7 @@ async def test_two_interrupt_rounds_leave_no_open_pause(tmp_path: Path) -> None:
 
 
 
-def test_main_unknown_change_id_prints_clean_error_and_exits_nonzero(
+def test_main_unknown_quest_id_prints_clean_error_and_exits_nonzero(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
 ) -> None:
     import imp.remote.session.daemon as daemon
@@ -668,7 +668,7 @@ def test_append_workflow_resumed_appends_after_a_real_event(tmp_path: Path) -> N
     from tests.conftest import _seed_control
 
     _seed_control(tmp_path)
-    change = Change.create(tmp_path, title="x", change_id="feat", base_branch="main")
+    change = Change.create(tmp_path, title="x", quest_id="feat", base_branch="main")
     log = change.event_log()
     daemon._append_workflow_resumed(log)
     log.append(agent_id=None, type="workflow_paused", payload={"reason": "interrupt"})
@@ -681,7 +681,7 @@ def test_last_pause_was_awaiting_turn_true_for_awaiting_turn(tmp_path: Path) -> 
     from tests.conftest import _seed_control
 
     _seed_control(tmp_path)
-    change = Change.create(tmp_path, title="x", change_id="feat", base_branch="main")
+    change = Change.create(tmp_path, title="x", quest_id="feat", base_branch="main")
     change.event_log().append(
         agent_id=None, type="workflow_paused", payload={"reason": "awaiting_turn"})
     assert daemon._last_pause_was_awaiting_turn(change.event_log()) is True
@@ -692,7 +692,7 @@ def test_last_pause_was_awaiting_turn_false_for_other_reason(tmp_path: Path) -> 
     from tests.conftest import _seed_control
 
     _seed_control(tmp_path)
-    change = Change.create(tmp_path, title="x", change_id="feat", base_branch="main")
+    change = Change.create(tmp_path, title="x", quest_id="feat", base_branch="main")
     change.event_log().append(
         agent_id=None, type="workflow_paused", payload={"reason": "interrupt"})
     assert daemon._last_pause_was_awaiting_turn(change.event_log()) is False
@@ -703,7 +703,7 @@ def test_last_pause_was_awaiting_turn_false_after_resume(tmp_path: Path) -> None
     from tests.conftest import _seed_control
 
     _seed_control(tmp_path)
-    change = Change.create(tmp_path, title="x", change_id="feat", base_branch="main")
+    change = Change.create(tmp_path, title="x", quest_id="feat", base_branch="main")
     log = change.event_log()
     log.append(agent_id=None, type="workflow_paused", payload={"reason": "awaiting_turn"})
     log.append(agent_id=None, type="workflow_resumed", payload={})
@@ -716,7 +716,7 @@ def test_last_pause_was_awaiting_turn_false_with_no_events(tmp_path: Path) -> No
     from tests.conftest import _seed_control
 
     _seed_control(tmp_path)
-    change = Change.create(tmp_path, title="x", change_id="feat", base_branch="main")
+    change = Change.create(tmp_path, title="x", quest_id="feat", base_branch="main")
     # No events at all — the fallback must be False
     assert daemon._last_pause_was_awaiting_turn(change.event_log()) is False
 
@@ -729,7 +729,7 @@ async def test_resident_abandon_of_unmaterialized_draft_tears_down(
 
     _seed_control(tmp_path)
     change = Change.create_draft(
-        tmp_path, title="x", change_id="draft1", base_branch="main")
+        tmp_path, title="x", quest_id="draft1", base_branch="main")
     assert change.materialized is False
     sock = str(session_socket_path(change.control_root, change.id))
     torn: list[Change] = []
@@ -774,7 +774,7 @@ async def test_awaiting_turn_hibernation_exit_drives_now_head(
     from tests.conftest import _seed_control
 
     _seed_control(tmp_path)
-    change = Change.create(tmp_path, title="b", change_id="bbb", base_branch="main")
+    change = Change.create(tmp_path, title="b", quest_id="bbb", base_branch="main")
     mq.enqueue_if_absent(tmp_path, "bbb", "main")        # bbb is now the lane head
 
     spawned: list = []
@@ -806,7 +806,7 @@ async def test_non_awaiting_turn_pause_does_not_drive_head(
     from tests.conftest import _seed_control
 
     _seed_control(tmp_path)
-    change = Change.create(tmp_path, title="b", change_id="bbb", base_branch="main")
+    change = Change.create(tmp_path, title="b", quest_id="bbb", base_branch="main")
     mq.enqueue_if_absent(tmp_path, "bbb", "main")        # bbb IS head, yet no spawn
 
     spawned: list = []
@@ -891,7 +891,7 @@ def test_hold_prompt_none_for_awaiting_turn(tmp_path: Path) -> None:
     from tests.conftest import _seed_control
 
     _seed_control(tmp_path)
-    change = Change.create(tmp_path, title="x", change_id="feat", base_branch="main")
+    change = Change.create(tmp_path, title="x", quest_id="feat", base_branch="main")
     change.event_log().append(
         agent_id=None, type="workflow_paused", payload={"reason": "awaiting_turn"})
     coord = SimpleNamespace(should_pause=False)
@@ -1262,7 +1262,7 @@ def test_main_forwards_autonomous_via_partial(
     loaded = object()
     captured: dict[str, Any] = {}
 
-    def fake_load(control_root: Path, change_id: str) -> object:
+    def fake_load(control_root: Path, quest_id: str) -> object:
         return loaded
 
     def fake_run(fn: Any) -> None:
@@ -1683,7 +1683,7 @@ def test_main_forwards_model_to_serve(
     loaded = object()
     captured: dict[str, Any] = {}
 
-    def fake_load(control_root: Path, change_id: str) -> object:
+    def fake_load(control_root: Path, quest_id: str) -> object:
         return loaded
 
     def fake_run(fn: Any) -> None:

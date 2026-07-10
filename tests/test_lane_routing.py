@@ -32,7 +32,7 @@ async def _never_returns(_pred):
 
 def test_acquire_head_marks_hold_and_continues(tmp_path: Path) -> None:
     _seed_control(tmp_path)
-    ch = Change.create(tmp_path, title="x", change_id="feat", base_branch="main")
+    ch = Change.create(tmp_path, title="x", quest_id="feat", base_branch="main")
     state, log = State.load(ch.state_dir), JsonlEventLog(ch.events_path)
     action, _fb, _muts = anyio.run(
         _route_acquire, _acquire_step(), ch, state, log, _never_returns)
@@ -47,9 +47,9 @@ def test_acquire_head_marks_hold_and_continues(tmp_path: Path) -> None:
 def test_acquire_non_head_hibernate_does_not_mark_hold(tmp_path: Path, monkeypatch) -> None:
     _seed_control(tmp_path)
     # Place another change at head so "feat" is NOT head.
-    Change.create(tmp_path, title="first", change_id="first", base_branch="main")
+    Change.create(tmp_path, title="first", quest_id="first", base_branch="main")
     mq.enqueue_if_absent(tmp_path, "first", "main")   # head
-    ch = Change.create(tmp_path, title="x", change_id="feat", base_branch="main")
+    ch = Change.create(tmp_path, title="x", quest_id="feat", base_branch="main")
     mq.enqueue_if_absent(tmp_path, "feat", "main")    # NOT head
     state, log = State.load(ch.state_dir), JsonlEventLog(ch.events_path)
     action, _fb, _muts = anyio.run(
@@ -62,9 +62,9 @@ def test_acquire_non_head_hibernate_does_not_mark_hold(tmp_path: Path, monkeypat
 
 def test_acquire_becomes_head_after_wait_marks_hold(tmp_path: Path, monkeypatch) -> None:
     _seed_control(tmp_path)
-    Change.create(tmp_path, title="first", change_id="first", base_branch="main")
+    Change.create(tmp_path, title="first", quest_id="first", base_branch="main")
     mq.enqueue_if_absent(tmp_path, "first", "main")   # head
-    ch = Change.create(tmp_path, title="x", change_id="feat", base_branch="main")
+    ch = Change.create(tmp_path, title="x", quest_id="feat", base_branch="main")
     mq.enqueue_if_absent(tmp_path, "feat", "main")    # NOT head initially
 
     # Simulate: wait_for_turn_fn is called, the turn is given (first pops itself),
@@ -84,8 +84,8 @@ def test_acquire_becomes_head_after_wait_marks_hold(tmp_path: Path, monkeypatch)
 
 def test_release_pops_and_clears_mark(tmp_path: Path, monkeypatch) -> None:
     _seed_control(tmp_path)
-    a = Change.create(tmp_path, title="a", change_id="aaa", base_branch="main")
-    Change.create(tmp_path, title="b", change_id="bbb", base_branch="main")
+    a = Change.create(tmp_path, title="a", quest_id="aaa", base_branch="main")
+    Change.create(tmp_path, title="b", quest_id="bbb", base_branch="main")
     mq.enqueue_if_absent(tmp_path, "aaa", "main")   # head
     mq.enqueue_if_absent(tmp_path, "bbb", "main")   # next
     # popping the head wakes the next head; stub the real daemon spawn so the
@@ -95,7 +95,7 @@ def test_release_pops_and_clears_mark(tmp_path: Path, monkeypatch) -> None:
     state.held_lane = "main"
     state.held_acquire_step = "lane"
     _release_lane(_release_step(), a, state, log)
-    assert all(e["change_id"] != "aaa" for e in mq.read(tmp_path))   # self popped
+    assert all(e["quest_id"] != "aaa" for e in mq.read(tmp_path))   # self popped
     assert state.held_lane is None
     assert state.held_acquire_step is None
     assert State.load(a.state_dir).held_lane is None
@@ -104,8 +104,8 @@ def test_release_pops_and_clears_mark(tmp_path: Path, monkeypatch) -> None:
 
 def test_rule_release_pops_and_clears_mark(tmp_path: Path, monkeypatch) -> None:
     _seed_control(tmp_path)
-    a = Change.create(tmp_path, title="a", change_id="aaa", base_branch="main")
-    Change.create(tmp_path, title="b", change_id="bbb", base_branch="main")
+    a = Change.create(tmp_path, title="a", quest_id="aaa", base_branch="main")
+    Change.create(tmp_path, title="b", quest_id="bbb", base_branch="main")
     mq.enqueue_if_absent(tmp_path, "aaa", "main")   # head
     mq.enqueue_if_absent(tmp_path, "bbb", "main")   # next
     monkeypatch.setattr(attach_mod, "spawn_session_daemon", lambda *a, **k: None)
@@ -114,7 +114,7 @@ def test_rule_release_pops_and_clears_mark(tmp_path: Path, monkeypatch) -> None:
     state.held_lane = "main"
     state.held_acquire_step = "wait-for-head"
     _release_held_lane("merge-lane", a, state, log, step_name="reconciler")
-    assert all(e["change_id"] != "aaa" for e in mq.read(tmp_path))   # self popped
+    assert all(e["quest_id"] != "aaa" for e in mq.read(tmp_path))   # self popped
     assert state.held_lane is None
     assert State.load(a.state_dir).held_lane is None
     released = [e for e in log.read() if e["type"] == "lane_released"]
@@ -123,11 +123,11 @@ def test_rule_release_pops_and_clears_mark(tmp_path: Path, monkeypatch) -> None:
 
 def test_acquire_poll_reemits_lane_waiting_on_position_change(tmp_path: Path, monkeypatch) -> None:
     _seed_control(tmp_path)
-    Change.create(tmp_path, title="first", change_id="first", base_branch="main")
-    Change.create(tmp_path, title="second", change_id="second", base_branch="main")
+    Change.create(tmp_path, title="first", quest_id="first", base_branch="main")
+    Change.create(tmp_path, title="second", quest_id="second", base_branch="main")
     mq.enqueue_if_absent(tmp_path, "first", "main")    # head
     mq.enqueue_if_absent(tmp_path, "second", "main")   # 2nd ahead
-    ch = Change.create(tmp_path, title="x", change_id="feat", base_branch="main")
+    ch = Change.create(tmp_path, title="x", quest_id="feat", base_branch="main")
     mq.enqueue_if_absent(tmp_path, "feat", "main")     # 3rd -> ahead == 2
     # popping a head wakes the next head; stub the real daemon spawn.
     monkeypatch.setattr(attach_mod, "spawn_session_daemon", lambda *a, **k: None)
@@ -159,7 +159,7 @@ def test_acquire_emits_glyph_in_lane_acquired_payload(tmp_path: Path) -> None:
                 rules=(Rule(condition=None, action=Continue(), mutations=(), source=loc),),
                 on_max_retries=Pause(), max_loops=1000, source=loc,
                 acquire="merge-lane", glyph="⛙")
-    ch = Change.create(tmp_path, title="x", change_id="feat", base_branch="main")
+    ch = Change.create(tmp_path, title="x", quest_id="feat", base_branch="main")
     state, log = State.load(ch.state_dir), InMemoryEventLog()
     anyio.run(_route_acquire, step, ch, state, log, _never_returns)
     acquired = [e for e in log.read() if e["type"] == "lane_acquired"]
@@ -169,7 +169,7 @@ def test_acquire_emits_glyph_in_lane_acquired_payload(tmp_path: Path) -> None:
 
 def test_acquire_lane_acquired_payload_glyph_none_when_unset(tmp_path: Path) -> None:
     _seed_control(tmp_path)
-    ch = Change.create(tmp_path, title="x", change_id="feat", base_branch="main")
+    ch = Change.create(tmp_path, title="x", quest_id="feat", base_branch="main")
     state, log = State.load(ch.state_dir), InMemoryEventLog()
     anyio.run(_route_acquire, _acquire_step(), ch, state, log, _never_returns)
     acquired = [e for e in log.read() if e["type"] == "lane_acquired"]

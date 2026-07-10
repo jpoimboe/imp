@@ -22,18 +22,18 @@ def _rewrite_phase_label(root: Path, label: str) -> None:
 def test_create_draft_seeds_phase_label_from_first_step(tmp_path: Path) -> None:
     _seed_control(tmp_path)
     _rewrite_phase_label(tmp_path, "intake phase")
-    ch = Change.create_draft(tmp_path, title="X", change_id="phlbl1", base_branch="main")
+    ch = Change.create_draft(tmp_path, title="X", quest_id="phlbl1", base_branch="main")
     assert State.load(ch.state_dir).phase_label == "intake phase"
 
 
 def test_create_draft_phase_label_none_when_phase_unlabeled(tmp_path: Path) -> None:
     _seed_control(tmp_path)  # the seeded phase 'p' has no label
-    ch = Change.create_draft(tmp_path, title="X", change_id="phlbl0", base_branch="main")
+    ch = Change.create_draft(tmp_path, title="X", quest_id="phlbl0", base_branch="main")
     assert State.load(ch.state_dir).phase_label is None
 
 
 def _park_draft(tmp_path: Path, cid: str) -> Change:
-    ch = Change.create_draft(tmp_path, title="X", change_id=cid, base_branch="main")
+    ch = Change.create_draft(tmp_path, title="X", quest_id=cid, base_branch="main")
     st = State.load(ch.state_dir)
     st.status = "paused"
     st.save(ch.state_dir)
@@ -50,7 +50,7 @@ def test_row_for_id_labels_parked_draft(tmp_path: Path) -> None:
 
 def test_materialized_paused_change_is_not_labeled_draft(tmp_path: Path) -> None:
     _seed_control(tmp_path)
-    ch = Change.create(tmp_path, title="X", change_id="matpause", base_branch="main")
+    ch = Change.create(tmp_path, title="X", quest_id="matpause", base_branch="main")
     st = State.load(ch.state_dir)
     st.status = "paused"
     st.save(ch.state_dir)
@@ -77,6 +77,6 @@ def test_parked_draft_renders_draft_status_word(tmp_path: Path) -> None:
     _park_draft(tmp_path, "drbare")
     row = next(r for r in m._status_rows(tmp_path) if r[0] == "drbare")
     line = change_row.format_change_line(
-        change_id=row[0], title=row[4], status=row[1], step=row[2],
+        quest_id=row[0], title=row[4], status=row[1], step=row[2],
         step_label=row[6], last_iso=row[3], now=datetime.now(UTC), color=False)
     assert "draft" in line

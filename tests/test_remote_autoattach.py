@@ -15,7 +15,7 @@ def test_no_remote_config_returns_none(tmp_path: Path) -> None:
     env: dict[str, str] = {}
     dc = select_driver_config(
         SimpleNamespace(remote={}), control_root=tmp_path,
-        change_id="2026-06-13-abc", title="T", env=env)
+        quest_id="2026-06-13-abc", title="T", env=env)
     assert dc is None
     assert env == {}
 
@@ -28,7 +28,7 @@ def test_daemon_absent_still_selects_the_connector(tmp_path: Path) -> None:
     env: dict[str, str] = {}
     dc = select_driver_config(
         _telegram_config(), control_root=tmp_path,
-        change_id="2026-06-13-abc", title="T", env=env)
+        quest_id="2026-06-13-abc", title="T", env=env)
     assert dc is not None
     assert dc.command[-1] == "imp.remote.drivers.daemon_connector"
     assert env["IMP_REMOTE_CONTROL_SOCK"].endswith("remote-control.sock")
@@ -45,7 +45,7 @@ def test_live_socket_selects_the_connector_and_sets_env(tmp_path: Path) -> None:
         env: dict[str, str] = {}
         dc = select_driver_config(
             _telegram_config(), control_root=tmp_path,
-            change_id="2026-06-13-abc", title="Dark mode", env=env)
+            quest_id="2026-06-13-abc", title="Dark mode", env=env)
         assert dc is not None
         assert dc.command[-1] == "imp.remote.drivers.daemon_connector"
         assert env["IMP_REMOTE_CONTROL_SOCK"] == str(sock)

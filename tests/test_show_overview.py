@@ -53,7 +53,7 @@ def test_list_no_arg_renders_overview(tmp_path: Path, monkeypatch) -> None:
     import imp.cli.main as m
 
     _seed_control(tmp_path)
-    Change.create(tmp_path, title="Live", change_id="liveid", base_branch="main")
+    Change.create(tmp_path, title="Live", quest_id="liveid", base_branch="main")
     monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
     monkeypatch.setenv("NO_COLOR", "1")
 
@@ -71,7 +71,7 @@ def test_list_all_renders_history_block(tmp_path: Path, monkeypatch) -> None:
     from tests.test_journal_read_cli import _complete_and_archive
 
     _seed_control(tmp_path)
-    Change.create(tmp_path, title="Done", change_id="doneid", base_branch="main")
+    Change.create(tmp_path, title="Done", quest_id="doneid", base_branch="main")
     _complete_and_archive(tmp_path, "doneid")
     monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
     monkeypatch.setenv("NO_COLOR", "1")
@@ -129,7 +129,7 @@ def test_detail_card_routes_through_pager(tmp_path: Path, monkeypatch) -> None:
     import imp.cli.main as m
 
     _seed_control(tmp_path)
-    Change.create(tmp_path, title="Live", change_id="liveid", base_branch="main")
+    Change.create(tmp_path, title="Live", quest_id="liveid", base_branch="main")
     monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
 
     captured: list[tuple[list[str], bool]] = []
@@ -147,7 +147,7 @@ def test_resource_routes_through_pager(tmp_path: Path, monkeypatch) -> None:
     import imp.cli.main as m
 
     _seed_control(tmp_path)
-    Change.create(tmp_path, title="Live", change_id="liveid", base_branch="main")
+    Change.create(tmp_path, title="Live", quest_id="liveid", base_branch="main")
     monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
 
     captured: list[tuple[list[str], bool]] = []
@@ -165,7 +165,7 @@ def test_no_pager_flag_propagates_to_pager(tmp_path: Path, monkeypatch) -> None:
     import imp.cli.main as m
 
     _seed_control(tmp_path)
-    Change.create(tmp_path, title="Live", change_id="liveid", base_branch="main")
+    Change.create(tmp_path, title="Live", quest_id="liveid", base_branch="main")
     monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
 
     captured: list[bool] = []

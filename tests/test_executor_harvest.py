@@ -27,12 +27,12 @@ def _init_repo(root: Path) -> None:
     _git(root, "commit", "-qm", "seed")
 
 
-def _change(root: Path, change_id: str) -> SimpleNamespace:
+def _change(root: Path, quest_id: str) -> SimpleNamespace:
     # The harvest helper only reads .control_root, .change_dir and .id.
     return SimpleNamespace(
         control_root=root,
-        change_dir=root / ".imp" / "changes" / change_id,
-        id=change_id,
+        change_dir=root / ".imp" / "changes" / quest_id,
+        id=quest_id,
     )
 
 
@@ -80,13 +80,13 @@ class _Log:
         return ev
 
 
-def _finish_change(root: Path, change_id: str) -> SimpleNamespace:
+def _finish_change(root: Path, quest_id: str) -> SimpleNamespace:
     """A change with a non-empty artifacts/ dir so _harvest_artifacts reaches
     artifact_commit."""
-    ch = _change(root, change_id)
+    ch = _change(root, quest_id)
     spec = ch.change_dir / "artifacts" / "spec"
     spec.mkdir(parents=True)
-    (spec / f"{change_id}.md").write_text("# spec\n")
+    (spec / f"{quest_id}.md").write_text("# spec\n")
     return ch
 
 

@@ -61,7 +61,7 @@ def _spawn(events, *, on_run=None, capture=None):
 
 def _make_change(tmp_path: Path) -> Change:
     _seed_control(tmp_path)
-    return Change.create(tmp_path, title="T", change_id="prb001",
+    return Change.create(tmp_path, title="T", quest_id="prb001",
                          base_branch="main")
 
 
@@ -158,9 +158,9 @@ def test_isolated_dispatch_tears_down_on_error(
     calls: list = []
     real_destroy = wtmod.destroy_spike_worktree
 
-    def _spy(control_root, change_id, discriminator):
-        calls.append((change_id, discriminator))
-        return real_destroy(control_root, change_id, discriminator)
+    def _spy(control_root, quest_id, discriminator):
+        calls.append((quest_id, discriminator))
+        return real_destroy(control_root, quest_id, discriminator)
 
     monkeypatch.setattr(wtmod, "destroy_spike_worktree", _spy)
 

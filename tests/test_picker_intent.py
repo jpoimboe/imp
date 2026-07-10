@@ -16,7 +16,7 @@ def anyio_backend() -> str:
 
 def test_render_shows_intent_for_untitled_candidate() -> None:
     c = resume_select.Candidate(
-        change_id="c1", title="", status="draft", step="plan",
+        quest_id="c1", title="", status="draft", step="plan",
         last_iso="2026-06-01T00:00:00+00:00", intent="fix the flaky login test")
     picker = resume_select.ResumePicker(
         [c], now=datetime.now(UTC), color=False, header="pick")
@@ -38,7 +38,7 @@ async def test_pick_change_target_threads_intent(
 
     async def fake_picker(candidates, *, now, color, header, selected_index):
         captured["c"] = candidates
-        return candidates[0].change_id
+        return candidates[0].quest_id
 
     monkeypatch.setattr(m.resume_select, "run_picker", fake_picker)
     rc = await m._pick_change_target(
@@ -70,7 +70,7 @@ async def test_pick_change_target_skips_event_load_for_titled_rows(
 
     async def fake_picker(candidates, *, now, color, header, selected_index):
         captured["c"] = candidates
-        return candidates[0].change_id
+        return candidates[0].quest_id
 
     monkeypatch.setattr(m.resume_select, "run_picker", fake_picker)
 
@@ -86,7 +86,7 @@ async def test_pick_change_target_skips_event_load_for_titled_rows(
     assert "u1" in called_with, "untitled row must trigger event load"
 
     candidates = captured["c"]
-    titled = next(c for c in candidates if c.change_id == "t1")
-    untitled = next(c for c in candidates if c.change_id == "u1")
+    titled = next(c for c in candidates if c.quest_id == "t1")
+    untitled = next(c for c in candidates if c.quest_id == "u1")
     assert titled.intent is None
     assert untitled.intent == "add dark mode"

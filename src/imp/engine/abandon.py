@@ -15,7 +15,7 @@ def tear_down_change(change: Change) -> None:
     this change was the head), remove the worktree, and delete the branch; on a draft
     those three are skipped (there is no worktree, branch, or queue slot)."""
     control = change.control_root
-    change_id = change.id
+    quest_id = change.id
     base_branch = change.base_branch
     materialized = change.materialized
     with ProjectLock(change.change_dir / "lock").acquire():  # raises LockHeld if runner is live
@@ -27,24 +27,24 @@ def tear_down_change(change: Change) -> None:
         # archive before worktree removal (the runtime files live inside the worktree)
         from imp.engine import archive
         archive.archive_change(
-            control, change_id,
+            control, quest_id,
             events_path=change.events_path,
             change_json_path=change.change_dir / "change.json",
             state_json_path=change.state_dir / "state.json",
         )
     if materialized:
         # Uses RepoGitLock, independent of the per-change ProjectLock held above.
-        merge_queue.pop_and_wake(control, change_id, base_branch)
+        merge_queue.pop_and_wake(control, quest_id, base_branch)
         # branch delete after worktree removal (git forbids deleting a checked-out branch)
-        worktree.remove_worktree(control, change_id, force=True)
-        worktree.delete_branch(control, change_id)
+        worktree.remove_worktree(control, quest_id, force=True)
+        worktree.delete_branch(control, quest_id)
     shutil.rmtree(change.change_dir, ignore_errors=True)
 
 
 def archive_conversation(change: Change) -> None:
     """Archive a left conversation as resumable (paused, not abandoned); drop the live home."""
     control = change.control_root
-    change_id = change.id
+    quest_id = change.id
     base_branch = change.base_branch
     materialized = change.materialized
     with ProjectLock(change.change_dir / "lock").acquire():  # raises LockHeld if runner is live
@@ -56,7 +56,7 @@ def archive_conversation(change: Change) -> None:
             agent_id=None, type="conversation_archived", payload={})
         from imp.engine import archive
         archive.archive_change(
-            control, change_id,
+            control, quest_id,
             events_path=change.events_path,
             change_json_path=change.change_dir / "change.json",
             state_json_path=change.state_dir / "state.json",
@@ -64,9 +64,9 @@ def archive_conversation(change: Change) -> None:
             resumable=True,
         )
     if materialized:
-        merge_queue.pop_and_wake(control, change_id, base_branch)
-        worktree.remove_worktree(control, change_id, force=True)
-        worktree.delete_branch(control, change_id)
+        merge_queue.pop_and_wake(control, quest_id, base_branch)
+        worktree.remove_worktree(control, quest_id, force=True)
+        worktree.delete_branch(control, quest_id)
     shutil.rmtree(change.change_dir, ignore_errors=True)
 
 

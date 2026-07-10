@@ -29,9 +29,9 @@ def _archive_terminal(control: Path, cid: str, status: str) -> None:
 def test_match_rows_include_live_resumable(tmp_path: Path) -> None:
     # AC 8: two live resumable Changes sharing a stem are both matches.
     _seed_control(tmp_path)
-    Change.create_draft(tmp_path, title="One", change_id="lodo40",
+    Change.create_draft(tmp_path, title="One", quest_id="lodo40",
                         base_branch="main", origin="idea")
-    Change.create_draft(tmp_path, title="Two", change_id="lodo77",
+    Change.create_draft(tmp_path, title="Two", quest_id="lodo77",
                         base_branch="main", origin="idea")
     ids = {r[0] for r in m._resumable_match_rows(tmp_path, "lodo")}
     assert ids == {"lodo40", "lodo77"}
@@ -41,7 +41,7 @@ def test_match_rows_include_archived_resumable(tmp_path: Path) -> None:
     # AC 9: an archived-but-resumable "left" conversation (live home deleted,
     # archive record resumable=True) is a match by its stem.
     _seed_control(tmp_path)
-    ch = Change.create_draft(tmp_path, title="Left", change_id="lodo40",
+    ch = Change.create_draft(tmp_path, title="Left", quest_id="lodo40",
                              base_branch="main")
     archive_conversation(ch)
     assert not (tmp_path / ".imp" / "changes" / "lodo40").exists()
@@ -53,7 +53,7 @@ def test_match_rows_exclude_archived_terminal(tmp_path: Path) -> None:
     # AC 10: a live resumable + an archived completed change share the stem, but
     # only the resumable one is a match (the terminal archived id is excluded).
     _seed_control(tmp_path)
-    Change.create_draft(tmp_path, title="Live", change_id="lodo40",
+    Change.create_draft(tmp_path, title="Live", quest_id="lodo40",
                         base_branch="main", origin="idea")
     _archive_terminal(tmp_path, "lodo77", "completed")
     assert "lodo77" in archive_read.archived_ids(tmp_path)   # guard: it IS archived
@@ -63,6 +63,6 @@ def test_match_rows_exclude_archived_terminal(tmp_path: Path) -> None:
 
 def test_match_rows_empty_when_token_matches_nothing(tmp_path: Path) -> None:
     _seed_control(tmp_path)
-    Change.create_draft(tmp_path, title="One", change_id="lodo40",
+    Change.create_draft(tmp_path, title="One", quest_id="lodo40",
                         base_branch="main", origin="idea")
     assert m._resumable_match_rows(tmp_path, "zzzz") == []

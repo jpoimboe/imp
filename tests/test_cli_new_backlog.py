@@ -169,7 +169,7 @@ def test_non_backlog_non_interactive_runs_headless(
         model=None,
     ) -> int:
         captured["non_interactive"] = non_interactive
-        captured["change_id"] = change.id
+        captured["quest_id"] = change.id
         return 0
 
     monkeypatch.setattr(cli_main, "run_session_client", _fake_run_session_client)

@@ -137,7 +137,7 @@ def _status_segment(status: str, step: str, step_label: str | None,
     return f"{status} ({label})"
 
 
-def format_change_line(*, change_id: str, title: str, status: str, step: str,
+def format_change_line(*, quest_id: str, title: str, status: str, step: str,
                        step_label: str | None = None,
                        phase_label: str | None = None,
                        last_iso: str | None, now: datetime,
@@ -145,7 +145,7 @@ def format_change_line(*, change_id: str, title: str, status: str, step: str,
                        status_width: int = STATUS_W, dim: bool = False,
                        intent: str | None = None) -> str:
     raw = title.strip()
-    id_pad = f"{change_id:<{ID_W}}"
+    id_pad = f"{quest_id:<{ID_W}}"
     visible = _status_segment(status, step, step_label,
                               phase_label=phase_label, status_width=status_width)
     status_pad = f"{visible:<{status_width}}"

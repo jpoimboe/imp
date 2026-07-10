@@ -116,7 +116,7 @@ def _row(phase, step, secs, *, wait=0.0, errored=False, open_=False):
                    wait_seconds=wait, errored=errored)
 
 
-_HDR = SummaryHeader(workflow="feature", change_id="abc",
+_HDR = SummaryHeader(workflow="feature", quest_id="abc",
                      status="merged", total_seconds=2342.0)
 
 
@@ -191,7 +191,7 @@ def test_no_wait_badge_and_duration_excludes_wait():
 
 
 def test_open_trailing_step_renders_running():
-    hdr = SummaryHeader(workflow="feature", change_id="abc",
+    hdr = SummaryHeader(workflow="feature", quest_id="abc",
                         status="running", total_seconds=None)
     rows = [_row("implement", "task-lead", 0, open_=True)]
     out = render_summary(rows, header=hdr, color=False, width=80)
@@ -199,7 +199,7 @@ def test_open_trailing_step_renders_running():
 
 
 def test_open_trailing_step_on_paused_change_reflects_status():
-    hdr = SummaryHeader(workflow="feature", change_id="abc",
+    hdr = SummaryHeader(workflow="feature", quest_id="abc",
                         status="paused", total_seconds=100.0)
     rows = [_row("implement", "task-lead", 0, open_=True)]
     out = render_summary(rows, header=hdr, color=False, width=80)
@@ -547,7 +547,7 @@ def test_header_total_is_work_time_excluding_wait():
     rows = [StepRow(phase="implement", step="verify",
                     start_ts="2026-01-01T00:00:00+00:00",
                     end_ts="2026-01-01T00:02:00+00:00", wait_seconds=90.0)]
-    hdr = SummaryHeader(workflow="f", change_id="c", status="merged",
+    hdr = SummaryHeader(workflow="f", quest_id="c", status="merged",
                         total_seconds=120.0)
     out = render_summary(rows, header=hdr, color=False, width=80)
     assert "30s" in out[0]     # 120s total - 90s wait = 30s work
@@ -565,7 +565,7 @@ def test_header_rolls_up_step_tokens_and_cost():
                 end_ts="2026-01-01T00:01:00+00:00",
                 tokens=TokenTotals(input=1500), cost=0.30),
     ]
-    hdr = SummaryHeader(workflow="feature", change_id="abc", status="merged",
+    hdr = SummaryHeader(workflow="feature", quest_id="abc", status="merged",
                         total_seconds=60.0)
     out = render_summary(rows, header=hdr, color=False, width=80)
     assert "2.5k" in out[0]    # 1000 + 1500 tokens rolled up
@@ -638,7 +638,7 @@ def test_header_rollup_includes_subagent_tokens_and_cost():
                        start_ts="2026-01-01T00:00:05+00:00",
                        end_ts="2026-01-01T00:00:25+00:00",
                        tokens=TokenTotals(input=1500), cost=0.30)])
-    hdr = SummaryHeader(workflow="f", change_id="c", status="merged",
+    hdr = SummaryHeader(workflow="f", quest_id="c", status="merged",
                         total_seconds=30.0)
     out = render_summary([step], header=hdr, color=False, width=80)
     assert "2.5k" in out[0]    # 1000 step + 1500 subagent

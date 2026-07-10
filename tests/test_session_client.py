@@ -16,7 +16,7 @@ def anyio_backend() -> str:
 
 
 @pytest.mark.anyio
-async def test_client_attach_sends_change_id_and_title(tmp_path: Path) -> None:
+async def test_client_attach_sends_quest_id_and_title(tmp_path: Path) -> None:
     sock = str(tmp_path / "s.sock")
     seen: list[Attach] = []
     server = SessionSocket(sock, on_attach=lambda hello, _send: seen.append(hello))

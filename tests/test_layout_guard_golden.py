@@ -29,7 +29,7 @@ def test_observed_layout_matches_golden_and_version_is_paired(tmp_path: Path) ->
     golden_version = int(header.split("LAYOUT_VERSION:")[1].strip())
 
     _seed_control(tmp_path)
-    ch = Change.create(tmp_path, title="X", change_id="golden", base_branch="main")
+    ch = Change.create(tmp_path, title="X", quest_id="golden", base_branch="main")
     observed = _observe_layout(ch.change_dir)
 
     # structural drift fails until golden body and LAYOUT_VERSION constant are updated together

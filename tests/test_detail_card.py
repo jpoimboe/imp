@@ -17,7 +17,7 @@ def test_detail_card_backlog_source(tmp_path: Path) -> None:
     Change.create_draft(
         tmp_path,
         title="Add OAuth",
-        change_id="2026-06-16-bkg111",
+        quest_id="2026-06-16-bkg111",
         base_branch="main",
         origin="followup",
         depends_on=["2026-06-16-dep001"],
@@ -36,14 +36,14 @@ def test_detail_card_backlog_source(tmp_path: Path) -> None:
     assert "." not in created_line.split("(")[0]      # no microseconds in the timestamp part
 
 
-def _live_change(control: Path, change_id: str) -> None:
-    cdir = control / ".imp" / "changes" / change_id
+def _live_change(control: Path, quest_id: str) -> None:
+    cdir = control / ".imp" / "changes" / quest_id
     cdir.mkdir(parents=True)
     (cdir / "state").mkdir()
     (cdir / "change.json").write_text(
         json.dumps(
             {
-                "id": change_id,
+                "id": quest_id,
                 "title": "Build widget",
                 "base_branch": "main",
                 "created_at": "2026-06-20T11:00:00+00:00",
@@ -88,21 +88,21 @@ def _live_change(control: Path, change_id: str) -> None:
         )
         + "\n"
     )
-    State(id=change_id, status="paused", step="spec-writer", step_label="writing spec",
+    State(id=quest_id, status="paused", step="spec-writer", step_label="writing spec",
           phase_label="spec phase", step_attempt=0).save(cdir / "state")
 
 
-def _live_change_task_prompt(control: Path, change_id: str) -> None:
+def _live_change_task_prompt(control: Path, quest_id: str) -> None:
     """A live change whose sole user_message is the composed task prompt (no
     opening_intent, no awaiting_user_input, no interject) -- the resumed-from-
     backlog shape whose card must show no prompt dump."""
-    cdir = control / ".imp" / "changes" / change_id
+    cdir = control / ".imp" / "changes" / quest_id
     cdir.mkdir(parents=True)
     (cdir / "state").mkdir()
     (cdir / "change.json").write_text(
         json.dumps(
             {
-                "id": change_id,
+                "id": quest_id,
                 "title": "Resumed seed",
                 "base_branch": "main",
                 "created_at": "2026-06-20T11:00:00+00:00",
@@ -134,7 +134,7 @@ def _live_change_task_prompt(control: Path, change_id: str) -> None:
         )
         + "\n"
     )
-    State(id=change_id, status="paused", step="coder", step_attempt=0).save(cdir / "state")
+    State(id=quest_id, status="paused", step="coder", step_attempt=0).save(cdir / "state")
 
 
 def test_detail_card_omits_synthetic_task_prompt_opening(tmp_path: Path) -> None:

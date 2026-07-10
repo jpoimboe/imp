@@ -261,7 +261,7 @@ def test_handle_terminal_outcome_counts_warnings_from_archive_when_home_reaped(m
     )
     monkeypatch.setattr(
         main.archive_read, "read_events",
-        lambda control_root, change_id: archive_blob)
+        lambda control_root, quest_id: archive_blob)
 
     captured: dict = {}
     monkeypatch.setattr(

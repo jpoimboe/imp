@@ -13,17 +13,17 @@ from imp.assets import bundled_workflow_dir
 SCRIPTS = bundled_workflow_dir("imp") / "scripts"
 
 
-def _run_capture(script: str, root: Path, change_dir: Path, change_id: str):
+def _run_capture(script: str, root: Path, change_dir: Path, quest_id: str):
     return subprocess.run(
         ["bash", str(SCRIPTS / script)], cwd=SCRIPTS,
-        env={"IMP_PROJECT_ROOT": str(root), "IMP_CHANGE_ID": change_id,
+        env={"IMP_PROJECT_ROOT": str(root), "IMP_CHANGE_ID": quest_id,
              "IMP_CHANGE_DIR": str(change_dir), "PATH": os.environ["PATH"]},
         capture_output=True, text=True,
     )
 
 
-def _run(script: str, root: Path, change_dir: Path, change_id: str) -> int:
-    return _run_capture(script, root, change_dir, change_id).returncode
+def _run(script: str, root: Path, change_dir: Path, quest_id: str) -> int:
+    return _run_capture(script, root, change_dir, quest_id).returncode
 
 
 def _write(change_dir: Path, rel: str, body: str) -> None:

@@ -22,7 +22,7 @@ def anyio_backend() -> str:
 
 def _seed(tmp_path: Path) -> Change:
     _seed_control(tmp_path)
-    ch = Change.create(tmp_path, title="demo", change_id="feat", base_branch="main")
+    ch = Change.create(tmp_path, title="demo", quest_id="feat", base_branch="main")
     st = State.load(ch.state_dir)
     st.status = "paused"
     st.save(ch.state_dir)

@@ -11,7 +11,7 @@ from tests.conftest import _seed_control
 
 def test_list_builtin_lists_changes_before_skill_fallback(tmp_path: Path, capsys) -> None:
     _seed_control(tmp_path)
-    Change.create(tmp_path, title="Live one", change_id="live1", base_branch="main")
+    Change.create(tmp_path, title="Live one", quest_id="live1", base_branch="main")
     change = SimpleNamespace(control_root=tmp_path)
     out: list[str] = []
     result = handle_slash_line("/list", change=change, output_fn=out.append)
@@ -202,7 +202,7 @@ def test_resume_builtin_live_match_skips_rehydration(tmp_path: Path) -> None:
     from tests.conftest import _seed_control
     _seed_control(tmp_path)
     from imp.engine.change import Change
-    Change.create_draft(tmp_path, title="Live", change_id="live1", base_branch="main")
+    Change.create_draft(tmp_path, title="Live", quest_id="live1", base_branch="main")
 
     change = SimpleNamespace(control_root=tmp_path)
     out: list[str] = []

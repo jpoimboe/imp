@@ -11,38 +11,38 @@ class Subscriptions:
         self._lock = threading.Lock()
         self._subs: dict[str, set[str]] = {}
 
-    def add(self, change_id: str, replayed_ids: Iterable[str] = ()) -> None:
+    def add(self, quest_id: str, replayed_ids: Iterable[str] = ()) -> None:
         with self._lock:
-            self._subs[change_id] = set(replayed_ids)
+            self._subs[quest_id] = set(replayed_ids)
 
-    def remove(self, change_id: str) -> None:
+    def remove(self, quest_id: str) -> None:
         with self._lock:
-            self._subs.pop(change_id, None)
+            self._subs.pop(quest_id, None)
 
-    def contains(self, change_id: str) -> bool:
+    def contains(self, quest_id: str) -> bool:
         with self._lock:
-            return change_id in self._subs
+            return quest_id in self._subs
 
     def all(self) -> list[str]:
         with self._lock:
             return list(self._subs)
 
-    def seen(self, change_id: str, event_id: str) -> bool:
+    def seen(self, quest_id: str, event_id: str) -> bool:
         with self._lock:
-            ids = self._subs.get(change_id)
+            ids = self._subs.get(quest_id)
             return ids is not None and event_id in ids
 
-    def mark_seen(self, change_id: str, event_id: str) -> None:
+    def mark_seen(self, quest_id: str, event_id: str) -> None:
         with self._lock:
-            ids = self._subs.get(change_id)
+            ids = self._subs.get(quest_id)
             if ids is not None:
                 ids.add(event_id)
 
     def snapshot_and_add(
-        self, change_id: str, snapshot: Callable[[], list[dict[str, Any]]],
+        self, quest_id: str, snapshot: Callable[[], list[dict[str, Any]]],
     ) -> list[dict[str, Any]]:
         """Snapshot history + register membership/replayed-ids atomically under the lock."""
         with self._lock:
             events = snapshot()
-            self._subs[change_id] = {e["id"] for e in events}
+            self._subs[quest_id] = {e["id"] for e in events}
             return events

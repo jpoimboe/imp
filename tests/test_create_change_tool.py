@@ -16,7 +16,7 @@ from tests.conftest import _seed_control
 def _make(tmp_path: Path) -> tuple[Change, State]:
     _seed_control(tmp_path)
     ch = Change.create(tmp_path, title="Parent",
-                       change_id="2026-06-16-par111", base_branch="main")
+                       quest_id="2026-06-16-par111", base_branch="main")
     return ch, State.load(ch.state_dir)
 
 
@@ -90,9 +90,9 @@ def test_create_change_from_subagent_raises(tmp_path: Path) -> None:
 def test_create_change_avoids_live_cvcv_stem(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     # End-to-end mint guard: the tool must pass the live-stem avoid-set to
-    # new_change_id, so a minted backlog id never reuses a live CVCV stem. A
-    # site reverting to a bare new_change_id() would fail this.
-    from imp.engine import change_id
+    # new_quest_id, so a minted backlog id never reuses a live CVCV stem. A
+    # site reverting to a bare new_quest_id() would fail this.
+    from imp.engine import quest_id
 
     ch, state = _make(tmp_path)
     home = ch.control_root / ".imp" / "changes" / "kobe10"
@@ -102,7 +102,7 @@ def test_create_change_avoids_live_cvcv_stem(
     # First stem draw collides with the seeded live stem; avoidance must
     # resample past it to the next (distinct) stem.
     stems = iter(["kobe", "mira", "mira"])
-    monkeypatch.setattr(change_id, "_draw_clean_stem", lambda rng: next(stems))
+    monkeypatch.setattr(quest_id, "_draw_clean_stem", lambda rng: next(stems))
 
     get_registry()["create_change"].invoke(
         _ctx(ch, state), {"title": "T", "description": "b"})

@@ -9,7 +9,7 @@ TS0 = "2026-01-01T00:00:00+00:00"
 
 def _step_builder() -> nv.NarrativeBuilder:
     b = nv.NarrativeBuilder()
-    b.add(ev("1", "change_created", change_id=1, title="x"))
+    b.add(ev("1", "change_created", quest_id=1, title="x"))
     b.add(ev("2", "step_started", step="review", kind="agent", phase="review",
              phase_label="review phase", label="reviewing", model="m",
              timestamp=TS0))
@@ -105,7 +105,7 @@ def test_collapsed_step_line_excludes_backoff_wait() -> None:
 def test_top_level_step_breadcrumb_excludes_backoff_wait() -> None:
     from imp.cli.render_text import render_tree
     events = [
-        ev("1", "change_created", change_id=1, title="x"),
+        ev("1", "change_created", quest_id=1, title="x"),
         ev("2", "step_started", step="review", kind="agent", phase="review",
            phase_label="review phase", label="reviewing", model="m",
            timestamp="2026-01-01T00:00:00+00:00"),

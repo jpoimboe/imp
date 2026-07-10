@@ -85,7 +85,7 @@ async def bash(
     src = ctx.change or ctx.change_context
     eng = engine_env(
         project_root=ctx.project_root,
-        change_id=src.id if src else "",
+        quest_id=src.id if src else "",
         change_title=src.title if src else "",
         change_dir=(getattr(src, "change_dir", None)
                     or (Path(h) if (h := getattr(src, "change_home", None)) else None)),

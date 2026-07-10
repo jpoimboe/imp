@@ -21,9 +21,9 @@ class _Log:
         return list(self._events)
 
 
-def _draft(tmp_path: Path, change_id: str, *, exchange: bool) -> Change:
+def _draft(tmp_path: Path, quest_id: str, *, exchange: bool) -> Change:
     ch = Change.create_draft(
-        tmp_path, title="D", change_id=change_id, base_branch="main")
+        tmp_path, title="D", quest_id=quest_id, base_branch="main")
     if exchange:
         ch.event_log().append(
             agent_id=None, type="user_message",

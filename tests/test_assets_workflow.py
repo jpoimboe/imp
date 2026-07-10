@@ -944,7 +944,7 @@ def test_task_lead_coder_tier_defaults_medium_not_task_count(tmp_path: Path) -> 
 
     def render(task_total: int) -> str:
         return render_prompt(body, build_context(
-            change_title="t", event_log=log, change_id="abc",
+            change_title="t", event_log=log, quest_id="abc",
             change_home=".imp/changes/abc",
             vars={"task_total": task_total, "fast_path": False}),
             workflow_dir=bundled_workflow_dir("imp"))

@@ -7,7 +7,7 @@ from imp.remote.daemon.telegram_adapter import TelegramNorthAdapter
 from imp.remote.drivers.telegram import ConfigError
 
 
-def _noop_submit(change_id: str, text: str) -> None:
+def _noop_submit(quest_id: str, text: str) -> None:
     return None
 
 

@@ -58,8 +58,8 @@ from imp.engine.abandon import (
 )
 from imp.engine.archive import read as archive_read
 from imp.engine.awaiting_user_input import AwaitingUserInput
-from imp.engine.change import Change, live_change_ids, live_stems
-from imp.engine.change_id import new_change_id
+from imp.engine.change import Change, live_quest_ids, live_stems
+from imp.engine.quest_id import new_quest_id
 from imp.engine.errors import LayoutMismatch, LoadError, LoadErrors
 from imp.engine.events_digest import digest_event, full_line
 from imp.engine.executor import RunResult
@@ -660,17 +660,17 @@ def _cmd_init(args: argparse.Namespace) -> int:
     return 0
 
 
-def _run_header_line(change_id: str, title: str, marker: str,
+def _run_header_line(quest_id: str, title: str, marker: str,
                      *, color: bool) -> str:
     stripped = title.strip()
     tail = f" · {stripped} · {marker}" if stripped else f" · {marker}"
-    return (ansi(change_id, *pal.NODE_COLORS["change_id"], enabled=color)
+    return (ansi(quest_id, *pal.NODE_COLORS["quest_id"], enabled=color)
             + ansi(tail, "dim", enabled=color))
 
 
-def _print_run_header(change_id: str, title: str, marker: str,
+def _print_run_header(quest_id: str, title: str, marker: str,
                       *, color: bool) -> None:
-    print(_run_header_line(change_id, title, marker, color=color))
+    print(_run_header_line(quest_id, title, marker, color=color))
     print()
 
 
@@ -730,7 +730,7 @@ async def _run_cleared_session(
 
     color = should_use_color(sys.stdout)
     change = Change.create_draft(
-        control, title="", change_id=new_change_id(existing_stems=live_stems(control)),
+        control, title="", quest_id=new_quest_id(existing_stems=live_stems(control)),
         base_branch=base, origin="draft")
     _session_started = False
     try:
@@ -761,7 +761,7 @@ async def _run_cleared_session(
         driver = LiveDriver(
             stream=sys.stdout, color=color, width=_term_width,
             display_width=_display_width, status=status,
-            change_id=change.id, title=change.title)
+            quest_id=change.id, title=change.title)
         coord = InterruptCoordinator()
         solicit = make_interactive_solicit(
             change, status=status, driver=driver, coord=coord)
@@ -799,18 +799,18 @@ def _record_idea(args: argparse.Namespace, control: Path, base: str) -> int:
         return 2
     description = getattr(args, "opening", None) or ""
     seed = backlog.seed_opening({"title": title, "description": description})
-    change_id = new_change_id(existing_stems=live_stems(control))
+    quest_id = new_quest_id(existing_stems=live_stems(control))
     try:
         Change.create_draft(
-            control, title=title, change_id=change_id, base_branch=base,
+            control, title=title, quest_id=quest_id, base_branch=base,
             depends_on=list(getattr(args, "depends_on", None) or []),
             workflow=getattr(args, "workflow", None),
             origin="idea", seed_opening=seed)
     except (LoadError, LoadErrors) as e:
         print(f"imp: {e}", file=sys.stderr)
         return 2
-    print(f"imp: recorded backlog Change {change_id} "
-          f"(start it with `imp resume {change_id}`)")
+    print(f"imp: recorded backlog Change {quest_id} "
+          f"(start it with `imp resume {quest_id}`)")
     return 0
 
 
@@ -844,7 +844,7 @@ async def _run_fresh_session(
         driver = LiveDriver(stream=sys.stdout,
                             color=should_use_color(sys.stdout),
                             width=_term_width, display_width=_display_width, status=status,
-                            change_id=change.id, title=change.title)
+                            quest_id=change.id, title=change.title)
         coord = InterruptCoordinator()
         solicit = make_headless_solicit(getattr(args, "message", None), coord)
         return await run_session_client(
@@ -857,7 +857,7 @@ async def _run_fresh_session(
         driver = LiveDriver(stream=sys.stdout,
                             color=should_use_color(sys.stdout),
                             width=_term_width, display_width=_display_width, status=status,
-                            change_id=change.id, title=change.title)
+                            quest_id=change.id, title=change.title)
         if change.seed_opening:
             driver.seed_opening_intent(change.seed_opening)
         coord = InterruptCoordinator()
@@ -983,13 +983,13 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
     opening_text = seed.seed_text
     color = should_use_color(sys.stdout)
 
-    change_id = new_change_id(existing_stems=live_stems(control))
+    quest_id = new_quest_id(existing_stems=live_stems(control))
     # No auto-name: an unnamed Change has an empty title. The agent
     # names it via rename_change once intent is clear, or the user passes --title.
     title = seed.title if seed.title is not None else ""
     try:
         change = Change.create_draft(
-            control, title=title, change_id=change_id, base_branch=base,
+            control, title=title, quest_id=quest_id, base_branch=base,
             workflow=wf_arg, origin="draft",
             depends_on=None, seed_opening=None)
     except (LoadError, LoadErrors) as e:
@@ -1046,7 +1046,7 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
         driver = LiveDriver(stream=sys.stdout,
                             color=should_use_color(sys.stdout),
                             width=_term_width, display_width=_display_width, status=status,
-                            change_id=change.id, title=change.title)
+                            quest_id=change.id, title=change.title)
         coord = InterruptCoordinator()
         solicit = make_headless_solicit(getattr(args, "message", None), coord)
         return await run_session_client(
@@ -1063,7 +1063,7 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
         driver = LiveDriver(stream=sys.stdout,
                             color=should_use_color(sys.stdout),
                             width=_term_width, display_width=_display_width, status=status,
-                            change_id=change.id, title=change.title)
+                            quest_id=change.id, title=change.title)
         if change.seed_opening:
             driver.seed_opening_intent(change.seed_opening)
         coord = InterruptCoordinator()
@@ -1121,8 +1121,8 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
         non_interactive=bool(getattr(args, "non_interactive", False)))
     if isinstance(target, int):
         return target
-    change_id = target
-    loaded = _load_or_rehydrate(control, change_id)
+    quest_id = target
+    loaded = _load_or_rehydrate(control, quest_id)
     if isinstance(loaded, int):
         return loaded
     change = loaded
@@ -1154,7 +1154,7 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
                             width=_term_width, display_width=_display_width, status=status,
                             suppress_replay=True,
                             startup_verb="resuming",
-                            change_id=change.id, title=change.title)
+                            quest_id=change.id, title=change.title)
         coord = InterruptCoordinator()
         solicit = make_headless_solicit(getattr(args, "message", None), coord)
         return await run_session_client(
@@ -1180,7 +1180,7 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
                             suppress_replay=True,
                             preceded_by_blank=splash_shown,
                             startup_verb="resuming",
-                            change_id=change.id, title=change.title)
+                            quest_id=change.id, title=change.title)
         coord = InterruptCoordinator()
         solicit = make_interactive_solicit(
             change, status=status, driver=driver, coord=coord)
@@ -1226,7 +1226,7 @@ async def _resume_inert(
                                 suppress_replay=True,
                                 preceded_by_blank=True,
                                 startup_verb="resuming",
-                                change_id=change.id, title=change.title)
+                                quest_id=change.id, title=change.title)
             coord = InterruptCoordinator()
             inner = make_interactive_solicit(
                 change, status=status, driver=driver, coord=coord)
@@ -1285,14 +1285,14 @@ def _display_width() -> int:
 
 def _list_change_homes(control: Path) -> list[str]:
     """Ids of changes with a permanent root home under .imp/changes/."""
-    return live_change_ids(control)
+    return live_quest_ids(control)
 
 
-def _change_home(control: Path, change_id: str) -> Path:
-    return control / ".imp" / "changes" / change_id
+def _change_home(control: Path, quest_id: str) -> Path:
+    return control / ".imp" / "changes" / quest_id
 
 
-def _iter_change_ids(control: Path) -> list[str]:
+def _iter_quest_ids(control: Path) -> list[str]:
     """All known Change ids: permanent homes first, then archived ids not live."""
     live = _list_change_homes(control)
     seen = set(live)
@@ -1304,16 +1304,16 @@ def _iter_change_ids(control: Path) -> list[str]:
     return out
 
 
-def _title_for_id(control: Path, change_id: str) -> str | None:
+def _title_for_id(control: Path, quest_id: str) -> str | None:
     """Read a Change's current title (worktree home first, archive second)."""
-    cdir = _change_home(control, change_id)
+    cdir = _change_home(control, quest_id)
     cj = cdir / "change.json"
     if cj.exists():
         try:
             return str(json.loads(cj.read_bytes())["title"])
         except (json.JSONDecodeError, KeyError):
             return None
-    raw = archive_read.read_change_json(control, change_id)
+    raw = archive_read.read_change_json(control, quest_id)
     if raw is None:
         return None
     try:
@@ -1329,7 +1329,7 @@ def _resolve_id(control: Path, token: str) -> str:
     if not token.strip():
         print(f"imp: no Change matches {token!r}", file=sys.stderr)
         raise SystemExit(2)
-    matches = [cid for cid in _iter_change_ids(control) if token in cid]
+    matches = [cid for cid in _iter_quest_ids(control) if token in cid]
     if len(matches) == 1:
         return matches[0]
     if len(matches) > 1:
@@ -1349,7 +1349,7 @@ def _exit_ambiguous(token: str, candidates: list[str], control: Path) -> NoRetur
             print(f"  {cid}", file=sys.stderr)
             continue
         print(change_row.format_change_line(
-            change_id=row[0], title=row[4], status=row[1], step=row[2],
+            quest_id=row[0], title=row[4], status=row[1], step=row[2],
             step_label=row[6], last_iso=row[3], now=now, color=color,
             name_width=change_row.name_budget()), file=sys.stderr)
     raise SystemExit(2)
@@ -1370,36 +1370,36 @@ def _parse_jsonl(raw: bytes) -> list[dict[str, Any]]:
     return out
 
 
-def _show_artifact(control: Path, change_id: str, rel: str) -> bytes | None:
-    live = _change_home(control, change_id) / "artifacts" / rel
+def _show_artifact(control: Path, quest_id: str, rel: str) -> bytes | None:
+    live = _change_home(control, quest_id) / "artifacts" / rel
     if live.is_file():
         return live.read_bytes()
-    return archive_read.read_artifact(control, change_id, rel)
+    return archive_read.read_artifact(control, quest_id, rel)
 
 
-def _show_newest_plan_rel(control: Path, change_id: str) -> str | None:
+def _show_newest_plan_rel(control: Path, quest_id: str) -> str | None:
     """plans/<id>-plan-N.md for the highest N: live worktree first, then the
     retained wip ref. Returns None when no plan exists anywhere."""
-    live_dir = _change_home(control, change_id) / "artifacts" / "plans"
+    live_dir = _change_home(control, quest_id) / "artifacts" / "plans"
     if live_dir.is_dir():
         pick = archive_read.pick_newest_plan(
-            change_id, [p.name for p in live_dir.iterdir() if p.is_file()])
+            quest_id, [p.name for p in live_dir.iterdir() if p.is_file()])
         if pick:
             return f"plans/{pick}"
-    pick = archive_read.newest_plan_name(control, change_id)
+    pick = archive_read.newest_plan_name(control, quest_id)
     if pick:
         return f"plans/{pick}"
     return None
 
 
-def _show_runtime(control: Path, change_id: str, name: str) -> bytes | None:
-    change = _change_home(control, change_id)
+def _show_runtime(control: Path, quest_id: str, name: str) -> bytes | None:
+    change = _change_home(control, quest_id)
     live = change / "state" / "state.json" if name == "state.json" else change / name
     if live.is_file():
         return live.read_bytes()
     if name == "state.json":
-        return archive_read.read_state_json(control, change_id)
-    return archive_read.read_events(control, change_id)
+        return archive_read.read_state_json(control, quest_id)
+    return archive_read.read_events(control, quest_id)
 
 
 def _user_message_text(payload: dict[str, Any]) -> str:
@@ -1450,13 +1450,13 @@ def _resolve_intent(events: list[dict[str, Any]]) -> str | None:
     return _first_genuine_human_turn(events)
 
 
-def _change_meta(control: Path, change_id: str) -> dict[str, Any] | None:
-    cdir = _change_home(control, change_id)
+def _change_meta(control: Path, quest_id: str) -> dict[str, Any] | None:
+    cdir = _change_home(control, quest_id)
     raw: bytes | None
     if (cdir / "change.json").exists():
         raw = (cdir / "change.json").read_bytes()
     else:
-        raw = archive_read.read_change_json(control, change_id)
+        raw = archive_read.read_change_json(control, quest_id)
     if raw is None:
         return None
     try:
@@ -1483,7 +1483,7 @@ def _is_backlog_home(
     )
 
 
-def _unstarted_backlog_meta(control: Path, change_id: str) -> dict[str, Any] | None:
+def _unstarted_backlog_meta(control: Path, quest_id: str) -> dict[str, Any] | None:
     """change.json of a LIVE un-materialized, non-draft-origin, never-conversed,
     unlocked Backlog home (idea or followup) — sourced from the worktree home
     only, never the archive: an abandoned home leaves an archived
@@ -1491,7 +1491,7 @@ def _unstarted_backlog_meta(control: Path, change_id: str) -> dict[str, Any] | N
     `status: backlog` brief instead of a History item. None for any archived-only
     id or any home the shared backlog predicate rejects (materialized,
     draft-origin, already-conversed, or lock-live)."""
-    cdir = _change_home(control, change_id)
+    cdir = _change_home(control, quest_id)
     cj = cdir / "change.json"
     if not cj.exists():
         return None
@@ -1502,7 +1502,7 @@ def _unstarted_backlog_meta(control: Path, change_id: str) -> dict[str, Any] | N
     if meta.get("materialized", True):
         return None  # materialized homes are never Backlog; skip the event-log read
     try:
-        change = Change.load(control, change_id)
+        change = Change.load(control, quest_id)
     except (LoadError, LoadErrors):
         return None
     conversed = _first_user_message(list(change.event_log().read())) is not None
@@ -1537,12 +1537,12 @@ def _backlog_card(meta: dict[str, Any], control: Path, *, now: datetime) -> list
     return lines
 
 
-def _change_card(control: Path, change_id: str, *, now: datetime) -> list[str]:
-    row = _row_for_id(control, change_id)
+def _change_card(control: Path, quest_id: str, *, now: datetime) -> list[str]:
+    row = _row_for_id(control, quest_id)
     if row is None:
         return []
     _id, status, step, last, title, created, step_label, phase_label = row
-    events = _load_events_for_id(control, change_id) or []
+    events = _load_events_for_id(control, quest_id) or []
     lines = [
         f"id:            {_id}",
         f"title:         {title.strip() or '(unnamed)'}",
@@ -1556,7 +1556,7 @@ def _change_card(control: Path, change_id: str, *, now: datetime) -> list[str]:
         f"created:       {change_row.format_timestamp(created)} "
         f"({change_row.relative_age(created, now=now)})")
     lines.append(f"last activity: {change_row.relative_age(last, now=now)}")
-    meta = _change_meta(control, change_id) or {}
+    meta = _change_meta(control, quest_id) or {}
     if meta.get("base_branch"):
         lines.append(f"base_branch:   {meta['base_branch']}")
     if meta.get("depends_on"):
@@ -1565,7 +1565,7 @@ def _change_card(control: Path, change_id: str, *, now: datetime) -> list[str]:
     if opening:
         lines.append("")
         lines.append(opening)
-    summary = _show_artifact(control, change_id, f"summary/{change_id}.md")
+    summary = _show_artifact(control, quest_id, f"summary/{quest_id}.md")
     if summary:
         lines.append("")
         lines.extend(
@@ -1573,11 +1573,11 @@ def _change_card(control: Path, change_id: str, *, now: datetime) -> list[str]:
     return lines
 
 
-def _detail_card(control: Path, change_id: str, *, now: datetime) -> list[str]:
-    meta = _unstarted_backlog_meta(control, change_id)
+def _detail_card(control: Path, quest_id: str, *, now: datetime) -> list[str]:
+    meta = _unstarted_backlog_meta(control, quest_id)
     if meta is not None:
         return _backlog_card(meta, control, now=now)
-    return _change_card(control, change_id, now=now)
+    return _change_card(control, quest_id, now=now)
 
 
 def _cmd_list(args: argparse.Namespace) -> int:
@@ -1603,22 +1603,22 @@ def _cmd_show(args: argparse.Namespace) -> int:
         picked = anyio.run(_pick_show_target, control)
         if isinstance(picked, int):
             return picked
-        change_id = picked
+        quest_id = picked
     else:
         # Same comprehension as _resolve_id — picker and resolver agree on candidates.
-        matches = [cid for cid in _iter_change_ids(control) if token in cid]
+        matches = [cid for cid in _iter_quest_ids(control) if token in cid]
         if _interactive() and token.strip() and len(matches) >= 2:
             picked = anyio.run(_pick_show_matches, control, matches)
             if isinstance(picked, int):
                 return picked
-            change_id = picked
+            quest_id = picked
         else:
             try:
-                change_id = _resolve_id(control, token)
+                quest_id = _resolve_id(control, token)
             except SystemExit:
                 return 2
     resource = args.resource
-    meta = _unstarted_backlog_meta(control, change_id)
+    meta = _unstarted_backlog_meta(control, quest_id)
     if meta is not None:
         if resource is None:
             _page_or_print(_backlog_card(meta, control, now=datetime.now(UTC)),
@@ -1627,24 +1627,24 @@ def _cmd_show(args: argparse.Namespace) -> int:
         if resource == "status":
             _page_or_print(["backlog"], no_pager=args.no_pager)
             return 0
-        print(f"imp: {change_id} is in the backlog (not started); "
+        print(f"imp: {quest_id} is in the backlog (not started); "
               f"no {resource} yet", file=sys.stderr)
         return 2
     if resource is None:
-        _page_or_print(_detail_card(control, change_id, now=datetime.now(UTC)),
+        _page_or_print(_detail_card(control, quest_id, now=datetime.now(UTC)),
                        no_pager=args.no_pager)
         return 0
     if resource == "spec":
-        data = _show_artifact(control, change_id, f"spec/{change_id}.md")
+        data = _show_artifact(control, quest_id, f"spec/{quest_id}.md")
     elif resource == "summary":
-        data = _show_artifact(control, change_id, f"summary/{change_id}.md")
+        data = _show_artifact(control, quest_id, f"summary/{quest_id}.md")
     elif resource == "plan":
-        rel = _show_newest_plan_rel(control, change_id)
-        data = _show_artifact(control, change_id, rel) if rel else None
+        rel = _show_newest_plan_rel(control, quest_id)
+        data = _show_artifact(control, quest_id, rel) if rel else None
     elif resource == "events":
-        events = _load_events_for_id(control, change_id)
+        events = _load_events_for_id(control, quest_id)
         if events is None:
-            print(f"imp: no events for {change_id!r}", file=sys.stderr)
+            print(f"imp: no events for {quest_id!r}", file=sys.stderr)
             return 2
         events = _filter_events(
             events, types=args.type, agent=args.agent, limit=args.limit)
@@ -1652,22 +1652,22 @@ def _cmd_show(args: argparse.Namespace) -> int:
         _page_or_print([render(e) for e in events], no_pager=args.no_pager)
         return 0
     elif resource == "status":
-        raw = _show_runtime(control, change_id, "state.json")
+        raw = _show_runtime(control, quest_id, "state.json")
         if raw is None:
-            print(f"imp: no state for {change_id!r}", file=sys.stderr)
+            print(f"imp: no state for {quest_id!r}", file=sys.stderr)
             return 2
         _page_or_print([json.loads(raw).get("status", "unknown")],
                        no_pager=args.no_pager)
         return 0
     if data is None:
-        print(f"imp: no {resource} for {change_id!r}", file=sys.stderr)
+        print(f"imp: no {resource} for {quest_id!r}", file=sys.stderr)
         return 2
     _page_or_print(data.decode("utf-8", errors="replace").splitlines(),
                    no_pager=args.no_pager)
     return 0
 
 
-def _load_events_for_id(control: Path, change_id: str) -> list[dict[str, Any]] | None:
+def _load_events_for_id(control: Path, quest_id: str) -> list[dict[str, Any]] | None:
     """Worktree first, archive second. Returns None if the id is in neither.
 
     Worktree-first is necessary, not merely preferred: an id lives in exactly
@@ -1675,12 +1675,12 @@ def _load_events_for_id(control: Path, change_id: str) -> list[dict[str, Any]] |
     removal), so the only overlap is a crash mid-sequence where worktree-first
     harmlessly returns identical content."""
     try:
-        change = Change.load(control, change_id)
+        change = Change.load(control, quest_id)
     except LoadError:
         change = None
     if change is not None:
         return list(change.event_log().read())
-    raw = archive_read.read_events(control, change_id)
+    raw = archive_read.read_events(control, quest_id)
     if raw is None:
         return None
     return _parse_jsonl(raw)
@@ -1881,17 +1881,17 @@ class _EventTail:
 _FOLLOW_TERMINAL = frozenset({"completed", "abandoned", "saved"})
 
 
-def _follow_paused_status(change_id: str) -> Callable[[int], list[str]]:
+def _follow_paused_status(quest_id: str) -> Callable[[int], list[str]]:
     """A static one-row footer composer shown while the run is paused."""
-    line = f"paused — resume with imp resume {change_id}"
+    line = f"paused — resume with imp resume {quest_id}"
     return lambda frame: [line]
 
 
 def _drain_from_archive(driver: LiveDriver, tail: _EventTail,
-                        control: Path, change_id: str) -> int:
+                        control: Path, quest_id: str) -> int:
     """The home vanished mid-follow: feed the archived events beyond the count
     already emitted (none if the id is not archived), finish, and exit 0."""
-    raw = archive_read.read_events(control, change_id)
+    raw = archive_read.read_events(control, quest_id)
     if raw is not None:
         for event in _parse_jsonl(raw)[tail.emitted:]:
             driver.on_event(event)
@@ -1900,19 +1900,19 @@ def _drain_from_archive(driver: LiveDriver, tail: _EventTail,
 
 
 def _follow_step(driver: LiveDriver, tail: _EventTail, status: LiveStatus,
-                 control: Path, change_id: str, home: Path) -> int | None:
+                 control: Path, quest_id: str, home: Path) -> int | None:
     """One poll iteration. Feeds newly-appended events through the driver and
     drives the footer from the lock's liveness. Returns an exit code when the
     follow should stop (terminal status, or the home vanished into the archive),
     else None to keep polling."""
     if not home.exists():
-        return _drain_from_archive(driver, tail, control, change_id)
+        return _drain_from_archive(driver, tail, control, quest_id)
     for event in tail.read_new():
         driver.on_event(event)
     try:
         state_status = State.load(home / "state").status
     except FileNotFoundError:
-        return _drain_from_archive(driver, tail, control, change_id)
+        return _drain_from_archive(driver, tail, control, quest_id)
     if state_status in _FOLLOW_TERMINAL:
         for event in tail.read_new():
             driver.on_event(event)
@@ -1921,14 +1921,14 @@ def _follow_step(driver: LiveDriver, tail: _EventTail, status: LiveStatus,
     if lock_is_live(home / "lock"):
         status.update(driver.compose_status)
     else:
-        status.update(_follow_paused_status(change_id))
+        status.update(_follow_paused_status(quest_id))
     return None
 
 
 _FOLLOW_POLL_INTERVAL = 0.3
 
 
-def _follow_live(control: Path, change_id: str, home: Path) -> int:
+def _follow_live(control: Path, quest_id: str, home: Path) -> int:
     """Replay a live Change's narrative through LiveDriver, then tail
     events.jsonl until a terminal status or the home is archived away. Ctrl-C
     clears the footer and exits 130."""
@@ -1939,7 +1939,7 @@ def _follow_live(control: Path, change_id: str, home: Path) -> int:
     tail = _EventTail(home / "events.jsonl")
     try:
         return anyio.run(
-            _follow_poll_loop, driver, tail, status, control, change_id, home)
+            _follow_poll_loop, driver, tail, status, control, quest_id, home)
     except KeyboardInterrupt:
         status.reset()
         return 130
@@ -1947,7 +1947,7 @@ def _follow_live(control: Path, change_id: str, home: Path) -> int:
 
 async def _follow_poll_loop(
     driver: LiveDriver, tail: _EventTail, status: LiveStatus,
-    control: Path, change_id: str, home: Path,
+    control: Path, quest_id: str, home: Path,
 ) -> int:
     """Advance the spinner (LiveStatus.tick) concurrently with a poll loop that
     feeds new events and checks exit conditions every _FOLLOW_POLL_INTERVAL."""
@@ -1955,7 +1955,7 @@ async def _follow_poll_loop(
     async with anyio.create_task_group() as tg:
         tg.start_soon(status.tick)
         while True:
-            step = _follow_step(driver, tail, status, control, change_id, home)
+            step = _follow_step(driver, tail, status, control, quest_id, home)
             if step is not None:
                 rc = step
                 break
@@ -1976,40 +1976,40 @@ def _cmd_log(args: argparse.Namespace) -> int:
                   f"argument {conflict}", file=sys.stderr)
             return 2
         args.no_pager = True
-    change_id: str | None
+    quest_id: str | None
     if args.token is not None:
         try:
-            change_id = _resolve_id(control, args.token)
+            quest_id = _resolve_id(control, args.token)
         except SystemExit:
             return 2
     elif _interactive():
         target = anyio.run(_pick_log_target, control)
         if isinstance(target, int):
             return target
-        change_id = target
+        quest_id = target
     else:
-        change_id = _resolve_default_id(control)
-    if change_id is None:
+        quest_id = _resolve_default_id(control)
+    if quest_id is None:
         print(_NO_CHANGES_MESSAGE)
         return 0
-    meta = _unstarted_backlog_meta(control, change_id)
+    meta = _unstarted_backlog_meta(control, quest_id)
     if meta is not None:
         lines: Iterable[str] = _backlog_card(meta, control, now=datetime.now(UTC))
         _page_or_print(lines, no_pager=args.no_pager)
         return 0
-    events = _load_events_for_id(control, change_id)
+    events = _load_events_for_id(control, quest_id)
     if events is None:
-        print(f"imp: no such Change {change_id!r}", file=sys.stderr)
+        print(f"imp: no such Change {quest_id!r}", file=sys.stderr)
         return 2
 
     if args.follow:
-        home = _change_home(control, change_id)
+        home = _change_home(control, quest_id)
         if home.exists():
-            return _follow_live(control, change_id, home)
+            return _follow_live(control, quest_id, home)
         return _follow_log(events)
 
     if args.html is not None or args.md is not None:
-        return _write_log_export(args, control, change_id, events)
+        return _write_log_export(args, control, quest_id, events)
 
     width = _term_width()
     color = should_use_color(sys.stdout)
@@ -2021,10 +2021,10 @@ def _cmd_log(args: argparse.Namespace) -> int:
             render_summary,
             summary_total,
         )
-        row = _row_for_id(control, change_id)
+        row = _row_for_id(control, quest_id)
         status = row[1] if row is not None else "?"
         workflow = parse_default_workflow(control / "imp" / "project.yaml")
-        header = SummaryHeader(workflow=workflow, change_id=change_id,
+        header = SummaryHeader(workflow=workflow, quest_id=quest_id,
                                status=status, total_seconds=summary_total(events))
         lines = render_summary(build_summary(events), header=header,
                                color=color, width=width)
@@ -2039,7 +2039,7 @@ def _cmd_log(args: argparse.Namespace) -> int:
 
 
 def _write_log_export(args: argparse.Namespace, control: Path,
-                      change_id: str, events: list[dict[str, Any]]) -> int:
+                      quest_id: str, events: list[dict[str, Any]]) -> int:
     if args.summary:
         from imp.cli.render_markdown import render_summary_markdown
         from imp.cli.render_summary import (
@@ -2047,10 +2047,10 @@ def _write_log_export(args: argparse.Namespace, control: Path,
             build_summary,
             summary_total,
         )
-        row = _row_for_id(control, change_id)
+        row = _row_for_id(control, quest_id)
         status = row[1] if row is not None else "?"
         workflow = parse_default_workflow(control / "imp" / "project.yaml")
-        header = SummaryHeader(workflow=workflow, change_id=change_id,
+        header = SummaryHeader(workflow=workflow, quest_id=quest_id,
                                status=status, total_seconds=summary_total(events))
         document = render_summary_markdown(build_summary(events), header=header)
     else:
@@ -2068,7 +2068,7 @@ def _write_log_export(args: argparse.Namespace, control: Path,
     if target == "-":
         sys.stdout.write(document)
         return 0
-    path = Path(f"imp-log-{change_id}.{ext}") if target is _LOG_EXPORT_DEFAULT else Path(target)
+    path = Path(f"imp-log-{quest_id}.{ext}") if target is _LOG_EXPORT_DEFAULT else Path(target)
     path.write_text(document, encoding="utf-8")
     print(path)
     return 0
@@ -2134,49 +2134,49 @@ def _last_event_iso(events_path: Path) -> str | None:
     return _iso_from_line(line.decode("utf-8", errors="replace"))
 
 
-def _journal_last_iso(control: Path, change_id: str) -> str | None:
-    return archive_read.last_event_ts(control, change_id)
+def _journal_last_iso(control: Path, quest_id: str) -> str | None:
+    return archive_read.last_event_ts(control, quest_id)
 
 
-def _journal_status(control: Path, change_id: str) -> str | None:
-    return archive_read.status_of(control, change_id)
+def _journal_status(control: Path, quest_id: str) -> str | None:
+    return archive_read.status_of(control, quest_id)
 
 
-def _resume_gone(control: Path, change_id: str) -> int:
-    status = _journal_status(control, change_id)
-    title = _title_for_id(control, change_id) or change_id
+def _resume_gone(control: Path, quest_id: str) -> int:
+    status = _journal_status(control, quest_id)
+    title = _title_for_id(control, quest_id) or quest_id
     if status == "abandoned":
         print(f"{title} was abandoned; nothing to resume.")
         return 0
     if status is not None:
         print(f"{title} is already completed; nothing to resume.")
         return 0
-    print(f"imp: no Change matches {change_id!r}", file=sys.stderr)
+    print(f"imp: no Change matches {quest_id!r}", file=sys.stderr)
     return 2
 
 
-def _rehydrate_resumable(control: Path, change_id: str) -> Change | None:
+def _rehydrate_resumable(control: Path, quest_id: str) -> Change | None:
     from imp.engine.archive import record, records_root
-    rec = record.read_record(records_root(control), change_id)
+    rec = record.read_record(records_root(control), quest_id)
     if rec is None or not rec.get("resumable"):
         return None
     try:
-        archive_read.rehydrate_change(control, change_id)
-        return Change.load(control, change_id)
+        archive_read.rehydrate_change(control, quest_id)
+        return Change.load(control, quest_id)
     except (FileExistsError, LoadError, LoadErrors):
         return None
 
 
-def _load_or_rehydrate(control: Path, change_id: str) -> Change | int:
+def _load_or_rehydrate(control: Path, quest_id: str) -> Change | int:
     try:
-        return Change.load(control, change_id)
+        return Change.load(control, quest_id)
     except LayoutMismatch as e:
         print(f"imp: {e}", file=sys.stderr)
         return 2
     except (LoadError, LoadErrors):
-        change = _rehydrate_resumable(control, change_id)
+        change = _rehydrate_resumable(control, quest_id)
         if change is None:
-            return _resume_gone(control, change_id)
+            return _resume_gone(control, quest_id)
         return change
 
 
@@ -2217,7 +2217,7 @@ class _HomeScan(NamedTuple):
     is missing or malformed are dropped from the scan, so meta is always valid);
     has_user_message records whether events.jsonl holds any user_message event,
     the conversed signal the shared backlog predicate consumes."""
-    change_id: str
+    quest_id: str
     change_json: bytes
     state_json: bytes | None
     meta: dict[str, Any]
@@ -2249,8 +2249,8 @@ def _scan_change_homes(control: Path) -> list[_HomeScan]:
     """Read and parse every live change home once, so the overview's three row
     builders share a single pass instead of re-reading each home three times."""
     scanned: list[_HomeScan] = []
-    for change_id in _list_change_homes(control):
-        cdir = _change_home(control, change_id)
+    for quest_id in _list_change_homes(control):
+        cdir = _change_home(control, quest_id)
         try:
             change_json = (cdir / "change.json").read_bytes()
             meta = json.loads(change_json)
@@ -2263,11 +2263,11 @@ def _scan_change_homes(control: Path) -> list[_HomeScan]:
         last_iso = _last_event_iso(cdir / "events.jsonl") or ""
         has_um = _events_have_user_message(cdir / "events.jsonl")
         scanned.append(
-            _HomeScan(change_id, change_json, state_json, meta, last_iso, has_um))
+            _HomeScan(quest_id, change_json, state_json, meta, last_iso, has_um))
     return scanned
 
 
-def _status_row(change_id: str, state_json: bytes, change_json: bytes,
+def _status_row(quest_id: str, state_json: bytes, change_json: bytes,
                 last_activity: str) -> _Row | None:
     """Pure (id, status, step, last_activity, title, created_at) extractor, fed
     by either worktree file bytes or archive bytes. The archived state.json and
@@ -2278,15 +2278,15 @@ def _status_row(change_id: str, state_json: bytes, change_json: bytes,
     try:
         st = json.loads(state_json)
         meta = json.loads(change_json)
-        return (change_id, st["status"], st.get("step") or "-", last_activity,
+        return (quest_id, st["status"], st.get("step") or "-", last_activity,
                 meta["title"], meta["created_at"], st.get("step_label"),
                 st.get("phase_label"))
     except (json.JSONDecodeError, KeyError, TypeError):
         return None
 
 
-def _row_for_id(control: Path, change_id: str) -> _Row | None:
-    cdir = _change_home(control, change_id)
+def _row_for_id(control: Path, quest_id: str) -> _Row | None:
+    cdir = _change_home(control, quest_id)
     # archive_read returns bytes | None; the live change-home branch always finds
     # the files. Annotate so the None-guard below stays reachable (not dead code).
     state_json: bytes | None
@@ -2303,12 +2303,12 @@ def _row_for_id(control: Path, change_id: str) -> _Row | None:
             return None
         last = _last_event_iso(cdir / "events.jsonl") or ""
     else:
-        state_json = archive_read.read_state_json(control, change_id)
-        change_json = archive_read.read_change_json(control, change_id)
+        state_json = archive_read.read_state_json(control, quest_id)
+        change_json = archive_read.read_change_json(control, quest_id)
         if state_json is None or change_json is None:
             return None
-        last = _journal_last_iso(control, change_id) or ""
-    row = _status_row(change_id, state_json, change_json, last)
+        last = _journal_last_iso(control, quest_id) or ""
+    row = _status_row(quest_id, state_json, change_json, last)
     if row is None:
         return None
     materialized = json.loads(change_json).get("materialized", True)
@@ -2322,11 +2322,11 @@ def _status_rows(control: Path, scanned: list[_HomeScan] | None = None) -> list[
     for h in homes:
         if h.state_json is None:
             continue
-        cdir = _change_home(control, h.change_id)
+        cdir = _change_home(control, h.quest_id)
         if _is_backlog_home(h.meta, conversed=h.has_user_message,
                             lock_live=lambda: lock_is_live(cdir / "lock")):  # noqa: B023
             continue  # un-materialized, never-conversed, unlocked seed -> Backlog
-        row = _status_row(h.change_id, h.state_json, h.change_json, h.last_iso)
+        row = _status_row(h.quest_id, h.state_json, h.change_json, h.last_iso)
         if row is None:
             continue
         status = resolve_display_status(
@@ -2434,7 +2434,7 @@ def _resume_picker_non_tty(rows: list[_Row]) -> str | int:
     name_w = change_row.name_budget()
     for r in rows:
         print(change_row.format_change_line(
-            change_id=r[0], title=r[4], status=r[1], step=r[2], step_label=r[6],
+            quest_id=r[0], title=r[4], status=r[1], step=r[2], step_label=r[6],
             last_iso=r[3], now=now, color=color, name_width=name_w), file=sys.stderr)
     return 2
 
@@ -2454,7 +2454,7 @@ async def _pick_change_target(
     if len(rows) == 1:
         return rows[0][0]
     candidates = [resume_select.Candidate(
-        change_id=r[0], title=r[4], status=r[1], step=r[2], last_iso=r[3],
+        quest_id=r[0], title=r[4], status=r[1], step=r[2], last_iso=r[3],
         step_label=r[6],
         intent=(_resolve_intent(_load_events_for_id(control, r[0]) or [])
                 if not r[4].strip() else None))
@@ -2505,14 +2505,14 @@ async def _resolve_resume_target(
         return 2
 
 
-def _deliver_abandon_resident(control: Path, change_id: str) -> None:
+def _deliver_abandon_resident(control: Path, quest_id: str) -> None:
     from imp.remote.session.client import SessionClient
     from imp.remote.session.discover import session_socket_path
     from imp.remote.session.protocol import CONTROL_ABANDON
 
     async def _run() -> None:
-        path = str(session_socket_path(control, change_id))
-        client = SessionClient(path, change_id, "", on_event=lambda _: None)
+        path = str(session_socket_path(control, quest_id))
+        client = SessionClient(path, quest_id, "", on_event=lambda _: None)
         await client.connect()
         try:
             await client.send_control(CONTROL_ABANDON)
@@ -2524,7 +2524,7 @@ def _deliver_abandon_resident(control: Path, change_id: str) -> None:
     anyio.run(_run)
 
 
-def _abandon(control: Path, change_id: str, *, yes: bool = False) -> int:
+def _abandon(control: Path, quest_id: str, *, yes: bool = False) -> int:
     """Tear down a Change (worktree, branch, state) as one logged operation.
 
     Order is pinned by git (spec §2): archive the runtime snapshot BEFORE
@@ -2532,13 +2532,13 @@ def _abandon(control: Path, change_id: str, *, yes: bool = False) -> int:
     (git refuses to delete a branch checked out in a worktree). Idempotent /
     crash-tolerant: re-running after any mid-sequence crash converges."""
     try:
-        change = Change.load(control, change_id)
+        change = Change.load(control, quest_id)
     except (LoadError, LoadErrors):
         # No live or un-materialized change-home: Change.load failed because the
         # home directory is absent (already fully torn down, or never existed).
         # Idempotent teardown — reap a possibly-orphaned branch and exit 0.
-        worktree.delete_branch(control, change_id)
-        print(f"Change {change_id} already gone; ensured branch imp/{change_id} is removed.")
+        worktree.delete_branch(control, quest_id)
+        print(f"Change {quest_id} already gone; ensured branch imp/{quest_id} is removed.")
         return 0
 
     token = change.id
@@ -2550,9 +2550,9 @@ def _abandon(control: Path, change_id: str, *, yes: bool = False) -> int:
         if input("Type 'y' to confirm: ").strip().lower() not in ("y", "yes"):
             print(f"Left {token} in place.")
             return 0
-    if session_is_resident(control, change_id):
+    if session_is_resident(control, quest_id):
         try:
-            _deliver_abandon_resident(control, change_id)
+            _deliver_abandon_resident(control, quest_id)
         except OSError:
             pass  # daemon gone, wedged, or startup-window hang (TimeoutError ⊂ OSError)
         else:
@@ -2561,7 +2561,7 @@ def _abandon(control: Path, change_id: str, *, yes: bool = False) -> int:
     try:
         tear_down_change(change)
     except LockHeld as e:
-        print(f"imp: Change {change_id} is running (pid {e.held_by_pid or '?'}); "
+        print(f"imp: Change {quest_id} is running (pid {e.held_by_pid or '?'}); "
               f"stop it before abandoning", file=sys.stderr)
         return 2
     print(f"Abandoned {token}.")
@@ -2644,11 +2644,11 @@ def _show_picker_non_tty(rows: list[_Row]) -> int:
 
 
 def _show_all_rows(control: Path) -> list[_Row]:
-    """Display rows for the no-token show picker: every _iter_change_ids id
+    """Display rows for the no-token show picker: every _iter_quest_ids id
     (live homes + backlog + archived), via _row_for_id, unreadable ids
     dropped, newest-first — the same pool `imp show <exact-id>` reaches."""
     rows = [r for r in (_row_for_id(control, cid)
-                        for cid in _iter_change_ids(control)) if r is not None]
+                        for cid in _iter_quest_ids(control)) if r is not None]
     return _sort_rows_newest_first(rows)
 
 
@@ -2663,7 +2663,7 @@ async def _pick_show_target(control: Path) -> str | int:
 
 
 async def _pick_show_matches(control: Path, matches: list[str]) -> str | int:
-    """Scoped show picker over a token's raw _iter_change_ids matches (>=2).
+    """Scoped show picker over a token's raw _iter_quest_ids matches (>=2).
 
     `matches` is the raw id list (the exact set the ambiguity fork counted);
     display rows come from _row_for_id, so an unreadable id is dropped from the
@@ -2681,7 +2681,7 @@ async def _pick_show_matches(control: Path, matches: list[str]) -> str | int:
         name_w = change_row.name_budget()
         for r in rows:
             print(change_row.format_change_line(
-                change_id=r[0], title=r[4], status=r[1], step=r[2],
+                quest_id=r[0], title=r[4], status=r[1], step=r[2],
                 step_label=r[6], last_iso=r[3], now=now, color=color,
                 name_width=name_w), file=sys.stderr)
         return 2
@@ -2713,7 +2713,7 @@ def _cmd_abandon(args: argparse.Namespace) -> int:
     if len(matches) == 1:
         return _abandon(control, matches[0][0], yes=yes)
     try:
-        change_id = _resolve_id(control, token)
+        quest_id = _resolve_id(control, token)
     except SystemExit:
         # No live/backlog match, and _resolve_id found nothing live either. A
         # Change whose worktree was already removed (crash between abandon's
@@ -2728,13 +2728,13 @@ def _cmd_abandon(args: argparse.Namespace) -> int:
         # Truly unknown (never existed, or ambiguous) — nothing to reap.
         print(f"imp: no Change matches {token!r}", file=sys.stderr)
         return 2
-    return _abandon(control, change_id, yes=yes)
+    return _abandon(control, quest_id, yes=yes)
 
 
 def _cmd_edit(args: argparse.Namespace) -> int:
     control = _control_root()
-    change_id = _resolve_id(control, args.token)
-    change = Change.load(control, change_id)
+    quest_id = _resolve_id(control, args.token)
+    change = Change.load(control, quest_id)
 
     zone_change = args.backlog or args.active
     dep_change = args.depends_on is not None or args.clear_deps
@@ -2744,7 +2744,7 @@ def _cmd_edit(args: argparse.Namespace) -> int:
         return 2
 
     if zone_change and change.materialized:
-        print(f"imp: {change_id} is already built; zone moves apply to "
+        print(f"imp: {quest_id} is already built; zone moves apply to "
               "un-materialized changes only (use abandon/pause instead)",
               file=sys.stderr)
         return 2
@@ -2769,7 +2769,7 @@ def _backlog_rows(control: Path, scanned: list[_HomeScan] | None = None) -> list
     rows: list[_Row] = []
     for h in homes:
         meta = h.meta
-        cdir = _change_home(control, h.change_id)
+        cdir = _change_home(control, h.quest_id)
         if not _is_backlog_home(meta, conversed=h.has_user_message,
                                 lock_live=lambda: lock_is_live(cdir / "lock")):  # noqa: B023
             continue  # materialized / draft-origin / conversed / lock-live -> Active
@@ -2777,7 +2777,7 @@ def _backlog_rows(control: Path, scanned: list[_HomeScan] | None = None) -> list
         ready, _unmerged = backlog.readiness(control, meta.get("depends_on", []))
         created = meta.get("created_at", "")
         blocked = "" if ready else "blocked"
-        rows.append((h.change_id, origin, blocked, h.last_iso,
+        rows.append((h.quest_id, origin, blocked, h.last_iso,
                      meta.get("title") or "", created, blocked or None, None))
     return rows
 
@@ -2839,7 +2839,7 @@ def _overview_lines(control: Path, *, show_all: bool, now: datetime,
     lines = [change_row.header_line(color=color, status_width=status_width)]
     for r in inflight:
         lines.append(change_row.format_change_line(
-            change_id=r[0], title=r[4], status=r[1], step=r[2], step_label=r[6],
+            quest_id=r[0], title=r[4], status=r[1], step=r[2], step_label=r[6],
             phase_label=r[7], last_iso=r[3], now=now, color=color,
             name_width=name_width, status_width=status_width,
             intent=intents.get(r[0])))
@@ -2848,7 +2848,7 @@ def _overview_lines(control: Path, *, show_all: bool, now: datetime,
         lines.append(pal.ansi("Backlog", "dim", enabled=color))
         for r in backlog_rows:
             lines.append(change_row.format_change_line(
-                change_id=r[0], title=r[4], status=r[1], step=r[2],
+                quest_id=r[0], title=r[4], status=r[1], step=r[2],
                 step_label=r[6], phase_label=None, last_iso=r[3], now=now,
                 color=color, name_width=name_width, status_width=status_width))
     if history:
@@ -2857,7 +2857,7 @@ def _overview_lines(control: Path, *, show_all: bool, now: datetime,
         lines.append(pal.ansi(label, "dim", enabled=color))
         for r in history:
             lines.append(change_row.format_change_line(
-                change_id=r[0], title=r[4], status=_DISPOSITION[r[1]], step="-",
+                quest_id=r[0], title=r[4], status=_DISPOSITION[r[1]], step="-",
                 last_iso=r[3], now=now, color=color, name_width=name_width,
                 status_width=status_width, dim=True))
     return lines
@@ -2876,11 +2876,11 @@ def _cmd_status(args: argparse.Namespace, _control: Path | None = None) -> int:
     return 0
 
 
-def _inflight_prose(control: Path, change_id: str) -> str:
+def _inflight_prose(control: Path, quest_id: str) -> str:
     """Same prose extractor as the archive ingest, so both search paths agree."""
     from imp.cli.render_helpers import conversation_prose
     try:
-        raw = (_change_home(control, change_id) / "events.jsonl").read_bytes()
+        raw = (_change_home(control, quest_id) / "events.jsonl").read_bytes()
     except OSError:
         return ""
     return conversation_prose(_parse_jsonl(raw))
@@ -2891,7 +2891,7 @@ _SEARCH_ZONES = ("active", "backlog", "archive")
 
 @dataclass(frozen=True)
 class _SearchHit:
-    change_id: str
+    quest_id: str
     title: str
     zone: str      # one of _SEARCH_ZONES
     content: str   # searchable prose for excerpting ("" when the zone has none)
@@ -2920,8 +2920,8 @@ def _search_active(control: Path, query: str) -> list[_SearchHit]:
     return hits
 
 
-def _backlog_seed_opening(control: Path, change_id: str) -> str:
-    cj = _change_home(control, change_id) / "change.json"
+def _backlog_seed_opening(control: Path, quest_id: str) -> str:
+    cj = _change_home(control, quest_id) / "change.json"
     try:
         meta = json.loads(cj.read_bytes())
     except (OSError, ValueError, TypeError):
@@ -2935,10 +2935,10 @@ def _search_backlog(control: Path, query: str) -> list[_SearchHit]:
     q = query.lower()
     hits: list[_SearchHit] = []
     for r in _backlog_rows(control):
-        change_id, title = r[0], r[4]
-        seed = _backlog_seed_opening(control, change_id)
-        if q in change_id.lower() or q in title.lower() or q in seed.lower():
-            hits.append(_SearchHit(change_id, title, "backlog", seed))
+        quest_id, title = r[0], r[4]
+        seed = _backlog_seed_opening(control, quest_id)
+        if q in quest_id.lower() or q in title.lower() or q in seed.lower():
+            hits.append(_SearchHit(quest_id, title, "backlog", seed))
     return hits
 
 
@@ -2989,12 +2989,12 @@ def _render_search_hit(
     spans = _excerpts(hit.content, query, color=color)
     if spans:
         return [header, *(f"    {s}" for s in spans)]
-    field = "id" if query.lower() in hit.change_id.lower() else "title"
+    field = "id" if query.lower() in hit.quest_id.lower() else "title"
     return [header, f"    (matched on {field})"]
 
 
 def _search_list_line(hit: _SearchHit) -> str:
-    return f"{hit.change_id}  {hit.title or '(untitled)'}  [{hit.zone}]"
+    return f"{hit.quest_id}  {hit.title or '(untitled)'}  [{hit.zone}]"
 
 
 def _cmd_search(args: argparse.Namespace, _control: Path | None = None) -> int:

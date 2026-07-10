@@ -23,7 +23,7 @@ from imp.engine.executor import RunResult, run_change
 from imp.engine.state import State
 
 
-def _make_change(root: Path, *, change_id: str = "test-change", title: str = "t") -> Change:
+def _make_change(root: Path, *, quest_id: str = "test-change", title: str = "t") -> Change:
     """Construct a Change directly on disk without git worktrees. The workflow is
     read from root/imp/workflows/imp (the branch-dir model — workflow_dir =
     project_root/imp/workflows/imp), so there is no snapshot copy to make."""
@@ -35,7 +35,7 @@ def _make_change(root: Path, *, change_id: str = "test-change", title: str = "t"
     change_dir.mkdir(parents=True, exist_ok=True)
     (change_dir / "state").mkdir(exist_ok=True)
     (change_dir / "change.json").write_text(json.dumps({
-        "id": change_id, "title": title, "base_branch": "main",
+        "id": quest_id, "title": title, "base_branch": "main",
     }, indent=2, sort_keys=True))
 
     configured_tiers: list[str] = []
@@ -49,17 +49,17 @@ def _make_change(root: Path, *, change_id: str = "test-change", title: str = "t"
     # characterization fixture keeps the simpler defaults() form (unchanged from
     # the prior fixture) — the exhaustion invariant doesn't depend on overrides.
     State(
-        id=change_id, step=flat[0].name if flat else None, step_attempt=0,
+        id=quest_id, step=flat[0].name if flat else None, step_attempt=0,
         status="running", vars=dict(workflow.vars.defaults()), loop_counts={},
     ).save(change_dir / "state")
 
     change = Change(
-        id=change_id, title=title, base_branch="main",
+        id=quest_id, title=title, base_branch="main",
         control_root=root, project_root=root, change_dir=change_dir,
     )
     change.event_log().append(
         agent_id=None, type="change_created",
-        payload={"id": change_id, "title": title},
+        payload={"id": quest_id, "title": title},
     )
     return change
 

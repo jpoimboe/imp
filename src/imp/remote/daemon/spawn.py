@@ -46,8 +46,8 @@ def create_change(control_root: Path, prompt: str) -> None:
 
 def resume_change(control_root: Path, token: str) -> str:
     """Resolve a token to a single Change and spawn a detached `imp resume` for it."""
-    from imp.cli.main import _iter_change_ids
-    matches = [cid for cid in _iter_change_ids(control_root) if token in cid]
+    from imp.cli.main import _iter_quest_ids
+    matches = [cid for cid in _iter_quest_ids(control_root) if token in cid]
     if len(matches) != 1:
         if not matches:
             return f"No change matches {token!r}."
@@ -60,7 +60,7 @@ def resume_change(control_root: Path, token: str) -> str:
     return f"Resuming @{target}…"
 
 
-def abandon_change(control_root: Path, change_id: str) -> int:
+def abandon_change(control_root: Path, quest_id: str) -> int:
     """Abandon a Change via `imp abandon`, synchronously; returns its exit code."""
     return _run_foreground(
-        _imp("abandon", change_id), _base_env(), control_root)
+        _imp("abandon", quest_id), _base_env(), control_root)

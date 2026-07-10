@@ -98,7 +98,7 @@ def test_batch_code_reviewer_renders_change_diff(tmp_path) -> None:
     body = _agent_prompt("batch-code-reviewer")
     log = JsonlEventLog(tmp_path / "events.jsonl")
     out = render_prompt(body, build_context(
-        change_title="t", event_log=log, change_id="abc",
+        change_title="t", event_log=log, quest_id="abc",
         change_home=".imp/changes/abc", cur_base_head="BASE",
         vars={"fast_path": False}),
         workflow_dir=bundled_workflow_dir("imp"))
@@ -325,7 +325,7 @@ def _render_agent(name: str, tmp_path) -> str:
         build_context(
             change_title="t",
             event_log=log,
-            change_id="abc",
+            quest_id="abc",
             change_home=".imp/changes/abc",
             cur_base_head="BASE",
             vars={"fast_path": False, "task_total": 0},

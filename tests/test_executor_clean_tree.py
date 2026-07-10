@@ -21,7 +21,7 @@ def _agent_step(*, name: str = "task-lead", phase: str = "implement",
 
 def _materialized_change(tmp_path: Path) -> Change:
     _seed_control(tmp_path)
-    return Change.create(tmp_path, title="x", change_id="feat", base_branch="main")
+    return Change.create(tmp_path, title="x", quest_id="feat", base_branch="main")
 
 
 def _key(step: Step) -> str:

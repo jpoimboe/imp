@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 
 from imp.engine.archive import read as archive_read
-from imp.engine.change import live_change_ids, live_stems
+from imp.engine.change import live_quest_ids, live_stems
 
 
 def _live_home(control: Path, cid: str) -> None:
@@ -33,17 +33,17 @@ def _archive_one(control: Path, cid: str) -> None:
         change_json_path=cj, state_json_path=sj)
 
 
-def test_live_change_ids_lists_only_homes_with_change_json(tmp_path: Path) -> None:
+def test_live_quest_ids_lists_only_homes_with_change_json(tmp_path: Path) -> None:
     _live_home(tmp_path, "wibo10")
     _live_home(tmp_path, "kobe47")
     # A stray dir without change.json and a hidden dir are both excluded.
     (tmp_path / ".imp" / "changes" / "junk").mkdir(parents=True)
     (tmp_path / ".imp" / "changes" / ".hidden").mkdir()
-    assert live_change_ids(tmp_path) == ["kobe47", "wibo10"]
+    assert live_quest_ids(tmp_path) == ["kobe47", "wibo10"]
 
 
-def test_live_change_ids_empty_when_no_changes_dir(tmp_path: Path) -> None:
-    assert live_change_ids(tmp_path) == []
+def test_live_quest_ids_empty_when_no_changes_dir(tmp_path: Path) -> None:
+    assert live_quest_ids(tmp_path) == []
 
 
 def test_live_stems_are_the_four_letter_prefixes(tmp_path: Path) -> None:
@@ -62,7 +62,7 @@ def test_live_stems_exclude_the_archive(tmp_path: Path) -> None:
     assert "zaka" not in stems
 
 
-def test_list_change_homes_delegates_to_live_change_ids(tmp_path: Path) -> None:
+def test_list_change_homes_delegates_to_live_quest_ids(tmp_path: Path) -> None:
     from imp.cli.main import _list_change_homes
 
     _live_home(tmp_path, "wibo10")
@@ -71,10 +71,10 @@ def test_list_change_homes_delegates_to_live_change_ids(tmp_path: Path) -> None:
 
 
 def test_mint_composition_avoids_live_stems(tmp_path: Path) -> None:
-    from imp.engine.change_id import new_change_id
+    from imp.engine.quest_id import new_quest_id
 
     for cid in ("kobe10", "mira20", "tavo30"):
         _live_home(tmp_path, cid)
     avoid = live_stems(tmp_path)
     for _ in range(20000):
-        assert new_change_id(existing_stems=avoid)[:4] not in avoid
+        assert new_quest_id(existing_stems=avoid)[:4] not in avoid

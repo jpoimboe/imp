@@ -19,14 +19,14 @@ def _adapter(subs: Subscriptions, sent: list) -> TelegramNorthAdapter:
         alert_all=alert_all)
 
 
-def _silent(change_id: str, event_id: str = "s1") -> dict:
+def _silent(quest_id: str, event_id: str = "s1") -> dict:
     return {"id": event_id, "type": "agent_output", "timestamp": TS,
-            "payload": {"text": "narrative"}, "change": {"id": change_id, "title": "t"}}
+            "payload": {"text": "narrative"}, "change": {"id": quest_id, "title": "t"}}
 
 
-def _buzz(change_id: str, event_id: str = "b1") -> dict:
+def _buzz(quest_id: str, event_id: str = "b1") -> dict:
     return {"id": event_id, "type": "awaiting_user_input", "timestamp": TS,
-            "payload": {"prompt": "?"}, "change": {"id": change_id, "title": "t"}}
+            "payload": {"prompt": "?"}, "change": {"id": quest_id, "title": "t"}}
 
 
 def test_unsubscribed_change_sends_nothing_silent() -> None:

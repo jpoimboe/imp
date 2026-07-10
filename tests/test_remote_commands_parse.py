@@ -129,7 +129,7 @@ def test_slash_save_at_handle_resolves_the_target() -> None:
     assert parse("/save @good", None, fake_resolve) == Save(B)
 
 
-def test_slash_save_untargeted_carries_no_change_id() -> None:
+def test_slash_save_untargeted_carries_no_quest_id() -> None:
     assert parse("/save", None, fake_resolve) == Save(None)
 
 

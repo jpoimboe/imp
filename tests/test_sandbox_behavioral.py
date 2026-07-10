@@ -439,7 +439,7 @@ def test_git_commit_works_but_escape_vectors_blocked() -> None:
         pol = resolve_policy(
             worktree=wt_path,
             control_root=control,
-            change_id="esc1",
+            quest_id="esc1",
             cfg=SandboxConfig(
                 home=control / "home",
                 uid=os.getuid(),
@@ -615,7 +615,7 @@ def _refprot_ctx(control: Path, worktree: Path) -> tuple[ToolContext, SandboxPol
     guard is active (Part 1). Used for the change worktree and, with a different
     `worktree`, for the spike worktree."""
     pol = resolve_policy(
-        worktree=worktree, control_root=control, change_id="esc1",
+        worktree=worktree, control_root=control, quest_id="esc1",
         cfg=SandboxConfig(home=control / "home", uid=os.getuid()),
         engine_env_result={"IMP_PROJECT_ROOT": str(worktree)},
         environ=os.environ, available=True,
@@ -846,7 +846,7 @@ def _spike_policy(worktree: Path, home: Path) -> SandboxPolicy:
     (worktree / ".git" / "hooks").mkdir(parents=True, exist_ok=True)
     (worktree / ".git" / "config").write_text("")
     return resolve_policy(
-        worktree=worktree, control_root=worktree, change_id="beh",
+        worktree=worktree, control_root=worktree, quest_id="beh",
         cfg=SandboxConfig(home=home),
         engine_env_result={}, environ={"HOME": str(home),
                                        "PATH": os.environ.get("PATH", "/usr/bin:/bin")},

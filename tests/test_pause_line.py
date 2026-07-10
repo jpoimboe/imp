@@ -67,7 +67,7 @@ def test_phase_from_events_takes_the_last_step_started_phase() -> None:
 
 
 def test_phase_from_events_none_when_no_step_started() -> None:
-    assert _phase_from_events([ev("1", "change_created", change_id=1, title="x")]) is None
+    assert _phase_from_events([ev("1", "change_created", quest_id=1, title="x")]) is None
 
 
 def test_pause_facts_unnamed_change_shows_bare_id(tmp_path: Path) -> None:
@@ -140,7 +140,7 @@ def test_pause_reason_interrupt_after_prior_terminated_pause_has_no_stale_cause(
 def test_pause_reason_none_when_no_pause_event() -> None:
     from imp.cli.main import _pause_reason
 
-    assert _pause_reason([ev("1", "change_created", change_id=1, title="x")]) is None
+    assert _pause_reason([ev("1", "change_created", quest_id=1, title="x")]) is None
 
 
 def test_pause_reason_internal_error_falls_back_to_message_first_line() -> None:

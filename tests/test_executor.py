@@ -38,7 +38,7 @@ def _persist_initial(invocation: AgentInvocation) -> None:
             tools_schema=[], params={}, max_tool_calls=None)
 
 
-def _make_change(root: Path, *, change_id: str = "test-change", title: str = "t") -> Change:
+def _make_change(root: Path, *, quest_id: str = "test-change", title: str = "t") -> Change:
     """Construct a Change directly on disk without git worktrees.
 
     The test sets up the workflow under root/imp/workflows/imp BEFORE
@@ -56,7 +56,7 @@ def _make_change(root: Path, *, change_id: str = "test-change", title: str = "t"
 
     # Write change metadata
     (change_dir / "change.json").write_text(json.dumps({
-        "id": change_id, "title": title, "base_branch": "main",
+        "id": quest_id, "title": title, "base_branch": "main",
     }, indent=2, sort_keys=True))
 
     configured_tiers: list[str] = []
@@ -72,7 +72,7 @@ def _make_change(root: Path, *, change_id: str = "test-change", title: str = "t"
     flat = workflow.flat_steps()
     from imp.engine.state import State as _State
     _State(
-        id=change_id,
+        id=quest_id,
         step=flat[0].name if flat else None,
         step_attempt=0,
         status="running",
@@ -81,12 +81,12 @@ def _make_change(root: Path, *, change_id: str = "test-change", title: str = "t"
     ).save(change_dir / "state")
 
     change = Change(
-        id=change_id, title=title, base_branch="main",
+        id=quest_id, title=title, base_branch="main",
         control_root=root, project_root=root, change_dir=change_dir,
     )
     change.event_log().append(
         agent_id=None, type="change_created",
-        payload={"id": change_id, "title": title},
+        payload={"id": quest_id, "title": title},
     )
     return change
 

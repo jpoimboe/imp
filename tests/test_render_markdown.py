@@ -314,8 +314,8 @@ def test_structure_covers_line_and_footer_nodes() -> None:
                                     "model": "claude", "differ_tier": None,
                                     "differ_from": None}]),
         nv.WarningsSummaryNode(lines=[("disk low", 2)], total=2),
-        nv.CompletedNode(change_id="gumu81"),
-        nv.MergedNode(change_id="gumu81", base="main"),
+        nv.CompletedNode(quest_id="gumu81"),
+        nv.MergedNode(quest_id="gumu81", base="main"),
         nv.FallbackLine(event_type="odd_event", payload={"k": "v"}),
     ]
     tree = nv.NarrativeTree(root=root, tokens=nv.TokenTotals())
@@ -386,7 +386,7 @@ def test_summary_markdown_carries_header_and_step_table() -> None:
         _tev("3", "step_completed", timestamp="2024-01-01T00:01:00Z",
              step="spec", kind="agent", action={"verb": "continue"}, var_mutations={}),
     ]
-    header = SummaryHeader(workflow="imp", change_id="gumu81",
+    header = SummaryHeader(workflow="imp", quest_id="gumu81",
                            status="merged", total_seconds=summary_total(events))
     out = render_summary_markdown(build_summary(events), header=header)
     assert "# imp — gumu81" in out               # SummaryHeader workflow/id
@@ -406,7 +406,7 @@ def test_summary_markdown_durations_exclude_wait_and_drop_wait_column() -> None:
         StepRow(phase="design", step="open",
                 start_ts="2024-01-01T00:00:00Z", end_ts=None),
     ]
-    header = SummaryHeader(workflow="imp", change_id="c",
+    header = SummaryHeader(workflow="imp", quest_id="c",
                            status="running", total_seconds=None)
     out = render_summary_markdown(rows, header=header)
     assert "Wait" not in out                          # Wait column dropped
@@ -424,7 +424,7 @@ def test_summary_multiple_phases_grouped_in_order() -> None:
                 start_ts="2024-01-01T00:00:10Z",
                 end_ts="2024-01-01T00:00:20Z"),
     ]
-    header = SummaryHeader(workflow="imp", change_id="c",
+    header = SummaryHeader(workflow="imp", quest_id="c",
                            status="merged", total_seconds=30.0)
     out = render_summary_markdown(rows, header=header)
     assert out.index("## design") < out.index("## build")
@@ -443,7 +443,7 @@ def test_summary_markdown_renders_subagent_rows_with_figures() -> None:
                     end_ts="2024-01-01T00:00:50Z",
                     tokens=nv.TokenTotals(input=200), cost=0.05)]),
     ]
-    header = SummaryHeader(workflow="imp", change_id="c",
+    header = SummaryHeader(workflow="imp", quest_id="c",
                            status="merged", total_seconds=60.0)
     out = render_summary_markdown(rows, header=header)
     assert "| task-lead | 1m 0s | 12.3k | $0.34 |" in out
@@ -453,7 +453,7 @@ def test_summary_markdown_renders_subagent_rows_with_figures() -> None:
 
 
 def test_summary_markdown_open_step_reflects_paused_status() -> None:
-    hdr = SummaryHeader(workflow="feature", change_id="abc",
+    hdr = SummaryHeader(workflow="feature", quest_id="abc",
                         status="paused", total_seconds=100.0)
     rows = [StepRow(phase="implement", step="task-lead",
                     start_ts="2026-01-01T00:00:00+00:00", end_ts=None)]

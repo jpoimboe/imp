@@ -11,7 +11,7 @@ from tests.conftest import _seed_control
 
 def test_spawn_against_held_lock_exits_without_opening_socket(tmp_path: Path) -> None:
     _seed_control(tmp_path)
-    ch = Change.create(tmp_path, title="x", change_id="feat", base_branch="main")
+    ch = Change.create(tmp_path, title="x", quest_id="feat", base_branch="main")
     sock = Path(session_socket_path(ch.control_root, ch.id))
 
     async def _scenario() -> object:

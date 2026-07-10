@@ -105,7 +105,7 @@ def test_scripted_parent_dispatches_scripted_subagent(
 
     _seed_repo(tmp_path)
     ch = Change.create(tmp_path, title="x",
-                       change_id="2026-07-03-aaa111", base_branch="main")
+                       quest_id="2026-07-03-aaa111", base_branch="main")
 
     events: list[dict] = []
     result = anyio.run(functools.partial(run_change, ch, on_event=events.append))

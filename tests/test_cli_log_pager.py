@@ -521,7 +521,7 @@ def test_main_log_backlog_routes_through_pager(
     slug = "backlog-only"
     _seed_control(tmp_path)
     Change.create_draft(
-        tmp_path, title="queued work", change_id=slug, base_branch="main",
+        tmp_path, title="queued work", quest_id=slug, base_branch="main",
         origin="followup", seed_opening="queued work")
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(m, "_control_root", lambda: tmp_path)

@@ -356,7 +356,7 @@ async def test_abandon_slash_command_at_gate_sends_control_abandon(
             async def _client() -> None:
                 await run_terminal_client(
                     attach=_attach, driver=_Driver(),
-                    coord=coord, solicit=_solicit, change_id="c1")
+                    coord=coord, solicit=_solicit, quest_id="c1")
 
             tg.start_soon(_client)
 
@@ -518,7 +518,7 @@ async def test_save_slash_command_at_gate_records_intent_and_detaches(
             async def _client() -> None:
                 await run_terminal_client(
                     attach=_attach, driver=_Driver(), coord=coord,
-                    solicit=_solicit, change_id="c1", leave_state=leave_state)
+                    solicit=_solicit, quest_id="c1", leave_state=leave_state)
 
             tg.start_soon(_client)
 
@@ -566,7 +566,7 @@ async def test_abandon_slash_command_records_abandon_intent(
             async def _client() -> None:
                 await run_terminal_client(
                     attach=_attach, driver=_Driver(), coord=coord,
-                    solicit=_solicit, change_id="c1", leave_state=leave_state)
+                    solicit=_solicit, quest_id="c1", leave_state=leave_state)
 
             tg.start_soon(_client)
 
@@ -689,7 +689,7 @@ async def test_abandon_records_materialized_false_for_unmaterialized_draft(
     tmp_path: Path,
 ) -> None:
     _seed_control(tmp_path)
-    Change.create_draft(tmp_path, title="D", change_id="ab1", base_branch="main")
+    Change.create_draft(tmp_path, title="D", quest_id="ab1", base_branch="main")
     sock = str(tmp_path / "s.sock")
     server = SessionServer(sock, hibernate=False)
 
@@ -723,7 +723,7 @@ async def test_abandon_records_materialized_false_for_unmaterialized_draft(
             async def _client() -> None:
                 await run_terminal_client(
                     attach=_attach, driver=_Driver(), coord=coord,
-                    solicit=_solicit, change_id="ab1", control_root=tmp_path,
+                    solicit=_solicit, quest_id="ab1", control_root=tmp_path,
                     leave_state=leave_state)
 
             tg.start_soon(_client)
@@ -738,7 +738,7 @@ async def test_abandon_records_materialized_true_for_materialized_change(
     tmp_path: Path,
 ) -> None:
     _seed_control(tmp_path)
-    ch = Change.create_draft(tmp_path, title="D", change_id="ab2", base_branch="main")
+    ch = Change.create_draft(tmp_path, title="D", quest_id="ab2", base_branch="main")
     meta_path = ch.change_dir / "change.json"
     meta = json.loads(meta_path.read_text())
     meta["materialized"] = True
@@ -777,7 +777,7 @@ async def test_abandon_records_materialized_true_for_materialized_change(
             async def _client() -> None:
                 await run_terminal_client(
                     attach=_attach, driver=_Driver(), coord=coord,
-                    solicit=_solicit, change_id="ab2", control_root=tmp_path,
+                    solicit=_solicit, quest_id="ab2", control_root=tmp_path,
                     leave_state=leave_state)
 
             tg.start_soon(_client)
@@ -830,7 +830,7 @@ async def test_clear_slash_command_at_gate_records_intent_and_detaches(
             async def _client() -> None:
                 await run_terminal_client(
                     attach=_attach, driver=_Driver(), coord=coord,
-                    solicit=_solicit, change_id="c1", leave_state=leave_state)
+                    solicit=_solicit, quest_id="c1", leave_state=leave_state)
 
             tg.start_soon(_client)
 
@@ -844,7 +844,7 @@ async def test_eoferror_leave_sends_archive_frame_and_records_disposition(
     tmp_path: Path,
 ) -> None:
     _seed_control(tmp_path)
-    ch = Change.create_draft(tmp_path, title="D", change_id="c1", base_branch="main")
+    ch = Change.create_draft(tmp_path, title="D", quest_id="c1", base_branch="main")
     ch.event_log().append(
         agent_id=None, type="user_message",
         payload={"role": "user", "content": "hi"})
@@ -881,7 +881,7 @@ async def test_eoferror_leave_sends_archive_frame_and_records_disposition(
             async def _client() -> None:
                 await run_terminal_client(
                     attach=_attach, driver=_Driver(), coord=coord,
-                    solicit=_solicit, change_id="c1", control_root=tmp_path,
+                    solicit=_solicit, quest_id="c1", control_root=tmp_path,
                     leave_mode="chat", leave_state=leave_state)
 
             tg.start_soon(_client)
@@ -894,7 +894,7 @@ async def test_eoferror_leave_sends_archive_frame_and_records_disposition(
 @pytest.mark.anyio
 async def test_natural_completion_sends_no_disposition_frame(tmp_path: Path) -> None:
     _seed_control(tmp_path)
-    Change.create_draft(tmp_path, title="D", change_id="c2", base_branch="main")
+    Change.create_draft(tmp_path, title="D", quest_id="c2", base_branch="main")
     sock = str(tmp_path / "s.sock")
     server = SessionServer(sock, hibernate=False)
 
@@ -927,7 +927,7 @@ async def test_natural_completion_sends_no_disposition_frame(tmp_path: Path) -> 
             async def _client() -> None:
                 await run_terminal_client(
                     attach=_attach, driver=_Driver(), coord=coord,
-                    solicit=_solicit, change_id="c2", control_root=tmp_path,
+                    solicit=_solicit, quest_id="c2", control_root=tmp_path,
                     leave_mode="chat", leave_state=leave_state)
 
             tg.start_soon(_client)
@@ -951,7 +951,7 @@ async def test_ctrl_d_returns_while_daemon_teardown_still_in_progress(
 
     _seed_control(tmp_path)
     change = Change.create_draft(
-        tmp_path, title="D", change_id="slow1", base_branch="main")
+        tmp_path, title="D", quest_id="slow1", base_branch="main")
     change.event_log().append(
         agent_id=None, type="user_message",
         payload={"role": "user", "content": "hi"})
@@ -1004,7 +1004,7 @@ async def test_ctrl_d_returns_while_daemon_teardown_still_in_progress(
             async def _client() -> None:
                 await run_terminal_client(
                     attach=_attach, driver=_Driver(), coord=coord,
-                    solicit=_solicit, change_id=change.id, control_root=tmp_path,
+                    solicit=_solicit, quest_id=change.id, control_root=tmp_path,
                     leave_mode="chat", leave_state=leave_state)
                 client_done.set()
 
@@ -1947,7 +1947,7 @@ async def test_local_echo_invoked_with_reply_on_local_send_path(
             async def _client() -> None:
                 await run_terminal_client(
                     attach=_attach, driver=_Driver(), coord=coord,
-                    solicit=_solicit, change_id="c1", local_echo=echoed.append)
+                    solicit=_solicit, quest_id="c1", local_echo=echoed.append)
 
             tg.start_soon(_client)
 
@@ -2001,7 +2001,7 @@ async def test_local_echo_not_invoked_when_answered_elsewhere(
             async def _client() -> None:
                 await run_terminal_client(
                     attach=_attach, driver=_Driver(), coord=coord,
-                    solicit=_solicit, change_id="cA", local_echo=echoed.append)
+                    solicit=_solicit, quest_id="cA", local_echo=echoed.append)
 
             tg.start_soon(_client)
             await gate_reached.wait()
@@ -2066,7 +2066,7 @@ async def test_local_echo_not_invoked_on_leave_command(
             async def _client() -> None:
                 await run_terminal_client(
                     attach=_attach, driver=_Driver(), coord=coord,
-                    solicit=_solicit, change_id="c1", leave_state=leave_state,
+                    solicit=_solicit, quest_id="c1", leave_state=leave_state,
                     local_echo=echoed.append)
 
             tg.start_soon(_client)
@@ -2119,7 +2119,7 @@ async def test_local_echo_not_invoked_on_abandon(
             async def _client() -> None:
                 await run_terminal_client(
                     attach=_attach, driver=_Driver(), coord=coord,
-                    solicit=_solicit, change_id="c1", local_echo=echoed.append)
+                    solicit=_solicit, quest_id="c1", local_echo=echoed.append)
 
             tg.start_soon(_client)
 

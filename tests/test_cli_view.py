@@ -25,21 +25,21 @@ def test_replay_current_step_removed() -> None:
     )
 
 
-def _make_change_worktree(control: Path, change_id: str, title: str,
+def _make_change_worktree(control: Path, quest_id: str, title: str,
                            status: str = "paused") -> Path:
     """Create a minimal on-disk Change home (no real git worktree needed —
     Change.load only reads the permanent .imp/changes/<id>/ directory)."""
     from imp.engine.state import State
 
-    change_dir = control / ".imp" / "changes" / change_id
+    change_dir = control / ".imp" / "changes" / quest_id
     change_dir.mkdir(parents=True)
     (change_dir / "state").mkdir()
     (change_dir / "change.json").write_text(
-        json.dumps({"id": change_id, "title": title, "base_branch": "main",
+        json.dumps({"id": quest_id, "title": title, "base_branch": "main",
                     "layout_version": LAYOUT_VERSION})
     )
     (change_dir / "events.jsonl").write_text("")
-    state = State(id=change_id, status=status, step="spec", step_attempt=0)
+    state = State(id=quest_id, status=status, step="spec", step_attempt=0)
     state.save(change_dir / "state")
     return change_dir
 
@@ -430,7 +430,7 @@ def test_log_backlog_id_renders_card(
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
     Change.create_draft(
-        tmp_path, title="Add OAuth", change_id="2026-06-16-bkg111",
+        tmp_path, title="Add OAuth", quest_id="2026-06-16-bkg111",
         base_branch="main", origin="followup",
         seed_opening="Add OAuth\n\nwire up OAuth login")
     rc = main(["log", "2026-06-16-bkg111"])
@@ -449,7 +449,7 @@ def test_log_picker_rows_include_backlog(
     from tests.conftest import _seed_control
     _seed_control(tmp_path)
     Change.create_draft(
-        tmp_path, title="Add OAuth", change_id="2026-06-16-bkg111",
+        tmp_path, title="Add OAuth", quest_id="2026-06-16-bkg111",
         base_branch="main", origin="idea", seed_opening="Add OAuth")
     captured: dict = {}
 

@@ -39,17 +39,17 @@ def _write_legacy_v0_db(db_path: Path) -> None:
             "CREATE TABLE changes (id TEXT PRIMARY KEY, title TEXT, base TEXT,"
             " created_at TEXT, status TEXT, step TEXT, events_hash TEXT,"
             " ingested_at TEXT)")
-        conn.execute("CREATE TABLE deps (change_id TEXT, depends_on_id TEXT)")
+        conn.execute("CREATE TABLE deps (quest_id TEXT, depends_on_id TEXT)")
         conn.execute(
-            "CREATE TABLE events (change_id TEXT, seq INTEGER, ts TEXT,"
+            "CREATE TABLE events (quest_id TEXT, seq INTEGER, ts TEXT,"
             " type TEXT, payload_json TEXT)")
         conn.execute(
-            "CREATE INDEX idx_events_change_seq ON events(change_id, seq)")
+            "CREATE INDEX idx_events_change_seq ON events(quest_id, seq)")
         conn.execute(
             "INSERT INTO changes (id, title, status) VALUES"
             " ('stale', 'Stale Bogus', 'completed')")
         conn.execute(
-            "INSERT INTO events (change_id, seq, ts) VALUES ('stale', 0, 'x')")
+            "INSERT INTO events (quest_id, seq, ts) VALUES ('stale', 0, 'x')")
         conn.commit()
     finally:
         conn.close()
@@ -67,7 +67,7 @@ def _write_stale_v2_db(db_path: Path) -> None:
             "CREATE TABLE changes (id TEXT PRIMARY KEY, title TEXT, base TEXT,"
             " created_at TEXT, status TEXT, step TEXT, events_hash TEXT,"
             " ingested_at TEXT, last_event_ts TEXT)")
-        conn.execute("CREATE TABLE deps (change_id TEXT, depends_on_id TEXT)")
+        conn.execute("CREATE TABLE deps (quest_id TEXT, depends_on_id TEXT)")
         conn.execute("INSERT INTO changes (id, title) VALUES ('stale', 'Stale')")
         conn.execute("PRAGMA user_version = 2")
         conn.commit()

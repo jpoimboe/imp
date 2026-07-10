@@ -61,11 +61,11 @@ def leave_control_action(
 
 
 def resolve_leave_action(
-    control_root: Path, change_id: str, leave_mode: str | None, intent: str | None,
+    control_root: Path, quest_id: str, leave_mode: str | None, intent: str | None,
 ) -> str | None:
     """Reload the change and decide its leave control action, or None if gone."""
     try:
-        change = Change.load(control_root, change_id)
+        change = Change.load(control_root, quest_id)
     except (LoadError, LoadErrors):
         return None
     return leave_control_action(change, leave_mode, intent)

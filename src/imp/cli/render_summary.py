@@ -202,7 +202,7 @@ def header_totals(
 @dataclass
 class SummaryHeader:
     workflow: str
-    change_id: str
+    quest_id: str
     status: str
     total_seconds: float | None
 
@@ -223,7 +223,7 @@ def _header_line(h: SummaryHeader, work_seconds: float | None,
     total = _dur_text(work_seconds)
     tok = _fmt_tokens(tokens)
     cst = _fmt_cost(cost)
-    return (f"{workflow}  ·  {h.change_id}  ·  {status}"
+    return (f"{workflow}  ·  {h.quest_id}  ·  {status}"
             f"  ·  {total}  ·  {tok}  ·  {cst}")
 
 

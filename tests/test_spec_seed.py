@@ -173,7 +173,7 @@ def test_threshold_opening_conditioned_on_message(tmp_path) -> None:
         "threshold"].prompt_template_source
     log = JsonlEventLog(tmp_path / "events.jsonl")
     out = render_prompt(body, build_context(
-        change_title="t", event_log=log, change_id="abc",
+        change_title="t", event_log=log, quest_id="abc",
         change_home=".imp/changes/abc", project_facts={}),
         workflow_dir=bundled_workflow_dir("imp"))
     # Rendered with no opening -> the unseeded (bare-open) branch, no <imp:begin/>.
@@ -181,7 +181,7 @@ def test_threshold_opening_conditioned_on_message(tmp_path) -> None:
     assert "Open by asking" in out
     # Rendered WITH an opening -> the seeded branch carries the verbatim intent.
     seeded = render_prompt(body, build_context(
-        change_title="t", event_log=log, change_id="abc",
+        change_title="t", event_log=log, quest_id="abc",
         change_home=".imp/changes/abc", project_facts={},
         opening="wire up telemetry"),
         workflow_dir=bundled_workflow_dir("imp"))
@@ -194,7 +194,7 @@ def test_threshold_prompt_has_verbatim_opening_branch(tmp_path) -> None:
         "threshold"].prompt_template_source
     log = JsonlEventLog(tmp_path / "events.jsonl")
     out = render_prompt(body, build_context(
-        change_title="t", event_log=log, change_id="abc",
+        change_title="t", event_log=log, quest_id="abc",
         change_home=".imp/changes/abc", project_facts={}),
         workflow_dir=bundled_workflow_dir("imp"))
     # Unseeded render -> the bare-open branch. The seeded branch no longer uses
@@ -203,7 +203,7 @@ def test_threshold_prompt_has_verbatim_opening_branch(tmp_path) -> None:
     assert "Opening message in hand" not in out
     assert "Open by asking" in out
     seeded = render_prompt(body, build_context(
-        change_title="t", event_log=log, change_id="abc",
+        change_title="t", event_log=log, quest_id="abc",
         change_home=".imp/changes/abc", project_facts={},
         opening="wire up telemetry"),
         workflow_dir=bundled_workflow_dir("imp"))
@@ -219,7 +219,7 @@ def test_threshold_prompt_has_read_and_verify_section(tmp_path) -> None:
         "threshold"].prompt_template_source
     log = JsonlEventLog(tmp_path / "events.jsonl")
     out = render_prompt(body, build_context(
-        change_title="t", event_log=log, change_id="abc",
+        change_title="t", event_log=log, quest_id="abc",
         change_home=".imp/changes/abc", project_facts={}),
         workflow_dir=bundled_workflow_dir("imp"))
     # The seeded/adopt marker is gone; a named spec is read and verified instead.

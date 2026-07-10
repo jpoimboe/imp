@@ -52,7 +52,7 @@ def test_new_non_interactive_routes_through_session_client(
         autonomous: object = False,
         model: str | None = None,
     ) -> int:
-        captured["change_id"] = change.id
+        captured["quest_id"] = change.id
         captured["seed_opening"] = seed_opening
         return 7
 
@@ -80,7 +80,7 @@ def test_new_interactive_routes_through_session_client(
     def _fake_make_interactive_solicit(
         change: Change, *, status: object, driver: object, coord: object,
     ) -> Any:
-        made["change_id"] = change.id
+        made["quest_id"] = change.id
 
         async def _solicit(_prompt: str) -> str:
             return ""
@@ -100,7 +100,7 @@ def test_new_interactive_routes_through_session_client(
         autonomous: object = False,
         model: str | None = None,
     ) -> int:
-        captured["change_id"] = change.id
+        captured["quest_id"] = change.id
         captured["seed_opening"] = seed_opening
         return 5
 
@@ -119,6 +119,6 @@ def test_new_interactive_routes_through_session_client(
         sys.stdout.isatty = orig_out  # type: ignore[method-assign]
 
     assert rc == 5
-    assert made["change_id"] == captured["change_id"]   # solicit bound to the same change
+    assert made["quest_id"] == captured["quest_id"]   # solicit bound to the same change
     # The opening intent is now persisted durably (change.json), not a run param.
-    assert Change.load(tmp_path, captured["change_id"]).seed_opening == "add a thing"
+    assert Change.load(tmp_path, captured["quest_id"]).seed_opening == "add a thing"

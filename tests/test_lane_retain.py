@@ -126,7 +126,7 @@ async def test_agent_interrupt_in_held_region_keeps_lane_and_resumes_in_place(
     provider_registry("fake", env_check=lambda: True,
                       factory=lambda _m: _provider(_InterruptingRunner))
     _seed_wf(tmp_path, _AGENT_HELD_WF)
-    ch = Change.create(tmp_path, title="x", change_id="feat", base_branch="main")
+    ch = Change.create(tmp_path, title="x", quest_id="feat", base_branch="main")
 
     result = await run_change(ch, coordinator=coord)
 
@@ -161,7 +161,7 @@ async def test_command_interrupt_in_held_region_keeps_lane(
     provider_registry("fake", env_check=lambda: True,
                       factory=lambda _m: _provider(_SuccessRunner))
     _seed_wf(tmp_path, _CMD_HELD_WF, sandbox_disabled=True)
-    ch = Change.create(tmp_path, title="x", change_id="feat", base_branch="main")
+    ch = Change.create(tmp_path, title="x", quest_id="feat", base_branch="main")
 
     def _on_event(e: dict) -> None:
         # Flip should_pause the instant the interruptible `verify` command begins,
@@ -202,7 +202,7 @@ async def test_transient_giveup_in_held_region_keeps_lane(
     provider_registry("fake", env_check=lambda: True,
                       factory=lambda _m: _provider(_StallRunner))
     _seed_wf(tmp_path, _AGENT_HELD_WF)
-    ch = Change.create(tmp_path, title="x", change_id="feat", base_branch="main")
+    ch = Change.create(tmp_path, title="x", quest_id="feat", base_branch="main")
     # Zero budget => the first backoff attempt exceeds it => retry_ceiling Pause,
     # with no real sleep. (Same lever as test_retry_ceiling_pause_preserves_marker.)
     monkeypatch.setattr("imp.engine.executor.budget_for", lambda _category: 0.0)
@@ -241,7 +241,7 @@ async def test_post_navigation_interrupt_keeps_lane(
     provider_registry("fake", env_check=lambda: True,
                       factory=lambda _m: _provider(_CleanRunner))
     _seed_wf(tmp_path, _AGENT_HELD_WF)
-    ch = Change.create(tmp_path, title="x", change_id="feat", base_branch="main")
+    ch = Change.create(tmp_path, title="x", quest_id="feat", base_branch="main")
 
     def _on_event(e: dict) -> None:
         # Flip should_pause synchronously the instant `held` completes — the
@@ -284,7 +284,7 @@ async def test_retained_lane_resume_does_not_reevict_at_entry(
     provider_registry("fake", env_check=lambda: True,
                       factory=lambda _m: _provider(_SuccessRunner))
     _seed_wf(tmp_path, _AGENT_HELD_WF)
-    ch = Change.create(tmp_path, title="x", change_id="feat", base_branch="main")
+    ch = Change.create(tmp_path, title="x", quest_id="feat", base_branch="main")
 
     # Reconstruct the AC1 paused-with-retained state on disk.
     mq.enqueue_if_absent(tmp_path, "feat", "main")

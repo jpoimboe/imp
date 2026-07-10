@@ -27,7 +27,7 @@ def _args_with_message(cid: str, msg: str) -> argparse.Namespace:
 def _seed(tmp_path: Path) -> Change:
     _seed_control(tmp_path)
     ch = Change.create_draft(
-        tmp_path, title="C", change_id="c", base_branch="main")
+        tmp_path, title="C", quest_id="c", base_branch="main")
     State(id="c", step="s", step_attempt=0, status="paused").save(ch.state_dir)
     return ch
 

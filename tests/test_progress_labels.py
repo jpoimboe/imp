@@ -12,7 +12,7 @@ from tests.conftest import _seed_control
 
 def _change(tmp_path: Path) -> Change:
     _seed_control(tmp_path)
-    return Change.create(tmp_path, title="t", change_id="aaa111", base_branch="main")
+    return Change.create(tmp_path, title="t", quest_id="aaa111", base_branch="main")
 
 
 def _state(**vars: object) -> SimpleNamespace:

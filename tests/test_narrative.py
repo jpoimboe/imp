@@ -57,7 +57,7 @@ def test_change_created_sets_id_and_title() -> None:
 def test_malformed_events_become_error_nodes_and_never_abort() -> None:
     tree = nv.build_tree([
         {"id": "e1", "agent_id": None, "type": "change_created",
-         "payload": {"change_id": 1, "title": "ok"}},
+         "payload": {"quest_id": 1, "title": "ok"}},
         None,                                   # not a dict
         {"agent_id": None, "payload": {}},      # missing "type"
         {"id": "e4", "type": "step_started",
@@ -87,7 +87,7 @@ def _ev(eid, etype, agent_id=None, **payload):
 
 def test_phase_derived_from_step_started_payload() -> None:
     tree = nv.build_tree([
-        _ev("1", "change_created", change_id=1, title="x"),
+        _ev("1", "change_created", quest_id=1, title="x"),
         _ev("2", "step_started", step="spec", kind="agent", phase="design",
             model="m", provider="anthropic"),
         _ev("3", "step_completed", step="spec", kind="agent",
@@ -392,7 +392,7 @@ def test_unknown_and_legacy_types_fall_through_to_fallback_line() -> None:
 
 
 INTERLEAVED_LOG = [
-    _ev("c", "change_created", change_id=1, title="parity"),
+    _ev("c", "change_created", quest_id=1, title="parity"),
     _ev("s", "step_started", step="build", kind="agent", phase="impl",
         model="m", provider="anthropic"),
     _ev("b1c", "tool_call", agent_id="step:impl/build", id="b1", name="read_file",
@@ -440,7 +440,7 @@ def test_parity_holds_with_open_step_when_paused() -> None:
 
 def test_resume_reentry_reuses_phase_and_resets_step() -> None:
     seed = [
-        _ev("c", "change_created", change_id=1, title="t"),
+        _ev("c", "change_created", quest_id=1, title="t"),
         _ev("s1", "step_started", step="spec", kind="agent", phase="design",
             model="m", provider="anthropic"),
         _ev("s1c", "step_completed", step="spec", kind="agent",
@@ -514,7 +514,7 @@ def test_resume_into_a_new_phase_does_not_reuse() -> None:
 def test_current_activity_reports_open_burst() -> None:
     b = nv.NarrativeBuilder()
     for e in [
-        ev("1", "change_created", change_id=1, title="x"),
+        ev("1", "change_created", quest_id=1, title="x"),
         ev("3", "step_started", step="spec", kind="agent", phase="design",
            model="m", provider="anthropic"),
         ev("4", "tool_call", agent_id="step:design/spec", id="b1",
@@ -531,7 +531,7 @@ def test_current_activity_reports_open_burst() -> None:
 def test_current_activity_idle_gap_between_nodes() -> None:
     b = nv.NarrativeBuilder()
     for e in [
-        ev("1", "change_created", change_id=1, title="x"),
+        ev("1", "change_created", quest_id=1, title="x"),
         ev("3", "step_started", step="spec", kind="agent", phase="design",
            model="m", provider="anthropic"),
     ]:
@@ -542,7 +542,7 @@ def test_current_activity_idle_gap_between_nodes() -> None:
 
 def test_current_activity_carries_agent_step_kind() -> None:
     b = nv.NarrativeBuilder()
-    b.add(ev("1", "change_created", change_id=1, title="x"))
+    b.add(ev("1", "change_created", quest_id=1, title="x"))
     b.add(ev("2", "step_started", step="spec", kind="agent", phase="design",
              model="m", provider="anthropic"))
     act = b.current_activity()
@@ -552,7 +552,7 @@ def test_current_activity_carries_agent_step_kind() -> None:
 
 def test_current_activity_carries_script_step_kind() -> None:
     b = nv.NarrativeBuilder()
-    b.add(ev("1", "change_created", change_id=1, title="x"))
+    b.add(ev("1", "change_created", quest_id=1, title="x"))
     b.add(ev("2", "step_started", step="verify", kind="script", phase="implement",
              label="running tests"))
     act = b.current_activity()
@@ -563,7 +563,7 @@ def test_current_activity_carries_script_step_kind() -> None:
 def test_current_activity_carries_kind_while_a_subagent_runs() -> None:
     b = nv.NarrativeBuilder()
     for e in [
-        ev("1", "change_created", change_id=1, title="x"),
+        ev("1", "change_created", quest_id=1, title="x"),
         ev("2", "step_started", step="spec", kind="agent", phase="design",
            model="m", provider="anthropic"),
         ev("3", "tool_call", agent_id="step:design/spec", id="t1",
@@ -578,14 +578,14 @@ def test_current_activity_carries_kind_while_a_subagent_runs() -> None:
 
 def test_current_activity_none_when_no_step() -> None:
     b = nv.NarrativeBuilder()
-    b.add(ev("1", "change_created", change_id=1, title="x"))
+    b.add(ev("1", "change_created", quest_id=1, title="x"))
     assert b.current_activity() is None
 
 
 def test_current_activity_agent_step_with_thinking_child_emits_no_verb() -> None:
     b = nv.NarrativeBuilder()
     for e in [
-        ev("1", "change_created", change_id=1, title="x"),
+        ev("1", "change_created", quest_id=1, title="x"),
         ev("3", "step_started", step="spec", kind="agent", phase="design",
            model="m", provider="anthropic"),
         ev("4", "thinking", agent_id="step:design/spec", content="reasoning..."),
@@ -598,7 +598,7 @@ def test_current_activity_agent_step_with_thinking_child_emits_no_verb() -> None
 def test_subagent_current_activity_includes_nested_detail() -> None:
     b = nv.NarrativeBuilder()
     for e in [
-        ev("1", "change_created", change_id=1, title="x"),
+        ev("1", "change_created", quest_id=1, title="x"),
         ev("3", "step_started", step="spec", kind="agent", phase="design",
            model="m", provider="anthropic"),
         ev("4", "tool_call", agent_id="step:design/spec", id="t1",
@@ -616,7 +616,7 @@ def test_subagent_current_activity_includes_nested_detail() -> None:
 def test_subagent_activity_uses_label_when_present() -> None:
     b = nv.NarrativeBuilder()
     for e in [
-        ev("1", "change_created", change_id=1, title="x"),
+        ev("1", "change_created", quest_id=1, title="x"),
         ev("3", "step_started", step="spec", kind="agent", phase="design",
            model="m", provider="anthropic"),
         _ev("4", "tool_call", agent_id="step:design/spec", id="t1",
@@ -637,7 +637,7 @@ def test_subagent_activity_uses_label_when_present() -> None:
 def test_subagent_without_label_falls_back_to_generic_name() -> None:
     b = nv.NarrativeBuilder()
     for e in [
-        ev("1", "change_created", change_id=1, title="x"),
+        ev("1", "change_created", quest_id=1, title="x"),
         ev("3", "step_started", step="spec", kind="agent", phase="design",
            model="m", provider="anthropic"),
         _ev("4", "tool_call", agent_id="step:design/spec", id="t1",
@@ -653,7 +653,7 @@ def test_subagent_without_label_falls_back_to_generic_name() -> None:
 def test_subagent_activity_unmapped_role_falls_back_to_subagent_name() -> None:
     b = nv.NarrativeBuilder()
     for e in [
-        ev("1", "change_created", change_id=1, title="x"),
+        ev("1", "change_created", quest_id=1, title="x"),
         ev("3", "step_started", step="spec", kind="agent", phase="design",
            model="m", provider="anthropic"),
         _ev("4", "tool_call", agent_id="step:design/spec", id="t1",
@@ -949,7 +949,7 @@ def test_step_started_stashes_start_ts_normal_and_resume() -> None:
     e1 = _ev("1", "step_started", step="spec", kind="agent", phase="design")
     e1["timestamp"] = "2026-05-30T10:00:00+00:00"
     b = nv.NarrativeBuilder()
-    b.add(_ev("0", "change_created", change_id=1, title="x"))
+    b.add(_ev("0", "change_created", quest_id=1, title="x"))
     b.add(e1)
     step = b._step_stack[-1]
     assert step.start_ts == "2026-05-30T10:00:00+00:00"
@@ -968,7 +968,7 @@ def test_step_started_stashes_start_ts_normal_and_resume() -> None:
 
 def test_agent_output_stashes_args_without_emitting_prose_node() -> None:
     b = nv.NarrativeBuilder()
-    b.add(_ev("0", "change_created", change_id=1, title="x"))
+    b.add(_ev("0", "change_created", quest_id=1, title="x"))
     b.add(_ev("1", "step_started", step="coder", kind="agent", phase="build"))
     # agent_output fires before step_completed; its long free-text field is
     # stashed for the breadcrumb/--full view, NEVER promoted to a prose block.
@@ -987,7 +987,7 @@ def test_agent_output_skips_whitespace_only_prose_field() -> None:
     # newline) but must NOT promote to _render_output_args output — the v.strip()
     # guard in _render_output_args skips empty/whitespace values.
     b = nv.NarrativeBuilder()
-    b.add(_ev("0", "change_created", change_id=1, title="x"))
+    b.add(_ev("0", "change_created", quest_id=1, title="x"))
     b.add(_ev("1", "step_started", step="coder", kind="agent", phase="build"))
     b.add(_ev("2", "agent_output", agent_id="step:build/coder",
               notes="   \n   ", status="Success"))
@@ -1004,13 +1004,13 @@ def test_structural_repr_covers_new_node_types() -> None:
     assert nv.structural_repr(bc) == {
         "t": "BreadcrumbLine", "step_name": "s", "elapsed_s": 1.0,
         "action": {"verb": "continue"}, "extras": ["status=Success"]}
-    completed = nv.CompletedNode(change_id="abc123")
-    assert nv.structural_repr(completed) == {"t": "CompletedNode", "change_id": "abc123"}
+    completed = nv.CompletedNode(quest_id="abc123")
+    assert nv.structural_repr(completed) == {"t": "CompletedNode", "quest_id": "abc123"}
 
 
 def test_current_activity_collapses_multiline_bash_command() -> None:
     b = nv.NarrativeBuilder()
-    b.add(_ev("0", "change_created", change_id=1, title="x"))
+    b.add(_ev("0", "change_created", quest_id=1, title="x"))
     b.add(_ev("1", "step_started", step="coder", kind="agent", phase="build"))
     cmd = "python3 -c 'import sys\nprint(sys.version)\n" + "x" * 80 + "'"
     b.add(_ev("2", "tool_call", agent_id="step:build/coder", id="t1",
@@ -1025,7 +1025,7 @@ def test_current_activity_collapses_multiline_bash_command() -> None:
 
 def test_step_completed_emits_merged_breadcrumb_and_preserves_outcome() -> None:
     b = nv.NarrativeBuilder()
-    b.add(_ev("0", "change_created", change_id=1, title="x"))
+    b.add(_ev("0", "change_created", quest_id=1, title="x"))
     s = _ev("1", "step_started", step="coder", kind="agent", phase="build")
     s["timestamp"] = "2026-05-30T10:00:00+00:00"
     b.add(s)
@@ -1743,7 +1743,7 @@ def test_change_merged_becomes_merged_node_not_fallback() -> None:
     ])
     merged = [c for c in tree.root.children if isinstance(c, nv.MergedNode)]
     assert len(merged) == 1
-    assert merged[0].change_id == "runx01"
+    assert merged[0].quest_id == "runx01"
     assert merged[0].base == "master"
     # the raw event no longer leaks as a fallback line anywhere in the tree
     fbs: list[nv.FallbackLine] = []
@@ -1865,7 +1865,7 @@ def test_blocking_panel_findings_not_promoted_to_prose() -> None:
 def test_agent_step_activity_has_no_step_prefix() -> None:
     b = nv.NarrativeBuilder()
     for e in [
-        ev("1", "change_created", change_id=1, title="x"),
+        ev("1", "change_created", quest_id=1, title="x"),
         ev("2", "step_started", step="plan-review", kind="agent", phase="review",
            model="m", provider="anthropic"),
         ev("3", "thinking", agent_id="step:review/plan-review", content="hmm"),
@@ -1877,7 +1877,7 @@ def test_agent_step_activity_has_no_step_prefix() -> None:
 def test_current_activity_command_less_chrome_step_emits_no_verb() -> None:
     b = nv.NarrativeBuilder()
     for e in [
-        ev("1", "change_created", change_id=1, title="x"),
+        ev("1", "change_created", quest_id=1, title="x"),
         ev("2", "step_started", step="merge-it", kind="merge_and_exit_worktree", phase="integrate"),
     ]:
         b.add(e)
@@ -1902,7 +1902,7 @@ def test_current_activity_script_step_names_the_command() -> None:
 def test_subagent_activity_has_no_step_prefix() -> None:
     b = nv.NarrativeBuilder()
     for e in [
-        ev("1", "change_created", change_id=1, title="x"),
+        ev("1", "change_created", quest_id=1, title="x"),
         ev("2", "step_started", step="plan-review", kind="agent", phase="review",
            model="m", provider="anthropic"),
         ev("tk1", "tool_call", agent_id="step:review/plan-review", id="b2", name="sub_agent",
@@ -1915,7 +1915,7 @@ def test_subagent_activity_has_no_step_prefix() -> None:
 
 def test_step_label_and_resumed_land_on_step_and_breadcrumb() -> None:
     tree = nv.build_tree([
-        ev("1", "change_created", change_id=1, title="x"),
+        ev("1", "change_created", quest_id=1, title="x"),
         ev("2", "step_started", step="code-reviewer", kind="agent",
            phase="implement", model="m", provider="anthropic",
            label="reviewing code", resumed=True),
@@ -1932,7 +1932,7 @@ def test_step_label_and_resumed_land_on_step_and_breadcrumb() -> None:
 
 def test_resume_reentry_updates_label_and_resumed_on_step_node() -> None:
     tree = nv.build_tree([
-        ev("1", "change_created", change_id=1, title="x"),
+        ev("1", "change_created", quest_id=1, title="x"),
         ev("2", "step_started", step="code-reviewer", kind="agent",
            phase="implement", model="m", provider="anthropic",
            label="reviewing code", resumed=False),
@@ -1950,7 +1950,7 @@ def test_resume_reentry_updates_label_and_resumed_on_step_node() -> None:
 
 def test_resume_reentry_updates_position_label_on_step_node() -> None:
     tree = nv.build_tree([
-        ev("1", "change_created", change_id=1, title="x"),
+        ev("1", "change_created", quest_id=1, title="x"),
         ev("2", "step_started", step="task-lead", kind="agent",
            phase="implement", model="m", provider="anthropic",
            position_label=False),
@@ -2133,7 +2133,7 @@ def test_step_node_command_populated_from_payload_fresh_node() -> None:
 
 def test_step_node_command_populated_on_resume_reentry() -> None:
     seed = [
-        ev("c", "change_created", change_id=1, title="t"),
+        ev("c", "change_created", quest_id=1, title="t"),
         ev("s1", "step_started", step="gate", kind="script", phase="verify",
            command="make test"),
         ev("wp", "workflow_paused", reason="ctrl-c"),
@@ -2477,7 +2477,7 @@ def test_subagent_llm_response_does_not_move_context_pct_or_window() -> None:
 
 def test_step_node_reads_position_label_from_step_started() -> None:
     b = nv.NarrativeBuilder()
-    b.add(ev("1", "change_created", change_id=1, title="x"))
+    b.add(ev("1", "change_created", quest_id=1, title="x"))
     b.add(ev("2", "step_started", step="task-lead", kind="agent", phase="code",
              model="m", provider="anthropic", label="task 1/3",
              phase_label="implementation phase · plan 1/1", position_label=True))
@@ -2487,7 +2487,7 @@ def test_step_node_reads_position_label_from_step_started() -> None:
 
 def test_step_node_position_label_defaults_false() -> None:
     b = nv.NarrativeBuilder()
-    b.add(ev("1", "change_created", change_id=1, title="x"))
+    b.add(ev("1", "change_created", quest_id=1, title="x"))
     b.add(ev("2", "step_started", step="plan-writer", kind="agent", phase="plan",
              model="m", provider="anthropic", label="writing plan",
              phase_label="planning phase · plan 1/1"))
@@ -2496,7 +2496,7 @@ def test_step_node_position_label_defaults_false() -> None:
 
 def test_current_activity_burst_detail_concatenates_count_and_inflight_tool() -> None:
     b = nv.NarrativeBuilder()
-    b.add(ev("1", "change_created", change_id=1, title="x"))
+    b.add(ev("1", "change_created", quest_id=1, title="x"))
     b.add(ev("2", "step_started", step="plan-writer", kind="agent", phase="plan",
              model="m", provider="anthropic", label="writing plan",
              phase_label="planning phase · plan 1/1"))
@@ -2510,7 +2510,7 @@ def test_current_activity_burst_detail_concatenates_count_and_inflight_tool() ->
 
 def test_current_activity_position_step_is_thinking_with_counter_on_position() -> None:
     b = nv.NarrativeBuilder()
-    b.add(ev("1", "change_created", change_id=1, title="x"))
+    b.add(ev("1", "change_created", quest_id=1, title="x"))
     b.add(ev("2", "step_started", step="task-lead", kind="agent", phase="code",
              model="m", provider="anthropic", label="task 2/3",
              phase_label="implementation phase · plan 1/1", position_label=True))
@@ -2522,7 +2522,7 @@ def test_current_activity_position_step_is_thinking_with_counter_on_position() -
 
 def test_current_activity_running_subagent_label_is_verb_nested_tool_is_detail() -> None:
     b = nv.NarrativeBuilder()
-    b.add(ev("1", "change_created", change_id=1, title="x"))
+    b.add(ev("1", "change_created", quest_id=1, title="x"))
     b.add(ev("2", "step_started", step="task-lead", kind="agent", phase="code",
              model="m", provider="anthropic", label="task 1/3",
              phase_label="implementation phase · plan 1/1", position_label=True))
@@ -2538,7 +2538,7 @@ def test_current_activity_running_subagent_label_is_verb_nested_tool_is_detail()
 
 def test_current_activity_script_step_verb_is_the_label() -> None:
     b = nv.NarrativeBuilder()
-    b.add(ev("1", "change_created", change_id=1, title="x"))
+    b.add(ev("1", "change_created", quest_id=1, title="x"))
     b.add(ev("2", "step_started", step="verify", kind="script", phase="code",
              label="running tests", phase_label="implementation phase · plan 1/1",
              command="pytest -q"))
@@ -2549,7 +2549,7 @@ def test_current_activity_script_step_verb_is_the_label() -> None:
 
 def test_current_activity_two_running_subagents_show_the_count_not_a_detail() -> None:
     b = nv.NarrativeBuilder()
-    b.add(ev("1", "change_created", change_id=1, title="x"))
+    b.add(ev("1", "change_created", quest_id=1, title="x"))
     b.add(ev("2", "step_started", step="task-lead", kind="agent", phase="code",
              model="m", provider="anthropic", label="task 1/3",
              phase_label="implementation phase · plan 1/1", position_label=True))
@@ -2661,7 +2661,7 @@ def test_resume_continuation_preserves_pre_interrupt_children() -> None:
     # restarted=False: a continued resume keeps the pre-interrupt rendered work,
     # appends the post-resume turns, and retains the original start clock.
     seed = [
-        ev("c", "change_created", change_id=1, title="t"),
+        ev("c", "change_created", quest_id=1, title="t"),
         ev("s", "step_started", step="build", kind="agent", phase="design",
            model="m", provider="anthropic", timestamp="2026-06-28T00:00:00+00:00"),
         ev("ll1", "llm_response", agent_id="step:design/build", provider="anthropic",
@@ -2695,7 +2695,7 @@ def test_resume_restart_clears_pre_interrupt_children() -> None:
     # restarted=True: a genuine re-run from an empty/never-ran transcript wipes
     # the partial and restamps the clock (preserving pre-change behavior).
     seed = [
-        ev("c", "change_created", change_id=1, title="t"),
+        ev("c", "change_created", quest_id=1, title="t"),
         ev("s", "step_started", step="build", kind="agent", phase="design",
            model="m", provider="anthropic", timestamp="2026-06-28T00:00:00+00:00"),
         ev("ll1", "llm_response", agent_id="step:design/build", provider="anthropic",
@@ -2761,7 +2761,7 @@ def _all_literals(node):
 
 def test_waiting_for_test_lane_leaves_no_lifecycle_line() -> None:
     b = nv.NarrativeBuilder()
-    b.add(_ev("0", "change_created", change_id=1, title="x"))
+    b.add(_ev("0", "change_created", quest_id=1, title="x"))
     b.add(_ev("1", "step_started", step="verify", kind="script", phase="build"))
     b.add(_ev("2", "waiting_for_test_lane", step="verify"))
     lits = _all_literals(b.tree.root)
@@ -2770,7 +2770,7 @@ def test_waiting_for_test_lane_leaves_no_lifecycle_line() -> None:
 
 def test_current_activity_position_segments_for_a_plan_phase_step() -> None:
     b = nv.NarrativeBuilder()
-    b.add(ev("1", "change_created", change_id=1, title="x"))
+    b.add(ev("1", "change_created", quest_id=1, title="x"))
     b.add(ev("2", "step_started", step="plan-writer", kind="agent", phase="plan",
              model="m", provider="anthropic", label="writing plan",
              phase_label="planning phase · plan 3/6"))
@@ -2783,7 +2783,7 @@ def test_current_activity_position_segments_for_a_plan_phase_step() -> None:
 
 def test_current_activity_position_segments_for_a_position_label_step() -> None:
     b = nv.NarrativeBuilder()
-    b.add(ev("1", "change_created", change_id=1, title="x"))
+    b.add(ev("1", "change_created", quest_id=1, title="x"))
     b.add(ev("2", "step_started", step="task-lead", kind="agent", phase="code",
              model="m", provider="anthropic", label="task 2/3",
              phase_label="implementation phase · plan 1/1", position_label=True))
@@ -2795,7 +2795,7 @@ def test_current_activity_position_segments_for_a_position_label_step() -> None:
 
 def test_current_activity_counter_prefers_pushed_live_label() -> None:
     b = nv.NarrativeBuilder()
-    b.add(ev("1", "change_created", change_id=1, title="x"))
+    b.add(ev("1", "change_created", quest_id=1, title="x"))
     b.add(ev("2", "step_started", step="task-lead", kind="agent", phase="code",
              model="m", provider="anthropic", label="task 2/3",
              phase_label="implementation phase · plan 1/1", position_label=True))
@@ -2808,7 +2808,7 @@ def test_current_activity_counter_prefers_pushed_live_label() -> None:
 
 def test_current_activity_position_segments_when_phase_has_no_plan() -> None:
     b = nv.NarrativeBuilder()
-    b.add(ev("1", "change_created", change_id=1, title="x"))
+    b.add(ev("1", "change_created", quest_id=1, title="x"))
     b.add(ev("2", "step_started", step="spec", kind="agent", phase="design",
              model="m", provider="anthropic", label="writing spec",
              phase_label="design phase"))
@@ -2820,7 +2820,7 @@ def test_current_activity_position_segments_when_phase_has_no_plan() -> None:
 
 def test_current_activity_counter_carries_a_non_position_step_label() -> None:
     b = nv.NarrativeBuilder()
-    b.add(ev("1", "change_created", change_id=1, title="x"))
+    b.add(ev("1", "change_created", quest_id=1, title="x"))
     b.add(ev("2", "step_started", step="verify", kind="script",
              phase="integration", label="running tests",
              phase_label="integration phase"))
@@ -2833,7 +2833,7 @@ def test_current_activity_counter_carries_a_non_position_step_label() -> None:
 
 def test_current_activity_counter_prefers_pushed_live_label_for_non_position_step() -> None:
     b = nv.NarrativeBuilder()
-    b.add(ev("1", "change_created", change_id=1, title="x"))
+    b.add(ev("1", "change_created", quest_id=1, title="x"))
     b.add(ev("2", "step_started", step="verify", kind="script",
              phase="integration", label="running tests",
              phase_label="integration phase"))
@@ -2855,7 +2855,7 @@ def test_engine_continuation_produces_no_narrative_node() -> None:
 
 def test_test_lane_acquired_emits_no_visible_line() -> None:
     b = nv.NarrativeBuilder()
-    b.add(_ev("0", "change_created", change_id=1, title="x"))
+    b.add(_ev("0", "change_created", quest_id=1, title="x"))
     b.add(_ev("1", "step_started", step="verify", kind="script", phase="build"))
     before = len(_all_literals(b.tree.root))
     b.add(_ev("2", "test_lane_acquired", step="verify"))
@@ -2875,7 +2875,7 @@ def test_seed_first_spinner_arms_preboot_activity(monkeypatch) -> None:
     monkeypatch.setattr("imp.agents.random_status.random_status_phrase",
                         lambda: "scheming")
     b = nv.NarrativeBuilder()
-    b.add(ev("1", "change_created", change_id=1, title="x"))
+    b.add(ev("1", "change_created", quest_id=1, title="x"))
     # No step/phase yet: footer is dark and the seed is unset (TUI/headless default).
     assert b._seed_phrase is None
     assert b.current_activity() is None
@@ -2889,7 +2889,7 @@ def test_seed_first_spinner_phrase_is_drawn_once(monkeypatch) -> None:
     monkeypatch.setattr("imp.agents.random_status.random_status_phrase",
                         lambda: next(draws))
     b = nv.NarrativeBuilder()
-    b.add(ev("1", "change_created", change_id=1, title="x"))
+    b.add(ev("1", "change_created", quest_id=1, title="x"))
     b.seed_first_spinner()
     # The footer redraws ~10x/s; the verb must stay stable across redraws
     # (drawn once at arm time, not re-randomized per current_activity() call).
@@ -2902,7 +2902,7 @@ def test_started_step_supersedes_seeded_spinner(monkeypatch) -> None:
     monkeypatch.setattr("imp.agents.random_status.random_status_phrase",
                         lambda: next(draws))
     b = nv.NarrativeBuilder()
-    b.add(ev("1", "change_created", change_id=1, title="x"))
+    b.add(ev("1", "change_created", quest_id=1, title="x"))
     b.seed_first_spinner()
     assert b.current_activity().verb == "seed-phrase"
     # The daemon's first rotating step draws its own phrase and takes precedence
@@ -2917,7 +2917,7 @@ def test_active_phase_supersedes_seeded_spinner(monkeypatch) -> None:
     monkeypatch.setattr("imp.agents.random_status.random_status_phrase",
                         lambda: "seed-phrase")
     b = nv.NarrativeBuilder()
-    b.add(ev("1", "change_created", change_id=1, title="x"))
+    b.add(ev("1", "change_created", quest_id=1, title="x"))
     b.seed_first_spinner()
     assert b.current_activity().verb == "seed-phrase"
     # Open a phase then end its step: _current_phase stays set with no running step.

@@ -81,8 +81,8 @@ def _reread_or_raise(
     raise err
 
 
-def read_record(records_dir: Path, change_id: str) -> dict[str, Any] | None:
-    path = records_dir / f"{change_id}.json"
+def read_record(records_dir: Path, quest_id: str) -> dict[str, Any] | None:
+    path = records_dir / f"{quest_id}.json"
     if not path.exists():
         return None
     raw = _read_record_bytes(path)

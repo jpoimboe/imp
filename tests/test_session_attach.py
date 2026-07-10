@@ -20,9 +20,9 @@ def anyio_backend() -> str:
     return "asyncio"
 
 
-def _make_change(tmp_path: Path, change_id: str) -> Change:
+def _make_change(tmp_path: Path, quest_id: str) -> Change:
     return Change(
-        id=change_id,
+        id=quest_id,
         title="T",
         base_branch="main",
         control_root=tmp_path,

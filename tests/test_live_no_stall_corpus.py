@@ -174,7 +174,7 @@ _SEED_TRIGGERS: dict[str, list[dict]] = {
     # stays non-final and is no longer the trailing node → a settled node is
     # withheld behind it.
     "step1_stale_narration": [
-        ev("1", "change_created", change_id=1, title="x"),
+        ev("1", "change_created", quest_id=1, title="x"),
         ev("2", "step_started", step="spec-writer", kind="agent", phase="spec",
            model="m", provider="anthropic"),
         ev("3", "llm_response", agent_id="a",
@@ -192,7 +192,7 @@ _SEED_TRIGGERS: dict[str, list[dict]] = {
     # ROOT; a following tool call opens a root-level burst after it. On master the
     # held root prose blocks while the burst is appended behind it.
     "root_orphaned_prose": [
-        ev("1", "change_created", change_id=1, title="x"),
+        ev("1", "change_created", quest_id=1, title="x"),
         ev("2", "llm_response", agent_id="a",
            raw={"content": [{"type": "text",
                              "text": "Orphan prose with no step opener."}]},
@@ -203,7 +203,7 @@ _SEED_TRIGGERS: dict[str, list[dict]] = {
     # (3) g8acjo: a long open burst with NO following result/boundary event. The
     # preceding narration must emit while only the open burst is withheld.
     "long_open_burst": [
-        ev("1", "change_created", change_id=1, title="x"),
+        ev("1", "change_created", quest_id=1, title="x"),
         ev("2", "step_started", step="implement", kind="agent", phase="impl",
            model="m", provider="anthropic"),
         ev("3", "llm_response", agent_id="a",

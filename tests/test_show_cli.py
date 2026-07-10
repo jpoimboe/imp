@@ -18,12 +18,12 @@ from tests.conftest import _seed_control
 _ID = "feat01"
 
 
-def _git_wip_present(control: Path, change_id: str) -> bool:
+def _git_wip_present(control: Path, quest_id: str) -> bool:
     import subprocess
 
     return (
         subprocess.run(
-            ["git", "rev-parse", "--verify", "--quiet", f"refs/imp/artifacts/{change_id}"],
+            ["git", "rev-parse", "--verify", "--quiet", f"refs/imp/artifacts/{quest_id}"],
             cwd=control,
             capture_output=True,
         ).returncode
@@ -31,15 +31,15 @@ def _git_wip_present(control: Path, change_id: str) -> bool:
     )
 
 
-def _seed_with_artifacts(control: Path, change_id: str, title: str) -> Change:
-    ch = Change.create(control, title=title, change_id=change_id, base_branch="main")
+def _seed_with_artifacts(control: Path, quest_id: str, title: str) -> Change:
+    ch = Change.create(control, title=title, quest_id=quest_id, base_branch="main")
     spec = ch.change_dir / "artifacts" / "spec"
     spec.mkdir(parents=True)
-    (spec / f"{change_id}.md").write_text("# SPEC BODY\n")
+    (spec / f"{quest_id}.md").write_text("# SPEC BODY\n")
     plans = ch.change_dir / "artifacts" / "plans"
     plans.mkdir(parents=True)
-    (plans / f"{change_id}-plan-1.md").write_text("# PLAN ONE\n")
-    (plans / f"{change_id}-plan-2.md").write_text("# PLAN TWO\n")
+    (plans / f"{quest_id}-plan-1.md").write_text("# PLAN ONE\n")
+    (plans / f"{quest_id}-plan-2.md").write_text("# PLAN TWO\n")
     return ch
 
 
@@ -183,7 +183,7 @@ def test_show_backlog_default_renders_card(
     Change.create_draft(
         tmp_path,
         title="Add OAuth",
-        change_id="2026-06-16-bkg111",
+        quest_id="2026-06-16-bkg111",
         base_branch="main",
         origin="followup",
         seed_opening="Add OAuth\n\nwire up OAuth login",
@@ -203,7 +203,7 @@ def test_show_backlog_status_prints_bare_word(
     Change.create_draft(
         tmp_path,
         title="Add OAuth",
-        change_id="2026-06-16-bkg111",
+        quest_id="2026-06-16-bkg111",
         base_branch="main",
         origin="idea",
         seed_opening="Add OAuth",
@@ -223,7 +223,7 @@ def test_show_backlog_spec_errors(
     Change.create_draft(
         tmp_path,
         title="Add OAuth",
-        change_id="2026-06-16-bkg111",
+        quest_id="2026-06-16-bkg111",
         base_branch="main",
         origin="idea",
         seed_opening="Add OAuth",
@@ -317,7 +317,7 @@ def test_show_step_line_prints_human_labels_not_raw_slugs(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _seed_control(tmp_path)
-    ch = Change.create(tmp_path, title="Feat", change_id="shwstp", base_branch="main")
+    ch = Change.create(tmp_path, title="Feat", quest_id="shwstp", base_branch="main")
     st = State.load(ch.state_dir)
     st.step = "write_spec"
     st.step_label = "writing spec"  # label differs from the raw slug
@@ -350,7 +350,7 @@ def test_show_step_line_omits_phase_when_no_phase_label(
     # No step_started event carries a phase_label -> show the step label alone,
     # with no raw phase slug and no leading separator.
     _seed_control(tmp_path)
-    ch = Change.create(tmp_path, title="Feat", change_id="shwnop", base_branch="main")
+    ch = Change.create(tmp_path, title="Feat", quest_id="shwnop", base_branch="main")
     st = State.load(ch.state_dir)
     st.step = "write_spec"
     st.step_label = "writing spec"
@@ -368,7 +368,7 @@ def test_show_step_line_omits_stale_phase_label_across_phase_change(
     # A prior labeled phase then a current UNLABELED phase (its step_started
     # carries no phase_label): the stale prior label must not bleed forward.
     _seed_control(tmp_path)
-    ch = Change.create(tmp_path, title="Feat", change_id="shwstl", base_branch="main")
+    ch = Change.create(tmp_path, title="Feat", quest_id="shwstl", base_branch="main")
     st = State.load(ch.state_dir)
     st.step = "verify"
     st.step_label = "verifying"
@@ -410,7 +410,7 @@ def test_show_step_line_truncates_to_terminal_width(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _seed_control(tmp_path)
-    ch = Change.create(tmp_path, title="Feat", change_id="shwtrn", base_branch="main")
+    ch = Change.create(tmp_path, title="Feat", quest_id="shwtrn", base_branch="main")
     st = State.load(ch.state_dir)
     st.step = "write_spec"
     st.step_label = "writing spec " + "x" * 200  # far wider than the 80-col test terminal
@@ -427,7 +427,7 @@ def test_show_status_stays_bare_word_not_labels(
 ) -> None:
     # `imp show <id> status` is the parseable form: bare status word only.
     _seed_control(tmp_path)
-    ch = Change.create(tmp_path, title="Feat", change_id="shwsta", base_branch="main")
+    ch = Change.create(tmp_path, title="Feat", quest_id="shwsta", base_branch="main")
     st = State.load(ch.state_dir)
     st.step = "write_spec"
     st.step_label = "writing spec"
@@ -499,7 +499,7 @@ def test_show_abandoned_backlog_is_not_a_live_brief(
     change = Change.create_draft(
         tmp_path,
         title="Add OAuth",
-        change_id="2026-06-16-bkg111",
+        quest_id="2026-06-16-bkg111",
         base_branch="main",
         origin="idea",
         seed_opening="Add OAuth",

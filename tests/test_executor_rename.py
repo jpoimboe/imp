@@ -23,7 +23,7 @@ def test_change_rename_is_content_only(tmp_path: Path) -> None:
     from tests.conftest import _seed_control
     _seed_control(tmp_path)
     ch = Change.create(tmp_path, title="orig",
-                       change_id="aaa111", base_branch="main")
+                       quest_id="aaa111", base_branch="main")
     created_before = json.loads(
         (ch.change_dir / "change.json").read_text())["created_at"]
     id_before, root_before = ch.id, ch.project_root
@@ -111,7 +111,7 @@ def test_run_change_rename_keeps_id_and_path(
     provider_registry("anthropic", lambda: True, lambda model: _FakeProvider(model))
     _seed_two_step_control(tmp_path)
     ch = Change.create(tmp_path, title="x",
-                       change_id="ccc333", base_branch="main")
+                       quest_id="ccc333", base_branch="main")
 
     cwd_before = os.getcwd()
     result = anyio.run(run_change, ch)
@@ -129,7 +129,7 @@ def test_run_change_restores_cwd_on_error(tmp_path: Path, provider_registry) -> 
     provider_registry("anthropic", lambda: True, lambda model: _FakeProvider(model))
     _seed_two_step_control(tmp_path)
     ch = Change.create(tmp_path, title="x",
-                       change_id="ddd444", base_branch="main")
+                       quest_id="ddd444", base_branch="main")
     (ch.control_workflow_dir / "workflow.yaml").write_text("}{ not yaml")
 
     cwd_before = os.getcwd()
@@ -172,7 +172,7 @@ async def test_seed_opening_first_step_only(tmp_path: Path, provider_registry) -
                       lambda model: _RecordingProvider(sink, model))
     _seed_two_step_control(tmp_path)
     ch = Change.create(tmp_path, title="",
-                       change_id="aaa111", base_branch="main")
+                       quest_id="aaa111", base_branch="main")
     ch.seed_opening = "Implement this spec X"  # durable source, not the run parameter
 
     events: list[dict[str, Any]] = []
@@ -197,7 +197,7 @@ async def test_run_change_none_seed_opening_has_empty_opening(
                       lambda model: _RecordingProvider(sink, model))
     _seed_two_step_control(tmp_path)
     ch = Change.create(tmp_path, title="",
-                       change_id="bbb222", base_branch="main")
+                       quest_id="bbb222", base_branch="main")
 
     result = await run_change(
         ch, on_event=lambda _e: None, headless=True)
@@ -218,7 +218,7 @@ async def test_seed_opening_not_forwarded_to_downstream_step_on_resume(
                       lambda model: _RecordingProvider(sink, model))
     _seed_two_step_control(tmp_path)
     ch = Change.create(tmp_path, title="",
-                       change_id="ccc333", base_branch="main")
+                       quest_id="ccc333", base_branch="main")
     ch.seed_opening = "Implement this spec SHOULD NOT LEAK"  # durable source
 
     state = State.load(ch.state_dir)

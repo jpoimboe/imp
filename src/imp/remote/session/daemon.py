@@ -233,7 +233,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--model", default=None)
     ns = parser.parse_args(argv)
     try:
-        change = Change.load(Path(ns.control_root), ns.change_id)
+        change = Change.load(Path(ns.control_root), ns.quest_id)
     except LoadError as exc:
         print(f"imp: {exc}", file=sys.stderr)
         return 2

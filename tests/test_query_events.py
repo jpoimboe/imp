@@ -275,7 +275,7 @@ def _archive_change(control: Path, cid: str, events_bytes: bytes) -> None:
         change_json_path=change_json, state_json_path=state_json)
 
 
-def test_change_id_live_returns_that_changes_digest(tmp_path: Path) -> None:
+def test_quest_id_live_returns_that_changes_digest(tmp_path: Path) -> None:
     cur = _control_events_path(tmp_path, "curr000")
     _make_live_change(tmp_path, "othr111", [
         {"agent_id": "step:plan/plan-writer", "type": "user_message",
@@ -283,13 +283,13 @@ def test_change_id_live_returns_that_changes_digest(tmp_path: Path) -> None:
         {"agent_id": "sub:abc123", "type": "tool_call",
          "payload": {"id": "t1", "name": "read_file", "input": {}}},
     ])
-    lines = [ln for ln in _call_at(cur, change_id="othr111").splitlines() if ln]
+    lines = [ln for ln in _call_at(cur, quest_id="othr111").splitlines() if ln]
     assert len(lines) == 2
     assert any("user_message" in ln for ln in lines)
     assert any("tool_call" in ln for ln in lines)
 
 
-def test_change_id_archived_resolves(tmp_path: Path) -> None:
+def test_quest_id_archived_resolves(tmp_path: Path) -> None:
     _git_init(tmp_path)
     cur = _control_events_path(tmp_path, "curr000")
     events_bytes = (
@@ -298,15 +298,15 @@ def test_change_id_archived_resolves(tmp_path: Path) -> None:
         b' "payload": {"step": "final-review"}}\n'
     )
     _archive_change(tmp_path, "arch222", events_bytes)
-    lines = [ln for ln in _call_at(cur, change_id="arch222").splitlines() if ln]
+    lines = [ln for ln in _call_at(cur, quest_id="arch222").splitlines() if ln]
     assert len(lines) == 1
     assert "step_started" in lines[0]
     assert "review/final-review" in lines[0]
 
 
-def test_change_id_unresolvable_returns_error_naming_id(tmp_path: Path) -> None:
+def test_quest_id_unresolvable_returns_error_naming_id(tmp_path: Path) -> None:
     cur = _control_events_path(tmp_path, "curr000")
-    out = _call_at(cur, change_id="ghost99")
+    out = _call_at(cur, quest_id="ghost99")
     lines = [ln for ln in out.splitlines() if ln]
     assert len(lines) == 1
     err = json.loads(lines[0])
@@ -314,7 +314,7 @@ def test_change_id_unresolvable_returns_error_naming_id(tmp_path: Path) -> None:
     assert "ghost99" in err["error"]
 
 
-def test_change_id_naming_current_reads_current_events(tmp_path: Path) -> None:
+def test_quest_id_naming_current_reads_current_events(tmp_path: Path) -> None:
     # The current change home has NO change.json; without the short-circuit the
     # resolver would hit Change.load and blow up, so this pins the short-circuit.
     cur = _control_events_path(tmp_path, "curr000")
@@ -322,12 +322,12 @@ def test_change_id_naming_current_reads_current_events(tmp_path: Path) -> None:
     log.append(agent_id="step:plan/plan-writer", type="user_message",
                payload={"role": "user", "content": [{"type": "text", "text": "x"}]})
     omitted = _call_at(cur)
-    named = _call_at(cur, change_id="curr000")
+    named = _call_at(cur, quest_id="curr000")
     assert named == omitted
     assert omitted != ""
 
 
-def test_change_id_applies_type_and_agent_filters(tmp_path: Path) -> None:
+def test_quest_id_applies_type_and_agent_filters(tmp_path: Path) -> None:
     cur = _control_events_path(tmp_path, "curr000")
     _make_live_change(tmp_path, "othr111", [
         {"agent_id": "step:plan/plan-writer", "type": "user_message",
@@ -339,24 +339,24 @@ def test_change_id_applies_type_and_agent_filters(tmp_path: Path) -> None:
          "payload": {"id": "t1", "name": "read_file", "input": {}}},
     ])
     type_lines = [ln for ln in
-                  _call_at(cur, change_id="othr111", type="llm_response").splitlines() if ln]
+                  _call_at(cur, quest_id="othr111", type="llm_response").splitlines() if ln]
     assert len(type_lines) == 1
     assert "llm_response" in type_lines[0]
 
     agent_lines = [ln for ln in
-                   _call_at(cur, change_id="othr111", agent_id="sub:").splitlines() if ln]
+                   _call_at(cur, quest_id="othr111", agent_id="sub:").splitlines() if ln]
     assert len(agent_lines) == 1
     assert "sub:abc123" in agent_lines[0]
 
 
-def test_change_id_applies_limit(tmp_path: Path) -> None:
+def test_quest_id_applies_limit(tmp_path: Path) -> None:
     cur = _control_events_path(tmp_path, "curr000")
     _make_live_change(tmp_path, "othr111", [
         {"agent_id": "step:plan/plan-writer", "type": "tick", "payload": {"i": i}}
         for i in range(10)
     ])
     lines = [ln for ln in
-             _call_at(cur, change_id="othr111", limit=3).splitlines() if ln]
+             _call_at(cur, quest_id="othr111", limit=3).splitlines() if ln]
     assert len(lines) == 3
     assert "i=7" in lines[0]
     assert "i=8" in lines[1]
@@ -364,7 +364,7 @@ def test_change_id_applies_limit(tmp_path: Path) -> None:
     assert "i=0" not in lines[0]
 
 
-def test_description_documents_change_id_and_current_change() -> None:
+def test_description_documents_quest_id_and_current_change() -> None:
     desc = get_registry()["query_events"].description
-    assert "change_id" in desc
+    assert "quest_id" in desc
     assert "current change" in desc.lower()

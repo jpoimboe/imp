@@ -179,13 +179,13 @@ def _build_spike_policy(change: Any, worktree_path: Path, test_gates: Any) -> An
         sandbox_config_from_raw(config.sandbox or {}), network=True)
     eng = overlay_engine_env(
         os.environ,
-        engine_env(project_root=worktree_path, change_id=change.id,
+        engine_env(project_root=worktree_path, quest_id=change.id,
                    change_title=change.title, change_dir=change.change_dir,
                    test_gates=test_gates),
     )
     return resolve_policy(
         worktree=worktree_path, control_root=change.control_root,
-        change_id=change.id, cfg=cfg, engine_env_result=eng,
+        quest_id=change.id, cfg=cfg, engine_env_result=eng,
         environ=os.environ, available=sandbox_available(),
         change_dir=change.change_dir, spike=True,
     )
@@ -260,7 +260,7 @@ async def dispatch_task(
         # Render the subagent's Jinja template. A SEPARATE read-only JsonlEventLog
         # for {{ events.* }} — NOT ctx.event_log, which is the shared WRITE instance.
         prompt_ctx = build_context(
-            change_id=cc.id,
+            quest_id=cc.id,
             change_title=cc.title,   # dispatch label is the title now [item 11]
             change_home=cc.change_home,
             event_log=JsonlEventLog(ctx.events_path),

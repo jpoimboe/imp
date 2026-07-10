@@ -1,4 +1,4 @@
-"""Transport-agnostic control plane: list / reply / create / abandon, routed by change_id."""
+"""Transport-agnostic control plane: list / reply / create / abandon, routed by quest_id."""
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
@@ -38,11 +38,11 @@ class ControlPlane:
         self._save = save
         self._full_history = full_history
 
-    def snapshot(self, change_id: str) -> tuple[str, str, str] | None:
-        return self._snapshot(change_id)
+    def snapshot(self, quest_id: str) -> tuple[str, str, str] | None:
+        return self._snapshot(quest_id)
 
-    def recent_narrative(self, change_id: str, n: int) -> list[dict[str, Any]]:
-        return self._recent_narrative(change_id, n)
+    def recent_narrative(self, quest_id: str, n: int) -> list[dict[str, Any]]:
+        return self._recent_narrative(quest_id, n)
 
     def search(self, query: str) -> list[tuple[str, str, str, str]]:
         assert self._search is not None  # run_daemon always wires it
@@ -52,23 +52,23 @@ class ControlPlane:
         assert self._resume is not None  # run_daemon always wires it
         return self._resume(token)
 
-    def save(self, change_id: str) -> None:
+    def save(self, quest_id: str) -> None:
         assert self._save is not None  # run_daemon always wires it
-        self._save(change_id)
+        self._save(quest_id)
 
-    def full_history(self, change_id: str) -> list[dict[str, Any]]:
+    def full_history(self, quest_id: str) -> list[dict[str, Any]]:
         assert self._full_history is not None  # run_daemon always wires it
-        return self._full_history(change_id)
+        return self._full_history(quest_id)
 
-    async def reply(self, change_id: str, text: str) -> None:
+    async def reply(self, quest_id: str, text: str) -> None:
         """Deliver a reply into the change's session daemon, rehydrating if hibernated."""
-        await self._deliver(change_id, text)
+        await self._deliver(quest_id, text)
 
     def create(self, prompt: str) -> None:
         self._create(prompt)
 
-    def abandon(self, change_id: str) -> int:
-        return self._abandon(change_id)
+    def abandon(self, quest_id: str) -> int:
+        return self._abandon(quest_id)
 
     def list_changes(self) -> list[ChangeInfo]:
         return self._list_fn()

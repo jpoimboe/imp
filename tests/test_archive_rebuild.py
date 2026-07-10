@@ -57,7 +57,7 @@ def _snapshot(conn) -> dict:
             "SELECT id, title, base, created_at, status, step, events_hash,"
             " last_event_ts FROM changes").fetchall()),
         "deps": sorted(conn.execute(
-            "SELECT change_id, depends_on_id FROM deps").fetchall()),
+            "SELECT quest_id, depends_on_id FROM deps").fetchall()),
     }
 
 

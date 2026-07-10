@@ -73,7 +73,7 @@ def test_scripted_tool_calls_produce_real_commit_and_sentinel(
 
     _seed_scripted_repo(tmp_path, script_path)
     ch = Change.create(tmp_path, title="x",
-                       change_id="2026-06-12-aaa111", base_branch="main")
+                       quest_id="2026-06-12-aaa111", base_branch="main")
 
     events: list[dict] = []
     result = anyio.run(functools.partial(run_change, ch, on_event=events.append))

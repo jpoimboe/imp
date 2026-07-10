@@ -197,9 +197,9 @@ def _make_on_attach(subscriptions: Subscriptions) -> Callable[[str, bool], None]
     """Auto-subscribe a freshly attached Change whose hello set autosubscribe (spec
     §6). Membership only — a freshly attached Change has no prior history. No
     on_detach hook: a detach is process churn, not an intent to stop following."""
-    def on_attach(change_id: str, autosubscribe: bool) -> None:
+    def on_attach(quest_id: str, autosubscribe: bool) -> None:
         if autosubscribe:
-            subscriptions.add(change_id)
+            subscriptions.add(quest_id)
     return on_attach
 
 
@@ -289,48 +289,48 @@ async def _handle_command(
     alert_all = alert_all if alert_all is not None else AlertAll()
     if isinstance(command, Reply):
         try:
-            await control.reply(command.change_id, command.text)
+            await control.reply(command.quest_id, command.text)
         except LoadError:
             responses.put(Notice(
-                f"no such change `{command.change_id}` — unknown or pruned"))
+                f"no such change `{command.quest_id}` — unknown or pruned"))
             return
     elif isinstance(command, Subscribe):
-        handle = handle_for(command.change_id)
-        if await anyio.to_thread.run_sync(control.snapshot, command.change_id) is None:
+        handle = handle_for(command.quest_id)
+        if await anyio.to_thread.run_sync(control.snapshot, command.quest_id) is None:
             responses.put(Notice(
                 f"No Change @{handle} — send /list to see what's running."))
             return
         await anyio.to_thread.run_sync(
             control.subscriptions.snapshot_and_add,
-            command.change_id,
-            lambda: control.full_history(command.change_id))
+            command.quest_id,
+            lambda: control.full_history(command.quest_id))
         responses.put(Notice(f"Following @{handle}."))
     elif isinstance(command, Unsubscribe):
-        control.subscriptions.remove(command.change_id)
-        responses.put(Notice(f"Unfollowed @{handle_for(command.change_id)}."))
+        control.subscriptions.remove(command.quest_id)
+        responses.put(Notice(f"Unfollowed @{handle_for(command.quest_id)}."))
     elif isinstance(command, Replay):
-        change_id = command.change_id
-        if change_id is None:
+        quest_id = command.quest_id
+        if quest_id is None:
             responses.put(Notice(ROUTE_HINT))
         else:
             events = await anyio.to_thread.run_sync(
-                control.recent_narrative, change_id, command.n)
+                control.recent_narrative, quest_id, command.n)
             rendered = [
                 text for text in (format_replay_event(event) for event in events)
                 if text is not None
             ]
             if not rendered:
                 responses.put(Notice(
-                    f"Nothing to replay for @{handle_for(change_id)} yet."))
+                    f"Nothing to replay for @{handle_for(quest_id)} yet."))
             else:
                 for text in rendered:
-                    responses.put(Notice(text, change_id=change_id))
+                    responses.put(Notice(text, quest_id=quest_id))
     elif isinstance(command, Create):
         control.create(command.prompt)
         responses.put(Notice("Spawning a new Change… watch for its first question"))
     elif isinstance(command, Abandon):
-        handle = handle_for(command.change_id)
-        rc = await anyio.to_thread.run_sync(control.abandon, command.change_id)
+        handle = handle_for(command.quest_id)
+        rc = await anyio.to_thread.run_sync(control.abandon, command.quest_id)
         if rc == 0:
             responses.put(Notice(f"Abandoned @{handle}."))
         else:
@@ -358,19 +358,19 @@ async def _handle_command(
         message = await anyio.to_thread.run_sync(control.resume, command.token)
         responses.put(Notice(message))
     elif isinstance(command, Save):
-        change_id = command.change_id
-        if change_id is None:
+        quest_id = command.quest_id
+        if quest_id is None:
             responses.put(Notice(SAVE_USAGE))
         else:
             try:
-                await anyio.to_thread.run_sync(control.save, change_id)
+                await anyio.to_thread.run_sync(control.save, quest_id)
             except (OSError, TimeoutError):
                 responses.put(Notice(
-                    f"Couldn't reach the session for @{handle_for(change_id)} "
+                    f"Couldn't reach the session for @{handle_for(quest_id)} "
                     "to save it — it may still be running."))
             else:
                 responses.put(Notice(
-                    f"Saved @{handle_for(change_id)} to your Backlog."))
+                    f"Saved @{handle_for(quest_id)} to your Backlog."))
     elif isinstance(command, Alerts):
         if command.on is None:
             responses.put(Notice(
@@ -427,10 +427,10 @@ async def _await_shutdown_signals(
 
 
 async def deliver_to_session(
-    control_root: Path, change_id: str, text: str,
+    control_root: Path, quest_id: str, text: str,
 ) -> None:
-    """Deliver one reply into change_id's session daemon, rehydrating if hibernated."""
-    change = await anyio.to_thread.run_sync(Change.load, control_root, change_id)
+    """Deliver one reply into quest_id's session daemon, rehydrating if hibernated."""
+    change = await anyio.to_thread.run_sync(Change.load, control_root, quest_id)
     await deliver_session_reply(change, text)
 
 

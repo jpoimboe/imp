@@ -50,24 +50,24 @@ class FakeControl:
         self._histories: dict = {}
         self._resident = frozenset(resident or ())
 
-    def full_history(self, change_id: str) -> list[dict]:
-        return self._histories.get(change_id, [])
+    def full_history(self, quest_id: str) -> list[dict]:
+        return self._histories.get(quest_id, [])
 
-    def snapshot(self, change_id: str) -> tuple[str, str, str] | None:
-        return self._snapshots.get(change_id)
+    def snapshot(self, quest_id: str) -> tuple[str, str, str] | None:
+        return self._snapshots.get(quest_id)
 
-    def recent_narrative(self, change_id: str, n: int) -> list[dict]:
-        return self._narratives.get(change_id, [])[-n:]
+    def recent_narrative(self, quest_id: str, n: int) -> list[dict]:
+        return self._narratives.get(quest_id, [])[-n:]
 
-    async def reply(self, change_id: str, text: str) -> str:
-        self.replies.append((change_id, text))
+    async def reply(self, quest_id: str, text: str) -> str:
+        self.replies.append((quest_id, text))
         return "live"
 
     def create(self, prompt: str) -> None:
         self.created.append(prompt)
 
-    def abandon(self, change_id: str) -> int:
-        self.abandoned.append(change_id)
+    def abandon(self, quest_id: str) -> int:
+        self.abandoned.append(quest_id)
         return self._abandon_rc
 
     def list_changes(self) -> list[ChangeInfo]:
@@ -222,7 +222,7 @@ async def test_replay_renders_each_event_through_the_common_envelope() -> None:
     assert responses.empty()
     # Full envelope: id · title · time header + body. A narrative (llm_response)
     # event carries NO reply footer (only awaiting_user_input gates append the
-    # handle); routing still works via the Notice's change_id tag, asserted below.
+    # handle); routing still works via the Notice's quest_id tag, asserted below.
     assert isinstance(first, Notice) and isinstance(second, Notice)
     assert first.text.startswith("k3f9qa · Dark mode · ")
     assert first.text.endswith("\none")
@@ -231,8 +231,8 @@ async def test_replay_renders_each_event_through_the_common_envelope() -> None:
     assert second.text.endswith("\ntwo")
     assert "↩" not in second.text
     # Each replayed Notice is tagged so a reply routes back to the Change.
-    assert first.change_id == "k3f9qa"
-    assert second.change_id == "k3f9qa"
+    assert first.quest_id == "k3f9qa"
+    assert second.quest_id == "k3f9qa"
 
 
 @pytest.mark.anyio
@@ -260,9 +260,9 @@ class FailThenStopControl:
         self.stop = stop
         self.calls: list[str] = []
 
-    async def reply(self, change_id: str, text: str) -> str:
-        self.calls.append(change_id)
-        if change_id == "boom":
+    async def reply(self, quest_id: str, text: str) -> str:
+        self.calls.append(quest_id)
+        if quest_id == "boom":
             raise RuntimeError("kaboom")
         self.stop.set()
         return "live"

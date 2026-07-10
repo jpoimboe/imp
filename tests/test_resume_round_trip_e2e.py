@@ -26,7 +26,7 @@ async def test_paused_conversation_round_trips_and_replays_on_resume(
         tmp_path: Path, provider_registry) -> None:
     _seed_control(tmp_path)
     ch = Change.create_draft(
-        tmp_path, title="Conv", change_id="conv", base_branch="main")
+        tmp_path, title="Conv", quest_id="conv", base_branch="main")
 
     # _seed_control workflow: phase "p", step "s"
     tdir = ch.change_dir / "steps" / "p" / "s"

@@ -16,7 +16,7 @@ from tests.conftest import _seed_control
 
 def test_rehydrate_restores_loadable_draft_from_archive(tmp_path: Path) -> None:
     _seed_control(tmp_path)
-    ch = Change.create_draft(tmp_path, title="Conv", change_id="draft", base_branch="main")
+    ch = Change.create_draft(tmp_path, title="Conv", quest_id="draft", base_branch="main")
     orig_head = ch.orig_base_head
     archive_conversation(ch)  # drops the live home into the archive
     assert not (tmp_path / ".imp" / "changes" / "draft").exists()
@@ -36,7 +36,7 @@ def test_rehydrate_restores_loadable_draft_from_archive(tmp_path: Path) -> None:
 
 def test_rehydrate_refuses_to_clobber_existing_home(tmp_path: Path) -> None:
     _seed_control(tmp_path)
-    Change.create_draft(tmp_path, title="Conv", change_id="draft", base_branch="main")
+    Change.create_draft(tmp_path, title="Conv", quest_id="draft", base_branch="main")
     with pytest.raises(FileExistsError):
         archive_read.rehydrate_change(tmp_path, "draft")
 

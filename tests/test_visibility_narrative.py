@@ -15,7 +15,7 @@ def _step(tree: nv.NarrativeTree, name: str) -> nv.StepNode:
 
 def test_show_label_and_show_output_land_on_step_node() -> None:
     tree = nv.build_tree([
-        ev("1", "change_created", change_id=1, title="x"),
+        ev("1", "change_created", quest_id=1, title="x"),
         ev("2", "step_started", step="announce", kind="script", phase="plan",
            show_label=False, show_output=True),
         ev("3", "step_completed", step="announce", kind="script",
@@ -28,7 +28,7 @@ def test_show_label_and_show_output_land_on_step_node() -> None:
 
 def test_resume_reentry_restarted_updates_show_label_and_show_output() -> None:
     tree = nv.build_tree([
-        ev("1", "change_created", change_id=1, title="x"),
+        ev("1", "change_created", quest_id=1, title="x"),
         ev("2", "step_started", step="coder", kind="agent", phase="build",
            model="m", provider="anthropic"),
         ev("3", "workflow_paused", reason="ctrl-c"),
@@ -61,7 +61,7 @@ def test_payload_carries_show_label_and_show_output() -> None:
 
 def test_show_label_defaults_true_and_show_output_defaults_false() -> None:
     tree = nv.build_tree([
-        ev("1", "change_created", change_id=1, title="x"),
+        ev("1", "change_created", quest_id=1, title="x"),
         ev("2", "step_started", step="spec-writer", kind="agent", phase="spec",
            model="m", provider="anthropic"),
         ev("3", "step_completed", step="spec-writer", kind="agent",
@@ -93,7 +93,7 @@ def test_payload_emits_phase_show_label_only_when_false() -> None:
 
 def test_phase_show_label_lands_on_phase_node() -> None:
     tree = nv.build_tree([
-        ev("1", "change_created", change_id=1, title="x"),
+        ev("1", "change_created", quest_id=1, title="x"),
         ev("2", "step_started", step="fd", kind="agent", phase="threshold",
            model="m", provider="anthropic", phase_show_label=False),
         ev("3", "step_completed", step="fd", kind="agent",

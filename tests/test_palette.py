@@ -241,8 +241,8 @@ def test_spinner_frame_braille_default_and_ascii_and_wrap() -> None:
     assert pal.spinner_frame(4, unicode=False) == "|"    # 4 % 4 == 0
 
 
-def test_change_id_role_wears_imp_gold_wordmark() -> None:
-    assert pal.NODE_COLORS["change_id"] == ("wordmark",)
+def test_quest_id_role_wears_imp_gold_wordmark() -> None:
+    assert pal.NODE_COLORS["quest_id"] == ("wordmark",)
 
 
 def test_yellow_accent_retuned_to_warm_gold_family() -> None:

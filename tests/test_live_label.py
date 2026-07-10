@@ -7,7 +7,7 @@ from tests._event_fixtures import ev
 def _build() -> nv.NarrativeBuilder:
     b = nv.NarrativeBuilder()
     for e in [
-        ev("1", "change_created", change_id=1, title="x"),
+        ev("1", "change_created", quest_id=1, title="x"),
         ev("2", "step_started", step="task-lead", kind="agent", phase="code",
            model="m", provider="anthropic", label="task 1/6 · thinking",
            phase_label="implementation phase · plan 2/4", position_label=True),

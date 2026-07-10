@@ -68,8 +68,8 @@ def handle_slash_line(
         if not hits:
             output_fn(f"No archived changes match {args!r}.")
         else:
-            for change_id, title, status, _created in hits:
-                output_fn(f"  {change_id}  {title or '(untitled)'}  [{status or '-'}]")
+            for quest_id, title, status, _created in hits:
+                output_fn(f"  {quest_id}  {title or '(untitled)'}  [{status or '-'}]")
         return REPROMPT
     if cmd == "abandon":
         return "/abandon"
@@ -90,11 +90,11 @@ def handle_slash_line(
         if not args:
             output_fn("Usage: /resume <id|query>")
             return REPROMPT
-        from imp.cli.main import _change_home, _iter_change_ids
+        from imp.cli.main import _change_home, _iter_quest_ids
         from imp.engine.archive import read as archive_read
         from imp.engine.archive import record, records_root
         control = change.control_root
-        matches = [cid for cid in _iter_change_ids(control) if args in cid]
+        matches = [cid for cid in _iter_quest_ids(control) if args in cid]
         if len(matches) != 1:
             if not matches:
                 output_fn(f"No change matches {args!r}.")
@@ -265,7 +265,7 @@ async def ask_line_with_slash(
                         toolbar = (
                             driver.compose_toolbar_static() if driver is not None
                             else compose_identity_toolbar(
-                                change_id=change.id, title=change.title,
+                                quest_id=change.id, title=change.title,
                                 color=color, width=width))
                         # _exit_event is None until C4 wires it; getattr is defensive
                         # for pre-C4 builds, where the read takes the unraced path.

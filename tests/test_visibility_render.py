@@ -17,7 +17,7 @@ def _body(events) -> list[str]:
 
 def test_show_label_false_script_silent_on_linear_continue() -> None:
     body = _body([
-        ev("1", "change_created", change_id=1, title="x"),
+        ev("1", "change_created", quest_id=1, title="x"),
         ev("2", "step_started", step="cleanup", kind="script", phase="implement",
            show_label=False),
         ev("3", "step_completed", step="cleanup", kind="script",
@@ -28,7 +28,7 @@ def test_show_label_false_script_silent_on_linear_continue() -> None:
 
 def test_show_label_false_script_reveals_frame_and_error_on_pause() -> None:
     body = _body([
-        ev("1", "change_created", change_id=1, title="x"),
+        ev("1", "change_created", quest_id=1, title="x"),
         ev("2", "step_started", step="merge-guard", kind="script", phase="merge",
            show_label=False),
         ev("3", "error", message="boom in bar.py"),
@@ -41,7 +41,7 @@ def test_show_label_false_script_reveals_frame_and_error_on_pause() -> None:
 
 def test_show_label_false_agent_shows_prose_without_step_header() -> None:
     body = _body([
-        ev("1", "change_created", change_id=1, title="x"),
+        ev("1", "change_created", quest_id=1, title="x"),
         ev("2", "step_started", step="scoping", kind="agent", phase="threshold",
            model="m", provider="anthropic", label="chatting", show_label=False),
         ev("3", "llm_response", agent_id="step:threshold/scoping",
@@ -96,7 +96,7 @@ def test_frame_suppressed_false_on_pause_outcome() -> None:
 def test_script_blocked_reveal_is_length_bounded() -> None:
     big = "L" + ("x" * 6000) + "R"
     events = [
-        ev("1", "change_created", change_id=1, title="x"),
+        ev("1", "change_created", quest_id=1, title="x"),
         ev("2", "step_started", step="verify", kind="script", phase="implement",
            show_label=False),
         ev("3", "script_blocked", step="verify", exit=1, stdout="", stderr=big),
@@ -109,7 +109,7 @@ def test_script_blocked_reveal_is_length_bounded() -> None:
 
 def test_script_output_renders_bullet_message_under_step() -> None:
     events = [
-        ev("1", "change_created", change_id=1, title="x"),
+        ev("1", "change_created", quest_id=1, title="x"),
         ev("2", "step_started", step="announce", kind="script", phase="plan",
            show_output=True, label="finalizing"),
         ev("3", "script_output", step="announce", stdout="plan 2/3 · 4 tasks"),
@@ -127,7 +127,7 @@ def test_script_output_renders_bullet_message_under_step() -> None:
 
 def test_phase_show_label_false_suppresses_phase_header() -> None:
     body = _body([
-        ev("1", "change_created", change_id=1, title="x"),
+        ev("1", "change_created", quest_id=1, title="x"),
         ev("2", "step_started", step="threshold", kind="agent",
            phase="threshold", model="m", provider="anthropic",
            label="chatting", phase_label="threshold phase",

@@ -104,20 +104,20 @@ def origin_head_branch(control_root: Path) -> str | None:
     return proc.stdout.strip().removeprefix("origin/") or None
 
 
-def commit_count(control_root: Path, change_id: str, base: str) -> int:
+def commit_count(control_root: Path, quest_id: str, base: str) -> int:
     """Commits on imp/<id> not reachable from base — the Change's own work."""
-    proc = _git(control_root, "rev-list", "--count", f"{base}..imp/{change_id}")
+    proc = _git(control_root, "rev-list", "--count", f"{base}..imp/{quest_id}")
     if proc.returncode != 0:
         return 0
     return int(proc.stdout.strip())
 
 
-def create_worktree(control_root: Path, change_id: str, base: str) -> Path:
+def create_worktree(control_root: Path, quest_id: str, base: str) -> Path:
     """`git worktree add -b imp/<id> .imp/worktrees/<id> <base>` (spec §4).
     Branch collision surfaces as BranchExists — the caller reports a clean error
     (there is no retry; the random id is the uniqueness guarantee)."""
-    rel = Path(".imp") / "worktrees" / change_id
-    branch = f"imp/{change_id}"
+    rel = Path(".imp") / "worktrees" / quest_id
+    branch = f"imp/{quest_id}"
     with RepoGitLock(control_root).acquire():
         if branch_exists(control_root, branch):
             raise BranchExists(branch)
@@ -129,7 +129,7 @@ def create_worktree(control_root: Path, change_id: str, base: str) -> Path:
     return (control_root / rel).resolve()
 
 
-def remove_worktree(control_root: Path, change_id: str, *, force: bool = False) -> None:
+def remove_worktree(control_root: Path, quest_id: str, *, force: bool = False) -> None:
     """`git worktree remove .imp/worktrees/<id>`. Branch is KEPT (spec §4).
 
     Default (force=False) is the merge-teardown behaviour: a plain remove that
@@ -137,7 +137,7 @@ def remove_worktree(control_root: Path, change_id: str, *, force: bool = False) 
     dirty tree / stale metadata / an already-absent worktree: retry with
     --force, then prune git's bookkeeping and drop any leftover directory so a
     re-run after a crash converges."""
-    rel = Path(".imp") / "worktrees" / change_id
+    rel = Path(".imp") / "worktrees" / quest_id
     with RepoGitLock(control_root).acquire():
         if not force:
             _git_ok(control_root, "worktree", "remove", str(rel))
@@ -148,7 +148,7 @@ def remove_worktree(control_root: Path, change_id: str, *, force: bool = False) 
             shutil.rmtree(control_root / rel, ignore_errors=True)
 
 
-def delete_branch(control_root: Path, change_id: str) -> None:
+def delete_branch(control_root: Path, quest_id: str) -> None:
     """`git branch -D imp/<id>` (abandon-only; remove_worktree keeps the
     branch). Tolerates an already-deleted branch so abandon is idempotent, and
     needs only the id — callable even when the worktree/change.json is gone
@@ -159,18 +159,18 @@ def delete_branch(control_root: Path, change_id: str) -> None:
         # "used by worktree", which only happens if a caller skips the
         # required remove_worktree-before-delete_branch ordering; abandon's
         # flow always removes first, so that path is unreachable here.
-        _git(control_root, "branch", "-D", f"imp/{change_id}")
+        _git(control_root, "branch", "-D", f"imp/{quest_id}")
 
 
-def destroy_worktree(control_root: Path, change_id: str) -> None:
+def destroy_worktree(control_root: Path, quest_id: str) -> None:
     """Full teardown: remove the worktree AND delete its branch imp/<id>,
     leaving nothing behind. Used to roll back a failed Change.create — unlike
     remove_worktree, which deliberately KEEPS the branch after a successful run.
     Best-effort git calls (not _git_ok) so a teardown hiccup never masks the
     LoadError that triggered the rollback — a teardown failure may therefore
     leave an orphan rather than raise. Acceptable under V0's single principal."""
-    rel = Path(".imp") / "worktrees" / change_id
-    branch = f"imp/{change_id}"
+    rel = Path(".imp") / "worktrees" / quest_id
+    branch = f"imp/{quest_id}"
     with RepoGitLock(control_root).acquire():
         _git(control_root, "worktree", "remove", "--force", str(rel))
         shutil.rmtree(control_root / rel, ignore_errors=True)
@@ -182,10 +182,10 @@ def destroy_worktree(control_root: Path, change_id: str) -> None:
 
 
 def create_spike_worktree(
-    control_root: Path, change_id: str, discriminator: int, base: str,
+    control_root: Path, quest_id: str, discriminator: int, base: str,
 ) -> Path:
     """Disposable worktree on branch imp/spike-<id>-<n>, cut from base's tip."""
-    name = f"spike-{change_id}-{discriminator}"
+    name = f"spike-{quest_id}-{discriminator}"
     rel = Path(".imp") / "worktrees" / name
     branch = f"imp/{name}"
     with RepoGitLock(control_root).acquire():
@@ -197,10 +197,10 @@ def create_spike_worktree(
 
 
 def destroy_spike_worktree(
-    control_root: Path, change_id: str, discriminator: int,
+    control_root: Path, quest_id: str, discriminator: int,
 ) -> None:
     """Full best-effort teardown of a spike worktree and its branch, crash-tolerant."""
-    name = f"spike-{change_id}-{discriminator}"
+    name = f"spike-{quest_id}-{discriminator}"
     rel = Path(".imp") / "worktrees" / name
     branch = f"imp/{name}"
     with RepoGitLock(control_root).acquire():
@@ -285,15 +285,15 @@ def is_worktree(path: Path) -> bool:
     return proc.returncode == 0 and proc.stdout.strip() == "true"
 
 
-def _merge_subject(title: str, change_id: str, body: str | None) -> str:
-    trailer = f"(imp/{change_id})"
+def _merge_subject(title: str, quest_id: str, body: str | None) -> str:
+    trailer = f"(imp/{quest_id})"
     if body:
         return f"Merge {title}\n\n{body.strip()}\n\n{trailer}"
     return f"Merge {title}\n\n{trailer}"
 
 
 def merge_to_base(
-    control_root: Path, change_id: str, base: str, *, title: str,
+    control_root: Path, quest_id: str, base: str, *, title: str,
     body: str | None = None,
     project_root: Path | None = None,
 ) -> MergeResult:
@@ -302,17 +302,17 @@ def merge_to_base(
     is clean (DIRTY) when `project_root` is given: the reconciler is the last
     committer, so a dirty tree would silently drop its work then be destroyed by
     remove_worktree (H1 net, R5)."""
-    branch = f"imp/{change_id}"
+    branch = f"imp/{quest_id}"
     with RepoGitLock(control_root).acquire():
         if project_root is not None and is_dirty(project_root):
             return MergeResult("DIRTY")
         live = _worktree_on_branch(control_root, base)
         if live is not None:
-            return _merge_in_place(live, branch, title, change_id, body)
-        return _merge_detached(control_root, change_id, branch, base, title, body)
+            return _merge_in_place(live, branch, title, quest_id, body)
+        return _merge_detached(control_root, quest_id, branch, base, title, body)
 
 
-def _merge_in_place(worktree: Path, branch: str, title: str, change_id: str,
+def _merge_in_place(worktree: Path, branch: str, title: str, quest_id: str,
                     body: str | None = None) -> MergeResult:
     """Branch 1: advance ref + index + working tree atomically in the live
     checkout. (See the dirty-safety note in merge_to_base.)
@@ -323,7 +323,7 @@ def _merge_in_place(worktree: Path, branch: str, title: str, change_id: str,
     histories, …) starts nothing — calling `git merge --abort` there errors ("no
     merge to abort"). MERGE_HEAD answers this locale-independently. git's stderr
     is carried in `detail` so the surfaced reason is truthful for any refusal."""
-    subject = _merge_subject(title, change_id, body)
+    subject = _merge_subject(title, quest_id, body)
     proc = _git(worktree, "merge", "--no-ff", "-m", subject, branch)
     if proc.returncode == 0:
         commit = _git_ok(worktree, "rev-parse", "HEAD").strip()
@@ -338,16 +338,16 @@ def _merge_in_place(worktree: Path, branch: str, title: str, change_id: str,
     return MergeResult("REFUSED", detail=detail)
 
 
-def _merge_detached(control_root: Path, change_id: str, branch: str, base: str,
+def _merge_detached(control_root: Path, quest_id: str, branch: str, base: str,
                     title: str, body: str | None = None) -> MergeResult:
     """Branch 3: <base> checked out nowhere. Merge in a detached scratch worktree,
     update-ref, remove the scratch."""
-    scratch_rel = Path(".imp") / "worktrees" / f".merge-{change_id}"
+    scratch_rel = Path(".imp") / "worktrees" / f".merge-{quest_id}"
     scratch = control_root / scratch_rel
     _git(control_root, "worktree", "remove", "--force", str(scratch_rel))
     shutil.rmtree(scratch, ignore_errors=True)
     _git_ok(control_root, "worktree", "add", "--detach", str(scratch_rel), base)
-    subject = _merge_subject(title, change_id, body)
+    subject = _merge_subject(title, quest_id, body)
     try:
         proc = _git(scratch, "merge", "--no-ff", "-m", subject, branch)
         if proc.returncode != 0:
@@ -392,7 +392,7 @@ def _force_update_ref(control_root: Path, ref: str, commit: str) -> None:
 
 
 def artifact_commit(
-    control_root: Path, change_id: str, files: Mapping[str, Path], *, message: str,
+    control_root: Path, quest_id: str, files: Mapping[str, Path], *, message: str,
     warn: Callable[[str], None] | None = None,
 ) -> bool:
     """Snapshot a change's artifacts to refs/imp/artifacts/<id> as a FULL tree.
@@ -409,7 +409,7 @@ def artifact_commit(
     Returns True iff a commit was written. Empty `files`, or a snapshot identical
     to the current tip, is a no-op that returns False and leaves the ref untouched.
     """
-    ref = f"refs/imp/artifacts/{change_id}"
+    ref = f"refs/imp/artifacts/{quest_id}"
     if not files:
         return False
     with RepoGitLock(control_root).acquire(), _temp_index(control_root) as env:

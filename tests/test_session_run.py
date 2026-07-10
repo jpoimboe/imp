@@ -29,9 +29,9 @@ def anyio_backend() -> str:
     return "asyncio"
 
 
-def _make_change(tmp_path: Path, change_id: str) -> Change:
+def _make_change(tmp_path: Path, quest_id: str) -> Change:
     return Change(
-        id=change_id,
+        id=quest_id,
         title="T",
         base_branch="main",
         control_root=tmp_path,
@@ -438,7 +438,7 @@ async def test_run_session_client_forwards_new_leave_mode_to_terminal(
 ) -> None:
     _seed_control(tmp_path)
     change = Change.create_draft(
-        tmp_path, title="Draft", change_id="d1", base_branch="main")
+        tmp_path, title="Draft", quest_id="d1", base_branch="main")
     change.event_log().append(
         agent_id=None, type="user_message",
         payload={"role": "user", "content": "hi"})
@@ -468,7 +468,7 @@ async def test_run_session_client_forwards_chat_leave_mode_to_terminal(
 ) -> None:
     _seed_control(tmp_path)
     change = Change.create_draft(
-        tmp_path, title="Draft", change_id="c1", base_branch="main")
+        tmp_path, title="Draft", quest_id="c1", base_branch="main")
     change.event_log().append(
         agent_id=None, type="opening_intent", payload={"text": "a question"})
 
@@ -516,7 +516,7 @@ async def test_run_session_client_passes_terminal_title_from_change_title(
     title = captured["title"]
     assert isinstance(title, TerminalTitle)
     assert title._name == "T"
-    assert title._change_id == "2026-06-15-title"
+    assert title._quest_id == "2026-06-15-title"
     assert rc == 0
 
 
@@ -559,8 +559,8 @@ async def test_run_session_client_resets_title_on_daemon_startup_failure(
     reset_calls: list[str] = []
 
     class _FakeTitle:
-        def __init__(self, stream: object, change_id: str, change_name: str) -> None:
-            self._change_id = change_id
+        def __init__(self, stream: object, quest_id: str, change_name: str) -> None:
+            self._quest_id = quest_id
             self._name = change_name
 
         def working(self) -> None: ...
@@ -647,7 +647,7 @@ async def test_run_session_client_reuses_passed_in_title(
 
     class _SentinelTitle:
         def __init__(self) -> None:
-            self._change_id = "sentinel"
+            self._quest_id = "sentinel"
             self._name = "sentinel"
 
         def working(self) -> None: ...
@@ -730,30 +730,30 @@ def test_should_run_ctrl_d_reader_requires_interactive_tty(monkeypatch) -> None:
 
 
 def test_infer_session_result_completed_from_archive_when_home_reaped(tmp_path: Path) -> None:
-    change_id = "2026-07-03-reaped"
+    quest_id = "2026-07-03-reaped"
     subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
     subprocess.run(["git", "config", "user.email", "t@t"], cwd=tmp_path, check=True)
     subprocess.run(["git", "config", "user.name", "t"], cwd=tmp_path, check=True)
 
-    events_file = tmp_path / f"{change_id}.jsonl"
+    events_file = tmp_path / f"{quest_id}.jsonl"
     events_file.write_bytes(
-        f'{{"id":"{change_id}-e0","parent_id":null,"agent_id":null,'
+        f'{{"id":"{quest_id}-e0","parent_id":null,"agent_id":null,'
         '"timestamp":"2026-06-01T00:00:01+00:00","type":"change_created",'
-        f'"payload":{{"id":"{change_id}"}}}}\n'.encode()
+        f'"payload":{{"id":"{quest_id}"}}}}\n'.encode()
     )
-    change_json = tmp_path / f"{change_id}-change.json"
+    change_json = tmp_path / f"{quest_id}-change.json"
     change_json.write_text(json.dumps({
-        "id": change_id, "title": "Reaped", "base_branch": "main",
+        "id": quest_id, "title": "Reaped", "base_branch": "main",
         "created_at": "2026-06-01T00:00:00+00:00", "depends_on": []}))
-    state_json = tmp_path / f"{change_id}-state.json"
-    state_json.write_text(json.dumps({"id": change_id, "status": "completed", "step": None}))
+    state_json = tmp_path / f"{quest_id}-state.json"
+    state_json.write_text(json.dumps({"id": quest_id, "status": "completed", "step": None}))
     archive.archive_change(
-        tmp_path, change_id, events_path=events_file,
+        tmp_path, quest_id, events_path=events_file,
         change_json_path=change_json, state_json_path=state_json)
 
     # Build the Change WITHOUT creating the live home/state dir — State.load raises
     # FileNotFoundError, forcing the archive fallback branch.
-    change = _make_change(tmp_path, change_id)
+    change = _make_change(tmp_path, quest_id)
     assert not change.state_dir.exists()
     assert infer_session_result(change) is RunResult.COMPLETED
 
@@ -764,7 +764,7 @@ async def test_run_session_client_wires_seed_pending_reply_as_local_echo(
 ) -> None:
     _seed_control(tmp_path)
     change = Change.create_draft(
-        tmp_path, title="Draft", change_id="e1", base_branch="main")
+        tmp_path, title="Draft", quest_id="e1", base_branch="main")
     change.event_log().append(
         agent_id=None, type="user_message",
         payload={"role": "user", "content": "hi"})

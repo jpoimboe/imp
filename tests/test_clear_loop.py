@@ -220,7 +220,7 @@ def test_fresh_session_line_routes_through_clear_loop(
 ) -> None:
     _seed_control(tmp_path)
     monkeypatch.chdir(tmp_path)
-    ch = Change.create(tmp_path, title="demo", change_id="feat", base_branch="main")
+    ch = Change.create(tmp_path, title="demo", quest_id="feat", base_branch="main")
 
     async def _fake_loop(control, *, first):
         return 0
@@ -284,7 +284,7 @@ def test_resume_interactive_routes_through_clear_loop(
 ) -> None:
     _seed_control(tmp_path)
     monkeypatch.chdir(tmp_path)
-    ch = Change.create(tmp_path, title="demo", change_id="feat", base_branch="main")
+    ch = Change.create(tmp_path, title="demo", quest_id="feat", base_branch="main")
     st = State.load(ch.state_dir)
     st.status = "paused"
     st.save(ch.state_dir)
@@ -314,7 +314,7 @@ def test_resume_interactive_leads_with_header_before_splash(
 ) -> None:
     _seed_control(tmp_path)
     monkeypatch.chdir(tmp_path)
-    ch = Change.create(tmp_path, title="demo", change_id="feat", base_branch="main")
+    ch = Change.create(tmp_path, title="demo", quest_id="feat", base_branch="main")
     st = State.load(ch.state_dir)
     st.status = "paused"
     st.save(ch.state_dir)
@@ -358,7 +358,7 @@ def test_resume_interactive_wires_preceded_by_blank_to_splash(
 ) -> None:
     _seed_control(tmp_path)
     monkeypatch.chdir(tmp_path)
-    ch = Change.create(tmp_path, title="demo", change_id="feat", base_branch="main")
+    ch = Change.create(tmp_path, title="demo", quest_id="feat", base_branch="main")
     st = State.load(ch.state_dir)
     st.status = "paused"
     st.save(ch.state_dir)
@@ -443,7 +443,7 @@ async def test_run_cleared_session_writes_title_before_prompt(
     # this pre-attach opening prompt is blocked on the user, so it shows the idle glyph.
     assert "\x1b]2;ѱ imp · " in at_prompt["value"]
     title = captured["title"]
-    assert title._change_id == captured["change"].id   # one instance threaded through
+    assert title._quest_id == captured["change"].id   # one instance threaded through
 
 
 @pytest.mark.anyio
@@ -461,7 +461,7 @@ async def test_run_cleared_session_cancel_resets_title(
         def __init__(
             self, stream: object, cid: str, name: str, initial: str = "busy",
         ) -> None:
-            self._change_id = cid
+            self._quest_id = cid
             self._name = name
 
         def busy(self) -> None: ...

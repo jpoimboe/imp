@@ -56,7 +56,7 @@ def test_change_resolves_fork_workflow_dir(tmp_path: Path) -> None:
     (tmp_path / "imp" / "project.yaml").write_text("default-workflow: mine\n")
     _git(tmp_path, "add", "-A")
     _git(tmp_path, "commit", "-qm", "fork workflow")
-    ch = Change.create(tmp_path, title="X", change_id="2026-06-15-fork01",
+    ch = Change.create(tmp_path, title="X", quest_id="2026-06-15-fork01",
                        base_branch="main")
     assert ch.workflow_dir == ch.project_root / "imp" / "workflows" / "mine"
 
@@ -67,7 +67,7 @@ def test_change_missing_workflow_dir_raises_naming_path(tmp_path: Path) -> None:
     _git(tmp_path, "add", "-A")
     _git(tmp_path, "commit", "-qm", "point at missing")
     with pytest.raises(LoadError) as exc:
-        Change.create(tmp_path, title="X", change_id="2026-06-15-ghost1",
+        Change.create(tmp_path, title="X", quest_id="2026-06-15-ghost1",
                       base_branch="main")
     msg = str(exc.value)
     assert "ghost" in msg

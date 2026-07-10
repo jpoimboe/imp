@@ -21,7 +21,7 @@ def _log(path: Path, events: list[tuple[str, dict]]) -> EventLog:
 def test_renders_change_namespace(tmp_path: Path) -> None:
     log = _log(tmp_path / "events.jsonl", [])
     ctx = build_context(
-        change_title="My Change", event_log=log, change_id="myid01",
+        change_title="My Change", event_log=log, quest_id="myid01",
     )
     assert render_prompt(
         "Hello {{ change.title }} ({{ change.id }})", ctx,
@@ -198,7 +198,7 @@ def test_dunder_raises_attributeerror() -> None:
 def test_renders_change_home(tmp_path: Path) -> None:
     log = _log(tmp_path / "events.jsonl", [])
     ctx = build_context(
-        change_id="abc123", change_title="My Change",
+        quest_id="abc123", change_title="My Change",
         change_home="/ctl/.imp/changes/abc123", event_log=log,
     )
     assert render_prompt(
@@ -208,7 +208,7 @@ def test_renders_change_home(tmp_path: Path) -> None:
 
 def test_change_home_defaults_empty(tmp_path: Path) -> None:
     log = _log(tmp_path / "events.jsonl", [])
-    ctx = build_context(change_id="t", change_title="t", event_log=log)
+    ctx = build_context(quest_id="t", change_title="t", event_log=log)
     assert render_prompt("{{ change.home }}", ctx) == ""
 
 
@@ -287,7 +287,7 @@ def test_change_namespace_exposes_orig_base_head(tmp_path) -> None:
 
     log = JsonlEventLog(tmp_path / "events.jsonl")
     ctx = build_context(
-        change_title="t", event_log=log, change_id="abc",
+        change_title="t", event_log=log, quest_id="abc",
         cur_base_head="NEWTIP", orig_base_head="OLDTIP")
     # Both heads render, so a template can branch on whether the base moved.
     out = render_prompt(
@@ -297,7 +297,7 @@ def test_change_namespace_exposes_orig_base_head(tmp_path) -> None:
     assert out == "OLDTIP|NEWTIP|MOVED"
 
     same = build_context(
-        change_title="t", event_log=log, change_id="abc",
+        change_title="t", event_log=log, quest_id="abc",
         cur_base_head="X", orig_base_head="X")
     out2 = render_prompt(
         "{% if change.cur_base_head != change.orig_base_head %}MOVED{% else %}SAME{% endif %}",

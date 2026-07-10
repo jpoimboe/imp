@@ -8,7 +8,7 @@ NOTICE = "✓ plan 1/2 · 2 tasks\n   1. seed widget\n   2. wire widget"
 
 def _stream() -> list[dict]:
     return [
-        ev("1", "change_created", change_id=1, title="x"),
+        ev("1", "change_created", quest_id=1, title="x"),
         ev("2", "step_started", step="plan-writer", kind="agent", phase="plan",
            model="m", provider="anthropic", label="writing plan 1/2",
            phase_label="planning phase"),

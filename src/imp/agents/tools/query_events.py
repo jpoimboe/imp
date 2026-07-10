@@ -1,5 +1,5 @@
 """query_events (spec §6.6). Reads a Change's event timeline — the current
-change by default, or another change via change_id."""
+change by default, or another change via quest_id."""
 
 from __future__ import annotations
 
@@ -21,17 +21,17 @@ _DEFAULT_LIMIT = 100
 
 
 def _resolve_other_change_events(
-    control_root: Path, change_id: str,
+    control_root: Path, quest_id: str,
 ) -> list[dict[str, Any]] | None:
     """Worktree-first (Change.load), then archive (archive_read.read_events),
     mirroring the CLI's _load_events_for_id. None if the id is in neither."""
     try:
-        change = Change.load(control_root, change_id)
+        change = Change.load(control_root, quest_id)
     except LoadError:
         change = None
     if change is not None:
         return list(change.event_log().read())
-    raw = archive_read.read_events(control_root, change_id)
+    raw = archive_read.read_events(control_root, quest_id)
     if raw is None:
         return None
     return parse_events_jsonl(raw)
@@ -63,7 +63,7 @@ def _filter_and_limit(
         "result with type (an event type, or a comma-separated list of them), "
         "agent_id (a substring matched against an event's role/phase id), and "
         "limit (the last N events; default 100). By default it reads the current "
-        "change; pass change_id to read another change's timeline. A history "
+        "change; pass quest_id to read another change's timeline. A history "
         "channel, not a status one — for current state, prefer your durable "
         "working files."
     ),
@@ -74,7 +74,7 @@ def query_events(
     agent_id: str | None = None,
     limit: int | None = None,
     full: bool = False,
-    change_id: str | None = None,
+    quest_id: str | None = None,
 ) -> str:
     if limit is None:
         n = _DEFAULT_LIMIT
@@ -93,16 +93,16 @@ def query_events(
     types = {t.strip() for t in type.split(",") if t.strip()} if type else None
 
     current_id = ctx.events_path.parent.name
-    # Truthy (not `is not None`): a blank change_id="" routes to the current-change
+    # Truthy (not `is not None`): a blank quest_id="" routes to the current-change
     # path — otherwise it would reach Change.load, where <control>/.imp/changes is a
     # real dir so .is_dir() passes and the missing change.json raises FileNotFoundError,
     # escaping the LoadError catch and breaking the "does not raise" contract.
-    if change_id and change_id != current_id:
+    if quest_id and quest_id != current_id:
         # <control>/.imp/changes/<id>/events.jsonl -> parents[3] == <control>.
         control_root = ctx.events_path.parents[3]
-        resolved = _resolve_other_change_events(control_root, change_id)
+        resolved = _resolve_other_change_events(control_root, quest_id)
         if resolved is None:
-            return json.dumps({"error": f"no such change {change_id!r}"})
+            return json.dumps({"error": f"no such change {quest_id!r}"})
         events = _filter_and_limit(resolved, types, agent_id, n)
     else:
         log = JsonlEventLog(ctx.events_path)

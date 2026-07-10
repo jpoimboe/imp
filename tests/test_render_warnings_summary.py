@@ -41,13 +41,13 @@ def test_summary_rendered_in_warning_palette_when_colored() -> None:
 
 
 def test_completed_node_renders_completed_id_line() -> None:
-    out = _render([nv.CompletedNode(change_id="abc123")], color=True)
+    out = _render([nv.CompletedNode(quest_id="abc123")], color=True)
     assert "✓ Completed abc123." in out
     assert pal.sgr("wordmark", enabled=True) in out  # NODE_COLORS["lifecycle"]
 
 
 def test_completed_node_plain_has_no_glyph() -> None:
-    out = _render([nv.CompletedNode(change_id="abc123")], color=False)
+    out = _render([nv.CompletedNode(quest_id="abc123")], color=False)
     assert "Completed abc123." in out
     assert "✓" not in out
 

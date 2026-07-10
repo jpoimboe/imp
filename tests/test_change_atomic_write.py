@@ -51,7 +51,7 @@ def test_write_change_json_preserves_original_on_replace_failure(
 
 def test_migration_advances_version_and_leaves_no_temp(tmp_path: Path) -> None:
     _seed_control(tmp_path)
-    ch = Change.create(tmp_path, title="x", change_id="mig01", base_branch="main")
+    ch = Change.create(tmp_path, title="x", quest_id="mig01", base_branch="main")
     meta_path = ch.change_dir / "change.json"
     meta = json.loads(meta_path.read_text())
     meta["layout_version"] = 4                       # pretend it was written by v4
@@ -68,7 +68,7 @@ def test_rename_setter_preserves_change_json_on_replace_failure(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _seed_control(tmp_path)
-    ch = Change.create(tmp_path, title="Original", change_id="atom01",
+    ch = Change.create(tmp_path, title="Original", quest_id="atom01",
                        base_branch="main")
     meta_path = ch.change_dir / "change.json"
     original = meta_path.read_text()
@@ -90,7 +90,7 @@ def test_migration_preserves_change_json_on_replace_failure(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _seed_control(tmp_path)
-    ch = Change.create(tmp_path, title="x", change_id="mig02", base_branch="main")
+    ch = Change.create(tmp_path, title="x", quest_id="mig02", base_branch="main")
     meta_path = ch.change_dir / "change.json"
     meta = json.loads(meta_path.read_text())
     meta["layout_version"] = 4

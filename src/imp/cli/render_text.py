@@ -855,13 +855,13 @@ def _render(node: Any, *, depth: int, full: bool, color: bool,
 
     if isinstance(node, nv.CompletedNode):
         mark = "✓ " if color else ""
-        yield _line(f"{mark}Completed {node.change_id}.", depth, color,
+        yield _line(f"{mark}Completed {node.quest_id}.", depth, color,
                     *pal.NODE_COLORS["lifecycle"], gutters=gutters)
         return
 
     if isinstance(node, nv.MergedNode):
         mark = "✓ " if color else ""
-        yield _line(f"{mark}Merged {node.change_id} into {node.base}.", depth, color,
+        yield _line(f"{mark}Merged {node.quest_id} into {node.base}.", depth, color,
                     *pal.NODE_COLORS["lifecycle"], gutters=gutters)
         return
 

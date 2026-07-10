@@ -49,9 +49,9 @@ async def test_log_picker_preselects_resolve_default_target(
     captured = {}
 
     async def fake_picker(candidates, *, now, color, header, selected_index):
-        captured["order"] = [c.change_id for c in candidates]
+        captured["order"] = [c.quest_id for c in candidates]
         captured["selected_index"] = selected_index
-        return candidates[selected_index].change_id
+        return candidates[selected_index].quest_id
 
     monkeypatch.setattr(m.resume_select, "run_picker", fake_picker)
     chosen = await m._pick_log_target(tmp_path)
@@ -89,8 +89,8 @@ def test_cmd_log_tty_no_token_routes_to_picker(
     monkeypatch.setattr(m, "_pick_log_target", fake_pick)
     seen = {}
 
-    def fake_load(control, change_id):
-        seen["id"] = change_id
+    def fake_load(control, quest_id):
+        seen["id"] = quest_id
         return None  # → "no such Change" rc 2, but proves the routing
 
     monkeypatch.setattr(m, "_load_events_for_id", fake_load)

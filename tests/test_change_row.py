@@ -31,7 +31,7 @@ def test_relative_age(then_iso, expected):
 
 
 def _row(**kw):
-    base = dict(change_id="yaitd7", title="Add version flag",
+    base = dict(quest_id="yaitd7", title="Add version flag",
                 status="running", step="code",
                 last_iso="2026-06-11T11:45:00+00:00", now=_NOW)
     base.update(kw)

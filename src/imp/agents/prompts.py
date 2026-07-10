@@ -135,7 +135,7 @@ class PromptContext:
 
 def build_context(
     change_title: str, event_log: EventLog,
-    *, change_id: str = "", change_home: str = "",
+    *, quest_id: str = "", change_home: str = "",
     cur_base_head: str = "", orig_base_head: str = "",
     vars: dict[str, Any] | None = None,
     project_facts: dict[str, str] | None = None,
@@ -146,7 +146,7 @@ def build_context(
     laps = tuple(prior_laps or ())
     # lap from the stored lap, not len: history truncates to OUTCOME_HISTORY_K so len saturates.
     return PromptContext(
-        change=_ChangeNamespace(id=change_id, title=change_title,
+        change=_ChangeNamespace(id=quest_id, title=change_title,
                                 home=change_home, cur_base_head=cur_base_head,
                                 orig_base_head=orig_base_head),
         events=_EventsNamespace(event_log),
@@ -175,7 +175,7 @@ def render_label(
     try:
         return render_prompt(label, build_context(
             change_title=change.title, event_log=log,
-            change_id=change.id, change_home=f".imp/changes/{change.id}",
+            quest_id=change.id, change_home=f".imp/changes/{change.id}",
             cur_base_head=change.cur_base_head,
             orig_base_head=change.orig_base_head,
             vars=state.vars if state is not None else {},

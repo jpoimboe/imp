@@ -31,7 +31,7 @@ def test_resume_change_spawns_imp_resume_for_a_unique_match(
 ) -> None:
     calls = _capture(monkeypatch)
     monkeypatch.setattr(
-        "imp.cli.main._iter_change_ids", lambda _c: ["2026-06-13-aaaaaa"])
+        "imp.cli.main._iter_quest_ids", lambda _c: ["2026-06-13-aaaaaa"])
     msg = spawn.resume_change(tmp_path, "aaaa")
     assert calls[0]["argv"] == [
         sys.executable, "-m", "imp", "resume", "2026-06-13-aaaaaa",
@@ -45,7 +45,7 @@ def test_resume_change_reports_ambiguous_and_does_not_spawn(
 ) -> None:
     calls = _capture(monkeypatch)
     monkeypatch.setattr(
-        "imp.cli.main._iter_change_ids",
+        "imp.cli.main._iter_quest_ids",
         lambda _c: ["2026-06-13-aaaaaa", "2026-06-13-aaabbb"])
     msg = spawn.resume_change(tmp_path, "aaa")
     assert calls == []
@@ -57,7 +57,7 @@ def test_resume_change_reports_no_match_and_does_not_spawn(
     monkeypatch: Any, tmp_path: Path,
 ) -> None:
     calls = _capture(monkeypatch)
-    monkeypatch.setattr("imp.cli.main._iter_change_ids", lambda _c: [])
+    monkeypatch.setattr("imp.cli.main._iter_quest_ids", lambda _c: [])
     msg = spawn.resume_change(tmp_path, "ghost")
     assert calls == []
     assert "'ghost'" in msg

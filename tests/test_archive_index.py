@@ -78,7 +78,7 @@ def test_ingest_populates_changes_deps(tmp_path: Path) -> None:
         ).fetchone()[0] is not None
 
         deps = conn.execute(
-            "SELECT depends_on_id FROM deps WHERE change_id='alpha'"
+            "SELECT depends_on_id FROM deps WHERE quest_id='alpha'"
             " ORDER BY depends_on_id").fetchall()
         assert deps == [("beta",), ("gamma",)]
     finally:

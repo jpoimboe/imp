@@ -19,7 +19,7 @@ def _merge_exit_step():
 
 def test_merge_and_exit_removes_worktree_and_flips_root(tmp_path: Path) -> None:
     _seed_control(tmp_path)
-    ch = Change.create(tmp_path, title="x", change_id="feat", base_branch="main")
+    ch = Change.create(tmp_path, title="x", quest_id="feat", base_branch="main")
     (ch.project_root / "feature.txt").write_text("hi")
     _git(ch.project_root, "add", "-A")
     _git(ch.project_root, "commit", "-qm", "feat")
@@ -37,7 +37,7 @@ def test_merge_and_exit_removes_worktree_and_flips_root(tmp_path: Path) -> None:
 
 def test_merge_and_exit_idempotent_when_already_merged(tmp_path: Path) -> None:
     _seed_control(tmp_path)
-    ch = Change.create(tmp_path, title="x", change_id="feat", base_branch="main")
+    ch = Change.create(tmp_path, title="x", quest_id="feat", base_branch="main")
     (ch.project_root / "feature.txt").write_text("hi")
     _git(ch.project_root, "add", "-A")
     _git(ch.project_root, "commit", "-qm", "feat")

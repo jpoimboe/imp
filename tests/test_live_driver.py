@@ -39,7 +39,7 @@ def _render_body(events) -> list[str]:
 def test_burst_recap_streams_then_prose_in_live_path() -> None:
     drv, out = _driver()
     events = [
-        ev("1", "change_created", change_id=1, title="x"),
+        ev("1", "change_created", quest_id=1, title="x"),
         ev("3", "step_started", step="spec", kind="agent", phase="design",
            model="m", provider="anthropic"),
         ev("4", "tool_call", agent_id="a", id="b1", name="read_file", input={"p": "1"}),
@@ -65,7 +65,7 @@ def test_burst_recap_streams_then_prose_in_live_path() -> None:
 def test_burst_recap_then_prose_kept_in_order() -> None:
     drv, out = _driver()
     for e in [
-        ev("1", "change_created", change_id=1, title="x"),
+        ev("1", "change_created", quest_id=1, title="x"),
         ev("3", "step_started", step="spec", kind="agent", phase="design",
            model="m", provider="anthropic"),
         ev("4", "tool_call", agent_id="a", id="b1", name="grep", input={"q": "x"}),
@@ -87,7 +87,7 @@ def test_live_subagent_only_status_rows() -> None:
     # subagent's streamed children or the SDK sentinel outcome.
     drv, out = _driver()
     for e in [
-        ev("1", "change_created", change_id=1, title="x"),
+        ev("1", "change_created", quest_id=1, title="x"),
         ev("3", "step_started", step="spec", kind="agent", phase="design",
            model="m", provider="anthropic"),
         ev("4", "tool_call", agent_id="a", id="t1", name="sub_agent",
@@ -110,7 +110,7 @@ def test_live_subagent_only_status_rows() -> None:
 def test_subagent_descends_but_nested_burst_does_not_leak() -> None:
     drv, out = _driver()
     for e in [
-        ev("1", "change_created", change_id=1, title="x"),
+        ev("1", "change_created", quest_id=1, title="x"),
         ev("3", "step_started", step="spec", kind="agent", phase="design",
            model="m", provider="anthropic"),
         ev("4", "tool_call", agent_id="a", id="t1", name="sub_agent",
@@ -133,7 +133,7 @@ def test_depth_when_step_completed_flushes_trailing_burst() -> None:
     # A burst flushed by step_completed must render at its append-time depth
     # (under the step), not the shallower post-pop depth.
     events = [
-        ev("1", "change_created", change_id=1, title="x"),
+        ev("1", "change_created", quest_id=1, title="x"),
         ev("3", "step_started", step="spec", kind="agent", phase="design",
            model="m", provider="anthropic"),
         ev("4", "tool_call", agent_id="a", id="b1", name="read_file", input={"p": "1"}),
@@ -150,7 +150,7 @@ def test_depth_when_step_completed_flushes_trailing_burst() -> None:
 
 def test_body_parity_with_render_tree() -> None:
     events = [
-        ev("1", "change_created", change_id=1, title="add auth"),
+        ev("1", "change_created", quest_id=1, title="add auth"),
         ev("3", "step_started", step="spec", kind="agent", phase="design",
            model="m", provider="anthropic"),
         ev("4", "thinking", agent_id="a", content="real thinking here"),
@@ -173,7 +173,7 @@ def test_consecutive_prose_blank_separated_and_parity() -> None:
     # live, exactly as in `imp log` — the live path streams prose one node at a time,
     # so this guards that its blank-line spacing matches the batch walk byte-for-byte.
     events = [
-        ev("1", "change_created", change_id=1, title="x"),
+        ev("1", "change_created", quest_id=1, title="x"),
         ev("3", "step_started", step="spec", kind="agent", phase="design",
            model="m", provider="anthropic"),
         ev("4", "llm_response", agent_id="a",
@@ -198,7 +198,7 @@ def test_consecutive_prose_blank_separated_and_parity() -> None:
 
 def test_empty_thinking_dropped_in_live_path() -> None:
     events = [
-        ev("1", "change_created", change_id=1, title="x"),
+        ev("1", "change_created", quest_id=1, title="x"),
         ev("3", "step_started", step="spec", kind="agent", phase="design",
            model="m", provider="anthropic"),
         ev("4", "thinking", agent_id="a", content="   "),
@@ -228,7 +228,7 @@ def test_no_slug_title_header_emitted() -> None:
 def test_open_burst_recap_emitted_at_finish() -> None:
     drv, out = _driver()
     for e in [
-        ev("1", "change_created", change_id=1, title="x"),
+        ev("1", "change_created", quest_id=1, title="x"),
         ev("3", "step_started", step="spec", kind="agent", phase="design",
            model="m", provider="anthropic"),
         ev("4", "tool_call", agent_id="a", id="b1", name="read_file", input={"p": "1"}),
@@ -247,7 +247,7 @@ def test_subagent_row_resolves_only_on_close() -> None:
     # resolved status row emits.
     drv, out = _driver()
     for e in [
-        ev("1", "change_created", change_id=1, title="x"),
+        ev("1", "change_created", quest_id=1, title="x"),
         ev("3", "step_started", step="spec", kind="agent", phase="design",
            model="m", provider="anthropic"),
         ev("4", "tool_call", agent_id="a", id="t1", name="sub_agent",
@@ -271,7 +271,7 @@ def test_subagent_row_resolves_only_on_close() -> None:
 def test_subagent_status_row_column_matches_render_tree() -> None:
     # The collapsed status row sits at the same column in live and imp log.
     events = [
-        ev("1", "change_created", change_id=1, title="x"),
+        ev("1", "change_created", quest_id=1, title="x"),
         ev("3", "step_started", step="spec", kind="agent", phase="design",
            model="m", provider="anthropic"),
         ev("4", "tool_call", agent_id="a", id="t1", name="sub_agent",
@@ -294,7 +294,7 @@ def test_subagent_status_row_column_matches_render_tree() -> None:
 def test_finish_force_pops_running_subagent_without_outcome() -> None:
     drv, out = _driver()
     for e in [
-        ev("1", "change_created", change_id=1, title="x"),
+        ev("1", "change_created", quest_id=1, title="x"),
         ev("3", "step_started", step="spec", kind="agent", phase="design",
            model="m", provider="anthropic"),
         ev("4", "tool_call", agent_id="a", id="t1", name="sub_agent",
@@ -318,7 +318,7 @@ def test_subagent_body_parity_with_render_tree() -> None:
     # resolved status row, so assert full-body parity for a subagent that had
     # internal prose AND a structured outcome (neither of which must render).
     events = [
-        ev("1", "change_created", change_id=1, title="x"),
+        ev("1", "change_created", quest_id=1, title="x"),
         ev("3", "step_started", step="spec", kind="agent", phase="design",
            model="m", provider="anthropic"),
         ev("4", "tool_call", agent_id="a", id="t1", name="sub_agent",
@@ -347,7 +347,7 @@ def test_background_subagent_row_keeps_duration_in_live() -> None:
     # end_ts) shows `· 10s`. Both views must stay byte-identical AND show the
     # duration.
     events = [
-        ev("1", "change_created", change_id=1, title="x"),
+        ev("1", "change_created", quest_id=1, title="x"),
         ev("3", "step_started", step="spec", kind="agent", phase="design",
            model="m", provider="anthropic"),
         # Block-tracked dispatch (id_ns="block"): an authoritative result WILL close
@@ -393,7 +393,7 @@ def test_nested_subagent_io_never_leaks() -> None:
     # or prose) ever reaches the live view, regardless of whether it closed.
     drv, out = _driver()
     for e in [
-        ev("1", "change_created", change_id=1, title="x"),
+        ev("1", "change_created", quest_id=1, title="x"),
         ev("3", "step_started", step="spec", kind="agent", phase="design",
            model="m", provider="anthropic"),
         ev("4", "tool_call", agent_id="a", id="t1", name="sub_agent",
@@ -418,7 +418,7 @@ def test_subagent_closing_with_open_nested_burst_emits_only_status_row() -> None
     # force) walk; no nested I/O and no outcome render.
     drv, out = _driver()
     for e in [
-        ev("1", "change_created", change_id=1, title="x"),
+        ev("1", "change_created", quest_id=1, title="x"),
         ev("3", "step_started", step="spec", kind="agent", phase="design",
            model="m", provider="anthropic"),
         ev("4", "tool_call", agent_id="a", id="t1", name="sub_agent",
@@ -443,7 +443,7 @@ def test_phase_b_streams_live_without_finish() -> None:
     close-fix the cursor froze in phase A and phase B never appeared until finish()."""
     drv, out = _driver()
     events = [
-        ev("1", "change_created", change_id=1, title="x"),
+        ev("1", "change_created", quest_id=1, title="x"),
         ev("2", "step_started", step="spec", kind="agent", phase="design",
            model="m", provider="anthropic"),
         ev("3", "step_completed", step="spec", kind="agent",
@@ -477,7 +477,7 @@ def test_live_subagent_collapses_to_status_row_byte_identical_to_log() -> None:
     # no streamed children, no gutter, and no outcome. The whole body is byte-
     # identical to the imp log replay (shared subagent_status_row layer).
     events = [
-        ev("1", "change_created", change_id=1, title="x"),
+        ev("1", "change_created", quest_id=1, title="x"),
         ev("3", "step_started", step="spec", kind="agent", phase="design",
            model="m", provider="anthropic"),
         ev("4", "tool_call", agent_id="a", id="t1", name="sub_agent",
@@ -504,7 +504,7 @@ def test_user_message_shown_in_live_on_tty_and_nontty() -> None:
     # TTY and non-TTY cases (and imp log always renders it). One shared path, so
     # the user's turn looks identical everywhere.
     events = [
-        ev("1", "change_created", change_id=1, title="t"),
+        ev("1", "change_created", quest_id=1, title="t"),
         ev("2", "step_started", step="spec-writer", kind="agent", phase="spec",
            model="m", provider="anthropic"),
         ev("2b", "awaiting_user_input", agent_id="step:spec/spec-writer"),
@@ -593,7 +593,7 @@ def test_live_prose_then_breadcrumb_blank_separated_and_parity() -> None:
     """Live path inserts a blank between prose and the step's BreadcrumbLine,
     mirroring render_text. Parity with the imp-log replay is preserved."""
     events = [
-        ev("1", "change_created", change_id=1, title="x"),
+        ev("1", "change_created", quest_id=1, title="x"),
         ev("3", "step_started", step="spec", kind="agent", phase="design",
            model="m", provider="anthropic"),
         ev("4", "llm_response", agent_id="a",
@@ -616,7 +616,7 @@ def test_live_subagent_emits_no_internal_io_or_outcome() -> None:
     structured return value (the SDK cancellation-sentinel carrier) never reach the
     live view. The body stays byte-identical to the imp log replay."""
     events = [
-        ev("1", "change_created", change_id=1, title="x"),
+        ev("1", "change_created", quest_id=1, title="x"),
         ev("3", "step_started", step="spec", kind="agent", phase="design",
            model="m", provider="anthropic"),
         ev("4", "tool_call", agent_id="a", id="t1", name="sub_agent",
@@ -639,7 +639,7 @@ def test_live_subagent_emits_no_internal_io_or_outcome() -> None:
 
 def test_live_prose_then_subagent_header_blank_separated() -> None:
     events = [
-        ev("1", "change_created", change_id=1, title="x"),
+        ev("1", "change_created", quest_id=1, title="x"),
         ev("3", "step_started", step="spec", kind="agent", phase="design",
            model="m", provider="anthropic"),
         ev("4", "llm_response", agent_id="a",
@@ -678,7 +678,7 @@ def test_tty_chrome_steps_no_committed_status_no_double_blanks(monkeypatch) -> N
     out = _TTYPipe()
     drv = LiveDriver(stream=out, color=False, width=60, status=LiveStatus(out))
     for e in [
-        ev("1", "change_created", change_id=1, title="x"),
+        ev("1", "change_created", quest_id=1, title="x"),
         ev("2", "step_started", step="spec-writer", kind="agent", phase="spec",
            model="m", provider="anthropic"),
         ev("3", "llm_response", agent_id="a",
@@ -717,7 +717,7 @@ def test_refresh_status_injects_no_newline_and_preserves_prev_prose() -> None:
     out = _TTYPipe()
     drv = LiveDriver(stream=out, color=False, width=80, status=LiveStatus(out))
     # Set up a builder activity so current_activity() returns non-None.
-    drv.on_event(ev("1", "change_created", change_id=1, title="x"))
+    drv.on_event(ev("1", "change_created", quest_id=1, title="x"))
     drv.on_event(ev("2", "step_started", step="spec", kind="agent", phase="p",
                     model="m", provider="anthropic"))
     out.truncate(0)
@@ -734,7 +734,7 @@ def test_refresh_status_no_output_on_non_tty() -> None:
     _refresh_status produces no output and leaves `_prev_prose` untouched."""
     out = _Pipe()
     drv = LiveDriver(stream=out, color=False, width=80, status=LiveStatus(out))
-    drv.on_event(ev("1", "change_created", change_id=1, title="x"))
+    drv.on_event(ev("1", "change_created", quest_id=1, title="x"))
     drv.on_event(ev("2", "step_started", step="spec", kind="agent", phase="p",
                     model="m", provider="anthropic"))
     out.truncate(0)
@@ -822,7 +822,7 @@ def test_prose_before_wait_for_user_emitted_before_the_prompt() -> None:
     # the prose is already visible.
     drv, out = _driver()
     events = [
-        ev("1", "change_created", change_id=1, title="x"),
+        ev("1", "change_created", quest_id=1, title="x"),
         ev("2", "step_started", step="s", kind="agent", phase="p",
            model="m", provider="anthropic"),
         ev("3", "llm_response", agent_id="a",
@@ -848,7 +848,7 @@ def test_live_driver_has_no_opening_question_suppression() -> None:
 def test_quiet_continue_is_silent_live_and_matches_log() -> None:
     drv, out = _driver()
     events = [
-        ev("1", "change_created", change_id=1, title="x"),
+        ev("1", "change_created", quest_id=1, title="x"),
         ev("2", "step_started", step="spec", kind="agent", phase="spec",
            model="m", provider="anthropic"),
         ev("3", "llm_response", agent_id="step:spec/spec",
@@ -870,7 +870,7 @@ def test_quiet_continue_is_silent_live_and_matches_log() -> None:
 def test_quiet_forward_goto_renders_nothing_matches_log() -> None:
     drv, out = _driver()
     events = [
-        ev("1", "change_created", change_id=1, title="x"),
+        ev("1", "change_created", quest_id=1, title="x"),
         ev("2", "step_started", step="fast-path-spec-gate", kind="branch",
            phase="spec", show_label=False),
         ev("3", "step_completed", step="fast-path-spec-gate", kind="branch",
@@ -910,7 +910,7 @@ def test_quiet_pause_surfaces_live_and_matches_log() -> None:
     # continue.
     drv, out = _driver()
     events = [
-        ev("1", "change_created", change_id=1, title="x"),
+        ev("1", "change_created", quest_id=1, title="x"),
         ev("2", "step_started", step="merge-to-base", kind="script",
            phase="merge", show_label=False),
         ev("3", "error", message="merge conflict in foo.py"),
@@ -968,7 +968,7 @@ def test_compose_status_is_flush_left_at_any_frontier_depth() -> None:
 def test_interrupt_breadcrumb_in_live_path() -> None:
     drv, out = _driver()
     for e in [
-        ev("1", "change_created", change_id=1, title="x"),
+        ev("1", "change_created", quest_id=1, title="x"),
         ev("2", "step_started", step="spec-writer", kind="agent", phase="design",
            model="m", provider="anthropic"),
         ev("3", "error", category="config", kind="interrupted",
@@ -987,7 +987,7 @@ def test_interrupt_breadcrumb_in_live_path() -> None:
 def test_loud_forward_goto_breadcrumb_emits_immediately() -> None:
     drv, out = _driver()
     events = [
-        ev("1", "change_created", change_id=1, title="x"),
+        ev("1", "change_created", quest_id=1, title="x"),
         ev("2", "step_started", step="spec-reviewer", kind="agent", phase="spec",
            model="m", provider="anthropic"),
         ev("3", "llm_response", agent_id="step:spec/spec-reviewer",
@@ -1066,7 +1066,7 @@ def test_narration_un_held_after_agent_output_findings_hidden_live() -> None:
     findings = ("No findings. Spec is complete and ready for planning. "
                 "All load-bearing claims were verified against the codebase.")
     events = [
-        ev("1", "change_created", change_id=1, title="x"),
+        ev("1", "change_created", quest_id=1, title="x"),
         ev("2", "step_started", step="spec-reviewer", kind="agent", phase="spec",
            model="m", provider="anthropic"),
         ev("3", "llm_response", agent_id="step:spec/spec-reviewer",
@@ -1110,7 +1110,7 @@ def test_interleaved_narration_does_not_permanently_hold_live_cursor() -> None:
     WITHOUT finish() to assert the real-time (mid-run) view, not the flushed one.
     """
     events = [
-        ev("1", "change_created", change_id=1, title="x"),
+        ev("1", "change_created", quest_id=1, title="x"),
         ev("2", "step_started", step="spec-writer", kind="agent", phase="spec",
            model="m", provider="anthropic"),
         # First narration — held.
@@ -1172,7 +1172,7 @@ def test_status_line_shows_step_then_activity_then_elapsed() -> None:
 
     b = nv.NarrativeBuilder()
     for e in [
-        ev("1", "change_created", change_id=1, title="x"),
+        ev("1", "change_created", quest_id=1, title="x"),
         ev("2", "step_started", step="plan-review", kind="agent", phase="review",
            model="m", provider="anthropic", label="reviewing plan",
            timestamp="2026-01-01T00:00:00+00:00"),
@@ -1189,7 +1189,7 @@ def test_status_line_shows_step_then_activity_then_elapsed() -> None:
 def test_labeled_route_reason_rides_target_header_in_both_paths() -> None:
     drv, out = _driver()
     events = [
-        ev("1", "change_created", change_id=1, title="x"),
+        ev("1", "change_created", quest_id=1, title="x"),
         ev("2", "step_started", step="code-reviewer", kind="agent", phase="review",
            model="m", provider="anthropic"),
         ev("3", "llm_response", agent_id="step:review/code-reviewer",
@@ -1222,7 +1222,7 @@ def test_held_narration_emits_before_open_burst_live() -> None:
     # the real, mid-run state a watching human sees.
     drv, out = _driver()
     for e in [
-        ev("1", "change_created", change_id=1, title="x"),
+        ev("1", "change_created", quest_id=1, title="x"),
         ev("2", "step_started", step="spec", kind="agent", phase="design",
            model="m", provider="anthropic"),
         ev("3", "llm_response", agent_id="a",
@@ -1240,7 +1240,7 @@ def test_held_narration_emits_before_open_burst_live() -> None:
 def test_quiet_goto_renders_nothing_in_live_path() -> None:
     drv, out = _driver()
     events = [
-        ev("1", "change_created", change_id=1, title="x"),
+        ev("1", "change_created", quest_id=1, title="x"),
         ev("2", "step_started", step="spec-reviewer", kind="agent", phase="spec",
            model="m", provider="anthropic"),
         ev("3", "llm_response", agent_id="step:spec/spec-reviewer",
@@ -1304,7 +1304,7 @@ def test_status_spine_label_activity_elapsed() -> None:
     # labeled agent step: verb · elapsed in the activity line (no phase, no thinking).
     b = nv.NarrativeBuilder()
     for e in [
-        ev("1", "change_created", change_id=1, title="x"),
+        ev("1", "change_created", quest_id=1, title="x"),
         ev("2", "step_started", step="plan-reviewer", kind="agent", phase="plan",
            model="m", provider="anthropic", label="reviewing plan",
            timestamp="2026-01-01T00:00:00+00:00"),
@@ -1323,7 +1323,7 @@ def test_status_spine_label_activity_elapsed() -> None:
     # quiet/unlabeled script step: no display label, no command → bare timer.
     q = nv.NarrativeBuilder()
     for e in [
-        ev("1", "change_created", change_id=1, title="x"),
+        ev("1", "change_created", quest_id=1, title="x"),
         ev("2", "step_started", step="autosquash", kind="script", phase="implement",
            show_label=False, timestamp="2026-01-01T00:00:00+00:00"),
     ]:
@@ -1338,7 +1338,7 @@ def test_live_parallel_batch_rows_show_correct_elapsed() -> None:
     # Tripwire: a streaming chunk must not resume-close sibling folds, freezing their elapsed.
     drv, out = _driver()
     for e in [
-        ev("1", "change_created", change_id=1, title="x"),
+        ev("1", "change_created", quest_id=1, title="x"),
         ev("3", "step_started", step="spec", kind="agent", phase="design",
            model="m", provider="anthropic"),
         ev("tk1", "tool_call", agent_id="a", id="b1", name="sub_agent",
@@ -1368,7 +1368,7 @@ def test_live_parallel_batch_rows_show_correct_elapsed() -> None:
 def test_prompt_indent_matches_open_step_frontier_depth() -> None:
     drv, _out = _driver()
     events = [
-        ev("1", "change_created", change_id=1, title="x"),
+        ev("1", "change_created", quest_id=1, title="x"),
         ev("2", "step_started", step="spec", kind="agent", phase="design",
            model="m", provider="anthropic"),
         ev("3", "thinking", agent_id="step:design/spec", content="hmm"),
@@ -1382,7 +1382,7 @@ def test_prompt_indent_matches_open_step_frontier_depth() -> None:
 
 def test_prompt_indent_empty_when_no_open_step() -> None:
     drv, _out = _driver()
-    drv.on_event(ev("1", "change_created", change_id=1, title="x"))
+    drv.on_event(ev("1", "change_created", quest_id=1, title="x"))
     assert drv.prompt_indent() == ""
 
 
@@ -1391,7 +1391,7 @@ def test_multiphase_subagent_reentry_live_log_parity() -> None:
     # must be byte-equal to the imp log body, the re-entry must print a second
     # `── implement phase ───` start rule, and a closed phase's end rule must land at column 0.
     events = [
-        ev("e0", "change_created", change_id=1, title="t", timestamp="2026-06-03T00:00:00+00:00"),
+        ev("e0", "change_created", quest_id=1, title="t", timestamp="2026-06-03T00:00:00+00:00"),
         ev("e1", "step_started", step="spec", kind="agent", phase="design",
            model="m", provider="anthropic", timestamp="2026-06-03T00:00:00+00:00"),
         ev("e2", "step_completed", step="spec", kind="agent",
@@ -1450,7 +1450,7 @@ def test_opening_intent_does_not_drop_following_step_output() -> None:
     # agent's output must render live.
     drv, out = _driver()
     events = [
-        ev("1", "change_created", change_id=1, title="x"),
+        ev("1", "change_created", quest_id=1, title="x"),
         ev("e1", "opening_intent", text="build the parser"),
         ev("3", "step_started", step="spec-writer", kind="agent", phase="spec",
            model="m", provider="anthropic"),
@@ -1599,7 +1599,7 @@ def test_replay_complete_boundary_lights_footer_without_live_event() -> None:
     # the running step's verb. current_activity() is non-None, so an un-decoupled
     # footer WOULD have drawn here during replay.
     replayed = [
-        ev("1", "change_created", change_id=1, title="x"),
+        ev("1", "change_created", quest_id=1, title="x"),
         ev("2", "step_started", step="wait-for-head", kind="acquire",
            phase="integration", label="waiting in merge queue"),
         ev("3", "lane_waiting", agent_id="step:integration/wait-for-head", ahead=5),
@@ -1622,7 +1622,7 @@ def test_replay_complete_marker_feeds_no_builder_node_cli() -> None:
     out = _Pipe()
     drv = LiveDriver(stream=out, color=False, width=80, status=LiveStatus(out),
                      suppress_replay=True)
-    drv.on_event({**ev("1", "change_created", change_id=1, title="x"), "_replay": True})
+    drv.on_event({**ev("1", "change_created", quest_id=1, title="x"), "_replay": True})
     nodes_before = len(drv._snapshot_node_ids())
     drv.on_event({"type": "replay_complete"})
     assert len(drv._snapshot_node_ids()) == nodes_before   # marker created no node
@@ -1637,7 +1637,7 @@ def test_footer_live_from_start_without_suppression() -> None:
     drv = LiveDriver(stream=out, color=False, width=80, status=LiveStatus(out))
     assert drv._footer_live is True
     for e in [
-        ev("1", "change_created", change_id=1, title="x"),
+        ev("1", "change_created", quest_id=1, title="x"),
         ev("2", "step_started", step="spec", kind="agent", phase="p",
            model="m", provider="anthropic"),
     ]:
@@ -1694,7 +1694,7 @@ def test_resume_user_first_message_has_no_driver_leading_separator() -> None:
     # that the preceded_by_blank suppression leaves that flow unchanged — the
     # message is the first emitted line, no blank above it.
     events = [
-        ev("1", "change_created", change_id=1, title="t"),
+        ev("1", "change_created", quest_id=1, title="t"),
         ev("2", "step_started", step="spec", kind="agent", phase="spec",
            model="m", provider="anthropic"),
         ev("2b", "awaiting_user_input", agent_id="step:spec/spec"),
@@ -1813,7 +1813,7 @@ def test_context_bar_omitted_for_unknown_model_or_missing_usage() -> None:
     assert context_bar("sonnet", None, color=False, over_bg=False) is None
 
 
-def test_compose_position_bar_includes_change_id_title_position_model() -> None:
+def test_compose_position_bar_includes_quest_id_title_position_model() -> None:
     import imp.cli.narrative as nv_mod
     from imp.cli.live_driver import compose_position_bar
     builder = nv_mod.NarrativeBuilder()
@@ -1822,7 +1822,7 @@ def test_compose_position_bar_includes_change_id_title_position_model() -> None:
                    model="sonnet", phase_label="implement", label="task-lead"))
     activity = builder.current_activity()
     root = builder.tree.root
-    bar = compose_position_bar(activity=activity, change_id=root.id, title=root.title,
+    bar = compose_position_bar(activity=activity, quest_id=root.id, title=root.title,
                                prompt_tokens=None, color=False, width=80)
     # Identity (id, title) and breadcrumb (position=phase_label, model) all appear.
     assert "z9gixx" in bar and "streaming toolbar" in bar
@@ -1833,7 +1833,7 @@ def test_compose_position_bar_includes_change_id_title_position_model() -> None:
 def test_position_bar_separates_model_from_graph_with_a_single_space() -> None:
     from imp.cli.live_driver import compose_position_bar, context_bar
     act = nv.Activity(position="implementation phase", model="sonnet")
-    line = compose_position_bar(activity=act, change_id="z9gixx", title="t",
+    line = compose_position_bar(activity=act, quest_id="z9gixx", title="t",
                                 prompt_tokens=26000, color=False, width=120)
     bar = context_bar("sonnet", 26000, color=False, over_bg=False)
     assert bar is not None
@@ -1844,7 +1844,7 @@ def test_position_bar_separates_model_from_graph_with_a_single_space() -> None:
 def test_position_row_separates_model_from_graph_with_a_single_space() -> None:
     from imp.cli.live_driver import compose_position_row, context_bar
     act = nv.Activity(kind="agent", model="sonnet", phase="review")
-    line = compose_position_row(activity=act, change_id="z9gixx", title="t",
+    line = compose_position_row(activity=act, quest_id="z9gixx", title="t",
                                 prompt_tokens=26000, color=False, width=200)
     bar = context_bar("sonnet", 26000, color=False, over_bg=False)
     assert bar is not None
@@ -1856,7 +1856,7 @@ def test_subagent_row_orders_elapsed_before_model_graph() -> None:
     from imp.cli import render_text as rt
     from imp.cli.live_driver import compose_subagent_rows, context_bar
     b = nv.NarrativeBuilder()
-    b.add(ev("1", "change_created", change_id=1, title="x"))
+    b.add(ev("1", "change_created", quest_id=1, title="x"))
     b.add(ev("2", "step_started", step="s", kind="agent", phase="p",
              model="m", provider="anthropic"))
     b.add(ev("t1", "tool_call", agent_id="step:p/s", id="blk-t1",
@@ -1890,7 +1890,7 @@ def test_compose_toolbar_static_uses_frame_zero_and_no_elapsed() -> None:
     out = _Pipe()
     status = LiveStatus(out)
     drv = LiveDriver(stream=out, color=False, width=80, status=status)
-    drv.on_event(ev("1", "change_created", change_id=1, title="t"))
+    drv.on_event(ev("1", "change_created", quest_id=1, title="t"))
     drv.on_event(ev("2", "step_started", step="s", kind="agent", phase="p",
                     model="sonnet", phase_label="impl phase"))
     static = drv.compose_toolbar_static()
@@ -1928,7 +1928,7 @@ def test_compose_identity_toolbar_carries_slate_and_padding_under_dark_theme() -
     from imp.cli.live_driver import compose_identity_toolbar
     try:
         pal.set_theme("dark")
-        bar = compose_identity_toolbar(change_id="z9gixx", title="t",
+        bar = compose_identity_toolbar(quest_id="z9gixx", title="t",
                                        color=True, width=120)
     finally:
         pal.set_theme("ansi")
@@ -1942,7 +1942,7 @@ def test_compose_identity_toolbar_title_is_unpainted_under_ansi_theme() -> None:
     from imp.cli.live_driver import compose_identity_toolbar
     try:
         pal.set_theme("ansi")
-        bar = compose_identity_toolbar(change_id="z9gixx", title="t",
+        bar = compose_identity_toolbar(quest_id="z9gixx", title="t",
                                        color=True, width=120)
     finally:
         pal.set_theme("ansi")
@@ -1954,9 +1954,9 @@ def test_compose_identity_toolbar_title_is_unpainted_under_ansi_theme() -> None:
     assert "\x1b[" not in parts[1]               # title: unpainted default fg
 
 
-def test_compose_identity_toolbar_none_without_change_id() -> None:
+def test_compose_identity_toolbar_none_without_quest_id() -> None:
     from imp.cli.live_driver import compose_identity_toolbar
-    assert compose_identity_toolbar(change_id=None, title="t",
+    assert compose_identity_toolbar(quest_id=None, title="t",
                                     color=False, width=80) is None
 
 
@@ -1965,7 +1965,7 @@ def test_live_driver_caps_hr_at_display_width() -> None:
     drv = LiveDriver(stream=out, color=False, width=10000, display_width=40,
                      status=LiveStatus(out))
     long_line = "X" * 200
-    drv.on_event(ev("1", "change_created", change_id=1, title="x"))
+    drv.on_event(ev("1", "change_created", quest_id=1, title="x"))
     drv.on_event(ev("2", "step_started", step="s", kind="agent", phase="p",
                     model="m", provider="anthropic"))
     drv.on_event(ev("3", "llm_response", agent_id="a", usage={},
@@ -1983,7 +1983,7 @@ def test_compose_position_bar_is_flush_left_with_position_and_bar() -> None:
     from imp.cli.live_driver import compose_position_bar
     act = nv.Activity(position="implementation phase · plan 1/1 · task 2/3",
                       model="claude-sonnet-4-5")
-    line = compose_position_bar(activity=act, change_id="z9gixx", title="Fix bug",
+    line = compose_position_bar(activity=act, quest_id="z9gixx", title="Fix bug",
                                 prompt_tokens=1000, color=False, width=120)
     assert line.lstrip().startswith("z9gixx")
     assert "implementation phase · plan 1/1 · task 2/3" in line
@@ -1994,7 +1994,7 @@ def test_compose_position_bar_never_contains_the_verb() -> None:
     from imp.cli.live_driver import compose_position_bar
     act = nv.Activity(position="planning phase · plan 2/4", verb="writing plan",
                       detail="3 calls", model="claude-sonnet-4-5")
-    line = compose_position_bar(activity=act, change_id="z9gixx", title="t",
+    line = compose_position_bar(activity=act, quest_id="z9gixx", title="t",
                                 prompt_tokens=1000, color=False, width=120)
     assert "writing plan" not in line
     assert "3 calls" not in line
@@ -2026,7 +2026,7 @@ def test_compose_position_bar_slate_survives_livestatus_clip_under_dark_theme() 
     act = nv.Activity(position="planning phase · plan 1/1", model="claude-sonnet-4-5")
     try:
         pal.set_theme("dark")
-        line = compose_position_bar(activity=act, change_id="z9gixx", title="t",
+        line = compose_position_bar(activity=act, quest_id="z9gixx", title="t",
                                     prompt_tokens=1000, color=True, width=120)
     finally:
         pal.set_theme("ansi")
@@ -2042,7 +2042,7 @@ def test_compose_activity_status_combined_line_does_not_overflow_under_slate() -
     from imp.cli import palette as pal
     from imp.cli.live_driver import compose_activity_status
     b = nv.NarrativeBuilder()
-    b.add(ev("1", "change_created", change_id=1, title="t"))
+    b.add(ev("1", "change_created", quest_id=1, title="t"))
     b.add(ev("2", "step_started", step="task-lead", kind="agent", phase="code",
              model="claude-sonnet-4-5", provider="anthropic", label="task 1/3",
              phase_label="implementation phase · plan 1/1", position_label=True))
@@ -2058,7 +2058,7 @@ def test_compose_activity_status_combined_line_does_not_overflow_under_slate() -
 
 def test_compose_status_returns_activity_line_blank_then_position_bar() -> None:
     drv, _ = _driver()
-    drv.on_event(ev("1", "change_created", change_id=1, title="t"))
+    drv.on_event(ev("1", "change_created", quest_id=1, title="t"))
     drv.on_event(ev("2", "step_started", step="task-lead", kind="agent", phase="code",
                      model="claude-sonnet-4-5", provider="anthropic", label="task 1/3",
                      phase_label="implementation phase · plan 1/1", position_label=True))
@@ -2086,7 +2086,7 @@ def test_compose_toolbar_static_uses_the_position_row_layout() -> None:
 
 def test_mid_step_position_change_re_emits_a_header() -> None:
     drv, out = _driver()
-    drv.on_event(ev("1", "change_created", change_id=1, title="t"))
+    drv.on_event(ev("1", "change_created", quest_id=1, title="t"))
     drv.on_event(ev("2", "step_started", step="task-lead", kind="agent", phase="code",
                      model="m", provider="anthropic", label="task 1/2",
                      phase_label="implementation phase · plan 1/1", position_label=True))
@@ -2101,7 +2101,7 @@ def test_mid_step_position_change_re_emits_a_header() -> None:
 
 def test_unchanged_position_push_emits_no_duplicate_header() -> None:
     drv, out = _driver()
-    drv.on_event(ev("1", "change_created", change_id=1, title="t"))
+    drv.on_event(ev("1", "change_created", quest_id=1, title="t"))
     drv.on_event(ev("2", "step_started", step="task-lead", kind="agent", phase="code",
                      model="m", provider="anthropic", label="task 1/2",
                      phase_label="implementation phase · plan 1/1", position_label=True))
@@ -2114,7 +2114,7 @@ def test_unchanged_position_push_emits_no_duplicate_header() -> None:
 
 def test_verb_step_label_push_emits_no_header() -> None:
     drv, out = _driver()
-    drv.on_event(ev("1", "change_created", change_id=1, title="t"))
+    drv.on_event(ev("1", "change_created", quest_id=1, title="t"))
     drv.on_event(ev("2", "step_started", step="plan-writer", kind="agent", phase="plan",
                      model="m", provider="anthropic", label="writing plan",
                      phase_label="planning phase · plan 2/4"))
@@ -2150,7 +2150,7 @@ def test_compose_position_bar_forwards_checkpoint_threshold() -> None:
     from imp.cli.live_driver import compose_position_bar
     activity = nv.Activity(model="sonnet",
                            position="implementation phase · plan 1/1 · task 1/3")
-    line = compose_position_bar(activity=activity, change_id="abc", title="t",
+    line = compose_position_bar(activity=activity, quest_id="abc", title="t",
                                 prompt_tokens=164000, color=True, width=200,
                                 checkpoint_threshold=0.8)
     assert "\x1b[31m" in line                    # warn forwarded through to the bar
@@ -2158,20 +2158,20 @@ def test_compose_position_bar_forwards_checkpoint_threshold() -> None:
 
 def test_completed_node_suppressed_in_live_leaf() -> None:
     drv, out = _driver()
-    drv._emit_leaf(nv.CompletedNode(change_id="abc123"), 0)
+    drv._emit_leaf(nv.CompletedNode(quest_id="abc123"), 0)
     assert out.getvalue() == ""  # main.py _emit_completed owns the live line
 
 
 def test_merged_node_still_suppressed_in_live_leaf() -> None:
     drv, out = _driver()
-    drv._emit_leaf(nv.MergedNode(change_id="abc123", base="master"), 0)
+    drv._emit_leaf(nv.MergedNode(quest_id="abc123", base="master"), 0)
     assert out.getvalue() == ""
 
 
 def test_show_label_false_script_silent_live_and_matches_log() -> None:
     drv, out = _driver()
     events = [
-        ev("1", "change_created", change_id=1, title="x"),
+        ev("1", "change_created", quest_id=1, title="x"),
         ev("2", "step_started", step="spec", kind="agent", phase="spec",
            model="m", provider="anthropic"),
         ev("3", "llm_response", agent_id="step:spec/spec",
@@ -2196,7 +2196,7 @@ def test_show_label_false_script_reveals_frame_on_pause_live_and_matches_log() -
     # renders it — not get silently suppressed like the deferred-leaf continue path.
     drv, out = _driver()
     events = [
-        ev("1", "change_created", change_id=1, title="x"),
+        ev("1", "change_created", quest_id=1, title="x"),
         ev("2", "step_started", step="merge-guard", kind="script", phase="merge",
            show_label=False),
         ev("3", "error", message="boom in bar.py"),
@@ -2216,7 +2216,7 @@ def test_terminal_nested_pause_renders_live_and_matches_render_tree() -> None:
     # child. finish()'s force-walk must reach and emit it, and the live body must
     # match render_tree line-for-line (live == imp log).
     events = [
-        ev("1", "change_created", change_id=1, title="x"),
+        ev("1", "change_created", quest_id=1, title="x"),
         ev("2", "step_started", step="spec", kind="agent", phase="design",
            model="m", provider="anthropic"),
         ev("3", "step_completed", step="spec", kind="agent",
@@ -2236,7 +2236,7 @@ def test_terminal_pause_flushes_warnings_summary_in_live() -> None:
     # finish() calls finalize() before the force-walk, so a reasoned terminal
     # pause with a warning drops the root warnings summary into the live body.
     events = [
-        ev("1", "change_created", change_id=1, title="x"),
+        ev("1", "change_created", quest_id=1, title="x"),
         ev("2", "step_started", step="spec", kind="agent", phase="design",
            model="m", provider="anthropic"),
         ev("3", "runner_warning", agent_id="step:design/spec", message="alpha"),
@@ -2259,7 +2259,7 @@ def test_mid_session_nested_pause_emits_via_normal_walk() -> None:
     # `running`, so the normal on_event walk (no finish()) reaches the pause.
     drv, out = _driver()
     for e in [
-        ev("1", "change_created", change_id=1, title="x"),
+        ev("1", "change_created", quest_id=1, title="x"),
         ev("2", "step_started", step="spec", kind="agent", phase="design",
            model="m", provider="anthropic"),
         ev("3", "tool_call", agent_id="a", id="t1", name="sub_agent",
@@ -2342,7 +2342,7 @@ def test_prose_reflows_to_live_width_between_emissions() -> None:
     second = ("Uniform victor whiskey xray yankee zulu uniform victor whiskey "
               "xray yankee zulu uniform victor whiskey xray yankee zulu foo")
     for e in [
-        ev("1", "change_created", change_id=1, title="x"),
+        ev("1", "change_created", quest_id=1, title="x"),
         ev("2", "step_started", step="one", kind="agent", phase="design",
            model="m", provider="anthropic"),
         ev("3", "llm_response", agent_id="a",
@@ -2383,7 +2383,7 @@ def _pos_activity(**kw):
 
 def test_compose_position_row_is_flat_and_identity_first() -> None:
     from imp.cli.live_driver import compose_position_row
-    row = compose_position_row(activity=_pos_activity(), change_id="z9gixx",
+    row = compose_position_row(activity=_pos_activity(), quest_id="z9gixx",
                                title="streaming footer", prompt_tokens=None,
                                color=False, width=80)
     # One flat left-aligned line, identity first, no right-flush gap.
@@ -2393,21 +2393,21 @@ def test_compose_position_row_is_flat_and_identity_first() -> None:
 
 def test_compose_position_row_omits_title_segment_when_untitled() -> None:
     from imp.cli.live_driver import compose_position_row
-    row = compose_position_row(activity=_pos_activity(), change_id="z9gixx",
+    row = compose_position_row(activity=_pos_activity(), quest_id="z9gixx",
                                title="", prompt_tokens=None, color=False, width=80)
     # No title -> no segment and no stray separator between id and phase.
     assert row == ("z9gixx · implementation phase · plan 1/1 · task 1/3 · m")
 
 
-def test_compose_position_row_starts_with_title_when_change_id_is_none() -> None:
+def test_compose_position_row_starts_with_title_when_quest_id_is_none() -> None:
     from imp.cli.live_driver import compose_position_row
-    titled = compose_position_row(activity=_pos_activity(), change_id=None,
+    titled = compose_position_row(activity=_pos_activity(), quest_id=None,
                                   title="streaming footer", prompt_tokens=None,
                                   color=False, width=80)
     # No id -> row starts with the title, no leading separator.
     assert titled == ("streaming footer · implementation phase · plan 1/1 · "
                       "task 1/3 · m")
-    untitled = compose_position_row(activity=_pos_activity(), change_id=None,
+    untitled = compose_position_row(activity=_pos_activity(), quest_id=None,
                                     title="", prompt_tokens=None, color=False,
                                     width=80)
     # No id and no title -> row starts with the phase.
@@ -2416,10 +2416,10 @@ def test_compose_position_row_starts_with_title_when_change_id_is_none() -> None
 
 def test_compose_position_row_context_bar_only_for_agent_kind() -> None:
     from imp.cli.live_driver import compose_position_row
-    agent = compose_position_row(activity=_pos_activity(kind="agent"), change_id="z",
+    agent = compose_position_row(activity=_pos_activity(kind="agent"), quest_id="z",
                                  title="t", prompt_tokens=None, color=False, width=80,
                                  context_pct=42.0)
-    script = compose_position_row(activity=_pos_activity(kind="script"), change_id="z",
+    script = compose_position_row(activity=_pos_activity(kind="script"), quest_id="z",
                                   title="t", prompt_tokens=None, color=False, width=80,
                                   context_pct=42.0)
     assert "42%" in agent
@@ -2430,7 +2430,7 @@ def test_compose_position_row_context_bar_only_for_agent_kind() -> None:
 def test_compose_position_row_context_bar_absent_during_lane_wait() -> None:
     from imp.cli.live_driver import compose_position_row
     row = compose_position_row(activity=_pos_activity(kind="agent", lane_wait=True),
-                               change_id="z", title="t", prompt_tokens=None,
+                               quest_id="z", title="t", prompt_tokens=None,
                                color=False, width=80, context_pct=42.0)
     assert "%" not in row
     assert "implementation phase" in row
@@ -2443,7 +2443,7 @@ def test_compose_position_row_colors_match_the_scrollback_palette() -> None:
         row = compose_position_row(
             activity=_pos_activity(phase="planning phase", plan="plan 3/6",
                                    counter="task 2/3", model="m", kind="agent"),
-            change_id="z9gixx", title="t", prompt_tokens=None, color=True,
+            quest_id="z9gixx", title="t", prompt_tokens=None, color=True,
             width=120, context_pct=42.0)
     finally:
         pal.set_theme("ansi")
@@ -2460,7 +2460,7 @@ def test_compose_position_row_colors_match_the_scrollback_palette() -> None:
 def _sub_builder(*subs, readings=(), start_ts=None):
     """A builder with an agent step and one running sub_agent fold per (event_id, name)."""
     b = nv.NarrativeBuilder()
-    b.add(ev("1", "change_created", change_id=1, title="x"))
+    b.add(ev("1", "change_created", quest_id=1, title="x"))
     b.add(ev("2", "step_started", step="s", kind="agent", phase="p",
              model="m", provider="anthropic"))
     for eid, name in subs:
@@ -2594,7 +2594,7 @@ def test_subagent_backoff_wait_surfaces_to_activity_not_rows() -> None:
     assert "waiting for re-authentication" not in row
     act = b.current_activity()
     # No countdown tag on the position row either.
-    pos = compose_position_row(activity=act, change_id="gizo14", title="t",
+    pos = compose_position_row(activity=act, quest_id="gizo14", title="t",
                                prompt_tokens=None, color=False, width=120)
     assert "left" not in pos
     # The wait surfaces on the activity line instead.
@@ -2606,7 +2606,7 @@ def test_subagent_backoff_wait_surfaces_to_activity_not_rows() -> None:
 
 def test_compose_status_appends_a_row_per_running_subagent() -> None:
     drv, _ = _driver()
-    drv.on_event(ev("1", "change_created", change_id=1, title="t"))
+    drv.on_event(ev("1", "change_created", quest_id=1, title="t"))
     drv.on_event(ev("2", "step_started", step="s", kind="agent", phase="p",
                      model="m", provider="anthropic", label="writing spec",
                      phase_label="design phase"))
@@ -2621,7 +2621,7 @@ def test_compose_status_appends_a_row_per_running_subagent() -> None:
 def test_seed_pending_reply_emits_once_and_reconciles() -> None:
     drv, out = _driver()
     for e in [
-        ev("1", "change_created", change_id=1, title="t"),
+        ev("1", "change_created", quest_id=1, title="t"),
         ev("2", "step_started", step="spec-writer", kind="agent", phase="spec",
            model="m", provider="anthropic"),
         ev("2b", "awaiting_user_input", agent_id="step:spec/spec-writer"),
@@ -2650,7 +2650,7 @@ def test_seed_pending_reply_lifts_replay_suppression_on_resume() -> None:
     # Replayed prefix (marked _replay), including the gate the user is now at:
     # stays suppressed, nothing printed.
     for e in [
-        ev("1", "change_created", change_id=1, title="t"),
+        ev("1", "change_created", quest_id=1, title="t"),
         ev("2", "step_started", step="spec-writer", kind="agent", phase="spec",
            model="m", provider="anthropic"),
         ev("2b", "awaiting_user_input", agent_id="step:spec/spec-writer"),
@@ -2671,7 +2671,7 @@ def test_reset_wait_does_not_re_emit_running_step_header() -> None:
     # wait keeps its single header; the wait banner must not print it a 2nd time.
     drv, out = _driver()
     for e in [
-        ev("1", "change_created", change_id=1, title="x"),
+        ev("1", "change_created", quest_id=1, title="x"),
         ev("2", "step_started", step="reviewer", kind="agent",
            phase="integration", phase_label="integration phase",
            label="reviewing merge conflicts", model="m", provider="anthropic"),
@@ -2690,7 +2690,7 @@ def test_body_less_deferred_leaf_emits_no_separate_header() -> None:
     # header must NOT also print while it is the open top-of-stack.
     drv, out = _driver()
     events = [
-        ev("1", "change_created", change_id=1, title="x"),
+        ev("1", "change_created", quest_id=1, title="x"),
         ev("2", "step_started", step="wait-for-head", kind="acquire",
            phase="integration", phase_label="integration phase",
            label="waiting in merge queue"),
@@ -2822,7 +2822,7 @@ def test_activity_line_matches_subagent_row_for_single_subagent() -> None:
     from imp.cli import narrative as nv
     from imp.cli.live_driver import compose_activity_line, compose_subagent_rows
     b = nv.NarrativeBuilder()
-    b.add(ev("1", "change_created", change_id=1, title="x"))
+    b.add(ev("1", "change_created", quest_id=1, title="x"))
     b.add(ev("2", "step_started", step="s", kind="agent", phase="p",
              model="m", provider="anthropic"))
     b.add(ev("t1", "tool_call", agent_id="step:p/s", id="blk-t1", name="sub_agent",
@@ -2852,7 +2852,7 @@ def test_activity_line_derives_countdown_from_block_start() -> None:
 
 def test_compose_status_takes_one_arg_and_returns_footer_rows() -> None:
     drv, _ = _driver()
-    drv.on_event(ev("1", "change_created", change_id=1, title="t"))
+    drv.on_event(ev("1", "change_created", quest_id=1, title="t"))
     drv.on_event(ev("2", "step_started", step="s", kind="agent", phase="p",
                     model="m", provider="anthropic", label="writing spec",
                     phase_label="design phase"))
@@ -2863,13 +2863,13 @@ def test_compose_status_takes_one_arg_and_returns_footer_rows() -> None:
 def test_driver_seeds_identity_at_construction() -> None:
     out = _Pipe()
     drv = LiveDriver(stream=out, color=False, width=80, status=LiveStatus(out),
-                     change_id="lufu50", title="Instant opening identity bar")
+                     quest_id="lufu50", title="Instant opening identity bar")
     root = drv._builder.tree.root
     assert root.id == "lufu50"                     # set before any event
     assert root.title == "Instant opening identity bar"
 
 
-def test_driver_without_change_id_leaves_root_unseeded() -> None:
+def test_driver_without_quest_id_leaves_root_unseeded() -> None:
     out = _Pipe()
     drv = LiveDriver(stream=out, color=False, width=80, status=LiveStatus(out))
     assert drv._builder.tree.root.id is None       # default: no identity yet
@@ -2879,7 +2879,7 @@ def test_compose_startup_appends_identity_row_when_seeded() -> None:
     out = _Pipe()
     drv = LiveDriver(stream=out, color=False, width=80, status=LiveStatus(out),
                      startup_verb="resuming",
-                     change_id="lufu50", title="Instant opening identity bar")
+                     quest_id="lufu50", title="Instant opening identity bar")
     rows = drv.compose_startup(0)
     assert rows is not None
     assert len(rows) == 3                          # spinner / blank / identity
@@ -2892,7 +2892,7 @@ def test_compose_startup_appends_identity_row_when_seeded() -> None:
 def test_compose_startup_spinner_only_when_id_absent() -> None:
     out = _Pipe()
     drv = LiveDriver(stream=out, color=False, width=80, status=LiveStatus(out),
-                     startup_verb="resuming")        # no change_id seeded
+                     startup_verb="resuming")        # no quest_id seeded
     rows = drv.compose_startup(0)
     assert rows is not None
     assert len(rows) == 1                            # degrades to spinner-only

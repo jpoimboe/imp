@@ -15,9 +15,9 @@ _HEADER = "Resume which change?"
 
 def _cands() -> list[Candidate]:
     return [
-        Candidate(change_id="2026-06-11-aaa111", title="Add version flag",
+        Candidate(quest_id="2026-06-11-aaa111", title="Add version flag",
                   status="paused", step="plan", last_iso="2026-06-11T11:45:00+00:00"),
-        Candidate(change_id="2026-06-10-bbb222", title="Other change",
+        Candidate(quest_id="2026-06-10-bbb222", title="Other change",
                   status="new", step="spec", last_iso="2026-06-10T11:45:00+00:00"),
     ]
 
@@ -25,7 +25,7 @@ def _cands() -> list[Candidate]:
 def test_newest_is_preselected() -> None:
     p = ResumePicker(_cands(), now=_NOW, color=False, header=_HEADER)
     assert p.index == 0
-    assert p.selected().change_id == "2026-06-11-aaa111"
+    assert p.selected().quest_id == "2026-06-11-aaa111"
 
 
 def test_move_clamps_at_both_ends() -> None:
@@ -36,7 +36,7 @@ def test_move_clamps_at_both_ends() -> None:
     assert p.index == 1
     p.move_down()                                # already bottom → clamp
     assert p.index == 1
-    assert p.selected().change_id == "2026-06-10-bbb222"
+    assert p.selected().quest_id == "2026-06-10-bbb222"
 
 
 def test_render_marks_selection_and_uses_shared_formatter() -> None:
@@ -107,7 +107,7 @@ def test_picker_stores_header_and_preselected_index() -> None:
                      header="Abandon which change?", selected_index=1)
     assert p.header == "Abandon which change?"
     assert p.index == 1
-    assert p.selected().change_id == "2026-06-10-bbb222"
+    assert p.selected().quest_id == "2026-06-10-bbb222"
 
 
 @pytest.mark.anyio

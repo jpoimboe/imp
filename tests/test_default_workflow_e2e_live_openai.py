@@ -88,7 +88,7 @@ async def test_one_step_walk_against_openai(
     _git(tmp_path, "add", "-A")
     _git(tmp_path, "commit", "-qm", "seed")
     change = Change.create(
-        tmp_path, title="live-openai", change_id="live-openai", base_branch="main")
+        tmp_path, title="live-openai", quest_id="live-openai", base_branch="main")
 
     result = await run_change(change)
     assert result is RunResult.COMPLETED

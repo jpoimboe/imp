@@ -49,7 +49,7 @@ def _draw_clean_stem(rng: random.Random) -> str:
             return stem
 
 
-def new_change_id(
+def new_quest_id(
     existing_stems: frozenset[str] = frozenset(),
     rng: random.Random = _SYSTEM_RANDOM,
 ) -> str:

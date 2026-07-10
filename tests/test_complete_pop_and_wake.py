@@ -15,8 +15,8 @@ from tests.conftest import _git, _seed_control
 
 def test_complete_after_merge_pops_self_and_wakes_next(tmp_path, monkeypatch) -> None:
     _seed_control(tmp_path)
-    a = Change.create(tmp_path, title="a", change_id="aaa", base_branch="main")
-    Change.create(tmp_path, title="b", change_id="bbb", base_branch="main")
+    a = Change.create(tmp_path, title="a", quest_id="aaa", base_branch="main")
+    Change.create(tmp_path, title="b", quest_id="bbb", base_branch="main")
     (a.project_root / "f.txt").write_text("hi")
     _git(a.project_root, "add", "-A")
     _git(a.project_root, "commit", "-qm", "a")
@@ -32,7 +32,7 @@ def test_complete_after_merge_pops_self_and_wakes_next(tmp_path, monkeypatch) ->
     log = JsonlEventLog(a.events_path)
     _complete(a, state, log)
 
-    assert all(e["change_id"] != "aaa" for e in mq.read(tmp_path))   # head popped
+    assert all(e["quest_id"] != "aaa" for e in mq.read(tmp_path))   # head popped
     assert woken == [("bbb", True)]                                  # next woken
 
 
@@ -47,8 +47,8 @@ def _merge_step():
 
 def test_complete_finalizes_even_when_next_head_vanishes(tmp_path, monkeypatch) -> None:
     _seed_control(tmp_path)
-    a = Change.create(tmp_path, title="a", change_id="aaa", base_branch="main")
-    Change.create(tmp_path, title="b", change_id="bbb", base_branch="main")
+    a = Change.create(tmp_path, title="a", quest_id="aaa", base_branch="main")
+    Change.create(tmp_path, title="b", quest_id="bbb", base_branch="main")
     (a.project_root / "f.txt").write_text("hi")
     _git(a.project_root, "add", "-A")
     _git(a.project_root, "commit", "-qm", "a")
@@ -79,7 +79,7 @@ def test_complete_finalizes_even_when_next_head_vanishes(tmp_path, monkeypatch) 
 
 def test_complete_without_merge_releases_queue_slot(tmp_path, monkeypatch) -> None:
     _seed_control(tmp_path)
-    ch = Change.create(tmp_path, title="x", change_id="feat", base_branch="main")
+    ch = Change.create(tmp_path, title="x", quest_id="feat", base_branch="main")
     mq.enqueue_if_absent(tmp_path, "feat", "main")
     monkeypatch.setattr(attach_mod, "spawn_session_daemon", lambda *a, **k: None)
     state = State.load(ch.state_dir)                     # merge_commit is None
@@ -89,7 +89,7 @@ def test_complete_without_merge_releases_queue_slot(tmp_path, monkeypatch) -> No
 
 def test_complete_without_merge_emits_workflow_completed(tmp_path, monkeypatch) -> None:
     _seed_control(tmp_path)
-    ch = Change.create(tmp_path, title="x", change_id="feat", base_branch="main")
+    ch = Change.create(tmp_path, title="x", quest_id="feat", base_branch="main")
     mq.enqueue_if_absent(tmp_path, "feat", "main")
     monkeypatch.setattr(attach_mod, "spawn_session_daemon", lambda *a, **k: None)
     state = State.load(ch.state_dir)                     # merge_commit is None

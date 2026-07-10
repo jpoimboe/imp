@@ -186,7 +186,7 @@ def _layout(tmp_path):
 def test_resolve_policy_active_when_enabled_and_available(tmp_path):
     control, wt = _layout(tmp_path)
     pol = resolve_policy(
-        worktree=wt, control_root=control, change_id="abc",
+        worktree=wt, control_root=control, quest_id="abc",
         cfg=SandboxConfig(),  # defaults: enabled=True, network=True
         engine_env_result={"IMP_PROJECT_ROOT": str(wt)},
         environ={"PATH": "/usr/bin", "HOME": str(tmp_path)},
@@ -204,7 +204,7 @@ def test_resolve_policy_binds_sibling_config_worktree(tmp_path):
     sib = control / ".git" / "worktrees" / "sib"
     sib.mkdir(parents=True)
     (sib / "config.worktree").write_text("")
-    pol = resolve_policy(worktree=wt, control_root=control, change_id="abc",
+    pol = resolve_policy(worktree=wt, control_root=control, quest_id="abc",
                          cfg=SandboxConfig(), engine_env_result={},
                          environ={}, available=True)
     assert str(sib / "config.worktree") in pol.git_ro_remask
@@ -217,7 +217,7 @@ def test_resolve_policy_only_existing_caches_and_secrets(tmp_path):
     (home / ".ssh").mkdir()                       # exists
     # .cargo, .aws do NOT exist
     pol = resolve_policy(
-        worktree=wt, control_root=control, change_id="abc",
+        worktree=wt, control_root=control, quest_id="abc",
         cfg=SandboxConfig(home=home), engine_env_result={},
         environ={}, available=True,
     )
@@ -229,7 +229,7 @@ def test_resolve_policy_only_existing_caches_and_secrets(tmp_path):
 
 def test_resolve_policy_masks_runtime_dir(tmp_path):
     control, wt = _layout(tmp_path)
-    pol = resolve_policy(worktree=wt, control_root=control, change_id="abc",
+    pol = resolve_policy(worktree=wt, control_root=control, quest_id="abc",
                          cfg=SandboxConfig(uid=1000), engine_env_result={},
                          environ={}, available=True)
     assert "/run/user/1000" in pol.secret_dirs
@@ -238,7 +238,7 @@ def test_resolve_policy_masks_runtime_dir(tmp_path):
 def test_resolve_policy_env_drops_secrets_keeps_imp_and_lc(tmp_path):
     control, wt = _layout(tmp_path)
     pol = resolve_policy(
-        worktree=wt, control_root=control, change_id="abc", cfg=SandboxConfig(),
+        worktree=wt, control_root=control, quest_id="abc", cfg=SandboxConfig(),
         engine_env_result={"IMP_TEST_CMD_FAST": "make check"},
         environ={"PATH": "/usr/bin", "AWS_SECRET_ACCESS_KEY": "x",
                  "LC_ALL": "C", "ANTHROPIC_API_KEY": "k"},
@@ -252,7 +252,7 @@ def test_resolve_policy_env_drops_secrets_keeps_imp_and_lc(tmp_path):
 
 def test_resolve_policy_disabled_is_inactive(tmp_path):
     control, wt = _layout(tmp_path)
-    pol = resolve_policy(worktree=wt, control_root=control, change_id="abc",
+    pol = resolve_policy(worktree=wt, control_root=control, quest_id="abc",
                          cfg=SandboxConfig(enabled=False), engine_env_result={},
                          environ={}, available=True)
     assert pol.active is False and pol.note == "sandbox_disabled"
@@ -260,7 +260,7 @@ def test_resolve_policy_disabled_is_inactive(tmp_path):
 
 def test_resolve_policy_unavailable_with_allow_runs_bare(tmp_path):
     control, wt = _layout(tmp_path)
-    pol = resolve_policy(worktree=wt, control_root=control, change_id="abc",
+    pol = resolve_policy(worktree=wt, control_root=control, quest_id="abc",
                          cfg=SandboxConfig(allow_unsandboxed=True),
                          engine_env_result={}, environ={}, available=False)
     assert pol.active is False and pol.note == "unsandboxed_by_config"
@@ -269,7 +269,7 @@ def test_resolve_policy_unavailable_with_allow_runs_bare(tmp_path):
 def test_resolve_policy_unavailable_without_allow_hard_fails(tmp_path):
     control, wt = _layout(tmp_path)
     with pytest.raises(SandboxUnavailable):
-        resolve_policy(worktree=wt, control_root=control, change_id="abc",
+        resolve_policy(worktree=wt, control_root=control, quest_id="abc",
                        cfg=SandboxConfig(allow_unsandboxed=False),
                        engine_env_result={}, environ={}, available=False)
 
@@ -285,7 +285,7 @@ def test_resolve_policy_secret_paths_classified_dir_and_file(tmp_path):
     (home / ".mykeys").mkdir()           # dir
     (home / ".mytoken").write_text("x")  # file
     pol = resolve_policy(
-        worktree=wt, control_root=control, change_id="abc",
+        worktree=wt, control_root=control, quest_id="abc",
         cfg=SandboxConfig(home=home, secret_paths=(".mykeys", ".mytoken")),
         engine_env_result={}, environ={}, available=True,
     )
@@ -299,7 +299,7 @@ def test_resolve_policy_writable_caches_override_replaces_defaults(tmp_path):
     (home / ".customcache").mkdir(parents=True)
     (home / ".cache").mkdir(parents=True)
     pol = resolve_policy(
-        worktree=wt, control_root=control, change_id="abc",
+        worktree=wt, control_root=control, quest_id="abc",
         cfg=SandboxConfig(home=home, writable_caches=(".customcache",)),
         engine_env_result={}, environ={}, available=True,
     )
@@ -310,7 +310,7 @@ def test_resolve_policy_writable_caches_override_replaces_defaults(tmp_path):
 def test_resolve_policy_extra_readable_writable_plumbed(tmp_path):
     control, wt = _layout(tmp_path)
     pol = resolve_policy(
-        worktree=wt, control_root=control, change_id="abc",
+        worktree=wt, control_root=control, quest_id="abc",
         cfg=SandboxConfig(extra_readable=("/opt/ro",), extra_writable=("/opt/rw",)),
         engine_env_result={}, environ={}, available=True,
     )
@@ -321,7 +321,7 @@ def test_resolve_policy_extra_readable_writable_plumbed(tmp_path):
 def test_build_setenv_dedups_overlapping_extra_env(tmp_path):
     control, wt = _layout(tmp_path)
     pol = resolve_policy(
-        worktree=wt, control_root=control, change_id="abc",
+        worktree=wt, control_root=control, quest_id="abc",
         cfg=SandboxConfig(extra_env=("TMPDIR",)),
         engine_env_result={},
         environ={"PATH": "/usr/bin", "TMPDIR": "/var/tmp"},
@@ -337,7 +337,7 @@ def test_build_setenv_dedups_overlapping_extra_env(tmp_path):
 def test_build_setenv_passes_pythonpath_from_engine_env(tmp_path):
     control, wt = _layout(tmp_path)
     pol = resolve_policy(
-        worktree=wt, control_root=control, change_id="abc",
+        worktree=wt, control_root=control, quest_id="abc",
         cfg=SandboxConfig(),
         engine_env_result={"IMP_PROJECT_ROOT": str(wt),
                            "PYTHONPATH": str(wt / "src")},
@@ -351,7 +351,7 @@ def test_build_setenv_passes_pythonpath_from_engine_env(tmp_path):
 def test_build_setenv_omits_pythonpath_when_engine_env_lacks_it(tmp_path):
     control, wt = _layout(tmp_path)
     pol = resolve_policy(
-        worktree=wt, control_root=control, change_id="abc",
+        worktree=wt, control_root=control, quest_id="abc",
         cfg=SandboxConfig(),
         engine_env_result={"IMP_PROJECT_ROOT": str(wt)},
         environ={"PATH": "/usr/bin"},
@@ -366,7 +366,7 @@ def test_build_setenv_admits_ambient_imp_toggles(tmp_path):
     # sandboxed agent, and an engine-managed var still arrives authoritatively.
     control, wt = _layout(tmp_path)
     pol = resolve_policy(
-        worktree=wt, control_root=control, change_id="abc",
+        worktree=wt, control_root=control, quest_id="abc",
         cfg=SandboxConfig(),
         engine_env_result={"IMP_PROJECT_ROOT": str(wt)},
         environ={"PATH": "/usr/bin", "IMP_SPIKE_LOG": "1", "IMP_DEBUG": "verbose"},
@@ -382,7 +382,7 @@ def test_build_setenv_strips_provider_api_keys(tmp_path):
     # not generic/LC_/extra_env), so they never reach the agent.
     control, wt = _layout(tmp_path)
     pol = resolve_policy(
-        worktree=wt, control_root=control, change_id="abc",
+        worktree=wt, control_root=control, quest_id="abc",
         cfg=SandboxConfig(),
         engine_env_result={},
         environ={"PATH": "/usr/bin", "ANTHROPIC_API_KEY": "sk-ant",
@@ -400,7 +400,7 @@ def test_build_setenv_ambient_engine_managed_imp_var_does_not_leak(tmp_path):
     # "absent => no fast gate" contract holds.
     control, wt = _layout(tmp_path)
     pol = resolve_policy(
-        worktree=wt, control_root=control, change_id="abc",
+        worktree=wt, control_root=control, quest_id="abc",
         cfg=SandboxConfig(),
         engine_env_result={"IMP_PROJECT_ROOT": str(wt)},
         environ={"PATH": "/usr/bin", "IMP_TEST_CMD_FAST": "stale-gate"},
@@ -416,7 +416,7 @@ def test_build_setenv_engine_imp_var_wins_over_ambient(tmp_path):
     # runs after it).
     control, wt = _layout(tmp_path)
     pol = resolve_policy(
-        worktree=wt, control_root=control, change_id="abc",
+        worktree=wt, control_root=control, quest_id="abc",
         cfg=SandboxConfig(),
         engine_env_result={"IMP_TEST_CMD_FAST": "real-gate"},
         environ={"PATH": "/usr/bin", "IMP_TEST_CMD_FAST": "stale-gate"},
@@ -429,7 +429,7 @@ def test_build_setenv_engine_imp_var_wins_over_ambient(tmp_path):
 def test_resolve_policy_uid_zero_masks_run_user_0(tmp_path):
     control, wt = _layout(tmp_path)
     pol = resolve_policy(
-        worktree=wt, control_root=control, change_id="abc",
+        worktree=wt, control_root=control, quest_id="abc",
         cfg=SandboxConfig(uid=0),
         engine_env_result={}, environ={}, available=True,
     )
@@ -652,7 +652,7 @@ def test_resolve_policy_binds_change_home_rw(tmp_path):
     control, wt = _layout(tmp_path)
     home = control / ".imp" / "changes" / "abc"
     pol = resolve_policy(
-        worktree=wt, control_root=control, change_id="abc",
+        worktree=wt, control_root=control, quest_id="abc",
         cfg=SandboxConfig(), engine_env_result={}, environ={},
         available=True, change_dir=home,
     )
@@ -813,7 +813,7 @@ def test_headless_vars_flow_through_build_sandbox_argv():
 def test_build_setenv_bakes_headless_vars_from_engine_env(tmp_path):
     control, wt = _layout(tmp_path)
     pol = resolve_policy(
-        worktree=wt, control_root=control, change_id="abc",
+        worktree=wt, control_root=control, quest_id="abc",
         cfg=SandboxConfig(),
         engine_env_result={"IMP_PROJECT_ROOT": str(wt), "GIT_EDITOR": "true",
                            "GIT_TERMINAL_PROMPT": "0", "EDITOR": "true",
@@ -833,7 +833,7 @@ def test_resolve_policy_masks_git_refs_and_reexposes_imp(tmp_path):
     (git / "refs" / "heads").mkdir(parents=True)
     (git / "index").write_text("")
     (git / "refs" / "stash").write_text("")
-    pol = resolve_policy(worktree=wt, control_root=control, change_id="abc",
+    pol = resolve_policy(worktree=wt, control_root=control, quest_id="abc",
                          cfg=SandboxConfig(), engine_env_result={}, environ={},
                          available=True)
     # The three crown-jewel paths join the RO remask...
@@ -855,7 +855,7 @@ def test_resolve_policy_skips_absent_ref_masks(tmp_path):
     git = control / ".git"
     (git / "refs" / "heads").mkdir(parents=True)
     # No index and no refs/stash on disk — a fresh clone may lack refs/stash.
-    pol = resolve_policy(worktree=wt, control_root=control, change_id="abc",
+    pol = resolve_policy(worktree=wt, control_root=control, quest_id="abc",
                          cfg=SandboxConfig(), engine_env_result={}, environ={},
                          available=True)
     assert str(git / "refs" / "heads") in pol.git_ro_remask
@@ -873,7 +873,7 @@ def test_resolve_policy_draft_change_skips_ref_protection(tmp_path):
     (git / "refs" / "heads").mkdir(parents=True)
     (git / "index").write_text("")
     # worktree IS the control root → draft/degenerate case: emit none of it.
-    pol = resolve_policy(worktree=control, control_root=control, change_id="abc",
+    pol = resolve_policy(worktree=control, control_root=control, quest_id="abc",
                          cfg=SandboxConfig(), engine_env_result={}, environ={},
                          available=True)
     assert str(git / "refs" / "heads") not in pol.git_ro_remask
@@ -972,7 +972,7 @@ def test_resolve_policy_spike_makes_home_a_writable_tmpfs(tmp_path):
     home = tmp_path / "home"
     home.mkdir()
     pol = resolve_policy(
-        worktree=wt, control_root=control, change_id="abc",
+        worktree=wt, control_root=control, quest_id="abc",
         cfg=SandboxConfig(home=home), engine_env_result={}, environ={},
         available=True, spike=True,
     )
@@ -994,7 +994,7 @@ def test_resolve_policy_spike_reexposes_worktree_and_change_home_under_home(tmp_
     (control / ".git" / "config").write_text("")
     change_home = control / ".imp" / "changes" / "abc"
     pol = resolve_policy(
-        worktree=wt, control_root=control, change_id="abc",
+        worktree=wt, control_root=control, quest_id="abc",
         cfg=SandboxConfig(home=home), engine_env_result={}, environ={},
         available=True, change_dir=change_home, spike=True,
     )
@@ -1010,7 +1010,7 @@ def test_resolve_policy_spike_binds_existing_cred_dirs_writethrough(tmp_path):
     (home / ".claude").mkdir(parents=True)
     (home / ".codex").mkdir(parents=True)
     pol = resolve_policy(
-        worktree=wt, control_root=control, change_id="abc",
+        worktree=wt, control_root=control, quest_id="abc",
         cfg=SandboxConfig(home=home), engine_env_result={}, environ={},
         available=True, spike=True,
     )
@@ -1025,7 +1025,7 @@ def test_resolve_policy_spike_cred_dirs_existence_gated(tmp_path):
     home = tmp_path / "home"
     home.mkdir()   # neither .claude nor .codex exists
     pol = resolve_policy(
-        worktree=wt, control_root=control, change_id="abc",
+        worktree=wt, control_root=control, quest_id="abc",
         cfg=SandboxConfig(home=home), engine_env_result={}, environ={},
         available=True, spike=True,
     )
@@ -1039,7 +1039,7 @@ def test_resolve_policy_spike_honors_claude_config_dir_override(tmp_path):
     custom = tmp_path / "custom-claude"
     custom.mkdir()
     pol = resolve_policy(
-        worktree=wt, control_root=control, change_id="abc",
+        worktree=wt, control_root=control, quest_id="abc",
         cfg=SandboxConfig(home=home), engine_env_result={},
         environ={"CLAUDE_CONFIG_DIR": str(custom)}, available=True, spike=True,
     )
@@ -1054,7 +1054,7 @@ def test_resolve_policy_spike_omits_home_relative_caches_and_masks(tmp_path):
     (home / ".ssh").mkdir(parents=True)       # would be a secret mask_dir when non-spike
     (home / ".netrc").write_text("secret")    # would be a secret mask_file when non-spike
     pol = resolve_policy(
-        worktree=wt, control_root=control, change_id="abc",
+        worktree=wt, control_root=control, quest_id="abc",
         cfg=SandboxConfig(home=home, secret_paths=("/abs/secret",)),
         engine_env_result={}, environ={}, available=True, spike=True,
     )
@@ -1073,7 +1073,7 @@ def test_resolve_policy_spike_keeps_absolute_secret_paths(tmp_path):
     abs_secret = tmp_path / "abs-secret"
     abs_secret.mkdir()   # absolute dir outside $HOME
     pol = resolve_policy(
-        worktree=wt, control_root=control, change_id="abc",
+        worktree=wt, control_root=control, quest_id="abc",
         cfg=SandboxConfig(home=home, secret_paths=(str(abs_secret),)),
         engine_env_result={}, environ={}, available=True, spike=True,
     )
@@ -1089,7 +1089,7 @@ def test_resolve_policy_spike_omits_home_relative_secret_paths(tmp_path):
     (home / ".mykeys").mkdir(parents=True)   # a real, existing home-relative dir
     (home / ".mysecret").write_text("x")     # a real, existing home-relative file
     pol = resolve_policy(
-        worktree=wt, control_root=control, change_id="abc",
+        worktree=wt, control_root=control, quest_id="abc",
         cfg=SandboxConfig(home=home, secret_paths=(".mykeys", ".mysecret")),
         engine_env_result={}, environ={}, available=True, spike=True,
     )
@@ -1106,7 +1106,7 @@ def test_resolve_policy_non_spike_default_has_no_spike_binds(tmp_path):
     (home / ".ssh").mkdir(parents=True)
     (home / ".claude").mkdir(parents=True)
     pol = resolve_policy(
-        worktree=wt, control_root=control, change_id="abc",
+        worktree=wt, control_root=control, quest_id="abc",
         cfg=SandboxConfig(home=home), engine_env_result={}, environ={},
         available=True,   # spike defaults to False
     )
@@ -1121,7 +1121,7 @@ def test_resolve_policy_bakes_workflow_snapshot_overlay(tmp_path):
     change_dir = control / ".imp" / "changes" / "abc"
     (change_dir / "workflow").mkdir(parents=True)
     pol = resolve_policy(
-        worktree=wt, control_root=control, change_id="abc",
+        worktree=wt, control_root=control, quest_id="abc",
         cfg=SandboxConfig(), engine_env_result={}, environ={},
         available=True, change_dir=change_dir,
     )
@@ -1133,7 +1133,7 @@ def test_resolve_policy_omits_workflow_overlay_when_snapshot_absent(tmp_path):
     change_dir = control / ".imp" / "changes" / "abc"
     change_dir.mkdir(parents=True)   # change home exists, but no workflow/ subtree
     pol = resolve_policy(
-        worktree=wt, control_root=control, change_id="abc",
+        worktree=wt, control_root=control, quest_id="abc",
         cfg=SandboxConfig(), engine_env_result={}, environ={},
         available=True, change_dir=change_dir,
     )
@@ -1144,7 +1144,7 @@ def test_resolve_policy_omits_workflow_overlay_when_snapshot_absent(tmp_path):
 def test_resolve_policy_omits_workflow_overlay_when_change_dir_unset(tmp_path):
     control, wt = _layout(tmp_path)
     pol = resolve_policy(
-        worktree=wt, control_root=control, change_id="abc",
+        worktree=wt, control_root=control, quest_id="abc",
         cfg=SandboxConfig(), engine_env_result={}, environ={},
         available=True,   # change_dir defaults to None
     )
@@ -1156,7 +1156,7 @@ def test_resolve_policy_workflow_snapshot_denies_write_siblings_writable(tmp_pat
     change_dir = control / ".imp" / "changes" / "abc"
     (change_dir / "workflow").mkdir(parents=True)
     pol = resolve_policy(
-        worktree=wt, control_root=control, change_id="abc",
+        worktree=wt, control_root=control, quest_id="abc",
         cfg=SandboxConfig(), engine_env_result={}, environ={},
         available=True, change_dir=change_dir,
     )
@@ -1170,7 +1170,7 @@ def test_resolve_policy_workflow_ro_bind_emitted_after_change_home(tmp_path):
     snapshot = change_dir / "workflow"
     snapshot.mkdir(parents=True)
     pol = resolve_policy(
-        worktree=wt, control_root=control, change_id="abc",
+        worktree=wt, control_root=control, quest_id="abc",
         cfg=SandboxConfig(), engine_env_result={}, environ={},
         available=True, change_dir=change_dir,
     )
@@ -1188,7 +1188,7 @@ def test_resolve_policy_omits_workflow_overlay_when_workflow_is_plain_file(tmp_p
     change_dir.mkdir(parents=True)
     (change_dir / "workflow").write_text("")   # a plain file, not a directory
     pol = resolve_policy(
-        worktree=wt, control_root=control, change_id="abc",
+        worktree=wt, control_root=control, quest_id="abc",
         cfg=SandboxConfig(), engine_env_result={}, environ={},
         available=True, change_dir=change_dir,
     )

@@ -95,7 +95,7 @@ async def test_multiple_interactive_uses_picker_selection(
     monkeypatch.setattr(m, "_interactive", lambda: True)
 
     async def fake_picker(candidates, *, now, color, header, selected_index=0):
-        return candidates[1].change_id
+        return candidates[1].quest_id
 
     monkeypatch.setattr(m.resume_select, "run_picker", fake_picker)
     assert await m._pick_resume_target(

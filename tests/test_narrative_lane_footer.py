@@ -7,7 +7,7 @@ from tests._event_fixtures import ev
 def _acquire_open() -> nv.NarrativeBuilder:
     """A builder with an open merge acquire step (no lane_waiting yet)."""
     b = nv.NarrativeBuilder()
-    b.add(ev("1", "change_created", change_id=1, title="x"))
+    b.add(ev("1", "change_created", quest_id=1, title="x"))
     b.add(ev("2", "step_started", step="acquire", kind="agent", phase="merge",
              label="waiting in merge queue"))
     return b

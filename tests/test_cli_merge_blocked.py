@@ -16,7 +16,7 @@ from tests.conftest import _seed_control
 
 def _change(tmp_path: Path) -> Change:
     _seed_control(tmp_path)
-    return Change.create(tmp_path, title="x", change_id="feat", base_branch="main")
+    return Change.create(tmp_path, title="x", quest_id="feat", base_branch="main")
 
 
 def test_refused_surfaces_git_detail(

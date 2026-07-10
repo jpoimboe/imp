@@ -24,7 +24,7 @@ async def test_relay_forwards_curated_events_with_change_context(
     await socket.open()
     sink: list[dict[str, Any]] = []
     relay = SessionRelay(
-        socket_path=sock, change_id="cid", title_provider=lambda: "T",
+        socket_path=sock, quest_id="cid", title_provider=lambda: "T",
         events=("all",), sink=sink.append)
     async with anyio.create_task_group() as tg:
         tg.start_soon(socket.serve)
@@ -54,7 +54,7 @@ async def test_relay_stays_attached_at_gate_and_drops_lease(tmp_path: Path) -> N
     await socket.open()
     sink: list[dict[str, Any]] = []
     relay = SessionRelay(
-        socket_path=sock, change_id="cid", title_provider=lambda: "T", events=("all",),
+        socket_path=sock, quest_id="cid", title_provider=lambda: "T", events=("all",),
         sink=sink.append, is_subscribed=lambda: True, lease_poll_gap=0.02)
     async with anyio.create_task_group() as tg:
         tg.start_soon(socket.serve)
@@ -88,7 +88,7 @@ async def test_relay_awaiting_then_live_events_reach_sink_and_toggle_lease(
     await socket.open()
     sink: list[dict[str, Any]] = []
     relay = SessionRelay(
-        socket_path=sock, change_id="cid", title_provider=lambda: "T", events=("all",),
+        socket_path=sock, quest_id="cid", title_provider=lambda: "T", events=("all",),
         sink=sink.append, is_subscribed=lambda: True, lease_poll_gap=0.02)
     async with anyio.create_task_group() as tg:
         tg.start_soon(socket.serve)
@@ -126,7 +126,7 @@ async def test_relay_replayed_gate_does_not_touch_lease(tmp_path: Path) -> None:
     await socket.open()
     sink: list[dict[str, Any]] = []
     relay = SessionRelay(
-        socket_path=sock, change_id="cid", title_provider=lambda: "T", events=("all",),
+        socket_path=sock, quest_id="cid", title_provider=lambda: "T", events=("all",),
         sink=sink.append, is_subscribed=lambda: True, lease_poll_gap=0.02)
     async with anyio.create_task_group() as tg:
         tg.start_soon(socket.serve)
@@ -155,7 +155,7 @@ async def test_relay_run_raises_when_no_session_is_resident(tmp_path: Path) -> N
     # The relay attaches to a resident session ONLY; it never spawns one
     # (subscription does not pin residency). No live socket → OSError, not a spawn.
     relay = SessionRelay(
-        socket_path=str(tmp_path / "absent.sock"), change_id="cid", title_provider=lambda: "T",
+        socket_path=str(tmp_path / "absent.sock"), quest_id="cid", title_provider=lambda: "T",
         events=("all",), sink=lambda _e: None)
     with pytest.raises(OSError):
         await relay.run()
@@ -167,7 +167,7 @@ async def test_relay_leases_when_subscribed(tmp_path: Path) -> None:
     socket = SessionSocket(sock)
     await socket.open()
     relay = SessionRelay(
-        socket_path=sock, change_id="cid", title_provider=lambda: "T", events=("all",),
+        socket_path=sock, quest_id="cid", title_provider=lambda: "T", events=("all",),
         sink=lambda _e: None, is_subscribed=lambda: True)
     async with anyio.create_task_group() as tg:
         tg.start_soon(socket.serve)
@@ -186,7 +186,7 @@ async def test_relay_is_lease_less_when_not_subscribed(tmp_path: Path) -> None:
     socket = SessionSocket(sock)
     await socket.open()
     relay = SessionRelay(
-        socket_path=sock, change_id="cid", title_provider=lambda: "T", events=("all",),
+        socket_path=sock, quest_id="cid", title_provider=lambda: "T", events=("all",),
         sink=lambda _e: None, is_subscribed=lambda: False)
     async with anyio.create_task_group() as tg:
         tg.start_soon(socket.serve)
@@ -206,7 +206,7 @@ async def test_relay_set_lease_tracks_subscription_changes(tmp_path: Path) -> No
     await socket.open()
     sub = {"on": False}
     relay = SessionRelay(
-        socket_path=sock, change_id="cid", title_provider=lambda: "T", events=("all",),
+        socket_path=sock, quest_id="cid", title_provider=lambda: "T", events=("all",),
         sink=lambda _e: None, is_subscribed=lambda: sub["on"], lease_poll_gap=0.02)
     async with anyio.create_task_group() as tg:
         tg.start_soon(socket.serve)
@@ -238,7 +238,7 @@ async def test_relay_reflects_title_rename_after_start(tmp_path: Path) -> None:
     holder = {"title": ""}
     sink: list[dict[str, Any]] = []
     relay = SessionRelay(
-        socket_path=sock, change_id="cid",
+        socket_path=sock, quest_id="cid",
         title_provider=lambda: holder["title"], events=("all",), sink=sink.append)
     async with anyio.create_task_group() as tg:
         tg.start_soon(socket.serve)

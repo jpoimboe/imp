@@ -12,7 +12,7 @@ def test_status_lists_unmaterialized_home_in_backlog(
         tmp_path: Path, monkeypatch, capsys) -> None:
     _seed_control(tmp_path)
     monkeypatch.chdir(tmp_path)
-    Change.create_draft(tmp_path, title="Idea one", change_id="2026-06-16-idea11",
+    Change.create_draft(tmp_path, title="Idea one", quest_id="2026-06-16-idea11",
                         base_branch="main", origin="idea", seed_opening="Idea one")
     rc = main._cmd_status(argparse.Namespace(all=False), tmp_path)
     assert rc == 0
@@ -27,8 +27,8 @@ def test_status_materialized_in_active_before_backlog(
         tmp_path: Path, monkeypatch, capsys) -> None:
     _seed_control(tmp_path)
     monkeypatch.chdir(tmp_path)
-    Change.create(tmp_path, title="Live", change_id="live222", base_branch="main")
-    Change.create_draft(tmp_path, title="Backlog item", change_id="2026-06-16-bk333",
+    Change.create(tmp_path, title="Live", quest_id="live222", base_branch="main")
+    Change.create_draft(tmp_path, title="Backlog item", quest_id="2026-06-16-bk333",
                         base_branch="main", origin="idea", seed_opening="x")
     rc = main._cmd_status(argparse.Namespace(all=False), tmp_path)
     assert rc == 0
@@ -42,7 +42,7 @@ def test_status_blocked_backlog_home_shows_blocked(
         tmp_path: Path, monkeypatch, capsys) -> None:
     _seed_control(tmp_path)
     monkeypatch.chdir(tmp_path)
-    Change.create_draft(tmp_path, title="Blocked", change_id="2026-06-16-blk44",
+    Change.create_draft(tmp_path, title="Blocked", quest_id="2026-06-16-blk44",
                         base_branch="main", origin="followup",
                         depends_on=["2026-06-16-ghost0"], seed_opening="x")
     rc = main._cmd_status(argparse.Namespace(all=False), tmp_path)

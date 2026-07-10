@@ -48,7 +48,7 @@ def _parse_events(raw: bytes) -> list[dict[str, Any]]:
 
 
 def archive_change(
-    control_root: Path, change_id: str, *,
+    control_root: Path, quest_id: str, *,
     events_path: Path, change_json_path: Path, state_json_path: Path,
     steps_dir: Path | None = None,
     resumable: bool = False,

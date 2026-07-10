@@ -119,10 +119,10 @@ def test_render_listresult_header_reflects_alerts_off() -> None:
     assert out == "Alerts: subscribed only\n@k3f9qa  Dark mode — running · implement"
 
 
-def test_on_response_notice_with_change_id_is_reply_routable() -> None:
+def test_on_response_notice_with_quest_id_is_reply_routable() -> None:
     sent: list = []
     adapter = _adapter(sent)
-    adapter.on_response(Notice("replayed body", change_id="k3f9qa"))
+    adapter.on_response(Notice("replayed body", quest_id="k3f9qa"))
     # Still sent silently — a catch-up must not buzz.
     assert sent == [("replayed body", True)]
     # The recorded message id (1, from the fake send) routes a reply to the Change,
@@ -137,6 +137,6 @@ def test_on_response_plain_notice_records_no_route() -> None:
     sent: list = []
     adapter = _adapter(sent)
     adapter.on_response(Notice("hello"))
-    # A Notice with no change_id records nothing — an unrelated reply stays unrouted.
+    # A Notice with no quest_id records nothing — an unrelated reply stays unrouted.
     assert adapter.resolve(
         Inbound(text="ok", reply_to_message_id=1)) == (None, "ok")

@@ -3,7 +3,7 @@
 A single shared file at <control_root>/.git/imp/merge-queue.json, mutated only
 under RepoGitLock (the same lock-adjacent, sandbox-writable git common dir that
 holds repo.lock — NOT the per-worktree gitignored .imp/). Each entry:
-    {"change_id": "...", "base_branch": "...", "enqueued_at": "<iso8601>"}
+    {"quest_id": "...", "base_branch": "...", "enqueued_at": "<iso8601>"}
 """
 from __future__ import annotations
 
@@ -44,36 +44,36 @@ def _lane(entries: list[dict[str, str]], base_branch: str) -> list[dict[str, str
     )
 
 
-def enqueue_if_absent(control_root: Path, change_id: str, base_branch: str) -> None:
+def enqueue_if_absent(control_root: Path, quest_id: str, base_branch: str) -> None:
     with RepoGitLock(control_root).acquire():
         entries = read(control_root)
-        if any(e["change_id"] == change_id for e in entries):
+        if any(e["quest_id"] == quest_id for e in entries):
             return
         entries.append({
-            "change_id": change_id,
+            "quest_id": quest_id,
             "base_branch": base_branch,
             "enqueued_at": datetime.now(UTC).isoformat(),
         })
         _write(control_root, entries)
 
 
-def is_head(control_root: Path, change_id: str, base_branch: str) -> bool:
+def is_head(control_root: Path, quest_id: str, base_branch: str) -> bool:
     lane = _lane(read(control_root), base_branch)
-    return bool(lane) and lane[0]["change_id"] == change_id
+    return bool(lane) and lane[0]["quest_id"] == quest_id
 
 
-def position(control_root: Path, change_id: str, base_branch: str) -> int:
-    """Number of entries ahead of change_id in its lane (0 == head). Returns the
-    lane length when change_id is absent (treated as 'behind everyone')."""
+def position(control_root: Path, quest_id: str, base_branch: str) -> int:
+    """Number of entries ahead of quest_id in its lane (0 == head). Returns the
+    lane length when quest_id is absent (treated as 'behind everyone')."""
     lane = _lane(read(control_root), base_branch)
-    ids = [e["change_id"] for e in lane]
-    return ids.index(change_id) if change_id in ids else len(ids)
+    ids = [e["quest_id"] for e in lane]
+    return ids.index(quest_id) if quest_id in ids else len(ids)
 
 
-def remove(control_root: Path, change_id: str) -> None:
+def remove(control_root: Path, quest_id: str) -> None:
     """Drop a change's entry (abandon of a non-head, or any cleanup). No wake."""
     with RepoGitLock(control_root).acquire():
-        entries = [e for e in read(control_root) if e["change_id"] != change_id]
+        entries = [e for e in read(control_root) if e["quest_id"] != quest_id]
         _write(control_root, entries)
 
 
@@ -86,7 +86,7 @@ def ensure_head_driven(
     from imp.engine.errors import LoadError
     with RepoGitLock(control_root).acquire():
         lane = _lane(read(control_root), base_branch)
-        head_id = lane[0]["change_id"] if lane else None
+        head_id = lane[0]["quest_id"] if lane else None
     if head_id is None:
         return
     try:
@@ -100,15 +100,15 @@ def ensure_head_driven(
 
 
 def pop_and_wake(
-    control_root: Path, change_id: str, base_branch: str,
+    control_root: Path, quest_id: str, base_branch: str,
     *, spawn_fn: Callable[..., Any] | None = None,
 ) -> None:
     """Remove self from the queue; wake the new lane head if self was head."""
     with RepoGitLock(control_root).acquire():
         entries = read(control_root)
         lane_before = _lane(entries, base_branch)
-        was_head = bool(lane_before) and lane_before[0]["change_id"] == change_id
-        new_entries = [e for e in entries if e["change_id"] != change_id]
+        was_head = bool(lane_before) and lane_before[0]["quest_id"] == quest_id
+        new_entries = [e for e in entries if e["quest_id"] != quest_id]
         if new_entries != entries:
             _write(control_root, new_entries)
         entries = new_entries

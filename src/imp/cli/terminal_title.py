@@ -11,12 +11,12 @@ class TerminalTitle:
     def __init__(
         self,
         stream: Any,
-        change_id: str,
+        quest_id: str,
         change_name: str,
         initial: str = "busy",
     ) -> None:
         self._stream = stream
-        self._change_id = change_id
+        self._quest_id = quest_id
         self._name = change_name
         self._enabled = bool(stream.isatty())
         self._current: str | None = None
@@ -67,9 +67,9 @@ class TerminalTitle:
             return
         prefix = f"{glyph} " if glyph else ""
         label = (
-            f"imp · {self._change_id} · {self._name}"
+            f"imp · {self._quest_id} · {self._name}"
             if self._name
-            else f"imp · {self._change_id}"
+            else f"imp · {self._quest_id}"
         )
         self._stream.write(f"\x1b]2;{prefix}{label}\x07")
         self._stream.flush()
