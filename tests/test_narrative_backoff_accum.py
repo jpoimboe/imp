@@ -89,3 +89,21 @@ def test_step_backoff_attributed_to_stepnode() -> None:
     b.add(ev("4", "thinking", content="x",
              timestamp="2026-01-01T00:00:13+00:00"))
     assert b._step_stack[-1].backoff_wait_s == 8.0
+
+
+def test_subagent_closed_row_excludes_backoff_wait() -> None:
+    from imp.cli.render_text import subagent_status_row
+    nested = nv.NarrativeBuilder()
+    nested.add(ev("r1", "agent_retry", category="auth", attempt=1,
+                  backoff_seconds=30.0,
+                  timestamp="2026-01-01T00:00:02+00:00"))
+    # Fold closes mid-wait: no resuming event, so the open span resolves at end_ts.
+    fold = nv.SubagentFold(
+        subagent_name="code-reviewer", event_id="t1", block_id="b1",
+        nested=nested, running=False, terminal_state="interrupted",
+        start_ts="2026-01-01T00:00:00+00:00",
+        end_ts="2026-01-01T00:00:14+00:00")
+    row = subagent_status_row(fold, depth=0, color=False)
+    # 14s wall - 12s wait (02..14) = 2s honest working time, not 14s.
+    assert "· 2s" in row
+    assert "14s" not in row

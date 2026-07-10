@@ -535,6 +535,8 @@ def subagent_status_row(sub: nv.SubagentFold, *, depth: int, color: bool,
     elif sub.is_error:
         parts.append(pal.ansi(" (failed)", *sub_c, enabled=color))
     elapsed = nv.elapsed_seconds(sub.start_ts, sub.end_ts)
+    if elapsed is not None:
+        elapsed = max(0.0, elapsed - sub.nested.backoff_wait_seconds(sub.end_ts))
     done = "" if sub.running else fmt_seconds_done(elapsed)
     if done:
         parts.append(pal.ansi(f" · {done}", "gray", enabled=color))
