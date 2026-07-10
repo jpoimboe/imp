@@ -18,10 +18,18 @@ def test_finalize_still_decides_merge_or_rework() -> None:
 
 def test_finalize_forbids_premature_merge_claim() -> None:
     body = (WF / "agents" / "finalize.md").read_text()
-    assert "enqueued into the merge queue" in body
+    # The "do not assert the merge as already done" guard is preserved verbatim.
     assert 'no "Merged"' in body
     assert "is now on master" in body
-    assert "at the queue head" in body
+    # Its justification is corrected: the mechanical merge runs right after finalize
+    # returns, not "later, at the queue head".
+    assert "runs immediately after you return" in body
+    assert "at the queue head" not in body
+    # The stale enqueue framing at the merge disposition is gone. (The source
+    # wraps "enqueues the change in the\n  merge queue", so assert the contiguous
+    # line-start substring that genuinely exists pre-fix, not the wrapped whole.)
+    assert "enqueued into the merge queue" not in body
+    assert "enqueues the change in the" not in body
 
 
 def test_finalize_pause_route_drops_human_availability_reasoning() -> None:
@@ -82,3 +90,24 @@ def test_auto_merge_branch_absent_in_autonomous_arm(tmp_path: Path) -> None:
     assert _AUTO_MERGE_MARKER not in out
     assert _INTERACTIVE_MARKER not in out
     assert _AUTONOMOUS_MARKER in out
+
+
+def test_finalize_frames_change_as_already_at_head() -> None:
+    body = (WF / "agents" / "finalize.md").read_text()
+    # None of the stale "entering / enqueuing the queue" phrasings remain anywhere.
+    assert "enters the merge queue" not in body
+    assert "(enqueue)" not in body
+    assert "enqueues the change in the" not in body
+    assert "enqueued into the merge queue" not in body
+    assert "Integration review happens later, at the head of the queue" not in body
+    # The change is described as already at the head, with integration-review already done.
+    assert "already at the head" in body
+    assert "already re-reviewed it at the merge head" in body
+
+
+def test_finalize_description_frames_head_of_queue() -> None:
+    from imp.engine.loader import parse_agent_file
+
+    desc = parse_agent_file((WF / "agents" / "finalize.md").resolve()).description
+    assert "head of the merge queue" in desc
+    assert "Integration review happens later" not in desc
