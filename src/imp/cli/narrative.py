@@ -122,7 +122,7 @@ class StepNode:
     outcome: OutcomeLine | None = None
     start_ts: str | None = None        # ISO-8601 from step_started.timestamp (issue 3)
     run_start_ts: str | None = None    # test-lane run clock; phase_elapsed reads start_ts
-    lane_wait_start_ts: str | None = None  # lane queue-entry clock (block-age for "waiting to test"/"waiting to merge")
+    lane_wait_start_ts: str | None = None  # lane queue-entry clock (block-age)
     end_ts: str | None = None          # ISO-8601 from step_completed.timestamp (§7)
     agent_output: dict[str, Any] | None = None  # stashed complete_step args (issues 5/6)
     show_label: bool = True            # step frame (header + breadcrumb) shown
@@ -237,7 +237,8 @@ class Activity:
     phase: str | None = field(default=None, compare=False)     # phase head (step-blue)
     plan: str | None = field(default=None, compare=False)      # plan counter (step-blue)
     counter: str | None = field(default=None, compare=False)   # running step's label (step-blue)
-    # Live-timer block-age source: block start_ts, the builder whose backoff to exclude, and backoff already accrued at start_ts.
+    # Live-timer block-age source: block start_ts, the builder whose backoff to
+    # exclude, and the backoff already accrued at start_ts.
     start_ts: str | None = field(default=None, compare=False)
     backoff_source: Any = field(default=None, compare=False)
     backoff_base: float = field(default=0.0, compare=False)
@@ -1527,7 +1528,7 @@ def elapsed_seconds(start_ts: str | None, end_ts: Any) -> float | None:
 
 
 def activity_elapsed(activity: Activity, now_iso: str) -> float:
-    """Block-age: now − start_ts, minus any backoff wait inside the block; 0.0 if start_ts missing, never negative."""
+    """Block-age: now - start_ts, minus in-block backoff; 0.0 if missing, never negative."""
     span = elapsed_seconds(activity.start_ts, now_iso)
     if span is None:
         return 0.0

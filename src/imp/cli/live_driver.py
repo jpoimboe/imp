@@ -81,10 +81,13 @@ def context_bar(model: str | None, prompt_tokens: int | None, *,
     return f"{fill}{track} {pct}%"
 
 
-def compose_activity_line(*, activity: nv.Activity, elapsed: float,
-                          frame: int, color: bool) -> str:
-    """Activity line: spinner + verb + detail + elapsed (always animated)."""
+def compose_activity_line(*, activity: nv.Activity, frame: int, color: bool,
+                          now_iso: str) -> str:
+    """Activity line: spinner + verb + detail + block-age elapsed (always animated).
+    Elapsed is the age of the activity's current live block, derived from its
+    start_ts against `now_iso` (see nv.activity_elapsed)."""
     spin = _paint(pal.spinner_frame(frame), "wordmark", color=color, over_bg=False)
+    elapsed = nv.activity_elapsed(activity, now_iso)
     parts: list[str | None] = []
     if activity.verb:
         parts.append(_paint(activity.verb, "wordmark", color=color, over_bg=False))
@@ -225,14 +228,16 @@ def compose_subagent_rows(builder: nv.NarrativeBuilder, *, color: bool,
 
 
 def compose_activity_status(
-    builder: nv.NarrativeBuilder, *, frame: int, elapsed: float, color: bool,
-    width: int | None = None,
+    builder: nv.NarrativeBuilder, *, frame: int, color: bool,
+    width: int | None = None, now_iso: str | None = None,
 ) -> str | None:
     """Single combined status line: the activity line joined with the position bar.
     The streaming live view uses the multi-row footer instead."""
     activity = builder.current_activity()
     if activity is None:
         return None
+    if now_iso is None:
+        now_iso = datetime.now(UTC).isoformat()
     root = builder.tree.root
     w = term_width() if width is None else width
     bar = compose_position_bar(
@@ -240,7 +245,7 @@ def compose_activity_status(
         prompt_tokens=builder.latest_prompt_tokens, color=color, width=w,
         context_pct=builder.latest_context_pct,
         checkpoint_threshold=builder.latest_checkpoint_threshold, pad_slate=False)
-    line = compose_activity_line(activity=activity, frame=frame, elapsed=elapsed, color=color)
+    line = compose_activity_line(activity=activity, frame=frame, color=color, now_iso=now_iso)
     return rt.compose_label([line, bar])
 
 
@@ -308,6 +313,7 @@ class LiveDriver:
         self._separator_emitted = False    # prepare_for_prompt printed the leading blank
         self._preceded_by_blank = preceded_by_blank
         self._startup_verb = startup_verb
+        self._startup_start_iso: str | None = None   # block start for the startup line's block-age timer
         self._emitted_any = False
         self._last_header_position: str | None = None
         self._deferred: list[tuple[list[str], bool, str]] = []
@@ -360,12 +366,13 @@ class LiveDriver:
         self._walk(force=True)
         self._status.reset()
 
-    def compose_status(self, frame: int, elapsed: float) -> list[str] | None:
+    def compose_status(self, frame: int) -> list[str] | None:
         activity = self._builder.current_activity()
         if activity is None:
             return None
-        a_line = compose_activity_line(activity=activity, elapsed=elapsed,
-                                       frame=frame, color=self._color)
+        now_iso = datetime.now(UTC).isoformat()
+        a_line = compose_activity_line(activity=activity, frame=frame,
+                                       color=self._color, now_iso=now_iso)
         root = self._builder.tree.root
         w = term_width()
         p_row = compose_position_row(
@@ -376,20 +383,22 @@ class LiveDriver:
             checkpoint_threshold=self._builder.latest_checkpoint_threshold)
         rows = [a_line, "", p_row]
         rows += compose_subagent_rows(
-            self._builder, color=self._color, width=w,
-            now_iso=datetime.now(UTC).isoformat())
+            self._builder, color=self._color, width=w, now_iso=now_iso)
         return rows
 
-    def compose_startup(self, frame: int, elapsed: float) -> list[str] | None:
+    def compose_startup(self, frame: int) -> list[str] | None:
         if self._startup_verb is None:
             return None
+        now_iso = datetime.now(UTC).isoformat()
         return [compose_activity_line(
-            activity=nv.Activity(verb=self._startup_verb),
-            elapsed=elapsed, frame=frame, color=self._color)]
+            activity=nv.Activity(verb=self._startup_verb,
+                                 start_ts=self._startup_start_iso),
+            frame=frame, color=self._color, now_iso=now_iso)]
 
     def install_startup_status(self) -> None:
         if self._startup_verb is None:
             return
+        self._startup_start_iso = datetime.now(UTC).isoformat()
         if self._preceded_by_blank:
             self._status.skip_leading_blank()
         self._status.update(self.compose_startup)

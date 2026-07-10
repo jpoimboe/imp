@@ -1858,10 +1858,10 @@ class _EventTail:
 _FOLLOW_TERMINAL = frozenset({"completed", "abandoned", "saved"})
 
 
-def _follow_paused_status(change_id: str) -> Callable[[int, float], list[str]]:
+def _follow_paused_status(change_id: str) -> Callable[[int], list[str]]:
     """A static one-row footer composer shown while the run is paused."""
     line = f"paused — resume with imp resume {change_id}"
-    return lambda frame, elapsed: [line]
+    return lambda frame: [line]
 
 
 def _drain_from_archive(driver: LiveDriver, tail: _EventTail,

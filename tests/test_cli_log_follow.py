@@ -101,7 +101,7 @@ def test_follow_step_paused_footer(tmp_path: Path) -> None:
     tail = _EventTail(home / "events.jsonl")
     assert _follow_step(driver, tail, status, tmp_path, slug, home) is None
     compose = status.update.call_args.args[0]
-    assert compose(0, 0.0) == ["paused — resume with imp resume follow-me"]
+    assert compose(0) == ["paused — resume with imp resume follow-me"]
     driver.finish.assert_not_called()
 
 

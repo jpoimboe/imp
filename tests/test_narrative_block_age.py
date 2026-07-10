@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from imp.cli import narrative as nv
+from tests._event_fixtures import ev
 
 
 def test_activity_elapsed_zero_when_start_ts_missing() -> None:
@@ -21,7 +22,7 @@ def test_activity_elapsed_excludes_source_backoff_beyond_base() -> None:
     src._backoff_wait_accum = 4.0
     act = nv.Activity(verb="thinking", start_ts="2026-01-01T00:00:00+00:00",
                       backoff_source=src, backoff_base=1.0)
-    # 10s wall span − (4 − 1) within-block backoff = 7s honest.
+    # 10s wall span - (4 - 1) within-block backoff = 7s honest.
     assert nv.activity_elapsed(act, "2026-01-01T00:00:10+00:00") == 7.0
 
 
@@ -31,9 +32,6 @@ def test_activity_elapsed_never_negative() -> None:
     act = nv.Activity(verb="thinking", start_ts="2026-01-01T00:00:00+00:00",
                       backoff_source=src, backoff_base=0.0)
     assert nv.activity_elapsed(act, "2026-01-01T00:00:05+00:00") == 0.0
-
-
-from tests._event_fixtures import ev
 
 
 def _stepped(ts="2026-01-01T00:00:00+00:00") -> nv.NarrativeBuilder:
@@ -163,7 +161,7 @@ def test_surfaced_waiting_subagent_countdown_anchors_to_nested_wait_entry() -> N
     assert b._backoff_wait_start is None                 # parent not waiting
     assert act.countdown_total == 30.0
     assert act.start_ts == "2026-01-01T00:00:05+00:00"   # the subagent's wait entry
-    # 10s after wait entry -> 30 − 5 = 25s remaining is derivable from start_ts.
+    # 10s after wait entry -> 30 - 5 = 25s remaining is derivable from start_ts.
     now = "2026-01-01T00:00:10+00:00"
     assert 30.0 - nv.activity_elapsed(act, now) == 25.0
 
