@@ -2175,7 +2175,7 @@ def test_phase_breadcrumb_uses_phase_label() -> None:
         "implementation phase · plan 1/3 complete")
 
 
-def test_opening_intent_renders_under_first_step_header_before_narration() -> None:
+def test_opening_intent_renders_at_root_before_step_header_and_narration() -> None:
     out = _lines([
         _ev("e1", "change_created", title="add auth"),
         {"id": "e2", "agent_id": None, "type": "opening_intent",
@@ -2191,7 +2191,9 @@ def test_opening_intent_renders_under_first_step_header_before_narration() -> No
     step_idx = next(i for i, ln in enumerate(out) if "spec" in ln)
     intent_idx = next(i for i, ln in enumerate(out) if "add a --json flag" in ln)
     narr_idx = next(i for i, ln in enumerate(out) if "starting the work" in ln)
-    assert step_idx < intent_idx < narr_idx
+    # Root placement: the opening intent renders at the top, ahead of the phase and
+    # step headers; then the step header; then the agent's narration.
+    assert intent_idx < step_idx < narr_idx
 
 
 def test_breadcrumb_completion_includes_phase_label() -> None:

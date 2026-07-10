@@ -2014,7 +2014,7 @@ def test_parallel_batch_folds_ignore_interleaved_parent_chunks() -> None:
         folds["tester"].start_ts, folds["tester"].end_ts) == 19.0
 
 
-def test_opening_intent_reparents_under_first_step() -> None:
+def test_opening_intent_stays_at_root_after_first_step() -> None:
     tree = nv.build_tree([
         {"id": "e1", "agent_id": None, "type": "change_created",
          "payload": {"handle": "h", "title": "t"}},
@@ -2023,15 +2023,18 @@ def test_opening_intent_reparents_under_first_step() -> None:
         _ev("e3", "step_started", step="spec", kind="agent", phase="design",
             model="m", provider="anthropic"),
     ])
-    # The intent is NOT a child of root.
-    assert not any(isinstance(c, nv.UserMessageNode) for c in tree.root.children)
+    # The intent is a child of root, ahead of the first phase — never re-homed.
+    intents = [c for c in tree.root.children if isinstance(c, nv.UserMessageNode)]
+    assert len(intents) == 1
+    assert intents[0].text == "add a --json flag"
+    # interactive=True is required, else render_text drops it as synthetic plumbing.
+    assert intents[0].interactive is True
     phase = next(c for c in tree.root.children if isinstance(c, nv.PhaseNode))
     step = next(c for c in phase.children if isinstance(c, nv.StepNode))
-    node = step.children[0]
-    assert isinstance(node, nv.UserMessageNode)
-    assert node.text == "add a --json flag"
-    # interactive=True is required, else render_text drops it as synthetic plumbing.
-    assert node.interactive is True
+    assert not any(isinstance(c, nv.UserMessageNode) for c in step.children)
+    # Ordering: the intent precedes the phase header at root.
+    root_kinds = [type(c) for c in tree.root.children]
+    assert root_kinds.index(nv.UserMessageNode) < root_kinds.index(nv.PhaseNode)
 
 
 def test_no_opening_intent_yields_no_user_message_node() -> None:
@@ -2045,7 +2048,7 @@ def test_no_opening_intent_yields_no_user_message_node() -> None:
     assert not any(isinstance(c, nv.UserMessageNode) for c in tree.root.children)
 
 
-def test_opening_intent_only_injected_under_first_step_not_later_ones() -> None:
+def test_opening_intent_at_root_not_under_any_step() -> None:
     tree = nv.build_tree([
         {"id": "e1", "agent_id": None, "type": "change_created",
          "payload": {"handle": "h", "title": "t"}},
@@ -2058,16 +2061,17 @@ def test_opening_intent_only_injected_under_first_step_not_later_ones() -> None:
         _ev("s2", "step_started", step="writing-plans", kind="agent", phase="design",
             model="m", provider="anthropic"),
     ])
+    intents = [c for c in tree.root.children if isinstance(c, nv.UserMessageNode)]
+    assert len(intents) == 1
     phase = next(c for c in tree.root.children if isinstance(c, nv.PhaseNode))
     steps = [c for c in phase.children if isinstance(c, nv.StepNode)]
     assert len(steps) == 2
-    # First step has the intent.
-    assert any(isinstance(c, nv.UserMessageNode) for c in steps[0].children)
-    # Second step does not.
+    # Neither step holds the intent — it stays at root.
+    assert not any(isinstance(c, nv.UserMessageNode) for c in steps[0].children)
     assert not any(isinstance(c, nv.UserMessageNode) for c in steps[1].children)
 
 
-def test_opening_intent_reinjected_once_on_resume_reentry_of_first_step() -> None:
+def test_opening_intent_stays_at_root_across_resume_reentry() -> None:
     seed = [
         {"id": "e1", "agent_id": None, "type": "opening_intent",
          "payload": {"text": "add a --json flag"}},
@@ -2082,14 +2086,14 @@ def test_opening_intent_reinjected_once_on_resume_reentry_of_first_step() -> Non
             model="m", provider="anthropic", restarted=True),
     ]
     tree = nv.build_tree(seed + live)
-    phase = next(c for c in tree.root.children if isinstance(c, nv.PhaseNode))
-    step = next(c for c in phase.children if isinstance(c, nv.StepNode))
-    intents = [c for c in step.children if isinstance(c, nv.UserMessageNode)]
+    intents = [c for c in tree.root.children if isinstance(c, nv.UserMessageNode)]
     assert len(intents) == 1
     assert intents[0].text == "add a --json flag"
     assert intents[0].interactive is True
-    # Not stranded at root.
-    assert not any(isinstance(c, nv.UserMessageNode) for c in tree.root.children)
+    phase = next(c for c in tree.root.children if isinstance(c, nv.PhaseNode))
+    step = next(c for c in phase.children if isinstance(c, nv.StepNode))
+    # Not re-homed under the step on resume re-entry.
+    assert not any(isinstance(c, nv.UserMessageNode) for c in step.children)
 
 
 def test_lost_task_result_resume_closed_at_step_completed() -> None:
@@ -2355,6 +2359,23 @@ def test_current_activity_model_none_without_a_step() -> None:
     assert act is None or act.model is None
 
 
+def test_seeded_opening_intent_reconciles_in_place_at_root() -> None:
+    b = nv.NarrativeBuilder()
+    b.seed_opening_intent("typed text")
+    b.add({"id": "oi", "agent_id": None, "type": "opening_intent",
+           "payload": {"text": "authoritative text"}})
+    b.add(_ev("s1", "step_started", step="spec", kind="agent", phase="design",
+              model="m", provider="anthropic"))
+    tree = b.tree
+    intents = [c for c in tree.root.children if isinstance(c, nv.UserMessageNode)]
+    # Exactly one node at root, carrying the AUTHORITATIVE event text (not the seed).
+    assert len(intents) == 1
+    assert intents[0].text == "authoritative text"
+    assert intents[0].interactive is True
+    phase = next(c for c in tree.root.children if isinstance(c, nv.PhaseNode))
+    step = next(c for c in phase.children if isinstance(c, nv.StepNode))
+    assert not any(isinstance(c, nv.UserMessageNode) for c in step.children)
+
 
 def test_unseeded_opening_intent_still_creates_single_node() -> None:
     b = nv.NarrativeBuilder()
@@ -2363,12 +2384,14 @@ def test_unseeded_opening_intent_still_creates_single_node() -> None:
     b.add(_ev("s1", "step_started", step="spec", kind="agent", phase="design",
               model="m", provider="anthropic"))
     tree = b.tree
-    phase = next(c for c in tree.root.children if isinstance(c, nv.PhaseNode))
-    step = next(c for c in phase.children if isinstance(c, nv.StepNode))
-    intents = [c for c in step.children if isinstance(c, nv.UserMessageNode)]
+    intents = [c for c in tree.root.children if isinstance(c, nv.UserMessageNode)]
+    # One node at root — never re-homed under the step, even unseeded.
     assert len(intents) == 1
     assert intents[0].text == "add a --json flag"
     assert intents[0].interactive is True
+    phase = next(c for c in tree.root.children if isinstance(c, nv.PhaseNode))
+    step = next(c for c in phase.children if isinstance(c, nv.StepNode))
+    assert not any(isinstance(c, nv.UserMessageNode) for c in step.children)
 
 
 def test_seeded_pending_reply_reconciles_into_single_node() -> None:
@@ -2846,17 +2869,3 @@ def test_test_lane_acquired_emits_no_visible_line() -> None:
     fbs = [n for n in _walk(b.tree.root)
            if isinstance(n, nv.FallbackLine) and n.event_type == "test_lane_acquired"]
     assert fbs == []
-
-
-def test_seed_opening_intent_removed_and_event_creates_node() -> None:
-    assert not hasattr(nv.NarrativeBuilder, "seed_opening_intent")
-
-    b = nv.NarrativeBuilder()
-    b.add(ev("oi", "opening_intent", text="ship the thing"))
-
-    roots = b._root.children
-    assert len(roots) == 1
-    node = roots[0]
-    assert isinstance(node, nv.UserMessageNode)
-    assert node.text == "ship the thing"
-    assert node.interactive is True

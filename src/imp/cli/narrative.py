@@ -514,7 +514,6 @@ class NarrativeBuilder:
         self._opening_intent_node: UserMessageNode | None = None
         # Optimistic reply echo: reconciled by the next user_message.
         self._pending_reply_node: UserMessageNode | None = None
-        self._first_step: StepNode | None = None
         # phrase rotation: work seen this segment, consumed at each prose/user-message boundary.
         self._segment_had_work = False
         # Deferred rename: rendered after its narration, not at the change_renamed position.
@@ -680,6 +679,15 @@ class NarrativeBuilder:
         if self._current_phase is not None:
             return Activity(verb="working")
         return None
+
+    def seed_opening_intent(self, text: str) -> None:
+        """Optimistic echo of the opening message: seed the committed opening-intent
+        node at root so frame one shows it. Used by the non-TUI
+        LiveDriver.seed_opening_intent; _h_opening_intent reconciles the
+        authoritative event into it in place."""
+        node = UserMessageNode(text=text, interactive=True)
+        self._opening_intent_node = node
+        self._root.children.append(node)
 
     def seed_pending_reply(self, text: str) -> None:
         """Optimistic echo for a your-turn reply (terminal via
@@ -1189,8 +1197,6 @@ def _h_step_started(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, 
                 existing.position_label = bool(p.get("position_label", False))
                 existing.rotated_phrase = (
                     _draw_status_phrase() if existing.rotate_phrase else None)
-                if existing is self._first_step:
-                    _inject_opening_intent(self, existing)
             self._step_stack = [existing]
             return
     _ensure_phase(self, phase, p.get("phase_label"),
@@ -1214,9 +1220,6 @@ def _h_step_started(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, 
     self._step_stack.append(node)
     if node.rotate_phrase:
         node.rotated_phrase = _draw_status_phrase()
-    if self._first_step is None:
-        self._first_step = node
-        _inject_opening_intent(self, node)
 
 
 def _h_step_completed(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
@@ -1586,15 +1589,12 @@ def _h_agent_output(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, 
         children[narration_idx].held = False
 
 
-def _inject_opening_intent(self: NarrativeBuilder, step: StepNode) -> None:
-    if self._opening_intent_node is None:
-        return
-    self._root.children = [c for c in self._root.children if c is not self._opening_intent_node]
-    step.children.insert(0, self._opening_intent_node)
-
-
 def _h_opening_intent(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
     text = p.get("text", "")
+    if self._opening_intent_node is not None:
+        # Seeded optimistically: adopt the authoritative text in place; never append a duplicate.
+        self._opening_intent_node.text = text
+        return
     node = UserMessageNode(text=text, interactive=True)
     self._opening_intent_node = node
     self._append(node)
