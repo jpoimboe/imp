@@ -407,24 +407,34 @@ async def _resolve_wait_reply(
     *,
     elog: Any,
     agent_id: str,
+    pending_reply: str | None = None,
 ) -> tuple[str, str]:
     """Satisfy a bare-turn-end / AWAITING_USER yield on resume, returning
-    (reply, source) where source is 'interject' | 'nudge' | 'solicited'.
+    (reply, source) where source is
+    'interject' | 'pending_reply' | 'nudge' | 'solicited'.
     Precedence:
     1. pending interject / --message present → drain+join and return it (a human
        spoke; wins) as ('interject').
-    2. else if resume_should_continue → return the continuation nudge as ('nudge')
+    2. else if pending_reply is not None → return it as ('pending_reply'): an
+       already-solicited human reply recovered from events.jsonl on a codex
+       retry, which must supersede the continuation nudge. Only codex passes
+       this; the message-list providers surface their pending tail via
+       messages[-1] and leave it None.
+    3. else if resume_should_continue → return the continuation nudge as ('nudge')
        so a headless resume continues the step instead of soliciting.
-    3. else → emit the sole awaiting_user_input gate and solicit empty via
+    4. else → emit the sole awaiting_user_input gate and solicit empty via
        user_input_fn (a genuine yield → park), returning ('solicited').
 
     The gate emit lives HERE (not in the provider resume branches) so it fires in
-    exactly one place and ONLY when we actually solicit — a retry-continue or a
-    queued interject satisfies the wait internally and emits no phantom prompt."""
+    exactly one place and ONLY when we actually solicit — a retry-continue, a
+    recovered pending reply, or a queued interject satisfies the wait internally
+    and emits no phantom prompt."""
     import inspect
     joined = _join_pending_interjects(coordinator)
     if joined is not None:
         return joined, "interject"
+    if pending_reply is not None:
+        return pending_reply, "pending_reply"
     if resume_should_continue:
         return _CONTINUATION_NUDGE, "nudge"
     elog.append(agent_id=agent_id, type="awaiting_user_input",
