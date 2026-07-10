@@ -85,3 +85,28 @@ def test_create_change_from_subagent_raises(tmp_path: Path) -> None:
     tool = get_registry()["create_change"]
     with pytest.raises(RuntimeError):
         tool.invoke(_ctx(ch, None), {"title": "T", "description": "b"})  # subagent: state=None
+
+
+def test_create_change_avoids_live_cvcv_stem(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # End-to-end mint guard: the tool must pass the live-stem avoid-set to
+    # new_change_id, so a minted backlog id never reuses a live CVCV stem. A
+    # site reverting to a bare new_change_id() would fail this.
+    from imp.engine import change_id
+
+    ch, state = _make(tmp_path)
+    home = ch.control_root / ".imp" / "changes" / "kobe10"
+    home.mkdir(parents=True)
+    (home / "change.json").write_text(json.dumps({"id": "kobe10", "title": "Seed"}))
+
+    # First stem draw collides with the seeded live stem; avoidance must
+    # resample past it to the next (distinct) stem.
+    stems = iter(["kobe", "mira", "mira"])
+    monkeypatch.setattr(change_id, "_draw_clean_stem", lambda: next(stems))
+
+    get_registry()["create_change"].invoke(
+        _ctx(ch, state), {"title": "T", "description": "b"})
+
+    new_id = next(p.name for p in (ch.control_root / ".imp" / "changes").iterdir()
+                  if p.name not in {ch.id, "kobe10"})
+    assert new_id[:4] == "mira"
