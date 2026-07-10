@@ -243,8 +243,9 @@ async def test_title_written_before_opening_prompt(stub_new, monkeypatch) -> Non
     rc = await m._async_cmd_new(_new_args(), leave_mode="new")
 
     assert rc == 0
-    # The working escape (unnamed draft → "๏ imp · <id>") is already on stdout.
-    assert "\x1b]2;๏ imp · z9y8x7\x07" in at_prompt["value"]
+    # The idle escape (unnamed draft → "ѱ imp · <id>") is already on stdout:
+    # the opening prompt is blocked on the user, so it shows the idle glyph.
+    assert "\x1b]2;ѱ imp · z9y8x7\x07" in at_prompt["value"]
     # The same instance is threaded into run_session_client.
     assert captured["title"]._change_id == "z9y8x7"
 
@@ -256,12 +257,14 @@ async def test_cancel_at_opening_prompt_resets_title(stub_new, monkeypatch, exc)
     reset: list[str] = []
 
     class _FakeTitle:
-        def __init__(self, stream: object, cid: str, name: str) -> None:
+        def __init__(
+            self, stream: object, cid: str, name: str, initial: str = "busy",
+        ) -> None:
             self._change_id = cid
             self._name = name
 
-        def working(self) -> None: ...
-        def waiting(self) -> None: ...
+        def busy(self) -> None: ...
+        def idle(self) -> None: ...
 
         def reset(self) -> None:
             reset.append("reset")

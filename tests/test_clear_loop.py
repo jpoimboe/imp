@@ -439,8 +439,9 @@ async def test_run_cleared_session_writes_title_before_prompt(
     rc = await m._run_cleared_session(tmp_path, "main", leave_state={})
 
     assert rc == 0
-    # The working escape for the freshly minted (unnamed) draft is already written.
-    assert "\x1b]2;๏ imp · " in at_prompt["value"]
+    # The idle escape for the freshly minted (unnamed) draft is already written:
+    # this pre-attach opening prompt is blocked on the user, so it shows the idle glyph.
+    assert "\x1b]2;ѱ imp · " in at_prompt["value"]
     title = captured["title"]
     assert title._change_id == captured["change"].id   # one instance threaded through
 
@@ -457,12 +458,14 @@ async def test_run_cleared_session_cancel_resets_title(
     reset: list[str] = []
 
     class _FakeTitle:
-        def __init__(self, stream: object, cid: str, name: str) -> None:
+        def __init__(
+            self, stream: object, cid: str, name: str, initial: str = "busy",
+        ) -> None:
             self._change_id = cid
             self._name = name
 
-        def working(self) -> None: ...
-        def waiting(self) -> None: ...
+        def busy(self) -> None: ...
+        def idle(self) -> None: ...
 
         def reset(self) -> None:
             reset.append("reset")

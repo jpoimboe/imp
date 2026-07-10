@@ -729,7 +729,8 @@ async def _run_cleared_session(
     try:
         print(_run_header_line(change.id, change.title, leave_mode, color=color))
         _print_splash_banner(interactive=True)
-        term_title = TerminalTitle(sys.stdout, change.id, change.title)
+        term_title = TerminalTitle(
+            sys.stdout, change.id, change.title, initial="idle")
         prompt = Prompt(skills_dir=change.workflow_dir / "skills",
                         editing_mode=_editing_mode(control), color=color)
         try:
@@ -967,12 +968,17 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
         return 2
 
     # Build the title before the opening prompt so the escape is written at startup,
-    # not after the user answers.
-    term_title = TerminalTitle(sys.stdout, change.id, change.title)
+    # not after the user answers. The opening prompt means the machine is idle
+    # (blocked on the user) with no daemon event yet to correct the glyph.
+    show_opening_prompt = _should_prompt_opening(
+        seed_text=seed.seed_text, interactive=interactive)
+    term_title = TerminalTitle(
+        sys.stdout, change.id, change.title,
+        initial="idle" if show_opening_prompt else "busy")
 
     # Print the run header before the prompt so erase/reprint causes no layout jump.
     header_printed = False
-    if _should_prompt_opening(seed_text=seed.seed_text, interactive=interactive):
+    if show_opening_prompt:
         try:
             async with prompt_sigint_guard():
                 reply = await _read_opening_message(
