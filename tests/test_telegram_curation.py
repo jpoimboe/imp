@@ -260,3 +260,26 @@ def test_retry_exhaustion_pause_now_buzzes(reason: str) -> None:
 )
 def test_retry_exhaustion_pause_has_plain_english_body(reason: str, expected: str) -> None:
     assert imp_telegram.event_body("workflow_paused", {"reason": reason}) == expected
+
+
+def test_interrupt_awaiting_user_input_is_silent() -> None:
+    assert imp_telegram.curate("awaiting_user_input", {"interrupt": True}) == "silent"
+
+
+def test_interrupt_awaiting_user_input_is_silent_with_prompt() -> None:
+    # The flag, not the prompt string, drives the tier.
+    payload = {"prompt": "interrupted — type to redirect", "interrupt": True}
+    assert imp_telegram.curate("awaiting_user_input", payload) == "silent"
+
+
+def test_genuine_awaiting_user_input_buzzes_when_flag_false() -> None:
+    assert imp_telegram.curate("awaiting_user_input", {"interrupt": False}) == "buzz"
+
+
+def test_genuine_awaiting_user_input_buzzes_when_flag_absent() -> None:
+    assert imp_telegram.curate("awaiting_user_input", {}) == "buzz"
+    assert imp_telegram.curate("awaiting_user_input", {"prompt": "which db?"}) == "buzz"
+
+
+def test_awaiting_user_input_is_not_a_static_buzz_member() -> None:
+    assert "awaiting_user_input" not in imp_telegram._BUZZ
