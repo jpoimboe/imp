@@ -20,11 +20,6 @@ build/
 *.swo
 *~
 
-# superpowers brainstorm mockups (throwaway)
-.superpowers/
-
-/_bmad/
-
 # Per-change spec/plan/review now live on the journal lineage, not the code branch
 imp/specs/
 imp/plans/

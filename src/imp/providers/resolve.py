@@ -43,8 +43,7 @@ class ProviderDefaults:
 
 _PROVIDER_DEFAULTS: dict[str, ProviderDefaults] = {}
 
-# Codex governance warning surfaced at selection time. See design
-# docs/superpowers/specs/2026-06-04-codex-provider-design.md ("Containment of
+# Codex governance warning surfaced at selection time ("containment of
 # already-written bytes — scoped to in-worktree writes"). Added only when the
 # resolved provider is `codex`; absent for every other provider so the wire
 # payload stays narrow and unrelated render tests don't drift.
