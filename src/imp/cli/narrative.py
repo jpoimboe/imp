@@ -1592,7 +1592,8 @@ def _h_agent_output(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, 
 def _h_opening_intent(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
     text = p.get("text", "")
     if self._opening_intent_node is not None:
-        # Seeded optimistically: adopt the authoritative text in place; never append a duplicate.
+        # Already seeded optimistically (non-TUI live path): adopt the authoritative
+        # text in place; never append a duplicate.
         self._opening_intent_node.text = text
         return
     node = UserMessageNode(text=text, interactive=True)
