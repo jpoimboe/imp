@@ -345,3 +345,84 @@ async def test_anthropic_pending_human_tail_suppresses_nudge(
         seed=_seed_text_user_tail_transcript)
     assert _CONTINUATION_NUDGE not in texts, texts
     assert "ignore" in texts, texts
+
+
+async def _run_openai(
+    tmp_path: Path, *, resume_should_continue: bool,
+    seed: Any = _seed_send_to_llm_transcript,
+) -> tuple[list[str], Any]:
+    from imp.agents.runner import AgentInvocation, ChangeContext, Message, TextBlock
+    from imp.agents.tools import get_registry  # noqa: F401 — ensures tools registered
+    from imp.engine.state import InMemoryEventLog
+    from imp.providers.openai import OpenAIAgentRunner
+    from tests.openai_fakes import (
+        FakeResponsesClient,
+        resp_function_call,
+        resp_message,
+        resp_response,
+    )
+
+    inv_dir = tmp_path / "step"
+    inv_dir.mkdir(parents=True, exist_ok=True)
+    seed(inv_dir)
+
+    fake = FakeResponsesClient([
+        resp_response(
+            resp_message("done"),
+            resp_function_call("c1", "complete_step", '{"status": "Success"}'),
+        ),
+    ])
+    log = InMemoryEventLog()
+    runner = OpenAIAgentRunner(
+        model_name="gpt-4o-mini", client_factory=lambda: fake,
+    )
+    inv = AgentInvocation(
+        agent_def=_agent_def(),
+        provider_name="openai",
+        model_name="gpt-4o-mini",
+        system_prompt="be terse",
+        initial_messages=(Message(role="user", content=(TextBlock(text="go"),)),),
+        change_context=ChangeContext(
+            title="Test", project_root=tmp_path,
+            workflow_dir=tmp_path / ".imp" / "change" / "workflow",
+        ),
+        transcript_dir=inv_dir,
+        events_path=tmp_path / "events.jsonl",
+        agent_id="step:p/s",
+        event_log=log,
+        coordinator=_Coord(),
+        resume_should_continue=resume_should_continue,
+    )
+
+    events = [e async for e in runner.run(inv)]
+    assert events[-1]["type"] == "agent_output"
+
+    texts: list[str] = []
+    for call in fake.responses.calls:
+        for item in call.get("input", []):
+            if not isinstance(item, dict) or item.get("type") != "message":
+                continue
+            for block in item.get("content", []):
+                if isinstance(block, dict) and block.get("type") == "input_text":
+                    texts.append(block.get("text", ""))
+    return texts, log
+
+
+@pytest.mark.anyio
+async def test_openai_interrupt_resume_appends_continuation_nudge(
+    tmp_path: Path,
+) -> None:
+    texts, _log = await _run_openai(tmp_path, resume_should_continue=True)
+    assert _CONTINUATION_NUDGE in texts, texts
+
+
+@pytest.mark.anyio
+async def test_openai_pending_human_tail_suppresses_nudge(
+    tmp_path: Path,
+) -> None:
+    texts, log = await _run_openai(
+        tmp_path, resume_should_continue=True,
+        seed=_seed_text_user_tail_transcript)
+    assert not any(e["type"] == "engine_continuation" for e in log.read())
+    assert _CONTINUATION_NUDGE not in texts, texts
+    assert "ignore" in texts, texts

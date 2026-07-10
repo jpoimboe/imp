@@ -27,7 +27,7 @@ from typing import Any, cast
 
 import anyio
 
-from imp.agents.classify import ResumeState, classify_resume
+from imp.agents.classify import ResumeState, _contains_tool_result, classify_resume
 from imp.agents.dispatch import TurnState, dispatch_turn_tool_uses
 from imp.agents.loop_guard import LoopGuard, ToolOutcome, TurnRecord, _result_preview
 from imp.agents.runner import (
@@ -615,7 +615,12 @@ class OpenAIAgentRunner:
                 # resume continues the step instead of bare-turn-ending on a
                 # clarifying question. A drained human interject already drives
                 # continuation, so it wins (parity with AWAITING_USER).
-                if invocation.resume_should_continue and drained == 0:
+                pending_human_tail = (
+                    messages[-1].role == "user"
+                    and not _contains_tool_result(messages[-1])
+                )
+                if (invocation.resume_should_continue and drained == 0
+                        and not pending_human_tail):
                     deliver_engine_continuation(
                         messages, transcript, elog, aid,
                         _CONTINUATION_NUDGE)
