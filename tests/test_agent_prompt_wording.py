@@ -42,20 +42,6 @@ def test_no_agent_or_partial_names_the_old_spec_writer() -> None:
                 f"{p.name} still names spec-writer"
 
 
-def test_changed_files_carry_no_superpowers_provenance() -> None:
-    import pathlib
-    base = pathlib.Path("src/imp/assets/workflows/imp")
-    touched = [
-        base / "agents" / "threshold.md",
-        base / "agents" / "spec-finalizer.md",
-        base / "partials" / "spec-design-principles.md",
-        base / "partials" / "brainstorm-dialogue.md",
-    ]
-    for p in touched:
-        assert "superpowers" not in p.read_text().lower(), \
-            f"{p.name} carries a superpowers provenance line"
-
-
 def test_cli_new_help_does_not_name_the_old_spec_writer() -> None:
     import pathlib
     text = pathlib.Path("src/imp/cli/main.py").read_text()

@@ -1,4 +1,4 @@
-"""check-artifact.sh was removed in the superpowers workflow port.
+"""check-artifact.sh was removed during the imp workflow port.
 
 Artifact validation is now done by spec-commit-verify.sh and
 plan-commit-verify.sh (see test_commit_verify_scripts.py for their tests).

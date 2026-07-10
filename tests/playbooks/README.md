@@ -30,7 +30,7 @@ Playbooks shine for two kinds of test that are hard to express as deterministic 
 ## Conventions
 
 - **A playbook is durable and re-runnable**, named `<name>-playbook.md`, with no date prefix
-  (unlike the dated specs/plans/runbooks under `docs/superpowers/`). Most playbooks pair 1:1
+  (unlike dated specs/plans/runbooks). Most playbooks pair 1:1
   with a feature spec in `imp/specs/` and are named after it. **But a playbook may instead be a
   *surface* or *cross-cutting* test** — `imp-ux-playbook.md` is a CLI-surface pass
   and not tied to a single feature. Name such a playbook after the surface or concern it covers,

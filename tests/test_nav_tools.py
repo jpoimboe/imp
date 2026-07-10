@@ -532,9 +532,9 @@ def _init_git_repo(root: Path, gitignore: str) -> None:
 
 def test_grep_skips_ignored_dirs_hidden_and_nonhidden(tmp_path: Path) -> None:
     _init_git_repo(tmp_path,
-                   ".mypy_cache/\nbuild/\n__pycache__/\n_bmad-output/\n")
+                   ".mypy_cache/\nbuild/\n__pycache__/\nnode_modules/\n")
     (tmp_path / "real.py").write_text("NEEDLE here\n")
-    for d in (".mypy_cache", "build", "__pycache__", "_bmad-output"):
+    for d in (".mypy_cache", "build", "__pycache__", "node_modules"):
         (tmp_path / d).mkdir()
         (tmp_path / d / "junk.py").write_text("NEEDLE junk\n")
 
@@ -543,7 +543,7 @@ def test_grep_skips_ignored_dirs_hidden_and_nonhidden(tmp_path: Path) -> None:
     assert ".mypy_cache" not in out
     assert "build" not in out
     assert "__pycache__" not in out
-    assert "_bmad-output" not in out
+    assert "node_modules" not in out
 
 
 def test_grep_searches_tracked_hidden_dir(tmp_path: Path) -> None:

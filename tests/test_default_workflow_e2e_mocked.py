@@ -245,7 +245,7 @@ async def test_full_default_workflow_completes_with_canned_anthropic(
     change = _seed_default_workflow(tmp_path)
 
     # Default response: complete_step with ALL fields needed by any agent in the
-    # superpowers workflow. The fake's default_response is consulted whenever the
+    # imp workflow. The fake's default_response is consulted whenever the
     # canned list is empty.
     #
     # LOAD-BEARING: this strategy relies on `validate_agent_output` (in

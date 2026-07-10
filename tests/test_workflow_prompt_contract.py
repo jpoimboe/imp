@@ -614,8 +614,6 @@ def test_human_decision_partial_holds_canonical_bar() -> None:
     assert "Reversibility lowers the bar for bothering" in text
     assert "never the bar for code quality." in text
     assert "not the smallest diff" in text
-    # Partials carry no superpowers attribution line.
-    assert "superpowers" not in text.lower()
 
 
 def test_deferred_sweep_sources_human_decision_bar() -> None:

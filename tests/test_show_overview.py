@@ -124,7 +124,7 @@ def test_no_pager_flag_propagates_to_pager(tmp_path: Path, monkeypatch) -> None:
 
 def test_no_live_imp_list_references() -> None:
     """No source under src/imp may still reference the removed `imp list` verb
-    (docs/superpowers historical specs and tests/playbooks are out of scope)."""
+    (tests/playbooks are out of scope)."""
     root = Path(__file__).resolve().parents[1] / "src" / "imp"
     offenders = [
         str(p.relative_to(root))

@@ -54,5 +54,3 @@ Two ready-made entry points:
   `resize` (`(rows, cols)` — resizes the live terminal, delivering a real `SIGWINCH`),
   `wait`, `view` (`full=True` for the whole strip), `snapshot` (renders the live screen to a PNG and
   returns its path), `stop`. Adding/removing a tool needs a server restart.
-
-Design + rationale: `_bmad-output/brainstorming/brainstorming-session-2026-06-05-1351.md`.
