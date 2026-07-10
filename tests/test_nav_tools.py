@@ -476,6 +476,15 @@ def test_grep_description_notes_sandbox_and_walk_cap() -> None:
     assert "external" in desc and "cap" in desc
 
 
+def test_grep_description_notes_multiline() -> None:
+    desc = get_registry()["grep"].description
+    assert "multiline" in desc
+    assert "span line boundaries" in desc
+    # retained guarantees still hold
+    assert "bounded by the sandbox like bash" in desc
+    assert "head_limit caps result rows" in desc
+
+
 def test_glob_surfaces_artifact_subtree_but_not_rest_of_imp(tmp_path: Path) -> None:
     plans = tmp_path / ".imp" / "changes" / "c1" / "artifacts" / "plans"
     plans.mkdir(parents=True)
