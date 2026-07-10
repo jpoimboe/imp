@@ -255,3 +255,34 @@ def test_abandon_unknown_id_reaps_branch_and_exits_zero(
     rc = _abandon(tmp_path, "ghost")
     assert rc == 0
     assert "already gone" in capsys.readouterr().out
+
+
+def test_tear_down_change_on_draft_skips_worktree_teardown(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from imp.engine import merge_queue, worktree
+    _seed_control(tmp_path)
+    ch = Change.create_draft(
+        tmp_path, title="An idea", change_id="idea1", base_branch="main",
+        origin="idea", seed_opening="An idea\n\ndo a thing")
+
+    calls: list[str] = []
+    monkeypatch.setattr(merge_queue, "pop_and_wake",
+                        lambda *a, **k: calls.append("pop_and_wake"))
+    monkeypatch.setattr(worktree, "remove_worktree",
+                        lambda *a, **k: calls.append("remove_worktree"))
+    monkeypatch.setattr(worktree, "delete_branch",
+                        lambda *a, **k: calls.append("delete_branch"))
+
+    tear_down_change(ch)
+
+    assert calls == []  # no built-out teardown on a draft
+    assert not (tmp_path / ".imp" / "changes" / "idea1").exists()   # live home dropped
+    from imp.engine.archive import read as archive_read
+    assert archive_read.status_of(tmp_path, "idea1") == "abandoned"  # tombstone marked abandoned
+    assert archive_read.is_archived(tmp_path, "idea1")               # findable in the archive
+    events = archive_read.read_events(tmp_path, "idea1")
+    assert events is not None and b"change_abandoned" in events      # abandon event recorded
+    from imp.engine.archive import record, records_root
+    rec = record.read_record(records_root(tmp_path), "idea1")
+    assert rec is not None and rec["resumable"] is False             # non-resumable tombstone
