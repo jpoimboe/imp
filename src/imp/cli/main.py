@@ -2325,6 +2325,30 @@ def _abandon_rows(control: Path) -> list[_Row]:
     return _sort_rows_newest_first(_status_rows(control) + _backlog_rows(control))
 
 
+def _resumable_match_rows(control: Path, token: str) -> list[_Row]:
+    """Rows for resumable Changes whose id contains `token`.
+
+    Spans live-resumable rows (`_resumable_rows`) AND archived-but-resumable
+    records — an archived id whose archive record reads `resumable=True` (a
+    "left" conversation whose live home was deleted). A live row wins when an id
+    appears in both. Archived completed/abandoned (non-resumable) ids are never
+    matches, so a terminal id sharing a stem never joins the menu."""
+    from imp.engine.archive import record, records_root
+
+    rows = [r for r in _resumable_rows(control) if token in r[0]]
+    live = {r[0] for r in rows}
+    for cid in archive_read.archived_ids(control):
+        if token not in cid or cid in live:
+            continue
+        rec = record.read_record(records_root(control), cid)
+        if rec is None or not rec.get("resumable"):
+            continue
+        row = _row_for_id(control, cid)
+        if row is not None:
+            rows.append(row)
+    return _sort_rows_newest_first(rows)
+
+
 def _past_change_count(control: Path) -> int:
     return len(_completed_rows(control))
 
