@@ -286,6 +286,7 @@ async def run_change(
     headless: bool = False,
     autonomous: bool = False,
     wait_for_turn_fn: Callable[[Callable[[], bool]], Awaitable[None]] | None = None,
+    opening_model: str | None = None,
 ) -> RunResult:
     on_event = on_event or (lambda _e: None)
     if wait_for_turn_fn is None:
@@ -338,7 +339,8 @@ async def run_change(
         # Resolve tiers once per run and persist, so resume never re-snapshots the
         # environment (design "When it runs"). run_change re-executes on every
         # resume, so guard on the persisted map.
-        if state.resolved_tiers is None:
+        did_fresh_resolve = state.resolved_tiers is None
+        if did_fresh_resolve:
             resolved_tiers, resolved_steps, details = resolve_run(workflow, config)
             state.resolved_tiers = resolved_tiers
             state.resolved_steps = resolved_steps
@@ -361,6 +363,11 @@ async def run_change(
         # not the transient run parameter (which resume loops never re-pass).
         pending_seed = change.seed_opening  # one-shot: consumed at the entry step's fresh render
         opening_step = next((s.name for s in flat if s.kind == "agent"), None)
+        if (did_fresh_resolve and opening_model is not None
+                and opening_step is not None):
+            from imp.engine.model_override import apply_model_override
+            apply_model_override(
+                change, state, opening_model, step_name=opening_step)
 
         # A hold mark surviving to process entry with lane_retained unset means a prior
         # run crashed while holding; with lane_retained set it was a clean interrupt /

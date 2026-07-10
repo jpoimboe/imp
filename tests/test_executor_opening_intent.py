@@ -8,7 +8,9 @@ import pytest
 
 from imp.engine.executor import RunResult, run_change
 from imp.engine.state import JsonlEventLog, State
+from imp.providers.config import ProviderModel
 from tests.test_executor import (
+    _CapturingProvider,
     _make_change,
     _register_invocation_capturing,
     _register_prompt_capturing,
@@ -188,3 +190,27 @@ async def test_no_opening_intent_when_seed_opening_absent_or_empty(tmp_path: Pat
     await run_change(change2)
     types2 = [e["type"] for e in JsonlEventLog(change2.events_path).read()]
     assert "opening_intent" not in types2
+
+
+@pytest.mark.anyio
+async def test_opening_model_seeds_first_agent_step(tmp_path: Path) -> None:
+    # A provider:model seed swaps BOTH provider and model on the opening agent
+    # step's resolved_steps entry, folded in AFTER the fresh resolve block.
+    from imp.providers import resolve
+    change = _seed(tmp_path)                     # single agent step "w"
+    _register_prompt_capturing({"status": "Success"}, [])
+    # The seed swaps step "w" onto the anthropic provider; register a fake for it
+    # so the run can dispatch and complete after the fold-in persists.
+    resolve.register_provider(
+        "anthropic", env_check=lambda: True,
+        factory=lambda model: _CapturingProvider({"status": "Success"}, [], model=model))
+    try:
+        result = await run_change(
+            change, opening_model="anthropic:claude-fable-5")
+        assert result is RunResult.COMPLETED
+
+        state = State.load(change.state_dir)
+        assert state.resolved_steps["w"] == ProviderModel(
+            "anthropic", "claude-fable-5")
+    finally:
+        resolve.reset_providers_for_tests()
