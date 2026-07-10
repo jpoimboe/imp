@@ -120,6 +120,7 @@ from imp.providers.claude_code_session_store import (
     session_key,
     session_store_for,
 )
+from imp.providers.claude_token_refresh import refresh_canonical_token
 from imp.providers.resolve import spawn_subagent_via_registry
 from imp.providers.web_native import (
     CC_WEB_BUILTIN_TO_NORM,
@@ -306,6 +307,19 @@ def _read_token_expiry(config_dir: Path | None, now_ms: int) -> dict[str, object
                           else expires_at <= now_ms + buffer_ms),
         "checked_at": now_ms,
     }
+
+
+def _pre_spawn_token_refresh(elog: Any, aid: str) -> None:
+    """Best-effort refresh of the canonical OAuth access token just before a
+    spawn is built, journaling one audit event with the outcome. Never raises:
+    refresh_canonical_token maps every failure to an outcome. The payload carries
+    only the outcome string (and expiresAt when refreshed) — never token
+    material, which RefreshOutcome structurally cannot hold."""
+    outcome = refresh_canonical_token(int(time.time() * 1000))
+    payload: dict[str, Any] = {"outcome": outcome.outcome}
+    if outcome.expires_at is not None:
+        payload["expires_at"] = outcome.expires_at
+    elog.append(agent_id=aid, type="token_refresh", payload=payload)
 
 
 def _termination_from_result(
@@ -1569,6 +1583,8 @@ class ClaudeCodeAgentRunner:
         # native_resume is False only on the fresh path; it still routes config_dir
         # (elif native_resume) and the reconcile_store_tail block (if native_resume).
         native_resume = shape_native_eligible
+        # Best-effort: keep canonical OAuth token fresh before either disposition copies it.
+        _pre_spawn_token_refresh(elog, aid)
         config_dir: Path | None = None
         if is_fresh or fresh_stream:
             config_dir = materialize_fresh_config_dir()
