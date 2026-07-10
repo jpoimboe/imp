@@ -2018,6 +2018,22 @@ def test_compose_identity_toolbar_carries_slate_and_padding_under_dark_theme() -
     assert pal.display_width(bar) == 118           # padded to width-2, aligned with the footer
 
 
+def test_compose_identity_toolbar_title_is_unpainted_under_ansi_theme() -> None:
+    from imp.cli.live_driver import compose_identity_toolbar
+    try:
+        pal.set_theme("ansi")
+        bar = compose_identity_toolbar(change_id="z9gixx", title="t",
+                                       color=True, width=120)
+    finally:
+        pal.set_theme("ansi")
+    assert bar is not None
+    parts = bar.split(" · ")
+    # id · title; under ansi the slate bg is empty, so gray would be the only \x1b[90m.
+    assert "\x1b[33m" in parts[0]                # id still wordmark gold
+    assert "\x1b[90m" not in bar                 # title no longer gray-painted
+    assert "\x1b[" not in parts[1]               # title: unpainted default fg
+
+
 def test_compose_identity_toolbar_none_without_change_id() -> None:
     from imp.cli.live_driver import compose_identity_toolbar
     assert compose_identity_toolbar(change_id=None, title="t",
@@ -2534,7 +2550,7 @@ def test_compose_position_row_colors_match_the_scrollback_palette() -> None:
     parts = row.split(" · ")
     # Flat order: id · title · phase · plan · counter · (model bar).
     assert "\x1b[33m" in parts[0]                                  # id: wordmark gold
-    assert "\x1b[90m" in parts[1] and "\x1b[33m" not in parts[1]   # title: gray
+    assert "\x1b[" not in parts[1]                                 # title: unpainted default fg
     assert "\x1b[34m" in parts[2] and "\x1b[33m" not in parts[2]   # phase: step-blue
     assert "\x1b[34m" in parts[3]                                  # plan: step-blue
     assert "\x1b[34m" in parts[4]                                  # counter: step-blue
