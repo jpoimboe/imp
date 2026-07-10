@@ -558,7 +558,13 @@ async def run_change(
             # Navigation already set resume_pending correctly (Goto(resume=True)
             # kept the target; Continue/forward-Goto cleared it) — do NOT override.
             if coordinator.should_pause:
-                _evict_if_holding(change, state, log)
+                # This branch is only reached under an interrupt, so retain the
+                # held lane (resume on the navigated-to step); evict only when no
+                # lane is held.
+                if state.held_lane is not None:
+                    state.lane_retained = True
+                else:
+                    _evict_if_holding(change, state, log)
                 state.status = "paused"
                 state.save(change.state_dir)
                 _emit_paused_event(

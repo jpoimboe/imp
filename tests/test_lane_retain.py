@@ -217,3 +217,47 @@ async def test_transient_giveup_in_held_region_keeps_lane(
     assert st.lane_retained is True
     assert st.resume_pending == "held"                # agent step armed in place
     assert mq.is_head(tmp_path, "feat", "main")
+
+
+@pytest.mark.anyio
+async def test_post_navigation_interrupt_keeps_lane(
+    tmp_path: Path, provider_registry: Any,
+) -> None:
+    """AC3: a held-region agent step completes (Continue) as an interrupt is
+    observed. Navigation has already advanced the cursor; the post-navigation
+    branch must retain the lane and leave the cursor on the NAVIGATED-TO step."""
+    coord = InterruptCoordinator()
+
+    class _CleanRunner:
+        async def run(self, _inv: AgentInvocation) -> AsyncIterator[Event]:
+            # Complete cleanly (=> Continue). The interrupt is injected AFTER this
+            # step completes, via the on_event hook — never inside run().
+            yield {"type": "agent_output",
+                   "payload": {"outcome": "ok", "status": "Success"}}
+
+        async def interrupt(self) -> None:
+            pass
+
+    provider_registry("fake", env_check=lambda: True,
+                      factory=lambda _m: _provider(_CleanRunner))
+    _seed_wf(tmp_path, _AGENT_HELD_WF)
+    ch = Change.create(tmp_path, title="x", change_id="feat", base_branch="main")
+
+    def _on_event(e: dict) -> None:
+        # Flip should_pause synchronously the instant `held` completes — the
+        # interrupt-after-completion window that reaches the post-nav branch.
+        if (e.get("type") == "step_completed"
+                and (e.get("payload") or {}).get("step") == "held"):
+            coord._should_pause = True
+            coord.pause_reason = "ctrl-c"
+
+    result = await run_change(ch, on_event=_on_event, coordinator=coord)
+
+    assert result is RunResult.PAUSED
+    st = State.load(ch.state_dir)
+    assert "lane_evicted" not in _types(ch)
+    assert st.held_lane == "main"
+    assert st.held_acquire_step == "lane"
+    assert st.step == "after"                         # navigated-to step, not rewound
+    assert st.lane_retained is True
+    assert mq.is_head(tmp_path, "feat", "main")
