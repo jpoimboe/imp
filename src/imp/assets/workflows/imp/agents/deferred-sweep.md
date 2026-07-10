@@ -34,11 +34,12 @@ never silently dropped). Do not reformat or delete lines you cannot parse. The
 `[scope: …]` tag is preserved metadata, not a ceiling — it does not constrain what
 you may fix.
 
-Two further terminal markers can appear on already-checked lines, written by the
+Three further terminal markers can appear on already-checked lines, written by the
 `finalize` merge gate: `— seeded <change-id>` (handed to a follow-up backlog
-Change) and `— ignored-at-gate` (dropped by a human). Like `— dismissed`, they
-are **inert** to this sweep — they sit on `- [x]` lines, so the `- [ ] DEFERRED `
-parse already skips them. Leave them untouched.
+Change), `— ignored-at-gate` (dropped by a human), and `— covered-by <change-id>`
+(auto-covered because another active or backlog change already tracks the failing
+test). Like `— dismissed`, they are **inert** to this sweep — they sit on `- [x]`
+lines, so the `- [ ] DEFERRED ` parse already skips them. Leave them untouched.
 
 ## Pre-classified human-decision items — pass through untouched
 
@@ -53,10 +54,10 @@ human-decision item, not a followup to maybe fix; it must survive verbatim to th
 
 **Drain-only-untagged invariant.** This sweep drains **only entries with no disposition tag**
 — a `- [ ] DEFERRED ` line carrying NO trailing `— …` marker. Any line already carrying
-`— needs-decision:` (including a toleration) or a terminal tag (`— fixed` / `— dismissed` /
-`— seeded` / `— ignored-at-gate`) is already triaged; leave it untouched. This is the
-de-facto contract today; it is pinned here so no future pruning rule can silently sweep a
-toleration out mid-gate.
+`— needs-decision:` (including a toleration) or a terminal tag
+(`— fixed` / `— dismissed` / `— seeded` / `— ignored-at-gate` / `— covered-by`) is already
+triaged; leave it untouched. This is the de-facto contract today; it is pinned here so no
+future pruning rule can silently sweep a toleration out mid-gate.
 
 ## Per item — gate on risk, not scope
 

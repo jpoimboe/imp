@@ -102,3 +102,15 @@ def test_deferred_sweep_triage_is_single_source() -> None:
     assert "wait-for-head" in low
     # The Part-2 single-source placeholder ("wired in a later change") is gone.
     assert "wired in a later change" not in low
+
+
+def test_deferred_sweep_treats_covered_by_as_terminal() -> None:
+    body = SWEEP.read_text()
+    low = body.lower()
+    # The gate's third terminal marker joins seeded / ignored-at-gate.
+    assert "three further terminal markers" in low
+    assert "— covered-by <change-id>" in body
+    # It is listed in the drain-only-untagged invariant's terminal-tag set.
+    assert "`— ignored-at-gate` / `— covered-by`)" in body
+    # Like the sibling gate markers, it is inert to the sweep.
+    assert "inert" in low
