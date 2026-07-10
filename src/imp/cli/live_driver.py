@@ -274,7 +274,8 @@ class LiveDriver:
                  width: int | Callable[[], int], status: LiveStatus,
                  display_width: int | Callable[[], int] = 80,
                  suppress_replay: bool = False,
-                 preceded_by_blank: bool = False) -> None:
+                 preceded_by_blank: bool = False,
+                 startup_verb: str | None = None) -> None:
         self._builder = nv.NarrativeBuilder()
         self._stream = stream
         self._color = color
@@ -300,6 +301,7 @@ class LiveDriver:
         self._prompt_active = False        # defer _print_lines while a prompt owns the screen
         self._separator_emitted = False    # prepare_for_prompt printed the leading blank
         self._preceded_by_blank = preceded_by_blank
+        self._startup_verb = startup_verb
         self._emitted_any = False
         self._last_header_position: str | None = None
         self._deferred: list[tuple[list[str], bool, str]] = []
@@ -406,6 +408,20 @@ class LiveDriver:
             self._builder, color=self._color, width=w,
             now_iso=datetime.now(UTC).isoformat())
         return rows
+
+    def compose_startup(self, frame: int, elapsed: float) -> list[str] | None:
+        if self._startup_verb is None:
+            return None
+        return [compose_activity_line(
+            activity=nv.Activity(verb=self._startup_verb),
+            elapsed=elapsed, frame=frame, color=self._color)]
+
+    def install_startup_status(self) -> None:
+        if self._startup_verb is None:
+            return
+        if self._preceded_by_blank:
+            self._status.skip_leading_blank()
+        self._status.update(self.compose_startup)
 
     def compose_toolbar_static(self) -> str | None:
         # The flat position row under the interactive prompt (no spinner/elapsed).
@@ -698,11 +714,11 @@ class LiveDriver:
         # it. `_prev_prose` is left untouched so the next block still gets its one
         # separator blank (which lands on the row the status was using).
         if self._suppressing:
-            # During a suppressed replay the footer stays dark: the compose callback
-            # is left unset (LiveStatus._draw early-returns on compose is None), so the
-            # replayed prefix never walks the footer through the whole prior run's
-            # history. _maybe_lift clears this flag at the first live node — reached in
-            # _walk, before this call — so the first live event draws the footer.
+            # Return early without swapping the compose callback, so whatever is
+            # currently installed persists through the replayed prefix: nothing (footer
+            # dark, normal start) or compose_startup (startup spinner, when a resume
+            # driver called install_startup_status). compose_status replaces it only
+            # once _maybe_lift clears this flag at the first live node.
             return
         if self._builder.current_activity() is not None:
             self._status.update(self.compose_status)

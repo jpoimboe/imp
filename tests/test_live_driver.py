@@ -18,6 +18,11 @@ class _Pipe(io.StringIO):
         return False
 
 
+class _TTY(io.StringIO):
+    def isatty(self) -> bool:
+        return True
+
+
 def _driver():
     out = _Pipe()
     drv = LiveDriver(stream=out, color=False, width=80, status=LiveStatus(out))
@@ -2811,3 +2816,63 @@ def test_seed_opening_intent_reconciles_with_daemon_event_no_duplicate() -> None
     phase = next(c for c in tree.root.children if isinstance(c, nv.PhaseNode))
     step = next(c for c in phase.children if isinstance(c, nv.StepNode))
     assert not any(isinstance(c, nv.UserMessageNode) for c in step.children)
+
+
+def test_compose_startup_returns_none_without_verb() -> None:
+    drv, _out = _driver()                          # no startup_verb
+    assert drv.compose_startup(0, 0.0) is None
+
+
+def test_startup_verb_none_install_is_noop() -> None:
+    out = _TTY()
+    drv = LiveDriver(stream=out, color=False, width=80, status=LiveStatus(out))
+    drv.install_startup_status()
+    assert out.getvalue() == ""                    # imp new / chat path: nothing drawn
+
+
+def test_install_startup_status_inert_on_non_tty() -> None:
+    out = _Pipe()                                  # not a tty
+    status = LiveStatus(out)
+    drv = LiveDriver(stream=out, color=False, width=80, status=status,
+                     startup_verb="resuming")
+    drv.install_startup_status()
+    assert out.getvalue() == ""                    # LiveStatus._enabled is False
+
+
+def test_install_startup_status_draws_and_animates_resuming() -> None:
+    out = _TTY()
+    clock = {"t": 0.0}
+    status = LiveStatus(out, now=lambda: clock["t"])
+    status._width_fn = lambda: 80
+    drv = LiveDriver(stream=out, color=False, width=80, status=status,
+                     startup_verb="resuming")
+    drv.install_startup_status()
+    assert "resuming" in out.getvalue()
+    assert "0s" in out.getvalue()                  # elapsed starts at 0
+    out.truncate(0)
+    out.seek(0)
+    clock["t"] = 5.0
+    status._frame += 1
+    status._draw()                                 # one spinner tick
+    assert "resuming" in out.getvalue()            # still shown
+    assert "5s" in out.getvalue()                  # elapsed advanced
+
+
+def test_startup_line_persists_through_replay_then_replaced_at_first_live() -> None:
+    out = _TTY()
+    status = LiveStatus(out, now=lambda: 0.0)
+    status._width_fn = lambda: 80
+    drv = LiveDriver(stream=out, color=False, width=80, status=status,
+                     suppress_replay=True, startup_verb="resuming")
+    drv.install_startup_status()
+    events = _two_phase_events()
+    marked = [{**e, "_replay": True} for e in events[:3]] + events[3:]
+    for e in marked[:3]:                           # replayed prefix only
+        drv.on_event(e)
+    # Bound methods compare EQUAL (==) for the same instance+function, but each
+    # attribute access yields a fresh object, so `is` is always False — use `==`.
+    assert status._compose == drv.compose_startup   # startup line NOT swapped during replay
+    assert "resuming" in out.getvalue()
+    for e in marked[3:]:                            # first live event onward
+        drv.on_event(e)
+    assert status._compose == drv.compose_status    # replaced by the real status footer
