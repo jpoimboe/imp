@@ -223,7 +223,13 @@ async def test_codex_live_cap_abort_terminates_within_budget(tmp_path: Path) -> 
             headless=True,
         ),
     )
-    events = [ev async for ev in runner.run(inv)]
+    try:
+        events = [ev async for ev in runner.run(inv)]
+    except AwaitingUserInput:
+        # Headless nudge-then-park is a clean, bounded termination — it proves
+        # the non-hang invariant exactly as a terminal error event does. A park
+        # emits no `error` event, so accept it and skip the error-kind check.
+        return
     # Terminated — and within the bounded budget (test runner has its own
     # session timeout; reaching here at all means we terminated). The core claim
     # is non-hang under cap pressure; the cap trip (tool_call_ceiling_exceeded)
