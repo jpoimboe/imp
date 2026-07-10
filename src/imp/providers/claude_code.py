@@ -44,7 +44,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
-from imp.agents.classify import ResumeState, classify_resume
+from imp.agents.classify import ResumeState, _contains_tool_result, classify_resume
 from imp.agents.loop_guard import (
     LoopGuard,
     ToolOutcome,
@@ -408,10 +408,6 @@ def _tail_has_complete_step(messages: list[Message]) -> bool:
         isinstance(b, ToolUseBlock) and _canon_tool_name(b.name) == "complete_step"
         for b in last.content
     )
-
-
-def _contains_tool_result(msg: Message) -> bool:
-    return any(isinstance(b, ToolResultBlock) for b in msg.content)
 
 
 def _drain_interject_message(coordinator: Any, elog: Any,
@@ -1721,8 +1717,13 @@ class ClaudeCodeAgentRunner:
             # a no-message resume continues the step instead of bare-turn-ending on
             # a clarifying question. A drained human interject already drives
             # continuation, so it wins (parity with AWAITING_USER).
+            pending_human_tail = (
+                messages[-1].role == "user"
+                and not _contains_tool_result(messages[-1])
+            )
             if (resume_state is not ResumeState.AWAITING_USER
-                    and invocation.resume_should_continue and drained == 0):
+                    and invocation.resume_should_continue and drained == 0
+                    and not pending_human_tail):
                 deliver_engine_continuation(
                     messages, transcript, elog, aid,
                     _CONTINUATION_NUDGE)
