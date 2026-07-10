@@ -321,6 +321,7 @@ def test_show_step_line_prints_human_labels_not_raw_slugs(
     st = State.load(ch.state_dir)
     st.step = "write_spec"
     st.step_label = "writing spec"  # label differs from the raw slug
+    st.phase_label = "spec phase"   # card sources the phase from persisted state
     st.save(ch.state_dir)
     with ch.events_path.open("a", encoding="utf-8") as fh:
         fh.write(
@@ -435,17 +436,6 @@ def test_show_status_stays_bare_word_not_labels(
     assert out == "new"
     assert "·" not in out
     assert "writing spec" not in out
-
-
-def test_latest_phase_label_returns_last_step_started_label() -> None:
-    from imp.cli.main import _latest_phase_label
-
-    events = [
-        {"type": "step_started", "payload": {"phase_label": "spec phase"}},
-        {"type": "user_message", "payload": {}},
-        {"type": "step_started", "payload": {"phase_label": "planning phase · plan 2/6"}},
-    ]
-    assert _latest_phase_label(events) == "planning phase · plan 2/6"
 
 
 def test_show_spec_and_plan_from_wip_ref_when_home_absent(

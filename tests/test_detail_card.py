@@ -89,7 +89,7 @@ def _live_change(control: Path, change_id: str) -> None:
         + "\n"
     )
     State(id=change_id, status="paused", step="spec-writer", step_label="writing spec",
-          step_attempt=0).save(cdir / "state")
+          phase_label="spec phase", step_attempt=0).save(cdir / "state")
 
 
 def _live_change_task_prompt(control: Path, change_id: str) -> None:
@@ -160,6 +160,31 @@ def test_detail_card_live_source(tmp_path: Path) -> None:
     assert "main" in card  # base_branch
     assert "2026-06-16-dep001" in card  # depends_on
     assert "build a widget please" in card  # originating prompt = first user_message
+
+
+def test_detail_card_sources_phase_from_persisted_state(tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+    cdir = tmp_path / ".imp" / "changes" / "2026-06-20-src01"
+    (cdir / "state").mkdir(parents=True)
+    (cdir / "change.json").write_text(json.dumps({
+        "id": "2026-06-20-src01", "title": "Widget", "base_branch": "main",
+        "created_at": "2026-06-20T11:00:00+00:00", "layout_version": LAYOUT_VERSION}))
+    # The event log's phase_label ("EVENT PHASE") must NOT be the card's source.
+    (cdir / "events.jsonl").write_text(json.dumps({
+        "type": "step_started", "agent_id": None,
+        "timestamp": "2026-06-20T11:00:01+00:00",
+        "payload": {"step": "spec-writer", "phase": "spec",
+                    "phase_label": "EVENT PHASE"}}) + "\n")
+    State(id="2026-06-20-src01", status="paused", step="spec-writer",
+          step_label="writing spec", phase_label="state phase",
+          step_attempt=0).save(cdir / "state")
+    card = "\n".join(main._detail_card(tmp_path, "2026-06-20-src01", now=_NOW))
+    assert "state phase · writing spec" in card    # sourced from persisted field
+    assert "EVENT PHASE" not in card               # not the event-log scan
+
+
+def test_latest_phase_label_helper_removed() -> None:
+    assert not hasattr(main, "_latest_phase_label")
 
 
 def test_detail_card_created_trims_microseconds_and_offset(tmp_path: Path) -> None:

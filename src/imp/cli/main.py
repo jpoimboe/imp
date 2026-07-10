@@ -1419,13 +1419,6 @@ def _resolve_intent(events: list[dict[str, Any]]) -> str | None:
     return _first_genuine_human_turn(events)
 
 
-def _latest_phase_label(events: list[dict[str, Any]]) -> str | None:
-    for ev in reversed(events):
-        if ev.get("type") == "step_started":
-            return (ev.get("payload") or {}).get("phase_label")
-    return None
-
-
 def _change_meta(control: Path, change_id: str) -> dict[str, Any] | None:
     cdir = _change_home(control, change_id)
     raw: bytes | None
@@ -1517,7 +1510,7 @@ def _change_card(control: Path, change_id: str, *, now: datetime) -> list[str]:
     row = _row_for_id(control, change_id)
     if row is None:
         return []
-    _id, status, step, last, title, created, step_label = row
+    _id, status, step, last, title, created, step_label, phase_label = row
     events = _load_events_for_id(control, change_id) or []
     lines = [
         f"id:            {_id}",
@@ -1525,7 +1518,6 @@ def _change_card(control: Path, change_id: str, *, now: datetime) -> list[str]:
         f"status:        {status}",
     ]
     if status in _INFLIGHT and step not in ("", "-"):
-        phase_label = _latest_phase_label(events)
         step_text = step_label or step
         position = f"{phase_label} · {step_text}" if phase_label else step_text
         lines.append(pal.clip_display(f"step:          {position}", _display_width()))
@@ -2164,11 +2156,11 @@ def resolve_display_status(
     return status
 
 
-# Row = (id, status, step, last_activity, title, created_at, step_label).
-# created_at is the trailing sort key only; step_label feeds the merged STATUS
-# cell's ` (label)` suffix (see change_row.format_change_line). The step slot
+# Row = (id, status, step, last_activity, title, created_at, step_label, phase_label).
+# created_at is the trailing sort key only; step_label + phase_label feed the
+# merged STATUS cell's ` (phase · step)` suffix (see change_row). The step slot
 # stays the RAW step name so imp list keeps printing it.
-_Row = tuple[str, str, str, str, str, str, str | None]
+_Row = tuple[str, str, str, str, str, str, str | None, str | None]
 
 
 class _HomeScan(NamedTuple):
@@ -2241,7 +2233,8 @@ def _status_row(change_id: str, state_json: bytes, change_json: bytes,
         st = json.loads(state_json)
         meta = json.loads(change_json)
         return (change_id, st["status"], st.get("step") or "-", last_activity,
-                meta["title"], meta["created_at"], st.get("step_label"))
+                meta["title"], meta["created_at"], st.get("step_label"),
+                st.get("phase_label"))
     except (json.JSONDecodeError, KeyError, TypeError):
         return None
 
@@ -2308,7 +2301,7 @@ def _completed_rows(control: Path, live_ids: set[str] | None = None) -> list[_Ro
     for row in archive_read.completed_rows(control):
         if row[0] in live or row[1] in _INFLIGHT:
             continue
-        rows.append(row)
+        rows.append((*row, None))
     return rows
 
 
@@ -2319,7 +2312,7 @@ def _left_rows(control: Path, live_ids: set[str] | None = None) -> list[_Row]:
     is not duplicated here. Reads the same indexed archive query as
     _completed_rows but selects `paused` rows instead of terminal ones."""
     live = {r[0] for r in _status_rows(control)} if live_ids is None else live_ids
-    return [r for r in archive_read.completed_rows(control)
+    return [(*r, None) for r in archive_read.completed_rows(control)
             if r[1] == "paused" and r[0] not in live]
 
 
@@ -2584,7 +2577,7 @@ def _backlog_rows(control: Path, scanned: list[_HomeScan] | None = None) -> list
         created = meta.get("created_at", "")
         blocked = "" if ready else "blocked"
         rows.append((h.change_id, origin, blocked, h.last_iso,
-                     meta.get("title") or "", created, blocked or None))
+                     meta.get("title") or "", created, blocked or None, None))
     return rows
 
 
