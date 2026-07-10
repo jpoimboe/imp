@@ -61,6 +61,7 @@ async def run_session_client(
             await tg.start(CtrlDReader(coord).run)
         if status is not None:
             tg.start_soon(status.tick)
+        driver.install_startup_status()
         try:
             await run_terminal_client(
                 attach=attach, driver=driver, coord=coord, solicit=solicit,

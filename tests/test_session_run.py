@@ -111,6 +111,7 @@ async def test_run_session_client_answers_gate_and_returns_completed_rc(
         def on_event(self, _event: dict[str, Any]) -> None: ...
         def finish(self) -> None: ...
         def seed_pending_reply(self, _text: str) -> None: ...
+        def install_startup_status(self) -> None: ...
 
     async def _solicit(_prompt: str) -> str:
         return "imp"
@@ -162,6 +163,7 @@ async def test_run_session_client_starts_status_tick_when_provided(
         def on_event(self, _event: dict[str, Any]) -> None: ...
         def finish(self) -> None: ...
         def seed_pending_reply(self, _text: str) -> None: ...
+        def install_startup_status(self) -> None: ...
 
     async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
         with anyio.fail_after(10):
@@ -214,6 +216,7 @@ async def test_run_session_client_returns_130_when_user_interrupted(
         def on_event(self, _event: dict[str, Any]) -> None: ...
         def finish(self) -> None: ...
         def seed_pending_reply(self, _text: str) -> None: ...
+        def install_startup_status(self) -> None: ...
 
     async def _solicit(_prompt: str) -> str:  # pragma: no cover
         return ""
@@ -344,6 +347,7 @@ async def test_run_session_client_threads_resume_into_attach(
         def on_event(self, _event: dict[str, Any]) -> None: ...
         def finish(self) -> None: ...
         def seed_pending_reply(self, _text: str) -> None: ...
+        def install_startup_status(self) -> None: ...
 
     async def _solicit(_prompt: str) -> str:  # pragma: no cover
         return ""
@@ -362,6 +366,7 @@ class _NullDriver:
     def on_event(self, _e: dict[str, Any]) -> None: ...
     def finish(self) -> None: ...
     def seed_pending_reply(self, _text: str) -> None: ...
+    def install_startup_status(self) -> None: ...
 
 
 async def _never(*_a: Any) -> str:
@@ -694,6 +699,7 @@ async def test_run_session_client_threads_autonomous_into_attach(
         def on_event(self, _event: dict[str, Any]) -> None: ...
         def finish(self) -> None: ...
         def seed_pending_reply(self, _text: str) -> None: ...
+        def install_startup_status(self) -> None: ...
 
     async def _solicit(_prompt: str) -> str:  # pragma: no cover
         return ""
@@ -777,4 +783,33 @@ async def test_run_session_client_wires_seed_pending_reply_as_local_echo(
         change, driver=driver, coord=coord, solicit=lambda _p: _never())
 
     assert captured["local_echo"] == driver.seed_pending_reply
+    assert rc == 0
+
+
+@pytest.mark.anyio
+async def test_run_session_client_installs_startup_status(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    change = _make_change(tmp_path, "2026-06-15-startup")
+    (tmp_path / ".imp" / "worktrees" / change.id).mkdir(parents=True)
+    State(id=change.id, step=None, step_attempt=0, status="completed").save(
+        change.state_dir)
+
+    async def _noop(**_kwargs: object) -> None:
+        pass
+
+    monkeypatch.setattr("imp.cli.session_run.run_terminal_client", _noop)
+    monkeypatch.setattr("imp.cli.main._handle_terminal_outcome", lambda *_: 0)
+
+    installed: list[bool] = []
+
+    class _Driver(_NullDriver):
+        def install_startup_status(self) -> None:
+            installed.append(True)
+
+    coord = InterruptCoordinator()
+    rc = await run_session_client(
+        change, driver=_Driver(), coord=coord, solicit=lambda _p: _never())
+
+    assert installed == [True]           # called exactly once
     assert rc == 0
