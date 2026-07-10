@@ -2601,8 +2601,7 @@ def _history_rows(control: Path, *, show_all: bool,
 
 def _overview_lines(control: Path, *, show_all: bool, now: datetime,
                     color: bool) -> list[str]:
-    """Build the overview as lines: in-flight, Backlog, then the history block."""
-    name_w = change_row.name_budget()
+    """Overview lines across all zones, sharing one content-sized STATUS/NAME width."""
     scanned = _scan_change_homes(control)
     status_rows = _status_rows(control, scanned)
     inflight = _sort_rows_newest_first(status_rows)
@@ -2611,21 +2610,46 @@ def _overview_lines(control: Path, *, show_all: bool, now: datetime,
                             live_ids={r[0] for r in status_rows})
     if not inflight and not backlog_rows and not history:
         return [_NO_CHANGES_MESSAGE]
-    lines = [change_row.header_line(color=color)]
+
+    intents: dict[str, str | None] = {}
     for r in inflight:
-        intent = None
         if not r[4].strip():
-            intent = _resolve_intent(_load_events_for_id(control, r[0]) or [])
+            intents[r[0]] = _resolve_intent(_load_events_for_id(control, r[0]) or [])
+
+    def _name_text(r: _Row) -> str:
+        raw = r[4].strip()
+        if raw:
+            return raw
+        intent = intents.get(r[0])
+        return " ".join(intent.split()) if intent else "(unnamed)"
+
+    specs: list[tuple[str, str | None, str]] = []
+    for r in inflight:
+        specs.append((r[1], change_row.compose_status_label(r[2], r[6], r[7]),
+                      _name_text(r)))
+    for r in backlog_rows:
+        specs.append((r[1], change_row.compose_status_label(r[2], r[6], None),
+                      _name_text(r)))
+    for r in history:
+        specs.append((_DISPOSITION[r[1]], None, _name_text(r)))
+
+    status_width, name_width = change_row.overview_widths(specs)
+
+    lines = [change_row.header_line(color=color, status_width=status_width)]
+    for r in inflight:
         lines.append(change_row.format_change_line(
             change_id=r[0], title=r[4], status=r[1], step=r[2], step_label=r[6],
-            last_iso=r[3], now=now, color=color, name_width=name_w, intent=intent))
+            phase_label=r[7], last_iso=r[3], now=now, color=color,
+            name_width=name_width, status_width=status_width,
+            intent=intents.get(r[0])))
     if backlog_rows:
         lines.append("")
         lines.append(pal.ansi("Backlog", "dim", enabled=color))
         for r in backlog_rows:
             lines.append(change_row.format_change_line(
-                change_id=r[0], title=r[4], status=r[1], step=r[2], step_label=r[6],
-                last_iso=r[3], now=now, color=color, name_width=name_w))
+                change_id=r[0], title=r[4], status=r[1], step=r[2],
+                step_label=r[6], phase_label=None, last_iso=r[3], now=now,
+                color=color, name_width=name_width, status_width=status_width))
     if history:
         lines.append("")
         label = "history" if show_all else "recently merged"
@@ -2633,7 +2657,8 @@ def _overview_lines(control: Path, *, show_all: bool, now: datetime,
         for r in history:
             lines.append(change_row.format_change_line(
                 change_id=r[0], title=r[4], status=_DISPOSITION[r[1]], step="-",
-                last_iso=r[3], now=now, color=color, name_width=name_w, dim=True))
+                last_iso=r[3], now=now, color=color, name_width=name_width,
+                status_width=status_width, dim=True))
     return lines
 
 
