@@ -18,15 +18,9 @@ from typing import Any
 from imp.agents.classify import ResumeState
 
 
-def derive_codex_resume_state(
-    events_path: Path, agent_id: str, *, subagent_depth: int = 0,
-) -> tuple[ResumeState, str]:
-    """Return (state, last_agent_text). last_agent_text is the tail
-    agent_message text (needed by the resume seam, since proc_state is empty on
-    a fresh resume process)."""
-    if not events_path.exists():
-        return ResumeState.FRESH, ""
-    records = []
+def _read_agent_records(events_path: Path, agent_id: str) -> list[dict[str, Any]]:
+    """Filtered, order-preserving list of this agent's events.jsonl records."""
+    records: list[dict[str, Any]] = []
     for line in events_path.read_text().splitlines():
         line = line.strip()
         if not line:
@@ -37,6 +31,18 @@ def derive_codex_resume_state(
             continue
         if rec.get("agent_id") == agent_id:
             records.append(rec)
+    return records
+
+
+def derive_codex_resume_state(
+    events_path: Path, agent_id: str, *, subagent_depth: int = 0,
+) -> tuple[ResumeState, str]:
+    """Return (state, last_agent_text). last_agent_text is the tail
+    agent_message text (needed by the resume seam, since proc_state is empty on
+    a fresh resume process)."""
+    if not events_path.exists():
+        return ResumeState.FRESH, ""
+    records = _read_agent_records(events_path, agent_id)
     if not records:
         return ResumeState.FRESH, ""
 
@@ -81,3 +87,36 @@ def _text_of(llm_record: dict[str, Any]) -> str:
     content = llm_record.get("payload", {}).get("raw", {}).get("content", [])
     return " ".join(
         b.get("text", "") for b in content if b.get("type") == "text").strip()
+
+
+def _user_text_of(rec: dict[str, Any]) -> str | None:
+    """Join the type=='text' content blocks of a user_message event; None if
+    the joined text is empty/whitespace."""
+    content = rec.get("payload", {}).get("content", [])
+    text = " ".join(
+        b.get("text", "") for b in content if b.get("type") == "text").strip()
+    return text or None
+
+
+def pending_human_reply(events_path: Path, agent_id: str) -> str | None:
+    """Recover an un-answered, already-solicited human reply from events.jsonl,
+    or None. Anchored on the LAST awaiting_user_input gate: scan forward from
+    that gate; a user_message sets the candidate, an llm_response or tool_call
+    clears it (the agent already acted on the reply)."""
+    if not events_path.exists():
+        return None
+    records = _read_agent_records(events_path, agent_id)
+    last_gate = None
+    for i, rec in enumerate(records):
+        if rec.get("type") == "awaiting_user_input":
+            last_gate = i
+    if last_gate is None:
+        return None
+    candidate: str | None = None
+    for rec in records[last_gate:]:
+        rtype = rec.get("type")
+        if rtype == "user_message":
+            candidate = _user_text_of(rec)
+        elif rtype in ("llm_response", "tool_call"):
+            candidate = None
+    return candidate
