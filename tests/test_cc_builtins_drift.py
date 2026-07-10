@@ -36,7 +36,8 @@ from imp.providers._cc_builtins import ALL_CLAUDE_CODE_BUILTIN_TOOLS
 from imp.providers.claude_code import ClaudeCodeAgentRunner
 
 
-@pytest.mark.timeout(120)   # own budget: the global 60s cap must not fire first
+@pytest.mark.timeout(120)   # process-level backstop against a genuinely hung
+                            # CLI (a real defect) — NOT a load budget.
 def test_builtin_tools_match_cli() -> None:
     # Do NOT skip on CLAUDECODE=1 — the bundled claude CLI advertises an
     # identical tool registry with or without it; a CLAUDECODE skip hides real
@@ -45,16 +46,16 @@ def test_builtin_tools_match_cli() -> None:
     if cli is None:
         pytest.skip("`claude` CLI not on PATH")
 
-    # Minimal stream-json input: one short user prompt that terminates without
-    # tool use. The `init` system message arrives BEFORE the model starts the
-    # conversation, so any small prompt suffices. `--max-turns 0` is rejected
-    # by the CLI (minimum is 1), so use 1 with a self-terminating prompt.
+    # Minimal stream-json input: one short user prompt. The `init` system
+    # message is emitted at process startup, BEFORE the model turn, so we read
+    # stdout only until `init` is parsed and then kill the subprocess — the
+    # model round-trip (the load-sensitive part) never runs.
     user_msg = json.dumps({
         "type": "user",
         "message": {"role": "user", "content": "say ok"},
     })
 
-    proc = subprocess.run(
+    proc = subprocess.Popen(
         [
             cli, "--print",
             "--input-format", "stream-json",
@@ -64,36 +65,56 @@ def test_builtin_tools_match_cli() -> None:
             "--no-session-persistence",
             "--max-turns", "1",
         ],
-        input=user_msg + "\n",
-        # Node cold-start on a CPU-saturated -n auto box has been seen to
-        # exceed 20s; the budget is liveness only, so keep it generous.
-        capture_output=True, text=True, timeout=90,
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        text=True,
     )
 
     advertised: set[str] = set()
-    for line in proc.stdout.splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            msg = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-        if msg.get("type") == "system" and msg.get("subtype") == "init":
-            # `tools` field on init may be a list of tool names or descriptors.
-            tools = msg.get("tools") or msg.get("data", {}).get("tools") or []
-            for t in tools:
-                if isinstance(t, str):
-                    advertised.add(t)
-                elif isinstance(t, dict) and "name" in t:
-                    advertised.add(t["name"])
-            break
+    try:
+        assert proc.stdin is not None and proc.stdout is not None
+        proc.stdin.write(user_msg + "\n")
+        proc.stdin.flush()
+        proc.stdin.close()
+
+        # readline() (not `for line in proc.stdout`) so the iterator's
+        # read-ahead buffering never delays delivery of the init line.
+        while True:
+            line = proc.stdout.readline()
+            if line == "":          # EOF: stdout closed before an init message
+                break
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                msg = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if msg.get("type") == "system" and msg.get("subtype") == "init":
+                # `tools` on init may be a list of names or of descriptors.
+                tools = msg.get("tools") or msg.get("data", {}).get("tools") or []
+                for t in tools:
+                    if isinstance(t, str):
+                        advertised.add(t)
+                    elif isinstance(t, dict) and "name" in t:
+                        advertised.add(t["name"])
+                break
+    finally:
+        # Reap so no orphan claude/node process is left running. terminate()
+        # (SIGTERM) is honored promptly by node; the wait() carries no numeric
+        # budget, and the @pytest.mark.timeout marker is the sole backstop for
+        # a genuinely hung process.
+        proc.terminate()
+        proc.wait()
+        if proc.stdout is not None:
+            proc.stdout.close()
 
     if not advertised:
         pytest.skip(
             "claude CLI did not advertise tools via init message; CLI format "
-            "may have changed. Investigate `claude --print ... --max-turns 0` "
-            "output and update this test."
+            "may have changed. Investigate `claude --print ...` output and "
+            "update this test."
         )
 
     declared = set(ALL_CLAUDE_CODE_BUILTIN_TOOLS)
