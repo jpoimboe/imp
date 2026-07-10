@@ -14,7 +14,7 @@ import pytest
 
 from imp.cli.session_terminal import run_terminal_client
 from imp.cli.signals import InterruptCoordinator
-from imp.cli.terminal_title import GLYPH_WAITING, GLYPH_WORKING, TerminalTitle
+from imp.cli.terminal_title import GLYPH_BUSY, GLYPH_IDLE, TerminalTitle
 from imp.engine.change import Change
 from imp.remote.session.client import SessionClient
 from imp.remote.session.protocol import encode_attach, encode_input
@@ -565,7 +565,7 @@ async def test_abandon_slash_command_records_abandon_intent(
 
 
 @pytest.mark.anyio
-async def test_title_flips_working_waiting_back_to_working_and_resets(
+async def test_title_flips_busy_idle_back_to_busy_and_resets(
     tmp_path: Path,
 ) -> None:
     sock = str(tmp_path / "s.sock")
@@ -614,19 +614,19 @@ async def test_title_flips_working_waiting_back_to_working_and_resets(
             tg.start_soon(_client)
 
     out = s.getvalue()
-    working = f"\x1b]2;{GLYPH_WORKING} imp · term1 · My Change\x07"
-    waiting = f"\x1b]2;{GLYPH_WAITING} imp · term1 · My Change\x07"
+    busy = f"\x1b]2;{GLYPH_BUSY} imp · term1 · My Change\x07"
+    idle = f"\x1b]2;{GLYPH_IDLE} imp · term1 · My Change\x07"
     reset = "\x1b]2;\x07"
-    assert working in out
-    assert waiting in out
-    assert out.index(waiting) > out.index(working)
-    post_gate = out[out.index(waiting) + len(waiting):]
-    assert working in post_gate          # flipped back to working after the reply
+    assert busy in out
+    assert idle in out
+    assert out.index(idle) > out.index(busy)
+    post_gate = out[out.index(idle) + len(idle):]
+    assert busy in post_gate          # flipped back to busy after the reply
     assert out.endswith(reset)           # reset last, on teardown
 
 
 @pytest.mark.anyio
-async def test_replayed_awaiting_does_not_flip_to_waiting(
+async def test_replayed_awaiting_does_not_flip_to_idle(
     tmp_path: Path,
 ) -> None:
     sock = str(tmp_path / "s.sock")
@@ -670,8 +670,8 @@ async def test_replayed_awaiting_does_not_flip_to_waiting(
 
             tg.start_soon(_client)
 
-    waiting = f"\x1b]2;{GLYPH_WAITING} imp · term1 · My Change\x07"
-    assert waiting not in s.getvalue()
+    idle = f"\x1b]2;{GLYPH_IDLE} imp · term1 · My Change\x07"
+    assert idle not in s.getvalue()
 
 
 @pytest.mark.anyio
@@ -1138,7 +1138,7 @@ async def test_change_renamed_updates_terminal_title(tmp_path: Path) -> None:
 
             tg.start_soon(_client)
 
-    renamed = f"\x1b]2;{GLYPH_WORKING} imp · term1 · Renamed Change\x07"
+    renamed = f"\x1b]2;{GLYPH_BUSY} imp · term1 · Renamed Change\x07"
     assert renamed in s.getvalue()
 
 
@@ -1186,7 +1186,7 @@ async def test_replayed_change_renamed_does_not_update_title(tmp_path: Path) -> 
 
             tg.start_soon(_client)
 
-    renamed = f"\x1b]2;{GLYPH_WORKING} imp · term1 · Renamed Change\x07"
+    renamed = f"\x1b]2;{GLYPH_BUSY} imp · term1 · Renamed Change\x07"
     assert renamed not in s.getvalue()
 
 
@@ -1524,10 +1524,10 @@ async def test_lane_released_clears_hold_glyph(tmp_path: Path) -> None:
         # Wait for the post-release working re-render to flush before returning,
         # else teardown can race ahead of the client processing the release.
         hold_r = "\x1b]2;⛙ imp · term1 · My Change\x07"
-        work_r = f"\x1b]2;{GLYPH_WORKING} imp · term1 · My Change\x07"
+        busy_r = f"\x1b]2;{GLYPH_BUSY} imp · term1 · My Change\x07"
         with anyio.fail_after(5):
-            while not (hold_r in s.getvalue() and work_r in s.getvalue()
-                       and s.getvalue().rindex(work_r) > s.getvalue().index(hold_r)):
+            while not (hold_r in s.getvalue() and busy_r in s.getvalue()
+                       and s.getvalue().rindex(busy_r) > s.getvalue().index(hold_r)):
                 await anyio.sleep(0.02)
         return "done"
 
@@ -1562,9 +1562,9 @@ async def test_lane_released_clears_hold_glyph(tmp_path: Path) -> None:
 
     out = s.getvalue()
     hold = "\x1b]2;⛙ imp · term1 · My Change\x07"
-    work = f"\x1b]2;{GLYPH_WORKING} imp · term1 · My Change\x07"
+    busy = f"\x1b]2;{GLYPH_BUSY} imp · term1 · My Change\x07"
     assert hold in out
-    assert out.rindex(work) > out.index(hold)
+    assert out.rindex(busy) > out.index(hold)
 
 
 @pytest.mark.anyio
@@ -1584,10 +1584,10 @@ async def test_lane_evicted_clears_hold_glyph_like_released(tmp_path: Path) -> N
         # Wait for the post-evict working re-render to flush before returning,
         # else teardown can race ahead of the client processing the eviction.
         hold_r = "\x1b]2;⛙ imp · term1 · My Change\x07"
-        work_r = f"\x1b]2;{GLYPH_WORKING} imp · term1 · My Change\x07"
+        busy_r = f"\x1b]2;{GLYPH_BUSY} imp · term1 · My Change\x07"
         with anyio.fail_after(5):
-            while not (hold_r in s.getvalue() and work_r in s.getvalue()
-                       and s.getvalue().rindex(work_r) > s.getvalue().index(hold_r)):
+            while not (hold_r in s.getvalue() and busy_r in s.getvalue()
+                       and s.getvalue().rindex(busy_r) > s.getvalue().index(hold_r)):
                 await anyio.sleep(0.02)
         return "done"
 
@@ -1622,13 +1622,13 @@ async def test_lane_evicted_clears_hold_glyph_like_released(tmp_path: Path) -> N
 
     out = s.getvalue()
     hold = "\x1b]2;⛙ imp · term1 · My Change\x07"
-    work = f"\x1b]2;{GLYPH_WORKING} imp · term1 · My Change\x07"
+    busy = f"\x1b]2;{GLYPH_BUSY} imp · term1 · My Change\x07"
     assert hold in out
-    assert out.rindex(work) > out.index(hold)
+    assert out.rindex(busy) > out.index(hold)
 
 
 @pytest.mark.anyio
-async def test_replayed_ordinary_event_does_not_flip_to_working(
+async def test_replayed_ordinary_event_does_not_flip_to_busy(
     tmp_path: Path,
 ) -> None:
     sock = str(tmp_path / "s.sock")
@@ -1675,11 +1675,11 @@ async def test_replayed_ordinary_event_does_not_flip_to_working(
             tg.start_soon(_client)
 
     out = s.getvalue()
-    waiting = f"\x1b]2;{GLYPH_WAITING} imp · term1 · My Change\x07"
-    working = f"\x1b]2;{GLYPH_WORKING} imp · term1 · My Change\x07"
-    assert waiting in out
-    post_gate = out[out.index(waiting) + len(waiting):]
-    assert working not in post_gate
+    idle = f"\x1b]2;{GLYPH_IDLE} imp · term1 · My Change\x07"
+    busy = f"\x1b]2;{GLYPH_BUSY} imp · term1 · My Change\x07"
+    assert idle in out
+    post_gate = out[out.index(idle) + len(idle):]
+    assert busy not in post_gate
 
 
 @pytest.mark.anyio

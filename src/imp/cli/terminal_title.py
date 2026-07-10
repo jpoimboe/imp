@@ -3,27 +3,33 @@ from __future__ import annotations
 
 from typing import Any
 
-GLYPH_WORKING = "๏"
-GLYPH_WAITING = "ѱ"
+GLYPH_BUSY = "๏"
+GLYPH_IDLE = "ѱ"
 
 
 class TerminalTitle:
-    def __init__(self, stream: Any, change_id: str, change_name: str) -> None:
+    def __init__(
+        self,
+        stream: Any,
+        change_id: str,
+        change_name: str,
+        initial: str = "busy",
+    ) -> None:
         self._stream = stream
         self._change_id = change_id
         self._name = change_name
         self._enabled = bool(stream.isatty())
         self._current: str | None = None
-        self._waiting = False
+        self._idle = initial == "idle"
         self._hold_glyph: str | None = None
-        self.working()
-
-    def working(self) -> None:
-        self._waiting = False
         self._set(self._derive())
 
-    def waiting(self) -> None:
-        self._waiting = True
+    def busy(self) -> None:
+        self._idle = False
+        self._set(self._derive())
+
+    def idle(self) -> None:
+        self._idle = True
         self._set(self._derive())
 
     def set_hold_glyph(self, glyph: str | None) -> None:
@@ -48,11 +54,11 @@ class TerminalTitle:
         self._set(glyph)
 
     def _derive(self) -> str:
-        if self._waiting:
-            return GLYPH_WAITING
+        if self._idle:
+            return GLYPH_IDLE
         if self._hold_glyph is not None:
             return self._hold_glyph
-        return GLYPH_WORKING
+        return GLYPH_BUSY
 
     def _set(self, glyph: str) -> None:
         if not self._enabled:

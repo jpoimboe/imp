@@ -73,12 +73,12 @@ async def run_terminal_client(
             prompt = (event.get("payload") or {}).get("prompt") or ""
             gate_send.send_nowait(prompt)
             if title is not None:
-                title.waiting()
+                title.idle()
         elif etype == "change_renamed" and not replay:
             if title is not None:
                 title.update_name((event.get("payload") or {})["new_title"])
         elif title is not None and not replay:
-            title.working()
+            title.busy()
 
     coord.escalation_event = anyio.Event()
     coord.set_escalation_hook(coord.escalation_event.set)
