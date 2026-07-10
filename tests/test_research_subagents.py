@@ -114,5 +114,6 @@ def test_spec_writer_design_quality_and_coverage_guidance(tmp_path) -> None:
         change_home=".imp/changes/abc", project_facts={}),
         workflow_dir=bundled_workflow_dir("imp"))
     assert "present it in sections" in out
-    assert "do not propose unrelated refactoring" in out
+    assert "do not propose unrelated refactoring" not in out
+    assert "improvements to the code this change touches." in out
     assert "architecture, components, data flow, error handling, and testing" in out

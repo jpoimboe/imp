@@ -1,6 +1,6 @@
 **Design for clarity.** Prefer units with clear boundaries and well-defined
 interfaces; follow the codebase's existing patterns; fold in *targeted*
-improvements to the code this change touches, but do not propose unrelated refactoring.
+improvements to the code this change touches.
 
 **Cover the design.** Where relevant, the spec should be concrete about
 architecture, components, data flow, error handling, and testing, while keeping
