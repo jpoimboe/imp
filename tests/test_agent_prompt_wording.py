@@ -266,3 +266,24 @@ def test_plan_writer_documents_untagged_scope_out_form() -> None:
     )
     # prose in the Decisions section does not count — only the untagged line records it
     assert "Prose in the plan's `## Decisions` section does not count" in body
+
+
+def test_plan_reviewer_backstops_unrecorded_scope_out() -> None:
+    body = _agent_prompt("plan-reviewer")
+    # the blanket read-only clause is reconciled to a deferred.md-only exception
+    assert "You are read-only with a single exception" in body
+    assert "You are read-only: do not write or modify any files." not in body
+    # the destination path, unique to the new carve-out clause
+    assert (
+        "the sole file you may write is `{{ change.home }}/deferred.md`"
+        in body
+    )
+    # the scope-out checklist item
+    assert "Scope-out recorded" in body
+    assert "assigned to a later plan by the spec's `## Plan outline`" in body
+    # the backstop write authority: append the untagged line itself, source plan-reviewer
+    assert "unrecorded scope-out" in body
+    assert (
+        "DEFERRED plan-reviewer: <item, citing the spec AC/scope ref> [scope: change]"
+        in body
+    )
