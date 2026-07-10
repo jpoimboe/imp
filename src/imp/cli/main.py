@@ -3182,7 +3182,7 @@ def _init_logging() -> None:
     `providers/codex_mcp.py`), so the first such instantiation would otherwise
     install a stderr RichHandler at INFO and paint propagated third-party INFO
     logs — notably the Claude Agent SDK's "Using bundled Claude Code CLI" — over
-    the live TUI. We pre-empt that by owning root logging here, before the
+    the live streaming output. We pre-empt that by owning root logging here, before the
     command path imports any of those modules.
 
     `IMP_DEBUG=1` opts into stderr logging for development; otherwise records are
