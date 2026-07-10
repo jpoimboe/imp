@@ -10,7 +10,11 @@ import pytest
 import imp.agents.tools.nav  # noqa: F401
 from imp.agents.tools import get_registry
 from imp.agents.tools.context import ToolContext
-from imp.agents.tools.limits import ToolAborted
+from imp.agents.tools.limits import (
+    OUTPUT_TRUNCATION_MARKER,
+    TOOL_OUTPUT_CAP_BYTES,
+    ToolAborted,
+)
 
 
 class _Coord:
@@ -52,12 +56,138 @@ def test_glob_recursive(tmp_path: Path) -> None:
     assert "sub/x.md" in out
 
 
+def test_glob_orders_by_mtime_descending(tmp_path: Path) -> None:
+    import os
+    (tmp_path / "old.py").write_text("")
+    (tmp_path / "mid.py").write_text("")
+    (tmp_path / "new.py").write_text("")
+    os.utime(tmp_path / "old.py", (1000, 1000))
+    os.utime(tmp_path / "mid.py", (2000, 2000))
+    os.utime(tmp_path / "new.py", (3000, 3000))
+    out = _glob(_ctx(tmp_path), pattern="*.py")
+    assert out.splitlines() == ["new.py", "mid.py", "old.py"]
+
+
+def test_glob_equal_mtime_falls_back_to_path_order(tmp_path: Path) -> None:
+    import os
+    # Path-sort orders these as ["z/a.py", "z.py"] (component-wise: "z" < "z.py"),
+    # but the posix-string tie-break orders them ["z.py", "z/a.py"] ("." < "/").
+    # Asserting the posix order makes the tie-break falsifiable: dropping the
+    # _posix(p) term from the sort key would leave the Path-sort order and fail.
+    (tmp_path / "z.py").write_text("")
+    (tmp_path / "z").mkdir()
+    (tmp_path / "z" / "a.py").write_text("")
+    for p in (tmp_path / "z.py", tmp_path / "z" / "a.py"):
+        os.utime(p, (5000, 5000))
+    out = _glob(_ctx(tmp_path), pattern="**/*.py")
+    assert out.splitlines() == ["z.py", "z/a.py"]
+
+
+def test_glob_caps_output_at_50kb(tmp_path: Path) -> None:
+    import os
+    stem = "x" * 200
+    for i in range(400):
+        f = tmp_path / f"{i:04d}_{stem}.py"
+        f.write_text("")
+        os.utime(f, (10000 + i, 10000 + i))  # higher i == newer
+    out = _glob(_ctx(tmp_path), pattern="*.py")
+    assert len(out.encode()) <= TOOL_OUTPUT_CAP_BYTES
+    assert out.rstrip().endswith(OUTPUT_TRUNCATION_MARKER.strip())
+    assert "not shown" in out
+    # The most-recent files are retained, the oldest are dropped.
+    assert f"0399_{stem}.py" in out
+    assert f"0000_{stem}.py" not in out
+
+
+def test_glob_under_cap_returns_output_unchanged(tmp_path: Path) -> None:
+    for name in ("a.py", "b.py", "c.py"):
+        (tmp_path / name).write_text("")
+    out = _glob(_ctx(tmp_path), pattern="*.py")
+    assert OUTPUT_TRUNCATION_MARKER.strip() not in out
+    assert "not shown" not in out
+    assert set(out.splitlines()) == {"a.py", "b.py", "c.py"}
+
+
 def test_grep_finds_match(tmp_path: Path) -> None:
     (tmp_path / "a.py").write_text("hello world\nfoo bar\n")
     (tmp_path / "b.py").write_text("nothing\n")
     out = _grep(_ctx(tmp_path), pattern="hello", path=".")
     assert "a.py" in out
     assert "b.py" not in out
+
+
+def test_grep_default_output_stable_across_modes(tmp_path: Path) -> None:
+    # Pins the pre-refactor default output for all three modes (plus context
+    # and head_limit) so the match_idxs unification stays byte-for-byte.
+    (tmp_path / "a.txt").write_text("alpha\nbeta\ngamma\nalpha\n")
+
+    fwm = _grep(_ctx(tmp_path), pattern="alpha", path="a.txt")
+    assert fwm == "a.txt"
+
+    cnt = _grep(_ctx(tmp_path), pattern="alpha", path="a.txt",
+                output_mode="count")
+    assert cnt == "a.txt:2"
+
+    content = _grep(_ctx(tmp_path), pattern="alpha", path="a.txt",
+                    output_mode="content")
+    assert content == "a.txt:1:alpha\na.txt:4:alpha"
+
+    ctx1 = _grep(_ctx(tmp_path), pattern="alpha", path="a.txt",
+                 output_mode="content", context=1)
+    # Windows [1,2] and [3,4] are adjacent (lo=3 <= prev_hi+1) so they merge
+    # into ONE block — no `--` separator between them.
+    assert ctx1 == (
+        "a.txt:1:alpha\na.txt-2-beta\na.txt-3-gamma\na.txt:4:alpha"
+    )
+
+    limited = _grep(_ctx(tmp_path), pattern="alpha", path="a.txt",
+                    output_mode="content", head_limit=1)
+    assert limited == (
+        "a.txt:1:alpha\n"
+        "[further results omitted: head_limit=1 reached "
+        "— raise head_limit or narrow the pattern]"
+    )
+
+
+def test_grep_multiline_content_reports_start_line(tmp_path: Path) -> None:
+    (tmp_path / "t.txt").write_text("foo\nbar\nbaz\n")
+    out = _grep(_ctx(tmp_path), pattern=r"foo\s+bar", path="t.txt",
+                output_mode="content", multiline=True)
+    # The match spans lines 1-2; it is reported at its START line (1).
+    assert out == "t.txt:1:foo"
+
+
+def test_grep_multiline_off_does_not_span_lines(tmp_path: Path) -> None:
+    (tmp_path / "t.txt").write_text("foo\nbar\nbaz\n")
+    out = _grep(_ctx(tmp_path), pattern=r"foo\s+bar", path="t.txt",
+                output_mode="content", multiline=False)
+    assert out == "(no matches)"
+
+
+def test_grep_multiline_count_counts_distinct_start_lines(tmp_path: Path) -> None:
+    (tmp_path / "t.txt").write_text("a1\na2\nb\na3\na4\n")
+    # Two non-overlapping cross-line matches: "a1\na2" (start line 1) and
+    # "a3\na4" (start line 4) -> two distinct start lines.
+    out = _grep(_ctx(tmp_path), pattern=r"a\d\na\d", path="t.txt",
+                output_mode="count", multiline=True)
+    assert out == "t.txt:2"
+
+
+def test_grep_multiline_files_with_matches(tmp_path: Path) -> None:
+    (tmp_path / "hit.txt").write_text("foo\nbar\n")
+    (tmp_path / "miss.txt").write_text("foo\nnope\n")
+    out = _grep(_ctx(tmp_path), pattern=r"foo\nbar", path=".", multiline=True)
+    assert out == "hit.txt"
+
+
+def test_grep_multiline_row_respects_per_line_cap(tmp_path: Path) -> None:
+    # A cross-line match whose START line is huge is still per-line truncated.
+    (tmp_path / "t.txt").write_text("A" * 3000 + "\nB\n")
+    out = _grep(_ctx(tmp_path), pattern=r"A\nB", path="t.txt",
+                output_mode="content", multiline=True)
+    assert out.startswith("t.txt:1:")
+    assert "…[truncated]" in out
+    assert len(out) < 3000  # the 3000-char line was truncated, not emitted whole
 
 
 def test_grep_excludes_imp_and_git(tmp_path: Path) -> None:
@@ -259,6 +389,15 @@ def test_glob_description_documents_path_and_sandbox() -> None:
     assert "bounded by the sandbox like bash" in desc
 
 
+def test_glob_description_notes_recency_and_cap() -> None:
+    desc = get_registry()["glob"].description
+    assert "most-recent" in desc
+    assert "50 KB" in desc
+    # retained guarantees
+    assert "bounded by the sandbox like bash" in desc
+    assert "git ignores" in desc
+
+
 def test_grep_reports_relative_paths(tmp_path: Path) -> None:
     (tmp_path / "a.txt").write_text("needle here\n")
     ctx = _ctx(tmp_path)
@@ -335,6 +474,15 @@ def test_grep_description_notes_sandbox_and_walk_cap() -> None:
     desc = get_registry()["grep"].description
     assert "bounded by the sandbox like bash" in desc
     assert "external" in desc and "cap" in desc
+
+
+def test_grep_description_notes_multiline() -> None:
+    desc = get_registry()["grep"].description
+    assert "multiline" in desc
+    assert "span line boundaries" in desc
+    # retained guarantees still hold
+    assert "bounded by the sandbox like bash" in desc
+    assert "head_limit caps result rows" in desc
 
 
 def test_glob_surfaces_artifact_subtree_but_not_rest_of_imp(tmp_path: Path) -> None:

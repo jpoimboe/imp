@@ -10,6 +10,7 @@ matches as absolute paths.
 
 from __future__ import annotations
 
+import bisect
 import fnmatch
 import os
 import re
@@ -151,6 +152,37 @@ async def _grep_file_source(target: Path, root: Path, inside: bool,
     return _git_files(unignored, gtarget, root, policy)
 
 
+def _mtime(p: Path) -> float:
+    """st_mtime, or 0.0 (sorts as oldest) if the entry vanished mid-call."""
+    try:
+        return p.stat().st_mtime
+    except OSError:
+        return 0.0
+
+
+def _cap_lines(lines: list[str]) -> str:
+    """glob's flat-list analog of symbol_outline._thin_file (no header term):
+    return the joined lines unchanged when they fit, else keep as many leading
+    (most-recent) lines as the budget allows before the next line plus the
+    omitted-count notice and truncation marker would exceed the cap, then append
+    the notice and the marker."""
+    full = "\n".join(lines)
+    if len(full.encode()) <= TOOL_OUTPUT_CAP_BYTES:
+        return full
+    marker = OUTPUT_TRUNCATION_MARKER.strip()
+    kept: list[str] = []
+    size = 0
+    for i, line in enumerate(lines):
+        notice = f"… +{len(lines) - i} not shown"
+        line_bytes = len(line.encode()) + len(notice.encode()) + len(marker.encode()) + 3
+        if size + line_bytes > TOOL_OUTPUT_CAP_BYTES:
+            break
+        kept.append(line)
+        size += len(line.encode()) + 1
+    omitted = len(lines) - len(kept)
+    return "\n".join([*kept, f"… +{omitted} not shown", marker])
+
+
 @imp_tool(
     name="glob",
     description=(
@@ -164,7 +196,10 @@ async def _grep_file_source(target: Path, root: Path, inside: bool,
         "an ignored path searches it anyway. Uses pathlib glob "
         "semantics — a bare *.py matches top-level files only; this differs "
         "from grep's `glob` parameter, where * and ** cross /. The `pattern` "
-        "stays relative; search elsewhere via `path`, not an absolute pattern."
+        "stays relative; search elsewhere via `path`, not an absolute pattern. "
+        "Results are ordered most-recent-first by mtime (ties broken by path) "
+        "and capped at 50 KB, head-truncated with a `… +N not shown` notice so "
+        "the most-recent matches are the ones kept."
     ),
     read_only=True,
 )
@@ -206,9 +241,12 @@ async def glob(ctx: ToolContext, pattern: str, path: str = ".") -> str:
             if ignored:
                 matched = [p for p in matched if p.resolve() not in ignored]
 
-    out = [p.relative_to(root).as_posix() if inside else p.as_posix()
-           for p in matched]
-    return "\n".join(out) if out else "(no matches)"
+    def _posix(p: Path) -> str:
+        return p.relative_to(root).as_posix() if inside else p.as_posix()
+
+    matched.sort(key=lambda p: (-_mtime(p), _posix(p)))
+    out = [_posix(p) for p in matched]
+    return _cap_lines(out) if out else "(no matches)"
 
 
 def _glob_variants(pat: str) -> list[str]:
@@ -244,6 +282,23 @@ def _compile_glob(pat: str) -> re.Pattern[str]:
         "(?:" + fnmatch.translate(v) + ")" for v in _glob_variants(pat)))
 
 
+def _multiline_start_lines(rgx: re.Pattern[str], text: str,
+                           n_lines: int) -> list[int]:
+    """Distinct ascending 1-based START lines of rgx's matches over `text`."""
+    newlines = [i for i, ch in enumerate(text) if ch == "\n"]
+    idxs: list[int] = []
+    for m in rgx.finditer(text):
+        ln = bisect.bisect_left(newlines, m.start()) + 1
+        # Drop a match starting past the last readable line (inside a fragment
+        # the 5 MB read cap cut off). finditer is non-overlapping/left-to-right
+        # so start lines are non-decreasing — adjacent-dup collapse suffices.
+        if ln > n_lines:
+            continue
+        if not idxs or idxs[-1] != ln:
+            idxs.append(ln)
+    return idxs
+
+
 _GREP_MODES = ("files_with_matches", "content", "count")
 
 
@@ -255,7 +310,10 @@ _GREP_MODES = ("files_with_matches", "content", "count")
         "file paths only; 'content' shows path:lineno:line rows (context "
         "rows from before/after/context use path-lineno-line); 'count' shows "
         "path:count for files with matches. before/after/context require "
-        "content mode. head_limit caps result rows. case_insensitive applies "
+        "content mode. head_limit caps result rows. multiline=True lets the "
+        "regex span line boundaries (matched with DOTALL+MULTILINE over the "
+        "whole file); each match is reported at its START line. "
+        "case_insensitive applies "
         "to the REGEX only — the `glob` filter is always case-sensitive. "
         "`glob` filters by the worktree-relative path for in-worktree targets, "
         "or the absolute path for external targets (NOT "
@@ -292,6 +350,7 @@ async def grep(
     after: int = 0,
     context: int = 0,
     head_limit: int | None = None,
+    multiline: bool = False,
 ) -> str:
     # No validation layer sits between the JSON schema and this call — every
     # constraint is enforced here in the body.
@@ -330,7 +389,10 @@ async def grep(
     inside = target.is_relative_to(root)
     external = not inside
     policy = ctx.sandbox_policy
-    rgx = re.compile(pattern, re.IGNORECASE if case_insensitive else 0)
+    flags = re.IGNORECASE if case_insensitive else 0
+    if multiline:
+        flags |= re.DOTALL | re.MULTILINE
+    rgx = re.compile(pattern, flags)
     coordinator = getattr(ctx, "coordinator", None)
     deadline = anyio.current_time() + TOOL_WALLCLOCK_TIMEOUT_S
 
@@ -379,11 +441,16 @@ async def grep(
         cap_truncated = file_is_cap_truncated(read_truncated, f)
         lines = split_lines(text, cap_truncated=cap_truncated)
 
+        if multiline:
+            match_idxs = _multiline_start_lines(rgx, text, len(lines))
+        else:
+            match_idxs = [i for i, line in enumerate(lines, start=1)
+                          if rgx.search(line)]
+
         if output_mode == "files_with_matches":
-            # Stop at the FIRST match — a regex-time win only (the bounded
-            # read is already paid). A LISTED truncated file resolved itself;
-            # an UNLISTED one is a potential false negative — note it.
-            if any(rgx.search(line) for line in lines):
+            # A LISTED truncated file resolved itself; an UNLISTED one is a
+            # potential false negative — note it.
+            if match_idxs:
                 capped = emit(disp)
                 result_rows += 1
                 if head_limit is not None and result_rows >= head_limit:
@@ -391,7 +458,7 @@ async def grep(
             elif cap_truncated:
                 notes.append(f"[{disp}: scanned first 5 MB only]")
         elif output_mode == "count":
-            n = sum(1 for line in lines if rgx.search(line))
+            n = len(match_idxs)
             if n:  # non-zero rows only (ripgrep -c, not GNU grep's path:0 flood)
                 capped = emit(f"{disp}:{n}")
                 result_rows += 1
@@ -400,8 +467,6 @@ async def grep(
             if cap_truncated:  # the count is a lower bound — always note
                 notes.append(f"[{disp}: scanned first 5 MB only]")
         else:  # content
-            match_idxs = [i for i, line in enumerate(lines, start=1)
-                          if rgx.search(line)]
             if eff_before == 0 and eff_after == 0:
                 # Zero-context: the bare row stream. Every match is its own
                 # "block" but NO -- separators (GNU grep emits group
