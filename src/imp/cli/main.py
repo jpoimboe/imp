@@ -13,6 +13,7 @@ import functools
 import json
 import logging
 import os
+import re
 import shlex
 import shutil
 import signal
@@ -2852,6 +2853,56 @@ def _search_archived(control: Path, query: str) -> list[_SearchHit]:
         _SearchHit(cid, title, "archive", content)
         for (cid, title, content) in archive_read.search_archive_content(control, query)
     ]
+
+
+def _highlight(text: str, query: str, *, color: bool) -> str:
+    """Wrap every case-insensitive occurrence of `query` in `text` with a bold-yellow accent."""
+    if not color or not query:
+        return text
+    out: list[str] = []
+    last = 0
+    for m in re.finditer(re.escape(query), text, flags=re.IGNORECASE):
+        out.append(text[last:m.start()])
+        out.append(pal.ansi(m.group(), "bold", "yellow", enabled=True))
+        last = m.end()
+    out.append(text[last:])
+    return "".join(out)
+
+
+def _excerpts(
+    content: str, query: str, *, color: bool, context: int = 40, limit: int = 3,
+) -> list[str]:
+    """Up to `limit` grep-style match spans, whitespace-collapsed and query-highlighted."""
+    if not query:
+        return []
+    ql = query.lower()
+    low = content.lower()
+    spans: list[str] = []
+    i = 0
+    while len(spans) < limit and (j := low.find(ql, i)) != -1:
+        start = max(0, j - context)
+        end = min(len(content), j + len(query) + context)
+        body = " ".join(content[start:end].split())
+        prefix = "… " if start > 0 else ""
+        suffix = " …" if end < len(content) else ""
+        spans.append(prefix + _highlight(body, query, color=color) + suffix)
+        i = j + len(query)
+    return spans
+
+
+def _render_search_hit(
+    hit: _SearchHit, query: str, *, color: bool,
+) -> list[str]:
+    header = _search_list_line(hit)
+    spans = _excerpts(hit.content, query, color=color)
+    if spans:
+        return [header, *(f"    {s}" for s in spans)]
+    field = "id" if query.lower() in hit.change_id.lower() else "title"
+    return [header, f"    (matched on {field})"]
+
+
+def _search_list_line(hit: _SearchHit) -> str:
+    return f"{hit.change_id}  {hit.title or '(untitled)'}  [{hit.zone}]"
 
 
 def _search_inflight(control: Path, query: str) -> list[tuple[str, str, str, str]]:
