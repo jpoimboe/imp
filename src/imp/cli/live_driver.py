@@ -350,15 +350,15 @@ class LiveDriver:
                 self._status.restart_span()
             elif etype == "agent_retry":
                 # Zero the span at wait entry so compose_activity_line's countdown
-                # (countdown_total - elapsed) measures time-since-wait-start. Mirror
-                # the exact condition under which the builder's _h_agent_retry sets
-                # _reset_wait (skips stalled, requires numeric backoff), so the
-                # wait-verb and its baseline can never disagree.
+                # (countdown_total - elapsed) measures time-since-this-wait-start.
+                # Mirror _h_agent_retry's new wait-state gate exactly — every
+                # retry-with-backoff category (stalled included) with a numeric
+                # delay — so the wait verb and its countdown baseline can never
+                # disagree.
+                from imp.engine.error_policy import is_retry_with_backoff
                 payload = event.get("payload") or {}
                 secs = payload.get("backoff_seconds")
-                hinted = bool(payload.get("hinted")) or (
-                    isinstance(secs, (int, float)) and secs >= 120)
-                if (payload.get("category") != "stalled" and hinted
+                if (is_retry_with_backoff(str(payload.get("category")))
                         and isinstance(secs, (int, float))):
                     self._status.restart_span()
         self._walk()
