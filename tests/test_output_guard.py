@@ -381,3 +381,107 @@ def test_recover_json_without_param_markers_is_unchanged() -> None:
     )
     args = {"status": "Success", "note": "plain narrative, no tags at all"}
     assert recover_folded_fields(args, schema) == args
+
+
+def _gapcheck_schema():
+    # gap-check-shaped schema (with_outcome_field applied): both required.
+    raw = {
+        "rationale": {"type": "string"},
+        "outcome": {"type": "string"},
+    }
+    return parse_output_schema(raw, source=SourceLoc(file=Path("a.yaml"), line=1))
+
+
+def test_recover_folded_fields_recovers_generic_close_to_eos_outcome() -> None:
+    # hehu38 shape: rationale ends with a GENERIC </parameter> close, then an
+    # unclosed <parameter name="outcome"> running to end-of-string. There is NO
+    # </rationale> anywhere, so the old own-name-only search never fired.
+    folded = (
+        "Verified all 7 scope items. No uncovered code scope remains."
+        '</parameter>\n<parameter name="outcome">Verified all 7 scope items; '
+        "more_plans: false."
+    )
+    repaired = recover_folded_fields({"rationale": folded}, _gapcheck_schema())
+    assert repaired == {
+        "rationale": (
+            "Verified all 7 scope items. No uncovered code scope remains."
+        ),
+        "outcome": "Verified all 7 scope items; more_plans: false.",
+    }
+
+
+def test_validate_recovers_generic_close_fold_returns_ok_with_metadata() -> None:
+    # Full path end to end: the generic-close fold makes the required `outcome`
+    # missing, so validation fails, recovery fires, and the repaired copy
+    # re-validates -> Ok with populated RecoveryInfo naming the recovered field.
+    g = LoopGuard()
+    folded = (
+        "No uncovered code scope remains."
+        '</parameter>\n<parameter name="outcome">Verified; more_plans: false.'
+    )
+    res = validate_output_or_nudge({"rationale": folded}, _gapcheck_schema(), g)
+    assert isinstance(res, Ok)
+    assert res.payload == {
+        "rationale": "No uncovered code scope remains.",
+        "outcome": "Verified; more_plans: false.",
+    }
+    assert res.recovered is not None
+    assert res.recovered.container == "rationale"
+    assert res.recovered.fields == ("outcome",)
+    ev = make_recovery_event(res)
+    assert ev == {
+        "type": "output_recovered",
+        "payload": {"container": "rationale", "fields": ["outcome"]},
+    }
+    assert g.noprogress_streak == 0
+
+
+def test_recover_earliest_viable_skips_lone_mirror_tag() -> None:
+    # Brittleness fix: an EARLIER lone </rationale> sits in prose and is NOT
+    # followed by a param opener; the real fold boundary is a later </rationale>
+    # that IS. The earliest-VIABLE search skips the lone tag and splits at the
+    # real boundary (the old first-occurrence search aborted here).
+    folded = (
+        "compare </rationale> loosely here."
+        '</rationale>\n<parameter name="outcome">done'
+    )
+    repaired = recover_folded_fields({"rationale": folded}, _gapcheck_schema())
+    assert repaired == {
+        "rationale": "compare </rationale> loosely here.",
+        "outcome": "done",
+    }
+
+
+def test_recover_generic_close_ignores_prose_parameter_tag() -> None:
+    # False-positive guard: a </parameter> that is NOT immediately followed by a
+    # <parameter name= opener is left untouched (no fold fired).
+    args = {"rationale": "we closed the </parameter> tag in prose; nothing folded"}
+    repaired = recover_folded_fields(args, _gapcheck_schema())
+    assert repaired == args
+
+
+def test_validate_prose_parameter_tag_still_nudges() -> None:
+    # Same prose-only </parameter> at the decision point: no recovery, required
+    # `outcome` stays missing -> nudge.
+    g = LoopGuard()
+    args = {"rationale": "we closed the </parameter> tag in prose; nothing folded"}
+    res = validate_output_or_nudge(args, _gapcheck_schema(), g)
+    assert isinstance(res, Nudge)
+    assert "outcome" in res.reason
+    assert g.noprogress_streak == 1
+
+
+def test_recover_generic_close_earliest_viable_skips_lone_generic_tag() -> None:
+    # Earliest-VIABLE at the generic-close intersection: a first lone
+    # </parameter> in prose is NOT followed by a param opener; the real fold
+    # boundary is a later </parameter> that IS. The split happens at the later,
+    # viable close, not the first raw occurrence.
+    folded = (
+        "closed one </parameter> in prose, then more text"
+        '</parameter>\n<parameter name="outcome">done'
+    )
+    repaired = recover_folded_fields({"rationale": folded}, _gapcheck_schema())
+    assert repaired == {
+        "rationale": "closed one </parameter> in prose, then more text",
+        "outcome": "done",
+    }
