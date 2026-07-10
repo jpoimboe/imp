@@ -79,6 +79,7 @@ async def serve_change_session(
     non_interactive: bool = False,
     autonomous: bool = False,
     first_attach_timeout: float = _DEFAULT_FIRST_ATTACH_TIMEOUT,
+    model: str | None = None,
 ) -> Any:
     # Shared coordinator: socket `interrupt` control frame → run_change's pause check.
     from imp.cli.signals import InterruptCoordinator
@@ -124,6 +125,8 @@ async def serve_change_session(
             run_kwargs["headless"] = True
         if autonomous:
             run_kwargs["autonomous"] = True
+        if model is not None:
+            run_kwargs["opening_model"] = model
         if resume_target == "prompt" and not (non_interactive or autonomous):
             # Resume back to the resteer hold prompt the user left from, before
             # any agent run: a typed reply then interjects and runs the agent;
@@ -230,6 +233,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--resume", action="store_true")
     parser.add_argument("--non-interactive", action="store_true")
     parser.add_argument("--autonomous", action="store_true")
+    parser.add_argument("--model", default=None)
     ns = parser.parse_args(argv)
     try:
         change = Change.load(Path(ns.control_root), ns.change_id)
@@ -243,6 +247,8 @@ def main(argv: list[str] | None = None) -> int:
         kwargs["non_interactive"] = True
     if ns.autonomous:
         kwargs["autonomous"] = True
+    if ns.model is not None:
+        kwargs["model"] = ns.model
     try:
         if kwargs:
             result = anyio.run(functools.partial(serve_change_session, change, **kwargs))

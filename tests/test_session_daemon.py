@@ -1617,3 +1617,52 @@ async def test_model_override_pause_reenters_without_resume_prompt(
     assert result is RunResult.COMPLETED
     assert calls["n"] == 2                       # re-entered exactly once
     assert applied == [("anthropic:claude-fable-5", "brainstorm")]
+
+
+@pytest.mark.anyio
+async def test_serve_threads_opening_model_to_run_fn(tmp_path) -> None:
+    from imp.engine.executor import RunResult
+    from imp.remote.session.daemon import serve_change_session
+
+    captured: dict[str, object] = {}
+
+    async def _run_fn(change, **kw):
+        captured.update(kw)
+        return RunResult.COMPLETED
+
+    await serve_change_session(
+        _make_change(tmp_path, "2026-07-10-mdl"), run_fn=_run_fn, hibernate=False,
+        model="anthropic:claude-fable-5")
+    assert captured["opening_model"] == "anthropic:claude-fable-5"
+
+
+def test_main_forwards_model_to_serve(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import functools
+
+    import imp.remote.session.daemon as daemon
+
+    loaded = object()
+    captured: dict[str, Any] = {}
+
+    def fake_load(control_root: Path, change_id: str) -> object:
+        return loaded
+
+    def fake_run(fn: Any) -> None:
+        captured["fn"] = fn
+
+    monkeypatch.setattr(daemon.Change, "load", staticmethod(fake_load))
+    monkeypatch.setattr(daemon.anyio, "run", fake_run)
+
+    rc = daemon.main([
+        "--control-root", str(tmp_path),
+        "--change-id", "2026-07-10-mdl",
+        "--model", "a:b",
+    ])
+
+    assert rc == 0
+    fn = captured["fn"]
+    assert isinstance(fn, functools.partial)
+    assert fn.func is daemon.serve_change_session
+    assert fn.keywords.get("model") == "a:b"
