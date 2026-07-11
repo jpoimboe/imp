@@ -587,3 +587,36 @@ def test_materialize_idempotent_no_op_never_raises_even_when_title_emptied(
     ch.rename("   ", log=ch.event_log())          # blank the title AFTER materializing
     assert ch.materialize() is False              # idempotent no-op, no raise
     assert ch.project_root == root_after_first
+
+
+def test_control_workflow_dir_resolves_against_control_root(tmp_path: Path) -> None:
+    """control_workflow_dir resolves the committed fork under control_root, even
+    when the worktree (project_root) carries a divergent committed workflow —
+    live_workflow_dir still points at the worktree."""
+    ctl = tmp_path / "ctl"
+    wt = tmp_path / "wt"
+    for root, marker in ((ctl, "control-side"), (wt, "worktree-side")):
+        wf = root / "imp" / "workflows" / "imp"
+        (wf / "agents").mkdir(parents=True)
+        (wf / "workflow.yaml").write_text(f"name: {marker}\n")
+        (root / "imp" / "project.yaml").write_text("default-workflow: imp\n")
+    ch = Change(
+        id="c", title="t", base_branch="main",
+        control_root=ctl, project_root=wt, change_dir=tmp_path / "cd",
+    )
+    assert ch.control_workflow_dir == ctl / "imp" / "workflows" / "imp"
+    assert ch.live_workflow_dir == wt / "imp" / "workflows" / "imp"
+
+
+def test_control_workflow_dir_falls_back_to_bundled(tmp_path: Path) -> None:
+    """With no committed imp/workflows/imp fork in the control root, the resolver
+    falls back to the installed bundled workflow (the downstream-bundled case)."""
+    from imp.assets import bundled_workflow_dir
+    ctl = tmp_path / "ctl"
+    (ctl / "imp").mkdir(parents=True)
+    (ctl / "imp" / "project.yaml").write_text("default-workflow: imp\n")
+    ch = Change(
+        id="c", title="t", base_branch="main",
+        control_root=ctl, project_root=tmp_path / "wt", change_dir=tmp_path / "cd",
+    )
+    assert ch.control_workflow_dir == bundled_workflow_dir("imp")

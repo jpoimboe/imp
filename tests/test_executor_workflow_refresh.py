@@ -427,3 +427,44 @@ async def test_unchanged_workflow_resume_skips_reconcile(tmp_path: Path) -> None
     await run_change(change, on_event=lambda _e: None)   # workflow byte-identical
     state = State.load(change.state_dir)
     assert "high" not in state.resolved_tiers
+
+
+def test_refresh_sources_from_control_root_not_worktree(tmp_path: Path) -> None:
+    """The snapshot is copied from the control root's workflow, NOT the change's
+    worktree — the imp-on-imp / divergent-worktree case. Before the fix the copy
+    source was the worktree, so the snapshot would carry WORKTREE-EDIT."""
+    change, _, _ = _seed_minimal_workflow(tmp_path)   # control-root workflow: name: t
+    # A divergent worktree whose committed workflow differs from the control root.
+    wt = tmp_path / "wt"
+    wt_wf = wt / "imp" / "workflows" / "imp"
+    (wt_wf / "agents").mkdir(parents=True)
+    (wt_wf / "agents" / "writer.md").write_text("worktree-divergent\n")
+    (wt_wf / "workflow.yaml").write_text("name: WORKTREE-EDIT\n")
+    change.project_root = wt
+
+    assert _refresh_workflow_snapshot(change) is False   # initial copy, no flag
+    snap = change.change_dir / "workflow" / "workflow.yaml"
+    assert "WORKTREE-EDIT" not in snap.read_text()
+    assert "name: t" in snap.read_text()                 # the control-root content
+
+
+def test_refresh_ignores_worktree_edits_stays_noop(tmp_path: Path) -> None:
+    """With the source anchored at the control root, editing ONLY the worktree
+    leaves the refresh a no-op (no swap, snapshot bytes unchanged) — a change
+    cannot self-poison its snapshot with its own in-flight workflow edits."""
+    change, _, _ = _seed_minimal_workflow(tmp_path)
+    wt = tmp_path / "wt"
+    wt_wf = wt / "imp" / "workflows" / "imp"
+    wt_wf.mkdir(parents=True)
+    (wt_wf / "workflow.yaml").write_text("name: v1-worktree\n")
+    change.project_root = wt
+
+    assert _refresh_workflow_snapshot(change) is False   # initial copy from control
+    snap = change.change_dir / "workflow" / "workflow.yaml"
+    before = snap.read_bytes()
+    # Edit ONLY the worktree; the control-root source is untouched.
+    (wt_wf / "workflow.yaml").write_text("name: v2-worktree-edit\n")
+
+    assert _refresh_workflow_snapshot(change) is False   # no-op: source unchanged
+    assert snap.read_bytes() == before
+    assert not (change.change_dir / "workflow.tmp").exists()

@@ -257,6 +257,15 @@ class Change:
         return resolve_workflow_dir(self.project_root, name)
 
     @property
+    def control_workflow_dir(self) -> Path:
+        """Mirror of live_workflow_dir rooted at the control root, not the worktree."""
+        from imp.assets import resolve_workflow_dir
+        from imp.providers.config import parse_default_workflow
+        name = self.workflow or parse_default_workflow(
+            self.control_root / "imp" / "project.yaml")
+        return resolve_workflow_dir(self.control_root, name)
+
+    @property
     def workflow_dir(self) -> Path:
         snapshot = self.change_dir / "workflow"
         return snapshot if snapshot.is_dir() else self.live_workflow_dir
