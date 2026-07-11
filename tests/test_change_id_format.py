@@ -31,8 +31,8 @@ def test_new_change_id_unique_small_n() -> None:
 
 
 def test_new_change_id_seeded_rng_is_deterministic() -> None:
-    first = [new_change_id(random.Random(0)) for _ in range(20)]
-    second = [new_change_id(random.Random(0)) for _ in range(20)]
+    first = [new_change_id(rng=random.Random(0)) for _ in range(20)]
+    second = [new_change_id(rng=random.Random(0)) for _ in range(20)]
     assert first == second
     assert _ID_RE.fullmatch(first[0])
 
