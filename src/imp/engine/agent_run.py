@@ -394,9 +394,10 @@ def _join_pending_interjects(coordinator: Any) -> str | None:
 
 
 _CONTINUATION_NUDGE = (
-    "Your previous turn ended before this step was finished. "
-    "Continue from where you left off and call `complete_step` when the "
-    "step is done."
+    "The run was paused by the user and is now resuming — this is not a "
+    "rejection and nothing failed. Continue the step from where you left off "
+    "and call complete_step when it is done. Do not ask the user how to "
+    "proceed unless you genuinely need input you do not already have."
 )
 
 

@@ -44,8 +44,10 @@ REWORK_RESULT_FRAME = (
 )
 
 RESUME_CONTINUE_NUDGE = (
-    "You stopped before calling complete_step. Continue exactly where you left "
-    "off and finish the step — call complete_step when the work is done."
+    "The run was paused by the user and is now resuming — this is not a "
+    "rejection and nothing failed. Continue the step from where you left off "
+    "and call complete_step when it is done. Do not ask the user how to "
+    "proceed unless you genuinely need input you do not already have."
 )
 
 # Injected once onto every synthesized resume turn. On resume the transcript is
@@ -55,12 +57,14 @@ RESUME_CONTINUE_NUDGE = (
 # is_error placeholders this module writes for interrupted/superseded tool_uses.
 # The note keeps the model from redoing durable work it can simply verify.
 RESUME_DURABILITY_NOTE = (
-    "[resume] The tool results above were reconstructed from before this resume "
-    "and may display as errors even when the original action succeeded. Any files "
-    "you have already written and commits you have already made are durable on "
-    "disk — do not blindly redo them. Before re-running any write, edit, or "
-    "commit, verify the current state with a read-only check (read the file, or "
-    "run git log / git status)."
+    "[resume] The run was paused by the user and is now resuming. Any tool "
+    "results above shown as errors were cut off by that pause — they were not "
+    "rejected or failed. The tool results above were reconstructed from before "
+    "this resume and may display as errors even when the original action "
+    "succeeded. Any files you have already written and commits you have already "
+    "made are durable on disk — do not blindly redo them. Before re-running any "
+    "write, edit, or commit, verify the current state with a read-only check "
+    "(read the file, or run git log / git status)."
 )
 
 RESUME_REDO_NUDGE = (
@@ -106,7 +110,8 @@ class Transcript:
 
 _INTERRUPTED_BASH_BODY = (
     '{"stdout": "", '
-    '"stderr": "interrupted before result captured", '
+    '"stderr": "interrupted by user pause before result captured — not a '
+    'failure; re-run if needed", '
     '"returncode": -2}'
 )
 
@@ -121,7 +126,12 @@ def _synthetic_tool_result_content(tool_name: str) -> str:
     """
     if tool_name in ("bash", "mcp__imp__bash"):
         return _INTERRUPTED_BASH_BODY
-    return f"tool {tool_name!r} interrupted before result was captured"
+    return (
+        "[interrupted] The user paused the run before this call's result was "
+        "captured — this was NOT a rejection, denial, or failure. On resume, "
+        "re-run or re-dispatch this call if its work is still needed, then "
+        "continue the step."
+    )
 
 
 def captured_result_key(name: str, tool_input: dict[str, Any]) -> str:
