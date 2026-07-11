@@ -206,7 +206,7 @@ def test_main_loads_named_change_and_serves_it(
     monkeypatch.setattr(daemon.anyio, "run", fake_run)
 
     rc = daemon.main(
-        ["--control-root", str(tmp_path), "--change-id", "2026-06-15-abc"])
+        ["--control-root", str(tmp_path), "--quest-id", "2026-06-15-abc"])
 
     assert rc == 0
     assert calls["load"] == (tmp_path, "2026-06-15-abc")
@@ -541,7 +541,7 @@ def test_main_forwards_resume_flag_via_partial(
 
     rc = daemon.main([
         "--control-root", str(tmp_path),
-        "--change-id", "2026-06-15-abc",
+        "--quest-id", "2026-06-15-abc",
         "--resume",
     ])
 
@@ -633,7 +633,7 @@ def test_main_unknown_quest_id_prints_clean_error_and_exits_nonzero(
         raise LoadError("no such change feat")
 
     monkeypatch.setattr(daemon.Quest, "load", staticmethod(boom))
-    rc = daemon.main(["--control-root", str(tmp_path), "--change-id", "feat"])
+    rc = daemon.main(["--control-root", str(tmp_path), "--quest-id", "feat"])
     assert rc == 2
     assert "no such change feat" in capsys.readouterr().err
 
@@ -646,7 +646,7 @@ def test_main_maps_paused_outcome_to_nonzero(
 
     monkeypatch.setattr(daemon.Quest, "load", staticmethod(lambda r, c: object()))
     monkeypatch.setattr(daemon.anyio, "run", lambda *a, **k: RunResult.PAUSED)
-    rc = daemon.main(["--control-root", str(tmp_path), "--change-id", "feat"])
+    rc = daemon.main(["--control-root", str(tmp_path), "--quest-id", "feat"])
     assert rc == 1
 
 
@@ -658,7 +658,7 @@ def test_main_maps_paused_outcome_to_nonzero_with_kwargs(
 
     monkeypatch.setattr(daemon.Quest, "load", staticmethod(lambda r, c: object()))
     monkeypatch.setattr(daemon.anyio, "run", lambda *a, **k: RunResult.PAUSED)
-    rc = daemon.main(["--control-root", str(tmp_path), "--change-id", "feat", "--resume"])
+    rc = daemon.main(["--control-root", str(tmp_path), "--quest-id", "feat", "--resume"])
     assert rc == 1
 
 
@@ -1093,7 +1093,7 @@ def test_main_parses_non_interactive_into_serve_kwargs(
     monkeypatch.setattr(daemon.anyio, "run", fake_run)
     rc = daemon.main([
         "--control-root", str(tmp_path),
-        "--change-id", "2026-06-15-mnint", "--non-interactive"])
+        "--quest-id", "2026-06-15-mnint", "--non-interactive"])
     assert rc == 0
     fn = calls["fn"]
     assert fn.func is daemon.serve_change_session
@@ -1273,7 +1273,7 @@ def test_main_forwards_autonomous_via_partial(
 
     rc = daemon.main([
         "--control-root", str(tmp_path),
-        "--change-id", "2026-06-15-abc",
+        "--quest-id", "2026-06-15-abc",
         "--autonomous",
     ])
 

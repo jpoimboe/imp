@@ -51,7 +51,7 @@ def test_spawn_session_daemon_launches_detached_module_entry(
     assert captured["argv"] == [
         sys.executable, "-m", "imp.remote.session.daemon",
         "--control-root", str(tmp_path),
-        "--change-id", "2026-06-15-abc",
+        "--quest-id", "2026-06-15-abc",
     ]
     kw = captured["kwargs"]
     assert kw["cwd"] == str(tmp_path)
@@ -148,7 +148,7 @@ def test_spawn_session_daemon_includes_resume_flag_when_set(
     assert captured["argv"] == [
         sys.executable, "-m", "imp.remote.session.daemon",
         "--control-root", str(tmp_path),
-        "--change-id", "2026-06-15-abc",
+        "--quest-id", "2026-06-15-abc",
         "--resume",
     ]
 

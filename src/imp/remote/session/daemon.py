@@ -226,14 +226,14 @@ async def serve_change_session(
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="imp-session-daemon")
     parser.add_argument("--control-root", required=True)
-    parser.add_argument("--change-id", required=True)
+    parser.add_argument("--quest-id", required=True)
     parser.add_argument("--resume", action="store_true")
     parser.add_argument("--non-interactive", action="store_true")
     parser.add_argument("--autonomous", action="store_true")
     parser.add_argument("--model", default=None)
     ns = parser.parse_args(argv)
     try:
-        change = Quest.load(Path(ns.control_root), ns.change_id)
+        change = Quest.load(Path(ns.control_root), ns.quest_id)
     except LoadError as exc:
         print(f"imp: {exc}", file=sys.stderr)
         return 2

@@ -25,7 +25,7 @@ def spawn_session_daemon(
     argv = [
         sys.executable, "-m", "imp.remote.session.daemon",
         "--control-root", str(change.control_root),
-        "--change-id", change.id,
+        "--quest-id", change.id,
     ]
     if resume:
         argv.append("--resume")
