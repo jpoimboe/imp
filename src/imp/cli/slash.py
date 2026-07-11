@@ -18,6 +18,7 @@ from imp.agents.skills import (
 )
 from imp.cli.live_driver import compose_identity_toolbar
 from imp.cli.model_command import print_model_roster, validate_model_arg
+from imp.cli.palette import caret
 
 # Sentinel: the line was a builtin / unknown / not-found command that printed
 # and the caller should re-prompt (do NOT submit anything to the agent).
@@ -28,8 +29,13 @@ def is_slash_command(text: str) -> bool:
     return text.lstrip().startswith("/")
 
 
+def _echo_command(text: str, out: Callable[[str], None], *, color: bool) -> None:
+    out(caret(enabled=color) + text.strip())
+
+
 def handle_slash_line(
     text: str, *, change: Any, output_fn: Callable[[str], None],
+    color: bool = False,
 ) -> object | str:
     """Dispatch a /-line. Returns REPROMPT for /help, /skills, and builtins that
     print usage (each prints via output_fn). Returns the skill body (str) for a
@@ -47,12 +53,15 @@ def handle_slash_line(
     args = tokens[1].strip() if len(tokens) > 1 else ""
 
     if cmd in ("", "help"):
+        _echo_command(text, output_fn, color=color)
         _help(output_fn)
         return REPROMPT
     if cmd == "skills":
+        _echo_command(text, output_fn, color=color)
         _list(change.workflow_dir / "skills", output_fn)
         return REPROMPT
     if cmd == "list":
+        _echo_command(text, output_fn, color=color)
         import argparse
 
         from imp.cli.main import _cmd_status
@@ -60,6 +69,7 @@ def handle_slash_line(
         _cmd_status(argparse.Namespace(all=show_all), change.control_root)
         return REPROMPT
     if cmd == "search":
+        _echo_command(text, output_fn, color=color)
         if not args:
             output_fn("Usage: /search <query>")
             return REPROMPT
@@ -79,14 +89,17 @@ def handle_slash_line(
         return "/clear"
     if cmd == "model":
         if not args:
+            _echo_command(text, output_fn, color=color)
             print_model_roster(change=change, output_fn=output_fn)
             return REPROMPT
         err = validate_model_arg(args, change=change)
         if err is not None:
+            _echo_command(text, output_fn, color=color)
             output_fn(err)
             return REPROMPT
         return f"/model {args}"
     if cmd == "resume":
+        _echo_command(text, output_fn, color=color)
         if not args:
             output_fn("Usage: /resume <id|query>")
             return REPROMPT
@@ -299,7 +312,8 @@ async def ask_line_with_slash(
                             raise EOFError
                         if not is_slash_command(line):
                             return line
-                        result = handle_slash_line(line, change=change, output_fn=print)
+                        result = handle_slash_line(
+                            line, change=change, output_fn=print, color=color)
                         if result is REPROMPT:
                             print("")  # one blank between slash output and the reprompt
                             continue

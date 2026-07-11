@@ -280,3 +280,92 @@ def test_help_documents_content_search() -> None:
     result = handle_slash_line("/help", change=change, output_fn=out.append)
     assert result is REPROMPT
     assert any("/search" in line and "content" in line for line in out)
+
+
+def test_help_is_echoed_with_caret(tmp_path: Path) -> None:
+    change = SimpleNamespace()
+    out: list[str] = []
+    result = handle_slash_line("/help", change=change, output_fn=out.append, color=False)
+    assert result is REPROMPT
+    assert out[0] == "> /help"          # caret echo heads the command's own output
+
+
+def test_search_echo_precedes_its_own_output(tmp_path: Path) -> None:
+    change = SimpleNamespace(control_root=tmp_path)
+    out: list[str] = []
+    handle_slash_line("/search", change=change, output_fn=out.append, color=False)
+    assert out[0] == "> /search"        # echo first
+    assert any("Usage: /search" in line for line in out[1:])   # command output below
+
+
+def test_valid_model_is_not_echoed_here(tmp_path: Path, monkeypatch) -> None:
+    import imp.cli.slash as slash
+    monkeypatch.setattr(slash, "validate_model_arg", lambda arg, *, change: None)
+    change = SimpleNamespace()
+    out: list[str] = []
+    result = slash.handle_slash_line(
+        "/model anthropic:claude-fable-5", change=change, output_fn=out.append,
+        color=False)
+    assert result == "/model anthropic:claude-fable-5"
+    assert not any(line.startswith("> ") for line in out)
+
+
+def test_invalid_model_is_echoed(tmp_path: Path, monkeypatch) -> None:
+    import imp.cli.slash as slash
+    monkeypatch.setattr(
+        slash, "validate_model_arg",
+        lambda arg, *, change: "provider 'openai' is not available")
+    change = SimpleNamespace()
+    out: list[str] = []
+    result = slash.handle_slash_line(
+        "/model openai:gpt-5", change=change, output_fn=out.append, color=False)
+    assert result is slash.REPROMPT
+    assert out[0] == "> /model openai:gpt-5"
+
+
+def test_bare_model_roster_is_echoed(tmp_path: Path, monkeypatch) -> None:
+    import imp.cli.slash as slash
+    monkeypatch.setattr(
+        slash, "print_model_roster",
+        lambda *, change, output_fn: output_fn("Current: x"))
+    change = SimpleNamespace()
+    out: list[str] = []
+    result = slash.handle_slash_line("/model", change=change, output_fn=out.append,
+                                     color=False)
+    assert result is slash.REPROMPT
+    assert out[0] == "> /model"
+
+
+def test_skill_and_pasted_path_are_not_command_echoed(tmp_path: Path) -> None:
+    change = SimpleNamespace(workflow_dir=tmp_path, control_root=tmp_path)
+    out: list[str] = []
+    result = handle_slash_line(
+        "/home/user/foo.py", change=change, output_fn=out.append, color=False)
+    assert result == "/home/user/foo.py"
+    assert out == []
+
+
+def test_skills_is_echoed_with_caret(tmp_path: Path) -> None:
+    change = SimpleNamespace(workflow_dir=tmp_path)   # empty skills dir -> "none" listing
+    out: list[str] = []
+    result = handle_slash_line("/skills", change=change, output_fn=out.append, color=False)
+    assert result is REPROMPT
+    assert out[0] == "> /skills"
+
+
+def test_list_is_echoed_with_caret(tmp_path: Path) -> None:
+    _seed_control(tmp_path)                            # _cmd_status needs a control root
+    change = SimpleNamespace(control_root=tmp_path)
+    out: list[str] = []
+    result = handle_slash_line("/list", change=change, output_fn=out.append, color=False)
+    assert result is REPROMPT
+    assert out[0] == "> /list"                         # _cmd_status prints via stdout, not out
+
+
+def test_resume_is_echoed_with_caret(tmp_path: Path) -> None:
+    change = SimpleNamespace(control_root=tmp_path)
+    out: list[str] = []
+    result = handle_slash_line("/resume", change=change, output_fn=out.append, color=False)
+    assert result is REPROMPT
+    assert out[0] == "> /resume"                        # echo above the usage line
+    assert any("Usage: /resume" in line for line in out[1:])
