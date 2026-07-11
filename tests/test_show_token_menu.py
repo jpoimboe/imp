@@ -233,6 +233,25 @@ def test_cmd_show_no_token_interactive_picker(monkeypatch, tmp_path: Path) -> No
     assert seen["id"] == "lodo40"
 
 
+def test_cmd_show_empty_token_skips_picker_and_errors(
+    monkeypatch, tmp_path: Path, capsys,
+) -> None:
+    # Keeps picker/resolve fork consistent with _resolve_id's empty-token guard,
+    # regardless of change count.
+    monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
+    monkeypatch.setattr(m, "_iter_change_ids", lambda c: ["lodo40", "lodo77"])
+    monkeypatch.setattr(m, "_interactive", lambda: True)
+
+    def boom_pick(*a, **k):
+        raise AssertionError("picker must not open for an empty token")
+
+    monkeypatch.setattr(m, "_pick_show_matches", boom_pick)
+    rc = m._cmd_show(_ns(""))
+    err = capsys.readouterr().err
+    assert rc == 2
+    assert "no Change matches" in err
+
+
 def test_cmd_show_no_token_non_tty_errors(
     monkeypatch, tmp_path: Path, capsys,
 ) -> None:

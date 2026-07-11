@@ -1607,7 +1607,7 @@ def _cmd_show(args: argparse.Namespace) -> int:
     else:
         # Same comprehension as _resolve_id — picker and resolver agree on candidates.
         matches = [cid for cid in _iter_change_ids(control) if token in cid]
-        if _interactive() and len(matches) >= 2:
+        if _interactive() and token.strip() and len(matches) >= 2:
             picked = anyio.run(_pick_show_matches, control, matches)
             if isinstance(picked, int):
                 return picked
