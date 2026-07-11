@@ -745,95 +745,6 @@ def test_refresh_status_no_output_on_non_tty() -> None:
     assert drv._prev_prose is True   # untouched
 
 
-def test_status_span_restarts_on_prose_turns_steps_and_user_replies() -> None:
-    """The status timer measures the agent's working burst since it last spoke.
-    restart_span() fires on step_started, user_message, AND a genuine prose
-    llm_response — but NOT on an empty-text (tool-use-carrier) llm_response."""
-    calls: list[str] = []
-
-    class _CountingStatus(LiveStatus):
-        def restart_span(self) -> None:
-            calls.append("restart")
-            super().restart_span()
-
-    out = _Pipe()
-    status = _CountingStatus(out)
-    drv = LiveDriver(stream=out, color=False, width=80, status=status)
-    for e in [
-        ev("1", "change_created", change_id=1, title="x"),
-        ev("2", "step_started", step="spec", kind="agent", phase="p",
-           model="m", provider="anthropic"),                              # restart
-        ev("3", "llm_response", agent_id="a",
-           raw={"content": [{"type": "tool_use", "id": "t", "name": "bash",
-                             "input": {}}]}, usage={}),                    # NO restart (no prose)
-        ev("4", "tool_call", agent_id="a", id="t", name="bash", input={}),
-        ev("5", "tool_result", agent_id="a", id="t", content="ok"),
-        ev("6", "llm_response", agent_id="a",
-           raw={"content": [{"type": "text", "text": "ask"}]}, usage={}),  # restart (prose)
-        ev("7", "user_message", content=[{"type": "text", "text": "reply"}]),  # restart
-        ev("8", "llm_response", agent_id="a",
-           raw={"content": [{"type": "text", "text": "ack"}]}, usage={}),  # restart (prose)
-    ]:
-        drv.on_event(e)
-    assert calls == ["restart", "restart", "restart", "restart"]
-
-
-def test_prose_does_not_restart_span_while_a_subagent_runs() -> None:
-    """A parent prose llm_response restarts the span normally — but NOT while a
-    dispatched subagent is still running, else the visible `(+N subagents) · Ns`
-    elapsed zeroes for work that never stopped."""
-    calls: list[str] = []
-
-    class _CountingStatus(LiveStatus):
-        def restart_span(self) -> None:
-            calls.append("restart")
-            super().restart_span()
-
-    out = _Pipe()
-    status = _CountingStatus(out)
-    drv = LiveDriver(stream=out, color=False, width=80, status=status)
-    for e in [
-        ev("1", "change_created", change_id=1, title="x"),
-        ev("2", "step_started", step="spec", kind="agent", phase="p",
-           model="m", provider="anthropic"),                              # restart
-        ev("3", "tool_call", agent_id="a", id="t1", name="sub_agent",
-           input={"subagent_name": "reviewer"}),                         # fold runs
-        ev("4", "llm_response", agent_id="a",
-           raw={"content": [{"type": "text", "text": "still working"}]},
-           usage={}),                                                    # NO restart
-    ]:
-        drv.on_event(e)
-    assert calls == ["restart"]                                          # only step_started
-
-
-def test_subagent_step_and_user_message_do_not_restart_span_while_running() -> None:
-    """A dispatched subagent's own step_started (and any user_message) must NOT
-    zero the shared `(+N subagents) · Ns` burst timer while the subagent runs;
-    only the parent's pre-dispatch step_started restarts it."""
-    calls: list[str] = []
-
-    class _CountingStatus(LiveStatus):
-        def restart_span(self) -> None:
-            calls.append("restart")
-            super().restart_span()
-
-    out = _Pipe()
-    status = _CountingStatus(out)
-    drv = LiveDriver(stream=out, color=False, width=80, status=status)
-    for e in [
-        ev("1", "change_created", change_id=1, title="x"),
-        ev("2", "step_started", step="spec", kind="agent", phase="p",
-           model="m", provider="anthropic"),                              # restart
-        ev("3", "tool_call", agent_id="a", id="t1", name="sub_agent",
-           input={"subagent_name": "reviewer"}),                         # fold runs
-        ev("4", "step_started", agent_id="sub:3", step="rev", kind="agent",
-           phase="p", model="m", provider="anthropic"),                  # NO restart
-        ev("5", "user_message", content=[{"type": "text", "text": "reply"}]),  # NO restart
-    ]:
-        drv.on_event(e)
-    assert calls == ["restart"]                                          # only step 2
-
-
 def test_chrome_step_collapses_live_and_matches_log() -> None:
     drv, out = _driver()
     events = [
@@ -1018,7 +929,7 @@ def test_quiet_pause_surfaces_live_and_matches_log() -> None:
 def test_compose_activity_status_none_when_idle() -> None:
     from imp.cli.live_driver import compose_activity_status
     builder = nv.NarrativeBuilder()
-    assert compose_activity_status(builder, frame=0, elapsed=1.0, color=True) is None
+    assert compose_activity_status(builder, frame=0, color=True) is None
 
 
 def test_compose_activity_status_paints_count_detail_label() -> None:
@@ -1027,7 +938,7 @@ def test_compose_activity_status_paints_count_detail_label() -> None:
     builder.add(ev("1", "step_started", step="s", kind="agent", phase="p"))
     builder.add(ev("t1", "tool_call", agent_id="a", id="c1", name="bash",
                    input={"command": "ls"}))
-    line = compose_activity_status(builder, frame=0, elapsed=1.0, color=True)
+    line = compose_activity_status(builder, frame=0, color=True)
     assert line is not None
     assert "thinking" in line           # verb head for unlabeled agent step
     assert "1 call" in line
@@ -1045,7 +956,7 @@ def test_compose_status_is_flush_left_at_any_frontier_depth() -> None:
     drv.on_event(ev("t1", "tool_call", agent_id="a", id="c1", name="bash",
                     input={"command": "ls"}))
     assert drv._frontier_depth() == 0                  # streaming flush at column 0
-    result = drv.compose_status(0, 1.0)
+    result = drv.compose_status(0)
     assert isinstance(result, list) and len(result) == 3
     assert not result[0].startswith(" ")               # spinner at column 0
     assert result[0][0] == "⠋"
@@ -1247,7 +1158,7 @@ def test_status_spinner_uses_braille_glyph() -> None:
     builder.add(ev("1", "step_started", step="s", kind="agent", phase="p"))
     builder.add(ev("t1", "tool_call", agent_id="a", id="c1", name="bash",
                    input={"command": "ls"}))
-    status = compose_activity_status(builder, frame=0, elapsed=1.0, color=False)
+    status = compose_activity_status(builder, frame=0, color=False)
     assert status is not None
     assert status[0] == "⠋"          # braille frame 0 is the first character
     assert "|" not in status          # the "|/-\\" cycle is gone
@@ -1263,11 +1174,13 @@ def test_status_line_shows_step_then_activity_then_elapsed() -> None:
     for e in [
         ev("1", "change_created", change_id=1, title="x"),
         ev("2", "step_started", step="plan-review", kind="agent", phase="review",
-           model="m", provider="anthropic", label="reviewing plan"),
+           model="m", provider="anthropic", label="reviewing plan",
+           timestamp="2026-01-01T00:00:00+00:00"),
         ev("3", "thinking", agent_id="step:review/plan-review", content="hmm"),
     ]:
         b.add(e)
-    line = compose_activity_status(b, frame=0, elapsed=18.0, color=False)
+    line = compose_activity_status(b, frame=0, color=False,
+                                   now_iso="2026-01-01T00:00:18+00:00")
     assert "reviewing plan · 18s" in line
     assert "thinking" not in line                  # the thinking verb is dropped
     assert "review · reviewing plan" not in line   # the phase is NOT shown in the status line
@@ -1375,10 +1288,11 @@ def test_compose_activity_status_has_no_per_call_timer() -> None:
 
     b = nv.NarrativeBuilder()
     b.add(ev("1", "step_started", step="implement", kind="agent", phase="impl",
-             label="implementing"))
+             label="implementing", timestamp="2026-01-01T00:00:00+00:00"))
     b.add(ev("t1", "tool_call", agent_id="a", id="c1", name="bash",
             input={"command": "sleep 600"}))
-    line = compose_activity_status(b, frame=0, elapsed=900.0, color=False)
+    line = compose_activity_status(b, frame=0, color=False,
+                                   now_iso="2026-01-01T00:15:00+00:00")
     assert line is not None
     # Only the single trailing burst timer (900s = 15m 0s); no per-call clock.
     assert line.split(" ", 1)[1] == "implementing · 1 call · bash sleep 600 · 15m 0s"
@@ -1392,11 +1306,13 @@ def test_status_spine_label_activity_elapsed() -> None:
     for e in [
         ev("1", "change_created", change_id=1, title="x"),
         ev("2", "step_started", step="plan-reviewer", kind="agent", phase="plan",
-           model="m", provider="anthropic", label="reviewing plan"),
+           model="m", provider="anthropic", label="reviewing plan",
+           timestamp="2026-01-01T00:00:00+00:00"),
         ev("3", "thinking", agent_id="step:plan/plan-reviewer", content="hmm"),
     ]:
         b.add(e)
-    line = compose_activity_status(b, frame=0, elapsed=18.0, color=False, width=80)
+    line = compose_activity_status(b, frame=0, color=False, width=80,
+                                   now_iso="2026-01-01T00:00:18+00:00")
     # Activity line: spinner · verb · elapsed. Identity (title/model) is in the
     # position bar — not in the activity line.
     assert line.startswith("⠋ reviewing plan · 18s")
@@ -1409,10 +1325,11 @@ def test_status_spine_label_activity_elapsed() -> None:
     for e in [
         ev("1", "change_created", change_id=1, title="x"),
         ev("2", "step_started", step="autosquash", kind="script", phase="implement",
-           show_label=False),
+           show_label=False, timestamp="2026-01-01T00:00:00+00:00"),
     ]:
         q.add(e)
-    qline = compose_activity_status(q, frame=0, elapsed=4.0, color=False, width=80)
+    qline = compose_activity_status(q, frame=0, color=False, width=80,
+                                    now_iso="2026-01-01T00:00:04+00:00")
     assert qline.startswith("⠋ 4s")     # bare timer leads (no verb, no detail)
     assert "x" in qline                 # title appears in position bar (joined into combined line)
 
@@ -1815,7 +1732,7 @@ def test_compose_activity_status_spinner_uses_wordmark_not_cyan() -> None:
             pal.set_theme(theme)
             b = nv.NarrativeBuilder()
             b.add(ev("1", "step_started", step="s", kind="agent", phase="p"))
-            line = compose_activity_status(b, frame=0, elapsed=1.0, color=True)
+            line = compose_activity_status(b, frame=0, color=True)
             assert line is not None
             # The activity line uses the wordmark color for the spinner — never cyan.
             # No background prefix on the activity line (background is on the position bar).
@@ -1935,7 +1852,7 @@ def test_position_row_separates_model_from_graph_with_a_single_space() -> None:
     assert "sonnet · " not in line
 
 
-def test_subagent_row_single_space_model_graph_keeps_trailing_elapsed() -> None:
+def test_subagent_row_orders_elapsed_before_model_graph() -> None:
     from imp.cli import render_text as rt
     from imp.cli.live_driver import compose_subagent_rows, context_bar
     b = nv.NarrativeBuilder()
@@ -1961,14 +1878,17 @@ def test_subagent_row_single_space_model_graph_keeps_trailing_elapsed() -> None:
     assert bar is not None
     rows = compose_subagent_rows(b, color=False, width=200,
                                  now_iso="2026-01-01T00:00:05+00:00")
-    assert f"sonnet {bar}" in rows[0]       # single space binds model to graph
+    assert f"sonnet {bar}" in rows[0]       # single space still binds model to graph
     assert "sonnet · " not in rows[0]       # no middle-dot before the graph
-    assert rows[0].rstrip().endswith("· 5s")  # trailing elapsed still ` · `-joined
+    # new segment order: role · elapsed · model context-bar
+    assert "coder · 5s · sonnet" in rows[0]              # role · elapsed · model, in order
+    assert rows[0].index("5s") < rows[0].index("sonnet")  # elapsed precedes model
+    assert rows[0].rstrip().endswith(bar)                # model context-bar now trailing
 
 
-def test_compose_toolbar_static_uses_frame_zero_and_status_elapsed() -> None:
+def test_compose_toolbar_static_uses_frame_zero_and_no_elapsed() -> None:
     out = _Pipe()
-    status = LiveStatus(out, now=lambda: 7.0)
+    status = LiveStatus(out)
     drv = LiveDriver(stream=out, color=False, width=80, status=status)
     drv.on_event(ev("1", "change_created", change_id=1, title="t"))
     drv.on_event(ev("2", "step_started", step="s", kind="agent", phase="p",
@@ -2083,16 +2003,20 @@ def test_compose_position_bar_never_contains_the_verb() -> None:
 
 def test_compose_activity_line_is_verb_detail_elapsed_with_spinner() -> None:
     from imp.cli.live_driver import compose_activity_line
-    act = nv.Activity(verb="coding", detail="bash pytest", model="m")
-    line = compose_activity_line(activity=act, frame=0, elapsed=14.0, color=False)
+    act = nv.Activity(verb="coding", detail="bash pytest", model="m",
+                      start_ts="2026-01-01T00:00:00+00:00")
+    line = compose_activity_line(activity=act, frame=0, color=False,
+                                 now_iso="2026-01-01T00:00:14+00:00")
     assert line is not None
     assert "coding" in line and "bash pytest" in line and "14s" in line
 
 
 def test_compose_activity_line_animates_spinner_and_elapsed_when_verbless() -> None:
     from imp.cli.live_driver import compose_activity_line
-    act = nv.Activity(position="implementation phase · plan 1/1", verb=None, detail=None)
-    line = compose_activity_line(activity=act, frame=0, elapsed=4.0, color=False)
+    act = nv.Activity(position="implementation phase · plan 1/1", verb=None, detail=None,
+                      start_ts="2026-01-01T00:00:00+00:00")
+    line = compose_activity_line(activity=act, frame=0, color=False,
+                                 now_iso="2026-01-01T00:00:04+00:00")
     assert line == "⠋ 4s"
 
 
@@ -2124,7 +2048,7 @@ def test_compose_activity_status_combined_line_does_not_overflow_under_slate() -
              phase_label="implementation phase · plan 1/1", position_label=True))
     try:
         pal.set_theme("dark")
-        line = compose_activity_status(b, frame=0, elapsed=5.0, color=True, width=120)
+        line = compose_activity_status(b, frame=0, color=True, width=120)
     finally:
         pal.set_theme("ansi")
     assert line is not None
@@ -2138,7 +2062,7 @@ def test_compose_status_returns_activity_line_blank_then_position_bar() -> None:
     drv.on_event(ev("2", "step_started", step="task-lead", kind="agent", phase="code",
                      model="claude-sonnet-4-5", provider="anthropic", label="task 1/3",
                      phase_label="implementation phase · plan 1/1", position_label=True))
-    block = drv.compose_status(0, 5.0)
+    block = drv.compose_status(0)
     assert isinstance(block, list) and len(block) == 3
     assert "thinking" in block[0]
     assert block[1] == ""
@@ -2349,8 +2273,10 @@ def test_mid_session_nested_pause_emits_via_normal_walk() -> None:
 
 def test_compose_activity_line_counts_down_when_countdown_total_set() -> None:
     from imp.cli.live_driver import compose_activity_line
-    act = nv.Activity(verb="waiting for limit reset", countdown_total=2940.0)
-    line = compose_activity_line(activity=act, frame=0, elapsed=660.0, color=False)
+    act = nv.Activity(verb="waiting for limit reset", countdown_total=2940.0,
+                      start_ts="2026-01-01T00:00:00+00:00")
+    line = compose_activity_line(activity=act, frame=0, color=False,
+                                 now_iso="2026-01-01T00:11:00+00:00")
     assert line is not None
     # 2940 - 660 = 2280s remaining -> _fmt_hm -> "38m"
     assert "38m left" in line
@@ -2365,13 +2291,16 @@ def test_compose_activity_line_countdown_second_granularity_under_a_minute() -> 
     # Use a hyphen-free verb so the negative-countdown guard (`"-" not in over`)
     # tests the tail alone — a hyphenated verb like "network - waiting to retry"
     # would itself put a "-" on the line and defeat that assertion.
-    act = nv.Activity(verb="waiting for limit reset", countdown_total=100.0)
+    act = nv.Activity(verb="waiting for limit reset", countdown_total=100.0,
+                      start_ts="2026-01-01T00:00:00+00:00")
     # 100 - 92 = 8s remaining -> second granularity, not the old "<1m left" collapse
-    line = compose_activity_line(activity=act, frame=0, elapsed=92.0, color=False)
+    line = compose_activity_line(activity=act, frame=0, color=False,
+                                 now_iso="2026-01-01T00:01:32+00:00")
     assert "8s left" in line
     assert "<1m left" not in line
     # remaining clamps at zero once the reset moment has passed: "0s left", never negative
-    over = compose_activity_line(activity=act, frame=0, elapsed=500.0, color=False)
+    over = compose_activity_line(activity=act, frame=0, color=False,
+                                 now_iso="2026-01-01T00:08:20+00:00")
     assert "0s left" in over
     assert "-" not in over
 
@@ -2379,8 +2308,10 @@ def test_compose_activity_line_countdown_second_granularity_under_a_minute() -> 
 def test_compose_activity_line_countdown_at_exact_minute_boundary() -> None:
     from imp.cli.live_driver import compose_activity_line
     # remaining == 60.0 exactly -> >= 60 guard is True -> "1m left", not "<1m left"
-    act = nv.Activity(verb="waiting for limit reset", countdown_total=120.0)
-    line = compose_activity_line(activity=act, frame=0, elapsed=60.0, color=False)
+    act = nv.Activity(verb="waiting for limit reset", countdown_total=120.0,
+                      start_ts="2026-01-01T00:00:00+00:00")
+    line = compose_activity_line(activity=act, frame=0, color=False,
+                                 now_iso="2026-01-01T00:01:00+00:00")
     assert "1m left" in line
     assert "~" not in line
     assert "<1m left" not in line
@@ -2388,44 +2319,13 @@ def test_compose_activity_line_countdown_at_exact_minute_boundary() -> None:
 
 def test_compose_activity_line_unchanged_when_no_countdown() -> None:
     from imp.cli.live_driver import compose_activity_line
-    act = nv.Activity(verb="coding", detail="bash pytest")
-    line = compose_activity_line(activity=act, frame=0, elapsed=14.0, color=False)
+    act = nv.Activity(verb="coding", detail="bash pytest",
+                      start_ts="2026-01-01T00:00:00+00:00")
+    line = compose_activity_line(activity=act, frame=0, color=False,
+                                 now_iso="2026-01-01T00:00:14+00:00")
     # existing count-up render is preserved exactly
     assert "14s" in line
     assert "left" not in line
-
-
-def test_status_span_restarts_on_every_backoff_retry() -> None:
-    """The span restarts at every backoff wait entry (any retry-with-backoff
-    category with a numeric delay, stalled included) so each attempt's countdown
-    baseline is zeroed; a non-numeric backoff does not restart it."""
-    calls: list[str] = []
-
-    class _CountingStatus(LiveStatus):
-        def restart_span(self) -> None:
-            calls.append("restart")
-            super().restart_span()
-
-    out = _Pipe()
-    status = _CountingStatus(out)
-    drv = LiveDriver(stream=out, color=False, width=80, status=status)
-    for e in [
-        ev("1", "change_created", change_id=1, title="x"),
-        ev("2", "step_started", step="spec", kind="agent", phase="p",
-           model="m", provider="anthropic"),          # restart (step_started)
-        ev("3", "agent_retry", category="rate_limit", attempt=1,
-           backoff_seconds=2940.0, hinted=True),       # restart (backoff, numeric)
-        ev("4", "agent_retry", category="rate_limit", attempt=2,
-           backoff_seconds=60.0),                      # restart (short blind, numeric)
-        ev("5", "agent_retry", category="rate_limit", attempt=3,
-           backoff_seconds=7200.0),                    # restart (numeric)
-        ev("6", "agent_retry", category="stalled", attempt=4,
-           backoff_seconds=7200.0, hinted=True),       # restart (stalled is backoff)
-        ev("7", "agent_retry", category="rate_limit", attempt=5,
-           hinted=True),                               # NO restart (non-numeric backoff)
-    ]:
-        drv.on_event(e)
-    assert calls == ["restart"] * 5
 
 
 def test_prose_reflows_to_live_width_between_emissions() -> None:
@@ -2698,7 +2598,8 @@ def test_subagent_backoff_wait_surfaces_to_activity_not_rows() -> None:
                                prompt_tokens=None, color=False, width=120)
     assert "left" not in pos
     # The wait surfaces on the activity line instead.
-    line = compose_activity_line(activity=act, frame=0, elapsed=5.0, color=False)
+    line = compose_activity_line(activity=act, frame=0, color=False,
+                                 now_iso="2026-01-01T00:00:10+00:00")
     assert "waiting for re-authentication" in line
     assert "25s left" in line          # 30 - 5 = 25s remaining
 
@@ -2711,35 +2612,10 @@ def test_compose_status_appends_a_row_per_running_subagent() -> None:
                      phase_label="design phase"))
     drv.on_event(ev("3", "tool_call", agent_id="step:p/s", id="b1", name="sub_agent",
                      input={"subagent_name": "coder"}))
-    block = drv.compose_status(0, 5.0)
+    block = drv.compose_status(0)
     assert isinstance(block, list) and len(block) == 4   # row1, blank, row3, + one subagent row
     assert "coder" in block[3]              # role present
     assert "writing code" not in block[3]   # verb segment dropped
-
-
-def test_test_lane_wait_and_acquire_each_restart_the_status_span() -> None:
-    """C1: the test-lane queue wait is excluded from the step. restart_span() fires at
-    queue entry (fresh wait clock) AND at slot acquisition (fresh run clock), on top of
-    the step_started reset — mirroring the agent_retry span-reset."""
-    calls: list[str] = []
-
-    class _CountingStatus(LiveStatus):
-        def restart_span(self) -> None:
-            calls.append("restart")
-            super().restart_span()
-
-    out = _Pipe()
-    status = _CountingStatus(out)
-    drv = LiveDriver(stream=out, color=False, width=80, status=status)
-    for e in [
-        ev("1", "change_created", change_id=1, title="x"),
-        ev("2", "step_started", step="integration-tests", kind="script",
-           phase="integration", label="running tests"),          # restart (step clock)
-        ev("3", "waiting_for_test_lane", step="integration-tests"),  # restart (wait clock)
-        ev("4", "test_lane_acquired", step="integration-tests"),     # restart (run clock)
-    ]:
-        drv.on_event(e)
-    assert calls == ["restart", "restart", "restart"]
 
 
 def test_seed_pending_reply_emits_once_and_reconciles() -> None:
@@ -2865,7 +2741,7 @@ def test_seed_opening_intent_reconciles_with_daemon_event_no_duplicate() -> None
 
 def test_compose_startup_returns_none_without_verb() -> None:
     drv, _out = _driver()                          # no startup_verb
-    assert drv.compose_startup(0, 0.0) is None
+    assert drv.compose_startup(0) is None
 
 
 def test_startup_verb_none_install_is_noop() -> None:
@@ -2886,26 +2762,27 @@ def test_install_startup_status_inert_on_non_tty() -> None:
 
 def test_install_startup_status_draws_and_animates_resuming() -> None:
     out = _TTY()
-    clock = {"t": 0.0}
-    status = LiveStatus(out, now=lambda: clock["t"])
+    status = LiveStatus(out)
     status._width_fn = lambda: 80
     drv = LiveDriver(stream=out, color=False, width=80, status=status,
                      startup_verb="resuming")
     drv.install_startup_status()
     assert "resuming" in out.getvalue()
-    assert "0s" in out.getvalue()                  # elapsed starts at 0
+    assert "0s" in out.getvalue()                  # elapsed starts at ~0 at install
+    # Block-age timer: backdate the startup block start and the line counts up.
+    from datetime import UTC, datetime, timedelta
+    drv._startup_start_iso = (datetime.now(UTC) - timedelta(seconds=5)).isoformat()
     out.truncate(0)
     out.seek(0)
-    clock["t"] = 5.0
     status._frame += 1
     status._draw()                                 # one spinner tick
     assert "resuming" in out.getvalue()            # still shown
-    assert "5s" in out.getvalue()                  # elapsed advanced
+    assert "5s" in out.getvalue()                  # elapsed advanced via block-age
 
 
 def test_startup_line_persists_through_replay_then_replaced_at_boundary() -> None:
     out = _TTY()
-    status = LiveStatus(out, now=lambda: 0.0)
+    status = LiveStatus(out)
     status._width_fn = lambda: 80
     drv = LiveDriver(stream=out, color=False, width=80, status=status,
                      suppress_replay=True, startup_verb="resuming")
@@ -2937,3 +2814,47 @@ def test_seed_opening_intent_arms_preboot_spinner(monkeypatch) -> None:
     act = drv._builder.current_activity()
     assert act is not None
     assert act.verb == "scheming"
+
+
+def test_activity_line_matches_subagent_row_for_single_subagent() -> None:
+    # The reported bug: activity line "1m 44s" beside "↳ … · 35s". With one
+    # running non-waiting subagent the two tails must be identical for one frame.
+    from imp.cli import narrative as nv
+    from imp.cli.live_driver import compose_activity_line, compose_subagent_rows
+    b = nv.NarrativeBuilder()
+    b.add(ev("1", "change_created", change_id=1, title="x"))
+    b.add(ev("2", "step_started", step="s", kind="agent", phase="p",
+             model="m", provider="anthropic"))
+    b.add(ev("t1", "tool_call", agent_id="step:p/s", id="blk-t1", name="sub_agent",
+             input={"subagent_name": "code-reviewer"},
+             timestamp="2026-01-01T00:00:00+00:00"))
+    now = "2026-01-01T00:01:44+00:00"          # 104s later
+    act = b.current_activity()
+    line = compose_activity_line(activity=act, frame=0, color=False, now_iso=now)
+    row = compose_subagent_rows(b, color=False, width=120, now_iso=now)[0]
+    fold = b.running_subagents()[0]
+    from imp.cli import render_text as rt
+    expected = rt.fmt_seconds(nv.elapsed_seconds(fold.start_ts, now)
+                              - fold.nested.backoff_wait_seconds(now))
+    assert f"· {expected}" in line and f"· {expected}" in row
+
+
+def test_activity_line_derives_countdown_from_block_start() -> None:
+    from imp.cli import narrative as nv
+    from imp.cli.live_driver import compose_activity_line
+    act = nv.Activity(verb="waiting for limit reset", countdown_total=2940.0,
+                      start_ts="2026-01-01T00:00:00+00:00")
+    line = compose_activity_line(activity=act, frame=0, color=False,
+                                 now_iso="2026-01-01T00:11:00+00:00")   # 660s in
+    assert "38m left" in line                  # 2940 - 660 = 2280s -> 38m
+    assert "11m 0s" not in line                # no count-up leak
+
+
+def test_compose_status_takes_one_arg_and_returns_footer_rows() -> None:
+    drv, _ = _driver()
+    drv.on_event(ev("1", "change_created", change_id=1, title="t"))
+    drv.on_event(ev("2", "step_started", step="s", kind="agent", phase="p",
+                    model="m", provider="anthropic", label="writing spec",
+                    phase_label="design phase"))
+    block = drv.compose_status(0)              # one arg only
+    assert isinstance(block, list) and len(block) == 3   # activity, blank, position

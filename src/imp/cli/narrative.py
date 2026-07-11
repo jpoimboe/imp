@@ -122,6 +122,7 @@ class StepNode:
     outcome: OutcomeLine | None = None
     start_ts: str | None = None        # ISO-8601 from step_started.timestamp (issue 3)
     run_start_ts: str | None = None    # test-lane run clock; phase_elapsed reads start_ts
+    lane_wait_start_ts: str | None = None  # lane queue-entry clock (block-age)
     end_ts: str | None = None          # ISO-8601 from step_completed.timestamp (§7)
     agent_output: dict[str, Any] | None = None  # stashed complete_step args (issues 5/6)
     show_label: bool = True            # step frame (header + breadcrumb) shown
@@ -236,6 +237,11 @@ class Activity:
     phase: str | None = field(default=None, compare=False)     # phase head (step-blue)
     plan: str | None = field(default=None, compare=False)      # plan counter (step-blue)
     counter: str | None = field(default=None, compare=False)   # running step's label (step-blue)
+    # Live-timer block-age source: block start_ts, the builder whose backoff to
+    # exclude, and the backoff already accrued at start_ts.
+    start_ts: str | None = field(default=None, compare=False)
+    backoff_source: Any = field(default=None, compare=False)
+    backoff_base: float = field(default=0.0, compare=False)
 
 
 def _join(*parts: str | None) -> str | None:
@@ -482,6 +488,11 @@ class NarrativeBuilder:
         # is the ISO timestamp the current in-progress wait began, or None.
         self._backoff_wait_accum: float = 0.0
         self._backoff_wait_start: str | None = None
+        # Parent-working stretch start + backoff accrued at that start. Set at the three
+        # parent boundaries (step_started, user_message, subagent-return); never advanced by
+        # within-stretch prose/thinking/tool bursts. Distinct from _span_start_ts (resets on prose).
+        self._stretch_start_ts: str | None = None
+        self._stretch_backoff_base: float = 0.0
         # subagent routing: "sub:<event_id>" -> fold (for delegating sub events)
         self._sub_by_agent_id: dict[str, SubagentFold] = {}
         # Two-dict open-fold registry. By block id (NON-EMPTY block ids only)
@@ -557,15 +568,6 @@ class NarrativeBuilder:
         accessor for the live driver's finalization check and LiveStatus."""
         return self._current_burst
 
-    @property
-    def has_running_subagent(self) -> bool:
-        """True while at least one dispatched subagent fold is still running.
-        The live driver checks this to suppress the prose-turn timer reset while
-        background subagents are in flight — an interleaved prose llm_response
-        from the PARENT would otherwise zero the visible `(+N subagents) · Ns`
-        elapsed even though the subagents never stopped (w7f56t over-reset)."""
-        return any(f.running for f in self._open_sub_by_event.values())
-
     def running_subagents(self) -> list[SubagentFold]:
         """Running dispatched subagent folds, in dispatch order (the footer's indented rows)."""
         return [f for f in self._open_sub_by_event.values() if f.running]
@@ -601,6 +603,7 @@ class NarrativeBuilder:
                 countdown_total=self._reset_wait.total_seconds,
                 kind=top_kind, lane_wait=top_lane_wait,
                 phase=top_phase, plan=top_plan, counter=top_counter,
+                start_ts=self._backoff_wait_start,
             )
         if top is not None:
             model = top.model
@@ -633,20 +636,24 @@ class NarrativeBuilder:
                                     detail=nested.detail, model=model,
                                     countdown_total=nested.countdown_total,
                                     kind=top_kind, lane_wait=top_lane_wait,
-                                    phase=top_phase, plan=top_plan, counter=top_counter)
+                                    phase=top_phase, plan=top_plan, counter=top_counter,
+                                    start_ts=nested.start_ts)
             n = len(running)
             if n > 1:
+                earliest = min(running, key=lambda fld: fld.start_ts or "9999")
                 return Activity(position=position, verb=f"running {n} subagents",
                                 model=model,
                                 kind=top_kind, lane_wait=top_lane_wait,
-                                phase=top_phase, plan=top_plan, counter=top_counter)
+                                phase=top_phase, plan=top_plan, counter=top_counter,
+                                start_ts=earliest.start_ts, backoff_source=earliest.nested)
             f = running[0]
             verb = f.label or f"subagent({f.subagent_name})"
             nested = f.nested.current_activity()
             detail = nested.detail if nested is not None else None
             return Activity(position=position, verb=verb, detail=detail, model=model,
                             kind=top_kind, lane_wait=top_lane_wait,
-                            phase=top_phase, plan=top_plan, counter=top_counter)
+                            phase=top_phase, plan=top_plan, counter=top_counter,
+                            start_ts=f.start_ts, backoff_source=f.nested)
 
         detail = None
         burst = self._current_burst
@@ -666,15 +673,27 @@ class NarrativeBuilder:
                 detail = _join(count, tool)
 
         if top is not None:
+            if top.lane_wait:
+                # lane_wait_start_ts is set by the lane handlers; the fallback keeps
+                # a lane_wait that somehow lacks it from regressing to a 0s timer.
+                p_start = top.lane_wait_start_ts or self._stretch_start_ts or top.start_ts
+                p_src, p_base = None, 0.0
+            elif top.run_start_ts is not None:
+                p_start, p_src, p_base = top.run_start_ts, None, 0.0
+            else:
+                p_start = self._stretch_start_ts or top.start_ts
+                p_src, p_base = self, self._stretch_backoff_base
             if top.kind in CHROME_KINDS:
                 return Activity(position=position, verb=static_verb or top.command,
                                 detail=detail, model=model,
                                 kind=top_kind, lane_wait=top_lane_wait,
-                                phase=top_phase, plan=top_plan, counter=top_counter)
+                                phase=top_phase, plan=top_plan, counter=top_counter,
+                                start_ts=p_start, backoff_source=p_src, backoff_base=p_base)
             return Activity(position=position, verb=static_verb or "thinking",
                             detail=detail, model=model,
                             kind=top_kind, lane_wait=top_lane_wait,
-                            phase=top_phase, plan=top_plan, counter=top_counter)
+                            phase=top_phase, plan=top_plan, counter=top_counter,
+                            start_ts=p_start, backoff_source=p_src, backoff_base=p_base)
         # No step on this builder. A dispatched subagent's nested builder reaches
         # here — carry the in-flight tool tail so the PARENT can read `nested.detail`
         # and concatenate it onto the subagent's verb.
@@ -766,6 +785,7 @@ class NarrativeBuilder:
 
         etype = event["type"]
         agent_id = event.get("agent_id")
+        had_running = bool(self.running_subagents())
 
         if etype in _RESUMES_WAIT:
             if self._backoff_wait_start is not None:
@@ -865,6 +885,13 @@ class NarrativeBuilder:
             self._append(FallbackLine(event_type=etype, payload=payload))
             return
         handler(self, event, payload)
+
+        if had_running and not self.running_subagents():
+            # The parent regained the live block: its last subagent finished this
+            # event (canonical close, resume-close fallback, or step-end close).
+            # Start a fresh parent-working stretch here.
+            self._stretch_start_ts = event.get("timestamp")
+            self._stretch_backoff_base = self.backoff_wait_seconds(None)
 
     # -- scope helpers --------------------------------------------------------
     def _container(self) -> WorkflowNode | PhaseNode | StepNode:
@@ -1028,6 +1055,8 @@ def _h_lane_waiting(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, 
     if step is not None:
         step.live_label = text
         step.lane_wait = True
+        if step.lane_wait_start_ts is None:
+            step.lane_wait_start_ts = event.get("timestamp")
 
 
 NarrativeBuilder._HANDLERS["lane_waiting"] = _h_lane_waiting
@@ -1043,6 +1072,7 @@ def _h_waiting_for_test_lane(
     if self._step_stack:
         self._step_stack[-1].live_label = "waiting to test"
         self._step_stack[-1].lane_wait = True
+        self._step_stack[-1].lane_wait_start_ts = event.get("timestamp")
 
 
 NarrativeBuilder._HANDLERS["waiting_for_test_lane"] = _h_waiting_for_test_lane
@@ -1133,6 +1163,8 @@ def _h_step_started(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, 
     self._flush_pending_rename()
     self._flush_burst()
     self._span_start_ts = event.get("timestamp")
+    self._stretch_start_ts = event.get("timestamp")
+    self._stretch_backoff_base = self.backoff_wait_seconds(None)
     self._segment_had_work = False
     name = p.get("step", "?")
     kind = p.get("kind")
@@ -1495,6 +1527,17 @@ def elapsed_seconds(start_ts: str | None, end_ts: Any) -> float | None:
         return None
 
 
+def activity_elapsed(activity: Activity, now_iso: str) -> float:
+    """Block-age: now - start_ts, minus in-block backoff; 0.0 if missing, never negative."""
+    span = elapsed_seconds(activity.start_ts, now_iso)
+    if span is None:
+        return 0.0
+    if activity.backoff_source is not None:
+        span -= max(0.0, activity.backoff_source.backoff_wait_seconds(now_iso)
+                    - activity.backoff_base)
+    return max(0.0, span)
+
+
 def _draw_status_phrase() -> str:
     # Lazy import keeps `import narrative` free of agent-package weight (design D3).
     from imp.agents.random_status import random_status_phrase
@@ -1513,6 +1556,8 @@ def _h_user_message(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, 
     self._flush_burst()
     _rotate_status_phrase(self)
     self._span_start_ts = event.get("timestamp")
+    self._stretch_start_ts = event.get("timestamp")
+    self._stretch_backoff_base = self.backoff_wait_seconds(None)
     interactive, self._awaiting_reply = self._awaiting_reply, False
     text = _user_message_text(p)
     if interactive and not text.strip():

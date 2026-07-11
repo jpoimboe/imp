@@ -81,10 +81,13 @@ def context_bar(model: str | None, prompt_tokens: int | None, *,
     return f"{fill}{track} {pct}%"
 
 
-def compose_activity_line(*, activity: nv.Activity, elapsed: float,
-                          frame: int, color: bool) -> str:
-    """Activity line: spinner + verb + detail + elapsed (always animated)."""
+def compose_activity_line(*, activity: nv.Activity, frame: int, color: bool,
+                          now_iso: str) -> str:
+    """Activity line: spinner + verb + detail + block-age elapsed (always animated).
+    Elapsed is the age of the activity's current live block, derived from its
+    start_ts against `now_iso` (see nv.activity_elapsed)."""
     spin = _paint(pal.spinner_frame(frame), "wordmark", color=color, over_bg=False)
+    elapsed = nv.activity_elapsed(activity, now_iso)
     parts: list[str | None] = []
     if activity.verb:
         parts.append(_paint(activity.verb, "wordmark", color=color, over_bg=False))
@@ -214,7 +217,7 @@ def compose_subagent_rows(builder: nv.NarrativeBuilder, *, color: bool,
         el_seg = _paint(el, "dim", color=color, over_bg=over) if el else None
         arrow = _paint("↳", *pal.NODE_COLORS["subagent"], color=color, over_bg=over)
         inner = arrow + " " + rt.compose_label(
-            [role_seg, rt.join_space(model_seg, bar), el_seg])
+            [role_seg, el_seg, rt.join_space(model_seg, bar)])
         if bg:
             pad = width - 2 - pal.display_width(inner)
             if pad > 0:
@@ -225,14 +228,16 @@ def compose_subagent_rows(builder: nv.NarrativeBuilder, *, color: bool,
 
 
 def compose_activity_status(
-    builder: nv.NarrativeBuilder, *, frame: int, elapsed: float, color: bool,
-    width: int | None = None,
+    builder: nv.NarrativeBuilder, *, frame: int, color: bool,
+    width: int | None = None, now_iso: str | None = None,
 ) -> str | None:
     """Single combined status line: the activity line joined with the position bar.
     The streaming live view uses the multi-row footer instead."""
     activity = builder.current_activity()
     if activity is None:
         return None
+    if now_iso is None:
+        now_iso = datetime.now(UTC).isoformat()
     root = builder.tree.root
     w = term_width() if width is None else width
     bar = compose_position_bar(
@@ -240,7 +245,7 @@ def compose_activity_status(
         prompt_tokens=builder.latest_prompt_tokens, color=color, width=w,
         context_pct=builder.latest_context_pct,
         checkpoint_threshold=builder.latest_checkpoint_threshold, pad_slate=False)
-    line = compose_activity_line(activity=activity, frame=frame, elapsed=elapsed, color=color)
+    line = compose_activity_line(activity=activity, frame=frame, color=color, now_iso=now_iso)
     return rt.compose_label([line, bar])
 
 
@@ -308,6 +313,7 @@ class LiveDriver:
         self._separator_emitted = False    # prepare_for_prompt printed the leading blank
         self._preceded_by_blank = preceded_by_blank
         self._startup_verb = startup_verb
+        self._startup_start_iso: str | None = None   # block start for the startup block-age timer
         self._emitted_any = False
         self._last_header_position: str | None = None
         self._deferred: list[tuple[list[str], bool, str]] = []
@@ -333,49 +339,6 @@ class LiveDriver:
             self._refresh_status()
             return
         self._builder.add(event)
-        if isinstance(event, dict):
-            etype = event.get("type")
-            if etype in ("step_started", "user_message"):
-                # §7: time-the-agent-working-since-the-last-user-reply. Reset on
-                # step_started AND user_message so the elapsed counter measures
-                # the current burst between user inputs (across tools, thinks, and
-                # multiple llm_response blocks within one interactive turn). Non-
-                # interactive runs never fire user_message, so today's per-step
-                # reset behavior is preserved as a side effect. Guarded — like the
-                # llm_response branch below — so a dispatched subagent's own
-                # step_started/user_message can't zero the shared burst timer while
-                # background subagents are in flight.
-                if not self._builder.has_running_subagent:
-                    self._status.restart_span()
-            elif etype == "llm_response":
-                # A genuine prose turn restarts the span (w7f56t) — but NOT while
-                # a dispatched subagent is still running: the parent narrating in
-                # the background must not zero the visible `(+N subagents) · Ns`
-                # elapsed of work that never stopped.
-                payload = event.get("payload")
-                if (isinstance(payload, dict) and nv.llm_response_has_prose(payload)
-                        and not self._builder.has_running_subagent):
-                    self._status.restart_span()
-            elif etype in ("waiting_for_test_lane", "test_lane_acquired"):
-                # C1: exclude the test-lane queue wait from the step clock. Zero the
-                # span at queue entry so the footer's `waiting to test · <t>` counts its
-                # own wait, and again at slot acquisition so `running tests · <t>`
-                # measures pure run time. Reuses the same restart_span() the rate-limit
-                # (agent_retry) wait uses.
-                self._status.restart_span()
-            elif etype == "agent_retry":
-                # Zero the span at wait entry so compose_activity_line's countdown
-                # (countdown_total - elapsed) measures time-since-this-wait-start.
-                # Mirror _h_agent_retry's new wait-state gate exactly — every
-                # retry-with-backoff category (stalled included) with a numeric
-                # delay — so the wait verb and its countdown baseline can never
-                # disagree.
-                from imp.engine.error_policy import is_retry_with_backoff
-                payload = event.get("payload") or {}
-                secs = payload.get("backoff_seconds")
-                if (is_retry_with_backoff(str(payload.get("category")))
-                        and isinstance(secs, (int, float))):
-                    self._status.restart_span()
         self._walk()
         self._maybe_reemit_header()
         self._refresh_status()
@@ -403,12 +366,13 @@ class LiveDriver:
         self._walk(force=True)
         self._status.reset()
 
-    def compose_status(self, frame: int, elapsed: float) -> list[str] | None:
+    def compose_status(self, frame: int) -> list[str] | None:
         activity = self._builder.current_activity()
         if activity is None:
             return None
-        a_line = compose_activity_line(activity=activity, elapsed=elapsed,
-                                       frame=frame, color=self._color)
+        now_iso = datetime.now(UTC).isoformat()
+        a_line = compose_activity_line(activity=activity, frame=frame,
+                                       color=self._color, now_iso=now_iso)
         root = self._builder.tree.root
         w = term_width()
         p_row = compose_position_row(
@@ -419,20 +383,22 @@ class LiveDriver:
             checkpoint_threshold=self._builder.latest_checkpoint_threshold)
         rows = [a_line, "", p_row]
         rows += compose_subagent_rows(
-            self._builder, color=self._color, width=w,
-            now_iso=datetime.now(UTC).isoformat())
+            self._builder, color=self._color, width=w, now_iso=now_iso)
         return rows
 
-    def compose_startup(self, frame: int, elapsed: float) -> list[str] | None:
+    def compose_startup(self, frame: int) -> list[str] | None:
         if self._startup_verb is None:
             return None
+        now_iso = datetime.now(UTC).isoformat()
         return [compose_activity_line(
-            activity=nv.Activity(verb=self._startup_verb),
-            elapsed=elapsed, frame=frame, color=self._color)]
+            activity=nv.Activity(verb=self._startup_verb,
+                                 start_ts=self._startup_start_iso),
+            frame=frame, color=self._color, now_iso=now_iso)]
 
     def install_startup_status(self) -> None:
         if self._startup_verb is None:
             return
+        self._startup_start_iso = datetime.now(UTC).isoformat()
         if self._preceded_by_blank:
             self._status.skip_leading_blank()
         self._status.update(self.compose_startup)
