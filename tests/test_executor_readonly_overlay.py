@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import dataclasses
 from pathlib import Path
 
 from imp.engine.executor import _apply_readonly_overlay
@@ -40,3 +41,15 @@ def test_apply_readonly_overlay_noop_without_read_only(tmp_path: Path):
 
 def test_apply_readonly_overlay_noop_when_policy_none(tmp_path: Path):
     assert _apply_readonly_overlay(None, _agent_step((".",)), tmp_path) is None
+
+
+def test_apply_readonly_overlay_is_additive_preserves_snapshot(tmp_path):
+    snapshot = str(tmp_path / "changes" / "abc" / "workflow")
+    base = dataclasses.replace(
+        _active_policy(tmp_path), readonly_overlays=(snapshot,))
+    out = _apply_readonly_overlay(base, _agent_step((".",)), tmp_path)
+    # The step's "." overlay is APPENDED to the pre-existing snapshot overlay,
+    # not replacing it — both are present, snapshot first.
+    assert out.readonly_overlays == (snapshot, str(tmp_path.resolve()))
+    # And the snapshot is still enforced as read-only after composition.
+    assert out.allows_write(tmp_path / "changes" / "abc" / "workflow" / "workflow.yaml") is False
