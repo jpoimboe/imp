@@ -694,11 +694,16 @@ def _complete(change: Change, state: State, log: EventLog) -> RunResult:
 
 
 def _apply_readonly_overlay(policy: Any, step: Step, project_root: Path) -> Any:
-    """Compose step.read_only into a dispatch-time policy copy; no-op if empty or None."""
+    """Compose step.read_only into a dispatch-time policy copy; no-op if empty or None.
+    Additive: the step's overlays are appended to any overlays already baked into
+    the policy (e.g. the workflow-snapshot overlay from resolve_policy), so a step's
+    read_only never drops the baked-in protection. Both are ro binds; order within
+    the category is immaterial."""
     if not step.read_only or policy is None:
         return policy
     overlays = tuple(str((project_root / p).resolve()) for p in step.read_only)
-    return dataclasses.replace(policy, readonly_overlays=overlays)
+    return dataclasses.replace(
+        policy, readonly_overlays=policy.readonly_overlays + overlays)
 
 
 async def _dispatch_step(
