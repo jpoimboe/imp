@@ -1,4 +1,4 @@
-"""query_events (spec §6.6). Reads a Quest's event timeline — the current
+"""query_events (spec §6.6). Reads a quest's event timeline — the current
 change by default, or another change via quest_id."""
 
 from __future__ import annotations
@@ -56,14 +56,14 @@ def _filter_and_limit(
 @imp_tool(
     name="query_events",
     description=(
-        "The Quest's event log: the provenance record, in order, of what was "
-        "said and what prior agents and reviews did on this Quest. Returns one "
+        "The quest's event log: the provenance record, in order, of what was "
+        "said and what prior agents and reviews did on this quest. Returns one "
         "compact digest line per event by default; pass full=True for raw event "
         "payloads (each capped at ~2 KB, marked when truncated). Narrow the "
         "result with type (an event type, or a comma-separated list of them), "
         "agent_id (a substring matched against an event's role/phase id), and "
         "limit (the last N events; default 100). By default it reads the current "
-        "Quest; pass quest_id to read another Quest's timeline. A history "
+        "quest; pass quest_id to read another quest's timeline. A history "
         "channel, not a status one — for current state, prefer your durable "
         "working files."
     ),
@@ -102,7 +102,7 @@ def query_events(
         control_root = ctx.events_path.parents[3]
         resolved = _resolve_other_change_events(control_root, quest_id)
         if resolved is None:
-            return json.dumps({"error": f"no such Quest {quest_id!r}"})
+            return json.dumps({"error": f"no such quest {quest_id!r}"})
         events = _filter_and_limit(resolved, types, agent_id, n)
     else:
         log = JsonlEventLog(ctx.events_path)

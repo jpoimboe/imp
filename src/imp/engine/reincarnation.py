@@ -54,7 +54,7 @@ def reincarnation_seed(
             f"`{stashed_dir}/transcript.jsonl`{tail}")
     lines.append(
         "- Orientation only: `query_events limit=N` returns the last N entries of "
-        "the Quest's event log — the provenance record of what was said and what "
+        "the quest's event log — the provenance record of what was said and what "
         "prior steps did (a bare call is bounded to the last 100). Use it for "
         "quest-level bearings, not for current state and not as the primary "
         "source of detail.")

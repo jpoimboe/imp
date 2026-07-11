@@ -187,7 +187,7 @@ is saved and they can return with `imp resume <id>`.
 
 The user reads only your prose; **never surface these internal terms** to them:
 `express`, `full`, `fast_path`, `show_label`, `materialize`, `transmute`, "phase 0",
-or even "Quest". Describe effects plainly instead ("I'll set this up and start
+or even "quest". Describe effects plainly instead ("I'll set this up and start
 building", "this is saved and you can come back to it").
 
 ## Yielding to the user

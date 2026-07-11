@@ -1,4 +1,4 @@
-"""Read side of the per-Quest archive: index/record/blob store."""
+"""Read side of the per-quest archive: index/record/blob store."""
 
 from __future__ import annotations
 

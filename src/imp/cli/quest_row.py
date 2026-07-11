@@ -34,7 +34,7 @@ def format_timestamp(iso: str | None) -> str:
         return "-"
 
 
-ID_W = 6        # bare 6-char Quest id
+ID_W = 6        # bare 6-char quest id
 STATUS_W = 35   # merged status + " (step-label)"; preserves the old 13+2+20 budget
 AGE_W = 7       # header "UPDATED" (7) aligns with the ≤4-char relative-age data
 NAME_MIN = 10   # never shrink the trailing NAME column below this

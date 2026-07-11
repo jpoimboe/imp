@@ -225,7 +225,7 @@ async def dispatch_task(
         if ctx.quest is None:
             raise RuntimeError(
                 f"subagent {subagent_name!r} sets isolated_worktree but was "
-                "dispatched with no live Quest context (nested dispatch); "
+                "dispatched with no live quest context (nested dispatch); "
                 "isolated_worktree is only supported from a top-level agent")
         from imp.engine import worktree as _worktree
         spike_worktree = _worktree.create_spike_worktree(

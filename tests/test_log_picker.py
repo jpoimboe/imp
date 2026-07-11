@@ -30,7 +30,7 @@ async def test_log_picker_empty_prints_and_exits_2(
     rc = await m._pick_log_target(tmp_path)
     out = capsys.readouterr().out
     assert rc == 2
-    assert "No Quests yet — start one with imp new" in out
+    assert "No quests yet — start one with imp new" in out
 
 
 @pytest.mark.anyio
@@ -74,7 +74,7 @@ def test_cmd_log_non_tty_keeps_resolve_default(
     rc = m._cmd_log(argparse.Namespace(token=None, full=False, follow=False))
     out = capsys.readouterr().out
     assert rc == 0
-    assert "No Quests yet — start one with imp new" in out
+    assert "No quests yet — start one with imp new" in out
 
 
 def test_cmd_log_tty_no_token_routes_to_picker(
@@ -91,7 +91,7 @@ def test_cmd_log_tty_no_token_routes_to_picker(
 
     def fake_load(control, quest_id):
         seen["id"] = quest_id
-        return None  # → "no such Quest" rc 2, but proves the routing
+        return None  # → "no such quest" rc 2, but proves the routing
 
     monkeypatch.setattr(m, "_load_events_for_id", fake_load)
     rc = m._cmd_log(argparse.Namespace(token=None, full=False, follow=False))

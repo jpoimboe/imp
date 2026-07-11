@@ -1,4 +1,4 @@
-"""Abandon a Quest: mark abandoned, archive a non-resumable tombstone, drop the
+"""Abandon a quest: mark abandoned, archive a non-resumable tombstone, drop the
 live home; on a built-out change also pop the merge queue and remove the worktree + branch."""
 from __future__ import annotations
 

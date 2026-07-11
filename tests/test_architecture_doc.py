@@ -21,8 +21,8 @@ def test_architecture_drops_artifact_commit_command() -> None:
 def test_architecture_names_quest_concept() -> None:
     text = ARCH.read_text()
     assert "| Quest / state | `engine/quest.py`, `engine/state.py` |" in text
-    assert "A single **Quest** is one unit of work" in text
-    assert "the last plan of a multi-plan Quest" in text
+    assert "A single **quest** is one unit of work" in text
+    assert "the last plan of a multi-plan quest" in text
     assert "engine/change.py" not in text
     assert "| Change / state |" not in text
     assert ".imp/change/" not in text
@@ -31,14 +31,14 @@ def test_architecture_names_quest_concept() -> None:
 
 def test_what_is_imp_names_quest_concept() -> None:
     text = Path("docs/what-is-imp.md").read_text()
-    assert "The core idea is a **Quest**" in text
+    assert "The core idea is a **quest**" in text
     assert "per-quest home on disk." in text
     assert "**Change**" not in text
 
 
 def test_imp_conventions_names_quest_concept() -> None:
     text = Path("docs/imp-conventions.md").read_text()
-    assert "nouns: Quest, workflow, backlog, phase," in text
+    assert "nouns: quest, workflow, backlog, phase," in text
     assert "nouns: Change," not in text
 
 
@@ -52,7 +52,7 @@ def test_imp_invariants_names_quest_concept() -> None:
 
 def test_imp_operator_notes_names_quest_concept() -> None:
     text = Path("docs/imp-operator-notes.md").read_text()
-    assert "Runbook for operating a running imp Quest." in text
+    assert "Runbook for operating a running imp quest." in text
     assert ".imp/quest/workflow" in text
     assert ".imp/change/" not in text
     assert ".imp/changes/" not in text

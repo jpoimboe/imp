@@ -187,7 +187,7 @@ async def test_subscribe_to_unknown_handle_errors_without_subscribing() -> None:
     await _handle_command(Subscribe("bogus"), control, responses)
     notice = responses.get_nowait()
     assert isinstance(notice, Notice)
-    assert notice.text == "No Quest @bogus — send /list to see what's running."
+    assert notice.text == "No quest @bogus — send /list to see what's running."
     assert responses.empty()
     assert control.subscriptions.contains("bogus") is False
 

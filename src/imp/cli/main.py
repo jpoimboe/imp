@@ -100,7 +100,7 @@ class ReplyInterjectRouter:
     mid-run is therefore not supported (do it at the next solicit boundary); a
     mid-run `/...` line reaches the agent as literal text. This is a deliberate
     scope boundary: intercepting slash on the interject path would require
-    coupling the Quest/event-log and a status-suspending print into the raw-tty
+    coupling the quest/event-log and a status-suspending print into the raw-tty
     reader, on the one path already known to CPR-degrade.
     """
 
@@ -242,10 +242,10 @@ def _emit_completed(quest: Quest, value: str, *, merged: bool, warnings: int = 0
     if merged:
         print(ansi(f"{mark}Merged {quest.id} into {quest.base_branch}.",
                    *pal.NODE_COLORS["lifecycle"], enabled=color))
-        print(ansi(f"Quest {quest.id}: {value}{suffix}",
+        print(ansi(f"quest {quest.id}: {value}{suffix}",
                    *pal.NODE_COLORS["lifecycle"], enabled=color))
     else:
-        print(ansi(f"{mark}Quest {quest.id}: {value}{suffix}", "green", enabled=color))
+        print(ansi(f"{mark}quest {quest.id}: {value}{suffix}", "green", enabled=color))
 
 
 def _phase_from_events(events: list[dict[str, Any]]) -> str | None:
@@ -420,10 +420,10 @@ def _emit_merge_blocked(
     elif reason == "conflict":
         msg = (f"`imp/{cid}` doesn't auto-merge into `{base}`. imp can't resolve "
                f"conflicts in this version — merge `imp/{cid}` into `{base}` manually, "
-               f"then the Quest is done (its worktree at `.imp/worktrees/{cid}` "
+               f"then the quest is done (its worktree at `.imp/worktrees/{cid}` "
                f"can be removed).")
     else:
-        msg = f"Quest {cid}: merge_blocked. Resolve, then `imp resume {cid}`."
+        msg = f"quest {cid}: merge_blocked. Resolve, then `imp resume {cid}`."
     if note:
         msg = f"{msg}\n{note}"
     if detail and reason in ("refused", "conflict"):
@@ -696,7 +696,7 @@ async def _read_intent_line(
             continue
         if line in _OPENING_SESSION_VERBS:
             print(f"{line} isn't available at the opening prompt — "
-                  f"describe your Quest, or /help for commands.")
+                  f"describe your quest, or /help for commands.")
             continue
         return line
 
@@ -808,7 +808,7 @@ def _record_idea(args: argparse.Namespace, control: Path, base: str) -> int:
     except (LoadError, LoadErrors) as e:
         print(f"imp: {e}", file=sys.stderr)
         return 2
-    print(f"imp: recorded backlog Quest {quest_id} "
+    print(f"imp: recorded backlog quest {quest_id} "
           f"(start it with `imp resume {quest_id}`)")
     return 0
 
@@ -886,7 +886,7 @@ class BaseResolutionError(Exception):
 
 
 def _resolve_new_base(control: Path, base_flag: str | None) -> str:
-    """The validated branch `imp new` bases a Quest on.
+    """The validated branch `imp new` bases a quest on.
 
     `--base BRANCH` overrides the configured `default-base`; either way the
     branch must already exist. There is no runtime auto-detection and no
@@ -983,7 +983,7 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
     color = should_use_color(sys.stdout)
 
     quest_id = new_quest_id(existing_stems=live_stems(control))
-    # No auto-name: an unnamed Quest has an empty title. The agent
+    # No auto-name: an unnamed quest has an empty title. The agent
     # names it via rename_quest once intent is clear, or the user passes --title.
     title = seed.title if seed.title is not None else ""
     try:
@@ -1106,7 +1106,7 @@ def _warn_if_blocked(quest: Quest) -> None:
         return
     ready, unmerged = backlog.readiness(quest.control_root, deps)
     if not ready:
-        print(f"imp: backlog Quest {quest.id} is blocked on unmerged dep(s): "
+        print(f"imp: backlog quest {quest.id} is blocked on unmerged dep(s): "
               f"{', '.join(unmerged)}; starting anyway.", file=sys.stderr)
 
 
@@ -1133,7 +1133,7 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
     # time); a crashed run is left at its resumable at-rest status (new/paused).
     if state.status not in RESUMABLE:
         print(
-            f"imp: Quest {quest.id} status is {state.status!r}; "
+            f"imp: quest {quest.id} status is {state.status!r}; "
             "nothing to resume",
             file=sys.stderr,
         )
@@ -1292,7 +1292,7 @@ def _quest_home(control: Path, quest_id: str) -> Path:
 
 
 def _iter_quest_ids(control: Path) -> list[str]:
-    """All known Quest ids: permanent homes first, then archived ids not live."""
+    """All known quest ids: permanent homes first, then archived ids not live."""
     live = _list_quest_homes(control)
     seen = set(live)
     out = list(live)
@@ -1304,7 +1304,7 @@ def _iter_quest_ids(control: Path) -> list[str]:
 
 
 def _title_for_id(control: Path, quest_id: str) -> str | None:
-    """Read a Quest's current title (worktree home first, archive second)."""
+    """Read a quest's current title (worktree home first, archive second)."""
     cdir = _quest_home(control, quest_id)
     cj = cdir / "quest.json"
     if cj.exists():
@@ -1322,18 +1322,18 @@ def _title_for_id(control: Path, quest_id: str) -> str | None:
 
 
 def _resolve_id(control: Path, token: str) -> str:
-    """Resolve a user-typed token to a Quest id (spec AC 7): it must be an
+    """Resolve a user-typed token to a quest id (spec AC 7): it must be an
     unambiguous substring of exactly one change's id. Multiple matches exit
     non-zero listing candidates; none errors."""
     if not token.strip():
-        print(f"imp: no Quest matches {token!r}", file=sys.stderr)
+        print(f"imp: no quest matches {token!r}", file=sys.stderr)
         raise SystemExit(2)
     matches = [cid for cid in _iter_quest_ids(control) if token in cid]
     if len(matches) == 1:
         return matches[0]
     if len(matches) > 1:
         _exit_ambiguous(token, matches, control)
-    print(f"imp: no Quest matches {token!r}", file=sys.stderr)
+    print(f"imp: no quest matches {token!r}", file=sys.stderr)
     raise SystemExit(2)
 
 
@@ -1594,7 +1594,7 @@ def _cmd_list(args: argparse.Namespace) -> int:
 def _cmd_show(args: argparse.Namespace) -> int:
     token = args.token
     if token is None and not _interactive():
-        print("imp: 'imp show' needs a Quest id — run 'imp list' for an overview",
+        print("imp: 'imp show' needs a quest id — run 'imp list' for an overview",
               file=sys.stderr)
         return 2
     control = _control_root()
@@ -1715,7 +1715,7 @@ def _resolve_default_id(control: Path) -> str | None:
     return archive_read.most_recent_archived_id(control)
 
 
-_NO_CHANGES_MESSAGE = "No Quests yet — start one with imp new"
+_NO_CHANGES_MESSAGE = "No quests yet — start one with imp new"
 
 
 def _log_picker_empty() -> int:
@@ -1733,7 +1733,7 @@ async def _pick_log_target(control: Path) -> str | int:
     return await _pick_quest_target(
         control=control,
         rows=rows,
-        header="Show log for which Quest?  (↑/↓ to move · enter to select · q to cancel)",
+        header="Show log for which quest?  (↑/↓ to move · enter to select · q to cancel)",
         on_empty=_log_picker_empty,
         selected_index=selected_index,
     )
@@ -1831,7 +1831,7 @@ def _follow_conflict(args: argparse.Namespace) -> str | None:
 
 
 def _follow_log(events: list[dict[str, Any]]) -> int:
-    """Replay a Quest's narrative through the live run view's renderer."""
+    """Replay a quest's narrative through the live run view's renderer."""
     status = LiveStatus(sys.stdout)
     driver = LiveDriver(
         stream=sys.stdout, color=should_use_color(sys.stdout),
@@ -1928,7 +1928,7 @@ _FOLLOW_POLL_INTERVAL = 0.3
 
 
 def _follow_live(control: Path, quest_id: str, home: Path) -> int:
-    """Replay a live Quest's narrative through LiveDriver, then tail
+    """Replay a live quest's narrative through LiveDriver, then tail
     events.jsonl until a terminal status or the home is archived away. Ctrl-C
     clears the footer and exits 130."""
     status = LiveStatus(sys.stdout)
@@ -1998,7 +1998,7 @@ def _cmd_log(args: argparse.Namespace) -> int:
         return 0
     events = _load_events_for_id(control, quest_id)
     if events is None:
-        print(f"imp: no such Quest {quest_id!r}", file=sys.stderr)
+        print(f"imp: no such quest {quest_id!r}", file=sys.stderr)
         return 2
 
     if args.follow:
@@ -2150,7 +2150,7 @@ def _resume_gone(control: Path, quest_id: str) -> int:
     if status is not None:
         print(f"{title} is already completed; nothing to resume.")
         return 0
-    print(f"imp: no Quest matches {quest_id!r}", file=sys.stderr)
+    print(f"imp: no quest matches {quest_id!r}", file=sys.stderr)
     return 2
 
 
@@ -2179,7 +2179,7 @@ def _load_or_rehydrate(control: Path, quest_id: str) -> Quest | int:
         return quest
 
 
-# Spec §10: in-flight statuses; completed Quests live in the archive.
+# Spec §10: in-flight statuses; completed quests live in the archive.
 _INFLIGHT = ("running", "new", "paused", "merge_blocked", "draft")
 RESUMABLE = ("new", "paused", "merge_blocked", "draft", "saved")
 
@@ -2338,7 +2338,7 @@ def _status_rows(control: Path, scanned: list[_HomeScan] | None = None) -> list[
 
 
 def _completed_rows(control: Path, live_ids: set[str] | None = None) -> list[_Row]:
-    """Completed/abandoned Quests NOT currently surfaced in-flight, from a
+    """Completed/abandoned quests NOT currently surfaced in-flight, from a
     SINGLE indexed archive query (spec AC 7). `live_ids` lets the overview reuse
     the in-flight id set it already computed instead of re-deriving it."""
     live = {r[0] for r in _status_rows(control)} if live_ids is None else live_ids
@@ -2418,7 +2418,7 @@ def _resume_picker_empty(control: Path) -> int:
     if past:
         plural = "s" if past != 1 else ""
         print(pal.ansi(
-            f"({past} past Quest{plural} — see `imp list --all`)",
+            f"({past} past quest{plural} — see `imp list --all`)",
             "dim", enabled=should_use_color(sys.stdout)))
     return 0
 
@@ -2426,7 +2426,7 @@ def _resume_picker_empty(control: Path) -> int:
 def _resume_picker_non_tty(rows: list[_Row]) -> str | int:
     if len(rows) == 1:
         return rows[0][0]
-    print("Multiple resumable Quests — pass a token:", file=sys.stderr)
+    print("Multiple resumable quests — pass a token:", file=sys.stderr)
     color = should_use_color(sys.stderr)
     now = datetime.now(UTC)
     print(quest_row.header_line(color=color), file=sys.stderr)
@@ -2466,7 +2466,7 @@ async def _pick_quest_target(
 
 
 _RESUME_PICKER_HEADER = (
-    "Resume which Quest?  (↑/↓ to move · enter to resume · q to cancel)"
+    "Resume which quest?  (↑/↓ to move · enter to resume · q to cancel)"
 )
 
 
@@ -2524,7 +2524,7 @@ def _deliver_abandon_resident(control: Path, quest_id: str) -> None:
 
 
 def _abandon(control: Path, quest_id: str, *, yes: bool = False) -> int:
-    """Tear down a Quest (worktree, branch, state) as one logged operation.
+    """Tear down a quest (worktree, branch, state) as one logged operation.
 
     Order is pinned by git (spec §2): archive the runtime snapshot BEFORE
     worktree removal (records live inside the worktree); `git branch -D` AFTER
@@ -2537,7 +2537,7 @@ def _abandon(control: Path, quest_id: str, *, yes: bool = False) -> int:
         # home directory is absent (already fully torn down, or never existed).
         # Idempotent teardown — reap a possibly-orphaned branch and exit 0.
         worktree.delete_branch(control, quest_id)
-        print(f"Quest {quest_id} already gone; ensured branch imp/{quest_id} is removed.")
+        print(f"quest {quest_id} already gone; ensured branch imp/{quest_id} is removed.")
         return 0
 
     token = quest.id
@@ -2560,7 +2560,7 @@ def _abandon(control: Path, quest_id: str, *, yes: bool = False) -> int:
     try:
         tear_down_quest(quest)
     except LockHeld as e:
-        print(f"imp: Quest {quest_id} is running (pid {e.held_by_pid or '?'}); "
+        print(f"imp: quest {quest_id} is running (pid {e.held_by_pid or '?'}); "
               f"stop it before abandoning", file=sys.stderr)
         return 2
     print(f"Abandoned {token}.")
@@ -2583,13 +2583,13 @@ def _abandon_picker_empty() -> int:
 
 
 def _abandon_picker_non_tty(rows: list[_Row]) -> int:
-    print("imp: abandon needs a Quest token on a non-interactive terminal",
+    print("imp: abandon needs a quest token on a non-interactive terminal",
           file=sys.stderr)
     return 2
 
 
 _ABANDON_PICKER_HEADER = (
-    "Abandon which Quest?  (↑/↓ to move · enter to select · q to cancel)"
+    "Abandon which quest?  (↑/↓ to move · enter to select · q to cancel)"
 )
 
 
@@ -2610,7 +2610,7 @@ async def _pick_abandon_matches(
     errors with a token-specific message (distinct from the no-token
     `_abandon_picker_non_tty` copy, which reads wrong when a token was given)."""
     def _non_tty(_rows: list[_Row]) -> int:
-        print(f"imp: {token!r} matches multiple Quests; pass a more specific token",
+        print(f"imp: {token!r} matches multiple quests; pass a more specific token",
               file=sys.stderr)
         return 2
 
@@ -2624,12 +2624,12 @@ async def _pick_abandon_matches(
 
 
 _SHOW_PICKER_HEADER = (
-    "Show which Quest?  (↑/↓ to move · enter to select · q to cancel)"
+    "Show which quest?  (↑/↓ to move · enter to select · q to cancel)"
 )
 
 
 def _show_picker_empty() -> int:
-    print("No Quests to show.")
+    print("No quests to show.")
     return 2
 
 
@@ -2637,7 +2637,7 @@ def _show_picker_non_tty(rows: list[_Row]) -> int:
     # Defensive parity only: _cmd_show handles the non-tty no-token case
     # directly (needs-a-quest-id error), so _pick_show_target is invoked
     # solely on an interactive tty and this branch is never reached.
-    print("imp: 'imp show' needs a Quest id — run 'imp list' for an overview",
+    print("imp: 'imp show' needs a quest id — run 'imp list' for an overview",
           file=sys.stderr)
     return 2
 
@@ -2715,7 +2715,7 @@ def _cmd_abandon(args: argparse.Namespace) -> int:
         quest_id = _resolve_id(control, token)
     except SystemExit:
         # No live/backlog match, and _resolve_id found nothing live either. A
-        # Quest whose worktree was already removed (crash between abandon's
+        # quest whose worktree was already removed (crash between abandon's
         # remove and branch-delete) is unresolvable there — but abandon archived
         # the id before removal, so recover it from the archive to still reap an
         # orphaned branch (AC 15c). Exact id, else unique suffix match.
@@ -2725,7 +2725,7 @@ def _cmd_abandon(args: argparse.Namespace) -> int:
         if len(hits) == 1:
             return _abandon(control, hits[0], yes=yes)
         # Truly unknown (never existed, or ambiguous) — nothing to reap.
-        print(f"imp: no Quest matches {token!r}", file=sys.stderr)
+        print(f"imp: no quest matches {token!r}", file=sys.stderr)
         return 2
     return _abandon(control, quest_id, yes=yes)
 
@@ -2744,7 +2744,7 @@ def _cmd_edit(args: argparse.Namespace) -> int:
 
     if zone_change and quest.materialized:
         print(f"imp: {quest_id} is already built; zone moves apply to "
-              "un-materialized Quests only (use abandon/pause instead)",
+              "un-materialized quests only (use abandon/pause instead)",
               file=sys.stderr)
         return 2
 
@@ -3007,7 +3007,7 @@ def _cmd_search(args: argparse.Namespace, _control: Path | None = None) -> int:
     if "archive" in zones:
         hits += _search_archived(control, args.query)
     if not hits:
-        print(f"No Quests match {args.query!r}.")
+        print(f"No quests match {args.query!r}.")
         return 0
     if args.list:
         lines = [_search_list_line(h) for h in hits]
@@ -3042,13 +3042,13 @@ def _cmd_config(args: argparse.Namespace) -> int:
 
 
 _OVERVIEW_COMMANDS: tuple[tuple[str, str], ...] = (
-    ("chat", "Open a conversation with imp — ask questions, scout work, or scope a Quest."),
-    ("new", "Scope a new Quest in conversation (optional opening message)."),
-    ("resume", "Continue an in-flight Quest (the sole resumable one, else a picker)."),
-    ("list", "List your Quests: in-flight, backlog, and recently merged."),
-    ("show", "Show one Quest's detail or a named artifact (imp show <id>)."),
-    ("log", "Show a Quest's narrative as plain text."),
-    ("abandon", "Tear down a Quest's worktree, branch, and state."),
+    ("chat", "Open a conversation with imp — ask questions, scout work, or scope a quest."),
+    ("new", "Scope a new quest in conversation (optional opening message)."),
+    ("resume", "Continue an in-flight quest (the sole resumable one, else a picker)."),
+    ("list", "List your quests: in-flight, backlog, and recently merged."),
+    ("show", "Show one quest's detail or a named artifact (imp show <id>)."),
+    ("log", "Show a quest's narrative as plain text."),
+    ("abandon", "Tear down a quest's worktree, branch, and state."),
     ("config", "Show the effective configuration."),
 )
 
@@ -3102,15 +3102,15 @@ def _build_parser() -> argparse.ArgumentParser:
     p_init.set_defaults(func=_cmd_init)
 
     p_new = sub.add_parser(
-        "new", help="Start a new Quest: run the workflow from an opening intent.")
+        "new", help="Start a new quest: run the workflow from an opening intent.")
     p_new.add_argument(
         "opening", nargs="?", metavar="MESSAGE",
         help="Opening intent handed verbatim to the workflow's opening step "
              "as its first message; omit to start with an interactive prompt. "
              "Distinct from --message, which is a headless reply to the first solicit.")
     p_new.add_argument("--title", metavar="TEXT", default=None,
-                       help="Set the Quest title explicitly; the workflow's "
-                            "opening step names the Quest if omitted.")
+                       help="Set the quest title explicitly; the workflow's "
+                            "opening step names the quest if omitted.")
     p_new.add_argument("--non-interactive", action="store_true",
                        help="Run headless: no live prompt; supply the first reply "
                             "via --message.")
@@ -3129,15 +3129,15 @@ def _build_parser() -> argparse.ArgumentParser:
                             "with `imp resume <id>`.")
     p_new.add_argument("--depends-on", metavar="ID", action="append",
                        default=None, dest="depends_on",
-                       help="A quest id this backlog Quest depends on "
+                       help="A quest id this backlog quest depends on "
                             "(repeatable). Gates ready/blocked; never changes the "
                             "base branch.")
     p_new.add_argument("--workflow", metavar="NAME", default=None,
-                       help="Run this Quest on workflow NAME instead of the "
+                       help="Run this quest on workflow NAME instead of the "
                             "project default. A bundled name needs no commit; a "
                             "committed imp/workflows/NAME fork overrides it.")
     p_new.add_argument("--base", metavar="BRANCH", default=None,
-                       help="Base the Quest on an existing BRANCH instead of "
+                       help="Base the quest on an existing BRANCH instead of "
                             "the configured default-base. BRANCH must already "
                             "exist.")
     p_new.add_argument("--model", metavar="ARG", default=None, type=_model_arg_type,
@@ -3149,7 +3149,7 @@ def _build_parser() -> argparse.ArgumentParser:
     p_chat = sub.add_parser(
         "chat",
         help="Open a conversation with imp (ask questions, scout work, or "
-             "scope a Quest).")
+             "scope a quest).")
     p_chat.add_argument(
         "opening", nargs="?", metavar="MESSAGE",
         help="Optional opening message; omit to start with an interactive prompt.")
@@ -3170,14 +3170,14 @@ def _build_parser() -> argparse.ArgumentParser:
 
     p_resume = sub.add_parser(
         "resume",
-        help="Resume a paused or interrupted Quest by id or token.",
+        help="Resume a paused or interrupted quest by id or token.",
         description=(
-            "Resume a paused or interrupted Quest, replaying its narrative and "
+            "Resume a paused or interrupted quest, replaying its narrative and "
             "continuing the workflow where it stopped. With no token on a tty, "
-            "pick from a list of resumable Quests."))
+            "pick from a list of resumable quests."))
     p_resume.add_argument(
         "token", nargs="?",
-        help="Quest id or resume token identifying which Quest to resume.")
+        help="Quest id or resume token identifying which quest to resume.")
     p_resume.add_argument("--non-interactive", action="store_true",
                           help="Headless: no live prompt; supply the reply via --message.")
     p_resume.add_argument("--autonomous", action="store_true",
@@ -3192,16 +3192,16 @@ def _build_parser() -> argparse.ArgumentParser:
 
     p_log = sub.add_parser(
         "log",
-        help="Show the narrative for a Quest.",
+        help="Show the narrative for a quest.",
         description=(
-            "Show the narrative for a Quest as plain text. --full starts every "
+            "Show the narrative for a quest as plain text. --full starts every "
             "fold expanded. Set NO_COLOR=1 to disable colors. "
             "Tip: imp log <id> --full | grep ... for line-oriented scripting."
         ),
     )
     p_log.add_argument(
         "token", nargs="?",
-        help="Quest id or its short token (omit for the most recent Quest).")
+        help="Quest id or its short token (omit for the most recent quest).")
     p_log_mode = p_log.add_mutually_exclusive_group()
     p_log_mode.add_argument(
         "--full", action="store_true",
@@ -3219,7 +3219,7 @@ def _build_parser() -> argparse.ArgumentParser:
     p_log.add_argument(
         "-f", "--follow", action="store_true",
         help="Live-tail the narrative (tail -f): replay it, then stream new "
-             "events until the Quest reaches a terminal status. Renders the "
+             "events until the quest reaches a terminal status. Renders the "
              "live run view; implies --no-pager.",
     )
     p_log_export = p_log.add_mutually_exclusive_group()
@@ -3239,16 +3239,16 @@ def _build_parser() -> argparse.ArgumentParser:
 
     p_list = sub.add_parser(
         "list",
-        help="List your Quests: in-flight, backlog, and recently merged.",
+        help="List your quests: in-flight, backlog, and recently merged.",
         description=(
-            "With no argument, an overview of your Quests — in-flight, the "
+            "With no argument, an overview of your quests — in-flight, the "
             "Backlog, and recently merged. -a/--all lifts the 10-cap and "
-            "includes abandoned/left Quests (the block is then labelled "
+            "includes abandoned/left quests (the block is then labelled "
             "`history`)."),
     )
     p_list.add_argument(
         "-a", "--all", action="store_true",
-        help="Lift the 10-cap and include abandoned Quests "
+        help="Lift the 10-cap and include abandoned quests "
              "(the block is then labelled `history`).")
     p_list.add_argument(
         "--no-pager", action="store_true",
@@ -3257,11 +3257,11 @@ def _build_parser() -> argparse.ArgumentParser:
 
     p_show = sub.add_parser(
         "show",
-        help="Show one Quest's detail or a named artifact (imp show <id>).",
+        help="Show one quest's detail or a named artifact (imp show <id>).",
         description=(
-            "Print a Quest's detail card, or name an artifact "
+            "Print a quest's detail card, or name an artifact "
             "(spec/plan/events/status/summary) to print just that. "
-            "Reads the live worktree files while a Quest is in flight and "
+            "Reads the live worktree files while a quest is in flight and "
             "falls back to the archive once it is merged."),
     )
     p_show.add_argument(
@@ -3293,10 +3293,10 @@ def _build_parser() -> argparse.ArgumentParser:
 
     p_search = sub.add_parser(
         "search",
-        help="Search Quests by id, title, or conversation content.",
+        help="Search quests by id, title, or conversation content.",
         description=(
-            "Search active (in-flight + drafts), backlog, and archived Quests "
-            "for the query as a case-insensitive substring of a Quest's id, "
+            "Search active (in-flight + drafts), backlog, and archived quests "
+            "for the query as a case-insensitive substring of a quest's id, "
             "title, or conversation content. With no zone flag, all three zones "
             "are searched."),
     )
@@ -3305,16 +3305,16 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Substring matched case-insensitively against id, title, and content.")
     p_search.add_argument(
         "--active", action="store_true",
-        help="Search in-flight and draft Quests.")
+        help="Search in-flight and draft quests.")
     p_search.add_argument(
         "--backlog", action="store_true",
-        help="Search backlog Quests.")
+        help="Search backlog quests.")
     p_search.add_argument(
         "--archived", action="store_true",
-        help="Search archived (completed, abandoned, left) Quests.")
+        help="Search archived (completed, abandoned, left) quests.")
     p_search.add_argument(
         "-l", "--list", action="store_true", dest="list",
-        help="One terse line per Quest (id, title, zone); no excerpts.")
+        help="One terse line per quest (id, title, zone); no excerpts.")
     p_search.add_argument(
         "--no-pager", action="store_true",
         help="Disable the pager even when stdout is a TTY.")
@@ -3340,38 +3340,38 @@ def _build_parser() -> argparse.ArgumentParser:
 
     p_abandon = sub.add_parser(
         "abandon",
-        help="Tear down a Quest's worktree, branch, and state (logged).",
+        help="Tear down a quest's worktree, branch, and state (logged).",
         description=(
-            "Tear down a materialized Quest — its worktree, branch, and state — "
+            "Tear down a materialized quest — its worktree, branch, and state — "
             "or discard a pure backlog idea. On a tty, confirm before tearing "
-            "down a materialized Quest; pass --yes to skip. With no token, pick "
+            "down a materialized quest; pass --yes to skip. With no token, pick "
             "from a list."),
     )
     p_abandon.add_argument(
         "token", nargs="?",
-        help="Quest id or short token identifying which Quest to abandon "
+        help="Quest id or short token identifying which quest to abandon "
              "(omit on a tty to pick from a list).")
     p_abandon.add_argument(
         "--yes", action="store_true",
-        help="Skip the confirmation prompt before tearing down a materialized Quest.")
+        help="Skip the confirmation prompt before tearing down a materialized quest.")
     p_abandon.set_defaults(func=_cmd_abandon)
 
     p_edit = sub.add_parser(
         "edit",
-        help="Edit a Quest's title, backlog membership, or dependencies.",
+        help="Edit a quest's title, backlog membership, or dependencies.",
         description=(
-            "Edit a Quest's title, backlog membership, or dependencies. Zone "
-            "moves (--backlog/--active) apply to un-materialized Quests only."))
+            "Edit a quest's title, backlog membership, or dependencies. Zone "
+            "moves (--backlog/--active) apply to un-materialized quests only."))
     p_edit.add_argument("token", help="Quest id or its short token.")
     p_edit.add_argument("--title", metavar="TEXT", default=None,
-                        help="Set the Quest title.")
+                        help="Set the quest title.")
     p_edit_zone = p_edit.add_mutually_exclusive_group()
     p_edit_zone.add_argument(
         "--backlog", action="store_true",
-        help="Move an un-materialized Quest to the Backlog zone (origin=idea).")
+        help="Move an un-materialized quest to the Backlog zone (origin=idea).")
     p_edit_zone.add_argument(
         "--active", action="store_true",
-        help="Return an un-materialized Quest to the Active zone (origin=draft).")
+        help="Return an un-materialized quest to the Active zone (origin=draft).")
     p_edit_deps = p_edit.add_mutually_exclusive_group()
     p_edit_deps.add_argument(
         "--depends-on", metavar="ID", action="append", default=None,
@@ -3383,7 +3383,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
     p_rc = sub.add_parser(
         "remote-control",
-        help="Run the optional per-repo daemon that relays all Quests to one transport.",
+        help="Run the optional per-repo daemon that relays all quests to one transport.",
     )
     rc_sub = p_rc.add_subparsers(dest="rc_action", required=True)
     p_rc_start = rc_sub.add_parser(

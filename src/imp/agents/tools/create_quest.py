@@ -12,7 +12,7 @@ from imp.engine.state import JsonlEventLog
 @imp_tool(
     name="create_quest",
     description=(
-        "Record a durable follow-up backlog Quest (no branch/worktree yet). "
+        "Record a durable follow-up backlog quest (no branch/worktree yet). "
         "Give it a short title and a self-contained description that needs no "
         "other context; optionally list quest ids it depends_on. Returns the "
         "new id; it is startable later with `imp resume <id>`."
@@ -22,7 +22,7 @@ def create_quest(
     ctx: Any, title: str, description: str, depends_on: list[str] | None = None,
 ) -> str:
     if ctx.change_state is None:
-        raise RuntimeError("create_quest is only available to top-level Quest steps")
+        raise RuntimeError("create_quest is only available to top-level quest steps")
     parent = ctx.quest
     new_id = new_quest_id(existing_stems=live_stems(parent.control_root))
     deps = list(depends_on or [])
@@ -36,4 +36,4 @@ def create_quest(
         agent_id=ctx.agent_id, type="quest_created",
         payload={"id": new_id, "title": title, "kind": "backlog",
                  "depends_on": deps})
-    return f"recorded backlog Quest {new_id}; start it later with `imp resume {new_id}`"
+    return f"recorded backlog quest {new_id}; start it later with `imp resume {new_id}`"

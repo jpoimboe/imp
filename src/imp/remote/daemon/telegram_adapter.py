@@ -125,7 +125,7 @@ def render_response(
     response: Response, subscribed_ids: Iterable[str] = (), alerts_on: bool = False,
 ) -> str:
     if isinstance(response, ListResult):
-        header = "Alerts: all Quests" if alerts_on else "Alerts: subscribed only"
+        header = "Alerts: all quests" if alerts_on else "Alerts: subscribed only"
         subscribed = set(subscribed_ids)
         visible = [
             c for c in response.changes
@@ -202,15 +202,15 @@ class TelegramNorthAdapter:
     def on_event(self, event: dict[str, Any]) -> None:
         """Curate one event and deliver it to chat.
 
-        Membership is the first decision (spec §2): a subscribed Quest takes the
+        Membership is the first decision (spec §2): a subscribed quest takes the
         full curated path below (buzz + silent, deduped via Subscriptions.seen). An
-        unsubscribed Quest no longer returns here — it falls through to
+        unsubscribed quest no longer returns here — it falls through to
         _alert_all_event, which delivers only buzz events and only while alert-all
-        is on. A subscribed Quest streams every llm_response as its own quiet
+        is on. A subscribed quest streams every llm_response as its own quiet
         message, so a gate (awaiting_user_input) is delivered terse — its label and
         reply handle, with no re-dump of the preceding narration. The _last_narration
         write is kept: it still feeds the alert-all path across a subscribe/
-        unsubscribe toggle. That per-Quest map is sender-thread-only, like _offset,
+        unsubscribe toggle. That per-quest map is sender-thread-only, like _offset,
         so it needs no lock."""
         change = event.get("change") or {}
         quest_id = change.get("id")
@@ -250,17 +250,17 @@ class TelegramNorthAdapter:
                 self._msg_to_change[message_id] = quest_id
 
     def _alert_all_event(self, quest_id: str, event: dict[str, Any]) -> None:
-        """An unsubscribed Quest: deliver a buzz alert loud iff alert-all is on,
+        """An unsubscribed quest: deliver a buzz alert loud iff alert-all is on,
         recording the same reply maps the subscribed path records and deduping on
         (quest_id, event id) against the AlertAll log. Silent narrative stays
-        suppressed for an unsubscribed Quest. An event with no id is best-effort
+        suppressed for an unsubscribed quest. An event with no id is best-effort
         (delivered, not deduped). mark fires only on a successful send (message_id
         is not None), mirroring the map write: a send that fails without raising
         must not record the event as delivered, or the re-attach replay that
-        re-surfaces this blocked Quest would be permanently suppressed. A
-        prompt-less awaiting_user_input falls back to this Quest's preceding
+        re-surfaces this blocked quest would be permanently suppressed. A
+        prompt-less awaiting_user_input falls back to this quest's preceding
         llm_response narration (recorded before the enabled gate so the first
-        alert after /alerts on carries current context). An unsubscribed Quest
+        alert after /alerts on carries current context). An unsubscribed quest
         never streamed that narration, so the gate carries it as its only copy
         (unlike the subscribed path, which streams narration live and keeps its gate
         terse); with no prior narration it renders the 'needs your input' label
