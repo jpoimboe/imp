@@ -233,7 +233,7 @@ async def run_terminal_client(
                         RuntimeError, anyio.BrokenResourceError,
                         anyio.ClosedResourceError,
                     ):
-                        await client.send_control(action)
+                        await client.send_control(action, coord.leave_reason)
                         leave_state["disposition"] = action
                         _sent = True
                     if not _sent:
