@@ -241,7 +241,7 @@ def test_isolated_dispatch_without_quest_context_raises(tmp_path: Path) -> None:
         anyio.run(dispatch_task, ctx, "prober", "go")
 
 
-def test_build_spike_policy_passes_spike_true(monkeypatch, tmp_path):
+def test_build_spike_policy_passes_disposable_tree_true(monkeypatch, tmp_path):
     from types import SimpleNamespace
 
     import imp.agents.subagents as subagents
@@ -278,4 +278,4 @@ def test_build_spike_policy_passes_spike_true(monkeypatch, tmp_path):
     result = subagents._build_spike_policy(quest, tmp_path / "wt", test_gates=None)
 
     assert result == "sentinel-policy"
-    assert captured["spike"] is True
+    assert captured["disposable_tree"] is True

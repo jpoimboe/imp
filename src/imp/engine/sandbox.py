@@ -44,8 +44,7 @@ class SandboxPolicy:
     quest_home: str = ""                     # <control>/.imp/quests/<id> rw bind ("" → none)
     readonly_overlays: tuple[str, ...] = ()  # ro subtrees; after git_ro_remask, before caches
     git_ref_reexpose: tuple[str, ...] = ()   # rw re-expose of refs/heads/imp; after git_ro_remask
-    ephemeral_home: str = ""                 # spike: writable tmpfs over $HOME ("" → none)
-    cred_writethrough: tuple[str, ...] = ()  # spike: rw write-through binds of provider cred dirs
+    disposable_tree: bool = False            # agent runs in a disposable git worktree
 
     def allows_read(self, path: Path) -> bool:
         """In-process mirror of the sandbox's read exposure: the whole host is
@@ -260,7 +259,7 @@ def sandbox_config_from_raw(raw: Mapping[str, Any]) -> SandboxConfig:
 def resolve_policy(
     *, worktree: Path, control_root: Path, quest_id: str, cfg: SandboxConfig,
     engine_env_result: Mapping[str, str], environ: Mapping[str, str],
-    available: bool, quest_dir: Path | None = None, spike: bool = False,
+    available: bool, quest_dir: Path | None = None, disposable_tree: bool = False,
 ) -> SandboxPolicy:
     """Stat once, bake a frozen SandboxPolicy. The ONE impure step (spec B.1).
 
@@ -308,41 +307,22 @@ def resolve_policy(
         imp_refs.mkdir(parents=True, exist_ok=True)
         git_ref_reexpose = (str(imp_refs),)
 
-    if spike:
-        caches: tuple[str, ...] = ()
-    else:
-        cache_names = cfg.writable_caches or _DEFAULT_CACHES
-        caches = _existing([str(home / c) for c in cache_names])
+    cache_names = cfg.writable_caches or _DEFAULT_CACHES
+    caches = _existing([str(home / c) for c in cache_names])
 
     # Secret dirs/files: code defaults + config secret_paths (each classified
-    # dir-vs-file by an actual stat); + /run/user/$UID. Under a spike tmpfs home
-    # the home-relative masks are moot (they live inside the now-empty tmpfs) and
-    # are omitted; absolute secret_paths and /run/user/$UID are outside $HOME and
-    # stay masked.
-    if spike:
-        secret_dirs: list[str] = []
-        secret_files: list[str] = []
-    else:
-        secret_dirs = list(_existing([str(home / d) for d in _DEFAULT_SECRET_DIRS]))
-        secret_files = list(_existing([str(home / f) for f in _DEFAULT_SECRET_FILES]))
+    # dir-vs-file by an actual stat); + /run/user/$UID. Applied uniformly for
+    # every agent — the disposable-tree capability no longer suppresses them.
+    secret_dirs = list(_existing([str(home / d) for d in _DEFAULT_SECRET_DIRS]))
+    secret_files = list(_existing([str(home / f) for f in _DEFAULT_SECRET_FILES]))
     for extra in cfg.secret_paths:
         is_abs = extra.startswith("/")
-        if spike and not is_abs:
-            continue   # home-relative mask is moot under the tmpfs home
         p = Path(extra) if is_abs else (home / extra)
         if p.is_dir():
             secret_dirs.append(str(p))
         elif p.exists():
             secret_files.append(str(p))
     secret_dirs.append(f"/run/user/{uid}")   # H2 — agent sockets; mask even if abs
-
-    ephemeral_home = ""
-    cred_writethrough: tuple[str, ...] = ()
-    if spike:
-        ephemeral_home = str(home)
-        claude_override = environ.get("CLAUDE_CONFIG_DIR")
-        claude_dir = Path(claude_override) if claude_override else home / ".claude"
-        cred_writethrough = _existing([str(claude_dir), str(home / ".codex")])
 
     # ro overlay of workflow snapshot — bind_plan emits it after the quest_home rw
     # bind, so last-covering-wins makes only workflow/ read-only.
@@ -357,6 +337,7 @@ def resolve_policy(
         quest_home=str(quest_dir) if quest_dir is not None else "",
         git_ro_remask=tuple(remask),
         git_ref_reexpose=git_ref_reexpose,
+        disposable_tree=disposable_tree,
         readonly_overlays=readonly_overlays,
         writable_caches=caches,
         extra_readable=tuple(cfg.extra_readable),
@@ -366,8 +347,6 @@ def resolve_policy(
         setenv=_build_setenv(engine_env_result, environ, cfg.extra_env),
         network=cfg.network,
         note="",
-        ephemeral_home=ephemeral_home,
-        cred_writethrough=cred_writethrough,
     )
 
 

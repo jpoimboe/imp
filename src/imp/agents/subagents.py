@@ -188,7 +188,7 @@ def _build_spike_policy(quest: Any, worktree_path: Path, test_gates: Any) -> Any
         worktree=worktree_path, control_root=quest.control_root,
         quest_id=quest.id, cfg=cfg, engine_env_result=eng,
         environ=os.environ, available=sandbox_available(),
-        quest_dir=quest.quest_dir, spike=True,
+        quest_dir=quest.quest_dir, disposable_tree=True,
     )
 
 

@@ -967,153 +967,38 @@ def test_argv_binds_match_bind_plan_spike():
     assert p.allows_write(Path("/home/u/.ssh/id_rsa")) is False
 
 
-def test_resolve_policy_spike_makes_home_a_writable_tmpfs(tmp_path):
-    control, wt = _layout(tmp_path)
-    home = tmp_path / "home"
-    home.mkdir()
-    pol = resolve_policy(
-        worktree=wt, control_root=control, quest_id="abc",
-        cfg=SandboxConfig(home=home), engine_env_result={}, environ={},
-        available=True, spike=True,
-    )
-    assert pol.ephemeral_home == str(home)
-    assert (str(home), "tmpfs_rw") in pol.bind_plan()
-    # AC 1c: any path under the tmpfs home is writable.
-    assert pol.allows_write(home / "anything") is True
-    assert pol.allows_write(home / ".local" / "bin" / "x") is True
-
-
-def test_resolve_policy_spike_reexposes_worktree_and_quest_home_under_home(tmp_path):
-    # AC 2: project root under $HOME → worktree and quest_home re-expose over the
-    # early home tmpfs and stay writable.
-    home = tmp_path / "home"
-    control = home / "proj"
-    wt = control / ".imp" / "worktrees" / "abc"
-    wt.mkdir(parents=True)
-    (control / ".git" / "hooks").mkdir(parents=True)
-    (control / ".git" / "config").write_text("")
-    quest_home = control / ".imp" / "quests" / "abc"
-    pol = resolve_policy(
-        worktree=wt, control_root=control, quest_id="abc",
-        cfg=SandboxConfig(home=home), engine_env_result={}, environ={},
-        available=True, quest_dir=quest_home, spike=True,
-    )
-    plan = pol.bind_plan()
-    assert plan.index((str(home), "tmpfs_rw")) < plan.index((str(wt), "rw"))
-    assert pol.allows_write(wt / "src" / "a.py") is True
-    assert pol.allows_write(quest_home / "progress.md") is True
-
-
-def test_resolve_policy_spike_binds_existing_cred_dirs_writethrough(tmp_path):
-    control, wt = _layout(tmp_path)
-    home = tmp_path / "home"
-    (home / ".claude").mkdir(parents=True)
-    (home / ".codex").mkdir(parents=True)
-    pol = resolve_policy(
-        worktree=wt, control_root=control, quest_id="abc",
-        cfg=SandboxConfig(home=home), engine_env_result={}, environ={},
-        available=True, spike=True,
-    )
-    assert pol.cred_writethrough == (str(home / ".claude"), str(home / ".codex"))
-    # Write-through binds are rw and win over the tmpfs home (emitted after it).
-    assert pol.allows_write(home / ".claude" / ".credentials.json") is True
-    assert pol.allows_write(home / ".codex" / "auth.json") is True
-
-
-def test_resolve_policy_spike_cred_dirs_existence_gated(tmp_path):
-    control, wt = _layout(tmp_path)
-    home = tmp_path / "home"
-    home.mkdir()   # neither .claude nor .codex exists
-    pol = resolve_policy(
-        worktree=wt, control_root=control, quest_id="abc",
-        cfg=SandboxConfig(home=home), engine_env_result={}, environ={},
-        available=True, spike=True,
-    )
-    assert pol.cred_writethrough == ()   # nothing bound; spike still starts
-
-
-def test_resolve_policy_spike_honors_claude_config_dir_override(tmp_path):
-    control, wt = _layout(tmp_path)
-    home = tmp_path / "home"
-    home.mkdir()
-    custom = tmp_path / "custom-claude"
-    custom.mkdir()
-    pol = resolve_policy(
-        worktree=wt, control_root=control, quest_id="abc",
-        cfg=SandboxConfig(home=home), engine_env_result={},
-        environ={"CLAUDE_CONFIG_DIR": str(custom)}, available=True, spike=True,
-    )
-    assert str(custom) in pol.cred_writethrough
-    assert str(home / ".claude") not in pol.cred_writethrough
-
-
-def test_resolve_policy_spike_omits_home_relative_caches_and_masks(tmp_path):
-    control, wt = _layout(tmp_path)
-    home = tmp_path / "home"
-    (home / ".cache").mkdir(parents=True)     # would be a writable cache when non-spike
-    (home / ".ssh").mkdir(parents=True)       # would be a secret mask_dir when non-spike
-    (home / ".netrc").write_text("secret")    # would be a secret mask_file when non-spike
-    pol = resolve_policy(
-        worktree=wt, control_root=control, quest_id="abc",
-        cfg=SandboxConfig(home=home, secret_paths=("/abs/secret",)),
-        engine_env_result={}, environ={}, available=True, spike=True,
-    )
-    # Home-relative caches/masks are moot under the tmpfs home → not emitted.
-    assert pol.writable_caches == ()
-    assert str(home / ".ssh") not in pol.secret_dirs
-    assert str(home / ".netrc") not in pol.secret_files
-    # /run/user/$UID (absolute) is still masked last.
-    assert any(d.startswith("/run/user/") for d in pol.secret_dirs)
-
-
-def test_resolve_policy_spike_keeps_absolute_secret_paths(tmp_path):
-    control, wt = _layout(tmp_path)
-    home = tmp_path / "home"
-    home.mkdir()
-    abs_secret = tmp_path / "abs-secret"
-    abs_secret.mkdir()   # absolute dir outside $HOME
-    pol = resolve_policy(
-        worktree=wt, control_root=control, quest_id="abc",
-        cfg=SandboxConfig(home=home, secret_paths=(str(abs_secret),)),
-        engine_env_result={}, environ={}, available=True, spike=True,
-    )
-    assert str(abs_secret) in pol.secret_dirs   # absolute secret still masked
-
-
-def test_resolve_policy_spike_omits_home_relative_secret_paths(tmp_path):
-    # Load-bearing partition: a HOME-RELATIVE cfg.secret_paths entry is moot under
-    # the tmpfs home and must be dropped even though it physically exists; the
-    # `if spike and not is_abs: continue` guard is the only thing enforcing this.
-    control, wt = _layout(tmp_path)
-    home = tmp_path / "home"
-    (home / ".mykeys").mkdir(parents=True)   # a real, existing home-relative dir
-    (home / ".mysecret").write_text("x")     # a real, existing home-relative file
-    pol = resolve_policy(
-        worktree=wt, control_root=control, quest_id="abc",
-        cfg=SandboxConfig(home=home, secret_paths=(".mykeys", ".mysecret")),
-        engine_env_result={}, environ={}, available=True, spike=True,
-    )
-    assert str(home / ".mykeys") not in pol.secret_dirs
-    assert str(home / ".mysecret") not in pol.secret_files
-
-
-def test_resolve_policy_non_spike_default_has_no_spike_binds(tmp_path):
-    # AC 6: spike=False (the default) leaves the ephemeral-home / cred binds absent
-    # and the existing caches + home-relative masks intact.
+def test_resolve_policy_disposable_tree_uses_universal_home_model(tmp_path):
+    # AC 4 + AC 10 (unit): disposable_tree no longer specializes the home — the
+    # writable caches write through and the home secret masks apply exactly as
+    # for a normal agent; no ephemeral tmpfs home is synthesized.
     control, wt = _layout(tmp_path)
     home = tmp_path / "home"
     (home / ".cache").mkdir(parents=True)
     (home / ".ssh").mkdir(parents=True)
-    (home / ".claude").mkdir(parents=True)
+    (home / ".netrc").write_text("secret")
+    (home / ".customsecret").mkdir(parents=True)
     pol = resolve_policy(
         worktree=wt, control_root=control, quest_id="abc",
-        cfg=SandboxConfig(home=home), engine_env_result={}, environ={},
-        available=True,   # spike defaults to False
+        cfg=SandboxConfig(home=home, secret_paths=(".customsecret",)),
+        engine_env_result={}, environ={}, available=True, disposable_tree=True,
     )
-    assert pol.ephemeral_home == ""
-    assert pol.cred_writethrough == ()
-    assert str(home / ".cache") in pol.writable_caches      # cache still bound
-    assert str(home / ".ssh") in pol.secret_dirs            # home mask still emitted
+    assert pol.disposable_tree is True
+    assert str(home / ".cache") in pol.writable_caches       # cache write-through
+    assert str(home / ".ssh") in pol.secret_dirs             # home mask applied
+    assert str(home / ".netrc") in pol.secret_files          # home file mask applied
+    assert str(home / ".customsecret") in pol.secret_dirs    # home-relative cfg secret honored
+    # /run/user/$UID still masked last; no tmpfs ephemeral home was produced.
+    assert any(d.startswith("/run/user/") for d in pol.secret_dirs)
+    assert all(kind != "tmpfs_rw" for _, kind in pol.bind_plan())
+
+
+def test_resolve_policy_defaults_disposable_tree_false(tmp_path):
+    control, wt = _layout(tmp_path)
+    pol = resolve_policy(
+        worktree=wt, control_root=control, quest_id="abc",
+        cfg=SandboxConfig(), engine_env_result={}, environ={}, available=True,
+    )
+    assert pol.disposable_tree is False
 
 
 def test_resolve_policy_bakes_workflow_snapshot_overlay(tmp_path):
