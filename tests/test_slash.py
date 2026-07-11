@@ -52,9 +52,9 @@ def test_successful_skill_load_emits_no_caret_echo(tmp_path: Path) -> None:
     # input; unlike the reprompt builtins it must NOT print a caret echo (the
     # live driver's local_echo renders the submitted line instead). Guards
     # against a stray _echo_command creeping onto the skill-load branch.
-    change = _FakeChange(tmp_path)
+    quest = _FakeChange(tmp_path)
     out: list[str] = []
-    result = handle_slash_line("/refactor", change=change, output_fn=out.append)
+    result = handle_slash_line("/refactor", quest=quest, output_fn=out.append)
     assert result == "# Refactor\nstep one\n"
     assert out == []
 
