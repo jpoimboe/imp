@@ -59,16 +59,13 @@ class SandboxPolicy:
         """The ordered path-covering binds, in bwrap EMIT ORDER — the SINGLE
         source of truth shared by build_sandbox_argv (which formats each entry to
         argv) and allows_write (which evaluates last-covering-wins). kind is one
-        of rw / tmpfs_rw / ro / mask_dir / mask_file; rw and tmpfs_rw grant write
-        (tmpfs_rw is the spike's writable ephemeral home — same --tmpfs argv as a
-        secret mask_dir but the opposite write verdict). The order is
+        of rw / ro / mask_dir / mask_file; rw grants write. The order is
         load-bearing: the ro overlays (git_ro_remask, readonly_overlays, extra_readable)
         are NOT globally last-wins — a later writable bind re-exposes a path they
         cover — only the secret masks are unconditionally last. Add a new bind here
         and BOTH consumers pick it up; the argv-parity test enforces no drift."""
         return [
             ("/tmp", "rw"),
-            *([(self.ephemeral_home, "tmpfs_rw")] if self.ephemeral_home else []),
             (self.worktree, "rw"),
             (self.git_common_dir, "rw"),
             *([(self.quest_home, "rw")] if self.quest_home else []),
@@ -78,7 +75,6 @@ class SandboxPolicy:
             *[(c, "rw") for c in self.writable_caches],
             *[(r, "ro") for r in self.extra_readable],
             *[(w, "rw") for w in self.extra_writable],
-            *[(c, "rw") for c in self.cred_writethrough],
             *[(d, "mask_dir") for d in self.secret_dirs],
             *[(f, "mask_file") for f in self.secret_files],
         ]
@@ -86,14 +82,13 @@ class SandboxPolicy:
     def allows_write(self, path: Path) -> bool:
         """In-process mirror of the sandbox's write exposure. Walks bind_plan()
         in emit order; the LAST bind covering `path` decides. Writable iff that
-        last bind is rw or tmpfs_rw (the spike's writable ephemeral home); a
-        read-only overlay (git_ro_remask, extra_readable), a secret mask, or no
-        covering bind denies."""
+        last bind is rw; a read-only overlay (git_ro_remask, extra_readable), a
+        secret mask, or no covering bind denies."""
         verdict: str | None = None
         for bind, kind in self.bind_plan():
             if path.is_relative_to(Path(bind)):
                 verdict = kind
-        return verdict in ("rw", "tmpfs_rw")
+        return verdict == "rw"
 
 
 def _is_engine_passthrough(key: str) -> bool:
@@ -147,8 +142,6 @@ def build_sandbox_argv(
             argv += ["--ro-bind", bind, bind]
         elif kind == "mask_dir":
             argv += ["--tmpfs", bind]
-        elif kind == "tmpfs_rw":
-            argv += ["--tmpfs", bind]   # spike ephemeral home: mask-identical argv, writable
         elif kind == "mask_file":
             argv += ["--ro-bind", "/dev/null", bind]
         else:  # unreachable; guards a future bind_plan kind from silently vanishing
