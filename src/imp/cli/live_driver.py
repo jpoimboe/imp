@@ -280,8 +280,11 @@ class LiveDriver:
                  display_width: int | Callable[[], int] = 80,
                  suppress_replay: bool = False,
                  preceded_by_blank: bool = False,
-                 startup_verb: str | None = None) -> None:
+                 startup_verb: str | None = None,
+                 change_id: str | None = None, title: str = "") -> None:
         self._builder = nv.NarrativeBuilder()
+        if change_id is not None:
+            self._builder.seed_identity(change_id, title)
         self._stream = stream
         self._color = color
         # width/display_width may be a live callable (a real terminal, re-read
