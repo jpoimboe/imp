@@ -77,6 +77,7 @@ def save_to_backlog(change: Change) -> None:
     with ProjectLock(change.change_dir / "lock").acquire():
         state = State.load(change.state_dir)
         state.status = "paused"
+        state.arm_step_resume(interrupt=False)
         state.save(change.state_dir)
         change.event_log().append(
             agent_id=None, type="conversation_saved", payload={})

@@ -145,3 +145,18 @@ def test_print_leave_disposition_send_failed_prints_running_line(
     out = capsys.readouterr().out
     assert "left running" in out
     assert "imp resume sf1" in out
+
+
+def test_save_to_backlog_arms_resume_pending(tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+    ch = Change.create_draft(tmp_path, title="Draft", change_id="bkarm", base_branch="main")
+    initial = State.load(ch.state_dir)
+    step = initial.step
+    assert step is not None
+    assert initial.resume_pending is None                      # fresh: not yet armed
+
+    save_to_backlog(ch)
+
+    reloaded = State.load(ch.state_dir)                         # home kept, reload in place
+    assert reloaded.resume_pending == step                     # armed to the step on leave
+    assert reloaded.interrupt_pending is False                 # clean yield, not an interrupt
