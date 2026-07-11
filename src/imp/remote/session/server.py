@@ -66,10 +66,12 @@ class SessionServer:
         self._first_leased_attach_fired: bool = False
         self.abandoned = False
         self.saved = False
+        self.save_reason: str | None = None
         self.archived = False
         self.discarded = False
         self._abandon_requested = False
         self._save_requested = False
+        self._save_reason: str | None = None
         self._archive_requested = False
         self._discard_requested = False
         self._serve_scope: anyio.CancelScope | None = None
@@ -302,7 +304,11 @@ class SessionServer:
         if action == CONTROL_SAVE:
             # Same guaranteed-delivery pattern as abandon: flag is always set;
             # enqueue is best-effort so the loop wakes immediately when possible.
+            # The reason rides on the flag, not the queue item — a full-queue drop
+            # must not lose it, and the loop's per-iteration reason may be another
+            # buffered frame's.
             self._save_requested = True
+            self._save_reason = reason
             with contextlib.suppress(anyio.WouldBlock):
                 self._control_send.send_nowait((action, reason))
             return
@@ -328,7 +334,7 @@ class SessionServer:
                 await self._dispatch_control(CONTROL_ABANDON)
                 return
             if self._save_requested:
-                await self._dispatch_control(CONTROL_SAVE)
+                await self._dispatch_control(CONTROL_SAVE, self._save_reason)
                 return
             if self._archive_requested:
                 await self._dispatch_control(CONTROL_ARCHIVE)
@@ -365,6 +371,7 @@ class SessionServer:
             self._serve_scope.cancel()
         elif action == CONTROL_SAVE:
             self.saved = True
+            self.save_reason = reason
             if self._serve_scope is None:
                 raise RuntimeError("save dispatched outside serve()")
             self._serve_scope.cancel()

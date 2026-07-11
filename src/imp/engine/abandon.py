@@ -70,17 +70,20 @@ def archive_conversation(quest: Quest) -> None:
     shutil.rmtree(quest.quest_dir, ignore_errors=True)
 
 
-def save_to_backlog(quest: Quest) -> None:
+def save_to_backlog(quest: Quest, reason: str | None = None) -> None:
     """Pause a conversation: the un-materialized change-home is kept (not archived) and
     remains resumable. Zone is derived from both `materialized` and `origin` — no bespoke
-    status string is needed for zone placement."""
+    status string is needed for zone placement. When the save was driven by a mid-run
+    interrupt leave, `reason` (e.g. "ctrl-d") is stamped onto the conversation_saved
+    payload as interrupt_reason; a plain save carries an empty payload."""
     with ProjectLock(quest.quest_dir / "lock").acquire():
         state = State.load(quest.state_dir)
         state.status = "paused"
         state.arm_step_resume(interrupt=False)
         state.save(quest.state_dir)
+        payload = {"interrupt_reason": reason} if reason else {}
         quest.event_log().append(
-            agent_id=None, type="conversation_saved", payload={})
+            agent_id=None, type="conversation_saved", payload=payload)
 
 
 def discard_conversation(quest: Quest) -> None:

@@ -1216,6 +1216,39 @@ async def test_force_kill_without_live_client_is_safe() -> None:
 
 
 @pytest.mark.anyio
+async def test_force_kill_sets_cancel_so_minus9_processerror_is_interrupted(
+    tmp_path: Path,
+) -> None:
+    """AC-3: force_kill() marks the runner cancelled BEFORE the SIGKILL, so when the
+    SDK later raises a `-9 ProcessError` (message does NOT contain "terminated
+    process", so `_is_terminated_process_teardown` misses it) the outer except
+    classifies it as config/interrupted — never the unknown "unclassified provider
+    error" fallback."""
+    class _ExplodingClient:
+        async def __aenter__(self) -> None:
+            raise RuntimeError("Command failed with exit code -9")
+
+        async def __aexit__(self, *args: object) -> None:
+            return None
+
+    runner = ClaudeCodeAgentRunner(
+        model_name="claude-sonnet-4-5",
+        client_factory=lambda _opts: _ExplodingClient(),
+    )
+    # No live transport yet: force_kill's SIGKILL is a no-op, but it must still set
+    # _cancel — the flag is set before the `process is None` early-out.
+    await runner.force_kill()
+    assert runner._cancel is True
+
+    events = [ev async for ev in runner.run(_inv(tmp_path))]
+    errs = [e for e in events if e.get("type") == "error"]
+    assert len(errs) == 1, errs
+    assert errs[0]["payload"]["category"] == "config", errs[0]["payload"]
+    assert errs[0]["payload"]["kind"] == "interrupted", errs[0]["payload"]
+    assert "unclassified provider error" not in errs[0]["payload"]["message"]
+
+
+@pytest.mark.anyio
 async def test_result_is_error_emits_terminated_not_nudge(tmp_path: Path) -> None:
     """A ResultMessage flagged is_error is a termination: emit a typed `terminated`
     error with the structured fields in the detail, BEFORE any nudge — even when a

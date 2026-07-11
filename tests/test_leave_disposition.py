@@ -161,3 +161,26 @@ def test_save_to_backlog_arms_resume_pending(tmp_path: Path) -> None:
     reloaded = State.load(ch.state_dir)                         # home kept, reload in place
     assert reloaded.resume_pending == step                     # armed to the step on leave
     assert reloaded.interrupt_pending is False                 # clean yield, not an interrupt
+
+
+def test_save_to_backlog_stamps_interrupt_reason_when_reason_given(tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+    ch = Quest.create_draft(tmp_path, title="Draft", quest_id="bkcd", base_branch="main")
+
+    save_to_backlog(ch, reason="ctrl-d")
+
+    saved = [e for e in ch.event_log().read() if e.get("type") == "conversation_saved"]
+    assert len(saved) == 1
+    assert saved[0]["payload"] == {"interrupt_reason": "ctrl-d"}
+
+
+def test_save_to_backlog_without_reason_carries_no_interrupt_reason(tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+    ch = Quest.create_draft(tmp_path, title="Draft", quest_id="bknr", base_branch="main")
+
+    save_to_backlog(ch)
+
+    saved = [e for e in ch.event_log().read() if e.get("type") == "conversation_saved"]
+    assert len(saved) == 1
+    assert "interrupt_reason" not in saved[0]["payload"]
+    assert saved[0]["payload"] == {}

@@ -66,16 +66,19 @@ interrupts with `wait=False` so they go immediately, then read with `wait` / `vi
 
 | Trigger | `send` data | Path through imp |
 |---------|-------------|------------------|
-| **Ctrl-C** | `"\x03"` | **At a prompt** it is *intercepted and never raises* (`src/imp/cli/prompt.py`): a non-empty buffer is cleared in place, an empty buffer prints `press ctrl-d to pause & exit` once per session — it does **not** pause. **Mid-run** a real SIGINT (CLI/cooked mode) → the coordinator's loop signal handler (`InterruptCoordinator.run_signal_receiver`, re-armed after every prompt) → `signal_pause("ctrl-c")`. In **both** the **phase-0 chat** and a **materialized** Change it pauses the agent and stays **ATTACHED** (`alive=True`, does not exit) at an interactive prompt — steer (reply resumes the agent) or leave (a subsequent Ctrl-D detaches, rc 130, paused); the Ctrl-C **disposition** is identical across regimes, but the landing prompt **text** differs: **phase-0** → its chat `> type your reply` prompt; **materialized** → the resteer hold prompt `paused — type a message to redirect, or detach to leave it paused`. |
-| **Ctrl-D** | `"\x04"` | **At a prompt** → **leave**. **Phase-0** (non-materialized) draft: at the opening prompt with no exchange → `imp: cancelled` (no Change); after an exchange → `imp: saved '<id>' to your Backlog` (`imp new`) / `conversation saved` (`imp chat`), resumable. **On a materialized Change at a prompt** (e.g. the resteer hold prompt after a Ctrl-C) → detaches (rc 130, resumable via `imp resume`); resume_target = "prompt" — `imp resume` lands back at the resteer hold prompt. **Mid-run** (delivered as a `\x04` keystroke — see fidelity note above) → **suspend & detach**: tears down the in-flight request/tool/subagent (orphan check clean), emits `workflow_paused` with `interrupt_reason == "ctrl-d"`, rc 130, Change left paused; resume_target = "agent" — `imp resume` continues the agent (transcript replays, no intervening prompt). |
+| **Ctrl-C** | `"\x03"` | **At a prompt** it is *intercepted and never raises* (`src/imp/cli/prompt.py`): a non-empty buffer is cleared in place, an empty buffer prints `press ctrl-d to pause & exit` once per session — it does **not** pause. **Mid-run** a real SIGINT (CLI/cooked mode) → the coordinator's loop signal handler (`InterruptCoordinator.run_signal_receiver`, re-armed after every prompt) → `signal_pause("ctrl-c")`. In **both** the **phase-0 chat** and a **materialized** Change it pauses the agent and stays **ATTACHED** (`alive=True`, does not exit) at an interactive prompt — steer (reply resumes the agent) or leave (a subsequent Ctrl-D detaches, rc 130, paused); the Ctrl-C **disposition** is identical across regimes and so is the landing prompt: a live mid-turn Ctrl-C on a top-level agent drops to the **inline steer gate** whose placeholder reads `interrupted — type to redirect, or Ctrl-D to leave it paused` (`INTERRUPT_STEER_HINT`, `completion.py:46`), in **both** phase-0 and a materialized Change, and prints **no** `⏸ paused (ctrl-c)` glyph line. (The daemon resteer hold prompt `paused — type a message to redirect, or detach to leave it paused` is a *resume-to-prompt* / workflow-pause surface — shown on `imp resume` into a paused Change, or on a subagent-unwind pause — not the live mid-turn placeholder.) |
+| **Ctrl-D** | `"\x04"` | **At a prompt** → **leave**. **Phase-0** (non-materialized) draft: at the opening prompt with no exchange → `imp: cancelled` (no Change); after an exchange → `imp: saved '<id>' to your Backlog` (`imp new`) / `conversation saved` (`imp chat`), resumable. On a **resumed** phase-0 chat, a prompt-state Ctrl-D at the threshold prompt leaves via the two-line `_pause_lines` banner — `<id>  at <threshold-step> · ctrl-d` + `resume:  imp resume <id>` (`main.py:324`) — because `imp resume` carries no leave-mode disposition. **On a materialized Change at a prompt** (e.g. the inline steer gate after a Ctrl-C) → detaches (rc 130, resumable via `imp resume`); resume_target = "prompt" — `imp resume` lands at the daemon resteer hold prompt. **Mid-run** (delivered as a `\x04` keystroke — see fidelity note above) → **suspend & detach**: tears down the in-flight request/tool/subagent (orphan check clean), emits `workflow_paused` with `interrupt_reason == "ctrl-d"`, rc 130, Change left paused. The guaranteed on-exit terminal print is the `_pause_lines` banner `<id>[ · <name>]  at <step> · ctrl-d` + `resume:  imp resume <id>` (`main.py:324`); the `⏸ paused (ctrl-d)` glyph is only the inline/`imp log` render of the same event. resume_target = "agent" — `imp resume` continues the agent (transcript replays, no intervening prompt). |
 
 > **ESC is a no-op.** A bare ESC byte (`"\x1b"`) never pauses imp: at a prompt prompt_toolkit
 > owns it (emacs meta-prefix / vi exit), and while an agent is thinking it is ignored. Do not
 > expect a `paused (esc)` line anywhere — if ESC ever pauses a run, that is a regression.
 
-> `SIGTERM` → `paused (sigterm)` is also part of the feature. Deliver it in one call with
-> `send_signal(sig=15)` — it signals imp's process group directly, no pid scraping. Run it
-> once where convenient during this run; it is no longer a skippable afterthought.
+> `SIGTERM` is also part of the feature and is a deliberate **leave**. Deliver it in one call
+> with `send_signal(sig=15)` — it signals imp's process group directly, no pid scraping. Its
+> guaranteed on-exit terminal print is the two-line leave banner `<id>[ · <name>]  at <step> ·
+> sigterm` + `resume:  imp resume <id>` (`_pause_lines`, `main.py:324`); the `⏸ paused (sigterm)`
+> glyph is only the inline/`imp log` render of the same `workflow_paused`. Run it once where
+> convenient during this run; it is no longer a skippable afterthought.
 
 ### 0b. The bar for "correct" (every interrupt point, unless stated otherwise)
 
@@ -86,28 +89,33 @@ A correct imp does **all** of:
   worktree/branch created (`change.materialized` in `src/imp/cli/main.py`). Two regimes:
   - **Phase 0 — the threshold interactive chat** (`imp new` / `imp chat` *before* the Change
     materializes; the conversational shaping phase):
-    - **Ctrl-C mid-turn** pauses the turn and *returns to the chat* — it does **not** exit.
-      imp prints `⏸ paused (ctrl-c)` (`⏸` shows only with color; otherwise the same text
-      without the glyph) and drops back to its live `> type your reply` prompt (`alive=True`);
-      from there you **steer** (reply → the turn resumes) or **leave** (Ctrl-D). One SIGINT
-      suffices.
+    - **Ctrl-C mid-turn** pauses the turn and *returns to an attached steer gate* — it does
+      **not** exit and prints **no** `⏸ paused (ctrl-c)` glyph line (that glyph marks a
+      workflow-level pause, not a live cooperative steer). The turn ends balanced and the prompt
+      placeholder becomes `interrupted — type to redirect, or Ctrl-D to leave it paused`
+      (`INTERRUPT_STEER_HINT`, `completion.py:46`), `alive=True`; from there you **steer** (reply
+      → the turn resumes) or **leave** (Ctrl-D). One SIGINT suffices.
     - **Ctrl-D leaves**, disposition by leave-mode × exchange (`alive=False`): no exchange →
       discarded → `imp: cancelled` (no Change); `imp new` + exchange → `imp: saved '<id>' to
       your Backlog (resume with imp resume <id>)`; `imp chat` + exchange → `imp: conversation
       saved — resume with imp resume <id>` (archived).
   - **A materialized Change** (real in-flight work — the workflow is executing):
-    - **Ctrl-C** drops to the resteer hold prompt `paused — type a message to redirect, or
-      detach to leave it paused` (`alive=True`, **ATTACHED** — does **not** exit). The Ctrl-C
-      **disposition** now matches phase-0 — pause, stay attached, steer-or-leave, never exit on
-      one press — but the prompt text is regime-specific: phase-0 lands at its chat
-      `> type your reply` prompt; materialized lands here, at the resteer hold prompt.
+    - **Ctrl-C** on a live agent turn drops to the **inline steer gate** whose placeholder reads
+      `interrupted — type to redirect, or Ctrl-D to leave it paused` (`INTERRUPT_STEER_HINT`,
+      `completion.py:46`) — `alive=True`, **ATTACHED**, does **not** exit, and prints **no**
+      `⏸ paused (ctrl-c)` glyph line (a cooperative steer records no `workflow_paused`). The
+      disposition **and** the placeholder are identical to phase-0 — pause, stay attached,
+      steer-or-leave, never exit on one press. (The daemon resteer hold prompt `paused — type a
+      message to redirect, or detach to leave it paused` is the *resume-to-prompt* surface —
+      what `imp resume` lands on after you detached at the steer gate — not the live mid-turn
+      placeholder.)
     - **Ctrl-D mid-run** suspends the agent and **detaches** (`alive=False`, exit code 130),
       leaving the Change **paused** and resumable via `imp resume <id>` (resume_target =
       "agent": transcript replays, no intervening prompt). It is **not** moved to the Backlog.
       `workflow_paused` records `interrupt_reason == "ctrl-d"`. Delivered as a `\x04`
       keystroke — no `send_signal` needed.
-    - **Ctrl-D at the resteer hold prompt** (after a Ctrl-C pause) → detaches (rc 130, paused);
-      `imp resume` lands back at the resteer hold prompt (resume_target = "prompt",
+    - **Ctrl-D at the inline steer gate** (after a Ctrl-C pause) → detaches (rc 130, paused);
+      `imp resume` lands at the daemon resteer hold prompt (resume_target = "prompt",
       `awaiting_user_input`).
   - The Change is resumable in every case; the exit code is not directly observable through
     impty — judge from `alive=False` + the final line.
@@ -132,16 +140,23 @@ A correct imp does **all** of:
 - **Speaks clearly to the user.** Judge the human-visible text with fresh eyes; an unclear,
   missing, or misleading message **is a bug** even when the exit code is right.
 
-> **The Ctrl-C disposition is now uniform across regimes.** In both the phase-0 threshold chat
-> and a materialized run, a mid-run Ctrl-C pauses the agent, stays **ATTACHED** (`alive=True`),
-> and drops to an interactive prompt — steer (reply resumes) or leave (Ctrl-D detaches, rc 130,
-> paused) — and never exits on a single press. The **prompt text differs by regime**: phase-0
-> lands at its chat `> type your reply` prompt; a materialized Change lands at the resteer hold
-> prompt `paused — type a message to redirect, or detach to leave it paused`. Ctrl-D's phase-0
-> disposition is discard / Backlog / archive by leave-mode × exchange; on a materialized Change,
-> Ctrl-D at the hold prompt detaches (rc 130, paused, resume_target = "prompt"). Mid-run Ctrl-D
-> (either regime) suspends the agent and detaches immediately (rc 130, paused, resume_target =
-> "agent"). If any provider/point does something else, record exactly what it did.
+> **The Ctrl-C disposition is uniform across regimes — and so is the live steer prompt.** In both
+> the phase-0 threshold chat and a materialized run, a mid-run Ctrl-C on a top-level agent pauses
+> the turn, stays **ATTACHED** (`alive=True`), prints **no** `⏸ paused (ctrl-c)` glyph line, and
+> drops to the **inline steer gate** whose placeholder reads `interrupted — type to redirect, or
+> Ctrl-D to leave it paused` (`INTERRUPT_STEER_HINT`, `completion.py:46`) — steer (reply resumes)
+> or leave (Ctrl-D detaches, rc 130, paused) — never exiting on a single press. The `⏸ paused
+> (ctrl-c)` glyph is reserved for **workflow-level pauses** — a verify-gate (script) step or a
+> subagent unwind, where the run does record a `workflow_paused`; those land on a daemon hold
+> prompt (`paused — type a message to redirect, or detach to leave it paused`, or the script
+> variant `paused — press enter to re-run the gate, or detach to leave it paused`), which is also
+> the surface `imp resume` lands on. Ctrl-D's phase-0 disposition is discard / Backlog / archive
+> by leave-mode × exchange; on a materialized Change, Ctrl-D at the hold prompt detaches (rc 130,
+> paused, resume_target = "prompt"). Mid-run Ctrl-D (either regime) suspends the agent and
+> detaches immediately (rc 130, paused, resume_target = "agent"); its guaranteed on-exit print is
+> the two-line `_pause_lines` leave banner (`<id>[ · <name>]  at <step> · ctrl-d` + `resume:  imp
+> resume <id>`, `main.py:324`), not the `⏸ paused (ctrl-d)` glyph. If any provider/point does
+> something else, record exactly what it did.
 
 ---
 
@@ -313,18 +328,22 @@ not reach imp.
    §0 fidelity caveat).
 2. `wait()` then `view()` + `view(full=True)`.
 3. Assert the bar from §0, by regime + trigger:
-   - **Mid-run Ctrl-C (phase-0 or materialized — disposition identical, prompt differs):** imp
-     prints `⏸ paused (ctrl-c)`, stays **ATTACHED** (`alive=True`) — it does **not** exit. One
-     SIGINT suffices (a second within ~1s is suppressed). The landing prompt is regime-specific:
-     **phase-0** → its chat `> type your reply` prompt; **materialized** → the resteer hold
-     prompt `paused — type a message to redirect, or detach to leave it paused`. To then
-     **leave**, send Ctrl-D and confirm rc 130, `alive=False`, Change left paused and resumable.
-   - **Mid-run Ctrl-D (`\x04` keystroke):** `alive=False`, rc 130, `⏸ paused
-     (ctrl-d)`, Change left **paused**; `workflow_paused` `interrupt_reason == "ctrl-d"`;
-     `imp resume` continues the agent (resume_target = "agent", no intervening prompt). Not in
-     Backlog.
-   - **Ctrl-D at the resteer hold prompt** (after a Ctrl-C): `alive=False`, rc 130, Change
-     paused; `imp resume` lands back at the resteer hold prompt (resume_target = "prompt").
+   - **Mid-run Ctrl-C on a top-level agent (phase-0 or materialized — identical):** imp prints
+     **no** `⏸ paused (ctrl-c)` glyph line; it drops to the **inline steer gate** whose
+     placeholder reads `interrupted — type to redirect, or Ctrl-D to leave it paused`
+     (`INTERRUPT_STEER_HINT`), stays **ATTACHED** (`alive=True`) — it does **not** exit. One
+     SIGINT suffices (a second within ~1s is suppressed). The placeholder is the same in **both**
+     regimes. (`⏸ paused (ctrl-c)` is printed only for a workflow-level pause — a verify-gate step
+     or a subagent unwind — which lands on a daemon hold prompt instead.) To then **leave**, send
+     Ctrl-D and confirm rc 130, `alive=False`, Change left paused and resumable.
+   - **Mid-run Ctrl-D (`\x04` keystroke):** `alive=False`, rc 130, Change left **paused**. The
+     guaranteed on-exit terminal print is the two-line `_pause_lines` leave banner —
+     `<id>[ · <name>]  at <step> · ctrl-d` + `resume:  imp resume <id>` (`main.py:324`); the
+     `⏸ paused (ctrl-d)` glyph is only the inline/`imp log` render of the same `workflow_paused`
+     (`interrupt_reason == "ctrl-d"`). `imp resume` continues the agent (resume_target = "agent",
+     no intervening prompt). Not in Backlog.
+   - **Ctrl-D at the inline steer gate** (after a Ctrl-C): `alive=False`, rc 130, Change
+     paused; `imp resume` lands at the daemon resteer hold prompt (resume_target = "prompt").
    - **Ctrl-C at a prompt (any regime):** neutered — clears a typed line, else `press ctrl-d
      to pause & exit`; `alive=True`, no pause.
    - In all cases: no `unclassified provider error` / `Cannot write to terminated process` /
@@ -356,7 +375,7 @@ not reach imp.
 1. `start` `imp resume <id>` (§5). 2. Confirm it continues the *same*
 Change (matching `#<handle>` / `· resuming` header), reaches a prompt or runs forward — not
 `nothing to resume`, not a restart. 3. Note message clarity. 4. Assert the **resume_target**:
-   - **After Ctrl-C → resteer hold prompt → Ctrl-D:** `imp resume <id>` lands back at the
+   - **After Ctrl-C → inline steer gate → Ctrl-D:** `imp resume <id>` lands at the daemon
      resteer hold prompt (`awaiting_user_input`) — **not** mid-agent. Expect the hold prompt to
      appear before any new agent output.
    - **After Ctrl-D mid-run:** `imp resume <id>` **continues the agent** (transcript replays,
@@ -376,23 +395,27 @@ For the **single provider under test**, run the points below. Use `INTERRUPT-AND
 | # | Point (imp state) | How to reach it | Trigger(s) | Expected |
 |---|-------------------|-----------------|-----------|----------|
 | **A** | Opening prompt (pre-Change) | `imp new`; `wait()` until parked at the first prompt | **Ctrl-C**, then in a fresh run **Ctrl-D** | **Ctrl-C is neutered at the prompt** — clears a typed line, else prints `press ctrl-d to pause & exit` once; stays `alive=True`, does *not* pause. **Ctrl-D** at the empty opening prompt (no Change exists yet) → `imp: cancelled`, clean exit, no Change created. **No `interrupted` event** — nothing was running to classify. |
-| **B** | Model thinking / streaming (phase-0 threshold) | Send a trivial intent (`send("add a one-line comment to the README\r")`); `wait` until output streams (no prompt) | **Ctrl-C**, **Ctrl-D** | **Ctrl-C:** `⏸ paused (ctrl-c)`, stays `alive=True` — drops to its chat `> type your reply` prompt (phase-0 regime); steer (reply), or Ctrl-D to leave. Ctrl-C via `send_signal(2)`. **Ctrl-D (mid-run):** `\x04` keystroke (`send("\x04", wait=False)`, no `send_signal`), rc 130, `⏸ paused (ctrl-d)`, `workflow_paused` `interrupt_reason == "ctrl-d"`, resume-to-agent. In-flight model request torn down (orphan check clean). |
-| **C** | **A tool is running** | Steer the agent until it runs a shell/`make`/test tool that takes a few seconds; interrupt during it | **Ctrl-C**, **Ctrl-D** | **Ctrl-C:** `⏸ paused (ctrl-c)`, stays `alive=True`, disposition identical across phase-0 and materialized (pause, attached, steer-or-leave, never exit) — landing prompt differs: phase-0 → `> type your reply`; materialized → resteer hold prompt `paused — type a message to redirect, or detach to leave it paused`. **Ctrl-D (mid-run):** `\x04` keystroke (`send("\x04", wait=False)`, no `send_signal`), rc 130, `⏸ paused (ctrl-d)`, suspend & detach, resume-to-agent. **The tool subprocess is killed** — orphan check must be clean. Ctrl-C via `send_signal(2)`. |
+| **B** | Model thinking / streaming (phase-0 threshold) | Send a trivial intent (`send("add a one-line comment to the README\r")`); `wait` until output streams (no prompt) | **Ctrl-C**, **Ctrl-D** | **Ctrl-C:** **no** `⏸ paused (ctrl-c)` glyph line; drops to the inline steer gate placeholder `interrupted — type to redirect, or Ctrl-D to leave it paused` (`INTERRUPT_STEER_HINT`), stays `alive=True`; steer (reply), or Ctrl-D to leave. Ctrl-C via `send_signal(2)`. **Ctrl-D (mid-run):** `\x04` keystroke (`send("\x04", wait=False)`, no `send_signal`), rc 130, on-exit `_pause_lines` banner `<id>[ · <name>]  at <step> · ctrl-d` + `resume:  imp resume <id>` (the `⏸ paused (ctrl-d)` glyph is only the inline/`imp log` render), `workflow_paused` `interrupt_reason == "ctrl-d"`, resume-to-agent. In-flight model request torn down (orphan check clean). |
+| **C** | **A tool is running** | Steer the agent until it runs a shell/`make`/test tool that takes a few seconds; interrupt during it | **Ctrl-C**, **Ctrl-D** | **Ctrl-C:** **no** `⏸ paused (ctrl-c)` glyph line; drops to the inline steer gate placeholder `interrupted — type to redirect, or Ctrl-D to leave it paused` (`INTERRUPT_STEER_HINT`), stays `alive=True`, identical across phase-0 and materialized (pause, attached, steer-or-leave, never exit). **Ctrl-D (mid-run):** `\x04` keystroke (`send("\x04", wait=False)`, no `send_signal`), rc 130, on-exit `_pause_lines` banner `<id>[ · <name>]  at <step> · ctrl-d` + `resume:  imp resume <id>` (the `⏸ paused (ctrl-d)` glyph is only the inline/`imp log` render), suspend & detach, resume-to-agent. **The tool subprocess is killed** — orphan check must be clean. Ctrl-C via `send_signal(2)`. |
 | **D** | In-turn prompt (agent asks *you* mid-turn, or the reply prompt after a Ctrl-C pause) | Use an interactive step where the agent prompts you back, or the reply prompt left by a point-B/C pause | **Ctrl-C**, **ESC** | **Ctrl-C is neutered at this prompt too** — clears a typed line, else `press ctrl-d to pause & exit`; `alive=True`, a normal reply still submits, Ctrl-D leaves. **ESC is a no-op** (prompt_toolkit owns it; `alive=True`). |
-| **E** | Subagent running (nested, materialized) | Drive until the workflow dispatches a subagent; interrupt while it is mid-flight | **Ctrl-C**, **Ctrl-D** | **Ctrl-C:** drops to the resteer hold prompt `paused — type a message to redirect, or detach to leave it paused` (`⏸ paused (ctrl-c)`, `alive=True`), unwinds the subagent (SubagentSuspended path), Change **not** exited. **Ctrl-D (mid-run):** `\x04` keystroke (`send("\x04", wait=False)`, no `send_signal`), rc 130, `⏸ paused (ctrl-d)`, suspend & detach, subagent torn down (orphan check clean), resume-to-agent. Ctrl-C via `send_signal(2)`. |
+| **E** | Subagent running (nested, materialized) | Drive until the workflow dispatches a subagent; interrupt while it is mid-flight | **Ctrl-C**, **Ctrl-D** | **Ctrl-C:** a subagent unwind **is** a workflow-level pause — it **does** print `⏸ paused (ctrl-c)` and drops to the daemon hold prompt `paused — type a message to redirect, or detach to leave it paused` (`alive=True`), unwinds the subagent (SubagentSuspended path), Change **not** exited. **Ctrl-D (mid-run):** `\x04` keystroke (`send("\x04", wait=False)`, no `send_signal`), rc 130, on-exit `_pause_lines` banner `<id>[ · <name>]  at <step> · ctrl-d` + `resume:  imp resume <id>` (the `⏸ paused (ctrl-d)` glyph is only the inline/`imp log` render), suspend & detach, subagent torn down (orphan check clean), resume-to-agent. Ctrl-C via `send_signal(2)`. |
 
 After the matrix: run `RESUME-AND-VERIFY` on the last paused change. Then deliver
-`send_signal(sig=15)` (SIGTERM) on a fresh `imp new` run mid-execution and verify
-`paused (sigterm)`.
+`send_signal(sig=15)` (SIGTERM) on a fresh `imp new` run mid-execution and verify the leave: the
+guaranteed on-exit print is the `_pause_lines` banner `<id>[ · <name>]  at <step> · sigterm` +
+`resume:  imp resume <id>` (`main.py:324`); `⏸ paused (sigterm)` is only the inline/`imp log`
+render of the same `workflow_paused`.
 
 ### 6a. Negative / edge-case checks (run at least once across the suite)
 
 These don't need to run at every point — fire each **at least once** somewhere in the suite.
 
 - **Double / mashed Ctrl-C (point B).** With the model streaming, deliver Ctrl-C *twice in
-  quick succession* — two `send_signal(2)` back-to-back. Expect a **single clean pause**, not a
-  traceback, a double-pause, or a hang: one `⏸ paused (ctrl-c)` line, back at the interactive
-  reply prompt (`alive=True`; the 2nd SIGINT within ~1s is suppressed), resumable.
+  quick succession* — two `send_signal(2)` back-to-back. Expect a **single clean steer**, not a
+  traceback, a double-pause, or a hang: one drop to the inline steer gate placeholder
+  `interrupted — type to redirect, or Ctrl-D to leave it paused` (no `⏸ paused (ctrl-c)` glyph on
+  this top-level steer), back at that attached prompt (`alive=True`; the 2nd SIGINT within ~1s is
+  suppressed), resumable.
 - **Very-early interrupt (point A window).** Ctrl-C in the brief window right after spawning
   imp, *before* the first prompt/agent appears — `send("\x03", wait=False)` immediately
   after the §5 spawn without waiting for the prompt. Nothing is running, so expect **no
@@ -422,10 +445,13 @@ These don't need to run at every point — fire each **at least once** somewhere
   session daemon's lease rule decides, not the client), resumable, no orphans. This is the
   "user closed the terminal tab" case.
 - **Out-of-band SIGINT at a prompt (once).** While parked at a prompt, fire
-  `send_signal(2)` — *not* the keystroke. Unlike typed Ctrl-C (neutered at a prompt), an
-  OS-level SIGINT at a prompt routes through the coordinator's **exit path**: expect a clean
-  detach/leave, not the `press ctrl-d…` hint and not a traceback. The keystroke and the signal
-  are *supposed* to diverge here — don't misfile the difference as a bug.
+  `send_signal(2)` — *not* the keystroke. An OS-level SIGINT at a prompt is **neutered
+  identically to a typed Ctrl-C**: imp routes it through the prompt's own Ctrl-C binding
+  (clear a typed line, else print `press ctrl-d to pause & exit`) and deliberately does **not**
+  `request_exit` (`signals.py`: "Ctrl-c NEVER exits at a prompt … do NOT request_exit"). Expect
+  `alive=True`, no pause, no detach/leave, and no traceback — only **Ctrl-D** pauses-and-exits at
+  a prompt. The keystroke and the OS signal are *supposed* to behave **identically** here; a
+  divergence (a clean detach/leave on the bare OS SIGINT) is itself the bug.
 - **Interrupt racing the finish.** Fire Ctrl-C or Ctrl-D as late as you can — while the
   workflow is merging/finalizing after its last step. A terminal or blocked status
   (`completed`, `saved`, `merge_blocked`, `abandoned`) must never be clobbered to `paused`:
@@ -482,10 +508,10 @@ per point, headline defects (or "none"), report path.
 | Interrupt | `send` | Out-of-band | What fires |
 |-----------|--------|-------------|------------|
 | **Ctrl-C** (at prompt) | `"\x03"` | — | intercepted — clears the line / `press ctrl-d to pause & exit` hint; never pauses |
-| **Ctrl-C** (mid-run) | unreliable | `send_signal(2)` | `SIGINT` → coordinator → pause, stay attached (`alive=True`), never exit; landing prompt: phase-0 `> type your reply` / materialized resteer hold prompt |
-| **Ctrl-D** (at prompt / resteer hold) | `"\x04"` | — | `EOFError` → phase-0 leave (`cancelled` / Backlog / archive); **materialized at resteer hold → detach** (rc 130, resume-to-prompt) |
-| **Ctrl-D** (mid-run) | `"\x04"` | — | cbreak `/dev/tty` reader reads byte directly — no `send_signal` needed; suspend & detach (rc 130, `interrupt_reason == "ctrl-d"`, resume-to-agent) |
+| **Ctrl-C** (mid-run) | unreliable | `send_signal(2)` | `SIGINT` → cooperative steer → stay attached (`alive=True`), never exit, **no** `⏸ paused (ctrl-c)` glyph; placeholder `interrupted — type to redirect, or Ctrl-D to leave it paused` (both regimes). The glyph + daemon hold prompt appear only on a workflow pause (verify gate / subagent unwind) |
+| **Ctrl-D** (at prompt / steer gate) | `"\x04"` | — | `EOFError` → phase-0 leave (`cancelled` / Backlog / archive); **materialized at inline steer gate → detach** (rc 130, resume-to-prompt) |
+| **Ctrl-D** (mid-run) | `"\x04"` | — | cbreak `/dev/tty` reader reads byte directly — no `send_signal` needed; suspend & detach (rc 130, `interrupt_reason == "ctrl-d"`, resume-to-agent). On-exit print: `_pause_lines` banner `<id>[ · <name>]  at <step> · ctrl-d` + `resume:  imp resume <id>` (the `⏸ paused (ctrl-d)` glyph is only the inline/`imp log` render) |
 | **Ctrl-C ×2** (>1s apart, mid-teardown) | — | `send_signal(2)` ×2 | escalation → force-quit detach; ack shows `stopping… (interrupt again to force-quit)` |
 | **Ctrl-\** (mid-run) | `"\x1c"` (bonus) | `send_signal(3)` | SIGQUIT trap → deliberate detach; same teardown as force-quit (paused, resumable) |
-| **SIGTERM** | — | `send_signal(15)` | Intent-B leave → detach; daemon lease rule pauses (`paused (sigterm)`) |
+| **SIGTERM** | — | `send_signal(15)` | Intent-B leave → detach; on-exit `_pause_lines` banner `<id>[ · <name>]  at <step> · sigterm` + `resume:  imp resume <id>` (`⏸ paused (sigterm)` is only the inline/`imp log` render) |
 | **SIGHUP** | — | `send_signal(1)` | Intent-B leave (terminal closed) → detach; daemon lease rule pauses |

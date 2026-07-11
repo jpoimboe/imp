@@ -28,6 +28,10 @@ from imp.remote.session.server import _DEFAULT_FIRST_ATTACH_TIMEOUT, SessionServ
 RunFn = Callable[..., Awaitable[Any]]
 
 _RESUME_PROMPT = "paused — type a message to redirect, or detach to leave it paused"
+_SCRIPT_HOLD_PROMPT = (
+    "paused — press enter to re-run the gate, or detach to leave it paused")
+_SCRIPT_REDIRECT_REFUSED = (
+    "a verify gate takes no redirect; press enter to re-run or detach to leave it paused")
 
 
 def _is_interrupt_pause(result: Any, coordinator: Any) -> bool:
@@ -59,11 +63,24 @@ def _last_pause_was_awaiting_turn(log: EventLog) -> bool:
     return False
 
 
-def _hold_prompt(result: Any, coordinator: Any) -> str | None:
+def _hold_prompt(
+    result: Any, coordinator: Any, *, is_script: bool = False,
+) -> str | None:
     if (_is_interrupt_pause(result, coordinator)
             and coordinator.pause_reason != "model-override"):
-        return _RESUME_PROMPT
+        return _SCRIPT_HOLD_PROMPT if is_script else _RESUME_PROMPT
     return None
+
+
+def _resolve_step_kind(quest: Quest) -> str | None:
+    """The kind ('agent'/'script'/…) of the quest's current step, or None."""
+    state = State.load(quest.state_dir)
+    if state.step is None:
+        return None
+    from imp.engine.loader import load_workflow
+    workflow = load_workflow(quest.workflow_dir)
+    return next((s.kind for s in workflow.flat_steps()
+                 if s.name == state.step), None)
 
 
 async def serve_quest_session(
@@ -73,7 +90,7 @@ async def serve_quest_session(
     hibernate: bool = True,
     tear_down: Callable[[Quest], None] = tear_down_quest,
     archive_left: Callable[[Quest], None] = archive_conversation,
-    save_left: Callable[[Quest], None] = save_to_backlog,
+    save_left: Callable[[Quest, str | None], None] = save_to_backlog,
     discard_left: Callable[[Quest], None] = discard_conversation,
     resume: bool = False,
     non_interactive: bool = False,
@@ -104,6 +121,9 @@ async def serve_quest_session(
 
     async def _bound(*, on_event: Any, user_chat_input_fn: Any) -> Any:
         from imp.engine.awaiting_user_input import AwaitingUserInput
+
+        def _paused_is_script() -> bool:
+            return _resolve_step_kind(quest) == "script"
 
         resume_target: str | None = None
         if resume:
@@ -136,7 +156,8 @@ async def serve_quest_session(
             # would re-pause without progress. Fall through to run the agent — it
             # replays the interrupted step (§6.15 mid-step ctrl-c resume).
             result: Any = RunResult.PAUSED
-            prompt: str | None = _RESUME_PROMPT
+            prompt: str | None = (
+                _SCRIPT_HOLD_PROMPT if _paused_is_script() else _RESUME_PROMPT)
         else:
             result = await run_fn(
                 quest,
@@ -147,7 +168,7 @@ async def serve_quest_session(
                 **run_kwargs,
             )
             coordinator.note_yield()  # run_quest returned -> the run has yielded
-            prompt = _hold_prompt(result, coordinator)
+            prompt = _hold_prompt(result, coordinator, is_script=_paused_is_script())
         while prompt is not None or _is_model_override_pause(result, coordinator):
             if _is_model_override_pause(result, coordinator):
                 # /model mid-conversation: executor parked+saved the step. Apply the
@@ -181,6 +202,10 @@ async def serve_quest_session(
                     return result
                 coordinator.reset()
                 if reply.strip():
+                    if _paused_is_script():
+                        on_event({"type": "script_output",
+                                  "payload": {"stdout": _SCRIPT_REDIRECT_REFUSED}})
+                        continue
                     coordinator.enqueue_interject(reply)
             _append_workflow_resumed(quest.event_log())
             result = await run_fn(
@@ -192,7 +217,7 @@ async def serve_quest_session(
                 **run_kwargs,
             )
             coordinator.note_yield()  # run_quest returned -> the run has yielded
-            prompt = _hold_prompt(result, coordinator)
+            prompt = _hold_prompt(result, coordinator, is_script=_paused_is_script())
         return result
 
     # Snapshot crash liveness BEFORE acquire(): ProjectLock.acquire() overwrites
@@ -212,7 +237,7 @@ async def serve_quest_session(
     if server.abandoned:
         await anyio.to_thread.run_sync(tear_down, quest)
     elif server.saved:
-        await anyio.to_thread.run_sync(save_left, quest)
+        await anyio.to_thread.run_sync(save_left, quest, server.save_reason)
     elif server.archived:
         await anyio.to_thread.run_sync(archive_left, quest)
     elif server.discarded:

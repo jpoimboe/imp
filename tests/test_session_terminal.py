@@ -2253,3 +2253,58 @@ async def test_mid_conversation_model_sends_control_not_input(
     assert (CONTROL_SET_MODEL, "anthropic:claude-fable-5") in controls_seen
     assert inputs_seen == ["done"]
     assert "/model anthropic:claude-fable-5" not in inputs_seen
+
+
+@pytest.mark.anyio
+async def test_save_disposition_leave_sends_reason_on_the_frame(tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+    # A leave_mode="new" draft with an exchange resolves to CONTROL_SAVE ("save").
+    quest = Quest.create_draft(
+        tmp_path, title="Draft", quest_id="svcd", base_branch="main")
+    quest.event_log().append(
+        agent_id=None, type="user_message",
+        payload={"role": "user", "content": "hi"})
+
+    sock = str(tmp_path / "s.sock")
+    actions: list[tuple[str, str | None]] = []
+    server = SessionSocket(sock, on_control=lambda a, r: actions.append((a, r)))
+    coord = InterruptCoordinator()
+
+    async def _attach(on_event: Callable[[dict[str, Any]], None]) -> SessionClient:
+        client = SessionClient(sock, quest.id, "T", on_event=on_event)
+        await client.connect()
+        return client
+
+    async def _solicit(_prompt: str) -> str:
+        raise AssertionError("no gate fired; solicit must not be called")
+
+    class _Driver:
+        def on_event(self, _event: dict[str, Any]) -> None: ...
+        def finish(self) -> None: ...
+
+    returned = anyio.Event()
+    with anyio.fail_after(10):
+        async with anyio.create_task_group() as tg:
+            await server.open()
+            tg.start_soon(server.serve)
+
+            async def _client() -> None:
+                await run_terminal_client(
+                    attach=_attach, driver=_Driver(), coord=coord, solicit=_solicit,
+                    quest_id=quest.id, control_root=tmp_path,
+                    leave_state={}, leave_mode="new")
+                returned.set()
+
+            tg.start_soon(_client)
+            with anyio.fail_after(5):
+                while server.attached_count != 1:
+                    await anyio.sleep(0.02)
+            await coord.leave_mid_run(reason="ctrl-d")
+            with anyio.fail_after(5):
+                await returned.wait()
+            with anyio.fail_after(5):
+                while not actions:
+                    await anyio.sleep(0.02)
+            assert actions == [("save", "ctrl-d")]
+            await server.close()
+            tg.cancel_scope.cancel()
