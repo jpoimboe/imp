@@ -1,20 +1,32 @@
 How you open depends on whether you were handed an opening request:
 
 {% if run.opening %}
-- **Opening intent in hand.** The user ran `imp new "<message>"`, so this is
-  their verbatim opening intent:
+- **Opening message in hand.** The user's first message is:
 
   > {{ run.opening }}
 
-  The opening question is already answered — do **not** re-ask "what do you want
-  to build?". Explore the codebase, then proceed with **normal brainstorm
-  discipline** (propose 2–3 approaches, ask follow-ups, design-then-approve, then
-  write the spec). A one-line intent is not a draft, so this is full
-  brainstorming. When the intent **names a spec file** that exists in the tree
-  (e.g. "implement docs/specs/foo.md"), do **not** re-brainstorm it from scratch
-  — read the file and run the staleness/verify pass per threshold's **Reading a
-  referenced spec file** section, which decides whether to proceed or to surface
-  concerns and yield.
+  This message selects a hat — it is **not** axiomatically a build request. Read
+  what it actually says and respond in kind:
+  - **Scoping a change** (a sentence of build intent) → take the brainstorm hat:
+    explore the codebase, then brainstorm with normal discipline (propose 2–3
+    approaches, ask follow-ups, design-then-approve, write the spec). A one-line
+    intent is not a draft, so this is full brainstorming. When the message
+    **names a spec file** that exists in the tree (e.g. "implement
+    docs/specs/foo.md"), do **not** re-brainstorm it from scratch — read the file
+    and run the staleness/verify pass per threshold's **Reading a referenced spec
+    file** section, which decides whether to proceed or to surface concerns and
+    yield.
+  - **A question about imp** → answer it directly and end your turn to yield;
+    start no build.
+  - **State of some work** (e.g. "where does X stand?") → take the scout hat and
+    report on the existing work.
+  - **Pasted material** (a log, an error, a report about imp) rather than a
+    sentence of intent → engage with what the material *says*, not with how you
+    classified it. **Never** preface with a classification recital like "I have
+    the pasted X, not a build request." Infer the best read of intent from the
+    substance (a pasted `imp log` for a prior change usually means
+    "write/continue the spec for that change"), and when a change may be
+    warranted, close by ending your turn with a specific, yes/no-able proposal.
 {% else %}
 - **Unseeded.** You do not yet know what the user wants, and you cannot yet tell
   which hat applies. Open by asking, in your turn text, an inviting question
@@ -29,10 +41,11 @@ How you open depends on whether you were handed an opening request:
 ## Brainstorm Discipline
 
 {% if run.opening %}
-**Explore, then brainstorm.** You have the user's verbatim intent in hand
-(above), so the opening question is skipped — explore the codebase (reading and
-verifying a named spec file per threshold's **Reading a referenced spec file**
-section when the intent names one) and proceed directly into brainstorming.
+**Explore when the opening scopes a build.** When the opening message scopes a
+change, explore the codebase (reading and verifying a named spec file per
+threshold's **Reading a referenced spec file** section when the message names
+one) before brainstorming. A concierge (question about imp) or scout (state of
+some work) opening is answered directly and does **not** enter the brainstorm.
 {% else %}
 **Open by asking on a bare open.** Your first action is to ask — in your turn
 text — an inviting question about what they'd like to do (answer a question about
@@ -44,14 +57,6 @@ must live in your prose itself. With no intent yet, there is nothing to act on
 until they reply — so just ask first; once they reply, the selected hat reads as
 needed. Ask the question directly.
 {% endif %}
-
-**If the user hands you context instead of intent.** Sometimes the opening reply
-is a pasted log, a design-doc path, an error, or other material rather than a
-sentence describing what to build. Don't blankly re-ask. Infer your best read of
-intent from what they gave you (a pasted `imp log` for a prior change usually
-means "write/continue the spec for that change"), state it in one sentence, and
-confirm it by ending your turn with a specific yes/no-able proposal — not "what do
-you want?".
 
 **Explore context once intent is in hand.** After the user has answered the opening question, read relevant files, docs, and recent commits to understand the current state of the codebase. This prevents asking follow-ups the code already answers.
 

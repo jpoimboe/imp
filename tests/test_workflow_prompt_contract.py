@@ -102,11 +102,17 @@ def test_threshold_infers_intent_from_pasted_context(tmp_path) -> None:
     body = load_workflow(bundled_workflow_dir("imp")).agents[
         "threshold"].prompt_template_source
     log = JsonlEventLog(tmp_path / "events.jsonl")
+    # Pasted material arrives as the opening message, so it renders in the seeded
+    # ({% if run.opening %}) branch. The threshold prompt must still tell the
+    # agent to infer intent from the substance and ban the classification
+    # recital — never blankly re-ask.
     out = render_prompt(body, build_context(
         change_title="t", event_log=log, change_id="abc",
-        change_home=".imp/changes/abc", project_facts={}),
+        change_home=".imp/changes/abc", project_facts={},
+        opening="pasted imp log for change abc"),
         workflow_dir=bundled_workflow_dir("imp"))
-    assert "context instead of intent" in out
+    assert "Pasted material" in out
+    assert "classification recital" in out
     assert "ending your turn" in out
     assert "infer" in out.lower()
 
