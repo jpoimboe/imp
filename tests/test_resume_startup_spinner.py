@@ -70,7 +70,7 @@ def _build(*, committed: str, preceded_by_blank: bool,
            startup_verb: str | None) -> tuple[LiveDriver, _TTY, LiveStatus]:
     out = _TTY()
     out.write(committed)
-    status = LiveStatus(out, now=lambda: 0.0)
+    status = LiveStatus(out)
     status._width_fn = lambda: 80
     drv = LiveDriver(stream=out, color=False, width=80, status=status,
                      suppress_replay=True, preceded_by_blank=preceded_by_blank,
