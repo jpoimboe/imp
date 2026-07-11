@@ -37,7 +37,7 @@ _WRITER_BODY = (
     "output:\n  status: {type: enum, values: [Success, Error]}\n---\n"
     # Blank line after the marker keeps it a standalone paragraph so reflow_markdown
     # (applied to the body) never wraps other text into the "INTENT: ..." line.
-    "{% if run.opening %}INTENT: {{ run.opening }}\n\n{% endif %}go {{ change.id }}\n"
+    "{% if run.opening %}INTENT: {{ run.opening }}\n\n{% endif %}go {{ quest.id }}\n"
 )
 
 
@@ -83,7 +83,7 @@ def _seed(root: Path) -> object:
     (wf / "agents" / "writer.md").write_text(
         "---\nname: writer\ntools: [complete_step]\n"
         "output:\n  status: {type: enum, values: [Success, Error]}\n---\n"
-        "go {{ change.id }}\n"
+        "go {{ quest.id }}\n"
     )
     (wf / "workflow.yaml").write_text(
         "name: t\ndescription: t\n"

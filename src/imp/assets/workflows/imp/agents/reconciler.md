@@ -37,7 +37,7 @@ and any injected feedback:
 
 In `bash`:
 - `git status` — rebase in progress? unmerged paths?
-- `BASE=$(python3 -c "import json;print(json.load(open('{{ change.home }}/quest.json'))['base_branch'])")`.
+- `BASE=$(python3 -c "import json;print(json.load(open('{{ quest.home }}/quest.json'))['base_branch'])")`.
 - `git log --oneline -8` and `git diff` (the conflicted hunks).
 - Recover the integration endpoints. The pre-rebase fork point `P` is the workflow var
   `{{ vars.integration_fork }}` — the SHA the branch was planted on before this
@@ -77,7 +77,7 @@ never one at or below the fork — a base commit or already-reviewed history. A
 failure that traces to a base commit is fixed **forward** as a new commit, never
 folded into base — never rewrite reviewed history.
 
-## Surface your work — `{{ change.home }}/progress.md`
+## Surface your work — `{{ quest.home }}/progress.md`
 
 You surface through `progress.md`, like every other step — there is no separate
 integration artifact. Narrate the completed reconciliation in prose: how many base
@@ -88,7 +88,7 @@ reconciled.
 
 For a reconciliation that clears that bar — you resolved it defensively but a human
 should still ratify it — append a line to the `## Deferred Followups` section in
-`{{ change.home }}/deferred.md` in reader form (create the file/heading if absent):
+`{{ quest.home }}/deferred.md` in reader form (create the file/heading if absent):
 
 `- [ ] DEFERRED reconciler: <one-line description> [scope: quest] — needs-decision: <why a human must decide>`
 
@@ -107,7 +107,7 @@ Drive to a clean state, then verify it:
 - If you drove a rebase to completion this round (the conflicted-rebase context),
   record the new plant after the branch is clean and linear on base: set
   `cur_base_head := B` in `quest.json`:
-  `python3 -c "import json,sys;p='{{ change.home }}/quest.json';m=json.load(open(p));m['cur_base_head']=sys.argv[1];json.dump(m,open(p,'w'),indent=2,sort_keys=True)" "$B"`.
+  `python3 -c "import json,sys;p='{{ quest.home }}/quest.json';m=json.load(open(p));m['cur_base_head']=sys.argv[1];json.dump(m,open(p,'w'),indent=2,sort_keys=True)" "$B"`.
   In the resumed context the branch is already planted on `B`; leave `cur_base_head`
   unchanged.
 

@@ -13,12 +13,12 @@ You are reviewing the newest implementation plan for this quest, before it is
 implemented. imp plans contain the verbatim code they intend to produce — so the
 bug, if there is one, is sitting in the plan as code.
 
-Quest title (user's starting intent): `{{ change.title }}`
-Spec file: `{{ change.home }}/artifacts/spec/{{ change.id }}.md`
+Quest title (user's starting intent): `{{ quest.title }}`
+Spec file: `{{ quest.home }}/artifacts/spec/{{ quest.id }}.md`
 
 ## Orient
 
-1. Glob `{{ change.home }}/artifacts/plans/{{ change.id }}-plan-*.md`, sort numerically, and read the
+1. Glob `{{ quest.home }}/artifacts/plans/{{ quest.id }}-plan-*.md`, sort numerically, and read the
    highest-N file — that is the plan under review.
 2. Read the spec.
 3. If you need to confirm the plan reflects a decision from brainstorm or spec
@@ -26,7 +26,7 @@ Spec file: `{{ change.home }}/artifacts/spec/{{ change.id }}.md`
 
 Read exactly these two artifacts — the newest plan and the spec. Do not read prior or future
 plan files: a requirement absent here may belong to another plan, and reading the whole
-series wastes your attention. You are read-only with a single exception — the sole file you may write is `{{ change.home }}/deferred.md`, and only to append an untagged scope-out line as the backstop below describes. Do not write or modify any other file.
+series wastes your attention. You are read-only with a single exception — the sole file you may write is `{{ quest.home }}/deferred.md`, and only to append an untagged scope-out line as the backstop below describes. Do not write or modify any other file.
 
 ## Review the prescribed code like a diff (primary)
 
@@ -60,12 +60,12 @@ incomplete implementations:
   over-engineering.
 - **Scope-out recorded** — every spec item the plan under review does not deliver is
   either assigned to a later plan by the spec's `## Plan outline` or recorded on an
-  untagged `- [ ] DEFERRED …: … [scope: quest]` line in `{{ change.home }}/deferred.md`.
+  untagged `- [ ] DEFERRED …: … [scope: quest]` line in `{{ quest.home }}/deferred.md`.
   An unrecorded scope-out of a spec-mandated item is a gap — apply the backstop below.
 
 ## Backstop: record an unrecorded scope-out
 
-You are read-only with a single exception: `{{ change.home }}/deferred.md`. When you find a spec-mandated item the plan neither delivers nor assigns to a later plan by the spec's `## Plan outline`, and it is recorded on **no** untagged DEFERRED line, that is an unrecorded scope-out. If the finding is otherwise **non-blocking**, do not merely hope a rework lap records it — append the untagged line yourself, with source `plan-reviewer`:
+You are read-only with a single exception: `{{ quest.home }}/deferred.md`. When you find a spec-mandated item the plan neither delivers nor assigns to a later plan by the spec's `## Plan outline`, and it is recorded on **no** untagged DEFERRED line, that is an unrecorded scope-out. If the finding is otherwise **non-blocking**, do not merely hope a rework lap records it — append the untagged line yourself, with source `plan-reviewer`:
 
 `- [ ] DEFERRED plan-reviewer: <item, citing the spec AC/scope ref> [scope: quest]`
 
@@ -81,7 +81,7 @@ not a reliable signal of user intent on scope — but a scope-contradicting deci
 is **the human's call at the merge gate, not yours to block on**, provided it is
 surfaced. So when a decision contradicts an explicit spec acceptance criterion —
 especially a scope or out-of-scope boundary — your job is to verify it is recorded
-as a `— needs-decision:` Deferred Followup open item in `{{ change.home }}/deferred.md`:
+as a `— needs-decision:` Deferred Followup open item in `{{ quest.home }}/deferred.md`:
 
 - **Recorded** — the deviation rides to the merge gate as a `— needs-decision:`
   open item: do **not** raise a Critical/Major finding. Note it **non-blocking**

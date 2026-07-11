@@ -54,7 +54,7 @@ def test_no_hardcoded_quest_dir_literal(name: str) -> None:
     # `.imp/change` while allowing the relocated `.imp/quests/` home name.
     assert not re.search(r"\.imp/change(?!s)", text), (
         f"{name}: hardcoded '.imp/change' path — use the engine-resolved "
-        "change.home variable (the {{ change.home }} template) instead")
+        "quest.home variable (the {{ quest.home }} template) instead")
 
 
 @pytest.mark.parametrize(
@@ -541,8 +541,8 @@ def test_spec_writer_recognizes_threshold_handoff() -> None:
     assert "Adopt the spec drafted with the user and finalize it:" in body
     assert "Threshold handoff" in body
     # head_changed is re-derived from the two persisted heads, not the tool return.
-    assert "change.cur_base_head" in body
-    assert "change.orig_base_head" in body
+    assert "quest.cur_base_head" in body
+    assert "quest.orig_base_head" in body
 
 
 NO_FIXUP_RULE_AGENTS = ["task-lead.md", "deferred-sweep.md", "reconciler.md"]
@@ -839,7 +839,7 @@ def test_finalize_cover_check_two_stage_funnel() -> None:
     # Stage 1: candidate finder — imp search -l over active + backlog, excluding self.
     assert "imp search --active --backlog -l" in text
     assert "candidate finder" in low
-    assert "{{ change.id }}" in text
+    assert "{{ quest.id }}" in text
     # Stage 2: confirm intent by reading the candidate's stated purpose.
     assert "imp show <id>" in text
     assert "imp show <id> spec" in text

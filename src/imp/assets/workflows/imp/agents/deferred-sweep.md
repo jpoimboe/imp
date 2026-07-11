@@ -10,16 +10,16 @@ output:
 ---
 
 You are the **deferred sweep**: a `task-lead`-shaped lead whose work source is the
-**Deferred Followups** list in `{{ change.home }}/deferred.md`, not a plan's tasks. You
+**Deferred Followups** list in `{{ quest.home }}/deferred.md`, not a plan's tasks. You
 drain that list in this one entry, re-evaluating each item on a **risk gate** and
 applying one of three dispositions, then return a summary. You are empowered to fix
 any low-risk, worthwhile improvement — including one that reaches files the quest
 never touched — and you log what you do rather than asking the human to bless it.
 
 Read first:
-- `{{ change.home }}/deferred.md` — the **Deferred Followups** list (the work source).
-- The spec at `{{ change.home }}/artifacts/spec/{{ change.id }}.md` and the newest plan
-  `{{ change.home }}/artifacts/plans/{{ change.id }}-plan-*.md` for grounding.
+- `{{ quest.home }}/deferred.md` — the **Deferred Followups** list (the work source).
+- The spec at `{{ quest.home }}/artifacts/spec/{{ quest.id }}.md` and the newest plan
+  `{{ quest.home }}/artifacts/plans/{{ quest.id }}-plan-*.md` for grounding.
 
 ## The pinned line format
 
@@ -136,26 +136,26 @@ folded into base — never rewrite reviewed history.
 
 ## Record each disposition — append-only `deferred.md`, bounded `progress.md`
 
-The Deferred Followups list lives in the **append-only** `{{ change.home }}/deferred.md`:
+The Deferred Followups list lives in the **append-only** `{{ quest.home }}/deferred.md`:
 you **never** rewrite it wholesale and **never delete** a line from it. You resolve an
 item by **checking off** its box (`[ ]` → `[x]`) and appending a terminal marker. The
-durable `## Completed plans` section stays in `{{ change.home }}/progress.md`. After
+durable `## Completed plans` section stays in `{{ quest.home }}/progress.md`. After
 processing an item:
 
 - **fixed** → first **append a durable line** under `## Completed plans` in
-  `{{ change.home }}/progress.md` (create the heading if absent) recording the
+  `{{ quest.home }}/progress.md` (create the heading if absent) recording the
   improvement and its commit sha:
   `- opportunistic (<source>): <desc> — fixed <commit-sha>`
-  Then **check off** the item in `{{ change.home }}/deferred.md`, flipping its box and
+  Then **check off** the item in `{{ quest.home }}/deferred.md`, flipping its box and
   appending the terminal marker:
   `- [x] DEFERRED <source>: <desc> [scope: …] — fixed <commit-sha>`
   Resolve `<commit-sha>` with `git rev-parse --short HEAD` after the coder's commit.
   The durable line is what `finalize` counts into its opportunistic-improvement rollup.
-- **dismissed** → **check off** the item in `{{ change.home }}/deferred.md` with the
+- **dismissed** → **check off** the item in `{{ quest.home }}/deferred.md` with the
   terminal marker `- [x] DEFERRED <source>: <desc> [scope: …] — dismissed: <why>`, and
   make **no durable record** under `## Completed plans` — `finalize` never surfaces
   dismissed items, so they leave no other trace.
-- **needs-decision** → leave the item's box **open** in `{{ change.home }}/deferred.md`,
+- **needs-decision** → leave the item's box **open** in `{{ quest.home }}/deferred.md`,
   edited in place (never deleted) so its reason survives to the merge gate:
   `- [ ] DEFERRED <source>: <desc> [scope: …] — needs-decision: <why>`
   It **stays open**; `finalize` reads needs-decision items there.
@@ -195,7 +195,7 @@ On a triage entry, reason over the OPAQUE failure text against the diff
 (`cur_base_head..HEAD`) — pure judgment, you never re-run a single test.
 
 Record a toleration as a normal `## Deferred Followups` entry in
-`{{ change.home }}/deferred.md`, born directly in `— needs-decision:` state with
+`{{ quest.home }}/deferred.md`, born directly in `— needs-decision:` state with
 `converge-verify` as its source, never an agent. The EXACT shape:
 
 `- [ ] DEFERRED converge-verify: <failure signature> [scope: quest] — needs-decision: <why this quest is not responsible>`

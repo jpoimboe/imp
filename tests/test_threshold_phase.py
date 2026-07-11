@@ -78,7 +78,7 @@ def test_threshold_agent_prose_carries_the_three_hats_and_handoff() -> None:
         assert hat in low, hat
     assert "create_and_enter_worktree" in body         # go-live tool
     assert "rename_quest" in body                      # names the change
-    assert "{{ change.home }}/artifacts/spec/{{ change.id }}.md" in body
+    assert "{{ quest.home }}/artifacts/spec/{{ quest.id }}.md" in body
     # AC10: a standing directive never to leak internal vocabulary to the user.
     assert "never surface these internal terms" in low
     assert "announce the name in prose without asking permission" in body

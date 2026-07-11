@@ -219,7 +219,7 @@ def _seed_minimal_workflow(
     (wf_dir / "agents" / f"{agent_stem}.md").write_text(
         f"---\nname: {agent_stem}\ntools: [complete_step]\n"
         "output:\n  status: {type: enum, values: [Success, Error]}\n---\n"
-        "go {{ change.id }}\n"
+        "go {{ quest.id }}\n"
     )
     (wf_dir / "workflow.yaml").write_text(
         "name: t\ndescription: t\n"
@@ -2482,7 +2482,7 @@ def _seed_two_step_workflow(root: Path) -> Quest:
     (wf_dir / "agents" / "writer.md").write_text(
         "---\nname: writer\ntools: [complete_step]\n"
         "output:\n  status: {type: enum, values: [Success, Error]}\n---\n"
-        "go {{ change.id }}\n"
+        "go {{ quest.id }}\n"
     )
     (wf_dir / "workflow.yaml").write_text(
         "name: t\ndescription: t\n"
@@ -2688,7 +2688,7 @@ async def test_quest_home_renders_worktree_relative(tmp_path: Path) -> None:
     (wf / "agents" / "writer.md").write_text(
         "---\nname: writer\ntools: [complete_step]\n"
         "output:\n  status: {type: enum, values: [Success, Error]}\n---\n"
-        "home={{ change.home }}\n"
+        "home={{ quest.home }}\n"
     )
     (wf / "workflow.yaml").write_text(
         "name: t\ndescription: t\n"

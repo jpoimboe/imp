@@ -51,13 +51,13 @@ def test_persona_injected_between_head_and_tail(tmp_path):
     assert "STEP BODY" in inv.initial_messages[0].content[0].text
 
 
-def test_persona_renders_change_and_vars_namespaces(tmp_path):
+def test_persona_renders_quest_and_vars_namespaces(tmp_path):
     # AC#4: persona body may reference the Jinja namespaces.
     log = JsonlEventLog(tmp_path / "events.jsonl")
     ctx = build_context(quest_title="My Quest", event_log=log,
                         vars={"point_of_novelty": "a widget"})
     rendered = render_prompt(
-        "Title {{ change.title }}; novelty {{ vars.point_of_novelty }}", ctx)
+        "Title {{ quest.title }}; novelty {{ vars.point_of_novelty }}", ctx)
     assert rendered == "Title My Quest; novelty a widget"
     sp = _build(tmp_path, rendered_persona=rendered).system_prompt
     assert "Title My Quest; novelty a widget" in sp

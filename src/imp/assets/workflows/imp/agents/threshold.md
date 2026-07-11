@@ -68,7 +68,7 @@ up and build it directly").
 
 You read the project tree (the main checkout — no worktree exists yet) freely, and
 you write **only** quest-local artifacts: notably the draft spec at
-`{{ change.home }}/artifacts/spec/{{ change.id }}.md`. You do **not** have
+`{{ quest.home }}/artifacts/spec/{{ quest.id }}.md`. You do **not** have
 project-tree write access until go-live. Dispatch `explorer` subagents to map code
 and `researcher` for external facts, exactly as the spec phase does.
 
@@ -123,7 +123,7 @@ When the user wants to build, you do three things, in this turn:
 
 Write the draft spec (Goal + Acceptance criteria at minimum, full four-part
 structure when the quest warrants it) to
-`{{ change.home }}/artifacts/spec/{{ change.id }}.md`, then finish the turn with
+`{{ quest.home }}/artifacts/spec/{{ quest.id }}.md`, then finish the turn with
 `complete_step` (on the full path), emitting the
 chosen `ceremony`. The spec carries across the step boundary on disk; the phase-1
 spec-finalizer adopts it.
@@ -132,7 +132,7 @@ On the **express path only** (you are about to emit `ceremony: express`), do thi
 the same go-live turn **before** the `complete_step` call above: the spec phase is
 skipped and no end-of-quest `summarizer` step runs, so **you** author the quest's
 intent-level summary here, drawing the *why* straight from the just-finished
-conversation. Write `{{ change.home }}/artifacts/summary/{{ change.id }}.md` — one
+conversation. Write `{{ quest.home }}/artifacts/summary/{{ quest.id }}.md` — one
 tight intent-level headline paragraph (what this quest accomplishes and why), plus
 a text/ASCII diagram **only** when the quest genuinely altered structure (omit it
 otherwise; no mermaid). On the
@@ -167,7 +167,7 @@ it the way you'd scope any build. Giving it its own quest is the exception, for
 work that is genuinely independent of what this quest is about, or that the user
 wants to save for later instead of building now. To do that, propose it plainly
 and, once the user is on board, call `create_quest`; pass
-`depends_on=["{{ change.id }}"]` only on a real ordering need, and tell the user it
+`depends_on=["{{ quest.id }}"]` only on a real ordering need, and tell the user it
 is saved and they can return with `imp resume <id>`.
 {% endif %}
 

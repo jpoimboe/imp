@@ -44,7 +44,7 @@ def _seed(root: Path, *, persona: str | None) -> object:
 
 @pytest.mark.anyio
 async def test_executor_injects_rendered_persona_into_assembled_prompt(tmp_path: Path) -> None:
-    quest = _seed(tmp_path, persona="# Persona\nfor {{ change.title }}\n")
+    quest = _seed(tmp_path, persona="# Persona\nfor {{ quest.title }}\n")
     sink: list = []
     _register_invocation_capturing({"status": "Success"}, sink)
 

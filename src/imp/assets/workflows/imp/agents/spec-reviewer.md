@@ -11,8 +11,8 @@ output:
 
 You are reviewing the spec for this quest.
 
-Quest title (user's starting intent): `{{ change.title }}`
-Spec file: `{{ change.home }}/artifacts/spec/{{ change.id }}.md`
+Quest title (user's starting intent): `{{ quest.title }}`
+Spec file: `{{ quest.home }}/artifacts/spec/{{ quest.id }}.md`
 
 ## Your Role
 
@@ -20,7 +20,7 @@ Verify the spec is complete, consistent, and ready for implementation planning. 
 
 ## Process
 
-1. Read `{{ change.home }}/artifacts/spec/{{ change.id }}.md`.
+1. Read `{{ quest.home }}/artifacts/spec/{{ quest.id }}.md`.
 2. Use `query_events` to read prior brainstorm turns — the provenance record of what was said, not current state — if you need to verify the spec reflects the user's clarifications.
 3. Evaluate against the categories below.
 4. Produce a severity-classified findings report and call `complete_step`.

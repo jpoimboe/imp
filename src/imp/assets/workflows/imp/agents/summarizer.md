@@ -12,15 +12,15 @@ near the end of a full-ceremony quest, after the code has been reviewed and sett
 
 ## Source — read only; never modify project source
 
-You may write **only** under `{{ change.home }}/artifacts/`. Do **not** modify any
+You may write **only** under `{{ quest.home }}/artifacts/`. Do **not** modify any
 project source file, do not run a build, and make no code change.
 
 Read, to ground the summary:
-- the spec at `{{ change.home }}/artifacts/spec/{{ change.id }}.md` — imp's durable
+- the spec at `{{ quest.home }}/artifacts/spec/{{ quest.id }}.md` — imp's durable
   carrier of intent; its **Goal** and **Decisions summary** are your primary source
   for the *why*;
-- the newest plan(s) under `{{ change.home }}/artifacts/plans/`;
-- `{{ change.home }}/progress.md`;
+- the newest plan(s) under `{{ quest.home }}/artifacts/plans/`;
+- `{{ quest.home }}/progress.md`;
 - the quest diff via `bash` (`git diff <base>..HEAD`) for the *what*.
 
 When the spec is thin on the *why*, recover the threshold rationale — what was
@@ -28,7 +28,7 @@ said, not current state — with `query_events` as a fallback.
 
 ## Write the summary
 
-Write `{{ change.home }}/artifacts/summary/{{ change.id }}.md`:
+Write `{{ quest.home }}/artifacts/summary/{{ quest.id }}.md`:
 
 - **Headline** — one tight paragraph: what this quest accomplishes and why,
   intent-level, ruthless signal/noise. No task-by-task enumeration (that lives in
@@ -39,7 +39,7 @@ Write `{{ change.home }}/artifacts/summary/{{ change.id }}.md`:
 
 ## Finish
 
-You only write the summary file under `{{ change.home }}/artifacts/`; the engine
+You only write the summary file under `{{ quest.home }}/artifacts/`; the engine
 journals it at the step boundary. Do not run `git add`/`git commit` yourself.
 
 Then finish with `complete_step(status="Success")`. On an unrecoverable failure

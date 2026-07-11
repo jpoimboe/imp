@@ -21,7 +21,7 @@ Resolve the diff range from the review cadence — a computed range, never
 reconstructed from `progress.md`:
 
 **End-of-quest pass (whole-quest, cross-plan).** Review the whole quest:
-`git diff {{ change.cur_base_head }}..imp/{{ change.id }}` — the quest's recorded fork point. This is
+`git diff {{ quest.cur_base_head }}..imp/{{ quest.id }}` — the quest's recorded fork point. This is
 the one full review of the run.
 
 The work is already committed, so a bare `git diff` shows nothing — always diff the
@@ -29,12 +29,12 @@ range above.
 
 ## Context to Load
 
-- **Spec:** `{{ change.home }}/artifacts/spec/{{ change.id }}.md` — the requirements this
+- **Spec:** `{{ quest.home }}/artifacts/spec/{{ quest.id }}.md` — the requirements this
   quest must satisfy.
-- **Plans:** `{{ change.home }}/artifacts/plans/{{ change.id }}-plan-*.md` — what was planned
+- **Plans:** `{{ quest.home }}/artifacts/plans/{{ quest.id }}-plan-*.md` — what was planned
   and intended for each phase.
-- **Progress:** `{{ change.home }}/progress.md` — completed tasks.
-- **Deferred ledger:** `{{ change.home }}/deferred.md` — deferred followups and
+- **Progress:** `{{ quest.home }}/progress.md` — completed tasks.
+- **Deferred ledger:** `{{ quest.home }}/deferred.md` — deferred followups and
   deviation notes.
 
 Read all of these and the diff before forming your assessment.
@@ -138,7 +138,7 @@ Collapse to one verdict over your kept findings:
 ## Record deferred observations (before you emit)
 
 Append each **deferred** finding (and any Minor/Nit observation that has no other
-fix-it path) to the **Deferred Followups** list in `{{ change.home }}/deferred.md` so the
+fix-it path) to the **Deferred Followups** list in `{{ quest.home }}/deferred.md` so the
 `deferred-sweep` step can act on it. Create a `## Deferred Followups` section if
 absent. Append one line per observation in this EXACT pinned format (the sweep parses
 it):
@@ -146,7 +146,7 @@ it):
 `- [ ] DEFERRED batch-code-reviewer: <one-line description> [scope: quest]`
 
 Append nothing for a finding you routed `task_gap` (it routes back for an immediate,
-re-reviewed fix). Appending to `{{ change.home }}/deferred.md` is the ONLY write you may make.
+re-reviewed fix). Appending to `{{ quest.home }}/deferred.md` is the ONLY write you may make.
 
 ## Using `web_search`
 
@@ -158,7 +158,7 @@ quest or to discover alternatives.
 ## Hard Rule: READ-ONLY over code
 
 You are strictly read-only over CODE — the only file you may write is
-`{{ change.home }}/deferred.md` (the Deferred Followups append above). Never commit, stage,
+`{{ quest.home }}/deferred.md` (the Deferred Followups append above). Never commit, stage,
 or edit code files.
 
 ## Output Format

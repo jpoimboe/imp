@@ -1,4 +1,4 @@
-"""Tests for render_prompt / build_context (5 namespaces: change, events, vars, project, run)."""
+"""Tests for render_prompt / build_context (5 namespaces: quest, events, vars, project, run)."""
 
 from __future__ import annotations
 
@@ -18,13 +18,25 @@ def _log(path: Path, events: list[tuple[str, dict]]) -> EventLog:
     return log
 
 
-def test_renders_change_namespace(tmp_path: Path) -> None:
+def test_change_namespace_no_longer_binds(tmp_path: Path) -> None:
+    """The old top-level `change` name is unbound; only `quest` resolves."""
+    ctx = build_context(
+        quest_title="t", event_log=_log(tmp_path / "e.jsonl", []), quest_id="x",
+    )
+    # `change` is no longer a passed top-level name: under StrictUndefined,
+    # rendering it at all raises (surfaced as PromptRenderError).
+    with pytest.raises(PromptRenderError):
+        render_prompt("{{ change }}", ctx)
+    assert render_prompt("{{ quest.id }}", ctx) == "x"
+
+
+def test_renders_quest_namespace(tmp_path: Path) -> None:
     log = _log(tmp_path / "events.jsonl", [])
     ctx = build_context(
         quest_title="My Quest", event_log=log, quest_id="myid01",
     )
     assert render_prompt(
-        "Hello {{ change.title }} ({{ change.id }})", ctx,
+        "Hello {{ quest.title }} ({{ quest.id }})", ctx,
     ) == "Hello My Quest (myid01)"
 
 
@@ -202,14 +214,14 @@ def test_renders_quest_home(tmp_path: Path) -> None:
         quest_home="/ctl/.imp/quests/abc123", event_log=log,
     )
     assert render_prompt(
-        "spec at {{ change.home }}/artifacts/spec/{{ change.id }}.md", ctx,
+        "spec at {{ quest.home }}/artifacts/spec/{{ quest.id }}.md", ctx,
     ) == "spec at /ctl/.imp/quests/abc123/artifacts/spec/abc123.md"
 
 
 def test_quest_home_defaults_empty(tmp_path: Path) -> None:
     log = _log(tmp_path / "events.jsonl", [])
     ctx = build_context(quest_id="t", quest_title="t", event_log=log)
-    assert render_prompt("{{ change.home }}", ctx) == ""
+    assert render_prompt("{{ quest.home }}", ctx) == ""
 
 
 
@@ -224,14 +236,14 @@ def test_missing_run_attr_raises(tmp_path: Path) -> None:
 def test_renders_cur_base_head(tmp_path: Path) -> None:
     log = _log(tmp_path / "events.jsonl", [])
     ctx = build_context(quest_title="t", event_log=log, cur_base_head="deadbeef")
-    assert render_prompt("{{ change.cur_base_head }}", ctx) == "deadbeef"
+    assert render_prompt("{{ quest.cur_base_head }}", ctx) == "deadbeef"
 
 
 def test_cur_base_head_defaults_empty(tmp_path: Path) -> None:
     ctx = build_context(
         quest_title="t", event_log=_log(tmp_path / "events.jsonl", []),
     )
-    assert render_prompt("{{ change.cur_base_head }}", ctx) == ""
+    assert render_prompt("{{ quest.cur_base_head }}", ctx) == ""
 
 
 def test_render_resolves_include_with_workflow_dir(tmp_path: Path) -> None:
@@ -281,7 +293,7 @@ def test_renders_run_autonomous_false_default(tmp_path: Path) -> None:
         "{% if run.autonomous %}take{% else %}confirm{% endif %}", ctx) == "confirm"
 
 
-def test_change_namespace_exposes_orig_base_head(tmp_path) -> None:
+def test_quest_namespace_exposes_orig_base_head(tmp_path) -> None:
     from imp.agents.prompts import build_context, render_prompt
     from imp.engine.state import JsonlEventLog
 
@@ -291,8 +303,8 @@ def test_change_namespace_exposes_orig_base_head(tmp_path) -> None:
         cur_base_head="NEWTIP", orig_base_head="OLDTIP")
     # Both heads render, so a template can branch on whether the base moved.
     out = render_prompt(
-        "{{ change.orig_base_head }}|{{ change.cur_base_head }}|"
-        "{% if change.cur_base_head != change.orig_base_head %}MOVED{% else %}SAME{% endif %}",
+        "{{ quest.orig_base_head }}|{{ quest.cur_base_head }}|"
+        "{% if quest.cur_base_head != quest.orig_base_head %}MOVED{% else %}SAME{% endif %}",
         ctx)
     assert out == "OLDTIP|NEWTIP|MOVED"
 
@@ -300,7 +312,7 @@ def test_change_namespace_exposes_orig_base_head(tmp_path) -> None:
         quest_title="t", event_log=log, quest_id="abc",
         cur_base_head="X", orig_base_head="X")
     out2 = render_prompt(
-        "{% if change.cur_base_head != change.orig_base_head %}MOVED{% else %}SAME{% endif %}",
+        "{% if quest.cur_base_head != quest.orig_base_head %}MOVED{% else %}SAME{% endif %}",
         same)
     assert out2 == "SAME"
 

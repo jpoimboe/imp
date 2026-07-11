@@ -398,7 +398,7 @@ async def test_var_added_after_creation_backfilled_no_render_crash(tmp_path: Pat
     (wf_dir / "agents" / "writer.md").write_text(
         "---\nname: writer\ntools: [complete_step]\n"
         "output:\n  status: {type: enum, values: [Success, Error]}\n---\n"
-        "go {{ change.id }} merge={{ vars.auto_merge }}\n"
+        "go {{ quest.id }} merge={{ vars.auto_merge }}\n"
     )
     _register_fake({"status": "Success"})
 

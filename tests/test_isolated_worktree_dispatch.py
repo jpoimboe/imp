@@ -23,7 +23,7 @@ def _isolated_agent(name: str) -> AgentDef:
         name=name, description="", tools=frozenset({"bash", "write_file"}),
         subagents=(),
         output_schema=OutputSchema(fields=(), source=_SRC),
-        prompt_template_source="probe {{ change.id }}",
+        prompt_template_source="probe {{ quest.id }}",
         source_path=Path("a.md"), source=_SRC,
         isolated_worktree=True)
 

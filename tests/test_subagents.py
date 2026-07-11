@@ -30,7 +30,7 @@ def _agent(name: str) -> AgentDef:
                                 values=("Success", "Error"), required=True),),
             source=SourceLoc(file=Path("a.md"), line=1),
         ),
-        prompt_template_source="hi {{ change.id }}",
+        prompt_template_source="hi {{ quest.id }}",
         source_path=Path("a.md"),
         source=SourceLoc(file=Path("a.md"), line=1),
     )
@@ -46,7 +46,7 @@ def _agent2(name: str, *, max_tool_calls=None, subagents=(),
         subagents=tuple(subagents),
         output_schema=OutputSchema(fields=fields,
                                    source=SourceLoc(file=Path("a.md"), line=1)),
-        prompt_template_source="hi {{ change.id }}",
+        prompt_template_source="hi {{ quest.id }}",
         source_path=Path("a.md"), source=SourceLoc(file=Path("a.md"), line=1),
         max_tool_calls=max_tool_calls)
 
@@ -202,7 +202,7 @@ def test_dispatch_task_renders_subagent_prompt(tmp_path):
             ),),
             source=SourceLoc(file=Path("sub.md"), line=1),
         ),
-        prompt_template_source="hello {{ change.id }}",
+        prompt_template_source="hello {{ quest.id }}",
         source_path=Path("sub.md"),
         source=SourceLoc(file=Path("sub.md"), line=1),
     )

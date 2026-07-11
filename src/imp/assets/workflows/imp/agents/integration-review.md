@@ -20,7 +20,7 @@ prompt a human; end with `complete_step`.
 ## Orient
 
 In `bash`:
-- `BASE=$(python3 -c "import json;print(json.load(open('{{ change.home }}/quest.json'))['base_branch'])")`
+- `BASE=$(python3 -c "import json;print(json.load(open('{{ quest.home }}/quest.json'))['base_branch'])")`
 - The base-side incoming diff — what base changed since this branch forked — is
   `git diff "{{ vars.integration_fork }}" "$B"`, where `{{ vars.integration_fork }}` is
   the pre-rebase fork point `P` (carried in the workflow var) and
@@ -29,12 +29,12 @@ In `bash`:
   var is the only way to recover what the rebase integrated.
 - `git show --first-parent HEAD` and `git log --graph --oneline -n 20` show what the
   rebase/resolution produced.
-- `{{ change.home }}/progress.md` carries the reconciler's narration of what it
-  reconciled; `{{ change.home }}/deferred.md` carries any `## Deferred Followups`
+- `{{ quest.home }}/progress.md` carries the reconciler's narration of what it
+  reconciled; `{{ quest.home }}/deferred.md` carries any `## Deferred Followups`
   `needs-decision` lines it flagged as reasoned-but-uncertain. Read both and check
   each flagged reconciliation first — they are the likeliest place something went
   wrong.
-- `{{ change.home }}/artifacts/spec/{{ change.id }}.md` is the quest's intent; you
+- `{{ quest.home }}/artifacts/spec/{{ quest.id }}.md` is the quest's intent; you
   judge faithfulness against it.
 
 ## Judge
@@ -70,7 +70,7 @@ You are resumed in **two** distinct modes, told apart by the injected feedback:
     **finding** and fixes it forward; it is driven by your finding, never raw test output.
   - **not ours / not worth it** — the base regressed its own test, or a flake → record a
     toleration and let it ride to `finalize`. Record it as a normal `## Deferred Followups`
-    entry in `{{ change.home }}/deferred.md` (create the `## Deferred Followups` heading if
+    entry in `{{ quest.home }}/deferred.md` (create the `## Deferred Followups` heading if
     absent), born directly in `— needs-decision:` state with source `integration-verify`. The
     EXACT shape:
 

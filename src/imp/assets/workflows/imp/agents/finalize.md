@@ -26,11 +26,11 @@ review routed any problem back to the reconciler (no human gate).
 ## 1. Gather the summary and the audit record
 
 Read the intent-level summary the `summarizer` step wrote at
-`{{ change.home }}/artifacts/summary/{{ change.id }}.md` — you **lead** your gate
+`{{ quest.home }}/artifacts/summary/{{ quest.id }}.md` — you **lead** your gate
 prose with it (§2). When that artifact is **absent** (e.g. the `summarizer` erred
 without committing), do not block the gate: open from the audit fields below
-instead. Read the spec, plans, `{{ change.home }}/progress.md`, and
-`{{ change.home }}/deferred.md`, and inspect the
+instead. Read the spec, plans, `{{ quest.home }}/progress.md`, and
+`{{ quest.home }}/deferred.md`, and inspect the
 quest in `bash` (`git diff <base>..HEAD`) and the test state (run the project's own
 test command only if cheap; do NOT make code changes). **You are not a reviewer.**
 The `git diff <base>..HEAD` read exists only to *orient* you — not to evaluate it,
@@ -51,9 +51,9 @@ becoming a reviewer or making code changes yourself.
 Populate the audit fields:
 - `verify_status`: the verification state in plain user terms — never surface internal gate jargon or raw exit codes.
 - `open_items`: the items you surface at the gate are a **closed set** — exactly the
-  recorded `— needs-decision: <why>` lines in `{{ change.home }}/deferred.md`, and
+  recorded `— needs-decision: <why>` lines in `{{ quest.home }}/deferred.md`, and
   nothing else. Read the **Deferred Followups** dispositions the `deferred-sweep`
-  step recorded in `{{ change.home }}/deferred.md`, and surface ONLY the
+  step recorded in `{{ quest.home }}/deferred.md`, and surface ONLY the
   `— needs-decision: <why>` items — one per line with its reason. These include items
   `spec-finalizer`/`plan-writer` appended directly in reader form (they reach you even on
   a `fast_path` quest where `deferred-sweep` never ran) **and tolerations** the
@@ -95,7 +95,7 @@ human here is redundant. It is a **two-stage funnel**:
 
 1. **Find candidates.** Run `imp search --active --backlog -l "<test identity>"` on the
    failing test's identity (its node id / name / signature, read from the toleration
-   line), and **exclude the quest being finalized** (`{{ change.id }}`) from the
+   line), and **exclude the quest being finalized** (`{{ quest.id }}`) from the
    results. This is a **candidate finder** only — a substring match — so it also returns
    quests that merely *mention* the test.
 2. **Confirm intent.** For each candidate, read its stated purpose — `imp show <id>` for
@@ -123,7 +123,7 @@ cover-check has already run, so any verify-family toleration confirmed as tracke
 elsewhere is already marked `— covered-by <id>` and is **not** re-seeded. Hand every
 remaining **needs-decision** item (the closed set from §1) to the backlog: call
 `create_quest(title="<short title>", description="<self-contained brief that needs no
-other context>", depends_on=["{{ change.id }}"])` — group related items into one Quest
+other context>", depends_on=["{{ quest.id }}"])` — group related items into one Quest
 or split unrelated ones across several, whatever fits best. When the item is a
 verify-family toleration, the `description` must embed the failing test's identity
 (node id / name / signature) so a later Quest's cover-check can match it instead of
@@ -164,7 +164,7 @@ terminal program looks — load `driving-terminal-uis` (`load_skill(name="drivin
 and render the final state with your impty tools to describe what you see.
 
 Then work through the **needs-decision** items. This walk has a **closed set**
-of inputs: the `— needs-decision: <why>` lines in `{{ change.home }}/deferred.md`
+of inputs: the `— needs-decision: <why>` lines in `{{ quest.home }}/deferred.md`
 (including tolerations the `verify` / `converge-verify` / `integration-verify` gates recorded there) — and
 nothing else. Do not add an item here from something you noticed while reading the
 diff. Drive the conversation however reads best — there is no required one-item-per-turn
@@ -180,7 +180,7 @@ item:
     re-evaluated next pass).
   - **defer** — hand it to a new backlog Quest. Call
     `create_quest(title="<short title>", description="<self-contained brief that needs
-    no other context>", depends_on=["{{ change.id }}"])`, then rewrite the item's
+    no other context>", depends_on=["{{ quest.id }}"])`, then rewrite the item's
     line to `- [x] DEFERRED <src>: <desc> [scope: …] — seeded <new-quest-id>`,
     and tell them it is startable via `imp resume <new-quest-id>` once this
     quest merges. When the item is a verify-family toleration, the `description`
@@ -234,5 +234,5 @@ Then route on the dispositions:
 
 Always emit the audit fields (`verify_status` / `open_items` / `next_steps`) on
 every `complete_step`, whichever decision you make — they land in
-the event log and are queryable via `imp log {{ change.id }}`. Do not write
+the event log and are queryable via `imp log {{ quest.id }}`. Do not write
 files (other than the `deferred.md` line rewrites above); do not commit.

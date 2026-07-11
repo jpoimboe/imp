@@ -31,13 +31,13 @@ tools: [complete_step]
 output:
   status: {type: enum, values: [Success, Error]}
 """.strip(),
-        body="Hello {{ change.id }}",
+        body="Hello {{ quest.id }}",
     )
     agent = parse_agent_file(path)
     assert agent.name == "stub"
     assert "complete_step" in agent.tools
     assert agent.output_schema.status_field() is not None
-    assert "{{ change.id }}" in agent.prompt_template_source
+    assert "{{ quest.id }}" in agent.prompt_template_source
 
 
 def test_parse_agent_subagents(tmp_path: Path) -> None:
@@ -145,12 +145,12 @@ def test_parse_agent_crlf_line_endings(tmp_path: Path) -> None:
     p.write_bytes(
         b"---\r\nname: stub\r\ntools: [complete_step]\r\n"
         b"output:\r\n  status: {type: enum, values: [Success, Error]}\r\n"
-        b"---\r\nHello {{ change.id }}\r\n"
+        b"---\r\nHello {{ quest.id }}\r\n"
     )
     agent = parse_agent_file(p)
     assert agent.name == "stub"
     assert "\r" not in agent.prompt_template_source
-    assert "Hello {{ change.id }}" in agent.prompt_template_source
+    assert "Hello {{ quest.id }}" in agent.prompt_template_source
 
 
 # ── Workflow helper ────────────────────────────────────────────────────────

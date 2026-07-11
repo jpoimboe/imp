@@ -51,6 +51,6 @@ running from what you merely inferred.
 
 So the spec or plan can cite runnable evidence after your worktree is gone, park
 a durable copy of the spike artifact — the script or patch and its captured
-output — under `{{ change.home }}/artifacts/spike/` before you send your final
+output — under `{{ quest.home }}/artifacts/spike/` before you send your final
 message. That path resolves to the quest's durable home, which survives the
 worktree teardown; everything else you wrote does not.
