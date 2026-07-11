@@ -4,7 +4,7 @@ import anyio
 
 from imp.engine import merge_queue as mq
 from imp.engine import test_lane
-from imp.engine.executor import RunResult, run_change
+from imp.engine.executor import RunResult, run_quest
 from imp.engine.quest import Quest
 from imp.engine.state import JsonlEventLog
 from tests.conftest import _git, _seed_control
@@ -43,7 +43,7 @@ def test_free_slot_runs_gate_without_waiting_or_merge_queue(
     _write_testlane_workflow(tmp_path)
     ch = Quest.create(tmp_path, title="x", quest_id="feat", base_branch="main")
 
-    result = anyio.run(run_change, ch)
+    result = anyio.run(run_quest, ch)
 
     assert result is RunResult.PAUSED
     types_seen = [e.get("type") for e in JsonlEventLog(ch.events_path).read()]
@@ -68,7 +68,7 @@ def test_contended_gate_emits_wait_then_proceeds(
     async def _scenario() -> None:
         async with anyio.create_task_group() as tg:
             async def _run() -> None:
-                result.append(await run_change(ch))
+                result.append(await run_quest(ch))
             tg.start_soon(_run)
             for _ in range(100):
                 await anyio.sleep(0.05)

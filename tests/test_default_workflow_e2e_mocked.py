@@ -22,7 +22,7 @@ from pathlib import Path
 
 import pytest
 
-from imp.engine.executor import RunResult, run_change
+from imp.engine.executor import RunResult, run_quest
 from imp.engine.quest import Quest
 from imp.engine.state import State
 from imp.providers import resolve
@@ -192,7 +192,7 @@ def _seed_default_workflow(tmp_path: Path) -> Quest:
             shell.write_text("#!/bin/sh\nexit 0\n")
         shell.chmod(0o755)
 
-    # config: a single role for every tier used by the workflow. run_change reads
+    # config: a single role for every tier used by the workflow. run_quest reads
     # via load_effective_config (project layer from imp/project.yaml + local layer
     # from .imp/config.yaml). Tests 2/3 swap the provider via _rewrite_config.
     (tmp_path / "imp").mkdir(parents=True, exist_ok=True)
@@ -275,7 +275,7 @@ async def test_full_default_workflow_completes_with_canned_anthropic(
     # The finalize agent uses wait_for_user to solicit the human, but the fake
     # provider returns complete_step immediately (no wait_for_user call in the
     # scripted response), so the reply channel is never exercised.
-    result = await run_change(
+    result = await run_quest(
         change,
         on_event=lambda _e: None,
     )
@@ -308,7 +308,7 @@ async def test_full_default_workflow_completes_with_canned_openai(
         ),
     )
 
-    result = await run_change(
+    result = await run_quest(
         change,
         on_event=lambda _e: None,
     )
@@ -386,7 +386,7 @@ async def test_full_default_workflow_completes_with_canned_claude_code(
         if rec.get("type") == "step_started":
             cur_step["name"] = rec.get("payload", {}).get("step", "")
 
-    result = await run_change(change, on_event=on_event)
+    result = await run_quest(change, on_event=on_event)
     assert result is RunResult.COMPLETED
 
 
@@ -425,7 +425,7 @@ async def test_clean_review_with_minors_integrates_then_verifies(
         elif rec["type"] == "step_completed":
             completed.append((rec["payload"]["step"], rec["payload"]["action"]))
 
-    result = await run_change(
+    result = await run_quest(
         change, on_event=on_event,
     )
     assert result is RunResult.COMPLETED
@@ -489,7 +489,7 @@ async def test_express_runs_full_implement_pipeline_with_change_panel(
         if rec["type"] == "step_started":
             started.append(rec["payload"]["step"])
 
-    result = await run_change(change, on_event=on_event)
+    result = await run_quest(change, on_event=on_event)
     assert result is RunResult.COMPLETED
     # The spec beat and plan review are still skipped on express.
     assert "spec-finalizer" not in started, started
@@ -551,7 +551,7 @@ async def test_finalize_bare_turn_end_solicit_then_merge(tmp_path: Path) -> None
         return "looks good, merge it"
 
     events_seen: list[dict] = []
-    result = await run_change(
+    result = await run_quest(
         change, on_event=events_seen.append, user_chat_input_fn=_user_chat_input,
     )
     assert result is RunResult.COMPLETED, (
@@ -579,7 +579,7 @@ async def test_clean_rebase_skips_reconciler_then_merges(tmp_path: Path) -> None
             model_name=model, client_factory=lambda: fake,
         ),
     )
-    result = await run_change(change, headless=True)
+    result = await run_quest(change, headless=True)
     assert result is RunResult.COMPLETED
     steps = [e["payload"].get("step") for e in _run_events(change)
              if e.get("type") == "step_started" and e.get("payload", {}).get("step")]
@@ -614,7 +614,7 @@ async def test_conflict_rebase_routes_through_reconciler(tmp_path: Path) -> None
             model_name=model, client_factory=lambda: fake,
         ),
     )
-    result = await run_change(change, headless=True)
+    result = await run_quest(change, headless=True)
     assert result is RunResult.COMPLETED
     steps = [e["payload"].get("step") for e in _run_events(change)
              if e.get("type") == "step_started" and e.get("payload", {}).get("step")]
@@ -640,7 +640,7 @@ async def test_merge_phase_runs_merge_to_base_step(tmp_path: Path) -> None:
             model_name=model, client_factory=lambda: fake,
         ),
     )
-    result = await run_change(change, headless=True)
+    result = await run_quest(change, headless=True)
     assert result is RunResult.COMPLETED
     types_seen = [e.get("type") for e in _run_events(change)]
     steps = [e["payload"].get("step") for e in _run_events(change)
@@ -669,7 +669,7 @@ async def test_merge_conflict_surfaces_merge_blocked(tmp_path: Path, monkeypatch
             model_name=model, client_factory=lambda: fake,
         ),
     )
-    result = await run_change(change, headless=True)
+    result = await run_quest(change, headless=True)
     assert result is RunResult.PAUSED
     final = State.load(change.state_dir)
     assert final.status == "merge_blocked"
@@ -690,7 +690,7 @@ async def test_autonomous_mode_integrates_and_merges_without_human(tmp_path: Pat
             model_name=model, client_factory=lambda: fake,
         ),
     )
-    result = await run_change(change, headless=True)
+    result = await run_quest(change, headless=True)
     assert result is RunResult.COMPLETED
     steps = [e["payload"].get("step") for e in _run_events(change)
              if e.get("type") == "step_started"]
@@ -721,7 +721,7 @@ async def test_full_run_transcript_hides_quiet_plumbing(tmp_path: Path) -> None:
             model_name=model, client_factory=lambda: fake,
         ),
     )
-    result = await run_change(change, headless=True)
+    result = await run_quest(change, headless=True)
     assert result is RunResult.COMPLETED
 
     events = _run_events(change)          # the same source `imp log` renders

@@ -11,7 +11,7 @@ from typing import Any
 import pytest
 
 from imp.agents.runner import AgentInvocation, AgentRunner
-from imp.engine.executor import RunResult, run_change
+from imp.engine.executor import RunResult, run_quest
 from imp.engine.quest import Quest
 from imp.engine.state import State
 from imp.providers.claude_code import ClaudeCodeAgentRunner
@@ -119,7 +119,7 @@ async def test_auth_retry_recovers_through_backoff_loop(
 
     monkeypatch.setattr("imp.engine.executor._interruptible_sleep", _no_sleep)
 
-    out = await run_change(change)
+    out = await run_quest(change)
 
     assert out is RunResult.COMPLETED
     assert State.load(change.state_dir).status == "completed"
@@ -167,7 +167,7 @@ async def test_concurrency_400_retry_recovers_through_backoff_loop(
 
     monkeypatch.setattr("imp.engine.executor._interruptible_sleep", _no_sleep)
 
-    out = await run_change(change)
+    out = await run_quest(change)
 
     assert out is RunResult.COMPLETED
     assert State.load(change.state_dir).status == "completed"

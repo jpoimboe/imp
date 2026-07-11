@@ -8,7 +8,7 @@ from typing import Any
 
 import pytest
 
-from imp.engine.executor import RunResult, run_change
+from imp.engine.executor import RunResult, run_quest
 from tests.test_executor_retry_continue import _SINGLE_WF, _WRITER, _make_change
 
 
@@ -77,7 +77,7 @@ async def test_hinted_delay_is_budget_exempt_and_completes(
     monkeypatch.setattr("imp.engine.executor._interruptible_sleep", _no_sleep)
 
     events: list[dict] = []
-    result = await run_change(change, on_event=events.append)
+    result = await run_quest(change, on_event=events.append)
     assert result is RunResult.COMPLETED
     assert provider.drives == 4
     retries = [e for e in events if e["type"] == "agent_retry"]
@@ -103,7 +103,7 @@ async def test_fourth_hinted_sleep_falls_back_to_budgeted(
     monkeypatch.setattr("imp.engine.executor._interruptible_sleep", _no_sleep)
 
     events: list[dict] = []
-    result = await run_change(change, on_event=events.append)
+    result = await run_quest(change, on_event=events.append)
     assert result is RunResult.PAUSED
     paused = [e for e in events if e["type"] == "workflow_paused"]
     assert paused and paused[0]["payload"]["reason"] == "retry_ceiling"
@@ -134,7 +134,7 @@ async def test_blind_retries_after_hinted_sleep_still_reach_ceiling(
     monkeypatch.setattr("imp.engine.executor._interruptible_sleep", _no_sleep)
 
     events: list[dict] = []
-    result = await run_change(change, on_event=events.append)
+    result = await run_quest(change, on_event=events.append)
     assert result is RunResult.PAUSED
     retries = [e for e in events if e["type"] == "agent_retry"]
     # retry 1: hinted (exempt); retry 2: blind 2s (cumulative 0 -> 2, within 5s).

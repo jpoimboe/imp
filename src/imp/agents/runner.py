@@ -215,7 +215,7 @@ class AgentInvocation:
     test_gates: TestGates | None = None
     # §10/§12: when True, the run is headless (no human at the keyboard) and the
     # subagent backoff loop applies a wall-clock ceiling instead of waiting forever.
-    # Threaded from run_change → _route_agent → _run_agent_invocation →
+    # Threaded from run_quest → _route_agent → _run_agent_invocation →
     # build_agent_invocation → provider → child ToolContext → dispatch_task.
     headless: bool = False
     # True for an `interactive: true` workflow step (threshold, finalize, the
@@ -224,7 +224,7 @@ class AgentInvocation:
     # AgentInvocation → every provider's LoopGuard, where it disables both
     # detectors. Default False for subagents / legacy tests.
     interactive: bool = False
-    # Resolved sandbox posture for this run. Threaded from run_change →
+    # Resolved sandbox posture for this run. Threaded from run_quest →
     # _route_agent → _run_agent_invocation → build_agent_invocation → provider →
     # ToolContext so every bash tool call applies the same posture. Any to avoid
     # importing SandboxPolicy here; None means no-op (bare sh -c, inactive policy).

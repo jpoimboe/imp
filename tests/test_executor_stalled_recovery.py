@@ -14,7 +14,7 @@ from typing import Any
 import pytest
 
 from imp.agents.runner import AgentInvocation, AgentRunner, Event
-from imp.engine.executor import RunResult, run_change
+from imp.engine.executor import RunResult, run_quest
 from imp.engine.quest import Quest
 from imp.engine.state import State
 
@@ -122,7 +122,7 @@ async def test_stalled_retries_with_backoff_without_burning_step_attempt(
     monkeypatch.setattr("imp.engine.executor._interruptible_sleep", _no_sleep)
 
     events: list[dict] = []
-    result = await run_change(change, on_event=events.append)
+    result = await run_quest(change, on_event=events.append)
 
     # max_retries=1: completing after THREE stalls is only possible on the
     # backoff path. The errored fallthrough (step_attempt += 1) would pause after
@@ -167,7 +167,7 @@ async def test_stalled_backoff_pauses_as_retry_ceiling_on_budget_exhaustion(
     monkeypatch.setattr("imp.engine.executor._interruptible_sleep", _no_sleep)
 
     events: list[dict] = []
-    result = await run_change(change, on_event=events.append)
+    result = await run_quest(change, on_event=events.append)
 
     # The loop terminates (no infinite retry) once cumulative backoff exceeds the
     # 1800s stalled budget, pausing as a generic ceiling — not the auth-only

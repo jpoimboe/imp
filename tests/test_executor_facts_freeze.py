@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from imp.engine.executor import RunResult, run_change
+from imp.engine.executor import RunResult, run_quest
 from imp.engine.state import State
 from tests.test_executor import _make_change, _register_invocation_capturing
 
@@ -50,7 +50,7 @@ async def test_first_run_freezes_facts_and_guidance_from_project_yaml(tmp_path: 
     sink: list = []
     _register_invocation_capturing({"status": "Success"}, sink)
 
-    result = await run_change(change, on_event=lambda _e: None)
+    result = await run_quest(change, on_event=lambda _e: None)
     assert result is RunResult.COMPLETED
 
     state = State.load(change.state_dir)
@@ -77,7 +77,7 @@ async def test_run_uses_frozen_state_not_live_project_yaml(tmp_path: Path) -> No
 
     sink: list = []
     _register_invocation_capturing({"status": "Success"}, sink)
-    await run_change(change, on_event=lambda _e: None)
+    await run_quest(change, on_event=lambda _e: None)
 
     body = sink[0].initial_messages[0].content[0].text
     assert "hello FROZEN" in body                 # frozen fact, not live project.yaml

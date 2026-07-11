@@ -10,7 +10,7 @@ import pytest
 
 from imp.agents.runner import AgentInvocation, AgentRunner, Event
 from imp.agents.transcript import Transcript
-from imp.engine.executor import RunResult, run_change
+from imp.engine.executor import RunResult, run_quest
 from imp.engine.feedback import COMPLETION_BACKSTOP
 from imp.engine.quest import Quest
 from imp.engine.state import State
@@ -42,7 +42,7 @@ def _make_change(root: Path, *, quest_id: str = "test-change", title: str = "t")
     """Construct a Quest directly on disk without git worktrees.
 
     The test sets up the workflow under root/imp/workflows/imp BEFORE
-    calling _make_change; this helper seeds the State so run_change can be
+    calling _make_change; this helper seeds the State so run_quest can be
     invoked immediately (no snapshot copy needed — workflow_dir resolves to
     root/imp/workflows/imp directly).
     """
@@ -238,11 +238,11 @@ def _seed_minimal_workflow(
 
 
 @pytest.mark.anyio
-async def test_run_change_completes_minimal_workflow(tmp_path: Path) -> None:
+async def test_run_quest_completes_minimal_workflow(tmp_path: Path) -> None:
     change, _, _ = _seed_minimal_workflow(tmp_path)
     _register_fake({"status": "Success"})
 
-    result = await run_change(change, on_event=lambda _e: None)
+    result = await run_quest(change, on_event=lambda _e: None)
     assert result is RunResult.COMPLETED
 
     state = State.load(change.state_dir)
@@ -251,12 +251,12 @@ async def test_run_change_completes_minimal_workflow(tmp_path: Path) -> None:
 
 
 @pytest.mark.anyio
-async def test_run_change_sets_has_started_at_dispatch(tmp_path: Path) -> None:
+async def test_run_quest_sets_has_started_at_dispatch(tmp_path: Path) -> None:
     change, _, _ = _seed_minimal_workflow(tmp_path)
     assert State.load(change.state_dir).has_started is False   # never-run seed
     _register_fake({"status": "Success"})
 
-    await run_change(change, on_event=lambda _e: None)
+    await run_quest(change, on_event=lambda _e: None)
 
     assert State.load(change.state_dir).has_started is True     # a step ran
 
@@ -268,7 +268,7 @@ async def test_continue_off_last_step_completes(tmp_path: Path) -> None:
     change, _, _ = _seed_minimal_workflow(tmp_path)
     _register_fake({"status": "Success"})
 
-    result = await run_change(change, on_event=lambda _e: None)
+    result = await run_quest(change, on_event=lambda _e: None)
     assert result is RunResult.COMPLETED
     assert not (change.quest_dir / "steps").exists()
 
@@ -303,7 +303,7 @@ async def test_set_mutation_persists_to_state_vars(tmp_path: Path) -> None:
     change = _make_change(tmp_path)
     _register_fake({"status": "Success"})
 
-    result = await run_change(change, on_event=lambda _e: None)
+    result = await run_quest(change, on_event=lambda _e: None)
     assert result is RunResult.COMPLETED
 
     state = State.load(change.state_dir)
@@ -352,7 +352,7 @@ async def test_branch_routes_on_var(tmp_path: Path) -> None:
     _register_fake({"status": "Success"})
 
     events: list[dict] = []
-    result = await run_change(change, on_event=events.append)
+    result = await run_quest(change, on_event=events.append)
     assert result is RunResult.COMPLETED
 
     # The branch step's step_started payload reports kind == "branch".
@@ -410,7 +410,7 @@ async def test_goto_with_release_releases_held_lane(tmp_path: Path) -> None:
     events: list = []
     _register_fake({"status": "Success", "deviation": True})
 
-    result = await run_change(change, on_event=events.append)
+    result = await run_quest(change, on_event=events.append)
 
     assert result is RunResult.COMPLETED
     state = State.load(change.state_dir)
@@ -487,7 +487,7 @@ async def test_backward_goto_increments_loop_count_and_trips_max_loops(
         "fake", env_check=lambda: True, factory=lambda _m: _Provider(),
     )
 
-    result = await run_change(change, on_event=lambda _e: None)
+    result = await run_quest(change, on_event=lambda _e: None)
     assert result is RunResult.PAUSED
 
     state = State.load(change.state_dir)
@@ -526,7 +526,7 @@ async def test_goto_empty_trailing_phase_completes(tmp_path: Path) -> None:
     change = _make_change(tmp_path)
     _register_fake({"status": "Success"})
 
-    result = await run_change(change, on_event=lambda _e: None)
+    result = await run_quest(change, on_event=lambda _e: None)
     assert result is RunResult.COMPLETED
     assert State.load(change.state_dir).step is None
 
@@ -546,7 +546,7 @@ async def test_step_completed_payload_has_action_dict_and_kind(
     _register_fake({"status": "Success"})
 
     events: list[dict] = []
-    result = await run_change(change, on_event=events.append)
+    result = await run_quest(change, on_event=events.append)
     assert result is RunResult.COMPLETED
 
     started = next(
@@ -575,7 +575,7 @@ async def test_step_events_carry_step_agent_id_and_step_started_seeds_chain(
     )
     _register_fake({"status": "Success"})
 
-    await run_change(change, on_event=lambda _e: None)
+    await run_quest(change, on_event=lambda _e: None)
     events = list(change.event_log().read())
     started = next(e for e in events if e["type"] == "step_started")
     output = next(e for e in events if e["type"] == "agent_output")
@@ -628,7 +628,7 @@ async def test_fatal_tool_error_pauses_without_retry(tmp_path: Path) -> None:
     )
 
     events: list[dict] = []
-    result = await run_change(change, on_event=events.append)
+    result = await run_quest(change, on_event=events.append)
     assert result is RunResult.PAUSED
     assert State.load(change.state_dir).status == "paused"
     assert runner.run_count == 1
@@ -682,7 +682,7 @@ async def test_fatal_error_pauses_without_burning_retries(tmp_path: Path) -> Non
         "fake", env_check=lambda: True, factory=lambda _m: _FatalProvider(),
     )
 
-    result = await run_change(change, on_event=lambda _e: None)
+    result = await run_quest(change, on_event=lambda _e: None)
     assert result is RunResult.PAUSED
     assert runner.run_count == 1
     assert State.load(change.state_dir).status == "paused"
@@ -758,7 +758,7 @@ async def test_rate_limit_sleeps_then_retries_without_consuming_step_attempt(
         "fake", env_check=lambda: True, factory=lambda _m: _RLProvider(),
     )
 
-    result = await run_change(change, on_event=lambda _e: None)
+    result = await run_quest(change, on_event=lambda _e: None)
     assert result is RunResult.COMPLETED
     assert runner.run_count == 2
 
@@ -800,7 +800,7 @@ async def test_retry_budget_pauses_with_retry_ceiling(
     )
 
     events: list[dict] = []
-    result = await run_change(change, on_event=events.append)
+    result = await run_quest(change, on_event=events.append)
     assert result is RunResult.PAUSED
     # Budget check fires BEFORE the first retry sleep -> exactly one run.
     assert runner.run_count == 1
@@ -844,7 +844,7 @@ async def test_auth_budget_exhaustion_pauses_with_reauth_needed(
     )
 
     events: list[dict] = []
-    result = await run_change(change, on_event=events.append)
+    result = await run_quest(change, on_event=events.append)
     assert result is RunResult.PAUSED
     assert runner.run_count == 1
     paused = [e for e in events if e["type"] == "workflow_paused"]
@@ -880,7 +880,7 @@ async def test_auth_backoff_crosses_old_120s_budget_and_keeps_retrying(
         "fake", env_check=lambda: True, factory=lambda _m: _AuthProvider(),
     )
 
-    result = await run_change(change, on_event=lambda _e: None)
+    result = await run_quest(change, on_event=lambda _e: None)
     assert result is RunResult.COMPLETED
     # 7 auth errors then success; the run rode through the 123 s crossing.
     assert runner.run_count == 8
@@ -916,7 +916,7 @@ async def test_fatal_api_error_pauses(tmp_path: Path) -> None:
         "fake", env_check=lambda: True, factory=lambda _m: _IncompleteProvider(),
     )
 
-    result = await run_change(change, on_event=lambda _e: None)
+    result = await run_quest(change, on_event=lambda _e: None)
     assert result is RunResult.PAUSED
 
 
@@ -954,7 +954,7 @@ async def test_agent_missing_output_exhausts_to_pause(tmp_path: Path) -> None:
         "fake", env_check=lambda: True, factory=lambda _m: _EmptyProvider(),
     )
 
-    result = await run_change(change, on_event=lambda _e: None)
+    result = await run_quest(change, on_event=lambda _e: None)
     assert result is RunResult.PAUSED
     # max_retries=1 → initial attempt + 1 retry = 2 invocations before pause.
     assert runner_calls["n"] == 2
@@ -1015,7 +1015,7 @@ async def test_system_prompt_carries_completion_instruction_and_continuation(
         "fake", env_check=lambda: True, factory=lambda model: _CapProvider(model),
     )
 
-    result = await run_change(change, on_event=lambda _e: None)
+    result = await run_quest(change, on_event=lambda _e: None)
     assert result is RunResult.COMPLETED
 
     inv = captured["inv"]
@@ -1104,7 +1104,7 @@ async def test_goto_feedback_resumes_target_with_wrapper(tmp_path: Path) -> None
     )
 
     events: list[dict] = []
-    result = await run_change(change, on_event=events.append)
+    result = await run_quest(change, on_event=events.append)
     assert result is RunResult.COMPLETED
 
     coder_runs = [fb for (aid, fb) in runs if aid.endswith("/coder")]
@@ -1139,14 +1139,14 @@ def test_action_payload_goto_carries_resume_bool() -> None:
 
 
 @pytest.mark.anyio
-async def test_run_change_computes_and_persists_resolved_tiers(tmp_path):
+async def test_run_quest_computes_and_persists_resolved_tiers(tmp_path):
     """After a run, State carries resolved_tiers and exactly one tiers_resolved
     event was emitted."""
     change, _, _ = _seed_minimal_workflow(tmp_path)
     _register_fake({"status": "Success"})
 
     captured: list[dict] = []
-    await run_change(change, on_event=captured.append)
+    await run_quest(change, on_event=captured.append)
 
     state = State.load(change.state_dir)
     assert state.resolved_tiers is not None
@@ -1162,16 +1162,16 @@ async def test_run_change_computes_and_persists_resolved_tiers(tmp_path):
 
 @pytest.mark.anyio
 async def test_resume_reuses_resolved_tiers_no_second_event(tmp_path):
-    """A second run_change re-entry reuses the persisted map and emits NO second
+    """A second run_quest re-entry reuses the persisted map and emits NO second
     tiers_resolved (compute-if-absent guard)."""
     change, _, _ = _seed_minimal_workflow(tmp_path)
     _register_fake({"status": "Success"})
-    await run_change(change)
+    await run_quest(change)
 
-    # Re-run run_change on the same (now-completed) change: it re-loads state,
+    # Re-run run_quest on the same (now-completed) change: it re-loads state,
     # sees resolved_tiers already set, and must not emit a second event.
     captured: list[dict] = []
-    await run_change(change, on_event=captured.append)
+    await run_quest(change, on_event=captured.append)
     assert [e for e in captured if e["type"] == "tiers_resolved"] == []
 
 
@@ -1212,7 +1212,7 @@ async def test_fresh_start_puts_task_in_first_user_message(
     resolve.register_provider(
         "fake", env_check=lambda: True, factory=lambda model: _CapProvider(model))
 
-    result = await run_change(change, on_event=lambda _e: None)
+    result = await run_quest(change, on_event=lambda _e: None)
     assert result is RunResult.COMPLETED
 
     inv = captured["inv"]
@@ -1307,7 +1307,7 @@ async def test_resume_edge_keeps_transcript(tmp_path: Path) -> None:
     runs: list = []
     _register_capturing(lambda _n: ("output", {"status": "Success"}),
                         ["rework", "approve"], runs)
-    result = await run_change(change, on_event=lambda _e: None)
+    result = await run_quest(change, on_event=lambda _e: None)
     assert result is RunResult.COMPLETED
     coder_balances = [bal for (aid, bal, _fb) in runs if aid.endswith("/coder")]
     # first entry fresh, second entry (via resume:) keeps the transcript
@@ -1320,7 +1320,7 @@ async def test_goto_edge_starts_target_fresh(tmp_path: Path) -> None:
     runs: list = []
     _register_capturing(lambda _n: ("output", {"status": "Success"}),
                         ["rework", "approve"], runs)
-    result = await run_change(change, on_event=lambda _e: None)
+    result = await run_quest(change, on_event=lambda _e: None)
     assert result is RunResult.COMPLETED
     coder_balances = [bal for (aid, bal, _fb) in runs if aid.endswith("/coder")]
     # both entries fresh: a plain goto never resumes
@@ -1366,7 +1366,7 @@ async def test_goto_feedback_prepended_to_fresh_user_message(tmp_path: Path) -> 
     resolve.register_provider(
         "fake", env_check=lambda: True, factory=lambda model: _Prov(model))
 
-    await run_change(change, on_event=lambda _e: None, headless=True)
+    await run_quest(change, on_event=lambda _e: None, headless=True)
 
     coder_invs = [i for i in invs if i.agent_def.name == "coder"]
     assert len(coder_invs) == 2
@@ -1381,7 +1381,7 @@ async def test_resume_marker_is_one_shot(tmp_path: Path) -> None:
     runs: list = []
     _register_capturing(lambda _n: ("output", {"status": "Success"}),
                         ["rework", "approve"], runs)
-    result = await run_change(change, on_event=lambda _e: None)
+    result = await run_quest(change, on_event=lambda _e: None)
     assert result is RunResult.COMPLETED
     # The reviewer that runs AFTER the resumed coder is a fresh entry (no marker).
     reviewer_balances = [bal for (aid, bal, _fb) in runs if aid.endswith("/reviewer")]
@@ -1399,7 +1399,7 @@ async def test_resume_forwards_feedback_to_target(tmp_path: Path) -> None:
     runs: list = []
     _register_capturing(lambda _n: ("output", {"status": "Success"}),
                         ["rework", "approve"], runs)
-    result = await run_change(change, on_event=lambda _e: None)
+    result = await run_quest(change, on_event=lambda _e: None)
     assert result is RunResult.COMPLETED
     coder_feedback = [fb for (aid, _bal, fb) in runs if aid.endswith("/coder")]
     assert coder_feedback[0] is None                  # first entry: no feedback
@@ -1451,7 +1451,7 @@ async def test_resume_is_constant_across_error_retry(tmp_path: Path) -> None:
     resolve.register_provider(
         "fake", env_check=lambda: True, factory=lambda _m: _Provider())
 
-    result = await run_change(change, on_event=lambda _e: None)
+    result = await run_quest(change, on_event=lambda _e: None)
     assert result is RunResult.COMPLETED
     coder_balances = [bal for (aid, bal) in runs if aid.endswith("/coder")]
     # entry1 fresh; entry2 + its retry (entry3) both resumed -> all keep True
@@ -1461,7 +1461,7 @@ async def test_resume_is_constant_across_error_retry(tmp_path: Path) -> None:
 @pytest.mark.anyio
 async def test_resume_survives_pause_and_reload(tmp_path: Path) -> None:
     """S1: a step entered via resume: that pauses mid-run keeps resume_pending in
-    state.json, so the next run_change re-entry continues (does not wipe)."""
+    state.json, so the next run_quest re-entry continues (does not wipe)."""
     from imp.providers import resolve
     resolve.reset_providers_for_tests()
     change = _seed_back_edge_workflow(tmp_path, verb="resume")
@@ -1502,14 +1502,14 @@ async def test_resume_survives_pause_and_reload(tmp_path: Path) -> None:
         "fake", env_check=lambda: True, factory=lambda _m: _Provider())
 
     # First run: coder#1 ok -> reviewer rework -> resume:coder -> coder#2 pauses.
-    first = await run_change(change, on_event=lambda _e: None)
+    first = await run_quest(change, on_event=lambda _e: None)
     assert first is RunResult.PAUSED
     paused = State.load(change.state_dir)
     assert paused.step == "coder"
     assert paused.resume_pending == "coder"      # marker survived the pause
 
     # Second run: reloads, coder is still the resume target -> continues.
-    second = await run_change(change, on_event=lambda _e: None)
+    second = await run_quest(change, on_event=lambda _e: None)
     assert second is RunResult.COMPLETED
     coder_balances = [bal for (aid, bal) in runs if aid.endswith("/coder")]
     # entry1 fresh; entry2 (paused) resumed; entry3 (post-reload) resumed
@@ -1559,7 +1559,7 @@ async def test_resume_keep_branch_passes_empty_initial_messages(
     resolve.register_provider(
         "fake", env_check=lambda: True, factory=lambda _m: _Provider())
 
-    result = await run_change(change, on_event=lambda _e: None)
+    result = await run_quest(change, on_event=lambda _e: None)
     assert result is RunResult.COMPLETED
 
     # Defensive: assert overall shape (coder, reviewer, coder, reviewer) before
@@ -1610,7 +1610,7 @@ async def test_script_pause_emits_script_blocked_event(tmp_path: Path) -> None:
     change = _make_change(tmp_path)
     _register_fake({"status": "Success"})  # resolve_run needs a registered provider
 
-    result = await run_change(change, on_event=lambda _e: None)
+    result = await run_quest(change, on_event=lambda _e: None)
 
     assert result is RunResult.PAUSED
     state = State.load(change.state_dir)
@@ -1650,7 +1650,7 @@ async def test_script_pause_emits_workflow_paused_with_script_blocked_reason(
     change = _make_change(tmp_path)
     _register_fake({"status": "Success"})
 
-    result = await run_change(change, on_event=lambda _e: None)
+    result = await run_quest(change, on_event=lambda _e: None)
 
     assert result is RunResult.PAUSED
     assert State.load(change.state_dir).status == "paused"
@@ -1711,7 +1711,7 @@ async def test_first_run_snapshots_the_workflow(tmp_path: Path) -> None:
     snapshot = change.quest_dir / "workflow"
     assert not snapshot.exists()
 
-    result = await run_change(change, on_event=lambda _e: None)
+    result = await run_quest(change, on_event=lambda _e: None)
 
     assert result is RunResult.COMPLETED
     assert (snapshot / "workflow.yaml").exists()
@@ -1729,7 +1729,7 @@ async def test_snapshot_copy_cleans_stale_tmp_dir(tmp_path: Path) -> None:
     tmp.mkdir()
     (tmp / "stale.yaml").write_text("garbage")
 
-    result = await run_change(change, on_event=lambda _e: None)
+    result = await run_quest(change, on_event=lambda _e: None)
 
     assert result is RunResult.COMPLETED
     # The stale tmp dir should be gone.
@@ -1769,7 +1769,7 @@ async def test_resume_runs_frozen_snapshot_after_live_workflow_deleted(
     change = _make_change(tmp_path)
     _register_fake({"status": "Success"})  # resolve_run needs a registered provider
 
-    r1 = await run_change(change, on_event=lambda _e: None)
+    r1 = await run_quest(change, on_event=lambda _e: None)
     assert r1 is RunResult.PAUSED
     snapshot = change.quest_dir / "workflow"
     assert (snapshot / "scripts" / "probe.sh").exists()
@@ -1779,7 +1779,7 @@ async def test_resume_runs_frozen_snapshot_after_live_workflow_deleted(
 
     # Resume reuses the frozen snapshot — no re-copy from the now-missing live
     # dir (which would raise), and the deleted script still runs.
-    r2 = await run_change(change, on_event=lambda _e: None)
+    r2 = await run_quest(change, on_event=lambda _e: None)
     assert r2 is RunResult.PAUSED
     evs = [e for e in change.event_log().read()
            if e.get("type") == "script_blocked"]
@@ -1800,7 +1800,7 @@ async def test_none_step_resolves_to_complete(tmp_path: Path) -> None:
     state.step = None
     state.save(change.state_dir)
 
-    result = await run_change(change, on_event=lambda _e: None)
+    result = await run_quest(change, on_event=lambda _e: None)
 
     assert result is RunResult.COMPLETED
     assert State.load(change.state_dir).status == "completed"
@@ -1816,7 +1816,7 @@ async def test_unknown_step_pauses_without_silent_merge(tmp_path: Path) -> None:
     state.step = "ghost-step"
     state.save(change.state_dir)
 
-    result = await run_change(change, on_event=lambda _e: None)
+    result = await run_quest(change, on_event=lambda _e: None)
 
     assert result is RunResult.PAUSED
     reloaded = State.load(change.state_dir)
@@ -1858,7 +1858,7 @@ async def test_frozen_script_runs_from_snapshot_cwd_with_live_project_root(
     change = _make_change(tmp_path)
     _register_fake({"status": "Success"})
 
-    result = await run_change(change, on_event=lambda _e: None)
+    result = await run_quest(change, on_event=lambda _e: None)
 
     assert result is RunResult.COMPLETED
 
@@ -1887,7 +1887,7 @@ async def test_facts_render_into_main_agent_prompt(tmp_path: Path) -> None:
     sink: list = []
     _register_invocation_capturing({"status": "Success"}, sink)
 
-    result = await run_change(change, on_event=lambda _e: None)
+    result = await run_quest(change, on_event=lambda _e: None)
     assert result is RunResult.COMPLETED
     assert any("run make check" in i.initial_messages[0].content[0].text for i in sink)
 
@@ -1968,7 +1968,7 @@ async def test_tolerated_forward_advance_resets_gate_loop_counter(
         "fake", env_check=lambda: True, factory=lambda _m: _Provider(),
     )
 
-    result = await run_change(change, on_event=lambda _e: None)
+    result = await run_quest(change, on_event=lambda _e: None)
 
     # No max_loops pause: the tolerated cycle completed.
     assert result is RunResult.COMPLETED
@@ -1998,11 +1998,11 @@ def test_record_outcome_appends_and_bounds_to_k() -> None:
 
 
 @pytest.mark.anyio
-async def test_run_change_records_step_outcome(tmp_path: Path) -> None:
+async def test_run_quest_records_step_outcome(tmp_path: Path) -> None:
     change, _, _ = _seed_minimal_workflow(tmp_path)
     _register_fake({"status": "Success", "outcome": "did the thing"})
 
-    result = await run_change(change, on_event=lambda _e: None)
+    result = await run_quest(change, on_event=lambda _e: None)
     assert result is RunResult.COMPLETED
 
     state = State.load(change.state_dir)
@@ -2038,7 +2038,7 @@ async def test_agent_step_without_outcome_fails_to_complete(tmp_path: Path) -> N
     resolve.register_provider(
         "fake", env_check=lambda: True, factory=lambda _m: _Provider())
 
-    result = await run_change(change, on_event=lambda _e: None)
+    result = await run_quest(change, on_event=lambda _e: None)
     assert result is RunResult.PAUSED
 
     state = State.load(change.state_dir)
@@ -2122,7 +2122,7 @@ async def test_rework_reentry_injects_prior_attempts(tmp_path: Path) -> None:
     resolve.register_provider(
         "fake", env_check=lambda: True, factory=lambda _m: _Provider())
 
-    result = await run_change(change, on_event=lambda _e: None)
+    result = await run_quest(change, on_event=lambda _e: None)
     assert result is RunResult.COMPLETED
 
     # Writer ran twice: the fresh entry, then the rework re-entry.
@@ -2200,7 +2200,7 @@ async def test_step_lap_render_var_increments_across_bounce(tmp_path: Path) -> N
     resolve.register_provider(
         "fake", env_check=lambda: True, factory=lambda _m: _Provider())
 
-    result = await run_change(change, on_event=lambda _e: None)
+    result = await run_quest(change, on_event=lambda _e: None)
     assert result is RunResult.COMPLETED
     # Writer ran twice: the fresh entry (lap 1) and the post-bounce re-entry (lap 2).
     assert len(writer_prompts) == 2
@@ -2230,7 +2230,7 @@ async def test_step_completed_payload_carries_rule_label(tmp_path: Path) -> None
     _register_fake({"status": "Success"})
 
     events: list[dict] = []
-    result = await run_change(change, on_event=events.append)
+    result = await run_quest(change, on_event=events.append)
     assert result is RunResult.COMPLETED
 
     completed = next(
@@ -2248,7 +2248,7 @@ async def test_step_completed_continue_default_label_is_none(tmp_path: Path) -> 
     _register_fake({"status": "Success"})
 
     events: list[dict] = []
-    result = await run_change(change, on_event=events.append)
+    result = await run_quest(change, on_event=events.append)
     assert result is RunResult.COMPLETED
 
     completed = next(e for e in events if e["type"] == "step_completed")
@@ -2278,7 +2278,7 @@ async def test_step_completed_unlabeled_rule_emits_none(tmp_path: Path) -> None:
     _register_fake({"status": "Success"})
 
     events: list[dict] = []
-    result = await run_change(change, on_event=events.append)
+    result = await run_quest(change, on_event=events.append)
     assert result is RunResult.COMPLETED
 
     completed = next(
@@ -2348,7 +2348,7 @@ async def test_step_started_payload_carries_label_and_resumed(tmp_path: Path) ->
         "fake", env_check=lambda: True, factory=lambda _m: _Provider())
 
     events: list[dict] = []
-    result = await run_change(change, on_event=events.append)
+    result = await run_quest(change, on_event=events.append)
     assert result is RunResult.COMPLETED
 
     coder_started = [e for e in events
@@ -2425,7 +2425,7 @@ async def test_step_started_restarted_true_when_resumed_transcript_empty(tmp_pat
         "fake", env_check=lambda: True, factory=lambda _m: _Provider())
 
     events: list[dict] = []
-    result = await run_change(change, on_event=events.append)
+    result = await run_quest(change, on_event=events.append)
     assert result is RunResult.COMPLETED
 
     coder_started = [e for e in events
@@ -2510,7 +2510,7 @@ async def test_sandbox_policy_rebuilt_after_project_root_flip(
     sink: list[str] = []
     _register_flip(sink, wt)
 
-    result = await run_change(change, on_event=lambda _e: None)
+    result = await run_quest(change, on_event=lambda _e: None)
     assert result is RunResult.COMPLETED
 
     # Step 1 ran under the control-root policy; the flip mid-step rebuilds the
@@ -2553,7 +2553,7 @@ async def test_continue_writes_target_step_label(tmp_path: Path) -> None:
     change = _make_change(tmp_path)
     _register_fake({"status": "Success"})
 
-    result = await run_change(change, on_event=lambda _e: None)
+    result = await run_quest(change, on_event=lambda _e: None)
     assert result is RunResult.PAUSED
     state = State.load(change.state_dir)
     assert state.step == "check"
@@ -2594,7 +2594,7 @@ async def test_complete_clears_step_label(tmp_path: Path) -> None:
     change = _make_change(tmp_path)
     _register_fake({"status": "Success"})
 
-    result = await run_change(change, on_event=lambda _e: None)
+    result = await run_quest(change, on_event=lambda _e: None)
     assert result is RunResult.COMPLETED
     state = State.load(change.state_dir)
     assert state.step is None
@@ -2633,7 +2633,7 @@ async def test_goto_writes_target_step_label(tmp_path: Path) -> None:
     change = _make_change(tmp_path)
     _register_fake({"status": "Success"})
 
-    result = await run_change(change, on_event=lambda _e: None)
+    result = await run_quest(change, on_event=lambda _e: None)
     assert result is RunResult.PAUSED
     state = State.load(change.state_dir)
     assert state.step == "dst"
@@ -2674,7 +2674,7 @@ async def test_executor_passes_autonomous_to_prompt(tmp_path: Path) -> None:
     sink: list = []
     _register_invocation_capturing({"status": "Success"}, sink)
 
-    result = await run_change(
+    result = await run_quest(
         change, on_event=lambda _e: None, autonomous=True,
     )
     assert result is RunResult.COMPLETED
@@ -2703,7 +2703,7 @@ async def test_quest_home_renders_worktree_relative(tmp_path: Path) -> None:
     sink: list = []
     _register_invocation_capturing({"status": "Success"}, sink)
 
-    result = await run_change(change, on_event=lambda _e: None)
+    result = await run_quest(change, on_event=lambda _e: None)
     assert result is RunResult.COMPLETED
 
     inv = sink[0]
@@ -2744,7 +2744,7 @@ async def test_route_label_threads_to_next_step_started(tmp_path: Path) -> None:
     _register_fake({"status": "Success"})
 
     events: list[dict] = []
-    result = await run_change(change, on_event=events.append)
+    result = await run_quest(change, on_event=events.append)
     assert result is RunResult.COMPLETED
 
     started = {
@@ -2794,7 +2794,7 @@ async def test_continue_renders_templated_target_label(tmp_path: Path) -> None:
     change = _make_change(tmp_path)
     _register_fake({"status": "Success"})
 
-    result = await run_change(change, on_event=lambda _e: None)
+    result = await run_quest(change, on_event=lambda _e: None)
     assert result is RunResult.PAUSED
     state = State.load(change.state_dir)
     assert state.step == "check"
@@ -2836,7 +2836,7 @@ async def test_goto_renders_templated_target_label(tmp_path: Path) -> None:
     change = _make_change(tmp_path)
     _register_fake({"status": "Success"})
 
-    result = await run_change(change, on_event=lambda _e: None)
+    result = await run_quest(change, on_event=lambda _e: None)
     assert result is RunResult.PAUSED
     state = State.load(change.state_dir)
     assert state.step == "dst"
@@ -2854,7 +2854,7 @@ async def test_first_run_overlays_project_skills_into_snapshot_user(
     (tmp_path / "imp" / "skills").mkdir(parents=True, exist_ok=True)
     (tmp_path / "imp" / "skills" / "mine.md").write_text("# Mine\nv1\n")
 
-    assert await run_change(change, on_event=lambda _e: None) is RunResult.COMPLETED
+    assert await run_quest(change, on_event=lambda _e: None) is RunResult.COMPLETED
     overlaid = change.quest_dir / "workflow" / "skills" / "user" / "mine.md"
     assert overlaid.read_text() == "# Mine\nv1\n"
 
@@ -2862,14 +2862,14 @@ async def test_first_run_overlays_project_skills_into_snapshot_user(
     # up and exactly one workflow_refreshed event is emitted.
     (tmp_path / "imp" / "skills" / "mine.md").write_text("# Mine\nv2\n")
     events: list[dict] = []
-    await run_change(change, on_event=events.append)
+    await run_quest(change, on_event=events.append)
     assert overlaid.read_text() == "# Mine\nv2\n"
     assert sum(1 for e in events if e["type"] == "workflow_refreshed") == 1
 
 
 @pytest.mark.anyio
-async def test_run_change_persists_configured_max_reincarnations(tmp_path):
-    """run_change copies config.context_max_reincarnations() onto State at run
+async def test_run_quest_persists_configured_max_reincarnations(tmp_path):
+    """run_quest copies config.context_max_reincarnations() onto State at run
     start (config is in scope only here), like resolved_tiers."""
     change, _, _ = _seed_minimal_workflow(tmp_path)
     # Overwrite the project layer with a NON-default cap so the assertion is
@@ -2878,7 +2878,7 @@ async def test_run_change_persists_configured_max_reincarnations(tmp_path):
         "default-workflow: imp\ncontext:\n  max_reincarnations: 5\n")
     _register_fake({"status": "Success"})
 
-    await run_change(change, on_event=lambda _e: None)
+    await run_quest(change, on_event=lambda _e: None)
 
     assert State.load(change.state_dir).max_reincarnations == 5
 
@@ -2919,7 +2919,7 @@ async def test_step_reincarnates_on_context_window_then_pauses_at_cap(tmp_path):
         factory=lambda model: _CtxWindowProvider(model))
 
     events: list[dict] = []
-    result = await run_change(change, on_event=events.append)
+    result = await run_quest(change, on_event=events.append)
 
     assert result is RunResult.PAUSED
     reincarnating = [e for e in events if e["type"] == "reincarnating"]
@@ -2929,8 +2929,8 @@ async def test_step_reincarnates_on_context_window_then_pauses_at_cap(tmp_path):
 
 
 @pytest.mark.anyio
-async def test_run_change_threads_checkpoint_threshold_to_invocation(tmp_path):
-    """run_change re-derives config.context_checkpoint_threshold() onto State on
+async def test_run_quest_threads_checkpoint_threshold_to_invocation(tmp_path):
+    """run_quest re-derives config.context_checkpoint_threshold() onto State on
     every entry (transient, not persisted) and the executor carries it onto each
     AgentInvocation, so the runner's Tier A watch sees the configured value."""
     change, _, _ = _seed_minimal_workflow(tmp_path)
@@ -2940,7 +2940,7 @@ async def test_run_change_threads_checkpoint_threshold_to_invocation(tmp_path):
     sink: list = []
     _register_invocation_capturing({"status": "Success"}, sink)
 
-    await run_change(change, on_event=lambda _e: None)
+    await run_quest(change, on_event=lambda _e: None)
 
     assert sink and sink[0].checkpoint_threshold == 0.65
 
@@ -2982,7 +2982,7 @@ async def test_step_reincarnates_on_handoff_then_pauses_at_cap(tmp_path):
         factory=lambda model: _HandoffProvider(model))
 
     events: list[dict] = []
-    result = await run_change(change, on_event=events.append)
+    result = await run_quest(change, on_event=events.append)
 
     assert result is RunResult.PAUSED
     reincarnating = [e for e in events if e["type"] == "reincarnating"]
@@ -3032,7 +3032,7 @@ async def test_step_handoff_missing_note_degrades_to_reactive_reason(tmp_path):
         factory=lambda model: _HandoffNoNoteProvider(model))
 
     events: list[dict] = []
-    result = await run_change(change, on_event=events.append)
+    result = await run_quest(change, on_event=events.append)
 
     assert result is RunResult.PAUSED
     reincarnating = [e for e in events if e["type"] == "reincarnating"]
@@ -3052,7 +3052,7 @@ async def test_resume_keep_path_feedback_ends_with_backstop(tmp_path: Path) -> N
     runs: list = []
     _register_capturing(lambda _n: ("output", {"status": "Success"}),
                         ["rework", "approve"], runs)
-    result = await run_change(change, on_event=lambda _e: None)
+    result = await run_quest(change, on_event=lambda _e: None)
     assert result is RunResult.COMPLETED
     coder_feedback = [fb for (aid, _bal, fb) in runs if aid.endswith("/coder")]
     assert coder_feedback[0] is None                     # fresh entry: no wrapper
@@ -3070,7 +3070,7 @@ async def test_bare_resume_backstop_rides_on_prior_attempts_preamble(tmp_path: P
     runs: list = []
     _register_capturing(lambda _n: ("output", {"status": "Success"}),
                         ["rework", "approve"], runs)
-    result = await run_change(change, on_event=lambda _e: None)
+    result = await run_quest(change, on_event=lambda _e: None)
     assert result is RunResult.COMPLETED
     coder_feedback = [fb for (aid, _bal, fb) in runs if aid.endswith("/coder")]
     assert coder_feedback[0] is None                          # fresh entry: no wrapper
@@ -3088,7 +3088,7 @@ async def test_resume_handoff_framed_feedback_ends_with_backstop(tmp_path: Path)
     runs: list = []
     _register_capturing(lambda _n: ("output", {"status": "Success"}),
                         ["rework", "approve"], runs)
-    result = await run_change(change, on_event=lambda _e: None)
+    result = await run_quest(change, on_event=lambda _e: None)
     assert result is RunResult.COMPLETED
     coder_feedback = [fb for (aid, _bal, fb) in runs if aid.endswith("/coder")]
     assert coder_feedback[1].endswith(COMPLETION_BACKSTOP)
@@ -3132,7 +3132,7 @@ async def test_goto_fresh_path_feedback_carries_backstop(tmp_path: Path) -> None
     resolve.register_provider(
         "fake", env_check=lambda: True, factory=lambda model: _Prov(model))
 
-    await run_change(change, on_event=lambda _e: None, headless=True)
+    await run_quest(change, on_event=lambda _e: None, headless=True)
 
     coder_invs = [i for i in invs if i.agent_def.name == "coder"]
     assert len(coder_invs) == 2
@@ -3200,7 +3200,7 @@ async def test_backward_gate_bounce_emits_step_transition(tmp_path: Path) -> Non
     resolve.register_provider(
         "fake", env_check=lambda: True, factory=lambda _m: _Provider())
 
-    await run_change(change, on_event=lambda _e: None)
+    await run_quest(change, on_event=lambda _e: None)
 
     events = list(change.event_log().read())
     trans = [e for e in events if e["type"] == "step_transition"]
@@ -3273,7 +3273,7 @@ async def test_forward_only_run_emits_no_step_transition(tmp_path: Path) -> None
     resolve.register_provider(
         "fake", env_check=lambda: True, factory=lambda _m: _Provider())
 
-    result = await run_change(change, on_event=lambda _e: None)
+    result = await run_quest(change, on_event=lambda _e: None)
 
     assert result is RunResult.COMPLETED
     events = list(change.event_log().read())
@@ -3326,7 +3326,7 @@ async def test_self_goto_retry_emits_no_step_transition(tmp_path: Path) -> None:
     resolve.register_provider(
         "fake", env_check=lambda: True, factory=lambda _m: _Provider())
 
-    await run_change(change, on_event=lambda _e: None)
+    await run_quest(change, on_event=lambda _e: None)
 
     events = list(change.event_log().read())
     assert not any(e["type"] == "step_transition" for e in events)
@@ -3369,7 +3369,7 @@ async def test_continue_writes_target_phase_label(tmp_path: Path) -> None:
     change = _make_change(tmp_path)
     _register_fake({"status": "Success"})
 
-    result = await run_change(change, on_event=lambda _e: None)
+    result = await run_quest(change, on_event=lambda _e: None)
     assert result is RunResult.PAUSED
     state = State.load(change.state_dir)
     assert state.step == "check"
@@ -3411,7 +3411,7 @@ async def test_goto_writes_target_phase_label(tmp_path: Path) -> None:
     change = _make_change(tmp_path)
     _register_fake({"status": "Success"})
 
-    result = await run_change(change, on_event=lambda _e: None)
+    result = await run_quest(change, on_event=lambda _e: None)
     assert result is RunResult.PAUSED
     state = State.load(change.state_dir)
     assert state.step == "dst"
@@ -3455,7 +3455,7 @@ async def test_complete_clears_phase_label(tmp_path: Path) -> None:
     change = _make_change(tmp_path)
     _register_fake({"status": "Success"})
 
-    result = await run_change(change, on_event=lambda _e: None)
+    result = await run_quest(change, on_event=lambda _e: None)
     assert result is RunResult.COMPLETED
     state = State.load(change.state_dir)
     assert state.step is None

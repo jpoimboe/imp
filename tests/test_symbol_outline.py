@@ -103,14 +103,14 @@ _PY = (
     '        return "x"\n'
     "\n"
     "\n"
-    "def run_change(change, config=None) -> int:\n"
+    "def run_quest(change, config=None) -> int:\n"
     "    return 1\n"
 )
 
 
 def test_extract_python_nesting_and_signatures() -> None:
     syms = extract_symbols(_PY, "python")
-    assert [s.name for s in syms] == ["Foo", "run_change"]
+    assert [s.name for s in syms] == ["Foo", "run_quest"]
 
     foo = syms[0]
     assert foo.bucket == "data"
@@ -126,7 +126,7 @@ def test_extract_python_nesting_and_signatures() -> None:
     run = syms[1]
     assert run.bucket == "fn"
     assert run.lineno == 9
-    assert run.signature == "def run_change(change, config=None) -> int:"
+    assert run.signature == "def run_quest(change, config=None) -> int:"
     assert run.children == ()
 
 
@@ -266,7 +266,7 @@ def test_render_file_signatures() -> None:
         "pkg/foo.py — 2 fn, 1 data\n"
         "4: class Foo:\n"
         "5:   def method(self, a: int) -> str:\n"
-        "9: def run_change(change, config=None) -> int:"
+        "9: def run_quest(change, config=None) -> int:"
     )
 
 
@@ -370,7 +370,7 @@ def test_extract_cached_parses_unchanged_file_once(tmp_path, monkeypatch) -> Non
     first = so.extract_cached(f, _PY, "python")
     second = so.extract_cached(f, _PY, "python")
     assert calls["n"] == 1
-    assert [s.name for s in first] == [s.name for s in second] == ["Foo", "run_change"]
+    assert [s.name for s in first] == [s.name for s in second] == ["Foo", "run_quest"]
 
 
 def test_extract_cached_reparses_after_mtime_change(tmp_path, monkeypatch) -> None:
@@ -437,7 +437,7 @@ def test_scan_file_python(tmp_path) -> None:
     f.write_text(_PY)
     e = anyio.run(so.scan_file, f, tmp_path)
     assert e.rel == "foo.py"
-    assert [s.name for s in e.symbols] == ["Foo", "run_change"]
+    assert [s.name for s in e.symbols] == ["Foo", "run_quest"]
 
 
 def test_scan_file_unsupported_extension_has_no_symbols(tmp_path) -> None:
@@ -475,7 +475,7 @@ def _render_entries():
         (
             Symbol("Foo", "data", 4, "class Foo:",
                    (Symbol("method", "fn", 5, "def method(self, a: int) -> str:"),)),
-            Symbol("run_change", "fn", 9, "def run_change(change, config=None) -> int:"),
+            Symbol("run_quest", "fn", 9, "def run_quest(change, config=None) -> int:"),
         ),
     )
     util = so.FileEntry("pkg/util.py", (Symbol("helper", "fn", 1, "def helper():"),))
@@ -503,7 +503,7 @@ def test_render_dir_signatures() -> None:
         "    foo.py — 2 fn, 1 data\n"
         "      4: class Foo:\n"
         "      5:   def method(self, a: int) -> str:\n"
-        "      9: def run_change(change, config=None) -> int:\n"
+        "      9: def run_quest(change, config=None) -> int:\n"
         "    util.py — 1 fn\n"
         "      1: def helper():"
     )
@@ -606,7 +606,7 @@ def test_tool_file_mode_python(tmp_path) -> None:
         "foo.py — 2 fn, 1 data\n"
         "4: class Foo:\n"
         "5:   def method(self, a: int) -> str:\n"
-        "9: def run_change(change, config=None) -> int:"
+        "9: def run_quest(change, config=None) -> int:"
     )
 
 
@@ -687,7 +687,7 @@ def test_tool_dir_mode(tmp_path, monkeypatch) -> None:
         "    foo.py — 2 fn, 1 data\n"
         "      4: class Foo:\n"
         "      5:   def method(self, a: int) -> str:\n"
-        "      9: def run_change(change, config=None) -> int:"
+        "      9: def run_quest(change, config=None) -> int:"
     )
 
 

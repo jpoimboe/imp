@@ -18,7 +18,7 @@ from pathlib import Path
 import pytest
 
 from imp.agents.runner import AgentInvocation, AgentRunner, Event
-from imp.engine.executor import RunResult, run_change
+from imp.engine.executor import RunResult, run_quest
 from imp.engine.quest import Quest
 from imp.engine.state import State
 
@@ -100,7 +100,7 @@ async def test_exhausted_step_emits_single_pause_completion(tmp_path: Path) -> N
         "    steps:\n"
         "      - {name: build, file: agents/worker.md, tier: low}\n"
     )
-    # run_change reads via load_effective_config: project marker + local layer.
+    # run_quest reads via load_effective_config: project marker + local layer.
     (tmp_path / "imp").mkdir(parents=True, exist_ok=True)
     (tmp_path / "imp" / "project.yaml").write_text("default-workflow: imp\n")
     (tmp_path / ".imp").mkdir(parents=True, exist_ok=True)
@@ -125,10 +125,10 @@ async def test_exhausted_step_emits_single_pause_completion(tmp_path: Path) -> N
 
     change = _make_change(tmp_path)
 
-    result = await run_change(change, on_event=lambda _e: None)
+    result = await run_quest(change, on_event=lambda _e: None)
     assert result is RunResult.PAUSED
 
-    # Read events back from the on-disk JsonlEventLog (run_change hard-codes it).
+    # Read events back from the on-disk JsonlEventLog (run_quest hard-codes it).
     events = list(change.event_log().read())
 
     completions = [

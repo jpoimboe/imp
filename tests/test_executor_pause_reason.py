@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 
 from imp.agents.runner import AgentInvocation, AgentRunner, Event
-from imp.engine.executor import RunResult, run_change
+from imp.engine.executor import RunResult, run_quest
 from imp.engine.quest import Quest
 from imp.engine.state import State
 from imp.engine.types import Continue, Goto, Pause
@@ -80,7 +80,7 @@ def test_emit_branch_for_non_pause_action_is_interrupt() -> None:
 #
 # Step-10 path chosen: HARNESS (not unit-stub). test_provider_error_e2e.py
 # already wires a fake provider that yields a classified `error` event and runs
-# it through run_change, so an end-to-end assertion on the emitted
+# it through run_quest, so an end-to-end assertion on the emitted
 # workflow_paused payload is both achievable and higher-fidelity than stubbing
 # _run_agent_invocation. The fixture yields category="auth"/kind="AuthError"
 # (a fatal Pause category) rather than the plan's illustrative "api"/"http_400";
@@ -102,7 +102,7 @@ def _seed_single_agent(root: Path) -> Quest:
         "    steps:\n"
         "      - {name: w, file: agents/writer.md, tier: low}\n"
     )
-    # run_change reads via load_effective_config: project marker + local layer.
+    # run_quest reads via load_effective_config: project marker + local layer.
     (root / "imp").mkdir(parents=True, exist_ok=True)
     (root / "imp" / "project.yaml").write_text("default-workflow: imp\n")
     (root / ".imp").mkdir(parents=True, exist_ok=True)
@@ -147,7 +147,7 @@ async def test_fatal_error_records_reason_and_kind_on_workflow_paused(
     )
 
     events: list[dict] = []
-    result = await run_change(change, on_event=events.append)
+    result = await run_quest(change, on_event=events.append)
 
     assert result is RunResult.PAUSED
     paused = [e for e in events if e["type"] == "workflow_paused"]
@@ -184,7 +184,7 @@ async def test_max_loops_pause_reason_unchanged(tmp_path: Path) -> None:
         "          - {if: {verdict: rework}, goto: reviewer}\n"
         "          - {else: true, continue: true}\n"
     )
-    # run_change reads via load_effective_config: project marker + local layer.
+    # run_quest reads via load_effective_config: project marker + local layer.
     (tmp_path / "imp").mkdir(parents=True, exist_ok=True)
     (tmp_path / "imp" / "project.yaml").write_text("default-workflow: imp\n")
     (tmp_path / ".imp").mkdir(parents=True, exist_ok=True)
@@ -216,7 +216,7 @@ async def test_max_loops_pause_reason_unchanged(tmp_path: Path) -> None:
     )
 
     events: list[dict] = []
-    result = await run_change(change, on_event=events.append)
+    result = await run_quest(change, on_event=events.append)
 
     assert result is RunResult.PAUSED
     paused = [e for e in events if e["type"] == "workflow_paused"]
@@ -258,7 +258,7 @@ async def test_ctrl_d_interrupt_records_interrupt_reason_on_workflow_paused(
     resolve.register_provider("fake", env_check=lambda: True, factory=lambda _m: _P())
 
     events: list[dict] = []
-    result = await run_change(change, on_event=events.append, coordinator=coord)
+    result = await run_quest(change, on_event=events.append, coordinator=coord)
     assert result is RunResult.PAUSED
     paused = [e for e in events if e["type"] == "workflow_paused"]
     assert len(paused) == 1
@@ -298,7 +298,7 @@ async def test_awaiting_user_park_records_awaiting_user_reason(
     )
 
     events: list[dict] = []
-    result = await run_change(change, on_event=events.append)
+    result = await run_quest(change, on_event=events.append)
 
     assert result is RunResult.PAUSED
     paused = [e for e in events if e["type"] == "workflow_paused"]

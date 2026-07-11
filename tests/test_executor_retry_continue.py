@@ -11,7 +11,7 @@ from typing import Any
 
 import pytest
 
-from imp.engine.executor import RunResult, run_change
+from imp.engine.executor import RunResult, run_quest
 from imp.engine.quest import Quest
 from imp.engine.state import State
 
@@ -128,7 +128,7 @@ async def test_backoff_persists_retry_continue_pending_before_sleep(
 
     monkeypatch.setattr("imp.engine.executor._interruptible_sleep", _capture_sleep)
 
-    result = await run_change(change)
+    result = await run_quest(change)
     assert result is RunResult.COMPLETED
     assert provider.drives == 2               # one stall + one success
     # The marker was set AND persisted to disk BEFORE the backoff sleep ran.
@@ -167,7 +167,7 @@ async def test_backoff_respawn_receives_resume_should_continue(
 
     monkeypatch.setattr("imp.engine.executor._interruptible_sleep", _no_sleep)
 
-    result = await run_change(change)
+    result = await run_quest(change)
     assert result is RunResult.COMPLETED
     # First drive: fresh state, marker False → resume_should_continue False.
     # Second drive (respawn after backoff): the union reads
@@ -251,7 +251,7 @@ async def test_completion_clears_retry_continue_pending(
 
     monkeypatch.setattr("imp.engine.executor._interruptible_sleep", _no_sleep)
 
-    result = await run_change(change)
+    result = await run_quest(change)
     assert result is RunResult.COMPLETED
     # The in-loop set left it True; the terminal Continue must clear it.
     assert State.load(change.state_dir).retry_continue_pending is False
@@ -278,7 +278,7 @@ async def test_forward_advance_clears_retry_continue_pending(
             coord._should_pause = True
             coord.pause_reason = "ctrl-c"
 
-    result = await run_change(change, on_event=_on_event, coordinator=coord)
+    result = await run_quest(change, on_event=_on_event, coordinator=coord)
     assert result is RunResult.PAUSED
     state = State.load(change.state_dir)
     assert state.step == "s2"                       # navigation applied first
@@ -306,7 +306,7 @@ async def test_resume_goto_clears_retry_continue_pending(
             coord._should_pause = True
             coord.pause_reason = "ctrl-c"
 
-    result = await run_change(change, on_event=_on_event, coordinator=coord)
+    result = await run_quest(change, on_event=_on_event, coordinator=coord)
     assert result is RunResult.PAUSED
     state = State.load(change.state_dir)
     assert state.step == "review"
@@ -356,7 +356,7 @@ async def test_retry_ceiling_pause_preserves_marker(
     monkeypatch.setattr("imp.engine.executor.budget_for", lambda _category: 0.0)
 
     events: list[dict] = []
-    result = await run_change(change, on_event=events.append)
+    result = await run_quest(change, on_event=events.append)
     assert result is RunResult.PAUSED
     paused = [e for e in events if e["type"] == "workflow_paused"]
     assert paused and paused[0]["payload"]["reason"] == "retry_ceiling"
@@ -377,7 +377,7 @@ async def test_fatal_pause_clears_marker(
 
     provider_registry("fake", env_check=lambda: True, factory=lambda _m: _FatalProvider())
 
-    result = await run_change(change)  # no coordinator interrupt
+    result = await run_quest(change)  # no coordinator interrupt
     assert result is RunResult.PAUSED
     state = State.load(change.state_dir)
     assert state.resume_pending == state.step        # fatal park keeps the transcript
@@ -416,7 +416,7 @@ async def test_ctrl_c_park_clears_marker_and_sets_interrupt_pending(
 
     provider_registry("fake", env_check=lambda: True, factory=lambda _m: _P())
 
-    result = await run_change(change, coordinator=coord)
+    result = await run_quest(change, coordinator=coord)
     assert result is RunResult.PAUSED
     state = State.load(change.state_dir)
     assert state.interrupt_pending is True            # Ctrl-C park sets the interrupt marker

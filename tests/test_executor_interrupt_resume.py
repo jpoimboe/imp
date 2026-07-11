@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from imp.agents.runner import AgentInvocation, AgentRunner, Event
-from imp.engine.executor import RunResult, run_change
+from imp.engine.executor import RunResult, run_quest
 from imp.engine.quest import Quest
 from imp.engine.state import State
 
@@ -69,7 +69,7 @@ def _seed_single_agent(root: Path) -> Quest:
         "    steps:\n"
         "      - {name: w, file: agents/writer.md, tier: low}\n"
     )
-    # run_change reads via load_effective_config: project marker + local layer.
+    # run_quest reads via load_effective_config: project marker + local layer.
     (root / "imp").mkdir(parents=True, exist_ok=True)
     (root / "imp" / "project.yaml").write_text("default-workflow: imp\n")
     (root / ".imp").mkdir(parents=True, exist_ok=True)
@@ -106,7 +106,7 @@ async def test_mid_turn_interrupt_sets_resume_pending(tmp_path: Path) -> None:
 
     resolve.register_provider("fake", env_check=lambda: True, factory=lambda _m: _P())
 
-    result = await run_change(change, coordinator=coord)
+    result = await run_quest(change, coordinator=coord)
     assert result is RunResult.PAUSED
     state = State.load(change.state_dir)
     assert state.status == "paused"
@@ -164,7 +164,7 @@ async def test_interrupt_after_step_completed_advances_then_pauses(tmp_path: Pat
             coord._should_pause = True
             coord.pause_reason = "ctrl-c"
 
-    result = await run_change(change, on_event=_on_event, coordinator=coord)
+    result = await run_quest(change, on_event=_on_event, coordinator=coord)
     assert result is RunResult.PAUSED
     state = State.load(change.state_dir)
     assert state.step == "s2"           # navigation applied first
@@ -238,7 +238,7 @@ async def test_interrupt_does_not_override_resume_goto_target(tmp_path: Path) ->
             coord._should_pause = True
             coord.pause_reason = "ctrl-c"
 
-    result = await run_change(change, on_event=_on_event, coordinator=coord)
+    result = await run_quest(change, on_event=_on_event, coordinator=coord)
     assert result is RunResult.PAUSED
     state = State.load(change.state_dir)
     assert state.step == "code"
@@ -266,7 +266,7 @@ async def test_genuine_fatal_no_interrupt_keeps_transcript_for_replay(tmp_path: 
             return _FatalRunner()
 
     resolve.register_provider("fake", env_check=lambda: True, factory=lambda _m: _P())
-    result = await run_change(change)  # no coordinator interrupt
+    result = await run_quest(change)  # no coordinator interrupt
     assert result is RunResult.PAUSED
     state = State.load(change.state_dir)
     # P1: a fatal agent-step pause keeps the current step's transcript so resume
@@ -310,7 +310,7 @@ async def test_completion_pending_finalizes_without_redispatch(tmp_path: Path) -
             coord._should_pause = True
             coord.pause_reason = "ctrl-c"
 
-    r1 = await run_change(change, on_event=_on_event, coordinator=coord)
+    r1 = await run_quest(change, on_event=_on_event, coordinator=coord)
     assert r1 is RunResult.PAUSED
     s1 = State.load(change.state_dir)
     assert s1.completion_pending is True
@@ -321,7 +321,7 @@ async def test_completion_pending_finalizes_without_redispatch(tmp_path: Path) -
     # with NO new agent turn.
     resolve.reset_providers_for_tests()
     resolve.register_provider("fake", env_check=lambda: True, factory=lambda _m: _P())
-    r2 = await run_change(change)
+    r2 = await run_quest(change)
     assert r2 is RunResult.COMPLETED
     assert runs["n"] == runs_after_round1  # no second agent turn ran
     assert State.load(change.state_dir).status == "completed"
@@ -352,7 +352,7 @@ async def test_mid_turn_interrupt_sets_interrupt_pending_true(tmp_path: Path) ->
 
     resolve.register_provider("fake", env_check=lambda: True, factory=lambda _m: _P())
 
-    result = await run_change(change, coordinator=coord)
+    result = await run_quest(change, coordinator=coord)
     assert result is RunResult.PAUSED
     state = State.load(change.state_dir)
     assert state.resume_pending == state.step
@@ -391,7 +391,7 @@ async def test_non_interrupt_pause_overwrites_stale_interrupt_pending(
             return _FatalRunner()
 
     resolve.register_provider("fake", env_check=lambda: True, factory=lambda _m: _P())
-    result = await run_change(change)  # no coordinator interrupt
+    result = await run_quest(change)  # no coordinator interrupt
     assert result is RunResult.PAUSED
     state = State.load(change.state_dir)
     assert state.resume_pending == state.step  # fatal park keeps the transcript
@@ -451,7 +451,7 @@ async def test_interrupt_after_complete_clears_interrupt_pending(tmp_path: Path)
             coord._should_pause = True
             coord.pause_reason = "ctrl-c"
 
-    result = await run_change(change, on_event=_on_event, coordinator=coord)
+    result = await run_quest(change, on_event=_on_event, coordinator=coord)
     assert result is RunResult.PAUSED
     state = State.load(change.state_dir)
     assert state.step == "s2"
@@ -518,7 +518,7 @@ async def test_interrupt_on_resume_goto_clears_interrupt_pending(tmp_path: Path)
             coord._should_pause = True
             coord.pause_reason = "ctrl-c"
 
-    result = await run_change(change, on_event=_on_event, coordinator=coord)
+    result = await run_quest(change, on_event=_on_event, coordinator=coord)
     assert result is RunResult.PAUSED
     state = State.load(change.state_dir)
     assert state.step == "review"

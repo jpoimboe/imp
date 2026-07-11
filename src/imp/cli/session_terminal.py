@@ -8,7 +8,7 @@ injected attach thunk), streams the daemon's events into a live event renderer
 gate by soliciting one reply and sending it back as an input frame. It returns
 when the daemon's run reaches a terminal state and drops the socket. The CLI flip
 (a later plan) builds the attach thunk, the LiveDriver, the InterruptCoordinator,
-and the solicit callback, and replaces the in-process run_change call in
+and the solicit callback, and replaces the in-process run_quest call in
 `imp new` / `imp resume` with this loop.
 """
 from __future__ import annotations

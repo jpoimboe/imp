@@ -47,7 +47,7 @@ async def _wait_for_socket(sock: str) -> None:
 
 
 @pytest.mark.anyio
-async def test_serves_on_per_change_socket_and_bridges_run_change_seams(
+async def test_serves_on_per_change_socket_and_bridges_run_quest_seams(
     tmp_path: Path,
 ) -> None:
     change = _make_change(tmp_path, "2026-06-15-abc")
@@ -1020,7 +1020,7 @@ async def test_resident_discard_applies_the_discard_disposition(tmp_path: Path) 
 
 
 @pytest.mark.anyio
-async def test_serve_forwards_non_interactive_to_run_change(tmp_path: Path) -> None:
+async def test_serve_forwards_non_interactive_to_run_quest(tmp_path: Path) -> None:
     change = _make_change(tmp_path, "2026-06-15-nint")
     captured: dict[str, Any] = {}
 

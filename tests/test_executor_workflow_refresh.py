@@ -1,6 +1,6 @@
-"""Workflow snapshot refresh on run_change entry (spec: Workflow snapshot
+"""Workflow snapshot refresh on run_quest entry (spec: Workflow snapshot
 refresh on resume). Covers the content-comparison + crash-safe refresh
-helpers and the run_change wiring / workflow_refreshed event."""
+helpers and the run_quest wiring / workflow_refreshed event."""
 from __future__ import annotations
 
 import os
@@ -14,7 +14,7 @@ from imp.engine.executor import (
     _reconcile_resolved_run,
     _refresh_workflow_snapshot,
     _trees_identical,
-    run_change,
+    run_quest,
 )
 from imp.engine.loader import load_workflow
 from imp.engine.state import State
@@ -92,7 +92,7 @@ def test_refresh_fresh_change_makes_initial_copy_no_flag(tmp_path: Path) -> None
     snapshot = change.quest_dir / "workflow"
     assert not snapshot.exists()
     # A fresh change's initial snapshot is NOT a "refresh": returns False so
-    # run_change emits no workflow_refreshed event.
+    # run_quest emits no workflow_refreshed event.
     assert _refresh_workflow_snapshot(change) is False
     assert (snapshot / "workflow.yaml").exists()
     assert (snapshot / "agents" / "writer.md").exists()
@@ -204,7 +204,7 @@ async def test_resume_refreshes_unloadable_snapshot(tmp_path: Path) -> None:
     (snapshot / "workflow.yaml").write_text("chrome: removed-syntax\n")
 
     events: list[dict] = []
-    result = await run_change(change, on_event=events.append)
+    result = await run_quest(change, on_event=events.append)
 
     assert result is RunResult.COMPLETED
     assert "chrome" not in (snapshot / "workflow.yaml").read_text()
@@ -218,8 +218,8 @@ async def test_unchanged_resume_emits_no_refresh_event(tmp_path: Path) -> None:
     change, _, _ = _seed_minimal_workflow(tmp_path)
     _register_fake({"status": "Success"})
     events: list[dict] = []
-    await run_change(change, on_event=events.append)   # fresh: initial copy
-    await run_change(change, on_event=events.append)   # unchanged: no-op
+    await run_quest(change, on_event=events.append)   # fresh: initial copy
+    await run_quest(change, on_event=events.append)   # unchanged: no-op
     assert not [e for e in events if e["type"] == "workflow_refreshed"]
 
 
@@ -235,7 +235,7 @@ async def test_refresh_dropping_cursor_step_pauses_unknown_step(tmp_path: Path) 
     wf_yaml = tmp_path / "imp" / "workflows" / "imp" / "workflow.yaml"
     wf_yaml.write_text(wf_yaml.read_text().replace("name: w,", "name: renamed,"))
 
-    result = await run_change(change, on_event=lambda _e: None)
+    result = await run_quest(change, on_event=lambda _e: None)
 
     assert result is RunResult.PAUSED
     events = list(change.event_log().read())
@@ -243,7 +243,7 @@ async def test_refresh_dropping_cursor_step_pauses_unknown_step(tmp_path: Path) 
     assert paused and paused[-1]["payload"]["reason"] == "unknown_step"
     assert paused[-1]["payload"]["step"] == "w"
     assert not any(e.get("type") == "change_merged" for e in events)
-    # run_change's own entry refresh swapped the "w" snapshot to the new live
+    # run_quest's own entry refresh swapped the "w" snapshot to the new live
     # version, which is what drops the cursor step.
     assert "name: renamed" in (
         change.quest_dir / "workflow" / "workflow.yaml").read_text()
@@ -256,20 +256,20 @@ async def test_self_edit_picked_up_on_reentry(tmp_path: Path) -> None:
     not resumed from a pause), with one workflow_refreshed event."""
     change, _, _ = _seed_minimal_workflow(tmp_path)
     _register_fake({"status": "Success"})
-    await run_change(change, on_event=lambda _e: None)   # snapshot v1
+    await run_quest(change, on_event=lambda _e: None)   # snapshot v1
 
     writer = tmp_path / "imp" / "workflows" / "imp" / "agents" / "writer.md"
     writer.write_text(writer.read_text() + "\nedited-by-self\n")
 
     events: list[dict] = []
-    await run_change(change, on_event=events.append)      # re-entry re-snapshots
+    await run_quest(change, on_event=events.append)      # re-entry re-snapshots
     snap_writer = change.quest_dir / "workflow" / "agents" / "writer.md"
     assert "edited-by-self" in snap_writer.read_text()
     assert sum(1 for e in events if e["type"] == "workflow_refreshed") == 1
 
 
 def _load_workflow_and_config(change):
-    """Load the refreshed snapshot workflow + config the way run_change does."""
+    """Load the refreshed snapshot workflow + config the way run_quest does."""
     config = load_effective_config(
         project_root=change.project_root, control_root=change.control_root,
     ).config
@@ -283,7 +283,7 @@ async def test_reconcile_adds_missing_tier_keeps_pinned(tmp_path: Path) -> None:
     an already-present (pinned) tier is left exactly as it was."""
     change, _, _ = _seed_minimal_workflow(tmp_path)
     _register_fake({"status": "Success"})
-    await run_change(change, on_event=lambda _e: None)   # persists {low,medium,high}
+    await run_quest(change, on_event=lambda _e: None)   # persists {low,medium,high}
     workflow, config = _load_workflow_and_config(change)
 
     state = State.load(change.state_dir)
@@ -302,7 +302,7 @@ async def test_reconcile_no_missing_returns_false_no_overwrite(tmp_path: Path) -
     give model 'm'; the pin must survive)."""
     change, _, _ = _seed_minimal_workflow(tmp_path)
     _register_fake({"status": "Success"})
-    await run_change(change, on_event=lambda _e: None)
+    await run_quest(change, on_event=lambda _e: None)
     workflow, config = _load_workflow_and_config(change)
 
     state = State.load(change.state_dir)
@@ -318,7 +318,7 @@ async def test_reconcile_adds_missing_step_override(tmp_path: Path) -> None:
     the persisted resolved_steps is filled in."""
     change, _, _ = _seed_minimal_workflow(tmp_path)
     _register_fake({"status": "Success"})
-    await run_change(change, on_event=lambda _e: None)   # resolved_steps == {}
+    await run_quest(change, on_event=lambda _e: None)   # resolved_steps == {}
 
     # Add a differ_from step to the live workflow, then refresh the snapshot.
     wf = tmp_path / "imp" / "workflows" / "imp" / "workflow.yaml"
@@ -348,7 +348,7 @@ async def test_resume_reconciles_new_step_override_keeps_pinned(tmp_path: Path) 
     tier-merge half is unit-tested instead."""
     change, _, _ = _seed_minimal_workflow(tmp_path)
     _register_fake({"status": "Success"})
-    await run_change(change, on_event=lambda _e: None)   # resolves {low,medium,high}
+    await run_quest(change, on_event=lambda _e: None)   # resolves {low,medium,high}
 
     # Pin low to a sentinel so we can prove reconcile never overwrites it.
     state = State.load(change.state_dir)
@@ -367,7 +367,7 @@ async def test_resume_reconciles_new_step_override_keeps_pinned(tmp_path: Path) 
         "      - {name: w2, file: agents/writer.md, tier: high, differ_from: w}\n"
     )
 
-    await run_change(change, on_event=lambda _e: None)   # resume: refresh + reconcile
+    await run_quest(change, on_event=lambda _e: None)   # resume: refresh + reconcile
 
     state = State.load(change.state_dir)
     assert "w2" in state.resolved_steps                        # new step override merged
@@ -403,7 +403,7 @@ async def test_var_added_after_creation_backfilled_no_render_crash(tmp_path: Pat
     _register_fake({"status": "Success"})
 
     events: list[dict] = []
-    result = await run_change(change, on_event=events.append)
+    result = await run_quest(change, on_event=events.append)
 
     assert result is RunResult.COMPLETED
     assert State.load(change.state_dir).vars["auto_merge"] is True
@@ -418,13 +418,13 @@ async def test_unchanged_workflow_resume_skips_reconcile(tmp_path: Path) -> None
     is NOT silently re-added (no churn on the common resume path)."""
     change, _, _ = _seed_minimal_workflow(tmp_path)
     _register_fake({"status": "Success"})
-    await run_change(change, on_event=lambda _e: None)
+    await run_quest(change, on_event=lambda _e: None)
 
     state = State.load(change.state_dir)
     del state.resolved_tiers["high"]
     state.save(change.state_dir)
 
-    await run_change(change, on_event=lambda _e: None)   # workflow byte-identical
+    await run_quest(change, on_event=lambda _e: None)   # workflow byte-identical
     state = State.load(change.state_dir)
     assert "high" not in state.resolved_tiers
 

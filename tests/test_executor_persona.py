@@ -6,7 +6,7 @@ import pytest
 
 from imp.agents.reflow import reflow_markdown
 from imp.engine.agent_run import _CORE_HEAD, _CORE_TAIL
-from imp.engine.executor import RunResult, run_change
+from imp.engine.executor import RunResult, run_quest
 from tests.test_executor import _make_change, _register_invocation_capturing
 
 
@@ -48,7 +48,7 @@ async def test_executor_injects_rendered_persona_into_assembled_prompt(tmp_path:
     sink: list = []
     _register_invocation_capturing({"status": "Success"}, sink)
 
-    result = await run_change(change, on_event=lambda _e: None)
+    result = await run_quest(change, on_event=lambda _e: None)
     assert result is RunResult.COMPLETED
 
     inv = sink[0]
@@ -67,7 +67,7 @@ async def test_executor_personaless_workflow_assembles_without_persona(tmp_path:
     sink: list = []
     _register_invocation_capturing({"status": "Success"}, sink)
 
-    result = await run_change(change, on_event=lambda _e: None)
+    result = await run_quest(change, on_event=lambda _e: None)
     assert result is RunResult.COMPLETED
 
     inv = sink[0]

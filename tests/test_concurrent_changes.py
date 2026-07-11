@@ -8,7 +8,7 @@ from pathlib import Path
 import anyio
 import pytest
 
-from imp.engine.executor import RunResult, _complete, run_change
+from imp.engine.executor import RunResult, _complete, run_quest
 from imp.engine.quest import Quest
 from imp.engine.state import JsonlEventLog, State
 from tests.conftest import _git, _seed_control
@@ -85,7 +85,7 @@ def test_per_change_lock_is_exclusive_but_cross_change_is_not(tmp_path: Path) ->
 
 
 def test_full_run_to_merge_spine(tmp_path: Path, provider_registry: object) -> None:
-    """Full run_change path: workflow completes, the engine-native merge-to-base
+    """Full run_quest path: workflow completes, the engine-native merge-to-base
     step merges into base, _complete journals artifacts, removes worktree, keeps
     branch (B3 cutover: the merge moved out of _complete into the merge step)."""
     from tests.test_executor_rename import _FakeProvider, _seed_two_step_control
@@ -111,7 +111,7 @@ def test_full_run_to_merge_spine(tmp_path: Path, provider_registry: object) -> N
     _git(ch.project_root, "commit", "-qm", "work")
 
     cwd_before = os.getcwd()
-    result = anyio.run(run_change, ch)
+    result = anyio.run(run_quest, ch)
     assert result is RunResult.COMPLETED
     assert (tmp_path / "out.txt").read_text() == "done"          # merged into live base
     assert not (tmp_path / ".imp" / "worktrees" / "spine").exists()  # worktree removed

@@ -4,7 +4,7 @@ import anyio
 
 import imp.remote.session.attach as attach_mod
 from imp.engine import merge_queue as mq
-from imp.engine.executor import RunResult, _evict_if_holding, run_change
+from imp.engine.executor import RunResult, _evict_if_holding, run_quest
 from imp.engine.quest import Quest
 from imp.engine.state import JsonlEventLog, State
 from tests.conftest import _git, _seed_control
@@ -73,7 +73,7 @@ def test_pause_in_held_region_evicts_and_rewinds(tmp_path: Path, provider_regist
     _seed_control(tmp_path)
     _write_serialize_workflow(tmp_path, "false")   # touch-base fails -> pause
     ch = Quest.create(tmp_path, title="x", quest_id="feat", base_branch="main")
-    result = anyio.run(run_change, ch)
+    result = anyio.run(run_quest, ch)
     assert result is RunResult.PAUSED
     reloaded = State.load(ch.state_dir)
     assert reloaded.step == "lane"                 # resume cursor rewound to acquire
@@ -96,7 +96,7 @@ def test_crash_resume_with_held_mark_evicts_at_entry(tmp_path: Path, provider_re
     state.status = "running"
     state.save(ch.state_dir)
 
-    anyio.run(run_change, ch)
+    anyio.run(run_quest, ch)
     types_seen = [e.get("type") for e in JsonlEventLog(ch.events_path).read()]
     assert "lane_evicted" in types_seen            # entry eviction fired on resume
     # After eviction the change re-acquires, runs touch-base, and completes with

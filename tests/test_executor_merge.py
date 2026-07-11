@@ -4,7 +4,7 @@
 # `merge-to-base` step (_route_merge_and_exit_worktree). These tests drive
 # _route_merge_and_exit_worktree to perform the merge (stashing State.merge_commit)
 # and then _complete to finalize (journal + remove worktree + mark completed),
-# mirroring the run_change flow.
+# mirroring the run_quest flow.
 from pathlib import Path
 
 import anyio

@@ -425,7 +425,7 @@ class InterruptCoordinator:
 
     def reset(self) -> None:
         """Clear interrupt state between session-loop rounds (§1). Runs right
-        after run_change returns, before the prompt. Does NOT clear queued
+        after run_quest returns, before the prompt. Does NOT clear queued
         interjects."""
         self._should_pause = False
         self._interrupted = False
@@ -606,7 +606,7 @@ class InterruptCoordinator:
         self._emit("interrupt_escalated", {"reason": "no_yield", "killed": killed})
 
     def note_yield(self) -> None:
-        """The run yielded (steer solicit posted, or run_change returned). Disarms
+        """The run yielded (steer solicit posted, or run_quest returned). Disarms
         the yield watchdog for the current round; no-op with no interrupt in flight."""
         evt = self._yielded
         if evt is not None:

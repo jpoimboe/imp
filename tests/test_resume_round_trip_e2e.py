@@ -10,7 +10,7 @@ from imp.agents.runner import AgentInvocation, AgentRunner, Event, Message, Text
 from imp.agents.transcript import Transcript
 from imp.engine.abandon import archive_conversation
 from imp.engine.archive.read import rehydrate_quest
-from imp.engine.executor import RunResult, run_change
+from imp.engine.executor import RunResult, run_quest
 from imp.engine.quest import Quest
 from imp.engine.state import State
 from tests.conftest import _seed_control
@@ -75,7 +75,7 @@ async def test_paused_conversation_round_trips_and_replays_on_resume(
 
     provider_registry("anthropic", env_check=lambda: True, factory=lambda _m: _P())
 
-    result = await run_change(change)
+    result = await run_quest(change)
 
     assert result is RunResult.COMPLETED
     assert seen_initial_empty == [True]

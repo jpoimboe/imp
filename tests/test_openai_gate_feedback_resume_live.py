@@ -27,7 +27,7 @@ from typing import Any
 
 import pytest
 
-from imp.engine.executor import RunResult, run_change
+from imp.engine.executor import RunResult, run_quest
 from imp.engine.quest import Quest
 from tests._live import opted_in
 from tests.conftest import _git
@@ -161,7 +161,7 @@ async def test_gate_feedback_reaches_model_on_openai_resume(
     # The gate never passes, so the run pauses at max_loops. Reaching PAUSED (not
     # an exception) already proves the live API accepted every request, including
     # the co-riding resume turn.
-    result = await run_change(change)
+    result = await run_quest(change)
     assert result is RunResult.PAUSED, f"expected PAUSED, got {result}"
 
     # A resume must actually have happened (>=2 LLM calls: w attempt1 + attempt2).

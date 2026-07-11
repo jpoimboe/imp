@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 
 from imp.agents.runner import AgentInvocation, AgentRunner, Event
-from imp.engine.executor import RunResult, run_change
+from imp.engine.executor import RunResult, run_quest
 from imp.engine.quest import Quest
 from imp.engine.state import State
 from imp.engine.types import Goto
@@ -77,11 +77,11 @@ def test_plain_goto_does_not_reset_attempt() -> None:
     assert state.step_attempt == 3
 
 
-# ── integration: drive the real run_change resume branch ─────────────────────
+# ── integration: drive the real run_quest resume branch ─────────────────────
 #
 # Step-5 path chosen: HARNESS. The branch-loop workflow below (mirrors
 # test_executor.py::_seed_branch_loop_workflow) exercises a genuine `resume:`
-# edge through run_change with a registered fake provider — far higher fidelity
+# edge through run_quest with a registered fake provider — far higher fidelity
 # than reimplementing the Goto-branch logic (which the scaffold tests above
 # already cover structurally).
 
@@ -138,7 +138,7 @@ def _seed_resume_loop_workflow(root: Path) -> Quest:
         "  - name: done\n"
         "    steps: []\n"
     )
-    # run_change reads via load_effective_config: project marker + local layer.
+    # run_quest reads via load_effective_config: project marker + local layer.
     (root / "imp").mkdir(parents=True, exist_ok=True)
     (root / "imp" / "project.yaml").write_text("default-workflow: imp\n")
     (root / ".imp").mkdir(parents=True, exist_ok=True)
@@ -150,7 +150,7 @@ def _seed_resume_loop_workflow(root: Path) -> Quest:
 
 @pytest.mark.anyio
 async def test_resume_edge_zeroes_step_attempt(tmp_path: Path) -> None:
-    """REAL coverage of Step-5 test (1): a `resume:` edge drives run_change
+    """REAL coverage of Step-5 test (1): a `resume:` edge drives run_quest
     back into a step and the resumed invocation starts from a zeroed
     step_attempt.
 
@@ -187,7 +187,7 @@ async def test_resume_edge_zeroes_step_attempt(tmp_path: Path) -> None:
 
     _register_fake_provider(lambda inv: _Runner(inv))
 
-    result = await run_change(change, on_event=lambda _e: None)
+    result = await run_quest(change, on_event=lambda _e: None)
     assert result is RunResult.COMPLETED
 
     # Exactly one writer invocation — the resumed one. It must observe a zeroed
@@ -244,7 +244,7 @@ async def test_resumed_step_persistent_error_still_terminates(
         "          - {if: 'resumed', continue: true}\n"
         "          - {else: true, resume: checker, set: {resumed: true}}\n"
     )
-    # run_change reads via load_effective_config: project marker + local layer.
+    # run_quest reads via load_effective_config: project marker + local layer.
     (tmp_path / "imp").mkdir(parents=True, exist_ok=True)
     (tmp_path / "imp" / "project.yaml").write_text("default-workflow: imp\n")
     (tmp_path / ".imp").mkdir(parents=True, exist_ok=True)
@@ -278,7 +278,7 @@ async def test_resumed_step_persistent_error_still_terminates(
 
     _register_fake_provider(lambda inv: _Runner(inv))
 
-    result = await run_change(change, on_event=lambda _e: None)
+    result = await run_quest(change, on_event=lambda _e: None)
     assert result is RunResult.PAUSED
 
     # checker runs: first natural visit exhausts (max_retries+1 == 4), then it

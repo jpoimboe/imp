@@ -1245,7 +1245,7 @@ async def _resume_inert(
 
 def _editing_mode(control_root: Path) -> str:
     """Read editing_mode from the merged config; default to emacs if config is
-    absent or invalid (run_change reports a bad config with full context — don't
+    absent or invalid (run_quest reports a bad config with full context — don't
     double-fail here just to pick a prompt mode)."""
     from imp.providers.effective import load_effective_config
     try:

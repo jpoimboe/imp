@@ -16,7 +16,7 @@ from pathlib import Path
 import anyio
 import pytest
 
-from imp.engine.executor import RunResult, run_change
+from imp.engine.executor import RunResult, run_quest
 from imp.engine.quest import Quest
 from tests.conftest import _git, _init_repo, write_agent_md
 
@@ -108,7 +108,7 @@ def test_scripted_parent_dispatches_scripted_subagent(
                        quest_id="2026-07-03-aaa111", base_branch="main")
 
     events: list[dict] = []
-    result = anyio.run(functools.partial(run_change, ch, on_event=events.append))
+    result = anyio.run(functools.partial(run_quest, ch, on_event=events.append))
     assert result is RunResult.COMPLETED
 
     # The coder (child) really ran: its commit is on the change worktree.

@@ -1,4 +1,4 @@
-"""run_change emits a display-only opening_intent event once on a fresh run,
+"""run_quest emits a display-only opening_intent event once on a fresh run,
 right after tiers_resolved; never on a resume, never when seed_opening is empty."""
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from imp.engine.executor import RunResult, run_change
+from imp.engine.executor import RunResult, run_quest
 from imp.engine.state import JsonlEventLog, State
 from imp.providers.config import ProviderModel
 from tests.test_executor import (
@@ -106,7 +106,7 @@ async def test_seeded_first_run_interpolates_opening_from_durable_field(
     sink: list = []
     _register_invocation_capturing({"status": "Success"}, sink)
 
-    result = await run_change(change)
+    result = await run_quest(change)
     assert result is RunResult.COMPLETED
     assert "INTENT: add a --json flag" in _task_text(sink[0])
 
@@ -126,7 +126,7 @@ async def test_restart_resume_reinterpolates_opening_from_durable_field(
     sink: list = []
     _register_invocation_capturing({"status": "Success"}, sink)
 
-    result = await run_change(change)
+    result = await run_quest(change)
     assert result is RunResult.COMPLETED
     assert "INTENT: add a --json flag" in _task_text(sink[0])
 
@@ -137,7 +137,7 @@ async def test_unseeded_run_renders_no_opening(tmp_path: Path) -> None:
     sink: list = []
     _register_invocation_capturing({"status": "Success"}, sink)
 
-    result = await run_change(change)
+    result = await run_quest(change)
     assert result is RunResult.COMPLETED
     assert "INTENT:" not in _task_text(sink[0])
 
@@ -154,7 +154,7 @@ async def test_opening_not_delivered_to_downstream_step(tmp_path: Path) -> None:
     sink: list = []
     _register_invocation_capturing({"status": "Success"}, sink)
 
-    result = await run_change(change)
+    result = await run_quest(change)
     assert result is RunResult.COMPLETED
     assert "INTENT:" not in _task_text(sink[0])  # step "b" got no seed
 
@@ -164,7 +164,7 @@ async def test_opening_intent_emitted_from_seed_opening(tmp_path: Path) -> None:
     change = _seed(tmp_path)
     change.seed_opening = "add a --json flag"
     _register_prompt_capturing({"status": "Success"}, [])
-    result = await run_change(change)
+    result = await run_quest(change)
     assert result is RunResult.COMPLETED
 
     types = [e["type"] for e in JsonlEventLog(change.events_path).read()]
@@ -179,7 +179,7 @@ async def test_opening_intent_emitted_from_seed_opening(tmp_path: Path) -> None:
 async def test_no_opening_intent_when_seed_opening_absent_or_empty(tmp_path: Path) -> None:
     change = _seed(tmp_path)                    # change.seed_opening is None
     _register_prompt_capturing({"status": "Success"}, [])
-    await run_change(change)
+    await run_quest(change)
     types = [e["type"] for e in JsonlEventLog(change.events_path).read()]
     assert "opening_intent" not in types
 
@@ -187,7 +187,7 @@ async def test_no_opening_intent_when_seed_opening_absent_or_empty(tmp_path: Pat
     change2 = _seed(tmp_path / "other")
     change2.seed_opening = ""                   # empty string is suppressed (falsy)
     _register_prompt_capturing({"status": "Success"}, [])
-    await run_change(change2)
+    await run_quest(change2)
     types2 = [e["type"] for e in JsonlEventLog(change2.events_path).read()]
     assert "opening_intent" not in types2
 
@@ -205,7 +205,7 @@ async def test_opening_model_seeds_first_agent_step(tmp_path: Path) -> None:
         "anthropic", env_check=lambda: True,
         factory=lambda model: _CapturingProvider({"status": "Success"}, [], model=model))
     try:
-        result = await run_change(
+        result = await run_quest(
             change, opening_model="anthropic:claude-fable-5")
         assert result is RunResult.COMPLETED
 

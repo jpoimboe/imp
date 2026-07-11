@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from imp.agents.runner import AgentInvocation, AgentRunner, Event
-from imp.engine.executor import RunResult, run_change
+from imp.engine.executor import RunResult, run_quest
 from imp.engine.quest import Quest
 from imp.engine.state import State
 
@@ -92,7 +92,7 @@ def _seed_workflow_with_max_retries_3(root: Path) -> Quest:
         "  medium: {fake: m}\n"
         "  high: {fake: m}\n"
     )
-    # run_change reads via load_effective_config: project marker + local layer.
+    # run_quest reads via load_effective_config: project marker + local layer.
     (root / "imp").mkdir(parents=True, exist_ok=True)
     (root / "imp" / "project.yaml").write_text("default-workflow: imp\n")
     (root / ".imp").mkdir(parents=True, exist_ok=True)
@@ -126,7 +126,7 @@ async def test_fatal_failure_pauses_immediately_with_diagnostic(
     )
 
     events: list[dict] = []
-    result = await run_change(change, on_event=events.append)
+    result = await run_quest(change, on_event=events.append)
 
     assert result is RunResult.PAUSED
 

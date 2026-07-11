@@ -132,9 +132,9 @@ def _isolate_user_config(
 def _sandbox_fallback_without_bwrap(
     request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Keep run_change-based tests green with OR without bwrap.
+    """Keep run_quest-based tests green with OR without bwrap.
 
-    run_change builds a sandbox policy whose default posture (enabled, NOT
+    run_quest builds a sandbox policy whose default posture (enabled, NOT
     allow_unsandboxed) HARD-FAILS with SandboxUnavailable when bwrap is absent.
     On a host WITH bwrap this fixture is a NO-OP, so those tests exercise the real
     sandbox. On a host WITHOUT bwrap it forces the executor's policy build to

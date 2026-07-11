@@ -14,7 +14,7 @@ import pytest
 
 from imp.agents.runner import AgentInvocation, AgentRunner, Event, Message, TextBlock
 from imp.agents.transcript import Transcript
-from imp.engine.executor import run_change
+from imp.engine.executor import run_quest
 from imp.engine.quest import Quest
 from imp.engine.state import State
 
@@ -133,7 +133,7 @@ async def test_armed_resume_keeps_transcript_native_and_no_seed(
     observed: dict = {}
     _register_observing_provider(provider_registry, tdir, observed)
 
-    await run_change(change)
+    await run_quest(change)
 
     # keep=True: the prior transcript survived into the run (not wiped)...
     assert observed["transcript_nonempty_at_run"] is True
@@ -162,7 +162,7 @@ async def test_fresh_run_delivers_seed_once(
     observed: dict = {}
     _register_observing_provider(provider_registry, tdir, observed)
 
-    await run_change(change)
+    await run_quest(change)
 
     assert observed["seed_in_initial"] is True
     assert observed["seed_count"] == 1
@@ -179,7 +179,7 @@ async def test_armed_but_empty_transcript_starts_fresh(
     observed: dict = {}
     _register_observing_provider(provider_registry, tdir, observed)
 
-    await run_change(change)
+    await run_quest(change)
 
     assert observed["seed_in_initial"] is True
     assert observed["transcript_nonempty_at_run"] is False

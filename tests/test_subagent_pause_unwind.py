@@ -10,7 +10,7 @@ import pytest
 
 from imp.agents.runner import AgentInvocation, AgentRunner, Event
 from imp.agents.subagents import SubagentSuspended
-from imp.engine.executor import RunResult, run_change
+from imp.engine.executor import RunResult, run_quest
 from imp.engine.quest import Quest
 from imp.engine.state import State
 
@@ -134,7 +134,7 @@ def _seed_single_step(root: Path) -> Quest:
         "phases:\n  - name: only\n    steps:\n"
         "      - {name: w, file: agents/writer.md, tier: low}\n")
     _cfg = "providers: [fake]\ntiers:\n  low: {fake: m}\n  medium: {fake: m}\n  high: {fake: m}\n"
-    # run_change reads via load_effective_config: project marker + local layer.
+    # run_quest reads via load_effective_config: project marker + local layer.
     (root / "imp").mkdir(parents=True, exist_ok=True)
     (root / "imp" / "project.yaml").write_text("default-workflow: imp\n")
     (root / ".imp").mkdir(parents=True, exist_ok=True)
@@ -190,11 +190,11 @@ async def test_subagent_pause_unwinds_then_resume_restarts(tmp_path: Path) -> No
                               factory=lambda _m: _Provider())
 
     change = _seed_single_step(tmp_path)
-    r1 = await run_change(change)
+    r1 = await run_quest(change)
     assert r1 is RunResult.PAUSED
     st = State.load(change.state_dir)
     assert st.status == "paused"
     assert st.step == "w"  # cursor unchanged -> resume restarts the step
 
-    r2 = await run_change(change)
+    r2 = await run_quest(change)
     assert r2 is RunResult.COMPLETED

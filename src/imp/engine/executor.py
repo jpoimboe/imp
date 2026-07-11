@@ -197,7 +197,7 @@ def _trees_identical(a: Path, b: Path) -> bool:
 
 
 def _refresh_workflow_snapshot(change: Quest) -> bool:
-    """Re-snapshot the live workflow into quest_dir/workflow at a run_change
+    """Re-snapshot the live workflow into quest_dir/workflow at a run_quest
     entry. Returns True only when an EXISTING snapshot's content was replaced
     (a fresh change's initial copy returns False); best-effort and crash-safe."""
     quest_dir = change.quest_dir
@@ -277,7 +277,7 @@ def _backfill_var_defaults(state: State, decls: Vars) -> list[str]:
     return sorted(added)
 
 
-async def run_change(
+async def run_quest(
     change: Quest,
     *,
     on_event: EventCallback | None = None,
@@ -299,7 +299,7 @@ async def run_change(
     prev_cwd = os.getcwd()
     os.chdir(change.control_root)  # spec §5.3: engine cwd = control root, so a
     # resume launched from inside a worktree never blocks `git worktree move`.
-    # NOTE: os.chdir is process-global — this hard-assumes one run_change per
+    # NOTE: os.chdir is process-global — this hard-assumes one run_quest per
     # process (the foreground CLI model). Do not parallelize runs in-process
     # without revisiting (all git calls already pass explicit control_root).
     try:
@@ -309,7 +309,7 @@ async def run_change(
         ).config
         state = State.load(change.state_dir)
         change.relink_home()
-        # Transient: re-set on EVERY run_change entry (fresh + resume) so the
+        # Transient: re-set on EVERY run_quest entry (fresh + resume) so the
         # Tier A handoff watch always sees the configured threshold without
         # persisting it (the resolved_tiers block below is skipped on resume).
         state.checkpoint_threshold = config.context_checkpoint_threshold()
@@ -337,7 +337,7 @@ async def run_change(
         policy_root = change.project_root
 
         # Resolve tiers once per run and persist, so resume never re-snapshots the
-        # environment (design "When it runs"). run_change re-executes on every
+        # environment (design "When it runs"). run_quest re-executes on every
         # resume, so guard on the persisted map.
         did_fresh_resolve = state.resolved_tiers is None
         if did_fresh_resolve:
@@ -424,7 +424,7 @@ async def run_change(
                 sandbox_policy = _build_sandbox_policy(change, config, log)
                 policy_root = change.project_root
             # var_mutations was ALREADY applied to state.vars and logged inside the
-            # _route_* body — run_change receives it for visibility only and must NOT
+            # _route_* body — run_quest receives it for visibility only and must NOT
             # re-apply it (double-apply trap). The third element is otherwise unused.
             # A step is about to begin executing: record the durable run fact the
             # first time any step dispatches, so resume can distinguish a
@@ -980,7 +980,7 @@ def _decisions_body(spec_path: Path) -> str | None:
 
 
 async def _headless_wait_for_turn(predicate: Callable[[], bool]) -> None:
-    """Default wait_for_turn used when run_change runs without a session server
+    """Default wait_for_turn used when run_quest runs without a session server
     (tests, or a non-daemon caller): proceed iff already head, else hibernate."""
     from imp.engine.awaiting_user_input import AwaitingUserInput
     if predicate():
@@ -1500,7 +1500,7 @@ async def _run_agent_invocation(
     sleep loop lives in _route_agent (it owns agent_retry events + transcript
     re-entry). See drive_invocation for the field semantics of the result.
     """
-    assert state.resolved_tiers is not None  # set by run_change before dispatch
+    assert state.resolved_tiers is not None  # set by run_quest before dispatch
     # Per-step override if differ_from was used, else the tier default
     resolved_steps = state.resolved_steps or {}
     if step_name in resolved_steps:

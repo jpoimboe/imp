@@ -1,4 +1,4 @@
-"""run_change's last-resort guard: an engine exception during dispatch is caught, logged,
+"""run_quest's last-resort guard: an engine exception during dispatch is caught, logged,
 and left resumable (PAUSED); a cancellation still propagates uncaught."""
 
 from __future__ import annotations
@@ -12,7 +12,7 @@ from typing import Any
 import anyio
 import pytest
 
-from imp.engine.executor import RunResult, run_change
+from imp.engine.executor import RunResult, run_quest
 from imp.engine.quest import Quest
 from imp.engine.state import State
 
@@ -91,7 +91,7 @@ async def test_internal_error_pauses_and_logs_instead_of_dying(
     monkeypatch.setattr("imp.engine.executor._dispatch_step", _boom)
 
     events: list[dict] = []
-    result = await run_change(change, on_event=events.append)
+    result = await run_quest(change, on_event=events.append)
 
     assert result is RunResult.PAUSED
 
@@ -129,7 +129,7 @@ async def test_cancellation_propagates_uncaught(
 
     events: list[dict] = []
     with pytest.raises(cancelled_cls):
-        await run_change(change, on_event=events.append)
+        await run_quest(change, on_event=events.append)
 
     # The guard must NOT convert a cancellation into a pause.
     assert not any(
@@ -154,7 +154,7 @@ async def test_internal_error_surfaces_subprocess_stderr(
     monkeypatch.setattr("imp.engine.executor._dispatch_step", _boom)
 
     events: list[dict] = []
-    result = await run_change(change, on_event=events.append)
+    result = await run_quest(change, on_event=events.append)
 
     assert result is RunResult.PAUSED
 

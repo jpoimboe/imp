@@ -71,7 +71,7 @@ def test_new_non_interactive_routes_through_session_client(
 def test_new_interactive_routes_through_session_client(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Interactive imp new routes through run_session_client, not run_change."""
+    """Interactive imp new routes through run_session_client, not run_quest."""
     _seed_control(tmp_path)
     monkeypatch.chdir(tmp_path)
 

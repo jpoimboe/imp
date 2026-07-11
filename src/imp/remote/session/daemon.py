@@ -1,4 +1,4 @@
-"""Per-change session-daemon: bind run_change behind a SessionServer."""
+"""Per-change session-daemon: bind run_quest behind a SessionServer."""
 from __future__ import annotations
 
 import argparse
@@ -17,7 +17,7 @@ from imp.engine.abandon import (
     tear_down_change,
 )
 from imp.engine.errors import LoadError, LoadErrors
-from imp.engine.executor import RunResult, run_change
+from imp.engine.executor import RunResult, run_quest
 from imp.engine.merge_queue import ensure_head_driven
 from imp.engine.model_override import apply_model_override
 from imp.engine.quest import Quest
@@ -69,7 +69,7 @@ def _hold_prompt(result: Any, coordinator: Any) -> str | None:
 async def serve_change_session(
     change: Quest,
     *,
-    run_fn: RunFn = run_change,
+    run_fn: RunFn = run_quest,
     hibernate: bool = True,
     tear_down: Callable[[Quest], None] = tear_down_change,
     archive_left: Callable[[Quest], None] = archive_conversation,
@@ -81,7 +81,7 @@ async def serve_change_session(
     first_attach_timeout: float = _DEFAULT_FIRST_ATTACH_TIMEOUT,
     model: str | None = None,
 ) -> Any:
-    # Shared coordinator: socket `interrupt` control frame → run_change's pause check.
+    # Shared coordinator: socket `interrupt` control frame → run_quest's pause check.
     from imp.cli.signals import InterruptCoordinator
 
     coordinator = InterruptCoordinator()
@@ -146,7 +146,7 @@ async def serve_change_session(
                 wait_for_turn_fn=server.wait_for_turn,
                 **run_kwargs,
             )
-            coordinator.note_yield()  # run_change returned -> the run has yielded
+            coordinator.note_yield()  # run_quest returned -> the run has yielded
             prompt = _hold_prompt(result, coordinator)
         while prompt is not None or _is_model_override_pause(result, coordinator):
             if _is_model_override_pause(result, coordinator):
@@ -191,7 +191,7 @@ async def serve_change_session(
                 wait_for_turn_fn=server.wait_for_turn,
                 **run_kwargs,
             )
-            coordinator.note_yield()  # run_change returned -> the run has yielded
+            coordinator.note_yield()  # run_quest returned -> the run has yielded
             prompt = _hold_prompt(result, coordinator)
         return result
 
