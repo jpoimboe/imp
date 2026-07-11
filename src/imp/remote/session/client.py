@@ -13,6 +13,7 @@ from imp.remote.session.protocol import (
     encode_control,
     encode_input,
     encode_set_lease,
+    encode_skill_request,
     parse_event,
 )
 
@@ -63,6 +64,12 @@ class SessionClient:
             if self._stream is None:
                 raise RuntimeError("call connect() before send_input()")
             await self._stream.send((encode_input(text) + "\n").encode("utf-8"))
+
+    async def send_skill_request(self, name: str, args: str) -> None:
+        async with self._send_lock:
+            if self._stream is None:
+                raise RuntimeError("call connect() before send_skill_request()")
+            await self._stream.send((encode_skill_request(name, args) + "\n").encode("utf-8"))
 
     async def send_control(self, action: str, reason: str | None = None) -> None:
         async with self._send_lock:

@@ -6,7 +6,7 @@ import anyio
 import pytest
 
 from imp.remote.session.client import SessionClient
-from imp.remote.session.protocol import CONTROL_INTERRUPT, Attach, encode_set_lease
+from imp.remote.session.protocol import CONTROL_INTERRUPT, Attach, SkillRequest, encode_set_lease
 from imp.remote.session.socket_server import SessionSocket
 
 
@@ -271,6 +271,35 @@ async def test_concurrent_send_input_and_control_do_not_collide(tmp_path: Path) 
         assert max_concurrent == 1, "lock must serialize concurrent sends"
         assert inputs == ["reply"]
         assert actions == ["interrupt"]
+        await client.aclose()
+        await server.close()
+        tg.cancel_scope.cancel()
+
+
+@pytest.mark.anyio
+async def test_send_skill_request_reaches_the_gate(tmp_path: Path) -> None:
+    sock = str(tmp_path / "s.sock")
+    server = SessionSocket(sock)
+    client = SessionClient(sock, "c1", "T", on_event=lambda _e: None)
+    async with anyio.create_task_group() as tg:
+        await server.open()
+        tg.start_soon(server.serve)
+        await client.connect()
+        with anyio.fail_after(5):
+            while server.attached_count != 1:
+                await anyio.sleep(0.02)
+        got: list[object] = []
+
+        async def _gate() -> None:
+            got.append(await server.next_input())
+
+        tg.start_soon(_gate)
+        await anyio.sleep(0.05)
+        await client.send_skill_request("refactor", "src/foo.py")
+        with anyio.fail_after(5):
+            while not got:
+                await anyio.sleep(0.02)
+        assert got == [SkillRequest("refactor", "src/foo.py")]
         await client.aclose()
         await server.close()
         tg.cancel_scope.cancel()
