@@ -354,6 +354,14 @@ class LiveDriver:
         self._walk()
         self._refresh_status()
 
+    def append_committed_reply(self, text: str) -> None:
+        # Committed, non-reconciling echo for a control slash command (no daemon
+        # user_message will arrive). Mirrors seed_pending_reply's walk/refresh but
+        # arms no _pending_reply_node.
+        self._builder.append_committed_reply(text)
+        self._walk()
+        self._refresh_status()
+
     def seed_opening_intent(self, text: str) -> None:
         # Optimistic local echo at submit time; mirrors seed_pending_reply (emits via _walk).
         self._builder.seed_opening_intent(text)

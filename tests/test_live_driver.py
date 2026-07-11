@@ -2643,6 +2643,22 @@ def test_seed_pending_reply_emits_once_and_reconciles() -> None:
     assert len(replies) == 1
 
 
+def test_append_committed_reply_emits_echo_without_arming_pending() -> None:
+    drv, out = _driver()
+    for e in [
+        ev("1", "change_created", quest_id=1, title="t"),
+        ev("2", "step_started", step="spec-writer", kind="agent", phase="spec",
+           model="m", provider="anthropic"),
+        ev("2b", "awaiting_user_input", agent_id="step:spec/spec-writer"),
+    ]:
+        drv.on_event(e)
+    drv.append_committed_reply("/abandon")
+    # The control-command echo renders once, with the caret, like a normal reply.
+    assert out.getvalue().count("> /abandon") == 1
+    # It arms NO pending-reply reconciliation (no daemon user_message will arrive).
+    assert drv._builder._pending_reply_node is None
+
+
 def test_seed_pending_reply_lifts_replay_suppression_on_resume() -> None:
     out = _Pipe()
     drv = LiveDriver(stream=out, color=False, width=80, status=LiveStatus(out),
