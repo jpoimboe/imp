@@ -1574,6 +1574,25 @@ async def test_resolve_wait_reply_no_flag_solicits_empty() -> None:
     assert [e["type"] for e in log.read()].count("awaiting_user_input") == 1
 
 
+@pytest.mark.anyio
+async def test_resolve_wait_reply_emit_carries_last_agent_message() -> None:
+    import imp.engine.agent_run as ar
+    from imp.engine.state import InMemoryEventLog
+    coord = _RecordingCoord()
+    log = InMemoryEventLog()
+
+    async def _ainput(_q):
+        return "blue"
+
+    reply, source = await ar._resolve_wait_reply(
+        coord, _ainput, False, elog=log, agent_id="step:p/s",
+        last_agent_message="what color?")
+    assert (reply, source) == ("blue", "solicited")
+    gate = next(e for e in log.read() if e["type"] == "awaiting_user_input")
+    assert gate["payload"] == {
+        "steer_hint": "", "last_agent_message": "what color?", "interrupt": False}
+
+
 def _capture_continuation(monkeypatch) -> dict:
     import imp.engine.agent_run as ar
     captured: dict = {}

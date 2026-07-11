@@ -26,7 +26,7 @@ def _silent(quest_id: str, event_id: str = "s1") -> dict:
 
 def _buzz(quest_id: str, event_id: str = "b1") -> dict:
     return {"id": event_id, "type": "awaiting_user_input", "timestamp": TS,
-            "payload": {"prompt": "?"}, "change": {"id": quest_id, "title": "t"}}
+            "payload": {"steer_hint": "?"}, "change": {"id": quest_id, "title": "t"}}
 
 
 def test_unsubscribed_change_sends_nothing_silent() -> None:

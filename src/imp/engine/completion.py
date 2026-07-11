@@ -73,10 +73,12 @@ def build_inline_solicit(
     the interrupt steer passes INTERRUPT_STEER_HINT so the human is oriented."""
     from imp.engine.awaiting_user_input import AwaitingUserInput
 
-    def _emit_awaiting() -> None:
+    def _emit_awaiting(last_text: str) -> None:
         if event_log is not None:
             event_log.append(agent_id=agent_id, type="awaiting_user_input",
-                             payload={"prompt": steer_prompt, "interrupt": interrupt})
+                             payload={"steer_hint": steer_prompt,
+                                      "last_agent_message": last_text,
+                                      "interrupt": interrupt})
         if coordinator is not None:
             coordinator.note_yield()
 
@@ -102,7 +104,7 @@ def build_inline_solicit(
 
     async def _inline(last_text: str) -> str:
         # Emit so codex resume reads this pause as AWAITING_USER, not MISSING_COMPLETE_STEP.
-        _emit_awaiting()
+        _emit_awaiting(last_text)
         if user_input_fn is not None:
             try:
                 return await _solicit()
@@ -164,10 +166,11 @@ def build_continuation_fn(
         user_input_fn=user_input_fn, coordinator=coordinator,
         event_log=event_log, agent_id=agent_id)
 
-    def _emit_awaiting() -> None:
+    def _emit_awaiting(last_text: str) -> None:
         if event_log is not None:
             event_log.append(agent_id=agent_id, type="awaiting_user_input",
-                             payload={"prompt": ""})
+                             payload={"steer_hint": "", "last_agent_message": last_text,
+                                      "interrupt": False})
 
     def _emit_nudge() -> None:
         if event_log is not None:
@@ -207,7 +210,7 @@ def build_continuation_fn(
         # _cont without awaiting and rely on the raise to pause the run.
         if user_input_fn is not None:
             return inline(park_text), True
-        _emit_awaiting()
+        _emit_awaiting(park_text)
         raise AwaitingUserInput(park_text)
 
     return _cont

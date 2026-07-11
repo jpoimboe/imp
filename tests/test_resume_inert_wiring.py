@@ -107,6 +107,35 @@ async def test_resume_skips_inert_when_message_supplied(
     assert rc == 7
 
 
+@pytest.mark.anyio
+async def test_resume_routes_to_inert_reading_recorded_message(
+        monkeypatch, tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+    ch = Quest.create_draft(
+        tmp_path, title="C", quest_id="c", base_branch="main")
+    ch.event_log().append(
+        agent_id="step:p/s", type="awaiting_user_input",
+        payload={"steer_hint": "", "last_agent_message": "Which DB should I use?",
+                 "interrupt": False})
+    State(id="c", step="s", step_attempt=0, status="new").save(ch.state_dir)
+
+    # bare_turn_end_question is NOT patched here: the real event-driven decision
+    # runs against ch's journaled gate.
+    _patch_common(monkeypatch, tmp_path, ch)
+    seen: dict[str, str] = {}
+
+    async def fake_inert(quest, question, *, autonomous=False):
+        seen["question"] = question
+        return 0
+
+    monkeypatch.setattr(m, "_resume_inert", fake_inert)
+
+    rc = await m._async_cmd_resume(_args("c"))
+
+    assert rc == 0
+    assert seen["question"] == "Which DB should I use?"
+
+
 class _RaisingPrompt:
     def __init__(self, exc: type[BaseException], **kwargs: object) -> None:
         self._exc = exc

@@ -10,7 +10,7 @@ def test_digest_event_is_single_line() -> None:
     ev = {
         "id": "e1", "parent_id": None, "agent_id": "step:plan/plan-writer",
         "timestamp": "2026-07-01T00:00:00+00:00", "type": "awaiting_user_input",
-        "payload": {"prompt": "line one\nline two\nline three"},
+        "payload": {"steer_hint": "line one\nline two\nline three"},
     }
     line = digest_event(ev)
     assert "\n" not in line

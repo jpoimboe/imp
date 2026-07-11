@@ -7,7 +7,7 @@ from imp.remote.daemon.telegram_adapter import format_outbound, send_message
 
 EVENT = {
     "type": "awaiting_user_input",
-    "payload": {"prompt": "Need your call"},
+    "payload": {"steer_hint": "Need your call"},
     "change": {"id": "2026-06-13-k3f9qa", "title": "Dark mode"},
 }
 

@@ -409,6 +409,7 @@ async def _resolve_wait_reply(
     elog: Any,
     agent_id: str,
     pending_reply: str | None = None,
+    last_agent_message: str = "",
 ) -> tuple[str, str]:
     """Satisfy a bare-turn-end / AWAITING_USER yield on resume, returning
     (reply, source) where source is
@@ -439,7 +440,8 @@ async def _resolve_wait_reply(
     if resume_should_continue:
         return _CONTINUATION_NUDGE, "nudge"
     elog.append(agent_id=agent_id, type="awaiting_user_input",
-                payload={"prompt": ""})
+                payload={"steer_hint": "", "last_agent_message": last_agent_message,
+                         "interrupt": False})
     raw = user_input_fn("")
     if inspect.isawaitable(raw):
         # Resume-side blocked solicit (all four providers route here): freeze the
