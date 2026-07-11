@@ -77,7 +77,7 @@ unimplemented task, or the re-opened task from injected feedback):
      `sub_agent(subagent_name="coder", tier="high", task_description=…)`
    - **New task:** tell the coder "INITIAL dispatch — make a NEW commit:
      `git add <files> && git commit -m \"<type>: <task summary>\"`. No `Task:`
-     trailer, no `Change:` trailer — the workflow stamps `Change:` later." Record
+     trailer, no `Quest:` trailer — the workflow stamps `Quest:` later." Record
      the task's commit **subject** in `progress.md` so you can re-find it if it is
      later re-opened.
    - **Re-opened buried task (Step 0):** the task's commit is no longer `HEAD`, so

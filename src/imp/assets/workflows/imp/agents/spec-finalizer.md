@@ -132,7 +132,7 @@ Append the outline, then finish with the existing
 You only write the spec file to the quest's artifact area (NOT the code branch —
 `main` stays pure code); the engine journals it to the quest's artifact ref at the
 step boundary. Do not run `git add`/`git commit` yourself, and do not add a
-`Change:` trailer.
+`Quest:` trailer.
 
 **Finish** with:
 

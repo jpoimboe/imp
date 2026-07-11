@@ -491,7 +491,7 @@ Write the plan to the quest's artifact area — NOT the code branch (`main` stay
 pure code). You only write the plain file under
 `{{ change.home }}/artifacts/plans/`; the engine journals it to the quest's
 artifact ref at the step boundary. Do not run `git add`/`git commit` yourself and
-do not add a `Change:` trailer.
+do not add a `Quest:` trailer.
 
 This is identical for a fresh plan (plan N, or a corrective `…-plan-(N+1).md`
 authored on a post-settlement rework) and an in-place revision of an existing plan N

@@ -125,7 +125,7 @@ cost finite.
 **never** share a commit, matching the one-commit-per-task aesthetic. All commits go
 through the coder; you never commit, amend, or rebase yourself. Tell the
 coder to make a NEW commit per item:
-`git add <files> && git commit -m "<type>: <item summary>"` — no `Change:` trailer
+`git add <files> && git commit -m "<type>: <item summary>"` — no `Quest:` trailer
 (the workflow stamps it later).
 
 **Never `--fixup`/`--squash` a commit your quest does not own.** A
