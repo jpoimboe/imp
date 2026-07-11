@@ -10,7 +10,7 @@ from imp.engine.archive import ensure_current, index, index_path
 
 def reap_archived_homes(control_root: Path) -> int:
     """Reap live change homes already terminal and durable in the archive; return the count."""
-    from imp.cli.main import _INFLIGHT, _quest_home, _list_quest_homes
+    from imp.cli.main import _INFLIGHT, _list_quest_homes, _quest_home
 
     ensure_current(control_root)
     db = index_path(control_root)

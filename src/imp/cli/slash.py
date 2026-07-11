@@ -90,7 +90,7 @@ def handle_slash_line(
         if not args:
             output_fn("Usage: /resume <id|query>")
             return REPROMPT
-        from imp.cli.main import _quest_home, _iter_quest_ids
+        from imp.cli.main import _iter_quest_ids, _quest_home
         from imp.engine.archive import read as archive_read
         from imp.engine.archive import record, records_root
         control = change.control_root
