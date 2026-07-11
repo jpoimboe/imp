@@ -61,6 +61,13 @@ yourself, without a confirmation prompt:
 - **Address review findings** — make broken tests pass and integrate review findings
   with normal fix commits on top.
 
+**Verify with focused tests only.** After making any reconciliation fix — resolving
+a conflict, fixing what the base broke, or addressing a review finding — run the
+*narrowest* tests covering the reconciled and base-broken code
+with the project's own test tooling, to catch mistakes early. Do **not** run the
+project's full/slow suite: `integration-verify` runs it as the very next step —
+under the test lane, at the slow tier — and owns that gate.
+
 Work FORWARD on the rebased history. Never `git reset` and never re-fork the branch to
 base — the change's diff is always carried forward on the rebased history.
 
