@@ -1,8 +1,9 @@
 """The attach-protocol frame codec for a per-change session daemon.
 
 Each frame is a single JSON line. Client -> daemon frames carry a "kind" of
-"attach" (the opening handshake), "input" (a gate reply), "control" (an
-interrupt/detach/abandon/save/archive/discard action), or "set-lease" (toggle
+"attach" (the opening handshake), "input" (a gate reply), "skill" (a skill
+load request), "control" (an interrupt/detach/abandon/save/archive/discard
+action), or "set-lease" (toggle
 this attachment's keep-alive lease). The daemon -> client
 frame is "event", wrapping one curated engine event. Encoders return a line
 WITHOUT a trailing newline; the caller frames it (matching
@@ -56,7 +57,13 @@ class SetLease:
     value: bool
 
 
-ClientMessage = Attach | Input | Control | SetLease
+@dataclass(frozen=True, slots=True)
+class SkillRequest:
+    name: str
+    args: str
+
+
+ClientMessage = Attach | Input | Control | SetLease | SkillRequest
 
 
 def encode_attach(quest_id: str, title: str, lease: bool = False) -> str:
@@ -70,6 +77,10 @@ def encode_set_lease(value: bool) -> str:
 
 def encode_input(text: str) -> str:
     return json.dumps({"kind": "input", "text": text})
+
+
+def encode_skill_request(name: str, args: str) -> str:
+    return json.dumps({"kind": "skill", "name": name, "args": args})
 
 
 def encode_control(action: str, reason: str | None = None) -> str:
@@ -95,6 +106,8 @@ def parse_client_message(line: str) -> ClientMessage:
             return Attach(obj["quest_id"], obj["title"], bool(obj.get("lease", False)))
         if kind == "input":
             return Input(obj["text"])
+        if kind == "skill":
+            return SkillRequest(obj["name"], obj["args"])
         if kind == SET_LEASE:
             return SetLease(bool(obj["value"]))
         if kind == "control":
