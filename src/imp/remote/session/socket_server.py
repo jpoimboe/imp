@@ -41,6 +41,8 @@ class ReplaySnapshot:
 
     @classmethod
     def capture(cls, events_path: Path) -> ReplaySnapshot:
+        # Transport-level end-of-replay boundary; final frame on every path, never persisted.
+        boundary = (encode_event({"type": "replay_complete"}) + "\n").encode("utf-8")
         framed: list[bytes] = []
         try:
             with events_path.open("rb") as f:
@@ -58,7 +60,8 @@ class ReplaySnapshot:
             _log.warning(
                 "replay: cannot read %s; client gets the live stream only",
                 events_path)
-            return cls(payload=b"")
+            return cls(payload=boundary)
+        framed.append(boundary)
         return cls(payload=b"".join(framed))
 
     def wire_bytes(self) -> bytes:

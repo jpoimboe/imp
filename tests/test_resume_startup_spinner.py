@@ -100,7 +100,10 @@ def _replaced_screen(*, committed: str, preceded_by_blank: bool,
     status._draw()
     events = _two_phase_events()
     marked = [{**e, "_replay": True} for e in events[:3]] + events[3:]
-    for e in marked:
+    for e in marked[:3]:                            # replayed prefix only
+        drv.on_event(e)
+    drv.on_event({"type": "replay_complete"})       # boundary lifts suppression
+    for e in marked[3:]:                            # live continuation onward
         drv.on_event(e)
     drv.finish()                                    # clear the transient real footer
     screen = Screen()

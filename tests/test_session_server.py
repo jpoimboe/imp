@@ -631,9 +631,10 @@ async def test_journaled_gate_is_replayed_marked_plus_one_live_reemit(
         buf = BufferedByteReceiveStream(client)
         seen: list[dict[str, Any]] = []
         with anyio.fail_after(5):
-            while len(seen) < 3:        # e0 (marked), e1 (marked), e1 (live re-emit)
+            while len(seen) < 4:  # e0 (marked), e1 (marked), boundary, e1 (live re-emit)
                 seen.append(parse_event(
                     (await buf.receive_until(b"\n", 1 << 20)).decode()))
+        assert seen[2] == {"type": "replay_complete"}            # boundary closes the replay
         replayed_gates = [s for s in seen
                           if s["type"] == "awaiting_user_input" and s.get("_replay")]
         live_gates = [s for s in seen
@@ -807,11 +808,12 @@ async def test_synthetic_resume_prompt_lands_once_after_replay(tmp_path: Path) -
         buf = BufferedByteReceiveStream(client)
         seen: list[dict[str, Any]] = []
         with anyio.fail_after(5):
-            while len(seen) < 3:
+            while len(seen) < 4:
                 seen.append(parse_event(
                     (await buf.receive_until(b"\n", 1 << 20)).decode()))
         assert [s.get("id") for s in seen[:2]] == ["e0", "e1"]   # replay prefix, no off-by-one
-        assert seen[2] == synthetic                               # synthetic prompt after replay
+        assert seen[2] == {"type": "replay_complete"}            # boundary closes the replay
+        assert seen[3] == synthetic                               # synthetic prompt after boundary
         assert sum(1 for s in seen if s.get("type") == "awaiting_user_input") == 1
         await client.send((encode_input("done") + "\n").encode())   # unblock the gate
         with anyio.fail_after(5):

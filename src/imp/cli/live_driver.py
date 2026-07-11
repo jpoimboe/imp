@@ -287,11 +287,17 @@ class LiveDriver:
         self._display_width = display_width
         self._status = status
         self._suppressing = suppress_replay
-        # Snapshot of every tree-node id present when the first live (un-marked)
-        # event arrives — i.e. the replayed prefix. The walk lifts suppression
-        # only when it reaches a node NOT in this set (a live continuation node),
-        # so a prior phase's completion breadcrumb (emitted when a live event
-        # closes the replayed phase) stays suppressed. None until the boundary.
+        # The footer is decoupled from scrollback suppression: it lights at the
+        # replay_complete boundary (see on_event) even though _suppressing stays
+        # True until the first live continuation node. Starts True for the non-
+        # suppressing paths (imp new/chat/log --follow) so their footer is live
+        # from the first event with no boundary.
+        self._footer_live = not suppress_replay
+        # Snapshot of every tree-node id present at the replay_complete boundary
+        # — i.e. the whole replayed prefix. The walk lifts suppression only when
+        # it reaches a node NOT in this set (a live continuation node), so a prior
+        # phase's completion breadcrumb (emitted when a live event closes the
+        # replayed phase) stays suppressed. None until the boundary arrives.
         self._replayed_node_ids: set[int] | None = None
         # True after the last emitted block was agent prose, so the next prose
         # block gets one blank-line separator — matching render_text's lean spacing
@@ -311,15 +317,21 @@ class LiveDriver:
 
     # -- engine callbacks -----------------------------------------------------
     def on_event(self, event: Any) -> None:
-        if (self._suppressing and self._replayed_node_ids is None
-                and isinstance(event, dict) and not event.get("_replay")):
-            # First live (un-marked) event. The replayed prefix carries a _replay
-            # marker (stamped by the session daemon's replay snapshot). Freeze the
-            # replayed tree: every node that exists now is replayed and stays
-            # suppressed — including a prior phase's completion breadcrumb that
-            # this event will trigger by closing the phase. The walk lifts only at
-            # a node created AFTER this point (see _maybe_lift).
+        if isinstance(event, dict) and event.get("type") == "replay_complete":
+            # End-of-replay boundary: a transport-level marker the session daemon
+            # appends to every replay snapshot (never persisted, never a narrative
+            # event). It is the SOLE freeze/light point. Freeze the replayed tree —
+            # every node that exists now is replayed and stays suppressed, including
+            # a prior phase's completion breadcrumb — so the walk lifts scrollback
+            # suppression only at a node created after this point (see _maybe_lift).
+            # Light the footer NOW so a resume into a live step that emits no fresh
+            # event (a merge-queue wait) still paints its working footer. Return
+            # before _builder.add: the payload-less marker would otherwise trip the
+            # builder's malformed-payload ErrorNode.
             self._replayed_node_ids = self._snapshot_node_ids()
+            self._footer_live = True
+            self._refresh_status()
+            return
         self._builder.add(event)
         if isinstance(event, dict):
             etype = event.get("type")
@@ -713,12 +725,15 @@ class LiveDriver:
         # block spacing is owned entirely by _print_lines; the status never adds to
         # it. `_prev_prose` is left untouched so the next block still gets its one
         # separator blank (which lands on the row the status was using).
-        if self._suppressing:
+        if not self._footer_live:
+            # The footer stays dark until the replay_complete boundary lights it
+            # (on_event sets _footer_live). Decoupled from _suppressing: the footer
+            # can wake at the boundary while the replayed scrollback stays dark.
             # Return early without swapping the compose callback, so whatever is
             # currently installed persists through the replayed prefix: nothing (footer
             # dark, normal start) or compose_startup (startup spinner, when a resume
-            # driver called install_startup_status). compose_status replaces it only
-            # once _maybe_lift clears this flag at the first live node.
+            # driver called install_startup_status). compose_status replaces it once
+            # the boundary lights the footer.
             return
         if self._builder.current_activity() is not None:
             self._status.update(self.compose_status)

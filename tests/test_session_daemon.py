@@ -85,7 +85,9 @@ async def test_serves_on_per_change_socket_and_bridges_run_change_seams(
         with anyio.fail_after(5):
             while not any(e["type"] == "agent_output" for e in received):
                 await anyio.sleep(0.02)
-        assert [e for e in received if e["type"] != "user_input_resolved"] == [
+        assert received[0] == {"type": "replay_complete"}  # boundary leads the attach stream
+        assert [e for e in received
+                if e["type"] not in ("user_input_resolved", "replay_complete")] == [
             {"type": "agent_output", "payload": {"reply": "ship it"}}]
         await client.aclose()
         tg.cancel_scope.cancel()

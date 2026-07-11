@@ -1568,7 +1568,10 @@ def test_suppress_replay_hides_marked_prefix_and_renders_live_tail() -> None:
     out = _Pipe()
     drv = LiveDriver(stream=out, color=False, width=80,
                      status=LiveStatus(out), suppress_replay=True)
-    for e in marked:
+    for e in marked[:3]:
+        drv.on_event(e)
+    drv.on_event({"type": "replay_complete"})   # boundary closes the replay
+    for e in marked[3:]:
         drv.on_event(e)
     drv.finish()
     body = _body(out)
@@ -1592,7 +1595,10 @@ def test_suppress_replay_advances_cursor_no_redump() -> None:
     sout = _Pipe()
     sdrv = LiveDriver(stream=sout, color=False, width=80,
                       status=LiveStatus(sout), suppress_replay=True)
-    for e in marked:
+    for e in marked[:3]:
+        sdrv.on_event(e)
+    sdrv.on_event({"type": "replay_complete"})   # boundary closes the replay
+    for e in marked[3:]:
         sdrv.on_event(e)
     sdrv.finish()
     supp = [ln for ln in _body(sout) if ln]
@@ -1622,7 +1628,10 @@ def test_suppress_replay_hides_replayed_opening_intent() -> None:
     out = _Pipe()
     drv = LiveDriver(stream=out, color=False, width=80,
                      status=LiveStatus(out), suppress_replay=True)
-    for e in replayed + live:
+    for e in replayed:
+        drv.on_event(e)
+    drv.on_event({"type": "replay_complete"})   # boundary closes the replay
+    for e in live:
         drv.on_event(e)
     drv.finish()
     body = _body(out)
@@ -1640,6 +1649,7 @@ def test_suppress_replay_with_no_replay_prefix_renders_full_history() -> None:
     out = _Pipe()
     drv = LiveDriver(stream=out, color=False, width=80,
                      status=LiveStatus(out), suppress_replay=True)
+    drv.on_event({"type": "replay_complete"})   # empty replayed prefix
     for e in events:
         drv.on_event(e)
     drv.finish()
@@ -1654,35 +1664,68 @@ def test_suppress_replay_pure_replay_renders_nothing() -> None:
                      status=LiveStatus(out), suppress_replay=True)
     for e in marked:
         drv.on_event(e)
+    drv.on_event({"type": "replay_complete"})   # boundary, then zero live events
     drv.finish()
     assert all(not ln for ln in _body(out))
 
 
-def test_suppress_replay_keeps_footer_dark_until_live_event() -> None:
-    """Regression: on a TTY resume the transient status footer must NOT redraw
-    once per replayed event (walking the whole prior run's history). _refresh_status
-    is guarded on self._suppressing, so it writes nothing through the _replay-marked
-    prefix — even a marked step_started whose activity WOULD otherwise draw the
-    footer — and draws only when the first live event lifts suppression."""
+def test_replay_complete_boundary_lights_footer_without_live_event() -> None:
+    """The replay_complete boundary is the SOLE footer-light point: on a TTY
+    resume the footer stays dark through the _replay-marked prefix, then lights
+    the instant the boundary arrives — WITHOUT any further live event. This is the
+    merge-queue-wait case: the live wait-for-head step emits nothing, so the
+    footer must wake on the boundary alone or the resume shows a blank line."""
     out = _TTYPipe()
     drv = LiveDriver(stream=out, color=False, width=80, status=LiveStatus(out),
                      suppress_replay=True)
-    # Replayed prefix (marked _replay). The step_started makes current_activity()
-    # non-None, so an unguarded _refresh_status would draw the footer on this TTY.
+    # Replayed prefix (marked _replay): a merge-queue wait whose lane_waiting sets
+    # the running step's verb. current_activity() is non-None, so an un-decoupled
+    # footer WOULD have drawn here during replay.
     replayed = [
         ev("1", "change_created", change_id=1, title="x"),
-        ev("2", "step_started", step="spec", kind="agent", phase="p",
-           model="m", provider="anthropic"),
+        ev("2", "step_started", step="wait-for-head", kind="acquire",
+           phase="integration", label="waiting in merge queue"),
+        ev("3", "lane_waiting", agent_id="step:integration/wait-for-head", ahead=5),
     ]
     for e in replayed:
         drv.on_event({**e, "_replay": True})
     assert drv._builder.current_activity() is not None   # footer WOULD draw if unguarded
-    assert out.getvalue() == ""                          # but stays dark through replay
-    # First live (un-marked) event: the walk reaches the new node, lifts suppression,
-    # emits it, and then _refresh_status draws the footer.
-    drv.on_event(ev("3", "llm_response", agent_id="a",
-                    raw={"content": [{"type": "text", "text": "working..."}]}, usage={}))
-    assert out.getvalue() != ""                          # footer draws on first live event
+    assert out.getvalue() == ""                          # dark through the replayed prefix
+    # The boundary lights the footer with NO live event following it.
+    drv.on_event({"type": "replay_complete"})
+    body = out.getvalue()
+    assert body != ""                                    # footer paints at the boundary
+    assert "waiting to merge" in body                    # the running step's verb
+    assert "malformed" not in body                       # marker never becomes an ErrorNode
+
+
+def test_replay_complete_marker_feeds_no_builder_node_cli() -> None:
+    """AC (d), CLI: the boundary is intercepted before _builder.add, so it adds
+    no tree node (and no malformed-payload ErrorNode) and renders nothing."""
+    out = _Pipe()
+    drv = LiveDriver(stream=out, color=False, width=80, status=LiveStatus(out),
+                     suppress_replay=True)
+    drv.on_event({**ev("1", "change_created", change_id=1, title="x"), "_replay": True})
+    nodes_before = len(drv._snapshot_node_ids())
+    drv.on_event({"type": "replay_complete"})
+    assert len(drv._snapshot_node_ids()) == nodes_before   # marker created no node
+    assert out.getvalue() == ""                            # and rendered nothing
+
+
+def test_footer_live_from_start_without_suppression() -> None:
+    """AC (e): imp new/chat/log --follow construct LiveDriver with the default
+    suppress_replay=False, so _footer_live starts True and the footer draws from
+    the first event with no boundary ever received."""
+    out = _TTYPipe()
+    drv = LiveDriver(stream=out, color=False, width=80, status=LiveStatus(out))
+    assert drv._footer_live is True
+    for e in [
+        ev("1", "change_created", change_id=1, title="x"),
+        ev("2", "step_started", step="spec", kind="agent", phase="p",
+           model="m", provider="anthropic"),
+    ]:
+        drv.on_event(e)
+    assert out.getvalue() != ""   # footer painted with no boundary needed
 
 
 def test_resume_with_preceding_blank_omits_driver_leading_separator() -> None:
@@ -1697,7 +1740,10 @@ def test_resume_with_preceding_blank_omits_driver_leading_separator() -> None:
     out = _Pipe()
     drv = LiveDriver(stream=out, color=False, width=80, status=LiveStatus(out),
                      suppress_replay=True, preceded_by_blank=True)
-    for e in marked:
+    for e in marked[:3]:
+        drv.on_event(e)
+    drv.on_event({"type": "replay_complete"})   # boundary closes the replay
+    for e in marked[3:]:
         drv.on_event(e)
     drv.finish()
     assert out.getvalue().split("\n")[0] == "── plan phase ───"
@@ -1715,7 +1761,10 @@ def test_resume_without_preceding_blank_keeps_driver_leading_separator() -> None
     out = _Pipe()
     drv = LiveDriver(stream=out, color=False, width=80, status=LiveStatus(out),
                      suppress_replay=True, preceded_by_blank=False)
-    for e in marked:
+    for e in marked[:3]:
+        drv.on_event(e)
+    drv.on_event({"type": "replay_complete"})   # boundary closes the replay
+    for e in marked[3:]:
         drv.on_event(e)
     drv.finish()
     assert out.getvalue().split("\n")[0] == ""
@@ -1738,7 +1787,10 @@ def test_resume_user_first_message_has_no_driver_leading_separator() -> None:
     out = _Pipe()
     drv = LiveDriver(stream=out, color=False, width=80, status=LiveStatus(out),
                      suppress_replay=True, preceded_by_blank=True)
-    for e in marked:
+    for e in marked[:3]:
+        drv.on_event(e)
+    drv.on_event({"type": "replay_complete"})   # boundary closes the replay
+    for e in marked[3:]:
         drv.on_event(e)
     drv.finish()
     assert out.getvalue().split("\n")[0] == "> do the thing"
@@ -2703,17 +2755,18 @@ def test_seed_pending_reply_lifts_replay_suppression_on_resume() -> None:
     out = _Pipe()
     drv = LiveDriver(stream=out, color=False, width=80, status=LiveStatus(out),
                      suppress_replay=True)
-    # Replayed prefix (marked _replay): stays suppressed, nothing printed.
+    # Replayed prefix (marked _replay), including the gate the user is now at:
+    # stays suppressed, nothing printed.
     for e in [
         ev("1", "change_created", change_id=1, title="t"),
         ev("2", "step_started", step="spec-writer", kind="agent", phase="spec",
            model="m", provider="anthropic"),
+        ev("2b", "awaiting_user_input", agent_id="step:spec/spec-writer"),
     ]:
         e["_replay"] = True
         drv.on_event(e)
-    # First LIVE (un-marked) event: the gate the user is now at. It freezes the
-    # replayed-node snapshot; the replayed prefix stays hidden.
-    drv.on_event(ev("2b", "awaiting_user_input", agent_id="step:spec/spec-writer"))
+    # The boundary freezes the replayed-node snapshot; the prefix stays hidden.
+    drv.on_event({"type": "replay_complete"})
     assert out.getvalue() == ""
     # The seeded node is created AFTER the boundary, so the walk lifts
     # suppression at it and emits the echo.
@@ -2834,7 +2887,7 @@ def test_install_startup_status_draws_and_animates_resuming() -> None:
     assert "5s" in out.getvalue()                  # elapsed advanced
 
 
-def test_startup_line_persists_through_replay_then_replaced_at_first_live() -> None:
+def test_startup_line_persists_through_replay_then_replaced_at_boundary() -> None:
     out = _TTY()
     status = LiveStatus(out, now=lambda: 0.0)
     status._width_fn = lambda: 80
@@ -2849,6 +2902,8 @@ def test_startup_line_persists_through_replay_then_replaced_at_first_live() -> N
     # attribute access yields a fresh object, so `is` is always False — use `==`.
     assert status._compose == drv.compose_startup   # startup line NOT swapped during replay
     assert "resuming" in out.getvalue()
+    drv.on_event({"type": "replay_complete"})      # boundary lights the footer
+    assert status._compose == drv.compose_status    # replaced by the real footer
     for e in marked[3:]:                            # first live event onward
         drv.on_event(e)
-    assert status._compose == drv.compose_status    # replaced by the real status footer
+    assert status._compose == drv.compose_status    # stays the real footer
