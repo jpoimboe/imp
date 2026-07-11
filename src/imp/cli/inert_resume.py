@@ -4,24 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
 
-from imp.agents.classify import ResumeState, classify_resume
-from imp.agents.runner import Message, TextBlock
-from imp.agents.transcript import Transcript
 from imp.engine.quest import Quest
-from imp.engine.state import State
-
-
-def render_pending_question(messages: list[Message]) -> str | None:
-    """Last assistant text in `messages`, else nearest preceding prose; None if none."""
-    for msg in reversed(messages):
-        if msg.role != "assistant":
-            continue
-        text = "\n".join(
-            b.text for b in msg.content if isinstance(b, TextBlock)
-        ).strip()
-        if text:
-            return text
-    return None
 
 
 def render_inert_question(text: str, *, width: int, color: bool) -> str:
@@ -34,16 +17,25 @@ def render_inert_question(text: str, *, width: int, color: bool) -> str:
     return "\n".join(_render_markdown_block(text, width, 0, color))
 
 
+_ANSWER_MARKERS = frozenset({"user_message", "step_started", "step_completed"})
+
+
 def bare_turn_end_question(quest: Quest) -> str | None:
-    """Pending question if `change` is paused at a bare-turn-end yield, else None."""
-    state = State.load(quest.state_dir)
-    if state.status != "paused" or state.current_step is None:
+    """Last unanswered bare-turn-end gate's `last_agent_message`, else None."""
+    events = list(quest.event_log().read())
+    for i in range(len(events) - 1, -1, -1):
+        if events[i].get("type") == "awaiting_user_input":
+            gate = events[i]
+            following = events[i + 1:]
+            break
+    else:
         return None
-    messages = Transcript(
-        state.current_step.transcript_dir / "transcript.jsonl").load()
-    if classify_resume(messages) is not ResumeState.AWAITING_USER:
+    payload = gate.get("payload") or {}
+    if payload.get("interrupt"):
         return None
-    return render_pending_question(messages)
+    if any(e.get("type") in _ANSWER_MARKERS for e in following):
+        return None
+    return payload.get("last_agent_message") or None
 
 
 def make_buffered_solicit(

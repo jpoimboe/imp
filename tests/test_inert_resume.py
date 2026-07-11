@@ -4,55 +4,20 @@ from pathlib import Path
 
 import pytest
 
-from imp.agents.runner import Message, TextBlock, ToolResultBlock, ToolUseBlock
-from imp.agents.transcript import Transcript
 from imp.cli.inert_resume import (
     bare_turn_end_question,
     make_buffered_solicit,
     render_inert_question,
-    render_pending_question,
     run_inert_resume,
 )
 from imp.engine.quest import Quest
-from imp.engine.state import CurrentStep, State
+from imp.engine.state import State
 from tests.conftest import _seed_control
 
 
 @pytest.fixture
 def anyio_backend() -> str:
     return "asyncio"
-
-
-def test_render_pending_question_returns_last_assistant_text() -> None:
-    msgs = [
-        Message(role="user", content=(TextBlock(text="start"),)),
-        Message(role="assistant", content=(TextBlock(text="Which DB should I use?"),)),
-    ]
-    assert render_pending_question(msgs) == "Which DB should I use?"
-
-
-def test_render_pending_question_falls_back_to_preceding_prose() -> None:
-    # The final assistant turn carries no text -> walk back to the prior prose.
-    msgs = [
-        Message(role="assistant", content=(TextBlock(text="earlier question?"),)),
-        Message(role="user", content=(TextBlock(text="ok"),)),
-        Message(role="assistant", content=()),
-    ]
-    assert render_pending_question(msgs) == "earlier question?"
-
-
-def test_render_pending_question_falls_back_past_tool_use_only_turn() -> None:
-    msgs = [
-        Message(role="assistant", content=(TextBlock(text="earlier question?"),)),
-        Message(role="user", content=(TextBlock(text="ok"),)),
-        Message(role="assistant", content=(ToolUseBlock(id="t1", name="bash", input={}),)),
-    ]
-    assert render_pending_question(msgs) == "earlier question?"
-
-
-def test_render_pending_question_none_when_no_assistant_text() -> None:
-    msgs = [Message(role="user", content=(TextBlock(text="hi"),))]
-    assert render_pending_question(msgs) is None
 
 
 _FENCED = "Try this:\n\n```bash\ncd ~/x && make\n```\n\nThen retry."
@@ -71,61 +36,93 @@ def test_render_inert_question_emits_ansi_when_color() -> None:
     assert "\x1b[" in out  # markdown→ANSI styling applied
 
 
-def _seed_paused_change(
-    tmp_path: Path, messages: list[Message], *, status: str = "paused",
+def _seed_quest_with_events(
+    tmp_path: Path, events: list[dict], *, status: str = "new",
 ) -> Quest:
+    """Create a draft quest, journal `events` to its events.jsonl, save `status`."""
     _seed_control(tmp_path)
     ch = Quest.create_draft(
         tmp_path, title="C", quest_id="c", base_branch="main")
-    tdir = ch.quest_dir / "steps" / "p" / "s"
-    tdir.mkdir(parents=True)
-    t = Transcript(tdir / "transcript.jsonl")
-    for m in messages:
-        t.append(m)
-    State(id="c", step="s", step_attempt=0, status=status,
-          current_step=CurrentStep(transcript_dir=tdir)).save(ch.state_dir)
+    log = ch.event_log()
+    for ev in events:
+        log.append(agent_id=ev.get("agent_id"), type=ev["type"],
+                   payload=ev.get("payload", {}))
+    State(id="c", step="s", step_attempt=0, status=status).save(ch.state_dir)
     return ch
 
 
-def test_bare_turn_end_question_returns_pending_question(tmp_path: Path) -> None:
-    ch = _seed_paused_change(tmp_path, [
-        Message(role="user", content=(TextBlock(text="start"),)),
-        Message(role="assistant", content=(TextBlock(text="Which DB should I use?"),)),
-    ])
+def _gate(message: str, *, interrupt: bool = False) -> dict:
+    return {"agent_id": "step:p/s", "type": "awaiting_user_input",
+            "payload": {"steer_hint": "interrupted" if interrupt else "",
+                        "last_agent_message": message, "interrupt": interrupt}}
+
+
+def test_bare_turn_end_question_reprints_unanswered_gate_at_status_new(
+        tmp_path: Path) -> None:
+    # jasa11-shape: a clean bare-turn-end left at status `new` still reprints
+    # (the dropped status gate no longer suppresses it).
+    ch = _seed_quest_with_events(
+        tmp_path, [_gate("Which DB should I use?")], status="new")
     assert bare_turn_end_question(ch) == "Which DB should I use?"
 
 
-def test_bare_turn_end_question_none_for_dangling_tool_use(tmp_path: Path) -> None:
-    ch = _seed_paused_change(tmp_path, [
-        Message(role="assistant", content=(
-            TextBlock(text="running it"),
-            ToolUseBlock(id="t1", name="bash", input={}),
-        )),
+@pytest.mark.parametrize(
+    "marker", ["user_message", "step_started", "step_completed"])
+def test_bare_turn_end_question_none_when_answer_marker_follows(
+        tmp_path: Path, marker: str) -> None:
+    # A real reply (user_message) or a wait-consuming step transition after the
+    # gate means the run advanced past the wait -> not parked at a prompt.
+    ch = _seed_quest_with_events(tmp_path, [
+        _gate("Which DB?"),
+        {"type": marker, "payload": {}},
     ])
     assert bare_turn_end_question(ch) is None
 
 
-def test_bare_turn_end_question_none_when_not_paused(tmp_path: Path) -> None:
-    ch = _seed_paused_change(tmp_path, [
-        Message(role="assistant", content=(TextBlock(text="Which DB?"),)),
-    ], status="running")
+@pytest.mark.parametrize(
+    "leave", ["conversation_saved", "conversation_archived",
+              "workflow_resumed", "workflow_paused"])
+def test_bare_turn_end_question_reprints_through_leave_markers(
+        tmp_path: Path, leave: str) -> None:
+    # save/clear/re-resume leave markers are NOT answers: the gate is still
+    # unanswered, so its message reprints.
+    ch = _seed_quest_with_events(tmp_path, [
+        _gate("Which DB?"),
+        {"type": leave, "payload": {}},
+    ])
+    assert bare_turn_end_question(ch) == "Which DB?"
+
+
+def test_bare_turn_end_question_none_for_interrupt_gate(tmp_path: Path) -> None:
+    # AC8: the last gate is a cooperative-interrupt steer (interrupt truthy) ->
+    # never a reprint candidate, even though it carries last_agent_message.
+    ch = _seed_quest_with_events(tmp_path, [
+        _gate("mid-work prose", interrupt=True),
+        {"type": "workflow_paused", "payload": {}},
+    ])
     assert bare_turn_end_question(ch) is None
 
 
-def test_bare_turn_end_question_none_when_no_current_step(tmp_path: Path) -> None:
-    _seed_control(tmp_path)
-    ch = Quest.create_draft(tmp_path, title="C", quest_id="c", base_branch="main")
-    State(id="c", step="s", step_attempt=0, status="paused").save(ch.state_dir)
+def test_bare_turn_end_question_uses_last_gate_only(tmp_path: Path) -> None:
+    # Only the LAST awaiting_user_input decides: an earlier bare-turn-end
+    # followed by a later interrupt steer resolves to "not parked".
+    ch = _seed_quest_with_events(tmp_path, [
+        _gate("earlier question?"),
+        _gate("interrupt steer", interrupt=True),
+    ])
     assert bare_turn_end_question(ch) is None
 
 
-def test_bare_turn_end_question_none_when_transcript_absent(tmp_path: Path) -> None:
-    _seed_control(tmp_path)
-    ch = Quest.create_draft(tmp_path, title="C", quest_id="c", base_branch="main")
-    tdir = ch.quest_dir / "steps" / "p" / "s"
-    tdir.mkdir(parents=True)
-    State(id="c", step="s", step_attempt=0, status="paused",
-          current_step=CurrentStep(transcript_dir=tdir)).save(ch.state_dir)
+def test_bare_turn_end_question_none_without_gate(tmp_path: Path) -> None:
+    # AC5: no awaiting_user_input in the tail (agent mid-work) -> no reprint.
+    ch = _seed_quest_with_events(
+        tmp_path, [{"type": "step_started", "payload": {"step": "s"}}])
+    assert bare_turn_end_question(ch) is None
+
+
+def test_bare_turn_end_question_none_when_message_empty(tmp_path: Path) -> None:
+    # A gate with no recorded prose has nothing to reprint.
+    ch = _seed_quest_with_events(tmp_path, [_gate("")])
     assert bare_turn_end_question(ch) is None
 
 
@@ -248,16 +245,3 @@ async def test_run_inert_resume_ctrl_c_leaves_change_untouched(tmp_path: Path) -
     assert rc == 0
     after = ch.events_path.read_bytes() if ch.events_path.exists() else b""
     assert after == before              # launch never ran -> no events appended
-
-
-def test_bare_turn_end_question_none_for_step_completed(tmp_path: Path) -> None:
-    # Trailing prose over a RESOLVED complete_step classifies STEP_COMPLETED, not
-    # AWAITING_USER, so no phantom pending question is previewed.
-    ch = _seed_paused_change(tmp_path, [
-        Message(role="assistant", content=(
-            ToolUseBlock(id="cs", name="complete_step", input={"status": "Success"}),)),
-        Message(role="user", content=(
-            ToolResultBlock(tool_use_id="cs", content="ok", is_error=False),)),
-        Message(role="assistant", content=(TextBlock(text="All done — summary."),)),
-    ])
-    assert bare_turn_end_question(ch) is None
