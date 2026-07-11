@@ -43,7 +43,7 @@ def test_str_tool_result_content_persists_unchanged() -> None:
 def test_user_message_image_tool_result_serializes_lean() -> None:
     log = InMemoryEventLog()
     msg = Message(role="user", content=(_image_block(),))
-    rec = log.append_user_message(agent_id="step:p/s", message=msg)
+    rec = log.append_user_message(agent_id="step:p/s", message=msg, human=True)
     part = rec["payload"]["content"][0]["content"][1]
     assert part == {"type": "image", "blob": "ab12.png",
                     "media_type": "image/png", "w": 800, "h": 600, "bytes": 1234}

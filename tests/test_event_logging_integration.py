@@ -436,6 +436,7 @@ async def test_resume_does_not_reemit_step_context(tmp_path: Path) -> None:
     log1.append_user_message(
         agent_id="step:p/s",
         message=Message(role="user", content=(TextBlock(text="go"),)),
+        human=True,
     )
 
     # ── Run 2: resume over the same transcript + fresh JsonlEventLog ──────────

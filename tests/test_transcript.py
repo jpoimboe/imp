@@ -348,7 +348,7 @@ def test_deliver_reply_on_resume_appends_user_text_message(tmp_path: Path) -> No
         t.append(m)
     log = InMemoryEventLog()
 
-    injected = deliver_reply_on_resume(msgs, t, log, "step:p/s", "blue")
+    injected = deliver_reply_on_resume(msgs, t, log, "step:p/s", "blue", human=True)
 
     # Delivered as a plain user TextBlock turn — NOT a tool_result fill.
     assert injected.role == "user"

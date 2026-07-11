@@ -83,10 +83,10 @@ def test_search_archived_labels_zone_and_carries_content(tmp_path: Path) -> None
     assert hits[0].title == "Dark archived work"
 
 
-def _user_msg_line(text: str) -> str:
+def _user_msg_line(text: str, *, human: bool = True) -> str:
     return json.dumps({
         "type": "user_message",
-        "payload": {"content": [{"type": "text", "text": text}]},
+        "payload": {"content": [{"type": "text", "text": text}], "human": human},
     }) + "\n"
 
 
@@ -100,3 +100,13 @@ def test_search_active_matches_conversation_prose_only(tmp_path: Path) -> None:
     assert [h.change_id for h in hits] == ["liveid"]
     assert hits[0].zone == "active"
     assert "300s" in hits[0].content
+
+
+def test_search_active_excludes_nonhuman_user_message(tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+    live = Change.create(tmp_path, title="Quiet chat", change_id="liveid",
+                         base_branch="main")
+    live.events_path.write_text(_user_msg_line("cover-check injected prompt", human=False))
+    # The term lives only in a non-human (injected) user_message -> not searchable,
+    # and it is in neither the id "liveid" nor the title "Quiet chat".
+    assert _search_active(tmp_path, "cover-check") == []

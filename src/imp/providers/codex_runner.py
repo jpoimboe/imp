@@ -566,14 +566,14 @@ class CodexAgentRunner:
                 else:
                     user_msg = Message(
                         role="user", content=(TextBlock(text=reply),))
-                    elog.append_user_message(agent_id=aid, message=user_msg)
+                    elog.append_user_message(agent_id=aid, message=user_msg, human=True)
                 next_prompt = reply
             elif rstate is ResumeState.MISSING_COMPLETE_STEP:
                 # Replay-and-continue: nudge is the resumed prompt; journal for audit trail.
                 from imp.agents.transcript import RESUME_CONTINUE_NUDGE
                 nudge_msg = Message(
                     role="user", content=(TextBlock(text=RESUME_CONTINUE_NUDGE),))
-                elog.append_user_message(agent_id=aid, message=nudge_msg)
+                elog.append_user_message(agent_id=aid, message=nudge_msg, human=False)
                 next_prompt = RESUME_CONTINUE_NUDGE
         # §2 resume-entry drain: fold pending interject texts into the first
         # resumed prompt (codex re-prompts with a string). AWAITING_USER already
@@ -591,7 +591,8 @@ class CodexAgentRunner:
                     parts.append(t)
                     elog.append_user_message(
                         agent_id=aid,
-                        message=Message(role="user", content=(TextBlock(text=t),)))
+                        message=Message(role="user", content=(TextBlock(text=t),)),
+                        human=True)
                     elog.append(agent_id=aid, type="user_interjected",
                                 payload={"text": t})
                 if parts:
@@ -764,7 +765,8 @@ class CodexAgentRunner:
                                 agent_id=aid,
                                 message=Message(
                                     role="user",
-                                    content=(TextBlock(text=res.message),)))
+                                    content=(TextBlock(text=res.message),)),
+                                human=False)
                             # Re-drive this session with the nudge as the next
                             # prompt (per-turn proc_state reset at the loop top
                             # clears the stale capture).
@@ -788,7 +790,8 @@ class CodexAgentRunner:
                         elog.append_user_message(
                             agent_id=aid,
                             message=Message(role="user",
-                                            content=(TextBlock(text=instr),)))
+                                            content=(TextBlock(text=instr),)),
+                            human=False)
                         next_prompt = instr
                         handoff_phase = "instruction_sent"
                         handoff_turn_queued = True
@@ -841,7 +844,7 @@ class CodexAgentRunner:
             cont = invocation.continuation_fn
             assert cont is not None  # guarded by need_nudge condition
             try:
-                nxt = cont(last_text)
+                nxt, human = cont(last_text)
                 if _inspect.isawaitable(nxt):
                     nxt = await nxt
             except AwaitingUserInput:
@@ -864,7 +867,8 @@ class CodexAgentRunner:
             elog.append_user_message(
                 agent_id=aid,
                 message=Message(role="user",
-                                content=(TextBlock(text=str(nxt)),)))
+                                content=(TextBlock(text=str(nxt)),)),
+                human=human)
             next_prompt = str(nxt)
 
             # Turn boundary: this is the only point where THIS runner sets up
@@ -883,7 +887,8 @@ class CodexAgentRunner:
                     elog.append_user_message(
                         agent_id=aid,
                         message=Message(role="user",
-                                        content=(TextBlock(text=interject_text),)))
+                                        content=(TextBlock(text=interject_text),)),
+                        human=True)
                     elog.append(agent_id=aid, type="user_interjected",
                                 payload={"text": interject_text})
                     next_prompt = f"{next_prompt}\n\n{interject_text}"

@@ -16,7 +16,7 @@ from tests.conftest import _seed_control
 def _user_msg_line(text: str) -> str:
     return json.dumps({
         "type": "user_message",
-        "payload": {"content": [{"type": "text", "text": text}]},
+        "payload": {"content": [{"type": "text", "text": text}], "human": True},
     }) + "\n"
 
 

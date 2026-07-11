@@ -87,9 +87,17 @@ def test_on_event_fan_out_fires_once_with_persisted_dict(tmp_path: Path) -> None
 def test_append_user_message_serializes_text(tmp_path: Path) -> None:
     log = JsonlEventLog(tmp_path / "e.jsonl")
     msg = Message(role="user", content=(TextBlock(text="hello"),))
-    ev = log.append_user_message(agent_id="step:p/s", message=msg)
+    ev = log.append_user_message(agent_id="step:p/s", message=msg, human=True)
     assert ev["payload"] == {"role": "user",
-                             "content": [{"type": "text", "text": "hello"}]}
+                             "content": [{"type": "text", "text": "hello"}],
+                             "human": True}
+
+
+def test_append_user_message_records_human_false(tmp_path: Path) -> None:
+    log = JsonlEventLog(tmp_path / "e.jsonl")
+    msg = Message(role="user", content=(TextBlock(text="injected prompt"),))
+    ev = log.append_user_message(agent_id="step:p/s", message=msg, human=False)
+    assert ev["payload"]["human"] is False
 
 
 def test_append_tool_call_and_result_shapes(tmp_path: Path) -> None:

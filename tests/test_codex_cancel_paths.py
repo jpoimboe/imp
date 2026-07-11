@@ -102,9 +102,9 @@ async def test_cancel_after_continuation_resolves_yields_interrupted(tmp_path: P
         client_factory=lambda options=None: fake_client)
     runner._canonical_auth_override = auth
 
-    def _cont(_last_text: str) -> str:
+    def _cont(_last_text: str) -> tuple[str, bool]:
         runner._cancel = True   # interrupt lands while the nudge is computed
-        return "keep going"
+        return "keep going", False
 
     inv = _invocation(tmp_path, event_log=elog, continuation_fn=_cont)
     events = [ev async for ev in runner.run(inv)]
@@ -132,7 +132,7 @@ async def test_cancel_raised_inside_continuation_yields_interrupted(tmp_path: Pa
         client_factory=lambda options=None: FakeCodex(scripted_turns=scripted))
     runner._canonical_auth_override = auth
 
-    def _cont(_last_text: str) -> str:
+    def _cont(_last_text: str) -> tuple[str, bool]:
         runner._cancel = True
         raise RuntimeError("transport died mid-nudge")
 

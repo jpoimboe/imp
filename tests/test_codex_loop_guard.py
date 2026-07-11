@@ -50,7 +50,7 @@ def _inv(tmp_path: Path, elog: object) -> AgentInvocation:
         # no-complete-step turn and the guard accumulates toward a trip.
         transcript_dir=tmp_path / "tx",
         events_path=tmp_path / "events.jsonl", agent_id="step:t", event_log=elog,
-        continuation_fn=lambda _last: "please call complete_step")
+        continuation_fn=lambda _last: ("please call complete_step", False))
 
 
 @pytest.mark.anyio

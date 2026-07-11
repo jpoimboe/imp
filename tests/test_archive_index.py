@@ -176,7 +176,7 @@ def test_ingest_last_event_ts_all_malformed(tmp_path: Path) -> None:
 def test_connect_stamps_fresh_db_user_version(tmp_path: Path) -> None:
     conn = index.connect(tmp_path / "index.db")
     try:
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 3
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 4
     finally:
         conn.close()
 

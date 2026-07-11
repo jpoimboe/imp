@@ -354,7 +354,7 @@ class EventLog(Protocol):
                             tools_schema: Any, params: dict[str, Any],
                             max_tool_calls: int | None) -> dict[str, Any]: ...
     def append_user_message(self, *, agent_id: str | None,
-                            message: Message) -> dict[str, Any]: ...
+                            message: Message, human: bool) -> dict[str, Any]: ...
     def append_llm_response(self, *, agent_id: str | None, provider: str,
                             model: str, raw: Any, usage: dict[str, Any],
                             stop_reason: Any,
@@ -485,11 +485,12 @@ class _BaseEventLog:
                      "params": params, "max_tool_calls": max_tool_calls})
 
     def append_user_message(self, *, agent_id: str | None,
-                            message: Any) -> dict[str, Any]:
+                            message: Any, human: bool) -> dict[str, Any]:
         return self._emit(
             agent_id=agent_id, type="user_message",
             payload={"role": message.role,
-                     "content": [_block_to_dict(b) for b in message.content]})
+                     "content": [_block_to_dict(b) for b in message.content],
+                     "human": human})
 
     def append_llm_response(self, *, agent_id: str | None, provider: str,
                             model: str, raw: Any, usage: dict[str, Any],

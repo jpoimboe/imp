@@ -49,6 +49,8 @@ def conversation_prose(events: list[Any]) -> str:
             if etype == "opening_intent":
                 text = str(payload.get("text", ""))
             elif etype == "user_message":
+                if not payload.get("human"):
+                    continue
                 text = user_message_text(payload)
             elif etype == "llm_response":
                 text = "\n".join(render_llm_response(payload).texts)

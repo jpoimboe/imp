@@ -1685,13 +1685,13 @@ class ClaudeCodeAgentRunner:
                 if injected is not None:
                     resume_base += 1
                 deliver_reply_on_resume(
-                    messages, transcript, elog, aid, RESUME_REDO_NUDGE)
+                    messages, transcript, elog, aid, RESUME_REDO_NUDGE, human=False)
             elif tail_step_completed and invocation.retry_feedback:
                 deliver_reply_on_resume(
-                    messages, transcript, elog, aid, invocation.retry_feedback)
+                    messages, transcript, elog, aid, invocation.retry_feedback, human=False)
             elif tail_step_completed:
                 deliver_reply_on_resume(
-                    messages, transcript, elog, aid, RESUME_REDO_NUDGE)
+                    messages, transcript, elog, aid, RESUME_REDO_NUDGE, human=False)
             elif classify_resume(existing) is ResumeState.DANGLING_TOOL_USE:
                 synth = repair_dangling_tool_use_on_resume(
                     messages, transcript,
@@ -1702,7 +1702,7 @@ class ClaudeCodeAgentRunner:
             elif (invocation.retry_feedback
                     and classify_resume(existing) is not ResumeState.AWAITING_USER):
                 deliver_reply_on_resume(
-                    messages, transcript, elog, aid, invocation.retry_feedback)
+                    messages, transcript, elog, aid, invocation.retry_feedback, human=False)
             resume_state = classify_resume(messages)
             if resume_state is ResumeState.AWAITING_USER:
                 if ctx.user_input_fn is None:
@@ -1728,7 +1728,7 @@ class ClaudeCodeAgentRunner:
                         messages, transcript, elog, aid, reply)
                 else:
                     deliver_reply_on_resume(
-                        messages, transcript, elog, aid, reply)
+                        messages, transcript, elog, aid, reply, human=True)
                 # Fall through (do NOT return): the reply drives the next LLM
                 # turn as the transcript's trailing user message.
             # §2 resume-entry drain: fold pending interjects into the history
@@ -1788,7 +1788,7 @@ class ClaudeCodeAgentRunner:
                 max_tool_calls=invocation.max_tool_calls)
             for m in invocation.initial_messages:
                 if all(isinstance(b, TextBlock) for b in m.content):
-                    elog.append_user_message(agent_id=aid, message=m)
+                    elog.append_user_message(agent_id=aid, message=m, human=False)
 
         ceiling = invocation.max_tool_calls  # may be None (no cap)
 
@@ -2244,7 +2244,7 @@ class ClaudeCodeAgentRunner:
                                 messages.append(instr_msg)
                                 transcript.append(instr_msg)
                                 elog.append_user_message(
-                                    agent_id=aid, message=instr_msg)
+                                    agent_id=aid, message=instr_msg, human=False)
                                 next_query = instr
                                 handoff_phase = "instruction_sent"
                                 requery = True
@@ -2289,7 +2289,7 @@ class ClaudeCodeAgentRunner:
                             messages.append(user_msg)
                             transcript.append(user_msg)
                             elog.append_user_message(
-                                agent_id=aid, message=user_msg)
+                                agent_id=aid, message=user_msg, human=True)
                             next_query = reply
                             requery = True
                             break
@@ -2371,7 +2371,7 @@ class ClaudeCodeAgentRunner:
                                 messages.append(nudge_msg)
                                 transcript.append(nudge_msg)
                                 elog.append_user_message(
-                                    agent_id=aid, message=nudge_msg)
+                                    agent_id=aid, message=nudge_msg, human=False)
                                 next_query = res.message
                                 requery = True
                                 break
@@ -2439,7 +2439,7 @@ class ClaudeCodeAgentRunner:
 
                         cont = invocation.continuation_fn
                         if cont is not None:
-                            next_text = cont(last_text)
+                            next_text, human = cont(last_text)
                             if inspect.isawaitable(next_text):
                                 next_text = await next_text
                             if self._interrupted():
@@ -2461,7 +2461,7 @@ class ClaudeCodeAgentRunner:
                             )
                             messages.append(user_msg)
                             transcript.append(user_msg)
-                            elog.append_user_message(agent_id=aid, message=user_msg)
+                            elog.append_user_message(agent_id=aid, message=user_msg, human=human)
                             # Turn boundary: this is the only point where THIS
                             # runner sets up the next SDK query (the SDK owns the
                             # in-query tool loop). Deliver any queued human
@@ -2480,7 +2480,7 @@ class ClaudeCodeAgentRunner:
                                 # with deliver_interject/codex (issue: order was
                                 # reversed here).
                                 elog.append_user_message(
-                                    agent_id=aid, message=interject_msg)
+                                    agent_id=aid, message=interject_msg, human=True)
                                 elog.append(
                                     agent_id=aid, type="user_interjected",
                                     payload={"text": _text_of(interject_msg)})

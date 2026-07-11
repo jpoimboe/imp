@@ -126,7 +126,7 @@ def test_pending_interject_satisfies_without_soliciting() -> None:
 
     fn = build_continuation_fn(
         user_input_fn=reply_fn, coordinator=coord, headless=False)
-    assert fn("which database?") == "actually, stop and reconsider"
+    assert fn("which database?") == ("actually, stop and reconsider", True)
     assert calls["n"] == 0
 
 
@@ -142,9 +142,10 @@ async def test_attended_human_reply_becomes_next_message(
     fn = build_continuation_fn(
         user_input_fn=reply_fn, coordinator=InterruptCoordinator(),
         event_log=log, agent_id="a1", headless=False)
-    out = fn("which database should I use?")
-    assert inspect.isawaitable(out)
-    assert await out == "use postgres"
+    text, human = fn("which database should I use?")
+    assert human is True
+    assert inspect.isawaitable(text)
+    assert await text == "use postgres"
     # Attended path emits awaiting_user_input and NEVER nudges.
     assert any(e["type"] == "awaiting_user_input" for e in log.events)
 
@@ -165,9 +166,10 @@ async def test_headless_with_channel_solicits_immediately(
         event_log=log, agent_id="a1", headless=True)
     # Headless top-level NEVER nudges: the first bare turn-end solicits the
     # channel and emits awaiting_user_input.
-    out = fn("still prose")
-    assert inspect.isawaitable(out)
-    assert await out == "the --message reply"
+    text, human = fn("still prose")
+    assert human is True
+    assert inspect.isawaitable(text)
+    assert await text == "the --message reply"
     assert calls["n"] == 1
     assert any(e["type"] == "awaiting_user_input" for e in log.events)
 
@@ -251,7 +253,7 @@ def test_first_bare_turn_end_returns_the_nudge_string() -> None:
     log = _RecordingLog()
     fn = build_continuation_fn(
         event_log=log, agent_id="a1", has_schema=True, interactive=False)
-    assert fn("the real question") == COMPLETION_NUDGE
+    assert fn("the real question") == (COMPLETION_NUDGE, False)
 
 
 def test_nudge_emits_completion_nudge_event_with_message() -> None:
@@ -271,7 +273,7 @@ def test_second_bare_turn_end_falls_through_to_park_no_second_nudge() -> None:
     log = _RecordingLog()
     fn = build_continuation_fn(
         event_log=log, agent_id="a1", has_schema=True, interactive=False)
-    assert fn("the real question") == COMPLETION_NUDGE
+    assert fn("the real question") == (COMPLETION_NUDGE, False)
     with pytest.raises(AwaitingUserInput):
         fn("WAITING")
     nudges = [e for e in log.events if e["type"] == "completion_nudge"]
@@ -282,7 +284,7 @@ def test_park_after_nudge_carries_pre_nudge_text_not_reply() -> None:
     # Park fidelity: the human at the gate must see the ORIGINAL question, not
     # the post-nudge reply. Without the stash, the prompt would be "WAITING".
     fn = build_continuation_fn(has_schema=True, interactive=False)
-    assert fn("the real question") == COMPLETION_NUDGE
+    assert fn("the real question") == (COMPLETION_NUDGE, False)
     with pytest.raises(AwaitingUserInput) as exc_info:
         fn("WAITING")
     assert exc_info.value.prompt == "the real question"
@@ -317,7 +319,7 @@ def test_pending_interject_wins_over_nudge() -> None:
     fn = build_continuation_fn(
         coordinator=coord, event_log=log, agent_id="a1",
         has_schema=True, interactive=False)
-    assert fn("which database?") == "stop and reconsider"
+    assert fn("which database?") == ("stop and reconsider", True)
     assert not any(e["type"] == "completion_nudge" for e in log.events)
 
 
@@ -338,10 +340,11 @@ async def test_attended_first_yield_nudges_then_solicits(
         user_input_fn=reply_fn, coordinator=InterruptCoordinator(),
         event_log=log, agent_id="a1", headless=False,
         has_schema=True, interactive=False)
-    assert fn("which database?") == COMPLETION_NUDGE   # nudge, not a solicit
-    out = fn("WAITING")                                # now solicits inline
-    assert inspect.isawaitable(out)
-    assert await out == "use postgres"
+    assert fn("which database?") == (COMPLETION_NUDGE, False)   # nudge, not a solicit
+    text, human = fn("WAITING")                        # now solicits inline
+    assert human is True
+    assert inspect.isawaitable(text)
+    assert await text == "use postgres"
     nudges = [e for e in log.events if e["type"] == "completion_nudge"]
     assert len(nudges) == 1
 
@@ -363,12 +366,13 @@ async def test_two_consecutive_yields_each_get_exactly_one_nudge(
         event_log=log, agent_id="a1", headless=True,
         has_schema=True, interactive=False)
     # Yield 1
-    assert fn("question one") == COMPLETION_NUDGE
-    out = fn("WAITING")            # falls through to channel solicit
-    assert inspect.isawaitable(out)
-    assert await out == "carry on"
+    assert fn("question one") == (COMPLETION_NUDGE, False)
+    text, human = fn("WAITING")    # falls through to channel solicit
+    assert human is True
+    assert inspect.isawaitable(text)
+    assert await text == "carry on"
     # Yield 2 — a later, separate bare turn-end
-    assert fn("question two") == COMPLETION_NUDGE
+    assert fn("question two") == (COMPLETION_NUDGE, False)
     nudges = [e for e in log.events if e["type"] == "completion_nudge"]
     assert len(nudges) == 2
 
@@ -384,13 +388,13 @@ def test_interject_after_nudge_clears_bit_so_later_yield_re_nudges() -> None:
         coordinator=coord, event_log=log, agent_id="a1",
         has_schema=True, interactive=False)
     # Yield 1: nudge fires.
-    assert fn("question one") == COMPLETION_NUDGE
+    assert fn("question one") == (COMPLETION_NUDGE, False)
     # A human types a mid-run interject; the next bare turn-end returns it and
     # clears the nudged bit.
     coord.enqueue_interject("actually, do X instead")
-    assert fn("WAITING") == "actually, do X instead"
+    assert fn("WAITING") == ("actually, do X instead", True)
     # Yield 2: a later separate bare turn-end must get a FRESH nudge, not a park.
-    assert fn("question two") == COMPLETION_NUDGE
+    assert fn("question two") == (COMPLETION_NUDGE, False)
     nudges = [e for e in log.events if e["type"] == "completion_nudge"]
     assert len(nudges) == 2
 

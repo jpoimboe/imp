@@ -129,7 +129,7 @@ def build_continuation_fn(
     headless: bool = False,
     interactive: bool = False,
     has_schema: bool = False,
-) -> Callable[[str], str | Awaitable[str]]:
+) -> Callable[[str], tuple[str | Awaitable[str], bool]]:
     """End-of-turn handler for a bare turn-end (assistant text, no
     complete_step). Whether that is a question to the human or a forgotten
     complete_step is indistinguishable, so resolution turns on WHO can take the
@@ -177,13 +177,13 @@ def build_continuation_fn(
     nudged = False
     pre_nudge_text = ""
 
-    def _cont(last_text: str) -> str | Awaitable[str]:
+    def _cont(last_text: str) -> tuple[str | Awaitable[str], bool]:
         nonlocal nudged, pre_nudge_text
         if coordinator is not None:
             pending: str | None = coordinator.drain_interject()
             if pending is not None:
                 nudged = False
-                return pending
+                return pending, True
         # One-shot disambiguation nudge: a schema-bearing, non-interactive-flag agent's
         # bare turn-end is indistinguishable from a forgotten complete_step, so
         # ask ONCE (WAITING or complete_step). Behavior keys only on whether the
@@ -193,7 +193,7 @@ def build_continuation_fn(
             nudged = True
             pre_nudge_text = last_text
             _emit_nudge()
-            return COMPLETION_NUDGE
+            return COMPLETION_NUDGE, False
         # Already nudged (or nudge not applicable): today's behavior. When we
         # nudged, the human/park must see the ORIGINAL question, not the
         # post-nudge reply, so pass the stashed pre-nudge text. Clear the bit so
@@ -201,12 +201,12 @@ def build_continuation_fn(
         park_text = pre_nudge_text if nudged else last_text
         nudged = False
         if user_input_fn is not None and not headless:
-            return inline(park_text)
+            return inline(park_text), True
         # Headless top-level: solicit the channel if present, else park.
         # Synchronous raise (not the async inline tail) because callers invoke
         # _cont without awaiting and rely on the raise to pause the run.
         if user_input_fn is not None:
-            return inline(park_text)
+            return inline(park_text), True
         _emit_awaiting()
         raise AwaitingUserInput(park_text)
 

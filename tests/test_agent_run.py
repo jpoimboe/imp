@@ -972,7 +972,8 @@ async def test_real_bare_turn_end_solicit_is_not_torn_down_by_watchdog(
             cont = build_continuation_fn(
                 user_input_fn=_blocking_input, coordinator=coord,
                 event_log=log, agent_id="step:p/s")
-            captured["reply"] = await cont("merge?")
+            _text, _human = cont("merge?")
+            captured["reply"] = await _text
             yield {"type": "agent_output", "payload": {"status": "Success"}}
 
     result_holder = {}

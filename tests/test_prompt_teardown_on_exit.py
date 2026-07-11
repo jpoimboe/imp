@@ -215,7 +215,8 @@ async def test_solicit_cancel_converts_to_awaiting_user_input_cleanly() -> None:
         with warnings.catch_warnings():
             warnings.simplefilter("error")
             with redirect_stderr(buf), pytest.raises(AwaitingUserInput) as ei:
-                await cont("")
+                _text, _human = cont("")
+                await _text
 
     # The cancellation converts cleanly; the pause carries no prompt.
     assert ei.value.prompt == ""
@@ -239,5 +240,6 @@ async def test_solicit_normal_reply_unchanged() -> None:
             user_input_fn=user_input_fn,
             coordinator=None, event_log=None, agent_id=None)
         pipe.send_text("do the thing\r")
-        reply = await cont("")
+        _text, _human = cont("")
+        reply = await _text
     assert reply == "do the thing"

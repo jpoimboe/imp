@@ -16,7 +16,7 @@ _SCHEMA = (
     " change_id TEXT, depends_on_id TEXT)",
 )
 
-_SCHEMA_VERSION = 3
+_SCHEMA_VERSION = 4
 
 
 def connect(index_path: Path) -> sqlite3.Connection:
