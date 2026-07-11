@@ -73,7 +73,7 @@ def test_tool_descriptions_name_quest() -> None:
 def test_mental_model_primer_names_quest() -> None:
     text = (_ASSETS / "skills/agent/imp-mental-model.md").read_text()
     assert "## Quest and its home" in text
-    assert "A **Quest** is one unit of work imp tracks from idea to merge." in text
+    assert "A **quest** is one unit of work imp tracks from idea to merge." in text
     assert "per-quest home on disk at " in text
     assert "**Change**" not in text
     assert "## Change and its home" not in text
