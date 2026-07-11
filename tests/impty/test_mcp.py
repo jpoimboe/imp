@@ -55,6 +55,19 @@ def test_build_server_registers_thread_offloaded_tools_that_are_callable() -> No
         asyncio.run(server.call_tool("view", {}))
 
 
+def test_thin_build_server_carries_the_one_line_descriptions() -> None:
+    driver = ImptyDriver()
+    tools = {t.name: t
+             for t in asyncio.run(build_server(driver, thin=True).list_tools())}
+    assert set(tools) == set(THIN_DESCRIPTIONS)
+    driver_docs = {m.__name__: m.__doc__ for m in driver.tool_methods()}
+    for name, tool in tools.items():
+        # Codex surface (start_impty_server -> build_server(thin=True)) shows
+        # the one-liner, not the full docstring; the default stays rich.
+        assert tool.description == THIN_DESCRIPTIONS[name]
+        assert tool.description != driver_docs[name]
+
+
 def test_impty_tool_specs_match_build_server_introspection() -> None:
     driver = ImptyDriver()
     # build_server's rich default (standalone surface) keeps the full docstrings.
