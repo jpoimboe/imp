@@ -68,6 +68,9 @@ def test_tool_descriptions_name_quest() -> None:
     assert "switch this quest into it" in reg["create_and_enter_worktree"].description
     assert "; the quest's " in reg["glob"].description
     assert "; the quest's " in reg["grep"].description
+    assert "Record a durable follow-up backlog quest" in reg["create_quest"].description
+    assert "Rename this quest to a meaningful title" in reg["rename_quest"].description
+    assert "returns this quest's id" in reg["rename_quest"].description
 
 
 def test_mental_model_primer_names_quest() -> None:
