@@ -58,6 +58,8 @@ class LiveStatus:
         self._width_fn: Callable[[], int] = term_width
         self._rows = 0                          # number of footer rows currently on screen
         self._drawn_widths: list[int] = []      # display width of each on-screen row
+        self._owns_lead_blank = True     # a footer normally owns one blank directly above it
+        self._skip_lead_once = False     # one-shot: next first-draw owns NO leading blank
 
     def update(self, compose: Callable[[int, float], list[str] | None]) -> None:
         """Set/refresh the compose fn and redraw. Starts the session timer on the
@@ -125,18 +127,27 @@ class LiveStatus:
         # the single-row ack, so the upper rows never leak into scroll-back. _erase() lands
         # the cursor on the status-owned blank and is a strict no-op when nothing is visible.
         was_visible = self._visible
+        owned_blank = self._owns_lead_blank
         self._erase()
-        # When a block was erased the cursor now sits ON the owned blank; draw the ack one
-        # row BELOW it (lead "\n") so the blank is preserved and the next _erase climbs back
-        # onto it — not one row too high onto committed scroll-back. On a fresh status
-        # (_erase was a no-op) draw in place, identical to the single-line path.
-        lead = "\n" if was_visible else ""
+        # When an owned-blank block was erased the cursor now sits ON the owned blank; draw
+        # the ack one row BELOW it (lead "\n") so the blank is preserved and the next _erase
+        # climbs back onto it — not one row too high onto committed scroll-back. On a fresh
+        # status (_erase was a no-op) or a skip-drawn footer (owns no blank, _erase cleared
+        # in place) draw in place, identical to the single-line path.
+        lead = "\n" if (was_visible and owned_blank) else ""
         self._hide_cursor()
         self._stream.write(f"{lead}{_ERASE}{_DIM}{text}{_RESET_SGR}")
         self._stream.flush()
         self._visible = True
         self._rows = 1
         self._drawn_widths = [_display_width(text)]
+
+    def skip_leading_blank(self) -> None:
+        """Prime the next first-draw to own NO leading blank: a committed blank
+        already sits above the install point (a splash tagline or an inert
+        question). Pairs with _erase, which then clears the footer in place
+        instead of climbing onto that committed blank."""
+        self._skip_lead_once = True
 
     # -- internals ------------------------------------------------------------
     def _hide_cursor(self) -> None:
@@ -199,7 +210,11 @@ class LiveStatus:
             if self._visible:
                 self._erase()
             self._hide_cursor()
-            self._stream.write("\n" + "\n".join(_ERASE + r for r in rows))
+            skip = self._skip_lead_once
+            self._skip_lead_once = False
+            self._owns_lead_blank = not skip
+            lead = "" if skip else "\n"
+            self._stream.write(lead + "\n".join(_ERASE + r for r in rows))
         self._stream.flush()
         self._visible = True
         self._prev_width = new_w
@@ -214,8 +229,10 @@ class LiveStatus:
             # erase correct after the terminal has narrowed and the rows soft-wrapped.
             phys = self._physical_rows()
             self._stream.write("\r")
-            for _ in range(phys):
-                self._stream.write("\x1b[K" + _UP)
+            for i in range(phys):
+                self._stream.write("\x1b[K")
+                if self._owns_lead_blank or i < phys - 1:
+                    self._stream.write(_UP)
             self._show_cursor()
             self._stream.flush()
         self._visible = False
