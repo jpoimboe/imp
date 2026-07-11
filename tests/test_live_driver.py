@@ -2903,7 +2903,7 @@ def test_startup_line_persists_through_replay_then_replaced_at_boundary() -> Non
     assert status._compose == drv.compose_startup   # startup line NOT swapped during replay
     assert "resuming" in out.getvalue()
     drv.on_event({"type": "replay_complete"})      # boundary lights the footer
-    assert status._compose == drv.compose_status    # replaced by the real status footer at the boundary
+    assert status._compose == drv.compose_status    # replaced by the real footer
     for e in marked[3:]:                            # first live event onward
         drv.on_event(e)
     assert status._compose == drv.compose_status    # stays the real footer
