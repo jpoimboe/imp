@@ -1029,7 +1029,7 @@ async def test_system_prompt_carries_completion_instruction_and_continuation(
     # Headless top-level schema-bearing step: the FIRST bare turn-end is nudged
     # once (asked to complete or confirm WAITING); a subsequent bare turn-end
     # then parks via AwaitingUserInput carrying the original text.
-    assert inv.continuation_fn("prose") == COMPLETION_NUDGE
+    assert inv.continuation_fn("prose") == (COMPLETION_NUDGE, False)
     with pytest.raises(AwaitingUserInput):
         inv.continuation_fn("prose")
 

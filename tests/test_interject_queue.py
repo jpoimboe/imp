@@ -291,7 +291,7 @@ async def test_claude_code_delivers_interject_at_requery_boundary(
         event_log=log,
         coordinator=coord,
     )
-    inv = replace(inv, continuation_fn=lambda _last: "call complete_step now")
+    inv = replace(inv, continuation_fn=lambda _last: ("call complete_step now", False))
 
     # Capture the client so we can read what was re-queried.
     captured: dict[str, Any] = {}
@@ -378,7 +378,7 @@ async def test_codex_delivers_interject_at_turn_boundary(tmp_path: Path) -> None
         transcript_dir=tmp_path / "tx",
         events_path=tmp_path / "events.jsonl", agent_id="step:t",
         event_log=log, coordinator=coord,
-        continuation_fn=lambda _last: "call complete_step now")
+        continuation_fn=lambda _last: ("call complete_step now", False))
 
     events = [ev async for ev in runner.run(inv)]
 
@@ -417,7 +417,7 @@ async def test_anthropic_delivers_interject_on_nudge_branch(tmp_path: Path) -> N
 
     inv = _inv(tmp_path, event_log=log, coordinator=coord,
                tools=frozenset({"complete_step"}))
-    inv = replace(inv, continuation_fn=lambda _last: "call complete_step now")
+    inv = replace(inv, continuation_fn=lambda _last: ("call complete_step now", False))
 
     runner = AnthropicAgentRunner(
         model_name="claude-sonnet-4-6", client_factory=lambda: fake)
@@ -484,7 +484,7 @@ async def test_openai_delivers_interject_on_nudge_branch(tmp_path: Path) -> None
         agent_id="step:p/s",
         event_log=log,
         coordinator=coord,
-        continuation_fn=lambda _last: "call complete_step now",
+        continuation_fn=lambda _last: ("call complete_step now", False),
     )
     runner = OpenAIAgentRunner(model_name="gpt-4o-mini", client_factory=lambda: fake)
     events = [e async for e in runner.run(inv)]

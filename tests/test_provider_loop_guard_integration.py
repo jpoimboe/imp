@@ -29,7 +29,7 @@ async def test_anthropic_repeated_prose_trips_repeated_failure(tmp_path) -> None
     runner = AnthropicAgentRunner(model_name="claude-sonnet-4-6",
                                   client_factory=lambda: fake)
     inv = replace(_inv(tmp_path, event_log=log),
-                  continuation_fn=lambda _last: "please call complete_step")
+                  continuation_fn=lambda _last: ("please call complete_step", False))
     events = [e async for e in runner.run(inv)]
     final = events[-1]
     assert final["type"] == "error"
@@ -46,7 +46,7 @@ async def test_anthropic_distinct_prose_trips_no_progress(tmp_path) -> None:
     runner = AnthropicAgentRunner(model_name="claude-sonnet-4-6",
                                   client_factory=lambda: fake)
     inv = replace(_inv(tmp_path, event_log=log),
-                  continuation_fn=lambda _last: "keep going")
+                  continuation_fn=lambda _last: ("keep going", False))
     events = [e async for e in runner.run(inv)]
     final = events[-1]
     assert final["type"] == "error"
@@ -67,7 +67,7 @@ async def test_anthropic_healthy_run_never_trips(tmp_path) -> None:
     inv = replace(
         _inv(tmp_path, tools=frozenset({"complete_step", "write_file"}),
              event_log=log),
-        continuation_fn=lambda _last: "keep going")
+        continuation_fn=lambda _last: ("keep going", False))
     events = [e async for e in runner.run(inv)]
     assert events[-1]["type"] == "agent_output"
     assert not any(e["type"] == "error" and e["payload"].get("category") == "loop"
@@ -111,7 +111,7 @@ async def test_anthropic_interactive_never_trips_loop(tmp_path) -> None:
                                   client_factory=lambda: fake)
     inv = replace(_inv(tmp_path, event_log=log),
                   interactive=True,
-                  continuation_fn=lambda _last: "keep going")
+                  continuation_fn=lambda _last: ("keep going", False))
     events = [e async for e in runner.run(inv)]
     assert events[-1]["type"] == "agent_output"
     assert not any(e["type"] == "error" and e["payload"].get("category") == "loop"

@@ -694,7 +694,7 @@ async def test_continuation_resumes_then_completes(tmp_path: Path) -> None:
     runner = AnthropicAgentRunner(model_name="claude-sonnet-4-6",
                                   client_factory=lambda: fake)
     inv = replace(_inv(tmp_path, event_log=log),
-                  continuation_fn=lambda _last: "please call complete_step")
+                  continuation_fn=lambda _last: ("please call complete_step", False))
     events = [e async for e in runner.run(inv)]
     assert [e["type"] for e in control_events(events)] == ["agent_output"]
     user_msgs = [e for e in log.read() if e["type"] == "user_message"]

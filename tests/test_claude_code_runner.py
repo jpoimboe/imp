@@ -241,10 +241,10 @@ async def test_cancel_during_continuation_skips_nudge_and_requery(
         model_name="claude-sonnet-4-5", client_factory=factory,
     )
 
-    def cancelling_cont(_last_text: str) -> str:
+    def cancelling_cont(_last_text: str) -> tuple[str, bool]:
         # The Ctrl-C lands here, mid-continuation.
         runner._cancel = True
-        return "You ended your turn without calling complete_step"
+        return "You ended your turn without calling complete_step", False
 
     inv = replace(_inv(tmp_path), continuation_fn=cancelling_cont)
     events = [ev async for ev in runner.run(inv)]
@@ -788,7 +788,7 @@ async def test_continuation_resumes_then_completes(tmp_path: Path) -> None:
 
     log = InMemoryEventLog()
     inv = _inv(tmp_path, event_log=log)
-    inv = replace(inv, continuation_fn=lambda _last: "please call complete_step")
+    inv = replace(inv, continuation_fn=lambda _last: ("please call complete_step", False))
 
     runner = ClaudeCodeAgentRunner(
         model_name="claude-sonnet-4-5", client_factory=fake_client_factory,
@@ -820,9 +820,9 @@ async def test_classified_auth_text_wins_over_nudge(tmp_path: Path) -> None:
     inv = _inv(tmp_path, event_log=log)
     consulted: dict[str, bool] = {"hit": False}
 
-    def cont(_last: str) -> str | None:
+    def cont(_last: str) -> tuple[str, bool] | None:
         consulted["hit"] = True
-        return "nudge"
+        return "nudge", False
 
     inv = replace(inv, continuation_fn=cont)
     runner = ClaudeCodeAgentRunner(
@@ -875,7 +875,7 @@ async def test_requery_across_two_receive_rounds_no_error(tmp_path: Path) -> Non
     log = InMemoryEventLog()
     inv = _inv(tmp_path, event_log=log)
     inv = replace(inv,
-                  continuation_fn=lambda _last: "looks good, proceed")
+                  continuation_fn=lambda _last: ("looks good, proceed", False))
 
     runner = ClaudeCodeAgentRunner(
         model_name="claude-sonnet-4-5", client_factory=fake_client_factory,
@@ -1230,7 +1230,7 @@ async def test_result_is_error_emits_terminated_not_nudge(tmp_path: Path) -> Non
         return FakeClaudeSDKClient(opts, scripted_messages=scripted)
 
     inv = _inv(tmp_path)
-    inv = replace(inv, continuation_fn=lambda _last: "please call complete_step")
+    inv = replace(inv, continuation_fn=lambda _last: ("please call complete_step", False))
     runner = ClaudeCodeAgentRunner(model_name="claude-sonnet-4-6", client_factory=factory)
 
     events = [e async for e in runner.run(inv)]

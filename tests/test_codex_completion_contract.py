@@ -185,9 +185,9 @@ async def test_interactive_nudge_recovers_with_complete_step_on_second_turn(
     ]
     seen: list[str] = []
 
-    def _cont(last: str) -> str:
+    def _cont(last: str) -> tuple[str, bool]:
         seen.append(last)
-        return "please call complete_step now"
+        return "please call complete_step now", False
 
     fake = FakeCodex(scripted_turns=scripted)
     runner = CodexAgentRunner(

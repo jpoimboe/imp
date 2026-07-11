@@ -154,7 +154,7 @@ class AgentInvocation:
     # inject and continue. None means "no end-of-turn nudge wired"
     # (legacy/test); providers then emit the immediate no_complete_step behavior.
     continuation_fn: (
-        Callable[[str], str | Awaitable[str]] | None
+        Callable[[str], tuple[str | Awaitable[str], bool]] | None
     ) = None
     # Stable identity of this agent invocation (step/gate/subagent), used as
     # the strict filter key for reconstruction. Derived by the executor /

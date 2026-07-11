@@ -525,7 +525,7 @@ async def test_continuation_resumes_then_completes(tmp_path: Path) -> None:
     runner = OpenAIAgentRunner(model_name="gpt-4o-mini",
                                client_factory=lambda: fake)
     inv = replace(_inv(tmp_path, event_log=log),
-                  continuation_fn=lambda _last: "please call complete_step")
+                  continuation_fn=lambda _last: ("please call complete_step", False))
     events = [e async for e in runner.run(inv)]
     assert events[-1]["type"] == "agent_output"
 

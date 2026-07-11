@@ -841,7 +841,7 @@ class CodexAgentRunner:
             cont = invocation.continuation_fn
             assert cont is not None  # guarded by need_nudge condition
             try:
-                nxt = cont(last_text)
+                nxt, _human = cont(last_text)
                 if _inspect.isawaitable(nxt):
                     nxt = await nxt
             except AwaitingUserInput:

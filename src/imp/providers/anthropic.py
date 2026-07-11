@@ -816,7 +816,7 @@ class AnthropicAgentRunner:
                     return
                 cont = invocation.continuation_fn
                 if cont is not None:
-                    next_text = cont(last_text)
+                    next_text, _human = cont(last_text)
                     if inspect.isawaitable(next_text):
                         next_text = await next_text
                     user_msg = Message(role="user", content=(TextBlock(text=next_text),))

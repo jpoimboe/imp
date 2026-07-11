@@ -181,7 +181,7 @@ class ScriptedAgentRunner:
                     # Bare turn-end (assistant text, no tool call) IS the yield:
                     # route through the shared end-of-turn handler like the real
                     # providers (solicit / nudge / pause), then continue the script.
-                    nxt = invocation.continuation_fn(text)
+                    nxt, _human = invocation.continuation_fn(text)
                     if inspect.isawaitable(nxt):
                         nxt = await nxt
                     reply_msg = Message(
