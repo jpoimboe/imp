@@ -344,6 +344,12 @@ def resolve_policy(
         claude_dir = Path(claude_override) if claude_override else home / ".claude"
         cred_writethrough = _existing([str(claude_dir), str(home / ".codex")])
 
+    # ro overlay of workflow snapshot — bind_plan emits it after the change_home rw
+    # bind, so last-covering-wins makes only workflow/ read-only.
+    readonly_overlays: tuple[str, ...] = ()
+    if change_dir is not None and (change_dir / "workflow").is_dir():
+        readonly_overlays = (str(change_dir / "workflow"),)
+
     return SandboxPolicy(
         active=True,
         worktree=str(worktree),
@@ -351,6 +357,7 @@ def resolve_policy(
         change_home=str(change_dir) if change_dir is not None else "",
         git_ro_remask=tuple(remask),
         git_ref_reexpose=git_ref_reexpose,
+        readonly_overlays=readonly_overlays,
         writable_caches=caches,
         extra_readable=tuple(cfg.extra_readable),
         extra_writable=tuple(cfg.extra_writable),
