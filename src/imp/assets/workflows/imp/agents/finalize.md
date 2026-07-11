@@ -2,7 +2,7 @@
 name: finalize
 label: finalizing
 description: Final gate at the head of the merge queue — runs after the change has already been rebased, re-verified, and integration-reviewed at the lane head. Opens with the summarizer's intent-level summary (falling back to the audit record) and takes human merge approval (merge / rework / pause); a merge decision proceeds straight into the mechanical merge.
-subagents: [explorer, researcher]
+subagents: [explorer, researcher, spiker]
 output:
   status: {type: enum, values: [Success, Error]}
   decision: {type: enum, values: [merge, rework, pause]}
@@ -39,6 +39,13 @@ diff, and `integration-review` already re-reviewed it at the merge head; a third
 here is redundant and is exactly where spurious end-of-run human asks are born.
 
 {% include "partials/delegate-exploration.md" %}
+
+Dispatch a **`spiker`** when a human at the gate raises a concern or an
+underspecified-rework question that can only be settled **empirically** — by
+writing and running throwaway code, not by reading — and whose answer bears on the
+merge-vs-rework decision. The spiker runs in its own isolated worktree and reports
+findings without ever shipping code, so you settle the question empirically without
+becoming a reviewer or making code changes yourself.
 
 Populate the audit fields:
 - `verify_status`: the verification state in plain user terms — never surface internal gate jargon or raw exit codes.
