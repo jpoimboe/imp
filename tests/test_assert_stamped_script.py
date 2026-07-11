@@ -1,6 +1,6 @@
 """assert-stamped.sh — the read-only PRE-MERGE backstop over fork..HEAD.
 
-It asserts every non-merge commit carries `Change: <id>` and that no
+It asserts every non-merge commit carries `Quest: <id>` and that no
 fixup!/squash!/amend! directive subject remains, and performs NO rebase/mutation.
   0 -> invariant holds
   1 -> an unstamped commit or a leftover fixup directive (pause for a human)
@@ -73,8 +73,8 @@ def test_passes_when_all_stamped_and_no_directives(tmp_path: Path) -> None:
     _init(pr)
     _record_change(pr)
     _git(pr, "checkout", "-b", "imp/x")
-    _commit(pr, "a.txt", "a\n", f"feat a\n\nChange: {ID}")
-    _commit(pr, "b.txt", "b\n", f"feat b\n\nChange: {ID}")
+    _commit(pr, "a.txt", "a\n", f"feat a\n\nQuest: {ID}")
+    _commit(pr, "b.txt", "b\n", f"feat b\n\nQuest: {ID}")
     _stamp(pr, "last_green_tree_slow")          # HEAD tree verified green
     res = _run(pr)
     assert res.returncode == 0, res.stderr
@@ -85,11 +85,11 @@ def test_fails_on_unstamped_commit(tmp_path: Path) -> None:
     _init(pr)
     _record_change(pr)
     _git(pr, "checkout", "-b", "imp/x")
-    _commit(pr, "a.txt", "a\n", f"feat a\n\nChange: {ID}")
+    _commit(pr, "a.txt", "a\n", f"feat a\n\nQuest: {ID}")
     _commit(pr, "b.txt", "b\n", "feat b")                 # no trailer
     res = _run(pr)
     assert res.returncode == 1, res.stderr
-    assert "missing Change" in res.stderr
+    assert "missing Quest" in res.stderr
 
 
 def test_fails_on_leftover_fixup_directive(tmp_path: Path) -> None:
@@ -97,7 +97,7 @@ def test_fails_on_leftover_fixup_directive(tmp_path: Path) -> None:
     _init(pr)
     _record_change(pr)
     _git(pr, "checkout", "-b", "imp/x")
-    _commit(pr, "a.txt", "a\n", f"feat a\n\nChange: {ID}")
+    _commit(pr, "a.txt", "a\n", f"feat a\n\nQuest: {ID}")
     target = _git(pr, "rev-parse", "HEAD").stdout.strip()
     (pr / "a.txt").write_text("a2\n")
     _git(pr, "add", "a.txt")
@@ -112,7 +112,7 @@ def test_makes_no_commit(tmp_path: Path) -> None:
     _init(pr)
     _record_change(pr)
     _git(pr, "checkout", "-b", "imp/x")
-    _commit(pr, "a.txt", "a\n", f"feat a\n\nChange: {ID}")
+    _commit(pr, "a.txt", "a\n", f"feat a\n\nQuest: {ID}")
     _stamp(pr, "last_green_tree_slow")
     head_before = _git(pr, "rev-parse", "HEAD").stdout.strip()
     res = _run(pr)
@@ -125,7 +125,7 @@ def test_empty_quest_id_fails(tmp_path: Path) -> None:
     _init(pr)
     _record_change(pr)
     _git(pr, "checkout", "-b", "imp/x")
-    _commit(pr, "a.txt", "a\n", f"feat a\n\nChange: {ID}")
+    _commit(pr, "a.txt", "a\n", f"feat a\n\nQuest: {ID}")
     res = _run(pr, quest_id="")
     assert res.returncode != 0                            # ${IMP_QUEST_ID:?}
 
@@ -136,7 +136,7 @@ def test_fails_when_tree_not_cleared(tmp_path: Path) -> None:
     _init(pr)
     _record_change(pr)
     _git(pr, "checkout", "-b", "imp/x")
-    _commit(pr, "a.txt", "a\n", f"feat a\n\nChange: {ID}")
+    _commit(pr, "a.txt", "a\n", f"feat a\n\nQuest: {ID}")
     res = _run(pr)                              # no stamp seeded, tolerated false
     assert res.returncode == 1, res.stderr
     assert "neither verified green" in res.stderr
@@ -148,7 +148,7 @@ def test_passes_on_tolerated_red_for_this_tree(tmp_path: Path) -> None:
     _init(pr)
     _record_change(pr)
     _git(pr, "checkout", "-b", "imp/x")
-    _commit(pr, "a.txt", "a\n", f"feat a\n\nChange: {ID}")
+    _commit(pr, "a.txt", "a\n", f"feat a\n\nQuest: {ID}")
     _stamp(pr, "last_verified_tree_slow")       # slow ran on THIS tree
     res = _run(pr, tolerated="True")
     assert res.returncode == 0, res.stderr
@@ -160,7 +160,7 @@ def test_fails_on_tolerated_but_stale_verified_tree(tmp_path: Path) -> None:
     _init(pr)
     _record_change(pr)
     _git(pr, "checkout", "-b", "imp/x")
-    _commit(pr, "a.txt", "a\n", f"feat a\n\nChange: {ID}")
+    _commit(pr, "a.txt", "a\n", f"feat a\n\nQuest: {ID}")
     (_home(pr) / "last_verified_tree_slow").write_text("deadbeef\n")   # a different tree
     res = _run(pr, tolerated="true")
     assert res.returncode == 1, res.stderr

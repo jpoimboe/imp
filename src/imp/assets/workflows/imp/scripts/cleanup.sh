@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # cleanup.sh — the ONE end-of-quest fold + stamp, run once at cleanup-merge over
 # the whole change range cur_base_head..HEAD. It folds every fixup!/squash!/amend!
-# chain into its target and stamps `Change: <id>` on every non-merge commit. Both
+# chain into its target and stamps `Quest: <id>` on every non-merge commit. Both
 # are idempotent: fold runs only when a directive exists, stamp only when some
 # in-range commit lacks the trailer, so re-running on already-folded, already-
 # stamped history is a ZERO-CHURN no-op (identical SHAs). Because the whole change
@@ -32,7 +32,7 @@ _has_directives() {
 _all_stamped() {
   local h
   while read -r h; do
-    [ "$(git log -1 --format='%(trailers:key=Change,valueonly)' "$h")" = "$ID" ] \
+    [ "$(git log -1 --format='%(trailers:key=Quest,valueonly)' "$h")" = "$ID" ] \
       || return 1
   done < <(git rev-list --no-merges "$FORK"..HEAD)
   return 0
@@ -158,21 +158,21 @@ if _has_directives; then
 fi
 
 # ── STAMP ────────────────────────────────────────────────────────────────────
-# Stamp Change: <id> on every non-merge commit in range; idempotent via
+# Stamp Quest: <id> on every non-merge commit in range; idempotent via
 # trailer.ifexists=doNothing. Then self-verify the postcondition. (Reached only
 # when a directive was folded or some commit was unstamped; the fast path above
 # already returned for already-folded + already-stamped history, keeping re-entry
 # zero-churn.)
 if ! git rebase "$FORK" \
-  --exec 'git -c trailer.ifexists=doNothing commit --amend --no-edit --trailer "Change: '"$ID"'"'; then
+  --exec 'git -c trailer.ifexists=doNothing commit --amend --no-edit --trailer "Quest: '"$ID"'"'; then
   git rebase --abort 2>/dev/null || true
   echo "cleanup stamp rebase failed; branch left intact for human resolution" >&2
   exit 1
 fi
 
 while read -r h; do
-  [ "$(git log -1 --format='%(trailers:key=Change,valueonly)' "$h")" = "$ID" ] \
-    || { echo "stamp failed: $h missing Change: $ID" >&2; exit 1; }
+  [ "$(git log -1 --format='%(trailers:key=Quest,valueonly)' "$h")" = "$ID" ] \
+    || { echo "stamp failed: $h missing Quest: $ID" >&2; exit 1; }
 done < <(git rev-list --no-merges "$FORK"..HEAD)
 
-echo "ok: clean tree, fixups folded, Change: $ID stamped over $FORK..HEAD"
+echo "ok: clean tree, fixups folded, Quest: $ID stamped over $FORK..HEAD"
