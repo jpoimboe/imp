@@ -1790,7 +1790,7 @@ async def test_script_step_hold_shows_rerun_copy_and_refuses_redirect(
             while not _awaiting():
                 await anyio.sleep(0.02)
         # (a) the script hold copy — re-run/detach, no redirect offer
-        assert _awaiting()[0]["payload"]["prompt"] == (
+        assert _awaiting()[0]["payload"]["steer_hint"] == (
             "paused — press enter to re-run the gate, or detach to leave it paused")
 
         # (b) a typed message is refused with a plain acknowledgement, not dropped
@@ -1865,7 +1865,7 @@ async def test_agent_step_hold_keeps_redirect_copy_and_consumes_message(
             while not _awaiting():
                 await anyio.sleep(0.02)
         # unchanged agent hold copy — offers a redirect
-        assert _awaiting()[0]["payload"]["prompt"] == (
+        assert _awaiting()[0]["payload"]["steer_hint"] == (
             "paused — type a message to redirect, or detach to leave it paused")
 
         await client.send_input("go left")
