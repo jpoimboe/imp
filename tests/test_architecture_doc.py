@@ -21,8 +21,8 @@ def test_architecture_drops_artifact_commit_command() -> None:
 def test_architecture_names_quest_concept() -> None:
     text = ARCH.read_text()
     assert "| Quest / state | `engine/quest.py`, `engine/state.py` |" in text
-    assert "A single **Quest** is one unit of work" in text
-    assert "the last plan of a multi-plan Quest" in text
+    assert "A single **quest** is one unit of work" in text
+    assert "the last plan of a multi-plan quest" in text
     assert "engine/change.py" not in text
     assert "| Change / state |" not in text
     assert ".imp/change/" not in text
