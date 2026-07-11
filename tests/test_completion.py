@@ -112,7 +112,9 @@ def test_top_level_no_channel_pause_emits_awaiting_user_input() -> None:
     awaiting = [e for e in log.events if e["type"] == "awaiting_user_input"]
     assert len(awaiting) == 1
     assert awaiting[0]["agent_id"] == "a1"
-    assert awaiting[0]["payload"] == {"prompt": ""}
+    assert awaiting[0]["payload"] == {
+        "steer_hint": "", "last_agent_message": "the final question",
+        "interrupt": False}
 
 
 def test_pending_interject_satisfies_without_soliciting() -> None:
