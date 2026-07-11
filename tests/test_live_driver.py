@@ -2682,6 +2682,29 @@ def test_seed_pending_reply_lifts_replay_suppression_on_resume() -> None:
     assert out.getvalue().count("> resume reply") == 1
 
 
+def test_append_committed_reply_lifts_replay_suppression_on_resume() -> None:
+    out = _Pipe()
+    drv = LiveDriver(stream=out, color=False, width=80, status=LiveStatus(out),
+                     suppress_replay=True)
+    # Replayed prefix (marked _replay), including the gate the user is now at:
+    # stays suppressed, nothing printed.
+    for e in [
+        ev("1", "change_created", quest_id=1, title="t"),
+        ev("2", "step_started", step="spec-writer", kind="agent", phase="spec",
+           model="m", provider="anthropic"),
+        ev("2b", "awaiting_user_input", agent_id="step:spec/spec-writer"),
+    ]:
+        e["_replay"] = True
+        drv.on_event(e)
+    # The boundary freezes the replayed-node snapshot; the prefix stays hidden.
+    drv.on_event({"type": "replay_complete"})
+    assert out.getvalue() == ""
+    # The committed node is created AFTER the boundary, so the walk lifts
+    # suppression at it and emits the echo (mirroring the seeded-pending case).
+    drv.append_committed_reply("/abandon")
+    assert out.getvalue().count("> /abandon") == 1
+
+
 def test_reset_wait_does_not_re_emit_running_step_header() -> None:
     # A running non-position_label agent step interrupted by a hinted rate-limit
     # wait keeps its single header; the wait banner must not print it a 2nd time.
