@@ -24,7 +24,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
-from imp.engine.env import HEADLESS_ENV
+from imp.engine.env import ENGINE_ENV_VARS, HEADLESS_ENV
 
 
 @dataclass(frozen=True, slots=True)
@@ -44,6 +44,8 @@ class SandboxPolicy:
     change_home: str = ""                     # <control>/.imp/changes/<id> rw bind ("" → none)
     readonly_overlays: tuple[str, ...] = ()  # ro subtrees; after git_ro_remask, before caches
     git_ref_reexpose: tuple[str, ...] = ()   # rw re-expose of refs/heads/imp; after git_ro_remask
+    ephemeral_home: str = ""                 # spike: writable tmpfs over $HOME ("" → none)
+    cred_writethrough: tuple[str, ...] = ()  # spike: rw write-through binds of provider cred dirs
 
     def allows_read(self, path: Path) -> bool:
         """In-process mirror of the sandbox's read exposure: the whole host is
@@ -58,13 +60,16 @@ class SandboxPolicy:
         """The ordered path-covering binds, in bwrap EMIT ORDER — the SINGLE
         source of truth shared by build_sandbox_argv (which formats each entry to
         argv) and allows_write (which evaluates last-covering-wins). kind is one
-        of rw / ro / mask_dir / mask_file; only rw grants write. The order is
+        of rw / tmpfs_rw / ro / mask_dir / mask_file; rw and tmpfs_rw grant write
+        (tmpfs_rw is the spike's writable ephemeral home — same --tmpfs argv as a
+        secret mask_dir but the opposite write verdict). The order is
         load-bearing: the ro overlays (git_ro_remask, readonly_overlays, extra_readable)
         are NOT globally last-wins — a later writable bind re-exposes a path they
         cover — only the secret masks are unconditionally last. Add a new bind here
         and BOTH consumers pick it up; the argv-parity test enforces no drift."""
         return [
             ("/tmp", "rw"),
+            *([(self.ephemeral_home, "tmpfs_rw")] if self.ephemeral_home else []),
             (self.worktree, "rw"),
             (self.git_common_dir, "rw"),
             *([(self.change_home, "rw")] if self.change_home else []),
@@ -74,6 +79,7 @@ class SandboxPolicy:
             *[(c, "rw") for c in self.writable_caches],
             *[(r, "ro") for r in self.extra_readable],
             *[(w, "rw") for w in self.extra_writable],
+            *[(c, "rw") for c in self.cred_writethrough],
             *[(d, "mask_dir") for d in self.secret_dirs],
             *[(f, "mask_file") for f in self.secret_files],
         ]
@@ -81,13 +87,14 @@ class SandboxPolicy:
     def allows_write(self, path: Path) -> bool:
         """In-process mirror of the sandbox's write exposure. Walks bind_plan()
         in emit order; the LAST bind covering `path` decides. Writable iff that
-        last bind is rw; a read-only overlay (git_ro_remask, extra_readable), a
-        secret mask, or no covering bind denies."""
+        last bind is rw or tmpfs_rw (the spike's writable ephemeral home); a
+        read-only overlay (git_ro_remask, extra_readable), a secret mask, or no
+        covering bind denies."""
         verdict: str | None = None
         for bind, kind in self.bind_plan():
             if path.is_relative_to(Path(bind)):
                 verdict = kind
-        return verdict == "rw"
+        return verdict in ("rw", "tmpfs_rw")
 
 
 def _is_engine_passthrough(key: str) -> bool:
@@ -141,6 +148,8 @@ def build_sandbox_argv(
             argv += ["--ro-bind", bind, bind]
         elif kind == "mask_dir":
             argv += ["--tmpfs", bind]
+        elif kind == "tmpfs_rw":
+            argv += ["--tmpfs", bind]   # spike ephemeral home: mask-identical argv, writable
         elif kind == "mask_file":
             argv += ["--ro-bind", "/dev/null", bind]
         else:  # unreachable; guards a future bind_plan kind from silently vanishing
@@ -251,7 +260,7 @@ def sandbox_config_from_raw(raw: Mapping[str, Any]) -> SandboxConfig:
 def resolve_policy(
     *, worktree: Path, control_root: Path, change_id: str, cfg: SandboxConfig,
     engine_env_result: Mapping[str, str], environ: Mapping[str, str],
-    available: bool, change_dir: Path | None = None,
+    available: bool, change_dir: Path | None = None, spike: bool = False,
 ) -> SandboxPolicy:
     """Stat once, bake a frozen SandboxPolicy. The ONE impure step (spec B.1).
 
@@ -299,20 +308,41 @@ def resolve_policy(
         imp_refs.mkdir(parents=True, exist_ok=True)
         git_ref_reexpose = (str(imp_refs),)
 
-    cache_names = cfg.writable_caches or _DEFAULT_CACHES
-    caches = _existing([str(home / c) for c in cache_names])
+    if spike:
+        caches: tuple[str, ...] = ()
+    else:
+        cache_names = cfg.writable_caches or _DEFAULT_CACHES
+        caches = _existing([str(home / c) for c in cache_names])
 
     # Secret dirs/files: code defaults + config secret_paths (each classified
-    # dir-vs-file by an actual stat — p.is_dir() / p.exists()); + /run/user/$UID.
-    secret_dirs = list(_existing([str(home / d) for d in _DEFAULT_SECRET_DIRS]))
-    secret_files = list(_existing([str(home / f) for f in _DEFAULT_SECRET_FILES]))
+    # dir-vs-file by an actual stat); + /run/user/$UID. Under a spike tmpfs home
+    # the home-relative masks are moot (they live inside the now-empty tmpfs) and
+    # are omitted; absolute secret_paths and /run/user/$UID are outside $HOME and
+    # stay masked.
+    if spike:
+        secret_dirs: list[str] = []
+        secret_files: list[str] = []
+    else:
+        secret_dirs = list(_existing([str(home / d) for d in _DEFAULT_SECRET_DIRS]))
+        secret_files = list(_existing([str(home / f) for f in _DEFAULT_SECRET_FILES]))
     for extra in cfg.secret_paths:
-        p = (home / extra) if not extra.startswith("/") else Path(extra)
+        is_abs = extra.startswith("/")
+        if spike and not is_abs:
+            continue   # home-relative mask is moot under the tmpfs home
+        p = Path(extra) if is_abs else (home / extra)
         if p.is_dir():
             secret_dirs.append(str(p))
         elif p.exists():
             secret_files.append(str(p))
     secret_dirs.append(f"/run/user/{uid}")   # H2 — agent sockets; mask even if abs
+
+    ephemeral_home = ""
+    cred_writethrough: tuple[str, ...] = ()
+    if spike:
+        ephemeral_home = str(home)
+        claude_override = environ.get("CLAUDE_CONFIG_DIR")
+        claude_dir = Path(claude_override) if claude_override else home / ".claude"
+        cred_writethrough = _existing([str(claude_dir), str(home / ".codex")])
 
     return SandboxPolicy(
         active=True,
@@ -329,6 +359,8 @@ def resolve_policy(
         setenv=_build_setenv(engine_env_result, environ, cfg.extra_env),
         network=cfg.network,
         note="",
+        ephemeral_home=ephemeral_home,
+        cred_writethrough=cred_writethrough,
     )
 
 
@@ -347,7 +379,9 @@ def _build_setenv(
     """Env allowlist (spec B.4). IMP_* and PYTHONPATH come from engine_env_result
     (authoritative, M2-r5; PYTHONPATH is the single deliberate non-IMP_ exception
     — the imp-on-imp import shadow); generic + LC_* + extra_env pass through from
-    `environ`; TMPDIR=/tmp.
+    `environ`; ambient non-engine IMP_* toggles pass through from `environ` too
+    (engine-managed IMP_* keys are excluded here so engine_env_result stays
+    authoritative); TMPDIR=/tmp.
 
     Dedup: accumulated into a dict (insertion-ordered); re-assigning a key updates
     its value in place (first-seen position, last value wins). TMPDIR is assigned
@@ -363,6 +397,13 @@ def _build_setenv(
     for k in extra_env:
         if k in environ:
             d[k] = environ[k]
+    # Ambient IMP_* toggles: admit user-set IMP_-prefixed vars (e.g. IMP_SPIKE_LOG,
+    # IMP_DEBUG) EXCEPT the engine-managed set, which arrives authoritatively from
+    # engine_env_result below. Placed before that loop so a stale ambient engine var
+    # (e.g. IMP_TEST_CMD_FAST from an outer imp) can never leak in.
+    for k, v in environ.items():
+        if k.startswith("IMP_") and k not in ENGINE_ENV_VARS:
+            d[k] = v
     for k, v in engine_env_result.items():
         if _is_engine_passthrough(k):
             d[k] = v

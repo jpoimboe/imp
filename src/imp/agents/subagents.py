@@ -187,7 +187,7 @@ def _build_spike_policy(change: Any, worktree_path: Path, test_gates: Any) -> An
         worktree=worktree_path, control_root=change.control_root,
         change_id=change.id, cfg=cfg, engine_env_result=eng,
         environ=os.environ, available=sandbox_available(),
-        change_dir=change.change_dir,
+        change_dir=change.change_dir, spike=True,
     )
 
 

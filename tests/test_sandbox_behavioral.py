@@ -835,3 +835,63 @@ def test_imp_own_git_writes_unaffected_by_ref_masks() -> None:
         with contextlib.suppress(Exception):
             wt.remove_worktree(control, "esc1", force=True)
         shutil.rmtree(control, ignore_errors=True)
+
+
+# ---------------------------------------------------------------------------
+# Spike ephemeral home: writable tmpfs $HOME + credential write-through
+# ---------------------------------------------------------------------------
+
+def _spike_policy(worktree: Path, home: Path) -> SandboxPolicy:
+    """A real active spike policy: worktree under /tmp, an injected disjoint home."""
+    (worktree / ".git" / "hooks").mkdir(parents=True, exist_ok=True)
+    (worktree / ".git" / "config").write_text("")
+    return resolve_policy(
+        worktree=worktree, control_root=worktree, change_id="beh",
+        cfg=SandboxConfig(home=home),
+        engine_env_result={}, environ={"HOME": str(home),
+                                       "PATH": os.environ.get("PATH", "/usr/bin:/bin")},
+        available=True, spike=True,
+    )
+
+
+def test_spike_home_is_writable_and_host_home_untouched() -> None:
+    root = _make_root()
+    home = Path(tempfile.mkdtemp(prefix="imp-test-spikehome-"))
+    try:
+        pol = _spike_policy(root, home)
+        ctx = _ctx(root, pol)
+        # AC 1a: writing under ~ (a fresh tmpfs) succeeds — ~/.local/bin, ~/.config,
+        # and a global git identity all land.
+        r = _bash(
+            ctx,
+            "mkdir -p ~/.local/bin ~/.config/x && echo hi > ~/.local/bin/x && "
+            "git config --global user.email t@t && echo DONE")
+        assert "DONE" in r["stdout"], f"writable-home ops failed: {r}"
+        assert r["returncode"] == 0
+        # AC 1b: the real host home dir is unmodified — the tmpfs discarded those
+        # writes; nothing leaked to the injected home on disk.
+        assert not (home / ".local").exists()
+        assert not (home / ".config").exists()
+        assert not (home / ".gitconfig").exists()
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+        shutil.rmtree(home, ignore_errors=True)
+
+
+def test_spike_credential_writethrough_lands_on_real_file() -> None:
+    root = _make_root()
+    home = Path(tempfile.mkdtemp(prefix="imp-test-spikecred-"))
+    try:
+        (home / ".claude").mkdir()
+        (home / ".claude" / ".credentials.json").write_text('{"v":0}')
+        pol = _spike_policy(root, home)
+        ctx = _ctx(root, pol)
+        # AC 4: an in-sandbox write to ~/.claude/.credentials.json write-throughs
+        # to the real host file (rw bind, not a copy).
+        r = _bash(ctx, 'printf %s \'{"v":1}\' > ~/.claude/.credentials.json && echo DONE')
+        assert "DONE" in r["stdout"], f"cred write failed: {r}"
+        # The REAL host file now carries the in-sandbox write.
+        assert (home / ".claude" / ".credentials.json").read_text() == '{"v":1}'
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+        shutil.rmtree(home, ignore_errors=True)

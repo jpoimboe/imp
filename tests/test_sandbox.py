@@ -1,6 +1,7 @@
 """Always-on sandbox tests — no bwrap needed (pure argv + policy resolution)."""
 from __future__ import annotations
 
+import itertools
 import types as _types
 from pathlib import Path
 
@@ -358,6 +359,71 @@ def test_build_setenv_omits_pythonpath_when_engine_env_lacks_it(tmp_path):
     )
     keys = {k for k, _ in pol.setenv}
     assert "PYTHONPATH" not in keys
+
+
+def test_build_setenv_admits_ambient_imp_toggles(tmp_path):
+    # AC 5: user-set non-engine IMP_* vars in the launching environment reach the
+    # sandboxed agent, and an engine-managed var still arrives authoritatively.
+    control, wt = _layout(tmp_path)
+    pol = resolve_policy(
+        worktree=wt, control_root=control, change_id="abc",
+        cfg=SandboxConfig(),
+        engine_env_result={"IMP_PROJECT_ROOT": str(wt)},
+        environ={"PATH": "/usr/bin", "IMP_SPIKE_LOG": "1", "IMP_DEBUG": "verbose"},
+        available=True,
+    )
+    assert ("IMP_SPIKE_LOG", "1") in pol.setenv
+    assert ("IMP_DEBUG", "verbose") in pol.setenv
+    assert ("IMP_PROJECT_ROOT", str(wt)) in pol.setenv
+
+
+def test_build_setenv_strips_provider_api_keys(tmp_path):
+    # AC 5: provider key env vars are never on the allowlist (not IMP_-prefixed,
+    # not generic/LC_/extra_env), so they never reach the agent.
+    control, wt = _layout(tmp_path)
+    pol = resolve_policy(
+        worktree=wt, control_root=control, change_id="abc",
+        cfg=SandboxConfig(),
+        engine_env_result={},
+        environ={"PATH": "/usr/bin", "ANTHROPIC_API_KEY": "sk-ant",
+                 "OPENAI_API_KEY": "sk-oai"},
+        available=True,
+    )
+    keys = {k for k, _ in pol.setenv}
+    assert "ANTHROPIC_API_KEY" not in keys
+    assert "OPENAI_API_KEY" not in keys
+
+
+def test_build_setenv_ambient_engine_managed_imp_var_does_not_leak(tmp_path):
+    # AC 5: an ambient IMP_TEST_CMD_FAST (an ENGINE_ENV_VARS member) that
+    # engine_env_result does NOT provide must NOT leak in — the engine's
+    # "absent => no fast gate" contract holds.
+    control, wt = _layout(tmp_path)
+    pol = resolve_policy(
+        worktree=wt, control_root=control, change_id="abc",
+        cfg=SandboxConfig(),
+        engine_env_result={"IMP_PROJECT_ROOT": str(wt)},
+        environ={"PATH": "/usr/bin", "IMP_TEST_CMD_FAST": "stale-gate"},
+        available=True,
+    )
+    keys = {k for k, _ in pol.setenv}
+    assert "IMP_TEST_CMD_FAST" not in keys
+
+
+def test_build_setenv_engine_imp_var_wins_over_ambient(tmp_path):
+    # AC 5: when both ambient and engine provide IMP_TEST_CMD_FAST, the engine
+    # value is authoritative (ambient pass excludes ENGINE_ENV_VARS; engine loop
+    # runs after it).
+    control, wt = _layout(tmp_path)
+    pol = resolve_policy(
+        worktree=wt, control_root=control, change_id="abc",
+        cfg=SandboxConfig(),
+        engine_env_result={"IMP_TEST_CMD_FAST": "real-gate"},
+        environ={"PATH": "/usr/bin", "IMP_TEST_CMD_FAST": "stale-gate"},
+        available=True,
+    )
+    assert ("IMP_TEST_CMD_FAST", "real-gate") in pol.setenv
+    assert ("IMP_TEST_CMD_FAST", "stale-gate") not in pol.setenv
 
 
 def test_resolve_policy_uid_zero_masks_run_user_0(tmp_path):
@@ -816,3 +882,235 @@ def test_resolve_policy_draft_change_skips_ref_protection(tmp_path):
     assert pol.git_ref_reexpose == ()
     # refs/heads/imp is NOT created for the draft case.
     assert not (git / "refs" / "heads" / "imp").exists()
+
+
+def test_ephemeral_home_emitted_early_and_writable():
+    # A spike-shaped hand-built policy: ephemeral tmpfs home under which the
+    # worktree, change_home and a credential dir all live.
+    p = _policy(
+        worktree="/home/u/proj/.imp/worktrees/abc",
+        change_home="/home/u/proj/.imp/changes/abc",
+        git_common_dir="/home/u/proj/.git",
+        git_ro_remask=(), writable_caches=(), extra_readable=(),
+        extra_writable=(), secret_dirs=("/run/user/1000",), secret_files=(),
+        ephemeral_home="/home/u",
+        cred_writethrough=("/home/u/.claude", "/home/u/.codex"),
+    )
+    plan = p.bind_plan()
+    # The home tmpfs is emitted right after /tmp and BEFORE the worktree bind.
+    assert plan[0] == ("/tmp", "rw")
+    assert plan[1] == ("/home/u", "tmpfs_rw")
+    i_home = plan.index(("/home/u", "tmpfs_rw"))
+    i_wt = plan.index(("/home/u/proj/.imp/worktrees/abc", "rw"))
+    i_ch = plan.index(("/home/u/proj/.imp/changes/abc", "rw"))
+    i_claude = plan.index(("/home/u/.claude", "rw"))
+    i_mask = plan.index(("/run/user/1000", "mask_dir"))
+    assert i_home < i_wt < i_claude          # tmpfs first, cred write-through later
+    assert i_home < i_ch < i_claude
+    assert i_claude < i_mask                 # secret masks remain last
+    # allows_write: everything under the tmpfs home is writable (re-exposed),
+    # the worktree/change_home (under home) win over the tmpfs, and the cred
+    # dirs are writable — the only real-home paths a spike can write.
+    assert p.allows_write(Path("/home/u/.local/bin/x")) is True
+    assert p.allows_write(Path("/home/u/proj/.imp/worktrees/abc/src/a.py")) is True
+    assert p.allows_write(Path("/home/u/proj/.imp/changes/abc/progress.md")) is True
+    assert p.allows_write(Path("/home/u/.claude/.credentials.json")) is True
+    assert p.allows_write(Path("/home/u/.codex/auth.json")) is True
+    # /run/user mask (emitted last, absolute) still denies.
+    assert p.allows_write(Path("/run/user/1000/bus")) is False
+
+
+def test_tmpfs_rw_argv_is_identical_to_mask_dir_emission():
+    p = _policy(
+        worktree="/wt", git_common_dir="/ctl/.git",
+        git_ro_remask=(), writable_caches=(), extra_readable=(),
+        extra_writable=(), secret_dirs=("/home/u/.ssh",), secret_files=(),
+        ephemeral_home="/home/u",
+    )
+    argv = build_sandbox_argv("x", cwd="/wt", policy=p, engine_env={})
+    pairs = list(itertools.pairwise(argv))
+    # tmpfs_rw home and the secret mask_dir both emit `--tmpfs <path>`.
+    assert ("--tmpfs", "/home/u") in pairs       # ephemeral home
+    assert ("--tmpfs", "/home/u/.ssh") in pairs  # secret mask (byte-identical form)
+
+
+def test_cred_writethrough_argv_is_rw_bind():
+    p = _policy(
+        worktree="/wt", git_common_dir="/ctl/.git",
+        git_ro_remask=(), writable_caches=(), extra_readable=(),
+        extra_writable=(), secret_dirs=(), secret_files=(),
+        ephemeral_home="/home/u",
+        cred_writethrough=("/home/u/.claude",),
+    )
+    argv = " ".join(build_sandbox_argv("x", cwd="/wt", policy=p, engine_env={}))
+    assert "--bind /home/u/.claude /home/u/.claude" in argv
+
+
+def test_argv_binds_match_bind_plan_spike():
+    # Extended argv-parity guard (AC 3). tmpfs_rw and mask_dir emit byte-identical
+    # `--tmpfs <path>` argv, so _parse_argv_binds recovers BOTH as "mask_dir";
+    # normalize bind_plan's tmpfs_rw to mask_dir before the order/position compare.
+    p = _policy(
+        worktree="/wt", git_common_dir="/ctl/.git",
+        git_ro_remask=("/ctl/.git/hooks",), writable_caches=(),
+        extra_readable=(), extra_writable=(),
+        secret_dirs=("/home/u/.ssh", "/run/user/1000"), secret_files=(),
+        ephemeral_home="/home/u",
+        cred_writethrough=("/home/u/.claude",),
+    )
+    argv = build_sandbox_argv("x", cwd="/wt", policy=p, engine_env={})
+    expected = [(b, "mask_dir" if k == "tmpfs_rw" else k) for b, k in p.bind_plan()]
+    assert _parse_argv_binds(argv) == expected
+    # ...then pin the real drift risk: the two identical-argv kinds have OPPOSITE
+    # write semantics — the tmpfs home is writable, the secret mask denies.
+    assert p.allows_write(Path("/home/u/.local/bin/x")) is True
+    assert p.allows_write(Path("/home/u/.ssh/id_rsa")) is False
+
+
+def test_resolve_policy_spike_makes_home_a_writable_tmpfs(tmp_path):
+    control, wt = _layout(tmp_path)
+    home = tmp_path / "home"
+    home.mkdir()
+    pol = resolve_policy(
+        worktree=wt, control_root=control, change_id="abc",
+        cfg=SandboxConfig(home=home), engine_env_result={}, environ={},
+        available=True, spike=True,
+    )
+    assert pol.ephemeral_home == str(home)
+    assert (str(home), "tmpfs_rw") in pol.bind_plan()
+    # AC 1c: any path under the tmpfs home is writable.
+    assert pol.allows_write(home / "anything") is True
+    assert pol.allows_write(home / ".local" / "bin" / "x") is True
+
+
+def test_resolve_policy_spike_reexposes_worktree_and_change_home_under_home(tmp_path):
+    # AC 2: project root under $HOME → worktree and change_home re-expose over the
+    # early home tmpfs and stay writable.
+    home = tmp_path / "home"
+    control = home / "proj"
+    wt = control / ".imp" / "worktrees" / "abc"
+    wt.mkdir(parents=True)
+    (control / ".git" / "hooks").mkdir(parents=True)
+    (control / ".git" / "config").write_text("")
+    change_home = control / ".imp" / "changes" / "abc"
+    pol = resolve_policy(
+        worktree=wt, control_root=control, change_id="abc",
+        cfg=SandboxConfig(home=home), engine_env_result={}, environ={},
+        available=True, change_dir=change_home, spike=True,
+    )
+    plan = pol.bind_plan()
+    assert plan.index((str(home), "tmpfs_rw")) < plan.index((str(wt), "rw"))
+    assert pol.allows_write(wt / "src" / "a.py") is True
+    assert pol.allows_write(change_home / "progress.md") is True
+
+
+def test_resolve_policy_spike_binds_existing_cred_dirs_writethrough(tmp_path):
+    control, wt = _layout(tmp_path)
+    home = tmp_path / "home"
+    (home / ".claude").mkdir(parents=True)
+    (home / ".codex").mkdir(parents=True)
+    pol = resolve_policy(
+        worktree=wt, control_root=control, change_id="abc",
+        cfg=SandboxConfig(home=home), engine_env_result={}, environ={},
+        available=True, spike=True,
+    )
+    assert pol.cred_writethrough == (str(home / ".claude"), str(home / ".codex"))
+    # Write-through binds are rw and win over the tmpfs home (emitted after it).
+    assert pol.allows_write(home / ".claude" / ".credentials.json") is True
+    assert pol.allows_write(home / ".codex" / "auth.json") is True
+
+
+def test_resolve_policy_spike_cred_dirs_existence_gated(tmp_path):
+    control, wt = _layout(tmp_path)
+    home = tmp_path / "home"
+    home.mkdir()   # neither .claude nor .codex exists
+    pol = resolve_policy(
+        worktree=wt, control_root=control, change_id="abc",
+        cfg=SandboxConfig(home=home), engine_env_result={}, environ={},
+        available=True, spike=True,
+    )
+    assert pol.cred_writethrough == ()   # nothing bound; spike still starts
+
+
+def test_resolve_policy_spike_honors_claude_config_dir_override(tmp_path):
+    control, wt = _layout(tmp_path)
+    home = tmp_path / "home"
+    home.mkdir()
+    custom = tmp_path / "custom-claude"
+    custom.mkdir()
+    pol = resolve_policy(
+        worktree=wt, control_root=control, change_id="abc",
+        cfg=SandboxConfig(home=home), engine_env_result={},
+        environ={"CLAUDE_CONFIG_DIR": str(custom)}, available=True, spike=True,
+    )
+    assert str(custom) in pol.cred_writethrough
+    assert str(home / ".claude") not in pol.cred_writethrough
+
+
+def test_resolve_policy_spike_omits_home_relative_caches_and_masks(tmp_path):
+    control, wt = _layout(tmp_path)
+    home = tmp_path / "home"
+    (home / ".cache").mkdir(parents=True)     # would be a writable cache when non-spike
+    (home / ".ssh").mkdir(parents=True)       # would be a secret mask_dir when non-spike
+    (home / ".netrc").write_text("secret")    # would be a secret mask_file when non-spike
+    pol = resolve_policy(
+        worktree=wt, control_root=control, change_id="abc",
+        cfg=SandboxConfig(home=home, secret_paths=("/abs/secret",)),
+        engine_env_result={}, environ={}, available=True, spike=True,
+    )
+    # Home-relative caches/masks are moot under the tmpfs home → not emitted.
+    assert pol.writable_caches == ()
+    assert str(home / ".ssh") not in pol.secret_dirs
+    assert str(home / ".netrc") not in pol.secret_files
+    # /run/user/$UID (absolute) is still masked last.
+    assert any(d.startswith("/run/user/") for d in pol.secret_dirs)
+
+
+def test_resolve_policy_spike_keeps_absolute_secret_paths(tmp_path):
+    control, wt = _layout(tmp_path)
+    home = tmp_path / "home"
+    home.mkdir()
+    abs_secret = tmp_path / "abs-secret"
+    abs_secret.mkdir()   # absolute dir outside $HOME
+    pol = resolve_policy(
+        worktree=wt, control_root=control, change_id="abc",
+        cfg=SandboxConfig(home=home, secret_paths=(str(abs_secret),)),
+        engine_env_result={}, environ={}, available=True, spike=True,
+    )
+    assert str(abs_secret) in pol.secret_dirs   # absolute secret still masked
+
+
+def test_resolve_policy_spike_omits_home_relative_secret_paths(tmp_path):
+    # Load-bearing partition: a HOME-RELATIVE cfg.secret_paths entry is moot under
+    # the tmpfs home and must be dropped even though it physically exists; the
+    # `if spike and not is_abs: continue` guard is the only thing enforcing this.
+    control, wt = _layout(tmp_path)
+    home = tmp_path / "home"
+    (home / ".mykeys").mkdir(parents=True)   # a real, existing home-relative dir
+    (home / ".mysecret").write_text("x")     # a real, existing home-relative file
+    pol = resolve_policy(
+        worktree=wt, control_root=control, change_id="abc",
+        cfg=SandboxConfig(home=home, secret_paths=(".mykeys", ".mysecret")),
+        engine_env_result={}, environ={}, available=True, spike=True,
+    )
+    assert str(home / ".mykeys") not in pol.secret_dirs
+    assert str(home / ".mysecret") not in pol.secret_files
+
+
+def test_resolve_policy_non_spike_default_has_no_spike_binds(tmp_path):
+    # AC 6: spike=False (the default) leaves the ephemeral-home / cred binds absent
+    # and the existing caches + home-relative masks intact.
+    control, wt = _layout(tmp_path)
+    home = tmp_path / "home"
+    (home / ".cache").mkdir(parents=True)
+    (home / ".ssh").mkdir(parents=True)
+    (home / ".claude").mkdir(parents=True)
+    pol = resolve_policy(
+        worktree=wt, control_root=control, change_id="abc",
+        cfg=SandboxConfig(home=home), engine_env_result={}, environ={},
+        available=True,   # spike defaults to False
+    )
+    assert pol.ephemeral_home == ""
+    assert pol.cred_writethrough == ()
+    assert str(home / ".cache") in pol.writable_caches      # cache still bound
+    assert str(home / ".ssh") in pol.secret_dirs            # home mask still emitted
