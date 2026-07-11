@@ -8,13 +8,13 @@ import pytest
 from imp.remote.drivers import telegram as imp_telegram
 
 
-def test_format_awaiting_user_input_uses_real_prompt_payload() -> None:
-    # Every provider emits awaiting_user_input with payload {"prompt": ...} (NOT
-    # "text"/"message"), so the body must come from "prompt".
+def test_format_awaiting_user_input_uses_real_steer_hint_payload() -> None:
+    # Every provider emits awaiting_user_input with payload {"steer_hint": ...} (NOT
+    # "text"/"message"), so the body must come from "steer_hint".
     event = {
         "type": "awaiting_user_input",
         "change": {"title": "My Quest", "id": "2026-06-11-abc"},
-        "payload": {"prompt": "Which DB should I use?"},
+        "payload": {"steer_hint": "Which DB should I use?"},
     }
     # The loud body is the humanized label alone — "needs your input", not the raw
     # event type, and NO "[title]" bracket (identity rides the header_line).

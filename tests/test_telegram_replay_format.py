@@ -43,7 +43,7 @@ def test_buzz_event_renders_header_label_and_footer(set_tz) -> None:
     set_tz("UTC")
     # The gate keeps its ↩ footer; the body is the label alone (no '[T]' bracket).
     assert format_replay_event(
-        _event("awaiting_user_input", {"prompt": "go?"})) == (
+        _event("awaiting_user_input", {"steer_hint": "go?"})) == (
         "tozi28 · T · 2:32pm\nneeds your input\ngo?\n↩ @tozi28")
 
 

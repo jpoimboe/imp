@@ -246,7 +246,7 @@ def event_body(event_type: Any, payload: Mapping[str, Any]) -> str:
     payload schemas (not a uniform 'text' field), so map the known ones; fall back
     to the generic text/message keys for everything else."""
     if event_type == "awaiting_user_input":
-        return str(payload.get("prompt") or payload.get("text") or "")
+        return str(payload.get("steer_hint") or payload.get("text") or "")
     if event_type == "llm_response":
         return _llm_response_text(payload)
     if event_type == "script_output":

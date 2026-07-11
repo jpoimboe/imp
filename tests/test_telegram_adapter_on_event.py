@@ -10,7 +10,7 @@ TS = "2026-06-25T14:32:05+00:00"
 
 LOUD_EVENT = {
     "id": "L1", "type": "awaiting_user_input", "timestamp": TS,
-    "payload": {"prompt": "Need your call"},
+    "payload": {"steer_hint": "Need your call"},
     "change": {"id": "k3f9qa", "title": "Dark mode"},
 }
 
@@ -100,7 +100,7 @@ def _narration(text: str) -> dict:
 def _prompt_less_await() -> dict:
     return {"id": "a1", "type": "awaiting_user_input", "timestamp": TS,
             "change": {"id": "k3f9qa", "title": "t"},
-            "payload": {"prompt": ""}}
+            "payload": {"steer_hint": ""}}
 
 
 def test_subscribed_prompt_less_await_is_terse_not_narration() -> None:
@@ -175,7 +175,7 @@ def test_prompt_less_await_does_not_borrow_another_changes_narration() -> None:
     adapter = _adapter(sent, subscriptions=_subs("k3f9qa", "other"))
     adapter.on_event(_narration("A's secret context"))   # narration for k3f9qa
     adapter.on_event({"id": "a2", "type": "awaiting_user_input", "timestamp": TS,
-                      "change": {"id": "other", "title": "t"}, "payload": {"prompt": ""}})
+                      "change": {"id": "other", "title": "t"}, "payload": {"steer_hint": ""}})
     loud = [text for text, silent in sent if not silent]
     assert loud and all("A's secret context" not in text for text in loud)
 
@@ -319,7 +319,7 @@ def test_replayed_event_marks_alert_all_seen_even_when_alert_all_is_off() -> Non
 
 INTERRUPT_GATE = {
     "id": "I1", "type": "awaiting_user_input", "timestamp": TS,
-    "payload": {"prompt": "interrupted — type to redirect", "interrupt": True},
+    "payload": {"steer_hint": "interrupted — type to redirect", "interrupt": True},
     "change": {"id": "k3f9qa", "title": "Dark mode"},
 }
 

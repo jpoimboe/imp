@@ -62,7 +62,7 @@ def _h_user(payload: dict[str, Any]) -> str:
 
 
 def _h_awaiting(payload: dict[str, Any]) -> str:
-    return _clip(str(payload.get("prompt", "")), _TEXT_CAP)
+    return _clip(str(payload.get("steer_hint", "")), _TEXT_CAP)
 
 
 def _h_llm_response(payload: dict[str, Any]) -> str:

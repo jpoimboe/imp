@@ -7,7 +7,7 @@ from imp.remote.daemon.telegram_adapter import TelegramNorthAdapter
 CHAT = 4242
 EVENT = {
     "id": "ev1", "type": "awaiting_user_input", "timestamp": "2026-06-25T14:32:05+00:00",
-    "payload": {"prompt": "go?"},
+    "payload": {"steer_hint": "go?"},
     "change": {"id": "k3f9qa", "title": "Dark mode"},
 }
 

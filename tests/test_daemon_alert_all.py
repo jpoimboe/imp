@@ -45,13 +45,13 @@ def _narration(text: str, *, replay: bool = False) -> dict:
 def _prompt_less_await() -> dict:
     return {"id": "a1", "type": "awaiting_user_input", "timestamp": TS,
             "change": {"id": "k3f9qa", "title": "t"},
-            "payload": {"prompt": ""}}
+            "payload": {"steer_hint": ""}}
 
 
 def _prompt_await(prompt: str) -> dict:
     return {"id": "a2", "type": "awaiting_user_input", "timestamp": TS,
             "change": {"id": "k3f9qa", "title": "t"},
-            "payload": {"prompt": prompt}}
+            "payload": {"steer_hint": prompt}}
 
 
 def test_default_is_on() -> None:

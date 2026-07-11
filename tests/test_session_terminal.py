@@ -47,7 +47,7 @@ async def test_terminal_client_renders_events_and_answers_one_gate(
                 await anyio.sleep(0.02)
         on_event({"type": "step_started", "payload": {}})
         on_event({"type": "awaiting_user_input",
-                   "payload": {"prompt": "your name?"}})
+                   "payload": {"steer_hint": "your name?"}})
         reply = await user_chat_input_fn("your name?")
         received.append(reply)
         on_event({"type": "user_message", "payload": {"text": reply}})
@@ -326,7 +326,7 @@ async def test_abandon_slash_command_at_gate_sends_control_abandon(
         with anyio.fail_after(5):
             while server.attached_count == 0:
                 await server.wait_for_attach_change()
-        on_event({"type": "awaiting_user_input", "payload": {"prompt": "reply?"}})
+        on_event({"type": "awaiting_user_input", "payload": {"steer_hint": "reply?"}})
         # CONTROL_ABANDON cancels the serve scope before user_chat_input_fn returns
         return await user_chat_input_fn("reply?")
 
@@ -376,7 +376,7 @@ async def test_control_command_is_echoed_before_handling(tmp_path: Path) -> None
         with anyio.fail_after(5):
             while server.attached_count == 0:
                 await server.wait_for_attach_change()
-        on_event({"type": "awaiting_user_input", "payload": {"prompt": "reply?"}})
+        on_event({"type": "awaiting_user_input", "payload": {"steer_hint": "reply?"}})
         return await user_chat_input_fn("reply?")
 
     coord = InterruptCoordinator()
@@ -427,7 +427,7 @@ async def test_eoferror_at_gate_detaches_cleanly_and_run_survives(
         with anyio.fail_after(5):
             while server.attached_count == 0:
                 await server.wait_for_attach_change()
-        on_event({"type": "awaiting_user_input", "payload": {"prompt": "reply?"}})
+        on_event({"type": "awaiting_user_input", "payload": {"steer_hint": "reply?"}})
         # The EOFError at the client must detach it; the run must keep going.
         with anyio.fail_after(5):
             while server.attached_count != 0:
@@ -474,7 +474,7 @@ async def test_replayed_gates_do_not_crash_only_live_gate_solicits(
     sock = str(tmp_path / "s.sock")
     # Journal holds three prior (resolved) gates; replay re-sends all three on attach.
     recs = [{"id": f"g{i}", "type": "awaiting_user_input",
-             "payload": {"prompt": f"q{i}"}} for i in range(3)]
+             "payload": {"steer_hint": f"q{i}"}} for i in range(3)]
     events_path.write_text("".join(json.dumps(r) + "\n" for r in recs))
     server = SessionServer(sock, hibernate=False, events_path=events_path)
     prompts: list[str] = []
@@ -485,7 +485,7 @@ async def test_replayed_gates_do_not_crash_only_live_gate_solicits(
             while server.attached_count == 0:
                 await anyio.sleep(0.02)
         on_event({"id": "live", "type": "awaiting_user_input",
-                  "payload": {"prompt": "live?"}})
+                  "payload": {"steer_hint": "live?"}})
         return await user_chat_input_fn("live?")
 
     async def _attach(
@@ -539,7 +539,7 @@ async def test_save_slash_command_at_gate_records_intent_and_detaches(
         with anyio.fail_after(5):
             while server.attached_count == 0:
                 await server.wait_for_attach_change()
-        on_event({"type": "awaiting_user_input", "payload": {"prompt": "reply?"}})
+        on_event({"type": "awaiting_user_input", "payload": {"steer_hint": "reply?"}})
         # /save detaches the client; the run pauses (survives) — no abandon.
         with anyio.fail_after(5):
             while server.attached_count != 0:
@@ -591,7 +591,7 @@ async def test_abandon_slash_command_records_abandon_intent(
         with anyio.fail_after(5):
             while server.attached_count == 0:
                 await server.wait_for_attach_change()
-        on_event({"type": "awaiting_user_input", "payload": {"prompt": "reply?"}})
+        on_event({"type": "awaiting_user_input", "payload": {"steer_hint": "reply?"}})
         return await user_chat_input_fn("reply?")
 
     coord = InterruptCoordinator()
@@ -641,7 +641,7 @@ async def test_title_flips_busy_idle_back_to_busy_and_resets(
                 await anyio.sleep(0.02)
         on_event({"type": "step_started", "payload": {}})
         on_event({"type": "awaiting_user_input",
-                   "payload": {"prompt": "name?"}})
+                   "payload": {"steer_hint": "name?"}})
         await user_chat_input_fn("name?")
         # A wait_for_user resume fires NO new step_started; the first live event
         # the resumed agent emits must flip the glyph back to working.
@@ -701,7 +701,7 @@ async def test_replayed_awaiting_does_not_flip_to_idle(
             while server.attached_count == 0:
                 await anyio.sleep(0.02)
         on_event({"type": "awaiting_user_input", "_replay": True,
-                   "payload": {"prompt": "old?"}})
+                   "payload": {"steer_hint": "old?"}})
         on_event({"type": "step_started", "payload": {}})
         return "done"
 
@@ -751,7 +751,7 @@ async def test_abandon_records_materialized_false_for_unmaterialized_draft(
         with anyio.fail_after(5):
             while server.attached_count == 0:
                 await server.wait_for_attach_change()
-        on_event({"type": "awaiting_user_input", "payload": {"prompt": "reply?"}})
+        on_event({"type": "awaiting_user_input", "payload": {"steer_hint": "reply?"}})
         return await user_chat_input_fn("reply?")
 
     coord = InterruptCoordinator()
@@ -806,7 +806,7 @@ async def test_abandon_records_materialized_true_for_materialized_change(
         with anyio.fail_after(5):
             while server.attached_count == 0:
                 await server.wait_for_attach_change()
-        on_event({"type": "awaiting_user_input", "payload": {"prompt": "reply?"}})
+        on_event({"type": "awaiting_user_input", "payload": {"steer_hint": "reply?"}})
         return await user_chat_input_fn("reply?")
 
     coord = InterruptCoordinator()
@@ -855,7 +855,7 @@ async def test_clear_slash_command_at_gate_records_intent_and_detaches(
         with anyio.fail_after(5):
             while server.attached_count == 0:
                 await server.wait_for_attach_change()
-        on_event({"type": "awaiting_user_input", "payload": {"prompt": "reply?"}})
+        on_event({"type": "awaiting_user_input", "payload": {"steer_hint": "reply?"}})
         # /clear detaches the client; the run pauses (survives) — no abandon.
         with anyio.fail_after(5):
             while server.attached_count != 0:
@@ -912,7 +912,7 @@ async def test_eoferror_leave_sends_archive_frame_and_records_disposition(
         with anyio.fail_after(5):
             while server.attached_count == 0:
                 await server.wait_for_attach_change()
-        on_event({"type": "awaiting_user_input", "payload": {"prompt": "reply?"}})
+        on_event({"type": "awaiting_user_input", "payload": {"steer_hint": "reply?"}})
         return await user_chat_input_fn("reply?")
 
     coord = InterruptCoordinator()
@@ -1027,7 +1027,7 @@ async def test_ctrl_d_returns_while_daemon_teardown_still_in_progress(
         quest: Quest, *, on_event: Any, user_chat_input_fn: Any,
         coordinator: Any, wait_for_turn_fn: Any = None,
     ) -> str:
-        on_event({"type": "awaiting_user_input", "payload": {"prompt": "reply?"}})
+        on_event({"type": "awaiting_user_input", "payload": {"steer_hint": "reply?"}})
         return await user_chat_input_fn("reply?")
 
     coord = InterruptCoordinator()
@@ -1100,7 +1100,7 @@ async def test_duplicate_live_gates_coalesce_to_one_solicit_without_wouldblock(
         # awaiting input. The client cannot receive the broadcast until the
         # server yields inside next_input() -- which is AFTER the receiver is
         # armed -- so a reply can never outrun the arm (no reply-before-arm drop).
-        on_event({"type": "awaiting_user_input", "payload": {"prompt": "q1"}})
+        on_event({"type": "awaiting_user_input", "payload": {"steer_hint": "q1"}})
         return await user_chat_input_fn("q1")
 
     async def _attach(
@@ -1149,7 +1149,7 @@ async def test_duplicate_live_gates_coalesce_to_one_solicit_without_wouldblock(
             # the SAME open gate (emit + resume re-announce + attach re-broadcast).
             with anyio.fail_after(30):
                 await solicit_entered.wait()
-            dup = {"type": "awaiting_user_input", "payload": {"prompt": "q1"}}
+            dup = {"type": "awaiting_user_input", "payload": {"steer_hint": "q1"}}
             captured["on_event"](dict(dup))
             captured["on_event"](dict(dup))
             captured["on_event"](dict(dup))
@@ -1722,7 +1722,7 @@ async def test_replayed_ordinary_event_does_not_flip_to_busy(
             while server.attached_count == 0:
                 await anyio.sleep(0.02)
         on_event({"type": "awaiting_user_input",
-                   "payload": {"prompt": "name?"}})
+                   "payload": {"steer_hint": "name?"}})
         await user_chat_input_fn("name?")
         # A replayed ordinary event must NOT flip activity back to working.
         on_event({"type": "llm_response", "_replay": True, "payload": {}})
@@ -1778,7 +1778,7 @@ async def test_remote_answer_tears_down_local_prompt_without_resending(
         with anyio.fail_after(5):
             while server.attached_count == 0:
                 await anyio.sleep(0.02)
-        on_event({"type": "awaiting_user_input", "payload": {"prompt": "answer?"}})
+        on_event({"type": "awaiting_user_input", "payload": {"steer_hint": "answer?"}})
         gate_reached.set()
         reply = await user_chat_input_fn("answer?")
         received.append(reply)
@@ -1856,11 +1856,11 @@ async def test_two_sequential_local_answers_no_spurious_self_cancellation(
         with anyio.fail_after(5):
             while server.attached_count == 0:
                 await anyio.sleep(0.02)
-        on_event({"type": "awaiting_user_input", "payload": {"prompt": "g1?"}})
+        on_event({"type": "awaiting_user_input", "payload": {"steer_hint": "g1?"}})
         r1 = await user_chat_input_fn("g1?")
         received.append(r1)
         on_event({"type": "user_message", "payload": {"text": r1}})
-        on_event({"type": "awaiting_user_input", "payload": {"prompt": "g2?"}})
+        on_event({"type": "awaiting_user_input", "payload": {"steer_hint": "g2?"}})
         r2 = await user_chat_input_fn("g2?")
         received.append(r2)
         on_event({"type": "user_message", "payload": {"text": r2}})
@@ -1921,7 +1921,7 @@ async def test_awaiting_user_input_resets_client_gesture_latch(
         with anyio.fail_after(5):
             while server.attached_count == 0:
                 await anyio.sleep(0.02)
-        on_event({"type": "awaiting_user_input", "payload": {"prompt": "p?"}})
+        on_event({"type": "awaiting_user_input", "payload": {"steer_hint": "p?"}})
         return await user_chat_input_fn("p?")
 
     class _Driver:
@@ -1973,7 +1973,7 @@ async def test_local_echo_invoked_with_reply_on_local_send_path(
         with anyio.fail_after(5):
             while server.attached_count == 0:
                 await anyio.sleep(0.02)
-        on_event({"type": "awaiting_user_input", "payload": {"prompt": "name?"}})
+        on_event({"type": "awaiting_user_input", "payload": {"steer_hint": "name?"}})
         reply = await user_chat_input_fn("name?")
         received.append(reply)
         on_event({"type": "user_message", "payload": {"text": reply}})
@@ -2027,7 +2027,7 @@ async def test_local_echo_not_invoked_when_answered_elsewhere(
         with anyio.fail_after(5):
             while server.attached_count == 0:
                 await anyio.sleep(0.02)
-        on_event({"type": "awaiting_user_input", "payload": {"prompt": "answer?"}})
+        on_event({"type": "awaiting_user_input", "payload": {"steer_hint": "answer?"}})
         gate_reached.set()
         reply = await user_chat_input_fn("answer?")
         received.append(reply)
@@ -2092,7 +2092,7 @@ async def test_local_echo_not_invoked_on_leave_command(
         with anyio.fail_after(5):
             while server.attached_count == 0:
                 await server.wait_for_attach_change()
-        on_event({"type": "awaiting_user_input", "payload": {"prompt": "reply?"}})
+        on_event({"type": "awaiting_user_input", "payload": {"steer_hint": "reply?"}})
         # The leave command detaches the client; the run survives — no input frame.
         with anyio.fail_after(5):
             while server.attached_count != 0:
@@ -2149,7 +2149,7 @@ async def test_local_echo_not_invoked_on_abandon(
         with anyio.fail_after(5):
             while server.attached_count == 0:
                 await server.wait_for_attach_change()
-        on_event({"type": "awaiting_user_input", "payload": {"prompt": "reply?"}})
+        on_event({"type": "awaiting_user_input", "payload": {"steer_hint": "reply?"}})
         # CONTROL_ABANDON cancels the serve scope before user_chat_input_fn returns.
         return await user_chat_input_fn("reply?")
 
@@ -2233,7 +2233,7 @@ async def test_mid_conversation_model_sends_control_not_input(
             # Gate 1: the client answers with /model. It must leave as a
             # set-model control carrying the raw arg, NOT an input frame.
             server.broadcast(
-                {"type": "awaiting_user_input", "payload": {"prompt": "q1"}})
+                {"type": "awaiting_user_input", "payload": {"steer_hint": "q1"}})
             with anyio.fail_after(5):
                 while (CONTROL_SET_MODEL,
                        "anthropic:claude-fable-5") not in controls_seen:
@@ -2245,7 +2245,7 @@ async def test_mid_conversation_model_sends_control_not_input(
             # production emit->arm order) so the "done" reply cannot outrun the
             # receiver. This reply IS delivered as an input frame.
             server.broadcast(
-                {"type": "awaiting_user_input", "payload": {"prompt": "q2"}})
+                {"type": "awaiting_user_input", "payload": {"steer_hint": "q2"}})
             inputs_seen.append(await server.next_input())
             await server.close()
             tg.cancel_scope.cancel()
