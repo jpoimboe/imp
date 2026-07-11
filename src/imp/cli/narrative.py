@@ -735,6 +735,10 @@ class NarrativeBuilder:
         self._pending_reply_node = node
         self._append(node)
 
+    def append_committed_reply(self, text: str) -> None:
+        """Append a committed interactive reply without arming _pending_reply_node."""
+        self._append(UserMessageNode(text=text, interactive=True))
+
     def _resume_close_folds(self, agent_id: str, event: Any) -> None:
         """Close every still-open fold opened by `agent_id` (the resuming parent).
         Outcome-free close — there is no task tool_result to read — so the fold

@@ -2412,6 +2412,27 @@ def test_seeded_pending_reply_reconciles_into_single_node() -> None:
     assert replies[0].interactive is True
 
 
+def test_append_committed_reply_is_non_reconciling() -> None:
+    b = nv.NarrativeBuilder()
+    b.add(_ev("s1", "step_started", step="spec", kind="agent", phase="design",
+              model="m", provider="anthropic"))
+    b.add(_ev("aw", "awaiting_user_input", agent_id="step:design/spec"))
+    # A control-command echo: committed, arms NO pending reconciliation pointer.
+    b.append_committed_reply("/model claude-sonnet-4-5")
+    assert b._pending_reply_node is None
+    # A subsequent normal reply reconciles into its OWN pending node, leaving the
+    # committed control echo intact as a separate node.
+    b.seed_pending_reply("real reply")
+    b.add(_ev("um", "user_message", agent_id="step:design/spec", role="user",
+              content=[{"type": "text", "text": "real reply"}]))
+    tree = b.tree
+    phase = next(c for c in tree.root.children if isinstance(c, nv.PhaseNode))
+    step = next(c for c in phase.children if isinstance(c, nv.StepNode))
+    replies = [c for c in step.children if isinstance(c, nv.UserMessageNode)]
+    assert [r.text for r in replies] == ["/model claude-sonnet-4-5", "real reply"]
+    assert all(r.interactive for r in replies)
+
+
 def test_unseeded_reply_appends_as_today() -> None:
     b = nv.NarrativeBuilder()
     b.add(_ev("s1", "step_started", step="spec", kind="agent", phase="design",
