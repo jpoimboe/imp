@@ -7,6 +7,7 @@ from imp.providers.catalog import (
     DEFAULT_WINDOW,
     OPENAI,
     ModelInfo,
+    catalog_aliases,
     checkpoint_fraction,
     context_tokens_from_usage,
     model_info,
@@ -225,3 +226,51 @@ def test_text_only_flag_forces_no_vision(monkeypatch) -> None:
     # A model explicitly flagged supports_vision=False resolves to False.
     monkeypatch.setitem(ANTHROPIC, "text-only", ModelInfo(supports_vision=False))
     assert model_supports_vision("anthropic", "text-only") is False
+
+
+def test_claude_code_catalog_has_fable_entries() -> None:
+    # Both aliases are present in the table (not merely resolved via the
+    # conservative default), window-only like the existing opus entries.
+    assert "claude-fable-5" in CLAUDE_CODE
+    assert "claude-fable-5[1m]" in CLAUDE_CODE
+    assert CLAUDE_CODE["claude-fable-5"] == ModelInfo(window=200_000)
+    assert CLAUDE_CODE["claude-fable-5[1m]"] == ModelInfo(window=1_000_000)
+
+
+def test_anthropic_catalog_has_fable_entries() -> None:
+    # Plain: 200k window, 128k output cap, no cli_model/betas indirection.
+    assert "claude-fable-5" in ANTHROPIC
+    assert ANTHROPIC["claude-fable-5"] == ModelInfo(
+        window=200_000, max_output_tokens=128_000
+    )
+    # 1M: raw API rejects the bracketed form, so cli_model strips it and the
+    # context-1m beta header requests the 1M window; 128k output cap.
+    assert "claude-fable-5[1m]" in ANTHROPIC
+    assert ANTHROPIC["claude-fable-5[1m]"] == ModelInfo(
+        window=1_000_000,
+        max_output_tokens=128_000,
+        cli_model="claude-fable-5",
+        betas=("context-1m-2025-08-07",),
+    )
+
+
+def test_window_for_model_covers_fable() -> None:
+    # The "[1m]" marker still wins; the plain fable alias resolves to 200k via
+    # the new substring token (keeping _WINDOW_TOKENS in agreement with the
+    # structured tables per the module NOTE).
+    assert window_for_model("claude-fable-5[1m]") == 1_000_000
+    assert window_for_model("claude-fable-5") == 200_000
+
+
+def test_catalog_aliases_lists_provider_table_keys() -> None:
+    anthropic = catalog_aliases("anthropic")
+    assert "claude-fable-5[1m]" in anthropic
+    assert "claude-fable-5" in anthropic
+    assert "sonnet" in catalog_aliases("claude_code")
+    # codex shares the OPENAI table
+    assert catalog_aliases("codex") == catalog_aliases("openai")
+    assert "gpt-5" in catalog_aliases("openai")
+
+
+def test_catalog_aliases_unknown_provider_is_empty() -> None:
+    assert catalog_aliases("nope") == ()

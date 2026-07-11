@@ -376,3 +376,26 @@ async def test_interrupted_flag_survives_end_gesture_round() -> None:
     coord.end_gesture_round()
     assert coord.should_pause is False   # live latch cleared (fresh next gesture)
     assert coord.interrupted is True     # durable signal survives -> rc 130 preserved
+
+
+def test_pending_model_take_is_one_shot() -> None:
+    from imp.cli.signals import InterruptCoordinator
+
+    coord = InterruptCoordinator()
+    assert coord.take_pending_model() is None
+    coord.set_pending_model("anthropic:claude-fable-5")
+    assert coord.take_pending_model() == "anthropic:claude-fable-5"
+    assert coord.take_pending_model() is None
+
+
+def test_pending_model_survives_reset_and_gesture_round() -> None:
+    from imp.cli.signals import InterruptCoordinator
+
+    coord = InterruptCoordinator()
+    coord.set_pending_model("anthropic:claude-fable-5")
+    coord.reset()
+    assert coord.take_pending_model() == "anthropic:claude-fable-5"
+
+    coord.set_pending_model("anthropic:claude-fable-5")
+    coord.end_gesture_round()
+    assert coord.take_pending_model() == "anthropic:claude-fable-5"

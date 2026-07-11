@@ -45,3 +45,15 @@ def test_log_help_documents_the_token_positional(
 ) -> None:
     out = _help_for(["log", "-h"], capsys)
     assert "Change id or its short token" in out
+
+
+def test_help_lists_model_command() -> None:
+    from imp.cli.slash import _help
+    out: list[str] = []
+    _help(out.append)
+    assert any(line.strip().startswith("/model") for line in out)
+
+
+def test_opening_hint_mentions_model() -> None:
+    from imp.cli.main import OPENING_HINT
+    assert "/model" in OPENING_HINT

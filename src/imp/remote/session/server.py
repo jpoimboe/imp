@@ -18,6 +18,7 @@ from imp.remote.session.protocol import (
     CONTROL_INTERRUPT_FORCE,
     CONTROL_INTERRUPT_LEAVE,
     CONTROL_SAVE,
+    CONTROL_SET_MODEL,
 )
 from imp.remote.session.socket_server import ReplaySnapshot, SessionSocket
 
@@ -344,6 +345,11 @@ class SessionServer:
             return
         if action == CONTROL_INTERRUPT and self._coordinator is not None:
             await self._coordinator.signal_pause(reason="ctrl-c", via="frame")
+        elif action == CONTROL_SET_MODEL and self._coordinator is not None:
+            # Non-terminal: stash the arg, pause like ctrl-c; hold loop applies it on park.
+            self._coordinator.set_pending_model(reason or "")
+            await self._coordinator.signal_pause(
+                reason="model-override", via="frame")
         elif action == CONTROL_INTERRUPT_LEAVE and self._coordinator is not None:
             await self._coordinator.signal_pause(reason=reason or "ctrl-d", via="frame")
         elif action == CONTROL_INTERRUPT_FORCE and self._coordinator is not None:

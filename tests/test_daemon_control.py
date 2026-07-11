@@ -97,3 +97,5 @@ def test_resident_ids_delegates_to_the_wired_callable() -> None:
         resident_ids=lambda: (calls.append(1) or frozenset({"x"})))
     assert plane.resident_ids() == frozenset({"x"})
     assert calls == [1]
+
+

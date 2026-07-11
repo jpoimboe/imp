@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import ClassVar
 
 import pytest
 
@@ -214,3 +215,24 @@ def test_differ_from_cascaded_chain() -> None:
     assert details["steps"]["s3"]["differ_from"] == "s2"
     # s3 differs from s2's resolved provider (openai)
     assert steps["s3"].provider != steps["s2"].provider
+
+
+def test_available_providers_filters_by_env_check(monkeypatch) -> None:
+    from imp.providers import register_builtin_providers
+    from imp.providers.resolve import available_providers
+
+    register_builtin_providers()  # restore real env-var-based env_checks
+
+    class _Cfg:
+        providers: ClassVar[list[str]] = ["anthropic", "openai"]
+
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    assert available_providers(_Cfg()) == ["anthropic"]
+
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    assert available_providers(_Cfg()) == ["anthropic", "openai"]
+
+    class _CfgWithUnknown:
+        providers: ClassVar[list[str]] = ["anthropic", "nonexistent_provider", "openai"]
+    assert available_providers(_CfgWithUnknown()) == ["anthropic", "openai"]

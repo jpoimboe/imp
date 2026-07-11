@@ -20,6 +20,7 @@ from imp.engine.change import Change
 from imp.engine.errors import LoadError, LoadErrors
 from imp.engine.executor import RunResult, run_change
 from imp.engine.merge_queue import ensure_head_driven
+from imp.engine.model_override import apply_model_override
 from imp.engine.state import EventLog, LockHeld, ProjectLock, State, lock_is_live
 from imp.remote.session.discover import session_socket_path
 from imp.remote.session.server import _DEFAULT_FIRST_ATTACH_TIMEOUT, SessionServer
@@ -31,6 +32,11 @@ _RESUME_PROMPT = "paused — type a message to redirect, or detach to leave it p
 
 def _is_interrupt_pause(result: Any, coordinator: Any) -> bool:
     return result is RunResult.PAUSED and coordinator.should_pause
+
+
+def _is_model_override_pause(result: Any, coordinator: Any) -> bool:
+    return (result is RunResult.PAUSED and coordinator.should_pause
+            and coordinator.pause_reason == "model-override")
 
 
 def _trailing_is_workflow_resumed(log: EventLog) -> bool:
@@ -54,7 +60,8 @@ def _last_pause_was_awaiting_turn(log: EventLog) -> bool:
 
 
 def _hold_prompt(result: Any, coordinator: Any) -> str | None:
-    if _is_interrupt_pause(result, coordinator):
+    if (_is_interrupt_pause(result, coordinator)
+            and coordinator.pause_reason != "model-override"):
         return _RESUME_PROMPT
     return None
 
@@ -72,6 +79,7 @@ async def serve_change_session(
     non_interactive: bool = False,
     autonomous: bool = False,
     first_attach_timeout: float = _DEFAULT_FIRST_ATTACH_TIMEOUT,
+    model: str | None = None,
 ) -> Any:
     # Shared coordinator: socket `interrupt` control frame → run_change's pause check.
     from imp.cli.signals import InterruptCoordinator
@@ -117,6 +125,8 @@ async def serve_change_session(
             run_kwargs["headless"] = True
         if autonomous:
             run_kwargs["autonomous"] = True
+        if model is not None:
+            run_kwargs["opening_model"] = model
         if resume_target == "prompt" and not (non_interactive or autonomous):
             # Resume back to the resteer hold prompt the user left from, before
             # any agent run: a typed reply then interjects and runs the agent;
@@ -138,30 +148,40 @@ async def serve_change_session(
             )
             coordinator.note_yield()  # run_change returned -> the run has yielded
             prompt = _hold_prompt(result, coordinator)
-        while prompt is not None:
-            on_event({"type": "awaiting_user_input",
-                      "payload": {"prompt": prompt, "interrupt": True}})
-            try:
-                reply = await user_chat_input_fn("")
-            except AwaitingUserInput:
-                # Left at the hold loop. A ctrl-d mid-run interrupt detaches here
-                # with the agent mid-step: the cancellation unwound past the
-                # executor's Pause handler, so arm resume here exactly as it would
-                # have — native-resume the interrupted step (not re-seed) and take
-                # the continuation nudge on a no-message resume. Any other detach
-                # left the user at the resteer prompt: its markers were already
-                # armed by the executor Pause handler, so record the target only.
-                state = State.load(change.state_dir)
-                if coordinator.pause_reason == "ctrl-d":
-                    state.resume_target = "agent"
-                    state.arm_step_resume(interrupt=True)
-                else:
-                    state.resume_target = "prompt"
-                state.save(change.state_dir)
-                return result
-            coordinator.reset()
-            if reply.strip():
-                coordinator.enqueue_interject(reply)
+        while prompt is not None or _is_model_override_pause(result, coordinator):
+            if _is_model_override_pause(result, coordinator):
+                # /model mid-conversation: executor parked+saved the step. Apply the
+                # override AFTER that save (no write race), then re-enter the same step.
+                arg = coordinator.take_pending_model()
+                if arg:
+                    state = State.load(change.state_dir)
+                    assert state.step is not None
+                    apply_model_override(change, state, arg, step_name=state.step)
+                coordinator.reset()
+            else:
+                on_event({"type": "awaiting_user_input",
+                          "payload": {"prompt": prompt, "interrupt": True}})
+                try:
+                    reply = await user_chat_input_fn("")
+                except AwaitingUserInput:
+                    # Left at the hold loop. A ctrl-d mid-run interrupt detaches here
+                    # with the agent mid-step: the cancellation unwound past the
+                    # executor's Pause handler, so arm resume here exactly as it would
+                    # have — native-resume the interrupted step (not re-seed) and take
+                    # the continuation nudge on a no-message resume. Any other detach
+                    # left the user at the resteer prompt: its markers were already
+                    # armed by the executor Pause handler, so record the target only.
+                    state = State.load(change.state_dir)
+                    if coordinator.pause_reason == "ctrl-d":
+                        state.resume_target = "agent"
+                        state.arm_step_resume(interrupt=True)
+                    else:
+                        state.resume_target = "prompt"
+                    state.save(change.state_dir)
+                    return result
+                coordinator.reset()
+                if reply.strip():
+                    coordinator.enqueue_interject(reply)
             _append_workflow_resumed(change.event_log())
             result = await run_fn(
                 change,
@@ -213,6 +233,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--resume", action="store_true")
     parser.add_argument("--non-interactive", action="store_true")
     parser.add_argument("--autonomous", action="store_true")
+    parser.add_argument("--model", default=None)
     ns = parser.parse_args(argv)
     try:
         change = Change.load(Path(ns.control_root), ns.change_id)
@@ -226,6 +247,8 @@ def main(argv: list[str] | None = None) -> int:
         kwargs["non_interactive"] = True
     if ns.autonomous:
         kwargs["autonomous"] = True
+    if ns.model is not None:
+        kwargs["model"] = ns.model
     try:
         if kwargs:
             result = anyio.run(functools.partial(serve_change_session, change, **kwargs))

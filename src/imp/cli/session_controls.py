@@ -8,6 +8,7 @@ from imp.remote.session.protocol import (
     CONTROL_ABANDON,
     CONTROL_INTERRUPT,
     CONTROL_INTERRUPT_FORCE,
+    CONTROL_SET_MODEL,
 )
 
 
@@ -25,6 +26,9 @@ class SessionControls:
 
     async def abandon(self) -> None:
         await self._client.send_control(CONTROL_ABANDON)
+
+    async def set_model(self, arg: str) -> None:
+        await self._client.send_control(CONTROL_SET_MODEL, arg)
 
     async def detach(self) -> None:
         await self._client.aclose()

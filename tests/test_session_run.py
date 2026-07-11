@@ -326,7 +326,7 @@ async def test_run_session_client_threads_resume_into_attach(
     def _fake_build(
         ch: Change, *, resume: bool = False,
         non_interactive: bool = False, autonomous: bool = False,
-        lease: bool = False,
+        lease: bool = False, model: str | None = None,
     ) -> Any:
         captured["resume"] = resume
         captured["lease"] = lease
@@ -679,7 +679,7 @@ async def test_run_session_client_threads_autonomous_into_attach(
     def _fake_build(
         ch: Change, *, resume: bool = False,
         non_interactive: bool = False, autonomous: bool = False,
-        lease: bool = False,
+        lease: bool = False, model: str | None = None,
     ) -> Any:
         captured["autonomous"] = autonomous
 
@@ -813,3 +813,47 @@ async def test_run_session_client_installs_startup_status(
 
     assert installed == [True]           # called exactly once
     assert rc == 0
+
+
+@pytest.mark.anyio
+async def test_run_session_client_threads_model(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    change = _make_change(tmp_path, "2026-06-15-model")
+    (tmp_path / ".imp" / "worktrees" / change.id).mkdir(parents=True)
+    State(id=change.id, step=None, step_attempt=0, status="completed").save(
+        change.state_dir)
+
+    captured: dict[str, object] = {}
+
+    def _fake_build(ch: Any, **kw: Any) -> Any:
+        captured.update(kw)
+
+        async def _attach(_on_event: Any) -> Any:  # pragma: no cover
+            raise AssertionError("attach must not be invoked in this test")
+
+        return _attach
+
+    monkeypatch.setattr("imp.cli.session_run.build_session_attach", _fake_build)
+
+    async def _noop(**_kwargs: object) -> None:
+        pass
+
+    monkeypatch.setattr("imp.cli.session_run.run_terminal_client", _noop)
+
+    class _Driver:
+        def on_event(self, _event: Any) -> None: ...
+        def finish(self) -> None: ...
+        def seed_pending_reply(self, _text: str) -> None: ...
+        def install_startup_status(self) -> None: ...
+
+    async def _solicit(_prompt: str) -> str:  # pragma: no cover
+        return ""
+
+    coord = InterruptCoordinator()
+    rc = await run_session_client(
+        change, driver=_Driver(), coord=coord, solicit=_solicit,
+        model="anthropic:claude-fable-5")
+
+    assert rc == 0
+    assert captured["model"] == "anthropic:claude-fable-5"

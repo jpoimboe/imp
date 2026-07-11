@@ -50,6 +50,7 @@ def test_new_non_interactive_routes_through_session_client(
         title: object = None,
         non_interactive: object = False,
         autonomous: object = False,
+        model: str | None = None,
     ) -> int:
         captured["change_id"] = change.id
         captured["seed_opening"] = seed_opening
@@ -97,6 +98,7 @@ def test_new_interactive_routes_through_session_client(
         leave_mode: object = None,
         leave_state: object = None, title: object = None,
         autonomous: object = False,
+        model: str | None = None,
     ) -> int:
         captured["change_id"] = change.id
         captured["seed_opening"] = seed_opening

@@ -417,3 +417,44 @@ def test_ask_line_with_slash_passes_no_toolbar_when_no_driver(tmp_path: Path) ->
     line = anyio.run(ask_line_with_slash, prompt, _NullStatus(), change)
     assert line == "hi"
     assert prompt.bottom_toolbars == [None]    # driver None -> no toolbar
+
+
+def test_slash_model_valid_returns_literal(tmp_path, monkeypatch) -> None:
+    import imp.cli.slash as slash
+    monkeypatch.setattr(slash, "validate_model_arg", lambda arg, *, change: None)
+    change = _FakeChange(tmp_path)
+    out: list[str] = []
+    result = slash.handle_slash_line(
+        "/model anthropic:claude-fable-5", change=change, output_fn=out.append)
+    assert result == "/model anthropic:claude-fable-5"
+
+
+def test_slash_model_invalid_reprompts(tmp_path, monkeypatch) -> None:
+    import imp.cli.slash as slash
+    monkeypatch.setattr(
+        slash, "validate_model_arg",
+        lambda arg, *, change: "provider 'openai' is not available")
+    change = _FakeChange(tmp_path)
+    out: list[str] = []
+    result = slash.handle_slash_line(
+        "/model openai:gpt-5", change=change, output_fn=out.append)
+    assert result is slash.REPROMPT
+    assert any("not available" in line for line in out)
+
+
+def test_slash_model_bare_prints_roster(tmp_path, monkeypatch) -> None:
+    import imp.cli.slash as slash
+
+    calls: dict[str, object] = {}
+
+    def _fake(*, change, output_fn):
+        calls["change"] = change
+        output_fn("Current: claude_code · opus   (this step)")
+
+    monkeypatch.setattr(slash, "print_model_roster", _fake)
+    change = _FakeChange(tmp_path)
+    out: list[str] = []
+    result = slash.handle_slash_line("/model", change=change, output_fn=out.append)
+    assert result is slash.REPROMPT
+    assert calls["change"] is change
+    assert any("Current:" in line for line in out)

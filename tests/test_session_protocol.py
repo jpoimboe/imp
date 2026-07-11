@@ -187,3 +187,17 @@ def test_interrupt_force_control_round_trips() -> None:
     line = encode_control(CONTROL_INTERRUPT_FORCE)
     msg = parse_client_message(line)
     assert msg == Control(action="interrupt-force", reason=None)
+
+
+def test_set_model_control_round_trips() -> None:
+    from imp.remote.session.protocol import (
+        CONTROL_SET_MODEL,
+        Control,
+        encode_control,
+        parse_client_message,
+    )
+
+    assert CONTROL_SET_MODEL == "set-model"
+    line = encode_control(CONTROL_SET_MODEL, "anthropic:claude-fable-5")
+    assert parse_client_message(line) == Control(
+        "set-model", "anthropic:claude-fable-5")

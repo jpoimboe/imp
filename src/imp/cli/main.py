@@ -132,7 +132,7 @@ class ReplyInterjectRouter:
             self._coord.enqueue_interject(line)
 
 
-OPENING_HINT = "type a message, or /help for commands"
+OPENING_HINT = "type a message, /help for commands, or /model to switch models"
 _OPENING_SESSION_VERBS = ("/save", "/clear", "/abandon")
 
 
@@ -685,11 +685,16 @@ def _print_opening(change: Change, marker: str, *, interactive: bool, color: boo
 
 async def _read_intent_line(
     prompt: Any, change: Any, *, color: bool, width: int,
+    model_sink: dict[str, str] | None = None,
 ) -> str:
-    """Read one opening-intent line through the slash interceptor, no model turn spent."""
+    """Read one opening-intent line, capturing an opening `/model` selection into `model_sink`."""
     while True:
         line = await ask_line_with_slash(
             prompt, None, change, color=color, width=width, hint=OPENING_HINT)
+        if line.strip().startswith("/model "):
+            if model_sink is not None:
+                model_sink["model"] = line.strip()[len("/model "):].strip()
+            continue
         if line in _OPENING_SESSION_VERBS:
             print(f"{line} isn't available at the opening prompt — "
                   f"describe your Change, or /help for commands.")
@@ -700,6 +705,7 @@ async def _read_intent_line(
 async def _read_opening_message(
     change: Change, *, leave_mode: str, banner_shown: bool, color: bool,
     width: int, editing_mode: str,
+    model_sink: dict[str, str] | None = None,
     _prompt_factory: Callable[[], Any] | None = None,
 ) -> str | None:
     """Lead with the run header, then the splash (when interactive), then read the
@@ -710,7 +716,8 @@ async def _read_opening_message(
         lambda: Prompt(skills_dir=change.workflow_dir / "skills",
                        editing_mode=editing_mode, color=color))
     prompt = make()
-    reply = await _read_intent_line(prompt, change, color=color, width=width)
+    reply = await _read_intent_line(
+        prompt, change, color=color, width=width, model_sink=model_sink)
     return _normalize_opening_reply(reply)
 
 
@@ -733,15 +740,19 @@ async def _run_cleared_session(
             sys.stdout, change.id, change.title, initial="idle")
         prompt = Prompt(skills_dir=change.workflow_dir / "skills",
                         editing_mode=_editing_mode(control), color=color)
+        # A `/model` typed at this reopened prompt lands here; empty when none.
+        cleared_model_sink: dict[str, str] = {}
         try:
             reply = await _read_intent_line(
-                prompt, change, color=color, width=_term_width())
+                prompt, change, color=color, width=_term_width(),
+                model_sink=cleared_model_sink)
         except (EOFError, KeyboardInterrupt):
             if term_title is not None:
                 term_title.reset()
             print("imp: cancelled", file=sys.stderr)
             return 130
         _session_started = True
+        cleared_model = cleared_model_sink.get("model")
         opening_text = _normalize_opening_reply(reply)
         # Persist the intent durably so the reopened chat's opening step seeds from
         # change.json (mirroring the imp new path), surviving any later resume.
@@ -757,7 +768,7 @@ async def _run_cleared_session(
             change, driver=driver, coord=coord, solicit=solicit,
             status=status,
             leave_mode=leave_mode,
-            leave_state=leave_state, title=term_title)
+            leave_state=leave_state, title=term_title, model=cleared_model)
     finally:
         if not _session_started:
             discard_conversation(change)
@@ -944,6 +955,19 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
         print(f"imp: {block}", file=sys.stderr)
         return 2
 
+    model_arg = getattr(args, "model", None)
+    if model_arg is not None:
+        from imp.cli.model_command import validate_model_available
+        from imp.providers.effective import load_effective_config
+        from imp.providers.resolve import available_providers
+        config = load_effective_config(
+            project_root=control, control_root=control).config
+        reason = validate_model_available(
+            model_arg, available=available_providers(config))
+        if reason is not None:
+            print(f"imp: {reason}", file=sys.stderr)
+            return 2
+
     non_interactive = bool(getattr(args, "non_interactive", False))
     autonomous = bool(getattr(args, "autonomous", False))
     _test_cmd_fast_nudge(
@@ -980,13 +1004,16 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
 
     # Print the run header before the prompt so erase/reprint causes no layout jump.
     header_printed = False
+    # A `/model` typed at the opening prompt lands here; empty when none was typed.
+    opening_model_sink: dict[str, str] = {}
     if show_opening_prompt:
         try:
             async with prompt_sigint_guard():
                 reply = await _read_opening_message(
                     change, leave_mode=leave_mode, banner_shown=interactive,
                     color=color, width=_term_width(),
-                    editing_mode=_editing_mode(control))
+                    editing_mode=_editing_mode(control),
+                    model_sink=opening_model_sink)
         except (EOFError, KeyboardInterrupt):
             if term_title is not None:
                 term_title.reset()
@@ -997,6 +1024,7 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
         # An empty reply falls back to the unseeded path (the opening step
         # opens by asking); a real answer becomes the opening intent.
         opening_text = reply
+    opening_model = opening_model_sink.get("model") or model_arg
 
     # Persist the finalized intent so it survives any resume (including a restart
     # from an errored transcript). Covers both the positional and interactive
@@ -1021,7 +1049,7 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
             change, driver=driver, coord=coord, solicit=solicit,
             status=status,
             title=term_title,
-            non_interactive=True, autonomous=autonomous)
+            non_interactive=True, autonomous=autonomous, model=opening_model)
 
     if not header_printed:
         _print_opening(change, leave_mode, interactive=interactive, color=color)
@@ -1040,7 +1068,8 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
             change, driver=driver, coord=coord, solicit=solicit,
             status=status,
             leave_mode=leave_mode,
-            leave_state=leave_state, title=term_title, autonomous=autonomous)
+            leave_state=leave_state, title=term_title, autonomous=autonomous,
+            model=opening_model)
 
     return await _clear_loop(control, first=_first, leave_mode=leave_mode)
 
@@ -2955,6 +2984,16 @@ def render_overview(color: bool) -> str:
     return "\n".join(lines)
 
 
+def _model_arg_type(value: str) -> str:
+    """argparse type= for --model: reject malformed provider:model syntax."""
+    from imp.providers.model_arg import ModelArgError, parse_model_arg
+    try:
+        parse_model_arg(value)
+    except ModelArgError as exc:
+        raise argparse.ArgumentTypeError(str(exc)) from exc
+    return value
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="imp")
     parser.add_argument("--version", action="version", version=f"imp {__version__}")
@@ -3014,6 +3053,10 @@ def _build_parser() -> argparse.ArgumentParser:
                        help="Base the Change on an existing BRANCH instead of "
                             "the configured default-base. BRANCH must already "
                             "exist.")
+    p_new.add_argument("--model", metavar="ARG", default=None, type=_model_arg_type,
+                       help="Run the opening step under a chosen model "
+                            "(provider:model or bare model); the same override as "
+                            "typing /model at the opening prompt.")
     p_new.set_defaults(func=_cmd_new)
 
     p_chat = sub.add_parser(
@@ -3032,6 +3075,10 @@ def _build_parser() -> argparse.ArgumentParser:
     p_chat.add_argument("--message", metavar="TEXT", default=None,
                         help="Headless reply consumed by the first bare-turn-end prompt; "
                              "requires --non-interactive.")
+    p_chat.add_argument("--model", metavar="ARG", default=None, type=_model_arg_type,
+                        help="Run the opening step under a chosen model "
+                             "(provider:model or bare model); the same override as "
+                             "typing /model at the opening prompt.")
     p_chat.set_defaults(func=_cmd_chat)
 
     p_resume = sub.add_parser(

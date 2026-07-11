@@ -868,8 +868,15 @@ async def test_resident_save_applies_the_save_disposition(tmp_path: Path) -> Non
 def test_hold_prompt_resume_prompt_for_interrupt() -> None:
     import imp.remote.session.daemon as daemon
 
-    coord = SimpleNamespace(should_pause=True)
+    coord = SimpleNamespace(should_pause=True, pause_reason="ctrl-c")
     assert daemon._hold_prompt(RunResult.PAUSED, coord) == daemon._RESUME_PROMPT
+
+
+def test_hold_prompt_none_for_model_override() -> None:
+    import imp.remote.session.daemon as daemon
+
+    coord = SimpleNamespace(should_pause=True, pause_reason="model-override")
+    assert daemon._hold_prompt(RunResult.PAUSED, coord) is None
 
 
 def test_hold_prompt_none_for_script_blocked() -> None:
@@ -1540,3 +1547,159 @@ async def test_lease_drop_without_a_gesture_records_detached(tmp_path: Path) -> 
     # No leave frame — a client that vanished without a gesture (lease drop).
     await server._dispatch_control(_INTERNAL_PAUSE)
     assert coord.pause_reason == "detached"
+
+
+@pytest.mark.anyio
+async def test_dispatch_set_model_stashes_arg_and_pauses(tmp_path: Path) -> None:
+    from imp.remote.session.protocol import CONTROL_SET_MODEL
+    from imp.remote.session.server import SessionServer
+
+    calls: list[tuple[str, str]] = []
+
+    class _Coord:
+        def __init__(self) -> None:
+            self.pending: str | None = None
+
+        def set_pending_model(self, arg: str) -> None:
+            self.pending = arg
+
+        async def signal_pause(self, *, reason: str = "ctrl-c",
+                               via: str = "signal") -> None:
+            calls.append((reason, via))
+
+    coord = _Coord()
+    server = SessionServer(str(tmp_path / "unused.sock"), coordinator=coord)
+
+    await server._dispatch_control(CONTROL_SET_MODEL, "anthropic:claude-fable-5")
+
+    assert coord.pending == "anthropic:claude-fable-5"
+    assert calls == [("model-override", "frame")]
+    # Ordinary control: serve() is never cancelled by set-model.
+    assert server.abandoned is server.saved is server.archived is server.discarded is False
+
+
+@pytest.mark.anyio
+async def test_model_override_pause_reenters_without_resume_prompt(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import imp.remote.session.daemon as daemon_mod
+
+    change = _make_change(tmp_path, "2026-06-15-mdl")
+
+    applied: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        daemon_mod, "apply_model_override",
+        lambda ch, state, arg, *, step_name: applied.append((arg, step_name)))
+
+    calls = {"n": 0}
+
+    async def _run_fn(
+        ch: Change, *, on_event: Any, user_chat_input_fn: Any, coordinator: Any,
+        wait_for_turn_fn: Any = None, **kw: Any,
+    ) -> RunResult:
+        calls["n"] += 1
+        if calls["n"] == 1:
+            # Seed the minimal state the hold loop's State.load reads.
+            State(id=ch.id, step="brainstorm", step_attempt=0,
+                  status="running").save(ch.state_dir)
+            coordinator.set_pending_model("anthropic:claude-fable-5")
+            await coordinator.signal_pause(reason="model-override", via="frame")
+            return RunResult.PAUSED
+        return RunResult.COMPLETED
+
+    # A wrong impl (treating the model-override pause as a ctrl-c hold) would emit
+    # _RESUME_PROMPT and block on user_chat_input_fn — with no client to answer,
+    # that blocks forever, so the deadline concretely enforces the no-prompt path.
+    with anyio.fail_after(5):
+        result = await serve_change_session(
+            change, run_fn=_run_fn, hibernate=False)
+
+    assert result is RunResult.COMPLETED
+    assert calls["n"] == 2                       # re-entered exactly once
+    assert applied == [("anthropic:claude-fable-5", "brainstorm")]
+
+
+@pytest.mark.anyio
+async def test_model_override_pause_with_empty_arg_resumes_without_applying(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import imp.remote.session.daemon as daemon_mod
+
+    change = _make_change(tmp_path, "2026-06-15-emp")
+
+    applied: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        daemon_mod, "apply_model_override",
+        lambda ch, state, arg, *, step_name: applied.append((arg, step_name)))
+
+    calls = {"n": 0}
+
+    async def _run_fn(
+        ch: Change, *, on_event: Any, user_chat_input_fn: Any, coordinator: Any,
+        wait_for_turn_fn: Any = None, **kw: Any,
+    ) -> RunResult:
+        calls["n"] += 1
+        if calls["n"] == 1:
+            State(id=ch.id, step="brainstorm", step_attempt=0,
+                  status="running").save(ch.state_dir)
+            coordinator.set_pending_model("")
+            await coordinator.signal_pause(reason="model-override", via="frame")
+            return RunResult.PAUSED
+        return RunResult.COMPLETED
+
+    with anyio.fail_after(5):
+        result = await serve_change_session(
+            change, run_fn=_run_fn, hibernate=False)
+
+    assert result is RunResult.COMPLETED
+    assert calls["n"] == 2
+    assert applied == []
+
+
+@pytest.mark.anyio
+async def test_serve_threads_opening_model_to_run_fn(tmp_path) -> None:
+    from imp.engine.executor import RunResult
+    from imp.remote.session.daemon import serve_change_session
+
+    captured: dict[str, object] = {}
+
+    async def _run_fn(change, **kw):
+        captured.update(kw)
+        return RunResult.COMPLETED
+
+    await serve_change_session(
+        _make_change(tmp_path, "2026-07-10-mdl"), run_fn=_run_fn, hibernate=False,
+        model="anthropic:claude-fable-5")
+    assert captured["opening_model"] == "anthropic:claude-fable-5"
+
+
+def test_main_forwards_model_to_serve(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import functools
+
+    import imp.remote.session.daemon as daemon
+
+    loaded = object()
+    captured: dict[str, Any] = {}
+
+    def fake_load(control_root: Path, change_id: str) -> object:
+        return loaded
+
+    def fake_run(fn: Any) -> None:
+        captured["fn"] = fn
+
+    monkeypatch.setattr(daemon.Change, "load", staticmethod(fake_load))
+    monkeypatch.setattr(daemon.anyio, "run", fake_run)
+
+    rc = daemon.main([
+        "--control-root", str(tmp_path),
+        "--change-id", "2026-07-10-mdl",
+        "--model", "a:b",
+    ])
+
+    assert rc == 0
+    fn = captured["fn"]
+    assert isinstance(fn, functools.partial)
+    assert fn.func is daemon.serve_change_session
+    assert fn.keywords.get("model") == "a:b"

@@ -165,7 +165,7 @@ async def test_build_session_attach_uses_resident_daemon_without_spawning(
     monkeypatch.setattr(
         attach_mod, "spawn_session_daemon",
         lambda ch, *, resume=False,
-        non_interactive=False, autonomous=False: spawned.append(ch))
+        non_interactive=False, autonomous=False, model=None: spawned.append(ch))
 
     received: list[dict[str, Any]] = []
     server = SessionSocket(sock)
@@ -213,6 +213,7 @@ async def test_build_session_attach_threads_resume_into_spawn(
         def fake_spawn(
             ch: Change, *, resume: bool = False,
             non_interactive: bool = False, autonomous: bool = False,
+            model: str | None = None,
         ) -> None:
             captured["resume"] = resume
             tg.start_soon(_start_server)
@@ -341,3 +342,27 @@ def test_spawn_session_daemon_truncates_stderr_file_on_respawn(
     captured = (change.change_dir / "daemon.stderr").read_bytes()
     assert captured == b"second\n"          # truncated ("wb"), not appended
     assert b"first-segment-crash" not in captured
+
+
+def test_spawn_session_daemon_appends_model_arg(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    change = _make_change(tmp_path, "2026-06-15-model")
+    captured: dict[str, Any] = {}
+    monkeypatch.setattr(subprocess, "Popen",
+                        lambda argv, **kw: captured.update(argv=argv) or object())
+    spawn_session_daemon(change, model="anthropic:claude-fable-5")
+    assert "--model" in captured["argv"]
+    i = captured["argv"].index("--model")
+    assert captured["argv"][i + 1] == "anthropic:claude-fable-5"
+
+
+def test_spawn_session_daemon_omits_model_when_none(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    change = _make_change(tmp_path, "2026-06-15-abc")
+    captured: dict[str, Any] = {}
+    monkeypatch.setattr(subprocess, "Popen",
+                        lambda argv, **kw: captured.update(argv=argv) or object())
+    spawn_session_daemon(change)
+    assert "--model" not in captured["argv"]

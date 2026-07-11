@@ -135,6 +135,20 @@ def _first_available_provider(config: Config) -> str | None:
     return None
 
 
+def available_providers(config: Config) -> list[str]:
+    """The registered providers named in config.providers whose env_check passes,
+    in config order. The roster/validation source for /model and --model."""
+    out: list[str] = []
+    for name in config.providers:
+        entry = _PROVIDERS.get(name)
+        if entry is None:
+            continue
+        env_check, _ = entry
+        if env_check():
+            out.append(name)
+    return out
+
+
 def _differ_tier(candidate_provider: str, candidate_model: str,
                  tgt_provider: str, tgt_model: str) -> int:
     """1 = different vendor (best), 2 = same vendor different model,

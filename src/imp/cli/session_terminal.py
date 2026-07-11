@@ -152,6 +152,11 @@ async def run_terminal_client(
                                     leave_state["intent"] = "clear"
                                 coord.escalation_event.set()
                                 return
+                            if reply.strip().startswith("/model "):
+                                # Sent as a control; stay attached, daemon applies it + re-prompts.
+                                arg = reply.strip()[len("/model "):].strip()
+                                await controls.set_model(arg)
+                                continue
                             if local_echo is not None:
                                 local_echo(reply)
                             await client.send_input(reply)

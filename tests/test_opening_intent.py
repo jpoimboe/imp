@@ -46,7 +46,7 @@ def test_opening_question_helpers_are_removed() -> None:
 
 def test_opening_hint_is_kept() -> None:
     import imp.cli.main as main_mod
-    assert main_mod.OPENING_HINT == "type a message, or /help for commands"
+    assert main_mod.OPENING_HINT == "type a message, /help for commands, or /model to switch models"
 
 
 def test_empty_reply_falls_back_to_unseeded() -> None:

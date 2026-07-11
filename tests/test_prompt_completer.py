@@ -52,7 +52,7 @@ def test_no_completion_for_non_slash(tmp_path: Path) -> None:
 def test_missing_skills_dir_only_builtins(tmp_path: Path) -> None:
     c = SlashCompleter(tmp_path / "nope")
     assert set(_texts(c, "/")) == {
-        "help", "skills", "list", "search", "save", "clear", "abandon", "resume"}
+        "help", "skills", "list", "search", "save", "clear", "model", "abandon", "resume"}
 
 
 def test_async_path_delegates_to_get_completions(tmp_path: Path) -> None:
@@ -89,3 +89,7 @@ def test_user_skill_named_like_builtin_not_duplicated(tmp_path: Path) -> None:
     (skills / "user" / "help.md").write_text("x")
     c = SlashCompleter(skills)
     assert _texts(c, "/help").count("help") == 1
+
+
+def test_builtins_include_model() -> None:
+    assert "model" in SlashCompleter._BUILTINS
