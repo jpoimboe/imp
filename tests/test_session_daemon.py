@@ -46,6 +46,12 @@ async def _wait_for_socket(sock: str) -> None:
             await anyio.sleep(0.02)
 
 
+def _seed_step(quest: Quest, step: str) -> None:
+    st = State.load(quest.state_dir)
+    st.step = step
+    st.save(quest.state_dir)
+
+
 @pytest.mark.anyio
 async def test_serves_on_per_change_socket_and_bridges_run_quest_seams(
     tmp_path: Path,
@@ -1736,3 +1742,164 @@ async def test_resident_save_forwards_the_leave_reason(tmp_path: Path) -> None:
         assert saved == [(quest, "ctrl-d")]
         await client.aclose()
         tg.cancel_scope.cancel()
+
+
+@pytest.mark.anyio
+async def test_script_step_hold_shows_rerun_copy_and_refuses_redirect(
+    tmp_path: Path,
+) -> None:
+    # A bare _make_change quest resolves its workflow to the bundled `imp`
+    # workflow (parse_default_workflow -> "imp"), where "verify" is a script step.
+    quest = _make_change(tmp_path, "2026-06-15-scr")
+    _seed_step(quest, "verify")
+    sock = str(session_socket_path(quest.control_root, quest.id))
+    calls = {"n": 0}
+    drained: dict[str, Any] = {}
+
+    async def fake_run(
+        quest: Quest, *, on_event: Any, user_chat_input_fn: Any,
+        coordinator: Any, wait_for_turn_fn: Any = None,
+    ) -> RunResult:
+        calls["n"] += 1
+        if calls["n"] == 1:
+            await coordinator.signal_pause(reason="ctrl-c")
+            return RunResult.PAUSED
+        drained["v"] = coordinator.drain_interject()
+        return RunResult.COMPLETED
+
+    async with anyio.create_task_group() as tg:
+        result: dict[str, Any] = {}
+
+        async def _serve() -> None:
+            result["r"] = await serve_quest_session(
+                quest, run_fn=fake_run, hibernate=False)
+
+        tg.start_soon(_serve)
+        await _wait_for_socket(sock)
+        received: list[dict[str, Any]] = []
+        client = SessionClient(sock, quest.id, quest.title,
+                               on_event=received.append)
+        await client.connect()
+        tg.start_soon(client.receive_events)
+
+        def _awaiting() -> list[dict[str, Any]]:
+            return [e for e in received
+                    if e.get("type") == "awaiting_user_input"]
+
+        with anyio.fail_after(5):
+            while not _awaiting():
+                await anyio.sleep(0.02)
+        # (a) the script hold copy — re-run/detach, no redirect offer
+        assert _awaiting()[0]["payload"]["prompt"] == (
+            "paused — press enter to re-run the gate, or detach to leave it paused")
+
+        # (b) a typed message is refused with a plain acknowledgement, not dropped
+        await client.send_input("go left")
+        with anyio.fail_after(5):
+            while not any(e.get("type") == "script_output" for e in received):
+                await anyio.sleep(0.02)
+        refusal = next(e for e in received if e.get("type") == "script_output")
+        assert refusal["payload"]["stdout"] == (
+            "a verify gate takes no redirect; press enter to re-run or detach to leave it paused")
+
+        # (c) stayed at the hold: re-prompted and the gate did NOT re-run
+        with anyio.fail_after(5):
+            while len(_awaiting()) < 2:
+                await anyio.sleep(0.02)
+        assert calls["n"] == 1
+
+        # press enter (empty line) -> re-run the gate to completion
+        await client.send_input("")
+        with anyio.fail_after(5):
+            while "r" not in result:
+                await anyio.sleep(0.02)
+        assert result["r"] is RunResult.COMPLETED
+        assert calls["n"] == 2
+        assert drained["v"] is None   # the refused message was never enqueued
+        await client.aclose()
+        tg.cancel_scope.cancel()
+
+
+@pytest.mark.anyio
+async def test_agent_step_hold_keeps_redirect_copy_and_consumes_message(
+    tmp_path: Path,
+) -> None:
+    # "task-lead" is an agent step in the bundled `imp` workflow.
+    quest = _make_change(tmp_path, "2026-06-15-agt")
+    _seed_step(quest, "task-lead")
+    sock = str(session_socket_path(quest.control_root, quest.id))
+    calls = {"n": 0}
+    drained: dict[str, Any] = {}
+
+    async def fake_run(
+        quest: Quest, *, on_event: Any, user_chat_input_fn: Any,
+        coordinator: Any, wait_for_turn_fn: Any = None,
+    ) -> RunResult:
+        calls["n"] += 1
+        if calls["n"] == 1:
+            await coordinator.signal_pause(reason="ctrl-c")
+            return RunResult.PAUSED
+        drained["v"] = coordinator.drain_interject()
+        return RunResult.COMPLETED
+
+    async with anyio.create_task_group() as tg:
+        result: dict[str, Any] = {}
+
+        async def _serve() -> None:
+            result["r"] = await serve_quest_session(
+                quest, run_fn=fake_run, hibernate=False)
+
+        tg.start_soon(_serve)
+        await _wait_for_socket(sock)
+        received: list[dict[str, Any]] = []
+        client = SessionClient(sock, quest.id, quest.title,
+                               on_event=received.append)
+        await client.connect()
+        tg.start_soon(client.receive_events)
+
+        def _awaiting() -> list[dict[str, Any]]:
+            return [e for e in received
+                    if e.get("type") == "awaiting_user_input"]
+
+        with anyio.fail_after(5):
+            while not _awaiting():
+                await anyio.sleep(0.02)
+        # unchanged agent hold copy — offers a redirect
+        assert _awaiting()[0]["payload"]["prompt"] == (
+            "paused — type a message to redirect, or detach to leave it paused")
+
+        await client.send_input("go left")
+        with anyio.fail_after(5):
+            while "r" not in result:
+                await anyio.sleep(0.02)
+        assert result["r"] is RunResult.COMPLETED
+        assert calls["n"] == 2
+        assert drained["v"] == "go left"   # consumed as an interject, as today
+        assert not any(e.get("type") == "script_output" for e in received)
+        await client.aclose()
+        tg.cancel_scope.cancel()
+
+
+def test_resolve_step_kind_maps_step_names_to_kinds(tmp_path: Path) -> None:
+    import imp.remote.session.daemon as daemon
+
+    # Bare quest resolves to the bundled `imp` workflow: "verify" is a verify-gate
+    # script step, "task-lead" is an agent step, and an unset step is None.
+    quest = _make_change(tmp_path, "2026-06-15-rsk")
+    st = State.load(quest.state_dir)
+
+    st.step = "verify"
+    st.save(quest.state_dir)
+    assert daemon._resolve_step_kind(quest) == "script"
+
+    st.step = "task-lead"
+    st.save(quest.state_dir)
+    assert daemon._resolve_step_kind(quest) == "agent"
+
+    st.step = None
+    st.save(quest.state_dir)
+    assert daemon._resolve_step_kind(quest) is None
+
+    st.step = "not-a-real-step"
+    st.save(quest.state_dir)
+    assert daemon._resolve_step_kind(quest) is None
