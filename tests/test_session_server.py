@@ -1457,3 +1457,24 @@ async def test_dispatch_control_force_skips_cooperative_and_hard_kills() -> None
     assert killed["n"] == 1      # hard kill fired
     esc = [r["payload"] for r in log.records if r["type"] == "interrupt_escalated"]
     assert esc == [{"reason": "second_gesture", "killed": ["a1"]}]
+
+
+@pytest.mark.anyio
+async def test_save_reason_survives_a_full_control_queue() -> None:
+    from imp.remote.session.protocol import CONTROL_INTERRUPT, CONTROL_SAVE
+    from imp.remote.session.server import _CONTROL_QUEUE_DEPTH
+
+    server = SessionServer("/unused.sock")
+    # Fill the queue with reason-less frames so the save frame's own enqueue is dropped.
+    for _ in range(_CONTROL_QUEUE_DEPTH):
+        server._enqueue_control(CONTROL_INTERRUPT)
+    server._enqueue_control(CONTROL_SAVE, "ctrl-d")
+    assert server._save_requested is True   # flag set regardless of queue state
+
+    async with anyio.create_task_group() as tg:
+        server._serve_scope = tg.cancel_scope
+        tg.start_soon(server._control_loop)
+        # _dispatch_control(CONTROL_SAVE, ...) flips self.saved and cancels _serve_scope,
+        # which cancels the task group — the loop exits cleanly.
+    assert server.saved is True
+    assert server.save_reason == "ctrl-d"   # the stored reason, not a buffered frame's None
