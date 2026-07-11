@@ -30,7 +30,7 @@ def _state_with_vars(vars_: dict) -> State:
     return State(id="c", step="s", step_attempt=0, status="running", vars=vars_)
 
 
-def test_backfill_seeds_var_declared_after_change_created() -> None:
+def test_backfill_seeds_var_declared_after_quest_created() -> None:
     """A var added to the workflow after a change was created is missing from that
     change's persisted vars (defaults are seeded only at creation). Backfill adds
     its default so a StrictUndefined template reference doesn't crash on resume."""

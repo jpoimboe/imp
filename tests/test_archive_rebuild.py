@@ -62,7 +62,7 @@ def _snapshot(conn) -> dict:
 
 
 def test_rebuild_reproduces_index_contents(tmp_path: Path) -> None:
-    _archive_one(tmp_path, "alpha", "beta", "change_created")
+    _archive_one(tmp_path, "alpha", "beta", "quest_created")
     _archive_one(tmp_path, "gamma", "alpha", "change_merged")
 
     conn = index.connect(archive.index_path(tmp_path))
@@ -89,7 +89,7 @@ def test_rebuild_reproduces_index_contents(tmp_path: Path) -> None:
 def test_rebuild_keeps_original_rows_queryable_during_ingest(
     tmp_path: Path, monkeypatch,
 ) -> None:
-    _archive_one(tmp_path, "alpha", "beta", "change_created")
+    _archive_one(tmp_path, "alpha", "beta", "quest_created")
     _archive_one(tmp_path, "gamma", "alpha", "change_merged")
 
     observed: dict[str, set[str]] = {}
@@ -127,7 +127,7 @@ def test_rebuild_keeps_original_rows_queryable_during_ingest(
 
 
 def test_rebuild_emits_dim_inplace_progress_on_tty(tmp_path: Path, monkeypatch) -> None:
-    _archive_one(tmp_path, "alpha", "beta", "change_created")
+    _archive_one(tmp_path, "alpha", "beta", "quest_created")
     _archive_one(tmp_path, "gamma", "alpha", "change_merged")
 
     fake = _FakeStderr(tty=True)
@@ -143,7 +143,7 @@ def test_rebuild_emits_dim_inplace_progress_on_tty(tmp_path: Path, monkeypatch) 
 
 
 def test_rebuild_on_non_tty_emits_nothing_and_indexes(tmp_path: Path, monkeypatch) -> None:
-    _archive_one(tmp_path, "alpha", "beta", "change_created")
+    _archive_one(tmp_path, "alpha", "beta", "quest_created")
     _archive_one(tmp_path, "gamma", "alpha", "change_merged")
 
     fake = _FakeStderr(tty=False)
@@ -164,7 +164,7 @@ def test_rebuild_on_non_tty_emits_nothing_and_indexes(tmp_path: Path, monkeypatc
 
 
 def test_rebuild_erases_progress_line_on_exception(tmp_path: Path, monkeypatch) -> None:
-    _archive_one(tmp_path, "alpha", "beta", "change_created")
+    _archive_one(tmp_path, "alpha", "beta", "quest_created")
     _archive_one(tmp_path, "gamma", "alpha", "change_merged")
 
     fake = _FakeStderr(tty=True)

@@ -531,7 +531,7 @@ class NarrativeBuilder:
         self._seed_phrase: str | None = None
         # phrase rotation: work seen this segment, consumed at each prose/user-message boundary.
         self._segment_had_work = False
-        # Deferred rename: rendered after its narration, not at the change_renamed position.
+        # Deferred rename: rendered after its narration, not at the quest_renamed position.
         self._pending_rename: RenameNode | None = None
 
     # -- public API -----------------------------------------------------------
@@ -974,19 +974,19 @@ def build_tree(events: Iterable[dict[str, Any]]) -> NarrativeTree:
     return b.tree
 
 
-# Handlers populate this in subsequent tasks; change_created lives here so the
+# Handlers populate this in subsequent tasks; quest_created lives here so the
 # skeleton test passes.
-def _h_change_created(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
+def _h_quest_created(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
     if p.get("kind") == "backlog":
         return
     self._root.title = p.get("title", "")
     self._root.id = p.get("id")
 
 
-NarrativeBuilder._HANDLERS["change_created"] = _h_change_created
+NarrativeBuilder._HANDLERS["quest_created"] = _h_quest_created
 
 
-def _h_change_renamed(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
+def _h_quest_renamed(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
     # A rename carries the new title. Apply it; ignore a legacy/partial event that
     # is missing new_title. The id is immutable; the breadcrumb shows the new title.
     new_title = p.get("new_title")
@@ -997,7 +997,7 @@ def _h_change_renamed(self: NarrativeBuilder, event: dict[str, Any], p: dict[str
     self._pending_rename = RenameNode(name=new_title)
 
 
-NarrativeBuilder._HANDLERS["change_renamed"] = _h_change_renamed
+NarrativeBuilder._HANDLERS["quest_renamed"] = _h_quest_renamed
 
 
 def _h_change_merged(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:

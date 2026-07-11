@@ -28,7 +28,7 @@ def _ev(eid, etype, agent_id=None, **payload):
 
 def test_phase_step_outcome_render_without_header() -> None:
     out = "\n".join(_lines([
-        _ev("1", "change_created", title="add auth"),
+        _ev("1", "quest_created", title="add auth"),
         _ev("3", "step_started", step="spec", kind="agent", phase="design",
             model="m", provider="anthropic"),
         _ev("4", "step_completed", step="spec", kind="agent",
@@ -402,7 +402,7 @@ def test_resumed_step_reemit_awaiting_user_input_shows_caret() -> None:
 
 def test_chrome_step_collapses_to_single_line() -> None:
     out = _lines([
-        _ev("1", "change_created", title="t"),
+        _ev("1", "quest_created", title="t"),
         _ev("2", "step_started", step="spec-verify-commit", kind="script", phase="spec"),
         _ev("3", "step_completed", step="spec-verify-commit", kind="script",
             action={"verb": "continue"}),
@@ -413,19 +413,19 @@ def test_chrome_step_collapses_to_single_line() -> None:
 
 def test_open_chrome_step_shows_header_then_collapses_on_complete() -> None:
     open_out = _lines([
-        _ev("1", "change_created", title="t"),
+        _ev("1", "quest_created", title="t"),
         _ev("2", "step_started", step="run-tests", kind="script", phase="implement"),
     ])
     open_hits = [ln for ln in open_out if "run-tests" in ln]
     assert len(open_hits) == 1
     assert "complete" not in open_hits[0]              # in-flight, not "complete"
     colored = list(render_tree(nv.build_tree([
-        _ev("1", "change_created", title="t"),
+        _ev("1", "quest_created", title="t"),
         _ev("2", "step_started", step="run-tests", kind="script", phase="implement"),
     ]), full=False, color=True, width=80))
     assert pal._ANSI["step"] in next(ln for ln in colored if "run-tests" in ln)
     done_out = _lines([
-        _ev("1", "change_created", title="t"),
+        _ev("1", "quest_created", title="t"),
         _ev("2", "step_started", step="run-tests", kind="script", phase="implement"),
         _ev("3", "step_completed", step="run-tests", kind="script",
             action={"verb": "continue"}),
@@ -487,7 +487,7 @@ def test_collapsed_step_line_prepends_phase_label() -> None:
 
 def test_body_less_visible_step_collapses_to_one_line() -> None:
     out = _lines([
-        _ev("1", "change_created", title="t"),
+        _ev("1", "quest_created", title="t"),
         _ev("2", "step_started", step="verify", kind="script", phase="implement",
             label="running tests"),
         _ev("3", "step_completed", step="verify", kind="script",
@@ -499,7 +499,7 @@ def test_body_less_visible_step_collapses_to_one_line() -> None:
 
 def test_visible_step_with_body_renders_header_not_collapsed() -> None:
     out = _lines([
-        _ev("1", "change_created", title="t"),
+        _ev("1", "quest_created", title="t"),
         _ev("2", "step_started", step="plan-finalized", kind="script", phase="plan",
             label="finalizing plan", show_output=True),
         _ev("3", "script_output", step="plan-finalized", stdout="plan 1/2 · 3 tasks"),
@@ -518,7 +518,7 @@ def test_visible_show_output_false_step_with_error_body_renders_full_frame() -> 
     # with show_output=False (step_no_body=True) gains a body via an ErrorNode child,
     # so deferred_leaf flips False and the full frame (header + body + breadcrumb) renders.
     out = _lines([
-        _ev("1", "change_created", title="t"),
+        _ev("1", "quest_created", title="t"),
         _ev("2", "step_started", step="verify-build", kind="script", phase="implement",
             label="verifying build"),
         _ev("3", "error", message="build failed: missing dependency", category="runner"),
@@ -664,7 +664,7 @@ def test_step_header_separated_from_first_prose_by_one_blank() -> None:
 def test_tiers_resolved_attaches_at_root() -> None:
     # Fired before any step_started (agent_id=None) → lands at the workflow root.
     b = nv.NarrativeBuilder()
-    b.add({"id": "e1", "agent_id": None, "type": "change_created",
+    b.add({"id": "e1", "agent_id": None, "type": "quest_created",
            "payload": {"quest_id": 1, "title": "t"}})
     b.add({"id": "e2", "agent_id": None, "type": "tiers_resolved",
            "payload": {"tiers": {
@@ -853,7 +853,7 @@ def test_steps_de_indent_to_column_zero() -> None:
     # The phase indent level is dropped: a step header inside a phase renders flush
     # at column 0 (was column 2), aligned with the phase rule.
     out = _lines([
-        _ev("1", "change_created", title="t"),
+        _ev("1", "quest_created", title="t"),
         _ev("2", "step_started", step="spec", kind="agent", phase="design", model="m"),
         _ev("3", "llm_response", agent_id="a",
             raw={"content": [{"type": "text", "text": "hi"}]}, usage={}),
@@ -866,7 +866,7 @@ def test_subagent_row_de_indents_to_column_two() -> None:
     # The lean subagent status row shifts left with everything else: its own 2-col
     # label offset now lands it at column 2 (was column 4 = phase + step + label).
     out = _lines([
-        _ev("1", "change_created", title="t"),
+        _ev("1", "quest_created", title="t"),
         _ev("2", "step_started", step="spec", kind="agent", phase="design", model="m"),
         _ev("3", "tool_call", agent_id="a", id="t1", name="sub_agent",
             input={"subagent_name": "reviewer"}),
@@ -936,7 +936,7 @@ def test_phase_breadcrumb_renders_after_closed_phase() -> None:
     # Two phases: the first (spec) is closed when the second (plan) opens.
     # The breadcrumb requires both step timestamps to compute duration.
     events = [
-        {"id": "e0", "agent_id": None, "type": "change_created",
+        {"id": "e0", "agent_id": None, "type": "quest_created",
          "payload": {"title": "t"}},
         {"id": "e1", "agent_id": None, "type": "step_started",
          "payload": {"step": "step1", "kind": "branch", "phase": "spec"},
@@ -1065,7 +1065,7 @@ def test_prose_then_structural_leaf_separated_by_blank() -> None:
     step_completed breadcrumb sits directly under the last prose line; the
     generalized rule inserts one gutter-bearing blank between them."""
     out = _lines([
-        _ev("1", "change_created", title="t"),
+        _ev("1", "quest_created", title="t"),
         _ev("2", "step_started", step="spec", kind="agent", phase="design",
             model="m", provider="anthropic"),
         _ev("3", "llm_response", agent_id="a",
@@ -1085,7 +1085,7 @@ def test_prose_then_subagent_header_separated_by_blank() -> None:
     blank separator — the rule applies to ALL non-prose next children, not just
     leaves."""
     out = _lines([
-        _ev("1", "change_created", title="t"),
+        _ev("1", "quest_created", title="t"),
         _ev("2", "step_started", step="spec", kind="agent", phase="design",
             model="m", provider="anthropic"),
         _ev("3", "llm_response", agent_id="a",
@@ -1641,7 +1641,7 @@ def test_breadcrumb_without_label_has_no_route_line() -> None:
 
 def test_route_reason_rides_target_step_header() -> None:
     events = [
-        _ev("1", "change_created", quest_id=1, title="x"),
+        _ev("1", "quest_created", quest_id=1, title="x"),
         _ev("2", "step_started", step="code-reviewer", kind="agent", phase="review",
             model="m", provider="anthropic"),
         _ev("3", "step_completed", step="code-reviewer", kind="agent",
@@ -1930,7 +1930,7 @@ def test_recap_sites_drop_sub_second_duration_and_separator() -> None:
 
 def test_opening_intent_renders_user_turn_with_gutter() -> None:
     tree = nv.build_tree([
-        {"id": "e1", "agent_id": None, "type": "change_created",
+        {"id": "e1", "agent_id": None, "type": "quest_created",
          "payload": {"handle": "h", "title": "t"}},
         {"id": "e2", "agent_id": None, "type": "opening_intent",
          "payload": {"text": "add a flag"}},
@@ -2049,7 +2049,7 @@ def test_phase_start_rule_is_lifecycle_wordmark() -> None:
         pal.set_theme(theme)
         try:
             out = list(render_tree(nv.build_tree([
-                _ev("1", "change_created", title="t"),
+                _ev("1", "quest_created", title="t"),
                 _ev("2", "step_started", step="spec", kind="agent",
                      phase="design", model="m"),
             ]), full=False, color=True, width=80))
@@ -2119,7 +2119,7 @@ def test_phase_end_rule_collapses_when_subsecond() -> None:
     # A sub-second phase drops the `· <elapsed>` suffix entirely: there must be no
     # dangling `· ` before the tail dashes.
     events = [
-        {"id": "e0", "agent_id": None, "type": "change_created", "payload": {"title": "t"}},
+        {"id": "e0", "agent_id": None, "type": "quest_created", "payload": {"title": "t"}},
         {"id": "e1", "agent_id": None, "type": "step_started",
          "payload": {"step": "s1", "kind": "branch", "phase": "spec"},
          "timestamp": "2026-06-03T00:00:00.0+00:00"},
@@ -2177,7 +2177,7 @@ def test_phase_breadcrumb_uses_phase_label() -> None:
 
 def test_opening_intent_renders_at_root_before_step_header_and_narration() -> None:
     out = _lines([
-        _ev("e1", "change_created", title="add auth"),
+        _ev("e1", "quest_created", title="add auth"),
         {"id": "e2", "agent_id": None, "type": "opening_intent",
          "payload": {"text": "add a --json flag"}},
         _ev("s1", "step_started", step="spec", kind="agent", phase="design",
@@ -2356,7 +2356,7 @@ def test_other_pause_reasons_still_render_verbatim() -> None:
 def test_result_less_complete_step_renders_closed_terminal() -> None:
     # Part A persists a result-less complete_step tail: the tool_call has no matching tool_result.
     events = [
-        ev("1", "change_created", quest_id=1, title="fix"),
+        ev("1", "quest_created", quest_id=1, title="fix"),
         ev("2", "step_started", step="coder", kind="agent", phase="implement",
            model="m", provider="claude_code",
            timestamp="2026-07-01T00:00:00+00:00"),
@@ -2691,7 +2691,7 @@ def test_header_line_paints_model_in_gray() -> None:
 
 def test_subagent_status_row_paints_model_and_frozen_elapsed_gray() -> None:
     b = nv.NarrativeBuilder()
-    b.add(ev("1", "change_created", quest_id=1, title="x"))
+    b.add(ev("1", "quest_created", quest_id=1, title="x"))
     b.add(ev("2", "step_started", step="s", kind="agent", phase="p",
              model="m", provider="anthropic"))
     b.add(ev("t1", "tool_call", agent_id="step:p/s", id="blk", name="sub_agent",

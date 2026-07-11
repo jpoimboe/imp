@@ -16,7 +16,7 @@ def test_scan_quest_homes_parses_each_home_once(tmp_path: Path) -> None:
     Quest.create(tmp_path, title="B", quest_id="beta", base_branch="main")
     ch_a = Quest.load(tmp_path, "alpha")
     ch_a.events_path.write_text('{"timestamp":"2026-06-05T12:00:00+00:00"}\n')
-    # Quest.create seeds a timestamped change_created event; truncate beta's
+    # Quest.create seeds a timestamped quest_created event; truncate beta's
     # events.jsonl to exercise the empty-file -> "" branch of _scan_quest_homes.
     Quest.load(tmp_path, "beta").events_path.write_text("")
 

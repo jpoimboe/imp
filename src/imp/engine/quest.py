@@ -177,7 +177,7 @@ class Quest:
 
     def rename(self, name: str, *, log: JsonlEventLog) -> str:
         """Content-only rename (no git): set title, rewrite quest.json under the
-        gitignored .imp/ (never dirties the tracked worktree), emit change_renamed.
+        gitignored .imp/ (never dirties the tracked worktree), emit quest_renamed.
         Returns the id. The id is immutable, so nothing else moves."""
         old_title = self.title
         self.title = name
@@ -185,7 +185,7 @@ class Quest:
         meta = json.loads(meta_path.read_text())
         meta["title"] = name
         _write_quest_json(meta_path, meta)
-        log.append(agent_id=None, type="change_renamed",
+        log.append(agent_id=None, type="quest_renamed",
                    payload={"id": self.id, "old_title": old_title,
                             "new_title": name})
         return self.id
@@ -353,7 +353,7 @@ class Quest:
             cur_base_head=cur_base_head, workflow=workflow,
         )
         quest.event_log().append(
-            agent_id=None, type="change_created",
+            agent_id=None, type="quest_created",
             payload={"id": quest_id, "title": title},
         )
         return quest
@@ -435,7 +435,7 @@ class Quest:
             workflow=workflow, origin=origin, seed_opening=seed_opening,
         )
         quest.event_log().append(
-            agent_id=None, type="change_created",
+            agent_id=None, type="quest_created",
             payload={"id": quest_id, "title": title},
         )
         return quest

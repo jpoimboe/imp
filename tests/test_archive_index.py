@@ -54,7 +54,7 @@ def _sample_record() -> dict:
 def _sample_events() -> list[dict]:
     return [
         {"id": "e0", "parent_id": None, "agent_id": None,
-         "timestamp": "2026-06-01T00:00:01+00:00", "type": "change_created",
+         "timestamp": "2026-06-01T00:00:01+00:00", "type": "quest_created",
          "payload": {"id": "alpha"}},
         {"id": "e1", "parent_id": "e0", "agent_id": "plan-writer",
          "timestamp": "2026-06-01T00:00:02+00:00", "type": "step_started",
@@ -146,7 +146,7 @@ def test_ingest_last_event_ts_skips_malformed(tmp_path: Path) -> None:
     try:
         events = [
             {"id": "e0", "parent_id": None, "agent_id": None,
-             "timestamp": "2026-06-01T00:00:05+00:00", "type": "change_created",
+             "timestamp": "2026-06-01T00:00:05+00:00", "type": "quest_created",
              "payload": {"id": "alpha"}},
             {"_malformed": True, "raw": "NOT_JSON"},
         ]

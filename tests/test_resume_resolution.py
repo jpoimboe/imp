@@ -54,7 +54,7 @@ def _archive_with_last_ts(control: Path, cid: str, last_ts: str) -> None:
     events = control / f"{cid}.jsonl"
     events.write_bytes((
         f'{{"id":"{cid}-e0","timestamp":"2026-06-01T00:00:00+00:00",'
-        f'"type":"change_created","payload":{{"id":"{cid}"}}}}\n'
+        f'"type":"quest_created","payload":{{"id":"{cid}"}}}}\n'
         f'{{"id":"{cid}-e1","timestamp":"{last_ts}",'
         '"type":"step_started","payload":{"step":"plan-writer"}}\n'
     ).encode())

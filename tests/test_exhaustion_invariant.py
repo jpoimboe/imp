@@ -58,7 +58,7 @@ def _make_change(root: Path, *, quest_id: str = "test-change", title: str = "t")
         control_root=root, project_root=root, quest_dir=quest_dir,
     )
     quest.event_log().append(
-        agent_id=None, type="change_created",
+        agent_id=None, type="quest_created",
         payload={"id": quest_id, "title": title},
     )
     return quest

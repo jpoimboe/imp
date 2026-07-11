@@ -461,7 +461,7 @@ def test_show_spec_and_plan_from_wip_ref_when_home_absent(
     events = tmp_path / "ghost-events.jsonl"
     events.write_text(
         '{"id":"ghost01","timestamp":"2026-06-01T00:00:00+00:00",'
-        '"type":"change_created","payload":{}}\n'
+        '"type":"quest_created","payload":{}}\n'
     )
     cj = tmp_path / "ghost-quest.json"
     cj.write_text(
@@ -715,7 +715,7 @@ def test_show_events_full_prints_raw_json(
          "payload": {"role": "user",
                      "content": [{"type": "text", "text": "hi"}]}},
     ])
-    # --type isolates the seeded event from the change_created event that
+    # --type isolates the seeded event from the quest_created event that
     # Quest.create writes; --full then renders it as raw JSON via full_line.
     out = _run(monkeypatch, tmp_path, "show", _ID, "events",
                "--type", "user_message", "--full")

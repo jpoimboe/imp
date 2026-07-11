@@ -37,7 +37,7 @@ def test_reason_used_when_no_interrupt_reason() -> None:
 
 
 def _created() -> dict:
-    return {"id": "c", "agent_id": None, "type": "change_created",
+    return {"id": "c", "agent_id": None, "type": "quest_created",
             "payload": {"id": "abc123", "title": "x"}}
 
 

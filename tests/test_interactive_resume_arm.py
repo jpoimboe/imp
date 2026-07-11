@@ -68,7 +68,7 @@ def _seed_interactive_change(root: Path, *, armed: bool, started: bool = True):
     quest = Quest(id="c", title="t", base_branch="main",
                     control_root=root, project_root=root, quest_dir=quest_dir,
                     seed_opening=SEED)
-    quest.event_log().append(agent_id=None, type="change_created",
+    quest.event_log().append(agent_id=None, type="quest_created",
                               payload={"id": "c", "title": "t"})
     return quest, flat[0].name
 

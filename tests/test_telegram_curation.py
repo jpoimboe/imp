@@ -62,7 +62,7 @@ def test_workflow_paused_unknown_reason_fails_safe_to_buzz() -> None:
     [
         "tool_call", "tool_result", "thinking", "step_context",
         "llm_response_usage_patch", "skill_load", "step_label_updated",
-        "user_message", "user_interjected", "change_created", "change_renamed",
+        "user_message", "user_interjected", "quest_created", "quest_renamed",
         "cli_attached", "runner_warning", "tool_killed", "completed",
     ],
 )

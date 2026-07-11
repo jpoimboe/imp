@@ -1162,7 +1162,7 @@ async def test_duplicate_live_gates_coalesce_to_one_solicit_without_wouldblock(
 
 
 @pytest.mark.anyio
-async def test_change_renamed_updates_terminal_title(tmp_path: Path) -> None:
+async def test_quest_renamed_updates_terminal_title(tmp_path: Path) -> None:
     sock = str(tmp_path / "s.sock")
     server = SessionServer(sock, hibernate=False)
 
@@ -1171,7 +1171,7 @@ async def test_change_renamed_updates_terminal_title(tmp_path: Path) -> None:
             while server.attached_count == 0:
                 await anyio.sleep(0.02)
         on_event({"type": "step_started", "payload": {}})
-        on_event({"type": "change_renamed",
+        on_event({"type": "quest_renamed",
                    "payload": {"new_title": "Renamed Quest"}})
         await anyio.sleep(0.1)
         return "done"
@@ -1210,7 +1210,7 @@ async def test_change_renamed_updates_terminal_title(tmp_path: Path) -> None:
 
 
 @pytest.mark.anyio
-async def test_replayed_change_renamed_does_not_update_title(tmp_path: Path) -> None:
+async def test_replayed_quest_renamed_does_not_update_title(tmp_path: Path) -> None:
     sock = str(tmp_path / "s.sock")
     server = SessionServer(sock, hibernate=False)
 
@@ -1218,7 +1218,7 @@ async def test_replayed_change_renamed_does_not_update_title(tmp_path: Path) -> 
         with anyio.fail_after(5):
             while server.attached_count == 0:
                 await anyio.sleep(0.02)
-        on_event({"type": "change_renamed", "_replay": True,
+        on_event({"type": "quest_renamed", "_replay": True,
                    "payload": {"new_title": "Renamed Quest"}})
         on_event({"type": "step_started", "payload": {}})
         await anyio.sleep(0.1)

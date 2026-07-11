@@ -226,7 +226,7 @@ def test_create_draft_makes_no_worktree_or_branch(tmp_path: Path) -> None:
     assert state.step == "s" and state.status == "new"   # seeded at the first step
     events_text = (ch.quest_dir / "events.jsonl").read_text()
     events = [json.loads(line) for line in events_text.splitlines() if line.strip()]
-    assert any(e["type"] == "change_created" for e in events)
+    assert any(e["type"] == "quest_created" for e in events)
 
 
 def test_create_draft_records_orig_base_head(tmp_path: Path) -> None:

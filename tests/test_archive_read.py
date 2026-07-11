@@ -22,7 +22,7 @@ def _archive_with_last_ts(control: Path, cid: str, last_ts: str) -> None:
     events = control / f"{cid}.jsonl"
     events.write_bytes((
         f'{{"id":"{cid}-e0","parent_id":null,"agent_id":null,'
-        '"timestamp":"2026-06-01T00:00:00+00:00","type":"change_created",'
+        '"timestamp":"2026-06-01T00:00:00+00:00","type":"quest_created",'
         f'"payload":{{"id":"{cid}"}}}}\n'
         f'{{"id":"{cid}-e1","parent_id":"{cid}-e0","agent_id":"plan-writer",'
         f'"timestamp":"{last_ts}","type":"step_started",'
@@ -42,7 +42,7 @@ def _archive_with_last_ts(control: Path, cid: str, last_ts: str) -> None:
 def _events_bytes(cid: str) -> bytes:
     return (
         f'{{"id":"{cid}-e0","parent_id":null,"agent_id":null,'
-        '"timestamp":"2026-06-01T00:00:01+00:00","type":"change_created",'
+        '"timestamp":"2026-06-01T00:00:01+00:00","type":"quest_created",'
         f'"payload":{{"id":"{cid}"}}}}\n'
         f'{{"id":"{cid}-e1","parent_id":"{cid}-e0","agent_id":"plan-writer",'
         '"timestamp":"2026-06-01T00:00:09+00:00","type":"step_started",'

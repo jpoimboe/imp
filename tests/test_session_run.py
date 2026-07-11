@@ -738,7 +738,7 @@ def test_infer_session_result_completed_from_archive_when_home_reaped(tmp_path: 
     events_file = tmp_path / f"{quest_id}.jsonl"
     events_file.write_bytes(
         f'{{"id":"{quest_id}-e0","parent_id":null,"agent_id":null,'
-        '"timestamp":"2026-06-01T00:00:01+00:00","type":"change_created",'
+        '"timestamp":"2026-06-01T00:00:01+00:00","type":"quest_created",'
         f'"payload":{{"id":"{quest_id}"}}}}\n'.encode()
     )
     quest_json = tmp_path / f"{quest_id}-quest.json"

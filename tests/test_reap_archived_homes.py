@@ -17,7 +17,7 @@ def _home(control: Path, cid: str, status: str) -> Path:
         "id": cid, "status": status, "step": None}))
     (home / "events.jsonl").write_text(
         '{"id":"e0","parent_id":null,"agent_id":null,'
-        '"timestamp":"2026-06-01T00:00:01+00:00","type":"change_created",'
+        '"timestamp":"2026-06-01T00:00:01+00:00","type":"quest_created",'
         '"payload":{"id":"' + cid + '"}}\n')
     return home
 

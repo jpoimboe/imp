@@ -27,7 +27,7 @@ def _had_exchange(log: object) -> bool:
 
 def _was_renamed(log: object) -> bool:
     """True if the change was renamed during the conversation (a design formed)."""
-    return any(ev.get("type") == "change_renamed" for ev in log.read())  # type: ignore[attr-defined]
+    return any(ev.get("type") == "quest_renamed" for ev in log.read())  # type: ignore[attr-defined]
 
 
 def leave_control_action(

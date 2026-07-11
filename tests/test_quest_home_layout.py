@@ -32,7 +32,7 @@ def test_rehydrate_recreates_home_under_quests(tmp_path: Path) -> None:
     events = tmp_path / f"{cid}.jsonl"
     events.write_text(
         f'{{"id":"{cid}-e0","timestamp":"2026-07-01T00:00:00+00:00",'
-        f'"type":"change_created","payload":{{}}}}\n')
+        f'"type":"quest_created","payload":{{}}}}\n')
     quest_json = tmp_path / f"{cid}-quest.json"
     quest_json.write_text(json.dumps({
         "id": cid, "title": "Test Quest", "base_branch": "main",

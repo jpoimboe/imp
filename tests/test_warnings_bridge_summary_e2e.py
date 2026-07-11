@@ -13,7 +13,7 @@ def test_bridged_warnings_from_several_steps_collapse_into_one_summary_line() ->
     msg = ("claude stderr: Warning: Custom betas are only available for API key "
            "users. Ignoring provided betas.")
     tree = nv.build_tree([
-        {"id": "c", "agent_id": None, "type": "change_created",
+        {"id": "c", "agent_id": None, "type": "quest_created",
          "payload": {"id": "abc123", "title": "x"}},
         _warn("w1", msg),   # a bridged stderr warning (one per step, flattened here)
         _warn("w2", msg),   # an identical bridged warning from another step

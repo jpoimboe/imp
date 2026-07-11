@@ -94,7 +94,7 @@ def _seed_single_agent(root: Path) -> Quest:
           vars=dict(workflow.vars.defaults()), loop_counts={}).save(quest_dir / "state")
     quest = Quest(id="c", title="t", base_branch="main",
                     control_root=root, project_root=root, quest_dir=quest_dir)
-    quest.event_log().append(agent_id=None, type="change_created",
+    quest.event_log().append(agent_id=None, type="quest_created",
                               payload={"id": "c", "title": "t"})
     return quest
 

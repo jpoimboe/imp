@@ -61,7 +61,7 @@ def test_create_quest_writes_quest_home_and_emits_event(tmp_path: Path) -> None:
     assert meta["depends_on"] == [ch.id]
 
     parent_events = [e for e in ch.event_log().read()
-                     if e["type"] == "change_created"
+                     if e["type"] == "quest_created"
                      and e["payload"].get("kind") == "backlog"]
     assert len(parent_events) == 1
     assert parent_events[0]["payload"]["id"] == new_id

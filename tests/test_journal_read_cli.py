@@ -24,7 +24,7 @@ from imp.engine.state import State
 from tests.conftest import _seed_control
 
 # A phase that renders through the narrative — the proof the archive was read.
-# (change_created emits no line now that the slug/title banner is gone, so we
+# (quest_created emits no line now that the slug/title banner is gone, so we
 # need a real rendered node to assert on.)
 _MARKER_PHASE = "summary"
 
@@ -551,7 +551,7 @@ def test_show_events_and_status_from_archive(tmp_path, monkeypatch) -> None:
     events = tmp_path / "e.jsonl"
     events.write_text(
         '{"id":"a-e0","parent_id":null,"agent_id":null,'
-        '"timestamp":"2026-06-01T00:00:01+00:00","type":"change_created",'
+        '"timestamp":"2026-06-01T00:00:01+00:00","type":"quest_created",'
         '"payload":{"id":"arch01"}}\n')
     cj = tmp_path / "c.json"
     cj.write_text(json.dumps({
@@ -571,7 +571,7 @@ def test_show_events_and_status_from_archive(tmp_path, monkeypatch) -> None:
             assert m.main(list(argv)) == 0, buf.getvalue()
         return buf.getvalue()
 
-    assert "change_created" in _run("show", "arch01", "events")
+    assert "quest_created" in _run("show", "arch01", "events")
     assert "completed" in _run("show", "arch01", "status")
 
 
@@ -618,7 +618,7 @@ def test_log_reads_events_from_archive_blob(tmp_path: Path, monkeypatch) -> None
     events = tmp_path / "e.jsonl"
     events.write_text(
         '{"id":"log-e0","parent_id":null,"agent_id":null,'
-        '"timestamp":"2026-06-01T00:00:01+00:00","type":"change_created",'
+        '"timestamp":"2026-06-01T00:00:01+00:00","type":"quest_created",'
         '"payload":{"id":"logtest"}}\n'
         '{"id":"log-e1","parent_id":"log-e0","agent_id":"plan-writer",'
         '"timestamp":"2026-06-01T00:00:09+00:00","type":"step_started",'
@@ -673,7 +673,7 @@ def test_status_all_lists_archived(tmp_path, monkeypatch) -> None:
     events = tmp_path / "e.jsonl"
     events.write_text(
         '{"id":"x-e0","timestamp":"2026-06-02T00:00:00+00:00",'
-        '"type":"change_created","payload":{}}\n')
+        '"type":"quest_created","payload":{}}\n')
     cj = tmp_path / "c.json"
     cj.write_text(json.dumps({
         "id": "arch01", "title": "Archived One", "base_branch": "main",

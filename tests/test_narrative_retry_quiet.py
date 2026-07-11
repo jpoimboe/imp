@@ -97,12 +97,12 @@ def test_network_error_without_last_agent_text_keeps_narration() -> None:
 
 
 def test_auth_error_drops_held_prose_even_behind_a_flushed_rename() -> None:
-    # A change_renamed stashes a pending rename that _h_llm_response flushes as a
+    # A quest_renamed stashes a pending rename that _h_llm_response flushes as a
     # RenameNode right AFTER the held auth narration, so the container tail is
     # [held_auth_prose, RenameNode]. The held-prose lookup must skip that trailing
     # RenameNode and still drop the prose; the rename line itself survives.
     events = [
-        _ev("n1", "change_renamed", agent_id=None, new_title="A better title"),
+        _ev("n1", "quest_renamed", agent_id=None, new_title="A better title"),
         _ev("a1", "llm_response", agent_id=None,
             raw={"content": [{"type": "text", "text": AUTH_PROSE}]}, usage={}),
         _ev("e1", "error", agent_id=None,

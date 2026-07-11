@@ -76,7 +76,7 @@ def _seed_single_agent(root: Path) -> Quest:
         control_root=root, project_root=root, quest_dir=quest_dir,
     )
     quest.event_log().append(
-        agent_id=None, type="change_created",
+        agent_id=None, type="quest_created",
         payload={"id": "c", "title": "t"},
     )
     return quest

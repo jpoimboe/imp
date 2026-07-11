@@ -33,7 +33,7 @@ def create_quest(
         origin="followup", seed_opening=seed)
     log = ctx.event_log or JsonlEventLog(ctx.events_path)
     log.append(
-        agent_id=ctx.agent_id, type="change_created",
+        agent_id=ctx.agent_id, type="quest_created",
         payload={"id": new_id, "title": title, "kind": "backlog",
                  "depends_on": deps})
     return f"recorded backlog Quest {new_id}; start it later with `imp resume {new_id}`"
