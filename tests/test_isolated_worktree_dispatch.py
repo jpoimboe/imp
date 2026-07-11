@@ -239,3 +239,43 @@ def test_isolated_dispatch_without_change_context_raises(tmp_path: Path) -> None
 
     with pytest.raises(RuntimeError, match="isolated_worktree"):
         anyio.run(dispatch_task, ctx, "prober", "go")
+
+
+def test_build_spike_policy_passes_spike_true(monkeypatch, tmp_path):
+    from types import SimpleNamespace
+
+    import imp.agents.subagents as subagents
+    from imp.engine.sandbox import SandboxConfig
+
+    captured: dict = {}
+
+    def _fake_resolve_policy(**kwargs):
+        captured.update(kwargs)
+        return "sentinel-policy"
+
+    monkeypatch.setattr("imp.engine.sandbox.resolve_policy", _fake_resolve_policy)
+    monkeypatch.setattr("imp.engine.sandbox.sandbox_available", lambda: True)
+    # Return a REAL SandboxConfig so _build_spike_policy's
+    # `dataclasses.replace(cfg, network=True)` succeeds and control reaches the
+    # patched resolve_policy (a SimpleNamespace would make replace raise first).
+    monkeypatch.setattr(
+        "imp.engine.sandbox.sandbox_config_from_raw",
+        lambda raw: SandboxConfig(),
+    )
+    monkeypatch.setattr(
+        "imp.providers.effective.load_effective_config",
+        lambda **kw: SimpleNamespace(config=SimpleNamespace(sandbox={})),
+    )
+    monkeypatch.setattr(
+        "imp.engine.env.engine_env", lambda **kw: {})
+    monkeypatch.setattr(
+        "imp.engine.env.overlay_engine_env", lambda parent, overlay: {})
+
+    change = SimpleNamespace(
+        id="abc", title="T", project_root=tmp_path, control_root=tmp_path,
+        change_dir=tmp_path / "change", base_branch="master",
+    )
+    result = subagents._build_spike_policy(change, tmp_path / "wt", test_gates=None)
+
+    assert result == "sentinel-policy"
+    assert captured["spike"] is True
