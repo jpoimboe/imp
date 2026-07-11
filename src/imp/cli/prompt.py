@@ -83,11 +83,30 @@ def _build_session(skills_dir: Any | None = None, *, editing_mode: str = "emacs"
     def _(event: Any) -> None:
         event.app.current_buffer.insert_text("\n")
 
+    from prompt_toolkit.layout.containers import Window
+    from prompt_toolkit.layout.dimension import Dimension
+
+    class _FloatingToolbarSession(PromptSession[str]):
+        """Session whose layout ends with a high-weight filler Window after the
+        bottom toolbar. prompt_toolkit's renderer forces the app to claim the
+        full height below the cursor; without a trailing expandable child that
+        fill sinks the toolbar to the terminal's last row. The filler absorbs the
+        fill so the toolbar floats one blank line below the input at any
+        scrollback depth. The layout is captured in __init__, so the override
+        must be in place before construction."""
+
+        def _create_layout(self) -> Any:
+            layout = super()._create_layout()
+            layout.container.children.append(  # type: ignore[attr-defined]
+                Window(height=Dimension(weight=100000)))
+            return layout
+
     completer = SlashCompleter(skills_dir) if skills_dir is not None else None
     # No app bg + reserve_space_for_menu=0: terminal default, no slate bleed; slash menu still pops.
-    return PromptSession(history=history, key_bindings=kb, completer=completer,  # type: ignore[arg-type]
-                         editing_mode=mode, erase_when_done=True,
-                         multiline=True, reserve_space_for_menu=0)
+    return _FloatingToolbarSession(
+        history=history, key_bindings=kb, completer=completer,  # type: ignore[arg-type]
+        editing_mode=mode, erase_when_done=True,
+        multiline=True, reserve_space_for_menu=0)
 
 
 class SlashCompleter:
