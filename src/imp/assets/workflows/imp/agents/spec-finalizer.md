@@ -3,7 +3,6 @@ name: spec-finalizer
 label: spec · finalizing
 description: Adopt the threshold draft spec, re-ground it against the current base, commit the final spec, and service the review loop.
 subagents: [explorer, researcher]
-drivers: [impty]
 output:
   status: {type: enum, values: [Success, Error]}
   phase: {type: enum, values: [written]}

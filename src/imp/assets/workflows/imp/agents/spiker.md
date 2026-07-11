@@ -1,6 +1,7 @@
 ---
 name: spiker
 label: spiking
+drivers: [impty]
 isolated_worktree: true
 tier: high
 ---

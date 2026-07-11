@@ -1,24 +1,33 @@
 from imp.assets import bundled_workflow_dir
 from imp.engine.loader import parse_agent_file
 
+HOLDERS = {"batch-code-reviewer", "threshold", "finalize", "spiker"}
+
 
 def _drivers(name: str) -> frozenset[str]:
     path = bundled_workflow_dir("imp") / "agents" / f"{name}.md"
     return parse_agent_file(path).drivers
 
 
-def test_spec_phase_agents_hold_impty_and_finalize_holds_none() -> None:
-    assert _drivers("spec-finalizer") == frozenset({"impty"})
-    assert _drivers("threshold") == frozenset({"impty"})
-    assert _drivers("finalize") == frozenset()
+def test_the_four_holders_each_hold_only_impty() -> None:
+    for name in sorted(HOLDERS):
+        assert _drivers(name) == frozenset({"impty"}), (
+            f"{name}.md should declare drivers: [impty]"
+        )
 
 
-def test_only_granted_agents_hold_drivers() -> None:
+def test_named_non_holders_hold_no_drivers() -> None:
+    for name in ("spec-finalizer", "coder", "code-reviewer"):
+        assert _drivers(name) == frozenset(), (
+            f"{name}.md should have no drivers"
+        )
+
+
+def test_no_agent_outside_the_holder_set_holds_drivers() -> None:
     agents_dir = bundled_workflow_dir("imp") / "agents"
-    granted = {"spec-finalizer", "threshold"}
     for path in sorted(agents_dir.glob("*.md")):
         name = path.stem
-        if name in granted:
+        if name in HOLDERS:
             continue
         assert parse_agent_file(path).drivers == frozenset(), (
             f"{name}.md should have no drivers"
