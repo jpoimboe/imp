@@ -529,8 +529,7 @@ def _print_leave_disposition(
             print(f"imp: '{label}' abandoned — torn down; "
                   f"find it later with `imp search`")
         else:
-            print(f"imp: '{label}' abandoned — "
-                  f"recover with `imp resume {change.id}`")
+            print(f"imp: '{label}' abandoned")
         return None
     disposition = leave_state.get("disposition")
     if disposition == "save":

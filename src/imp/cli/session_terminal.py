@@ -128,6 +128,11 @@ async def run_terminal_client(
                                     gate_recv.receive_nowait()
                                 except anyio.WouldBlock:
                                     break
+                            # Echo a recognized control command before handling (non-reconciling).
+                            control = reply.strip()
+                            if (control in ("/abandon", "/save", "/clear")
+                                    or control.startswith("/model ")):
+                                driver.append_committed_reply(control)
                             if reply.strip() == "/abandon":
                                 if leave_state is not None:
                                     leave_state["intent"] = "abandon"

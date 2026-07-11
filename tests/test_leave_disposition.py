@@ -59,7 +59,7 @@ def _draft_with_exchange(tmp_path: Path, quest_id: str) -> Quest:
     return ch
 
 
-def test_disposition_abandon_prints_prebuild_recover_line(
+def test_disposition_abandon_draft_prints_honest_line(
     tmp_path: Path, capsys: pytest.CaptureFixture[str],
 ) -> None:
     _seed_control(tmp_path)
@@ -68,8 +68,9 @@ def test_disposition_abandon_prints_prebuild_recover_line(
     rc = m._print_leave_disposition(ch, {"intent": "abandon"})
     assert rc is None
     out = capsys.readouterr().out
-    assert "'Dark mode' abandoned" in out
-    assert "imp resume ab1" in out
+    assert out.strip() == "imp: 'Dark mode' abandoned"
+    assert "imp resume" not in out
+    assert "imp search" not in out
     assert "torn down" not in out
 
 

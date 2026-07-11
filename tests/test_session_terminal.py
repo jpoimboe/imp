@@ -347,6 +347,7 @@ async def test_abandon_slash_command_at_gate_sends_control_abandon(
     class _Driver:
         def on_event(self, _event: dict[str, Any]) -> None: ...
         def finish(self) -> None: ...
+        def append_committed_reply(self, _text: str) -> None: ...
 
     with anyio.fail_after(10):
         async with anyio.create_task_group() as tg:
@@ -360,6 +361,57 @@ async def test_abandon_slash_command_at_gate_sends_control_abandon(
 
             tg.start_soon(_client)
 
+    assert server.abandoned
+
+
+@pytest.mark.anyio
+async def test_control_command_is_echoed_before_handling(tmp_path: Path) -> None:
+    # A control slash command is echoed into the scrollback as a committed,
+    # non-reconciling reply node BEFORE it is handled (here /abandon, which then
+    # tears the client down).
+    sock = str(tmp_path / "s.sock")
+    server = SessionServer(sock, hibernate=False)
+
+    async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
+        with anyio.fail_after(5):
+            while server.attached_count == 0:
+                await server.wait_for_attach_change()
+        on_event({"type": "awaiting_user_input", "payload": {"prompt": "reply?"}})
+        return await user_chat_input_fn("reply?")
+
+    coord = InterruptCoordinator()
+
+    async def _attach(
+        on_event: Callable[[dict[str, Any]], None],
+    ) -> SessionClient:
+        client = SessionClient(sock, "c1", "T", on_event=on_event)
+        await client.connect()
+        return client
+
+    async def _solicit(_prompt: str) -> str:
+        return "/abandon"
+
+    echoed: list[str] = []
+
+    class _Driver:
+        def on_event(self, _event: dict[str, Any]) -> None: ...
+        def finish(self) -> None: ...
+        def append_committed_reply(self, text: str) -> None:
+            echoed.append(text)
+
+    with anyio.fail_after(10):
+        async with anyio.create_task_group() as tg:
+            await server.open()
+            tg.start_soon(server.serve, run_fn)
+
+            async def _client() -> None:
+                await run_terminal_client(
+                    attach=_attach, driver=_Driver(),
+                    coord=coord, solicit=_solicit, quest_id="c1")
+
+            tg.start_soon(_client)
+
+    assert echoed == ["/abandon"]     # echoed exactly once, before teardown
     assert server.abandoned
 
 
@@ -508,6 +560,7 @@ async def test_save_slash_command_at_gate_records_intent_and_detaches(
     class _Driver:
         def on_event(self, _event: dict[str, Any]) -> None: ...
         def finish(self) -> None: ...
+        def append_committed_reply(self, _text: str) -> None: ...
 
     leave_state: dict[str, str] = {}
     with anyio.fail_after(15):
@@ -556,6 +609,7 @@ async def test_abandon_slash_command_records_abandon_intent(
     class _Driver:
         def on_event(self, _event: dict[str, Any]) -> None: ...
         def finish(self) -> None: ...
+        def append_committed_reply(self, _text: str) -> None: ...
 
     leave_state: dict[str, str] = {}
     with anyio.fail_after(10):
@@ -713,6 +767,7 @@ async def test_abandon_records_materialized_false_for_unmaterialized_draft(
     class _Driver:
         def on_event(self, _event: dict[str, Any]) -> None: ...
         def finish(self) -> None: ...
+        def append_committed_reply(self, _text: str) -> None: ...
 
     leave_state: dict[str, str] = {}
     with anyio.fail_after(10):
@@ -767,6 +822,7 @@ async def test_abandon_records_materialized_true_for_materialized_change(
     class _Driver:
         def on_event(self, _event: dict[str, Any]) -> None: ...
         def finish(self) -> None: ...
+        def append_committed_reply(self, _text: str) -> None: ...
 
     leave_state: dict[str, str] = {}
     with anyio.fail_after(10):
@@ -820,6 +876,7 @@ async def test_clear_slash_command_at_gate_records_intent_and_detaches(
     class _Driver:
         def on_event(self, _event: dict[str, Any]) -> None: ...
         def finish(self) -> None: ...
+        def append_committed_reply(self, _text: str) -> None: ...
 
     leave_state: dict[str, str] = {}
     with anyio.fail_after(15):
@@ -2045,6 +2102,7 @@ async def test_local_echo_not_invoked_on_leave_command(
     class _Driver:
         def on_event(self, _event: dict[str, Any]) -> None: ...
         def finish(self) -> None: ...
+        def append_committed_reply(self, _text: str) -> None: ...
 
     async def _attach(
         on_event: Callable[[dict[str, Any]], None],
@@ -2110,6 +2168,7 @@ async def test_local_echo_not_invoked_on_abandon(
     class _Driver:
         def on_event(self, _event: dict[str, Any]) -> None: ...
         def finish(self) -> None: ...
+        def append_committed_reply(self, _text: str) -> None: ...
 
     with anyio.fail_after(10):
         async with anyio.create_task_group() as tg:
@@ -2154,6 +2213,7 @@ async def test_mid_conversation_model_sends_control_not_input(
     class _Driver:
         def on_event(self, _event: dict[str, Any]) -> None: ...
         def finish(self) -> None: ...
+        def append_committed_reply(self, _text: str) -> None: ...
 
     with anyio.fail_after(10):
         async with anyio.create_task_group() as tg:
