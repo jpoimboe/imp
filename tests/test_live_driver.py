@@ -2887,7 +2887,7 @@ def test_install_startup_status_draws_and_animates_resuming() -> None:
     assert "5s" in out.getvalue()                  # elapsed advanced
 
 
-def test_startup_line_persists_through_replay_then_replaced_at_first_live() -> None:
+def test_startup_line_persists_through_replay_then_replaced_at_boundary() -> None:
     out = _TTY()
     status = LiveStatus(out, now=lambda: 0.0)
     status._width_fn = lambda: 80
@@ -2902,6 +2902,8 @@ def test_startup_line_persists_through_replay_then_replaced_at_first_live() -> N
     # attribute access yields a fresh object, so `is` is always False — use `==`.
     assert status._compose == drv.compose_startup   # startup line NOT swapped during replay
     assert "resuming" in out.getvalue()
+    drv.on_event({"type": "replay_complete"})      # boundary lights the footer
+    assert status._compose == drv.compose_status    # replaced by the real status footer at the boundary
     for e in marked[3:]:                            # first live event onward
         drv.on_event(e)
-    assert status._compose == drv.compose_status    # replaced by the real status footer
+    assert status._compose == drv.compose_status    # stays the real footer
