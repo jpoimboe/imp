@@ -125,7 +125,7 @@ def _latest_step_context_system_prompt(log: EventLog, agent_id: str) -> str | No
     """The verbatim system_prompt from the LATEST step_context for this agent_id,
     or None if none exists. 'Latest' matters: a goto re-entry renders afresh and
     emits a newer step_context; resume must replay the newest, not an earlier row.
-    Resume is not a hot path and the log is per-Quest, so a linear scan is fine."""
+    Resume is not a hot path and the log is per-quest, so a linear scan is fine."""
     found: str | None = None
     for e in log.read():
         if e.get("type") == "step_context" and e.get("agent_id") == agent_id:
@@ -265,7 +265,7 @@ def _reconcile_resolved_run(
 
 def _backfill_var_defaults(state: State, decls: Vars) -> list[str]:
     """Seed any workflow-declared var whose key is absent from state.vars with its
-    declared default. Vars are seeded from the workflow only at Quest creation
+    declared default. Vars are seeded from the workflow only at quest creation
     (change.py); a var added to the workflow later is missing from an in-flight
     change's persisted vars, so a template referencing it under StrictUndefined
     (`{{ vars.x }}`) raises "'dict object' has no attribute 'x'" on resume. An
@@ -313,7 +313,7 @@ async def run_quest(
         # Tier A handoff watch always sees the configured threshold without
         # persisting it (the resolved_tiers block below is skipped on resume).
         state.checkpoint_threshold = config.context_checkpoint_threshold()
-        # Freeze once per Quest: resume reuses the facts/guidance the first run saw.
+        # Freeze once per quest: resume reuses the facts/guidance the first run saw.
         if state.project_facts is None:
             state.project_facts = config.project_facts
             state.guidance = config.guidance

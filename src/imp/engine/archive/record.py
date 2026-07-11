@@ -1,4 +1,4 @@
-"""Immutable per-Quest record file: build, write, and read."""
+"""Immutable per-quest record file: build, write, and read."""
 
 from __future__ import annotations
 

@@ -60,11 +60,11 @@ class LayoutMismatch(LoadError):
         self.quest_dir = quest_dir
         breadcrumb = imp_commit or "(unknown)"
         super().__init__(
-            f"Quest at {quest_dir} has layout_version {stored}, but this imp "
+            f"quest at {quest_dir} has layout_version {stored}, but this imp "
             f"engine speaks layout_version {engine}; refusing to resume it under "
             f"a contradictory engine.\n"
             f"  birth imp_commit: {breadcrumb}\n"
-            f"  recover: finish or abandon-and-restart this Quest under the new "
+            f"  recover: finish or abandon-and-restart this quest under the new "
             f"layout, or hand-migrate {quest_dir}; its events and transcripts "
             f"are accessible via `imp log {quest_dir.name}`."
         )
@@ -87,7 +87,7 @@ class StateDecodeError(LoadError):
         super().__init__(
             f"could not parse {live}: {reason}\n{evidence}",
             hint="restore a good state.json from backup, or "
-                 "abandon-and-restart this Quest.",
+                 "abandon-and-restart this quest.",
         )
 
 

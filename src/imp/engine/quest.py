@@ -171,7 +171,7 @@ class Quest:
     materialized: bool = True    # False only for an un-materialized draft (no worktree)
     orig_base_head: str = ""     # base tip captured at draft creation; NEVER a diff base
     cur_base_head: str = ""      # the SHA the branch is currently planted on (the fork)
-    workflow: str | None = None  # per-Quest workflow name; None = project default
+    workflow: str | None = None  # per-quest workflow name; None = project default
     origin: str = "draft"        # provenance: idea | draft | followup (Backlog only)
     seed_opening: str | None = None  # title+description seed for a fresh resume open
 
@@ -226,7 +226,7 @@ class Quest:
             return False
         if not self.title.strip():
             raise ValueError(
-                f"Quest {self.id} has no title; call rename_quest to name it "
+                f"quest {self.id} has no title; call rename_quest to name it "
                 "before going live")
         current_tip = worktree.head_of(self.control_root, self.base_branch)
         head_changed = current_tip != self.orig_base_head
@@ -444,7 +444,7 @@ class Quest:
     def load(cls, control_root: Path, quest_id: str) -> Quest:
         quest_dir = control_root / ".imp" / "quests" / quest_id
         if not quest_dir.is_dir():
-            raise LoadError(f"no such Quest {quest_id!r}", SourceLoc(file=quest_dir, line=1))
+            raise LoadError(f"no such quest {quest_id!r}", SourceLoc(file=quest_dir, line=1))
         meta = json.loads((quest_dir / "quest.json").read_text())
         stored = meta.get("layout_version", 0)
         if stored != LAYOUT_VERSION:
