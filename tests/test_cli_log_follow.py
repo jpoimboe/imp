@@ -44,7 +44,7 @@ def _make_live_home(control: Path, slug: str) -> Path:
         json.dumps({"step": "-", "status": "paused"}))
     (d / "events.jsonl").write_text(
         json.dumps({"timestamp": "2026-05-27T10:00:00+00:00",
-                    "type": "change_created", "payload": {"title": "follow"}}) + "\n"
+                    "type": "quest_created", "payload": {"title": "follow"}}) + "\n"
         + json.dumps({"id": "e2", "agent_id": None,
                       "timestamp": "2026-05-27T10:00:01+00:00",
                       "type": "step_started",
@@ -281,7 +281,7 @@ def test_follow_log_replays_all_events_then_finishes() -> None:
     calls finish() exactly once, and returns 0."""
     import imp.cli.main as m
     events = [
-        {"type": "change_created", "payload": {"title": "t"}},
+        {"type": "quest_created", "payload": {"title": "t"}},
         {"type": "step_started", "payload": {"step": "s"}},
     ]
     driver = MagicMock()
@@ -411,7 +411,7 @@ def test_cmd_log_follow_routes_archived_only_to_follow_log(
     monkeypatch.setattr(m, "_unstarted_backlog_meta", lambda c, i: None)
     monkeypatch.setattr(
         m, "_load_events_for_id",
-        lambda c, i: [{"type": "change_created", "payload": {}}])
+        lambda c, i: [{"type": "quest_created", "payload": {}}])
     monkeypatch.setattr(m, "_quest_home", lambda c, i: tmp_path / "absent")
     monkeypatch.setattr(m, "_follow_log", lambda events: 9)
     rc = m.main(["log", "-f", "arch"])

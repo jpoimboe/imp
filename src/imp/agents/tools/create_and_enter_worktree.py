@@ -20,8 +20,8 @@ def create_and_enter_worktree(ctx: Any) -> str:
     if ctx.change_state is None:
         raise RuntimeError(
             "create_and_enter_worktree is only available to top-level Quest steps")
-    change = ctx.change
-    head_changed = change.materialize()
-    ctx.project_root = change.project_root
-    return (f"materialized worktree at {change.project_root}; "
+    quest = ctx.quest
+    head_changed = quest.materialize()
+    ctx.project_root = quest.project_root
+    return (f"materialized worktree at {quest.project_root}; "
             f"head_changed={'true' if head_changed else 'false'}")

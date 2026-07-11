@@ -391,12 +391,12 @@ def test_bash_tool_uses_live_quest_title_not_stale_snapshot() -> None:
     try:
         pol = _active_policy(root)
         ctx = _ctx(root, pol)
-        # quest_context = the pre-rename snapshot (empty title); ctx.change = the
+        # quest_context = the pre-rename snapshot (empty title); ctx.quest = the
         # live, renamed Quest. The bash tool must prefer the live one.
         ctx.quest_context = QuestContext(
             id="2026-06-10-x", title="",
             project_root=root, workflow_dir=root / ".imp" / "wf")
-        ctx.change = _t.SimpleNamespace(
+        ctx.quest = _t.SimpleNamespace(
             id="2026-06-10-x", handle="", title="renamed")
         out = _bash(ctx, 'printf %s "$IMP_QUEST_TITLE"')
         assert out["returncode"] == 0, out

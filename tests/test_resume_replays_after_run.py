@@ -26,19 +26,19 @@ def test_resume_replays_conversed_draft_after_archive_roundtrip(
     # A draft that ran >=1 step (has_started True), archived resumable and
     # rehydrated. No events.jsonl exists at all, so the outcome cannot depend on
     # which conversational event types are present.
-    change = _draft(tmp_path, has_started=True)
+    quest = _draft(tmp_path, has_started=True)
     final_state = json.loads(
-        (change.state_dir / "state.json").read_text())
+        (quest.state_dir / "state.json").read_text())
     record.write_record(records_root(tmp_path), record.build_record(
         {"id": "c", "title": "t", "base_branch": "main"},
         final_state, events_hash="", resumable=True))
     # Rehydrate: restore state.json from the archived final_state verbatim.
-    (change.state_dir / "state.json").write_bytes(
+    (quest.state_dir / "state.json").write_bytes(
         archive_read.read_state_json(tmp_path, "c"))
 
-    assert m._resume_opens_fresh(change) is False   # replays, never restarts
+    assert m._resume_opens_fresh(quest) is False   # replays, never restarts
 
 
 def test_resume_opens_fresh_for_never_run_draft(tmp_path: Path) -> None:
-    change = _draft(tmp_path, has_started=False)
-    assert m._resume_opens_fresh(change) is True    # genuinely never ran
+    quest = _draft(tmp_path, has_started=False)
+    assert m._resume_opens_fresh(quest) is True    # genuinely never ran

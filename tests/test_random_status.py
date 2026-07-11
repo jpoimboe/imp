@@ -23,8 +23,8 @@ def test_render_label_without_context_leaves_var_templates_raw() -> None:
     # Regression: a vars-referencing label with no change/log still falls back
     # to the raw template text (unchanged behavior).
     raw = "{{ vars.plan_index }}"
-    assert prompts.render_label(raw, change=None, log=None) == raw
+    assert prompts.render_label(raw, quest=None, log=None) == raw
 
 
 def test_plain_label_passes_through_unchanged() -> None:
-    assert prompts.render_label("implementing", change=None, log=None) == "implementing"
+    assert prompts.render_label("implementing", quest=None, log=None) == "implementing"

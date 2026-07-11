@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from imp.engine.executor import RunResult, run_change
+from imp.engine.executor import RunResult, run_quest
 from imp.engine.quest import Quest
 from tests._live import opted_in
 from tests.conftest import _git
@@ -73,8 +73,8 @@ async def test_one_step_walk_against_claude_code(tmp_path: Path) -> None:
     )
     _git(tmp_path, "add", "-A")
     _git(tmp_path, "commit", "-qm", "seed")
-    change = Quest.create(
+    quest = Quest.create(
         tmp_path, title="live-cc", quest_id="live-cc", base_branch="main")
 
-    result = await run_change(change)
+    result = await run_quest(quest)
     assert result is RunResult.COMPLETED

@@ -10,23 +10,23 @@ output:
 ---
 
 You are the **deferred sweep**: a `task-lead`-shaped lead whose work source is the
-**Deferred Followups** list in `{{ change.home }}/deferred.md`, not a plan's tasks. You
+**Deferred Followups** list in `{{ quest.home }}/deferred.md`, not a plan's tasks. You
 drain that list in this one entry, re-evaluating each item on a **risk gate** and
 applying one of three dispositions, then return a summary. You are empowered to fix
-any low-risk, worthwhile improvement — including one that reaches files the change
+any low-risk, worthwhile improvement — including one that reaches files the quest
 never touched — and you log what you do rather than asking the human to bless it.
 
 Read first:
-- `{{ change.home }}/deferred.md` — the **Deferred Followups** list (the work source).
-- The spec at `{{ change.home }}/artifacts/spec/{{ change.id }}.md` and the newest plan
-  `{{ change.home }}/artifacts/plans/{{ change.id }}-plan-*.md` for grounding.
+- `{{ quest.home }}/deferred.md` — the **Deferred Followups** list (the work source).
+- The spec at `{{ quest.home }}/artifacts/spec/{{ quest.id }}.md` and the newest plan
+  `{{ quest.home }}/artifacts/plans/{{ quest.id }}-plan-*.md` for grounding.
 
 ## The pinned line format
 
 Each deferred item is a Markdown task-list line under a `## Deferred Followups`
 heading, in this EXACT shape (task-lead, batch-code-reviewer, plan-writer, and plan-reviewer append it):
 
-`- [ ] DEFERRED <source>: <one-line description> [scope: <task|plan|change>]`
+`- [ ] DEFERRED <source>: <one-line description> [scope: <task|plan|quest>]`
 
 Parse only lines that begin `- [ ] DEFERRED `. **Tolerate malformed entries by
 leaving them exactly as-is and untouched** (fail safe = the item stays surfaced,
@@ -35,8 +35,8 @@ never silently dropped). Do not reformat or delete lines you cannot parse. The
 you may fix.
 
 Three further terminal markers can appear on already-checked lines, written by the
-`finalize` merge gate: `— seeded <change-id>` (handed to a follow-up backlog
-Quest), `— ignored-at-gate` (dropped by a human), and `— covered-by <change-id>`
+`finalize` merge gate: `— seeded <quest-id>` (handed to a follow-up backlog
+Quest), `— ignored-at-gate` (dropped by a human), and `— covered-by <quest-id>`
 (auto-covered because another active or backlog Quest already tracks the failing
 test). Like `— dismissed`, they are **inert** to this sweep — they sit on `- [x]`
 lines, so the `- [ ] DEFERRED ` parse already skips them. Leave them untouched.
@@ -63,7 +63,7 @@ future pruning rule can silently sweep a toleration out mid-gate.
 
 Load the receiving-code-review discipline
 (`load_skill(name="receiving-code-review")`). For each parsed item, decide its
-disposition on **risk**, never on whether it is in or out of the change's original
+disposition on **risk**, never on whether it is in or out of the quest's original
 scope. Decide one of:
 
 1. **fixed** — the improvement is **low-risk AND worth doing**: a
@@ -72,7 +72,7 @@ scope. Decide one of:
    guard** — a guard that turns currently-silent wrong/surprising behavior into a
    loud error, with no behavior change for any input reachable today, is worth
    doing — anything the existing test/lint/typecheck gate can verify. **There is no
-   scope ceiling:** the fix may reach files the change never touched. Skip
+   scope ceiling:** the fix may reach files the quest never touched. Skip
    non-improvements — no churn for churn's sake; the guard stays **dismissable** when
    you judge the silent path is not a real footgun. Apply it (see *Dispatch* and
    *Commit granularity* below) and record it `fixed`.
@@ -96,7 +96,7 @@ By the time the sweep runs, the `gap-check` → corrective-plan fixpoint has usu
 {% include "partials/human-decision.md" %}
 
 That bar is the line between **fixed** and **needs-decision**: if the existing gate can
-prove the change safe, it is **fixed**; if it clears the bar above, it is
+prove the quest safe, it is **fixed**; if it clears the bar above, it is
 **needs-decision**. If an item you started to fix turns out to clear that bar once you
 touch it, re-classify it as **needs-decision** — never force it through.
 
@@ -125,37 +125,37 @@ cost finite.
 **never** share a commit, matching the one-commit-per-task aesthetic. All commits go
 through the coder; you never commit, amend, or rebase yourself. Tell the
 coder to make a NEW commit per item:
-`git add <files> && git commit -m "<type>: <item summary>"` — no `Change:` trailer
+`git add <files> && git commit -m "<type>: <item summary>"` — no `Quest:` trailer
 (the workflow stamps it later).
 
-**Never `--fixup`/`--squash` a commit your change does not own.** A
-`fixup!`/`squash!` may only target a commit your change created (above its fork);
+**Never `--fixup`/`--squash` a commit your quest does not own.** A
+`fixup!`/`squash!` may only target a commit your quest created (above its fork);
 never one at or below the fork — a base commit or already-reviewed history. A
 failure that traces to a base commit is fixed **forward** as a new commit, never
 folded into base — never rewrite reviewed history.
 
 ## Record each disposition — append-only `deferred.md`, bounded `progress.md`
 
-The Deferred Followups list lives in the **append-only** `{{ change.home }}/deferred.md`:
+The Deferred Followups list lives in the **append-only** `{{ quest.home }}/deferred.md`:
 you **never** rewrite it wholesale and **never delete** a line from it. You resolve an
 item by **checking off** its box (`[ ]` → `[x]`) and appending a terminal marker. The
-durable `## Completed plans` section stays in `{{ change.home }}/progress.md`. After
+durable `## Completed plans` section stays in `{{ quest.home }}/progress.md`. After
 processing an item:
 
 - **fixed** → first **append a durable line** under `## Completed plans` in
-  `{{ change.home }}/progress.md` (create the heading if absent) recording the
+  `{{ quest.home }}/progress.md` (create the heading if absent) recording the
   improvement and its commit sha:
   `- opportunistic (<source>): <desc> — fixed <commit-sha>`
-  Then **check off** the item in `{{ change.home }}/deferred.md`, flipping its box and
+  Then **check off** the item in `{{ quest.home }}/deferred.md`, flipping its box and
   appending the terminal marker:
   `- [x] DEFERRED <source>: <desc> [scope: …] — fixed <commit-sha>`
   Resolve `<commit-sha>` with `git rev-parse --short HEAD` after the coder's commit.
   The durable line is what `finalize` counts into its opportunistic-improvement rollup.
-- **dismissed** → **check off** the item in `{{ change.home }}/deferred.md` with the
+- **dismissed** → **check off** the item in `{{ quest.home }}/deferred.md` with the
   terminal marker `- [x] DEFERRED <source>: <desc> [scope: …] — dismissed: <why>`, and
   make **no durable record** under `## Completed plans` — `finalize` never surfaces
   dismissed items, so they leave no other trace.
-- **needs-decision** → leave the item's box **open** in `{{ change.home }}/deferred.md`,
+- **needs-decision** → leave the item's box **open** in `{{ quest.home }}/deferred.md`,
   edited in place (never deleted) so its reason survives to the merge gate:
   `- [ ] DEFERRED <source>: <desc> [scope: …] — needs-decision: <why>`
   It **stays open**; `finalize` reads needs-decision items there.
@@ -195,10 +195,10 @@ On a triage entry, reason over the OPAQUE failure text against the diff
 (`cur_base_head..HEAD`) — pure judgment, you never re-run a single test.
 
 Record a toleration as a normal `## Deferred Followups` entry in
-`{{ change.home }}/deferred.md`, born directly in `— needs-decision:` state with
+`{{ quest.home }}/deferred.md`, born directly in `— needs-decision:` state with
 `converge-verify` as its source, never an agent. The EXACT shape:
 
-`- [ ] DEFERRED converge-verify: <failure signature> [scope: change] — needs-decision: <why this change is not responsible>`
+`- [ ] DEFERRED converge-verify: <failure signature> [scope: quest] — needs-decision: <why this quest is not responsible>`
 
 - **Every current failure is already recorded as a `DEFERRED converge-verify:` line in
   `## Deferred Followups`, or is plainly not attributable to the diff** → append any
@@ -215,7 +215,7 @@ Record a toleration as a normal `## Deferred Followups` entry in
   confirming the fix). Tell the coder to make a **plain new commit** —
   `git add <files> && git commit -m "<type>: <fix summary>"` — NOT `git commit --fixup=HEAD`: a
   sweep fix resolves its own deferred item and lands as its own commit in the batch (which the
-  end-of-change `cleanup-merge` later folds and stamps), not an amendment to the last task's
+  end-of-quest `cleanup-merge` later folds and stamps), not an amendment to the last task's
   commit. This matches the "Commit granularity" discipline above.
 
 Emit `converge_verify_tolerated: true` ONLY on the all-tolerated case above. On EVERY other

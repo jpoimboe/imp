@@ -1,7 +1,7 @@
 """Prompt template rendering for agent .md bodies.
 
 Six namespaces (spec §7.5):
-  change.id — stable identity; change.title — human title
+  quest.id — stable identity; quest.title — human title
   events.<step-name>.<field> — validated agent_output of prior step;
       missing steps render as empty (lenient-within)
   vars.<name> — workflow vars from state.vars; a typo'd key raises at render
@@ -9,7 +9,7 @@ Six namespaces (spec §7.5):
   project.<fact> — project facts; missing key raises (strict-within)
   run.autonomous — whether the run may auto-take recommendations at
       recommendation-bearing gates (bool); a missing attr under run raises
-      (strict-within), like change/project
+      (strict-within), like quest/project
   step.lap — this step's 1-based lap number (1 = first forward pass);
       step.prior_laps — retained {lap, outcome, head} entries of prior laps
 
@@ -77,7 +77,7 @@ class _EventsNamespace:
 
 
 @dataclass(frozen=True, slots=True)
-class _ChangeNamespace:
+class _QuestNamespace:
     id: str
     title: str
     home: str = ""
@@ -125,7 +125,7 @@ class _ProjectNamespace:
 
 @dataclass(frozen=True, slots=True)
 class PromptContext:
-    change: _ChangeNamespace
+    quest: _QuestNamespace
     events: _EventsNamespace
     vars: dict[str, Any]
     project: _ProjectNamespace
@@ -146,9 +146,9 @@ def build_context(
     laps = tuple(prior_laps or ())
     # lap from the stored lap, not len: history truncates to OUTCOME_HISTORY_K so len saturates.
     return PromptContext(
-        change=_ChangeNamespace(id=quest_id, title=quest_title,
-                                home=quest_home, cur_base_head=cur_base_head,
-                                orig_base_head=orig_base_head),
+        quest=_QuestNamespace(id=quest_id, title=quest_title,
+                              home=quest_home, cur_base_head=cur_base_head,
+                              orig_base_head=orig_base_head),
         events=_EventsNamespace(event_log),
         vars=dict(vars or {}),
         project=_ProjectNamespace(facts),
@@ -159,14 +159,14 @@ def build_context(
 
 
 def render_label(
-    label: str | None, change: Quest | None, log: EventLog | None,
+    label: str | None, quest: Quest | None, log: EventLog | None,
     state: State | None = None,
 ) -> str | None:
     if label is None or "{{" not in label:
         return label
-    if change is None or log is None:
-        # No change/log context (the State.step_label seed path): render with no
-        # template context. A label that needs vars/change raises UndefinedError
+    if quest is None or log is None:
+        # No quest/log context (the State.step_label seed path): render with no
+        # template context. A label that needs vars/quest raises UndefinedError
         # under StrictUndefined and falls back to the raw template text.
         try:
             return _env_for(None).from_string(label).render()
@@ -174,10 +174,10 @@ def render_label(
             return label
     try:
         return render_prompt(label, build_context(
-            quest_title=change.title, event_log=log,
-            quest_id=change.id, quest_home=f".imp/quests/{change.id}",
-            cur_base_head=change.cur_base_head,
-            orig_base_head=change.orig_base_head,
+            quest_title=quest.title, event_log=log,
+            quest_id=quest.id, quest_home=f".imp/quests/{quest.id}",
+            cur_base_head=quest.cur_base_head,
+            orig_base_head=quest.orig_base_head,
             vars=state.vars if state is not None else {},
         ))
     except PromptRenderError:
@@ -211,7 +211,7 @@ def render_prompt(
     Pass workflow_dir to resolve `{% include %}` of shared partials."""
     try:
         return _env_for(workflow_dir).from_string(template_source).render(
-            change=ctx.change, events=ctx.events, vars=ctx.vars,
+            quest=ctx.quest, events=ctx.events, vars=ctx.vars,
             project=ctx.project, run=ctx.run, step=ctx.step,
         )
     except jinja2.exceptions.UndefinedError as e:

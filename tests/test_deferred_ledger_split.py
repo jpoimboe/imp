@@ -13,33 +13,33 @@ def test_imp_producers_file_deferred_items_to_deferred_md() -> None:
     pw = _imp("plan-writer.md")
     # The "Surfacing a decision" append target moved off progress.md.
     assert (
-        "`{{ change.home }}/deferred.md` (create the `## Deferred Followups` heading"
+        "`{{ quest.home }}/deferred.md` (create the `## Deferred Followups` heading"
         " if absent)"
     ) in pw
     # The ask-vs-decide scope-deviation surface moved too.
-    assert "open item in `{{ change.home }}/deferred.md` (the reader" in pw
+    assert "open item in `{{ quest.home }}/deferred.md` (the reader" in pw
     # The forward-note (NEEDS-REPLAN) lifecycle handle is read from deferred.md.
-    assert "note in `{{ change.home }}/deferred.md` (a `task-lead` needs-replan that" in pw
+    assert "note in `{{ quest.home }}/deferred.md` (a `task-lead` needs-replan that" in pw
 
     pcr = _imp("batch-code-reviewer.md")
-    assert "**Deferred Followups** list in `{{ change.home }}/deferred.md` so the" in pcr
-    assert "`{{ change.home }}/deferred.md` (the Deferred Followups append above)" in pcr
+    assert "**Deferred Followups** list in `{{ quest.home }}/deferred.md` so the" in pcr
+    assert "`{{ quest.home }}/deferred.md` (the Deferred Followups append above)" in pcr
     # progress.md is now described as completed tasks only; the ledger is its own file.
-    assert "**Deferred ledger:** `{{ change.home }}/deferred.md`" in pcr
+    assert "**Deferred ledger:** `{{ quest.home }}/deferred.md`" in pcr
 
     rec = _imp("reconciler.md")
     assert (
-        "`{{ change.home }}/deferred.md` in reader form (create the file/heading"
+        "`{{ quest.home }}/deferred.md` in reader form (create the file/heading"
         " if absent):"
     ) in rec
     # The reconciler still NARRATES through progress.md (transient surface stays).
-    assert "## Surface your work — `{{ change.home }}/progress.md`" in rec
+    assert "## Surface your work — `{{ quest.home }}/progress.md`" in rec
 
     sf = _imp("spec-finalizer.md")
-    assert "in `{{ change.home }}/deferred.md` (create the `## Deferred Followups` heading if" in sf
+    assert "in `{{ quest.home }}/deferred.md` (create the `## Deferred Followups` heading if" in sf
 
     prv = _imp("plan-reviewer.md")
-    assert "Deferred Followup open item in `{{ change.home }}/deferred.md`:" in prv
+    assert "Deferred Followup open item in `{{ quest.home }}/deferred.md`:" in prv
 
 
 def test_imp_deferred_sweep_drains_deferred_md_append_only() -> None:
@@ -47,22 +47,22 @@ def test_imp_deferred_sweep_drains_deferred_md_append_only() -> None:
     low = sw.lower()
     # Work source repointed to deferred.md.
     assert (
-        "**Deferred Followups** list in `{{ change.home }}/deferred.md`,"
+        "**Deferred Followups** list in `{{ quest.home }}/deferred.md`,"
         " not a plan's tasks"
     ) in sw
     assert (
-        "- `{{ change.home }}/deferred.md` — the **Deferred Followups** list"
+        "- `{{ quest.home }}/deferred.md` — the **Deferred Followups** list"
         " (the work source)."
     ) in sw
     # Append-only: resolve by checking off, never deleting.
     assert "append-only" in low
     assert "check off" in low
     # The fixed disposition still records the durable opportunistic line in progress.md.
-    assert "under `## Completed plans` in\n  `{{ change.home }}/progress.md`" in sw
+    assert "under `## Completed plans` in\n  `{{ quest.home }}/progress.md`" in sw
     # The verify-triage toleration is recorded in deferred.md.
     assert (
         "Record a toleration as a normal `## Deferred Followups` entry in\n"
-        "`{{ change.home }}/deferred.md`"
+        "`{{ quest.home }}/deferred.md`"
     ) in sw
 
 
@@ -71,15 +71,15 @@ def test_imp_task_lead_files_ledger_and_forward_notes_to_deferred_md() -> None:
     # The deferred-finding append target is deferred.md.
     assert (
         "under a\n   `## Deferred Followups` heading in the append-only"
-        " `{{ change.home }}/deferred.md`"
+        " `{{ quest.home }}/deferred.md`"
     ) in tl
     # Forward notes are appended to deferred.md, never the rewritable progress.md.
-    assert "by appending to `{{ change.home }}/deferred.md` — the" in tl
+    assert "by appending to `{{ quest.home }}/deferred.md` — the" in tl
     assert "append-only ledger" in tl
     # The verify-triage toleration is recorded in deferred.md.
     assert (
         "Record a toleration as a normal `## Deferred Followups` entry in\n"
-        "`{{ change.home }}/deferred.md`"
+        "`{{ quest.home }}/deferred.md`"
     ) in tl
     # progress.md keeps the per-task commit-subject ledger and the Completed-plans collapse.
     assert "keep each task's **commit subject** in `progress.md`" in tl
@@ -95,9 +95,9 @@ def test_imp_task_lead_files_ledger_and_forward_notes_to_deferred_md() -> None:
 def test_imp_consumers_read_ledger_from_deferred_md() -> None:
     fin = _imp("finalize.md")
     # The closed-set needs-decision read is from deferred.md.
-    assert "recorded `— needs-decision: <why>` lines in `{{ change.home }}/deferred.md`, and" in fin
-    assert "step recorded in `{{ change.home }}/deferred.md`, and surface ONLY the" in fin
-    assert "the `— needs-decision: <why>` lines in `{{ change.home }}/deferred.md`" in fin
+    assert "recorded `— needs-decision: <why>` lines in `{{ quest.home }}/deferred.md`, and" in fin
+    assert "step recorded in `{{ quest.home }}/deferred.md`, and surface ONLY the" in fin
+    assert "the `— needs-decision: <why>` lines in `{{ quest.home }}/deferred.md`" in fin
     # The gate's line rewrites target deferred.md, not progress.md.
     assert "leave its `deferred.md` line `needs-decision`" in fin
     assert "other than the `deferred.md` line rewrites above" in fin
@@ -106,12 +106,12 @@ def test_imp_consumers_read_ledger_from_deferred_md() -> None:
     # gap-check reads the needs-decision items (the backstop-suppression source) from
     # deferred.md, alongside progress.md.
     assert (
-        "`{{ change.home }}/progress.md`, `{{ change.home }}/deferred.md`,"
+        "`{{ quest.home }}/progress.md`, `{{ quest.home }}/deferred.md`,"
         " and the committed code"
     ) in gc
 
     ir = _imp("integration-review.md")
-    assert "`{{ change.home }}/deferred.md` carries any `## Deferred Followups`" in ir
+    assert "`{{ quest.home }}/deferred.md` carries any `## Deferred Followups`" in ir
 
 
 def test_no_prompt_overwrites_deferred_md_wholesale() -> None:
@@ -132,7 +132,7 @@ def test_imp_forward_notes_survive_progress_md_rewrite() -> None:
     tl = _imp("task-lead.md")
     # The open NEEDS-REPLAN note and resolved-forward note are appended to the
     # append-only deferred.md, which the progress.md collapse never touches.
-    assert "by appending to `{{ change.home }}/deferred.md` — the" in tl
+    assert "by appending to `{{ quest.home }}/deferred.md` — the" in tl
     assert "`deferred.md` is\n   never collapsed" in tl
     # progress.md's collapse is explicitly scoped to status only.
     assert "Keep `progress.md` bounded — it holds status only." in tl
@@ -147,5 +147,5 @@ def test_imp_completed_plans_and_per_task_status_stay_on_progress_md() -> None:
     # in progress.md (status), not deferred.md.
     assert (
         "under `## Completed plans` in\n"
-        "  `{{ change.home }}/progress.md`"
+        "  `{{ quest.home }}/progress.md`"
     ) in _imp("deferred-sweep.md")

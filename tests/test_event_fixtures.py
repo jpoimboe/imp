@@ -14,7 +14,7 @@ def test_ev_builds_canonical_shape() -> None:
 
 def test_sample_is_a_complete_step() -> None:
     types = [e["type"] for e in SAMPLE]
-    assert types[0] == "change_created"
+    assert types[0] == "quest_created"
     # No phase_started/phase_completed events — phase is derived from
     # step_started.payload.phase.
     assert "phase_started" not in types and "phase_completed" not in types

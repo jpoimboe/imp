@@ -6,7 +6,7 @@ import pytest
 
 from imp.agents.reflow import reflow_markdown
 from imp.engine.agent_run import _CORE_HEAD, _CORE_TAIL
-from imp.engine.executor import RunResult, run_change
+from imp.engine.executor import RunResult, run_quest
 from tests.test_executor import _make_change, _register_invocation_capturing
 
 
@@ -44,11 +44,11 @@ def _seed(root: Path, *, persona: str | None) -> object:
 
 @pytest.mark.anyio
 async def test_executor_injects_rendered_persona_into_assembled_prompt(tmp_path: Path) -> None:
-    change = _seed(tmp_path, persona="# Persona\nfor {{ change.title }}\n")
+    quest = _seed(tmp_path, persona="# Persona\nfor {{ quest.title }}\n")
     sink: list = []
     _register_invocation_capturing({"status": "Success"}, sink)
 
-    result = await run_change(change, on_event=lambda _e: None)
+    result = await run_quest(quest, on_event=lambda _e: None)
     assert result is RunResult.COMPLETED
 
     inv = sink[0]
@@ -63,11 +63,11 @@ async def test_executor_injects_rendered_persona_into_assembled_prompt(tmp_path:
 
 @pytest.mark.anyio
 async def test_executor_personaless_workflow_assembles_without_persona(tmp_path: Path) -> None:
-    change = _seed(tmp_path, persona=None)
+    quest = _seed(tmp_path, persona=None)
     sink: list = []
     _register_invocation_capturing({"status": "Success"}, sink)
 
-    result = await run_change(change, on_event=lambda _e: None)
+    result = await run_quest(quest, on_event=lambda _e: None)
     assert result is RunResult.COMPLETED
 
     inv = sink[0]

@@ -14,7 +14,7 @@ def _seed_change(control: Path, cid: str, last_ts: str) -> None:
     """Archive one change normally so its record + blob + a v2 index.db exist."""
     events = control / f"{cid}.jsonl"
     events.write_text(
-        f'{{"id":"{cid}-e0","timestamp":"{last_ts}","type":"change_created",'
+        f'{{"id":"{cid}-e0","timestamp":"{last_ts}","type":"quest_created",'
         f'"payload":{{}}}}\n')
     quest_json = control / f"{cid}-quest.json"
     quest_json.write_text(json.dumps({
@@ -212,7 +212,7 @@ def test_concurrent_migration_reads_and_ingest_lose_nothing(tmp_path: Path) -> N
     w_events = control / "writer.jsonl"
     w_events.write_text(
         '{"id":"writer-e0","timestamp":"2026-06-02T00:00:00+00:00",'
-        '"type":"change_created","payload":{}}\n')
+        '"type":"quest_created","payload":{}}\n')
     w_change = control / "writer-quest.json"
     w_change.write_text(json.dumps({
         "id": "writer", "title": "Writer", "base_branch": "main",

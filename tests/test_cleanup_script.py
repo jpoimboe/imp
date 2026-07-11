@@ -1,7 +1,7 @@
 """cleanup.sh — the end-of-change fold + stamp over cur_base_head..HEAD.
 
 Exit contract:
-  0 -> clean tree, fixups folded, Change: <id> stamped (or already-clean no-op)
+  0 -> clean tree, fixups folded, Quest: <id> stamped (or already-clean no-op)
   2 -> resolvable fold conflict (rebase left in progress, sentinels written)
   1 -> pause for a human: dirty working tree, a surviving fixup directive that
        cannot be folded, or a hard rebase/stamp failure
@@ -62,7 +62,7 @@ def _subjects(pr: Path, base: str) -> list[str]:
 
 
 def _trailer(pr: Path, ref: str) -> str:
-    return _git(pr, "log", "-1", "--format=%(trailers:key=Change,valueonly)", ref
+    return _git(pr, "log", "-1", "--format=%(trailers:key=Quest,valueonly)", ref
                 ).stdout.strip()
 
 
@@ -124,11 +124,11 @@ def test_fixup_targeting_earlier_stamped_commit_folds(tmp_path: Path) -> None:
     _git(pr, "checkout", "-b", "imp/x")
     (pr / "g.txt").write_text("orig\n")
     _git(pr, "add", "g.txt")
-    _git(pr, "commit", "-m", f"earlier work\n\nChange: {ID}")   # already stamped
+    _git(pr, "commit", "-m", f"earlier work\n\nQuest: {ID}")   # already stamped
     target = _git(pr, "rev-parse", "HEAD").stdout.strip()
     (pr / "h.txt").write_text("later\n")
     _git(pr, "add", "h.txt")
-    _git(pr, "commit", "-m", f"later work\n\nChange: {ID}")      # already stamped
+    _git(pr, "commit", "-m", f"later work\n\nQuest: {ID}")      # already stamped
     (pr / "g.txt").write_text("orig (fixed)\n")
     _git(pr, "add", "g.txt")
     _git(pr, "commit", f"--fixup={target}")                      # targets the earlier commit
@@ -150,7 +150,7 @@ def test_noop_when_clean_and_already_stamped(tmp_path: Path) -> None:
     _git(pr, "checkout", "-b", "imp/x")
     (pr / "g.txt").write_text("work\n")
     _git(pr, "add", "g.txt")
-    _git(pr, "commit", "-m", f"feat work\n\nChange: {ID}")
+    _git(pr, "commit", "-m", f"feat work\n\nQuest: {ID}")
     head_before = _git(pr, "rev-parse", "HEAD").stdout.strip()
 
     res = _run(pr)

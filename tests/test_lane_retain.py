@@ -15,7 +15,7 @@ import imp.remote.session.attach as attach_mod
 from imp.agents.runner import AgentInvocation, AgentRunner, Event
 from imp.cli.signals import InterruptCoordinator
 from imp.engine import merge_queue as mq
-from imp.engine.executor import RunResult, run_change
+from imp.engine.executor import RunResult, run_quest
 from imp.engine.quest import Quest
 from imp.engine.state import JsonlEventLog, State
 from tests.conftest import _git, _init_repo
@@ -128,7 +128,7 @@ async def test_agent_interrupt_in_held_region_keeps_lane_and_resumes_in_place(
     _seed_wf(tmp_path, _AGENT_HELD_WF)
     ch = Quest.create(tmp_path, title="x", quest_id="feat", base_branch="main")
 
-    result = await run_change(ch, coordinator=coord)
+    result = await run_quest(ch, coordinator=coord)
 
     assert result is RunResult.PAUSED
     st = State.load(ch.state_dir)
@@ -171,7 +171,7 @@ async def test_command_interrupt_in_held_region_keeps_lane(
             coord._should_pause = True
             coord.pause_reason = "ctrl-c"
 
-    result = await run_change(ch, on_event=_on_event, coordinator=coord)
+    result = await run_quest(ch, on_event=_on_event, coordinator=coord)
 
     assert result is RunResult.PAUSED
     st = State.load(ch.state_dir)
@@ -207,7 +207,7 @@ async def test_transient_giveup_in_held_region_keeps_lane(
     # with no real sleep. (Same lever as test_retry_ceiling_pause_preserves_marker.)
     monkeypatch.setattr("imp.engine.executor.budget_for", lambda _category: 0.0)
 
-    result = await run_change(ch)
+    result = await run_quest(ch)
 
     assert result is RunResult.PAUSED
     st = State.load(ch.state_dir)
@@ -251,7 +251,7 @@ async def test_post_navigation_interrupt_keeps_lane(
             coord._should_pause = True
             coord.pause_reason = "ctrl-c"
 
-    result = await run_change(ch, on_event=_on_event, coordinator=coord)
+    result = await run_quest(ch, on_event=_on_event, coordinator=coord)
 
     assert result is RunResult.PAUSED
     st = State.load(ch.state_dir)
@@ -306,7 +306,7 @@ async def test_retained_lane_resume_does_not_reevict_at_entry(
                 and "value" not in disk_flag_at_dispatch):
             disk_flag_at_dispatch["value"] = State.load(ch.state_dir).lane_retained
 
-    await run_change(ch, on_event=_on_event)
+    await run_quest(ch, on_event=_on_event)
 
     assert "lane_evicted" not in _types(ch)           # entry guard did NOT evict
     assert disk_flag_at_dispatch["value"] is False    # cleared + persisted first

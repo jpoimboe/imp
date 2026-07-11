@@ -17,7 +17,7 @@ def _summary_nodes(root) -> list[nv.WarningsSummaryNode]:
 
 def test_merge_terminal_flushes_one_summary_with_total_dedup_and_order() -> None:
     tree = nv.build_tree([
-        {"id": "c", "agent_id": None, "type": "change_created",
+        {"id": "c", "agent_id": None, "type": "quest_created",
          "payload": {"id": "abc123", "title": "x"}},
         _warn("w1", "alpha"),
         _warn("w2", "beta"),
@@ -35,7 +35,7 @@ def test_merge_terminal_flushes_one_summary_with_total_dedup_and_order() -> None
 
 def test_summary_sits_immediately_before_merged_node_at_root() -> None:
     tree = nv.build_tree([
-        {"id": "c", "agent_id": None, "type": "change_created",
+        {"id": "c", "agent_id": None, "type": "quest_created",
          "payload": {"id": "abc123", "title": "x"}},
         _warn("w1", "alpha"),
         _merged(),
@@ -48,7 +48,7 @@ def test_summary_sits_immediately_before_merged_node_at_root() -> None:
 
 def test_zero_warnings_produces_no_summary_node() -> None:
     tree = nv.build_tree([
-        {"id": "c", "agent_id": None, "type": "change_created",
+        {"id": "c", "agent_id": None, "type": "quest_created",
          "payload": {"id": "abc123", "title": "x"}},
         _merged(),
     ])
@@ -72,7 +72,7 @@ def test_summary_lands_at_root_even_with_open_phase() -> None:
     # A phase/step is still open when merge fires; the summary must bypass _append
     # and land at the workflow root, not nested inside the open phase.
     tree = nv.build_tree([
-        {"id": "c", "agent_id": None, "type": "change_created",
+        {"id": "c", "agent_id": None, "type": "quest_created",
          "payload": {"id": "abc123", "title": "x"}},
         _started("s1"),
         _warn("w1", "alpha"),
@@ -98,7 +98,7 @@ def _completed(eid: str = "k") -> dict:
 
 def test_workflow_completed_appends_completed_node_at_root() -> None:
     tree = nv.build_tree([
-        {"id": "c", "agent_id": None, "type": "change_created",
+        {"id": "c", "agent_id": None, "type": "quest_created",
          "payload": {"id": "abc123", "title": "x"}},
         _completed(),
     ])
@@ -110,7 +110,7 @@ def test_workflow_completed_appends_completed_node_at_root() -> None:
 
 def test_summary_sits_immediately_before_completed_node() -> None:
     tree = nv.build_tree([
-        {"id": "c", "agent_id": None, "type": "change_created",
+        {"id": "c", "agent_id": None, "type": "quest_created",
          "payload": {"id": "abc123", "title": "x"}},
         _warn("w1", "alpha"),
         _completed(),
@@ -126,7 +126,7 @@ def test_completed_node_lands_at_root_even_with_open_phase() -> None:
     # A phase/step is still open when completion fires; the CompletedNode must
     # bypass _append and land at the workflow root, not nested in the open phase.
     tree = nv.build_tree([
-        {"id": "c", "agent_id": None, "type": "change_created",
+        {"id": "c", "agent_id": None, "type": "quest_created",
          "payload": {"id": "abc123", "title": "x"}},
         _started("s1"),
         _warn("w1", "alpha"),
@@ -149,7 +149,7 @@ def test_pause_with_no_reason_appends_no_outcome_and_no_summary() -> None:
     # `_pause_outcome_shown` False; the run-level warnings summary flush now lives
     # in finalize(), gated on that flag, so a reasonless pause produces neither at root.
     tree = nv.build_tree([
-        {"id": "c", "agent_id": None, "type": "change_created",
+        {"id": "c", "agent_id": None, "type": "quest_created",
          "payload": {"id": "abc123", "title": "x"}},
         _started("s1"),
         _warn("w1", "alpha"),
@@ -168,7 +168,7 @@ def test_reasoned_terminal_pause_nests_and_summary_lands_at_root() -> None:
     # dedicated placement tests in test_narrative_pause.py; here we assert only
     # that the summary is at root and the pause is nested somewhere below it.
     tree = nv.build_tree([
-        {"id": "c", "agent_id": None, "type": "change_created",
+        {"id": "c", "agent_id": None, "type": "quest_created",
          "payload": {"id": "abc123", "title": "x"}},
         _started("s1"),
         _warn("w1", "alpha"),
@@ -194,7 +194,7 @@ def test_pause_resume_complete_shows_all_warnings_at_completion() -> None:
     # resuming resets the flush latch so all warnings (pre-pause and post-resume)
     # appear in the completion summary node, not just pre-pause ones.
     tree = nv.build_tree([
-        {"id": "c", "agent_id": None, "type": "change_created",
+        {"id": "c", "agent_id": None, "type": "quest_created",
          "payload": {"id": "abc123", "title": "x"}},
         _warn("w1", "before"),
         _paused(),
@@ -214,7 +214,7 @@ def test_pause_resume_complete_shows_all_warnings_at_completion() -> None:
 
 def test_terminal_pause_with_reason_and_warnings_flushes_one_root_summary() -> None:
     tree = nv.build_tree([
-        {"id": "c", "agent_id": None, "type": "change_created",
+        {"id": "c", "agent_id": None, "type": "quest_created",
          "payload": {"id": "abc123", "title": "x"}},
         _started("s1"),
         _warn("w1", "alpha"),
@@ -225,7 +225,7 @@ def test_terminal_pause_with_reason_and_warnings_flushes_one_root_summary() -> N
 
 def test_terminal_pause_with_reason_no_warnings_flushes_nothing() -> None:
     tree = nv.build_tree([
-        {"id": "c", "agent_id": None, "type": "change_created",
+        {"id": "c", "agent_id": None, "type": "quest_created",
          "payload": {"id": "abc123", "title": "x"}},
         _started("s1"),
         _paused(),
@@ -237,7 +237,7 @@ def test_resumable_pause_produces_no_root_summary() -> None:
     # Pause then resume (run ends non-paused): finalize() is a no-op, so no
     # summary is flushed by the pause at all.
     tree = nv.build_tree([
-        {"id": "c", "agent_id": None, "type": "change_created",
+        {"id": "c", "agent_id": None, "type": "quest_created",
          "payload": {"id": "abc123", "title": "x"}},
         _warn("w1", "alpha"),
         _paused(),

@@ -70,7 +70,7 @@ class TextPart:
 class ImagePart:
     # Structured image content part. `data` is the base64 of the PROCESSED
     # bytes (the on-wire/in-memory payload). `blob` is the content-addressed
-    # filename "<sha256>.<ext>" under the change's blobs/ dir; `nbytes` is the
+    # filename "<sha256>.<ext>" under the quest's blobs/ dir; `nbytes` is the
     # processed raw byte count. Together (blob, media_type, width, height,
     # nbytes) are exactly the lean reference persisted to events.jsonl (Part 5),
     # with the base64 `data` filtered out on write and rebuilt from the blob on
@@ -169,7 +169,7 @@ class AgentInvocation:
     change_state: Any = None
     # The LIVE, mutable Quest for the rename_quest tool. Any to avoid an import
     # cycle. None for subagents / legacy tests (no rename authority anyway).
-    change: Any = None
+    quest: Any = None
     # parent_id override for this agent's FIRST emitted event (step_context):
     # the spawning step_started id (steps/gates) or task tool_call id (subagents).
     first_event_parent_id: str | None = None
@@ -215,7 +215,7 @@ class AgentInvocation:
     test_gates: TestGates | None = None
     # §10/§12: when True, the run is headless (no human at the keyboard) and the
     # subagent backoff loop applies a wall-clock ceiling instead of waiting forever.
-    # Threaded from run_change → _route_agent → _run_agent_invocation →
+    # Threaded from run_quest → _route_agent → _run_agent_invocation →
     # build_agent_invocation → provider → child ToolContext → dispatch_task.
     headless: bool = False
     # True for an `interactive: true` workflow step (threshold, finalize, the
@@ -224,7 +224,7 @@ class AgentInvocation:
     # AgentInvocation → every provider's LoopGuard, where it disables both
     # detectors. Default False for subagents / legacy tests.
     interactive: bool = False
-    # Resolved sandbox posture for this run. Threaded from run_change →
+    # Resolved sandbox posture for this run. Threaded from run_quest →
     # _route_agent → _run_agent_invocation → build_agent_invocation → provider →
     # ToolContext so every bash tool call applies the same posture. Any to avoid
     # importing SandboxPolicy here; None means no-op (bare sh -c, inactive policy).

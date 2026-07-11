@@ -162,7 +162,7 @@ async def test_cancel_at_opening_prompt_discards_the_minted_draft(
     monkeypatch.setattr(m, "Prompt", _CancelPrompt)
     monkeypatch.setattr(
         m, "discard_conversation",
-        lambda change: discarded.__setitem__("id", change.id))
+        lambda quest: discarded.__setitem__("id", quest.id))
 
     rc = await m._async_cmd_new(_new_args(), leave_mode="new")
 
@@ -231,7 +231,7 @@ async def test_title_written_before_opening_prompt(stub_new, monkeypatch) -> Non
 
     captured: dict[str, object] = {}
 
-    async def _capture_client(change: object, **kwargs: object) -> int:
+    async def _capture_client(quest: object, **kwargs: object) -> int:
         captured.update(kwargs)
         return 0
 
@@ -271,7 +271,7 @@ async def test_cancel_at_opening_prompt_resets_title(stub_new, monkeypatch, exc)
 
     monkeypatch.setattr(m, "TerminalTitle", _FakeTitle)
     monkeypatch.setattr(m, "_print_run_header", lambda *a, **k: None)
-    monkeypatch.setattr(m, "discard_conversation", lambda change: None)
+    monkeypatch.setattr(m, "discard_conversation", lambda quest: None)
 
     class _CancelPrompt:
         def __init__(self, **kwargs: object) -> None: ...
@@ -303,7 +303,7 @@ async def test_headless_path_threads_title(stub_new, monkeypatch) -> None:
 
     captured: dict[str, object] = {}
 
-    async def _capture_client(change: object, **kwargs: object) -> int:
+    async def _capture_client(quest: object, **kwargs: object) -> int:
         captured.update(kwargs)
         return 0
 

@@ -72,7 +72,7 @@ def test_pop_and_wake_removes_self_and_wakes_new_head(tmp_path: Path) -> None:
     woken: list[str] = []
     mq.pop_and_wake(
         tmp_path, "a", "main",
-        spawn_fn=lambda change, **kw: woken.append((change.id, kw.get("resume"))),
+        spawn_fn=lambda quest, **kw: woken.append((quest.id, kw.get("resume"))),
     )
     assert all(e["quest_id"] != "a" for e in mq.read(tmp_path))   # self removed
     assert woken == [("b", True)]                                  # new head woken with resume
@@ -82,7 +82,7 @@ def test_pop_and_wake_no_wake_when_lane_empties(tmp_path: Path) -> None:
     _seed_control(tmp_path)
     mq.enqueue_if_absent(tmp_path, "a", "main")
     woken: list[str] = []
-    mq.pop_and_wake(tmp_path, "a", "main", spawn_fn=lambda change, **kw: woken.append(change.id))
+    mq.pop_and_wake(tmp_path, "a", "main", spawn_fn=lambda quest, **kw: woken.append(quest.id))
     assert mq.read(tmp_path) == []
     assert woken == []                                             # nothing left to wake
 
@@ -93,7 +93,7 @@ def test_pop_and_wake_no_wake_when_self_not_head(tmp_path: Path) -> None:
     mq.enqueue_if_absent(tmp_path, "b", "main")
     woken: list[str] = []
     # 'b' (not head) removes itself: the head 'a' is untouched and not re-woken.
-    mq.pop_and_wake(tmp_path, "b", "main", spawn_fn=lambda change, **kw: woken.append(change.id))
+    mq.pop_and_wake(tmp_path, "b", "main", spawn_fn=lambda quest, **kw: woken.append(quest.id))
     assert [e["quest_id"] for e in mq.read(tmp_path)] == ["a"]
     assert woken == []
 
@@ -121,7 +121,7 @@ def test_pop_and_wake_cross_lane_isolation(tmp_path: Path) -> None:
     # "main" lane empties after pop — no wake. "release" lane must be unaffected.
     mq.pop_and_wake(
         tmp_path, "a", "main",
-        spawn_fn=lambda change, **kw: woken.append(change.id),
+        spawn_fn=lambda quest, **kw: woken.append(quest.id),
     )
     assert all(e["quest_id"] != "a" for e in mq.read(tmp_path))   # "a" removed
     assert any(e["quest_id"] == "b" for e in mq.read(tmp_path))   # "b" untouched
@@ -156,7 +156,7 @@ def test_ensure_head_driven_spawns_current_head_with_resume(tmp_path) -> None:
     spawned: list = []
     mq.ensure_head_driven(
         tmp_path, "main",
-        spawn_fn=lambda change, **kw: spawned.append((change.id, kw.get("resume"))),
+        spawn_fn=lambda quest, **kw: spawned.append((quest.id, kw.get("resume"))),
     )
     assert spawned == [("a", True)]        # current head, woken with resume
 
@@ -165,7 +165,7 @@ def test_ensure_head_driven_empty_lane_is_noop(tmp_path) -> None:
     _seed_control(tmp_path)
     spawned: list = []
     mq.ensure_head_driven(
-        tmp_path, "main", spawn_fn=lambda change, **kw: spawned.append(change.id))
+        tmp_path, "main", spawn_fn=lambda quest, **kw: spawned.append(quest.id))
     assert spawned == []                   # nothing to drive
 
 
@@ -179,7 +179,7 @@ def test_pop_and_wake_tolerates_vanished_next_head(tmp_path) -> None:
     spawned: list = []
     # Must not raise even though the next head can no longer be loaded.
     mq.pop_and_wake(
-        tmp_path, "a", "main", spawn_fn=lambda change, **kw: spawned.append(change.id))
+        tmp_path, "a", "main", spawn_fn=lambda quest, **kw: spawned.append(quest.id))
     assert all(e["quest_id"] != "a" for e in mq.read(tmp_path))   # self still popped
     assert spawned == []                                          # vanished head skipped
     assert any(e["quest_id"] == "b" for e in mq.read(tmp_path))   # b remains queued
@@ -193,5 +193,5 @@ def test_ensure_head_driven_tolerates_vanished_head(tmp_path) -> None:
     spawned: list = []
     # Must not raise; the unloadable head is skipped silently.
     mq.ensure_head_driven(
-        tmp_path, "main", spawn_fn=lambda change, **kw: spawned.append(change.id))
+        tmp_path, "main", spawn_fn=lambda quest, **kw: spawned.append(quest.id))
     assert spawned == []

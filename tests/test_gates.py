@@ -195,7 +195,7 @@ def test_route_script_does_not_block_event_loop(tmp_path) -> None:
     from imp.engine.executor import _route_script
     from imp.engine.state import InMemoryEventLog
 
-    change = types.SimpleNamespace(
+    quest = types.SimpleNamespace(
         workflow_dir=tmp_path, project_root=tmp_path,
         id="test-id", handle="test", title="Test",
         quest_dir=tmp_path / ".imp" / "change",
@@ -218,7 +218,7 @@ def test_route_script_does_not_block_event_loop(tmp_path) -> None:
             tg.start_soon(ticker)
             await anyio.sleep(0.06)          # let the ticker spin up
             before = ticks
-            res = _route_script(step, change, state, log)
+            res = _route_script(step, quest, state, log)
             if inspect.isawaitable(res):
                 res = await res
             during = ticks - before
@@ -243,7 +243,7 @@ def test_route_script_goto_exit0_suppresses_feedback(tmp_path) -> None:
     from imp.engine.executor import _route_script
     from imp.engine.state import InMemoryEventLog
 
-    change = types.SimpleNamespace(
+    quest = types.SimpleNamespace(
         workflow_dir=tmp_path, project_root=tmp_path,
         id="test-id", handle="test", title="Test",
         quest_dir=tmp_path / ".imp" / "change",
@@ -258,7 +258,7 @@ def test_route_script_goto_exit0_suppresses_feedback(tmp_path) -> None:
     async def main() -> None:
         state = types.SimpleNamespace(vars={}, route_label=None)
         log = InMemoryEventLog()
-        action, feedback, _ = await _route_script(step, change, state, log)
+        action, feedback, _ = await _route_script(step, quest, state, log)
         assert isinstance(action, Goto)
         assert feedback is None
 
@@ -274,7 +274,7 @@ def test_route_script_goto_nonzero_keeps_feedback(tmp_path) -> None:
     from imp.engine.executor import _route_script
     from imp.engine.state import InMemoryEventLog
 
-    change = types.SimpleNamespace(
+    quest = types.SimpleNamespace(
         workflow_dir=tmp_path, project_root=tmp_path,
         id="test-id", handle="test", title="Test",
         quest_dir=tmp_path / ".imp" / "change",
@@ -289,7 +289,7 @@ def test_route_script_goto_nonzero_keeps_feedback(tmp_path) -> None:
     async def main() -> None:
         state = types.SimpleNamespace(vars={}, route_label=None)
         log = InMemoryEventLog()
-        action, feedback, _ = await _route_script(step, change, state, log)
+        action, feedback, _ = await _route_script(step, quest, state, log)
         assert isinstance(action, Goto)
         assert feedback is not None
         assert "failed (exit 3)" in feedback
@@ -329,7 +329,7 @@ def test_route_script_renders_command_template(tmp_path) -> None:
     from imp.engine.executor import _route_script
     from imp.engine.state import InMemoryEventLog
 
-    change = types.SimpleNamespace(
+    quest = types.SimpleNamespace(
         workflow_dir=tmp_path, project_root=tmp_path,
         id="test-id", handle="test", title="Test",
         cur_base_head="basesha", orig_base_head="basesha",
@@ -345,7 +345,7 @@ def test_route_script_renders_command_template(tmp_path) -> None:
     async def main() -> None:
         state = types.SimpleNamespace(vars={"review_base": "abc123"}, route_label=None)
         log = InMemoryEventLog()
-        await _route_script(step, change, state, log)
+        await _route_script(step, quest, state, log)
 
     anyio.run(main)
     assert (tmp_path / "rendered.txt").read_text().strip() == "abc123"
@@ -363,7 +363,7 @@ def test_route_script_merges_declared_output_into_rules(tmp_path) -> None:
     from imp.engine.state import InMemoryEventLog
     from imp.engine.types import OutputField, OutputSchema
 
-    change = types.SimpleNamespace(
+    quest = types.SimpleNamespace(
         workflow_dir=tmp_path, project_root=tmp_path,
         id="test-id", handle="test", title="Test",
         quest_dir=tmp_path / ".imp" / "change",
@@ -381,7 +381,7 @@ def test_route_script_merges_declared_output_into_rules(tmp_path) -> None:
     async def main() -> None:
         state = types.SimpleNamespace(vars={"n": 0}, route_label=None)
         log = InMemoryEventLog()
-        action, _feedback, _ = await _route_script(step, change, state, log)
+        action, _feedback, _ = await _route_script(step, quest, state, log)
         assert isinstance(action, Continue)
         assert state.vars["n"] == 5
 
@@ -399,7 +399,7 @@ def test_route_script_pauses_on_malformed_output(tmp_path) -> None:
     from imp.engine.state import InMemoryEventLog
     from imp.engine.types import OutputField, OutputSchema
 
-    change = types.SimpleNamespace(
+    quest = types.SimpleNamespace(
         workflow_dir=tmp_path, project_root=tmp_path,
         id="test-id", handle="test", title="Test",
         quest_dir=tmp_path / ".imp" / "change",
@@ -417,7 +417,7 @@ def test_route_script_pauses_on_malformed_output(tmp_path) -> None:
     async def main() -> None:
         state = types.SimpleNamespace(vars={}, route_label=None)
         log = InMemoryEventLog()
-        action, feedback, _ = await _route_script(step, change, state, log)
+        action, feedback, _ = await _route_script(step, quest, state, log)
         assert isinstance(action, Pause)
         assert feedback is not None
 
@@ -435,7 +435,7 @@ def test_route_script_pauses_on_type_mismatch(tmp_path) -> None:
     from imp.engine.state import InMemoryEventLog
     from imp.engine.types import OutputField, OutputSchema
 
-    change = types.SimpleNamespace(
+    quest = types.SimpleNamespace(
         workflow_dir=tmp_path, project_root=tmp_path,
         id="test-id", handle="test", title="Test",
         quest_dir=tmp_path / ".imp" / "change",
@@ -453,7 +453,7 @@ def test_route_script_pauses_on_type_mismatch(tmp_path) -> None:
     async def main() -> None:
         state = types.SimpleNamespace(vars={}, route_label=None)
         log = InMemoryEventLog()
-        action, feedback, _ = await _route_script(step, change, state, log)
+        action, feedback, _ = await _route_script(step, quest, state, log)
         assert isinstance(action, Pause)
         assert feedback is not None
         types_seen = [e["type"] for e in log.read()]
@@ -472,7 +472,7 @@ def test_route_script_without_output_schema_unchanged(tmp_path) -> None:
     from imp.engine.executor import _route_script
     from imp.engine.state import InMemoryEventLog
 
-    change = types.SimpleNamespace(
+    quest = types.SimpleNamespace(
         workflow_dir=tmp_path, project_root=tmp_path,
         id="test-id", handle="test", title="Test",
         quest_dir=tmp_path / ".imp" / "change",
@@ -487,7 +487,7 @@ def test_route_script_without_output_schema_unchanged(tmp_path) -> None:
     async def main() -> None:
         state = types.SimpleNamespace(vars={}, route_label=None)
         log = InMemoryEventLog()
-        action, feedback, _ = await _route_script(step, change, state, log)
+        action, feedback, _ = await _route_script(step, quest, state, log)
         assert isinstance(action, Continue)
         assert feedback is None
 
@@ -506,7 +506,7 @@ def test_route_script_cleans_up_output_path_on_run_script_error(tmp_path) -> Non
     from imp.engine.state import InMemoryEventLog
     from imp.engine.types import OutputField, OutputSchema
 
-    change = types.SimpleNamespace(
+    quest = types.SimpleNamespace(
         workflow_dir=tmp_path, project_root=tmp_path,
         id="test-id", handle="test", title="Test",
         quest_dir=tmp_path / ".imp" / "change",
@@ -536,7 +536,7 @@ def test_route_script_cleans_up_output_path_on_run_script_error(tmp_path) -> Non
             mock.patch("tempfile.mkstemp", side_effect=tracking_mkstemp),
             pytest.raises(RuntimeError, match="timeout"),
         ):
-            await _route_script(step, change, state, log)
+            await _route_script(step, quest, state, log)
         assert created, "expected temp file to be created"
         assert not created[0].exists(), "temp file was not cleaned up after run_script raised"
 
@@ -551,7 +551,7 @@ def test_route_script_emits_script_output_on_show_output_success(tmp_path) -> No
     from imp.engine.executor import _route_script
     from imp.engine.state import InMemoryEventLog
 
-    change = types.SimpleNamespace(
+    quest = types.SimpleNamespace(
         workflow_dir=tmp_path, project_root=tmp_path,
         id="test-id", handle="test", title="Test",
         quest_dir=tmp_path / ".imp" / "change")
@@ -564,7 +564,7 @@ def test_route_script_emits_script_output_on_show_output_success(tmp_path) -> No
     async def main() -> None:
         state = types.SimpleNamespace(vars={}, route_label=None)
         log = InMemoryEventLog()
-        action, _, _ = await _route_script(step, change, state, log)
+        action, _, _ = await _route_script(step, quest, state, log)
         assert isinstance(action, Continue)
         outs = [e for e in log.read() if e["type"] == "script_output"]
         assert len(outs) == 1
@@ -581,7 +581,7 @@ def test_route_script_no_script_output_on_nonzero_exit(tmp_path) -> None:
     from imp.engine.executor import _route_script
     from imp.engine.state import InMemoryEventLog
 
-    change = types.SimpleNamespace(
+    quest = types.SimpleNamespace(
         workflow_dir=tmp_path, project_root=tmp_path,
         id="test-id", handle="test", title="Test",
         quest_dir=tmp_path / ".imp" / "change")
@@ -594,7 +594,7 @@ def test_route_script_no_script_output_on_nonzero_exit(tmp_path) -> None:
     async def main() -> None:
         state = types.SimpleNamespace(vars={}, route_label=None)
         log = InMemoryEventLog()
-        action, _, _ = await _route_script(step, change, state, log)
+        action, _, _ = await _route_script(step, quest, state, log)
         assert isinstance(action, Continue)
         assert not any(e["type"] == "script_output" for e in log.read())
 
@@ -751,7 +751,7 @@ def test_route_script_interrupt_returns_pause_no_script_blocked(tmp_path) -> Non
     from imp.engine.gates import ScriptInterrupted
     from imp.engine.state import InMemoryEventLog
 
-    change = types.SimpleNamespace(
+    quest = types.SimpleNamespace(
         workflow_dir=tmp_path, project_root=tmp_path,
         id="test-id", handle="test", title="Test",
         quest_dir=tmp_path / ".imp" / "change",
@@ -770,7 +770,7 @@ def test_route_script_interrupt_returns_pause_no_script_blocked(tmp_path) -> Non
         with mock.patch("imp.engine.executor.run_script",
                         side_effect=ScriptInterrupted):
             action, feedback, muts = await _route_script(
-                step, change, state, log, coordinator=coordinator)
+                step, quest, state, log, coordinator=coordinator)
         assert isinstance(action, Pause)
         assert action.interrupt is True
         assert feedback is None
@@ -793,7 +793,7 @@ def test_route_script_builds_abort_for_interruptible_step(tmp_path) -> None:
     from imp.engine.executor import _route_script
     from imp.engine.state import InMemoryEventLog
 
-    change = types.SimpleNamespace(
+    quest = types.SimpleNamespace(
         workflow_dir=tmp_path, project_root=tmp_path,
         id="test-id", handle="test", title="Test",
         quest_dir=tmp_path / ".imp" / "change",
@@ -816,7 +816,7 @@ def test_route_script_builds_abort_for_interruptible_step(tmp_path) -> None:
         log = InMemoryEventLog()
         with mock.patch("imp.engine.executor.run_script", side_effect=fake_run_script):
             action, _feedback, _ = await _route_script(
-                step, change, state, log, coordinator=coordinator)
+                step, quest, state, log, coordinator=coordinator)
         assert isinstance(action, Continue)
         abort = captured["abort"]
         assert callable(abort)
@@ -838,7 +838,7 @@ def test_route_script_non_interruptible_passes_no_abort(tmp_path) -> None:
     from imp.engine.executor import _route_script
     from imp.engine.state import InMemoryEventLog
 
-    change = types.SimpleNamespace(
+    quest = types.SimpleNamespace(
         workflow_dir=tmp_path, project_root=tmp_path,
         id="test-id", handle="test", title="Test",
         quest_dir=tmp_path / ".imp" / "change",
@@ -861,7 +861,7 @@ def test_route_script_non_interruptible_passes_no_abort(tmp_path) -> None:
         log = InMemoryEventLog()
         with mock.patch("imp.engine.executor.run_script", side_effect=fake_run_script):
             action, _feedback, _ = await _route_script(
-                step, change, state, log, coordinator=coordinator)
+                step, quest, state, log, coordinator=coordinator)
         assert isinstance(action, Continue)
         assert captured["abort"] is None
 

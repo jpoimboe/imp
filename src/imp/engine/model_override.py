@@ -34,12 +34,12 @@ def resolve_current_model(
 
 
 def apply_model_override(
-    change: Any, state: Any, arg: str, *, step_name: str,
+    quest: Any, state: Any, arg: str, *, step_name: str,
 ) -> None:
     """Resolve `arg` against `step_name`'s current provider and persist the override."""
     parsed = parse_model_arg(arg)
     workflow = load_workflow(
-        change.workflow_dir,
+        quest.workflow_dir,
         project_keys=frozenset(state.project_facts or {}),
     )
     current = current_provider_model(state, workflow, step_name)
@@ -48,4 +48,4 @@ def apply_model_override(
         state.resolved_steps = {}
     state.resolved_steps[step_name] = ProviderModel(
         provider=provider, model=parsed.model)
-    State.save(state, change.state_dir)
+    State.save(state, quest.state_dir)

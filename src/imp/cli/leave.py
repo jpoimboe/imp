@@ -27,11 +27,11 @@ def _had_exchange(log: object) -> bool:
 
 def _was_renamed(log: object) -> bool:
     """True if the change was renamed during the conversation (a design formed)."""
-    return any(ev.get("type") == "change_renamed" for ev in log.read())  # type: ignore[attr-defined]
+    return any(ev.get("type") == "quest_renamed" for ev in log.read())  # type: ignore[attr-defined]
 
 
 def leave_control_action(
-    change: Quest, leave_mode: str | None, intent: str | None,
+    quest: Quest, leave_mode: str | None, intent: str | None,
 ) -> str | None:
     """Which daemon disposition frame a phase-0 leave should send.
 
@@ -45,9 +45,9 @@ def leave_control_action(
     is_clear = intent == "clear"
     if leave_mode is None and not explicit_save and not is_clear:
         return None
-    if change.materialized:
+    if quest.materialized:
         return None
-    if not explicit_save and not _had_exchange(change.event_log()):
+    if not explicit_save and not _had_exchange(quest.event_log()):
         return CONTROL_DISCARD
     if explicit_save:
         return CONTROL_SAVE
@@ -55,7 +55,7 @@ def leave_control_action(
         return CONTROL_ARCHIVE
     if leave_mode == "new":
         return CONTROL_SAVE
-    if _was_renamed(change.event_log()):
+    if _was_renamed(quest.event_log()):
         return CONTROL_SAVE
     return CONTROL_ARCHIVE
 
@@ -65,7 +65,7 @@ def resolve_leave_action(
 ) -> str | None:
     """Reload the change and decide its leave control action, or None if gone."""
     try:
-        change = Quest.load(control_root, quest_id)
+        quest = Quest.load(control_root, quest_id)
     except (LoadError, LoadErrors):
         return None
-    return leave_control_action(change, leave_mode, intent)
+    return leave_control_action(quest, leave_mode, intent)

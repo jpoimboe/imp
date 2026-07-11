@@ -57,7 +57,7 @@ def test_md_escape_neutralizes_html_and_control_bytes() -> None:
 
 def test_heading_spine_workflow_phase_step() -> None:
     out = _md([
-        _ev("1", "change_created", title="add auth"),
+        _ev("1", "quest_created", title="add auth"),
         _ev("2", "step_started", step="spec", kind="agent", phase="design",
             model="m", provider="anthropic"),
         _ev("3", "step_completed", step="spec", kind="agent",
@@ -70,7 +70,7 @@ def test_heading_spine_workflow_phase_step() -> None:
 
 def test_heading_content_is_escaped_end_to_end() -> None:
     out = _md([
-        _ev("1", "change_created", title="<evil>&"),
+        _ev("1", "quest_created", title="<evil>&"),
         _ev("2", "step_started", step="spec", kind="agent", phase="design",
             model="m", provider="anthropic"),
         _ev("3", "step_completed", step="spec", kind="agent",
@@ -260,7 +260,7 @@ def test_subagent_status_tags_and_elapsed() -> None:
 
 def test_completion_breadcrumb_and_end_to_end_structure() -> None:
     out = _md([
-        _ev("1", "change_created", title="add auth"),
+        _ev("1", "quest_created", title="add auth"),
         _ev("2", "step_started", step="spec", kind="agent", phase="design",
             model="m", provider="anthropic"),
         _ev("3", "llm_response", agent_id="step:design/spec", provider="anthropic",
@@ -380,7 +380,7 @@ def _tev(eid, etype, *, timestamp, **payload):
 
 def test_summary_markdown_carries_header_and_step_table() -> None:
     events = [
-        _tev("1", "change_created", timestamp="2024-01-01T00:00:00Z", title="x"),
+        _tev("1", "quest_created", timestamp="2024-01-01T00:00:00Z", title="x"),
         _tev("2", "step_started", timestamp="2024-01-01T00:00:00Z",
              step="spec", kind="agent", phase="design"),
         _tev("3", "step_completed", timestamp="2024-01-01T00:01:00Z",

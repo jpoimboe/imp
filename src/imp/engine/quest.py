@@ -20,7 +20,7 @@ from imp.engine.errors import LayoutMismatch, LoadError, LoadErrors
 from imp.engine.state import JsonlEventLog, State
 from imp.engine.types import SourceLoc
 
-LAYOUT_VERSION = 5  # bump in the SAME commit as any breaking change-home layout/schema change
+LAYOUT_VERSION = 5  # bump in the SAME commit as any breaking quest-home layout/schema change
 
 
 def _write_quest_json(meta_path: Path, meta: dict[str, Any]) -> None:
@@ -177,7 +177,7 @@ class Quest:
 
     def rename(self, name: str, *, log: JsonlEventLog) -> str:
         """Content-only rename (no git): set title, rewrite quest.json under the
-        gitignored .imp/ (never dirties the tracked worktree), emit change_renamed.
+        gitignored .imp/ (never dirties the tracked worktree), emit quest_renamed.
         Returns the id. The id is immutable, so nothing else moves."""
         old_title = self.title
         self.title = name
@@ -185,7 +185,7 @@ class Quest:
         meta = json.loads(meta_path.read_text())
         meta["title"] = name
         _write_quest_json(meta_path, meta)
-        log.append(agent_id=None, type="change_renamed",
+        log.append(agent_id=None, type="quest_renamed",
                    payload={"id": self.id, "old_title": old_title,
                             "new_title": name})
         return self.id
@@ -334,11 +334,11 @@ class Quest:
         State(
             id=quest_id, step=flat[0].name if flat else None, step_attempt=0,
             step_label=(
-                render_label(flat[0].label, change=None, log=None, state=None)
+                render_label(flat[0].label, quest=None, log=None, state=None)
                 or flat[0].name
             ) if flat else None,
             phase_label=(
-                render_label(flat[0].phase_label, change=None, log=None, state=None)
+                render_label(flat[0].phase_label, quest=None, log=None, state=None)
                 if flat[0].phase_label is not None else None
             ) if flat else None,
             status="new",
@@ -347,16 +347,16 @@ class Quest:
         ).save(quest_dir / "state")
 
         link_quest_home(wt_path, quest_dir)
-        change = cls(
+        quest = cls(
             id=quest_id, title=title, base_branch=base_branch,
             control_root=control_root, project_root=wt_path, quest_dir=quest_dir,
             cur_base_head=cur_base_head, workflow=workflow,
         )
-        change.event_log().append(
-            agent_id=None, type="change_created",
+        quest.event_log().append(
+            agent_id=None, type="quest_created",
             payload={"id": quest_id, "title": title},
         )
-        return change
+        return quest
 
     @classmethod
     def create_draft(
@@ -416,11 +416,11 @@ class Quest:
         State(
             id=quest_id, step=flat[0].name if flat else None, step_attempt=0,
             step_label=(
-                render_label(flat[0].label, change=None, log=None, state=None)
+                render_label(flat[0].label, quest=None, log=None, state=None)
                 or flat[0].name
             ) if flat else None,
             phase_label=(
-                render_label(flat[0].phase_label, change=None, log=None, state=None)
+                render_label(flat[0].phase_label, quest=None, log=None, state=None)
                 if flat[0].phase_label is not None else None
             ) if flat else None,
             status="new",
@@ -428,17 +428,17 @@ class Quest:
             loop_counts={},
         ).save(quest_dir / "state")
 
-        change = cls(
+        quest = cls(
             id=quest_id, title=title, base_branch=base_branch,
             control_root=control_root, project_root=control_root,
             quest_dir=quest_dir, materialized=False, orig_base_head=orig_base_head,
             workflow=workflow, origin=origin, seed_opening=seed_opening,
         )
-        change.event_log().append(
-            agent_id=None, type="change_created",
+        quest.event_log().append(
+            agent_id=None, type="quest_created",
             payload={"id": quest_id, "title": title},
         )
-        return change
+        return quest
 
     @classmethod
     def load(cls, control_root: Path, quest_id: str) -> Quest:

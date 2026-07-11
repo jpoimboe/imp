@@ -18,14 +18,14 @@ SpawnFn = Callable[[Quest], None]
 
 
 def spawn_session_daemon(
-    change: Quest, *, resume: bool = False,
+    quest: Quest, *, resume: bool = False,
     non_interactive: bool = False, autonomous: bool = False,
     model: str | None = None,
 ) -> None:
     argv = [
         sys.executable, "-m", "imp.remote.session.daemon",
-        "--control-root", str(change.control_root),
-        "--quest-id", change.id,
+        "--control-root", str(quest.control_root),
+        "--quest-id", quest.id,
     ]
     if resume:
         argv.append("--resume")
@@ -37,12 +37,12 @@ def spawn_session_daemon(
         argv += ["--model", model]
     env = overlay_engine_env(os.environ, {})
     env.pop("IMP_REMOTE_CONTROL_SOCK", None)
-    change.quest_dir.mkdir(parents=True, exist_ok=True)
-    with open(change.quest_dir / "daemon.stderr", "wb") as stderr_file:
+    quest.quest_dir.mkdir(parents=True, exist_ok=True)
+    with open(quest.quest_dir / "daemon.stderr", "wb") as stderr_file:
         subprocess.Popen(
             argv,
             env=env,
-            cwd=str(change.control_root),
+            cwd=str(quest.control_root),
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
             stderr=stderr_file,
@@ -51,21 +51,21 @@ def spawn_session_daemon(
 
 
 async def attach_or_spawn(
-    change: Quest,
+    quest: Quest,
     *,
     on_event: Callable[[dict[str, Any]], None],
     spawn_fn: SpawnFn = spawn_session_daemon,
     connect_timeout: float = 10.0,
     lease: bool = False,
 ) -> SessionClient:
-    socket_path = str(session_socket_path(change.control_root, change.id))
-    client = SessionClient(socket_path, change.id, change.title, on_event=on_event, lease=lease)
+    socket_path = str(session_socket_path(quest.control_root, quest.id))
+    client = SessionClient(socket_path, quest.id, quest.title, on_event=on_event, lease=lease)
     try:
         await client.connect()
         return client
     except OSError:
         pass
-    spawn_fn(change)
+    spawn_fn(quest)
     with anyio.fail_after(connect_timeout):
         while True:
             try:
@@ -76,7 +76,7 @@ async def attach_or_spawn(
 
 
 def build_session_attach(
-    change: Quest,
+    quest: Quest,
     *,
     resume: bool = False,
     non_interactive: bool = False,
@@ -86,7 +86,7 @@ def build_session_attach(
 ) -> Callable[[Callable[[dict[str, Any]], None]], Awaitable[SessionClient]]:
     async def attach(on_event: Callable[[dict[str, Any]], None]) -> SessionClient:
         return await attach_or_spawn(
-            change,
+            quest,
             on_event=on_event,
             lease=lease,
             spawn_fn=lambda ch: spawn_session_daemon(

@@ -998,21 +998,21 @@ async def test_ctrl_d_returns_while_daemon_teardown_still_in_progress(
     tmp_path: Path,
 ) -> None:
     # Primary latency AC: the shell returns well under a second independent of a
-    # slow teardown. Run the real daemon (serve_change_session) with a teardown
+    # slow teardown. Run the real daemon (serve_quest_session) with a teardown
     # that blocks until released; assert run_terminal_client returns AND the
     # daemon is still inside its (slow) archive when it does.
     import threading
 
-    from imp.remote.session.daemon import serve_change_session
+    from imp.remote.session.daemon import serve_quest_session
     from imp.remote.session.discover import session_socket_path
 
     _seed_control(tmp_path)
-    change = Quest.create_draft(
+    quest = Quest.create_draft(
         tmp_path, title="D", quest_id="slow1", base_branch="main")
-    change.event_log().append(
+    quest.event_log().append(
         agent_id=None, type="user_message",
         payload={"role": "user", "content": "hi"})
-    sock = str(session_socket_path(change.control_root, change.id))
+    sock = str(session_socket_path(quest.control_root, quest.id))
 
     archive_started = threading.Event()
     release_archive = threading.Event()
@@ -1024,7 +1024,7 @@ async def test_ctrl_d_returns_while_daemon_teardown_still_in_progress(
         archived.append(ch.id)
 
     async def fake_run(
-        change: Quest, *, on_event: Any, user_chat_input_fn: Any,
+        quest: Quest, *, on_event: Any, user_chat_input_fn: Any,
         coordinator: Any, wait_for_turn_fn: Any = None,
     ) -> str:
         on_event({"type": "awaiting_user_input", "payload": {"prompt": "reply?"}})
@@ -1033,7 +1033,7 @@ async def test_ctrl_d_returns_while_daemon_teardown_still_in_progress(
     coord = InterruptCoordinator()
 
     async def _attach(on_event: Callable[[dict[str, Any]], None]) -> SessionClient:
-        client = SessionClient(sock, change.id, change.title, on_event=on_event)
+        client = SessionClient(sock, quest.id, quest.title, on_event=on_event)
         await client.connect()
         return client
 
@@ -1049,8 +1049,8 @@ async def test_ctrl_d_returns_while_daemon_teardown_still_in_progress(
     with anyio.fail_after(10):
         async with anyio.create_task_group() as tg:
             async def _serve() -> None:
-                await serve_change_session(
-                    change, run_fn=fake_run, hibernate=False,
+                await serve_quest_session(
+                    quest, run_fn=fake_run, hibernate=False,
                     archive_left=slow_archive)
 
             tg.start_soon(_serve)
@@ -1061,7 +1061,7 @@ async def test_ctrl_d_returns_while_daemon_teardown_still_in_progress(
             async def _client() -> None:
                 await run_terminal_client(
                     attach=_attach, driver=_Driver(), coord=coord,
-                    solicit=_solicit, quest_id=change.id, control_root=tmp_path,
+                    solicit=_solicit, quest_id=quest.id, control_root=tmp_path,
                     leave_mode="chat", leave_state=leave_state)
                 client_done.set()
 
@@ -1075,7 +1075,7 @@ async def test_ctrl_d_returns_while_daemon_teardown_still_in_progress(
             assert leave_state["disposition"] == "archive"
             release_archive.set()                     # let the daemon finish
 
-    assert archived == [change.id]                    # teardown completed in the daemon
+    assert archived == [quest.id]                    # teardown completed in the daemon
 
 
 @pytest.mark.anyio
@@ -1162,7 +1162,7 @@ async def test_duplicate_live_gates_coalesce_to_one_solicit_without_wouldblock(
 
 
 @pytest.mark.anyio
-async def test_change_renamed_updates_terminal_title(tmp_path: Path) -> None:
+async def test_quest_renamed_updates_terminal_title(tmp_path: Path) -> None:
     sock = str(tmp_path / "s.sock")
     server = SessionServer(sock, hibernate=False)
 
@@ -1171,7 +1171,7 @@ async def test_change_renamed_updates_terminal_title(tmp_path: Path) -> None:
             while server.attached_count == 0:
                 await anyio.sleep(0.02)
         on_event({"type": "step_started", "payload": {}})
-        on_event({"type": "change_renamed",
+        on_event({"type": "quest_renamed",
                    "payload": {"new_title": "Renamed Quest"}})
         await anyio.sleep(0.1)
         return "done"
@@ -1210,7 +1210,7 @@ async def test_change_renamed_updates_terminal_title(tmp_path: Path) -> None:
 
 
 @pytest.mark.anyio
-async def test_replayed_change_renamed_does_not_update_title(tmp_path: Path) -> None:
+async def test_replayed_quest_renamed_does_not_update_title(tmp_path: Path) -> None:
     sock = str(tmp_path / "s.sock")
     server = SessionServer(sock, hibernate=False)
 
@@ -1218,7 +1218,7 @@ async def test_replayed_change_renamed_does_not_update_title(tmp_path: Path) -> 
         with anyio.fail_after(5):
             while server.attached_count == 0:
                 await anyio.sleep(0.02)
-        on_event({"type": "change_renamed", "_replay": True,
+        on_event({"type": "quest_renamed", "_replay": True,
                    "payload": {"new_title": "Renamed Quest"}})
         on_event({"type": "step_started", "payload": {}})
         await anyio.sleep(0.1)

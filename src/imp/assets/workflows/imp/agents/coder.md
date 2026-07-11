@@ -9,7 +9,7 @@ You are implementing a task. The task-lead's dispatch message contains the full 
 ## Before You Begin
 
 {% if vars.fast_path %}
-This change was classified **trivial**: do **not** create or modify tests, and do
+This quest was classified **trivial**: do **not** create or modify tests, and do
 **not** load the TDD skill. Make exactly the task's edits, then commit. Do **not**
 run the project's full test suite or any lint/typecheck yourself — the phase-level
 `verify` gate runs the project's combined checks after this phase and routes back
@@ -92,7 +92,7 @@ Anything not in a commit, a file, or this final message is lost.
 
 Commit with **raw `git`** in `bash` (working dir is the project root; use
 relative paths or `$IMP_PROJECT_ROOT`). Do **not** add any `Task:` trailer and
-do **not** add a `Change:` trailer — the workflow stamps `Change:` once at the
+do **not** add a `Quest:` trailer — the workflow stamps `Quest:` once at the
 top of the review phase, after history is final. The task-lead's dispatch
 message tells you which mode to use.
 

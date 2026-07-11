@@ -13,7 +13,7 @@ from tests.conftest import _seed_control
 def _ctx(ch: Quest, state: State) -> ToolContext:
     ctx = ToolContext(project_root=ch.project_root,
                       events_path=ch.events_path)
-    ctx.change = ch
+    ctx.quest = ch
     ctx.change_state = state
     ctx.event_log = ch.event_log()
     return ctx
@@ -36,7 +36,7 @@ def test_rename_applies_immediately_and_returns_id(tmp_path: Path) -> None:
     assert f"{ch.quest_dir}/artifacts/spec/bbb111.md" in msg
     meta = json.loads((ch.quest_dir / "quest.json").read_text())
     assert meta["title"] == "Add version flag"
-    renamed = [e for e in ch.event_log().read() if e["type"] == "change_renamed"]
+    renamed = [e for e in ch.event_log().read() if e["type"] == "quest_renamed"]
     assert renamed and renamed[-1]["payload"]["new_title"] == "Add version flag"
 
 
@@ -53,7 +53,7 @@ def test_rename_noop_when_title_unchanged(tmp_path: Path) -> None:
     # Same title after stripping outer whitespace must NOT churn.
     msg = tool.invoke(_ctx(ch, state), {"name": "  Add OAuth  "})
     assert "already named" in msg.lower()
-    assert [e for e in ch.event_log().read() if e["type"] == "change_renamed"] == []
+    assert [e for e in ch.event_log().read() if e["type"] == "quest_renamed"] == []
 
 
 def test_double_rename_to_same_title_is_noop(tmp_path: Path) -> None:
@@ -64,7 +64,7 @@ def test_double_rename_to_same_title_is_noop(tmp_path: Path) -> None:
     msg2 = tool.invoke(ctx, {"name": "First Title"})   # identical title
     assert "already named" in msg2.lower()
     assert ch.title == "First Title"
-    emitted = [e for e in ch.event_log().read() if e["type"] == "change_renamed"]
+    emitted = [e for e in ch.event_log().read() if e["type"] == "quest_renamed"]
     assert len(emitted) == 1                          # only the first applied
 
 
@@ -84,7 +84,7 @@ def test_rename_from_subagent_raises(tmp_path: Path) -> None:
     ch, _ = _make(tmp_path)
     ctx = ToolContext(project_root=ch.project_root,
                       events_path=ch.events_path)
-    ctx.change = ch
+    ctx.quest = ch
     ctx.change_state = None              # subagent: no rename authority
     tool = get_registry()["rename_quest"]
     with pytest.raises(RuntimeError):

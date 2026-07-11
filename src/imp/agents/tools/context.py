@@ -70,15 +70,15 @@ class ToolContext:
     # _build_tools names).
     background_enabled: bool = False
     _bg_counter: int = 0
-    # The change being processed; used by subagent dispatch to propagate slug/title.
+    # The quest being processed; used by subagent dispatch to propagate slug/title.
     quest_context: Any = None
     # Live State of the running Quest; used by the subagent-authority guard
     # (rename_quest raises if this is None). None for subagents (no rename authority).
     change_state: Any = None
     # The LIVE, mutable Quest (top-level steps only; None for subagents). The
-    # rename_quest tool mutates change.title + rewrites quest.json through it.
+    # rename_quest tool mutates quest.title + rewrites quest.json through it.
     # Distinct from quest_context, which is the FROZEN render-time snapshot.
-    change: Any = None
+    quest: Any = None
     quest_home: Path | None = None
     # The runner injects this callable as the bare-turn-end / AWAITING_USER
     # resume input channel, used to read the user's reply. None for subagents.

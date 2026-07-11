@@ -60,15 +60,15 @@ def _make_change(root: Path, *, quest_id: str = "test-change", title: str = "t")
         status="running", vars=dict(workflow.vars.defaults()), loop_counts={},
     ).save(quest_dir / "state")
 
-    change = Quest(
+    quest = Quest(
         id=quest_id, title=title, base_branch="main",
         control_root=root, project_root=root, quest_dir=quest_dir,
     )
-    change.event_log().append(
-        agent_id=None, type="change_created",
+    quest.event_log().append(
+        agent_id=None, type="quest_created",
         payload={"id": quest_id, "title": title},
     )
-    return change
+    return quest
 
 # ── shared helpers ────────────────────────────────────────────────────────────
 
@@ -263,7 +263,7 @@ async def test_backward_goto_emits_step_started_each_iteration(tmp_path: Path) -
     executor emits a fresh step_started event for every step execution
     (including re-executions caused by backward goto loops).
     """
-    from imp.engine.executor import RunResult, run_change
+    from imp.engine.executor import RunResult, run_quest
     from imp.providers import resolve
 
     wf = tmp_path / "imp" / "workflows" / "imp"
@@ -294,14 +294,14 @@ async def test_backward_goto_emits_step_started_each_iteration(tmp_path: Path) -
         "          - {if: {verdict: rework}, goto: work}\n"
         "          - {else: true, pause: true}\n"
     )
-    # run_change reads via load_effective_config: project marker + local layer.
+    # run_quest reads via load_effective_config: project marker + local layer.
     (tmp_path / "imp").mkdir(parents=True, exist_ok=True)
     (tmp_path / "imp" / "project.yaml").write_text("default-workflow: imp\n")
     (tmp_path / ".imp").mkdir(parents=True, exist_ok=True)
     (tmp_path / ".imp" / "config.yaml").write_text(
         "providers: [fake]\ntiers:\n  low: {fake: m}\n  medium: {fake: m}\n  high: {fake: m}\n"
     )
-    change = _make_change(tmp_path)
+    quest = _make_change(tmp_path)
 
     # Sequence: work succeeds, check → rework (goto work), work again, check → approve
     call_num = [0]
@@ -342,10 +342,10 @@ async def test_backward_goto_emits_step_started_each_iteration(tmp_path: Path) -
     )
 
     collected_events: list[dict] = []
-    result = await run_change(change, on_event=collected_events.append)
+    result = await run_quest(quest, on_event=collected_events.append)
     assert result is RunResult.COMPLETED, f"expected COMPLETED, got {result}"
 
-    events = list(change.event_log().read())
+    events = list(quest.event_log().read())
 
     # Verify step_started events: work should appear twice, check should appear twice.
     started_steps = [

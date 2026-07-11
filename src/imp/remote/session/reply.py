@@ -14,14 +14,14 @@ AttachFn = Callable[[Callable[[dict[str, Any]], None]], Awaitable[SessionClient]
 
 
 async def deliver_session_reply(
-    change: Quest,
+    quest: Quest,
     text: str,
     *,
     attach: AttachFn | None = None,
     gate_timeout: float = 60.0,
 ) -> None:
     """Deliver one reply into change's session daemon, then detach."""
-    attach = attach or build_session_attach(change, resume=True)
+    attach = attach or build_session_attach(quest, resume=True)
     gate_send, gate_recv = anyio.create_memory_object_stream[str](
         max_buffer_size=1)
 

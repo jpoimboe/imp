@@ -18,19 +18,19 @@ your turn bounces you back to commit it; the whole-diff `review` re-enters you f
 a `task_gap` — see Step 0.)
 
 Read first, every entry:
-- The current plan: the newest `{{ change.home }}/artifacts/plans/{{ change.id }}-plan-*.md`
+- The current plan: the newest `{{ quest.home }}/artifacts/plans/{{ quest.id }}-plan-*.md`
   (highest N — find it with glob).
-- `{{ change.home }}/progress.md` if it exists. It is **bounded** and **rewritable**:
+- `{{ quest.home }}/progress.md` if it exists. It is **bounded** and **rewritable**:
   a durable `## Completed plans` section (one line per plan: what landed + a
   representative commit) plus the transient in-flight per-task entries. The durable
   `## Deferred Followups` list and the `resolved-forward` / `NEEDS-REPLAN` forward
-  notes live in the append-only `{{ change.home }}/deferred.md`, never here. While you
+  notes live in the append-only `{{ quest.home }}/deferred.md`, never here. While you
   implement the current plan, keep each task's **commit subject** in `progress.md` (so
   a buried task can be re-found for a fixup); do NOT carry the verbose per-task
   narrative of plans already completed.
-- `{{ change.home }}/deferred.md` if it exists — the append-only ledger of deferred
+- `{{ quest.home }}/deferred.md` if it exists — the append-only ledger of deferred
   followups and forward notes (you append to it; it is never collapsed or rewritten).
-- The spec at `{{ change.home }}/artifacts/spec/{{ change.id }}.md` for grounding.
+- The spec at `{{ quest.home }}/artifacts/spec/{{ quest.id }}.md` for grounding.
 
 {% include "partials/delegate-exploration.md" %}
 
@@ -77,7 +77,7 @@ unimplemented task, or the re-opened task from injected feedback):
      `sub_agent(subagent_name="coder", tier="high", task_description=…)`
    - **New task:** tell the coder "INITIAL dispatch — make a NEW commit:
      `git add <files> && git commit -m \"<type>: <task summary>\"`. No `Task:`
-     trailer, no `Change:` trailer — the workflow stamps `Change:` later." Record
+     trailer, no `Quest:` trailer — the workflow stamps `Quest:` later." Record
      the task's commit **subject** in `progress.md` so you can re-find it if it is
      later re-opened.
    - **Re-opened buried task (Step 0):** the task's commit is no longer `HEAD`, so
@@ -89,24 +89,24 @@ unimplemented task, or the re-opened task from injected feedback):
      no `fixup! ` prefix) — then tell the coder: "fixup the buried task
      commit `<SHA>`" → it runs `git commit --fixup=<SHA>`. Resolve the SHA **now**,
      against current history (no fold has run since your last commit, so SHAs are
-     stable within the loop — folding is deferred to the end-of-change cleanup). The
-     end-of-change cleanup folds the fixup into its target, so the final branch stays
+     stable within the loop — folding is deferred to the end-of-quest cleanup). The
+     end-of-quest cleanup folds the fixup into its target, so the final branch stays
      one clean commit per task. Do **not** make a second new commit for a re-opened task.
 
-   **Never `--fixup`/`--squash` a commit your change does not own.** A
-   `fixup!`/`squash!` may only target a commit your change created (above its fork);
+   **Never `--fixup`/`--squash` a commit your quest does not own.** A
+   `fixup!`/`squash!` may only target a commit your quest created (above its fork);
    never one at or below the fork — a base commit or already-reviewed history. A
    failure that traces to a base commit is fixed **forward** as a new commit, never
    folded into base — never rewrite reviewed history.
 3. **Framing consistency check (before dispatching reviewers).** Confirm your task
    framing is internally consistent with the spec. If your own decomposition
    contradicts the spec — e.g. you're about to tell the reviewer "part 1 of N" for
-   a change the spec calls a single atomic commit — that is **plan trouble**, not a
+   a quest the spec calls a single atomic commit — that is **plan trouble**, not a
    puzzle for the reviewer: fix it forward or log it per step 6. Never hand a
    reviewer contradictory framing.
 
    **State what was already verified.** In the reviewer's dispatch message, state
-   what the coder verified for this change — the focused tests it ran. Do
+   what the coder verified for this quest — the focused tests it ran. Do
    **not** run the project's full suite, lint, or typecheck yourself: the phase-level
    `verify` gate is the authoritative combined check and runs once after the
    implement phase, so a run here only duplicates it. State only what was actually run.
@@ -152,7 +152,7 @@ unimplemented task, or the re-opened task from injected feedback):
    **re-dispatch the coder telling it to fix the tree to its final state and
    `git commit --fixup=HEAD`** (the task commit, or its pending fixups, sits at the
    loop tip). Batch qualifying nits into the **same fixup round** as any blocking
-   fixes; the fixup is transient, and the end-of-change cleanup folds the whole chain
+   fixes; the fixup is transient, and the end-of-quest cleanup folds the whole chain
    back into the task commit, so the final branch is **one clean commit per
    task**. When nothing clears the bar and there are no blocking findings, there is
    **no extra work** — do not invent a fixup.
@@ -169,17 +169,17 @@ unimplemented task, or the re-opened task from injected feedback):
    correctness; see step 5). When a round carries blocking findings, re-review
    until none remain. All fixes go through the coder — you never commit,
    amend, or rebase yourself.
-5. Append to `{{ change.home }}/progress.md` (create it if missing) the **transient
+5. Append to `{{ quest.home }}/progress.md` (create it if missing) the **transient
    status** only: the task completed, **its commit subject** (the ledger entry from
    step 2, so a buried task can be re-found for a fixup). **Record qualifying
    nits you fixed inline as fixed-inline** — they rode the task's fixup and need no
    follow-up. The **Deferred Followups** list — reserved for the judgment-call /
    out-of-scope findings the fixability bar deferred — does **not** live in
-   `progress.md`; append it to the append-only `{{ change.home }}/deferred.md` (see
+   `progress.md`; append it to the append-only `{{ quest.home }}/deferred.md` (see
    *Pin the format* below).
 
    **Pin the format.** Each deferred finding is one line under a
-   `## Deferred Followups` heading in the append-only `{{ change.home }}/deferred.md`
+   `## Deferred Followups` heading in the append-only `{{ quest.home }}/deferred.md`
    (append it there; create the file/heading if absent), in this EXACT shape so the
    `deferred-sweep` step can parse it (the sweep, not the human, is now the consumer
    of this list):
@@ -238,7 +238,7 @@ unimplemented task, or the re-opened task from injected feedback):
    `plan-writer` invocation that `gap-check` triggers. All commits go through
    the coder; you never commit, amend, or rebase yourself.
 
-   Record both new note types by appending to `{{ change.home }}/deferred.md` — the
+   Record both new note types by appending to `{{ quest.home }}/deferred.md` — the
    append-only ledger, alongside the `## Deferred Followups` / `— needs-decision:`
    lines and never the wholesale-rewritten `progress.md` status. `deferred.md` is
    never collapsed, so a note there survives every end-of-plan `progress.md` rewrite
@@ -247,7 +247,7 @@ unimplemented task, or the re-opened task from injected feedback):
    - resolved-forward: `- resolved-forward task-lead: <one-line description of what you fixed>`
    - needs-replan (a checkbox, so its open/addressed state is explicit):
 
-     `- [ ] NEEDS-REPLAN task-lead: <one-line description of the uncovered/redo scope> [scope: change]`
+     `- [ ] NEEDS-REPLAN task-lead: <one-line description of the uncovered/redo scope> [scope: quest]`
 
    The `NEEDS-REPLAN` checkbox is the lifecycle handle: it is born open (`[ ]`); the
    `plan-writer` invocation that authors the covering `N+1` marks it `[x]`, so the
@@ -259,11 +259,11 @@ unimplemented task, or the re-opened task from injected feedback):
 ## Implementation-local spikes
 
 When a build-time unknown can only be settled empirically — how one specific
-piece is best built, not the shape of the change — dispatch a **`spiker`** to run
+piece is best built, not the shape of the quest — dispatch a **`spiker`** to run
 a throwaway experiment and report findings. These **implementation-local** spikes
 are allowed in place during the build: they change *how* one piece is
-implemented, never *what* the change delivers. A spike whose outcome would change
-the shape of the change is not implementation-local — that belonged to the spec
+implemented, never *what* the quest delivers. A spike whose outcome would change
+the shape of the quest is not implementation-local — that belonged to the spec
 phase, not here.
 
 ## Verify triage — tolerated failures
@@ -278,10 +278,10 @@ failure output. Reason over the OPAQUE failure text against the diff
 (`cur_base_head..HEAD`) — you never re-run a single test; this is pure judgment.
 
 Record a toleration as a normal `## Deferred Followups` entry in
-`{{ change.home }}/deferred.md`, born directly in `— needs-decision:` state with the
+`{{ quest.home }}/deferred.md`, born directly in `— needs-decision:` state with the
 originating gate as its `<source>` — here `verify`, never an agent. The EXACT shape:
 
-`- [ ] DEFERRED verify: <failure signature> [scope: change] — needs-decision: <why this change is not responsible>`
+`- [ ] DEFERRED verify: <failure signature> [scope: quest] — needs-decision: <why this quest is not responsible>`
 
 The `verify` source is the discriminator the convergence check greps for.
 

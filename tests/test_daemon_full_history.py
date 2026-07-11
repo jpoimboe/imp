@@ -9,9 +9,9 @@ from tests.conftest import _seed_control
 
 def test_full_history_returns_ordered_augmented_events(tmp_path: Path) -> None:
     _seed_control(tmp_path)
-    change = Quest.create(
+    quest = Quest.create(
         tmp_path, title="Dark mode", quest_id="alpha", base_branch="main")
-    log = change.event_log()
+    log = quest.event_log()
     log.append(agent_id=None, type="notice", payload={"text": "hi"})
     log.append(agent_id=None, type="awaiting_user_input", payload={"prompt": "go?"})
 

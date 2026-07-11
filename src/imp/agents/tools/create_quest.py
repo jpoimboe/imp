@@ -23,7 +23,7 @@ def create_quest(
 ) -> str:
     if ctx.change_state is None:
         raise RuntimeError("create_quest is only available to top-level Quest steps")
-    parent = ctx.change
+    parent = ctx.quest
     new_id = new_quest_id(existing_stems=live_stems(parent.control_root))
     deps = list(depends_on or [])
     seed = backlog.seed_opening({"title": title, "description": description})
@@ -33,7 +33,7 @@ def create_quest(
         origin="followup", seed_opening=seed)
     log = ctx.event_log or JsonlEventLog(ctx.events_path)
     log.append(
-        agent_id=ctx.agent_id, type="change_created",
+        agent_id=ctx.agent_id, type="quest_created",
         payload={"id": new_id, "title": title, "kind": "backlog",
                  "depends_on": deps})
     return f"recorded backlog Quest {new_id}; start it later with `imp resume {new_id}`"

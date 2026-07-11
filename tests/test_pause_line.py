@@ -67,17 +67,17 @@ def test_phase_from_events_takes_the_last_step_started_phase() -> None:
 
 
 def test_phase_from_events_none_when_no_step_started() -> None:
-    assert _phase_from_events([ev("1", "change_created", quest_id=1, title="x")]) is None
+    assert _phase_from_events([ev("1", "quest_created", quest_id=1, title="x")]) is None
 
 
 def test_pause_facts_unnamed_change_shows_bare_id(tmp_path: Path) -> None:
     from imp.cli.main import _pause_facts
     from imp.engine.quest import Quest
 
-    change = Quest(id="qzbscf", title="", base_branch="main",
+    quest = Quest(id="qzbscf", title="", base_branch="main",
                     control_root=tmp_path, project_root=tmp_path,
                     quest_dir=tmp_path / ".imp" / "change")
-    name, title, _phase, token, _reason = _pause_facts(change)
+    name, title, _phase, token, _reason = _pause_facts(quest)
     assert name == "qzbscf"
     assert token == "qzbscf"
     assert title == ""
@@ -87,11 +87,11 @@ def test_pause_facts_named_change_shows_bare_id(tmp_path: Path) -> None:
     from imp.cli.main import _pause_facts
     from imp.engine.quest import Quest
 
-    change = Quest(id="qzbscf", title="Add version flag",
+    quest = Quest(id="qzbscf", title="Add version flag",
                     base_branch="main", control_root=tmp_path,
                     project_root=tmp_path,
                     quest_dir=tmp_path / ".imp" / "change")
-    name, title, _phase, token, _reason = _pause_facts(change)
+    name, title, _phase, token, _reason = _pause_facts(quest)
     assert name == "qzbscf"          # the bare id, not a slugified handle
     assert token == "qzbscf"
     assert title == "Add version flag"
@@ -140,7 +140,7 @@ def test_pause_reason_interrupt_after_prior_terminated_pause_has_no_stale_cause(
 def test_pause_reason_none_when_no_pause_event() -> None:
     from imp.cli.main import _pause_reason
 
-    assert _pause_reason([ev("1", "change_created", quest_id=1, title="x")]) is None
+    assert _pause_reason([ev("1", "quest_created", quest_id=1, title="x")]) is None
 
 
 def test_pause_reason_internal_error_falls_back_to_message_first_line() -> None:
@@ -263,10 +263,10 @@ def test_pause_facts_stale_with_crash_stderr_renders_unexpected_death_banner(
     # A genuine death: the daemon left a traceback in its stderr.
     (quest_dir / "daemon.stderr").write_text(
         "Traceback (most recent call last):\n  ...\nRuntimeError: boom\n")
-    change = Quest(id="mona44", title="", base_branch="main",
+    quest = Quest(id="mona44", title="", base_branch="main",
                     control_root=tmp_path, project_root=tmp_path,
                     quest_dir=quest_dir)
-    name, _title, phase, token, reason = _pause_facts(change)
+    name, _title, phase, token, reason = _pause_facts(quest)
     assert name == "mona44"
     assert phase == "converge"
     assert token == "mona44"
@@ -293,10 +293,10 @@ def test_pause_facts_stale_clean_detach_renders_calm_interrupt(
         "\n".join(json.dumps(e) for e in events) + "\n")
     # ...but daemon.stderr holds only benign INFO chatter — a clean detach.
     (quest_dir / "daemon.stderr").write_text("Using bundled Claude Code CLI\n")
-    change = Quest(id="mona44", title="", base_branch="main",
+    quest = Quest(id="mona44", title="", base_branch="main",
                     control_root=tmp_path, project_root=tmp_path,
                     quest_dir=quest_dir)
-    _name, _title, _phase, _token, reason = _pause_facts(change)
+    _name, _title, _phase, _token, reason = _pause_facts(quest)
     assert reason == "interrupt"
     assert "daemon.stderr" not in (reason or "")
     assert "ended unexpectedly" not in (reason or "")
@@ -321,10 +321,10 @@ def test_pause_facts_stale_empty_stderr_renders_calm_interrupt(tmp_path: Path) -
     (quest_dir / "events.jsonl").write_text(
         "\n".join(json.dumps(e) for e in events) + "\n")
     (quest_dir / "daemon.stderr").write_bytes(b"")
-    change = Quest(id="mona44", title="", base_branch="main",
+    quest = Quest(id="mona44", title="", base_branch="main",
                     control_root=tmp_path, project_root=tmp_path,
                     quest_dir=quest_dir)
-    *_, reason = _pause_facts(change)
+    *_, reason = _pause_facts(quest)
     assert reason == "interrupt"
     assert "daemon.stderr" not in (reason or "")
 
@@ -347,11 +347,11 @@ def test_pause_facts_deliberate_leave_renders_trigger_over_stale(tmp_path: Path)
     ]
     (quest_dir / "events.jsonl").write_text(
         "\n".join(json.dumps(e) for e in events) + "\n")
-    change = Quest(id="krol99", title="Leave now", base_branch="main",
+    quest = Quest(id="krol99", title="Leave now", base_branch="main",
                     control_root=tmp_path, project_root=tmp_path,
                     quest_dir=quest_dir)
 
-    name, title, phase, token, reason = _pause_facts(change, leave_trigger="sigterm")
+    name, title, phase, token, reason = _pause_facts(quest, leave_trigger="sigterm")
     assert name == "krol99"
     assert title == "Leave now"          # title carried on the deliberate-leave path
     assert phase == "implement"          # last-seen phase, local knowledge

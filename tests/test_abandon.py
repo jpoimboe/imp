@@ -4,7 +4,7 @@ import pytest
 
 from imp.cli.main import _abandon, _build_parser, _status_rows
 from imp.engine import worktree
-from imp.engine.abandon import tear_down_change
+from imp.engine.abandon import tear_down_quest
 from imp.engine.quest import Quest
 from imp.engine.state import ProjectLock, State
 from tests.conftest import _git, _seed_control
@@ -188,20 +188,20 @@ def test_abandon_falls_through_when_resident_daemon_never_acks(
 
     torn: list[str] = []
     monkeypatch.setattr(main_mod, "_deliver_abandon_resident", _hang)
-    monkeypatch.setattr(main_mod, "tear_down_change", lambda ch: torn.append(ch.id))
+    monkeypatch.setattr(main_mod, "tear_down_quest", lambda ch: torn.append(ch.id))
 
     rc = main_mod._abandon(tmp_path, "feat")
     assert rc == 0
     assert torn == ["feat"]  # fell through to direct teardown
 
 
-def test_tear_down_change_destroys_worktree_branch_and_archives(
+def test_tear_down_quest_destroys_worktree_branch_and_archives(
     tmp_path: Path,
 ) -> None:
     _seed_control(tmp_path)
     ch = Quest.create(tmp_path, title="x", quest_id="feat", base_branch="main")
 
-    tear_down_change(ch)
+    tear_down_quest(ch)
 
     assert not (tmp_path / ".imp" / "worktrees" / "feat").exists()       # worktree gone
     assert _git(tmp_path, "branch", "--list", "imp/feat").stdout.strip() == ""  # branch gone
@@ -264,7 +264,7 @@ def test_abandon_unknown_id_reaps_branch_and_exits_zero(
     assert "already gone" in capsys.readouterr().out
 
 
-def test_tear_down_change_on_draft_skips_worktree_teardown(
+def test_tear_down_quest_on_draft_skips_worktree_teardown(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from imp.engine import merge_queue, worktree
@@ -281,7 +281,7 @@ def test_tear_down_change_on_draft_skips_worktree_teardown(
     monkeypatch.setattr(worktree, "delete_branch",
                         lambda *a, **k: calls.append("delete_branch"))
 
-    tear_down_change(ch)
+    tear_down_quest(ch)
 
     assert calls == []  # no built-out teardown on a draft
     assert not (tmp_path / ".imp" / "quests" / "idea1").exists()   # live home dropped

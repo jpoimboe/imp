@@ -12,7 +12,7 @@ def _setup_change(control: Path) -> tuple[Path, Path, Path]:
     events = control / "events.jsonl"
     events.write_text(
         '{"id":"e0","parent_id":null,"agent_id":null,'
-        '"timestamp":"2026-06-01T00:00:01+00:00","type":"change_created",'
+        '"timestamp":"2026-06-01T00:00:01+00:00","type":"quest_created",'
         '"payload":{"id":"alpha"}}\n'
         '{"id":"e1","parent_id":"e0","agent_id":"plan-writer",'
         '"timestamp":"2026-06-01T00:00:02+00:00","type":"step_started",'
@@ -77,7 +77,7 @@ def test_parse_events_preserves_malformed_lines_for_stable_ordinals() -> None:
     from imp.engine.archive import _parse_events
 
     raw = (
-        b'{"id":"e0","type":"change_created","payload":{}}\n'
+        b'{"id":"e0","type":"quest_created","payload":{}}\n'
         b'NOT_JSON\n'
         b'{"id":"e2","type":"step_started","payload":{}}\n'
     )

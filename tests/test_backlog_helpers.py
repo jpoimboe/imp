@@ -37,7 +37,7 @@ def test_readiness_resolves_from_archive_index(tmp_path: Path) -> None:
     events = tmp_path / "e.jsonl"
     events.write_text(
         '{"id":"d-e0","parent_id":null,"agent_id":null,'
-        '"timestamp":"2026-06-01T00:00:01+00:00","type":"change_created",'
+        '"timestamp":"2026-06-01T00:00:01+00:00","type":"quest_created",'
         '"payload":{}}\n')
     cj = tmp_path / "c.json"
     cj.write_text(_json.dumps({

@@ -29,10 +29,10 @@ def rename_quest(ctx: Any, name: str) -> str:
         raise ValueError("rename_quest requires a non-empty name")
     if ctx.change_state is None:
         raise RuntimeError("rename_quest is only available to top-level Quest steps")
-    change = ctx.change
-    if title == change.title:
-        return f"already named {change.id}"
+    quest = ctx.quest
+    if title == quest.title:
+        return f"already named {quest.id}"
     log = ctx.event_log or JsonlEventLog(ctx.events_path)
-    change.rename(title, log=log)
+    quest.rename(title, log=log)
     return (f"renamed to {title!r}; use "
-            f"{change.quest_dir}/artifacts/spec/{change.id}.md for the spec")
+            f"{quest.quest_dir}/artifacts/spec/{quest.id}.md for the spec")

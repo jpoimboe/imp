@@ -149,7 +149,7 @@ class State:
     merge_commit: str | None = None
     step_label: str | None = None
     phase_label: str | None = None
-    held_lane: str | None = None          # lane key (base branch) this change holds
+    held_lane: str | None = None          # lane key (base branch) this quest holds
     held_acquire_step: str | None = None  # the acquiring step to rewind to on eviction
     # Consume-once: last pause kept the held merge lane; entry guard honors it once.
     lane_retained: bool = False
@@ -165,7 +165,7 @@ class State:
     # (step-keyed) dirty-worktree bounce counter; the enforcement hook caps it.
     max_clean_tree_bounces: int = 3  # dirty-worktree bounce cap before pausing.
     # Transient: NOT written to state.json (so no LAYOUT_VERSION bump). Re-set
-    # from config.context_checkpoint_threshold() on every run_change entry and
+    # from config.context_checkpoint_threshold() on every run_quest entry and
     # carried onto each AgentInvocation for the Tier A proactive-handoff watch.
     checkpoint_threshold: float | int | None = None
 

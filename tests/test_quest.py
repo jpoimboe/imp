@@ -226,7 +226,7 @@ def test_create_draft_makes_no_worktree_or_branch(tmp_path: Path) -> None:
     assert state.step == "s" and state.status == "new"   # seeded at the first step
     events_text = (ch.quest_dir / "events.jsonl").read_text()
     events = [json.loads(line) for line in events_text.splitlines() if line.strip()]
-    assert any(e["type"] == "change_created" for e in events)
+    assert any(e["type"] == "quest_created" for e in events)
 
 
 def test_create_draft_records_orig_base_head(tmp_path: Path) -> None:
@@ -497,12 +497,12 @@ def test_set_origin_rewrites_quest_json(tmp_path: Path) -> None:
 
     _seed_control(tmp_path)
     base = worktree.current_branch(tmp_path)
-    change = Quest.create_draft(
+    quest = Quest.create_draft(
         tmp_path, title="X", quest_id="2026-06-24-orig01",
         base_branch=base, origin="draft")
-    change.set_origin("idea")
-    assert change.origin == "idea"
-    meta = _json.loads((change.quest_dir / "quest.json").read_text())
+    quest.set_origin("idea")
+    assert quest.origin == "idea"
+    meta = _json.loads((quest.quest_dir / "quest.json").read_text())
     assert meta["origin"] == "idea"
 
 
@@ -515,19 +515,19 @@ def test_set_seed_opening_rewrites_quest_json(tmp_path: Path) -> None:
 
     _seed_control(tmp_path)
     base = worktree.current_branch(tmp_path)
-    change = Quest.create_draft(
+    quest = Quest.create_draft(
         tmp_path, title="X", quest_id="2026-06-24-seed01",
         base_branch=base, origin="draft")
 
-    change.set_seed_opening("add a --json flag")
-    assert change.seed_opening == "add a --json flag"
-    meta = _json.loads((change.quest_dir / "quest.json").read_text())
+    quest.set_seed_opening("add a --json flag")
+    assert quest.seed_opening == "add a --json flag"
+    meta = _json.loads((quest.quest_dir / "quest.json").read_text())
     assert meta["seed_opening"] == "add a --json flag"
 
     # An unseeded fallback persists as null.
-    change.set_seed_opening(None)
-    assert change.seed_opening is None
-    meta = _json.loads((change.quest_dir / "quest.json").read_text())
+    quest.set_seed_opening(None)
+    assert quest.seed_opening is None
+    meta = _json.loads((quest.quest_dir / "quest.json").read_text())
     assert meta["seed_opening"] is None
 
 
@@ -540,14 +540,14 @@ def test_set_depends_on_rewrites_quest_json(tmp_path: Path) -> None:
 
     _seed_control(tmp_path)
     base = worktree.current_branch(tmp_path)
-    change = Quest.create_draft(
+    quest = Quest.create_draft(
         tmp_path, title="X", quest_id="2026-06-24-deps01",
         base_branch=base, origin="draft")
-    change.set_depends_on(["a", "b"])
-    meta = _json.loads((change.quest_dir / "quest.json").read_text())
+    quest.set_depends_on(["a", "b"])
+    meta = _json.loads((quest.quest_dir / "quest.json").read_text())
     assert meta["depends_on"] == ["a", "b"]
-    change.set_depends_on([])
-    meta = _json.loads((change.quest_dir / "quest.json").read_text())
+    quest.set_depends_on([])
+    meta = _json.loads((quest.quest_dir / "quest.json").read_text())
     assert meta["depends_on"] == []
 
 

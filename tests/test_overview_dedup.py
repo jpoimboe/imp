@@ -16,7 +16,7 @@ def test_scan_quest_homes_parses_each_home_once(tmp_path: Path) -> None:
     Quest.create(tmp_path, title="B", quest_id="beta", base_branch="main")
     ch_a = Quest.load(tmp_path, "alpha")
     ch_a.events_path.write_text('{"timestamp":"2026-06-05T12:00:00+00:00"}\n')
-    # Quest.create seeds a timestamped change_created event; truncate beta's
+    # Quest.create seeds a timestamped quest_created event; truncate beta's
     # events.jsonl to exercise the empty-file -> "" branch of _scan_quest_homes.
     Quest.load(tmp_path, "beta").events_path.write_text("")
 
@@ -172,8 +172,8 @@ def test_status_row_carries_phase_label() -> None:
     import imp.cli.main as m
     state = json.dumps({"status": "running", "step": "s", "step_label": "L",
                         "phase_label": "P"}).encode()
-    change = json.dumps({"title": "T", "created_at": "2026-06-20T11:00:00+00:00"}).encode()
-    row = m._status_row("cid", state, change, "2026-06-20T11:00:00+00:00")
+    quest = json.dumps({"title": "T", "created_at": "2026-06-20T11:00:00+00:00"}).encode()
+    row = m._status_row("cid", state, quest, "2026-06-20T11:00:00+00:00")
     assert len(row) == 8
     assert row[7] == "P"
 

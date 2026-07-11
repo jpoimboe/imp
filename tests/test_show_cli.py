@@ -461,7 +461,7 @@ def test_show_spec_and_plan_from_wip_ref_when_home_absent(
     events = tmp_path / "ghost-events.jsonl"
     events.write_text(
         '{"id":"ghost01","timestamp":"2026-06-01T00:00:00+00:00",'
-        '"type":"change_created","payload":{}}\n'
+        '"type":"quest_created","payload":{}}\n'
     )
     cj = tmp_path / "ghost-quest.json"
     cj.write_text(
@@ -492,11 +492,11 @@ def test_show_abandoned_backlog_is_not_a_live_brief(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     import imp.cli.main as m
-    from imp.engine.abandon import tear_down_change
+    from imp.engine.abandon import tear_down_quest
 
     _seed_control(tmp_path)
     monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
-    change = Quest.create_draft(
+    quest = Quest.create_draft(
         tmp_path,
         title="Add OAuth",
         quest_id="2026-06-16-bkg111",
@@ -504,7 +504,7 @@ def test_show_abandoned_backlog_is_not_a_live_brief(
         origin="idea",
         seed_opening="Add OAuth",
     )
-    tear_down_change(change)
+    tear_down_quest(quest)
     assert not (tmp_path / ".imp" / "quests" / "2026-06-16-bkg111").exists()
     out = _run(monkeypatch, tmp_path, "show", "2026-06-16-bkg111", "status")
     assert out.strip() != "backlog"  # History item, not a queued Backlog brief
@@ -715,7 +715,7 @@ def test_show_events_full_prints_raw_json(
          "payload": {"role": "user",
                      "content": [{"type": "text", "text": "hi"}]}},
     ])
-    # --type isolates the seeded event from the change_created event that
+    # --type isolates the seeded event from the quest_created event that
     # Quest.create writes; --full then renders it as raw JSON via full_line.
     out = _run(monkeypatch, tmp_path, "show", _ID, "events",
                "--type", "user_message", "--full")

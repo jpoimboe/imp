@@ -8,14 +8,14 @@ from imp.engine.state import JsonlEventLog
 from tests.conftest import write_agent_md
 
 
-def test_render_uses_change_namespace(tmp_path: Path) -> None:
+def test_render_uses_quest_namespace(tmp_path: Path) -> None:
     p = write_agent_md(
         tmp_path / "a.md",
         frontmatter=(
             "name: a\ntools: [complete_step]\noutput:\n"
             "  status: {type: enum, values: [Success, Error]}"
         ),
-        body="Quest {{ change.id }}: {{ change.title }}",
+        body="Quest {{ quest.id }}: {{ quest.title }}",
     )
     agent = parse_agent_file(p)
     log = JsonlEventLog(tmp_path / "events.jsonl")

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# At-head integration: the change is head of its merge-queue lane, so the base
+# At-head integration: the quest is head of its merge-queue lane, so the base
 # cannot move under it. Rebase the branch ONTO the base tip ONLY when the base
 # moved (non-empty base-side incoming diff); otherwise merge directly. Linear
 # history, no merge commit; the eventual branch->base merge is the only merge.
@@ -39,7 +39,7 @@ fi
 # Refuse a TRACKED-dirty entry tree so pre-existing changes aren't folded into a
 # replayed commit. Scope to tracked only; untracked scratch is harmless.
 if [ -n "$(git status --porcelain --untracked-files=no)" ]; then
-  echo "change worktree has uncommitted TRACKED changes at integration entry; pausing" >&2
+  echo "quest worktree has uncommitted TRACKED changes at integration entry; pausing" >&2
   exit 5
 fi
 
@@ -62,7 +62,7 @@ if git diff --quiet "$P" "$B"; then
 fi
 
 # Base moved: rebase the branch onto base. rerere replays any recorded resolution;
-# --empty=drop drops a change commit base already contains. The pre-rebase fork P
+# --empty=drop drops a quest commit base already contains. The pre-rebase fork P
 # is handed to the workflow on stdout for the integration_fork var.
 if git -c rerere.enabled=true -c rerere.autoupdate=true rebase --empty=drop "$BASE" 1>&2; then
   # Clean replant complete: the branch now sits on B. Record cur_base_head := B.

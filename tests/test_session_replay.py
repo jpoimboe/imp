@@ -30,19 +30,19 @@ def test_capture_frames_every_complete_line(tmp_path: Path) -> None:
 
 
 def test_capture_includes_lines_that_never_broadcast(tmp_path: Path) -> None:
-    # change_created / workflow_resumed land on disk without a broadcast. Capture
+    # quest_created / workflow_resumed land on disk without a broadcast. Capture
     # reads disk, so it must replay them — this is exactly what a broadcast counter
     # would have dropped at the seam.
     p = tmp_path / "events.jsonl"
     recs = [
-        {"id": "c", "type": "change_created", "payload": {"id": "x"}},
+        {"id": "c", "type": "quest_created", "payload": {"id": "x"}},
         {"id": "r", "type": "workflow_resumed", "payload": {}},
         {"id": "s", "type": "step_started", "payload": {"step": "spec"}},
     ]
     _write_jsonl(p, recs)
     lines = ReplaySnapshot.capture(p).wire_bytes().decode().splitlines()
     assert [parse_event(ln)["type"] for ln in lines] == [
-        "change_created", "workflow_resumed", "step_started", "replay_complete"]
+        "quest_created", "workflow_resumed", "step_started", "replay_complete"]
 
 
 def test_capture_ignores_partial_trailing_line(tmp_path: Path) -> None:
@@ -121,11 +121,11 @@ async def test_late_attach_replays_full_disk_prefix_then_live_tail(
 ) -> None:
     events_path = tmp_path / "events.jsonl"
     sock = str(tmp_path / "s.sock")
-    # disk holds an un-broadcast leading line (change_created) plus two lines that
+    # disk holds an un-broadcast leading line (quest_created) plus two lines that
     # the run also broadcasts. A broadcast-counter partition would drop "thinking";
     # the disk-line partition replays all three.
     prefix = [
-        {"id": "e0", "type": "change_created", "payload": {"id": "x"}},
+        {"id": "e0", "type": "quest_created", "payload": {"id": "x"}},
         {"id": "e1", "type": "step_started", "payload": {"step": "spec"}},
         {"id": "e2", "type": "thinking", "payload": {"content": "hmm"}},
     ]
@@ -235,7 +235,7 @@ def test_replay_marker_does_not_change_rendering() -> None:
     from imp.cli.render_text import render_tree
 
     events = [
-        {"type": "change_created", "payload": {"id": "x", "title": "T"}},
+        {"type": "quest_created", "payload": {"id": "x", "title": "T"}},
         {"type": "step_started", "payload": {"step": "spec"}},
         {"type": "agent_output", "payload": {"text": "hi"}},
     ]

@@ -377,7 +377,7 @@ def _make_change_worktree(control: Path, slug: str, title: str) -> Path:
     (quest_dir / "events.jsonl").write_text(
         json.dumps({
             "timestamp": "2026-05-27T10:00:00+00:00",
-            "type": "change_created",
+            "type": "quest_created",
             "payload": {"title": title},
         }) + "\n"
         + json.dumps({

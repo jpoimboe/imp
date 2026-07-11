@@ -165,7 +165,7 @@ async def test_run_fresh_session_threads_autonomous(
 
     captured: dict[str, object] = {}
 
-    async def _fake_rsc(change: object, **kw: object) -> int:
+    async def _fake_rsc(quest: object, **kw: object) -> int:
         captured.update(kw)
         return 0
 
@@ -187,7 +187,7 @@ async def test_run_fresh_session_interactive_branch_threads_autonomous(
 
     captured: dict[str, object] = {}
 
-    async def _fake_rsc(change: object, **kw: object) -> int:
+    async def _fake_rsc(quest: object, **kw: object) -> int:
         captured.update(kw)
         return 0
 

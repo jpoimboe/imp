@@ -90,13 +90,13 @@ def ensure_head_driven(
     if head_id is None:
         return
     try:
-        change = Quest.load(control_root, head_id)
+        quest = Quest.load(control_root, head_id)
     except (LoadError, OSError):
         return
     if spawn_fn is None:
         from imp.remote.session.attach import spawn_session_daemon
         spawn_fn = spawn_session_daemon
-    spawn_fn(change, resume=True)
+    spawn_fn(quest, resume=True)
 
 
 def pop_and_wake(

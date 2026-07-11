@@ -82,7 +82,7 @@ def test_mental_model_primer_names_quest() -> None:
 def test_reviewer_prompts_label_quest_title() -> None:
     for name in ("agents/plan-reviewer.md", "agents/spec-reviewer.md"):
         text = (_ASSETS / name).read_text()
-        assert "Quest title (user's starting intent): `{{ change.title }}`" in text
+        assert "Quest title (user's starting intent): `{{ quest.title }}`" in text
         assert "Change title" not in text
 
 

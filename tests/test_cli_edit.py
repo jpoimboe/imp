@@ -19,8 +19,8 @@ def _make_draft(control: Path, quest_id: str, *, origin: str = "draft") -> Quest
         origin=origin)
 
 
-def _meta(change: Quest) -> dict:
-    return json.loads((change.quest_dir / "quest.json").read_text())
+def _meta(quest: Quest) -> dict:
+    return json.loads((quest.quest_dir / "quest.json").read_text())
 
 
 def _edit_args(token: str, **kw) -> argparse.Namespace:
@@ -61,10 +61,10 @@ def test_edit_zone_rejected_for_materialized(
         tmp_path: Path, monkeypatch, capsys) -> None:
     _seed_control(tmp_path)
     monkeypatch.chdir(tmp_path)
-    change = _make_draft(tmp_path, "2026-06-24-edit04", origin="draft")
-    meta = _meta(change)
+    quest = _make_draft(tmp_path, "2026-06-24-edit04", origin="draft")
+    meta = _meta(quest)
     meta["materialized"] = True
-    (change.quest_dir / "quest.json").write_text(json.dumps(meta, indent=2,
+    (quest.quest_dir / "quest.json").write_text(json.dumps(meta, indent=2,
                                                               sort_keys=True))
     rc = main._cmd_edit(_edit_args("2026-06-24-edit04", backlog=True))
     assert rc == 2
@@ -84,8 +84,8 @@ def test_edit_depends_on_replaces_list(tmp_path: Path, monkeypatch) -> None:
 def test_edit_clear_deps_empties_list(tmp_path: Path, monkeypatch) -> None:
     _seed_control(tmp_path)
     monkeypatch.chdir(tmp_path)
-    change = _make_draft(tmp_path, "2026-06-24-edit06")
-    change.set_depends_on(["A"])
+    quest = _make_draft(tmp_path, "2026-06-24-edit06")
+    quest.set_depends_on(["A"])
     rc = main._cmd_edit(_edit_args("2026-06-24-edit06", clear_deps=True))
     assert rc == 0
     assert _meta(Quest.load(tmp_path, "2026-06-24-edit06"))["depends_on"] == []
@@ -108,20 +108,20 @@ def test_edit_combined_title_zone_and_deps(tmp_path: Path, monkeypatch) -> None:
     rc = main._cmd_edit(_edit_args(
         "2026-06-24-edit08", title="Combined", backlog=True, depends_on=["X"]))
     assert rc == 0
-    change = Quest.load(tmp_path, "2026-06-24-edit08")
-    assert change.title == "Combined"
-    assert change.origin == "idea"
-    assert _meta(change)["depends_on"] == ["X"]
+    quest = Quest.load(tmp_path, "2026-06-24-edit08")
+    assert quest.title == "Combined"
+    assert quest.origin == "idea"
+    assert _meta(quest)["depends_on"] == ["X"]
 
 
 def test_edit_materialized_title_and_zone_rejects_whole_invocation(
         tmp_path: Path, monkeypatch, capsys) -> None:
     _seed_control(tmp_path)
     monkeypatch.chdir(tmp_path)
-    change = _make_draft(tmp_path, "2026-06-24-edit09", origin="draft")
-    meta = _meta(change)
+    quest = _make_draft(tmp_path, "2026-06-24-edit09", origin="draft")
+    meta = _meta(quest)
     meta["materialized"] = True
-    (change.quest_dir / "quest.json").write_text(json.dumps(meta, indent=2,
+    (quest.quest_dir / "quest.json").write_text(json.dumps(meta, indent=2,
                                                               sort_keys=True))
     rc = main._cmd_edit(
         _edit_args("2026-06-24-edit09", title="Renamed", backlog=True))

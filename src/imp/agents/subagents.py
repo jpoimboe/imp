@@ -162,7 +162,7 @@ def _emit_collision_warning(
             })
 
 
-def _build_spike_policy(change: Any, worktree_path: Path, test_gates: Any) -> Any:
+def _build_spike_policy(quest: Any, worktree_path: Path, test_gates: Any) -> Any:
     """Build a distinct sandbox policy rooted at a throwaway spike worktree."""
     from imp.engine.env import engine_env, overlay_engine_env
     from imp.engine.sandbox import (
@@ -173,21 +173,21 @@ def _build_spike_policy(change: Any, worktree_path: Path, test_gates: Any) -> An
     from imp.providers.effective import load_effective_config
 
     config = load_effective_config(
-        project_root=change.project_root, control_root=change.control_root,
+        project_root=quest.project_root, control_root=quest.control_root,
     ).config
     cfg = dataclasses.replace(
         sandbox_config_from_raw(config.sandbox or {}), network=True)
     eng = overlay_engine_env(
         os.environ,
-        engine_env(project_root=worktree_path, quest_id=change.id,
-                   quest_title=change.title, quest_dir=change.quest_dir,
+        engine_env(project_root=worktree_path, quest_id=quest.id,
+                   quest_title=quest.title, quest_dir=quest.quest_dir,
                    test_gates=test_gates),
     )
     return resolve_policy(
-        worktree=worktree_path, control_root=change.control_root,
-        quest_id=change.id, cfg=cfg, engine_env_result=eng,
+        worktree=worktree_path, control_root=quest.control_root,
+        quest_id=quest.id, cfg=cfg, engine_env_result=eng,
         environ=os.environ, available=sandbox_available(),
-        quest_dir=change.quest_dir, spike=True,
+        quest_dir=quest.quest_dir, spike=True,
     )
 
 
@@ -222,23 +222,23 @@ async def dispatch_task(
     isolated = subagent_def.isolated_worktree
     spike_worktree: Path | None = None
     if isolated:
-        if ctx.change is None:
+        if ctx.quest is None:
             raise RuntimeError(
                 f"subagent {subagent_name!r} sets isolated_worktree but was "
                 "dispatched with no live Quest context (nested dispatch); "
                 "isolated_worktree is only supported from a top-level agent")
         from imp.engine import worktree as _worktree
         spike_worktree = _worktree.create_spike_worktree(
-            ctx.change.control_root, ctx.change.id, invocation_id,
-            ctx.change.base_branch)
+            ctx.quest.control_root, ctx.quest.id, invocation_id,
+            ctx.quest.base_branch)
 
     try:
         if isolated:
             from imp.engine.quest import link_quest_home
             assert spike_worktree is not None
-            link_quest_home(spike_worktree, ctx.change.quest_dir)
+            link_quest_home(spike_worktree, ctx.quest.quest_dir)
             dispatch_policy = _build_spike_policy(
-                ctx.change, spike_worktree, ctx.test_gates)
+                ctx.quest, spike_worktree, ctx.test_gates)
             if not dispatch_policy.active and ctx.event_log is not None:
                 ctx.event_log.append(
                     agent_id=ctx.agent_id, type="sandbox_inactive",
@@ -248,7 +248,7 @@ async def dispatch_task(
 
         cc = ctx.quest_context or QuestContext(
             id="", title="", project_root=ctx.project_root,
-            # No change context -> no quest_dir, no snapshot; live dir is the only option.
+            # No quest context -> no quest_dir, no snapshot; live dir is the only option.
             workflow_dir=resolve_workflow_dir(
                 ctx.project_root,
                 parse_default_workflow(ctx.project_root / "imp" / "project.yaml"),
@@ -517,4 +517,4 @@ async def dispatch_task(
         if spike_worktree is not None:
             from imp.engine import worktree as _worktree
             _worktree.destroy_spike_worktree(
-                ctx.change.control_root, ctx.change.id, invocation_id)
+                ctx.quest.control_root, ctx.quest.id, invocation_id)

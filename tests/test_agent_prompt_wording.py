@@ -26,7 +26,7 @@ def test_finalize_prompt_avoids_full_width_rules() -> None:
 
 def test_spec_finalizer_writes_to_artifacts_no_commit_script() -> None:
     body = _agent_prompt("spec-finalizer")
-    assert "{{ change.home }}/artifacts/spec/" in body
+    assert "{{ quest.home }}/artifacts/spec/" in body
     assert "imp artifact-commit" not in body
     # The old code-branch path and git-commit machinery are gone.
     assert "imp/specs/" not in body
@@ -53,7 +53,7 @@ def test_cli_new_help_does_not_name_the_old_spec_writer() -> None:
 
 def test_plan_writer_writes_to_artifacts_no_commit_script() -> None:
     body = _agent_prompt("plan-writer")
-    assert "{{ change.home }}/artifacts/plans/" in body
+    assert "{{ quest.home }}/artifacts/plans/" in body
     assert "imp artifact-commit" not in body
     # No plan fixup / amend machinery survives.
     assert "--fixup" not in body
@@ -91,10 +91,10 @@ def test_no_agent_prompt_references_code_branch_artifact_paths() -> None:
 def test_batch_code_reviewer_has_no_ambient_head_in_diff_ranges() -> None:
     body = _agent_prompt("batch-code-reviewer")
     assert "..HEAD" not in body
-    assert body.count("..imp/{{ change.id }}") == 1
+    assert body.count("..imp/{{ quest.id }}") == 1
 
 
-def test_batch_code_reviewer_renders_change_diff(tmp_path) -> None:
+def test_batch_code_reviewer_renders_quest_diff(tmp_path) -> None:
     body = _agent_prompt("batch-code-reviewer")
     log = JsonlEventLog(tmp_path / "events.jsonl")
     out = render_prompt(body, build_context(
@@ -146,7 +146,7 @@ def test_no_workflow_prompt_invokes_artifact_commit() -> None:
 def test_gap_check_change_review_is_unconditional() -> None:
     body = _agent_prompt("gap-check")
     assert "if the change spanned more than one plan" not in body
-    assert "once-only change-wide review." in body
+    assert "once-only quest-wide review." in body
 
 
 def test_batch_code_reviewer_description_is_whole_diff() -> None:
@@ -242,12 +242,12 @@ def test_plan_writer_documents_untagged_scope_out_form() -> None:
     assert "the **whether** is never in play, only the **when**" in body
     # the required destination path, unique to this new section
     assert (
-        "append the plain **untagged** DEFERRED line to `{{ change.home }}/deferred.md`"
+        "append the plain **untagged** DEFERRED line to `{{ quest.home }}/deferred.md`"
         in body
     )
     # the plain untagged form (no needs-decision marker), citing the spec ref
     assert (
-        "DEFERRED plan-writer: <item, citing the spec AC/scope ref> [scope: change]"
+        "DEFERRED plan-writer: <item, citing the spec AC/scope ref> [scope: quest]"
         in body
     )
     # prose in the Decisions section does not count — only the untagged line records it
@@ -261,7 +261,7 @@ def test_plan_reviewer_backstops_unrecorded_scope_out() -> None:
     assert "You are read-only: do not write or modify any files." not in body
     # the destination path, unique to the new carve-out clause
     assert (
-        "the sole file you may write is `{{ change.home }}/deferred.md`"
+        "the sole file you may write is `{{ quest.home }}/deferred.md`"
         in body
     )
     # the scope-out checklist item
@@ -270,7 +270,7 @@ def test_plan_reviewer_backstops_unrecorded_scope_out() -> None:
     # the backstop write authority: append the untagged line itself, source plan-reviewer
     assert "unrecorded scope-out" in body
     assert (
-        "DEFERRED plan-reviewer: <item, citing the spec AC/scope ref> [scope: change]"
+        "DEFERRED plan-reviewer: <item, citing the spec AC/scope ref> [scope: quest]"
         in body
     )
 

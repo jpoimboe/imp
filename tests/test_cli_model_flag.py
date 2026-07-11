@@ -72,7 +72,7 @@ async def test_async_cmd_new_rejects_unavailable_model_provider(
 
     started: dict[str, bool] = {}
 
-    async def _fake_rsc(change, **kw):
+    async def _fake_rsc(quest, **kw):
         started["ran"] = True
         return 0
 
@@ -97,7 +97,7 @@ async def test_async_cmd_new_threads_flag_model_to_run(
 
     captured: dict[str, object] = {}
 
-    async def _fake_rsc(change, **kw):
+    async def _fake_rsc(quest, **kw):
         captured.update(kw)
         return 0
 
@@ -118,14 +118,14 @@ async def test_typed_opening_model_overrides_flag_model(
     monkeypatch.setattr(
         "imp.providers.resolve.available_providers", lambda config: ["anthropic"])
 
-    async def _fake_open(change, *, model_sink=None, **kw):
+    async def _fake_open(quest, *, model_sink=None, **kw):
         if model_sink is not None:
             model_sink["model"] = "anthropic:claude-sonnet-4-6"  # typed /model
         return "brainstorm this"
 
     captured: dict[str, object] = {}
 
-    async def _fake_rsc(change, **kw):
+    async def _fake_rsc(quest, **kw):
         captured.update(kw)
         return 0
 

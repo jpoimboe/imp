@@ -37,7 +37,7 @@ def _patch_common(monkeypatch, tmp_path: Path, ch: Quest) -> None:
     monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
     monkeypatch.setattr(m, "_resolve_id", lambda control, token: "c")
     monkeypatch.setattr(m, "_load_or_rehydrate", lambda control, cid: ch)
-    monkeypatch.setattr(m, "_resume_opens_fresh", lambda change: False)
+    monkeypatch.setattr(m, "_resume_opens_fresh", lambda quest: False)
     monkeypatch.setattr(m, "_select_headless", lambda args: (False, False))
 
 
@@ -46,10 +46,10 @@ async def test_resume_routes_to_inert_for_bare_turn_end(
         monkeypatch, tmp_path: Path) -> None:
     ch = _seed(tmp_path)
     _patch_common(monkeypatch, tmp_path, ch)
-    monkeypatch.setattr(m, "bare_turn_end_question", lambda change: "Pending Q?")
+    monkeypatch.setattr(m, "bare_turn_end_question", lambda quest: "Pending Q?")
     seen: dict[str, str] = {}
 
-    async def fake_inert(change, question, *, autonomous=False):
+    async def fake_inert(quest, question, *, autonomous=False):
         seen["question"] = question
         return 0
 
@@ -67,9 +67,9 @@ async def test_resume_skips_inert_when_not_bare_turn_end(
     ch = _seed(tmp_path)
     _patch_common(monkeypatch, tmp_path, ch)
     monkeypatch.setattr(m, "_print_splash_banner", lambda **k: False)
-    monkeypatch.setattr(m, "bare_turn_end_question", lambda change: None)
+    monkeypatch.setattr(m, "bare_turn_end_question", lambda quest: None)
 
-    async def boom_inert(change, question):
+    async def boom_inert(quest, question):
         raise AssertionError("inert branch taken for a non-bare-turn-end resume")
 
     monkeypatch.setattr(m, "_resume_inert", boom_inert)
@@ -90,9 +90,9 @@ async def test_resume_skips_inert_when_message_supplied(
     ch = _seed(tmp_path)
     _patch_common(monkeypatch, tmp_path, ch)
     monkeypatch.setattr(m, "_print_splash_banner", lambda **k: False)
-    monkeypatch.setattr(m, "bare_turn_end_question", lambda change: "Pending Q?")
+    monkeypatch.setattr(m, "bare_turn_end_question", lambda quest: "Pending Q?")
 
-    async def boom_inert_msg(change, question):
+    async def boom_inert_msg(quest, question):
         raise AssertionError("inert branch taken despite message being set")
 
     monkeypatch.setattr(m, "_resume_inert", boom_inert_msg)
@@ -138,10 +138,10 @@ async def test_resume_inert_receives_autonomous(
         monkeypatch, tmp_path: Path) -> None:
     ch = _seed(tmp_path)
     _patch_common(monkeypatch, tmp_path, ch)
-    monkeypatch.setattr(m, "bare_turn_end_question", lambda change: "Pending Q?")
+    monkeypatch.setattr(m, "bare_turn_end_question", lambda quest: "Pending Q?")
     seen: dict[str, object] = {}
 
-    async def fake_inert(change, question, *, autonomous=False):
+    async def fake_inert(quest, question, *, autonomous=False):
         seen["autonomous"] = autonomous
         return 0
 

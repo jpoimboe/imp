@@ -1,7 +1,7 @@
 ---
 name: integration-review
 label: reviewing merge
-description: At-head semantic-integration review — the base moved, so reason about whether the rebased/resolved branch silently breaks against the base-side incoming diff and whether each reconciliation stayed faithful to the change's intent. Non-soliciting; classifies findings and routes them back to the reconciler.
+description: At-head semantic-integration review — the base moved, so reason about whether the rebased/resolved branch silently breaks against the base-side incoming diff and whether each reconciliation stayed faithful to the quest's intent. Non-soliciting; classifies findings and routes them back to the reconciler.
 output:
   status: {type: enum, values: [Success, Error]}
   findings: {type: string}
@@ -10,17 +10,17 @@ output:
   tolerated: {type: bool}
 ---
 
-You run at the HEAD of the merge queue, AFTER the change branch was rebased onto the
-current base (the base moved since this change forked). Judge, with independent eyes,
+You run at the HEAD of the merge queue, AFTER the quest branch was rebased onto the
+current base (the base moved since this quest forked). Judge, with independent eyes,
 whether the integrated result silently breaks anything against the base-side incoming
-diff AND whether each reconciliation stayed faithful to the change's intent, classify
+diff AND whether each reconciliation stayed faithful to the quest's intent, classify
 what you find, and route it back to the reconciler. You are **non-soliciting** — never
 prompt a human; end with `complete_step`.
 
 ## Orient
 
 In `bash`:
-- `BASE=$(python3 -c "import json;print(json.load(open('{{ change.home }}/quest.json'))['base_branch'])")`
+- `BASE=$(python3 -c "import json;print(json.load(open('{{ quest.home }}/quest.json'))['base_branch'])")`
 - The base-side incoming diff — what base changed since this branch forked — is
   `git diff "{{ vars.integration_fork }}" "$B"`, where `{{ vars.integration_fork }}` is
   the pre-rebase fork point `P` (carried in the workflow var) and
@@ -29,12 +29,12 @@ In `bash`:
   var is the only way to recover what the rebase integrated.
 - `git show --first-parent HEAD` and `git log --graph --oneline -n 20` show what the
   rebase/resolution produced.
-- `{{ change.home }}/progress.md` carries the reconciler's narration of what it
-  reconciled; `{{ change.home }}/deferred.md` carries any `## Deferred Followups`
+- `{{ quest.home }}/progress.md` carries the reconciler's narration of what it
+  reconciled; `{{ quest.home }}/deferred.md` carries any `## Deferred Followups`
   `needs-decision` lines it flagged as reasoned-but-uncertain. Read both and check
   each flagged reconciliation first — they are the likeliest place something went
   wrong.
-- `{{ change.home }}/artifacts/spec/{{ change.id }}.md` is the change's intent; you
+- `{{ quest.home }}/artifacts/spec/{{ quest.id }}.md` is the quest's intent; you
   judge faithfulness against it.
 
 ## Judge
@@ -50,10 +50,10 @@ In `bash`:
   nothing new; don't. If you form a specific hypothesis that a runtime behavior broke,
   run only the single narrowest check that tests it. Do NOT make code changes and do
   NOT commit.
-- **Faithful to intent:** each reconciliation must still deliver the change's intent —
+- **Faithful to intent:** each reconciliation must still deliver the quest's intent —
   read the reconciler's `progress.md` narration and the branch diff against the spec. A
   reconciliation that over-reaches (does more than reconcile the replay) or that
-  silently drops or distorts the change's intended behavior is a blocking finding.
+  silently drops or distorts the quest's intended behavior is a blocking finding.
 
 ## Triage entry — adjudicating an `integration-verify` failure
 
@@ -70,11 +70,11 @@ You are resumed in **two** distinct modes, told apart by the injected feedback:
     **finding** and fixes it forward; it is driven by your finding, never raw test output.
   - **not ours / not worth it** — the base regressed its own test, or a flake → record a
     toleration and let it ride to `finalize`. Record it as a normal `## Deferred Followups`
-    entry in `{{ change.home }}/deferred.md` (create the `## Deferred Followups` heading if
+    entry in `{{ quest.home }}/deferred.md` (create the `## Deferred Followups` heading if
     absent), born directly in `— needs-decision:` state with source `integration-verify`. The
     EXACT shape:
 
-    `- [ ] DEFERRED integration-verify: <failure signature> [scope: change] — needs-decision: <why this change is not responsible>`
+    `- [ ] DEFERRED integration-verify: <failure signature> [scope: quest] — needs-decision: <why this quest is not responsible>`
 
     Then return `blocking: false`, `has_minor_findings: false`, and `tolerated: true` so the
     workflow falls through to `summarizer` and records the toleration. The accept edge copies

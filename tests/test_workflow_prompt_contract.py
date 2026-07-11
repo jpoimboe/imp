@@ -54,7 +54,7 @@ def test_no_hardcoded_quest_dir_literal(name: str) -> None:
     # `.imp/change` while allowing the relocated `.imp/quests/` home name.
     assert not re.search(r"\.imp/change(?!s)", text), (
         f"{name}: hardcoded '.imp/change' path — use the engine-resolved "
-        "change.home variable (the {{ change.home }} template) instead")
+        "quest.home variable (the {{ quest.home }} template) instead")
 
 
 @pytest.mark.parametrize(
@@ -220,7 +220,7 @@ SWEEP = AGENTS_DIR / "deferred-sweep.md"
 def test_deferred_sweep_crossrefs_terminal_gate_dispositions() -> None:
     low = SWEEP.read_text().lower()
     # The two terminal markers finalize writes are inert to the sweep (like dismissed).
-    assert "seeded <change" in low
+    assert "seeded <quest" in low
     assert "ignored-at-gate" in low
 
 
@@ -541,8 +541,8 @@ def test_spec_writer_recognizes_threshold_handoff() -> None:
     assert "Adopt the spec drafted with the user and finalize it:" in body
     assert "Threshold handoff" in body
     # head_changed is re-derived from the two persisted heads, not the tool return.
-    assert "change.cur_base_head" in body
-    assert "change.orig_base_head" in body
+    assert "quest.cur_base_head" in body
+    assert "quest.orig_base_head" in body
 
 
 NO_FIXUP_RULE_AGENTS = ["task-lead.md", "deferred-sweep.md", "reconciler.md"]
@@ -664,9 +664,9 @@ def test_threshold_adopts_discovered_work_by_default(tmp_path) -> None:
         quest_title="t", event_log=log, quest_id="abc",
         quest_home=".imp/quests/abc", project_facts={}),
         workflow_dir=bundled_workflow_dir("imp"))
-    # Adoption is the unmarked default: discovered work folds into the current change.
+    # Adoption is the unmarked default: discovered work folds into the current quest.
     assert "## Keep discovered work here by default" in attended
-    assert "fold it into this change" in attended
+    assert "fold it into this quest" in attended
     # Spin-off is demoted to the exception, not a first-class move.
     assert "is the exception" in attended
     # The create_quest capability survives, in condensed conditional form.
@@ -827,7 +827,7 @@ def test_finalize_auto_resolves_needs_decision_only_under_autonomy(
         # backlog and the gate takes the merge disposition itself; only an
         # unrecoverable problem still pauses for a human.
         assert "no human at the gate" in autonomous
-        assert "seeded <new-change-id>" in autonomous
+        assert "seeded <new-quest-id>" in autonomous
         assert "pauses** for a human even under" in autonomous
 
 
@@ -839,7 +839,7 @@ def test_finalize_cover_check_two_stage_funnel() -> None:
     # Stage 1: candidate finder — imp search -l over active + backlog, excluding self.
     assert "imp search --active --backlog -l" in text
     assert "candidate finder" in low
-    assert "{{ change.id }}" in text
+    assert "{{ quest.id }}" in text
     # Stage 2: confirm intent by reading the candidate's stated purpose.
     assert "imp show <id>" in text
     assert "imp show <id> spec" in text

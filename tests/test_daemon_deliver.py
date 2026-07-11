@@ -27,8 +27,8 @@ async def test_deliver_to_session_loads_the_change_and_injects_the_reply(
 
     captured: dict[str, object] = {}
 
-    async def _fake_deliver(change: object, text: str) -> None:
-        captured["change"] = change
+    async def _fake_deliver(quest: object, text: str) -> None:
+        captured["change"] = quest
         captured["text"] = text
 
     monkeypatch.setattr(runner, "Quest", _FakeChange)

@@ -1,4 +1,4 @@
-"""Per-change session-daemon: bind run_change behind a SessionServer."""
+"""Per-change session-daemon: bind run_quest behind a SessionServer."""
 from __future__ import annotations
 
 import argparse
@@ -14,10 +14,10 @@ from imp.engine.abandon import (
     archive_conversation,
     discard_conversation,
     save_to_backlog,
-    tear_down_change,
+    tear_down_quest,
 )
 from imp.engine.errors import LoadError, LoadErrors
-from imp.engine.executor import RunResult, run_change
+from imp.engine.executor import RunResult, run_quest
 from imp.engine.merge_queue import ensure_head_driven
 from imp.engine.model_override import apply_model_override
 from imp.engine.quest import Quest
@@ -66,12 +66,12 @@ def _hold_prompt(result: Any, coordinator: Any) -> str | None:
     return None
 
 
-async def serve_change_session(
-    change: Quest,
+async def serve_quest_session(
+    quest: Quest,
     *,
-    run_fn: RunFn = run_change,
+    run_fn: RunFn = run_quest,
     hibernate: bool = True,
-    tear_down: Callable[[Quest], None] = tear_down_change,
+    tear_down: Callable[[Quest], None] = tear_down_quest,
     archive_left: Callable[[Quest], None] = archive_conversation,
     save_left: Callable[[Quest], None] = save_to_backlog,
     discard_left: Callable[[Quest], None] = discard_conversation,
@@ -81,12 +81,12 @@ async def serve_change_session(
     first_attach_timeout: float = _DEFAULT_FIRST_ATTACH_TIMEOUT,
     model: str | None = None,
 ) -> Any:
-    # Shared coordinator: socket `interrupt` control frame → run_change's pause check.
+    # Shared coordinator: socket `interrupt` control frame → run_quest's pause check.
     from imp.cli.signals import InterruptCoordinator
 
     coordinator = InterruptCoordinator()
-    socket_path = str(session_socket_path(change.control_root, change.id))
-    attach_log = change.event_log()
+    socket_path = str(session_socket_path(quest.control_root, quest.id))
+    attach_log = quest.event_log()
     coordinator.set_event_log(attach_log)
 
     def _on_first_attach() -> None:
@@ -97,7 +97,7 @@ async def serve_change_session(
         coordinator=coordinator,
         lock=None,
         hibernate=hibernate,
-        events_path=change.events_path,
+        events_path=quest.events_path,
         on_first_attach=_on_first_attach,
         first_attach_timeout=first_attach_timeout,
     )
@@ -107,8 +107,8 @@ async def serve_change_session(
 
         resume_target: str | None = None
         if resume:
-            log = change.event_log()
-            state = State.load(change.state_dir)
+            log = quest.event_log()
+            state = State.load(quest.state_dir)
             _append_workflow_resumed(log)
             # Crash recovery keys on the lock, not the status field. `crashed` is
             # snapshotted BEFORE acquire() (see below): a stale lock means the
@@ -116,7 +116,7 @@ async def serve_change_session(
             # re-burning it. A clean pause (no lock) leaves resume_pending unset.
             if crashed:
                 state.resume_pending = state.step
-            state.save(change.state_dir)
+            state.save(quest.state_dir)
             # A crash replays the interrupted agent step, so it always lands in
             # the agent regardless of the last-stamped target.
             resume_target = None if crashed else state.resume_target
@@ -139,14 +139,14 @@ async def serve_change_session(
             prompt: str | None = _RESUME_PROMPT
         else:
             result = await run_fn(
-                change,
+                quest,
                 on_event=on_event,
                 user_chat_input_fn=user_chat_input_fn,
                 coordinator=coordinator,
                 wait_for_turn_fn=server.wait_for_turn,
                 **run_kwargs,
             )
-            coordinator.note_yield()  # run_change returned -> the run has yielded
+            coordinator.note_yield()  # run_quest returned -> the run has yielded
             prompt = _hold_prompt(result, coordinator)
         while prompt is not None or _is_model_override_pause(result, coordinator):
             if _is_model_override_pause(result, coordinator):
@@ -154,9 +154,9 @@ async def serve_change_session(
                 # override AFTER that save (no write race), then re-enter the same step.
                 arg = coordinator.take_pending_model()
                 if arg:
-                    state = State.load(change.state_dir)
+                    state = State.load(quest.state_dir)
                     assert state.step is not None
-                    apply_model_override(change, state, arg, step_name=state.step)
+                    apply_model_override(quest, state, arg, step_name=state.step)
                 coordinator.reset()
             else:
                 on_event({"type": "awaiting_user_input",
@@ -171,27 +171,27 @@ async def serve_change_session(
                     # the continuation nudge on a no-message resume. Any other detach
                     # left the user at the resteer prompt: its markers were already
                     # armed by the executor Pause handler, so record the target only.
-                    state = State.load(change.state_dir)
+                    state = State.load(quest.state_dir)
                     if coordinator.pause_reason == "ctrl-d":
                         state.resume_target = "agent"
                         state.arm_step_resume(interrupt=True)
                     else:
                         state.resume_target = "prompt"
-                    state.save(change.state_dir)
+                    state.save(quest.state_dir)
                     return result
                 coordinator.reset()
                 if reply.strip():
                     coordinator.enqueue_interject(reply)
-            _append_workflow_resumed(change.event_log())
+            _append_workflow_resumed(quest.event_log())
             result = await run_fn(
-                change,
+                quest,
                 on_event=on_event,
                 user_chat_input_fn=user_chat_input_fn,
                 coordinator=coordinator,
                 wait_for_turn_fn=server.wait_for_turn,
                 **run_kwargs,
             )
-            coordinator.note_yield()  # run_change returned -> the run has yielded
+            coordinator.note_yield()  # run_quest returned -> the run has yielded
             prompt = _hold_prompt(result, coordinator)
         return result
 
@@ -200,26 +200,26 @@ async def serve_change_session(
     # would always see a live pid and never detect the crash. `_bound` (defined
     # above) closes over `crashed`; it is read only when _bound runs, after this
     # assignment, so the forward reference is sound.
-    lock_path = change.quest_dir / "lock"
+    lock_path = quest.quest_dir / "lock"
     crashed = resume and lock_path.exists() and not lock_is_live(lock_path)
     try:
-        with ProjectLock(change.quest_dir / "lock").acquire():
+        with ProjectLock(quest.quest_dir / "lock").acquire():
             await server.open()
             result = await server.serve(_bound)
     except LockHeld:
-        # A wake-spawn raced a resident change: exit harmlessly without binding socket.
+        # A wake-spawn raced a resident quest: exit harmlessly without binding socket.
         return None
     if server.abandoned:
-        await anyio.to_thread.run_sync(tear_down, change)
+        await anyio.to_thread.run_sync(tear_down, quest)
     elif server.saved:
-        await anyio.to_thread.run_sync(save_left, change)
+        await anyio.to_thread.run_sync(save_left, quest)
     elif server.archived:
-        await anyio.to_thread.run_sync(archive_left, change)
+        await anyio.to_thread.run_sync(archive_left, quest)
     elif server.discarded:
-        await anyio.to_thread.run_sync(discard_left, change)
-    elif result is RunResult.PAUSED and _last_pause_was_awaiting_turn(change.event_log()):
+        await anyio.to_thread.run_sync(discard_left, quest)
+    elif result is RunResult.PAUSED and _last_pause_was_awaiting_turn(quest.event_log()):
         await anyio.to_thread.run_sync(
-            ensure_head_driven, change.control_root, change.base_branch)
+            ensure_head_driven, quest.control_root, quest.base_branch)
     return result
 
 
@@ -233,7 +233,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--model", default=None)
     ns = parser.parse_args(argv)
     try:
-        change = Quest.load(Path(ns.control_root), ns.quest_id)
+        quest = Quest.load(Path(ns.control_root), ns.quest_id)
     except LoadError as exc:
         print(f"imp: {exc}", file=sys.stderr)
         return 2
@@ -248,9 +248,9 @@ def main(argv: list[str] | None = None) -> int:
         kwargs["model"] = ns.model
     try:
         if kwargs:
-            result = anyio.run(functools.partial(serve_change_session, change, **kwargs))
+            result = anyio.run(functools.partial(serve_quest_session, quest, **kwargs))
         else:
-            result = anyio.run(serve_change_session, change)
+            result = anyio.run(serve_quest_session, quest)
     except (LoadError, LoadErrors) as exc:
         print(f"imp: {exc}", file=sys.stderr)
         return 2

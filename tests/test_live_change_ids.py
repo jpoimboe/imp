@@ -19,7 +19,7 @@ def _archive_one(control: Path, cid: str) -> None:
     events = control / f"{cid}.jsonl"
     events.write_bytes(
         f'{{"id":"{cid}-e0","parent_id":null,"agent_id":null,'
-        '"timestamp":"2026-06-01T00:00:00+00:00","type":"change_created",'
+        '"timestamp":"2026-06-01T00:00:00+00:00","type":"quest_created",'
         f'"payload":{{"id":"{cid}"}}}}\n'.encode()
     )
     cj = control / f"{cid}-quest.json"

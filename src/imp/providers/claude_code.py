@@ -1357,7 +1357,7 @@ class ClaudeCodeAgentRunner:
         # provider injects neither, so off => true parity): the CLAUDE.md/memory
         # walk, and the start-of-conversation gitStatus snapshot + generic git
         # instructions (which go stale across a step's edits and fight imp's
-        # controlled per-change worktree/snapshot git model). Static, unconditional.
+        # controlled per-quest worktree/snapshot git model). Static, unconditional.
         env["CLAUDE_CODE_DISABLE_CLAUDE_MDS"] = "1"
         env["CLAUDE_CODE_DISABLE_GIT_INSTRUCTIONS"] = "1"
         thinking_cfg, effort_cfg = _cc_thinking_posture(invocation.tier)
@@ -1367,7 +1367,7 @@ class ClaudeCodeAgentRunner:
             include_partial_messages=True,
             stderr=self._stderr_sink.feed if self._stderr_sink is not None else None,
             env=env,
-            # Pin the `claude` subprocess to the change's project_root. Without
+            # Pin the `claude` subprocess to the quest's project_root. Without
             # this the SDK launches claude with cwd=None and leaves $PWD as
             # inherited, so claude keys off a stale $PWD and edits/commits the
             # wrong working tree (e.g. imp's own repo when launched from a
@@ -1489,7 +1489,7 @@ class ClaudeCodeAgentRunner:
         )
         ctx.quest_context = invocation.quest_context
         ctx.change_state = invocation.change_state
-        ctx.change = invocation.change          # live Quest for rename_quest
+        ctx.quest = invocation.quest          # live Quest for rename_quest
         ctx.spawn_subagent = spawn_subagent_via_registry
         ctx.resolved_tiers = invocation.resolved_tiers
         ctx.subagent_depth = invocation.subagent_depth
@@ -2532,7 +2532,7 @@ class ClaudeCodeAgentRunner:
         # cancel check above never runs. Report the cancellation here too, as
         # `config`/interrupted (a Pause), NOT `network` (a retry): auto-retrying
         # an interrupted turn replays a transcript the API rejects with a 400
-        # ("tool use concurrency issues"). See change 2026-06-06-06x3ml.
+        # ("tool use concurrency issues"). See quest 2026-06-06-06x3ml.
         if self._cancel:
             yield {"type": "error", "payload": {
                 "category": "config",

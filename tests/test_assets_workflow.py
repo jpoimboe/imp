@@ -247,7 +247,7 @@ def test_threshold_authors_summary_on_express() -> None:
     wf = load_workflow(bundled_workflow_dir("imp"))
     body = wf.agents["threshold"].prompt_template_source
     assert "imp artifact-commit" not in body
-    assert "{{ change.home }}/artifacts/summary/{{ change.id }}.md" in body
+    assert "{{ quest.home }}/artifacts/summary/{{ quest.id }}.md" in body
     low = body.lower()
     # Only on the express path; the full path defers to the end-of-change summarizer.
     assert "express path" in low
@@ -909,7 +909,7 @@ def test_gap_check_agent_is_end_of_change_backstop() -> None:
     text = (Path("src/imp/assets/workflows/imp/agents") / "gap-check.md").read_text()
     low = text.lower()
     assert "name: gap-check" in text
-    assert "end-of-change" in low or "end of change" in low
+    assert "end-of-quest" in low or "end of quest" in low
     assert "once" in low
     assert "outline" in low
     assert "plan-cycle-check" not in low          # no residual old name
@@ -1014,7 +1014,7 @@ def test_spiker_prose_is_empirical_findings_only_and_parks_artifact() -> None:
     assert "never commit" in low
     assert "never ship" in low
     # parks a durable copy under the change-home spike dir (survives teardown)
-    assert "{{ change.home }}/artifacts/spike/" in text
+    assert "{{ quest.home }}/artifacts/spike/" in text
 
 
 def test_spiker_prose_documents_writable_ephemeral_home() -> None:

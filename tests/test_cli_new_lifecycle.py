@@ -14,10 +14,10 @@ _ID_RE = re.compile(r"[a-z0-9]{6}")
 def test_new_mints_unique_dateless_id(tmp_path: Path) -> None:
     _seed_control(tmp_path)
     quest_id = new_quest_id()
-    change = Quest.create(tmp_path, title="Add OAuth", quest_id=quest_id,
+    quest = Quest.create(tmp_path, title="Add OAuth", quest_id=quest_id,
                            base_branch="main")
-    assert change.id == quest_id
-    assert _ID_RE.fullmatch(change.id)
+    assert quest.id == quest_id
+    assert _ID_RE.fullmatch(quest.id)
     worktrees = sorted((tmp_path / ".imp" / "worktrees").iterdir())
     assert len(worktrees) == 1
     assert worktrees[0].name == quest_id

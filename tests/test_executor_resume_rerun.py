@@ -9,7 +9,7 @@ import pytest
 
 from imp.agents.runner import AgentInvocation, AgentRunner, Event, Message, TextBlock, ToolUseBlock
 from imp.agents.transcript import Transcript
-from imp.engine.executor import RunResult, _resume_replays_transcript, run_change
+from imp.engine.executor import RunResult, _resume_replays_transcript, run_quest
 from imp.engine.quest import Quest
 from imp.engine.state import State
 
@@ -92,27 +92,27 @@ def _seed_single_agent(root: Path) -> Quest:
     flat = workflow.flat_steps()
     State(id="c", step=flat[0].name, step_attempt=0, status="running",
           vars=dict(workflow.vars.defaults()), loop_counts={}).save(quest_dir / "state")
-    change = Quest(id="c", title="t", base_branch="main",
+    quest = Quest(id="c", title="t", base_branch="main",
                     control_root=root, project_root=root, quest_dir=quest_dir)
-    change.event_log().append(agent_id=None, type="change_created",
+    quest.event_log().append(agent_id=None, type="quest_created",
                               payload={"id": "c", "title": "t"})
-    return change
+    return quest
 
 
 @pytest.mark.anyio
 async def test_resume_truncated_autonomous_replays_and_advances(
         tmp_path: Path, provider_registry) -> None:
-    change = _seed_single_agent(tmp_path)
-    state = State.load(change.state_dir)
+    quest = _seed_single_agent(tmp_path)
+    state = State.load(quest.state_dir)
     state.resume_pending = state.step
-    state.save(change.state_dir)
-    tdir = change.quest_dir / "steps" / "only" / "w"
+    state.save(quest.state_dir)
+    tdir = quest.quest_dir / "steps" / "only" / "w"
     tdir.mkdir(parents=True, exist_ok=True)
     Transcript(tdir / "transcript.jsonl").append(
         Message(role="assistant", content=(TextBlock(text="still working"),)))
     # Seed the step_context event so _resume_system_prompt finds the stored
     # prompt (in production this is always present when a transcript exists).
-    change.event_log().append(
+    quest.event_log().append(
         agent_id="step:only/w", type="step_context",
         payload={"system_prompt": "test"})
 
@@ -137,10 +137,10 @@ async def test_resume_truncated_autonomous_replays_and_advances(
 
     provider_registry("fake", env_check=lambda: True, factory=lambda _m: _P())
 
-    result = await run_change(change)
+    result = await run_quest(quest)
     assert result is RunResult.COMPLETED          # advanced, not wedged
     assert seen_nonempty == [True]                # transcript kept and replayed
-    assert State.load(change.state_dir).status == "completed"
+    assert State.load(quest.state_dir).status == "completed"
 
 
 @pytest.mark.anyio
@@ -153,13 +153,13 @@ async def test_resume_empty_transcript_with_stored_context_runs_fresh(
     # over the fresh re-render: system_prompt_override suppresses first-user-
     # message composition, so the runner would get initial_messages=() with no
     # transcript to replay and the spawn streams nothing — a silent stall loop.
-    change = _seed_single_agent(tmp_path)
-    state = State.load(change.state_dir)
+    quest = _seed_single_agent(tmp_path)
+    state = State.load(quest.state_dir)
     state.resume_pending = state.step
-    state.save(change.state_dir)
-    tdir = change.quest_dir / "steps" / "only" / "w"
+    state.save(quest.state_dir)
+    tdir = quest.quest_dir / "steps" / "only" / "w"
     tdir.mkdir(parents=True, exist_ok=True)
-    change.event_log().append(
+    quest.event_log().append(
         agent_id="step:only/w", type="step_context",
         payload={"system_prompt": "stored from the killed run"})
 
@@ -181,10 +181,10 @@ async def test_resume_empty_transcript_with_stored_context_runs_fresh(
 
     provider_registry("fake", env_check=lambda: True, factory=lambda _m: _P())
 
-    result = await run_change(change)
+    result = await run_quest(quest)
     assert result is RunResult.COMPLETED          # advanced, not wedged
     assert seen_initial_nonempty == [True]        # fresh seed, not an empty replay
-    assert State.load(change.state_dir).status == "completed"
+    assert State.load(quest.state_dir).status == "completed"
 
 
 @pytest.mark.anyio
@@ -196,12 +196,12 @@ async def test_resume_empty_transcript_seeds_fresh_and_advances(
     # transcript. The buggy path kept the (empty) transcript and passed
     # initial_messages=(), so the provider built an empty query and hung. The fix
     # runs the step fresh: a non-empty seed reaches the runner and it advances.
-    change = _seed_single_agent(tmp_path)
-    state = State.load(change.state_dir)
+    quest = _seed_single_agent(tmp_path)
+    state = State.load(quest.state_dir)
     state.resume_pending = state.step
-    state.save(change.state_dir)
+    state.save(quest.state_dir)
     # Step's transcript dir exists but is empty — the never-ran case.
-    tdir = change.quest_dir / "steps" / "only" / "w"
+    tdir = quest.quest_dir / "steps" / "only" / "w"
     tdir.mkdir(parents=True, exist_ok=True)
 
     seen_initial_nonempty: list[bool] = []
@@ -224,7 +224,7 @@ async def test_resume_empty_transcript_seeds_fresh_and_advances(
 
     provider_registry("fake", env_check=lambda: True, factory=lambda _m: _P())
 
-    result = await run_change(change)
+    result = await run_quest(quest)
     assert result is RunResult.COMPLETED          # advanced, not wedged
     assert seen_initial_nonempty == [True]        # fresh seed, not an empty replay
-    assert State.load(change.state_dir).status == "completed"
+    assert State.load(quest.state_dir).status == "completed"

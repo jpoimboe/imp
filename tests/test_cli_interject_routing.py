@@ -101,7 +101,7 @@ def test_slash_builtin_is_intercepted_not_routed() -> None:
         workflow_dir = _WF()
 
     printed: list[str] = []
-    result = handle_slash_line("/help", change=_Change(), output_fn=printed.append)
+    result = handle_slash_line("/help", quest=_Change(), output_fn=printed.append)
     # /help is consumed (re-prompt sentinel) — it never becomes a routable line.
     assert result is REPROMPT
     assert any("slash commands" in line.lower() for line in printed)

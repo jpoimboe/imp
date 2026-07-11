@@ -60,7 +60,7 @@ def test_deferred_sweep_checks_off_and_records_fixes_durably() -> None:
     assert "malformed" in low
     assert "degraded" in low
     # The terminal gate markers stay inert.
-    assert "seeded <change" in low and "ignored-at-gate" in low
+    assert "seeded <quest" in low and "ignored-at-gate" in low
     assert "needs-decision:" in low                  # parseable format that finalize reads
     assert "never grow the change" not in low
     assert "auto-route" not in low
@@ -109,7 +109,7 @@ def test_deferred_sweep_treats_covered_by_as_terminal() -> None:
     low = body.lower()
     # The gate's third terminal marker joins seeded / ignored-at-gate.
     assert "three further terminal markers" in low
-    assert "— covered-by <change-id>" in body
+    assert "— covered-by <quest-id>" in body
     # It is listed in the drain-only-untagged invariant's terminal-tag set.
     assert "`— ignored-at-gate` / `— covered-by`)" in body
     # Like the sibling gate markers, it is inert to the sweep.

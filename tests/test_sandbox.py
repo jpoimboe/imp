@@ -491,11 +491,11 @@ def test_build_sandbox_policy_hard_fails_when_unavailable(tmp_path, monkeypatch)
     from imp.engine import sandbox as _sb
     _sb.sandbox_available.cache_clear()
 
-    change = _fake_change(tmp_path)
+    quest = _fake_change(tmp_path)
     config = _fake_config(sandbox={})      # enabled defaults True, allow_unsandboxed False
     log = _CaptureLog()
     with pytest.raises(SandboxUnavailable):
-        ex._build_sandbox_policy(change, config, log)
+        ex._build_sandbox_policy(quest, config, log)
     assert any(e["type"] == "sandbox_unavailable" for e in log.events)
 
 
@@ -506,10 +506,10 @@ def test_build_sandbox_policy_bare_when_allow_unsandboxed(tmp_path, monkeypatch)
     from imp.engine import sandbox as _sb
     _sb.sandbox_available.cache_clear()
 
-    change = _fake_change(tmp_path)
+    quest = _fake_change(tmp_path)
     config = _fake_config(sandbox={"allow_unsandboxed": True})
     log = _CaptureLog()
-    pol = ex._build_sandbox_policy(change, config, log)
+    pol = ex._build_sandbox_policy(quest, config, log)
     assert pol.active is False and pol.note == "unsandboxed_by_config"
     # The inactive posture must be auditable: a sandbox_inactive event is emitted
     # carrying the note (so an operator can see the run went unsandboxed).
@@ -527,13 +527,13 @@ def test_build_sandbox_policy_active_path_builds_policy_silently(tmp_path, monke
     from imp.engine import sandbox as _sb
     _sb.sandbox_available.cache_clear()
 
-    change = _fake_change(tmp_path)
+    quest = _fake_change(tmp_path)
     config = _fake_config(sandbox={})
     log = _CaptureLog()
-    pol = ex._build_sandbox_policy(change, config, log)
+    pol = ex._build_sandbox_policy(quest, config, log)
     assert pol.active is True and pol.note == ""
-    assert pol.worktree == str(change.project_root)
-    assert ("IMP_PROJECT_ROOT", str(change.project_root)) in pol.setenv
+    assert pol.worktree == str(quest.project_root)
+    assert ("IMP_PROJECT_ROOT", str(quest.project_root)) in pol.setenv
     # active is the silent common case — no posture event is emitted.
     assert not any(e["type"] in ("sandbox_inactive", "sandbox_unavailable")
                    for e in log.events)

@@ -10,7 +10,7 @@ from imp.agents.runner import AgentInvocation, AgentRunner, Event, Message, Text
 from imp.agents.transcript import Transcript
 from imp.engine.abandon import archive_conversation
 from imp.engine.archive.read import rehydrate_quest
-from imp.engine.executor import RunResult, run_change
+from imp.engine.executor import RunResult, run_quest
 from imp.engine.quest import Quest
 from imp.engine.state import State
 from tests.conftest import _seed_control
@@ -46,10 +46,10 @@ async def test_paused_conversation_round_trips_and_replays_on_resume(
     restored = quest_dir / "steps" / "p" / "s" / "transcript.jsonl"
     assert restored.read_bytes() == seeded_bytes
 
-    change = Quest.load(tmp_path, "conv")
-    state = State.load(change.state_dir)
+    quest = Quest.load(tmp_path, "conv")
+    state = State.load(quest.state_dir)
     state.resume_pending = state.step   # "s" → replay, not re-seed
-    state.save(change.state_dir)
+    state.save(quest.state_dir)
 
     seen_initial_empty: list[bool] = []
     seen_transcript_nonempty: list[bool] = []
@@ -75,13 +75,13 @@ async def test_paused_conversation_round_trips_and_replays_on_resume(
 
     provider_registry("anthropic", env_check=lambda: True, factory=lambda _m: _P())
 
-    result = await run_change(change)
+    result = await run_quest(quest)
 
     assert result is RunResult.COMPLETED
     assert seen_initial_empty == [True]
     assert seen_transcript_nonempty == [True]
 
-    lines = change.events_path.read_text().splitlines()
+    lines = quest.events_path.read_text().splitlines()
     events = [json.loads(ln) for ln in lines if ln.strip()]
     starts = [e for e in events if e["type"] == "step_started"]
     assert any(

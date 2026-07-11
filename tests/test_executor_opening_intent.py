@@ -1,4 +1,4 @@
-"""run_change emits a display-only opening_intent event once on a fresh run,
+"""run_quest emits a display-only opening_intent event once on a fresh run,
 right after tiers_resolved; never on a resume, never when seed_opening is empty."""
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from imp.engine.executor import RunResult, run_change
+from imp.engine.executor import RunResult, run_quest
 from imp.engine.state import JsonlEventLog, State
 from imp.providers.config import ProviderModel
 from tests.test_executor import (
@@ -37,7 +37,7 @@ _WRITER_BODY = (
     "output:\n  status: {type: enum, values: [Success, Error]}\n---\n"
     # Blank line after the marker keeps it a standalone paragraph so reflow_markdown
     # (applied to the body) never wraps other text into the "INTENT: ..." line.
-    "{% if run.opening %}INTENT: {{ run.opening }}\n\n{% endif %}go {{ change.id }}\n"
+    "{% if run.opening %}INTENT: {{ run.opening }}\n\n{% endif %}go {{ quest.id }}\n"
 )
 
 
@@ -83,7 +83,7 @@ def _seed(root: Path) -> object:
     (wf / "agents" / "writer.md").write_text(
         "---\nname: writer\ntools: [complete_step]\n"
         "output:\n  status: {type: enum, values: [Success, Error]}\n---\n"
-        "go {{ change.id }}\n"
+        "go {{ quest.id }}\n"
     )
     (wf / "workflow.yaml").write_text(
         "name: t\ndescription: t\n"
@@ -101,12 +101,12 @@ def _seed(root: Path) -> object:
 async def test_seeded_first_run_interpolates_opening_from_durable_field(
     tmp_path: Path,
 ) -> None:
-    change = _seed_render(tmp_path)
-    change.seed_opening = "add a --json flag"   # durable source; no run parameter
+    quest = _seed_render(tmp_path)
+    quest.seed_opening = "add a --json flag"   # durable source; no run parameter
     sink: list = []
     _register_invocation_capturing({"status": "Success"}, sink)
 
-    result = await run_change(change)
+    result = await run_quest(quest)
     assert result is RunResult.COMPLETED
     assert "INTENT: add a --json flag" in _task_text(sink[0])
 
@@ -117,27 +117,27 @@ async def test_restart_resume_reinterpolates_opening_from_durable_field(
 ) -> None:
     # dobe93: the opening turn errored, leaving an empty transcript; the resume
     # re-renders the entry step FRESH and must re-seed from change.seed_opening.
-    change = _seed_render(tmp_path)
-    change.seed_opening = "add a --json flag"
-    state = State.load(change.state_dir)
+    quest = _seed_render(tmp_path)
+    quest.seed_opening = "add a --json flag"
+    state = State.load(quest.state_dir)
     state.step = "w"
     state.arm_step_resume(interrupt=False)      # resume_pending == step -> is_resume
-    state.save(change.state_dir)                # no transcript written -> restart
+    state.save(quest.state_dir)                # no transcript written -> restart
     sink: list = []
     _register_invocation_capturing({"status": "Success"}, sink)
 
-    result = await run_change(change)
+    result = await run_quest(quest)
     assert result is RunResult.COMPLETED
     assert "INTENT: add a --json flag" in _task_text(sink[0])
 
 
 @pytest.mark.anyio
 async def test_unseeded_run_renders_no_opening(tmp_path: Path) -> None:
-    change = _seed_render(tmp_path)             # change.seed_opening stays None
+    quest = _seed_render(tmp_path)             # change.seed_opening stays None
     sink: list = []
     _register_invocation_capturing({"status": "Success"}, sink)
 
-    result = await run_change(change)
+    result = await run_quest(quest)
     assert result is RunResult.COMPLETED
     assert "INTENT:" not in _task_text(sink[0])
 
@@ -145,49 +145,49 @@ async def test_unseeded_run_renders_no_opening(tmp_path: Path) -> None:
 @pytest.mark.anyio
 async def test_opening_not_delivered_to_downstream_step(tmp_path: Path) -> None:
     # A resume landing on a LATER agent step must never receive the one-shot seed.
-    change = _seed_two_step(tmp_path)
-    change.seed_opening = "add a --json flag"
-    state = State.load(change.state_dir)
+    quest = _seed_two_step(tmp_path)
+    quest.seed_opening = "add a --json flag"
+    state = State.load(quest.state_dir)
     state.step = "b"                            # start at the downstream step
     state.arm_step_resume(interrupt=False)
-    state.save(change.state_dir)
+    state.save(quest.state_dir)
     sink: list = []
     _register_invocation_capturing({"status": "Success"}, sink)
 
-    result = await run_change(change)
+    result = await run_quest(quest)
     assert result is RunResult.COMPLETED
     assert "INTENT:" not in _task_text(sink[0])  # step "b" got no seed
 
 
 @pytest.mark.anyio
 async def test_opening_intent_emitted_from_seed_opening(tmp_path: Path) -> None:
-    change = _seed(tmp_path)
-    change.seed_opening = "add a --json flag"
+    quest = _seed(tmp_path)
+    quest.seed_opening = "add a --json flag"
     _register_prompt_capturing({"status": "Success"}, [])
-    result = await run_change(change)
+    result = await run_quest(quest)
     assert result is RunResult.COMPLETED
 
-    types = [e["type"] for e in JsonlEventLog(change.events_path).read()]
+    types = [e["type"] for e in JsonlEventLog(quest.events_path).read()]
     assert "opening_intent" in types
     assert types.index("opening_intent") == types.index("tiers_resolved") + 1
-    payload = next(e["payload"] for e in JsonlEventLog(change.events_path).read()
+    payload = next(e["payload"] for e in JsonlEventLog(quest.events_path).read()
                    if e["type"] == "opening_intent")
     assert payload == {"text": "add a --json flag"}
 
 
 @pytest.mark.anyio
 async def test_no_opening_intent_when_seed_opening_absent_or_empty(tmp_path: Path) -> None:
-    change = _seed(tmp_path)                    # change.seed_opening is None
+    quest = _seed(tmp_path)                    # change.seed_opening is None
     _register_prompt_capturing({"status": "Success"}, [])
-    await run_change(change)
-    types = [e["type"] for e in JsonlEventLog(change.events_path).read()]
+    await run_quest(quest)
+    types = [e["type"] for e in JsonlEventLog(quest.events_path).read()]
     assert "opening_intent" not in types
 
     (tmp_path / "other").mkdir()
     change2 = _seed(tmp_path / "other")
     change2.seed_opening = ""                   # empty string is suppressed (falsy)
     _register_prompt_capturing({"status": "Success"}, [])
-    await run_change(change2)
+    await run_quest(change2)
     types2 = [e["type"] for e in JsonlEventLog(change2.events_path).read()]
     assert "opening_intent" not in types2
 
@@ -197,7 +197,7 @@ async def test_opening_model_seeds_first_agent_step(tmp_path: Path) -> None:
     # A provider:model seed swaps BOTH provider and model on the opening agent
     # step's resolved_steps entry, folded in AFTER the fresh resolve block.
     from imp.providers import resolve
-    change = _seed(tmp_path)                     # single agent step "w"
+    quest = _seed(tmp_path)                     # single agent step "w"
     _register_prompt_capturing({"status": "Success"}, [])
     # The seed swaps step "w" onto the anthropic provider; register a fake for it
     # so the run can dispatch and complete after the fold-in persists.
@@ -205,11 +205,11 @@ async def test_opening_model_seeds_first_agent_step(tmp_path: Path) -> None:
         "anthropic", env_check=lambda: True,
         factory=lambda model: _CapturingProvider({"status": "Success"}, [], model=model))
     try:
-        result = await run_change(
-            change, opening_model="anthropic:claude-fable-5")
+        result = await run_quest(
+            quest, opening_model="anthropic:claude-fable-5")
         assert result is RunResult.COMPLETED
 
-        state = State.load(change.state_dir)
+        state = State.load(quest.state_dir)
         assert state.resolved_steps["w"] == ProviderModel(
             "anthropic", "claude-fable-5")
     finally:

@@ -1,6 +1,6 @@
 ---
 name: plan-writer
-description: Write the next bite-sized plan ({{ change.home }}/artifacts/plans/{{ change.id }}-plan-N.md) from the spec and progress, then commit it.
+description: Write the next bite-sized plan ({{ quest.home }}/artifacts/plans/{{ quest.id }}-plan-N.md) from the spec and progress, then commit it.
 subagents: [explorer, researcher]
 output:
   status: {type: enum, values: [Success, Error]}
@@ -9,9 +9,9 @@ output:
   plan_total: {type: int}
 ---
 
-You are writing an implementation plan for this change.
+You are writing an implementation plan for this quest.
 
-Current id: `{{ change.id }}`
+Current id: `{{ quest.id }}`
 
 ## Which Plan to Write
 
@@ -20,14 +20,14 @@ Before writing anything, determine which plan number N to write and whether you 
 **Step 1 — glob existing plan files:**
 
 ```
-glob("{{ change.home }}/artifacts/plans/{{ change.id }}-plan-*.md")
+glob("{{ quest.home }}/artifacts/plans/{{ quest.id }}-plan-*.md")
 ```
 
 Sort the results numerically. The highest N found is the "current plan".
 
 **Step 2 — read progress state:**
 
-If `{{ change.home }}/progress.md` exists, read it.
+If `{{ quest.home }}/progress.md` exists, read it.
 
 **Step 3 — decide:**
 
@@ -54,7 +54,7 @@ non-soliciting exception):
 | Script-gate failure | resume | "Your previous attempt completed but was not accepted." (plan-verify-commit) | Fix commit mechanics, re-emit. |
 | Reviewer rework | resume | "Here's review feedback to address:" + `blocking: True` | Rework protocol (verify findings first). |
 | Minors pass | resume | "No blocking issues — integrate these minor improvements; a final review follows:" + `blocking: False` | One-pass minors protocol (non-soliciting). |
-| Threshold express | goto (fresh session) | "Plan this from the spec drafted with the user:" | Plan from the draft spec on disk (`{{ change.home }}/artifacts/spec/{{ change.id }}.md`); the change is already materialized and the spec is complete enough to plan against. |
+| Threshold express | goto (fresh session) | "Plan this from the spec drafted with the user:" | Plan from the draft spec on disk (`{{ quest.home }}/artifacts/spec/{{ quest.id }}.md`); the quest is already materialized and the spec is complete enough to plan against. |
 | Plan-cycle supercycle | goto (fresh session) | "More plans are needed for this spec. Coverage assessment:" + `more_plans:` fields | Author plan N+1. |
 | Review rework | goto (fresh session) | "The review found the plan needs revision. Findings:" | Rework mode (see below): author a new corrective plan N+1; never revise the settled plan. |
 | Human rework (finalize) | goto (fresh session) | "Here's the feedback to address:" + finalize `comments` | Rework mode (see below): author a new corrective plan N+1 from `comments`; never revise the settled plan. |
@@ -81,7 +81,7 @@ disappear.
 A `review` rework ("The review found the plan needs revision. Findings:"), a
 `finalize` human rework ("Here's the feedback to address:"), or an integration-pass
 plan gap ("The integration pass found the plan needs revision. Findings:") routes the
-change back to YOU — no rework reaches a coder without an opus plan in front of it.
+quest back to YOU — no rework reaches a coder without an opus plan in front of it.
 These are **post-settlement** reworks: plan N has already been fully implemented and
 `progress.md` marks it complete, so the "Which Plan to Write" disambiguation lands on
 the **author-N+1** row. **Author a new focused corrective plan `…-plan-(N+1).md`**
@@ -99,11 +99,11 @@ You still **decide the corrective's depth** yourself from the findings/`comments
 Write `…-plan-(N+1).md`, then the corrective flows
 through `plan-reviewer` → `task-lead` exactly like a first-time plan (a trivial
 corrective takes `fast_path` and skips `plan-reviewer`). Code review of the corrective
-is included in the change-wide review at converge; the settled work is neither re-planned
+is included in the quest-wide review at converge; the settled work is neither re-planned
 nor re-reviewed.
 
 **Consume the lifecycle handle.** When this `N+1` covers an open `NEEDS-REPLAN
-task-lead:` note in `{{ change.home }}/deferred.md` (a `task-lead` needs-replan that
+task-lead:` note in `{{ quest.home }}/deferred.md` (a `task-lead` needs-replan that
 the coverage guard surfaced), mark that checkbox addressed (`[ ]` → `[x]`) as part of
 authoring the plan. This consumes the handle so the next `gap-check` run does
 not re-fire on an already-covered note.
@@ -148,7 +148,7 @@ spec-finalizer's. **Decide-and-record is the default even for a call that
 *contradicts* an explicit spec scope/AC boundary**, as long as a reasonable
 default exists: decide the correct call, implement it in the plan, record the
 rationale in `## Decisions`, and — because it crosses a spec scope/AC boundary —
-surface it as **one** `— needs-decision:` open item in `{{ change.home }}/deferred.md` (the reader
+surface it as **one** `— needs-decision:` open item in `{{ quest.home }}/deferred.md` (the reader
 form under "Surfacing a decision you cannot resolve", which is load-bearing). Do
 **not** yield to the human for it. The human ratifies it exactly once, at the
 merge gate, where `finalize` already walks `— needs-decision:` items: that gate
@@ -186,11 +186,11 @@ pass is unchanged.
 
 When a concern clears that bar and you cannot settle it from the spec or the codebase,
 do not bury it in prose. Append it to the **Deferred Followups** list in
-`{{ change.home }}/deferred.md` (create the `## Deferred Followups` heading if absent)
+`{{ quest.home }}/deferred.md` (create the `## Deferred Followups` heading if absent)
 in `finalize`'s exact reader form, the same `— needs-decision:` line shape the merge
 gate already walks:
 
-`- [ ] DEFERRED plan-writer: <one-line description> [scope: change] — needs-decision: <why a human must decide>`
+`- [ ] DEFERRED plan-writer: <one-line description> [scope: quest] — needs-decision: <why a human must decide>`
 
 Writing it in this reader form is **load-bearing**: on a trivial `fast_path`
 corrective the `deferred-sweep` step never runs, so an item not already in
@@ -201,12 +201,12 @@ yourself and recording them in the `## Decisions` section (see "Ask vs. decide")
 
 ## Explore the Codebase First
 
-Read the spec at `{{ change.home }}/artifacts/spec/{{ change.id }}.md`.
+Read the spec at `{{ quest.home }}/artifacts/spec/{{ quest.id }}.md`.
 
 Glob and read existing plan files to understand what has already been planned or implemented:
 
 ```
-glob("{{ change.home }}/artifacts/plans/{{ change.id }}-plan-*.md")
+glob("{{ quest.home }}/artifacts/plans/{{ quest.id }}-plan-*.md")
 ```
 
 Read relevant source files to understand current patterns, interfaces, and conventions before decomposing tasks. Do not guess at file layout — read the actual code.
@@ -234,7 +234,7 @@ A **task** is one logical unit of work that maps to **exactly one commit**. Its
 three tasks: splitting them produces broken intermediate commits (e.g. an unused
 import) and violates a single-commit spec.
 
-**Atomicity hard rule.** If the spec says the change must be atomic / a single
+**Atomicity hard rule.** If the spec says the quest must be atomic / a single
 commit / "do not split," the plan has **exactly one `## Task N`** (with as many
 steps inside it as needed). Honor the spec's atomicity prose — there is no
 separate spec field for this.
@@ -250,12 +250,12 @@ separate spec field for this.
 - "Commit" — step
 
 {% if vars.fast_path %}
-**Fast-path.** This change was classified trivial. Skip TDD scaffolding and
-verification steps the spec did not ask for — do not pad a small change with a
-test the spec waived. **Default to one `## Task`.** A trivial change is naturally
+**Fast-path.** This quest was classified trivial. Skip TDD scaffolding and
+verification steps the spec did not ask for — do not pad a small quest with a
+test the spec waived. **Default to one `## Task`.** A trivial quest is naturally
 a single commit; plan it as one task unless the spec explicitly describes
 genuinely separable units of work. This is a strong default, not the hard floor
-the atomicity rule sets — but on a fast-path change, "I'll split this into a few
+the atomicity rule sets — but on a fast-path quest, "I'll split this into a few
 tasks" is almost always the over-splitting this workflow exists to prevent. If
 you do emit more than one task, confirm each is a real, independently-committable
 unit — not a step dressed up as a task.
@@ -270,7 +270,7 @@ commit per task. Do not fracture the slice into trivial one-task fragments, and
 do not merge across what the outline kept separate. Size in **tasks**, not lines of code;
 let the slice be as large as its natural boundary makes it. The
 **outline-driven plan loop** authors the remaining plans — the engine loops back
-to you for each next plan while `plan_index < plan_total`, with the end-of-change
+to you for each next plan while `plan_index < plan_total`, with the end-of-quest
 `gap-check` as the sole coverage backstop.
 
 On the **express / self-scope path** there is no outline, so size the single plan
@@ -279,16 +279,16 @@ its natural dependency boundary; default `plan_total = 1`.
 
 ## Scheduling spec-mandated work into a later plan
 
-Slicing spec-mandated work into a later plan is legitimate — the **whether** is never in play, only the **when**; `gap-check` enforces the clause regardless. But a scope-out must leave a machine-parseable trace: when this plan does not deliver a spec-mandated item, you **must** append the plain **untagged** DEFERRED line to `{{ change.home }}/deferred.md`:
+Slicing spec-mandated work into a later plan is legitimate — the **whether** is never in play, only the **when**; `gap-check` enforces the clause regardless. But a scope-out must leave a machine-parseable trace: when this plan does not deliver a spec-mandated item, you **must** append the plain **untagged** DEFERRED line to `{{ quest.home }}/deferred.md`:
 
-`- [ ] DEFERRED plan-writer: <item, citing the spec AC/scope ref> [scope: change]`
+`- [ ] DEFERRED plan-writer: <item, citing the spec AC/scope ref> [scope: quest]`
 
-This is the plain **untagged** form — no `— needs-decision:` marker — distinct from the human-decision line under **Surfacing a decision you cannot resolve** above. Prose in the plan's `## Decisions` section does not count; only the untagged line in `{{ change.home }}/deferred.md` records the scope-out durably. Untagged means the sweep may fix it, `gap-check` enforces it, and the user is never re-asked.
+This is the plain **untagged** form — no `— needs-decision:` marker — distinct from the human-decision line under **Surfacing a decision you cannot resolve** above. Prose in the plan's `## Decisions` section does not count; only the untagged line in `{{ quest.home }}/deferred.md` records the scope-out durably. Untagged means the sweep may fix it, `gap-check` enforces it, and the user is never re-asked.
 
 ## First-run plan_total estimate
 
 Always emit `plan_total` in your output contract — an integer `>= 1` (it is a required
-field). On the **first plan** of a change (`plan_index == 1`) it is captured into
+field). On the **first plan** of a quest (`plan_index == 1`) it is captured into
 `vars.plan_total`, seeding the `plan N/total` denominator the user sees from the very first plan label, so it is never
 blank and never `1/0`.
 
@@ -296,7 +296,7 @@ blank and never `1/0`.
   plans**, and emit that count as `plan_total`. This is the outline-derived value; the
   outline is the source of truth.
 - **Express path:** there is no outline — emit `plan_total = 1` (a trivial express
-  change is a single plan).
+  quest is a single plan).
 
 On every later plan (`plan_index > 1`) `gap-check` owns the authoritative total — it
 bumps it only when it authors a corrective — and the workflow ignores your emission on
@@ -481,22 +481,22 @@ If you find issues, fix them inline. If you find a spec requirement with no task
 
 ## Writing the File
 
-Write to `{{ change.home }}/artifacts/plans/{{ change.id }}-plan-N.md` (substitute the actual integer for N).
+Write to `{{ quest.home }}/artifacts/plans/{{ quest.id }}-plan-N.md` (substitute the actual integer for N).
 
 Do NOT write code. Only write the plan document.
 
 ## Write the plan file
 
-Write the plan to the change's artifact area — NOT the code branch (`main` stays
+Write the plan to the quest's artifact area — NOT the code branch (`main` stays
 pure code). You only write the plain file under
-`{{ change.home }}/artifacts/plans/`; the engine journals it to the change's
+`{{ quest.home }}/artifacts/plans/`; the engine journals it to the quest's
 artifact ref at the step boundary. Do not run `git add`/`git commit` yourself and
-do not add a `Change:` trailer.
+do not add a `Quest:` trailer.
 
 This is identical for a fresh plan (plan N, or a corrective `…-plan-(N+1).md`
 authored on a post-settlement rework) and an in-place revision of an existing plan N
 (a minors-integration pass): re-write the relevant plan file under
-`{{ change.home }}/artifacts/plans/`. There is no separate commit step.
+`{{ quest.home }}/artifacts/plans/`. There is no separate commit step.
 
 ## Minors-integration pass (a review follows)
 
@@ -518,17 +518,17 @@ not-yet-complete plan: the newest plan exists and `progress.md` does not mark it
 complete, so you revise N in place). On this pass:
 
 1. **Integrate the advisory findings.** Apply any Minor/Nit improvements from
-   `findings:` to plan N, re-write `{{ change.home }}/artifacts/plans/{{ change.id }}-plan-N.md`,
+   `findings:` to plan N, re-write `{{ quest.home }}/artifacts/plans/{{ quest.id }}-plan-N.md`,
    then finish tool-terminal (the engine journals the rewritten file at the step
    boundary):
 
    ```
-   complete_step(plan_path="{{ change.home }}/artifacts/plans/{{ change.id }}-plan-N.md", plan_number=N, plan_total=T)
+   complete_step(plan_path="{{ quest.home }}/artifacts/plans/{{ quest.id }}-plan-N.md", plan_number=N, plan_total=T)
    ```
 
 2. **If there is nothing worth integrating** (none of the findings are worth
    acting on), just call
-   `complete_step(plan_path="{{ change.home }}/artifacts/plans/{{ change.id }}-plan-N.md", plan_number=N, plan_total=T)`
+   `complete_step(plan_path="{{ quest.home }}/artifacts/plans/{{ quest.id }}-plan-N.md", plan_number=N, plan_total=T)`
    without changing the file. The verification review still runs on the unchanged
    plan and will pass it through.
 
@@ -543,7 +543,7 @@ across the re-emit.
 ## Finish
 
 ```
-complete_step(plan_path="{{ change.home }}/artifacts/plans/{{ change.id }}-plan-N.md", plan_number=N, plan_total=T)
+complete_step(plan_path="{{ quest.home }}/artifacts/plans/{{ quest.id }}-plan-N.md", plan_number=N, plan_total=T)
 ```
 
 (Substitute the actual integers for N and T.)

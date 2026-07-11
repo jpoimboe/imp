@@ -138,5 +138,5 @@ def test_record_idea_uses_passed_base_not_current_branch(
     assert rc == 0
     ids = [p.name for p in (tmp_path / ".imp" / "quests").iterdir()]
     assert len(ids) == 1, ids
-    change = Quest.load(tmp_path, ids[0])
-    assert change.base_branch == "release/9"
+    quest = Quest.load(tmp_path, ids[0])
+    assert quest.base_branch == "release/9"

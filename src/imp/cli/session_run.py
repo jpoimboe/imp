@@ -23,18 +23,18 @@ def _should_run_ctrl_d_reader(*, non_interactive: bool) -> bool:
     return not non_interactive and sys.stdin.isatty()
 
 
-def infer_session_result(change: Quest) -> RunResult:
+def infer_session_result(quest: Quest) -> RunResult:
     """Read persisted status, home first then archive: 'completed' → COMPLETED, else PAUSED."""
     try:
-        status: str | None = State.load(change.state_dir).status
+        status: str | None = State.load(quest.state_dir).status
     except FileNotFoundError:
         from imp.engine.archive import read as archive_read
-        status = archive_read.status_of(change.control_root, change.id)
+        status = archive_read.status_of(quest.control_root, quest.id)
     return RunResult.COMPLETED if status == "completed" else RunResult.PAUSED
 
 
 async def run_session_client(
-    change: Quest,
+    quest: Quest,
     *,
     driver: Any,
     coord: InterruptCoordinator,
@@ -50,9 +50,9 @@ async def run_session_client(
 ) -> int:
     """Attach to the session daemon, render events, answer gates, and return the exit code."""
     leave_state = {} if leave_state is None else leave_state
-    title = title if title is not None else TerminalTitle(sys.stdout, change.id, change.title)
+    title = title if title is not None else TerminalTitle(sys.stdout, quest.id, quest.title)
     attach = build_session_attach(
-        change, resume=resume,
+        quest, resume=resume,
         non_interactive=non_interactive, autonomous=autonomous, lease=True,
         model=model)
     startup_failed = False
@@ -67,7 +67,7 @@ async def run_session_client(
         try:
             await run_terminal_client(
                 attach=attach, driver=driver, coord=coord, solicit=solicit,
-                quest_id=change.id, control_root=change.control_root,
+                quest_id=quest.id, control_root=quest.control_root,
                 leave_state=leave_state, leave_mode=leave_mode, title=title,
                 local_echo=driver.seed_pending_reply)
         except TimeoutError:
@@ -75,20 +75,20 @@ async def run_session_client(
             # attach raised before run_terminal_client's teardown finally runs.
             title.reset()
         tg.cancel_scope.cancel()
-    if startup_failed and infer_session_result(change) is not RunResult.COMPLETED:
+    if startup_failed and infer_session_result(quest) is not RunResult.COMPLETED:
         print(
-            f"imp: session daemon for {change.id} did not come up; "
-            f"it may have crashed (see {change.control_root}/.imp/remote-control.log)",
+            f"imp: session daemon for {quest.id} did not come up; "
+            f"it may have crashed (see {quest.control_root}/.imp/remote-control.log)",
             file=sys.stderr)
         return 3
     from imp.cli.main import (
         _print_leave_disposition,
         _session_exit_code,
     )
-    disposition_rc = _print_leave_disposition(change, leave_state)
+    disposition_rc = _print_leave_disposition(quest, leave_state)
     if disposition_rc is not None:
         return disposition_rc
-    return _session_exit_code(change, coord)
+    return _session_exit_code(quest, coord)
 
 
 def make_headless_solicit(
@@ -113,7 +113,7 @@ def make_headless_solicit(
 
 
 def make_interactive_solicit(
-    change: Quest,
+    quest: Quest,
     *,
     status: Any,
     driver: Any,
@@ -125,8 +125,8 @@ def make_interactive_solicit(
     from imp.cli.main import _editing_mode, _term_width
 
     prompt = Prompt(
-        skills_dir=change.workflow_dir / "skills",
-        editing_mode=_editing_mode(change.control_root),
+        skills_dir=quest.workflow_dir / "skills",
+        editing_mode=_editing_mode(quest.control_root),
         color=should_use_color(sys.stdout))
 
     async def _solicit(_prompt: str) -> str:
@@ -134,7 +134,7 @@ def make_interactive_solicit(
         # prompt) surfaces as the field placeholder; an empty prompt — the bare
         # turn-end yield — falls back to the default "type your reply".
         return await ask_line_with_slash(
-            prompt, status, change,
+            prompt, status, quest,
             color=should_use_color(sys.stdout), width=_term_width(),
             coord=coord, driver=driver, hint=_prompt or None)
 

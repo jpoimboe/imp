@@ -9,82 +9,82 @@ from imp.engine.quest import Quest
 from imp.engine.state import ProjectLock, State
 
 
-def tear_down_change(change: Quest) -> None:
+def tear_down_quest(quest: Quest) -> None:
     """Destroy a change: mark abandoned, archive a non-resumable tombstone, drop the
     live home. On a built-out change also pop the merge queue (waking the next head if
     this change was the head), remove the worktree, and delete the branch; on a draft
     those three are skipped (there is no worktree, branch, or queue slot)."""
-    control = change.control_root
-    quest_id = change.id
-    base_branch = change.base_branch
-    materialized = change.materialized
-    with ProjectLock(change.quest_dir / "lock").acquire():  # raises LockHeld if runner is live
-        state = State.load(change.state_dir)
+    control = quest.control_root
+    quest_id = quest.id
+    base_branch = quest.base_branch
+    materialized = quest.materialized
+    with ProjectLock(quest.quest_dir / "lock").acquire():  # raises LockHeld if runner is live
+        state = State.load(quest.state_dir)
         state.status = "abandoned"
-        state.save(change.state_dir)
-        change.event_log().append(
+        state.save(quest.state_dir)
+        quest.event_log().append(
             agent_id=None, type="change_abandoned", payload={})
         # archive before worktree removal (the runtime files live inside the worktree)
         from imp.engine import archive
         archive.archive_quest(
             control, quest_id,
-            events_path=change.events_path,
-            quest_json_path=change.quest_dir / "quest.json",
-            state_json_path=change.state_dir / "state.json",
+            events_path=quest.events_path,
+            quest_json_path=quest.quest_dir / "quest.json",
+            state_json_path=quest.state_dir / "state.json",
         )
     if materialized:
-        # Uses RepoGitLock, independent of the per-change ProjectLock held above.
+        # Uses RepoGitLock, independent of the per-quest ProjectLock held above.
         merge_queue.pop_and_wake(control, quest_id, base_branch)
         # branch delete after worktree removal (git forbids deleting a checked-out branch)
         worktree.remove_worktree(control, quest_id, force=True)
         worktree.delete_branch(control, quest_id)
-    shutil.rmtree(change.quest_dir, ignore_errors=True)
+    shutil.rmtree(quest.quest_dir, ignore_errors=True)
 
 
-def archive_conversation(change: Quest) -> None:
+def archive_conversation(quest: Quest) -> None:
     """Archive a left conversation as resumable (paused, not abandoned); drop the live home."""
-    control = change.control_root
-    quest_id = change.id
-    base_branch = change.base_branch
-    materialized = change.materialized
-    with ProjectLock(change.quest_dir / "lock").acquire():  # raises LockHeld if runner is live
-        state = State.load(change.state_dir)
+    control = quest.control_root
+    quest_id = quest.id
+    base_branch = quest.base_branch
+    materialized = quest.materialized
+    with ProjectLock(quest.quest_dir / "lock").acquire():  # raises LockHeld if runner is live
+        state = State.load(quest.state_dir)
         state.status = "paused"
         state.arm_step_resume(interrupt=False)
-        state.save(change.state_dir)
-        change.event_log().append(
+        state.save(quest.state_dir)
+        quest.event_log().append(
             agent_id=None, type="conversation_archived", payload={})
         from imp.engine import archive
         archive.archive_quest(
             control, quest_id,
-            events_path=change.events_path,
-            quest_json_path=change.quest_dir / "quest.json",
-            state_json_path=change.state_dir / "state.json",
-            steps_dir=change.quest_dir / "steps",
+            events_path=quest.events_path,
+            quest_json_path=quest.quest_dir / "quest.json",
+            state_json_path=quest.state_dir / "state.json",
+            steps_dir=quest.quest_dir / "steps",
             resumable=True,
         )
     if materialized:
         merge_queue.pop_and_wake(control, quest_id, base_branch)
         worktree.remove_worktree(control, quest_id, force=True)
         worktree.delete_branch(control, quest_id)
-    shutil.rmtree(change.quest_dir, ignore_errors=True)
+    shutil.rmtree(quest.quest_dir, ignore_errors=True)
 
 
-def save_to_backlog(change: Quest) -> None:
+def save_to_backlog(quest: Quest) -> None:
     """Pause a conversation: the un-materialized change-home is kept (not archived) and
     remains resumable. Zone is derived from both `materialized` and `origin` — no bespoke
     status string is needed for zone placement."""
-    with ProjectLock(change.quest_dir / "lock").acquire():
-        state = State.load(change.state_dir)
+    with ProjectLock(quest.quest_dir / "lock").acquire():
+        state = State.load(quest.state_dir)
         state.status = "paused"
         state.arm_step_resume(interrupt=False)
-        state.save(change.state_dir)
-        change.event_log().append(
+        state.save(quest.state_dir)
+        quest.event_log().append(
             agent_id=None, type="conversation_saved", payload={})
 
 
-def discard_conversation(change: Quest) -> None:
+def discard_conversation(quest: Quest) -> None:
     """Discard a zero-exchange open — no archive, no record; raises LockHeld if runner is live."""
-    with ProjectLock(change.quest_dir / "lock").acquire():
+    with ProjectLock(quest.quest_dir / "lock").acquire():
         pass
-    shutil.rmtree(change.quest_dir, ignore_errors=True)
+    shutil.rmtree(quest.quest_dir, ignore_errors=True)

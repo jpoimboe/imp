@@ -18,7 +18,7 @@ from pathlib import Path
 import pytest
 
 from imp.agents.runner import AgentInvocation, AgentRunner, Event
-from imp.engine.executor import RunResult, run_change
+from imp.engine.executor import RunResult, run_quest
 from imp.engine.quest import Quest
 from imp.engine.state import State
 
@@ -53,15 +53,15 @@ def _make_change(root: Path, *, quest_id: str = "test-change", title: str = "t")
         status="running", vars=dict(workflow.vars.defaults()), loop_counts={},
     ).save(quest_dir / "state")
 
-    change = Quest(
+    quest = Quest(
         id=quest_id, title=title, base_branch="main",
         control_root=root, project_root=root, quest_dir=quest_dir,
     )
-    change.event_log().append(
-        agent_id=None, type="change_created",
+    quest.event_log().append(
+        agent_id=None, type="quest_created",
         payload={"id": quest_id, "title": title},
     )
-    return change
+    return quest
 
 
 class _NoOutputRunner:
@@ -88,7 +88,7 @@ async def test_exhausted_step_emits_single_pause_completion(tmp_path: Path) -> N
     (wf_dir / "agents" / "worker.md").write_text(
         "---\nname: worker\ntools: [complete_step]\n"
         "output:\n  status: {type: enum, values: [Success, Error]}\n---\n"
-        "go {{ change.id }}\n"
+        "go {{ quest.id }}\n"
     )
     # New inline-surface format: phases is a list of {name, steps}.
     # on_max_retries uses verb-style: {pause: true}.
@@ -100,7 +100,7 @@ async def test_exhausted_step_emits_single_pause_completion(tmp_path: Path) -> N
         "    steps:\n"
         "      - {name: build, file: agents/worker.md, tier: low}\n"
     )
-    # run_change reads via load_effective_config: project marker + local layer.
+    # run_quest reads via load_effective_config: project marker + local layer.
     (tmp_path / "imp").mkdir(parents=True, exist_ok=True)
     (tmp_path / "imp" / "project.yaml").write_text("default-workflow: imp\n")
     (tmp_path / ".imp").mkdir(parents=True, exist_ok=True)
@@ -123,13 +123,13 @@ async def test_exhausted_step_emits_single_pause_completion(tmp_path: Path) -> N
         "fake", env_check=lambda: True, factory=lambda _m: _NoOutputProvider(),
     )
 
-    change = _make_change(tmp_path)
+    quest = _make_change(tmp_path)
 
-    result = await run_change(change, on_event=lambda _e: None)
+    result = await run_quest(quest, on_event=lambda _e: None)
     assert result is RunResult.PAUSED
 
-    # Read events back from the on-disk JsonlEventLog (run_change hard-codes it).
-    events = list(change.event_log().read())
+    # Read events back from the on-disk JsonlEventLog (run_quest hard-codes it).
+    events = list(quest.event_log().read())
 
     completions = [
         e for e in events

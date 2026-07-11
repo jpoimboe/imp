@@ -54,7 +54,7 @@ from imp.cli.terminal_title import TerminalTitle
 from imp.engine import backlog, worktree
 from imp.engine.abandon import (
     discard_conversation,
-    tear_down_change,
+    tear_down_quest,
 )
 from imp.engine.archive import read as archive_read
 from imp.engine.awaiting_user_input import AwaitingUserInput
@@ -231,7 +231,7 @@ def make_message_reply_fn(message: str | None) -> Callable[[], Awaitable[str]]:
 # decoration is gated on `should_use_color` (TTY + NO_COLOR aware), so piped /
 # redirected output stays plain and script-parseable. Shared by `new`/`resume`.
 
-def _emit_completed(change: Quest, value: str, *, merged: bool, warnings: int = 0) -> None:
+def _emit_completed(quest: Quest, value: str, *, merged: bool, warnings: int = 0) -> None:
     """Run finished cleanly — ✓ on the headline."""
     color = should_use_color(sys.stdout)
     mark = "✓ " if color else ""
@@ -240,12 +240,12 @@ def _emit_completed(change: Quest, value: str, *, merged: bool, warnings: int = 
         noun = "warning" if warnings == 1 else "warnings"
         suffix = f"  ({warnings} {noun})"
     if merged:
-        print(ansi(f"{mark}Merged {change.id} into {change.base_branch}.",
+        print(ansi(f"{mark}Merged {quest.id} into {quest.base_branch}.",
                    *pal.NODE_COLORS["lifecycle"], enabled=color))
-        print(ansi(f"Quest {change.id}: {value}{suffix}",
+        print(ansi(f"Quest {quest.id}: {value}{suffix}",
                    *pal.NODE_COLORS["lifecycle"], enabled=color))
     else:
-        print(ansi(f"{mark}Quest {change.id}: {value}{suffix}", "green", enabled=color))
+        print(ansi(f"{mark}Quest {quest.id}: {value}{suffix}", "green", enabled=color))
 
 
 def _phase_from_events(events: list[dict[str, Any]]) -> str | None:
@@ -365,38 +365,38 @@ def _daemon_stderr_has_crash(path: Path) -> bool:
 
 
 def _pause_facts(
-    change: Quest, leave_trigger: str | None = None,
+    quest: Quest, leave_trigger: str | None = None,
 ) -> tuple[str, str, str | None, str, str | None]:
-    name = change.id
-    events = list(change.event_log().read())
+    name = quest.id
+    events = list(quest.event_log().read())
     phase = _phase_from_events(events)
     if leave_trigger is not None:
         # Deliberate leave: render the trigger locally (daemon reason may lag / read STALE).
-        return name, change.title, phase, change.id, leave_trigger
+        return name, quest.title, phase, quest.id, leave_trigger
     reason_val = _pause_reason(events)
     if reason_val is _PauseBanner.STALE:
-        if _daemon_stderr_has_crash(change.quest_dir / "daemon.stderr"):
+        if _daemon_stderr_has_crash(quest.quest_dir / "daemon.stderr"):
             reason: str | None = (
-                f"ended unexpectedly — see .imp/quests/{change.id}/daemon.stderr")
+                f"ended unexpectedly — see .imp/quests/{quest.id}/daemon.stderr")
         else:
             # A resumed-without-pause segment with no crash traceback is a clean
             # deliberate detach — render the calm interrupt reason, no pointer.
             reason = "interrupt"
     else:
         reason = reason_val
-    return name, change.title, phase, change.id, reason
+    return name, quest.title, phase, quest.id, reason
 
 
-def _emit_paused_summary(change: Quest, leave_trigger: str | None = None) -> None:
+def _emit_paused_summary(quest: Quest, leave_trigger: str | None = None) -> None:
     """The trailing run-status line on a non-interactive pause / merge-block."""
     color = should_use_color(sys.stdout)
-    name, title, phase, token, reason = _pause_facts(change, leave_trigger)
+    name, title, phase, token, reason = _pause_facts(quest, leave_trigger)
     for ln in _pause_lines(name, phase, token, reason=reason, title=title, color=color):
         print(ln)
 
 
 def _emit_merge_blocked(
-    change: Quest, reason: str | None, detail: str | None = None,
+    quest: Quest, reason: str | None, detail: str | None = None,
     note: str | None = None,
 ) -> None:
     """Merge couldn't complete — the user must act: wordmark, ⚠.
@@ -410,7 +410,7 @@ def _emit_merge_blocked(
     overwrite one. `worktree_dirty` has a precise template and gets no detail."""
     color = should_use_color(sys.stdout)
     mark = "⚠ " if color else ""
-    cid, base = change.id, change.base_branch
+    cid, base = quest.id, quest.base_branch
     if reason == "worktree_dirty":
         msg = f"Uncommitted work in the worktree; commit it, then `imp resume {cid}`."
     elif reason == "refused":
@@ -462,7 +462,7 @@ def _last_script_blocked(
 
 
 def _handle_terminal_outcome(
-    change: Quest, result: RunResult, coord: Any,
+    quest: Quest, result: RunResult, coord: Any,
 ) -> int:
     """Render the terminal outcome of a settled run and return its rc.
 
@@ -471,36 +471,36 @@ def _handle_terminal_outcome(
     Shared by `new`/`resume` (relocated verbatim from the post-run `else` arm)."""
     if result is RunResult.COMPLETED:
         # Worktree gone = the merge gate was exercised.
-        wt_path = change.control_root / ".imp" / "worktrees" / change.id
-        _ep = getattr(change, 'events_path', None)
+        wt_path = quest.control_root / ".imp" / "worktrees" / quest.id
+        _ep = getattr(quest, 'events_path', None)
         if _ep is not None and not _ep.exists():
             events: list[dict[str, Any]] = []
         else:
-            events = list(change.event_log().read())
+            events = list(quest.event_log().read())
         if not events:
-            raw = archive_read.read_events(change.control_root, change.id)
+            raw = archive_read.read_events(quest.control_root, quest.id)
             events = _parse_jsonl(raw) if raw is not None else []
         warnings = sum(1 for ev in events if ev.get("type") == "runner_warning")
-        _emit_completed(change, result.value, merged=not wt_path.exists(),
+        _emit_completed(quest, result.value, merged=not wt_path.exists(),
                         warnings=warnings)
         return 0
     # PAUSED — surface merge_blocked or script-step remediation.
-    final_state = State.load(change.state_dir)
+    final_state = State.load(quest.state_dir)
     if final_state.status == "merge_blocked":
         mb_reason: str | None = None
         mb_detail: str | None = None
         mb_note: str | None = None
-        for ev in change.event_log().read():
+        for ev in quest.event_log().read():
             if ev.get("type") == "merge_blocked":
                 payload = ev.get("payload") or {}
                 mb_reason = payload.get("reason")
                 mb_detail = payload.get("detail")
                 mb_note = payload.get("note")
-        _emit_merge_blocked(change, mb_reason, mb_detail, mb_note)
+        _emit_merge_blocked(quest, mb_reason, mb_detail, mb_note)
         return 1  # friendly block already carries the resume command; skip redundant summary
     if final_state.step is not None:
         matched = _last_script_blocked(
-            list(change.event_log().read()), final_state.step)
+            list(quest.event_log().read()), final_state.step)
         if matched is not None:
             payload = matched.get("payload") or {}
             _emit_script_blocked(
@@ -508,13 +508,13 @@ def _handle_terminal_outcome(
                 payload.get("stderr", ""),
                 payload.get("stdout", ""),
             )
-    _emit_paused_summary(change, _leave_trigger(coord))
+    _emit_paused_summary(quest, _leave_trigger(coord))
     return 1
 
 
 
 def _print_leave_disposition(
-    change: Quest, leave_state: dict[str, str],
+    quest: Quest, leave_state: dict[str, str],
 ) -> int | None:
     """Print the optimistic leave message for a daemon-applied disposition.
 
@@ -524,7 +524,7 @@ def _print_leave_disposition(
     """
     intent = leave_state.get("intent")
     if intent == "abandon":
-        label = change.title or change.id
+        label = quest.title or quest.id
         if leave_state.get("materialized") == "1":
             print(f"imp: '{label}' abandoned — torn down; "
                   f"find it later with `imp search`")
@@ -533,24 +533,24 @@ def _print_leave_disposition(
         return None
     disposition = leave_state.get("disposition")
     if disposition == "save":
-        print(f"imp: saved '{change.title or change.id}' to your Backlog "
-              f"(resume with `imp resume {change.id}`)")
+        print(f"imp: saved '{quest.title or quest.id}' to your Backlog "
+              f"(resume with `imp resume {quest.id}`)")
         return 0
     if disposition == "archive":
-        print(f"imp: conversation saved — resume with `imp resume {change.id}` "
+        print(f"imp: conversation saved — resume with `imp resume {quest.id}` "
               f"or find it later with `imp search`")
         return 0
     if disposition == "discard":
         return 0
     if leave_state.get("send_failed"):
-        print(f"imp: left running — resume with `imp resume {change.id}`")
+        print(f"imp: left running — resume with `imp resume {quest.id}`")
         return 0
     return None
 
 
-def _session_exit_code(change: Quest, coord: Any) -> int:
-    result = infer_session_result(change)
-    outcome = _handle_terminal_outcome(change, result, coord)
+def _session_exit_code(quest: Quest, coord: Any) -> int:
+    result = infer_session_result(quest)
+    outcome = _handle_terminal_outcome(quest, result, coord)
     if result is RunResult.PAUSED and coord.interrupted:
         return 130
     return outcome
@@ -673,23 +673,23 @@ def _print_run_header(quest_id: str, title: str, marker: str,
     print()
 
 
-def _print_opening(change: Quest, marker: str, *, interactive: bool, color: bool) -> bool:
+def _print_opening(quest: Quest, marker: str, *, interactive: bool, color: bool) -> bool:
     """Lead with the run header, then the splash scene+phrase when interactive, so
     the change identity is the first thing on screen. The header already emits its
     trailing blank line, so the splash is printed without its own leading one.
     Returns whether the splash was rendered."""
-    _print_run_header(change.id, change.title, marker, color=color)
+    _print_run_header(quest.id, quest.title, marker, color=color)
     return _print_splash_banner(interactive=interactive, lead_blank=False)
 
 
 async def _read_intent_line(
-    prompt: Any, change: Any, *, color: bool, width: int,
+    prompt: Any, quest: Any, *, color: bool, width: int,
     model_sink: dict[str, str] | None = None,
 ) -> str:
     """Read one opening-intent line, capturing an opening `/model` selection into `model_sink`."""
     while True:
         line = await ask_line_with_slash(
-            prompt, None, change, color=color, width=width, hint=OPENING_HINT)
+            prompt, None, quest, color=color, width=width, hint=OPENING_HINT)
         if line.strip().startswith("/model "):
             if model_sink is not None:
                 model_sink["model"] = line.strip()[len("/model "):].strip()
@@ -702,7 +702,7 @@ async def _read_intent_line(
 
 
 async def _read_opening_message(
-    change: Quest, *, leave_mode: str, banner_shown: bool, color: bool,
+    quest: Quest, *, leave_mode: str, banner_shown: bool, color: bool,
     width: int, editing_mode: str,
     model_sink: dict[str, str] | None = None,
     _prompt_factory: Callable[[], Any] | None = None,
@@ -710,13 +710,13 @@ async def _read_opening_message(
     """Lead with the run header, then the splash (when interactive), then read the
     opening message — so the change identity is the first thing on screen.
     `banner_shown` is True on an interactive entry that should render the splash."""
-    _print_opening(change, leave_mode, interactive=banner_shown, color=color)
+    _print_opening(quest, leave_mode, interactive=banner_shown, color=color)
     make = _prompt_factory or (
-        lambda: Prompt(skills_dir=change.workflow_dir / "skills",
+        lambda: Prompt(skills_dir=quest.workflow_dir / "skills",
                        editing_mode=editing_mode, color=color))
     prompt = make()
     reply = await _read_intent_line(
-        prompt, change, color=color, width=width, model_sink=model_sink)
+        prompt, quest, color=color, width=width, model_sink=model_sink)
     return _normalize_opening_reply(reply)
 
 
@@ -728,22 +728,22 @@ async def _run_cleared_session(
     from imp.cli.signals import InterruptCoordinator
 
     color = should_use_color(sys.stdout)
-    change = Quest.create_draft(
+    quest = Quest.create_draft(
         control, title="", quest_id=new_quest_id(existing_stems=live_stems(control)),
         base_branch=base, origin="draft")
     _session_started = False
     try:
-        print(_run_header_line(change.id, change.title, leave_mode, color=color))
+        print(_run_header_line(quest.id, quest.title, leave_mode, color=color))
         _print_splash_banner(interactive=True)
         term_title = TerminalTitle(
-            sys.stdout, change.id, change.title, initial="idle")
-        prompt = Prompt(skills_dir=change.workflow_dir / "skills",
+            sys.stdout, quest.id, quest.title, initial="idle")
+        prompt = Prompt(skills_dir=quest.workflow_dir / "skills",
                         editing_mode=_editing_mode(control), color=color)
         # A `/model` typed at this reopened prompt lands here; empty when none.
         cleared_model_sink: dict[str, str] = {}
         try:
             reply = await _read_intent_line(
-                prompt, change, color=color, width=_term_width(),
+                prompt, quest, color=color, width=_term_width(),
                 model_sink=cleared_model_sink)
         except (EOFError, KeyboardInterrupt):
             if term_title is not None:
@@ -755,23 +755,23 @@ async def _run_cleared_session(
         opening_text = _normalize_opening_reply(reply)
         # Persist the intent durably so the reopened chat's opening step seeds from
         # quest.json (mirroring the imp new path), surviving any later resume.
-        change.set_seed_opening(opening_text)
+        quest.set_seed_opening(opening_text)
         status = LiveStatus(sys.stdout)
         driver = LiveDriver(
             stream=sys.stdout, color=color, width=_term_width,
             display_width=_display_width, status=status,
-            quest_id=change.id, title=change.title)
+            quest_id=quest.id, title=quest.title)
         coord = InterruptCoordinator()
         solicit = make_interactive_solicit(
-            change, status=status, driver=driver, coord=coord)
+            quest, status=status, driver=driver, coord=coord)
         return await run_session_client(
-            change, driver=driver, coord=coord, solicit=solicit,
+            quest, driver=driver, coord=coord, solicit=solicit,
             status=status,
             leave_mode=leave_mode,
             leave_state=leave_state, title=term_title, model=cleared_model)
     finally:
         if not _session_started:
-            discard_conversation(change)
+            discard_conversation(quest)
 
 
 async def _clear_loop(
@@ -825,29 +825,29 @@ def _select_headless(
 
 
 async def _run_fresh_session(
-    change: Quest, *, args: argparse.Namespace,
+    quest: Quest, *, args: argparse.Namespace,
 ) -> int:
     """Run a freshly-created change (new / materialized backlog) through
     the per-change session daemon, dispatching on headless / interactive."""
     from imp.cli.signals import InterruptCoordinator
 
     _print_run_header(
-        change.id, change.title, "new", color=should_use_color(sys.stdout))
+        quest.id, quest.title, "new", color=should_use_color(sys.stdout))
     headless, auto_headless = _select_headless(args)
     autonomous = bool(getattr(args, "autonomous", False))
     if headless:
         if auto_headless:
             print(f"imp: no tty detected — running headless; resume with "
-                  f"`imp resume {change.id}`", file=sys.stderr)
+                  f"`imp resume {quest.id}`", file=sys.stderr)
         status = LiveStatus(sys.stdout)
         driver = LiveDriver(stream=sys.stdout,
                             color=should_use_color(sys.stdout),
                             width=_term_width, display_width=_display_width, status=status,
-                            quest_id=change.id, title=change.title)
+                            quest_id=quest.id, title=quest.title)
         coord = InterruptCoordinator()
         solicit = make_headless_solicit(getattr(args, "message", None), coord)
         return await run_session_client(
-            change, driver=driver, coord=coord, solicit=solicit,
+            quest, driver=driver, coord=coord, solicit=solicit,
             status=status, non_interactive=True,
             autonomous=autonomous)
 
@@ -856,18 +856,18 @@ async def _run_fresh_session(
         driver = LiveDriver(stream=sys.stdout,
                             color=should_use_color(sys.stdout),
                             width=_term_width, display_width=_display_width, status=status,
-                            quest_id=change.id, title=change.title)
-        if change.seed_opening:
-            driver.seed_opening_intent(change.seed_opening)
+                            quest_id=quest.id, title=quest.title)
+        if quest.seed_opening:
+            driver.seed_opening_intent(quest.seed_opening)
         coord = InterruptCoordinator()
         solicit = make_interactive_solicit(
-            change, status=status, driver=driver, coord=coord)
+            quest, status=status, driver=driver, coord=coord)
         return await run_session_client(
-            change, driver=driver, coord=coord, solicit=solicit,
+            quest, driver=driver, coord=coord, solicit=solicit,
             status=status, leave_state=leave_state,
             autonomous=autonomous)
 
-    return await _clear_loop(change.control_root, first=_first)
+    return await _clear_loop(quest.control_root, first=_first)
 
 
 def _backlog_run_only_flag(args: argparse.Namespace) -> str | None:
@@ -987,7 +987,7 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
     # names it via rename_quest once intent is clear, or the user passes --title.
     title = seed.title if seed.title is not None else ""
     try:
-        change = Quest.create_draft(
+        quest = Quest.create_draft(
             control, title=title, quest_id=quest_id, base_branch=base,
             workflow=wf_arg, origin="draft",
             depends_on=None, seed_opening=None)
@@ -1001,7 +1001,7 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
     show_opening_prompt = _should_prompt_opening(
         seed_text=seed.seed_text, interactive=interactive)
     term_title = TerminalTitle(
-        sys.stdout, change.id, change.title,
+        sys.stdout, quest.id, quest.title,
         initial="idle" if show_opening_prompt else "busy")
 
     # Print the run header before the prompt so erase/reprint causes no layout jump.
@@ -1012,14 +1012,14 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
         try:
             async with prompt_sigint_guard():
                 reply = await _read_opening_message(
-                    change, leave_mode=leave_mode, banner_shown=interactive,
+                    quest, leave_mode=leave_mode, banner_shown=interactive,
                     color=color, width=_term_width(),
                     editing_mode=_editing_mode(control),
                     model_sink=opening_model_sink)
         except (EOFError, KeyboardInterrupt):
             if term_title is not None:
                 term_title.reset()
-            discard_conversation(change)   # drop the just-minted draft on cancel
+            discard_conversation(quest)   # drop the just-minted draft on cancel
             print("imp: cancelled", file=sys.stderr)
             return 130
         header_printed = True
@@ -1031,45 +1031,45 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
     # Persist the finalized intent so it survives any resume (including a restart
     # from an errored transcript). Covers both the positional and interactive
     # forms; an empty/absent reply persists as None/empty (unseeded).
-    change.set_seed_opening(opening_text)
+    quest.set_seed_opening(opening_text)
 
     headless, auto_headless = _select_headless(args)
     if headless:
         if auto_headless:
             print(f"imp: no tty detected — running headless; resume with "
-                  f"`imp resume {change.id}`", file=sys.stderr)
+                  f"`imp resume {quest.id}`", file=sys.stderr)
         if not header_printed:
             _print_run_header(
-                change.id, change.title, leave_mode, color=should_use_color(sys.stdout))
+                quest.id, quest.title, leave_mode, color=should_use_color(sys.stdout))
         status = LiveStatus(sys.stdout)
         driver = LiveDriver(stream=sys.stdout,
                             color=should_use_color(sys.stdout),
                             width=_term_width, display_width=_display_width, status=status,
-                            quest_id=change.id, title=change.title)
+                            quest_id=quest.id, title=quest.title)
         coord = InterruptCoordinator()
         solicit = make_headless_solicit(getattr(args, "message", None), coord)
         return await run_session_client(
-            change, driver=driver, coord=coord, solicit=solicit,
+            quest, driver=driver, coord=coord, solicit=solicit,
             status=status,
             title=term_title,
             non_interactive=True, autonomous=autonomous, model=opening_model)
 
     if not header_printed:
-        _print_opening(change, leave_mode, interactive=interactive, color=color)
+        _print_opening(quest, leave_mode, interactive=interactive, color=color)
 
     async def _first(leave_state: dict[str, str]) -> int:
         status = LiveStatus(sys.stdout)
         driver = LiveDriver(stream=sys.stdout,
                             color=should_use_color(sys.stdout),
                             width=_term_width, display_width=_display_width, status=status,
-                            quest_id=change.id, title=change.title)
-        if change.seed_opening:
-            driver.seed_opening_intent(change.seed_opening)
+                            quest_id=quest.id, title=quest.title)
+        if quest.seed_opening:
+            driver.seed_opening_intent(quest.seed_opening)
         coord = InterruptCoordinator()
         solicit = make_interactive_solicit(
-            change, status=status, driver=driver, coord=coord)
+            quest, status=status, driver=driver, coord=coord)
         return await run_session_client(
-            change, driver=driver, coord=coord, solicit=solicit,
+            quest, driver=driver, coord=coord, solicit=solicit,
             status=status,
             leave_mode=leave_mode,
             leave_state=leave_state, title=term_title, autonomous=autonomous,
@@ -1086,7 +1086,7 @@ def _cmd_chat(args: argparse.Namespace) -> int:
     return anyio.run(functools.partial(_async_cmd_new, leave_mode="chat"), args)
 
 
-def _resume_opens_fresh(change: Quest) -> bool:
+def _resume_opens_fresh(quest: Quest) -> bool:
     """Whether a resume should open a fresh seeded session rather than replay history.
 
     True only for an un-materialized seed draft that has never run a step; a
@@ -1094,19 +1094,19 @@ def _resume_opens_fresh(change: Quest) -> bool:
     replays. Reads the durable per-change fact (State.has_started) from the
     persisted state.json the resume flow already rehydrated -- never a re-scan
     of events.jsonl."""
-    if change.materialized or not change.seed_opening:
+    if quest.materialized or not quest.seed_opening:
         return False
-    return not State.load(change.state_dir).has_started
+    return not State.load(quest.state_dir).has_started
 
 
-def _warn_if_blocked(change: Quest) -> None:
+def _warn_if_blocked(quest: Quest) -> None:
     try:
-        deps = json.loads((change.quest_dir / "quest.json").read_bytes()).get("depends_on", [])
+        deps = json.loads((quest.quest_dir / "quest.json").read_bytes()).get("depends_on", [])
     except (FileNotFoundError, json.JSONDecodeError):
         return
-    ready, unmerged = backlog.readiness(change.control_root, deps)
+    ready, unmerged = backlog.readiness(quest.control_root, deps)
     if not ready:
-        print(f"imp: backlog Quest {change.id} is blocked on unmerged dep(s): "
+        print(f"imp: backlog Quest {quest.id} is blocked on unmerged dep(s): "
               f"{', '.join(unmerged)}; starting anyway.", file=sys.stderr)
 
 
@@ -1124,16 +1124,16 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
     loaded = _load_or_rehydrate(control, quest_id)
     if isinstance(loaded, int):
         return loaded
-    change = loaded
-    if _resume_opens_fresh(change):
-        _warn_if_blocked(change)
-        return await _run_fresh_session(change, args=args)
-    state = State.load(change.state_dir)
+    quest = loaded
+    if _resume_opens_fresh(quest):
+        _warn_if_blocked(quest)
+        return await _run_fresh_session(quest, args=args)
+    state = State.load(quest.state_dir)
     # Persisted status is never `running` (it is derived from the lock at display
     # time); a crashed run is left at its resumable at-rest status (new/paused).
     if state.status not in RESUMABLE:
         print(
-            f"imp: Quest {change.id} status is {state.status!r}; "
+            f"imp: Quest {quest.id} status is {state.status!r}; "
             "nothing to resume",
             file=sys.stderr,
         )
@@ -1144,30 +1144,30 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
     if headless:
         if auto_headless:
             print(f"imp: no tty detected — running headless; resume with "
-                  f"`imp resume {change.id}`", file=sys.stderr)
+                  f"`imp resume {quest.id}`", file=sys.stderr)
         print(_run_header_line(
-            change.id, change.title, "resuming", color=should_use_color(sys.stdout)))
+            quest.id, quest.title, "resuming", color=should_use_color(sys.stdout)))
         status = LiveStatus(sys.stdout)
         driver = LiveDriver(stream=sys.stdout,
                             color=should_use_color(sys.stdout),
                             width=_term_width, display_width=_display_width, status=status,
                             suppress_replay=True,
                             startup_verb="resuming",
-                            quest_id=change.id, title=change.title)
+                            quest_id=quest.id, title=quest.title)
         coord = InterruptCoordinator()
         solicit = make_headless_solicit(getattr(args, "message", None), coord)
         return await run_session_client(
-            change, driver=driver, coord=coord, solicit=solicit,
+            quest, driver=driver, coord=coord, solicit=solicit,
             resume=True, status=status, non_interactive=True, autonomous=autonomous)
     if not getattr(args, "message", None):
-        question = bare_turn_end_question(change)
+        question = bare_turn_end_question(quest)
         if question is not None:
-            return await _resume_inert(change, question, autonomous=autonomous)
+            return await _resume_inert(quest, question, autonomous=autonomous)
 
     # Interactive resume: a thin session-client; the daemon owns the worktree +
     # lock and runs resume prep + the agent loop.
     color = should_use_color(sys.stdout)
-    print(_run_header_line(change.id, change.title, "resuming", color=color))
+    print(_run_header_line(quest.id, quest.title, "resuming", color=color))
     splash_shown = _print_splash_banner(interactive=_is_interactive(
         non_interactive=bool(getattr(args, "non_interactive", False))))
 
@@ -1179,27 +1179,27 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
                             suppress_replay=True,
                             preceded_by_blank=splash_shown,
                             startup_verb="resuming",
-                            quest_id=change.id, title=change.title)
+                            quest_id=quest.id, title=quest.title)
         coord = InterruptCoordinator()
         solicit = make_interactive_solicit(
-            change, status=status, driver=driver, coord=coord)
+            quest, status=status, driver=driver, coord=coord)
         return await run_session_client(
-            change, driver=driver, coord=coord, solicit=solicit,
+            quest, driver=driver, coord=coord, solicit=solicit,
             resume=True, status=status, leave_state=leave_state,
             autonomous=autonomous)
 
-    return await _clear_loop(change.control_root, first=_first)
+    return await _clear_loop(quest.control_root, first=_first)
 
 
 def _cmd_resume(args: argparse.Namespace) -> int:
     return anyio.run(_async_cmd_resume, args)
 
 
-async def _inert_ask_line(change: Quest) -> str | None:
+async def _inert_ask_line(quest: Quest) -> str | None:
     """Read one prompt-toolkit line at inert resume; EOF / Ctrl-C maps to None."""
     prompt = Prompt(
-        skills_dir=change.workflow_dir / "skills",
-        editing_mode=_editing_mode(change.control_root),
+        skills_dir=quest.workflow_dir / "skills",
+        editing_mode=_editing_mode(quest.control_root),
         color=should_use_color(sys.stdout))
     try:
         return await prompt.ask_async(width=_term_width())
@@ -1208,13 +1208,13 @@ async def _inert_ask_line(change: Quest) -> str | None:
 
 
 async def _resume_inert(
-    change: Quest, question: str, *, autonomous: bool = False,
+    quest: Quest, question: str, *, autonomous: bool = False,
 ) -> int:
     """AC8 inert resume: show the pending question, wait for a reply, launch live session."""
     from imp.cli.signals import InterruptCoordinator
 
     color = should_use_color(sys.stdout)
-    print(_run_header_line(change.id, change.title, "resuming", color=color))
+    print(_run_header_line(quest.id, quest.title, "resuming", color=color))
     question = render_inert_question(question, width=_term_width(), color=color)
 
     async def _launch(line: str) -> int:
@@ -1225,27 +1225,27 @@ async def _resume_inert(
                                 suppress_replay=True,
                                 preceded_by_blank=True,
                                 startup_verb="resuming",
-                                quest_id=change.id, title=change.title)
+                                quest_id=quest.id, title=quest.title)
             coord = InterruptCoordinator()
             inner = make_interactive_solicit(
-                change, status=status, driver=driver, coord=coord)
+                quest, status=status, driver=driver, coord=coord)
             solicit = make_buffered_solicit(line, inner)
             return await run_session_client(
-                change, driver=driver, coord=coord, solicit=solicit,
+                quest, driver=driver, coord=coord, solicit=solicit,
                 resume=True, status=status, leave_state=leave_state,
                 autonomous=autonomous)
 
-        return await _clear_loop(change.control_root, first=_first)
+        return await _clear_loop(quest.control_root, first=_first)
 
     return await run_inert_resume(
         question=question,
-        ask_line=lambda: _inert_ask_line(change),
+        ask_line=lambda: _inert_ask_line(quest),
         launch=_launch)
 
 
 def _editing_mode(control_root: Path) -> str:
     """Read editing_mode from the merged config; default to emacs if config is
-    absent or invalid (run_change reports a bad config with full context — don't
+    absent or invalid (run_quest reports a bad config with full context — don't
     double-fail here just to pick a prompt mode)."""
     from imp.providers.effective import load_effective_config
     try:
@@ -1392,8 +1392,8 @@ def _show_newest_plan_rel(control: Path, quest_id: str) -> str | None:
 
 
 def _show_runtime(control: Path, quest_id: str, name: str) -> bytes | None:
-    change = _quest_home(control, quest_id)
-    live = change / "state" / "state.json" if name == "state.json" else change / name
+    quest = _quest_home(control, quest_id)
+    live = quest / "state" / "state.json" if name == "state.json" else quest / name
     if live.is_file():
         return live.read_bytes()
     if name == "state.json":
@@ -1501,10 +1501,10 @@ def _unstarted_backlog_meta(control: Path, quest_id: str) -> dict[str, Any] | No
     if meta.get("materialized", True):
         return None  # materialized homes are never Backlog; skip the event-log read
     try:
-        change = Quest.load(control, quest_id)
+        quest = Quest.load(control, quest_id)
     except (LoadError, LoadErrors):
         return None
-    conversed = _first_user_message(list(change.event_log().read())) is not None
+    conversed = _first_user_message(list(quest.event_log().read())) is not None
     if not _is_backlog_home(meta, conversed=conversed,
                             lock_live=lambda: lock_is_live(cdir / "lock")):
         return None
@@ -1536,7 +1536,7 @@ def _backlog_card(meta: dict[str, Any], control: Path, *, now: datetime) -> list
     return lines
 
 
-def _change_card(control: Path, quest_id: str, *, now: datetime) -> list[str]:
+def _quest_card(control: Path, quest_id: str, *, now: datetime) -> list[str]:
     row = _row_for_id(control, quest_id)
     if row is None:
         return []
@@ -1576,7 +1576,7 @@ def _detail_card(control: Path, quest_id: str, *, now: datetime) -> list[str]:
     meta = _unstarted_backlog_meta(control, quest_id)
     if meta is not None:
         return _backlog_card(meta, control, now=now)
-    return _change_card(control, quest_id, now=now)
+    return _quest_card(control, quest_id, now=now)
 
 
 def _cmd_list(args: argparse.Namespace) -> int:
@@ -1674,11 +1674,11 @@ def _load_events_for_id(control: Path, quest_id: str) -> list[dict[str, Any]] | 
     removal), so the only overlap is a crash mid-sequence where worktree-first
     harmlessly returns identical content."""
     try:
-        change = Quest.load(control, quest_id)
+        quest = Quest.load(control, quest_id)
     except LoadError:
-        change = None
-    if change is not None:
-        return list(change.event_log().read())
+        quest = None
+    if quest is not None:
+        return list(quest.event_log().read())
     raw = archive_read.read_events(control, quest_id)
     if raw is None:
         return None
@@ -1730,7 +1730,7 @@ async def _pick_log_target(control: Path) -> str | int:
     selected_index = next(
         (i for i, r in enumerate(rows) if r[0] == default_id), 0)
 
-    return await _pick_change_target(
+    return await _pick_quest_target(
         control=control,
         rows=rows,
         header="Show log for which Quest?  (↑/↓ to move · enter to select · q to cancel)",
@@ -2173,10 +2173,10 @@ def _load_or_rehydrate(control: Path, quest_id: str) -> Quest | int:
         print(f"imp: {e}", file=sys.stderr)
         return 2
     except (LoadError, LoadErrors):
-        change = _rehydrate_resumable(control, quest_id)
-        if change is None:
+        quest = _rehydrate_resumable(control, quest_id)
+        if quest is None:
             return _resume_gone(control, quest_id)
-        return change
+        return quest
 
 
 # Spec §10: in-flight statuses; completed Quests live in the archive.
@@ -2286,12 +2286,12 @@ def _status_row(quest_id: str, state_json: bytes, quest_json: bytes,
 
 def _row_for_id(control: Path, quest_id: str) -> _Row | None:
     cdir = _quest_home(control, quest_id)
-    # archive_read returns bytes | None; the live change-home branch always finds
+    # archive_read returns bytes | None; the live quest-home branch always finds
     # the files. Annotate so the None-guard below stays reachable (not dead code).
     state_json: bytes | None
     quest_json: bytes | None
     if (cdir / "quest.json").exists():
-        # A change home mid-creation has quest.json written but state.json not
+        # A quest home mid-creation has quest.json written but state.json not
         # yet (Quest.create is not atomic across the two files). The daemon's
         # scan loop can hit that window, so tolerate it like _scan_quest_homes
         # rather than crashing the whole listing.
@@ -2404,7 +2404,7 @@ def _abandon_match_rows(control: Path, token: str) -> list[_Row]:
     return [r for r in _abandon_rows(control) if token in r[0]]
 
 
-def _past_change_count(control: Path) -> int:
+def _past_quest_count(control: Path) -> int:
     return len(_completed_rows(control))
 
 
@@ -2414,7 +2414,7 @@ def _interactive() -> bool:
 
 def _resume_picker_empty(control: Path) -> int:
     print("Nothing to resume.")
-    past = _past_change_count(control)
+    past = _past_quest_count(control)
     if past:
         plural = "s" if past != 1 else ""
         print(pal.ansi(
@@ -2438,7 +2438,7 @@ def _resume_picker_non_tty(rows: list[_Row]) -> str | int:
     return 2
 
 
-async def _pick_change_target(
+async def _pick_quest_target(
     *, control: Path, rows: list[_Row], header: str,
     on_empty: Callable[[], int],
     on_non_tty: Callable[[list[_Row]], str | int] | None = None,
@@ -2471,7 +2471,7 @@ _RESUME_PICKER_HEADER = (
 
 
 async def _pick_resume_target(control: Path, *, non_interactive: bool) -> str | int:
-    return await _pick_change_target(
+    return await _pick_quest_target(
         control=control,
         rows=_resumable_rows(control),
         header=_RESUME_PICKER_HEADER,
@@ -2488,7 +2488,7 @@ async def _resolve_resume_target(
         return await _pick_resume_target(control, non_interactive=non_interactive)
     matches = _resumable_match_rows(control, token)
     if len(matches) >= 2:
-        return await _pick_change_target(
+        return await _pick_quest_target(
             control=control,
             rows=matches,
             header=_RESUME_PICKER_HEADER,
@@ -2531,18 +2531,18 @@ def _abandon(control: Path, quest_id: str, *, yes: bool = False) -> int:
     (git refuses to delete a branch checked out in a worktree). Idempotent /
     crash-tolerant: re-running after any mid-sequence crash converges."""
     try:
-        change = Quest.load(control, quest_id)
+        quest = Quest.load(control, quest_id)
     except (LoadError, LoadErrors):
-        # No live or un-materialized change-home: Quest.load failed because the
+        # No live or un-materialized quest-home: Quest.load failed because the
         # home directory is absent (already fully torn down, or never existed).
         # Idempotent teardown — reap a possibly-orphaned branch and exit 0.
         worktree.delete_branch(control, quest_id)
         print(f"Quest {quest_id} already gone; ensured branch imp/{quest_id} is removed.")
         return 0
 
-    token = change.id
+    token = quest.id
     if not yes and _interactive():
-        if change.materialized:
+        if quest.materialized:
             print(f"Abandon {token}? This removes its worktree, branch, and state.")
         else:
             print(f"Abandon {token}? This permanently discards it.")
@@ -2558,7 +2558,7 @@ def _abandon(control: Path, quest_id: str, *, yes: bool = False) -> int:
             print(f"Abandoned {token}.")
             return 0
     try:
-        tear_down_change(change)
+        tear_down_quest(quest)
     except LockHeld as e:
         print(f"imp: Quest {quest_id} is running (pid {e.held_by_pid or '?'}); "
               f"stop it before abandoning", file=sys.stderr)
@@ -2594,7 +2594,7 @@ _ABANDON_PICKER_HEADER = (
 
 
 async def _pick_abandon_target(control: Path) -> str | int:
-    return await _pick_change_target(
+    return await _pick_quest_target(
         control=control,
         rows=_abandon_rows(control),
         header=_ABANDON_PICKER_HEADER,
@@ -2614,7 +2614,7 @@ async def _pick_abandon_matches(
               file=sys.stderr)
         return 2
 
-    return await _pick_change_target(
+    return await _pick_quest_target(
         control=control,
         rows=rows,
         header=_ABANDON_PICKER_HEADER,
@@ -2635,7 +2635,7 @@ def _show_picker_empty() -> int:
 
 def _show_picker_non_tty(rows: list[_Row]) -> int:
     # Defensive parity only: _cmd_show handles the non-tty no-token case
-    # directly (needs-a-change-id error), so _pick_show_target is invoked
+    # directly (needs-a-quest-id error), so _pick_show_target is invoked
     # solely on an interactive tty and this branch is never reached.
     print("imp: 'imp show' needs a Quest id — run 'imp list' for an overview",
           file=sys.stderr)
@@ -2652,7 +2652,7 @@ def _show_all_rows(control: Path) -> list[_Row]:
 
 
 async def _pick_show_target(control: Path) -> str | int:
-    return await _pick_change_target(
+    return await _pick_quest_target(
         control=control,
         rows=_show_all_rows(control),
         header=_SHOW_PICKER_HEADER,
@@ -2685,7 +2685,7 @@ async def _pick_show_matches(control: Path, matches: list[str]) -> str | int:
                 name_width=name_w), file=sys.stderr)
         return 2
 
-    return await _pick_change_target(
+    return await _pick_quest_target(
         control=control,
         rows=rows,
         header=_SHOW_PICKER_HEADER,
@@ -2733,7 +2733,7 @@ def _cmd_abandon(args: argparse.Namespace) -> int:
 def _cmd_edit(args: argparse.Namespace) -> int:
     control = _control_root()
     quest_id = _resolve_id(control, args.token)
-    change = Quest.load(control, quest_id)
+    quest = Quest.load(control, quest_id)
 
     zone_change = args.backlog or args.active
     dep_change = args.depends_on is not None or args.clear_deps
@@ -2742,24 +2742,24 @@ def _cmd_edit(args: argparse.Namespace) -> int:
               "or --depends-on/--clear-deps", file=sys.stderr)
         return 2
 
-    if zone_change and change.materialized:
+    if zone_change and quest.materialized:
         print(f"imp: {quest_id} is already built; zone moves apply to "
               "un-materialized Quests only (use abandon/pause instead)",
               file=sys.stderr)
         return 2
 
-    if args.title is not None and args.title != change.title:
-        old_title = change.title
-        change.rename(args.title, log=change.event_log())
+    if args.title is not None and args.title != quest.title:
+        old_title = quest.title
+        quest.rename(args.title, log=quest.event_log())
         print(f'title: "{old_title}" → "{args.title}"')
     if args.backlog:
-        change.set_origin("idea")
+        quest.set_origin("idea")
     elif args.active:
-        change.set_origin("draft")
+        quest.set_origin("draft")
     if args.clear_deps:
-        change.set_depends_on([])
+        quest.set_depends_on([])
     elif args.depends_on is not None:
-        change.set_depends_on(args.depends_on)
+        quest.set_depends_on(args.depends_on)
     return 0
 
 

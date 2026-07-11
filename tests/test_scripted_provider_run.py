@@ -7,7 +7,7 @@ from pathlib import Path
 import anyio
 import pytest
 
-from imp.engine.executor import RunResult, run_change
+from imp.engine.executor import RunResult, run_quest
 from imp.engine.quest import Quest
 from tests.conftest import _git, _init_repo, write_agent_md
 
@@ -76,7 +76,7 @@ def test_scripted_tool_calls_produce_real_commit_and_sentinel(
                        quest_id="2026-06-12-aaa111", base_branch="main")
 
     events: list[dict] = []
-    result = anyio.run(functools.partial(run_change, ch, on_event=events.append))
+    result = anyio.run(functools.partial(run_quest, ch, on_event=events.append))
     assert result is RunResult.COMPLETED
 
     worktree = tmp_path / ".imp" / "worktrees" / "2026-06-12-aaa111"

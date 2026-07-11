@@ -9,10 +9,10 @@ output:
   has_minor_findings: {type: bool}
 ---
 
-You are reviewing the spec for this change.
+You are reviewing the spec for this quest.
 
-Quest title (user's starting intent): `{{ change.title }}`
-Spec file: `{{ change.home }}/artifacts/spec/{{ change.id }}.md`
+Quest title (user's starting intent): `{{ quest.title }}`
+Spec file: `{{ quest.home }}/artifacts/spec/{{ quest.id }}.md`
 
 ## Your Role
 
@@ -20,7 +20,7 @@ Verify the spec is complete, consistent, and ready for implementation planning. 
 
 ## Process
 
-1. Read `{{ change.home }}/artifacts/spec/{{ change.id }}.md`.
+1. Read `{{ quest.home }}/artifacts/spec/{{ quest.id }}.md`.
 2. Use `query_events` to read prior brainstorm turns — the provenance record of what was said, not current state — if you need to verify the spec reflects the user's clarifications.
 3. Evaluate against the categories below.
 4. Produce a severity-classified findings report and call `complete_step`.
@@ -34,7 +34,7 @@ checklist — do the real reasoning:
   system (file paths, current behavior, function or type names) — verify it against the
   actual source with `read_file`/`grep`. A confident claim that is false or unverifiable
   misleads planning even if the spec reads cleanly.
-- **Would building this satisfy the intent?** Does the spec actually address the change
+- **Would building this satisfy the intent?** Does the spec actually address the quest
   title and the brainstorm clarifications, end to end?
 - **Could you build it without guessing?** Are the acceptance criteria concrete enough
   that you'd know whether you'd met them? Is anything ambiguous enough that two builders

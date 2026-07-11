@@ -23,7 +23,7 @@ def _make_worktree(control: Path, slug: str, status: str = "paused") -> None:
         json.dumps({"id": slug, "title": slug, "base_branch": "main",
                     "created_at": T0, "layout_version": LAYOUT_VERSION}))
     events = [
-        {"id": "1", "agent_id": None, "type": "change_created",
+        {"id": "1", "agent_id": None, "type": "quest_created",
          "timestamp": T0, "payload": {"title": "add auth"}},
         {"id": "2", "agent_id": None, "type": "step_started", "timestamp": T0,
          "payload": {"step": "spec", "kind": "agent", "phase": "design",

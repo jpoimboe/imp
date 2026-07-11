@@ -1,6 +1,6 @@
 import imp.remote.session.attach as attach_mod
 from imp.engine import merge_queue as mq
-from imp.engine.abandon import tear_down_change
+from imp.engine.abandon import tear_down_quest
 from imp.engine.quest import Quest
 from tests.conftest import _seed_control
 
@@ -13,9 +13,9 @@ def test_abandon_head_removes_and_wakes_next(tmp_path, monkeypatch) -> None:
     mq.enqueue_if_absent(tmp_path, "bbb", "main")
     woken: list = []
     monkeypatch.setattr(attach_mod, "spawn_session_daemon",
-                        lambda change, **kw: woken.append(change.id))
+                        lambda quest, **kw: woken.append(quest.id))
 
-    tear_down_change(a)
+    tear_down_quest(a)
 
     assert all(e["quest_id"] != "aaa" for e in mq.read(tmp_path))   # removed
     assert woken == ["bbb"]                                          # next head woken
@@ -27,7 +27,7 @@ def test_abandon_not_in_queue_is_noop(tmp_path, monkeypatch) -> None:
     woken: list = []
     monkeypatch.setattr(attach_mod, "spawn_session_daemon", lambda *a, **k: woken.append(1))
     # Not enqueued — pop_and_wake should be a no-op, no wake
-    tear_down_change(ch)
+    tear_down_quest(ch)
     assert mq.read(tmp_path) == []
     assert woken == []
 
@@ -41,7 +41,7 @@ def test_abandon_non_head_removes_without_waking(tmp_path, monkeypatch) -> None:
     woken: list = []
     monkeypatch.setattr(attach_mod, "spawn_session_daemon", lambda *a, **k: woken.append(1))
 
-    tear_down_change(b)
+    tear_down_quest(b)
 
     assert [e["quest_id"] for e in mq.read(tmp_path)] == ["aaa"]    # only b removed
     assert woken == []                                              # head untouched

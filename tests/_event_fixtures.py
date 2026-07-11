@@ -20,7 +20,7 @@ class _TTY(io.StringIO):
 
 def _two_phase_events():
     return [
-        {"type": "change_created", "agent_id": None, "payload": {"title": "t"},
+        {"type": "quest_created", "agent_id": None, "payload": {"title": "t"},
          "id": "e0", "timestamp": "2026-06-03T00:00:00+00:00"},
         {"type": "step_started", "agent_id": None,
          "payload": {"step": "draft", "kind": "branch", "phase": "spec"},
@@ -52,7 +52,7 @@ def ev(eid: str, etype: str, agent_id: str | None = None, **payload: Any) -> dic
 
 # A minimal change -> step (phase derived) -> thinking -> complete sequence.
 SAMPLE: list[dict[str, Any]] = [
-    ev("1", "change_created", quest_id=1, title="x"),
+    ev("1", "quest_created", quest_id=1, title="x"),
     ev("2", "step_started", step="spec", kind="agent", phase="design",
        model="m", provider="anthropic"),
     ev("3", "thinking", agent_id="step:design/spec", content="hmm"),

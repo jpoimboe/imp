@@ -12,7 +12,7 @@ from imp.engine import archive
 def test_row_for_id_from_archive(tmp_path: Path) -> None:
     events = tmp_path / "e.jsonl"
     events.write_text(
-        '{"timestamp":"2026-06-05T00:00:00+00:00","type":"change_created",'
+        '{"timestamp":"2026-06-05T00:00:00+00:00","type":"quest_created",'
         '"payload":{}}\n')
     cj = tmp_path / "c.json"
     cj.write_text(json.dumps({

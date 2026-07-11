@@ -161,7 +161,7 @@ def test_renamed_chat_leave_saves(tmp_path: Path) -> None:
     _seed_control(tmp_path)
     ch = _draft(tmp_path, "rn1", exchange=True)
     ch.event_log().append(
-        agent_id=None, type="change_renamed",
+        agent_id=None, type="quest_renamed",
         payload={"id": "rn1", "old_title": "D", "new_title": "Real design"})
     assert leave_control_action(ch, "chat", None) == "save"
 
@@ -170,25 +170,25 @@ def test_renamed_chat_with_clear_still_archives(tmp_path: Path) -> None:
     _seed_control(tmp_path)
     ch = _draft(tmp_path, "rn2", exchange=True)
     ch.event_log().append(
-        agent_id=None, type="change_renamed",
+        agent_id=None, type="quest_renamed",
         payload={"id": "rn2", "old_title": "D", "new_title": "Real design"})
     assert leave_control_action(ch, "chat", "clear") == "archive"
 
 
-def test_was_renamed_true_for_change_renamed_event() -> None:
-    assert _was_renamed(_Log([{"type": "change_renamed"}])) is True
+def test_was_renamed_true_for_quest_renamed_event() -> None:
+    assert _was_renamed(_Log([{"type": "quest_renamed"}])) is True
 
 
 def test_zero_exchange_renamed_chat_discards(tmp_path: Path) -> None:
     _seed_control(tmp_path)
     ch = _draft(tmp_path, "rn3", exchange=False)
     ch.event_log().append(
-        agent_id=None, type="change_renamed",
+        agent_id=None, type="quest_renamed",
         payload={"id": "rn3", "old_title": "D", "new_title": "Real design"})
     assert leave_control_action(ch, "chat", None) == "discard"
 
 
-def test_was_renamed_false_without_change_renamed_event() -> None:
+def test_was_renamed_false_without_quest_renamed_event() -> None:
     log = _Log([
         {"type": "opening_intent"},
         {"type": "user_message"},

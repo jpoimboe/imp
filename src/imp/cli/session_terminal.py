@@ -8,7 +8,7 @@ injected attach thunk), streams the daemon's events into a live event renderer
 gate by soliciting one reply and sending it back as an input frame. It returns
 when the daemon's run reaches a terminal state and drops the socket. The CLI flip
 (a later plan) builds the attach thunk, the LiveDriver, the InterruptCoordinator,
-and the solicit callback, and replaces the in-process run_change call in
+and the solicit callback, and replaces the in-process run_quest call in
 `imp new` / `imp resume` with this loop.
 """
 from __future__ import annotations
@@ -74,7 +74,7 @@ async def run_terminal_client(
             gate_send.send_nowait(prompt)
             if title is not None:
                 title.idle()
-        elif etype == "change_renamed" and not replay:
+        elif etype == "quest_renamed" and not replay:
             if title is not None:
                 title.update_name((event.get("payload") or {})["new_title"])
         elif title is not None and not replay:
@@ -168,7 +168,7 @@ async def run_terminal_client(
                     except EOFError:
                         # A non-tty solicit (prompt_toolkit add_reader on a piped
                         # stdin) or Ctrl-D at a real tty surfaces as EOFError.
-                        # Treat it as a deliberate detach: leave the change paused.
+                        # Treat it as a deliberate detach: leave the quest paused.
                         coord.leave_reason = "ctrl-d"
                         coord.escalation_event.set()
 

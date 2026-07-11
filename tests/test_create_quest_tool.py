@@ -23,7 +23,7 @@ def _make(tmp_path: Path) -> tuple[Quest, State]:
 def _ctx(ch: Quest, state: State | None) -> ToolContext:
     ctx = ToolContext(project_root=ch.project_root,
                       events_path=ch.events_path)
-    ctx.change = ch
+    ctx.quest = ch
     ctx.change_state = state
     ctx.event_log = ch.event_log()
     ctx.agent_id = "step:finalize"
@@ -61,7 +61,7 @@ def test_create_quest_writes_quest_home_and_emits_event(tmp_path: Path) -> None:
     assert meta["depends_on"] == [ch.id]
 
     parent_events = [e for e in ch.event_log().read()
-                     if e["type"] == "change_created"
+                     if e["type"] == "quest_created"
                      and e["payload"].get("kind") == "backlog"]
     assert len(parent_events) == 1
     assert parent_events[0]["payload"]["id"] == new_id

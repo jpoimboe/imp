@@ -82,7 +82,7 @@ async def bash(
     # (and no rename authority) and fall back to the frozen quest_context snapshot.
     # quest_context is a render-time snapshot that rename_quest never updates, so
     # reading it here would leak a stale (empty name-on-intent) title.
-    src = ctx.change or ctx.quest_context
+    src = ctx.quest or ctx.quest_context
     eng = engine_env(
         project_root=ctx.project_root,
         quest_id=src.id if src else "",

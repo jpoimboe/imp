@@ -5,10 +5,10 @@ from imp.cli.render_text import render_tree
 from tests._event_fixtures import ev
 
 
-def test_change_renamed_appends_a_rename_node_with_the_title() -> None:
+def test_quest_renamed_appends_a_rename_node_with_the_title() -> None:
     tree = nv.build_tree([
-        ev("1", "change_created", quest_id=1, title=""),
-        ev("2", "change_renamed", agent_id="a", id=1, old_title="",
+        ev("1", "quest_created", quest_id=1, title=""),
+        ev("2", "quest_renamed", agent_id="a", id=1, old_title="",
            new_title="Add version flag"),
     ])
     renames = [c for c in tree.root.children if isinstance(c, nv.RenameNode)]
@@ -20,16 +20,16 @@ def test_change_renamed_appends_a_rename_node_with_the_title() -> None:
 def test_partial_rename_event_appends_no_node() -> None:
     # A legacy/partial event missing new_title leaves the transcript untouched.
     tree = nv.build_tree([
-        ev("1", "change_created", quest_id=1, title="x"),
-        ev("2", "change_renamed", agent_id="a", id=1, old_title="x"),
+        ev("1", "quest_created", quest_id=1, title="x"),
+        ev("2", "quest_renamed", agent_id="a", id=1, old_title="x"),
     ])
     assert not any(isinstance(c, nv.RenameNode) for c in tree.root.children)
 
 
 def test_rename_line_renders_agent_aside_with_set_name() -> None:
     tree = nv.build_tree([
-        ev("1", "change_created", quest_id=1, title=""),
-        ev("2", "change_renamed", agent_id="a", id=1, old_title="",
+        ev("1", "quest_created", quest_id=1, title=""),
+        ev("2", "quest_renamed", agent_id="a", id=1, old_title="",
            new_title="Add version flag"),
     ])
     body = list(render_tree(tree, full=False, color=False, width=80))
@@ -38,8 +38,8 @@ def test_rename_line_renders_agent_aside_with_set_name() -> None:
 
 def test_rename_line_color_bullet_and_name_yellow() -> None:
     tree = nv.build_tree([
-        ev("1", "change_created", quest_id=1, title=""),
-        ev("2", "change_renamed", agent_id="a", id=1, old_title="",
+        ev("1", "quest_created", quest_id=1, title=""),
+        ev("2", "quest_renamed", agent_id="a", id=1, old_title="",
            new_title="Add version flag"),
     ])
     body = list(render_tree(tree, full=False, color=True, width=80))
@@ -51,8 +51,8 @@ def test_rename_line_color_bullet_and_name_yellow() -> None:
 def test_rename_line_bullet_and_name_are_wordmark_under_dark_theme() -> None:
     from imp.cli import palette as pal
     tree = nv.build_tree([
-        ev("1", "change_created", quest_id=1, title=""),
-        ev("2", "change_renamed", agent_id="a", id=1, old_title="",
+        ev("1", "quest_created", quest_id=1, title=""),
+        ev("2", "quest_renamed", agent_id="a", id=1, old_title="",
            new_title="Add version flag"),
     ])
     try:
@@ -69,14 +69,14 @@ def test_rename_line_bullet_and_name_are_wordmark_under_dark_theme() -> None:
 
 
 def test_rename_renders_after_narration_in_sdk_order() -> None:
-    # SDK-path log order is [change_renamed, llm_response(prose), tool_call]; the
+    # SDK-path log order is [quest_renamed, llm_response(prose), tool_call]; the
     # built tree must place the narration (AgentTextNode) BEFORE the rename effect
     # line (RenameNode) within their container.
     tree = nv.build_tree([
-        ev("1", "change_created", quest_id=1, title=""),
+        ev("1", "quest_created", quest_id=1, title=""),
         ev("2", "step_started", step="spec", kind="agent", phase="design",
            model="m", provider="anthropic"),
-        ev("3", "change_renamed", agent_id="step:design/spec", id=1,
+        ev("3", "quest_renamed", agent_id="step:design/spec", id=1,
            old_title="", new_title="Order the rename"),
         ev("4", "llm_response", agent_id="step:design/spec", provider="anthropic",
            model="m", stop_reason="end_turn", usage={},
@@ -101,10 +101,10 @@ def test_rename_without_narration_flushes_at_step_boundary() -> None:
     # A rename with no following llm_response before the step ends still produces
     # exactly one RenameNode, flushed into the step at the step_completed boundary.
     tree = nv.build_tree([
-        ev("1", "change_created", quest_id=1, title=""),
+        ev("1", "quest_created", quest_id=1, title=""),
         ev("2", "step_started", step="spec", kind="agent", phase="design",
            model="m", provider="anthropic"),
-        ev("3", "change_renamed", agent_id="step:design/spec", id=1,
+        ev("3", "quest_renamed", agent_id="step:design/spec", id=1,
            old_title="", new_title="Renamed early"),
         ev("4", "step_completed", step="spec", kind="agent",
            action={"verb": "continue"}, var_mutations={}),
@@ -116,12 +116,12 @@ def test_rename_without_narration_flushes_at_step_boundary() -> None:
 
 
 def test_two_renames_before_flush_coalesce_to_latest() -> None:
-    # Two change_renamed events before any flush yield a single RenameNode
+    # Two quest_renamed events before any flush yield a single RenameNode
     # carrying the latest title (the stash holds one; the second replaces it).
     tree = nv.build_tree([
-        ev("1", "change_created", quest_id=1, title=""),
-        ev("2", "change_renamed", agent_id="a", id=1, old_title="", new_title="First"),
-        ev("3", "change_renamed", agent_id="a", id=1, old_title="First",
+        ev("1", "quest_created", quest_id=1, title=""),
+        ev("2", "quest_renamed", agent_id="a", id=1, old_title="", new_title="First"),
+        ev("3", "quest_renamed", agent_id="a", id=1, old_title="First",
            new_title="Second"),
     ])
     renames = [c for c in tree.root.children if isinstance(c, nv.RenameNode)]

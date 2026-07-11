@@ -35,11 +35,11 @@ def test_resumable_rows_includes_backlog_rows(monkeypatch, tmp_path: Path) -> No
     assert [r[0] for r in out] == ["s1"]
 
 
-def test_past_change_count_counts_completed_rows(monkeypatch, tmp_path: Path) -> None:
+def test_past_quest_count_counts_completed_rows(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setattr(
         m, "_completed_rows",
         lambda control: [_row("x", "completed", ""), _row("y", "abandoned", "")])
-    assert m._past_change_count(tmp_path) == 2
+    assert m._past_quest_count(tmp_path) == 2
 
 
 def _git_init(root: Path) -> None:
@@ -54,7 +54,7 @@ def _archive_with_last_ts(control: Path, cid: str, last_ts: str) -> None:
     events = control / f"{cid}.jsonl"
     events.write_bytes((
         f'{{"id":"{cid}-e0","timestamp":"2026-06-01T00:00:00+00:00",'
-        f'"type":"change_created","payload":{{"id":"{cid}"}}}}\n'
+        f'"type":"quest_created","payload":{{"id":"{cid}"}}}}\n'
         f'{{"id":"{cid}-e1","timestamp":"{last_ts}",'
         '"type":"step_started","payload":{"step":"plan-writer"}}\n'
     ).encode())

@@ -31,7 +31,7 @@ def test_rehydrate_restores_loadable_draft_from_archive(tmp_path: Path) -> None:
     state = State.load(loaded.state_dir)
     assert state.status == "paused"  # the left-conversation resting status
     events = (quest_dir / "events.jsonl").read_bytes()
-    assert b"change_created" in events  # the original conversation events survive
+    assert b"quest_created" in events  # the original conversation events survive
 
 
 def test_rehydrate_refuses_to_clobber_existing_home(tmp_path: Path) -> None:

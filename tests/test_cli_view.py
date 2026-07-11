@@ -56,8 +56,8 @@ def test_resume_accepts_merge_blocked_status(tmp_path, monkeypatch) -> None:
 
     called: list[str] = []
 
-    async def _fake_run_session_client(change, **kwargs) -> int:
-        called.append(change.id)
+    async def _fake_run_session_client(quest, **kwargs) -> int:
+        called.append(quest.id)
         return 0
 
     monkeypatch.chdir(tmp_path)
@@ -85,8 +85,8 @@ def test_resume_accepts_crashed_at_rest_status(tmp_path, monkeypatch) -> None:
 
     called: list[str] = []
 
-    async def _fake_run_session_client(change, **kwargs) -> int:
-        called.append(change.id)
+    async def _fake_run_session_client(quest, **kwargs) -> int:
+        called.append(quest.id)
         return 0
 
     monkeypatch.chdir(tmp_path)
@@ -112,7 +112,7 @@ def test_cli_log_pipes_through_narrative(
 
     Constructs a minimal Quest directory by hand (no engine spinup) and
     invokes ``main([..])`` directly.  The narrative view renders
-    change_created as the workflow header "#<slug>  <title>" and phase_started
+    quest_created as the workflow header "#<slug>  <title>" and phase_started
     as the phase name — no raw JSON braces.
     """
     import imp.cli.main as m
@@ -128,7 +128,7 @@ def test_cli_log_pipes_through_narrative(
         json.dumps({
             "id": "e1", "agent_id": None,
             "timestamp": "2026-05-27T10:00:00+00:00",
-            "type": "change_created",
+            "type": "quest_created",
             "payload": {"title": "smoke"},
         }) + "\n"
         + json.dumps({
@@ -172,7 +172,7 @@ def test_imp_log_skips_malformed_lines_in_events_jsonl(
         json.dumps({
             "id": "e1", "agent_id": None,
             "timestamp": "2026-05-27T10:00:00+00:00",
-            "type": "change_created",
+            "type": "quest_created",
             "payload": {"title": "smoke"},
         }) + "\n"
         + "this is not json\n"
@@ -205,7 +205,7 @@ def test_cli_log_subprocess_no_color_on_pipe(tmp_path: Path) -> None:
 
     Covers the ``__main__.py → _cmd_log`` wiring, ``should_use_color`` on a
     non-tty stream, and the real ``sys.exit`` path.  The narrative view renders
-    change_created and phase_started as the phase name."""
+    quest_created and phase_started as the phase name."""
     from tests.conftest import _seed_control
 
     _seed_control(tmp_path)
@@ -221,7 +221,7 @@ def test_cli_log_subprocess_no_color_on_pipe(tmp_path: Path) -> None:
         json.dumps({
             "id": "e1", "agent_id": None,
             "timestamp": "2026-05-27T10:00:00+00:00",
-            "type": "change_created",
+            "type": "quest_created",
             "payload": {"title": "sub"},
         }) + "\n"
         + json.dumps({
@@ -314,7 +314,7 @@ def test_cmd_log_auto_picks_latest_by_mtime(
             json.dumps({
                 "id": "e1", "agent_id": None,
                 "timestamp": "2026-05-27T10:00:00+00:00",
-                "type": "change_created",
+                "type": "quest_created",
                 "payload": {"title": title},
             }) + "\n"
             # A step renders the phase name (the title banner is gone), so use a
@@ -457,7 +457,7 @@ def test_log_picker_rows_include_backlog(
         captured["rows"] = rows
         return 2
 
-    monkeypatch.setattr(m, "_pick_change_target", _fake_picker)
+    monkeypatch.setattr(m, "_pick_quest_target", _fake_picker)
     import anyio
     anyio.run(m._pick_log_target, tmp_path)
     assert any(r[0] == "2026-06-16-bkg111" for r in captured["rows"])
