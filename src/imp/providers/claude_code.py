@@ -837,6 +837,13 @@ def _wrap_one(
                 state.complete_step_called = True
                 state.complete_step_args = args
                 return _tool_response("step complete", is_error=False)
+            if name == "load_skill" and state.flush_llm_group is not None:
+                # Commit any accumulated turn prose as an llm_response BEFORE
+                # load_skill appends its skill_load event from inside async_invoke,
+                # so the event log lands narration-then-load (parity with the eager
+                # sub_agent flush above). No-ops when no llm group is open; None
+                # until _run assigns the closure (pre-loop).
+                await state.flush_llm_group()
             tuid = args.get("__tool_use_id__", "")
             clean_args = {k: v for k, v in args.items()
                           if not (k.startswith("__") and k.endswith("__"))}
