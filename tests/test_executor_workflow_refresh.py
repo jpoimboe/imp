@@ -440,7 +440,6 @@ def test_refresh_sources_from_control_root_not_worktree(tmp_path: Path) -> None:
     (wt_wf / "agents").mkdir(parents=True)
     (wt_wf / "agents" / "writer.md").write_text("worktree-divergent\n")
     (wt_wf / "workflow.yaml").write_text("name: WORKTREE-EDIT\n")
-    (wt / "imp" / "project.yaml").write_text("default-workflow: imp\n")
     change.project_root = wt
 
     assert _refresh_workflow_snapshot(change) is False   # initial copy, no flag
@@ -458,7 +457,6 @@ def test_refresh_ignores_worktree_edits_stays_noop(tmp_path: Path) -> None:
     wt_wf = wt / "imp" / "workflows" / "imp"
     wt_wf.mkdir(parents=True)
     (wt_wf / "workflow.yaml").write_text("name: v1-worktree\n")
-    (wt / "imp" / "project.yaml").write_text("default-workflow: imp\n")
     change.project_root = wt
 
     assert _refresh_workflow_snapshot(change) is False   # initial copy from control
