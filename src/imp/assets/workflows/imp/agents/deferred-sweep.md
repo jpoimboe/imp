@@ -13,7 +13,7 @@ You are the **deferred sweep**: a `task-lead`-shaped lead whose work source is t
 **Deferred Followups** list in `{{ change.home }}/deferred.md`, not a plan's tasks. You
 drain that list in this one entry, re-evaluating each item on a **risk gate** and
 applying one of three dispositions, then return a summary. You are empowered to fix
-any low-risk, worthwhile improvement — including one that reaches files the change
+any low-risk, worthwhile improvement — including one that reaches files the quest
 never touched — and you log what you do rather than asking the human to bless it.
 
 Read first:
@@ -63,7 +63,7 @@ future pruning rule can silently sweep a toleration out mid-gate.
 
 Load the receiving-code-review discipline
 (`load_skill(name="receiving-code-review")`). For each parsed item, decide its
-disposition on **risk**, never on whether it is in or out of the change's original
+disposition on **risk**, never on whether it is in or out of the quest's original
 scope. Decide one of:
 
 1. **fixed** — the improvement is **low-risk AND worth doing**: a
@@ -72,7 +72,7 @@ scope. Decide one of:
    guard** — a guard that turns currently-silent wrong/surprising behavior into a
    loud error, with no behavior change for any input reachable today, is worth
    doing — anything the existing test/lint/typecheck gate can verify. **There is no
-   scope ceiling:** the fix may reach files the change never touched. Skip
+   scope ceiling:** the fix may reach files the quest never touched. Skip
    non-improvements — no churn for churn's sake; the guard stays **dismissable** when
    you judge the silent path is not a real footgun. Apply it (see *Dispatch* and
    *Commit granularity* below) and record it `fixed`.
@@ -96,7 +96,7 @@ By the time the sweep runs, the `gap-check` → corrective-plan fixpoint has usu
 {% include "partials/human-decision.md" %}
 
 That bar is the line between **fixed** and **needs-decision**: if the existing gate can
-prove the change safe, it is **fixed**; if it clears the bar above, it is
+prove the quest safe, it is **fixed**; if it clears the bar above, it is
 **needs-decision**. If an item you started to fix turns out to clear that bar once you
 touch it, re-classify it as **needs-decision** — never force it through.
 
@@ -128,8 +128,8 @@ coder to make a NEW commit per item:
 `git add <files> && git commit -m "<type>: <item summary>"` — no `Change:` trailer
 (the workflow stamps it later).
 
-**Never `--fixup`/`--squash` a commit your change does not own.** A
-`fixup!`/`squash!` may only target a commit your change created (above its fork);
+**Never `--fixup`/`--squash` a commit your quest does not own.** A
+`fixup!`/`squash!` may only target a commit your quest created (above its fork);
 never one at or below the fork — a base commit or already-reviewed history. A
 failure that traces to a base commit is fixed **forward** as a new commit, never
 folded into base — never rewrite reviewed history.
@@ -198,7 +198,7 @@ Record a toleration as a normal `## Deferred Followups` entry in
 `{{ change.home }}/deferred.md`, born directly in `— needs-decision:` state with
 `converge-verify` as its source, never an agent. The EXACT shape:
 
-`- [ ] DEFERRED converge-verify: <failure signature> [scope: quest] — needs-decision: <why this change is not responsible>`
+`- [ ] DEFERRED converge-verify: <failure signature> [scope: quest] — needs-decision: <why this quest is not responsible>`
 
 - **Every current failure is already recorded as a `DEFERRED converge-verify:` line in
   `## Deferred Followups`, or is plainly not attributable to the diff** → append any

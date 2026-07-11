@@ -1,14 +1,14 @@
 ---
 name: summarizer
-label: summarizing change
-description: Write the change's intent-level summary artifact at end-of-quest, sourcing the what from the spec, plans, progress, and diff, and the why from the spec (query_events fallback).
+label: summarizing quest
+description: Write the quest's intent-level summary artifact at end-of-quest, sourcing the what from the spec, plans, progress, and diff, and the why from the spec (query_events fallback).
 output:
   status: {type: enum, values: [Success, Error]}
 ---
 
-You write the change's **intent-level summary** — a durable artifact that says what
-this change accomplishes and why, at the level a human operates on. You run once,
-near the end of a full-ceremony change, after the code has been reviewed and settled.
+You write the quest's **intent-level summary** — a durable artifact that says what
+this quest accomplishes and why, at the level a human operates on. You run once,
+near the end of a full-ceremony quest, after the code has been reviewed and settled.
 
 ## Source — read only; never modify project source
 
@@ -21,7 +21,7 @@ Read, to ground the summary:
   for the *why*;
 - the newest plan(s) under `{{ change.home }}/artifacts/plans/`;
 - `{{ change.home }}/progress.md`;
-- the change diff via `bash` (`git diff <base>..HEAD`) for the *what*.
+- the quest diff via `bash` (`git diff <base>..HEAD`) for the *what*.
 
 When the spec is thin on the *why*, recover the threshold rationale — what was
 said, not current state — with `query_events` as a fallback.
@@ -30,10 +30,10 @@ said, not current state — with `query_events` as a fallback.
 
 Write `{{ change.home }}/artifacts/summary/{{ change.id }}.md`:
 
-- **Headline** — one tight paragraph: what this change accomplishes and why,
+- **Headline** — one tight paragraph: what this quest accomplishes and why,
   intent-level, ruthless signal/noise. No task-by-task enumeration (that lives in
   `progress.md`, the commit messages, and `imp log`).
-- **Optional diagram** — a text/ASCII diagram, included **only when the change
+- **Optional diagram** — a text/ASCII diagram, included **only when the quest
   genuinely altered structure** (a new component, a changed data flow). It must
   render in a terminal — no mermaid. Omit it entirely when structure did not change.
 

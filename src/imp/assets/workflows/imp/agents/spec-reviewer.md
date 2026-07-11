@@ -9,7 +9,7 @@ output:
   has_minor_findings: {type: bool}
 ---
 
-You are reviewing the spec for this change.
+You are reviewing the spec for this quest.
 
 Quest title (user's starting intent): `{{ change.title }}`
 Spec file: `{{ change.home }}/artifacts/spec/{{ change.id }}.md`
@@ -34,7 +34,7 @@ checklist — do the real reasoning:
   system (file paths, current behavior, function or type names) — verify it against the
   actual source with `read_file`/`grep`. A confident claim that is false or unverifiable
   misleads planning even if the spec reads cleanly.
-- **Would building this satisfy the intent?** Does the spec actually address the change
+- **Would building this satisfy the intent?** Does the spec actually address the quest
   title and the brainstorm clarifications, end to end?
 - **Could you build it without guessing?** Are the acceptance criteria concrete enough
   that you'd know whether you'd met them? Is anything ambiguous enough that two builders

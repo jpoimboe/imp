@@ -9,7 +9,7 @@ output:
   plan_total: {type: int}
 ---
 
-You are writing an implementation plan for this change.
+You are writing an implementation plan for this quest.
 
 Current id: `{{ change.id }}`
 
@@ -54,7 +54,7 @@ non-soliciting exception):
 | Script-gate failure | resume | "Your previous attempt completed but was not accepted." (plan-verify-commit) | Fix commit mechanics, re-emit. |
 | Reviewer rework | resume | "Here's review feedback to address:" + `blocking: True` | Rework protocol (verify findings first). |
 | Minors pass | resume | "No blocking issues — integrate these minor improvements; a final review follows:" + `blocking: False` | One-pass minors protocol (non-soliciting). |
-| Threshold express | goto (fresh session) | "Plan this from the spec drafted with the user:" | Plan from the draft spec on disk (`{{ change.home }}/artifacts/spec/{{ change.id }}.md`); the change is already materialized and the spec is complete enough to plan against. |
+| Threshold express | goto (fresh session) | "Plan this from the spec drafted with the user:" | Plan from the draft spec on disk (`{{ change.home }}/artifacts/spec/{{ change.id }}.md`); the quest is already materialized and the spec is complete enough to plan against. |
 | Plan-cycle supercycle | goto (fresh session) | "More plans are needed for this spec. Coverage assessment:" + `more_plans:` fields | Author plan N+1. |
 | Review rework | goto (fresh session) | "The review found the plan needs revision. Findings:" | Rework mode (see below): author a new corrective plan N+1; never revise the settled plan. |
 | Human rework (finalize) | goto (fresh session) | "Here's the feedback to address:" + finalize `comments` | Rework mode (see below): author a new corrective plan N+1 from `comments`; never revise the settled plan. |
@@ -81,7 +81,7 @@ disappear.
 A `review` rework ("The review found the plan needs revision. Findings:"), a
 `finalize` human rework ("Here's the feedback to address:"), or an integration-pass
 plan gap ("The integration pass found the plan needs revision. Findings:") routes the
-change back to YOU — no rework reaches a coder without an opus plan in front of it.
+quest back to YOU — no rework reaches a coder without an opus plan in front of it.
 These are **post-settlement** reworks: plan N has already been fully implemented and
 `progress.md` marks it complete, so the "Which Plan to Write" disambiguation lands on
 the **author-N+1** row. **Author a new focused corrective plan `…-plan-(N+1).md`**
@@ -234,7 +234,7 @@ A **task** is one logical unit of work that maps to **exactly one commit**. Its
 three tasks: splitting them produces broken intermediate commits (e.g. an unused
 import) and violates a single-commit spec.
 
-**Atomicity hard rule.** If the spec says the change must be atomic / a single
+**Atomicity hard rule.** If the spec says the quest must be atomic / a single
 commit / "do not split," the plan has **exactly one `## Task N`** (with as many
 steps inside it as needed). Honor the spec's atomicity prose — there is no
 separate spec field for this.
@@ -250,12 +250,12 @@ separate spec field for this.
 - "Commit" — step
 
 {% if vars.fast_path %}
-**Fast-path.** This change was classified trivial. Skip TDD scaffolding and
-verification steps the spec did not ask for — do not pad a small change with a
-test the spec waived. **Default to one `## Task`.** A trivial change is naturally
+**Fast-path.** This quest was classified trivial. Skip TDD scaffolding and
+verification steps the spec did not ask for — do not pad a small quest with a
+test the spec waived. **Default to one `## Task`.** A trivial quest is naturally
 a single commit; plan it as one task unless the spec explicitly describes
 genuinely separable units of work. This is a strong default, not the hard floor
-the atomicity rule sets — but on a fast-path change, "I'll split this into a few
+the atomicity rule sets — but on a fast-path quest, "I'll split this into a few
 tasks" is almost always the over-splitting this workflow exists to prevent. If
 you do emit more than one task, confirm each is a real, independently-committable
 unit — not a step dressed up as a task.
@@ -288,7 +288,7 @@ This is the plain **untagged** form — no `— needs-decision:` marker — dist
 ## First-run plan_total estimate
 
 Always emit `plan_total` in your output contract — an integer `>= 1` (it is a required
-field). On the **first plan** of a change (`plan_index == 1`) it is captured into
+field). On the **first plan** of a quest (`plan_index == 1`) it is captured into
 `vars.plan_total`, seeding the `plan N/total` denominator the user sees from the very first plan label, so it is never
 blank and never `1/0`.
 
@@ -296,7 +296,7 @@ blank and never `1/0`.
   plans**, and emit that count as `plan_total`. This is the outline-derived value; the
   outline is the source of truth.
 - **Express path:** there is no outline — emit `plan_total = 1` (a trivial express
-  change is a single plan).
+  quest is a single plan).
 
 On every later plan (`plan_index > 1`) `gap-check` owns the authoritative total — it
 bumps it only when it authors a corrective — and the workflow ignores your emission on
@@ -487,9 +487,9 @@ Do NOT write code. Only write the plan document.
 
 ## Write the plan file
 
-Write the plan to the change's artifact area — NOT the code branch (`main` stays
+Write the plan to the quest's artifact area — NOT the code branch (`main` stays
 pure code). You only write the plain file under
-`{{ change.home }}/artifacts/plans/`; the engine journals it to the change's
+`{{ change.home }}/artifacts/plans/`; the engine journals it to the quest's
 artifact ref at the step boundary. Do not run `git add`/`git commit` yourself and
 do not add a `Change:` trailer.
 

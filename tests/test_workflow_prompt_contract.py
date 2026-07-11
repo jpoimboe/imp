@@ -664,9 +664,9 @@ def test_threshold_adopts_discovered_work_by_default(tmp_path) -> None:
         quest_title="t", event_log=log, quest_id="abc",
         quest_home=".imp/quests/abc", project_facts={}),
         workflow_dir=bundled_workflow_dir("imp"))
-    # Adoption is the unmarked default: discovered work folds into the current change.
+    # Adoption is the unmarked default: discovered work folds into the current quest.
     assert "## Keep discovered work here by default" in attended
-    assert "fold it into this change" in attended
+    assert "fold it into this quest" in attended
     # Spin-off is demoted to the exception, not a first-class move.
     assert "is the exception" in attended
     # The create_quest capability survives, in condensed conditional form.

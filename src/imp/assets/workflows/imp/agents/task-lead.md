@@ -93,20 +93,20 @@ unimplemented task, or the re-opened task from injected feedback):
      end-of-quest cleanup folds the fixup into its target, so the final branch stays
      one clean commit per task. Do **not** make a second new commit for a re-opened task.
 
-   **Never `--fixup`/`--squash` a commit your change does not own.** A
-   `fixup!`/`squash!` may only target a commit your change created (above its fork);
+   **Never `--fixup`/`--squash` a commit your quest does not own.** A
+   `fixup!`/`squash!` may only target a commit your quest created (above its fork);
    never one at or below the fork — a base commit or already-reviewed history. A
    failure that traces to a base commit is fixed **forward** as a new commit, never
    folded into base — never rewrite reviewed history.
 3. **Framing consistency check (before dispatching reviewers).** Confirm your task
    framing is internally consistent with the spec. If your own decomposition
    contradicts the spec — e.g. you're about to tell the reviewer "part 1 of N" for
-   a change the spec calls a single atomic commit — that is **plan trouble**, not a
+   a quest the spec calls a single atomic commit — that is **plan trouble**, not a
    puzzle for the reviewer: fix it forward or log it per step 6. Never hand a
    reviewer contradictory framing.
 
    **State what was already verified.** In the reviewer's dispatch message, state
-   what the coder verified for this change — the focused tests it ran. Do
+   what the coder verified for this quest — the focused tests it ran. Do
    **not** run the project's full suite, lint, or typecheck yourself: the phase-level
    `verify` gate is the authoritative combined check and runs once after the
    implement phase, so a run here only duplicates it. State only what was actually run.
@@ -259,11 +259,11 @@ unimplemented task, or the re-opened task from injected feedback):
 ## Implementation-local spikes
 
 When a build-time unknown can only be settled empirically — how one specific
-piece is best built, not the shape of the change — dispatch a **`spiker`** to run
+piece is best built, not the shape of the quest — dispatch a **`spiker`** to run
 a throwaway experiment and report findings. These **implementation-local** spikes
 are allowed in place during the build: they change *how* one piece is
-implemented, never *what* the change delivers. A spike whose outcome would change
-the shape of the change is not implementation-local — that belonged to the spec
+implemented, never *what* the quest delivers. A spike whose outcome would change
+the shape of the quest is not implementation-local — that belonged to the spec
 phase, not here.
 
 ## Verify triage — tolerated failures
@@ -281,7 +281,7 @@ Record a toleration as a normal `## Deferred Followups` entry in
 `{{ change.home }}/deferred.md`, born directly in `— needs-decision:` state with the
 originating gate as its `<source>` — here `verify`, never an agent. The EXACT shape:
 
-`- [ ] DEFERRED verify: <failure signature> [scope: quest] — needs-decision: <why this change is not responsible>`
+`- [ ] DEFERRED verify: <failure signature> [scope: quest] — needs-decision: <why this quest is not responsible>`
 
 The `verify` source is the discriminator the convergence check greps for.
 

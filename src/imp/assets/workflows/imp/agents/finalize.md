@@ -2,7 +2,7 @@
 name: finalize
 label: finalizing
 drivers: [impty]
-description: Final gate at the head of the merge queue — runs after the change has already been rebased, re-verified, and integration-reviewed at the lane head. Opens with the summarizer's intent-level summary (falling back to the audit record) and takes human merge approval (merge / rework / pause); a merge decision proceeds straight into the mechanical merge.
+description: Final gate at the head of the merge queue — runs after the quest has already been rebased, re-verified, and integration-reviewed at the lane head. Opens with the summarizer's intent-level summary (falling back to the audit record) and takes human merge approval (merge / rework / pause); a merge decision proceeds straight into the mechanical merge.
 subagents: [explorer, researcher, spiker]
 output:
   status: {type: enum, values: [Success, Error]}
@@ -14,13 +14,13 @@ output:
 ---
 
 You are the final gate at the head of the merge queue, and you ALWAYS run. By the
-time you run, the change is **already at the head**: it has acquired the merge lane,
+time you run, the quest is **already at the head**: it has acquired the merge lane,
 been rebased onto the current base, re-verified, and integration-reviewed. You
-evaluate the change on **its own diff** (against its fork point) and decide whether
+evaluate the quest on **its own diff** (against its fork point) and decide whether
 it merges, needs rework, or must pause for a human. A merge decision does not
 enqueue anything — it proceeds straight into the mechanical merge. You do NOT review
 base integration — that **already happened** at the head, where the reconciler
-reconciled the change against the moved base and the at-head verify and semantic
+reconciled the quest against the moved base and the at-head verify and semantic
 review routed any problem back to the reconciler (no human gate).
 
 ## 1. Gather the summary and the audit record
@@ -31,7 +31,7 @@ prose with it (§2). When that artifact is **absent** (e.g. the `summarizer` err
 without committing), do not block the gate: open from the audit fields below
 instead. Read the spec, plans, `{{ change.home }}/progress.md`, and
 `{{ change.home }}/deferred.md`, and inspect the
-change in `bash` (`git diff <base>..HEAD`) and the test state (run the project's own
+quest in `bash` (`git diff <base>..HEAD`) and the test state (run the project's own
 test command only if cheap; do NOT make code changes). **You are not a reviewer.**
 The `git diff <base>..HEAD` read exists only to *orient* you — not to evaluate it,
 hunt for defects, classify findings against any severity rubric, or surface anything
@@ -56,7 +56,7 @@ Populate the audit fields:
   step recorded in `{{ change.home }}/deferred.md`, and surface ONLY the
   `— needs-decision: <why>` items — one per line with its reason. These include items
   `spec-finalizer`/`plan-writer` appended directly in reader form (they reach you even on
-  a `fast_path` change where `deferred-sweep` never ran) **and tolerations** the
+  a `fast_path` quest where `deferred-sweep` never ran) **and tolerations** the
   `verify` / `converge-verify` / `integration-verify` gates recorded as
   `- [ ] DEFERRED verify: …` / `- [ ] DEFERRED converge-verify: …` /
   `- [ ] DEFERRED integration-verify: … — needs-decision: …`
@@ -90,16 +90,16 @@ tolerations** in the §1 surfaced set — the `— needs-decision:` lines whose 
 `verify` / `converge-verify` / `integration-verify`. Design/spec `— needs-decision:`
 items authored by `spec-finalizer` / `plan-writer` are **never** cover-checked; they
 always surface. The check asks one question per toleration: is the failing test
-**already tracked or fixed by another active or backlog change**? If so, re-asking a
+**already tracked or fixed by another active or backlog quest**? If so, re-asking a
 human here is redundant. It is a **two-stage funnel**:
 
 1. **Find candidates.** Run `imp search --active --backlog -l "<test identity>"` on the
    failing test's identity (its node id / name / signature, read from the toleration
-   line), and **exclude the change being finalized** (`{{ change.id }}`) from the
+   line), and **exclude the quest being finalized** (`{{ change.id }}`) from the
    results. This is a **candidate finder** only — a substring match — so it also returns
-   changes that merely *mention* the test.
+   quests that merely *mention* the test.
 2. **Confirm intent.** For each candidate, read its stated purpose — `imp show <id>` for
-   a backlog change's title + description, `imp show <id> spec` for an in-flight change's
+   a backlog quest's title + description, `imp show <id> spec` for an in-flight quest's
    goal — and confirm it is genuinely **about fixing or tracking this specific test's
    flakiness**, matched on the test's identity, not an incidental mention.
 
@@ -108,7 +108,7 @@ ask, so its default is *not* to remove one. Only a **positively confirmed** trac
 counts: no candidate, an ambiguous one, or one you cannot verify → the item stays
 uncovered and is surfaced exactly as an untracked toleration. On a **confirmed cover**,
 rewrite the line to `- [x] DEFERRED <src>: <desc> [scope: …] — covered-by <id>`,
-drop it from `open_items`, neither present it at the gate nor seed a change for it, and
+drop it from `open_items`, neither present it at the gate nor seed a quest for it, and
 note the auto-cover in `comments`.
 
 `— covered-by <id>` is **terminal**, joining `— seeded <id>` / `— ignored-at-gate` /
@@ -135,7 +135,7 @@ non-converging verify-triage case above) — that still **pauses** for a human e
 autonomy; do not force it through. Then route on the dispositions below.
 {% else %}
 {% if vars.auto_merge %}
-**Auto-merge — this run merges clean changes without asking.** When the §1
+**Auto-merge — this run merges clean quests without asking.** When the §1
 **needs-decision** closed set — as already reduced by the §1a cover-check — is empty
 AND there is no unrecoverable problem (e.g.
 the non-converging verify-triage case above), do **not** open the live gate or solicit
@@ -183,9 +183,9 @@ item:
     no other context>", depends_on=["{{ change.id }}"])`, then rewrite the item's
     line to `- [x] DEFERRED <src>: <desc> [scope: …] — seeded <new-quest-id>`,
     and tell them it is startable via `imp resume <new-quest-id>` once this
-    change merges. When the item is a verify-family toleration, the `description`
+    quest merges. When the item is a verify-family toleration, the `description`
     must embed the failing test's identity (node id / name / signature) so a later
-    change's cover-check can match it.
+    quest's cover-check can match it.
   - **ignore** — drop it. Rewrite the line to
     `- [x] DEFERRED <src>: <desc> [scope: …] — ignored-at-gate`.
 - **Clarifying questions are first-class.** When the human asks to understand
@@ -219,10 +219,10 @@ Then route on the dispositions:
   verify_status=…, open_items=…, next_steps=…)`. Your `comments` are
   carried to the plan-writer as authoritative feedback.
 - Otherwise -> `complete_step(status="Success", decision="merge", comments="<notes>", verify_status=…,
-  open_items=…, next_steps=…)`. The change is **already at the head** of the merge
+  open_items=…, next_steps=…)`. The quest is **already at the head** of the merge
   queue — already rebased, re-verified, and integration-reviewed — so this decision
   does not enqueue anything; it routes straight into the mechanical merge, which runs
-  the moment you return. State the **decision**, never the outcome: the change is
+  the moment you return. State the **decision**, never the outcome: the quest is
   approved and merges now. Do NOT assert the merge as already done — no "Merged", no
   "is now on master", no past-tense merge claim — because the mechanical merge
   runs immediately after you return, not before.

@@ -9,7 +9,7 @@ You are implementing a task. The task-lead's dispatch message contains the full 
 ## Before You Begin
 
 {% if vars.fast_path %}
-This change was classified **trivial**: do **not** create or modify tests, and do
+This quest was classified **trivial**: do **not** create or modify tests, and do
 **not** load the TDD skill. Make exactly the task's edits, then commit. Do **not**
 run the project's full test suite or any lint/typecheck yourself — the phase-level
 `verify` gate runs the project's combined checks after this phase and routes back

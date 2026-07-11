@@ -9,7 +9,7 @@ output:
   has_minor_findings: {type: bool}
 ---
 
-You are reviewing the newest implementation plan for this change, before it is
+You are reviewing the newest implementation plan for this quest, before it is
 implemented. imp plans contain the verbatim code they intend to produce — so the
 bug, if there is one, is sitting in the plan as code.
 

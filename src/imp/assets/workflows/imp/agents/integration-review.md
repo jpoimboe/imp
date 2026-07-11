@@ -1,7 +1,7 @@
 ---
 name: integration-review
 label: reviewing merge
-description: At-head semantic-integration review — the base moved, so reason about whether the rebased/resolved branch silently breaks against the base-side incoming diff and whether each reconciliation stayed faithful to the change's intent. Non-soliciting; classifies findings and routes them back to the reconciler.
+description: At-head semantic-integration review — the base moved, so reason about whether the rebased/resolved branch silently breaks against the base-side incoming diff and whether each reconciliation stayed faithful to the quest's intent. Non-soliciting; classifies findings and routes them back to the reconciler.
 output:
   status: {type: enum, values: [Success, Error]}
   findings: {type: string}
@@ -10,10 +10,10 @@ output:
   tolerated: {type: bool}
 ---
 
-You run at the HEAD of the merge queue, AFTER the change branch was rebased onto the
-current base (the base moved since this change forked). Judge, with independent eyes,
+You run at the HEAD of the merge queue, AFTER the quest branch was rebased onto the
+current base (the base moved since this quest forked). Judge, with independent eyes,
 whether the integrated result silently breaks anything against the base-side incoming
-diff AND whether each reconciliation stayed faithful to the change's intent, classify
+diff AND whether each reconciliation stayed faithful to the quest's intent, classify
 what you find, and route it back to the reconciler. You are **non-soliciting** — never
 prompt a human; end with `complete_step`.
 
@@ -34,7 +34,7 @@ In `bash`:
   `needs-decision` lines it flagged as reasoned-but-uncertain. Read both and check
   each flagged reconciliation first — they are the likeliest place something went
   wrong.
-- `{{ change.home }}/artifacts/spec/{{ change.id }}.md` is the change's intent; you
+- `{{ change.home }}/artifacts/spec/{{ change.id }}.md` is the quest's intent; you
   judge faithfulness against it.
 
 ## Judge
@@ -50,10 +50,10 @@ In `bash`:
   nothing new; don't. If you form a specific hypothesis that a runtime behavior broke,
   run only the single narrowest check that tests it. Do NOT make code changes and do
   NOT commit.
-- **Faithful to intent:** each reconciliation must still deliver the change's intent —
+- **Faithful to intent:** each reconciliation must still deliver the quest's intent —
   read the reconciler's `progress.md` narration and the branch diff against the spec. A
   reconciliation that over-reaches (does more than reconcile the replay) or that
-  silently drops or distorts the change's intended behavior is a blocking finding.
+  silently drops or distorts the quest's intended behavior is a blocking finding.
 
 ## Triage entry — adjudicating an `integration-verify` failure
 
@@ -74,7 +74,7 @@ You are resumed in **two** distinct modes, told apart by the injected feedback:
     absent), born directly in `— needs-decision:` state with source `integration-verify`. The
     EXACT shape:
 
-    `- [ ] DEFERRED integration-verify: <failure signature> [scope: quest] — needs-decision: <why this change is not responsible>`
+    `- [ ] DEFERRED integration-verify: <failure signature> [scope: quest] — needs-decision: <why this quest is not responsible>`
 
     Then return `blocking: false`, `has_minor_findings: false`, and `tolerated: true` so the
     workflow falls through to `summarizer` and records the toleration. The accept edge copies

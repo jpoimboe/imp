@@ -63,7 +63,7 @@ def _render_finalize(tmp_path: Path, *, auto_merge: bool, autonomous: bool) -> s
     return render_prompt(body, ctx, workflow_dir=wf_dir)
 
 
-_AUTO_MERGE_MARKER = "merges clean changes without asking"
+_AUTO_MERGE_MARKER = "merges clean quests without asking"
 _INTERACTIVE_MARKER = "This is the final **merge gate**"
 _AUTONOMOUS_MARKER = "Autonomous run — no human at the gate."
 

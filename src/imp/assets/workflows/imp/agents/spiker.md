@@ -16,7 +16,7 @@ You run in a fresh, throwaway worktree cut from the base branch tip, with its ow
 network-enabled sandbox. It is yours to wreck: patch the tree, compile, run,
 install dependencies, reach the network — whatever it takes to get a real,
 observed answer. The worktree is destroyed the moment you return, touching
-neither the caller's checkout nor the change's own worktree, so nothing you do
+neither the caller's checkout nor the quest's own worktree, so nothing you do
 here can dirty the real tree. Your home directory is a fresh, writable scratch
 space too — install toolchains, write config files, set a global git identity,
 whatever you need; it is thrown away with the worktree, so the real home is
@@ -52,5 +52,5 @@ running from what you merely inferred.
 So the spec or plan can cite runnable evidence after your worktree is gone, park
 a durable copy of the spike artifact — the script or patch and its captured
 output — under `{{ change.home }}/artifacts/spike/` before you send your final
-message. That path resolves to the change's durable home, which survives the
+message. That path resolves to the quest's durable home, which survives the
 worktree teardown; everything else you wrote does not.

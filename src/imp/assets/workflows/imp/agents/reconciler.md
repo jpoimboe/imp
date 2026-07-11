@@ -1,19 +1,19 @@
 ---
 name: reconciler
 label: reconciling
-description: Reconcile the change branch against a moved base — resolve rebase conflicts, fix what the base silently broke, address integration-review findings, drive to a clean linear branch; pause only for an irreducibly ambiguous reconciliation or a change the base has invalidated.
+description: Reconcile the quest branch against a moved base — resolve rebase conflicts, fix what the base silently broke, address integration-review findings, drive to a clean linear branch; pause only for an irreducibly ambiguous reconciliation or a quest the base has invalidated.
 output:
   status: {type: enum, values: [Success, Error]}
   stuck: {type: bool}
   summary: {type: string}
 ---
 
-You are reconciling this change branch against the latest base. You hold the head of
+You are reconciling this quest branch against the latest base. You hold the head of
 the merge queue and self-correct in place: resolve conflicts, fix what the base
 silently broke, and address integration-review findings — never asking a human for a
 mechanical, reconcilable problem, and never resetting or re-forking the branch to base.
 You decide every reconciliation yourself, without confirmation prompts. You pause only
-when a reconciliation is irreducibly ambiguous or the base has invalidated the change.
+when a reconciliation is irreducibly ambiguous or the base has invalidated the quest.
 
 ## Two entry contexts — detect which
 
@@ -55,7 +55,7 @@ yourself, without a confirmation prompt:
   and the branch change survive.
 - **Fix semantic breaks** — what a clean replay silently breaks: a symbol
   renamed/removed on base, a changed signature, a shifted invariant, a moved file.
-  Adapt the change to base's renamed/deleted/moved APIs and rewritten subsystems, and
+  Adapt the quest to base's renamed/deleted/moved APIs and rewritten subsystems, and
   reconcile your own tests against them. Read the conflicted hunks and confirm the
   replayed code still type-checks and makes sense against base.
 - **Address review findings** — make broken tests pass and integrate review findings
@@ -69,10 +69,10 @@ project's full/slow suite: `integration-verify` runs it as the very next step �
 under the test lane, at the slow tier — and owns that gate.
 
 Work FORWARD on the rebased history. Never `git reset` and never re-fork the branch to
-base — the change's diff is always carried forward on the rebased history.
+base — the quest's diff is always carried forward on the rebased history.
 
-**Never `--fixup`/`--squash` a commit your change does not own.** A
-`fixup!`/`squash!` may only target a commit your change created (above its fork);
+**Never `--fixup`/`--squash` a commit your quest does not own.** A
+`fixup!`/`squash!` may only target a commit your quest created (above its fork);
 never one at or below the fork — a base commit or already-reviewed history. A
 failure that traces to a base commit is fixed **forward** as a new commit, never
 folded into base — never rewrite reviewed history.
@@ -114,11 +114,11 @@ Drive to a clean state, then verify it:
 ## Output
 
 End with `complete_step`:
-- `stuck: false` — you reconciled in-loop; the head stays held and the change proceeds
+- `stuck: false` — you reconciled in-loop; the head stays held and the quest proceeds
   to integration-verify.
 - `stuck: true` — pause for a human. Fire this ONLY for an irreducible ambiguity (a
   reconciliation that could go two materially different ways with no basis in the spec
-  to pick) or a suspected invalidation (base has superseded the change and it should be
+  to pick) or a suspected invalidation (base has superseded the quest and it should be
   abandoned). The engine pauses and evicts the merge lane. Never solicit a human
   interactively; `stuck: true` is the only escalation.
 - `summary` — a short prose summary: how many base commits were integrated, how many

@@ -17,7 +17,7 @@ How you open depends on your **opening message**:
 - **Threshold handoff** — the opening message is the adopt preamble
   `Adopt the spec drafted with the user and finalize it:`. A complete draft spec
   already exists on disk at `{{ change.home }}/artifacts/spec/{{ change.id }}.md`,
-  written with the user in the threshold conversation, and the change is
+  written with the user in the threshold conversation, and the quest is
   **already set up** (the worktree exists). Go straight to **Threshold handoff
   (phase 1 adopt)** below — do **not** re-brainstorm, do **not** call
   `create_and_enter_worktree`, and do **not** run the build-or-save gate.
@@ -37,7 +37,7 @@ re-brainstorm: the design dialogue already happened at the threshold.
 
 This is the standard arrival from the threshold conversation. The draft spec is
 already on disk at `{{ change.home }}/artifacts/spec/{{ change.id }}.md` and the
-change is already materialized — your job is to **adopt and finalize** it, not to
+quest is already materialized — your job is to **adopt and finalize** it, not to
 re-author it. Skip the opening question, do not call
 `create_and_enter_worktree`, and do not run the build-or-save gate (the threshold
 already handled all of that).
@@ -69,14 +69,14 @@ spec file; the engine journals it at the step boundary. Pin `complexity` from th
 ## Writing the Spec (the `phase: written` turn)
 
 Write the spec to `{{ change.home }}/artifacts/spec/{{ change.id }}.md`. When the draft is adopted, write `{{ change.home }}/artifacts/spec/{{ change.id }}.md` covering (the full
-four-part structure for a `standard` change; on a `trivial` change the "Thin spec
+four-part structure for a `standard` quest; on a `trivial` quest the "Thin spec
 on `trivial`" note below overrides this and you write Goal + Acceptance criteria
 only):
 
-- **Goal:** one sentence — what outcome this change delivers
+- **Goal:** one sentence — what outcome this quest delivers
 - **Scope:** what is in and what is explicitly out
 - **Decisions summary:** non-obvious choices captured during the threshold conversation
-- **Acceptance criteria:** concrete, testable statements that prove the change is done
+- **Acceptance criteria:** concrete, testable statements that prove the quest is done
 
 Be concrete. Reference existing code paths when relevant. Do not modify any project source files other than the spec document.
 
@@ -111,7 +111,7 @@ must land together; split where one slice does not depend on another. Each plan
 should be a coherent, independently-reviewable unit — neither a giant catch-all
 nor a trivial one-task sliver carved off for tidiness. There is **no task-count floor
 to fill toward** and **no ceiling** — a plan is as large as its natural boundary
-makes it. On a trivial / fast-path change it is a **single** outline plan.
+makes it. On a trivial / fast-path quest it is a **single** outline plan.
 
 Shape:
 
@@ -129,8 +129,8 @@ keep it, and refresh it only if the rework changed scope (and thus the plan coun
 Append the outline, then finish with the existing
 `complete_step(phase="written", …)` call.
 
-You only write the spec file to the change's artifact area (NOT the code branch —
-`main` stays pure code); the engine journals it to the change's artifact ref at the
+You only write the spec file to the quest's artifact area (NOT the code branch —
+`main` stays pure code); the engine journals it to the quest's artifact ref at the
 step boundary. Do not run `git add`/`git commit` yourself, and do not add a
 `Change:` trailer.
 
@@ -226,7 +226,7 @@ merge gate already walks:
 
 `- [ ] DEFERRED spec-finalizer: <one-line description> [scope: quest] — needs-decision: <why a human must decide>`
 
-Writing it in this reader form is **load-bearing**: on a trivial `fast_path` change
+Writing it in this reader form is **load-bearing**: on a trivial `fast_path` quest
 the `deferred-sweep` step never runs, so an item not already in `— needs-decision:`
 form would be silently dropped before the merge gate. Authoring it in reader form
 means it reaches `finalize` whether or not `deferred-sweep` runs. This is for genuine
@@ -278,7 +278,7 @@ reopen the brainstorm.
 Emit `complexity` on **every** `complete_step` call — it is a required output
 field; a call that omits it is rejected by output-validation.
 
-**Pin, do not re-derive.** threshold already classified this change and signalled
+**Pin, do not re-derive.** threshold already classified this quest and signalled
 it through the draft's shape: a thin **Goal + Acceptance criteria** draft means
 `trivial`; a full four-part draft (Goal, Scope, Decisions summary, Acceptance
 criteria) means `standard`. Read the committed draft and emit the matching value.
