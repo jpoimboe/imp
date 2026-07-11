@@ -258,8 +258,6 @@ def test_bare_turn_end_question_reprints_after_archive_and_rehydrate(
         agent_id="step:p/s", type="awaiting_user_input",
         payload={"steer_hint": "", "last_agent_message": "Which DB should I use?",
                  "interrupt": False})
-    State(id="c", step="s", step_attempt=0, status="paused").save(ch.state_dir)
-
     archive_conversation(ch)
     assert not (tmp_path / ".imp" / "quests" / "c").exists()
 
