@@ -146,7 +146,7 @@ def compose_identity_toolbar(*, change_id: str | None, title: str, color: bool,
     bg = pal.user_bg_open(enabled=color)
     over = bool(bg)
     id_seg = _paint(change_id, "wordmark", color=color, over_bg=over)
-    title_seg = _paint(title, "gray", color=color, over_bg=over) if title else None
+    title_seg = title if title else None
     body = rt.compose_label([id_seg, title_seg])
     return _slate_wrap(body, bg, width)
 
@@ -160,7 +160,7 @@ def compose_position_row(*, activity: nv.Activity, change_id: str | None,
     bg = pal.user_bg_open(enabled=color)
     over = bool(bg)
     id_seg = _paint(change_id, "wordmark", color=color, over_bg=over) if change_id else None
-    title_seg = _paint(title, "gray", color=color, over_bg=over) if title else None
+    title_seg = title if title else None
     phase_seg = (_paint(activity.phase, *pal.NODE_COLORS["step"], color=color, over_bg=over)
                  if activity.phase else None)
     plan_seg = (_paint(activity.plan, *pal.NODE_COLORS["step"], color=color, over_bg=over)
