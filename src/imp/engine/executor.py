@@ -326,7 +326,7 @@ async def run_quest(
             quest.events_path, on_event=_liveness_on_event(coordinator, on_event))
         if workflow_refreshed:
             _emit(log, "workflow_refreshed", {}, agent_id=None)
-        # Seed any workflow var introduced after this change was created (its
+        # Seed any workflow var introduced after this quest was created (its
         # default is missing from the persisted vars); otherwise a StrictUndefined
         # template reference to it crashes the render on resume.
         backfilled = _backfill_var_defaults(state, workflow.vars)
@@ -417,7 +417,7 @@ async def run_quest(
                 pending_seed
                 if pending_seed is not None and step.name == opening_step
                 else None)
-            # Go-live mid-run flips change.project_root to the freshly-forked
+            # Go-live mid-run flips quest.project_root to the freshly-forked
             # worktree; the once-built policy is then rooted at the stale control
             # root. Rebuild so the next step's gates and agents bind the worktree.
             if quest.project_root != policy_root:

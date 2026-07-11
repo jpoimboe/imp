@@ -650,8 +650,8 @@ class OpenAIAgentRunner:
         openai_tools.extend(openai_web_tool_specs(invocation.agent_def))
         # Stable routing/affinity hint for OpenAI's automatic prompt cache.
         # Keyed to one growing conversation (one agent invocation within one
-        # change) so the prefix stays cache-resident turn-over-turn. id
-        # is required: agent_id alone is change-agnostic, so concurrent changes
+        # quest) so the prefix stays cache-resident turn-over-turn. id
+        # is required: agent_id alone is quest-agnostic, so concurrent quests
         # running the same step would collide on one routing slot.
         # Keyed to the IMMUTABLE id, not the handle: a handle rotates at the
         # spec->plan title rename and would bust the cache mid-conversation

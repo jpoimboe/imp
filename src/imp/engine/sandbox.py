@@ -293,7 +293,7 @@ def resolve_policy(
     # Git-ref foot-gun guard: RO-mask the crown-jewel shared paths (all of
     # refs/heads, refs/stash, the main index) via the existing git_ro_remask
     # ro-bind category, and RW re-expose refs/heads/imp so the agent's own
-    # change/spike branches still update. bind_plan() emits the re-expose after
+    # quest/spike branches still update. bind_plan() emits the re-expose after
     # the refs/heads mask, so last-wins keeps the imp/ subtree writable while
     # master and every other branch stay read-only. Existence-gated like caches/
     # secrets. Skipped for the draft/degenerate case where the agent legitimately

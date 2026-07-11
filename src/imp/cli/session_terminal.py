@@ -168,7 +168,7 @@ async def run_terminal_client(
                     except EOFError:
                         # A non-tty solicit (prompt_toolkit add_reader on a piped
                         # stdin) or Ctrl-D at a real tty surfaces as EOFError.
-                        # Treat it as a deliberate detach: leave the change paused.
+                        # Treat it as a deliberate detach: leave the quest paused.
                         coord.leave_reason = "ctrl-d"
                         coord.escalation_event.set()
 

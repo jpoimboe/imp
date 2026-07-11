@@ -20,7 +20,7 @@ from imp.engine.errors import LayoutMismatch, LoadError, LoadErrors
 from imp.engine.state import JsonlEventLog, State
 from imp.engine.types import SourceLoc
 
-LAYOUT_VERSION = 5  # bump in the SAME commit as any breaking change-home layout/schema change
+LAYOUT_VERSION = 5  # bump in the SAME commit as any breaking quest-home layout/schema change
 
 
 def _write_quest_json(meta_path: Path, meta: dict[str, Any]) -> None:

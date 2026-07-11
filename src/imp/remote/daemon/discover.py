@@ -36,7 +36,7 @@ def list_quests(control_root: Path) -> list[QuestInfo]:
         try:
             row = _row_for_id(control_root, quest_id)
         except Exception:
-            # A single mid-write or corrupt change home must never blind the
+            # A single mid-write or corrupt quest home must never blind the
             # whole directory — that would drop every resident session's relay
             # and (in the daemon's scan loop) crash the daemon. Skip it; a later
             # poll re-reads it once it settles.

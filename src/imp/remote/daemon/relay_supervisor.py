@@ -51,7 +51,7 @@ class RelaySupervisor:
                     failing = False
                 except Exception:
                     # A poll must never kill the daemon. Directory reads are guarded
-                    # per-change in discover.py; this is the backstop for anything
+                    # per-quest in discover.py; this is the backstop for anything
                     # else (a probe error, a bug). Log the first failure of a run,
                     # suppress the repeats, and retry on the next poll. CancelledError
                     # is a BaseException, so cancel-to-stop still propagates.

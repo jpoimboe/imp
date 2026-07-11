@@ -33,7 +33,7 @@ def tear_down_quest(quest: Quest) -> None:
             state_json_path=quest.state_dir / "state.json",
         )
     if materialized:
-        # Uses RepoGitLock, independent of the per-change ProjectLock held above.
+        # Uses RepoGitLock, independent of the per-quest ProjectLock held above.
         merge_queue.pop_and_wake(control, quest_id, base_branch)
         # branch delete after worktree removal (git forbids deleting a checked-out branch)
         worktree.remove_worktree(control, quest_id, force=True)

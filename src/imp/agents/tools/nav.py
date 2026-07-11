@@ -216,7 +216,7 @@ async def glob(ctx: ToolContext, pattern: str, path: str = ".") -> str:
     for p in sorted(base.glob(pattern)):
         await tool_checkpoint(coordinator, deadline)
         resolved = p.resolve()
-        # p.resolve() escapes root via the change-home symlink; use the logical path instead.
+        # p.resolve() escapes root via the quest-home symlink; use the logical path instead.
         rel = p.relative_to(root) if p.is_relative_to(root) else None
         sanctioned = rel is not None and within_artifacts(rel)
         if inside:

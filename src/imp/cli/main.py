@@ -2286,12 +2286,12 @@ def _status_row(quest_id: str, state_json: bytes, quest_json: bytes,
 
 def _row_for_id(control: Path, quest_id: str) -> _Row | None:
     cdir = _quest_home(control, quest_id)
-    # archive_read returns bytes | None; the live change-home branch always finds
+    # archive_read returns bytes | None; the live quest-home branch always finds
     # the files. Annotate so the None-guard below stays reachable (not dead code).
     state_json: bytes | None
     quest_json: bytes | None
     if (cdir / "quest.json").exists():
-        # A change home mid-creation has quest.json written but state.json not
+        # A quest home mid-creation has quest.json written but state.json not
         # yet (Quest.create is not atomic across the two files). The daemon's
         # scan loop can hit that window, so tolerate it like _scan_quest_homes
         # rather than crashing the whole listing.
@@ -2533,7 +2533,7 @@ def _abandon(control: Path, quest_id: str, *, yes: bool = False) -> int:
     try:
         quest = Quest.load(control, quest_id)
     except (LoadError, LoadErrors):
-        # No live or un-materialized change-home: Quest.load failed because the
+        # No live or un-materialized quest-home: Quest.load failed because the
         # home directory is absent (already fully torn down, or never existed).
         # Idempotent teardown — reap a possibly-orphaned branch and exit 0.
         worktree.delete_branch(control, quest_id)
@@ -2635,7 +2635,7 @@ def _show_picker_empty() -> int:
 
 def _show_picker_non_tty(rows: list[_Row]) -> int:
     # Defensive parity only: _cmd_show handles the non-tty no-token case
-    # directly (needs-a-change-id error), so _pick_show_target is invoked
+    # directly (needs-a-quest-id error), so _pick_show_target is invoked
     # solely on an interactive tty and this branch is never reached.
     print("imp: 'imp show' needs a Quest id — run 'imp list' for an overview",
           file=sys.stderr)

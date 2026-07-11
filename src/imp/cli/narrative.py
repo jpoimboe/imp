@@ -805,7 +805,7 @@ class NarrativeBuilder:
             self._reset_wait = None
 
         # 0. token accumulation — before sub routing (F2) so subagent events fold
-        #    into the change total. The context-bar value (_latest_prompt_tokens)
+        #    into the quest total. The context-bar value (_latest_prompt_tokens)
         #    tracks THIS builder's own agent: the top level (own_agent_id None) records
         #    its non-sub: turns; a nested builder records the turns of the subagent it
         #    represents (agent_id == own_agent_id). A registered child's turn never moves it.
@@ -1670,7 +1670,7 @@ def _h_opening_intent(self: NarrativeBuilder, event: dict[str, Any], p: dict[str
 
 def _h_query_result(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
     # Token totals + cost are accumulated in add() (pre-routing, so subagent
-    # query_results fold into the change total). No visible node.
+    # query_results fold into the quest total). No visible node.
     return
 
 

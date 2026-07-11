@@ -207,7 +207,7 @@ async def serve_quest_session(
             await server.open()
             result = await server.serve(_bound)
     except LockHeld:
-        # A wake-spawn raced a resident change: exit harmlessly without binding socket.
+        # A wake-spawn raced a resident quest: exit harmlessly without binding socket.
         return None
     if server.abandoned:
         await anyio.to_thread.run_sync(tear_down, quest)

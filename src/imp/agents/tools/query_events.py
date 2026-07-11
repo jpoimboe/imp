@@ -93,7 +93,7 @@ def query_events(
     types = {t.strip() for t in type.split(",") if t.strip()} if type else None
 
     current_id = ctx.events_path.parent.name
-    # Truthy (not `is not None`): a blank quest_id="" routes to the current-change
+    # Truthy (not `is not None`): a blank quest_id="" routes to the current-quest
     # path — otherwise it would reach Quest.load, where <control>/.imp/quests is a
     # real dir so .is_dir() passes and the missing quest.json raises FileNotFoundError,
     # escaping the LoadError catch and breaking the "does not raise" contract.
