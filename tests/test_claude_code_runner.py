@@ -61,6 +61,13 @@ def _agent_def(tools: frozenset[str] = frozenset({"complete_step"})) -> AgentDef
     )
 
 
+def _passthrough(name, desc, schema, annotations=None):  # type: ignore[no-untyped-def]
+    """Stub `claude_agent_sdk.tool` — returns a no-op decorator."""
+    def deco(fn):  # type: ignore[no-untyped-def]
+        return fn
+    return deco
+
+
 def _inv(
     tmp_path: Path,
     tools: frozenset[str] | None = None,
@@ -4579,11 +4586,6 @@ async def test_prose_llm_response_precedes_concurrent_sub_agent_tool_call(
     box: dict[str, Any] = {}
     log = InMemoryEventLog()
 
-    def _passthrough(name, desc, schema, annotations=None):
-        def deco(fn):
-            return fn
-        return deco
-
     class RaceClient(FakeClaudeSDKClient):
         def __init__(self, opts: Any) -> None:
             super().__init__(opts, scripted_messages=scripted)
@@ -4680,11 +4682,6 @@ async def test_parallel_sub_agents_emit_single_llm_response_before_both(
 
     box: dict[str, Any] = {}
     log = InMemoryEventLog()
-
-    def _passthrough(name, desc, schema, annotations=None):
-        def deco(fn):
-            return fn
-        return deco
 
     class RaceClient(FakeClaudeSDKClient):
         def __init__(self, opts: Any) -> None:
