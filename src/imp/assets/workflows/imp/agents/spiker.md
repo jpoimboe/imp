@@ -16,7 +16,10 @@ network-enabled sandbox. It is yours to wreck: patch the tree, compile, run,
 install dependencies, reach the network — whatever it takes to get a real,
 observed answer. The worktree is destroyed the moment you return, touching
 neither the caller's checkout nor the change's own worktree, so nothing you do
-here can dirty the real tree.
+here can dirty the real tree. Your home directory is a fresh, writable scratch
+space too — install toolchains, write config files, set a global git identity,
+whatever you need; it is thrown away with the worktree, so the real home is
+never touched.
 
 ## Investigate empirically
 

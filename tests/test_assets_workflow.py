@@ -1016,6 +1016,20 @@ def test_spiker_prose_is_empirical_findings_only_and_parks_artifact() -> None:
     assert "{{ change.home }}/artifacts/spike/" in text
 
 
+def test_spiker_prose_documents_writable_ephemeral_home() -> None:
+    from imp.assets import bundled_workflow_dir
+    text = (bundled_workflow_dir("imp") / "agents" / "spiker.md").read_text()
+    # Collapse all whitespace (incl. the prose's hard-wrap newlines) to single
+    # spaces so the asserted phrases match regardless of where lines wrap.
+    low = " ".join(text.split()).lower()
+    assert "home directory is a fresh, writable scratch space" in low
+    assert "set a global git identity" in low
+    assert "thrown away with the worktree" in low
+    assert "the real home is never touched" in low
+    assert "imp_" not in low
+    assert "imp-on-imp" not in low
+
+
 def test_threshold_prose_resolves_spec_shaping_unknowns_via_spiker() -> None:
     from imp.assets import bundled_workflow_dir
     low = (bundled_workflow_dir("imp") / "agents" / "threshold.md").read_text().lower()
