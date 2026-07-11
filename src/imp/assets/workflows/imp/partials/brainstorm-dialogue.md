@@ -76,6 +76,11 @@ spec phase — research as much as the change warrants.
 
 **Walk the whole surface.** When the design changes a user-visible surface — a status bar, the scrollback log, a screen — present the complete after-state inventory of that surface: every element and its final text, color, and visibility, not only the elements the user named. Use concrete mockups where the change is visual; terminal mockups use real ANSI SGR colors and never depict a color the codes cannot produce.
 
+When a design turns on how a terminal surface actually looks, load
+`driving-terminal-uis` (`load_skill(name="driving-terminal-uis")`) and snapshot the
+*current* appearance with your impty tools, so your mockups are grounded in the real
+rendering rather than a guess.
+
 **Enumerated values are spec content.** Once the user confirms them, the actual values go into the spec verbatim — the label table, the color assignments, the per-element after-states. Plans implement pinned values; they never re-derive them.
 
 **Grill mode on request.** Prose-batch pacing is the default. When the user asks to be grilled, switch to relentless one-question-at-a-time until you share understanding: walk each branch of the design tree, resolving dependencies one at a time, one question per turn, each carrying your recommended answer. Facts findable in the codebase are looked up, never asked; decisions are the user's — put each one to them.

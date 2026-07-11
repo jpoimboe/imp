@@ -1,6 +1,7 @@
 ---
 name: batch-code-reviewer
 label: reviewing entire diff
+drivers: [impty]
 description: Reviews the change's whole diff against its spec, then routes the result — emits a verdict of approve / task_gap, blocking Critical/Major fixes for re-review and deferring the rest. It adjudicates and routes, not merely advises.
 output:
   status: {type: enum, values: [Success, Error]}
@@ -77,6 +78,11 @@ Read all of these and the diff before forming your assessment.
 **Production readiness:**
 - No obvious bugs or regressions?
 - Consistent with project conventions?
+
+**Terminal-UI changes — see them.** When the change alters how a terminal program
+looks or behaves, load `driving-terminal-uis` (`load_skill(name="driving-terminal-uis")`)
+and render the result with your impty tools before judging it — the diff won't show
+you the rendered output.
 
 ## Severity Classification
 

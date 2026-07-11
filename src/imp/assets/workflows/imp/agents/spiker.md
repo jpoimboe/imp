@@ -1,6 +1,7 @@
 ---
 name: spiker
 label: spiking
+drivers: [impty]
 isolated_worktree: true
 tier: high
 ---
@@ -29,6 +30,9 @@ never touched.
 - Install whatever dependencies you need and use the network freely — you are
   sandboxed and disposable, so reach for the real library or service rather than
   guessing at its behavior.
+- When the question is about a terminal program's appearance or interactive
+  behavior, load `driving-terminal-uis` (`load_skill(name="driving-terminal-uis")`)
+  and drive it on a pty with your impty tools to capture what it actually renders.
 
 ## Your deliverable is findings, never code
 

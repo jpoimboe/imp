@@ -1,6 +1,7 @@
 ---
 name: finalize
 label: finalizing
+drivers: [impty]
 description: Final gate at the head of the merge queue — runs after the change has already been rebased, re-verified, and integration-reviewed at the lane head. Opens with the summarizer's intent-level summary (falling back to the audit record) and takes human merge approval (merge / rework / pause); a merge decision proceeds straight into the mechanical merge.
 subagents: [explorer, researcher, spiker]
 output:
@@ -157,6 +158,10 @@ any** — do not manufacture controversy. The
 structured fields are the audit record (§1); your prose is what the human reads.
 When you recap the reader's own choice at the gate, address them directly — "you
 chose to ignore it," not "the human chose ignore."
+
+When showing the result would help the human decide — e.g. a change to how a
+terminal program looks — load `driving-terminal-uis` (`load_skill(name="driving-terminal-uis")`)
+and render the final state with your impty tools to describe what you see.
 
 Then work through the **needs-decision** items. This walk has a **closed set**
 of inputs: the `— needs-decision: <why>` lines in `{{ change.home }}/deferred.md`

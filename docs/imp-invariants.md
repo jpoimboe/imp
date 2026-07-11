@@ -9,8 +9,10 @@ Read this when editing imp's engine/renderer or workflow prompts.
   `$IMP_TEST_COMMAND` / `$IMP_LINT_COMMAND`, and let the agent discover the real
   command. Illustrative code is allowed only with a disclaimer that it is
   illustrative. Exempt: imp's *own* tooling — `integrator` /
-  `integration-review` reading `quest.json`, and `finalize`'s `PYTHONPATH` /
-  impty usage.
+  `integration-review` reading `quest.json`, `finalize`'s `PYTHONPATH`, and the
+  impty grants on the review/gate holders (`batch-code-reviewer`, `threshold`,
+  `finalize`, `spiker`) whose prompts name the impty tools and the
+  `driving-terminal-uis` skill.
 - The engine (`executor`) and the renderer (`narrative.py` / `render_text.py` /
   `live_driver.py`) expose only **generic primitives**: step kinds, and phases
   *derived* from each step's declared `phase` string. No hardcoded step, phase,

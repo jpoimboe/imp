@@ -319,7 +319,7 @@ async def start_impty_server(
     from impty.mcp import build_server
 
     return await _serve_fastmcp(
-        build_server(driver), bearer_token=bearer_token, host=host,
+        build_server(driver, thin=True), bearer_token=bearer_token, host=host,
         runner_loop=runner_loop, name="imp-codex-impty-server")
 
 
