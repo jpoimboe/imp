@@ -255,7 +255,6 @@ async def test_ask_async_passes_plain_bottom_toolbar_through() -> None:
 
 @pytest.mark.anyio
 async def test_ask_async_wraps_colored_bottom_toolbar_as_ansi_with_style() -> None:
-    from prompt_toolkit.formatted_text import ANSI
     captured: dict[str, object] = {}
 
     class _SpySession:
@@ -263,12 +262,24 @@ async def test_ask_async_wraps_colored_bottom_toolbar_as_ansi_with_style() -> No
             captured.update(kwargs)
             return "ok"
 
+    from prompt_toolkit.formatted_text import to_formatted_text
+    from prompt_toolkit.styles.defaults import default_ui_style
+
     prompt = Prompt(color=True, _session_factory=lambda: _SpySession())
     await prompt.ask_async(bottom_toolbar="\x1b[35mmodel\x1b[39m")
-    assert isinstance(captured["bottom_toolbar"], ANSI)   # parsed so the SGR survives
-    # the spaced value (with its leading newline) is wrapped, not the original
-    assert captured["bottom_toolbar"].value == "\n\x1b[35mmodel\x1b[39m"
-    assert "style" in captured                            # neutralizes default reverse
+    frags = to_formatted_text(captured["bottom_toolbar"])
+    assert frags                                          # non-empty fragments
+    # every fragment carries an inline noreverse; the ANSI magenta survives
+    assert all("noreverse" in style for style, _text, *_ in frags)
+    assert any("ansimagenta" in style for style, _text, *_ in frags)
+    # inline noreverse defeats prompt_toolkit's default reverse-video bottom-toolbar
+    # class regardless of class-merge precedence
+    ui = default_ui_style()
+    assert all(
+        ui.get_attrs_for_style_str(f"class:bottom-toolbar {style}").reverse is False
+        for style, _text, *_ in frags
+    )
+    assert "style" in captured                            # secondary noreverse class guard
 
 
 @pytest.mark.anyio

@@ -192,7 +192,7 @@ class Prompt:
         loop.remove_signal_handler(SIGINT) on prompt exit, so the handler-deletion
         problem (a88e96e) cannot recur — the rearm_signal_handlers call in
         ask_line_with_slash becomes a harmless defensive no-op (kept)."""
-        from prompt_toolkit.formatted_text import ANSI
+        from prompt_toolkit.formatted_text import ANSI, to_formatted_text
 
         from imp.cli import palette as pal
 
@@ -211,7 +211,12 @@ class Prompt:
         if bottom_toolbar is not None:
             from prompt_toolkit.styles import Style
             spaced = f"\n{bottom_toolbar}" if bottom_toolbar else bottom_toolbar
-            extra["bottom_toolbar"] = ANSI(spaced) if self._color else spaced
+            # Inline fragment-level noreverse beats the default reverse-video
+            # bottom-toolbar class regardless of class-merge precedence.
+            if self._color:
+                extra["bottom_toolbar"] = to_formatted_text(ANSI(spaced), style="noreverse")
+            else:
+                extra["bottom_toolbar"] = spaced
             extra["style"] = Style.from_dict({"bottom-toolbar": "noreverse"})
         stdin = sys.stdin
         if stdin.isatty():
