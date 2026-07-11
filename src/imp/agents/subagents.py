@@ -296,7 +296,7 @@ async def dispatch_task(
             pm = resolved[subagent_tier]
             sub_provider, sub_model = pm.provider, pm.model
         else:
-            # No runtime or static tier: fall back to the parent's provider/model (chosen_tier stays None).
+            # No runtime or static tier: inherit parent's provider/model (chosen_tier=None).
             chosen_tier = None
             sub_provider, sub_model = ctx.provider_name, ctx.model_name
 
