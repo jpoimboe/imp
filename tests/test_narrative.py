@@ -2928,3 +2928,28 @@ def test_active_phase_supersedes_seeded_spinner(monkeypatch) -> None:
     # The _current_phase guard sits ABOVE the seed branch in current_activity(),
     # so an active phase (step ended) supersedes the seed with "working".
     assert b.current_activity() == nv.Activity(verb="working")
+
+
+def test_seed_identity_sets_root_id_and_title() -> None:
+    b = nv.NarrativeBuilder()
+    b.seed_identity("lufu50", "Instant opening identity bar")
+    assert b.tree.root.id == "lufu50"
+    assert b.tree.root.title == "Instant opening identity bar"
+
+
+def test_seed_identity_empty_title_keeps_title_empty() -> None:
+    b = nv.NarrativeBuilder()
+    b.seed_identity("lufu50", "")
+    assert b.tree.root.id == "lufu50"
+    assert b.tree.root.title == ""
+
+
+def test_seeded_identity_survives_change_created_replay_unchanged() -> None:
+    b = nv.NarrativeBuilder()
+    b.seed_identity("lufu50", "Instant opening identity bar")
+    assert b.tree.root.id == "lufu50"                     # set pre-replay by seed_identity
+    assert b.tree.root.title == "Instant opening identity bar"
+    b.add({"id": "e1", "agent_id": None, "type": "change_created",
+           "payload": {"id": "lufu50", "title": "Instant opening identity bar"}})
+    assert b.tree.root.id == "lufu50"                     # replay supersedes with identical values
+    assert b.tree.root.title == "Instant opening identity bar"

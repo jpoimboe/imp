@@ -705,6 +705,10 @@ class NarrativeBuilder:
             return Activity(verb=self._seed_phrase)
         return None
 
+    def seed_identity(self, change_id: str, title: str) -> None:
+        self._root.id = change_id
+        self._root.title = title
+
     def seed_opening_intent(self, text: str) -> None:
         """Optimistic echo of the opening message: seed the committed opening-intent
         node at root so frame one shows it. Used by the non-TUI
