@@ -313,7 +313,7 @@ class LiveDriver:
         self._separator_emitted = False    # prepare_for_prompt printed the leading blank
         self._preceded_by_blank = preceded_by_blank
         self._startup_verb = startup_verb
-        self._startup_start_iso: str | None = None   # block start for the startup line's block-age timer
+        self._startup_start_iso: str | None = None   # block start for the startup block-age timer
         self._emitted_any = False
         self._last_header_position: str | None = None
         self._deferred: list[tuple[list[str], bool, str]] = []
