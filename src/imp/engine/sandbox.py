@@ -260,7 +260,7 @@ def sandbox_config_from_raw(raw: Mapping[str, Any]) -> SandboxConfig:
 def resolve_policy(
     *, worktree: Path, control_root: Path, change_id: str, cfg: SandboxConfig,
     engine_env_result: Mapping[str, str], environ: Mapping[str, str],
-    available: bool, change_dir: Path | None = None,
+    available: bool, change_dir: Path | None = None, spike: bool = False,
 ) -> SandboxPolicy:
     """Stat once, bake a frozen SandboxPolicy. The ONE impure step (spec B.1).
 
@@ -308,20 +308,41 @@ def resolve_policy(
         imp_refs.mkdir(parents=True, exist_ok=True)
         git_ref_reexpose = (str(imp_refs),)
 
-    cache_names = cfg.writable_caches or _DEFAULT_CACHES
-    caches = _existing([str(home / c) for c in cache_names])
+    if spike:
+        caches: tuple[str, ...] = ()
+    else:
+        cache_names = cfg.writable_caches or _DEFAULT_CACHES
+        caches = _existing([str(home / c) for c in cache_names])
 
     # Secret dirs/files: code defaults + config secret_paths (each classified
-    # dir-vs-file by an actual stat — p.is_dir() / p.exists()); + /run/user/$UID.
-    secret_dirs = list(_existing([str(home / d) for d in _DEFAULT_SECRET_DIRS]))
-    secret_files = list(_existing([str(home / f) for f in _DEFAULT_SECRET_FILES]))
+    # dir-vs-file by an actual stat); + /run/user/$UID. Under a spike tmpfs home
+    # the home-relative masks are moot (they live inside the now-empty tmpfs) and
+    # are omitted; absolute secret_paths and /run/user/$UID are outside $HOME and
+    # stay masked.
+    if spike:
+        secret_dirs: list[str] = []
+        secret_files: list[str] = []
+    else:
+        secret_dirs = list(_existing([str(home / d) for d in _DEFAULT_SECRET_DIRS]))
+        secret_files = list(_existing([str(home / f) for f in _DEFAULT_SECRET_FILES]))
     for extra in cfg.secret_paths:
-        p = (home / extra) if not extra.startswith("/") else Path(extra)
+        is_abs = extra.startswith("/")
+        if spike and not is_abs:
+            continue   # home-relative mask is moot under the tmpfs home
+        p = Path(extra) if is_abs else (home / extra)
         if p.is_dir():
             secret_dirs.append(str(p))
         elif p.exists():
             secret_files.append(str(p))
     secret_dirs.append(f"/run/user/{uid}")   # H2 — agent sockets; mask even if abs
+
+    ephemeral_home = ""
+    cred_writethrough: tuple[str, ...] = ()
+    if spike:
+        ephemeral_home = str(home)
+        claude_override = environ.get("CLAUDE_CONFIG_DIR")
+        claude_dir = Path(claude_override) if claude_override else home / ".claude"
+        cred_writethrough = _existing([str(claude_dir), str(home / ".codex")])
 
     return SandboxPolicy(
         active=True,
@@ -338,6 +359,8 @@ def resolve_policy(
         setenv=_build_setenv(engine_env_result, environ, cfg.extra_env),
         network=cfg.network,
         note="",
+        ephemeral_home=ephemeral_home,
+        cred_writethrough=cred_writethrough,
     )
 
 
