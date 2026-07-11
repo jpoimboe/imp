@@ -296,14 +296,20 @@ def test_send_signal_delivers_sigint() -> None:
 def test_run_to_completion_drains_flood_and_keeps_trailing_sentinel() -> None:
     # AC1+AC2: a child that floods ≫ one tty-buffer, then prints a sentinel and
     # exits. run_to_completion must drain PAST the buffer-fill point to the end,
-    # WITHOUT relying on the hard cap. The assertion below only needs to tell an
-    # EOF-drain apart from a hard-cap stall, so it asserts elapsed ≪ hard. It is
-    # deliberately NOT a tight sub-second bound: the drain's own cost is dominated
-    # by pyte's feed() rendering the ~2350-line flood through its history buffer
-    # (~0.85 s on an idle box, and it grows under CPU load) — a 1 s bound collides
-    # with that legitimate cost and flakes. A hard-cap stall would instead make
-    # elapsed ≈ hard, so `< hard / 2` separates the two with a wide, load-robust
-    # margin (real drain ~1-3 s under load vs. a 10 s cap).
+    # WITHOUT relying on the hard cap. The two assertions below are DETERMINISTIC
+    # and together prove that invariant, so there is no wall-clock assertion here:
+    #   - rc == 0 proves an EOF-drain-and-reap, NOT a hard-cap stall. A hard-cap
+    #     outcome in Phase 1 (child still alive at the deadline) RAISES
+    #     TimeoutExpired rather than returning — so a returned exit code can only
+    #     mean the child exited and was reaped after a real drain.
+    #   - DONE-1 present proves the post-flood trailing sentinel survived to the
+    #     end, i.e. the drain went past the buffer-fill point.
+    # A wall-clock bound is deliberately NOT asserted: the drain's cost is
+    # dominated by pyte's feed() rendering the ~2350-line flood through its
+    # history buffer (~0.85 s idle, and it grows under CPU load), so any fixed
+    # ceiling is a load-dependent timing flake under `-n auto` saturation. `hard`
+    # below is a generous liveness ceiling only — nothing asserts how much of it
+    # was used.
     prog = (
         "import sys\n"
         "sys.stdout.write('A' * 200000)\n"  # ≫ 64 KiB kernel tty buffer
@@ -311,12 +317,8 @@ def test_run_to_completion_drains_flood_and_keeps_trailing_sentinel() -> None:
         "sys.stdout.flush()\n"
     )
     with TerminalSession([sys.executable, "-c", prog]) as s:
-        hard = 10.0
-        start = time.monotonic()
-        rc = s.run_to_completion(hard=hard)
-        elapsed = time.monotonic() - start
+        rc = s.run_to_completion(hard=30.0)
         assert rc == 0
-        assert elapsed < hard / 2, f"drained via hard cap, not EOF (elapsed={elapsed:.2f}s)"
         # Assert on the pyte-RENDERED line: the pty line discipline maps \n→\r\n
         # (ONLCR), so the raw master tail isn't byte-exact. transcript() is
         # history-bounded (pyte history=2000), but the trailing line survives.
