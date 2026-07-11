@@ -91,6 +91,21 @@ def test_subagent_return_sets_stretch_start_when_last_fold_closes() -> None:
     assert b._stretch_start_ts == "2026-01-01T00:00:44+00:00"
 
 
+def test_subagent_tool_result_close_sets_stretch_start() -> None:
+    # The COMMON production close path (the test above covers only resume-close):
+    # the subagent's `task` tool_result — same block id as its dispatch — closes
+    # the last running fold via _h_tool_result, so the parent regains the block
+    # and a fresh stretch starts at the result's timestamp.
+    b = _stepped("2026-01-01T00:00:03+00:00")
+    b.add(ev("t1", "tool_call", agent_id="step:p/s", id="blk-t1", name="sub_agent",
+             input={"subagent_name": "coder"}, timestamp="2026-01-01T00:00:04+00:00"))
+    assert b.running_subagents()                          # fold open
+    b.add(ev("tr1", "tool_result", agent_id="step:p/s", id="blk-t1", content="ok",
+             timestamp="2026-01-01T00:00:44+00:00"))
+    assert b.running_subagents() == []                    # canonical close fired
+    assert b._stretch_start_ts == "2026-01-01T00:00:44+00:00"
+
+
 def test_waiting_for_test_lane_captures_wait_start_ts() -> None:
     b = nv.NarrativeBuilder()
     b.add(ev("1", "change_created", change_id=1, title="x"))
