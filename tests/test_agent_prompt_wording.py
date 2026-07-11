@@ -315,3 +315,38 @@ def test_finalize_cover_check_marks_covered_by() -> None:
     # Fail-safe: only a positively confirmed tracker suppresses the human ask.
     assert "surface, never suppress" in low
     assert "positively confirmed" in low
+
+
+def _render_agent(name: str, tmp_path) -> str:
+    body = _agent_prompt(name)
+    log = JsonlEventLog(tmp_path / f"{name}-events.jsonl")
+    return render_prompt(
+        body,
+        build_context(
+            change_title="t",
+            event_log=log,
+            change_id="abc",
+            change_home=".imp/changes/abc",
+            cur_base_head="BASE",
+            vars={"fast_path": False, "task_total": 0},
+        ),
+        workflow_dir=bundled_workflow_dir("imp"),
+    )
+
+
+def test_synced_pair_notes_stripped_from_rendered_prompts(tmp_path) -> None:
+    # The maintainer-only SYNCED PAIR coordination note must not reach the model.
+    for name in ("task-lead", "deferred-sweep"):
+        out = _render_agent(name, tmp_path)
+        assert "SYNCED PAIR" not in out, name
+        # The Jinja comment delimiters must not leak into the rendered body either.
+        assert "{#" not in out and "#}" not in out, name
+
+    # The SYNCED PAIR blocks in source now use Jinja comment delimiters, not HTML.
+    for name in ("task-lead", "deferred-sweep"):
+        src = _agent_prompt(name)
+        assert "<!-- SYNCED PAIR" not in src, name
+        assert "{# SYNCED PAIR" in src, name
+
+    # Regression: plan-writer.md's intentional inline example comment is untouched.
+    assert "<!-- HARD tasks ONLY" in _agent_prompt("plan-writer")
