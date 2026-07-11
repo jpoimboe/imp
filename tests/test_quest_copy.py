@@ -22,17 +22,16 @@ def test_show_help_names_quests_not_changes(capsys) -> None:
     # `imp <cmd> --help` prints the subparser DESCRIPTION + arg helps, NOT the
     # parent-list `add_parser(help=...)` string — so assert against those.
     out = _help_for("show", capsys)
-    assert "show an overview of your Quests" in out       # description=
-    assert "print that Quest's detail card" in out         # description=
-    assert "an overview of all Quests" in out              # token arg help
-    assert "include abandoned Quests" in out               # --all arg help
+    assert "Print a Quest's detail card" in out            # description=
+    assert "while a Quest is in flight" in out             # description=
+    assert "Quest id or its short token" in out            # token arg help
     assert "change" not in out
 
 
 def test_search_help_names_quests(capsys) -> None:
     out = _help_for("search", capsys)
-    assert "for Quests whose title or id" in out           # description=
-    assert "against a Quest's title or id." in out         # QUERY arg help
+    assert "backlog, and archived Quests" in out           # description=
+    assert "a Quest's id, title, or conversation content" in out   # description=
     assert "change" not in out
 
 
@@ -41,7 +40,8 @@ def test_overview_command_list_names_quests() -> None:
     descs = " | ".join(d for _verb, d in _OVERVIEW_COMMANDS)
     assert "scope a Quest." in descs
     assert "Scope a new Quest in conversation" in descs
-    assert "Show your Quests; `imp show <id>` for one Quest's detail." in descs
+    assert "List your Quests: in-flight, backlog, and recently merged." in descs
+    assert "Show one Quest's detail or a named artifact (imp show <id>)." in descs
     assert "change" not in descs
 
 

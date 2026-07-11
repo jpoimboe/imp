@@ -1694,7 +1694,7 @@ def test_main_forwards_model_to_serve(
 
     rc = daemon.main([
         "--control-root", str(tmp_path),
-        "--change-id", "2026-07-10-mdl",
+        "--quest-id", "2026-07-10-mdl",
         "--model", "a:b",
     ])
 

@@ -2625,7 +2625,7 @@ async def _pick_abandon_matches(
 
 
 _SHOW_PICKER_HEADER = (
-    "Show which change?  (↑/↓ to move · enter to select · q to cancel)"
+    "Show which Quest?  (↑/↓ to move · enter to select · q to cancel)"
 )
 
 

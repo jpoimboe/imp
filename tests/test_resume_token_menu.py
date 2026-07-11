@@ -81,7 +81,7 @@ async def test_two_matches_open_scoped_picker_interactive(
     monkeypatch.setattr(m, "_interactive", lambda: True)
 
     async def fake_picker(candidates, *, now, color, header, selected_index):
-        assert "Resume which change?" in header
+        assert "Resume which Quest?" in header
         return candidates[1].quest_id
 
     monkeypatch.setattr(m.resume_select, "run_picker", fake_picker)

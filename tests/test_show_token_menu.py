@@ -58,13 +58,13 @@ async def test_pick_show_target_empty_pool(
 async def test_pick_show_matches_interactive_selection(
     monkeypatch, tmp_path: Path,
 ) -> None:
-    # AC 1 / AC 9a: the scoped picker is headed "Show which change?" and returns
+    # AC 1 / AC 9a: the scoped picker is headed "Show which Quest?" and returns
     # the selected id. Display rows are built from _row_for_id over the raw ids.
     monkeypatch.setattr(m, "_interactive", lambda: True)
     monkeypatch.setattr(m, "_row_for_id", lambda c, cid: _row(cid))
 
     async def fake_picker(candidates, *, now, color, header, selected_index):
-        assert "Show which change?" in header
+        assert "Show which Quest?" in header
         return candidates[1].quest_id
 
     monkeypatch.setattr(m.resume_select, "run_picker", fake_picker)
