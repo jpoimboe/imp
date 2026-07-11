@@ -2609,6 +2609,77 @@ async def _pick_abandon_matches(
     )
 
 
+_SHOW_PICKER_HEADER = (
+    "Show which change?  (↑/↓ to move · enter to select · q to cancel)"
+)
+
+
+def _show_picker_empty() -> int:
+    print("No changes to show.")
+    return 2
+
+
+def _show_picker_non_tty(rows: list[_Row]) -> int:
+    # Defensive parity only: _cmd_show handles the non-tty no-token case
+    # directly (needs-a-change-id error), so _pick_show_target is invoked
+    # solely on an interactive tty and this branch is never reached.
+    print("imp: 'imp show' needs a change id — run 'imp list' for an overview",
+          file=sys.stderr)
+    return 2
+
+
+def _show_all_rows(control: Path) -> list[_Row]:
+    """Display rows for the no-token show picker: every _iter_change_ids id
+    (live homes + backlog + archived), via _row_for_id, unreadable ids
+    dropped, newest-first — the same pool `imp show <exact-id>` reaches."""
+    rows = [r for r in (_row_for_id(control, cid)
+                        for cid in _iter_change_ids(control)) if r is not None]
+    return _sort_rows_newest_first(rows)
+
+
+async def _pick_show_target(control: Path) -> str | int:
+    return await _pick_change_target(
+        control=control,
+        rows=_show_all_rows(control),
+        header=_SHOW_PICKER_HEADER,
+        on_empty=_show_picker_empty,
+        on_non_tty=_show_picker_non_tty,
+    )
+
+
+async def _pick_show_matches(control: Path, matches: list[str]) -> str | int:
+    """Scoped show picker over a token's raw _iter_change_ids matches (>=2).
+
+    `matches` is the raw id list (the exact set the ambiguity fork counted);
+    display rows come from _row_for_id, so an unreadable id is dropped from the
+    menu only, never from the count. on_non_tty is defensive parity — the real
+    non-tty ambiguous path routes through _resolve_id/_exit_ambiguous."""
+    rows = _sort_rows_newest_first(
+        [r for r in (_row_for_id(control, cid) for cid in matches)
+         if r is not None])
+
+    def _non_tty(rows: list[_Row]) -> int:
+        print("imp: ambiguous token; candidates:", file=sys.stderr)
+        color = should_use_color(sys.stderr)
+        now = datetime.now(UTC)
+        print(change_row.header_line(color=color), file=sys.stderr)
+        name_w = change_row.name_budget()
+        for r in rows:
+            print(change_row.format_change_line(
+                change_id=r[0], title=r[4], status=r[1], step=r[2],
+                step_label=r[6], last_iso=r[3], now=now, color=color,
+                name_width=name_w), file=sys.stderr)
+        return 2
+
+    return await _pick_change_target(
+        control=control,
+        rows=rows,
+        header=_SHOW_PICKER_HEADER,
+        on_empty=_show_picker_empty,
+        on_non_tty=_non_tty,
+    )
+
+
 def _cmd_abandon(args: argparse.Namespace) -> int:
     control = _control_root()
     yes = args.yes
