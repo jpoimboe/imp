@@ -25,7 +25,7 @@
 #     (no gate; project hasn't wired / has opted out of this tier).
 #
 # Per-tier tree-SHA skip cache: record the git tree SHA of the last green (exit-0)
-# run in a per-tier per-change file (last_green_tree_<tier>) under $IMP_QUEST_DIR.
+# run in a per-tier per-quest file (last_green_tree_<tier>) under $IMP_QUEST_DIR.
 # On entry, if HEAD's tree equals THIS tier's last green tree, skip (exit 0) —
 # identical tree ⇒ identical result. Each tier has its own cache: a green fast run
 # never lets the slow gate skip (and vice versa). Logged explicitly, never silent.

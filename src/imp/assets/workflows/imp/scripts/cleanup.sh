@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # cleanup.sh — the ONE end-of-quest fold + stamp, run once at cleanup-merge over
-# the whole change range cur_base_head..HEAD. It folds every fixup!/squash!/amend!
+# the whole quest range cur_base_head..HEAD. It folds every fixup!/squash!/amend!
 # chain into its target and stamps `Quest: <id>` on every non-merge commit. Both
 # are idempotent: fold runs only when a directive exists, stamp only when some
 # in-range commit lacks the trailer, so re-running on already-folded, already-
-# stamped history is a ZERO-CHURN no-op (identical SHAs). Because the whole change
-# is in range, a fixup! targeting ANY change commit folds.
+# stamped history is a ZERO-CHURN no-op (identical SHAs). Because the whole quest
+# is in range, a fixup! targeting ANY quest commit folds.
 #
 #   0 -> clean tree, fixups folded, trailers stamped (or already-clean no-op)
 #   2 -> resolvable fold conflict (rebase left in progress) -> autosquash-resolve-merge
@@ -17,7 +17,7 @@ QUEST_DIR="${IMP_QUEST_DIR:?IMP_QUEST_DIR not set by engine}"
 ID="${IMP_QUEST_ID:?IMP_QUEST_ID not set by engine}"
 STATE="$QUEST_DIR/state"
 
-# Range base: the change fork (cur_base_head from quest.json). The whole change is
+# Range base: the quest fork (cur_base_head from quest.json). The whole quest is
 # in range, so any in-range fixup! folds.
 FORK=$(python3 -c "import json,os;print(json.load(open(os.path.join(os.environ['IMP_QUEST_DIR'],'quest.json')))['cur_base_head'])")
 [ -n "$FORK" ] || { echo "empty fork (no cur_base_head)" >&2; exit 1; }
