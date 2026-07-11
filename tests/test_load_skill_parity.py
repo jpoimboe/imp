@@ -364,3 +364,69 @@ async def test_claude_code_load_skill_via_wrap_one(tmp_path: Path) -> None:
     # skill_load event with correct payload and agent_id=None.
     events = _read_events(events_path)
     _assert_skill_load_event(events)
+
+
+@pytest.mark.anyio
+async def test_claude_code_load_skill_flush_orders_below_narration(
+    tmp_path: Path,
+) -> None:
+    """ClaudeCode: load_skill flushes the turn's prose (llm_response) BEFORE it
+    appends skill_load, so the event log lands narration-then-load.
+
+    Drives the real _wrap_one/_impl path directly (same mechanism as
+    test_claude_code_load_skill_via_wrap_one).  state.flush_llm_group is stubbed
+    with a closure that emits an llm_response event — exactly what _run's real
+    closure does when a turn carries accumulated narration prose.  The fix must
+    invoke that closure before load_skill's in-tool skill_load append, so the
+    llm_response event precedes the skill_load event in the log.
+
+    Falsifiability: without the fix, the generic dispatch branch never calls
+    flush_llm_group, so no llm_response event is emitted at all and the
+    membership assertion fails; with the fix it is emitted, and before skill_load.
+    """
+    workflow_dir = tmp_path / ".imp" / "change" / "workflow"
+    skills_dir = workflow_dir / "skills" / "agent"
+    skills_dir.mkdir(parents=True, exist_ok=True)
+    (skills_dir / "refactor.md").write_text(SKILL_BODY)
+
+    events_path = tmp_path / "events.jsonl"
+
+    ctx = ToolContext(
+        project_root=tmp_path,
+        events_path=events_path,
+    )
+    ctx.change_context = ChangeContext(
+        title="Test Change", project_root=tmp_path,
+        workflow_dir=workflow_dir,
+    )
+    ctx.event_log = JsonlEventLog(events_path)
+
+    state = _RunState()
+
+    async def _fake_flush(*_args: Any, **_kwargs: Any) -> None:
+        # Stand in for _run's real _flush_llm_group: commit the turn's
+        # accumulated narration prose as an llm_response event.
+        ctx.event_log.append_llm_response(
+            agent_id="t", provider="claude_code", model="claude-sonnet-4-5",
+            raw={"content": [{"type": "text",
+                              "text": "loading the refactor skill"}]},
+            usage={}, stop_reason=None,
+        )
+
+    state.flush_llm_group = _fake_flush
+
+    tool = make_load_skill_tool()
+    wrapped = _wrap_one("load_skill", tool, ctx, state, _passthrough_decorator)
+
+    out = await wrapped({"name": "refactor"})
+    assert out["content"][0]["text"] == SKILL_BODY
+
+    events = _read_events(events_path)
+    types = [e["type"] for e in events]
+    assert "llm_response" in types, (
+        f"expected an llm_response event (the flushed narration), got {types}"
+    )
+    assert "skill_load" in types, f"expected a skill_load event, got {types}"
+    assert types.index("llm_response") < types.index("skill_load"), (
+        f"llm_response must precede skill_load; event order was {types}"
+    )
