@@ -536,6 +536,11 @@ class _RunState:
     # Per-tool wall-time (ms) keyed by SDK tool_use_id, written by the MCP
     # wrapper and read once by the receive loop when it appends the tool_result.
     tool_durations: dict[str, float] = field(default_factory=dict)
+    # The flush-lock-guarded _flush_llm_group closure, assigned once by _run so
+    # the out-of-band _impl sub_agent path can commit accumulated parent prose
+    # (as an llm_response) BEFORE it eagerly appends the sub_agent tool_call.
+    # None until _run assigns it (pre-loop); _impl guards on that.
+    flush_llm_group: Any = None
 
 
 # ── Tool registry shimming ───────────────────────────────────────────────────
@@ -776,6 +781,13 @@ def _wrap_one(
                     # link (agent_id="sub:" + this event id) depends on it.
                     sub_def = ctx.subagent_defs.get(args["subagent_name"])
                     label = sub_def.label if sub_def is not None else None
+                    # Commit any accumulated parent prose as an llm_response BEFORE
+                    # this eager tool_call, so narration renders above the sub_agent
+                    # fold it introduces (parity with ordinary tools). The flush's
+                    # lock makes this wait for any in-flight receive-loop flush's
+                    # emit. None until _run assigns the closure (pre-loop).
+                    if state.flush_llm_group is not None:
+                        await state.flush_llm_group()
                     # Stamp the call block-tracked (id_ns="block"), matching the
                     # outcome-carrying result below and dispatch.py: the narrative
                     # reads awaits_result from the CALL, so an unstamped call leaves
@@ -1249,6 +1261,7 @@ class ClaudeCodeAgentRunner:
         self._last_no_result_diag: dict[str, Any] = {}
         self._cancel = False
         self._ctx: ToolContext | None = None
+        self._state: _RunState | None = None
         # The live SDK client while a turn streams. interrupt() signals the
         # running query (client.interrupt()) WITHOUT disconnecting: the subprocess
         # stays connected and the turn closes balanced, so a steer or handoff
@@ -1487,6 +1500,7 @@ class ClaudeCodeAgentRunner:
         state = _RunState()
         state.agent_id = aid
         state.runner_loop = asyncio.get_running_loop()
+        self._state = state
         sdk_tools = _make_sdk_tools(tools, ctx, state)
 
         # In-process MCP server hosting imp tools. The real SDK call:
@@ -1827,42 +1841,56 @@ class ClaudeCodeAgentRunner:
         stream_cur_usage: dict[str, Any] = {}
         stream_cur_stop_reason: Any = None
 
+        _flush_lock = asyncio.Lock()
+
         async def _flush_llm_group(backstop_stop_reason: Any = None) -> None:
             nonlocal llm_group_open, llm_group_key, llm_blocks
             nonlocal llm_model, llm_stop_reason, llm_usage
-            if not llm_group_open:
-                return
-            cu_fields = await _context_usage_fields(client)
-            # Prefer the finalized figures harvested from the stream for this
-            # message_id; fall back to the AssistantMessage-derived values when
-            # the turn produced no stream events for that key.
-            harvested = (stream_usage_by_msg.pop(llm_group_key, None)
-                         if llm_group_key is not None else None)
-            if harvested is not None:
-                usage, harvested_stop = harvested
-                stop = harvested_stop if harvested_stop is not None else (
-                    llm_stop_reason if llm_stop_reason is not None
-                    else backstop_stop_reason)
-            else:
-                usage = llm_usage
-                stop = llm_stop_reason if llm_stop_reason is not None \
-                    else backstop_stop_reason
-            elog.append_llm_response(
-                agent_id=aid, provider=invocation.provider_name,
-                model=llm_model or self.model,
-                raw={"content": llm_blocks, "stop_reason": stop,
-                     "usage": usage},
-                usage=usage, stop_reason=stop,
-                message_id=llm_group_key,
-                context_window=cu_fields.get("context_window"),
-                context_pct=cu_fields.get("context_pct"),
-                context_tokens=cu_fields.get("context_tokens"))
-            llm_group_open = False
-            llm_group_key = None
-            llm_blocks = []
-            llm_model = None
-            llm_stop_reason = None
-            llm_usage = {}
+            # Serialize every flush on one per-run lock: whichever caller flushes
+            # first holds the lock across the _context_usage_fields await and the
+            # emit; a concurrent second caller (the eager sub_agent flush in
+            # _impl) BLOCKS on the lock until that emit completes, then sees the
+            # group closed and no-ops. A bare no-op guard would NOT reorder — under
+            # the pinned interleaving the receive-loop flush is suspended in the
+            # await when _impl fires, so the prose would still emit AFTER _impl's
+            # tool_call. The lock is the completion barrier that makes _impl's
+            # flush wait for the in-flight prose emit.
+            async with _flush_lock:
+                if not llm_group_open:
+                    return
+                cu_fields = await _context_usage_fields(client)
+                # Prefer the finalized figures harvested from the stream for this
+                # message_id; fall back to the AssistantMessage-derived values when
+                # the turn produced no stream events for that key.
+                harvested = (stream_usage_by_msg.pop(llm_group_key, None)
+                             if llm_group_key is not None else None)
+                if harvested is not None:
+                    usage, harvested_stop = harvested
+                    stop = harvested_stop if harvested_stop is not None else (
+                        llm_stop_reason if llm_stop_reason is not None
+                        else backstop_stop_reason)
+                else:
+                    usage = llm_usage
+                    stop = llm_stop_reason if llm_stop_reason is not None \
+                        else backstop_stop_reason
+                elog.append_llm_response(
+                    agent_id=aid, provider=invocation.provider_name,
+                    model=llm_model or self.model,
+                    raw={"content": llm_blocks, "stop_reason": stop,
+                         "usage": usage},
+                    usage=usage, stop_reason=stop,
+                    message_id=llm_group_key,
+                    context_window=cu_fields.get("context_window"),
+                    context_pct=cu_fields.get("context_pct"),
+                    context_tokens=cu_fields.get("context_tokens"))
+                llm_group_open = False
+                llm_group_key = None
+                llm_blocks = []
+                llm_model = None
+                llm_stop_reason = None
+                llm_usage = {}
+
+        state.flush_llm_group = _flush_llm_group
 
         client_ctx = self._build_client(opts)
         async with client_ctx as client:
