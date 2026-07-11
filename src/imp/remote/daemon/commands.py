@@ -97,30 +97,30 @@ SAVE_USAGE = (
     "To save a conversation, reply to one of its messages or use @handle "
     "(e.g. /save @ab12cd).")
 ABANDON_USAGE = (
-    "To abandon a Quest, reply to one of its messages or use @handle "
+    "To abandon a quest, reply to one of its messages or use @handle "
     "(e.g. /abandon @ab12cd).")
 UNSUBSCRIBE_USAGE = (
     "To unsubscribe, reply to one of its messages or use @handle "
     "(e.g. /unsubscribe @ab12cd).")
 UNKNOWN_COMMAND = "Unknown command. Try /help."
-ALERTS_ON_REPLY = "Alerts: all Quests."
-ALERTS_OFF_REPLY = "Alerts: subscribed Quests only."
+ALERTS_ON_REPLY = "Alerts: all quests."
+ALERTS_OFF_REPLY = "Alerts: subscribed quests only."
 ROUTE_HINT = (
-    "Couldn't route that — reply to a Quest's message, prefix @handle, or send /list.")
+    "Couldn't route that — reply to a quest's message, prefix @handle, or send /list.")
 HELP_TEXT = (
     "Commands:\n"
-    "/list — show running Quests (● = subscribed)\n"
-    "/new <prompt> — start a Quest\n"
-    "/subscribe @handle — follow a Quest (streams from now; /replay for history)\n"
-    "/unsubscribe (reply or @handle) — stop all messages for a Quest\n"
+    "/list — show running quests (● = subscribed)\n"
+    "/new <prompt> — start a quest\n"
+    "/subscribe @handle — follow a quest (streams from now; /replay for history)\n"
+    "/unsubscribe (reply or @handle) — stop all messages for a quest\n"
     "/replay [n] (reply or @handle) — re-send last n messages\n"
-    "/abandon (reply or @handle) — stop a Quest\n"
+    "/abandon (reply or @handle) — stop a quest\n"
     "/search <query> — search archived conversations by title or id\n"
     "/resume <id or text> — rehydrate and continue a saved/archived conversation\n"
     "/save (reply or @handle) — save a conversation to your Backlog\n"
-    "/alerts on|off — alert on every Quest, not just the ones you follow (default: on)\n"
+    "/alerts on|off — alert on every quest, not just the ones you follow (default: on)\n"
     "/help — this message\n"
-    "Reply to a Quest's message (or @handle) to answer it.")
+    "Reply to a quest's message (or @handle) to answer it.")
 
 
 def _resolve_target(

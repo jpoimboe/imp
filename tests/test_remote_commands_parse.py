@@ -144,7 +144,7 @@ def test_listresult_carries_the_resident_set() -> None:
 
 
 def test_list_help_line_says_running_changes() -> None:
-    assert "/list — show running Quests (● = subscribed)" in HELP_TEXT
+    assert "/list — show running quests (● = subscribed)" in HELP_TEXT
 
 
 def test_route_hint_points_at_list_not_show() -> None:
@@ -174,11 +174,11 @@ def test_slash_alerts_arg_is_case_insensitive() -> None:
 
 def test_help_text_mentions_alerts() -> None:
     assert (
-        "/alerts on|off — alert on every Quest, not just the ones you follow (default: on)"
+        "/alerts on|off — alert on every quest, not just the ones you follow (default: on)"
         in HELP_TEXT)
 
 
 def test_help_text_mentions_subscribe_streams_from_now() -> None:
     assert (
-        "/subscribe @handle — follow a Quest (streams from now; /replay for history)"
+        "/subscribe @handle — follow a quest (streams from now; /replay for history)"
         in HELP_TEXT)

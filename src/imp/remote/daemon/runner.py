@@ -194,8 +194,8 @@ def _make_telegram_adapter(
 
 
 def _make_on_attach(subscriptions: Subscriptions) -> Callable[[str, bool], None]:
-    """Auto-subscribe a freshly attached Quest whose hello set autosubscribe (spec
-    §6). Membership only — a freshly attached Quest has no prior history. No
+    """Auto-subscribe a freshly attached quest whose hello set autosubscribe (spec
+    §6). Membership only — a freshly attached quest has no prior history. No
     on_detach hook: a detach is process churn, not an intent to stop following."""
     def on_attach(quest_id: str, autosubscribe: bool) -> None:
         if autosubscribe:
@@ -292,13 +292,13 @@ async def _handle_command(
             await control.reply(command.quest_id, command.text)
         except LoadError:
             responses.put(Notice(
-                f"no such Quest `{command.quest_id}` — unknown or pruned"))
+                f"no such quest `{command.quest_id}` — unknown or pruned"))
             return
     elif isinstance(command, Subscribe):
         handle = handle_for(command.quest_id)
         if await anyio.to_thread.run_sync(control.snapshot, command.quest_id) is None:
             responses.put(Notice(
-                f"No Quest @{handle} — send /list to see what's running."))
+                f"No quest @{handle} — send /list to see what's running."))
             return
         await anyio.to_thread.run_sync(
             control.subscriptions.snapshot_and_add,
@@ -327,7 +327,7 @@ async def _handle_command(
                     responses.put(Notice(text, quest_id=quest_id))
     elif isinstance(command, Create):
         control.create(command.prompt)
-        responses.put(Notice("Spawning a new Quest… watch for its first question"))
+        responses.put(Notice("Spawning a new quest… watch for its first question"))
     elif isinstance(command, Abandon):
         handle = handle_for(command.quest_id)
         rc = await anyio.to_thread.run_sync(control.abandon, command.quest_id)
@@ -343,7 +343,7 @@ async def _handle_command(
             responses.put(ListResult(changes, resident))
         except Exception:
             _log.warning("list or residency probe failed", exc_info=True)
-            responses.put(Notice("Error: could not list Quests."))
+            responses.put(Notice("Error: could not list quests."))
     elif isinstance(command, Search):
         hits = await anyio.to_thread.run_sync(control.search, command.query)
         if not hits:
@@ -475,7 +475,7 @@ async def run_daemon(
     alert_all = AlertAll()
 
     # on_event is a no-op: events now arrive via the supervisor's directory pull.
-    # on_attach auto-subscribes a Quest whose hello set autosubscribe (spec §6).
+    # on_attach auto-subscribes a quest whose hello set autosubscribe (spec §6).
     hub = SouthHub(
         str(spath), on_event=lambda cid, line: None,
         on_attach=_make_on_attach(subscriptions))

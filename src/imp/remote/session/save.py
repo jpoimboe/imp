@@ -1,4 +1,4 @@
-"""Save a (possibly resident) Quest to the Backlog."""
+"""Save a (possibly resident) quest to the Backlog."""
 from __future__ import annotations
 
 from pathlib import Path

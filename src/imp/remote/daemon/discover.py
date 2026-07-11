@@ -15,7 +15,7 @@ def socket_path(control_root: Path) -> Path:
 
 @dataclass(frozen=True)
 class QuestInfo:
-    """One Quest as the `list` control verb reports it (spec control surface)."""
+    """One quest as the `list` control verb reports it (spec control surface)."""
     id: str
     title: str
     status: str
@@ -23,9 +23,9 @@ class QuestInfo:
 
 
 def list_quests(control_root: Path) -> list[QuestInfo]:
-    """The in-flight Quests the `list` verb reports — those a user can still act on.
+    """The in-flight quests the `list` verb reports — those a user can still act on.
 
-    `_iter_quest_ids` enumerates every known Quest including the journal
+    `_iter_quest_ids` enumerates every known quest including the journal
     (completed / merged / abandoned), but those are terminal: surfacing them in a
     remote `/list` is just noise. Keep only the in-flight statuses
     (running / new / paused / merge_blocked / draft); `running` and
