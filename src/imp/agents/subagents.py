@@ -81,8 +81,9 @@ def make_task_tool(tiers: tuple[str, ...] = ()) -> Tool:
                     "enum": list(tiers),
                     "description": (
                         "Capability tier for the subagent, listed cheapest->"
-                        "strongest. Pick by subtask difficulty; omit to inherit "
-                        "the caller's model."
+                        "strongest. Omit to use the subagent's own default "
+                        "tier; pass a value only to deliberately override it "
+                        "(e.g. escalate a genuinely hard subtask)."
                     ),
                 },
             },
