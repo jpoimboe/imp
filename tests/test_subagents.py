@@ -1054,3 +1054,15 @@ async def test_subagent_fourth_hinted_sleep_is_budgeted(tmp_path: Path,
     retries = [e for e in log.read() if e["type"] == "agent_retry"]
     assert len(retries) == 3
     assert all(e["payload"]["hinted"] is True for e in retries)
+
+
+def test_task_tool_tier_description_omit_uses_default_not_inherit() -> None:
+    """The tier description tells the model that omitting resolves to the
+    subagent's own default tier — NOT the caller's model."""
+    tool = make_task_tool(("low", "medium", "high"))
+    desc = tool.input_schema["properties"]["tier"]["description"]
+    assert "Omit to use the subagent's own default tier" in desc
+    assert "deliberately override it" in desc
+    # The factually-wrong clause is gone.
+    assert "inherit the caller's model" not in desc
+    assert "Pick by subtask difficulty" not in desc

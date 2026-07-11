@@ -200,3 +200,19 @@ def test_brainstorm_dialogue_renders_seeded_vs_unseeded_branch() -> None:
     assert "add a dark-mode toggle" not in unseeded
     assert "Open by asking" in unseeded                # bare-open elicit branch
 
+
+def test_delegate_exploration_carries_explorer_tier_discipline() -> None:
+    text = (PARTIALS / "delegate-exploration.md").read_text()
+    # The new tier-discipline paragraph, verbatim in its load-bearing parts.
+    assert "Leave the tier unset: `explorer` defaults to the `medium` tier" in text
+    assert "tuned for" in text
+    assert "read-and-trace work" in text
+    assert "Escalate to `high` only for a genuinely hard investigation" in text
+    assert "the cheaper tier would plausibly draw a wrong conclusion" in text
+    assert "most" in text
+    assert "exploration does not need it" in text
+    # It is appended AFTER the existing delegate-exploration guidance, not before it.
+    idx_intro = text.index("Delegate exploration; read inline only what you will edit.")
+    idx_tier = text.index("Leave the tier unset:")
+    assert idx_intro < idx_tier
+

@@ -81,8 +81,9 @@ def make_task_tool(tiers: tuple[str, ...] = ()) -> Tool:
                     "enum": list(tiers),
                     "description": (
                         "Capability tier for the subagent, listed cheapest->"
-                        "strongest. Pick by subtask difficulty; omit to inherit "
-                        "the caller's model."
+                        "strongest. Omit to use the subagent's own default "
+                        "tier; pass a value only to deliberately override it "
+                        "(e.g. escalate a genuinely hard subtask)."
                     ),
                 },
             },
@@ -295,7 +296,7 @@ async def dispatch_task(
             pm = resolved[subagent_tier]
             sub_provider, sub_model = pm.provider, pm.model
         else:
-            # Inherit the parent's provider/model with no explicit tier label.
+            # No runtime or static tier: inherit parent's provider/model (chosen_tier=None).
             chosen_tier = None
             sub_provider, sub_model = ctx.provider_name, ctx.model_name
 
