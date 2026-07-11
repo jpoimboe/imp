@@ -20,7 +20,7 @@ def _row(cid: str, status: str, last: str) -> tuple[str, str, str, str, str, str
 @pytest.mark.anyio
 async def test_nothing_to_resume_prints_hint(monkeypatch, tmp_path: Path, capsys) -> None:
     monkeypatch.setattr(m, "_resumable_rows", lambda c: [])
-    monkeypatch.setattr(m, "_past_change_count", lambda c: 3)
+    monkeypatch.setattr(m, "_past_quest_count", lambda c: 3)
     rc = await m._pick_resume_target(tmp_path, non_interactive=False)
     out = capsys.readouterr().out
     assert rc == 0
@@ -34,7 +34,7 @@ async def test_nothing_to_resume_no_hint_when_no_past(
     monkeypatch, tmp_path: Path, capsys,
 ) -> None:
     monkeypatch.setattr(m, "_resumable_rows", lambda c: [])
-    monkeypatch.setattr(m, "_past_change_count", lambda c: 0)
+    monkeypatch.setattr(m, "_past_quest_count", lambda c: 0)
     rc = await m._pick_resume_target(tmp_path, non_interactive=False)
     out = capsys.readouterr().out
     assert rc == 0

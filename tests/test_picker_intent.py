@@ -24,7 +24,7 @@ def test_render_shows_intent_for_untitled_candidate() -> None:
 
 
 @pytest.mark.anyio
-async def test_pick_change_target_threads_intent(
+async def test_pick_quest_target_threads_intent(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
 ) -> None:
     row = ("c1", "draft", "plan", "2026-06-11T00:00:00+00:00", "",
@@ -41,7 +41,7 @@ async def test_pick_change_target_threads_intent(
         return candidates[0].quest_id
 
     monkeypatch.setattr(m.resume_select, "run_picker", fake_picker)
-    rc = await m._pick_change_target(
+    rc = await m._pick_quest_target(
         control=tmp_path, rows=[row, row], header="pick",
         on_empty=lambda: 0, on_non_tty=None)
     assert rc == "c1"
@@ -49,7 +49,7 @@ async def test_pick_change_target_threads_intent(
 
 
 @pytest.mark.anyio
-async def test_pick_change_target_skips_event_load_for_titled_rows(
+async def test_pick_quest_target_skips_event_load_for_titled_rows(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
 ) -> None:
     titled_row = ("t1", "draft", "plan", "2026-06-11T00:00:00+00:00", "Named feature",
@@ -74,7 +74,7 @@ async def test_pick_change_target_skips_event_load_for_titled_rows(
 
     monkeypatch.setattr(m.resume_select, "run_picker", fake_picker)
 
-    await m._pick_change_target(
+    await m._pick_quest_target(
         control=tmp_path,
         rows=[titled_row, untitled_row],
         header="pick",

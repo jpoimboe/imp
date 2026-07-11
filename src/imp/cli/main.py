@@ -1536,7 +1536,7 @@ def _backlog_card(meta: dict[str, Any], control: Path, *, now: datetime) -> list
     return lines
 
 
-def _change_card(control: Path, quest_id: str, *, now: datetime) -> list[str]:
+def _quest_card(control: Path, quest_id: str, *, now: datetime) -> list[str]:
     row = _row_for_id(control, quest_id)
     if row is None:
         return []
@@ -1576,7 +1576,7 @@ def _detail_card(control: Path, quest_id: str, *, now: datetime) -> list[str]:
     meta = _unstarted_backlog_meta(control, quest_id)
     if meta is not None:
         return _backlog_card(meta, control, now=now)
-    return _change_card(control, quest_id, now=now)
+    return _quest_card(control, quest_id, now=now)
 
 
 def _cmd_list(args: argparse.Namespace) -> int:
@@ -1730,7 +1730,7 @@ async def _pick_log_target(control: Path) -> str | int:
     selected_index = next(
         (i for i, r in enumerate(rows) if r[0] == default_id), 0)
 
-    return await _pick_change_target(
+    return await _pick_quest_target(
         control=control,
         rows=rows,
         header="Show log for which Quest?  (↑/↓ to move · enter to select · q to cancel)",
@@ -2404,7 +2404,7 @@ def _abandon_match_rows(control: Path, token: str) -> list[_Row]:
     return [r for r in _abandon_rows(control) if token in r[0]]
 
 
-def _past_change_count(control: Path) -> int:
+def _past_quest_count(control: Path) -> int:
     return len(_completed_rows(control))
 
 
@@ -2414,7 +2414,7 @@ def _interactive() -> bool:
 
 def _resume_picker_empty(control: Path) -> int:
     print("Nothing to resume.")
-    past = _past_change_count(control)
+    past = _past_quest_count(control)
     if past:
         plural = "s" if past != 1 else ""
         print(pal.ansi(
@@ -2438,7 +2438,7 @@ def _resume_picker_non_tty(rows: list[_Row]) -> str | int:
     return 2
 
 
-async def _pick_change_target(
+async def _pick_quest_target(
     *, control: Path, rows: list[_Row], header: str,
     on_empty: Callable[[], int],
     on_non_tty: Callable[[list[_Row]], str | int] | None = None,
@@ -2471,7 +2471,7 @@ _RESUME_PICKER_HEADER = (
 
 
 async def _pick_resume_target(control: Path, *, non_interactive: bool) -> str | int:
-    return await _pick_change_target(
+    return await _pick_quest_target(
         control=control,
         rows=_resumable_rows(control),
         header=_RESUME_PICKER_HEADER,
@@ -2488,7 +2488,7 @@ async def _resolve_resume_target(
         return await _pick_resume_target(control, non_interactive=non_interactive)
     matches = _resumable_match_rows(control, token)
     if len(matches) >= 2:
-        return await _pick_change_target(
+        return await _pick_quest_target(
             control=control,
             rows=matches,
             header=_RESUME_PICKER_HEADER,
@@ -2594,7 +2594,7 @@ _ABANDON_PICKER_HEADER = (
 
 
 async def _pick_abandon_target(control: Path) -> str | int:
-    return await _pick_change_target(
+    return await _pick_quest_target(
         control=control,
         rows=_abandon_rows(control),
         header=_ABANDON_PICKER_HEADER,
@@ -2614,7 +2614,7 @@ async def _pick_abandon_matches(
               file=sys.stderr)
         return 2
 
-    return await _pick_change_target(
+    return await _pick_quest_target(
         control=control,
         rows=rows,
         header=_ABANDON_PICKER_HEADER,
@@ -2652,7 +2652,7 @@ def _show_all_rows(control: Path) -> list[_Row]:
 
 
 async def _pick_show_target(control: Path) -> str | int:
-    return await _pick_change_target(
+    return await _pick_quest_target(
         control=control,
         rows=_show_all_rows(control),
         header=_SHOW_PICKER_HEADER,
@@ -2685,7 +2685,7 @@ async def _pick_show_matches(control: Path, matches: list[str]) -> str | int:
                 name_width=name_w), file=sys.stderr)
         return 2
 
-    return await _pick_change_target(
+    return await _pick_quest_target(
         control=control,
         rows=rows,
         header=_SHOW_PICKER_HEADER,

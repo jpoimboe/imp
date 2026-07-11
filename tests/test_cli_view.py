@@ -457,7 +457,7 @@ def test_log_picker_rows_include_backlog(
         captured["rows"] = rows
         return 2
 
-    monkeypatch.setattr(m, "_pick_change_target", _fake_picker)
+    monkeypatch.setattr(m, "_pick_quest_target", _fake_picker)
     import anyio
     anyio.run(m._pick_log_target, tmp_path)
     assert any(r[0] == "2026-06-16-bkg111" for r in captured["rows"])
