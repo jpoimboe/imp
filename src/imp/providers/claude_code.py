@@ -2583,7 +2583,12 @@ class ClaudeCodeAgentRunner:
 
     async def force_kill(self) -> None:
         """Non-waiting SIGKILL of the claude-p transport group on teardown overrun;
-        reaping a D-state child would re-block the executor, so never await wait()."""
+        reaping a D-state child would re-block the executor, so never await wait().
+        Every force_kill caller is an interrupt/pause context, so mark the runner
+        cancelled here: when the SDK subsequently raises a `-9 ProcessError` for the
+        SIGKILLed child, run()'s outer except classifies it as config/interrupted
+        instead of the unknown-error fallback ("unclassified provider error")."""
+        self._cancel = True
         transport = getattr(self._client, "_transport", None)
         process = getattr(transport, "_process", None)
         if process is None:
