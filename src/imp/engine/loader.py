@@ -106,9 +106,9 @@ def parse_agent_file(path: Path) -> AgentDef:
     else:
         # A dispatched subagent has no typed output: absent output: → empty schema.
         schema = OutputSchema(fields=(), source=source)
-    if "tools" in fm and "deny_tools" in fm:
+    if "tools" in fm and ("deny_tools" in fm or "allow_tools" in fm):
         raise LoadError(
-            "agent may declare 'tools:' or 'deny_tools:', not both", source)
+            "agent may declare 'tools:' or 'deny_tools:'/'allow_tools:', not both", source)
     explicit_tools = "tools" in fm
     tools = frozenset(fm.get("tools") or [])
     deny_raw = fm.get("deny_tools")
@@ -123,6 +123,20 @@ def parse_agent_file(path: Path) -> AgentDef:
             "'deny_tools' names tools that are never default-granted "
             f"(no-op): {sorted(unknown_deny)}; denyable tools are "
             f"{sorted(DENYABLE_TOOLS)}",
+            source,
+        )
+    allow_raw = fm.get("allow_tools")
+    if allow_raw is not None and not (
+        isinstance(allow_raw, list) and all(isinstance(x, str) for x in allow_raw)
+    ):
+        raise LoadError("'allow_tools' must be a list of strings", source)
+    allow_tools = frozenset(allow_raw or [])
+    unknown_allow = allow_tools - ALLOWABLE_TOOLS
+    if unknown_allow:
+        raise LoadError(
+            "'allow_tools' names tools that are not opt-in-grantable: "
+            f"{sorted(unknown_allow)}; allowable tools are "
+            f"{sorted(ALLOWABLE_TOOLS)}",
             source,
         )
     subagents = tuple(fm.get("subagents") or [])
@@ -177,6 +191,7 @@ def parse_agent_file(path: Path) -> AgentDef:
         tier=tier,
         explicit_tools=explicit_tools,
         deny_tools=deny_tools,
+        allow_tools=allow_tools,
         drivers=drivers,
         label=label_raw,
         isolated_worktree=iw_raw,
@@ -186,7 +201,7 @@ def parse_agent_file(path: Path) -> AgentDef:
 BASE_CAPS: frozenset[str] = frozenset({
     "read_file", "glob", "grep", "query_events", "bash",
     "edit_file", "write_file", "web_search", "web_fetch",
-    "update_step_label", "symbol_outline",
+    "symbol_outline",
 })
 TOP_LEVEL_CAPS: frozenset[str] = frozenset(
     {"rename_quest", "create_quest", "create_and_enter_worktree"})
@@ -198,11 +213,18 @@ TOP_LEVEL_CAPS: frozenset[str] = frozenset(
 # no-op rather than an error — the name is real, just not in that context.
 DENYABLE_TOOLS: frozenset[str] = BASE_CAPS | TOP_LEVEL_CAPS | frozenset({"sub_agent"})
 
+# Tools removed from the default grant that an agent may re-request via
+# allow_tools:. An allow_tools entry outside this set is a no-op/typo,
+# validated at parse time. Disjoint from BASE_CAPS: a tool is either
+# default-granted or opt-in, never both.
+ALLOWABLE_TOOLS: frozenset[str] = frozenset({"update_step_label"})
+
 
 def _effective_tools(agent: AgentDef, is_sub: bool) -> frozenset[str]:
     if agent.explicit_tools:
         return frozenset(agent.tools)
     effective = set(BASE_CAPS)
+    effective |= agent.allow_tools
     if not is_sub:
         effective |= TOP_LEVEL_CAPS
         if agent.subagents:

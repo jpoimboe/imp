@@ -147,6 +147,7 @@ class AgentDef:
     tier: str | None = None
     explicit_tools: bool = False
     deny_tools: frozenset[str] = frozenset()
+    allow_tools: frozenset[str] = frozenset()
     drivers: frozenset[str] = frozenset()
     label: str | None = None
     isolated_worktree: bool = False
