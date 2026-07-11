@@ -15,8 +15,8 @@ import imp.remote.session.attach as attach_mod
 from imp.agents.runner import AgentInvocation, AgentRunner, Event
 from imp.cli.signals import InterruptCoordinator
 from imp.engine import merge_queue as mq
-from imp.engine.quest import Quest
 from imp.engine.executor import RunResult, run_change
+from imp.engine.quest import Quest
 from imp.engine.state import JsonlEventLog, State
 from tests.conftest import _git, _init_repo
 

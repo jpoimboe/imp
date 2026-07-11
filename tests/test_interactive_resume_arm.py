@@ -14,8 +14,8 @@ import pytest
 
 from imp.agents.runner import AgentInvocation, AgentRunner, Event, Message, TextBlock
 from imp.agents.transcript import Transcript
-from imp.engine.quest import Quest
 from imp.engine.executor import run_change
+from imp.engine.quest import Quest
 from imp.engine.state import State
 
 SEED = "help me design a caching layer"
