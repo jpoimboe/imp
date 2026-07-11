@@ -22,26 +22,26 @@ def test_show_help_names_quests_not_changes(capsys) -> None:
     # `imp <cmd> --help` prints the subparser DESCRIPTION + arg helps, NOT the
     # parent-list `add_parser(help=...)` string — so assert against those.
     out = _help_for("show", capsys)
-    assert "Print a Quest's detail card" in out            # description=
-    assert "while a Quest is in flight" in out             # description=
+    assert "Print a quest's detail card" in out            # description=
+    assert "while a quest is in flight" in out             # description=
     assert "Quest id or its short token" in out            # token arg help
     assert "change" not in out
 
 
 def test_search_help_names_quests(capsys) -> None:
     out = _help_for("search", capsys)
-    assert "backlog, and archived Quests" in out           # description=
-    assert "a Quest's id, title, or conversation content" in out   # description=
+    assert "backlog, and archived quests" in out           # description=
+    assert "a quest's id, title, or conversation content" in out   # description=
     assert "change" not in out
 
 
 def test_overview_command_list_names_quests() -> None:
     from imp.cli.main import _OVERVIEW_COMMANDS
     descs = " | ".join(d for _verb, d in _OVERVIEW_COMMANDS)
-    assert "scope a Quest." in descs
-    assert "Scope a new Quest in conversation" in descs
-    assert "List your Quests: in-flight, backlog, and recently merged." in descs
-    assert "Show one Quest's detail or a named artifact (imp show <id>)." in descs
+    assert "scope a quest." in descs
+    assert "Scope a new quest in conversation" in descs
+    assert "List your quests: in-flight, backlog, and recently merged." in descs
+    assert "Show one quest's detail or a named artifact (imp show <id>)." in descs
     assert "change" not in descs
 
 
@@ -50,9 +50,9 @@ def test_slash_help_listing_names_quests() -> None:
     lines: list[str] = []
     _help(lines.append)
     text = "\n".join(lines)
-    assert "List your Quests (-a adds completed/abandoned)" in text
-    assert "Search archived Quests by content, title, or id" in text
-    assert "Abandon the current Quest" in text
+    assert "List your quests (-a adds completed/abandoned)" in text
+    assert "Search archived quests by content, title, or id" in text
+    assert "Abandon the current quest" in text
     assert "change" not in text
 
 

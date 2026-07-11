@@ -357,7 +357,7 @@ def test_cmd_log_no_changes_yet_returns_rc_0(
     rc = main(["log"])
     assert rc == 0
     captured = capsys.readouterr()
-    assert "No Quests" in captured.out
+    assert "No quests" in captured.out
     assert captured.err == ""
 
 
@@ -438,7 +438,7 @@ def test_log_backlog_id_renders_card(
     out = capsys.readouterr().out
     assert "Add OAuth" in out
     assert "wire up OAuth login" in out
-    assert "no such Quest" not in out
+    assert "no such quest" not in out
 
 
 def test_log_picker_rows_include_backlog(

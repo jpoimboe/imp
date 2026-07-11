@@ -16,10 +16,10 @@ def test_top_level_help_describes_every_subcommand(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     out = _help_for(["-h"], capsys)
-    assert "Start a new Quest" in out
+    assert "Start a new quest" in out
     assert "Resume a paused" in out
-    assert "List your Quests" in out
-    assert "one Quest's detail" in out
+    assert "List your quests" in out
+    assert "one quest's detail" in out
     assert "effective config" in out
 
 

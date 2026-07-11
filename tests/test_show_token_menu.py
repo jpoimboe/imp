@@ -51,7 +51,7 @@ async def test_pick_show_target_empty_pool(
     monkeypatch.setattr(m.resume_select, "run_picker", boom)
     rc = await m._pick_show_target(tmp_path)
     assert rc == 2
-    assert "No Quests to show." in capsys.readouterr().out
+    assert "No quests to show." in capsys.readouterr().out
 
 
 @pytest.mark.anyio
@@ -64,7 +64,7 @@ async def test_pick_show_matches_interactive_selection(
     monkeypatch.setattr(m, "_row_for_id", lambda c, cid: _row(cid))
 
     async def fake_picker(candidates, *, now, color, header, selected_index):
-        assert "Show which Quest?" in header
+        assert "Show which quest?" in header
         return candidates[1].quest_id
 
     monkeypatch.setattr(m.resume_select, "run_picker", fake_picker)
@@ -249,7 +249,7 @@ def test_cmd_show_empty_token_skips_picker_and_errors(
     rc = m._cmd_show(_ns(""))
     err = capsys.readouterr().err
     assert rc == 2
-    assert "no Quest matches" in err
+    assert "no quest matches" in err
 
 
 def test_cmd_show_no_token_non_tty_errors(
@@ -270,4 +270,4 @@ def test_cmd_show_no_token_non_tty_errors(
     rc = m._cmd_show(_ns(None))
     err = capsys.readouterr().err
     assert rc == 2
-    assert "needs a Quest id" in err
+    assert "needs a quest id" in err

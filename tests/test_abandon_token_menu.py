@@ -39,7 +39,7 @@ async def test_pick_abandon_matches_interactive_selection(
     monkeypatch.setattr(m, "_interactive", lambda: True)
 
     async def fake_picker(candidates, *, now, color, header, selected_index):
-        assert "Abandon which Quest?" in header
+        assert "Abandon which quest?" in header
         return candidates[1].quest_id
 
     monkeypatch.setattr(m.resume_select, "run_picker", fake_picker)
@@ -178,4 +178,4 @@ def test_cmd_abandon_zero_matches_unknown_exits_2(
     monkeypatch.setattr(m, "_abandon", boom_abandon)
     rc = m._cmd_abandon(argparse.Namespace(token="zzzz", yes=False))
     assert rc == 2
-    assert "no Quest matches" in capsys.readouterr().err
+    assert "no quest matches" in capsys.readouterr().err

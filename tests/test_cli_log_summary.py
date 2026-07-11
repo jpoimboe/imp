@@ -71,7 +71,7 @@ def test_summary_unknown_id_errors(tmp_path, monkeypatch, capsys):
     _setup(tmp_path, monkeypatch)
     rc = main(["log", "-s", "no-such-token"])
     assert rc == 2
-    assert "no Quest matches" in capsys.readouterr().err
+    assert "no quest matches" in capsys.readouterr().err
 
 
 def test_summary_paused_open_step_reads_paused_not_running(tmp_path, monkeypatch, capsys):

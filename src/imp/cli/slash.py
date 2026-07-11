@@ -1,7 +1,7 @@
 """Slash command dispatcher for interactive steps (spec §4).
 
 Flat namespace: built-ins (/help, /skills) take precedence; every other
-/<name> resolves a skill from the Quest's tracked workflow dir and is submitted AS the
+/<name> resolves a skill from the quest's tracked workflow dir and is submitted AS the
 user's input line (human-attributed). The skill name is untrusted and
 sanitized by agents.skills."""
 
@@ -76,7 +76,7 @@ def handle_slash_line(
         from imp.engine.archive import read as archive_read
         hits = archive_read.search_archive(quest.control_root, args)
         if not hits:
-            output_fn(f"No archived Quests match {args!r}.")
+            output_fn(f"No archived quests match {args!r}.")
         else:
             for quest_id, title, status, _created in hits:
                 output_fn(f"  {quest_id}  {title or '(untitled)'}  [{status or '-'}]")
@@ -110,7 +110,7 @@ def handle_slash_line(
         matches = [cid for cid in _iter_quest_ids(control) if args in cid]
         if len(matches) != 1:
             if not matches:
-                output_fn(f"No Quest matches {args!r}.")
+                output_fn(f"No quest matches {args!r}.")
             else:
                 output_fn(f"{args!r} is ambiguous: {', '.join(matches)}")
             return REPROMPT
@@ -156,12 +156,12 @@ def _help(out: Callable[[str], None]) -> None:
     out("Available slash commands:")
     out("  /help              Show this message")
     out("  /skills            List loadable skills")
-    out("  /list [-a]         List your Quests (-a adds completed/abandoned)")
-    out("  /search <query>    Search archived Quests by content, title, or id")
+    out("  /list [-a]         List your quests (-a adds completed/abandoned)")
+    out("  /search <query>    Search archived quests by content, title, or id")
     out("  /save              Save this conversation to your Backlog")
     out("  /clear             Park this chat and start a fresh one")
     out("  /model <model>     Switch this step's model (or provider:model)")
-    out("  /abandon           Abandon the current Quest")
+    out("  /abandon           Abandon the current quest")
     out("  /resume <id|query> Rehydrate a saved/archived conversation to continue")
     out("  /<name> [args]     Load a skill (trailing args appended to it)")
     out("")
