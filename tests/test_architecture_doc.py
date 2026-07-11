@@ -31,14 +31,14 @@ def test_architecture_names_quest_concept() -> None:
 
 def test_what_is_imp_names_quest_concept() -> None:
     text = Path("docs/what-is-imp.md").read_text()
-    assert "The core idea is a **Quest**" in text
+    assert "The core idea is a **quest**" in text
     assert "per-quest home on disk." in text
     assert "**Change**" not in text
 
 
 def test_imp_conventions_names_quest_concept() -> None:
     text = Path("docs/imp-conventions.md").read_text()
-    assert "nouns: Quest, workflow, backlog, phase," in text
+    assert "nouns: quest, workflow, backlog, phase," in text
     assert "nouns: Change," not in text
 
 
