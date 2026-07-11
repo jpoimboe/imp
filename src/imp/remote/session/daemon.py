@@ -181,7 +181,7 @@ async def serve_quest_session(
                 coordinator.reset()
             else:
                 on_event({"type": "awaiting_user_input",
-                          "payload": {"prompt": prompt, "interrupt": True}})
+                          "payload": {"steer_hint": prompt, "interrupt": True}})
                 try:
                     reply = await user_chat_input_fn("")
                 except AwaitingUserInput:

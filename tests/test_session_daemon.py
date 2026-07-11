@@ -1409,7 +1409,7 @@ async def test_resume_prompt_target_holds_before_running_agent(
         # The hold prompt is surfaced FIRST — the agent has not run yet.
         assert calls["n"] == 0
         gates = [e for e in received if e.get("type") == "awaiting_user_input"]
-        prompts = [e["payload"]["prompt"] for e in gates]
+        prompts = [e["payload"]["steer_hint"] for e in gates]
         assert prompts[-1] == daemon._RESUME_PROMPT
         # The hold-loop resteer prompt is self-inflicted: flag it so Telegram
         # curation silences it instead of buzzing the operator.
