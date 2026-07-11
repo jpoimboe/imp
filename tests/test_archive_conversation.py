@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from imp.engine.abandon import archive_conversation
 from imp.engine.archive import read as archive_read
 from imp.engine.archive import record, records_root
 from imp.engine.change import Change
+from imp.engine.state import State
 from tests.conftest import _git, _seed_control
 
 
@@ -57,3 +59,20 @@ def test_archive_conversation_captures_steps_subtree(tmp_path: Path) -> None:
     rec = record.read_record(records_root(tmp_path), "draft")
     assert rec is not None
     assert rec["step_blobs"].get("p/s/transcript.jsonl") is not None
+
+
+def test_archive_conversation_arms_resume_pending(tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+    ch = Change.create(tmp_path, title="x", change_id="armed", base_branch="main")
+    initial = State.load(ch.state_dir)
+    step = initial.step
+    assert step is not None                                    # entry step exists
+    assert initial.resume_pending is None                      # fresh: not yet armed
+
+    archive_conversation(ch)
+
+    raw = archive_read.read_state_json(tmp_path, "armed")
+    assert raw is not None
+    persisted = json.loads(raw)
+    assert persisted["resume_pending"] == step                 # armed to the step on leave
+    assert persisted["interrupt_pending"] is False             # clean yield, not an interrupt
