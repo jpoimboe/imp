@@ -12,9 +12,11 @@ from imp.cli.slash import REPROMPT, handle_slash_line, is_slash_command
 
 class _FakeChange:
     """Minimal stand-in: handle_slash_line needs .workflow_dir and
-    .event_log().append(...)."""
+    .event_log().append(...); ask_line_with_slash needs .id/.title."""
 
     def __init__(self, tmp_path: Path) -> None:
+        self.id = "abcd12"
+        self.title = "Fake change"
         self.workflow_dir = tmp_path / ".imp" / "change" / "workflow"
         user = self.workflow_dir / "skills" / "user"
         user.mkdir(parents=True)
@@ -410,13 +412,13 @@ def test_ask_line_with_slash_forwards_toolbar_through_raced_path(tmp_path: Path)
     assert prompt.bottom_toolbars == ["z9gixx · implement · task-lead · 13%"]
 
 
-def test_ask_line_with_slash_passes_no_toolbar_when_no_driver(tmp_path: Path) -> None:
+def test_ask_line_with_slash_composes_identity_toolbar_when_no_driver(tmp_path: Path) -> None:
     from imp.cli.slash import ask_line_with_slash
     change = _FakeChange(tmp_path)
     prompt = _FakePrompt(["hi"])
     line = anyio.run(ask_line_with_slash, prompt, _NullStatus(), change)
     assert line == "hi"
-    assert prompt.bottom_toolbars == [None]    # driver None -> no toolbar
+    assert prompt.bottom_toolbars == ["abcd12 · Fake change"]    # driver None -> identity bar
 
 
 def test_slash_model_valid_returns_literal(tmp_path, monkeypatch) -> None:

@@ -233,3 +233,43 @@ async def test_cleared_session_threads_model(tmp_path, monkeypatch) -> None:
         tmp_path, "main", leave_state={})
     assert rc == 0
     assert captured["model"] == "anthropic:claude-fable-5"
+
+
+class _CaptureToolbarPrompt:
+    """Captures the bottom_toolbar passed to ask_async; returns a fixed non-slash line."""
+
+    def __init__(self, line: str) -> None:
+        self._line = line
+        self.toolbar: object = "unset"
+
+    async def ask_async(
+        self, prompt_text: str | None = None, *,
+        bottom_toolbar: object = None, **kwargs: object,
+    ) -> str:
+        self.toolbar = bottom_toolbar
+        return self._line
+
+
+@pytest.mark.anyio
+async def test_opening_toolbar_composed_from_change_when_no_driver() -> None:
+    from imp.cli.slash import ask_line_with_slash
+
+    change = SimpleNamespace(id="lufu50", title="Instant opening identity bar")
+    prompt = _CaptureToolbarPrompt("add oauth")
+    line = await ask_line_with_slash(prompt, None, change, color=False, width=80)
+    assert line == "add oauth"
+    assert prompt.toolbar is not None          # was None (no driver) before the change
+    assert "lufu50" in prompt.toolbar
+    assert "Instant opening identity bar" in prompt.toolbar
+
+
+@pytest.mark.anyio
+async def test_opening_toolbar_id_only_when_title_empty() -> None:
+    from imp.cli.slash import ask_line_with_slash
+
+    change = SimpleNamespace(id="lufu50", title="")
+    prompt = _CaptureToolbarPrompt("add oauth")
+    line = await ask_line_with_slash(prompt, None, change, color=False, width=80)
+    assert line == "add oauth"
+    assert prompt.toolbar is not None          # empty title still paints the id bar
+    assert "lufu50" in prompt.toolbar
