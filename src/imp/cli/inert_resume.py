@@ -34,9 +34,9 @@ def render_inert_question(text: str, *, width: int, color: bool) -> str:
     return "\n".join(_render_markdown_block(text, width, 0, color))
 
 
-def bare_turn_end_question(change: Quest) -> str | None:
+def bare_turn_end_question(quest: Quest) -> str | None:
     """Pending question if `change` is paused at a bare-turn-end yield, else None."""
-    state = State.load(change.state_dir)
+    state = State.load(quest.state_dir)
     if state.status != "paused" or state.current_step is None:
         return None
     messages = Transcript(

@@ -172,8 +172,8 @@ def test_status_row_carries_phase_label() -> None:
     import imp.cli.main as m
     state = json.dumps({"status": "running", "step": "s", "step_label": "L",
                         "phase_label": "P"}).encode()
-    change = json.dumps({"title": "T", "created_at": "2026-06-20T11:00:00+00:00"}).encode()
-    row = m._status_row("cid", state, change, "2026-06-20T11:00:00+00:00")
+    quest = json.dumps({"title": "T", "created_at": "2026-06-20T11:00:00+00:00"}).encode()
+    row = m._status_row("cid", state, quest, "2026-06-20T11:00:00+00:00")
     assert len(row) == 8
     assert row[7] == "P"
 

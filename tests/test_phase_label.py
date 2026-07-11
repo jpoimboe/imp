@@ -94,7 +94,7 @@ def test_payload_renders_templated_phase_label(tmp_path: Path) -> None:
     p = _step_started_payload(
         _step(phase_label="plan {{ vars.plan_index }}/{{ vars.plan_total }}"),
         _types.SimpleNamespace(route_label=None, vars={"plan_index": 2, "plan_total": 5}),
-        change=ch, log=ch.event_log(),
+        quest=ch, log=ch.event_log(),
     )
     assert p["phase_label"] == "plan 2/5"
 

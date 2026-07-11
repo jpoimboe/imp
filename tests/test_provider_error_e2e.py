@@ -38,15 +38,15 @@ def _make_change(root: Path, *, quest_id: str = "test-change", title: str = "t")
         status="running", vars=dict(workflow.vars.defaults()), loop_counts={},
     ).save(quest_dir / "state")
 
-    change = Quest(
+    quest = Quest(
         id=quest_id, title=title, base_branch="main",
         control_root=root, project_root=root, quest_dir=quest_dir,
     )
-    change.event_log().append(
+    quest.event_log().append(
         agent_id=None, type="change_created",
         payload={"id": quest_id, "title": title},
     )
-    return change
+    return quest
 
 
 class _FatalErrorRunner:
@@ -107,7 +107,7 @@ async def test_fatal_failure_pauses_immediately_with_diagnostic(
     """A genuine fatal (terminated) classified error produces a single error
     event, immediately Pauses (does NOT consume max_retries=3), and the event
     payload carries the diagnostic detail (category, message, request_id)."""
-    change = _seed_workflow_with_max_retries_3(tmp_path)
+    quest = _seed_workflow_with_max_retries_3(tmp_path)
 
     from imp.providers import resolve
     resolve.reset_providers_for_tests()
@@ -126,7 +126,7 @@ async def test_fatal_failure_pauses_immediately_with_diagnostic(
     )
 
     events: list[dict] = []
-    result = await run_quest(change, on_event=events.append)
+    result = await run_quest(quest, on_event=events.append)
 
     assert result is RunResult.PAUSED
 
@@ -142,7 +142,7 @@ async def test_fatal_failure_pauses_immediately_with_diagnostic(
     assert "terminated" in payload["message"]
     assert payload["detail"].get("request_id") == "req_01abc"
 
-    state = State.load(change.state_dir)
+    state = State.load(quest.state_dir)
     assert state.status == "paused"
     assert state.step_attempt == 0
 

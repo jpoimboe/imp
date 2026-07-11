@@ -64,7 +64,7 @@ class _ScriptProvider:
 async def test_hinted_delay_is_budget_exempt_and_completes(
     tmp_path: Path, provider_registry: Any, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    change = _make_change(
+    quest = _make_change(
         tmp_path, agents={"writer.md": _WRITER}, workflow_yaml=_SINGLE_WF)
     # Three hinted (7200s > 1800s rate_limit budget) failures, then success.
     # Without the exemption the first 7200s delay blows the budget and pauses on
@@ -77,7 +77,7 @@ async def test_hinted_delay_is_budget_exempt_and_completes(
     monkeypatch.setattr("imp.engine.executor._interruptible_sleep", _no_sleep)
 
     events: list[dict] = []
-    result = await run_quest(change, on_event=events.append)
+    result = await run_quest(quest, on_event=events.append)
     assert result is RunResult.COMPLETED
     assert provider.drives == 4
     retries = [e for e in events if e["type"] == "agent_retry"]
@@ -90,7 +90,7 @@ async def test_hinted_delay_is_budget_exempt_and_completes(
 async def test_fourth_hinted_sleep_falls_back_to_budgeted(
     tmp_path: Path, provider_registry: Any, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    change = _make_change(
+    quest = _make_change(
         tmp_path, agents={"writer.md": _WRITER}, workflow_yaml=_SINGLE_WF)
     # Six hinted 7200s failures available. The first three are exempt; the fourth
     # is budgeted (cap=3) and 7200s > the 1800s budget, so the loop pauses at the
@@ -103,7 +103,7 @@ async def test_fourth_hinted_sleep_falls_back_to_budgeted(
     monkeypatch.setattr("imp.engine.executor._interruptible_sleep", _no_sleep)
 
     events: list[dict] = []
-    result = await run_quest(change, on_event=events.append)
+    result = await run_quest(quest, on_event=events.append)
     assert result is RunResult.PAUSED
     paused = [e for e in events if e["type"] == "workflow_paused"]
     assert paused and paused[0]["payload"]["reason"] == "retry_ceiling"
@@ -117,7 +117,7 @@ async def test_fourth_hinted_sleep_falls_back_to_budgeted(
 async def test_blind_retries_after_hinted_sleep_still_reach_ceiling(
     tmp_path: Path, provider_registry: Any, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    change = _make_change(
+    quest = _make_change(
         tmp_path, agents={"writer.md": _WRITER}, workflow_yaml=_SINGLE_WF)
     # One hinted 7200s failure (exempt, NOT added to cumulative_backoff), then
     # blind (hint-less) rate_limit failures. With a tiny 5s budget the blind
@@ -134,7 +134,7 @@ async def test_blind_retries_after_hinted_sleep_still_reach_ceiling(
     monkeypatch.setattr("imp.engine.executor._interruptible_sleep", _no_sleep)
 
     events: list[dict] = []
-    result = await run_quest(change, on_event=events.append)
+    result = await run_quest(quest, on_event=events.append)
     assert result is RunResult.PAUSED
     retries = [e for e in events if e["type"] == "agent_retry"]
     # retry 1: hinted (exempt); retry 2: blind 2s (cumulative 0 -> 2, within 5s).

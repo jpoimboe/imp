@@ -45,5 +45,5 @@ def test_change_create_uses_floor_tiers_without_a_tiers_block(
     _git(root, "add", "-A")
     _git(root, "commit", "-qm", "seed")
 
-    change = Quest.create(root, title="t", quest_id="2026-06-08-x", base_branch="main")
-    assert change.id == "2026-06-08-x"
+    quest = Quest.create(root, title="t", quest_id="2026-06-08-x", base_branch="main")
+    assert quest.id == "2026-06-08-x"

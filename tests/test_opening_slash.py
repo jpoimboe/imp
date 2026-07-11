@@ -51,7 +51,7 @@ def _fake_intent_line(*, model: str, reply: str):
     """Stand-in for _read_intent_line: populates the passed model_sink and returns
     the reply, mirroring the new signature."""
 
-    async def _f(prompt, change, *, color, width, model_sink=None):
+    async def _f(prompt, quest, *, color, width, model_sink=None):
         if model_sink is not None:
             model_sink["model"] = model
         return reply
@@ -63,9 +63,9 @@ def _fake_intent_line(*, model: str, reply: str):
 async def test_opening_prompt_intercepts_help_then_returns_intent(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    change = SimpleNamespace(id="z9y8x7", title="")
+    quest = SimpleNamespace(id="z9y8x7", title="")
     reply = await main._read_opening_message(
-        change, leave_mode="new", banner_shown=False, color=False,
+        quest, leave_mode="new", banner_shown=False, color=False,
         width=80, editing_mode="emacs",
         _prompt_factory=lambda: _QueuePrompt(["/help", "add oauth"]))
     # /help was handled client-side and the loop kept reading; only the real
@@ -80,9 +80,9 @@ async def test_opening_prompt_intercepts_help_then_returns_intent(
 async def test_opening_prompt_session_verb_reprompts(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    change = SimpleNamespace(id="z9y8x7", title="")
+    quest = SimpleNamespace(id="z9y8x7", title="")
     reply = await main._read_opening_message(
-        change, leave_mode="new", banner_shown=False, color=False,
+        quest, leave_mode="new", banner_shown=False, color=False,
         width=80, editing_mode="emacs",
         _prompt_factory=lambda: _QueuePrompt(["/clear", "real intent"]))
     assert reply == "real intent"        # /clear did not become the draft intent
@@ -95,9 +95,9 @@ async def test_opening_prompt_leading_slash_path_submits_as_input(
     tmp_path: Path,
 ) -> None:
     # A pasted absolute path is not a command — it must submit verbatim.
-    change = SimpleNamespace(id="z9y8x7", title="", workflow_dir=tmp_path)
+    quest = SimpleNamespace(id="z9y8x7", title="", workflow_dir=tmp_path)
     reply = await main._read_opening_message(
-        change, leave_mode="new", banner_shown=False, color=False,
+        quest, leave_mode="new", banner_shown=False, color=False,
         width=80, editing_mode="emacs",
         _prompt_factory=lambda: _QueuePrompt(["/home/user/foo.py"]))
     assert reply == "/home/user/foo.py"
@@ -110,12 +110,12 @@ async def test_read_intent_line_captures_model_and_reprompts(
     import imp.cli.slash as slash
 
     prompt = _QueuePrompt(["/model anthropic:claude-fable-5", "brainstorm this"])
-    change = _fake_change(tmp_path)
-    monkeypatch.setattr(slash, "validate_model_arg", lambda arg, *, change: None)
+    quest = _fake_change(tmp_path)
+    monkeypatch.setattr(slash, "validate_model_arg", lambda arg, *, quest: None)
     sink: dict[str, str] = {}
 
     line = await main._read_intent_line(
-        prompt, change, color=False, width=80, model_sink=sink)
+        prompt, quest, color=False, width=80, model_sink=sink)
 
     assert line == "brainstorm this"
     assert sink["model"] == "anthropic:claude-fable-5"
@@ -125,12 +125,12 @@ async def test_read_intent_line_captures_model_and_reprompts(
 async def test_read_opening_message_threads_sink(tmp_path, monkeypatch) -> None:
     import imp.cli.slash as slash
 
-    monkeypatch.setattr(slash, "validate_model_arg", lambda arg, *, change: None)
-    change = _fake_change(tmp_path)
+    monkeypatch.setattr(slash, "validate_model_arg", lambda arg, *, quest: None)
+    quest = _fake_change(tmp_path)
     sink: dict[str, str] = {}
 
     reply = await main._read_opening_message(
-        change, leave_mode="new", banner_shown=False, color=False, width=80,
+        quest, leave_mode="new", banner_shown=False, color=False, width=80,
         editing_mode="emacs", model_sink=sink,
         _prompt_factory=lambda: _QueuePrompt(
             ["/model anthropic:claude-fable-5", "brainstorm this"]))
@@ -146,14 +146,14 @@ async def test_async_cmd_new_threads_model_to_run_session_client(
     _seed_control(tmp_path)
     monkeypatch.chdir(tmp_path)
 
-    async def _fake_open(change, *, model_sink=None, **kw):
+    async def _fake_open(quest, *, model_sink=None, **kw):
         if model_sink is not None:
             model_sink["model"] = "anthropic:claude-fable-5"
         return "brainstorm this"
 
     captured: dict[str, object] = {}
 
-    async def _fake_rsc(change, **kw):
+    async def _fake_rsc(quest, **kw):
         captured.update(kw)
         return 0
 
@@ -178,14 +178,14 @@ async def test_async_cmd_new_threads_model_to_headless_session_client(
     _seed_control(tmp_path)
     monkeypatch.chdir(tmp_path)
 
-    async def _fake_open(change, *, model_sink=None, **kw):
+    async def _fake_open(quest, *, model_sink=None, **kw):
         if model_sink is not None:
             model_sink["model"] = "anthropic:claude-fable-5"
         return "brainstorm this"
 
     captured: dict[str, object] = {}
 
-    async def _fake_rsc(change, **kw):
+    async def _fake_rsc(quest, **kw):
         captured.update(kw)
         return 0
 
@@ -223,7 +223,7 @@ async def test_cleared_session_threads_model(tmp_path, monkeypatch) -> None:
 
     captured: dict[str, object] = {}
 
-    async def _fake_rsc(change, **kw):
+    async def _fake_rsc(quest, **kw):
         captured.update(kw)
         return 0
 
@@ -254,9 +254,9 @@ class _CaptureToolbarPrompt:
 async def test_opening_toolbar_composed_from_change_when_no_driver() -> None:
     from imp.cli.slash import ask_line_with_slash
 
-    change = SimpleNamespace(id="lufu50", title="Instant opening identity bar")
+    quest = SimpleNamespace(id="lufu50", title="Instant opening identity bar")
     prompt = _CaptureToolbarPrompt("add oauth")
-    line = await ask_line_with_slash(prompt, None, change, color=False, width=80)
+    line = await ask_line_with_slash(prompt, None, quest, color=False, width=80)
     assert line == "add oauth"
     assert prompt.toolbar is not None          # was None (no driver) before the change
     assert "lufu50" in prompt.toolbar
@@ -267,9 +267,9 @@ async def test_opening_toolbar_composed_from_change_when_no_driver() -> None:
 async def test_opening_toolbar_id_only_when_title_empty() -> None:
     from imp.cli.slash import ask_line_with_slash
 
-    change = SimpleNamespace(id="lufu50", title="")
+    quest = SimpleNamespace(id="lufu50", title="")
     prompt = _CaptureToolbarPrompt("add oauth")
-    line = await ask_line_with_slash(prompt, None, change, color=False, width=80)
+    line = await ask_line_with_slash(prompt, None, quest, color=False, width=80)
     assert line == "add oauth"
     assert prompt.toolbar is not None          # empty title still paints the id bar
     assert "lufu50" in prompt.toolbar

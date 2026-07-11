@@ -65,18 +65,18 @@ def _seed_interactive_change(root: Path, *, armed: bool, started: bool = True):
     st.has_started = started
     st.resume_pending = flat[0].name if armed else None
     st.save(quest_dir / "state")
-    change = Quest(id="c", title="t", base_branch="main",
+    quest = Quest(id="c", title="t", base_branch="main",
                     control_root=root, project_root=root, quest_dir=quest_dir,
                     seed_opening=SEED)
-    change.event_log().append(agent_id=None, type="change_created",
+    quest.event_log().append(agent_id=None, type="change_created",
                               payload={"id": "c", "title": "t"})
-    return change, flat[0].name
+    return quest, flat[0].name
 
 
-def _write_awaiting_user_transcript(change: Quest, step_name: str) -> Path:
+def _write_awaiting_user_transcript(quest: Quest, step_name: str) -> Path:
     """A non-empty AWAITING_USER transcript + a native claude_session store under it,
     plus the stored step_context the armed resume path replays."""
-    tdir = change.quest_dir / "steps" / "only" / step_name
+    tdir = quest.quest_dir / "steps" / "only" / step_name
     tdir.mkdir(parents=True, exist_ok=True)
     t = Transcript(tdir / "transcript.jsonl")
     t.append(Message(role="user", content=(
@@ -89,7 +89,7 @@ def _write_awaiting_user_transcript(change: Quest, step_name: str) -> Path:
     # step_context system prompt; a non-empty transcript with NO stored prompt
     # trips the resume-invariant guard (executor.py:_resume_system_prompt) and
     # raises before the provider runs. Seed the step_context the first run emitted.
-    change.event_log().append_step_context(
+    quest.event_log().append_step_context(
         agent_id=f"step:only/{step_name}", provider="fake", model="m",
         system_prompt=f"brainstorm partner. opening: {SEED}",
         tools_schema=[], params={}, max_tool_calls=None)
@@ -128,12 +128,12 @@ def _register_observing_provider(provider_registry, tdir: Path, observed: dict) 
 async def test_armed_resume_keeps_transcript_native_and_no_seed(
         tmp_path: Path, provider_registry) -> None:
     # Armed marker + non-empty AWAITING_USER transcript => is_resume and keep both True.
-    change, step_name = _seed_interactive_change(tmp_path, armed=True)
-    tdir = _write_awaiting_user_transcript(change, step_name)
+    quest, step_name = _seed_interactive_change(tmp_path, armed=True)
+    tdir = _write_awaiting_user_transcript(quest, step_name)
     observed: dict = {}
     _register_observing_provider(provider_registry, tdir, observed)
 
-    await run_quest(change)
+    await run_quest(quest)
 
     # keep=True: the prior transcript survived into the run (not wiped)...
     assert observed["transcript_nonempty_at_run"] is True
@@ -144,7 +144,7 @@ async def test_armed_resume_keeps_transcript_native_and_no_seed(
     # AC3(a)/(b) made explicit: the entry step re-rendered as a resume, not a
     # restart — the step_started event carries resumed=True.
     events = [json.loads(ln) for ln in
-              change.events_path.read_text().splitlines() if ln.strip()]
+              quest.events_path.read_text().splitlines() if ln.strip()]
     starts = [e for e in events if e["type"] == "step_started"]
     assert any(
         e["payload"].get("step") == step_name and e["payload"].get("resumed") is True
@@ -157,12 +157,12 @@ async def test_fresh_run_delivers_seed_once(
         tmp_path: Path, provider_registry) -> None:
     # Unarmed (resume_pending None), never started, no prior transcript: a genuine
     # first run => is_resume False, seed delivered exactly once.
-    change, step_name = _seed_interactive_change(tmp_path, armed=False, started=False)
-    tdir = change.quest_dir / "steps" / "only" / step_name
+    quest, step_name = _seed_interactive_change(tmp_path, armed=False, started=False)
+    tdir = quest.quest_dir / "steps" / "only" / step_name
     observed: dict = {}
     _register_observing_provider(provider_registry, tdir, observed)
 
-    await run_quest(change)
+    await run_quest(quest)
 
     assert observed["seed_in_initial"] is True
     assert observed["seed_count"] == 1
@@ -174,12 +174,12 @@ async def test_armed_but_empty_transcript_starts_fresh(
         tmp_path: Path, provider_registry) -> None:
     # Armed marker but NO transcript (draft that never produced a turn): keep gates
     # on a non-empty transcript, so it still starts fresh and re-delivers the seed.
-    change, step_name = _seed_interactive_change(tmp_path, armed=True)
-    tdir = change.quest_dir / "steps" / "only" / step_name
+    quest, step_name = _seed_interactive_change(tmp_path, armed=True)
+    tdir = quest.quest_dir / "steps" / "only" / step_name
     observed: dict = {}
     _register_observing_provider(provider_registry, tdir, observed)
 
-    await run_quest(change)
+    await run_quest(quest)
 
     assert observed["seed_in_initial"] is True
     assert observed["transcript_nonempty_at_run"] is False

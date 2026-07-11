@@ -153,11 +153,11 @@ def _seed_single_step(root: Path) -> Quest:
     flat = workflow.flat_steps()
     State(id="s", step=flat[0].name, step_attempt=0, status="running",
           vars=dict(workflow.vars.defaults()), loop_counts={}).save(quest_dir / "state")
-    change = Quest(id="s", title="t", base_branch="main", control_root=root,
+    quest = Quest(id="s", title="t", base_branch="main", control_root=root,
                     project_root=root, quest_dir=quest_dir)
-    change.event_log().append(agent_id=None, type="change_created",
+    quest.event_log().append(agent_id=None, type="change_created",
                               payload={"id": "s", "title": "t"})
-    return change
+    return quest
 
 
 @pytest.mark.anyio
@@ -189,12 +189,12 @@ async def test_subagent_pause_unwinds_then_resume_restarts(tmp_path: Path) -> No
     resolve.register_provider("fake", env_check=lambda: True,
                               factory=lambda _m: _Provider())
 
-    change = _seed_single_step(tmp_path)
-    r1 = await run_quest(change)
+    quest = _seed_single_step(tmp_path)
+    r1 = await run_quest(quest)
     assert r1 is RunResult.PAUSED
-    st = State.load(change.state_dir)
+    st = State.load(quest.state_dir)
     assert st.status == "paused"
     assert st.step == "w"  # cursor unchanged -> resume restarts the step
 
-    r2 = await run_quest(change)
+    r2 = await run_quest(quest)
     assert r2 is RunResult.COMPLETED

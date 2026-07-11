@@ -41,15 +41,15 @@ def _make_change(root: Path, *, quest_id: str = "test-change", title: str = "t")
         status="running", vars=dict(workflow.vars.defaults()), loop_counts={},
     ).save(quest_dir / "state")
 
-    change = Quest(
+    quest = Quest(
         id=quest_id, title=title, base_branch="main",
         control_root=root, project_root=root, quest_dir=quest_dir,
     )
-    change.event_log().append(
+    quest.event_log().append(
         agent_id=None, type="change_created",
         payload={"id": quest_id, "title": title},
     )
-    return change
+    return quest
 
 
 def test_resume_goto_resets_attempt_once() -> None:
@@ -162,13 +162,13 @@ async def test_resume_edge_zeroes_step_attempt(tmp_path: Path) -> None:
     invocation runs. The runner snapshots the live step_attempt at the start of
     every invocation; the resumed writer invocation must observe 0.
     """
-    change = _seed_resume_loop_workflow(tmp_path)
+    quest = _seed_resume_loop_workflow(tmp_path)
 
     # Poison: position cursor at the branch `route` with a stale retry count.
-    state = State.load(change.state_dir)
+    state = State.load(quest.state_dir)
     state.step = "route"
     state.step_attempt = 3
-    state.save(change.state_dir)
+    state.save(quest.state_dir)
 
     seen_attempts: list[int] = []
 
@@ -178,7 +178,7 @@ async def test_resume_edge_zeroes_step_attempt(tmp_path: Path) -> None:
 
         async def run(self, invocation: AgentInvocation) -> AsyncIterator[Event]:
             # Snapshot the live step_attempt at the moment this invocation runs.
-            live = State.load(change.state_dir)
+            live = State.load(quest.state_dir)
             seen_attempts.append(live.step_attempt)
             yield {"type": "agent_output", "payload": {"outcome": "ok", "status": "Success"}}
 
@@ -187,7 +187,7 @@ async def test_resume_edge_zeroes_step_attempt(tmp_path: Path) -> None:
 
     _register_fake_provider(lambda inv: _Runner(inv))
 
-    result = await run_quest(change, on_event=lambda _e: None)
+    result = await run_quest(quest, on_event=lambda _e: None)
     assert result is RunResult.COMPLETED
 
     # Exactly one writer invocation — the resumed one. It must observe a zeroed
@@ -251,7 +251,7 @@ async def test_resumed_step_persistent_error_still_terminates(
     (tmp_path / ".imp" / "config.yaml").write_text(
         "providers: [fake]\ntiers:\n  low: {fake: m}\n  medium: {fake: m}\n  high: {fake: m}\n"
     )
-    change = _make_change(tmp_path)
+    quest = _make_change(tmp_path)
 
     checker_invocations = {"n": 0}
     _CAP = 50  # bound: a per-retry-reset regression would loop forever.
@@ -278,7 +278,7 @@ async def test_resumed_step_persistent_error_still_terminates(
 
     _register_fake_provider(lambda inv: _Runner(inv))
 
-    result = await run_quest(change, on_event=lambda _e: None)
+    result = await run_quest(quest, on_event=lambda _e: None)
     assert result is RunResult.PAUSED
 
     # checker runs: first natural visit exhausts (max_retries+1 == 4), then it
@@ -287,7 +287,7 @@ async def test_resumed_step_persistent_error_still_terminates(
     # not that it equals an exact number across both passes. A per-retry reset
     # at the resume navigation would loop without bound.
     assert checker_invocations["n"] <= _CAP, checker_invocations["n"]
-    assert State.load(change.state_dir).status == "paused"
+    assert State.load(quest.state_dir).status == "paused"
 
 
 @pytest.fixture

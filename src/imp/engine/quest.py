@@ -334,11 +334,11 @@ class Quest:
         State(
             id=quest_id, step=flat[0].name if flat else None, step_attempt=0,
             step_label=(
-                render_label(flat[0].label, change=None, log=None, state=None)
+                render_label(flat[0].label, quest=None, log=None, state=None)
                 or flat[0].name
             ) if flat else None,
             phase_label=(
-                render_label(flat[0].phase_label, change=None, log=None, state=None)
+                render_label(flat[0].phase_label, quest=None, log=None, state=None)
                 if flat[0].phase_label is not None else None
             ) if flat else None,
             status="new",
@@ -347,16 +347,16 @@ class Quest:
         ).save(quest_dir / "state")
 
         link_quest_home(wt_path, quest_dir)
-        change = cls(
+        quest = cls(
             id=quest_id, title=title, base_branch=base_branch,
             control_root=control_root, project_root=wt_path, quest_dir=quest_dir,
             cur_base_head=cur_base_head, workflow=workflow,
         )
-        change.event_log().append(
+        quest.event_log().append(
             agent_id=None, type="change_created",
             payload={"id": quest_id, "title": title},
         )
-        return change
+        return quest
 
     @classmethod
     def create_draft(
@@ -416,11 +416,11 @@ class Quest:
         State(
             id=quest_id, step=flat[0].name if flat else None, step_attempt=0,
             step_label=(
-                render_label(flat[0].label, change=None, log=None, state=None)
+                render_label(flat[0].label, quest=None, log=None, state=None)
                 or flat[0].name
             ) if flat else None,
             phase_label=(
-                render_label(flat[0].phase_label, change=None, log=None, state=None)
+                render_label(flat[0].phase_label, quest=None, log=None, state=None)
                 if flat[0].phase_label is not None else None
             ) if flat else None,
             status="new",
@@ -428,17 +428,17 @@ class Quest:
             loop_counts={},
         ).save(quest_dir / "state")
 
-        change = cls(
+        quest = cls(
             id=quest_id, title=title, base_branch=base_branch,
             control_root=control_root, project_root=control_root,
             quest_dir=quest_dir, materialized=False, orig_base_head=orig_base_head,
             workflow=workflow, origin=origin, seed_opening=seed_opening,
         )
-        change.event_log().append(
+        quest.event_log().append(
             agent_id=None, type="change_created",
             payload={"id": quest_id, "title": title},
         )
-        return change
+        return quest
 
     @classmethod
     def load(cls, control_root: Path, quest_id: str) -> Quest:

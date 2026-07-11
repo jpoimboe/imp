@@ -34,7 +34,7 @@ def _echo_command(text: str, out: Callable[[str], None], *, color: bool) -> None
 
 
 def handle_slash_line(
-    text: str, *, change: Any, output_fn: Callable[[str], None],
+    text: str, *, quest: Any, output_fn: Callable[[str], None],
     color: bool = False,
 ) -> object | str:
     """Dispatch a /-line. Returns REPROMPT for /help, /skills, and builtins that
@@ -58,7 +58,7 @@ def handle_slash_line(
         return REPROMPT
     if cmd == "skills":
         _echo_command(text, output_fn, color=color)
-        _list(change.workflow_dir / "skills", output_fn)
+        _list(quest.workflow_dir / "skills", output_fn)
         return REPROMPT
     if cmd == "list":
         _echo_command(text, output_fn, color=color)
@@ -66,7 +66,7 @@ def handle_slash_line(
 
         from imp.cli.main import _cmd_status
         show_all = args in ("-a", "--all", "all")
-        _cmd_status(argparse.Namespace(all=show_all), change.control_root)
+        _cmd_status(argparse.Namespace(all=show_all), quest.control_root)
         return REPROMPT
     if cmd == "search":
         _echo_command(text, output_fn, color=color)
@@ -74,7 +74,7 @@ def handle_slash_line(
             output_fn("Usage: /search <query>")
             return REPROMPT
         from imp.engine.archive import read as archive_read
-        hits = archive_read.search_archive(change.control_root, args)
+        hits = archive_read.search_archive(quest.control_root, args)
         if not hits:
             output_fn(f"No archived Quests match {args!r}.")
         else:
@@ -90,9 +90,9 @@ def handle_slash_line(
     if cmd == "model":
         if not args:
             _echo_command(text, output_fn, color=color)
-            print_model_roster(change=change, output_fn=output_fn)
+            print_model_roster(quest=quest, output_fn=output_fn)
             return REPROMPT
-        err = validate_model_arg(args, change=change)
+        err = validate_model_arg(args, quest=quest)
         if err is not None:
             _echo_command(text, output_fn, color=color)
             output_fn(err)
@@ -106,7 +106,7 @@ def handle_slash_line(
         from imp.cli.main import _iter_quest_ids, _quest_home
         from imp.engine.archive import read as archive_read
         from imp.engine.archive import record, records_root
-        control = change.control_root
+        control = quest.control_root
         matches = [cid for cid in _iter_quest_ids(control) if args in cid]
         if len(matches) != 1:
             if not matches:
@@ -127,7 +127,7 @@ def handle_slash_line(
         return REPROMPT
 
     try:
-        body = load_user_skill(change.workflow_dir / "skills", cmd)
+        body = load_user_skill(quest.workflow_dir / "skills", cmd)
     except SkillError:
         # Not a builtin or known skill. Rather than erroring, submit the line
         # verbatim as ordinary input — so a pasted absolute path like
@@ -135,7 +135,7 @@ def handle_slash_line(
         # misread as `no such skill: /home/...`.
         return text
 
-    change.event_log().append(
+    quest.event_log().append(
         agent_id=None, type="skill_load",
         payload={"name": cmd, "source": "human"},
     )
@@ -217,7 +217,7 @@ async def _ask_or_exit(prompt: Any, exit_evt: Any, *, question: str = "",
 
 
 async def ask_line_with_slash(
-    prompt: Any, status: Any | None, change: Any, *, color: bool = False, width: int = 80,
+    prompt: Any, status: Any | None, quest: Any, *, color: bool = False, width: int = 80,
     coord: Any = None, driver: Any = None, hint: str | None = None,
 ) -> str:
     """Read one interactive line, intercepting slash commands. /help, /skills,
@@ -278,7 +278,7 @@ async def ask_line_with_slash(
                         toolbar = (
                             driver.compose_toolbar_static() if driver is not None
                             else compose_identity_toolbar(
-                                quest_id=change.id, title=change.title,
+                                quest_id=quest.id, title=quest.title,
                                 color=color, width=width))
                         # _exit_event is None until C4 wires it; getattr is defensive
                         # for pre-C4 builds, where the read takes the unraced path.
@@ -313,7 +313,7 @@ async def ask_line_with_slash(
                         if not is_slash_command(line):
                             return line
                         result = handle_slash_line(
-                            line, change=change, output_fn=print, color=color)
+                            line, quest=quest, output_fn=print, color=color)
                         if result is REPROMPT:
                             print("")  # one blank between slash output and the reprompt
                             continue

@@ -23,7 +23,7 @@ def create_quest(
 ) -> str:
     if ctx.change_state is None:
         raise RuntimeError("create_quest is only available to top-level Quest steps")
-    parent = ctx.change
+    parent = ctx.quest
     new_id = new_quest_id(existing_stems=live_stems(parent.control_root))
     deps = list(depends_on or [])
     seed = backlog.seed_opening({"title": title, "description": description})

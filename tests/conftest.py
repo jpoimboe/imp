@@ -150,7 +150,7 @@ def _sandbox_fallback_without_bwrap(
     from imp.engine.sandbox import _inactive
     monkeypatch.setattr(
         ex, "_build_sandbox_policy",
-        lambda change, config, log: _inactive(note="test_fallback_no_bwrap"),
+        lambda quest, config, log: _inactive(note="test_fallback_no_bwrap"),
     )
 
 

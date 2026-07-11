@@ -78,7 +78,7 @@ class ToolContext:
     # The LIVE, mutable Quest (top-level steps only; None for subagents). The
     # rename_quest tool mutates change.title + rewrites quest.json through it.
     # Distinct from quest_context, which is the FROZEN render-time snapshot.
-    change: Any = None
+    quest: Any = None
     quest_home: Path | None = None
     # The runner injects this callable as the bare-turn-end / AWAITING_USER
     # resume input channel, used to read the user's reply. None for subagents.

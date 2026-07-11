@@ -56,8 +56,8 @@ def test_resume_accepts_merge_blocked_status(tmp_path, monkeypatch) -> None:
 
     called: list[str] = []
 
-    async def _fake_run_session_client(change, **kwargs) -> int:
-        called.append(change.id)
+    async def _fake_run_session_client(quest, **kwargs) -> int:
+        called.append(quest.id)
         return 0
 
     monkeypatch.chdir(tmp_path)
@@ -85,8 +85,8 @@ def test_resume_accepts_crashed_at_rest_status(tmp_path, monkeypatch) -> None:
 
     called: list[str] = []
 
-    async def _fake_run_session_client(change, **kwargs) -> int:
-        called.append(change.id)
+    async def _fake_run_session_client(quest, **kwargs) -> int:
+        called.append(quest.id)
         return 0
 
     monkeypatch.chdir(tmp_path)

@@ -80,8 +80,8 @@ async def test_live_minimal_change_completes_one_step(
     )
     _git(tmp_path, "add", "-A")
     _git(tmp_path, "commit", "-qm", "seed")
-    change = Quest.create(
+    quest = Quest.create(
         tmp_path, title="live-smoke", quest_id="live-smoke", base_branch="main")
 
-    result = await run_quest(change)
+    result = await run_quest(quest)
     assert result is RunResult.COMPLETED

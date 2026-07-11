@@ -71,13 +71,13 @@ def _make_change(root: Path, *, agents: dict[str, str], workflow_yaml: str) -> Q
         status="running", vars=dict(workflow.vars.defaults()), loop_counts={},
     ).save(quest_dir / "state")
 
-    change = Quest(
+    quest = Quest(
         id="c", title="t", base_branch="main",
         control_root=root, project_root=root, quest_dir=quest_dir,
     )
-    change.event_log().append(
+    quest.event_log().append(
         agent_id=None, type="change_created", payload={"id": "c", "title": "t"})
-    return change
+    return quest
 
 
 class _StallNthRunner:
@@ -116,7 +116,7 @@ class _StallThenSucceedProvider:
 async def test_backoff_persists_retry_continue_pending_before_sleep(
     tmp_path: Path, provider_registry: Any, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    change = _make_change(
+    quest = _make_change(
         tmp_path, agents={"writer.md": _WRITER}, workflow_yaml=_SINGLE_WF)
     provider = _StallThenSucceedProvider(stalls=1)
     provider_registry("fake", env_check=lambda: True, factory=lambda _m: provider)
@@ -124,11 +124,11 @@ async def test_backoff_persists_retry_continue_pending_before_sleep(
     seen_on_disk: list[bool] = []
 
     async def _capture_sleep(_delay: float, _coord: Any) -> None:
-        seen_on_disk.append(State.load(change.state_dir).retry_continue_pending)
+        seen_on_disk.append(State.load(quest.state_dir).retry_continue_pending)
 
     monkeypatch.setattr("imp.engine.executor._interruptible_sleep", _capture_sleep)
 
-    result = await run_quest(change)
+    result = await run_quest(quest)
     assert result is RunResult.COMPLETED
     assert provider.drives == 2               # one stall + one success
     # The marker was set AND persisted to disk BEFORE the backoff sleep ran.
@@ -157,7 +157,7 @@ class _RecordingProvider:
 async def test_backoff_respawn_receives_resume_should_continue(
     tmp_path: Path, provider_registry: Any, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    change = _make_change(
+    quest = _make_change(
         tmp_path, agents={"writer.md": _WRITER}, workflow_yaml=_SINGLE_WF)
     provider = _RecordingProvider(stalls=1)
     provider_registry("fake", env_check=lambda: True, factory=lambda _m: provider)
@@ -167,7 +167,7 @@ async def test_backoff_respawn_receives_resume_should_continue(
 
     monkeypatch.setattr("imp.engine.executor._interruptible_sleep", _no_sleep)
 
-    result = await run_quest(change)
+    result = await run_quest(quest)
     assert result is RunResult.COMPLETED
     # First drive: fresh state, marker False → resume_should_continue False.
     # Second drive (respawn after backoff): the union reads
@@ -239,7 +239,7 @@ class _ReworkProvider:
 async def test_completion_clears_retry_continue_pending(
     tmp_path: Path, provider_registry: Any, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    change = _make_change(
+    quest = _make_change(
         tmp_path, agents={"writer.md": _WRITER}, workflow_yaml=_SINGLE_WF)
     _prov = _StallThenSucceedProvider(stalls=1)
     provider_registry(
@@ -251,22 +251,22 @@ async def test_completion_clears_retry_continue_pending(
 
     monkeypatch.setattr("imp.engine.executor._interruptible_sleep", _no_sleep)
 
-    result = await run_quest(change)
+    result = await run_quest(quest)
     assert result is RunResult.COMPLETED
     # The in-loop set left it True; the terminal Continue must clear it.
-    assert State.load(change.state_dir).retry_continue_pending is False
+    assert State.load(quest.state_dir).retry_continue_pending is False
 
 
 @pytest.mark.anyio
 async def test_forward_advance_clears_retry_continue_pending(
     tmp_path: Path, provider_registry: Any,
 ) -> None:
-    change = _make_change(
+    quest = _make_change(
         tmp_path, agents={"a.md": _A}, workflow_yaml=_TWO_STEP_WF)
     # Seed a stale True; the forward Continue (s1 → s2) must overwrite it.
-    s = State.load(change.state_dir)
+    s = State.load(quest.state_dir)
     s.retry_continue_pending = True
-    s.save(change.state_dir)
+    s.save(quest.state_dir)
 
     from imp.cli.signals import InterruptCoordinator
     coord = InterruptCoordinator()
@@ -278,9 +278,9 @@ async def test_forward_advance_clears_retry_continue_pending(
             coord._should_pause = True
             coord.pause_reason = "ctrl-c"
 
-    result = await run_quest(change, on_event=_on_event, coordinator=coord)
+    result = await run_quest(quest, on_event=_on_event, coordinator=coord)
     assert result is RunResult.PAUSED
-    state = State.load(change.state_dir)
+    state = State.load(quest.state_dir)
     assert state.step == "s2"                       # navigation applied first
     assert state.retry_continue_pending is False    # Continue cleared it
 
@@ -289,12 +289,12 @@ async def test_forward_advance_clears_retry_continue_pending(
 async def test_resume_goto_clears_retry_continue_pending(
     tmp_path: Path, provider_registry: Any,
 ) -> None:
-    change = _make_change(
+    quest = _make_change(
         tmp_path, agents={"rev.md": _REV}, workflow_yaml=_RESUME_GOTO_WF)
     # Seed a stale True; the resume-Goto branch must overwrite it.
-    s = State.load(change.state_dir)
+    s = State.load(quest.state_dir)
     s.retry_continue_pending = True
-    s.save(change.state_dir)
+    s.save(quest.state_dir)
 
     from imp.cli.signals import InterruptCoordinator
     coord = InterruptCoordinator()
@@ -306,9 +306,9 @@ async def test_resume_goto_clears_retry_continue_pending(
             coord._should_pause = True
             coord.pause_reason = "ctrl-c"
 
-    result = await run_quest(change, on_event=_on_event, coordinator=coord)
+    result = await run_quest(quest, on_event=_on_event, coordinator=coord)
     assert result is RunResult.PAUSED
-    state = State.load(change.state_dir)
+    state = State.load(quest.state_dir)
     assert state.step == "review"
     assert state.resume_pending == "review"         # resume-goto target preserved
     assert state.retry_continue_pending is False     # cleared at the resume-Goto branch
@@ -344,7 +344,7 @@ class _FatalProvider:
 async def test_retry_ceiling_pause_preserves_marker(
     tmp_path: Path, provider_registry: Any, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    change = _make_change(
+    quest = _make_change(
         tmp_path, agents={"writer.md": _WRITER}, workflow_yaml=_SINGLE_WF)
     provider_registry("fake", env_check=lambda: True, factory=lambda _m: _AlwaysStallProvider())
 
@@ -356,30 +356,30 @@ async def test_retry_ceiling_pause_preserves_marker(
     monkeypatch.setattr("imp.engine.executor.budget_for", lambda _category: 0.0)
 
     events: list[dict] = []
-    result = await run_quest(change, on_event=events.append)
+    result = await run_quest(quest, on_event=events.append)
     assert result is RunResult.PAUSED
     paused = [e for e in events if e["type"] == "workflow_paused"]
     assert paused and paused[0]["payload"]["reason"] == "retry_ceiling"
     # The marker was False at ceiling time; the retry_ceiling disposition set it True.
-    assert State.load(change.state_dir).retry_continue_pending is True
+    assert State.load(quest.state_dir).retry_continue_pending is True
 
 
 @pytest.mark.anyio
 async def test_fatal_pause_clears_marker(
     tmp_path: Path, provider_registry: Any,
 ) -> None:
-    change = _make_change(
+    quest = _make_change(
         tmp_path, agents={"writer.md": _WRITER}, workflow_yaml=_SINGLE_WF)
     # Seed a stale True (as if a prior backoff had set it).
-    s = State.load(change.state_dir)
+    s = State.load(quest.state_dir)
     s.retry_continue_pending = True
-    s.save(change.state_dir)
+    s.save(quest.state_dir)
 
     provider_registry("fake", env_check=lambda: True, factory=lambda _m: _FatalProvider())
 
-    result = await run_quest(change)  # no coordinator interrupt
+    result = await run_quest(quest)  # no coordinator interrupt
     assert result is RunResult.PAUSED
-    state = State.load(change.state_dir)
+    state = State.load(quest.state_dir)
     assert state.resume_pending == state.step        # fatal park keeps the transcript
     assert state.retry_continue_pending is False      # non-retry park cleared it
 
@@ -388,12 +388,12 @@ async def test_fatal_pause_clears_marker(
 async def test_ctrl_c_park_clears_marker_and_sets_interrupt_pending(
     tmp_path: Path, provider_registry: Any,
 ) -> None:
-    change = _make_change(
+    quest = _make_change(
         tmp_path, agents={"writer.md": _WRITER}, workflow_yaml=_SINGLE_WF)
     # Seed a stale True; a Ctrl-C park during a transient backoff must clear it.
-    s = State.load(change.state_dir)
+    s = State.load(quest.state_dir)
     s.retry_continue_pending = True
-    s.save(change.state_dir)
+    s.save(quest.state_dir)
 
     from imp.cli.signals import InterruptCoordinator
     coord = InterruptCoordinator()
@@ -416,8 +416,8 @@ async def test_ctrl_c_park_clears_marker_and_sets_interrupt_pending(
 
     provider_registry("fake", env_check=lambda: True, factory=lambda _m: _P())
 
-    result = await run_quest(change, coordinator=coord)
+    result = await run_quest(quest, coordinator=coord)
     assert result is RunResult.PAUSED
-    state = State.load(change.state_dir)
+    state = State.load(quest.state_dir)
     assert state.interrupt_pending is True            # Ctrl-C park sets the interrupt marker
     assert state.retry_continue_pending is False       # and clears the transient marker

@@ -430,8 +430,8 @@ async def deliver_to_session(
     control_root: Path, quest_id: str, text: str,
 ) -> None:
     """Deliver one reply into quest_id's session daemon, rehydrating if hibernated."""
-    change = await anyio.to_thread.run_sync(Quest.load, control_root, quest_id)
-    await deliver_session_reply(change, text)
+    quest = await anyio.to_thread.run_sync(Quest.load, control_root, quest_id)
+    await deliver_session_reply(quest, text)
 
 
 async def run_daemon(

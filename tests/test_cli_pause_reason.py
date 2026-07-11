@@ -44,7 +44,7 @@ def test_new_non_interactive_routes_through_session_client(
     captured: dict[str, object] = {}
 
     async def _fake_run_session_client(
-        change: Quest, *, driver: object, coord: object, solicit: object,
+        quest: Quest, *, driver: object, coord: object, solicit: object,
         seed_opening: object = None, status: object = None,
         leave_mode: object = None,
         title: object = None,
@@ -52,7 +52,7 @@ def test_new_non_interactive_routes_through_session_client(
         autonomous: object = False,
         model: str | None = None,
     ) -> int:
-        captured["quest_id"] = change.id
+        captured["quest_id"] = quest.id
         captured["seed_opening"] = seed_opening
         return 7
 
@@ -78,9 +78,9 @@ def test_new_interactive_routes_through_session_client(
     made: dict[str, object] = {}
 
     def _fake_make_interactive_solicit(
-        change: Quest, *, status: object, driver: object, coord: object,
+        quest: Quest, *, status: object, driver: object, coord: object,
     ) -> Any:
-        made["quest_id"] = change.id
+        made["quest_id"] = quest.id
 
         async def _solicit(_prompt: str) -> str:
             return ""
@@ -93,14 +93,14 @@ def test_new_interactive_routes_through_session_client(
     captured: dict[str, object] = {}
 
     async def _fake_run_session_client(
-        change: Quest, *, driver: object, coord: object, solicit: object,
+        quest: Quest, *, driver: object, coord: object, solicit: object,
         seed_opening: object = None, status: object = None,
         leave_mode: object = None,
         leave_state: object = None, title: object = None,
         autonomous: object = False,
         model: str | None = None,
     ) -> int:
-        captured["quest_id"] = change.id
+        captured["quest_id"] = quest.id
         captured["seed_opening"] = seed_opening
         return 5
 

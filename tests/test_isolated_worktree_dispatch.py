@@ -65,20 +65,20 @@ def _make_change(tmp_path: Path) -> Quest:
                          base_branch="main")
 
 
-def _ctx(tmp_path: Path, change: Quest, *, name: str, agent: AgentDef,
+def _ctx(tmp_path: Path, quest: Quest, *, name: str, agent: AgentDef,
          spawn) -> ToolContext:
-    ctx = ToolContext(project_root=change.project_root,
-                      events_path=change.events_path)
+    ctx = ToolContext(project_root=quest.project_root,
+                      events_path=quest.events_path)
     ctx.subagent_defs = {name: agent}
     ctx.provider_name = "anthropic"
     ctx.model_name = "claude"
     ctx.parent_transcript_dir = tmp_path / "steps" / "p" / "s"
     ctx.coordinator = InterruptCoordinator()
-    ctx.change = change
+    ctx.quest = quest
     ctx.quest_context = QuestContext(
-        id=change.id, title=change.title, project_root=change.project_root,
-        quest_home=f".imp/quests/{change.id}",
-        workflow_dir=change.workflow_dir)
+        id=quest.id, title=quest.title, project_root=quest.project_root,
+        quest_home=f".imp/quests/{quest.id}",
+        workflow_dir=quest.workflow_dir)
     ctx.sandbox_policy = None
     ctx.spawn_subagent = spawn
     return ctx
@@ -90,9 +90,9 @@ def test_isolated_dispatch_runs_in_throwaway_with_distinct_policy(
     # fake runner never actually spawns a sandboxed shell, so the policy is
     # inspected as pure data.
     monkeypatch.setattr("imp.engine.sandbox.sandbox_available", lambda: True)
-    change = _make_change(tmp_path)
+    quest = _make_change(tmp_path)
     capture: dict = {}
-    ctx = _ctx(tmp_path, change, name="prober", agent=_isolated_agent("prober"),
+    ctx = _ctx(tmp_path, quest, name="prober", agent=_isolated_agent("prober"),
                spawn=_spawn([{"type": "agent_output", "payload": {"text": "ok"}}],
                             capture=capture))
 
@@ -107,7 +107,7 @@ def test_isolated_dispatch_runs_in_throwaway_with_distinct_policy(
     assert pol.network is True
     assert pol.worktree == str(throwaway)
     # the DURABLE change home is the rw-bound change dir (survives teardown)
-    assert pol.quest_home == str(change.quest_dir)
+    assert pol.quest_home == str(quest.quest_dir)
     # teardown: throwaway worktree + its branch are gone
     assert not throwaway.exists()
     assert "imp/spike-prb001-1" not in _git(
@@ -117,19 +117,19 @@ def test_isolated_dispatch_runs_in_throwaway_with_distinct_policy(
 def test_isolated_dispatch_parks_artifact_surviving_teardown(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("imp.engine.sandbox.sandbox_available", lambda: True)
-    change = _make_change(tmp_path)
+    quest = _make_change(tmp_path)
 
     seen: dict = {}
 
     def _park(inv) -> None:
         seen["root"] = inv.quest_context.project_root
         # write through the planted change-home symlink inside the throwaway
-        home = inv.quest_context.project_root / ".imp" / "quests" / change.id
+        home = inv.quest_context.project_root / ".imp" / "quests" / quest.id
         dest = home / "artifacts" / "spike" / "finding.md"
         dest.parent.mkdir(parents=True, exist_ok=True)
         dest.write_text("empirical result: 42\n")
 
-    ctx = _ctx(tmp_path, change, name="prober", agent=_isolated_agent("prober"),
+    ctx = _ctx(tmp_path, quest, name="prober", agent=_isolated_agent("prober"),
                spawn=_spawn([{"type": "agent_output", "payload": {"text": "done"}}],
                             on_run=_park))
 
@@ -139,7 +139,7 @@ def test_isolated_dispatch_parks_artifact_surviving_teardown(
     # the write happened INSIDE the disposable worktree ...
     assert seen["root"] == throwaway
     # ... which is now gone, yet the parked artifact persists in the durable home
-    parked = change.quest_dir / "artifacts" / "spike" / "finding.md"
+    parked = quest.quest_dir / "artifacts" / "spike" / "finding.md"
     assert parked.read_text() == "empirical result: 42\n"
     assert not throwaway.exists()
 
@@ -149,7 +149,7 @@ def test_isolated_dispatch_tears_down_on_error(
     import imp.engine.worktree as wtmod
 
     monkeypatch.setattr("imp.engine.sandbox.sandbox_available", lambda: True)
-    change = _make_change(tmp_path)
+    quest = _make_change(tmp_path)
 
     # Spy on teardown so the test proves it ran with the spike's id+discriminator
     # (a bare "worktree is absent" check can't tell "never created" from
@@ -167,7 +167,7 @@ def test_isolated_dispatch_tears_down_on_error(
     async def _spawn_boom(_inv):
         raise RuntimeError("spike spawn failed")
 
-    ctx = _ctx(tmp_path, change, name="prober", agent=_isolated_agent("prober"),
+    ctx = _ctx(tmp_path, quest, name="prober", agent=_isolated_agent("prober"),
                spawn=_spawn_boom)
 
     with pytest.raises(RuntimeError, match="spike spawn failed"):
@@ -181,10 +181,10 @@ def test_isolated_dispatch_tears_down_on_error(
 
 
 def test_non_isolated_subagent_inherits_parent_policy(tmp_path: Path) -> None:
-    change = _make_change(tmp_path)
+    quest = _make_change(tmp_path)
     capture: dict = {}
     sentinel = object()
-    ctx = _ctx(tmp_path, change, name="rev", agent=_plain_agent("rev"),
+    ctx = _ctx(tmp_path, quest, name="rev", agent=_plain_agent("rev"),
                spawn=_spawn([{"type": "agent_output", "payload": {"text": "ok"}}],
                             capture=capture))
     ctx.sandbox_policy = sentinel
@@ -193,7 +193,7 @@ def test_non_isolated_subagent_inherits_parent_policy(tmp_path: Path) -> None:
 
     inv = capture["inv"]
     assert inv.sandbox_policy is sentinel                 # inherited unchanged
-    assert inv.quest_context.project_root == change.project_root
+    assert inv.quest_context.project_root == quest.project_root
     # no spike worktree was ever created
     assert list((tmp_path / ".imp" / "worktrees").glob("spike-*")) == []
 
@@ -204,8 +204,8 @@ def test_inactive_spike_policy_emits_sandbox_inactive_event(
     monkeypatch.setattr(
         "imp.agents.subagents._build_spike_policy", lambda *_a, **_kw: inactive_policy)
 
-    change = _make_change(tmp_path)
-    ctx = _ctx(tmp_path, change, name="prober", agent=_isolated_agent("prober"),
+    quest = _make_change(tmp_path)
+    ctx = _ctx(tmp_path, quest, name="prober", agent=_isolated_agent("prober"),
                spawn=_spawn([{"type": "agent_output", "payload": {"text": "ok"}}]))
     ctx.agent_id = "prober"
 
@@ -232,7 +232,7 @@ def test_isolated_dispatch_without_quest_context_raises(tmp_path: Path) -> None:
     ctx.model_name = "claude"
     ctx.parent_transcript_dir = tmp_path / "steps" / "p" / "s"
     ctx.coordinator = InterruptCoordinator()
-    ctx.change = None                                     # nested-dispatch shape
+    ctx.quest = None                                     # nested-dispatch shape
     ctx.quest_context = QuestContext(
         id="x", title="X", project_root=tmp_path, workflow_dir=tmp_path / "wf")
     ctx.spawn_subagent = _spawn([{"type": "agent_output", "payload": {"text": "ok"}}])
@@ -271,11 +271,11 @@ def test_build_spike_policy_passes_spike_true(monkeypatch, tmp_path):
     monkeypatch.setattr(
         "imp.engine.env.overlay_engine_env", lambda parent, overlay: {})
 
-    change = SimpleNamespace(
+    quest = SimpleNamespace(
         id="abc", title="T", project_root=tmp_path, control_root=tmp_path,
         quest_dir=tmp_path / "change", base_branch="master",
     )
-    result = subagents._build_spike_policy(change, tmp_path / "wt", test_gates=None)
+    result = subagents._build_spike_policy(quest, tmp_path / "wt", test_gates=None)
 
     assert result == "sentinel-policy"
     assert captured["spike"] is True

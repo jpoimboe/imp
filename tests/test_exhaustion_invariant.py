@@ -53,15 +53,15 @@ def _make_change(root: Path, *, quest_id: str = "test-change", title: str = "t")
         status="running", vars=dict(workflow.vars.defaults()), loop_counts={},
     ).save(quest_dir / "state")
 
-    change = Quest(
+    quest = Quest(
         id=quest_id, title=title, base_branch="main",
         control_root=root, project_root=root, quest_dir=quest_dir,
     )
-    change.event_log().append(
+    quest.event_log().append(
         agent_id=None, type="change_created",
         payload={"id": quest_id, "title": title},
     )
-    return change
+    return quest
 
 
 class _NoOutputRunner:
@@ -123,13 +123,13 @@ async def test_exhausted_step_emits_single_pause_completion(tmp_path: Path) -> N
         "fake", env_check=lambda: True, factory=lambda _m: _NoOutputProvider(),
     )
 
-    change = _make_change(tmp_path)
+    quest = _make_change(tmp_path)
 
-    result = await run_quest(change, on_event=lambda _e: None)
+    result = await run_quest(quest, on_event=lambda _e: None)
     assert result is RunResult.PAUSED
 
     # Read events back from the on-disk JsonlEventLog (run_quest hard-codes it).
-    events = list(change.event_log().read())
+    events = list(quest.event_log().read())
 
     completions = [
         e for e in events

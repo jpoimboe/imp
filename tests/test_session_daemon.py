@@ -27,7 +27,7 @@ def anyio_backend() -> str:
 
 
 def _make_change(tmp_path: Path, quest_id: str) -> Quest:
-    change = Quest(
+    quest = Quest(
         id=quest_id,
         title="T",
         base_branch="main",
@@ -36,8 +36,8 @@ def _make_change(tmp_path: Path, quest_id: str) -> Quest:
         quest_dir=tmp_path / ".imp" / "change",
     )
     State(id=quest_id, step=None, step_attempt=0, status="paused").save(
-        change.state_dir)
-    return change
+        quest.state_dir)
+    return quest
 
 
 async def _wait_for_socket(sock: str) -> None:
@@ -50,11 +50,11 @@ async def _wait_for_socket(sock: str) -> None:
 async def test_serves_on_per_change_socket_and_bridges_run_quest_seams(
     tmp_path: Path,
 ) -> None:
-    change = _make_change(tmp_path, "2026-06-15-abc")
-    sock = str(session_socket_path(change.control_root, change.id))
+    quest = _make_change(tmp_path, "2026-06-15-abc")
+    sock = str(session_socket_path(quest.control_root, quest.id))
 
     async def fake_run(
-        change: Quest, *, on_event: Any, user_chat_input_fn: Any,
+        quest: Quest, *, on_event: Any, user_chat_input_fn: Any,
         coordinator: Any,
         wait_for_turn_fn: Any = None,
     ) -> str:
@@ -67,12 +67,12 @@ async def test_serves_on_per_change_socket_and_bridges_run_quest_seams(
 
         async def _serve() -> None:
             result["r"] = await serve_quest_session(
-                change, run_fn=fake_run, hibernate=False)
+                quest, run_fn=fake_run, hibernate=False)
 
         tg.start_soon(_serve)
         await _wait_for_socket(sock)
         received: list[dict[str, Any]] = []
-        client = SessionClient(sock, change.id, change.title,
+        client = SessionClient(sock, quest.id, quest.title,
                                on_event=received.append)
         await client.connect()
         tg.start_soon(client.receive_events)
@@ -97,10 +97,10 @@ async def test_serves_on_per_change_socket_and_bridges_run_quest_seams(
 async def test_zero_client_gate_hibernates_by_default(tmp_path: Path) -> None:
     from imp.engine.awaiting_user_input import AwaitingUserInput
 
-    change = _make_change(tmp_path, "2026-06-15-def")
+    quest = _make_change(tmp_path, "2026-06-15-def")
 
     async def fake_run(
-        change: Quest, *, on_event: Any, user_chat_input_fn: Any,
+        quest: Quest, *, on_event: Any, user_chat_input_fn: Any,
         coordinator: Any,
         wait_for_turn_fn: Any = None,
     ) -> str:
@@ -112,18 +112,18 @@ async def test_zero_client_gate_hibernates_by_default(tmp_path: Path) -> None:
 
     with anyio.fail_after(5):
         result = await serve_quest_session(
-            change, run_fn=fake_run, first_attach_timeout=0.1)
+            quest, run_fn=fake_run, first_attach_timeout=0.1)
     assert result == "hibernated"
 
 
 @pytest.mark.anyio
 async def test_lock_is_held_during_run_and_released_after(tmp_path: Path) -> None:
-    change = _make_change(tmp_path, "2026-06-15-ghi")
-    lock_path = change.quest_dir / "lock"
+    quest = _make_change(tmp_path, "2026-06-15-ghi")
+    lock_path = quest.quest_dir / "lock"
     release = anyio.Event()
 
     async def fake_run(
-        change: Quest, *, on_event: Any, user_chat_input_fn: Any,
+        quest: Quest, *, on_event: Any, user_chat_input_fn: Any,
         coordinator: Any,
         wait_for_turn_fn: Any = None,
     ) -> str:
@@ -135,7 +135,7 @@ async def test_lock_is_held_during_run_and_released_after(tmp_path: Path) -> Non
 
         async def _serve() -> None:
             result["r"] = await serve_quest_session(
-                change, run_fn=fake_run, hibernate=False)
+                quest, run_fn=fake_run, hibernate=False)
 
         tg.start_soon(_serve)
         await anyio.sleep(0.05)  # let serve acquire the lock and enter run_fn
@@ -153,11 +153,11 @@ async def test_lock_is_held_during_run_and_released_after(tmp_path: Path) -> Non
 async def test_interrupt_control_pauses_the_shared_coordinator(
     tmp_path: Path,
 ) -> None:
-    change = _make_change(tmp_path, "2026-06-15-jkl")
-    sock = str(session_socket_path(change.control_root, change.id))
+    quest = _make_change(tmp_path, "2026-06-15-jkl")
+    sock = str(session_socket_path(quest.control_root, quest.id))
 
     async def fake_run(
-        change: Quest, *, on_event: Any, user_chat_input_fn: Any,
+        quest: Quest, *, on_event: Any, user_chat_input_fn: Any,
         coordinator: Any,
         wait_for_turn_fn: Any = None,
     ) -> str:
@@ -171,11 +171,11 @@ async def test_interrupt_control_pauses_the_shared_coordinator(
 
         async def _serve() -> None:
             result["r"] = await serve_quest_session(
-                change, run_fn=fake_run, hibernate=False)
+                quest, run_fn=fake_run, hibernate=False)
 
         tg.start_soon(_serve)
         await _wait_for_socket(sock)
-        client = SessionClient(sock, change.id, change.title,
+        client = SessionClient(sock, quest.id, quest.title,
                                on_event=lambda _e: None)
         await client.connect()
         await client.send_control("interrupt")
@@ -215,12 +215,12 @@ def test_main_loads_named_change_and_serves_it(
 
 @pytest.mark.anyio
 async def test_resident_abandon_runs_teardown(tmp_path: Path) -> None:
-    change = _make_change(tmp_path, "2026-06-15-aba")
-    sock = str(session_socket_path(change.control_root, change.id))
+    quest = _make_change(tmp_path, "2026-06-15-aba")
+    sock = str(session_socket_path(quest.control_root, quest.id))
     torn: list[Quest] = []
 
     async def fake_run(
-        change: Quest, *, on_event: Any, user_chat_input_fn: Any,
+        quest: Quest, *, on_event: Any, user_chat_input_fn: Any,
         coordinator: Any,
         wait_for_turn_fn: Any = None,
     ) -> str:
@@ -230,19 +230,19 @@ async def test_resident_abandon_runs_teardown(tmp_path: Path) -> None:
     async with anyio.create_task_group() as tg:
         async def _serve() -> None:
             await serve_quest_session(
-                change, run_fn=fake_run, hibernate=False,
+                quest, run_fn=fake_run, hibernate=False,
                 tear_down=lambda ch: torn.append(ch))
 
         tg.start_soon(_serve)
         await _wait_for_socket(sock)
-        client = SessionClient(sock, change.id, change.title,
+        client = SessionClient(sock, quest.id, quest.title,
                                on_event=lambda _e: None)
         await client.connect()
         await client.send_control(CONTROL_ABANDON)
         with anyio.fail_after(5):
             while not torn:
                 await anyio.sleep(0.02)
-        assert torn == [change]
+        assert torn == [quest]
         await client.aclose()
         tg.cancel_scope.cancel()
 
@@ -251,12 +251,12 @@ async def test_resident_abandon_runs_teardown(tmp_path: Path) -> None:
 async def test_interrupt_resume_prompt_not_duplicated_on_existing_client(
     tmp_path: Path,
 ) -> None:
-    change = _make_change(tmp_path, "2026-06-15-dup")
-    sock = str(session_socket_path(change.control_root, change.id))
+    quest = _make_change(tmp_path, "2026-06-15-dup")
+    sock = str(session_socket_path(quest.control_root, quest.id))
     calls = {"n": 0}
 
     async def fake_run(
-        change: Quest, *, on_event: Any, user_chat_input_fn: Any,
+        quest: Quest, *, on_event: Any, user_chat_input_fn: Any,
         coordinator: Any,
         wait_for_turn_fn: Any = None,
     ) -> RunResult:
@@ -271,12 +271,12 @@ async def test_interrupt_resume_prompt_not_duplicated_on_existing_client(
 
         async def _serve() -> None:
             result["r"] = await serve_quest_session(
-                change, run_fn=fake_run, hibernate=False)
+                quest, run_fn=fake_run, hibernate=False)
 
         tg.start_soon(_serve)
         await _wait_for_socket(sock)
         seen1: list[dict[str, Any]] = []
-        c1 = SessionClient(sock, change.id, change.title, on_event=seen1.append)
+        c1 = SessionClient(sock, quest.id, quest.title, on_event=seen1.append)
         await c1.connect()
         tg.start_soon(c1.receive_events)
         with anyio.fail_after(5):
@@ -284,7 +284,7 @@ async def test_interrupt_resume_prompt_not_duplicated_on_existing_client(
                 await anyio.sleep(0.02)
         # Late client attaches at the resume gate.
         seen2: list[dict[str, Any]] = []
-        c2 = SessionClient(sock, change.id, change.title, on_event=seen2.append)
+        c2 = SessionClient(sock, quest.id, quest.title, on_event=seen2.append)
         await c2.connect()
         tg.start_soon(c2.receive_events)
         with anyio.fail_after(5):
@@ -314,12 +314,12 @@ def test_is_interrupt_pause_true_only_for_paused_with_should_pause() -> None:
 async def test_interrupt_pause_reprompts_and_resumes_in_place(
     tmp_path: Path,
 ) -> None:
-    change = _make_change(tmp_path, "2026-06-15-rzm")
-    sock = str(session_socket_path(change.control_root, change.id))
+    quest = _make_change(tmp_path, "2026-06-15-rzm")
+    sock = str(session_socket_path(quest.control_root, quest.id))
     calls = {"n": 0}
 
     async def fake_run(
-        change: Quest, *, on_event: Any, user_chat_input_fn: Any,
+        quest: Quest, *, on_event: Any, user_chat_input_fn: Any,
         coordinator: Any,
         wait_for_turn_fn: Any = None,
     ) -> RunResult:
@@ -337,12 +337,12 @@ async def test_interrupt_pause_reprompts_and_resumes_in_place(
 
         async def _serve() -> None:
             result["r"] = await serve_quest_session(
-                change, run_fn=fake_run, hibernate=False)
+                quest, run_fn=fake_run, hibernate=False)
 
         tg.start_soon(_serve)
         await _wait_for_socket(sock)
         received: list[dict[str, Any]] = []
-        client = SessionClient(sock, change.id, change.title,
+        client = SessionClient(sock, quest.id, quest.title,
                                on_event=received.append)
         await client.connect()
         tg.start_soon(client.receive_events)
@@ -366,11 +366,11 @@ async def test_interrupt_pause_reprompts_and_resumes_in_place(
 async def test_interrupt_pause_hibernates_with_zero_clients(
     tmp_path: Path,
 ) -> None:
-    change = _make_change(tmp_path, "2026-06-15-rzh")
+    quest = _make_change(tmp_path, "2026-06-15-rzh")
     calls = {"n": 0}
 
     async def fake_run(
-        change: Quest, *, on_event: Any, user_chat_input_fn: Any,
+        quest: Quest, *, on_event: Any, user_chat_input_fn: Any,
         coordinator: Any,
         wait_for_turn_fn: Any = None,
     ) -> RunResult:
@@ -380,7 +380,7 @@ async def test_interrupt_pause_hibernates_with_zero_clients(
 
     with anyio.fail_after(5):
         result = await serve_quest_session(
-            change, run_fn=fake_run, hibernate=True, first_attach_timeout=0.1)
+            quest, run_fn=fake_run, hibernate=True, first_attach_timeout=0.1)
     assert result is RunResult.PAUSED
     assert calls["n"] == 1
 
@@ -393,28 +393,28 @@ async def test_resume_journals_workflow_resumed_without_flipping_status(
     from tests.conftest import _seed_control
 
     _seed_control(tmp_path)
-    change = Quest.create(tmp_path, title="x", quest_id="feat", base_branch="main")
-    st = State.load(change.state_dir)
+    quest = Quest.create(tmp_path, title="x", quest_id="feat", base_branch="main")
+    st = State.load(quest.state_dir)
     st.status = "paused"
-    st.save(change.state_dir)
+    st.save(quest.state_dir)
 
     seen: dict[str, str] = {}
 
     async def fake_run(
-        change: Quest, *, on_event: Any, user_chat_input_fn: Any,
+        quest: Quest, *, on_event: Any, user_chat_input_fn: Any,
         coordinator: Any,
         wait_for_turn_fn: Any = None,
     ) -> RunResult:
-        seen["status"] = State.load(change.state_dir).status
+        seen["status"] = State.load(quest.state_dir).status
         return RunResult.COMPLETED
 
     with anyio.fail_after(5):
         result = await serve_quest_session(
-            change, run_fn=fake_run, hibernate=False, resume=True)
+            quest, run_fn=fake_run, hibernate=False, resume=True)
 
     assert result is RunResult.COMPLETED
     assert seen["status"] == "paused"           # never flipped to a persisted "running"
-    assert change.events_path.exists() and "workflow_resumed" in change.events_path.read_text()
+    assert quest.events_path.exists() and "workflow_resumed" in quest.events_path.read_text()
 
 
 @pytest.mark.anyio
@@ -428,29 +428,29 @@ async def test_resume_sets_resume_pending_for_a_stale_lock_crash(tmp_path: Path)
     from tests.conftest import _seed_control
 
     _seed_control(tmp_path)
-    change = Quest.create(tmp_path, title="x", quest_id="feat", base_branch="main")
-    st = State.load(change.state_dir)
+    quest = Quest.create(tmp_path, title="x", quest_id="feat", base_branch="main")
+    st = State.load(quest.state_dir)
     st.step = "review"
     st.status = "paused"
     st.resume_pending = None
-    st.save(change.state_dir)
+    st.save(quest.state_dir)
     p = subprocess.Popen(["true"])           # dead pid ⇒ stale lock ⇒ crash
     p.wait()
-    (change.quest_dir / "lock").write_text(str(p.pid))
+    (quest.quest_dir / "lock").write_text(str(p.pid))
 
     seen: dict[str, object] = {}
 
     async def fake_run(
-        change: Quest, *, on_event: Any, user_chat_input_fn: Any,
+        quest: Quest, *, on_event: Any, user_chat_input_fn: Any,
         coordinator: Any,
         wait_for_turn_fn: Any = None,
     ) -> RunResult:
-        seen["resume_pending"] = State.load(change.state_dir).resume_pending
+        seen["resume_pending"] = State.load(quest.state_dir).resume_pending
         return RunResult.COMPLETED
 
     with anyio.fail_after(5):
         result = await serve_quest_session(
-            change, run_fn=fake_run, hibernate=False, resume=True)
+            quest, run_fn=fake_run, hibernate=False, resume=True)
 
     assert result is RunResult.COMPLETED
     assert seen["resume_pending"] == "review"
@@ -464,26 +464,26 @@ async def test_resume_with_no_lock_does_not_set_resume_pending(tmp_path: Path) -
     from tests.conftest import _seed_control
 
     _seed_control(tmp_path)
-    change = Quest.create(tmp_path, title="x", quest_id="feat", base_branch="main")
-    st = State.load(change.state_dir)
+    quest = Quest.create(tmp_path, title="x", quest_id="feat", base_branch="main")
+    st = State.load(quest.state_dir)
     st.step = "review"
     st.status = "paused"
     st.resume_pending = None
-    st.save(change.state_dir)
+    st.save(quest.state_dir)
 
     seen: dict[str, object] = {}
 
     async def fake_run(
-        change: Quest, *, on_event: Any, user_chat_input_fn: Any,
+        quest: Quest, *, on_event: Any, user_chat_input_fn: Any,
         coordinator: Any,
         wait_for_turn_fn: Any = None,
     ) -> RunResult:
-        seen["resume_pending"] = State.load(change.state_dir).resume_pending
+        seen["resume_pending"] = State.load(quest.state_dir).resume_pending
         return RunResult.COMPLETED
 
     with anyio.fail_after(5):
         result = await serve_quest_session(
-            change, run_fn=fake_run, hibernate=False, resume=True)
+            quest, run_fn=fake_run, hibernate=False, resume=True)
 
     assert result is RunResult.COMPLETED
     assert seen["resume_pending"] is None
@@ -495,29 +495,29 @@ async def test_default_spawn_does_no_resume_prep(tmp_path: Path) -> None:
     from tests.conftest import _seed_control
 
     _seed_control(tmp_path)
-    change = Quest.create(tmp_path, title="x", quest_id="feat", base_branch="main")
-    st = State.load(change.state_dir)
+    quest = Quest.create(tmp_path, title="x", quest_id="feat", base_branch="main")
+    st = State.load(quest.state_dir)
     st.status = "paused"
-    st.save(change.state_dir)
+    st.save(quest.state_dir)
 
     seen: dict[str, str] = {}
 
     async def fake_run(
-        change: Quest, *, on_event: Any, user_chat_input_fn: Any,
+        quest: Quest, *, on_event: Any, user_chat_input_fn: Any,
         coordinator: Any,
         wait_for_turn_fn: Any = None,
     ) -> RunResult:
-        seen["status"] = State.load(change.state_dir).status
+        seen["status"] = State.load(quest.state_dir).status
         return RunResult.COMPLETED
 
     with anyio.fail_after(5):
         result = await serve_quest_session(
-            change, run_fn=fake_run, hibernate=False)  # resume defaults False
+            quest, run_fn=fake_run, hibernate=False)  # resume defaults False
 
     assert result is RunResult.COMPLETED
     assert seen["status"] == "paused"           # untouched: no resume prep ran
-    assert not change.events_path.exists() or (
-        "workflow_resumed" not in change.events_path.read_text())
+    assert not quest.events_path.exists() or (
+        "workflow_resumed" not in quest.events_path.read_text())
 
 
 def test_main_forwards_resume_flag_via_partial(
@@ -558,8 +558,8 @@ def test_append_workflow_resumed_is_idempotent_when_trailing(tmp_path: Path) -> 
     from tests.conftest import _seed_control
 
     _seed_control(tmp_path)
-    change = Quest.create(tmp_path, title="x", quest_id="feat", base_branch="main")
-    log = change.event_log()
+    quest = Quest.create(tmp_path, title="x", quest_id="feat", base_branch="main")
+    log = quest.event_log()
     daemon._append_workflow_resumed(log)
     daemon._append_workflow_resumed(log)   # trailing already resumed → no-op
     assert [e["type"] for e in log.read()].count("workflow_resumed") == 1
@@ -569,35 +569,35 @@ def test_append_workflow_resumed_is_idempotent_when_trailing(tmp_path: Path) -> 
 async def test_two_interrupt_rounds_leave_no_open_pause(tmp_path: Path) -> None:
     from imp.cli.signals import _open_pause_exists
 
-    change = _make_change(tmp_path, "2026-06-15-bal")
+    quest = _make_change(tmp_path, "2026-06-15-bal")
     calls = {"n": 0}
 
     async def fake_run(
-        change: Quest, *, on_event: Any, user_chat_input_fn: Any,
+        quest: Quest, *, on_event: Any, user_chat_input_fn: Any,
         coordinator: Any,
         wait_for_turn_fn: Any = None,
     ) -> RunResult:
         calls["n"] += 1
         if calls["n"] <= 2:
-            change.event_log().append(
+            quest.event_log().append(
                 agent_id=None, type="workflow_paused",
                 payload={"reason": "interrupt"})
             await coordinator.signal_pause(reason="ctrl-c")
             return RunResult.PAUSED
         return RunResult.COMPLETED
 
-    sock = str(session_socket_path(change.control_root, change.id))
+    sock = str(session_socket_path(quest.control_root, quest.id))
     async with anyio.create_task_group() as tg:
         result: dict[str, Any] = {}
 
         async def _serve() -> None:
             result["r"] = await serve_quest_session(
-                change, run_fn=fake_run, hibernate=False)
+                quest, run_fn=fake_run, hibernate=False)
 
         tg.start_soon(_serve)
         await _wait_for_socket(sock)
         seen: list[dict[str, Any]] = []
-        client = SessionClient(sock, change.id, change.title, on_event=seen.append)
+        client = SessionClient(sock, quest.id, quest.title, on_event=seen.append)
         await client.connect()
         tg.start_soon(client.receive_events)
 
@@ -614,10 +614,10 @@ async def test_two_interrupt_rounds_leave_no_open_pause(tmp_path: Path) -> None:
             while "r" not in result:
                 await anyio.sleep(0.02)
         assert result["r"] is RunResult.COMPLETED
-        types = [e["type"] for e in change.event_log().read()]
+        types = [e["type"] for e in quest.event_log().read()]
         assert types.count("workflow_paused") == 2
         assert types.count("workflow_resumed") == 2
-        assert not _open_pause_exists(change)
+        assert not _open_pause_exists(quest)
         await client.aclose()
         tg.cancel_scope.cancel()
 
@@ -668,8 +668,8 @@ def test_append_workflow_resumed_appends_after_a_real_event(tmp_path: Path) -> N
     from tests.conftest import _seed_control
 
     _seed_control(tmp_path)
-    change = Quest.create(tmp_path, title="x", quest_id="feat", base_branch="main")
-    log = change.event_log()
+    quest = Quest.create(tmp_path, title="x", quest_id="feat", base_branch="main")
+    log = quest.event_log()
     daemon._append_workflow_resumed(log)
     log.append(agent_id=None, type="workflow_paused", payload={"reason": "interrupt"})
     daemon._append_workflow_resumed(log)   # real event between → a second marker
@@ -681,10 +681,10 @@ def test_last_pause_was_awaiting_turn_true_for_awaiting_turn(tmp_path: Path) -> 
     from tests.conftest import _seed_control
 
     _seed_control(tmp_path)
-    change = Quest.create(tmp_path, title="x", quest_id="feat", base_branch="main")
-    change.event_log().append(
+    quest = Quest.create(tmp_path, title="x", quest_id="feat", base_branch="main")
+    quest.event_log().append(
         agent_id=None, type="workflow_paused", payload={"reason": "awaiting_turn"})
-    assert daemon._last_pause_was_awaiting_turn(change.event_log()) is True
+    assert daemon._last_pause_was_awaiting_turn(quest.event_log()) is True
 
 
 def test_last_pause_was_awaiting_turn_false_for_other_reason(tmp_path: Path) -> None:
@@ -692,10 +692,10 @@ def test_last_pause_was_awaiting_turn_false_for_other_reason(tmp_path: Path) -> 
     from tests.conftest import _seed_control
 
     _seed_control(tmp_path)
-    change = Quest.create(tmp_path, title="x", quest_id="feat", base_branch="main")
-    change.event_log().append(
+    quest = Quest.create(tmp_path, title="x", quest_id="feat", base_branch="main")
+    quest.event_log().append(
         agent_id=None, type="workflow_paused", payload={"reason": "interrupt"})
-    assert daemon._last_pause_was_awaiting_turn(change.event_log()) is False
+    assert daemon._last_pause_was_awaiting_turn(quest.event_log()) is False
 
 
 def test_last_pause_was_awaiting_turn_false_after_resume(tmp_path: Path) -> None:
@@ -703,8 +703,8 @@ def test_last_pause_was_awaiting_turn_false_after_resume(tmp_path: Path) -> None
     from tests.conftest import _seed_control
 
     _seed_control(tmp_path)
-    change = Quest.create(tmp_path, title="x", quest_id="feat", base_branch="main")
-    log = change.event_log()
+    quest = Quest.create(tmp_path, title="x", quest_id="feat", base_branch="main")
+    log = quest.event_log()
     log.append(agent_id=None, type="workflow_paused", payload={"reason": "awaiting_turn"})
     log.append(agent_id=None, type="workflow_resumed", payload={})
     assert daemon._last_pause_was_awaiting_turn(log) is False   # pause is closed
@@ -716,9 +716,9 @@ def test_last_pause_was_awaiting_turn_false_with_no_events(tmp_path: Path) -> No
     from tests.conftest import _seed_control
 
     _seed_control(tmp_path)
-    change = Quest.create(tmp_path, title="x", quest_id="feat", base_branch="main")
+    quest = Quest.create(tmp_path, title="x", quest_id="feat", base_branch="main")
     # No events at all — the fallback must be False
-    assert daemon._last_pause_was_awaiting_turn(change.event_log()) is False
+    assert daemon._last_pause_was_awaiting_turn(quest.event_log()) is False
 
 
 @pytest.mark.anyio
@@ -728,15 +728,15 @@ async def test_resident_abandon_of_unmaterialized_draft_tears_down(
     from tests.conftest import _seed_control
 
     _seed_control(tmp_path)
-    change = Quest.create_draft(
+    quest = Quest.create_draft(
         tmp_path, title="x", quest_id="draft1", base_branch="main")
-    assert change.materialized is False
-    sock = str(session_socket_path(change.control_root, change.id))
+    assert quest.materialized is False
+    sock = str(session_socket_path(quest.control_root, quest.id))
     torn: list[Quest] = []
     archived: list[Quest] = []
 
     async def fake_run(
-        change: Quest, *, on_event: Any, user_chat_input_fn: Any,
+        quest: Quest, *, on_event: Any, user_chat_input_fn: Any,
         coordinator: Any,
         wait_for_turn_fn: Any = None,
     ) -> str:
@@ -746,20 +746,20 @@ async def test_resident_abandon_of_unmaterialized_draft_tears_down(
     async with anyio.create_task_group() as tg:
         async def _serve() -> None:
             await serve_quest_session(
-                change, run_fn=fake_run, hibernate=False,
+                quest, run_fn=fake_run, hibernate=False,
                 tear_down=lambda ch: torn.append(ch),
                 archive_left=lambda ch: archived.append(ch))
 
         tg.start_soon(_serve)
         await _wait_for_socket(sock)
-        client = SessionClient(sock, change.id, change.title,
+        client = SessionClient(sock, quest.id, quest.title,
                                on_event=lambda _e: None)
         await client.connect()
         await client.send_control(CONTROL_ABANDON)
         with anyio.fail_after(5):
             while not torn:
                 await anyio.sleep(0.02)
-        assert torn == [change]
+        assert torn == [quest]
         assert archived == []  # the resumable archive path is not taken
         await client.aclose()
         tg.cancel_scope.cancel()
@@ -774,7 +774,7 @@ async def test_awaiting_turn_hibernation_exit_drives_now_head(
     from tests.conftest import _seed_control
 
     _seed_control(tmp_path)
-    change = Quest.create(tmp_path, title="b", quest_id="bbb", base_branch="main")
+    quest = Quest.create(tmp_path, title="b", quest_id="bbb", base_branch="main")
     mq.enqueue_if_absent(tmp_path, "bbb", "main")        # bbb is now the lane head
 
     spawned: list = []
@@ -783,15 +783,15 @@ async def test_awaiting_turn_hibernation_exit_drives_now_head(
         lambda ch, **kw: spawned.append((ch.id, kw.get("resume"))))
 
     async def fake_run(
-        change: Quest, *, on_event: Any, user_chat_input_fn: Any,
+        quest: Quest, *, on_event: Any, user_chat_input_fn: Any,
         coordinator: Any, wait_for_turn_fn: Any = None,
     ) -> RunResult:
-        change.event_log().append(
+        quest.event_log().append(
             agent_id=None, type="workflow_paused", payload={"reason": "awaiting_turn"})
         return RunResult.PAUSED
 
     with anyio.fail_after(5):
-        result = await serve_quest_session(change, run_fn=fake_run, hibernate=False)
+        result = await serve_quest_session(quest, run_fn=fake_run, hibernate=False)
 
     assert result is RunResult.PAUSED
     assert spawned == [("bbb", True)]    # hook re-drove the now-head after lock release
@@ -806,7 +806,7 @@ async def test_non_awaiting_turn_pause_does_not_drive_head(
     from tests.conftest import _seed_control
 
     _seed_control(tmp_path)
-    change = Quest.create(tmp_path, title="b", quest_id="bbb", base_branch="main")
+    quest = Quest.create(tmp_path, title="b", quest_id="bbb", base_branch="main")
     mq.enqueue_if_absent(tmp_path, "bbb", "main")        # bbb IS head, yet no spawn
 
     spawned: list = []
@@ -814,15 +814,15 @@ async def test_non_awaiting_turn_pause_does_not_drive_head(
         attach_mod, "spawn_session_daemon", lambda ch, **kw: spawned.append(ch.id))
 
     async def fake_run(
-        change: Quest, *, on_event: Any, user_chat_input_fn: Any,
+        quest: Quest, *, on_event: Any, user_chat_input_fn: Any,
         coordinator: Any, wait_for_turn_fn: Any = None,
     ) -> RunResult:
-        change.event_log().append(
+        quest.event_log().append(
             agent_id=None, type="workflow_paused", payload={"reason": "interrupt"})
         return RunResult.PAUSED
 
     with anyio.fail_after(5):
-        result = await serve_quest_session(change, run_fn=fake_run, hibernate=False)
+        result = await serve_quest_session(quest, run_fn=fake_run, hibernate=False)
 
     assert result is RunResult.PAUSED
     assert spawned == []   # a user-pause exit suppresses the handoff-repair hook
@@ -830,13 +830,13 @@ async def test_non_awaiting_turn_pause_does_not_drive_head(
 
 @pytest.mark.anyio
 async def test_resident_save_applies_the_save_disposition(tmp_path: Path) -> None:
-    change = _make_change(tmp_path, "2026-06-15-sav")
-    sock = str(session_socket_path(change.control_root, change.id))
+    quest = _make_change(tmp_path, "2026-06-15-sav")
+    sock = str(session_socket_path(quest.control_root, quest.id))
     saved: list[Quest] = []
     torn: list[Quest] = []
 
     async def fake_run(
-        change: Quest, *, on_event: Any, user_chat_input_fn: Any,
+        quest: Quest, *, on_event: Any, user_chat_input_fn: Any,
         coordinator: Any,
         wait_for_turn_fn: Any = None,
     ) -> None:
@@ -845,20 +845,20 @@ async def test_resident_save_applies_the_save_disposition(tmp_path: Path) -> Non
     async with anyio.create_task_group() as tg:
         async def _serve() -> None:
             await serve_quest_session(
-                change, run_fn=fake_run, hibernate=False,
+                quest, run_fn=fake_run, hibernate=False,
                 tear_down=lambda ch: torn.append(ch),
                 save_left=lambda ch: saved.append(ch))
 
         tg.start_soon(_serve)
         await _wait_for_socket(sock)
-        client = SessionClient(sock, change.id, change.title,
+        client = SessionClient(sock, quest.id, quest.title,
                                on_event=lambda _e: None)
         await client.connect()
         await client.send_control(CONTROL_SAVE)
         with anyio.fail_after(5):
             while not saved:
                 await anyio.sleep(0.02)
-        assert saved == [change]
+        assert saved == [quest]
         assert torn == []
         await client.aclose()
         tg.cancel_scope.cancel()
@@ -891,8 +891,8 @@ def test_hold_prompt_none_for_awaiting_turn(tmp_path: Path) -> None:
     from tests.conftest import _seed_control
 
     _seed_control(tmp_path)
-    change = Quest.create(tmp_path, title="x", quest_id="feat", base_branch="main")
-    change.event_log().append(
+    quest = Quest.create(tmp_path, title="x", quest_id="feat", base_branch="main")
+    quest.event_log().append(
         agent_id=None, type="workflow_paused", payload={"reason": "awaiting_turn"})
     coord = SimpleNamespace(should_pause=False)
     assert daemon._hold_prompt(RunResult.PAUSED, coord) is None
@@ -900,15 +900,15 @@ def test_hold_prompt_none_for_awaiting_turn(tmp_path: Path) -> None:
 
 @pytest.mark.anyio
 async def test_script_blocked_pause_exits_terminal(tmp_path: Path) -> None:
-    change = _make_change(tmp_path, "2026-06-15-scb")
+    quest = _make_change(tmp_path, "2026-06-15-scb")
     calls = {"n": 0}
 
     async def fake_run(
-        change: Quest, *, on_event: Any, user_chat_input_fn: Any,
+        quest: Quest, *, on_event: Any, user_chat_input_fn: Any,
         coordinator: Any, wait_for_turn_fn: Any = None,
     ) -> RunResult:
         calls["n"] += 1
-        log = change.event_log()
+        log = quest.event_log()
         log.append(agent_id=None, type="script_blocked",
                    payload={"step": "integrate", "exit": 3, "stdout": "",
                             "stderr": "integration blocked: worktree dirty"})
@@ -917,7 +917,7 @@ async def test_script_blocked_pause_exits_terminal(tmp_path: Path) -> None:
         return RunResult.PAUSED
 
     with anyio.fail_after(5):
-        result = await serve_quest_session(change, run_fn=fake_run, hibernate=False)
+        result = await serve_quest_session(quest, run_fn=fake_run, hibernate=False)
     assert result is RunResult.PAUSED
     assert calls["n"] == 1  # exited terminal — never looped
 
@@ -926,15 +926,15 @@ async def test_script_blocked_pause_exits_terminal(tmp_path: Path) -> None:
 async def test_script_blocked_pause_hibernates_with_zero_clients(
     tmp_path: Path,
 ) -> None:
-    change = _make_change(tmp_path, "2026-06-15-sch")
+    quest = _make_change(tmp_path, "2026-06-15-sch")
     calls = {"n": 0}
 
     async def fake_run(
-        change: Quest, *, on_event: Any, user_chat_input_fn: Any,
+        quest: Quest, *, on_event: Any, user_chat_input_fn: Any,
         coordinator: Any, wait_for_turn_fn: Any = None,
     ) -> RunResult:
         calls["n"] += 1
-        log = change.event_log()
+        log = quest.event_log()
         log.append(agent_id=None, type="script_blocked",
                    payload={"step": "integrate", "exit": 3, "stdout": "",
                             "stderr": "blocked"})
@@ -944,20 +944,20 @@ async def test_script_blocked_pause_hibernates_with_zero_clients(
 
     with anyio.fail_after(5):
         result = await serve_quest_session(
-            change, run_fn=fake_run, hibernate=True, first_attach_timeout=0.1)
+            quest, run_fn=fake_run, hibernate=True, first_attach_timeout=0.1)
     assert result is RunResult.PAUSED
     assert calls["n"] == 1   # held once, then hibernated — never looped
 
 
 @pytest.mark.anyio
 async def test_resident_archive_applies_the_archive_disposition(tmp_path: Path) -> None:
-    change = _make_change(tmp_path, "2026-06-15-arc")
-    sock = str(session_socket_path(change.control_root, change.id))
+    quest = _make_change(tmp_path, "2026-06-15-arc")
+    sock = str(session_socket_path(quest.control_root, quest.id))
     archived: list[Quest] = []
     discarded: list[Quest] = []
 
     async def fake_run(
-        change: Quest, *, on_event: Any, user_chat_input_fn: Any,
+        quest: Quest, *, on_event: Any, user_chat_input_fn: Any,
         coordinator: Any, wait_for_turn_fn: Any = None,
     ) -> None:
         await anyio.sleep_forever()
@@ -965,20 +965,20 @@ async def test_resident_archive_applies_the_archive_disposition(tmp_path: Path) 
     async with anyio.create_task_group() as tg:
         async def _serve() -> None:
             await serve_quest_session(
-                change, run_fn=fake_run, hibernate=False,
+                quest, run_fn=fake_run, hibernate=False,
                 archive_left=lambda ch: archived.append(ch),
                 discard_left=lambda ch: discarded.append(ch))
 
         tg.start_soon(_serve)
         await _wait_for_socket(sock)
-        client = SessionClient(sock, change.id, change.title,
+        client = SessionClient(sock, quest.id, quest.title,
                                on_event=lambda _e: None)
         await client.connect()
         await client.send_control(CONTROL_ARCHIVE)
         with anyio.fail_after(5):
             while not archived:
                 await anyio.sleep(0.02)
-        assert archived == [change]
+        assert archived == [quest]
         assert discarded == []
         await client.aclose()
         tg.cancel_scope.cancel()
@@ -986,13 +986,13 @@ async def test_resident_archive_applies_the_archive_disposition(tmp_path: Path) 
 
 @pytest.mark.anyio
 async def test_resident_discard_applies_the_discard_disposition(tmp_path: Path) -> None:
-    change = _make_change(tmp_path, "2026-06-15-dis")
-    sock = str(session_socket_path(change.control_root, change.id))
+    quest = _make_change(tmp_path, "2026-06-15-dis")
+    sock = str(session_socket_path(quest.control_root, quest.id))
     archived: list[Quest] = []
     discarded: list[Quest] = []
 
     async def fake_run(
-        change: Quest, *, on_event: Any, user_chat_input_fn: Any,
+        quest: Quest, *, on_event: Any, user_chat_input_fn: Any,
         coordinator: Any, wait_for_turn_fn: Any = None,
     ) -> None:
         await anyio.sleep_forever()
@@ -1000,20 +1000,20 @@ async def test_resident_discard_applies_the_discard_disposition(tmp_path: Path) 
     async with anyio.create_task_group() as tg:
         async def _serve() -> None:
             await serve_quest_session(
-                change, run_fn=fake_run, hibernate=False,
+                quest, run_fn=fake_run, hibernate=False,
                 archive_left=lambda ch: archived.append(ch),
                 discard_left=lambda ch: discarded.append(ch))
 
         tg.start_soon(_serve)
         await _wait_for_socket(sock)
-        client = SessionClient(sock, change.id, change.title,
+        client = SessionClient(sock, quest.id, quest.title,
                                on_event=lambda _e: None)
         await client.connect()
         await client.send_control(CONTROL_DISCARD)
         with anyio.fail_after(5):
             while not discarded:
                 await anyio.sleep(0.02)
-        assert discarded == [change]
+        assert discarded == [quest]
         assert archived == []
         await client.aclose()
         tg.cancel_scope.cancel()
@@ -1021,11 +1021,11 @@ async def test_resident_discard_applies_the_discard_disposition(tmp_path: Path) 
 
 @pytest.mark.anyio
 async def test_serve_forwards_non_interactive_to_run_quest(tmp_path: Path) -> None:
-    change = _make_change(tmp_path, "2026-06-15-nint")
+    quest = _make_change(tmp_path, "2026-06-15-nint")
     captured: dict[str, Any] = {}
 
     async def fake_run(
-        change: Quest, *, on_event: Any, user_chat_input_fn: Any,
+        quest: Quest, *, on_event: Any, user_chat_input_fn: Any,
         coordinator: Any, wait_for_turn_fn: Any = None,
         headless: bool = False,
     ) -> str:
@@ -1034,7 +1034,7 @@ async def test_serve_forwards_non_interactive_to_run_quest(tmp_path: Path) -> No
 
     with anyio.fail_after(5):
         result = await serve_quest_session(
-            change, run_fn=fake_run, hibernate=False, non_interactive=True)
+            quest, run_fn=fake_run, hibernate=False, non_interactive=True)
     assert result == "done"
     assert captured["headless"] is True
 
@@ -1046,7 +1046,7 @@ def test_spawn_session_daemon_emits_non_interactive_flag(
 
     import imp.remote.session.attach as attach_mod
 
-    change = _make_change(tmp_path, "2026-06-15-spwn")
+    quest = _make_change(tmp_path, "2026-06-15-spwn")
     captured: dict[str, Any] = {}
 
     class _FakePopen:
@@ -1054,7 +1054,7 @@ def test_spawn_session_daemon_emits_non_interactive_flag(
             captured["argv"] = argv
 
     monkeypatch.setattr(subprocess, "Popen", _FakePopen)
-    attach_mod.spawn_session_daemon(change, non_interactive=True)
+    attach_mod.spawn_session_daemon(quest, non_interactive=True)
     assert "--non-interactive" in captured["argv"]
 
 
@@ -1065,7 +1065,7 @@ def test_spawn_session_daemon_omits_flag_when_interactive(
 
     import imp.remote.session.attach as attach_mod
 
-    change = _make_change(tmp_path, "2026-06-15-spwi")
+    quest = _make_change(tmp_path, "2026-06-15-spwi")
     captured: dict[str, Any] = {}
 
     class _FakePopen:
@@ -1073,7 +1073,7 @@ def test_spawn_session_daemon_omits_flag_when_interactive(
             captured["argv"] = argv
 
     monkeypatch.setattr(subprocess, "Popen", _FakePopen)
-    attach_mod.spawn_session_daemon(change)
+    attach_mod.spawn_session_daemon(quest)
     assert "--non-interactive" not in captured["argv"]
 
 
@@ -1105,10 +1105,10 @@ def test_build_session_attach_forwards_non_interactive(
 ) -> None:
     import imp.remote.session.attach as attach_mod
 
-    change = _make_change(tmp_path, "2026-06-15-bsa")
+    quest = _make_change(tmp_path, "2026-06-15-bsa")
     captured: dict[str, Any] = {}
 
-    def fake_spawn(change: Quest, **kw: Any) -> None:
+    def fake_spawn(quest: Quest, **kw: Any) -> None:
         captured.update(kw)
 
     monkeypatch.setattr(attach_mod, "spawn_session_daemon", fake_spawn)
@@ -1116,7 +1116,7 @@ def test_build_session_attach_forwards_non_interactive(
     holder: dict[str, Any] = {}
 
     async def fake_attach_or_spawn(
-        change: Quest, *, on_event: Any, spawn_fn: Any,
+        quest: Quest, *, on_event: Any, spawn_fn: Any,
         connect_timeout: float = 10.0, lease: bool = False,
     ) -> object:
         holder["spawn_fn"] = spawn_fn
@@ -1124,9 +1124,9 @@ def test_build_session_attach_forwards_non_interactive(
 
     monkeypatch.setattr(attach_mod, "attach_or_spawn", fake_attach_or_spawn)
 
-    attach = attach_mod.build_session_attach(change, non_interactive=True)
+    attach = attach_mod.build_session_attach(quest, non_interactive=True)
     anyio.run(attach, lambda _e: None)
-    holder["spawn_fn"](change)
+    holder["spawn_fn"](quest)
     assert captured["non_interactive"] is True
 
 
@@ -1135,10 +1135,10 @@ def test_build_session_attach_forwards_autonomous(
 ) -> None:
     import imp.remote.session.attach as attach_mod
 
-    change = _make_change(tmp_path, "2026-06-15-bsa-auto")
+    quest = _make_change(tmp_path, "2026-06-15-bsa-auto")
     captured: dict[str, Any] = {}
 
-    def fake_spawn(change: Quest, **kw: Any) -> None:
+    def fake_spawn(quest: Quest, **kw: Any) -> None:
         captured.update(kw)
 
     monkeypatch.setattr(attach_mod, "spawn_session_daemon", fake_spawn)
@@ -1146,7 +1146,7 @@ def test_build_session_attach_forwards_autonomous(
     holder: dict[str, Any] = {}
 
     async def fake_attach_or_spawn(
-        change: Quest, *, on_event: Any, spawn_fn: Any,
+        quest: Quest, *, on_event: Any, spawn_fn: Any,
         connect_timeout: float = 10.0, lease: bool = False,
     ) -> object:
         holder["spawn_fn"] = spawn_fn
@@ -1154,9 +1154,9 @@ def test_build_session_attach_forwards_autonomous(
 
     monkeypatch.setattr(attach_mod, "attach_or_spawn", fake_attach_or_spawn)
 
-    attach = attach_mod.build_session_attach(change, autonomous=True)
+    attach = attach_mod.build_session_attach(quest, autonomous=True)
     anyio.run(attach, lambda _e: None)
-    holder["spawn_fn"](change)
+    holder["spawn_fn"](quest)
     assert captured["autonomous"] is True
 
 
@@ -1164,12 +1164,12 @@ def test_build_session_attach_forwards_autonomous(
 async def test_resume_loop_under_non_interactive_passes_flag_to_second_run(
     tmp_path: Path,
 ) -> None:
-    change = _make_change(tmp_path, "2026-06-15-nirl")
-    sock = str(session_socket_path(change.control_root, change.id))
+    quest = _make_change(tmp_path, "2026-06-15-nirl")
+    sock = str(session_socket_path(quest.control_root, quest.id))
     received_flags: list[bool] = []
 
     async def fake_run(
-        change: Quest, *, on_event: Any, user_chat_input_fn: Any,
+        quest: Quest, *, on_event: Any, user_chat_input_fn: Any,
         coordinator: Any, wait_for_turn_fn: Any = None,
         headless: bool = False,
     ) -> RunResult:
@@ -1184,12 +1184,12 @@ async def test_resume_loop_under_non_interactive_passes_flag_to_second_run(
 
         async def _serve() -> None:
             result["r"] = await serve_quest_session(
-                change, run_fn=fake_run, hibernate=False, non_interactive=True)
+                quest, run_fn=fake_run, hibernate=False, non_interactive=True)
 
         tg.start_soon(_serve)
         await _wait_for_socket(sock)
         received: list[dict[str, Any]] = []
-        client = SessionClient(sock, change.id, change.title,
+        client = SessionClient(sock, quest.id, quest.title,
                                on_event=received.append)
         await client.connect()
         tg.start_soon(client.receive_events)
@@ -1210,12 +1210,12 @@ async def test_resume_loop_under_non_interactive_passes_flag_to_second_run(
 async def test_resume_loop_under_autonomous_passes_flag_to_second_run(
     tmp_path: Path,
 ) -> None:
-    change = _make_change(tmp_path, "2026-06-15-arl")
-    sock = str(session_socket_path(change.control_root, change.id))
+    quest = _make_change(tmp_path, "2026-06-15-arl")
+    sock = str(session_socket_path(quest.control_root, quest.id))
     received_flags: list[bool] = []
 
     async def fake_run(
-        change: Quest, *, on_event: Any, user_chat_input_fn: Any,
+        quest: Quest, *, on_event: Any, user_chat_input_fn: Any,
         coordinator: Any, wait_for_turn_fn: Any = None,
         autonomous: bool = False,
     ) -> RunResult:
@@ -1230,12 +1230,12 @@ async def test_resume_loop_under_autonomous_passes_flag_to_second_run(
 
         async def _serve() -> None:
             result["r"] = await serve_quest_session(
-                change, run_fn=fake_run, hibernate=False, autonomous=True)
+                quest, run_fn=fake_run, hibernate=False, autonomous=True)
 
         tg.start_soon(_serve)
         await _wait_for_socket(sock)
         received: list[dict[str, Any]] = []
-        client = SessionClient(sock, change.id, change.title,
+        client = SessionClient(sock, quest.id, quest.title,
                                on_event=received.append)
         await client.connect()
         tg.start_soon(client.receive_events)
@@ -1286,11 +1286,11 @@ def test_main_forwards_autonomous_via_partial(
 
 @pytest.mark.anyio
 async def test_autonomous_forwarded_to_run_fn(tmp_path: Path) -> None:
-    change = _make_change(tmp_path, "2026-06-15-aut")
+    quest = _make_change(tmp_path, "2026-06-15-aut")
     captured: dict[str, Any] = {}
 
     async def fake_run(
-        change: Quest, *, on_event: Any, user_chat_input_fn: Any,
+        quest: Quest, *, on_event: Any, user_chat_input_fn: Any,
         coordinator: Any, wait_for_turn_fn: Any = None, autonomous: bool = False,
     ) -> RunResult:
         captured["autonomous"] = autonomous
@@ -1298,7 +1298,7 @@ async def test_autonomous_forwarded_to_run_fn(tmp_path: Path) -> None:
 
     with anyio.fail_after(5):
         result = await serve_quest_session(
-            change, run_fn=fake_run, hibernate=False, autonomous=True)
+            quest, run_fn=fake_run, hibernate=False, autonomous=True)
     assert result is RunResult.COMPLETED
     assert captured["autonomous"] is True
 
@@ -1307,15 +1307,15 @@ async def test_autonomous_forwarded_to_run_fn(tmp_path: Path) -> None:
 async def test_detach_at_hold_prompt_stamps_resume_target_prompt(
     tmp_path: Path,
 ) -> None:
-    change = _make_change(tmp_path, "2026-06-15-dph")
-    st = State.load(change.state_dir)
+    quest = _make_change(tmp_path, "2026-06-15-dph")
+    st = State.load(quest.state_dir)
     st.step = "code"               # the active step at detach time
     st.resume_pending = "review"   # already armed by the executor Pause handler
     st.interrupt_pending = True
-    st.save(change.state_dir)
+    st.save(quest.state_dir)
 
     async def fake_run(
-        change: Quest, *, on_event: Any, user_chat_input_fn: Any,
+        quest: Quest, *, on_event: Any, user_chat_input_fn: Any,
         coordinator: Any, wait_for_turn_fn: Any = None,
     ) -> RunResult:
         await coordinator.signal_pause(reason="ctrl-c")
@@ -1323,10 +1323,10 @@ async def test_detach_at_hold_prompt_stamps_resume_target_prompt(
 
     with anyio.fail_after(5):
         result = await serve_quest_session(
-            change, run_fn=fake_run, hibernate=True, first_attach_timeout=0.1)
+            quest, run_fn=fake_run, hibernate=True, first_attach_timeout=0.1)
 
     assert result is RunResult.PAUSED
-    state = State.load(change.state_dir)
+    state = State.load(quest.state_dir)
     assert state.resume_target == "prompt"
     assert state.resume_pending == "review"   # untouched by the non-ctrl-d branch
     assert state.interrupt_pending is True     # untouched by the non-ctrl-d branch
@@ -1336,13 +1336,13 @@ async def test_detach_at_hold_prompt_stamps_resume_target_prompt(
 async def test_detach_after_ctrl_d_midrun_stamps_resume_target_agent(
     tmp_path: Path,
 ) -> None:
-    change = _make_change(tmp_path, "2026-06-15-cda")
-    st = State.load(change.state_dir)
+    quest = _make_change(tmp_path, "2026-06-15-cda")
+    st = State.load(quest.state_dir)
     st.step = "review"
-    st.save(change.state_dir)
+    st.save(quest.state_dir)
 
     async def fake_run(
-        change: Quest, *, on_event: Any, user_chat_input_fn: Any,
+        quest: Quest, *, on_event: Any, user_chat_input_fn: Any,
         coordinator: Any, wait_for_turn_fn: Any = None,
     ) -> RunResult:
         await coordinator.signal_pause(reason="ctrl-d")
@@ -1350,10 +1350,10 @@ async def test_detach_after_ctrl_d_midrun_stamps_resume_target_agent(
 
     with anyio.fail_after(5):
         result = await serve_quest_session(
-            change, run_fn=fake_run, hibernate=True, first_attach_timeout=0.1)
+            quest, run_fn=fake_run, hibernate=True, first_attach_timeout=0.1)
 
     assert result is RunResult.PAUSED
-    state = State.load(change.state_dir)
+    state = State.load(quest.state_dir)
     assert state.resume_target == "agent"
     assert state.resume_pending == "review"   # arm_step_resume(step) → native resume
     assert state.interrupt_pending is True     # continuation nudge on no-message resume
@@ -1365,16 +1365,16 @@ async def test_resume_prompt_target_holds_before_running_agent(
 ) -> None:
     import imp.remote.session.daemon as daemon
 
-    change = _make_change(tmp_path, "2026-06-15-rpt")
-    st = State.load(change.state_dir)
+    quest = _make_change(tmp_path, "2026-06-15-rpt")
+    st = State.load(quest.state_dir)
     st.resume_target = "prompt"
-    st.save(change.state_dir)
-    sock = str(session_socket_path(change.control_root, change.id))
+    st.save(quest.state_dir)
+    sock = str(session_socket_path(quest.control_root, quest.id))
 
     calls: dict[str, Any] = {"n": 0, "interject": None}
 
     async def fake_run(
-        change: Quest, *, on_event: Any, user_chat_input_fn: Any,
+        quest: Quest, *, on_event: Any, user_chat_input_fn: Any,
         coordinator: Any, wait_for_turn_fn: Any = None,
     ) -> RunResult:
         calls["n"] += 1
@@ -1387,12 +1387,12 @@ async def test_resume_prompt_target_holds_before_running_agent(
 
         async def _serve() -> None:
             result["r"] = await serve_quest_session(
-                change, run_fn=fake_run, hibernate=False, resume=True)
+                quest, run_fn=fake_run, hibernate=False, resume=True)
 
         tg.start_soon(_serve)
         await _wait_for_socket(sock)
         received: list[dict[str, Any]] = []
-        client = SessionClient(sock, change.id, change.title,
+        client = SessionClient(sock, quest.id, quest.title,
                                on_event=received.append)
         await client.connect()
         tg.start_soon(client.receive_events)
@@ -1424,15 +1424,15 @@ async def test_resume_prompt_target_holds_before_running_agent(
 async def test_resume_agent_target_runs_straight_away(
     tmp_path: Path, target: str | None,
 ) -> None:
-    change = _make_change(tmp_path, "2026-06-15-rat")
-    st = State.load(change.state_dir)
+    quest = _make_change(tmp_path, "2026-06-15-rat")
+    st = State.load(quest.state_dir)
     st.resume_target = target
-    st.save(change.state_dir)
+    st.save(quest.state_dir)
 
     seen: dict[str, bool] = {"ran": False}
 
     async def fake_run(
-        change: Quest, *, on_event: Any, user_chat_input_fn: Any,
+        quest: Quest, *, on_event: Any, user_chat_input_fn: Any,
         coordinator: Any, wait_for_turn_fn: Any = None,
     ) -> RunResult:
         seen["ran"] = True
@@ -1440,7 +1440,7 @@ async def test_resume_agent_target_runs_straight_away(
 
     with anyio.fail_after(5):
         result = await serve_quest_session(
-            change, run_fn=fake_run, hibernate=False, resume=True)
+            quest, run_fn=fake_run, hibernate=False, resume=True)
 
     assert result is RunResult.COMPLETED
     assert seen["ran"] is True
@@ -1455,15 +1455,15 @@ async def test_resume_prompt_target_runs_agent_without_interactive_channel(
     type. A headless or autonomous resume has no channel to answer the prompt, so
     honoring it would re-pause without progress — it must continue the agent
     instead (§6.15 mid-step ctrl-c resume completes the interrupted step)."""
-    change = _make_change(tmp_path, "2026-06-15-rph")
-    st = State.load(change.state_dir)
+    quest = _make_change(tmp_path, "2026-06-15-rph")
+    st = State.load(quest.state_dir)
     st.resume_target = "prompt"
-    st.save(change.state_dir)
+    st.save(quest.state_dir)
 
     seen: dict[str, bool] = {"ran": False}
 
     async def fake_run(
-        change: Quest, *, on_event: Any, user_chat_input_fn: Any,
+        quest: Quest, *, on_event: Any, user_chat_input_fn: Any,
         coordinator: Any, wait_for_turn_fn: Any = None,
         headless: bool = False, autonomous: bool = False,
     ) -> RunResult:
@@ -1473,7 +1473,7 @@ async def test_resume_prompt_target_runs_agent_without_interactive_channel(
     kwargs = {flag: True}
     with anyio.fail_after(5):
         result = await serve_quest_session(
-            change, run_fn=fake_run, hibernate=True, resume=True,
+            quest, run_fn=fake_run, hibernate=True, resume=True,
             first_attach_timeout=0.1, **kwargs)
 
     assert result is RunResult.COMPLETED
@@ -1584,7 +1584,7 @@ async def test_model_override_pause_reenters_without_resume_prompt(
 ) -> None:
     import imp.remote.session.daemon as daemon_mod
 
-    change = _make_change(tmp_path, "2026-06-15-mdl")
+    quest = _make_change(tmp_path, "2026-06-15-mdl")
 
     applied: list[tuple[str, str]] = []
     monkeypatch.setattr(
@@ -1612,7 +1612,7 @@ async def test_model_override_pause_reenters_without_resume_prompt(
     # that blocks forever, so the deadline concretely enforces the no-prompt path.
     with anyio.fail_after(5):
         result = await serve_quest_session(
-            change, run_fn=_run_fn, hibernate=False)
+            quest, run_fn=_run_fn, hibernate=False)
 
     assert result is RunResult.COMPLETED
     assert calls["n"] == 2                       # re-entered exactly once
@@ -1625,7 +1625,7 @@ async def test_model_override_pause_with_empty_arg_resumes_without_applying(
 ) -> None:
     import imp.remote.session.daemon as daemon_mod
 
-    change = _make_change(tmp_path, "2026-06-15-emp")
+    quest = _make_change(tmp_path, "2026-06-15-emp")
 
     applied: list[tuple[str, str]] = []
     monkeypatch.setattr(
@@ -1649,7 +1649,7 @@ async def test_model_override_pause_with_empty_arg_resumes_without_applying(
 
     with anyio.fail_after(5):
         result = await serve_quest_session(
-            change, run_fn=_run_fn, hibernate=False)
+            quest, run_fn=_run_fn, hibernate=False)
 
     assert result is RunResult.COMPLETED
     assert calls["n"] == 2
@@ -1663,7 +1663,7 @@ async def test_serve_threads_opening_model_to_run_fn(tmp_path) -> None:
 
     captured: dict[str, object] = {}
 
-    async def _run_fn(change, **kw):
+    async def _run_fn(quest, **kw):
         captured.update(kw)
         return RunResult.COMPLETED
 

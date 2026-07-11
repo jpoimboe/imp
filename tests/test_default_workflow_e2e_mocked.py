@@ -31,10 +31,10 @@ from tests.anthropic_fakes import FakeAsyncAnthropic, response, text, tool_use
 from tests.openai_fakes import resp_function_call, resp_response
 
 
-def _run_events(change):
+def _run_events(quest):
     """Post-run events read the way production does: home first, archive second."""
     from imp.cli.main import _load_events_for_id
-    return _load_events_for_id(change.control_root, change.id) or []
+    return _load_events_for_id(quest.control_root, quest.id) or []
 
 
 def _canned_anthropic(**overrides):
@@ -151,15 +151,15 @@ def _make_change(root: Path, *, quest_id: str = "test-change", title: str = "t")
         status="running", vars=dict(workflow.vars.defaults()), loop_counts={},
     ).save(quest_dir / "state")
 
-    change = Quest(
+    quest = Quest(
         id=quest_id, title=title, base_branch="main",
         control_root=root, project_root=root, quest_dir=quest_dir,
     )
-    change.event_log().append(
+    quest.event_log().append(
         agent_id=None, type="change_created",
         payload={"id": quest_id, "title": title},
     )
-    return change
+    return quest
 
 
 @pytest.fixture
@@ -242,7 +242,7 @@ def _rewrite_config(tmp_path: Path, *replacements: tuple[str, str]) -> None:
 async def test_full_default_workflow_completes_with_canned_anthropic(
     tmp_path: Path,
 ) -> None:
-    change = _seed_default_workflow(tmp_path)
+    quest = _seed_default_workflow(tmp_path)
 
     # Default response: complete_step with ALL fields needed by any agent in the
     # imp workflow. The fake's default_response is consulted whenever the
@@ -276,7 +276,7 @@ async def test_full_default_workflow_completes_with_canned_anthropic(
     # provider returns complete_step immediately (no wait_for_user call in the
     # scripted response), so the reply channel is never exercised.
     result = await run_quest(
-        change,
+        quest,
         on_event=lambda _e: None,
     )
 
@@ -292,7 +292,7 @@ async def test_full_default_workflow_completes_with_canned_openai(
     from imp.providers.openai import OpenAIProvider
     from tests.openai_fakes import FakeResponsesClient
 
-    change = _seed_default_workflow(tmp_path)
+    quest = _seed_default_workflow(tmp_path)
     # Rewrite config to OpenAI provider for every role (both layers: the legacy
     # imp/config.yaml and the .imp/config.yaml local layer the reader uses).
     _rewrite_config(tmp_path, ("anthropic", "openai"),
@@ -309,7 +309,7 @@ async def test_full_default_workflow_completes_with_canned_openai(
     )
 
     result = await run_quest(
-        change,
+        quest,
         on_event=lambda _e: None,
     )
     assert result is RunResult.COMPLETED
@@ -334,7 +334,7 @@ async def test_full_default_workflow_completes_with_canned_claude_code(
         tool_use as cc_tool_use,
     )
 
-    change = _seed_default_workflow(tmp_path)
+    quest = _seed_default_workflow(tmp_path)
     _rewrite_config(tmp_path, ("anthropic", "claude_code"),
                     ("claude-sonnet-4-6", "claude-sonnet-4-5"))
 
@@ -386,7 +386,7 @@ async def test_full_default_workflow_completes_with_canned_claude_code(
         if rec.get("type") == "step_started":
             cur_step["name"] = rec.get("payload", {}).get("step", "")
 
-    result = await run_quest(change, on_event=on_event)
+    result = await run_quest(quest, on_event=on_event)
     assert result is RunResult.COMPLETED
 
 
@@ -394,7 +394,7 @@ async def test_full_default_workflow_completes_with_canned_claude_code(
 async def test_clean_review_with_minors_integrates_then_verifies(
     tmp_path: Path,
 ) -> None:
-    change = _seed_default_workflow(tmp_path)
+    quest = _seed_default_workflow(tmp_path)
     # standard change, every review clean (blocking:false) but always carrying
     # actionable minors (has_minor_findings:true). The new cycle: the first clean
     # review sends the writer back to integrate the minors (setting the
@@ -426,7 +426,7 @@ async def test_clean_review_with_minors_integrates_then_verifies(
             completed.append((rec["payload"]["step"], rec["payload"]["action"]))
 
     result = await run_quest(
-        change, on_event=on_event,
+        quest, on_event=on_event,
     )
     assert result is RunResult.COMPLETED
 
@@ -458,7 +458,7 @@ async def test_clean_review_with_minors_integrates_then_verifies(
 async def test_express_runs_full_implement_pipeline_with_change_panel(
     tmp_path: Path,
 ) -> None:
-    change = _seed_default_workflow(tmp_path)
+    quest = _seed_default_workflow(tmp_path)
     # ceremony:express -> threshold sets fast_path=true and routes straight to
     # plan-writer, skipping the spec beat (spec-finalizer + spec-reviewer) and plan
     # review (plan-verify-commit fast-path rule). The implement-side fast_path ->
@@ -489,7 +489,7 @@ async def test_express_runs_full_implement_pipeline_with_change_panel(
         if rec["type"] == "step_started":
             started.append(rec["payload"]["step"])
 
-    result = await run_quest(change, on_event=on_event)
+    result = await run_quest(quest, on_event=on_event)
     assert result is RunResult.COMPLETED
     # The spec beat and plan review are still skipped on express.
     assert "spec-finalizer" not in started, started
@@ -518,11 +518,11 @@ async def test_finalize_bare_turn_end_solicit_then_merge(tmp_path: Path) -> None
     immediately — no completion_nudge, no WAITING round-trip. The human reply
     becomes the next user message, after which finalize completes with
     decision=merge. Positioned directly at finalize so only finalize -> merge runs."""
-    change = _seed_default_workflow(tmp_path)
-    st = State.load(change.state_dir)
+    quest = _seed_default_workflow(tmp_path)
+    st = State.load(quest.state_dir)
     st.step = "finalize"
     st.status = "running"
-    st.save(change.state_dir)
+    st.save(quest.state_dir)
 
     solicit_response = response(
         text("Summary: stub change. Merge or rework?"),
@@ -552,7 +552,7 @@ async def test_finalize_bare_turn_end_solicit_then_merge(tmp_path: Path) -> None
 
     events_seen: list[dict] = []
     result = await run_quest(
-        change, on_event=events_seen.append, user_chat_input_fn=_user_chat_input,
+        quest, on_event=events_seen.append, user_chat_input_fn=_user_chat_input,
     )
     assert result is RunResult.COMPLETED, (
         f"expected COMPLETED, got {result!r}; events: {[e['type'] for e in events_seen]}"
@@ -569,7 +569,7 @@ async def test_clean_rebase_skips_reconciler_then_merges(tmp_path: Path) -> None
     SKIPPED; the integrate tail is wait-for-head → integrate-rebase →
     integration-verify → integration-reviewer → summarizer → finalize →
     merge-to-base."""
-    change = _seed_default_workflow(tmp_path)
+    quest = _seed_default_workflow(tmp_path)
     fake = FakeAsyncAnthropic([], default_response=_anthropic_step_aware)
     resolve.reset_providers_for_tests()
     resolve.register_provider(
@@ -579,9 +579,9 @@ async def test_clean_rebase_skips_reconciler_then_merges(tmp_path: Path) -> None
             model_name=model, client_factory=lambda: fake,
         ),
     )
-    result = await run_quest(change, headless=True)
+    result = await run_quest(quest, headless=True)
     assert result is RunResult.COMPLETED
-    steps = [e["payload"].get("step") for e in _run_events(change)
+    steps = [e["payload"].get("step") for e in _run_events(quest)
              if e.get("type") == "step_started" and e.get("payload", {}).get("step")]
     for name in ("wait-for-head", "integrate-rebase", "integration-verify",
                  "integration-reviewer", "summarizer", "finalize", "merge-to-base"):
@@ -600,8 +600,8 @@ async def test_clean_rebase_skips_reconciler_then_merges(tmp_path: Path) -> None
 async def test_conflict_rebase_routes_through_reconciler(tmp_path: Path) -> None:
     """A conflict rebase (integrate-rebase.sh exits 6) routes through the
     reconciler before integration-verify → integration-reviewer → merge-to-base."""
-    change = _seed_default_workflow(tmp_path)
-    ir = (change.project_root / "imp" / "workflows" / "imp"
+    quest = _seed_default_workflow(tmp_path)
+    ir = (quest.project_root / "imp" / "workflows" / "imp"
           / "scripts" / "integrate-rebase.sh")
     ir.write_text("#!/usr/bin/env bash\nexit 6\n")
     ir.chmod(0o755)
@@ -614,9 +614,9 @@ async def test_conflict_rebase_routes_through_reconciler(tmp_path: Path) -> None
             model_name=model, client_factory=lambda: fake,
         ),
     )
-    result = await run_quest(change, headless=True)
+    result = await run_quest(quest, headless=True)
     assert result is RunResult.COMPLETED
-    steps = [e["payload"].get("step") for e in _run_events(change)
+    steps = [e["payload"].get("step") for e in _run_events(quest)
              if e.get("type") == "step_started" and e.get("payload", {}).get("step")]
     for name in ("integrate-rebase", "reconciler", "integration-verify",
                  "integration-reviewer", "merge-to-base"):
@@ -630,7 +630,7 @@ async def test_conflict_rebase_routes_through_reconciler(tmp_path: Path) -> None
 
 @pytest.mark.anyio
 async def test_merge_phase_runs_merge_to_base_step(tmp_path: Path) -> None:
-    change = _seed_default_workflow(tmp_path)
+    quest = _seed_default_workflow(tmp_path)
     fake = FakeAsyncAnthropic([], default_response=_anthropic_step_aware)
     resolve.reset_providers_for_tests()
     resolve.register_provider(
@@ -640,10 +640,10 @@ async def test_merge_phase_runs_merge_to_base_step(tmp_path: Path) -> None:
             model_name=model, client_factory=lambda: fake,
         ),
     )
-    result = await run_quest(change, headless=True)
+    result = await run_quest(quest, headless=True)
     assert result is RunResult.COMPLETED
-    types_seen = [e.get("type") for e in _run_events(change)]
-    steps = [e["payload"].get("step") for e in _run_events(change)
+    types_seen = [e.get("type") for e in _run_events(quest)]
+    steps = [e["payload"].get("step") for e in _run_events(quest)
              if e.get("type") == "step_started"]
     assert "wait-for-head" in steps
     assert "merge-to-base" in steps
@@ -655,7 +655,7 @@ async def test_merge_conflict_surfaces_merge_blocked(tmp_path: Path, monkeypatch
     """A blocking outcome at merge-to-base must preserve the pre-B3 surfacing
     (review finding #2): status=='merge_blocked' AND a merge_blocked event, so the
     CLI remediation path stays alive — NOT a generic 'paused'."""
-    change = _seed_default_workflow(tmp_path)
+    quest = _seed_default_workflow(tmp_path)
     from imp.engine import worktree as _wt
     from imp.engine.worktree import MergeResult
     monkeypatch.setattr(_wt, "merge_to_base",
@@ -669,18 +669,18 @@ async def test_merge_conflict_surfaces_merge_blocked(tmp_path: Path, monkeypatch
             model_name=model, client_factory=lambda: fake,
         ),
     )
-    result = await run_quest(change, headless=True)
+    result = await run_quest(quest, headless=True)
     assert result is RunResult.PAUSED
-    final = State.load(change.state_dir)
+    final = State.load(quest.state_dir)
     assert final.status == "merge_blocked"
-    types_seen = [e.get("type") for e in change.event_log().read()]
+    types_seen = [e.get("type") for e in quest.event_log().read()]
     assert "merge_blocked" in types_seen
 
 
 @pytest.mark.anyio
 async def test_autonomous_mode_integrates_and_merges_without_human(tmp_path: Path) -> None:
     # No workflow var override needed — finalize merges without a human gate.
-    change = _seed_default_workflow(tmp_path)
+    quest = _seed_default_workflow(tmp_path)
     fake = FakeAsyncAnthropic([], default_response=_anthropic_step_aware)
     resolve.reset_providers_for_tests()
     resolve.register_provider(
@@ -690,12 +690,12 @@ async def test_autonomous_mode_integrates_and_merges_without_human(tmp_path: Pat
             model_name=model, client_factory=lambda: fake,
         ),
     )
-    result = await run_quest(change, headless=True)
+    result = await run_quest(quest, headless=True)
     assert result is RunResult.COMPLETED
-    steps = [e["payload"].get("step") for e in _run_events(change)
+    steps = [e["payload"].get("step") for e in _run_events(quest)
              if e.get("type") == "step_started"]
     assert "integrate-rebase" in steps and "finalize" in steps
-    assert "change_merged" in [e.get("type") for e in _run_events(change)]
+    assert "change_merged" in [e.get("type") for e in _run_events(quest)]
 
 
 @pytest.mark.anyio
@@ -712,7 +712,7 @@ async def test_full_run_transcript_hides_quiet_plumbing(tmp_path: Path) -> None:
     from imp.cli.render_text import render_tree
     from imp.engine.loader import load_workflow
 
-    change = _seed_default_workflow(tmp_path)
+    quest = _seed_default_workflow(tmp_path)
     fake = FakeAsyncAnthropic([], default_response=_anthropic_step_aware)
     resolve.reset_providers_for_tests()
     resolve.register_provider(
@@ -721,10 +721,10 @@ async def test_full_run_transcript_hides_quiet_plumbing(tmp_path: Path) -> None:
             model_name=model, client_factory=lambda: fake,
         ),
     )
-    result = await run_quest(change, headless=True)
+    result = await run_quest(quest, headless=True)
     assert result is RunResult.COMPLETED
 
-    events = _run_events(change)          # the same source `imp log` renders
+    events = _run_events(quest)          # the same source `imp log` renders
     body = list(render_tree(nv.build_tree(events), full=False, color=False, width=100))
 
     # Every quiet step is HIDDEN: it never renders its own block — neither a header
@@ -735,7 +735,7 @@ async def test_full_run_transcript_hides_quiet_plumbing(tmp_path: Path) -> None:
     # TARGET (`review complete · goto(integrate-rebase)`) — and a loud agent
     # step showing its own routing breadcrumb is intended; humanize-routing is a
     # plumbing rule.
-    quiet = {s.name for s in load_workflow(change.workflow_dir).flat_steps() if not s.show_label}
+    quiet = {s.name for s in load_workflow(quest.workflow_dir).flat_steps() if not s.show_label}
     assert quiet, "expected the default workflow to mark plumbing steps quiet"
     for name in sorted(quiet):
         assert not any(ln.strip() == name for ln in body), (

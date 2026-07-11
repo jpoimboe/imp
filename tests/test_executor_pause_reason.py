@@ -41,15 +41,15 @@ def _make_change(root: Path, *, quest_id: str = "test-change", title: str = "t")
         status="running", vars=dict(workflow.vars.defaults()), loop_counts={},
     ).save(quest_dir / "state")
 
-    change = Quest(
+    quest = Quest(
         id=quest_id, title=title, base_branch="main",
         control_root=root, project_root=root, quest_dir=quest_dir,
     )
-    change.event_log().append(
+    quest.event_log().append(
         agent_id=None, type="change_created",
         payload={"id": quest_id, "title": title},
     )
-    return change
+    return quest
 
 
 def test_pause_has_reason_and_kind_fields() -> None:
@@ -119,7 +119,7 @@ async def test_fatal_error_records_reason_and_kind_on_workflow_paused(
     """A category=terminated (fatal) error pauses immediately and the emitted
     workflow_paused payload carries reason=terminated / kind=TerminatedError,
     plumbed from the classified ErrorInfo through Pause(reason, kind)."""
-    change = _seed_single_agent(tmp_path)
+    quest = _seed_single_agent(tmp_path)
 
     from imp.providers import resolve
     resolve.reset_providers_for_tests()
@@ -147,7 +147,7 @@ async def test_fatal_error_records_reason_and_kind_on_workflow_paused(
     )
 
     events: list[dict] = []
-    result = await run_quest(change, on_event=events.append)
+    result = await run_quest(quest, on_event=events.append)
 
     assert result is RunResult.PAUSED
     paused = [e for e in events if e["type"] == "workflow_paused"]
@@ -155,7 +155,7 @@ async def test_fatal_error_records_reason_and_kind_on_workflow_paused(
     assert paused[0]["payload"]["reason"] == "terminated"
     assert paused[0]["payload"]["kind"] == "TerminatedError"
 
-    state = State.load(change.state_dir)
+    state = State.load(quest.state_dir)
     assert state.status == "paused"
 
 
@@ -191,7 +191,7 @@ async def test_max_loops_pause_reason_unchanged(tmp_path: Path) -> None:
     (tmp_path / ".imp" / "config.yaml").write_text(
         "providers: [fake]\ntiers:\n  low: {fake: m}\n  medium: {fake: m}\n  high: {fake: m}\n"
     )
-    change = _make_change(tmp_path)
+    quest = _make_change(tmp_path)
 
     from imp.providers import resolve
     resolve.reset_providers_for_tests()
@@ -216,7 +216,7 @@ async def test_max_loops_pause_reason_unchanged(tmp_path: Path) -> None:
     )
 
     events: list[dict] = []
-    result = await run_quest(change, on_event=events.append)
+    result = await run_quest(quest, on_event=events.append)
 
     assert result is RunResult.PAUSED
     paused = [e for e in events if e["type"] == "workflow_paused"]
@@ -233,7 +233,7 @@ def anyio_backend():
 async def test_ctrl_d_interrupt_records_interrupt_reason_on_workflow_paused(
     tmp_path: Path,
 ) -> None:
-    change = _seed_single_agent(tmp_path)
+    quest = _seed_single_agent(tmp_path)
     from imp.providers import resolve
     resolve.reset_providers_for_tests()
     from imp.cli.signals import InterruptCoordinator
@@ -258,7 +258,7 @@ async def test_ctrl_d_interrupt_records_interrupt_reason_on_workflow_paused(
     resolve.register_provider("fake", env_check=lambda: True, factory=lambda _m: _P())
 
     events: list[dict] = []
-    result = await run_quest(change, on_event=events.append, coordinator=coord)
+    result = await run_quest(quest, on_event=events.append, coordinator=coord)
     assert result is RunResult.PAUSED
     paused = [e for e in events if e["type"] == "workflow_paused"]
     assert len(paused) == 1
@@ -272,7 +272,7 @@ async def test_awaiting_user_park_records_awaiting_user_reason(
     """A headless bare-turn-end yield (AwaitingUserInput with interrupt=False)
     parks with workflow_paused reason="awaiting_user" and NO interrupt_reason —
     the split away from the overloaded "interrupt" token."""
-    change = _seed_single_agent(tmp_path)
+    quest = _seed_single_agent(tmp_path)
 
     from imp.engine.awaiting_user_input import AwaitingUserInput
     from imp.providers import resolve
@@ -298,7 +298,7 @@ async def test_awaiting_user_park_records_awaiting_user_reason(
     )
 
     events: list[dict] = []
-    result = await run_quest(change, on_event=events.append)
+    result = await run_quest(quest, on_event=events.append)
 
     assert result is RunResult.PAUSED
     paused = [e for e in events if e["type"] == "workflow_paused"]
@@ -307,4 +307,4 @@ async def test_awaiting_user_park_records_awaiting_user_reason(
     assert "interrupt_reason" not in paused[0]["payload"]
 
     # The step is marked resumable exactly as before (unchanged by the relabel).
-    assert State.load(change.state_dir).resume_pending == "w"
+    assert State.load(quest.state_dir).resume_pending == "w"

@@ -43,17 +43,17 @@ def _seed(root: Path, *, facts_yaml: str):
 
 @pytest.mark.anyio
 async def test_first_run_freezes_facts_and_guidance_from_project_yaml(tmp_path: Path) -> None:
-    change = _seed(
+    quest = _seed(
         tmp_path,
         facts_yaml="default-workflow: imp\nfacts:\n  greeting: hi\nguidance: live note\n",
     )
     sink: list = []
     _register_invocation_capturing({"status": "Success"}, sink)
 
-    result = await run_quest(change, on_event=lambda _e: None)
+    result = await run_quest(quest, on_event=lambda _e: None)
     assert result is RunResult.COMPLETED
 
-    state = State.load(change.state_dir)
+    state = State.load(quest.state_dir)
     assert state.project_facts == {"greeting": "hi"}
     assert state.guidance == "live note"
     body = sink[0].initial_messages[0].content[0].text
@@ -66,18 +66,18 @@ async def test_first_run_freezes_facts_and_guidance_from_project_yaml(tmp_path: 
 async def test_run_uses_frozen_state_not_live_project_yaml(tmp_path: Path) -> None:
     # project.yaml says greeting=hi/guidance=live, but state was frozen earlier with
     # different values. The executor must render from the FROZEN state.
-    change = _seed(
+    quest = _seed(
         tmp_path,
         facts_yaml="default-workflow: imp\nfacts:\n  greeting: hi\nguidance: live\n",
     )
-    state = State.load(change.state_dir)
+    state = State.load(quest.state_dir)
     state.project_facts = {"greeting": "FROZEN"}
     state.guidance = "FROZEN-GUIDANCE"
-    state.save(change.state_dir)
+    state.save(quest.state_dir)
 
     sink: list = []
     _register_invocation_capturing({"status": "Success"}, sink)
-    await run_quest(change, on_event=lambda _e: None)
+    await run_quest(quest, on_event=lambda _e: None)
 
     body = sink[0].initial_messages[0].content[0].text
     assert "hello FROZEN" in body                 # frozen fact, not live project.yaml
@@ -85,4 +85,4 @@ async def test_run_uses_frozen_state_not_live_project_yaml(tmp_path: Path) -> No
     assert "FROZEN-GUIDANCE" in body              # frozen guidance, injected
     assert "hello hi" not in body                 # live greeting never used
     # The guard never overwrites an already-frozen value.
-    assert State.load(change.state_dir).project_facts == {"greeting": "FROZEN"}
+    assert State.load(quest.state_dir).project_facts == {"greeting": "FROZEN"}

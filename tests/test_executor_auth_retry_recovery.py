@@ -71,22 +71,22 @@ def _seed_single_agent(root: Path) -> Quest:
         status="running", vars=dict(workflow.vars.defaults()), loop_counts={},
     ).save(quest_dir / "state")
 
-    change = Quest(
+    quest = Quest(
         id="c", title="t", base_branch="main",
         control_root=root, project_root=root, quest_dir=quest_dir,
     )
-    change.event_log().append(
+    quest.event_log().append(
         agent_id=None, type="change_created",
         payload={"id": "c", "title": "t"},
     )
-    return change
+    return quest
 
 
 @pytest.mark.anyio
 async def test_auth_retry_recovers_through_backoff_loop(
     tmp_path: Path, provider_registry: Any, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    change = _seed_single_agent(tmp_path)
+    quest = _seed_single_agent(tmp_path)
 
     scripts = [
         [assistant(text("Failed to authenticate. API Error: 401 "
@@ -119,13 +119,13 @@ async def test_auth_retry_recovers_through_backoff_loop(
 
     monkeypatch.setattr("imp.engine.executor._interruptible_sleep", _no_sleep)
 
-    out = await run_quest(change)
+    out = await run_quest(quest)
 
     assert out is RunResult.COMPLETED
-    assert State.load(change.state_dir).status == "completed"
+    assert State.load(quest.state_dir).status == "completed"
     assert calls["n"] == 2
 
-    log_types = [e["type"] for e in change.event_log().read()]
+    log_types = [e["type"] for e in quest.event_log().read()]
     assert "agent_retry" in log_types
     assert "awaiting_user_input" not in log_types
     assert "llm_response" in log_types
@@ -135,7 +135,7 @@ async def test_auth_retry_recovers_through_backoff_loop(
 async def test_concurrency_400_retry_recovers_through_backoff_loop(
     tmp_path: Path, provider_registry: Any, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    change = _seed_single_agent(tmp_path)
+    quest = _seed_single_agent(tmp_path)
 
     scripts = [
         [assistant(text("API Error 400 — tool use concurrency")),
@@ -167,13 +167,13 @@ async def test_concurrency_400_retry_recovers_through_backoff_loop(
 
     monkeypatch.setattr("imp.engine.executor._interruptible_sleep", _no_sleep)
 
-    out = await run_quest(change)
+    out = await run_quest(quest)
 
     assert out is RunResult.COMPLETED
-    assert State.load(change.state_dir).status == "completed"
+    assert State.load(quest.state_dir).status == "completed"
     assert calls["n"] == 2
 
-    log_types = [e["type"] for e in change.event_log().read()]
+    log_types = [e["type"] for e in quest.event_log().read()]
     assert "agent_retry" in log_types
     assert "workflow_paused" not in log_types
     assert "llm_response" in log_types

@@ -219,7 +219,7 @@ def test_route_merge_does_not_block_event_loop(tmp_path: Path, monkeypatch) -> N
 
     monkeypatch.setattr(worktree, "merge_to_base", _blocking_merge)
 
-    change = types.SimpleNamespace(
+    quest = types.SimpleNamespace(
         quest_dir=tmp_path, control_root=tmp_path, id="feat", handle="feat",
         base_branch="main", title="x", project_root=tmp_path, state_dir=tmp_path,
     )
@@ -242,7 +242,7 @@ def test_route_merge_does_not_block_event_loop(tmp_path: Path, monkeypatch) -> N
             tg.start_soon(ticker)
             await anyio.sleep(0.06)          # let the ticker spin up
             before = ticks
-            res = _route_merge_and_exit_worktree(step, change, state, log)
+            res = _route_merge_and_exit_worktree(step, quest, state, log)
             if inspect.isawaitable(res):
                 res = await res
             during = ticks - before

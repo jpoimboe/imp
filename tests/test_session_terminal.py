@@ -1007,12 +1007,12 @@ async def test_ctrl_d_returns_while_daemon_teardown_still_in_progress(
     from imp.remote.session.discover import session_socket_path
 
     _seed_control(tmp_path)
-    change = Quest.create_draft(
+    quest = Quest.create_draft(
         tmp_path, title="D", quest_id="slow1", base_branch="main")
-    change.event_log().append(
+    quest.event_log().append(
         agent_id=None, type="user_message",
         payload={"role": "user", "content": "hi"})
-    sock = str(session_socket_path(change.control_root, change.id))
+    sock = str(session_socket_path(quest.control_root, quest.id))
 
     archive_started = threading.Event()
     release_archive = threading.Event()
@@ -1024,7 +1024,7 @@ async def test_ctrl_d_returns_while_daemon_teardown_still_in_progress(
         archived.append(ch.id)
 
     async def fake_run(
-        change: Quest, *, on_event: Any, user_chat_input_fn: Any,
+        quest: Quest, *, on_event: Any, user_chat_input_fn: Any,
         coordinator: Any, wait_for_turn_fn: Any = None,
     ) -> str:
         on_event({"type": "awaiting_user_input", "payload": {"prompt": "reply?"}})
@@ -1033,7 +1033,7 @@ async def test_ctrl_d_returns_while_daemon_teardown_still_in_progress(
     coord = InterruptCoordinator()
 
     async def _attach(on_event: Callable[[dict[str, Any]], None]) -> SessionClient:
-        client = SessionClient(sock, change.id, change.title, on_event=on_event)
+        client = SessionClient(sock, quest.id, quest.title, on_event=on_event)
         await client.connect()
         return client
 
@@ -1050,7 +1050,7 @@ async def test_ctrl_d_returns_while_daemon_teardown_still_in_progress(
         async with anyio.create_task_group() as tg:
             async def _serve() -> None:
                 await serve_quest_session(
-                    change, run_fn=fake_run, hibernate=False,
+                    quest, run_fn=fake_run, hibernate=False,
                     archive_left=slow_archive)
 
             tg.start_soon(_serve)
@@ -1061,7 +1061,7 @@ async def test_ctrl_d_returns_while_daemon_teardown_still_in_progress(
             async def _client() -> None:
                 await run_terminal_client(
                     attach=_attach, driver=_Driver(), coord=coord,
-                    solicit=_solicit, quest_id=change.id, control_root=tmp_path,
+                    solicit=_solicit, quest_id=quest.id, control_root=tmp_path,
                     leave_mode="chat", leave_state=leave_state)
                 client_done.set()
 
@@ -1075,7 +1075,7 @@ async def test_ctrl_d_returns_while_daemon_teardown_still_in_progress(
             assert leave_state["disposition"] == "archive"
             release_archive.set()                     # let the daemon finish
 
-    assert archived == [change.id]                    # teardown completed in the daemon
+    assert archived == [quest.id]                    # teardown completed in the daemon
 
 
 @pytest.mark.anyio

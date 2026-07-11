@@ -80,15 +80,15 @@ def _make_change(root: Path, *, quest_id: str = "test-change", title: str = "t")
         loop_counts={},
     ).save(quest_dir / "state")
 
-    change = Quest(
+    quest = Quest(
         id=quest_id, title=title, base_branch="main",
         control_root=root, project_root=root, quest_dir=quest_dir,
     )
-    change.event_log().append(
+    quest.event_log().append(
         agent_id=None, type="change_created",
         payload={"id": quest_id, "title": title},
     )
-    return change
+    return quest
 
 
 class _FakeRunner:
@@ -230,8 +230,8 @@ def _seed_minimal_workflow(
         f"      - {{name: {step_name}, file: agents/{agent_stem}.md, tier: low}}\n"
     )
     _write_fake_config(root)
-    change = _make_change(root)
-    return change, phase_name, step_name
+    quest = _make_change(root)
+    return quest, phase_name, step_name
 
 
 # ── Minimal completion + transcript lifecycle ───────────────────────────────
@@ -239,38 +239,38 @@ def _seed_minimal_workflow(
 
 @pytest.mark.anyio
 async def test_run_quest_completes_minimal_workflow(tmp_path: Path) -> None:
-    change, _, _ = _seed_minimal_workflow(tmp_path)
+    quest, _, _ = _seed_minimal_workflow(tmp_path)
     _register_fake({"status": "Success"})
 
-    result = await run_quest(change, on_event=lambda _e: None)
+    result = await run_quest(quest, on_event=lambda _e: None)
     assert result is RunResult.COMPLETED
 
-    state = State.load(change.state_dir)
+    state = State.load(quest.state_dir)
     assert state.status == "completed"
     assert state.step is None
 
 
 @pytest.mark.anyio
 async def test_run_quest_sets_has_started_at_dispatch(tmp_path: Path) -> None:
-    change, _, _ = _seed_minimal_workflow(tmp_path)
-    assert State.load(change.state_dir).has_started is False   # never-run seed
+    quest, _, _ = _seed_minimal_workflow(tmp_path)
+    assert State.load(quest.state_dir).has_started is False   # never-run seed
     _register_fake({"status": "Success"})
 
-    await run_quest(change, on_event=lambda _e: None)
+    await run_quest(quest, on_event=lambda _e: None)
 
-    assert State.load(change.state_dir).has_started is True     # a step ran
+    assert State.load(quest.state_dir).has_started is True     # a step ran
 
 
 @pytest.mark.anyio
 async def test_continue_off_last_step_completes(tmp_path: Path) -> None:
     """A single agent step with no rules → continue → COMPLETED, and the
     steps/ tree is removed at completion."""
-    change, _, _ = _seed_minimal_workflow(tmp_path)
+    quest, _, _ = _seed_minimal_workflow(tmp_path)
     _register_fake({"status": "Success"})
 
-    result = await run_quest(change, on_event=lambda _e: None)
+    result = await run_quest(quest, on_event=lambda _e: None)
     assert result is RunResult.COMPLETED
-    assert not (change.quest_dir / "steps").exists()
+    assert not (quest.quest_dir / "steps").exists()
 
 
 # ── set: mutation persistence ───────────────────────────────────────────────
@@ -300,13 +300,13 @@ async def test_set_mutation_persists_to_state_vars(tmp_path: Path) -> None:
         "          - {else: true, continue: true, set: {review_done: true}}\n"
     )
     _write_fake_config(tmp_path)
-    change = _make_change(tmp_path)
+    quest = _make_change(tmp_path)
     _register_fake({"status": "Success"})
 
-    result = await run_quest(change, on_event=lambda _e: None)
+    result = await run_quest(quest, on_event=lambda _e: None)
     assert result is RunResult.COMPLETED
 
-    state = State.load(change.state_dir)
+    state = State.load(quest.state_dir)
     assert state.vars["review_done"] is True
 
 
@@ -348,11 +348,11 @@ def _seed_branch_loop_workflow(root: Path) -> Quest:
 
 @pytest.mark.anyio
 async def test_branch_routes_on_var(tmp_path: Path) -> None:
-    change = _seed_branch_loop_workflow(tmp_path)
+    quest = _seed_branch_loop_workflow(tmp_path)
     _register_fake({"status": "Success"})
 
     events: list[dict] = []
-    result = await run_quest(change, on_event=events.append)
+    result = await run_quest(quest, on_event=events.append)
     assert result is RunResult.COMPLETED
 
     # The branch step's step_started payload reports kind == "branch".
@@ -406,14 +406,14 @@ def _seed_lane_release_workflow(root: Path) -> Quest:
 @pytest.mark.anyio
 async def test_goto_with_release_releases_held_lane(tmp_path: Path) -> None:
     """Goto(release="merge-lane") in a rule releases the held lane via the executor branch."""
-    change = _seed_lane_release_workflow(tmp_path)
+    quest = _seed_lane_release_workflow(tmp_path)
     events: list = []
     _register_fake({"status": "Success", "deviation": True})
 
-    result = await run_quest(change, on_event=events.append)
+    result = await run_quest(quest, on_event=events.append)
 
     assert result is RunResult.COMPLETED
-    state = State.load(change.state_dir)
+    state = State.load(quest.state_dir)
     assert state.held_lane is None
     released = [e for e in events if e.get("type") == "lane_released"]
     assert len(released) == 1
@@ -457,7 +457,7 @@ async def test_backward_goto_increments_loop_count_and_trips_max_loops(
         "          - {else: true, continue: true}\n"
     )
     _write_fake_config(tmp_path)
-    change = _make_change(tmp_path)
+    quest = _make_change(tmp_path)
 
     from imp.providers import resolve
     resolve.reset_providers_for_tests()
@@ -487,10 +487,10 @@ async def test_backward_goto_increments_loop_count_and_trips_max_loops(
         "fake", env_check=lambda: True, factory=lambda _m: _Provider(),
     )
 
-    result = await run_quest(change, on_event=lambda _e: None)
+    result = await run_quest(quest, on_event=lambda _e: None)
     assert result is RunResult.PAUSED
 
-    state = State.load(change.state_dir)
+    state = State.load(quest.state_dir)
     assert state.status == "paused"
     # max_loops: 2 → loop trips on the 3rd backward goto (n == 3 > 2).
     assert state.loop_counts["reviewer"] == 3
@@ -523,12 +523,12 @@ async def test_goto_empty_trailing_phase_completes(tmp_path: Path) -> None:
         "    steps: []\n"
     )
     _write_fake_config(tmp_path)
-    change = _make_change(tmp_path)
+    quest = _make_change(tmp_path)
     _register_fake({"status": "Success"})
 
-    result = await run_quest(change, on_event=lambda _e: None)
+    result = await run_quest(quest, on_event=lambda _e: None)
     assert result is RunResult.COMPLETED
-    assert State.load(change.state_dir).step is None
+    assert State.load(quest.state_dir).step is None
 
 
 # ── step_completed / step_started payload shapes ────────────────────────────
@@ -540,13 +540,13 @@ async def test_step_completed_payload_has_action_dict_and_kind(
 ) -> None:
     """step_completed.payload.action == {"verb": "continue"} and the agent
     step_started.payload carries all of {step, kind, phase}."""
-    change, phase, step = _seed_minimal_workflow(
+    quest, phase, step = _seed_minimal_workflow(
         tmp_path, phase_name="myphase", step_name="mystep", agent_stem="writer",
     )
     _register_fake({"status": "Success"})
 
     events: list[dict] = []
-    result = await run_quest(change, on_event=events.append)
+    result = await run_quest(quest, on_event=events.append)
     assert result is RunResult.COMPLETED
 
     started = next(
@@ -570,13 +570,13 @@ async def test_step_completed_payload_has_action_dict_and_kind(
 async def test_step_events_carry_step_agent_id_and_step_started_seeds_chain(
     tmp_path: Path,
 ) -> None:
-    change, phase, step = _seed_minimal_workflow(
+    quest, phase, step = _seed_minimal_workflow(
         tmp_path, phase_name="myphase", step_name="mystep", agent_stem="worker",
     )
     _register_fake({"status": "Success"})
 
-    await run_quest(change, on_event=lambda _e: None)
-    events = list(change.event_log().read())
+    await run_quest(quest, on_event=lambda _e: None)
+    events = list(quest.event_log().read())
     started = next(e for e in events if e["type"] == "step_started")
     output = next(e for e in events if e["type"] == "agent_output")
     assert started["agent_id"] is None
@@ -606,7 +606,7 @@ class _FatalToolErrorRunner:
 
 @pytest.mark.anyio
 async def test_fatal_tool_error_pauses_without_retry(tmp_path: Path) -> None:
-    change, _, _ = _seed_minimal_workflow(tmp_path)
+    quest, _, _ = _seed_minimal_workflow(tmp_path)
 
     from imp.providers import resolve
     resolve.reset_providers_for_tests()
@@ -628,9 +628,9 @@ async def test_fatal_tool_error_pauses_without_retry(tmp_path: Path) -> None:
     )
 
     events: list[dict] = []
-    result = await run_quest(change, on_event=events.append)
+    result = await run_quest(quest, on_event=events.append)
     assert result is RunResult.PAUSED
-    assert State.load(change.state_dir).status == "paused"
+    assert State.load(quest.state_dir).status == "paused"
     assert runner.run_count == 1
 
     fatal_events = [e for e in events
@@ -661,7 +661,7 @@ class _CategoryErrorRunner:
 
 @pytest.mark.anyio
 async def test_fatal_error_pauses_without_burning_retries(tmp_path: Path) -> None:
-    change, _, _ = _seed_minimal_workflow(tmp_path)
+    quest, _, _ = _seed_minimal_workflow(tmp_path)
 
     from imp.providers import resolve
     resolve.reset_providers_for_tests()
@@ -682,10 +682,10 @@ async def test_fatal_error_pauses_without_burning_retries(tmp_path: Path) -> Non
         "fake", env_check=lambda: True, factory=lambda _m: _FatalProvider(),
     )
 
-    result = await run_quest(change, on_event=lambda _e: None)
+    result = await run_quest(quest, on_event=lambda _e: None)
     assert result is RunResult.PAUSED
     assert runner.run_count == 1
-    assert State.load(change.state_dir).status == "paused"
+    assert State.load(quest.state_dir).status == "paused"
 
 
 class _RateLimitThenSuccessRunner:
@@ -741,7 +741,7 @@ async def test_rate_limit_sleeps_then_retries_without_consuming_step_attempt(
         pass
     monkeypatch.setattr(executor, "_interruptible_sleep", _instant_sleep)
 
-    change, _, _ = _seed_minimal_workflow(tmp_path)
+    quest, _, _ = _seed_minimal_workflow(tmp_path)
     from imp.providers import resolve
     resolve.reset_providers_for_tests()
 
@@ -758,11 +758,11 @@ async def test_rate_limit_sleeps_then_retries_without_consuming_step_attempt(
         "fake", env_check=lambda: True, factory=lambda _m: _RLProvider(),
     )
 
-    result = await run_quest(change, on_event=lambda _e: None)
+    result = await run_quest(quest, on_event=lambda _e: None)
     assert result is RunResult.COMPLETED
     assert runner.run_count == 2
 
-    state = State.load(change.state_dir)
+    state = State.load(quest.state_dir)
     assert state.step_attempt == 0
 
 
@@ -780,7 +780,7 @@ async def test_retry_budget_pauses_with_retry_ceiling(
         pass
     monkeypatch.setattr(executor, "_interruptible_sleep", _instant_sleep)
 
-    change, _, _ = _seed_minimal_workflow(tmp_path)
+    quest, _, _ = _seed_minimal_workflow(tmp_path)
     from imp.providers import resolve
     resolve.reset_providers_for_tests()
 
@@ -800,7 +800,7 @@ async def test_retry_budget_pauses_with_retry_ceiling(
     )
 
     events: list[dict] = []
-    result = await run_quest(change, on_event=events.append)
+    result = await run_quest(quest, on_event=events.append)
     assert result is RunResult.PAUSED
     # Budget check fires BEFORE the first retry sleep -> exactly one run.
     assert runner.run_count == 1
@@ -823,7 +823,7 @@ async def test_auth_budget_exhaustion_pauses_with_reauth_needed(
         pass
     monkeypatch.setattr(executor, "_interruptible_sleep", _instant_sleep)
 
-    change, _, _ = _seed_minimal_workflow(tmp_path)
+    quest, _, _ = _seed_minimal_workflow(tmp_path)
     from imp.providers import resolve
     resolve.reset_providers_for_tests()
 
@@ -844,7 +844,7 @@ async def test_auth_budget_exhaustion_pauses_with_reauth_needed(
     )
 
     events: list[dict] = []
-    result = await run_quest(change, on_event=events.append)
+    result = await run_quest(quest, on_event=events.append)
     assert result is RunResult.PAUSED
     assert runner.run_count == 1
     paused = [e for e in events if e["type"] == "workflow_paused"]
@@ -863,7 +863,7 @@ async def test_auth_backoff_crosses_old_120s_budget_and_keeps_retrying(
         pass
     monkeypatch.setattr(executor, "_interruptible_sleep", _instant_sleep)
 
-    change, _, _ = _seed_minimal_workflow(tmp_path)
+    quest, _, _ = _seed_minimal_workflow(tmp_path)
     from imp.providers import resolve
     resolve.reset_providers_for_tests()
 
@@ -880,7 +880,7 @@ async def test_auth_backoff_crosses_old_120s_budget_and_keeps_retrying(
         "fake", env_check=lambda: True, factory=lambda _m: _AuthProvider(),
     )
 
-    result = await run_quest(change, on_event=lambda _e: None)
+    result = await run_quest(quest, on_event=lambda _e: None)
     assert result is RunResult.COMPLETED
     # 7 auth errors then success; the run rode through the 123 s crossing.
     assert runner.run_count == 8
@@ -889,7 +889,7 @@ async def test_auth_backoff_crosses_old_120s_budget_and_keeps_retrying(
 @pytest.mark.anyio
 async def test_fatal_api_error_pauses(tmp_path: Path) -> None:
     """A runner that emits a fatal (Pause) error makes the step Pause, not retry."""
-    change, _, _ = _seed_minimal_workflow(tmp_path)
+    quest, _, _ = _seed_minimal_workflow(tmp_path)
 
     from imp.providers import resolve
     resolve.reset_providers_for_tests()
@@ -916,7 +916,7 @@ async def test_fatal_api_error_pauses(tmp_path: Path) -> None:
         "fake", env_check=lambda: True, factory=lambda _m: _IncompleteProvider(),
     )
 
-    result = await run_quest(change, on_event=lambda _e: None)
+    result = await run_quest(quest, on_event=lambda _e: None)
     assert result is RunResult.PAUSED
 
 
@@ -927,7 +927,7 @@ async def test_fatal_api_error_pauses(tmp_path: Path) -> None:
 async def test_agent_missing_output_exhausts_to_pause(tmp_path: Path) -> None:
     """A runner that never yields agent_output exhausts max_retries (1) and
     pauses via on_max_retries (default Pause)."""
-    change, _, _ = _seed_minimal_workflow(tmp_path)
+    quest, _, _ = _seed_minimal_workflow(tmp_path)
 
     from imp.providers import resolve
     resolve.reset_providers_for_tests()
@@ -954,11 +954,11 @@ async def test_agent_missing_output_exhausts_to_pause(tmp_path: Path) -> None:
         "fake", env_check=lambda: True, factory=lambda _m: _EmptyProvider(),
     )
 
-    result = await run_quest(change, on_event=lambda _e: None)
+    result = await run_quest(quest, on_event=lambda _e: None)
     assert result is RunResult.PAUSED
     # max_retries=1 → initial attempt + 1 retry = 2 invocations before pause.
     assert runner_calls["n"] == 2
-    assert State.load(change.state_dir).status == "paused"
+    assert State.load(quest.state_dir).status == "paused"
 
 
 # ── completion instruction + continuation wiring ────────────────────────────
@@ -988,7 +988,7 @@ async def test_system_prompt_carries_completion_instruction_and_continuation(
         "      - {name: w, file: agents/writer.md, tier: low}\n"
     )
     _write_fake_config(tmp_path)
-    change = _make_change(tmp_path)
+    quest = _make_change(tmp_path)
 
     captured: dict[str, AgentInvocation] = {}
 
@@ -1015,7 +1015,7 @@ async def test_system_prompt_carries_completion_instruction_and_continuation(
         "fake", env_check=lambda: True, factory=lambda model: _CapProvider(model),
     )
 
-    result = await run_quest(change, on_event=lambda _e: None)
+    result = await run_quest(quest, on_event=lambda _e: None)
     assert result is RunResult.COMPLETED
 
     inv = captured["inv"]
@@ -1068,7 +1068,7 @@ async def test_goto_feedback_resumes_target_with_wrapper(tmp_path: Path) -> None
         "          - {else: true, continue: true}\n"
     )
     _write_fake_config(tmp_path)
-    change = _make_change(tmp_path)
+    quest = _make_change(tmp_path)
 
     from imp.providers import resolve
     resolve.reset_providers_for_tests()
@@ -1104,7 +1104,7 @@ async def test_goto_feedback_resumes_target_with_wrapper(tmp_path: Path) -> None
     )
 
     events: list[dict] = []
-    result = await run_quest(change, on_event=events.append)
+    result = await run_quest(quest, on_event=events.append)
     assert result is RunResult.COMPLETED
 
     coder_runs = [fb for (aid, fb) in runs if aid.endswith("/coder")]
@@ -1114,7 +1114,7 @@ async def test_goto_feedback_resumes_target_with_wrapper(tmp_path: Path) -> None
     assert "verdict: " in coder_runs[1]   # render_output_fields half is present
 
     # Feedback consumed: cleared on the engine's state.
-    assert State.load(change.state_dir).retry_feedback is None
+    assert State.load(quest.state_dir).retry_feedback is None
 
     # No agent_output_missing surfaced anywhere.
     assert not any(
@@ -1142,13 +1142,13 @@ def test_action_payload_goto_carries_resume_bool() -> None:
 async def test_run_quest_computes_and_persists_resolved_tiers(tmp_path):
     """After a run, State carries resolved_tiers and exactly one tiers_resolved
     event was emitted."""
-    change, _, _ = _seed_minimal_workflow(tmp_path)
+    quest, _, _ = _seed_minimal_workflow(tmp_path)
     _register_fake({"status": "Success"})
 
     captured: list[dict] = []
-    await run_quest(change, on_event=captured.append)
+    await run_quest(quest, on_event=captured.append)
 
-    state = State.load(change.state_dir)
+    state = State.load(quest.state_dir)
     assert state.resolved_tiers is not None
     assert "medium" in state.resolved_tiers
     resolved_events = [e for e in captured if e["type"] == "tiers_resolved"]
@@ -1164,14 +1164,14 @@ async def test_run_quest_computes_and_persists_resolved_tiers(tmp_path):
 async def test_resume_reuses_resolved_tiers_no_second_event(tmp_path):
     """A second run_quest re-entry reuses the persisted map and emits NO second
     tiers_resolved (compute-if-absent guard)."""
-    change, _, _ = _seed_minimal_workflow(tmp_path)
+    quest, _, _ = _seed_minimal_workflow(tmp_path)
     _register_fake({"status": "Success"})
-    await run_quest(change)
+    await run_quest(quest)
 
     # Re-run run_quest on the same (now-completed) change: it re-loads state,
     # sees resolved_tiers already set, and must not emit a second event.
     captured: list[dict] = []
-    await run_quest(change, on_event=captured.append)
+    await run_quest(quest, on_event=captured.append)
     assert [e for e in captured if e["type"] == "tiers_resolved"] == []
 
 
@@ -1188,7 +1188,7 @@ async def test_fresh_start_puts_task_in_first_user_message(
     completion contract) as the sole first user message — no `<imp:begin/>` sentinel."""
     from imp.providers import resolve
 
-    change, _, _ = _seed_minimal_workflow(tmp_path)
+    quest, _, _ = _seed_minimal_workflow(tmp_path)
     captured: dict[str, AgentInvocation] = {}
 
     class _CapRunner:
@@ -1212,7 +1212,7 @@ async def test_fresh_start_puts_task_in_first_user_message(
     resolve.register_provider(
         "fake", env_check=lambda: True, factory=lambda model: _CapProvider(model))
 
-    result = await run_quest(change, on_event=lambda _e: None)
+    result = await run_quest(quest, on_event=lambda _e: None)
     assert result is RunResult.COMPLETED
 
     inv = captured["inv"]
@@ -1303,11 +1303,11 @@ def _register_capturing(coder_behavior, reviewer_verdicts: list[str], runs: list
 
 @pytest.mark.anyio
 async def test_resume_edge_keeps_transcript(tmp_path: Path) -> None:
-    change = _seed_back_edge_workflow(tmp_path, verb="resume")
+    quest = _seed_back_edge_workflow(tmp_path, verb="resume")
     runs: list = []
     _register_capturing(lambda _n: ("output", {"status": "Success"}),
                         ["rework", "approve"], runs)
-    result = await run_quest(change, on_event=lambda _e: None)
+    result = await run_quest(quest, on_event=lambda _e: None)
     assert result is RunResult.COMPLETED
     coder_balances = [bal for (aid, bal, _fb) in runs if aid.endswith("/coder")]
     # first entry fresh, second entry (via resume:) keeps the transcript
@@ -1316,11 +1316,11 @@ async def test_resume_edge_keeps_transcript(tmp_path: Path) -> None:
 
 @pytest.mark.anyio
 async def test_goto_edge_starts_target_fresh(tmp_path: Path) -> None:
-    change = _seed_back_edge_workflow(tmp_path, verb="goto")
+    quest = _seed_back_edge_workflow(tmp_path, verb="goto")
     runs: list = []
     _register_capturing(lambda _n: ("output", {"status": "Success"}),
                         ["rework", "approve"], runs)
-    result = await run_quest(change, on_event=lambda _e: None)
+    result = await run_quest(quest, on_event=lambda _e: None)
     assert result is RunResult.COMPLETED
     coder_balances = [bal for (aid, bal, _fb) in runs if aid.endswith("/coder")]
     # both entries fresh: a plain goto never resumes
@@ -1332,7 +1332,7 @@ async def test_goto_feedback_prepended_to_fresh_user_message(tmp_path: Path) -> 
     """A goto: edge with a feedback: preamble delivers that feedback as the lead of
     the fresh target's first user message (the relocated seed), preserving rework
     feedback for goto-fed agents whose templates do not render run.opening."""
-    change = _seed_back_edge_workflow(
+    quest = _seed_back_edge_workflow(
         tmp_path, verb="goto", feedback="Address these findings:")
     invs: list[AgentInvocation] = []
 
@@ -1366,7 +1366,7 @@ async def test_goto_feedback_prepended_to_fresh_user_message(tmp_path: Path) -> 
     resolve.register_provider(
         "fake", env_check=lambda: True, factory=lambda model: _Prov(model))
 
-    await run_quest(change, on_event=lambda _e: None, headless=True)
+    await run_quest(quest, on_event=lambda _e: None, headless=True)
 
     coder_invs = [i for i in invs if i.agent_def.name == "coder"]
     assert len(coder_invs) == 2
@@ -1377,29 +1377,29 @@ async def test_goto_feedback_prepended_to_fresh_user_message(tmp_path: Path) -> 
 
 @pytest.mark.anyio
 async def test_resume_marker_is_one_shot(tmp_path: Path) -> None:
-    change = _seed_back_edge_workflow(tmp_path, verb="resume")
+    quest = _seed_back_edge_workflow(tmp_path, verb="resume")
     runs: list = []
     _register_capturing(lambda _n: ("output", {"status": "Success"}),
                         ["rework", "approve"], runs)
-    result = await run_quest(change, on_event=lambda _e: None)
+    result = await run_quest(quest, on_event=lambda _e: None)
     assert result is RunResult.COMPLETED
     # The reviewer that runs AFTER the resumed coder is a fresh entry (no marker).
     reviewer_balances = [bal for (aid, bal, _fb) in runs if aid.endswith("/reviewer")]
     assert reviewer_balances == [False, False]
     # Marker is cleared by completion.
-    assert State.load(change.state_dir).resume_pending is None
+    assert State.load(quest.state_dir).resume_pending is None
 
 
 @pytest.mark.anyio
 async def test_resume_forwards_feedback_to_target(tmp_path: Path) -> None:
     """F2: a resume: edge with a feedback: preamble string delivers the composed
     feedback text to the resumed agent's next invocation (§6)."""
-    change = _seed_back_edge_workflow(
+    quest = _seed_back_edge_workflow(
         tmp_path, verb="resume", feedback="reviewer findings:")
     runs: list = []
     _register_capturing(lambda _n: ("output", {"status": "Success"}),
                         ["rework", "approve"], runs)
-    result = await run_quest(change, on_event=lambda _e: None)
+    result = await run_quest(quest, on_event=lambda _e: None)
     assert result is RunResult.COMPLETED
     coder_feedback = [fb for (aid, _bal, fb) in runs if aid.endswith("/coder")]
     assert coder_feedback[0] is None                  # first entry: no feedback
@@ -1414,7 +1414,7 @@ async def test_resume_is_constant_across_error_retry(tmp_path: Path) -> None:
     constant across the error recursion; the marker is never read in _route_agent)."""
     from imp.providers import resolve
     resolve.reset_providers_for_tests()
-    change = _seed_back_edge_workflow(tmp_path, verb="resume")
+    quest = _seed_back_edge_workflow(tmp_path, verb="resume")
     runs: list = []
     counts = {"coder": 0, "reviewer": 0}
 
@@ -1451,7 +1451,7 @@ async def test_resume_is_constant_across_error_retry(tmp_path: Path) -> None:
     resolve.register_provider(
         "fake", env_check=lambda: True, factory=lambda _m: _Provider())
 
-    result = await run_quest(change, on_event=lambda _e: None)
+    result = await run_quest(quest, on_event=lambda _e: None)
     assert result is RunResult.COMPLETED
     coder_balances = [bal for (aid, bal) in runs if aid.endswith("/coder")]
     # entry1 fresh; entry2 + its retry (entry3) both resumed -> all keep True
@@ -1464,7 +1464,7 @@ async def test_resume_survives_pause_and_reload(tmp_path: Path) -> None:
     state.json, so the next run_quest re-entry continues (does not wipe)."""
     from imp.providers import resolve
     resolve.reset_providers_for_tests()
-    change = _seed_back_edge_workflow(tmp_path, verb="resume")
+    quest = _seed_back_edge_workflow(tmp_path, verb="resume")
     runs: list = []
     counts = {"coder": 0, "reviewer": 0}
 
@@ -1502,14 +1502,14 @@ async def test_resume_survives_pause_and_reload(tmp_path: Path) -> None:
         "fake", env_check=lambda: True, factory=lambda _m: _Provider())
 
     # First run: coder#1 ok -> reviewer rework -> resume:coder -> coder#2 pauses.
-    first = await run_quest(change, on_event=lambda _e: None)
+    first = await run_quest(quest, on_event=lambda _e: None)
     assert first is RunResult.PAUSED
-    paused = State.load(change.state_dir)
+    paused = State.load(quest.state_dir)
     assert paused.step == "coder"
     assert paused.resume_pending == "coder"      # marker survived the pause
 
     # Second run: reloads, coder is still the resume target -> continues.
-    second = await run_quest(change, on_event=lambda _e: None)
+    second = await run_quest(quest, on_event=lambda _e: None)
     assert second is RunResult.COMPLETED
     coder_balances = [bal for (aid, bal) in runs if aid.endswith("/coder")]
     # entry1 fresh; entry2 (paused) resumed; entry3 (post-reload) resumed
@@ -1527,7 +1527,7 @@ async def test_resume_keep_branch_passes_empty_initial_messages(
     carries `()`."""
     from imp.providers import resolve
 
-    change = _seed_back_edge_workflow(tmp_path, verb="resume")
+    quest = _seed_back_edge_workflow(tmp_path, verb="resume")
     invs: list[AgentInvocation] = []
     reviewer_calls = {"n": 0}
 
@@ -1559,7 +1559,7 @@ async def test_resume_keep_branch_passes_empty_initial_messages(
     resolve.register_provider(
         "fake", env_check=lambda: True, factory=lambda _m: _Provider())
 
-    result = await run_quest(change, on_event=lambda _e: None)
+    result = await run_quest(quest, on_event=lambda _e: None)
     assert result is RunResult.COMPLETED
 
     # Defensive: assert overall shape (coder, reviewer, coder, reviewer) before
@@ -1607,16 +1607,16 @@ async def test_script_pause_emits_script_blocked_event(tmp_path: Path) -> None:
     # The sandbox policy binds control_root/.git; git init ensures bwrap finds it.
     import subprocess
     subprocess.run(["git", "init", str(tmp_path)], check=True, capture_output=True)
-    change = _make_change(tmp_path)
+    quest = _make_change(tmp_path)
     _register_fake({"status": "Success"})  # resolve_run needs a registered provider
 
-    result = await run_quest(change, on_event=lambda _e: None)
+    result = await run_quest(quest, on_event=lambda _e: None)
 
     assert result is RunResult.PAUSED
-    state = State.load(change.state_dir)
+    state = State.load(quest.state_dir)
     assert state.status == "paused"
 
-    evs = [e for e in change.event_log().read() if e.get("type") == "script_blocked"]
+    evs = [e for e in quest.event_log().read() if e.get("type") == "script_blocked"]
     assert evs, "expected at least one script_blocked event"
     last = evs[-1]
     assert last["payload"]["step"] == "check"
@@ -1647,14 +1647,14 @@ async def test_script_pause_emits_workflow_paused_with_script_blocked_reason(
     _write_fake_config(tmp_path)
     import subprocess
     subprocess.run(["git", "init", str(tmp_path)], check=True, capture_output=True)
-    change = _make_change(tmp_path)
+    quest = _make_change(tmp_path)
     _register_fake({"status": "Success"})
 
-    result = await run_quest(change, on_event=lambda _e: None)
+    result = await run_quest(quest, on_event=lambda _e: None)
 
     assert result is RunResult.PAUSED
-    assert State.load(change.state_dir).status == "paused"
-    paused = [e for e in change.event_log().read()
+    assert State.load(quest.state_dir).status == "paused"
+    paused = [e for e in quest.event_log().read()
               if e.get("type") == "workflow_paused"]
     assert paused, "expected a workflow_paused event"
     assert paused[-1]["payload"]["reason"] == "script_blocked"
@@ -1706,12 +1706,12 @@ def test_last_script_blocked_returns_last_match() -> None:
 async def test_first_run_snapshots_the_workflow(tmp_path: Path) -> None:
     """The first run copies the live workflow dir into the gitignored per-Quest
     snapshot at .imp/change/workflow/ (taken once, at run-start)."""
-    change, _, _ = _seed_minimal_workflow(tmp_path)
+    quest, _, _ = _seed_minimal_workflow(tmp_path)
     _register_fake({"status": "Success"})
-    snapshot = change.quest_dir / "workflow"
+    snapshot = quest.quest_dir / "workflow"
     assert not snapshot.exists()
 
-    result = await run_quest(change, on_event=lambda _e: None)
+    result = await run_quest(quest, on_event=lambda _e: None)
 
     assert result is RunResult.COMPLETED
     assert (snapshot / "workflow.yaml").exists()
@@ -1722,20 +1722,20 @@ async def test_first_run_snapshots_the_workflow(tmp_path: Path) -> None:
 async def test_snapshot_copy_cleans_stale_tmp_dir(tmp_path: Path) -> None:
     """A leftover workflow.tmp from a previous crashed copy is removed before the
     new copy proceeds, so the final workflow/ snapshot is always complete."""
-    change, _, _ = _seed_minimal_workflow(tmp_path)
+    quest, _, _ = _seed_minimal_workflow(tmp_path)
     _register_fake({"status": "Success"})
     # Simulate a partial copy left over from a prior crash.
-    tmp = change.quest_dir / "workflow.tmp"
+    tmp = quest.quest_dir / "workflow.tmp"
     tmp.mkdir()
     (tmp / "stale.yaml").write_text("garbage")
 
-    result = await run_quest(change, on_event=lambda _e: None)
+    result = await run_quest(quest, on_event=lambda _e: None)
 
     assert result is RunResult.COMPLETED
     # The stale tmp dir should be gone.
     assert not tmp.exists()
     # And the real snapshot should be present and correct.
-    snapshot = change.quest_dir / "workflow"
+    snapshot = quest.quest_dir / "workflow"
     assert (snapshot / "workflow.yaml").exists()
 
 
@@ -1766,12 +1766,12 @@ async def test_resume_runs_frozen_snapshot_after_live_workflow_deleted(
     _write_fake_config(tmp_path)
     # The sandbox policy binds control_root/.git; git init ensures bwrap finds it.
     subprocess.run(["git", "init", str(tmp_path)], check=True, capture_output=True)
-    change = _make_change(tmp_path)
+    quest = _make_change(tmp_path)
     _register_fake({"status": "Success"})  # resolve_run needs a registered provider
 
-    r1 = await run_quest(change, on_event=lambda _e: None)
+    r1 = await run_quest(quest, on_event=lambda _e: None)
     assert r1 is RunResult.PAUSED
-    snapshot = change.quest_dir / "workflow"
+    snapshot = quest.quest_dir / "workflow"
     assert (snapshot / "scripts" / "probe.sh").exists()
 
     # Mutate the live workflow out from under the run: delete script AND step.
@@ -1779,9 +1779,9 @@ async def test_resume_runs_frozen_snapshot_after_live_workflow_deleted(
 
     # Resume reuses the frozen snapshot — no re-copy from the now-missing live
     # dir (which would raise), and the deleted script still runs.
-    r2 = await run_quest(change, on_event=lambda _e: None)
+    r2 = await run_quest(quest, on_event=lambda _e: None)
     assert r2 is RunResult.PAUSED
-    evs = [e for e in change.event_log().read()
+    evs = [e for e in quest.event_log().read()
            if e.get("type") == "script_blocked"]
     assert evs and evs[-1]["payload"]["step"] == "check"
     # exit 7 proves the snapshot's probe.sh actually executed on resume.
@@ -1794,35 +1794,35 @@ async def test_resume_runs_frozen_snapshot_after_live_workflow_deleted(
 @pytest.mark.anyio
 async def test_none_step_resolves_to_complete(tmp_path: Path) -> None:
     """state.step is None is genuine completion: the run finalizes COMPLETED."""
-    change, _, _ = _seed_minimal_workflow(tmp_path)
+    quest, _, _ = _seed_minimal_workflow(tmp_path)
     _register_fake({"status": "Success"})
-    state = State.load(change.state_dir)
+    state = State.load(quest.state_dir)
     state.step = None
-    state.save(change.state_dir)
+    state.save(quest.state_dir)
 
-    result = await run_quest(change, on_event=lambda _e: None)
+    result = await run_quest(quest, on_event=lambda _e: None)
 
     assert result is RunResult.COMPLETED
-    assert State.load(change.state_dir).status == "completed"
+    assert State.load(quest.state_dir).status == "completed"
 
 
 @pytest.mark.anyio
 async def test_unknown_step_pauses_without_silent_merge(tmp_path: Path) -> None:
     """A cursor naming a step absent from the loaded workflow pauses with an
     unknown_step error rather than calling _complete (which could silent-merge)."""
-    change, _, _ = _seed_minimal_workflow(tmp_path)
+    quest, _, _ = _seed_minimal_workflow(tmp_path)
     _register_fake({"status": "Success"})
-    state = State.load(change.state_dir)
+    state = State.load(quest.state_dir)
     state.step = "ghost-step"
-    state.save(change.state_dir)
+    state.save(quest.state_dir)
 
-    result = await run_quest(change, on_event=lambda _e: None)
+    result = await run_quest(quest, on_event=lambda _e: None)
 
     assert result is RunResult.PAUSED
-    reloaded = State.load(change.state_dir)
+    reloaded = State.load(quest.state_dir)
     assert reloaded.status == "paused"
     assert reloaded.step == "ghost-step"          # cursor untouched, not nulled
-    events = list(change.event_log().read())  # read() is a single-use generator
+    events = list(quest.event_log().read())  # read() is a single-use generator
     paused = [e for e in events if e.get("type") == "workflow_paused"]
     assert paused and paused[-1]["payload"]["reason"] == "unknown_step"
     assert paused[-1]["payload"]["step"] == "ghost-step"
@@ -1855,10 +1855,10 @@ async def test_frozen_script_runs_from_snapshot_cwd_with_live_project_root(
     )
     _write_fake_config(tmp_path)
     subprocess.run(["git", "init", str(tmp_path)], check=True, capture_output=True)
-    change = _make_change(tmp_path)
+    quest = _make_change(tmp_path)
     _register_fake({"status": "Success"})
 
-    result = await run_quest(change, on_event=lambda _e: None)
+    result = await run_quest(quest, on_event=lambda _e: None)
 
     assert result is RunResult.COMPLETED
 
@@ -1883,11 +1883,11 @@ async def test_facts_render_into_main_agent_prompt(tmp_path: Path) -> None:
     (tmp_path / "imp" / "project.yaml").write_text(
         "default-workflow: imp\nfacts:\n  test_command: make check\n"
     )
-    change = _make_change(tmp_path)
+    quest = _make_change(tmp_path)
     sink: list = []
     _register_invocation_capturing({"status": "Success"}, sink)
 
-    result = await run_quest(change, on_event=lambda _e: None)
+    result = await run_quest(quest, on_event=lambda _e: None)
     assert result is RunResult.COMPLETED
     assert any("run make check" in i.initial_messages[0].content[0].text for i in sink)
 
@@ -1941,7 +1941,7 @@ async def test_tolerated_forward_advance_resets_gate_loop_counter(
     _write_fake_config(tmp_path)
     # git init: the sandbox policy binds control_root/.git.
     subprocess.run(["git", "init", str(tmp_path)], check=True, capture_output=True)
-    change = _make_change(tmp_path)
+    quest = _make_change(tmp_path)
 
     from imp.providers import resolve
     resolve.reset_providers_for_tests()
@@ -1968,11 +1968,11 @@ async def test_tolerated_forward_advance_resets_gate_loop_counter(
         "fake", env_check=lambda: True, factory=lambda _m: _Provider(),
     )
 
-    result = await run_quest(change, on_event=lambda _e: None)
+    result = await run_quest(quest, on_event=lambda _e: None)
 
     # No max_loops pause: the tolerated cycle completed.
     assert result is RunResult.COMPLETED
-    state = State.load(change.state_dir)
+    state = State.load(quest.state_dir)
     # The forward advance fired FROM the gate, popping its counter: the tolerated
     # cycle cost 0 of the gate's budget. The rejected design leaves this == 1.
     assert state.loop_counts.get("gate", 0) == 0
@@ -1999,13 +1999,13 @@ def test_record_outcome_appends_and_bounds_to_k() -> None:
 
 @pytest.mark.anyio
 async def test_run_quest_records_step_outcome(tmp_path: Path) -> None:
-    change, _, _ = _seed_minimal_workflow(tmp_path)
+    quest, _, _ = _seed_minimal_workflow(tmp_path)
     _register_fake({"status": "Success", "outcome": "did the thing"})
 
-    result = await run_quest(change, on_event=lambda _e: None)
+    result = await run_quest(quest, on_event=lambda _e: None)
     assert result is RunResult.COMPLETED
 
-    state = State.load(change.state_dir)
+    state = State.load(quest.state_dir)
     assert state.outcome_history["w"] == [
         {"lap": 1, "outcome": "did the thing", "head": ""}]
     # outcome is never promoted into the rule-evaluation var environment.
@@ -2017,7 +2017,7 @@ async def test_agent_step_without_outcome_fails_to_complete(tmp_path: Path) -> N
     # With the field required on the executor path, a complete_step payload that
     # omits outcome fails validation, exhausts the single retry, and pauses —
     # nothing is recorded.
-    change, _, _ = _seed_minimal_workflow(tmp_path)
+    quest, _, _ = _seed_minimal_workflow(tmp_path)
     from imp.providers import resolve
     resolve.reset_providers_for_tests()
 
@@ -2038,10 +2038,10 @@ async def test_agent_step_without_outcome_fails_to_complete(tmp_path: Path) -> N
     resolve.register_provider(
         "fake", env_check=lambda: True, factory=lambda _m: _Provider())
 
-    result = await run_quest(change, on_event=lambda _e: None)
+    result = await run_quest(quest, on_event=lambda _e: None)
     assert result is RunResult.PAUSED
 
-    state = State.load(change.state_dir)
+    state = State.load(quest.state_dir)
     assert state.outcome_history == {}
 
 
@@ -2086,7 +2086,7 @@ async def test_rework_reentry_injects_prior_attempts(tmp_path: Path) -> None:
         "          - {if: {verdict: rework}, goto: writer}\n"
         "          - {else: true, continue: true}\n")
     _write_fake_config(tmp_path)
-    change = _make_change(tmp_path)
+    quest = _make_change(tmp_path)
 
     writer_openings: list[str] = []
     review_count = [0]
@@ -2122,7 +2122,7 @@ async def test_rework_reentry_injects_prior_attempts(tmp_path: Path) -> None:
     resolve.register_provider(
         "fake", env_check=lambda: True, factory=lambda _m: _Provider())
 
-    result = await run_quest(change, on_event=lambda _e: None)
+    result = await run_quest(quest, on_event=lambda _e: None)
     assert result is RunResult.COMPLETED
 
     # Writer ran twice: the fresh entry, then the rework re-entry.
@@ -2163,7 +2163,7 @@ async def test_step_lap_render_var_increments_across_bounce(tmp_path: Path) -> N
         "          - {if: {verdict: rework}, goto: writer}\n"
         "          - {else: true, continue: true}\n")
     _write_fake_config(tmp_path)
-    change = _make_change(tmp_path)
+    quest = _make_change(tmp_path)
 
     writer_prompts: list[str] = []
     review_count = [0]
@@ -2200,7 +2200,7 @@ async def test_step_lap_render_var_increments_across_bounce(tmp_path: Path) -> N
     resolve.register_provider(
         "fake", env_check=lambda: True, factory=lambda _m: _Provider())
 
-    result = await run_quest(change, on_event=lambda _e: None)
+    result = await run_quest(quest, on_event=lambda _e: None)
     assert result is RunResult.COMPLETED
     # Writer ran twice: the fresh entry (lap 1) and the post-bounce re-entry (lap 2).
     assert len(writer_prompts) == 2
@@ -2226,11 +2226,11 @@ async def test_step_completed_payload_carries_rule_label(tmp_path: Path) -> None
         "    steps: []\n"
     )
     _write_fake_config(tmp_path)
-    change = _make_change(tmp_path)
+    quest = _make_change(tmp_path)
     _register_fake({"status": "Success"})
 
     events: list[dict] = []
-    result = await run_quest(change, on_event=events.append)
+    result = await run_quest(quest, on_event=events.append)
     assert result is RunResult.COMPLETED
 
     completed = next(
@@ -2244,11 +2244,11 @@ async def test_step_completed_payload_carries_rule_label(tmp_path: Path) -> None
 @pytest.mark.anyio
 async def test_step_completed_continue_default_label_is_none(tmp_path: Path) -> None:
     """The continue-on-success default (match.rule is None) emits label: None."""
-    change, _, _ = _seed_minimal_workflow(tmp_path)
+    quest, _, _ = _seed_minimal_workflow(tmp_path)
     _register_fake({"status": "Success"})
 
     events: list[dict] = []
-    result = await run_quest(change, on_event=events.append)
+    result = await run_quest(quest, on_event=events.append)
     assert result is RunResult.COMPLETED
 
     completed = next(e for e in events if e["type"] == "step_completed")
@@ -2274,11 +2274,11 @@ async def test_step_completed_unlabeled_rule_emits_none(tmp_path: Path) -> None:
         "    steps: []\n"
     )
     _write_fake_config(tmp_path)
-    change = _make_change(tmp_path)
+    quest = _make_change(tmp_path)
     _register_fake({"status": "Success"})
 
     events: list[dict] = []
-    result = await run_quest(change, on_event=events.append)
+    result = await run_quest(quest, on_event=events.append)
     assert result is RunResult.COMPLETED
 
     completed = next(
@@ -2317,7 +2317,7 @@ async def test_step_started_payload_carries_label_and_resumed(tmp_path: Path) ->
         "          - {else: true, continue: true}\n"
     )
     _write_fake_config(tmp_path)
-    change = _make_change(tmp_path)
+    quest = _make_change(tmp_path)
 
     from imp.providers import resolve
     resolve.reset_providers_for_tests()
@@ -2348,7 +2348,7 @@ async def test_step_started_payload_carries_label_and_resumed(tmp_path: Path) ->
         "fake", env_check=lambda: True, factory=lambda _m: _Provider())
 
     events: list[dict] = []
-    result = await run_quest(change, on_event=events.append)
+    result = await run_quest(quest, on_event=events.append)
     assert result is RunResult.COMPLETED
 
     coder_started = [e for e in events
@@ -2392,7 +2392,7 @@ async def test_step_started_restarted_true_when_resumed_transcript_empty(tmp_pat
         "          - {else: true, continue: true}\n"
     )
     _write_fake_config(tmp_path)
-    change = _make_change(tmp_path)
+    quest = _make_change(tmp_path)
 
     from imp.providers import resolve
     resolve.reset_providers_for_tests()
@@ -2425,7 +2425,7 @@ async def test_step_started_restarted_true_when_resumed_transcript_empty(tmp_pat
         "fake", env_check=lambda: True, factory=lambda _m: _Provider())
 
     events: list[dict] = []
-    result = await run_quest(change, on_event=events.append)
+    result = await run_quest(quest, on_event=events.append)
     assert result is RunResult.COMPLETED
 
     coder_started = [e for e in events
@@ -2447,7 +2447,7 @@ class _FlipRunner:
     async def run(self, invocation: AgentInvocation) -> AsyncGenerator[Event, None]:
         self._sink.append(invocation.sandbox_policy.worktree)
         if len(self._sink) == 1:                       # first step = go-live flip
-            invocation.change.project_root = self._wt
+            invocation.quest.project_root = self._wt
         yield {"type": "agent_output",
                "payload": {"outcome": "ok", "status": "Success"}}
 
@@ -2504,13 +2504,13 @@ async def test_sandbox_policy_rebuilt_after_project_root_flip(
     import imp.engine.executor as ex
     monkeypatch.setattr(ex, "sandbox_available", lambda: True)
 
-    change = _seed_two_step_workflow(tmp_path)
-    wt = tmp_path / ".imp" / "worktrees" / change.id
+    quest = _seed_two_step_workflow(tmp_path)
+    wt = tmp_path / ".imp" / "worktrees" / quest.id
     wt.mkdir(parents=True)
     sink: list[str] = []
     _register_flip(sink, wt)
 
-    result = await run_quest(change, on_event=lambda _e: None)
+    result = await run_quest(quest, on_event=lambda _e: None)
     assert result is RunResult.COMPLETED
 
     # Step 1 ran under the control-root policy; the flip mid-step rebuilds the
@@ -2550,12 +2550,12 @@ async def test_continue_writes_target_step_label(tmp_path: Path) -> None:
     _write_fake_config(tmp_path)
     import subprocess
     subprocess.run(["git", "init", str(tmp_path)], check=True, capture_output=True)
-    change = _make_change(tmp_path)
+    quest = _make_change(tmp_path)
     _register_fake({"status": "Success"})
 
-    result = await run_quest(change, on_event=lambda _e: None)
+    result = await run_quest(quest, on_event=lambda _e: None)
     assert result is RunResult.PAUSED
-    state = State.load(change.state_dir)
+    state = State.load(quest.state_dir)
     assert state.step == "check"
     assert state.step_label == "second gate"   # the navigated-to step's label
 
@@ -2591,12 +2591,12 @@ async def test_complete_clears_step_label(tmp_path: Path) -> None:
         "          - {else: true, continue: true}\n"
     )
     _write_fake_config(tmp_path)
-    change = _make_change(tmp_path)
+    quest = _make_change(tmp_path)
     _register_fake({"status": "Success"})
 
-    result = await run_quest(change, on_event=lambda _e: None)
+    result = await run_quest(quest, on_event=lambda _e: None)
     assert result is RunResult.COMPLETED
-    state = State.load(change.state_dir)
+    state = State.load(quest.state_dir)
     assert state.step is None
     assert state.step_label is None
 
@@ -2630,12 +2630,12 @@ async def test_goto_writes_target_step_label(tmp_path: Path) -> None:
         "          - {else: true, pause: true}\n"
     )
     _write_fake_config(tmp_path)
-    change = _make_change(tmp_path)
+    quest = _make_change(tmp_path)
     _register_fake({"status": "Success"})
 
-    result = await run_quest(change, on_event=lambda _e: None)
+    result = await run_quest(quest, on_event=lambda _e: None)
     assert result is RunResult.PAUSED
-    state = State.load(change.state_dir)
+    state = State.load(quest.state_dir)
     assert state.step == "dst"
     assert state.step_label == "destination step"
 
@@ -2670,12 +2670,12 @@ async def test_executor_passes_autonomous_to_prompt(tmp_path: Path) -> None:
         "      - {name: w, file: agents/writer.md, tier: low}\n"
     )
     _write_fake_config(tmp_path)
-    change = _make_change(tmp_path)
+    quest = _make_change(tmp_path)
     sink: list = []
     _register_invocation_capturing({"status": "Success"}, sink)
 
     result = await run_quest(
-        change, on_event=lambda _e: None, autonomous=True,
+        quest, on_event=lambda _e: None, autonomous=True,
     )
     assert result is RunResult.COMPLETED
     assert any("autonomous=True" in i.initial_messages[0].content[0].text for i in sink)
@@ -2699,11 +2699,11 @@ async def test_quest_home_renders_worktree_relative(tmp_path: Path) -> None:
         "      - {name: w, file: agents/writer.md, tier: low}\n"
     )
     _write_fake_config(tmp_path)
-    change = _make_change(tmp_path)
+    quest = _make_change(tmp_path)
     sink: list = []
     _register_invocation_capturing({"status": "Success"}, sink)
 
-    result = await run_quest(change, on_event=lambda _e: None)
+    result = await run_quest(quest, on_event=lambda _e: None)
     assert result is RunResult.COMPLETED
 
     inv = sink[0]
@@ -2740,11 +2740,11 @@ async def test_route_label_threads_to_next_step_started(tmp_path: Path) -> None:
         "      - {name: third, file: agents/writer.md, tier: low}\n"
     )
     _write_fake_config(tmp_path)
-    change = _make_change(tmp_path)
+    quest = _make_change(tmp_path)
     _register_fake({"status": "Success"})
 
     events: list[dict] = []
-    result = await run_quest(change, on_event=events.append)
+    result = await run_quest(quest, on_event=events.append)
     assert result is RunResult.COMPLETED
 
     started = {
@@ -2791,12 +2791,12 @@ async def test_continue_renders_templated_target_label(tmp_path: Path) -> None:
     _write_fake_config(tmp_path)
     import subprocess
     subprocess.run(["git", "init", str(tmp_path)], check=True, capture_output=True)
-    change = _make_change(tmp_path)
+    quest = _make_change(tmp_path)
     _register_fake({"status": "Success"})
 
-    result = await run_quest(change, on_event=lambda _e: None)
+    result = await run_quest(quest, on_event=lambda _e: None)
     assert result is RunResult.PAUSED
-    state = State.load(change.state_dir)
+    state = State.load(quest.state_dir)
     assert state.step == "check"
     assert state.step_label == "processing 5"
     seg = _status_segment(state.status, state.step, state.step_label)
@@ -2833,12 +2833,12 @@ async def test_goto_renders_templated_target_label(tmp_path: Path) -> None:
         "          - {else: true, pause: true}\n"
     )
     _write_fake_config(tmp_path)
-    change = _make_change(tmp_path)
+    quest = _make_change(tmp_path)
     _register_fake({"status": "Success"})
 
-    result = await run_quest(change, on_event=lambda _e: None)
+    result = await run_quest(quest, on_event=lambda _e: None)
     assert result is RunResult.PAUSED
-    state = State.load(change.state_dir)
+    state = State.load(quest.state_dir)
     assert state.step == "dst"
     assert state.step_label == "arrived at 5"
 
@@ -2849,20 +2849,20 @@ async def test_first_run_overlays_project_skills_into_snapshot_user(
 ) -> None:
     """At snapshot creation, project_root/imp/skills/*.md land in the snapshot's
     skills/user/; a resume re-snapshots and picks up a changed source skill."""
-    change, _, _ = _seed_minimal_workflow(tmp_path)
+    quest, _, _ = _seed_minimal_workflow(tmp_path)
     _register_fake({"status": "Success"})
     (tmp_path / "imp" / "skills").mkdir(parents=True, exist_ok=True)
     (tmp_path / "imp" / "skills" / "mine.md").write_text("# Mine\nv1\n")
 
-    assert await run_quest(change, on_event=lambda _e: None) is RunResult.COMPLETED
-    overlaid = change.quest_dir / "workflow" / "skills" / "user" / "mine.md"
+    assert await run_quest(quest, on_event=lambda _e: None) is RunResult.COMPLETED
+    overlaid = quest.quest_dir / "workflow" / "skills" / "user" / "mine.md"
     assert overlaid.read_text() == "# Mine\nv1\n"
 
     # Resume re-snapshots (escape-hatch inversion): the changed source is picked
     # up and exactly one workflow_refreshed event is emitted.
     (tmp_path / "imp" / "skills" / "mine.md").write_text("# Mine\nv2\n")
     events: list[dict] = []
-    await run_quest(change, on_event=events.append)
+    await run_quest(quest, on_event=events.append)
     assert overlaid.read_text() == "# Mine\nv2\n"
     assert sum(1 for e in events if e["type"] == "workflow_refreshed") == 1
 
@@ -2871,16 +2871,16 @@ async def test_first_run_overlays_project_skills_into_snapshot_user(
 async def test_run_quest_persists_configured_max_reincarnations(tmp_path):
     """run_quest copies config.context_max_reincarnations() onto State at run
     start (config is in scope only here), like resolved_tiers."""
-    change, _, _ = _seed_minimal_workflow(tmp_path)
+    quest, _, _ = _seed_minimal_workflow(tmp_path)
     # Overwrite the project layer with a NON-default cap so the assertion is
     # falsifiable (5 != the default 2).
     (tmp_path / "imp" / "project.yaml").write_text(
         "default-workflow: imp\ncontext:\n  max_reincarnations: 5\n")
     _register_fake({"status": "Success"})
 
-    await run_quest(change, on_event=lambda _e: None)
+    await run_quest(quest, on_event=lambda _e: None)
 
-    assert State.load(change.state_dir).max_reincarnations == 5
+    assert State.load(quest.state_dir).max_reincarnations == 5
 
 
 @pytest.mark.anyio
@@ -2890,7 +2890,7 @@ async def test_step_reincarnates_on_context_window_then_pauses_at_cap(tmp_path):
     `reincarnating` event and stashing the prior transcript at .attempt-1."""
     from imp.providers import resolve
 
-    change, phase, step = _seed_minimal_workflow(tmp_path)
+    quest, phase, step = _seed_minimal_workflow(tmp_path)
     (tmp_path / "imp" / "project.yaml").write_text(
         "default-workflow: imp\ncontext:\n  max_reincarnations: 1\n")
 
@@ -2919,13 +2919,13 @@ async def test_step_reincarnates_on_context_window_then_pauses_at_cap(tmp_path):
         factory=lambda model: _CtxWindowProvider(model))
 
     events: list[dict] = []
-    result = await run_quest(change, on_event=events.append)
+    result = await run_quest(quest, on_event=events.append)
 
     assert result is RunResult.PAUSED
     reincarnating = [e for e in events if e["type"] == "reincarnating"]
     assert len(reincarnating) == 1
     assert reincarnating[0]["payload"]["reason"] == "context window exceeded"
-    assert (change.quest_dir / "steps" / phase / f"{step}.attempt-1").exists()
+    assert (quest.quest_dir / "steps" / phase / f"{step}.attempt-1").exists()
 
 
 @pytest.mark.anyio
@@ -2933,14 +2933,14 @@ async def test_run_quest_threads_checkpoint_threshold_to_invocation(tmp_path):
     """run_quest re-derives config.context_checkpoint_threshold() onto State on
     every entry (transient, not persisted) and the executor carries it onto each
     AgentInvocation, so the runner's Tier A watch sees the configured value."""
-    change, _, _ = _seed_minimal_workflow(tmp_path)
+    quest, _, _ = _seed_minimal_workflow(tmp_path)
     # Non-default threshold so the assertion is falsifiable (0.65 != default 0.8).
     (tmp_path / "imp" / "project.yaml").write_text(
         "default-workflow: imp\ncontext:\n  checkpoint_threshold: 0.65\n")
     sink: list = []
     _register_invocation_capturing({"status": "Success"}, sink)
 
-    await run_quest(change, on_event=lambda _e: None)
+    await run_quest(quest, on_event=lambda _e: None)
 
     assert sink and sink[0].checkpoint_threshold == 0.65
 
@@ -2953,7 +2953,7 @@ async def test_step_reincarnates_on_handoff_then_pauses_at_cap(tmp_path):
     from imp.engine.reincarnation import handoff_path_for
     from imp.providers import resolve
 
-    change, phase, step = _seed_minimal_workflow(tmp_path)
+    quest, phase, step = _seed_minimal_workflow(tmp_path)
     (tmp_path / "imp" / "project.yaml").write_text(
         "default-workflow: imp\ncontext:\n  max_reincarnations: 1\n")
 
@@ -2982,13 +2982,13 @@ async def test_step_reincarnates_on_handoff_then_pauses_at_cap(tmp_path):
         factory=lambda model: _HandoffProvider(model))
 
     events: list[dict] = []
-    result = await run_quest(change, on_event=events.append)
+    result = await run_quest(quest, on_event=events.append)
 
     assert result is RunResult.PAUSED
     reincarnating = [e for e in events if e["type"] == "reincarnating"]
     assert len(reincarnating) == 1
     assert reincarnating[0]["payload"]["reason"] == "context threshold crossed"
-    assert (change.quest_dir / "steps" / phase / f"{step}.attempt-1").exists()
+    assert (quest.quest_dir / "steps" / phase / f"{step}.attempt-1").exists()
     cap_event = next(e for e in events if e["type"] == "step_completed")
     assert cap_event["payload"]["action"]["verb"] == "pause"
 
@@ -3003,7 +3003,7 @@ async def test_step_handoff_missing_note_degrades_to_reactive_reason(tmp_path):
     from imp.engine.reincarnation import handoff_path_for
     from imp.providers import resolve
 
-    change, phase, step = _seed_minimal_workflow(tmp_path)
+    quest, phase, step = _seed_minimal_workflow(tmp_path)
     (tmp_path / "imp" / "project.yaml").write_text(
         "default-workflow: imp\ncontext:\n  max_reincarnations: 1\n")
 
@@ -3032,14 +3032,14 @@ async def test_step_handoff_missing_note_degrades_to_reactive_reason(tmp_path):
         factory=lambda model: _HandoffNoNoteProvider(model))
 
     events: list[dict] = []
-    result = await run_quest(change, on_event=events.append)
+    result = await run_quest(quest, on_event=events.append)
 
     assert result is RunResult.PAUSED
     reincarnating = [e for e in events if e["type"] == "reincarnating"]
     assert len(reincarnating) == 1
     assert reincarnating[0]["payload"]["reason"] == \
         "handoff failed — recovering from transcript"
-    assert (change.quest_dir / "steps" / phase / f"{step}.attempt-1").exists()
+    assert (quest.quest_dir / "steps" / phase / f"{step}.attempt-1").exists()
 
 
 @pytest.mark.anyio
@@ -3047,12 +3047,12 @@ async def test_resume_keep_path_feedback_ends_with_backstop(tmp_path: Path) -> N
     """Kept-transcript resume (retry_wrapper path): the feedback delivered to the
     resumed schema'd agent preserves the source feedback and ends with the
     completion backstop."""
-    change = _seed_back_edge_workflow(
+    quest = _seed_back_edge_workflow(
         tmp_path, verb="resume", feedback="reviewer findings:")
     runs: list = []
     _register_capturing(lambda _n: ("output", {"status": "Success"}),
                         ["rework", "approve"], runs)
-    result = await run_quest(change, on_event=lambda _e: None)
+    result = await run_quest(quest, on_event=lambda _e: None)
     assert result is RunResult.COMPLETED
     coder_feedback = [fb for (aid, _bal, fb) in runs if aid.endswith("/coder")]
     assert coder_feedback[0] is None                     # fresh entry: no wrapper
@@ -3066,11 +3066,11 @@ async def test_bare_resume_backstop_rides_on_prior_attempts_preamble(tmp_path: P
     """A bare (feedback=None) resume back-edge is still a rework re-entry: the
     engine injects a prior-attempts preamble as wrapper_text, so the schema'd
     coder's resumed feedback is non-empty and ends with the backstop."""
-    change = _seed_back_edge_workflow(tmp_path, verb="resume")  # feedback=None
+    quest = _seed_back_edge_workflow(tmp_path, verb="resume")  # feedback=None
     runs: list = []
     _register_capturing(lambda _n: ("output", {"status": "Success"}),
                         ["rework", "approve"], runs)
-    result = await run_quest(change, on_event=lambda _e: None)
+    result = await run_quest(quest, on_event=lambda _e: None)
     assert result is RunResult.COMPLETED
     coder_feedback = [fb for (aid, _bal, fb) in runs if aid.endswith("/coder")]
     assert coder_feedback[0] is None                          # fresh entry: no wrapper
@@ -3082,13 +3082,13 @@ async def test_bare_resume_backstop_rides_on_prior_attempts_preamble(tmp_path: P
 @pytest.mark.anyio
 async def test_resume_handoff_framed_feedback_ends_with_backstop(tmp_path: Path) -> None:
     """Regression: a handoff-framed feedback string still gets the backstop appended."""
-    change = _seed_back_edge_workflow(
+    quest = _seed_back_edge_workflow(
         tmp_path, verb="resume",
         feedback="Your work is done for now — hand back to the reviewer.")
     runs: list = []
     _register_capturing(lambda _n: ("output", {"status": "Success"}),
                         ["rework", "approve"], runs)
-    result = await run_quest(change, on_event=lambda _e: None)
+    result = await run_quest(quest, on_event=lambda _e: None)
     assert result is RunResult.COMPLETED
     coder_feedback = [fb for (aid, _bal, fb) in runs if aid.endswith("/coder")]
     assert coder_feedback[1].endswith(COMPLETION_BACKSTOP)
@@ -3098,7 +3098,7 @@ async def test_resume_handoff_framed_feedback_ends_with_backstop(tmp_path: Path)
 async def test_goto_fresh_path_feedback_carries_backstop(tmp_path: Path) -> None:
     """Fresh-transcript resume (feedback_lead path): the backstop rides in the
     relocated first user message of the freshly-restarted schema'd agent."""
-    change = _seed_back_edge_workflow(
+    quest = _seed_back_edge_workflow(
         tmp_path, verb="goto", feedback="Address these findings:")
     invs: list[AgentInvocation] = []
 
@@ -3132,7 +3132,7 @@ async def test_goto_fresh_path_feedback_carries_backstop(tmp_path: Path) -> None
     resolve.register_provider(
         "fake", env_check=lambda: True, factory=lambda model: _Prov(model))
 
-    await run_quest(change, on_event=lambda _e: None, headless=True)
+    await run_quest(quest, on_event=lambda _e: None, headless=True)
 
     coder_invs = [i for i in invs if i.agent_def.name == "coder"]
     assert len(coder_invs) == 2
@@ -3176,7 +3176,7 @@ async def test_backward_gate_bounce_emits_step_transition(tmp_path: Path) -> Non
     )
     _write_fake_config(tmp_path)
     subprocess.run(["git", "init", str(tmp_path)], check=True, capture_output=True)
-    change = _make_change(tmp_path)
+    quest = _make_change(tmp_path)
 
     from imp.providers import resolve
     resolve.reset_providers_for_tests()
@@ -3200,9 +3200,9 @@ async def test_backward_gate_bounce_emits_step_transition(tmp_path: Path) -> Non
     resolve.register_provider(
         "fake", env_check=lambda: True, factory=lambda _m: _Provider())
 
-    await run_quest(change, on_event=lambda _e: None)
+    await run_quest(quest, on_event=lambda _e: None)
 
-    events = list(change.event_log().read())
+    events = list(quest.event_log().read())
     trans = [e for e in events if e["type"] == "step_transition"]
     assert len(trans) == 1
     p = trans[0]["payload"]
@@ -3249,7 +3249,7 @@ async def test_forward_only_run_emits_no_step_transition(tmp_path: Path) -> None
     )
     _write_fake_config(tmp_path)
     subprocess.run(["git", "init", str(tmp_path)], check=True, capture_output=True)
-    change = _make_change(tmp_path)
+    quest = _make_change(tmp_path)
 
     from imp.providers import resolve
     resolve.reset_providers_for_tests()
@@ -3273,10 +3273,10 @@ async def test_forward_only_run_emits_no_step_transition(tmp_path: Path) -> None
     resolve.register_provider(
         "fake", env_check=lambda: True, factory=lambda _m: _Provider())
 
-    result = await run_quest(change, on_event=lambda _e: None)
+    result = await run_quest(quest, on_event=lambda _e: None)
 
     assert result is RunResult.COMPLETED
-    events = list(change.event_log().read())
+    events = list(quest.event_log().read())
     assert not any(e["type"] == "step_transition" for e in events)
 
 
@@ -3302,7 +3302,7 @@ async def test_self_goto_retry_emits_no_step_transition(tmp_path: Path) -> None:
     )
     _write_fake_config(tmp_path)
     subprocess.run(["git", "init", str(tmp_path)], check=True, capture_output=True)
-    change = _make_change(tmp_path)
+    quest = _make_change(tmp_path)
 
     from imp.providers import resolve
     resolve.reset_providers_for_tests()
@@ -3326,9 +3326,9 @@ async def test_self_goto_retry_emits_no_step_transition(tmp_path: Path) -> None:
     resolve.register_provider(
         "fake", env_check=lambda: True, factory=lambda _m: _Provider())
 
-    await run_quest(change, on_event=lambda _e: None)
+    await run_quest(quest, on_event=lambda _e: None)
 
-    events = list(change.event_log().read())
+    events = list(quest.event_log().read())
     assert not any(e["type"] == "step_transition" for e in events)
 
 
@@ -3366,12 +3366,12 @@ async def test_continue_writes_target_phase_label(tmp_path: Path) -> None:
     _write_fake_config(tmp_path)
     import subprocess
     subprocess.run(["git", "init", str(tmp_path)], check=True, capture_output=True)
-    change = _make_change(tmp_path)
+    quest = _make_change(tmp_path)
     _register_fake({"status": "Success"})
 
-    result = await run_quest(change, on_event=lambda _e: None)
+    result = await run_quest(quest, on_event=lambda _e: None)
     assert result is RunResult.PAUSED
-    state = State.load(change.state_dir)
+    state = State.load(quest.state_dir)
     assert state.step == "check"
     assert state.phase_label == "verification phase"
 
@@ -3408,12 +3408,12 @@ async def test_goto_writes_target_phase_label(tmp_path: Path) -> None:
         "          - {else: true, pause: true}\n"
     )
     _write_fake_config(tmp_path)
-    change = _make_change(tmp_path)
+    quest = _make_change(tmp_path)
     _register_fake({"status": "Success"})
 
-    result = await run_quest(change, on_event=lambda _e: None)
+    result = await run_quest(quest, on_event=lambda _e: None)
     assert result is RunResult.PAUSED
-    state = State.load(change.state_dir)
+    state = State.load(quest.state_dir)
     assert state.step == "dst"
     assert state.phase_label == "landing phase"
 
@@ -3452,11 +3452,11 @@ async def test_complete_clears_phase_label(tmp_path: Path) -> None:
         "          - {else: true, continue: true}\n"
     )
     _write_fake_config(tmp_path)
-    change = _make_change(tmp_path)
+    quest = _make_change(tmp_path)
     _register_fake({"status": "Success"})
 
-    result = await run_quest(change, on_event=lambda _e: None)
+    result = await run_quest(quest, on_event=lambda _e: None)
     assert result is RunResult.COMPLETED
-    state = State.load(change.state_dir)
+    state = State.load(quest.state_dir)
     assert state.step is None
     assert state.phase_label is None

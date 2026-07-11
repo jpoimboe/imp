@@ -396,7 +396,7 @@ def test_bash_tool_uses_live_quest_title_not_stale_snapshot() -> None:
         ctx.quest_context = QuestContext(
             id="2026-06-10-x", title="",
             project_root=root, workflow_dir=root / ".imp" / "wf")
-        ctx.change = _t.SimpleNamespace(
+        ctx.quest = _t.SimpleNamespace(
             id="2026-06-10-x", handle="", title="renamed")
         out = _bash(ctx, 'printf %s "$IMP_QUEST_TITLE"')
         assert out["returncode"] == 0, out

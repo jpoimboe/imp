@@ -4,28 +4,28 @@ from imp.cli.model_command import validate_model_arg
 
 
 def test_validate_rejects_malformed_syntax() -> None:
-    err = validate_model_arg("anthropic:", change=SimpleNamespace())
+    err = validate_model_arg("anthropic:", quest=SimpleNamespace())
     assert err is not None and "anthropic:" in err
 
 
 def test_validate_rejects_unavailable_provider(monkeypatch) -> None:
     import imp.cli.model_command as mod
-    monkeypatch.setattr(mod, "_available_for_change", lambda change: ["anthropic"])
-    err = validate_model_arg("openai:gpt-5", change=SimpleNamespace())
+    monkeypatch.setattr(mod, "_available_for_change", lambda quest: ["anthropic"])
+    err = validate_model_arg("openai:gpt-5", quest=SimpleNamespace())
     assert err is not None and "openai" in err
 
 
 def test_validate_accepts_available_provider(monkeypatch) -> None:
     import imp.cli.model_command as mod
-    monkeypatch.setattr(mod, "_available_for_change", lambda change: ["anthropic"])
+    monkeypatch.setattr(mod, "_available_for_change", lambda quest: ["anthropic"])
     assert validate_model_arg(
-        "anthropic:claude-fable-5", change=SimpleNamespace()) is None
+        "anthropic:claude-fable-5", quest=SimpleNamespace()) is None
 
 
 def test_validate_bare_model_needs_no_provider_check(monkeypatch) -> None:
     import imp.cli.model_command as mod
-    monkeypatch.setattr(mod, "_available_for_change", lambda change: [])
-    assert validate_model_arg("claude-fable-5", change=SimpleNamespace()) is None
+    monkeypatch.setattr(mod, "_available_for_change", lambda quest: [])
+    assert validate_model_arg("claude-fable-5", quest=SimpleNamespace()) is None
 
 
 def test_render_roster_marks_current_and_groups_by_provider() -> None:
@@ -86,11 +86,11 @@ def test_print_model_roster_threads_cache_and_current(monkeypatch, tmp_path) -> 
 
     monkeypatch.setattr("imp.providers.model_roster.discover_roster", _discover)
 
-    change = SimpleNamespace(
+    quest = SimpleNamespace(
         state_dir=tmp_path, project_root=tmp_path,
         control_root=tmp_path, workflow_dir=tmp_path)
     out: list[str] = []
-    mod.print_model_roster(change=change, output_fn=out.append)
+    mod.print_model_roster(quest=quest, output_fn=out.append)
 
     # the best-effort cache read is threaded into discovery
     assert captured["claude_options"] == ["SENTINEL-CACHE"]
@@ -131,8 +131,8 @@ def test_validate_model_arg_still_rejects_unavailable_via_delegation(
     import imp.cli.model_command as mod
     from imp.cli.model_command import validate_model_arg
 
-    monkeypatch.setattr(mod, "_available_for_change", lambda change: ["anthropic"])
-    reason = validate_model_arg("openai:gpt-5.5", change=object())
+    monkeypatch.setattr(mod, "_available_for_change", lambda quest: ["anthropic"])
+    reason = validate_model_arg("openai:gpt-5.5", quest=object())
     assert reason is not None
     assert "openai" in reason
     assert "not available" in reason

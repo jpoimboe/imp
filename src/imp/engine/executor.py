@@ -101,10 +101,10 @@ def _record_outcome(
     del hist[:-OUTCOME_HISTORY_K]
 
 
-def _worktree_head(change: Quest) -> str:
+def _worktree_head(quest: Quest) -> str:
     """Worktree HEAD sha, or "" when HEAD is absent/unborn (like change._imp_commit)."""
     from imp.engine import worktree
-    proc = worktree._git(change.project_root, "rev-parse", "HEAD")
+    proc = worktree._git(quest.project_root, "rev-parse", "HEAD")
     return proc.stdout.strip() if proc.returncode == 0 else ""
 
 
@@ -196,11 +196,11 @@ def _trees_identical(a: Path, b: Path) -> bool:
     )
 
 
-def _refresh_workflow_snapshot(change: Quest) -> bool:
+def _refresh_workflow_snapshot(quest: Quest) -> bool:
     """Re-snapshot the live workflow into quest_dir/workflow at a run_quest
     entry. Returns True only when an EXISTING snapshot's content was replaced
     (a fresh change's initial copy returns False); best-effort and crash-safe."""
-    quest_dir = change.quest_dir
+    quest_dir = quest.quest_dir
     snapshot = quest_dir / "workflow"
     tmp = quest_dir / "workflow.tmp"
     old = quest_dir / "workflow.old"
@@ -217,7 +217,7 @@ def _refresh_workflow_snapshot(change: Quest) -> bool:
 
     # 2. Resolve the live source; best-effort — never introduce a new failure.
     try:
-        live = change.control_workflow_dir
+        live = quest.control_workflow_dir
     except Exception:
         return False
     if not live.is_dir():
@@ -225,7 +225,7 @@ def _refresh_workflow_snapshot(change: Quest) -> bool:
 
     # 3. Build the candidate exactly as the initial snapshot does.
     shutil.copytree(live, tmp)
-    overlay_project_skills(change.project_root, tmp / "skills" / "user")
+    overlay_project_skills(quest.project_root, tmp / "skills" / "user")
 
     # 4. No-op when the candidate matches the current snapshot.
     if had_snapshot and _trees_identical(snapshot, tmp):
@@ -278,7 +278,7 @@ def _backfill_var_defaults(state: State, decls: Vars) -> list[str]:
 
 
 async def run_quest(
-    change: Quest,
+    quest: Quest,
     *,
     on_event: EventCallback | None = None,
     user_chat_input_fn: Callable[[str], str | Awaitable[str]] | None = None,
@@ -297,18 +297,18 @@ async def run_quest(
         coordinator = InterruptCoordinator()
 
     prev_cwd = os.getcwd()
-    os.chdir(change.control_root)  # spec §5.3: engine cwd = control root, so a
+    os.chdir(quest.control_root)  # spec §5.3: engine cwd = control root, so a
     # resume launched from inside a worktree never blocks `git worktree move`.
     # NOTE: os.chdir is process-global — this hard-assumes one run_quest per
     # process (the foreground CLI model). Do not parallelize runs in-process
     # without revisiting (all git calls already pass explicit control_root).
     try:
-        workflow_refreshed = _refresh_workflow_snapshot(change)
+        workflow_refreshed = _refresh_workflow_snapshot(quest)
         config = load_effective_config(
-            project_root=change.project_root, control_root=change.control_root,
+            project_root=quest.project_root, control_root=quest.control_root,
         ).config
-        state = State.load(change.state_dir)
-        change.relink_home()
+        state = State.load(quest.state_dir)
+        quest.relink_home()
         # Transient: re-set on EVERY run_quest entry (fresh + resume) so the
         # Tier A handoff watch always sees the configured threshold without
         # persisting it (the resolved_tiers block below is skipped on resume).
@@ -317,13 +317,13 @@ async def run_quest(
         if state.project_facts is None:
             state.project_facts = config.project_facts
             state.guidance = config.guidance
-            state.save(change.state_dir)
+            state.save(quest.state_dir)
         workflow = load_workflow(
-            change.workflow_dir,
+            quest.workflow_dir,
             project_keys=frozenset(state.project_facts),
         )
         log: EventLog = JsonlEventLog(
-            change.events_path, on_event=_liveness_on_event(coordinator, on_event))
+            quest.events_path, on_event=_liveness_on_event(coordinator, on_event))
         if workflow_refreshed:
             _emit(log, "workflow_refreshed", {}, agent_id=None)
         # Seed any workflow var introduced after this change was created (its
@@ -331,10 +331,10 @@ async def run_quest(
         # template reference to it crashes the render on resume.
         backfilled = _backfill_var_defaults(state, workflow.vars)
         if backfilled:
-            state.save(change.state_dir)
+            state.save(quest.state_dir)
             _emit(log, "vars_backfilled", {"names": backfilled}, agent_id=None)
-        sandbox_policy = _build_sandbox_policy(change, config, log)
-        policy_root = change.project_root
+        sandbox_policy = _build_sandbox_policy(quest, config, log)
+        policy_root = quest.project_root
 
         # Resolve tiers once per run and persist, so resume never re-snapshots the
         # environment (design "When it runs"). run_quest re-executes on every
@@ -345,29 +345,29 @@ async def run_quest(
             state.resolved_tiers = resolved_tiers
             state.resolved_steps = resolved_steps
             state.max_reincarnations = config.context_max_reincarnations()
-            state.save(change.state_dir)
+            state.save(quest.state_dir)
             _emit(log, "tiers_resolved",
                   {"tiers": details["tiers"], "steps": details["steps"],
                    "checkpoint_threshold": config.context_checkpoint_threshold()},
                   agent_id=None)
-            if change.seed_opening:
-                _emit(log, "opening_intent", {"text": change.seed_opening},
+            if quest.seed_opening:
+                _emit(log, "opening_intent", {"text": quest.seed_opening},
                       agent_id=None)
         elif workflow_refreshed:
             if _reconcile_resolved_run(state, workflow, config):
-                state.save(change.state_dir)
+                state.save(quest.state_dir)
 
         flat = workflow.flat_steps()
         index_of = {s.name: i for i, s in enumerate(flat)}
         # Durable source of truth: the intent survives any resume via quest.json,
         # not the transient run parameter (which resume loops never re-pass).
-        pending_seed = change.seed_opening  # one-shot: consumed at the entry step's fresh render
+        pending_seed = quest.seed_opening  # one-shot: consumed at the entry step's fresh render
         opening_step = next((s.name for s in flat if s.kind == "agent"), None)
         if (did_fresh_resolve and opening_model is not None
                 and opening_step is not None):
             from imp.engine.model_override import apply_model_override
             apply_model_override(
-                change, state, opening_model, step_name=opening_step)
+                quest, state, opening_model, step_name=opening_step)
 
         # A hold mark surviving to process entry with lane_retained unset means a prior
         # run crashed while holding; with lane_retained set it was a clean interrupt /
@@ -384,25 +384,25 @@ async def run_quest(
                 # mid-resumed-step would leave lane_retained=True on disk and the
                 # next entry would wrongly retain a possibly-mutated tree.
                 state.lane_retained = False
-                state.save(change.state_dir)
+                state.save(quest.state_dir)
             else:
-                _evict_if_holding(change, state, log)
-                state.save(change.state_dir)
+                _evict_if_holding(quest, state, log)
+                state.save(quest.state_dir)
 
         while True:
             if state.completion_pending:
                 # §3: re-entry after an interrupt parked at the completion
                 # boundary. Finalize directly — no dispatch, no transcript wipe.
                 state.completion_pending = False
-                return _complete(change, state, log)
+                return _complete(quest, state, log)
             if state.step is None:
-                return _complete(change, state, log)            # genuine completion
+                return _complete(quest, state, log)            # genuine completion
             if index_of.get(state.step) is None:
                 # The cursor names a step absent from the loaded workflow
                 # (corruption, or a refresh that dropped this step). Never
                 # silent-merge: pause with an error instead of calling _complete.
                 state.status = "paused"
-                state.save(change.state_dir)
+                state.save(quest.state_dir)
                 _emit_paused_event(log, "unknown_step", step=state.step)
                 return RunResult.PAUSED
             idx = index_of[state.step]
@@ -420,9 +420,9 @@ async def run_quest(
             # Go-live mid-run flips change.project_root to the freshly-forked
             # worktree; the once-built policy is then rooted at the stale control
             # root. Rebuild so the next step's gates and agents bind the worktree.
-            if change.project_root != policy_root:
-                sandbox_policy = _build_sandbox_policy(change, config, log)
-                policy_root = change.project_root
+            if quest.project_root != policy_root:
+                sandbox_policy = _build_sandbox_policy(quest, config, log)
+                policy_root = quest.project_root
             # var_mutations was ALREADY applied to state.vars and logged inside the
             # _route_* body — run_quest receives it for visibility only and must NOT
             # re-apply it (double-apply trap). The third element is otherwise unused.
@@ -432,9 +432,9 @@ async def run_quest(
             # now (before dispatch) so even a crash mid-step leaves it set.
             if not state.has_started:
                 state.has_started = True
-                state.save(change.state_dir)
+                state.save(quest.state_dir)
             action, feedback_text, _var_mutations = await _dispatch_step(
-                step, workflow, change, state, log, is_resume=is_resume,
+                step, workflow, quest, state, log, is_resume=is_resume,
                 user_chat_input_fn=user_chat_input_fn, coordinator=coordinator,
                 test_gates=TestGates.from_config(config),
                 headless=headless,
@@ -462,7 +462,7 @@ async def run_quest(
                     state.lane_retained = True
                     evicted = False
                 else:
-                    evicted = _evict_if_holding(change, state, log)
+                    evicted = _evict_if_holding(quest, state, log)
                 if not evicted and step.kind == "agent":
                     state.arm_step_resume(
                         interrupt=coordinator.should_pause or action.interrupt)
@@ -472,7 +472,7 @@ async def run_quest(
                 reason = action.reason or "interrupt"
                 state.status = (
                     "merge_blocked" if reason == "merge_blocked" else "paused")
-                state.save(change.state_dir)
+                state.save(quest.state_dir)
                 _emit_paused_event(
                     log, reason, kind=action.kind,
                     interrupt_reason=(coordinator.pause_reason
@@ -486,14 +486,14 @@ async def run_quest(
                 if nxt >= len(flat):
                     state.interrupt_pending = False
                     state.retry_continue_pending = False
-                    return _complete_or_park(change, state, log, coordinator)
+                    return _complete_or_park(quest, state, log, coordinator)
                 state.step = flat[nxt].name
                 state.step_label = (
-                    render_label(flat[nxt].label, change, log, state)
+                    render_label(flat[nxt].label, quest, log, state)
                     or flat[nxt].name
                 )
                 state.phase_label = (
-                    render_label(flat[nxt].phase_label, change, log, state)
+                    render_label(flat[nxt].phase_label, quest, log, state)
                     if flat[nxt].phase_label is not None else None
                 )
                 state.resume_pending = None
@@ -502,30 +502,30 @@ async def run_quest(
             elif isinstance(action, Goto):
                 if action.release is not None and state.held_lane is not None:
                     _release_held_lane(
-                        action.release, change, state, log, step_name=step.name)
+                        action.release, quest, state, log, step_name=step.name)
                 target_idx = workflow.resolve_goto(action.target)
                 if target_idx >= len(flat):                      # empty trailing phase
                     state.interrupt_pending = False
                     state.retry_continue_pending = False
-                    return _complete_or_park(change, state, log, coordinator)
+                    return _complete_or_park(quest, state, log, coordinator)
                 if target_idx <= idx:                            # backward OR self → loop-counted
                     n = state.loop_counts.get(step.name, 0) + 1
                     state.loop_counts[step.name] = n
                     if n > step.max_loops and not coordinator.should_pause:
-                        _evict_if_holding(change, state, log)
+                        _evict_if_holding(quest, state, log)
                         state.status = "paused"
-                        state.save(change.state_dir)
+                        state.save(quest.state_dir)
                         _emit_paused_event(log, "max_loops", step=step.name)
                         return RunResult.PAUSED
                 else:
                     state.loop_counts.pop(step.name, None)       # forward goto resets
                 state.step = flat[target_idx].name
                 state.step_label = (
-                    render_label(flat[target_idx].label, change, log, state)
+                    render_label(flat[target_idx].label, quest, log, state)
                     or flat[target_idx].name
                 )
                 state.phase_label = (
-                    render_label(flat[target_idx].phase_label, change, log, state)
+                    render_label(flat[target_idx].phase_label, quest, log, state)
                     if flat[target_idx].phase_label is not None else None
                 )
                 if action.resume:
@@ -581,13 +581,13 @@ async def run_quest(
                 if state.held_lane is not None:
                     state.lane_retained = True
                 else:
-                    _evict_if_holding(change, state, log)
+                    _evict_if_holding(quest, state, log)
                 state.status = "paused"
-                state.save(change.state_dir)
+                state.save(quest.state_dir)
                 _emit_paused_event(
                     log, "interrupt", interrupt_reason=coordinator.pause_reason)
                 return RunResult.PAUSED
-            state.save(change.state_dir)
+            state.save(quest.state_dir)
     except Exception as exc:
         # Last-resort guard: except Exception (not BaseException) pauses resumably on an
         # engine bug, letting anyio cancellation / Ctrl-C propagate.
@@ -610,7 +610,7 @@ async def run_quest(
             _emit_paused_event(log, "internal_error", kind=kind)
             state.resume_pending = state.step
             state.status = "paused"
-            state.save(change.state_dir)
+            state.save(quest.state_dir)
         except Exception:
             # Best-effort: if the emit/save fails (or log/state was never bound), re-raise
             # the original (from None) so daemon.stderr surfaces it, not a spurious
@@ -624,11 +624,11 @@ async def run_quest(
         try:
             os.chdir(prev_cwd)
         except OSError:
-            os.chdir(change.control_root)
+            os.chdir(quest.control_root)
 
 
 def _complete_or_park(
-    change: Quest, state: State, log: EventLog, coordinator: Any,
+    quest: Quest, state: State, log: EventLog, coordinator: Any,
 ) -> RunResult:
     """Navigation ran off the end. Normally finalize via _complete(); but an
     in-flight interrupt parks at completion instead (§3): set completion_pending,
@@ -639,13 +639,13 @@ def _complete_or_park(
     if coordinator.should_pause:
         state.completion_pending = True
         state.status = "paused"
-        state.save(change.state_dir)
+        state.save(quest.state_dir)
         _emit_paused_event(log, "interrupt", interrupt_reason=coordinator.pause_reason)
         return RunResult.PAUSED
-    return _complete(change, state, log)
+    return _complete(quest, state, log)
 
 
-def _complete(change: Quest, state: State, log: EventLog) -> RunResult:
+def _complete(quest: Quest, state: State, log: EventLog) -> RunResult:
     """Terminal handler. Two paths:
     - No merge happened (merge-to-base was never reached, or the gate never set
       it): mark completed, drop steps/, COMPLETED — unchanged legacy behaviour.
@@ -670,26 +670,26 @@ def _complete(change: Quest, state: State, log: EventLog) -> RunResult:
     state.route_label = None
     from imp.engine import merge_queue
     if not state.merge_commit:
-        merge_queue.pop_and_wake(change.control_root, change.id, change.base_branch)
+        merge_queue.pop_and_wake(quest.control_root, quest.id, quest.base_branch)
         state.status = "completed"
-        state.save(change.state_dir)
+        state.save(quest.state_dir)
         _emit(log, "workflow_completed", {})
-        shutil.rmtree(change.quest_dir / "steps", ignore_errors=True)
+        shutil.rmtree(quest.quest_dir / "steps", ignore_errors=True)
         return RunResult.COMPLETED
 
     state.status = "completed"
-    state.save(change.state_dir)
+    state.save(quest.state_dir)
     _emit(log, "change_merged",
-          {"base": change.base_branch, "commit": state.merge_commit})
-    merge_queue.pop_and_wake(change.control_root, change.id, change.base_branch)
+          {"base": quest.base_branch, "commit": state.merge_commit})
+    merge_queue.pop_and_wake(quest.control_root, quest.id, quest.base_branch)
     from imp.engine import archive
     archive.archive_quest(
-        change.control_root, change.id,
-        events_path=change.events_path,
-        quest_json_path=change.quest_dir / "quest.json",
-        state_json_path=change.state_dir / "state.json",
+        quest.control_root, quest.id,
+        events_path=quest.events_path,
+        quest_json_path=quest.quest_dir / "quest.json",
+        state_json_path=quest.state_dir / "state.json",
     )
-    shutil.rmtree(change.quest_dir, ignore_errors=True)
+    shutil.rmtree(quest.quest_dir, ignore_errors=True)
     return RunResult.COMPLETED
 
 
@@ -707,7 +707,7 @@ def _apply_readonly_overlay(policy: Any, step: Step, project_root: Path) -> Any:
 
 
 async def _dispatch_step(
-    step: Step, workflow: Workflow, change: Quest,
+    step: Step, workflow: Workflow, quest: Quest,
     state: State, log: EventLog, *, is_resume: bool,
     user_chat_input_fn: Callable[[str], str | Awaitable[str]] | None,
     coordinator: Any,
@@ -727,27 +727,27 @@ async def _dispatch_step(
     if fb is not None and fb.get("target_step") == step.name:
         wrapper_text = fb.get("text")
         state.retry_feedback = None
-        state.save(change.state_dir)
+        state.save(quest.state_dir)
 
     if step.release is not None:
-        _release_lane(step, change, state, log)
+        _release_lane(step, quest, state, log)
     if step.acquire is not None and step.acquire != "test-lane":
-        return await _route_acquire(step, change, state, log, wait_for_turn_fn)
+        return await _route_acquire(step, quest, state, log, wait_for_turn_fn)
 
-    sandbox_policy = _apply_readonly_overlay(sandbox_policy, step, change.project_root)
+    sandbox_policy = _apply_readonly_overlay(sandbox_policy, step, quest.project_root)
 
     if step.kind == "branch":
-        return _route_branch(step, change, state, log)
+        return _route_branch(step, quest, state, log)
     if step.kind == "merge_and_exit_worktree":
-        return await _route_merge_and_exit_worktree(step, change, state, log)
+        return await _route_merge_and_exit_worktree(step, quest, state, log)
     if step.kind == "script":
-        return await _route_script(step, change, state, log,
+        return await _route_script(step, quest, state, log,
                                    test_gates=test_gates,
                                    sandbox_policy=sandbox_policy,
                                    max_parallel_test_runs=max_parallel_test_runs,
                                    coordinator=coordinator)
     return await _route_agent(
-        step, workflow, change, state, log,
+        step, workflow, quest, state, log,
         user_chat_input_fn=user_chat_input_fn, coordinator=coordinator,
         wrapper_text=wrapper_text, is_resume=is_resume, test_gates=test_gates,
         headless=headless,
@@ -758,12 +758,12 @@ async def _dispatch_step(
 
 def _step_started_payload(
     step: Step, state: State,
-    change: Quest | None = None, log: EventLog | None = None,
+    quest: Quest | None = None, log: EventLog | None = None,
 ) -> dict[str, Any]:
     payload = {"step": step.name, "kind": step.kind, "phase": step.phase,
                "show_label": step.show_label,
                "show_output": step.show_output,
-               "label": render_label(step.label, change, log, state)}
+               "label": render_label(step.label, quest, log, state)}
     rotate = step.rotate_phrase if step.rotate_phrase is not None else step.interactive
     if rotate:
         payload["rotate_phrase"] = True
@@ -772,7 +772,7 @@ def _step_started_payload(
     if step.position_label:
         payload["position_label"] = True
     if step.phase_label is not None:
-        payload["phase_label"] = render_label(step.phase_label, change, log, state)
+        payload["phase_label"] = render_label(step.phase_label, quest, log, state)
     if not step.phase_show_label:
         payload["phase_show_label"] = False
     # Consume-on-read: transfer route_label from the prior step's _finish, then clear it.
@@ -783,19 +783,19 @@ def _step_started_payload(
 
 
 def _emit_started(
-    log: EventLog, step: Step, state: State, change: Quest, **extra: Any,
+    log: EventLog, step: Step, state: State, quest: Quest, **extra: Any,
 ) -> dict[str, Any]:
     return _emit(log, "step_started",
-                 {**_step_started_payload(step, state, change, log), **extra},
+                 {**_step_started_payload(step, state, quest, log), **extra},
                  agent_id=None)
 
 
 def _harvest_artifacts(
-    change: Quest, step: Step, warn: Callable[[str], None] | None = None
+    quest: Quest, step: Step, warn: Callable[[str], None] | None = None
 ) -> None:
     """Journal quest_dir/artifacts/** to the change's artifact ref (no-op if none)."""
     from imp.engine import worktree
-    art_root = change.quest_dir / "artifacts"
+    art_root = quest.quest_dir / "artifacts"
     if not art_root.is_dir():
         return
     files = {
@@ -803,19 +803,19 @@ def _harvest_artifacts(
         for p in sorted(art_root.rglob("*")) if p.is_file()
     }
     worktree.artifact_commit(
-        change.control_root, change.id, files,
+        quest.control_root, quest.id, files,
         message=f"artifact: {step.name}", warn=warn)
 
 
 def _finish(
-    log: EventLog, step: Step, change: Quest, match: Any, state: State
+    log: EventLog, step: Step, quest: Quest, match: Any, state: State
 ) -> tuple[Action, str | None, dict[str, object]]:
     def _warn(msg: str) -> None:
         _emit(log, "warning",
               {"source": "artifact_harvest", "message": msg, "detail": {}})
     # except Exception, not BaseException: lets CancelledError / Ctrl-C propagate.
     try:
-        _harvest_artifacts(change, step, warn=_warn)
+        _harvest_artifacts(quest, step, warn=_warn)
     except Exception as e:
         msg, extras = summarize_exception(e)
         _emit(log, "warning",
@@ -832,12 +832,12 @@ def _finish(
 
 
 def _route_branch(
-    step: Step, change: Quest, state: State, log: EventLog
+    step: Step, quest: Quest, state: State, log: EventLog
 ) -> tuple[Action, str | None, dict[str, object]]:
-    _emit_started(log, step, state, change)
+    _emit_started(log, step, state, quest)
     match = evaluate_rules(step.rules, vars=state.vars, output=None)
     state.vars.update(match.var_mutations)
-    return _finish(log, step, change, match, state)            # branch goto carries NO feedback
+    return _finish(log, step, quest, match, state)            # branch goto carries NO feedback
 
 
 class ScriptOutputError(Exception):
@@ -863,21 +863,21 @@ def _read_script_output(output_path: Path, schema: OutputSchema) -> dict[str, An
 
 
 async def _route_script(
-    step: Step, change: Quest, state: State, log: EventLog,
+    step: Step, quest: Quest, state: State, log: EventLog,
     *, test_gates: TestGates | None = None,
     sandbox_policy: Any = None,
     max_parallel_test_runs: int = 1,
     coordinator: Any = None,
 ) -> tuple[Action, str | None, dict[str, object]]:
-    _emit_started(log, step, state, change)
+    _emit_started(log, step, state, quest)
     command = step.command
     assert command is not None, "script step must have a command"
     if "{{" in command:
         command = render_prompt(command, build_context(
-            quest_title=change.title, event_log=log,
-            quest_id=change.id, quest_home=f".imp/quests/{change.id}",
-            cur_base_head=change.cur_base_head,
-            orig_base_head=change.orig_base_head, vars=state.vars,
+            quest_title=quest.title, event_log=log,
+            quest_id=quest.id, quest_home=f".imp/quests/{quest.id}",
+            cur_base_head=quest.cur_base_head,
+            orig_base_head=quest.orig_base_head, vars=state.vars,
         ))
     # The script gate's subprocess runs to completion under a blocking
     # proc.communicate() (gates.run_script). Offload it to a worker thread so the
@@ -902,20 +902,20 @@ async def _route_script(
     slot_fd: int | None = None
     try:
         if step.acquire == "test-lane":
-            slot_fd = _test_lane.try_acquire(change.control_root, max_parallel_test_runs)
+            slot_fd = _test_lane.try_acquire(quest.control_root, max_parallel_test_runs)
             if slot_fd is None:
                 _emit(log, "waiting_for_test_lane", {"step": step.name})
                 slot_fd = await anyio.to_thread.run_sync(
                     functools.partial(_test_lane.acquire_blocking,
-                                      change.control_root, max_parallel_test_runs))
+                                      quest.control_root, max_parallel_test_runs))
                 _emit(log, "test_lane_acquired", {"step": step.name})
         out = await anyio.to_thread.run_sync(
             functools.partial(
-                run_script, step, cwd=change.workflow_dir,
-                env_extra=engine_env(project_root=change.project_root,
-                                     quest_id=change.id,
-                                     quest_title=change.title,
-                                     quest_dir=change.quest_dir,
+                run_script, step, cwd=quest.workflow_dir,
+                env_extra=engine_env(project_root=quest.project_root,
+                                     quest_id=quest.id,
+                                     quest_title=quest.title,
+                                     quest_dir=quest.quest_dir,
                                      output_path=output_path,
                                      test_gates=test_gates),
                 policy=sandbox_policy, command=command, abort=abort))
@@ -924,7 +924,7 @@ async def _route_script(
             try:
                 out = {**out, **_read_script_output(output_path, step.output_schema)}
             except ScriptOutputError as e:
-                _finish(log, step, change,
+                _finish(log, step, quest,
                         RuleMatch(action=Pause(reason="script_blocked"),
                                   rule=None, var_mutations={}), state)
                 _emit(log, "script_blocked", {
@@ -942,7 +942,7 @@ async def _route_script(
         _emit(log, "script_output", {"step": step.name, "stdout": out["stdout"]})
     match = evaluate_rules(step.rules, vars=state.vars, output=out)
     state.vars.update(match.var_mutations)
-    action, _, muts = _finish(log, step, change, match, state)
+    action, _, muts = _finish(log, step, quest, match, state)
     feedback = None
     if isinstance(action, Goto):
         # exit-0 Goto is a success forward-route; only non-zero exit is a failure-retry.
@@ -988,14 +988,14 @@ async def _headless_wait_for_turn(predicate: Callable[[], bool]) -> None:
     raise AwaitingUserInput()
 
 
-def _resolve_lane(value: str, change: Quest) -> str:
+def _resolve_lane(value: str, quest: Quest) -> str:
     if value == "merge-lane":
-        return change.base_branch
+        return quest.base_branch
     raise RuntimeError(f"unknown lane keyword {value!r}")
 
 
 async def _route_acquire(
-    step: Step, change: Quest, state: State, log: EventLog,
+    step: Step, quest: Quest, state: State, log: EventLog,
     wait_for_turn_fn: Callable[[Callable[[], bool]], Awaitable[None]] | None,
 ) -> tuple[Action, str | None, dict[str, object]]:
     """Enqueue in lane; proceed as head, marking the hold; hibernate if unattended non-head."""
@@ -1004,21 +1004,21 @@ async def _route_acquire(
     if wait_for_turn_fn is None:
         raise RuntimeError("wait_for_turn_fn is required for acquire steps")
     assert step.acquire is not None
-    lane = _resolve_lane(step.acquire, change)
-    _emit_started(log, step, state, change)
-    merge_queue.enqueue_if_absent(change.control_root, change.id, lane)
+    lane = _resolve_lane(step.acquire, quest)
+    _emit_started(log, step, state, quest)
+    merge_queue.enqueue_if_absent(quest.control_root, quest.id, lane)
 
     def _is_head() -> bool:
-        return merge_queue.is_head(change.control_root, change.id, lane)
+        return merge_queue.is_head(quest.control_root, quest.id, lane)
 
     if not _is_head():
-        ahead = merge_queue.position(change.control_root, change.id, lane)
+        ahead = merge_queue.position(quest.control_root, quest.id, lane)
         _emit(log, "lane_waiting", {"base": lane, "ahead": ahead})
         last_ahead = ahead
 
         def _poll_turn() -> bool:
             nonlocal last_ahead
-            current = merge_queue.position(change.control_root, change.id, lane)
+            current = merge_queue.position(quest.control_root, quest.id, lane)
             if current != last_ahead:
                 _emit(log, "lane_waiting", {"base": lane, "ahead": current})
                 last_ahead = current
@@ -1035,40 +1035,40 @@ async def _route_acquire(
 
     state.held_lane = lane
     state.held_acquire_step = step.name
-    state.save(change.state_dir)
+    state.save(quest.state_dir)
     _emit(log, "lane_acquired", {"base": lane, "step": step.name, "glyph": step.glyph})
     match = evaluate_rules(step.rules, vars=state.vars, output=None)
     state.vars.update(match.var_mutations)
-    return _finish(log, step, change, match, state)
+    return _finish(log, step, quest, match, state)
 
 
 def _release_held_lane(
-    lane_keyword: str, change: Quest, state: State, log: EventLog, *, step_name: str,
+    lane_keyword: str, quest: Quest, state: State, log: EventLog, *, step_name: str,
 ) -> None:
     """Pop the held lane and clear the hold mark, waking the next head."""
     from imp.engine import merge_queue
-    lane = _resolve_lane(lane_keyword, change)
-    merge_queue.pop_and_wake(change.control_root, change.id, lane)
+    lane = _resolve_lane(lane_keyword, quest)
+    merge_queue.pop_and_wake(quest.control_root, quest.id, lane)
     state.held_lane = None
     state.held_acquire_step = None
-    state.save(change.state_dir)
+    state.save(quest.state_dir)
     _emit(log, "lane_released", {"base": lane, "step": step_name})
 
 
-def _release_lane(step: Step, change: Quest, state: State, log: EventLog) -> None:
+def _release_lane(step: Step, quest: Quest, state: State, log: EventLog) -> None:
     """Pop the lane before the step body, clearing the hold mark."""
     assert step.release is not None
-    _release_held_lane(step.release, change, state, log, step_name=step.name)
+    _release_held_lane(step.release, quest, state, log, step_name=step.name)
 
 
-def _evict_if_holding(change: Quest, state: State, log: EventLog) -> bool:
+def _evict_if_holding(quest: Quest, state: State, log: EventLog) -> bool:
     """Release a held lane on pause/crash and rewind the resume cursor to the acquiring step."""
     if state.held_lane is None:
         return False
     from imp.engine import merge_queue
     lane = state.held_lane
     acquire_step = state.held_acquire_step
-    merge_queue.pop_and_wake(change.control_root, change.id, lane)
+    merge_queue.pop_and_wake(quest.control_root, quest.id, lane)
     state.held_lane = None
     state.held_acquire_step = None
     state.step = acquire_step
@@ -1077,20 +1077,20 @@ def _evict_if_holding(change: Quest, state: State, log: EventLog) -> bool:
     return True
 
 
-def _exit_worktree(change: Quest) -> None:
+def _exit_worktree(quest: Quest) -> None:
     """Idempotent: remove_worktree(force=True) tolerates an already-absent worktree."""
     from imp.engine import worktree
-    worktree.remove_worktree(change.control_root, change.id, force=True)
-    if change.project_root != change.control_root:
-        change.set_project_root(change.control_root)
+    worktree.remove_worktree(quest.control_root, quest.id, force=True)
+    if quest.project_root != quest.control_root:
+        quest.set_project_root(quest.control_root)
 
 
 def _merge_blocked_pause(
-    log: EventLog, step: Step, change: Quest, status: str, detail: str | None,
+    log: EventLog, step: Step, quest: Quest, status: str, detail: str | None,
     *, note: str | None = None,
 ) -> tuple[Action, str | None, dict[str, object]]:
     reason = "worktree_dirty" if status == "DIRTY" else status.lower()
-    payload: dict[str, Any] = {"reason": reason, "base": change.base_branch, "detail": detail}
+    payload: dict[str, Any] = {"reason": reason, "base": quest.base_branch, "detail": detail}
     if note is not None:
         payload["note"] = note
     _emit(log, "merge_blocked", payload)
@@ -1102,28 +1102,28 @@ def _merge_blocked_pause(
 
 
 async def _route_merge_and_exit_worktree(
-    step: Step, change: Quest, state: State, log: EventLog,
+    step: Step, quest: Quest, state: State, log: EventLog,
 ) -> tuple[Action, str | None, dict[str, object]]:
     from imp.engine import worktree
-    _emit_started(log, step, state, change)
+    _emit_started(log, step, state, quest)
 
     if state.merge_commit:
-        _exit_worktree(change)
+        _exit_worktree(quest)
         match = evaluate_rules(step.rules, vars=state.vars, output={"merge": "MERGED"})
         state.vars.update(match.var_mutations)
-        return _finish(log, step, change, match, state)
+        return _finish(log, step, quest, match, state)
 
-    spec_path = change.quest_dir / "artifacts" / "spec" / f"{change.id}.md"
+    spec_path = quest.quest_dir / "artifacts" / "spec" / f"{quest.id}.md"
     body = _decisions_body(spec_path)
     result = await anyio.to_thread.run_sync(
         functools.partial(
             worktree.merge_to_base,
-            change.control_root, change.id, change.base_branch, title=change.title,
-            body=body, project_root=change.project_root))
+            quest.control_root, quest.id, quest.base_branch, title=quest.title,
+            body=body, project_root=quest.project_root))
     if result.status == "MERGED":
         state.merge_commit = result.merge_commit
-        state.save(change.state_dir)
-        _exit_worktree(change)
+        state.save(quest.state_dir)
+        _exit_worktree(quest)
 
     match = evaluate_rules(step.rules, vars=state.vars, output={"merge": result.status})
 
@@ -1133,26 +1133,26 @@ async def _route_merge_and_exit_worktree(
             note = (f"imp attempted {step.max_loops} recovery passes and the "
                     "merge still failed.")
             return _merge_blocked_pause(
-                log, step, change, result.status, result.detail, note=note)
+                log, step, quest, result.status, result.detail, note=note)
         _emit(log, "merge_retry",
               {"status": result.status, "attempt": attempt + 1,
-               "max": step.max_loops, "base": change.base_branch})
+               "max": step.max_loops, "base": quest.base_branch})
         state.vars.update(match.var_mutations)
-        action, _, muts = _finish(log, step, change, match, state)
+        action, _, muts = _finish(log, step, quest, match, state)
         # _finish hardcodes its feedback element to None; thread the rule's own
         # feedback so a DIRTY route's preamble reaches the reconciler (mirrors the
         # agent route).
         return action, match.action.feedback, muts
 
     if isinstance(match.action, Pause):               # REFUSED or any other status
-        return _merge_blocked_pause(log, step, change, result.status, result.detail)
+        return _merge_blocked_pause(log, step, quest, result.status, result.detail)
 
     state.vars.update(match.var_mutations)
-    return _finish(log, step, change, match, state)
+    return _finish(log, step, quest, match, state)
 
 
 def _enforce_clean_tree(
-    step: Step, change: Quest, state: State, log: EventLog,
+    step: Step, quest: Quest, state: State, log: EventLog,
 ) -> tuple[Action, str | None, dict[str, object]] | None:
     """Post-step clean-tree invariant: None to proceed to rules, else a
     bounce-or-pause (action, feedback, muts) tuple."""
@@ -1164,11 +1164,11 @@ def _enforce_clean_tree(
     # test root) => the invariant does not apply. The is_worktree guard also
     # keeps the hook from raising `git status` on a non-repo path.
     if (not step.clean_tree
-            or change.project_root == change.control_root
-            or not worktree.is_worktree(change.project_root)):
+            or quest.project_root == quest.control_root
+            or not worktree.is_worktree(quest.project_root)):
         state.clean_tree_bounces.pop(key, None)
         return None
-    paths = worktree.uncommitted_paths(change.project_root)
+    paths = worktree.uncommitted_paths(quest.project_root)
     if not paths:
         state.clean_tree_bounces.pop(key, None)
         return None
@@ -1188,12 +1188,12 @@ def _enforce_clean_tree(
     _emit(log, "step_completed",
           {"step": step.name, "kind": "agent",
            "action": _action_payload(action), "var_mutations": {}})
-    state.save(change.state_dir)
+    state.save(quest.state_dir)
     return action, format_clean_tree_feedback(paths), {}
 
 
 async def _route_agent(
-    step: Step, workflow: Workflow, change: Quest,
+    step: Step, workflow: Workflow, quest: Quest,
     state: State, log: EventLog, *,
     user_chat_input_fn: Callable[[str], str | Awaitable[str]] | None,
     coordinator: Any, wrapper_text: str | None, is_resume: bool,
@@ -1209,7 +1209,7 @@ async def _route_agent(
     # _v_agent_has_file rejects inline prompt: agents this milestone.
     assert step.file is not None, "agent step must have a file this milestone"
     agent_def = workflow.agents[step.file.stem]
-    transcript_dir = change.quest_dir / "steps" / step.phase / step.name
+    transcript_dir = quest.quest_dir / "steps" / step.phase / step.name
 
     # Keep (replay) the transcript on every `resume:` entry that has a non-empty
     # one. A transcript that ended before complete_step is replayed and
@@ -1244,7 +1244,7 @@ async def _route_agent(
         initial = ()
 
     state.current_step = CurrentStep(transcript_dir=transcript_dir)
-    state.save(change.state_dir)
+    state.save(quest.state_dir)
 
     backoff = 0
     cumulative_backoff = 0.0
@@ -1253,10 +1253,10 @@ async def _route_agent(
         result = await _run_agent_invocation(
             agent_id=f"step:{step.phase}/{step.name}", agent_def=agent_def,
             tier=step.tier, step_name=step.name,
-            workflow=workflow, change=change, state=state, log=log,
+            workflow=workflow, quest=quest, state=state, log=log,
             transcript_dir=transcript_dir,
             step_started_payload_extras={
-                **_step_started_payload(step, state, change, log),
+                **_step_started_payload(step, state, quest, log),
                 "resumed": is_resume, "restarted": restarted},
             user_chat_input_fn=user_chat_input_fn,
             coordinator=coordinator, prior_backoff_attempts=backoff,
@@ -1305,7 +1305,7 @@ async def _route_agent(
         backoff += 1
         # Persist before sleep so a kill/crash during backoff leaves the intent on disk.
         state.retry_continue_pending = True
-        state.save(change.state_dir)
+        state.save(quest.state_dir)
         # Self-healed-retry visibility (agent_retry): surface the backoff so a
         # transient network/rate_limit error that recovers doesn't look like a
         # failure. category comes from the plumbed ErrorInfo.
@@ -1332,7 +1332,7 @@ async def _route_agent(
             # AWAITING_USER resume delivers a reply to). Mirrors the resume:
             # edge's marker; cleared on the next forward Continue.
             state.resume_pending = state.step
-            state.save(change.state_dir)
+            state.save(quest.state_dir)
         # A genuine your-turn yield gets its own reason so it stops sharing the
         # "interrupt" token; a real interrupt (interrupt=True) or a
         # subagent-suspend unwind (awaiting_user=False) keeps reason=None and
@@ -1366,7 +1366,7 @@ async def _route_agent(
                 stashed_dir=stashed,
                 handoff_path=hp if note_exists else None)
             return await _route_agent(
-                step, workflow, change, state, log,
+                step, workflow, quest, state, log,
                 user_chat_input_fn=user_chat_input_fn, coordinator=coordinator,
                 wrapper_text=wrapper_text, is_resume=False,
                 test_gates=test_gates, headless=headless,
@@ -1392,7 +1392,7 @@ async def _route_agent(
               {"reason": "context window exceeded"}, agent_id=None)
         seed = reincarnation_seed(stashed_dir=stashed, handoff_path=None)
         return await _route_agent(
-            step, workflow, change, state, log,
+            step, workflow, quest, state, log,
             user_chat_input_fn=user_chat_input_fn, coordinator=coordinator,
             wrapper_text=wrapper_text, is_resume=False,
             test_gates=test_gates, headless=headless,
@@ -1425,7 +1425,7 @@ async def _route_agent(
                   {"step": step.name, "kind": "agent",
                    "action": _action_payload(on_max), "var_mutations": {}})
             return on_max, None, {}     # Pause (validator forbids Retry here)
-        return await _route_agent(step, workflow, change, state, log,
+        return await _route_agent(step, workflow, quest, state, log,
                                   user_chat_input_fn=user_chat_input_fn,
                                   coordinator=coordinator, wrapper_text=wrapper_text,
                                   is_resume=is_resume, test_gates=test_gates,
@@ -1436,15 +1436,15 @@ async def _route_agent(
                                   project_facts=project_facts, guidance=guidance)
 
     state.step_attempt = 0
-    _record_outcome(state, step.name, result.output, _worktree_head(change))
-    bounce = _enforce_clean_tree(step, change, state, log)
+    _record_outcome(state, step.name, result.output, _worktree_head(quest))
+    bounce = _enforce_clean_tree(step, quest, state, log)
     if bounce is not None:
         return bounce
     match = evaluate_rules(step.rules, vars=state.vars, output=result.output)
     state.vars.update(match.var_mutations)
     state.current_step = None
-    state.save(change.state_dir)
-    action, _, muts = _finish(log, step, change, match, state)
+    state.save(quest.state_dir)
+    action, _, muts = _finish(log, step, quest, match, state)
     feedback = None
     if isinstance(action, Goto) and action.feedback is not None:
         feedback = f"{action.feedback}\n{render_output_fields(result.output)}"
@@ -1469,7 +1469,7 @@ async def _run_agent_invocation(
     tier: str,
     step_name: str,
     workflow: Workflow,
-    change: Quest,
+    quest: Quest,
     state: State,
     log: EventLog,
     transcript_dir: Any,
@@ -1516,10 +1516,10 @@ async def _run_agent_invocation(
         system_prompt_override: str | None = stored
     else:
         ctx = build_context(
-            quest_id=change.id, quest_title=change.title,
-            quest_home=f".imp/quests/{change.id}",
-            cur_base_head=change.cur_base_head,
-            orig_base_head=change.orig_base_head,
+            quest_id=quest.id, quest_title=quest.title,
+            quest_home=f".imp/quests/{quest.id}",
+            cur_base_head=quest.cur_base_head,
+            orig_base_head=quest.orig_base_head,
             event_log=log, vars=state.vars,
             project_facts=project_facts,
             autonomous=autonomous, opening=opening,
@@ -1527,10 +1527,10 @@ async def _run_agent_invocation(
         )
         rendered = render_prompt(
             agent_def.prompt_template_source, ctx,
-            workflow_dir=change.workflow_dir,
+            workflow_dir=quest.workflow_dir,
         )
         rendered_persona = render_prompt(
-            workflow.persona_source, ctx, workflow_dir=change.workflow_dir,
+            workflow.persona_source, ctx, workflow_dir=quest.workflow_dir,
         ) if workflow.persona_source else ""
         system_prompt_override = None
 
@@ -1566,22 +1566,22 @@ async def _run_agent_invocation(
         system_prompt_override=system_prompt_override,
         initial_messages=initial_messages,
         quest_context=QuestContext(
-            id=change.id, title=change.title,
-            quest_home=f".imp/quests/{change.id}",
-            project_root=change.project_root, workflow_dir=change.workflow_dir,
+            id=quest.id, title=quest.title,
+            quest_home=f".imp/quests/{quest.id}",
+            project_root=quest.project_root, workflow_dir=quest.workflow_dir,
             project_facts=project_facts or {}, guidance=guidance,
             persona_source=workflow.persona_source,
         ),
         user_chat_input_fn=user_chat_input_fn,
         transcript_dir=transcript_dir,
-        events_path=change.events_path,
+        events_path=quest.events_path,
         subagent_defs=subagent_defs,
         tiers=tuple(state.resolved_tiers.keys()) if state.resolved_tiers else (),
         max_tool_calls=resolved_max_tool_calls,
         agent_id=agent_id,
         event_log=log,
         change_state=state,
-        change=change,
+        quest=quest,
         first_event_parent_id=started["id"],
         resolved_tiers=state.resolved_tiers,
         coordinator=coordinator,
@@ -1631,7 +1631,7 @@ def _emit_paused_event(
     _emit(log, "workflow_paused", payload)
 
 
-def _build_sandbox_policy(change: Quest, config: Any, log: EventLog) -> Any:
+def _build_sandbox_policy(quest: Quest, config: Any, log: EventLog) -> Any:
     """Resolve the SandboxPolicy for the current spawn point (IMP_* are
     change-stable, but project_root can flip on go-live, triggering a rebuild).
     Emit a durable posture event; on a hard-fail posture, emit + re-raise so the
@@ -1639,17 +1639,17 @@ def _build_sandbox_policy(change: Quest, config: Any, log: EventLog) -> Any:
     cfg = sandbox_config_from_raw(config.sandbox or {})
     eng = overlay_engine_env(
         os.environ,
-        engine_env(project_root=change.project_root, quest_id=change.id,
-                   quest_title=change.title,
-                   quest_dir=change.quest_dir,
+        engine_env(project_root=quest.project_root, quest_id=quest.id,
+                   quest_title=quest.title,
+                   quest_dir=quest.quest_dir,
                    test_gates=TestGates.from_config(config)),
     )
     try:
         policy = resolve_policy(
-            worktree=change.project_root, control_root=change.control_root,
-            quest_id=change.id, cfg=cfg, engine_env_result=eng,
+            worktree=quest.project_root, control_root=quest.control_root,
+            quest_id=quest.id, cfg=cfg, engine_env_result=eng,
             environ=os.environ, available=sandbox_available(),
-            quest_dir=change.quest_dir,
+            quest_dir=quest.quest_dir,
         )
     except SandboxUnavailable as exc:
         _emit(log, "sandbox_unavailable", {"message": str(exc)}, agent_id=None)

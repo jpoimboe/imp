@@ -70,8 +70,8 @@ def _handled_signals() -> tuple[int, ...]:
     return (signal.SIGINT, *_leave_signals())
 
 
-def _open_pause_exists(change: Quest) -> bool:
-    for event in reversed(list(change.event_log().read())):
+def _open_pause_exists(quest: Quest) -> bool:
+    for event in reversed(list(quest.event_log().read())):
         etype = event.get("type")
         if etype == "workflow_paused":
             return True
@@ -80,7 +80,7 @@ def _open_pause_exists(change: Quest) -> bool:
     return False
 
 
-def pause_and_exit(change: Quest, *, reason: str) -> None:
+def pause_and_exit(quest: Quest, *, reason: str) -> None:
     """Save state as `paused` (from any active status; a terminal/blocked status
     in _PRESERVE_ON_PAUSE is left untouched) and append workflow_paused UNLESS the
     journal already holds an open pause (a workflow_paused with no intervening
@@ -88,16 +88,16 @@ def pause_and_exit(change: Quest, *, reason: str) -> None:
     clean-solicit-SIGINT (point A) and SIGTERM paths emit no engine pause, so the
     tail is not `paused` and they still append correctly."""
     try:
-        state = State.load(change.state_dir)
+        state = State.load(quest.state_dir)
         if state.status not in _PRESERVE_ON_PAUSE:
             state.status = "paused"
-            state.save(change.state_dir)
+            state.save(quest.state_dir)
     except FileNotFoundError:
         # State never reached the durable phase — nothing to update
         pass
-    if _open_pause_exists(change):
+    if _open_pause_exists(quest):
         return  # an open pause already exists in the journal; no dup append
-    change.event_log().append(
+    quest.event_log().append(
         agent_id=None, type="workflow_paused",
         payload={"reason": reason, "interrupt_reason": reason})
 

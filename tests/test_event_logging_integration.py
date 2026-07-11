@@ -60,15 +60,15 @@ def _make_change(root: Path, *, quest_id: str = "test-change", title: str = "t")
         status="running", vars=dict(workflow.vars.defaults()), loop_counts={},
     ).save(quest_dir / "state")
 
-    change = Quest(
+    quest = Quest(
         id=quest_id, title=title, base_branch="main",
         control_root=root, project_root=root, quest_dir=quest_dir,
     )
-    change.event_log().append(
+    quest.event_log().append(
         agent_id=None, type="change_created",
         payload={"id": quest_id, "title": title},
     )
-    return change
+    return quest
 
 # ── shared helpers ────────────────────────────────────────────────────────────
 
@@ -301,7 +301,7 @@ async def test_backward_goto_emits_step_started_each_iteration(tmp_path: Path) -
     (tmp_path / ".imp" / "config.yaml").write_text(
         "providers: [fake]\ntiers:\n  low: {fake: m}\n  medium: {fake: m}\n  high: {fake: m}\n"
     )
-    change = _make_change(tmp_path)
+    quest = _make_change(tmp_path)
 
     # Sequence: work succeeds, check → rework (goto work), work again, check → approve
     call_num = [0]
@@ -342,10 +342,10 @@ async def test_backward_goto_emits_step_started_each_iteration(tmp_path: Path) -
     )
 
     collected_events: list[dict] = []
-    result = await run_quest(change, on_event=collected_events.append)
+    result = await run_quest(quest, on_event=collected_events.append)
     assert result is RunResult.COMPLETED, f"expected COMPLETED, got {result}"
 
-    events = list(change.event_log().read())
+    events = list(quest.event_log().read())
 
     # Verify step_started events: work should appear twice, check should appear twice.
     started_steps = [

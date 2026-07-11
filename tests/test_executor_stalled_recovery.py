@@ -67,13 +67,13 @@ def _make_change(root: Path) -> Quest:
         status="running", vars=dict(workflow.vars.defaults()), loop_counts={},
     ).save(quest_dir / "state")
 
-    change = Quest(
+    quest = Quest(
         id="c", title="t", base_branch="main",
         control_root=root, project_root=root, quest_dir=quest_dir,
     )
-    change.event_log().append(
+    quest.event_log().append(
         agent_id=None, type="change_created", payload={"id": "c", "title": "t"})
-    return change
+    return quest
 
 
 class _StallNthRunner:
@@ -111,7 +111,7 @@ class _StallThenSucceedProvider:
 async def test_stalled_retries_with_backoff_without_burning_step_attempt(
     tmp_path: Path, provider_registry: Any, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    change = _make_change(tmp_path)
+    quest = _make_change(tmp_path)
 
     provider = _StallThenSucceedProvider(stalls=3)
     provider_registry("fake", env_check=lambda: True, factory=lambda _m: provider)
@@ -122,7 +122,7 @@ async def test_stalled_retries_with_backoff_without_burning_step_attempt(
     monkeypatch.setattr("imp.engine.executor._interruptible_sleep", _no_sleep)
 
     events: list[dict] = []
-    result = await run_quest(change, on_event=events.append)
+    result = await run_quest(quest, on_event=events.append)
 
     # max_retries=1: completing after THREE stalls is only possible on the
     # backoff path. The errored fallthrough (step_attempt += 1) would pause after
@@ -141,7 +141,7 @@ async def test_stalled_retries_with_backoff_without_burning_step_attempt(
         e["type"] == "error" and e["payload"].get("category") == "config"
         for e in events)
 
-    state = State.load(change.state_dir)
+    state = State.load(quest.state_dir)
     assert state.status == "completed"
     assert state.step_attempt == 0
 
@@ -158,7 +158,7 @@ class _AlwaysStallProvider:
 async def test_stalled_backoff_pauses_as_retry_ceiling_on_budget_exhaustion(
     tmp_path: Path, provider_registry: Any, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    change = _make_change(tmp_path)
+    quest = _make_change(tmp_path)
     provider_registry("fake", env_check=lambda: True, factory=lambda _m: _AlwaysStallProvider())
 
     async def _no_sleep(_delay: float, _coordinator: Any) -> None:
@@ -167,7 +167,7 @@ async def test_stalled_backoff_pauses_as_retry_ceiling_on_budget_exhaustion(
     monkeypatch.setattr("imp.engine.executor._interruptible_sleep", _no_sleep)
 
     events: list[dict] = []
-    result = await run_quest(change, on_event=events.append)
+    result = await run_quest(quest, on_event=events.append)
 
     # The loop terminates (no infinite retry) once cumulative backoff exceeds the
     # 1800s stalled budget, pausing as a generic ceiling — not the auth-only
@@ -178,6 +178,6 @@ async def test_stalled_backoff_pauses_as_retry_ceiling_on_budget_exhaustion(
     assert paused[0]["payload"]["reason"] == "retry_ceiling"
     assert paused[0]["payload"]["reason"] != "reauth_needed"
 
-    state = State.load(change.state_dir)
+    state = State.load(quest.state_dir)
     assert state.status == "paused"
     assert state.step_attempt == 0   # the backoff path never burned it

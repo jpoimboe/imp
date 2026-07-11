@@ -159,12 +159,12 @@ def build_context(
 
 
 def render_label(
-    label: str | None, change: Quest | None, log: EventLog | None,
+    label: str | None, quest: Quest | None, log: EventLog | None,
     state: State | None = None,
 ) -> str | None:
     if label is None or "{{" not in label:
         return label
-    if change is None or log is None:
+    if quest is None or log is None:
         # No change/log context (the State.step_label seed path): render with no
         # template context. A label that needs vars/change raises UndefinedError
         # under StrictUndefined and falls back to the raw template text.
@@ -174,10 +174,10 @@ def render_label(
             return label
     try:
         return render_prompt(label, build_context(
-            quest_title=change.title, event_log=log,
-            quest_id=change.id, quest_home=f".imp/quests/{change.id}",
-            cur_base_head=change.cur_base_head,
-            orig_base_head=change.orig_base_head,
+            quest_title=quest.title, event_log=log,
+            quest_id=quest.id, quest_home=f".imp/quests/{quest.id}",
+            cur_base_head=quest.cur_base_head,
+            orig_base_head=quest.orig_base_head,
             vars=state.vars if state is not None else {},
         ))
     except PromptRenderError:

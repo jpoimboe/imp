@@ -32,7 +32,7 @@ def render_roster(
 
 
 def print_model_roster(
-    *, change: Any, output_fn: Callable[[str], None],
+    *, quest: Any, output_fn: Callable[[str], None],
 ) -> None:
     """Bare /model: print the current step's model and the discovered roster."""
     from imp.engine.loader import load_workflow
@@ -42,12 +42,12 @@ def print_model_roster(
     from imp.providers.effective import load_effective_config
     from imp.providers.model_roster import discover_roster
 
-    state = State.load(change.state_dir)
+    state = State.load(quest.state_dir)
     config = load_effective_config(
-        project_root=change.project_root, control_root=change.control_root,
+        project_root=quest.project_root, control_root=quest.control_root,
     ).config
     workflow = load_workflow(
-        change.workflow_dir,
+        quest.workflow_dir,
         project_keys=frozenset(state.project_facts or {}),
     )
     assert state.step is not None
@@ -58,11 +58,11 @@ def print_model_roster(
         output_fn(line)
 
 
-def _available_for_change(change: Any) -> list[str]:
+def _available_for_change(quest: Any) -> list[str]:
     from imp.providers.effective import load_effective_config
     from imp.providers.resolve import available_providers
     config = load_effective_config(
-        project_root=change.project_root, control_root=change.control_root,
+        project_root=quest.project_root, control_root=quest.control_root,
     ).config
     return available_providers(config)
 
@@ -74,9 +74,9 @@ def validate_model_available(arg: str, *, available: list[str]) -> str | None:
     return None
 
 
-def validate_model_arg(arg: str, *, change: Any) -> str | None:
+def validate_model_arg(arg: str, *, quest: Any) -> str | None:
     try:
         parse_model_arg(arg)
     except ModelArgError as exc:
         return str(exc)
-    return validate_model_available(arg, available=_available_for_change(change))
+    return validate_model_available(arg, available=_available_for_change(quest))

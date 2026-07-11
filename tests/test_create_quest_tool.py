@@ -23,7 +23,7 @@ def _make(tmp_path: Path) -> tuple[Quest, State]:
 def _ctx(ch: Quest, state: State | None) -> ToolContext:
     ctx = ToolContext(project_root=ch.project_root,
                       events_path=ch.events_path)
-    ctx.change = ch
+    ctx.quest = ch
     ctx.change_state = state
     ctx.event_log = ch.event_log()
     ctx.agent_id = "step:finalize"

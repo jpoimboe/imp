@@ -13,7 +13,7 @@ from tests.conftest import _git, _seed_control
 def _ctx(ch: Quest, state: State) -> ToolContext:
     ctx = ToolContext(project_root=ch.project_root,
                       events_path=ch.events_path)
-    ctx.change = ch
+    ctx.quest = ch
     ctx.change_state = state
     return ctx
 
@@ -64,7 +64,7 @@ def test_tool_from_subagent_raises(tmp_path: Path) -> None:
     ch = Quest.create_draft(tmp_path, title="X", quest_id="t4", base_branch="main")
     ctx = ToolContext(project_root=ch.project_root,
                       events_path=ch.events_path)
-    ctx.change = ch
+    ctx.quest = ch
     ctx.change_state = None                               # subagent: no go-live authority
     tool = get_registry()["create_and_enter_worktree"]
     with pytest.raises(RuntimeError):

@@ -25,7 +25,7 @@ def test_complete_after_merge_pops_self_and_wakes_next(tmp_path, monkeypatch) ->
 
     woken: list = []
     monkeypatch.setattr(attach_mod, "spawn_session_daemon",
-                        lambda change, **kw: woken.append((change.id, kw.get("resume"))))
+                        lambda quest, **kw: woken.append((quest.id, kw.get("resume"))))
 
     state = State.load(a.state_dir)
     state.merge_commit = "deadbeef"                      # mark the merge already durable

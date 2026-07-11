@@ -92,14 +92,14 @@ def test_new_positional_delivers_verbatim_seed(
 
     captured: dict[str, object] = {}
 
-    async def _fake_client(change: object, *, driver: object, coord: object,
+    async def _fake_client(quest: object, *, driver: object, coord: object,
                            solicit: object,
                            status: object = None,
                            title: object = None,
                            non_interactive: object = False,
                            autonomous: object = False,
                            model: str | None = None) -> int:
-        captured["change"] = change
+        captured["change"] = quest
         return 0
 
     monkeypatch.setattr(cli_main, "run_session_client", _fake_client)
@@ -120,14 +120,14 @@ def test_new_title_flag_sets_quest_title(
 
     captured: dict[str, object] = {}
 
-    async def _fake_client(change: object, *, driver: object, coord: object,
+    async def _fake_client(quest: object, *, driver: object, coord: object,
                            solicit: object,
                            status: object = None,
                            title: object = None,
                            non_interactive: object = False,
                            autonomous: object = False,
                            model: str | None = None) -> int:
-        captured["change"] = change
+        captured["change"] = quest
         return 0
 
     monkeypatch.setattr(cli_main, "run_session_client", _fake_client)
@@ -147,14 +147,14 @@ def test_new_positional_with_message_legal(
 
     captured: dict[str, object] = {}
 
-    async def _fake_client(change: object, *, driver: object, coord: object,
+    async def _fake_client(quest: object, *, driver: object, coord: object,
                            solicit: object,
                            status: object = None,
                            title: object = None,
                            non_interactive: object = False,
                            autonomous: object = False,
                            model: str | None = None) -> int:
-        captured["change"] = change
+        captured["change"] = quest
         captured["reply"] = await solicit("")  # type: ignore[operator]
         return 0
 
@@ -234,7 +234,7 @@ def test_opening_prompt_reply_wires_to_seed_opening(
 
     captured: dict[str, object] = {}
 
-    async def _fake_client(change: object, *, driver: object, coord: object,
+    async def _fake_client(quest: object, *, driver: object, coord: object,
                            solicit: object,
                            status: object = None,
                            leave_mode: object = None,
@@ -243,7 +243,7 @@ def test_opening_prompt_reply_wires_to_seed_opening(
                            non_interactive: object = False,
                            autonomous: object = False,
                            model: str | None = None) -> int:
-        captured["change"] = change
+        captured["change"] = quest
         return 0
 
     monkeypatch.setattr(cli_main, "run_session_client", _fake_client)
@@ -275,7 +275,7 @@ def test_opening_prompt_empty_reply_gives_none_seed_opening(
 
     captured: dict[str, object] = {}
 
-    async def _fake_client(change: object, *, driver: object, coord: object,
+    async def _fake_client(quest: object, *, driver: object, coord: object,
                            solicit: object,
                            status: object = None,
                            leave_mode: object = None,
@@ -284,7 +284,7 @@ def test_opening_prompt_empty_reply_gives_none_seed_opening(
                            non_interactive: object = False,
                            autonomous: object = False,
                            model: str | None = None) -> int:
-        captured["change"] = change
+        captured["change"] = quest
         return 0
 
     monkeypatch.setattr(cli_main, "run_session_client", _fake_client)
@@ -316,14 +316,14 @@ def test_new_creates_unmaterialized_draft(
 
     captured: dict[str, object] = {}
 
-    async def _fake_client(change: object, *, driver: object, coord: object,
+    async def _fake_client(quest: object, *, driver: object, coord: object,
                            solicit: object,
                            status: object = None,
                            title: object = None,
                            non_interactive: object = False,
                            autonomous: object = False,
                            model: str | None = None) -> int:
-        captured["change"] = change
+        captured["change"] = quest
         return 0
 
     monkeypatch.setattr(cli_main, "run_session_client", _fake_client)
@@ -332,9 +332,9 @@ def test_new_creates_unmaterialized_draft(
     rc = anyio.run(cli_main._async_cmd_new, args)
     assert rc == 0
 
-    change = captured["change"]
-    cid = change.id  # type: ignore[union-attr]
-    assert change.materialized is False                                  # type: ignore[union-attr]
+    quest = captured["change"]
+    cid = quest.id  # type: ignore[union-attr]
+    assert quest.materialized is False                                  # type: ignore[union-attr]
     assert not (tmp_path / ".imp" / "worktrees" / cid).exists()          # no worktree
     assert _git(tmp_path, "branch", "--list", f"imp/{cid}").stdout.strip() == ""  # no branch
     assert (tmp_path / ".imp" / "quests" / cid / "quest.json").exists()  # permanent home

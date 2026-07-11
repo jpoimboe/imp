@@ -53,8 +53,8 @@ async def test_run_cleared_session_opens_fresh_new_draft(
 
     captured: dict[str, object] = {}
 
-    async def _fake_client(change: object, **kwargs: object) -> int:
-        captured["change"] = change
+    async def _fake_client(quest: object, **kwargs: object) -> int:
+        captured["change"] = quest
         captured.update(kwargs)
         return 0
 
@@ -67,12 +67,12 @@ async def test_run_cleared_session_opens_fresh_new_draft(
     assert splash_calls == [True]                     # the splash was re-rendered (AC 5b)
     assert captured["leave_mode"] == "new"            # parks like imp new, not abandon
     assert captured["leave_state"] is ls              # threads the loop's dict
-    change = captured["change"]
+    quest = captured["change"]
     # The typed intent is persisted durably so the reopened chat's opening step
     # seeds from quest.json (survives resume), not via a transient run parameter.
-    assert Quest.load(tmp_path, change.id).seed_opening == "build a parser"
-    assert (tmp_path / ".imp" / "quests" / change.id).exists()  # a brand-new draft home
-    assert change.title == ""                          # imp new-style: unnamed draft
+    assert Quest.load(tmp_path, quest.id).seed_opening == "build a parser"
+    assert (tmp_path / ".imp" / "quests" / quest.id).exists()  # a brand-new draft home
+    assert quest.title == ""                          # imp new-style: unnamed draft
 
 
 @pytest.mark.anyio
@@ -266,7 +266,7 @@ async def test_run_cleared_session_leads_with_header_before_splash(
     monkeypatch.setattr(m, "make_interactive_solicit",
                         lambda *a, **k: (lambda _p: None))
 
-    async def _fake_client(change: object, **kwargs: object) -> int:
+    async def _fake_client(quest: object, **kwargs: object) -> int:
         return 0
 
     monkeypatch.setattr(m, "run_session_client", _fake_client)
@@ -429,8 +429,8 @@ async def test_run_cleared_session_writes_title_before_prompt(
 
     captured: dict[str, object] = {}
 
-    async def _fake_client(change: object, **kwargs: object) -> int:
-        captured["change"] = change
+    async def _fake_client(quest: object, **kwargs: object) -> int:
+        captured["change"] = quest
         captured.update(kwargs)
         return 0
 
@@ -505,7 +505,7 @@ async def test_run_cleared_session_chat_marks_header_chat(
 
     captured: dict[str, object] = {}
 
-    async def _fake_client(change: object, **kwargs: object) -> int:
+    async def _fake_client(quest: object, **kwargs: object) -> int:
         captured.update(kwargs)
         return 0
 
@@ -542,8 +542,8 @@ async def test_run_cleared_session_intercepts_help(
 
     captured: dict[str, object] = {}
 
-    async def _fake_client(change: object, **kwargs: object) -> int:
-        captured["change"] = change
+    async def _fake_client(quest: object, **kwargs: object) -> int:
+        captured["change"] = quest
         captured.update(kwargs)
         return 0
 
@@ -556,8 +556,8 @@ async def test_run_cleared_session_intercepts_help(
 
     assert rc == 0
     # /help was intercepted; the following real line becomes the persisted intent.
-    change = captured["change"]
-    assert Quest.load(tmp_path, change.id).seed_opening == "build a parser"
+    quest = captured["change"]
+    assert Quest.load(tmp_path, quest.id).seed_opening == "build a parser"
     assert "Available slash commands" in buf.getvalue()
 
 

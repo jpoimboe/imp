@@ -69,20 +69,20 @@ def _make_change(root: Path) -> Quest:
         status="running", vars=dict(workflow.vars.defaults()), loop_counts={},
     ).save(quest_dir / "state")
 
-    change = Quest(
+    quest = Quest(
         id="c", title="t", base_branch="main",
         control_root=root, project_root=root, quest_dir=quest_dir,
     )
-    change.event_log().append(
+    quest.event_log().append(
         agent_id=None, type="change_created", payload={"id": "c", "title": "t"})
-    return change
+    return quest
 
 
 @pytest.mark.anyio
 async def test_internal_error_pauses_and_logs_instead_of_dying(
     tmp_path: Path, provider_registry: Any, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    change = _make_change(tmp_path)
+    quest = _make_change(tmp_path)
     provider_registry("fake", env_check=lambda: True, factory=lambda _m: object())
 
     async def _boom(*_a: Any, **_k: Any) -> Any:
@@ -91,7 +91,7 @@ async def test_internal_error_pauses_and_logs_instead_of_dying(
     monkeypatch.setattr("imp.engine.executor._dispatch_step", _boom)
 
     events: list[dict] = []
-    result = await run_quest(change, on_event=events.append)
+    result = await run_quest(quest, on_event=events.append)
 
     assert result is RunResult.PAUSED
 
@@ -108,7 +108,7 @@ async def test_internal_error_pauses_and_logs_instead_of_dying(
     assert paused["reason"] == "internal_error"
     assert paused["kind"] == "EngineBoom"
 
-    state = State.load(change.state_dir)
+    state = State.load(quest.state_dir)
     assert state.status == "paused"
     assert state.resume_pending == "w"   # the interrupted step, armed for replay
 
@@ -117,7 +117,7 @@ async def test_internal_error_pauses_and_logs_instead_of_dying(
 async def test_cancellation_propagates_uncaught(
     tmp_path: Path, provider_registry: Any, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    change = _make_change(tmp_path)
+    quest = _make_change(tmp_path)
     provider_registry("fake", env_check=lambda: True, factory=lambda _m: object())
 
     cancelled_cls = anyio.get_cancelled_exc_class()
@@ -129,7 +129,7 @@ async def test_cancellation_propagates_uncaught(
 
     events: list[dict] = []
     with pytest.raises(cancelled_cls):
-        await run_quest(change, on_event=events.append)
+        await run_quest(quest, on_event=events.append)
 
     # The guard must NOT convert a cancellation into a pause.
     assert not any(
@@ -141,7 +141,7 @@ async def test_cancellation_propagates_uncaught(
 async def test_internal_error_surfaces_subprocess_stderr(
     tmp_path: Path, provider_registry: Any, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    change = _make_change(tmp_path)
+    quest = _make_change(tmp_path)
     provider_registry("fake", env_check=lambda: True, factory=lambda _m: object())
 
     async def _boom(*_a: Any, **_k: Any) -> Any:
@@ -154,7 +154,7 @@ async def test_internal_error_surfaces_subprocess_stderr(
     monkeypatch.setattr("imp.engine.executor._dispatch_step", _boom)
 
     events: list[dict] = []
-    result = await run_quest(change, on_event=events.append)
+    result = await run_quest(quest, on_event=events.append)
 
     assert result is RunResult.PAUSED
 

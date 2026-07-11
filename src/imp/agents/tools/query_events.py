@@ -26,11 +26,11 @@ def _resolve_other_change_events(
     """Worktree-first (Quest.load), then archive (archive_read.read_events),
     mirroring the CLI's _load_events_for_id. None if the id is in neither."""
     try:
-        change = Quest.load(control_root, quest_id)
+        quest = Quest.load(control_root, quest_id)
     except LoadError:
-        change = None
-    if change is not None:
-        return list(change.event_log().read())
+        quest = None
+    if quest is not None:
+        return list(quest.event_log().read())
     raw = archive_read.read_events(control_root, quest_id)
     if raw is None:
         return None

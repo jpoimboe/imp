@@ -88,42 +88,42 @@ def test_trees_identical_detects_missing_path(tmp_path: Path) -> None:
 
 
 def test_refresh_fresh_change_makes_initial_copy_no_flag(tmp_path: Path) -> None:
-    change, _, _ = _seed_minimal_workflow(tmp_path)
-    snapshot = change.quest_dir / "workflow"
+    quest, _, _ = _seed_minimal_workflow(tmp_path)
+    snapshot = quest.quest_dir / "workflow"
     assert not snapshot.exists()
     # A fresh change's initial snapshot is NOT a "refresh": returns False so
     # run_quest emits no workflow_refreshed event.
-    assert _refresh_workflow_snapshot(change) is False
+    assert _refresh_workflow_snapshot(quest) is False
     assert (snapshot / "workflow.yaml").exists()
     assert (snapshot / "agents" / "writer.md").exists()
 
 
 def test_refresh_identical_source_no_swap(tmp_path: Path) -> None:
-    change, _, _ = _seed_minimal_workflow(tmp_path)
-    assert _refresh_workflow_snapshot(change) is False        # initial copy
-    snapshot = change.quest_dir / "workflow"
+    quest, _, _ = _seed_minimal_workflow(tmp_path)
+    assert _refresh_workflow_snapshot(quest) is False        # initial copy
+    snapshot = quest.quest_dir / "workflow"
     before = (snapshot / "workflow.yaml").read_bytes()
-    assert _refresh_workflow_snapshot(change) is False        # unchanged source
+    assert _refresh_workflow_snapshot(quest) is False        # unchanged source
     assert (snapshot / "workflow.yaml").read_bytes() == before
-    assert not (change.quest_dir / "workflow.tmp").exists()
+    assert not (quest.quest_dir / "workflow.tmp").exists()
 
 
 def test_refresh_changed_source_replaces_snapshot(tmp_path: Path) -> None:
-    change, _, _ = _seed_minimal_workflow(tmp_path)
-    _refresh_workflow_snapshot(change)
+    quest, _, _ = _seed_minimal_workflow(tmp_path)
+    _refresh_workflow_snapshot(quest)
     live_yaml = tmp_path / "imp" / "workflows" / "imp" / "workflow.yaml"
     live_yaml.write_text(live_yaml.read_text() + "# edited-live\n")
-    assert _refresh_workflow_snapshot(change) is True
-    snapshot = change.quest_dir / "workflow"
+    assert _refresh_workflow_snapshot(quest) is True
+    snapshot = quest.quest_dir / "workflow"
     assert "# edited-live" in (snapshot / "workflow.yaml").read_text()
-    assert not (change.quest_dir / "workflow.tmp").exists()
-    assert not (change.quest_dir / "workflow.old").exists()
+    assert not (quest.quest_dir / "workflow.tmp").exists()
+    assert not (quest.quest_dir / "workflow.old").exists()
 
 
 def test_refresh_missing_live_source_keeps_snapshot(tmp_path: Path) -> None:
-    change, _, _ = _seed_minimal_workflow(tmp_path)
-    _refresh_workflow_snapshot(change)
-    snapshot = change.quest_dir / "workflow"
+    quest, _, _ = _seed_minimal_workflow(tmp_path)
+    _refresh_workflow_snapshot(quest)
+    snapshot = quest.quest_dir / "workflow"
     before = (snapshot / "workflow.yaml").read_bytes()
     # Point the default workflow at a name with no committed dir and no bundle:
     # resolve_workflow_dir then RAISES (unknown workflow), so the live source is
@@ -131,40 +131,40 @@ def test_refresh_missing_live_source_keeps_snapshot(tmp_path: Path) -> None:
     # imp/workflows/imp does NOT do this — the bundled "imp" workflow is a live
     # fallback, so live_workflow_dir always resolves to an existing dir.)
     (tmp_path / "imp" / "project.yaml").write_text("default-workflow: nosuch\n")
-    assert _refresh_workflow_snapshot(change) is False
+    assert _refresh_workflow_snapshot(quest) is False
     assert (snapshot / "workflow.yaml").read_bytes() == before
 
 
 def test_refresh_unresolvable_live_source_keeps_snapshot(tmp_path: Path) -> None:
-    change, _, _ = _seed_minimal_workflow(tmp_path)
-    _refresh_workflow_snapshot(change)
-    snapshot = change.quest_dir / "workflow"
+    quest, _, _ = _seed_minimal_workflow(tmp_path)
+    _refresh_workflow_snapshot(quest)
+    snapshot = quest.quest_dir / "workflow"
     before = (snapshot / "workflow.yaml").read_bytes()
     # Malformed project.yaml makes parse_default_workflow RAISE LoadError,
     # which propagates through live_workflow_dir and is caught by the helper's
     # best-effort except → snapshot kept, returns False. (A MISSING project.yaml
     # would NOT raise: parse_default_workflow returns "imp" for an absent file.)
     (tmp_path / "imp" / "project.yaml").write_text("default-workflow: [bad yaml\n")
-    assert _refresh_workflow_snapshot(change) is False
+    assert _refresh_workflow_snapshot(quest) is False
     assert (snapshot / "workflow.yaml").read_bytes() == before
 
 
 def test_refresh_cleans_stale_tmp(tmp_path: Path) -> None:
-    change, _, _ = _seed_minimal_workflow(tmp_path)
-    _refresh_workflow_snapshot(change)
-    tmp = change.quest_dir / "workflow.tmp"
+    quest, _, _ = _seed_minimal_workflow(tmp_path)
+    _refresh_workflow_snapshot(quest)
+    tmp = quest.quest_dir / "workflow.tmp"
     tmp.mkdir()
     (tmp / "stale.yaml").write_text("garbage")
-    _refresh_workflow_snapshot(change)
+    _refresh_workflow_snapshot(quest)
     assert not tmp.exists()
-    assert (change.quest_dir / "workflow" / "workflow.yaml").exists()
+    assert (quest.quest_dir / "workflow" / "workflow.yaml").exists()
 
 
 def test_refresh_recovers_workflow_old_when_workflow_missing(tmp_path: Path) -> None:
-    change, _, _ = _seed_minimal_workflow(tmp_path)
-    _refresh_workflow_snapshot(change)
-    snapshot = change.quest_dir / "workflow"
-    old = change.quest_dir / "workflow.old"
+    quest, _, _ = _seed_minimal_workflow(tmp_path)
+    _refresh_workflow_snapshot(quest)
+    snapshot = quest.quest_dir / "workflow"
+    old = quest.quest_dir / "workflow.old"
     os.rename(snapshot, old)                                   # crash mid-swap
     # Make the live source unresolvable too (unknown workflow name), so the
     # snapshot can ONLY reappear if workflow.old was renamed back — never via a
@@ -172,20 +172,20 @@ def test_refresh_recovers_workflow_old_when_workflow_missing(tmp_path: Path) -> 
     # "imp" workflow, which is a live source, defeating the point.)
     (tmp_path / "imp" / "project.yaml").write_text("default-workflow: nosuch\n")
     assert not snapshot.exists()
-    assert _refresh_workflow_snapshot(change) is False
+    assert _refresh_workflow_snapshot(quest) is False
     assert snapshot.is_dir()
     assert (snapshot / "workflow.yaml").exists()
     assert not old.exists()
 
 
 def test_refresh_deletes_leftover_workflow_old(tmp_path: Path) -> None:
-    change, _, _ = _seed_minimal_workflow(tmp_path)
-    _refresh_workflow_snapshot(change)
-    snapshot = change.quest_dir / "workflow"
-    old = change.quest_dir / "workflow.old"
+    quest, _, _ = _seed_minimal_workflow(tmp_path)
+    _refresh_workflow_snapshot(quest)
+    snapshot = quest.quest_dir / "workflow"
+    old = quest.quest_dir / "workflow.old"
     old.mkdir()
     (old / "junk.yaml").write_text("stale")
-    _refresh_workflow_snapshot(change)
+    _refresh_workflow_snapshot(quest)
     assert not old.exists()
     assert (snapshot / "workflow.yaml").exists()
 
@@ -195,16 +195,16 @@ async def test_resume_refreshes_unloadable_snapshot(tmp_path: Path) -> None:
     """The pohe33 regression: a frozen snapshot the CURRENT loader rejects is
     replaced from a valid live source on entry, so the run proceeds instead of
     crashing in load_workflow."""
-    change, _, _ = _seed_minimal_workflow(tmp_path)
+    quest, _, _ = _seed_minimal_workflow(tmp_path)
     _register_fake({"status": "Success"})
     # A snapshot using removed `chrome:` syntax: a mapping with no `phases`,
     # which load_workflow rejects with LoadError("missing 'phases' list").
-    snapshot = change.quest_dir / "workflow"
+    snapshot = quest.quest_dir / "workflow"
     snapshot.mkdir(parents=True, exist_ok=True)
     (snapshot / "workflow.yaml").write_text("chrome: removed-syntax\n")
 
     events: list[dict] = []
-    result = await run_quest(change, on_event=events.append)
+    result = await run_quest(quest, on_event=events.append)
 
     assert result is RunResult.COMPLETED
     assert "chrome" not in (snapshot / "workflow.yaml").read_text()
@@ -215,11 +215,11 @@ async def test_resume_refreshes_unloadable_snapshot(tmp_path: Path) -> None:
 async def test_unchanged_resume_emits_no_refresh_event(tmp_path: Path) -> None:
     """Identical live source across entries → no swap and no workflow_refreshed
     event (neither the fresh initial copy nor an unchanged re-entry emits)."""
-    change, _, _ = _seed_minimal_workflow(tmp_path)
+    quest, _, _ = _seed_minimal_workflow(tmp_path)
     _register_fake({"status": "Success"})
     events: list[dict] = []
-    await run_quest(change, on_event=events.append)   # fresh: initial copy
-    await run_quest(change, on_event=events.append)   # unchanged: no-op
+    await run_quest(quest, on_event=events.append)   # fresh: initial copy
+    await run_quest(quest, on_event=events.append)   # unchanged: no-op
     assert not [e for e in events if e["type"] == "workflow_refreshed"]
 
 
@@ -227,18 +227,18 @@ async def test_unchanged_resume_emits_no_refresh_event(tmp_path: Path) -> None:
 async def test_refresh_dropping_cursor_step_pauses_unknown_step(tmp_path: Path) -> None:
     """A refreshed workflow that no longer contains the cursor step pauses with
     an unknown_step event instead of silent-merging."""
-    change, _, _ = _seed_minimal_workflow(tmp_path)   # cursor seeded at step "w"
+    quest, _, _ = _seed_minimal_workflow(tmp_path)   # cursor seeded at step "w"
     _register_fake({"status": "Success"})
-    _refresh_workflow_snapshot(change)                 # snapshot now contains "w"
+    _refresh_workflow_snapshot(quest)                 # snapshot now contains "w"
 
     # Drop step "w" from the LIVE source (rename it); the cursor stays at "w".
     wf_yaml = tmp_path / "imp" / "workflows" / "imp" / "workflow.yaml"
     wf_yaml.write_text(wf_yaml.read_text().replace("name: w,", "name: renamed,"))
 
-    result = await run_quest(change, on_event=lambda _e: None)
+    result = await run_quest(quest, on_event=lambda _e: None)
 
     assert result is RunResult.PAUSED
-    events = list(change.event_log().read())
+    events = list(quest.event_log().read())
     paused = [e for e in events if e.get("type") == "workflow_paused"]
     assert paused and paused[-1]["payload"]["reason"] == "unknown_step"
     assert paused[-1]["payload"]["step"] == "w"
@@ -246,7 +246,7 @@ async def test_refresh_dropping_cursor_step_pauses_unknown_step(tmp_path: Path) 
     # run_quest's own entry refresh swapped the "w" snapshot to the new live
     # version, which is what drops the cursor step.
     assert "name: renamed" in (
-        change.quest_dir / "workflow" / "workflow.yaml").read_text()
+        quest.quest_dir / "workflow" / "workflow.yaml").read_text()
 
 
 @pytest.mark.anyio
@@ -254,26 +254,26 @@ async def test_self_edit_picked_up_on_reentry(tmp_path: Path) -> None:
     """A change whose live workflow source was edited (self-edit) sees that edit
     in its snapshot on the next re-entry (the completed change is re-entered,
     not resumed from a pause), with one workflow_refreshed event."""
-    change, _, _ = _seed_minimal_workflow(tmp_path)
+    quest, _, _ = _seed_minimal_workflow(tmp_path)
     _register_fake({"status": "Success"})
-    await run_quest(change, on_event=lambda _e: None)   # snapshot v1
+    await run_quest(quest, on_event=lambda _e: None)   # snapshot v1
 
     writer = tmp_path / "imp" / "workflows" / "imp" / "agents" / "writer.md"
     writer.write_text(writer.read_text() + "\nedited-by-self\n")
 
     events: list[dict] = []
-    await run_quest(change, on_event=events.append)      # re-entry re-snapshots
-    snap_writer = change.quest_dir / "workflow" / "agents" / "writer.md"
+    await run_quest(quest, on_event=events.append)      # re-entry re-snapshots
+    snap_writer = quest.quest_dir / "workflow" / "agents" / "writer.md"
     assert "edited-by-self" in snap_writer.read_text()
     assert sum(1 for e in events if e["type"] == "workflow_refreshed") == 1
 
 
-def _load_workflow_and_config(change):
+def _load_workflow_and_config(quest):
     """Load the refreshed snapshot workflow + config the way run_quest does."""
     config = load_effective_config(
-        project_root=change.project_root, control_root=change.control_root,
+        project_root=quest.project_root, control_root=quest.control_root,
     ).config
-    workflow = load_workflow(change.workflow_dir, project_keys=frozenset())
+    workflow = load_workflow(quest.workflow_dir, project_keys=frozenset())
     return workflow, config
 
 
@@ -281,12 +281,12 @@ def _load_workflow_and_config(change):
 async def test_reconcile_adds_missing_tier_keeps_pinned(tmp_path: Path) -> None:
     """A tier absent from the persisted map is filled in from a fresh resolve;
     an already-present (pinned) tier is left exactly as it was."""
-    change, _, _ = _seed_minimal_workflow(tmp_path)
+    quest, _, _ = _seed_minimal_workflow(tmp_path)
     _register_fake({"status": "Success"})
-    await run_quest(change, on_event=lambda _e: None)   # persists {low,medium,high}
-    workflow, config = _load_workflow_and_config(change)
+    await run_quest(quest, on_event=lambda _e: None)   # persists {low,medium,high}
+    workflow, config = _load_workflow_and_config(quest)
 
-    state = State.load(change.state_dir)
+    state = State.load(quest.state_dir)
     del state.resolved_tiers["high"]                     # simulate a stale map
     state.resolved_tiers["low"] = ProviderModel(provider="fake", model="pinned-low")
 
@@ -300,12 +300,12 @@ async def test_reconcile_no_missing_returns_false_no_overwrite(tmp_path: Path) -
     """When every tier/step key is already present the helper adds nothing,
     returns False, and never overwrites a pinned model (fresh resolve would
     give model 'm'; the pin must survive)."""
-    change, _, _ = _seed_minimal_workflow(tmp_path)
+    quest, _, _ = _seed_minimal_workflow(tmp_path)
     _register_fake({"status": "Success"})
-    await run_quest(change, on_event=lambda _e: None)
-    workflow, config = _load_workflow_and_config(change)
+    await run_quest(quest, on_event=lambda _e: None)
+    workflow, config = _load_workflow_and_config(quest)
 
-    state = State.load(change.state_dir)
+    state = State.load(quest.state_dir)
     state.resolved_tiers["low"] = ProviderModel(provider="fake", model="pinned-low")
 
     assert _reconcile_resolved_run(state, workflow, config) is False
@@ -316,9 +316,9 @@ async def test_reconcile_no_missing_returns_false_no_overwrite(tmp_path: Path) -
 async def test_reconcile_adds_missing_step_override(tmp_path: Path) -> None:
     """A new differ_from step present in the refreshed workflow but absent from
     the persisted resolved_steps is filled in."""
-    change, _, _ = _seed_minimal_workflow(tmp_path)
+    quest, _, _ = _seed_minimal_workflow(tmp_path)
     _register_fake({"status": "Success"})
-    await run_quest(change, on_event=lambda _e: None)   # resolved_steps == {}
+    await run_quest(quest, on_event=lambda _e: None)   # resolved_steps == {}
 
     # Add a differ_from step to the live workflow, then refresh the snapshot.
     wf = tmp_path / "imp" / "workflows" / "imp" / "workflow.yaml"
@@ -331,10 +331,10 @@ async def test_reconcile_adds_missing_step_override(tmp_path: Path) -> None:
         "      - {name: w, file: agents/writer.md, tier: low}\n"
         "      - {name: w2, file: agents/writer.md, tier: high, differ_from: w}\n"
     )
-    _refresh_workflow_snapshot(change)
-    workflow, config = _load_workflow_and_config(change)
+    _refresh_workflow_snapshot(quest)
+    workflow, config = _load_workflow_and_config(quest)
 
-    state = State.load(change.state_dir)
+    state = State.load(quest.state_dir)
     assert "w2" not in state.resolved_steps
     assert _reconcile_resolved_run(state, workflow, config) is True
     assert "w2" in state.resolved_steps
@@ -346,14 +346,14 @@ async def test_resume_reconciles_new_step_override_keeps_pinned(tmp_path: Path) 
     resolved_steps and leaves a pre-pinned tier entry untouched. A new *tier* key
     is integration-unrealizable (config.tiers is always low/medium/high), so the
     tier-merge half is unit-tested instead."""
-    change, _, _ = _seed_minimal_workflow(tmp_path)
+    quest, _, _ = _seed_minimal_workflow(tmp_path)
     _register_fake({"status": "Success"})
-    await run_quest(change, on_event=lambda _e: None)   # resolves {low,medium,high}
+    await run_quest(quest, on_event=lambda _e: None)   # resolves {low,medium,high}
 
     # Pin low to a sentinel so we can prove reconcile never overwrites it.
-    state = State.load(change.state_dir)
+    state = State.load(quest.state_dir)
     state.resolved_tiers["low"] = ProviderModel(provider="fake", model="pinned-low")
-    state.save(change.state_dir)
+    state.save(quest.state_dir)
 
     # The workflow gains a new differ_from step w2 (legal tier: high).
     wf = tmp_path / "imp" / "workflows" / "imp" / "workflow.yaml"
@@ -367,9 +367,9 @@ async def test_resume_reconciles_new_step_override_keeps_pinned(tmp_path: Path) 
         "      - {name: w2, file: agents/writer.md, tier: high, differ_from: w}\n"
     )
 
-    await run_quest(change, on_event=lambda _e: None)   # resume: refresh + reconcile
+    await run_quest(quest, on_event=lambda _e: None)   # resume: refresh + reconcile
 
-    state = State.load(change.state_dir)
+    state = State.load(quest.state_dir)
     assert "w2" in state.resolved_steps                        # new step override merged
     assert state.resolved_tiers["low"].model == "pinned-low"   # pinned entry preserved
 
@@ -380,9 +380,9 @@ async def test_var_added_after_creation_backfilled_no_render_crash(tmp_path: Pat
     vars. When the workflow is updated to declare the var AND a template references
     it under StrictUndefined, resume must backfill the default rather than crash the
     render (regression: integrate/finalize paused on `vars.auto_merge` undefined)."""
-    change, _, _ = _seed_minimal_workflow(tmp_path)
+    quest, _, _ = _seed_minimal_workflow(tmp_path)
     # state.vars was seeded from the original (var-less) workflow.
-    assert "auto_merge" not in State.load(change.state_dir).vars
+    assert "auto_merge" not in State.load(quest.state_dir).vars
 
     # Update the LIVE workflow: declare the new var and have the agent reference it.
     wf_dir = tmp_path / "imp" / "workflows" / "imp"
@@ -403,10 +403,10 @@ async def test_var_added_after_creation_backfilled_no_render_crash(tmp_path: Pat
     _register_fake({"status": "Success"})
 
     events: list[dict] = []
-    result = await run_quest(change, on_event=events.append)
+    result = await run_quest(quest, on_event=events.append)
 
     assert result is RunResult.COMPLETED
-    assert State.load(change.state_dir).vars["auto_merge"] is True
+    assert State.load(quest.state_dir).vars["auto_merge"] is True
     assert any(e["type"] == "vars_backfilled"
                and e["payload"]["names"] == ["auto_merge"] for e in events)
 
@@ -416,16 +416,16 @@ async def test_unchanged_workflow_resume_skips_reconcile(tmp_path: Path) -> None
     """Reconciliation is gated on an actual content refresh: an unchanged-workflow
     resume does not re-run resolve_run, so a tier removed from the persisted map
     is NOT silently re-added (no churn on the common resume path)."""
-    change, _, _ = _seed_minimal_workflow(tmp_path)
+    quest, _, _ = _seed_minimal_workflow(tmp_path)
     _register_fake({"status": "Success"})
-    await run_quest(change, on_event=lambda _e: None)
+    await run_quest(quest, on_event=lambda _e: None)
 
-    state = State.load(change.state_dir)
+    state = State.load(quest.state_dir)
     del state.resolved_tiers["high"]
-    state.save(change.state_dir)
+    state.save(quest.state_dir)
 
-    await run_quest(change, on_event=lambda _e: None)   # workflow byte-identical
-    state = State.load(change.state_dir)
+    await run_quest(quest, on_event=lambda _e: None)   # workflow byte-identical
+    state = State.load(quest.state_dir)
     assert "high" not in state.resolved_tiers
 
 
@@ -433,17 +433,17 @@ def test_refresh_sources_from_control_root_not_worktree(tmp_path: Path) -> None:
     """The snapshot is copied from the control root's workflow, NOT the change's
     worktree — the imp-on-imp / divergent-worktree case. Before the fix the copy
     source was the worktree, so the snapshot would carry WORKTREE-EDIT."""
-    change, _, _ = _seed_minimal_workflow(tmp_path)   # control-root workflow: name: t
+    quest, _, _ = _seed_minimal_workflow(tmp_path)   # control-root workflow: name: t
     # A divergent worktree whose committed workflow differs from the control root.
     wt = tmp_path / "wt"
     wt_wf = wt / "imp" / "workflows" / "imp"
     (wt_wf / "agents").mkdir(parents=True)
     (wt_wf / "agents" / "writer.md").write_text("worktree-divergent\n")
     (wt_wf / "workflow.yaml").write_text("name: WORKTREE-EDIT\n")
-    change.project_root = wt
+    quest.project_root = wt
 
-    assert _refresh_workflow_snapshot(change) is False   # initial copy, no flag
-    snap = change.quest_dir / "workflow" / "workflow.yaml"
+    assert _refresh_workflow_snapshot(quest) is False   # initial copy, no flag
+    snap = quest.quest_dir / "workflow" / "workflow.yaml"
     assert "WORKTREE-EDIT" not in snap.read_text()
     assert "name: t" in snap.read_text()                 # the control-root content
 
@@ -452,19 +452,19 @@ def test_refresh_ignores_worktree_edits_stays_noop(tmp_path: Path) -> None:
     """With the source anchored at the control root, editing ONLY the worktree
     leaves the refresh a no-op (no swap, snapshot bytes unchanged) — a change
     cannot self-poison its snapshot with its own in-flight workflow edits."""
-    change, _, _ = _seed_minimal_workflow(tmp_path)
+    quest, _, _ = _seed_minimal_workflow(tmp_path)
     wt = tmp_path / "wt"
     wt_wf = wt / "imp" / "workflows" / "imp"
     wt_wf.mkdir(parents=True)
     (wt_wf / "workflow.yaml").write_text("name: v1-worktree\n")
-    change.project_root = wt
+    quest.project_root = wt
 
-    assert _refresh_workflow_snapshot(change) is False   # initial copy from control
-    snap = change.quest_dir / "workflow" / "workflow.yaml"
+    assert _refresh_workflow_snapshot(quest) is False   # initial copy from control
+    snap = quest.quest_dir / "workflow" / "workflow.yaml"
     before = snap.read_bytes()
     # Edit ONLY the worktree; the control-root source is untouched.
     (wt_wf / "workflow.yaml").write_text("name: v2-worktree-edit\n")
 
-    assert _refresh_workflow_snapshot(change) is False   # no-op: source unchanged
+    assert _refresh_workflow_snapshot(quest) is False   # no-op: source unchanged
     assert snap.read_bytes() == before
-    assert not (change.quest_dir / "workflow.tmp").exists()
+    assert not (quest.quest_dir / "workflow.tmp").exists()

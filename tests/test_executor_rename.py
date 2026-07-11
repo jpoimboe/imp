@@ -51,7 +51,7 @@ class _RenamingRunner:
         self._inv = invocation
 
     async def run(self, invocation: AgentInvocation) -> AsyncIterator[Event]:
-        ch = invocation.change
+        ch = invocation.quest
         if ch is not None and ch.title == "x":
             ch.rename("Renamed Thing", log=invocation.event_log or ch.event_log())
         yield {"type": "agent_output", "payload": {"outcome": "ok", "status": "Success"}}

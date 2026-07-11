@@ -13,7 +13,7 @@ def test_abandon_head_removes_and_wakes_next(tmp_path, monkeypatch) -> None:
     mq.enqueue_if_absent(tmp_path, "bbb", "main")
     woken: list = []
     monkeypatch.setattr(attach_mod, "spawn_session_daemon",
-                        lambda change, **kw: woken.append(change.id))
+                        lambda quest, **kw: woken.append(quest.id))
 
     tear_down_quest(a)
 

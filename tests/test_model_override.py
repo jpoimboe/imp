@@ -43,10 +43,10 @@ def test_apply_bare_model_keeps_current_provider(monkeypatch) -> None:
     wf = _Workflow([_Step("brainstorm", "high")])
     monkeypatch.setattr(mod, "load_workflow", lambda *a, **k: wf)
     st = _state({}, {"high": ProviderModel("claude_code", "opus")})
-    change = SimpleNamespace(workflow_dir="wf", state_dir="sd")
+    quest = SimpleNamespace(workflow_dir="wf", state_dir="sd")
     monkeypatch.setattr(mod.State, "save", lambda self, d: None)
 
-    apply_model_override(change, st, "claude-fable-5", step_name="brainstorm")
+    apply_model_override(quest, st, "claude-fable-5", step_name="brainstorm")
 
     assert st.resolved_steps["brainstorm"] == ProviderModel(
         "claude_code", "claude-fable-5")
@@ -58,10 +58,10 @@ def test_apply_provider_model_switches_provider(monkeypatch) -> None:
     monkeypatch.setattr(mod, "load_workflow", lambda *a, **k: wf)
     monkeypatch.setattr(mod.State, "save", lambda self, d: None)
     st = _state({}, {"high": ProviderModel("claude_code", "opus")})
-    change = SimpleNamespace(workflow_dir="wf", state_dir="sd")
+    quest = SimpleNamespace(workflow_dir="wf", state_dir="sd")
 
     apply_model_override(
-        change, st, "anthropic:claude-fable-5[1m]", step_name="brainstorm")
+        quest, st, "anthropic:claude-fable-5[1m]", step_name="brainstorm")
 
     assert st.resolved_steps["brainstorm"] == ProviderModel(
         "anthropic", "claude-fable-5[1m]")
@@ -73,9 +73,9 @@ def test_apply_initializes_none_resolved_steps(monkeypatch) -> None:
     monkeypatch.setattr(mod, "load_workflow", lambda *a, **k: wf)
     monkeypatch.setattr(mod.State, "save", lambda self, d: None)
     st = _state(None, {"high": ProviderModel("claude_code", "opus")})
-    change = SimpleNamespace(workflow_dir="wf", state_dir="sd")
+    quest = SimpleNamespace(workflow_dir="wf", state_dir="sd")
 
-    apply_model_override(change, st, "claude-fable-5", step_name="brainstorm")
+    apply_model_override(quest, st, "claude-fable-5", step_name="brainstorm")
 
     assert st.resolved_steps == {
         "brainstorm": ProviderModel("claude_code", "claude-fable-5")}

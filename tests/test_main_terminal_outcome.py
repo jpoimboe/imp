@@ -34,25 +34,25 @@ class _State:
 
 
 def test_merge_blocked_outcome_emits_no_paused_summary() -> None:
-    change = _Change([{"type": "merge_blocked",
+    quest = _Change([{"type": "merge_blocked",
                        "payload": {"reason": "refused", "base": "master",
                                    "detail": "error: Aborting"}}])
     with patch.object(main, "State") as State, \
          patch.object(main, "_emit_merge_blocked") as mb, \
          patch.object(main, "_emit_paused_summary") as ps:
         State.load.return_value = _State("merge_blocked")
-        rc = main._handle_terminal_outcome(change, RunResult.PAUSED, coord=None)
+        rc = main._handle_terminal_outcome(quest, RunResult.PAUSED, coord=None)
     assert rc == 1
     mb.assert_called_once()          # the friendly ⚠ block still prints
     ps.assert_not_called()           # the redundant second pause line is gone
 
 
 def test_non_merge_pause_still_emits_paused_summary() -> None:
-    change = _Change([])
+    quest = _Change([])
     with patch.object(main, "State") as State, \
          patch.object(main, "_emit_paused_summary") as ps:
         State.load.return_value = _State("paused", step=None)
-        rc = main._handle_terminal_outcome(change, RunResult.PAUSED, coord=None)
+        rc = main._handle_terminal_outcome(quest, RunResult.PAUSED, coord=None)
     assert rc == 1
     ps.assert_called_once()          # ordinary pauses keep the summary line
 
@@ -131,11 +131,11 @@ def test_handle_terminal_outcome_passes_combined_output(capsys) -> None:
         {"type": "script_blocked",
          "payload": {"step": "verify", "stderr": "err-detail", "stdout": "out-detail", "exit": 3}},
     ]
-    change = _Change(events)
+    quest = _Change(events)
     with patch.object(main, "State") as State, \
          patch.object(main, "_emit_paused_summary"):
         State.load.return_value = _State("paused", step="verify")
-        rc = main._handle_terminal_outcome(change, RunResult.PAUSED, coord=None)
+        rc = main._handle_terminal_outcome(quest, RunResult.PAUSED, coord=None)
     out = capsys.readouterr().out
     assert "err-detail" in out
     assert "out-detail" in out
@@ -144,20 +144,20 @@ def test_handle_terminal_outcome_passes_combined_output(capsys) -> None:
 
 def test_merge_blocked_outcome_forwards_exhaustion_note() -> None:
     note = "imp attempted 3 recovery passes and the merge still failed."
-    change = _Change([{"type": "merge_blocked",
+    quest = _Change([{"type": "merge_blocked",
                        "payload": {"reason": "conflict", "base": "master",
                                    "detail": "merge conflict", "note": note}}])
     with patch.object(main, "State") as State, \
          patch.object(main, "_emit_merge_blocked") as mb, \
          patch.object(main, "_emit_paused_summary"):
         State.load.return_value = _State("merge_blocked")
-        main._handle_terminal_outcome(change, RunResult.PAUSED, coord=None)
+        main._handle_terminal_outcome(quest, RunResult.PAUSED, coord=None)
     mb.assert_called_once()
     assert mb.call_args.args[3] == note     # the note reached _emit_merge_blocked as the note arg
 
 
 def test_emit_paused_summary_renders_terminated_reason(capsys) -> None:
-    change = _Change([
+    quest = _Change([
         {"type": "step_started", "payload": {"phase": "reviewing plan"}},
         {"type": "error",
          "payload": {"detail": {"last_agent_text":
@@ -165,18 +165,18 @@ def test_emit_paused_summary_renders_terminated_reason(capsys) -> None:
         {"type": "workflow_paused",
          "payload": {"reason": "terminated", "kind": "terminated"}},
     ])
-    main._emit_paused_summary(change)
+    main._emit_paused_summary(quest)
     out = capsys.readouterr().out
     assert "· terminated: API Error 400 — tool use concurrency" in out
     assert "at reviewing plan" in out
 
 
 def test_emit_paused_summary_interrupt_renders_bare_reason(capsys) -> None:
-    change = _Change([
+    quest = _Change([
         {"type": "workflow_paused",
          "payload": {"reason": "interrupt", "interrupt_reason": "interrupt"}},
     ])
-    main._emit_paused_summary(change)
+    main._emit_paused_summary(quest)
     out = capsys.readouterr().out
     assert "· interrupt" in out
 
@@ -217,13 +217,13 @@ def test_handle_terminal_outcome_threads_runner_warning_count(monkeypatch) -> No
         {"type": "runner_warning", "payload": {"message": "a"}},
         {"type": "step_started", "payload": {"step": "s", "kind": "agent"}},
     ]
-    change = _Change(events)
-    change.control_root = main.Path("/tmp/imp-no-such-worktree-xyz")
+    quest = _Change(events)
+    quest.control_root = main.Path("/tmp/imp-no-such-worktree-xyz")
     captured: dict = {}
     monkeypatch.setattr(
         main, "_emit_completed",
         lambda ch, value, *, merged, warnings: captured.update(warnings=warnings))
-    rc = main._handle_terminal_outcome(change, RunResult.COMPLETED, coord=None)
+    rc = main._handle_terminal_outcome(quest, RunResult.COMPLETED, coord=None)
     assert rc == 0
     assert captured["warnings"] == 2
 
@@ -237,11 +237,11 @@ def test_handle_terminal_outcome_threads_deliberate_leave_trigger() -> None:
         leave_reason = "ctrl-d"
         escalation_event = _Evt()
 
-    change = _Change([])
+    quest = _Change([])
     with patch.object(main, "State") as State, \
          patch.object(main, "_emit_paused_summary") as ps:
         State.load.return_value = _State("paused", step=None)
-        rc = main._handle_terminal_outcome(change, RunResult.PAUSED, coord=_Coord())
+        rc = main._handle_terminal_outcome(quest, RunResult.PAUSED, coord=_Coord())
     assert rc == 1
     ps.assert_called_once()
     assert ps.call_args.args[1] == "ctrl-d"   # the trigger reached the summary
@@ -250,8 +250,8 @@ def test_handle_terminal_outcome_threads_deliberate_leave_trigger() -> None:
 def test_handle_terminal_outcome_counts_warnings_from_archive_when_home_reaped(monkeypatch) -> None:
     # _Change([]) has no events_path attribute and event_log().read() returns [] —
     # so the code falls through to the archive_read.read_events fallback branch.
-    change = _Change([])
-    change.control_root = main.Path("/tmp/imp-no-such-worktree-xyz")
+    quest = _Change([])
+    quest.control_root = main.Path("/tmp/imp-no-such-worktree-xyz")
 
     # Two runner_warning events plus one non-warning event in the archived blob.
     archive_blob = (
@@ -268,6 +268,6 @@ def test_handle_terminal_outcome_counts_warnings_from_archive_when_home_reaped(m
         main, "_emit_completed",
         lambda ch, value, *, merged, warnings: captured.update(warnings=warnings))
 
-    rc = main._handle_terminal_outcome(change, RunResult.COMPLETED, coord=None)
+    rc = main._handle_terminal_outcome(quest, RunResult.COMPLETED, coord=None)
     assert rc == 0
     assert captured["warnings"] == 2
