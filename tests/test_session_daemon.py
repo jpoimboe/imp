@@ -722,7 +722,7 @@ def test_last_pause_was_awaiting_turn_false_with_no_events(tmp_path: Path) -> No
 
 
 @pytest.mark.anyio
-async def test_resident_abandon_of_unmaterialized_draft_archives_not_tears_down(
+async def test_resident_abandon_of_unmaterialized_draft_tears_down(
     tmp_path: Path,
 ) -> None:
     from tests.conftest import _seed_control
@@ -757,10 +757,10 @@ async def test_resident_abandon_of_unmaterialized_draft_archives_not_tears_down(
         await client.connect()
         await client.send_control(CONTROL_ABANDON)
         with anyio.fail_after(5):
-            while not archived:
+            while not torn:
                 await anyio.sleep(0.02)
-        assert archived == [change]
-        assert torn == []
+        assert torn == [change]
+        assert archived == []  # the resumable archive path is not taken
         await client.aclose()
         tg.cancel_scope.cancel()
 

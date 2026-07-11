@@ -244,8 +244,15 @@ def test_abandon_backlog_reports_message(
     Change.create_draft(tmp_path, title="Backlog brief", change_id="bk1",
                         base_branch="main", origin="followup",
                         seed_opening="Backlog brief")
-    _abandon(tmp_path, "bk1")
-    assert "Discarded idea bk1." in capsys.readouterr().out
+    rc = _abandon(tmp_path, "bk1")
+    assert rc == 0
+    assert "Abandoned bk1." in capsys.readouterr().out       # unified message; not "Discarded idea"
+    from imp.engine.archive import read as archive_read
+    assert archive_read.status_of(tmp_path, "bk1") == "abandoned"  # non-resumable tombstone written
+    assert archive_read.is_archived(tmp_path, "bk1")              # findable in the archive
+    from imp.engine.archive import record, records_root
+    rec = record.read_record(records_root(tmp_path), "bk1")
+    assert rec is not None and rec["resumable"] is False          # tombstone is non-resumable
 
 
 def test_abandon_unknown_id_reaps_branch_and_exits_zero(
@@ -255,3 +262,93 @@ def test_abandon_unknown_id_reaps_branch_and_exits_zero(
     rc = _abandon(tmp_path, "ghost")
     assert rc == 0
     assert "already gone" in capsys.readouterr().out
+
+
+def test_tear_down_change_on_draft_skips_worktree_teardown(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from imp.engine import merge_queue, worktree
+    _seed_control(tmp_path)
+    ch = Change.create_draft(
+        tmp_path, title="An idea", change_id="idea1", base_branch="main",
+        origin="idea", seed_opening="An idea\n\ndo a thing")
+
+    calls: list[str] = []
+    monkeypatch.setattr(merge_queue, "pop_and_wake",
+                        lambda *a, **k: calls.append("pop_and_wake"))
+    monkeypatch.setattr(worktree, "remove_worktree",
+                        lambda *a, **k: calls.append("remove_worktree"))
+    monkeypatch.setattr(worktree, "delete_branch",
+                        lambda *a, **k: calls.append("delete_branch"))
+
+    tear_down_change(ch)
+
+    assert calls == []  # no built-out teardown on a draft
+    assert not (tmp_path / ".imp" / "changes" / "idea1").exists()   # live home dropped
+    from imp.engine.archive import read as archive_read
+    assert archive_read.status_of(tmp_path, "idea1") == "abandoned"  # tombstone marked abandoned
+    assert archive_read.is_archived(tmp_path, "idea1")               # findable in the archive
+    events = archive_read.read_events(tmp_path, "idea1")
+    assert events is not None and b"change_abandoned" in events      # abandon event recorded
+    from imp.engine.archive import record, records_root
+    rec = record.read_record(records_root(tmp_path), "idea1")
+    assert rec is not None and rec["resumable"] is False             # non-resumable tombstone
+
+
+def test_abandon_draft_confirm_copy_on_tty(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    _seed_control(tmp_path)
+    Change.create_draft(tmp_path, title="An idea", change_id="idea1",
+                        base_branch="main", origin="idea",
+                        seed_opening="An idea\n\ndo a thing")
+    monkeypatch.setattr("imp.cli.main._interactive", lambda: True)
+    monkeypatch.setattr("builtins.input", lambda _p: "y")
+    rc = _abandon(tmp_path, "idea1")
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "Abandon idea1? This permanently discards it." in out   # draft-specific copy
+    assert "worktree, branch, and state" not in out                # not the built-out copy
+    assert not (tmp_path / ".imp" / "changes" / "idea1").exists()   # torn down
+
+
+def test_resume_refuses_abandoned_draft(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from imp.cli.main import _load_or_rehydrate
+
+    _seed_control(tmp_path)
+    Change.create_draft(tmp_path, title="An idea", change_id="idea1",
+                        base_branch="main", origin="idea",
+                        seed_opening="An idea\n\ndo a thing")
+    assert _abandon(tmp_path, "idea1") == 0
+    capsys.readouterr()  # drop the abandon output
+
+    result = _load_or_rehydrate(tmp_path, "idea1")
+    assert result == 0  # int refusal code, not a rehydrated Change
+    assert "was abandoned; nothing to resume." in capsys.readouterr().out
+
+
+def test_search_finds_abandoned_draft(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    import argparse
+
+    from imp.cli.main import _cmd_search
+
+    _seed_control(tmp_path)
+    Change.create_draft(tmp_path, title="Zephyr idea", change_id="idea1",
+                        base_branch="main", origin="idea",
+                        seed_opening="Zephyr idea\n\ndo a thing")
+    assert _abandon(tmp_path, "idea1") == 0
+    capsys.readouterr()  # drop the abandon output
+
+    ns = argparse.Namespace(
+        query="Zephyr", active=False, backlog=False, archived=False,
+        list=False, no_pager=True)
+    rc = _cmd_search(ns, tmp_path)
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "idea1" in out            # abandoned draft is found
+    assert "[archive]" in out        # surfaced from the archive zone

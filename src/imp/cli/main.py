@@ -2519,17 +2519,11 @@ def _abandon(control: Path, change_id: str, *, yes: bool = False) -> int:
         return 0
 
     token = change.id
-    if not change.materialized:
-        try:
-            discard_conversation(change)
-        except LockHeld as e:
-            print(f"imp: Change {change_id} is running (pid {e.held_by_pid or '?'}); "
-                  f"stop it before abandoning", file=sys.stderr)
-            return 2
-        print(f"Discarded idea {token}.")
-        return 0
     if not yes and _interactive():
-        print(f"Abandon {token}? This removes its worktree, branch, and state.")
+        if change.materialized:
+            print(f"Abandon {token}? This removes its worktree, branch, and state.")
+        else:
+            print(f"Abandon {token}? This permanently discards it.")
         if input("Type 'y' to confirm: ").strip().lower() not in ("y", "yes"):
             print(f"Left {token} in place.")
             return 0

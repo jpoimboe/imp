@@ -210,10 +210,7 @@ async def serve_change_session(
         # A wake-spawn raced a resident change: exit harmlessly without binding socket.
         return None
     if server.abandoned:
-        if change.materialized:
-            await anyio.to_thread.run_sync(tear_down, change)
-        else:
-            await anyio.to_thread.run_sync(archive_left, change)
+        await anyio.to_thread.run_sync(tear_down, change)
     elif server.saved:
         await anyio.to_thread.run_sync(save_left, change)
     elif server.archived:
