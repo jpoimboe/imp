@@ -52,7 +52,7 @@ def test_imp_invariants_names_quest_concept() -> None:
 
 def test_imp_operator_notes_names_quest_concept() -> None:
     text = Path("docs/imp-operator-notes.md").read_text()
-    assert "Runbook for operating a running imp Quest." in text
+    assert "Runbook for operating a running imp quest." in text
     assert ".imp/quest/workflow" in text
     assert ".imp/change/" not in text
     assert ".imp/changes/" not in text
