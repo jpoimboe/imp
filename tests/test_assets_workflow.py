@@ -986,9 +986,10 @@ def test_spiker_is_isolated_dispatchable_subagent() -> None:
     spiker = wf.agents["spiker"]
     # opts into the Part-1 isolation primitive
     assert spiker.isolated_worktree is True
-    # dispatchable by BOTH threshold and task-lead
+    # dispatchable by threshold, task-lead, and the finalize gate
     assert "spiker" in wf.agents["threshold"].subagents
     assert "spiker" in wf.agents["task-lead"].subagents
+    assert "spiker" in wf.agents["finalize"].subagents
     # full default grant: write + exec + network, but no dispatch/rename caps
     assert spiker.tools == BASE_CAPS
     assert {"write_file", "edit_file", "bash", "web_fetch"} <= spiker.tools
@@ -1037,6 +1038,15 @@ def test_threshold_prose_resolves_spec_shaping_unknowns_via_spiker() -> None:
     assert "spec-shaping" in low
     assert "before finalizing" in low
     assert "empiric" in low
+
+
+def test_finalize_prose_settles_gate_questions_via_spiker() -> None:
+    from imp.assets import bundled_workflow_dir
+    low = (bundled_workflow_dir("imp") / "agents" / "finalize.md").read_text().lower()
+    assert "spiker" in low
+    assert "empiric" in low
+    assert "gate" in low
+    assert "merge-vs-rework" in low
 
 
 def test_task_lead_prose_allows_implementation_local_spikes() -> None:

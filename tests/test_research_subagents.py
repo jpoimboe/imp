@@ -80,7 +80,7 @@ def test_task_lead_declares_research_subagents() -> None:
 
 def test_finalize_declares_research_subagents() -> None:
     a = _wf().agents["finalize"]
-    assert set(a.subagents) == {"explorer", "researcher"}
+    assert set(a.subagents) == {"explorer", "researcher", "spiker"}
     assert "sub_agent" in a.tools
 
 
