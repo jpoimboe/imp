@@ -73,7 +73,7 @@ async def serve_quest_session(
     hibernate: bool = True,
     tear_down: Callable[[Quest], None] = tear_down_quest,
     archive_left: Callable[[Quest], None] = archive_conversation,
-    save_left: Callable[[Quest], None] = save_to_backlog,
+    save_left: Callable[[Quest, str | None], None] = save_to_backlog,
     discard_left: Callable[[Quest], None] = discard_conversation,
     resume: bool = False,
     non_interactive: bool = False,
@@ -212,7 +212,7 @@ async def serve_quest_session(
     if server.abandoned:
         await anyio.to_thread.run_sync(tear_down, quest)
     elif server.saved:
-        await anyio.to_thread.run_sync(save_left, quest)
+        await anyio.to_thread.run_sync(save_left, quest, server.save_reason)
     elif server.archived:
         await anyio.to_thread.run_sync(archive_left, quest)
     elif server.discarded:

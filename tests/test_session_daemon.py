@@ -847,7 +847,7 @@ async def test_resident_save_applies_the_save_disposition(tmp_path: Path) -> Non
             await serve_quest_session(
                 quest, run_fn=fake_run, hibernate=False,
                 tear_down=lambda ch: torn.append(ch),
-                save_left=lambda ch: saved.append(ch))
+                save_left=lambda ch, reason=None: saved.append(ch))
 
         tg.start_soon(_serve)
         await _wait_for_socket(sock)
@@ -1703,3 +1703,36 @@ def test_main_forwards_model_to_serve(
     assert isinstance(fn, functools.partial)
     assert fn.func is daemon.serve_quest_session
     assert fn.keywords.get("model") == "a:b"
+
+
+@pytest.mark.anyio
+async def test_resident_save_forwards_the_leave_reason(tmp_path: Path) -> None:
+    quest = _make_change(tmp_path, "2026-06-15-svr")
+    sock = str(session_socket_path(quest.control_root, quest.id))
+    saved: list[tuple[Quest, str | None]] = []
+
+    async def fake_run(
+        quest: Quest, *, on_event: Any, user_chat_input_fn: Any,
+        coordinator: Any,
+        wait_for_turn_fn: Any = None,
+    ) -> None:
+        await anyio.sleep_forever()   # only a save-cancel ends this run
+
+    async with anyio.create_task_group() as tg:
+        async def _serve() -> None:
+            await serve_quest_session(
+                quest, run_fn=fake_run, hibernate=False,
+                save_left=lambda ch, reason: saved.append((ch, reason)))
+
+        tg.start_soon(_serve)
+        await _wait_for_socket(sock)
+        client = SessionClient(sock, quest.id, quest.title,
+                               on_event=lambda _e: None)
+        await client.connect()
+        await client.send_control(CONTROL_SAVE, "ctrl-d")
+        with anyio.fail_after(5):
+            while not saved:
+                await anyio.sleep(0.02)
+        assert saved == [(quest, "ctrl-d")]
+        await client.aclose()
+        tg.cancel_scope.cancel()
