@@ -1,11 +1,11 @@
 """new_change_id: dateless immutable identity, a 6-char pronounceable id — a
 consonant/vowel/consonant/vowel stem plus two digits (spec AC 1). Format
-asserted over many draws; uniqueness asserted at a small N — the keyspace is
-only ~640k (16x5x16x5x100), so N is kept low to keep birthday-collision odds
-negligible (secrets isn't seedable)."""
+asserted over many draws; uniqueness asserted at a small N with a seeded
+random.Random injected for determinism."""
 
 from __future__ import annotations
 
+import random
 import re
 
 from imp.engine.change_id import (
@@ -25,8 +25,16 @@ def test_new_change_id_format() -> None:
 
 
 def test_new_change_id_unique_small_n() -> None:
-    ids = [new_change_id() for _ in range(20)]
+    rng = random.Random(0)
+    ids = [new_change_id(rng=rng) for _ in range(20)]
     assert len(set(ids)) == len(ids)
+
+
+def test_new_change_id_seeded_rng_is_deterministic() -> None:
+    first = [new_change_id(rng=random.Random(0)) for _ in range(20)]
+    second = [new_change_id(rng=random.Random(0)) for _ in range(20)]
+    assert first == second
+    assert _ID_RE.fullmatch(first[0])
 
 
 def test_new_change_id_has_no_date_prefix() -> None:

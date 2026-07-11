@@ -102,7 +102,7 @@ def test_create_change_avoids_live_cvcv_stem(
     # First stem draw collides with the seeded live stem; avoidance must
     # resample past it to the next (distinct) stem.
     stems = iter(["kobe", "mira", "mira"])
-    monkeypatch.setattr(change_id, "_draw_clean_stem", lambda: next(stems))
+    monkeypatch.setattr(change_id, "_draw_clean_stem", lambda rng: next(stems))
 
     get_registry()["create_change"].invoke(
         _ctx(ch, state), {"title": "T", "description": "b"})
