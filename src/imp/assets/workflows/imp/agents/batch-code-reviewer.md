@@ -79,6 +79,11 @@ Read all of these and the diff before forming your assessment.
 - No obvious bugs or regressions?
 - Consistent with project conventions?
 
+**Terminal-UI changes — see them.** When the change alters how a terminal program
+looks or behaves, load `driving-terminal-uis` (`load_skill(name="driving-terminal-uis")`)
+and render the result with your impty tools before judging it — the diff won't show
+you the rendered output.
+
 ## Severity Classification
 
 Classify each finding against the canonical severity rubric:
