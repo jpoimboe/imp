@@ -16,6 +16,7 @@ from imp.engine.executor import RunResult
 from imp.engine.quest import Quest
 from imp.engine.state import State
 from imp.remote.session.attach import build_session_attach
+from imp.remote.session.protocol import SkillRequest
 
 
 def _should_run_ctrl_d_reader(*, non_interactive: bool) -> bool:
@@ -38,7 +39,7 @@ async def run_session_client(
     *,
     driver: Any,
     coord: InterruptCoordinator,
-    solicit: Callable[[str], Awaitable[str]],
+    solicit: Callable[[str], Awaitable[str | SkillRequest]],
     status: Any = None,
     resume: bool = False,
     leave_mode: str | None = None,
@@ -118,7 +119,7 @@ def make_interactive_solicit(
     status: Any,
     driver: Any,
     coord: InterruptCoordinator,
-) -> Callable[[str], Awaitable[str]]:
+) -> Callable[[str], Awaitable[str | SkillRequest]]:
     """Return a solicit callback that reads one slash-aware line from the tty as the gate reply."""
     # Lazy import: imp.cli.main imports this module, so a
     # module-level import of these helpers would be circular.
@@ -129,7 +130,7 @@ def make_interactive_solicit(
         editing_mode=_editing_mode(quest.control_root),
         color=should_use_color(sys.stdout))
 
-    async def _solicit(_prompt: str) -> str:
+    async def _solicit(_prompt: str) -> str | SkillRequest:
         # The gate's prompt (the interrupt-steer hint, or the daemon's resume
         # prompt) surfaces as the field placeholder; an empty prompt — the bare
         # turn-end yield — falls back to the default "type your reply".

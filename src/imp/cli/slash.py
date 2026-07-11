@@ -11,14 +11,11 @@ import contextlib
 from collections.abc import Callable
 from typing import Any
 
-from imp.agents.skills import (
-    SkillError,
-    list_user_skills,
-    load_user_skill,
-)
+from imp.agents.skills import list_user_skills
 from imp.cli.live_driver import compose_identity_toolbar
 from imp.cli.model_command import print_model_roster, validate_model_arg
 from imp.cli.palette import caret
+from imp.remote.session.protocol import SkillRequest
 
 # Sentinel: the line was a builtin / unknown / not-found command that printed
 # and the caller should re-prompt (do NOT submit anything to the agent).
@@ -36,18 +33,13 @@ def _echo_command(text: str, out: Callable[[str], None], *, color: bool) -> None
 def handle_slash_line(
     text: str, *, quest: Any, output_fn: Callable[[str], None],
     color: bool = False,
-) -> object | str:
+) -> object | str | SkillRequest:
     """Dispatch a /-line. Returns REPROMPT for /help, /skills, and builtins that
-    print usage (each prints via output_fn). Returns the skill body (str) for a
-    successful /<name>, emitting a human-attributed skill_load event. A /-line
-    that matches no builtin and no skill is returned verbatim (str) and submitted
-    as ordinary input — so a pasted path like `/home/user/foo.py` is not misread
-    as a command.
-
-    `/<name> <args>` loads skill <name> and appends the trailing argument text
-    after the body (blank-line separated), so `/refactor src/foo.py` submits the
-    refactor skill followed by `src/foo.py`. The argument rides the returned user
-    message; the attribution event stays {name, source}."""
+    print usage (each prints via output_fn). Returns a SkillRequest(name, args)
+    for a /<name> that matches a known user skill — the daemon loads the body.
+    A /-line that matches no builtin and no known skill is returned verbatim
+    (str) and submitted as ordinary input — so a pasted path like
+    `/home/user/foo.py` is not misread as a command."""
     tokens = text.lstrip().lstrip("/").split(None, 1)
     cmd = tokens[0] if tokens else ""
     args = tokens[1].strip() if len(tokens) > 1 else ""
@@ -126,20 +118,13 @@ def handle_slash_line(
         output_fn(f"Rehydrated {target}; continue it with `imp resume {target}`.")
         return REPROMPT
 
-    try:
-        body = load_user_skill(quest.workflow_dir / "skills", cmd)
-    except SkillError:
-        # Not a builtin or known skill. Rather than erroring, submit the line
-        # verbatim as ordinary input — so a pasted absolute path like
-        # `/home/user/foo.py` reaches the agent unchanged instead of being
-        # misread as `no such skill: /home/...`.
-        return text
-
-    quest.event_log().append(
-        agent_id=None, type="skill_load",
-        payload={"name": cmd, "source": "human"},
-    )
-    return f"{body.rstrip()}\n\n{args}\n" if args else body
+    known = {name for name, _ in list_user_skills(quest.workflow_dir / "skills")}
+    if cmd in known:
+        return SkillRequest(cmd, args)
+    # Not a builtin or known skill: submit the line verbatim as ordinary input,
+    # so a pasted absolute path like `/home/user/foo.py` reaches the agent
+    # unchanged instead of being misread as a command.
+    return text
 
 
 def _list(skills_dir: Any, out: Callable[[str], None]) -> None:
@@ -219,10 +204,10 @@ async def _ask_or_exit(prompt: Any, exit_evt: Any, *, question: str = "",
 async def ask_line_with_slash(
     prompt: Any, status: Any | None, quest: Any, *, color: bool = False, width: int = 80,
     coord: Any = None, driver: Any = None, hint: str | None = None,
-) -> str:
+) -> str | SkillRequest:
     """Read one interactive line, intercepting slash commands. /help, /skills,
-    unknown, and not-found commands print and re-prompt; /<name> returns the
-    resolved skill body; anything else returns as-is.
+    unknown, and not-found commands print and re-prompt; /<name> that matches a
+    known skill returns a SkillRequest marker; anything else returns as-is.
 
     Framing: no chrome around the field. While the user types, the slate input
     field marks the turn; on submit prompt_toolkit erases its region
@@ -317,7 +302,9 @@ async def ask_line_with_slash(
                         if result is REPROMPT:
                             print("")  # one blank between slash output and the reprompt
                             continue
-                        assert isinstance(result, str)  # skill body or a literal command
+                        if isinstance(result, SkillRequest):
+                            return result
+                        assert isinstance(result, str)  # a literal command line
                         return result
                 finally:
                     # Flush deferred live-driver blocks exactly once on solicit exit

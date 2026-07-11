@@ -29,7 +29,7 @@ from imp.cli.terminal_title import TerminalTitle
 from imp.engine.errors import LoadError, LoadErrors
 from imp.engine.quest import Quest
 from imp.remote.session.client import SessionClient
-from imp.remote.session.protocol import CONTROL_INTERRUPT_LEAVE
+from imp.remote.session.protocol import CONTROL_INTERRUPT_LEAVE, SkillRequest
 
 AttachFn = Callable[[Callable[[dict[str, Any]], None]], Awaitable[SessionClient]]
 
@@ -39,7 +39,7 @@ async def run_terminal_client(
     attach: AttachFn,
     driver: Any,
     coord: InterruptCoordinator,
-    solicit: Callable[[str], Awaitable[str]],
+    solicit: Callable[[str], Awaitable[str | SkillRequest]],
     quest_id: str = "",
     control_root: Path | None = None,
     leave_state: dict[str, str] | None = None,
@@ -112,7 +112,7 @@ async def run_terminal_client(
                     try:
                         async for prompt in gate_recv:
                             gate_state["elsewhere"] = False
-                            reply = ""
+                            reply: str | SkillRequest = ""
                             with anyio.CancelScope() as scope:
                                 gate_state["scope"] = scope
                                 try:
@@ -128,6 +128,14 @@ async def run_terminal_client(
                                     gate_recv.receive_nowait()
                                 except anyio.WouldBlock:
                                     break
+                            if isinstance(reply, SkillRequest):
+                                cmd_line = (
+                                    f"/{reply.name} {reply.args}".rstrip())
+                                if local_echo is not None:
+                                    local_echo(cmd_line)
+                                await client.send_skill_request(
+                                    reply.name, reply.args)
+                                continue
                             # Echo a recognized control command before handling (non-reconciling).
                             control = reply.strip()
                             if (control in ("/abandon", "/save", "/clear")
