@@ -44,7 +44,7 @@ def create_quest(control_root: Path, prompt: str) -> None:
         _imp("new", "--non-interactive", "--message", prompt), env, control_root)
 
 
-def resume_change(control_root: Path, token: str) -> str:
+def resume_quest(control_root: Path, token: str) -> str:
     """Resolve a token to a single Quest and spawn a detached `imp resume` for it."""
     from imp.cli.main import _iter_quest_ids
     matches = [cid for cid in _iter_quest_ids(control_root) if token in cid]
@@ -60,7 +60,7 @@ def resume_change(control_root: Path, token: str) -> str:
     return f"Resuming @{target}…"
 
 
-def abandon_change(control_root: Path, quest_id: str) -> int:
+def abandon_quest(control_root: Path, quest_id: str) -> int:
     """Abandon a Quest via `imp abandon`, synchronously; returns its exit code."""
     return _run_foreground(
         _imp("abandon", quest_id), _base_env(), control_root)

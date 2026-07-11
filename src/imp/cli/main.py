@@ -54,7 +54,7 @@ from imp.cli.terminal_title import TerminalTitle
 from imp.engine import backlog, worktree
 from imp.engine.abandon import (
     discard_conversation,
-    tear_down_change,
+    tear_down_quest,
 )
 from imp.engine.archive import read as archive_read
 from imp.engine.awaiting_user_input import AwaitingUserInput
@@ -2558,7 +2558,7 @@ def _abandon(control: Path, quest_id: str, *, yes: bool = False) -> int:
             print(f"Abandoned {token}.")
             return 0
     try:
-        tear_down_change(change)
+        tear_down_quest(change)
     except LockHeld as e:
         print(f"imp: Quest {quest_id} is running (pid {e.held_by_pid or '?'}); "
               f"stop it before abandoning", file=sys.stderr)

@@ -9,7 +9,7 @@ from imp.engine.state import State
 from tests.conftest import _seed_control
 
 
-def test_save_change_non_resident_marks_status_paused(
+def test_save_quest_non_resident_marks_status_paused(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     import imp.remote.session.save as savemod
@@ -17,11 +17,11 @@ def test_save_change_non_resident_marks_status_paused(
     _seed_control(tmp_path)
     change = Quest.create_draft(tmp_path, title="x", quest_id="feat", base_branch="main")
     monkeypatch.setattr(savemod, "session_is_resident", lambda *_a: False)
-    savemod.save_change(tmp_path, "feat")
+    savemod.save_quest(tmp_path, "feat")
     assert State.load(change.state_dir).status == "paused"
 
 
-def test_save_change_non_resident_ignores_materialized_change(
+def test_save_quest_non_resident_ignores_materialized_change(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     import imp.remote.session.save as savemod
@@ -30,12 +30,12 @@ def test_save_change_non_resident_ignores_materialized_change(
     change = Quest.create(tmp_path, title="x", quest_id="feat2", base_branch="main")
     assert change.materialized  # confirm it starts materialized
     monkeypatch.setattr(savemod, "session_is_resident", lambda *_a: False)
-    savemod.save_change(tmp_path, "feat2")
+    savemod.save_quest(tmp_path, "feat2")
     # Status must NOT be flipped to "saved"
     assert State.load(change.state_dir).status != "saved"
 
 
-def test_save_change_resident_delivers_the_control(
+def test_save_quest_resident_delivers_the_control(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     import imp.remote.session.save as savemod
@@ -45,5 +45,5 @@ def test_save_change_resident_delivers_the_control(
     monkeypatch.setattr(
         savemod, "_deliver_save_resident",
         lambda _c, cid: delivered.append(cid))
-    savemod.save_change(tmp_path, "feat")
+    savemod.save_quest(tmp_path, "feat")
     assert delivered == ["feat"]

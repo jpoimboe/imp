@@ -56,7 +56,7 @@ from imp.remote.daemon.telegram_adapter import (
     handle_for,
 )
 from imp.remote.session.reply import deliver_session_reply
-from imp.remote.session.save import save_change as _save_change
+from imp.remote.session.save import save_quest as _save_quest
 
 _log = logging.getLogger("imp.daemon")
 
@@ -458,13 +458,13 @@ async def run_daemon(
     shutdown = anyio.Event() if shutdown is None else shutdown
     deliver = deliver or (lambda cid, text: deliver_to_session(control_root, cid, text))
     create = create or (lambda prompt: spawn.create_quest(control_root, prompt))
-    abandon = abandon or (lambda cid: spawn.abandon_change(control_root, cid))
+    abandon = abandon or (lambda cid: spawn.abandon_quest(control_root, cid))
     list_quests = list_quests or (lambda: discover.list_quests(control_root))
     resident_ids = resident_ids or (
         lambda: frozenset(resident_session_ids(control_root)))
     search = search or (lambda q: archive_read.search_archive(control_root, q))
-    resume = resume or (lambda token: spawn.resume_change(control_root, token))
-    save = save or (lambda cid: _save_change(control_root, cid))
+    resume = resume or (lambda token: spawn.resume_quest(control_root, token))
+    save = save or (lambda cid: _save_quest(control_root, cid))
 
     spath = socket_path(control_root)
     outbound: queue.Queue[dict[str, Any]] = queue.Queue()

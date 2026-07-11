@@ -13,7 +13,7 @@ from imp.remote.session.discover import session_socket_path
 from imp.remote.session.protocol import CONTROL_SAVE
 
 
-def save_change(control_root: Path, quest_id: str) -> None:
+def save_quest(control_root: Path, quest_id: str) -> None:
     if session_is_resident(control_root, quest_id):
         _deliver_save_resident(control_root, quest_id)
     else:

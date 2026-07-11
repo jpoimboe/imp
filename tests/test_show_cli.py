@@ -492,7 +492,7 @@ def test_show_abandoned_backlog_is_not_a_live_brief(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     import imp.cli.main as m
-    from imp.engine.abandon import tear_down_change
+    from imp.engine.abandon import tear_down_quest
 
     _seed_control(tmp_path)
     monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
@@ -504,7 +504,7 @@ def test_show_abandoned_backlog_is_not_a_live_brief(
         origin="idea",
         seed_opening="Add OAuth",
     )
-    tear_down_change(change)
+    tear_down_quest(change)
     assert not (tmp_path / ".imp" / "quests" / "2026-06-16-bkg111").exists()
     out = _run(monkeypatch, tmp_path, "show", "2026-06-16-bkg111", "status")
     assert out.strip() != "backlog"  # History item, not a queued Backlog brief

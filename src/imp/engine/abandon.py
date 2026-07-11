@@ -9,7 +9,7 @@ from imp.engine.quest import Quest
 from imp.engine.state import ProjectLock, State
 
 
-def tear_down_change(change: Quest) -> None:
+def tear_down_quest(change: Quest) -> None:
     """Destroy a change: mark abandoned, archive a non-resumable tombstone, drop the
     live home. On a built-out change also pop the merge queue (waking the next head if
     this change was the head), remove the worktree, and delete the branch; on a draft

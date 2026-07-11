@@ -14,7 +14,7 @@ from imp.engine.abandon import (
     archive_conversation,
     discard_conversation,
     save_to_backlog,
-    tear_down_change,
+    tear_down_quest,
 )
 from imp.engine.errors import LoadError, LoadErrors
 from imp.engine.executor import RunResult, run_quest
@@ -71,7 +71,7 @@ async def serve_quest_session(
     *,
     run_fn: RunFn = run_quest,
     hibernate: bool = True,
-    tear_down: Callable[[Quest], None] = tear_down_change,
+    tear_down: Callable[[Quest], None] = tear_down_quest,
     archive_left: Callable[[Quest], None] = archive_conversation,
     save_left: Callable[[Quest], None] = save_to_backlog,
     discard_left: Callable[[Quest], None] = discard_conversation,
