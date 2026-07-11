@@ -24,7 +24,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
-from imp.engine.env import HEADLESS_ENV
+from imp.engine.env import ENGINE_ENV_VARS, HEADLESS_ENV
 
 
 @dataclass(frozen=True, slots=True)
@@ -379,7 +379,9 @@ def _build_setenv(
     """Env allowlist (spec B.4). IMP_* and PYTHONPATH come from engine_env_result
     (authoritative, M2-r5; PYTHONPATH is the single deliberate non-IMP_ exception
     — the imp-on-imp import shadow); generic + LC_* + extra_env pass through from
-    `environ`; TMPDIR=/tmp.
+    `environ`; ambient non-engine IMP_* toggles pass through from `environ` too
+    (engine-managed IMP_* keys are excluded here so engine_env_result stays
+    authoritative); TMPDIR=/tmp.
 
     Dedup: accumulated into a dict (insertion-ordered); re-assigning a key updates
     its value in place (first-seen position, last value wins). TMPDIR is assigned
@@ -395,6 +397,13 @@ def _build_setenv(
     for k in extra_env:
         if k in environ:
             d[k] = environ[k]
+    # Ambient IMP_* toggles: admit user-set IMP_-prefixed vars (e.g. IMP_SPIKE_LOG,
+    # IMP_DEBUG) EXCEPT the engine-managed set, which arrives authoritatively from
+    # engine_env_result below. Placed before that loop so a stale ambient engine var
+    # (e.g. IMP_TEST_CMD_FAST from an outer imp) can never leak in.
+    for k, v in environ.items():
+        if k.startswith("IMP_") and k not in ENGINE_ENV_VARS:
+            d[k] = v
     for k, v in engine_env_result.items():
         if _is_engine_passthrough(k):
             d[k] = v

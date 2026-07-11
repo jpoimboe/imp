@@ -361,6 +361,71 @@ def test_build_setenv_omits_pythonpath_when_engine_env_lacks_it(tmp_path):
     assert "PYTHONPATH" not in keys
 
 
+def test_build_setenv_admits_ambient_imp_toggles(tmp_path):
+    # AC 5: user-set non-engine IMP_* vars in the launching environment reach the
+    # sandboxed agent, and an engine-managed var still arrives authoritatively.
+    control, wt = _layout(tmp_path)
+    pol = resolve_policy(
+        worktree=wt, control_root=control, change_id="abc",
+        cfg=SandboxConfig(),
+        engine_env_result={"IMP_PROJECT_ROOT": str(wt)},
+        environ={"PATH": "/usr/bin", "IMP_SPIKE_LOG": "1", "IMP_DEBUG": "verbose"},
+        available=True,
+    )
+    assert ("IMP_SPIKE_LOG", "1") in pol.setenv
+    assert ("IMP_DEBUG", "verbose") in pol.setenv
+    assert ("IMP_PROJECT_ROOT", str(wt)) in pol.setenv
+
+
+def test_build_setenv_strips_provider_api_keys(tmp_path):
+    # AC 5: provider key env vars are never on the allowlist (not IMP_-prefixed,
+    # not generic/LC_/extra_env), so they never reach the agent.
+    control, wt = _layout(tmp_path)
+    pol = resolve_policy(
+        worktree=wt, control_root=control, change_id="abc",
+        cfg=SandboxConfig(),
+        engine_env_result={},
+        environ={"PATH": "/usr/bin", "ANTHROPIC_API_KEY": "sk-ant",
+                 "OPENAI_API_KEY": "sk-oai"},
+        available=True,
+    )
+    keys = {k for k, _ in pol.setenv}
+    assert "ANTHROPIC_API_KEY" not in keys
+    assert "OPENAI_API_KEY" not in keys
+
+
+def test_build_setenv_ambient_engine_managed_imp_var_does_not_leak(tmp_path):
+    # AC 5: an ambient IMP_TEST_CMD_FAST (an ENGINE_ENV_VARS member) that
+    # engine_env_result does NOT provide must NOT leak in — the engine's
+    # "absent => no fast gate" contract holds.
+    control, wt = _layout(tmp_path)
+    pol = resolve_policy(
+        worktree=wt, control_root=control, change_id="abc",
+        cfg=SandboxConfig(),
+        engine_env_result={"IMP_PROJECT_ROOT": str(wt)},
+        environ={"PATH": "/usr/bin", "IMP_TEST_CMD_FAST": "stale-gate"},
+        available=True,
+    )
+    keys = {k for k, _ in pol.setenv}
+    assert "IMP_TEST_CMD_FAST" not in keys
+
+
+def test_build_setenv_engine_imp_var_wins_over_ambient(tmp_path):
+    # AC 5: when both ambient and engine provide IMP_TEST_CMD_FAST, the engine
+    # value is authoritative (ambient pass excludes ENGINE_ENV_VARS; engine loop
+    # runs after it).
+    control, wt = _layout(tmp_path)
+    pol = resolve_policy(
+        worktree=wt, control_root=control, change_id="abc",
+        cfg=SandboxConfig(),
+        engine_env_result={"IMP_TEST_CMD_FAST": "real-gate"},
+        environ={"PATH": "/usr/bin", "IMP_TEST_CMD_FAST": "stale-gate"},
+        available=True,
+    )
+    assert ("IMP_TEST_CMD_FAST", "real-gate") in pol.setenv
+    assert ("IMP_TEST_CMD_FAST", "stale-gate") not in pol.setenv
+
+
 def test_resolve_policy_uid_zero_masks_run_user_0(tmp_path):
     control, wt = _layout(tmp_path)
     pol = resolve_policy(
