@@ -34,3 +34,25 @@ def test_what_is_imp_names_quest_concept() -> None:
     assert "The core idea is a **Quest**" in text
     assert "per-quest home on disk." in text
     assert "**Change**" not in text
+
+
+def test_imp_conventions_names_quest_concept() -> None:
+    text = Path("docs/imp-conventions.md").read_text()
+    assert "nouns: Quest, workflow, backlog, phase," in text
+    assert "nouns: Change," not in text
+
+
+def test_imp_invariants_names_quest_concept() -> None:
+    text = Path("docs/imp-invariants.md").read_text()
+    assert "quest.json" in text
+    assert "change.json" not in text
+    assert "change_id" not in text
+    assert ".imp/changes/" not in text
+
+
+def test_imp_operator_notes_names_quest_concept() -> None:
+    text = Path("docs/imp-operator-notes.md").read_text()
+    assert "Runbook for operating a running imp Quest." in text
+    assert ".imp/quest/workflow" in text
+    assert ".imp/change/" not in text
+    assert ".imp/changes/" not in text
