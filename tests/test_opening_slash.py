@@ -161,11 +161,10 @@ async def test_async_cmd_new_threads_model_to_run_session_client(
     monkeypatch.setattr(main, "run_session_client", _fake_rsc)
     monkeypatch.setattr(main, "_should_prompt_opening", lambda **kw: True)
     monkeypatch.setattr(main, "_select_headless", lambda args: (False, False))
-    monkeypatch.setattr(main, "_tui_requested", lambda args: False)
 
     rc = await main._async_cmd_new(argparse.Namespace(
         base=None, workflow=None, idea=None, title=None,
-        non_interactive=False, autonomous=False, message=None, tui=False,
+        non_interactive=False, autonomous=False, message=None,
         opening=None, depends_on=None))
 
     assert rc == 0
@@ -194,44 +193,10 @@ async def test_async_cmd_new_threads_model_to_headless_session_client(
     monkeypatch.setattr(main, "run_session_client", _fake_rsc)
     monkeypatch.setattr(main, "_should_prompt_opening", lambda **kw: True)
     monkeypatch.setattr(main, "_select_headless", lambda args: (True, False))
-    monkeypatch.setattr(main, "_tui_requested", lambda args: False)
 
     rc = await main._async_cmd_new(argparse.Namespace(
         base=None, workflow=None, idea=None, title=None,
-        non_interactive=False, autonomous=False, message=None, tui=False,
-        opening=None, depends_on=None))
-
-    assert rc == 0
-    assert captured["model"] == "anthropic:claude-fable-5"
-
-
-@pytest.mark.anyio
-async def test_async_cmd_new_threads_model_to_tui_session(
-    tmp_path, monkeypatch,
-) -> None:
-    _seed_control(tmp_path)
-    monkeypatch.chdir(tmp_path)
-
-    async def _fake_open(change, *, model_sink=None, **kw):
-        if model_sink is not None:
-            model_sink["model"] = "anthropic:claude-fable-5"
-        return "brainstorm this"
-
-    captured: dict[str, object] = {}
-
-    async def _fake_tui(change, **kw):
-        captured.update(kw)
-        return 0
-
-    monkeypatch.setattr(main, "_read_opening_message", _fake_open)
-    monkeypatch.setattr(main, "_run_tui_session", _fake_tui)
-    monkeypatch.setattr(main, "_should_prompt_opening", lambda **kw: True)
-    monkeypatch.setattr(main, "_select_headless", lambda args: (False, False))
-    monkeypatch.setattr(main, "_tui_requested", lambda args: True)
-
-    rc = await main._async_cmd_new(argparse.Namespace(
-        base=None, workflow=None, idea=None, title=None,
-        non_interactive=False, autonomous=False, message=None, tui=True,
+        non_interactive=False, autonomous=False, message=None,
         opening=None, depends_on=None))
 
     assert rc == 0
@@ -265,36 +230,6 @@ async def test_cleared_session_threads_model(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(main, "run_session_client", _fake_rsc)
 
     rc = await main._run_cleared_session(
-        tmp_path, "main", tui=False, leave_state={})
-    assert rc == 0
-    assert captured["model"] == "anthropic:claude-fable-5"
-
-
-@pytest.mark.anyio
-async def test_cleared_session_tui_threads_model(tmp_path, monkeypatch) -> None:
-    _seed_control(tmp_path)
-    monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr(
-        main, "_read_intent_line",
-        _fake_intent_line(model="anthropic:claude-fable-5", reply="brainstorm"))
-    monkeypatch.setattr(main, "_print_splash_banner", lambda *, interactive: False)
-
-    class _StubPrompt:
-        def __init__(self, *a: object, **k: object) -> None: ...
-        async def ask_async(self, *a: object, **k: object) -> str:
-            return "brainstorm"
-
-    monkeypatch.setattr(main, "Prompt", _StubPrompt)
-
-    captured: dict[str, object] = {}
-
-    async def _fake_tui(change, **kw):
-        captured.update(kw)
-        return 0
-
-    monkeypatch.setattr(main, "_run_tui_session", _fake_tui)
-
-    rc = await main._run_cleared_session(
-        tmp_path, "main", tui=True, leave_state={})
+        tmp_path, "main", leave_state={})
     assert rc == 0
     assert captured["model"] == "anthropic:claude-fable-5"

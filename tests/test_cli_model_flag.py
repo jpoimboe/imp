@@ -55,7 +55,7 @@ def test_chat_parser_rejects_malformed_model_at_parse_time() -> None:
 def _full_ns(**over: object) -> argparse.Namespace:
     base = dict(
         base=None, workflow=None, idea=None, title=None,
-        non_interactive=True, autonomous=False, message=None, tui=False,
+        non_interactive=True, autonomous=False, message=None,
         opening="do a thing", depends_on=None, model=None)
     base.update(over)
     return argparse.Namespace(**base)
@@ -133,7 +133,6 @@ async def test_typed_opening_model_overrides_flag_model(
     monkeypatch.setattr(main, "run_session_client", _fake_rsc)
     monkeypatch.setattr(main, "_should_prompt_opening", lambda **kw: True)
     monkeypatch.setattr(main, "_select_headless", lambda args: (False, False))
-    monkeypatch.setattr(main, "_tui_requested", lambda args: False)
 
     rc = await main._async_cmd_new(
         _full_ns(model="anthropic:claude-fable-5", non_interactive=False, opening=None))
