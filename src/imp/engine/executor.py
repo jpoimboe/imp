@@ -217,7 +217,7 @@ def _refresh_workflow_snapshot(change: Change) -> bool:
 
     # 2. Resolve the live source; best-effort — never introduce a new failure.
     try:
-        live = change.live_workflow_dir
+        live = change.control_workflow_dir
     except Exception:
         return False
     if not live.is_dir():

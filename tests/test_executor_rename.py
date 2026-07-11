@@ -130,7 +130,7 @@ def test_run_change_restores_cwd_on_error(tmp_path: Path, provider_registry) -> 
     _seed_two_step_control(tmp_path)
     ch = Change.create(tmp_path, title="x",
                        change_id="ddd444", base_branch="main")
-    (ch.workflow_dir / "workflow.yaml").write_text("}{ not yaml")
+    (ch.control_workflow_dir / "workflow.yaml").write_text("}{ not yaml")
 
     cwd_before = os.getcwd()
     with pytest.raises(LoadError):
