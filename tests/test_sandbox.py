@@ -1,6 +1,7 @@
 """Always-on sandbox tests — no bwrap needed (pure argv + policy resolution)."""
 from __future__ import annotations
 
+import itertools
 import types as _types
 from pathlib import Path
 
@@ -816,3 +817,86 @@ def test_resolve_policy_draft_change_skips_ref_protection(tmp_path):
     assert pol.git_ref_reexpose == ()
     # refs/heads/imp is NOT created for the draft case.
     assert not (git / "refs" / "heads" / "imp").exists()
+
+
+def test_ephemeral_home_emitted_early_and_writable():
+    # A spike-shaped hand-built policy: ephemeral tmpfs home under which the
+    # worktree, change_home and a credential dir all live.
+    p = _policy(
+        worktree="/home/u/proj/.imp/worktrees/abc",
+        change_home="/home/u/proj/.imp/changes/abc",
+        git_common_dir="/home/u/proj/.git",
+        git_ro_remask=(), writable_caches=(), extra_readable=(),
+        extra_writable=(), secret_dirs=("/run/user/1000",), secret_files=(),
+        ephemeral_home="/home/u",
+        cred_writethrough=("/home/u/.claude", "/home/u/.codex"),
+    )
+    plan = p.bind_plan()
+    # The home tmpfs is emitted right after /tmp and BEFORE the worktree bind.
+    assert plan[0] == ("/tmp", "rw")
+    assert plan[1] == ("/home/u", "tmpfs_rw")
+    i_home = plan.index(("/home/u", "tmpfs_rw"))
+    i_wt = plan.index(("/home/u/proj/.imp/worktrees/abc", "rw"))
+    i_ch = plan.index(("/home/u/proj/.imp/changes/abc", "rw"))
+    i_claude = plan.index(("/home/u/.claude", "rw"))
+    i_mask = plan.index(("/run/user/1000", "mask_dir"))
+    assert i_home < i_wt < i_claude          # tmpfs first, cred write-through later
+    assert i_home < i_ch < i_claude
+    assert i_claude < i_mask                 # secret masks remain last
+    # allows_write: everything under the tmpfs home is writable (re-exposed),
+    # the worktree/change_home (under home) win over the tmpfs, and the cred
+    # dirs are writable — the only real-home paths a spike can write.
+    assert p.allows_write(Path("/home/u/.local/bin/x")) is True
+    assert p.allows_write(Path("/home/u/proj/.imp/worktrees/abc/src/a.py")) is True
+    assert p.allows_write(Path("/home/u/proj/.imp/changes/abc/progress.md")) is True
+    assert p.allows_write(Path("/home/u/.claude/.credentials.json")) is True
+    assert p.allows_write(Path("/home/u/.codex/auth.json")) is True
+    # /run/user mask (emitted last, absolute) still denies.
+    assert p.allows_write(Path("/run/user/1000/bus")) is False
+
+
+def test_tmpfs_rw_argv_is_identical_to_mask_dir_emission():
+    p = _policy(
+        worktree="/wt", git_common_dir="/ctl/.git",
+        git_ro_remask=(), writable_caches=(), extra_readable=(),
+        extra_writable=(), secret_dirs=("/home/u/.ssh",), secret_files=(),
+        ephemeral_home="/home/u",
+    )
+    argv = build_sandbox_argv("x", cwd="/wt", policy=p, engine_env={})
+    pairs = list(itertools.pairwise(argv))
+    # tmpfs_rw home and the secret mask_dir both emit `--tmpfs <path>`.
+    assert ("--tmpfs", "/home/u") in pairs       # ephemeral home
+    assert ("--tmpfs", "/home/u/.ssh") in pairs  # secret mask (byte-identical form)
+
+
+def test_cred_writethrough_argv_is_rw_bind():
+    p = _policy(
+        worktree="/wt", git_common_dir="/ctl/.git",
+        git_ro_remask=(), writable_caches=(), extra_readable=(),
+        extra_writable=(), secret_dirs=(), secret_files=(),
+        ephemeral_home="/home/u",
+        cred_writethrough=("/home/u/.claude",),
+    )
+    argv = " ".join(build_sandbox_argv("x", cwd="/wt", policy=p, engine_env={}))
+    assert "--bind /home/u/.claude /home/u/.claude" in argv
+
+
+def test_argv_binds_match_bind_plan_spike():
+    # Extended argv-parity guard (AC 3). tmpfs_rw and mask_dir emit byte-identical
+    # `--tmpfs <path>` argv, so _parse_argv_binds recovers BOTH as "mask_dir";
+    # normalize bind_plan's tmpfs_rw to mask_dir before the order/position compare.
+    p = _policy(
+        worktree="/wt", git_common_dir="/ctl/.git",
+        git_ro_remask=("/ctl/.git/hooks",), writable_caches=(),
+        extra_readable=(), extra_writable=(),
+        secret_dirs=("/home/u/.ssh", "/run/user/1000"), secret_files=(),
+        ephemeral_home="/home/u",
+        cred_writethrough=("/home/u/.claude",),
+    )
+    argv = build_sandbox_argv("x", cwd="/wt", policy=p, engine_env={})
+    expected = [(b, "mask_dir" if k == "tmpfs_rw" else k) for b, k in p.bind_plan()]
+    assert _parse_argv_binds(argv) == expected
+    # ...then pin the real drift risk: the two identical-argv kinds have OPPOSITE
+    # write semantics — the tmpfs home is writable, the secret mask denies.
+    assert p.allows_write(Path("/home/u/.local/bin/x")) is True
+    assert p.allows_write(Path("/home/u/.ssh/id_rsa")) is False
