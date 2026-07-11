@@ -319,7 +319,7 @@ Bug found? Write failing test reproducing it. Follow TDD cycle. Test proves fix 
 
 Never fix bugs without a test.
 
-A known bug you cannot fix in the same change goes in as a committed repro marked
+A known bug you cannot fix in the same quest goes in as a committed repro marked
 `@pytest.mark.xfail(strict=True, reason="...")`. Master stays green, and the moment the
 fix lands the test xpasses — strict mode turns that into a failure, auto-flipping the
 repro into a regression guard.

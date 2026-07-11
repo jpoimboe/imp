@@ -147,7 +147,7 @@ def test_threshold_renders_full_brainstorm_depth(tmp_path) -> None:
     # design lens expanded from spec-design-principles
     assert "architecture, components, data flow, error handling, and testing" in out
     assert "do not propose unrelated refactoring" not in out
-    assert "improvements to the code this change touches." in out
+    assert "improvements to the code this quest touches." in out
 
 
 def test_threshold_owns_complexity_classification() -> None:

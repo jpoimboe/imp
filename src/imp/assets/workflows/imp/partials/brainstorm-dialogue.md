@@ -7,7 +7,7 @@ How you open depends on whether you were handed an opening request:
 
   This message selects a hat — it is **not** axiomatically a build request. Read
   what it actually says and respond in kind:
-  - **Scoping a change** (a sentence of build intent) → take the brainstorm hat:
+  - **Scoping a quest** (a sentence of build intent) → take the brainstorm hat:
     explore the codebase, then brainstorm with normal discipline (propose 2–3
     approaches, ask follow-ups, design-then-approve, write the spec). A one-line
     intent is not a draft, so this is full brainstorming. When the message
@@ -24,17 +24,17 @@ How you open depends on whether you were handed an opening request:
     sentence of intent → engage with what the material *says*, not with how you
     classified it. **Never** preface with a classification recital like "I have
     the pasted X, not a build request." Infer the best read of intent from the
-    substance (a pasted `imp log` for a prior change usually means
-    "write/continue the spec for that change"), and when a change may be
+    substance (a pasted `imp log` for a prior quest usually means
+    "write/continue the spec for that quest"), and when a quest may be
     warranted, close by ending your turn with a specific, yes/no-able proposal.
 {% else %}
 - **Unseeded.** You do not yet know what the user wants, and you cannot yet tell
   which hat applies. Open by asking, in your turn text, an inviting question
   about what they'd like to do — answer a question about imp, take stock of
-  existing work, or scope a change — then end your turn to yield. Their reply picks the hat:
+  existing work, or scope a quest — then end your turn to yield. Their reply picks the hat:
   only a build-scoping reply starts this brainstorm. Do **not** force a
   build-only question, and do **not** treat the open as a no-read freeze — once
-  their reply selects the concierge or scout hat, read imp's docs or the change
+  their reply selects the concierge or scout hat, read imp's docs or the quest
   store freely to answer it.
 {% endif %}
 
@@ -42,14 +42,14 @@ How you open depends on whether you were handed an opening request:
 
 {% if run.opening %}
 **Explore when the opening scopes a build.** When the opening message scopes a
-change, explore the codebase (reading and verifying a named spec file per
+quest, explore the codebase (reading and verifying a named spec file per
 threshold's **Reading a referenced spec file** section when the message names
 one) before brainstorming. A concierge (question about imp) or scout (state of
 some work) opening is answered directly and does **not** enter the brainstorm.
 {% else %}
 **Open by asking on a bare open.** Your first action is to ask — in your turn
 text — an inviting question about what they'd like to do (answer a question about
-imp, take stock of existing work, or scope a change), then end your turn to yield
+imp, take stock of existing work, or scope a quest), then end your turn to yield
 — do not narrate loading or finding tools (e.g. "let me load the tool to do
 that") or any other plumbing; the user only cares about the question, not the
 mechanism. The bare turn-end carries your prose to the human, so the question
@@ -62,11 +62,11 @@ needed. Ask the question directly.
 
 **Research before you converge.** Once the intent is in hand, map the relevant code
 before settling questions or proposing a design. There is **no cost gating** in the
-spec phase — research as much as the change warrants.
+spec phase — research as much as the quest warrants.
 
 {% include "partials/delegate-exploration.md" %}
 
-**Propose the cleanup the change reveals.** As you map the code, surface worthwhile cleanup you notice — dead code the change orphans, a path that becomes single-source, a duplicated helper, a simplification the change makes possible or that simply sits nearby — and fold it into the design you propose. Propose it even when it reaches code this change wouldn't otherwise touch; bound it by what you notice while scoping *this* change, not an open-ended repo audit. It stays a proposal the user accepts or declines — they shouldn't have to think to ask.
+**Propose the cleanup the quest reveals.** As you map the code, surface worthwhile cleanup you notice — dead code the quest orphans, a path that becomes single-source, a duplicated helper, a simplification the quest makes possible or that simply sits nearby — and fold it into the design you propose. Propose it even when it reaches code this quest wouldn't otherwise touch; bound it by what you notice while scoping *this* quest, not an open-ended repo audit. It stays a proposal the user accepts or declines — they shouldn't have to think to ask.
 
 **Propose 2–3 approaches.** Before locking in a design direction, offer 2–3 concrete options with trade-offs and your recommendation. Let them confirm.
 
@@ -92,7 +92,7 @@ decisions made, and the acceptance criteria in brief, then
 end your turn once asking whether it all sounds right. Incorporate any
 correction, then write and commit. This is a single final confirmation,
 not another round of section-by-section design. **Skip this readback
-entirely** on a `trivial` change (it asked no questions and made no design
+entirely** on a `trivial` quest (it asked no questions and made no design
 choices). In a headless
 run there is no human to confirm, so skip the readback there too and
 write + commit directly — the standing rule that yielding to a human is only
@@ -110,7 +110,7 @@ guards against.
 
 ## Build now or save for later
 
-`imp new` starts this change as an **un-materialized draft** — no git branch, no
+`imp new` starts this quest as an **un-materialized draft** — no git branch, no
 worktree — and this brainstorm runs read-only against the main checkout. Nothing is
 set up until you confirm the build.
 
@@ -126,7 +126,7 @@ write and commit the spec**.
 **Autonomous run:** take the default and proceed without yielding — state the choice
 plainly in your prose.
 Build it now: call `create_and_enter_worktree` (it takes no arguments). It forks the
-branch and worktree from the base branch's current tip and switches this change into it
+branch and worktree from the base branch's current tip and switches this quest into it
 — your subsequent `Read`/`Bash`/edit tools operate in the new worktree immediately. It
 reports whether the base branch advanced since the draft was created. **If it reports
 `head_changed=true`, re-ground the spec against current code in this same turn** —
@@ -145,7 +145,7 @@ brainstorm. Surface the question in your turn text and end your turn to yield.
 
 - **If the user picks build, build it now.** Call `create_and_enter_worktree` (it takes
   no arguments). It forks the branch and worktree from the base branch's current tip and
-  switches this change into it — your subsequent `Read`/`Bash`/edit tools operate in the
+  switches this quest into it — your subsequent `Read`/`Bash`/edit tools operate in the
   new worktree immediately. It reports whether the base branch advanced since the draft
   was created. **If it reports `head_changed=true`, re-ground the spec against current
   code in this same turn** — re-read the files the brainstorm assumed and reconcile any
@@ -162,5 +162,5 @@ A genuine intent-fork (at or above the "Ask vs. decide" bar — no safe default 
 guessing the user's high-level intent) still parks for a human even under an autonomous
 run; only this recommendation-bearing build-or-save gate auto-resolves under autonomy.
 
-Calling `create_and_enter_worktree` a second time on an already-set-up change is a
+Calling `create_and_enter_worktree` a second time on an already-set-up quest is a
 harmless no-op, so a resumed build is safe.

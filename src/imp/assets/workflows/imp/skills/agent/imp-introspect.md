@@ -6,9 +6,9 @@ plain-language answer. Pair with `imp-mental-model` for the stable picture.
 
 ## What the current workflow is doing
 
-Read the change's `workflow/workflow.yaml` (under the change home) for the ordered
+Read the quest's `workflow/workflow.yaml` (under the quest home) for the ordered
 phases and steps, then correlate it with the live step in `state/state.json` to
-see where this change is right now. Turn it into plain language: name the phase
+see where this quest is right now. Turn it into plain language: name the phase
 the user is in and what the next step does, without surfacing internal step ids.
 
 ## A CLI question
@@ -19,21 +19,21 @@ names rather than guessing them.
 
 ## What work exists
 
-- `imp list` — the board: active in-flight changes plus the Backlog (including
-  parked / `saved` changes).
-- `imp list --all` — also includes completed and abandoned past changes.
+- `imp list` — the board: active in-flight quests plus the Backlog (including
+  parked / `saved` quests).
+- `imp list --all` — also includes completed and abandoned past quests.
 - `imp search <query>` — a live-and-archive scout: search **active** (in-flight +
-  drafts), **backlog**, and **archive** changes for `<query>` as a case-insensitive
-  substring of a change's id, title, or conversation content (a required substring;
+  drafts), **backlog**, and **archive** quests for `<query>` as a case-insensitive
+  substring of a quest's id, title, or conversation content (a required substring;
   bare `imp search` errors). Composable `--active` / `--backlog` / `--archived` flags
   scope it to those zones; with none given, all three are searched. Default output is
-  grep-style matched excerpts per change; `-l` / `--list` prints one terse line per
-  change (`id  title  [zone]`).
+  grep-style matched excerpts per quest; `-l` / `--list` prints one terse line per
+  quest (`id  title  [zone]`).
 
 Summarize the rows in plain language (what is in flight, what is parked, what is
-finished); do not invent changes that the commands did not list.
+finished); do not invent quests that the commands did not list.
 
-## Detail on one change
+## Detail on one quest
 
 `imp show <id> [spec|plan|events|status]` — the subcommand selects the
 facet: `spec` for the spec, `plan` for the plan(s), `events` for the timeline,
@@ -55,16 +55,16 @@ answers the question, and never dump the raw log as your default.
   payloads, with `step_context` redacted and each event byte-capped. Drop to
   this tier only for the few events whose full contents you actually need.
 
-## Querying another change's timeline
+## Querying another quest's timeline
 
-To read a *different* change's events, do not cat its log file — use a front
+To read a *different* quest's events, do not cat its log file — use a front
 door that renders a digest by default:
 
-- In-loop: `query_events(quest_id="<id>")` returns that change's digest (or its
-  raw payloads with `full=True`). It resolves live and archived changes alike,
+- In-loop: `query_events(quest_id="<id>")` returns that quest's digest (or its
+  raw payloads with `full=True`). It resolves live and archived quests alike,
   and returns a clear `{"error": ...}` string for an unknown id instead of
   raising.
-- From bash: `imp show <id> events` prints that change's digest lines (add
+- From bash: `imp show <id> events` prints that quest's digest lines (add
   `--full` for the raw payloads).
 
 ## Keep the output bounded
@@ -77,11 +77,11 @@ it deliberately:
   `agent_id` (an agent-id substring) rather than pulling the whole log.
 - **Scan, then zoom.** Read the digest first; drop to `--full` / `full=True`
   only for the handful of events whose exact payload you need.
-- **Prefer state over history.** When you only need where a change stands now —
+- **Prefer state over history.** When you only need where a quest stands now —
   not how it got there — reach for the board (`imp list`) or the `status` /
   `spec` facets of `imp show <id>` instead of the event log.
 
-## This change's own state
+## This quest's own state
 
-Read `state/state.json` in the current change home, or run
-`imp show <id> status`, to report where this conversation's change stands.
+Read `state/state.json` in the current quest home, or run
+`imp show <id> status`, to report where this conversation's quest stands.
