@@ -10,6 +10,8 @@ from imp.cli.inert_resume import (
     render_inert_question,
     run_inert_resume,
 )
+from imp.engine.abandon import archive_conversation
+from imp.engine.archive.read import rehydrate_quest
 from imp.engine.quest import Quest
 from imp.engine.state import State
 from tests.conftest import _seed_control
@@ -245,3 +247,24 @@ async def test_run_inert_resume_ctrl_c_leaves_change_untouched(tmp_path: Path) -
     assert rc == 0
     after = ch.events_path.read_bytes() if ch.events_path.exists() else b""
     assert after == before              # launch never ran -> no events appended
+
+
+def test_bare_turn_end_question_reprints_after_archive_and_rehydrate(
+        tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+    ch = Quest.create_draft(
+        tmp_path, title="C", quest_id="c", base_branch="main")
+    ch.event_log().append(
+        agent_id="step:p/s", type="awaiting_user_input",
+        payload={"steer_hint": "", "last_agent_message": "Which DB should I use?",
+                 "interrupt": False})
+    State(id="c", step="s", step_attempt=0, status="paused").save(ch.state_dir)
+
+    archive_conversation(ch)
+    assert not (tmp_path / ".imp" / "quests" / "c").exists()
+
+    rehydrate_quest(tmp_path, "c")
+    restored = Quest.load(tmp_path, "c")
+    # The gate is followed only by the conversation_archived leave marker that
+    # archive_conversation appended -> still unanswered -> reprints.
+    assert bare_turn_end_question(restored) == "Which DB should I use?"
