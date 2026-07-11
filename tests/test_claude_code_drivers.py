@@ -12,6 +12,7 @@ from imp.providers.claude_code import (
     _make_impty_sdk_tools,
 )
 from impty.driver import ImptyDriver
+from impty.mcp import THIN_DESCRIPTIONS
 from tests.cc_fakes import FakeClaudeSDKClient, assistant, result, text, tool_use
 
 
@@ -75,7 +76,9 @@ async def test_impty_sdk_tools_carry_driver_names_and_descriptions() -> None:
         "wait", "snapshot", "stop"}
     method_docs = {m.__name__: m.__doc__ for m in driver.tool_methods()}
     for name, sdk in by_name.items():
-        assert sdk.description == method_docs[name]
+        # Provider surface carries the thin one-liner, not the full docstring.
+        assert sdk.description == THIN_DESCRIPTIONS[name]
+        assert sdk.description != method_docs[name]
 
 
 @pytest.mark.anyio
