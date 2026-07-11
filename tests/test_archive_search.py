@@ -33,6 +33,12 @@ def _prose_line(text: str) -> str:
             "usage": {"input_tokens": 1, "output_tokens": 1}}}}) + "\n"
 
 
+def _user_msg_line(text: str, *, human: bool) -> str:
+    return json.dumps({
+        "id": "u0", "timestamp": "2026-06-01T00:00:01+00:00", "type": "user_message",
+        "payload": {"content": [{"type": "text", "text": text}], "human": human}}) + "\n"
+
+
 def test_search_archive_matches_title_substring(tmp_path: Path) -> None:
     _archive(tmp_path, "alpha", "Dark mode toggle")
     _archive(tmp_path, "beta", "Login flow")
@@ -104,3 +110,15 @@ def test_search_content_percent_is_literal(tmp_path: Path) -> None:
     _archive(tmp_path, "pct", "", events_text=_prose_line("throughput up 50% today"))
     _archive(tmp_path, "plain", "", events_text=_prose_line("50 items processed"))
     assert [h[0] for h in archive_read.search_archive_content(tmp_path, "50%")] == ["pct"]
+
+
+def test_search_content_surfaces_human_reply_not_injected_prompt(tmp_path: Path) -> None:
+    _archive(tmp_path, "reply", "",
+             events_text=_user_msg_line("please use HUMANTERM", human=True))
+    _archive(tmp_path, "prompt", "",
+             events_text=_user_msg_line("cover-check INJECTEDTERM", human=False))
+    # The human reply is indexed and searchable (term is in neither id nor title)...
+    assert [h[0] for h in
+            archive_read.search_archive_content(tmp_path, "HUMANTERM")] == ["reply"]
+    # ...but the injected prompt term matches nothing (excluded from content).
+    assert archive_read.search_archive_content(tmp_path, "INJECTEDTERM") == []

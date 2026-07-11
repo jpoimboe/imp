@@ -106,7 +106,8 @@ def test_conversation_prose_concatenates_prose_in_order() -> None:
     events = [
         {"type": "opening_intent", "payload": {"text": "make search better"}},
         {"type": "user_message",
-         "payload": {"content": [{"type": "text", "text": "add a 300s timeout"}]}},
+         "payload": {"content": [{"type": "text", "text": "add a 300s timeout"}],
+                     "human": True}},
         _llm_event("sure, the 300s deadline is wired"),
     ]
     prose = conversation_prose(events)
@@ -137,6 +138,38 @@ def test_conversation_prose_skips_malformed_without_raising() -> None:
         {"type": "llm_response", "payload": "not-a-dict-payload"},   # non-dict payload value
         {"type": "llm_response", "payload": {"raw": "not-a-dict"}},  # would raise if parsed
         {"type": "user_message",
-         "payload": {"content": [{"type": "text", "text": "second"}]}},
+         "payload": {"content": [{"type": "text", "text": "second"}],
+                     "human": True}},
     ]
     assert conversation_prose(events) == "first\nsecond"
+
+
+def test_conversation_prose_includes_human_user_message() -> None:
+    events = [
+        {"type": "user_message",
+         "payload": {"content": [{"type": "text", "text": "typed human reply"}],
+                     "human": True}},
+    ]
+    assert conversation_prose(events) == "typed human reply"
+
+
+def test_conversation_prose_excludes_nonhuman_user_message() -> None:
+    events = [
+        {"type": "user_message",
+         "payload": {"content": [{"type": "text", "text": "INJECTED cover-check prompt"}],
+                     "human": False}},
+        {"type": "user_message",
+         "payload": {"content": [{"type": "text", "text": "genuine human reply"}],
+                     "human": True}},
+    ]
+    prose = conversation_prose(events)
+    assert prose == "genuine human reply"    # only the human turn indexed
+    assert "INJECTED" not in prose           # injected prompt excluded
+
+
+def test_conversation_prose_treats_missing_human_field_as_nonhuman() -> None:
+    events = [
+        {"type": "user_message",
+         "payload": {"content": [{"type": "text", "text": "no human field here"}]}},
+    ]
+    assert conversation_prose(events) == ""  # absent human field -> excluded
