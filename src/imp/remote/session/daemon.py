@@ -66,7 +66,7 @@ def _hold_prompt(result: Any, coordinator: Any) -> str | None:
     return None
 
 
-async def serve_change_session(
+async def serve_quest_session(
     change: Quest,
     *,
     run_fn: RunFn = run_quest,
@@ -248,9 +248,9 @@ def main(argv: list[str] | None = None) -> int:
         kwargs["model"] = ns.model
     try:
         if kwargs:
-            result = anyio.run(functools.partial(serve_change_session, change, **kwargs))
+            result = anyio.run(functools.partial(serve_quest_session, change, **kwargs))
         else:
-            result = anyio.run(serve_change_session, change)
+            result = anyio.run(serve_quest_session, change)
     except (LoadError, LoadErrors) as exc:
         print(f"imp: {exc}", file=sys.stderr)
         return 2

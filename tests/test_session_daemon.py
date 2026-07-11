@@ -11,7 +11,7 @@ from imp.engine.executor import RunResult
 from imp.engine.quest import Quest
 from imp.engine.state import State
 from imp.remote.session.client import SessionClient
-from imp.remote.session.daemon import _is_interrupt_pause, serve_change_session
+from imp.remote.session.daemon import _is_interrupt_pause, serve_quest_session
 from imp.remote.session.discover import session_socket_path
 from imp.remote.session.protocol import (
     CONTROL_ABANDON,
@@ -66,7 +66,7 @@ async def test_serves_on_per_change_socket_and_bridges_run_quest_seams(
         result: dict[str, Any] = {}
 
         async def _serve() -> None:
-            result["r"] = await serve_change_session(
+            result["r"] = await serve_quest_session(
                 change, run_fn=fake_run, hibernate=False)
 
         tg.start_soon(_serve)
@@ -111,7 +111,7 @@ async def test_zero_client_gate_hibernates_by_default(tmp_path: Path) -> None:
         return "resident"
 
     with anyio.fail_after(5):
-        result = await serve_change_session(
+        result = await serve_quest_session(
             change, run_fn=fake_run, first_attach_timeout=0.1)
     assert result == "hibernated"
 
@@ -134,7 +134,7 @@ async def test_lock_is_held_during_run_and_released_after(tmp_path: Path) -> Non
         result: dict[str, Any] = {}
 
         async def _serve() -> None:
-            result["r"] = await serve_change_session(
+            result["r"] = await serve_quest_session(
                 change, run_fn=fake_run, hibernate=False)
 
         tg.start_soon(_serve)
@@ -170,7 +170,7 @@ async def test_interrupt_control_pauses_the_shared_coordinator(
         result: dict[str, Any] = {}
 
         async def _serve() -> None:
-            result["r"] = await serve_change_session(
+            result["r"] = await serve_quest_session(
                 change, run_fn=fake_run, hibernate=False)
 
         tg.start_soon(_serve)
@@ -210,7 +210,7 @@ def test_main_loads_named_change_and_serves_it(
 
     assert rc == 0
     assert calls["load"] == (tmp_path, "2026-06-15-abc")
-    assert calls["run"] == (daemon.serve_change_session, loaded)
+    assert calls["run"] == (daemon.serve_quest_session, loaded)
 
 
 @pytest.mark.anyio
@@ -229,7 +229,7 @@ async def test_resident_abandon_runs_teardown(tmp_path: Path) -> None:
 
     async with anyio.create_task_group() as tg:
         async def _serve() -> None:
-            await serve_change_session(
+            await serve_quest_session(
                 change, run_fn=fake_run, hibernate=False,
                 tear_down=lambda ch: torn.append(ch))
 
@@ -270,7 +270,7 @@ async def test_interrupt_resume_prompt_not_duplicated_on_existing_client(
         result: dict[str, Any] = {}
 
         async def _serve() -> None:
-            result["r"] = await serve_change_session(
+            result["r"] = await serve_quest_session(
                 change, run_fn=fake_run, hibernate=False)
 
         tg.start_soon(_serve)
@@ -336,7 +336,7 @@ async def test_interrupt_pause_reprompts_and_resumes_in_place(
         result: dict[str, Any] = {}
 
         async def _serve() -> None:
-            result["r"] = await serve_change_session(
+            result["r"] = await serve_quest_session(
                 change, run_fn=fake_run, hibernate=False)
 
         tg.start_soon(_serve)
@@ -379,7 +379,7 @@ async def test_interrupt_pause_hibernates_with_zero_clients(
         return RunResult.PAUSED
 
     with anyio.fail_after(5):
-        result = await serve_change_session(
+        result = await serve_quest_session(
             change, run_fn=fake_run, hibernate=True, first_attach_timeout=0.1)
     assert result is RunResult.PAUSED
     assert calls["n"] == 1
@@ -409,7 +409,7 @@ async def test_resume_journals_workflow_resumed_without_flipping_status(
         return RunResult.COMPLETED
 
     with anyio.fail_after(5):
-        result = await serve_change_session(
+        result = await serve_quest_session(
             change, run_fn=fake_run, hibernate=False, resume=True)
 
     assert result is RunResult.COMPLETED
@@ -449,7 +449,7 @@ async def test_resume_sets_resume_pending_for_a_stale_lock_crash(tmp_path: Path)
         return RunResult.COMPLETED
 
     with anyio.fail_after(5):
-        result = await serve_change_session(
+        result = await serve_quest_session(
             change, run_fn=fake_run, hibernate=False, resume=True)
 
     assert result is RunResult.COMPLETED
@@ -482,7 +482,7 @@ async def test_resume_with_no_lock_does_not_set_resume_pending(tmp_path: Path) -
         return RunResult.COMPLETED
 
     with anyio.fail_after(5):
-        result = await serve_change_session(
+        result = await serve_quest_session(
             change, run_fn=fake_run, hibernate=False, resume=True)
 
     assert result is RunResult.COMPLETED
@@ -511,7 +511,7 @@ async def test_default_spawn_does_no_resume_prep(tmp_path: Path) -> None:
         return RunResult.COMPLETED
 
     with anyio.fail_after(5):
-        result = await serve_change_session(
+        result = await serve_quest_session(
             change, run_fn=fake_run, hibernate=False)  # resume defaults False
 
     assert result is RunResult.COMPLETED
@@ -548,7 +548,7 @@ def test_main_forwards_resume_flag_via_partial(
     assert rc == 0
     fn = captured["fn"]
     assert isinstance(fn, functools.partial)
-    assert fn.func is daemon.serve_change_session
+    assert fn.func is daemon.serve_quest_session
     assert fn.args == (loaded,)
     assert fn.keywords == {"resume": True}
 
@@ -591,7 +591,7 @@ async def test_two_interrupt_rounds_leave_no_open_pause(tmp_path: Path) -> None:
         result: dict[str, Any] = {}
 
         async def _serve() -> None:
-            result["r"] = await serve_change_session(
+            result["r"] = await serve_quest_session(
                 change, run_fn=fake_run, hibernate=False)
 
         tg.start_soon(_serve)
@@ -745,7 +745,7 @@ async def test_resident_abandon_of_unmaterialized_draft_tears_down(
 
     async with anyio.create_task_group() as tg:
         async def _serve() -> None:
-            await serve_change_session(
+            await serve_quest_session(
                 change, run_fn=fake_run, hibernate=False,
                 tear_down=lambda ch: torn.append(ch),
                 archive_left=lambda ch: archived.append(ch))
@@ -791,7 +791,7 @@ async def test_awaiting_turn_hibernation_exit_drives_now_head(
         return RunResult.PAUSED
 
     with anyio.fail_after(5):
-        result = await serve_change_session(change, run_fn=fake_run, hibernate=False)
+        result = await serve_quest_session(change, run_fn=fake_run, hibernate=False)
 
     assert result is RunResult.PAUSED
     assert spawned == [("bbb", True)]    # hook re-drove the now-head after lock release
@@ -822,7 +822,7 @@ async def test_non_awaiting_turn_pause_does_not_drive_head(
         return RunResult.PAUSED
 
     with anyio.fail_after(5):
-        result = await serve_change_session(change, run_fn=fake_run, hibernate=False)
+        result = await serve_quest_session(change, run_fn=fake_run, hibernate=False)
 
     assert result is RunResult.PAUSED
     assert spawned == []   # a user-pause exit suppresses the handoff-repair hook
@@ -844,7 +844,7 @@ async def test_resident_save_applies_the_save_disposition(tmp_path: Path) -> Non
 
     async with anyio.create_task_group() as tg:
         async def _serve() -> None:
-            await serve_change_session(
+            await serve_quest_session(
                 change, run_fn=fake_run, hibernate=False,
                 tear_down=lambda ch: torn.append(ch),
                 save_left=lambda ch: saved.append(ch))
@@ -917,7 +917,7 @@ async def test_script_blocked_pause_exits_terminal(tmp_path: Path) -> None:
         return RunResult.PAUSED
 
     with anyio.fail_after(5):
-        result = await serve_change_session(change, run_fn=fake_run, hibernate=False)
+        result = await serve_quest_session(change, run_fn=fake_run, hibernate=False)
     assert result is RunResult.PAUSED
     assert calls["n"] == 1  # exited terminal — never looped
 
@@ -943,7 +943,7 @@ async def test_script_blocked_pause_hibernates_with_zero_clients(
         return RunResult.PAUSED
 
     with anyio.fail_after(5):
-        result = await serve_change_session(
+        result = await serve_quest_session(
             change, run_fn=fake_run, hibernate=True, first_attach_timeout=0.1)
     assert result is RunResult.PAUSED
     assert calls["n"] == 1   # held once, then hibernated — never looped
@@ -964,7 +964,7 @@ async def test_resident_archive_applies_the_archive_disposition(tmp_path: Path) 
 
     async with anyio.create_task_group() as tg:
         async def _serve() -> None:
-            await serve_change_session(
+            await serve_quest_session(
                 change, run_fn=fake_run, hibernate=False,
                 archive_left=lambda ch: archived.append(ch),
                 discard_left=lambda ch: discarded.append(ch))
@@ -999,7 +999,7 @@ async def test_resident_discard_applies_the_discard_disposition(tmp_path: Path) 
 
     async with anyio.create_task_group() as tg:
         async def _serve() -> None:
-            await serve_change_session(
+            await serve_quest_session(
                 change, run_fn=fake_run, hibernate=False,
                 archive_left=lambda ch: archived.append(ch),
                 discard_left=lambda ch: discarded.append(ch))
@@ -1033,7 +1033,7 @@ async def test_serve_forwards_non_interactive_to_run_quest(tmp_path: Path) -> No
         return "done"
 
     with anyio.fail_after(5):
-        result = await serve_change_session(
+        result = await serve_quest_session(
             change, run_fn=fake_run, hibernate=False, non_interactive=True)
     assert result == "done"
     assert captured["headless"] is True
@@ -1096,7 +1096,7 @@ def test_main_parses_non_interactive_into_serve_kwargs(
         "--quest-id", "2026-06-15-mnint", "--non-interactive"])
     assert rc == 0
     fn = calls["fn"]
-    assert fn.func is daemon.serve_change_session
+    assert fn.func is daemon.serve_quest_session
     assert fn.keywords == {"non_interactive": True}
 
 
@@ -1183,7 +1183,7 @@ async def test_resume_loop_under_non_interactive_passes_flag_to_second_run(
         result: dict[str, Any] = {}
 
         async def _serve() -> None:
-            result["r"] = await serve_change_session(
+            result["r"] = await serve_quest_session(
                 change, run_fn=fake_run, hibernate=False, non_interactive=True)
 
         tg.start_soon(_serve)
@@ -1229,7 +1229,7 @@ async def test_resume_loop_under_autonomous_passes_flag_to_second_run(
         result: dict[str, Any] = {}
 
         async def _serve() -> None:
-            result["r"] = await serve_change_session(
+            result["r"] = await serve_quest_session(
                 change, run_fn=fake_run, hibernate=False, autonomous=True)
 
         tg.start_soon(_serve)
@@ -1280,7 +1280,7 @@ def test_main_forwards_autonomous_via_partial(
     assert rc == 0
     fn = captured["fn"]
     assert isinstance(fn, functools.partial)
-    assert fn.func is daemon.serve_change_session
+    assert fn.func is daemon.serve_quest_session
     assert fn.keywords == {"autonomous": True}
 
 
@@ -1297,7 +1297,7 @@ async def test_autonomous_forwarded_to_run_fn(tmp_path: Path) -> None:
         return RunResult.COMPLETED
 
     with anyio.fail_after(5):
-        result = await serve_change_session(
+        result = await serve_quest_session(
             change, run_fn=fake_run, hibernate=False, autonomous=True)
     assert result is RunResult.COMPLETED
     assert captured["autonomous"] is True
@@ -1322,7 +1322,7 @@ async def test_detach_at_hold_prompt_stamps_resume_target_prompt(
         return RunResult.PAUSED
 
     with anyio.fail_after(5):
-        result = await serve_change_session(
+        result = await serve_quest_session(
             change, run_fn=fake_run, hibernate=True, first_attach_timeout=0.1)
 
     assert result is RunResult.PAUSED
@@ -1349,7 +1349,7 @@ async def test_detach_after_ctrl_d_midrun_stamps_resume_target_agent(
         return RunResult.PAUSED
 
     with anyio.fail_after(5):
-        result = await serve_change_session(
+        result = await serve_quest_session(
             change, run_fn=fake_run, hibernate=True, first_attach_timeout=0.1)
 
     assert result is RunResult.PAUSED
@@ -1386,7 +1386,7 @@ async def test_resume_prompt_target_holds_before_running_agent(
         result: dict[str, Any] = {}
 
         async def _serve() -> None:
-            result["r"] = await serve_change_session(
+            result["r"] = await serve_quest_session(
                 change, run_fn=fake_run, hibernate=False, resume=True)
 
         tg.start_soon(_serve)
@@ -1439,7 +1439,7 @@ async def test_resume_agent_target_runs_straight_away(
         return RunResult.COMPLETED
 
     with anyio.fail_after(5):
-        result = await serve_change_session(
+        result = await serve_quest_session(
             change, run_fn=fake_run, hibernate=False, resume=True)
 
     assert result is RunResult.COMPLETED
@@ -1472,7 +1472,7 @@ async def test_resume_prompt_target_runs_agent_without_interactive_channel(
 
     kwargs = {flag: True}
     with anyio.fail_after(5):
-        result = await serve_change_session(
+        result = await serve_quest_session(
             change, run_fn=fake_run, hibernate=True, resume=True,
             first_attach_timeout=0.1, **kwargs)
 
@@ -1611,7 +1611,7 @@ async def test_model_override_pause_reenters_without_resume_prompt(
     # _RESUME_PROMPT and block on user_chat_input_fn — with no client to answer,
     # that blocks forever, so the deadline concretely enforces the no-prompt path.
     with anyio.fail_after(5):
-        result = await serve_change_session(
+        result = await serve_quest_session(
             change, run_fn=_run_fn, hibernate=False)
 
     assert result is RunResult.COMPLETED
@@ -1648,7 +1648,7 @@ async def test_model_override_pause_with_empty_arg_resumes_without_applying(
         return RunResult.COMPLETED
 
     with anyio.fail_after(5):
-        result = await serve_change_session(
+        result = await serve_quest_session(
             change, run_fn=_run_fn, hibernate=False)
 
     assert result is RunResult.COMPLETED
@@ -1659,7 +1659,7 @@ async def test_model_override_pause_with_empty_arg_resumes_without_applying(
 @pytest.mark.anyio
 async def test_serve_threads_opening_model_to_run_fn(tmp_path) -> None:
     from imp.engine.executor import RunResult
-    from imp.remote.session.daemon import serve_change_session
+    from imp.remote.session.daemon import serve_quest_session
 
     captured: dict[str, object] = {}
 
@@ -1667,7 +1667,7 @@ async def test_serve_threads_opening_model_to_run_fn(tmp_path) -> None:
         captured.update(kw)
         return RunResult.COMPLETED
 
-    await serve_change_session(
+    await serve_quest_session(
         _make_change(tmp_path, "2026-07-10-mdl"), run_fn=_run_fn, hibernate=False,
         model="anthropic:claude-fable-5")
     assert captured["opening_model"] == "anthropic:claude-fable-5"
@@ -1701,5 +1701,5 @@ def test_main_forwards_model_to_serve(
     assert rc == 0
     fn = captured["fn"]
     assert isinstance(fn, functools.partial)
-    assert fn.func is daemon.serve_change_session
+    assert fn.func is daemon.serve_quest_session
     assert fn.keywords.get("model") == "a:b"

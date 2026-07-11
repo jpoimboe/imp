@@ -998,12 +998,12 @@ async def test_ctrl_d_returns_while_daemon_teardown_still_in_progress(
     tmp_path: Path,
 ) -> None:
     # Primary latency AC: the shell returns well under a second independent of a
-    # slow teardown. Run the real daemon (serve_change_session) with a teardown
+    # slow teardown. Run the real daemon (serve_quest_session) with a teardown
     # that blocks until released; assert run_terminal_client returns AND the
     # daemon is still inside its (slow) archive when it does.
     import threading
 
-    from imp.remote.session.daemon import serve_change_session
+    from imp.remote.session.daemon import serve_quest_session
     from imp.remote.session.discover import session_socket_path
 
     _seed_control(tmp_path)
@@ -1049,7 +1049,7 @@ async def test_ctrl_d_returns_while_daemon_teardown_still_in_progress(
     with anyio.fail_after(10):
         async with anyio.create_task_group() as tg:
             async def _serve() -> None:
-                await serve_change_session(
+                await serve_quest_session(
                     change, run_fn=fake_run, hibernate=False,
                     archive_left=slow_archive)
 

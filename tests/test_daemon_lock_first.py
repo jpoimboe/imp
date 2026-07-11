@@ -4,7 +4,7 @@ import anyio
 
 from imp.engine.quest import Quest
 from imp.engine.state import ProjectLock
-from imp.remote.session.daemon import serve_change_session
+from imp.remote.session.daemon import serve_quest_session
 from imp.remote.session.discover import session_socket_path
 from tests.conftest import _seed_control
 
@@ -18,7 +18,7 @@ def test_spawn_against_held_lock_exits_without_opening_socket(tmp_path: Path) ->
         # Simulate a RESIDENT change holding its ProjectLock; the wake-spawned
         # daemon must return harmlessly without binding the socket.
         with ProjectLock(ch.quest_dir / "lock").acquire():
-            return await serve_change_session(ch, resume=True)
+            return await serve_quest_session(ch, resume=True)
 
     result = anyio.run(_scenario)
     assert result is None              # exited harmlessly (no LockHeld escaped)
