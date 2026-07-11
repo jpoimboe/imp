@@ -19,6 +19,7 @@ from imp.remote.session.protocol import (
     CONTROL_INTERRUPT_LEAVE,
     CONTROL_SAVE,
     CONTROL_SET_MODEL,
+    SkillRequest,
 )
 from imp.remote.session.socket_server import ReplaySnapshot, SessionSocket
 
@@ -138,7 +139,7 @@ class SessionServer:
             self._last_gate_event = event
         self._socket.broadcast(event)
 
-    async def _chat(self, _query: str) -> str:
+    async def _chat(self, _query: str) -> str | SkillRequest:
         self.set_pending_prompt(self._last_gate_event)
         try:
             text = (await self._hibernation_gate() if self._hibernate
@@ -176,10 +177,10 @@ class SessionServer:
         if self._first_leased_attach_fired or not await self._await_first_attach():
             raise AwaitingUserInput()
 
-    async def _hibernation_gate(self) -> str:
+    async def _hibernation_gate(self) -> str | SkillRequest:
         from imp.engine.awaiting_user_input import AwaitingUserInput
 
-        holder: dict[str, str] = {}
+        holder: dict[str, str | SkillRequest] = {}
         async with anyio.create_task_group() as tg:
             async def _await_input() -> None:
                 holder["text"] = await self._socket.next_input()

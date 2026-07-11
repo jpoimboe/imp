@@ -11,9 +11,11 @@ from anyio.abc import SocketStream
 from anyio.streams.buffered import BufferedByteReceiveStream
 
 from imp.remote.session.protocol import (
+    SkillRequest,
     encode_attach,
     encode_control,
     encode_input,
+    encode_skill_request,
     parse_event,
 )
 from imp.remote.session.server import SessionServer
@@ -1478,3 +1480,36 @@ async def test_save_reason_survives_a_full_control_queue() -> None:
         # which cancels the task group — the loop exits cleanly.
     assert server.saved is True
     assert server.save_reason == "ctrl-d"   # the stored reason, not a buffered frame's None
+
+
+@pytest.mark.anyio
+async def test_chat_delivers_a_skill_request_unchanged(tmp_path: Path) -> None:
+    sock = str(tmp_path / "s.sock")
+    server = SessionServer(sock, hibernate=False)
+    captured: list[object] = []
+
+    async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> object:
+        with anyio.fail_after(5):
+            while server.attached_count < 1:
+                await anyio.sleep(0.02)
+        on_event({"type": "awaiting_user_input", "payload": {"prompt": ""}})
+        reply = await user_chat_input_fn("")
+        captured.append(reply)
+        return reply
+
+    async with anyio.create_task_group() as tg:
+        await server.open()
+        tg.start_soon(server.serve, run_fn)
+        client = await _attach(sock, "c1")
+        with anyio.fail_after(5):
+            while server.attached_count < 1:
+                await anyio.sleep(0.02)
+        await anyio.sleep(0.05)
+        await client.send(
+            (encode_skill_request("refactor", "src/foo.py") + "\n").encode())
+        with anyio.fail_after(5):
+            while not captured:
+                await anyio.sleep(0.02)
+        assert captured == [SkillRequest("refactor", "src/foo.py")]
+        await client.aclose()
+        tg.cancel_scope.cancel()

@@ -26,6 +26,7 @@ from imp.remote.session.protocol import (
     Control,
     Input,
     SetLease,
+    SkillRequest,
     encode_event,
     parse_client_message,
 )
@@ -97,7 +98,7 @@ class SessionSocket:
         self._client_buffer = client_buffer
         self._clients: set[_Client] = set()
         self._listener: SocketListener | None = None
-        self._input_send: MemoryObjectSendStream[str] | None = None
+        self._input_send: MemoryObjectSendStream[str | SkillRequest] | None = None
         self._serve_scope: anyio.CancelScope | None = None
         self._serve_done: anyio.Event | None = None
 
@@ -183,11 +184,11 @@ class SessionSocket:
                     self._drop(client)
                     break
 
-    async def next_input(self) -> str:
+    async def next_input(self) -> str | SkillRequest:
         if self._input_send is not None:
             raise RuntimeError("next_input called while gate is already open")
         # capacity-1 stream + WouldBlock drop: first write wins, loser not queued for next gate
-        send, recv = anyio.create_memory_object_stream[str](max_buffer_size=1)
+        send, recv = anyio.create_memory_object_stream[str | SkillRequest](max_buffer_size=1)
         self._input_send = send
         try:
             return await recv.receive()
@@ -200,6 +201,9 @@ class SessionSocket:
         if isinstance(message, Input) and self._input_send is not None:
             with contextlib.suppress(anyio.WouldBlock):
                 self._input_send.send_nowait(message.text)
+        elif isinstance(message, SkillRequest) and self._input_send is not None:
+            with contextlib.suppress(anyio.WouldBlock):
+                self._input_send.send_nowait(message)
         elif isinstance(message, Control) and self._on_control is not None:
             self._on_control(message.action, message.reason)
         elif isinstance(message, SetLease):
