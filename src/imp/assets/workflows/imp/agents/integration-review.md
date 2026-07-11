@@ -74,7 +74,7 @@ You are resumed in **two** distinct modes, told apart by the injected feedback:
     absent), born directly in `— needs-decision:` state with source `integration-verify`. The
     EXACT shape:
 
-    `- [ ] DEFERRED integration-verify: <failure signature> [scope: change] — needs-decision: <why this change is not responsible>`
+    `- [ ] DEFERRED integration-verify: <failure signature> [scope: quest] — needs-decision: <why this change is not responsible>`
 
     Then return `blocking: false`, `has_minor_findings: false`, and `tolerated: true` so the
     workflow falls through to `summarizer` and records the toleration. The accept edge copies

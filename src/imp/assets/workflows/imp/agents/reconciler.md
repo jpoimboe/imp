@@ -90,7 +90,7 @@ For a reconciliation that clears that bar — you resolved it defensively but a 
 should still ratify it — append a line to the `## Deferred Followups` section in
 `{{ change.home }}/deferred.md` in reader form (create the file/heading if absent):
 
-`- [ ] DEFERRED reconciler: <one-line description> [scope: change] — needs-decision: <why a human must decide>`
+`- [ ] DEFERRED reconciler: <one-line description> [scope: quest] — needs-decision: <why a human must decide>`
 
 These are a durable record for asynchronous human triage and for integration-review's
 synchronous read — not input to any automated sweep. Never mutate the spec or plan

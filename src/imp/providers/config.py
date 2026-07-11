@@ -9,7 +9,7 @@ Schema (post 2026-06-04-roles-to-tiers):
     provider_envs:                        # optional; default <PROVIDER>_API_KEY
       openai: {env: OPENAI_API_KEY}
     test_cmd_fast: "..."                  # cheap gate (lint+typecheck+fast tests); per-plan
-    test_cmd_slow: "..."                  # complete run; once-per-change at integration-verify
+    test_cmd_slow: "..."                  # complete run; once-per-quest at integration-verify
     test_cmd_fast_timeout: 120            # optional fast-gate ceiling, seconds (default 120)
     test_cmd_slow_timeout: 300            # optional slow-gate ceiling, seconds (default 300)
     max_parallel_test_runs: 1             # max concurrent verify-gate runs (default 1)

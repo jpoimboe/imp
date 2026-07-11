@@ -20,7 +20,7 @@ exclusively. Your job is code correctness within the diff under review.
 Resolve the diff range from the review cadence — a computed range, never
 reconstructed from `progress.md`:
 
-**End-of-change pass (whole-change, cross-plan).** Review the whole change:
+**End-of-quest pass (whole-quest, cross-plan).** Review the whole change:
 `git diff {{ change.cur_base_head }}..imp/{{ change.id }}` — the change's recorded fork point. This is
 the one full review of the run.
 
@@ -143,7 +143,7 @@ fix-it path) to the **Deferred Followups** list in `{{ change.home }}/deferred.m
 absent. Append one line per observation in this EXACT pinned format (the sweep parses
 it):
 
-`- [ ] DEFERRED batch-code-reviewer: <one-line description> [scope: change]`
+`- [ ] DEFERRED batch-code-reviewer: <one-line description> [scope: quest]`
 
 Append nothing for a finding you routed `task_gap` (it routes back for an immediate,
 re-reviewed fix). Appending to `{{ change.home }}/deferred.md` is the ONLY write you may make.

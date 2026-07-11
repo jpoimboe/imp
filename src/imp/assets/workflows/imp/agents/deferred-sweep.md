@@ -26,7 +26,7 @@ Read first:
 Each deferred item is a Markdown task-list line under a `## Deferred Followups`
 heading, in this EXACT shape (task-lead, batch-code-reviewer, plan-writer, and plan-reviewer append it):
 
-`- [ ] DEFERRED <source>: <one-line description> [scope: <task|plan|change>]`
+`- [ ] DEFERRED <source>: <one-line description> [scope: <task|plan|quest>]`
 
 Parse only lines that begin `- [ ] DEFERRED `. **Tolerate malformed entries by
 leaving them exactly as-is and untouched** (fail safe = the item stays surfaced,
@@ -35,8 +35,8 @@ never silently dropped). Do not reformat or delete lines you cannot parse. The
 you may fix.
 
 Three further terminal markers can appear on already-checked lines, written by the
-`finalize` merge gate: `— seeded <change-id>` (handed to a follow-up backlog
-Quest), `— ignored-at-gate` (dropped by a human), and `— covered-by <change-id>`
+`finalize` merge gate: `— seeded <quest-id>` (handed to a follow-up backlog
+Quest), `— ignored-at-gate` (dropped by a human), and `— covered-by <quest-id>`
 (auto-covered because another active or backlog Quest already tracks the failing
 test). Like `— dismissed`, they are **inert** to this sweep — they sit on `- [x]`
 lines, so the `- [ ] DEFERRED ` parse already skips them. Leave them untouched.
@@ -198,7 +198,7 @@ Record a toleration as a normal `## Deferred Followups` entry in
 `{{ change.home }}/deferred.md`, born directly in `— needs-decision:` state with
 `converge-verify` as its source, never an agent. The EXACT shape:
 
-`- [ ] DEFERRED converge-verify: <failure signature> [scope: change] — needs-decision: <why this change is not responsible>`
+`- [ ] DEFERRED converge-verify: <failure signature> [scope: quest] — needs-decision: <why this change is not responsible>`
 
 - **Every current failure is already recorded as a `DEFERRED converge-verify:` line in
   `## Deferred Followups`, or is plainly not attributable to the diff** → append any
@@ -215,7 +215,7 @@ Record a toleration as a normal `## Deferred Followups` entry in
   confirming the fix). Tell the coder to make a **plain new commit** —
   `git add <files> && git commit -m "<type>: <fix summary>"` — NOT `git commit --fixup=HEAD`: a
   sweep fix resolves its own deferred item and lands as its own commit in the batch (which the
-  end-of-change `cleanup-merge` later folds and stamps), not an amendment to the last task's
+  end-of-quest `cleanup-merge` later folds and stamps), not an amendment to the last task's
   commit. This matches the "Commit granularity" discipline above.
 
 Emit `converge_verify_tolerated: true` ONLY on the all-tolerated case above. On EVERY other

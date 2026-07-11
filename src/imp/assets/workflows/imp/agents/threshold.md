@@ -130,13 +130,13 @@ spec-finalizer adopts it.
 
 On the **express path only** (you are about to emit `ceremony: express`), do this in
 the same go-live turn **before** the `complete_step` call above: the spec phase is
-skipped and no end-of-change `summarizer` step runs, so **you** author the change's
+skipped and no end-of-quest `summarizer` step runs, so **you** author the change's
 intent-level summary here, drawing the *why* straight from the just-finished
 conversation. Write `{{ change.home }}/artifacts/summary/{{ change.id }}.md` — one
 tight intent-level headline paragraph (what this change accomplishes and why), plus
 a text/ASCII diagram **only** when the change genuinely altered structure (omit it
 otherwise; no mermaid). On the
-full path do **not** write the summary — the end-of-change `summarizer` step does.
+full path do **not** write the summary — the end-of-quest `summarizer` step does.
 
 ## Reading a referenced spec file
 

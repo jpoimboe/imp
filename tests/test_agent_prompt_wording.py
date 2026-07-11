@@ -146,7 +146,7 @@ def test_no_workflow_prompt_invokes_artifact_commit() -> None:
 def test_gap_check_change_review_is_unconditional() -> None:
     body = _agent_prompt("gap-check")
     assert "if the change spanned more than one plan" not in body
-    assert "once-only change-wide review." in body
+    assert "once-only quest-wide review." in body
 
 
 def test_batch_code_reviewer_description_is_whole_diff() -> None:
@@ -247,7 +247,7 @@ def test_plan_writer_documents_untagged_scope_out_form() -> None:
     )
     # the plain untagged form (no needs-decision marker), citing the spec ref
     assert (
-        "DEFERRED plan-writer: <item, citing the spec AC/scope ref> [scope: change]"
+        "DEFERRED plan-writer: <item, citing the spec AC/scope ref> [scope: quest]"
         in body
     )
     # prose in the Decisions section does not count — only the untagged line records it
@@ -270,7 +270,7 @@ def test_plan_reviewer_backstops_unrecorded_scope_out() -> None:
     # the backstop write authority: append the untagged line itself, source plan-reviewer
     assert "unrecorded scope-out" in body
     assert (
-        "DEFERRED plan-reviewer: <item, citing the spec AC/scope ref> [scope: change]"
+        "DEFERRED plan-reviewer: <item, citing the spec AC/scope ref> [scope: quest]"
         in body
     )
 

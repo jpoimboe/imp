@@ -220,7 +220,7 @@ SWEEP = AGENTS_DIR / "deferred-sweep.md"
 def test_deferred_sweep_crossrefs_terminal_gate_dispositions() -> None:
     low = SWEEP.read_text().lower()
     # The two terminal markers finalize writes are inert to the sweep (like dismissed).
-    assert "seeded <change" in low
+    assert "seeded <quest" in low
     assert "ignored-at-gate" in low
 
 
@@ -827,7 +827,7 @@ def test_finalize_auto_resolves_needs_decision_only_under_autonomy(
         # backlog and the gate takes the merge disposition itself; only an
         # unrecoverable problem still pauses for a human.
         assert "no human at the gate" in autonomous
-        assert "seeded <new-change-id>" in autonomous
+        assert "seeded <new-quest-id>" in autonomous
         assert "pauses** for a human even under" in autonomous
 
 

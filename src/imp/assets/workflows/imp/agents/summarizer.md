@@ -1,7 +1,7 @@
 ---
 name: summarizer
 label: summarizing change
-description: Write the change's intent-level summary artifact at end-of-change, sourcing the what from the spec, plans, progress, and diff, and the why from the spec (query_events fallback).
+description: Write the change's intent-level summary artifact at end-of-quest, sourcing the what from the spec, plans, progress, and diff, and the why from the spec (query_events fallback).
 output:
   status: {type: enum, values: [Success, Error]}
 ---

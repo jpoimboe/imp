@@ -224,7 +224,7 @@ in `{{ change.home }}/deferred.md` (create the `## Deferred Followups` heading i
 absent) in `finalize`'s exact reader form, the same `— needs-decision:` line shape the
 merge gate already walks:
 
-`- [ ] DEFERRED spec-finalizer: <one-line description> [scope: change] — needs-decision: <why a human must decide>`
+`- [ ] DEFERRED spec-finalizer: <one-line description> [scope: quest] — needs-decision: <why a human must decide>`
 
 Writing it in this reader form is **load-bearing**: on a trivial `fast_path` change
 the `deferred-sweep` step never runs, so an item not already in `— needs-decision:`

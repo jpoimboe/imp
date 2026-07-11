@@ -8,7 +8,7 @@ description: |
 # fast-verified, then check-next-plan either starts the next outline plan or
 # (last plan done) enters converge. converge runs ONCE per change: gap-check (the
 # sole coverage backstop; latches coverage_settled) -> change-review (the single
-# change-wide code review, reusing agents/batch-code-reviewer.md) -> deferred-sweep
+# quest-wide code review, reusing agents/batch-code-reviewer.md) -> deferred-sweep
 # (drains the whole change's Deferred list once) -> converge-verify (slow, on the
 # change's own base). integrate then
 # acquires the merge lane, rebases, slow-re-verifies only when the base moved,
@@ -174,14 +174,14 @@ phases:
           - {else: true, goto: gap-check}
 
   # ── converge: runs ONCE per change (change-local, NO lock). The coverage backstop,
-  # the single change-wide code review, the once-per-change deferred sweep, and the
+  # the single quest-wide code review, the once-per-quest deferred sweep, and the
   # slow verify on the change's own base.
   - name: converge
     label: "convergence phase"
     steps:
-      # End-of-change coverage backstop — runs ONCE. Gap found -> author a corrective via
+      # End-of-quest coverage backstop — runs ONCE. Gap found -> author a corrective via
       # plan-writer (latch stays false). Clean -> latch coverage_settled and run the
-      # change-wide review.
+      # quest-wide review.
       - name: gap-check
         file: agents/gap-check.md
         tier: high
@@ -190,7 +190,7 @@ phases:
           - {if: {more_plans: true}, set: {plan_total: "output.plan_total", plan_index: "var.plan_index + 1"}, goto: plan-writer, label: "writing plan", feedback: "More plans are needed for this spec. Coverage assessment:"}
           - {else: true, set: {coverage_settled: true}, goto: change-review}
 
-      # The single change-wide code review (cur_base_head..HEAD), reusing batch-code-reviewer.md.
+      # The single quest-wide code review (cur_base_head..HEAD), reusing batch-code-reviewer.md.
       # approve -> deferred-sweep; task_gap -> task-lead rework.
       - name: change-review
         file: agents/batch-code-reviewer.md

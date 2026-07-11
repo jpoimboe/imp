@@ -909,7 +909,7 @@ def test_gap_check_agent_is_end_of_change_backstop() -> None:
     text = (Path("src/imp/assets/workflows/imp/agents") / "gap-check.md").read_text()
     low = text.lower()
     assert "name: gap-check" in text
-    assert "end-of-change" in low or "end of change" in low
+    assert "end-of-quest" in low or "end of quest" in low
     assert "once" in low
     assert "outline" in low
     assert "plan-cycle-check" not in low          # no residual old name

@@ -128,7 +128,7 @@ or split unrelated ones across several, whatever fits best. When the item is a
 verify-family toleration, the `description` must embed the failing test's identity
 (node id / name / signature) so a later Quest's cover-check can match it instead of
 seeding another duplicate. Then rewrite each item's `deferred.md` line to
-`- [x] DEFERRED <src>: <desc> [scope: …] — seeded <new-change-id>`.
+`- [x] DEFERRED <src>: <desc> [scope: …] — seeded <new-quest-id>`.
 With every item now either trusted-and-merged or seeded to the backlog, take the
 **merge** disposition. The one exception is an **unrecoverable problem** (e.g. the
 non-converging verify-triage case above) — that still **pauses** for a human even under
@@ -181,8 +181,8 @@ item:
   - **defer** — hand it to a new backlog Quest. Call
     `create_quest(title="<short title>", description="<self-contained brief that needs
     no other context>", depends_on=["{{ change.id }}"])`, then rewrite the item's
-    line to `- [x] DEFERRED <src>: <desc> [scope: …] — seeded <new-change-id>`,
-    and tell them it is startable via `imp resume <new-change-id>` once this
+    line to `- [x] DEFERRED <src>: <desc> [scope: …] — seeded <new-quest-id>`,
+    and tell them it is startable via `imp resume <new-quest-id>` once this
     change merges. When the item is a verify-family toleration, the `description`
     must embed the failing test's identity (node id / name / signature) so a later
     change's cover-check can match it.

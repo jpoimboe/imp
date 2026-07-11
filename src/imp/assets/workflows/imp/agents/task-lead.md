@@ -89,8 +89,8 @@ unimplemented task, or the re-opened task from injected feedback):
      no `fixup! ` prefix) — then tell the coder: "fixup the buried task
      commit `<SHA>`" → it runs `git commit --fixup=<SHA>`. Resolve the SHA **now**,
      against current history (no fold has run since your last commit, so SHAs are
-     stable within the loop — folding is deferred to the end-of-change cleanup). The
-     end-of-change cleanup folds the fixup into its target, so the final branch stays
+     stable within the loop — folding is deferred to the end-of-quest cleanup). The
+     end-of-quest cleanup folds the fixup into its target, so the final branch stays
      one clean commit per task. Do **not** make a second new commit for a re-opened task.
 
    **Never `--fixup`/`--squash` a commit your change does not own.** A
@@ -152,7 +152,7 @@ unimplemented task, or the re-opened task from injected feedback):
    **re-dispatch the coder telling it to fix the tree to its final state and
    `git commit --fixup=HEAD`** (the task commit, or its pending fixups, sits at the
    loop tip). Batch qualifying nits into the **same fixup round** as any blocking
-   fixes; the fixup is transient, and the end-of-change cleanup folds the whole chain
+   fixes; the fixup is transient, and the end-of-quest cleanup folds the whole chain
    back into the task commit, so the final branch is **one clean commit per
    task**. When nothing clears the bar and there are no blocking findings, there is
    **no extra work** — do not invent a fixup.
@@ -247,7 +247,7 @@ unimplemented task, or the re-opened task from injected feedback):
    - resolved-forward: `- resolved-forward task-lead: <one-line description of what you fixed>`
    - needs-replan (a checkbox, so its open/addressed state is explicit):
 
-     `- [ ] NEEDS-REPLAN task-lead: <one-line description of the uncovered/redo scope> [scope: change]`
+     `- [ ] NEEDS-REPLAN task-lead: <one-line description of the uncovered/redo scope> [scope: quest]`
 
    The `NEEDS-REPLAN` checkbox is the lifecycle handle: it is born open (`[ ]`); the
    `plan-writer` invocation that authors the covering `N+1` marks it `[x]`, so the
@@ -281,7 +281,7 @@ Record a toleration as a normal `## Deferred Followups` entry in
 `{{ change.home }}/deferred.md`, born directly in `— needs-decision:` state with the
 originating gate as its `<source>` — here `verify`, never an agent. The EXACT shape:
 
-`- [ ] DEFERRED verify: <failure signature> [scope: change] — needs-decision: <why this change is not responsible>`
+`- [ ] DEFERRED verify: <failure signature> [scope: quest] — needs-decision: <why this change is not responsible>`
 
 The `verify` source is the discriminator the convergence check greps for.
 

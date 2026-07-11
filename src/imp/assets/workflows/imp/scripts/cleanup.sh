@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# cleanup.sh — the ONE end-of-change fold + stamp, run once at cleanup-merge over
+# cleanup.sh — the ONE end-of-quest fold + stamp, run once at cleanup-merge over
 # the whole change range cur_base_head..HEAD. It folds every fixup!/squash!/amend!
 # chain into its target and stamps `Change: <id>` on every non-merge commit. Both
 # are idempotent: fold runs only when a directive exists, stamp only when some

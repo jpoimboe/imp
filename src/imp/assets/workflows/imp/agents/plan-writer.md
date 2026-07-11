@@ -99,7 +99,7 @@ You still **decide the corrective's depth** yourself from the findings/`comments
 Write `…-plan-(N+1).md`, then the corrective flows
 through `plan-reviewer` → `task-lead` exactly like a first-time plan (a trivial
 corrective takes `fast_path` and skips `plan-reviewer`). Code review of the corrective
-is included in the change-wide review at converge; the settled work is neither re-planned
+is included in the quest-wide review at converge; the settled work is neither re-planned
 nor re-reviewed.
 
 **Consume the lifecycle handle.** When this `N+1` covers an open `NEEDS-REPLAN
@@ -190,7 +190,7 @@ do not bury it in prose. Append it to the **Deferred Followups** list in
 in `finalize`'s exact reader form, the same `— needs-decision:` line shape the merge
 gate already walks:
 
-`- [ ] DEFERRED plan-writer: <one-line description> [scope: change] — needs-decision: <why a human must decide>`
+`- [ ] DEFERRED plan-writer: <one-line description> [scope: quest] — needs-decision: <why a human must decide>`
 
 Writing it in this reader form is **load-bearing**: on a trivial `fast_path`
 corrective the `deferred-sweep` step never runs, so an item not already in
@@ -270,7 +270,7 @@ commit per task. Do not fracture the slice into trivial one-task fragments, and
 do not merge across what the outline kept separate. Size in **tasks**, not lines of code;
 let the slice be as large as its natural boundary makes it. The
 **outline-driven plan loop** authors the remaining plans — the engine loops back
-to you for each next plan while `plan_index < plan_total`, with the end-of-change
+to you for each next plan while `plan_index < plan_total`, with the end-of-quest
 `gap-check` as the sole coverage backstop.
 
 On the **express / self-scope path** there is no outline, so size the single plan
@@ -281,7 +281,7 @@ its natural dependency boundary; default `plan_total = 1`.
 
 Slicing spec-mandated work into a later plan is legitimate — the **whether** is never in play, only the **when**; `gap-check` enforces the clause regardless. But a scope-out must leave a machine-parseable trace: when this plan does not deliver a spec-mandated item, you **must** append the plain **untagged** DEFERRED line to `{{ change.home }}/deferred.md`:
 
-`- [ ] DEFERRED plan-writer: <item, citing the spec AC/scope ref> [scope: change]`
+`- [ ] DEFERRED plan-writer: <item, citing the spec AC/scope ref> [scope: quest]`
 
 This is the plain **untagged** form — no `— needs-decision:` marker — distinct from the human-decision line under **Surfacing a decision you cannot resolve** above. Prose in the plan's `## Decisions` section does not count; only the untagged line in `{{ change.home }}/deferred.md` records the scope-out durably. Untagged means the sweep may fix it, `gap-check` enforces it, and the user is never re-asked.
 
