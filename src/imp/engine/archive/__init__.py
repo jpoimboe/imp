@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import sqlite3
+import sys
 import tempfile
+from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any
 
@@ -78,6 +81,25 @@ def archive_change(
             conn.close()
 
 
+@contextlib.contextmanager
+def _reindex_progress() -> Iterator[Callable[[int, int], None]]:
+    stream = sys.stderr
+    tty = stream.isatty()
+
+    def emit(i: int, total: int) -> None:
+        if not tty:
+            return
+        stream.write(f"\r\x1b[K\x1b[2mReindexing archive… {i}/{total}\x1b[0m")
+        stream.flush()
+
+    try:
+        yield emit
+    finally:
+        if tty:
+            stream.write("\r\x1b[K")
+            stream.flush()
+
+
 def rebuild_index(control_root: Path) -> None:
     """Reconstruct index.db from record files + locally present blobs.
 
@@ -91,13 +113,17 @@ def rebuild_index(control_root: Path) -> None:
         store = LocalBlobStore(blobs_root(control_root))
         conn = index.connect(Path(tmp))
         try:
-            for cid in record.list_record_ids(records_root(control_root)):
-                rec = record.read_record(records_root(control_root), cid)
-                if rec is None:
-                    continue
-                blob = store.get(rec["events_hash"])
-                events = _parse_events(blob) if blob is not None else []
-                index.ingest(conn, rec, events)
+            cids = list(record.list_record_ids(records_root(control_root)))
+            total = len(cids)
+            with _reindex_progress() as emit:
+                for i, cid in enumerate(cids, start=1):
+                    emit(i, total)
+                    rec = record.read_record(records_root(control_root), cid)
+                    if rec is None:
+                        continue
+                    blob = store.get(rec["events_hash"])
+                    events = _parse_events(blob) if blob is not None else []
+                    index.ingest(conn, rec, events)
         finally:
             conn.close()
         os.replace(tmp, index_path(control_root))
