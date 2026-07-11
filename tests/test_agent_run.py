@@ -1690,3 +1690,73 @@ def test_build_agent_invocation_interactive_defaults_false(
     tmp_path: Path,
 ) -> None:
     assert _build_inv(tmp_path).interactive is False
+
+
+@pytest.mark.anyio
+async def test_resolve_wait_reply_interject_wins_over_pending_reply() -> None:
+    import imp.engine.agent_run as ar
+    from imp.engine.state import InMemoryEventLog
+    log = InMemoryEventLog()
+
+    async def _ainput(_q):
+        raise AssertionError("must not solicit when an interject is queued")
+
+    reply, source = await ar._resolve_wait_reply(
+        _OneInterjectCoord("human says go"), _ainput, True,
+        elog=log, agent_id="step:p/s", pending_reply="recovered reply")
+    assert (reply, source) == ("human says go", "interject")
+    assert "awaiting_user_input" not in [e["type"] for e in log.read()]
+
+
+@pytest.mark.anyio
+async def test_resolve_wait_reply_pending_reply_wins_over_nudge() -> None:
+    import imp.engine.agent_run as ar
+    from imp.engine.state import InMemoryEventLog
+    coord = _RecordingCoord()  # drains no interjects
+    log = InMemoryEventLog()
+
+    async def _ainput(_q):
+        raise AssertionError("must not solicit when a pending_reply exists")
+
+    reply, source = await ar._resolve_wait_reply(
+        coord, _ainput, True, elog=log, agent_id="step:p/s",
+        pending_reply="use config.py")
+    assert (reply, source) == ("use config.py", "pending_reply")
+    # The recovered reply emits no gate and never enters the solicit bracket.
+    assert "awaiting_user_input" not in [e["type"] for e in log.read()]
+    assert coord.events == []
+
+
+@pytest.mark.anyio
+async def test_resolve_wait_reply_pending_reply_none_still_nudges() -> None:
+    import imp.engine.agent_run as ar
+    from imp.engine.state import InMemoryEventLog
+    coord = _RecordingCoord()
+    log = InMemoryEventLog()
+
+    async def _ainput(_q):
+        raise AssertionError("must not solicit when resume_should_continue")
+
+    reply, source = await ar._resolve_wait_reply(
+        coord, _ainput, True, elog=log, agent_id="step:p/s",
+        pending_reply=None)
+    assert (reply, source) == (ar._CONTINUATION_NUDGE, "nudge")
+    assert "awaiting_user_input" not in [e["type"] for e in log.read()]
+
+
+@pytest.mark.anyio
+async def test_resolve_wait_reply_pending_reply_wins_over_solicit() -> None:
+    import imp.engine.agent_run as ar
+    from imp.engine.state import InMemoryEventLog
+    coord = _RecordingCoord()
+    log = InMemoryEventLog()
+
+    async def _ainput(_q):
+        raise AssertionError("must not solicit when a pending_reply exists")
+
+    reply, source = await ar._resolve_wait_reply(
+        coord, _ainput, False, elog=log, agent_id="step:p/s",
+        pending_reply="use config.py")
+    assert (reply, source) == ("use config.py", "pending_reply")
+    assert "awaiting_user_input" not in [e["type"] for e in log.read()]
+    assert coord.events == []

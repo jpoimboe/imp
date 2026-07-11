@@ -4,7 +4,10 @@ from __future__ import annotations
 from pathlib import Path
 
 from imp.agents.classify import ResumeState
-from imp.providers.codex_resume import derive_codex_resume_state
+from imp.providers.codex_resume import (
+    derive_codex_resume_state,
+    pending_human_reply,
+)
 
 
 def _write_events(p: Path, records: list[dict]) -> None:
@@ -101,3 +104,91 @@ def test_subagent_awaiting_user_still_returns_awaiting(tmp_path: Path) -> None:
         ev, "sub:tc-1", subagent_depth=1)
     assert state is ResumeState.AWAITING_USER
     assert last_text == "the conclusion"
+
+
+def _user_msg(text: str) -> dict:
+    return {"agent_id": "step:t", "type": "user_message",
+            "payload": {"role": "user",
+                        "content": [{"type": "text", "text": text}]}}
+
+
+def test_pending_reply_returns_solicited_text(tmp_path: Path) -> None:
+    ev = tmp_path / "events.jsonl"
+    _write_events(ev, [
+        {"agent_id": "step:t", "type": "llm_response",
+         "payload": {"raw": {"content": [{"type": "text", "text": "which file?"}]}}},
+        {"agent_id": "step:t", "type": "awaiting_user_input",
+         "payload": {"prompt": "which file?"}},
+        _user_msg("use config.py"),
+    ])
+    assert pending_human_reply(ev, "step:t") == "use config.py"
+
+
+def test_pending_reply_none_when_agent_already_answered(tmp_path: Path) -> None:
+    ev = tmp_path / "events.jsonl"
+    _write_events(ev, [
+        {"agent_id": "step:t", "type": "awaiting_user_input",
+         "payload": {"prompt": "which file?"}},
+        _user_msg("use config.py"),
+        {"agent_id": "step:t", "type": "llm_response",
+         "payload": {"raw": {"content": [{"type": "text", "text": "ok, editing"}]}}},
+    ])
+    assert pending_human_reply(ev, "step:t") is None
+
+
+def test_pending_reply_none_when_no_user_message_after_gate(tmp_path: Path) -> None:
+    ev = tmp_path / "events.jsonl"
+    _write_events(ev, [
+        {"agent_id": "step:t", "type": "llm_response",
+         "payload": {"raw": {"content": [{"type": "text", "text": "which file?"}]}}},
+        {"agent_id": "step:t", "type": "awaiting_user_input",
+         "payload": {"prompt": "which file?"}},
+    ])
+    assert pending_human_reply(ev, "step:t") is None
+
+
+def test_pending_reply_none_when_no_awaiting_gate(tmp_path: Path) -> None:
+    ev = tmp_path / "events.jsonl"
+    _write_events(ev, [_user_msg("stray reply with no gate")])
+    assert pending_human_reply(ev, "step:t") is None
+
+
+def test_pending_reply_none_when_reply_is_whitespace(tmp_path: Path) -> None:
+    ev = tmp_path / "events.jsonl"
+    _write_events(ev, [
+        {"agent_id": "step:t", "type": "awaiting_user_input",
+         "payload": {"prompt": "which file?"}},
+        _user_msg("   \n  "),
+    ])
+    assert pending_human_reply(ev, "step:t") is None
+
+
+def test_pending_reply_none_when_events_file_missing(tmp_path: Path) -> None:
+    assert pending_human_reply(tmp_path / "nope.jsonl", "step:t") is None
+
+
+def test_pending_reply_uses_last_gate_not_first(tmp_path: Path) -> None:
+    ev = tmp_path / "events.jsonl"
+    _write_events(ev, [
+        {"agent_id": "step:t", "type": "awaiting_user_input",
+         "payload": {"prompt": "first?"}},
+        _user_msg("first reply"),
+        {"agent_id": "step:t", "type": "llm_response",
+         "payload": {"raw": {"content": [{"type": "text", "text": "acting"}]}}},
+        {"agent_id": "step:t", "type": "awaiting_user_input",
+         "payload": {"prompt": "second?"}},
+        _user_msg("second reply"),
+    ])
+    assert pending_human_reply(ev, "step:t") == "second reply"
+
+
+def test_pending_reply_none_when_tool_call_after_reply(tmp_path: Path) -> None:
+    ev = tmp_path / "events.jsonl"
+    _write_events(ev, [
+        {"agent_id": "step:t", "type": "awaiting_user_input",
+         "payload": {"prompt": "which file?"}},
+        _user_msg("use config.py"),
+        {"agent_id": "step:t", "type": "tool_call",
+         "payload": {"name": "edit_file"}},
+    ])
+    assert pending_human_reply(ev, "step:t") is None
