@@ -73,10 +73,12 @@ def build_inline_solicit(
     the interrupt steer passes INTERRUPT_STEER_HINT so the human is oriented."""
     from imp.engine.awaiting_user_input import AwaitingUserInput
 
-    def _emit_awaiting() -> None:
+    def _emit_awaiting(last_text: str) -> None:
         if event_log is not None:
             event_log.append(agent_id=agent_id, type="awaiting_user_input",
-                             payload={"prompt": steer_prompt, "interrupt": interrupt})
+                             payload={"steer_hint": steer_prompt,
+                                      "last_agent_message": last_text,
+                                      "interrupt": interrupt})
         if coordinator is not None:
             coordinator.note_yield()
 
@@ -102,7 +104,7 @@ def build_inline_solicit(
 
     async def _inline(last_text: str) -> str:
         # Emit so codex resume reads this pause as AWAITING_USER, not MISSING_COMPLETE_STEP.
-        _emit_awaiting()
+        _emit_awaiting(last_text)
         if user_input_fn is not None:
             try:
                 return await _solicit()

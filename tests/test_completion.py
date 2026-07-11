@@ -409,7 +409,9 @@ def test_inline_steer_emit_carries_interrupt_true() -> None:
         anyio.run(inline, "last prose")
     awaiting = [e for e in log.events if e["type"] == "awaiting_user_input"]
     assert len(awaiting) == 1
-    assert awaiting[0]["payload"] == {"prompt": "interrupted", "interrupt": True}
+    assert awaiting[0]["payload"] == {
+        "steer_hint": "interrupted", "last_agent_message": "last prose",
+        "interrupt": True}
 
 
 def test_inline_bare_turn_end_emit_carries_interrupt_false() -> None:
@@ -420,4 +422,6 @@ def test_inline_bare_turn_end_emit_carries_interrupt_false() -> None:
         anyio.run(inline, "the final question")
     awaiting = [e for e in log.events if e["type"] == "awaiting_user_input"]
     assert len(awaiting) == 1
-    assert awaiting[0]["payload"] == {"prompt": "", "interrupt": False}
+    assert awaiting[0]["payload"] == {
+        "steer_hint": "", "last_agent_message": "the final question",
+        "interrupt": False}
