@@ -535,7 +535,7 @@ class CodexAgentRunner:
                 derive_codex_resume_state,
                 pending_human_reply,
             )
-            rstate, _ = derive_codex_resume_state(
+            rstate, last_agent_text = derive_codex_resume_state(
                 invocation.events_path, aid,
                 subagent_depth=invocation.subagent_depth)
             if rstate is ResumeState.AWAITING_USER:
@@ -553,7 +553,8 @@ class CodexAgentRunner:
                 reply, source = await _resolve_wait_reply(
                     invocation.coordinator, invocation.user_input_fn,
                     invocation.resume_should_continue,
-                    elog=elog, agent_id=aid, pending_reply=pending)
+                    elog=elog, agent_id=aid, pending_reply=pending,
+                    last_agent_message=last_agent_text)
                 if source == "nudge":
                     # Internal continuation, not a human turn: journal an internal
                     # engine_continuation event (no `>` caret), not a user_message.

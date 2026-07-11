@@ -442,3 +442,54 @@ async def test_awaiting_user_retry_redrives_pending_reply_not_nudge(
         for e in elog.read())
     # No new gate emitted by the resume branch.
     assert "awaiting_user_input" not in types
+
+
+@pytest.mark.anyio
+async def test_awaiting_user_solicit_emits_gate_with_last_agent_message(
+    tmp_path: Path,
+) -> None:
+    """codex AWAITING_USER resume that actually solicits: the gate emit carries
+    the derived last agent prose in last_agent_message (not an empty string),
+    sourced from derive_codex_resume_state's second return value."""
+    _seed_git_and_auth(tmp_path)
+    tx = tmp_path / "tx"
+    rel = "sessions/2026/06/05/rollout-2026-06-05T00-00-00-thr-s-1.jsonl"
+    (tx / "codex_thread.json").write_text(
+        json.dumps({"thread_id": "thr-s-1", "rollout_relpath": rel}))
+    saved = tx / "codex_rollout" / rel
+    saved.parent.mkdir(parents=True, exist_ok=True)
+    saved.write_text('{"id": "thr-s-1"}\n')
+
+    # events.jsonl deriving AWAITING_USER: a tail prose llm_response + the
+    # journaled awaiting_user_input, no complete_step, no following user_message.
+    _write_events(tmp_path / "events.jsonl", [
+        {"agent_id": "step:t", "type": "llm_response",
+         "payload": {"raw": {"content": [{"type": "text", "text": "which file?"}]}}},
+        {"agent_id": "step:t", "type": "awaiting_user_input",
+         "payload": {"steer_hint": "", "last_agent_message": "which file?",
+                     "interrupt": False}},
+    ])
+
+    elog = InMemoryEventLog()
+    scripted = [[
+        thread_started("thr-s-1"),
+        agent_message("resumed; calling complete_step"),
+        mcp_call(name="complete_step", args={"answer": "foo.py"},
+                 result="ok", item_id="cs-1"),
+        turn_completed(input_tokens=1, output_tokens=1),
+    ]]
+    fake = FakeCodex(scripted_turns=scripted)
+    runner = CodexAgentRunner(
+        model_name="gpt-5.5", client_factory=lambda options=None: fake)
+    runner._canonical_auth_override = tmp_path / "auth.json"
+
+    inv = _build_invocation(tmp_path, event_log=elog, balance_on_resume=True)
+    object.__setattr__(inv, "resume_should_continue", False)
+    object.__setattr__(inv, "user_input_fn", lambda _p: "foo.py")
+
+    _ = [ev async for ev in runner.run(inv)]
+
+    gate = next(e for e in elog.read() if e["type"] == "awaiting_user_input")
+    assert gate["payload"]["last_agent_message"] == "which file?"
+    assert gate["payload"]["steer_hint"] == ""
+    assert gate["payload"]["interrupt"] is False
