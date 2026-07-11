@@ -1,7 +1,7 @@
 """Slash command dispatcher for interactive steps (spec §4).
 
 Flat namespace: built-ins (/help, /skills) take precedence; every other
-/<name> resolves a skill from the Change's tracked workflow dir and is submitted AS the
+/<name> resolves a skill from the Quest's tracked workflow dir and is submitted AS the
 user's input line (human-attributed). The skill name is untrusted and
 sanitized by agents.skills."""
 
@@ -66,10 +66,10 @@ def handle_slash_line(
         from imp.engine.archive import read as archive_read
         hits = archive_read.search_archive(change.control_root, args)
         if not hits:
-            output_fn(f"No archived changes match {args!r}.")
+            output_fn(f"No archived Quests match {args!r}.")
         else:
-            for change_id, title, status, _created in hits:
-                output_fn(f"  {change_id}  {title or '(untitled)'}  [{status or '-'}]")
+            for quest_id, title, status, _created in hits:
+                output_fn(f"  {quest_id}  {title or '(untitled)'}  [{status or '-'}]")
         return REPROMPT
     if cmd == "abandon":
         return "/abandon"
@@ -90,26 +90,26 @@ def handle_slash_line(
         if not args:
             output_fn("Usage: /resume <id|query>")
             return REPROMPT
-        from imp.cli.main import _change_home, _iter_change_ids
+        from imp.cli.main import _iter_quest_ids, _quest_home
         from imp.engine.archive import read as archive_read
         from imp.engine.archive import record, records_root
         control = change.control_root
-        matches = [cid for cid in _iter_change_ids(control) if args in cid]
+        matches = [cid for cid in _iter_quest_ids(control) if args in cid]
         if len(matches) != 1:
             if not matches:
-                output_fn(f"No change matches {args!r}.")
+                output_fn(f"No Quest matches {args!r}.")
             else:
                 output_fn(f"{args!r} is ambiguous: {', '.join(matches)}")
             return REPROMPT
         target = matches[0]
-        if _change_home(control, target).exists():
+        if _quest_home(control, target).exists():
             output_fn(f"{target} is live; continue it with `imp resume {target}`.")
             return REPROMPT
         rec = record.read_record(records_root(control), target)
         if rec is None or not rec.get("resumable"):
             output_fn(f"{target} is not resumable.")
             return REPROMPT
-        archive_read.rehydrate_change(control, target)
+        archive_read.rehydrate_quest(control, target)
         output_fn(f"Rehydrated {target}; continue it with `imp resume {target}`.")
         return REPROMPT
 
@@ -143,12 +143,12 @@ def _help(out: Callable[[str], None]) -> None:
     out("Available slash commands:")
     out("  /help              Show this message")
     out("  /skills            List loadable skills")
-    out("  /list [-a]         List your changes (-a adds completed/abandoned)")
-    out("  /search <query>    Search archived changes by content, title, or id")
+    out("  /list [-a]         List your Quests (-a adds completed/abandoned)")
+    out("  /search <query>    Search archived Quests by content, title, or id")
     out("  /save              Save this conversation to your Backlog")
     out("  /clear             Park this chat and start a fresh one")
     out("  /model <model>     Switch this step's model (or provider:model)")
-    out("  /abandon           Abandon the current change")
+    out("  /abandon           Abandon the current Quest")
     out("  /resume <id|query> Rehydrate a saved/archived conversation to continue")
     out("  /<name> [args]     Load a skill (trailing args appended to it)")
     out("")
@@ -265,7 +265,7 @@ async def ask_line_with_slash(
                         toolbar = (
                             driver.compose_toolbar_static() if driver is not None
                             else compose_identity_toolbar(
-                                change_id=change.id, title=change.title,
+                                quest_id=change.id, title=change.title,
                                 color=color, width=width))
                         # _exit_event is None until C4 wires it; getattr is defensive
                         # for pre-C4 builds, where the read takes the unraced path.

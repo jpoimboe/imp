@@ -83,8 +83,8 @@ from imp.agents.tools import bg as _bg
 from imp.agents.tools.complete_step import make_complete_step_tool
 from imp.agents.tools.context import (
     ToolContext,
-    change_home_path,
     kill_process_group,
+    quest_home_path,
     request_bracketed,
     suspend_inactivity_watchdog,
 )
@@ -1372,7 +1372,7 @@ class ClaudeCodeAgentRunner:
             # inherited, so claude keys off a stale $PWD and edits/commits the
             # wrong working tree (e.g. imp's own repo when launched from a
             # subdir or via Popen(cwd=...) which doesn't update $PWD).
-            cwd=str(invocation.change_context.project_root),
+            cwd=str(invocation.quest_context.project_root),
             system_prompt=invocation.system_prompt,
             thinking=thinking_cfg,
             effort=effort_cfg,
@@ -1477,7 +1477,7 @@ class ClaudeCodeAgentRunner:
         transcript = Transcript(invocation.transcript_dir / "transcript.jsonl")
         tools = _build_tools(invocation)
         ctx = ToolContext(
-            project_root=invocation.change_context.project_root,
+            project_root=invocation.quest_context.project_root,
             events_path=invocation.events_path,
             subagent_defs=invocation.subagent_defs,
             provider_name=invocation.provider_name,
@@ -1485,11 +1485,11 @@ class ClaudeCodeAgentRunner:
             parent_transcript_dir=invocation.transcript_dir,
             agent_id=aid,
             background_enabled=True,  # full bg surface wired: injection + sweeps + teardown
-            change_home=change_home_path(invocation.change_context.change_home),
+            quest_home=quest_home_path(invocation.quest_context.quest_home),
         )
-        ctx.change_context = invocation.change_context
+        ctx.quest_context = invocation.quest_context
         ctx.change_state = invocation.change_state
-        ctx.change = invocation.change          # live Change for rename_change
+        ctx.change = invocation.change          # live Quest for rename_quest
         ctx.spawn_subagent = spawn_subagent_via_registry
         ctx.resolved_tiers = invocation.resolved_tiers
         ctx.subagent_depth = invocation.subagent_depth
@@ -1539,7 +1539,7 @@ class ClaudeCodeAgentRunner:
         # resume= and session_id are mutually exclusive in the SDK: native resume
         # passes resume= and leaves session_id unset.
         existing = transcript.load(
-            ctx.change_home / "blobs" if ctx.change_home is not None else None)
+            ctx.quest_home / "blobs" if ctx.quest_home is not None else None)
         is_fresh = not existing
         # A subagent's done-signal is a bare-turn-end terminal (assistant prose,
         # no complete_step), complementing _tail_has_complete_step's top-level
@@ -1553,7 +1553,7 @@ class ClaudeCodeAgentRunner:
                 yield {"type": "agent_output", "payload": {"text": final_text}}
             return
         store = session_store_for(invocation.transcript_dir)
-        skey = session_key(invocation.change_context.project_root, aid)
+        skey = session_key(invocation.quest_context.project_root, aid)
         # Native resume is sound ONLY when existing's final turn was actually
         # flushed to the store. The SDK mirror batcher flushes solely at a `result`
         # boundary, so AWAITING_USER (the agent ended its turn on assistant prose —
@@ -1829,7 +1829,7 @@ class ClaudeCodeAgentRunner:
             reconciled = reconcile_store_tail(
                 messages[:resume_base], store_body or [],
                 session_id=skey["session_id"],
-                cwd=str(invocation.change_context.project_root),
+                cwd=str(invocation.quest_context.project_root),
                 model=self.model,
             )
             await store.overwrite(skey, reconciled)

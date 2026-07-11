@@ -23,7 +23,7 @@ from imp.remote.daemon.commands import (
     Subscribe,
     Unsubscribe,
 )
-from imp.remote.daemon.discover import ChangeInfo
+from imp.remote.daemon.discover import QuestInfo
 from imp.remote.daemon.runner import _dispatch_inbound, _handle_command
 from imp.remote.daemon.subscriptions import Subscriptions
 
@@ -35,7 +35,7 @@ def anyio_backend() -> str:
 
 class FakeControl:
     def __init__(
-        self, changes: list[ChangeInfo] | None = None, *, abandon_rc: int = 0,
+        self, changes: list[QuestInfo] | None = None, *, abandon_rc: int = 0,
         snapshots: dict | None = None, narratives: dict | None = None,
         resident: frozenset[str] | None = None,
     ) -> None:
@@ -50,27 +50,27 @@ class FakeControl:
         self._histories: dict = {}
         self._resident = frozenset(resident or ())
 
-    def full_history(self, change_id: str) -> list[dict]:
-        return self._histories.get(change_id, [])
+    def full_history(self, quest_id: str) -> list[dict]:
+        return self._histories.get(quest_id, [])
 
-    def snapshot(self, change_id: str) -> tuple[str, str, str] | None:
-        return self._snapshots.get(change_id)
+    def snapshot(self, quest_id: str) -> tuple[str, str, str] | None:
+        return self._snapshots.get(quest_id)
 
-    def recent_narrative(self, change_id: str, n: int) -> list[dict]:
-        return self._narratives.get(change_id, [])[-n:]
+    def recent_narrative(self, quest_id: str, n: int) -> list[dict]:
+        return self._narratives.get(quest_id, [])[-n:]
 
-    async def reply(self, change_id: str, text: str) -> str:
-        self.replies.append((change_id, text))
+    async def reply(self, quest_id: str, text: str) -> str:
+        self.replies.append((quest_id, text))
         return "live"
 
     def create(self, prompt: str) -> None:
         self.created.append(prompt)
 
-    def abandon(self, change_id: str) -> int:
-        self.abandoned.append(change_id)
+    def abandon(self, quest_id: str) -> int:
+        self.abandoned.append(quest_id)
         return self._abandon_rc
 
-    def list_changes(self) -> list[ChangeInfo]:
+    def list_quests(self) -> list[QuestInfo]:
         return self._changes
 
     def resident_ids(self) -> frozenset[str]:
@@ -120,7 +120,7 @@ async def test_abandon_running_change_enqueues_still_running_notice() -> None:
 
 @pytest.mark.anyio
 async def test_listchanges_calls_list_and_enqueues_a_listresult() -> None:
-    rows = [ChangeInfo(id="aaaaaa", title="T", status="running", step="plan")]
+    rows = [QuestInfo(id="aaaaaa", title="T", status="running", step="plan")]
     control = FakeControl(changes=rows, resident=frozenset({"aaaaaa"}))
     responses: queue.Queue = queue.Queue()
     await _handle_command(ListChanges(), control, responses)
@@ -187,7 +187,7 @@ async def test_subscribe_to_unknown_handle_errors_without_subscribing() -> None:
     await _handle_command(Subscribe("bogus"), control, responses)
     notice = responses.get_nowait()
     assert isinstance(notice, Notice)
-    assert notice.text == "No Change @bogus — send /list to see what's running."
+    assert notice.text == "No Quest @bogus — send /list to see what's running."
     assert responses.empty()
     assert control.subscriptions.contains("bogus") is False
 
@@ -222,7 +222,7 @@ async def test_replay_renders_each_event_through_the_common_envelope() -> None:
     assert responses.empty()
     # Full envelope: id · title · time header + body. A narrative (llm_response)
     # event carries NO reply footer (only awaiting_user_input gates append the
-    # handle); routing still works via the Notice's change_id tag, asserted below.
+    # handle); routing still works via the Notice's quest_id tag, asserted below.
     assert isinstance(first, Notice) and isinstance(second, Notice)
     assert first.text.startswith("k3f9qa · Dark mode · ")
     assert first.text.endswith("\none")
@@ -230,9 +230,9 @@ async def test_replay_renders_each_event_through_the_common_envelope() -> None:
     assert second.text.startswith("k3f9qa · Dark mode · ")
     assert second.text.endswith("\ntwo")
     assert "↩" not in second.text
-    # Each replayed Notice is tagged so a reply routes back to the Change.
-    assert first.change_id == "k3f9qa"
-    assert second.change_id == "k3f9qa"
+    # Each replayed Notice is tagged so a reply routes back to the Quest.
+    assert first.quest_id == "k3f9qa"
+    assert second.quest_id == "k3f9qa"
 
 
 @pytest.mark.anyio
@@ -260,9 +260,9 @@ class FailThenStopControl:
         self.stop = stop
         self.calls: list[str] = []
 
-    async def reply(self, change_id: str, text: str) -> str:
-        self.calls.append(change_id)
-        if change_id == "boom":
+    async def reply(self, quest_id: str, text: str) -> str:
+        self.calls.append(quest_id)
+        if quest_id == "boom":
             raise RuntimeError("kaboom")
         self.stop.set()
         return "live"
@@ -337,8 +337,8 @@ async def test_alerts_bare_reports_on_state() -> None:
 @pytest.mark.anyio
 async def test_alerts_on_with_parked_changes_sends_only_confirmation() -> None:
     rows = [
-        ChangeInfo(id="aaaaaa", title="Alpha", status="paused", step="plan"),
-        ChangeInfo(id="cccccc", title="Gamma", status="merge_blocked", step="finalize"),
+        QuestInfo(id="aaaaaa", title="Alpha", status="paused", step="plan"),
+        QuestInfo(id="cccccc", title="Gamma", status="merge_blocked", step="finalize"),
     ]
     control = FakeControl(changes=rows)
     responses: queue.Queue = queue.Queue()
@@ -347,12 +347,12 @@ async def test_alerts_on_with_parked_changes_sends_only_confirmation() -> None:
     await _handle_command(Alerts(True), control, responses, alert_all)
     assert alert_all.enabled() is True
     assert responses.get_nowait() == Notice(ALERTS_ON_REPLY)
-    assert responses.empty()   # no catch-up even with parked Changes on disk
+    assert responses.empty()   # no catch-up even with parked Quests on disk
 
 
 @pytest.mark.anyio
 async def test_alerts_on_with_no_parked_changes_sends_only_confirmation() -> None:
-    rows = [ChangeInfo(id="bbbbbb", title="Beta", status="running", step="implement")]
+    rows = [QuestInfo(id="bbbbbb", title="Beta", status="running", step="implement")]
     control = FakeControl(changes=rows)
     responses: queue.Queue = queue.Queue()
     await _handle_command(Alerts(True), control, responses, AlertAll())

@@ -88,13 +88,13 @@ def default_workflow_script(sentinel: str) -> dict[str, Any]:
         return {"name": "complete_step", "input": {"status": "Success", "outcome": "ok", **fields}}
 
     spec_cmd = (
-        'mkdir -p "$IMP_CHANGE_DIR/artifacts/spec" && '
+        'mkdir -p "$IMP_QUEST_DIR/artifacts/spec" && '
         'printf "# Spec\\n\\nstub spec\\n"'
-        ' > "$IMP_CHANGE_DIR/artifacts/spec/$IMP_CHANGE_ID.md"'
+        ' > "$IMP_QUEST_DIR/artifacts/spec/$IMP_QUEST_ID.md"'
     )
     plan_cmd = (
-        'mkdir -p "$IMP_CHANGE_DIR/artifacts/plans" && '
-        'printf "# Plan 1\\n" > "$IMP_CHANGE_DIR/artifacts/plans/$IMP_CHANGE_ID-plan-1.md"'
+        'mkdir -p "$IMP_QUEST_DIR/artifacts/plans" && '
+        'printf "# Plan 1\\n" > "$IMP_QUEST_DIR/artifacts/plans/$IMP_QUEST_ID-plan-1.md"'
     )
     lead_cmd = (
         'cd "$IMP_PROJECT_ROOT" && mkdir -p src && '
@@ -104,7 +104,7 @@ def default_workflow_script(sentinel: str) -> dict[str, Any]:
     return {
         "steps": {
             "threshold": [{"text": "threshold", "tools": [
-                {"name": "rename_change", "input": {"name": "demo change"}},
+                {"name": "rename_quest", "input": {"name": "demo change"}},
                 {"name": "create_and_enter_worktree", "input": {}},
                 bash(spec_cmd),
                 done(ceremony="express"),

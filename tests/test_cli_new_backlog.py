@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from imp.cli import main
-from imp.engine.change import Change
+from imp.engine.quest import Quest
 from tests.conftest import _seed_control
 
 
@@ -19,22 +19,22 @@ def _args(**kw) -> argparse.Namespace:
 
 
 def _only_new_id(control: Path) -> str:
-    return next(p.name for p in (control / ".imp" / "changes").iterdir())
+    return next(p.name for p in (control / ".imp" / "quests").iterdir())
 
 
-def test_new_idea_creates_change_home_with_origin_idea(
+def test_new_idea_creates_quest_home_with_origin_idea(
         tmp_path: Path, monkeypatch, capsys) -> None:
     _seed_control(tmp_path)
     monkeypatch.chdir(tmp_path)
     rc = main._record_idea(_args(), tmp_path, "main")
     assert rc == 0
     new_id = _only_new_id(tmp_path)
-    change = Change.load(tmp_path, new_id)
+    change = Quest.load(tmp_path, new_id)
     assert change.materialized is False
     assert change.origin == "idea"
     assert change.title == "Wire OAuth login"
     assert change.seed_opening == "Wire OAuth login"
-    meta = json.loads((change.change_dir / "change.json").read_text())
+    meta = json.loads((change.quest_dir / "quest.json").read_text())
     assert meta["depends_on"] == ["2026-06-16-dep001"]
     assert new_id in capsys.readouterr().out
 
@@ -44,7 +44,7 @@ def test_new_idea_description_populates_seed_opening(
     _seed_control(tmp_path)
     monkeypatch.chdir(tmp_path)
     main._record_idea(_args(opening="the longer brief"), tmp_path, "main")
-    change = Change.load(tmp_path, _only_new_id(tmp_path))
+    change = Quest.load(tmp_path, _only_new_id(tmp_path))
     assert change.seed_opening == "Wire OAuth login\n\nthe longer brief"
 
 
@@ -52,8 +52,8 @@ def test_new_idea_no_deps(tmp_path: Path, monkeypatch) -> None:
     _seed_control(tmp_path)
     monkeypatch.chdir(tmp_path)
     main._record_idea(_args(depends_on=None), tmp_path, "main")
-    meta = json.loads((Change.load(tmp_path, _only_new_id(tmp_path)).change_dir
-                       / "change.json").read_text())
+    meta = json.loads((Quest.load(tmp_path, _only_new_id(tmp_path)).quest_dir
+                       / "quest.json").read_text())
     assert meta["depends_on"] == []
 
 
@@ -63,7 +63,7 @@ def test_new_idea_blank_title_errors_without_creating(
     monkeypatch.chdir(tmp_path)
     rc = main._record_idea(_args(idea="   "), tmp_path, "main")
     assert rc == 2
-    assert not (tmp_path / ".imp" / "changes").exists()
+    assert not (tmp_path / ".imp" / "quests").exists()
     captured = capsys.readouterr()
     assert "imp:" in captured.err
     assert "--backlog" in captured.err
@@ -80,7 +80,7 @@ def test_new_idea_with_title_flag_is_error(
                            non_interactive=True, message=None,
                            workflow=None)))
     assert rc == 2
-    assert not (tmp_path / ".imp" / "changes").exists()
+    assert not (tmp_path / ".imp" / "quests").exists()
     assert "--backlog" in capsys.readouterr().err
 
 
@@ -144,7 +144,7 @@ def test_backlog_with_run_only_flag_errors(
     ns.update(flag)
     rc = asyncio.run(main._async_cmd_new(argparse.Namespace(**ns)))
     assert rc == 2
-    assert not (tmp_path / ".imp" / "changes").exists()
+    assert not (tmp_path / ".imp" / "quests").exists()
     err = capsys.readouterr().err
     assert "files an idea instantly and never runs" in err
     assert "imp resume" in err
@@ -169,7 +169,7 @@ def test_non_backlog_non_interactive_runs_headless(
         model=None,
     ) -> int:
         captured["non_interactive"] = non_interactive
-        captured["change_id"] = change.id
+        captured["quest_id"] = change.id
         return 0
 
     monkeypatch.setattr(cli_main, "run_session_client", _fake_run_session_client)
@@ -225,7 +225,7 @@ def test_interactive_backlog_files_instantly_no_session(
         sys.stdout.isatty = orig_out  # type: ignore[method-assign]
 
     assert rc == 0
-    change = Change.load(tmp_path, _only_new_id(tmp_path))
+    change = Quest.load(tmp_path, _only_new_id(tmp_path))
     assert change.origin == "idea"
     assert change.title == "My backlog item"
     assert change.materialized is False

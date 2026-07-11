@@ -290,7 +290,7 @@ def _v_differ_from_targets_exist(
             )
 
 
-_SUBAGENT_FORBIDDEN_TOOLS = ("sub_agent", "rename_change")
+_SUBAGENT_FORBIDDEN_TOOLS = ("sub_agent", "rename_quest")
 
 
 def _v_subagent_forbidden_tools(
@@ -309,7 +309,7 @@ def _v_subagent_forbidden_tools(
                     LoadError(
                         f"subagent {name!r} is parallel-dispatchable (named in a "
                         f"`subagents:` list) and declares {tool!r}; a dispatched "
-                        f"subagent cannot dispatch or rename the change",
+                        f"subagent cannot dispatch or rename the Quest",
                         adef.source,
                         hint=f"remove {tool!r} from the subagent's tools",
                     )

@@ -17,7 +17,7 @@ ID = "2026-06-20-assert-test"
 
 
 def _home(pr: Path) -> Path:
-    return pr.parent / ".imp" / "changes" / "x"
+    return pr.parent / ".imp" / "quests" / "x"
 
 
 def _git(cwd: Path, *args: str) -> subprocess.CompletedProcess[str]:
@@ -26,12 +26,12 @@ def _git(cwd: Path, *args: str) -> subprocess.CompletedProcess[str]:
 
 
 def _run(
-    pr: Path, change_id: str = ID, tolerated: str = "false"
+    pr: Path, quest_id: str = ID, tolerated: str = "false"
 ) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         ["bash", str(ASSERT), tolerated], cwd=pr.parent,
         env={**os.environ, "IMP_PROJECT_ROOT": str(pr),
-             "IMP_CHANGE_DIR": str(_home(pr)), "IMP_CHANGE_ID": change_id},
+             "IMP_QUEST_DIR": str(_home(pr)), "IMP_QUEST_ID": quest_id},
         capture_output=True, text=True, check=False,
     )
 
@@ -58,7 +58,7 @@ def _record_change(pr: Path) -> None:
     cd = _home(pr)
     cd.mkdir(parents=True, exist_ok=True)
     fork = _git(pr, "rev-parse", "main").stdout.strip()
-    (cd / "change.json").write_text(json.dumps(
+    (cd / "quest.json").write_text(json.dumps(
         {"id": "x", "title": "t", "base_branch": "main", "cur_base_head": fork}))
 
 
@@ -120,14 +120,14 @@ def test_makes_no_commit(tmp_path: Path) -> None:
     assert _git(pr, "rev-parse", "HEAD").stdout.strip() == head_before   # read-only
 
 
-def test_empty_change_id_fails(tmp_path: Path) -> None:
+def test_empty_quest_id_fails(tmp_path: Path) -> None:
     pr = tmp_path / "wt"
     _init(pr)
     _record_change(pr)
     _git(pr, "checkout", "-b", "imp/x")
     _commit(pr, "a.txt", "a\n", f"feat a\n\nChange: {ID}")
-    res = _run(pr, change_id="")
-    assert res.returncode != 0                            # ${IMP_CHANGE_ID:?}
+    res = _run(pr, quest_id="")
+    assert res.returncode != 0                            # ${IMP_QUEST_ID:?}
 
 
 def test_fails_when_tree_not_cleared(tmp_path: Path) -> None:

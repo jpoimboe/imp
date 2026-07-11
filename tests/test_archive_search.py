@@ -8,20 +8,20 @@ from imp.engine.archive import read as archive_read
 
 
 def _archive(
-    tmp_path: Path, change_id: str, title: str, status: str = "abandoned",
+    tmp_path: Path, quest_id: str, title: str, status: str = "abandoned",
     events_text: str = "",
 ) -> None:
-    events = tmp_path / f"{change_id}.jsonl"
+    events = tmp_path / f"{quest_id}.jsonl"
     events.write_text(events_text)
-    change_json = tmp_path / f"{change_id}.change.json"
-    change_json.write_text(json.dumps({
-        "id": change_id, "title": title, "base_branch": "main",
+    quest_json = tmp_path / f"{quest_id}.quest.json"
+    quest_json.write_text(json.dumps({
+        "id": quest_id, "title": title, "base_branch": "main",
         "created_at": "2026-06-01T00:00:00+00:00", "depends_on": []}))
-    state_json = tmp_path / f"{change_id}.state.json"
-    state_json.write_text(json.dumps({"id": change_id, "status": status, "step": "spec"}))
-    archive.archive_change(
-        tmp_path, change_id, events_path=events,
-        change_json_path=change_json, state_json_path=state_json)
+    state_json = tmp_path / f"{quest_id}.state.json"
+    state_json.write_text(json.dumps({"id": quest_id, "status": status, "step": "spec"}))
+    archive.archive_quest(
+        tmp_path, quest_id, events_path=events,
+        quest_json_path=quest_json, state_json_path=state_json)
 
 
 def _prose_line(text: str) -> str:

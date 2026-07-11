@@ -23,7 +23,7 @@ import anyio
 import pytest
 
 import imp.agents.tools.bash  # noqa: F401 — registers the tool
-from imp.agents.runner import ChangeContext
+from imp.agents.runner import QuestContext
 from imp.agents.tools import get_registry
 from imp.agents.tools.context import ToolContext
 from imp.engine import worktree as wt
@@ -92,7 +92,7 @@ def _ctx(worktree: Path, policy: SandboxPolicy) -> ToolContext:
         project_root=worktree,
         events_path=worktree / "events.jsonl",
     )
-    ctx.change_context = ChangeContext(
+    ctx.quest_context = QuestContext(
         title="Test",
         project_root=worktree,
         workflow_dir=worktree / ".imp" / "wf",
@@ -351,9 +351,9 @@ def test_gate_writing_in_its_cwd_succeeds() -> None:
 
 
 def test_gate_sees_post_rename_title_not_frozen_empty() -> None:
-    """Regression: name-on-intent freezes the policy with IMP_CHANGE_TITLE="" at run
-    start; after rename_change the gate's fresh env_extra carries the real title.
-    Reproduces the dogfood failure where a `${IMP_CHANGE_*:?not set by engine}`
+    """Regression: name-on-intent freezes the policy with IMP_QUEST_TITLE="" at run
+    start; after rename_quest the gate's fresh env_extra carries the real title.
+    Reproduces the dogfood failure where a `${IMP_QUEST_*:?not set by engine}`
     guard fired inside the bwrap --clearenv jail.
     """
     import dataclasses
@@ -364,25 +364,25 @@ def test_gate_sees_post_rename_title_not_frozen_empty() -> None:
     root = _make_root("imp-test-title-")
     try:
         pol = _active_policy(root)
-        pol = dataclasses.replace(pol, setenv=(*pol.setenv, ("IMP_CHANGE_TITLE", "")))
+        pol = dataclasses.replace(pol, setenv=(*pol.setenv, ("IMP_QUEST_TITLE", "")))
         step = Step(
             name="g", phase="p", kind="script", rules=(), on_max_retries=Pause(),
             max_loops=1, source=SourceLoc(file=Path(__file__), line=1),
-            command=': "${IMP_CHANGE_TITLE:?IMP_CHANGE_TITLE not set by engine}"; '
-                    'printf %s "$IMP_CHANGE_TITLE"',
+            command=': "${IMP_QUEST_TITLE:?IMP_QUEST_TITLE not set by engine}"; '
+                    'printf %s "$IMP_QUEST_TITLE"',
             timeout_seconds=30,
         )
         result = run_script(step, cwd=root, policy=pol,
-                            env_extra={"IMP_CHANGE_TITLE": "Live mode log polish"})
+                            env_extra={"IMP_QUEST_TITLE": "Live mode log polish"})
         assert result["exit"] == 0, f"gate exited {result['exit']}: {result}"
         assert result["stdout"] == "Live mode log polish"
     finally:
         shutil.rmtree(root, ignore_errors=True)
 
 
-def test_bash_tool_uses_live_change_title_not_stale_snapshot() -> None:
-    """Regression: the bash tool must read IMP_CHANGE_TITLE from the LIVE Change, not
-    the frozen change_context snapshot that rename_change never updates. Without the
+def test_bash_tool_uses_live_quest_title_not_stale_snapshot() -> None:
+    """Regression: the bash tool must read IMP_QUEST_TITLE from the LIVE Quest, not
+    the frozen quest_context snapshot that rename_quest never updates. Without the
     fix the agent's own bash sees the empty name-on-intent title inside the sandbox.
     """
     import types as _t
@@ -391,14 +391,14 @@ def test_bash_tool_uses_live_change_title_not_stale_snapshot() -> None:
     try:
         pol = _active_policy(root)
         ctx = _ctx(root, pol)
-        # change_context = the pre-rename snapshot (empty title); ctx.change = the
-        # live, renamed Change. The bash tool must prefer the live one.
-        ctx.change_context = ChangeContext(
+        # quest_context = the pre-rename snapshot (empty title); ctx.change = the
+        # live, renamed Quest. The bash tool must prefer the live one.
+        ctx.quest_context = QuestContext(
             id="2026-06-10-x", title="",
             project_root=root, workflow_dir=root / ".imp" / "wf")
         ctx.change = _t.SimpleNamespace(
             id="2026-06-10-x", handle="", title="renamed")
-        out = _bash(ctx, 'printf %s "$IMP_CHANGE_TITLE"')
+        out = _bash(ctx, 'printf %s "$IMP_QUEST_TITLE"')
         assert out["returncode"] == 0, out
         assert out["stdout"] == "renamed"
     finally:
@@ -439,7 +439,7 @@ def test_git_commit_works_but_escape_vectors_blocked() -> None:
         pol = resolve_policy(
             worktree=wt_path,
             control_root=control,
-            change_id="esc1",
+            quest_id="esc1",
             cfg=SandboxConfig(
                 home=control / "home",
                 uid=os.getuid(),
@@ -452,7 +452,7 @@ def test_git_commit_works_but_escape_vectors_blocked() -> None:
             project_root=wt_path,
             events_path=wt_path / "events.jsonl",
         )
-        ctx.change_context = ChangeContext(
+        ctx.quest_context = QuestContext(
             title="Escape Test",
             project_root=wt_path,
             workflow_dir=wt_path / ".imp" / "wf",
@@ -615,14 +615,14 @@ def _refprot_ctx(control: Path, worktree: Path) -> tuple[ToolContext, SandboxPol
     guard is active (Part 1). Used for the change worktree and, with a different
     `worktree`, for the spike worktree."""
     pol = resolve_policy(
-        worktree=worktree, control_root=control, change_id="esc1",
+        worktree=worktree, control_root=control, quest_id="esc1",
         cfg=SandboxConfig(home=control / "home", uid=os.getuid()),
         engine_env_result={"IMP_PROJECT_ROOT": str(worktree)},
         environ=os.environ, available=True,
     )
     ctx = ToolContext(
         project_root=worktree, events_path=worktree / "events.jsonl")
-    ctx.change_context = ChangeContext(
+    ctx.quest_context = QuestContext(
         title="Ref Test", project_root=worktree,
         workflow_dir=worktree / ".imp" / "wf")
     ctx.sandbox_policy = pol
@@ -731,7 +731,7 @@ def test_change_and_spike_branch_writes_succeed() -> None:
     try:
         ctx, _pol = _refprot_ctx(control, wt_path)
 
-        # Change branch: two commits then an autosquash rebase onto main. The
+        # Quest branch: two commits then an autosquash rebase onto main. The
         # inline GIT_SEQUENCE_EDITOR/GIT_EDITOR=: keep rebase -i non-interactive
         # (they are shell-assignment prefixes, independent of the --clearenv jail).
         r1 = _bash(
@@ -846,7 +846,7 @@ def _spike_policy(worktree: Path, home: Path) -> SandboxPolicy:
     (worktree / ".git" / "hooks").mkdir(parents=True, exist_ok=True)
     (worktree / ".git" / "config").write_text("")
     return resolve_policy(
-        worktree=worktree, control_root=worktree, change_id="beh",
+        worktree=worktree, control_root=worktree, quest_id="beh",
         cfg=SandboxConfig(home=home),
         engine_env_result={}, environ={"HOME": str(home),
                                        "PATH": os.environ.get("PATH", "/usr/bin:/bin")},

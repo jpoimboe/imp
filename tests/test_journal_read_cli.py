@@ -1,8 +1,8 @@
 """imp log / imp list / imp show against an ARCHIVED (merged,
-worktree-removed) Change.
+worktree-removed) Quest.
 
-Seeds the per-Change archive directly (the sole read source for completed
-Changes), then drives the CLI. No live providers needed.
+Seeds the per-Quest archive directly (the sole read source for completed
+Quests), then drives the CLI. No live providers needed.
 """
 
 from __future__ import annotations
@@ -19,7 +19,7 @@ import pytest
 
 from imp.cli.main import main
 from imp.engine import archive, worktree
-from imp.engine.change import Change
+from imp.engine.quest import Quest
 from imp.engine.state import State
 from tests.conftest import _seed_control
 
@@ -33,7 +33,7 @@ def _seed_marker_phase(control: Path, slug: str) -> None:
     """Append a step_started event so the change has a node that renders through
     the narrative. Reuses the change's own first-event timestamp so it never
     perturbs last-activity sorting. Call BEFORE _complete_and_archive."""
-    ch = Change.load(control, slug)
+    ch = Quest.load(control, slug)
     with ch.events_path.open("a", encoding="utf-8") as fh:
         fh.write(json.dumps({
             "id": "marker", "agent_id": None,
@@ -45,16 +45,16 @@ def _seed_marker_phase(control: Path, slug: str) -> None:
 
 
 def _complete_and_archive(control: Path, slug: str, status: str = "completed") -> None:
-    """Flip the Change to <status>, archive its runtime snapshot, then remove the
+    """Flip the Quest to <status>, archive its runtime snapshot, then remove the
     worktree — the exact post-merge state imp log/status/show read from."""
-    ch = Change.load(control, slug)
+    ch = Quest.load(control, slug)
     st = State.load(ch.state_dir)
     st.status = status
     st.save(ch.state_dir)
-    archive.archive_change(
+    archive.archive_quest(
         control, slug,
         events_path=ch.events_path,
-        change_json_path=ch.change_dir / "change.json",
+        quest_json_path=ch.quest_dir / "quest.json",
         state_json_path=ch.state_dir / "state.json")
     worktree.remove_worktree(control, slug)
 
@@ -65,10 +65,10 @@ def test_log_reads_from_archive_after_merge(
     import imp.cli.main as m
 
     _seed_control(tmp_path)
-    Change.create(tmp_path, title="Done Thing", change_id="done-thing", base_branch="main")
+    Quest.create(tmp_path, title="Done Thing", quest_id="done-thing", base_branch="main")
     _seed_marker_phase(tmp_path, "done-thing")
     _complete_and_archive(tmp_path, "done-thing")
-    # Worktree is gone: Change.load now raises; log must use the archive.
+    # Worktree is gone: Quest.load now raises; log must use the archive.
     assert not (tmp_path / ".imp" / "worktrees" / "done-thing").exists()
 
     monkeypatch.chdir(tmp_path)
@@ -103,7 +103,7 @@ def test_log_no_slug_resolves_archived(
     import imp.cli.main as m
 
     _seed_control(tmp_path)
-    Change.create(tmp_path, title="Only One", change_id="only-one", base_branch="main")
+    Quest.create(tmp_path, title="Only One", quest_id="only-one", base_branch="main")
     _seed_marker_phase(tmp_path, "only-one")
     _complete_and_archive(tmp_path, "only-one")
 
@@ -126,8 +126,8 @@ def test_status_shows_completed_section_from_archive(
 
     _seed_control(tmp_path)
     # One in-flight, one merged-and-archived.
-    Change.create(tmp_path, title="Live One", change_id="live-one", base_branch="main")
-    Change.create(tmp_path, title="Gone One", change_id="gone-one", base_branch="main")
+    Quest.create(tmp_path, title="Live One", quest_id="live-one", base_branch="main")
+    Quest.create(tmp_path, title="Gone One", quest_id="gone-one", base_branch="main")
     _complete_and_archive(tmp_path, "gone-one")
 
     monkeypatch.chdir(tmp_path)
@@ -139,7 +139,7 @@ def test_status_shows_completed_section_from_archive(
     # in-flight slug appears under in-flight; merged slug under completed.
     assert "live-one" in out
     assert "gone-one" in out
-    # The merged Change shows its title + merged disposition, not blank columns.
+    # The merged Quest shows its title + merged disposition, not blank columns.
     assert "Gone One" in out
     assert "merged" in out
 
@@ -153,12 +153,12 @@ def test_status_inflight_takes_precedence_over_archive(
     import imp.cli.main as m
 
     _seed_control(tmp_path)
-    ch = Change.create(tmp_path, title="Both", change_id="both", base_branch="main")
+    ch = Quest.create(tmp_path, title="Both", quest_id="both", base_branch="main")
     # Archive it but DON'T remove the worktree (simulates the crash window).
-    archive.archive_change(
+    archive.archive_quest(
         tmp_path, "both",
         events_path=ch.events_path,
-        change_json_path=ch.change_dir / "change.json",
+        quest_json_path=ch.quest_dir / "quest.json",
         state_json_path=ch.state_dir / "state.json")
 
     monkeypatch.chdir(tmp_path)
@@ -198,7 +198,7 @@ def test_status_empty_prints_no_changes(
 
     rc = m._cmd_status(type("NS", (), {"all": True})())
     assert rc == 0
-    assert capsys.readouterr().out == "No changes yet — start one with imp new\n"
+    assert capsys.readouterr().out == "No Quests yet — start one with imp new\n"
 
 
 def test_status_precondition_error_prints_no_changes(
@@ -217,7 +217,7 @@ def test_status_precondition_error_prints_no_changes(
 
     rc = m._cmd_status(type("NS", (), {"all": True})())
     assert rc == 0
-    assert capsys.readouterr().out == "No changes yet — start one with imp new\n"
+    assert capsys.readouterr().out == "No Quests yet — start one with imp new\n"
 
 
 def test_status_column_alignment_short_ids(
@@ -229,9 +229,9 @@ def test_status_column_alignment_short_ids(
     import imp.cli.main as m
 
     _seed_control(tmp_path)
-    Change.create(tmp_path, title="Long Title That Gets Truncated",
-                  change_id="abc123", base_branch="main")
-    Change.create(tmp_path, title="Short", change_id="xyz789", base_branch="main")
+    Quest.create(tmp_path, title="Long Title That Gets Truncated",
+                  quest_id="abc123", base_branch="main")
+    Quest.create(tmp_path, title="Short", quest_id="xyz789", base_branch="main")
 
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
@@ -256,7 +256,7 @@ def test_status_no_ansi_when_NO_COLOR_set(
     import imp.cli.main as m
 
     _seed_control(tmp_path)
-    Change.create(tmp_path, title="Gone", change_id="gone", base_branch="main")
+    Quest.create(tmp_path, title="Gone", quest_id="gone", base_branch="main")
     _complete_and_archive(tmp_path, "gone")
 
     monkeypatch.chdir(tmp_path)
@@ -281,7 +281,7 @@ def test_status_all_dims_completed_section(
     import imp.cli.main as m
 
     _seed_control(tmp_path)
-    Change.create(tmp_path, title="Gone", change_id="gone", base_branch="main")
+    Quest.create(tmp_path, title="Gone", quest_id="gone", base_branch="main")
     _complete_and_archive(tmp_path, "gone")
 
     monkeypatch.chdir(tmp_path)
@@ -305,9 +305,9 @@ def test_overview_default_shows_merged_disposition(
     import imp.cli.main as m
 
     _seed_control(tmp_path)
-    Change.create(tmp_path, title="Live", change_id="live", base_branch="main")
-    Change.create(tmp_path, title="Done", change_id="done", base_branch="main")
-    Change.create(tmp_path, title="Dead", change_id="dead", base_branch="main")
+    Quest.create(tmp_path, title="Live", quest_id="live", base_branch="main")
+    Quest.create(tmp_path, title="Done", quest_id="done", base_branch="main")
+    Quest.create(tmp_path, title="Dead", quest_id="dead", base_branch="main")
     _complete_and_archive(tmp_path, "done")
     _complete_and_archive(tmp_path, "dead", status="abandoned")
 
@@ -337,8 +337,8 @@ def test_overview_all_shows_history_label_and_abandoned(
     import imp.cli.main as m
 
     _seed_control(tmp_path)
-    Change.create(tmp_path, title="Done", change_id="done", base_branch="main")
-    Change.create(tmp_path, title="Dead", change_id="dead", base_branch="main")
+    Quest.create(tmp_path, title="Done", quest_id="done", base_branch="main")
+    Quest.create(tmp_path, title="Dead", quest_id="dead", base_branch="main")
     _complete_and_archive(tmp_path, "done")
     _complete_and_archive(tmp_path, "dead", status="abandoned")
 
@@ -365,7 +365,7 @@ def test_overview_default_caps_at_ten(
     _seed_control(tmp_path)
     for i in range(12):
         cid = f"done{i:02d}"
-        Change.create(tmp_path, title=f"Done {i}", change_id=cid, base_branch="main")
+        Quest.create(tmp_path, title=f"Done {i}", quest_id=cid, base_branch="main")
         _complete_and_archive(tmp_path, cid)
 
     monkeypatch.chdir(tmp_path)
@@ -390,7 +390,7 @@ def test_overview_excludes_left_conversations(
     import imp.cli.main as m
 
     _seed_control(tmp_path)
-    Change.create(tmp_path, title="Chat", change_id="chatid", base_branch="main")
+    Quest.create(tmp_path, title="Chat", quest_id="chatid", base_branch="main")
     _complete_and_archive(tmp_path, "chatid", status="left")
 
     monkeypatch.chdir(tmp_path)
@@ -411,7 +411,7 @@ def test_overview_empty_history_omits_block(
     import imp.cli.main as m
 
     _seed_control(tmp_path)
-    Change.create(tmp_path, title="Live", change_id="live", base_branch="main")
+    Quest.create(tmp_path, title="Live", quest_id="live", base_branch="main")
 
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
@@ -432,7 +432,7 @@ def test_overview_only_history_not_reported_empty(
     import imp.cli.main as m
 
     _seed_control(tmp_path)
-    Change.create(tmp_path, title="Done", change_id="done", base_branch="main")
+    Quest.create(tmp_path, title="Done", quest_id="done", base_branch="main")
     _complete_and_archive(tmp_path, "done")
 
     monkeypatch.chdir(tmp_path)
@@ -441,7 +441,7 @@ def test_overview_only_history_not_reported_empty(
 
     m._cmd_status(type("NS", (), {"all": False})(), tmp_path)
     out = capsys.readouterr().out
-    assert out != "No changes yet — start one with imp new\n"
+    assert out != "No Quests yet — start one with imp new\n"
     assert "done" in out and "merged" in out
 
 
@@ -453,7 +453,7 @@ def test_status_all_dims_abandoned_section(
     import imp.cli.main as m
 
     _seed_control(tmp_path)
-    Change.create(tmp_path, title="Dead", change_id="dead", base_branch="main")
+    Quest.create(tmp_path, title="Dead", quest_id="dead", base_branch="main")
     _complete_and_archive(tmp_path, "dead", status="abandoned")
 
     monkeypatch.chdir(tmp_path)
@@ -476,8 +476,8 @@ def test_status_default_inflight_columns_and_color(
     import imp.cli.main as m
 
     _seed_control(tmp_path)
-    Change.create(tmp_path, title="Add version flag",
-                  change_id="yaitd7", base_branch="main")
+    Quest.create(tmp_path, title="Add version flag",
+                  quest_id="yaitd7", base_branch="main")
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
     monkeypatch.delenv("NO_COLOR", raising=False)
@@ -501,9 +501,9 @@ def test_abandon_archives_runtime_and_retains_wip(tmp_path: Path) -> None:
     import imp.cli.main as m
 
     _seed_control(tmp_path)
-    ch = Change.create(tmp_path, title="Doomed", change_id="doomed",
+    ch = Quest.create(tmp_path, title="Doomed", quest_id="doomed",
                        base_branch="main")
-    art = ch.change_dir / "artifacts" / "plans"
+    art = ch.quest_dir / "artifacts" / "plans"
     art.mkdir(parents=True)
     (art / "doomed-plan-1.md").write_text("# plan\n")
     worktree.artifact_commit(
@@ -528,7 +528,7 @@ def test_abandon_without_wip_still_archives_runtime(tmp_path: Path) -> None:
     import imp.cli.main as m
 
     _seed_control(tmp_path)
-    Change.create(tmp_path, title="Bare", change_id="bare",
+    Quest.create(tmp_path, title="Bare", quest_id="bare",
                   base_branch="main")
     # No artifact committed → no wip ref exists.
     rc = m._abandon(tmp_path, "bare")
@@ -559,9 +559,9 @@ def test_show_events_and_status_from_archive(tmp_path, monkeypatch) -> None:
         "created_at": "2026-06-01T00:00:00+00:00", "depends_on": []}))
     sj = tmp_path / "s.json"
     sj.write_text(json.dumps({"id": "arch01", "status": "completed", "step": None}))
-    archive.archive_change(
+    archive.archive_quest(
         tmp_path, "arch01", events_path=events,
-        change_json_path=cj, state_json_path=sj)
+        quest_json_path=cj, state_json_path=sj)
 
     monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
 
@@ -580,13 +580,13 @@ def test_finalize_archives_runtime_and_retains_wip(tmp_path: Path) -> None:
     from imp.engine.state import JsonlEventLog
 
     _seed_control(tmp_path)
-    ch = Change.create(tmp_path, title="Doc Thing", change_id="doc-thing",
+    ch = Quest.create(tmp_path, title="Doc Thing", quest_id="doc-thing",
                        base_branch="main")
     # An artifact accumulated on the wip ref during the run.
-    art = ch.change_dir / "artifacts" / "spec"
+    art = ch.quest_dir / "artifacts" / "spec"
     art.mkdir(parents=True)
     (art / "doc-thing.md").write_text("# the spec\n")
-    files = {str(p.relative_to(ch.change_dir / "artifacts")): p
+    files = {str(p.relative_to(ch.quest_dir / "artifacts")): p
              for p in (art / "doc-thing.md",)}
     worktree.artifact_commit(tmp_path, "doc-thing", files, message="artifact: spec")
     # Simulate a completed merge so _complete takes the finalize path.
@@ -601,7 +601,7 @@ def test_finalize_archives_runtime_and_retains_wip(tmp_path: Path) -> None:
     assert archive_read.read_artifact(tmp_path, "doc-thing", "spec/doc-thing.md") \
         == b"# the spec\n"
     assert archive_read.read_events(tmp_path, "doc-thing") is not None
-    assert archive_read.read_change_json(tmp_path, "doc-thing") is not None
+    assert archive_read.read_quest_json(tmp_path, "doc-thing") is not None
     assert subprocess.run(
         ["git", "rev-parse", "--verify", "--quiet",
          "refs/imp/artifacts/doc-thing"],
@@ -630,9 +630,9 @@ def test_log_reads_events_from_archive_blob(tmp_path: Path, monkeypatch) -> None
         "created_at": "2026-06-01T00:00:00+00:00", "depends_on": []}))
     sj = tmp_path / "s.json"
     sj.write_text(json.dumps({"id": "logtest", "status": "completed", "step": None}))
-    archive.archive_change(
+    archive.archive_quest(
         tmp_path, "logtest", events_path=events,
-        change_json_path=cj, state_json_path=sj)
+        quest_json_path=cj, state_json_path=sj)
 
     monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
     buf = io.StringIO()
@@ -643,22 +643,22 @@ def test_log_reads_events_from_archive_blob(tmp_path: Path, monkeypatch) -> None
     assert "plan-writer" in out    # rendered from the archive events blob
 
 
-def test_change_meta_resolves_archived_from_archive(tmp_path: Path) -> None:
-    """After abandon (permanent change home rmtree'd, worktree gone), _change_meta
-    resolves the Change's metadata from the archive record, not the retired journal."""
+def test_quest_meta_resolves_archived_from_archive(tmp_path: Path) -> None:
+    """After abandon (permanent change home rmtree'd, worktree gone), _quest_meta
+    resolves the Quest's metadata from the archive record, not the retired journal."""
     import imp.cli.main as m
 
     _seed_control(tmp_path)
-    Change.create(tmp_path, title="Meta One", change_id="meta-one",
+    Quest.create(tmp_path, title="Meta One", quest_id="meta-one",
                   base_branch="main")
-    home = tmp_path / ".imp" / "changes" / "meta-one"
-    assert (home / "change.json").exists()
+    home = tmp_path / ".imp" / "quests" / "meta-one"
+    assert (home / "quest.json").exists()
     _complete_and_archive(tmp_path, "meta-one")
     shutil.rmtree(home)                       # abandon path: permanent home gone
     assert not home.exists()
     assert not (tmp_path / ".imp" / "worktrees" / "meta-one").exists()
 
-    meta = m._change_meta(tmp_path, "meta-one")
+    meta = m._quest_meta(tmp_path, "meta-one")
     assert meta is not None
     assert meta["base_branch"] == "main"
     assert meta["title"] == "Meta One"
@@ -669,7 +669,7 @@ def test_status_all_lists_archived(tmp_path, monkeypatch) -> None:
 
     _seed_control(tmp_path)
 
-    # An archived (index) completed Change with no in-flight home.
+    # An archived (index) completed Quest with no in-flight home.
     events = tmp_path / "e.jsonl"
     events.write_text(
         '{"id":"x-e0","timestamp":"2026-06-02T00:00:00+00:00",'
@@ -680,9 +680,9 @@ def test_status_all_lists_archived(tmp_path, monkeypatch) -> None:
         "created_at": "2026-06-02T00:00:00+00:00", "depends_on": []}))
     sj = tmp_path / "s.json"
     sj.write_text(json.dumps({"id": "arch01", "status": "completed", "step": None}))
-    archive.archive_change(
+    archive.archive_quest(
         tmp_path, "arch01", events_path=events,
-        change_json_path=cj, state_json_path=sj)
+        quest_json_path=cj, state_json_path=sj)
 
     monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
     buf = io.StringIO()

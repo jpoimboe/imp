@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from imp.agents.runner import AgentInvocation, ChangeContext, Message, TextBlock
+from imp.agents.runner import AgentInvocation, Message, QuestContext, TextBlock
 from imp.agents.transcript import Transcript
 from imp.cli.inert_resume import make_buffered_solicit
 from imp.engine.completion import build_continuation_fn
@@ -74,7 +74,7 @@ async def test_resumed_run_supports_multiple_exchanges_to_completion(
         provider_name="scripted", model_name="x",
         system_prompt="be terse",
         initial_messages=(Message(role="user", content=(TextBlock(text="go"),)),),
-        change_context=ChangeContext(
+        quest_context=QuestContext(
             title="Test", project_root=tmp_path,
             workflow_dir=tmp_path / ".imp" / "change" / "workflow"),
         transcript_dir=tmp_path / "step",

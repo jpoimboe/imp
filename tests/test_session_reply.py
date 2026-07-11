@@ -8,7 +8,7 @@ from typing import Any, cast
 import anyio
 import pytest
 
-from imp.engine.change import Change
+from imp.engine.quest import Quest
 from imp.remote.session.client import SessionClient
 from imp.remote.session.reply import deliver_session_reply
 from imp.remote.session.server import SessionServer
@@ -48,7 +48,7 @@ async def test_deliver_session_reply_satisfies_the_daemon_gate(tmp_path: Path) -
     async with anyio.create_task_group() as tg:
         tg.start_soon(server.serve, _run_fn)
         with anyio.fail_after(5):
-            await deliver_session_reply(cast(Change, None), "approved", attach=_attach)
+            await deliver_session_reply(cast(Quest, None), "approved", attach=_attach)
         with anyio.fail_after(5):
             while not got:
                 await anyio.sleep(0.02)
@@ -106,7 +106,7 @@ async def test_deliver_session_reply_satisfies_gate_when_foreground_client_alrea
             tg.start_soon(server.serve, _run_fn)
             with anyio.fail_after(5):
                 await deliver_session_reply(
-                    cast(Change, None), "approved", attach=_attach_deliver)
+                    cast(Quest, None), "approved", attach=_attach_deliver)
             with anyio.fail_after(5):
                 while not got:
                     await anyio.sleep(0.02)
@@ -148,7 +148,7 @@ async def test_deliver_session_reply_ignores_replayed_gate(tmp_path: Path) -> No
 
         tg.start_soon(_server_gate)
         with anyio.fail_after(5):
-            await deliver_session_reply(cast(Change, None), "approved", attach=_attach)
+            await deliver_session_reply(cast(Quest, None), "approved", attach=_attach)
         with anyio.fail_after(5):
             while not inputs:
                 await anyio.sleep(0.02)

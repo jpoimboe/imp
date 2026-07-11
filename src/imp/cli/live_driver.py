@@ -103,7 +103,7 @@ def compose_activity_line(*, activity: nv.Activity, frame: int, color: bool,
     return f"{spin} " + rt.compose_label([p for p in parts if p])
 
 
-def compose_position_bar(*, activity: nv.Activity, change_id: str | None,
+def compose_position_bar(*, activity: nv.Activity, quest_id: str | None,
                          title: str, prompt_tokens: int | None, color: bool,
                          width: int, context_pct: float | None = None,
                          checkpoint_threshold: float | int | None = None,
@@ -111,7 +111,7 @@ def compose_position_bar(*, activity: nv.Activity, change_id: str | None,
     """Position bar: id · title · position · model context-bar (no spinner, no elapsed)."""
     bg = pal.user_bg_open(enabled=color)
     over = bool(bg)
-    id_seg = _paint(change_id, "wordmark", color=color, over_bg=over) if change_id else None
+    id_seg = _paint(quest_id, "wordmark", color=color, over_bg=over) if quest_id else None
     title_seg = title if title else None
     position_seg = (_paint(activity.position, "blue", color=color, over_bg=over)
                     if activity.position else None)
@@ -141,20 +141,20 @@ def _slate_wrap(body: str, bg: str, width: int) -> str:
     return f"{bg}{body}{_RESET}"
 
 
-def compose_identity_toolbar(*, change_id: str | None, title: str, color: bool,
+def compose_identity_toolbar(*, quest_id: str | None, title: str, color: bool,
                              width: int) -> str | None:
     """Minimal id · title identity bar for the opening prompt, before any activity exists."""
-    if not change_id:
+    if not quest_id:
         return None
     bg = pal.user_bg_open(enabled=color)
     over = bool(bg)
-    id_seg = _paint(change_id, "wordmark", color=color, over_bg=over)
+    id_seg = _paint(quest_id, "wordmark", color=color, over_bg=over)
     title_seg = title if title else None
     body = rt.compose_label([id_seg, title_seg])
     return _slate_wrap(body, bg, width)
 
 
-def compose_position_row(*, activity: nv.Activity, change_id: str | None,
+def compose_position_row(*, activity: nv.Activity, quest_id: str | None,
                          title: str, prompt_tokens: int | None, color: bool,
                          width: int, context_pct: float | None = None,
                          checkpoint_threshold: float | int | None = None) -> str:
@@ -162,7 +162,7 @@ def compose_position_row(*, activity: nv.Activity, change_id: str | None,
     id · title · phase · plan · counter · model context-bar."""
     bg = pal.user_bg_open(enabled=color)
     over = bool(bg)
-    id_seg = _paint(change_id, "wordmark", color=color, over_bg=over) if change_id else None
+    id_seg = _paint(quest_id, "wordmark", color=color, over_bg=over) if quest_id else None
     title_seg = title if title else None
     phase_seg = (_paint(activity.phase, *pal.NODE_COLORS["step"], color=color, over_bg=over)
                  if activity.phase else None)
@@ -241,7 +241,7 @@ def compose_activity_status(
     root = builder.tree.root
     w = term_width() if width is None else width
     bar = compose_position_bar(
-        activity=activity, change_id=root.id, title=root.title,
+        activity=activity, quest_id=root.id, title=root.title,
         prompt_tokens=builder.latest_prompt_tokens, color=color, width=w,
         context_pct=builder.latest_context_pct,
         checkpoint_threshold=builder.latest_checkpoint_threshold, pad_slate=False)
@@ -281,10 +281,10 @@ class LiveDriver:
                  suppress_replay: bool = False,
                  preceded_by_blank: bool = False,
                  startup_verb: str | None = None,
-                 change_id: str | None = None, title: str = "") -> None:
+                 quest_id: str | None = None, title: str = "") -> None:
         self._builder = nv.NarrativeBuilder()
-        if change_id is not None:
-            self._builder.seed_identity(change_id, title)
+        if quest_id is not None:
+            self._builder.seed_identity(quest_id, title)
         self._stream = stream
         self._color = color
         # width/display_width may be a live callable (a real terminal, re-read
@@ -379,7 +379,7 @@ class LiveDriver:
         root = self._builder.tree.root
         w = term_width()
         p_row = compose_position_row(
-            activity=activity, change_id=root.id, title=root.title,
+            activity=activity, quest_id=root.id, title=root.title,
             prompt_tokens=self._builder.latest_prompt_tokens,
             color=self._color, width=w,
             context_pct=self._builder.latest_context_pct,
@@ -399,7 +399,7 @@ class LiveDriver:
             frame=frame, color=self._color, now_iso=now_iso)
         root = self._builder.tree.root
         identity_row = compose_identity_toolbar(
-            change_id=root.id, title=root.title,
+            quest_id=root.id, title=root.title,
             color=self._color, width=term_width())
         if identity_row is None:
             return [a_line]
@@ -420,10 +420,10 @@ class LiveDriver:
         root = self._builder.tree.root
         if activity is None:
             return compose_identity_toolbar(
-                change_id=root.id, title=root.title,
+                quest_id=root.id, title=root.title,
                 color=self._color, width=term_width())
         return compose_position_row(
-            activity=activity, change_id=root.id, title=root.title,
+            activity=activity, quest_id=root.id, title=root.title,
             prompt_tokens=self._builder.latest_prompt_tokens,
             color=self._color, width=term_width(),
             context_pct=self._builder.latest_context_pct,

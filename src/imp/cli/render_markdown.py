@@ -230,10 +230,10 @@ def _walk(node: Any, *, full: bool, level: int) -> Iterator[str]:
         yield "\n".join(lines)
         return
     if isinstance(node, nv.CompletedNode):
-        yield f"**✓ Completed {_md_escape(node.change_id)}.**"
+        yield f"**✓ Completed {_md_escape(node.quest_id)}.**"
         return
     if isinstance(node, nv.MergedNode):
-        yield f"**✓ Merged {_md_escape(node.change_id)} into {_md_escape(node.base)}.**"
+        yield f"**✓ Merged {_md_escape(node.quest_id)} into {_md_escape(node.base)}.**"
         return
     if isinstance(node, nv.TiersResolvedNode):
         if not full:
@@ -266,7 +266,7 @@ def render_summary_markdown(summary: list[StepRow], *,
     work, tokens, cost = header_totals(summary, header.total_seconds)
     open_label = header.status
     blocks = [
-        _heading(1, _md_escape(f"{header.workflow} — {header.change_id}")),
+        _heading(1, _md_escape(f"{header.workflow} — {header.quest_id}")),
         (f"**Status:** {_md_escape(header.status)}"
          f" · **Total:** {_dur_text(work)}"
          f" · **Tokens:** {_fmt_tokens(tokens)}"

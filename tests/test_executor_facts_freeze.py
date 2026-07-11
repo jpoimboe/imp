@@ -1,5 +1,5 @@
 """Project facts/guidance freeze into state.json at first run and are reused on
-resume — never re-read live mid-Change (spec item 6 / AC 10)."""
+resume — never re-read live mid-Quest (spec item 6 / AC 10)."""
 from __future__ import annotations
 
 from pathlib import Path

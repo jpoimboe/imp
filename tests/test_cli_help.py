@@ -16,10 +16,10 @@ def test_top_level_help_describes_every_subcommand(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     out = _help_for(["-h"], capsys)
-    assert "Start a new Change" in out
+    assert "Start a new Quest" in out
     assert "Resume a paused" in out
-    assert "List your changes" in out
-    assert "one change's detail" in out
+    assert "List your Quests" in out
+    assert "one Quest's detail" in out
     assert "effective config" in out
 
 
@@ -37,14 +37,14 @@ def test_resume_help_documents_the_token_positional(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     out = _help_for(["resume", "-h"], capsys)
-    assert "Change id or resume token" in out
+    assert "Quest id or resume token" in out
 
 
 def test_log_help_documents_the_token_positional(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     out = _help_for(["log", "-h"], capsys)
-    assert "Change id or its short token" in out
+    assert "Quest id or its short token" in out
 
 
 def test_help_lists_model_command() -> None:

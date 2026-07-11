@@ -60,7 +60,7 @@ answers the question, and never dump the raw log as your default.
 To read a *different* change's events, do not cat its log file — use a front
 door that renders a digest by default:
 
-- In-loop: `query_events(change_id="<id>")` returns that change's digest (or its
+- In-loop: `query_events(quest_id="<id>")` returns that change's digest (or its
   raw payloads with `full=True`). It resolves live and archived changes alike,
   and returns a clear `{"error": ...}` string for an unknown id instead of
   raising.

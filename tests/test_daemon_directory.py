@@ -12,10 +12,10 @@ from imp.remote.session.discover import session_socket_path
 def test_session_is_resident_tracks_a_live_session_socket(tmp_path: Path) -> None:
     # A stale file is not resident — the predicate probes liveness, not file existence.
     control_root = tmp_path
-    change_id = "directory-probe-change"
-    path = session_socket_path(control_root, change_id)
+    quest_id = "directory-probe-change"
+    path = session_socket_path(control_root, quest_id)
 
-    assert session_is_resident(control_root, change_id) is False  # nothing bound yet
+    assert session_is_resident(control_root, quest_id) is False  # nothing bound yet
 
     path.parent.mkdir(parents=True, exist_ok=True)
     if path.exists():
@@ -24,26 +24,26 @@ def test_session_is_resident_tracks_a_live_session_socket(tmp_path: Path) -> Non
     try:
         srv.bind(str(path))
         srv.listen()
-        assert session_is_resident(control_root, change_id) is True
+        assert session_is_resident(control_root, quest_id) is True
 
         srv.close()
         # Stale socket file is still on disk, but nothing is accepting → not resident.
         assert path.exists()
-        assert session_is_resident(control_root, change_id) is False
+        assert session_is_resident(control_root, quest_id) is False
     finally:
         srv.close()
         path.unlink(missing_ok=True)
 
 
-def _make_home(control_root: Path, change_id: str) -> Path:
-    home = control_root / ".imp" / "changes" / change_id
+def _make_home(control_root: Path, quest_id: str) -> Path:
+    home = control_root / ".imp" / "quests" / quest_id
     home.mkdir(parents=True, exist_ok=True)
-    (home / "change.json").write_text(json.dumps({"title": change_id}))
+    (home / "quest.json").write_text(json.dumps({"title": quest_id}))
     return home
 
 
-def _bind_live_socket(control_root: Path, change_id: str) -> socket.socket:
-    path = session_socket_path(control_root, change_id)
+def _bind_live_socket(control_root: Path, quest_id: str) -> socket.socket:
+    path = session_socket_path(control_root, quest_id)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.unlink(missing_ok=True)
     srv = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)

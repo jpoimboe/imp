@@ -10,9 +10,9 @@ import pytest
 
 from imp.agents.runner import AgentInvocation, AgentRunner, Event
 from imp.agents.transcript import Transcript
-from imp.engine.change import Change
 from imp.engine.executor import RunResult, run_change
 from imp.engine.feedback import COMPLETION_BACKSTOP
+from imp.engine.quest import Quest
 from imp.engine.state import State
 
 
@@ -38,8 +38,8 @@ def _persist_initial(invocation: AgentInvocation) -> None:
             tools_schema=[], params={}, max_tool_calls=None)
 
 
-def _make_change(root: Path, *, change_id: str = "test-change", title: str = "t") -> Change:
-    """Construct a Change directly on disk without git worktrees.
+def _make_change(root: Path, *, quest_id: str = "test-change", title: str = "t") -> Quest:
+    """Construct a Quest directly on disk without git worktrees.
 
     The test sets up the workflow under root/imp/workflows/imp BEFORE
     calling _make_change; this helper seeds the State so run_change can be
@@ -50,13 +50,13 @@ def _make_change(root: Path, *, change_id: str = "test-change", title: str = "t"
     from imp.providers.effective import load_effective_config
 
     src_wf = root / "imp" / "workflows" / "imp"
-    change_dir = root / ".imp" / "change"
-    change_dir.mkdir(parents=True, exist_ok=True)
-    (change_dir / "state").mkdir(exist_ok=True)
+    quest_dir = root / ".imp" / "change"
+    quest_dir.mkdir(parents=True, exist_ok=True)
+    (quest_dir / "state").mkdir(exist_ok=True)
 
     # Write change metadata
-    (change_dir / "change.json").write_text(json.dumps({
-        "id": change_id, "title": title, "base_branch": "main",
+    (quest_dir / "quest.json").write_text(json.dumps({
+        "id": quest_id, "title": title, "base_branch": "main",
     }, indent=2, sort_keys=True))
 
     configured_tiers: list[str] = []
@@ -72,21 +72,21 @@ def _make_change(root: Path, *, change_id: str = "test-change", title: str = "t"
     flat = workflow.flat_steps()
     from imp.engine.state import State as _State
     _State(
-        id=change_id,
+        id=quest_id,
         step=flat[0].name if flat else None,
         step_attempt=0,
         status="running",
         vars=dict(workflow.vars.defaults()),
         loop_counts={},
-    ).save(change_dir / "state")
+    ).save(quest_dir / "state")
 
-    change = Change(
-        id=change_id, title=title, base_branch="main",
-        control_root=root, project_root=root, change_dir=change_dir,
+    change = Quest(
+        id=quest_id, title=title, base_branch="main",
+        control_root=root, project_root=root, quest_dir=quest_dir,
     )
     change.event_log().append(
         agent_id=None, type="change_created",
-        payload={"id": change_id, "title": title},
+        payload={"id": quest_id, "title": title},
     )
     return change
 
@@ -211,9 +211,9 @@ def _seed_minimal_workflow(
     phase_name: str = "only",
     step_name: str = "w",
     agent_stem: str = "writer",
-) -> tuple[Change, str, str]:
+) -> tuple[Quest, str, str]:
     """Create a minimal single-step workflow on disk and snapshot it into a
-    Change. Returns ``(change, phase_name, step_name)``."""
+    Quest. Returns ``(change, phase_name, step_name)``."""
     wf_dir = root / "imp" / "workflows" / "imp"
     (wf_dir / "agents").mkdir(parents=True)
     (wf_dir / "agents" / f"{agent_stem}.md").write_text(
@@ -270,7 +270,7 @@ async def test_continue_off_last_step_completes(tmp_path: Path) -> None:
 
     result = await run_change(change, on_event=lambda _e: None)
     assert result is RunResult.COMPLETED
-    assert not (change.change_dir / "steps").exists()
+    assert not (change.quest_dir / "steps").exists()
 
 
 # ── set: mutation persistence ───────────────────────────────────────────────
@@ -313,7 +313,7 @@ async def test_set_mutation_persists_to_state_vars(tmp_path: Path) -> None:
 # ── branch routing on a var ─────────────────────────────────────────────────
 
 
-def _seed_branch_loop_workflow(root: Path) -> Change:
+def _seed_branch_loop_workflow(root: Path) -> Quest:
     """writer(agent); the branch loops back via resume: writer. writer sets
     review_done=true; a branch step continues while review_done is false, and
     gotos the trailing `done` phase once it's true."""
@@ -365,7 +365,7 @@ async def test_branch_routes_on_var(tmp_path: Path) -> None:
     assert branch_started[0]["payload"]["kind"] == "branch"
 
 
-def _seed_lane_release_workflow(root: Path) -> Change:
+def _seed_lane_release_workflow(root: Path) -> Quest:
     wf = root / "imp" / "workflows" / "imp"
     (wf / "agents").mkdir(parents=True, exist_ok=True)
     (wf / "agents" / "worker.md").write_text(
@@ -1226,7 +1226,7 @@ async def test_fresh_start_puts_task_in_first_user_message(
 
 def _seed_back_edge_workflow(
     root: Path, verb: str, feedback: str | None = None
-) -> Change:
+) -> Quest:
     """coder(agent) -> reviewer(agent). reviewer rules: on rework, <verb>: coder;
     else continue. `verb` is 'goto' or 'resume'. `feedback` is an optional
     preamble string for the back edge (§6); None means bare (forwards nothing)."""
@@ -1704,11 +1704,11 @@ def test_last_script_blocked_returns_last_match() -> None:
 
 @pytest.mark.anyio
 async def test_first_run_snapshots_the_workflow(tmp_path: Path) -> None:
-    """The first run copies the live workflow dir into the gitignored per-Change
+    """The first run copies the live workflow dir into the gitignored per-Quest
     snapshot at .imp/change/workflow/ (taken once, at run-start)."""
     change, _, _ = _seed_minimal_workflow(tmp_path)
     _register_fake({"status": "Success"})
-    snapshot = change.change_dir / "workflow"
+    snapshot = change.quest_dir / "workflow"
     assert not snapshot.exists()
 
     result = await run_change(change, on_event=lambda _e: None)
@@ -1725,7 +1725,7 @@ async def test_snapshot_copy_cleans_stale_tmp_dir(tmp_path: Path) -> None:
     change, _, _ = _seed_minimal_workflow(tmp_path)
     _register_fake({"status": "Success"})
     # Simulate a partial copy left over from a prior crash.
-    tmp = change.change_dir / "workflow.tmp"
+    tmp = change.quest_dir / "workflow.tmp"
     tmp.mkdir()
     (tmp / "stale.yaml").write_text("garbage")
 
@@ -1735,7 +1735,7 @@ async def test_snapshot_copy_cleans_stale_tmp_dir(tmp_path: Path) -> None:
     # The stale tmp dir should be gone.
     assert not tmp.exists()
     # And the real snapshot should be present and correct.
-    snapshot = change.change_dir / "workflow"
+    snapshot = change.quest_dir / "workflow"
     assert (snapshot / "workflow.yaml").exists()
 
 
@@ -1771,7 +1771,7 @@ async def test_resume_runs_frozen_snapshot_after_live_workflow_deleted(
 
     r1 = await run_change(change, on_event=lambda _e: None)
     assert r1 is RunResult.PAUSED
-    snapshot = change.change_dir / "workflow"
+    snapshot = change.quest_dir / "workflow"
     assert (snapshot / "scripts" / "probe.sh").exists()
 
     # Mutate the live workflow out from under the run: delete script AND step.
@@ -1892,9 +1892,9 @@ async def test_facts_render_into_main_agent_prompt(tmp_path: Path) -> None:
     assert any("run make check" in i.initial_messages[0].content[0].text for i in sink)
 
 
-def test_change_context_defaults_empty_facts() -> None:
-    from imp.agents.runner import ChangeContext
-    cc = ChangeContext(
+def test_quest_context_defaults_empty_facts() -> None:
+    from imp.agents.runner import QuestContext
+    cc = QuestContext(
         title="t", project_root=Path("/x"), workflow_dir=Path("/x"))
     assert cc.project_facts == {}
     assert cc.guidance == ""
@@ -2476,7 +2476,7 @@ def _register_flip(sink: list[str], wt: Path) -> None:
     )
 
 
-def _seed_two_step_workflow(root: Path) -> Change:
+def _seed_two_step_workflow(root: Path) -> Quest:
     wf_dir = root / "imp" / "workflows" / "imp"
     (wf_dir / "agents").mkdir(parents=True)
     (wf_dir / "agents" / "writer.md").write_text(
@@ -2682,7 +2682,7 @@ async def test_executor_passes_autonomous_to_prompt(tmp_path: Path) -> None:
 
 
 @pytest.mark.anyio
-async def test_change_home_renders_worktree_relative(tmp_path: Path) -> None:
+async def test_quest_home_renders_worktree_relative(tmp_path: Path) -> None:
     wf = tmp_path / "imp" / "workflows" / "imp"
     (wf / "agents").mkdir(parents=True)
     (wf / "agents" / "writer.md").write_text(
@@ -2707,11 +2707,11 @@ async def test_change_home_renders_worktree_relative(tmp_path: Path) -> None:
     assert result is RunResult.COMPLETED
 
     inv = sink[0]
-    assert inv.change_context.change_home == ".imp/changes/test-change"
-    assert "home=.imp/changes/test-change" in inv.initial_messages[0].content[0].text
+    assert inv.quest_context.quest_home == ".imp/quests/test-change"
+    assert "home=.imp/quests/test-change" in inv.initial_messages[0].content[0].text
     # worktree-anchored: relative, never absolute, never a parent escape.
-    assert not inv.change_context.change_home.startswith("/")
-    assert ".." not in inv.change_context.change_home
+    assert not inv.quest_context.quest_home.startswith("/")
+    assert ".." not in inv.quest_context.quest_home
 
 
 @pytest.mark.anyio
@@ -2761,7 +2761,7 @@ async def test_route_label_threads_to_next_step_started(tmp_path: Path) -> None:
 
 @pytest.mark.anyio
 async def test_continue_renders_templated_target_label(tmp_path: Path) -> None:
-    from imp.cli.change_row import _status_segment
+    from imp.cli.quest_row import _status_segment
 
     wf = tmp_path / "imp" / "workflows" / "imp"
     (wf / "agents").mkdir(parents=True)
@@ -2855,7 +2855,7 @@ async def test_first_run_overlays_project_skills_into_snapshot_user(
     (tmp_path / "imp" / "skills" / "mine.md").write_text("# Mine\nv1\n")
 
     assert await run_change(change, on_event=lambda _e: None) is RunResult.COMPLETED
-    overlaid = change.change_dir / "workflow" / "skills" / "user" / "mine.md"
+    overlaid = change.quest_dir / "workflow" / "skills" / "user" / "mine.md"
     assert overlaid.read_text() == "# Mine\nv1\n"
 
     # Resume re-snapshots (escape-hatch inversion): the changed source is picked
@@ -2925,7 +2925,7 @@ async def test_step_reincarnates_on_context_window_then_pauses_at_cap(tmp_path):
     reincarnating = [e for e in events if e["type"] == "reincarnating"]
     assert len(reincarnating) == 1
     assert reincarnating[0]["payload"]["reason"] == "context window exceeded"
-    assert (change.change_dir / "steps" / phase / f"{step}.attempt-1").exists()
+    assert (change.quest_dir / "steps" / phase / f"{step}.attempt-1").exists()
 
 
 @pytest.mark.anyio
@@ -2988,7 +2988,7 @@ async def test_step_reincarnates_on_handoff_then_pauses_at_cap(tmp_path):
     reincarnating = [e for e in events if e["type"] == "reincarnating"]
     assert len(reincarnating) == 1
     assert reincarnating[0]["payload"]["reason"] == "context threshold crossed"
-    assert (change.change_dir / "steps" / phase / f"{step}.attempt-1").exists()
+    assert (change.quest_dir / "steps" / phase / f"{step}.attempt-1").exists()
     cap_event = next(e for e in events if e["type"] == "step_completed")
     assert cap_event["payload"]["action"]["verb"] == "pause"
 
@@ -3039,7 +3039,7 @@ async def test_step_handoff_missing_note_degrades_to_reactive_reason(tmp_path):
     assert len(reincarnating) == 1
     assert reincarnating[0]["payload"]["reason"] == \
         "handoff failed — recovering from transcript"
-    assert (change.change_dir / "steps" / phase / f"{step}.attempt-1").exists()
+    assert (change.quest_dir / "steps" / phase / f"{step}.attempt-1").exists()
 
 
 @pytest.mark.anyio

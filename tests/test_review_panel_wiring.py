@@ -200,8 +200,8 @@ def _render_reviewer(tmp_path, *, cur_base_head: str = "forkSHA") -> str:
     wf = _wf()
     body = wf.agents["batch-code-reviewer"].prompt_template_source
     log = JsonlEventLog(tmp_path / "events.jsonl")
-    ctx = build_context(change_title="t", event_log=log, cur_base_head=cur_base_head,
-                        change_id="chg",
+    ctx = build_context(quest_title="t", event_log=log, cur_base_head=cur_base_head,
+                        quest_id="chg",
                         vars={"fast_path": False})
     return render_prompt(body, ctx, workflow_dir=bundled_workflow_dir("imp"))
 

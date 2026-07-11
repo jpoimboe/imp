@@ -21,7 +21,7 @@ from imp.agents.runner import (
 )
 from imp.agents.tools import Tool, get_registry
 from imp.agents.tools.complete_step import make_complete_step_tool
-from imp.agents.tools.context import ToolContext, change_home_path
+from imp.agents.tools.context import ToolContext, quest_home_path
 from imp.agents.transcript import Transcript
 from imp.engine.agent_run import last_assistant_text
 from imp.providers.base import Provider
@@ -78,7 +78,7 @@ class ScriptedAgentRunner:
         transcript = Transcript(invocation.transcript_dir / "transcript.jsonl")
         tools = _build_tools(invocation)
         ctx = ToolContext(
-            project_root=invocation.change_context.project_root,
+            project_root=invocation.quest_context.project_root,
             events_path=invocation.events_path,
             subagent_defs=invocation.subagent_defs,
             provider_name=invocation.provider_name,
@@ -86,9 +86,9 @@ class ScriptedAgentRunner:
             parent_transcript_dir=invocation.transcript_dir,
             agent_id=aid,
             background_enabled=True,
-            change_home=change_home_path(invocation.change_context.change_home),
+            quest_home=quest_home_path(invocation.quest_context.quest_home),
         )
-        ctx.change_context = invocation.change_context
+        ctx.quest_context = invocation.quest_context
         ctx.change_state = invocation.change_state
         ctx.change = invocation.change
         ctx.spawn_subagent = spawn_subagent_via_registry

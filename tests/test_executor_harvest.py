@@ -1,4 +1,4 @@
-"""The engine harvests change_dir/artifacts/** to refs/imp/artifacts/<id>."""
+"""The engine harvests quest_dir/artifacts/** to refs/imp/artifacts/<id>."""
 from __future__ import annotations
 
 import asyncio
@@ -27,12 +27,12 @@ def _init_repo(root: Path) -> None:
     _git(root, "commit", "-qm", "seed")
 
 
-def _change(root: Path, change_id: str) -> SimpleNamespace:
-    # The harvest helper only reads .control_root, .change_dir and .id.
+def _change(root: Path, quest_id: str) -> SimpleNamespace:
+    # The harvest helper only reads .control_root, .quest_dir and .id.
     return SimpleNamespace(
         control_root=root,
-        change_dir=root / ".imp" / "changes" / change_id,
-        id=change_id,
+        quest_dir=root / ".imp" / "quests" / quest_id,
+        id=quest_id,
     )
 
 
@@ -41,7 +41,7 @@ def test_harvest_journals_disk_artifacts_and_guards_redundant_commits(
 ) -> None:
     _init_repo(tmp_path)
     ch = _change(tmp_path, "feat")
-    spec = ch.change_dir / "artifacts" / "spec"
+    spec = ch.quest_dir / "artifacts" / "spec"
     spec.mkdir(parents=True)
     (spec / "feat.md").write_text("# spec\n")
 
@@ -80,13 +80,13 @@ class _Log:
         return ev
 
 
-def _finish_change(root: Path, change_id: str) -> SimpleNamespace:
+def _finish_change(root: Path, quest_id: str) -> SimpleNamespace:
     """A change with a non-empty artifacts/ dir so _harvest_artifacts reaches
     artifact_commit."""
-    ch = _change(root, change_id)
-    spec = ch.change_dir / "artifacts" / "spec"
+    ch = _change(root, quest_id)
+    spec = ch.quest_dir / "artifacts" / "spec"
     spec.mkdir(parents=True)
-    (spec / f"{change_id}.md").write_text("# spec\n")
+    (spec / f"{quest_id}.md").write_text("# spec\n")
     return ch
 
 

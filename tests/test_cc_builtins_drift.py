@@ -30,7 +30,7 @@ from pathlib import Path
 
 import pytest
 
-from imp.agents.runner import AgentInvocation, ChangeContext, Message, TextBlock
+from imp.agents.runner import AgentInvocation, Message, QuestContext, TextBlock
 from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
 from imp.providers._cc_builtins import ALL_CLAUDE_CODE_BUILTIN_TOOLS
 from imp.providers.claude_code import ClaudeCodeAgentRunner
@@ -152,7 +152,7 @@ def test_web_builtins_are_intentionally_enabled_when_declared(tmp_path: Path) ->
         agent_def=agent, provider_name="claude_code", model_name="m",
         system_prompt="s",
         initial_messages=(Message(role="user", content=(TextBlock(text="go"),)),),
-        change_context=ChangeContext(title="t", project_root=tmp_path,
+        quest_context=QuestContext(title="t", project_root=tmp_path,
                                      workflow_dir=tmp_path),
         transcript_dir=tmp_path,
         events_path=tmp_path / "events.jsonl")

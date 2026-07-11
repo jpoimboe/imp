@@ -2,22 +2,22 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from imp.engine.change import Change
+from imp.engine.quest import Quest
 from imp.remote.daemon.discover import full_history
 from tests.conftest import _seed_control
 
 
 def test_full_history_returns_ordered_augmented_events(tmp_path: Path) -> None:
     _seed_control(tmp_path)
-    change = Change.create(
-        tmp_path, title="Dark mode", change_id="alpha", base_branch="main")
+    change = Quest.create(
+        tmp_path, title="Dark mode", quest_id="alpha", base_branch="main")
     log = change.event_log()
     log.append(agent_id=None, type="notice", payload={"text": "hi"})
     log.append(agent_id=None, type="awaiting_user_input", payload={"prompt": "go?"})
 
     events = full_history(tmp_path, "alpha")
 
-    # Last two in order; Change.create may seed earlier lifecycle events ahead.
+    # Last two in order; Quest.create may seed earlier lifecycle events ahead.
     assert [e["type"] for e in events][-2:] == ["notice", "awaiting_user_input"]
     last = events[-1]
     assert last["change"]["id"] == "alpha"

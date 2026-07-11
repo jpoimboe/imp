@@ -6,7 +6,7 @@ import anyio
 import pytest
 
 from imp.agents.reflow import reflow_markdown
-from imp.agents.runner import ChangeContext, Message, TextBlock
+from imp.agents.runner import Message, QuestContext, TextBlock
 from imp.cli.signals import InterruptCoordinator
 from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
 
@@ -30,8 +30,8 @@ def _agent(name: str = "rev", max_tool_calls=None, subagents=(),
         max_tool_calls=max_tool_calls)
 
 
-def _cc(tmp: Path) -> ChangeContext:
-    return ChangeContext(title="t", project_root=tmp,
+def _cc(tmp: Path) -> QuestContext:
+    return QuestContext(title="t", project_root=tmp,
                          workflow_dir=tmp / "wf")
 
 
@@ -67,7 +67,7 @@ def test_build_agent_invocation_appends_completion_instruction(tmp_path: Path) -
     inv = build_agent_invocation(
         agent_def=_agent(), provider_name="anthropic", model_name="m",
         rendered_system_prompt="RENDERED BODY",
-        initial_messages=(), change_context=_cc(tmp_path),
+        initial_messages=(), quest_context=_cc(tmp_path),
         user_chat_input_fn=None,
         transcript_dir=tmp_path / "td",
         events_path=tmp_path / "e.jsonl", subagent_defs={}, tiers=(),
@@ -105,7 +105,7 @@ def test_build_agent_invocation_injects_bash_paths_note_when_bash_present(
         agent_def=_agent(tools={"complete_step", "bash"}),
         provider_name="anthropic", model_name="m",
         rendered_system_prompt="RENDERED BODY",
-        initial_messages=(), change_context=_cc(tmp_path),
+        initial_messages=(), quest_context=_cc(tmp_path),
         user_chat_input_fn=None,
         transcript_dir=tmp_path / "td",
         events_path=tmp_path / "e.jsonl", subagent_defs={}, tiers=(),
@@ -132,7 +132,7 @@ def test_build_agent_invocation_omits_bash_paths_note_without_bash(
         agent_def=_agent(),  # tools = {complete_step}
         provider_name="anthropic", model_name="m",
         rendered_system_prompt="RENDERED BODY",
-        initial_messages=(), change_context=_cc(tmp_path),
+        initial_messages=(), quest_context=_cc(tmp_path),
         user_chat_input_fn=None,
         transcript_dir=tmp_path / "td",
         events_path=tmp_path / "e.jsonl", subagent_defs={}, tiers=(),
@@ -151,7 +151,7 @@ def test_build_agent_invocation_wires_user_input_unconditionally(
     inv = build_agent_invocation(
         agent_def=_agent(), provider_name="anthropic", model_name="m",
         rendered_system_prompt="BODY", initial_messages=(),
-        change_context=_cc(tmp_path),
+        quest_context=_cc(tmp_path),
         user_chat_input_fn=lambda _p: "hi",
         transcript_dir=tmp_path / "td",
         events_path=tmp_path / "e.jsonl", subagent_defs={}, tiers=(),
@@ -172,7 +172,7 @@ def test_build_agent_invocation_threads_test_gates(tmp_path: Path) -> None:
     inv = build_agent_invocation(
         agent_def=_agent(), provider_name="anthropic", model_name="m",
         rendered_system_prompt="BODY", initial_messages=(),
-        change_context=_cc(tmp_path),
+        quest_context=_cc(tmp_path),
         user_chat_input_fn=None, transcript_dir=tmp_path / "td",
 events_path=tmp_path / "e.jsonl",
         subagent_defs={}, tiers=(), max_tool_calls=None,
@@ -188,7 +188,7 @@ def _inv(tmp_path: Path):
     return build_agent_invocation(
         agent_def=_agent(), provider_name="p", model_name="m",
         rendered_system_prompt="B", initial_messages=(),
-        change_context=_cc(tmp_path),
+        quest_context=_cc(tmp_path),
         user_chat_input_fn=None, transcript_dir=tmp_path / "td",
 events_path=tmp_path / "e.jsonl",
         subagent_defs={}, tiers=(), max_tool_calls=None,
@@ -622,7 +622,7 @@ def _build_inv(tmp_path: Path, **kw):
         agent_def=_agent(tools=frozenset({"bash", "complete_step"})),
         provider_name="anthropic", model_name="m",
         rendered_system_prompt="BODY", initial_messages=(),
-        change_context=_cc(tmp_path), user_chat_input_fn=None,
+        quest_context=_cc(tmp_path), user_chat_input_fn=None,
         transcript_dir=tmp_path,events_path=tmp_path / "e",
         subagent_defs={}, tiers=(), max_tool_calls=None, agent_id="step:p/s",
         event_log=None, change_state=None, first_event_parent_id=None,
@@ -640,7 +640,7 @@ def test_build_agent_invocation_splits_role_header_and_user_task(tmp_path: Path)
         agent_def=_agent(tools={"complete_step", "bash"}),
         provider_name="anthropic", model_name="m",
         rendered_system_prompt="RENDERED BODY",
-        initial_messages=(), change_context=_cc(tmp_path),
+        initial_messages=(), quest_context=_cc(tmp_path),
         user_chat_input_fn=None,
         transcript_dir=tmp_path / "td",
         events_path=tmp_path / "e.jsonl", subagent_defs={}, tiers=(),
@@ -715,7 +715,7 @@ def test_build_invocation_subagent_keeps_body_in_system(tmp_path: Path) -> None:
     inv = build_agent_invocation(
         agent_def=_agent(), provider_name="anthropic", model_name="m",
         rendered_system_prompt="RENDERED BODY",
-        initial_messages=task, change_context=_cc(tmp_path),
+        initial_messages=task, quest_context=_cc(tmp_path),
         user_chat_input_fn=None, transcript_dir=tmp_path / "td",
         events_path=tmp_path / "e.jsonl", subagent_defs={}, tiers=(),
         max_tool_calls=None, agent_id="sub:x", event_log=None,
@@ -732,7 +732,7 @@ def test_build_invocation_prepends_feedback_lead_to_user_task(tmp_path: Path) ->
     inv = build_agent_invocation(
         agent_def=_agent(), provider_name="anthropic", model_name="m",
         rendered_system_prompt="RENDERED BODY",
-        initial_messages=(), change_context=_cc(tmp_path),
+        initial_messages=(), quest_context=_cc(tmp_path),
         user_chat_input_fn=None, transcript_dir=tmp_path / "td",
         events_path=tmp_path / "e.jsonl", subagent_defs={}, tiers=(),
         max_tool_calls=None, agent_id="step:p/s", event_log=None,
@@ -1016,7 +1016,7 @@ def test_build_agent_invocation_injects_outcome_field_when_requested(
     inv = build_agent_invocation(
         agent_def=_agent(), provider_name="anthropic", model_name="m",
         rendered_system_prompt="BODY", initial_messages=(),
-        change_context=_cc(tmp_path),
+        quest_context=_cc(tmp_path),
         user_chat_input_fn=None, transcript_dir=tmp_path / "td",
 events_path=tmp_path / "e.jsonl",
         subagent_defs={}, tiers=(), max_tool_calls=None,
@@ -1039,7 +1039,7 @@ def test_build_agent_invocation_omits_outcome_field_by_default(
     inv = build_agent_invocation(
         agent_def=_agent(), provider_name="anthropic", model_name="m",
         rendered_system_prompt="BODY", initial_messages=(),
-        change_context=_cc(tmp_path),
+        quest_context=_cc(tmp_path),
         user_chat_input_fn=None, transcript_dir=tmp_path / "td",
 events_path=tmp_path / "e.jsonl",
         subagent_defs={}, tiers=(), max_tool_calls=None,
@@ -1388,7 +1388,7 @@ async def test_inline_solicit_returns_reply_and_emits_awaiting() -> None:
 
 @pytest.mark.anyio
 async def test_drive_invocation_maps_handoff_event_to_result(tmp_path):
-    from imp.agents.runner import AgentInvocation, ChangeContext
+    from imp.agents.runner import AgentInvocation, QuestContext
     from imp.engine.agent_run import drive_invocation
     from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
 
@@ -1411,7 +1411,7 @@ async def test_drive_invocation_maps_handoff_event_to_result(tmp_path):
     inv = AgentInvocation(
         agent_def=agent_def, provider_name="fake", model_name="m",
         system_prompt="p", initial_messages=(),
-        change_context=ChangeContext(title="t", project_root=tmp_path,
+        quest_context=QuestContext(title="t", project_root=tmp_path,
                                      workflow_dir=tmp_path),
         transcript_dir=tmp_path / "s", events_path=tmp_path / "e.jsonl")
 
@@ -1427,7 +1427,7 @@ async def test_drive_invocation_maps_handoff_event_to_result(tmp_path):
 
 @pytest.mark.anyio
 async def test_drive_invocation_handoff_event_not_logged(tmp_path):
-    from imp.agents.runner import AgentInvocation, ChangeContext
+    from imp.agents.runner import AgentInvocation, QuestContext
     from imp.engine.agent_run import drive_invocation
     from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
 
@@ -1456,7 +1456,7 @@ async def test_drive_invocation_handoff_event_not_logged(tmp_path):
     inv = AgentInvocation(
         agent_def=agent_def, provider_name="fake", model_name="m",
         system_prompt="p", initial_messages=(),
-        change_context=ChangeContext(title="t", project_root=tmp_path,
+        quest_context=QuestContext(title="t", project_root=tmp_path,
                                      workflow_dir=tmp_path),
         transcript_dir=tmp_path / "s", events_path=tmp_path / "e.jsonl")
 
@@ -1476,7 +1476,7 @@ def test_build_agent_invocation_threads_resume_should_continue(
     inv = build_agent_invocation(
         agent_def=_agent(), provider_name="anthropic", model_name="m",
         rendered_system_prompt="BODY", initial_messages=(),
-        change_context=_cc(tmp_path), user_chat_input_fn=None,
+        quest_context=_cc(tmp_path), user_chat_input_fn=None,
         transcript_dir=tmp_path / "td",
         events_path=tmp_path / "e.jsonl", subagent_defs={}, tiers=(),
         max_tool_calls=None, agent_id="step:p/s", event_log=None,
@@ -1495,7 +1495,7 @@ def test_build_agent_invocation_resume_should_continue_defaults_false(
     inv = build_agent_invocation(
         agent_def=_agent(), provider_name="anthropic", model_name="m",
         rendered_system_prompt="BODY", initial_messages=(),
-        change_context=_cc(tmp_path), user_chat_input_fn=None,
+        quest_context=_cc(tmp_path), user_chat_input_fn=None,
         transcript_dir=tmp_path / "td",
         events_path=tmp_path / "e.jsonl", subagent_defs={}, tiers=(),
         max_tool_calls=None, agent_id="step:p/s", event_log=None,
@@ -1622,7 +1622,7 @@ def test_build_agent_invocation_derives_has_schema_false_when_fieldless(
     build_agent_invocation(
         agent_def=_fieldless_agent(), provider_name="anthropic", model_name="m",
         rendered_system_prompt="BODY", initial_messages=(),
-        change_context=_cc(tmp_path), user_chat_input_fn=None,
+        quest_context=_cc(tmp_path), user_chat_input_fn=None,
         transcript_dir=tmp_path, events_path=tmp_path / "e",
         subagent_defs={}, tiers=(), max_tool_calls=None, agent_id="step:p/s",
         event_log=None, change_state=None, first_event_parent_id=None,

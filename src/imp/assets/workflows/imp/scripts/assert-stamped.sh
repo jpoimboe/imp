@@ -12,13 +12,13 @@ set -euo pipefail
 _here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$_here/lib-verify-clear.sh"
 cd "${IMP_PROJECT_ROOT:?IMP_PROJECT_ROOT not set by engine}" || exit 1
-ID="${IMP_CHANGE_ID:?IMP_CHANGE_ID not set by engine}"
-: "${IMP_CHANGE_DIR:?IMP_CHANGE_DIR not set by engine}"
+ID="${IMP_QUEST_ID:?IMP_QUEST_ID not set by engine}"
+: "${IMP_QUEST_DIR:?IMP_QUEST_DIR not set by engine}"
 # Toleration flag from the workflow (bool var renders capitalized) -> lowercase.
 # Portable normalization (tr), not the bash-4-only ${x,,}, so this parses on bash 3.2.
 tolerated="$(printf '%s' "${1:-false}" | tr '[:upper:]' '[:lower:]')"
-FORK=$(python3 -c "import json,os;print(json.load(open(os.path.join(os.environ['IMP_CHANGE_DIR'],'change.json')))['cur_base_head'])")
-[ -n "$FORK" ] || { echo "empty cur_base_head in change.json" >&2; exit 1; }
+FORK=$(python3 -c "import json,os;print(json.load(open(os.path.join(os.environ['IMP_QUEST_DIR'],'quest.json')))['cur_base_head'])")
+[ -n "$FORK" ] || { echo "empty cur_base_head in quest.json" >&2; exit 1; }
 
 # A here-string carries no pipe partner, so pipefail/SIGPIPE cannot make this spuriously
 # fail; grep returns 1 (no directive => good) or 0 (a directive remains => fail).

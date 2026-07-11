@@ -21,9 +21,9 @@ SILENT_EVENT = {
 }
 
 
-def _subs(*change_ids: str) -> Subscriptions:
+def _subs(*quest_ids: str) -> Subscriptions:
     subs = Subscriptions()
-    for cid in change_ids:
+    for cid in quest_ids:
         subs.add(cid)
     return subs
 
@@ -138,7 +138,7 @@ def test_consecutive_subscribed_prompt_less_awaits_are_terse() -> None:
 
 
 def _step_started(
-    change_id: str, *, phase: str | None = None, label: str = "scoping",
+    quest_id: str, *, phase: str | None = None, label: str = "scoping",
     show_label: bool = True,
 ) -> dict:
     payload: dict = {"label": label}
@@ -147,7 +147,7 @@ def _step_started(
     if not show_label:
         payload["show_label"] = False
     return {"id": "st1", "type": "step_started", "timestamp": TS,
-            "change": {"id": change_id, "title": "t"}, "payload": payload}
+            "change": {"id": quest_id, "title": "t"}, "payload": payload}
 
 
 def test_step_started_renders_silent_header_less_divider_when_subscribed() -> None:

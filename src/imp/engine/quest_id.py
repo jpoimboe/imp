@@ -1,4 +1,4 @@
-"""Immutable Change identity (spec AC 1): a 6-char pronounceable id — a
+"""Immutable Quest identity (spec AC 1): a 6-char pronounceable id — a
 consonant, vowel, consonant, vowel, then two digits (e.g. kobe47) — drawn with
 secrets. Ref-safe, coordination-free, no date prefix. The CVCV stem has no
 consonant clusters, so it stays pronounceable; an unfortunate-stem denylist is
@@ -49,7 +49,7 @@ def _draw_clean_stem(rng: random.Random) -> str:
             return stem
 
 
-def new_change_id(
+def new_quest_id(
     existing_stems: frozenset[str] = frozenset(),
     rng: random.Random = _SYSTEM_RANDOM,
 ) -> str:

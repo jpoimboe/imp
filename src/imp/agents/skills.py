@@ -104,7 +104,7 @@ def overlay_project_skills(project_root: Path, dest_user_dir: Path) -> None:
 def list_user_skills(skills_dir: Path) -> list[tuple[str, str | None]]:
     """Sorted (stem, description) pairs for <skills_dir>/user/*.md. description is
     None when the file carries no frontmatter description. Empty list if user/ is
-    absent (a Change created before user skills existed)."""
+    absent (a Quest created before user skills existed)."""
     user = skills_dir / "user"
     if not user.is_dir():
         return []

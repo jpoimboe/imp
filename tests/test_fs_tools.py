@@ -323,7 +323,7 @@ def _vision_ctx(tmp_path: Path) -> ToolContext:
         events_path=tmp_path / "events.jsonl",
         provider_name="anthropic",
         model_name="opus",
-        change_home=tmp_path / "change",
+        quest_home=tmp_path / "change",
     )
     ctx.coordinator = None
     return ctx
@@ -342,7 +342,7 @@ def test_read_file_image_returns_text_and_image_parts(tmp_path: Path) -> None:
     assert isinstance(part, ImagePart)
     assert part.media_type == "image/png"
     assert (part.width, part.height) == (300, 200)
-    blob_path = ctx.change_home / "blobs" / part.blob
+    blob_path = ctx.quest_home / "blobs" / part.blob
     assert blob_path.exists()
     assert base64.b64decode(part.data) == blob_path.read_bytes()
 
@@ -371,11 +371,11 @@ def test_read_file_image_over_cap_fails_loudly(
         _read_file(_vision_ctx(tmp_path), path="big.png")
 
 
-def test_read_image_with_no_change_home_raises(tmp_path: Path) -> None:
+def test_read_image_with_no_quest_home_raises(tmp_path: Path) -> None:
     (tmp_path / "shot.png").write_bytes(_png_bytes(300, 200))
     ctx = _vision_ctx(tmp_path)
-    ctx.change_home = None
-    with pytest.raises(ValueError, match="change home"):
+    ctx.quest_home = None
+    with pytest.raises(ValueError, match="quest home"):
         _read_file(ctx, path="shot.png")
 
 
@@ -401,7 +401,7 @@ def test_read_file_image_degrades_for_nonvision_model(
     assert "300×200" in result
     assert "PNG" in result
     assert "can't display images" in result
-    assert not (ctx.change_home / "blobs").exists()
+    assert not (ctx.quest_home / "blobs").exists()
 
 
 def test_write_file_allowed_after_image_degrade_read(
@@ -440,11 +440,11 @@ def test_read_file_same_image_twice_dedups_to_one_blob(tmp_path: Path) -> None:
 
     # Same content -> same content-addressed blob name (shared sha).
     assert r1[1].blob == r2[1].blob
-    blobs = ctx.change_home / "blobs"
+    blobs = ctx.quest_home / "blobs"
     # Exactly one blob on disk despite two reads.
     assert [p.name for p in blobs.iterdir()] == [r1[1].blob]
     # Blob lives under the change home, so per-change cleanup/archival removes it.
-    assert (ctx.change_home / "blobs" / r1[1].blob).exists()
+    assert (ctx.quest_home / "blobs" / r1[1].blob).exists()
 
 
 def test_read_record_rendered_map_defaults_independent_and_mutable() -> None:

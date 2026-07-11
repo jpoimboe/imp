@@ -1,9 +1,9 @@
 # LAYOUT_VERSION: 5
 [paths]
-change.json
 events.jsonl
+quest.json
 state/state.json
-[change.json]
+[quest.json]
 base_branch
 created_at
 cur_base_head

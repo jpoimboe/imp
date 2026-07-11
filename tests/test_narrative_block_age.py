@@ -36,7 +36,7 @@ def test_activity_elapsed_never_negative() -> None:
 
 def _stepped(ts="2026-01-01T00:00:00+00:00") -> nv.NarrativeBuilder:
     b = nv.NarrativeBuilder()
-    b.add(ev("1", "change_created", change_id=1, title="x"))
+    b.add(ev("1", "change_created", quest_id=1, title="x"))
     b.add(ev("2", "step_started", step="s", kind="agent", phase="p",
              model="m", provider="anthropic", timestamp=ts))
     return b
@@ -108,7 +108,7 @@ def test_subagent_tool_result_close_sets_stretch_start() -> None:
 
 def test_waiting_for_test_lane_captures_wait_start_ts() -> None:
     b = nv.NarrativeBuilder()
-    b.add(ev("1", "change_created", change_id=1, title="x"))
+    b.add(ev("1", "change_created", quest_id=1, title="x"))
     b.add(ev("2", "step_started", step="integration-tests", kind="script",
              phase="integration", label="running tests",
              timestamp="2026-01-01T00:00:00+00:00"))
@@ -119,7 +119,7 @@ def test_waiting_for_test_lane_captures_wait_start_ts() -> None:
 
 def test_merge_lane_waiting_captures_wait_start_ts_once() -> None:
     b = nv.NarrativeBuilder()
-    b.add(ev("1", "change_created", change_id=1, title="x"))
+    b.add(ev("1", "change_created", quest_id=1, title="x"))
     b.add(ev("2", "step_started", step="merge", kind="merge", phase="convergence",
              timestamp="2026-01-01T00:00:00+00:00"))
     b.add(ev("3", "lane_waiting", ahead=2, timestamp="2026-01-01T00:00:12+00:00"))
@@ -203,7 +203,7 @@ def test_parent_stretch_activity_uses_stretch_start_not_prose() -> None:
 
 def test_test_lane_states_use_queue_and_run_timestamps() -> None:
     b = nv.NarrativeBuilder()
-    b.add(ev("1", "change_created", change_id=1, title="x"))
+    b.add(ev("1", "change_created", quest_id=1, title="x"))
     b.add(ev("2", "step_started", step="integration-tests", kind="script",
              phase="integration", label="running tests",
              timestamp="2026-01-01T00:00:00+00:00"))

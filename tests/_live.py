@@ -103,45 +103,45 @@ def build_isolated_venv(
 
 
 def _await_worktree(control_root: Path, timeout: float) -> Path:
-    """Poll .imp/worktrees/ for the single Change worktree dir and return it;
+    """Poll .imp/worktrees/ for the single Quest worktree dir and return it;
     its .name is the slug. The real guard is the presence of
-    .imp/changes/<slug>/change.json at the control root (scratch/.merge-* dirs
+    .imp/quests/<slug>/quest.json at the control root (scratch/.merge-* dirs
     have no such entry); the leading-dot exclusion is redundant belt-and-suspenders.
 
-    Replaces stdout-parsing of `imp new`'s "Created Change <slug>:" line:
+    Replaces stdout-parsing of `imp new`'s "Created Quest <slug>:" line:
     sidesteps PTY/PIPE read-timing and yields the slug directly. Raises
-    TimeoutError if no Change worktree appears within `timeout` seconds."""
+    TimeoutError if no Quest worktree appears within `timeout` seconds."""
     root = control_root / ".imp" / "worktrees"
     deadline = time.time() + timeout
     while time.time() < deadline:
         if root.is_dir():
             for p in sorted(root.iterdir()):
                 if (p.is_dir() and not p.name.startswith(".")
-                        and (control_root / ".imp" / "changes" / p.name / "change.json").exists()):
+                        and (control_root / ".imp" / "quests" / p.name / "quest.json").exists()):
                     return p
         time.sleep(0.1)
     raise TimeoutError(
-        f"no Change worktree appeared under {root} within {timeout}s"
+        f"no Quest worktree appeared under {root} within {timeout}s"
     )
 
 
 def _await_change_dir(control_root: Path, timeout: float) -> Path:
-    """Poll .imp/changes/ for the single Change's permanent home dir and return it;
-    its .name is the slug. Guards on change.json so a half-written dir is skipped.
+    """Poll .imp/quests/ for the single Quest's permanent home dir and return it;
+    its .name is the slug. Guards on quest.json so a half-written dir is skipped.
 
     Under the deferred-worktree model `imp new` creates an un-materialized draft
-    (no branch/worktree) with state+events under <control_root>/.imp/changes/<id>/.
+    (no branch/worktree) with state+events under <control_root>/.imp/quests/<id>/.
     A workflow that never calls create_and_enter_worktree runs to completion as a
     draft, so tests that used to await a worktree must await the change home here.
-    Raises TimeoutError if no Change home appears within `timeout` seconds."""
-    root = control_root / ".imp" / "changes"
+    Raises TimeoutError if no Quest home appears within `timeout` seconds."""
+    root = control_root / ".imp" / "quests"
     deadline = time.time() + timeout
     while time.time() < deadline:
         if root.is_dir():
             for p in sorted(root.iterdir()):
-                if p.is_dir() and (p / "change.json").exists():
+                if p.is_dir() and (p / "quest.json").exists():
                     return p
         time.sleep(0.1)
     raise TimeoutError(
-        f"no Change home appeared under {root} within {timeout}s"
+        f"no Quest home appeared under {root} within {timeout}s"
     )

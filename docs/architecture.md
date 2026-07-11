@@ -2,7 +2,7 @@
 
 ## Engine architecture
 
-A single **change** is one unit of work: an isolated git worktree on an `imp/<id>` branch, driven through a workflow by the executor. The executor runs a step loop — each step is an *agent*, *script*, *branch* (router), or *merge* — and every step appends to an append-only event log that is the source of truth for both crash recovery and rendering.
+A single **Quest** is one unit of work: an isolated git worktree on an `imp/<id>` branch, driven through a workflow by the executor. The executor runs a step loop — each step is an *agent*, *script*, *branch* (router), or *merge* — and every step appends to an append-only event log that is the source of truth for both crash recovery and rendering.
 
 ### Overview
 
@@ -70,7 +70,7 @@ flowchart LR
 
 ### Zoom 4 — worktree & git
 
-All git mechanics sit behind `worktree.py`. Spec/plan artifacts live under `.imp/change/` (gitignored); the engine journals them in-process to a per-change `refs/imp/artifacts/<id>` ref at each step-completion boundary (agents only write the files). The final merge is lock-protected; at completion the change is archived — `events.jsonl` is content-addressed into a local blob store with an immutable record + SQLite index under `.imp/archive/` — so each change's events and artifacts survive even after the worktree is pruned (the `refs/imp/artifacts/<id>` ref persists the artifacts; the archive persists the events).
+All git mechanics sit behind `worktree.py`. Spec/plan artifacts live under `.imp/quest/` (gitignored); the engine journals them in-process to a per-quest `refs/imp/artifacts/<id>` ref at each step-completion boundary (agents only write the files). The final merge is lock-protected; at completion the Quest is archived — `events.jsonl` is content-addressed into a local blob store with an immutable record + SQLite index under `.imp/archive/` — so each Quest's events and artifacts survive even after the worktree is pruned (the `refs/imp/artifacts/<id>` ref persists the artifacts; the archive persists the events).
 
 ```mermaid
 flowchart LR
@@ -102,14 +102,14 @@ flowchart LR
 |---|---|---|
 | Entry / drivers | `cli/main.py`, `cli/live_driver.py` | Command dispatch; live / headless rendering + signal wiring around `run_change`. |
 | Executor | `engine/executor.py` | Step loop: load → resolve providers → dispatch → route. Returns `COMPLETED \| PAUSED \| ERRORED`. |
-| Change / state | `engine/change.py`, `engine/state.py` | Per-run identity + worktree; execution cursor, vars, resolved tiers (atomic `save()`); append-only `EventLog`. |
+| Quest / state | `engine/quest.py`, `engine/state.py` | Per-run identity + worktree; execution cursor, vars, resolved tiers (atomic `save()`); append-only `EventLog`. |
 | Workflow load | `engine/loader.py`, `engine/types.py` | Parse `workflow.yaml` + `agents/*.md` into a frozen `Workflow` (phases → steps, agents, vars, rules). |
 | Step dispatch | `engine/gates.py`, `engine/expr.py` | `run_script()` (sandboxed commands) + `evaluate_rules()` (Continue / Retry / Pause / Goto + var mutations). |
 | Sandbox | `engine/sandbox.py` | Bubblewrap policy baked once; `IMP_*` env injected per spawn. |
 | Providers | `providers/*.py`, `providers/resolve.py` | `resolve_run()` maps tiers→(provider, model) once per run; each provider implements the `AgentRunner` protocol. |
 | Agent drive / tools | `engine/agent_run.py`, `agents/runner.py`, `agents/tools/*` | Build `AgentInvocation`, consume the event stream, dispatch per-agent allowlisted tools (incl. synthesized `complete_step`, `wait_for_user`). |
 | Subagents | `agents/subagents.py`, `agents/dispatch.py` | `dispatch_task()` spawns child invocations with depth + parent-event threading. |
-| Git | `engine/worktree.py`, `engine/archive/` | Worktree create/remove, lock-protected merge-to-base, engine-journaled per-change `refs/imp/artifacts/<id>` artifact ref; at completion the change is archived (content-addressed `events.jsonl` blob + immutable record + SQLite index under `.imp/archive/`). |
+| Git | `engine/worktree.py`, `engine/archive/` | Worktree create/remove, lock-protected merge-to-base, engine-journaled per-quest `refs/imp/artifacts/<id>` artifact ref; at completion the Quest is archived (content-addressed `events.jsonl` blob + immutable record + SQLite index under `.imp/archive/`). |
 | Workflow assets | `assets/__init__.py` | Bundled workflows ship with the install; `resolve_workflow_dir` lets a committed `imp/workflows/<name>` override a bundled one. |
 | Rendering | `cli/narrative.py`, `cli/render_text.py` | One event→tree fold shared by live view and `imp log`. |
 | Control plane | `cli/signals.py`, `engine/recovery.py`, `providers/errors.py` | Interrupt/pause + watchdog; typed error categories incl. a first-class *terminated*; gate-safe rewind and continue-nudge transcript replay for `imp resume`. |
@@ -121,7 +121,7 @@ flowchart LR
 
 ## Default workflow
 
-Defined in `src/imp/assets/workflows/imp/workflow.yaml` (workflow name: **feature**; bundled with the install — a committed `imp/workflows/imp` overrides it, see the [component reference](#component-reference)). Five phases, with a per-task loop inside *implement*, a single **change-end** code-review pass that covers the whole change (forward plans are not reviewed individually), and a **supercycle** when a spec needs more than one plan. A `fast_path` (trivial spec) skips the spec and plan-document review gates and the supercycle, but still gets the change-end code review.
+Defined in `src/imp/assets/workflows/imp/workflow.yaml` (workflow name: **feature**; bundled with the install — a committed `imp/workflows/imp` overrides it, see the [component reference](#component-reference)). Five phases, with a per-task loop inside *implement*, a single **change-end** code-review pass that covers the whole Quest (forward plans are not reviewed individually), and a **supercycle** when a spec needs more than one plan. A `fast_path` (trivial spec) skips the spec and plan-document review gates and the supercycle, but still gets the change-end code review.
 
 ### Overview
 
@@ -148,7 +148,7 @@ Routing verbs: `continue`, `goto <step>`, `resume <step>` (re-enter with feedbac
 
 ### Phase ① spec
 
-Brainstorm with the user (optionally dispatching read-only `explorer`/`researcher` helpers) → name the change → write the spec under `.imp/change/artifacts/spec/` (the engine journals it to the change's `refs/imp/artifacts/<id>` ref at the step boundary), verify the artifact is present on disk, then review. A trivial `fast_path` skips the reviewer; otherwise the reviewer gets the last word — the loop ends only on a clean verification review with nothing left to integrate.
+Brainstorm with the user (optionally dispatching read-only `explorer`/`researcher` helpers) → name the Quest → write the spec under `.imp/quest/artifacts/spec/` (the engine journals it to the Quest's `refs/imp/artifacts/<id>` ref at the step boundary), verify the artifact is present on disk, then review. A trivial `fast_path` skips the reviewer; otherwise the reviewer gets the last word — the loop ends only on a clean verification review with nothing left to integrate.
 
 ```mermaid
 flowchart TD
@@ -180,7 +180,7 @@ flowchart TD
 
 ### Phase ③ implement
 
-`task-lead` drives one task at a time (dispatching `implementer` + `quality-reviewer`), committing a clean unit each loop. After all tasks: `commit-check`, then `verify` (the project's own test/lint gate — a gate **timeout** pauses to a human rather than looping), autosquash fixups into one-commit-per-task, run the 4-slice review panel, drain deferred followups, re-verify, stamp trailers, then `plan-cycle-check` decides whether the spec needs another plan (supercycle). After the last plan of a multi-plan change it routes once more through the panel for a **whole-change pass** (`review_scope=change`) before the review phase.
+`task-lead` drives one task at a time (dispatching `implementer` + `quality-reviewer`), committing a clean unit each loop. After all tasks: `commit-check`, then `verify` (the project's own test/lint gate — a gate **timeout** pauses to a human rather than looping), autosquash fixups into one-commit-per-task, run the 4-slice review panel, drain deferred followups, re-verify, stamp trailers, then `plan-cycle-check` decides whether the spec needs another plan (supercycle). After the last plan of a multi-plan Quest it routes once more through the panel for a **whole-change pass** (`review_scope=change`) before the review phase.
 
 ```mermaid
 flowchart TD
@@ -236,7 +236,7 @@ flowchart TD
   in([from review]) --> BFC{"base-fresh-check"}
   BFC -->|"base unchanged"| M2B{"merge-to-base<br/>(lock-protected)"}
   BFC -->|"base advanced"| reint([→ integrate-rebase])
-  M2B -->|MERGED| done([change complete<br/>worktree removed · archived])
+  M2B -->|MERGED| done([Quest complete<br/>worktree removed · archived])
   M2B -->|STALE| reint
 ```
 
@@ -244,7 +244,7 @@ flowchart TD
 
 | Agent | Tier | Role |
 |---|---|---|
-| `spec-writer` | high | Brainstorm with user, name the change, write+commit the spec. |
+| `spec-writer` | high | Brainstorm with user, name the Quest, write+commit the spec. |
 | `spec-reviewer` | high | Review spec vs captured intent; blocking iff Critical/Major. |
 | `plan-writer` | high | Write the next bite-sized `plan-N` from spec + progress. |
 | `plan-reviewer` | high | Run directly as the `plan-review` step. Review the newest plan's prescribed code like a diff; blocking iff Critical/Major. |
@@ -266,10 +266,10 @@ flowchart TD
 
 ### Data files
 
-All four live under `.imp/change/` (gitignored); spec/plan artifacts are journaled by the engine to the change's `refs/imp/artifacts/<id>` ref (see *Zoom 4 — worktree & git*).
+All four live under `.imp/quest/` (gitignored); spec/plan artifacts are journaled by the engine to the Quest's `refs/imp/artifacts/<id>` ref (see *Zoom 4 — worktree & git*).
 
 | File | Written by | Read by |
 |---|---|---|
-| `.imp/change/artifacts/spec/{slug}.md` | spec-writer | all phases |
-| `.imp/change/artifacts/plans/{slug}-plan-N.md` | plan-writer | task-lead, plan-reviewer, plan-cycle-check, deferred-sweep, finalize |
-| `.imp/change/progress.md` | task-lead, deferred-sweep | all implement/review steps (tasks, commit subjects, deferred followups) |
+| `.imp/quest/artifacts/spec/{slug}.md` | spec-writer | all phases |
+| `.imp/quest/artifacts/plans/{slug}-plan-N.md` | plan-writer | task-lead, plan-reviewer, plan-cycle-check, deferred-sweep, finalize |
+| `.imp/quest/progress.md` | task-lead, deferred-sweep | all implement/review steps (tasks, commit subjects, deferred followups) |

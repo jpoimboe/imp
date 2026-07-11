@@ -3,16 +3,16 @@ from __future__ import annotations
 from imp.remote.curate import EventCurator
 
 
-def test_curate_augments_allowed_event_with_change_context() -> None:
+def test_curate_augments_allowed_event_with_quest_context() -> None:
     curator = EventCurator(
-        id="cid", title_provider=lambda: "My Change", events=("all",))
+        id="cid", title_provider=lambda: "My Quest", events=("all",))
     out = curator.curate(
         {"id": "ev1", "type": "agent_output", "payload": {"text": "hi"}})
     assert out is not None
     assert out["id"] == "ev1"             # the event's OWN id is not clobbered
     assert out["type"] == "agent_output"
     assert out["change"] == {
-        "id": "cid", "title": "My Change", "step": None, "status": "running"}
+        "id": "cid", "title": "My Quest", "step": None, "status": "running"}
 
 
 def test_curate_tracks_step_and_status_across_events() -> None:

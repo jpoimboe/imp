@@ -44,9 +44,9 @@ def stub_new(monkeypatch, tmp_path):
     monkeypatch.setattr(main, "should_use_color", lambda *a, **k: False)
     monkeypatch.setattr(main, "_term_width", lambda: 80)
     monkeypatch.setattr(main, "_editing_mode", lambda *a, **k: "emacs")
-    monkeypatch.setattr(main, "new_change_id", lambda existing_stems=frozenset(): "z9y8x7")
+    monkeypatch.setattr(main, "new_quest_id", lambda existing_stems=frozenset(): "z9y8x7")
     monkeypatch.setattr(
-        main.Change, "create_draft",
+        main.Quest, "create_draft",
         staticmethod(lambda *a, **k: SimpleNamespace(
             id="z9y8x7", title="", workflow_dir=tmp_path, seed_opening=None,
             set_seed_opening=lambda text: None)))
@@ -75,7 +75,7 @@ async def test_new_persists_finalized_opening_intent(
             id="z9y8x7", title="", workflow_dir=tmp_path, seed_opening=None,
             set_seed_opening=lambda text: recorded.__setitem__("text", text))
 
-    monkeypatch.setattr(m.Change, "create_draft", staticmethod(_make_draft))
+    monkeypatch.setattr(m.Quest, "create_draft", staticmethod(_make_draft))
 
     class _FakePrompt:
         def __init__(self, **kwargs: object) -> None: ...
@@ -247,7 +247,7 @@ async def test_title_written_before_opening_prompt(stub_new, monkeypatch) -> Non
     # the opening prompt is blocked on the user, so it shows the idle glyph.
     assert "\x1b]2;ѱ imp · z9y8x7\x07" in at_prompt["value"]
     # The same instance is threaded into run_session_client.
-    assert captured["title"]._change_id == "z9y8x7"
+    assert captured["title"]._quest_id == "z9y8x7"
 
 
 @pytest.mark.anyio
@@ -260,7 +260,7 @@ async def test_cancel_at_opening_prompt_resets_title(stub_new, monkeypatch, exc)
         def __init__(
             self, stream: object, cid: str, name: str, initial: str = "busy",
         ) -> None:
-            self._change_id = cid
+            self._quest_id = cid
             self._name = name
 
         def busy(self) -> None: ...
@@ -315,7 +315,7 @@ async def test_headless_path_threads_title(stub_new, monkeypatch) -> None:
     rc = await m._async_cmd_new(_new_args(), leave_mode="new")
 
     assert rc == 0
-    assert captured["title"]._change_id == "z9y8x7"
+    assert captured["title"]._quest_id == "z9y8x7"
 
 
 @pytest.mark.anyio

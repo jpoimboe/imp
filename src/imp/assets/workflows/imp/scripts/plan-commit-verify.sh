@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 cd "${IMP_PROJECT_ROOT:?IMP_PROJECT_ROOT not set by engine}"
-CHANGE_DIR="${IMP_CHANGE_DIR:?IMP_CHANGE_DIR not set by engine}"
-ID="${IMP_CHANGE_ID:?IMP_CHANGE_ID not set by engine}"
-PLANS="${CHANGE_DIR}/artifacts/plans"
+QUEST_DIR="${IMP_QUEST_DIR:?IMP_QUEST_DIR not set by engine}"
+ID="${IMP_QUEST_ID:?IMP_QUEST_ID not set by engine}"
+PLANS="${QUEST_DIR}/artifacts/plans"
 
 NEWEST=""
 best=-1

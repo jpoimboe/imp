@@ -5,12 +5,12 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Generic, TypeVar
 
-from imp.cli import change_row
+from imp.cli import quest_row
 
 
 @dataclass(frozen=True)
 class Candidate:
-    change_id: str
+    quest_id: str
     title: str
     status: str
     step: str
@@ -43,11 +43,11 @@ class ResumePicker:
 
     def render(self) -> str:
         out = []
-        name_w = change_row.name_budget(indent=2)  # the 2-char selection marker
+        name_w = quest_row.name_budget(indent=2)  # the 2-char selection marker
         for i, c in enumerate(self.candidates):
             marker = "▸ " if i == self.index else "  "
-            out.append(marker + change_row.format_change_line(
-                change_id=c.change_id, title=c.title,
+            out.append(marker + quest_row.format_quest_line(
+                quest_id=c.quest_id, title=c.title,
                 status=c.status, step=c.step, step_label=c.step_label,
                 last_iso=c.last_iso, intent=c.intent,
                 now=self.now, color=self.color, name_width=name_w))
@@ -84,7 +84,7 @@ async def run_picker(candidates: list[Candidate], *, now: datetime,
 
     @kb.add("enter")
     def _enter(event: Any) -> None:
-        event.app.exit(result=model.selected().change_id)
+        event.app.exit(result=model.selected().quest_id)
 
     @kb.add("q")
     @kb.add("escape")
@@ -99,7 +99,7 @@ async def run_picker(candidates: list[Candidate], *, now: datetime,
     body = Window(content=FormattedTextControl(lambda: ANSI(model.render())))
     app: Any = Application(
         layout=Layout(HSplit([head, body])), key_bindings=kb, full_screen=False)
-    # _enter exits with a change_id (str); _cancel (q/esc/c-c) exits with None.
+    # _enter exits with a quest_id (str); _cancel (q/esc/c-c) exits with None.
     result: str | None = await app.run_async()
     return result
 

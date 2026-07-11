@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from imp.agents.loop_guard import DEFAULT_REPEAT_K
-from imp.agents.runner import AgentInvocation, ChangeContext, Message, TextBlock
+from imp.agents.runner import AgentInvocation, Message, QuestContext, TextBlock
 from imp.engine.types import (
     AgentDef,
     OutputField,
@@ -80,7 +80,7 @@ def _inv(
         model_name="gpt-5.5",
         system_prompt="sp",
         initial_messages=(),
-        change_context=ChangeContext(
+        quest_context=QuestContext(
             title="t", project_root=tmp_path,
             workflow_dir=tmp_path, id="c1"),
         transcript_dir=tmp_path / "tx",
@@ -103,7 +103,7 @@ def _inv_with_continuation(
         model_name="gpt-5.5",
         system_prompt="sp",
         initial_messages=(),
-        change_context=ChangeContext(
+        quest_context=QuestContext(
             title="t", project_root=tmp_path,
             workflow_dir=tmp_path, id="c1"),
         transcript_dir=tmp_path / "tx",
@@ -223,7 +223,7 @@ def _inv_with_task(
         system_prompt="ROLE_HEADER_SENTINEL",
         initial_messages=(
             Message(role="user", content=(TextBlock(text=task_text),)),),
-        change_context=ChangeContext(
+        quest_context=QuestContext(
             title="t", project_root=tmp_path,
             workflow_dir=tmp_path, id="c1"),
         transcript_dir=tmp_path / "tx",

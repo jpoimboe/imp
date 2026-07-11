@@ -1,4 +1,4 @@
-"""imp-daemon-connector — bridges a Change's NDJSON stdio to the per-repo daemon socket.
+"""imp-daemon-connector — bridges a Quest's NDJSON stdio to the per-repo daemon socket.
 
 The connector owns daemon liveness. It polls for the socket, attaches whenever the
 daemon is up, and re-attaches across daemon restarts. While the daemon is down it
@@ -110,7 +110,7 @@ def _wants_autosubscribe(env: Mapping[str, str]) -> bool:
 
 
 def _bridge(
-    sock: socket.socket, stdin_fd: int, change_id: str, title: str, stdout: Any,
+    sock: socket.socket, stdin_fd: int, quest_id: str, title: str, stdout: Any,
     autosubscribe: bool = False,
 ) -> bool:
     """Bridge one live connection until the socket drops or stdin EOFs. Returns
@@ -126,7 +126,7 @@ def _bridge(
         args=(sock, stdin_fd, cancel_r, stdin_eof), daemon=True,
     )
     try:
-        sock.sendall((make_hello(change_id, title, autosubscribe) + "\n").encode("utf-8"))
+        sock.sendall((make_hello(quest_id, title, autosubscribe) + "\n").encode("utf-8"))
         reader.start()
         writer.start()
         reader.join()  # return when socket closes (daemon drop or normal shutdown)
@@ -160,7 +160,7 @@ def main(
     path = env.get("IMP_REMOTE_CONTROL_SOCK")
     if not path:
         return 0
-    change_id = env.get("IMP_REMOTE_CONTROL_CHANGE_ID", "")
+    quest_id = env.get("IMP_REMOTE_CONTROL_CHANGE_ID", "")
     title = env.get("IMP_REMOTE_CONTROL_TITLE", "")
     autosubscribe = _wants_autosubscribe(env)
     stdin_fd = stdin.fileno()
@@ -171,7 +171,7 @@ def main(
         if sock is not None:
             waiting_logged = False
             _log("attached to daemon socket")
-            if _bridge(sock, stdin_fd, change_id, title, stdout, autosubscribe):
+            if _bridge(sock, stdin_fd, quest_id, title, stdout, autosubscribe):
                 return 0   # stdin EOF during the bridge: imp tore us down
             # socket dropped (daemon stop/crash) → fall through to the poll gap
         elif not waiting_logged:

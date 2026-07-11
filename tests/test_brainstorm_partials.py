@@ -176,7 +176,7 @@ def test_brainstorm_dialogue_seeded_branch_reframed_as_hat_selector() -> None:
     src = (PARTIALS / "brainstorm-dialogue.md").read_text()
     wf = PARTIALS.parent
     seeded = render_prompt(src, build_context(
-        change_title="t", event_log=InMemoryEventLog(),
+        quest_title="t", event_log=InMemoryEventLog(),
         opening="a pasted spiker complaint"), workflow_dir=wf)
     assert "a pasted spiker complaint" in seeded
     assert "Opening message in hand" in seeded
@@ -190,13 +190,13 @@ def test_brainstorm_dialogue_renders_seeded_vs_unseeded_branch() -> None:
     wf = PARTIALS.parent  # workflow_dir so {% include %} resolves
 
     seeded = render_prompt(src, build_context(
-        change_title="t", event_log=InMemoryEventLog(),
+        quest_title="t", event_log=InMemoryEventLog(),
         opening="add a dark-mode toggle"), workflow_dir=wf)
     assert "add a dark-mode toggle" in seeded          # intent rendered inline
     assert "Open by asking" not in seeded              # not the bare-open branch
 
     unseeded = render_prompt(src, build_context(
-        change_title="t", event_log=InMemoryEventLog()), workflow_dir=wf)
+        quest_title="t", event_log=InMemoryEventLog()), workflow_dir=wf)
     assert "add a dark-mode toggle" not in unseeded
     assert "Open by asking" in unseeded                # bare-open elicit branch
 

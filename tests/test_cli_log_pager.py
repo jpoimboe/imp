@@ -16,7 +16,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from imp.engine.change import LAYOUT_VERSION
+from imp.engine.quest import LAYOUT_VERSION
 
 
 def _fake_tty_stdout(monkeypatch: pytest.MonkeyPatch, *, isatty: bool) -> None:
@@ -360,21 +360,21 @@ def test_keyboard_interrupt_in_wait_does_not_raise(
 
 
 def _make_change_worktree(control: Path, slug: str, title: str) -> Path:
-    """Create a minimal on-disk Change home under control/.imp/changes/<slug>
+    """Create a minimal on-disk Quest home under control/.imp/quests/<slug>
     with one rendered step (phase "spec") so the narrative reaches output."""
-    change_dir = control / ".imp" / "changes" / slug
-    change_dir.mkdir(parents=True)
-    (change_dir / "change.json").write_text(
+    quest_dir = control / ".imp" / "quests" / slug
+    quest_dir.mkdir(parents=True)
+    (quest_dir / "quest.json").write_text(
         json.dumps({"id": slug, "title": title, "base_branch": "main",
                     "layout_version": LAYOUT_VERSION,
                     "created_at": "2026-05-27T10:00:00+00:00"}),
     )
-    state_dir = change_dir / "state"
+    state_dir = quest_dir / "state"
     state_dir.mkdir()
     (state_dir / "state.json").write_text(
         json.dumps({"step": "-", "status": "paused"}),
     )
-    (change_dir / "events.jsonl").write_text(
+    (quest_dir / "events.jsonl").write_text(
         json.dumps({
             "timestamp": "2026-05-27T10:00:00+00:00",
             "type": "change_created",
@@ -388,7 +388,7 @@ def _make_change_worktree(control: Path, slug: str, title: str) -> Path:
                         "model": "m", "provider": "anthropic"},
         }) + "\n",
     )
-    return change_dir
+    return quest_dir
 
 
 def test_main_log_invokes_pager_on_tty(
@@ -512,16 +512,16 @@ def test_main_log_backlog_routes_through_pager(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """A backlog Change (no conversation) renders its card through
+    """A backlog Quest (no conversation) renders its card through
     _page_or_print on a TTY (Popen once, cleanup ran)."""
     import imp.cli.main as m
-    from imp.engine.change import Change
+    from imp.engine.quest import Quest
     from tests.conftest import _seed_control
 
     slug = "backlog-only"
     _seed_control(tmp_path)
-    Change.create_draft(
-        tmp_path, title="queued work", change_id=slug, base_branch="main",
+    Quest.create_draft(
+        tmp_path, title="queued work", quest_id=slug, base_branch="main",
         origin="followup", seed_opening="queued work")
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(m, "_control_root", lambda: tmp_path)

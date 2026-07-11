@@ -13,7 +13,7 @@ from imp.cli.main import (
     _record_idea,
     _resolve_new_base,
 )
-from imp.engine.change import Change
+from imp.engine.quest import Quest
 from tests.conftest import _git, _seed_control
 
 
@@ -89,7 +89,7 @@ def test_cmd_new_missing_default_base_exits_2_and_creates_no_draft(
     monkeypatch.chdir(tmp_path)
     rc = asyncio.run(_async_cmd_new(argparse.Namespace(base=None)))
     assert rc == 2
-    assert not (tmp_path / ".imp" / "changes").exists()  # no draft created
+    assert not (tmp_path / ".imp" / "quests").exists()  # no draft created
     assert "imp init" in capsys.readouterr().err
 
 
@@ -102,7 +102,7 @@ def test_cmd_new_nonexistent_default_base_exits_2_and_creates_no_draft(
     monkeypatch.chdir(tmp_path)
     rc = asyncio.run(_async_cmd_new(argparse.Namespace(base=None)))
     assert rc == 2
-    assert not (tmp_path / ".imp" / "changes").exists()  # no draft created
+    assert not (tmp_path / ".imp" / "quests").exists()  # no draft created
     assert "does not name an existing branch" in capsys.readouterr().err
 
 
@@ -136,7 +136,7 @@ def test_record_idea_uses_passed_base_not_current_branch(
         idea="my idea", opening=None, depends_on=None, workflow=None)
     rc = _record_idea(ns, tmp_path, "release/9")
     assert rc == 0
-    ids = [p.name for p in (tmp_path / ".imp" / "changes").iterdir()]
+    ids = [p.name for p in (tmp_path / ".imp" / "quests").iterdir()]
     assert len(ids) == 1, ids
-    change = Change.load(tmp_path, ids[0])
+    change = Quest.load(tmp_path, ids[0])
     assert change.base_branch == "release/9"

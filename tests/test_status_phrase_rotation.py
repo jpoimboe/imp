@@ -25,7 +25,7 @@ def _prose(eid: str) -> dict:
 
 def _threshold_builder() -> nv.NarrativeBuilder:
     b = nv.NarrativeBuilder()
-    b.add(ev("1", "change_created", change_id=1, title="x"))
+    b.add(ev("1", "change_created", quest_id=1, title="x"))
     b.add(ev("2", "step_started", step="threshold", kind="agent",
              phase="threshold", model="m", provider="anthropic",
              label="frozen0", rotate_phrase=True))
@@ -94,7 +94,7 @@ def test_rotation_leaves_the_frozen_journal_label_untouched(monkeypatch) -> None
 def test_step_without_rotate_phrase_keeps_its_label(monkeypatch) -> None:
     monkeypatch.setattr(_PHRASE_FN, lambda: "SHOULD_NOT_DRAW")
     b = nv.NarrativeBuilder()
-    b.add(ev("1", "change_created", change_id=1, title="x"))
+    b.add(ev("1", "change_created", quest_id=1, title="x"))
     b.add(ev("2", "step_started", step="task-lead", kind="agent", phase="code",
              model="m", provider="anthropic", label="task 1/6"))
     assert b.current_activity().verb == "task 1/6"   # no seed drawn without rotate_phrase
@@ -146,7 +146,7 @@ def test_resume_continuation_preserves_the_rotated_phrase(monkeypatch) -> None:
 def test_position_label_step_seeds_phrase_and_keeps_counter(monkeypatch) -> None:
     _deterministic_draws(monkeypatch)
     b = nv.NarrativeBuilder()
-    b.add(ev("1", "change_created", change_id=1, title="x"))
+    b.add(ev("1", "change_created", quest_id=1, title="x"))
     b.add(ev("2", "step_started", step="task-lead", kind="agent", phase="code",
              model="m", provider="anthropic", label="task 2/3",
              phase_label="implementation phase · plan 1/1",

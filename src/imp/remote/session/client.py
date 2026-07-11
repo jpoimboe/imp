@@ -21,14 +21,14 @@ class SessionClient:
     def __init__(
         self,
         path: str,
-        change_id: str,
+        quest_id: str,
         title: str,
         *,
         on_event: Callable[[dict[str, Any]], None],
         lease: bool = False,
     ) -> None:
         self._path = path
-        self._change_id = change_id
+        self._quest_id = quest_id
         self._title = title
         self._on_event = on_event
         self._lease = lease
@@ -39,7 +39,7 @@ class SessionClient:
         stream = await anyio.connect_unix(self._path)
         try:
             await stream.send(
-                (encode_attach(self._change_id, self._title, self._lease) + "\n").encode("utf-8"))
+                (encode_attach(self._quest_id, self._title, self._lease) + "\n").encode("utf-8"))
         except BaseException:
             await stream.aclose()
             raise

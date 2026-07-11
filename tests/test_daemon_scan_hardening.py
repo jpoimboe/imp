@@ -15,7 +15,7 @@ def anyio_backend() -> str:
     return "asyncio"
 
 
-def test_list_changes_skips_a_change_whose_row_read_raises(
+def test_list_quests_skips_a_change_whose_row_read_raises(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """One broken change home must not blind the whole directory — the daemon's
@@ -27,10 +27,10 @@ def test_list_changes_skips_a_change_whose_row_read_raises(
             raise OSError("mid-write / corrupt home")
         return (cid, "running", "plan", "", "T", "2026-01-01", None, None)
 
-    monkeypatch.setattr("imp.cli.main._iter_change_ids", lambda _c: ids)
+    monkeypatch.setattr("imp.cli.main._iter_quest_ids", lambda _c: ids)
     monkeypatch.setattr("imp.cli.main._row_for_id", _row)
 
-    got = {info.id for info in discover.list_changes(tmp_path)}
+    got = {info.id for info in discover.list_quests(tmp_path)}
     assert got == {"good1", "good2"}  # "boom" skipped, not fatal
 
 

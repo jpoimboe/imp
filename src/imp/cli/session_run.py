@@ -12,8 +12,8 @@ from imp.cli.session_terminal import run_terminal_client
 from imp.cli.signals import InterruptCoordinator
 from imp.cli.slash import ask_line_with_slash
 from imp.cli.terminal_title import TerminalTitle
-from imp.engine.change import Change
 from imp.engine.executor import RunResult
+from imp.engine.quest import Quest
 from imp.engine.state import State
 from imp.remote.session.attach import build_session_attach
 
@@ -23,7 +23,7 @@ def _should_run_ctrl_d_reader(*, non_interactive: bool) -> bool:
     return not non_interactive and sys.stdin.isatty()
 
 
-def infer_session_result(change: Change) -> RunResult:
+def infer_session_result(change: Quest) -> RunResult:
     """Read persisted status, home first then archive: 'completed' → COMPLETED, else PAUSED."""
     try:
         status: str | None = State.load(change.state_dir).status
@@ -34,7 +34,7 @@ def infer_session_result(change: Change) -> RunResult:
 
 
 async def run_session_client(
-    change: Change,
+    change: Quest,
     *,
     driver: Any,
     coord: InterruptCoordinator,
@@ -67,7 +67,7 @@ async def run_session_client(
         try:
             await run_terminal_client(
                 attach=attach, driver=driver, coord=coord, solicit=solicit,
-                change_id=change.id, control_root=change.control_root,
+                quest_id=change.id, control_root=change.control_root,
                 leave_state=leave_state, leave_mode=leave_mode, title=title,
                 local_echo=driver.seed_pending_reply)
         except TimeoutError:
@@ -113,7 +113,7 @@ def make_headless_solicit(
 
 
 def make_interactive_solicit(
-    change: Change,
+    change: Quest,
     *,
     status: Any,
     driver: Any,

@@ -8,8 +8,8 @@ from pathlib import Path
 import anyio
 import pytest
 
-from imp.engine.change import Change
 from imp.engine.executor import RunResult, _complete, run_change
+from imp.engine.quest import Quest
 from imp.engine.state import JsonlEventLog, State
 from tests.conftest import _git, _seed_control
 
@@ -17,8 +17,8 @@ from tests.conftest import _git, _seed_control
 def test_two_changes_isolated(tmp_path: Path) -> None:
     """Two concurrent worktrees see only their own files."""
     _seed_control(tmp_path)
-    a = Change.create(tmp_path, title="A", change_id="alpha", base_branch="main")
-    b = Change.create(tmp_path, title="B", change_id="beta", base_branch="main")
+    a = Quest.create(tmp_path, title="A", quest_id="alpha", base_branch="main")
+    b = Quest.create(tmp_path, title="B", quest_id="beta", base_branch="main")
     (a.project_root / "a.txt").write_text("a")
     (b.project_root / "b.txt").write_text("b")
     assert not (a.project_root / "b.txt").exists()
@@ -40,8 +40,8 @@ def test_serialized_merges_second_against_advanced_base(tmp_path: Path) -> None:
         / "src" / "imp" / "assets" / "workflows" / "imp")
     merge_step = next(s for s in wf.flat_steps() if s.name == "merge-to-base")
 
-    a = Change.create(tmp_path, title="A", change_id="alpha", base_branch="main")
-    b = Change.create(tmp_path, title="B", change_id="beta", base_branch="main")
+    a = Quest.create(tmp_path, title="A", quest_id="alpha", base_branch="main")
+    b = Quest.create(tmp_path, title="B", quest_id="beta", base_branch="main")
     for ch, fn in ((a, "a.txt"), (b, "b.txt")):
         (ch.project_root / fn).write_text(fn)
         _git(ch.project_root, "add", "-A")
@@ -61,7 +61,7 @@ def test_serialized_merges_second_against_advanced_base(tmp_path: Path) -> None:
 def test_add_a_inside_worktree_ignores_imp_state(tmp_path: Path) -> None:
     """git add -A inside a worktree must NOT stage .imp/ files."""
     _seed_control(tmp_path)
-    ch = Change.create(tmp_path, title="X", change_id="iso", base_branch="main")
+    ch = Quest.create(tmp_path, title="X", quest_id="iso", base_branch="main")
     (ch.project_root / "src.txt").write_text("code")
     _git(ch.project_root, "add", "-A")
     staged = _git(ch.project_root, "diff", "--cached", "--name-only").stdout
@@ -73,14 +73,14 @@ def test_per_change_lock_is_exclusive_but_cross_change_is_not(tmp_path: Path) ->
     from imp.engine.state import LockHeld, ProjectLock
 
     _seed_control(tmp_path)
-    a = Change.create(tmp_path, title="A", change_id="alpha", base_branch="main")
-    b = Change.create(tmp_path, title="B", change_id="beta", base_branch="main")
-    with ProjectLock(a.change_dir / "lock").acquire():
+    a = Quest.create(tmp_path, title="A", quest_id="alpha", base_branch="main")
+    b = Quest.create(tmp_path, title="B", quest_id="beta", base_branch="main")
+    with ProjectLock(a.quest_dir / "lock").acquire():
         # Same lock file: must raise LockHeld (timeout=0 → immediate)
-        with pytest.raises(LockHeld), ProjectLock(a.change_dir / "lock").acquire(timeout=0.2):
+        with pytest.raises(LockHeld), ProjectLock(a.quest_dir / "lock").acquire(timeout=0.2):
             pass
         # Different change's lock file: must succeed
-        with ProjectLock(b.change_dir / "lock").acquire(timeout=0.2):
+        with ProjectLock(b.quest_dir / "lock").acquire(timeout=0.2):
             pass
 
 
@@ -105,7 +105,7 @@ def test_full_run_to_merge_spine(tmp_path: Path, provider_registry: object) -> N
     )
     _git(tmp_path, "add", "-A")
     _git(tmp_path, "commit", "-qm", "add merge phase")
-    ch = Change.create(tmp_path, title="x", change_id="spine", base_branch="main")
+    ch = Quest.create(tmp_path, title="x", quest_id="spine", base_branch="main")
     (ch.project_root / "out.txt").write_text("done")
     _git(ch.project_root, "add", "-A")
     _git(ch.project_root, "commit", "-qm", "work")
@@ -123,11 +123,11 @@ def test_full_run_to_merge_spine(tmp_path: Path, provider_registry: object) -> N
 
 
 def test_workflow_edits_isolated_between_changes(tmp_path: Path) -> None:
-    """Editing Change A's workflow agent leaves Change B's copy untouched —
+    """Editing Quest A's workflow agent leaves Quest B's copy untouched —
     each worktree resolves imp/workflows/imp to its own checkout."""
     _seed_control(tmp_path)
-    a = Change.create(tmp_path, title="A", change_id="alpha", base_branch="main")
-    b = Change.create(tmp_path, title="B", change_id="beta", base_branch="main")
+    a = Quest.create(tmp_path, title="A", quest_id="alpha", base_branch="main")
+    b = Quest.create(tmp_path, title="B", quest_id="beta", base_branch="main")
 
     a_agent = a.workflow_dir / "agents" / "stub.md"
     b_agent = b.workflow_dir / "agents" / "stub.md"
@@ -140,19 +140,19 @@ def test_workflow_edits_isolated_between_changes(tmp_path: Path) -> None:
 
 
 def test_committed_workflow_edit_is_tracked_on_branch(tmp_path: Path) -> None:
-    """Editing + committing a Change's workflow agent produces a real tracked
+    """Editing + committing a Quest's workflow agent produces a real tracked
     diff on imp/<slug>. (In imp's own repo imp/workflows/imp is a symlink, so
     the tracked path is src/imp/assets/workflows/imp/...; the test fixture
     uses a real dir, so the path here is imp/workflows/imp/...)."""
     _seed_control(tmp_path)
-    ch = Change.create(tmp_path, title="X", change_id="ver", base_branch="main")
+    ch = Quest.create(tmp_path, title="X", quest_id="ver", base_branch="main")
 
     agent_md = ch.workflow_dir / "agents" / "stub.md"
     agent_md.write_text(agent_md.read_text() + "\nVERSIONED EDIT\n")
     _git(ch.project_root, "add", "-A")
     _git(ch.project_root, "commit", "-qm", "improve stub agent")
 
-    # The edit is a committed diff on the Change's branch...
+    # The edit is a committed diff on the Quest's branch...
     show = _git(tmp_path, "show", "imp/ver:imp/workflows/imp/agents/stub.md")
     assert "VERSIONED EDIT" in show.stdout
     # ...and is NOT on base.

@@ -58,7 +58,7 @@ def test_threshold_preserves_speak_plainly() -> None:
 
 def test_threshold_introduces_no_new_cli_command_or_read_tool() -> None:
     body = _threshold()
-    for banned in ("list_changes", "show_change",
+    for banned in ("list_quests", "show_change",
                    "imp explain", "imp doctor", "imp workflow show"):
         assert banned not in body, banned
 

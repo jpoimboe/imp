@@ -41,7 +41,7 @@ from imp.agents.subagents import raise_if_suspended
 from imp.agents.tools import bg as _bg
 from imp.agents.tools.context import (
     ToolContext,
-    change_home_path,
+    quest_home_path,
     request_bracketed,
     terminate_running_processes,
 )
@@ -260,7 +260,7 @@ class CodexAgentRunner:
 
         # 1. Preflight (auth / *-codex / non-git cwd) — raises PreflightError.
         canonical_auth = self._canonical_auth_path()
-        cwd = invocation.change_context.project_root
+        cwd = invocation.quest_context.project_root
         auth_mode = preflight(
             model=self.model, cwd=cwd, canonical_auth=canonical_auth,
             env=os.environ,
@@ -279,11 +279,11 @@ class CodexAgentRunner:
             parent_transcript_dir=invocation.transcript_dir,
             agent_id=aid,
             background_enabled=True,  # full bg surface wired: injection + sweeps + teardown
-            change_home=change_home_path(invocation.change_context.change_home),
+            quest_home=quest_home_path(invocation.quest_context.quest_home),
         )
-        ctx.change_context = invocation.change_context
+        ctx.quest_context = invocation.quest_context
         ctx.change_state = invocation.change_state
-        ctx.change = invocation.change          # live Change for rename_change
+        ctx.change = invocation.change          # live Quest for rename_quest
         ctx.spawn_subagent = spawn_subagent_via_registry
         ctx.resolved_tiers = invocation.resolved_tiers
         ctx.subagent_depth = invocation.subagent_depth
@@ -1123,7 +1123,7 @@ def process_event(
         state["thread_id"] = getattr(event, "thread_id", None)
         return
 
-    # `item.started` — open the task fold keyed on the SDK item id (Change 2).
+    # `item.started` — open the task fold keyed on the SDK item id (Quest 2).
     # The codex SDK emits item.started (status="in_progress") for an mcp_tool_call
     # before item.completed, carrying the SAME id; opening the task tool_call here
     # lets out-of-order sibling completion pair by id with no re-key. Non-task
@@ -1218,7 +1218,7 @@ def process_event(
             call_id = sdk_id
             task_id_ns: str | None
             if name == "sub_agent":
-                # Change 2: the task tool_call was opened at item.started keyed on
+                # Quest 2: the task tool_call was opened at item.started keyed on
                 # this same SDK id; close the fold here with the matching result
                 # (id_ns="event" marks the codex namespace for the §3 fold probe).
                 # A task item with no prior item.started (the no-pair path) still

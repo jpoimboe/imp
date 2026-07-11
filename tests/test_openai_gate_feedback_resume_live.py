@@ -27,8 +27,8 @@ from typing import Any
 
 import pytest
 
-from imp.engine.change import Change
 from imp.engine.executor import RunResult, run_change
+from imp.engine.quest import Quest
 from tests._live import opted_in
 from tests.conftest import _git
 
@@ -155,8 +155,8 @@ async def test_gate_feedback_reaches_model_on_openai_resume(
 
     monkeypatch.setattr(oai_mod, "_imp_to_responses_input", _spy)
 
-    change = Change.create(
-        tmp_path, title="gate-fb", change_id="gate-fb", base_branch="main")
+    change = Quest.create(
+        tmp_path, title="gate-fb", quest_id="gate-fb", base_branch="main")
 
     # The gate never passes, so the run pauses at max_loops. Reaching PAUSED (not
     # an exception) already proves the live API accepted every request, including

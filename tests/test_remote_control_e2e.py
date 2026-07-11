@@ -8,7 +8,7 @@ import anyio
 import pytest
 
 from imp.remote.daemon.commands import HELP_TEXT, ROUTE_HINT
-from imp.remote.daemon.discover import ChangeInfo, socket_is_live, socket_path
+from imp.remote.daemon.discover import QuestInfo, socket_is_live, socket_path
 from imp.remote.daemon.runner import run_daemon
 from imp.remote.session.discover import session_socket_path
 from imp.remote.session.socket_server import SessionSocket
@@ -38,9 +38,9 @@ async def test_e2e_chat_commands_round_trip(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _seed_control(tmp_path)
-    home = tmp_path / ".imp" / "changes" / CHANGE
+    home = tmp_path / ".imp" / "quests" / CHANGE
     home.mkdir(parents=True, exist_ok=True)
-    (home / "change.json").write_text("{}")
+    (home / "quest.json").write_text("{}")
     monkeypatch.setattr(
         "imp.remote.daemon.discover.snapshot",
         lambda _cr, c: ("running", "plan", "Dark mode") if c == CHANGE else None)
@@ -50,7 +50,7 @@ async def test_e2e_chat_commands_round_trip(
 
     created: list[str] = []
     abandoned: list[str] = []
-    listed = [ChangeInfo(id="q1w2e3", title="Listed",
+    listed = [QuestInfo(id="q1w2e3", title="Listed",
                          status="running", step="plan")]
     spath = socket_path(tmp_path)
     shutdown = anyio.Event()
@@ -67,7 +67,7 @@ async def test_e2e_chat_commands_round_trip(
                 env={"IMP_TELEGRAM_TOKEN": "TOK", "IMP_TELEGRAM_CHAT_ID": "4242"},
                 create=created.append,
                 abandon=lambda cid: (abandoned.append(cid), 0)[1],
-                list_changes=lambda: listed,
+                list_quests=lambda: listed,
                 resident_ids=lambda: frozenset({"q1w2e3"}),
                 deliver=_capture_deliver,
                 install_signals=False, shutdown=shutdown))
@@ -107,7 +107,7 @@ async def test_e2e_chat_commands_round_trip(
             fake.inject_reply("approved", reply_to_message_id=m1)
             await _wait(lambda: delivered == [(CHANGE, "approved")])
 
-            # /abandon, addressed by replying to the Change's message.
+            # /abandon, addressed by replying to the Quest's message.
             fake.inject_reply("/abandon", reply_to_message_id=m1)
             await _wait(lambda: abandoned == [CHANGE])
             await _wait(lambda: _text_in_outbox(fake, "Abandoned @zzzzzz."))

@@ -13,21 +13,21 @@ from imp.assets import bundled_workflow_dir
 SCRIPTS = bundled_workflow_dir("imp") / "scripts"
 
 
-def _run_capture(script: str, root: Path, change_dir: Path, change_id: str):
+def _run_capture(script: str, root: Path, quest_dir: Path, quest_id: str):
     return subprocess.run(
         ["bash", str(SCRIPTS / script)], cwd=SCRIPTS,
-        env={"IMP_PROJECT_ROOT": str(root), "IMP_CHANGE_ID": change_id,
-             "IMP_CHANGE_DIR": str(change_dir), "PATH": os.environ["PATH"]},
+        env={"IMP_PROJECT_ROOT": str(root), "IMP_QUEST_ID": quest_id,
+             "IMP_QUEST_DIR": str(quest_dir), "PATH": os.environ["PATH"]},
         capture_output=True, text=True,
     )
 
 
-def _run(script: str, root: Path, change_dir: Path, change_id: str) -> int:
-    return _run_capture(script, root, change_dir, change_id).returncode
+def _run(script: str, root: Path, quest_dir: Path, quest_id: str) -> int:
+    return _run_capture(script, root, quest_dir, quest_id).returncode
 
 
-def _write(change_dir: Path, rel: str, body: str) -> None:
-    dest = change_dir / "artifacts" / rel
+def _write(quest_dir: Path, rel: str, body: str) -> None:
+    dest = quest_dir / "artifacts" / rel
     dest.parent.mkdir(parents=True, exist_ok=True)
     dest.write_text(body)
 
@@ -86,8 +86,8 @@ def test_plan_verify_passes_large_plan_no_task_cap(tmp_path: Path) -> None:
     assert "CEILING" not in imp
 
 
-def test_spec_verify_reads_live_from_change_dir(tmp_path: Path) -> None:
-    # The gate reads the artifact from IMP_CHANGE_DIR (the change-home), which can
+def test_spec_verify_reads_live_from_quest_dir(tmp_path: Path) -> None:
+    # The gate reads the artifact from IMP_QUEST_DIR (the change-home), which can
     # be a separate dir from the project tree.
     root = tmp_path / "proj"
     root.mkdir()
@@ -97,8 +97,8 @@ def test_spec_verify_reads_live_from_change_dir(tmp_path: Path) -> None:
     assert proc.returncode == 0, proc.stderr
 
 
-def test_plan_verify_reads_live_from_change_dir(tmp_path: Path) -> None:
-    # The gate reads the plan from IMP_CHANGE_DIR, not the project tree.
+def test_plan_verify_reads_live_from_quest_dir(tmp_path: Path) -> None:
+    # The gate reads the plan from IMP_QUEST_DIR, not the project tree.
     root = tmp_path / "proj"
     root.mkdir()
     home = tmp_path / "home"

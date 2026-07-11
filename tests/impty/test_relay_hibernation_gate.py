@@ -31,7 +31,7 @@ from pathlib import Path
 
 import pytest
 
-from imp.engine.change import Change
+from imp.engine.quest import Quest
 from impty import TerminalSession
 from tests._live import _await_worktree
 from tests.impty.e2e_support import _MINIMAL_CONFIG, _git, can_pty, clean_env
@@ -41,7 +41,7 @@ _WORKTREE_SRC = str(Path(__file__).parent.parent.parent / "src")
 
 # Bounded poll (~20s ceiling, then exit 0) on the change's events.jsonl for a
 # cli_attached marker that is FRESH for the current daemon instance. The journal
-# is at $IMP_CHANGE_DIR/events.jsonl (the permanent control-root home).
+# is at $IMP_QUEST_DIR/events.jsonl (the permanent control-root home).
 #
 # cli_attached is written to the PERSISTENT journal and survives hibernation, so
 # the first-run marker is still present on the resume leg. The SAME scripted
@@ -65,7 +65,7 @@ _WORKTREE_SRC = str(Path(__file__).parent.parent.parent / "src")
 # matches only the real daemon event records and never this command's self-echo.
 # `: ?` tolerates either json separator spacing.
 _ATTACH_POLL = (
-    'J="${IMP_CHANGE_DIR}/events.jsonl"; '
+    'J="${IMP_QUEST_DIR}/events.jsonl"; '
     "for _ in $(seq 200); do "
     "base=$(grep -nE '\"type\": ?\"workflow_resumed\"' \"$J\" 2>/dev/null "
     "| tail -1 | cut -d: -f1); base=${base:-0}; "
@@ -143,10 +143,10 @@ def test_relay_hibernate_gate_then_resume_reengages(tmp_path: Path) -> None:
     try:
         wt = _await_worktree(tmp_path, timeout=30.0)
         slug = wt.name
-        change = Change.load(tmp_path, slug)
-        events = change.change_dir / "events.jsonl"
-        state_path = change.change_dir / "state" / "state.json"
-        lock_path = change.change_dir / "lock"
+        change = Quest.load(tmp_path, slug)
+        events = change.quest_dir / "events.jsonl"
+        state_path = change.quest_dir / "state" / "state.json"
+        lock_path = change.quest_dir / "lock"
 
         # The daemon journals cli_attached on the 0 -> 1 attach; the scripted
         # bash step blocks on that marker, so the provider only reaches

@@ -7,11 +7,11 @@ from pathlib import Path
 import anyio
 import pytest
 
-from imp.agents.runner import ChangeContext
+from imp.agents.runner import QuestContext
 from imp.agents.subagents import dispatch_task
 from imp.agents.tools.context import ToolContext
 from imp.cli.signals import InterruptCoordinator
-from imp.engine.change import Change
+from imp.engine.quest import Quest
 from imp.engine.types import AgentDef, OutputSchema, SourceLoc
 from tests.conftest import _git, _seed_control
 
@@ -59,13 +59,13 @@ def _spawn(events, *, on_run=None, capture=None):
     return _s
 
 
-def _make_change(tmp_path: Path) -> Change:
+def _make_change(tmp_path: Path) -> Quest:
     _seed_control(tmp_path)
-    return Change.create(tmp_path, title="T", change_id="prb001",
+    return Quest.create(tmp_path, title="T", quest_id="prb001",
                          base_branch="main")
 
 
-def _ctx(tmp_path: Path, change: Change, *, name: str, agent: AgentDef,
+def _ctx(tmp_path: Path, change: Quest, *, name: str, agent: AgentDef,
          spawn) -> ToolContext:
     ctx = ToolContext(project_root=change.project_root,
                       events_path=change.events_path)
@@ -75,9 +75,9 @@ def _ctx(tmp_path: Path, change: Change, *, name: str, agent: AgentDef,
     ctx.parent_transcript_dir = tmp_path / "steps" / "p" / "s"
     ctx.coordinator = InterruptCoordinator()
     ctx.change = change
-    ctx.change_context = ChangeContext(
+    ctx.quest_context = QuestContext(
         id=change.id, title=change.title, project_root=change.project_root,
-        change_home=f".imp/changes/{change.id}",
+        quest_home=f".imp/quests/{change.id}",
         workflow_dir=change.workflow_dir)
     ctx.sandbox_policy = None
     ctx.spawn_subagent = spawn
@@ -102,12 +102,12 @@ def test_isolated_dispatch_runs_in_throwaway_with_distinct_policy(
     inv = capture["inv"]
     throwaway = (tmp_path / ".imp" / "worktrees" / "spike-prb001-1").resolve()
     # the subagent's working root is the disposable worktree
-    assert inv.change_context.project_root == throwaway
+    assert inv.quest_context.project_root == throwaway
     pol = inv.sandbox_policy
     assert pol.network is True
     assert pol.worktree == str(throwaway)
     # the DURABLE change home is the rw-bound change dir (survives teardown)
-    assert pol.change_home == str(change.change_dir)
+    assert pol.quest_home == str(change.quest_dir)
     # teardown: throwaway worktree + its branch are gone
     assert not throwaway.exists()
     assert "imp/spike-prb001-1" not in _git(
@@ -122,9 +122,9 @@ def test_isolated_dispatch_parks_artifact_surviving_teardown(
     seen: dict = {}
 
     def _park(inv) -> None:
-        seen["root"] = inv.change_context.project_root
+        seen["root"] = inv.quest_context.project_root
         # write through the planted change-home symlink inside the throwaway
-        home = inv.change_context.project_root / ".imp" / "changes" / change.id
+        home = inv.quest_context.project_root / ".imp" / "quests" / change.id
         dest = home / "artifacts" / "spike" / "finding.md"
         dest.parent.mkdir(parents=True, exist_ok=True)
         dest.write_text("empirical result: 42\n")
@@ -139,7 +139,7 @@ def test_isolated_dispatch_parks_artifact_surviving_teardown(
     # the write happened INSIDE the disposable worktree ...
     assert seen["root"] == throwaway
     # ... which is now gone, yet the parked artifact persists in the durable home
-    parked = change.change_dir / "artifacts" / "spike" / "finding.md"
+    parked = change.quest_dir / "artifacts" / "spike" / "finding.md"
     assert parked.read_text() == "empirical result: 42\n"
     assert not throwaway.exists()
 
@@ -158,9 +158,9 @@ def test_isolated_dispatch_tears_down_on_error(
     calls: list = []
     real_destroy = wtmod.destroy_spike_worktree
 
-    def _spy(control_root, change_id, discriminator):
-        calls.append((change_id, discriminator))
-        return real_destroy(control_root, change_id, discriminator)
+    def _spy(control_root, quest_id, discriminator):
+        calls.append((quest_id, discriminator))
+        return real_destroy(control_root, quest_id, discriminator)
 
     monkeypatch.setattr(wtmod, "destroy_spike_worktree", _spy)
 
@@ -193,7 +193,7 @@ def test_non_isolated_subagent_inherits_parent_policy(tmp_path: Path) -> None:
 
     inv = capture["inv"]
     assert inv.sandbox_policy is sentinel                 # inherited unchanged
-    assert inv.change_context.project_root == change.project_root
+    assert inv.quest_context.project_root == change.project_root
     # no spike worktree was ever created
     assert list((tmp_path / ".imp" / "worktrees").glob("spike-*")) == []
 
@@ -225,7 +225,7 @@ def test_inactive_spike_policy_emits_sandbox_inactive_event(
     assert sandbox_events[0]["agent_id"] == "prober"
 
 
-def test_isolated_dispatch_without_change_context_raises(tmp_path: Path) -> None:
+def test_isolated_dispatch_without_quest_context_raises(tmp_path: Path) -> None:
     ctx = ToolContext(project_root=tmp_path, events_path=tmp_path / "e.jsonl")
     ctx.subagent_defs = {"prober": _isolated_agent("prober")}
     ctx.provider_name = "anthropic"
@@ -233,7 +233,7 @@ def test_isolated_dispatch_without_change_context_raises(tmp_path: Path) -> None
     ctx.parent_transcript_dir = tmp_path / "steps" / "p" / "s"
     ctx.coordinator = InterruptCoordinator()
     ctx.change = None                                     # nested-dispatch shape
-    ctx.change_context = ChangeContext(
+    ctx.quest_context = QuestContext(
         id="x", title="X", project_root=tmp_path, workflow_dir=tmp_path / "wf")
     ctx.spawn_subagent = _spawn([{"type": "agent_output", "payload": {"text": "ok"}}])
 
@@ -273,7 +273,7 @@ def test_build_spike_policy_passes_spike_true(monkeypatch, tmp_path):
 
     change = SimpleNamespace(
         id="abc", title="T", project_root=tmp_path, control_root=tmp_path,
-        change_dir=tmp_path / "change", base_branch="master",
+        quest_dir=tmp_path / "change", base_branch="master",
     )
     result = subagents._build_spike_policy(change, tmp_path / "wt", test_gates=None)
 

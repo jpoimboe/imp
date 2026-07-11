@@ -49,7 +49,7 @@ def _seed_project(tmp_path: Path) -> None:
 
     imp new needs >=1 commit with HEAD on a branch (worktree.check_preconditions)
     and reads the workflow + config from the control root's WORKING TREE
-    (Change.create copies imp/workflows/imp; the runtime reads the merged
+    (Quest.create copies imp/workflows/imp; the runtime reads the merged
     config from imp/project.yaml — the project layer of load_effective_config).
     Committing them is the clean choice. _init_repo already commits a README +
     .gitignore with `.imp/`, so .imp/ is durably ignored and `imp new` won't add
@@ -194,11 +194,11 @@ def test_ctrl_c_during_bash_pauses_then_resume_completes(tmp_path: Path) -> None
     )
     try:
         # imp new starts an un-materialized draft: no worktree, state+events live
-        # at the permanent control-root home .imp/changes/<id>/.
-        change_dir = _await_change_dir(tmp_path, timeout=30.0)
-        slug = change_dir.name
-        events = change_dir / "events.jsonl"
-        state_path = change_dir / "state" / "state.json"
+        # at the permanent control-root home .imp/quests/<id>/.
+        quest_dir = _await_change_dir(tmp_path, timeout=30.0)
+        slug = quest_dir.name
+        events = quest_dir / "events.jsonl"
+        state_path = quest_dir / "state" / "state.json"
 
         if not _wait_for_bash_tool_call(events, timeout=60.0):
             stdout, stderr = proc.communicate(timeout=10)
@@ -301,11 +301,11 @@ def test_ctrl_c_during_bash_pauses_then_resume_completes_openai(
     )
     try:
         # imp new starts an un-materialized draft: no worktree, state+events live
-        # at the permanent control-root home .imp/changes/<id>/.
-        change_dir = _await_change_dir(tmp_path, timeout=30.0)
-        slug = change_dir.name
-        events = change_dir / "events.jsonl"
-        state_path = change_dir / "state" / "state.json"
+        # at the permanent control-root home .imp/quests/<id>/.
+        quest_dir = _await_change_dir(tmp_path, timeout=30.0)
+        slug = quest_dir.name
+        events = quest_dir / "events.jsonl"
+        state_path = quest_dir / "state" / "state.json"
 
         if not _wait_for_bash_tool_call(events, timeout=60.0):
             stdout, stderr = proc.communicate(timeout=10)
@@ -382,11 +382,11 @@ def test_ctrl_c_during_bash_pauses_then_resume_completes_claude_code(
     )
     try:
         # imp new starts an un-materialized draft: no worktree, state+events live
-        # at the permanent control-root home .imp/changes/<id>/.
-        change_dir = _await_change_dir(tmp_path, timeout=30.0)
-        slug = change_dir.name
-        events = change_dir / "events.jsonl"
-        state_path = change_dir / "state" / "state.json"
+        # at the permanent control-root home .imp/quests/<id>/.
+        quest_dir = _await_change_dir(tmp_path, timeout=30.0)
+        slug = quest_dir.name
+        events = quest_dir / "events.jsonl"
+        state_path = quest_dir / "state" / "state.json"
 
         if not _wait_for_bash_tool_call(events, timeout=120.0):
             stdout, stderr = proc.communicate(timeout=10)

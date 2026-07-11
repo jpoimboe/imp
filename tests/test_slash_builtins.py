@@ -5,13 +5,13 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from imp.cli.slash import REPROMPT, handle_slash_line
-from imp.engine.change import Change
+from imp.engine.quest import Quest
 from tests.conftest import _seed_control
 
 
 def test_list_builtin_lists_changes_before_skill_fallback(tmp_path: Path, capsys) -> None:
     _seed_control(tmp_path)
-    Change.create(tmp_path, title="Live one", change_id="live1", base_branch="main")
+    Quest.create(tmp_path, title="Live one", quest_id="live1", base_branch="main")
     change = SimpleNamespace(control_root=tmp_path)
     out: list[str] = []
     result = handle_slash_line("/list", change=change, output_fn=out.append)
@@ -28,15 +28,15 @@ def test_list_builtin_all_flag_includes_archived_completed(tmp_path: Path, capsy
     for cid, status in (("doneid", "completed"), ("deadid", "abandoned")):
         events = tmp_path / f"{cid}-e.jsonl"
         events.write_text("")
-        change_json = tmp_path / f"{cid}-c.json"
-        change_json.write_text(json.dumps({
+        quest_json = tmp_path / f"{cid}-c.json"
+        quest_json.write_text(json.dumps({
             "id": cid, "title": f"Title {cid}", "base_branch": "main",
             "created_at": "2026-06-01T00:00:00+00:00", "depends_on": []}))
         state_json = tmp_path / f"{cid}-s.json"
         state_json.write_text(json.dumps({"id": cid, "status": status, "step": "merge"}))
-        archive.archive_change(
+        archive.archive_quest(
             tmp_path, cid, events_path=events,
-            change_json_path=change_json, state_json_path=state_json)
+            quest_json_path=quest_json, state_json_path=state_json)
     change = SimpleNamespace(control_root=tmp_path)
 
     assert handle_slash_line("/list", change=change, output_fn=[].append) is REPROMPT
@@ -66,15 +66,15 @@ def test_search_builtin_prints_matching_archived_change(tmp_path: Path) -> None:
     from imp.engine import archive
     events = tmp_path / "e.jsonl"
     events.write_text("")
-    change_json = tmp_path / "c.json"
-    change_json.write_text(json.dumps({
+    quest_json = tmp_path / "c.json"
+    quest_json.write_text(json.dumps({
         "id": "darkid", "title": "Dark mode toggle", "base_branch": "main",
         "created_at": "2026-06-01T00:00:00+00:00", "depends_on": []}))
     state_json = tmp_path / "s.json"
     state_json.write_text(json.dumps({"id": "darkid", "status": "abandoned", "step": "spec"}))
-    archive.archive_change(
+    archive.archive_quest(
         tmp_path, "darkid", events_path=events,
-        change_json_path=change_json, state_json_path=state_json)
+        quest_json_path=quest_json, state_json_path=state_json)
 
     change = SimpleNamespace(control_root=tmp_path)
     out: list[str] = []
@@ -121,15 +121,15 @@ def test_resume_builtin_rehydrates_resumable_match(tmp_path: Path) -> None:
         "materialized": False}))
     sj = tmp_path / "s.json"
     sj.write_text(json.dumps({"id": "conv1", "status": "paused", "step": "threshold"}))
-    archive.archive_change(
+    archive.archive_quest(
         tmp_path, "conv1", events_path=events,
-        change_json_path=cj, state_json_path=sj, resumable=True)
+        quest_json_path=cj, state_json_path=sj, resumable=True)
 
     change = SimpleNamespace(control_root=tmp_path)
     out: list[str] = []
     result = handle_slash_line("/resume conv1", change=change, output_fn=out.append)
     assert result is REPROMPT
-    assert (tmp_path / ".imp" / "changes" / "conv1").exists()       # rehydrated live home
+    assert (tmp_path / ".imp" / "quests" / "conv1").exists()       # rehydrated live home
     assert any("imp resume conv1" in line for line in out)          # how to continue
 
 
@@ -145,15 +145,15 @@ def test_resume_builtin_refuses_non_resumable(tmp_path: Path) -> None:
         "created_at": "2026-06-01T00:00:00+00:00", "depends_on": []}))
     sj = tmp_path / "s.json"
     sj.write_text(json.dumps({"id": "done1", "status": "completed", "step": "merge"}))
-    archive.archive_change(
+    archive.archive_quest(
         tmp_path, "done1", events_path=events,
-        change_json_path=cj, state_json_path=sj)                    # resumable False
+        quest_json_path=cj, state_json_path=sj)                    # resumable False
 
     change = SimpleNamespace(control_root=tmp_path)
     out: list[str] = []
     result = handle_slash_line("/resume done1", change=change, output_fn=out.append)
     assert result is REPROMPT
-    assert not (tmp_path / ".imp" / "changes" / "done1").exists()   # never rehydrated
+    assert not (tmp_path / ".imp" / "quests" / "done1").exists()   # never rehydrated
     assert any("not resumable" in line for line in out)
 
 
@@ -170,7 +170,7 @@ def test_resume_builtin_no_match(tmp_path: Path) -> None:
     out: list[str] = []
     result = handle_slash_line("/resume zzz999", change=change, output_fn=out.append)
     assert result is REPROMPT
-    assert any("No change matches" in line for line in out)
+    assert any("No Quest matches" in line for line in out)
 
 
 def test_resume_builtin_ambiguous_match(tmp_path: Path) -> None:
@@ -187,9 +187,9 @@ def test_resume_builtin_ambiguous_match(tmp_path: Path) -> None:
             "created_at": "2026-06-01T00:00:00+00:00", "depends_on": []}))
         sj = tmp_path / f"{cid}s.json"
         sj.write_text(json.dumps({"id": cid, "status": "completed", "step": "merge"}))
-        archive.archive_change(
+        archive.archive_quest(
             tmp_path, cid, events_path=events,
-            change_json_path=cj, state_json_path=sj)
+            quest_json_path=cj, state_json_path=sj)
 
     change = SimpleNamespace(control_root=tmp_path)
     out: list[str] = []
@@ -201,8 +201,8 @@ def test_resume_builtin_ambiguous_match(tmp_path: Path) -> None:
 def test_resume_builtin_live_match_skips_rehydration(tmp_path: Path) -> None:
     from tests.conftest import _seed_control
     _seed_control(tmp_path)
-    from imp.engine.change import Change
-    Change.create_draft(tmp_path, title="Live", change_id="live1", base_branch="main")
+    from imp.engine.quest import Quest
+    Quest.create_draft(tmp_path, title="Live", quest_id="live1", base_branch="main")
 
     change = SimpleNamespace(control_root=tmp_path)
     out: list[str] = []
@@ -210,7 +210,7 @@ def test_resume_builtin_live_match_skips_rehydration(tmp_path: Path) -> None:
     assert result is REPROMPT
     assert any("live" in line and "imp resume live1" in line for line in out)
     # live home is still there (not removed/re-created by rehydrate)
-    assert (tmp_path / ".imp" / "changes" / "live1").exists()
+    assert (tmp_path / ".imp" / "quests" / "live1").exists()
 
 
 def test_save_builtin_returns_literal_for_the_gate_loop(tmp_path: Path) -> None:
@@ -256,15 +256,15 @@ def test_search_builtin_matches_archived_change_by_body_term(tmp_path: Path) -> 
             "content": [{"type": "text", "text": "the 300s deadline is enforced"}],
             "stop_reason": "end_turn",
             "usage": {"input_tokens": 1, "output_tokens": 1}}}}) + "\n")
-    change_json = tmp_path / "c.json"
-    change_json.write_text(json.dumps({
+    quest_json = tmp_path / "c.json"
+    quest_json.write_text(json.dumps({
         "id": "quietid", "title": "", "base_branch": "main",
         "created_at": "2026-06-01T00:00:00+00:00", "depends_on": []}))
     state_json = tmp_path / "s.json"
     state_json.write_text(json.dumps({"id": "quietid", "status": "abandoned", "step": "spec"}))
-    archive.archive_change(
+    archive.archive_quest(
         tmp_path, "quietid", events_path=events,
-        change_json_path=change_json, state_json_path=state_json)
+        quest_json_path=quest_json, state_json_path=state_json)
 
     change = SimpleNamespace(control_root=tmp_path)
     out: list[str] = []

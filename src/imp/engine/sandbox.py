@@ -41,7 +41,7 @@ class SandboxPolicy:
     setenv: tuple[tuple[str, str], ...]       # resolved env allowlist key/value pairs
     network: bool                             # True → no --unshare-net
     note: str = ""                            # "" | "unsandboxed_by_config" | "sandbox_disabled"
-    change_home: str = ""                     # <control>/.imp/changes/<id> rw bind ("" → none)
+    quest_home: str = ""                     # <control>/.imp/quests/<id> rw bind ("" → none)
     readonly_overlays: tuple[str, ...] = ()  # ro subtrees; after git_ro_remask, before caches
     git_ref_reexpose: tuple[str, ...] = ()   # rw re-expose of refs/heads/imp; after git_ro_remask
     ephemeral_home: str = ""                 # spike: writable tmpfs over $HOME ("" → none)
@@ -72,7 +72,7 @@ class SandboxPolicy:
             *([(self.ephemeral_home, "tmpfs_rw")] if self.ephemeral_home else []),
             (self.worktree, "rw"),
             (self.git_common_dir, "rw"),
-            *([(self.change_home, "rw")] if self.change_home else []),
+            *([(self.quest_home, "rw")] if self.quest_home else []),
             *[(p, "ro") for p in self.git_ro_remask],
             *[(p, "rw") for p in self.git_ref_reexpose],
             *[(p, "ro") for p in self.readonly_overlays],
@@ -118,7 +118,7 @@ def build_sandbox_argv(
     is the single source of truth for the sandbox's `IMP_*` vars: every IMP_*-
     prefixed key it carries is emitted via --setenv, authoritatively superseding
     whatever was baked into `policy.setenv` at run start. The policy is resolved
-    once per run (the stat-once design), but name-on-intent makes IMP_CHANGE_TITLE
+    once per run (the stat-once design), but name-on-intent makes IMP_QUEST_TITLE
     mutate mid-run on a rename — so a gate or tool spawned after
     the rename MUST see the live values, not the empty ones frozen at run start.
 
@@ -258,9 +258,9 @@ def sandbox_config_from_raw(raw: Mapping[str, Any]) -> SandboxConfig:
 
 
 def resolve_policy(
-    *, worktree: Path, control_root: Path, change_id: str, cfg: SandboxConfig,
+    *, worktree: Path, control_root: Path, quest_id: str, cfg: SandboxConfig,
     engine_env_result: Mapping[str, str], environ: Mapping[str, str],
-    available: bool, change_dir: Path | None = None, spike: bool = False,
+    available: bool, quest_dir: Path | None = None, spike: bool = False,
 ) -> SandboxPolicy:
     """Stat once, bake a frozen SandboxPolicy. The ONE impure step (spec B.1).
 
@@ -344,17 +344,17 @@ def resolve_policy(
         claude_dir = Path(claude_override) if claude_override else home / ".claude"
         cred_writethrough = _existing([str(claude_dir), str(home / ".codex")])
 
-    # ro overlay of workflow snapshot — bind_plan emits it after the change_home rw
+    # ro overlay of workflow snapshot — bind_plan emits it after the quest_home rw
     # bind, so last-covering-wins makes only workflow/ read-only.
     readonly_overlays: tuple[str, ...] = ()
-    if change_dir is not None and (change_dir / "workflow").is_dir():
-        readonly_overlays = (str(change_dir / "workflow"),)
+    if quest_dir is not None and (quest_dir / "workflow").is_dir():
+        readonly_overlays = (str(quest_dir / "workflow"),)
 
     return SandboxPolicy(
         active=True,
         worktree=str(worktree),
         git_common_dir=str(git),
-        change_home=str(change_dir) if change_dir is not None else "",
+        quest_home=str(quest_dir) if quest_dir is not None else "",
         git_ro_remask=tuple(remask),
         git_ref_reexpose=git_ref_reexpose,
         readonly_overlays=readonly_overlays,

@@ -8,8 +8,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from imp.engine.change import Change
 from imp.engine.errors import LoadError, LoadErrors
+from imp.engine.quest import Quest
 from imp.remote.session.protocol import (
     CONTROL_ARCHIVE,
     CONTROL_DISCARD,
@@ -31,7 +31,7 @@ def _was_renamed(log: object) -> bool:
 
 
 def leave_control_action(
-    change: Change, leave_mode: str | None, intent: str | None,
+    change: Quest, leave_mode: str | None, intent: str | None,
 ) -> str | None:
     """Which daemon disposition frame a phase-0 leave should send.
 
@@ -61,11 +61,11 @@ def leave_control_action(
 
 
 def resolve_leave_action(
-    control_root: Path, change_id: str, leave_mode: str | None, intent: str | None,
+    control_root: Path, quest_id: str, leave_mode: str | None, intent: str | None,
 ) -> str | None:
     """Reload the change and decide its leave control action, or None if gone."""
     try:
-        change = Change.load(control_root, change_id)
+        change = Quest.load(control_root, quest_id)
     except (LoadError, LoadErrors):
         return None
     return leave_control_action(change, leave_mode, intent)

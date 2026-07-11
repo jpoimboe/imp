@@ -2,9 +2,9 @@ from datetime import UTC, datetime
 
 import pytest
 
-from imp.cli.change_row import (
+from imp.cli.quest_row import (
     NAME_MIN,
-    format_change_line,
+    format_quest_line,
     header_line,
     name_budget,
     relative_age,
@@ -31,7 +31,7 @@ def test_relative_age(then_iso, expected):
 
 
 def _row(**kw):
-    base = dict(change_id="yaitd7", title="Add version flag",
+    base = dict(quest_id="yaitd7", title="Add version flag",
                 status="running", step="code",
                 last_iso="2026-06-11T11:45:00+00:00", now=_NOW)
     base.update(kw)
@@ -39,7 +39,7 @@ def _row(**kw):
 
 
 def test_format_columns_plain():
-    line = format_change_line(**_row(), color=False)
+    line = format_quest_line(**_row(), color=False)
     assert "\x1b[" not in line
     assert line.startswith("yaitd7")        # ID first
     assert "Add version flag" in line       # NAME
@@ -49,7 +49,7 @@ def test_format_columns_plain():
 
 
 def test_name_is_final_column():
-    line = format_change_line(**_row(), color=False)
+    line = format_quest_line(**_row(), color=False)
     # NAME now trails every other column.
     assert line.index("Add version flag") > line.index("running")
     assert line.index("Add version flag") > line.index("code")
@@ -57,7 +57,7 @@ def test_name_is_final_column():
 
 
 def test_format_unnamed_shows_id_and_unnamed_label():
-    line = format_change_line(**_row(title="   "), color=False)
+    line = format_quest_line(**_row(title="   "), color=False)
     assert line.startswith("yaitd7")
     assert "(unnamed)" in line
 
@@ -72,32 +72,32 @@ def test_header_line_leads_with_id_ends_with_name():
 
 
 def test_format_does_not_truncate_name_within_budget():
-    line = format_change_line(**_row(title="x" * 40), color=False, name_width=48)
+    line = format_quest_line(**_row(title="x" * 40), color=False, name_width=48)
     assert "x" * 40 in line
     assert "…" not in line
 
 
 def test_format_truncates_name_past_budget():
-    line = format_change_line(**_row(title="x" * 40), color=False, name_width=24)
+    line = format_quest_line(**_row(title="x" * 40), color=False, name_width=24)
     # Truncated to 24 display cols: 23 chars + ellipsis.
     assert "x" * 23 + "…" in line
     assert "x" * 24 not in line
 
 
 def test_format_status_color_running():
-    line = format_change_line(**_row(status="running"), color=True)
+    line = format_quest_line(**_row(status="running"), color=True)
     assert "\x1b[32mrunning\x1b[0m" in line
 
 
 def test_format_dim_wraps_whole_row():
-    line = format_change_line(**_row(status="completed"), color=True, dim=True)
+    line = format_quest_line(**_row(status="completed"), color=True, dim=True)
     assert line.startswith("\x1b[2m")
     assert line.endswith("\x1b[0m")
     assert "\x1b[32m" not in line
 
 
 def test_merged_status_renders_green():
-    line = format_change_line(**_row(status="merged"), color=True)
+    line = format_quest_line(**_row(status="merged"), color=True)
     assert "\x1b[32mmerged\x1b[0m" in line
 
 
@@ -127,12 +127,12 @@ def test_name_budget_floors_at_minimum(monkeypatch):
 
 
 def test_backlog_status_renders_dim():
-    from imp.cli.change_row import STATUS_COLORS
+    from imp.cli.quest_row import STATUS_COLORS
     assert STATUS_COLORS["backlog"] == ("dim",)
 
 
 def test_status_cell_merges_step_label_as_dim_suffix():
-    line = format_change_line(**_row(status="running", step="write_spec"),
+    line = format_quest_line(**_row(status="running", step="write_spec"),
                               step_label="writing spec", color=True)
     # status word keeps its color; the label suffix is dim and parenthesized.
     assert "\x1b[32mrunning\x1b[0m" in line
@@ -140,7 +140,7 @@ def test_status_cell_merges_step_label_as_dim_suffix():
 
 
 def test_status_cell_falls_back_to_step_name_without_label():
-    line = format_change_line(**_row(status="running", step="write_spec"),
+    line = format_quest_line(**_row(status="running", step="write_spec"),
                               step_label=None, color=False)
     assert "running (write_spec)" in line
 
@@ -148,7 +148,7 @@ def test_status_cell_falls_back_to_step_name_without_label():
 def test_status_cell_bare_when_step_empty():
     # The default _row title ("Add version flag") has no paren, so a clean line
     # has none at all when the STATUS cell carries no ` (label)` suffix.
-    line = format_change_line(**_row(status="completed", step="-"),
+    line = format_quest_line(**_row(status="completed", step="-"),
                               step_label=None, color=False)
     assert "completed" in line
     assert "(" not in line                     # no suffix in the STATUS cell
@@ -157,19 +157,19 @@ def test_status_cell_bare_when_step_empty():
 def test_draft_status_renders_step_suffix():
     # The draft special-case is gone: a non-empty step renders a ` (label)` suffix
     # like any other status, so a blocked Backlog draft can show its state.
-    line = format_change_line(**_row(status="draft", step="blocked"),
+    line = format_quest_line(**_row(status="draft", step="blocked"),
                               step_label="blocked", color=False)
     assert "draft (blocked)" in line
 
 
 def test_provenance_statuses_have_colors():
-    from imp.cli.change_row import STATUS_COLORS
+    from imp.cli.quest_row import STATUS_COLORS
     assert "idea" in STATUS_COLORS
     assert "followup" in STATUS_COLORS
 
 
 def test_status_word_never_truncated_only_label_is():
-    line = format_change_line(
+    line = format_quest_line(
         **_row(status="merge_blocked", step="x"),
         step_label="resolving deferred items", color=False)
     assert "merge_blocked" in line               # status word intact
@@ -181,7 +181,7 @@ def test_merge_blocked_status_word_is_wordmark_under_dark_theme() -> None:
     from imp.cli import palette as pal
     try:
         pal.set_theme("dark")
-        line = format_change_line(**_row(status="merge_blocked", step="x"), color=True)
+        line = format_quest_line(**_row(status="merge_blocked", step="x"), color=True)
     finally:
         pal.set_theme("ansi")
     wordmark = pal.theme_escapes("dark")["wordmark"]   # \x1b[38;2;255;154;60m
@@ -191,14 +191,14 @@ def test_merge_blocked_status_word_is_wordmark_under_dark_theme() -> None:
 
 
 def test_intent_fallback_for_empty_title():
-    line = format_change_line(**_row(title="   ", status="running", step="s"),
+    line = format_quest_line(**_row(title="   ", status="running", step="s"),
                               intent="add a dark mode toggle", color=False)
     assert "add a dark mode toggle" in line
     assert "(unnamed)" not in line
 
 
 def test_intent_fallback_for_empty_title_color():
-    line = format_change_line(**_row(title="   ", status="running", step="s"),
+    line = format_quest_line(**_row(title="   ", status="running", step="s"),
                               intent="add a dark mode toggle", color=True)
     # intent text rendered dim
     assert "\x1b[2madd a dark mode toggle\x1b[0m" in line
@@ -208,7 +208,7 @@ def test_intent_fallback_for_empty_title_color():
 def test_intent_fallback_flattens_multiline_prompt():
     # A multi-line opening prompt (e.g. a pasted traceback) must collapse to a
     # single row; an embedded newline in the NAME cell would spill the table.
-    line = format_change_line(
+    line = format_quest_line(
         **_row(title="", status="running", step="s"),
         intent="Ready to land the draft?\n  + Exception Group Traceback\n  |  File",
         color=False, name_width=80)
@@ -217,20 +217,20 @@ def test_intent_fallback_flattens_multiline_prompt():
 
 
 def test_unnamed_when_no_intent():
-    line = format_change_line(**_row(title="   ", status="running", step="s"),
+    line = format_quest_line(**_row(title="   ", status="running", step="s"),
                               intent=None, color=False)
     assert "(unnamed)" in line
 
 
 def test_status_cell_includes_phase_label():
-    line = format_change_line(**_row(status="running", step="write_spec"),
+    line = format_quest_line(**_row(status="running", step="write_spec"),
                               step_label="writing spec",
                               phase_label="spec phase", color=False)
     assert "running (spec phase · writing spec)" in line
 
 
 def test_status_cell_omits_phase_when_none():
-    line = format_change_line(**_row(status="running", step="write_spec"),
+    line = format_quest_line(**_row(status="running", step="write_spec"),
                               step_label="writing spec",
                               phase_label=None, color=False)
     assert "running (writing spec)" in line
@@ -239,7 +239,7 @@ def test_status_cell_omits_phase_when_none():
 
 def test_status_width_narrows_label_budget():
     # status_width 20 -> budget 20-7-3 = 10, so a 30-char label is clipped.
-    line = format_change_line(**_row(status="running", step="x"),
+    line = format_quest_line(**_row(status="running", step="x"),
                               step_label="a" * 30, status_width=20, color=False)
     assert "…" in line
     assert "a" * 30 not in line
@@ -248,7 +248,7 @@ def test_status_width_narrows_label_budget():
 def test_status_subfloor_drops_suffix_no_overflow():
     # status_width 8 -> budget 8-7-3 = -2 < 1, so the suffix is dropped and the
     # bare status word is rendered (never the untruncated label).
-    line = format_change_line(**_row(status="running", step="x"),
+    line = format_quest_line(**_row(status="running", step="x"),
                               step_label="a very long label that will not fit",
                               status_width=8, color=False)
     assert "running" in line
@@ -257,14 +257,14 @@ def test_status_subfloor_drops_suffix_no_overflow():
 
 
 def test_header_line_honors_status_width():
-    from imp.cli.change_row import ID_W
+    from imp.cli.quest_row import ID_W
     h = header_line(color=False, status_width=25)
     # UPDATED starts after ID + gap + STATUS(25) + gap.
     assert h.index("UPDATED") == ID_W + 2 + 25 + 2
 
 
 def test_status_colors_have_new_and_no_errored() -> None:
-    from imp.cli.change_row import STATUS_COLORS
+    from imp.cli.quest_row import STATUS_COLORS
     assert "new" in STATUS_COLORS
     assert "errored" not in STATUS_COLORS
 
@@ -280,12 +280,12 @@ def test_status_colors_have_new_and_no_errored() -> None:
     ],
 )
 def test_format_timestamp_trims_to_seconds(iso, expected):
-    from imp.cli.change_row import format_timestamp
+    from imp.cli.quest_row import format_timestamp
     assert format_timestamp(iso) == expected
 
 
 def test_status_cell_phase_label_color_path():
-    line = format_change_line(**_row(status="running", step="write_spec"),
+    line = format_quest_line(**_row(status="running", step="write_spec"),
                               step_label="writing spec",
                               phase_label="spec phase", color=True)
     assert "\x1b[32mrunning\x1b[0m" in line
@@ -293,7 +293,7 @@ def test_status_cell_phase_label_color_path():
 
 
 def test_compose_status_label_variants():
-    from imp.cli.change_row import compose_status_label
+    from imp.cli.quest_row import compose_status_label
     assert compose_status_label("-", None, None) is None
     assert compose_status_label("", "x", "p") is None
     assert compose_status_label("write", "writing", None) == "writing"
@@ -308,7 +308,7 @@ def _term(monkeypatch, cols):
 
 
 def test_overview_widths_80col_name_full_status_clips(monkeypatch):
-    from imp.cli.change_row import overview_widths
+    from imp.cli.quest_row import overview_widths
     _term(monkeypatch, 80)
     # region = 80 - (6 + 7 + 6) = 61; name_content = 20; status_content = 7+40+3 = 50.
     status_w, name_w = overview_widths([("running", "x" * 40, "y" * 20)])
@@ -316,7 +316,7 @@ def test_overview_widths_80col_name_full_status_clips(monkeypatch):
 
 
 def test_overview_widths_wide_terminal_shows_full_status(monkeypatch):
-    from imp.cli.change_row import overview_widths
+    from imp.cli.quest_row import overview_widths
     _term(monkeypatch, 130)
     # region = 111; status_content = 50 fits, so STATUS gets its content width.
     status_w, name_w = overview_widths([("running", "x" * 40, "y" * 20)])
@@ -324,7 +324,7 @@ def test_overview_widths_wide_terminal_shows_full_status(monkeypatch):
 
 
 def test_overview_widths_name_cap_protects_status(monkeypatch):
-    from imp.cli.change_row import overview_widths
+    from imp.cli.quest_row import overview_widths
     _term(monkeypatch, 130)
     # An 80-char name is capped at 60 for sizing, so STATUS still gets its 50.
     status_w, _name_w = overview_widths([("running", "x" * 40, "y" * 80)])
@@ -332,7 +332,7 @@ def test_overview_widths_name_cap_protects_status(monkeypatch):
 
 
 def test_overview_widths_subfloor_floors_status_to_word(monkeypatch):
-    from imp.cli.change_row import overview_widths
+    from imp.cli.quest_row import overview_widths
     _term(monkeypatch, 80)
     # region = 61; a long intent hits the 60 cap so STATUS floors to the word (7).
     status_w, name_w = overview_widths([("running", "x" * 40, "i" * 80)])
@@ -340,7 +340,7 @@ def test_overview_widths_subfloor_floors_status_to_word(monkeypatch):
 
 
 def test_overview_widths_floors_name_at_min(monkeypatch):
-    from imp.cli.change_row import NAME_MIN, overview_widths
+    from imp.cli.quest_row import NAME_MIN, overview_widths
     _term(monkeypatch, 20)
     # region = 1; STATUS keeps its 6-wide header floor, NAME never drops below NAME_MIN.
     status_w, name_w = overview_widths([("new", None, "a")])
@@ -349,7 +349,7 @@ def test_overview_widths_floors_name_at_min(monkeypatch):
 
 
 def test_overview_widths_empty_rows(monkeypatch):
-    from imp.cli.change_row import overview_widths
+    from imp.cli.quest_row import overview_widths
     _term(monkeypatch, 80)
     # region = 61; no rows -> status_floor=status_content=6, name_content=0.
     assert overview_widths([]) == (6, 55)

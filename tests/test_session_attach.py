@@ -8,7 +8,7 @@ from typing import Any
 import anyio
 import pytest
 
-from imp.engine.change import Change
+from imp.engine.quest import Quest
 from imp.remote.session.attach import attach_or_spawn, build_session_attach, spawn_session_daemon
 from imp.remote.session.discover import session_socket_path
 from imp.remote.session.reply import deliver_session_reply
@@ -20,14 +20,14 @@ def anyio_backend() -> str:
     return "asyncio"
 
 
-def _make_change(tmp_path: Path, change_id: str) -> Change:
-    return Change(
-        id=change_id,
+def _make_change(tmp_path: Path, quest_id: str) -> Quest:
+    return Quest(
+        id=quest_id,
         title="T",
         base_branch="main",
         control_root=tmp_path,
         project_root=tmp_path,
-        change_dir=tmp_path / ".imp" / "change",
+        quest_dir=tmp_path / ".imp" / "change",
     )
 
 
@@ -51,7 +51,7 @@ def test_spawn_session_daemon_launches_detached_module_entry(
     assert captured["argv"] == [
         sys.executable, "-m", "imp.remote.session.daemon",
         "--control-root", str(tmp_path),
-        "--change-id", "2026-06-15-abc",
+        "--quest-id", "2026-06-15-abc",
     ]
     kw = captured["kwargs"]
     assert kw["cwd"] == str(tmp_path)
@@ -59,7 +59,7 @@ def test_spawn_session_daemon_launches_detached_module_entry(
     assert kw["stdin"] == subprocess.DEVNULL
     assert kw["stdout"] == subprocess.DEVNULL
     assert kw["stderr"] is not subprocess.DEVNULL
-    assert Path(kw["stderr"].name) == change.change_dir / "daemon.stderr"
+    assert Path(kw["stderr"].name) == change.quest_dir / "daemon.stderr"
     assert "IMP_TEST_CMD_FAST" not in kw["env"]
     assert "IMP_REMOTE_CONTROL_SOCK" not in kw["env"]
 
@@ -69,7 +69,7 @@ async def test_attaches_to_resident_daemon_without_spawning(tmp_path: Path) -> N
     change = _make_change(tmp_path, "2026-06-15-res")
     sock = str(session_socket_path(change.control_root, change.id))
     server = SessionSocket(sock)
-    spawned: list[Change] = []
+    spawned: list[Quest] = []
     async with anyio.create_task_group() as tg:
         await server.open()
         tg.start_soon(server.serve)
@@ -98,9 +98,9 @@ async def test_spawns_then_attaches_when_no_daemon_resident(tmp_path: Path) -> N
             holder["server"] = server
             await server.serve()
 
-        spawned: list[Change] = []
+        spawned: list[Quest] = []
 
-        def fake_spawn(ch: Change) -> None:
+        def fake_spawn(ch: Quest) -> None:
             spawned.append(ch)
             tg.start_soon(_start_server)
 
@@ -148,7 +148,7 @@ def test_spawn_session_daemon_includes_resume_flag_when_set(
     assert captured["argv"] == [
         sys.executable, "-m", "imp.remote.session.daemon",
         "--control-root", str(tmp_path),
-        "--change-id", "2026-06-15-abc",
+        "--quest-id", "2026-06-15-abc",
         "--resume",
     ]
 
@@ -161,7 +161,7 @@ async def test_build_session_attach_uses_resident_daemon_without_spawning(
 
     change = _make_change(tmp_path, "2026-06-15-warm")
     sock = str(session_socket_path(change.control_root, change.id))
-    spawned: list[Change] = []
+    spawned: list[Quest] = []
     monkeypatch.setattr(
         attach_mod, "spawn_session_daemon",
         lambda ch, *, resume=False,
@@ -211,7 +211,7 @@ async def test_build_session_attach_threads_resume_into_spawn(
             await server.serve()
 
         def fake_spawn(
-            ch: Change, *, resume: bool = False,
+            ch: Quest, *, resume: bool = False,
             non_interactive: bool = False, autonomous: bool = False,
             model: str | None = None,
         ) -> None:
@@ -315,7 +315,7 @@ def test_spawn_session_daemon_captures_child_stderr_to_file(
 
     spawn_session_daemon(change)
 
-    captured = (change.change_dir / "daemon.stderr").read_bytes()
+    captured = (change.quest_dir / "daemon.stderr").read_bytes()
     assert b"Traceback (most recent call last):" in captured
     assert b"Boom" in captured
 
@@ -339,7 +339,7 @@ def test_spawn_session_daemon_truncates_stderr_file_on_respawn(
     monkeypatch.setattr(subprocess, "Popen", second)
     spawn_session_daemon(change)
 
-    captured = (change.change_dir / "daemon.stderr").read_bytes()
+    captured = (change.quest_dir / "daemon.stderr").read_bytes()
     assert captured == b"second\n"          # truncated ("wb"), not appended
     assert b"first-segment-crash" not in captured
 

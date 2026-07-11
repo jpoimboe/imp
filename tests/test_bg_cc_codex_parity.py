@@ -53,14 +53,14 @@ def test_codex_reuses_cc_build_tools() -> None:
 
 def _bg_ctx(tmp_path: Path):
     """A ToolContext shaped like the CC runner's, with bg enabled."""
-    from imp.agents.runner import ChangeContext
+    from imp.agents.runner import QuestContext
     from imp.agents.tools.context import ToolContext
     run_dir = tmp_path / ".imp" / "change"
     run_dir.mkdir(parents=True, exist_ok=True)
     ctx = ToolContext(project_root=tmp_path,
                       events_path=run_dir / "events.jsonl",
                       agent_id="step:t/coder", background_enabled=True)
-    ctx.change_context = ChangeContext(
+    ctx.quest_context = QuestContext(
         title="T", project_root=tmp_path,
         workflow_dir=tmp_path / ".imp" / "change" / "workflow")
     return ctx

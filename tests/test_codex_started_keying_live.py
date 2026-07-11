@@ -1,5 +1,5 @@
 """Gated codex regression (promoted from spike_codex_started_timing.py): one live
-parallel-task turn confirms the Change-2 keying — each `task` tool_call is keyed on
+parallel-task turn confirms the Quest-2 keying — each `task` tool_call is keyed on
 the SDK item id and opens before its result; the two task results pair to the two
 task calls by id (out-of-order safe). Billable; opt in via `codex` in
 IMP_LIVE_PROVIDERS.

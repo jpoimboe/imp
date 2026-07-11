@@ -13,7 +13,7 @@ from pathlib import Path
 import pytest
 
 from imp.cli.main import main
-from imp.engine.change import LAYOUT_VERSION
+from imp.engine.quest import LAYOUT_VERSION
 
 # ── resume renders through LiveDriver (no replay) ────────────────────────────
 
@@ -25,23 +25,23 @@ def test_replay_current_step_removed() -> None:
     )
 
 
-def _make_change_worktree(control: Path, change_id: str, title: str,
+def _make_change_worktree(control: Path, quest_id: str, title: str,
                            status: str = "paused") -> Path:
-    """Create a minimal on-disk Change home (no real git worktree needed —
-    Change.load only reads the permanent .imp/changes/<id>/ directory)."""
+    """Create a minimal on-disk Quest home (no real git worktree needed —
+    Quest.load only reads the permanent .imp/quests/<id>/ directory)."""
     from imp.engine.state import State
 
-    change_dir = control / ".imp" / "changes" / change_id
-    change_dir.mkdir(parents=True)
-    (change_dir / "state").mkdir()
-    (change_dir / "change.json").write_text(
-        json.dumps({"id": change_id, "title": title, "base_branch": "main",
+    quest_dir = control / ".imp" / "quests" / quest_id
+    quest_dir.mkdir(parents=True)
+    (quest_dir / "state").mkdir()
+    (quest_dir / "quest.json").write_text(
+        json.dumps({"id": quest_id, "title": title, "base_branch": "main",
                     "layout_version": LAYOUT_VERSION})
     )
-    (change_dir / "events.jsonl").write_text("")
-    state = State(id=change_id, status=status, step="spec", step_attempt=0)
-    state.save(change_dir / "state")
-    return change_dir
+    (quest_dir / "events.jsonl").write_text("")
+    state = State(id=quest_id, status=status, step="spec", step_attempt=0)
+    state.save(quest_dir / "state")
+    return quest_dir
 
 
 def test_resume_accepts_merge_blocked_status(tmp_path, monkeypatch) -> None:
@@ -110,7 +110,7 @@ def test_cli_log_pipes_through_narrative(
 ) -> None:
     """End-to-end: ``imp log`` reads events.jsonl and prints narrative lines.
 
-    Constructs a minimal Change directory by hand (no engine spinup) and
+    Constructs a minimal Quest directory by hand (no engine spinup) and
     invokes ``main([..])`` directly.  The narrative view renders
     change_created as the workflow header "#<slug>  <title>" and phase_started
     as the phase name — no raw JSON braces.
@@ -118,13 +118,13 @@ def test_cli_log_pipes_through_narrative(
     import imp.cli.main as m
 
     slug = "my-smoke"
-    change_dir = tmp_path / ".imp" / "changes" / slug
-    change_dir.mkdir(parents=True)
-    (change_dir / "change.json").write_text(
+    quest_dir = tmp_path / ".imp" / "quests" / slug
+    quest_dir.mkdir(parents=True)
+    (quest_dir / "quest.json").write_text(
         json.dumps({"id": slug, "title": "smoke", "base_branch": "main",
                     "layout_version": LAYOUT_VERSION}),
     )
-    (change_dir / "events.jsonl").write_text(
+    (quest_dir / "events.jsonl").write_text(
         json.dumps({
             "id": "e1", "agent_id": None,
             "timestamp": "2026-05-27T10:00:00+00:00",
@@ -162,13 +162,13 @@ def test_imp_log_skips_malformed_lines_in_events_jsonl(
     import imp.cli.main as m
 
     slug = "my-smoke"
-    change_dir = tmp_path / ".imp" / "changes" / slug
-    change_dir.mkdir(parents=True)
-    (change_dir / "change.json").write_text(
+    quest_dir = tmp_path / ".imp" / "quests" / slug
+    quest_dir.mkdir(parents=True)
+    (quest_dir / "quest.json").write_text(
         json.dumps({"id": slug, "title": "smoke", "base_branch": "main",
                     "layout_version": LAYOUT_VERSION}),
     )
-    (change_dir / "events.jsonl").write_text(
+    (quest_dir / "events.jsonl").write_text(
         json.dumps({
             "id": "e1", "agent_id": None,
             "timestamp": "2026-05-27T10:00:00+00:00",
@@ -211,13 +211,13 @@ def test_cli_log_subprocess_no_color_on_pipe(tmp_path: Path) -> None:
     _seed_control(tmp_path)
 
     slug = "my-sub"
-    change_dir = tmp_path / ".imp" / "changes" / slug
-    change_dir.mkdir(parents=True)
-    (change_dir / "change.json").write_text(
+    quest_dir = tmp_path / ".imp" / "quests" / slug
+    quest_dir.mkdir(parents=True)
+    (quest_dir / "quest.json").write_text(
         json.dumps({"id": slug, "title": "sub", "base_branch": "main",
                     "layout_version": LAYOUT_VERSION}),
     )
-    (change_dir / "events.jsonl").write_text(
+    (quest_dir / "events.jsonl").write_text(
         json.dumps({
             "id": "e1", "agent_id": None,
             "timestamp": "2026-05-27T10:00:00+00:00",
@@ -303,13 +303,13 @@ def test_cmd_log_auto_picks_latest_by_mtime(
     slugs_titles = [("first-change", "first"), ("second-change", "second"),
                     ("tenth-change", "tenth")]
     for slug, title in slugs_titles:
-        change_dir = tmp_path / ".imp" / "changes" / slug
-        change_dir.mkdir(parents=True)
-        (change_dir / "change.json").write_text(
+        quest_dir = tmp_path / ".imp" / "quests" / slug
+        quest_dir.mkdir(parents=True)
+        (quest_dir / "quest.json").write_text(
             json.dumps({"id": slug, "title": title, "base_branch": "main",
                         "layout_version": LAYOUT_VERSION}),
         )
-        events_path = change_dir / "events.jsonl"
+        events_path = quest_dir / "events.jsonl"
         events_path.write_text(
             json.dumps({
                 "id": "e1", "agent_id": None,
@@ -357,7 +357,7 @@ def test_cmd_log_no_changes_yet_returns_rc_0(
     rc = main(["log"])
     assert rc == 0
     captured = capsys.readouterr()
-    assert "No changes" in captured.out
+    assert "No Quests" in captured.out
     assert captured.err == ""
 
 
@@ -424,13 +424,13 @@ def test_log_backlog_id_renders_card(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture,
 ) -> None:
     import imp.cli.main as m
-    from imp.engine.change import Change
+    from imp.engine.quest import Quest
     from tests.conftest import _seed_control
     _seed_control(tmp_path)
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
-    Change.create_draft(
-        tmp_path, title="Add OAuth", change_id="2026-06-16-bkg111",
+    Quest.create_draft(
+        tmp_path, title="Add OAuth", quest_id="2026-06-16-bkg111",
         base_branch="main", origin="followup",
         seed_opening="Add OAuth\n\nwire up OAuth login")
     rc = main(["log", "2026-06-16-bkg111"])
@@ -438,18 +438,18 @@ def test_log_backlog_id_renders_card(
     out = capsys.readouterr().out
     assert "Add OAuth" in out
     assert "wire up OAuth login" in out
-    assert "no such Change" not in out
+    assert "no such Quest" not in out
 
 
 def test_log_picker_rows_include_backlog(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     import imp.cli.main as m
-    from imp.engine.change import Change
+    from imp.engine.quest import Quest
     from tests.conftest import _seed_control
     _seed_control(tmp_path)
-    Change.create_draft(
-        tmp_path, title="Add OAuth", change_id="2026-06-16-bkg111",
+    Quest.create_draft(
+        tmp_path, title="Add OAuth", quest_id="2026-06-16-bkg111",
         base_branch="main", origin="idea", seed_opening="Add OAuth")
     captured: dict = {}
 
@@ -498,13 +498,13 @@ def test_log_uses_display_width_for_hr_and_term_width_for_wrap(
     import imp.cli.main as m
 
     slug = "wide-demo"
-    change_dir = tmp_path / ".imp" / "changes" / slug
-    change_dir.mkdir(parents=True)
-    (change_dir / "change.json").write_text(json.dumps(
+    quest_dir = tmp_path / ".imp" / "quests" / slug
+    quest_dir.mkdir(parents=True)
+    (quest_dir / "quest.json").write_text(json.dumps(
         {"id": slug, "title": "demo", "base_branch": "main",
          "layout_version": LAYOUT_VERSION}))
     long_line = "X" * 200  # no spaces: only wraps if the wrap width forces it
-    (change_dir / "events.jsonl").write_text(
+    (quest_dir / "events.jsonl").write_text(
         json.dumps({"id": "e1", "agent_id": None,
                     "timestamp": "2026-06-25T10:00:00+00:00",
                     "type": "step_started",

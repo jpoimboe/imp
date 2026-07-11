@@ -9,9 +9,9 @@ import pytest
 from imp.agents.runner import AgentInvocation, AgentRunner, Event, Message, TextBlock
 from imp.agents.transcript import Transcript
 from imp.engine.abandon import archive_conversation
-from imp.engine.archive.read import rehydrate_change
-from imp.engine.change import Change
+from imp.engine.archive.read import rehydrate_quest
 from imp.engine.executor import RunResult, run_change
+from imp.engine.quest import Quest
 from imp.engine.state import State
 from tests.conftest import _seed_control
 
@@ -25,11 +25,11 @@ def anyio_backend() -> str:
 async def test_paused_conversation_round_trips_and_replays_on_resume(
         tmp_path: Path, provider_registry) -> None:
     _seed_control(tmp_path)
-    ch = Change.create_draft(
-        tmp_path, title="Conv", change_id="conv", base_branch="main")
+    ch = Quest.create_draft(
+        tmp_path, title="Conv", quest_id="conv", base_branch="main")
 
     # _seed_control workflow: phase "p", step "s"
-    tdir = ch.change_dir / "steps" / "p" / "s"
+    tdir = ch.quest_dir / "steps" / "p" / "s"
     tdir.mkdir(parents=True)
     Transcript(tdir / "transcript.jsonl").append(
         Message(role="assistant", content=(TextBlock(text="still working"),)))
@@ -40,13 +40,13 @@ async def test_paused_conversation_round_trips_and_replays_on_resume(
     seeded_bytes = (tdir / "transcript.jsonl").read_bytes()
 
     archive_conversation(ch)
-    assert not (tmp_path / ".imp" / "changes" / "conv").exists()
+    assert not (tmp_path / ".imp" / "quests" / "conv").exists()
 
-    change_dir = rehydrate_change(tmp_path, "conv")
-    restored = change_dir / "steps" / "p" / "s" / "transcript.jsonl"
+    quest_dir = rehydrate_quest(tmp_path, "conv")
+    restored = quest_dir / "steps" / "p" / "s" / "transcript.jsonl"
     assert restored.read_bytes() == seeded_bytes
 
-    change = Change.load(tmp_path, "conv")
+    change = Quest.load(tmp_path, "conv")
     state = State.load(change.state_dir)
     state.resume_pending = state.step   # "s" → replay, not re-seed
     state.save(change.state_dir)

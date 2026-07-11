@@ -12,8 +12,8 @@ from typing import Any
 import anyio
 import pytest
 
-from imp.engine.change import Change
 from imp.engine.executor import RunResult, run_change
+from imp.engine.quest import Quest
 from imp.engine.state import State
 
 
@@ -26,7 +26,7 @@ class EngineBoom(Exception):
     """Stand-in for an engine bug raised during dispatch."""
 
 
-def _make_change(root: Path) -> Change:
+def _make_change(root: Path) -> Quest:
     from imp.engine.loader import load_workflow
     from imp.providers.effective import load_effective_config
 
@@ -51,10 +51,10 @@ def _make_change(root: Path) -> Change:
         "providers: [fake]\ntiers:\n  low: {fake: m}\n  medium: {fake: m}\n  high: {fake: m}\n"
     )
 
-    change_dir = root / ".imp" / "change"
-    change_dir.mkdir(parents=True, exist_ok=True)
-    (change_dir / "state").mkdir(exist_ok=True)
-    (change_dir / "change.json").write_text(json.dumps(
+    quest_dir = root / ".imp" / "change"
+    quest_dir.mkdir(parents=True, exist_ok=True)
+    (quest_dir / "state").mkdir(exist_ok=True)
+    (quest_dir / "quest.json").write_text(json.dumps(
         {"id": "c", "title": "t", "base_branch": "main"}, indent=2, sort_keys=True))
 
     configured_tiers: list[str] = []
@@ -67,11 +67,11 @@ def _make_change(root: Path) -> Change:
     State(
         id="c", step=flat[0].name if flat else None, step_attempt=0,
         status="running", vars=dict(workflow.vars.defaults()), loop_counts={},
-    ).save(change_dir / "state")
+    ).save(quest_dir / "state")
 
-    change = Change(
+    change = Quest(
         id="c", title="t", base_branch="main",
-        control_root=root, project_root=root, change_dir=change_dir,
+        control_root=root, project_root=root, quest_dir=quest_dir,
     )
     change.event_log().append(
         agent_id=None, type="change_created", payload={"id": "c", "title": "t"})

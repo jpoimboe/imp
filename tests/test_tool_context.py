@@ -16,13 +16,13 @@ def test_resolve_project_path(tmp_path: Path) -> None:
     assert ctx.resolve_path("src/x.py") == (tmp_path / "src" / "x.py").resolve()
 
 
-def test_change_context_field(tmp_path: Path) -> None:
-    from imp.agents.runner import ChangeContext
+def test_quest_context_field(tmp_path: Path) -> None:
+    from imp.agents.runner import QuestContext
     ctx = _ctx(tmp_path)
-    assert ctx.change_context is None
-    ctx.change_context = ChangeContext(title="Test change", project_root=tmp_path,
+    assert ctx.quest_context is None
+    ctx.quest_context = QuestContext(title="Test change", project_root=tmp_path,
                                        workflow_dir=tmp_path / ".imp" / "change" / "workflow")
-    assert ctx.change_context.project_root == tmp_path
+    assert ctx.quest_context.project_root == tmp_path
 
 
 def _ctx(tmp_path: Path) -> ToolContext:
@@ -163,7 +163,7 @@ def test_resolve_path_relative_still_maps_under_root(tmp_path: Path) -> None:
 
 def test_resolve_path_expands_home(tmp_path: Path, monkeypatch) -> None:
     # A `~`-home path resolves to the literal host location, NOT under the
-    # worktree root — so an agent in a Change worktree can reach a file the user
+    # worktree root — so an agent in a Quest worktree can reach a file the user
     # named by ~/path in their main checkout.
     home = tmp_path / "home" / "u"
     monkeypatch.setenv("HOME", str(home))
@@ -177,7 +177,7 @@ def _active_policy(tmp_path: Path, *, readonly_overlays: tuple[str, ...] = ()) -
     home = tmp_path.parent / "changes_abc"
     return SandboxPolicy(
         active=True, worktree=str(tmp_path), git_common_dir=str(tmp_path / ".git"),
-        change_home=str(home),
+        quest_home=str(home),
         git_ro_remask=(), writable_caches=(), extra_readable=(), extra_writable=(),
         secret_dirs=("/home/u/.ssh",), secret_files=("/home/u/.netrc",),
         setenv=(), network=True, note="", readonly_overlays=readonly_overlays,
@@ -196,24 +196,24 @@ def test_authorize_fs_worktree_writable_under_active_policy(tmp_path: Path) -> N
     assert ctx.authorize_fs(("write",), "src/x.py") == (tmp_path / "src" / "x.py").resolve()
 
 
-def test_authorize_fs_change_home_writable_by_default(tmp_path: Path) -> None:
-    # The finalize regression: a progress.md write under change_home with no
-    # special config must succeed (change_home is an rw bind).
+def test_authorize_fs_quest_home_writable_by_default(tmp_path: Path) -> None:
+    # The finalize regression: a progress.md write under quest_home with no
+    # special config must succeed (quest_home is an rw bind).
     pol = _active_policy(tmp_path)
     ctx = _ctx(tmp_path)
     ctx.sandbox_policy = pol
-    target = Path(pol.change_home) / "progress.md"
+    target = Path(pol.quest_home) / "progress.md"
     assert ctx.authorize_fs(("write",), str(target)) == target.resolve()
 
 
-def test_authorize_fs_read_only_overlay_denies_worktree_allows_change_home(tmp_path: Path) -> None:
+def test_authorize_fs_read_only_overlay_denies_worktree_allows_quest_home(tmp_path: Path) -> None:
     pol = _active_policy(tmp_path, readonly_overlays=(str(tmp_path),))
     ctx = _ctx(tmp_path)
     ctx.sandbox_policy = pol
     with pytest.raises(PermissionDenied):
         ctx.authorize_fs(("write",), "src/x.py")            # worktree locked
-    target = Path(pol.change_home) / "progress.md"
-    assert ctx.authorize_fs(("write",), str(target)) == target.resolve()  # change_home stays rw
+    target = Path(pol.quest_home) / "progress.md"
+    assert ctx.authorize_fs(("write",), str(target)) == target.resolve()  # quest_home stays rw
 
 
 def test_authorize_fs_out_of_worktree_unsandboxed_allows(tmp_path: Path) -> None:
@@ -335,18 +335,18 @@ def test_terminate_reaps_regrouped_descendant(tmp_path):
     anyio.run(go)
 
 
-def test_change_home_path_maps_empty_to_none() -> None:
-    from imp.agents.tools.context import change_home_path
-    assert change_home_path("") is None
-    assert change_home_path(None) is None
-    assert change_home_path("/c/.imp/changes/abc") == Path("/c/.imp/changes/abc")
+def test_quest_home_path_maps_empty_to_none() -> None:
+    from imp.agents.tools.context import quest_home_path
+    assert quest_home_path("") is None
+    assert quest_home_path(None) is None
+    assert quest_home_path("/c/.imp/quests/abc") == Path("/c/.imp/quests/abc")
 
 
-def test_tool_context_change_home_defaults_none(tmp_path: Path) -> None:
+def test_tool_context_quest_home_defaults_none(tmp_path: Path) -> None:
     from imp.agents.tools.context import ToolContext
     ctx = ToolContext(project_root=tmp_path, events_path=tmp_path / "e.jsonl")
-    assert ctx.change_home is None
-    ctx.change_home = tmp_path / ".imp" / "changes" / "abc"
-    assert ctx.change_home == tmp_path / ".imp" / "changes" / "abc"
+    assert ctx.quest_home is None
+    ctx.quest_home = tmp_path / ".imp" / "quests" / "abc"
+    assert ctx.quest_home == tmp_path / ".imp" / "quests" / "abc"
     assert ToolContext(project_root=tmp_path, events_path=tmp_path / "e.jsonl",
-                       change_home=tmp_path).change_home == tmp_path
+                       quest_home=tmp_path).quest_home == tmp_path

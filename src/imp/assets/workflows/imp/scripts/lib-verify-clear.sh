@@ -6,7 +6,7 @@
 # A tree is "cleared for merge" iff run-verify.sh verified it GREEN on a slow run
 # (its tree SHA == last_green_tree_slow), OR it was an explicitly-tolerated red
 # that ran on THIS exact tree (tolerated flag true AND tree SHA ==
-# last_verified_tree_slow). Both stamp files live under $IMP_CHANGE_DIR and are
+# last_verified_tree_slow). Both stamp files live under $IMP_QUEST_DIR and are
 # written by run-verify.sh (a no-op gate stamps green too, so an opt-out project
 # is trivially cleared).
 #
@@ -17,7 +17,7 @@
 #   0 -> cleared (verified green, or accepted red on this exact tree)
 #   1 -> not cleared
 _cleared_for_merge() {
-  local tree="$1" tolerated="$2" d="${IMP_CHANGE_DIR:?IMP_CHANGE_DIR not set}"
+  local tree="$1" tolerated="$2" d="${IMP_QUEST_DIR:?IMP_QUEST_DIR not set}"
   [ -f "$d/last_green_tree_slow" ] \
     && [ "$(cat "$d/last_green_tree_slow")" = "$tree" ] && return 0
   [ "$tolerated" = "true" ] \

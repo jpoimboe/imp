@@ -7,20 +7,20 @@ import pytest
 
 from imp.agents.tools import get_registry
 from imp.agents.tools.context import ToolContext
-from imp.engine.change import Change
 from imp.engine.loader import TOP_LEVEL_CAPS
+from imp.engine.quest import Quest
 from imp.engine.state import State
 from tests.conftest import _seed_control
 
 
-def _make(tmp_path: Path) -> tuple[Change, State]:
+def _make(tmp_path: Path) -> tuple[Quest, State]:
     _seed_control(tmp_path)
-    ch = Change.create(tmp_path, title="Parent",
-                       change_id="2026-06-16-par111", base_branch="main")
+    ch = Quest.create(tmp_path, title="Parent",
+                       quest_id="2026-06-16-par111", base_branch="main")
     return ch, State.load(ch.state_dir)
 
 
-def _ctx(ch: Change, state: State | None) -> ToolContext:
+def _ctx(ch: Quest, state: State | None) -> ToolContext:
     ctx = ToolContext(project_root=ch.project_root,
                       events_path=ch.events_path)
     ctx.change = ch
@@ -31,33 +31,33 @@ def _ctx(ch: Change, state: State | None) -> ToolContext:
 
 
 def test_registered_and_top_level_only() -> None:
-    assert "create_change" in get_registry()
-    assert "create_change" in TOP_LEVEL_CAPS
+    assert "create_quest" in get_registry()
+    assert "create_quest" in TOP_LEVEL_CAPS
 
 
-def test_create_change_writes_change_home_and_emits_event(tmp_path: Path) -> None:
+def test_create_quest_writes_quest_home_and_emits_event(tmp_path: Path) -> None:
     ch, state = _make(tmp_path)
     ctx = _ctx(ch, state)
-    tool = get_registry()["create_change"]
+    tool = get_registry()["create_quest"]
     msg = tool.invoke(ctx, {
         "title": "Follow-up: extract helper",
         "description": "extract the duplicated parser into one function",
         "depends_on": [ch.id]})
 
-    new_ids = [p.name for p in (ch.control_root / ".imp" / "changes").iterdir()
+    new_ids = [p.name for p in (ch.control_root / ".imp" / "quests").iterdir()
                if p.name != ch.id]
     assert len(new_ids) == 1
     new_id = new_ids[0]
     assert new_id in msg
 
-    created = Change.load(ch.control_root, new_id)
+    created = Quest.load(ch.control_root, new_id)
     assert created.materialized is False
     assert created.origin == "followup"
     assert created.title == "Follow-up: extract helper"
     assert created.seed_opening == (
         "Follow-up: extract helper\n\n"
         "extract the duplicated parser into one function")
-    meta = json.loads((created.change_dir / "change.json").read_text())
+    meta = json.loads((created.quest_dir / "quest.json").read_text())
     assert meta["depends_on"] == [ch.id]
 
     parent_events = [e for e in ch.event_log().read()
@@ -69,44 +69,44 @@ def test_create_change_writes_change_home_and_emits_event(tmp_path: Path) -> Non
     assert parent_events[0]["payload"]["depends_on"] == [ch.id]
 
 
-def test_create_change_defaults_no_deps(tmp_path: Path) -> None:
+def test_create_quest_defaults_no_deps(tmp_path: Path) -> None:
     ch, state = _make(tmp_path)
-    tool = get_registry()["create_change"]
+    tool = get_registry()["create_quest"]
     tool.invoke(_ctx(ch, state), {"title": "T", "description": "b"})
-    new_id = next(p.name for p in (ch.control_root / ".imp" / "changes").iterdir()
+    new_id = next(p.name for p in (ch.control_root / ".imp" / "quests").iterdir()
                   if p.name != ch.id)
-    meta = json.loads((Change.load(ch.control_root, new_id).change_dir
-                       / "change.json").read_text())
+    meta = json.loads((Quest.load(ch.control_root, new_id).quest_dir
+                       / "quest.json").read_text())
     assert meta["depends_on"] == []
 
 
-def test_create_change_from_subagent_raises(tmp_path: Path) -> None:
+def test_create_quest_from_subagent_raises(tmp_path: Path) -> None:
     ch, _ = _make(tmp_path)
-    tool = get_registry()["create_change"]
+    tool = get_registry()["create_quest"]
     with pytest.raises(RuntimeError):
         tool.invoke(_ctx(ch, None), {"title": "T", "description": "b"})  # subagent: state=None
 
 
-def test_create_change_avoids_live_cvcv_stem(
+def test_create_quest_avoids_live_cvcv_stem(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     # End-to-end mint guard: the tool must pass the live-stem avoid-set to
-    # new_change_id, so a minted backlog id never reuses a live CVCV stem. A
-    # site reverting to a bare new_change_id() would fail this.
-    from imp.engine import change_id
+    # new_quest_id, so a minted backlog id never reuses a live CVCV stem. A
+    # site reverting to a bare new_quest_id() would fail this.
+    from imp.engine import quest_id
 
     ch, state = _make(tmp_path)
-    home = ch.control_root / ".imp" / "changes" / "kobe10"
+    home = ch.control_root / ".imp" / "quests" / "kobe10"
     home.mkdir(parents=True)
-    (home / "change.json").write_text(json.dumps({"id": "kobe10", "title": "Seed"}))
+    (home / "quest.json").write_text(json.dumps({"id": "kobe10", "title": "Seed"}))
 
     # First stem draw collides with the seeded live stem; avoidance must
     # resample past it to the next (distinct) stem.
     stems = iter(["kobe", "mira", "mira"])
-    monkeypatch.setattr(change_id, "_draw_clean_stem", lambda rng: next(stems))
+    monkeypatch.setattr(quest_id, "_draw_clean_stem", lambda rng: next(stems))
 
-    get_registry()["create_change"].invoke(
+    get_registry()["create_quest"].invoke(
         _ctx(ch, state), {"title": "T", "description": "b"})
 
-    new_id = next(p.name for p in (ch.control_root / ".imp" / "changes").iterdir()
+    new_id = next(p.name for p in (ch.control_root / ".imp" / "quests").iterdir()
                   if p.name not in {ch.id, "kobe10"})
     assert new_id[:4] == "mira"

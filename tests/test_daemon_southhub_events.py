@@ -15,7 +15,7 @@ def anyio_backend() -> str:
 
 
 @pytest.mark.anyio
-async def test_events_reach_sink_tagged_with_change_id(tmp_path: Path) -> None:
+async def test_events_reach_sink_tagged_with_quest_id(tmp_path: Path) -> None:
     sock = str(tmp_path / "rc.sock")
     seen: list[tuple[str, str]] = []
     hub = SouthHub(sock, on_event=lambda cid, line: seen.append((cid, line)))
@@ -35,7 +35,7 @@ async def test_events_reach_sink_tagged_with_change_id(tmp_path: Path) -> None:
 
 
 @pytest.mark.anyio
-async def test_closing_a_connection_deregisters_its_change_id(tmp_path: Path) -> None:
+async def test_closing_a_connection_deregisters_its_quest_id(tmp_path: Path) -> None:
     sock = str(tmp_path / "rc.sock")
     hub = SouthHub(sock, on_event=lambda cid, line: None)
     async with anyio.create_task_group() as tg:

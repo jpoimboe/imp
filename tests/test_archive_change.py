@@ -17,24 +17,24 @@ def _setup_change(control: Path) -> tuple[Path, Path, Path]:
         '{"id":"e1","parent_id":"e0","agent_id":"plan-writer",'
         '"timestamp":"2026-06-01T00:00:02+00:00","type":"step_started",'
         '"payload":{"step":"plan-writer"}}\n')
-    change_json = control / "change.json"
-    change_json.write_text(json.dumps({
+    quest_json = control / "quest.json"
+    quest_json.write_text(json.dumps({
         "id": "alpha", "title": "Alpha", "base_branch": "main",
         "created_at": "2026-06-01T00:00:00+00:00", "depends_on": ["beta"]}))
     state_json = control / "state.json"
     state_json.write_text(json.dumps({
         "id": "alpha", "status": "completed", "step": "finalize",
         "merge_commit": "abc123"}))
-    return events, change_json, state_json
+    return events, quest_json, state_json
 
 
-def test_archive_change_writes_blob_record_and_index(tmp_path: Path) -> None:
-    events, change_json, state_json = _setup_change(tmp_path)
+def test_archive_quest_writes_blob_record_and_index(tmp_path: Path) -> None:
+    events, quest_json, state_json = _setup_change(tmp_path)
     expected_hash = hash_content(events.read_bytes())
 
-    archive.archive_change(
+    archive.archive_quest(
         tmp_path, "alpha", events_path=events,
-        change_json_path=change_json, state_json_path=state_json)
+        quest_json_path=quest_json, state_json_path=state_json)
 
     # Blob stored under the content hash, retrievable byte-for-byte.
     store = LocalBlobStore(archive.blobs_root(tmp_path))
@@ -51,24 +51,24 @@ def test_archive_change_writes_blob_record_and_index(tmp_path: Path) -> None:
     conn = index.connect(archive.index_path(tmp_path))
     try:
         assert conn.execute(
-            "SELECT status, events_hash FROM changes WHERE id='alpha'"
+            "SELECT status, events_hash FROM quests WHERE id='alpha'"
         ).fetchone() == ("completed", expected_hash)
     finally:
         conn.close()
 
 
-def test_archive_change_is_idempotent(tmp_path: Path) -> None:
-    events, change_json, state_json = _setup_change(tmp_path)
+def test_archive_quest_is_idempotent(tmp_path: Path) -> None:
+    events, quest_json, state_json = _setup_change(tmp_path)
     for _ in range(2):
-        archive.archive_change(
+        archive.archive_quest(
             tmp_path, "alpha", events_path=events,
-            change_json_path=change_json, state_json_path=state_json)
+            quest_json_path=quest_json, state_json_path=state_json)
 
     blobs = [p for p in archive.blobs_root(tmp_path).rglob("*") if p.is_file()]
     assert len(blobs) == 1
     conn = index.connect(archive.index_path(tmp_path))
     try:
-        assert conn.execute("SELECT COUNT(*) FROM changes").fetchone()[0] == 1
+        assert conn.execute("SELECT COUNT(*) FROM quests").fetchone()[0] == 1
     finally:
         conn.close()
 
@@ -88,58 +88,58 @@ def test_parse_events_preserves_malformed_lines_for_stable_ordinals() -> None:
     assert events[2]["id"] == "e2"
 
 
-def test_archive_change_missing_events_file(tmp_path: Path) -> None:
-    _, change_json, state_json = _setup_change(tmp_path)
+def test_archive_quest_missing_events_file(tmp_path: Path) -> None:
+    _, quest_json, state_json = _setup_change(tmp_path)
     missing_events = tmp_path / "no-events.jsonl"
 
-    archive.archive_change(
+    archive.archive_quest(
         tmp_path, "alpha", events_path=missing_events,
-        change_json_path=change_json, state_json_path=state_json)
+        quest_json_path=quest_json, state_json_path=state_json)
 
     conn = index.connect(archive.index_path(tmp_path))
     try:
         assert conn.execute(
-            "SELECT COUNT(*) FROM changes WHERE id='alpha'"
+            "SELECT COUNT(*) FROM quests WHERE id='alpha'"
         ).fetchone()[0] == 1
     finally:
         conn.close()
 
 
-def test_archive_change_records_resumable_and_full_meta(tmp_path: Path) -> None:
-    events, change_json, state_json = _setup_change(tmp_path)
+def test_archive_quest_records_resumable_and_full_meta(tmp_path: Path) -> None:
+    events, quest_json, state_json = _setup_change(tmp_path)
 
-    archive.archive_change(
+    archive.archive_quest(
         tmp_path, "alpha", events_path=events,
-        change_json_path=change_json, state_json_path=state_json,
+        quest_json_path=quest_json, state_json_path=state_json,
         resumable=True)
 
     rec = record.read_record(archive.records_root(tmp_path), "alpha")
     assert rec is not None
     assert rec["resumable"] is True
-    assert rec["change_meta"]["id"] == "alpha"
-    assert rec["change_meta"]["base_branch"] == "main"
+    assert rec["quest_meta"]["id"] == "alpha"
+    assert rec["quest_meta"]["base_branch"] == "main"
 
 
-def test_archive_change_defaults_not_resumable(tmp_path: Path) -> None:
-    events, change_json, state_json = _setup_change(tmp_path)
-    archive.archive_change(
+def test_archive_quest_defaults_not_resumable(tmp_path: Path) -> None:
+    events, quest_json, state_json = _setup_change(tmp_path)
+    archive.archive_quest(
         tmp_path, "alpha", events_path=events,
-        change_json_path=change_json, state_json_path=state_json)
+        quest_json_path=quest_json, state_json_path=state_json)
     rec = record.read_record(archive.records_root(tmp_path), "alpha")
     assert rec is not None and rec["resumable"] is False
 
 
-def test_archive_change_resumable_captures_steps_subtree(tmp_path: Path) -> None:
-    events, change_json, state_json = _setup_change(tmp_path)
+def test_archive_quest_resumable_captures_steps_subtree(tmp_path: Path) -> None:
+    events, quest_json, state_json = _setup_change(tmp_path)
     steps = tmp_path / "steps"
     (steps / "p" / "s").mkdir(parents=True)
     (steps / "p" / "s" / "transcript.jsonl").write_bytes(b'{"m":1}\n')
     (steps / "p" / "s" / "claude_session" / "x").mkdir(parents=True)
     (steps / "p" / "s" / "claude_session" / "x" / "sess.jsonl").write_bytes(b"SESSION")
 
-    archive.archive_change(
+    archive.archive_quest(
         tmp_path, "alpha", events_path=events,
-        change_json_path=change_json, state_json_path=state_json,
+        quest_json_path=quest_json, state_json_path=state_json,
         steps_dir=steps, resumable=True)
 
     rec = record.read_record(archive.records_root(tmp_path), "alpha")
@@ -152,15 +152,15 @@ def test_archive_change_resumable_captures_steps_subtree(tmp_path: Path) -> None
     assert store.get(manifest["p/s/claude_session/x/sess.jsonl"]) == b"SESSION"
 
 
-def test_archive_change_non_resumable_captures_no_steps(tmp_path: Path) -> None:
-    events, change_json, state_json = _setup_change(tmp_path)
+def test_archive_quest_non_resumable_captures_no_steps(tmp_path: Path) -> None:
+    events, quest_json, state_json = _setup_change(tmp_path)
     steps = tmp_path / "steps"
     (steps / "p" / "s").mkdir(parents=True)
     (steps / "p" / "s" / "transcript.jsonl").write_bytes(b'{"m":1}\n')
 
-    archive.archive_change(
+    archive.archive_quest(
         tmp_path, "alpha", events_path=events,
-        change_json_path=change_json, state_json_path=state_json,
+        quest_json_path=quest_json, state_json_path=state_json,
         steps_dir=steps, resumable=False)
 
     rec = record.read_record(archive.records_root(tmp_path), "alpha")
@@ -170,29 +170,29 @@ def test_archive_change_non_resumable_captures_no_steps(tmp_path: Path) -> None:
     assert len(blobs) == 1
 
 
-def test_archive_change_resumable_missing_steps_dir_captures_nothing(tmp_path: Path) -> None:
-    events, change_json, state_json = _setup_change(tmp_path)
+def test_archive_quest_resumable_missing_steps_dir_captures_nothing(tmp_path: Path) -> None:
+    events, quest_json, state_json = _setup_change(tmp_path)
     missing = tmp_path / "nonexistent-steps"
 
-    archive.archive_change(
+    archive.archive_quest(
         tmp_path, "alpha", events_path=events,
-        change_json_path=change_json, state_json_path=state_json,
+        quest_json_path=quest_json, state_json_path=state_json,
         steps_dir=missing, resumable=True)
 
     rec = record.read_record(archive.records_root(tmp_path), "alpha")
     assert rec is not None and rec["step_blobs"] == {}
 
 
-def test_archive_change_resumable_steps_idempotent(tmp_path: Path) -> None:
-    events, change_json, state_json = _setup_change(tmp_path)
+def test_archive_quest_resumable_steps_idempotent(tmp_path: Path) -> None:
+    events, quest_json, state_json = _setup_change(tmp_path)
     steps = tmp_path / "steps"
     (steps / "p" / "s").mkdir(parents=True)
     (steps / "p" / "s" / "transcript.jsonl").write_bytes(b'{"m":1}\n')
 
     for _ in range(2):
-        archive.archive_change(
+        archive.archive_quest(
             tmp_path, "alpha", events_path=events,
-            change_json_path=change_json, state_json_path=state_json,
+            quest_json_path=quest_json, state_json_path=state_json,
             steps_dir=steps, resumable=True)
 
     # events blob + one step blob, content-addressed dedup -> exactly 2 files.
@@ -200,6 +200,6 @@ def test_archive_change_resumable_steps_idempotent(tmp_path: Path) -> None:
     assert len(blobs) == 2
     conn = index.connect(archive.index_path(tmp_path))
     try:
-        assert conn.execute("SELECT COUNT(*) FROM changes").fetchone()[0] == 1
+        assert conn.execute("SELECT COUNT(*) FROM quests").fetchone()[0] == 1
     finally:
         conn.close()

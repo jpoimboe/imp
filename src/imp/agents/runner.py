@@ -120,12 +120,12 @@ class Diagnostics:
 
 # Engine → runner boundary value. Frozen to make it safe to pass to subagents.
 @dataclass(frozen=True, slots=True)
-class ChangeContext:
+class QuestContext:
     title: str
     project_root: Path
     workflow_dir: Path
     id: str = ""
-    change_home: str = ""
+    quest_home: str = ""
     project_facts: dict[str, str] = field(hash=False, default_factory=dict)
     guidance: str = ""
     persona_source: str = ""
@@ -138,8 +138,8 @@ class AgentInvocation:
     model_name: str
     system_prompt: str
     initial_messages: tuple[Message, ...]
-    change_context: ChangeContext
-    transcript_dir: Path                   # .imp/changes/<id>/steps/<phase>/<step>/
+    quest_context: QuestContext
+    transcript_dir: Path                   # .imp/quests/<id>/steps/<phase>/<step>/
     events_path: Path
     subagent_defs: dict[str, AgentDef] = field(default_factory=dict)
     # resolved by engine (Task 27a/28); None means no tool-count cap (opt-in only)
@@ -164,10 +164,10 @@ class AgentInvocation:
     # writes audit events through this; None means "construct a private
     # JsonlEventLog over events_path" (legacy/test fallback).
     event_log: Any = None
-    # Live engine State for the rename_change tool to mutate. Any to avoid an
+    # Live engine State for the rename_quest tool to mutate. Any to avoid an
     # import cycle. None for subagents / legacy tests.
     change_state: Any = None
-    # The LIVE, mutable Change for the rename_change tool. Any to avoid an import
+    # The LIVE, mutable Quest for the rename_quest tool. Any to avoid an import
     # cycle. None for subagents / legacy tests (no rename authority anyway).
     change: Any = None
     # parent_id override for this agent's FIRST emitted event (step_context):

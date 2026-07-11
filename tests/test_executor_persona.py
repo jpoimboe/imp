@@ -39,7 +39,7 @@ def _seed(root: Path, *, persona: str | None) -> object:
     (root / "imp" / "project.yaml").write_text("default-workflow: imp\n")
     (root / ".imp").mkdir(parents=True, exist_ok=True)
     (root / ".imp" / "config.yaml").write_text(_FAKE_CONFIG)
-    return _make_change(root, title="My Change")
+    return _make_change(root, title="My Quest")
 
 
 @pytest.mark.anyio
@@ -56,8 +56,8 @@ async def test_executor_injects_rendered_persona_into_assembled_prompt(tmp_path:
     body = inv.initial_messages[0].content[0].text
     # Persona is rendered (namespace substituted) and injected into the role-only
     # system prompt, after the core head; the step body moved to the user turn.
-    assert "# Persona\nfor My Change" in sp
-    assert sp.index(reflow_markdown(_CORE_HEAD)) < sp.index("# Persona\nfor My Change")
+    assert "# Persona\nfor My Quest" in sp
+    assert sp.index(reflow_markdown(_CORE_HEAD)) < sp.index("# Persona\nfor My Quest")
     assert "STEP BODY MARKER" in body
 
 

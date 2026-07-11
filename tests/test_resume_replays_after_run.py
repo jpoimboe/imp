@@ -6,18 +6,18 @@ from pathlib import Path
 from imp.cli import main as m
 from imp.engine.archive import read as archive_read
 from imp.engine.archive import record, records_root
-from imp.engine.change import Change
+from imp.engine.quest import Quest
 from imp.engine.state import State
 
 
-def _draft(control: Path, *, has_started: bool) -> Change:
-    change_dir = control / ".imp" / "change"
-    (change_dir / "state").mkdir(parents=True, exist_ok=True)
+def _draft(control: Path, *, has_started: bool) -> Quest:
+    quest_dir = control / ".imp" / "change"
+    (quest_dir / "state").mkdir(parents=True, exist_ok=True)
     State(id="c", step="chat", step_attempt=0, status="new",
-          has_started=has_started).save(change_dir / "state")
-    return Change(
+          has_started=has_started).save(quest_dir / "state")
+    return Quest(
         id="c", title="t", base_branch="main",
-        control_root=control, project_root=control, change_dir=change_dir,
+        control_root=control, project_root=control, quest_dir=quest_dir,
         materialized=False, seed_opening="do the thing")
 
 

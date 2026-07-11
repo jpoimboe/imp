@@ -29,7 +29,7 @@ def _adapter(
     return TelegramNorthAdapter(
         chat_id=4242, submit=lambda _: None,
         send=send, get_updates=lambda _: {"result": []},
-        subscriptions=Subscriptions(),  # empty → every Change takes the alert-all path
+        subscriptions=Subscriptions(),  # empty → every Quest takes the alert-all path
         alert_all=alert_all if alert_all is not None else _on())
 
 

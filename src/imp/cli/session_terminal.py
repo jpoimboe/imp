@@ -26,8 +26,8 @@ from imp.cli.leave import resolve_leave_action
 from imp.cli.session_controls import SessionControls
 from imp.cli.signals import InterruptCoordinator
 from imp.cli.terminal_title import TerminalTitle
-from imp.engine.change import Change
 from imp.engine.errors import LoadError, LoadErrors
+from imp.engine.quest import Quest
 from imp.remote.session.client import SessionClient
 from imp.remote.session.protocol import CONTROL_INTERRUPT_LEAVE
 
@@ -40,7 +40,7 @@ async def run_terminal_client(
     driver: Any,
     coord: InterruptCoordinator,
     solicit: Callable[[str], Awaitable[str]],
-    change_id: str = "",
+    quest_id: str = "",
     control_root: Path | None = None,
     leave_state: dict[str, str] | None = None,
     leave_mode: str | None = None,
@@ -133,8 +133,8 @@ async def run_terminal_client(
                                     leave_state["intent"] = "abandon"
                                     if control_root is not None:
                                         try:
-                                            reloaded = Change.load(
-                                                control_root, change_id)
+                                            reloaded = Quest.load(
+                                                control_root, quest_id)
                                             leave_state["materialized"] = (
                                                 "1" if reloaded.materialized
                                                 else "")
@@ -220,7 +220,7 @@ async def run_terminal_client(
                 action = None
                 if leave_state is not None and control_root is not None:
                     action = resolve_leave_action(
-                        control_root, change_id, leave_mode,
+                        control_root, quest_id, leave_mode,
                         leave_state.get("intent"))
                 if action is not None and leave_state is not None:
                     _sent = False

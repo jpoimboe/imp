@@ -7,7 +7,7 @@ from tests._event_fixtures import ev
 def _build() -> nv.NarrativeBuilder:
     b = nv.NarrativeBuilder()
     for e in [
-        ev("1", "change_created", change_id=1, title="x"),
+        ev("1", "change_created", quest_id=1, title="x"),
         ev("2", "step_started", step="task-lead", kind="agent", phase="code",
            model="m", provider="anthropic", label="task 1/5 · thinking",
            phase_label="implementation phase · plan 2/4"),
@@ -46,7 +46,7 @@ def test_step_completed_copies_phase_label_to_breadcrumb() -> None:
 def test_resume_reentry_resets_phase_label() -> None:
     b = nv.NarrativeBuilder()
     for e in [
-        ev("1", "change_created", change_id=1, title="x"),
+        ev("1", "change_created", quest_id=1, title="x"),
         ev("2", "step_started", step="task-lead", kind="agent", phase="code",
            model="m", provider="anthropic", label="task 1/5 · thinking",
            phase_label="implementation phase · plan 2/4"),
@@ -63,7 +63,7 @@ def test_resume_reentry_resets_phase_label() -> None:
 def test_current_activity_burst_exposes_phase_label() -> None:
     b = nv.NarrativeBuilder()
     for e in [
-        ev("1", "change_created", change_id=1, title="x"),
+        ev("1", "change_created", quest_id=1, title="x"),
         ev("2", "step_started", step="task-lead", kind="agent", phase="code",
            model="m", provider="anthropic",
            phase_label="implementation phase · plan 2/4"),
@@ -77,7 +77,7 @@ def test_current_activity_burst_exposes_phase_label() -> None:
 def test_current_activity_subagent_running_exposes_phase_label() -> None:
     b = nv.NarrativeBuilder()
     for e in [
-        ev("1", "change_created", change_id=1, title="x"),
+        ev("1", "change_created", quest_id=1, title="x"),
         ev("2", "step_started", step="task-lead", kind="agent", phase="code",
            model="m", provider="anthropic",
            phase_label="implementation phase · plan 2/4"),
@@ -91,7 +91,7 @@ def test_current_activity_subagent_running_exposes_phase_label() -> None:
 def test_current_activity_chrome_step_exposes_phase_label() -> None:
     b = nv.NarrativeBuilder()
     for e in [
-        ev("1", "change_created", change_id=1, title="x"),
+        ev("1", "change_created", quest_id=1, title="x"),
         ev("2", "step_started", step="gate", kind="script", phase="verify",
            label="testing", command="make test",
            phase_label="implementation phase · plan 2/4"),

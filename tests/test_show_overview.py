@@ -17,7 +17,7 @@ from imp.cli.main import (
     main,
     render_overview,
 )
-from imp.engine.change import LAYOUT_VERSION, Change
+from imp.engine.quest import LAYOUT_VERSION, Quest
 from imp.engine.state import State
 from tests.conftest import _seed_control
 
@@ -31,9 +31,9 @@ def _term(monkeypatch, cols):
 
 def _inflight_home(control, cid, *, title, phase_label, step_label,
                    step="write", intent=None):
-    cdir = control / ".imp" / "changes" / cid
+    cdir = control / ".imp" / "quests" / cid
     (cdir / "state").mkdir(parents=True)
-    (cdir / "change.json").write_text(json.dumps({
+    (cdir / "quest.json").write_text(json.dumps({
         "id": cid, "title": title, "base_branch": "main",
         "created_at": "2026-06-20T11:00:00+00:00",
         "materialized": True, "layout_version": LAYOUT_VERSION}))
@@ -53,7 +53,7 @@ def test_list_no_arg_renders_overview(tmp_path: Path, monkeypatch) -> None:
     import imp.cli.main as m
 
     _seed_control(tmp_path)
-    Change.create(tmp_path, title="Live", change_id="liveid", base_branch="main")
+    Quest.create(tmp_path, title="Live", quest_id="liveid", base_branch="main")
     monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
     monkeypatch.setenv("NO_COLOR", "1")
 
@@ -71,7 +71,7 @@ def test_list_all_renders_history_block(tmp_path: Path, monkeypatch) -> None:
     from tests.test_journal_read_cli import _complete_and_archive
 
     _seed_control(tmp_path)
-    Change.create(tmp_path, title="Done", change_id="doneid", base_branch="main")
+    Quest.create(tmp_path, title="Done", quest_id="doneid", base_branch="main")
     _complete_and_archive(tmp_path, "doneid")
     monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
     monkeypatch.setenv("NO_COLOR", "1")
@@ -90,7 +90,7 @@ def test_bare_show_nudges_to_list(capsys) -> None:
     assert rc == 2
     err = capsys.readouterr().err
     assert err == (
-        "imp: 'imp show' needs a change id — run 'imp list' for an overview\n"
+        "imp: 'imp show' needs a Quest id — run 'imp list' for an overview\n"
     )
 
 
@@ -110,9 +110,9 @@ def test_list_and_show_both_resolve() -> None:
 
 def test_overview_lists_list_then_show_with_copy() -> None:
     text = render_overview(color=False)
-    assert "List your changes: in-flight, backlog, and recently merged." in text
-    assert "Show one change's detail or a named artifact (imp show <id>)." in text
-    assert text.index("List your changes") < text.index("Show one change's detail")
+    assert "List your Quests: in-flight, backlog, and recently merged." in text
+    assert "Show one Quest's detail or a named artifact (imp show <id>)." in text
+    assert text.index("List your Quests") < text.index("Show one Quest's detail")
 
 
 def test_show_status_word_errors_not_found(tmp_path: Path, monkeypatch, capsys) -> None:
@@ -122,14 +122,14 @@ def test_show_status_word_errors_not_found(tmp_path: Path, monkeypatch, capsys) 
     monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
     rc = main(["show", "status"])     # `status` parsed as a token, not a resource
     assert rc == 2
-    assert "no Change matches" in capsys.readouterr().err
+    assert "no Quest matches" in capsys.readouterr().err
 
 
 def test_detail_card_routes_through_pager(tmp_path: Path, monkeypatch) -> None:
     import imp.cli.main as m
 
     _seed_control(tmp_path)
-    Change.create(tmp_path, title="Live", change_id="liveid", base_branch="main")
+    Quest.create(tmp_path, title="Live", quest_id="liveid", base_branch="main")
     monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
 
     captured: list[tuple[list[str], bool]] = []
@@ -147,7 +147,7 @@ def test_resource_routes_through_pager(tmp_path: Path, monkeypatch) -> None:
     import imp.cli.main as m
 
     _seed_control(tmp_path)
-    Change.create(tmp_path, title="Live", change_id="liveid", base_branch="main")
+    Quest.create(tmp_path, title="Live", quest_id="liveid", base_branch="main")
     monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
 
     captured: list[tuple[list[str], bool]] = []
@@ -165,7 +165,7 @@ def test_no_pager_flag_propagates_to_pager(tmp_path: Path, monkeypatch) -> None:
     import imp.cli.main as m
 
     _seed_control(tmp_path)
-    Change.create(tmp_path, title="Live", change_id="liveid", base_branch="main")
+    Quest.create(tmp_path, title="Live", quest_id="liveid", base_branch="main")
     monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
 
     captured: list[bool] = []

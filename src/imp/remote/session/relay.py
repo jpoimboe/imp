@@ -16,7 +16,7 @@ class SessionRelay:
         self,
         *,
         socket_path: str,
-        change_id: str,
+        quest_id: str,
         title_provider: Callable[[], str],
         events: tuple[str, ...],
         sink: Callable[[dict[str, Any]], None],
@@ -24,11 +24,11 @@ class SessionRelay:
         lease_poll_gap: float = 0.5,
     ) -> None:
         self._socket_path = socket_path
-        self._change_id = change_id
+        self._quest_id = quest_id
         # Hello is a one-shot attach frame: resolve once here; curator keeps the live provider.
         self._title = title_provider()
         self._curator = EventCurator(
-            id=change_id, title_provider=title_provider, events=events)
+            id=quest_id, title_provider=title_provider, events=events)
         self._sink = sink
         self._is_subscribed = is_subscribed
         self._lease_poll_gap = lease_poll_gap
@@ -39,7 +39,7 @@ class SessionRelay:
         probe = self._is_subscribed   # local so mypy narrows it for the closure/start_soon
         initial_lease = probe() if probe is not None else False
         client = SessionClient(
-            self._socket_path, self._change_id, self._title,
+            self._socket_path, self._quest_id, self._title,
             on_event=self._on_event, lease=initial_lease)
         await client.connect()
         try:

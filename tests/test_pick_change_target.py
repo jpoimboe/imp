@@ -90,7 +90,7 @@ async def test_tty_multiple_runs_picker_with_header_and_index(monkeypatch) -> No
     async def fake_picker(candidates, *, now, color, header, selected_index):
         captured["header"] = header
         captured["selected_index"] = selected_index
-        return candidates[selected_index].change_id
+        return candidates[selected_index].quest_id
 
     monkeypatch.setattr(m.resume_select, "run_picker", fake_picker)
     rc = await m._pick_change_target(

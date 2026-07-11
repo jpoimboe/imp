@@ -21,9 +21,9 @@ def test_row_for_id_from_archive(tmp_path: Path) -> None:
     sj = tmp_path / "s.json"
     sj.write_text(json.dumps({
         "id": "2026-06-01-xyz999", "status": "completed", "step": "merge"}))
-    archive.archive_change(
+    archive.archive_quest(
         tmp_path, "2026-06-01-xyz999", events_path=events,
-        change_json_path=cj, state_json_path=sj)
+        quest_json_path=cj, state_json_path=sj)
     row = m._row_for_id(tmp_path, "2026-06-01-xyz999")
     assert row == ("2026-06-01-xyz999", "completed", "merge",
                    "2026-06-05T00:00:00+00:00", "Done", "2026-06-01T00:00:00+00:00",

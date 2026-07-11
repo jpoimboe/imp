@@ -10,8 +10,8 @@ pytest.importorskip("claude_agent_sdk")  # opts (incl. stderr=) only build with 
 
 from imp.agents.runner import (
     AgentInvocation,
-    ChangeContext,
     Message,
+    QuestContext,
     TextBlock,
 )
 from imp.agents.tools import get_registry  # noqa: F401 ensures tools registered
@@ -45,7 +45,7 @@ def _inv(tmp_path: Path) -> AgentInvocation:
         provider_name="claude_code", model_name="claude-sonnet-4-5",
         system_prompt="be terse",
         initial_messages=(Message(role="user", content=(TextBlock(text="go"),)),),
-        change_context=ChangeContext(
+        quest_context=QuestContext(
             title="Test", project_root=tmp_path,
             workflow_dir=tmp_path / ".imp" / "change" / "workflow",
         ),

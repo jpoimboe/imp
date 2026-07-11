@@ -16,11 +16,11 @@ from imp.engine.abandon import (
     save_to_backlog,
     tear_down_change,
 )
-from imp.engine.change import Change
 from imp.engine.errors import LoadError, LoadErrors
 from imp.engine.executor import RunResult, run_change
 from imp.engine.merge_queue import ensure_head_driven
 from imp.engine.model_override import apply_model_override
+from imp.engine.quest import Quest
 from imp.engine.state import EventLog, LockHeld, ProjectLock, State, lock_is_live
 from imp.remote.session.discover import session_socket_path
 from imp.remote.session.server import _DEFAULT_FIRST_ATTACH_TIMEOUT, SessionServer
@@ -67,14 +67,14 @@ def _hold_prompt(result: Any, coordinator: Any) -> str | None:
 
 
 async def serve_change_session(
-    change: Change,
+    change: Quest,
     *,
     run_fn: RunFn = run_change,
     hibernate: bool = True,
-    tear_down: Callable[[Change], None] = tear_down_change,
-    archive_left: Callable[[Change], None] = archive_conversation,
-    save_left: Callable[[Change], None] = save_to_backlog,
-    discard_left: Callable[[Change], None] = discard_conversation,
+    tear_down: Callable[[Quest], None] = tear_down_change,
+    archive_left: Callable[[Quest], None] = archive_conversation,
+    save_left: Callable[[Quest], None] = save_to_backlog,
+    discard_left: Callable[[Quest], None] = discard_conversation,
     resume: bool = False,
     non_interactive: bool = False,
     autonomous: bool = False,
@@ -200,10 +200,10 @@ async def serve_change_session(
     # would always see a live pid and never detect the crash. `_bound` (defined
     # above) closes over `crashed`; it is read only when _bound runs, after this
     # assignment, so the forward reference is sound.
-    lock_path = change.change_dir / "lock"
+    lock_path = change.quest_dir / "lock"
     crashed = resume and lock_path.exists() and not lock_is_live(lock_path)
     try:
-        with ProjectLock(change.change_dir / "lock").acquire():
+        with ProjectLock(change.quest_dir / "lock").acquire():
             await server.open()
             result = await server.serve(_bound)
     except LockHeld:
@@ -226,14 +226,14 @@ async def serve_change_session(
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="imp-session-daemon")
     parser.add_argument("--control-root", required=True)
-    parser.add_argument("--change-id", required=True)
+    parser.add_argument("--quest-id", required=True)
     parser.add_argument("--resume", action="store_true")
     parser.add_argument("--non-interactive", action="store_true")
     parser.add_argument("--autonomous", action="store_true")
     parser.add_argument("--model", default=None)
     ns = parser.parse_args(argv)
     try:
-        change = Change.load(Path(ns.control_root), ns.change_id)
+        change = Quest.load(Path(ns.control_root), ns.quest_id)
     except LoadError as exc:
         print(f"imp: {exc}", file=sys.stderr)
         return 2

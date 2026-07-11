@@ -11,19 +11,19 @@ import pytest
 
 from imp.cli.main import main
 from imp.engine import archive, worktree
-from imp.engine.change import Change
+from imp.engine.quest import Quest
 from imp.engine.state import State
 from tests.conftest import _seed_control
 
 _ID = "feat01"
 
 
-def _git_wip_present(control: Path, change_id: str) -> bool:
+def _git_wip_present(control: Path, quest_id: str) -> bool:
     import subprocess
 
     return (
         subprocess.run(
-            ["git", "rev-parse", "--verify", "--quiet", f"refs/imp/artifacts/{change_id}"],
+            ["git", "rev-parse", "--verify", "--quiet", f"refs/imp/artifacts/{quest_id}"],
             cwd=control,
             capture_output=True,
         ).returncode
@@ -31,15 +31,15 @@ def _git_wip_present(control: Path, change_id: str) -> bool:
     )
 
 
-def _seed_with_artifacts(control: Path, change_id: str, title: str) -> Change:
-    ch = Change.create(control, title=title, change_id=change_id, base_branch="main")
-    spec = ch.change_dir / "artifacts" / "spec"
+def _seed_with_artifacts(control: Path, quest_id: str, title: str) -> Quest:
+    ch = Quest.create(control, title=title, quest_id=quest_id, base_branch="main")
+    spec = ch.quest_dir / "artifacts" / "spec"
     spec.mkdir(parents=True)
-    (spec / f"{change_id}.md").write_text("# SPEC BODY\n")
-    plans = ch.change_dir / "artifacts" / "plans"
+    (spec / f"{quest_id}.md").write_text("# SPEC BODY\n")
+    plans = ch.quest_dir / "artifacts" / "plans"
     plans.mkdir(parents=True)
-    (plans / f"{change_id}-plan-1.md").write_text("# PLAN ONE\n")
-    (plans / f"{change_id}-plan-2.md").write_text("# PLAN TWO\n")
+    (plans / f"{quest_id}-plan-1.md").write_text("# PLAN ONE\n")
+    (plans / f"{quest_id}-plan-2.md").write_text("# PLAN TWO\n")
     return ch
 
 
@@ -124,8 +124,8 @@ def test_show_spec_falls_back_after_archive(
     _seed_control(tmp_path)
     ch = _seed_with_artifacts(tmp_path, _ID, "Feat")
     files = {
-        str(p.relative_to(ch.change_dir / "artifacts")): p
-        for p in sorted((ch.change_dir / "artifacts").rglob("*"))
+        str(p.relative_to(ch.quest_dir / "artifacts")): p
+        for p in sorted((ch.quest_dir / "artifacts").rglob("*"))
         if p.is_file()
     }
     worktree.artifact_commit(tmp_path, _ID, files, message="artifact: spec")
@@ -145,14 +145,14 @@ def test_show_spec_falls_back_after_archive(
         )
     from imp.engine import archive
 
-    archive.archive_change(
+    archive.archive_quest(
         tmp_path,
         _ID,
         events_path=ch.events_path,
-        change_json_path=ch.change_dir / "change.json",
+        quest_json_path=ch.quest_dir / "quest.json",
         state_json_path=ch.state_dir / "state.json",
     )
-    # The per-Change artifact ref is RETAINED at archive (spec AC 3).
+    # The per-Quest artifact ref is RETAINED at archive (spec AC 3).
     assert _git_wip_present(tmp_path, _ID)
     worktree.remove_worktree(tmp_path, _ID)
     assert not (tmp_path / ".imp" / "worktrees" / _ID).exists()
@@ -180,10 +180,10 @@ def test_show_backlog_default_renders_card(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _seed_control(tmp_path)
-    Change.create_draft(
+    Quest.create_draft(
         tmp_path,
         title="Add OAuth",
-        change_id="2026-06-16-bkg111",
+        quest_id="2026-06-16-bkg111",
         base_branch="main",
         origin="followup",
         seed_opening="Add OAuth\n\nwire up OAuth login",
@@ -200,10 +200,10 @@ def test_show_backlog_status_prints_bare_word(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _seed_control(tmp_path)
-    Change.create_draft(
+    Quest.create_draft(
         tmp_path,
         title="Add OAuth",
-        change_id="2026-06-16-bkg111",
+        quest_id="2026-06-16-bkg111",
         base_branch="main",
         origin="idea",
         seed_opening="Add OAuth",
@@ -220,10 +220,10 @@ def test_show_backlog_spec_errors(
 
     _seed_control(tmp_path)
     monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
-    Change.create_draft(
+    Quest.create_draft(
         tmp_path,
         title="Add OAuth",
-        change_id="2026-06-16-bkg111",
+        quest_id="2026-06-16-bkg111",
         base_branch="main",
         origin="idea",
         seed_opening="Add OAuth",
@@ -317,7 +317,7 @@ def test_show_step_line_prints_human_labels_not_raw_slugs(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _seed_control(tmp_path)
-    ch = Change.create(tmp_path, title="Feat", change_id="shwstp", base_branch="main")
+    ch = Quest.create(tmp_path, title="Feat", quest_id="shwstp", base_branch="main")
     st = State.load(ch.state_dir)
     st.step = "write_spec"
     st.step_label = "writing spec"  # label differs from the raw slug
@@ -350,7 +350,7 @@ def test_show_step_line_omits_phase_when_no_phase_label(
     # No step_started event carries a phase_label -> show the step label alone,
     # with no raw phase slug and no leading separator.
     _seed_control(tmp_path)
-    ch = Change.create(tmp_path, title="Feat", change_id="shwnop", base_branch="main")
+    ch = Quest.create(tmp_path, title="Feat", quest_id="shwnop", base_branch="main")
     st = State.load(ch.state_dir)
     st.step = "write_spec"
     st.step_label = "writing spec"
@@ -368,7 +368,7 @@ def test_show_step_line_omits_stale_phase_label_across_phase_change(
     # A prior labeled phase then a current UNLABELED phase (its step_started
     # carries no phase_label): the stale prior label must not bleed forward.
     _seed_control(tmp_path)
-    ch = Change.create(tmp_path, title="Feat", change_id="shwstl", base_branch="main")
+    ch = Quest.create(tmp_path, title="Feat", quest_id="shwstl", base_branch="main")
     st = State.load(ch.state_dir)
     st.step = "verify"
     st.step_label = "verifying"
@@ -410,7 +410,7 @@ def test_show_step_line_truncates_to_terminal_width(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _seed_control(tmp_path)
-    ch = Change.create(tmp_path, title="Feat", change_id="shwtrn", base_branch="main")
+    ch = Quest.create(tmp_path, title="Feat", quest_id="shwtrn", base_branch="main")
     st = State.load(ch.state_dir)
     st.step = "write_spec"
     st.step_label = "writing spec " + "x" * 200  # far wider than the 80-col test terminal
@@ -427,7 +427,7 @@ def test_show_status_stays_bare_word_not_labels(
 ) -> None:
     # `imp show <id> status` is the parseable form: bare status word only.
     _seed_control(tmp_path)
-    ch = Change.create(tmp_path, title="Feat", change_id="shwsta", base_branch="main")
+    ch = Quest.create(tmp_path, title="Feat", quest_id="shwsta", base_branch="main")
     st = State.load(ch.state_dir)
     st.step = "write_spec"
     st.step_label = "writing spec"
@@ -463,7 +463,7 @@ def test_show_spec_and_plan_from_wip_ref_when_home_absent(
         '{"id":"ghost01","timestamp":"2026-06-01T00:00:00+00:00",'
         '"type":"change_created","payload":{}}\n'
     )
-    cj = tmp_path / "ghost-change.json"
+    cj = tmp_path / "ghost-quest.json"
     cj.write_text(
         json.dumps(
             {
@@ -477,8 +477,8 @@ def test_show_spec_and_plan_from_wip_ref_when_home_absent(
     )
     sj = tmp_path / "ghost-state.json"
     sj.write_text(json.dumps({"id": "ghost01", "status": "completed", "step": None}))
-    archive.archive_change(
-        tmp_path, "ghost01", events_path=events, change_json_path=cj, state_json_path=sj
+    archive.archive_quest(
+        tmp_path, "ghost01", events_path=events, quest_json_path=cj, state_json_path=sj
     )
 
     assert "WIP-ONLY SPEC" in _run(monkeypatch, tmp_path, "show", "ghost01", "spec")
@@ -496,16 +496,16 @@ def test_show_abandoned_backlog_is_not_a_live_brief(
 
     _seed_control(tmp_path)
     monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
-    change = Change.create_draft(
+    change = Quest.create_draft(
         tmp_path,
         title="Add OAuth",
-        change_id="2026-06-16-bkg111",
+        quest_id="2026-06-16-bkg111",
         base_branch="main",
         origin="idea",
         seed_opening="Add OAuth",
     )
     tear_down_change(change)
-    assert not (tmp_path / ".imp" / "changes" / "2026-06-16-bkg111").exists()
+    assert not (tmp_path / ".imp" / "quests" / "2026-06-16-bkg111").exists()
     out = _run(monkeypatch, tmp_path, "show", "2026-06-16-bkg111", "status")
     assert out.strip() != "backlog"  # History item, not a queued Backlog brief
     # log renders the archived conversation, not a brief
@@ -515,7 +515,7 @@ def test_show_abandoned_backlog_is_not_a_live_brief(
 def test_show_summary_live(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     _seed_control(tmp_path)
     ch = _seed_with_artifacts(tmp_path, _ID, "Feat")
-    summary = ch.change_dir / "artifacts" / "summary"
+    summary = ch.quest_dir / "artifacts" / "summary"
     summary.mkdir(parents=True)
     (summary / f"{_ID}.md").write_text("# SUMMARY BODY\n")
     assert "SUMMARY BODY" in _run(monkeypatch, tmp_path, "show", _ID, "summary")
@@ -526,7 +526,7 @@ def test_show_default_card_renders_summary(
 ) -> None:
     _seed_control(tmp_path)
     ch = _seed_with_artifacts(tmp_path, _ID, "Feat")
-    summary = ch.change_dir / "artifacts" / "summary"
+    summary = ch.quest_dir / "artifacts" / "summary"
     summary.mkdir(parents=True)
     (summary / f"{_ID}.md").write_text(
         "Gives every change a durable intent-level summary.\n")
@@ -540,12 +540,12 @@ def test_show_summary_falls_back_after_archive(
 ) -> None:
     _seed_control(tmp_path)
     ch = _seed_with_artifacts(tmp_path, _ID, "Feat")
-    summary = ch.change_dir / "artifacts" / "summary"
+    summary = ch.quest_dir / "artifacts" / "summary"
     summary.mkdir(parents=True)
     (summary / f"{_ID}.md").write_text("# SUMMARY BODY\n")
     files = {
-        str(p.relative_to(ch.change_dir / "artifacts")): p
-        for p in sorted((ch.change_dir / "artifacts").rglob("*"))
+        str(p.relative_to(ch.quest_dir / "artifacts")): p
+        for p in sorted((ch.quest_dir / "artifacts").rglob("*"))
         if p.is_file()
     }
     worktree.artifact_commit(tmp_path, _ID, files, message="artifact: summary")
@@ -563,11 +563,11 @@ def test_show_summary_falls_back_after_archive(
             )
             + "\n"
         )
-    archive.archive_change(
+    archive.archive_quest(
         tmp_path,
         _ID,
         events_path=ch.events_path,
-        change_json_path=ch.change_dir / "change.json",
+        quest_json_path=ch.quest_dir / "quest.json",
         state_json_path=ch.state_dir / "state.json",
     )
     assert _git_wip_present(tmp_path, _ID)
@@ -582,12 +582,12 @@ def test_show_default_card_renders_summary_after_archive(
 ) -> None:
     _seed_control(tmp_path)
     ch = _seed_with_artifacts(tmp_path, _ID, "Feat")
-    summary = ch.change_dir / "artifacts" / "summary"
+    summary = ch.quest_dir / "artifacts" / "summary"
     summary.mkdir(parents=True)
     (summary / f"{_ID}.md").write_text("# SUMMARY BODY\n")
     files = {
-        str(p.relative_to(ch.change_dir / "artifacts")): p
-        for p in sorted((ch.change_dir / "artifacts").rglob("*"))
+        str(p.relative_to(ch.quest_dir / "artifacts")): p
+        for p in sorted((ch.quest_dir / "artifacts").rglob("*"))
         if p.is_file()
     }
     worktree.artifact_commit(tmp_path, _ID, files, message="artifact: summary")
@@ -605,11 +605,11 @@ def test_show_default_card_renders_summary_after_archive(
             )
             + "\n"
         )
-    archive.archive_change(
+    archive.archive_quest(
         tmp_path,
         _ID,
         events_path=ch.events_path,
-        change_json_path=ch.change_dir / "change.json",
+        quest_json_path=ch.quest_dir / "quest.json",
         state_json_path=ch.state_dir / "state.json",
     )
     assert _git_wip_present(tmp_path, _ID)
@@ -680,7 +680,7 @@ def test_filter_events_non_positive_limit_returns_all() -> None:
     assert len(_filter_events(events, limit=-1)) == 5
 
 
-def _seed_events(ch: Change, events: list[dict]) -> None:
+def _seed_events(ch: Quest, events: list[dict]) -> None:
     with ch.events_path.open("a", encoding="utf-8") as fh:
         for e in events:
             fh.write(json.dumps(e) + "\n")
@@ -716,7 +716,7 @@ def test_show_events_full_prints_raw_json(
                      "content": [{"type": "text", "text": "hi"}]}},
     ])
     # --type isolates the seeded event from the change_created event that
-    # Change.create writes; --full then renders it as raw JSON via full_line.
+    # Quest.create writes; --full then renders it as raw JSON via full_line.
     out = _run(monkeypatch, tmp_path, "show", _ID, "events",
                "--type", "user_message", "--full")
     lines = [ln for ln in out.splitlines() if ln]
@@ -814,15 +814,15 @@ def test_show_events_digest_from_archive(
                         "content": [{"type": "text", "text": "archived hello"}]},
         }) + "\n"
     )
-    cj = tmp_path / "arch-change.json"
+    cj = tmp_path / "arch-quest.json"
     cj.write_text(json.dumps({
         "id": "arch01", "title": "Arch", "base_branch": "main",
         "created_at": "2026-06-01T00:00:00+00:00", "depends_on": [],
     }))
     sj = tmp_path / "arch-state.json"
     sj.write_text(json.dumps({"id": "arch01", "status": "completed", "step": None}))
-    archive.archive_change(
-        tmp_path, "arch01", events_path=events, change_json_path=cj,
+    archive.archive_quest(
+        tmp_path, "arch01", events_path=events, quest_json_path=cj,
         state_json_path=sj,
     )
     out = _run(monkeypatch, tmp_path, "show", "arch01", "events")

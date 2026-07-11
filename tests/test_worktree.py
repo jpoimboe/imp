@@ -281,7 +281,7 @@ def test_ensure_imp_ignored_repairs_mis_set_committed_rule(tmp_path: Path) -> No
     _git(tmp_path, "init", "-q", "-b", "main")
     _git(tmp_path, "config", "user.email", "t@t")
     _git(tmp_path, "config", "user.name", "t")
-    (tmp_path / ".gitignore").write_text(".imp/changes/\n.imp/config.yaml\n")  # sub-paths only
+    (tmp_path / ".gitignore").write_text(".imp/quests/\n.imp/config.yaml\n")  # sub-paths only
     (tmp_path / "README.md").write_text("x")
     _git(tmp_path, "add", "-A")
     _git(tmp_path, "commit", "-qm", "seed")

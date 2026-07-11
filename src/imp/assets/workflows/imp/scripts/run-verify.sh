@@ -6,7 +6,7 @@
 #          cheap gate (lint + typecheck + fast tests); runs at the frequent
 #          per-plan gate (verify).
 #   slow → IMP_TEST_CMD_SLOW under IMP_TEST_CMD_SLOW_TIMEOUT (default 300s). The
-#          complete run (a superset of fast); runs once per Change at
+#          complete run (a superset of fast); runs once per Quest at
 #          integration-verify. When IMP_TEST_CMD_SLOW is empty it falls back to
 #          IMP_TEST_CMD_FAST under the slow timeout.
 #
@@ -25,7 +25,7 @@
 #     (no gate; project hasn't wired / has opted out of this tier).
 #
 # Per-tier tree-SHA skip cache: record the git tree SHA of the last green (exit-0)
-# run in a per-tier per-change file (last_green_tree_<tier>) under $IMP_CHANGE_DIR.
+# run in a per-tier per-change file (last_green_tree_<tier>) under $IMP_QUEST_DIR.
 # On entry, if HEAD's tree equals THIS tier's last green tree, skip (exit 0) —
 # identical tree ⇒ identical result. Each tier has its own cache: a green fast run
 # never lets the slow gate skip (and vice versa). Logged explicitly, never silent.
@@ -35,7 +35,7 @@
 # overlay_engine_env and injected into script-gate env by the engine (all
 # IMP_-prefixed, so the sandbox allowlist passes them through unchanged).
 #
-# Script gates run with cwd set to the Change's tracked workflow dir; cd into the
+# Script gates run with cwd set to the Quest's tracked workflow dir; cd into the
 # project tree (IMP_PROJECT_ROOT, set by the engine) first.
 set -euo pipefail
 cd "${IMP_PROJECT_ROOT:?IMP_PROJECT_ROOT not set by engine}"
@@ -65,17 +65,17 @@ if [[ -z "$cmd" ]]; then
   echo "no test command configured; skipping $tier gate"
   # A no-op gate is trivially green: stamp HEAD's tree so the pre-merge clearance gate treats an opt-out project as verified rather than deadlocking every merge.
   tree="$(git rev-parse 'HEAD^{tree}' 2>/dev/null || true)"
-  if [[ -n "$tree" && -n "${IMP_CHANGE_DIR:-}" ]]; then
-    mkdir -p "$IMP_CHANGE_DIR" || true
+  if [[ -n "$tree" && -n "${IMP_QUEST_DIR:-}" ]]; then
+    mkdir -p "$IMP_QUEST_DIR" || true
     if [[ "$tier" == "slow" ]]; then
-      echo "$tree" > "$IMP_CHANGE_DIR/last_verified_tree_slow" || true
+      echo "$tree" > "$IMP_QUEST_DIR/last_verified_tree_slow" || true
     fi
-    echo "$tree" > "$IMP_CHANGE_DIR/last_green_tree_${tier}" || true
+    echo "$tree" > "$IMP_QUEST_DIR/last_green_tree_${tier}" || true
   fi
   exit 0
 fi
 
-cache="${IMP_CHANGE_DIR:?IMP_CHANGE_DIR not set by engine}/last_green_tree_${tier}"
+cache="${IMP_QUEST_DIR:?IMP_QUEST_DIR not set by engine}/last_green_tree_${tier}"
 tree="$(git rev-parse 'HEAD^{tree}' 2>/dev/null || true)"
 if [[ -n "$tree" && -f "$cache" && "$(cat "$cache")" == "$tree" ]]; then
   echo "$tier gate skipped — tree unchanged since last green run"
@@ -108,9 +108,9 @@ fi
 # Record the tree of every slow run (pass or fail) so a later pre-merge gate will be able to
 # tell an explicitly-tolerated red on THIS tree from a stale toleration on a different tree.
 if [[ "$tier" == "slow" && -n "$tree" ]]; then
-  mkdir -p "$IMP_CHANGE_DIR" && echo "$tree" > "$IMP_CHANGE_DIR/last_verified_tree_slow" || true
+  mkdir -p "$IMP_QUEST_DIR" && echo "$tree" > "$IMP_QUEST_DIR/last_verified_tree_slow" || true
 fi
 if (( rc == 0 )) && [[ -n "$tree" ]]; then
-  mkdir -p "$IMP_CHANGE_DIR" && echo "$tree" > "$cache" || true
+  mkdir -p "$IMP_QUEST_DIR" && echo "$tree" > "$cache" || true
 fi
 exit "$rc"

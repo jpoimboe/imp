@@ -22,8 +22,8 @@ from pathlib import Path
 
 import pytest
 
-from imp.engine.change import Change
 from imp.engine.executor import RunResult, run_change
+from imp.engine.quest import Quest
 from imp.engine.state import State
 from imp.providers import resolve
 from imp.providers.anthropic import AnthropicProvider
@@ -126,17 +126,17 @@ def _openai_step_aware(**kwargs):
     return resp_response(resp_function_call("c0", "complete_step", json.dumps(fields)))
 
 
-def _make_change(root: Path, *, change_id: str = "test-change", title: str = "t") -> Change:
-    """Construct a Change directly on disk without git worktrees."""
+def _make_change(root: Path, *, quest_id: str = "test-change", title: str = "t") -> Quest:
+    """Construct a Quest directly on disk without git worktrees."""
     from imp.engine.loader import load_workflow
     from imp.providers.effective import load_effective_config
 
     src_wf = root / "imp" / "workflows" / "imp"
-    change_dir = root / ".imp" / "change"
-    change_dir.mkdir(parents=True, exist_ok=True)
-    (change_dir / "state").mkdir(exist_ok=True)
-    (change_dir / "change.json").write_text(json.dumps({
-        "id": change_id, "title": title, "base_branch": "main",
+    quest_dir = root / ".imp" / "change"
+    quest_dir.mkdir(parents=True, exist_ok=True)
+    (quest_dir / "state").mkdir(exist_ok=True)
+    (quest_dir / "quest.json").write_text(json.dumps({
+        "id": quest_id, "title": title, "base_branch": "main",
     }, indent=2, sort_keys=True))
 
     configured_tiers: list[str] = []
@@ -147,17 +147,17 @@ def _make_change(root: Path, *, change_id: str = "test-change", title: str = "t"
     workflow = load_workflow(src_wf, configured_tiers=configured_tiers)
     flat = workflow.flat_steps()
     State(
-        id=change_id, step=flat[0].name if flat else None, step_attempt=0,
+        id=quest_id, step=flat[0].name if flat else None, step_attempt=0,
         status="running", vars=dict(workflow.vars.defaults()), loop_counts={},
-    ).save(change_dir / "state")
+    ).save(quest_dir / "state")
 
-    change = Change(
-        id=change_id, title=title, base_branch="main",
-        control_root=root, project_root=root, change_dir=change_dir,
+    change = Quest(
+        id=quest_id, title=title, base_branch="main",
+        control_root=root, project_root=root, quest_dir=quest_dir,
     )
     change.event_log().append(
         agent_id=None, type="change_created",
-        payload={"id": change_id, "title": title},
+        payload={"id": quest_id, "title": title},
     )
     return change
 
@@ -173,7 +173,7 @@ def _git(cwd: Path, *args: str) -> subprocess.CompletedProcess[str]:
     )
 
 
-def _seed_default_workflow(tmp_path: Path) -> Change:
+def _seed_default_workflow(tmp_path: Path) -> Quest:
     """Copy the shipped default workflow into the change root, then replace
     the script-gate shells with `exit 0` stubs.
 

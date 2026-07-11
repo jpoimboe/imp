@@ -10,13 +10,13 @@ from pathlib import Path
 import pytest
 
 from imp.cli import main as cli_main
-from imp.engine.change import Change
+from imp.engine.quest import Quest
 from tests.conftest import _seed_control
 
 
-def _change(tmp_path: Path) -> Change:
+def _change(tmp_path: Path) -> Quest:
     _seed_control(tmp_path)
-    return Change.create(tmp_path, title="x", change_id="feat", base_branch="main")
+    return Quest.create(tmp_path, title="x", quest_id="feat", base_branch="main")
 
 
 def test_refused_surfaces_git_detail(

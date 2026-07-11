@@ -27,7 +27,7 @@ import jinja2
 from imp.engine.state import EventLog, State
 
 if TYPE_CHECKING:
-    from imp.engine.change import Change
+    from imp.engine.quest import Quest
 
 
 class PromptRenderError(Exception):
@@ -134,8 +134,8 @@ class PromptContext:
 
 
 def build_context(
-    change_title: str, event_log: EventLog,
-    *, change_id: str = "", change_home: str = "",
+    quest_title: str, event_log: EventLog,
+    *, quest_id: str = "", quest_home: str = "",
     cur_base_head: str = "", orig_base_head: str = "",
     vars: dict[str, Any] | None = None,
     project_facts: dict[str, str] | None = None,
@@ -146,8 +146,8 @@ def build_context(
     laps = tuple(prior_laps or ())
     # lap from the stored lap, not len: history truncates to OUTCOME_HISTORY_K so len saturates.
     return PromptContext(
-        change=_ChangeNamespace(id=change_id, title=change_title,
-                                home=change_home, cur_base_head=cur_base_head,
+        change=_ChangeNamespace(id=quest_id, title=quest_title,
+                                home=quest_home, cur_base_head=cur_base_head,
                                 orig_base_head=orig_base_head),
         events=_EventsNamespace(event_log),
         vars=dict(vars or {}),
@@ -159,7 +159,7 @@ def build_context(
 
 
 def render_label(
-    label: str | None, change: Change | None, log: EventLog | None,
+    label: str | None, change: Quest | None, log: EventLog | None,
     state: State | None = None,
 ) -> str | None:
     if label is None or "{{" not in label:
@@ -174,8 +174,8 @@ def render_label(
             return label
     try:
         return render_prompt(label, build_context(
-            change_title=change.title, event_log=log,
-            change_id=change.id, change_home=f".imp/changes/{change.id}",
+            quest_title=change.title, event_log=log,
+            quest_id=change.id, quest_home=f".imp/quests/{change.id}",
             cur_base_head=change.cur_base_head,
             orig_base_head=change.orig_base_head,
             vars=state.vars if state is not None else {},

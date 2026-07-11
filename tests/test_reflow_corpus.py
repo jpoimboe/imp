@@ -68,7 +68,7 @@ def test_reflow_idempotent_on_asset(path: Path) -> None:
 
 def test_reflow_folds_wrapped_lines_in_rendered_persona(tmp_path: Path) -> None:
     log = JsonlEventLog(tmp_path / "events.jsonl")
-    ctx = build_context(change_title="t", event_log=log)
+    ctx = build_context(quest_title="t", event_log=log)
     rendered = render_prompt((_ASSET / "persona.md").read_text(), ctx,
                              workflow_dir=_ASSET)
     out = reflow_markdown(rendered)

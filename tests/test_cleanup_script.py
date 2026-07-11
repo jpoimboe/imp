@@ -6,7 +6,7 @@ Exit contract:
   1 -> pause for a human: dirty working tree, a surviving fixup directive that
        cannot be folded, or a hard rebase/stamp failure
 
-The range base is change.json's cur_base_head (the whole change is in range), so a
+The range base is quest.json's cur_base_head (the whole change is in range), so a
 fixup! targeting ANY in-range commit folds. No positional argument is used.
 """
 from __future__ import annotations
@@ -21,7 +21,7 @@ ID = "2026-06-20-cleanup-test"
 
 
 def _home(pr: Path) -> Path:
-    return pr.parent / ".imp" / "changes" / "x"
+    return pr.parent / ".imp" / "quests" / "x"
 
 
 def _git(cwd: Path, *args: str) -> subprocess.CompletedProcess[str]:
@@ -29,11 +29,11 @@ def _git(cwd: Path, *args: str) -> subprocess.CompletedProcess[str]:
                           check=False, env={**os.environ, "GIT_EDITOR": "true"})
 
 
-def _run(pr: Path, change_id: str = ID) -> subprocess.CompletedProcess[str]:
+def _run(pr: Path, quest_id: str = ID) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         ["bash", str(CLEANUP)], cwd=pr.parent,
         env={**os.environ, "IMP_PROJECT_ROOT": str(pr),
-             "IMP_CHANGE_DIR": str(_home(pr)), "IMP_CHANGE_ID": change_id},
+             "IMP_QUEST_DIR": str(_home(pr)), "IMP_QUEST_ID": quest_id},
         capture_output=True, text=True, check=False,
     )
 
@@ -52,7 +52,7 @@ def _record_change(pr: Path) -> None:
     cd = _home(pr)
     cd.mkdir(parents=True, exist_ok=True)
     fork = _git(pr, "rev-parse", "main").stdout.strip()
-    (cd / "change.json").write_text(json.dumps(
+    (cd / "quest.json").write_text(json.dumps(
         {"id": "x", "title": "t", "base_branch": "main", "cur_base_head": fork}))
 
 
@@ -226,7 +226,7 @@ def test_fold_conflict_hands_off_exit_2(tmp_path: Path) -> None:
     _git(pr, "rebase", "--abort")
 
 
-def test_empty_change_id_fails(tmp_path: Path) -> None:
+def test_empty_quest_id_fails(tmp_path: Path) -> None:
     pr = tmp_path / "wt"
     _init(pr)
     _record_change(pr)
@@ -235,8 +235,8 @@ def test_empty_change_id_fails(tmp_path: Path) -> None:
     _git(pr, "add", "g.txt")
     _git(pr, "commit", "-m", "branch work")
 
-    res = _run(pr, change_id="")
-    assert res.returncode == 1                               # ${IMP_CHANGE_ID:?}
+    res = _run(pr, quest_id="")
+    assert res.returncode == 1                               # ${IMP_QUEST_ID:?}
 
 
 def _build_and_handoff(pr: Path) -> tuple[str, str]:

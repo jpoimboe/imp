@@ -104,7 +104,7 @@ def test_workflow_completed_appends_completed_node_at_root() -> None:
     ])
     completed = [c for c in tree.root.children if isinstance(c, nv.CompletedNode)]
     assert len(completed) == 1
-    assert completed[0].change_id == "abc123"
+    assert completed[0].quest_id == "abc123"
     assert tree.root.status == "completed"
 
 

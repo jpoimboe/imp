@@ -1,4 +1,4 @@
-"""Per-Change persistence: state.json (cursor) + events.jsonl (audit log) + locks.
+"""Per-Quest persistence: state.json (cursor) + events.jsonl (audit log) + locks.
 
 Tasks 10/11/12 build this file incrementally:
   Task 10 — State
@@ -198,7 +198,7 @@ class State:
         )
         # Drop keys for fields removed since this state.json was written (e.g.
         # pending_rename/drafting/random_title from the name-on-intent rework) so
-        # an old paused/running Change can still be loaded, abandoned, or resumed.
+        # an old paused/running Quest can still be loaded, abandoned, or resumed.
         known = {f.name for f in fields(cls)}
         data = {k: v for k, v in data.items() if k in known}
         if "status" in data:
@@ -765,7 +765,7 @@ class LockHeld(Exception):
 
 
 class ProjectLock:
-    """File-backed advisory lock for single-Change-running enforcement.
+    """File-backed advisory lock for single-Quest-running enforcement.
 
     The lock file's content is the holder's PID so `imp show` can display it.
     """

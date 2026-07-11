@@ -25,7 +25,7 @@ def make_load_skill_tool() -> Tool:
     def _invoke(ctx: Any, name: str, **_ignore: Any) -> str:
         # **_ignore tolerates any extra model-emitted arg (mirrors complete_step's
         # _invoke(ctx, **kwargs)); a stray arg must not become a TypeError.
-        skills_dir = ctx.change_context.workflow_dir / "skills"
+        skills_dir = ctx.quest_context.workflow_dir / "skills"
         body = load_agent_skill(skills_dir, name)  # raises -> guarded is_error result
         if ctx.event_log is not None:
             ctx.event_log.append(

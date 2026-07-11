@@ -15,7 +15,7 @@ def anyio_backend() -> str:
 
 
 def _fake_change(tmp_path: Path):
-    """Minimal Change stand-in: ask_line_with_slash needs .workflow_dir (for
+    """Minimal Quest stand-in: ask_line_with_slash needs .workflow_dir (for
     handle_slash_line) and .event_log().append(...) (for skill_load events).
     Mirrors the _FakeChange from test_slash.py."""
     from imp.engine.state import JsonlEventLog

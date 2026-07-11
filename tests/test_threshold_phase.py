@@ -77,7 +77,7 @@ def test_threshold_agent_prose_carries_the_three_hats_and_handoff() -> None:
     for hat in ("concierge", "scout", "brainstorm"):
         assert hat in low, hat
     assert "create_and_enter_worktree" in body         # go-live tool
-    assert "rename_change" in body                      # names the change
+    assert "rename_quest" in body                      # names the change
     assert "{{ change.home }}/artifacts/spec/{{ change.id }}.md" in body
     # AC10: a standing directive never to leak internal vocabulary to the user.
     assert "never surface these internal terms" in low
@@ -89,24 +89,24 @@ def test_threshold_adoption_section_omitted_on_autonomous_runs(tmp_path) -> None
     log = JsonlEventLog(tmp_path / "events.jsonl")
 
     attended = render_prompt(body, build_context(
-        change_title="t", event_log=log, change_id="abc",
-        change_home=".imp/changes/abc", project_facts={}),
+        quest_title="t", event_log=log, quest_id="abc",
+        quest_home=".imp/quests/abc", project_facts={}),
         workflow_dir=bundled_workflow_dir("imp"))
     # Attended runs render the adoption-first section.
     assert "## Keep discovered work here by default" in attended
-    assert "create_change" in attended
+    assert "create_quest" in attended
 
     autonomous = render_prompt(body, build_context(
-        change_title="t", event_log=log, change_id="abc",
-        change_home=".imp/changes/abc", autonomous=True,
+        quest_title="t", event_log=log, quest_id="abc",
+        quest_home=".imp/quests/abc", autonomous=True,
         project_facts={}),
         workflow_dir=bundled_workflow_dir("imp"))
     # Autonomous runs omit the whole {% if not run.autonomous %} block.
     assert "## Keep discovered work here by default" not in autonomous
-    assert "create_change" not in autonomous
+    assert "create_quest" not in autonomous
     # The retired unconditional / spin-off-first heading and phrasing are gone.
     assert "## Splitting off a separate change" not in attended
-    assert "ending your turn to yield** before calling `create_change`" not in attended
+    assert "ending your turn to yield** before calling `create_quest`" not in attended
 
 
 def test_threshold_has_no_headless_branch(tmp_path) -> None:
@@ -116,8 +116,8 @@ def test_threshold_has_no_headless_branch(tmp_path) -> None:
     log = JsonlEventLog(tmp_path / "events.jsonl")
     for autonomous in (False, True):
         out = render_prompt(body, build_context(
-            change_title="t", event_log=log, change_id="abc",
-            change_home=".imp/changes/abc", autonomous=autonomous,
+            quest_title="t", event_log=log, quest_id="abc",
+            quest_home=".imp/quests/abc", autonomous=autonomous,
             project_facts={}),
             workflow_dir=bundled_workflow_dir("imp")).lower()
         assert "the ceremony is predetermined" not in out
@@ -134,8 +134,8 @@ def test_threshold_renders_full_brainstorm_depth(tmp_path) -> None:
     body = _wf().agents["threshold"].prompt_template_source
     log = JsonlEventLog(tmp_path / "events.jsonl")
     out = render_prompt(body, build_context(
-        change_title="t", event_log=log, change_id="abc",
-        change_home=".imp/changes/abc",
+        quest_title="t", event_log=log, quest_id="abc",
+        quest_home=".imp/quests/abc",
         project_facts={}),
         workflow_dir=bundled_workflow_dir("imp"))
     low = out.lower()
@@ -163,8 +163,8 @@ def test_threshold_prose_names_spec_finalizer_not_spec_writer(tmp_path) -> None:
     body = _wf().agents["threshold"].prompt_template_source
     log = JsonlEventLog(tmp_path / "events.jsonl")
     out = render_prompt(body, build_context(
-        change_title="t", event_log=log, change_id="abc",
-        change_home=".imp/changes/abc",
+        quest_title="t", event_log=log, quest_id="abc",
+        quest_home=".imp/quests/abc",
         project_facts={}),
         workflow_dir=bundled_workflow_dir("imp"))
     assert "spec-writer" not in out
@@ -177,8 +177,8 @@ def test_threshold_bare_open_keeps_concierge_and_scout_hats(tmp_path) -> None:
     body = _wf().agents["threshold"].prompt_template_source
     log = JsonlEventLog(tmp_path / "events.jsonl")
     out = render_prompt(body, build_context(
-        change_title="t", event_log=log, change_id="abc",
-        change_home=".imp/changes/abc", project_facts={}),
+        quest_title="t", event_log=log, quest_id="abc",
+        quest_home=".imp/quests/abc", project_facts={}),
         workflow_dir=bundled_workflow_dir("imp"))
     low = out.lower()
     assert "do not read any files, do not explore the codebase" not in low
@@ -227,8 +227,8 @@ def test_threshold_live_gate_conventions_relocated_to_partial(tmp_path) -> None:
     # ...but resolves through the included partial chain in the rendered prompt.
     log = JsonlEventLog(tmp_path / "events.jsonl")
     out = render_prompt(body, build_context(
-        change_title="t", event_log=log, change_id="abc",
-        change_home=".imp/changes/abc",
+        quest_title="t", event_log=log, quest_id="abc",
+        quest_home=".imp/quests/abc",
         project_facts={}),
         workflow_dir=bundled_workflow_dir("imp"))
     assert "no co-equal dangling alternative" in out

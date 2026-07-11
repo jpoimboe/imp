@@ -53,20 +53,20 @@ class LayoutMismatch(LoadError):
     """Raised on resume when stored layout_version differs from the engine's."""
 
     def __init__(self, *, stored: int, engine: int, imp_commit: str,
-                 change_dir: Path) -> None:
+                 quest_dir: Path) -> None:
         self.stored = stored
         self.engine = engine
         self.imp_commit = imp_commit
-        self.change_dir = change_dir
+        self.quest_dir = quest_dir
         breadcrumb = imp_commit or "(unknown)"
         super().__init__(
-            f"Change at {change_dir} has layout_version {stored}, but this imp "
+            f"Quest at {quest_dir} has layout_version {stored}, but this imp "
             f"engine speaks layout_version {engine}; refusing to resume it under "
             f"a contradictory engine.\n"
             f"  birth imp_commit: {breadcrumb}\n"
-            f"  recover: finish or abandon-and-restart this change under the new "
-            f"layout, or hand-migrate {change_dir}; its events and transcripts "
-            f"are accessible via `imp log {change_dir.name}`."
+            f"  recover: finish or abandon-and-restart this Quest under the new "
+            f"layout, or hand-migrate {quest_dir}; its events and transcripts "
+            f"are accessible via `imp log {quest_dir.name}`."
         )
 
 
@@ -87,7 +87,7 @@ class StateDecodeError(LoadError):
         super().__init__(
             f"could not parse {live}: {reason}\n{evidence}",
             hint="restore a good state.json from backup, or "
-                 "abandon-and-restart this change.",
+                 "abandon-and-restart this Quest.",
         )
 
 

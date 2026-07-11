@@ -33,7 +33,7 @@ def test_resume_gone_unknown_keeps_no_match(monkeypatch, tmp_path: Path, capsys)
     rc = m._resume_gone(tmp_path, "2026-06-11-yaitd7")
     out, err = capsys.readouterr()
     assert rc == 2
-    assert "imp: no Change matches '2026-06-11-yaitd7'" in err
+    assert "imp: no Quest matches '2026-06-11-yaitd7'" in err
     assert out == ""
 
 
@@ -47,9 +47,9 @@ def test_journal_status_reads_status_field(tmp_path: Path) -> None:
     sj = tmp_path / "s.json"
     sj.write_text(json.dumps({
         "id": "2026-06-01-xyz999", "status": "completed", "step": "merge"}))
-    archive.archive_change(
+    archive.archive_quest(
         tmp_path, "2026-06-01-xyz999", events_path=events,
-        change_json_path=cj, state_json_path=sj)
+        quest_json_path=cj, state_json_path=sj)
     assert m._journal_status(tmp_path, "2026-06-01-xyz999") == "completed"
 
 

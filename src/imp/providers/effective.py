@@ -116,8 +116,8 @@ def load_effective_config(
 ) -> EffectiveConfig:
     """Build the floor, then merge project ← user ← local on top.
 
-    - project layer: `project_root/imp/project.yaml` (the worktree for a Change;
-      the control-root checkout for Change-less commands). Skipped when
+    - project layer: `project_root/imp/project.yaml` (the worktree for a Quest;
+      the control-root checkout for Quest-less commands). Skipped when
       project_root is None.
     - user layer: `user_config_path()` (live).
     - local layer: `control_root/.imp/config.yaml` (live, gitignored). Skipped

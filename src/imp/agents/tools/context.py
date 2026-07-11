@@ -71,15 +71,15 @@ class ToolContext:
     background_enabled: bool = False
     _bg_counter: int = 0
     # The change being processed; used by subagent dispatch to propagate slug/title.
-    change_context: Any = None
-    # Live State of the running Change; used by the subagent-authority guard
-    # (rename_change raises if this is None). None for subagents (no rename authority).
+    quest_context: Any = None
+    # Live State of the running Quest; used by the subagent-authority guard
+    # (rename_quest raises if this is None). None for subagents (no rename authority).
     change_state: Any = None
-    # The LIVE, mutable Change (top-level steps only; None for subagents). The
-    # rename_change tool mutates change.title + rewrites change.json through it.
-    # Distinct from change_context, which is the FROZEN render-time snapshot.
+    # The LIVE, mutable Quest (top-level steps only; None for subagents). The
+    # rename_quest tool mutates change.title + rewrites quest.json through it.
+    # Distinct from quest_context, which is the FROZEN render-time snapshot.
     change: Any = None
-    change_home: Path | None = None
+    quest_home: Path | None = None
     # The runner injects this callable as the bare-turn-end / AWAITING_USER
     # resume input channel, used to read the user's reply. None for subagents.
     user_input_fn: Any = None
@@ -240,8 +240,8 @@ async def request_bracketed(
         yield item
 
 
-def change_home_path(change_home: str | None) -> Path | None:
-    return Path(change_home) if change_home else None
+def quest_home_path(quest_home: str | None) -> Path | None:
+    return Path(quest_home) if quest_home else None
 
 
 def _supports_killpg() -> bool:

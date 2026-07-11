@@ -1,4 +1,4 @@
-"""SouthHub — the per-repo Unix-socket multiplexer for live Change connections."""
+"""SouthHub — the per-repo Unix-socket multiplexer for live Quest connections."""
 from __future__ import annotations
 
 import contextlib
@@ -15,7 +15,7 @@ _MAX_FRAME = 1 << 20
 
 
 class SouthHub:
-    """Owns the south-side socket and the live change_id -> stream registry."""
+    """Owns the south-side socket and the live quest_id -> stream registry."""
 
     def __init__(
         self,
@@ -44,28 +44,28 @@ class SouthHub:
         return set(self._conns)
 
     async def _handle(self, stream: SocketStream) -> None:
-        change_id: str | None = None
+        quest_id: str | None = None
         buf = BufferedByteReceiveStream(stream)
         try:
             hello = (await buf.receive_until(b"\n", _MAX_FRAME)).decode("utf-8")
-            change_id, _title, autosubscribe = parse_hello(hello)
-            self._conns[change_id] = stream
+            quest_id, _title, autosubscribe = parse_hello(hello)
+            self._conns[quest_id] = stream
             if self._on_attach is not None:
-                self._on_attach(change_id, autosubscribe)
+                self._on_attach(quest_id, autosubscribe)
             while True:
                 line = (await buf.receive_until(b"\n", _MAX_FRAME)).decode("utf-8")
                 with contextlib.suppress(Exception):
-                    self._on_event(change_id, line)
+                    self._on_event(quest_id, line)
         except (anyio.IncompleteRead, anyio.EndOfStream,
                 anyio.ClosedResourceError, anyio.DelimiterNotFound,
                 anyio.BrokenResourceError,
                 json.JSONDecodeError, KeyError, ValueError):
             pass
         finally:
-            if change_id is not None and self._conns.get(change_id) is stream:
-                self._conns.pop(change_id)
+            if quest_id is not None and self._conns.get(quest_id) is stream:
+                self._conns.pop(quest_id)
                 if self._on_detach is not None:
-                    self._on_detach(change_id)
+                    self._on_detach(quest_id)
             await stream.aclose()
 
     async def close(self) -> None:

@@ -7,7 +7,7 @@ import pytest
 
 from imp.agents.reflow import reflow_markdown
 from imp.agents.runner import (
-    ChangeContext,
+    QuestContext,
 )
 from imp.agents.subagents import (
     TASK_TOOL_SCHEMA,
@@ -82,7 +82,7 @@ def anyio_backend():
 def _dispatch_ctx(tmp_path: Path) -> ToolContext:
     """Minimal ToolContext that lets dispatch_task reach drive_invocation.
     Mirrors the existing dispatch tests above (spawn_subagent + a 'reviewer'
-    def + coordinator + change_context). drive_invocation is monkeypatched by
+    def + coordinator + quest_context). drive_invocation is monkeypatched by
     the caller, so the spawned runner's events are never consumed."""
     ctx = ToolContext(project_root=tmp_path,
                       events_path=tmp_path / "events.jsonl")
@@ -93,8 +93,8 @@ def _dispatch_ctx(tmp_path: Path) -> ToolContext:
     ctx.coordinator = InterruptCoordinator()
     ctx.spawn_subagent = _spawn_yielding(
         [{"type": "agent_output", "payload": {"text": "ok"}}])
-    ctx.change_context = ChangeContext(
-        id="change-42", title="Change 42", project_root=tmp_path,
+    ctx.quest_context = QuestContext(
+        id="change-42", title="Quest 42", project_root=tmp_path,
         workflow_dir=tmp_path / ".imp" / "change" / "workflow")
     return ctx
 
@@ -156,8 +156,8 @@ async def test_dispatch_task_awaits_spawn_subagent(tmp_path: Path) -> None:
     ctx.spawn_subagent = _spawn_yielding(
         [{"type": "agent_output", "payload": {"text": "ok"}}],
         capture=capture)
-    ctx.change_context = ChangeContext(
-        id="change-42", title="Change 42", project_root=tmp_path,
+    ctx.quest_context = QuestContext(
+        id="change-42", title="Quest 42", project_root=tmp_path,
         workflow_dir=tmp_path / ".imp" / "change" / "workflow")
 
     out = await dispatch_task(ctx, "reviewer", "please review")
@@ -166,7 +166,7 @@ async def test_dispatch_task_awaits_spawn_subagent(tmp_path: Path) -> None:
     assert inv.agent_def.name == "reviewer"
     assert inv.user_input_fn is None  # subagents are headless
     assert inv.provider_name == "anthropic"
-    assert inv.change_context.id == "change-42"
+    assert inv.quest_context.id == "change-42"
 
 
 @pytest.mark.anyio
@@ -187,7 +187,7 @@ def test_dispatch_task_renders_subagent_prompt(tmp_path):
 
     import anyio
 
-    from imp.agents.runner import ChangeContext
+    from imp.agents.runner import QuestContext
     from imp.agents.subagents import dispatch_task
     from imp.agents.tools.context import ToolContext
     from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
@@ -213,8 +213,8 @@ events_path=tmp_path / "events.jsonl",
         subagent_defs={"sub": sub_def},
         provider_name="anthropic", model_name="claude-sonnet-4-6",
         parent_transcript_dir=tmp_path / "parent",
-        change_context=ChangeContext(
-            id="change-7", title="Change 7", project_root=tmp_path,
+        quest_context=QuestContext(
+            id="change-7", title="Quest 7", project_root=tmp_path,
             workflow_dir=tmp_path / ".imp" / "change" / "workflow",
         ),
     )
@@ -289,7 +289,7 @@ async def test_dispatch_task_uses_subagent_tier(tmp_path: Path) -> None:
     ctx.spawn_subagent = _spawn_yielding(
         [{"type": "agent_output", "payload": {"text": "ok"}}],
         capture=capture)
-    ctx.change_context = ChangeContext(
+    ctx.quest_context = QuestContext(
         id="test", title="Test", project_root=tmp_path,
         workflow_dir=tmp_path / ".imp" / "change" / "workflow")
     ctx.resolved_tiers = {"medium": ProviderModel("openai", "gpt-5.2")}
@@ -316,7 +316,7 @@ async def test_dispatch_task_roleless_subagent_inherits_parent(tmp_path: Path) -
     ctx.spawn_subagent = _spawn_yielding(
         [{"type": "agent_output", "payload": {"text": "ok"}}],
         capture=capture)
-    ctx.change_context = ChangeContext(
+    ctx.quest_context = QuestContext(
         id="test", title="Test", project_root=tmp_path,
         workflow_dir=tmp_path / ".imp" / "change" / "workflow")
 
@@ -383,7 +383,7 @@ async def test_dispatch_task_runtime_tier_overrides_frontmatter(tmp_path: Path) 
     ctx.spawn_subagent = _spawn_yielding(
         [{"type": "agent_output", "payload": {"text": "ok"}}],
         capture=capture)
-    ctx.change_context = ChangeContext(
+    ctx.quest_context = QuestContext(
         id="test", title="Test", project_root=tmp_path,
         workflow_dir=tmp_path / ".imp" / "change" / "workflow")
     ctx.tiers = ("high",)
@@ -423,7 +423,7 @@ async def test_dispatch_task_none_tier_falls_through_to_frontmatter(tmp_path: Pa
     ctx.spawn_subagent = _spawn_yielding(
         [{"type": "agent_output", "payload": {"text": "ok"}}],
         capture=capture)
-    ctx.change_context = ChangeContext(
+    ctx.quest_context = QuestContext(
         id="test", title="Test", project_root=tmp_path,
         workflow_dir=tmp_path / ".imp" / "change" / "workflow")
     ctx.tiers = ("high",)
@@ -463,7 +463,7 @@ async def test_dispatch_task_blank_tier_falls_through_to_frontmatter(tmp_path: P
     ctx.spawn_subagent = _spawn_yielding(
         [{"type": "agent_output", "payload": {"text": "ok"}}],
         capture=capture)
-    ctx.change_context = ChangeContext(
+    ctx.quest_context = QuestContext(
         id="test", title="Test", project_root=tmp_path,
         workflow_dir=tmp_path / ".imp" / "change" / "workflow")
     ctx.tiers = ("high",)
@@ -490,7 +490,7 @@ async def test_dispatch_task_unknown_tier_raises_listing_valid(tmp_path: Path) -
     ctx.model_name = "haiku"
     ctx.parent_transcript_dir = tmp_path / "steps/p/s"
     ctx.spawn_subagent = lambda _inv: None  # type: ignore[assignment]
-    ctx.change_context = ChangeContext(
+    ctx.quest_context = QuestContext(
         id="test", title="Test", project_root=tmp_path,
         workflow_dir=tmp_path / ".imp" / "change" / "workflow")
     ctx.tiers = ("low", "high")
@@ -519,7 +519,7 @@ async def test_dispatch_task_powerful_tier_cross_vendor(tmp_path: Path) -> None:
     ctx.spawn_subagent = _spawn_yielding(
         [{"type": "agent_output", "payload": {"text": "ok"}}],
         capture=capture)
-    ctx.change_context = ChangeContext(
+    ctx.quest_context = QuestContext(
         id="test", title="Test", project_root=tmp_path,
         workflow_dir=tmp_path / ".imp" / "change" / "workflow")
     ctx.tiers = ("low", "medium", "high")
@@ -552,7 +552,7 @@ async def test_subagent_construction_parity(tmp_path: Path) -> None:
     ctx.spawn_subagent = _spawn_yielding(
         [{"type": "agent_output", "payload": {"text": "ok"}}],
         capture=capture)
-    ctx.change_context = ChangeContext(
+    ctx.quest_context = QuestContext(
         id="c", title="C c", project_root=tmp_path,
         workflow_dir=tmp_path / "wf")
 
@@ -578,7 +578,7 @@ async def test_subagent_error_fails_loudly_to_parent(tmp_path: Path) -> None:
     ctx.spawn_subagent = _spawn_yielding([{"type": "error", "payload": {
         "category": "api",
         "kind": "api_error", "message": "fatal provider error"}}])
-    ctx.change_context = ChangeContext(id="c", title="C", project_root=tmp_path,
+    ctx.quest_context = QuestContext(id="c", title="C", project_root=tmp_path,
                                        workflow_dir=tmp_path / "wf")
     with pytest.raises(RuntimeError):
         await dispatch_task(ctx, "reviewer", "review it")
@@ -616,7 +616,7 @@ async def test_subagent_backs_off_on_rate_limit(tmp_path: Path, monkeypatch) -> 
     ctx.parent_transcript_dir = tmp_path / "steps/p/s"
     ctx.coordinator = InterruptCoordinator()
     ctx.spawn_subagent = _spawn
-    ctx.change_context = ChangeContext(id="c", title="C", project_root=tmp_path,
+    ctx.quest_context = QuestContext(id="c", title="C", project_root=tmp_path,
                                        workflow_dir=tmp_path / "wf")
 
     out = await dispatch_task(ctx, "reviewer", "review it")
@@ -648,7 +648,7 @@ async def test_subagent_pause_raises_suspended(tmp_path: Path) -> None:
     ctx.coordinator = coord
     ctx.spawn_subagent = _spawn_yielding([{"type": "thinking", "payload": {}}],
                                          on_run=_trip)
-    ctx.change_context = ChangeContext(id="c", title="C", project_root=tmp_path,
+    ctx.quest_context = QuestContext(id="c", title="C", project_root=tmp_path,
                                        workflow_dir=tmp_path / "wf")
     with pytest.raises(SubagentSuspended):
         await dispatch_task(ctx, "reviewer", "review it")
@@ -691,7 +691,7 @@ async def test_subagent_backoff_sleep_is_interruptible(tmp_path: Path) -> None:
     ctx.parent_transcript_dir = tmp_path / "steps/p/s"
     ctx.coordinator = coord
     ctx.spawn_subagent = _spawn
-    ctx.change_context = ChangeContext(id="c", title="C", project_root=tmp_path,
+    ctx.quest_context = QuestContext(id="c", title="C", project_root=tmp_path,
                                        workflow_dir=tmp_path / "wf")
 
     async def main() -> None:
@@ -747,7 +747,7 @@ async def test_subagent_backoff_hits_per_category_budget(tmp_path: Path,
     ctx.coordinator = InterruptCoordinator()
     ctx.spawn_subagent = _spawn
     ctx.non_interactive = False  # interactive: the budget still fires
-    ctx.change_context = ChangeContext(id="c", title="C", project_root=tmp_path,
+    ctx.quest_context = QuestContext(id="c", title="C", project_root=tmp_path,
                                        workflow_dir=tmp_path / "wf")
 
     with pytest.raises(SubagentSuspended, match="retry ceiling"):
@@ -776,7 +776,7 @@ async def test_dispatch_task_forwards_non_interactive_true(tmp_path: Path) -> No
     ctx.spawn_subagent = _spawn_yielding(
         [{"type": "agent_output", "payload": {"text": "ok"}}],
         capture=capture)
-    ctx.change_context = ChangeContext(id="c", title="C", project_root=tmp_path,
+    ctx.quest_context = QuestContext(id="c", title="C", project_root=tmp_path,
                                        workflow_dir=tmp_path / "wf")
     ctx.non_interactive = True  # headless parent
 
@@ -798,7 +798,7 @@ async def test_dispatch_task_forwards_non_interactive_false(tmp_path: Path) -> N
     ctx.spawn_subagent = _spawn_yielding(
         [{"type": "agent_output", "payload": {"text": "ok"}}],
         capture=capture)
-    ctx.change_context = ChangeContext(id="c", title="C", project_root=tmp_path,
+    ctx.quest_context = QuestContext(id="c", title="C", project_root=tmp_path,
                                        workflow_dir=tmp_path / "wf")
     ctx.non_interactive = False  # interactive parent
 
@@ -825,7 +825,7 @@ async def test_dispatch_task_threads_sandbox_policy(tmp_path: Path) -> None:
     ctx.spawn_subagent = _spawn_yielding(
         [{"type": "agent_output", "payload": {"text": "ok"}}],
         capture=capture)
-    ctx.change_context = ChangeContext(id="c", title="C", project_root=tmp_path,
+    ctx.quest_context = QuestContext(id="c", title="C", project_root=tmp_path,
                                        workflow_dir=tmp_path / "wf")
     pol = SandboxPolicy(
         active=True, worktree=str(tmp_path), git_common_dir=str(tmp_path / ".git"),
@@ -856,7 +856,7 @@ async def test_dispatch_task_inherits_readonly_overlay(tmp_path: Path) -> None:
     ctx.spawn_subagent = _spawn_yielding(
         [{"type": "agent_output", "payload": {"text": "ok"}}],
         capture=capture)
-    ctx.change_context = ChangeContext(id="c", title="C", project_root=tmp_path,
+    ctx.quest_context = QuestContext(id="c", title="C", project_root=tmp_path,
                                        workflow_dir=tmp_path / "wf")
     ctx.sandbox_policy = SandboxPolicy(
         active=True, worktree=str(tmp_path), git_common_dir=str(tmp_path / ".git"),
@@ -948,7 +948,7 @@ async def test_subagent_auth_budget_suspend_reads_as_reauth(tmp_path: Path,
     ctx.coordinator = InterruptCoordinator()
     ctx.spawn_subagent = _spawn
     ctx.non_interactive = False
-    ctx.change_context = ChangeContext(id="c", title="C", project_root=tmp_path,
+    ctx.quest_context = QuestContext(id="c", title="C", project_root=tmp_path,
                                        workflow_dir=tmp_path / "wf")
 
     with pytest.raises(SubagentSuspended, match="re-authentication needed") as exc:
@@ -1002,7 +1002,7 @@ async def test_subagent_hinted_delay_is_budget_exempt(tmp_path: Path,
     ctx.coordinator = InterruptCoordinator()
     ctx.spawn_subagent = _spawn
     ctx.event_log = log
-    ctx.change_context = ChangeContext(id="c", title="C", project_root=tmp_path,
+    ctx.quest_context = QuestContext(id="c", title="C", project_root=tmp_path,
                                        workflow_dir=tmp_path / "wf")
 
     out = await dispatch_task(ctx, "reviewer", "review it")
@@ -1045,7 +1045,7 @@ async def test_subagent_fourth_hinted_sleep_is_budgeted(tmp_path: Path,
     ctx.coordinator = InterruptCoordinator()
     ctx.spawn_subagent = _spawn
     ctx.event_log = log
-    ctx.change_context = ChangeContext(id="c", title="C", project_root=tmp_path,
+    ctx.quest_context = QuestContext(id="c", title="C", project_root=tmp_path,
                                        workflow_dir=tmp_path / "wf")
 
     with pytest.raises(SubagentSuspended, match="retry ceiling"):

@@ -12,9 +12,9 @@ import pytest
 
 from imp.agents.runner import AgentInvocation, AgentRunner, Event, Message, TextBlock
 from imp.agents.transcript import Transcript
-from imp.engine.change import Change
 from imp.engine.errors import LoadError
 from imp.engine.executor import RunResult, run_change
+from imp.engine.quest import Quest
 from imp.engine.state import State
 from tests.conftest import _git
 
@@ -22,10 +22,10 @@ from tests.conftest import _git
 def test_change_rename_is_content_only(tmp_path: Path) -> None:
     from tests.conftest import _seed_control
     _seed_control(tmp_path)
-    ch = Change.create(tmp_path, title="orig",
-                       change_id="aaa111", base_branch="main")
+    ch = Quest.create(tmp_path, title="orig",
+                       quest_id="aaa111", base_branch="main")
     created_before = json.loads(
-        (ch.change_dir / "change.json").read_text())["created_at"]
+        (ch.quest_dir / "quest.json").read_text())["created_at"]
     id_before, root_before = ch.id, ch.project_root
 
     returned = ch.rename("Add OAuth", log=ch.event_log())
@@ -34,7 +34,7 @@ def test_change_rename_is_content_only(tmp_path: Path) -> None:
     assert ch.title == "Add OAuth"
     assert ch.id == id_before                       # id never changes
     assert ch.project_root == root_before           # no worktree move
-    meta = json.loads((ch.change_dir / "change.json").read_text())
+    meta = json.loads((ch.quest_dir / "quest.json").read_text())
     assert meta["title"] == "Add OAuth"
     assert meta["created_at"] == created_before
     assert "id" in meta and "slug" not in meta
@@ -44,7 +44,7 @@ def test_change_rename_is_content_only(tmp_path: Path) -> None:
 
 
 class _RenamingRunner:
-    """Fake runner: on its single turn, calls Change.rename via the tool path by
+    """Fake runner: on its single turn, calls Quest.rename via the tool path by
     mutating through the invocation's live change, then returns Success."""
 
     def __init__(self, invocation: AgentInvocation) -> None:
@@ -110,16 +110,16 @@ def test_run_change_rename_keeps_id_and_path(
 ) -> None:
     provider_registry("anthropic", lambda: True, lambda model: _FakeProvider(model))
     _seed_two_step_control(tmp_path)
-    ch = Change.create(tmp_path, title="x",
-                       change_id="ccc333", base_branch="main")
+    ch = Quest.create(tmp_path, title="x",
+                       quest_id="ccc333", base_branch="main")
 
     cwd_before = os.getcwd()
     result = anyio.run(run_change, ch)
     assert result is RunResult.COMPLETED
     assert os.getcwd() == cwd_before
-    # Reload to confirm the rename persisted to change.json (the in-memory ch is
+    # Reload to confirm the rename persisted to quest.json (the in-memory ch is
     # the same object the runner mutated; reloading proves durability).
-    reloaded = Change.load(tmp_path, "ccc333")
+    reloaded = Quest.load(tmp_path, "ccc333")
     assert reloaded.title == "Renamed Thing"
     assert reloaded.id == "ccc333"
     assert (tmp_path / ".imp" / "worktrees" / "ccc333").is_dir()
@@ -128,8 +128,8 @@ def test_run_change_rename_keeps_id_and_path(
 def test_run_change_restores_cwd_on_error(tmp_path: Path, provider_registry) -> None:
     provider_registry("anthropic", lambda: True, lambda model: _FakeProvider(model))
     _seed_two_step_control(tmp_path)
-    ch = Change.create(tmp_path, title="x",
-                       change_id="ddd444", base_branch="main")
+    ch = Quest.create(tmp_path, title="x",
+                       quest_id="ddd444", base_branch="main")
     (ch.control_workflow_dir / "workflow.yaml").write_text("}{ not yaml")
 
     cwd_before = os.getcwd()
@@ -171,8 +171,8 @@ async def test_seed_opening_first_step_only(tmp_path: Path, provider_registry) -
     provider_registry("anthropic", lambda: True,
                       lambda model: _RecordingProvider(sink, model))
     _seed_two_step_control(tmp_path)
-    ch = Change.create(tmp_path, title="",
-                       change_id="aaa111", base_branch="main")
+    ch = Quest.create(tmp_path, title="",
+                       quest_id="aaa111", base_branch="main")
     ch.seed_opening = "Implement this spec X"  # durable source, not the run parameter
 
     events: list[dict[str, Any]] = []
@@ -196,8 +196,8 @@ async def test_run_change_none_seed_opening_has_empty_opening(
     provider_registry("anthropic", lambda: True,
                       lambda model: _RecordingProvider(sink, model))
     _seed_two_step_control(tmp_path)
-    ch = Change.create(tmp_path, title="",
-                       change_id="bbb222", base_branch="main")
+    ch = Quest.create(tmp_path, title="",
+                       quest_id="bbb222", base_branch="main")
 
     result = await run_change(
         ch, on_event=lambda _e: None, headless=True)
@@ -217,8 +217,8 @@ async def test_seed_opening_not_forwarded_to_downstream_step_on_resume(
     provider_registry("anthropic", lambda: True,
                       lambda model: _RecordingProvider(sink, model))
     _seed_two_step_control(tmp_path)
-    ch = Change.create(tmp_path, title="",
-                       change_id="ccc333", base_branch="main")
+    ch = Quest.create(tmp_path, title="",
+                       quest_id="ccc333", base_branch="main")
     ch.seed_opening = "Implement this spec SHOULD NOT LEAK"  # durable source
 
     state = State.load(ch.state_dir)
@@ -229,7 +229,7 @@ async def test_seed_opening_not_forwarded_to_downstream_step_on_resume(
     # takes the keep/replay branch, consuming the one-shot seed there; the seed
     # is scoped to the first agent step and is NEVER forwarded to the downstream
     # step s2 (the anti-leak invariant).
-    s1_dir = ch.change_dir / "steps" / "p" / "s1"
+    s1_dir = ch.quest_dir / "steps" / "p" / "s1"
     s1_dir.mkdir(parents=True, exist_ok=True)
     Transcript(s1_dir / "transcript.jsonl").append(
         Message(role="user", content=(TextBlock(text="prior turn"),)))

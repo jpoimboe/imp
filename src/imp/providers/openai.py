@@ -48,7 +48,7 @@ from imp.agents.tools import bg as _bg
 from imp.agents.tools.complete_step import make_complete_step_tool
 from imp.agents.tools.context import (
     ToolContext,
-    change_home_path,
+    quest_home_path,
     request_bracketed,
 )
 from imp.agents.tools.load_skill import make_load_skill_tool
@@ -401,23 +401,23 @@ _CACHE_KEY_MAX = 64        # OpenAI's hard limit on prompt_cache_key
 _CACHE_KEY_HASH_LEN = 8    # hex chars of disambiguating digest
 
 
-def _prompt_cache_key(change_id: str, aid: str) -> str:
+def _prompt_cache_key(quest_id: str, aid: str) -> str:
     """OpenAI routing/affinity hint, bounded to the 64-char API limit.
 
     Stable per (change, agent) invocation; distinct per change and per
     agent. Keys that fit are passed through verbatim. Over-long keys keep
     the whole aid (the within-change discriminator one greps for) and the
-    change_id head (the cross-change discriminator), then append a hash of the
-    *full* change_id:aid so distinctness on both survives truncation.
+    quest_id head (the cross-change discriminator), then append a hash of the
+    *full* quest_id:aid so distinctness on both survives truncation.
     """
-    full = f"{change_id}:{aid}"
+    full = f"{quest_id}:{aid}"
     if len(full) <= _CACHE_KEY_MAX:
         return full
     digest = hashlib.sha256(full.encode()).hexdigest()[:_CACHE_KEY_HASH_LEN]
     budget = _CACHE_KEY_MAX - _CACHE_KEY_HASH_LEN - 1   # 55: readable, before "-{digest}"
     aid_keep = min(len(aid), budget - 1)                # keep >=1 char for id + ":"
     id_keep = budget - aid_keep - 1                     # -1 for the ":" separator
-    return f"{change_id[:id_keep]}:{aid[-aid_keep:]}-{digest}"
+    return f"{quest_id[:id_keep]}:{aid[-aid_keep:]}-{digest}"
 
 
 class OpenAIAgentRunner:
@@ -512,7 +512,7 @@ class OpenAIAgentRunner:
         transcript = Transcript(invocation.transcript_dir / "transcript.jsonl")
         tools = _build_tools(invocation)
         ctx = ToolContext(
-            project_root=invocation.change_context.project_root,
+            project_root=invocation.quest_context.project_root,
             events_path=invocation.events_path,
             subagent_defs=invocation.subagent_defs,
             provider_name=invocation.provider_name,
@@ -520,11 +520,11 @@ class OpenAIAgentRunner:
             parent_transcript_dir=invocation.transcript_dir,
             agent_id=aid,
             background_enabled=True,  # full bg surface wired: injection + sweeps + teardown
-            change_home=change_home_path(invocation.change_context.change_home),
+            quest_home=quest_home_path(invocation.quest_context.quest_home),
         )
-        ctx.change_context = invocation.change_context
+        ctx.quest_context = invocation.quest_context
         ctx.change_state = invocation.change_state
-        ctx.change = invocation.change          # live Change for rename_change
+        ctx.change = invocation.change          # live Quest for rename_quest
         ctx.spawn_subagent = spawn_subagent_via_registry
         ctx.resolved_tiers = invocation.resolved_tiers
         ctx.subagent_depth = invocation.subagent_depth
@@ -539,7 +539,7 @@ class OpenAIAgentRunner:
         self._ctx = ctx
 
         existing = transcript.load(
-            ctx.change_home / "blobs" if ctx.change_home is not None else None)
+            ctx.quest_home / "blobs" if ctx.quest_home is not None else None)
         if existing:
             messages = existing
             tool_calls_used = 0  # per-invocation; never inherit history
@@ -656,7 +656,7 @@ class OpenAIAgentRunner:
         # Keyed to the IMMUTABLE id, not the handle: a handle rotates at the
         # spec->plan title rename and would bust the cache mid-conversation
         # (spec §9). [AC 10]
-        prompt_cache_key = _prompt_cache_key(invocation.change_context.id, aid)
+        prompt_cache_key = _prompt_cache_key(invocation.quest_context.id, aid)
         guard = LoopGuard(interactive=invocation.interactive)
 
         while not self._cancel:

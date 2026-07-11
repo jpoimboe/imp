@@ -1,4 +1,4 @@
-"""new_change_id: dateless immutable identity, a 6-char pronounceable id — a
+"""new_quest_id: dateless immutable identity, a 6-char pronounceable id — a
 consonant/vowel/consonant/vowel stem plus two digits (spec AC 1). Format
 asserted over many draws; uniqueness asserted at a small N with a seeded
 random.Random injected for determinism."""
@@ -8,37 +8,37 @@ from __future__ import annotations
 import random
 import re
 
-from imp.engine.change_id import (
+from imp.engine.quest_id import (
     _CONSONANTS,
     _DENYLIST,
     _VOWELS,
     _is_clean_stem,
-    new_change_id,
+    new_quest_id,
 )
 
 _ID_RE = re.compile(r"^[bdfghjklmnprstvz][aeiou][bdfghjklmnprstvz][aeiou][0-9]{2}$")
 
 
-def test_new_change_id_format() -> None:
+def test_new_quest_id_format() -> None:
     for _ in range(200):
-        assert _ID_RE.fullmatch(new_change_id())
+        assert _ID_RE.fullmatch(new_quest_id())
 
 
-def test_new_change_id_unique_small_n() -> None:
+def test_new_quest_id_unique_small_n() -> None:
     rng = random.Random(0)
-    ids = [new_change_id(rng=rng) for _ in range(20)]
+    ids = [new_quest_id(rng=rng) for _ in range(20)]
     assert len(set(ids)) == len(ids)
 
 
-def test_new_change_id_seeded_rng_is_deterministic() -> None:
-    first = [new_change_id(rng=random.Random(0)) for _ in range(20)]
-    second = [new_change_id(rng=random.Random(0)) for _ in range(20)]
+def test_new_quest_id_seeded_rng_is_deterministic() -> None:
+    first = [new_quest_id(rng=random.Random(0)) for _ in range(20)]
+    second = [new_quest_id(rng=random.Random(0)) for _ in range(20)]
     assert first == second
     assert _ID_RE.fullmatch(first[0])
 
 
-def test_new_change_id_has_no_date_prefix() -> None:
-    assert not re.match(r"^\d{4}-\d{2}-\d{2}", new_change_id())
+def test_new_quest_id_has_no_date_prefix() -> None:
+    assert not re.match(r"^\d{4}-\d{2}-\d{2}", new_quest_id())
 
 
 def test_screening_rejects_every_denylisted_stem() -> None:
@@ -51,9 +51,9 @@ def test_screening_accepts_a_clean_stem() -> None:
     assert _is_clean_stem("kobe") is True
 
 
-def test_new_change_id_never_emits_a_denylisted_stem() -> None:
+def test_new_quest_id_never_emits_a_denylisted_stem() -> None:
     for _ in range(5000):
-        assert new_change_id()[:4] not in _DENYLIST
+        assert new_quest_id()[:4] not in _DENYLIST
 
 
 def _all_clean_stems() -> list[str]:
@@ -67,7 +67,7 @@ def _all_clean_stems() -> list[str]:
     ]
 
 
-def test_new_change_id_avoids_existing_stems() -> None:
+def test_new_quest_id_avoids_existing_stems() -> None:
     # AC 1: over many draws with a small avoid-set, the returned stem is never
     # one of the avoided stems. |S|=3 out of ~6395 clean stems: a build that
     # ignored existing_stems would collide ~9 times in expectation over 20000
@@ -75,22 +75,22 @@ def test_new_change_id_avoids_existing_stems() -> None:
     avoid = frozenset({"kobe", "mira", "tavo"})
     assert avoid <= set(_all_clean_stems())  # guard: the avoided stems are clean
     for _ in range(20000):
-        assert new_change_id(existing_stems=avoid)[:4] not in avoid
+        assert new_quest_id(existing_stems=avoid)[:4] not in avoid
 
 
-def test_new_change_id_with_avoid_set_keeps_format_and_denylist() -> None:
+def test_new_quest_id_with_avoid_set_keeps_format_and_denylist() -> None:
     # AC 2: for any S, the id is still CVCV + two digits and never denylisted.
     avoid = frozenset({"kobe", "mira"})
     for _ in range(2000):
-        cid = new_change_id(existing_stems=avoid)
+        cid = new_quest_id(existing_stems=avoid)
         assert _ID_RE.fullmatch(cid)
         assert cid[:4] not in _DENYLIST
 
 
-def test_new_change_id_terminates_when_avoid_set_is_saturated() -> None:
+def test_new_quest_id_terminates_when_avoid_set_is_saturated() -> None:
     # AC 3: S contains every clean stem. The mint must still terminate and
     # return a valid-format, denylist-clean id (the last clean stem, a duplicate).
     saturated = frozenset(_all_clean_stems())
-    cid = new_change_id(existing_stems=saturated)
+    cid = new_quest_id(existing_stems=saturated)
     assert _ID_RE.fullmatch(cid)
     assert cid[:4] not in _DENYLIST

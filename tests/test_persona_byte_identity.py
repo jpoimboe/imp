@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 from imp.agents.prompts import build_context, render_prompt
-from imp.agents.runner import ChangeContext
+from imp.agents.runner import QuestContext
 from imp.engine.agent_run import build_agent_invocation
 from imp.engine.state import JsonlEventLog
 from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
@@ -27,7 +27,7 @@ def _agent(tools):
 
 def _rendered_imp_persona(tmp_path: Path) -> str:
     log = JsonlEventLog(tmp_path / "events.jsonl")
-    ctx = build_context(change_title="t", event_log=log)
+    ctx = build_context(quest_title="t", event_log=log)
     return render_prompt((_ASSET / "persona.md").read_text(), ctx,
                          workflow_dir=_ASSET)
 
@@ -37,7 +37,7 @@ def _build(tmp_path, tools):
         agent_def=_agent(tools), provider_name="anthropic", model_name="m",
         rendered_system_prompt="STEP BODY",
         rendered_persona=_rendered_imp_persona(tmp_path), initial_messages=(),
-        change_context=ChangeContext(title="t", project_root=tmp_path,
+        quest_context=QuestContext(title="t", project_root=tmp_path,
                                      workflow_dir=_ASSET),
         user_chat_input_fn=None, transcript_dir=tmp_path / "td",
 events_path=tmp_path / "e.jsonl", subagent_defs={},

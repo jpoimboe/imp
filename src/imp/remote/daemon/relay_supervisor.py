@@ -44,10 +44,10 @@ class RelaySupervisor:
             while True:
                 try:
                     resident = resident_session_ids(self._control_root)
-                    for change_id in resident:
-                        if change_id not in self._running:
-                            self._running.add(change_id)
-                            tg.start_soon(self._relay_one, change_id)
+                    for quest_id in resident:
+                        if quest_id not in self._running:
+                            self._running.add(quest_id)
+                            tg.start_soon(self._relay_one, quest_id)
                     failing = False
                 except Exception:
                     # A poll must never kill the daemon. Directory reads are guarded
@@ -61,24 +61,24 @@ class RelaySupervisor:
                                      exc_info=True)
                 await anyio.sleep(self._poll_gap)
 
-    def _subscribed_probe(self, change_id: str) -> Callable[[], bool] | None:
+    def _subscribed_probe(self, quest_id: str) -> Callable[[], bool] | None:
         subs = self._subscriptions   # local so mypy narrows past the None-return
         if subs is None:
             return None
-        return lambda: subs.contains(change_id)
+        return lambda: subs.contains(quest_id)
 
-    async def _relay_one(self, change_id: str) -> None:
+    async def _relay_one(self, quest_id: str) -> None:
         relay = SessionRelay(
-            socket_path=str(session_socket_path(self._control_root, change_id)),
-            change_id=change_id,
-            title_provider=lambda: self._title_for(change_id),
+            socket_path=str(session_socket_path(self._control_root, quest_id)),
+            quest_id=quest_id,
+            title_provider=lambda: self._title_for(quest_id),
             events=self._events,
             sink=self._sink,
-            is_subscribed=self._subscribed_probe(change_id),
+            is_subscribed=self._subscribed_probe(quest_id),
         )
         try:
             await relay.run()
         except OSError:
             pass
         finally:
-            self._running.discard(change_id)
+            self._running.discard(quest_id)

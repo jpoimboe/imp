@@ -40,7 +40,7 @@ are two git trees you check out side by side.
 REPO=$(git rev-parse --show-toplevel)
 ID=2026-06-11-9k6zii                 # the Change id (see `imp list --all`)
 BR=imp/$ID                           # the Change's branch
-BASE=$(python3 -c "import json;print(json.load(open('$REPO/.imp/worktrees/$ID/.imp/change/change.json'))['base_branch'])" 2>/dev/null || echo master)
+BASE=$(python3 -c "import json;print(json.load(open('$REPO/.imp/worktrees/$ID/.imp/change/quest.json'))['base_branch'])" 2>/dev/null || echo master)
 
 # AFTER tree: the Change's live worktree if it still exists (in-flight), else a
 # fresh worktree at the branch tip (works for a merged Change too — the ref lives on).
@@ -97,11 +97,11 @@ ROWS = [("2026-06-11-yaitd7", "Add a --version flag", "paused", "implement", 2),
 missing symbol can't break unrelated scenes):
 ```python
 import sys; sys.path.insert(0, "/tmp/showcase"); import data
-from imp.cli import change_row            # a new module → only resolves in the after tree
+from imp.cli import quest_row            # a new module → only resolves in the after tree
 def scene_status():
-    rows = [change_row.header_line(color=True)]
+    rows = [quest_row.header_line(color=True)]
     for cid, title, st, step, age in data.ROWS:
-        rows.append(change_row.format_change_line(change_id=cid, title=title,
+        rows.append(quest_row.format_quest_line(quest_id=cid, title=title,
             status=st, step=step, last_iso=data.iso(age), now=data.NOW, color=True))
     return rows
 SCENES = {"status": scene_status, ...}
@@ -188,7 +188,7 @@ git worktree prune
 - **A scene's screen must be ≥ its line count + 1 rows**, or the final `\n` scrolls
   line 0 away. `render_png.py` handles this; if you render by hand, remember it.
 - **Lazy-import new symbols** inside each after-scene. A top-level
-  `from imp.cli import change_row` makes the *whole* emitter fail to import in the
+  `from imp.cli import quest_row` makes the *whole* emitter fail to import in the
   before tree even for scenes that don't need it.
 - **Reproduce, don't fabricate, old behaviour.** Read the old function in the before
   tree (or run the old command) — guessing the old wording undermines the contrast.

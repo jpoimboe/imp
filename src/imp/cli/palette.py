@@ -255,7 +255,7 @@ def action_text(action: Any) -> str:
 # calmest; weight + color are reserved for speaker identity and structure.
 NODE_COLORS: dict[str, tuple[str, ...]] = {
     "workflow": ("bold", "magenta"),   # appears once at top — the lone bold anchor
-    "change_id": ("wordmark",),         # the change's identity handle: imp's brand gold, no bold
+    "quest_id": ("wordmark",),         # the change's identity handle: imp's brand gold, no bold
     "phase": ("bold", "blue"),         # structure stands out: bold blue
     "step": ("bold", "step"),          # a bold darker-blue "mini-phase" label
     "breadcrumb": ("gray",),           # per-step completion line — recede entirely

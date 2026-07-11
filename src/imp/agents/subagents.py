@@ -18,7 +18,7 @@ from typing import Any, cast
 
 from imp.agents.parallel import emit_parallelism_warning_once
 from imp.agents.prompts import build_context, render_prompt
-from imp.agents.runner import ChangeContext, Message, TextBlock
+from imp.agents.runner import Message, QuestContext, TextBlock
 from imp.agents.tools import Tool
 from imp.agents.tools.context import ToolContext
 from imp.agents.transcript import Transcript
@@ -179,15 +179,15 @@ def _build_spike_policy(change: Any, worktree_path: Path, test_gates: Any) -> An
         sandbox_config_from_raw(config.sandbox or {}), network=True)
     eng = overlay_engine_env(
         os.environ,
-        engine_env(project_root=worktree_path, change_id=change.id,
-                   change_title=change.title, change_dir=change.change_dir,
+        engine_env(project_root=worktree_path, quest_id=change.id,
+                   quest_title=change.title, quest_dir=change.quest_dir,
                    test_gates=test_gates),
     )
     return resolve_policy(
         worktree=worktree_path, control_root=change.control_root,
-        change_id=change.id, cfg=cfg, engine_env_result=eng,
+        quest_id=change.id, cfg=cfg, engine_env_result=eng,
         environ=os.environ, available=sandbox_available(),
-        change_dir=change.change_dir, spike=True,
+        quest_dir=change.quest_dir, spike=True,
     )
 
 
@@ -225,7 +225,7 @@ async def dispatch_task(
         if ctx.change is None:
             raise RuntimeError(
                 f"subagent {subagent_name!r} sets isolated_worktree but was "
-                "dispatched with no live change context (nested dispatch); "
+                "dispatched with no live Quest context (nested dispatch); "
                 "isolated_worktree is only supported from a top-level agent")
         from imp.engine import worktree as _worktree
         spike_worktree = _worktree.create_spike_worktree(
@@ -234,9 +234,9 @@ async def dispatch_task(
 
     try:
         if isolated:
-            from imp.engine.change import link_change_home
+            from imp.engine.quest import link_quest_home
             assert spike_worktree is not None
-            link_change_home(spike_worktree, ctx.change.change_dir)
+            link_quest_home(spike_worktree, ctx.change.quest_dir)
             dispatch_policy = _build_spike_policy(
                 ctx.change, spike_worktree, ctx.test_gates)
             if not dispatch_policy.active and ctx.event_log is not None:
@@ -246,9 +246,9 @@ async def dispatch_task(
         else:
             dispatch_policy = ctx.sandbox_policy
 
-        cc = ctx.change_context or ChangeContext(
+        cc = ctx.quest_context or QuestContext(
             id="", title="", project_root=ctx.project_root,
-            # No change context -> no change_dir, no snapshot; live dir is the only option.
+            # No change context -> no quest_dir, no snapshot; live dir is the only option.
             workflow_dir=resolve_workflow_dir(
                 ctx.project_root,
                 parse_default_workflow(ctx.project_root / "imp" / "project.yaml"),
@@ -260,9 +260,9 @@ async def dispatch_task(
         # Render the subagent's Jinja template. A SEPARATE read-only JsonlEventLog
         # for {{ events.* }} — NOT ctx.event_log, which is the shared WRITE instance.
         prompt_ctx = build_context(
-            change_id=cc.id,
-            change_title=cc.title,   # dispatch label is the title now [item 11]
-            change_home=cc.change_home,
+            quest_id=cc.id,
+            quest_title=cc.title,   # dispatch label is the title now [item 11]
+            quest_home=cc.quest_home,
             event_log=JsonlEventLog(ctx.events_path),
             vars=ctx.change_state.vars if ctx.change_state is not None else {},
             project_facts=cc.project_facts,
@@ -319,7 +319,7 @@ async def dispatch_task(
                 rendered_system_prompt=rendered_prompt,
                 rendered_persona=rendered_persona,
                 initial_messages=init_msgs,
-                change_context=cc,
+                quest_context=cc,
                 user_chat_input_fn=None,
                 transcript_dir=target,
                 events_path=ctx.events_path,

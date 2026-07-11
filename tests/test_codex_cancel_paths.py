@@ -7,7 +7,7 @@ from typing import Any
 
 import pytest
 
-from imp.agents.runner import AgentInvocation, ChangeContext
+from imp.agents.runner import AgentInvocation, QuestContext
 from imp.engine.state import InMemoryEventLog
 from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
 from imp.providers.codex_runner import CodexAgentRunner
@@ -50,7 +50,7 @@ def _invocation(tmp_path: Path, *, event_log: object,
     return AgentInvocation(
         agent_def=_agent_def(), provider_name="codex", model_name="gpt-5.5",
         system_prompt="you are a test agent", initial_messages=(),
-        change_context=ChangeContext(
+        quest_context=QuestContext(
             title="t", project_root=tmp_path, workflow_dir=tmp_path, id="c1"),
         transcript_dir=tmp_path / "tx",
         events_path=tmp_path / "events.jsonl", agent_id="step:t",

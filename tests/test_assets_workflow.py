@@ -44,7 +44,7 @@ def test_default_agents_resolve_to_position_appropriate_tools(tmp_path: Path) ->
     shutil.copytree(asset, tmp_path / "wf")
     wf = load_workflow(tmp_path / "wf")
 
-    top_leaf = BASE_CAPS | {"rename_change", "create_change",
+    top_leaf = BASE_CAPS | {"rename_quest", "create_quest",
                             "create_and_enter_worktree"}
     top_dispatcher = top_leaf | {"sub_agent"}
     subagents = {
@@ -399,7 +399,7 @@ def test_no_goto_spec_finalizer_edge() -> None:
     from pathlib import Path
     wf = Path("src/imp/assets/workflows/imp/workflow.yaml").read_text()
     # Rework edges back into spec-finalizer must be `resume:` (transcript kept), so a
-    # resumed spec-finalizer always has its rename_change result in history. The one
+    # resumed spec-finalizer always has its rename_quest result in history. The one
     # permitted `goto: spec-finalizer` is threshold's forward entry on the full path.
     assert wf.count("goto: spec-finalizer") == 1  # only threshold's forward entry
     assert "goto: spec_finalizer" not in wf
@@ -678,7 +678,7 @@ def test_spec_reviewer_renders_canonical_severity_rubric() -> None:
     from imp.engine.state import InMemoryEventLog
     wf_dir = bundled_workflow_dir("imp")
     body = load_workflow(wf_dir).agents["spec-reviewer"].prompt_template_source
-    ctx = build_context(change_title="t", event_log=InMemoryEventLog())
+    ctx = build_context(quest_title="t", event_log=InMemoryEventLog())
     out = render_prompt(body, ctx, workflow_dir=wf_dir)
     assert "behavioral impact, not file type" in out
     for term in ("**Critical**", "**Major**", "**Minor**", "**Nit**"):
@@ -704,7 +704,7 @@ def test_code_reviewer_renders_canonical_severity_rubric() -> None:
     from imp.engine.state import InMemoryEventLog
     wf_dir = bundled_workflow_dir("imp")
     body = load_workflow(wf_dir).agents["code-reviewer"].prompt_template_source
-    ctx = build_context(change_title="t", event_log=InMemoryEventLog())
+    ctx = build_context(quest_title="t", event_log=InMemoryEventLog())
     out = render_prompt(body, ctx, workflow_dir=wf_dir)
     assert "behavioral impact, not file type" in out
     for term in ("**Critical**", "**Major**", "**Minor**", "**Nit**"):
@@ -723,7 +723,7 @@ def test_spec_finalizer_replaces_spec_writer() -> None:
     # Brainstorm-entry sections are gone.
     assert "## Brainstorm Discipline" not in body
     assert "## Build now or save for later" not in body
-    assert "## Naming the Change" not in body
+    assert "## Naming the Quest" not in body
     # Its finalize core remains.
     assert "Threshold handoff" in body
     assert "imp artifact-commit" not in body
@@ -944,8 +944,8 @@ def test_task_lead_coder_tier_defaults_medium_not_task_count(tmp_path: Path) -> 
 
     def render(task_total: int) -> str:
         return render_prompt(body, build_context(
-            change_title="t", event_log=log, change_id="abc",
-            change_home=".imp/changes/abc",
+            quest_title="t", event_log=log, quest_id="abc",
+            quest_home=".imp/quests/abc",
             vars={"task_total": task_total, "fast_path": False}),
             workflow_dir=bundled_workflow_dir("imp"))
 
@@ -993,7 +993,7 @@ def test_spiker_is_isolated_dispatchable_subagent() -> None:
     assert spiker.tools == BASE_CAPS
     assert {"write_file", "edit_file", "bash", "web_fetch"} <= spiker.tools
     assert "sub_agent" not in spiker.tools
-    assert "rename_change" not in spiker.tools
+    assert "rename_quest" not in spiker.tools
     # spiker must have a label
     assert spiker.label
 

@@ -78,7 +78,7 @@ def check_atomic_coder_commit(repo: str, base: str, sentinel: str) -> Result:
 
 
 def check_artifacts_in_archive(repo: str) -> Result:
-    ids = archived_change_ids(repo)
+    ids = archived_quest_ids(repo)
     if len(ids) != 1:
         return Result("artifacts_in_archive", False,
                       f"expected exactly one archived change, got {_fmt(ids)}")
@@ -110,15 +110,15 @@ def check_no_artifacts_on_code_branch(repo: str, base: str) -> Result:
                   f"branch: {_fmt(artifacts)}")
 
 
-def archived_change_ids(repo: str) -> list[str]:
-    """Change ids from the archive index (new primary store)."""
+def archived_quest_ids(repo: str) -> list[str]:
+    """Quest ids from the archive index (new primary store)."""
     db = os.path.join(repo, ".imp", "archive", "index.db")
     if not os.path.exists(db):
         return []
     try:
         conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
         try:
-            return [r[0] for r in conn.execute("SELECT id FROM changes ORDER BY id")]
+            return [r[0] for r in conn.execute("SELECT id FROM quests ORDER BY id")]
         finally:
             conn.close()
     except Exception:
@@ -133,7 +133,7 @@ def _imp(repo: str, imp: str, *args: str) -> subprocess.CompletedProcess[str]:
 
 
 def check_readback(repo: str, imp: str) -> Result:
-    ids = archived_change_ids(repo)
+    ids = archived_quest_ids(repo)
     if len(ids) != 1:
         return Result("readback", False,
                       f"expected exactly one archived change, got {_fmt(ids)}")

@@ -26,7 +26,7 @@ class _QueuePrompt:
 
 
 class _FakeChange:
-    """Minimal Change stand-in for the opening-prompt slash path: carries the id/
+    """Minimal Quest stand-in for the opening-prompt slash path: carries the id/
     title _print_opening needs plus the workflow_dir/event_log handle_slash_line
     touches."""
 

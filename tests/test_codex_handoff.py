@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from imp.agents.runner import AgentInvocation, ChangeContext
+from imp.agents.runner import AgentInvocation, QuestContext
 from imp.engine.reincarnation import handoff_path_for
 from imp.engine.state import InMemoryEventLog
 from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
@@ -70,7 +70,7 @@ async def test_threshold_crossing_elicits_codex_handoff(tmp_path: Path) -> None:
     inv = AgentInvocation(
         agent_def=_agent_def(), provider_name="codex", model_name="gpt-5.5",
         system_prompt="you are a test agent", initial_messages=(),
-        change_context=ChangeContext(title="t", project_root=tmp_path,
+        quest_context=QuestContext(title="t", project_root=tmp_path,
                                      workflow_dir=tmp_path, id="c1"),
         transcript_dir=tmp_path / "tx", events_path=tmp_path / "events.jsonl",
         agent_id="step:t", event_log=elog, checkpoint_threshold=0.8)
@@ -107,7 +107,7 @@ async def test_below_threshold_does_not_elicit_codex_handoff(tmp_path: Path) -> 
     inv = AgentInvocation(
         agent_def=_agent_def(), provider_name="codex", model_name="gpt-5.5",
         system_prompt="you are a test agent", initial_messages=(),
-        change_context=ChangeContext(title="t", project_root=tmp_path,
+        quest_context=QuestContext(title="t", project_root=tmp_path,
                                      workflow_dir=tmp_path, id="c1"),
         transcript_dir=tmp_path / "tx", events_path=tmp_path / "events.jsonl",
         agent_id="step:t", event_log=elog, checkpoint_threshold=0.8)
@@ -144,7 +144,7 @@ async def test_completing_turn_above_threshold_completes_not_handoff(
     inv = AgentInvocation(
         agent_def=_agent_def(), provider_name="codex", model_name="gpt-5.5",
         system_prompt="you are a test agent", initial_messages=(),
-        change_context=ChangeContext(title="t", project_root=tmp_path,
+        quest_context=QuestContext(title="t", project_root=tmp_path,
                                      workflow_dir=tmp_path, id="c1"),
         transcript_dir=tmp_path / "tx", events_path=tmp_path / "events.jsonl",
         agent_id="step:t", event_log=elog, checkpoint_threshold=0.8)

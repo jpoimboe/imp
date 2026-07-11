@@ -8,7 +8,7 @@ import pytest
 from imp.remote.daemon import spawn
 
 
-def test_create_change_sets_autosubscribe_env(
+def test_create_quest_sets_autosubscribe_env(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     captured: dict[str, Any] = {}
@@ -18,7 +18,7 @@ def test_create_change_sets_autosubscribe_env(
         captured["argv"] = argv
 
     monkeypatch.setattr(spawn, "_spawn_detached", fake_spawn)
-    spawn.create_change(tmp_path, "add dark mode")
+    spawn.create_quest(tmp_path, "add dark mode")
     assert captured["env"]["IMP_REMOTE_AUTOSUBSCRIBE"] == "1"
     assert "new" in captured["argv"]
 

@@ -13,7 +13,7 @@ from pathlib import Path
 import pytest
 
 from imp.agents.parallel import reset_parallelism_cache
-from imp.agents.runner import ChangeContext, ImagePart, TextPart
+from imp.agents.runner import ImagePart, QuestContext, TextPart
 from imp.agents.subagents import make_task_tool
 from imp.agents.tools import Tool
 from imp.agents.tools.complete_step import make_complete_step_tool
@@ -32,8 +32,8 @@ def _ctx(tmp_path: Path) -> ToolContext:
         project_root=tmp_path,
         events_path=tmp_path / "events.jsonl",
     )
-    ctx.change_context = ChangeContext(
-        title="Test Change", project_root=tmp_path,
+    ctx.quest_context = QuestContext(
+        title="Test Quest", project_root=tmp_path,
         workflow_dir=tmp_path / ".imp" / "change" / "workflow",
     )
     return ctx
@@ -143,8 +143,8 @@ async def test_wrap_task_routes_to_dispatch_task(tmp_path: Path) -> None:
     ctx = _ctx(tmp_path)
     ctx.subagent_defs = {"sub": sub_def}
     ctx.parent_transcript_dir = tmp_path / "parent"
-    ctx.change_context = ChangeContext(
-        title="Test Change", project_root=tmp_path,
+    ctx.quest_context = QuestContext(
+        title="Test Quest", project_root=tmp_path,
         workflow_dir=tmp_path / ".imp" / "change" / "workflow",
     )
 
@@ -196,8 +196,8 @@ async def test_wrap_task_emits_matching_call_and_result(tmp_path: Path) -> None:
     ctx = _ctx(tmp_path)
     ctx.subagent_defs = {"sub": sub_def}
     ctx.parent_transcript_dir = tmp_path / "parent"
-    ctx.change_context = ChangeContext(
-        title="Test Change", project_root=tmp_path,
+    ctx.quest_context = QuestContext(
+        title="Test Quest", project_root=tmp_path,
         workflow_dir=tmp_path / ".imp" / "change" / "workflow",
     )
     elog = InMemoryEventLog()
@@ -813,8 +813,8 @@ async def test_impl_flushes_llm_group_before_appending_sub_agent_call(
 
     ctx = _ctx(tmp_path)
     ctx.subagent_defs = {"sub": sub_def}
-    ctx.change_context = ChangeContext(
-        title="Test Change", project_root=tmp_path,
+    ctx.quest_context = QuestContext(
+        title="Test Quest", project_root=tmp_path,
         workflow_dir=tmp_path / ".imp" / "change" / "workflow",
     )
     elog = InMemoryEventLog()

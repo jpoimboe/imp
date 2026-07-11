@@ -12,7 +12,7 @@ import anyio
 import pytest
 
 import imp.agents.tools.bash  # noqa: F401
-from imp.agents.runner import ChangeContext
+from imp.agents.runner import QuestContext
 from imp.agents.tools import get_registry
 from imp.agents.tools.context import ToolContext, terminate_running_processes
 from imp.engine.sandbox import SandboxPolicy, sandbox_available
@@ -57,7 +57,7 @@ def _ctx(worktree: Path) -> ToolContext:
         project_root=worktree,
         events_path=worktree / "events.jsonl",
     )
-    ctx.change_context = ChangeContext(
+    ctx.quest_context = QuestContext(
         title="t",
         project_root=worktree,
         workflow_dir=worktree / ".imp" / "wf",

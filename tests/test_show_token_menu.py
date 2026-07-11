@@ -23,9 +23,9 @@ def _row(cid: str, last: str = "2026-06-11T00:00:00+00:00",
 def test_show_all_rows_spans_pool_and_skips_unreadable(
     monkeypatch, tmp_path: Path,
 ) -> None:
-    # AC 3: the no-token pool is the full _iter_change_ids set (live + backlog +
+    # AC 3: the no-token pool is the full _iter_quest_ids set (live + backlog +
     # archived); an id _row_for_id cannot read (None) is dropped from the menu.
-    monkeypatch.setattr(m, "_iter_change_ids",
+    monkeypatch.setattr(m, "_iter_quest_ids",
                         lambda c: ["live10", "arch20", "bad30"])
 
     def fake_row(control: Path, cid: str):
@@ -41,7 +41,7 @@ async def test_pick_show_target_empty_pool(
     monkeypatch, tmp_path: Path, capsys,
 ) -> None:
     # AC 8: bare `imp show` on an interactive tty with no changes prints
-    # "No changes to show." and returns 2, opening no menu.
+    # "No Quests to show." and returns 2, opening no menu.
     monkeypatch.setattr(m, "_show_all_rows", lambda c: [])
     monkeypatch.setattr(m, "_interactive", lambda: True)
 
@@ -51,21 +51,21 @@ async def test_pick_show_target_empty_pool(
     monkeypatch.setattr(m.resume_select, "run_picker", boom)
     rc = await m._pick_show_target(tmp_path)
     assert rc == 2
-    assert "No changes to show." in capsys.readouterr().out
+    assert "No Quests to show." in capsys.readouterr().out
 
 
 @pytest.mark.anyio
 async def test_pick_show_matches_interactive_selection(
     monkeypatch, tmp_path: Path,
 ) -> None:
-    # AC 1 / AC 9a: the scoped picker is headed "Show which change?" and returns
+    # AC 1 / AC 9a: the scoped picker is headed "Show which Quest?" and returns
     # the selected id. Display rows are built from _row_for_id over the raw ids.
     monkeypatch.setattr(m, "_interactive", lambda: True)
     monkeypatch.setattr(m, "_row_for_id", lambda c, cid: _row(cid))
 
     async def fake_picker(candidates, *, now, color, header, selected_index):
-        assert "Show which change?" in header
-        return candidates[1].change_id
+        assert "Show which Quest?" in header
+        return candidates[1].quest_id
 
     monkeypatch.setattr(m.resume_select, "run_picker", fake_picker)
     chosen = await m._pick_show_matches(tmp_path, ["lodo40", "lodo77"])
@@ -100,7 +100,7 @@ def test_cmd_show_two_matches_open_picker(monkeypatch, tmp_path: Path) -> None:
     # AC 1 / AC 9a: >=2 raw matches on an interactive tty open the scoped picker
     # with exactly those ids; _resolve_id is NOT consulted for the fork.
     monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
-    monkeypatch.setattr(m, "_iter_change_ids",
+    monkeypatch.setattr(m, "_iter_quest_ids",
                         lambda c: ["lodo40", "lodo77", "tavo12"])
     monkeypatch.setattr(m, "_interactive", lambda: True)
     seen = {}
@@ -124,7 +124,7 @@ def test_cmd_show_picker_selection_dispatches(monkeypatch, tmp_path: Path) -> No
     # AC 9b: an interactive selection of a scoped match flows into the resource
     # dispatch with that change id.
     monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
-    monkeypatch.setattr(m, "_iter_change_ids", lambda c: ["lodo40", "lodo77"])
+    monkeypatch.setattr(m, "_iter_quest_ids", lambda c: ["lodo40", "lodo77"])
     monkeypatch.setattr(m, "_interactive", lambda: True)
 
     async def fake_pick(control, matches):
@@ -134,8 +134,8 @@ def test_cmd_show_picker_selection_dispatches(monkeypatch, tmp_path: Path) -> No
     monkeypatch.setattr(m, "_unstarted_backlog_meta", lambda c, cid: None)
     seen = {}
 
-    def fake_detail(control, change_id, *, now):
-        seen["id"] = change_id
+    def fake_detail(control, quest_id, *, now):
+        seen["id"] = quest_id
         return ["card"]
 
     monkeypatch.setattr(m, "_detail_card", fake_detail)
@@ -149,7 +149,7 @@ def test_cmd_show_single_match_skips_picker(monkeypatch, tmp_path: Path) -> None
     # AC 6 / AC 9a: a token matching exactly one id resolves directly via
     # _resolve_id, opening no picker.
     monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
-    monkeypatch.setattr(m, "_iter_change_ids", lambda c: ["lodo40", "tavo12"])
+    monkeypatch.setattr(m, "_iter_quest_ids", lambda c: ["lodo40", "tavo12"])
     monkeypatch.setattr(m, "_interactive", lambda: True)
 
     def boom_pick(*a, **k):
@@ -159,8 +159,8 @@ def test_cmd_show_single_match_skips_picker(monkeypatch, tmp_path: Path) -> None
     monkeypatch.setattr(m, "_unstarted_backlog_meta", lambda c, cid: None)
     seen = {}
 
-    def fake_detail(control, change_id, *, now):
-        seen["id"] = change_id
+    def fake_detail(control, quest_id, *, now):
+        seen["id"] = quest_id
         return []
 
     monkeypatch.setattr(m, "_detail_card", fake_detail)
@@ -176,7 +176,7 @@ def test_cmd_show_non_tty_ambiguous_exits_2(
     # AC 5 / AC 9c: a non-tty ambiguous token skips the picker and hits
     # _exit_ambiguous (candidate list to stderr, exit 2).
     monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
-    monkeypatch.setattr(m, "_iter_change_ids", lambda c: ["lodo40", "lodo77"])
+    monkeypatch.setattr(m, "_iter_quest_ids", lambda c: ["lodo40", "lodo77"])
     monkeypatch.setattr(m, "_interactive", lambda: False)
 
     def boom_pick(*a, **k):
@@ -193,7 +193,7 @@ def test_cmd_show_non_tty_ambiguous_exits_2(
 def test_cmd_show_picker_cancel_no_dispatch(monkeypatch, tmp_path: Path) -> None:
     # AC 4: cancelling returns the picker rc and reaches no resource-dispatch code.
     monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
-    monkeypatch.setattr(m, "_iter_change_ids", lambda c: ["lodo40", "lodo77"])
+    monkeypatch.setattr(m, "_iter_quest_ids", lambda c: ["lodo40", "lodo77"])
     monkeypatch.setattr(m, "_interactive", lambda: True)
 
     async def cancel_pick(control, matches):
@@ -222,8 +222,8 @@ def test_cmd_show_no_token_interactive_picker(monkeypatch, tmp_path: Path) -> No
     monkeypatch.setattr(m, "_unstarted_backlog_meta", lambda c, cid: None)
     seen = {}
 
-    def fake_detail(control, change_id, *, now):
-        seen["id"] = change_id
+    def fake_detail(control, quest_id, *, now):
+        seen["id"] = quest_id
         return []
 
     monkeypatch.setattr(m, "_detail_card", fake_detail)
@@ -239,7 +239,7 @@ def test_cmd_show_empty_token_skips_picker_and_errors(
     # Keeps picker/resolve fork consistent with _resolve_id's empty-token guard,
     # regardless of change count.
     monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
-    monkeypatch.setattr(m, "_iter_change_ids", lambda c: ["lodo40", "lodo77"])
+    monkeypatch.setattr(m, "_iter_quest_ids", lambda c: ["lodo40", "lodo77"])
     monkeypatch.setattr(m, "_interactive", lambda: True)
 
     def boom_pick(*a, **k):
@@ -249,7 +249,7 @@ def test_cmd_show_empty_token_skips_picker_and_errors(
     rc = m._cmd_show(_ns(""))
     err = capsys.readouterr().err
     assert rc == 2
-    assert "no Change matches" in err
+    assert "no Quest matches" in err
 
 
 def test_cmd_show_no_token_non_tty_errors(
@@ -270,4 +270,4 @@ def test_cmd_show_no_token_non_tty_errors(
     rc = m._cmd_show(_ns(None))
     err = capsys.readouterr().err
     assert rc == 2
-    assert "needs a change id" in err
+    assert "needs a Quest id" in err

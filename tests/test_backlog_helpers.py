@@ -45,9 +45,9 @@ def test_readiness_resolves_from_archive_index(tmp_path: Path) -> None:
         "created_at": "2026-06-01T00:00:00+00:00", "depends_on": []}))
     sj = tmp_path / "s.json"
     sj.write_text(_json.dumps({"id": "dep1", "status": "completed", "step": None}))
-    archive.archive_change(
+    archive.archive_quest(
         tmp_path, "dep1", events_path=events,
-        change_json_path=cj, state_json_path=sj)
+        quest_json_path=cj, state_json_path=sj)
 
     assert backlog.readiness(tmp_path, ["dep1"]) == (True, [])
     assert backlog.readiness(tmp_path, ["dep1", "ghost"]) == (False, ["ghost"])

@@ -1,4 +1,4 @@
-"""Change.create reads the project layer from imp/project.yaml in the worktree
+"""Quest.create reads the project layer from imp/project.yaml in the worktree
 (spec §7 step 3)."""
 import shutil
 import subprocess
@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from imp.assets import bundled_workflow_dir
-from imp.engine.change import Change
+from imp.engine.quest import Quest
 from imp.providers import register_builtin_providers, resolve
 
 
@@ -45,5 +45,5 @@ def test_change_create_uses_floor_tiers_without_a_tiers_block(
     _git(root, "add", "-A")
     _git(root, "commit", "-qm", "seed")
 
-    change = Change.create(root, title="t", change_id="2026-06-08-x", base_branch="main")
+    change = Quest.create(root, title="t", quest_id="2026-06-08-x", base_branch="main")
     assert change.id == "2026-06-08-x"

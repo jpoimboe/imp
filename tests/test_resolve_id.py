@@ -8,12 +8,12 @@ from pathlib import Path
 import pytest
 
 from imp.cli.main import _resolve_id
-from imp.engine.change import Change
+from imp.engine.quest import Quest
 from tests.conftest import _seed_control
 
 
-def _mk(tmp_path: Path, change_id: str, title: str) -> Change:
-    return Change.create(tmp_path, title=title, change_id=change_id, base_branch="main")
+def _mk(tmp_path: Path, quest_id: str, title: str) -> Quest:
+    return Quest.create(tmp_path, title=title, quest_id=quest_id, base_branch="main")
 
 
 def test_bare_id_resolves_named_or_unnamed(tmp_path: Path) -> None:

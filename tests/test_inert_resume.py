@@ -13,7 +13,7 @@ from imp.cli.inert_resume import (
     render_pending_question,
     run_inert_resume,
 )
-from imp.engine.change import Change
+from imp.engine.quest import Quest
 from imp.engine.state import CurrentStep, State
 from tests.conftest import _seed_control
 
@@ -73,11 +73,11 @@ def test_render_inert_question_emits_ansi_when_color() -> None:
 
 def _seed_paused_change(
     tmp_path: Path, messages: list[Message], *, status: str = "paused",
-) -> Change:
+) -> Quest:
     _seed_control(tmp_path)
-    ch = Change.create_draft(
-        tmp_path, title="C", change_id="c", base_branch="main")
-    tdir = ch.change_dir / "steps" / "p" / "s"
+    ch = Quest.create_draft(
+        tmp_path, title="C", quest_id="c", base_branch="main")
+    tdir = ch.quest_dir / "steps" / "p" / "s"
     tdir.mkdir(parents=True)
     t = Transcript(tdir / "transcript.jsonl")
     for m in messages:
@@ -114,15 +114,15 @@ def test_bare_turn_end_question_none_when_not_paused(tmp_path: Path) -> None:
 
 def test_bare_turn_end_question_none_when_no_current_step(tmp_path: Path) -> None:
     _seed_control(tmp_path)
-    ch = Change.create_draft(tmp_path, title="C", change_id="c", base_branch="main")
+    ch = Quest.create_draft(tmp_path, title="C", quest_id="c", base_branch="main")
     State(id="c", step="s", step_attempt=0, status="paused").save(ch.state_dir)
     assert bare_turn_end_question(ch) is None
 
 
 def test_bare_turn_end_question_none_when_transcript_absent(tmp_path: Path) -> None:
     _seed_control(tmp_path)
-    ch = Change.create_draft(tmp_path, title="C", change_id="c", base_branch="main")
-    tdir = ch.change_dir / "steps" / "p" / "s"
+    ch = Quest.create_draft(tmp_path, title="C", quest_id="c", base_branch="main")
+    tdir = ch.quest_dir / "steps" / "p" / "s"
     tdir.mkdir(parents=True)
     State(id="c", step="s", step_attempt=0, status="paused",
           current_step=CurrentStep(transcript_dir=tdir)).save(ch.state_dir)
@@ -228,8 +228,8 @@ async def test_run_inert_resume_reprompts_on_blank_line() -> None:
 @pytest.mark.anyio
 async def test_run_inert_resume_ctrl_c_leaves_change_untouched(tmp_path: Path) -> None:
     _seed_control(tmp_path)
-    ch = Change.create_draft(
-        tmp_path, title="C", change_id="c", base_branch="main")
+    ch = Quest.create_draft(
+        tmp_path, title="C", quest_id="c", base_branch="main")
     before = ch.events_path.read_bytes() if ch.events_path.exists() else b""
 
     async def ask_line() -> str | None:

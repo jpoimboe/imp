@@ -153,7 +153,7 @@ async def dispatch_tool(
         # SDK item id (item.started opens the fold, item.completed closes it). An
         # exception (ordinary failure OR SubagentSuspended) propagates out of this
         # handler; FastMCP wraps it as an isError tool result, so a batched child
-        # cannot pause the run (Change 1). A SubagentSuspended is re-raised with a
+        # cannot pause the run (Quest 1). A SubagentSuspended is re-raised with a
         # bracketed [interrupted] marker so the FastMCP-wrapped result text lets the
         # renderer classify the fold as (interrupted), not (failed) — the result
         # text is the only channel codex controls here.

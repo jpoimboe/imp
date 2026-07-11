@@ -1,4 +1,4 @@
-"""Read side of the per-Change archive: index/record/blob store."""
+"""Read side of the per-Quest archive: index/record/blob store."""
 
 from __future__ import annotations
 
@@ -24,7 +24,7 @@ def _read_index_ids(control_root: Path) -> list[str]:
         return []
     conn = index.connect(db)
     try:
-        return index.change_ids(conn)
+        return index.quest_ids(conn)
     finally:
         conn.close()
 
@@ -33,13 +33,13 @@ def archived_ids(control_root: Path) -> list[str]:
     return sorted(_read_index_ids(control_root))
 
 
-def is_archived(control_root: Path, change_id: str) -> bool:
+def is_archived(control_root: Path, quest_id: str) -> bool:
     db = index_path(control_root)
     if not db.exists():
         return False
     conn = index.connect(db)
     try:
-        return index.has_change(conn, change_id)
+        return index.has_quest(conn, quest_id)
     finally:
         conn.close()
 
@@ -98,29 +98,29 @@ def most_recent_archived_id(control_root: Path) -> str | None:
         conn.close()
 
 
-def last_event_ts(control_root: Path, change_id: str) -> str | None:
+def last_event_ts(control_root: Path, quest_id: str) -> str | None:
     ensure_current(control_root)
     db = index_path(control_root)
     if not db.exists():
         return None
     conn = index.connect(db)
     try:
-        return index.last_event_ts(conn, change_id)
+        return index.last_event_ts(conn, quest_id)
     finally:
         conn.close()
 
 
-def read_events(control_root: Path, change_id: str) -> bytes | None:
-    rec = record.read_record(records_root(control_root), change_id)
+def read_events(control_root: Path, quest_id: str) -> bytes | None:
+    rec = record.read_record(records_root(control_root), quest_id)
     if rec is None:
         return None
     return LocalBlobStore(blobs_root(control_root)).get(rec["events_hash"])
 
 
-def read_step_blobs(control_root: Path, change_id: str) -> dict[str, bytes]:
+def read_step_blobs(control_root: Path, quest_id: str) -> dict[str, bytes]:
     """Steps-relative path -> blob bytes for an archived resumable change.
     Empty when the change is absent or recorded no step blobs."""
-    rec = record.read_record(records_root(control_root), change_id)
+    rec = record.read_record(records_root(control_root), quest_id)
     if rec is None:
         return {}
     store = LocalBlobStore(blobs_root(control_root))
@@ -132,18 +132,18 @@ def read_step_blobs(control_root: Path, change_id: str) -> dict[str, bytes]:
     return out
 
 
-def read_state_json(control_root: Path, change_id: str) -> bytes | None:
-    rec = record.read_record(records_root(control_root), change_id)
+def read_state_json(control_root: Path, quest_id: str) -> bytes | None:
+    rec = record.read_record(records_root(control_root), quest_id)
     if rec is None:
         return None
     return json.dumps(rec["final_state"]).encode("utf-8")
 
 
-def read_change_json(control_root: Path, change_id: str) -> bytes | None:
-    rec = record.read_record(records_root(control_root), change_id)
+def read_quest_json(control_root: Path, quest_id: str) -> bytes | None:
+    rec = record.read_record(records_root(control_root), quest_id)
     if rec is None:
         return None
-    meta = rec.get("change_meta")
+    meta = rec.get("quest_meta")
     if meta is not None:
         return json.dumps(meta).encode("utf-8")
     return json.dumps({
@@ -157,61 +157,61 @@ def _git_bytes(control_root: Path, *args: str) -> subprocess.CompletedProcess[by
     return subprocess.run(["git", *args], cwd=control_root, capture_output=True)
 
 
-def read_artifact(control_root: Path, change_id: str, rel: str) -> bytes | None:
+def read_artifact(control_root: Path, quest_id: str, rel: str) -> bytes | None:
     wip = _git_bytes(
-        control_root, "cat-file", "-p", f"refs/imp/artifacts/{change_id}:{rel}")
+        control_root, "cat-file", "-p", f"refs/imp/artifacts/{quest_id}:{rel}")
     if wip.returncode == 0:
         return wip.stdout
     return None
 
 
-def pick_newest_plan(change_id: str, names: list[str]) -> str | None:
+def pick_newest_plan(quest_id: str, names: list[str]) -> str | None:
     best, pick = -1, None
     for name in names:
-        mobj = re.fullmatch(rf"{re.escape(change_id)}-plan-(\d+)\.md", name)
+        mobj = re.fullmatch(rf"{re.escape(quest_id)}-plan-(\d+)\.md", name)
         if mobj and int(mobj.group(1)) > best:
             best, pick = int(mobj.group(1)), name
     return pick
 
 
-def newest_plan_name(control_root: Path, change_id: str) -> str | None:
+def newest_plan_name(control_root: Path, quest_id: str) -> str | None:
     """Highest-N plan filename from the retained artifact ref; bare filename."""
-    treeish = f"refs/imp/artifacts/{change_id}:plans"
+    treeish = f"refs/imp/artifacts/{quest_id}:plans"
     proc = subprocess.run(
         ["git", "ls-tree", "--name-only", treeish],
         cwd=control_root, capture_output=True, text=True)
     if proc.returncode == 0:
         pick = pick_newest_plan(
-            change_id,
+            quest_id,
             [ln.strip() for ln in proc.stdout.splitlines() if ln.strip()])
         if pick:
             return pick
     return None
 
 
-def rehydrate_change(control_root: Path, change_id: str) -> Path:
+def rehydrate_quest(control_root: Path, quest_id: str) -> Path:
     """Recreate a live scratch dir from the archive so a left conversation can be resumed."""
-    change_dir = control_root / ".imp" / "changes" / change_id
-    if change_dir.exists():
-        raise FileExistsError(f"live home for {change_id!r} already exists")
-    change_json = read_change_json(control_root, change_id)
-    if change_json is None:
-        raise FileNotFoundError(f"no archived record for {change_id!r}")
-    state_json = read_state_json(control_root, change_id)
-    events = read_events(control_root, change_id)
-    (change_dir / "state").mkdir(parents=True)
-    (change_dir / "change.json").write_bytes(change_json)
-    (change_dir / "state" / "state.json").write_bytes(state_json or b"{}")
-    (change_dir / "events.jsonl").write_bytes(events or b"")
-    for rel, blob in read_step_blobs(control_root, change_id).items():
-        dest = change_dir / "steps" / rel
+    quest_dir = control_root / ".imp" / "quests" / quest_id
+    if quest_dir.exists():
+        raise FileExistsError(f"live home for {quest_id!r} already exists")
+    quest_json = read_quest_json(control_root, quest_id)
+    if quest_json is None:
+        raise FileNotFoundError(f"no archived record for {quest_id!r}")
+    state_json = read_state_json(control_root, quest_id)
+    events = read_events(control_root, quest_id)
+    (quest_dir / "state").mkdir(parents=True)
+    (quest_dir / "quest.json").write_bytes(quest_json)
+    (quest_dir / "state" / "state.json").write_bytes(state_json or b"{}")
+    (quest_dir / "events.jsonl").write_bytes(events or b"")
+    for rel, blob in read_step_blobs(control_root, quest_id).items():
+        dest = quest_dir / "steps" / rel
         dest.parent.mkdir(parents=True, exist_ok=True)
         dest.write_bytes(blob)
-    return change_dir
+    return quest_dir
 
 
-def status_of(control_root: Path, change_id: str) -> str | None:
-    raw = read_state_json(control_root, change_id)
+def status_of(control_root: Path, quest_id: str) -> str | None:
+    raw = read_state_json(control_root, quest_id)
     if raw is None:
         return None
     try:

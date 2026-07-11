@@ -12,7 +12,7 @@ import pytest
 
 import imp.cli.main as m
 import imp.cli.signals as sig
-from imp.engine.change import Change
+from imp.engine.quest import Quest
 from imp.engine.state import State
 from tests.conftest import _seed_control
 
@@ -69,9 +69,9 @@ async def test_run_cleared_session_opens_fresh_new_draft(
     assert captured["leave_state"] is ls              # threads the loop's dict
     change = captured["change"]
     # The typed intent is persisted durably so the reopened chat's opening step
-    # seeds from change.json (survives resume), not via a transient run parameter.
-    assert Change.load(tmp_path, change.id).seed_opening == "build a parser"
-    assert (tmp_path / ".imp" / "changes" / change.id).exists()  # a brand-new draft home
+    # seeds from quest.json (survives resume), not via a transient run parameter.
+    assert Quest.load(tmp_path, change.id).seed_opening == "build a parser"
+    assert (tmp_path / ".imp" / "quests" / change.id).exists()  # a brand-new draft home
     assert change.title == ""                          # imp new-style: unnamed draft
 
 
@@ -95,7 +95,7 @@ async def test_run_cleared_session_cancel_returns_130_no_draft(
     rc = await m._run_cleared_session(tmp_path, "main", leave_state={})
 
     assert rc == 130
-    changes_dir = tmp_path / ".imp" / "changes"
+    changes_dir = tmp_path / ".imp" / "quests"
     entries = list(changes_dir.iterdir()) if changes_dir.exists() else []
     assert entries == []
 
@@ -220,7 +220,7 @@ def test_fresh_session_line_routes_through_clear_loop(
 ) -> None:
     _seed_control(tmp_path)
     monkeypatch.chdir(tmp_path)
-    ch = Change.create(tmp_path, title="demo", change_id="feat", base_branch="main")
+    ch = Quest.create(tmp_path, title="demo", quest_id="feat", base_branch="main")
 
     async def _fake_loop(control, *, first):
         return 0
@@ -284,7 +284,7 @@ def test_resume_interactive_routes_through_clear_loop(
 ) -> None:
     _seed_control(tmp_path)
     monkeypatch.chdir(tmp_path)
-    ch = Change.create(tmp_path, title="demo", change_id="feat", base_branch="main")
+    ch = Quest.create(tmp_path, title="demo", quest_id="feat", base_branch="main")
     st = State.load(ch.state_dir)
     st.status = "paused"
     st.save(ch.state_dir)
@@ -314,7 +314,7 @@ def test_resume_interactive_leads_with_header_before_splash(
 ) -> None:
     _seed_control(tmp_path)
     monkeypatch.chdir(tmp_path)
-    ch = Change.create(tmp_path, title="demo", change_id="feat", base_branch="main")
+    ch = Quest.create(tmp_path, title="demo", quest_id="feat", base_branch="main")
     st = State.load(ch.state_dir)
     st.status = "paused"
     st.save(ch.state_dir)
@@ -358,7 +358,7 @@ def test_resume_interactive_wires_preceded_by_blank_to_splash(
 ) -> None:
     _seed_control(tmp_path)
     monkeypatch.chdir(tmp_path)
-    ch = Change.create(tmp_path, title="demo", change_id="feat", base_branch="main")
+    ch = Quest.create(tmp_path, title="demo", quest_id="feat", base_branch="main")
     st = State.load(ch.state_dir)
     st.status = "paused"
     st.save(ch.state_dir)
@@ -443,7 +443,7 @@ async def test_run_cleared_session_writes_title_before_prompt(
     # this pre-attach opening prompt is blocked on the user, so it shows the idle glyph.
     assert "\x1b]2;ѱ imp · " in at_prompt["value"]
     title = captured["title"]
-    assert title._change_id == captured["change"].id   # one instance threaded through
+    assert title._quest_id == captured["change"].id   # one instance threaded through
 
 
 @pytest.mark.anyio
@@ -461,7 +461,7 @@ async def test_run_cleared_session_cancel_resets_title(
         def __init__(
             self, stream: object, cid: str, name: str, initial: str = "busy",
         ) -> None:
-            self._change_id = cid
+            self._quest_id = cid
             self._name = name
 
         def busy(self) -> None: ...
@@ -557,7 +557,7 @@ async def test_run_cleared_session_intercepts_help(
     assert rc == 0
     # /help was intercepted; the following real line becomes the persisted intent.
     change = captured["change"]
-    assert Change.load(tmp_path, change.id).seed_opening == "build a parser"
+    assert Quest.load(tmp_path, change.id).seed_opening == "build a parser"
     assert "Available slash commands" in buf.getvalue()
 
 

@@ -13,7 +13,7 @@ env=dict(os.environ))` — which changes the child's working directory but leave
 saw only the `initial` commit in tmp_path ("expected >=2 commits, got 1") while
 the coder's commit landed on the real master.
 
-Fix: pass `cwd=change_context.project_root` so the SDK sets both the subprocess
+Fix: pass `cwd=quest_context.project_root` so the SDK sets both the subprocess
 cwd and `$PWD` to the project root — independent of where imp was launched.
 """
 
@@ -21,7 +21,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from imp.agents.runner import AgentInvocation, ChangeContext
+from imp.agents.runner import AgentInvocation, QuestContext
 from imp.engine.types import (
     AgentDef,
     OutputSchema,
@@ -48,7 +48,7 @@ def _invocation(project_root: Path) -> AgentInvocation:
         model_name="claude-sonnet-4-5",
         system_prompt="be a coder",
         initial_messages=(),
-        change_context=ChangeContext(
+        quest_context=QuestContext(
             title="Test",
             project_root=project_root,
             workflow_dir=project_root / ".imp" / "change" / "workflow",

@@ -20,9 +20,9 @@ async def test_deliver_to_session_loads_the_change_and_injects_the_reply(
 
     class _FakeChange:
         @classmethod
-        def load(cls, control_root: Path, change_id: str) -> object:
+        def load(cls, control_root: Path, quest_id: str) -> object:
             assert control_root == tmp_path
-            assert change_id == "2026-06-13-abc"
+            assert quest_id == "2026-06-13-abc"
             return sentinel
 
     captured: dict[str, object] = {}
@@ -31,7 +31,7 @@ async def test_deliver_to_session_loads_the_change_and_injects_the_reply(
         captured["change"] = change
         captured["text"] = text
 
-    monkeypatch.setattr(runner, "Change", _FakeChange)
+    monkeypatch.setattr(runner, "Quest", _FakeChange)
     monkeypatch.setattr(runner, "deliver_session_reply", _fake_deliver)
 
     await runner.deliver_to_session(tmp_path, "2026-06-13-abc", "approved")

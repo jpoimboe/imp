@@ -7,8 +7,8 @@ from typing import Any
 import anyio
 import pytest
 
-from imp.engine.change import Change
 from imp.engine.executor import RunResult
+from imp.engine.quest import Quest
 from imp.engine.state import State
 from imp.remote.session.client import SessionClient
 from imp.remote.session.daemon import _is_interrupt_pause, serve_change_session
@@ -26,16 +26,16 @@ def anyio_backend() -> str:
     return "asyncio"
 
 
-def _make_change(tmp_path: Path, change_id: str) -> Change:
-    change = Change(
-        id=change_id,
+def _make_change(tmp_path: Path, quest_id: str) -> Quest:
+    change = Quest(
+        id=quest_id,
         title="T",
         base_branch="main",
         control_root=tmp_path,
         project_root=tmp_path,
-        change_dir=tmp_path / ".imp" / "change",
+        quest_dir=tmp_path / ".imp" / "change",
     )
-    State(id=change_id, step=None, step_attempt=0, status="paused").save(
+    State(id=quest_id, step=None, step_attempt=0, status="paused").save(
         change.state_dir)
     return change
 
@@ -54,7 +54,7 @@ async def test_serves_on_per_change_socket_and_bridges_run_change_seams(
     sock = str(session_socket_path(change.control_root, change.id))
 
     async def fake_run(
-        change: Change, *, on_event: Any, user_chat_input_fn: Any,
+        change: Quest, *, on_event: Any, user_chat_input_fn: Any,
         coordinator: Any,
         wait_for_turn_fn: Any = None,
     ) -> str:
@@ -100,7 +100,7 @@ async def test_zero_client_gate_hibernates_by_default(tmp_path: Path) -> None:
     change = _make_change(tmp_path, "2026-06-15-def")
 
     async def fake_run(
-        change: Change, *, on_event: Any, user_chat_input_fn: Any,
+        change: Quest, *, on_event: Any, user_chat_input_fn: Any,
         coordinator: Any,
         wait_for_turn_fn: Any = None,
     ) -> str:
@@ -119,11 +119,11 @@ async def test_zero_client_gate_hibernates_by_default(tmp_path: Path) -> None:
 @pytest.mark.anyio
 async def test_lock_is_held_during_run_and_released_after(tmp_path: Path) -> None:
     change = _make_change(tmp_path, "2026-06-15-ghi")
-    lock_path = change.change_dir / "lock"
+    lock_path = change.quest_dir / "lock"
     release = anyio.Event()
 
     async def fake_run(
-        change: Change, *, on_event: Any, user_chat_input_fn: Any,
+        change: Quest, *, on_event: Any, user_chat_input_fn: Any,
         coordinator: Any,
         wait_for_turn_fn: Any = None,
     ) -> str:
@@ -157,7 +157,7 @@ async def test_interrupt_control_pauses_the_shared_coordinator(
     sock = str(session_socket_path(change.control_root, change.id))
 
     async def fake_run(
-        change: Change, *, on_event: Any, user_chat_input_fn: Any,
+        change: Quest, *, on_event: Any, user_chat_input_fn: Any,
         coordinator: Any,
         wait_for_turn_fn: Any = None,
     ) -> str:
@@ -195,18 +195,18 @@ def test_main_loads_named_change_and_serves_it(
     loaded = object()
     calls: dict[str, Any] = {}
 
-    def fake_load(control_root: Path, change_id: str) -> object:
-        calls["load"] = (control_root, change_id)
+    def fake_load(control_root: Path, quest_id: str) -> object:
+        calls["load"] = (control_root, quest_id)
         return loaded
 
     def fake_run(fn: Any, arg: Any) -> None:
         calls["run"] = (fn, arg)
 
-    monkeypatch.setattr(daemon.Change, "load", staticmethod(fake_load))
+    monkeypatch.setattr(daemon.Quest, "load", staticmethod(fake_load))
     monkeypatch.setattr(daemon.anyio, "run", fake_run)
 
     rc = daemon.main(
-        ["--control-root", str(tmp_path), "--change-id", "2026-06-15-abc"])
+        ["--control-root", str(tmp_path), "--quest-id", "2026-06-15-abc"])
 
     assert rc == 0
     assert calls["load"] == (tmp_path, "2026-06-15-abc")
@@ -217,10 +217,10 @@ def test_main_loads_named_change_and_serves_it(
 async def test_resident_abandon_runs_teardown(tmp_path: Path) -> None:
     change = _make_change(tmp_path, "2026-06-15-aba")
     sock = str(session_socket_path(change.control_root, change.id))
-    torn: list[Change] = []
+    torn: list[Quest] = []
 
     async def fake_run(
-        change: Change, *, on_event: Any, user_chat_input_fn: Any,
+        change: Quest, *, on_event: Any, user_chat_input_fn: Any,
         coordinator: Any,
         wait_for_turn_fn: Any = None,
     ) -> str:
@@ -256,7 +256,7 @@ async def test_interrupt_resume_prompt_not_duplicated_on_existing_client(
     calls = {"n": 0}
 
     async def fake_run(
-        change: Change, *, on_event: Any, user_chat_input_fn: Any,
+        change: Quest, *, on_event: Any, user_chat_input_fn: Any,
         coordinator: Any,
         wait_for_turn_fn: Any = None,
     ) -> RunResult:
@@ -319,7 +319,7 @@ async def test_interrupt_pause_reprompts_and_resumes_in_place(
     calls = {"n": 0}
 
     async def fake_run(
-        change: Change, *, on_event: Any, user_chat_input_fn: Any,
+        change: Quest, *, on_event: Any, user_chat_input_fn: Any,
         coordinator: Any,
         wait_for_turn_fn: Any = None,
     ) -> RunResult:
@@ -370,7 +370,7 @@ async def test_interrupt_pause_hibernates_with_zero_clients(
     calls = {"n": 0}
 
     async def fake_run(
-        change: Change, *, on_event: Any, user_chat_input_fn: Any,
+        change: Quest, *, on_event: Any, user_chat_input_fn: Any,
         coordinator: Any,
         wait_for_turn_fn: Any = None,
     ) -> RunResult:
@@ -393,7 +393,7 @@ async def test_resume_journals_workflow_resumed_without_flipping_status(
     from tests.conftest import _seed_control
 
     _seed_control(tmp_path)
-    change = Change.create(tmp_path, title="x", change_id="feat", base_branch="main")
+    change = Quest.create(tmp_path, title="x", quest_id="feat", base_branch="main")
     st = State.load(change.state_dir)
     st.status = "paused"
     st.save(change.state_dir)
@@ -401,7 +401,7 @@ async def test_resume_journals_workflow_resumed_without_flipping_status(
     seen: dict[str, str] = {}
 
     async def fake_run(
-        change: Change, *, on_event: Any, user_chat_input_fn: Any,
+        change: Quest, *, on_event: Any, user_chat_input_fn: Any,
         coordinator: Any,
         wait_for_turn_fn: Any = None,
     ) -> RunResult:
@@ -428,7 +428,7 @@ async def test_resume_sets_resume_pending_for_a_stale_lock_crash(tmp_path: Path)
     from tests.conftest import _seed_control
 
     _seed_control(tmp_path)
-    change = Change.create(tmp_path, title="x", change_id="feat", base_branch="main")
+    change = Quest.create(tmp_path, title="x", quest_id="feat", base_branch="main")
     st = State.load(change.state_dir)
     st.step = "review"
     st.status = "paused"
@@ -436,12 +436,12 @@ async def test_resume_sets_resume_pending_for_a_stale_lock_crash(tmp_path: Path)
     st.save(change.state_dir)
     p = subprocess.Popen(["true"])           # dead pid ⇒ stale lock ⇒ crash
     p.wait()
-    (change.change_dir / "lock").write_text(str(p.pid))
+    (change.quest_dir / "lock").write_text(str(p.pid))
 
     seen: dict[str, object] = {}
 
     async def fake_run(
-        change: Change, *, on_event: Any, user_chat_input_fn: Any,
+        change: Quest, *, on_event: Any, user_chat_input_fn: Any,
         coordinator: Any,
         wait_for_turn_fn: Any = None,
     ) -> RunResult:
@@ -464,7 +464,7 @@ async def test_resume_with_no_lock_does_not_set_resume_pending(tmp_path: Path) -
     from tests.conftest import _seed_control
 
     _seed_control(tmp_path)
-    change = Change.create(tmp_path, title="x", change_id="feat", base_branch="main")
+    change = Quest.create(tmp_path, title="x", quest_id="feat", base_branch="main")
     st = State.load(change.state_dir)
     st.step = "review"
     st.status = "paused"
@@ -474,7 +474,7 @@ async def test_resume_with_no_lock_does_not_set_resume_pending(tmp_path: Path) -
     seen: dict[str, object] = {}
 
     async def fake_run(
-        change: Change, *, on_event: Any, user_chat_input_fn: Any,
+        change: Quest, *, on_event: Any, user_chat_input_fn: Any,
         coordinator: Any,
         wait_for_turn_fn: Any = None,
     ) -> RunResult:
@@ -495,7 +495,7 @@ async def test_default_spawn_does_no_resume_prep(tmp_path: Path) -> None:
     from tests.conftest import _seed_control
 
     _seed_control(tmp_path)
-    change = Change.create(tmp_path, title="x", change_id="feat", base_branch="main")
+    change = Quest.create(tmp_path, title="x", quest_id="feat", base_branch="main")
     st = State.load(change.state_dir)
     st.status = "paused"
     st.save(change.state_dir)
@@ -503,7 +503,7 @@ async def test_default_spawn_does_no_resume_prep(tmp_path: Path) -> None:
     seen: dict[str, str] = {}
 
     async def fake_run(
-        change: Change, *, on_event: Any, user_chat_input_fn: Any,
+        change: Quest, *, on_event: Any, user_chat_input_fn: Any,
         coordinator: Any,
         wait_for_turn_fn: Any = None,
     ) -> RunResult:
@@ -530,18 +530,18 @@ def test_main_forwards_resume_flag_via_partial(
     loaded = object()
     captured: dict[str, Any] = {}
 
-    def fake_load(control_root: Path, change_id: str) -> object:
+    def fake_load(control_root: Path, quest_id: str) -> object:
         return loaded
 
     def fake_run(fn: Any) -> None:   # partial form takes a single positional
         captured["fn"] = fn
 
-    monkeypatch.setattr(daemon.Change, "load", staticmethod(fake_load))
+    monkeypatch.setattr(daemon.Quest, "load", staticmethod(fake_load))
     monkeypatch.setattr(daemon.anyio, "run", fake_run)
 
     rc = daemon.main([
         "--control-root", str(tmp_path),
-        "--change-id", "2026-06-15-abc",
+        "--quest-id", "2026-06-15-abc",
         "--resume",
     ])
 
@@ -558,7 +558,7 @@ def test_append_workflow_resumed_is_idempotent_when_trailing(tmp_path: Path) -> 
     from tests.conftest import _seed_control
 
     _seed_control(tmp_path)
-    change = Change.create(tmp_path, title="x", change_id="feat", base_branch="main")
+    change = Quest.create(tmp_path, title="x", quest_id="feat", base_branch="main")
     log = change.event_log()
     daemon._append_workflow_resumed(log)
     daemon._append_workflow_resumed(log)   # trailing already resumed → no-op
@@ -573,7 +573,7 @@ async def test_two_interrupt_rounds_leave_no_open_pause(tmp_path: Path) -> None:
     calls = {"n": 0}
 
     async def fake_run(
-        change: Change, *, on_event: Any, user_chat_input_fn: Any,
+        change: Quest, *, on_event: Any, user_chat_input_fn: Any,
         coordinator: Any,
         wait_for_turn_fn: Any = None,
     ) -> RunResult:
@@ -623,7 +623,7 @@ async def test_two_interrupt_rounds_leave_no_open_pause(tmp_path: Path) -> None:
 
 
 
-def test_main_unknown_change_id_prints_clean_error_and_exits_nonzero(
+def test_main_unknown_quest_id_prints_clean_error_and_exits_nonzero(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
 ) -> None:
     import imp.remote.session.daemon as daemon
@@ -632,8 +632,8 @@ def test_main_unknown_change_id_prints_clean_error_and_exits_nonzero(
     def boom(_root: Path, _cid: str) -> object:
         raise LoadError("no such change feat")
 
-    monkeypatch.setattr(daemon.Change, "load", staticmethod(boom))
-    rc = daemon.main(["--control-root", str(tmp_path), "--change-id", "feat"])
+    monkeypatch.setattr(daemon.Quest, "load", staticmethod(boom))
+    rc = daemon.main(["--control-root", str(tmp_path), "--quest-id", "feat"])
     assert rc == 2
     assert "no such change feat" in capsys.readouterr().err
 
@@ -644,9 +644,9 @@ def test_main_maps_paused_outcome_to_nonzero(
     import imp.remote.session.daemon as daemon
     from imp.engine.executor import RunResult
 
-    monkeypatch.setattr(daemon.Change, "load", staticmethod(lambda r, c: object()))
+    monkeypatch.setattr(daemon.Quest, "load", staticmethod(lambda r, c: object()))
     monkeypatch.setattr(daemon.anyio, "run", lambda *a, **k: RunResult.PAUSED)
-    rc = daemon.main(["--control-root", str(tmp_path), "--change-id", "feat"])
+    rc = daemon.main(["--control-root", str(tmp_path), "--quest-id", "feat"])
     assert rc == 1
 
 
@@ -656,9 +656,9 @@ def test_main_maps_paused_outcome_to_nonzero_with_kwargs(
     import imp.remote.session.daemon as daemon
     from imp.engine.executor import RunResult
 
-    monkeypatch.setattr(daemon.Change, "load", staticmethod(lambda r, c: object()))
+    monkeypatch.setattr(daemon.Quest, "load", staticmethod(lambda r, c: object()))
     monkeypatch.setattr(daemon.anyio, "run", lambda *a, **k: RunResult.PAUSED)
-    rc = daemon.main(["--control-root", str(tmp_path), "--change-id", "feat", "--resume"])
+    rc = daemon.main(["--control-root", str(tmp_path), "--quest-id", "feat", "--resume"])
     assert rc == 1
 
 
@@ -668,7 +668,7 @@ def test_append_workflow_resumed_appends_after_a_real_event(tmp_path: Path) -> N
     from tests.conftest import _seed_control
 
     _seed_control(tmp_path)
-    change = Change.create(tmp_path, title="x", change_id="feat", base_branch="main")
+    change = Quest.create(tmp_path, title="x", quest_id="feat", base_branch="main")
     log = change.event_log()
     daemon._append_workflow_resumed(log)
     log.append(agent_id=None, type="workflow_paused", payload={"reason": "interrupt"})
@@ -681,7 +681,7 @@ def test_last_pause_was_awaiting_turn_true_for_awaiting_turn(tmp_path: Path) -> 
     from tests.conftest import _seed_control
 
     _seed_control(tmp_path)
-    change = Change.create(tmp_path, title="x", change_id="feat", base_branch="main")
+    change = Quest.create(tmp_path, title="x", quest_id="feat", base_branch="main")
     change.event_log().append(
         agent_id=None, type="workflow_paused", payload={"reason": "awaiting_turn"})
     assert daemon._last_pause_was_awaiting_turn(change.event_log()) is True
@@ -692,7 +692,7 @@ def test_last_pause_was_awaiting_turn_false_for_other_reason(tmp_path: Path) -> 
     from tests.conftest import _seed_control
 
     _seed_control(tmp_path)
-    change = Change.create(tmp_path, title="x", change_id="feat", base_branch="main")
+    change = Quest.create(tmp_path, title="x", quest_id="feat", base_branch="main")
     change.event_log().append(
         agent_id=None, type="workflow_paused", payload={"reason": "interrupt"})
     assert daemon._last_pause_was_awaiting_turn(change.event_log()) is False
@@ -703,7 +703,7 @@ def test_last_pause_was_awaiting_turn_false_after_resume(tmp_path: Path) -> None
     from tests.conftest import _seed_control
 
     _seed_control(tmp_path)
-    change = Change.create(tmp_path, title="x", change_id="feat", base_branch="main")
+    change = Quest.create(tmp_path, title="x", quest_id="feat", base_branch="main")
     log = change.event_log()
     log.append(agent_id=None, type="workflow_paused", payload={"reason": "awaiting_turn"})
     log.append(agent_id=None, type="workflow_resumed", payload={})
@@ -716,7 +716,7 @@ def test_last_pause_was_awaiting_turn_false_with_no_events(tmp_path: Path) -> No
     from tests.conftest import _seed_control
 
     _seed_control(tmp_path)
-    change = Change.create(tmp_path, title="x", change_id="feat", base_branch="main")
+    change = Quest.create(tmp_path, title="x", quest_id="feat", base_branch="main")
     # No events at all — the fallback must be False
     assert daemon._last_pause_was_awaiting_turn(change.event_log()) is False
 
@@ -728,15 +728,15 @@ async def test_resident_abandon_of_unmaterialized_draft_tears_down(
     from tests.conftest import _seed_control
 
     _seed_control(tmp_path)
-    change = Change.create_draft(
-        tmp_path, title="x", change_id="draft1", base_branch="main")
+    change = Quest.create_draft(
+        tmp_path, title="x", quest_id="draft1", base_branch="main")
     assert change.materialized is False
     sock = str(session_socket_path(change.control_root, change.id))
-    torn: list[Change] = []
-    archived: list[Change] = []
+    torn: list[Quest] = []
+    archived: list[Quest] = []
 
     async def fake_run(
-        change: Change, *, on_event: Any, user_chat_input_fn: Any,
+        change: Quest, *, on_event: Any, user_chat_input_fn: Any,
         coordinator: Any,
         wait_for_turn_fn: Any = None,
     ) -> str:
@@ -774,7 +774,7 @@ async def test_awaiting_turn_hibernation_exit_drives_now_head(
     from tests.conftest import _seed_control
 
     _seed_control(tmp_path)
-    change = Change.create(tmp_path, title="b", change_id="bbb", base_branch="main")
+    change = Quest.create(tmp_path, title="b", quest_id="bbb", base_branch="main")
     mq.enqueue_if_absent(tmp_path, "bbb", "main")        # bbb is now the lane head
 
     spawned: list = []
@@ -783,7 +783,7 @@ async def test_awaiting_turn_hibernation_exit_drives_now_head(
         lambda ch, **kw: spawned.append((ch.id, kw.get("resume"))))
 
     async def fake_run(
-        change: Change, *, on_event: Any, user_chat_input_fn: Any,
+        change: Quest, *, on_event: Any, user_chat_input_fn: Any,
         coordinator: Any, wait_for_turn_fn: Any = None,
     ) -> RunResult:
         change.event_log().append(
@@ -806,7 +806,7 @@ async def test_non_awaiting_turn_pause_does_not_drive_head(
     from tests.conftest import _seed_control
 
     _seed_control(tmp_path)
-    change = Change.create(tmp_path, title="b", change_id="bbb", base_branch="main")
+    change = Quest.create(tmp_path, title="b", quest_id="bbb", base_branch="main")
     mq.enqueue_if_absent(tmp_path, "bbb", "main")        # bbb IS head, yet no spawn
 
     spawned: list = []
@@ -814,7 +814,7 @@ async def test_non_awaiting_turn_pause_does_not_drive_head(
         attach_mod, "spawn_session_daemon", lambda ch, **kw: spawned.append(ch.id))
 
     async def fake_run(
-        change: Change, *, on_event: Any, user_chat_input_fn: Any,
+        change: Quest, *, on_event: Any, user_chat_input_fn: Any,
         coordinator: Any, wait_for_turn_fn: Any = None,
     ) -> RunResult:
         change.event_log().append(
@@ -832,11 +832,11 @@ async def test_non_awaiting_turn_pause_does_not_drive_head(
 async def test_resident_save_applies_the_save_disposition(tmp_path: Path) -> None:
     change = _make_change(tmp_path, "2026-06-15-sav")
     sock = str(session_socket_path(change.control_root, change.id))
-    saved: list[Change] = []
-    torn: list[Change] = []
+    saved: list[Quest] = []
+    torn: list[Quest] = []
 
     async def fake_run(
-        change: Change, *, on_event: Any, user_chat_input_fn: Any,
+        change: Quest, *, on_event: Any, user_chat_input_fn: Any,
         coordinator: Any,
         wait_for_turn_fn: Any = None,
     ) -> None:
@@ -891,7 +891,7 @@ def test_hold_prompt_none_for_awaiting_turn(tmp_path: Path) -> None:
     from tests.conftest import _seed_control
 
     _seed_control(tmp_path)
-    change = Change.create(tmp_path, title="x", change_id="feat", base_branch="main")
+    change = Quest.create(tmp_path, title="x", quest_id="feat", base_branch="main")
     change.event_log().append(
         agent_id=None, type="workflow_paused", payload={"reason": "awaiting_turn"})
     coord = SimpleNamespace(should_pause=False)
@@ -904,7 +904,7 @@ async def test_script_blocked_pause_exits_terminal(tmp_path: Path) -> None:
     calls = {"n": 0}
 
     async def fake_run(
-        change: Change, *, on_event: Any, user_chat_input_fn: Any,
+        change: Quest, *, on_event: Any, user_chat_input_fn: Any,
         coordinator: Any, wait_for_turn_fn: Any = None,
     ) -> RunResult:
         calls["n"] += 1
@@ -930,7 +930,7 @@ async def test_script_blocked_pause_hibernates_with_zero_clients(
     calls = {"n": 0}
 
     async def fake_run(
-        change: Change, *, on_event: Any, user_chat_input_fn: Any,
+        change: Quest, *, on_event: Any, user_chat_input_fn: Any,
         coordinator: Any, wait_for_turn_fn: Any = None,
     ) -> RunResult:
         calls["n"] += 1
@@ -953,11 +953,11 @@ async def test_script_blocked_pause_hibernates_with_zero_clients(
 async def test_resident_archive_applies_the_archive_disposition(tmp_path: Path) -> None:
     change = _make_change(tmp_path, "2026-06-15-arc")
     sock = str(session_socket_path(change.control_root, change.id))
-    archived: list[Change] = []
-    discarded: list[Change] = []
+    archived: list[Quest] = []
+    discarded: list[Quest] = []
 
     async def fake_run(
-        change: Change, *, on_event: Any, user_chat_input_fn: Any,
+        change: Quest, *, on_event: Any, user_chat_input_fn: Any,
         coordinator: Any, wait_for_turn_fn: Any = None,
     ) -> None:
         await anyio.sleep_forever()
@@ -988,11 +988,11 @@ async def test_resident_archive_applies_the_archive_disposition(tmp_path: Path) 
 async def test_resident_discard_applies_the_discard_disposition(tmp_path: Path) -> None:
     change = _make_change(tmp_path, "2026-06-15-dis")
     sock = str(session_socket_path(change.control_root, change.id))
-    archived: list[Change] = []
-    discarded: list[Change] = []
+    archived: list[Quest] = []
+    discarded: list[Quest] = []
 
     async def fake_run(
-        change: Change, *, on_event: Any, user_chat_input_fn: Any,
+        change: Quest, *, on_event: Any, user_chat_input_fn: Any,
         coordinator: Any, wait_for_turn_fn: Any = None,
     ) -> None:
         await anyio.sleep_forever()
@@ -1025,7 +1025,7 @@ async def test_serve_forwards_non_interactive_to_run_change(tmp_path: Path) -> N
     captured: dict[str, Any] = {}
 
     async def fake_run(
-        change: Change, *, on_event: Any, user_chat_input_fn: Any,
+        change: Quest, *, on_event: Any, user_chat_input_fn: Any,
         coordinator: Any, wait_for_turn_fn: Any = None,
         headless: bool = False,
     ) -> str:
@@ -1084,7 +1084,7 @@ def test_main_parses_non_interactive_into_serve_kwargs(
 
     loaded = object()
     calls: dict[str, Any] = {}
-    monkeypatch.setattr(daemon.Change, "load",
+    monkeypatch.setattr(daemon.Quest, "load",
                         staticmethod(lambda cr, cid: loaded))
 
     def fake_run(fn: Any) -> None:
@@ -1093,7 +1093,7 @@ def test_main_parses_non_interactive_into_serve_kwargs(
     monkeypatch.setattr(daemon.anyio, "run", fake_run)
     rc = daemon.main([
         "--control-root", str(tmp_path),
-        "--change-id", "2026-06-15-mnint", "--non-interactive"])
+        "--quest-id", "2026-06-15-mnint", "--non-interactive"])
     assert rc == 0
     fn = calls["fn"]
     assert fn.func is daemon.serve_change_session
@@ -1108,7 +1108,7 @@ def test_build_session_attach_forwards_non_interactive(
     change = _make_change(tmp_path, "2026-06-15-bsa")
     captured: dict[str, Any] = {}
 
-    def fake_spawn(change: Change, **kw: Any) -> None:
+    def fake_spawn(change: Quest, **kw: Any) -> None:
         captured.update(kw)
 
     monkeypatch.setattr(attach_mod, "spawn_session_daemon", fake_spawn)
@@ -1116,7 +1116,7 @@ def test_build_session_attach_forwards_non_interactive(
     holder: dict[str, Any] = {}
 
     async def fake_attach_or_spawn(
-        change: Change, *, on_event: Any, spawn_fn: Any,
+        change: Quest, *, on_event: Any, spawn_fn: Any,
         connect_timeout: float = 10.0, lease: bool = False,
     ) -> object:
         holder["spawn_fn"] = spawn_fn
@@ -1138,7 +1138,7 @@ def test_build_session_attach_forwards_autonomous(
     change = _make_change(tmp_path, "2026-06-15-bsa-auto")
     captured: dict[str, Any] = {}
 
-    def fake_spawn(change: Change, **kw: Any) -> None:
+    def fake_spawn(change: Quest, **kw: Any) -> None:
         captured.update(kw)
 
     monkeypatch.setattr(attach_mod, "spawn_session_daemon", fake_spawn)
@@ -1146,7 +1146,7 @@ def test_build_session_attach_forwards_autonomous(
     holder: dict[str, Any] = {}
 
     async def fake_attach_or_spawn(
-        change: Change, *, on_event: Any, spawn_fn: Any,
+        change: Quest, *, on_event: Any, spawn_fn: Any,
         connect_timeout: float = 10.0, lease: bool = False,
     ) -> object:
         holder["spawn_fn"] = spawn_fn
@@ -1169,7 +1169,7 @@ async def test_resume_loop_under_non_interactive_passes_flag_to_second_run(
     received_flags: list[bool] = []
 
     async def fake_run(
-        change: Change, *, on_event: Any, user_chat_input_fn: Any,
+        change: Quest, *, on_event: Any, user_chat_input_fn: Any,
         coordinator: Any, wait_for_turn_fn: Any = None,
         headless: bool = False,
     ) -> RunResult:
@@ -1215,7 +1215,7 @@ async def test_resume_loop_under_autonomous_passes_flag_to_second_run(
     received_flags: list[bool] = []
 
     async def fake_run(
-        change: Change, *, on_event: Any, user_chat_input_fn: Any,
+        change: Quest, *, on_event: Any, user_chat_input_fn: Any,
         coordinator: Any, wait_for_turn_fn: Any = None,
         autonomous: bool = False,
     ) -> RunResult:
@@ -1262,18 +1262,18 @@ def test_main_forwards_autonomous_via_partial(
     loaded = object()
     captured: dict[str, Any] = {}
 
-    def fake_load(control_root: Path, change_id: str) -> object:
+    def fake_load(control_root: Path, quest_id: str) -> object:
         return loaded
 
     def fake_run(fn: Any) -> None:
         captured["fn"] = fn
 
-    monkeypatch.setattr(daemon.Change, "load", staticmethod(fake_load))
+    monkeypatch.setattr(daemon.Quest, "load", staticmethod(fake_load))
     monkeypatch.setattr(daemon.anyio, "run", fake_run)
 
     rc = daemon.main([
         "--control-root", str(tmp_path),
-        "--change-id", "2026-06-15-abc",
+        "--quest-id", "2026-06-15-abc",
         "--autonomous",
     ])
 
@@ -1290,7 +1290,7 @@ async def test_autonomous_forwarded_to_run_fn(tmp_path: Path) -> None:
     captured: dict[str, Any] = {}
 
     async def fake_run(
-        change: Change, *, on_event: Any, user_chat_input_fn: Any,
+        change: Quest, *, on_event: Any, user_chat_input_fn: Any,
         coordinator: Any, wait_for_turn_fn: Any = None, autonomous: bool = False,
     ) -> RunResult:
         captured["autonomous"] = autonomous
@@ -1315,7 +1315,7 @@ async def test_detach_at_hold_prompt_stamps_resume_target_prompt(
     st.save(change.state_dir)
 
     async def fake_run(
-        change: Change, *, on_event: Any, user_chat_input_fn: Any,
+        change: Quest, *, on_event: Any, user_chat_input_fn: Any,
         coordinator: Any, wait_for_turn_fn: Any = None,
     ) -> RunResult:
         await coordinator.signal_pause(reason="ctrl-c")
@@ -1342,7 +1342,7 @@ async def test_detach_after_ctrl_d_midrun_stamps_resume_target_agent(
     st.save(change.state_dir)
 
     async def fake_run(
-        change: Change, *, on_event: Any, user_chat_input_fn: Any,
+        change: Quest, *, on_event: Any, user_chat_input_fn: Any,
         coordinator: Any, wait_for_turn_fn: Any = None,
     ) -> RunResult:
         await coordinator.signal_pause(reason="ctrl-d")
@@ -1374,7 +1374,7 @@ async def test_resume_prompt_target_holds_before_running_agent(
     calls: dict[str, Any] = {"n": 0, "interject": None}
 
     async def fake_run(
-        change: Change, *, on_event: Any, user_chat_input_fn: Any,
+        change: Quest, *, on_event: Any, user_chat_input_fn: Any,
         coordinator: Any, wait_for_turn_fn: Any = None,
     ) -> RunResult:
         calls["n"] += 1
@@ -1432,7 +1432,7 @@ async def test_resume_agent_target_runs_straight_away(
     seen: dict[str, bool] = {"ran": False}
 
     async def fake_run(
-        change: Change, *, on_event: Any, user_chat_input_fn: Any,
+        change: Quest, *, on_event: Any, user_chat_input_fn: Any,
         coordinator: Any, wait_for_turn_fn: Any = None,
     ) -> RunResult:
         seen["ran"] = True
@@ -1463,7 +1463,7 @@ async def test_resume_prompt_target_runs_agent_without_interactive_channel(
     seen: dict[str, bool] = {"ran": False}
 
     async def fake_run(
-        change: Change, *, on_event: Any, user_chat_input_fn: Any,
+        change: Quest, *, on_event: Any, user_chat_input_fn: Any,
         coordinator: Any, wait_for_turn_fn: Any = None,
         headless: bool = False, autonomous: bool = False,
     ) -> RunResult:
@@ -1594,7 +1594,7 @@ async def test_model_override_pause_reenters_without_resume_prompt(
     calls = {"n": 0}
 
     async def _run_fn(
-        ch: Change, *, on_event: Any, user_chat_input_fn: Any, coordinator: Any,
+        ch: Quest, *, on_event: Any, user_chat_input_fn: Any, coordinator: Any,
         wait_for_turn_fn: Any = None, **kw: Any,
     ) -> RunResult:
         calls["n"] += 1
@@ -1635,7 +1635,7 @@ async def test_model_override_pause_with_empty_arg_resumes_without_applying(
     calls = {"n": 0}
 
     async def _run_fn(
-        ch: Change, *, on_event: Any, user_chat_input_fn: Any, coordinator: Any,
+        ch: Quest, *, on_event: Any, user_chat_input_fn: Any, coordinator: Any,
         wait_for_turn_fn: Any = None, **kw: Any,
     ) -> RunResult:
         calls["n"] += 1
@@ -1683,18 +1683,18 @@ def test_main_forwards_model_to_serve(
     loaded = object()
     captured: dict[str, Any] = {}
 
-    def fake_load(control_root: Path, change_id: str) -> object:
+    def fake_load(control_root: Path, quest_id: str) -> object:
         return loaded
 
     def fake_run(fn: Any) -> None:
         captured["fn"] = fn
 
-    monkeypatch.setattr(daemon.Change, "load", staticmethod(fake_load))
+    monkeypatch.setattr(daemon.Quest, "load", staticmethod(fake_load))
     monkeypatch.setattr(daemon.anyio, "run", fake_run)
 
     rc = daemon.main([
         "--control-root", str(tmp_path),
-        "--change-id", "2026-07-10-mdl",
+        "--quest-id", "2026-07-10-mdl",
         "--model", "a:b",
     ])
 

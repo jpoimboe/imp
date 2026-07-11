@@ -148,13 +148,13 @@ def test_relay_hibernate_then_resume_reengages(tmp_path: Path) -> None:
     )
     try:
         # imp new starts an un-materialized draft: no worktree, state+events live
-        # at the permanent control-root home .imp/changes/<id>/. The minimal
+        # at the permanent control-root home .imp/quests/<id>/. The minimal
         # workflow never calls create_and_enter_worktree, so it runs as a draft.
-        change_dir = _await_change_dir(tmp_path, timeout=30.0)
-        slug = change_dir.name
-        events = change_dir / "events.jsonl"
-        state_path = change_dir / "state" / "state.json"
-        lock_path = change_dir / "lock"
+        quest_dir = _await_change_dir(tmp_path, timeout=30.0)
+        slug = quest_dir.name
+        events = quest_dir / "events.jsonl"
+        state_path = quest_dir / "state" / "state.json"
+        lock_path = quest_dir / "lock"
 
         assert _wait_for_bash_tool_call(events, timeout=120.0), "never saw bash tool_call"
         time.sleep(_CC_STARTUP_GRACE)

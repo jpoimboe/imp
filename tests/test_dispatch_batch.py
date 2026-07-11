@@ -10,7 +10,7 @@ import pytest
 import imp.agents.dispatch as dispatch_mod
 from imp.agents.dispatch import TurnState, _dispatch_one_task_inline, dispatch_task_batch
 from imp.agents.parallel import reset_parallelism_cache
-from imp.agents.runner import ChangeContext, ToolUseBlock
+from imp.agents.runner import QuestContext, ToolUseBlock
 from imp.agents.subagents import SubagentSuspended
 from imp.agents.tools.context import ToolContext
 from imp.cli.signals import InterruptCoordinator
@@ -46,8 +46,8 @@ def _ctx(tmp_path: Path, *, spawn, event_log=None) -> ToolContext:
     ctx.coordinator = InterruptCoordinator()
     ctx.spawn_subagent = spawn
     ctx.event_log = event_log
-    ctx.change_context = ChangeContext(
-        title="Change 42", project_root=tmp_path,
+    ctx.quest_context = QuestContext(
+        title="Quest 42", project_root=tmp_path,
         workflow_dir=tmp_path / ".imp" / "change" / "workflow")
     return ctx
 

@@ -6,7 +6,7 @@ from typing import Any
 
 import anyio
 
-from imp.engine.change import Change
+from imp.engine.quest import Quest
 from imp.remote.session.attach import build_session_attach
 from imp.remote.session.client import SessionClient
 
@@ -14,7 +14,7 @@ AttachFn = Callable[[Callable[[dict[str, Any]], None]], Awaitable[SessionClient]
 
 
 async def deliver_session_reply(
-    change: Change,
+    change: Quest,
     text: str,
     *,
     attach: AttachFn | None = None,

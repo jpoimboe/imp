@@ -13,8 +13,8 @@ import pytest
 
 from imp.agents.runner import (
     AgentInvocation,
-    ChangeContext,
     Message,
+    QuestContext,
     TextBlock,
     ToolResultBlock,
     ToolUseBlock,
@@ -63,7 +63,7 @@ def _inv(tmp_path: Path) -> AgentInvocation:
         agent_def=_agent(),
         provider_name="openai", model_name="gpt-4",
         system_prompt="be terse", initial_messages=(),
-        change_context=ChangeContext(
+        quest_context=QuestContext(
             title="Test", project_root=tmp_path,
             workflow_dir=tmp_path / ".imp" / "change" / "workflow",
         ),

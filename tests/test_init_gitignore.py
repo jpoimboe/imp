@@ -50,10 +50,10 @@ def test_project_gitignore_ignores_imp_wholesale(tmp_path: Path) -> None:
 def test_wholesale_appended_when_granular_rules_preexist(tmp_path: Path) -> None:
     # REGRESSION: the copied host .gitignore already carries granular .imp/*
     # rules. A substring idempotency filter (`".imp/" in existing`) matches
-    # `.imp/changes/` and wrongly suppresses the wholesale `.imp/` append. With
+    # `.imp/quests/` and wrongly suppresses the wholesale `.imp/` append. With
     # line-wise equality it must still be appended.
     (tmp_path / ".gitignore").write_text(
-        ".venv/\n.imp/changes/\n.imp/config.yaml\n.imp/lock\n")
+        ".venv/\n.imp/quests/\n.imp/config.yaml\n.imp/lock\n")
     _init(tmp_path)
     lines = {ln.strip() for ln in
              (tmp_path / ".gitignore").read_text().splitlines()}
@@ -67,7 +67,7 @@ def test_imp_dir_fully_ignored_after_init(tmp_path: Path) -> None:
     import subprocess
     subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
     (tmp_path / ".gitignore").write_text(
-        ".venv/\n.imp/changes/\n.imp/config.yaml\n.imp/lock\n")
+        ".venv/\n.imp/quests/\n.imp/config.yaml\n.imp/lock\n")
     _init(tmp_path)
     # .imp/ is now ignored wholesale by the project .gitignore.
     # Create a sentinel file inside .imp/ to test the ignore rule.

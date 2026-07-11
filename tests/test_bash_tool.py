@@ -8,7 +8,7 @@ import anyio
 import pytest
 
 import imp.agents.tools.bash  # noqa: F401
-from imp.agents.runner import ChangeContext
+from imp.agents.runner import QuestContext
 from imp.agents.tools import get_registry
 from imp.agents.tools.context import ToolContext
 from imp.agents.tools.limits import ToolAborted
@@ -19,8 +19,8 @@ def _ctx(tmp_path: Path) -> ToolContext:
         project_root=tmp_path,
         events_path=tmp_path / "events.jsonl",
     )
-    ctx.change_context = ChangeContext(
-        id="test01", title="Test Change", project_root=tmp_path,
+    ctx.quest_context = QuestContext(
+        id="test01", title="Test Quest", project_root=tmp_path,
         workflow_dir=tmp_path / ".imp" / "change" / "workflow",
     )
     return ctx
@@ -59,9 +59,9 @@ def test_bash_exposes_imp_project_root(tmp_path: Path) -> None:
     assert str(tmp_path) in out["stdout"]
 
 
-def test_bash_exposes_imp_change_id(tmp_path: Path) -> None:
+def test_bash_exposes_imp_quest_id(tmp_path: Path) -> None:
     ctx = _ctx(tmp_path)
-    out = json.loads(_run_bash(ctx, {"command": "echo $IMP_CHANGE_ID"}))
+    out = json.loads(_run_bash(ctx, {"command": "echo $IMP_QUEST_ID"}))
     assert out["returncode"] == 0
     assert "test01" in out["stdout"]
 

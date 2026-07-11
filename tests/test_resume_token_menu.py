@@ -7,8 +7,8 @@ import pytest
 
 import imp.cli.main as m
 from imp.engine.abandon import archive_conversation
-from imp.engine.archive import archive_change
-from imp.engine.change import Change
+from imp.engine.archive import archive_quest
+from imp.engine.quest import Quest
 from tests.conftest import _seed_control
 
 
@@ -27,14 +27,14 @@ def _row(cid: str, last: str = "2026-06-11T00:00:00+00:00",
 def _archive_terminal(control: Path, cid: str, status: str) -> None:
     events = control / f"{cid}.jsonl"
     events.write_text("")
-    cj = control / f"{cid}.change.json"
+    cj = control / f"{cid}.quest.json"
     cj.write_text(json.dumps({
         "id": cid, "title": cid.title(), "base_branch": "main",
         "created_at": "2026-06-01T00:00:00+00:00", "depends_on": []}))
     sj = control / f"{cid}.state.json"
     sj.write_text(json.dumps({"id": cid, "status": status, "step": "merge"}))
-    archive_change(control, cid, events_path=events,
-                   change_json_path=cj, state_json_path=sj)
+    archive_quest(control, cid, events_path=events,
+                   quest_json_path=cj, state_json_path=sj)
 
 
 # --- branch selection, isolated via monkeypatched _resumable_match_rows -------
@@ -81,8 +81,8 @@ async def test_two_matches_open_scoped_picker_interactive(
     monkeypatch.setattr(m, "_interactive", lambda: True)
 
     async def fake_picker(candidates, *, now, color, header, selected_index):
-        assert "Resume which change?" in header
-        return candidates[1].change_id
+        assert "Resume which Quest?" in header
+        return candidates[1].quest_id
 
     monkeypatch.setattr(m.resume_select, "run_picker", fake_picker)
     assert await m._resolve_resume_target(
@@ -140,7 +140,7 @@ async def test_zero_matches_resolve_id_systemexit_returns_2(
 async def test_real_single_live_resumable_resolves_directly(tmp_path: Path) -> None:
     # AC 7
     _seed_control(tmp_path)
-    Change.create_draft(tmp_path, title="A", change_id="lodo40",
+    Quest.create_draft(tmp_path, title="A", quest_id="lodo40",
                         base_branch="main", origin="idea")
     assert await m._resolve_resume_target(
         tmp_path, "lodo", non_interactive=True) == "lodo40"
@@ -153,7 +153,7 @@ async def test_real_archived_resumable_resolves_by_stem_and_full_id(
     # AC 9: archived-but-resumable reachable by both a shorter unique stem and a
     # full-id token.
     _seed_control(tmp_path)
-    ch = Change.create_draft(tmp_path, title="Left", change_id="lodo40",
+    ch = Quest.create_draft(tmp_path, title="Left", quest_id="lodo40",
                              base_branch="main")
     archive_conversation(ch)
     assert await m._resolve_resume_target(
@@ -182,12 +182,12 @@ async def test_real_lone_archived_terminal_falls_through_to_resume_gone(
 async def test_real_unknown_token_returns_2(tmp_path: Path, capsys) -> None:
     # AC 12
     _seed_control(tmp_path)
-    Change.create_draft(tmp_path, title="A", change_id="lodo40",
+    Quest.create_draft(tmp_path, title="A", quest_id="lodo40",
                         base_branch="main", origin="idea")
     rc = await m._resolve_resume_target(
         tmp_path, "zzzzzz", non_interactive=True)
     assert rc == 2
-    assert "no Change matches" in capsys.readouterr().err
+    assert "no Quest matches" in capsys.readouterr().err
 
 
 @pytest.mark.anyio
@@ -195,7 +195,7 @@ async def test_real_blank_token_behaves_like_no_token(tmp_path: Path) -> None:
     # AC 13: "" resolves identically to None (both the full picker; a lone
     # resumable auto-selects on a non-tty).
     _seed_control(tmp_path)
-    Change.create_draft(tmp_path, title="A", change_id="lodo40",
+    Quest.create_draft(tmp_path, title="A", quest_id="lodo40",
                         base_branch="main", origin="idea")
     none_res = await m._resolve_resume_target(
         tmp_path, None, non_interactive=True)

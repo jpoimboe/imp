@@ -8,9 +8,9 @@ from imp.engine.archive.maintenance import reap_archived_homes
 
 
 def _home(control: Path, cid: str, status: str) -> Path:
-    home = control / ".imp" / "changes" / cid
+    home = control / ".imp" / "quests" / cid
     (home / "state").mkdir(parents=True)
-    (home / "change.json").write_text(json.dumps({
+    (home / "quest.json").write_text(json.dumps({
         "id": cid, "title": cid, "base_branch": "main",
         "created_at": "2026-06-01T00:00:00+00:00"}))
     (home / "state" / "state.json").write_text(json.dumps({
@@ -23,9 +23,9 @@ def _home(control: Path, cid: str, status: str) -> Path:
 
 
 def _archive(control: Path, home: Path, cid: str) -> None:
-    archive.archive_change(
+    archive.archive_quest(
         control, cid, events_path=home / "events.jsonl",
-        change_json_path=home / "change.json",
+        quest_json_path=home / "quest.json",
         state_json_path=home / "state" / "state.json")
 
 

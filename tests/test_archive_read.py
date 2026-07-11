@@ -6,7 +6,7 @@ from pathlib import Path
 from imp.engine.archive.read import (
     completed_rows,
     pick_newest_plan,
-    read_change_json,
+    read_quest_json,
     read_state_json,
     status_of,
 )
@@ -28,15 +28,15 @@ def _archive_with_last_ts(control: Path, cid: str, last_ts: str) -> None:
         f'"timestamp":"{last_ts}","type":"step_started",'
         '"payload":{"step":"plan-writer"}}\n'
     ).encode())
-    cj = control / f"{cid}-change.json"
+    cj = control / f"{cid}-quest.json"
     cj.write_text(json.dumps({
         "id": cid, "title": cid.title(), "base_branch": "main",
         "created_at": "2026-06-01T00:00:00+00:00", "depends_on": []}))
     sj = control / f"{cid}-state.json"
     sj.write_text(json.dumps({"id": cid, "status": "completed", "step": None}))
-    archive.archive_change(
+    archive.archive_quest(
         control, cid, events_path=events,
-        change_json_path=cj, state_json_path=sj)
+        quest_json_path=cj, state_json_path=sj)
 
 
 def _events_bytes(cid: str) -> bytes:
@@ -55,27 +55,27 @@ def _archive(control: Path, cid: str, status: str) -> bytes:
 
     events = control / f"{cid}.jsonl"
     events.write_bytes(_events_bytes(cid))
-    change_json = control / f"{cid}-change.json"
-    change_json.write_text(json.dumps({
+    quest_json = control / f"{cid}-quest.json"
+    quest_json.write_text(json.dumps({
         "id": cid, "title": cid.title(), "base_branch": "main",
         "created_at": "2026-06-01T00:00:00+00:00", "depends_on": ["dep1"],
         "materialized": True}))
     state_json = control / f"{cid}-state.json"
     state_json.write_text(json.dumps({
         "id": cid, "status": status, "step": None, "merge_commit": "c0ffee"}))
-    archive.archive_change(
+    archive.archive_quest(
         control, cid, events_path=events,
-        change_json_path=change_json, state_json_path=state_json)
+        quest_json_path=quest_json, state_json_path=state_json)
     return events.read_bytes()
 
 
-def test_read_state_and_change_json_reconstruct_from_record(tmp_path: Path) -> None:
+def test_read_state_and_quest_json_reconstruct_from_record(tmp_path: Path) -> None:
     _git_init(tmp_path)
     _archive(tmp_path, "alpha", "completed")
     st = json.loads(read_state_json(tmp_path, "alpha"))
     assert st["status"] == "completed"
     assert st["merge_commit"] == "c0ffee"
-    cj = json.loads(read_change_json(tmp_path, "alpha"))
+    cj = json.loads(read_quest_json(tmp_path, "alpha"))
     assert cj["title"] == "Alpha"
     assert cj["base_branch"] == "main"
     assert cj["created_at"] == "2026-06-01T00:00:00+00:00"
@@ -121,14 +121,14 @@ def test_status_of_returns_none_when_not_archived(tmp_path: Path) -> None:
     assert status_of(tmp_path, "ghost") is None
 
 
-def test_read_change_json_prefers_stored_meta(tmp_path: Path) -> None:
+def test_read_quest_json_prefers_stored_meta(tmp_path: Path) -> None:
     from imp.engine import archive
     from imp.engine.archive import read as archive_read
 
     events = tmp_path / "events.jsonl"
     events.write_text("")
-    change_json = tmp_path / "change.json"
-    change_json.write_text(json.dumps({
+    quest_json = tmp_path / "quest.json"
+    quest_json.write_text(json.dumps({
         "id": "conv", "title": "Conv", "base_branch": "main",
         "created_at": "2026-06-01T00:00:00+00:00", "depends_on": [],
         "project_root": str(tmp_path), "materialized": False,
@@ -136,11 +136,11 @@ def test_read_change_json_prefers_stored_meta(tmp_path: Path) -> None:
     state_json = tmp_path / "state.json"
     state_json.write_text(json.dumps({"id": "conv", "status": "paused", "step": "threshold"}))
 
-    archive.archive_change(
+    archive.archive_quest(
         tmp_path, "conv", events_path=events,
-        change_json_path=change_json, state_json_path=state_json, resumable=True)
+        quest_json_path=quest_json, state_json_path=state_json, resumable=True)
 
-    raw = archive_read.read_change_json(tmp_path, "conv")
+    raw = archive_read.read_quest_json(tmp_path, "conv")
     assert raw is not None
     meta = json.loads(raw)
     assert meta["materialized"] is False           # faithful: not hardcoded True
@@ -148,7 +148,7 @@ def test_read_change_json_prefers_stored_meta(tmp_path: Path) -> None:
     assert meta["layout_version"] == 2
 
 
-def test_read_change_json_falls_back_for_legacy_record(tmp_path: Path) -> None:
+def test_read_quest_json_falls_back_for_legacy_record(tmp_path: Path) -> None:
     from imp.engine.archive import record, records_root
 
     legacy_rec = {
@@ -158,14 +158,14 @@ def test_read_change_json_falls_back_for_legacy_record(tmp_path: Path) -> None:
         "events_hash": "abc",
     }
     record.write_record(records_root(tmp_path), legacy_rec)
-    raw = read_change_json(tmp_path, "old")
+    raw = read_quest_json(tmp_path, "old")
     assert raw is not None
     meta = json.loads(raw)
     assert meta["id"] == "old"
     assert meta["title"] == "Old"
     assert meta["base_branch"] == "main"
     assert meta["materialized"] is True
-    assert "change_meta" not in meta
+    assert "quest_meta" not in meta
 
 
 def test_read_step_blobs_returns_relpath_to_bytes(tmp_path: Path) -> None:
@@ -174,8 +174,8 @@ def test_read_step_blobs_returns_relpath_to_bytes(tmp_path: Path) -> None:
 
     events = tmp_path / "e.jsonl"
     events.write_bytes(b"")
-    change_json = tmp_path / "c.json"
-    change_json.write_text(json.dumps(
+    quest_json = tmp_path / "c.json"
+    quest_json.write_text(json.dumps(
         {"id": "conv", "title": "C", "base_branch": "main"}))
     state_json = tmp_path / "st.json"
     state_json.write_text(json.dumps({"id": "conv", "status": "paused"}))
@@ -183,9 +183,9 @@ def test_read_step_blobs_returns_relpath_to_bytes(tmp_path: Path) -> None:
     (steps / "p" / "s").mkdir(parents=True)
     (steps / "p" / "s" / "transcript.jsonl").write_bytes(b"LINE\n")
 
-    archive.archive_change(
+    archive.archive_quest(
         tmp_path, "conv", events_path=events,
-        change_json_path=change_json, state_json_path=state_json,
+        quest_json_path=quest_json, state_json_path=state_json,
         steps_dir=steps, resumable=True)
 
     assert read_step_blobs(tmp_path, "conv") == {"p/s/transcript.jsonl": b"LINE\n"}
@@ -204,8 +204,8 @@ def test_read_step_blobs_skips_missing_blob(tmp_path: Path) -> None:
 
     events = tmp_path / "e.jsonl"
     events.write_bytes(b"")
-    change_json = tmp_path / "c.json"
-    change_json.write_text(json.dumps(
+    quest_json = tmp_path / "c.json"
+    quest_json.write_text(json.dumps(
         {"id": "conv", "title": "C", "base_branch": "main"}))
     state_json = tmp_path / "st.json"
     state_json.write_text(json.dumps({"id": "conv", "status": "paused"}))
@@ -213,9 +213,9 @@ def test_read_step_blobs_skips_missing_blob(tmp_path: Path) -> None:
     (steps / "p" / "s").mkdir(parents=True)
     (steps / "p" / "s" / "transcript.jsonl").write_bytes(b"LINE\n")
 
-    archive.archive_change(
+    archive.archive_quest(
         tmp_path, "conv", events_path=events,
-        change_json_path=change_json, state_json_path=state_json,
+        quest_json_path=quest_json, state_json_path=state_json,
         steps_dir=steps, resumable=True)
 
     rec = record.read_record(records_root(tmp_path), "conv")
@@ -231,8 +231,8 @@ def test_read_step_blobs_empty_when_not_resumable(tmp_path: Path) -> None:
 
     events = tmp_path / "e.jsonl"
     events.write_bytes(b"")
-    change_json = tmp_path / "c.json"
-    change_json.write_text(json.dumps(
+    quest_json = tmp_path / "c.json"
+    quest_json.write_text(json.dumps(
         {"id": "conv", "title": "C", "base_branch": "main"}))
     state_json = tmp_path / "st.json"
     state_json.write_text(json.dumps({"id": "conv", "status": "paused"}))
@@ -240,9 +240,9 @@ def test_read_step_blobs_empty_when_not_resumable(tmp_path: Path) -> None:
     (steps / "p" / "s").mkdir(parents=True)
     (steps / "p" / "s" / "transcript.jsonl").write_bytes(b"LINE\n")
 
-    archive.archive_change(
+    archive.archive_quest(
         tmp_path, "conv", events_path=events,
-        change_json_path=change_json, state_json_path=state_json,
+        quest_json_path=quest_json, state_json_path=state_json,
         steps_dir=steps, resumable=False)
 
     assert read_step_blobs(tmp_path, "conv") == {}

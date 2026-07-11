@@ -13,7 +13,7 @@ You are reviewing the newest implementation plan for this change, before it is
 implemented. imp plans contain the verbatim code they intend to produce — so the
 bug, if there is one, is sitting in the plan as code.
 
-Change title (user's starting intent): `{{ change.title }}`
+Quest title (user's starting intent): `{{ change.title }}`
 Spec file: `{{ change.home }}/artifacts/spec/{{ change.id }}.md`
 
 ## Orient

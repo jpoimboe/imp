@@ -13,7 +13,7 @@ import anyio
 import pytest
 
 from imp.cli import main as cli_main
-from imp.engine.change import Change
+from imp.engine.quest import Quest
 from tests.conftest import _seed_control
 
 
@@ -44,7 +44,7 @@ def test_new_non_interactive_routes_through_session_client(
     captured: dict[str, object] = {}
 
     async def _fake_run_session_client(
-        change: Change, *, driver: object, coord: object, solicit: object,
+        change: Quest, *, driver: object, coord: object, solicit: object,
         seed_opening: object = None, status: object = None,
         leave_mode: object = None,
         title: object = None,
@@ -52,7 +52,7 @@ def test_new_non_interactive_routes_through_session_client(
         autonomous: object = False,
         model: str | None = None,
     ) -> int:
-        captured["change_id"] = change.id
+        captured["quest_id"] = change.id
         captured["seed_opening"] = seed_opening
         return 7
 
@@ -78,9 +78,9 @@ def test_new_interactive_routes_through_session_client(
     made: dict[str, object] = {}
 
     def _fake_make_interactive_solicit(
-        change: Change, *, status: object, driver: object, coord: object,
+        change: Quest, *, status: object, driver: object, coord: object,
     ) -> Any:
-        made["change_id"] = change.id
+        made["quest_id"] = change.id
 
         async def _solicit(_prompt: str) -> str:
             return ""
@@ -93,14 +93,14 @@ def test_new_interactive_routes_through_session_client(
     captured: dict[str, object] = {}
 
     async def _fake_run_session_client(
-        change: Change, *, driver: object, coord: object, solicit: object,
+        change: Quest, *, driver: object, coord: object, solicit: object,
         seed_opening: object = None, status: object = None,
         leave_mode: object = None,
         leave_state: object = None, title: object = None,
         autonomous: object = False,
         model: str | None = None,
     ) -> int:
-        captured["change_id"] = change.id
+        captured["quest_id"] = change.id
         captured["seed_opening"] = seed_opening
         return 5
 
@@ -119,6 +119,6 @@ def test_new_interactive_routes_through_session_client(
         sys.stdout.isatty = orig_out  # type: ignore[method-assign]
 
     assert rc == 5
-    assert made["change_id"] == captured["change_id"]   # solicit bound to the same change
-    # The opening intent is now persisted durably (change.json), not a run param.
-    assert Change.load(tmp_path, captured["change_id"]).seed_opening == "add a thing"
+    assert made["quest_id"] == captured["quest_id"]   # solicit bound to the same change
+    # The opening intent is now persisted durably (quest.json), not a run param.
+    assert Quest.load(tmp_path, captured["quest_id"]).seed_opening == "add a thing"

@@ -21,7 +21,7 @@ from imp.remote.daemon.commands import (
     Search,
     parse,
 )
-from imp.remote.daemon.discover import ChangeInfo
+from imp.remote.daemon.discover import QuestInfo
 from imp.remote.daemon.telegram_adapter import parse_handle
 
 # A fake resolve_lookup: reply_to 42 -> change A; @good -> change B; else unresolved.
@@ -129,12 +129,12 @@ def test_slash_save_at_handle_resolves_the_target() -> None:
     assert parse("/save @good", None, fake_resolve) == Save(B)
 
 
-def test_slash_save_untargeted_carries_no_change_id() -> None:
+def test_slash_save_untargeted_carries_no_quest_id() -> None:
     assert parse("/save", None, fake_resolve) == Save(None)
 
 
 def test_listresult_defaults_resident_to_empty_frozenset() -> None:
-    result = ListResult([ChangeInfo(id="a", title="A", status="running", step="plan")])
+    result = ListResult([QuestInfo(id="a", title="A", status="running", step="plan")])
     assert result.resident == frozenset()
 
 
@@ -144,7 +144,7 @@ def test_listresult_carries_the_resident_set() -> None:
 
 
 def test_list_help_line_says_running_changes() -> None:
-    assert "/list — show running changes (● = subscribed)" in HELP_TEXT
+    assert "/list — show running Quests (● = subscribed)" in HELP_TEXT
 
 
 def test_route_hint_points_at_list_not_show() -> None:
@@ -174,11 +174,11 @@ def test_slash_alerts_arg_is_case_insensitive() -> None:
 
 def test_help_text_mentions_alerts() -> None:
     assert (
-        "/alerts on|off — alert on every Change, not just the ones you follow (default: on)"
+        "/alerts on|off — alert on every Quest, not just the ones you follow (default: on)"
         in HELP_TEXT)
 
 
 def test_help_text_mentions_subscribe_streams_from_now() -> None:
     assert (
-        "/subscribe @handle — follow a Change (streams from now; /replay for history)"
+        "/subscribe @handle — follow a Quest (streams from now; /replay for history)"
         in HELP_TEXT)

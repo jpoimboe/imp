@@ -9,7 +9,7 @@ SCRIPT = Path("src/imp/assets/workflows/imp/scripts/integrate-rebase.sh").resolv
 
 
 def _home(project_root: Path) -> Path:
-    return project_root.parent / ".imp" / "changes" / "x"
+    return project_root.parent / ".imp" / "quests" / "x"
 
 
 def _git(cwd: Path, *args: str) -> subprocess.CompletedProcess[str]:
@@ -18,7 +18,7 @@ def _git(cwd: Path, *args: str) -> subprocess.CompletedProcess[str]:
 
 def _run(project_root: Path, tolerated: str = "false") -> subprocess.CompletedProcess[str]:
     env = {**os.environ, "IMP_PROJECT_ROOT": str(project_root),
-           "IMP_CHANGE_DIR": str(_home(project_root))}
+           "IMP_QUEST_DIR": str(_home(project_root))}
     return subprocess.run(["bash", str(SCRIPT), tolerated], cwd=project_root.parent,
                           env=env, capture_output=True, text=True, check=False)
 
@@ -60,7 +60,7 @@ def _seed(project_root: Path, *, base_ahead: bool, conflict: bool) -> None:
             _git(project_root, "commit", "-m", "branch edits f")
     cd = _home(project_root)
     cd.mkdir(parents=True, exist_ok=True)
-    (cd / "change.json").write_text(json.dumps(
+    (cd / "quest.json").write_text(json.dumps(
         {"id": "x", "title": "t", "base_branch": "main", "cur_base_head": fork}))
 
 
@@ -76,7 +76,7 @@ def test_bad_base_ref_exits_3(tmp_path: Path) -> None:
     pr = tmp_path / "wt"
     _seed(pr, base_ahead=False, conflict=False)
     cd = _home(pr)
-    (cd / "change.json").write_text(
+    (cd / "quest.json").write_text(
         json.dumps({"id": "x", "title": "t", "base_branch": "nonexistent"}))
     r = _run(pr)
     assert r.returncode == 3
@@ -123,12 +123,12 @@ def test_base_moved_conflict_exits_6(tmp_path: Path) -> None:
 def test_clean_rebase_prints_fork_sha_and_replants_cur_base_head(tmp_path: Path) -> None:
     pr = tmp_path / "wt"
     _seed(pr, base_ahead=True, conflict=False)
-    before = json.loads((_home(pr) / "change.json").read_text())["cur_base_head"]
+    before = json.loads((_home(pr) / "quest.json").read_text())["cur_base_head"]
     r = _run(pr)
     assert r.returncode == 0, r.stderr
     assert r.stdout.strip() == before
     b = _git(pr, "rev-parse", "main").stdout.strip()
-    meta = json.loads((_home(pr) / "change.json").read_text())
+    meta = json.loads((_home(pr) / "quest.json").read_text())
     assert meta["cur_base_head"] == b                           # cur_base_head := B
     assert _git(pr, "diff", "--quiet", before, b).returncode == 1   # (P,B) non-empty, recoverable
     mb = _git(pr, "merge-base", "main", "HEAD").stdout.strip()
@@ -138,11 +138,11 @@ def test_clean_rebase_prints_fork_sha_and_replants_cur_base_head(tmp_path: Path)
 def test_conflict_prints_fork_sha_and_keeps_cur_base_head(tmp_path: Path) -> None:
     pr = tmp_path / "wt"
     _seed(pr, base_ahead=True, conflict=True)
-    before = json.loads((_home(pr) / "change.json").read_text())["cur_base_head"]
+    before = json.loads((_home(pr) / "quest.json").read_text())["cur_base_head"]
     r = _run(pr)
     assert r.returncode == 6, r.stderr
     assert r.stdout.strip() == before
-    after = json.loads((_home(pr) / "change.json").read_text())["cur_base_head"]
+    after = json.loads((_home(pr) / "quest.json").read_text())["cur_base_head"]
     assert after == before                                      # untouched on exit 6
 
 
@@ -150,10 +150,10 @@ def test_base_unmoved_cleared_keeps_cur_base_head_and_prints_no_fork(tmp_path: P
     pr = tmp_path / "wt"
     _seed(pr, base_ahead=False, conflict=False)
     _stamp(pr, "last_green_tree_slow")
-    before = json.loads((_home(pr) / "change.json").read_text())["cur_base_head"]
+    before = json.loads((_home(pr) / "quest.json").read_text())["cur_base_head"]
     r = _run(pr)
     assert r.returncode == 2
-    after = json.loads((_home(pr) / "change.json").read_text())["cur_base_head"]
+    after = json.loads((_home(pr) / "quest.json").read_text())["cur_base_head"]
     assert after == before                                      # untouched on exit 2
     assert r.stdout.strip() == ""                               # no fork SHA on the fast path
 
@@ -162,11 +162,11 @@ def test_base_unmoved_uncleared_exits_7_and_prints_fork(tmp_path: Path) -> None:
     """Base unmoved, no stamp, not tolerated -> exit 7, prints fork SHA, cur_base_head untouched."""
     pr = tmp_path / "wt"
     _seed(pr, base_ahead=False, conflict=False)
-    before = json.loads((_home(pr) / "change.json").read_text())["cur_base_head"]
+    before = json.loads((_home(pr) / "quest.json").read_text())["cur_base_head"]
     r = _run(pr)                                # tolerated defaults false, no stamp
     assert r.returncode == 7, r.stderr
     assert r.stdout.strip() == before
-    after = json.loads((_home(pr) / "change.json").read_text())["cur_base_head"]
+    after = json.loads((_home(pr) / "quest.json").read_text())["cur_base_head"]
     assert after == before
 
 

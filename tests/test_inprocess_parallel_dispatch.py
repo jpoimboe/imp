@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 from imp.agents.parallel import reset_parallelism_cache
-from imp.agents.runner import AgentInvocation, ChangeContext, Message, TextBlock
+from imp.agents.runner import AgentInvocation, Message, QuestContext, TextBlock
 from imp.agents.tools import get_registry  # noqa: F401 ensures tools registered
 from imp.engine.state import InMemoryEventLog
 from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
@@ -80,7 +80,7 @@ def _inv(tmp_path: Path, log, provider: str) -> AgentInvocation:
         provider_name=provider, model_name="m",
         system_prompt="be terse",
         initial_messages=(Message(role="user", content=(TextBlock(text="go"),)),),
-        change_context=ChangeContext(
+        quest_context=QuestContext(
             title="Test", project_root=tmp_path,
             workflow_dir=tmp_path / ".imp" / "change" / "workflow"),
         transcript_dir=tmp_path / "step",

@@ -14,53 +14,53 @@ def socket_path(control_root: Path) -> Path:
 
 
 @dataclass(frozen=True)
-class ChangeInfo:
-    """One Change as the `list` control verb reports it (spec control surface)."""
+class QuestInfo:
+    """One Quest as the `list` control verb reports it (spec control surface)."""
     id: str
     title: str
     status: str
     step: str
 
 
-def list_changes(control_root: Path) -> list[ChangeInfo]:
-    """The in-flight Changes the `list` verb reports — those a user can still act on.
+def list_quests(control_root: Path) -> list[QuestInfo]:
+    """The in-flight Quests the `list` verb reports — those a user can still act on.
 
-    `_iter_change_ids` enumerates every known Change including the journal
+    `_iter_quest_ids` enumerates every known Quest including the journal
     (completed / merged / abandoned), but those are terminal: surfacing them in a
     remote `/list` is just noise. Keep only the in-flight statuses
     (running / new / paused / merge_blocked / draft); `running` and
     `draft` are derived at display time — there is no persisted `errored`."""
-    from imp.cli.main import _INFLIGHT, _iter_change_ids, _row_for_id
-    out: list[ChangeInfo] = []
-    for change_id in _iter_change_ids(control_root):
+    from imp.cli.main import _INFLIGHT, _iter_quest_ids, _row_for_id
+    out: list[QuestInfo] = []
+    for quest_id in _iter_quest_ids(control_root):
         try:
-            row = _row_for_id(control_root, change_id)
+            row = _row_for_id(control_root, quest_id)
         except Exception:
             # A single mid-write or corrupt change home must never blind the
             # whole directory — that would drop every resident session's relay
             # and (in the daemon's scan loop) crash the daemon. Skip it; a later
             # poll re-reads it once it settles.
-            _log.warning("list_changes: skipping %s (row read failed)",
-                         change_id, exc_info=True)
+            _log.warning("list_quests: skipping %s (row read failed)",
+                         quest_id, exc_info=True)
             continue
         if row is None:
             continue
-        change_id_, status_, step_, _last, title_, _created, _step_label, _phase_label = row
+        quest_id_, status_, step_, _last, title_, _created, _step_label, _phase_label = row
         if status_ not in _INFLIGHT:
             continue
-        out.append(ChangeInfo(id=change_id_, title=title_, status=status_, step=step_))
+        out.append(QuestInfo(id=quest_id_, title=title_, status=status_, step=step_))
     return out
 
 
-def snapshot(control_root: Path, change_id: str) -> tuple[str, str, str] | None:
+def snapshot(control_root: Path, quest_id: str) -> tuple[str, str, str] | None:
     from imp.cli.main import _row_for_id
     try:
-        row = _row_for_id(control_root, change_id)
+        row = _row_for_id(control_root, quest_id)
     except Exception:
         # snapshot() feeds the relay's title_for from inside a task-group child,
         # so a raise here would escape the supervisor's poll-loop guard and crash
         # the daemon. Treat a transient/corrupt read as "no snapshot".
-        _log.warning("snapshot: %s row read failed", change_id, exc_info=True)
+        _log.warning("snapshot: %s row read failed", quest_id, exc_info=True)
         return None
     if row is None:
         return None
@@ -68,14 +68,14 @@ def snapshot(control_root: Path, change_id: str) -> tuple[str, str, str] | None:
     return (status, step, title)
 
 
-def recent_narrative(control_root: Path, change_id: str, n: int) -> list[dict[str, Any]]:
+def recent_narrative(control_root: Path, quest_id: str, n: int) -> list[dict[str, Any]]:
     """Last n non-empty llm_response events, oldest-first, augmented for /replay."""
     from imp.cli.main import _load_events_for_id
     from imp.remote.curate import EventCurator
     from imp.remote.drivers.telegram import event_body
     if n <= 0:
         return []
-    events = _load_events_for_id(control_root, change_id)
+    events = _load_events_for_id(control_root, quest_id)
     if events is None:
         return []
     selected = [
@@ -83,9 +83,9 @@ def recent_narrative(control_root: Path, change_id: str, n: int) -> list[dict[st
         if event.get("type") == "llm_response"
         and event_body("llm_response", event.get("payload") or {}).strip()
     ]
-    snap = snapshot(control_root, change_id)
+    snap = snapshot(control_root, quest_id)
     title = snap[2] if snap is not None else ""
-    curator = EventCurator(id=change_id, title_provider=lambda: title, events=("all",))
+    curator = EventCurator(id=quest_id, title_provider=lambda: title, events=("all",))
     out: list[dict[str, Any]] = []
     for event in selected[-n:]:
         augmented = curator.curate(event)
@@ -106,16 +106,16 @@ def socket_is_live(path: Path | str) -> bool:
     return True
 
 
-def full_history(control_root: Path, change_id: str) -> list[dict[str, Any]]:
+def full_history(control_root: Path, quest_id: str) -> list[dict[str, Any]]:
     """Complete events.jsonl as raw, ordered augmented events; empty when the id is unknown."""
     from imp.cli.main import _load_events_for_id
     from imp.remote.curate import EventCurator
-    events = _load_events_for_id(control_root, change_id)
+    events = _load_events_for_id(control_root, quest_id)
     if events is None:
         return []
-    snap = snapshot(control_root, change_id)
+    snap = snapshot(control_root, quest_id)
     title = snap[2] if snap is not None else ""
-    curator = EventCurator(id=change_id, title_provider=lambda: title, events=("all",))
+    curator = EventCurator(id=quest_id, title_provider=lambda: title, events=("all",))
     out: list[dict[str, Any]] = []
     for event in events:
         augmented = curator.curate(event)

@@ -142,7 +142,7 @@ async def run_parallel_task_turn(provider: str) -> list[dict]:
     include tool_call/tool_result for both task dispatches, which the caller
     uses to assert concurrency shape (both calls precede either result).
     """
-    from imp.agents.runner import AgentInvocation, ChangeContext, Message, TextBlock
+    from imp.agents.runner import AgentInvocation, Message, QuestContext, TextBlock
     from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
 
     _SRC = SourceLoc(file=Path("a.md"), line=1)
@@ -214,7 +214,7 @@ async def run_parallel_task_turn(provider: str) -> list[dict]:
                         "in a single message."
                     )),),
             ),),
-            change_context=ChangeContext(
+            quest_context=QuestContext(
                 title="parallel concurrency test",
                 project_root=tmp_path, workflow_dir=tmp_path, id="c1",
             ),

@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from imp.agents.runner import AgentInvocation, ChangeContext, Message, TextBlock
+from imp.agents.runner import AgentInvocation, Message, QuestContext, TextBlock
 from imp.engine.types import AgentDef, OutputSchema, SourceLoc
 from imp.providers.anthropic import _build_tools as anthropic_build
 from imp.providers.claude_code import _build_tools as cc_build
@@ -25,7 +25,7 @@ def _inv(provider: str, tools: frozenset[str], explicit_tools: bool = False) -> 
         agent_def=_agent(tools, explicit_tools=explicit_tools), provider_name=provider,
         model_name="m", system_prompt="s",
         initial_messages=(Message(role="user", content=(TextBlock(text="go"),)),),
-        change_context=ChangeContext(title="t", project_root=Path("/"),
+        quest_context=QuestContext(title="t", project_root=Path("/"),
                                      workflow_dir=Path("/")),
         transcript_dir=Path("/"),
 events_path=Path("/events.jsonl"))

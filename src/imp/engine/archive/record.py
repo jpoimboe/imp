@@ -1,4 +1,4 @@
-"""Immutable per-Change record file: build, write, and read."""
+"""Immutable per-Quest record file: build, write, and read."""
 
 from __future__ import annotations
 
@@ -14,16 +14,16 @@ from imp.engine.pagecache import drop_page_cache
 
 
 def build_record(
-    change_meta: dict[str, Any], final_state: dict[str, Any], events_hash: str,
+    quest_meta: dict[str, Any], final_state: dict[str, Any], events_hash: str,
     *, resumable: bool = False, step_blobs: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     return {
-        "id": change_meta["id"],
-        "title": change_meta["title"],
-        "base": change_meta["base_branch"],
-        "created_at": change_meta.get("created_at", ""),
-        "depends_on": list(change_meta.get("depends_on") or []),
-        "change_meta": dict(change_meta),
+        "id": quest_meta["id"],
+        "title": quest_meta["title"],
+        "base": quest_meta["base_branch"],
+        "created_at": quest_meta.get("created_at", ""),
+        "depends_on": list(quest_meta.get("depends_on") or []),
+        "quest_meta": dict(quest_meta),
         "resumable": resumable,
         "final_state": final_state,
         "events_hash": events_hash,
@@ -81,8 +81,8 @@ def _reread_or_raise(
     raise err
 
 
-def read_record(records_dir: Path, change_id: str) -> dict[str, Any] | None:
-    path = records_dir / f"{change_id}.json"
+def read_record(records_dir: Path, quest_id: str) -> dict[str, Any] | None:
+    path = records_dir / f"{quest_id}.json"
     if not path.exists():
         return None
     raw = _read_record_bytes(path)

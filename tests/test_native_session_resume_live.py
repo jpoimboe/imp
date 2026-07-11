@@ -191,10 +191,10 @@ def test_resumed_step_recalls_prior_reads_without_redo_or_400(
         start_new_session=True,
     )
     try:
-        change_dir = _await_change_dir(tmp_path, timeout=30.0)
-        slug = change_dir.name
-        events = change_dir / "events.jsonl"
-        state_path = change_dir / "state" / "state.json"
+        quest_dir = _await_change_dir(tmp_path, timeout=30.0)
+        slug = quest_dir.name
+        events = quest_dir / "events.jsonl"
+        state_path = quest_dir / "state" / "state.json"
 
         if not _wait_for_bash_tool_call(events, timeout=120.0):
             stdout, stderr = proc.communicate(timeout=10)

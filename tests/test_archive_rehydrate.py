@@ -8,56 +8,56 @@ import pytest
 from imp.engine import archive
 from imp.engine.abandon import archive_conversation
 from imp.engine.archive import read as archive_read
-from imp.engine.change import Change
 from imp.engine.executor import _resume_replays_transcript
+from imp.engine.quest import Quest
 from imp.engine.state import State
 from tests.conftest import _seed_control
 
 
 def test_rehydrate_restores_loadable_draft_from_archive(tmp_path: Path) -> None:
     _seed_control(tmp_path)
-    ch = Change.create_draft(tmp_path, title="Conv", change_id="draft", base_branch="main")
+    ch = Quest.create_draft(tmp_path, title="Conv", quest_id="draft", base_branch="main")
     orig_head = ch.orig_base_head
     archive_conversation(ch)  # drops the live home into the archive
-    assert not (tmp_path / ".imp" / "changes" / "draft").exists()
+    assert not (tmp_path / ".imp" / "quests" / "draft").exists()
 
-    change_dir = archive_read.rehydrate_change(tmp_path, "draft")
-    assert change_dir == tmp_path / ".imp" / "changes" / "draft"
+    quest_dir = archive_read.rehydrate_quest(tmp_path, "draft")
+    assert quest_dir == tmp_path / ".imp" / "quests" / "draft"
 
-    # The rehydrated home is a faithful, loadable Change.
-    loaded = Change.load(tmp_path, "draft")
+    # The rehydrated home is a faithful, loadable Quest.
+    loaded = Quest.load(tmp_path, "draft")
     assert loaded.materialized is False
     assert loaded.orig_base_head == orig_head
     state = State.load(loaded.state_dir)
     assert state.status == "paused"  # the left-conversation resting status
-    events = (change_dir / "events.jsonl").read_bytes()
+    events = (quest_dir / "events.jsonl").read_bytes()
     assert b"change_created" in events  # the original conversation events survive
 
 
 def test_rehydrate_refuses_to_clobber_existing_home(tmp_path: Path) -> None:
     _seed_control(tmp_path)
-    Change.create_draft(tmp_path, title="Conv", change_id="draft", base_branch="main")
+    Quest.create_draft(tmp_path, title="Conv", quest_id="draft", base_branch="main")
     with pytest.raises(FileExistsError):
-        archive_read.rehydrate_change(tmp_path, "draft")
+        archive_read.rehydrate_quest(tmp_path, "draft")
 
 
 def test_rehydrate_unknown_change_raises(tmp_path: Path) -> None:
     _seed_control(tmp_path)
     with pytest.raises(FileNotFoundError):
-        archive_read.rehydrate_change(tmp_path, "nope")
+        archive_read.rehydrate_quest(tmp_path, "nope")
 
 
 def _archive_with_steps(control: Path, cid: str, steps: Path, *, resumable: bool) -> None:
     events = control / f"{cid}.jsonl"
     events.write_bytes(b"")
-    change_json = control / f"{cid}-change.json"
-    change_json.write_text(json.dumps(
+    quest_json = control / f"{cid}-quest.json"
+    quest_json.write_text(json.dumps(
         {"id": cid, "title": "C", "base_branch": "main", "materialized": False}))
     state_json = control / f"{cid}-state.json"
     state_json.write_text(json.dumps({"id": cid, "status": "paused", "step": "s"}))
-    archive.archive_change(
+    archive.archive_quest(
         control, cid, events_path=events,
-        change_json_path=change_json, state_json_path=state_json,
+        quest_json_path=quest_json, state_json_path=state_json,
         steps_dir=steps, resumable=resumable)
 
 
@@ -71,9 +71,9 @@ def test_rehydrate_restores_steps_subtree_byte_for_byte(tmp_path: Path) -> None:
     (steps / "p" / "s" / "codex_rollout" / "sessions" / "rollout-1.jsonl").write_bytes(b"ROLL")
     _archive_with_steps(tmp_path, "conv", steps, resumable=True)
 
-    change_dir = archive_read.rehydrate_change(tmp_path, "conv")
+    quest_dir = archive_read.rehydrate_quest(tmp_path, "conv")
 
-    sdir = change_dir / "steps" / "p" / "s"
+    sdir = quest_dir / "steps" / "p" / "s"
     assert (sdir / "transcript.jsonl").read_bytes() == b'{"role":"user"}\n'
     assert (sdir / "claude_session" / "x" / "sess.jsonl").read_bytes() == b"SESS"
     assert (sdir / "codex_rollout" / "sessions" / "rollout-1.jsonl").read_bytes() == b"ROLL"
@@ -87,6 +87,6 @@ def test_rehydrate_non_resumable_restores_no_steps(tmp_path: Path) -> None:
     (steps / "p" / "s" / "transcript.jsonl").write_bytes(b'{"role":"user"}\n')
     _archive_with_steps(tmp_path, "conv", steps, resumable=False)
 
-    change_dir = archive_read.rehydrate_change(tmp_path, "conv")
+    quest_dir = archive_read.rehydrate_quest(tmp_path, "conv")
 
-    assert not (change_dir / "steps").exists()
+    assert not (quest_dir / "steps").exists()

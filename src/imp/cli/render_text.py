@@ -26,10 +26,10 @@ _INDENT_W = len(_INDENT)  # logical indent width per level; the gutter SUBSTITUT
 _DIFFER_LABELS = {1: "vendor jump", 2: "same-vendor fallback", 3: "identical"}
 
 # Plain-speak copy for pause reasons that need more than the verbatim token.
-# imp-canon nouns (Change, resume); unmapped reasons render as paused (<reason>).
+# imp-canon nouns (Quest, resume); unmapped reasons render as paused (<reason>).
 _PAUSE_REASON_COPY: dict[str, str] = {
     "reauth_needed":
-        "authentication kept failing; the Change is paused and resumable; "
+        "authentication kept failing; the Quest is paused and resumable; "
         "re-authenticate to Claude (e.g. re-login), then resume",
 }
 
@@ -855,13 +855,13 @@ def _render(node: Any, *, depth: int, full: bool, color: bool,
 
     if isinstance(node, nv.CompletedNode):
         mark = "✓ " if color else ""
-        yield _line(f"{mark}Completed {node.change_id}.", depth, color,
+        yield _line(f"{mark}Completed {node.quest_id}.", depth, color,
                     *pal.NODE_COLORS["lifecycle"], gutters=gutters)
         return
 
     if isinstance(node, nv.MergedNode):
         mark = "✓ " if color else ""
-        yield _line(f"{mark}Merged {node.change_id} into {node.base}.", depth, color,
+        yield _line(f"{mark}Merged {node.quest_id} into {node.base}.", depth, color,
                     *pal.NODE_COLORS["lifecycle"], gutters=gutters)
         return
 

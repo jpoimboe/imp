@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from imp.agents.runner import ChangeContext
+from imp.agents.runner import QuestContext
 from imp.agents.subagents import MAX_SUBAGENT_DEPTH, dispatch_task
 from imp.agents.tools.context import ToolContext
 from imp.cli.signals import InterruptCoordinator
@@ -48,7 +48,7 @@ def _ctx(tmp_path: Path, *, depth: int) -> ToolContext:
     ctx.parent_transcript_dir = tmp_path / "steps/p/s"
     ctx.coordinator = InterruptCoordinator()
     ctx.subagent_depth = depth
-    ctx.change_context = ChangeContext(title="C", project_root=tmp_path,
+    ctx.quest_context = QuestContext(title="C", project_root=tmp_path,
                                        workflow_dir=tmp_path / "wf")
     return ctx
 

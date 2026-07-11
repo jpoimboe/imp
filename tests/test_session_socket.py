@@ -24,9 +24,9 @@ def anyio_backend() -> str:
     return "asyncio"
 
 
-async def _attach(sock_path: str, change_id: str) -> SocketStream:
+async def _attach(sock_path: str, quest_id: str) -> SocketStream:
     client = await anyio.connect_unix(sock_path)
-    await client.send((encode_attach(change_id, "T") + "\n").encode())
+    await client.send((encode_attach(quest_id, "T") + "\n").encode())
     return client
 
 
@@ -289,9 +289,9 @@ def test_emit_drops_a_client_whose_bounded_buffer_overflows() -> None:
     _recv.close()
 
 
-async def _attach_leased(sock_path: str, change_id: str, lease: bool) -> SocketStream:
+async def _attach_leased(sock_path: str, quest_id: str, lease: bool) -> SocketStream:
     client = await anyio.connect_unix(sock_path)
-    await client.send((encode_attach(change_id, "T", lease) + "\n").encode())
+    await client.send((encode_attach(quest_id, "T", lease) + "\n").encode())
     return client
 
 

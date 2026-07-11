@@ -10,8 +10,8 @@ import pytest
 
 from imp.agents.runner import AgentInvocation, AgentRunner, Event
 from imp.agents.subagents import SubagentSuspended
-from imp.engine.change import Change
 from imp.engine.executor import RunResult, run_change
+from imp.engine.quest import Quest
 from imp.engine.state import State
 
 
@@ -59,7 +59,7 @@ def _e2e_agent_def(name, *, tools, subagents=()):
 
 @pytest.mark.anyio
 async def test_batched_child_suspension_degrades_to_is_error(tmp_path) -> None:
-    from imp.agents.runner import ChangeContext, Message, TextBlock
+    from imp.agents.runner import Message, QuestContext, TextBlock
     from imp.cli.signals import InterruptCoordinator
     from imp.providers import resolve
     from imp.providers.anthropic import AnthropicAgentRunner
@@ -96,7 +96,7 @@ async def test_batched_child_suspension_degrades_to_is_error(tmp_path) -> None:
         provider_name="fake", model_name="m",        # subagent inherits -> fake
         system_prompt="be terse",
         initial_messages=(Message(role="user", content=(TextBlock(text="go"),)),),
-        change_context=ChangeContext(title="T", project_root=tmp_path,
+        quest_context=QuestContext(title="T", project_root=tmp_path,
                                      workflow_dir=tmp_path / "wf"),
         transcript_dir=tmp_path / "step",
         events_path=tmp_path / "events.jsonl",
@@ -119,7 +119,7 @@ async def test_batched_child_suspension_degrades_to_is_error(tmp_path) -> None:
     assert error_results, "expected an is_error tool_result containing SubagentSuspended"
 
 
-def _seed_single_step(root: Path) -> Change:
+def _seed_single_step(root: Path) -> Quest:
     from imp.engine.loader import load_workflow
     from imp.providers.effective import load_effective_config
 
@@ -140,10 +140,10 @@ def _seed_single_step(root: Path) -> Change:
     (root / ".imp").mkdir(parents=True, exist_ok=True)
     (root / ".imp" / "config.yaml").write_text(_cfg)
 
-    change_dir = root / ".imp" / "change"
-    change_dir.mkdir(parents=True, exist_ok=True)
-    (change_dir / "state").mkdir(exist_ok=True)
-    (change_dir / "change.json").write_text(json.dumps(
+    quest_dir = root / ".imp" / "change"
+    quest_dir.mkdir(parents=True, exist_ok=True)
+    (quest_dir / "state").mkdir(exist_ok=True)
+    (quest_dir / "quest.json").write_text(json.dumps(
         {"id": "s", "title": "t", "base_branch": "main"}, indent=2, sort_keys=True))
     configured: list[str] = []
     with contextlib.suppress(Exception):
@@ -152,9 +152,9 @@ def _seed_single_step(root: Path) -> Change:
     workflow = load_workflow(wf, configured_tiers=configured)
     flat = workflow.flat_steps()
     State(id="s", step=flat[0].name, step_attempt=0, status="running",
-          vars=dict(workflow.vars.defaults()), loop_counts={}).save(change_dir / "state")
-    change = Change(id="s", title="t", base_branch="main", control_root=root,
-                    project_root=root, change_dir=change_dir)
+          vars=dict(workflow.vars.defaults()), loop_counts={}).save(quest_dir / "state")
+    change = Quest(id="s", title="t", base_branch="main", control_root=root,
+                    project_root=root, quest_dir=quest_dir)
     change.event_log().append(agent_id=None, type="change_created",
                               payload={"id": "s", "title": "t"})
     return change

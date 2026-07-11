@@ -16,8 +16,8 @@ from pathlib import Path
 import anyio
 import pytest
 
-from imp.engine.change import Change
 from imp.engine.executor import RunResult, run_change
+from imp.engine.quest import Quest
 from tests.conftest import _git, _init_repo, write_agent_md
 
 
@@ -104,8 +104,8 @@ def test_scripted_parent_dispatches_scripted_subagent(
     monkeypatch.setenv("IMP_SCRIPTED_SCRIPT", str(script_path))
 
     _seed_repo(tmp_path)
-    ch = Change.create(tmp_path, title="x",
-                       change_id="2026-07-03-aaa111", base_branch="main")
+    ch = Quest.create(tmp_path, title="x",
+                       quest_id="2026-07-03-aaa111", base_branch="main")
 
     events: list[dict] = []
     result = anyio.run(functools.partial(run_change, ch, on_event=events.append))

@@ -12,8 +12,8 @@ import pytest
 from imp.agents.classify import ResumeState, classify_resume
 from imp.agents.runner import (
     AgentInvocation,
-    ChangeContext,
     Message,
+    QuestContext,
     TextBlock,
     ToolResultBlock,
     ToolUseBlock,
@@ -51,7 +51,7 @@ def _inv(tmp_path: Path, tools=None, *, event_log=None, agent_id="step:p/s",
         provider_name="anthropic", model_name="claude-sonnet-4-6",
         system_prompt="be terse",
         initial_messages=(Message(role="user", content=(TextBlock(text="go"),)),),
-        change_context=ChangeContext(
+        quest_context=QuestContext(
             title="Test", project_root=tmp_path,
             workflow_dir=tmp_path / ".imp" / "change" / "workflow"),
         transcript_dir=tmp_path / "step",
@@ -234,7 +234,7 @@ async def test_resume_with_retry_feedback_injects_and_continues(tmp_path: Path) 
         agent_def=_agent_def(), provider_name="anthropic",
         model_name="claude-sonnet-4-6", system_prompt="be terse",
         initial_messages=(Message(role="user", content=(TextBlock(text="go"),)),),
-        change_context=ChangeContext(
+        quest_context=QuestContext(
             title="Test", project_root=tmp_path,
             workflow_dir=tmp_path / ".imp" / "change" / "workflow"),
         transcript_dir=inv_dir,

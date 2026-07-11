@@ -10,7 +10,7 @@ import pytest
 
 import imp.cli.main as m
 import imp.cli.signals as sig
-from imp.engine.change import Change
+from imp.engine.quest import Quest
 from imp.engine.state import State
 from tests.conftest import _seed_control
 
@@ -20,9 +20,9 @@ def anyio_backend() -> str:
     return "asyncio"
 
 
-def _seed(tmp_path: Path) -> Change:
+def _seed(tmp_path: Path) -> Quest:
     _seed_control(tmp_path)
-    ch = Change.create(tmp_path, title="demo", change_id="feat", base_branch="main")
+    ch = Quest.create(tmp_path, title="demo", quest_id="feat", base_branch="main")
     st = State.load(ch.state_dir)
     st.status = "paused"
     st.save(ch.state_dir)

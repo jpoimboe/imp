@@ -46,7 +46,7 @@ def test_cli_new_help_does_not_name_the_old_spec_writer() -> None:
     import pathlib
     text = pathlib.Path("src/imp/cli/main.py").read_text()
     assert "handed verbatim to the spec-writer" not in text
-    assert "the spec-writer names the Change" not in text
+    assert "the spec-writer names the Quest" not in text
     assert "spec-writer's opening intent" not in text
     assert "the spec-writer opens" not in text
 
@@ -98,8 +98,8 @@ def test_batch_code_reviewer_renders_change_diff(tmp_path) -> None:
     body = _agent_prompt("batch-code-reviewer")
     log = JsonlEventLog(tmp_path / "events.jsonl")
     out = render_prompt(body, build_context(
-        change_title="t", event_log=log, change_id="abc",
-        change_home=".imp/changes/abc", cur_base_head="BASE",
+        quest_title="t", event_log=log, quest_id="abc",
+        quest_home=".imp/quests/abc", cur_base_head="BASE",
         vars={"fast_path": False}),
         workflow_dir=bundled_workflow_dir("imp"))
     assert "git diff BASE..imp/abc" in out
@@ -323,10 +323,10 @@ def _render_agent(name: str, tmp_path) -> str:
     return render_prompt(
         body,
         build_context(
-            change_title="t",
+            quest_title="t",
             event_log=log,
-            change_id="abc",
-            change_home=".imp/changes/abc",
+            quest_id="abc",
+            quest_home=".imp/quests/abc",
             cur_base_head="BASE",
             vars={"fast_path": False, "task_total": 0},
         ),
