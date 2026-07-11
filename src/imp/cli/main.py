@@ -1593,15 +1593,30 @@ def _cmd_list(args: argparse.Namespace) -> int:
 
 
 def _cmd_show(args: argparse.Namespace) -> int:
-    if args.token is None:
+    token = args.token
+    if token is None and not _interactive():
         print("imp: 'imp show' needs a change id — run 'imp list' for an overview",
               file=sys.stderr)
         return 2
     control = _control_root()
-    try:
-        change_id = _resolve_id(control, args.token)
-    except SystemExit:
-        return 2
+    if token is None:
+        picked = anyio.run(_pick_show_target, control)
+        if isinstance(picked, int):
+            return picked
+        change_id = picked
+    else:
+        # Same comprehension as _resolve_id — picker and resolver agree on candidates.
+        matches = [cid for cid in _iter_change_ids(control) if token in cid]
+        if _interactive() and len(matches) >= 2:
+            picked = anyio.run(_pick_show_matches, control, matches)
+            if isinstance(picked, int):
+                return picked
+            change_id = picked
+        else:
+            try:
+                change_id = _resolve_id(control, token)
+            except SystemExit:
+                return 2
     resource = args.resource
     meta = _unstarted_backlog_meta(control, change_id)
     if meta is not None:

@@ -90,3 +90,165 @@ async def test_pick_show_matches_non_tty_lists_candidates(
     err = capsys.readouterr().err
     assert rc == 2
     assert "lodo40" in err and "lodo77" in err
+
+
+def _ns(token, resource=None):
+    return argparse.Namespace(token=token, resource=resource, no_pager=True)
+
+
+def test_cmd_show_two_matches_open_picker(monkeypatch, tmp_path: Path) -> None:
+    # AC 1 / AC 9a: >=2 raw matches on an interactive tty open the scoped picker
+    # with exactly those ids; _resolve_id is NOT consulted for the fork.
+    monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
+    monkeypatch.setattr(m, "_iter_change_ids",
+                        lambda c: ["lodo40", "lodo77", "tavo12"])
+    monkeypatch.setattr(m, "_interactive", lambda: True)
+    seen = {}
+
+    async def fake_pick(control, matches):
+        seen["matches"] = matches
+        return 2  # short-circuit rc; dispatch must not run
+
+    monkeypatch.setattr(m, "_pick_show_matches", fake_pick)
+
+    def boom_resolve(*a, **k):
+        raise AssertionError("_resolve_id used for an ambiguous interactive token")
+
+    monkeypatch.setattr(m, "_resolve_id", boom_resolve)
+    rc = m._cmd_show(_ns("lodo"))
+    assert rc == 2
+    assert seen["matches"] == ["lodo40", "lodo77"]
+
+
+def test_cmd_show_picker_selection_dispatches(monkeypatch, tmp_path: Path) -> None:
+    # AC 9b: an interactive selection of a scoped match flows into the resource
+    # dispatch with that change id.
+    monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
+    monkeypatch.setattr(m, "_iter_change_ids", lambda c: ["lodo40", "lodo77"])
+    monkeypatch.setattr(m, "_interactive", lambda: True)
+
+    async def fake_pick(control, matches):
+        return "lodo77"
+
+    monkeypatch.setattr(m, "_pick_show_matches", fake_pick)
+    monkeypatch.setattr(m, "_unstarted_backlog_meta", lambda c, cid: None)
+    seen = {}
+
+    def fake_detail(control, change_id, *, now):
+        seen["id"] = change_id
+        return ["card"]
+
+    monkeypatch.setattr(m, "_detail_card", fake_detail)
+    monkeypatch.setattr(m, "_page_or_print", lambda lines, *, no_pager: None)
+    rc = m._cmd_show(_ns("lodo"))
+    assert rc == 0
+    assert seen["id"] == "lodo77"
+
+
+def test_cmd_show_single_match_skips_picker(monkeypatch, tmp_path: Path) -> None:
+    # AC 6 / AC 9a: a token matching exactly one id resolves directly via
+    # _resolve_id, opening no picker.
+    monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
+    monkeypatch.setattr(m, "_iter_change_ids", lambda c: ["lodo40", "tavo12"])
+    monkeypatch.setattr(m, "_interactive", lambda: True)
+
+    def boom_pick(*a, **k):
+        raise AssertionError("picker invoked for a single match")
+
+    monkeypatch.setattr(m, "_pick_show_matches", boom_pick)
+    monkeypatch.setattr(m, "_unstarted_backlog_meta", lambda c, cid: None)
+    seen = {}
+
+    def fake_detail(control, change_id, *, now):
+        seen["id"] = change_id
+        return []
+
+    monkeypatch.setattr(m, "_detail_card", fake_detail)
+    monkeypatch.setattr(m, "_page_or_print", lambda lines, *, no_pager: None)
+    rc = m._cmd_show(_ns("lodo"))
+    assert rc == 0
+    assert seen["id"] == "lodo40"
+
+
+def test_cmd_show_non_tty_ambiguous_exits_2(
+    monkeypatch, tmp_path: Path, capsys,
+) -> None:
+    # AC 5 / AC 9c: a non-tty ambiguous token skips the picker and hits
+    # _exit_ambiguous (candidate list to stderr, exit 2).
+    monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
+    monkeypatch.setattr(m, "_iter_change_ids", lambda c: ["lodo40", "lodo77"])
+    monkeypatch.setattr(m, "_interactive", lambda: False)
+
+    def boom_pick(*a, **k):
+        raise AssertionError("picker invoked on a non-tty")
+
+    monkeypatch.setattr(m, "_pick_show_matches", boom_pick)
+    monkeypatch.setattr(m, "_row_for_id", lambda c, cid: None)
+    rc = m._cmd_show(_ns("lodo"))
+    err = capsys.readouterr().err
+    assert rc == 2
+    assert "is ambiguous; candidates:" in err
+
+
+def test_cmd_show_picker_cancel_no_dispatch(monkeypatch, tmp_path: Path) -> None:
+    # AC 4: cancelling returns the picker rc and reaches no resource-dispatch code.
+    monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
+    monkeypatch.setattr(m, "_iter_change_ids", lambda c: ["lodo40", "lodo77"])
+    monkeypatch.setattr(m, "_interactive", lambda: True)
+
+    async def cancel_pick(control, matches):
+        return 2
+
+    monkeypatch.setattr(m, "_pick_show_matches", cancel_pick)
+
+    def boom(*a, **k):
+        raise AssertionError("resource dispatch reached after cancel")
+
+    monkeypatch.setattr(m, "_unstarted_backlog_meta", boom)
+    monkeypatch.setattr(m, "_detail_card", boom)
+    assert m._cmd_show(_ns("lodo")) == 2
+
+
+def test_cmd_show_no_token_interactive_picker(monkeypatch, tmp_path: Path) -> None:
+    # AC 2 / AC 9d: bare `imp show` on an interactive tty opens the no-token
+    # picker; the selection flows into dispatch.
+    monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
+    monkeypatch.setattr(m, "_interactive", lambda: True)
+
+    async def fake_pick(control):
+        return "lodo40"
+
+    monkeypatch.setattr(m, "_pick_show_target", fake_pick)
+    monkeypatch.setattr(m, "_unstarted_backlog_meta", lambda c, cid: None)
+    seen = {}
+
+    def fake_detail(control, change_id, *, now):
+        seen["id"] = change_id
+        return []
+
+    monkeypatch.setattr(m, "_detail_card", fake_detail)
+    monkeypatch.setattr(m, "_page_or_print", lambda lines, *, no_pager: None)
+    rc = m._cmd_show(_ns(None))
+    assert rc == 0
+    assert seen["id"] == "lodo40"
+
+
+def test_cmd_show_no_token_non_tty_errors(
+    monkeypatch, tmp_path: Path, capsys,
+) -> None:
+    # AC 5 / AC 9d: bare `imp show` on a non-tty errors asking for an id, exit 2,
+    # opening no picker.
+    def boom_control_root() -> object:
+        raise AssertionError("_control_root called before the needs-a-change-id check")
+
+    monkeypatch.setattr(m, "_control_root", boom_control_root)
+    monkeypatch.setattr(m, "_interactive", lambda: False)
+
+    def boom(*a, **k):
+        raise AssertionError("picker invoked on a non-tty")
+
+    monkeypatch.setattr(m, "_pick_show_target", boom)
+    rc = m._cmd_show(_ns(None))
+    err = capsys.readouterr().err
+    assert rc == 2
+    assert "needs a change id" in err
