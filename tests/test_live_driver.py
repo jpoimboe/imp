@@ -1852,7 +1852,7 @@ def test_position_row_separates_model_from_graph_with_a_single_space() -> None:
     assert "sonnet · " not in line
 
 
-def test_subagent_row_single_space_model_graph_keeps_trailing_elapsed() -> None:
+def test_subagent_row_orders_elapsed_before_model_graph() -> None:
     from imp.cli import render_text as rt
     from imp.cli.live_driver import compose_subagent_rows, context_bar
     b = nv.NarrativeBuilder()
@@ -1878,9 +1878,12 @@ def test_subagent_row_single_space_model_graph_keeps_trailing_elapsed() -> None:
     assert bar is not None
     rows = compose_subagent_rows(b, color=False, width=200,
                                  now_iso="2026-01-01T00:00:05+00:00")
-    assert f"sonnet {bar}" in rows[0]       # single space binds model to graph
+    assert f"sonnet {bar}" in rows[0]       # single space still binds model to graph
     assert "sonnet · " not in rows[0]       # no middle-dot before the graph
-    assert rows[0].rstrip().endswith("· 5s")  # trailing elapsed still ` · `-joined
+    # new segment order: role · elapsed · model context-bar
+    assert "coder · 5s · sonnet" in rows[0]              # role · elapsed · model, in order
+    assert rows[0].index("5s") < rows[0].index("sonnet")  # elapsed precedes model
+    assert rows[0].rstrip().endswith(bar)                # model context-bar now trailing
 
 
 def test_compose_toolbar_static_uses_frame_zero_and_no_elapsed() -> None:

@@ -217,7 +217,7 @@ def compose_subagent_rows(builder: nv.NarrativeBuilder, *, color: bool,
         el_seg = _paint(el, "dim", color=color, over_bg=over) if el else None
         arrow = _paint("↳", *pal.NODE_COLORS["subagent"], color=color, over_bg=over)
         inner = arrow + " " + rt.compose_label(
-            [role_seg, rt.join_space(model_seg, bar), el_seg])
+            [role_seg, el_seg, rt.join_space(model_seg, bar)])
         if bg:
             pad = width - 2 - pal.display_width(inner)
             if pad > 0:
