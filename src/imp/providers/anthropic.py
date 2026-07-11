@@ -613,7 +613,7 @@ class AnthropicAgentRunner:
                         messages, transcript, elog, aid, reply)
                 else:
                     deliver_reply_on_resume(
-                        messages, transcript, elog, aid, reply)
+                        messages, transcript, elog, aid, reply, human=True)
                 # Fall through (do NOT return): the reply drives the next LLM
                 # turn as the transcript's trailing user message.
             # §2 resume-entry drain: mid-turn pending texts fold into the first
@@ -656,7 +656,7 @@ class AnthropicAgentRunner:
                 max_tool_calls=invocation.max_tool_calls)
             for m in invocation.initial_messages:
                 if all(isinstance(b, TextBlock) for b in m.content):
-                    elog.append_user_message(agent_id=aid, message=m)
+                    elog.append_user_message(agent_id=aid, message=m, human=False)
 
         # max_tool_calls is opt-in; None means no cap. The engine resolves
         # agent_def -> workflow.defaults -> None and passes the result via
@@ -816,13 +816,13 @@ class AnthropicAgentRunner:
                     return
                 cont = invocation.continuation_fn
                 if cont is not None:
-                    next_text, _human = cont(last_text)
+                    next_text, human = cont(last_text)
                     if inspect.isawaitable(next_text):
                         next_text = await next_text
                     user_msg = Message(role="user", content=(TextBlock(text=next_text),))
                     messages.append(user_msg)
                     transcript.append(user_msg)
-                    elog.append_user_message(agent_id=aid, message=user_msg)
+                    elog.append_user_message(agent_id=aid, message=user_msg, human=human)
                     loop_err = guard.observe(TurnRecord(
                         assistant_text=last_text, tools=[],
                         has_complete_step=False))
@@ -913,7 +913,7 @@ class AnthropicAgentRunner:
                 hmsg = Message(role="user", content=(TextBlock(text=instr),))
                 messages.append(hmsg)
                 transcript.append(hmsg)
-                elog.append_user_message(agent_id=aid, message=hmsg)
+                elog.append_user_message(agent_id=aid, message=hmsg, human=False)
                 handoff_phase = "instruction_sent"
                 continue
 

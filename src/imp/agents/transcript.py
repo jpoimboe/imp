@@ -301,7 +301,7 @@ def balance_success_on_resume(
     injected = Message(role="user", content=tuple(blocks))
     messages.append(injected)
     transcript.append(injected)
-    elog.append_user_message(agent_id=agent_id, message=injected)
+    elog.append_user_message(agent_id=agent_id, message=injected, human=False)
     return injected
 
 
@@ -342,13 +342,13 @@ def synthesize_native_success_on_resume(
     injected = Message(role="user", content=tuple(result_blocks))
     messages.append(injected)
     transcript.append(injected)
-    elog.append_user_message(agent_id=agent_id, message=injected)
+    elog.append_user_message(agent_id=agent_id, message=injected, human=False)
     return injected
 
 
 def deliver_reply_on_resume(
     messages: list[Message], transcript: Transcript, elog: EventLog,
-    agent_id: str, reply: str,
+    agent_id: str, reply: str, *, human: bool,
 ) -> Message:
     """Deliver a human reply (or drained interject) as the next user message.
 
@@ -360,7 +360,7 @@ def deliver_reply_on_resume(
     injected = Message(role="user", content=(TextBlock(text=reply),))
     messages.append(injected)
     transcript.append(injected)
-    elog.append_user_message(agent_id=agent_id, message=injected)
+    elog.append_user_message(agent_id=agent_id, message=injected, human=human)
     return injected
 
 

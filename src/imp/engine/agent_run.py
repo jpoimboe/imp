@@ -360,7 +360,7 @@ def deliver_interject(coordinator: Any, messages: Any, transcript: Any,
     msg = Message(role="user", content=(TextBlock(text=text),))
     messages.append(msg)
     transcript.append(msg)
-    elog.append_user_message(agent_id=agent_id, message=msg)
+    elog.append_user_message(agent_id=agent_id, message=msg, human=True)
     elog.append(agent_id=agent_id, type="user_interjected", payload={"text": text})
     return True
 
@@ -474,7 +474,7 @@ def drain_all_interjects_at_resume(
         msg = Message(role="user", content=(TextBlock(text=text),))
         messages.append(msg)
         transcript.append(msg)
-        elog.append_user_message(agent_id=agent_id, message=msg)
+        elog.append_user_message(agent_id=agent_id, message=msg, human=True)
         elog.append(agent_id=agent_id, type="user_interjected", payload={"text": text})
         n += 1
     return n

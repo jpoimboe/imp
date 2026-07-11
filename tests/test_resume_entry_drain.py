@@ -29,7 +29,7 @@ def test_drain_all_appends_in_order_and_clears() -> None:
     class _T:
         def append(self, m): sink.append(("t", m))
     class _E:
-        def append_user_message(self, *, agent_id, message): sink.append(("u", message))
+        def append_user_message(self, *, agent_id, message, human): sink.append(("u", message))
         def append(self, **k): sink.append(("e", k))
     delivered = drain_all_interjects_at_resume(coord, messages, _T(), _E(), "aid")
     assert [m.content[0].text for m in messages] == ["one", "two"]
@@ -849,7 +849,8 @@ def test_subagent_suspended_resume_drains_via_parent_replay() -> None:
             sink.append(("t", m))
 
     class _E:
-        def append_user_message(self, *, agent_id: str, message: object) -> None:
+        def append_user_message(self, *, agent_id: str, message: object,
+                                human: bool) -> None:
             sink.append(("u", message))
 
         def append(self, **k: object) -> None:

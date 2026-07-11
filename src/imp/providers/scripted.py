@@ -118,7 +118,7 @@ class ScriptedAgentRunner:
 
             for m in invocation.initial_messages:
                 if all(isinstance(b, TextBlock) for b in m.content):
-                    elog.append_user_message(agent_id=aid, message=m)
+                    elog.append_user_message(agent_id=aid, message=m, human=False)
 
             ceiling = invocation.max_tool_calls
             turns = _select_turns(_load_script(), invocation.agent_def.name)
@@ -181,14 +181,14 @@ class ScriptedAgentRunner:
                     # Bare turn-end (assistant text, no tool call) IS the yield:
                     # route through the shared end-of-turn handler like the real
                     # providers (solicit / nudge / pause), then continue the script.
-                    nxt, _human = invocation.continuation_fn(text)
+                    nxt, human = invocation.continuation_fn(text)
                     if inspect.isawaitable(nxt):
                         nxt = await nxt
                     reply_msg = Message(
                         role="user", content=(TextBlock(text=str(nxt)),))
                     messages.append(reply_msg)
                     transcript.append(reply_msg)
-                    elog.append_user_message(agent_id=aid, message=reply_msg)
+                    elog.append_user_message(agent_id=aid, message=reply_msg, human=human)
 
             yield {"type": "error", "payload": {
                 "category": "agent_output_missing",

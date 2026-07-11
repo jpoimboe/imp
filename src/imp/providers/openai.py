@@ -600,7 +600,7 @@ class OpenAIAgentRunner:
                         messages, transcript, elog, aid, reply)
                 else:
                     deliver_reply_on_resume(
-                        messages, transcript, elog, aid, reply)
+                        messages, transcript, elog, aid, reply, human=True)
                 # Fall through (do NOT return): the reply drives the next LLM
                 # turn as the transcript's trailing user message.
             # §2 resume-entry drain: mid-turn pending texts fold into the first
@@ -643,7 +643,7 @@ class OpenAIAgentRunner:
                 max_tool_calls=invocation.max_tool_calls)
             for m in invocation.initial_messages:
                 if all(isinstance(b, TextBlock) for b in m.content):
-                    elog.append_user_message(agent_id=aid, message=m)
+                    elog.append_user_message(agent_id=aid, message=m, human=False)
 
         ceiling = invocation.max_tool_calls  # may be None (no cap)
         openai_tools = [_responses_tool_schema(t) for t in tools.values()]
@@ -740,13 +740,13 @@ class OpenAIAgentRunner:
                     return
                 cont = invocation.continuation_fn
                 if cont is not None:
-                    next_text, _human = cont(last_text)
+                    next_text, human = cont(last_text)
                     if inspect.isawaitable(next_text):
                         next_text = await next_text
                     user_msg = Message(role="user", content=(TextBlock(text=next_text),))
                     messages.append(user_msg)
                     transcript.append(user_msg)
-                    elog.append_user_message(agent_id=aid, message=user_msg)
+                    elog.append_user_message(agent_id=aid, message=user_msg, human=human)
                     loop_err = guard.observe(TurnRecord(
                         assistant_text=last_text, tools=[],
                         has_complete_step=False))
