@@ -72,10 +72,10 @@ class ToolContext:
     _bg_counter: int = 0
     # The quest being processed; used by subagent dispatch to propagate slug/title.
     quest_context: Any = None
-    # Live State of the running Quest; used by the subagent-authority guard
+    # Live State of the running quest; used by the subagent-authority guard
     # (rename_quest raises if this is None). None for subagents (no rename authority).
     change_state: Any = None
-    # The LIVE, mutable Quest (top-level steps only; None for subagents). The
+    # The LIVE, mutable quest (top-level steps only; None for subagents). The
     # rename_quest tool mutates quest.title + rewrites quest.json through it.
     # Distinct from quest_context, which is the FROZEN render-time snapshot.
     quest: Any = None

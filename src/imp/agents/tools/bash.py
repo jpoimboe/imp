@@ -77,8 +77,8 @@ async def bash(
     *, run_in_background: bool = False,
 ) -> str:
     cwd_path = cwd or str(ctx.project_root)
-    # Engine vars come from the LIVE Quest when available (top-level steps), so a
-    # mid-run rename_quest is reflected immediately; subagents have no live Quest
+    # Engine vars come from the LIVE quest when available (top-level steps), so a
+    # mid-run rename_quest is reflected immediately; subagents have no live quest
     # (and no rename authority) and fall back to the frozen quest_context snapshot.
     # quest_context is a render-time snapshot that rename_quest never updates, so
     # reading it here would leak a stale (empty name-on-intent) title.

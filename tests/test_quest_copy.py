@@ -61,13 +61,13 @@ def test_tool_descriptions_name_quest() -> None:
     reg = get_registry()
     # positive literals only — the descriptions contain unrelated substrings like
     # "head_changed", so a blanket `"change" not in` check would false-fail.
-    assert reg["query_events"].description.startswith("The Quest's event log:")
-    assert "did on this Quest." in reg["query_events"].description
-    assert "another Quest's timeline" in reg["query_events"].description
+    assert reg["query_events"].description.startswith("The quest's event log:")
+    assert "did on this quest." in reg["query_events"].description
+    assert "another quest's timeline" in reg["query_events"].description
     assert "list quest ids it depends_on" in reg["create_quest"].description
-    assert "switch this Quest into it" in reg["create_and_enter_worktree"].description
-    assert "; the Quest's " in reg["glob"].description
-    assert "; the Quest's " in reg["grep"].description
+    assert "switch this quest into it" in reg["create_and_enter_worktree"].description
+    assert "; the quest's " in reg["glob"].description
+    assert "; the quest's " in reg["grep"].description
 
 
 def test_mental_model_primer_names_quest() -> None:

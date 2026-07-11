@@ -1,5 +1,5 @@
 """rename_quest tool (spec §3, §10). Applies the rename IMMEDIATELY inside the
-tool call and returns the Quest id so the agent writes the spec at the
+tool call and returns the quest id so the agent writes the spec at the
 change-home's artifacts/spec/<id>.md in-band, same turn. Content-only: rewrites the
 gitignored quest.json, touches no git. Top-level only — raises for subagents
 (no change_state)."""
@@ -15,10 +15,10 @@ from imp.engine.state import JsonlEventLog
 @imp_tool(
     name="rename_quest",
     description=(
-        "Rename this Quest to a meaningful title once you understand the work. "
+        "Rename this quest to a meaningful title once you understand the work. "
         "A title is a short human-readable phrase — a few words with spaces, "
         "sentence case, like a PR title — not a branch-name slug (no kebab-case "
-        "hyphens). Applies immediately and returns this Quest's id; use that id "
+        "hyphens). Applies immediately and returns this quest's id; use that id "
         "to write and commit the spec at the quest-home's artifacts/spec/<id>.md "
         "this same turn."
     ),
@@ -28,7 +28,7 @@ def rename_quest(ctx: Any, name: str) -> str:
     if not title:
         raise ValueError("rename_quest requires a non-empty name")
     if ctx.change_state is None:
-        raise RuntimeError("rename_quest is only available to top-level Quest steps")
+        raise RuntimeError("rename_quest is only available to top-level quest steps")
     quest = ctx.quest
     if title == quest.title:
         return f"already named {quest.id}"
