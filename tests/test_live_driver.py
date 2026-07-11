@@ -2858,3 +2858,42 @@ def test_compose_status_takes_one_arg_and_returns_footer_rows() -> None:
                     phase_label="design phase"))
     block = drv.compose_status(0)              # one arg only
     assert isinstance(block, list) and len(block) == 3   # activity, blank, position
+
+
+def test_driver_seeds_identity_at_construction() -> None:
+    out = _Pipe()
+    drv = LiveDriver(stream=out, color=False, width=80, status=LiveStatus(out),
+                     change_id="lufu50", title="Instant opening identity bar")
+    root = drv._builder.tree.root
+    assert root.id == "lufu50"                     # set before any event
+    assert root.title == "Instant opening identity bar"
+
+
+def test_driver_without_change_id_leaves_root_unseeded() -> None:
+    out = _Pipe()
+    drv = LiveDriver(stream=out, color=False, width=80, status=LiveStatus(out))
+    assert drv._builder.tree.root.id is None       # default: no identity yet
+
+
+def test_compose_startup_appends_identity_row_when_seeded() -> None:
+    out = _Pipe()
+    drv = LiveDriver(stream=out, color=False, width=80, status=LiveStatus(out),
+                     startup_verb="resuming",
+                     change_id="lufu50", title="Instant opening identity bar")
+    rows = drv.compose_startup(0)
+    assert rows is not None
+    assert len(rows) == 3                          # spinner / blank / identity
+    assert "resuming" in rows[0]
+    assert rows[1] == ""
+    assert "lufu50" in rows[2]
+    assert "Instant opening identity bar" in rows[2]
+
+
+def test_compose_startup_spinner_only_when_id_absent() -> None:
+    out = _Pipe()
+    drv = LiveDriver(stream=out, color=False, width=80, status=LiveStatus(out),
+                     startup_verb="resuming")        # no change_id seeded
+    rows = drv.compose_startup(0)
+    assert rows is not None
+    assert len(rows) == 1                            # degrades to spinner-only
+    assert "resuming" in rows[0]

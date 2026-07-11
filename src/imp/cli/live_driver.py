@@ -280,8 +280,11 @@ class LiveDriver:
                  display_width: int | Callable[[], int] = 80,
                  suppress_replay: bool = False,
                  preceded_by_blank: bool = False,
-                 startup_verb: str | None = None) -> None:
+                 startup_verb: str | None = None,
+                 change_id: str | None = None, title: str = "") -> None:
         self._builder = nv.NarrativeBuilder()
+        if change_id is not None:
+            self._builder.seed_identity(change_id, title)
         self._stream = stream
         self._color = color
         # width/display_width may be a live callable (a real terminal, re-read
@@ -390,10 +393,17 @@ class LiveDriver:
         if self._startup_verb is None:
             return None
         now_iso = datetime.now(UTC).isoformat()
-        return [compose_activity_line(
+        a_line = compose_activity_line(
             activity=nv.Activity(verb=self._startup_verb,
                                  start_ts=self._startup_start_iso),
-            frame=frame, color=self._color, now_iso=now_iso)]
+            frame=frame, color=self._color, now_iso=now_iso)
+        root = self._builder.tree.root
+        identity_row = compose_identity_toolbar(
+            change_id=root.id, title=root.title,
+            color=self._color, width=term_width())
+        if identity_row is None:
+            return [a_line]
+        return [a_line, "", identity_row]
 
     def install_startup_status(self) -> None:
         if self._startup_verb is None:

@@ -48,6 +48,8 @@ def _fake_change(tmp_path: Path):
 
     class _FC:
         def __init__(self) -> None:
+            self.id = "abcd12"
+            self.title = "Fake change"
             self.workflow_dir = tmp_path / ".imp" / "change" / "workflow"
             (self.workflow_dir / "skills").mkdir(parents=True)
             self._events = tmp_path / "events.jsonl"

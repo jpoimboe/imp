@@ -16,6 +16,7 @@ from imp.agents.skills import (
     list_user_skills,
     load_user_skill,
 )
+from imp.cli.live_driver import compose_identity_toolbar
 from imp.cli.model_command import print_model_roster, validate_model_arg
 
 # Sentinel: the line was a builtin / unknown / not-found command that printed
@@ -261,7 +262,11 @@ async def ask_line_with_slash(
                     while True:
                         if driver is not None:
                             driver.prepare_for_prompt()
-                        toolbar = driver.compose_toolbar_static() if driver is not None else None
+                        toolbar = (
+                            driver.compose_toolbar_static() if driver is not None
+                            else compose_identity_toolbar(
+                                change_id=change.id, title=change.title,
+                                color=color, width=width))
                         # _exit_event is None until C4 wires it; getattr is defensive
                         # for pre-C4 builds, where the read takes the unraced path.
                         exit_evt = getattr(coord, "_exit_event", None) if coord else None
