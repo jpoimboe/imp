@@ -197,17 +197,18 @@ def test_threshold_prompt_has_verbatim_opening_branch(tmp_path) -> None:
         change_title="t", event_log=log, change_id="abc",
         change_home=".imp/changes/abc", project_facts={}),
         workflow_dir=bundled_workflow_dir("imp"))
-    # Unseeded render -> the bare-open branch, not the seeded "verbatim opening
-    # intent" wording (which now lives only in the {% if run.opening %} branch).
+    # Unseeded render -> the bare-open branch. The seeded branch no longer uses
+    # "verbatim opening intent" wording; it is titled "Opening message in hand".
     assert "verbatim opening intent" not in out
+    assert "Opening message in hand" not in out
     assert "Open by asking" in out
     seeded = render_prompt(body, build_context(
         change_title="t", event_log=log, change_id="abc",
         change_home=".imp/changes/abc", project_facts={},
         opening="wire up telemetry"),
         workflow_dir=bundled_workflow_dir("imp"))
-    assert "verbatim opening intent" in seeded    # seeded branch carries the wording
-    assert "wire up telemetry" in seeded          # ...and the verbatim intent
+    assert "Opening message in hand" in seeded     # seeded branch title
+    assert "wire up telemetry" in seeded          # ...and the verbatim opening
     # No spec is inlined into the prompt; the user names a spec file threshold reads.
     assert "imp new <draft>" not in out
     assert "imp new <file>" not in out

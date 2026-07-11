@@ -136,6 +136,53 @@ def test_brainstorm_dialogue_carries_enumeration_and_grill_mode() -> None:
     assert "One question at a time" not in text
 
 
+def test_brainstorm_dialogue_seeded_branch_reframed_as_hat_selector() -> None:
+    text = (PARTIALS / "brainstorm-dialogue.md").read_text()
+
+    # (a) The seeded branch is retitled and no longer frames the opening as an
+    #     axiomatic build request. The `verbatim opening intent` removal is the
+    #     load-bearing signal that the old build-request framing is gone, so a
+    #     separate "The user ran ..." assertion would be redundant.
+    assert "Opening message in hand" in text
+    assert "verbatim opening intent" not in text
+    assert "the opening question is already answered" not in text.lower()
+
+    # (b) The seeded branch enumerates the four hat responses.
+    assert "not** axiomatically a build request" in text
+    assert "take the scout hat" in text.lower()
+    assert "a question about imp" in text.lower()
+
+    # (c) The pasted-material bullet keeps the imp log nugget and bans the recital.
+    assert "imp log" in text
+    assert "classification recital" in text
+    assert "engage with what the material" in text.lower()
+
+    # (d) The named-spec-file build-scoping sub-case is preserved.
+    assert "names a spec file" in text
+    assert "Reading a referenced spec file" in text
+
+    # (e) The standalone context paragraph is gone.
+    assert "If the user hands you context instead of intent" not in text
+
+    # (f) The "Explore, then brainstorm" item is de-contradicted.
+    assert "proceed directly into brainstorming" not in text
+    assert "You have the user's verbatim intent in hand" not in text
+    assert "Explore when the opening scopes a build" in text
+
+    # (g) Rendered seeded branch still surfaces the opening inline and is NOT the
+    #     bare-open branch; the unseeded branch is untouched.
+    from imp.agents.prompts import build_context, render_prompt
+    from imp.engine.state import InMemoryEventLog
+    src = (PARTIALS / "brainstorm-dialogue.md").read_text()
+    wf = PARTIALS.parent
+    seeded = render_prompt(src, build_context(
+        change_title="t", event_log=InMemoryEventLog(),
+        opening="a pasted spiker complaint"), workflow_dir=wf)
+    assert "a pasted spiker complaint" in seeded
+    assert "Opening message in hand" in seeded
+    assert "Open by asking" not in seeded
+
+
 def test_brainstorm_dialogue_renders_seeded_vs_unseeded_branch() -> None:
     from imp.agents.prompts import build_context, render_prompt
     from imp.engine.state import InMemoryEventLog
