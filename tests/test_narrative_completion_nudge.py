@@ -89,3 +89,50 @@ def test_nudge_flag_survives_intervening_thinking() -> None:
 def test_nudge_then_waiting_reply_dropped_mixed_case() -> None:
     out = _render([_nudge(), _text_response("e1", "Waiting")])
     assert "waiting" not in out.lower()
+
+
+def _render_full(events: list[dict]) -> str:
+    tree = nv.build_tree(events)
+    return "\n".join(render_tree(tree, full=True, color=False, width=80))
+
+
+def _injected(eid: str, text: str) -> dict:
+    return {"id": eid, "parent_id": None, "agent_id": "step:x",
+            "type": "user_message",
+            "payload": {"content": [{"type": "text", "text": text}],
+                        "human": False}}
+
+
+def test_nudge_user_message_suppressed_in_full() -> None:
+    out = _render_full([
+        _nudge(),
+        _injected("u1", "Your turn ended without calling complete_step"),
+    ])
+    assert "injected message:" not in out
+    assert "complete_step" not in out
+
+
+def test_non_nudge_injected_message_still_renders_in_full() -> None:
+    out = _render_full([_injected("u1", "You are the spec-writer. Begin.")])
+    assert "injected message:" in out
+    assert "spec-writer" in out
+
+
+def test_nudge_suppression_is_one_shot() -> None:
+    out = _render_full([
+        _nudge(),
+        _injected("u1", "nudge injection body"),
+        _injected("u2", "steer the agent here"),
+    ])
+    assert "nudge injection body" not in out
+    assert "steer the agent here" in out
+
+
+def test_nudge_user_message_then_waiting_both_dropped() -> None:
+    out = _render_full([
+        _nudge(),
+        _injected("u1", "nudge injection body"),
+        _text_response("e1", "WAITING"),
+    ])
+    assert "nudge injection body" not in out
+    assert "WAITING" not in out

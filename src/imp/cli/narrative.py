@@ -522,6 +522,10 @@ class NarrativeBuilder:
         # Armed by a completion_nudge; the next prose llm_response consumes it and
         # drops a bare WAITING protocol reply (pure plumbing). Survives non-prose events.
         self._completion_nudge_pending = False
+        # One-shot: armed alongside _completion_nudge_pending by a completion_nudge;
+        # consumed by the single following user_message to drop the injected nudge
+        # node so it never renders as an `injected message:` block in --full.
+        self._suppress_next_injected = False
         self._opening_intent_node: UserMessageNode | None = None
         # Optimistic reply echo: reconciled by the next user_message.
         self._pending_reply_node: UserMessageNode | None = None
@@ -1561,6 +1565,13 @@ def _rotate_status_phrase(self: NarrativeBuilder) -> None:
 
 
 def _h_user_message(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
+    if self._suppress_next_injected:
+        # One-shot: this user_message is the engine's completion nudge (a
+        # human=False injection armed by the preceding completion_nudge event).
+        # Drop its node so it never renders as an `injected message:` block;
+        # leave _completion_nudge_pending set so the WAITING-drop still fires.
+        self._suppress_next_injected = False
+        return
     self._flush_burst()
     _rotate_status_phrase(self)
     self._span_start_ts = event.get("timestamp")
@@ -2056,6 +2067,8 @@ def _h_completion_nudge(
     # Telemetry-only (events.jsonl keeps the forensic record; render nothing).
     # Arm the flag so the next prose llm_response can drop a bare WAITING reply.
     self._completion_nudge_pending = True
+    # Arm the one-shot so the single following (nudge) user_message node is dropped.
+    self._suppress_next_injected = True
 
 
 def _h_script_blocked(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
