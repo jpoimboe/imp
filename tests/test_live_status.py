@@ -276,6 +276,15 @@ def test_show_cursor_is_noop_when_not_hidden() -> None:
     assert s._cursor_hidden is False
 
 
+def test_show_cursor_swallows_closed_stream_error() -> None:
+    out = _TTY()
+    s = LiveStatus(out)
+    s._hide_cursor()          # cursor now hidden
+    out.close()               # stream closed under it, as at interpreter shutdown
+    s._show_cursor()          # must return without raising ValueError
+    assert s._cursor_hidden is False   # flag cleared even though the write was swallowed
+
+
 def test_non_tty_hide_cursor_writes_nothing() -> None:
     out = _Pipe()
     s = LiveStatus(out)

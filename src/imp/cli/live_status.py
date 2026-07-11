@@ -133,9 +133,10 @@ class LiveStatus:
 
     def _show_cursor(self) -> None:
         if self._cursor_hidden:
-            self._stream.write(_SHOW)
-            self._stream.flush()
             self._cursor_hidden = False
+            with contextlib.suppress(ValueError):
+                self._stream.write(_SHOW)
+                self._stream.flush()
 
     def _physical_rows(self) -> int:
         """Physical line count of the on-screen footer at the CURRENT width.
