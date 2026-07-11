@@ -422,10 +422,13 @@ These don't need to run at every point — fire each **at least once** somewhere
   session daemon's lease rule decides, not the client), resumable, no orphans. This is the
   "user closed the terminal tab" case.
 - **Out-of-band SIGINT at a prompt (once).** While parked at a prompt, fire
-  `send_signal(2)` — *not* the keystroke. Unlike typed Ctrl-C (neutered at a prompt), an
-  OS-level SIGINT at a prompt routes through the coordinator's **exit path**: expect a clean
-  detach/leave, not the `press ctrl-d…` hint and not a traceback. The keystroke and the signal
-  are *supposed* to diverge here — don't misfile the difference as a bug.
+  `send_signal(2)` — *not* the keystroke. An OS-level SIGINT at a prompt is **neutered
+  identically to a typed Ctrl-C**: imp routes it through the prompt's own Ctrl-C binding
+  (clear a typed line, else print `press ctrl-d to pause & exit`) and deliberately does **not**
+  `request_exit` (`signals.py`: "Ctrl-c NEVER exits at a prompt … do NOT request_exit"). Expect
+  `alive=True`, no pause, no detach/leave, and no traceback — only **Ctrl-D** pauses-and-exits at
+  a prompt. The keystroke and the OS signal are *supposed* to behave **identically** here; a
+  divergence (a clean detach/leave on the bare OS SIGINT) is itself the bug.
 - **Interrupt racing the finish.** Fire Ctrl-C or Ctrl-D as late as you can — while the
   workflow is merging/finalizing after its last step. A terminal or blocked status
   (`completed`, `saved`, `merge_blocked`, `abandoned`) must never be clobbered to `paused`:
