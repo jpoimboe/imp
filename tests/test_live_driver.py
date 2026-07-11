@@ -2923,3 +2923,17 @@ def test_startup_line_persists_through_replay_then_replaced_at_boundary() -> Non
     for e in marked[3:]:                            # first live event onward
         drv.on_event(e)
     assert status._compose == drv.compose_status    # stays the real footer
+
+
+def test_seed_opening_intent_arms_preboot_spinner(monkeypatch) -> None:
+    monkeypatch.setattr("imp.agents.random_status.random_status_phrase",
+                        lambda: "scheming")
+    drv, _out = _driver()
+    # Before submit: no step/phase, footer dark.
+    assert drv._builder.current_activity() is None
+    drv.seed_opening_intent("build the parser")
+    # The opening echo now also arms the pre-boot spinner, so the footer draws
+    # `⠋ scheming` immediately — before any daemon event arrives.
+    act = drv._builder.current_activity()
+    assert act is not None
+    assert act.verb == "scheming"

@@ -391,6 +391,8 @@ class LiveDriver:
     def seed_opening_intent(self, text: str) -> None:
         # Optimistic local echo at submit time; mirrors seed_pending_reply (emits via _walk).
         self._builder.seed_opening_intent(text)
+        # Non-TUI only: arm the pre-boot footer spinner (superseded once a step starts).
+        self._builder.seed_first_spinner()
         self._walk()
         self._refresh_status()
 

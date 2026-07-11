@@ -514,6 +514,10 @@ class NarrativeBuilder:
         self._opening_intent_node: UserMessageNode | None = None
         # Optimistic reply echo: reconciled by the next user_message.
         self._pending_reply_node: UserMessageNode | None = None
+        # Pre-boot spinner seed (non-TUI opening echo): armed by seed_first_spinner
+        # so the footer spinner shows instantly at Enter, before the daemon's first
+        # step_started supersedes it. Stays None on TUI/headless paths.
+        self._seed_phrase: str | None = None
         # phrase rotation: work seen this segment, consumed at each prose/user-message boundary.
         self._segment_had_work = False
         # Deferred rename: rendered after its narration, not at the change_renamed position.
@@ -678,6 +682,8 @@ class NarrativeBuilder:
             return Activity(detail=detail)
         if self._current_phase is not None:
             return Activity(verb="working")
+        if self._seed_phrase is not None:
+            return Activity(verb=self._seed_phrase)
         return None
 
     def seed_opening_intent(self, text: str) -> None:
@@ -688,6 +694,14 @@ class NarrativeBuilder:
         node = UserMessageNode(text=text, interactive=True)
         self._opening_intent_node = node
         self._root.children.append(node)
+
+    def seed_first_spinner(self) -> None:
+        """Arm a pre-boot spinner phrase so the live footer shows `⠋ <phrase>` the
+        instant the opening message echoes, before the daemon's first step_started.
+        Drawn once and held stable so the ~100ms footer redraw never re-randomizes
+        the verb; superseded naturally once a step starts (the seed branch sits at
+        the tail of current_activity(), after the phase/step checks)."""
+        self._seed_phrase = _draw_status_phrase()
 
     def seed_pending_reply(self, text: str) -> None:
         """Optimistic echo for a your-turn reply (terminal via

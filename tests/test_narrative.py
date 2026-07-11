@@ -2869,3 +2869,62 @@ def test_test_lane_acquired_emits_no_visible_line() -> None:
     fbs = [n for n in _walk(b.tree.root)
            if isinstance(n, nv.FallbackLine) and n.event_type == "test_lane_acquired"]
     assert fbs == []
+
+
+def test_seed_first_spinner_arms_preboot_activity(monkeypatch) -> None:
+    monkeypatch.setattr("imp.agents.random_status.random_status_phrase",
+                        lambda: "scheming")
+    b = nv.NarrativeBuilder()
+    b.add(ev("1", "change_created", change_id=1, title="x"))
+    # No step/phase yet: footer is dark and the seed is unset (TUI/headless default).
+    assert b._seed_phrase is None
+    assert b.current_activity() is None
+    # Arming the pre-boot spinner produces a bare rotating-phrase activity.
+    b.seed_first_spinner()
+    assert b.current_activity() == nv.Activity(verb="scheming")
+
+
+def test_seed_first_spinner_phrase_is_drawn_once(monkeypatch) -> None:
+    draws = iter(["rot1", "rot2", "rot3"])
+    monkeypatch.setattr("imp.agents.random_status.random_status_phrase",
+                        lambda: next(draws))
+    b = nv.NarrativeBuilder()
+    b.add(ev("1", "change_created", change_id=1, title="x"))
+    b.seed_first_spinner()
+    # The footer redraws ~10x/s; the verb must stay stable across redraws
+    # (drawn once at arm time, not re-randomized per current_activity() call).
+    assert b.current_activity().verb == "rot1"
+    assert b.current_activity().verb == "rot1"
+
+
+def test_started_step_supersedes_seeded_spinner(monkeypatch) -> None:
+    draws = iter(["seed-phrase", "step-phrase"])
+    monkeypatch.setattr("imp.agents.random_status.random_status_phrase",
+                        lambda: next(draws))
+    b = nv.NarrativeBuilder()
+    b.add(ev("1", "change_created", change_id=1, title="x"))
+    b.seed_first_spinner()
+    assert b.current_activity().verb == "seed-phrase"
+    # The daemon's first rotating step draws its own phrase and takes precedence
+    # over the tail seed branch — the seed is never consulted again (no teardown).
+    b.add(ev("2", "step_started", step="threshold", kind="agent",
+             phase="threshold", model="m", provider="anthropic",
+             label="frozen0", rotate_phrase=True))
+    assert b.current_activity().verb == "step-phrase"
+
+
+def test_active_phase_supersedes_seeded_spinner(monkeypatch) -> None:
+    monkeypatch.setattr("imp.agents.random_status.random_status_phrase",
+                        lambda: "seed-phrase")
+    b = nv.NarrativeBuilder()
+    b.add(ev("1", "change_created", change_id=1, title="x"))
+    b.seed_first_spinner()
+    assert b.current_activity().verb == "seed-phrase"
+    # Open a phase then end its step: _current_phase stays set with no running step.
+    b.add(ev("2", "step_started", step="threshold", kind="agent",
+             phase="threshold", model="m", provider="anthropic"))
+    b.add(ev("3", "step_completed", step="threshold", kind="agent",
+             action={"verb": "continue"}, var_mutations={}))
+    # The _current_phase guard sits ABOVE the seed branch in current_activity(),
+    # so an active phase (step ended) supersedes the seed with "working".
+    assert b.current_activity() == nv.Activity(verb="working")
