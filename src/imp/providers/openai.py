@@ -594,7 +594,8 @@ class OpenAIAgentRunner:
                 reply, source = await _resolve_wait_reply(
                     invocation.coordinator, ctx.user_input_fn,
                     invocation.resume_should_continue,
-                    elog=elog, agent_id=aid)
+                    elog=elog, agent_id=aid,
+                    last_agent_message=last_assistant_text(messages))
                 if source == "nudge":
                     deliver_engine_continuation(
                         messages, transcript, elog, aid, reply)

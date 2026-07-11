@@ -521,6 +521,11 @@ async def test_bare_turn_end_resume_delivers_reply_then_continues(
     assert "awaiting_user_input" in types
     assert types.index("user_message") < types.index("llm_response")
 
+    gate = next(e for e in log.read() if e["type"] == "awaiting_user_input")
+    assert gate["payload"]["last_agent_message"] == "what color?"
+    assert gate["payload"]["steer_hint"] == ""
+    assert gate["payload"]["interrupt"] is False
+
     # Transcript: user("go") / assistant(question) / user(TextBlock "blue") /
     # assistant(complete_step). The reply is a plain text turn, not a tool_result.
     loaded = t.load()
