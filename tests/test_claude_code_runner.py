@@ -4524,3 +4524,213 @@ async def test_reclassified_auth_error_carries_last_agent_text_detail(
     payload = error_events[0]["payload"]
     assert payload["category"] == "auth"
     assert payload["detail"]["last_agent_text"] == prose
+
+
+@pytest.mark.anyio
+async def test_prose_llm_response_precedes_concurrent_sub_agent_tool_call(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Faithful reproduction of the pinned race (spec Background): the receive-loop
+    transition flush enters _flush_llm_group first and SUSPENDS in the
+    get_context_usage() await (holding the flush lock); _impl fires DURING that
+    window, calls the plumbed flush, and appends the sub_agent tool_call. The flush
+    lock (barrier) must make _impl's flush BLOCK until the in-flight prose flush
+    emits, so the log carries prose llm_response -> sub_agent tool_call, with
+    EXACTLY ONE llm_response.
+
+    Falsifiability: with a bare no-op guard (or the original unlocked flush),
+    _impl's flush either no-ops with no await or passes the still-open guard and
+    emits a SECOND llm_response, and in both cases _impl appends the tool_call
+    before caller A emits -> the count==1 and ordering assertions fail. Only the
+    completion barrier makes both hold. (Pre-implementation, before _RunState is
+    plumbed onto the runner, `runner._state` does not exist; the resulting
+    AttributeError is swallowed by _context_usage_fields, so no _impl task is
+    fired and the `next(... sub_agent ...)` lookup raises -> red.)
+    """
+    import asyncio
+
+    from imp.agents.subagents import make_task_tool
+    from imp.providers import claude_code as cc
+
+    async def fake_dispatch(_ctx, name, desc, *, tool_call_event_id="", tier=None):
+        cap["tool_call_event_id"] = tool_call_event_id
+        return "sub done"
+
+    async def noop_sweep(_ctx):
+        return None
+
+    monkeypatch.setattr(cc, "dispatch_task", fake_dispatch)
+    monkeypatch.setattr(cc._bg, "_sweep_bg", noop_sweep)
+
+    cap: dict[str, Any] = {}
+    sub_def = replace(_agent_def(), name="sub", label=None)
+
+    scripted = [
+        assistant(
+            text("dispatching a subagent"),
+            tool_use("s1", "sub_agent",
+                     {"subagent_name": "sub", "task_description": "do"}),
+            tool_use("c1", "complete_step", {"status": "Success"}),
+            message_id="m1",
+        ),
+        result(),
+    ]
+
+    box: dict[str, Any] = {}
+    log = InMemoryEventLog()
+
+    def _passthrough(name, desc, schema, annotations=None):
+        def deco(fn):
+            return fn
+        return deco
+
+    class RaceClient(FakeClaudeSDKClient):
+        def __init__(self, opts: Any) -> None:
+            super().__init__(opts, scripted_messages=scripted)
+            self._fired = False
+
+        async def get_context_usage(self) -> Any:
+            # Runs inside caller A's (receive-loop transition) flush await, which
+            # holds the flush lock. Fire a REAL _impl sub_agent call as a separate
+            # task so it contends for that lock exactly as the SDK's out-of-band
+            # handler task does in production.
+            if not self._fired:
+                self._fired = True
+                runner = box["runner"]
+                impl = cc._wrap_one("sub_agent", make_task_tool(),
+                                    runner._ctx, runner._state, _passthrough)
+                box["impl_task"] = asyncio.create_task(
+                    impl({"subagent_name": "sub", "task_description": "do"}))
+                # Let the _impl task make progress, bounded and wall-clock-free.
+                # With the lock it parks at its flush call and nothing lands, so
+                # the loop runs out; without the lock it emits a duplicate
+                # llm_response / appends the tool_call here (the falsifying window).
+                for _ in range(200):
+                    if any(e["type"] in ("tool_call", "llm_response")
+                           for e in log._events):
+                        break
+                    await asyncio.sleep(0)
+            return None
+
+    def factory(opts: Any) -> RaceClient:
+        return RaceClient(opts)
+
+    inv = _inv(tmp_path, tools=frozenset({"complete_step", "sub_agent"}),
+               event_log=log)
+    inv = replace(inv, subagent_defs={"sub": sub_def})
+    runner = ClaudeCodeAgentRunner(
+        model_name="claude-sonnet-4-5", client_factory=factory)
+    box["runner"] = runner
+
+    async for _ev in runner.run(inv):
+        pass
+    await box["impl_task"]
+
+    events = log._events
+    llm_responses = [e for e in events if e["type"] == "llm_response"]
+    assert len(llm_responses) == 1, (
+        f"expected exactly one llm_response, got {len(llm_responses)}")
+    assert llm_responses[0]["payload"]["message_id"] == "m1"
+    i_llm = next(i for i, e in enumerate(events) if e["type"] == "llm_response")
+    i_sub = next(i for i, e in enumerate(events)
+                 if e["type"] == "tool_call"
+                 and e["payload"]["name"] == "sub_agent")
+    assert i_llm < i_sub, "prose llm_response must precede the sub_agent tool_call"
+    assert cap["tool_call_event_id"] == events[i_sub]["id"], (
+        "dispatch received the sub_agent tool_call EVENT id (parent link)")
+
+
+@pytest.mark.anyio
+async def test_parallel_sub_agents_emit_single_llm_response_before_both(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Two parallel sub_agent calls in one turn produce two concurrent _impl
+    flush callers during the receive-loop flush's await window. The barrier must
+    serialize them so the prose group emits EXACTLY ONE llm_response, appearing
+    BEFORE both sub_agent tool_calls.
+    """
+    import asyncio
+
+    from imp.agents.subagents import make_task_tool
+    from imp.providers import claude_code as cc
+
+    async def fake_dispatch(_ctx, name, desc, *, tool_call_event_id="", tier=None):
+        return "sub done"
+
+    async def noop_sweep(_ctx):
+        return None
+
+    monkeypatch.setattr(cc, "dispatch_task", fake_dispatch)
+    monkeypatch.setattr(cc._bg, "_sweep_bg", noop_sweep)
+
+    sub_def = replace(_agent_def(), name="sub", label=None)
+
+    scripted = [
+        assistant(
+            text("dispatching two subagents"),
+            tool_use("s1", "sub_agent",
+                     {"subagent_name": "sub", "task_description": "a"}),
+            tool_use("s2", "sub_agent",
+                     {"subagent_name": "sub", "task_description": "b"}),
+            tool_use("c1", "complete_step", {"status": "Success"}),
+            message_id="m1",
+        ),
+        result(),
+    ]
+
+    box: dict[str, Any] = {}
+    log = InMemoryEventLog()
+
+    def _passthrough(name, desc, schema, annotations=None):
+        def deco(fn):
+            return fn
+        return deco
+
+    class RaceClient(FakeClaudeSDKClient):
+        def __init__(self, opts: Any) -> None:
+            super().__init__(opts, scripted_messages=scripted)
+            self._fired = False
+
+        async def get_context_usage(self) -> Any:
+            if not self._fired:
+                self._fired = True
+                runner = box["runner"]
+                impl = cc._wrap_one("sub_agent", make_task_tool(),
+                                    runner._ctx, runner._state, _passthrough)
+                box["impl_tasks"] = [
+                    asyncio.create_task(
+                        impl({"subagent_name": "sub", "task_description": t}))
+                    for t in ("a", "b")
+                ]
+                for _ in range(200):
+                    if any(e["type"] in ("tool_call", "llm_response")
+                           for e in log._events):
+                        break
+                    await asyncio.sleep(0)
+            return None
+
+    def factory(opts: Any) -> RaceClient:
+        return RaceClient(opts)
+
+    inv = _inv(tmp_path, tools=frozenset({"complete_step", "sub_agent"}),
+               event_log=log)
+    inv = replace(inv, subagent_defs={"sub": sub_def})
+    runner = ClaudeCodeAgentRunner(
+        model_name="claude-sonnet-4-5", client_factory=factory)
+    box["runner"] = runner
+
+    async for _ev in runner.run(inv):
+        pass
+    await asyncio.gather(*box["impl_tasks"])
+
+    events = log._events
+    llm_responses = [e for e in events if e["type"] == "llm_response"]
+    assert len(llm_responses) == 1, (
+        f"expected exactly one llm_response, got {len(llm_responses)}")
+    i_llm = next(i for i, e in enumerate(events) if e["type"] == "llm_response")
+    sub_calls = [i for i, e in enumerate(events)
+                 if e["type"] == "tool_call"
+                 and e["payload"]["name"] == "sub_agent"]
+    assert len(sub_calls) == 2, f"expected two sub_agent tool_calls, got {len(sub_calls)}"
+    assert all(i_llm < i for i in sub_calls), (
+        "the single llm_response must precede BOTH sub_agent tool_calls")

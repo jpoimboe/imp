@@ -783,3 +783,77 @@ async def test_wrap_list_content_captures_caption_to_parent_transcript(tmp_path:
     assert entry["input"] == {}
     assert entry["is_error"] is False
     assert entry["content"] == "shot.png — 8×8 PNG"
+
+
+@pytest.mark.anyio
+async def test_impl_flushes_llm_group_before_appending_sub_agent_call(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Unit contract for edit #3: _impl invokes state.flush_llm_group() BEFORE it
+    appends the sub_agent tool_call, and dispatch_task receives that tool_call's
+    EVENT id (the parent link, AC #5). This pins _impl's call ordering only; the
+    production receive-loop-vs-_impl race and the flush-lock barrier are covered
+    by the concurrent tests in test_claude_code_runner.py.
+    """
+    import imp.providers.claude_code as cc
+    from imp.engine.state import InMemoryEventLog
+
+    sub_def = AgentDef(
+        name="sub", description="", tools=frozenset({"complete_step"}),
+        subagents=(),
+        output_schema=OutputSchema(
+            fields=(OutputField(name="status", type="enum",
+                                values=("Success", "Error"), required=True),),
+            source=SourceLoc(file=Path("sub.md"), line=1),
+        ),
+        prompt_template_source="hi",
+        source_path=Path("sub.md"),
+        source=SourceLoc(file=Path("sub.md"), line=1),
+    )
+
+    ctx = _ctx(tmp_path)
+    ctx.subagent_defs = {"sub": sub_def}
+    ctx.change_context = ChangeContext(
+        title="Test Change", project_root=tmp_path,
+        workflow_dir=tmp_path / ".imp" / "change" / "workflow",
+    )
+    elog = InMemoryEventLog()
+    ctx.event_log = elog
+
+    captured: dict[str, object] = {}
+
+    async def fake_dispatch(_ctx, name, desc, *, tool_call_event_id, tier=None):
+        captured["tool_call_event_id"] = tool_call_event_id
+        return "done"
+
+    monkeypatch.setattr(cc, "dispatch_task", fake_dispatch)
+
+    state = _RunState()
+    state.agent_id = "step:p/task-lead"
+
+    flush = {"calls": 0, "sub_present_at_flush": None}
+
+    async def recording_flush(backstop_stop_reason=None):
+        flush["calls"] += 1
+        # Was the sub_agent tool_call already appended when the flush ran? It must
+        # NOT be — _impl has to flush BEFORE it appends.
+        flush["sub_present_at_flush"] = any(
+            e["type"] == "tool_call" and e["payload"]["name"] == "sub_agent"
+            for e in elog._events)
+
+    state.flush_llm_group = recording_flush
+
+    wrapped = _wrap_one(
+        "sub_agent", make_task_tool(), ctx, state, _passthrough_decorator)
+    out = await wrapped({"subagent_name": "sub", "task_description": "do"})
+    assert out["content"][0]["text"] == "done"
+
+    assert flush["calls"] == 1, "state.flush_llm_group must be called exactly once"
+    assert flush["sub_present_at_flush"] is False, (
+        "flush must run BEFORE the sub_agent tool_call is appended")
+    call_event = next(e for e in elog._events
+                      if e["type"] == "tool_call"
+                      and e["payload"]["name"] == "sub_agent")
+    assert call_event["id"], "sub_agent tool_call event id must be non-empty"
+    assert captured["tool_call_event_id"] == call_event["id"], (
+        "dispatch_task must receive the sub_agent tool_call's EVENT id (parent link)")
