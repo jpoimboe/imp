@@ -59,3 +59,36 @@ def test_snapshot_includes_comment_only_file_as_blank(tmp_path: Path) -> None:
     snap = load_memory_snapshot(mem)
     assert "imp/empty.md" in snap
     assert snap["imp/empty.md"].strip() == ""
+
+
+_SNAP = {
+    "all.md": "GLOBAL",
+    "imp/all.md": "WORKFLOW",
+    "imp/threshold.md": "STEP",
+    "imp/blank.md": "  \n",  # whitespace-only
+}
+
+
+def test_resolve_global_only_for_subagent_shape() -> None:
+    # workflow=None models a subagent: only global all.md applies.
+    assert resolve_memory(_SNAP, workflow=None, step=None) == "GLOBAL"
+
+
+def test_resolve_broad_to_narrow_order() -> None:
+    out = resolve_memory(_SNAP, workflow="imp", step="threshold")
+    assert out.index("GLOBAL") < out.index("WORKFLOW") < out.index("STEP")
+
+
+def test_resolve_workflow_level_without_step() -> None:
+    out = resolve_memory(_SNAP, workflow="imp", step=None)
+    assert out == "GLOBAL\n\nWORKFLOW"
+
+
+def test_resolve_skips_missing_and_blank_levels() -> None:
+    out = resolve_memory(_SNAP, workflow="imp", step="blank")
+    # step file is blank -> contributes nothing; only global + workflow remain.
+    assert out == "GLOBAL\n\nWORKFLOW"
+
+
+def test_resolve_empty_snapshot_is_empty_string() -> None:
+    assert resolve_memory({}, workflow="imp", step="threshold") == ""

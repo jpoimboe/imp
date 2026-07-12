@@ -32,3 +32,29 @@ def load_memory_snapshot(memory_dir: Path) -> dict[str, str]:
         rel = path.relative_to(memory_dir).as_posix()
         out[rel] = strip_html_comments(path.read_text(encoding="utf-8"))
     return out
+
+
+def _applicable_keys(workflow: str | None, step: str | None) -> list[str]:
+    """The snapshot keys that apply, broad->narrow. `all.md` always applies;
+    the workflow and step layers apply only when identity is known (a subagent
+    passes workflow=None and receives only global memory)."""
+    keys = ["all.md"]
+    if workflow is not None:
+        keys.append(f"{workflow}/all.md")
+        if step is not None:
+            keys.append(f"{workflow}/{step}.md")
+    return keys
+
+
+def resolve_memory(
+    snapshot: dict[str, str], *, workflow: str | None, step: str | None
+) -> str:
+    """Concatenate the applicable memory layers broad->narrow, joined by blank
+    lines. Missing or blank layers contribute nothing; an all-blank result is
+    the empty string (the caller emits no `## Project memory` section)."""
+    parts: list[str] = []
+    for key in _applicable_keys(workflow, step):
+        content = snapshot.get(key, "").strip()
+        if content:
+            parts.append(content)
+    return "\n\n".join(parts)
