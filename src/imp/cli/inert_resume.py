@@ -1,4 +1,4 @@
-"""Inert resume of a change parked at a bare-turn-end yield (spec AC8) — cheap local reads only."""
+"""Inert resume of a quest parked at a bare-turn-end yield (spec AC8) — cheap local reads only."""
 
 from __future__ import annotations
 

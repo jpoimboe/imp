@@ -449,7 +449,7 @@ class NarrativeBuilder:
 
     Routing order in add() (design §5.3):
       0. accumulate token usage for EVERY llm_response (before sub routing, so
-         subagent tokens count toward the change total — F2). latest_prompt_tokens
+         subagent tokens count toward the quest total — F2). latest_prompt_tokens
          (the context-bar value) updates for THIS builder's own agent only: the
          top-level builder (own_agent_id None) records its non-sub: turns, a nested
          builder records the sub: turns of the subagent it represents; a turn that

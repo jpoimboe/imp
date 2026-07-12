@@ -677,7 +677,7 @@ def _print_run_header(quest_id: str, title: str, marker: str,
 
 def _print_opening(quest: Quest, marker: str, *, interactive: bool, color: bool) -> bool:
     """Lead with the run header, then the splash scene+phrase when interactive, so
-    the change identity is the first thing on screen. The header already emits its
+    the quest identity is the first thing on screen. The header already emits its
     trailing blank line, so the splash is printed without its own leading one.
     Returns whether the splash was rendered."""
     _print_run_header(quest.id, quest.title, marker, color=color)
@@ -716,7 +716,7 @@ async def _read_opening_message(
     _prompt_factory: Callable[[], Any] | None = None,
 ) -> str | None:
     """Lead with the run header, then the splash (when interactive), then read the
-    opening message — so the change identity is the first thing on screen.
+    opening message — so the quest identity is the first thing on screen.
     `banner_shown` is True on an interactive entry that should render the splash."""
     _print_opening(quest, leave_mode, interactive=banner_shown, color=color)
     make = _prompt_factory or (
@@ -835,8 +835,8 @@ def _select_headless(
 async def _run_fresh_session(
     quest: Quest, *, args: argparse.Namespace,
 ) -> int:
-    """Run a freshly-created change (new / materialized backlog) through
-    the per-change session daemon, dispatching on headless / interactive."""
+    """Run a freshly-created quest (new / materialized backlog) through
+    the per-quest session daemon, dispatching on headless / interactive."""
     from imp.cli.signals import InterruptCoordinator
 
     _print_run_header(
@@ -1098,8 +1098,8 @@ def _resume_opens_fresh(quest: Quest) -> bool:
     """Whether a resume should open a fresh seeded session rather than replay history.
 
     True only for an un-materialized seed draft that has never run a step; a
-    change that has ever run (and is therefore archived-resumable) always
-    replays. Reads the durable per-change fact (State.has_started) from the
+    quest that has ever run (and is therefore archived-resumable) always
+    replays. Reads the durable per-quest fact (State.has_started) from the
     persisted state.json the resume flow already rehydrated -- never a re-scan
     of events.jsonl."""
     if quest.materialized or not quest.seed_opening:
@@ -1291,7 +1291,7 @@ def _display_width() -> int:
 
 
 def _list_quest_homes(control: Path) -> list[str]:
-    """Ids of changes with a permanent root home under .imp/quests/."""
+    """Ids of quests with a permanent root home under .imp/quests/."""
     return live_quest_ids(control)
 
 
@@ -1331,7 +1331,7 @@ def _title_for_id(control: Path, quest_id: str) -> str | None:
 
 def _resolve_id(control: Path, token: str) -> str:
     """Resolve a user-typed token to a quest id (spec AC 7): it must be an
-    unambiguous substring of exactly one change's id. Multiple matches exit
+    unambiguous substring of exactly one quest's id. Multiple matches exit
     non-zero listing candidates; none errors."""
     if not token.strip():
         print(f"imp: no quest matches {token!r}", file=sys.stderr)
@@ -1476,7 +1476,7 @@ def _quest_meta(control: Path, quest_id: str) -> dict[str, Any] | None:
 def _is_backlog_home(
     meta: dict[str, Any], *, conversed: bool, lock_live: Callable[[], bool]
 ) -> bool:
-    """Shared zone predicate. A live change home is Backlog iff it is
+    """Shared zone predicate. A live quest home is Backlog iff it is
     un-materialized, has a non-draft origin, has never been conversed (no
     user_message event), and is not lock-live. The detail card
     (`_unstarted_backlog_meta`) and both overview zone builders (`_status_rows`,
@@ -1714,7 +1714,7 @@ def _filter_events(
 
 
 def _resolve_default_id(control: Path) -> str | None:
-    """No-arg default: most-recent change home by its events.jsonl mtime, else
+    """No-arg default: most-recent quest home by its events.jsonl mtime, else
     the most-recent archived id (by the index's last_event_ts), else None."""
     homes = _list_quest_homes(control)
     if homes:
@@ -2199,8 +2199,8 @@ def resolve_display_status(
 
     `running` is derived, never persisted: a live process holds quest_dir/lock
     with its pid inside for its whole run. A stale lock (file present, pid dead)
-    reads as not-running, so the change shows its resumable at-rest status — no
-    manufactured `errored`. An un-materialized new/paused change shows as
+    reads as not-running, so the quest shows its resumable at-rest status — no
+    manufactured `errored`. An un-materialized new/paused quest shows as
     `draft`, generalizing the already-accepted draft synthesis."""
     if lock_is_live(quest_dir / "lock"):
         return "running"
@@ -2217,7 +2217,7 @@ _Row = tuple[str, str, str, str, str, str, str | None, str | None]
 
 
 class _HomeScan(NamedTuple):
-    """One live change home parsed exactly once for the overview's row builders.
+    """One live quest home parsed exactly once for the overview's row builders.
 
     quest_json/state_json are the raw bytes (state_json is None when a home has
     no state.json yet); meta is the parsed quest.json (homes whose quest.json
@@ -2253,7 +2253,7 @@ def _events_have_user_message(events_path: Path) -> bool:
 
 
 def _scan_quest_homes(control: Path) -> list[_HomeScan]:
-    """Read and parse every live change home once, so the overview's three row
+    """Read and parse every live quest home once, so the overview's three row
     builders share a single pass instead of re-reading each home three times."""
     scanned: list[_HomeScan] = []
     for quest_id in _list_quest_homes(control):
@@ -2384,7 +2384,7 @@ def _abandon_rows(control: Path) -> list[_Row]:
 
 
 def _resumable_match_rows(control: Path, token: str) -> list[_Row]:
-    """Rows for resumable Changes whose id contains `token`.
+    """Rows for resumable quests whose id contains `token`.
 
     Spans live-resumable rows (`_resumable_rows`) AND archived-but-resumable
     records — an archived id whose archive record reads `resumable=True` (a
@@ -2916,7 +2916,7 @@ def _selected_search_zones(args: argparse.Namespace) -> set[str]:
 
 
 def _search_active(control: Path, query: str) -> list[_SearchHit]:
-    """In-flight + draft-origin changes whose id, title, or conversation prose
+    """In-flight + draft-origin quests whose id, title, or conversation prose
     contains `query` (case-insensitive)."""
     q = query.lower()
     hits: list[_SearchHit] = []
@@ -2937,7 +2937,7 @@ def _backlog_seed_opening(control: Path, quest_id: str) -> str:
 
 
 def _search_backlog(control: Path, query: str) -> list[_SearchHit]:
-    """Backlog changes whose id, title, or seed_opening body (title + description)
+    """Backlog quests whose id, title, or seed_opening body (title + description)
     contains `query` (case-insensitive)."""
     q = query.lower()
     hits: list[_SearchHit] = []

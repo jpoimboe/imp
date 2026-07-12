@@ -1,7 +1,7 @@
 """Thin terminal session client: render the daemon's event stream, answer its gates.
 
-Composes the Plan 1-7 primitives into the client half of the per-change session
-daemon. `run_terminal_client` attaches to a change's session daemon (via an
+Composes the Plan 1-7 primitives into the client half of the per-quest session
+daemon. `run_terminal_client` attaches to a quest's session daemon (via an
 injected attach thunk), streams the daemon's events into a live event renderer
 (LiveDriver), forwards a local interrupt gesture as a control frame
 (SessionControls, without killing the client), and answers each bare-turn-end

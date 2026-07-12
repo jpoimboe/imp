@@ -7,7 +7,7 @@ committed imp/project.yaml, init is idempotent: it never overwrites the
 project file and only bootstraps the machine's user config if absent.
 
 Committed config+workflows live under imp/ (tracked by git).
-Runtime state (changes, locks, etc.) lives under .imp/ (gitignored wholesale).
+Runtime state (quests, locks, etc.) lives under .imp/ (gitignored wholesale).
 
 Tier→model bindings come from the provider-code floor now, so init asks no
 model question — it just records the enabled providers + detected theme.
