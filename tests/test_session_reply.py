@@ -222,6 +222,50 @@ async def test_deliver_returns_not_at_gate_after_boundary_with_no_live_gate(
 
 
 @pytest.mark.anyio
+async def test_deliver_returns_delivered_when_live_gate_follows_boundary_within_grace(
+    tmp_path: Path,
+) -> None:
+    sock = str(tmp_path / "s.sock")
+    events_path = tmp_path / "events.jsonl"
+    events_path.write_text("")  # empty: capture() yields only the replay_complete boundary
+    socket = SessionSocket(
+        sock, on_attach=lambda hello, send: ReplaySnapshot.capture(events_path))
+    await socket.open()
+    inputs: list[str] = []
+
+    async def _attach(on_event: Callable[[dict[str, Any]], None]) -> SessionClient:
+        client = SessionClient(sock, "c1", "T", on_event=on_event)
+        await client.connect()
+        return client
+
+    async with anyio.create_task_group() as tg:
+        tg.start_soon(socket.serve)
+
+        async def _server_gate() -> None:
+            with anyio.fail_after(5):
+                while socket.attached_count == 0:
+                    await anyio.sleep(0.02)
+            # Sleep briefly so the boundary (replay_complete) arrives first,
+            # then broadcast the live gate comfortably within the grace window.
+            await anyio.sleep(0.1)
+            socket.broadcast({"type": "awaiting_user_input", "payload": {"prompt": "go?"}})
+            inputs.append(await socket.next_input())
+
+        tg.start_soon(_server_gate)
+        with anyio.fail_after(5):
+            outcome = await deliver_session_reply(
+                cast(Quest, None), "approved", attach=_attach,
+                overall_timeout=2.0, grace=1.0)
+        assert outcome is DeliveryOutcome.DELIVERED
+        with anyio.fail_after(5):
+            while not inputs:
+                await anyio.sleep(0.02)
+        assert inputs == ["approved"]
+        tg.cancel_scope.cancel()
+    await socket.close()
+
+
+@pytest.mark.anyio
 async def test_deliver_returns_unreachable_when_handshake_never_completes(
     tmp_path: Path,
 ) -> None:
