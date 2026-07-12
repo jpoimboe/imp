@@ -2,6 +2,7 @@
 name: threshold
 description: An open conversation — answer questions about imp, scout existing work, or scope a build — that goes live only when the user is ready.
 subagents: [explorer, researcher, spiker]
+allow_tools: [commit_memory]
 drivers: [impty]
 output:
   status: {type: enum, values: [Success, Error]}
@@ -61,8 +62,11 @@ up and build it directly").
 You read the project tree (the main checkout — no worktree exists yet) freely, and
 you write **only** quest-local artifacts: notably the draft spec at
 `{{ quest.home }}/artifacts/spec/{{ quest.id }}.md`. You do **not** have
-project-tree write access until go-live. Dispatch `explorer` subagents to map code
-and `researcher` for external facts, exactly as the spec phase does.
+project-tree write access until go-live — with one narrow exception: standing
+`imp/memory/` files, which you record through `commit_memory` (never a raw `git`
+command, and never `.imp/`), as described under "Recording standing preferences
+to memory". Dispatch `explorer` subagents to map code and `researcher` for
+external facts, exactly as the spec phase does.
 
 Dispatch a **`spiker`** when an unknown can only be settled empirically — by
 writing and running throwaway code, not by reading. A `spiker` runs in its own
@@ -169,11 +173,16 @@ is saved and they can return with `imp resume <id>`.
   searching the archive, explaining what the current workflow is doing — you
   perform directly.
 - **Mutations** you propose and confirm in prose first; never mutate silently.
+- **Standing `imp/memory/` preferences** you record with `commit_memory` on the
+  user's confirmation — see "Recording standing preferences to memory"; never
+  `.imp/`.
 - **This conversation** (save it, abandon it, clear it) you hand back to the user
   via the `/save`, `/abandon`, and `/clear` commands — do **not** run `imp`
   against your own quest to mutate it.
 - **Another quest** you may mutate with `imp …` only after the user explicitly
   confirms.
+
+{% include "partials/memory-authoring.md" %}
 
 ## Speak plainly
 

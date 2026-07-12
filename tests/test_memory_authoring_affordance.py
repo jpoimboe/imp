@@ -21,3 +21,46 @@ def test_memory_authoring_partial_has_pinned_prose() -> None:
     assert "Never invent a step name." in text
     assert "only `commit_memory` takes the lock" in text
     assert "never `.imp/`" in text
+
+
+def _render_agent(name: str, vars: dict) -> str:
+    wf = load_workflow(bundled_workflow_dir("imp"))
+    body = wf.agents[name].prompt_template_source
+    return render_prompt(
+        body,
+        build_context(
+            quest_title="t",
+            event_log=InMemoryEventLog(),
+            quest_id="x",
+            quest_home=".imp/quests/x",
+            vars=vars,
+        ),
+        workflow_dir=bundled_workflow_dir("imp"),
+    )
+
+
+def test_both_gates_grant_commit_memory() -> None:
+    wf = load_workflow(bundled_workflow_dir("imp"))
+    assert "commit_memory" in wf.agents["threshold"].tools
+    assert "commit_memory" in wf.agents["finalize"].tools
+
+
+def test_threshold_prompt_includes_memory_authoring() -> None:
+    out = _render_agent("threshold", {})
+    assert "## Recording standing preferences to memory" in out
+
+
+def test_finalize_prompt_includes_memory_authoring() -> None:
+    # finalize's memory-authoring include is top-level (outside the autonomous
+    # and auto_merge gates), so it renders on every path; pass a concrete vars
+    # dict so the rest of the finalize template renders cleanly.
+    out = _render_agent("finalize", {"auto_merge": False})
+    assert "## Recording standing preferences to memory" in out
+
+
+def test_threshold_access_permits_memory_writes() -> None:
+    out = _render_agent("threshold", {})
+    # The Access section now carves out imp/memory writes via commit_memory,
+    # still forbidding raw git and .imp/.
+    assert "one narrow exception" in out
+    assert "record through `commit_memory`" in out
