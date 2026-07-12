@@ -1025,3 +1025,52 @@ def test_overlay_home_caches_write_through_to_real_home() -> None:
     finally:
         shutil.rmtree(root, ignore_errors=True)
 
+
+def test_fallback_home_is_writable_real_home_with_masks() -> None:
+    # AC 8: when overlay is unavailable the home is a plain rw bind of the REAL home
+    # — a $HOME write persists to the real home (home isolation is lost, the spec's
+    # deliberate degrade-security-not-functionality edge) — and the secret masks
+    # STILL apply (secrets masked in BOTH modes). Runs on any bwrap host (no overlay needed).
+    root = _make_root("imp-test-fb-")
+    try:
+        home = root / "home"
+        ssh = home / ".ssh"
+        ssh.mkdir(parents=True)
+        (ssh / "id_rsa").write_text("SUPER_SECRET_KEY\n")
+
+        pol = _fallback_home(root, home, secret_dirs=(str(ssh),))
+        ctx = _ctx(root, pol)
+        r = _bash(
+            ctx,
+            'echo FB > "$HOME/fallback.txt" && cat "$HOME/fallback.txt"; '
+            'echo "==S=="; cat "$HOME/.ssh/id_rsa" 2>&1')
+        out = r["stdout"]
+        assert "FB" in out                            # writable home (functionality kept)
+        assert "SUPER_SECRET_KEY" not in out          # AC8/AC3: masks apply in fallback
+        # rw bind (no overlay capture) → the write persisted to the REAL home.
+        assert (home / "fallback.txt").exists(), (
+            "fallback rw home did not persist the write to the real home")
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_readonly_overlay_blocks_bash_write_to_tree() -> None:
+    # AC 9: a read-only overlay over the tree (what a subagent inherits from a
+    # read_only:["."] step — object-level inheritance is covered by
+    # test_non_isolated_subagent_inherits_parent_policy in the dispatch suite) blocks
+    # a real bash WRITE at the OS level: the last-covering --ro-bind wins over the
+    # earlier rw worktree bind.
+    root = _make_root("imp-test-ro-")
+    try:
+        base = _active_policy(root)
+        pol = dataclasses.replace(base, readonly_overlays=(str(root),))
+        ctx = _ctx(root, pol)
+        r = _bash(ctx, f'touch "{root}/blocked.txt" 2>&1; echo rc=$?')
+        assert "rc=0" not in r["stdout"], (
+            f"write to a read-only-overlaid tree unexpectedly succeeded: "
+            f"{r['stdout']!r}")
+        assert not (root / "blocked.txt").exists(), (
+            "blocked.txt appeared on host — the read-only overlay did not block it")
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
