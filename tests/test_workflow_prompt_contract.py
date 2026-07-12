@@ -347,6 +347,13 @@ def test_task_lead_documents_verify_triage() -> None:
     assert "verify_tolerated" in text                # the signal it emits
     assert "attributable" in low                     # the single attributability judgment
     assert "cur_base_head..HEAD" in text             # judged against the diff
+    # The self-check ban is broadened past "a single test": task-lead runs no
+    # project check itself — not the gate, suite, lint, or typecheck.
+    assert "you never re-run a single test" not in low   # the narrow old wording is gone
+    assert "never run the gate, the full suite, lint, or typecheck" in low
+    assert "not even to confirm a fix" in low
+    # The diff-attributable path returns and lets the engine re-run verify.
+    assert "do not self-verify" in low
     # The two-category taxonomy is gone — no tags, no "green at baseline", no union set.
     assert "[baseline]" not in text
     assert "[flaky]" not in text
@@ -466,6 +473,11 @@ def test_deferred_sweep_documents_verify_triage() -> None:
     # The single attributability judgment, against the diff.
     assert "attributable" in low
     assert "cur_base_head..HEAD" in text
+    # SYNCED-PAIR lockstep with task-lead: the shared judgment ban is broadened past
+    # "a single test" here too — the sweep runs no project check itself.
+    assert "you never re-run a single test" not in low   # the narrow old wording is gone
+    assert "never run the gate, the full suite, lint, or typecheck" in low
+    assert "not even to confirm a fix" in low
     # The two-category taxonomy is gone.
     assert "[baseline]" not in text
     assert "[flaky]" not in text
