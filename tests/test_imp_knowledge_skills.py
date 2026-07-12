@@ -126,7 +126,8 @@ def test_memory_covers_two_tiers_of_durable_state() -> None:
     assert ".imp/quests/" in body
     # project-config tier
     assert "imp/project.yaml" in body
-    assert "guidance" in low
+    assert "imp/memory/" in body
+    assert "guidance" not in low
     assert "facts" in low
     assert "default-workflow" in body
     assert "test_cmd_fast" in body
@@ -136,6 +137,12 @@ def test_memory_covers_two_tiers_of_durable_state() -> None:
     # how to read what is active, incl. imp config's blind spots
     assert "imp config" in body
     assert "blind spots" in body
+
+
+def test_knowledge_no_longer_references_removed_guidance_key() -> None:
+    body = load_agent_skill(_skills_dir(), "imp-knowledge")
+    assert "guidance" not in body.lower()
+    assert "imp/memory/" in body
 
 
 def test_knowledge_maps_to_both_spokes() -> None:
