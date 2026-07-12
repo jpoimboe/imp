@@ -1,7 +1,8 @@
 """The shipped default workflow ships its discipline skills under skills/agent/,
 loadable via the agent path with no YAML frontmatter; skills/user/ ships empty.
-This module covers the four core disciplines; the two imp-* grounding skills are
-covered in test_imp_knowledge_skills.py."""
+This module covers the four core disciplines; the three imp-* grounding skills
+(imp-knowledge, imp-introspection, imp-memory) are covered in
+test_imp_knowledge_skills.py."""
 
 from __future__ import annotations
 

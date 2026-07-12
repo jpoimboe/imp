@@ -1,8 +1,10 @@
 # imp introspection
 
-How to answer a specific imp question from ground truth instead of memory. Each
-procedure says what to read or run and how to turn the raw output into a
-plain-language answer. Pair with `imp-mental-model` for the stable picture.
+How to answer a specific imp question about live state from ground truth instead
+of memory: what the current workflow is doing, what work exists, and a quest's
+event timeline. Each procedure says what to read or run and how to turn the raw
+output into a plain-language answer. A spoke of `imp-knowledge` — load that hub
+first for the stable picture, then come here to derive live specifics.
 
 ## What the current workflow is doing
 
