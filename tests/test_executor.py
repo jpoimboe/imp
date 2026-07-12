@@ -1661,44 +1661,6 @@ async def test_script_pause_emits_workflow_paused_with_script_blocked_reason(
     assert paused[-1]["payload"]["reason"] == "script_blocked"
 
 
-# ── _last_script_blocked selection logic ────────────────────────────────────
-
-
-def test_last_script_blocked_returns_last_match() -> None:
-    """_last_script_blocked returns the LAST event whose payload.step matches,
-    ignoring events for other steps and returning None when absent."""
-    from imp.cli.main import _last_script_blocked
-
-    events: list[dict] = [
-        {"type": "script_blocked", "payload": {"step": "check", "stderr": "first", "exit": 3}},
-        {"type": "script_blocked", "payload": {"step": "other", "stderr": "noise", "exit": 1}},
-        {"type": "script_blocked", "payload": {"step": "check", "stderr": "second", "exit": 5}},
-    ]
-
-    # Returns the LAST match for "check" (index 2), not the first (index 0).
-    result = _last_script_blocked(events, "check")
-    assert result is not None
-    assert result["payload"]["stderr"] == "second"
-
-    # Returns the sole match for "other".
-    result_other = _last_script_blocked(events, "other")
-    assert result_other is not None
-    assert result_other["payload"]["stderr"] == "noise"
-
-    # Returns None when the step name is absent.
-    assert _last_script_blocked(events, "missing") is None
-
-    # Returns None for an empty event list.
-    assert _last_script_blocked([], "check") is None
-
-    # Ignores non-script_blocked events.
-    mixed: list[dict] = [
-        {"type": "step_started", "payload": {"step": "check"}},
-        {"type": "script_blocked", "payload": {"step": "check", "stderr": "only", "exit": 4}},
-        {"type": "step_completed", "payload": {"step": "check"}},
-    ]
-    assert _last_script_blocked(mixed, "check") == mixed[1]
-
 
 # ── Workflow snapshot ────────────────────────────────────────────────────────
 

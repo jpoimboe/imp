@@ -96,49 +96,21 @@ def test_emit_merge_blocked_notice_is_wordmark_under_dark_theme(monkeypatch, cap
         pal.set_theme("ansi")
 
 
-def test_emit_script_blocked_notice_is_wordmark_under_dark_theme(monkeypatch, capsys) -> None:
-    from imp.cli import palette as pal
-    monkeypatch.setattr(main, "should_use_color", lambda stream: True)
-    try:
-        pal.set_theme("dark")
-        main._emit_script_blocked("integrate-rebase", "rebase conflict", "")
-        out = capsys.readouterr().out
-        assert pal.sgr("wordmark", enabled=True) in out
-        assert pal.sgr("yellow", enabled=True) not in out
-    finally:
-        pal.set_theme("ansi")
 
-
-def test_emit_script_blocked_renders_combined_stderr_then_stdout(capsys) -> None:
-    main._emit_script_blocked("verify", "the-stderr-part", "the-stdout-part")
-    out = capsys.readouterr().out
-    assert "the-stderr-part" in out
-    assert "the-stdout-part" in out
-    assert out.index("the-stderr-part") < out.index("the-stdout-part")
-
-
-def test_emit_script_blocked_bounds_detail_to_tail(capsys) -> None:
-    from imp.cli.render_text import _SCRIPT_DETAIL_TAIL_LINES
-    stdout = "\n".join(f"line-{i}" for i in range(_SCRIPT_DETAIL_TAIL_LINES + 20))
-    main._emit_script_blocked("verify", "", stdout)
-    out = capsys.readouterr().out
-    assert "line-0" not in out
-    assert f"line-{_SCRIPT_DETAIL_TAIL_LINES + 19}" in out
-
-
-def test_handle_terminal_outcome_passes_combined_output(capsys) -> None:
+def test_handle_terminal_outcome_does_not_reprint_script_detail(capsys) -> None:
     events = [
         {"type": "script_blocked",
          "payload": {"step": "verify", "stderr": "err-detail", "stdout": "out-detail", "exit": 3}},
     ]
     quest = _Change(events)
     with patch.object(main, "State") as State, \
-         patch.object(main, "_emit_paused_summary"):
+         patch.object(main, "_emit_paused_summary") as ps:
         State.load.return_value = _State("paused", step="verify")
         rc = main._handle_terminal_outcome(quest, RunResult.PAUSED, coord=None)
     out = capsys.readouterr().out
-    assert "err-detail" in out
-    assert "out-detail" in out
+    assert "err-detail" not in out       # the exit recap no longer reprints script detail
+    assert "out-detail" not in out
+    ps.assert_called_once()              # only the paused summary is emitted
     assert rc == 1
 
 

@@ -42,7 +42,6 @@ from imp.cli.live_driver import LiveDriver
 from imp.cli.live_status import LiveStatus
 from imp.cli.palette import ansi, should_use_color
 from imp.cli.prompt import Prompt
-from imp.cli.render_text import _SCRIPT_DETAIL_TAIL_LINES
 from imp.cli.session_run import (
     infer_session_result,
     make_headless_solicit,
@@ -433,43 +432,13 @@ def _emit_merge_blocked(
     print(ansi(f"{mark}{msg}", "wordmark", enabled=color))
 
 
-def _emit_script_blocked(step: str, stderr: str, stdout: str) -> None:
-    detail = stderr.strip()
-    out_part = stdout.strip()
-    if out_part:
-        detail = f"{detail}\n{out_part}" if detail else out_part
-    lines = detail.splitlines()
-    if len(lines) > _SCRIPT_DETAIL_TAIL_LINES:
-        detail = "\n".join(lines[-_SCRIPT_DETAIL_TAIL_LINES:])
-    color = should_use_color(sys.stdout)
-    mark = "⚠ " if color else ""
-    print(ansi(f"{mark}{step} paused:\n{detail}", "wordmark", enabled=color))
-
-
-def _last_script_blocked(
-    events: list[dict[str, Any]], step: str,
-) -> dict[str, Any] | None:
-    """Return the LAST script_blocked event whose payload.step == `step`, or None.
-
-    A step may pause, be resumed, and pause again with different stderr.  Iterating
-    forward and keeping only the last match ensures we surface the most-recent
-    block reason and never emit stale output from an earlier pause that was
-    subsequently resumed."""
-    matched: dict[str, Any] | None = None
-    for ev in events:
-        if (ev.get("type") == "script_blocked"
-                and (ev.get("payload") or {}).get("step") == step):
-            matched = ev
-    return matched
-
-
 def _handle_terminal_outcome(
     quest: Quest, result: RunResult, coord: Any,
 ) -> int:
     """Render the terminal outcome of a settled run and return its rc.
 
-    COMPLETED → green completion line (rc 0). PAUSED → merge_blocked exits early (no summary);
-    script-step remediation surfaced once, then the dim paused summary (rc 1).
+    COMPLETED → green completion line (rc 0). PAUSED → merge_blocked exits early
+    (no summary); every other pause falls through to the dim paused summary (rc 1).
     Shared by `new`/`resume` (relocated verbatim from the post-run `else` arm)."""
     if result is RunResult.COMPLETED:
         # Worktree gone = the merge gate was exercised.
@@ -486,7 +455,7 @@ def _handle_terminal_outcome(
         _emit_completed(quest, result.value, merged=not wt_path.exists(),
                         warnings=warnings)
         return 0
-    # PAUSED — surface merge_blocked or script-step remediation.
+    # PAUSED — surface merge_blocked; every other pause falls through to the summary.
     final_state = State.load(quest.state_dir)
     if final_state.status == "merge_blocked":
         mb_reason: str | None = None
@@ -500,19 +469,8 @@ def _handle_terminal_outcome(
                 mb_note = payload.get("note")
         _emit_merge_blocked(quest, mb_reason, mb_detail, mb_note)
         return 1  # friendly block already carries the resume command; skip redundant summary
-    if final_state.step is not None:
-        matched = _last_script_blocked(
-            list(quest.event_log().read()), final_state.step)
-        if matched is not None:
-            payload = matched.get("payload") or {}
-            _emit_script_blocked(
-                final_state.step,
-                payload.get("stderr", ""),
-                payload.get("stdout", ""),
-            )
     _emit_paused_summary(quest, _leave_trigger(coord))
     return 1
-
 
 
 def _print_leave_disposition(
