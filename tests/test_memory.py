@@ -8,6 +8,7 @@ from imp.providers.memory import (
     load_memory_snapshot,
     resolve_memory,
     strip_html_comments,
+    validate_memory_tree,
 )
 
 
@@ -92,3 +93,89 @@ def test_resolve_skips_missing_and_blank_levels() -> None:
 
 def test_resolve_empty_snapshot_is_empty_string() -> None:
     assert resolve_memory({}, workflow="imp", step="threshold") == ""
+
+
+def test_validate_accepts_valid_tree() -> None:
+    errors = validate_memory_tree(
+        ["all.md", "imp/all.md", "imp/threshold.md"],
+        valid_workflows={"imp", "patent"},
+        workflow_steps={"imp": frozenset({"threshold", "plan-writer"})},
+    )
+    assert errors == []
+
+
+def test_validate_accepts_workflow_all_md() -> None:
+    # all.md under a workflow dir is always allowed, no step lookup needed.
+    errors = validate_memory_tree(
+        ["imp/all.md"],
+        valid_workflows={"imp"},
+        workflow_steps={"imp": frozenset()},
+    )
+    assert errors == []
+
+
+def test_validate_flags_unknown_workflow_dir() -> None:
+    errors = validate_memory_tree(
+        ["imp/threshold.md", "bogus/all.md"],
+        valid_workflows={"imp", "patent"},
+        workflow_steps={"imp": frozenset({"threshold"})},
+    )
+    assert len(errors) == 1
+    assert "bogus" in errors[0]
+    # the error names the known workflows so it doubles as discovery
+    assert "imp" in errors[0] and "patent" in errors[0]
+
+
+def test_validate_flags_nonstep_md_and_lists_valid_steps() -> None:
+    errors = validate_memory_tree(
+        ["imp/notastep.md"],
+        valid_workflows={"imp"},
+        workflow_steps={"imp": frozenset({"threshold", "plan-writer"})},
+    )
+    assert len(errors) == 1
+    assert "notastep" in errors[0]
+    # the step-name error lists that workflow's valid step names (AC 5)
+    assert "threshold" in errors[0] and "plan-writer" in errors[0]
+
+
+def test_validate_flags_stray_toplevel_step_file() -> None:
+    errors = validate_memory_tree(
+        ["threshold.md"],
+        valid_workflows={"imp"},
+        workflow_steps={},
+    )
+    assert len(errors) == 1
+    assert "threshold.md" in errors[0]
+    # points the user at the only allowed top-level file
+    assert "all.md" in errors[0]
+
+
+def test_validate_flags_too_deep_nesting() -> None:
+    errors = validate_memory_tree(
+        ["imp/threshold/extra.md"],
+        valid_workflows={"imp"},
+        workflow_steps={"imp": frozenset({"threshold"})},
+    )
+    assert len(errors) == 1
+    assert "imp/threshold/extra.md" in errors[0]
+
+
+def test_validate_known_workflow_missing_from_steps_map() -> None:
+    # Workflow is known but absent from workflow_steps -> "(none)" valid steps.
+    errors = validate_memory_tree(
+        ["imp/step.md"],
+        valid_workflows={"imp"},
+        workflow_steps={},
+    )
+    assert len(errors) == 1
+    assert "step" in errors[0]
+    assert "(none)" in errors[0]
+
+
+def test_validate_collects_multiple_errors() -> None:
+    errors = validate_memory_tree(
+        ["bogus/all.md", "stray.md"],
+        valid_workflows={"imp"},
+        workflow_steps={"imp": frozenset({"threshold"})},
+    )
+    assert len(errors) == 2

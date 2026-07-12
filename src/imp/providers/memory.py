@@ -7,6 +7,7 @@ validation, and the agent-invocation builder alike.
 from __future__ import annotations
 
 import re
+from collections.abc import Collection, Iterable, Mapping
 from pathlib import Path
 
 _HTML_COMMENT_RE = re.compile(r"<!--.*?-->", re.DOTALL)
@@ -58,3 +59,56 @@ def resolve_memory(
         if content:
             parts.append(content)
     return "\n\n".join(parts)
+
+
+def validate_memory_tree(
+    relpaths: Iterable[str],
+    *,
+    valid_workflows: Collection[str],
+    workflow_steps: Mapping[str, Collection[str]],
+) -> list[str]:
+    """Check each memory relpath against the known workflows and steps. Returns
+    a list of loud error messages, one per offending path (empty list == valid).
+
+    `relpaths` are POSIX paths relative to `imp/memory/` (the snapshot keys).
+    `valid_workflows` is every known workflow name; `workflow_steps` maps a
+    workflow name to its valid step names (only workflows actually referenced by
+    a subdir need be present). Content is irrelevant here — this validates the
+    tree's SHAPE, so a comment-only file is judged only by its path.
+    """
+    errors: list[str] = []
+    known = ", ".join(sorted(valid_workflows)) or "(none)"
+    for rel in sorted(relpaths):
+        parts = rel.split("/")
+        if len(parts) == 1:
+            if parts[0] != "all.md":
+                errors.append(
+                    f"memory/{rel}: only 'all.md' is allowed at the memory/ top "
+                    f"level; nest a step file under its workflow, e.g. "
+                    f"memory/<workflow>/{parts[0]}"
+                )
+        elif len(parts) == 2:
+            workflow, filename = parts
+            if workflow not in valid_workflows:
+                errors.append(
+                    f"memory/{rel}: '{workflow}' is not a known workflow; "
+                    f"known workflows: {known}"
+                )
+                continue
+            if filename == "all.md":
+                continue
+            step = filename[: -len(".md")]
+            steps = workflow_steps.get(workflow, ())
+            if step not in steps:
+                valid_steps = ", ".join(sorted(steps)) or "(none)"
+                errors.append(
+                    f"memory/{rel}: '{step}' is not a step of workflow "
+                    f"'{workflow}'; valid steps: {valid_steps}"
+                )
+        else:
+            errors.append(
+                f"memory/{rel}: memory files nest at most two levels "
+                f"(memory/all.md, memory/<workflow>/all.md, "
+                f"memory/<workflow>/<step>.md)"
+            )
+    return errors
