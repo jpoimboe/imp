@@ -3603,6 +3603,43 @@ def test_attach_home_layer_overlay_creates_sibling_upper(tmp_path, monkeypatch):
     assert not upper.exists() and not work.exists() and not merged.exists()
 
 
+def test_reincarnation_preserves_and_teardown_removes_overlay_home(
+        tmp_path, monkeypatch):
+    # AC 6: reincarnating a top-level step neither wipes nor leaks its per-invocation
+    # home. The overlay upper is a SIBLING of transcript_dir, so _route_agent's
+    # per-reincarnation rmtree of transcript_dir leaves it (and a captured write)
+    # intact; cleanup removes upper/work/merged at invocation teardown.
+    import shutil
+
+    from imp.engine import executor as ex
+    monkeypatch.setattr(ex, "overlay_available", lambda _base: True)
+    quest = types.SimpleNamespace(quest_dir=tmp_path)
+    step = types.SimpleNamespace(phase="build", name="coder")
+
+    pol, cleanup = ex._attach_home_layer(_active_home_policy(), step, quest)
+    upper = Path(pol.home_layer.upper)
+    work = Path(pol.home_layer.work)
+    merged = Path(pol.home_layer.merged)
+    # a write captured in the overlay upper during the first incarnation
+    (upper / "captured").write_text("data")
+
+    # the executor recreates transcript_dir on each reincarnation restart
+    transcript_dir = tmp_path / "steps" / "build" / "coder"
+    transcript_dir.mkdir(parents=True, exist_ok=True)
+    (transcript_dir / "log.txt").write_text("attempt-1")
+    # simulate _route_agent's per-reincarnation wipe (executor.py:1255-1257)
+    shutil.rmtree(transcript_dir, ignore_errors=True)
+    transcript_dir.mkdir(parents=True, exist_ok=True)
+
+    # the sibling overlay upper and its captured write survive the reincarnation
+    assert upper.is_dir()
+    assert (upper / "captured").read_text() == "data"
+
+    # invocation teardown removes all three overlay dirs — nothing left behind
+    cleanup()
+    assert not upper.exists() and not work.exists() and not merged.exists()
+
+
 def test_attach_home_layer_noop_for_home_less(tmp_path, monkeypatch):
     from imp.engine import executor as ex
     monkeypatch.setattr(ex, "overlay_available", lambda _base: True)
