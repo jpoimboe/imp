@@ -5,8 +5,9 @@ gates (engine/gates.py). `resolve_policy` does the one-time stat I/O and bakes a
 frozen `SandboxPolicy`; `build_sandbox_argv` is pure given that policy.
 
 The flag ORDER in build_sandbox_argv is load-bearing: bwrap is last-wins, so the
-/tmp bind is emitted EARLY (right after the ro-floor, before worktree/git/remask)
-and the secret masks MUST be emitted AFTER every bind (incl. extra_writable), else
+writable-home bind (when a home_layer is present) and then the /tmp bind are
+emitted EARLY (right after the ro-floor, before worktree/git/remask) and the
+secret masks MUST be emitted AFTER every bind (incl. extra_writable), else
 a config-driven bind could re-expose a masked secret dir (spec L1-r5). No
 --unshare-pid / --die-with-parent / --new-session — all three break the runner's
 interrupt grace (spec B.9); reaping is via the process group.
@@ -29,6 +30,15 @@ from imp.engine.env import ENGINE_ENV_VARS, HEADLESS_ENV
 
 
 @dataclass(frozen=True, slots=True)
+class HomeLayer:
+    """The writable-home layer bound over $HOME for an active-sandbox agent.
+    Fallback (rw) shape: only `home` set → a plain `--bind home home`. The COW
+    overlay shape (Task 2) also sets merged/upper/work and wraps with unshare +
+    mount -t overlay."""
+    home: str
+
+
+@dataclass(frozen=True, slots=True)
 class SandboxPolicy:
     active: bool                              # True → wrap with bwrap; False → bare sh -c
     worktree: str                             # rw bind at REAL path
@@ -46,6 +56,8 @@ class SandboxPolicy:
     readonly_overlays: tuple[str, ...] = ()  # ro subtrees; after git_ro_remask, before caches
     git_ref_reexpose: tuple[str, ...] = ()   # rw re-expose of refs/heads/imp; after git_ro_remask
     disposable_tree: bool = False            # agent runs in a disposable git worktree
+    home: str = ""                           # real $HOME ("" → inactive/unresolved)
+    home_layer: HomeLayer | None = None      # writable-home layer (None → ro read-through)
 
     def allows_read(self, path: Path) -> bool:
         """In-process mirror of the sandbox's read exposure: the whole host is
@@ -64,8 +76,12 @@ class SandboxPolicy:
         load-bearing: the ro overlays (git_ro_remask, readonly_overlays, extra_readable)
         are NOT globally last-wins — a later writable bind re-exposes a path they
         cover — only the secret masks are unconditionally last. Add a new bind here
-        and BOTH consumers pick it up; the argv-parity test enforces no drift."""
+        and BOTH consumers pick it up; the argv-parity test enforces no drift. The
+        order is load-bearing and last-wins: the home_layer rw bind goes FIRST (so
+        caches/worktree/secrets layered over $HOME win), /tmp next, and the secret
+        masks unconditionally LAST."""
         return [
+            *([(self.home_layer.home, "rw")] if self.home_layer is not None else []),
             ("/tmp", "rw"),
             (self.worktree, "rw"),
             (self.git_common_dir, "rw"),
@@ -132,10 +148,9 @@ def build_sandbox_argv(
     argv += ["--ro-bind", "/", "/"]
     # 2-10. path-covering binds, in emit order from policy.bind_plan() (the single
     #    source shared with allows_write). Emit order is load-bearing and last-wins:
-    #    /tmp goes EARLY (right after the ro floor) so the later worktree/git binds,
-    #    git RO-remask, and secret masks all win over it — a late /tmp bind would
-    #    re-expose .git escape vectors for a repo under /tmp; secret masks go LAST.
-    #    /tmp is the agent's scratch, like a normal shell.
+    #    the home_layer rw bind (when present) goes FIRST so caches/worktree/secrets
+    #    over $HOME win; /tmp goes next (before the worktree/git binds and secret
+    #    masks) as the agent's scratch; secret masks go LAST.
     for bind, kind in policy.bind_plan():
         if kind == "rw":
             argv += ["--bind", bind, bind]
@@ -367,6 +382,7 @@ def resolve_policy(
         git_ro_remask=tuple(remask),
         git_ref_reexpose=git_ref_reexpose,
         disposable_tree=disposable_tree,
+        home=str(home),
         readonly_overlays=readonly_overlays,
         writable_caches=caches,
         extra_readable=tuple(cfg.extra_readable),

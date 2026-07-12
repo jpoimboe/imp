@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from imp.engine.sandbox import (
+    HomeLayer,
     SandboxConfig,
     SandboxPolicy,
     SandboxUnavailable,
@@ -704,6 +705,46 @@ def test_argv_binds_match_bind_plan():
     p = _mirror_policy()
     argv = build_sandbox_argv("x", cwd="/wt", policy=p, engine_env={})
     assert _parse_argv_binds(argv) == p.bind_plan()
+
+
+def test_home_layer_rw_binds_real_home_first():
+    # AC 8 (unit): the fallback writable-home layer emits a rw bind of the real
+    # home, ordered BEFORE the worktree / cache / secret binds so later binds win
+    # (caches write through, worktree stays real, secrets still mask).
+    pol = _policy(home="/home/u", home_layer=HomeLayer(home="/home/u"))
+    argv = build_sandbox_argv("x", cwd="/wt", policy=pol, engine_env={})
+    assert argv[0] == "bwrap"                      # no unshare wrapper for rw fallback
+    flat = " ".join(argv)
+    assert "--bind /home/u /home/u" in flat
+    i_home = argv.index("/home/u")                 # first "/home/u" is the bind source
+    i_wt = argv.index("/ctl/.imp/worktrees/abc")
+    i_secret = argv.index("/home/u/.ssh")
+    assert i_home < i_wt < i_secret
+
+
+def test_home_layer_makes_home_writable_in_mirror():
+    pol = _policy(home="/home/u", home_layer=HomeLayer(home="/home/u"))
+    assert pol.allows_write(Path("/home/u/newfile"))          # home is writable
+    assert pol.allows_write(Path("/home/u/.cache/x"))         # cache write-through wins
+    assert not pol.allows_write(Path("/home/u/.ssh/id_rsa"))  # secret mask still denies
+    assert not pol.allows_read(Path("/home/u/.ssh/id_rsa"))   # and unreadable
+
+
+def test_no_home_layer_leaves_home_read_only():
+    # Without a home layer (script gates / pre-attach) home stays read-through the
+    # ro floor: no rw home bind, and the mirror denies home writes.
+    pol = _policy(home="/home/u")
+    flat = " ".join(build_sandbox_argv("x", cwd="/wt", policy=pol, engine_env={}))
+    assert "--bind /home/u /home/u" not in flat
+    assert not pol.allows_write(Path("/home/u/newfile"))
+
+
+def test_argv_binds_match_bind_plan_with_home_layer():
+    # Drift guard extended to the home bind: the rw fallback's source == dest, so
+    # the parse-back still equals bind_plan() (which is dest-keyed).
+    pol = _policy(home="/home/u", home_layer=HomeLayer(home="/home/u"))
+    argv = build_sandbox_argv("x", cwd="/wt", policy=pol, engine_env={})
+    assert _parse_argv_binds(argv) == pol.bind_plan()
 
 
 def test_resolve_policy_binds_quest_home_rw(tmp_path):
