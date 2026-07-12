@@ -37,7 +37,7 @@ class RelaySupervisor:
         self._running: set[str] = set()
 
     async def run(self) -> None:
-        """Poll the directory forever, running one relay per resident change. Cancel
+        """Poll the directory forever, running one relay per resident quest. Cancel
         the surrounding scope to stop."""
         failing = False
         async with anyio.create_task_group() as tg:

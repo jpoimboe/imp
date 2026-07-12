@@ -1,4 +1,4 @@
-"""Curate raw engine events: filter by allowlist, track step/status, augment with change context."""
+"""Curate raw engine events: filter by allowlist, track step/status, augment with quest context."""
 from __future__ import annotations
 
 from collections.abc import Callable

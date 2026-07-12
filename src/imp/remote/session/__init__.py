@@ -1,1 +1,1 @@
-"""The per-change session daemon: bidirectional NDJSON attach protocol."""
+"""The per-quest session daemon: bidirectional NDJSON attach protocol."""

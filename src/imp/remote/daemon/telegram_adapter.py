@@ -25,7 +25,7 @@ from imp.remote.drivers.telegram import (
 
 
 def handle_for(quest_id: str) -> str:
-    """Short routing token for a change: the bare id (dateless, already short)."""
+    """Short routing token for a quest: the bare id (dateless, already short)."""
     return quest_id
 
 
@@ -40,7 +40,7 @@ def parse_handle(text: str) -> tuple[str | None, str]:
 
 
 def parse_subscribe_handle(text: str) -> str | None:
-    """Resolve a /subscribe arg to a change id by @handle only — handle_for is identity."""
+    """Resolve a /subscribe arg to a quest id by @handle only — handle_for is identity."""
     handle, _ = parse_handle(f"{text.strip()} .")
     return handle or None
 

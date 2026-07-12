@@ -1,4 +1,4 @@
-"""The attach-protocol frame codec for a per-change session daemon.
+"""The attach-protocol frame codec for a per-quest session daemon.
 
 Each frame is a single JSON line. Client -> daemon frames carry a "kind" of
 "attach" (the opening handshake), "input" (a gate reply), "skill" (a skill

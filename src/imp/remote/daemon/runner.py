@@ -505,7 +505,7 @@ async def run_daemon(
     try:
         write_pid(control_root)
         reaped = archive_maintenance.reap_archived_homes(control_root)
-        _log.info("reaped %d archived-terminal change home(s) at startup", reaped)
+        _log.info("reaped %d archived-terminal quest home(s) at startup", reaped)
         await hub.open()
         # Daemon threads are not joined at interpreter shutdown, so a worker parked
         # in a blocking long-poll syscall is reaped at process exit rather than

@@ -61,7 +61,7 @@ class ControlPlane:
         return self._full_history(quest_id)
 
     async def reply(self, quest_id: str, text: str) -> None:
-        """Deliver a reply into the change's session daemon, rehydrating if hibernated."""
+        """Deliver a reply into the quest's session daemon, rehydrating if hibernated."""
         await self._deliver(quest_id, text)
 
     def create(self, prompt: str) -> None:

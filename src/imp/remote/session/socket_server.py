@@ -1,4 +1,4 @@
-"""SessionSocket — the per-change Unix-socket endpoint of the attach protocol.
+"""SessionSocket — the per-quest Unix-socket endpoint of the attach protocol.
 
 Inverts SouthHub's direction: it BROADCASTS curated events to every attached
 client and reads input/control frames back. Accepts N concurrent clients; a

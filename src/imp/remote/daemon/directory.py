@@ -1,4 +1,4 @@
-"""Session-daemon directory: liveness probes for per-change session sockets."""
+"""Session-daemon directory: liveness probes for per-quest session sockets."""
 from __future__ import annotations
 
 from pathlib import Path
