@@ -11,6 +11,7 @@ from typing import Any
 import anyio
 
 from imp.agents.skills import load_user_skill
+from imp.diagnostics import install_stack_dumper
 from imp.engine.abandon import (
     archive_conversation,
     discard_conversation,
@@ -268,6 +269,7 @@ def main(argv: list[str] | None = None) -> int:
     except LoadError as exc:
         print(f"imp: {exc}", file=sys.stderr)
         return 2
+    install_stack_dumper(quest.quest_dir / "stack-dump.txt")
     kwargs: dict[str, Any] = {}
     if ns.resume:
         kwargs["resume"] = True

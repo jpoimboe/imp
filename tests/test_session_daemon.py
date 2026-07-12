@@ -26,6 +26,12 @@ def anyio_backend() -> str:
     return "asyncio"
 
 
+@pytest.fixture(autouse=True)
+def _stub_stack_dumper(monkeypatch: pytest.MonkeyPatch) -> None:
+    import imp.remote.session.daemon as daemon
+    monkeypatch.setattr(daemon, "install_stack_dumper", lambda p: None)
+
+
 def _make_change(tmp_path: Path, quest_id: str) -> Quest:
     quest = Quest(
         id=quest_id,
@@ -198,7 +204,7 @@ def test_main_loads_named_change_and_serves_it(
 ) -> None:
     import imp.remote.session.daemon as daemon
 
-    loaded = object()
+    loaded = SimpleNamespace(quest_dir=tmp_path)
     calls: dict[str, Any] = {}
 
     def fake_load(control_root: Path, quest_id: str) -> object:
@@ -536,7 +542,7 @@ def test_main_forwards_resume_flag_via_partial(
 
     import imp.remote.session.daemon as daemon
 
-    loaded = object()
+    loaded = SimpleNamespace(quest_dir=tmp_path)
     captured: dict[str, Any] = {}
 
     def fake_load(control_root: Path, quest_id: str) -> object:
@@ -653,7 +659,9 @@ def test_main_maps_paused_outcome_to_nonzero(
     import imp.remote.session.daemon as daemon
     from imp.engine.executor import RunResult
 
-    monkeypatch.setattr(daemon.Quest, "load", staticmethod(lambda r, c: object()))
+    monkeypatch.setattr(
+        daemon.Quest, "load",
+        staticmethod(lambda r, c: SimpleNamespace(quest_dir=tmp_path)))
     monkeypatch.setattr(daemon.anyio, "run", lambda *a, **k: RunResult.PAUSED)
     rc = daemon.main(["--control-root", str(tmp_path), "--quest-id", "feat"])
     assert rc == 1
@@ -665,7 +673,9 @@ def test_main_maps_paused_outcome_to_nonzero_with_kwargs(
     import imp.remote.session.daemon as daemon
     from imp.engine.executor import RunResult
 
-    monkeypatch.setattr(daemon.Quest, "load", staticmethod(lambda r, c: object()))
+    monkeypatch.setattr(
+        daemon.Quest, "load",
+        staticmethod(lambda r, c: SimpleNamespace(quest_dir=tmp_path)))
     monkeypatch.setattr(daemon.anyio, "run", lambda *a, **k: RunResult.PAUSED)
     rc = daemon.main(["--control-root", str(tmp_path), "--quest-id", "feat", "--resume"])
     assert rc == 1
@@ -1091,7 +1101,7 @@ def test_main_parses_non_interactive_into_serve_kwargs(
 ) -> None:
     import imp.remote.session.daemon as daemon
 
-    loaded = object()
+    loaded = SimpleNamespace(quest_dir=tmp_path)
     calls: dict[str, Any] = {}
     monkeypatch.setattr(daemon.Quest, "load",
                         staticmethod(lambda cr, cid: loaded))
@@ -1268,7 +1278,7 @@ def test_main_forwards_autonomous_via_partial(
 
     import imp.remote.session.daemon as daemon
 
-    loaded = object()
+    loaded = SimpleNamespace(quest_dir=tmp_path)
     captured: dict[str, Any] = {}
 
     def fake_load(control_root: Path, quest_id: str) -> object:
@@ -1687,7 +1697,7 @@ def test_main_forwards_model_to_serve(
 
     import imp.remote.session.daemon as daemon
 
-    loaded = object()
+    loaded = SimpleNamespace(quest_dir=tmp_path)
     captured: dict[str, Any] = {}
 
     def fake_load(control_root: Path, quest_id: str) -> object:
