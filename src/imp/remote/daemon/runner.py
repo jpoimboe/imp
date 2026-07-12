@@ -55,7 +55,7 @@ from imp.remote.daemon.telegram_adapter import (
     format_replay_event,
     handle_for,
 )
-from imp.remote.session.reply import deliver_session_reply
+from imp.remote.session.reply import DeliveryOutcome, deliver_session_reply
 from imp.remote.session.save import save_quest as _save_quest
 
 _log = logging.getLogger("imp.daemon")
@@ -428,10 +428,10 @@ async def _await_shutdown_signals(
 
 async def deliver_to_session(
     control_root: Path, quest_id: str, text: str,
-) -> None:
+) -> DeliveryOutcome:
     """Deliver one reply into quest_id's session daemon, rehydrating if hibernated."""
     quest = await anyio.to_thread.run_sync(Quest.load, control_root, quest_id)
-    await deliver_session_reply(quest, text)
+    return await deliver_session_reply(quest, text)
 
 
 async def run_daemon(
@@ -442,7 +442,7 @@ async def run_daemon(
         [Mapping[str, str], Callable[[Command], None], Subscriptions, AlertAll],
         Any,
     ] = _make_telegram_adapter,
-    deliver: Callable[[str, str], Awaitable[None]] | None = None,
+    deliver: Callable[[str, str], Awaitable[DeliveryOutcome]] | None = None,
     create: Callable[[str], None] | None = None,
     abandon: Callable[[str], int] | None = None,
     list_quests: Callable[[], list[discover.QuestInfo]] | None = None,

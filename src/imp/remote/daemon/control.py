@@ -6,13 +6,14 @@ from typing import Any
 
 from imp.remote.daemon.discover import QuestInfo
 from imp.remote.daemon.subscriptions import Subscriptions
+from imp.remote.session.reply import DeliveryOutcome
 
 
 class ControlPlane:
     def __init__(
         self,
         *,
-        deliver: Callable[[str, str], Awaitable[None]],
+        deliver: Callable[[str, str], Awaitable[DeliveryOutcome]],
         create: Callable[[str], None],
         abandon: Callable[[str], int],
         list_quests: Callable[[], list[QuestInfo]],
@@ -60,9 +61,9 @@ class ControlPlane:
         assert self._full_history is not None  # run_daemon always wires it
         return self._full_history(quest_id)
 
-    async def reply(self, quest_id: str, text: str) -> None:
+    async def reply(self, quest_id: str, text: str) -> DeliveryOutcome:
         """Deliver a reply into the quest's session daemon, rehydrating if hibernated."""
-        await self._deliver(quest_id, text)
+        return await self._deliver(quest_id, text)
 
     def create(self, prompt: str) -> None:
         self._create(prompt)
