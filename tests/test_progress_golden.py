@@ -52,7 +52,7 @@ def test_golden_status_bar_tracks_live_task_position() -> None:
     assert "task 1/3 · coding" in (b.current_activity().position or "")
 
 
-def test_golden_breadcrumbs_show_frozen_label_not_live_position() -> None:
+def test_golden_breadcrumbs_show_most_recent_label() -> None:
     b = nv.NarrativeBuilder()
     for e in _stream():
         b.add(e)
@@ -62,8 +62,7 @@ def test_golden_breadcrumbs_show_frozen_label_not_live_position() -> None:
     task_crumbs = [c for c in crumbs if (c.step_label or "").startswith("task ")]
     assert task_crumbs                              # the completed task-lead step
     for c in task_crumbs:
-        assert c.step_label == "task 1/2 · thinking"     # frozen entry label
-        assert "task 2/2" not in (c.step_label or "")    # never the live position
+        assert c.step_label == "task 2/2 · coding"  # most-recent push at completion
 
 
 def test_golden_task_list_prints_once() -> None:

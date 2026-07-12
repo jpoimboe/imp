@@ -72,13 +72,16 @@ def test_no_rotation_when_a_segment_has_no_work(monkeypatch) -> None:
     assert b.current_activity().verb == "rot1"   # seeded phrase persists, no re-draw
 
 
-def test_pushed_live_label_beats_the_rotated_phrase(monkeypatch) -> None:
+def test_rotated_phrase_beats_a_pushed_label_on_a_rotating_step(monkeypatch) -> None:
     _deterministic_draws(monkeypatch)
     b = _threshold_builder()
     b.add(_tool("3", "c1"))
     b.add(_prose("4"))                # rotated_phrase == "rot2"
     b.add(ev("5", "step_label_updated", agent_id="a", label="pushed"))
-    assert b.current_activity().verb == "pushed"
+    # A rotating step shows its phrase as the verb; the pushed label rides the
+    # position row (Activity.counter), not the spinner.
+    assert b.current_activity().verb == "rot2"
+    assert b.current_activity().counter == "pushed"
 
 
 def test_rotation_leaves_the_frozen_journal_label_untouched(monkeypatch) -> None:
