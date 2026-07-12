@@ -9,6 +9,7 @@ from typing import Any
 import anyio
 from anyio.streams.memory import MemoryObjectReceiveStream, MemoryObjectSendStream
 
+from imp.agents.transcript import SkillReply
 from imp.remote.session.protocol import (
     CONTROL_ABANDON,
     CONTROL_ARCHIVE,
@@ -52,6 +53,7 @@ class SessionServer:
         events_path: Path | None = None,
         on_first_attach: Callable[[], None] | None = None,
         first_attach_timeout: float = _DEFAULT_FIRST_ATTACH_TIMEOUT,
+        skill_loader: Callable[[str], str] | None = None,
     ) -> None:
         self._coordinator = coordinator
         self._on_abandon = on_abandon
@@ -60,6 +62,7 @@ class SessionServer:
         self._events_path = events_path
         self._on_first_attach = on_first_attach
         self._first_attach_timeout = first_attach_timeout
+        self._skill_loader = skill_loader
         # Set on the first 0 -> 1 LEASED attach and never cleared: distinguishes
         # "no keep-alive client has arrived yet" (startup — wait) from "a
         # keep-alive client attached and left" (hibernate now) at the
@@ -139,13 +142,21 @@ class SessionServer:
             self._last_gate_event = event
         self._socket.broadcast(event)
 
-    async def _chat(self, _query: str) -> str | SkillRequest:
+    async def _chat(self, _query: str) -> str | SkillReply:
         self.set_pending_prompt(self._last_gate_event)
         try:
-            text = (await self._hibernation_gate() if self._hibernate
-                    else await self._socket.next_input())
+            got = (await self._hibernation_gate() if self._hibernate
+                   else await self._socket.next_input())
             self._emit({"type": "user_input_resolved", "payload": {}})
-            return text
+            if isinstance(got, SkillRequest):
+                assert self._skill_loader is not None
+                body = self._skill_loader(got.name)
+                command = f"/{got.name} {got.args}".rstrip()
+                body_with_args = (
+                    f"{body.rstrip()}\n\n{got.args}\n" if got.args else body)
+                return SkillReply(
+                    command=command, name=got.name, body=body_with_args)
+            return got
         finally:
             self.set_pending_prompt(None)
             self._last_gate_event = None

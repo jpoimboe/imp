@@ -12,6 +12,7 @@ from typing import Any
 import anyio
 import pytest
 
+from imp.agents.transcript import SkillReply
 from imp.cli.session_terminal import run_terminal_client
 from imp.cli.signals import InterruptCoordinator
 from imp.cli.terminal_title import GLYPH_BUSY, GLYPH_IDLE, TerminalTitle
@@ -2315,7 +2316,7 @@ async def test_skill_request_is_routed_and_command_line_echoed(
     tmp_path: Path,
 ) -> None:
     sock = str(tmp_path / "s.sock")
-    server = SessionServer(sock, hibernate=False)
+    server = SessionServer(sock, hibernate=False, skill_loader=lambda name: "BODY")
     captured: list[object] = []
 
     async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> object:
@@ -2359,5 +2360,7 @@ async def test_skill_request_is_routed_and_command_line_echoed(
 
             tg.start_soon(_client)
 
-    assert captured == [SkillRequest("refactor", "src/foo.py")]
+    assert captured == [SkillReply(
+        command="/refactor src/foo.py", name="refactor",
+        body="BODY\n\nsrc/foo.py\n")]
     assert echoed == ["/refactor src/foo.py"]
