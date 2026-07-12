@@ -150,7 +150,7 @@ def test_every_shown_step_has_its_label() -> None:
         "quest-review": "reviewing entire diff",
         "deferred-sweep": "sweeping deferred tasks",
         "converge-verify": "running tests",
-        "summarizer": "summarizing change",
+        "summarizer": "summarizing quest",
         "finalize": "finalizing",
         "wait-for-head": "waiting in merge queue",
         "reconciler": "resolving merge conflicts",

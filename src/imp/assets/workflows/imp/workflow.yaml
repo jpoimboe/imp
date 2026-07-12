@@ -279,7 +279,7 @@ phases:
       - name: summarizer
         file: agents/summarizer.md
         tier: medium
-        label: summarizing change
+        label: summarizing quest
         rules:
           - {else: true, goto: finalize}
 
