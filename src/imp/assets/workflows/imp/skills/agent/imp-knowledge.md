@@ -23,7 +23,10 @@ Load these with `load_skill(name=...)` when a question goes past the primer belo
 
 A **quest** is one unit of work imp tracks from idea to merge. Each quest has a
 per-quest home on disk at `.imp/quests/<id>/` holding its spec, plans, events,
-and state — its whole record lives there.
+and state — its whole record lives there. The home also holds the quest's
+**workflow snapshot** at `workflow/` — the `workflow.yaml` plus the agent
+prompts, partials, scripts, and skills that drove it; `imp-introspection` covers
+reading it in depth.
 
 ## Statuses
 

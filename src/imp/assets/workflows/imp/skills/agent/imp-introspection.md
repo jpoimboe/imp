@@ -13,6 +13,26 @@ phases and steps, then correlate it with the live step in `state/state.json` to
 see where this quest is right now. Turn it into plain language: name the phase
 the user is in and what the next step does, without surfacing internal step ids.
 
+## Reading the workflow in depth
+
+`workflow.yaml` is only the skeleton — the ordered phases and steps. The
+actual instructions each step runs live beside it in the quest's
+**workflow snapshot** at `.imp/quests/<id>/workflow/` — a copy of the live
+workflow, refreshed at the start of each run, that is exactly what drove
+this quest. When a question turns on what a step *does*, not just its name,
+read the snapshot:
+
+- `workflow.yaml` — phases, steps, lanes, vars: the order of what runs.
+- `agents/<name>.md` — the full prompt a given agent step follows; where a
+  step's real behavior lives.
+- `partials/*.md` — shared prompt fragments the agent files include.
+- `scripts/*.sh` — the shell scripts that `script` steps execute.
+- `persona.md` — the workflow persona shared across agents.
+- `skills/agent/*.md` — the skills agents load (these docs among them).
+
+Map a step name in `workflow.yaml` to its `agents/<name>.md` to read
+exactly what that step was told to do.
+
 ## A CLI question
 
 Run `imp help` for the command list, or `imp <cmd> --help` for one command's
