@@ -19,6 +19,13 @@ way, your only job is the same final backstop: did the implemented plans miss re
 `{{ quest.home }}/artifacts/plans/{{ quest.id }}-plan-*.md`,
 `{{ quest.home }}/progress.md`, `{{ quest.home }}/deferred.md`, and the committed code (use glob/grep to spot-check).
 
+**This is a read-and-reason step — don't run the suite.** Use glob/grep to spot-check
+the committed code; do **not** run the project's full test suite, lint, or typecheck.
+The phase-level verify gate (`converge-verify`) runs the combined checks later in this phase
+and owns that gate, so pre-empting it here tells you nothing it won't catch. If
+you form a specific hypothesis that a runtime behavior broke, run only the
+single narrowest check that tests it.
+
 ## Coverage decision — you are the SOLE completeness guard
 
 A spec may decompose into multiple plans, each written and implemented before the
