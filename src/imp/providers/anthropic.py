@@ -54,8 +54,8 @@ from imp.agents.tools.load_skill import make_load_skill_tool
 from imp.agents.transcript import (
     Transcript,
     balance_success_on_resume,
+    deliver_continuation_reply,
     deliver_engine_continuation,
-    deliver_reply_on_resume,
     repair_dangling_tool_use_on_resume,
 )
 from imp.engine.agent_run import (
@@ -610,10 +610,11 @@ class AnthropicAgentRunner:
                     elog=elog, agent_id=aid,
                     last_agent_message=last_assistant_text(messages))
                 if source == "nudge":
+                    assert isinstance(reply, str)
                     deliver_engine_continuation(
                         messages, transcript, elog, aid, reply)
                 else:
-                    deliver_reply_on_resume(
+                    deliver_continuation_reply(
                         messages, transcript, elog, aid, reply, human=True)
                 # Fall through (do NOT return): the reply drives the next LLM
                 # turn as the transcript's trailing user message.
@@ -820,10 +821,8 @@ class AnthropicAgentRunner:
                     next_text, human = cont(last_text)
                     if inspect.isawaitable(next_text):
                         next_text = await next_text
-                    user_msg = Message(role="user", content=(TextBlock(text=next_text),))
-                    messages.append(user_msg)
-                    transcript.append(user_msg)
-                    elog.append_user_message(agent_id=aid, message=user_msg, human=human)
+                    deliver_continuation_reply(
+                        messages, transcript, elog, aid, next_text, human=human)
                     loop_err = guard.observe(TurnRecord(
                         assistant_text=last_text, tools=[],
                         has_complete_step=False))

@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable
 
 from imp.engine.quest import Quest
+from imp.remote.session.protocol import SkillRequest
 
 
 def render_inert_question(text: str, *, width: int, color: bool) -> str:
@@ -39,12 +40,12 @@ def bare_turn_end_question(quest: Quest) -> str | None:
 
 
 def make_buffered_solicit(
-    first_line: str, inner: Callable[[str], Awaitable[str]],
-) -> Callable[[str], Awaitable[str]]:
+    first_line: str, inner: Callable[[str], Awaitable[str | SkillRequest]],
+) -> Callable[[str], Awaitable[str | SkillRequest]]:
     """Return first_line on the first call; delegate to inner(prompt) on every later call."""
     delivered = False
 
-    async def _solicit(prompt: str) -> str:
+    async def _solicit(prompt: str) -> str | SkillRequest:
         nonlocal delivered
         if not delivered:
             delivered = True

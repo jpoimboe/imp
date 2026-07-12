@@ -22,7 +22,7 @@ from imp.agents.runner import (
 from imp.agents.tools import Tool, get_registry
 from imp.agents.tools.complete_step import make_complete_step_tool
 from imp.agents.tools.context import ToolContext, quest_home_path
-from imp.agents.transcript import Transcript
+from imp.agents.transcript import Transcript, deliver_continuation_reply
 from imp.engine.agent_run import last_assistant_text
 from imp.providers.base import Provider
 from imp.providers.resolve import spawn_subagent_via_registry
@@ -184,11 +184,8 @@ class ScriptedAgentRunner:
                     nxt, human = invocation.continuation_fn(text)
                     if inspect.isawaitable(nxt):
                         nxt = await nxt
-                    reply_msg = Message(
-                        role="user", content=(TextBlock(text=str(nxt)),))
-                    messages.append(reply_msg)
-                    transcript.append(reply_msg)
-                    elog.append_user_message(agent_id=aid, message=reply_msg, human=human)
+                    deliver_continuation_reply(
+                        messages, transcript, elog, aid, nxt, human=human)
 
             yield {"type": "error", "payload": {
                 "category": "agent_output_missing",

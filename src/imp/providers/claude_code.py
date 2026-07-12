@@ -94,6 +94,7 @@ from imp.agents.transcript import (
     RESUME_REDO_NUDGE,
     Transcript,
     captured_result_key,
+    deliver_continuation_reply,
     deliver_engine_continuation,
     deliver_reply_on_resume,
     repair_dangling_tool_use_on_resume,
@@ -1732,10 +1733,11 @@ class ClaudeCodeAgentRunner:
                     elog=elog, agent_id=aid,
                     last_agent_message=last_assistant_text(messages))
                 if source == "nudge":
+                    assert isinstance(reply, str)
                     deliver_engine_continuation(
                         messages, transcript, elog, aid, reply)
                 else:
-                    deliver_reply_on_resume(
+                    deliver_continuation_reply(
                         messages, transcript, elog, aid, reply, human=True)
                 # Fall through (do NOT return): the reply drives the next LLM
                 # turn as the transcript's trailing user message.
@@ -2291,14 +2293,8 @@ class ClaudeCodeAgentRunner:
                             # Brake holds until reply is in hand: clear only now.
                             if invocation.coordinator is not None:
                                 invocation.coordinator.clear_pause()
-                            user_msg = Message(
-                                role="user",
-                                content=(TextBlock(text=reply),))
-                            messages.append(user_msg)
-                            transcript.append(user_msg)
-                            elog.append_user_message(
-                                agent_id=aid, message=user_msg, human=True)
-                            next_query = reply
+                            next_query = deliver_continuation_reply(
+                                messages, transcript, elog, aid, reply, human=True)
                             requery = True
                             break
                         elif (self._handoff_requested or self._steer_requested
@@ -2464,12 +2460,9 @@ class ClaudeCodeAgentRunner:
                                     "message": "runner cancelled by interrupt",
                                 }}
                                 return
-                            user_msg = Message(
-                                role="user", content=(TextBlock(text=next_text),),
-                            )
-                            messages.append(user_msg)
-                            transcript.append(user_msg)
-                            elog.append_user_message(agent_id=aid, message=user_msg, human=human)
+                            next_query = deliver_continuation_reply(
+                                messages, transcript, elog, aid, next_text,
+                                human=human)
                             # Turn boundary: this is the only point where THIS
                             # runner sets up the next SDK query (the SDK owns the
                             # in-query tool loop). Deliver any queued human
@@ -2478,7 +2471,6 @@ class ClaudeCodeAgentRunner:
                             # SDK actually sees it on this re-query. Reached only
                             # after the turn's tool results are flushed, so no
                             # subagent is mid-dispatch — S4 holds.
-                            next_query = next_text
                             interject_msg = _drain_interject_message(
                                 invocation.coordinator, elog, aid)
                             if interject_msg is not None:
@@ -2492,7 +2484,7 @@ class ClaudeCodeAgentRunner:
                                 elog.append(
                                     agent_id=aid, type="user_interjected",
                                     payload={"text": _text_of(interject_msg)})
-                                next_query = f"{next_text}\n\n{_text_of(interject_msg)}"
+                                next_query = f"{next_query}\n\n{_text_of(interject_msg)}"
                             # Re-query on a FRESH receive_response() (issue 7):
                             # break the inner loop so the outer while restarts.
                             requery = True

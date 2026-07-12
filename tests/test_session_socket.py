@@ -10,10 +10,12 @@ from anyio.streams.buffered import BufferedByteReceiveStream
 
 from imp.remote.session.protocol import (
     Attach,
+    SkillRequest,
     encode_attach,
     encode_control,
     encode_input,
     encode_set_lease,
+    encode_skill_request,
     parse_event,
 )
 from imp.remote.session.socket_server import SessionSocket, _Client
@@ -339,5 +341,34 @@ async def test_set_lease_frame_mutates_only_issuing_client(tmp_path: Path) -> No
         assert len(changes) == 2   # on_lease_change fired once per live lease mutation
         await a.aclose()
         await b.aclose()
+        await session.close()
+        tg.cancel_scope.cancel()
+
+
+@pytest.mark.anyio
+async def test_open_gate_resolves_to_a_skill_request(tmp_path: Path) -> None:
+    sock = str(tmp_path / "s.sock")
+    session = SessionSocket(sock)
+    async with anyio.create_task_group() as tg:
+        await session.open()
+        tg.start_soon(session.serve)
+        client = await _attach(sock, "c1")
+        with anyio.fail_after(5):
+            while session.attached_count != 1:
+                await anyio.sleep(0.02)
+        got: list[object] = []
+
+        async def _gate() -> None:
+            got.append(await session.next_input())
+
+        tg.start_soon(_gate)
+        await anyio.sleep(0.05)
+        await client.send(
+            (encode_skill_request("refactor", "src/foo.py") + "\n").encode())
+        with anyio.fail_after(5):
+            while not got:
+                await anyio.sleep(0.02)
+        assert got == [SkillRequest("refactor", "src/foo.py")]
+        await client.aclose()
         await session.close()
         tg.cancel_scope.cancel()

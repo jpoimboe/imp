@@ -20,6 +20,7 @@ SEND_TO_LLM resume path has a balanced transcript.
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -72,6 +73,17 @@ RESUME_REDO_NUDGE = (
     "superseded; re-run the step from the current state and call complete_step "
     "when the work is done."
 )
+
+
+@dataclass(frozen=True, slots=True)
+class SkillReply:
+    """A daemon-resolved human skill load: the command line the human typed, the
+    skill name, and the already-loaded body (body + trailing args). Distinct from
+    the wire frame SkillRequest — this carries the LOADED body back through the
+    continuation contract to the delivery helper."""
+    command: str
+    name: str
+    body: str
 
 
 class Transcript:
@@ -372,6 +384,52 @@ def deliver_reply_on_resume(
     transcript.append(injected)
     elog.append_user_message(agent_id=agent_id, message=injected, human=human)
     return injected
+
+
+def deliver_continuation_reply(
+    messages: list[Message] | None,
+    transcript: Transcript | None,
+    elog: EventLog,
+    agent_id: str,
+    reply: str | SkillReply,
+    *,
+    human: bool,
+) -> str:
+    """Deliver a bare-turn-end / resume continuation reply as the next user turn.
+
+    A plain str reply journals a single human=<human> user_message and appends it
+    to messages/transcript. A SkillReply journals the command user_message
+    (event-only, human=true, step agent_id) + a skill_load(source="human") event +
+    the human=false body user_message, appending ONLY the body — so the command
+    provenance renders `>` and consumes the awaiting-reply arm while the body
+    lands non-interactive (dropped in lean, `injected message:` under --full).
+
+    Returns the text that drives the next agent turn: the body for a SkillReply,
+    the reply text otherwise. messages/transcript are None for codex's
+    string-prompt model, which keeps no message-list transcript here.
+    """
+    if isinstance(reply, SkillReply):
+        command_msg = Message(
+            role="user", content=(TextBlock(text=reply.command),))
+        elog.append_user_message(
+            agent_id=agent_id, message=command_msg, human=True)
+        elog.append(agent_id=None, type="skill_load",
+                    payload={"name": reply.name, "source": "human"})
+        body_msg = Message(role="user", content=(TextBlock(text=reply.body),))
+        if messages is not None:
+            messages.append(body_msg)
+        if transcript is not None:
+            transcript.append(body_msg)
+        elog.append_user_message(
+            agent_id=agent_id, message=body_msg, human=False)
+        return reply.body
+    msg = Message(role="user", content=(TextBlock(text=reply),))
+    if messages is not None:
+        messages.append(msg)
+    if transcript is not None:
+        transcript.append(msg)
+    elog.append_user_message(agent_id=agent_id, message=msg, human=human)
+    return reply
 
 
 def deliver_engine_continuation(

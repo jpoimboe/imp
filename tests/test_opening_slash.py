@@ -273,3 +273,15 @@ async def test_opening_toolbar_id_only_when_title_empty() -> None:
     assert line == "add oauth"
     assert prompt.toolbar is not None          # empty title still paints the id bar
     assert "lufu50" in prompt.toolbar
+
+
+@pytest.mark.anyio
+async def test_opening_prompt_skill_name_loads_body_as_message(
+    tmp_path: Path,
+) -> None:
+    quest = _fake_change(tmp_path)
+    (quest.workflow_dir / "skills" / "user" / "refactor.md").write_text(
+        "# Refactor\nstep one\n")
+    line = await main._read_intent_line(
+        _QueuePrompt(["/refactor src/foo.py"]), quest, color=False, width=80)
+    assert line == "# Refactor\nstep one\n\nsrc/foo.py\n"

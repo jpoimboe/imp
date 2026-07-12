@@ -10,6 +10,7 @@ from typing import Any
 
 import anyio
 
+from imp.agents.skills import load_user_skill
 from imp.engine.abandon import (
     archive_conversation,
     discard_conversation,
@@ -117,6 +118,8 @@ async def serve_quest_session(
         events_path=quest.events_path,
         on_first_attach=_on_first_attach,
         first_attach_timeout=first_attach_timeout,
+        skill_loader=lambda name: load_user_skill(
+            quest.workflow_dir / "skills", name),
     )
 
     async def _bound(*, on_event: Any, user_chat_input_fn: Any) -> Any:

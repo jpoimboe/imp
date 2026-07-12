@@ -28,6 +28,7 @@ from typing import Any, NamedTuple, NoReturn
 import anyio
 
 from imp import __version__
+from imp.agents.skills import load_user_skill
 from imp.cli import palette as pal
 from imp.cli import quest_row, resume_select, splash
 from imp.cli.inert_resume import (
@@ -71,6 +72,7 @@ from imp.providers.config import (
     validate_workflow_name,
 )
 from imp.remote.daemon.directory import session_is_resident
+from imp.remote.session.protocol import SkillRequest
 
 
 class ReplyInterjectRouter:
@@ -690,6 +692,12 @@ async def _read_intent_line(
     while True:
         line = await ask_line_with_slash(
             prompt, None, quest, color=color, width=width, hint=OPENING_HINT)
+        if isinstance(line, SkillRequest):
+            # Opening prompt is pre-session: no daemon gate exists yet, so the
+            # skill body is loaded here and becomes the opening message.
+            body = load_user_skill(quest.workflow_dir / "skills", line.name)
+            return (
+                f"{body.rstrip()}\n\n{line.args}\n" if line.args else body)
         if line.strip().startswith("/model "):
             if model_sink is not None:
                 model_sink["model"] = line.strip()[len("/model "):].strip()

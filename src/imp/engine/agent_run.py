@@ -26,7 +26,7 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass, replace
 from datetime import date
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import anyio
 
@@ -50,6 +50,9 @@ from imp.engine.completion import (
 )
 from imp.engine.env import TestGates
 from imp.engine.types import AgentDef, OutputField
+
+if TYPE_CHECKING:
+    from imp.agents.transcript import SkillReply
 
 # Injected into the system prompt of every agent that has the `bash` tool (see
 # build_agent_invocation). This is a PROPERTY OF HOLDING `bash`, not something
@@ -403,14 +406,14 @@ _CONTINUATION_NUDGE = (
 
 async def _resolve_wait_reply(
     coordinator: Any,
-    user_input_fn: Callable[[str], str | Awaitable[str]],
+    user_input_fn: Callable[[str], str | SkillReply | Awaitable[str | SkillReply]],
     resume_should_continue: bool = False,
     *,
     elog: Any,
     agent_id: str,
     pending_reply: str | None = None,
     last_agent_message: str = "",
-) -> tuple[str, str]:
+) -> tuple[str | SkillReply, str]:
     """Satisfy a bare-turn-end / AWAITING_USER yield on resume, returning
     (reply, source) where source is
     'interject' | 'pending_reply' | 'nudge' | 'solicited'.
@@ -455,7 +458,7 @@ async def _resolve_wait_reply(
         finally:
             if coordinator is not None:
                 coordinator.end_solicit_watchdog()
-    return str(raw), "solicited"
+    return raw, "solicited"
 
 
 def drain_all_interjects_at_resume(

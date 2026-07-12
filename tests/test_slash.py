@@ -1,13 +1,13 @@
 # tests/test_slash.py
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import anyio
 import pytest
 
 from imp.cli.slash import REPROMPT, handle_slash_line, is_slash_command
+from imp.remote.session.protocol import SkillRequest
 
 
 class _FakeChange:
@@ -36,26 +36,13 @@ def test_is_slash_command() -> None:
     assert not is_slash_command("")
 
 
-def test_name_loads_body_and_emits_event(tmp_path: Path) -> None:
+def test_name_returns_skill_request_and_emits_no_event(tmp_path: Path) -> None:
     quest = _FakeChange(tmp_path)
     out: list[str] = []
     result = handle_slash_line("/refactor", quest=quest, output_fn=out.append)
-    assert result == "# Refactor\nstep one\n"
-    events = [json.loads(line) for line in quest._events.read_text().splitlines()]
-    loads = [e for e in events if e["type"] == "skill_load"]
-    assert loads[0]["payload"] == {"name": "refactor", "source": "human"}
-    assert loads[0]["agent_id"] is None
-
-
-def test_successful_skill_load_emits_no_caret_echo(tmp_path: Path) -> None:
-    # The /<name> skill-load path returns the body to be submitted as ordinary
-    # input; unlike the reprompt builtins it must NOT print a caret echo (the
-    # live driver's local_echo renders the submitted line instead). Guards
-    # against a stray _echo_command creeping onto the skill-load branch.
-    quest = _FakeChange(tmp_path)
-    out: list[str] = []
-    result = handle_slash_line("/refactor", quest=quest, output_fn=out.append)
-    assert result == "# Refactor\nstep one\n"
+    assert result == SkillRequest("refactor", "")
+    # No client-side skill file read and no client-side skill_load event.
+    assert not quest._events.exists() or quest._events.read_text() == ""
     assert out == []
 
 
@@ -179,49 +166,29 @@ def test_ask_line_with_slash_loops_on_help_then_returns(tmp_path: Path) -> None:
     assert line == "real input"
 
 
-def test_ask_line_with_slash_returns_skill_body(tmp_path: Path) -> None:
+def test_ask_line_with_slash_returns_skill_request(tmp_path: Path) -> None:
     from imp.cli.slash import ask_line_with_slash
     quest = _FakeChange(tmp_path)
-    prompt = _FakePrompt(["/refactor"])
+    prompt = _FakePrompt(["/refactor src/foo.py"])
     line = anyio.run(ask_line_with_slash, prompt, _NullStatus(), quest)
-    assert line == "# Refactor\nstep one\n"
+    assert line == SkillRequest("refactor", "src/foo.py")
 
 
-def test_skill_args_appended_after_body(tmp_path: Path) -> None:
-    # `/refactor src/foo.py` loads skill `refactor` and appends the argument
-    # text after the body, separated by a blank line.
+def test_skill_args_ride_the_skill_request(tmp_path: Path) -> None:
     quest = _FakeChange(tmp_path)
     out: list[str] = []
     result = handle_slash_line(
-        "/refactor src/foo.py", quest=quest, output_fn=out.append
-    )
-    assert result == "# Refactor\nstep one\n\nsrc/foo.py\n"
+        "/refactor src/foo.py", quest=quest, output_fn=out.append)
+    assert result == SkillRequest("refactor", "src/foo.py")
 
 
 def test_skill_args_preserve_internal_spacing_strip_edges(tmp_path: Path) -> None:
     quest = _FakeChange(tmp_path)
     out: list[str] = []
     result = handle_slash_line(
-        "/refactor   keep  this   ", quest=quest, output_fn=out.append
-    )
-    assert result == "# Refactor\nstep one\n\nkeep  this\n"
-
-
-def test_skill_without_args_returns_body_unchanged(tmp_path: Path) -> None:
-    quest = _FakeChange(tmp_path)
-    out: list[str] = []
-    result = handle_slash_line("/refactor", quest=quest, output_fn=out.append)
-    assert result == "# Refactor\nstep one\n"
-
-
-def test_skill_args_event_still_records_name_only(tmp_path: Path) -> None:
-    # The attribution event stays {name, source}; the argument rides the
-    # returned user message, not the event payload.
-    quest = _FakeChange(tmp_path)
-    handle_slash_line("/refactor src/foo.py", quest=quest, output_fn=[].append)
-    events = [json.loads(line) for line in quest._events.read_text().splitlines()]
-    loads = [e for e in events if e["type"] == "skill_load"]
-    assert loads[0]["payload"] == {"name": "refactor", "source": "human"}
+        "/refactor   keep  this   ", quest=quest, output_fn=out.append)
+    assert result == SkillRequest("refactor", "keep  this")
+    assert out == []
 
 
 def test_exit_and_quit_words_request_save_and_exit(tmp_path: Path) -> None:

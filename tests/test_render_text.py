@@ -2434,6 +2434,22 @@ def test_stale_awaiting_reply_disarmed_at_step_boundary_drops_next_kickoff() -> 
     assert um.interactive is False
 
 
+def test_engine_continuation_renders_injected_message_in_full_only() -> None:
+    # AC-10: engine continuation is invisible in lean/live, `injected message:` under --full.
+    events = [
+        _ev("1", "step_started", step="a", kind="agent", phase="p", model="m"),
+        _ev("2", "engine_continuation", agent_id="step:p/a",
+            text="continue from where you left off"),
+    ]
+    tree = nv.build_tree(events)
+    lean = "\n".join(render_tree(tree, full=False, color=False, width=80))
+    full = "\n".join(render_tree(tree, full=True, color=False, width=80))
+    assert "continue from where you left off" not in lean
+    assert "injected message:" not in lean
+    assert "injected message:" in full
+    assert "continue from where you left off" in full
+
+
 def test_begin_kickoff_never_replays_as_human_turn_from_events_jsonl(tmp_path) -> None:
     # D1 (persist + imp log replay): the same scenario persisted to a real
     # events.jsonl and replayed the way `imp log` reads it (line-delimited JSON).

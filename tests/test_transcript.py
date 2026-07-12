@@ -8,8 +8,10 @@ from imp.agents.runner import Message, TextBlock, ToolResultBlock, ToolUseBlock
 from imp.agents.transcript import (
     RESUME_DURABILITY_NOTE,
     REWORK_RESULT_FRAME,
+    SkillReply,
     Transcript,
     balance_success_on_resume,
+    deliver_continuation_reply,
     deliver_engine_continuation,
     deliver_reply_on_resume,
     repair_dangling_tool_use_on_resume,
@@ -736,3 +738,83 @@ def test_repair_keeps_note_when_captured_result_is_error(tmp_path: Path) -> None
     # ...but because it is error-shaped, the durability note is retained.
     texts = [b.text for b in msgs[-1].content if isinstance(b, TextBlock)]
     assert RESUME_DURABILITY_NOTE in texts
+
+
+class _FakeElog:
+    def __init__(self) -> None:
+        self.events: list[tuple] = []
+
+    def append_user_message(self, *, agent_id, message, human):
+        self.events.append(
+            ("user_message", agent_id, message.content[0].text, human))
+
+    def append(self, *, agent_id, type, payload):
+        self.events.append((type, agent_id, payload))
+
+
+class _FakeTranscript:
+    def __init__(self) -> None:
+        self.msgs: list = []
+
+    def append(self, m) -> None:
+        self.msgs.append(m)
+
+
+def test_deliver_continuation_reply_plain_appends_and_journals_human() -> None:
+    elog = _FakeElog()
+    messages: list = []
+    tr = _FakeTranscript()
+    out = deliver_continuation_reply(
+        messages, tr, elog, "step:coder", "hello", human=True)
+    assert out == "hello"
+    assert elog.events == [("user_message", "step:coder", "hello", True)]
+    assert [m.content[0].text for m in messages] == ["hello"]
+    assert [m.content[0].text for m in tr.msgs] == ["hello"]
+
+
+def test_deliver_continuation_reply_skill_journals_command_load_body_in_order(
+) -> None:
+    elog = _FakeElog()
+    messages: list = []
+    tr = _FakeTranscript()
+    reply = SkillReply(
+        command="/refactor src/foo.py", name="refactor",
+        body="BODY\n\nsrc/foo.py\n")
+    out = deliver_continuation_reply(
+        messages, tr, elog, "step:coder", reply, human=True)
+    # Returns the body (drives the next turn), not the command line.
+    assert out == "BODY\n\nsrc/foo.py\n"
+    # AC-4 ordering: command user_message (human), then skill_load, then body.
+    assert elog.events == [
+        ("user_message", "step:coder", "/refactor src/foo.py", True),
+        ("skill_load", None, {"name": "refactor", "source": "human"}),
+        ("user_message", "step:coder", "BODY\n\nsrc/foo.py\n", False),
+    ]
+    # The command is event-only: only the body is appended to messages/transcript.
+    assert [m.content[0].text for m in messages] == ["BODY\n\nsrc/foo.py\n"]
+    assert [m.content[0].text for m in tr.msgs] == ["BODY\n\nsrc/foo.py\n"]
+
+
+def test_deliver_continuation_reply_string_model_skips_append() -> None:
+    # codex's string-prompt model passes messages=None, transcript=None:
+    # it journals but keeps no message-list transcript here.
+    elog = _FakeElog()
+    out = deliver_continuation_reply(
+        None, None, elog, "step:coder", "hello", human=False)
+    assert out == "hello"
+    assert elog.events == [("user_message", "step:coder", "hello", False)]
+
+
+def test_deliver_continuation_reply_skill_string_model_skips_append() -> None:
+    elog = _FakeElog()
+    reply = SkillReply(
+        command="/refactor src/foo.py", name="refactor",
+        body="BODY\n\nsrc/foo.py\n")
+    out = deliver_continuation_reply(
+        None, None, elog, "step:coder", reply, human=True)
+    assert out == "BODY\n\nsrc/foo.py\n"
+    assert elog.events == [
+        ("user_message", "step:coder", "/refactor src/foo.py", True),
+        ("skill_load", None, {"name": "refactor", "source": "human"}),
+        ("user_message", "step:coder", "BODY\n\nsrc/foo.py\n", False),
+    ]

@@ -12,12 +12,13 @@ from typing import Any
 import anyio
 import pytest
 
+from imp.agents.transcript import SkillReply
 from imp.cli.session_terminal import run_terminal_client
 from imp.cli.signals import InterruptCoordinator
 from imp.cli.terminal_title import GLYPH_BUSY, GLYPH_IDLE, TerminalTitle
 from imp.engine.quest import Quest
 from imp.remote.session.client import SessionClient
-from imp.remote.session.protocol import encode_attach, encode_input
+from imp.remote.session.protocol import SkillRequest, encode_attach, encode_input
 from imp.remote.session.server import SessionServer
 from imp.remote.session.socket_server import SessionSocket
 from tests.conftest import _seed_control
@@ -2308,3 +2309,58 @@ async def test_save_disposition_leave_sends_reason_on_the_frame(tmp_path: Path) 
             assert actions == [("save", "ctrl-d")]
             await server.close()
             tg.cancel_scope.cancel()
+
+
+@pytest.mark.anyio
+async def test_skill_request_is_routed_and_command_line_echoed(
+    tmp_path: Path,
+) -> None:
+    sock = str(tmp_path / "s.sock")
+    server = SessionServer(sock, hibernate=False, skill_loader=lambda name: "BODY")
+    captured: list[object] = []
+
+    async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> object:
+        with anyio.fail_after(5):
+            while server.attached_count == 0:
+                await server.wait_for_attach_change()
+        on_event({"type": "awaiting_user_input", "payload": {"prompt": "reply?"}})
+        reply = await user_chat_input_fn("reply?")
+        captured.append(reply)
+        return reply
+
+    coord = InterruptCoordinator()
+
+    async def _attach(
+        on_event: Callable[[dict[str, Any]], None],
+    ) -> SessionClient:
+        client = SessionClient(sock, "c1", "T", on_event=on_event)
+        await client.connect()
+        return client
+
+    async def _solicit(_prompt: str) -> SkillRequest:
+        return SkillRequest("refactor", "src/foo.py")
+
+    echoed: list[str] = []
+
+    class _Driver:
+        def on_event(self, _event: dict[str, Any]) -> None: ...
+        def finish(self) -> None: ...
+        def append_committed_reply(self, _text: str) -> None: ...
+
+    with anyio.fail_after(10):
+        async with anyio.create_task_group() as tg:
+            await server.open()
+            tg.start_soon(server.serve, run_fn)
+
+            async def _client() -> None:
+                await run_terminal_client(
+                    attach=_attach, driver=_Driver(),
+                    coord=coord, solicit=_solicit, quest_id="c1",
+                    local_echo=echoed.append)
+
+            tg.start_soon(_client)
+
+    assert captured == [SkillReply(
+        command="/refactor src/foo.py", name="refactor",
+        body="BODY\n\nsrc/foo.py\n")]
+    assert echoed == ["/refactor src/foo.py"]

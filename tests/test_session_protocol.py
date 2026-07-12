@@ -12,11 +12,13 @@ from imp.remote.session.protocol import (
     Control,
     Input,
     SetLease,
+    SkillRequest,
     encode_attach,
     encode_control,
     encode_event,
     encode_input,
     encode_set_lease,
+    encode_skill_request,
     parse_client_message,
     parse_event,
 )
@@ -187,6 +189,22 @@ def test_interrupt_force_control_round_trips() -> None:
     line = encode_control(CONTROL_INTERRUPT_FORCE)
     msg = parse_client_message(line)
     assert msg == Control(action="interrupt-force", reason=None)
+
+
+def test_encode_skill_request_is_single_line_kind_tagged_json() -> None:
+    line = encode_skill_request("refactor", "src/foo.py")
+    assert "\n" not in line
+    assert json.loads(line) == {
+        "kind": "skill", "name": "refactor", "args": "src/foo.py"}
+
+
+def test_parse_client_message_recovers_skill_request() -> None:
+    assert parse_client_message(
+        encode_skill_request("refactor", "src/foo.py")
+    ) == SkillRequest("refactor", "src/foo.py")
+    assert parse_client_message(
+        encode_skill_request("debug", "")
+    ) == SkillRequest("debug", "")
 
 
 def test_set_model_control_round_trips() -> None:
