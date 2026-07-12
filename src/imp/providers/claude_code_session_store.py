@@ -1,6 +1,6 @@
 """imp-backed claude_code SessionStore adapter (design §1).
 
-Persists claude-p session entries under the change so a resumed step can drive
+Persists claude-p session entries under the quest so a resumed step can drive
 claude-p's NATIVE session resume from imp-owned bytes — never from
 ~/.claude/projects/. One JSONL per SessionKey under
 `.imp/quests/<id>/steps/<step>/claude_session/`; subagent transcripts ride

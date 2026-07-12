@@ -972,7 +972,7 @@ def _stream_history(messages: list[Message]) -> Any:
     fragments back into one message per logical turn before replay. This applies
     to BOTH roles: an interrupted turn can leave consecutive *user* messages too
     (a tool_result, then claude-p's "[Request interrupted by user]" marker, then
-    imp's complete_step nudge — see change 2026-06-06-06x3ml), and replaying
+    imp's complete_step nudge — see quest 2026-06-06-06x3ml), and replaying
     three user turns in a row trips the same 400.
 
     Drop empty assistant content (thinking-only fragments after we extracted

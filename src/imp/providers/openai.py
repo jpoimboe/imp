@@ -404,10 +404,10 @@ _CACHE_KEY_HASH_LEN = 8    # hex chars of disambiguating digest
 def _prompt_cache_key(quest_id: str, aid: str) -> str:
     """OpenAI routing/affinity hint, bounded to the 64-char API limit.
 
-    Stable per (change, agent) invocation; distinct per change and per
+    Stable per (quest, agent) invocation; distinct per quest and per
     agent. Keys that fit are passed through verbatim. Over-long keys keep
-    the whole aid (the within-change discriminator one greps for) and the
-    quest_id head (the cross-change discriminator), then append a hash of the
+    the whole aid (the within-quest discriminator one greps for) and the
+    quest_id head (the cross-quest discriminator), then append a hash of the
     *full* quest_id:aid so distinctness on both survives truncation.
     """
     full = f"{quest_id}:{aid}"
