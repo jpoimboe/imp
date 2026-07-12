@@ -91,7 +91,7 @@ def test_rotation_leaves_the_frozen_journal_label_untouched(monkeypatch) -> None
     b.add(_prose("4"))
     step = b._step_stack[-1]
     assert step.rotated_phrase == "rot2"   # live phrase advanced past the seed
-    assert step.label == "frozen0"         # the seeded step label — rotation advances the phrase, not label
+    assert step.label == "frozen0"         # seeded label, untouched by phrase rotation
 
 
 def test_step_without_rotate_phrase_keeps_its_label(monkeypatch) -> None:
