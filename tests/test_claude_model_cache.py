@@ -25,11 +25,8 @@ def test_reads_options_from_config_dir(tmp_path, monkeypatch) -> None:
     })
     opts = read_claude_model_options()
     assert opts == [
-        ClaudeModelOption(
-            value="claude-fable-5[1m]", label="Fable 5",
-            description="Most capable for your hardest tasks"),
-        ClaudeModelOption(
-            value="claude-opus-4-8[1m]", label="Opus 4.8", description=None),
+        ClaudeModelOption(value="claude-fable-5[1m]"),
+        ClaudeModelOption(value="claude-opus-4-8[1m]"),
     ]
 
 
@@ -67,16 +64,14 @@ def test_skips_entries_without_a_string_value(tmp_path, monkeypatch) -> None:
             {"value": "keep-me"},
         ],
     })
-    assert read_claude_model_options() == [
-        ClaudeModelOption(value="keep-me", label=None, description=None)]
+    assert read_claude_model_options() == [ClaudeModelOption(value="keep-me")]
 
 
-def test_non_string_label_and_description_degrade_to_none(tmp_path, monkeypatch) -> None:
+def test_extra_keys_are_ignored(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path))
     _write_cache(tmp_path, {
         "additionalModelOptionsCache": [
-            {"value": "keep", "label": 42, "description": ["a", "b"]},
+            {"value": "keep", "label": "Ignored", "description": "Ignored too"},
         ],
     })
-    assert read_claude_model_options() == [
-        ClaudeModelOption(value="keep", label=None, description=None)]
+    assert read_claude_model_options() == [ClaudeModelOption(value="keep")]
