@@ -1017,16 +1017,21 @@ def test_spiker_prose_is_empirical_findings_only_and_parks_artifact() -> None:
     assert "{{ quest.home }}/artifacts/spike/" in text
 
 
-def test_spiker_prose_documents_writable_ephemeral_home() -> None:
+def test_spiker_prose_documents_copy_on_write_home() -> None:
     from imp.assets import bundled_workflow_dir
     text = (bundled_workflow_dir("imp") / "agents" / "spiker.md").read_text()
     # Collapse all whitespace (incl. the prose's hard-wrap newlines) to single
     # spaces so the asserted phrases match regardless of where lines wrap.
     low = " ".join(text.split()).lower()
-    assert "home directory is a fresh, writable scratch space" in low
-    assert "set a global git identity" in low
-    assert "thrown away with the worktree" in low
-    assert "the real home is never touched" in low
+    # AC 14: the copy-on-write real-home model — real toolchains/creds visible,
+    # writes captured then discarded — replaces the deleted tmpfs scratch home.
+    assert "copy-on-write" in low
+    assert "model credentials are all visible" in low   # AC5: real creds visible
+    assert "discarded when the worktree is torn down" in low
+    assert "the real home is never mutated" in low
+    # the deleted tmpfs framing is gone.
+    assert "fresh, writable scratch space" not in low
+    assert "thrown away with the worktree" not in low
     assert "imp_" not in low
     assert "imp-on-imp" not in low
 
