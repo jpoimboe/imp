@@ -2654,6 +2654,24 @@ def test_step_started_payload_carries_command_only_for_script() -> None:
     assert "command" not in _step_started_payload(agent, state)
 
 
+def test_step_started_payload_prefers_route_label_for_label() -> None:
+    from imp.engine.executor import _step_started_payload
+    from imp.engine.types import Pause, SourceLoc, Step
+    loc = SourceLoc(file=Path("w.yaml"), line=1)
+    step = Step(name="task-lead", phase="code", kind="agent", rules=(),
+                on_max_retries=Pause(), max_loops=1, source=loc, label="task 1/6")
+    # An entering labeled edge (route_label set) reflects WHY we entered, both as
+    # the status label and as the scrollback route reason.
+    state = State(id="t", step=None, step_attempt=0, status="running")
+    state.route_label = "fixing test failures"
+    payload = _step_started_payload(step, state)
+    assert payload["label"] == "fixing test failures"
+    assert payload["route_label"] == "fixing test failures"
+    # No entering edge label -> fall back to the step's own template label.
+    plain = State(id="t", step=None, step_attempt=0, status="running")
+    assert _step_started_payload(step, plain)["label"] == "task 1/6"
+
+
 @pytest.mark.anyio
 async def test_executor_passes_autonomous_to_prompt(tmp_path: Path) -> None:
     wf = tmp_path / "imp" / "workflows" / "imp"
@@ -3460,3 +3478,85 @@ async def test_complete_clears_phase_label(tmp_path: Path) -> None:
     state = State.load(quest.state_dir)
     assert state.step is None
     assert state.phase_label is None
+
+
+@pytest.mark.anyio
+async def test_route_label_seeds_step_label_on_continue(tmp_path: Path) -> None:
+    """A labeled continue rule seeds state.step_label from route_label, not from the
+    target step's own label.  If `state.route_label or` were removed from the Continue
+    block, state.step_label would be "second gate", not "fixing test failures"."""
+    wf = tmp_path / "imp" / "workflows" / "imp"
+    (wf / "agents").mkdir(parents=True)
+    (wf / "agents" / "writer.md").write_text(
+        "---\nname: writer\ntools: [complete_step]\n"
+        "output:\n  status: {type: enum, values: [Success, Error]}\n---\ngo\n"
+    )
+    (wf / "workflow.yaml").write_text(
+        "name: t\ndescription: t\n"
+        "defaults: {max_retries: 1, max_loops: 6}\n"
+        "phases:\n"
+        "  - name: only\n"
+        "    steps:\n"
+        "      - name: w\n"
+        "        file: agents/writer.md\n"
+        "        label: writing the thing\n"
+        "        tier: low\n"
+        "        rules:\n"
+        "          - {else: true, continue: true, label: \"fixing test failures\"}\n"
+        "      - name: check\n"
+        "        label: second gate\n"
+        "        file: agents/writer.md\n"
+        "        tier: low\n"
+        "        rules:\n"
+        "          - {else: true, pause: true}\n"
+    )
+    _write_fake_config(tmp_path)
+    quest = _make_change(tmp_path)
+    _register_fake({"status": "Success"})
+
+    result = await run_quest(quest, on_event=lambda _e: None)
+    assert result is RunResult.PAUSED
+    state = State.load(quest.state_dir)
+    assert state.step == "check"
+    assert state.step_label == "fixing test failures"   # route_label wins over "second gate"
+
+
+@pytest.mark.anyio
+async def test_route_label_seeds_step_label_on_goto(tmp_path: Path) -> None:
+    """A labeled goto rule seeds state.step_label from route_label, not from the
+    target step's own label.  If `state.route_label or` were removed from the Goto
+    block, state.step_label would be "destination step", not "fixing test failures"."""
+    wf = tmp_path / "imp" / "workflows" / "imp"
+    (wf / "agents").mkdir(parents=True)
+    (wf / "agents" / "writer.md").write_text(
+        "---\nname: writer\ntools: [complete_step]\n"
+        "output:\n  status: {type: enum, values: [Success, Error]}\n---\ngo\n"
+    )
+    (wf / "workflow.yaml").write_text(
+        "name: t\ndescription: t\n"
+        "defaults: {max_retries: 1, max_loops: 6}\n"
+        "phases:\n"
+        "  - name: only\n"
+        "    steps:\n"
+        "      - name: src\n"
+        "        label: source step\n"
+        "        file: agents/writer.md\n"
+        "        tier: low\n"
+        "        rules:\n"
+        "          - {else: true, goto: dst, label: \"fixing test failures\"}\n"
+        "      - name: dst\n"
+        "        label: destination step\n"
+        "        file: agents/writer.md\n"
+        "        tier: low\n"
+        "        rules:\n"
+        "          - {else: true, pause: true}\n"
+    )
+    _write_fake_config(tmp_path)
+    quest = _make_change(tmp_path)
+    _register_fake({"status": "Success"})
+
+    result = await run_quest(quest, on_event=lambda _e: None)
+    assert result is RunResult.PAUSED
+    state = State.load(quest.state_dir)
+    assert state.step == "dst"
+    assert state.step_label == "fixing test failures"   # route_label wins over "destination step"

@@ -495,7 +495,8 @@ async def run_quest(
                     return _complete_or_park(quest, state, log, coordinator)
                 state.step = flat[nxt].name
                 state.step_label = (
-                    render_label(flat[nxt].label, quest, log, state)
+                    state.route_label
+                    or render_label(flat[nxt].label, quest, log, state)
                     or flat[nxt].name
                 )
                 state.phase_label = (
@@ -527,7 +528,8 @@ async def run_quest(
                     state.loop_counts.pop(step.name, None)       # forward goto resets
                 state.step = flat[target_idx].name
                 state.step_label = (
-                    render_label(flat[target_idx].label, quest, log, state)
+                    state.route_label
+                    or render_label(flat[target_idx].label, quest, log, state)
                     or flat[target_idx].name
                 )
                 state.phase_label = (
@@ -769,7 +771,7 @@ def _step_started_payload(
     payload = {"step": step.name, "kind": step.kind, "phase": step.phase,
                "show_label": step.show_label,
                "show_output": step.show_output,
-               "label": render_label(step.label, quest, log, state)}
+               "label": state.route_label or render_label(step.label, quest, log, state)}
     rotate = step.rotate_phrase if step.rotate_phrase is not None else step.interactive
     if rotate:
         payload["rotate_phrase"] = True

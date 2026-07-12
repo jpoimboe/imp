@@ -160,7 +160,7 @@ phases:
         rules:
           - {if: {exit: 0}, continue: true}
           - {if: {exit: 124}, pause: true}
-          - {else: true, resume: task-lead}
+          - {else: true, resume: task-lead, label: "fixing test failures"}
 
       # Routing-only branch. After a plan's tasks settle:
       #  - a converge/finalize rework (coverage_settled latched) -> change-review (re-review, never re-gap-check);

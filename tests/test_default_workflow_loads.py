@@ -179,6 +179,8 @@ def test_route_labels_assigned() -> None:
     assert by["plan-reviewer"].rules[2].label == "addressing plan review feedback"
     # batch-code-reviewer task_gap -> task-lead
     assert by["change-review"].rules[0].label == "addressing code review feedback"
+    # verify gate fallthrough resumes task-lead with the fix reason
+    assert by["verify"].rules[2].label == "fixing test failures"
     # finalize: merge label + rework label
     assert by["finalize"].rules[0].label == "preparing to merge"
     assert by["finalize"].rules[1].label == "addressing review feedback"
