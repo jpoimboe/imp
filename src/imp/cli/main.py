@@ -1373,6 +1373,24 @@ def _user_message_text(payload: dict[str, Any]) -> str:
         if isinstance(b, dict) and b.get("type") == "text")
 
 
+def _prompt_history_lines(
+    seed_opening: str | None, events: Iterable[dict[str, Any]],
+) -> list[str]:
+    lines: list[str] = []
+    if seed_opening and seed_opening.strip():
+        lines.append(seed_opening)
+    for ev in events:
+        if ev.get("type") != "user_message":
+            continue
+        payload = ev.get("payload") or {}
+        if payload.get("human") is not True:
+            continue
+        text = _user_message_text(payload)
+        if text.strip():
+            lines.append(text)
+    return lines
+
+
 def _first_user_message(events: list[dict[str, Any]]) -> str | None:
     for ev in events:
         if ev.get("type") == "user_message":
