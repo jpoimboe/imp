@@ -36,6 +36,16 @@ def _plain_agent(name: str) -> AgentDef:
         prompt_template_source="hi", source_path=Path("a.md"), source=_SRC)
 
 
+def _active_home_policy(home: str = "/home/u"):
+    from imp.engine.sandbox import SandboxPolicy
+    return SandboxPolicy(
+        active=True, worktree="/wt", git_common_dir="/ctl/.git",
+        git_ro_remask=(), writable_caches=(), extra_readable=(),
+        extra_writable=(), secret_dirs=(), secret_files=(), setenv=(),
+        network=True, home=home,
+    )
+
+
 class _FakeRunner:
     def __init__(self, events, *, on_run=None, capture=None):
         self._events = events
@@ -90,6 +100,7 @@ def test_isolated_dispatch_runs_in_throwaway_with_distinct_policy(
     # fake runner never actually spawns a sandboxed shell, so the policy is
     # inspected as pure data.
     monkeypatch.setattr("imp.engine.sandbox.sandbox_available", lambda: True)
+    monkeypatch.setattr("imp.engine.sandbox.overlay_available", lambda _b: False)
     quest = _make_change(tmp_path)
     capture: dict = {}
     ctx = _ctx(tmp_path, quest, name="prober", agent=_isolated_agent("prober"),
@@ -117,6 +128,7 @@ def test_isolated_dispatch_runs_in_throwaway_with_distinct_policy(
 def test_isolated_dispatch_parks_artifact_surviving_teardown(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("imp.engine.sandbox.sandbox_available", lambda: True)
+    monkeypatch.setattr("imp.engine.sandbox.overlay_available", lambda _b: False)
     quest = _make_change(tmp_path)
 
     seen: dict = {}
@@ -149,6 +161,7 @@ def test_isolated_dispatch_tears_down_on_error(
     import imp.engine.worktree as wtmod
 
     monkeypatch.setattr("imp.engine.sandbox.sandbox_available", lambda: True)
+    monkeypatch.setattr("imp.engine.sandbox.overlay_available", lambda _b: False)
     quest = _make_change(tmp_path)
 
     # Spy on teardown so the test proves it ran with the spike's id+discriminator
@@ -180,6 +193,34 @@ def test_isolated_dispatch_tears_down_on_error(
         tmp_path, "branch", "--list", "imp/spike-prb001-1").stdout
 
 
+def test_isolated_dispatch_overlay_home_torn_down_on_error(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # AC 6 (error path): the overlay cleanup lives in the outer finally, so a
+    # failing spawn still removes the per-invocation overlay dirs. Overlay is ON
+    # here (unlike test_isolated_dispatch_tears_down_on_error), so this fails if
+    # home_cleanup() is ever moved out of finally into the try body.
+    monkeypatch.setattr("imp.engine.sandbox.sandbox_available", lambda: True)
+    monkeypatch.setattr("imp.engine.sandbox.overlay_available", lambda _b: True)
+    quest = _make_change(tmp_path)
+
+    async def _spawn_boom(_inv):
+        raise RuntimeError("spike spawn failed")
+
+    ctx = _ctx(tmp_path, quest, name="prober", agent=_isolated_agent("prober"),
+               spawn=_spawn_boom)
+
+    with pytest.raises(RuntimeError, match="spike spawn failed"):
+        anyio.run(dispatch_task, ctx, "prober", "will fail")
+
+    worktrees = (tmp_path / ".imp" / "worktrees").resolve()
+    # the per-invocation overlay dirs are gone despite the dispatch error ...
+    assert not (worktrees / "spike-prb001-1.overlay-upper").exists()
+    assert not (worktrees / "spike-prb001-1.overlay-work").exists()
+    assert not (worktrees / "spike-prb001-1.overlay-merged").exists()
+    # ... and so is the throwaway worktree
+    assert not (worktrees / "spike-prb001-1").exists()
+
+
 def test_non_isolated_subagent_inherits_parent_policy(tmp_path: Path) -> None:
     quest = _make_change(tmp_path)
     capture: dict = {}
@@ -202,7 +243,7 @@ def test_inactive_spike_policy_emits_sandbox_inactive_event(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     inactive_policy = types.SimpleNamespace(active=False, note="unsandboxed_by_config")
     monkeypatch.setattr(
-        "imp.agents.subagents._build_spike_policy", lambda *_a, **_kw: inactive_policy)
+        "imp.agents.subagents._build_isolated_policy", lambda *_a, **_kw: inactive_policy)
 
     quest = _make_change(tmp_path)
     ctx = _ctx(tmp_path, quest, name="prober", agent=_isolated_agent("prober"),
@@ -241,7 +282,7 @@ def test_isolated_dispatch_without_quest_context_raises(tmp_path: Path) -> None:
         anyio.run(dispatch_task, ctx, "prober", "go")
 
 
-def test_build_spike_policy_passes_spike_true(monkeypatch, tmp_path):
+def test_build_isolated_policy_passes_disposable_tree_true(monkeypatch, tmp_path):
     from types import SimpleNamespace
 
     import imp.agents.subagents as subagents
@@ -255,9 +296,8 @@ def test_build_spike_policy_passes_spike_true(monkeypatch, tmp_path):
 
     monkeypatch.setattr("imp.engine.sandbox.resolve_policy", _fake_resolve_policy)
     monkeypatch.setattr("imp.engine.sandbox.sandbox_available", lambda: True)
-    # Return a REAL SandboxConfig so _build_spike_policy's
-    # `dataclasses.replace(cfg, network=True)` succeeds and control reaches the
-    # patched resolve_policy (a SimpleNamespace would make replace raise first).
+    # A REAL SandboxConfig so _build_isolated_policy reaches the patched
+    # resolve_policy (a SimpleNamespace cfg would break the resolve_policy call).
     monkeypatch.setattr(
         "imp.engine.sandbox.sandbox_config_from_raw",
         lambda raw: SandboxConfig(),
@@ -275,7 +315,143 @@ def test_build_spike_policy_passes_spike_true(monkeypatch, tmp_path):
         id="abc", title="T", project_root=tmp_path, control_root=tmp_path,
         quest_dir=tmp_path / "change", base_branch="master",
     )
-    result = subagents._build_spike_policy(quest, tmp_path / "wt", test_gates=None)
+    result = subagents._build_isolated_policy(quest, tmp_path / "wt", test_gates=None)
 
     assert result == "sentinel-policy"
-    assert captured["spike"] is True
+    assert captured["disposable_tree"] is True
+
+
+def test_build_isolated_policy_does_not_force_network(monkeypatch, tmp_path):
+    # AC 11 (unit): the deleted network force no longer overrides run-level config.
+    # With sandbox.network=False configured, the cfg handed to resolve_policy is
+    # network=False (before this change it was forced True).
+    from types import SimpleNamespace
+
+    import imp.agents.subagents as subagents
+
+    captured: dict = {}
+
+    def _fake_resolve_policy(**kwargs):
+        captured.update(kwargs)
+        return "sentinel-policy"
+
+    monkeypatch.setattr("imp.engine.sandbox.resolve_policy", _fake_resolve_policy)
+    monkeypatch.setattr("imp.engine.sandbox.sandbox_available", lambda: True)
+    monkeypatch.setattr(
+        "imp.providers.effective.load_effective_config",
+        lambda **kw: SimpleNamespace(config=SimpleNamespace(sandbox={"network": False})),
+    )
+    monkeypatch.setattr("imp.engine.env.engine_env", lambda **kw: {})
+    monkeypatch.setattr(
+        "imp.engine.env.overlay_engine_env", lambda parent, overlay: {})
+
+    quest = SimpleNamespace(
+        id="abc", title="T", project_root=tmp_path, control_root=tmp_path,
+        quest_dir=tmp_path / "change", base_branch="master",
+    )
+    subagents._build_isolated_policy(quest, tmp_path / "wt", test_gates=None)
+
+    assert captured["cfg"].network is False
+
+
+def test_attach_isolated_home_overlay_siblings_spike(tmp_path, monkeypatch):
+    # AC 1/6 (unit): overlay dirs are SIBLINGS of the spike worktree (keyed by its
+    # name), created on disk, and the cleanup removes them.
+    import imp.agents.subagents as subagents
+    from imp.engine.sandbox import HomeLayer
+    monkeypatch.setattr("imp.engine.sandbox.overlay_available", lambda _b: True)
+    spike = tmp_path / ".imp" / "worktrees" / "spike-x-1"
+    spike.mkdir(parents=True)
+    pol, cleanup = subagents._attach_isolated_home(
+        _active_home_policy(), spike, tmp_path / "q")
+    assert isinstance(pol.home_layer, HomeLayer) and pol.home_layer.is_overlay
+    upper = spike.parent / "spike-x-1.overlay-upper"
+    assert upper.is_dir() and upper.parent == spike.parent and upper != spike
+    assert pol.home_layer.upper == str(upper)
+    assert cleanup is not None
+    cleanup()
+    assert not upper.exists()
+
+
+def test_attach_isolated_home_falls_back_to_rw(tmp_path, monkeypatch):
+    # AC 8 (unit): no overlay support → rw-bind fallback, no overlay dirs created.
+    import imp.agents.subagents as subagents
+    monkeypatch.setattr("imp.engine.sandbox.overlay_available", lambda _b: False)
+    spike = tmp_path / ".imp" / "worktrees" / "spike-x-1"
+    spike.mkdir(parents=True)
+    pol, cleanup = subagents._attach_isolated_home(
+        _active_home_policy(), spike, tmp_path / "q")
+    assert pol.home_layer is not None and not pol.home_layer.is_overlay
+    assert pol.home_layer.home == "/home/u"
+    assert not (spike.parent / "spike-x-1.overlay-upper").exists()
+    cleanup()  # no-op, must not raise
+
+
+def test_attach_isolated_home_noop_for_inactive(tmp_path, monkeypatch):
+    import imp.agents.subagents as subagents
+    from imp.engine.sandbox import SandboxPolicy
+    monkeypatch.setattr("imp.engine.sandbox.overlay_available", lambda _b: True)
+    inactive = SandboxPolicy(
+        active=False, worktree="", git_common_dir="", git_ro_remask=(),
+        writable_caches=(), extra_readable=(), extra_writable=(),
+        secret_dirs=(), secret_files=(), setenv=(), network=True)
+    spike = tmp_path / ".imp" / "worktrees" / "spike-x-1"
+    pol, cleanup = subagents._attach_isolated_home(inactive, spike, tmp_path / "q")
+    assert pol is inactive and pol.home_layer is None
+    assert cleanup is None
+
+
+def test_isolated_dispatch_overlay_home_torn_down_with_worktree(
+        tmp_path, monkeypatch):
+    # AC 1/6 (wiring): dispatch attaches an overlay home keyed to the spike
+    # worktree; the outer finally removes the overlay dirs with the worktree.
+    monkeypatch.setattr("imp.engine.sandbox.sandbox_available", lambda: True)
+    monkeypatch.setattr("imp.engine.sandbox.overlay_available", lambda _b: True)
+    quest = _make_change(tmp_path)
+    capture: dict = {}
+    ctx = _ctx(tmp_path, quest, name="prober", agent=_isolated_agent("prober"),
+               spawn=_spawn([{"type": "agent_output", "payload": {"text": "ok"}}],
+                            capture=capture))
+
+    anyio.run(dispatch_task, ctx, "prober", "measure it")
+
+    pol = capture["inv"].sandbox_policy
+    assert pol.home_layer is not None and pol.home_layer.is_overlay
+    # resolve() to match create_spike_worktree's resolved return (macOS /tmp symlink)
+    worktrees = (tmp_path / ".imp" / "worktrees").resolve()
+    assert pol.home_layer.upper == str(worktrees / "spike-prb001-1.overlay-upper")
+    # finally teardown removed both the overlay dirs and the spike worktree
+    assert not (worktrees / "spike-prb001-1.overlay-upper").exists()
+    assert not (worktrees / "spike-prb001-1").exists()
+
+
+def test_isolated_dispatch_honors_network_off(tmp_path, monkeypatch):
+    # AC 11: with sandbox.network=False configured, the isolated agent's policy has
+    # network off (the deleted force-on no longer overrides run-level config) and its
+    # bash argv carries --unshare-net.
+    from types import SimpleNamespace
+
+    from imp.engine.sandbox import build_sandbox_argv
+
+    monkeypatch.setattr("imp.engine.sandbox.sandbox_available", lambda: True)
+    monkeypatch.setattr("imp.engine.sandbox.overlay_available", lambda _b: False)
+    # _make_change uses load_effective_config internally; patch it AFTER so
+    # Quest.create gets the real config object (which has tier_names() etc.).
+    quest = _make_change(tmp_path)
+    monkeypatch.setattr(
+        "imp.providers.effective.load_effective_config",
+        lambda **kw: SimpleNamespace(
+            config=SimpleNamespace(sandbox={"network": False})),
+    )
+    capture: dict = {}
+    ctx = _ctx(tmp_path, quest, name="prober", agent=_isolated_agent("prober"),
+               spawn=_spawn([{"type": "agent_output", "payload": {"text": "ok"}}],
+                            capture=capture))
+
+    anyio.run(dispatch_task, ctx, "prober", "measure it")
+
+    pol = capture["inv"].sandbox_policy
+    assert pol.network is False
+    argv = build_sandbox_argv("curl example.com", cwd=pol.worktree, policy=pol,
+                              engine_env={})
+    assert "--unshare-net" in argv

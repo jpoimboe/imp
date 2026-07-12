@@ -12,6 +12,7 @@ and /tmp files are visible inside and outside the sandbox.
 from __future__ import annotations
 
 import contextlib
+import dataclasses
 import json
 import os
 import shutil
@@ -31,6 +32,8 @@ from imp.engine.sandbox import (
     SandboxConfig,
     SandboxPolicy,
     build_sandbox_argv,
+    make_home_layer,
+    overlay_available,
     resolve_policy,
     sandbox_available,
 )
@@ -106,6 +109,81 @@ def _bash(ctx: ToolContext, cmd: str) -> dict[str, object]:
     async def _run() -> str:
         return await get_registry()["bash"].async_invoke(ctx, {"command": cmd})
     return json.loads(anyio.run(_run))
+
+
+# The overlay home under test must live at a path covered by NO later bind_plan
+# bind — NOT under /tmp (build_sandbox_argv emits --bind /tmp /tmp, which re-mounts
+# the host /tmp OVER an overlay home placed under /tmp, defeating it) and NOT under
+# the sandbox worktree (its rw bind does the same). The home-layer rw bind is
+# emitted FIRST (sandbox.py:91), so it can never be the last-covering bind for a
+# path that a later bind also covers. So the overlay tests root their home AND
+# worktree as SIBLINGS under a real fs OUTSIDE /tmp (/var/tmp): the --ro-bind / /
+# floor keeps them readable, and the home-layer rw bind is then the ONLY bind
+# covering the home path, so the overlay isolates correctly (writes captured in the
+# upper; real home untouched). /var/tmp is also a real disk fs — a valid overlay
+# upperdir location, unlike a possible tmpfs /tmp.
+_OVERLAY_BASE = Path("/var/tmp")
+
+
+def _probe_overlay_at_base() -> bool:
+    """Probe overlay support at the /var/tmp base, removing the probe dir after.
+    overlay_available() only rmtrees its own inner .overlay-probe subdir, so the
+    mkdtemp'd parent is cleaned up here — otherwise it would leak one empty
+    /var/tmp/imp-ovl-probe-XXXX dir per test-collection on an overlay-capable host."""
+    if not sandbox_available() or not _OVERLAY_BASE.is_dir():
+        return False
+    try:
+        probe = Path(tempfile.mkdtemp(prefix="imp-ovl-probe-", dir=_OVERLAY_BASE))
+    except OSError:
+        return False
+    try:
+        return overlay_available(probe)
+    finally:
+        shutil.rmtree(probe, ignore_errors=True)
+
+
+_OVERLAY_OK = _probe_overlay_at_base()
+requires_overlay = pytest.mark.skipif(
+    not _OVERLAY_OK,
+    reason="unprivileged overlayfs unavailable at a non-/tmp base on this host")
+
+
+def _make_overlay_root() -> Path:
+    """A throwaway base dir OUTSIDE /tmp for the overlay tests (see _OVERLAY_BASE)."""
+    return Path(tempfile.mkdtemp(prefix="imp-test-ovl-", dir=_OVERLAY_BASE))
+
+
+def _overlay_home(base: Path, home: Path, *,
+                  secret_dirs: tuple[str, ...] = (),
+                  writable_caches: tuple[str, ...] = ()):
+    """Active policy with a real COW-overlay HomeLayer over `home`. `home` and the
+    sandbox worktree are SIBLINGS under `base` (a non-/tmp real fs), so no later
+    bind_plan bind (/tmp identity, worktree rw) covers `home` and shadows the
+    overlay merged mount. Returns (policy, cleanup); cleanup removes the overlay
+    upper/work/merged dirs."""
+    wt = base / "worktree"
+    wt.mkdir(exist_ok=True)
+    base_pol = _active_policy(wt, home=home, secret_dirs=secret_dirs)
+    layer, cleanup = make_home_layer(
+        str(home),
+        upper=base / "ov-upper", work=base / "ov-work", merged=base / "ov-merged",
+        use_overlay=True)
+    pol = dataclasses.replace(
+        base_pol, home=str(home), writable_caches=writable_caches, home_layer=layer)
+    return pol, cleanup
+
+
+def _fallback_home(root: Path, home: Path, *,
+                   secret_dirs: tuple[str, ...] = ()) -> SandboxPolicy:
+    """Active policy with a rw-fallback HomeLayer (no overlay) over `home` — a
+    plain --bind home home (writes persist to the REAL home). The fallback writes
+    THROUGH to the real home by design, so a /tmp-based root is fine here (the /tmp
+    shadow re-binds the same host home dir the fallback already targets)."""
+    base = _active_policy(root, home=home, secret_dirs=secret_dirs)
+    layer, _ = make_home_layer(
+        str(home), upper=root / "u", work=root / "w", merged=root / "m",
+        use_overlay=False)
+    return dataclasses.replace(base, home=str(home), home_layer=layer)
 
 
 # ---------------------------------------------------------------------------
@@ -752,7 +830,7 @@ def test_change_and_spike_branch_writes_succeed() -> None:
             "main..imp/esc1").stdout.strip() == "1", "imp/esc1 did not collapse to 1 commit"
 
         # Spike branch: a fresh spike worktree on imp/spike-esc1-1, policy rooted
-        # at the spike worktree (mirrors _build_spike_policy inheriting the guard).
+        # at the spike worktree (mirrors _build_isolated_policy inheriting the guard).
         spike_wt = wt.create_spike_worktree(control, "esc1", 1, "main")
         spike_ctx, _ = _refprot_ctx(control, spike_wt)
         r2 = _bash(
@@ -838,60 +916,161 @@ def test_imp_own_git_writes_unaffected_by_ref_masks() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Spike ephemeral home: writable tmpfs $HOME + credential write-through
+# Overlay-home behavioral tests (AC 1-5)
 # ---------------------------------------------------------------------------
 
-def _spike_policy(worktree: Path, home: Path) -> SandboxPolicy:
-    """A real active spike policy: worktree under /tmp, an injected disjoint home."""
-    (worktree / ".git" / "hooks").mkdir(parents=True, exist_ok=True)
-    (worktree / ".git" / "config").write_text("")
-    return resolve_policy(
-        worktree=worktree, control_root=worktree, quest_id="beh",
-        cfg=SandboxConfig(home=home),
-        engine_env_result={}, environ={"HOME": str(home),
-                                       "PATH": os.environ.get("PATH", "/usr/bin:/bin")},
-        available=True, spike=True,
-    )
-
-
-def test_spike_home_is_writable_and_host_home_untouched() -> None:
-    root = _make_root()
-    home = Path(tempfile.mkdtemp(prefix="imp-test-spikehome-"))
+@requires_overlay
+def test_overlay_home_faithful_isolated_and_masked() -> None:
+    # AC 1: a real home file (.gitconfig) reads through the overlay lower; a new
+    #       $HOME write is readable in-step but leaves the real home unchanged
+    #       (captured in the discarded upper).
+    # AC 5: ~/.claude is readable (model auth intact).
+    # AC 3 (overlay mode): a secret dir (.ssh) is masked to empty — proving the
+    #       overlay home bind is emitted BEFORE the secret masks.
+    # home + worktree are siblings under a non-/tmp base so the overlay is not
+    # shadowed by the /tmp/worktree binds (see _overlay_home).
+    root = _make_overlay_root()
     try:
-        pol = _spike_policy(root, home)
+        home = root / "home"
+        home.mkdir()
+        (home / ".gitconfig").write_text("[user]\n\tname = Real Dev\n")
+        (home / ".claude").mkdir()
+        (home / ".claude" / "creds.json").write_text("MODEL_TOKEN_XYZ\n")
+        ssh = home / ".ssh"
+        ssh.mkdir()
+        (ssh / "id_rsa").write_text("SUPER_SECRET_KEY\n")
+
+        pol, cleanup = _overlay_home(root, home, secret_dirs=(str(ssh),))
+        try:
+            ctx = _ctx(Path(pol.worktree), pol)
+            r = _bash(
+                ctx,
+                'cat "$HOME/.gitconfig"; echo "==C=="; '
+                'cat "$HOME/.claude/creds.json"; echo "==S=="; '
+                'cat "$HOME/.ssh/id_rsa" 2>&1; echo "==W=="; '
+                'echo NEWCONTENT > "$HOME/scratch.txt" && cat "$HOME/scratch.txt"')
+            out = r["stdout"]
+            assert "Real Dev" in out                 # AC1: real home read-through
+            assert "MODEL_TOKEN_XYZ" in out          # AC5: .claude readable
+            assert "SUPER_SECRET_KEY" not in out     # AC3: .ssh masked in overlay
+            assert "NEWCONTENT" in out               # AC1: write+readback in step
+            # AC1: the write was captured in the discarded upper — real home untouched.
+            assert not (home / "scratch.txt").exists()
+        finally:
+            cleanup()
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+@requires_overlay
+def test_overlay_home_write_persists_across_bash_calls() -> None:
+    # AC 2: a file written to $HOME in one bash call is present in a later bash call
+    # within the same invocation (both calls mount the same on-disk upper). Because
+    # home is NOT shadowed by a later bind, the write lands in the overlay upper —
+    # so this proves shared-upper persistence, NOT a real-home leak: the falsifier
+    # below asserts the real home never sees the file.
+    root = _make_overlay_root()
+    try:
+        home = root / "home"
+        home.mkdir()
+        pol, cleanup = _overlay_home(root, home)
+        try:
+            ctx = _ctx(Path(pol.worktree), pol)
+            r1 = _bash(ctx, 'echo PERSISTED > "$HOME/across.txt" && echo wrote')
+            assert r1["returncode"] == 0 and "wrote" in r1["stdout"]
+            r2 = _bash(ctx, 'cat "$HOME/across.txt"')
+            assert r2["returncode"] == 0, f"read-back failed: {r2}"
+            assert "PERSISTED" in r2["stdout"], (
+                f"write did not persist across bash calls: {r2['stdout']!r}")
+            # falsifier: persistence is via the shared overlay upper, not a leak —
+            # the isolated real home never sees the file.
+            assert not (home / "across.txt").exists()
+        finally:
+            cleanup()
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+@requires_overlay
+def test_overlay_home_caches_write_through_to_real_home() -> None:
+    # AC 4: a cache dir bound rw ON TOP of the overlay writes THROUGH to the real
+    # home (not captured in the discarded upper), so cache downloads persist across
+    # runs. Falsifier: in the SAME step a non-cache $HOME write is captured by the
+    # overlay (absent from the real home), while the .cache write lands on the real
+    # home — distinguishing genuine write-through from a whole-home leak.
+    # (The isolated/spiker policy uses the same universal caches — unit-tested by
+    # Part 1's test_resolve_policy_disposable_tree_uses_universal_home_model.)
+    root = _make_overlay_root()
+    try:
+        home = root / "home"
+        cache = home / ".cache"
+        cache.mkdir(parents=True)
+        pol, cleanup = _overlay_home(root, home, writable_caches=(str(cache),))
+        try:
+            ctx = _ctx(Path(pol.worktree), pol)
+            r = _bash(
+                ctx,
+                'echo DL > "$HOME/.cache/pkg.bin"; '
+                'echo CAP > "$HOME/captured.txt"; echo done')
+            assert r["returncode"] == 0 and "done" in r["stdout"]
+            # write-through: the cache file lands on the REAL home cache dir.
+            assert (cache / "pkg.bin").exists(), (
+                "cache write did not pass through to the real home")
+            assert (cache / "pkg.bin").read_text().strip() == "DL"
+            # distinguisher: the non-cache write was captured by the overlay upper,
+            # so it is ABSENT from the real home (proves this is not a whole-home leak).
+            assert not (home / "captured.txt").exists()
+        finally:
+            cleanup()
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_fallback_home_is_writable_real_home_with_masks() -> None:
+    # AC 8: when overlay is unavailable the home is a plain rw bind of the REAL home
+    # — a $HOME write persists to the real home (home isolation is lost, the spec's
+    # deliberate degrade-security-not-functionality edge) — and the secret masks
+    # STILL apply (secrets masked in BOTH modes). Runs on any bwrap host (no overlay needed).
+    root = _make_root("imp-test-fb-")
+    try:
+        home = root / "home"
+        ssh = home / ".ssh"
+        ssh.mkdir(parents=True)
+        (ssh / "id_rsa").write_text("SUPER_SECRET_KEY\n")
+
+        pol = _fallback_home(root, home, secret_dirs=(str(ssh),))
         ctx = _ctx(root, pol)
-        # AC 1a: writing under ~ (a fresh tmpfs) succeeds — ~/.local/bin, ~/.config,
-        # and a global git identity all land.
         r = _bash(
             ctx,
-            "mkdir -p ~/.local/bin ~/.config/x && echo hi > ~/.local/bin/x && "
-            "git config --global user.email t@t && echo DONE")
-        assert "DONE" in r["stdout"], f"writable-home ops failed: {r}"
-        assert r["returncode"] == 0
-        # AC 1b: the real host home dir is unmodified — the tmpfs discarded those
-        # writes; nothing leaked to the injected home on disk.
-        assert not (home / ".local").exists()
-        assert not (home / ".config").exists()
-        assert not (home / ".gitconfig").exists()
+            'echo FB > "$HOME/fallback.txt" && cat "$HOME/fallback.txt"; '
+            'echo "==S=="; cat "$HOME/.ssh/id_rsa" 2>&1')
+        out = r["stdout"]
+        assert "FB" in out                            # writable home (functionality kept)
+        assert "SUPER_SECRET_KEY" not in out          # AC8/AC3: masks apply in fallback
+        # rw bind (no overlay capture) → the write persisted to the REAL home.
+        assert (home / "fallback.txt").exists(), (
+            "fallback rw home did not persist the write to the real home")
     finally:
         shutil.rmtree(root, ignore_errors=True)
-        shutil.rmtree(home, ignore_errors=True)
 
 
-def test_spike_credential_writethrough_lands_on_real_file() -> None:
-    root = _make_root()
-    home = Path(tempfile.mkdtemp(prefix="imp-test-spikecred-"))
+def test_readonly_overlay_blocks_bash_write_to_tree() -> None:
+    # AC 9: a read-only overlay over the tree (what a subagent inherits from a
+    # read_only:["."] step — object-level inheritance is covered by
+    # test_non_isolated_subagent_inherits_parent_policy in the dispatch suite) blocks
+    # a real bash WRITE at the OS level: the last-covering --ro-bind wins over the
+    # earlier rw worktree bind.
+    root = _make_root("imp-test-ro-")
     try:
-        (home / ".claude").mkdir()
-        (home / ".claude" / ".credentials.json").write_text('{"v":0}')
-        pol = _spike_policy(root, home)
+        base = _active_policy(root)
+        pol = dataclasses.replace(base, readonly_overlays=(str(root),))
         ctx = _ctx(root, pol)
-        # AC 4: an in-sandbox write to ~/.claude/.credentials.json write-throughs
-        # to the real host file (rw bind, not a copy).
-        r = _bash(ctx, 'printf %s \'{"v":1}\' > ~/.claude/.credentials.json && echo DONE')
-        assert "DONE" in r["stdout"], f"cred write failed: {r}"
-        # The REAL host file now carries the in-sandbox write.
-        assert (home / ".claude" / ".credentials.json").read_text() == '{"v":1}'
+        r = _bash(ctx, f'touch "{root}/blocked.txt" 2>&1; echo rc=$?')
+        assert "rc=0" not in r["stdout"], (
+            f"write to a read-only-overlaid tree unexpectedly succeeded: "
+            f"{r['stdout']!r}")
+        assert not (root / "blocked.txt").exists(), (
+            "blocked.txt appeared on host — the read-only overlay did not block it")
     finally:
         shutil.rmtree(root, ignore_errors=True)
-        shutil.rmtree(home, ignore_errors=True)
+

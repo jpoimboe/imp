@@ -62,6 +62,8 @@ from imp.engine.quest import Quest
 from imp.engine.reincarnation import reincarnation_seed, stash_transcript
 from imp.engine.sandbox import (
     SandboxUnavailable,
+    make_home_layer,
+    overlay_available,
     resolve_policy,
     sandbox_available,
     sandbox_config_from_raw,
@@ -714,6 +716,29 @@ def _apply_readonly_overlay(policy: Any, step: Step, project_root: Path) -> Any:
         policy, readonly_overlays=policy.readonly_overlays + overlays)
 
 
+def _attach_home_layer(
+    policy: Any, step: Step, quest: Quest,
+) -> tuple[Any, Callable[[], None]]:
+    """Attach the per-invocation writable-home layer to `policy` and return
+    (policy, cleanup). Overlay-capable host → a COW overlay whose upper/work/merged
+    dirs are SIBLINGS of transcript_dir (keyed only by step.phase/step.name, so
+    they survive its per-reincarnation rmtree and are shared across reincarnations);
+    cleanup removes them. Otherwise → a plain rw bind of the real home (fallback);
+    cleanup is a no-op. An inactive or home-less policy (e.g. a script gate) is
+    returned unchanged."""
+    if not policy.active or not policy.home:
+        return policy, (lambda: None)
+    base = quest.quest_dir / "steps" / step.phase
+    layer, cleanup = make_home_layer(
+        policy.home,
+        upper=base / f"{step.name}.overlay-upper",
+        work=base / f"{step.name}.overlay-work",
+        merged=base / f"{step.name}.overlay-merged",
+        use_overlay=overlay_available(quest.quest_dir),
+    )
+    return dataclasses.replace(policy, home_layer=layer), cleanup
+
+
 async def _dispatch_step(
     step: Step, workflow: Workflow, quest: Quest,
     state: State, log: EventLog, *, is_resume: bool,
@@ -754,14 +779,18 @@ async def _dispatch_step(
                                    sandbox_policy=sandbox_policy,
                                    max_parallel_test_runs=max_parallel_test_runs,
                                    coordinator=coordinator)
-    return await _route_agent(
-        step, workflow, quest, state, log,
-        user_chat_input_fn=user_chat_input_fn, coordinator=coordinator,
-        wrapper_text=wrapper_text, is_resume=is_resume, test_gates=test_gates,
-        headless=headless,
-        autonomous=autonomous,
-        sandbox_policy=sandbox_policy, seed_opening=seed_opening,
-        project_facts=project_facts, guidance=guidance)
+    sandbox_policy, _home_cleanup = _attach_home_layer(sandbox_policy, step, quest)
+    try:
+        return await _route_agent(
+            step, workflow, quest, state, log,
+            user_chat_input_fn=user_chat_input_fn, coordinator=coordinator,
+            wrapper_text=wrapper_text, is_resume=is_resume, test_gates=test_gates,
+            headless=headless,
+            autonomous=autonomous,
+            sandbox_policy=sandbox_policy, seed_opening=seed_opening,
+            project_facts=project_facts, guidance=guidance)
+    finally:
+        _home_cleanup()
 
 
 def _step_started_payload(
@@ -1639,6 +1668,18 @@ def _emit_paused_event(
     _emit(log, "workflow_paused", payload)
 
 
+def _warn_if_no_overlay(policy: Any, quest: Quest, log: EventLog) -> None:
+    """When the sandbox is active but the host lacks unprivileged overlayfs, $HOME
+    falls back to a writable bind of the REAL home (home isolation lost; secret
+    masks still apply). Emit one durable warning, modeled on sandbox_inactive."""
+    if policy.active and not overlay_available(quest.quest_dir):
+        _emit(log, "sandbox_overlay_unavailable",
+              {"reason": "unprivileged overlayfs unavailable; $HOME is a writable "
+                         "bind of the real home (home isolation lost; secrets "
+                         "still masked)"},
+              agent_id=None)
+
+
 def _build_sandbox_policy(quest: Quest, config: Any, log: EventLog) -> Any:
     """Resolve the SandboxPolicy for the current spawn point (IMP_* are
     change-stable, but project_root can flip on go-live, triggering a rebuild).
@@ -1664,4 +1705,5 @@ def _build_sandbox_policy(quest: Quest, config: Any, log: EventLog) -> Any:
         raise
     if not policy.active:
         _emit(log, "sandbox_inactive", {"reason": policy.note}, agent_id=None)
+    _warn_if_no_overlay(policy, quest, log)
     return policy

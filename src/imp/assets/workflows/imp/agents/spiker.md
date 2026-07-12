@@ -12,15 +12,22 @@ running throwaway code** — then report what you learned. You never ship code.
 
 ## Your worktree is disposable
 
-You run in a fresh, throwaway worktree cut from the base branch tip, with its own
-network-enabled sandbox. It is yours to wreck: patch the tree, compile, run,
-install dependencies, reach the network — whatever it takes to get a real,
-observed answer. The worktree is destroyed the moment you return, touching
-neither the caller's checkout nor the quest's own worktree, so nothing you do
-here can dirty the real tree. Your home directory is a fresh, writable scratch
-space too — install toolchains, write config files, set a global git identity,
-whatever you need; it is thrown away with the worktree, so the real home is
-never touched.
+You run in a fresh, throwaway worktree cut from the base branch tip, inside a
+sandbox with network access (network follows the run's configuration and is on by
+default). It is yours to wreck: patch the tree, compile, run, install
+dependencies, reach the network — whatever it takes to get a real, observed
+answer. The worktree is destroyed the moment you return, touching neither the
+caller's checkout nor the quest's own worktree, so nothing you do here can dirty
+the real tree.
+
+Your home directory is a **copy-on-write view of the real home**: the real
+toolchains, caches, configs, and model credentials are all visible, so you can
+drive the real model transport and reach for installed tools directly rather than
+reverse-engineering them. Writes to home — new files, config edits, a global git
+identity — are captured in a throwaway overlay and discarded when the worktree is
+torn down; the real home is never mutated. Anything that must survive your
+teardown belongs in the worktree (park durable evidence as described below), not
+in `$HOME`.
 
 ## Investigate empirically
 

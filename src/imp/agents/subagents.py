@@ -13,6 +13,7 @@ import contextlib
 import dataclasses
 import os
 import re
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any, cast
 
@@ -163,8 +164,11 @@ def _emit_collision_warning(
             })
 
 
-def _build_spike_policy(quest: Any, worktree_path: Path, test_gates: Any) -> Any:
-    """Build a distinct sandbox policy rooted at a throwaway spike worktree."""
+def _build_isolated_policy(quest: Any, worktree_path: Path, test_gates: Any) -> Any:
+    """Build the sandbox policy for an isolated (disposable-tree) subagent, rooted
+    at its throwaway worktree and drawn from the universal home/caches/masks. No
+    network force and no bespoke home — network follows the run-level config, and
+    the writable COW home is attached separately by _attach_isolated_home."""
     from imp.engine.env import engine_env, overlay_engine_env
     from imp.engine.sandbox import (
         resolve_policy,
@@ -176,8 +180,7 @@ def _build_spike_policy(quest: Any, worktree_path: Path, test_gates: Any) -> Any
     config = load_effective_config(
         project_root=quest.project_root, control_root=quest.control_root,
     ).config
-    cfg = dataclasses.replace(
-        sandbox_config_from_raw(config.sandbox or {}), network=True)
+    cfg = sandbox_config_from_raw(config.sandbox or {})
     eng = overlay_engine_env(
         os.environ,
         engine_env(project_root=worktree_path, quest_id=quest.id,
@@ -188,8 +191,32 @@ def _build_spike_policy(quest: Any, worktree_path: Path, test_gates: Any) -> Any
         worktree=worktree_path, control_root=quest.control_root,
         quest_id=quest.id, cfg=cfg, engine_env_result=eng,
         environ=os.environ, available=sandbox_available(),
-        quest_dir=quest.quest_dir, spike=True,
+        quest_dir=quest.quest_dir, disposable_tree=True,
     )
+
+
+def _attach_isolated_home(
+    policy: Any, spike_worktree: Path, quest_dir: Path,
+) -> tuple[Any, Callable[[], None] | None]:
+    """Attach the per-invocation writable-home layer to an isolated subagent's
+    policy, keyed by the spike worktree, and return (policy, cleanup). The overlay
+    upper/work/merged dirs are SIBLINGS of the spike worktree under
+    .imp/worktrees/ (a real local fs, not the symlinked quest home inside the
+    worktree); cleanup rmtrees them at teardown. Without overlay support the home
+    is a plain rw bind (cleanup is a no-op). An inactive or home-less policy is
+    returned unchanged with cleanup None."""
+    if not policy.active or not policy.home:
+        return policy, None
+    from imp.engine.sandbox import make_home_layer, overlay_available
+    base = spike_worktree.parent
+    layer, cleanup = make_home_layer(
+        policy.home,
+        upper=base / f"{spike_worktree.name}.overlay-upper",
+        work=base / f"{spike_worktree.name}.overlay-work",
+        merged=base / f"{spike_worktree.name}.overlay-merged",
+        use_overlay=overlay_available(quest_dir),
+    )
+    return dataclasses.replace(policy, home_layer=layer), cleanup
 
 
 async def dispatch_task(
@@ -222,6 +249,7 @@ async def dispatch_task(
 
     isolated = subagent_def.isolated_worktree
     spike_worktree: Path | None = None
+    home_cleanup: Callable[[], None] | None = None
     if isolated:
         if ctx.quest is None:
             raise RuntimeError(
@@ -238,8 +266,10 @@ async def dispatch_task(
             from imp.engine.quest import link_quest_home
             assert spike_worktree is not None
             link_quest_home(spike_worktree, ctx.quest.quest_dir)
-            dispatch_policy = _build_spike_policy(
+            dispatch_policy = _build_isolated_policy(
                 ctx.quest, spike_worktree, ctx.test_gates)
+            dispatch_policy, home_cleanup = _attach_isolated_home(
+                dispatch_policy, spike_worktree, ctx.quest.quest_dir)
             if not dispatch_policy.active and ctx.event_log is not None:
                 ctx.event_log.append(
                     agent_id=ctx.agent_id, type="sandbox_inactive",
@@ -515,6 +545,8 @@ async def dispatch_task(
                 raise RuntimeError(f"subagent {subagent_name!r} failed ({cat}){suffix}")
             return cast(str, result.output["text"])
     finally:
+        if home_cleanup is not None:
+            home_cleanup()
         if spike_worktree is not None:
             from imp.engine import worktree as _worktree
             _worktree.destroy_spike_worktree(

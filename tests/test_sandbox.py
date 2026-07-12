@@ -1,17 +1,18 @@
 """Always-on sandbox tests — no bwrap needed (pure argv + policy resolution)."""
 from __future__ import annotations
 
-import itertools
 import types as _types
 from pathlib import Path
 
 import pytest
 
 from imp.engine.sandbox import (
+    HomeLayer,
     SandboxConfig,
     SandboxPolicy,
     SandboxUnavailable,
     build_sandbox_argv,
+    make_home_layer,
     resolve_policy,
     sandbox_available,
 )
@@ -276,6 +277,65 @@ def test_resolve_policy_unavailable_without_allow_hard_fails(tmp_path):
 
 def test_sandbox_available_is_cached_bool():
     assert isinstance(sandbox_available(), bool)
+
+
+def test_overlay_available_true_when_mount_succeeds(tmp_path, monkeypatch):
+    import imp.engine.sandbox as sb
+    monkeypatch.setattr(sb.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(sb.shutil, "which", lambda _: "/usr/bin/unshare")
+    calls: dict = {}
+
+    def fake_run(argv, **kw):
+        calls["argv"] = argv
+        return _types.SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(sb.subprocess, "run", fake_run)
+    sb.overlay_available.cache_clear()
+    assert sb.overlay_available(tmp_path) is True
+    # probes via unshare with a real overlay mount, then removes its scratch dir
+    assert calls["argv"][0] == "unshare"
+    assert "mount -t overlay" in calls["argv"][-1]
+    assert not (tmp_path / ".overlay-probe").exists()
+
+
+def test_overlay_available_false_when_mount_fails(tmp_path, monkeypatch):
+    import imp.engine.sandbox as sb
+    monkeypatch.setattr(sb.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(sb.shutil, "which", lambda _: "/usr/bin/unshare")
+    monkeypatch.setattr(sb.subprocess, "run",
+                        lambda *a, **k: _types.SimpleNamespace(returncode=32))
+    sb.overlay_available.cache_clear()
+    assert sb.overlay_available(tmp_path) is False
+    assert not (tmp_path / ".overlay-probe").exists()
+
+
+def test_overlay_available_false_without_unshare(tmp_path, monkeypatch):
+    import imp.engine.sandbox as sb
+    monkeypatch.setattr(sb.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(sb.shutil, "which", lambda _: None)
+    sb.overlay_available.cache_clear()
+    assert sb.overlay_available(tmp_path) is False
+
+
+def test_overlay_available_false_on_non_linux(tmp_path, monkeypatch):
+    import imp.engine.sandbox as sb
+    monkeypatch.setattr(sb.platform, "system", lambda: "Darwin")
+    sb.overlay_available.cache_clear()
+    assert sb.overlay_available(tmp_path) is False
+
+
+def test_overlay_available_false_when_subprocess_raises(tmp_path, monkeypatch):
+    import imp.engine.sandbox as sb
+    monkeypatch.setattr(sb.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(sb.shutil, "which", lambda _: "/usr/bin/unshare")
+
+    def boom(*a, **k):
+        raise OSError("no userns")
+
+    monkeypatch.setattr(sb.subprocess, "run", boom)
+    sb.overlay_available.cache_clear()
+    assert sb.overlay_available(tmp_path) is False
+    assert not (tmp_path / ".overlay-probe").exists()
 
 
 def test_resolve_policy_secret_paths_classified_dir_and_file(tmp_path):
@@ -648,6 +708,122 @@ def test_argv_binds_match_bind_plan():
     assert _parse_argv_binds(argv) == p.bind_plan()
 
 
+def test_home_layer_rw_binds_real_home_first():
+    # AC 8 (unit): the fallback writable-home layer emits a rw bind of the real
+    # home, ordered BEFORE the worktree / cache / secret binds so later binds win
+    # (caches write through, worktree stays real, secrets still mask).
+    pol = _policy(home="/home/u", home_layer=HomeLayer(home="/home/u"))
+    argv = build_sandbox_argv("x", cwd="/wt", policy=pol, engine_env={})
+    assert argv[0] == "bwrap"                      # no unshare wrapper for rw fallback
+    flat = " ".join(argv)
+    assert "--bind /home/u /home/u" in flat
+    i_home = argv.index("/home/u")                 # first "/home/u" is the bind source
+    i_wt = argv.index("/ctl/.imp/worktrees/abc")
+    i_secret = argv.index("/home/u/.ssh")
+    assert i_home < i_wt < i_secret
+
+
+def test_home_layer_makes_home_writable_in_mirror():
+    pol = _policy(home="/home/u", home_layer=HomeLayer(home="/home/u"))
+    assert pol.allows_write(Path("/home/u/newfile"))          # home is writable
+    assert pol.allows_write(Path("/home/u/.cache/x"))         # cache write-through wins
+    assert not pol.allows_write(Path("/home/u/.ssh/id_rsa"))  # secret mask still denies
+    assert not pol.allows_read(Path("/home/u/.ssh/id_rsa"))   # and unreadable
+
+
+def test_no_home_layer_leaves_home_read_only():
+    # Without a home layer (script gates / pre-attach) home stays read-through the
+    # ro floor: no rw home bind, and the mirror denies home writes.
+    pol = _policy(home="/home/u")
+    flat = " ".join(build_sandbox_argv("x", cwd="/wt", policy=pol, engine_env={}))
+    assert "--bind /home/u /home/u" not in flat
+    assert not pol.allows_write(Path("/home/u/newfile"))
+
+
+def test_argv_binds_match_bind_plan_with_home_layer():
+    # Drift guard extended to the home bind: the rw fallback's source == dest, so
+    # the parse-back still equals bind_plan() (which is dest-keyed).
+    pol = _policy(home="/home/u", home_layer=HomeLayer(home="/home/u"))
+    argv = build_sandbox_argv("x", cwd="/wt", policy=pol, engine_env={})
+    assert _parse_argv_binds(argv) == pol.bind_plan()
+
+
+def test_overlay_home_wraps_bwrap_with_unshare_mount():
+    # AC 1/2: a COW overlay is composed by wrapping bwrap with an unprivileged
+    # overlay mount; the merged view is bound onto the REAL home path.
+    hl = HomeLayer(home="/home/u", merged="/up/merged",
+                   upper="/up/upper", work="/up/work")
+    pol = _policy(home="/home/u", home_layer=hl)
+    argv = build_sandbox_argv("echo hi", cwd="/wt", policy=pol, engine_env={})
+    assert argv[:6] == ["unshare", "--user", "--map-root-user", "--mount",
+                        "sh", "-c"]
+    script = argv[6]
+    assert ("mount -t overlay overlay -o "
+            "lowerdir=/home/u,upperdir=/up/upper,workdir=/up/work "
+            "/up/merged") in script
+    # `&&` (not `;`) is fail-loud: a runtime mount failure short-circuits so bwrap
+    # never binds an empty merged dir over $HOME. exec (not a child bwrap) keeps
+    # pgid == pid so signals reach the whole tree.
+    assert " && exec bwrap" in script
+    # merged view bound onto the real home: source == merged, dest == home.
+    assert "--bind /up/merged /home/u" in script
+
+
+def test_overlay_home_shell_quotes_paths_with_spaces():
+    hl = HomeLayer(home="/ho me", merged="/a b/merged",
+                   upper="/a b/upper", work="/a b/work")
+    pol = _policy(home="/ho me", home_layer=hl)
+    argv = build_sandbox_argv("x", cwd="/wt", policy=pol, engine_env={})
+    script = argv[6]
+    assert "lowerdir='/ho me'" in script          # lower (real home) quoted
+    assert "upperdir='/a b/upper'" in script       # upper quoted
+    assert "workdir='/a b/work'" in script         # work quoted
+    assert "'/a b/merged'" in script               # mount target + bind source quoted
+
+
+def test_overlay_home_write_mirror_is_dest_keyed():
+    # bind_plan keys the home entry by the DEST (home), not the merged source, so
+    # allows_write is correct under the overlay too.
+    hl = HomeLayer(home="/home/u", merged="/up/merged",
+                   upper="/up/upper", work="/up/work")
+    pol = _policy(home="/home/u", home_layer=hl)
+    assert pol.allows_write(Path("/home/u/newfile"))
+    assert not pol.allows_write(Path("/home/u/.ssh/id_rsa"))
+
+
+def test_rw_fallback_home_layer_is_not_wrapped():
+    # is_overlay is False when there is no upper → plain bwrap, no unshare wrapper.
+    pol = _policy(home="/home/u", home_layer=HomeLayer(home="/home/u"))
+    argv = build_sandbox_argv("x", cwd="/wt", policy=pol, engine_env={})
+    assert argv[0] == "bwrap"
+
+
+def test_make_home_layer_overlay_builds_dirs_and_cleanup(tmp_path):
+    # AC 1 (unit): the overlay layer creates upper/work/merged on disk and returns
+    # a HomeLayer that reports is_overlay; the cleanup callable removes all three.
+    upper, work, merged = tmp_path / "u", tmp_path / "w", tmp_path / "m"
+    layer, cleanup = make_home_layer(
+        "/home/u", upper=upper, work=work, merged=merged, use_overlay=True)
+    assert isinstance(layer, HomeLayer) and layer.is_overlay
+    assert layer.home == "/home/u"
+    assert layer.upper == str(upper) and layer.work == str(work)
+    assert layer.merged == str(merged)
+    assert upper.is_dir() and work.is_dir() and merged.is_dir()
+    cleanup()
+    assert not upper.exists() and not work.exists() and not merged.exists()
+
+
+def test_make_home_layer_fallback_builds_no_dirs(tmp_path):
+    # AC 8 (unit): the rw fallback layer touches no disk (no overlay dirs) and its
+    # cleanup is a harmless no-op.
+    upper, work, merged = tmp_path / "u", tmp_path / "w", tmp_path / "m"
+    layer, cleanup = make_home_layer(
+        "/home/u", upper=upper, work=work, merged=merged, use_overlay=False)
+    assert not layer.is_overlay and layer.home == "/home/u"
+    assert not upper.exists() and not work.exists() and not merged.exists()
+    cleanup()  # no-op, must not raise
+
+
 def test_resolve_policy_binds_quest_home_rw(tmp_path):
     control, wt = _layout(tmp_path)
     home = control / ".imp" / "quests" / "abc"
@@ -884,236 +1060,38 @@ def test_resolve_policy_draft_change_skips_ref_protection(tmp_path):
     assert not (git / "refs" / "heads" / "imp").exists()
 
 
-def test_ephemeral_home_emitted_early_and_writable():
-    # A spike-shaped hand-built policy: ephemeral tmpfs home under which the
-    # worktree, quest_home and a credential dir all live.
-    p = _policy(
-        worktree="/home/u/proj/.imp/worktrees/abc",
-        quest_home="/home/u/proj/.imp/quests/abc",
-        git_common_dir="/home/u/proj/.git",
-        git_ro_remask=(), writable_caches=(), extra_readable=(),
-        extra_writable=(), secret_dirs=("/run/user/1000",), secret_files=(),
-        ephemeral_home="/home/u",
-        cred_writethrough=("/home/u/.claude", "/home/u/.codex"),
-    )
-    plan = p.bind_plan()
-    # The home tmpfs is emitted right after /tmp and BEFORE the worktree bind.
-    assert plan[0] == ("/tmp", "rw")
-    assert plan[1] == ("/home/u", "tmpfs_rw")
-    i_home = plan.index(("/home/u", "tmpfs_rw"))
-    i_wt = plan.index(("/home/u/proj/.imp/worktrees/abc", "rw"))
-    i_ch = plan.index(("/home/u/proj/.imp/quests/abc", "rw"))
-    i_claude = plan.index(("/home/u/.claude", "rw"))
-    i_mask = plan.index(("/run/user/1000", "mask_dir"))
-    assert i_home < i_wt < i_claude          # tmpfs first, cred write-through later
-    assert i_home < i_ch < i_claude
-    assert i_claude < i_mask                 # secret masks remain last
-    # allows_write: everything under the tmpfs home is writable (re-exposed),
-    # the worktree/quest_home (under home) win over the tmpfs, and the cred
-    # dirs are writable — the only real-home paths a spike can write.
-    assert p.allows_write(Path("/home/u/.local/bin/x")) is True
-    assert p.allows_write(Path("/home/u/proj/.imp/worktrees/abc/src/a.py")) is True
-    assert p.allows_write(Path("/home/u/proj/.imp/quests/abc/progress.md")) is True
-    assert p.allows_write(Path("/home/u/.claude/.credentials.json")) is True
-    assert p.allows_write(Path("/home/u/.codex/auth.json")) is True
-    # /run/user mask (emitted last, absolute) still denies.
-    assert p.allows_write(Path("/run/user/1000/bus")) is False
-
-
-def test_tmpfs_rw_argv_is_identical_to_mask_dir_emission():
-    p = _policy(
-        worktree="/wt", git_common_dir="/ctl/.git",
-        git_ro_remask=(), writable_caches=(), extra_readable=(),
-        extra_writable=(), secret_dirs=("/home/u/.ssh",), secret_files=(),
-        ephemeral_home="/home/u",
-    )
-    argv = build_sandbox_argv("x", cwd="/wt", policy=p, engine_env={})
-    pairs = list(itertools.pairwise(argv))
-    # tmpfs_rw home and the secret mask_dir both emit `--tmpfs <path>`.
-    assert ("--tmpfs", "/home/u") in pairs       # ephemeral home
-    assert ("--tmpfs", "/home/u/.ssh") in pairs  # secret mask (byte-identical form)
-
-
-def test_cred_writethrough_argv_is_rw_bind():
-    p = _policy(
-        worktree="/wt", git_common_dir="/ctl/.git",
-        git_ro_remask=(), writable_caches=(), extra_readable=(),
-        extra_writable=(), secret_dirs=(), secret_files=(),
-        ephemeral_home="/home/u",
-        cred_writethrough=("/home/u/.claude",),
-    )
-    argv = " ".join(build_sandbox_argv("x", cwd="/wt", policy=p, engine_env={}))
-    assert "--bind /home/u/.claude /home/u/.claude" in argv
-
-
-def test_argv_binds_match_bind_plan_spike():
-    # Extended argv-parity guard (AC 3). tmpfs_rw and mask_dir emit byte-identical
-    # `--tmpfs <path>` argv, so _parse_argv_binds recovers BOTH as "mask_dir";
-    # normalize bind_plan's tmpfs_rw to mask_dir before the order/position compare.
-    p = _policy(
-        worktree="/wt", git_common_dir="/ctl/.git",
-        git_ro_remask=("/ctl/.git/hooks",), writable_caches=(),
-        extra_readable=(), extra_writable=(),
-        secret_dirs=("/home/u/.ssh", "/run/user/1000"), secret_files=(),
-        ephemeral_home="/home/u",
-        cred_writethrough=("/home/u/.claude",),
-    )
-    argv = build_sandbox_argv("x", cwd="/wt", policy=p, engine_env={})
-    expected = [(b, "mask_dir" if k == "tmpfs_rw" else k) for b, k in p.bind_plan()]
-    assert _parse_argv_binds(argv) == expected
-    # ...then pin the real drift risk: the two identical-argv kinds have OPPOSITE
-    # write semantics — the tmpfs home is writable, the secret mask denies.
-    assert p.allows_write(Path("/home/u/.local/bin/x")) is True
-    assert p.allows_write(Path("/home/u/.ssh/id_rsa")) is False
-
-
-def test_resolve_policy_spike_makes_home_a_writable_tmpfs(tmp_path):
-    control, wt = _layout(tmp_path)
-    home = tmp_path / "home"
-    home.mkdir()
-    pol = resolve_policy(
-        worktree=wt, control_root=control, quest_id="abc",
-        cfg=SandboxConfig(home=home), engine_env_result={}, environ={},
-        available=True, spike=True,
-    )
-    assert pol.ephemeral_home == str(home)
-    assert (str(home), "tmpfs_rw") in pol.bind_plan()
-    # AC 1c: any path under the tmpfs home is writable.
-    assert pol.allows_write(home / "anything") is True
-    assert pol.allows_write(home / ".local" / "bin" / "x") is True
-
-
-def test_resolve_policy_spike_reexposes_worktree_and_quest_home_under_home(tmp_path):
-    # AC 2: project root under $HOME → worktree and quest_home re-expose over the
-    # early home tmpfs and stay writable.
-    home = tmp_path / "home"
-    control = home / "proj"
-    wt = control / ".imp" / "worktrees" / "abc"
-    wt.mkdir(parents=True)
-    (control / ".git" / "hooks").mkdir(parents=True)
-    (control / ".git" / "config").write_text("")
-    quest_home = control / ".imp" / "quests" / "abc"
-    pol = resolve_policy(
-        worktree=wt, control_root=control, quest_id="abc",
-        cfg=SandboxConfig(home=home), engine_env_result={}, environ={},
-        available=True, quest_dir=quest_home, spike=True,
-    )
-    plan = pol.bind_plan()
-    assert plan.index((str(home), "tmpfs_rw")) < plan.index((str(wt), "rw"))
-    assert pol.allows_write(wt / "src" / "a.py") is True
-    assert pol.allows_write(quest_home / "progress.md") is True
-
-
-def test_resolve_policy_spike_binds_existing_cred_dirs_writethrough(tmp_path):
-    control, wt = _layout(tmp_path)
-    home = tmp_path / "home"
-    (home / ".claude").mkdir(parents=True)
-    (home / ".codex").mkdir(parents=True)
-    pol = resolve_policy(
-        worktree=wt, control_root=control, quest_id="abc",
-        cfg=SandboxConfig(home=home), engine_env_result={}, environ={},
-        available=True, spike=True,
-    )
-    assert pol.cred_writethrough == (str(home / ".claude"), str(home / ".codex"))
-    # Write-through binds are rw and win over the tmpfs home (emitted after it).
-    assert pol.allows_write(home / ".claude" / ".credentials.json") is True
-    assert pol.allows_write(home / ".codex" / "auth.json") is True
-
-
-def test_resolve_policy_spike_cred_dirs_existence_gated(tmp_path):
-    control, wt = _layout(tmp_path)
-    home = tmp_path / "home"
-    home.mkdir()   # neither .claude nor .codex exists
-    pol = resolve_policy(
-        worktree=wt, control_root=control, quest_id="abc",
-        cfg=SandboxConfig(home=home), engine_env_result={}, environ={},
-        available=True, spike=True,
-    )
-    assert pol.cred_writethrough == ()   # nothing bound; spike still starts
-
-
-def test_resolve_policy_spike_honors_claude_config_dir_override(tmp_path):
-    control, wt = _layout(tmp_path)
-    home = tmp_path / "home"
-    home.mkdir()
-    custom = tmp_path / "custom-claude"
-    custom.mkdir()
-    pol = resolve_policy(
-        worktree=wt, control_root=control, quest_id="abc",
-        cfg=SandboxConfig(home=home), engine_env_result={},
-        environ={"CLAUDE_CONFIG_DIR": str(custom)}, available=True, spike=True,
-    )
-    assert str(custom) in pol.cred_writethrough
-    assert str(home / ".claude") not in pol.cred_writethrough
-
-
-def test_resolve_policy_spike_omits_home_relative_caches_and_masks(tmp_path):
-    control, wt = _layout(tmp_path)
-    home = tmp_path / "home"
-    (home / ".cache").mkdir(parents=True)     # would be a writable cache when non-spike
-    (home / ".ssh").mkdir(parents=True)       # would be a secret mask_dir when non-spike
-    (home / ".netrc").write_text("secret")    # would be a secret mask_file when non-spike
-    pol = resolve_policy(
-        worktree=wt, control_root=control, quest_id="abc",
-        cfg=SandboxConfig(home=home, secret_paths=("/abs/secret",)),
-        engine_env_result={}, environ={}, available=True, spike=True,
-    )
-    # Home-relative caches/masks are moot under the tmpfs home → not emitted.
-    assert pol.writable_caches == ()
-    assert str(home / ".ssh") not in pol.secret_dirs
-    assert str(home / ".netrc") not in pol.secret_files
-    # /run/user/$UID (absolute) is still masked last.
-    assert any(d.startswith("/run/user/") for d in pol.secret_dirs)
-
-
-def test_resolve_policy_spike_keeps_absolute_secret_paths(tmp_path):
-    control, wt = _layout(tmp_path)
-    home = tmp_path / "home"
-    home.mkdir()
-    abs_secret = tmp_path / "abs-secret"
-    abs_secret.mkdir()   # absolute dir outside $HOME
-    pol = resolve_policy(
-        worktree=wt, control_root=control, quest_id="abc",
-        cfg=SandboxConfig(home=home, secret_paths=(str(abs_secret),)),
-        engine_env_result={}, environ={}, available=True, spike=True,
-    )
-    assert str(abs_secret) in pol.secret_dirs   # absolute secret still masked
-
-
-def test_resolve_policy_spike_omits_home_relative_secret_paths(tmp_path):
-    # Load-bearing partition: a HOME-RELATIVE cfg.secret_paths entry is moot under
-    # the tmpfs home and must be dropped even though it physically exists; the
-    # `if spike and not is_abs: continue` guard is the only thing enforcing this.
-    control, wt = _layout(tmp_path)
-    home = tmp_path / "home"
-    (home / ".mykeys").mkdir(parents=True)   # a real, existing home-relative dir
-    (home / ".mysecret").write_text("x")     # a real, existing home-relative file
-    pol = resolve_policy(
-        worktree=wt, control_root=control, quest_id="abc",
-        cfg=SandboxConfig(home=home, secret_paths=(".mykeys", ".mysecret")),
-        engine_env_result={}, environ={}, available=True, spike=True,
-    )
-    assert str(home / ".mykeys") not in pol.secret_dirs
-    assert str(home / ".mysecret") not in pol.secret_files
-
-
-def test_resolve_policy_non_spike_default_has_no_spike_binds(tmp_path):
-    # AC 6: spike=False (the default) leaves the ephemeral-home / cred binds absent
-    # and the existing caches + home-relative masks intact.
+def test_resolve_policy_disposable_tree_uses_universal_home_model(tmp_path):
+    # AC 4 + AC 10 (unit): disposable_tree no longer specializes the home — the
+    # writable caches write through and the home secret masks apply exactly as
+    # for a normal agent; no ephemeral tmpfs home is synthesized.
     control, wt = _layout(tmp_path)
     home = tmp_path / "home"
     (home / ".cache").mkdir(parents=True)
     (home / ".ssh").mkdir(parents=True)
-    (home / ".claude").mkdir(parents=True)
+    (home / ".netrc").write_text("secret")
+    (home / ".customsecret").mkdir(parents=True)
     pol = resolve_policy(
         worktree=wt, control_root=control, quest_id="abc",
-        cfg=SandboxConfig(home=home), engine_env_result={}, environ={},
-        available=True,   # spike defaults to False
+        cfg=SandboxConfig(home=home, secret_paths=(".customsecret",)),
+        engine_env_result={}, environ={}, available=True, disposable_tree=True,
     )
-    assert pol.ephemeral_home == ""
-    assert pol.cred_writethrough == ()
-    assert str(home / ".cache") in pol.writable_caches      # cache still bound
-    assert str(home / ".ssh") in pol.secret_dirs            # home mask still emitted
+    assert pol.disposable_tree is True
+    assert str(home / ".cache") in pol.writable_caches       # cache write-through
+    assert str(home / ".ssh") in pol.secret_dirs             # home mask applied
+    assert str(home / ".netrc") in pol.secret_files          # home file mask applied
+    assert str(home / ".customsecret") in pol.secret_dirs    # home-relative cfg secret honored
+    # /run/user/$UID still masked last; no tmpfs ephemeral home was produced.
+    assert any(d.startswith("/run/user/") for d in pol.secret_dirs)
+    assert all(kind != "tmpfs_rw" for _, kind in pol.bind_plan())
+
+
+def test_resolve_policy_defaults_disposable_tree_false(tmp_path):
+    control, wt = _layout(tmp_path)
+    pol = resolve_policy(
+        worktree=wt, control_root=control, quest_id="abc",
+        cfg=SandboxConfig(), engine_env_result={}, environ={}, available=True,
+    )
+    assert pol.disposable_tree is False
 
 
 def test_resolve_policy_bakes_workflow_snapshot_overlay(tmp_path):
