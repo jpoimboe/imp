@@ -81,7 +81,7 @@ from imp.engine.types import (
     Vars,
     Workflow,
 )
-from imp.providers.effective import load_effective_config
+from imp.providers.effective import load_effective_config, validate_project_memory
 from imp.providers.resolve import provider_from_model, resolve_run
 
 if TYPE_CHECKING:
@@ -322,6 +322,8 @@ async def run_quest(
         state.checkpoint_threshold = config.context_checkpoint_threshold()
         # Freeze once per quest: resume reuses the facts/memory the first run saw.
         if state.project_facts is None:
+            validate_project_memory(
+                quest.project_root, config.memory, config.project_facts)
             state.project_facts = config.project_facts
             state.memory = config.memory
             state.save(quest.state_dir)
