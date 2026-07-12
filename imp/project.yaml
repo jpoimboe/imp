@@ -15,3 +15,7 @@ test_cmd_fast: "make check"
 test_cmd_slow: "make check && make test-live"
 test_cmd_fast_timeout: 240
 test_cmd_slow_timeout: 600
+
+# Worktree-relative import roots prepended to gate/agent subprocess PYTHONPATH so
+# an editable-installed imp resolves to the worktree, not the main checkout.
+pythonpath: [src]

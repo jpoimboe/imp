@@ -126,3 +126,15 @@ def test_repo_project_yaml_uses_tiered_test_cmds(
     assert eff.config.test_cmd_slow_timeout == 600
     raw = (repo_root / "imp" / "project.yaml").read_text()
     assert "verify_command" not in raw and "verify_timeout" not in raw
+
+
+def test_repo_project_yaml_declares_pythonpath_src(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # imp is the first consumer of the general knob: src-layout, one `src` root
+    # covers both src/imp and src/impty. Must be declared since the env-level
+    # auto-shadow branch was deleted.
+    repo_root = Path(__file__).resolve().parents[1]
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(repo_root / "nonexistent-xdg"))
+    eff = load_effective_config(project_root=repo_root, control_root=None)
+    assert eff.config.pythonpath == ("src",)
