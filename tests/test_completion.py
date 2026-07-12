@@ -427,3 +427,29 @@ def test_inline_bare_turn_end_emit_carries_interrupt_false() -> None:
     assert awaiting[0]["payload"] == {
         "steer_hint": "", "last_agent_message": "the final question",
         "interrupt": False}
+
+
+def test_inline_solicit_passes_skill_reply_through() -> None:
+    import anyio
+
+    from imp.agents.transcript import SkillReply
+    reply_obj = SkillReply(
+        command="/refactor x", name="refactor", body="BODY\n\nx\n")
+    inline = build_inline_solicit(user_input_fn=lambda _p: reply_obj)
+    result = anyio.run(inline, "last")
+    assert result == reply_obj
+
+
+def test_inline_solicit_passes_skill_reply_through_async() -> None:
+    import anyio
+
+    from imp.agents.transcript import SkillReply
+    reply_obj = SkillReply(
+        command="/refactor x", name="refactor", body="BODY\n\nx\n")
+
+    async def _fn(_p: str) -> SkillReply:
+        return reply_obj
+
+    inline = build_inline_solicit(user_input_fn=_fn)
+    result = anyio.run(inline, "last")
+    assert result == reply_obj

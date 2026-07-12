@@ -12,7 +12,10 @@ import json
 from collections.abc import AsyncGenerator, Awaitable, Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Literal, Protocol
+from typing import TYPE_CHECKING, Any, Literal, Protocol
+
+if TYPE_CHECKING:
+    from imp.agents.transcript import SkillReply
 
 from imp.engine.env import TestGates
 from imp.engine.types import AgentDef
@@ -154,7 +157,8 @@ class AgentInvocation:
     # inject and continue. None means "no end-of-turn nudge wired"
     # (legacy/test); providers then emit the immediate no_complete_step behavior.
     continuation_fn: (
-        Callable[[str], tuple[str | Awaitable[str], bool]] | None
+        Callable[[str], tuple[str | SkillReply | Awaitable[str | SkillReply], bool]]
+        | None
     ) = None
     # Stable identity of this agent invocation (step/gate/subagent), used as
     # the strict filter key for reconstruction. Derived by the executor /
