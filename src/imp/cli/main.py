@@ -1591,7 +1591,7 @@ def _cmd_list(args: argparse.Namespace) -> int:
     try:
         control = _control_root()
     except worktree.PreconditionError:
-        print(_NO_CHANGES_MESSAGE)
+        print(_NO_QUESTS_MESSAGE)
         return 0
     lines = _overview_lines(control, show_all=args.all, now=datetime.now(UTC),
                             color=should_use_color(sys.stdout))
@@ -1723,11 +1723,11 @@ def _resolve_default_id(control: Path) -> str | None:
     return archive_read.most_recent_archived_id(control)
 
 
-_NO_CHANGES_MESSAGE = "No quests yet — start one with imp new"
+_NO_QUESTS_MESSAGE = "No quests yet — start one with imp new"
 
 
 def _log_picker_empty() -> int:
-    print(_NO_CHANGES_MESSAGE)
+    print(_NO_QUESTS_MESSAGE)
     return 2
 
 
@@ -1997,7 +1997,7 @@ def _cmd_log(args: argparse.Namespace) -> int:
     else:
         quest_id = _resolve_default_id(control)
     if quest_id is None:
-        print(_NO_CHANGES_MESSAGE)
+        print(_NO_QUESTS_MESSAGE)
         return 0
     meta = _unstarted_backlog_meta(control, quest_id)
     if meta is not None:
@@ -2817,7 +2817,7 @@ def _overview_lines(control: Path, *, show_all: bool, now: datetime,
     history = _history_rows(control, show_all=show_all,
                             live_ids={r[0] for r in status_rows})
     if not inflight and not backlog_rows and not history:
-        return [_NO_CHANGES_MESSAGE]
+        return [_NO_QUESTS_MESSAGE]
 
     intents: dict[str, str | None] = {}
     for r in inflight:
@@ -2874,7 +2874,7 @@ def _cmd_status(args: argparse.Namespace, _control: Path | None = None) -> int:
     try:
         control = _control if _control is not None else _control_root()
     except worktree.PreconditionError:
-        print(_NO_CHANGES_MESSAGE)
+        print(_NO_QUESTS_MESSAGE)
         return 0
     lines = _overview_lines(control, show_all=args.all, now=datetime.now(UTC),
                             color=should_use_color(sys.stdout))
