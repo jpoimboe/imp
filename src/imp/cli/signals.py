@@ -667,12 +667,19 @@ class InterruptCoordinator:
         import anyio
 
         self._emit("interrupt_requested", {"source": reason, "via": via})
-        if not self._runner_stack:
-            # Nothing attached: the run already yielded (e.g. a ctrl-d leave at a
-            # turn-end / resume-hold prompt). The pause flags above are the whole
-            # effect — do NOT arm the watchdog against an empty stack: nothing would
-            # post a yield to disarm it, so it would false-fire interrupt_escalated
-            # after the window AND stall the pump task group's close for the window.
+        if not self._runner_stack or reason == "model-override":
+            # No interrupt is delivered in two cases:
+            #  - empty stack: the run already yielded (e.g. a ctrl-d leave at a
+            #    turn-end / resume-hold prompt).
+            #  - model-override: the run is parked at a between-turns solicit with
+            #    no active query; the hibernation gate's model-override wake arm
+            #    unwinds it. Interrupting the idle attached runner would await its
+            #    post-interrupt ResultMessage forever -> 2s cooperative deadline ->
+            #    force_kill -> the conversation is archived out from under the user.
+            # The pause flags above are the whole effect — do NOT arm the watchdog:
+            # nothing would post a yield to disarm it, so it would false-fire
+            # interrupt_escalated after the window AND stall the pump task group's
+            # close for the window.
             return
         spawn = self._spawn
         if spawn is not None:

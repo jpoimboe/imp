@@ -58,3 +58,50 @@ async def test_repeat_signal_pause_invokes_runner_once_per_round() -> None:
     await coord.signal_pause(reason="ctrl-c")
     await coord.signal_pause(reason="ctrl-c")  # repeat gesture, same round
     assert calls == [True]  # first-wins: runner interrupted once, not per gesture
+
+
+@pytest.mark.anyio
+async def test_model_override_signal_pause_takes_no_interrupt_route() -> None:
+    coord = InterruptCoordinator()
+    log = RecordingLog()
+    coord.set_event_log(log)
+    interrupt_calls: list[str] = []
+    spawned: list[Any] = []
+
+    async def runner_interrupt() -> None:
+        interrupt_calls.append("interrupt")
+
+    coord.attach_runner(runner_interrupt)
+    coord.set_delivery_spawner(lambda fn: spawned.append(fn))
+
+    await coord.signal_pause(reason="model-override", via="frame")
+
+    # No _deliver_interrupt / _yield_watchdog spawned, runner never interrupted.
+    assert spawned == []
+    assert interrupt_calls == []
+    # Pause state is still set so the daemon hold loop can apply the override.
+    assert coord.pause_reason == "model-override"
+    assert coord.should_pause is True
+    # interrupt_requested still emitted for observability; no delivered/escalated.
+    types = [r["type"] for r in log.records]
+    assert "interrupt_requested" in types
+    assert "interrupt_delivered" not in types
+    assert "interrupt_escalated" not in types
+
+
+@pytest.mark.anyio
+async def test_ctrl_c_signal_pause_still_spawns_delivery() -> None:
+    coord = InterruptCoordinator()
+    interrupt_calls: list[str] = []
+    spawned: list[Any] = []
+
+    async def runner_interrupt() -> None:
+        interrupt_calls.append("interrupt")
+
+    coord.attach_runner(runner_interrupt)
+    coord.set_delivery_spawner(lambda fn: spawned.append(fn))
+
+    await coord.signal_pause(reason="ctrl-c", via="frame")
+
+    # Contrast: a genuine ctrl-c with the daemon spawner set DOES arm delivery.
+    assert len(spawned) == 2
