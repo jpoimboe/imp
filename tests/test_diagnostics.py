@@ -77,3 +77,38 @@ def test_repeated_signals_append_repeated_sections(tmp_path: Path) -> None:
 
     assert text.count("==== imp stack dump") == 2
     assert text.count("-- asyncio tasks --") == 2
+
+
+def test_asyncio_section_produced_while_loop_is_wedged(tmp_path: Path) -> None:
+    import threading
+
+    dump = tmp_path / "stack-dump.txt"
+    dumper = install_stack_dumper(dump)
+
+    async def _named_pending() -> None:
+        await asyncio.Event().wait()
+
+    async def _main() -> None:
+        marker = asyncio.ensure_future(_named_pending())
+        # A blocking sync call inside the coroutine wedges the loop: it does not
+        # await, so the loop cannot turn while the signal is handled.
+        time.sleep(1.5)
+        marker.cancel()
+
+    def _fire() -> None:
+        time.sleep(0.3)
+        os.kill(os.getpid(), signal.SIGUSR1)
+
+    firer = threading.Thread(target=_fire, name="sigusr1-firer")
+    try:
+        firer.start()
+        asyncio.run(_main())
+        text = _wait_for(dump, "-- asyncio tasks --")
+    finally:
+        firer.join(timeout=2)
+        dumper.uninstall()
+
+    assert "-- asyncio tasks --" in text
+    # The wedged loop never turned, yet the diagnostics thread still enumerated
+    # the pending task and captured its stack.
+    assert "_named_pending" in text
