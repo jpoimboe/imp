@@ -1,4 +1,4 @@
-"""Archive maintenance: reap leaked change homes already durable in the archive."""
+"""Archive maintenance: reap leaked quest homes already durable in the archive."""
 from __future__ import annotations
 
 import json
@@ -9,7 +9,7 @@ from imp.engine.archive import ensure_current, index, index_path
 
 
 def reap_archived_homes(control_root: Path) -> int:
-    """Reap live change homes already terminal and durable in the archive; return the count."""
+    """Reap live quest homes already terminal and durable in the archive; return the count."""
     from imp.cli.main import _INFLIGHT, _list_quest_homes, _quest_home
 
     ensure_current(control_root)

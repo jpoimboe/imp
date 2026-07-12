@@ -242,7 +242,7 @@ async def test_refresh_dropping_cursor_step_pauses_unknown_step(tmp_path: Path) 
     paused = [e for e in events if e.get("type") == "workflow_paused"]
     assert paused and paused[-1]["payload"]["reason"] == "unknown_step"
     assert paused[-1]["payload"]["step"] == "w"
-    assert not any(e.get("type") == "change_merged" for e in events)
+    assert not any(e.get("type") == "quest_merged" for e in events)
     # run_quest's own entry refresh swapped the "w" snapshot to the new live
     # version, which is what drops the cursor step.
     assert "name: renamed" in (

@@ -11,13 +11,13 @@ TS = "2026-06-25T14:32:05+00:00"
 LOUD_EVENT = {
     "id": "L1", "type": "awaiting_user_input", "timestamp": TS,
     "payload": {"steer_hint": "Need your call"},
-    "change": {"id": "k3f9qa", "title": "Dark mode"},
+    "quest": {"id": "k3f9qa", "title": "Dark mode"},
 }
 
 SILENT_EVENT = {
     "id": "S1", "type": "agent_output", "timestamp": TS,
     "payload": {"text": "working on it"},
-    "change": {"id": CHANGE_ID, "title": "My change"},
+    "quest": {"id": CHANGE_ID, "title": "My change"},
 }
 
 
@@ -73,7 +73,7 @@ def test_on_event_drops_a_silent_event_with_an_empty_body() -> None:
     sent: list = []
     adapter = _adapter(sent)
     adapter.on_event({"id": "x", "type": "llm_response", "timestamp": TS,
-                      "payload": {}, "change": {"id": "k3f9qa", "title": "X"}})
+                      "payload": {}, "quest": {"id": "k3f9qa", "title": "X"}})
     assert sent == []
 
 
@@ -87,19 +87,19 @@ def test_on_event_records_handle_map_even_when_send_returns_none() -> None:
 def test_unsubscribed_event_is_dropped_and_records_no_maps() -> None:
     adapter = _adapter([], subscriptions=Subscriptions())
     adapter.on_event(SILENT_EVENT)
-    assert adapter._handle_to_change == {}
-    assert adapter._msg_to_change == {}
+    assert adapter._handle_to_quest == {}
+    assert adapter._msg_to_quest == {}
 
 
 def _narration(text: str) -> dict:
     return {"id": "n1", "type": "llm_response", "timestamp": TS,
-            "change": {"id": "k3f9qa", "title": "t"},
+            "quest": {"id": "k3f9qa", "title": "t"},
             "payload": {"raw": {"content": [{"type": "text", "text": text}]}}}
 
 
 def _prompt_less_await() -> dict:
     return {"id": "a1", "type": "awaiting_user_input", "timestamp": TS,
-            "change": {"id": "k3f9qa", "title": "t"},
+            "quest": {"id": "k3f9qa", "title": "t"},
             "payload": {"steer_hint": ""}}
 
 
@@ -147,7 +147,7 @@ def _step_started(
     if not show_label:
         payload["show_label"] = False
     return {"id": "st1", "type": "step_started", "timestamp": TS,
-            "change": {"id": quest_id, "title": "t"}, "payload": payload}
+            "quest": {"id": quest_id, "title": "t"}, "payload": payload}
 
 
 def test_step_started_renders_silent_header_less_divider_when_subscribed() -> None:
@@ -175,7 +175,7 @@ def test_prompt_less_await_does_not_borrow_another_changes_narration() -> None:
     adapter = _adapter(sent, subscriptions=_subs("k3f9qa", "other"))
     adapter.on_event(_narration("A's secret context"))   # narration for k3f9qa
     adapter.on_event({"id": "a2", "type": "awaiting_user_input", "timestamp": TS,
-                      "change": {"id": "other", "title": "t"}, "payload": {"steer_hint": ""}})
+                      "quest": {"id": "other", "title": "t"}, "payload": {"steer_hint": ""}})
     loud = [text for text, silent in sent if not silent]
     assert loud and all("A's secret context" not in text for text in loud)
 
@@ -183,7 +183,7 @@ def test_prompt_less_await_does_not_borrow_another_changes_narration() -> None:
 SILENT_K3 = {
     "id": "S2", "type": "agent_output", "timestamp": TS,
     "payload": {"text": "working on it"},
-    "change": {"id": "k3f9qa", "title": "Dark mode"},
+    "quest": {"id": "k3f9qa", "title": "Dark mode"},
 }
 
 
@@ -200,8 +200,8 @@ def test_alert_all_off_drops_unsubscribed_buzz_and_records_no_maps() -> None:
     adapter = _adapter(sent, subscriptions=Subscriptions(), alert_all=off)
     adapter.on_event(LOUD_EVENT)
     assert sent == []
-    assert adapter._handle_to_change == {}
-    assert adapter._msg_to_change == {}
+    assert adapter._handle_to_quest == {}
+    assert adapter._msg_to_quest == {}
 
 
 def test_alert_all_on_sends_unsubscribed_buzz_loud_and_records_maps() -> None:
@@ -213,8 +213,8 @@ def test_alert_all_on_sends_unsubscribed_buzz_loud_and_records_maps() -> None:
     text, silent = sent[0]
     assert silent is False
     assert "Need your call" in text
-    assert adapter._handle_to_change == {"k3f9qa": "k3f9qa"}
-    assert adapter._msg_to_change == {42: "k3f9qa"}
+    assert adapter._handle_to_quest == {"k3f9qa": "k3f9qa"}
+    assert adapter._msg_to_quest == {42: "k3f9qa"}
 
 
 def test_alert_all_on_still_drops_unsubscribed_silent_narrative() -> None:
@@ -320,7 +320,7 @@ def test_replayed_event_marks_alert_all_seen_even_when_alert_all_is_off() -> Non
 INTERRUPT_GATE = {
     "id": "I1", "type": "awaiting_user_input", "timestamp": TS,
     "payload": {"steer_hint": "interrupted — type to redirect", "interrupt": True},
-    "change": {"id": "k3f9qa", "title": "Dark mode"},
+    "quest": {"id": "k3f9qa", "title": "Dark mode"},
 }
 
 
@@ -333,7 +333,7 @@ def test_subscribed_interrupt_gate_streams_silent_with_reply_handle() -> None:
     assert silent is True                 # streamed quietly — no phone buzz
     assert text.endswith("↩ @k3f9qa")     # reply handle intact: still steerable
     assert "needs your input" in text
-    assert adapter._handle_to_change == {"k3f9qa": "k3f9qa"}
+    assert adapter._handle_to_quest == {"k3f9qa": "k3f9qa"}
 
 
 def test_alert_all_on_drops_unsubscribed_interrupt_gate() -> None:
@@ -342,8 +342,8 @@ def test_alert_all_on_drops_unsubscribed_interrupt_gate() -> None:
         sent, subscriptions=Subscriptions(), alert_all=_alert_all_on())
     adapter.on_event(INTERRUPT_GATE)
     assert sent == []                     # silent tier is suppressed on alert-all
-    assert adapter._handle_to_change == {}
-    assert adapter._msg_to_change == {}
+    assert adapter._handle_to_quest == {}
+    assert adapter._msg_to_quest == {}
 
 
 def test_genuine_gate_still_buzzes_on_both_paths() -> None:
@@ -359,12 +359,12 @@ def test_genuine_gate_still_buzzes_on_both_paths() -> None:
     assert alerted and alerted[0][1] is False          # loud on alert-all path
 
 
-def test_subscribed_change_merged_is_header_and_done_no_handle() -> None:
+def test_subscribed_quest_merged_is_header_and_done_no_handle() -> None:
     sent: list = []
     adapter = _adapter(sent, subscriptions=_subs("k3f9qa"))
     adapter.on_event({
-        "id": "m1", "type": "change_merged", "timestamp": TS,
-        "change": {"id": "k3f9qa", "title": "Dark mode"}, "payload": {}})
+        "id": "m1", "type": "quest_merged", "timestamp": TS,
+        "quest": {"id": "k3f9qa", "title": "Dark mode"}, "payload": {}})
     assert len(sent) == 1
     text, silent = sent[0]
     assert silent is False
@@ -372,5 +372,5 @@ def test_subscribed_change_merged_is_header_and_done_no_handle() -> None:
     assert text.endswith("done")                      # label-only body
     assert "[Dark mode]" not in text                  # no doubled title bracket
     assert "↩" not in text                            # done is not a gate: no handle
-    assert adapter._handle_to_change == {"k3f9qa": "k3f9qa"}
-    assert adapter._msg_to_change == {42: "k3f9qa"}
+    assert adapter._handle_to_quest == {"k3f9qa": "k3f9qa"}
+    assert adapter._msg_to_quest == {42: "k3f9qa"}

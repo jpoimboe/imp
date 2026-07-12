@@ -20,11 +20,11 @@ def test_status_and_log_share_one_empty_message(tmp_path, monkeypatch, capsys) -
     rc_status = m._cmd_status(argparse.Namespace(all=False))
     status_out = capsys.readouterr()
     assert rc_status == 0
-    assert m._NO_CHANGES_MESSAGE in status_out.out
+    assert m._NO_QUESTS_MESSAGE in status_out.out
 
     rc_log = m._cmd_log(argparse.Namespace(token=None, full=False, follow=False))
     log_out = capsys.readouterr()
     assert rc_log == 0
-    assert m._NO_CHANGES_MESSAGE in log_out.out
+    assert m._NO_QUESTS_MESSAGE in log_out.out
     assert "imp: no Quests found" not in log_out.err   # no error-prefixed register
     assert log_out.err == ""                             # empty case is non-error

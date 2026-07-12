@@ -10,21 +10,21 @@ def test_validate_rejects_malformed_syntax() -> None:
 
 def test_validate_rejects_unavailable_provider(monkeypatch) -> None:
     import imp.cli.model_command as mod
-    monkeypatch.setattr(mod, "_available_for_change", lambda quest: ["anthropic"])
+    monkeypatch.setattr(mod, "_available_for_quest", lambda quest: ["anthropic"])
     err = validate_model_arg("openai:gpt-5", quest=SimpleNamespace())
     assert err is not None and "openai" in err
 
 
 def test_validate_accepts_available_provider(monkeypatch) -> None:
     import imp.cli.model_command as mod
-    monkeypatch.setattr(mod, "_available_for_change", lambda quest: ["anthropic"])
+    monkeypatch.setattr(mod, "_available_for_quest", lambda quest: ["anthropic"])
     assert validate_model_arg(
         "anthropic:claude-fable-5", quest=SimpleNamespace()) is None
 
 
 def test_validate_bare_model_needs_no_provider_check(monkeypatch) -> None:
     import imp.cli.model_command as mod
-    monkeypatch.setattr(mod, "_available_for_change", lambda quest: [])
+    monkeypatch.setattr(mod, "_available_for_quest", lambda quest: [])
     assert validate_model_arg("claude-fable-5", quest=SimpleNamespace()) is None
 
 
@@ -131,7 +131,7 @@ def test_validate_model_arg_still_rejects_unavailable_via_delegation(
     import imp.cli.model_command as mod
     from imp.cli.model_command import validate_model_arg
 
-    monkeypatch.setattr(mod, "_available_for_change", lambda quest: ["anthropic"])
+    monkeypatch.setattr(mod, "_available_for_quest", lambda quest: ["anthropic"])
     reason = validate_model_arg("openai:gpt-5.5", quest=object())
     assert reason is not None
     assert "openai" in reason

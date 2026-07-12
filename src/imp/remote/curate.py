@@ -1,4 +1,4 @@
-"""Curate raw engine events: filter by allowlist, track step/status, augment with change context."""
+"""Curate raw engine events: filter by allowlist, track step/status, augment with quest context."""
 from __future__ import annotations
 
 from collections.abc import Callable
@@ -27,11 +27,11 @@ class EventCurator:
         # Re-read while empty to catch a mid-session rename; freeze on first non-empty.
         if not self._title:
             self._title = self._title_provider()
-        # Quest context is namespaced under "change" so it never clobbers the
+        # Quest context is namespaced under "quest" so it never clobbers the
         # event's OWN id/payload fields (events carry their own log id).
         return {
             **event,
-            "change": {
+            "quest": {
                 "id": self._id, "title": self._title,
                 "step": self._step, "status": self._status,
             },
@@ -49,5 +49,5 @@ class EventCurator:
             self._status = "paused"
         elif etype == "merge_blocked":
             self._status = "merge_blocked"
-        elif etype == "change_merged":
+        elif etype == "quest_merged":
             self._status = "completed"

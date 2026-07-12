@@ -35,7 +35,7 @@ def _adapter(
 
 def _narration(text: str, *, replay: bool = False) -> dict:
     event = {"id": "n1", "type": "llm_response", "timestamp": TS,
-             "change": {"id": "k3f9qa", "title": "t"},
+             "quest": {"id": "k3f9qa", "title": "t"},
              "payload": {"raw": {"content": [{"type": "text", "text": text}]}}}
     if replay:
         event["_replay"] = True
@@ -44,13 +44,13 @@ def _narration(text: str, *, replay: bool = False) -> dict:
 
 def _prompt_less_await() -> dict:
     return {"id": "a1", "type": "awaiting_user_input", "timestamp": TS,
-            "change": {"id": "k3f9qa", "title": "t"},
+            "quest": {"id": "k3f9qa", "title": "t"},
             "payload": {"steer_hint": ""}}
 
 
 def _prompt_await(prompt: str) -> dict:
     return {"id": "a2", "type": "awaiting_user_input", "timestamp": TS,
-            "change": {"id": "k3f9qa", "title": "t"},
+            "quest": {"id": "k3f9qa", "title": "t"},
             "payload": {"steer_hint": prompt}}
 
 

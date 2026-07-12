@@ -95,7 +95,7 @@ def select_driver_config(
     if dc is None:
         return None
     env["IMP_REMOTE_CONTROL_SOCK"] = str(socket_path(control_root))
-    env["IMP_REMOTE_CONTROL_CHANGE_ID"] = quest_id
+    env["IMP_REMOTE_CONTROL_QUEST_ID"] = quest_id
     env["IMP_REMOTE_CONTROL_TITLE"] = title
     entry = REGISTRY["daemon-connector"]
     return DriverConfig(

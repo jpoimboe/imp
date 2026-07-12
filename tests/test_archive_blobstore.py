@@ -8,7 +8,7 @@ from imp.engine.archive.blobstore import LocalBlobStore, hash_content
 def test_hash_content_is_deterministic_and_content_addressed() -> None:
     a = hash_content(b'{"type":"quest_created"}\n')
     b = hash_content(b'{"type":"quest_created"}\n')
-    c = hash_content(b'{"type":"change_merged"}\n')
+    c = hash_content(b'{"type":"quest_merged"}\n')
     assert a == b
     assert a != c
     assert len(a) == 64  # sha256 hexdigest

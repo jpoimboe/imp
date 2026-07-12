@@ -65,8 +65,8 @@ def test_recent_narrative_returns_last_n_augmented_events_oldest_first(
         "second", "third"]
     assert all(e["type"] == "llm_response" for e in events)
     # Augmented with change context so header_line can render id · title.
-    assert all(e["change"]["id"] == cid for e in events)
-    assert all(e["change"]["title"] == "Dark mode" for e in events)
+    assert all(e["quest"]["id"] == cid for e in events)
+    assert all(e["quest"]["title"] == "Dark mode" for e in events)
 
 
 def test_recent_narrative_skips_tool_only_responses(tmp_path: Path) -> None:

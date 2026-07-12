@@ -86,7 +86,7 @@ async def test_run_daemon_relays_a_resident_session_event_and_cleans_up(
             while not adapter.events:
                 await anyio.sleep(0.02)
         assert adapter.events[0]["type"] == "agent_output"
-        assert adapter.events[0]["change"]["id"] == cid
+        assert adapter.events[0]["quest"]["id"] == cid
 
         await sess.close()
         shutdown.set()                          # clean drain

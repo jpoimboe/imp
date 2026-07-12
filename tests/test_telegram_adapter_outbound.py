@@ -8,7 +8,7 @@ from imp.remote.daemon.telegram_adapter import format_outbound, send_message
 EVENT = {
     "type": "awaiting_user_input",
     "payload": {"steer_hint": "Need your call"},
-    "change": {"id": "2026-06-13-k3f9qa", "title": "Dark mode"},
+    "quest": {"id": "2026-06-13-k3f9qa", "title": "Dark mode"},
 }
 
 
@@ -21,8 +21,8 @@ def test_format_outbound_carries_body_and_handle() -> None:
 
 def test_format_outbound_omits_handle_for_non_await_event() -> None:
     # Every non-gate event renders with NO handle line.
-    event = {"type": "change_merged", "payload": {},
-             "change": {"id": "k3f9qa", "title": "Dark mode"}}
+    event = {"type": "quest_merged", "payload": {},
+             "quest": {"id": "k3f9qa", "title": "Dark mode"}}
     assert format_outbound(event, "k3f9qa") == "done"
 
 

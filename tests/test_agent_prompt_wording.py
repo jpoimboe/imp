@@ -143,7 +143,7 @@ def test_no_workflow_prompt_invokes_artifact_commit() -> None:
                 f"{wf_name}/{name} still names the journal-wip ref"
 
 
-def test_gap_check_change_review_is_unconditional() -> None:
+def test_gap_check_quest_review_is_unconditional() -> None:
     body = _agent_prompt("gap-check")
     assert "if the change spanned more than one plan" not in body
     assert "once-only quest-wide review." in body

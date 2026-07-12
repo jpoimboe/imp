@@ -32,7 +32,7 @@ def test_daemon_absent_still_selects_the_connector(tmp_path: Path) -> None:
     assert dc is not None
     assert dc.command[-1] == "imp.remote.drivers.daemon_connector"
     assert env["IMP_REMOTE_CONTROL_SOCK"].endswith("remote-control.sock")
-    assert env["IMP_REMOTE_CONTROL_CHANGE_ID"] == "2026-06-13-abc"
+    assert env["IMP_REMOTE_CONTROL_QUEST_ID"] == "2026-06-13-abc"
 
 
 def test_live_socket_selects_the_connector_and_sets_env(tmp_path: Path) -> None:
@@ -49,7 +49,7 @@ def test_live_socket_selects_the_connector_and_sets_env(tmp_path: Path) -> None:
         assert dc is not None
         assert dc.command[-1] == "imp.remote.drivers.daemon_connector"
         assert env["IMP_REMOTE_CONTROL_SOCK"] == str(sock)
-        assert env["IMP_REMOTE_CONTROL_CHANGE_ID"] == "2026-06-13-abc"
+        assert env["IMP_REMOTE_CONTROL_QUEST_ID"] == "2026-06-13-abc"
         assert env["IMP_REMOTE_CONTROL_TITLE"] == "Dark mode"
     finally:
         srv.close()

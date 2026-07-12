@@ -31,7 +31,7 @@ def _build(tmp_path: Path, *, name: str, body: str):
         user_chat_input_fn=None, transcript_dir=tmp_path / "td",
 events_path=tmp_path / "e.jsonl", subagent_defs={},
         tiers=(), max_tool_calls=None, agent_id="step:p/s", event_log=None,
-        change_state=None, first_event_parent_id=None, resolved_tiers=None,
+        quest_state=None, first_event_parent_id=None, resolved_tiers=None,
         coordinator=None)
 
 

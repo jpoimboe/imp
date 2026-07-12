@@ -1,4 +1,4 @@
-"""Deliver one reply into a change's session daemon (attach + inject + detach)."""
+"""Deliver one reply into a quest's session daemon (attach + inject + detach)."""
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
@@ -20,7 +20,7 @@ async def deliver_session_reply(
     attach: AttachFn | None = None,
     gate_timeout: float = 60.0,
 ) -> None:
-    """Deliver one reply into change's session daemon, then detach."""
+    """Deliver one reply into quest's session daemon, then detach."""
     attach = attach or build_session_attach(quest, resume=True)
     gate_send, gate_recv = anyio.create_memory_object_stream[str](
         max_buffer_size=1)

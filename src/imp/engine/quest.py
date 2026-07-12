@@ -74,7 +74,7 @@ def _imp_commit(control_root: Path) -> str:
 
 
 def live_quest_ids(control_root: Path) -> list[str]:
-    """Live change-home ids: dirs under .imp/quests/ holding a quest.json (archive excluded)."""
+    """Live quest-home ids: dirs under .imp/quests/ holding a quest.json (archive excluded)."""
     root = control_root / ".imp" / "quests"
     if not root.is_dir():
         return []
@@ -84,13 +84,13 @@ def live_quest_ids(control_root: Path) -> list[str]:
 
 
 def live_stems(control_root: Path) -> frozenset[str]:
-    """Four-letter stems of every live change home — the mint avoid-set."""
+    """Four-letter stems of every live quest home — the mint avoid-set."""
     return frozenset(cid[:4] for cid in live_quest_ids(control_root))
 
 
 def _migrate_v1_to_v2(quest_dir: Path) -> None:
     """v1->v2: rename base_head->orig_base_head and backfill cur_base_head via
-    `git merge-base base_branch HEAD` in the change's project_root."""
+    `git merge-base base_branch HEAD` in the quest's project_root."""
     meta_path = quest_dir / "quest.json"
     meta = json.loads(meta_path.read_text())
     meta["orig_base_head"] = meta.pop("base_head", "")

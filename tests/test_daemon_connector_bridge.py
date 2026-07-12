@@ -18,7 +18,7 @@ from imp.remote.drivers.daemon_connector import main
 def _env(path: str) -> dict[str, str]:
     return {
         "IMP_REMOTE_CONTROL_SOCK": path,
-        "IMP_REMOTE_CONTROL_CHANGE_ID": "2026-06-13-abc",
+        "IMP_REMOTE_CONTROL_QUEST_ID": "2026-06-13-abc",
         "IMP_REMOTE_CONTROL_TITLE": "Add dark mode",
     }
 

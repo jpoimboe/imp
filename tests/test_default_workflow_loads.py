@@ -38,7 +38,7 @@ def test_supercycle_back_edges_present() -> None:
     steps = {s.name: s for p in _wf().phases for s in p.steps}
     # The outline drives the plan loop; gap-check is the end-of-change backstop.
     assert "gap-check" in steps
-    assert "change-review" in steps
+    assert "quest-review" in steps
     assert "deferred-sweep" in steps
     assert "task-lead" in steps and "finalize" in steps
 
@@ -147,10 +147,10 @@ def test_every_shown_step_has_its_label() -> None:
         "verify": "running tests",
         "autosquash-resolve-merge": "resolving merge fixups",
         "gap-check": "checking plan coverage",
-        "change-review": "reviewing entire diff",
+        "quest-review": "reviewing entire diff",
         "deferred-sweep": "sweeping deferred tasks",
         "converge-verify": "running tests",
-        "summarizer": "summarizing change",
+        "summarizer": "summarizing quest",
         "finalize": "finalizing",
         "wait-for-head": "waiting in merge queue",
         "reconciler": "resolving merge conflicts",
@@ -178,7 +178,7 @@ def test_route_labels_assigned() -> None:
     assert by["plan-reviewer"].rules[0].label == "addressing plan review feedback"
     assert by["plan-reviewer"].rules[2].label == "addressing plan review feedback"
     # batch-code-reviewer task_gap -> task-lead
-    assert by["change-review"].rules[0].label == "addressing code review feedback"
+    assert by["quest-review"].rules[0].label == "addressing code review feedback"
     # verify gate fallthrough resumes task-lead with the fix reason
     assert by["verify"].rules[2].label == "fixing test failures"
     # finalize: merge label + rework label

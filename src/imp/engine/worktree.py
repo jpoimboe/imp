@@ -298,7 +298,7 @@ def merge_to_base(
     project_root: Path | None = None,
 ) -> MergeResult:
     """Integrate imp/<id> into <base> (spec §4). B1: git decides on base dirt.
-    B3: re-assert UNDER THE LOCK (the race-proof point) that the change worktree
+    B3: re-assert UNDER THE LOCK (the race-proof point) that the quest worktree
     is clean (DIRTY) when `project_root` is given: the reconciler is the last
     committer, so a dirty tree would silently drop its work then be destroyed by
     remove_worktree (H1 net, R5)."""
@@ -395,7 +395,7 @@ def artifact_commit(
     control_root: Path, quest_id: str, files: Mapping[str, Path], *, message: str,
     warn: Callable[[str], None] | None = None,
 ) -> bool:
-    """Snapshot a change's artifacts to refs/imp/artifacts/<id> as a FULL tree.
+    """Snapshot a quest's artifacts to refs/imp/artifacts/<id> as a FULL tree.
 
     The committed tree is exactly `files`, flat at the tree root (e.g.
     spec/<id>.md, plans/<id>-plan-N.md) — a file dropped from `files` is gone at

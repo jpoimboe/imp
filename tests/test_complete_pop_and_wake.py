@@ -99,6 +99,6 @@ def test_complete_without_merge_emits_workflow_completed(tmp_path, monkeypatch) 
     types = [e.get("type") for e in log.read()]
     assert "workflow_completed" in types                 # generic terminal event emitted
     # the merge-only event is NOT emitted on the no-merge path
-    assert "change_merged" not in types
+    assert "quest_merged" not in types
     completed = [e for e in log.read() if e.get("type") == "workflow_completed"]
     assert completed and completed[0].get("payload") == {}

@@ -1,5 +1,5 @@
 """Abandon a quest: mark abandoned, archive a non-resumable tombstone, drop the
-live home; on a built-out change also pop the merge queue and remove the worktree + branch."""
+live home; on a built-out quest also pop the merge queue and remove the worktree + branch."""
 from __future__ import annotations
 
 import shutil
@@ -10,9 +10,9 @@ from imp.engine.state import ProjectLock, State
 
 
 def tear_down_quest(quest: Quest) -> None:
-    """Destroy a change: mark abandoned, archive a non-resumable tombstone, drop the
-    live home. On a built-out change also pop the merge queue (waking the next head if
-    this change was the head), remove the worktree, and delete the branch; on a draft
+    """Destroy a quest: mark abandoned, archive a non-resumable tombstone, drop the
+    live home. On a built-out quest also pop the merge queue (waking the next head if
+    this quest was the head), remove the worktree, and delete the branch; on a draft
     those three are skipped (there is no worktree, branch, or queue slot)."""
     control = quest.control_root
     quest_id = quest.id
@@ -23,7 +23,7 @@ def tear_down_quest(quest: Quest) -> None:
         state.status = "abandoned"
         state.save(quest.state_dir)
         quest.event_log().append(
-            agent_id=None, type="change_abandoned", payload={})
+            agent_id=None, type="quest_abandoned", payload={})
         # archive before worktree removal (the runtime files live inside the worktree)
         from imp.engine import archive
         archive.archive_quest(
@@ -71,7 +71,7 @@ def archive_conversation(quest: Quest) -> None:
 
 
 def save_to_backlog(quest: Quest, reason: str | None = None) -> None:
-    """Pause a conversation: the un-materialized change-home is kept (not archived) and
+    """Pause a conversation: the un-materialized quest-home is kept (not archived) and
     remains resumable. Zone is derived from both `materialized` and `origin` — no bespoke
     status string is needed for zone placement. When the save was driven by a mid-run
     interrupt leave, `reason` (e.g. "ctrl-d") is stamped onto the conversation_saved

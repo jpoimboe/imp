@@ -76,7 +76,7 @@ class ImptyDriver:
         """Spawn an interactive program on a fresh pty and return its first screen.
 
         Replaces any existing session. `argv` is the command + args, e.g.
-        ["imp", "new", "my-change"] — spawned directly, so the program is the
+        ["imp", "new", "my-quest"] — spawned directly, so the program is the
         foreground, controlling-tty session leader (Ctrl-C/ESC reach it). No shell
         wrapper is needed; pass `env` to set variables (e.g. API keys) instead of a
         `bash -lc "export …; exec …"` wrapper, which would otherwise put bash — not

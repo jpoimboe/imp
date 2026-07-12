@@ -15,7 +15,7 @@ from imp.remote.daemon.commands import (
     Alerts,
     Create,
     Help,
-    ListChanges,
+    ListQuests,
     ListResult,
     Notice,
     Replay,
@@ -35,14 +35,14 @@ def anyio_backend() -> str:
 
 class FakeControl:
     def __init__(
-        self, changes: list[QuestInfo] | None = None, *, abandon_rc: int = 0,
+        self, quests: list[QuestInfo] | None = None, *, abandon_rc: int = 0,
         snapshots: dict | None = None, narratives: dict | None = None,
         resident: frozenset[str] | None = None,
     ) -> None:
         self.replies: list[tuple[str, str]] = []
         self.created: list[str] = []
         self.abandoned: list[str] = []
-        self._changes = changes or []
+        self._quests = quests or []
         self._abandon_rc = abandon_rc
         self.subscriptions = Subscriptions()
         self._snapshots = snapshots or {}
@@ -71,7 +71,7 @@ class FakeControl:
         return self._abandon_rc
 
     def list_quests(self) -> list[QuestInfo]:
-        return self._changes
+        return self._quests
 
     def resident_ids(self) -> frozenset[str]:
         return self._resident
@@ -119,14 +119,14 @@ async def test_abandon_running_change_enqueues_still_running_notice() -> None:
 
 
 @pytest.mark.anyio
-async def test_listchanges_calls_list_and_enqueues_a_listresult() -> None:
+async def test_listquests_calls_list_and_enqueues_a_listresult() -> None:
     rows = [QuestInfo(id="aaaaaa", title="T", status="running", step="plan")]
-    control = FakeControl(changes=rows, resident=frozenset({"aaaaaa"}))
+    control = FakeControl(quests=rows, resident=frozenset({"aaaaaa"}))
     responses: queue.Queue = queue.Queue()
-    await _handle_command(ListChanges(), control, responses)
+    await _handle_command(ListQuests(), control, responses)
     result = responses.get_nowait()
     assert isinstance(result, ListResult)
-    assert result.changes == rows
+    assert result.quests == rows
     assert result.resident == frozenset({"aaaaaa"})
 
 
@@ -158,7 +158,7 @@ async def test_subscribe_seeds_seen_set_without_replaying() -> None:
     control = FakeControl(snapshots={"k3f9qa": ("running", "plan", "Dark mode")})
     control._histories["k3f9qa"] = [
         {"id": "e1", "type": "agent_output", "timestamp": "2026-06-25T14:32:05+00:00",
-         "change": {"id": "k3f9qa", "title": "Dark mode"}, "payload": {"text": "hi"}},
+         "quest": {"id": "k3f9qa", "title": "Dark mode"}, "payload": {"text": "hi"}},
     ]
     responses: queue.Queue = queue.Queue()
     await _handle_command(Subscribe("k3f9qa"), control, responses)
@@ -206,7 +206,7 @@ def _narr_event(eid: str, text: str) -> dict:
     return {
         "id": eid, "type": "llm_response",
         "timestamp": "2026-06-25T14:32:05+00:00",
-        "change": {"id": "k3f9qa", "title": "Dark mode"},
+        "quest": {"id": "k3f9qa", "title": "Dark mode"},
         "payload": {"raw": {"content": [{"type": "text", "text": text}]}},
     }
 
@@ -340,7 +340,7 @@ async def test_alerts_on_with_parked_changes_sends_only_confirmation() -> None:
         QuestInfo(id="aaaaaa", title="Alpha", status="paused", step="plan"),
         QuestInfo(id="cccccc", title="Gamma", status="merge_blocked", step="finalize"),
     ]
-    control = FakeControl(changes=rows)
+    control = FakeControl(quests=rows)
     responses: queue.Queue = queue.Queue()
     alert_all = AlertAll()
     alert_all.set(False)
@@ -353,7 +353,7 @@ async def test_alerts_on_with_parked_changes_sends_only_confirmation() -> None:
 @pytest.mark.anyio
 async def test_alerts_on_with_no_parked_changes_sends_only_confirmation() -> None:
     rows = [QuestInfo(id="bbbbbb", title="Beta", status="running", step="implement")]
-    control = FakeControl(changes=rows)
+    control = FakeControl(quests=rows)
     responses: queue.Queue = queue.Queue()
     await _handle_command(Alerts(True), control, responses, AlertAll())
     assert responses.get_nowait() == Notice(ALERTS_ON_REPLY)

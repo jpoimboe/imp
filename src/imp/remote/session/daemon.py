@@ -1,4 +1,4 @@
-"""Per-change session-daemon: bind run_quest behind a SessionServer."""
+"""Per-quest session-daemon: bind run_quest behind a SessionServer."""
 from __future__ import annotations
 
 import argparse

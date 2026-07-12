@@ -2,7 +2,7 @@
 registry @imp_tool: built per-step by a factory and injected unconditionally in
 each provider's _build_tools, so any agent can call it. It advertises no skill
 names (the agent's own prompt names the skill). Reads
-<change.workflow_dir>/skills/agent/<name>.md, falling back to
+<quest.workflow_dir>/skills/agent/<name>.md, falling back to
 skills/user/<name>.md, and emits a skill_load event."""
 
 from __future__ import annotations

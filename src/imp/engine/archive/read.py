@@ -118,8 +118,8 @@ def read_events(control_root: Path, quest_id: str) -> bytes | None:
 
 
 def read_step_blobs(control_root: Path, quest_id: str) -> dict[str, bytes]:
-    """Steps-relative path -> blob bytes for an archived resumable change.
-    Empty when the change is absent or recorded no step blobs."""
+    """Steps-relative path -> blob bytes for an archived resumable quest.
+    Empty when the quest is absent or recorded no step blobs."""
     rec = record.read_record(records_root(control_root), quest_id)
     if rec is None:
         return {}

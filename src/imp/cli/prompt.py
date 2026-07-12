@@ -193,7 +193,7 @@ class Prompt:
         the prompt's duration and raises KeyboardInterrupt inside the prompt app
         coroutine on an out-of-band SIGINT; across the attended-solicit coroutine
         boundary that KeyboardInterrupt escapes imp's except arms and crashes
-        anyio.run, leaving the change status="running". Setting it False lets
+        anyio.run, leaving the quest status="running". Setting it False lets
         imp's InterruptCoordinator SIGINT handler stay installed during the
         prompt and route an out-of-band SIGINT through the coordinator exit path
         (identical to SIGTERM). This also means prompt_toolkit never calls

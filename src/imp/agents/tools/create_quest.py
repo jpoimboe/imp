@@ -21,7 +21,7 @@ from imp.engine.state import JsonlEventLog
 def create_quest(
     ctx: Any, title: str, description: str, depends_on: list[str] | None = None,
 ) -> str:
-    if ctx.change_state is None:
+    if ctx.quest_state is None:
         raise RuntimeError("create_quest is only available to top-level quest steps")
     parent = ctx.quest
     new_id = new_quest_id(existing_stems=live_stems(parent.control_root))

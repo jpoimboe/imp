@@ -12,7 +12,7 @@ from imp.remote.daemon.commands import (
     Alerts,
     Create,
     Help,
-    ListChanges,
+    ListQuests,
     ListResult,
     Notice,
     Reply,
@@ -38,8 +38,8 @@ def fake_resolve(text: str, reply_to: int | None) -> tuple[str | None, str]:
     return (None, text)
 
 
-def test_slash_list_is_listchanges() -> None:
-    assert parse("/list", None, fake_resolve) == ListChanges()
+def test_slash_list_is_listquests() -> None:
+    assert parse("/list", None, fake_resolve) == ListQuests()
 
 
 def test_slash_show_is_no_longer_recognized() -> None:
@@ -47,7 +47,7 @@ def test_slash_show_is_no_longer_recognized() -> None:
 
 
 def test_leading_whitespace_still_selects_the_command_path() -> None:
-    assert parse("   /list", None, fake_resolve) == ListChanges()
+    assert parse("   /list", None, fake_resolve) == ListQuests()
 
 
 def test_slash_help_is_help() -> None:
@@ -79,9 +79,9 @@ def test_slash_abandon_unresolvable_handle_is_a_usage_notice() -> None:
     assert parse("/abandon @nope", None, fake_resolve) == Notice(ABANDON_USAGE)
 
 
-def test_slash_ls_is_no_longer_an_alias_for_listchanges() -> None:
+def test_slash_ls_is_no_longer_an_alias_for_listquests() -> None:
     result = parse("/ls", None, fake_resolve)
-    assert result != ListChanges()
+    assert result != ListQuests()
     assert result == Notice(UNKNOWN_COMMAND)
 
 
@@ -143,7 +143,7 @@ def test_listresult_carries_the_resident_set() -> None:
     assert result.resident == frozenset({"a", "b"})
 
 
-def test_list_help_line_says_running_changes() -> None:
+def test_list_help_line_says_running_quests() -> None:
     assert "/list — show running quests (● = subscribed)" in HELP_TEXT
 
 

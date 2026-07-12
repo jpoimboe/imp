@@ -23,12 +23,12 @@ from typing import Any
 # Delivery tiers (spec §2). buzz = input prompts + status transitions (phone buzzes);
 # silent = narrative / script output / step dividers (streams quietly); everything else drops.
 _BUZZ = frozenset({
-    "merge_blocked", "script_blocked", "change_merged",
+    "merge_blocked", "script_blocked", "quest_merged",
     "error",
 })
 _SILENT = frozenset({
     "llm_response", "agent_output", "script_output", "step_started",
-    "workflow_resumed", "change_abandoned",
+    "workflow_resumed", "quest_abandoned",
 })
 
 # workflow_paused is curated by reason, not static membership. A pause is silent
@@ -72,8 +72,8 @@ _EVENT_LABELS = {
     "awaiting_user_input": "needs your input",
     "merge_blocked": "merge blocked",
     "script_blocked": "script blocked",
-    "change_merged": "done",
-    "change_abandoned": "abandoned",
+    "quest_merged": "done",
+    "quest_abandoned": "abandoned",
     "workflow_paused": "paused",
     "workflow_resumed": "resumed",
     "error": "error",
@@ -128,9 +128,9 @@ def header_line(event: Mapping[str, Any]) -> str:
     """The per-message header 'id · title · time'; time is the event's own send
     time. Collapses to 'id · time' when no title exists yet or the title just equals
     the id, so a not-yet-renamed quest never renders 'id · id · time'."""
-    change = event.get("change") or {}
-    cid = str(change.get("id") or "")
-    title = str(change.get("title") or "")
+    quest = event.get("quest") or {}
+    cid = str(quest.get("id") or "")
+    title = str(quest.get("title") or "")
     ts = event.get("timestamp")
     when = format_time_of_day(ts) if ts else ""
     if title and title != cid:

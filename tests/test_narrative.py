@@ -1732,14 +1732,14 @@ def test_non_interrupt_config_error_still_renders() -> None:
     assert len(_errors(tree.root)) == 1
 
 
-def test_change_merged_becomes_merged_node_not_fallback() -> None:
+def test_quest_merged_becomes_merged_node_not_fallback() -> None:
     tree = nv.build_tree([
         _ev("0", "quest_created", id="runx01", title="Run X"),
         _ev("1", "step_started", step="merge-to-base",
             kind="merge_and_exit_worktree", phase="review"),
         _ev("2", "step_completed", step="merge-to-base", kind="merge_and_exit_worktree",
             action={"verb": "continue"}, var_mutations={}),
-        _ev("3", "change_merged", base="master", commit="37dde900abc"),
+        _ev("3", "quest_merged", base="master", commit="37dde900abc"),
     ])
     merged = [c for c in tree.root.children if isinstance(c, nv.MergedNode)]
     assert len(merged) == 1
@@ -1754,7 +1754,7 @@ def test_change_merged_becomes_merged_node_not_fallback() -> None:
                 fbs.append(n)
             walk(getattr(n, "children", []))
     walk(tree.root.children)
-    assert all(f.event_type != "change_merged" for f in fbs)
+    assert all(f.event_type != "quest_merged" for f in fbs)
 
 
 def test_merge_blocked_event_is_suppressed() -> None:

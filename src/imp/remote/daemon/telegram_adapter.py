@@ -25,7 +25,7 @@ from imp.remote.drivers.telegram import (
 
 
 def handle_for(quest_id: str) -> str:
-    """Short routing token for a change: the bare id (dateless, already short)."""
+    """Short routing token for a quest: the bare id (dateless, already short)."""
     return quest_id
 
 
@@ -40,7 +40,7 @@ def parse_handle(text: str) -> tuple[str | None, str]:
 
 
 def parse_subscribe_handle(text: str) -> str | None:
-    """Resolve a /subscribe arg to a change id by @handle only — handle_for is identity."""
+    """Resolve a /subscribe arg to a quest id by @handle only — handle_for is identity."""
     handle, _ = parse_handle(f"{text.strip()} .")
     return handle or None
 
@@ -78,16 +78,16 @@ def extract_inbound(
 
 def resolve_quest_id(
     inbound: Inbound,
-    msg_to_change: dict[int, str],
-    handle_to_change: dict[str, str],
+    msg_to_quest: dict[int, str],
+    handle_to_quest: dict[str, str],
 ) -> tuple[str | None, str]:
     if inbound.reply_to_message_id is not None:
-        quest_id = msg_to_change.get(inbound.reply_to_message_id)
+        quest_id = msg_to_quest.get(inbound.reply_to_message_id)
         if quest_id is not None:
             return quest_id, inbound.text
     handle, rest = parse_handle(inbound.text)
     if handle is not None:
-        quest_id = handle_to_change.get(handle)
+        quest_id = handle_to_quest.get(handle)
         if quest_id is not None:
             return quest_id, rest
     return None, inbound.text
@@ -116,8 +116,8 @@ def format_replay_event(event: dict[str, Any]) -> str | None:
     body = event_body(etype, event.get("payload") or {})
     if kind == "silent" and not body.strip():
         return None
-    change = event.get("change") or {}
-    handle = handle_for(str(change.get("id") or ""))
+    quest = event.get("quest") or {}
+    handle = handle_for(str(quest.get("id") or ""))
     return f"{header_line(event)}\n{format_outbound(event, handle)}"
 
 
@@ -128,7 +128,7 @@ def render_response(
         header = "Alerts: all quests" if alerts_on else "Alerts: subscribed only"
         subscribed = set(subscribed_ids)
         visible = [
-            c for c in response.changes
+            c for c in response.quests
             if c.id in response.resident or c.id in subscribed]
         if not visible:
             return f"{header}\nNothing running."
@@ -171,8 +171,8 @@ class TelegramNorthAdapter:
         self._alert_all = alert_all if alert_all is not None else AlertAll()
         self._offset = 0
         self._last_narration: dict[str, str] = {}
-        self._msg_to_change: dict[int, str] = {}
-        self._handle_to_change: dict[str, str] = {}
+        self._msg_to_quest: dict[int, str] = {}
+        self._handle_to_quest: dict[str, str] = {}
         # The reply maps below are WRITTEN by on_event and on_response (both run on
         # the sender thread) and READ by resolve (poll thread); _offset stays
         # poll-thread-only. Guard only the maps.
@@ -212,8 +212,8 @@ class TelegramNorthAdapter:
         write is kept: it still feeds the alert-all path across a subscribe/
         unsubscribe toggle. That per-quest map is sender-thread-only, like _offset,
         so it needs no lock."""
-        change = event.get("change") or {}
-        quest_id = change.get("id")
+        quest = event.get("quest") or {}
+        quest_id = quest.get("id")
         if not quest_id:
             return
         if not self._subscriptions.contains(quest_id):
@@ -242,12 +242,12 @@ class TelegramNorthAdapter:
             return
         handle = handle_for(quest_id)
         with self._lock:
-            self._handle_to_change[handle] = quest_id
+            self._handle_to_quest[handle] = quest_id
         full = f"{header_line(event)}\n{format_outbound(event, handle)}"
         message_id = self._send(full, kind == "silent")
         with self._lock:
             if message_id is not None:
-                self._msg_to_change[message_id] = quest_id
+                self._msg_to_quest[message_id] = quest_id
 
     def _alert_all_event(self, quest_id: str, event: dict[str, Any]) -> None:
         """An unsubscribed quest: deliver a buzz alert loud iff alert-all is on,
@@ -287,12 +287,12 @@ class TelegramNorthAdapter:
             override = self._last_narration.get(quest_id, "")
         handle = handle_for(quest_id)
         with self._lock:
-            self._handle_to_change[handle] = quest_id
+            self._handle_to_quest[handle] = quest_id
         full = f"{header_line(event)}\n{format_outbound(event, handle, override)}"
         message_id = self._send(full, False)
         with self._lock:
             if message_id is not None:
-                self._msg_to_change[message_id] = quest_id
+                self._msg_to_quest[message_id] = quest_id
         if message_id is not None and event_id is not None:
             self._alert_all.mark(quest_id, event_id)
 
@@ -305,15 +305,15 @@ class TelegramNorthAdapter:
         if isinstance(response, Notice) and response.quest_id is not None:
             handle = handle_for(response.quest_id)
             with self._lock:
-                self._handle_to_change[handle] = response.quest_id
+                self._handle_to_quest[handle] = response.quest_id
                 if message_id is not None:
-                    self._msg_to_change[message_id] = response.quest_id
+                    self._msg_to_quest[message_id] = response.quest_id
 
     def resolve(self, inbound: Inbound) -> tuple[str | None, str]:
         """Resolve one inbound reply to (quest_id, text) against the recorded maps."""
         with self._lock:
             return resolve_quest_id(
-                inbound, self._msg_to_change, self._handle_to_change)
+                inbound, self._msg_to_quest, self._handle_to_quest)
 
     def _resolve_text(self, text: str, reply_to: int | None) -> tuple[str | None, str]:
         return self.resolve(Inbound(text=text, reply_to_message_id=reply_to))

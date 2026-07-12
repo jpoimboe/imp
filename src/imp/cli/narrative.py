@@ -396,7 +396,7 @@ class FallbackLine:
 
 @dataclass
 class MergedNode:
-    """Terminal change_merged event — rendered as the friendly footer in imp log only (F5)."""
+    """Terminal quest_merged event — rendered as the friendly footer in imp log only (F5)."""
     quest_id: str
     base: str
     collapsible = False
@@ -449,7 +449,7 @@ class NarrativeBuilder:
 
     Routing order in add() (design §5.3):
       0. accumulate token usage for EVERY llm_response (before sub routing, so
-         subagent tokens count toward the change total — F2). latest_prompt_tokens
+         subagent tokens count toward the quest total — F2). latest_prompt_tokens
          (the context-bar value) updates for THIS builder's own agent only: the
          top-level builder (own_agent_id None) records its non-sub: turns, a nested
          builder records the sub: turns of the subagent it represents; a turn that
@@ -1011,7 +1011,7 @@ def _h_quest_renamed(self: NarrativeBuilder, event: dict[str, Any], p: dict[str,
 NarrativeBuilder._HANDLERS["quest_renamed"] = _h_quest_renamed
 
 
-def _h_change_merged(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
+def _h_quest_merged(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
     self._flush_pending_rename()
     self._flush_burst()
     self._root.status = "completed"
@@ -1022,7 +1022,7 @@ def _h_change_merged(self: NarrativeBuilder, event: dict[str, Any], p: dict[str,
     self._root.children.append(MergedNode(quest_id=descriptor, base=str(p.get("base", ""))))
 
 
-NarrativeBuilder._HANDLERS["change_merged"] = _h_change_merged
+NarrativeBuilder._HANDLERS["quest_merged"] = _h_quest_merged
 
 
 def _h_workflow_completed(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:

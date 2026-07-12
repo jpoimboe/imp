@@ -166,7 +166,7 @@ def parse_default_workflow(path: Path) -> str:
 
 def parse_default_base(path: Path) -> str | None:
     """Read imp/project.yaml `default-base:` field — the integration branch a
-    change is based on. Absent file or missing key → None; `imp new` treats that
+    quest is based on. Absent file or missing key → None; `imp new` treats that
     as a hard error (there is no runtime auto-detect fallback). Read directly
     from the project layer, not merged into the layered Config. A branch name may
     contain '/', so it is not validated as a single path segment — only that,

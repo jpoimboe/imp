@@ -542,7 +542,7 @@ def test_breadcrumb_and_fallback_recede_to_gray() -> None:
     assert pal._ANSI["gray"] in crumb
     assert pal._ANSI["step"] not in crumb       # no longer bold step-blue
     fallback = next(iter(rt._render(
-        nv.FallbackLine(event_type="change_merged", payload={"id": "s"}),
+        nv.FallbackLine(event_type="quest_merged", payload={"id": "s"}),
         depth=0, full=True, color=True, width=80)))
     assert pal._ANSI["gray"] in fallback
 

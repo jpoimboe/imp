@@ -48,8 +48,8 @@ def test_on_event_writes_ndjson_with_quest_context() -> None:
     # The event's own fields are preserved (event id NOT clobbered)...
     assert obj["id"] == "ev1"
     assert obj["type"] == "agent_output"
-    # ...and change context is namespaced under "change" (spec AC 2).
-    assert obj["change"] == {
+    # ...and change context is namespaced under "quest" (spec AC 2).
+    assert obj["quest"] == {
         "id": "2026-06-11-abc", "title": "My Quest",
         "step": None, "status": "running"}
     os.close(r)
@@ -74,8 +74,8 @@ def test_on_event_tracks_step_and_status() -> None:
     lines = [ln for ln in data.split(b"\n") if ln]
     assert len(lines) == 2
     second = json.loads(lines[1])
-    assert second["change"]["step"] == "plan"
-    assert second["change"]["status"] == "paused"
+    assert second["quest"]["step"] == "plan"
+    assert second["quest"]["status"] == "paused"
     os.close(r)
     os.close(w)
 

@@ -84,7 +84,7 @@ async def test_subagent_reincarnates_within_dispatch_then_is_error_at_cap(
         events_path=tmp_path / "events.jsonl",
         subagent_defs={"coder": _agent("coder", tools={"complete_step"})},
         agent_id="step:impl/lead",
-        change_state=State(id="c", step="lead", step_attempt=0,
+        quest_state=State(id="c", step="lead", step_attempt=0,
                            status="running", max_reincarnations=1))
 
     async for _ in runner.run(inv):
@@ -169,7 +169,7 @@ async def test_subagent_reincarnates_on_handoff_then_is_error_at_cap(
         subagent_defs={"coder": _agent("coder", tools={"complete_step"})},
         agent_id="step:impl/lead",
         checkpoint_threshold=0.8,
-        change_state=State(id="c", step="lead", step_attempt=0,
+        quest_state=State(id="c", step="lead", step_attempt=0,
                            status="running", max_reincarnations=1))
 
     async for _ in runner.run(inv):
@@ -255,7 +255,7 @@ async def test_subagent_missing_handoff_note_logs_recovering_reason(
         subagent_defs={"coder": _agent("coder", tools={"complete_step"})},
         agent_id="step:impl/lead",
         checkpoint_threshold=0.8,
-        change_state=State(id="c", step="lead", step_attempt=0,
+        quest_state=State(id="c", step="lead", step_attempt=0,
                            status="running", max_reincarnations=1))
 
     async for _ in runner.run(inv):

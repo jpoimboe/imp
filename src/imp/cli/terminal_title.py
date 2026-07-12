@@ -12,12 +12,12 @@ class TerminalTitle:
         self,
         stream: Any,
         quest_id: str,
-        change_name: str,
+        quest_name: str,
         initial: str = "busy",
     ) -> None:
         self._stream = stream
         self._quest_id = quest_id
-        self._name = change_name
+        self._name = quest_name
         self._enabled = bool(stream.isatty())
         self._current: str | None = None
         self._idle = initial == "idle"

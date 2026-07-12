@@ -6,11 +6,11 @@ description: |
 # reviewer judging the coder's work), not by vendor. The per-plan implement loop
 # carries NO code review and NO sweep: each plan's tasks are implemented and
 # fast-verified, then check-next-plan either starts the next outline plan or
-# (last plan done) enters converge. converge runs ONCE per change: gap-check (the
-# sole coverage backstop; latches coverage_settled) -> change-review (the single
+# (last plan done) enters converge. converge runs ONCE per quest: gap-check (the
+# sole coverage backstop; latches coverage_settled) -> quest-review (the single
 # quest-wide code review, reusing agents/batch-code-reviewer.md) -> deferred-sweep
-# (drains the whole change's Deferred list once) -> converge-verify (slow, on the
-# change's own base). integrate then
+# (drains the whole quest's Deferred list once) -> converge-verify (slow, on the
+# quest's own base). integrate then
 # acquires the merge lane, rebases, slow-re-verifies only when the base moved,
 # reviews the integration, and ends at the human gate (summarizer -> finalize) so
 # the human blesses the locked, rebased, slow-tested state. cleanup.sh folds
@@ -104,7 +104,7 @@ phases:
         show_label: false
         command: ./scripts/plan-commit-verify.sh
         rules:
-          - {if: {exit: 0, fast_path: true}, goto: plan-finalized}   # trivial change: skip plan review entirely
+          - {if: {exit: 0, fast_path: true}, goto: plan-finalized}   # trivial quest: skip plan review entirely
           - {if: {exit: 0}, continue: true}
           - {else: true, resume: plan-writer}
 
@@ -163,19 +163,19 @@ phases:
           - {else: true, resume: task-lead, label: "fixing test failures"}
 
       # Routing-only branch. After a plan's tasks settle:
-      #  - a converge/finalize rework (coverage_settled latched) -> change-review (re-review, never re-gap-check);
+      #  - a converge/finalize rework (coverage_settled latched) -> quest-review (re-review, never re-gap-check);
       #  - more outline plans remain -> the next plan-writer (plan_index++);
       #  - the last outline plan was implemented -> the once-only gap-check (enter converge).
       - name: check-next-plan
         show_label: false
         rules:
-          - {if: {coverage_settled: true}, goto: change-review}
+          - {if: {coverage_settled: true}, goto: quest-review}
           - {if: "var.plan_index < var.plan_total", set: {plan_index: "var.plan_index + 1"}, goto: plan-writer, label: "writing plan"}
           - {else: true, goto: gap-check}
 
-  # ── converge: runs ONCE per change (change-local, NO lock). The coverage backstop,
+  # ── converge: runs ONCE per quest (quest-local, NO lock). The coverage backstop,
   # the single quest-wide code review, the once-per-quest deferred sweep, and the
-  # slow verify on the change's own base.
+  # slow verify on the quest's own base.
   - name: converge
     label: "convergence phase"
     steps:
@@ -188,11 +188,11 @@ phases:
         label: checking plan coverage
         rules:
           - {if: {more_plans: true}, set: {plan_total: "output.plan_total", plan_index: "var.plan_index + 1"}, goto: plan-writer, label: "writing plan", feedback: "More plans are needed for this spec. Coverage assessment:"}
-          - {else: true, set: {coverage_settled: true}, goto: change-review}
+          - {else: true, set: {coverage_settled: true}, goto: quest-review}
 
       # The single quest-wide code review (cur_base_head..HEAD), reusing batch-code-reviewer.md.
       # approve -> deferred-sweep; task_gap -> task-lead rework.
-      - name: change-review
+      - name: quest-review
         file: agents/batch-code-reviewer.md
         tier: high
         label: reviewing entire diff
@@ -210,7 +210,7 @@ phases:
           - {if: {converge_verify_tolerated: true}, set: {slow_verify_tolerated: true}, goto: wait-for-head}
           - {else: true, continue: true}
 
-      # Slow tests on the change's own base (off-lock). Clean -> enter integrate. A failure
+      # Slow tests on the quest's own base (off-lock). Clean -> enter integrate. A failure
       # resumes deferred-sweep in slow-gate triage: a fix loops back through converge-verify;
       # a "not ours" toleration emits converge_verify_tolerated
       # -> wait-for-head (forward escape; this gate never re-runs).
@@ -279,7 +279,7 @@ phases:
       - name: summarizer
         file: agents/summarizer.md
         tier: medium
-        label: summarizing change
+        label: summarizing quest
         rules:
           - {else: true, goto: finalize}
 
@@ -327,7 +327,7 @@ phases:
           - {if: {merge: MERGED},   continue: true}
           - {if: {merge: DIRTY},    goto: reconciler,
              label: "recovering merge",
-             feedback: "The merge couldn't proceed because the change worktree still had uncommitted changes. Commit your resolution; integration will retry."}
+             feedback: "The merge couldn't proceed because the quest worktree still had uncommitted changes. Commit your resolution; integration will retry."}
           - {if: {merge: CONFLICT}, goto: integrate-rebase, label: "retrying integration"}
           - {if: {merge: REFUSED},  pause: true}
           - {else: true, pause: true}

@@ -7,7 +7,7 @@ from imp.remote.drivers import telegram as imp_telegram
 
 @pytest.mark.parametrize(
     "event_type",
-    ["awaiting_user_input", "merge_blocked", "script_blocked", "change_merged"],
+    ["awaiting_user_input", "merge_blocked", "script_blocked", "quest_merged"],
 )
 def test_buzz_event_types_notify(event_type: str) -> None:
     assert imp_telegram.curate(event_type, {}) == "buzz"
@@ -17,7 +17,7 @@ def test_buzz_event_types_notify(event_type: str) -> None:
     "event_type",
     [
         "llm_response", "agent_output", "script_output", "step_started",
-        "workflow_resumed", "change_abandoned",
+        "workflow_resumed", "quest_abandoned",
     ],
 )
 def test_silent_event_types_stream_quietly(event_type: str) -> None:
@@ -113,7 +113,7 @@ def test_paused_body_missing_reason_is_bare_paused() -> None:
 def test_paused_message_is_label_and_plain_speak_body_no_title_bracket() -> None:
     event = {
         "type": "workflow_paused",
-        "change": {"title": "Foo"},
+        "quest": {"title": "Foo"},
         "payload": {"reason": "max_loops"},
     }
     assert imp_telegram.format_event_message(event) == "paused\nstuck in a loop"

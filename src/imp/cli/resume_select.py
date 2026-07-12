@@ -56,7 +56,7 @@ class ResumePicker:
 
 async def run_picker(candidates: list[Candidate], *, now: datetime,
                      color: bool, header: str, selected_index: int = 0) -> str | None:
-    """Draw the inline arrow-key picker; return the chosen change id, or None when
+    """Draw the inline arrow-key picker; return the chosen quest id, or None when
     the user cancels (q / esc / ctrl-c). Uses Application.run_async so it nests on
     the event loop imp's anyio.run already owns."""
     from prompt_toolkit.application import Application

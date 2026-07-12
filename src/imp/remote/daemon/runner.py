@@ -32,7 +32,7 @@ from imp.remote.daemon.commands import (
     Command,
     Create,
     Help,
-    ListChanges,
+    ListQuests,
     ListResult,
     Notice,
     Replay,
@@ -336,11 +336,11 @@ async def _handle_command(
         else:
             responses.put(Notice(
                 f"@{handle} is still running — stop it first, then /abandon again."))
-    elif isinstance(command, ListChanges):
+    elif isinstance(command, ListQuests):
         try:
-            changes = await anyio.to_thread.run_sync(control.list_quests)
+            quests = await anyio.to_thread.run_sync(control.list_quests)
             resident = await anyio.to_thread.run_sync(control.resident_ids)
-            responses.put(ListResult(changes, resident))
+            responses.put(ListResult(quests, resident))
         except Exception:
             _log.warning("list or residency probe failed", exc_info=True)
             responses.put(Notice("Error: could not list quests."))
@@ -505,7 +505,7 @@ async def run_daemon(
     try:
         write_pid(control_root)
         reaped = archive_maintenance.reap_archived_homes(control_root)
-        _log.info("reaped %d archived-terminal change home(s) at startup", reaped)
+        _log.info("reaped %d archived-terminal quest home(s) at startup", reaped)
         await hub.open()
         # Daemon threads are not joined at interpreter shutdown, so a worker parked
         # in a blocking long-poll syscall is reaped at process exit rather than

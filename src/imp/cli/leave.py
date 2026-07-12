@@ -1,7 +1,7 @@
 """Lock-free leave-disposition decision for a phase-0 conversation.
 
 The foreground decides which daemon-applied disposition a leave maps to; the
-daemon applies it after it releases the per-change lock. These functions take no
+daemon applies it after it releases the per-quest lock. These functions take no
 lock and perform no archive/teardown — they only choose the control action.
 """
 from __future__ import annotations
@@ -26,7 +26,7 @@ def _had_exchange(log: object) -> bool:
 
 
 def _was_renamed(log: object) -> bool:
-    """True if the change was renamed during the conversation (a design formed)."""
+    """True if the quest was renamed during the conversation (a design formed)."""
     return any(ev.get("type") == "quest_renamed" for ev in log.read())  # type: ignore[attr-defined]
 
 
@@ -36,7 +36,7 @@ def leave_control_action(
     """Which daemon disposition frame a phase-0 leave should send.
 
     Returns one of CONTROL_SAVE / CONTROL_ARCHIVE / CONTROL_DISCARD, or None to
-    leave the change paused (abandon has its own frame path; materialized and
+    leave the quest paused (abandon has its own frame path; materialized and
     non-leave exits are left untouched).
     """
     if intent == "abandon":
@@ -63,7 +63,7 @@ def leave_control_action(
 def resolve_leave_action(
     control_root: Path, quest_id: str, leave_mode: str | None, intent: str | None,
 ) -> str | None:
-    """Reload the change and decide its leave control action, or None if gone."""
+    """Reload the quest and decide its leave control action, or None if gone."""
     try:
         quest = Quest.load(control_root, quest_id)
     except (LoadError, LoadErrors):

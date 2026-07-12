@@ -35,7 +35,7 @@ async def test_start_spawns_and_feeds_events(tmp_path: Path) -> None:
                 await anyio.sleep(0.02)
         logged = json.loads(log.read_text().splitlines()[0])
         assert logged["type"] == "agent_output"
-        assert logged["change"]["id"] == "2026-06-11-abc"
+        assert logged["quest"]["id"] == "2026-06-11-abc"
         await ch.stop()
         tg.cancel_scope.cancel()
 

@@ -72,7 +72,7 @@ def test_build_agent_invocation_appends_completion_instruction(tmp_path: Path) -
         transcript_dir=tmp_path / "td",
         events_path=tmp_path / "e.jsonl", subagent_defs={}, tiers=(),
         max_tool_calls=7, agent_id="sub:abc", event_log=None,
-        change_state=None, first_event_parent_id="tc-1",
+        quest_state=None, first_event_parent_id="tc-1",
         resolved_tiers=None, coordinator=None, subagent_depth=0)
 
     # System prompt is role-only; completion instruction rides in the user turn.
@@ -110,7 +110,7 @@ def test_build_agent_invocation_injects_bash_paths_note_when_bash_present(
         transcript_dir=tmp_path / "td",
         events_path=tmp_path / "e.jsonl", subagent_defs={}, tiers=(),
         max_tool_calls=None, agent_id="step:p/s", event_log=None,
-        change_state=None, first_event_parent_id=None,
+        quest_state=None, first_event_parent_id=None,
         resolved_tiers=None, coordinator=None)
 
     assert inv.system_prompt.startswith(reflow_markdown(_CORE_HEAD))
@@ -137,7 +137,7 @@ def test_build_agent_invocation_omits_bash_paths_note_without_bash(
         transcript_dir=tmp_path / "td",
         events_path=tmp_path / "e.jsonl", subagent_defs={}, tiers=(),
         max_tool_calls=None, agent_id="step:p/s", event_log=None,
-        change_state=None, first_event_parent_id=None,
+        quest_state=None, first_event_parent_id=None,
         resolved_tiers=None, coordinator=None)
 
     assert "IMP_PROJECT_ROOT" not in inv.system_prompt
@@ -156,7 +156,7 @@ def test_build_agent_invocation_wires_user_input_unconditionally(
         transcript_dir=tmp_path / "td",
         events_path=tmp_path / "e.jsonl", subagent_defs={}, tiers=(),
         max_tool_calls=None, agent_id="step:p/s", event_log=None,
-        change_state=None, first_event_parent_id=None,
+        quest_state=None, first_event_parent_id=None,
         resolved_tiers=None, coordinator=None)
 
     assert inv.continuation_fn is not None
@@ -176,7 +176,7 @@ def test_build_agent_invocation_threads_test_gates(tmp_path: Path) -> None:
         user_chat_input_fn=None, transcript_dir=tmp_path / "td",
 events_path=tmp_path / "e.jsonl",
         subagent_defs={}, tiers=(), max_tool_calls=None,
-        agent_id="step:p/s", event_log=None, change_state=None,
+        agent_id="step:p/s", event_log=None, quest_state=None,
         first_event_parent_id=None, resolved_tiers=None, coordinator=None,
         test_gates=TestGates(fast="make check", fast_timeout=120))
     assert inv.test_gates.fast == "make check"
@@ -192,7 +192,7 @@ def _inv(tmp_path: Path):
         user_chat_input_fn=None, transcript_dir=tmp_path / "td",
 events_path=tmp_path / "e.jsonl",
         subagent_defs={}, tiers=(), max_tool_calls=None,
-        agent_id="step:p/s", event_log=None, change_state=None,
+        agent_id="step:p/s", event_log=None, quest_state=None,
         first_event_parent_id=None, resolved_tiers=None, coordinator=None)
 
 
@@ -649,7 +649,7 @@ def _build_inv(tmp_path: Path, **kw):
         quest_context=_cc(tmp_path), user_chat_input_fn=None,
         transcript_dir=tmp_path,events_path=tmp_path / "e",
         subagent_defs={}, tiers=(), max_tool_calls=None, agent_id="step:p/s",
-        event_log=None, change_state=None, first_event_parent_id=None,
+        event_log=None, quest_state=None, first_event_parent_id=None,
         resolved_tiers=None, coordinator=None, **kw,
     )
 
@@ -669,7 +669,7 @@ def test_build_agent_invocation_splits_role_header_and_user_task(tmp_path: Path)
         transcript_dir=tmp_path / "td",
         events_path=tmp_path / "e.jsonl", subagent_defs={}, tiers=(),
         max_tool_calls=None, agent_id="step:p/s", event_log=None,
-        change_state=None, first_event_parent_id=None,
+        quest_state=None, first_event_parent_id=None,
         resolved_tiers=None, coordinator=None)
 
     sp = inv.system_prompt
@@ -743,7 +743,7 @@ def test_build_invocation_subagent_keeps_body_in_system(tmp_path: Path) -> None:
         user_chat_input_fn=None, transcript_dir=tmp_path / "td",
         events_path=tmp_path / "e.jsonl", subagent_defs={}, tiers=(),
         max_tool_calls=None, agent_id="sub:x", event_log=None,
-        change_state=None, first_event_parent_id=None,
+        quest_state=None, first_event_parent_id=None,
         resolved_tiers=None, coordinator=None, subagent_depth=1)
     assert "RENDERED BODY" in inv.system_prompt
     assert SUBAGENT_DELIVERABLE_NOTE in inv.system_prompt
@@ -760,7 +760,7 @@ def test_build_invocation_prepends_feedback_lead_to_user_task(tmp_path: Path) ->
         user_chat_input_fn=None, transcript_dir=tmp_path / "td",
         events_path=tmp_path / "e.jsonl", subagent_defs={}, tiers=(),
         max_tool_calls=None, agent_id="step:p/s", event_log=None,
-        change_state=None, first_event_parent_id=None,
+        quest_state=None, first_event_parent_id=None,
         resolved_tiers=None, coordinator=None,
         feedback_lead="Here's the feedback to address: fix X")
     text = inv.initial_messages[0].content[0].text
@@ -1044,7 +1044,7 @@ def test_build_agent_invocation_injects_outcome_field_when_requested(
         user_chat_input_fn=None, transcript_dir=tmp_path / "td",
 events_path=tmp_path / "e.jsonl",
         subagent_defs={}, tiers=(), max_tool_calls=None,
-        agent_id="step:p/s", event_log=None, change_state=None,
+        agent_id="step:p/s", event_log=None, quest_state=None,
         first_event_parent_id=None, resolved_tiers=None, coordinator=None,
         inject_outcome_field=True)
 
@@ -1067,7 +1067,7 @@ def test_build_agent_invocation_omits_outcome_field_by_default(
         user_chat_input_fn=None, transcript_dir=tmp_path / "td",
 events_path=tmp_path / "e.jsonl",
         subagent_defs={}, tiers=(), max_tool_calls=None,
-        agent_id="step:p/s", event_log=None, change_state=None,
+        agent_id="step:p/s", event_log=None, quest_state=None,
         first_event_parent_id=None, resolved_tiers=None, coordinator=None)
 
     assert "outcome" not in [f.name for f in inv.agent_def.output_schema.fields]
@@ -1504,7 +1504,7 @@ def test_build_agent_invocation_threads_resume_should_continue(
         transcript_dir=tmp_path / "td",
         events_path=tmp_path / "e.jsonl", subagent_defs={}, tiers=(),
         max_tool_calls=None, agent_id="step:p/s", event_log=None,
-        change_state=None, first_event_parent_id=None,
+        quest_state=None, first_event_parent_id=None,
         resolved_tiers=None, coordinator=None,
         resume_should_continue=True)
 
@@ -1523,7 +1523,7 @@ def test_build_agent_invocation_resume_should_continue_defaults_false(
         transcript_dir=tmp_path / "td",
         events_path=tmp_path / "e.jsonl", subagent_defs={}, tiers=(),
         max_tool_calls=None, agent_id="step:p/s", event_log=None,
-        change_state=None, first_event_parent_id=None,
+        quest_state=None, first_event_parent_id=None,
         resolved_tiers=None, coordinator=None)
 
     assert inv.resume_should_continue is False
@@ -1668,7 +1668,7 @@ def test_build_agent_invocation_derives_has_schema_false_when_fieldless(
         quest_context=_cc(tmp_path), user_chat_input_fn=None,
         transcript_dir=tmp_path, events_path=tmp_path / "e",
         subagent_defs={}, tiers=(), max_tool_calls=None, agent_id="step:p/s",
-        event_log=None, change_state=None, first_event_parent_id=None,
+        event_log=None, quest_state=None, first_event_parent_id=None,
         resolved_tiers=None, coordinator=None)
     assert captured["has_schema"] is False
 

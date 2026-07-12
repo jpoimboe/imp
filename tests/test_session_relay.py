@@ -41,7 +41,7 @@ async def test_relay_forwards_curated_events_with_quest_context(
     await socket.close()
     assert sink[0]["id"] == "e1"
     assert sink[0]["type"] == "agent_output"
-    assert sink[0]["change"] == {
+    assert sink[0]["quest"] == {
         "id": "cid", "title": "T", "step": None, "status": "running"}
 
 
@@ -257,5 +257,5 @@ async def test_relay_reflects_title_rename_after_start(tmp_path: Path) -> None:
                 await anyio.sleep(0.02)
         tg.cancel_scope.cancel()
     await socket.close()
-    assert sink[0]["change"]["title"] == ""            # empty at start
-    assert sink[1]["change"]["title"] == "Real Title"   # picked up the rename
+    assert sink[0]["quest"]["title"] == ""            # empty at start
+    assert sink[1]["quest"]["title"] == "Real Title"   # picked up the rename

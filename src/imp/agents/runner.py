@@ -172,7 +172,7 @@ class AgentInvocation:
     event_log: Any = None
     # Live engine State for the rename_quest tool to mutate. Any to avoid an
     # import cycle. None for subagents / legacy tests.
-    change_state: Any = None
+    quest_state: Any = None
     # The LIVE, mutable quest for the rename_quest tool. Any to avoid an import
     # cycle. None for subagents / legacy tests (no rename authority anyway).
     quest: Any = None

@@ -20,9 +20,9 @@ def test_full_history_returns_ordered_augmented_events(tmp_path: Path) -> None:
     # Last two in order; Quest.create may seed earlier lifecycle events ahead.
     assert [e["type"] for e in events][-2:] == ["notice", "awaiting_user_input"]
     last = events[-1]
-    assert last["change"]["id"] == "alpha"
-    assert last["change"]["title"] == "Dark mode"
-    assert "step" in last["change"] and "status" in last["change"]
+    assert last["quest"]["id"] == "alpha"
+    assert last["quest"]["title"] == "Dark mode"
+    assert "step" in last["quest"] and "status" in last["quest"]
     assert last["payload"]["prompt"] == "go?"     # raw payload preserved
     assert "id" in last and "timestamp" in last   # raw id/timestamp preserved
 
