@@ -3,8 +3,12 @@ scout hats and carries the load-or-introspect-first grounding rule (spec AC 4)."
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from imp.assets import bundled_workflow_dir
 from imp.engine.loader import load_workflow
+
+PARTIALS = Path("src/imp/assets/workflows/imp/partials")
 
 
 def _threshold() -> str:
@@ -61,6 +65,17 @@ def test_threshold_introduces_no_new_cli_command_or_read_tool() -> None:
     for banned in ("list_quests", "show_change",
                    "imp explain", "imp doctor", "imp workflow show"):
         assert banned not in body, banned
+
+
+def test_grounding_partial_carries_memory_rule_and_names_only_hub() -> None:
+    text = (PARTIALS / "imp-grounding.md").read_text()
+    low = text.lower()
+    assert "## Grounding" in text
+    assert "do not answer from memory" in low
+    assert 'load_skill(name="imp-knowledge")' in text
+    # hub-only rule: the partial names no spoke directly
+    assert "imp-introspection" not in text
+    assert "imp-memory" not in text
 
 
 def test_threshold_has_lazy_orientation_cue() -> None:

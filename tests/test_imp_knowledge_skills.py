@@ -107,3 +107,30 @@ def test_introspect_search_entry_spans_all_zones_and_content() -> None:
         assert flag in body, flag
     # The stale archive-only framing is gone.
     assert "search the archive (completed, abandoned, and left" not in body
+
+
+def test_memory_skill_is_loadable_profile_b() -> None:
+    body = load_agent_skill(_skills_dir(), "imp-memory")
+    assert body.strip(), "imp-memory is empty"
+    assert not body.lstrip().startswith("---"), "imp-memory has frontmatter"
+
+
+def test_memory_covers_two_tiers_of_durable_state() -> None:
+    body = load_agent_skill(_skills_dir(), "imp-memory")
+    low = body.lower()
+    # two-tiers framing
+    assert "two tiers" in low
+    # per-quest records tier
+    assert ".imp/quests/" in body
+    # project-config tier
+    assert "imp/project.yaml" in body
+    assert "guidance" in low
+    assert "facts" in low
+    assert "default-workflow" in body
+    assert "test_cmd_fast" in body
+    assert "test_cmd_slow" in body
+    # the concrete config layering chain
+    assert "floor ← imp/project.yaml ← ~/.config/imp/config.yaml ← .imp/config.yaml" in body
+    # how to read what is active, incl. imp config's blind spots
+    assert "imp config" in body
+    assert "blind spots" in body
