@@ -15,6 +15,7 @@ from typing import Any
 
 import anyio
 
+from imp.diagnostics import install_stack_dumper
 from imp.engine.archive import maintenance as archive_maintenance
 from imp.engine.archive import read as archive_read
 from imp.engine.errors import LoadError
@@ -518,6 +519,9 @@ async def run_daemon(
         spath.unlink()   # clear a stale socket file (guard already proved not live)
     try:
         write_pid(control_root)
+        if install_signals:
+            install_stack_dumper(
+                control_root / ".imp" / "remote-control.stack-dump.txt")
         reaped = archive_maintenance.reap_archived_homes(control_root)
         _log.info("reaped %d archived-terminal quest home(s) at startup", reaped)
         await hub.open()
