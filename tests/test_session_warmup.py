@@ -69,3 +69,25 @@ def test_main_warms_module_graph_before_serving(monkeypatch, tmp_path) -> None:
 
     assert calls == ["warmup", "load", "run"]
     assert rc == 0
+
+
+def test_completion_path_modules_are_cached_after_warmup() -> None:
+    # After warmup, completion-path modules are already in sys.modules, so a
+    # later first-time reference is a cache hit, not a fresh disk import.
+    import importlib
+
+    from imp.remote.session.warmup import warm_module_graph
+
+    warm_module_graph()
+
+    targets = ["imp.providers.codex_runner", "imp.remote.session.client"]
+    missing = [t for t in targets if t not in sys.modules]
+    assert missing == [], f"warmup did not cache completion-path modules: {missing}"
+
+    # The marker survives re-import only on a cache hit; a fresh disk import
+    # would re-execute the module body and drop it.
+    cached = sys.modules["imp.providers.codex_runner"]
+    marker = object()
+    cached.__dict__["_warmup_probe"] = marker
+    reimported = importlib.import_module("imp.providers.codex_runner")
+    assert reimported.__dict__.get("_warmup_probe") is marker
