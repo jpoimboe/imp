@@ -239,6 +239,19 @@ def test_non_isolated_subagent_inherits_parent_policy(tmp_path: Path) -> None:
     assert list((tmp_path / ".imp" / "worktrees").glob("spike-*")) == []
 
 
+def test_dispatch_task_forwards_ctx_pythonpath_to_invocation(tmp_path: Path) -> None:
+    quest = _make_change(tmp_path)
+    capture: dict = {}
+    ctx = _ctx(tmp_path, quest, name="rev", agent=_plain_agent("rev"),
+               spawn=_spawn([{"type": "agent_output", "payload": {"text": "ok"}}],
+                            capture=capture))
+    ctx.pythonpath = ("src",)
+
+    anyio.run(dispatch_task, ctx, "rev", "check pythonpath forwarding")
+
+    assert capture["inv"].pythonpath == ("src",)
+
+
 def test_inactive_spike_policy_emits_sandbox_inactive_event(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     inactive_policy = types.SimpleNamespace(active=False, note="unsandboxed_by_config")
@@ -304,7 +317,7 @@ def test_build_isolated_policy_passes_disposable_tree_true(monkeypatch, tmp_path
     )
     monkeypatch.setattr(
         "imp.providers.effective.load_effective_config",
-        lambda **kw: SimpleNamespace(config=SimpleNamespace(sandbox={})),
+        lambda **kw: SimpleNamespace(config=SimpleNamespace(sandbox={}, pythonpath=())),
     )
     monkeypatch.setattr(
         "imp.engine.env.engine_env", lambda **kw: {})
@@ -339,7 +352,8 @@ def test_build_isolated_policy_does_not_force_network(monkeypatch, tmp_path):
     monkeypatch.setattr("imp.engine.sandbox.sandbox_available", lambda: True)
     monkeypatch.setattr(
         "imp.providers.effective.load_effective_config",
-        lambda **kw: SimpleNamespace(config=SimpleNamespace(sandbox={"network": False})),
+        lambda **kw: SimpleNamespace(
+            config=SimpleNamespace(sandbox={"network": False}, pythonpath=())),
     )
     monkeypatch.setattr("imp.engine.env.engine_env", lambda **kw: {})
     monkeypatch.setattr(
@@ -352,6 +366,39 @@ def test_build_isolated_policy_does_not_force_network(monkeypatch, tmp_path):
     subagents._build_isolated_policy(quest, tmp_path / "wt", test_gates=None)
 
     assert captured["cfg"].network is False
+
+
+def test_build_isolated_policy_threads_pythonpath(monkeypatch, tmp_path):
+    from types import SimpleNamespace
+
+    import imp.agents.subagents as subagents
+    from imp.engine.sandbox import SandboxConfig
+
+    captured: dict = {}
+
+    def _fake_resolve_policy(**kwargs):
+        captured.update(kwargs)
+        return "sentinel-policy"
+
+    monkeypatch.setattr("imp.engine.sandbox.resolve_policy", _fake_resolve_policy)
+    monkeypatch.setattr("imp.engine.sandbox.sandbox_available", lambda: True)
+    monkeypatch.setattr(
+        "imp.engine.sandbox.sandbox_config_from_raw", lambda raw: SandboxConfig())
+    monkeypatch.setattr(
+        "imp.providers.effective.load_effective_config",
+        lambda **kw: SimpleNamespace(
+            config=SimpleNamespace(sandbox={}, pythonpath=("src",))))
+
+    quest = SimpleNamespace(
+        id="abc", title="T", project_root=tmp_path, control_root=tmp_path,
+        quest_dir=tmp_path / "change", base_branch="master",
+    )
+    worktree = tmp_path / "wt"
+    subagents._build_isolated_policy(quest, worktree, test_gates=None)
+
+    # pythonpath resolved against the SPIKE worktree path, not quest.project_root.
+    assert captured["engine_env_result"]["PYTHONPATH"].startswith(
+        str(worktree / "src"))
 
 
 def test_attach_isolated_home_overlay_siblings_spike(tmp_path, monkeypatch):
@@ -441,7 +488,7 @@ def test_isolated_dispatch_honors_network_off(tmp_path, monkeypatch):
     monkeypatch.setattr(
         "imp.providers.effective.load_effective_config",
         lambda **kw: SimpleNamespace(
-            config=SimpleNamespace(sandbox={"network": False})),
+            config=SimpleNamespace(sandbox={"network": False}, pythonpath=())),
     )
     capture: dict = {}
     ctx = _ctx(tmp_path, quest, name="prober", agent=_isolated_agent("prober"),
