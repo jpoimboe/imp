@@ -119,6 +119,7 @@ __all__ = ["Tool", "clear_registry", "get_registry", "imp_tool", "register_tool"
 _BUILTIN_MODULES = (
     "bash",
     "bg",
+    "commit_memory",
     "create_and_enter_worktree",
     "create_quest",
     "fs",
