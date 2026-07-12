@@ -217,3 +217,25 @@ def test_overview_no_quest_id_targets_current_quest(tmp_path: Path) -> None:
 def test_overview_blank_quest_id_targets_current_quest(tmp_path: Path) -> None:
     cur = _make_home(tmp_path, "curr000", title="Current Quest")
     assert _call(cur, quest_id="") == _call(cur, quest_id="curr000")
+
+
+# ---- spec resource ---------------------------------------------------------
+
+def test_spec_live_returns_raw_text(tmp_path: Path) -> None:
+    cur = _control_events_path(tmp_path, "curr000")
+    _make_home(tmp_path, "othr111", spec="# The Spec\n\nbody line\n")
+    out = _call(cur, quest_id="othr111", resource="spec")
+    assert out == "# The Spec\n\nbody line\n"
+
+
+def test_spec_current_quest_when_quest_id_omitted(tmp_path: Path) -> None:
+    cur = _make_home(tmp_path, "curr000", spec="# Current spec\n")
+    assert _call(cur, resource="spec") == "# Current spec\n"
+
+
+def test_spec_missing_returns_json_error(tmp_path: Path) -> None:
+    cur = _control_events_path(tmp_path, "curr000")
+    _make_home(tmp_path, "othr111")  # no spec artifact written
+    err = json.loads(_call(cur, quest_id="othr111", resource="spec"))
+    assert "error" in err
+    assert "othr111" in err["error"]

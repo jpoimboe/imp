@@ -39,11 +39,15 @@ def imp_show(
     # <control>/.imp/quests/<id>/events.jsonl -> parents[3] == <control>.
     control_root = ctx.events_path.parents[3]
 
-    if resource == "overview":
-        lines = cli_main._detail_card(
-            control_root, target, now=datetime.now(UTC))
-        if not lines:
-            return json.dumps({"error": f"no such quest {target!r}"})
-        return "\n".join(lines)
+    if resource == "spec":
+        data = cli_main._show_artifact(
+            control_root, target, f"spec/{target}.md")
+        if data is None:
+            return json.dumps({"error": f"no spec for {target!r}"})
+        return data.decode("utf-8", errors="replace")
 
-    return json.dumps({"error": f"unknown resource {resource!r}"})
+    lines = cli_main._detail_card(
+        control_root, target, now=datetime.now(UTC))
+    if not lines:
+        return json.dumps({"error": f"no such quest {target!r}"})
+    return "\n".join(lines)
