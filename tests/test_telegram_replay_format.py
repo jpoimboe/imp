@@ -27,7 +27,7 @@ def set_tz():
 def _event(etype: str, payload: dict) -> dict:
     return {
         "id": "e1", "type": etype, "timestamp": "2026-06-25T14:32:05+00:00",
-        "change": {"id": "tozi28", "title": "T"}, "payload": payload,
+        "quest": {"id": "tozi28", "title": "T"}, "payload": payload,
     }
 
 

@@ -27,11 +27,11 @@ class EventCurator:
         # Re-read while empty to catch a mid-session rename; freeze on first non-empty.
         if not self._title:
             self._title = self._title_provider()
-        # Quest context is namespaced under "change" so it never clobbers the
+        # Quest context is namespaced under "quest" so it never clobbers the
         # event's OWN id/payload fields (events carry their own log id).
         return {
             **event,
-            "change": {
+            "quest": {
                 "id": self._id, "title": self._title,
                 "step": self._step, "status": self._status,
             },

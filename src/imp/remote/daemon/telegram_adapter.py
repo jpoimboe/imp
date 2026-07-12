@@ -116,8 +116,8 @@ def format_replay_event(event: dict[str, Any]) -> str | None:
     body = event_body(etype, event.get("payload") or {})
     if kind == "silent" and not body.strip():
         return None
-    change = event.get("change") or {}
-    handle = handle_for(str(change.get("id") or ""))
+    quest = event.get("quest") or {}
+    handle = handle_for(str(quest.get("id") or ""))
     return f"{header_line(event)}\n{format_outbound(event, handle)}"
 
 
@@ -212,8 +212,8 @@ class TelegramNorthAdapter:
         write is kept: it still feeds the alert-all path across a subscribe/
         unsubscribe toggle. That per-quest map is sender-thread-only, like _offset,
         so it needs no lock."""
-        change = event.get("change") or {}
-        quest_id = change.get("id")
+        quest = event.get("quest") or {}
+        quest_id = quest.get("id")
         if not quest_id:
             return
         if not self._subscriptions.contains(quest_id):

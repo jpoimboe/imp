@@ -13,7 +13,7 @@ def test_format_awaiting_user_input_uses_real_steer_hint_payload() -> None:
     # "text"/"message"), so the body must come from "steer_hint".
     event = {
         "type": "awaiting_user_input",
-        "change": {"title": "My Quest", "id": "2026-06-11-abc"},
+        "quest": {"title": "My Quest", "id": "2026-06-11-abc"},
         "payload": {"steer_hint": "Which DB should I use?"},
     }
     # The loud body is the humanized label alone — "needs your input", not the raw
@@ -28,7 +28,7 @@ def test_format_llm_response_renders_assistant_text_without_type_header() -> Non
     # header leaking the internal event type into a narrative message.
     event = {
         "type": "llm_response",
-        "change": {"title": "T"},
+        "quest": {"title": "T"},
         "payload": {
             "provider": "anthropic", "model": "m",
             "raw": {"content": [{"type": "text", "text": "Here is my answer."}]},
@@ -41,7 +41,7 @@ def test_format_llm_response_renders_assistant_text_without_type_header() -> Non
 def test_format_merge_blocked_surfaces_reason_and_detail() -> None:
     event = {
         "type": "merge_blocked",
-        "change": {"title": "T"},
+        "quest": {"title": "T"},
         "payload": {"reason": "conflict", "base": "main",
                     "detail": "CONFLICT (content): merge conflict in x.py"},
     }
@@ -51,7 +51,7 @@ def test_format_merge_blocked_surfaces_reason_and_detail() -> None:
 
 def test_format_loud_body_is_label_only_no_title_bracket() -> None:
     # No '[title]' bracket regardless of the change block — the body is the label.
-    event = {"type": "quest_merged", "change": {"id": "2026-06-11-abc"}, "payload": {}}
+    event = {"type": "quest_merged", "quest": {"id": "2026-06-11-abc"}, "payload": {}}
     assert imp_telegram.format_event_message(event) == "done"
 
 
@@ -70,14 +70,14 @@ def test_clamp_text_truncates_overflow_and_marks_it() -> None:
 
 
 def test_format_loud_body_is_label_only_even_with_empty_change_block() -> None:
-    event = {"type": "quest_merged", "change": {}, "payload": {}}
+    event = {"type": "quest_merged", "quest": {}, "payload": {}}
     assert imp_telegram.format_event_message(event) == "done"
 
 
 def test_format_uses_payload_message_key_as_body() -> None:
     event = {
         "type": "quest_merged",
-        "change": {"title": "T"},
+        "quest": {"title": "T"},
         "payload": {"message": "wrapped up"},
     }
     assert imp_telegram.format_event_message(event) == "done\nwrapped up"
@@ -168,7 +168,7 @@ def test_header_line_renders_id_name_and_event_local_time(set_tz) -> None:
 
     set_tz("UTC")
     event = {
-        "change": {"id": "tozi28", "title": "Telegram subscriptions"},
+        "quest": {"id": "tozi28", "title": "Telegram subscriptions"},
         "timestamp": "2026-06-25T14:32:05+00:00",
     }
     assert header_line(event) == "tozi28 · Telegram subscriptions · 2:32pm"
@@ -180,7 +180,7 @@ def test_header_line_collapses_to_id_time_when_no_title(set_tz) -> None:
     set_tz("UTC")
     # No title yet (session started before the rename): collapse to 'id · time',
     # never 'id · id · time'.
-    event = {"change": {"id": "abc123"}, "timestamp": "2026-06-25T11:05:00+00:00"}
+    event = {"quest": {"id": "abc123"}, "timestamp": "2026-06-25T11:05:00+00:00"}
     assert header_line(event) == "abc123 · 11:05am"
 
 
@@ -188,7 +188,7 @@ def test_header_line_collapses_when_title_equals_id(set_tz) -> None:
     from imp.remote.drivers.telegram import header_line
 
     set_tz("UTC")
-    event = {"change": {"id": "abc123", "title": "abc123"},
+    event = {"quest": {"id": "abc123", "title": "abc123"},
              "timestamp": "2026-06-25T11:05:00+00:00"}
     assert header_line(event) == "abc123 · 11:05am"
 
@@ -197,7 +197,7 @@ def test_header_line_collapses_when_no_id_or_title(set_tz) -> None:
     from imp.remote.drivers.telegram import header_line
 
     set_tz("UTC")
-    event = {"change": {}, "timestamp": "2026-06-25T11:05:00+00:00"}
+    event = {"quest": {}, "timestamp": "2026-06-25T11:05:00+00:00"}
     assert header_line(event) == " · 11:05am"
 
 
@@ -206,7 +206,7 @@ def test_header_line_uses_event_time_in_daemon_local_zone(set_tz) -> None:
 
     set_tz("America/New_York")
     event = {
-        "change": {"id": "tozi28", "title": "T"},
+        "quest": {"id": "tozi28", "title": "T"},
         "timestamp": "2026-06-25T14:32:05+00:00",
     }
     assert header_line(event) == "tozi28 · T · 10:32am"
@@ -220,7 +220,7 @@ def test_script_output_body_surfaces_stdout() -> None:
         {"step": "plan-finalized", "stdout": "✓ plan 1/1 · 2 tasks"},
     ) == "✓ plan 1/1 · 2 tasks"
     msg = format_event_message(
-        {"type": "script_output", "change": {"id": "abc", "title": "t"},
+        {"type": "script_output", "quest": {"id": "abc", "title": "t"},
          "payload": {"step": "plan-finalized", "stdout": "✓ plan 1/1 · 2 tasks"}})
     assert msg == "✓ plan 1/1 · 2 tasks"
 

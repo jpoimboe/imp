@@ -11,13 +11,13 @@ TS = "2026-06-25T14:32:05+00:00"
 LOUD_EVENT = {
     "id": "L1", "type": "awaiting_user_input", "timestamp": TS,
     "payload": {"steer_hint": "Need your call"},
-    "change": {"id": "k3f9qa", "title": "Dark mode"},
+    "quest": {"id": "k3f9qa", "title": "Dark mode"},
 }
 
 SILENT_EVENT = {
     "id": "S1", "type": "agent_output", "timestamp": TS,
     "payload": {"text": "working on it"},
-    "change": {"id": CHANGE_ID, "title": "My change"},
+    "quest": {"id": CHANGE_ID, "title": "My change"},
 }
 
 
@@ -73,7 +73,7 @@ def test_on_event_drops_a_silent_event_with_an_empty_body() -> None:
     sent: list = []
     adapter = _adapter(sent)
     adapter.on_event({"id": "x", "type": "llm_response", "timestamp": TS,
-                      "payload": {}, "change": {"id": "k3f9qa", "title": "X"}})
+                      "payload": {}, "quest": {"id": "k3f9qa", "title": "X"}})
     assert sent == []
 
 
@@ -93,13 +93,13 @@ def test_unsubscribed_event_is_dropped_and_records_no_maps() -> None:
 
 def _narration(text: str) -> dict:
     return {"id": "n1", "type": "llm_response", "timestamp": TS,
-            "change": {"id": "k3f9qa", "title": "t"},
+            "quest": {"id": "k3f9qa", "title": "t"},
             "payload": {"raw": {"content": [{"type": "text", "text": text}]}}}
 
 
 def _prompt_less_await() -> dict:
     return {"id": "a1", "type": "awaiting_user_input", "timestamp": TS,
-            "change": {"id": "k3f9qa", "title": "t"},
+            "quest": {"id": "k3f9qa", "title": "t"},
             "payload": {"steer_hint": ""}}
 
 
@@ -147,7 +147,7 @@ def _step_started(
     if not show_label:
         payload["show_label"] = False
     return {"id": "st1", "type": "step_started", "timestamp": TS,
-            "change": {"id": quest_id, "title": "t"}, "payload": payload}
+            "quest": {"id": quest_id, "title": "t"}, "payload": payload}
 
 
 def test_step_started_renders_silent_header_less_divider_when_subscribed() -> None:
@@ -175,7 +175,7 @@ def test_prompt_less_await_does_not_borrow_another_changes_narration() -> None:
     adapter = _adapter(sent, subscriptions=_subs("k3f9qa", "other"))
     adapter.on_event(_narration("A's secret context"))   # narration for k3f9qa
     adapter.on_event({"id": "a2", "type": "awaiting_user_input", "timestamp": TS,
-                      "change": {"id": "other", "title": "t"}, "payload": {"steer_hint": ""}})
+                      "quest": {"id": "other", "title": "t"}, "payload": {"steer_hint": ""}})
     loud = [text for text, silent in sent if not silent]
     assert loud and all("A's secret context" not in text for text in loud)
 
@@ -183,7 +183,7 @@ def test_prompt_less_await_does_not_borrow_another_changes_narration() -> None:
 SILENT_K3 = {
     "id": "S2", "type": "agent_output", "timestamp": TS,
     "payload": {"text": "working on it"},
-    "change": {"id": "k3f9qa", "title": "Dark mode"},
+    "quest": {"id": "k3f9qa", "title": "Dark mode"},
 }
 
 
@@ -320,7 +320,7 @@ def test_replayed_event_marks_alert_all_seen_even_when_alert_all_is_off() -> Non
 INTERRUPT_GATE = {
     "id": "I1", "type": "awaiting_user_input", "timestamp": TS,
     "payload": {"steer_hint": "interrupted — type to redirect", "interrupt": True},
-    "change": {"id": "k3f9qa", "title": "Dark mode"},
+    "quest": {"id": "k3f9qa", "title": "Dark mode"},
 }
 
 
@@ -364,7 +364,7 @@ def test_subscribed_quest_merged_is_header_and_done_no_handle() -> None:
     adapter = _adapter(sent, subscriptions=_subs("k3f9qa"))
     adapter.on_event({
         "id": "m1", "type": "quest_merged", "timestamp": TS,
-        "change": {"id": "k3f9qa", "title": "Dark mode"}, "payload": {}})
+        "quest": {"id": "k3f9qa", "title": "Dark mode"}, "payload": {}})
     assert len(sent) == 1
     text, silent = sent[0]
     assert silent is False

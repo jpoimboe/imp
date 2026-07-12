@@ -45,7 +45,7 @@ class _Control:
 def _event(event_id: str, etype: str, payload: dict) -> dict:
     return {
         "id": event_id, "type": etype, "timestamp": "2026-06-25T14:32:05+00:00",
-        "change": {"id": "c", "title": "T"}, "payload": payload,
+        "quest": {"id": "c", "title": "T"}, "payload": payload,
     }
 
 

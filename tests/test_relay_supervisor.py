@@ -93,7 +93,7 @@ async def test_supervisor_relays_a_resident_sessions_events(
     await sock.close()
     assert sink[0]["id"] == "e1"
     assert sink[0]["type"] == "agent_output"
-    assert sink[0]["change"] == {
+    assert sink[0]["quest"] == {
         "id": cid, "title": "T", "step": None, "status": "running"}
 
 
@@ -128,7 +128,7 @@ async def test_supervisor_multiplexes_two_resident_sessions(
         tg.cancel_scope.cancel()
     await sock_a.close()
     await sock_b.close()
-    titles = {e["id"]: e["change"]["title"] for e in sink}
+    titles = {e["id"]: e["quest"]["title"] for e in sink}
     assert titles == {"ea": "A", "eb": "B"}
 
 
@@ -292,5 +292,5 @@ async def test_supervisor_reflects_late_title_via_live_provider(
                 await anyio.sleep(0.02)
         tg.cancel_scope.cancel()
     await sock.close()
-    assert sink[0]["change"]["title"] == ""
-    assert sink[1]["change"]["title"] == "Real Title"
+    assert sink[0]["quest"]["title"] == ""
+    assert sink[1]["quest"]["title"] == "Real Title"

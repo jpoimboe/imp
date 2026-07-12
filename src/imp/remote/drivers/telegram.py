@@ -128,9 +128,9 @@ def header_line(event: Mapping[str, Any]) -> str:
     """The per-message header 'id · title · time'; time is the event's own send
     time. Collapses to 'id · time' when no title exists yet or the title just equals
     the id, so a not-yet-renamed quest never renders 'id · id · time'."""
-    change = event.get("change") or {}
-    cid = str(change.get("id") or "")
-    title = str(change.get("title") or "")
+    quest = event.get("quest") or {}
+    cid = str(quest.get("id") or "")
+    title = str(quest.get("title") or "")
     ts = event.get("timestamp")
     when = format_time_of_day(ts) if ts else ""
     if title and title != cid:

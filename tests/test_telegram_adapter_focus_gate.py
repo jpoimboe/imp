@@ -21,12 +21,12 @@ def _adapter(subs: Subscriptions, sent: list) -> TelegramNorthAdapter:
 
 def _silent(quest_id: str, event_id: str = "s1") -> dict:
     return {"id": event_id, "type": "agent_output", "timestamp": TS,
-            "payload": {"text": "narrative"}, "change": {"id": quest_id, "title": "t"}}
+            "payload": {"text": "narrative"}, "quest": {"id": quest_id, "title": "t"}}
 
 
 def _buzz(quest_id: str, event_id: str = "b1") -> dict:
     return {"id": event_id, "type": "awaiting_user_input", "timestamp": TS,
-            "payload": {"steer_hint": "?"}, "change": {"id": quest_id, "title": "t"}}
+            "payload": {"steer_hint": "?"}, "quest": {"id": quest_id, "title": "t"}}
 
 
 def test_unsubscribed_change_sends_nothing_silent() -> None:
@@ -75,7 +75,7 @@ def test_dropped_type_stays_dropped_when_subscribed() -> None:
     sent: list = []
     _adapter(subs, sent).on_event(
         {"id": "t1", "type": "thinking", "timestamp": TS, "payload": {},
-         "change": {"id": A, "title": "t"}})
+         "quest": {"id": A, "title": "t"}})
     assert sent == []
 
 
@@ -85,5 +85,5 @@ def test_subscribed_silent_empty_body_stays_dropped() -> None:
     sent: list = []
     _adapter(subs, sent).on_event(
         {"id": "e0", "type": "agent_output", "timestamp": TS,
-         "payload": {"text": ""}, "change": {"id": A, "title": "t"}})
+         "payload": {"text": ""}, "quest": {"id": A, "title": "t"}})
     assert sent == []

@@ -158,7 +158,7 @@ async def test_subscribe_seeds_seen_set_without_replaying() -> None:
     control = FakeControl(snapshots={"k3f9qa": ("running", "plan", "Dark mode")})
     control._histories["k3f9qa"] = [
         {"id": "e1", "type": "agent_output", "timestamp": "2026-06-25T14:32:05+00:00",
-         "change": {"id": "k3f9qa", "title": "Dark mode"}, "payload": {"text": "hi"}},
+         "quest": {"id": "k3f9qa", "title": "Dark mode"}, "payload": {"text": "hi"}},
     ]
     responses: queue.Queue = queue.Queue()
     await _handle_command(Subscribe("k3f9qa"), control, responses)
@@ -206,7 +206,7 @@ def _narr_event(eid: str, text: str) -> dict:
     return {
         "id": eid, "type": "llm_response",
         "timestamp": "2026-06-25T14:32:05+00:00",
-        "change": {"id": "k3f9qa", "title": "Dark mode"},
+        "quest": {"id": "k3f9qa", "title": "Dark mode"},
         "payload": {"raw": {"content": [{"type": "text", "text": text}]}},
     }
 
