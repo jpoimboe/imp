@@ -179,6 +179,27 @@ def test_refuses_dot_path(tmp_path: Path) -> None:
     assert _git(tmp_path, "rev-parse", "HEAD").strip() == before
 
 
+def test_identical_content_is_noop(tmp_path: Path) -> None:
+    quest = _quest(tmp_path)
+    _invoke(
+        _ctx(quest, tmp_path),
+        path="imp/s.md",
+        content="stable memory\n",
+        message="memory: initial",
+    )
+    sha_after_first = _git(tmp_path, "rev-parse", "HEAD").strip()
+
+    result = _invoke(
+        _ctx(quest, tmp_path),
+        path="imp/s.md",
+        content="stable memory\n",
+        message="memory: initial",
+    )
+
+    assert "nothing to commit" in result
+    assert _git(tmp_path, "rev-parse", "HEAD").strip() == sha_after_first
+
+
 def test_top_level_only_guard(tmp_path: Path) -> None:
     _seed_control(tmp_path)
     with pytest.raises(RuntimeError):

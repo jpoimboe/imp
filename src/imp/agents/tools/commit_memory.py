@@ -11,7 +11,7 @@ from pathlib import PurePosixPath
 from typing import Any
 
 from imp.agents.tools import imp_tool
-from imp.engine.worktree import RepoGitLock, _git_ok
+from imp.engine.worktree import RepoGitLock, _git, _git_ok
 from imp.providers.config import parse_project_facts
 from imp.providers.effective import memory_validation_scopes
 from imp.providers.memory import validate_memory_tree
@@ -65,6 +65,11 @@ def commit_memory(ctx: Any, path: str, content: str, message: str) -> str:
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(content, encoding="utf-8")
         _git_ok(control_root, "add", "--", relpath)
+        if _git(control_root, "diff", "--cached", "--quiet", "--", relpath).returncode == 0:
+            branch = _git_ok(
+                control_root, "rev-parse", "--abbrev-ref", "HEAD"
+            ).strip()
+            return f"{relpath} already up to date on {branch}; nothing to commit"
         _git_ok(control_root, "commit", "-m", message, "--", relpath)
         branch = _git_ok(
             control_root, "rev-parse", "--abbrev-ref", "HEAD"
