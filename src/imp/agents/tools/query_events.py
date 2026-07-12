@@ -20,7 +20,7 @@ from imp.engine.state import JsonlEventLog, parse_events_jsonl
 _DEFAULT_LIMIT = 100
 
 
-def _resolve_other_change_events(
+def _resolve_other_quest_events(
     control_root: Path, quest_id: str,
 ) -> list[dict[str, Any]] | None:
     """Worktree-first (Quest.load), then archive (archive_read.read_events),
@@ -100,7 +100,7 @@ def query_events(
     if quest_id and quest_id != current_id:
         # <control>/.imp/quests/<id>/events.jsonl -> parents[3] == <control>.
         control_root = ctx.events_path.parents[3]
-        resolved = _resolve_other_change_events(control_root, quest_id)
+        resolved = _resolve_other_quest_events(control_root, quest_id)
         if resolved is None:
             return json.dumps({"error": f"no such quest {quest_id!r}"})
         events = _filter_and_limit(resolved, types, agent_id, n)
