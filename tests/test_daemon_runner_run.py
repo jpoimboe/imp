@@ -69,7 +69,7 @@ async def test_run_daemon_relays_a_resident_session_event_and_cleans_up(
         tg.start_soon(sess.serve)
         tg.start_soon(functools.partial(
             run_daemon, tmp_path, env={},
-            make_adapter=lambda env, submit, subscriptions, alert_all: adapter,
+            make_adapter=lambda env, submit, subscriptions, alert_all, is_known_quest: adapter,
             install_signals=False, shutdown=shutdown))
 
         with anyio.fail_after(5):              # daemon up + pidfile written
@@ -123,7 +123,10 @@ async def test_run_daemon_logs_start_and_routed_command_to_file(tmp_path: Path) 
     async with anyio.create_task_group() as tg:
         tg.start_soon(functools.partial(
             run_daemon, tmp_path, env={},
-            make_adapter=lambda env, submit, subscriptions, alert_all: SubmitOnceAdapter(submit),
+            make_adapter=(
+                lambda env, submit, subscriptions, alert_all,
+                    is_known_quest: SubmitOnceAdapter(submit)
+            ),
             install_signals=False, shutdown=shutdown))
 
         with anyio.fail_after(5):
@@ -149,7 +152,7 @@ async def test_run_daemon_returns_promptly_under_cancellation(tmp_path: Path) ->
         async with anyio.create_task_group() as tg:
             tg.start_soon(functools.partial(
                 run_daemon, tmp_path, env={},
-                make_adapter=lambda env, submit, subscriptions, alert_all: adapter,
+                make_adapter=lambda env, submit, subscriptions, alert_all, is_known_quest: adapter,
                 install_signals=False, shutdown=shutdown))
 
             with anyio.fail_after(5):              # socket comes up
@@ -194,7 +197,9 @@ async def test_workers_run_as_daemon_threads(
     async with anyio.create_task_group() as tg:
         tg.start_soon(functools.partial(
             run_daemon, tmp_path, env={},
-            make_adapter=lambda env, submit, subscriptions, alert_all: FakeAdapter(),
+            make_adapter=(
+                lambda env, submit, subscriptions, alert_all, is_known_quest: FakeAdapter()
+            ),
             install_signals=False, shutdown=shutdown))
         with anyio.fail_after(5):
             while not socket_is_live(spath):
@@ -227,7 +232,10 @@ async def test_run_daemon_returns_while_poll_worker_is_blocked(tmp_path: Path) -
             async with anyio.create_task_group() as tg:
                 tg.start_soon(functools.partial(
                     run_daemon, tmp_path, env={},
-                    make_adapter=lambda env, submit, subscriptions, alert_all: BlockingAdapter(),
+                    make_adapter=(
+                        lambda env, submit, subscriptions, alert_all,
+                            is_known_quest: BlockingAdapter()
+                    ),
                     install_signals=False, shutdown=shutdown))
                 with anyio.fail_after(5):
                     while not socket_is_live(spath):
@@ -287,7 +295,7 @@ async def test_run_daemon_injects_a_default_on_alert_all_into_the_adapter(
     _seed_control(tmp_path)
     captured: dict = {}
 
-    def make_adapter(env, submit, subscriptions, alert_all):
+    def make_adapter(env, submit, subscriptions, alert_all, is_known_quest):
         captured["alert_all"] = alert_all
         return FakeAdapter()
 
@@ -303,6 +311,36 @@ async def test_run_daemon_injects_a_default_on_alert_all_into_the_adapter(
 
     assert isinstance(captured["alert_all"], AlertAll)
     assert captured["alert_all"].enabled() is True
+
+
+@pytest.mark.anyio
+async def test_run_daemon_injects_home_backed_is_known_quest_into_the_adapter(
+    tmp_path: Path,
+) -> None:
+    _seed_control(tmp_path)
+    cid = "2026-06-13-known"
+    home = tmp_path / ".imp" / "quests" / cid
+    home.mkdir(parents=True, exist_ok=True)
+    (home / "quest.json").write_text("{}")
+    captured: dict = {}
+
+    def make_adapter(env, submit, subscriptions, alert_all, is_known_quest):
+        captured["is_known_quest"] = is_known_quest
+        return FakeAdapter()
+
+    shutdown = anyio.Event()
+    async with anyio.create_task_group() as tg:
+        tg.start_soon(functools.partial(
+            run_daemon, tmp_path, env={},
+            make_adapter=make_adapter, install_signals=False, shutdown=shutdown))
+        with anyio.fail_after(5):
+            while "is_known_quest" not in captured:
+                await anyio.sleep(0.02)
+        shutdown.set()
+
+    is_known = captured["is_known_quest"]
+    assert is_known(cid) is True          # home exists on disk -> known
+    assert is_known("2026-06-13-ghost") is False  # no home -> unknown
 
 
 @pytest.mark.anyio
@@ -334,7 +372,9 @@ async def test_run_daemon_reaps_archived_homes_at_startup(tmp_path: Path) -> Non
     async with anyio.create_task_group() as tg:
         tg.start_soon(functools.partial(
             run_daemon, tmp_path, env={},
-            make_adapter=lambda env, submit, subscriptions, alert_all: FakeAdapter(),
+            make_adapter=(
+                lambda env, submit, subscriptions, alert_all, is_known_quest: FakeAdapter()
+            ),
             install_signals=False, shutdown=shutdown))
         # The socket only binds AFTER the startup reap runs, so socket-live
         # guarantees the sweep already executed.

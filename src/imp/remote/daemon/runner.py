@@ -45,7 +45,7 @@ from imp.remote.daemon.commands import (
     Unsubscribe,
 )
 from imp.remote.daemon.control import ControlPlane
-from imp.remote.daemon.directory import resident_session_ids
+from imp.remote.daemon.directory import quest_home_exists, resident_session_ids
 from imp.remote.daemon.discover import socket_is_live, socket_path
 from imp.remote.daemon.relay_supervisor import RelaySupervisor
 from imp.remote.daemon.server import SouthHub
@@ -187,10 +187,12 @@ def check_not_running(control_root: Path) -> None:
 def _make_telegram_adapter(
     env: Mapping[str, str], submit: Callable[[Command], None],
     subscriptions: Subscriptions, alert_all: AlertAll,
+    is_known_quest: Callable[[str], bool],
 ) -> TelegramNorthAdapter:
     """Default north adapter — Telegram, refusing without an allowlist."""
     return TelegramNorthAdapter.from_env(
-        dict(env), submit, subscriptions=subscriptions, alert_all=alert_all)
+        dict(env), submit, subscriptions=subscriptions, alert_all=alert_all,
+        is_known_quest=is_known_quest)
 
 
 def _make_on_attach(subscriptions: Subscriptions) -> Callable[[str, bool], None]:
@@ -447,7 +449,8 @@ async def run_daemon(
     *,
     env: Mapping[str, str] | None = None,
     make_adapter: Callable[
-        [Mapping[str, str], Callable[[Command], None], Subscriptions, AlertAll],
+        [Mapping[str, str], Callable[[Command], None], Subscriptions, AlertAll,
+         Callable[[str], bool]],
         Any,
     ] = _make_telegram_adapter,
     deliver: Callable[[str, str], Awaitable[DeliveryOutcome]] | None = None,
@@ -473,6 +476,9 @@ async def run_daemon(
     search = search or (lambda q: archive_read.search_archive(control_root, q))
     resume = resume or (lambda token: spawn.resume_quest(control_root, token))
     save = save or (lambda cid: _save_quest(control_root, cid))
+
+    def is_known_quest(cid: str) -> bool:
+        return quest_home_exists(control_root, cid)
 
     spath = socket_path(control_root)
     outbound: queue.Queue[dict[str, Any]] = queue.Queue()
@@ -503,7 +509,7 @@ async def run_daemon(
             control_root, cid, n),
         search=search, resume=resume, save=save,
         full_history=lambda cid: discover.full_history(control_root, cid))
-    adapter = make_adapter(env, inbound.put, subscriptions, alert_all)
+    adapter = make_adapter(env, inbound.put, subscriptions, alert_all, is_known_quest)
 
     log_handlers = _install_file_logging(control_root, env)
     _log.info("remote-control daemon starting (control_root=%s)", control_root)

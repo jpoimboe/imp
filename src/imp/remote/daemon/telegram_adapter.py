@@ -79,17 +79,15 @@ def extract_inbound(
 def resolve_quest_id(
     inbound: Inbound,
     msg_to_quest: dict[int, str],
-    handle_to_quest: dict[str, str],
+    is_known_quest: Callable[[str], bool],
 ) -> tuple[str | None, str]:
     if inbound.reply_to_message_id is not None:
         quest_id = msg_to_quest.get(inbound.reply_to_message_id)
         if quest_id is not None:
             return quest_id, inbound.text
     handle, rest = parse_handle(inbound.text)
-    if handle is not None:
-        quest_id = handle_to_quest.get(handle)
-        if quest_id is not None:
-            return quest_id, rest
+    if handle is not None and is_known_quest(handle):
+        return handle, rest
     return None, inbound.text
 
 
@@ -162,6 +160,7 @@ class TelegramNorthAdapter:
         get_updates: Callable[[int], dict[str, Any]],
         subscriptions: Subscriptions,
         alert_all: AlertAll | None = None,
+        is_known_quest: Callable[[str], bool] = lambda _cid: False,
     ) -> None:
         self._chat_id = chat_id
         self._submit = submit
@@ -169,13 +168,14 @@ class TelegramNorthAdapter:
         self._get_updates = get_updates
         self._subscriptions = subscriptions
         self._alert_all = alert_all if alert_all is not None else AlertAll()
+        self._is_known_quest = is_known_quest
         self._offset = 0
         self._last_narration: dict[str, str] = {}
         self._msg_to_quest: dict[int, str] = {}
-        self._handle_to_quest: dict[str, str] = {}
-        # The reply maps below are WRITTEN by on_event and on_response (both run on
-        # the sender thread) and READ by resolve (poll thread); _offset stays
-        # poll-thread-only. Guard only the maps.
+        # _msg_to_quest is WRITTEN by on_event and on_response (both run on the
+        # sender thread) and READ by resolve (poll thread); _offset stays
+        # poll-thread-only. Guard only that map. @handle routing is stateless
+        # (is_known_quest), so it keeps no map and needs no lock.
         self._lock = threading.Lock()
 
     @classmethod
@@ -185,6 +185,7 @@ class TelegramNorthAdapter:
         submit: Callable[[Command], None],
         *,
         subscriptions: Subscriptions,
+        is_known_quest: Callable[[str], bool],
         alert_all: AlertAll | None = None,
         file_text: str | None = None,
     ) -> TelegramNorthAdapter:
@@ -197,7 +198,7 @@ class TelegramNorthAdapter:
 
         return cls(chat_id=config.chat_id, submit=submit,
                    send=send, get_updates=get_updates, subscriptions=subscriptions,
-                   alert_all=alert_all)
+                   alert_all=alert_all, is_known_quest=is_known_quest)
 
     def on_event(self, event: dict[str, Any]) -> None:
         """Curate one event and deliver it to chat.
@@ -241,8 +242,6 @@ class TelegramNorthAdapter:
         if kind == "silent" and not body.strip():
             return
         handle = handle_for(quest_id)
-        with self._lock:
-            self._handle_to_quest[handle] = quest_id
         full = f"{header_line(event)}\n{format_outbound(event, handle)}"
         message_id = self._send(full, kind == "silent")
         with self._lock:
@@ -286,8 +285,6 @@ class TelegramNorthAdapter:
         if etype == "awaiting_user_input" and not body.strip():
             override = self._last_narration.get(quest_id, "")
         handle = handle_for(quest_id)
-        with self._lock:
-            self._handle_to_quest[handle] = quest_id
         full = f"{header_line(event)}\n{format_outbound(event, handle, override)}"
         message_id = self._send(full, False)
         with self._lock:
@@ -302,18 +299,22 @@ class TelegramNorthAdapter:
         if not text:
             return
         message_id = self._send(text, True)
-        if isinstance(response, Notice) and response.quest_id is not None:
-            handle = handle_for(response.quest_id)
+        if (
+            isinstance(response, Notice)
+            and response.quest_id is not None
+            and message_id is not None
+        ):
             with self._lock:
-                self._handle_to_quest[handle] = response.quest_id
-                if message_id is not None:
-                    self._msg_to_quest[message_id] = response.quest_id
+                self._msg_to_quest[message_id] = response.quest_id
 
     def resolve(self, inbound: Inbound) -> tuple[str | None, str]:
-        """Resolve one inbound reply to (quest_id, text) against the recorded maps."""
+        """Resolve one inbound reply to (quest_id, text): the message-id map first
+        (a locked snapshot), then a stateless @handle check via is_known_quest.
+        The snapshot is taken under the lock so the is_known_quest probe — which may
+        touch the filesystem — never runs while the sender thread's writes are held."""
         with self._lock:
-            return resolve_quest_id(
-                inbound, self._msg_to_quest, self._handle_to_quest)
+            msg_to_quest = dict(self._msg_to_quest)
+        return resolve_quest_id(inbound, msg_to_quest, self._is_known_quest)
 
     def _resolve_text(self, text: str, reply_to: int | None) -> tuple[str | None, str]:
         return self.resolve(Inbound(text=text, reply_to_message_id=reply_to))

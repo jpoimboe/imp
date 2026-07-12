@@ -41,7 +41,7 @@ def _adapter(
         chat_id=4242, submit=lambda _: None,
         send=send, get_updates=lambda _: {"result": []},
         subscriptions=subscriptions if subscriptions is not None else _subs("k3f9qa"),
-        alert_all=alert_all)
+        alert_all=alert_all, is_known_quest=lambda _cid: True)
 
 
 def test_on_event_sends_a_message_carrying_the_handle() -> None:
@@ -62,9 +62,8 @@ def test_on_event_records_reply_to_mapping_so_a_reply_resolves_home() -> None:
     assert adapter.resolve(reply) == ("k3f9qa", "yes do it")
 
 
-def test_on_event_records_handle_mapping_for_the_at_fallback() -> None:
-    adapter = _adapter([])
-    adapter.on_event(LOUD_EVENT)
+def test_at_handle_reply_resolves_when_quest_is_known() -> None:
+    adapter = _adapter([])  # helper wires is_known_quest -> True for any id
     reply = Inbound(text="@k3f9qa go", reply_to_message_id=None)
     assert adapter.resolve(reply) == ("k3f9qa", "go")
 
@@ -77,17 +76,9 @@ def test_on_event_drops_a_silent_event_with_an_empty_body() -> None:
     assert sent == []
 
 
-def test_on_event_records_handle_map_even_when_send_returns_none() -> None:
-    adapter = _adapter([], message_id=None)
-    adapter.on_event(LOUD_EVENT)
-    reply = Inbound(text="@k3f9qa go", reply_to_message_id=None)
-    assert adapter.resolve(reply) == ("k3f9qa", "go")
-
-
 def test_unsubscribed_event_is_dropped_and_records_no_maps() -> None:
     adapter = _adapter([], subscriptions=Subscriptions())
     adapter.on_event(SILENT_EVENT)
-    assert adapter._handle_to_quest == {}
     assert adapter._msg_to_quest == {}
 
 
@@ -200,7 +191,6 @@ def test_alert_all_off_drops_unsubscribed_buzz_and_records_no_maps() -> None:
     adapter = _adapter(sent, subscriptions=Subscriptions(), alert_all=off)
     adapter.on_event(LOUD_EVENT)
     assert sent == []
-    assert adapter._handle_to_quest == {}
     assert adapter._msg_to_quest == {}
 
 
@@ -213,7 +203,6 @@ def test_alert_all_on_sends_unsubscribed_buzz_loud_and_records_maps() -> None:
     text, silent = sent[0]
     assert silent is False
     assert "Need your call" in text
-    assert adapter._handle_to_quest == {"k3f9qa": "k3f9qa"}
     assert adapter._msg_to_quest == {42: "k3f9qa"}
 
 
@@ -333,7 +322,6 @@ def test_subscribed_interrupt_gate_streams_silent_with_reply_handle() -> None:
     assert silent is True                 # streamed quietly — no phone buzz
     assert text.endswith("↩ @k3f9qa")     # reply handle intact: still steerable
     assert "needs your input" in text
-    assert adapter._handle_to_quest == {"k3f9qa": "k3f9qa"}
 
 
 def test_alert_all_on_drops_unsubscribed_interrupt_gate() -> None:
@@ -342,7 +330,6 @@ def test_alert_all_on_drops_unsubscribed_interrupt_gate() -> None:
         sent, subscriptions=Subscriptions(), alert_all=_alert_all_on())
     adapter.on_event(INTERRUPT_GATE)
     assert sent == []                     # silent tier is suppressed on alert-all
-    assert adapter._handle_to_quest == {}
     assert adapter._msg_to_quest == {}
 
 
@@ -372,5 +359,4 @@ def test_subscribed_quest_merged_is_header_and_done_no_handle() -> None:
     assert text.endswith("done")                      # label-only body
     assert "[Dark mode]" not in text                  # no doubled title bracket
     assert "↩" not in text                            # done is not a gate: no handle
-    assert adapter._handle_to_quest == {"k3f9qa": "k3f9qa"}
     assert adapter._msg_to_quest == {42: "k3f9qa"}

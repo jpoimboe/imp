@@ -20,7 +20,7 @@ def _adapter(
         send=lambda text, silent: (sent.append((text, silent)) or 1),
         get_updates=lambda offset: {"result": []},
         subscriptions=subs if subs is not None else Subscriptions(),
-        alert_all=alert_all)
+        alert_all=alert_all, is_known_quest=lambda _cid: True)
 
 
 def test_render_listresult_one_line_per_change() -> None:

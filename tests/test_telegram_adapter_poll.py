@@ -74,7 +74,7 @@ def test_poll_routes_an_at_handle_reply_as_a_reply_command() -> None:
     subs.add("k3f9qa")
     adapter = TelegramNorthAdapter(
         chat_id=CHAT, submit=submitted.append,
-        send=lambda text, silent: 42, get_updates=get_updates, subscriptions=subs)
-    adapter.on_event(EVENT)          # records handle k3f9qa -> the Quest
+        send=lambda text, silent: 42, get_updates=get_updates, subscriptions=subs,
+        is_known_quest=lambda _cid: True)
     adapter.poll_once()
     assert submitted == [Reply("k3f9qa", "go")]
