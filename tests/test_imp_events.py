@@ -1,4 +1,4 @@
-# tests/test_query_events.py
+# tests/test_imp_events.py
 from __future__ import annotations
 
 import json
@@ -14,7 +14,7 @@ def _ctx(tmp_path: Path) -> ToolContext:
 
 
 def _call(tmp_path: Path, **args) -> str:
-    return get_registry()["query_events"].invoke(_ctx(tmp_path), args)
+    return get_registry()["imp_events"].invoke(_ctx(tmp_path), args)
 
 
 def _lines(out: str) -> list[str]:
@@ -202,7 +202,7 @@ def test_full_no_filter_matches_manual_tail(tmp_path: Path) -> None:
 
 
 def test_description_frames_provenance_documents_new_params() -> None:
-    desc = get_registry()["query_events"].description
+    desc = get_registry()["imp_events"].description
     low = desc.lower()
     # Provenance framing, not the old state/format framing.
     assert "provenance" in low
@@ -233,7 +233,7 @@ def _ctx_at(events_path: Path) -> ToolContext:
 
 
 def _call_at(events_path: Path, **args) -> str:
-    return get_registry()["query_events"].invoke(_ctx_at(events_path), args)
+    return get_registry()["imp_events"].invoke(_ctx_at(events_path), args)
 
 
 def _make_live_change(control: Path, cid: str, events: list[dict]) -> None:
@@ -365,6 +365,6 @@ def test_quest_id_applies_limit(tmp_path: Path) -> None:
 
 
 def test_description_documents_quest_id_and_current_quest() -> None:
-    desc = get_registry()["query_events"].description
+    desc = get_registry()["imp_events"].description
     assert "quest_id" in desc
     assert "current quest" in desc.lower()

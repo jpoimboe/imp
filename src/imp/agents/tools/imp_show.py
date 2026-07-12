@@ -33,7 +33,7 @@ def imp_show(
     from imp.cli import main as cli_main
 
     current_id = ctx.events_path.parent.name
-    # Truthy check mirrors query_events: a blank quest_id routes to the current
+    # Truthy check mirrors imp_events: a blank quest_id routes to the current
     # quest rather than reaching resolution with an empty id.
     target = quest_id if quest_id else current_id
     # <control>/.imp/quests/<id>/events.jsonl -> parents[3] == <control>.

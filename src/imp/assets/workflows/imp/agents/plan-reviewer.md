@@ -22,7 +22,7 @@ Spec file: `{{ quest.home }}/artifacts/spec/{{ quest.id }}.md`
    highest-N file — that is the plan under review.
 2. Read the spec.
 3. If you need to confirm the plan reflects a decision from brainstorm or spec
-   review, use `query_events` — the provenance record of what was decided, not current state.
+   review, use `imp_events` — the provenance record of what was decided, not current state.
 
 Read exactly these two artifacts — the newest plan and the spec. Do not read prior or future
 plan files: a requirement absent here may belong to another plan, and reading the whole

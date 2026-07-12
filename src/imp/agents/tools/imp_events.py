@@ -1,4 +1,4 @@
-"""query_events (spec §6.6). Reads a quest's event timeline — the current
+"""imp_events (spec §6.6). Reads a quest's event timeline — the current
 quest by default, or another quest via quest_id."""
 
 from __future__ import annotations
@@ -54,7 +54,7 @@ def _filter_and_limit(
 
 
 @imp_tool(
-    name="query_events",
+    name="imp_events",
     description=(
         "The quest's event log: the provenance record, in order, of what was "
         "said and what prior agents and reviews did on this quest. Returns one "
@@ -68,7 +68,7 @@ def _filter_and_limit(
         "working files."
     ),
 )
-def query_events(
+def imp_events(
     ctx: ToolContext,
     type: str | None = None,
     agent_id: str | None = None,

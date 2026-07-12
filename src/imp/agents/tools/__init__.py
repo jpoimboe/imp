@@ -125,7 +125,7 @@ _BUILTIN_MODULES = (
     "fs",
     "imp_show",
     "nav",
-    "query_events",
+    "imp_events",
     "rename_quest",
     "step_label",
     "symbol_outline",

@@ -14,7 +14,7 @@ def test_explorer_agent_is_read_only_leaf() -> None:
     a = _wf().agents["explorer"]
     assert a.name == "explorer"
     tools = set(a.tools)
-    assert tools == {"read_file", "glob", "grep", "bash", "query_events", "symbol_outline"}
+    assert tools == {"read_file", "glob", "grep", "bash", "imp_events", "symbol_outline"}
     for forbidden in ("write_file", "edit_file", "web_search", "web_fetch",
                       "sub_agent", "wait_for_user"):
         assert forbidden not in tools
@@ -26,7 +26,7 @@ def test_explorer_agent_is_read_only_leaf() -> None:
 def test_researcher_agent_has_web_tools_read_only() -> None:
     a = _wf().agents["researcher"]
     assert set(a.tools) == {"read_file", "glob", "grep", "bash",
-                             "query_events", "web_search", "web_fetch"}
+                             "imp_events", "web_search", "web_fetch"}
     assert a.subagents == ()
     assert a.output_schema.fields == ()
 
