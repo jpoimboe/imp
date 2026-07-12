@@ -48,3 +48,33 @@ its own). Pair with `imp-knowledge` for the stable picture.
 
 When the user asks what the standing instructions say, read the applicable
 `imp/memory/` files and quote them verbatim rather than paraphrasing.
+
+## The memory model in depth
+
+Memory is **additive**, never an override: for a step of workflow `W`, imp
+concatenates `all.md`, then `W/all.md`, then `W/<step>.md`. Step names only mean
+something inside a workflow, which is why per-step files nest under a
+`<workflow>/` directory keyed by the workflow's directory name. To get the real
+step names for a workflow, read its `workflow.yaml` (a running quest's snapshot
+is at `.imp/quests/<id>/workflow/workflow.yaml`) — never guess a step name.
+
+imp validates the whole `imp/memory/` tree at load, before any agent runs: a
+directory must name a known workflow, and a `.md` under it must be `all` or a
+real step of that workflow, or imp fails loudly and lists the valid names. That
+error doubles as the live discovery aid for step names and as upgrade-orphan
+detection — if an imp upgrade renames or removes a step, the now-stale file
+surfaces the same loud error instead of silently going dead. A run **freezes**
+its memory at first run, so editing `imp/memory/` mid-run never changes an
+in-flight quest; the change takes effect next run.
+
+## Building up memory with imp
+
+The user needn't hand-author these files. In the interactive gates — the
+`threshold` chat and the `finalize` merge gate — when the user voices a standing,
+cross-quest preference ("always show me exact prose at threshold", "always run X
+before planning"), imp offers to record it: it works out the narrowest correct
+target file, shows the exact path and content, and writes it only on
+confirmation, via the `commit_memory` tool (which commits the single file under
+imp's shared-repo lock). imp never auto-writes memory and never writes outside
+`imp/memory/`. This is how a user grows memory over time instead of composing the
+markdown by hand.

@@ -13,6 +13,7 @@ leaf-path — NEVER folded into `config.tiers`, whose leaves stay plain `str`.
 from __future__ import annotations
 
 import os
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -146,6 +147,37 @@ def load_effective_config(
     return EffectiveConfig(config=_to_config(merged, project_facts, memory), provenance=prov)
 
 
+def memory_validation_scopes(
+    project_root: Path,
+    relpaths: Iterable[str],
+    project_facts: Mapping[str, str],
+) -> tuple[list[str], dict[str, frozenset[str]]]:
+    """Build the (valid_workflows, workflow_steps) inputs for
+    `validate_memory_tree`: every known workflow name, plus the step names of
+    each workflow referenced by a `<workflow>/...` relpath. Honors project-key
+    gating via `project_facts` so no unrelated template-ref error can fire."""
+    from imp.assets import available_workflow_names, resolve_workflow_dir
+    from imp.engine.loader import load_workflow
+
+    valid = available_workflow_names(project_root)
+    valid_set = set(valid)
+    referenced = sorted(
+        {
+            key.split("/", 1)[0]
+            for key in relpaths
+            if "/" in key and key.split("/", 1)[0] in valid_set
+        }
+    )
+    workflow_steps: dict[str, frozenset[str]] = {}
+    for name in referenced:
+        wf = load_workflow(
+            resolve_workflow_dir(project_root, name),
+            project_keys=frozenset(project_facts),
+        )
+        workflow_steps[name] = frozenset(s.name for s in wf.flat_steps())
+    return valid, workflow_steps
+
+
 def validate_project_memory(
     project_root: Path,
     memory: dict[str, str],
@@ -159,27 +191,11 @@ def validate_project_memory(
     error can fire here."""
     if not memory:
         return
-    from imp.assets import available_workflow_names, resolve_workflow_dir
     from imp.engine.errors import LoadError
-    from imp.engine.loader import load_workflow
 
-    valid = available_workflow_names(project_root)
-    valid_set = set(valid)
-    referenced = sorted(
-        {
-            key.split("/", 1)[0]
-            for key in memory
-            if "/" in key and key.split("/", 1)[0] in valid_set
-        }
+    valid, workflow_steps = memory_validation_scopes(
+        project_root, memory.keys(), project_facts
     )
-    workflow_steps: dict[str, frozenset[str]] = {}
-    for name in referenced:
-        wf = load_workflow(
-            resolve_workflow_dir(project_root, name),
-            project_keys=frozenset(project_facts),
-        )
-        workflow_steps[name] = frozenset(s.name for s in wf.flat_steps())
-
     errors = validate_memory_tree(
         memory.keys(), valid_workflows=valid, workflow_steps=workflow_steps
     )

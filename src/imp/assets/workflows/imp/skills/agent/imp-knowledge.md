@@ -16,8 +16,10 @@ Load these with `load_skill(name=...)` when a question goes past the primer belo
   of a specific quest right now.
 - **`imp-memory`** (`load_skill(name="imp-memory")`) — what imp remembers and
   where: its two tiers of durable state (per-quest records and project-level
-  `imp/project.yaml` config and `imp/memory/` files) and how to inspect them.
-  Load it for any question about memory, persistence, or project configuration.
+  `imp/project.yaml` config and `imp/memory/` files), the layered memory model
+  in depth, and how imp can help you author memory in the interactive gates, not
+  just inspect it. Load it for any question about memory, persistence, or project
+  configuration.
 
 ## Quest and its home
 

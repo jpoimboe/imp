@@ -398,17 +398,20 @@ def resolve_policy(
     # quest/spike branches still update. bind_plan() emits the re-expose after
     # the refs/heads mask, so last-wins keeps the imp/ subtree writable while
     # master and every other branch stay read-only. Existence-gated like caches/
-    # secrets. Skipped for the draft/degenerate case where the agent legitimately
-    # IS the control root (mirrors _enforce_clean_tree's project_root ==
-    # control_root guard).
-    git_ref_reexpose: tuple[str, ...] = ()
-    if worktree != control_root:
-        refs_heads = git / "refs" / "heads"
-        remask += list(_existing(
-            [str(refs_heads), str(git / "refs" / "stash"), str(git / "index")]))
-        imp_refs = refs_heads / "imp"
-        imp_refs.mkdir(parents=True, exist_ok=True)
-        git_ref_reexpose = (str(imp_refs),)
+    # secrets. Applied UNIFORMLY — including the draft/degenerate case where the
+    # agent's project_root IS the control root (the threshold concierge and its
+    # non-isolated explorer/researcher subagents). This is a deliberate asymmetry
+    # with _enforce_clean_tree, which keeps its project_root == control_root skip:
+    # the ref-mask must cover draft agents precisely because commit_memory now
+    # gives them a real (locked) commit capability that a raw bash git must not
+    # bypass, whereas clean-tree tolerance for the user's pre-existing WIP is
+    # unchanged.
+    refs_heads = git / "refs" / "heads"
+    remask += list(_existing(
+        [str(refs_heads), str(git / "refs" / "stash"), str(git / "index")]))
+    imp_refs = refs_heads / "imp"
+    imp_refs.mkdir(parents=True, exist_ok=True)
+    git_ref_reexpose: tuple[str, ...] = (str(imp_refs),)
 
     cache_names = cfg.writable_caches or _DEFAULT_CACHES
     caches = _existing([str(home / c) for c in cache_names])

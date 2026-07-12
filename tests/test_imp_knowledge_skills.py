@@ -155,3 +155,41 @@ def test_old_skill_names_are_gone() -> None:
     for old in ("imp-mental-model", "imp-introspect"):
         with pytest.raises(SkillNotFound):
             load_agent_skill(_skills_dir(), old)
+
+
+def test_memory_teaches_the_in_depth_model() -> None:
+    body = load_agent_skill(_skills_dir(), "imp-memory")
+    low = body.lower()
+    # The new in-depth section and its additive-layering claim.
+    assert "## The memory model in depth" in body
+    assert "additive" in low
+    assert "all.md`, then `W/all.md`, then `W/<step>.md" in body
+    # Step-name discovery from workflow.yaml, load-time validation, and the freeze.
+    assert "workflow.yaml" in body
+    assert "validates the whole `imp/memory/` tree at load" in body
+    # "upgrade-orphan" and "detection" wrap across a line break in the pinned
+    # prose, so assert the distinctive token alone (raw file body, no whitespace
+    # normalization).
+    assert "upgrade-orphan" in low
+    assert "freezes" in low
+    # No stale guidance reference reintroduced by the enrichment.
+    assert "guidance" not in low
+
+
+def test_memory_teaches_the_authoring_affordance() -> None:
+    body = load_agent_skill(_skills_dir(), "imp-memory")
+    assert "## Building up memory with imp" in body
+    # The affordance names the interactive gates and the commit_memory tool,
+    # and states imp never auto-writes memory.
+    assert "the `commit_memory` tool" in body
+    assert "never auto-writes memory" in body
+    assert "threshold" in body
+    assert "finalize" in body
+
+
+def test_knowledge_memory_entry_notes_authoring_help() -> None:
+    body = load_agent_skill(_skills_dir(), "imp-knowledge")
+    # The refreshed map entry points past inspection to authoring help,
+    # while keeping the load_skill invocation intact.
+    assert 'load_skill(name="imp-memory")' in body
+    assert "help you author memory" in body

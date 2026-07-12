@@ -217,7 +217,7 @@ DENYABLE_TOOLS: frozenset[str] = BASE_CAPS | TOP_LEVEL_CAPS | frozenset({"sub_ag
 # allow_tools:. An allow_tools entry outside this set is a no-op/typo,
 # validated at parse time. Disjoint from BASE_CAPS: a tool is either
 # default-granted or opt-in, never both.
-ALLOWABLE_TOOLS: frozenset[str] = frozenset({"update_step_label"})
+ALLOWABLE_TOOLS: frozenset[str] = frozenset({"update_step_label", "commit_memory"})
 
 
 def _effective_tools(agent: AgentDef, is_sub: bool) -> frozenset[str]:

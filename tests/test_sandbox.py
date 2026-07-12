@@ -1066,21 +1066,61 @@ def test_resolve_policy_skips_absent_ref_masks(tmp_path):
     assert (git / "refs" / "heads" / "imp").is_dir()
 
 
-def test_resolve_policy_draft_change_skips_ref_protection(tmp_path):
+def test_resolve_policy_draft_change_masks_git_refs_and_reexposes_imp(tmp_path):
+    # The draft/degenerate case (worktree IS the
+    # control root — the threshold concierge and its non-isolated explorer/
+    # researcher subagents) now gets the SAME ref-mask as a real worktree, so a
+    # raw `git commit` from bash cannot bypass commit_memory's lock. Only
+    # refs/heads/imp stays writable.
     control, _wt = _layout(tmp_path)
     git = control / ".git"
     (git / "refs" / "heads").mkdir(parents=True)
     (git / "index").write_text("")
-    # worktree IS the control root → draft/degenerate case: emit none of it.
+    (git / "refs" / "stash").write_text("")
     pol = resolve_policy(worktree=control, control_root=control, quest_id="abc",
                          cfg=SandboxConfig(), engine_env_result={}, environ={},
                          available=True)
-    assert str(git / "refs" / "heads") not in pol.git_ro_remask
-    assert str(git / "refs" / "stash") not in pol.git_ro_remask
-    assert str(git / "index") not in pol.git_ro_remask
-    assert pol.git_ref_reexpose == ()
-    # refs/heads/imp is NOT created for the draft case.
-    assert not (git / "refs" / "heads" / "imp").exists()
+    # The three crown-jewel paths join the RO remask even in draft mode...
+    assert str(git / "refs" / "heads") in pol.git_ro_remask
+    assert str(git / "refs" / "stash") in pol.git_ro_remask
+    assert str(git / "index") in pol.git_ro_remask
+    # ...and refs/heads/imp is the RW re-expose, created on disk for the bind.
+    assert pol.git_ref_reexpose == (str(git / "refs" / "heads" / "imp"),)
+    assert (git / "refs" / "heads" / "imp").is_dir()
+    # End-to-end verdicts: master + index read-only, imp/ subtree writable.
+    assert pol.allows_write(git / "refs" / "heads" / "master") is False
+    assert pol.allows_write(git / "index") is False
+    assert pol.allows_write(git / "refs" / "heads" / "imp" / "abc") is True
+
+
+def test_draft_ref_mask_emitted_in_bwrap_argv(tmp_path):
+    # The draft ref-mask survives all the way into the
+    # emitted bwrap argv, not just the resolved-policy verdict, so a future
+    # bind_plan/build_sandbox_argv refactor that drops it is caught.
+    control, _wt = _layout(tmp_path)
+    git = control / ".git"
+    (git / "refs" / "heads").mkdir(parents=True)
+    (git / "index").write_text("")
+    (git / "refs" / "stash").write_text("")
+    pol = resolve_policy(worktree=control, control_root=control, quest_id="abc",
+                         cfg=SandboxConfig(), engine_env_result={}, environ={},
+                         available=True)
+    argv = build_sandbox_argv(
+        "git status", cwd=str(control), policy=pol, engine_env={}
+    )
+    flat = " ".join(argv)
+    assert (
+        f"--ro-bind {git / 'refs' / 'heads'} {git / 'refs' / 'heads'}" in flat
+    )
+    assert (
+        f"--bind {git / 'refs' / 'heads' / 'imp'} "
+        f"{git / 'refs' / 'heads' / 'imp'}" in flat
+    )
+    # last-wins ordering: the refs/heads RO mask precedes the refs/heads/imp
+    # RW re-expose so the imp/ subtree stays writable.
+    i_mask = argv.index(str(git / "refs" / "heads"))
+    i_reexpose = argv.index(str(git / "refs" / "heads" / "imp"))
+    assert i_mask < i_reexpose
 
 
 def test_resolve_policy_disposable_tree_uses_universal_home_model(tmp_path):
