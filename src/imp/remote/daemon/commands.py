@@ -28,7 +28,7 @@ class Abandon:
 
 
 @dataclass(frozen=True)
-class ListChanges:
+class ListQuests:
     pass
 
 
@@ -81,12 +81,12 @@ class Alerts:
 
 @dataclass(frozen=True)
 class ListResult:
-    changes: list[QuestInfo]
+    quests: list[QuestInfo]
     resident: frozenset[str] = frozenset()
 
 
 Command = (
-    Reply | Create | Abandon | ListChanges | Help | Notice |
+    Reply | Create | Abandon | ListQuests | Help | Notice |
     Subscribe | Unsubscribe | Replay | Search | Resume | Save | Alerts)
 Response = ListResult | Notice
 
@@ -152,7 +152,7 @@ def parse(
         rest = rest.strip()
         verb = word[1:].lower()
         if verb == "list":
-            return ListChanges()
+            return ListQuests()
         if verb == "help":
             return Help()
         if verb == "new":

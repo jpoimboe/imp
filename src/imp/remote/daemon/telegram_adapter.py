@@ -128,7 +128,7 @@ def render_response(
         header = "Alerts: all quests" if alerts_on else "Alerts: subscribed only"
         subscribed = set(subscribed_ids)
         visible = [
-            c for c in response.changes
+            c for c in response.quests
             if c.id in response.resident or c.id in subscribed]
         if not visible:
             return f"{header}\nNothing running."
