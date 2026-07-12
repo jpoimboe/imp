@@ -187,9 +187,9 @@ class AgentInvocation:
     # is_resume (a `resume:` edge). retry_feedback (above) now means "optional
     # wrapper text appended on that balancing user turn"; None = balance only.
     balance_on_resume: bool = False
-    # True when a resume/respawn should deliver the continuation nudge (unioned
-    # from State.interrupt_pending and State.retry_continue_pending) rather than
-    # solicit an empty reply and park.
+    # True when a resume/respawn should deliver the continuation nudge (computed
+    # by the executor from State.resume_mode == "continue") rather than solicit
+    # an empty reply and park.
     resume_should_continue: bool = False
     # tier name → ProviderModel, the run's tier map. Threaded by the executor
     # into every AgentInvocation; copied onto ToolContext so dispatch_task can

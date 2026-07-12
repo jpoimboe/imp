@@ -473,10 +473,10 @@ async def run_quest(
                     evicted = _evict_if_holding(quest, state, log)
                 if not evicted and step.kind == "agent":
                     state.arm_step_resume(
-                        interrupt=coordinator.should_pause or action.interrupt)
-                    # Keep on transient give-up; clear on genuine yield or any other park.
-                    state.retry_continue_pending = action.reason in (
-                        "retry_ceiling", "reauth_needed")
+                        mode="continue" if (
+                            coordinator.should_pause or action.interrupt
+                            or action.reason in ("retry_ceiling", "reauth_needed"))
+                        else "solicit")
                 reason = action.reason or "interrupt"
                 state.status = (
                     "merge_blocked" if reason == "merge_blocked" else "paused")
@@ -492,8 +492,7 @@ async def run_quest(
                 state.loop_counts.pop(step.name, None)          # forward advance resets
                 nxt = idx + 1
                 if nxt >= len(flat):
-                    state.interrupt_pending = False
-                    state.retry_continue_pending = False
+                    state.clear_step_resume()
                     return _complete_or_park(quest, state, log, coordinator)
                 state.step = flat[nxt].name
                 state.step_label = (
@@ -505,17 +504,14 @@ async def run_quest(
                     render_label(flat[nxt].phase_label, quest, log, state)
                     if flat[nxt].phase_label is not None else None
                 )
-                state.resume_pending = None
-                state.interrupt_pending = False
-                state.retry_continue_pending = False
+                state.clear_step_resume()
             elif isinstance(action, Goto):
                 if action.release is not None and state.held_lane is not None:
                     _release_held_lane(
                         action.release, quest, state, log, step_name=step.name)
                 target_idx = workflow.resolve_goto(action.target)
                 if target_idx >= len(flat):                      # empty trailing phase
-                    state.interrupt_pending = False
-                    state.retry_continue_pending = False
+                    state.clear_step_resume()
                     return _complete_or_park(quest, state, log, coordinator)
                 if target_idx <= idx:                            # backward OR self → loop-counted
                     n = state.loop_counts.get(step.name, 0) + 1
@@ -540,18 +536,14 @@ async def run_quest(
                 )
                 if action.resume:
                     # Single-shot reset: a resumed step must not inherit a stale
-                    # retry count. Done HERE (the navigation point that sets
-                    # resume_pending), not in _route_agent — is_resume stays True
-                    # across internal retries, so resetting per entry would let a
+                    # retry count. Done HERE (the navigation point that arms the
+                    # resume), not in _route_agent — is_resume stays True across
+                    # internal retries, so resetting per entry would let a
                     # persistent error retry forever.
                     state.step_attempt = 0
-                    state.resume_pending = flat[target_idx].name
-                    state.interrupt_pending = False
-                    state.retry_continue_pending = False
+                    state.arm_step_resume(mode="solicit")
                 else:
-                    state.resume_pending = None
-                    state.interrupt_pending = False
-                    state.retry_continue_pending = False
+                    state.clear_step_resume()
             else:
                 raise AssertionError(f"unexpected action {action!r}")
 
@@ -618,7 +610,7 @@ async def run_quest(
                 },
             )
             _emit_paused_event(log, "internal_error", kind=kind)
-            state.resume_pending = state.step
+            state.arm_step_resume(mode="solicit")
             state.status = "paused"
             state.save(quest.state_dir)
         except Exception:
@@ -1109,7 +1101,7 @@ def _evict_if_holding(quest: Quest, state: State, log: EventLog) -> bool:
     state.held_lane = None
     state.held_acquire_step = None
     state.step = acquire_step
-    state.resume_pending = None
+    state.clear_step_resume()
     _emit(log, "lane_evicted", {"base": lane, "rewind_to": acquire_step})
     return True
 
@@ -1341,7 +1333,7 @@ async def _route_agent(
                 return pause, None, {}
         backoff += 1
         # Persist before sleep so a kill/crash during backoff leaves the intent on disk.
-        state.retry_continue_pending = True
+        state.arm_step_resume(mode="continue")
         state.save(quest.state_dir)
         # Self-healed-retry visibility (agent_retry): surface the backoff so a
         # transient network/rate_limit error that recovers doesn't look like a
@@ -1368,7 +1360,7 @@ async def _route_agent(
             # reload keeps the transcript (the agent's last text is what the
             # AWAITING_USER resume delivers a reply to). Mirrors the resume:
             # edge's marker; cleared on the next forward Continue.
-            state.resume_pending = state.step
+            state.arm_step_resume(mode="solicit")
             state.save(quest.state_dir)
         # A genuine your-turn yield gets its own reason so it stops sharing the
         # "interrupt" token; a real interrupt (interrupt=True) or a
@@ -1628,8 +1620,8 @@ async def _run_agent_invocation(
         feedback_lead=feedback_lead,
         balance_on_resume=balance_on_resume,
         resume_should_continue=(
-            (is_resume and state.interrupt_pending)
-            or state.retry_continue_pending),
+            state.resume_pending == state.step
+            and state.resume_mode == "continue"),
         log=log,
         test_gates=test_gates,
         headless=headless,

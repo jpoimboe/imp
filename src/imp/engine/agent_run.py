@@ -223,8 +223,8 @@ class AgentRunResult:
     # other pause (coordinator, subagent).
     awaiting_user: bool = False
     # True when the awaiting_user pause came from the cooperative-interrupt steer
-    # (Ctrl-C mid-turn), not a genuine bare-turn-end yield. The executor shadows
-    # it into State.interrupt_pending so a no-message resume continues the step.
+    # (Ctrl-C mid-turn), not a genuine bare-turn-end yield. The executor arms
+    # State.resume_mode = "continue" so a no-message resume continues the step.
     interrupt: bool = False
     # Tier A proactive handoff: the runner captured an agent-authored handoff
     # note at this path before stopping. The caller (executor / dispatch_task)
@@ -730,9 +730,9 @@ async def drive_invocation(
                         category = payload.get("category", "unknown")
                         kind = payload.get("kind")
                         # An interrupt-caused teardown pauses cleanly with
-                        # interrupt=True so the resume CONTINUES the step (shadowed
-                        # into State.interrupt_pending), NOT classified by the error's
-                        # own category. Two cases reach here:
+                        # interrupt=True so the resume CONTINUES the step (the
+                        # executor arms State.resume_mode = "continue"), NOT
+                        # classified by the error's own category. Two cases reach here:
                         #   * kind == "interrupted": the runner surfaced the interrupt
                         #     as an error event rather than the cooperative-steer
                         #     AwaitingUserInput — and the steer may have ALREADY
@@ -786,8 +786,8 @@ async def drive_invocation(
         # A headless/subagent bare-turn-end yield with no human attached.
         # paused=True drives normal pause handling; awaiting_user=True tells the
         # executor to mark the step resumable so the paused step survives reload.
-        # interrupt=True (cooperative-interrupt steer) shadows into
-        # State.interrupt_pending so a no-message resume continues the step.
+        # interrupt=True (cooperative-interrupt steer) arms
+        # State.resume_mode = "continue" so a no-message resume continues the step.
         return AgentRunResult(None, False, True, False, None,
                               awaiting_user=True, interrupt=exc.interrupt)
 

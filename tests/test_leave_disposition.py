@@ -160,7 +160,7 @@ def test_save_to_backlog_arms_resume_pending(tmp_path: Path) -> None:
 
     reloaded = State.load(ch.state_dir)                         # home kept, reload in place
     assert reloaded.resume_pending == step                     # armed to the step on leave
-    assert reloaded.interrupt_pending is False                 # clean yield, not an interrupt
+    assert reloaded.resume_mode == "solicit"                   # clean yield re-solicits
 
 
 def test_save_to_backlog_stamps_interrupt_reason_when_reason_given(tmp_path: Path) -> None:

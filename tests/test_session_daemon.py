@@ -451,7 +451,9 @@ async def test_resume_sets_resume_pending_for_a_stale_lock_crash(tmp_path: Path)
         coordinator: Any,
         wait_for_turn_fn: Any = None,
     ) -> RunResult:
-        seen["resume_pending"] = State.load(quest.state_dir).resume_pending
+        st = State.load(quest.state_dir)
+        seen["resume_pending"] = st.resume_pending
+        seen["resume_mode"] = st.resume_mode
         return RunResult.COMPLETED
 
     with anyio.fail_after(5):
@@ -460,6 +462,7 @@ async def test_resume_sets_resume_pending_for_a_stale_lock_crash(tmp_path: Path)
 
     assert result is RunResult.COMPLETED
     assert seen["resume_pending"] == "review"
+    assert seen["resume_mode"] == "continue"   # crash recovery continues the step
 
 
 @pytest.mark.anyio
@@ -1316,8 +1319,6 @@ async def test_detach_at_hold_prompt_stamps_resume_target_prompt(
     quest = _make_change(tmp_path, "2026-06-15-dph")
     st = State.load(quest.state_dir)
     st.step = "code"               # the active step at detach time
-    st.resume_pending = "review"   # already armed by the executor Pause handler
-    st.interrupt_pending = True
     st.save(quest.state_dir)
 
     async def fake_run(
@@ -1334,8 +1335,8 @@ async def test_detach_at_hold_prompt_stamps_resume_target_prompt(
     assert result is RunResult.PAUSED
     state = State.load(quest.state_dir)
     assert state.resume_target == "prompt"
-    assert state.resume_pending == "review"   # untouched by the non-ctrl-d branch
-    assert state.interrupt_pending is True     # untouched by the non-ctrl-d branch
+    assert state.resume_pending == "code"    # non-ctrl-d branch arms solicit on state.step
+    assert state.resume_mode == "solicit"    # detaching at the hold prompt re-solicits
 
 
 @pytest.mark.anyio
@@ -1362,7 +1363,7 @@ async def test_detach_after_ctrl_d_midrun_stamps_resume_target_agent(
     state = State.load(quest.state_dir)
     assert state.resume_target == "agent"
     assert state.resume_pending == "review"   # arm_step_resume(step) → native resume
-    assert state.interrupt_pending is True     # continuation nudge on no-message resume
+    assert state.resume_mode == "continue"    # ctrl-d detach continues on reattach
 
 
 @pytest.mark.anyio

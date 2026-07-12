@@ -116,8 +116,8 @@ def build_inline_solicit(
                 # The headless hibernation gate raises its own AwaitingUserInput
                 # (interrupt=False) when the solicit blocks then detaches; for the
                 # cooperative-interrupt steer that supersedes the interrupt cause,
-                # so re-stamp it True. The executor shadows it into
-                # State.interrupt_pending → a no-message resume continues the step.
+                # so re-stamp it True. The executor arms
+                # State.resume_mode = "continue" → a no-message resume continues the step.
                 if interrupt and not e.interrupt:
                     raise AwaitingUserInput(e.prompt, interrupt=True) from None
                 raise
