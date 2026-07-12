@@ -22,6 +22,11 @@ from typing import Any
 
 import yaml
 
+from imp.cli.pythonpath_detect import (
+    detect_pythonpath,
+    format_pythonpath_yaml,
+    resolve_pythonpath_choice,
+)
 from imp.cli.verify_detect import (
     detect_test_command,
     format_test_cmd_fast_yaml,
@@ -253,6 +258,17 @@ def _facts_hint() -> str:
     )
 
 
+def _pythonpath_hint() -> str:
+    return (
+        "\n# pythonpath: worktree-relative import roots prepended to the gate/agent\n"
+        "# subprocess PYTHONPATH. Set this when this project is installed editable\n"
+        "# (pip install -e) and imported by package name — without it imp's test gate\n"
+        "# runs the STALE main-checkout code instead of the worktree under test.\n"
+        "# Use [src] for a src-layout package, [.] for a flat layout.\n"
+        "# pythonpath: [src]\n"
+    )
+
+
 def _remote_hint() -> str:
     lines = [
         "",
@@ -382,6 +398,7 @@ def run_init(
     picker_fn: Callable[[list[str]], list[str]] | None = None,
     detect_theme_fn: Callable[[], str] | None = None,
     detect_verify_fn: Callable[[Path], str | None] | None = None,
+    detect_pythonpath_fn: Callable[[Path], list[str] | None] | None = None,
 ) -> None:
     from imp.providers.effective import user_config_path
 
@@ -457,7 +474,23 @@ def run_init(
                 "# test_cmd_slow_timeout.\n"
                 + format_test_cmd_fast_yaml(chosen)
             )
-        project_file.write_text(body + test_block + _facts_hint())
+        detect_pp = detect_pythonpath_fn or detect_pythonpath
+        suggested_pp = detect_pp(project_root)
+        chosen_pp = (
+            resolve_pythonpath_choice(suggested_pp, input_fn, output_fn)
+            if suggested_pp is not None else None
+        )
+        if chosen_pp:
+            pythonpath_block = (
+                "\n# Worktree-relative import roots prepended to gate/agent\n"
+                "# subprocess PYTHONPATH, so an editable-installed package resolves\n"
+                "# to the worktree under test, not the stale main checkout.\n"
+                + format_pythonpath_yaml(chosen_pp)
+            )
+        else:
+            pythonpath_block = _pythonpath_hint()
+        project_file.write_text(
+            body + test_block + pythonpath_block + _facts_hint())
         _write_memory_scaffold(imp_dir)
 
     # --- bootstrap user config (only if the machine has none) ---
