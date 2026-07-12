@@ -1,5 +1,5 @@
 """query_events (spec §6.6). Reads a quest's event timeline — the current
-change by default, or another change via quest_id."""
+quest by default, or another quest via quest_id."""
 
 from __future__ import annotations
 

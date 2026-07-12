@@ -46,7 +46,7 @@ def _iter_files(target: Path, policy: Any = None,
                 root: Path | None = None,
                 excluded: frozenset[str] = EXCLUDED_DIRS) -> Iterator[Path]:
     """Files under `target`, never descending into an excluded control/VCS dir
-    (A3) — EXCEPT the per-change artifact subtree .imp/quests/<id>/artifacts/, which
+    (A3) — EXCEPT the per-quest artifact subtree .imp/quests/<id>/artifacts/, which
     is surfaced (passed via `root`, the worktree root, so the carve-out is anchored
     there; `root=None` for external targets keeps the old exclude-everything
     behavior). `os.walk` with in-place `dirnames` pruning means the walk does not
@@ -105,7 +105,7 @@ def _iter_files(target: Path, policy: Any = None,
 
 def _git_files(unignored: set[Path], target: Path, root: Path,
                policy: Any) -> list[Path]:
-    """Normal in-worktree git path: the unignored set UNION each change's
+    """Normal in-worktree git path: the unignored set UNION each quest's
     .imp/quests/<id>/artifacts/ carve-out portion under `target` (walked
     separately since .imp is gitignored), restricted to regular files under
     `target`, sandbox-masked, sorted (head_limit early-exit makes order

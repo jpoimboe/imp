@@ -1,6 +1,6 @@
 """rename_quest tool (spec §3, §10). Applies the rename IMMEDIATELY inside the
 tool call and returns the quest id so the agent writes the spec at the
-change-home's artifacts/spec/<id>.md in-band, same turn. Content-only: rewrites the
+quest-home's artifacts/spec/<id>.md in-band, same turn. Content-only: rewrites the
 gitignored quest.json, touches no git. Top-level only — raises for subagents
 (no quest_state)."""
 
