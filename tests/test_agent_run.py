@@ -601,19 +601,43 @@ def test_shared_log_append_pulses_coordinator_activity(tmp_path: Path) -> None:
     fix would pass while the real claude_code window never resets — the live
     hazard the plan calls out."""
     from imp.engine.executor import _liveness_on_event
-    from imp.engine.state import JsonlEventLog
+    from imp.engine.state import JsonlEventLog, State
 
     coord = InterruptCoordinator()
     pulses = {"n": 0}
     coord.add_activity_listener(lambda: pulses.__setitem__("n", pulses["n"] + 1))
     seen: list[dict] = []
+    state = State(id="c", step="s", step_attempt=0, status="paused")
 
     log = JsonlEventLog(
-        tmp_path / "e.jsonl", on_event=_liveness_on_event(coord, seen.append))
+        tmp_path / "e.jsonl",
+        on_event=_liveness_on_event(coord, seen.append, state, tmp_path))
     log.append(agent_id="step:p/s", type="thinking", payload={"x": 1})
 
     assert pulses["n"] == 1, "append did not pulse coordinator.note_activity()"
     assert len(seen) == 1, "composed on_event dropped the original driver callback"
+
+
+def test_shared_log_persists_step_label_to_state(tmp_path: Path) -> None:
+    """A step_label_updated append writes the label into state.step_label and
+    saves it, so imp list / Telegram (which read persisted state.step_label) see
+    the live task position — while the original on_event fan-out is preserved."""
+    from imp.engine.executor import _liveness_on_event
+    from imp.engine.state import JsonlEventLog, State
+
+    coord = InterruptCoordinator()
+    state = State(id="c", step="s", step_attempt=0, status="paused")
+    seen: list[dict] = []
+    log = JsonlEventLog(
+        tmp_path / "e.jsonl",
+        on_event=_liveness_on_event(coord, seen.append, state, tmp_path))
+
+    log.append(agent_id="step:code/task-lead", type="step_label_updated",
+               payload={"label": "task 3/6 · coding"})
+
+    assert state.step_label == "task 3/6 · coding"           # in-memory updated
+    assert State.load(tmp_path).step_label == "task 3/6 · coding"  # persisted to disk
+    assert len(seen) == 1                                    # driver callback preserved
 
 
 def _build_inv(tmp_path: Path, **kw):
