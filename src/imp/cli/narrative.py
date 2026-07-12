@@ -128,8 +128,13 @@ class StepNode:
     show_label: bool = True            # step frame (header + breadcrumb) shown
     show_output: bool = False          # surface a script's stdout as a • message
     position_label: bool = False       # step label is a position counter, not a verb
-    label: str | None = None           # step display label (step_started.payload.label)
-    live_label: str | None = None      # agent-pushed live status label; None when unset
+    label: str | None = None           # step display label, most-recent-wins:
+                                       # the step_started seed, then overwritten by
+                                       # each update_step_label push
+    lane_wait_label: str | None = None # transient footer override while parked in a
+                                       # resource (test/merge) lane wait; None when
+                                       # unset; highest precedence over `label` in
+                                       # the live footer, never persisted
     lane_waiting_node: Any = None      # in-place merge-queue transcript node; None when unset
     lane_wait: bool = False            # parked in a lane semaphore wait (test or merge); live-only
     phase_label: str | None = None     # owning phase's rendered label
@@ -592,12 +597,16 @@ class NarrativeBuilder:
         top_kind = top.kind if top is not None else None
         top_lane_wait = top.lane_wait if top is not None else False
         top_phase, top_plan = _split_phase_label(top.phase_label if top is not None else None)
-        top_counter = (top.live_label or top.label) if top is not None else None
+        # The step's current label rides the position row (Activity.counter): a
+        # lane-wait transient overrides it in the footer, else the single most-
+        # recent-wins `label` (seed, or the agent's latest update_step_label).
+        top_label = (top.lane_wait_label or top.label) if top is not None else None
+        top_counter = top_label
         if self._reset_wait is not None:
             if top is None:
                 position = None
             elif top.position_label:
-                position = _join(top.phase_label, top.live_label or top.label)
+                position = _join(top.phase_label, top_label)
             else:
                 position = top.phase_label
             return Activity(
@@ -612,17 +621,15 @@ class NarrativeBuilder:
         if top is not None:
             model = top.model
             if top.position_label:
-                # The label is a counter that rides the position row (Activity.counter),
-                # never the spinner verb. The rotating phrase drives the spinner line
-                # instead; the counter label (live_label/label) is kept off static_verb so
-                # it can never leak onto the spinner. A rotate_phrase step has
-                # rotated_phrase seeded at step start; a position_label step
-                # without rotate_phrase leaves it None and falls back to "thinking".
-                position = _join(top.phase_label, top.live_label or top.label)
-                static_verb: str | None = top.rotated_phrase
+                # A position_label step's label is a counter that rides the
+                # position row and the composed `position`, never the spinner verb
+                # — the rotating phrase drives the spinner. A lane-wait transient
+                # still overrides the verb at highest precedence.
+                position = _join(top.phase_label, top_label)
+                static_verb: str | None = top.lane_wait_label or top.rotated_phrase
             else:
                 position = top.phase_label
-                static_verb = top.live_label or top.rotated_phrase or top.label
+                static_verb = top.lane_wait_label or top.rotated_phrase or top.label
         else:
             model = None
             position = None
@@ -1065,7 +1072,7 @@ def _h_lane_waiting(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, 
         if step is not None:
             step.lane_waiting_node = node
     if step is not None:
-        step.live_label = text
+        step.lane_wait_label = text
         step.lane_wait = True
         if step.lane_wait_start_ts is None:
             step.lane_wait_start_ts = event.get("timestamp")
@@ -1082,7 +1089,7 @@ def _h_waiting_for_test_lane(
     # already fired, so current_activity() reads its "running tests" phrase —
     # override the footer verb with "waiting to test" until test_lane_acquired clears it.
     if self._step_stack:
-        self._step_stack[-1].live_label = "waiting to test"
+        self._step_stack[-1].lane_wait_label = "waiting to test"
         self._step_stack[-1].lane_wait = True
         self._step_stack[-1].lane_wait_start_ts = event.get("timestamp")
 
@@ -1100,7 +1107,7 @@ def _h_test_lane_acquired(
     # still measures the phase's full wall-clock span including the queue wait.
     if self._step_stack:
         top = self._step_stack[-1]
-        top.live_label = None
+        top.lane_wait_label = None
         top.lane_wait = False
         ts = event.get("timestamp")
         if ts is not None:
@@ -1139,7 +1146,7 @@ def _h_lane_acquired(self: NarrativeBuilder, event: dict[str, Any], p: dict[str,
     self._flush_burst()
     if self._step_stack:
         top = self._step_stack[-1]
-        top.live_label = None
+        top.lane_wait_label = None
         top.lane_waiting_node = None
         top.lane_wait = False
 
@@ -1204,9 +1211,11 @@ def _h_step_started(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, 
         if not top.closed and top.name == name:
             if p.get("resumed"):
                 if p.get("restarted"):
-                    top.live_label = None
+                    top.label = p.get("label")
+                    top.lane_wait_label = None
+                elif p.get("route_label"):
+                    top.label = p.get("label")
                 top.lane_waiting_node = None
-                top.label = p.get("label")
                 top.resumed = True
             return
     # Resume re-entry: the first step_started after a resume re-enters the
@@ -1229,15 +1238,16 @@ def _h_step_started(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, 
             existing.outcome = None
             existing.closed = False
             existing.interrupted = False
-            existing.label = p.get("label")
             existing.lane_waiting_node = None
             existing.resumed = True
             if p.get("restarted"):
                 # Genuine re-run from scratch: the fresh run supersedes the
-                # interrupted partial, so wipe it, restamp the clock, and reset
-                # the re-run-only fields. Interactivity is re-sourced from the
-                # event stream (a re-emitted awaiting_user_input re-arms it).
-                existing.live_label = None
+                # interrupted partial, so revert the label to the re-emitted seed,
+                # clear the lane transient, wipe the partial, restamp the clock,
+                # and reset the re-run-only fields. Interactivity is re-sourced
+                # from the event stream (a re-emitted awaiting_user_input re-arms it).
+                existing.label = p.get("label")
+                existing.lane_wait_label = None
                 existing.children.clear()
                 existing.kind = kind
                 existing.model = p.get("model")
@@ -1255,6 +1265,10 @@ def _h_step_started(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, 
                 existing.position_label = bool(p.get("position_label", False))
                 existing.rotated_phrase = (
                     _draw_status_phrase() if existing.rotate_phrase else None)
+            elif p.get("route_label"):
+                # A continuation that re-entered via a labeled edge shows that
+                # reason; a plain continuation preserves the pushed label.
+                existing.label = p.get("label")
             self._step_stack = [existing]
             return
     _ensure_phase(self, phase, p.get("phase_label"),
@@ -1920,7 +1934,7 @@ def _h_step_label_updated(
     # Live status-bar label for the current step. Do NOT flush the open burst:
     # this fires between the update_step_label tool_call and its tool_result.
     if self._step_stack:
-        self._step_stack[-1].live_label = p.get("label")
+        self._step_stack[-1].label = p.get("label")
 
 
 NarrativeBuilder._HANDLERS["step_label_updated"] = _h_step_label_updated

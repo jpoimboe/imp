@@ -276,7 +276,9 @@ fixes in sweep context with a plain commit). #}
 
 When the phase-level `verify` gate fails, the engine resumes you (Step 0) with the
 failure output. Reason over the OPAQUE failure text against the diff
-(`cur_base_head..HEAD`) — you never re-run a single test; this is pure judgment.
+(`cur_base_head..HEAD`). You **never run the gate, the full suite, lint, or typecheck
+yourself — not even to confirm a fix**; reasoning over the failure text against the
+diff is the only action here. This is pure judgment.
 
 Record a toleration as a normal `## Deferred Followups` entry in
 `{{ quest.home }}/deferred.md`, born directly in `— needs-decision:` state with the
@@ -297,8 +299,9 @@ The `verify` source is the discriminator the convergence check greps for.
   nothing about the merge — `finalize` surfaces it to a human through the existing
   needs-decision walk before merge.
 - **A failure attributable to the diff** → fix it as usual (dispatch the
-  coder, `git commit --fixup=HEAD`) and return `verify_tolerated: false`. The
-  engine re-runs `verify`.
+  coder, `git commit --fixup=HEAD`), then **return and let the engine re-run
+  `verify`; do not self-verify** by re-running the gate, suite, lint, or typecheck
+  yourself. Return `verify_tolerated: false`.
 
 Emit `verify_tolerated: true` ONLY on the all-tolerated case above. On EVERY other
 return — a normal task entry or a real-regression fix — emit `verify_tolerated: false`.

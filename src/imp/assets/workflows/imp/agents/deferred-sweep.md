@@ -192,7 +192,10 @@ emits `converge_verify_tolerated: true`, which routes **forward to `wait-for-hea
 gate never re-runs — the forward escape).
 
 On a triage entry, reason over the OPAQUE failure text against the diff
-(`cur_base_head..HEAD`) — pure judgment, you never re-run a single test.
+(`cur_base_head..HEAD`) — pure judgment. You
+**never run the gate, the full suite, lint, or typecheck yourself —
+not even to confirm a fix**; reasoning over the failure text against the diff is
+the only action here.
 
 Record a toleration as a normal `## Deferred Followups` entry in
 `{{ quest.home }}/deferred.md`, born directly in `— needs-decision:` state with

@@ -2814,7 +2814,7 @@ def test_current_activity_position_segments_for_a_position_label_step() -> None:
     assert act.counter == "task 2/3"          # the position_label counter leaf (step-blue)
 
 
-def test_current_activity_counter_prefers_pushed_live_label() -> None:
+def test_current_activity_counter_prefers_pushed_label() -> None:
     b = nv.NarrativeBuilder()
     b.add(ev("1", "quest_created", quest_id=1, title="x"))
     b.add(ev("2", "step_started", step="task-lead", kind="agent", phase="code",
@@ -2852,7 +2852,7 @@ def test_current_activity_counter_carries_a_non_position_step_label() -> None:
     assert act.position == "integration phase"  # composed breadcrumb string unchanged
 
 
-def test_current_activity_counter_prefers_pushed_live_label_for_non_position_step() -> None:
+def test_current_activity_counter_prefers_pushed_label_for_non_position_step() -> None:
     b = nv.NarrativeBuilder()
     b.add(ev("1", "quest_created", quest_id=1, title="x"))
     b.add(ev("2", "step_started", step="verify", kind="script",

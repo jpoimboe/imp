@@ -60,21 +60,27 @@ def _row_text(screen: object, row: int, cols: int = 80) -> str:
 
 
 @pytest.mark.anyio
-async def test_toolbar_floats_one_blank_line_below_input_not_screen_bottom() -> None:
-    """AC(c): on an empty-scrollback 40-row terminal, the mid-prompt (non-done)
-    screen places the toolbar text one blank line below the input line, not on
-    the terminal's last row. Without the filler the toolbar pins to row 39."""
+async def test_toolbar_pins_to_screen_bottom_below_input() -> None:
+    """With the full-height filler removed, the bottom toolbar
+    reverts to the known-good bottom-pinned position (the terminal's last row)
+    and is still shown above-the-input. The float (one blank line below the
+    input) is intentionally dropped — killing the wrap-lag is the hard
+    requirement; the float was the nice-to-have. With the filler still present
+    the toolbar sat at input_row+2 (row 2), so the bottom-row assertion fails."""
     with create_pipe_input() as pipe, create_app_session(
         input=pipe, output=DummyOutput()
     ):
         session = _build_session()
         pipe.send_text("hello")  # typed, deliberately NOT submitted
-        # ask_async prefixes the toolbar with a single "\n"; mimic that here so the
-        # one-blank-line spacing (unchanged by this change) is exercised too.
+        # ask_async prefixes the toolbar with a single "\n"; mimic that here.
         task = asyncio.create_task(
             session.prompt_async("> ", bottom_toolbar="\nstatus")
         )
         try:
+            # Break only once BOTH the piped input and the toolbar are on the
+            # same frame: prompt_toolkit draws the bottom toolbar on the initial
+            # frame before "hello" is echoed into the buffer, so breaking on
+            # "status" alone would capture a toolbar-only frame with no input.
             screen = None
             for _ in range(500):
                 await asyncio.sleep(0.005)
@@ -82,24 +88,22 @@ async def test_toolbar_floats_one_blank_line_below_input_not_screen_bottom() -> 
                 if candidate is not None and any(
                     "hello" in _row_text(candidate, r)
                     for r in range(candidate.height)
+                ) and any(
+                    "status" in _row_text(candidate, r)
+                    for r in range(candidate.height)
                 ):
                     screen = candidate
                     break
-            assert screen is not None, "prompt never rendered the typed input"
+            assert screen is not None, "prompt never rendered input and toolbar"
 
             rows = session.app.output.get_size().rows  # DummyOutput -> 40
-            input_row = next(
-                r for r in range(screen.height) if "hello" in _row_text(screen, r)
-            )
             toolbar_row = next(
                 r for r in range(screen.height) if "status" in _row_text(screen, r)
             )
-
-            # exactly one blank line separates the input from the toolbar
-            assert _row_text(screen, input_row + 1) == ""
-            assert toolbar_row == input_row + 2
-            # and the toolbar is NOT pinned to the terminal's last row
-            assert toolbar_row < rows - 2
+            # the toolbar reverts to the terminal's bottom rows (bottom-pinned),
+            # NOT one blank line below the input near the top of the screen.
+            # (The break condition already guaranteed "hello" is shown above it.)
+            assert toolbar_row >= rows - 2
         finally:
             if session.app.is_running:
                 session.app.exit(result="")

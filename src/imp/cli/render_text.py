@@ -427,14 +427,13 @@ def phase_breadcrumb_line(node: nv.PhaseNode, *, depth: int, color: bool,
 
 
 def _step_header_label(node: nv.StepNode) -> str:
-    """The step's own scrollback label — its position counter (live or static) for
-    a `position_label` step, else its plain label. The raw step name is the loud
-    fallback when a visible step somehow has no label, so the omission is
-    caught and fixed. This helper returns a phase-free label; both
+    """The step's own scrollback label — the single most-recent-wins `label` (the
+    step_started seed, or the agent's latest update_step_label push). The raw step
+    name is the loud fallback when a visible step somehow has no label, so the
+    omission is caught and fixed. This helper returns a phase-free label; both
     `collapsed_step_line` and `header_line` prepend the owning phase's label (via
     `compose_label`) to this result."""
-    step_label = (node.live_label or node.label) if node.position_label else node.label
-    return step_label or node.name
+    return node.label or node.name
 
 
 def collapsed_step_line(node: nv.StepNode, *, depth: int, color: bool,

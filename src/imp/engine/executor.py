@@ -167,17 +167,22 @@ def _resume_replays_transcript(transcript_dir: Any) -> bool:
 
 
 
-def _liveness_on_event(coordinator: Any, on_event: EventCallback) -> EventCallback:
-    """Compose subtree-liveness onto the run's `on_event`. Every append to the
-    shared event log — by the task-lead OR any descendant subagent, since they
-    all write through this one instance — pulses `coordinator.note_activity()`,
-    which resets the B.2 inactivity watchdog (`agent_run._pull_with_inactivity_watchdog`).
-    This is the signal that keeps flowing while a parent is parked in an in-process
-    subagent dispatch and claude_code yields nothing; without it a busy subtree is
-    falsely torn down every AGENT_INACTIVITY_TIMEOUT_S. The original driver
-    callback is preserved (live narrative unaffected)."""
+def _liveness_on_event(coordinator: Any, on_event: EventCallback,
+                       state: Any, state_dir: Path) -> EventCallback:
+    """Compose subtree-liveness AND step-label persistence onto the run's
+    `on_event`. Every append to the shared event log — by the task-lead OR any
+    descendant subagent, since they all write through this one instance — pulses
+    `coordinator.note_activity()` (resets the B.2 inactivity watchdog) and, on a
+    `step_label_updated`, writes the pushed label into `state.step_label` and saves
+    it, so `imp list` / Telegram `/list` (which read the persisted
+    `state.step_label`) reflect the live task position. Only agents granted
+    `update_step_label` (the step-level agents, e.g. task-lead) emit that event.
+    The original driver callback is preserved (live narrative unaffected)."""
     def _composed(e: Any) -> None:
         coordinator.note_activity()
+        if e.get("type") == "step_label_updated":
+            state.step_label = e["payload"].get("label")
+            state.save(state_dir)
         on_event(e)
     return _composed
 
@@ -323,7 +328,8 @@ async def run_quest(
             project_keys=frozenset(state.project_facts),
         )
         log: EventLog = JsonlEventLog(
-            quest.events_path, on_event=_liveness_on_event(coordinator, on_event))
+            quest.events_path,
+            on_event=_liveness_on_event(coordinator, on_event, state, quest.state_dir))
         if workflow_refreshed:
             _emit(log, "workflow_refreshed", {}, agent_id=None)
         # Seed any workflow var introduced after this quest was created (its
@@ -489,7 +495,8 @@ async def run_quest(
                     return _complete_or_park(quest, state, log, coordinator)
                 state.step = flat[nxt].name
                 state.step_label = (
-                    render_label(flat[nxt].label, quest, log, state)
+                    state.route_label
+                    or render_label(flat[nxt].label, quest, log, state)
                     or flat[nxt].name
                 )
                 state.phase_label = (
@@ -521,7 +528,8 @@ async def run_quest(
                     state.loop_counts.pop(step.name, None)       # forward goto resets
                 state.step = flat[target_idx].name
                 state.step_label = (
-                    render_label(flat[target_idx].label, quest, log, state)
+                    state.route_label
+                    or render_label(flat[target_idx].label, quest, log, state)
                     or flat[target_idx].name
                 )
                 state.phase_label = (
@@ -763,7 +771,7 @@ def _step_started_payload(
     payload = {"step": step.name, "kind": step.kind, "phase": step.phase,
                "show_label": step.show_label,
                "show_output": step.show_output,
-               "label": render_label(step.label, quest, log, state)}
+               "label": state.route_label or render_label(step.label, quest, log, state)}
     rotate = step.rotate_phrase if step.rotate_phrase is not None else step.interactive
     if rotate:
         payload["rotate_phrase"] = True

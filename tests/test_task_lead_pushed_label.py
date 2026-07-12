@@ -29,8 +29,8 @@ def test_task_lead_pushes_position_only_no_verbs() -> None:
     assert "· reviewing" not in out
 
 
-def test_task_lead_live_label_drops_the_phase_prefix() -> None:
+def test_task_lead_pushed_label_drops_the_phase_prefix() -> None:
     # The code-phase label now supplies `implementation phase · plan i/N`; the pushed
-    # live label carries only the trailing `task …` segments.
+    # label carries only the trailing `task …` segments.
     out = _render_task_lead()
     assert "code · plan" not in out
