@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import os
 import platform
+import shlex
 import shutil
 import subprocess
 from collections.abc import Mapping
@@ -229,6 +230,41 @@ def sandbox_available() -> bool:
         return r.returncode == 0
     except (OSError, subprocess.SubprocessError):
         return False
+
+
+@lru_cache(maxsize=1)
+def overlay_available(probe_base: Path) -> bool:
+    """Linux + `unshare` on PATH + a one-shot unprivileged `mount -t overlay`
+    inside a user namespace succeeds at `probe_base` (a real dir under `.imp/`,
+    NOT /tmp — some hosts refuse an overlay upperdir on tmpfs). Cached like
+    sandbox_available(); Part 2 calls this to choose the COW home vs. the rw
+    fallback.
+
+    Tests that monkeypatch subprocess.run / shutil.which / platform.system must
+    call overlay_available.cache_clear() first (the result is process-global
+    cached).
+    """
+    if platform.system() != "Linux" or shutil.which("unshare") is None:
+        return False
+    probe = probe_base / ".overlay-probe"
+    lower, upper, work, merged = (
+        probe / "lower", probe / "upper", probe / "work", probe / "merged")
+    try:
+        for d in (lower, upper, work, merged):
+            d.mkdir(parents=True, exist_ok=True)
+        r = subprocess.run(
+            ["unshare", "--user", "--map-root-user", "--mount", "sh", "-c",
+             f"mount -t overlay overlay -o "
+             f"lowerdir={shlex.quote(str(lower))},"
+             f"upperdir={shlex.quote(str(upper))},"
+             f"workdir={shlex.quote(str(work))} {shlex.quote(str(merged))}"],
+            capture_output=True, timeout=10,
+        )
+        return r.returncode == 0
+    except (OSError, subprocess.SubprocessError):
+        return False
+    finally:
+        shutil.rmtree(probe, ignore_errors=True)
 
 
 def _existing(paths: list[str]) -> tuple[str, ...]:

@@ -277,6 +277,65 @@ def test_sandbox_available_is_cached_bool():
     assert isinstance(sandbox_available(), bool)
 
 
+def test_overlay_available_true_when_mount_succeeds(tmp_path, monkeypatch):
+    import imp.engine.sandbox as sb
+    monkeypatch.setattr(sb.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(sb.shutil, "which", lambda _: "/usr/bin/unshare")
+    calls: dict = {}
+
+    def fake_run(argv, **kw):
+        calls["argv"] = argv
+        return _types.SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(sb.subprocess, "run", fake_run)
+    sb.overlay_available.cache_clear()
+    assert sb.overlay_available(tmp_path) is True
+    # probes via unshare with a real overlay mount, then removes its scratch dir
+    assert calls["argv"][0] == "unshare"
+    assert "mount -t overlay" in calls["argv"][-1]
+    assert not (tmp_path / ".overlay-probe").exists()
+
+
+def test_overlay_available_false_when_mount_fails(tmp_path, monkeypatch):
+    import imp.engine.sandbox as sb
+    monkeypatch.setattr(sb.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(sb.shutil, "which", lambda _: "/usr/bin/unshare")
+    monkeypatch.setattr(sb.subprocess, "run",
+                        lambda *a, **k: _types.SimpleNamespace(returncode=32))
+    sb.overlay_available.cache_clear()
+    assert sb.overlay_available(tmp_path) is False
+    assert not (tmp_path / ".overlay-probe").exists()
+
+
+def test_overlay_available_false_without_unshare(tmp_path, monkeypatch):
+    import imp.engine.sandbox as sb
+    monkeypatch.setattr(sb.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(sb.shutil, "which", lambda _: None)
+    sb.overlay_available.cache_clear()
+    assert sb.overlay_available(tmp_path) is False
+
+
+def test_overlay_available_false_on_non_linux(tmp_path, monkeypatch):
+    import imp.engine.sandbox as sb
+    monkeypatch.setattr(sb.platform, "system", lambda: "Darwin")
+    sb.overlay_available.cache_clear()
+    assert sb.overlay_available(tmp_path) is False
+
+
+def test_overlay_available_false_when_subprocess_raises(tmp_path, monkeypatch):
+    import imp.engine.sandbox as sb
+    monkeypatch.setattr(sb.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(sb.shutil, "which", lambda _: "/usr/bin/unshare")
+
+    def boom(*a, **k):
+        raise OSError("no userns")
+
+    monkeypatch.setattr(sb.subprocess, "run", boom)
+    sb.overlay_available.cache_clear()
+    assert sb.overlay_available(tmp_path) is False
+    assert not (tmp_path / ".overlay-probe").exists()
+
+
 def test_resolve_policy_secret_paths_classified_dir_and_file(tmp_path):
     control, wt = _layout(tmp_path)
     home = tmp_path / "home"
