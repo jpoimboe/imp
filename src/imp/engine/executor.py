@@ -61,8 +61,8 @@ from imp.engine.loader import load_workflow
 from imp.engine.quest import Quest
 from imp.engine.reincarnation import reincarnation_seed, stash_transcript
 from imp.engine.sandbox import (
-    HomeLayer,
     SandboxUnavailable,
+    make_home_layer,
     overlay_available,
     resolve_policy,
     sandbox_available,
@@ -729,22 +729,14 @@ def _attach_home_layer(
     if not policy.active or not policy.home:
         return policy, (lambda: None)
     base = quest.quest_dir / "steps" / step.phase
-    if overlay_available(quest.quest_dir):
-        upper = base / f"{step.name}.overlay-upper"
-        work = base / f"{step.name}.overlay-work"
-        merged = base / f"{step.name}.overlay-merged"
-        for d in (upper, work, merged):
-            d.mkdir(parents=True, exist_ok=True)
-        layer = HomeLayer(home=policy.home, merged=str(merged),
-                          upper=str(upper), work=str(work))
-
-        def cleanup() -> None:
-            for d in (upper, work, merged):
-                shutil.rmtree(d, ignore_errors=True)
-
-        return dataclasses.replace(policy, home_layer=layer), cleanup
-    layer = HomeLayer(home=policy.home)
-    return dataclasses.replace(policy, home_layer=layer), (lambda: None)
+    layer, cleanup = make_home_layer(
+        policy.home,
+        upper=base / f"{step.name}.overlay-upper",
+        work=base / f"{step.name}.overlay-work",
+        merged=base / f"{step.name}.overlay-merged",
+        use_overlay=overlay_available(quest.quest_dir),
+    )
+    return dataclasses.replace(policy, home_layer=layer), cleanup
 
 
 async def _dispatch_step(

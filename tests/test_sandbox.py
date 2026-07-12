@@ -12,6 +12,7 @@ from imp.engine.sandbox import (
     SandboxPolicy,
     SandboxUnavailable,
     build_sandbox_argv,
+    make_home_layer,
     resolve_policy,
     sandbox_available,
 )
@@ -795,6 +796,32 @@ def test_rw_fallback_home_layer_is_not_wrapped():
     pol = _policy(home="/home/u", home_layer=HomeLayer(home="/home/u"))
     argv = build_sandbox_argv("x", cwd="/wt", policy=pol, engine_env={})
     assert argv[0] == "bwrap"
+
+
+def test_make_home_layer_overlay_builds_dirs_and_cleanup(tmp_path):
+    # AC 1 (unit): the overlay layer creates upper/work/merged on disk and returns
+    # a HomeLayer that reports is_overlay; the cleanup callable removes all three.
+    upper, work, merged = tmp_path / "u", tmp_path / "w", tmp_path / "m"
+    layer, cleanup = make_home_layer(
+        "/home/u", upper=upper, work=work, merged=merged, use_overlay=True)
+    assert isinstance(layer, HomeLayer) and layer.is_overlay
+    assert layer.home == "/home/u"
+    assert layer.upper == str(upper) and layer.work == str(work)
+    assert layer.merged == str(merged)
+    assert upper.is_dir() and work.is_dir() and merged.is_dir()
+    cleanup()
+    assert not upper.exists() and not work.exists() and not merged.exists()
+
+
+def test_make_home_layer_fallback_builds_no_dirs(tmp_path):
+    # AC 8 (unit): the rw fallback layer touches no disk (no overlay dirs) and its
+    # cleanup is a harmless no-op.
+    upper, work, merged = tmp_path / "u", tmp_path / "w", tmp_path / "m"
+    layer, cleanup = make_home_layer(
+        "/home/u", upper=upper, work=work, merged=merged, use_overlay=False)
+    assert not layer.is_overlay and layer.home == "/home/u"
+    assert not upper.exists() and not work.exists() and not merged.exists()
+    cleanup()  # no-op, must not raise
 
 
 def test_resolve_policy_binds_quest_home_rw(tmp_path):
