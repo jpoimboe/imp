@@ -60,23 +60,6 @@ def test_show_spec_live(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None
     assert "SPEC BODY" in _run(monkeypatch, tmp_path, "show", _ID, "spec")
 
 
-def test_show_plan_live_shows_newest(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    _seed_control(tmp_path)
-    _seed_with_artifacts(tmp_path, _ID, "Feat")
-    out = _run(monkeypatch, tmp_path, "show", _ID, "plan")
-    assert "PLAN TWO" in out  # newest plan
-    assert "PLAN ONE" not in out
-
-
-def test_show_status_live(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    _seed_control(tmp_path)
-    _seed_with_artifacts(tmp_path, _ID, "Feat")
-    assert "new" in _run(monkeypatch, tmp_path, "show", _ID, "status")
-
-
 def test_show_events_live(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -115,6 +98,16 @@ def test_show_rejects_review_resource(
     with pytest.raises(SystemExit):
         main(["show", _ID, "review"])
     assert "invalid choice: 'review'" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("facet", ["plan", "status", "summary"])
+def test_show_rejects_trimmed_facets(
+    facet: str,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    with pytest.raises(SystemExit):
+        main(["show", _ID, facet])
+    assert f"invalid choice: '{facet}'" in capsys.readouterr().err
 
 
 def test_show_spec_falls_back_after_archive(
@@ -158,8 +151,6 @@ def test_show_spec_falls_back_after_archive(
     assert not (tmp_path / ".imp" / "worktrees" / _ID).exists()
     # Worktree gone -> archive/journal fallback.
     assert "SPEC BODY" in _run(monkeypatch, tmp_path, "show", _ID, "spec")
-    assert "PLAN TWO" in _run(monkeypatch, tmp_path, "show", _ID, "plan")
-    assert "completed" in _run(monkeypatch, tmp_path, "show", _ID, "status")
     assert "plan-reviewer" in _run(monkeypatch, tmp_path, "show", _ID, "events")
 
 
@@ -193,23 +184,6 @@ def test_show_backlog_default_renders_card(
     assert "backlog" in out
     assert "ready" in out
     assert "wire up OAuth login" in out
-
-
-def test_show_backlog_status_prints_bare_word(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    _seed_control(tmp_path)
-    Quest.create_draft(
-        tmp_path,
-        title="Add OAuth",
-        quest_id="2026-06-16-bkg111",
-        base_branch="main",
-        origin="idea",
-        seed_opening="Add OAuth",
-    )
-    out = _run(monkeypatch, tmp_path, "show", "2026-06-16-bkg111", "status")
-    assert out.strip() == "backlog"
 
 
 def test_show_backlog_spec_errors(
@@ -421,24 +395,7 @@ def test_show_step_line_truncates_to_terminal_width(
     assert step_line.endswith("…")
 
 
-def test_show_status_stays_bare_word_not_labels(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    # `imp show <id> status` is the parseable form: bare status word only.
-    _seed_control(tmp_path)
-    ch = Quest.create(tmp_path, title="Feat", quest_id="shwsta", base_branch="main")
-    st = State.load(ch.state_dir)
-    st.step = "write_spec"
-    st.step_label = "writing spec"
-    st.save(ch.state_dir)
-    out = _run(monkeypatch, tmp_path, "show", "shwsta", "status").strip()
-    assert out == "new"
-    assert "·" not in out
-    assert "writing spec" not in out
-
-
-def test_show_spec_and_plan_from_wip_ref_when_home_absent(
+def test_show_spec_from_wip_ref_when_home_absent(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -482,9 +439,6 @@ def test_show_spec_and_plan_from_wip_ref_when_home_absent(
     )
 
     assert "WIP-ONLY SPEC" in _run(monkeypatch, tmp_path, "show", "ghost01", "spec")
-    out = _run(monkeypatch, tmp_path, "show", "ghost01", "plan")
-    assert "PLAN B" in out  # newest
-    assert "PLAN A" not in out
 
 
 def test_show_abandoned_backlog_is_not_a_live_brief(
@@ -506,19 +460,11 @@ def test_show_abandoned_backlog_is_not_a_live_brief(
     )
     tear_down_quest(quest)
     assert not (tmp_path / ".imp" / "quests" / "2026-06-16-bkg111").exists()
-    out = _run(monkeypatch, tmp_path, "show", "2026-06-16-bkg111", "status")
-    assert out.strip() != "backlog"  # History item, not a queued Backlog brief
+    out = _run(monkeypatch, tmp_path, "show", "2026-06-16-bkg111")
+    assert "id:" in out
+    assert "readiness:" not in out  # detail card, not a queued Backlog brief
     # log renders the archived conversation, not a brief
     assert main(["log", "2026-06-16-bkg111"]) == 0
-
-
-def test_show_summary_live(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    _seed_control(tmp_path)
-    ch = _seed_with_artifacts(tmp_path, _ID, "Feat")
-    summary = ch.quest_dir / "artifacts" / "summary"
-    summary.mkdir(parents=True)
-    (summary / f"{_ID}.md").write_text("# SUMMARY BODY\n")
-    assert "SUMMARY BODY" in _run(monkeypatch, tmp_path, "show", _ID, "summary")
 
 
 def test_show_default_card_renders_summary(
@@ -532,48 +478,6 @@ def test_show_default_card_renders_summary(
         "Gives every change a durable intent-level summary.\n")
     out = _run(monkeypatch, tmp_path, "show", _ID)  # default card, no resource
     assert "intent-level summary" in out
-
-
-def test_show_summary_falls_back_after_archive(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    _seed_control(tmp_path)
-    ch = _seed_with_artifacts(tmp_path, _ID, "Feat")
-    summary = ch.quest_dir / "artifacts" / "summary"
-    summary.mkdir(parents=True)
-    (summary / f"{_ID}.md").write_text("# SUMMARY BODY\n")
-    files = {
-        str(p.relative_to(ch.quest_dir / "artifacts")): p
-        for p in sorted((ch.quest_dir / "artifacts").rglob("*"))
-        if p.is_file()
-    }
-    worktree.artifact_commit(tmp_path, _ID, files, message="artifact: summary")
-    st = State.load(ch.state_dir)
-    st.status = "completed"
-    st.save(ch.state_dir)
-    with ch.events_path.open("w", encoding="utf-8") as fh:
-        fh.write(
-            json.dumps(
-                {
-                    "type": "step_started",
-                    "agent_id": None,
-                    "payload": {"step": "plan-reviewer", "phase": "plan"},
-                }
-            )
-            + "\n"
-        )
-    archive.archive_quest(
-        tmp_path,
-        _ID,
-        events_path=ch.events_path,
-        quest_json_path=ch.quest_dir / "quest.json",
-        state_json_path=ch.state_dir / "state.json",
-    )
-    assert _git_wip_present(tmp_path, _ID)
-    worktree.remove_worktree(tmp_path, _ID)
-    assert not (tmp_path / ".imp" / "worktrees" / _ID).exists()
-    assert "SUMMARY BODY" in _run(monkeypatch, tmp_path, "show", _ID, "summary")
 
 
 def test_show_default_card_renders_summary_after_archive(
