@@ -15,6 +15,7 @@ interrupt grace (spec B.9); reaping is via the process group.
 
 from __future__ import annotations
 
+import contextlib
 import os
 import platform
 import shlex
@@ -268,6 +269,17 @@ def sandbox_available() -> bool:
         return False
 
 
+def _force_rmtree(path: Path) -> None:
+    """rmtree that also clears the mode-000 `work/work` dir overlayfs leaves in
+    its workdir (untraversable until chmod'd), so no overlay residue survives
+    under .imp/. Owner is the real uid, so the chmod always succeeds."""
+    for root, dirs, _files in os.walk(path):
+        for d in dirs:
+            with contextlib.suppress(OSError):
+                os.chmod(os.path.join(root, d), 0o700)
+    shutil.rmtree(path, ignore_errors=True)
+
+
 @lru_cache(maxsize=1)
 def overlay_available(probe_base: Path) -> bool:
     """Linux + `unshare` on PATH + a one-shot unprivileged `mount -t overlay`
@@ -300,7 +312,7 @@ def overlay_available(probe_base: Path) -> bool:
     except (OSError, subprocess.SubprocessError):
         return False
     finally:
-        shutil.rmtree(probe, ignore_errors=True)
+        _force_rmtree(probe)
 
 
 def make_home_layer(
@@ -323,7 +335,7 @@ def make_home_layer(
 
         def cleanup() -> None:
             for d in (upper, work, merged):
-                shutil.rmtree(d, ignore_errors=True)
+                _force_rmtree(d)
 
         return layer, cleanup
     return HomeLayer(home=home), (lambda: None)
