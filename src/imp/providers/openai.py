@@ -55,6 +55,7 @@ from imp.agents.tools.load_skill import make_load_skill_tool
 from imp.agents.transcript import (
     Transcript,
     balance_success_on_resume,
+    deliver_continuation_reply,
     deliver_engine_continuation,
     deliver_reply_on_resume,
     repair_dangling_tool_use_on_resume,
@@ -744,10 +745,8 @@ class OpenAIAgentRunner:
                     next_text, human = cont(last_text)
                     if inspect.isawaitable(next_text):
                         next_text = await next_text
-                    user_msg = Message(role="user", content=(TextBlock(text=next_text),))
-                    messages.append(user_msg)
-                    transcript.append(user_msg)
-                    elog.append_user_message(agent_id=aid, message=user_msg, human=human)
+                    deliver_continuation_reply(
+                        messages, transcript, elog, aid, next_text, human=human)
                     loop_err = guard.observe(TurnRecord(
                         assistant_text=last_text, tools=[],
                         has_complete_step=False))

@@ -45,6 +45,7 @@ from imp.agents.tools.context import (
     request_bracketed,
     terminate_running_processes,
 )
+from imp.agents.transcript import deliver_continuation_reply
 from imp.engine.agent_run import _resolve_wait_reply
 from imp.engine.awaiting_user_input import AwaitingUserInput
 from imp.engine.state import JsonlEventLog
@@ -865,12 +866,8 @@ class CodexAgentRunner:
                     "category": "config", "kind": "interrupted",
                     "message": "runner cancelled by interrupt"}}
                 return
-            elog.append_user_message(
-                agent_id=aid,
-                message=Message(role="user",
-                                content=(TextBlock(text=str(nxt)),)),
-                human=human)
-            next_prompt = str(nxt)
+            next_prompt = deliver_continuation_reply(
+                None, None, elog, aid, nxt, human=human)
 
             # Turn boundary: this is the only point where THIS runner sets up
             # codex's next turn prompt (the codex thread owns the in-turn tool
