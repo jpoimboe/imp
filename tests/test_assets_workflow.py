@@ -61,11 +61,11 @@ def test_default_agents_resolve_to_position_appropriate_tools(tmp_path: Path) ->
             # their own tools and are not subject to the all-by-default buckets.
             continue
         if name in subagents:
-            assert agent.tools == BASE_CAPS, name
+            assert agent.tools == BASE_CAPS | agent.allow_tools, name
         elif name in dispatchers:
-            assert agent.tools == top_dispatcher, name
+            assert agent.tools == top_dispatcher | agent.allow_tools, name
         else:
-            assert agent.tools == top_leaf, name
+            assert agent.tools == top_leaf | agent.allow_tools, name
 
 
 def test_spec_writer_does_not_declare_ask_user(tmp_path: Path) -> None:

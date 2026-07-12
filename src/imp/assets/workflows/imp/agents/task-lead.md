@@ -3,6 +3,7 @@ name: task-lead
 label: "task 1/{{ vars.task_total }}"
 description: Implement-phase controller — pick the next task, dispatch coder + one reviewer, adjudicate, commit one clean unit, record progress.
 subagents: [coder, code-reviewer, explorer, researcher, spiker]
+allow_tools: [update_step_label]
 output:
   status: {type: enum, values: [Success, Error]}
   verify_tolerated: {type: bool}
