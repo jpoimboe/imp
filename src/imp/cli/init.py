@@ -31,7 +31,46 @@ from imp.engine import worktree
 from imp.engine.sandbox import sandbox_available
 from imp.remote.drivers import REGISTRY
 
-_INIT_COMMIT_PATHS: tuple[str, ...] = ("imp/project.yaml", ".gitignore")
+_DEFAULT_WORKFLOW = "imp"
+
+_INIT_COMMIT_PATHS: tuple[str, ...] = (
+    "imp/project.yaml",
+    ".gitignore",
+    "imp/memory/all.md",
+    f"imp/memory/{_DEFAULT_WORKFLOW}/all.md",
+)
+
+# Both scaffolds are wholly wrapped in one HTML comment, so strip_html_comments
+# reduces them to empty and they inject nothing until the user writes prose.
+_MEMORY_GLOBAL_SCAFFOLD = """<!--
+imp memory: standing instructions you author as plain markdown, which imp layers
+onto its agents. Files resolve broad -> narrow for a running step:
+
+  imp/memory/all.md                # every agent, every workflow  (THIS FILE)
+  imp/memory/<workflow>/all.md     # every step of that workflow
+  imp/memory/<workflow>/<step>.md  # just that step of that workflow
+
+A filename is a step name; `all.md` means "everything at this level". HTML
+comments like this one are stripped before injection, so this scaffold injects
+nothing until you write real prose below it.
+
+WARNING: this file is injected into EVERY agent, so it bloats EVERY context.
+Use it EXTREMELY sparingly -- prefer a per-step file
+(imp/memory/<workflow>/<step>.md) scoped to just the agent that needs it.
+-->
+"""
+
+_MEMORY_WORKFLOW_SCAFFOLD = """<!--
+imp memory for every step of the `imp` workflow. Write standing instructions
+below to reach all steps of this workflow, or scope to a single step with a
+sibling file named for that step (e.g. imp/memory/imp/threshold.md).
+`all.md` means "everything at this level". HTML comments are stripped before
+injection, so this scaffold injects nothing until you add real prose below.
+
+This file fans out to EVERY step of the workflow, so use it sparingly --
+prefer a per-step file scoped to just the step that needs it.
+-->
+"""
 
 
 class GitSetupDeclined(Exception):
@@ -121,17 +160,23 @@ def _resolve_init_base(
 
 
 def _commit_init_files(project_root: Path) -> bool:
-    """Stage and commit init files by explicit pathspec; return True iff a commit was created."""
+    """Stage and commit init files by explicit pathspec; return True iff a commit
+    was created. Only paths that exist on disk are staged — the imp/memory/
+    scaffolds are absent on an already-initialized re-init, and `git add` with a
+    pathspec matching no file exits non-zero."""
+    paths = [p for p in _INIT_COMMIT_PATHS if (project_root / p).exists()]
+    if not paths:
+        return False
     status = subprocess.run(
-        ["git", "status", "--porcelain", "--", *_INIT_COMMIT_PATHS],
+        ["git", "status", "--porcelain", "--", *paths],
         cwd=project_root, capture_output=True, text=True, check=True)
     if not status.stdout.strip():
         return False
-    subprocess.run(["git", "add", "--", *_INIT_COMMIT_PATHS],
+    subprocess.run(["git", "add", "--", *paths],
                    cwd=project_root, check=True, capture_output=True, text=True)
     subprocess.run(
         ["git", "commit", "-m", "imp: initialize project",
-         "--", *_INIT_COMMIT_PATHS],
+         "--", *paths],
         cwd=project_root, check=True, capture_output=True, text=True)
     return True
 
@@ -165,10 +210,22 @@ def _build_project_config(default_base: str) -> dict[str, Any]:
     resolves it up front (detect / ask / error), so `imp new` consumes it
     directly with no runtime fallback."""
     return {
-        "default-workflow": "imp",
+        "default-workflow": _DEFAULT_WORKFLOW,
         "default-base": default_base,
         "vars": {},
     }
+
+
+def _write_memory_scaffold(imp_dir: Path) -> None:
+    """Create the two inert comment-only memory files a fresh init ships:
+    the global imp/memory/all.md and the default-workflow imp/memory/<wf>/all.md.
+    Both are wholly commented, so they inject nothing until the user edits them."""
+    memory_dir = imp_dir / "memory"
+    memory_dir.mkdir(parents=True, exist_ok=True)
+    (memory_dir / "all.md").write_text(_MEMORY_GLOBAL_SCAFFOLD)
+    wf_dir = memory_dir / _DEFAULT_WORKFLOW
+    wf_dir.mkdir(parents=True, exist_ok=True)
+    (wf_dir / "all.md").write_text(_MEMORY_WORKFLOW_SCAFFOLD)
 
 
 def _build_user_config(
@@ -187,13 +244,12 @@ def _facts_hint() -> str:
     return (
         "\n# Project facts: human-authored values any agent prompt can read via\n"
         "# {{ project.<key> }}. All commented out -- uncomment and edit to expose\n"
-        "# facts to your agents. The freeform 'guidance:' below is delivered to\n"
-        "# agents automatically by the engine (not via a template var).\n"
+        "# facts to your agents. For standing prose instructions to agents (what\n"
+        "# the old guidance key did), write markdown under imp/memory/ instead --\n"
+        "# e.g. imp/memory/<workflow>/<step>.md; see imp/memory/all.md for the layout.\n"
         "# facts:\n"
         "#   test_command: make test\n"
         "#   stack: python 3.12, pytest\n"
-        "# guidance: |\n"
-        "#   Freeform notes for agents (conventions, gotchas).\n"
     )
 
 
@@ -402,6 +458,7 @@ def run_init(
                 + format_test_cmd_fast_yaml(chosen)
             )
         project_file.write_text(body + test_block + _facts_hint())
+        _write_memory_scaffold(imp_dir)
 
     # --- bootstrap user config (only if the machine has none) ---
     user_path = user_config_path()
