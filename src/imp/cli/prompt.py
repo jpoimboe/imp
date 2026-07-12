@@ -40,7 +40,8 @@ def _placeholder_text(*, color: bool, text: str = "type your reply") -> str:
 
 
 def _build_session(skills_dir: Any | None = None, *, editing_mode: str = "emacs",
-                   color: bool = False) -> Any:
+                   color: bool = False,
+                   roster_models: Callable[[], list[str]] | None = None) -> Any:
     from prompt_toolkit import PromptSession
     from prompt_toolkit.enums import EditingMode
     from prompt_toolkit.filters import completion_is_selected
@@ -85,7 +86,8 @@ def _build_session(skills_dir: Any | None = None, *, editing_mode: str = "emacs"
     def _(event: Any) -> None:
         event.app.current_buffer.insert_text("\n")
 
-    completer = SlashCompleter(skills_dir) if skills_dir is not None else None
+    completer = (
+        SlashCompleter(skills_dir, roster_models) if skills_dir is not None else None)
     from prompt_toolkit.output import ColorDepth
 
     from imp.cli import palette as pal
@@ -106,8 +108,20 @@ class SlashCompleter:
     _BUILTINS = (
         "help", "skills", "list", "search", "save", "clear", "model", "abandon", "resume")
 
-    def __init__(self, skills_dir: Any) -> None:
+    def __init__(
+        self, skills_dir: Any,
+        roster_models: Callable[[], list[str]] | None = None,
+    ) -> None:
         self._skills_dir = Path(skills_dir)
+        self._roster_models = roster_models
+        self._model_cache: list[str] | None = None
+
+    def _model_candidates(self) -> list[str]:
+        """Roster model names for /model completion, read at most once per session."""
+        if self._model_cache is None:
+            self._model_cache = (
+                list(self._roster_models()) if self._roster_models is not None else [])
+        return self._model_cache
 
     def get_completions(self, document: Any, complete_event: Any) -> Iterator[Any]:
         from prompt_toolkit.completion import Completion
@@ -117,7 +131,17 @@ class SlashCompleter:
         text = document.text_before_cursor
         if not text.startswith("/"):
             return
-        prefix = text[1:]
+        rest = text[1:]
+        # A space means the command name is typed: complete the /model ARGUMENT token.
+        if " " in rest:
+            cmd, _, arg = rest.partition(" ")
+            if cmd == "model":
+                for name in self._model_candidates():
+                    if name.startswith(arg):
+                        yield Completion(
+                            name, start_position=-len(arg), display_meta="")
+            return
+        prefix = rest
         # Builtins first (no description); user skills after. setdefault keeps the
         # builtin entry if a user skill shares its name (e.g. a skills.md), so it
         # never surfaces twice.
@@ -151,11 +175,20 @@ class Prompt:
         skills_dir: Any | None = None,
         editing_mode: str = "emacs",
         color: bool = False,
+        quest: Any | None = None,
         _session_factory: Callable[[], Any] | None = None,
     ) -> None:
         self._color = color
+        roster_models: Callable[[], list[str]] | None = None
+        if quest is not None:
+            def _load_roster() -> list[str]:
+                from imp.cli.model_command import roster_model_names
+                return roster_model_names(quest)
+            roster_models = _load_roster
         self._session_factory = _session_factory or (
-            lambda: _build_session(skills_dir, editing_mode=editing_mode, color=color))
+            lambda: _build_session(
+                skills_dir, editing_mode=editing_mode, color=color,
+                roster_models=roster_models))
         self._session = self._session_factory()
 
     def _message(self, prompt_text: str | None, indent: str = "") -> Any:

@@ -8,6 +8,9 @@ from imp.providers.config import ProviderModel
 from imp.providers.model_arg import ModelArgError, parse_model_arg
 from imp.providers.model_roster import ProviderRoster
 
+# Hidden from the roster but still resolvable; exact-name match keeps dated ids listed.
+_HIDDEN_ALIASES = frozenset({"haiku", "sonnet", "opus"})
+
 
 def render_roster(
     current: ProviderModel, rosters: list[ProviderRoster],
@@ -20,12 +23,10 @@ def render_roster(
     ]
     for roster in rosters:
         lines.append(f"  {roster.provider}")
-        plain = [e.name for e in roster.entries if e.description is None]
-        if plain:
-            lines.append("    " + " · ".join(plain))
-        for entry in roster.entries:
-            if entry.description is not None:
-                lines.append(f"    {entry.name}    {entry.description}")
+        for name in roster.entries:
+            if name in _HIDDEN_ALIASES:
+                continue
+            lines.append(f"    {name}")
     lines.append("")
     lines.append("Switch with  /model <name>  or  /model provider:model")
     return lines
@@ -56,6 +57,24 @@ def print_model_roster(
         config, claude_options=read_claude_model_options())
     for line in render_roster(current, rosters):
         output_fn(line)
+
+
+def roster_model_names(quest: Any) -> list[str]:
+    """Flat, de-duplicated model-name candidates (aliases incl.) for /model completion."""
+    from imp.providers.claude_model_cache import read_claude_model_options
+    from imp.providers.effective import load_effective_config
+    from imp.providers.model_roster import discover_roster
+
+    config = load_effective_config(
+        project_root=quest.project_root, control_root=quest.control_root,
+    ).config
+    rosters = discover_roster(config, claude_options=read_claude_model_options())
+    names: list[str] = []
+    for roster in rosters:
+        for name in roster.entries:
+            if name not in names:
+                names.append(name)
+    return names
 
 
 def _available_for_quest(quest: Any) -> list[str]:

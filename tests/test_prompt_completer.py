@@ -93,3 +93,63 @@ def test_user_skill_named_like_builtin_not_duplicated(tmp_path: Path) -> None:
 
 def test_builtins_include_model() -> None:
     assert "model" in SlashCompleter._BUILTINS
+
+
+_ROSTER = [
+    "claude-haiku-4-5", "claude-sonnet-4-6", "claude-opus-4-8",
+    "claude-opus-4-8[1m]", "claude-fable-5", "opus", "haiku", "sonnet",
+]
+
+
+def _completions(completer: SlashCompleter, text: str) -> list:
+    doc = Document(text=text, cursor_position=len(text))
+    return list(completer.get_completions(doc, None))
+
+
+def test_model_arg_completes_full_set_including_aliases(tmp_path: Path) -> None:
+    c = SlashCompleter(_skills(tmp_path), roster_models=lambda: list(_ROSTER))
+    assert set(_texts(c, "/model ")) == set(_ROSTER)
+
+
+def test_model_arg_prefix_narrows(tmp_path: Path) -> None:
+    c = SlashCompleter(_skills(tmp_path), roster_models=lambda: list(_ROSTER))
+    # bare-alias prefix: only the alias starts with "op"
+    assert set(_texts(c, "/model op")) == {"opus"}
+    # dated-id prefix pulls both opus variants but not the bare alias
+    assert set(_texts(c, "/model claude-o")) == {
+        "claude-opus-4-8", "claude-opus-4-8[1m]"}
+
+
+def test_model_arg_start_position_and_empty_meta(tmp_path: Path) -> None:
+    c = SlashCompleter(_skills(tmp_path), roster_models=lambda: ["opus"])
+    comps = _completions(c, "/model op")
+    assert [(x.text, x.start_position, x.display_meta_text) for x in comps] == [
+        ("opus", -2, "")]
+
+
+def test_model_source_read_at_most_once(tmp_path: Path) -> None:
+    calls = {"n": 0}
+
+    def source() -> list[str]:
+        calls["n"] += 1
+        return ["opus", "haiku"]
+
+    c = SlashCompleter(_skills(tmp_path), roster_models=source)
+    _texts(c, "/model ")
+    _texts(c, "/model op")
+    _texts(c, "/model h")
+    assert calls["n"] == 1
+
+
+def test_no_roster_source_yields_no_model_arg_completions(tmp_path: Path) -> None:
+    c = SlashCompleter(_skills(tmp_path))  # no roster source threaded
+    assert _texts(c, "/model ") == []
+
+
+def test_command_name_completion_unaffected_by_roster_source(tmp_path: Path) -> None:
+    c = SlashCompleter(_skills(tmp_path), roster_models=lambda: ["opus"])
+    # no space yet -> still the command-name branch
+    assert "model" in _texts(c, "/mod")
+    assert "model" in _texts(c, "/model")
+    # a non-model command with an argument yields nothing (unchanged behavior)
+    assert _texts(c, "/search foo") == []

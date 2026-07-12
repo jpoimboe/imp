@@ -28,30 +28,30 @@ def test_validate_bare_model_needs_no_provider_check(monkeypatch) -> None:
     assert validate_model_arg("claude-fable-5", quest=SimpleNamespace()) is None
 
 
-def test_render_roster_marks_current_and_groups_by_provider() -> None:
+def test_render_roster_one_per_line_hides_bare_aliases() -> None:
     from imp.cli.model_command import render_roster
     from imp.providers.config import ProviderModel
-    from imp.providers.model_roster import ProviderRoster, RosterEntry
+    from imp.providers.model_roster import ProviderRoster
 
     current = ProviderModel("claude_code", "claude-opus-4-8[1m]")
     rosters = [
         ProviderRoster("claude_code", (
-            RosterEntry("opus"),
-            RosterEntry("sonnet"),
-            RosterEntry("claude-fable-5[1m]", "Fable 5 · Most capable"),
-        )),
-        ProviderRoster("anthropic", (RosterEntry("claude-sonnet-4-6"),)),
+            "claude-opus-4-8", "opus", "claude-fable-5[1m]")),
+        ProviderRoster("anthropic", ("claude-sonnet-4-6",)),
     ]
     lines = render_roster(current, rosters)
     assert "Current: claude_code · claude-opus-4-8[1m]   (this step)" in lines
     assert "  claude_code" in lines
     assert "  anthropic" in lines
-    # plain (description-less) names share one joined line
-    assert "    opus · sonnet" in lines
-    # a described entry sits on its own line, description shown
-    assert any(
-        "claude-fable-5[1m]" in line and "Fable 5 · Most capable" in line
-        for line in lines)
+    # one model per line, bare name, 4-space indent
+    assert "    claude-opus-4-8" in lines
+    assert "    claude-fable-5[1m]" in lines
+    assert "    claude-sonnet-4-6" in lines
+    # the bare alias is hidden, but a dated id merely CONTAINING "opus" is kept
+    assert "    opus" not in lines
+    # no `·`-joined model line and no description side-notes (the Current line excepted)
+    body = [ln for ln in lines if not ln.startswith("Current:")]
+    assert all(" · " not in ln for ln in body)
     assert any("Switch with" in line for line in lines)
 
 
@@ -60,7 +60,7 @@ def test_print_model_roster_threads_cache_and_current(monkeypatch, tmp_path) -> 
 
     import imp.cli.model_command as mod
     from imp.providers.config import ProviderModel
-    from imp.providers.model_roster import ProviderRoster, RosterEntry
+    from imp.providers.model_roster import ProviderRoster
 
     state = SimpleNamespace(
         step="brainstorm", project_facts={},
@@ -82,7 +82,7 @@ def test_print_model_roster_threads_cache_and_current(monkeypatch, tmp_path) -> 
 
     def _discover(config, *, claude_options):
         captured["claude_options"] = claude_options
-        return [ProviderRoster("claude_code", (RosterEntry("opus"),))]
+        return [ProviderRoster("claude_code", ("claude-opus-4-8",))]
 
     monkeypatch.setattr("imp.providers.model_roster.discover_roster", _discover)
 
@@ -136,3 +136,36 @@ def test_validate_model_arg_still_rejects_unavailable_via_delegation(
     assert reason is not None
     assert "openai" in reason
     assert "not available" in reason
+
+
+def test_roster_model_names_flattens_dedups_and_keeps_aliases(
+    monkeypatch, tmp_path,
+) -> None:
+    from types import SimpleNamespace
+
+    import imp.cli.model_command as mod
+    from imp.providers.model_roster import ProviderRoster
+
+    monkeypatch.setattr(
+        "imp.providers.effective.load_effective_config",
+        lambda **kw: SimpleNamespace(config=SimpleNamespace(tiers={}, providers=())))
+    monkeypatch.setattr(
+        "imp.providers.claude_model_cache.read_claude_model_options",
+        lambda: [])
+
+    def _discover(config, *, claude_options):
+        return [
+            ProviderRoster("claude_code", (
+                "claude-opus-4-8", "opus", "claude-fable-5[1m]")),
+            ProviderRoster("anthropic", ("claude-sonnet-4-6", "opus")),
+        ]
+
+    monkeypatch.setattr("imp.providers.model_roster.discover_roster", _discover)
+
+    quest = SimpleNamespace(project_root=tmp_path, control_root=tmp_path)
+    names = mod.roster_model_names(quest)
+
+    # flattened across providers, first-seen order, dedup drops the second "opus",
+    # and the bare alias "opus" is KEPT (no display filter in discovery)
+    assert names == [
+        "claude-opus-4-8", "opus", "claude-fable-5[1m]", "claude-sonnet-4-6"]

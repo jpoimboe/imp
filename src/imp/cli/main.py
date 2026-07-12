@@ -679,7 +679,7 @@ async def _read_opening_message(
     _print_opening(quest, leave_mode, interactive=banner_shown, color=color)
     make = _prompt_factory or (
         lambda: Prompt(skills_dir=quest.workflow_dir / "skills",
-                       editing_mode=editing_mode, color=color))
+                       editing_mode=editing_mode, color=color, quest=quest))
     prompt = make()
     reply = await _read_intent_line(
         prompt, quest, color=color, width=width, model_sink=model_sink)
@@ -704,7 +704,7 @@ async def _run_cleared_session(
         term_title = TerminalTitle(
             sys.stdout, quest.id, quest.title, initial="idle")
         prompt = Prompt(skills_dir=quest.workflow_dir / "skills",
-                        editing_mode=_editing_mode(control), color=color)
+                        editing_mode=_editing_mode(control), color=color, quest=quest)
         # A `/model` typed at this reopened prompt lands here; empty when none.
         cleared_model_sink: dict[str, str] = {}
         try:
@@ -1166,7 +1166,7 @@ async def _inert_ask_line(quest: Quest) -> str | None:
     prompt = Prompt(
         skills_dir=quest.workflow_dir / "skills",
         editing_mode=_editing_mode(quest.control_root),
-        color=should_use_color(sys.stdout))
+        color=should_use_color(sys.stdout), quest=quest)
     try:
         return await prompt.ask_async(width=_term_width())
     except (EOFError, KeyboardInterrupt):

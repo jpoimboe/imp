@@ -128,7 +128,7 @@ def make_interactive_solicit(
     prompt = Prompt(
         skills_dir=quest.workflow_dir / "skills",
         editing_mode=_editing_mode(quest.control_root),
-        color=should_use_color(sys.stdout))
+        color=should_use_color(sys.stdout), quest=quest)
     prompt.seed_history(
         _prompt_history_lines(quest.seed_opening, quest.event_log().read()))
 

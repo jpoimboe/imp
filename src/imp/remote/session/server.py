@@ -85,6 +85,7 @@ class SessionServer:
         self._in_wait_for_turn = False
         # Initialized in open() because anyio.Event needs a running event loop.
         self._attach_changed: anyio.Event | None = None
+        self._model_override_pending: anyio.Event | None = None
         self._socket = SessionSocket(
             socket_path,
             on_attach=self._on_attach_pulse,
@@ -107,6 +108,7 @@ class SessionServer:
 
     async def open(self) -> None:
         self._attach_changed = anyio.Event()
+        self._model_override_pending = anyio.Event()
         await self._socket.open()
 
     async def serve(self, run_fn: RunFn) -> Any:
@@ -205,8 +207,13 @@ class SessionServer:
                 await self._wait_until_unleased()
                 tg.cancel_scope.cancel()
 
+            async def _await_model_override() -> None:
+                await self._wait_for_model_override()
+                tg.cancel_scope.cancel()
+
             tg.start_soon(_await_input)
             tg.start_soon(_await_hibernate)
+            tg.start_soon(_await_model_override)
         if "text" not in holder:
             raise AwaitingUserInput()
         return holder["text"]
@@ -236,6 +243,32 @@ class SessionServer:
         if evt is not None:
             evt.set()
             self._attach_changed = anyio.Event()
+
+    def _pulse_model_override(self) -> None:
+        evt = self._model_override_pending
+        if evt is not None:
+            evt.set()
+            self._model_override_pending = anyio.Event()
+
+    async def _wait_for_model_override(self) -> None:
+        """Resolve when a model-override pause is pending on the coordinator. The
+        between-turns solicit stays attached and leased, so the unlease arm never
+        fires; this arm supplies the concrete cancel that unwinds the parked
+        next_input() to AwaitingUserInput without a detach. Snapshots the event
+        before testing the predicate so a set-model frame arriving between the
+        check and the await is not a lost wakeup; the predicate reads committed
+        coordinator state so the wake is level-triggered (fires whether the frame
+        lands before or after gate entry)."""
+        while True:
+            evt = self._model_override_pending
+            if (self._coordinator is not None
+                    and self._coordinator.should_pause
+                    and self._coordinator.pause_reason == "model-override"):
+                return
+            if evt is None:                  # pre-open(): no event to await
+                await anyio.sleep(0.02)
+            else:
+                await evt.wait()
 
     async def wait_for_attach_change(self) -> None:
         """Wait for the next attach or detach event."""
@@ -368,10 +401,14 @@ class SessionServer:
         if action == CONTROL_INTERRUPT and self._coordinator is not None:
             await self._coordinator.signal_pause(reason="ctrl-c", via="frame")
         elif action == CONTROL_SET_MODEL and self._coordinator is not None:
-            # Non-terminal: stash the arg, pause like ctrl-c; hold loop applies it on park.
+            # Non-terminal: stash the arg, pause like ctrl-c; the hibernation gate's
+            # model-override wake arm unwinds the parked between-turns solicit
+            # (attached + leased, so the unlease arm never fires) and the hold loop
+            # applies the pending model on park.
             self._coordinator.set_pending_model(reason or "")
             await self._coordinator.signal_pause(
                 reason="model-override", via="frame")
+            self._pulse_model_override()
         elif action == CONTROL_INTERRUPT_LEAVE and self._coordinator is not None:
             await self._coordinator.signal_pause(reason=reason or "ctrl-d", via="frame")
         elif action == CONTROL_INTERRUPT_FORCE and self._coordinator is not None:
