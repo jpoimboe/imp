@@ -2863,15 +2863,20 @@ def test_current_activity_counter_prefers_pushed_live_label_for_non_position_ste
     assert act.counter == "running 42 tests"
 
 
-def test_engine_continuation_produces_no_narrative_node() -> None:
+def test_engine_continuation_folds_into_injected_message_node() -> None:
     tree = nv.build_tree([
         _ev("1", "step_started", step="s", kind="agent", phase="p"),
         _ev("2", "engine_continuation", text="continue from where you left off"),
     ])
     step = tree.root.children[0].children[0]
-    # No FallbackLine (would leak the nudge) and no node of any kind for it.
+    # No FallbackLine (raw fallthrough would leak the nudge as a plain line).
     assert [c for c in step.children if isinstance(c, nv.FallbackLine)] == []
-    assert step.children == []
+    # The nudge folds into one non-interactive UserMessageNode carrying the text.
+    assert len(step.children) == 1
+    node = step.children[0]
+    assert isinstance(node, nv.UserMessageNode)
+    assert node.interactive is False
+    assert node.text == "continue from where you left off"
 
 
 def test_test_lane_acquired_emits_no_visible_line() -> None:

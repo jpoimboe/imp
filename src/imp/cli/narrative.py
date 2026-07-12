@@ -2097,8 +2097,9 @@ def _h_max_tokens_truncated(
 def _h_engine_continuation(
     self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]
 ) -> None:
-    # Internal retry self-continuation; suppressed live (human sees it via agent_retry).
-    return
+    # _awaiting_reply left untouched: the stale-arm disarm is owned by _h_step_completed.
+    self._flush_burst()
+    self._append(UserMessageNode(text=p.get("text", ""), interactive=False))
 
 
 NarrativeBuilder._HANDLERS["error"] = _h_error
