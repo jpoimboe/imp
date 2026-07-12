@@ -185,3 +185,11 @@ def test_memory_teaches_the_authoring_affordance() -> None:
     assert "never auto-writes memory" in body
     assert "threshold" in body
     assert "finalize" in body
+
+
+def test_knowledge_memory_entry_notes_authoring_help() -> None:
+    body = load_agent_skill(_skills_dir(), "imp-knowledge")
+    # The refreshed map entry points past inspection to authoring help,
+    # while keeping the load_skill invocation intact.
+    assert 'load_skill(name="imp-memory")' in body
+    assert "help you author memory" in body
