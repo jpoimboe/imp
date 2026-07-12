@@ -28,7 +28,7 @@ _BUZZ = frozenset({
 })
 _SILENT = frozenset({
     "llm_response", "agent_output", "script_output", "step_started",
-    "workflow_resumed", "change_abandoned",
+    "workflow_resumed", "quest_abandoned",
 })
 
 # workflow_paused is curated by reason, not static membership. A pause is silent
@@ -73,7 +73,7 @@ _EVENT_LABELS = {
     "merge_blocked": "merge blocked",
     "script_blocked": "script blocked",
     "quest_merged": "done",
-    "change_abandoned": "abandoned",
+    "quest_abandoned": "abandoned",
     "workflow_paused": "paused",
     "workflow_resumed": "resumed",
     "error": "error",

@@ -46,12 +46,12 @@ def test_abandon_happy_path_tears_down_and_archives(tmp_path: Path) -> None:
     assert _git(tmp_path, "branch", "--list", "imp/feat").stdout.strip() == ""  # branch gone
     assert not (tmp_path / ".imp" / "quests" / "feat").exists()   # root home dropped
 
-    # Durable: change_abandoned event + abandoned status retrievable via archive.
+    # Durable: quest_abandoned event + abandoned status retrievable via archive.
     from imp.engine.archive import read as archive_read
     state_json = archive_read.read_state_json(tmp_path, "feat")
     assert state_json is not None and b'"abandoned"' in state_json
     events = archive_read.read_events(tmp_path, "feat")
-    assert events is not None and b"change_abandoned" in events
+    assert events is not None and b"quest_abandoned" in events
 
 
 def test_abandon_surfaces_as_completed_not_inflight(tmp_path: Path) -> None:
@@ -210,7 +210,7 @@ def test_tear_down_quest_destroys_worktree_branch_and_archives(
     state_json = archive_read.read_state_json(tmp_path, "feat")
     assert state_json is not None and b'"abandoned"' in state_json
     events = archive_read.read_events(tmp_path, "feat")
-    assert events is not None and b"change_abandoned" in events
+    assert events is not None and b"quest_abandoned" in events
 
 
 def test_abandon_refuses_when_lock_held_on_idea(
@@ -289,7 +289,7 @@ def test_tear_down_quest_on_draft_skips_worktree_teardown(
     assert archive_read.status_of(tmp_path, "idea1") == "abandoned"  # tombstone marked abandoned
     assert archive_read.is_archived(tmp_path, "idea1")               # findable in the archive
     events = archive_read.read_events(tmp_path, "idea1")
-    assert events is not None and b"change_abandoned" in events      # abandon event recorded
+    assert events is not None and b"quest_abandoned" in events      # abandon event recorded
     from imp.engine.archive import record, records_root
     rec = record.read_record(records_root(tmp_path), "idea1")
     assert rec is not None and rec["resumable"] is False             # non-resumable tombstone

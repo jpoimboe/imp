@@ -27,7 +27,7 @@ def test_archive_conversation_materialized_tears_down_resumable(tmp_path: Path) 
     assert archive_read.status_of(tmp_path, "conv") == "paused"             # not "abandoned"
     events = archive_read.read_events(tmp_path, "conv")
     assert events is not None and b"conversation_archived" in events
-    assert b"change_abandoned" not in events
+    assert b"quest_abandoned" not in events
     full = record.read_record(records_root(tmp_path), "conv")
     assert full is not None and full["resumable"] is True
 

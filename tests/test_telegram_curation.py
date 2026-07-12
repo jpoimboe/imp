@@ -17,7 +17,7 @@ def test_buzz_event_types_notify(event_type: str) -> None:
     "event_type",
     [
         "llm_response", "agent_output", "script_output", "step_started",
-        "workflow_resumed", "change_abandoned",
+        "workflow_resumed", "quest_abandoned",
     ],
 )
 def test_silent_event_types_stream_quietly(event_type: str) -> None:

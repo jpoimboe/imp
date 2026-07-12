@@ -23,7 +23,7 @@ def tear_down_quest(quest: Quest) -> None:
         state.status = "abandoned"
         state.save(quest.state_dir)
         quest.event_log().append(
-            agent_id=None, type="change_abandoned", payload={})
+            agent_id=None, type="quest_abandoned", payload={})
         # archive before worktree removal (the runtime files live inside the worktree)
         from imp.engine import archive
         archive.archive_quest(

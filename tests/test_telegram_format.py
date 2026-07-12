@@ -231,7 +231,7 @@ def test_event_labels_humanize_every_buzz_type() -> None:
         "merge_blocked": "merge blocked",
         "script_blocked": "script blocked",
         "quest_merged": "done",
-        "change_abandoned": "abandoned",
+        "quest_abandoned": "abandoned",
         "workflow_paused": "paused",
         "workflow_resumed": "resumed",
         "error": "error",
