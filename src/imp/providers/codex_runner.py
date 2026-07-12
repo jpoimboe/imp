@@ -291,6 +291,7 @@ class CodexAgentRunner:
         ctx.coordinator = invocation.coordinator
         ctx.tiers = invocation.tiers
         ctx.test_gates = invocation.test_gates
+        ctx.pythonpath = invocation.pythonpath
         ctx.non_interactive = invocation.headless
         ctx.sandbox_policy = invocation.sandbox_policy
         ctx.checkpoint_threshold = invocation.checkpoint_threshold

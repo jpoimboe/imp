@@ -90,6 +90,7 @@ async def bash(
         quest_dir=(getattr(src, "quest_dir", None)
                     or (Path(h) if (h := getattr(src, "quest_home", None)) else None)),
         test_gates=ctx.test_gates,
+        pythonpath=ctx.pythonpath,
     )
     env = overlay_engine_env(os.environ, eng)
     # POSIX: start_new_session=True makes the child a new session leader so
