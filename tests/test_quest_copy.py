@@ -73,8 +73,8 @@ def test_tool_descriptions_name_quest() -> None:
     assert "returns this quest's id" in reg["rename_quest"].description
 
 
-def test_mental_model_primer_names_quest() -> None:
-    text = (_ASSETS / "skills/agent/imp-mental-model.md").read_text()
+def test_knowledge_primer_names_quest() -> None:
+    text = (_ASSETS / "skills/agent/imp-knowledge.md").read_text()
     assert "## Quest and its home" in text
     assert "A **quest** is one unit of work imp tracks from idea to merge." in text
     assert "per-quest home on disk at " in text

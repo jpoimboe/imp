@@ -23,6 +23,8 @@ base integration — that **already happened** at the head, where the reconciler
 reconciled the quest against the moved base and the at-head verify and semantic
 review routed any problem back to the reconciler (no human gate).
 
+{% include "partials/imp-grounding.md" %}
+
 ## 1. Gather the summary and the audit record
 
 Read the intent-level summary the `summarizer` step wrote at
