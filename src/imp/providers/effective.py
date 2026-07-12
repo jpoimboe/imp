@@ -19,6 +19,7 @@ from typing import Any
 
 from imp.engine.types import SourceLoc
 from imp.providers.config import Config, parse_config_layer, parse_project_facts
+from imp.providers.memory import load_memory_snapshot, validate_memory_tree
 from imp.providers.resolve import iter_provider_defaults
 
 # A synthetic source for floor leaves. The string is what `imp config` prints.
@@ -88,7 +89,7 @@ def merge_layers(
 
 
 def _to_config(
-    merged: dict[str, Any], project_facts: dict[str, str], guidance: str,
+    merged: dict[str, Any], project_facts: dict[str, str], memory: dict[str, str],
 ) -> Config:
     return Config(
         providers=tuple(merged.get("providers", ())),
@@ -107,7 +108,7 @@ def _to_config(
         remote=merged.get("remote", {}),
         context=merged.get("context", {}),
         project_facts=project_facts,
-        guidance=guidance,
+        memory=memory,
     )
 
 
@@ -125,13 +126,14 @@ def load_effective_config(
     """
     layers: list[tuple[dict[str, Any], SourceLoc]] = [_floor_layer()]
     project_facts: dict[str, str] = {}
-    guidance = ""
+    memory: dict[str, str] = {}
     if project_root is not None:
         proj_path = project_root / "imp" / "project.yaml"
         p = parse_config_layer(proj_path)
         if p is not None:
             layers.append(p)
-        project_facts, guidance = parse_project_facts(proj_path)
+        project_facts = parse_project_facts(proj_path)
+        memory = load_memory_snapshot(project_root / "imp" / "memory")
     u = parse_config_layer(user_config_path())
     if u is not None:
         layers.append(u)
@@ -140,4 +142,48 @@ def load_effective_config(
         if local is not None:
             layers.append(local)
     merged, prov = merge_layers(layers)
-    return EffectiveConfig(config=_to_config(merged, project_facts, guidance), provenance=prov)
+    return EffectiveConfig(config=_to_config(merged, project_facts, memory), provenance=prov)
+
+
+def validate_project_memory(
+    project_root: Path,
+    memory: dict[str, str],
+    project_facts: dict[str, str],
+) -> None:
+    """Validate a loaded `imp/memory/` snapshot against the project's known
+    workflows and their steps. Raises LoadError (loud, fail-fast) on any unknown
+    workflow dir, non-step `.md`, or stray top-level step file. An empty
+    snapshot is a no-op. Loads only the workflows a subdir references, reusing
+    the same `project_keys` the executor passes so no unrelated template-ref
+    error can fire here."""
+    if not memory:
+        return
+    from imp.assets import available_workflow_names, resolve_workflow_dir
+    from imp.engine.errors import LoadError
+    from imp.engine.loader import load_workflow
+
+    valid = available_workflow_names(project_root)
+    valid_set = set(valid)
+    referenced = sorted(
+        {
+            key.split("/", 1)[0]
+            for key in memory
+            if "/" in key and key.split("/", 1)[0] in valid_set
+        }
+    )
+    workflow_steps: dict[str, frozenset[str]] = {}
+    for name in referenced:
+        wf = load_workflow(
+            resolve_workflow_dir(project_root, name),
+            project_keys=frozenset(project_facts),
+        )
+        workflow_steps[name] = frozenset(s.name for s in wf.flat_steps())
+
+    errors = validate_memory_tree(
+        memory.keys(), valid_workflows=valid, workflow_steps=workflow_steps
+    )
+    if errors:
+        raise LoadError(
+            "invalid imp/memory/ tree:\n  " + "\n  ".join(errors),
+            SourceLoc(file=project_root / "imp" / "memory", line=1),
+        )

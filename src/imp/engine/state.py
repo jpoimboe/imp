@@ -145,7 +145,7 @@ class State:
     resolved_tiers: dict[str, ProviderModel] | None = None
     resolved_steps: dict[str, ProviderModel] | None = None
     project_facts: dict[str, str] | None = None
-    guidance: str | None = None
+    memory: dict[str, str] | None = None
     merge_commit: str | None = None
     step_label: str | None = None
     phase_label: str | None = None
@@ -250,7 +250,7 @@ class State:
                 if self.resolved_steps is not None else None
             ),
             "project_facts": self.project_facts,
-            "guidance": self.guidance,
+            "memory": self.memory,
             "merge_commit": self.merge_commit,
             "held_lane": self.held_lane,
             "held_acquire_step": self.held_acquire_step,

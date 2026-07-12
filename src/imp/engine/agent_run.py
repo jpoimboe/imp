@@ -505,19 +505,19 @@ def with_outcome_field(agent_def: AgentDef) -> AgentDef:
     return replace(agent_def, output_schema=new_schema)
 
 
-_GUIDANCE_HEAD = (
-    "## Project guidance\n\n"
-    "The project maintainer set this guidance for this codebase — follow it "
-    "unless it conflicts with a hard correctness or safety requirement:"
+_MEMORY_HEAD = (
+    "## Project memory\n\n"
+    "The project maintainer wrote this standing memory for this codebase — "
+    "follow it unless it conflicts with a hard correctness or safety requirement:"
 )
 
 
-def _compose_guidance_section(guidance: str) -> str:
-    """Engine-owned project-guidance block; empty/absent guidance -> no section."""
-    text = (guidance or "").strip()
+def _compose_memory_section(memory: str) -> str:
+    """Engine-owned project-memory block; empty resolved memory -> no section."""
+    text = (memory or "").strip()
     if not text:
         return ""
-    return f"{_GUIDANCE_HEAD}\n\n{text}\n\n"
+    return f"{_MEMORY_HEAD}\n\n{text}\n\n"
 
 
 def build_agent_invocation(
@@ -582,8 +582,22 @@ def build_agent_invocation(
         # first user message replays from its logged user_message event.
         system_prompt = system_prompt_override
     else:
-        guidance_section = _compose_guidance_section(quest_context.guidance)
-        body_source = f"{guidance_section}{rendered_system_prompt}"
+        # Lazy import (see module docstring): `imp.providers.memory` is a pure
+        # leaf, but importing the submodule runs providers/__init__ -> anthropic
+        # -> agents.subagents, which imports THIS module — a top-level import
+        # would crash a cold `import imp.agents.subagents`.
+        from imp.providers.memory import resolve_memory
+        if is_subagent:
+            resolved_memory = resolve_memory(
+                quest_context.memory, workflow=None, step=None)
+        else:
+            resolved_memory = resolve_memory(
+                quest_context.memory,
+                workflow=quest_context.workflow_name or None,
+                step=quest_context.step_name or None,
+            )
+        memory_section = _compose_memory_section(resolved_memory)
+        body_source = f"{memory_section}{rendered_system_prompt}"
         persona = rendered_persona.strip("\n")
         if persona:
             base = f"{_CORE_HEAD}\n\n{persona}\n\n{_CORE_TAIL}"

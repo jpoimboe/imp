@@ -64,3 +64,11 @@ def test_commit_becomes_first_commit_when_git_just_initialized(
     _run(tmp_path)  # non-repo: run_init runs `git init` (default Yes)
     assert (tmp_path / ".git").is_dir()
     assert _git(tmp_path, "rev-list", "--count", "HEAD").strip() == "1"
+
+
+def test_commit_includes_memory_scaffolds(tmp_path: Path) -> None:
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    _run(tmp_path)
+    tracked = _git(tmp_path, "ls-tree", "-r", "--name-only", "HEAD").split()
+    assert "imp/memory/all.md" in tracked
+    assert "imp/memory/imp/all.md" in tracked

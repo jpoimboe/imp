@@ -310,12 +310,16 @@ class Quest:
 
         from imp.engine.loader import load_workflow
         from imp.providers.config import apply_var_overrides
-        from imp.providers.effective import load_effective_config
+        from imp.providers.effective import (
+            load_effective_config,
+            validate_project_memory,
+        )
 
         config = load_effective_config(
             project_root=wt_path, control_root=control_root,
         ).config
         try:
+            validate_project_memory(wt_path, config.memory, config.project_facts)
             from imp.assets import resolve_workflow_dir
             from imp.providers.config import parse_default_workflow
             wf_name = workflow or parse_default_workflow(
@@ -395,12 +399,17 @@ class Quest:
 
         from imp.engine.loader import load_workflow
         from imp.providers.config import apply_var_overrides, parse_default_workflow
-        from imp.providers.effective import load_effective_config
+        from imp.providers.effective import (
+            load_effective_config,
+            validate_project_memory,
+        )
 
         config = load_effective_config(
             project_root=control_root, control_root=control_root,
         ).config
         try:
+            validate_project_memory(
+                control_root, config.memory, config.project_facts)
             from imp.assets import resolve_workflow_dir
             wf_name = workflow or parse_default_workflow(
                 control_root / "imp" / "project.yaml")

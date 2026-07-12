@@ -61,7 +61,7 @@ class Config:
     remote: dict[str, Any] = field(hash=False, default_factory=dict)
     context: dict[str, Any] = field(hash=False, default_factory=dict)
     project_facts: dict[str, str] = field(hash=False, default_factory=dict)
-    guidance: str = field(hash=False, default="")
+    memory: dict[str, str] = field(hash=False, default_factory=dict)
 
     def tier_names(self) -> frozenset[str]:
         return frozenset(self.tiers)
@@ -85,10 +85,11 @@ _FACT_KEY_RE = re.compile(r"[A-Za-z][A-Za-z0-9_]*\Z")
 _FACT_SCALARS = (str, int, float, bool)
 
 
-def parse_project_facts(path: Path) -> tuple[dict[str, str], str]:
-    """Read imp/project.yaml `facts:` and `guidance:` into (facts, guidance)."""
+def parse_project_facts(path: Path) -> dict[str, str]:
+    """Read imp/project.yaml `facts:` into a name->string mapping. Absent file
+    or missing `facts:` -> empty mapping."""
     if not path.exists():
-        return {}, ""
+        return {}
     try:
         raw: Any = yaml.load(path.read_text(), Loader=LineLoader) or {}
     except yaml.YAMLError as e:
@@ -98,21 +99,10 @@ def parse_project_facts(path: Path) -> tuple[dict[str, str], str]:
     if not isinstance(raw, dict):
         raise LoadError(f"{path.name} root must be a mapping", SourceLoc(file=path, line=1))
 
-    guidance_raw = raw.get("guidance")
-    if guidance_raw is None:
-        guidance = ""
-    elif not isinstance(guidance_raw, _FACT_SCALARS):
-        raise LoadError(
-            "'guidance:' must be a string scalar",
-            key_loc(path, raw, "guidance"),
-        )
-    else:
-        guidance = str(guidance_raw)
-
     facts: dict[str, str] = {}
     facts_raw = raw.get("facts")
     if facts_raw is None:
-        return facts, guidance
+        return facts
     if not isinstance(facts_raw, dict):
         raise LoadError(
             "'facts:' must be a mapping of name to scalar value",
@@ -126,19 +116,13 @@ def parse_project_facts(path: Path) -> tuple[dict[str, str], str]:
                 "([A-Za-z][A-Za-z0-9_]*)",
                 facts_src,
             )
-        if key == "guidance":
-            raise LoadError(
-                "facts key 'guidance' is reserved (it is the sibling top-level "
-                "'guidance:' field)",
-                facts_src,
-            )
         if not isinstance(value, _FACT_SCALARS):
             raise LoadError(
                 f"facts.{key}: value must be a scalar, not {type(value).__name__}",
                 loc(path, value) if isinstance(value, dict) else facts_src,
             )
         facts[key] = ("true" if value else "false") if isinstance(value, bool) else str(value)
-    return facts, guidance
+    return facts
 
 
 def validate_workflow_name(name: str) -> bool:

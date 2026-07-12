@@ -19,7 +19,6 @@ workflow
 clean_tree_bounces
 completion_pending
 current_step
-guidance
 has_started
 held_acquire_step
 held_lane
@@ -28,6 +27,7 @@ lane_retained
 loop_counts
 max_clean_tree_bounces
 max_reincarnations
+memory
 merge_commit
 outcome_history
 phase_label

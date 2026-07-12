@@ -1898,7 +1898,7 @@ def test_quest_context_defaults_empty_facts() -> None:
     cc = QuestContext(
         title="t", project_root=Path("/x"), workflow_dir=Path("/x"))
     assert cc.project_facts == {}
-    assert cc.guidance == ""
+    assert cc.memory == {}
 
 
 @pytest.mark.anyio

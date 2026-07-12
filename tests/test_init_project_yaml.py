@@ -105,9 +105,8 @@ def test_init_appends_commented_facts_example(
     assert "# facts:" in text
     assert "{{ project." in text
 
-    facts, guidance = parse_project_facts(root / "imp" / "project.yaml")
+    facts = parse_project_facts(root / "imp" / "project.yaml")
     assert facts == {}
-    assert guidance == ""
 
 
 def test_init_records_checked_out_branch_without_remote(
@@ -254,3 +253,76 @@ def test_init_echoes_integration_branch_line(
         detect_verify_fn=lambda _p: None,
     )
     assert "Integration branch: trunk" in lines
+
+
+def test_init_scaffolds_inert_memory_files(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from imp.providers.memory import strip_html_comments
+
+    xdg = tmp_path / "xdg"
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(xdg))
+    root = tmp_path / "repo"
+    root.mkdir()
+    _run(root, xdg, ["claude_code"])
+
+    global_md = root / "imp" / "memory" / "all.md"
+    wf_md = root / "imp" / "memory" / "imp" / "all.md"
+    assert global_md.is_file()
+    assert wf_md.is_file()
+    # Both are comment-only: they strip to empty and inject nothing.
+    assert strip_html_comments(global_md.read_text()).strip() == ""
+    assert strip_html_comments(wf_md.read_text()).strip() == ""
+    # Both scaffolds carry a "sparingly" caution.
+    assert "sparingly" in global_md.read_text().lower()
+    assert "sparingly" in wf_md.read_text().lower()
+
+
+def test_init_memory_snapshot_resolves_to_nothing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from imp.providers.memory import load_memory_snapshot, resolve_memory
+
+    xdg = tmp_path / "xdg"
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(xdg))
+    root = tmp_path / "repo"
+    root.mkdir()
+    _run(root, xdg, ["claude_code"])
+
+    snap = load_memory_snapshot(root / "imp" / "memory")
+    assert set(snap) == {"all.md", "imp/all.md"}
+    # A freshly initialized project injects no memory at any step.
+    assert resolve_memory(snap, workflow="imp", step="threshold") == ""
+
+
+def test_init_facts_hint_points_at_memory_not_guidance(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    xdg = tmp_path / "xdg"
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(xdg))
+    root = tmp_path / "repo"
+    root.mkdir()
+    _run(root, xdg, ["claude_code"])
+
+    text = (root / "imp" / "project.yaml").read_text()
+    assert "imp/memory/" in text        # points at the new home for standing prose
+    assert "guidance:" not in text      # the removed key's stub is gone
+    assert "# facts:" in text           # facts guidance survives
+
+
+def test_init_reinit_without_scaffolds_does_not_raise(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Regression guard for the extended commit pathspec: an already-initialized
+    # clone whose imp/memory/ scaffolds are absent must re-run cleanly. The
+    # scaffolds are written only on a fresh init, so `_commit_init_files` must
+    # stage only the memory paths that actually exist — `git add` with a
+    # pathspec matching no file exits non-zero.
+    xdg = tmp_path / "xdg"
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(xdg))
+    root = tmp_path / "repo"
+    subprocess.run(["git", "init", "-q", str(root)], check=True)
+    (root / "imp").mkdir()
+    (root / "imp" / "project.yaml").write_text("default-workflow: imp\n")
+    _run(root, xdg, ["claude_code"])  # must NOT raise CalledProcessError
+    assert not (root / "imp" / "memory").exists()  # no scaffold on re-init

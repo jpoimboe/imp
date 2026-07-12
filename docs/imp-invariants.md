@@ -25,9 +25,10 @@ Read this when editing imp's engine/renderer or workflow prompts.
   storage, persist only (1) durable user preferences and (2) non-obvious
   invariants no test guards. Never persist "X landed/fixed/approved" status
   snapshots or branch-tied state — they rot fast.
-- **User-level guidance channel (P1):** `guidance` is project-only today
-  (`src/imp/providers/effective.py`, read via `parse_project_facts` and never
-  merged through the floor → project → user → local layers). A maintainer's
-  cross-project preferences have no home but per-repo `project.yaml`. Candidate
-  feature: a user-level `guidance:` in `~/.config/imp/config.yaml`, merged into
-  the prompt's `{{ project.guidance }}`.
+- **User-level memory channel (P1):** `imp/memory/` is project-only today —
+  read from the repo's `imp/` config dir and frozen per run into quest state,
+  never merged through the floor → project → user → local config layers. A
+  maintainer's cross-project preferences have no home but per-repo `imp/memory/`.
+  Candidate feature: a user-level memory dir (e.g. under `~/.config/imp/`) whose
+  `all.md` layers into every agent's `## Project memory` section alongside the
+  project's.

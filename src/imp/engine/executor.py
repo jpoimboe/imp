@@ -81,7 +81,7 @@ from imp.engine.types import (
     Vars,
     Workflow,
 )
-from imp.providers.effective import load_effective_config
+from imp.providers.effective import load_effective_config, validate_project_memory
 from imp.providers.resolve import provider_from_model, resolve_run
 
 if TYPE_CHECKING:
@@ -320,10 +320,12 @@ async def run_quest(
         # Tier A handoff watch always sees the configured threshold without
         # persisting it (the resolved_tiers block below is skipped on resume).
         state.checkpoint_threshold = config.context_checkpoint_threshold()
-        # Freeze once per quest: resume reuses the facts/guidance the first run saw.
+        # Freeze once per quest: resume reuses the facts/memory the first run saw.
         if state.project_facts is None:
+            validate_project_memory(
+                quest.project_root, config.memory, config.project_facts)
             state.project_facts = config.project_facts
-            state.guidance = config.guidance
+            state.memory = config.memory
             state.save(quest.state_dir)
         workflow = load_workflow(
             quest.workflow_dir,
@@ -450,7 +452,7 @@ async def run_quest(
                 sandbox_policy=sandbox_policy,
                 seed_opening=seed_for_step,
                 project_facts=state.project_facts or {},
-                guidance=state.guidance or "",
+                memory=state.memory or {},
                 wait_for_turn_fn=wait_for_turn_fn,
                 max_parallel_test_runs=config.max_parallel_test_runs)
             if seed_for_step is not None:
@@ -742,7 +744,7 @@ async def _dispatch_step(
     sandbox_policy: Any = None,
     seed_opening: str | None = None,
     project_facts: dict[str, str] | None = None,
-    guidance: str = "",
+    memory: dict[str, str] | None = None,
     wait_for_turn_fn: Callable[[Callable[[], bool]], Awaitable[None]] | None = None,
     max_parallel_test_runs: int = 1,
 ) -> tuple[Action, str | None, dict[str, object]]:
@@ -780,7 +782,7 @@ async def _dispatch_step(
             headless=headless,
             autonomous=autonomous,
             sandbox_policy=sandbox_policy, seed_opening=seed_opening,
-            project_facts=project_facts, guidance=guidance)
+            project_facts=project_facts, memory=memory)
     finally:
         _home_cleanup()
 
@@ -1232,7 +1234,7 @@ async def _route_agent(
     sandbox_policy: Any = None,
     seed_opening: str | None = None,
     project_facts: dict[str, str] | None = None,
-    guidance: str = "",
+    memory: dict[str, str] | None = None,
 ) -> tuple[Action, str | None, dict[str, object]]:
     # step.file is guaranteed non-None: loader requires file:/prompt:, and
     # _v_agent_has_file rejects inline prompt: agents this milestone.
@@ -1303,7 +1305,7 @@ async def _route_agent(
             interactive=step.interactive,
             autonomous=autonomous,
             sandbox_policy=sandbox_policy,
-            project_facts=project_facts, guidance=guidance,
+            project_facts=project_facts, memory=memory,
             opening=run_opening, feedback_lead=feedback_lead)
         if result.delay is None:
             break
@@ -1401,7 +1403,7 @@ async def _route_agent(
                 test_gates=test_gates, headless=headless,
                 autonomous=autonomous,
                 sandbox_policy=sandbox_policy, seed_opening=seed,
-                project_facts=project_facts, guidance=guidance)
+                project_facts=project_facts, memory=memory)
         state.step_attempt = 0
         pause = Pause(reason="context_window", kind="reincarnation_cap")
         _emit(log, "step_completed",
@@ -1427,7 +1429,7 @@ async def _route_agent(
             test_gates=test_gates, headless=headless,
             autonomous=autonomous,
             sandbox_policy=sandbox_policy, seed_opening=seed,
-            project_facts=project_facts, guidance=guidance)
+            project_facts=project_facts, memory=memory)
     if result.fatal:
         # Defense in depth: reset the retry count when pausing fatally, matching
         # the success/exhaustion resets. Runs once (at the pause), unlike the
@@ -1462,7 +1464,7 @@ async def _route_agent(
                                   autonomous=autonomous,
                                   sandbox_policy=sandbox_policy,
                                   seed_opening=seed_opening,
-                                  project_facts=project_facts, guidance=guidance)
+                                  project_facts=project_facts, memory=memory)
 
     state.step_attempt = 0
     _record_outcome(state, step.name, result.output, _worktree_head(quest))
@@ -1516,7 +1518,7 @@ async def _run_agent_invocation(
     autonomous: bool = False,
     sandbox_policy: Any = None,
     project_facts: dict[str, str] | None = None,
-    guidance: str = "",
+    memory: dict[str, str] | None = None,
     opening: str = "",
     feedback_lead: str | None = None,
 ) -> AgentRunResult:
@@ -1598,7 +1600,8 @@ async def _run_agent_invocation(
             id=quest.id, title=quest.title,
             quest_home=f".imp/quests/{quest.id}",
             project_root=quest.project_root, workflow_dir=quest.workflow_dir,
-            project_facts=project_facts or {}, guidance=guidance,
+            project_facts=project_facts or {}, memory=memory or {},
+            workflow_name=workflow.name, step_name=step_name,
             persona_source=workflow.persona_source,
         ),
         user_chat_input_fn=user_chat_input_fn,

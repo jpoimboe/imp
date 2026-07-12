@@ -1,5 +1,4 @@
-"""parse_project_facts: project-file-only facts/guidance loader with file:line
-errors and Norway-safe string scalars (spec 2026-06-15-project-facts-namespace)."""
+"""parse_project_facts: facts-only loader with file:line errors, Norway-safe scalars."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -18,25 +17,22 @@ def _write(tmp_path: Path, body: str) -> Path:
 
 
 def test_absent_file_returns_empty(tmp_path: Path) -> None:
-    facts, guidance = parse_project_facts(tmp_path / "nope.yaml")
+    facts = parse_project_facts(tmp_path / "nope.yaml")
     assert facts == {}
-    assert guidance == ""
 
 
-def test_parses_facts_and_guidance(tmp_path: Path) -> None:
+def test_parses_facts(tmp_path: Path) -> None:
     p = _write(
         tmp_path,
-        "facts:\n  test_command: make test\n  stack: python\n"
-        "guidance: be careful\n",
+        "facts:\n  test_command: make test\n  stack: python\n",
     )
-    facts, guidance = parse_project_facts(p)
+    facts = parse_project_facts(p)
     assert facts == {"test_command": "make test", "stack": "python"}
-    assert guidance == "be careful"
 
 
 def test_norway_value_stays_string(tmp_path: Path) -> None:
     p = _write(tmp_path, "facts:\n  flag: on\n  other: yes\n")
-    facts, _ = parse_project_facts(p)
+    facts = parse_project_facts(p)
     assert facts["flag"] == "on"
     assert facts["other"] == "yes"
 
@@ -60,16 +56,9 @@ def test_non_mapping_facts_rejected(tmp_path: Path) -> None:
         parse_project_facts(p)
 
 
-def test_reserved_guidance_key_rejected(tmp_path: Path) -> None:
-    p = _write(tmp_path, "facts:\n  guidance: hi\n")
-    with pytest.raises(LoadError) as ei:
-        parse_project_facts(p)
-    assert "reserved" in str(ei.value)
-
-
 def test_numeric_value_coerced_to_string(tmp_path: Path) -> None:
     p = _write(tmp_path, "facts:\n  count: 42\n  ratio: 3.14\n")
-    facts, _ = parse_project_facts(p)
+    facts = parse_project_facts(p)
     assert facts["count"] == "42"
     assert facts["ratio"] == "3.14"
 
@@ -89,11 +78,10 @@ def test_facts_reach_config_from_project_layer(
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
     (tmp_path / "imp").mkdir()
     (tmp_path / "imp" / "project.yaml").write_text(
-        "default-workflow: imp\nfacts:\n  test_command: make test\nguidance: hi\n"
+        "default-workflow: imp\nfacts:\n  test_command: make test\n"
     )
     cfg = load_effective_config(project_root=tmp_path, control_root=tmp_path).config
     assert cfg.project_facts == {"test_command": "make test"}
-    assert cfg.guidance == "hi"
 
 
 def test_user_layer_facts_not_contributed(
@@ -113,15 +101,9 @@ def test_user_layer_facts_not_contributed(
 
 def test_bool_fact_value_coerces_to_lowercase(tmp_path: Path) -> None:
     p = _write(tmp_path, "facts:\n  flag: true\n  off: false\n")
-    facts, _ = parse_project_facts(p)
+    facts = parse_project_facts(p)
     assert facts["flag"] == "true"
     assert facts["off"] == "false"
-
-
-def test_non_scalar_guidance_rejected(tmp_path: Path) -> None:
-    p = _write(tmp_path, "guidance:\n  key: val\n")
-    with pytest.raises(LoadError):
-        parse_project_facts(p)
 
 
 def test_leading_underscore_key_rejected(tmp_path: Path) -> None:
@@ -137,16 +119,8 @@ def test_leading_underscore_key_rejected(tmp_path: Path) -> None:
 
 
 def test_non_mapping_facts_error_points_at_facts_line(tmp_path: Path) -> None:
-    p = _write(tmp_path, "guidance: hi\nfacts: notamap\n")
+    p = _write(tmp_path, "# a comment\nfacts: notamap\n")
     with pytest.raises(LoadError) as ei:
         parse_project_facts(p)
     assert ei.value.source is not None
     assert ei.value.source.line == 2
-
-
-def test_non_scalar_guidance_error_points_at_guidance_line(tmp_path: Path) -> None:
-    p = _write(tmp_path, "facts:\n  a: b\nguidance:\n  nested: x\n")
-    with pytest.raises(LoadError) as ei:
-        parse_project_facts(p)
-    assert ei.value.source is not None
-    assert ei.value.source.line == 3

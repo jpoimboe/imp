@@ -3,7 +3,7 @@
 The entry point to imp's self-knowledge: a stable primer on how imp is organized,
 plus a map to imp's deeper skills. Load this first whenever you need to ground an
 answer about how imp works, then follow the map to the skill the question needs.
-Everything specific (the live workflow, what quests exist, what guidance is
+Everything specific (the live workflow, what quests exist, what memory is
 active) is read fresh — this file is only the durable picture.
 
 ## Deeper skills (the map)
@@ -16,8 +16,8 @@ Load these with `load_skill(name=...)` when a question goes past the primer belo
   of a specific quest right now.
 - **`imp-memory`** (`load_skill(name="imp-memory")`) — what imp remembers and
   where: its two tiers of durable state (per-quest records and project-level
-  `imp/project.yaml` config/guidance) and how to inspect them. Load it for any
-  question about memory, persistence, guidance, or project configuration.
+  `imp/project.yaml` config and `imp/memory/` files) and how to inspect them.
+  Load it for any question about memory, persistence, or project configuration.
 
 ## Quest and its home
 

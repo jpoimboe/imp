@@ -643,10 +643,12 @@ def test_project_ref_unknown_key_errors_with_hint(tmp_path: Path) -> None:
     assert "test_command" in msg  # configured keys appear in the hint
 
 
-def test_guidance_always_known(tmp_path: Path) -> None:
+def test_project_guidance_no_longer_special(tmp_path: Path) -> None:
+    # The guidance key is gone; {{ project.guidance }} is now an unknown ref.
     wf = _wf(tmp_path, _PROJECT_WF,
              agents={"stub": _agent_with_body("{{ project.guidance }}")})
-    load_workflow(wf)  # default project_keys=frozenset() -> guidance still known
+    with pytest.raises((LoadError, LoadErrors)):
+        load_workflow(wf)  # default project_keys=frozenset() -> guidance unknown
 
 
 def test_project_ref_with_no_facts_block_errors(tmp_path: Path) -> None:
