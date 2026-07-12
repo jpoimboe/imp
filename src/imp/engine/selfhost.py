@@ -6,8 +6,6 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-from imp.engine.env import _is_imp_checkout
-
 _SHIM_DIRNAME = "selfhost-bin"
 
 
@@ -29,3 +27,9 @@ def selfhost_launch(project_root: Path) -> SelfHostLaunch | None:
     return SelfHostLaunch(
         shim_dir=str(shim_dir), src_dir=str(project_root / "src"),
     )
+
+
+def _is_imp_checkout(project_root: Path) -> bool:
+    """True when `project_root` is an imp source checkout (src-layout with the
+    imp package present). Gates self-host shim creation."""
+    return (project_root / "src" / "imp" / "__init__.py").is_file()

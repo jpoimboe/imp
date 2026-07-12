@@ -88,24 +88,26 @@ def overlay_engine_env(
     ambient engine var — notably `IMP_TEST_CMD_FAST` from an outer imp process —
     from leaking past `engine_env`'s "absent => no fast gate" contract.
 
-    `PYTHONPATH` is special-cased: it is a *prefix*, not an authoritative value.
-    The worktree's `src/` (set by `engine_env` for an imp checkout) is prepended
-    to any inherited `PYTHONPATH` so the worktree's own sources win over an
-    editable install that pins a sibling checkout — without discarding ambient
-    entries the parent set, and without duplicating a copy already inherited.
+    `PYTHONPATH` is special-cased: it is a *prefix* of worktree-relative import
+    roots (from `engine_env`), not an authoritative value. Its entries are
+    prepended ahead of any inherited `PYTHONPATH` so the worktree's own sources
+    win over an editable install that pins a sibling checkout — dropping empty
+    inherited entries and any inherited entry that duplicates a prefix entry
+    (per-entry dedup, so a multi-root prefix stays clean), and preserving the
+    remaining ambient entries in order after the prefix.
     """
     env = {k: v for k, v in parent.items() if k not in ENGINE_ENV_VARS}
     overlay = dict(overlay)
     pythonpath_prefix = overlay.pop("PYTHONPATH", None)
     env.update(overlay)
     if pythonpath_prefix:
+        prefix_entries = pythonpath_prefix.split(os.pathsep)
         inherited = parent.get("PYTHONPATH", "")
-        # Prepend, dropping any empty or duplicate copy of the prefix the parent
-        # already carried (nested imp-on-imp, or a re-entered worktree) so the
-        # path doesn't grow a redundant entry each level.
+        # Drop any inherited entry equal to one of the prefix entries (and any
+        # empty entry) so a multi-root prefix doesn't grow a redundant copy.
         rest = [p for p in inherited.split(os.pathsep)
-                if p and p != pythonpath_prefix]
-        env["PYTHONPATH"] = os.pathsep.join([pythonpath_prefix, *rest])
+                if p and p not in prefix_entries]
+        env["PYTHONPATH"] = os.pathsep.join([*prefix_entries, *rest])
     return env
 
 
@@ -114,6 +116,7 @@ def engine_env(
     quest_dir: Path | None = None,
     output_path: Path | None = None,
     test_gates: TestGates | None = None,
+    pythonpath: tuple[str, ...] = (),
 ) -> dict[str, str]:
     """Return the environment variables the engine injects into every subprocess.
 
@@ -137,15 +140,17 @@ def engine_env(
                             run-verify.sh applies its own per-tier default (120/300).
                             IMP_-prefixed, so the sandbox allowlist passes them
                             through with no edit.
-        PYTHONPATH        — prefix pointing at `<project_root>/src`, injected only
-                            for an imp source checkout (imp-on-imp dogfooding), so
-                            unrelated projects' subprocesses are never perturbed.
-                            `overlay_engine_env` prepends it to any inherited
-                            PYTHONPATH so subprocesses import the worktree's own
-                            imp instead of resolving an editable install to a
-                            sibling checkout. Emitted as a bare prefix here; the
-                            prepend-and-dedup merge happens in `overlay_engine_env`
-                            where the parent env is visible.
+        PYTHONPATH        — one entry per `pythonpath` root, each resolved against
+                            project_root (the worktree for a live quest), joined
+                            by os.pathsep in listed order; e.g. `src` =>
+                            <worktree>/src, `.` => <worktree>. Empty pythonpath =>
+                            no PYTHONPATH key (unchanged when off). Emitted as a
+                            bare prefix here; overlay_engine_env prepends it to any
+                            inherited PYTHONPATH. The shadow relies on PYTHONPATH
+                            preceding site-packages on sys.path — true for
+                            path-style editable installs; a strict PEP 660 editable
+                            that registers a sys.meta_path finder resolves first
+                            and is not shadowable by PYTHONPATH (out of scope).
     """
     env = {
         "IMP_PROJECT_ROOT": str(project_root),
@@ -166,27 +171,7 @@ def engine_env(
             env["IMP_TEST_CMD_FAST_TIMEOUT"] = str(test_gates.fast_timeout)
         if test_gates.slow_timeout is not None:
             env["IMP_TEST_CMD_SLOW_TIMEOUT"] = str(test_gates.slow_timeout)
-    # imp-on-imp only: when the project being changed is itself an imp source
-    # checkout, an editable install (pip install -e) pins `import imp` to the
-    # parent repo, so a worktree's agent would import the parent's code, not the
-    # worktree's. Prepending the worktree's own `src/` to PYTHONPATH shadows that.
-    #
-    # Scoped to an imp checkout (`_is_imp_checkout`), NOT any `src/` directory:
-    # imp manages arbitrary projects, and forcing every project's `src/` onto its
-    # subprocess PYTHONPATH would silently shadow modules for unrelated (even
-    # non-Python) projects that merely happen to have a `src/` folder.
-    #
-    # The shadow relies on PYTHONPATH preceding site-packages on sys.path. That
-    # holds for path-style editable installs (imp's, via pipx/`pip install -e`).
-    # A strict PEP 660 editable that registers a `sys.meta_path` finder would
-    # resolve first and defeat it — out of scope while imp ships path-style.
-    if _is_imp_checkout(project_root):
-        env["PYTHONPATH"] = str(project_root / "src")
+    if pythonpath:
+        env["PYTHONPATH"] = os.pathsep.join(
+            str(project_root / entry) for entry in pythonpath)
     return env
-
-
-def _is_imp_checkout(project_root: Path) -> bool:
-    """True when `project_root` is an imp source checkout (src-layout with the
-    imp package present). Gates the imp-on-imp PYTHONPATH shadow so unrelated
-    projects' subprocesses are never perturbed."""
-    return (project_root / "src" / "imp" / "__init__.py").is_file()
