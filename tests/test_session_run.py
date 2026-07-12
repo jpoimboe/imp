@@ -559,9 +559,9 @@ async def test_run_session_client_resets_title_on_daemon_startup_failure(
     reset_calls: list[str] = []
 
     class _FakeTitle:
-        def __init__(self, stream: object, quest_id: str, change_name: str) -> None:
+        def __init__(self, stream: object, quest_id: str, quest_name: str) -> None:
             self._quest_id = quest_id
-            self._name = change_name
+            self._name = quest_name
 
         def working(self) -> None: ...
         def waiting(self) -> None: ...
