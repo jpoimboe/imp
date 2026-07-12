@@ -44,10 +44,10 @@ In `bash`:
 - **No silent semantic break:** a clean textual merge can still be wrong — base
   renamed/removed a symbol the branch calls, changed a signature, shifted an invariant.
   Reason about the branch's code against the base-side incoming diff. When the
-  project runs a combined verification gate, it runs as a separate step immediately
-  before this review and has already passed at the current tree — and you cannot have
-  changed that tree (you do not commit), so re-running the whole suite tells you
-  nothing new; don't. If you form a specific hypothesis that a runtime behavior broke,
+  project runs a combined verification gate, it ran immediately before this review as
+  a separate step — and you cannot have changed that tree since (you do not commit), so
+  re-running the whole suite tells you nothing new; don't. If you form a specific
+  hypothesis that a runtime behavior broke,
   run only the single narrowest check that tests it. Do NOT make code changes and do
   NOT commit.
 - **Faithful to intent:** each reconciliation must still deliver the quest's intent —
