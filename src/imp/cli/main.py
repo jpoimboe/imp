@@ -912,7 +912,7 @@ def _resolve_new_base(control: Path, base_flag: str | None) -> str:
     if base is None:
         raise BaseResolutionError(
             "no `default-base` in imp/project.yaml — run `imp init` to set the "
-            "branch changes integrate into.")
+            "branch quests integrate into.")
     if not worktree.branch_exists(control, base):
         raise BaseResolutionError(
             f"default-base {base!r} (imp/project.yaml) does not name an existing "

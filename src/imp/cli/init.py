@@ -147,7 +147,7 @@ def _resolve_init_base(
     suffix = f" [{current}]" if current else ""
     try:
         answer = input_fn(
-            f"Which branch should changes integrate into?{suffix} "
+            f"Which branch should quests integrate into?{suffix} "
         ).strip()
     except EOFError as e:
         raise IntegrationBranchUnresolved(
@@ -159,7 +159,7 @@ def _resolve_init_base(
     if not resolved:
         raise IntegrationBranchUnresolved(
             "imp init needs an integration branch but none was given. Re-run "
-            "`imp init` and name the branch changes should integrate into."
+            "`imp init` and name the branch quests should integrate into."
         )
     return resolved
 
