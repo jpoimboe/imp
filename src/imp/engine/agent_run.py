@@ -8,8 +8,9 @@ recovery still differs: steps retry inline with feedback; subagents are
 re-dispatched by the parent — see the dispatch_task caller.)
 
 No-cycle invariant: at MODULE TOP this imports only cycle-free leaves —
-`engine.types`, `engine.completion`, and `agents.runner` (which imports only
-`engine.types`). `engine.error_policy` and `engine.schema` are imported LAZILY
+`engine.types`, `engine.completion`, `agents.runner`, and `agents.transcript`
+(each importing only cycle-free leaves). `engine.error_policy` and
+`engine.schema` are imported LAZILY
 inside `drive_invocation`, NOT at top: error_policy -> providers.errors eagerly
 runs providers/__init__ -> anthropic -> agents.subagents, and agents.subagents
 imports THIS module, so a top-level error_policy import would make a cold
@@ -37,6 +38,7 @@ from imp.agents.tools.limits import (
     PROCESS_KILL_GRACE_S,
     PROVIDER_REQUEST_SILENCE_CEILING_S,
 )
+from imp.agents.transcript import RESUME_CONTINUE_NUDGE
 from imp.engine.awaiting_user_input import AwaitingUserInput
 from imp.engine.completion import (  # re-exports for claude_code.py
     INTERRUPT_STEER_HINT as INTERRUPT_STEER_HINT,
@@ -396,12 +398,7 @@ def _join_pending_interjects(coordinator: Any) -> str | None:
     return "\n".join(parts) if parts else None
 
 
-_CONTINUATION_NUDGE = (
-    "The run was paused by the user and is now resuming — this is not a "
-    "rejection and nothing failed. Continue the step from where you left off "
-    "and call complete_step when it is done. Do not ask the user how to "
-    "proceed unless you genuinely need input you do not already have."
-)
+_CONTINUATION_NUDGE = RESUME_CONTINUE_NUDGE
 
 
 async def _resolve_wait_reply(
