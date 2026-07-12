@@ -160,7 +160,7 @@ def main(
     path = env.get("IMP_REMOTE_CONTROL_SOCK")
     if not path:
         return 0
-    quest_id = env.get("IMP_REMOTE_CONTROL_CHANGE_ID", "")
+    quest_id = env.get("IMP_REMOTE_CONTROL_QUEST_ID", "")
     title = env.get("IMP_REMOTE_CONTROL_TITLE", "")
     autosubscribe = _wants_autosubscribe(env)
     stdin_fd = stdin.fileno()

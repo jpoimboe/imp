@@ -31,7 +31,7 @@ async def test_connector_keeps_polling_when_daemon_dies_and_exits_on_stdin_eof(
     r_fd, w_fd = os.pipe()
     env = {
         "IMP_REMOTE_CONTROL_SOCK": sock,
-        "IMP_REMOTE_CONTROL_CHANGE_ID": "2026-06-13-abc",
+        "IMP_REMOTE_CONTROL_QUEST_ID": "2026-06-13-abc",
         "IMP_REMOTE_CONTROL_TITLE": "T",
     }
     result: dict[str, int] = {}
