@@ -647,7 +647,7 @@ async def test_merge_phase_runs_merge_to_base_step(tmp_path: Path) -> None:
              if e.get("type") == "step_started"]
     assert "wait-for-head" in steps
     assert "merge-to-base" in steps
-    assert "change_merged" in types_seen
+    assert "quest_merged" in types_seen
 
 
 @pytest.mark.anyio
@@ -695,7 +695,7 @@ async def test_autonomous_mode_integrates_and_merges_without_human(tmp_path: Pat
     steps = [e["payload"].get("step") for e in _run_events(quest)
              if e.get("type") == "step_started"]
     assert "integrate-rebase" in steps and "finalize" in steps
-    assert "change_merged" in [e.get("type") for e in _run_events(quest)]
+    assert "quest_merged" in [e.get("type") for e in _run_events(quest)]
 
 
 @pytest.mark.anyio

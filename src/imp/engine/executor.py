@@ -684,7 +684,7 @@ def _complete(quest: Quest, state: State, log: EventLog) -> RunResult:
 
     state.status = "completed"
     state.save(quest.state_dir)
-    _emit(log, "change_merged",
+    _emit(log, "quest_merged",
           {"base": quest.base_branch, "commit": state.merge_commit})
     merge_queue.pop_and_wake(quest.control_root, quest.id, quest.base_branch)
     from imp.engine import archive

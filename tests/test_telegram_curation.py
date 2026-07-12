@@ -7,7 +7,7 @@ from imp.remote.drivers import telegram as imp_telegram
 
 @pytest.mark.parametrize(
     "event_type",
-    ["awaiting_user_input", "merge_blocked", "script_blocked", "change_merged"],
+    ["awaiting_user_input", "merge_blocked", "script_blocked", "quest_merged"],
 )
 def test_buzz_event_types_notify(event_type: str) -> None:
     assert imp_telegram.curate(event_type, {}) == "buzz"

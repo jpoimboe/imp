@@ -7,7 +7,7 @@ def _warn(eid: str, message: str) -> dict:
 
 
 def _merged(eid: str = "m") -> dict:
-    return {"id": eid, "agent_id": None, "type": "change_merged",
+    return {"id": eid, "agent_id": None, "type": "quest_merged",
             "payload": {"base": "master"}}
 
 

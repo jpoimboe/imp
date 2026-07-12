@@ -1026,7 +1026,7 @@ def test_is_final_goto_breadcrumb_is_emitted() -> None:
     assert drv._is_final(bc, container=None) is True
 
 
-def test_change_merged_suppressed_in_live_path() -> None:
+def test_quest_merged_suppressed_in_live_path() -> None:
     drv, out = _driver()
     for e in [
         ev("0", "quest_created", id="run-x",
@@ -1035,14 +1035,14 @@ def test_change_merged_suppressed_in_live_path() -> None:
            kind="merge_and_exit_worktree", phase="review"),
         ev("2", "step_completed", step="merge-to-base", kind="merge_and_exit_worktree",
            action={"verb": "continue"}, var_mutations={}),
-        ev("3", "change_merged", base="master", commit="37dde900abc"),
+        ev("3", "quest_merged", base="master", commit="37dde900abc"),
     ]:
         drv.on_event(e)
     drv.finish()
     body = "\n".join(_body(out))
     # neither the raw event nor the friendly footer is emitted by the live driver
     # (the friendly line is owned by main.py _emit_completed).
-    assert "change_merged" not in body
+    assert "quest_merged" not in body
     assert "Merged 2026-06-12-run-x" not in body
 
 

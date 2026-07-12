@@ -55,9 +55,9 @@ def test_curate_tracks_merge_blocked_status() -> None:
     assert out["change"]["status"] == "merge_blocked"
 
 
-def test_curate_tracks_change_merged_status() -> None:
+def test_curate_tracks_quest_merged_status() -> None:
     curator = EventCurator(id="cid", title_provider=lambda: "T", events=("all",))
-    out = curator.curate({"type": "change_merged", "payload": {}})
+    out = curator.curate({"type": "quest_merged", "payload": {}})
     assert out is not None
     assert out["change"]["status"] == "completed"
 

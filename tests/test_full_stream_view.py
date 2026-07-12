@@ -95,9 +95,9 @@ def test_no_stall_invariant_final_breadcrumb_present() -> None:
 
 
 def test_live_log_body_parity() -> None:
-    # change_merged is intentionally suppressed in the live path (main.py owns
+    # quest_merged is intentionally suppressed in the live path (main.py owns
     # that line), so exclude it from the parity comparison.
-    events = [e for e in _events() if e.get("type") != "change_merged"]
+    events = [e for e in _events() if e.get("type") != "quest_merged"]
     assert _live_body(events) == _log_body(events), (
         "live and log bodies diverged — live/log parity invariant broken"
     )

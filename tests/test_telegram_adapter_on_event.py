@@ -359,11 +359,11 @@ def test_genuine_gate_still_buzzes_on_both_paths() -> None:
     assert alerted and alerted[0][1] is False          # loud on alert-all path
 
 
-def test_subscribed_change_merged_is_header_and_done_no_handle() -> None:
+def test_subscribed_quest_merged_is_header_and_done_no_handle() -> None:
     sent: list = []
     adapter = _adapter(sent, subscriptions=_subs("k3f9qa"))
     adapter.on_event({
-        "id": "m1", "type": "change_merged", "timestamp": TS,
+        "id": "m1", "type": "quest_merged", "timestamp": TS,
         "change": {"id": "k3f9qa", "title": "Dark mode"}, "payload": {}})
     assert len(sent) == 1
     text, silent = sent[0]

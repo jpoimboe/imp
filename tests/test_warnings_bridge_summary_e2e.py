@@ -17,7 +17,7 @@ def test_bridged_warnings_from_several_steps_collapse_into_one_summary_line() ->
          "payload": {"id": "abc123", "title": "x"}},
         _warn("w1", msg),   # a bridged stderr warning (one per step, flattened here)
         _warn("w2", msg),   # an identical bridged warning from another step
-        {"id": "m", "agent_id": None, "type": "change_merged",
+        {"id": "m", "agent_id": None, "type": "quest_merged",
          "payload": {"base": "master"}},
     ])
     summaries = [c for c in tree.root.children

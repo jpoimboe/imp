@@ -23,7 +23,7 @@ from typing import Any
 # Delivery tiers (spec §2). buzz = input prompts + status transitions (phone buzzes);
 # silent = narrative / script output / step dividers (streams quietly); everything else drops.
 _BUZZ = frozenset({
-    "merge_blocked", "script_blocked", "change_merged",
+    "merge_blocked", "script_blocked", "quest_merged",
     "error",
 })
 _SILENT = frozenset({
@@ -72,7 +72,7 @@ _EVENT_LABELS = {
     "awaiting_user_input": "needs your input",
     "merge_blocked": "merge blocked",
     "script_blocked": "script blocked",
-    "change_merged": "done",
+    "quest_merged": "done",
     "change_abandoned": "abandoned",
     "workflow_paused": "paused",
     "workflow_resumed": "resumed",

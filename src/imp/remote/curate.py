@@ -49,5 +49,5 @@ class EventCurator:
             self._status = "paused"
         elif etype == "merge_blocked":
             self._status = "merge_blocked"
-        elif etype == "change_merged":
+        elif etype == "quest_merged":
             self._status = "completed"

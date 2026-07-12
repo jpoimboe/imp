@@ -51,7 +51,7 @@ def test_format_merge_blocked_surfaces_reason_and_detail() -> None:
 
 def test_format_loud_body_is_label_only_no_title_bracket() -> None:
     # No '[title]' bracket regardless of the change block — the body is the label.
-    event = {"type": "change_merged", "change": {"id": "2026-06-11-abc"}, "payload": {}}
+    event = {"type": "quest_merged", "change": {"id": "2026-06-11-abc"}, "payload": {}}
     assert imp_telegram.format_event_message(event) == "done"
 
 
@@ -70,13 +70,13 @@ def test_clamp_text_truncates_overflow_and_marks_it() -> None:
 
 
 def test_format_loud_body_is_label_only_even_with_empty_change_block() -> None:
-    event = {"type": "change_merged", "change": {}, "payload": {}}
+    event = {"type": "quest_merged", "change": {}, "payload": {}}
     assert imp_telegram.format_event_message(event) == "done"
 
 
 def test_format_uses_payload_message_key_as_body() -> None:
     event = {
-        "type": "change_merged",
+        "type": "quest_merged",
         "change": {"title": "T"},
         "payload": {"message": "wrapped up"},
     }
@@ -230,7 +230,7 @@ def test_event_labels_humanize_every_buzz_type() -> None:
         "awaiting_user_input": "needs your input",
         "merge_blocked": "merge blocked",
         "script_blocked": "script blocked",
-        "change_merged": "done",
+        "quest_merged": "done",
         "change_abandoned": "abandoned",
         "workflow_paused": "paused",
         "workflow_resumed": "resumed",
