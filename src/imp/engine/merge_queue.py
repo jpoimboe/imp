@@ -71,7 +71,7 @@ def position(control_root: Path, quest_id: str, base_branch: str) -> int:
 
 
 def remove(control_root: Path, quest_id: str) -> None:
-    """Drop a change's entry (abandon of a non-head, or any cleanup). No wake."""
+    """Drop a quest's entry (abandon of a non-head, or any cleanup). No wake."""
     with RepoGitLock(control_root).acquire():
         entries = [e for e in read(control_root) if e["quest_id"] != quest_id]
         _write(control_root, entries)

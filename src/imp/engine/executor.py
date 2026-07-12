@@ -6,7 +6,7 @@ the cursor.
 The engine owns state.json + events.jsonl. The runner owns transcript.jsonl.
 An agent step entered fresh (no resume marker) wipes its transcript dir on
 entry; a step entered via a `resume:` edge keeps it and balances a trailing
-complete_step. The whole steps/ tree is removed at change completion.
+complete_step. The whole steps/ tree is removed at quest completion.
 """
 
 from __future__ import annotations
@@ -104,7 +104,7 @@ def _record_outcome(
 
 
 def _worktree_head(quest: Quest) -> str:
-    """Worktree HEAD sha, or "" when HEAD is absent/unborn (like change._imp_commit)."""
+    """Worktree HEAD sha, or "" when HEAD is absent/unborn (like quest._imp_commit)."""
     from imp.engine import worktree
     proc = worktree._git(quest.project_root, "rev-parse", "HEAD")
     return proc.stdout.strip() if proc.returncode == 0 else ""
@@ -206,7 +206,7 @@ def _trees_identical(a: Path, b: Path) -> bool:
 def _refresh_workflow_snapshot(quest: Quest) -> bool:
     """Re-snapshot the live workflow into quest_dir/workflow at a run_quest
     entry. Returns True only when an EXISTING snapshot's content was replaced
-    (a fresh change's initial copy returns False); best-effort and crash-safe."""
+    (a fresh quest's initial copy returns False); best-effort and crash-safe."""
     quest_dir = quest.quest_dir
     snapshot = quest_dir / "workflow"
     tmp = quest_dir / "workflow.tmp"
@@ -273,8 +273,8 @@ def _reconcile_resolved_run(
 def _backfill_var_defaults(state: State, decls: Vars) -> list[str]:
     """Seed any workflow-declared var whose key is absent from state.vars with its
     declared default. Vars are seeded from the workflow only at quest creation
-    (change.py); a var added to the workflow later is missing from an in-flight
-    change's persisted vars, so a template referencing it under StrictUndefined
+    (quest.py); a var added to the workflow later is missing from an in-flight
+    quest's persisted vars, so a template referencing it under StrictUndefined
     (`{{ vars.x }}`) raises "'dict object' has no attribute 'x'" on resume. An
     already-set var keeps its persisted value. Returns the names added (sorted;
     empty if none), so the caller persists + logs only on a real change."""
@@ -828,7 +828,7 @@ def _emit_started(
 def _harvest_artifacts(
     quest: Quest, step: Step, warn: Callable[[str], None] | None = None
 ) -> None:
-    """Journal quest_dir/artifacts/** to the change's artifact ref (no-op if none)."""
+    """Journal quest_dir/artifacts/** to the quest's artifact ref (no-op if none)."""
     from imp.engine import worktree
     art_root = quest.quest_dir / "artifacts"
     if not art_root.is_dir():
@@ -1687,7 +1687,7 @@ def _warn_if_no_overlay(policy: Any, quest: Quest, log: EventLog) -> None:
 
 def _build_sandbox_policy(quest: Quest, config: Any, log: EventLog) -> Any:
     """Resolve the SandboxPolicy for the current spawn point (IMP_* are
-    change-stable, but project_root can flip on go-live, triggering a rebuild).
+    quest-stable, but project_root can flip on go-live, triggering a rebuild).
     Emit a durable posture event; on a hard-fail posture, emit + re-raise so the
     run stops rather than silently running bare."""
     cfg = sandbox_config_from_raw(config.sandbox or {})

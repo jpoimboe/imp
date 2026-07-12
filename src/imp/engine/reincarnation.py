@@ -29,7 +29,7 @@ def reincarnation_seed(
     Point it at its recovery sources in priority order: the agent-authored
     handoff note (primary; present only for the proactive Tier A path), the
     stashed prior transcript for deeper detail, and `query_events` for
-    change-level orientation. Built to serve both the no-handoff (reactive,
+    quest-level orientation. Built to serve both the no-handoff (reactive,
     Tier B) and handoff (proactive, Tier A) shapes.
     """
     lines = [

@@ -124,10 +124,10 @@ def engine_env(
         IMP_PROJECT_ROOT  — absolute path of the project root on the host.
         IMP_QUEST_ID      — the stable, immutable quest identity; hook authors
                             MUST key on this.
-        IMP_QUEST_TITLE   — human-readable title for the change.
-        IMP_QUEST_DIR     — absolute host path of the change state directory;
+        IMP_QUEST_TITLE   — human-readable title for the quest.
+        IMP_QUEST_DIR     — absolute host path of the quest state directory;
                             injected only when quest_dir is provided. Scripts
-                            anchor on this instead of a cwd-relative .imp/change/
+                            anchor on this instead of a cwd-relative .imp/quests/
                             so the state directory survives worktree relocation.
         IMP_OUTPUT        — path to the JSON file where a script writes its declared
                             typed output: fields; injected only when output_path is

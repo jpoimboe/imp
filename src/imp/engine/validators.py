@@ -22,7 +22,7 @@ def validate(
     """Run every validator. Returns (errors, warnings).
 
     `configured_tiers` enables _v_step_tier_configured / subagent tier checks
-    when supplied (the change-creation backstop; resolve_run is authoritative).
+    when supplied (the quest-creation backstop; resolve_run is authoritative).
     """
     errors: list[LoadError] = []
     warnings: list[LoadError] = []
