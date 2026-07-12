@@ -33,6 +33,17 @@ async def _attach(sock_path: str, quest_id: str) -> SocketStream:
     return client
 
 
+class _RecordingLog:
+    def __init__(self) -> None:
+        self.records: list[dict[str, Any]] = []
+
+    def append(self, *, agent_id: str | None, type: str,
+               payload: dict[str, Any]) -> dict[str, Any]:
+        rec = {"agent_id": agent_id, "type": type, "payload": payload}
+        self.records.append(rec)
+        return rec
+
+
 @pytest.mark.anyio
 async def test_run_fn_events_are_broadcast_to_attached_client(tmp_path: Path) -> None:
     sock = str(tmp_path / "s.sock")
@@ -1592,3 +1603,133 @@ async def test_chat_skill_without_args_returns_body_unchanged(
             command="/debug", name="debug", body="BODY")]
         await client.aclose()
         tg.cancel_scope.cancel()
+
+
+@pytest.mark.anyio
+async def test_model_override_frame_unwinds_gate_without_detach(tmp_path: Path) -> None:
+    from imp.cli.signals import InterruptCoordinator
+    from imp.engine.awaiting_user_input import AwaitingUserInput
+
+    sock = str(tmp_path / "s.sock")
+    coord = InterruptCoordinator()
+    server = SessionServer(sock, coordinator=coord, hibernate=True)
+    gate_reached = anyio.Event()
+    captured: dict[str, Any] = {}
+
+    async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
+        with anyio.fail_after(5):
+            while server.leased_count < 1:
+                await anyio.sleep(0.02)
+        gate_reached.set()
+        try:
+            await user_chat_input_fn("")
+        except AwaitingUserInput:
+            captured["leased_at_pause"] = server.leased_count
+            return "paused"
+        return "resident"
+
+    async with anyio.create_task_group() as tg:
+        await server.open()
+        result: dict[str, Any] = {}
+
+        async def _serve() -> None:
+            result["r"] = await server.serve(run_fn)
+
+        tg.start_soon(_serve)
+        client = await _attach(sock, "c1")
+        with anyio.fail_after(5):
+            while server.leased_count != 1:
+                await anyio.sleep(0.02)
+        await gate_reached.wait()
+        await client.send((encode_control("set-model", "opus") + "\n").encode())
+        with anyio.fail_after(5):
+            while "r" not in result:
+                await anyio.sleep(0.02)
+        assert result["r"] == "paused"
+        assert captured["leased_at_pause"] == 1     # still leased: no detach
+        assert coord.pause_reason == "model-override"
+        assert coord.take_pending_model() == "opus"
+        await client.aclose()
+        tg.cancel_scope.cancel()
+
+
+@pytest.mark.anyio
+async def test_model_override_frame_no_interrupt_or_kill_events(tmp_path: Path) -> None:
+    from imp.cli.signals import InterruptCoordinator
+    from imp.engine.awaiting_user_input import AwaitingUserInput
+
+    sock = str(tmp_path / "s.sock")
+    coord = InterruptCoordinator()
+    log = _RecordingLog()
+    coord.set_event_log(log)
+    server = SessionServer(sock, coordinator=coord, hibernate=True)
+    gate_reached = anyio.Event()
+    captured: dict[str, Any] = {}
+    interrupt_calls: list[str] = []
+
+    async def fake_runner_interrupt() -> None:
+        interrupt_calls.append("interrupt")
+
+    async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
+        with anyio.fail_after(5):
+            while server.leased_count < 1:
+                await anyio.sleep(0.02)
+        coord.attach_runner(fake_runner_interrupt)   # a runner IS attached at the prompt
+        gate_reached.set()
+        try:
+            await user_chat_input_fn("")
+        except AwaitingUserInput:
+            captured["leased_at_pause"] = server.leased_count
+            return "paused"
+        return "resident"
+
+    async with anyio.create_task_group() as tg:
+        await server.open()
+        result: dict[str, Any] = {}
+
+        async def _serve() -> None:
+            result["r"] = await server.serve(run_fn)
+
+        tg.start_soon(_serve)
+        client = await _attach(sock, "c1")
+        with anyio.fail_after(5):
+            while server.leased_count != 1:
+                await anyio.sleep(0.02)
+        await gate_reached.wait()
+        await client.send((encode_control("set-model", "opus") + "\n").encode())
+        with anyio.fail_after(5):
+            while "r" not in result:
+                await anyio.sleep(0.02)
+        assert result["r"] == "paused"
+        assert captured["leased_at_pause"] == 1
+        assert interrupt_calls == []                # runner never interrupted
+        types = {r["type"] for r in log.records}
+        assert "interrupt_requested" in types
+        assert "interrupt_delivered" not in types   # no cooperative/hard kill
+        assert "interrupt_escalated" not in types
+        assert "conversation_archived" not in types
+        await client.aclose()
+        tg.cancel_scope.cancel()
+
+
+@pytest.mark.anyio
+async def test_wait_for_model_override_returns_when_pause_already_committed(
+    tmp_path: Path,
+) -> None:
+    from imp.cli.signals import InterruptCoordinator
+
+    sock = str(tmp_path / "s.sock")
+    coord = InterruptCoordinator()
+    server = SessionServer(sock, coordinator=coord, hibernate=True)
+    await server.open()
+
+    # Commit the model-override pause state BEFORE the wait — mirrors a set-model
+    # frame processed before the gate is entered. No pulse happens after this
+    # point, so the _model_override_pending event stays unset.
+    coord.set_pending_model("opus")
+    await coord.signal_pause(reason="model-override", via="frame")
+
+    # Level-triggered: must return on the first predicate check, not hang on
+    # evt.wait(). A regression to await-only would time out here.
+    with anyio.fail_after(1):
+        await server._wait_for_model_override()
