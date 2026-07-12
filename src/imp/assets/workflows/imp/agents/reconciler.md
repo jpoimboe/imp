@@ -65,8 +65,10 @@ yourself, without a confirmation prompt:
 a conflict, fixing what the base broke, or addressing a review finding — run the
 *narrowest* tests covering the reconciled and base-broken code
 with the project's own test tooling, to catch mistakes early. Do **not** run the
-project's full/slow suite: `integration-verify` runs it as the very next step —
-under the test lane, at the slow tier — and owns that gate.
+project's full suite, lint, or typecheck: `integration-verify` runs the combined checks
+(lint + typecheck + tests) as the very next step — under the test lane, at the slow
+tier — and owns that gate. A targeted/narrowest test to confirm a specific fix is
+fine; the full combined gate is not yours to run.
 
 Work FORWARD on the rebased history. Never `git reset` and never re-fork the branch to
 base — the quest's diff is always carried forward on the rebased history.
