@@ -288,12 +288,20 @@ async def _handle_command(
 ) -> None:
     alert_all = alert_all if alert_all is not None else AlertAll()
     if isinstance(command, Reply):
+        handle = handle_for(command.quest_id)
         try:
-            await control.reply(command.quest_id, command.text)
+            outcome = await control.reply(command.quest_id, command.text)
         except LoadError:
             responses.put(Notice(
                 f"no such quest `{command.quest_id}` — unknown or pruned"))
             return
+        if outcome is DeliveryOutcome.NOT_AT_GATE:
+            _log.info("reply to @%s dropped: not awaiting input", handle)
+            responses.put(Notice(f"@{handle}: not awaiting input — reply dropped."))
+        elif outcome is DeliveryOutcome.UNREACHABLE:
+            _log.info("reply to @%s dropped: delivery timed out", handle)
+            responses.put(Notice(f"@{handle}: delivery timed out — reply dropped."))
+        return
     elif isinstance(command, Subscribe):
         handle = handle_for(command.quest_id)
         if await anyio.to_thread.run_sync(control.snapshot, command.quest_id) is None:

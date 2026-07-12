@@ -26,6 +26,7 @@ from imp.remote.daemon.commands import (
 from imp.remote.daemon.discover import QuestInfo
 from imp.remote.daemon.runner import _dispatch_inbound, _handle_command
 from imp.remote.daemon.subscriptions import Subscriptions
+from imp.remote.session.reply import DeliveryOutcome
 
 
 @pytest.fixture
@@ -38,6 +39,7 @@ class FakeControl:
         self, quests: list[QuestInfo] | None = None, *, abandon_rc: int = 0,
         snapshots: dict | None = None, narratives: dict | None = None,
         resident: frozenset[str] | None = None,
+        reply_outcome: DeliveryOutcome = DeliveryOutcome.DELIVERED,
     ) -> None:
         self.replies: list[tuple[str, str]] = []
         self.created: list[str] = []
@@ -49,6 +51,7 @@ class FakeControl:
         self._narratives = narratives or {}
         self._histories: dict = {}
         self._resident = frozenset(resident or ())
+        self._reply_outcome = reply_outcome
 
     def full_history(self, quest_id: str) -> list[dict]:
         return self._histories.get(quest_id, [])
@@ -59,9 +62,9 @@ class FakeControl:
     def recent_narrative(self, quest_id: str, n: int) -> list[dict]:
         return self._narratives.get(quest_id, [])[-n:]
 
-    async def reply(self, quest_id: str, text: str) -> str:
+    async def reply(self, quest_id: str, text: str) -> DeliveryOutcome:
         self.replies.append((quest_id, text))
-        return "live"
+        return self._reply_outcome
 
     def create(self, prompt: str) -> None:
         self.created.append(prompt)
@@ -142,6 +145,37 @@ async def test_notice_passes_through() -> None:
     responses: queue.Queue = queue.Queue()
     await _handle_command(Notice("hint"), FakeControl(), responses)
     assert responses.get_nowait() == Notice("hint")
+
+
+@pytest.mark.anyio
+async def test_reply_delivered_enqueues_no_notice() -> None:
+    control = FakeControl(reply_outcome=DeliveryOutcome.DELIVERED)
+    responses: queue.Queue = queue.Queue()
+    await _handle_command(Reply("aaaaaa", "go"), control, responses)
+    assert control.replies == [("aaaaaa", "go")]
+    assert responses.empty()
+
+
+@pytest.mark.anyio
+async def test_reply_not_at_gate_enqueues_dropped_notice() -> None:
+    control = FakeControl(reply_outcome=DeliveryOutcome.NOT_AT_GATE)
+    responses: queue.Queue = queue.Queue()
+    await _handle_command(Reply("aaaaaa", "go"), control, responses)
+    notice = responses.get_nowait()
+    assert isinstance(notice, Notice)
+    assert notice.text == "@aaaaaa: not awaiting input — reply dropped."
+    assert responses.empty()
+
+
+@pytest.mark.anyio
+async def test_reply_unreachable_enqueues_timeout_notice() -> None:
+    control = FakeControl(reply_outcome=DeliveryOutcome.UNREACHABLE)
+    responses: queue.Queue = queue.Queue()
+    await _handle_command(Reply("aaaaaa", "go"), control, responses)
+    notice = responses.get_nowait()
+    assert isinstance(notice, Notice)
+    assert notice.text == "@aaaaaa: delivery timed out — reply dropped."
+    assert responses.empty()
 
 
 @pytest.mark.anyio
@@ -260,12 +294,12 @@ class FailThenStopControl:
         self.stop = stop
         self.calls: list[str] = []
 
-    async def reply(self, quest_id: str, text: str) -> str:
+    async def reply(self, quest_id: str, text: str) -> DeliveryOutcome:
         self.calls.append(quest_id)
         if quest_id == "boom":
             raise RuntimeError("kaboom")
         self.stop.set()
-        return "live"
+        return DeliveryOutcome.DELIVERED
 
 
 @pytest.mark.anyio
