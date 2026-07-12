@@ -32,10 +32,17 @@ from imp.engine.env import ENGINE_ENV_VARS, HEADLESS_ENV
 @dataclass(frozen=True, slots=True)
 class HomeLayer:
     """The writable-home layer bound over $HOME for an active-sandbox agent.
-    Fallback (rw) shape: only `home` set → a plain `--bind home home`. The COW
-    overlay shape (Task 2) also sets merged/upper/work and wraps with unshare +
-    mount -t overlay."""
+    Fallback (rw) shape: only `home` set → a plain `--bind home home`. COW overlay
+    shape: merged/upper/work set → bwrap is wrapped with unshare + mount -t
+    overlay (lowerdir=home) and the merged view is bound onto `home`."""
     home: str
+    merged: str = ""     # overlay mountpoint bound onto $HOME ("" → plain rw bind of home)
+    upper: str = ""      # overlay upperdir (captured writes; discarded at teardown)
+    work: str = ""       # overlay workdir
+
+    @property
+    def is_overlay(self) -> bool:
+        return bool(self.upper)
 
 
 @dataclass(frozen=True, slots=True)
@@ -153,7 +160,10 @@ def build_sandbox_argv(
     #    masks) as the agent's scratch; secret masks go LAST.
     for bind, kind in policy.bind_plan():
         if kind == "rw":
-            argv += ["--bind", bind, bind]
+            hl = policy.home_layer
+            src = (hl.merged if (hl is not None and hl.is_overlay
+                                 and bind == hl.home) else bind)
+            argv += ["--bind", src, bind]
         elif kind == "ro":
             argv += ["--ro-bind", bind, bind]
         elif kind == "mask_dir":
@@ -185,6 +195,17 @@ def build_sandbox_argv(
         argv += ["--unshare-net"]
     # 16. the command
     argv += ["sh", "-c", command]
+    hl = policy.home_layer
+    if hl is not None and hl.is_overlay:
+        mount = (
+            f"mount -t overlay overlay -o "
+            f"lowerdir={shlex.quote(hl.home)},"
+            f"upperdir={shlex.quote(hl.upper)},"
+            f"workdir={shlex.quote(hl.work)} {shlex.quote(hl.merged)} && "
+            f"exec {shlex.join(argv)}"
+        )
+        return ["unshare", "--user", "--map-root-user", "--mount",
+                "sh", "-c", mount]
     return argv
 
 

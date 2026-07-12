@@ -747,6 +747,56 @@ def test_argv_binds_match_bind_plan_with_home_layer():
     assert _parse_argv_binds(argv) == pol.bind_plan()
 
 
+def test_overlay_home_wraps_bwrap_with_unshare_mount():
+    # AC 1/2: a COW overlay is composed by wrapping bwrap with an unprivileged
+    # overlay mount; the merged view is bound onto the REAL home path.
+    hl = HomeLayer(home="/home/u", merged="/up/merged",
+                   upper="/up/upper", work="/up/work")
+    pol = _policy(home="/home/u", home_layer=hl)
+    argv = build_sandbox_argv("echo hi", cwd="/wt", policy=pol, engine_env={})
+    assert argv[:6] == ["unshare", "--user", "--map-root-user", "--mount",
+                        "sh", "-c"]
+    script = argv[6]
+    assert ("mount -t overlay overlay -o "
+            "lowerdir=/home/u,upperdir=/up/upper,workdir=/up/work "
+            "/up/merged") in script
+    # `&&` (not `;`) is fail-loud: a runtime mount failure short-circuits so bwrap
+    # never binds an empty merged dir over $HOME. exec (not a child bwrap) keeps
+    # pgid == pid so signals reach the whole tree.
+    assert " && exec bwrap" in script
+    # merged view bound onto the real home: source == merged, dest == home.
+    assert "--bind /up/merged /home/u" in script
+
+
+def test_overlay_home_shell_quotes_paths_with_spaces():
+    hl = HomeLayer(home="/ho me", merged="/a b/merged",
+                   upper="/a b/upper", work="/a b/work")
+    pol = _policy(home="/ho me", home_layer=hl)
+    argv = build_sandbox_argv("x", cwd="/wt", policy=pol, engine_env={})
+    script = argv[6]
+    assert "lowerdir='/ho me'" in script          # lower (real home) quoted
+    assert "upperdir='/a b/upper'" in script       # upper quoted
+    assert "workdir='/a b/work'" in script         # work quoted
+    assert "'/a b/merged'" in script               # mount target + bind source quoted
+
+
+def test_overlay_home_write_mirror_is_dest_keyed():
+    # bind_plan keys the home entry by the DEST (home), not the merged source, so
+    # allows_write is correct under the overlay too.
+    hl = HomeLayer(home="/home/u", merged="/up/merged",
+                   upper="/up/upper", work="/up/work")
+    pol = _policy(home="/home/u", home_layer=hl)
+    assert pol.allows_write(Path("/home/u/newfile"))
+    assert not pol.allows_write(Path("/home/u/.ssh/id_rsa"))
+
+
+def test_rw_fallback_home_layer_is_not_wrapped():
+    # is_overlay is False when there is no upper → plain bwrap, no unshare wrapper.
+    pol = _policy(home="/home/u", home_layer=HomeLayer(home="/home/u"))
+    argv = build_sandbox_argv("x", cwd="/wt", policy=pol, engine_env={})
+    assert argv[0] == "bwrap"
+
+
 def test_resolve_policy_binds_quest_home_rw(tmp_path):
     control, wt = _layout(tmp_path)
     home = control / ".imp" / "quests" / "abc"
