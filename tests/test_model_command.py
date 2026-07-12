@@ -136,3 +136,36 @@ def test_validate_model_arg_still_rejects_unavailable_via_delegation(
     assert reason is not None
     assert "openai" in reason
     assert "not available" in reason
+
+
+def test_roster_model_names_flattens_dedups_and_keeps_aliases(
+    monkeypatch, tmp_path,
+) -> None:
+    from types import SimpleNamespace
+
+    import imp.cli.model_command as mod
+    from imp.providers.model_roster import ProviderRoster
+
+    monkeypatch.setattr(
+        "imp.providers.effective.load_effective_config",
+        lambda **kw: SimpleNamespace(config=SimpleNamespace(tiers={}, providers=())))
+    monkeypatch.setattr(
+        "imp.providers.claude_model_cache.read_claude_model_options",
+        lambda: [])
+
+    def _discover(config, *, claude_options):
+        return [
+            ProviderRoster("claude_code", (
+                "claude-opus-4-8", "opus", "claude-fable-5[1m]")),
+            ProviderRoster("anthropic", ("claude-sonnet-4-6", "opus")),
+        ]
+
+    monkeypatch.setattr("imp.providers.model_roster.discover_roster", _discover)
+
+    quest = SimpleNamespace(project_root=tmp_path, control_root=tmp_path)
+    names = mod.roster_model_names(quest)
+
+    # flattened across providers, first-seen order, dedup drops the second "opus",
+    # and the bare alias "opus" is KEPT (no display filter in discovery)
+    assert names == [
+        "claude-opus-4-8", "opus", "claude-fable-5[1m]", "claude-sonnet-4-6"]

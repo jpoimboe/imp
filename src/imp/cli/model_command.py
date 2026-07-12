@@ -59,6 +59,24 @@ def print_model_roster(
         output_fn(line)
 
 
+def roster_model_names(quest: Any) -> list[str]:
+    """Flat, de-duplicated model-name candidates (aliases incl.) for /model completion."""
+    from imp.providers.claude_model_cache import read_claude_model_options
+    from imp.providers.effective import load_effective_config
+    from imp.providers.model_roster import discover_roster
+
+    config = load_effective_config(
+        project_root=quest.project_root, control_root=quest.control_root,
+    ).config
+    rosters = discover_roster(config, claude_options=read_claude_model_options())
+    names: list[str] = []
+    for roster in rosters:
+        for name in roster.entries:
+            if name not in names:
+                names.append(name)
+    return names
+
+
 def _available_for_quest(quest: Any) -> list[str]:
     from imp.providers.effective import load_effective_config
     from imp.providers.resolve import available_providers
