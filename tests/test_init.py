@@ -94,6 +94,19 @@ def test_persists_detected_theme(tmp_path: Path) -> None:
     assert data["theme"] == "dark"
 
 
+def test_user_config_documents_theme_and_editing_mode(tmp_path: Path) -> None:
+    # safe_dump can't emit inline comments, so these are appended as raw commented lines.
+    run_init(
+        project_root=tmp_path, picker_fn=_picks("anthropic"),
+        input_fn=_inputs(), output_fn=lambda _msg: None,
+        detect_theme_fn=lambda: "dark",
+    )
+    text = (tmp_path / "xdg" / "imp" / "config.yaml").read_text()
+    assert "theme: dark  # dark | light | ansi\n" in text
+    assert "editing_mode: emacs  # emacs | vi\n" in text
+    assert text.index("providers:") < text.index("theme:") < text.index("editing_mode:")
+
+
 def test_appends_to_project_gitignore(tmp_path: Path) -> None:
     (tmp_path / ".gitignore").write_text("# existing\nfoo/\n")
     run_init(

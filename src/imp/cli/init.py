@@ -233,15 +233,11 @@ def _write_memory_scaffold(imp_dir: Path) -> None:
     (wf_dir / "all.md").write_text(_MEMORY_WORKFLOW_SCAFFOLD)
 
 
-def _build_user_config(
-    providers: list[str], theme: str, editing_mode: str = "emacs",
-) -> dict[str, Any]:
-    """The bootstrapped ~/.config/imp/config.yaml: providers (detected here),
-    theme (detected), editing_mode."""
+def _build_user_config(providers: list[str]) -> dict[str, Any]:
+    """The bootstrapped ~/.config/imp/config.yaml providers block (theme/editing_mode
+    appended separately as commented raw lines)."""
     return {
         "providers": list(providers),
-        "theme": theme,
-        "editing_mode": editing_mode,
     }
 
 
@@ -500,8 +496,10 @@ def run_init(
         user_path.parent.mkdir(parents=True, exist_ok=True)
         user_path.write_text(
             yaml.safe_dump(
-                _build_user_config(providers, theme),
+                _build_user_config(providers),
                 sort_keys=False, default_flow_style=False)
+            + f"theme: {theme}  # dark | light | ansi\n"
+            + "editing_mode: emacs  # emacs | vi\n"
             + _remote_hint())
 
     # --- ensure .imp/ is gitignored (control-root state lives there) ---
