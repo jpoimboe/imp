@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import contextlib
 import json
+import types
 from collections.abc import AsyncGenerator, AsyncIterator
 from pathlib import Path
 
@@ -3560,3 +3561,100 @@ async def test_route_label_seeds_step_label_on_goto(tmp_path: Path) -> None:
     state = State.load(quest.state_dir)
     assert state.step == "dst"
     assert state.step_label == "fixing test failures"   # route_label wins over "destination step"
+
+
+def _active_home_policy(home: str = "/home/u"):
+    from imp.engine.sandbox import SandboxPolicy
+    return SandboxPolicy(
+        active=True, worktree="/wt", git_common_dir="/ctl/.git",
+        git_ro_remask=(), writable_caches=(), extra_readable=(),
+        extra_writable=(), secret_dirs=(), secret_files=(), setenv=(),
+        network=True, home=home,
+    )
+
+
+class _CapLog:
+    def __init__(self):
+        self.events = []
+
+    def append(self, *, agent_id, type, payload):
+        self.events.append((type, payload))
+        return {}
+
+
+def test_attach_home_layer_overlay_creates_sibling_upper(tmp_path, monkeypatch):
+    from imp.engine import executor as ex
+    from imp.engine.sandbox import HomeLayer
+    monkeypatch.setattr(ex, "overlay_available", lambda _base: True)
+    quest = types.SimpleNamespace(quest_dir=tmp_path)
+    step = types.SimpleNamespace(phase="build", name="coder")
+    pol, cleanup = ex._attach_home_layer(_active_home_policy(), step, quest)
+    assert isinstance(pol.home_layer, HomeLayer) and pol.home_layer.is_overlay
+    upper = tmp_path / "steps" / "build" / "coder.overlay-upper"
+    transcript_dir = tmp_path / "steps" / "build" / "coder"
+    assert upper.is_dir()
+    # SIBLING of transcript_dir (not a child) — survives its rmtree on reincarnation.
+    assert upper.parent == transcript_dir.parent and upper != transcript_dir
+    work = tmp_path / "steps" / "build" / "coder.overlay-work"
+    merged = tmp_path / "steps" / "build" / "coder.overlay-merged"
+    assert work.is_dir() and merged.is_dir()
+    assert pol.home_layer.upper == str(upper)
+    cleanup()
+    assert not upper.exists() and not work.exists() and not merged.exists()
+
+
+def test_attach_home_layer_noop_for_home_less(tmp_path, monkeypatch):
+    from imp.engine import executor as ex
+    monkeypatch.setattr(ex, "overlay_available", lambda _base: True)
+    quest = types.SimpleNamespace(quest_dir=tmp_path)
+    step = types.SimpleNamespace(phase="build", name="coder")
+    active_no_home = _active_home_policy(home="")
+    pol, cleanup = ex._attach_home_layer(active_no_home, step, quest)
+    assert pol is active_no_home and pol.home_layer is None
+    assert not (tmp_path / "steps" / "build" / "coder.overlay-upper").exists()
+    cleanup()  # no-op, must not raise
+
+
+def test_attach_home_layer_falls_back_to_rw_home(tmp_path, monkeypatch):
+    from imp.engine import executor as ex
+    monkeypatch.setattr(ex, "overlay_available", lambda _base: False)
+    quest = types.SimpleNamespace(quest_dir=tmp_path)
+    step = types.SimpleNamespace(phase="build", name="coder")
+    pol, cleanup = ex._attach_home_layer(_active_home_policy(), step, quest)
+    assert pol.home_layer is not None and not pol.home_layer.is_overlay
+    assert pol.home_layer.home == "/home/u"
+    assert not (tmp_path / "steps" / "build" / "coder.overlay-upper").exists()
+    cleanup()  # no-op, must not raise
+
+
+def test_attach_home_layer_noop_for_inactive(tmp_path, monkeypatch):
+    from imp.engine import executor as ex
+    from imp.engine.sandbox import SandboxPolicy
+    monkeypatch.setattr(ex, "overlay_available", lambda _base: True)
+    inactive = SandboxPolicy(
+        active=False, worktree="", git_common_dir="", git_ro_remask=(),
+        writable_caches=(), extra_readable=(), extra_writable=(),
+        secret_dirs=(), secret_files=(), setenv=(), network=True)
+    quest = types.SimpleNamespace(quest_dir=tmp_path)
+    step = types.SimpleNamespace(phase="p", name="n")
+    pol, cleanup = ex._attach_home_layer(inactive, step, quest)
+    assert pol is inactive and pol.home_layer is None
+    cleanup()
+
+
+def test_warn_if_no_overlay_emits_when_unavailable(monkeypatch):
+    from imp.engine import executor as ex
+    monkeypatch.setattr(ex, "overlay_available", lambda _base: False)
+    log = _CapLog()
+    quest = types.SimpleNamespace(quest_dir=Path("/x"))
+    ex._warn_if_no_overlay(_active_home_policy(), quest, log)
+    assert [t for t, _ in log.events] == ["sandbox_overlay_unavailable"]
+
+
+def test_warn_if_no_overlay_silent_when_available(monkeypatch):
+    from imp.engine import executor as ex
+    monkeypatch.setattr(ex, "overlay_available", lambda _base: True)
+    log = _CapLog()
+    quest = types.SimpleNamespace(quest_dir=Path("/x"))
+    ex._warn_if_no_overlay(_active_home_policy(), quest, log)
+    assert log.events == []
