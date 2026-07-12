@@ -9,6 +9,7 @@ from typing import Any
 import anyio
 from anyio.streams.memory import MemoryObjectReceiveStream, MemoryObjectSendStream
 
+from imp.agents.skills import SkillError
 from imp.agents.transcript import SkillReply
 from imp.remote.session.protocol import (
     CONTROL_ABANDON,
@@ -150,8 +151,11 @@ class SessionServer:
             self._emit({"type": "user_input_resolved", "payload": {}})
             if isinstance(got, SkillRequest):
                 assert self._skill_loader is not None
-                body = self._skill_loader(got.name)
                 command = f"/{got.name} {got.args}".rstrip()
+                try:
+                    body = self._skill_loader(got.name)
+                except SkillError:
+                    return command
                 body_with_args = (
                     f"{body.rstrip()}\n\n{got.args}\n" if got.args else body)
                 return SkillReply(

@@ -10,6 +10,7 @@ import pytest
 from anyio.abc import SocketStream
 from anyio.streams.buffered import BufferedByteReceiveStream
 
+from imp.agents.skills import SkillNotFound
 from imp.agents.transcript import SkillReply
 from imp.remote.session.protocol import (
     encode_attach,
@@ -1514,6 +1515,45 @@ async def test_chat_loads_skill_and_returns_skill_reply(tmp_path: Path) -> None:
         assert captured == [SkillReply(
             command="/refactor src/foo.py", name="refactor",
             body="BODY\n\nsrc/foo.py\n")]
+        await client.aclose()
+        tg.cancel_scope.cancel()
+
+
+@pytest.mark.anyio
+async def test_chat_skill_load_failure_degrades_to_verbatim_input(
+    tmp_path: Path,
+) -> None:
+    sock = str(tmp_path / "s.sock")
+
+    def _boom(name: str) -> str:
+        raise SkillNotFound(f"no such skill {name!r}")
+
+    server = SessionServer(sock, hibernate=False, skill_loader=_boom)
+    captured: list[object] = []
+
+    async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> object:
+        with anyio.fail_after(5):
+            while server.attached_count < 1:
+                await anyio.sleep(0.02)
+        on_event({"type": "awaiting_user_input", "payload": {"prompt": ""}})
+        reply = await user_chat_input_fn("")
+        captured.append(reply)
+        return reply
+
+    async with anyio.create_task_group() as tg:
+        await server.open()
+        tg.start_soon(server.serve, run_fn)
+        client = await _attach(sock, "c1")
+        with anyio.fail_after(5):
+            while server.attached_count < 1:
+                await anyio.sleep(0.02)
+        await anyio.sleep(0.05)
+        await client.send(
+            (encode_skill_request("refactor", "src/foo.py") + "\n").encode())
+        with anyio.fail_after(5):
+            while not captured:
+                await anyio.sleep(0.02)
+        assert captured == ["/refactor src/foo.py"]
         await client.aclose()
         tg.cancel_scope.cancel()
 
