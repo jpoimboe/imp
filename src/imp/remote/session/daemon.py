@@ -25,6 +25,7 @@ from imp.engine.quest import Quest
 from imp.engine.state import EventLog, LockHeld, ProjectLock, State, lock_is_live
 from imp.remote.session.discover import session_socket_path
 from imp.remote.session.server import _DEFAULT_FIRST_ATTACH_TIMEOUT, SessionServer
+from imp.remote.session.warmup import warm_module_graph
 
 RunFn = Callable[..., Awaitable[Any]]
 
@@ -260,6 +261,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--autonomous", action="store_true")
     parser.add_argument("--model", default=None)
     ns = parser.parse_args(argv)
+    warm_module_graph()
     try:
         quest = Quest.load(Path(ns.control_root), ns.quest_id)
     except LoadError as exc:
