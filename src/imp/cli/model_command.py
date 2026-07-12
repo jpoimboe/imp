@@ -58,7 +58,7 @@ def print_model_roster(
         output_fn(line)
 
 
-def _available_for_change(quest: Any) -> list[str]:
+def _available_for_quest(quest: Any) -> list[str]:
     from imp.providers.effective import load_effective_config
     from imp.providers.resolve import available_providers
     config = load_effective_config(
@@ -79,4 +79,4 @@ def validate_model_arg(arg: str, *, quest: Any) -> str | None:
         parse_model_arg(arg)
     except ModelArgError as exc:
         return str(exc)
-    return validate_model_available(arg, available=_available_for_change(quest))
+    return validate_model_available(arg, available=_available_for_quest(quest))
