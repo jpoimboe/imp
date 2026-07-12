@@ -102,11 +102,17 @@ def _build_session(skills_dir: Any | None = None, *, editing_mode: str = "emacs"
             return layout
 
     completer = SlashCompleter(skills_dir) if skills_dir is not None else None
+    from prompt_toolkit.output import ColorDepth
+
+    from imp.cli import palette as pal
+
+    # prompt_toolkit defaults to 8-bit and ignores COLORTERM; force 24-bit on truecolor themes.
+    color_depth = ColorDepth.DEPTH_24_BIT if pal.active_theme() in ("dark", "light") else None
     # No app bg + reserve_space_for_menu=0: terminal default, no slate bleed; slash menu still pops.
     return _FloatingToolbarSession(
         history=history, key_bindings=kb, completer=completer,  # type: ignore[arg-type]
         editing_mode=mode, erase_when_done=True,
-        multiline=True, reserve_space_for_menu=0)
+        multiline=True, reserve_space_for_menu=0, color_depth=color_depth)
 
 
 class SlashCompleter:

@@ -60,6 +60,37 @@ def test_build_session_has_no_app_background_and_reserves_no_menu_space() -> Non
     assert s.reserve_space_for_menu == 0
 
 
+def test_build_session_forces_24bit_depth_on_truecolor_theme() -> None:
+    """_build_session forces 24-bit depth on truecolor themes; no override on ansi."""
+    from prompt_toolkit.output import ColorDepth
+
+    from imp.cli import palette as pal
+    from imp.cli.prompt import _build_session
+
+    # ansi (default) theme: no override
+    assert _build_session(None).color_depth is None
+
+    # ansi theme WITH color=True: still no override — the gate is on the theme,
+    # not the color flag (spec: "not merely 'color on'"). This pins the
+    # theme-vs-color distinction: a buggy gate on `color` would wrongly force
+    # 24-bit here.
+    assert _build_session(None, color=True).color_depth is None
+
+    # dark (truecolor) theme: forced 24-bit
+    pal.set_theme("dark")
+    try:
+        assert _build_session(None, color=True).color_depth == ColorDepth.DEPTH_24_BIT
+    finally:
+        pal.set_theme("ansi")
+
+    # light (truecolor) theme: forced 24-bit
+    pal.set_theme("light")
+    try:
+        assert _build_session(None, color=True).color_depth == ColorDepth.DEPTH_24_BIT
+    finally:
+        pal.set_theme("ansi")
+
+
 def test_build_session_appends_high_weight_filler_after_toolbar() -> None:
     """AC(a)/(b): the layout ends with a high-weight filler Window placed
     immediately after the bottom-toolbar container, so the renderer's forced
