@@ -139,7 +139,7 @@ async def serve_quest_session(
             # prior run died mid-step, so replay the interrupted step instead of
             # re-burning it. A clean pause (no lock) leaves resume_pending unset.
             if crashed:
-                state.resume_pending = state.step
+                state.arm_step_resume(mode="continue")
             state.save(quest.state_dir)
             # A crash replays the interrupted agent step, so it always lands in
             # the agent regardless of the last-stamped target.
@@ -199,9 +199,10 @@ async def serve_quest_session(
                     state = State.load(quest.state_dir)
                     if coordinator.pause_reason == "ctrl-d":
                         state.resume_target = "agent"
-                        state.arm_step_resume(interrupt=True)
+                        state.arm_step_resume(mode="continue")
                     else:
                         state.resume_target = "prompt"
+                        state.arm_step_resume(mode="solicit")
                     state.save(quest.state_dir)
                     return result
                 coordinator.reset()

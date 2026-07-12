@@ -111,6 +111,7 @@ async def test_internal_error_pauses_and_logs_instead_of_dying(
     state = State.load(quest.state_dir)
     assert state.status == "paused"
     assert state.resume_pending == "w"   # the interrupted step, armed for replay
+    assert state.resume_mode == "solicit"   # internal error must solicit, never auto-continue
 
 
 @pytest.mark.anyio

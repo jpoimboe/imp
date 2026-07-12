@@ -24,7 +24,6 @@ has_started
 held_acquire_step
 held_lane
 id
-interrupt_pending
 lane_retained
 loop_counts
 max_clean_tree_bounces
@@ -36,9 +35,9 @@ project_facts
 reincarnations
 resolved_steps
 resolved_tiers
+resume_mode
 resume_pending
 resume_target
-retry_continue_pending
 retry_feedback
 route_label
 status

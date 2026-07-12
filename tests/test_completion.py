@@ -178,7 +178,7 @@ async def test_headless_with_channel_solicits_immediately(
 
 def test_inline_steer_no_channel_raises_interrupt_flag() -> None:
     """The cooperative-interrupt steer (interrupt=True) with no channel pauses
-    carrying interrupt=True so the executor shadows State.interrupt_pending."""
+    carrying interrupt=True so the executor arms State.resume_mode = "continue"."""
     inline = build_inline_solicit(steer_prompt="interrupted", interrupt=True)
     with pytest.raises(AwaitingUserInput) as exc_info:
         import anyio

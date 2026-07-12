@@ -35,6 +35,27 @@ def test_evict_releases_lane_and_rewinds(tmp_path: Path, monkeypatch) -> None:
     assert state.held_acquire_step is None
 
 
+def test_evict_clears_resume_mode_pair(tmp_path: Path, monkeypatch) -> None:
+    _seed_control(tmp_path)
+    a = Quest.create(tmp_path, title="a", quest_id="aaa", base_branch="main")
+    Quest.create(tmp_path, title="b", quest_id="bbb", base_branch="main")
+    mq.enqueue_if_absent(tmp_path, "aaa", "main")   # head
+    mq.enqueue_if_absent(tmp_path, "bbb", "main")   # next
+    monkeypatch.setattr(attach_mod, "spawn_session_daemon", lambda *a, **k: None)
+    state = State.load(a.state_dir)
+    state.held_lane = "main"
+    state.held_acquire_step = "lane"
+    state.step = "touch-base"                 # somewhere inside the held region
+    state.arm_step_resume(mode="continue")    # a genuine armed continue resume
+    assert state.resume_pending == "touch-base" and state.resume_mode == "continue"
+
+    evicted = _evict_if_holding(a, state, JsonlEventLog(a.events_path))
+
+    assert evicted is True
+    assert state.resume_pending is None   # pair cleared together — no tear
+    assert state.resume_mode is None
+
+
 def test_evict_noop_when_not_holding(tmp_path: Path) -> None:
     _seed_control(tmp_path)
     ch = Quest.create(tmp_path, title="x", quest_id="feat", base_branch="main")

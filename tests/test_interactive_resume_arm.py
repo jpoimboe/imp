@@ -63,7 +63,8 @@ def _seed_interactive_change(root: Path, *, armed: bool, started: bool = True):
                status="paused" if started else "new",
                vars=dict(workflow.vars.defaults()), loop_counts={})
     st.has_started = started
-    st.resume_pending = flat[0].name if armed else None
+    if armed:
+        st.arm_step_resume(mode="solicit")
     st.save(quest_dir / "state")
     quest = Quest(id="c", title="t", base_branch="main",
                     control_root=root, project_root=root, quest_dir=quest_dir,
