@@ -202,7 +202,7 @@ def test_inactive_spike_policy_emits_sandbox_inactive_event(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     inactive_policy = types.SimpleNamespace(active=False, note="unsandboxed_by_config")
     monkeypatch.setattr(
-        "imp.agents.subagents._build_spike_policy", lambda *_a, **_kw: inactive_policy)
+        "imp.agents.subagents._build_isolated_policy", lambda *_a, **_kw: inactive_policy)
 
     quest = _make_change(tmp_path)
     ctx = _ctx(tmp_path, quest, name="prober", agent=_isolated_agent("prober"),
@@ -241,7 +241,7 @@ def test_isolated_dispatch_without_quest_context_raises(tmp_path: Path) -> None:
         anyio.run(dispatch_task, ctx, "prober", "go")
 
 
-def test_build_spike_policy_passes_disposable_tree_true(monkeypatch, tmp_path):
+def test_build_isolated_policy_passes_disposable_tree_true(monkeypatch, tmp_path):
     from types import SimpleNamespace
 
     import imp.agents.subagents as subagents
@@ -255,9 +255,8 @@ def test_build_spike_policy_passes_disposable_tree_true(monkeypatch, tmp_path):
 
     monkeypatch.setattr("imp.engine.sandbox.resolve_policy", _fake_resolve_policy)
     monkeypatch.setattr("imp.engine.sandbox.sandbox_available", lambda: True)
-    # Return a REAL SandboxConfig so _build_spike_policy's
-    # `dataclasses.replace(cfg, network=True)` succeeds and control reaches the
-    # patched resolve_policy (a SimpleNamespace would make replace raise first).
+    # A REAL SandboxConfig so _build_isolated_policy reaches the patched
+    # resolve_policy (a SimpleNamespace cfg would break the resolve_policy call).
     monkeypatch.setattr(
         "imp.engine.sandbox.sandbox_config_from_raw",
         lambda raw: SandboxConfig(),
@@ -275,7 +274,40 @@ def test_build_spike_policy_passes_disposable_tree_true(monkeypatch, tmp_path):
         id="abc", title="T", project_root=tmp_path, control_root=tmp_path,
         quest_dir=tmp_path / "change", base_branch="master",
     )
-    result = subagents._build_spike_policy(quest, tmp_path / "wt", test_gates=None)
+    result = subagents._build_isolated_policy(quest, tmp_path / "wt", test_gates=None)
 
     assert result == "sentinel-policy"
     assert captured["disposable_tree"] is True
+
+
+def test_build_isolated_policy_does_not_force_network(monkeypatch, tmp_path):
+    # AC 11 (unit): the deleted network force no longer overrides run-level config.
+    # With sandbox.network=False configured, the cfg handed to resolve_policy is
+    # network=False (before this change it was forced True).
+    from types import SimpleNamespace
+
+    import imp.agents.subagents as subagents
+
+    captured: dict = {}
+
+    def _fake_resolve_policy(**kwargs):
+        captured.update(kwargs)
+        return "sentinel-policy"
+
+    monkeypatch.setattr("imp.engine.sandbox.resolve_policy", _fake_resolve_policy)
+    monkeypatch.setattr("imp.engine.sandbox.sandbox_available", lambda: True)
+    monkeypatch.setattr(
+        "imp.providers.effective.load_effective_config",
+        lambda **kw: SimpleNamespace(config=SimpleNamespace(sandbox={"network": False})),
+    )
+    monkeypatch.setattr("imp.engine.env.engine_env", lambda **kw: {})
+    monkeypatch.setattr(
+        "imp.engine.env.overlay_engine_env", lambda parent, overlay: {})
+
+    quest = SimpleNamespace(
+        id="abc", title="T", project_root=tmp_path, control_root=tmp_path,
+        quest_dir=tmp_path / "change", base_branch="master",
+    )
+    subagents._build_isolated_policy(quest, tmp_path / "wt", test_gates=None)
+
+    assert captured["cfg"].network is False

@@ -752,7 +752,7 @@ def test_change_and_spike_branch_writes_succeed() -> None:
             "main..imp/esc1").stdout.strip() == "1", "imp/esc1 did not collapse to 1 commit"
 
         # Spike branch: a fresh spike worktree on imp/spike-esc1-1, policy rooted
-        # at the spike worktree (mirrors _build_spike_policy inheriting the guard).
+        # at the spike worktree (mirrors _build_isolated_policy inheriting the guard).
         spike_wt = wt.create_spike_worktree(control, "esc1", 1, "main")
         spike_ctx, _ = _refprot_ctx(control, spike_wt)
         r2 = _bash(
