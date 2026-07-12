@@ -270,6 +270,38 @@ def test_create_draft_refuses_invalid_workflow_and_leaves_no_home(
     assert not (tmp_path / ".imp" / "quests" / "drf4").exists()
 
 
+def test_create_refuses_invalid_memory_and_leaves_no_orphan(tmp_path: Path) -> None:
+    """An invalid imp/memory/ tree raises LoadError. Quest.create must tear down
+    the worktree and branch so no orphan is left."""
+    _seed_control(tmp_path)
+    memory_dir = tmp_path / "imp" / "memory"
+    memory_dir.mkdir()
+    (memory_dir / "notallowed.md").write_text("x")
+    _git(tmp_path, "add", "-A")
+    _git(tmp_path, "commit", "-qm", "add invalid memory")
+
+    with pytest.raises(LoadError):
+        Quest.create(tmp_path, title="X", quest_id="badmem1", base_branch="main")
+    assert not (tmp_path / ".imp" / "worktrees" / "badmem1").exists()
+    assert "imp/badmem1" not in _git(tmp_path, "branch", "--list", "imp/badmem1").stdout
+    assert not (tmp_path / ".imp" / "quests" / "badmem1").exists()
+
+
+def test_create_draft_refuses_invalid_memory_and_leaves_no_home(tmp_path: Path) -> None:
+    """An invalid imp/memory/ tree raises LoadError. Quest.create_draft must
+    clean up the just-created quest home so no orphan is left."""
+    _seed_control(tmp_path)
+    memory_dir = tmp_path / "imp" / "memory"
+    memory_dir.mkdir()
+    (memory_dir / "notallowed.md").write_text("x")
+    _git(tmp_path, "add", "-A")
+    _git(tmp_path, "commit", "-qm", "add invalid memory")
+
+    with pytest.raises(LoadError):
+        Quest.create_draft(tmp_path, title="X", quest_id="badmem2", base_branch="main")
+    assert not (tmp_path / ".imp" / "quests" / "badmem2").exists()
+
+
 def test_create_draft_refuses_bad_branch_and_leaves_no_home(tmp_path: Path) -> None:
     """If the base branch does not exist, head_of raises RuntimeError. The
     just-created change home must be cleaned up (no orphan)."""

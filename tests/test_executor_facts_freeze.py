@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+from imp.engine.errors import LoadError
 from imp.engine.executor import RunResult, run_quest
 from imp.engine.state import State
 from tests.test_executor import _make_change, _register_invocation_capturing
@@ -64,6 +65,24 @@ async def test_first_run_freezes_facts_and_memory(tmp_path: Path) -> None:
     assert "hello hi" in body                     # fact still rendered via the template
     assert "## Project memory" in body            # engine-injected section
     assert "live note" in body                    # frozen memory text
+
+
+@pytest.mark.anyio
+async def test_first_run_raises_on_invalid_memory_and_leaves_state_unfrozen(
+    tmp_path: Path,
+) -> None:
+    """An invalid imp/memory/ tree raises LoadError at the first-run freeze site
+    and leaves state.project_facts None (freeze never committed)."""
+    quest = _seed(
+        tmp_path,
+        facts_yaml="default-workflow: imp\nfacts:\n  greeting: hi\n",
+    )
+    (tmp_path / "imp" / "memory").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "imp" / "memory" / "notallowed.md").write_text("x")
+
+    with pytest.raises(LoadError):
+        await run_quest(quest, on_event=lambda _e: None)
+    assert State.load(quest.state_dir).project_facts is None
 
 
 @pytest.mark.anyio
