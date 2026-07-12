@@ -8,6 +8,9 @@ from imp.providers.config import ProviderModel
 from imp.providers.model_arg import ModelArgError, parse_model_arg
 from imp.providers.model_roster import ProviderRoster
 
+# Hidden from the roster but still resolvable; exact-name match keeps dated ids listed.
+_HIDDEN_ALIASES = frozenset({"haiku", "sonnet", "opus"})
+
 
 def render_roster(
     current: ProviderModel, rosters: list[ProviderRoster],
@@ -20,12 +23,10 @@ def render_roster(
     ]
     for roster in rosters:
         lines.append(f"  {roster.provider}")
-        plain = [e.name for e in roster.entries if e.description is None]
-        if plain:
-            lines.append("    " + " · ".join(plain))
-        for entry in roster.entries:
-            if entry.description is not None:
-                lines.append(f"    {entry.name}    {entry.description}")
+        for name in roster.entries:
+            if name in _HIDDEN_ALIASES:
+                continue
+            lines.append(f"    {name}")
     lines.append("")
     lines.append("Switch with  /model <name>  or  /model provider:model")
     return lines
