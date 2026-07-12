@@ -212,3 +212,43 @@ def test_cmd_status_renders_draft_in_active(
     assert "Backlog" not in out          # a lone draft creates no Backlog section
     d1_line = next(ln for ln in out.splitlines() if ln.startswith("d1"))
     assert "draft" in d1_line          # a fresh un-materialized draft shows draft in Active
+
+
+def _human_msg(text: str) -> dict:
+    return {"type": "user_message",
+            "payload": {"role": "user",
+                        "content": [{"type": "text", "text": text}],
+                        "human": True}}
+
+
+def _synthetic_msg(text: str) -> dict:
+    return {"type": "user_message",
+            "payload": {"role": "user",
+                        "content": [{"type": "text", "text": text}],
+                        "human": False}}
+
+
+def test_prompt_history_lines_seed_first_then_human_turns_in_order() -> None:
+    events = [
+        _human_msg("first reply"),
+        {"type": "agent_message", "payload": {}},
+        _synthetic_msg("engine nudge, do not show"),
+        _human_msg("second reply"),
+    ]
+    assert m._prompt_history_lines("the seed", events) == [
+        "the seed", "first reply", "second reply"]
+
+
+def test_prompt_history_lines_excludes_synthetic_and_skips_blanks() -> None:
+    events = [
+        _synthetic_msg("skill reply body"),
+        _human_msg("   "),
+        _human_msg("kept"),
+    ]
+    # synthetic excluded, whitespace-only human turn skipped, seed skipped
+    # because it is whitespace-only.
+    assert m._prompt_history_lines("   ", events) == ["kept"]
+
+
+def test_prompt_history_lines_no_seed_no_events() -> None:
+    assert m._prompt_history_lines(None, []) == []

@@ -7,7 +7,9 @@ A bare ESC is still owned by prompt_toolkit's built-in handling (meta-prefix
 in emacs mode; leaves insert mode in vi mode — see editing_mode plumbing).
 Alt+Enter (`escape c-m`) is bound by `_build_session` to insert a newline.
 
-History is per-session in-memory; persisted history is a post-V0 feature.
+History is in-memory and seeded at construction from the quest's durable
+event record (the seed opening plus each human-typed line), so up-arrow
+recalls prior lines across an imp resume.
 """
 
 from __future__ import annotations
@@ -245,3 +247,7 @@ class Prompt:
             return list(self._session.history.get_strings())
         except AttributeError:
             return []
+
+    def seed_history(self, lines: list[str]) -> None:
+        for line in lines:
+            self._session.history.append_string(line)

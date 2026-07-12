@@ -276,6 +276,7 @@ async def test_make_interactive_solicit_returns_typed_line_and_threads_run_objec
 
     class _DummyPrompt:
         def __init__(self, **_kw: object) -> None: ...
+        def seed_history(self, _lines: list[str]) -> None: ...
 
     monkeypatch.setattr("imp.cli.session_run.Prompt", _DummyPrompt)
 
@@ -309,6 +310,42 @@ async def test_make_interactive_solicit_returns_typed_line_and_threads_run_objec
     assert captured["driver"] is driver
     assert captured["coord"] is coord
     assert captured["hint"] == "daemon wait_for_user prompt text"
+
+
+def test_make_interactive_solicit_seeds_prompt_history_from_record(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The persistent prompt is seeded at construction from quest.seed_opening
+    plus its human=True user_message texts (synthetic messages excluded),
+    oldest-first."""
+    quest = _make_change(tmp_path, "2026-06-15-seedhist")
+    quest.seed_opening = "the seed goal"
+    elog = quest.event_log()
+    elog.append(
+        agent_id=None, type="user_message",
+        payload={"role": "user",
+                 "content": [{"type": "text", "text": "a human reply"}],
+                 "human": True})
+    elog.append(
+        agent_id=None, type="user_message",
+        payload={"role": "user",
+                 "content": [{"type": "text", "text": "engine nudge"}],
+                 "human": False})
+
+    seeded: dict[str, list[str]] = {}
+
+    class _RecordingPrompt:
+        def __init__(self, **_kw: object) -> None: ...
+        def seed_history(self, lines: list[str]) -> None:
+            seeded["lines"] = lines
+
+    monkeypatch.setattr("imp.cli.session_run.Prompt", _RecordingPrompt)
+
+    coord = InterruptCoordinator()
+    make_interactive_solicit(
+        quest, status=object(), driver=object(), coord=coord)
+
+    assert seeded["lines"] == ["the seed goal", "a human reply"]
 
 
 @pytest.mark.anyio

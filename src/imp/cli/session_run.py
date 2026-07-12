@@ -123,12 +123,14 @@ def make_interactive_solicit(
     """Return a solicit callback that reads one slash-aware line from the tty as the gate reply."""
     # Lazy import: imp.cli.main imports this module, so a
     # module-level import of these helpers would be circular.
-    from imp.cli.main import _editing_mode, _term_width
+    from imp.cli.main import _editing_mode, _prompt_history_lines, _term_width
 
     prompt = Prompt(
         skills_dir=quest.workflow_dir / "skills",
         editing_mode=_editing_mode(quest.control_root),
         color=should_use_color(sys.stdout))
+    prompt.seed_history(
+        _prompt_history_lines(quest.seed_opening, quest.event_log().read()))
 
     async def _solicit(_prompt: str) -> str | SkillRequest:
         # The gate's prompt (the interrupt-steer hint, or the daemon's resume
