@@ -57,10 +57,11 @@ finished); do not invent quests that the commands did not list.
 
 ## Detail on one quest
 
-`imp show <id> [spec|plan|events|status]` — the subcommand selects the
-facet: `spec` for the spec, `plan` for the plan(s), `events` for the timeline,
-`status` for where it stands. Read the facet the
-user asked about and answer from it.
+`imp show <id>` — the overview detail card: id, title, status, timing,
+dependencies, opening intent, and the summary inlined. Add a subcommand to
+narrow to one facet: `imp show <id> spec` for the raw spec,
+`imp show <id> events` for the timeline. Read the facet the user asked about and
+answer from it.
 
 ## Reading an event timeline — three tiers
 
@@ -69,7 +70,7 @@ answers the question, and never dump the raw log as your default.
 
 - **Narrative** — `imp log <id>`. The human "read the story" view: prose with
   tool bursts folded. Use it when you want to follow what happened, in order.
-- **Digest** — `query_events(...)` in-loop, or `imp show <id> events` from bash.
+- **Digest** — `imp_events(...)` in-loop, or `imp show <id> events` from bash.
   One compact line per event. This is the default view for scanning and
   filtering, and it is what both front doors return unless you ask for raw.
 - **Raw** — `full=True` (the tool) or `--full` on `imp show <id> events` (the
@@ -77,17 +78,24 @@ answers the question, and never dump the raw log as your default.
   payloads, with `step_context` redacted and each event byte-capped. Drop to
   this tier only for the few events whose full contents you actually need.
 
-## Querying another quest's timeline
+## Reading another quest
 
-To read a *different* quest's events, do not cat its log file — use a front
-door that renders a digest by default:
+To understand a *different* quest — live or archived — reach for the in-loop
+readers rather than cat-ing its files (a raw `read_file` silently fails for an
+archived quest, whose artifacts live in a git ref, not on disk):
 
-- In-loop: `query_events(quest_id="<id>")` returns that quest's digest (or its
-  raw payloads with `full=True`). It resolves live and archived quests alike,
-  and returns a clear `{"error": ...}` string for an unknown id instead of
-  raising.
-- From bash: `imp show <id> events` prints that quest's digest lines (add
-  `--full` for the raw payloads).
+- **`imp_show(quest_id="<id>")`** — the primary "what is this quest / what did it
+  accomplish" read. Its `overview` (the default) returns the quest's detail card:
+  id, title, status, timing, dependencies, the opening intent, and the summary
+  inlined. Pass `resource="spec"` for the raw spec. Returns a clear
+  `{"error": ...}` string for an unknown id or a facet that does not exist yet,
+  never raising.
+- **`imp_events(quest_id="<id>")`** — the filtered trace tool, for when you need
+  the event history rather than the distilled record. Steer it toward the
+  high-signal event types (`agent_output`, `user_message`,
+  `awaiting_user_input`) and away from the `tool_call` / `tool_result` /
+  `llm_response` churn. Returns the digest by default (or raw payloads with
+  `full=True`), resolving live and archived quests alike.
 
 ## Keep the output bounded
 
@@ -100,10 +108,10 @@ it deliberately:
 - **Scan, then zoom.** Read the digest first; drop to `--full` / `full=True`
   only for the handful of events whose exact payload you need.
 - **Prefer state over history.** When you only need where a quest stands now —
-  not how it got there — reach for the board (`imp list`) or the `status` /
-  `spec` facets of `imp show <id>` instead of the event log.
+  not how it got there — reach for the board (`imp list`) or `imp show <id>`'s
+  overview card instead of the event log.
 
 ## This quest's own state
 
-Read `state/state.json` in the current quest home, or run
-`imp show <id> status`, to report where this conversation's quest stands.
+Read `state/state.json` in the current quest home, or run `imp show <id>`
+(the overview card), to report where this conversation's quest stands.
