@@ -203,6 +203,46 @@ def test_context_max_reincarnations_zero_accepted(tmp_path: Path) -> None:
     assert out["context"] == {"max_reincarnations": 0}
 
 
+# --- pythonpath tests ---
+
+
+def test_pythonpath_list_parsed(tmp_path: Path) -> None:
+    p = tmp_path / "project.yaml"
+    p.write_text("pythonpath: [src, .]\n")
+    out, _ = parse_config_layer(p)  # type: ignore[misc]
+    assert out["pythonpath"] == ["src", "."]
+
+
+def test_pythonpath_absent_key_omitted(tmp_path: Path) -> None:
+    p = tmp_path / "project.yaml"
+    p.write_text("default-workflow: imp\n")
+    out, _ = parse_config_layer(p)  # type: ignore[misc]
+    assert "pythonpath" not in out
+
+
+def test_valueless_pythonpath_treated_as_absent(tmp_path: Path) -> None:
+    # A bare `pythonpath:` (YAML null) => feature off, following the
+    # `.get(...) is not None` guard idiom (not the `key in raw` idiom).
+    p = tmp_path / "project.yaml"
+    p.write_text("pythonpath:\n")
+    out, _ = parse_config_layer(p)  # type: ignore[misc]
+    assert "pythonpath" not in out
+
+
+def test_pythonpath_non_list_raises(tmp_path: Path) -> None:
+    p = tmp_path / "project.yaml"
+    p.write_text("pythonpath: src\n")
+    with pytest.raises(LoadError):
+        parse_config_layer(p)
+
+
+def test_pythonpath_non_string_entry_raises(tmp_path: Path) -> None:
+    p = tmp_path / "project.yaml"
+    p.write_text("pythonpath: [src, 3]\n")
+    with pytest.raises(LoadError):
+        parse_config_layer(p)
+
+
 def test_test_cmd_fast_in_tiers_less_layer(tmp_path: Path) -> None:
     p = tmp_path / "project.yaml"
     p.write_text("default-workflow: imp\ntest_cmd_fast: make check\n")

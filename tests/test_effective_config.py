@@ -93,6 +93,25 @@ def test_test_cmd_fields_default_to_none_when_unset(
     assert eff.config.test_cmd_slow_timeout is None
 
 
+def test_pythonpath_flows_from_project_to_config(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+    proj = tmp_path / "proj"
+    (proj / "imp").mkdir(parents=True)
+    (proj / "imp" / "project.yaml").write_text("pythonpath: [src, vendor]\n")
+    eff = load_effective_config(project_root=proj, control_root=None)
+    assert eff.config.pythonpath == ("src", "vendor")
+
+
+def test_pythonpath_defaults_to_empty_tuple_when_unset(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+    eff = load_effective_config(project_root=None, control_root=None)
+    assert eff.config.pythonpath == ()
+
+
 def test_repo_project_yaml_uses_tiered_test_cmds(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

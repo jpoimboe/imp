@@ -12,6 +12,7 @@ Schema (post 2026-06-04-roles-to-tiers):
     test_cmd_slow: "..."                  # complete run; once-per-quest at integration-verify
     test_cmd_fast_timeout: 120            # optional fast-gate ceiling, seconds (default 120)
     test_cmd_slow_timeout: 300            # optional slow-gate ceiling, seconds (default 300)
+    pythonpath: [src]                     # import roots prepended to PYTHONPATH; off if unset
     max_parallel_test_runs: 1             # max concurrent verify-gate runs (default 1)
     editing_mode: emacs                   # vi | emacs (default emacs)
     vars: {...}                           # optional scalar overrides
@@ -54,6 +55,7 @@ class Config:
     test_cmd_slow: str | None = field(hash=False, default=None)
     test_cmd_fast_timeout: int | None = field(hash=False, default=None)
     test_cmd_slow_timeout: int | None = field(hash=False, default=None)
+    pythonpath: tuple[str, ...] = field(hash=False, default=())
     max_parallel_test_runs: int = field(hash=False, default=1)
     editing_mode: str = field(hash=False, default="emacs")
     theme: str = field(hash=False, default="ansi")
@@ -234,6 +236,13 @@ def parse_config_layer(path: Path) -> tuple[dict[str, Any], SourceLoc] | None:
                     f"'{timeout_key}' must be a positive integer "
                     "(seconds, e.g. 120)", src)
             out[timeout_key] = v
+    if raw.get("pythonpath") is not None:
+        v = raw["pythonpath"]
+        if not isinstance(v, list) or not all(isinstance(e, str) for e in v):
+            raise LoadError(
+                "'pythonpath' must be a list of worktree-relative directory "
+                "strings (e.g. [src] or [.])", src)
+        out["pythonpath"] = list(v)
     if "max_parallel_test_runs" in raw:
         v = raw["max_parallel_test_runs"]
         # bool is an int subclass; reject it so `max_parallel_test_runs: true` isn't read as 1.
