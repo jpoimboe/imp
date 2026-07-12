@@ -93,6 +93,25 @@ def test_test_cmd_fields_default_to_none_when_unset(
     assert eff.config.test_cmd_slow_timeout is None
 
 
+def test_pythonpath_flows_from_project_to_config(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+    proj = tmp_path / "proj"
+    (proj / "imp").mkdir(parents=True)
+    (proj / "imp" / "project.yaml").write_text("pythonpath: [src, vendor]\n")
+    eff = load_effective_config(project_root=proj, control_root=None)
+    assert eff.config.pythonpath == ("src", "vendor")
+
+
+def test_pythonpath_defaults_to_empty_tuple_when_unset(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+    eff = load_effective_config(project_root=None, control_root=None)
+    assert eff.config.pythonpath == ()
+
+
 def test_repo_project_yaml_uses_tiered_test_cmds(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -107,3 +126,15 @@ def test_repo_project_yaml_uses_tiered_test_cmds(
     assert eff.config.test_cmd_slow_timeout == 600
     raw = (repo_root / "imp" / "project.yaml").read_text()
     assert "verify_command" not in raw and "verify_timeout" not in raw
+
+
+def test_repo_project_yaml_declares_pythonpath_src(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # imp is the first consumer of the general knob: src-layout, one `src` root
+    # covers both src/imp and src/impty. Must be declared since the env-level
+    # auto-shadow branch was deleted.
+    repo_root = Path(__file__).resolve().parents[1]
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(repo_root / "nonexistent-xdg"))
+    eff = load_effective_config(project_root=repo_root, control_root=None)
+    assert eff.config.pythonpath == ("src",)

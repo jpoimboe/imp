@@ -111,6 +111,9 @@ class ToolContext:
     # Resolved tiered gate commands+timeouts (TestGates). Threaded onto the
     # subprocess env (IMP_TEST_CMD_*) by the bash tool. None => no gate vars.
     test_gates: TestGates | None = None
+    # Worktree-relative import roots (Config.pythonpath) prepended onto the
+    # subprocess PYTHONPATH by the bash tool. Empty () => no PYTHONPATH prefix.
+    pythonpath: tuple[str, ...] = ()
     # Tier A proactive-handoff watch threshold, propagated parent -> subagent via
     # this ctx so dispatch_task seeds each subagent's checkpoint_threshold.
     checkpoint_threshold: float | int | None = None

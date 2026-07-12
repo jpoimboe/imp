@@ -513,7 +513,8 @@ def _fake_change(tmp_path):
 def _fake_config(**over):
     base = dict(sandbox={},
                 test_cmd_fast=None, test_cmd_slow=None,
-                test_cmd_fast_timeout=None, test_cmd_slow_timeout=None)
+                test_cmd_fast_timeout=None, test_cmd_slow_timeout=None,
+                pythonpath=())
     base.update(over)
     return _types.SimpleNamespace(**base)
 
@@ -597,6 +598,28 @@ def test_build_sandbox_policy_active_path_builds_policy_silently(tmp_path, monke
     # active is the silent common case — no posture event is emitted.
     assert not any(e["type"] in ("sandbox_inactive", "sandbox_unavailable")
                    for e in log.events)
+
+
+@pytest.mark.real_sandbox_policy
+def test_build_sandbox_policy_threads_pythonpath_to_setenv(tmp_path, monkeypatch):
+    """config.pythonpath reaches the sandbox policy's setenv as a worktree-resolved
+    PYTHONPATH (imp-on-imp shadow through the general path)."""
+    import imp.engine.executor as ex
+    monkeypatch.setattr(ex, "sandbox_available", lambda: True)
+    from imp.engine import sandbox as _sb
+    _sb.sandbox_available.cache_clear()
+
+    quest = _fake_change(tmp_path)
+    config = _fake_config(pythonpath=("src",))
+    log = _CaptureLog()
+    pol = ex._build_sandbox_policy(quest, config, log)
+    # `_build_sandbox_policy` overlays engine_env onto the real `os.environ`, and
+    # overlay_engine_env APPENDS any ambient PYTHONPATH after the prefix. The
+    # Makefile sets PYTHONPATH for every pytest run, so setenv's PYTHONPATH is a
+    # joined string, not the bare prefix — assert the prefix is FIRST (the robust
+    # idiom the isolated test below also uses), not an exact (key, value) pair.
+    assert dict(pol.setenv)["PYTHONPATH"].startswith(
+        str(quest.project_root / "src"))
 
 
 def _mirror_policy() -> SandboxPolicy:

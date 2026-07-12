@@ -185,7 +185,7 @@ def _build_isolated_policy(quest: Any, worktree_path: Path, test_gates: Any) -> 
         os.environ,
         engine_env(project_root=worktree_path, quest_id=quest.id,
                    quest_title=quest.title, quest_dir=quest.quest_dir,
-                   test_gates=test_gates),
+                   test_gates=test_gates, pythonpath=config.pythonpath),
     )
     return resolve_policy(
         worktree=worktree_path, control_root=quest.control_root,
@@ -374,6 +374,7 @@ async def dispatch_task(
                 # are ctx.event_log.
                 log=ctx.event_log,
                 test_gates=ctx.test_gates,
+                pythonpath=ctx.pythonpath,
                 headless=ctx.non_interactive,
                 sandbox_policy=dispatch_policy,
                 checkpoint_threshold=ctx.checkpoint_threshold,

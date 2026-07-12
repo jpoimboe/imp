@@ -387,6 +387,23 @@ def test_bash_midcommand_pause_over_cap_spills_tombstone(tmp_path: Path) -> None
     assert ctx.running_processes == []
 
 
+def test_bash_exposes_pythonpath_from_ctx(tmp_path: Path) -> None:
+    # The bash tool prepends the worktree-resolved pythonpath roots onto the
+    # subprocess PYTHONPATH so an editable install can't shadow the worktree.
+    ctx = _ctx(tmp_path)
+    ctx.pythonpath = ("src",)
+    out = json.loads(_run_bash(ctx, {"command": "echo $PYTHONPATH"}))
+    assert out["returncode"] == 0
+    assert str(tmp_path / "src") in out["stdout"]
+
+
+def test_bash_no_worktree_pythonpath_when_ctx_unset(tmp_path: Path) -> None:
+    # Default ctx.pythonpath == (): no worktree/src prefix is injected.
+    ctx = _ctx(tmp_path)
+    out = json.loads(_run_bash(ctx, {"command": "echo $PYTHONPATH"}))
+    assert str(tmp_path / "src") not in out["stdout"]
+
+
 def test_bash_with_coordinator_no_pause_completes_normally(tmp_path: Path) -> None:
     # Regression: with a coordinator present but NO pause, the poller must stay
     # out of the way — the command completes normally and returns the ordinary

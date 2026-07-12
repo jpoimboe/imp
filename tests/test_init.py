@@ -335,3 +335,67 @@ def test_picker_cursor_uses_render_safe_caret() -> None:
     assert active.startswith("> ")
     assert "❯" not in active
     assert inactive.startswith("  ")
+
+
+def test_init_writes_pythonpath_on_accept(tmp_path: Path) -> None:
+    run_init(
+        tmp_path, input_fn=_inputs("y"), output_fn=lambda _m: None,
+        picker_fn=_picks("anthropic"),
+        detect_verify_fn=lambda _root: None,
+        detect_pythonpath_fn=lambda _root: ["src"],
+    )
+    data = yaml.safe_load((tmp_path / "imp" / "project.yaml").read_text())
+    assert data["pythonpath"] == ["src"]
+
+
+def test_init_writes_edited_pythonpath(tmp_path: Path) -> None:
+    run_init(
+        tmp_path, input_fn=_inputs("edit", "lib vendor"), output_fn=lambda _m: None,
+        picker_fn=_picks("anthropic"),
+        detect_verify_fn=lambda _root: None,
+        detect_pythonpath_fn=lambda _root: ["src"],
+    )
+    data = yaml.safe_load((tmp_path / "imp" / "project.yaml").read_text())
+    assert data["pythonpath"] == ["lib", "vendor"]
+
+
+def test_init_writes_teaching_hint_on_skip(tmp_path: Path) -> None:
+    run_init(
+        tmp_path, input_fn=_inputs("skip"), output_fn=lambda _m: None,
+        picker_fn=_picks("anthropic"),
+        detect_verify_fn=lambda _root: None,
+        detect_pythonpath_fn=lambda _root: ["src"],
+    )
+    text = (tmp_path / "imp" / "project.yaml").read_text()
+    # Skipped => no field written, but the commented hint teaches the remedy.
+    assert yaml.safe_load(text).get("pythonpath") is None
+    assert "# pythonpath:" in text
+    assert "editable" in text
+
+
+def test_init_writes_teaching_hint_when_detector_returns_none(tmp_path: Path) -> None:
+    run_init(
+        tmp_path, input_fn=_inputs("y"), output_fn=lambda _m: None,
+        picker_fn=_picks("anthropic"),
+        detect_verify_fn=lambda _root: None,
+        detect_pythonpath_fn=lambda _root: None,
+    )
+    text = (tmp_path / "imp" / "project.yaml").read_text()
+    assert yaml.safe_load(text).get("pythonpath") is None
+    assert "# pythonpath:" in text
+    assert "[src]" in text and "[.]" in text
+
+
+def test_init_sequences_both_detector_prompts(tmp_path: Path) -> None:
+    # Both detectors fire: the test-cmd prompt is answered first, the
+    # pythonpath prompt second. Guards the two prompt blocks' ordering.
+    run_init(
+        tmp_path, input_fn=_inputs("y", "y"), output_fn=lambda _m: None,
+        picker_fn=_picks("anthropic"),
+        detect_verify_fn=lambda _root: "make check",
+        detect_pythonpath_fn=lambda _root: ["src"],
+    )
+    text = (tmp_path / "imp" / "project.yaml").read_text()
+    data = yaml.safe_load(text)
+    assert data["test_cmd_fast"] == "make check"
+    assert data["pythonpath"] == ["src"]

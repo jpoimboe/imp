@@ -447,6 +447,7 @@ async def run_quest(
                 step, workflow, quest, state, log, is_resume=is_resume,
                 user_chat_input_fn=user_chat_input_fn, coordinator=coordinator,
                 test_gates=TestGates.from_config(config),
+                pythonpath=config.pythonpath,
                 headless=headless,
                 autonomous=autonomous,
                 sandbox_policy=sandbox_policy,
@@ -739,6 +740,7 @@ async def _dispatch_step(
     user_chat_input_fn: Callable[[str], str | Awaitable[str]] | None,
     coordinator: Any,
     test_gates: TestGates | None = None,
+    pythonpath: tuple[str, ...] = (),
     headless: bool = False,
     autonomous: bool = False,
     sandbox_policy: Any = None,
@@ -770,6 +772,7 @@ async def _dispatch_step(
     if step.kind == "script":
         return await _route_script(step, quest, state, log,
                                    test_gates=test_gates,
+                                   pythonpath=pythonpath,
                                    sandbox_policy=sandbox_policy,
                                    max_parallel_test_runs=max_parallel_test_runs,
                                    coordinator=coordinator)
@@ -779,6 +782,7 @@ async def _dispatch_step(
             step, workflow, quest, state, log,
             user_chat_input_fn=user_chat_input_fn, coordinator=coordinator,
             wrapper_text=wrapper_text, is_resume=is_resume, test_gates=test_gates,
+            pythonpath=pythonpath,
             headless=headless,
             autonomous=autonomous,
             sandbox_policy=sandbox_policy, seed_opening=seed_opening,
@@ -896,6 +900,7 @@ def _read_script_output(output_path: Path, schema: OutputSchema) -> dict[str, An
 async def _route_script(
     step: Step, quest: Quest, state: State, log: EventLog,
     *, test_gates: TestGates | None = None,
+    pythonpath: tuple[str, ...] = (),
     sandbox_policy: Any = None,
     max_parallel_test_runs: int = 1,
     coordinator: Any = None,
@@ -948,7 +953,8 @@ async def _route_script(
                                      quest_title=quest.title,
                                      quest_dir=quest.quest_dir,
                                      output_path=output_path,
-                                     test_gates=test_gates),
+                                     test_gates=test_gates,
+                                     pythonpath=pythonpath),
                 policy=sandbox_policy, command=command, abort=abort))
         if output_path is not None:
             assert step.output_schema is not None
@@ -1229,6 +1235,7 @@ async def _route_agent(
     user_chat_input_fn: Callable[[str], str | Awaitable[str]] | None,
     coordinator: Any, wrapper_text: str | None, is_resume: bool,
     test_gates: TestGates | None = None,
+    pythonpath: tuple[str, ...] = (),
     headless: bool = False,  # forwarded to the invocation/child runs
     autonomous: bool = False,
     sandbox_policy: Any = None,
@@ -1301,7 +1308,7 @@ async def _route_agent(
             # nothing to replay — restoring would stream no messages at all and
             # the spawn hangs silently until the next watchdog kill.
             initial_messages=initial, is_resume=keep,
-            test_gates=test_gates, headless=headless,
+            test_gates=test_gates, pythonpath=pythonpath, headless=headless,
             interactive=step.interactive,
             autonomous=autonomous,
             sandbox_policy=sandbox_policy,
@@ -1400,7 +1407,7 @@ async def _route_agent(
                 step, workflow, quest, state, log,
                 user_chat_input_fn=user_chat_input_fn, coordinator=coordinator,
                 wrapper_text=wrapper_text, is_resume=False,
-                test_gates=test_gates, headless=headless,
+                test_gates=test_gates, pythonpath=pythonpath, headless=headless,
                 autonomous=autonomous,
                 sandbox_policy=sandbox_policy, seed_opening=seed,
                 project_facts=project_facts, memory=memory)
@@ -1426,7 +1433,7 @@ async def _route_agent(
             step, workflow, quest, state, log,
             user_chat_input_fn=user_chat_input_fn, coordinator=coordinator,
             wrapper_text=wrapper_text, is_resume=False,
-            test_gates=test_gates, headless=headless,
+            test_gates=test_gates, pythonpath=pythonpath, headless=headless,
             autonomous=autonomous,
             sandbox_policy=sandbox_policy, seed_opening=seed,
             project_facts=project_facts, memory=memory)
@@ -1460,6 +1467,7 @@ async def _route_agent(
                                   user_chat_input_fn=user_chat_input_fn,
                                   coordinator=coordinator, wrapper_text=wrapper_text,
                                   is_resume=is_resume, test_gates=test_gates,
+                                  pythonpath=pythonpath,
                                   headless=headless,
                                   autonomous=autonomous,
                                   sandbox_policy=sandbox_policy,
@@ -1513,6 +1521,7 @@ async def _run_agent_invocation(
     retry_feedback: str | None = None,
     balance_on_resume: bool = False,
     test_gates: TestGates | None = None,
+    pythonpath: tuple[str, ...] = (),
     headless: bool = False,
     interactive: bool = False,
     autonomous: bool = False,
@@ -1627,6 +1636,7 @@ async def _run_agent_invocation(
             and state.resume_mode == "continue"),
         log=log,
         test_gates=test_gates,
+        pythonpath=pythonpath,
         headless=headless,
         interactive=interactive,
         sandbox_policy=sandbox_policy,
@@ -1686,7 +1696,8 @@ def _build_sandbox_policy(quest: Quest, config: Any, log: EventLog) -> Any:
         engine_env(project_root=quest.project_root, quest_id=quest.id,
                    quest_title=quest.title,
                    quest_dir=quest.quest_dir,
-                   test_gates=TestGates.from_config(config)),
+                   test_gates=TestGates.from_config(config),
+                   pythonpath=config.pythonpath),
     )
     try:
         policy = resolve_policy(

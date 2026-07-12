@@ -219,6 +219,9 @@ class AgentInvocation:
     # Resolved tiered gate commands+timeouts (TestGates), threaded onto the child
     # ToolContext by each provider so the agent bash tool injects IMP_TEST_CMD_*.
     test_gates: TestGates | None = None
+    # Worktree-relative import roots (Config.pythonpath), copied by each provider
+    # onto the child ToolContext so the agent bash tool prepends them to PYTHONPATH.
+    pythonpath: tuple[str, ...] = ()
     # §10/§12: when True, the run is headless (no human at the keyboard) and the
     # subagent backoff loop applies a wall-clock ceiling instead of waiting forever.
     # Threaded from run_quest → _route_agent → _run_agent_invocation →

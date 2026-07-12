@@ -2,7 +2,6 @@ import os
 from pathlib import Path
 
 from imp.engine.env import TestGates, engine_env, overlay_engine_env
-from tests.conftest import _make_imp_checkout
 
 
 def test_engine_env_exposes_id_and_title_no_artifacts() -> None:
@@ -26,68 +25,54 @@ def test_engine_env_exposes_quest_id() -> None:
     assert env["IMP_QUEST_ID"] == "2026-06-04-eee555"
 
 
-def test_engine_env_injects_worktree_src_on_pythonpath_for_imp_checkout(
-    tmp_path: Path,
-) -> None:
-    # imp-on-imp: an imp source checkout => PYTHONPATH prefix points at the
-    # worktree's src so the editable install can't resolve `import imp` to a
-    # sibling checkout.
-    _make_imp_checkout(tmp_path)
-    env = engine_env(project_root=tmp_path, quest_id="2026-06-04-eee555",
-                     quest_title="t")
-    assert env["PYTHONPATH"] == str(tmp_path / "src")
+def test_engine_env_pythonpath_single_root_resolves_against_worktree() -> None:
+    env = engine_env(project_root=Path("/wt"), quest_id="c", quest_title="t",
+                     pythonpath=("src",))
+    assert env["PYTHONPATH"] == "/wt/src"
 
 
-def test_engine_env_omits_pythonpath_without_src_layout(tmp_path: Path) -> None:
-    env = engine_env(project_root=tmp_path, quest_id="2026-06-04-eee555",
-                     quest_title="t")
+def test_engine_env_pythonpath_dot_is_worktree_root() -> None:
+    env = engine_env(project_root=Path("/wt"), quest_id="c", quest_title="t",
+                     pythonpath=(".",))
+    assert env["PYTHONPATH"] == "/wt"
+
+
+def test_engine_env_pythonpath_multi_root_joined_in_listed_order() -> None:
+    env = engine_env(project_root=Path("/wt"), quest_id="c", quest_title="t",
+                     pythonpath=("src", "vendor"))
+    assert env["PYTHONPATH"] == f"/wt/src{os.pathsep}/wt/vendor"
+
+
+def test_engine_env_omits_pythonpath_when_empty() -> None:
+    env = engine_env(project_root=Path("/wt"), quest_id="c", quest_title="t")
     assert "PYTHONPATH" not in env
 
 
-def test_engine_env_omits_pythonpath_for_non_imp_src_layout(tmp_path: Path) -> None:
-    # A bare src/ dir, or a non-imp src-layout project, must NOT get its src/
-    # forced onto subprocess PYTHONPATH — the shadow is imp-on-imp only and must
-    # never perturb sys.path for unrelated projects' gate/agent subprocesses.
-    (tmp_path / "src" / "otherpkg").mkdir(parents=True)
-    (tmp_path / "src" / "otherpkg" / "__init__.py").write_text("")
-    env = engine_env(project_root=tmp_path, quest_id="2026-06-04-eee555",
-                     quest_title="t")
-    assert "PYTHONPATH" not in env
-
-
-def test_overlay_prepends_worktree_src_to_inherited_pythonpath(
-    tmp_path: Path,
-) -> None:
-    _make_imp_checkout(tmp_path)
+def test_overlay_prepends_pythonpath_prefix_to_inherited() -> None:
     parent = {"PYTHONPATH": "/tmp/ambient"}
-    overlay = engine_env(project_root=tmp_path, quest_id="2026-06-04-eee555",
-                     quest_title="t")
+    overlay = engine_env(project_root=Path("/wt"), quest_id="c", quest_title="t",
+                         pythonpath=("src",))
     env = overlay_engine_env(parent, overlay)
-    # worktree src first (wins over the editable .pth), ambient preserved after.
-    assert env["PYTHONPATH"] == f"{tmp_path / 'src'}{os.pathsep}/tmp/ambient"
+    assert env["PYTHONPATH"] == f"/wt/src{os.pathsep}/tmp/ambient"
 
 
-def test_overlay_sets_pythonpath_alone_when_none_inherited(tmp_path: Path) -> None:
-    _make_imp_checkout(tmp_path)
-    overlay = engine_env(project_root=tmp_path, quest_id="2026-06-04-eee555",
-                     quest_title="t")
+def test_overlay_sets_pythonpath_alone_when_none_inherited() -> None:
+    overlay = engine_env(project_root=Path("/wt"), quest_id="c", quest_title="t",
+                         pythonpath=("src",))
     env = overlay_engine_env({}, overlay)
-    assert env["PYTHONPATH"] == str(tmp_path / "src")
+    assert env["PYTHONPATH"] == "/wt/src"
 
 
-def test_overlay_dedups_worktree_src_already_in_inherited_pythonpath(
-    tmp_path: Path,
-) -> None:
-    # Nested imp-on-imp (or a re-entered worktree) can inherit a PYTHONPATH that
-    # already starts with this src/. Prepend must not duplicate it.
-    _make_imp_checkout(tmp_path)
-    src = str(tmp_path / "src")
-    parent = {"PYTHONPATH": f"{src}{os.pathsep}/tmp/ambient"}
-    overlay = engine_env(project_root=tmp_path, quest_id="2026-06-04-eee555",
-                     quest_title="t")
+def test_overlay_per_entry_dedups_multi_root_prefix() -> None:
+    # Per-entry dedup: an inherited entry equal to ANY prefix entry is dropped,
+    # empty entries dropped, surviving inherited entries kept in order after the
+    # whole prefix. (Whole-string dedup would leave /wt/vendor duplicated.)
+    parent = {"PYTHONPATH": f"/wt/vendor{os.pathsep}{os.pathsep}/tmp/ambient"}
+    overlay = engine_env(project_root=Path("/wt"), quest_id="c", quest_title="t",
+                         pythonpath=("src", "vendor"))
     env = overlay_engine_env(parent, overlay)
-    assert env["PYTHONPATH"] == f"{src}{os.pathsep}/tmp/ambient"
-    assert env["PYTHONPATH"].count(src) == 1
+    assert env["PYTHONPATH"] == (
+        f"/wt/src{os.pathsep}/wt/vendor{os.pathsep}/tmp/ambient")
 
 
 def test_overlay_strips_inherited_quest_dir_when_unset() -> None:
