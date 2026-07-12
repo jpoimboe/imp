@@ -16,7 +16,7 @@ def _build() -> nv.NarrativeBuilder:
     return b
 
 
-def test_live_label_takes_precedence_in_current_activity() -> None:
+def test_pushed_label_takes_precedence_in_current_activity() -> None:
     b = _build()
     b.add(ev("3", "step_label_updated", agent_id="step:code/task-lead",
              label="task 3/6 · coding"))
@@ -57,7 +57,7 @@ def test_resume_reentry_adopts_edge_label_over_pushed_label() -> None:
     assert "fixing test failures" in (b.current_activity().position or "")
 
 
-def test_live_label_preserved_on_resume_re_emit_continuation() -> None:
+def test_pushed_label_preserved_on_resume_re_emit_continuation() -> None:
     # Branch 1 (on-stack re-emit, no workflow_resumed window open): a resumed
     # step_started WITHOUT `restarted` is a plain pause/resume continuation and
     # must keep the pushed `task 3/6` live label, not revert to frozen `task 1/6`.
@@ -72,7 +72,7 @@ def test_live_label_preserved_on_resume_re_emit_continuation() -> None:
     assert "task 3/6 · coding" in (b.current_activity().position or "")
 
 
-def test_live_label_preserved_on_genuine_resume_continuation() -> None:
+def test_pushed_label_preserved_on_genuine_resume_continuation() -> None:
     # Branch 2 (workflow_resumed window open): the real resume path. A
     # continuation (`restarted` absent/False) preserves the pushed counter.
     b = _build()
@@ -86,7 +86,7 @@ def test_live_label_preserved_on_genuine_resume_continuation() -> None:
     assert "task 3/6 · coding" in (b.current_activity().position or "")
 
 
-def test_live_label_cleared_on_genuine_resume_restart() -> None:
+def test_pushed_label_cleared_on_genuine_resume_restart() -> None:
     # Branch 2 restart: a genuine re-run from scratch (`restarted` True) still
     # wipes the stale pushed label and falls back to the frozen static label.
     b = _build()
