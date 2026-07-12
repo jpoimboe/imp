@@ -91,11 +91,11 @@ def test_bundled_workflow_loads_and_producers_resume() -> None:
     assert by["spec-reviewer"].rules[0].action.resume is True         # rework -> spec-finalizer
     # phase jumps clear (plain goto): task_gap -> coder (target task-lead),
     # cross-phase plain goto (resume is False)
-    assert by["change-review"].rules[0].action.target == "task-lead"
-    assert by["change-review"].rules[0].action.resume is False
+    assert by["quest-review"].rules[0].action.target == "task-lead"
+    assert by["quest-review"].rules[0].action.resume is False
     # else: approve -> goto deferred-sweep (forward)
-    assert isinstance(by["change-review"].rules[-1].action, Goto)
-    assert by["change-review"].rules[-1].action.target == "deferred-sweep"
+    assert isinstance(by["quest-review"].rules[-1].action, Goto)
+    assert by["quest-review"].rules[-1].action.target == "deferred-sweep"
     assert by["spec-verify-commit"].kind == "script"
     # B3: the merge phase is the engine-native authoritative merge.
     assert wf.phases[-1].name == "integrate"
@@ -113,7 +113,7 @@ def test_review_step_has_no_differ_from():
     from imp.engine.loader import load_workflow
     wf = load_workflow(bundled_workflow_dir("imp"))
     by = {s.name: s for s in wf.flat_steps()}
-    assert by["change-review"].differ_from is None
+    assert by["quest-review"].differ_from is None
 
 
 def test_review_step_declares_high_tier():
@@ -121,7 +121,7 @@ def test_review_step_declares_high_tier():
     from imp.engine.loader import load_workflow
     wf = load_workflow(bundled_workflow_dir("imp"))
     by = {s.name: s for s in wf.flat_steps()}
-    assert by["change-review"].tier == "high"
+    assert by["quest-review"].tier == "high"
 
 
 def test_gap_check_declares_high_tier() -> None:
@@ -546,18 +546,18 @@ def test_gap_check_first_coverage_complete_multi_plan_runs_panel_and_latches() -
     from imp.assets import bundled_workflow_dir
     wf = load_workflow(bundled_workflow_dir("imp"))
     rules = _steps(wf)["gap-check"].rules
-    # Multi-plan change, coverage complete: the change-wide panel fires
+    # Multi-plan change, coverage complete: the quest-wide panel fires
     # (review_scope=change) and coverage_settled latches true.
     m = evaluate_rules(
         rules, vars={**_BASE_VARS, "plan_total": 2},
         output={"status": "Success", "more_plans": False, "rationale": "done",
                 "plan_total": 2})
-    assert isinstance(m.action, Goto) and m.action.target == "change-review"
+    assert isinstance(m.action, Goto) and m.action.target == "quest-review"
     assert m.var_mutations["coverage_settled"] is True
     assert "review_scope" not in m.var_mutations
 
 
-def test_check_next_plan_settled_routes_to_change_review():
+def test_check_next_plan_settled_routes_to_quest_review():
     from imp.assets import bundled_workflow_dir
     wf = load_workflow(bundled_workflow_dir("imp"))
     step = _steps(wf)["check-next-plan"]
@@ -566,7 +566,7 @@ def test_check_next_plan_settled_routes_to_change_review():
         step.rules,
         vars={**_BASE_VARS, "coverage_settled": True, "plan_index": 1, "plan_total": 3},
         output={})
-    assert isinstance(m.action, Goto) and m.action.target == "change-review"
+    assert isinstance(m.action, Goto) and m.action.target == "quest-review"
 
 
 def test_check_next_plan_mid_change_advances_to_plan_writer():
@@ -693,7 +693,7 @@ def test_review_steps_read_only_tightening():
     assert steps["spec-reviewer"].read_only == (".",)
     assert steps["plan-reviewer"].read_only == (".",)
     # Reviewers that run tests in-tree stay loose (cannot be confined).
-    assert steps["change-review"].read_only == ()
+    assert steps["quest-review"].read_only == ()
     assert steps["integration-reviewer"].read_only == ()
 
 
@@ -889,18 +889,18 @@ def test_gap_check_routing_and_latch() -> None:
     assert gap.var_mutations["plan_index"] == 3
     assert "coverage_settled" not in gap.var_mutations
     assert "review_scope" not in gap.var_mutations
-    # Clean + multi-plan -> latch coverage_settled + change-wide change-review.
+    # Clean + multi-plan -> latch coverage_settled + quest-wide quest-review.
     multi = evaluate_rules(rules, vars={**_BASE_VARS, "plan_total": 2},
                            output={"status": "Success", "more_plans": False,
                                    "plan_total": 2, "rationale": "done"})
-    assert isinstance(multi.action, Goto) and multi.action.target == "change-review"
+    assert isinstance(multi.action, Goto) and multi.action.target == "quest-review"
     assert multi.var_mutations["coverage_settled"] is True
     assert "review_scope" not in multi.var_mutations
-    # Clean + single-plan -> change-wide review fires too (plan_total gate dropped).
+    # Clean + single-plan -> quest-wide review fires too (plan_total gate dropped).
     single = evaluate_rules(rules, vars={**_BASE_VARS, "plan_total": 1},
                             output={"status": "Success", "more_plans": False,
                                     "plan_total": 1, "rationale": "done"})
-    assert isinstance(single.action, Goto) and single.action.target == "change-review"
+    assert isinstance(single.action, Goto) and single.action.target == "quest-review"
     assert single.var_mutations["coverage_settled"] is True
     assert "review_scope" not in single.var_mutations
 

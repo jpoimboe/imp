@@ -1,5 +1,5 @@
 """The per-plan implement loop carries no code review or sweep; the single
-change-wide code review (`change-review`, reusing batch-code-reviewer.md) runs once
+quest-wide code review (`quest-review`, reusing batch-code-reviewer.md) runs once
 in the converge phase after gap-check latches coverage, paired with the
 once-per-change deferred sweep."""
 from __future__ import annotations
@@ -48,12 +48,12 @@ def test_review_sweep_and_finalize_left_the_implement_loop() -> None:
     wf = _wf()
     impl_names = [s.name for s in next(p for p in wf.phases if p.name == "implement").steps]
     assert impl_names[-1] == "check-next-plan"
-    for gone in ("change-review", "batch-code-reviewer", "gap-check",
+    for gone in ("quest-review", "batch-code-reviewer", "gap-check",
                  "deferred-sweep", "summarizer", "finalize"):
         assert gone not in impl_names, gone
     conv_names = [s.name for s in next(p for p in wf.phases if p.name == "converge").steps]
     assert conv_names == [
-        "gap-check", "change-review", "deferred-sweep", "converge-verify",
+        "gap-check", "quest-review", "deferred-sweep", "converge-verify",
     ]
 
 
@@ -64,14 +64,14 @@ def test_standalone_panel_gate_and_recheck_are_gone() -> None:
 
 def test_review_step_uses_code_reviewer_at_high_tier() -> None:
     wf = _wf()
-    step = _steps(wf)["change-review"]
+    step = _steps(wf)["quest-review"]
     assert step.tier == "high"
     assert step.file is not None and step.file.name == "batch-code-reviewer.md"
 
 
 def test_review_step_routes_two_way_no_plan_gap() -> None:
     wf = _wf()
-    rules = _steps(wf)["change-review"].rules
+    rules = _steps(wf)["quest-review"].rules
     gap = evaluate_rules(rules, vars=_BASE_VARS,
                          output={"status": "Success", "verdict": "task_gap"})
     assert isinstance(gap.action, Goto) and gap.action.target == "task-lead"
@@ -83,7 +83,7 @@ def test_review_step_routes_two_way_no_plan_gap() -> None:
 def test_review_parse_contract_routes_declared_schema() -> None:
     wf = _wf()
     schema = wf.agents["batch-code-reviewer"].output_schema
-    rules = _steps(wf)["change-review"].rules
+    rules = _steps(wf)["quest-review"].rules
     for verdict in ("approve", "task_gap"):
         payload = {"status": "Success", "verdict": verdict, "findings": "x"}
         validate_agent_output(payload, schema)
@@ -151,28 +151,28 @@ def test_gap_check_routes_coverage_at_change_end() -> None:
     assert isinstance(m_more.action, Goto) and m_more.action.target == "plan-writer"
     assert m_more.var_mutations["plan_total"] == 3
     assert m_more.var_mutations["plan_index"] == 3
-    # Coverage complete + multi-plan -> change-wide review, latched.
+    # Coverage complete + multi-plan -> quest-wide review, latched.
     m_multi = evaluate_rules(rules, vars={**_BASE_VARS, "plan_total": 2},
                              output={"status": "Success", "more_plans": False,
                                      "rationale": "x", "plan_total": 2})
-    assert isinstance(m_multi.action, Goto) and m_multi.action.target == "change-review"
+    assert isinstance(m_multi.action, Goto) and m_multi.action.target == "quest-review"
     assert "review_scope" not in m_multi.var_mutations
     assert m_multi.var_mutations["coverage_settled"] is True
-    # Coverage complete + single-plan -> change-wide review fires too (plan_total gate dropped).
+    # Coverage complete + single-plan -> quest-wide review fires too (plan_total gate dropped).
     m_one = evaluate_rules(rules, vars={**_BASE_VARS, "plan_total": 1},
                            output={"status": "Success", "more_plans": False,
                                    "rationale": "x", "plan_total": 1})
-    assert isinstance(m_one.action, Goto) and m_one.action.target == "change-review"
+    assert isinstance(m_one.action, Goto) and m_one.action.target == "quest-review"
     assert "review_scope" not in m_one.var_mutations
     assert m_one.var_mutations["coverage_settled"] is True
 
 
-def test_check_next_plan_routes_settled_batch_to_change_review() -> None:
+def test_check_next_plan_routes_settled_batch_to_quest_review() -> None:
     wf = _wf()
     cnp = _steps(wf)["check-next-plan"].rules
     corrective = evaluate_rules(cnp, vars={**_BASE_VARS, "coverage_settled": True,
                                            "plan_index": 1, "plan_total": 1}, output={})
-    assert isinstance(corrective.action, Goto) and corrective.action.target == "change-review"
+    assert isinstance(corrective.action, Goto) and corrective.action.target == "quest-review"
     fresh = evaluate_rules(cnp, vars={**_BASE_VARS, "coverage_settled": False,
                                       "plan_index": 1, "plan_total": 1}, output={})
     assert isinstance(fresh.action, Goto) and fresh.action.target == "gap-check"
@@ -206,7 +206,7 @@ def _render_reviewer(tmp_path, *, cur_base_head: str = "forkSHA") -> str:
     return render_prompt(body, ctx, workflow_dir=bundled_workflow_dir("imp"))
 
 
-def test_end_of_change_reviews_whole_change_diff(tmp_path) -> None:
+def test_end_of_quest_reviews_whole_quest_diff(tmp_path) -> None:
     out = _render_reviewer(tmp_path)
     assert "forkSHA..imp/chg" in out                 # whole-change diff from recorded fork
     assert "git merge-base" not in out
@@ -217,7 +217,7 @@ def test_end_of_change_reviews_whole_change_diff(tmp_path) -> None:
 
 def test_plan_writer_recognizes_rework_preambles() -> None:
     by = _steps(_wf())
-    assert by["change-review"].rules[0].action.feedback
+    assert by["quest-review"].rules[0].action.feedback
     assert by["finalize"].rules[1].action.feedback
     finalize_fb = by["finalize"].rules[1].action.feedback    # decision: rework rule
     text = (AGENTS / "plan-writer.md").read_text()
@@ -255,7 +255,7 @@ def test_task_lead_step0_admits_panel_task_gap() -> None:
 
 def test_rework_path_loop_budgets_unchanged() -> None:
     steps = _steps(_wf())
-    assert steps["change-review"].max_loops == 6
+    assert steps["quest-review"].max_loops == 6
     assert steps["finalize"].max_loops == 20
 
 

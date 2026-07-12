@@ -27,7 +27,7 @@ def test_substantive_steps_stay_loud() -> None:
     by_name = {s.name: s for s in wf.flat_steps()}
     # agents and the consequential merge step carry real narrative — never quiet.
     for name in ("spec-finalizer", "plan-writer", "task-lead", "spec-reviewer",
-                 "verify", "change-review", "deferred-sweep", "converge-verify",
+                 "verify", "quest-review", "deferred-sweep", "converge-verify",
                  "autosquash-resolve-merge",
                  "reconciler", "integration-reviewer",
                  "finalize", "merge-to-base",

@@ -31,6 +31,6 @@ def test_coverage_complete_latches_and_does_not_advance_index() -> None:
     m = evaluate_rules(_rules(), vars={**_BASE, "plan_index": 3, "plan_total": 3},
                        output={"status": "Success", "more_plans": False,
                                "rationale": "x", "plan_total": 3})
-    assert isinstance(m.action, Goto) and m.action.target == "change-review"
+    assert isinstance(m.action, Goto) and m.action.target == "quest-review"
     assert m.var_mutations["coverage_settled"] is True
     assert "plan_index" not in m.var_mutations

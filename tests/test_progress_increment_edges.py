@@ -34,7 +34,7 @@ def test_settled_batch_does_not_advance_plan_index() -> None:
                        vars={**_BASE, "coverage_settled": True, "plan_index": 2, "plan_total": 2},
                        output={})
     assert "plan_index" not in m.var_mutations
-    assert isinstance(m.action, Goto) and m.action.target == "change-review"
+    assert isinstance(m.action, Goto) and m.action.target == "quest-review"
 
 
 def test_finalize_rework_bumps_both_counters_together() -> None:

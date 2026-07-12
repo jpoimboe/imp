@@ -465,8 +465,8 @@ async def test_express_runs_full_implement_pipeline_with_change_panel(
     # finalize shortcut is GONE: express now runs the full pipeline. The single
     # forward plan SKIPS batch-code-reviewer (coverage_settled unset -> deferred-sweep);
     # gap-check then latches coverage_settled, sets review_scope=change, and fires the
-    # change-wide batch-code-reviewer pass (the plan_total>1 gate is gone), which routes
-    # to summarizer. So batch-code-reviewer still runs exactly once -- now the change-wide
+    # quest-wide batch-code-reviewer pass (the plan_total>1 gate is gone), which routes
+    # to summarizer. So batch-code-reviewer still runs exactly once -- now the quest-wide
     # pass, not a per-plan pass.
     def _default_trivial(**kwargs):
         if _prompt_carries_ir(**kwargs):
@@ -499,16 +499,16 @@ async def test_express_runs_full_implement_pipeline_with_change_panel(
     assert "plan-writer" in started, started
     assert "plan-finalized" in started, started
     assert "task-lead" in started, started
-    assert "change-review" in started, started
+    assert "quest-review" in started, started
     assert "deferred-sweep" in started, started
     assert "converge-verify" in started, started
     assert started.index("converge-verify") > started.index("deferred-sweep"), started
     assert "gap-check" in started, started
     assert "summarizer" in started, started
-    # Single plan: gap-check runs exactly once in converge and fires the change-wide
-    # review, so change-review runs exactly once (the change-wide pass).
+    # Single plan: gap-check runs exactly once in converge and fires the quest-wide
+    # review, so quest-review runs exactly once (the quest-wide pass).
     assert started.count("gap-check") == 1, started
-    assert started.count("change-review") == 1, started
+    assert started.count("quest-review") == 1, started
 
 
 @pytest.mark.anyio
