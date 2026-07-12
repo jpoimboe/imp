@@ -5,7 +5,11 @@ import socket
 from pathlib import Path
 from typing import Any
 
-from imp.remote.daemon.directory import resident_session_ids, session_is_resident
+from imp.remote.daemon.directory import (
+    quest_home_exists,
+    resident_session_ids,
+    session_is_resident,
+)
 from imp.remote.session.discover import session_socket_path
 
 
@@ -88,3 +92,16 @@ def test_resident_session_ids_never_enumerates_the_archive(
     finally:
         srv.close()
         session_socket_path(control_root, "live-one").unlink(missing_ok=True)
+
+
+def test_quest_home_exists_true_for_a_home_with_no_live_socket(tmp_path: Path) -> None:
+    # AC 3(c): a hibernated/parked quest — home on disk, no resident session socket —
+    # must still be "known" so @handle stays routable after a daemon restart.
+    _make_home(tmp_path, "parked-one")
+    assert session_is_resident(tmp_path, "parked-one") is False  # guard: no live socket
+    assert quest_home_exists(tmp_path, "parked-one") is True
+
+
+def test_quest_home_exists_false_for_an_unknown_id(tmp_path: Path) -> None:
+    _make_home(tmp_path, "parked-one")
+    assert quest_home_exists(tmp_path, "ghost-id") is False
