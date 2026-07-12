@@ -473,7 +473,6 @@ def _handle_terminal_outcome(
     return 1
 
 
-
 def _print_leave_disposition(
     quest: Quest, leave_state: dict[str, str],
 ) -> int | None:
