@@ -36,7 +36,7 @@ def _inv(tmp: Path, *, memory: dict[str, str], subagent: bool, feedback_lead=Non
         user_chat_input_fn=None, transcript_dir=tmp / "td",
         events_path=tmp / "e.jsonl", subagent_defs={}, tiers=(),
         max_tool_calls=None, agent_id="step:p/s", event_log=None,
-        change_state=None, first_event_parent_id=None,
+        quest_state=None, first_event_parent_id=None,
         resolved_tiers=None, coordinator=None,
         subagent_depth=1 if subagent else 0,
         feedback_lead=feedback_lead,

@@ -14,7 +14,7 @@ def _ctx(ch: Quest, state: State) -> ToolContext:
     ctx = ToolContext(project_root=ch.project_root,
                       events_path=ch.events_path)
     ctx.quest = ch
-    ctx.change_state = state
+    ctx.quest_state = state
     return ctx
 
 
@@ -65,7 +65,7 @@ def test_tool_from_subagent_raises(tmp_path: Path) -> None:
     ctx = ToolContext(project_root=ch.project_root,
                       events_path=ch.events_path)
     ctx.quest = ch
-    ctx.change_state = None                               # subagent: no go-live authority
+    ctx.quest_state = None                               # subagent: no go-live authority
     tool = get_registry()["create_and_enter_worktree"]
     with pytest.raises(RuntimeError):
         tool.invoke(ctx, {})

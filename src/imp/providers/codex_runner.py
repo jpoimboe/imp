@@ -283,7 +283,7 @@ class CodexAgentRunner:
             quest_home=quest_home_path(invocation.quest_context.quest_home),
         )
         ctx.quest_context = invocation.quest_context
-        ctx.change_state = invocation.change_state
+        ctx.quest_state = invocation.quest_state
         ctx.quest = invocation.quest          # live quest for rename_quest
         ctx.spawn_subagent = spawn_subagent_via_registry
         ctx.resolved_tiers = invocation.resolved_tiers

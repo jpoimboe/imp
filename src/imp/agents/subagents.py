@@ -295,7 +295,7 @@ async def dispatch_task(
             quest_title=cc.title,   # dispatch label is the title now [item 11]
             quest_home=cc.quest_home,
             event_log=JsonlEventLog(ctx.events_path),
-            vars=ctx.change_state.vars if ctx.change_state is not None else {},
+            vars=ctx.quest_state.vars if ctx.quest_state is not None else {},
             project_facts=cc.project_facts,
         )
         rendered_prompt = render_prompt(
@@ -361,7 +361,7 @@ async def dispatch_task(
                 max_tool_calls=subagent_def.max_tool_calls,
                 agent_id=f"sub:{tool_call_event_id}",
                 event_log=ctx.event_log,
-                change_state=None,
+                quest_state=None,
                 first_event_parent_id=tool_call_event_id or None,
                 resolved_tiers=ctx.resolved_tiers,
                 coordinator=ctx.coordinator,
@@ -471,13 +471,13 @@ async def dispatch_task(
                 # transcript, seed a fresh instance from the handoff, and re-dispatch
                 # — up to the same per-session cap. At the cap, fall through to the
                 # is_error degrade below (result.output is None). The counter lives on
-                # the shared top-level State (ctx.change_state); a nested dispatch has
+                # the shared top-level State (ctx.quest_state); a nested dispatch has
                 # none, so it falls through unchanged.
                 if (result.handoff_path is not None
-                        and ctx.change_state is not None
-                        and ctx.change_state.reincarnation_count(reincarnation_key)
-                        < ctx.change_state.max_reincarnations):
-                    ctx.change_state.bump_reincarnation(reincarnation_key)
+                        and ctx.quest_state is not None
+                        and ctx.quest_state.reincarnation_count(reincarnation_key)
+                        < ctx.quest_state.max_reincarnations):
+                    ctx.quest_state.bump_reincarnation(reincarnation_key)
                     stashed = stash_transcript(target_dir)
                     # Note existence is the sole arbiter of handoff success;
                     # a missing note degrades the seed to transcript-only.
@@ -502,14 +502,14 @@ async def dispatch_task(
                 # re-dispatch — up to the per-session cap. An inner loop (not a
                 # recursive dispatch_task call) avoids re-acquiring `limiter` and
                 # deadlocking when the width cap is 1. The counter lives on the shared
-                # top-level State (ctx.change_state); a nested dispatch has none, so it
+                # top-level State (ctx.quest_state); a nested dispatch has none, so it
                 # falls through to today's failure path unchanged.
                 if (result.fatal and result.error is not None
                         and result.error.category == "context_window"
-                        and ctx.change_state is not None
-                        and ctx.change_state.reincarnation_count(reincarnation_key)
-                        < ctx.change_state.max_reincarnations):
-                    ctx.change_state.bump_reincarnation(reincarnation_key)
+                        and ctx.quest_state is not None
+                        and ctx.quest_state.reincarnation_count(reincarnation_key)
+                        < ctx.quest_state.max_reincarnations):
+                    ctx.quest_state.bump_reincarnation(reincarnation_key)
                     stashed = stash_transcript(target_dir)
                     ctx.event_log.append(
                         agent_id=None, type="reincarnating",

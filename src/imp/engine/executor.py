@@ -1621,7 +1621,7 @@ async def _run_agent_invocation(
         max_tool_calls=resolved_max_tool_calls,
         agent_id=agent_id,
         event_log=log,
-        change_state=state,
+        quest_state=state,
         quest=quest,
         first_event_parent_id=started["id"],
         resolved_tiers=state.resolved_tiers,

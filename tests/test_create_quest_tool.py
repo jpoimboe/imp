@@ -24,7 +24,7 @@ def _ctx(ch: Quest, state: State | None) -> ToolContext:
     ctx = ToolContext(project_root=ch.project_root,
                       events_path=ch.events_path)
     ctx.quest = ch
-    ctx.change_state = state
+    ctx.quest_state = state
     ctx.event_log = ch.event_log()
     ctx.agent_id = "step:finalize"
     return ctx

@@ -41,7 +41,7 @@ def _lead_inv(tmp_path: Path, fake: Any) -> AgentInvocation:
         events_path=tmp_path / "events.jsonl",
         subagent_defs={"coder": _agent("coder", tools={"complete_step"})},
         agent_id="step:impl/lead",
-        change_state=State(id="c", step="lead", step_attempt=0,
+        quest_state=State(id="c", step="lead", step_attempt=0,
                            status="running", max_reincarnations=1))
 
 
