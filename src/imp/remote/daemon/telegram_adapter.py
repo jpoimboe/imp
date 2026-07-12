@@ -78,16 +78,16 @@ def extract_inbound(
 
 def resolve_quest_id(
     inbound: Inbound,
-    msg_to_change: dict[int, str],
-    handle_to_change: dict[str, str],
+    msg_to_quest: dict[int, str],
+    handle_to_quest: dict[str, str],
 ) -> tuple[str | None, str]:
     if inbound.reply_to_message_id is not None:
-        quest_id = msg_to_change.get(inbound.reply_to_message_id)
+        quest_id = msg_to_quest.get(inbound.reply_to_message_id)
         if quest_id is not None:
             return quest_id, inbound.text
     handle, rest = parse_handle(inbound.text)
     if handle is not None:
-        quest_id = handle_to_change.get(handle)
+        quest_id = handle_to_quest.get(handle)
         if quest_id is not None:
             return quest_id, rest
     return None, inbound.text
@@ -171,8 +171,8 @@ class TelegramNorthAdapter:
         self._alert_all = alert_all if alert_all is not None else AlertAll()
         self._offset = 0
         self._last_narration: dict[str, str] = {}
-        self._msg_to_change: dict[int, str] = {}
-        self._handle_to_change: dict[str, str] = {}
+        self._msg_to_quest: dict[int, str] = {}
+        self._handle_to_quest: dict[str, str] = {}
         # The reply maps below are WRITTEN by on_event and on_response (both run on
         # the sender thread) and READ by resolve (poll thread); _offset stays
         # poll-thread-only. Guard only the maps.
@@ -242,12 +242,12 @@ class TelegramNorthAdapter:
             return
         handle = handle_for(quest_id)
         with self._lock:
-            self._handle_to_change[handle] = quest_id
+            self._handle_to_quest[handle] = quest_id
         full = f"{header_line(event)}\n{format_outbound(event, handle)}"
         message_id = self._send(full, kind == "silent")
         with self._lock:
             if message_id is not None:
-                self._msg_to_change[message_id] = quest_id
+                self._msg_to_quest[message_id] = quest_id
 
     def _alert_all_event(self, quest_id: str, event: dict[str, Any]) -> None:
         """An unsubscribed quest: deliver a buzz alert loud iff alert-all is on,
@@ -287,12 +287,12 @@ class TelegramNorthAdapter:
             override = self._last_narration.get(quest_id, "")
         handle = handle_for(quest_id)
         with self._lock:
-            self._handle_to_change[handle] = quest_id
+            self._handle_to_quest[handle] = quest_id
         full = f"{header_line(event)}\n{format_outbound(event, handle, override)}"
         message_id = self._send(full, False)
         with self._lock:
             if message_id is not None:
-                self._msg_to_change[message_id] = quest_id
+                self._msg_to_quest[message_id] = quest_id
         if message_id is not None and event_id is not None:
             self._alert_all.mark(quest_id, event_id)
 
@@ -305,15 +305,15 @@ class TelegramNorthAdapter:
         if isinstance(response, Notice) and response.quest_id is not None:
             handle = handle_for(response.quest_id)
             with self._lock:
-                self._handle_to_change[handle] = response.quest_id
+                self._handle_to_quest[handle] = response.quest_id
                 if message_id is not None:
-                    self._msg_to_change[message_id] = response.quest_id
+                    self._msg_to_quest[message_id] = response.quest_id
 
     def resolve(self, inbound: Inbound) -> tuple[str | None, str]:
         """Resolve one inbound reply to (quest_id, text) against the recorded maps."""
         with self._lock:
             return resolve_quest_id(
-                inbound, self._msg_to_change, self._handle_to_change)
+                inbound, self._msg_to_quest, self._handle_to_quest)
 
     def _resolve_text(self, text: str, reply_to: int | None) -> tuple[str | None, str]:
         return self.resolve(Inbound(text=text, reply_to_message_id=reply_to))
