@@ -557,19 +557,20 @@ class CodexAgentRunner:
                     elog=elog, agent_id=aid, pending_reply=pending,
                     last_agent_message=last_agent_text)
                 if source == "nudge":
+                    assert isinstance(reply, str)
                     # Internal continuation, not a human turn: journal an internal
                     # engine_continuation event (no `>` caret), not a user_message.
                     elog.append(agent_id=aid, type="engine_continuation",
                                 payload={"text": reply})
+                    next_prompt = reply
                 elif source == "pending_reply":
                     # The reply's user_message is already durable in events.jsonl
                     # from the prior attempt; re-journaling would duplicate it.
-                    pass
+                    assert isinstance(reply, str)
+                    next_prompt = reply
                 else:
-                    user_msg = Message(
-                        role="user", content=(TextBlock(text=reply),))
-                    elog.append_user_message(agent_id=aid, message=user_msg, human=True)
-                next_prompt = reply
+                    next_prompt = deliver_continuation_reply(
+                        None, None, elog, aid, reply, human=True)
             elif rstate is ResumeState.MISSING_COMPLETE_STEP:
                 # Replay-and-continue: nudge is the resumed prompt; journal for audit trail.
                 from imp.agents.transcript import RESUME_CONTINUE_NUDGE
