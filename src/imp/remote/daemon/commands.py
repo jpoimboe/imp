@@ -7,7 +7,8 @@ from dataclasses import dataclass
 from imp.remote.daemon.discover import QuestInfo
 
 # resolve_lookup(text, reply_to) -> (quest_id | None, stripped_text). Supplied by
-# the adapter (its resolve over _msg_to_quest / _handle_to_quest); pure inputs to parse.
+# the adapter (its resolve over _msg_to_quest plus a stateless @handle check); pure
+# inputs to parse.
 ResolveLookup = Callable[[str, int | None], tuple[str | None, str]]
 
 

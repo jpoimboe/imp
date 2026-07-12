@@ -20,3 +20,9 @@ def resident_session_ids(control_root: Path) -> set[str]:
         for cid in _list_quest_homes(control_root)
         if socket_is_live(session_socket_path(control_root, cid))
     }
+
+
+def quest_home_exists(control_root: Path, quest_id: str) -> bool:
+    """True iff quest_id has a home on disk under .imp/quests/ (not the archive)."""
+    from imp.cli.main import _list_quest_homes
+    return quest_id in _list_quest_homes(control_root)

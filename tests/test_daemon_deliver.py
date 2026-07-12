@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 from imp.remote.daemon import runner
+from imp.remote.session.reply import DeliveryOutcome
 
 
 @pytest.fixture
@@ -27,13 +28,15 @@ async def test_deliver_to_session_loads_the_change_and_injects_the_reply(
 
     captured: dict[str, object] = {}
 
-    async def _fake_deliver(quest: object, text: str) -> None:
+    async def _fake_deliver(quest: object, text: str) -> DeliveryOutcome:
         captured["change"] = quest
         captured["text"] = text
+        return DeliveryOutcome.NOT_AT_GATE
 
     monkeypatch.setattr(runner, "Quest", _FakeChange)
     monkeypatch.setattr(runner, "deliver_session_reply", _fake_deliver)
 
-    await runner.deliver_to_session(tmp_path, "2026-06-13-abc", "approved")
+    outcome = await runner.deliver_to_session(tmp_path, "2026-06-13-abc", "approved")
 
+    assert outcome is DeliveryOutcome.NOT_AT_GATE
     assert captured == {"change": sentinel, "text": "approved"}

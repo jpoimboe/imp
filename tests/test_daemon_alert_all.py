@@ -30,7 +30,8 @@ def _adapter(
         chat_id=4242, submit=lambda _: None,
         send=send, get_updates=lambda _: {"result": []},
         subscriptions=Subscriptions(),  # empty → every Quest takes the alert-all path
-        alert_all=alert_all if alert_all is not None else _on())
+        alert_all=alert_all if alert_all is not None else _on(),
+        is_known_quest=lambda _cid: True)
 
 
 def _narration(text: str, *, replay: bool = False) -> dict:
