@@ -10,9 +10,9 @@ import pytest
 
 from imp.engine.quest import Quest
 from imp.remote.session.client import SessionClient
-from imp.remote.session.reply import deliver_session_reply
+from imp.remote.session.reply import DeliveryOutcome, deliver_session_reply
 from imp.remote.session.server import SessionServer
-from imp.remote.session.socket_server import SessionSocket
+from imp.remote.session.socket_server import ReplaySnapshot, SessionSocket
 
 
 @pytest.fixture
@@ -105,8 +105,9 @@ async def test_deliver_session_reply_satisfies_gate_when_foreground_client_alrea
         async with anyio.create_task_group() as tg:
             tg.start_soon(server.serve, _run_fn)
             with anyio.fail_after(5):
-                await deliver_session_reply(
+                outcome = await deliver_session_reply(
                     cast(Quest, None), "approved", attach=_attach_deliver)
+            assert outcome is DeliveryOutcome.DELIVERED
             with anyio.fail_after(5):
                 while not got:
                     await anyio.sleep(0.02)
@@ -153,5 +154,92 @@ async def test_deliver_session_reply_ignores_replayed_gate(tmp_path: Path) -> No
             while not inputs:
                 await anyio.sleep(0.02)
         assert inputs == ["approved"]   # answered the live gate, not the replayed one
+        tg.cancel_scope.cancel()
+    await socket.close()
+
+
+@pytest.mark.anyio
+async def test_deliver_returns_delivered_and_sends_input(tmp_path: Path) -> None:
+    sock = str(tmp_path / "s.sock")
+    socket = SessionSocket(sock)
+    await socket.open()
+    inputs: list[str] = []
+
+    async def _attach(on_event: Callable[[dict[str, Any]], None]) -> SessionClient:
+        client = SessionClient(sock, "c1", "T", on_event=on_event)
+        await client.connect()
+        return client
+
+    async with anyio.create_task_group() as tg:
+        tg.start_soon(socket.serve)
+
+        async def _server_gate() -> None:
+            with anyio.fail_after(5):
+                while socket.attached_count == 0:
+                    await anyio.sleep(0.02)
+            socket.broadcast({"type": "awaiting_user_input", "payload": {"prompt": "go?"}})
+            inputs.append(await socket.next_input())
+
+        tg.start_soon(_server_gate)
+        with anyio.fail_after(5):
+            outcome = await deliver_session_reply(
+                cast(Quest, None), "approved", attach=_attach,
+                overall_timeout=2.0, grace=0.5)
+        assert outcome is DeliveryOutcome.DELIVERED
+        with anyio.fail_after(5):
+            while not inputs:
+                await anyio.sleep(0.02)
+        assert inputs == ["approved"]
+        tg.cancel_scope.cancel()
+    await socket.close()
+
+
+@pytest.mark.anyio
+async def test_deliver_returns_not_at_gate_after_boundary_with_no_live_gate(
+    tmp_path: Path,
+) -> None:
+    sock = str(tmp_path / "s.sock")
+    events_path = tmp_path / "events.jsonl"
+    events_path.write_text("")  # empty: capture() yields only the replay_complete boundary
+    socket = SessionSocket(
+        sock, on_attach=lambda hello, send: ReplaySnapshot.capture(events_path))
+    await socket.open()
+
+    async def _attach(on_event: Callable[[dict[str, Any]], None]) -> SessionClient:
+        client = SessionClient(sock, "c1", "T", on_event=on_event)
+        await client.connect()
+        return client
+
+    async with anyio.create_task_group() as tg:
+        tg.start_soon(socket.serve)
+        with anyio.fail_after(5):
+            outcome = await deliver_session_reply(
+                cast(Quest, None), "approved", attach=_attach,
+                overall_timeout=2.0, grace=0.2)
+        assert outcome is DeliveryOutcome.NOT_AT_GATE
+        tg.cancel_scope.cancel()
+    await socket.close()
+
+
+@pytest.mark.anyio
+async def test_deliver_returns_unreachable_when_handshake_never_completes(
+    tmp_path: Path,
+) -> None:
+    sock = str(tmp_path / "s.sock")
+    socket = SessionSocket(sock)  # no on_attach -> no replay_complete boundary is ever sent
+    await socket.open()
+
+    async def _attach(on_event: Callable[[dict[str, Any]], None]) -> SessionClient:
+        client = SessionClient(sock, "c1", "T", on_event=on_event)
+        await client.connect()
+        return client
+
+    async with anyio.create_task_group() as tg:
+        tg.start_soon(socket.serve)
+        with anyio.fail_after(5):
+            outcome = await deliver_session_reply(
+                cast(Quest, None), "approved", attach=_attach,
+                overall_timeout=0.3, grace=0.1)
+        assert outcome is DeliveryOutcome.UNREACHABLE
         tg.cancel_scope.cancel()
     await socket.close()
