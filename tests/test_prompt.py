@@ -152,6 +152,15 @@ class _FakeHistory:
         return list(self._strings)
 
 
+def test_seed_history_populates_history_oldest_first() -> None:
+    """seed_history pre-loads the prompt's history so history_strings() reads
+    them back oldest-first (the order prompt_toolkit's up-arrow walks backward
+    from). Uses a real InMemoryHistory-backed session; no TTY needed."""
+    p = Prompt()
+    p.seed_history(["the seed", "reply one", "reply two"])
+    assert p.history_strings() == ["the seed", "reply one", "reply two"]
+
+
 def test_message_is_bare_caret_without_a_question_plain() -> None:
     assert _prompt_message_text("", color=False) == "> "
 
