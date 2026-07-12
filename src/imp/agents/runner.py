@@ -130,7 +130,9 @@ class QuestContext:
     id: str = ""
     quest_home: str = ""
     project_facts: dict[str, str] = field(hash=False, default_factory=dict)
-    guidance: str = ""
+    memory: dict[str, str] = field(hash=False, default_factory=dict)
+    workflow_name: str = ""
+    step_name: str = ""
     persona_source: str = ""
 
 

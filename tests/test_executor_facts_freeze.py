@@ -1,4 +1,4 @@
-"""Project facts/guidance freeze into state.json at first run and are reused on
+"""Project facts/memory freeze into state.json at first run and are reused on
 resume — never re-read live mid-Quest (spec item 6 / AC 10)."""
 from __future__ import annotations
 
@@ -21,7 +21,7 @@ _FAKE_CONFIG = (
 )
 
 
-def _seed(root: Path, *, facts_yaml: str):
+def _seed(root: Path, *, facts_yaml: str, memory: str | None = None):
     wf = root / "imp" / "workflows" / "imp"
     (wf / "agents").mkdir(parents=True)
     (wf / "agents" / "writer.md").write_text(
@@ -36,16 +36,20 @@ def _seed(root: Path, *, facts_yaml: str):
         "      - {name: w, file: agents/writer.md, tier: low}\n"
     )
     (root / "imp" / "project.yaml").write_text(facts_yaml)
+    if memory is not None:
+        (root / "imp" / "memory").mkdir(parents=True, exist_ok=True)
+        (root / "imp" / "memory" / "all.md").write_text(memory)
     (root / ".imp").mkdir(parents=True, exist_ok=True)
     (root / ".imp" / "config.yaml").write_text(_FAKE_CONFIG)
     return _make_change(root)
 
 
 @pytest.mark.anyio
-async def test_first_run_freezes_facts_and_guidance_from_project_yaml(tmp_path: Path) -> None:
+async def test_first_run_freezes_facts_and_memory(tmp_path: Path) -> None:
     quest = _seed(
         tmp_path,
-        facts_yaml="default-workflow: imp\nfacts:\n  greeting: hi\nguidance: live note\n",
+        facts_yaml="default-workflow: imp\nfacts:\n  greeting: hi\n",
+        memory="live note",
     )
     sink: list = []
     _register_invocation_capturing({"status": "Success"}, sink)
@@ -55,24 +59,25 @@ async def test_first_run_freezes_facts_and_guidance_from_project_yaml(tmp_path: 
 
     state = State.load(quest.state_dir)
     assert state.project_facts == {"greeting": "hi"}
-    assert state.guidance == "live note"
+    assert state.memory == {"all.md": "live note"}
     body = sink[0].initial_messages[0].content[0].text
     assert "hello hi" in body                     # fact still rendered via the template
-    assert "## Project guidance" in body          # engine-injected section
-    assert "live note" in body                    # frozen guidance text
+    assert "## Project memory" in body            # engine-injected section
+    assert "live note" in body                    # frozen memory text
 
 
 @pytest.mark.anyio
 async def test_run_uses_frozen_state_not_live_project_yaml(tmp_path: Path) -> None:
-    # project.yaml says greeting=hi/guidance=live, but state was frozen earlier with
-    # different values. The executor must render from the FROZEN state.
+    # project.yaml says greeting=hi and memory=live, but state was frozen earlier
+    # with different values. The executor must render from the FROZEN state.
     quest = _seed(
         tmp_path,
-        facts_yaml="default-workflow: imp\nfacts:\n  greeting: hi\nguidance: live\n",
+        facts_yaml="default-workflow: imp\nfacts:\n  greeting: hi\n",
+        memory="live",
     )
     state = State.load(quest.state_dir)
     state.project_facts = {"greeting": "FROZEN"}
-    state.guidance = "FROZEN-GUIDANCE"
+    state.memory = {"all.md": "FROZEN-MEMO"}
     state.save(quest.state_dir)
 
     sink: list = []
@@ -81,8 +86,8 @@ async def test_run_uses_frozen_state_not_live_project_yaml(tmp_path: Path) -> No
 
     body = sink[0].initial_messages[0].content[0].text
     assert "hello FROZEN" in body                 # frozen fact, not live project.yaml
-    assert "## Project guidance" in body
-    assert "FROZEN-GUIDANCE" in body              # frozen guidance, injected
+    assert "## Project memory" in body
+    assert "FROZEN-MEMO" in body                  # frozen memory, injected
     assert "hello hi" not in body                 # live greeting never used
     # The guard never overwrites an already-frozen value.
     assert State.load(quest.state_dir).project_facts == {"greeting": "FROZEN"}

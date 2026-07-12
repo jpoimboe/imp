@@ -105,9 +105,8 @@ def test_init_appends_commented_facts_example(
     assert "# facts:" in text
     assert "{{ project." in text
 
-    facts, guidance = parse_project_facts(root / "imp" / "project.yaml")
+    facts = parse_project_facts(root / "imp" / "project.yaml")
     assert facts == {}
-    assert guidance == ""
 
 
 def test_init_records_checked_out_branch_without_remote(

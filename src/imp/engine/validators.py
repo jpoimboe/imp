@@ -323,7 +323,7 @@ def _v_project_refs(
     from jinja2 import nodes
 
     env = jinja2.Environment()
-    known = set(project_keys) | {"guidance"}
+    known = set(project_keys)
     for agent in workflow.agents.values():
         try:
             ast = env.parse(agent.prompt_template_source)
