@@ -423,3 +423,35 @@ def test_isolated_dispatch_overlay_home_torn_down_with_worktree(
     # finally teardown removed both the overlay dirs and the spike worktree
     assert not (worktrees / "spike-prb001-1.overlay-upper").exists()
     assert not (worktrees / "spike-prb001-1").exists()
+
+
+def test_isolated_dispatch_honors_network_off(tmp_path, monkeypatch):
+    # AC 11: with sandbox.network=False configured, the isolated agent's policy has
+    # network off (the deleted force-on no longer overrides run-level config) and its
+    # bash argv carries --unshare-net.
+    from types import SimpleNamespace
+
+    from imp.engine.sandbox import build_sandbox_argv
+
+    monkeypatch.setattr("imp.engine.sandbox.sandbox_available", lambda: True)
+    monkeypatch.setattr("imp.engine.sandbox.overlay_available", lambda _b: False)
+    # _make_change uses load_effective_config internally; patch it AFTER so
+    # Quest.create gets the real config object (which has tier_names() etc.).
+    quest = _make_change(tmp_path)
+    monkeypatch.setattr(
+        "imp.providers.effective.load_effective_config",
+        lambda **kw: SimpleNamespace(
+            config=SimpleNamespace(sandbox={"network": False})),
+    )
+    capture: dict = {}
+    ctx = _ctx(tmp_path, quest, name="prober", agent=_isolated_agent("prober"),
+               spawn=_spawn([{"type": "agent_output", "payload": {"text": "ok"}}],
+                            capture=capture))
+
+    anyio.run(dispatch_task, ctx, "prober", "measure it")
+
+    pol = capture["inv"].sandbox_policy
+    assert pol.network is False
+    argv = build_sandbox_argv("curl example.com", cwd=pol.worktree, policy=pol,
+                              engine_env={})
+    assert "--unshare-net" in argv
