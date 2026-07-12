@@ -123,6 +123,7 @@ _BUILTIN_MODULES = (
     "create_and_enter_worktree",
     "create_quest",
     "fs",
+    "imp_show",
     "nav",
     "query_events",
     "rename_quest",
