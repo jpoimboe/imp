@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import re
 import subprocess
 from pathlib import Path
 
@@ -162,30 +161,6 @@ def read_artifact(control_root: Path, quest_id: str, rel: str) -> bytes | None:
         control_root, "cat-file", "-p", f"refs/imp/artifacts/{quest_id}:{rel}")
     if wip.returncode == 0:
         return wip.stdout
-    return None
-
-
-def pick_newest_plan(quest_id: str, names: list[str]) -> str | None:
-    best, pick = -1, None
-    for name in names:
-        mobj = re.fullmatch(rf"{re.escape(quest_id)}-plan-(\d+)\.md", name)
-        if mobj and int(mobj.group(1)) > best:
-            best, pick = int(mobj.group(1)), name
-    return pick
-
-
-def newest_plan_name(control_root: Path, quest_id: str) -> str | None:
-    """Highest-N plan filename from the retained artifact ref; bare filename."""
-    treeish = f"refs/imp/artifacts/{quest_id}:plans"
-    proc = subprocess.run(
-        ["git", "ls-tree", "--name-only", treeish],
-        cwd=control_root, capture_output=True, text=True)
-    if proc.returncode == 0:
-        pick = pick_newest_plan(
-            quest_id,
-            [ln.strip() for ln in proc.stdout.splitlines() if ln.strip()])
-        if pick:
-            return pick
     return None
 
 

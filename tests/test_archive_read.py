@@ -5,7 +5,6 @@ from pathlib import Path
 
 from imp.engine.archive.read import (
     completed_rows,
-    pick_newest_plan,
     read_quest_json,
     read_state_json,
     status_of,
@@ -94,13 +93,6 @@ def test_completed_rows_single_query_carries_last_activity(tmp_path: Path) -> No
     assert rows["alpha"][3] == "2026-06-01T00:00:09+00:00"  # MAX(events.ts)
     assert rows["alpha"][4] == "Alpha"
     assert rows["alpha"][5] == "2026-06-01T00:00:00+00:00"
-
-
-def test_pick_newest_plan_picks_highest_n() -> None:
-    assert pick_newest_plan(
-        "alpha", ["alpha-plan-1.md", "alpha-plan-10.md", "alpha-plan-2.md"]
-    ) == "alpha-plan-10.md"
-    assert pick_newest_plan("alpha", ["unrelated.md"]) is None
 
 
 def _git_init(root: Path) -> None:
