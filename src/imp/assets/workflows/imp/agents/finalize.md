@@ -167,7 +167,7 @@ When you recap the reader's own choice at the gate, address them directly — "y
 chose to ignore it," not "the human chose ignore."
 
 When showing the result would help the human decide — e.g. a change to how a
-terminal program looks — load `driving-terminal-uis` (`load_skill(name="driving-terminal-uis")`)
+terminal program looks — load `imp-driving-terminal-uis` (`load_skill(name="imp-driving-terminal-uis")`)
 and render the final state with your impty tools to describe what you see.
 
 Then work through the **needs-decision** items. This walk has a **closed set**

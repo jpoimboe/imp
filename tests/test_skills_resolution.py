@@ -10,76 +10,108 @@ from imp.agents.skills import (
     SkillNameError,
     SkillNotFound,
     list_user_skills,
-    load_agent_skill,
+    load_internal_skill,
     load_user_skill,
+    overlay_global_skills,
     overlay_project_skills,
 )
+from imp.assets import bundled_skills_dir
+
+_POOL = (
+    "imp-tool-reference",
+    "imp-driving-terminal-uis",
+    "imp-knowledge",
+    "imp-introspection",
+    "imp-memory",
+)
+
+
+def _skills(tmp_path: Path) -> Path:
+    # local helper: build a skills/ root with a user/ subdir
+    skills = tmp_path / "workflow" / "skills"
+    skills.mkdir(parents=True)
+    (skills / "user").mkdir()
+    return skills
 
 
 def test_skill_errors_share_a_base(tmp_path: Path) -> None:
     assert issubclass(SkillNameError, SkillError)
     assert issubclass(SkillNotFound, SkillError)
     assert issubclass(SkillNameError, ValueError)
-    skills = _split(tmp_path)
+    skills = _skills(tmp_path)
     with pytest.raises(SkillError):
         load_user_skill(skills, "../escape")   # bad name -> SkillNameError
     with pytest.raises(SkillError):
         load_user_skill(skills, "nope")        # missing file -> SkillNotFound
 
 
-def _split(tmp_path: Path) -> Path:
-    # local helper: build skills/agent and skills/user trees
-    skills = tmp_path / "workflow" / "skills"
-    (skills / "agent").mkdir(parents=True)
-    (skills / "user").mkdir(parents=True)
-    return skills
+def test_load_internal_skill_resolves_root(tmp_path: Path) -> None:
+    skills = _skills(tmp_path)
+    (skills / "tdd.md").write_text("# TDD\nred green\n")
+    assert load_internal_skill(skills, "tdd") == "# TDD\nred green\n"
 
 
-def test_load_agent_skill_resolves_agent_dir(tmp_path: Path) -> None:
-    skills = _split(tmp_path)
-    (skills / "agent" / "tdd.md").write_text("# TDD\nred green\n")
-    assert load_agent_skill(skills, "tdd") == "# TDD\nred green\n"
-
-
-def test_load_agent_skill_falls_back_to_user_dir(tmp_path: Path) -> None:
-    skills = _split(tmp_path)
+def test_load_internal_skill_falls_back_to_user_dir(tmp_path: Path) -> None:
+    skills = _skills(tmp_path)
     (skills / "user" / "shared.md").write_text("# Shared\nuser body\n")
-    # No agent/shared.md exists, so the agent path resolves it via user fallback.
-    assert load_agent_skill(skills, "shared") == "# Shared\nuser body\n"
+    # No root shared.md exists, so it resolves via the user/ fallback.
+    assert load_internal_skill(skills, "shared") == "# Shared\nuser body\n"
 
 
-def test_load_agent_skill_strips_frontmatter_on_user_fallback(tmp_path: Path) -> None:
-    skills = _split(tmp_path)
+def test_load_internal_skill_root_shadows_user(tmp_path: Path) -> None:
+    skills = _skills(tmp_path)
+    (skills / "dup.md").write_text("ROOT\n")
+    (skills / "user" / "dup.md").write_text("USER\n")
+    # Root is tried first, so the root copy wins.
+    assert load_internal_skill(skills, "dup") == "ROOT\n"
+
+
+def test_load_internal_skill_strips_frontmatter_on_user_fallback(tmp_path: Path) -> None:
+    skills = _skills(tmp_path)
     (skills / "user" / "shared.md").write_text(
         "---\ndescription: A shared skill\n---\n# Shared\nbody\n"
     )
-    assert load_agent_skill(skills, "shared") == "# Shared\nbody\n"
+    assert load_internal_skill(skills, "shared") == "# Shared\nbody\n"
 
 
-def test_load_agent_skill_missing_everywhere_raises_not_found(tmp_path: Path) -> None:
-    skills = _split(tmp_path)
+def test_load_internal_skill_strips_frontmatter_in_root(tmp_path: Path) -> None:
+    skills = _skills(tmp_path)
+    (skills / "tdd.md").write_text(
+        "---\ndescription: TDD discipline\n---\n# TDD\nred green\n"
+    )
+    assert load_internal_skill(skills, "tdd") == "# TDD\nred green\n"
+
+
+def test_load_internal_skill_missing_everywhere_raises_not_found(tmp_path: Path) -> None:
+    skills = _skills(tmp_path)
     with pytest.raises(SkillNotFound):
-        load_agent_skill(skills, "ghost")
+        load_internal_skill(skills, "ghost")
 
 
-def test_load_agent_skill_missing_subdirs_read_as_not_found(tmp_path: Path) -> None:
-    # Neither agent/ nor user/ exists: not an IO error, a clean not-found.
+def test_load_internal_skill_missing_user_dir_reads_as_not_found(tmp_path: Path) -> None:
+    # A skills/ root with no user/ subdir: not an IO error, a clean not-found.
     skills = tmp_path / "workflow" / "skills"
     skills.mkdir(parents=True)
     with pytest.raises(SkillNotFound):
-        load_agent_skill(skills, "tdd")
+        load_internal_skill(skills, "tdd")
+
+
+def test_load_internal_skill_rejects_traversal(tmp_path: Path) -> None:
+    skills = _skills(tmp_path)
+    with pytest.raises(SkillNameError):
+        load_internal_skill(skills, "../user/secret")
 
 
 def test_load_user_skill_reads_user_only(tmp_path: Path) -> None:
-    skills = _split(tmp_path)
-    (skills / "agent" / "secret.md").write_text("# Secret\nagent only\n")
-    # The human path never sees agent disciplines, even by exact name.
+    skills = _skills(tmp_path)
+    (skills / "secret.md").write_text("# Secret\ninternal only\n")
+    # The human path never sees a root (internal) skill, even by exact name.
     with pytest.raises(SkillNotFound):
         load_user_skill(skills, "secret")
 
 
 def test_load_user_skill_strips_frontmatter(tmp_path: Path) -> None:
-    skills = _split(tmp_path)
+    skills = _skills(tmp_path)
     (skills / "user" / "refactor.md").write_text(
         "---\ndescription: Refactor helper\n---\n# Refactor\nstep one\n"
     )
@@ -87,27 +119,34 @@ def test_load_user_skill_strips_frontmatter(tmp_path: Path) -> None:
 
 
 def test_load_user_skill_no_frontmatter_returns_body_unchanged(tmp_path: Path) -> None:
-    skills = _split(tmp_path)
+    skills = _skills(tmp_path)
     (skills / "user" / "plain.md").write_text("# Plain\njust body\n")
     assert load_user_skill(skills, "plain") == "# Plain\njust body\n"
 
 
-@pytest.mark.parametrize("bad", ["../agent/secret", "..", "a/b", "/etc/passwd"])
+@pytest.mark.parametrize("bad", ["../secret", "..", "a/b", "/etc/passwd"])
 def test_load_user_skill_rejects_traversal(tmp_path: Path, bad: str) -> None:
-    skills = _split(tmp_path)
-    (skills / "agent" / "secret.md").write_text("# Secret\n")
+    skills = _skills(tmp_path)
+    (skills / "secret.md").write_text("# Secret\n")
     with pytest.raises(SkillNameError):
         load_user_skill(skills, bad)
 
 
+def test_load_user_skill_unterminated_frontmatter_returned_unchanged(tmp_path: Path) -> None:
+    skills = _skills(tmp_path)
+    raw = "---\ndescription: foo\n# Body never closes the block\n"
+    (skills / "user" / "weird.md").write_text(raw)
+    assert load_user_skill(skills, "weird") == raw
+
+
 def test_list_user_skills_returns_stem_and_description(tmp_path: Path) -> None:
-    skills = _split(tmp_path)
+    skills = _skills(tmp_path)
     (skills / "user" / "refactor.md").write_text(
         "---\ndescription: Refactor helper\n---\n# Refactor\n"
     )
     (skills / "user" / "plain.md").write_text("# Plain\n")
-    # agent skills never appear in the human listing
-    (skills / "agent" / "tdd.md").write_text("# TDD\n")
+    # internal (root) skills never appear in the human listing
+    (skills / "tdd.md").write_text("# TDD\n")
     assert list_user_skills(skills) == [
         ("plain", None),
         ("refactor", "Refactor helper"),
@@ -118,27 +157,6 @@ def test_list_user_skills_missing_user_dir_is_empty(tmp_path: Path) -> None:
     skills = tmp_path / "workflow" / "skills"
     skills.mkdir(parents=True)
     assert list_user_skills(skills) == []
-
-
-def test_load_agent_skill_strips_frontmatter_in_agent_dir(tmp_path: Path) -> None:
-    skills = _split(tmp_path)
-    (skills / "agent" / "tdd.md").write_text(
-        "---\ndescription: TDD discipline\n---\n# TDD\nred green\n"
-    )
-    assert load_agent_skill(skills, "tdd") == "# TDD\nred green\n"
-
-
-def test_load_user_skill_unterminated_frontmatter_returned_unchanged(tmp_path: Path) -> None:
-    skills = _split(tmp_path)
-    raw = "---\ndescription: foo\n# Body never closes the block\n"
-    (skills / "user" / "weird.md").write_text(raw)
-    assert load_user_skill(skills, "weird") == raw
-
-
-def test_load_agent_skill_rejects_traversal(tmp_path: Path) -> None:
-    skills = _split(tmp_path)
-    with pytest.raises(SkillNameError):
-        load_agent_skill(skills, "../user/secret")
 
 
 def test_overlay_copies_project_skills_into_user_dir(tmp_path: Path) -> None:
@@ -169,11 +187,31 @@ def test_overlay_missing_source_is_noop(tmp_path: Path) -> None:
     assert not dest.exists()
 
 
-def test_overlay_never_writes_into_agent(tmp_path: Path) -> None:
-    project = tmp_path / "proj"
-    (project / "imp" / "skills").mkdir(parents=True)
-    (project / "imp" / "skills" / "mine.md").write_text("# Mine\n")
-    skills_root = tmp_path / "snap" / "skills"
-    (skills_root / "agent").mkdir(parents=True)
-    overlay_project_skills(project, skills_root / "user")
-    assert list((skills_root / "agent").iterdir()) == []  # agent/ untouched
+def test_bundled_skills_dir_holds_the_global_pool() -> None:
+    pool = bundled_skills_dir()
+    assert pool.is_dir()
+    for name in _POOL:
+        assert (pool / f"{name}.md").is_file(), name
+
+
+def test_overlay_global_lands_the_pool_into_dest_root(tmp_path: Path) -> None:
+    dest = tmp_path / "snap" / "skills"
+    overlay_global_skills(dest)  # dest does not pre-exist: overlay must create it
+    for name in _POOL:
+        body = (dest / f"{name}.md").read_text()
+        assert body.strip(), name
+    # The pool copy is byte-identical to the shipped source.
+    assert (dest / "imp-knowledge.md").read_text() == (
+        bundled_skills_dir() / "imp-knowledge.md"
+    ).read_text()
+
+
+def test_overlay_global_does_not_clobber_a_workflow_skill(tmp_path: Path) -> None:
+    dest = tmp_path / "snap" / "skills"
+    dest.mkdir(parents=True)
+    (dest / "imp-knowledge.md").write_text("WORKFLOW OWN\n")
+    overlay_global_skills(dest)
+    # Workflow-wins: an already-present same-named file is left untouched.
+    assert (dest / "imp-knowledge.md").read_text() == "WORKFLOW OWN\n"
+    # …while the other pool skills are still overlaid alongside it.
+    assert (dest / "imp-memory.md").read_text().strip()

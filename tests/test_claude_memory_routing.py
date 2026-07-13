@@ -30,7 +30,7 @@ def test_verifying_claims_excluded_from_task_lead_coder_and_skill() -> None:
     for rel in (
         "agents/task-lead.md",
         "agents/coder.md",
-        "skills/agent/verification-before-completion.md",
+        "skills/verification-before-completion.md",
     ):
         assert INCLUDE not in (WF / rel).read_text(), rel
 

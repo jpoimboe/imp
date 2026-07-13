@@ -15,9 +15,8 @@ from imp.engine.state import JsonlEventLog
 
 def _ctx(tmp_path: Path) -> ToolContext:
     wf = tmp_path / ".imp" / "change" / "workflow"
-    (wf / "skills" / "agent").mkdir(parents=True)
     (wf / "skills" / "user").mkdir(parents=True)
-    (wf / "skills" / "agent" / "refactor.md").write_text("# Refactor\ndo the thing\n")
+    (wf / "skills" / "refactor.md").write_text("# Refactor\ndo the thing\n")
     ctx = ToolContext(
         project_root=tmp_path,
         events_path=tmp_path / "events.jsonl",
@@ -44,7 +43,7 @@ def test_load_skill_emits_skill_load_event(tmp_path: Path) -> None:
     ]
     loads = [e for e in events if e["type"] == "skill_load"]
     assert len(loads) == 1
-    assert loads[0]["payload"] == {"name": "refactor", "source": "agent"}
+    assert loads[0]["payload"] == {"name": "refactor", "source": "internal"}
     assert loads[0]["agent_id"] is None
 
 
@@ -86,4 +85,4 @@ def test_load_skill_falls_back_to_user_dir(tmp_path: Path) -> None:
     ]
     loads = [e for e in events if e["type"] == "skill_load"]
     assert len(loads) == 1
-    assert loads[0]["payload"] == {"name": "shared", "source": "agent"}
+    assert loads[0]["payload"] == {"name": "shared", "source": "internal"}

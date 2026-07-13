@@ -33,7 +33,7 @@ NEW_SENTINELS = {
 }
 
 # Clauses the rewrite removes from every description (paths/sandbox live centrally
-# now — spec §4 — and in the tool-reference skill).
+# now — spec §4 — and in the imp-tool-reference skill).
 REMOVED_CLAUSES = [
     "relative to the project root",
     "relative to the worktree root",
@@ -65,7 +65,7 @@ def test_no_description_keeps_a_removed_paths_or_sandbox_clause() -> None:
 
 def test_relocating_tools_advertise_the_skill() -> None:
     for name in SKILL_ADVERTISERS:
-        assert "tool-reference" in _desc(name), f"{name} must point to tool-reference"
+        assert "imp-tool-reference" in _desc(name), f"{name} must point to imp-tool-reference"
 
 
 def test_explorer_toolset_description_word_budget() -> None:

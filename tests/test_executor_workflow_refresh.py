@@ -8,6 +8,8 @@ from pathlib import Path
 
 import pytest
 
+from imp.agents.skills import load_internal_skill
+from imp.assets import bundled_skills_dir
 from imp.engine.executor import (
     RunResult,
     _backfill_var_defaults,
@@ -448,6 +450,17 @@ def test_refresh_sources_from_control_root_not_worktree(tmp_path: Path) -> None:
     assert "name: t" in snap.read_text()                 # the control-root content
 
 
+def test_refresh_overlays_global_skills_into_snapshot(tmp_path: Path) -> None:
+    quest, _, _ = _seed_minimal_workflow(tmp_path)
+    # The minimal live workflow ships no skills/ dir, so any global skill in the
+    # snapshot can ONLY have arrived via overlay_global_skills.
+    assert _refresh_workflow_snapshot(quest) is False        # initial copy
+    snap_skills = quest.quest_dir / "workflow" / "skills"
+    for name in ("imp-knowledge", "imp-introspection", "imp-memory",
+                 "imp-tool-reference", "imp-driving-terminal-uis"):
+        assert (snap_skills / f"{name}.md").is_file(), name
+
+
 def test_refresh_ignores_worktree_edits_stays_noop(tmp_path: Path) -> None:
     """With the source anchored at the control root, editing ONLY the worktree
     leaves the refresh a no-op (no swap, snapshot bytes unchanged) — a change
@@ -468,3 +481,28 @@ def test_refresh_ignores_worktree_edits_stays_noop(tmp_path: Path) -> None:
     assert _refresh_workflow_snapshot(quest) is False   # no-op: source unchanged
     assert snap.read_bytes() == before
     assert not (quest.quest_dir / "workflow.tmp").exists()
+
+
+def test_refresh_workflow_skill_shadows_global_on_name_collision(tmp_path: Path) -> None:
+    """End-to-end workflow-wins precedence: a workflow that ships its own
+    skills/imp-knowledge.md shadows the bundled global pool skill of the same
+    name through the snapshot builder — the workflow copy is what lands and what
+    load_internal_skill resolves — while the other pool skills still overlay."""
+    quest, _, _ = _seed_minimal_workflow(tmp_path)
+    live_skills = tmp_path / "imp" / "workflows" / "imp" / "skills"
+    live_skills.mkdir(parents=True)
+    sentinel = "# imp-knowledge\nWORKFLOW-OWN COPY — not the global pool.\n"
+    (live_skills / "imp-knowledge.md").write_text(sentinel)
+
+    assert _refresh_workflow_snapshot(quest) is False        # initial copy
+    snap_skills = quest.quest_dir / "workflow" / "skills"
+
+    # copytree lands the workflow's own file first, so overlay_global_skills
+    # skips the colliding name: the snapshot holds the workflow copy verbatim.
+    assert (snap_skills / "imp-knowledge.md").read_text() == sentinel
+    pool_copy = (bundled_skills_dir() / "imp-knowledge.md").read_text()
+    assert (snap_skills / "imp-knowledge.md").read_text() != pool_copy
+    # The resolver returns the workflow copy (no frontmatter on the sentinel).
+    assert load_internal_skill(snap_skills, "imp-knowledge") == sentinel
+    # …and the non-colliding pool skills still overlay alongside it.
+    assert (snap_skills / "imp-memory.md").read_text().strip()

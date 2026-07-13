@@ -28,7 +28,7 @@ read the snapshot:
 - `partials/*.md` — shared prompt fragments the agent files include.
 - `scripts/*.sh` — the shell scripts that `script` steps execute.
 - `persona.md` — the workflow persona shared across agents.
-- `skills/agent/*.md` — the skills agents load (these docs among them).
+- `skills/*.md` — the internal skills agents load (these docs among them).
 
 Map a step name in `workflow.yaml` to its `agents/<name>.md` to read
 exactly what that step was told to do.

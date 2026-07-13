@@ -37,7 +37,7 @@ from imp.agents.tools.lines import file_is_cap_truncated, split_lines, truncate_
         "WARNING: the line-number prefix, `…[truncated]` suffixes, and U+FFFD "
         "characters are display-only — never paste them into `edit_file`/`write_file`. "
         "On CRLF files the trailing `\\r` IS content; preserve it. "
-        "See the `tool-reference` skill for image handling and caps."
+        "See the `imp-tool-reference` skill for image handling and caps."
     ),
     read_only=True,
 )
@@ -361,7 +361,7 @@ def _atomic_write_bytes(resolved: Path, data: bytes, *, display_path: str) -> No
         "file-faithful text — never `read_file`/`grep` display output (line-number "
         "prefixes, `…[truncated]`, U+FFFD will never match). Batch several "
         "edits to one file via `edits=[{old, new, replace_all?}]`, applied "
-        "sequentially, all-or-nothing. See `tool-reference` for size/UTF-8 limits."
+        "sequentially, all-or-nothing. See `imp-tool-reference` for size/UTF-8 limits."
     ),
 )
 async def edit_file(ctx: ToolContext, path: str, old: str | None = None,
