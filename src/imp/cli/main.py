@@ -432,21 +432,22 @@ def _emit_merge_blocked(
     quest: Quest, reason: str | None, detail: str | None = None,
     note: str | None = None,
 ) -> None:
-    """Merge couldn't complete — the user must act: wordmark, ⚠.
+    """Merge couldn't complete — the user must act. A red `… · merge blocked`
+    headline over the existing per-reason explanation in gold, flush left.
 
     `detail` is git's own stderr (carried on the `merge_blocked` event).
-    `note` is an optional message rendered before git's detail (e.g. the recovery-exhaustion note).
-    The `refused` and `conflict` reasons are neutral buckets — REFUSED alone covers
-    overwrite, unrelated histories, ref-lock, and object-store corruption — so the
-    template can only describe the common case. We append git's actual words for
-    those two so the surfaced reason is truthful for every refusal, not just the
-    overwrite one. `worktree_dirty` has a precise template and gets no detail."""
+    `note` is an optional message rendered before git's detail (e.g. the
+    recovery-exhaustion note). The `refused` and `conflict` reasons are neutral
+    buckets — REFUSED alone covers overwrite, unrelated histories, ref-lock, and
+    object-store corruption — so the template can only describe the common case.
+    We append git's actual words for those two so the surfaced reason is truthful
+    for every refusal, not just the overwrite one. `worktree_dirty` has a precise
+    template and gets no detail."""
     color = should_use_color(sys.stdout)
-    mark = "⚠ " if color else ""
     cid, base = quest.id, quest.base_branch
     if reason == "worktree_dirty":
         msg = f"Uncommitted work in the worktree; commit it, then `imp resume {cid}`."
-    elif reason == "refused":
+    elif reason =="refused":
         msg = (f"git refused to merge `imp/{cid}` into `{base}` (commonly: uncommitted "
                f"changes on `{base}` that the merge would overwrite). Resolve, then "
                f"`imp resume {cid}`.")
@@ -461,7 +462,9 @@ def _emit_merge_blocked(
         msg = f"{msg}\n{note}"
     if detail and reason in ("refused", "conflict"):
         msg = f"{msg}\ngit said: {detail.strip()}"
-    print(ansi(f"{mark}{msg}", "wordmark", enabled=color))
+    print()
+    print(_status_spine(cid, quest.title, "merge blocked", "red", color=color))
+    print(ansi(msg, "wordmark", enabled=color))
 
 
 def _handle_terminal_outcome(

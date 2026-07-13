@@ -57,15 +57,16 @@ def test_non_merge_pause_still_emits_paused_summary() -> None:
     ps.assert_called_once()          # ordinary pauses keep the summary line
 
 
-def test_emit_merge_blocked_notice_is_wordmark_under_dark_theme(monkeypatch, capsys) -> None:
+def test_emit_merge_blocked_headline_red_explanation_wordmark(monkeypatch, capsys) -> None:
     from imp.cli import palette as pal
     monkeypatch.setattr(main, "should_use_color", lambda stream: True)
     try:
         pal.set_theme("dark")
         main._emit_merge_blocked(_Change([]), "worktree_dirty")
         out = capsys.readouterr().out
-        assert pal.sgr("wordmark", enabled=True) in out   # \x1b[38;2;255;154;60m
-        assert pal.sgr("yellow", enabled=True) not in out  # not the muted yellow role
+        assert pal.sgr("red", enabled=True) in out       # red headline tail
+        assert pal.sgr("wordmark", enabled=True) in out  # gold explanation body
+        assert "⚠" not in out
     finally:
         pal.set_theme("ansi")
 
