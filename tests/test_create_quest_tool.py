@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 
 import pytest
@@ -134,3 +135,64 @@ def test_create_quest_defers_seed_and_survives_skew_workflow(tmp_path: Path) -> 
     seeded = State.load(created.state_dir)
     assert seeded.step is None
     assert seeded.has_started is False
+
+
+def test_start_true_creates_active_draft_and_spawns(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from imp.remote.daemon import spawn
+
+    calls: list[list[str]] = []
+    monkeypatch.setattr(
+        spawn, "_spawn_detached",
+        lambda argv, env, cwd: calls.append(argv))
+
+    ch, state = _make(tmp_path)
+    msg = get_registry()["create_quest"].invoke(_ctx(ch, state), {
+        "title": "Record a preference",
+        "description": "prefer tabs over spaces",
+        "workflow": "memory", "start": True})
+
+    new_id = next(p.name for p in (ch.control_root / ".imp" / "quests").iterdir()
+                  if p.name != ch.id)
+    created = Quest.load(ch.control_root, new_id)
+    assert created.origin == "draft"
+    meta = json.loads((created.quest_dir / "quest.json").read_text())
+    assert meta["workflow"] == "memory"
+
+    assert calls == [[
+        sys.executable, "-m", "imp", "resume", new_id,
+        "--non-interactive", "--autonomous"]]
+    assert new_id in msg
+    assert "started" in msg.lower()
+
+    child = next(e for e in ch.event_log().read()
+                 if e["type"] == "quest_created"
+                 and e["payload"].get("id") == new_id)
+    assert child["payload"]["kind"] == "started"
+
+
+def test_start_false_records_backlog_and_does_not_spawn(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from imp.remote.daemon import spawn
+
+    calls: list[list[str]] = []
+    monkeypatch.setattr(
+        spawn, "_spawn_detached",
+        lambda argv, env, cwd: calls.append(argv))
+
+    ch, state = _make(tmp_path)
+    get_registry()["create_quest"].invoke(_ctx(ch, state), {
+        "title": "T", "description": "b"})
+
+    new_id = next(p.name for p in (ch.control_root / ".imp" / "quests").iterdir()
+                  if p.name != ch.id)
+    created = Quest.load(ch.control_root, new_id)
+    assert created.origin == "followup"
+    assert calls == []
+
+    child = next(e for e in ch.event_log().read()
+                 if e["type"] == "quest_created"
+                 and e["payload"].get("id") == new_id)
+    assert child["payload"]["kind"] == "backlog"
