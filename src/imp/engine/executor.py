@@ -1394,7 +1394,8 @@ async def _route_agent(
             # reload keeps the transcript (the agent's last text is what the
             # AWAITING_USER resume delivers a reply to). Mirrors the resume:
             # edge's marker; cleared on the next forward Continue.
-            state.arm_step_resume(mode="solicit")
+            state.arm_step_resume(
+                mode="continue" if result.interrupt else "solicit")
             state.save(quest.state_dir)
         # A genuine your-turn yield gets its own reason so it stops sharing the
         # "interrupt" token; a real interrupt (interrupt=True) or a

@@ -197,6 +197,7 @@ async def test_heartbeats_dropped_before_event_log(tmp_path: Path) -> None:
 
 class _PauseCoordinator:
     should_pause = True
+    interrupted = True
 
     def runner_attached(self, fn, *, force_kill=None, agent_id=None):
         import contextlib
