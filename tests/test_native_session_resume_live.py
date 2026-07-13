@@ -21,7 +21,7 @@ from pathlib import Path
 
 import pytest
 
-from tests._live import _await_change_dir
+from tests._live import _await_change_dir, sandbox_sleep_precondition_failed
 from tests.conftest import _init_repo
 
 _WORKTREE_SRC = str(Path(__file__).parent.parent / "src")
@@ -204,6 +204,10 @@ def test_resumed_step_recalls_prior_reads_without_redo_or_400(
             proc.wait()
 
     status = _wait_for_status(state_path, "paused", timeout=30.0)
+    if status != "paused":
+        reason = sandbox_sleep_precondition_failed(events)
+        if reason is not None:
+            pytest.skip(reason)
     assert status == "paused", status
 
     # Pre-resume sanity: both files were read before the mid-bash interrupt. The
