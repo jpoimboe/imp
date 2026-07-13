@@ -31,7 +31,7 @@ def _archive(tmp_path: Path, quest_id: str, title: str) -> None:
 
 
 def _ns(**kw: bool) -> argparse.Namespace:
-    base = {"active": False, "backlog": False, "archived": False}
+    base = {"active": False, "backlog": False, "archived": False, "completed": False}
     base.update(kw)
     return argparse.Namespace(**base)
 
@@ -43,6 +43,20 @@ def test_selected_zones_defaults_to_all_three() -> None:
 def test_selected_zones_are_composable() -> None:
     assert _selected_search_zones(_ns(backlog=True)) == {"backlog"}
     assert _selected_search_zones(_ns(active=True, archived=True)) == {"active", "archive"}
+
+
+def test_selected_zones_completed_alone() -> None:
+    assert _selected_search_zones(_ns(completed=True)) == {"completed"}
+
+
+def test_selected_zones_archive_wins_over_completed() -> None:
+    # Passing both drops "completed" so a completed quest never double-lists.
+    assert _selected_search_zones(_ns(archived=True, completed=True)) == {"archive"}
+
+
+def test_selected_zones_default_excludes_completed() -> None:
+    # No-flag default is unchanged: completed quests appear under [archive].
+    assert "completed" not in _selected_search_zones(_ns())
 
 
 def test_search_active_labels_zone_and_carries_prose(tmp_path: Path) -> None:

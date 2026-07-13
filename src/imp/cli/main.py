@@ -2888,9 +2888,14 @@ def _selected_search_zones(args: argparse.Namespace) -> set[str]:
             ("active", args.active),
             ("backlog", args.backlog),
             ("archive", args.archived),
+            ("completed", args.completed),
         ) if on
     }
-    return picked or set(_SEARCH_ZONES)
+    picked = picked or set(_SEARCH_ZONES)
+    if "archive" in picked:
+        # Archive is the superset; drop the completed subset so nothing double-lists.
+        picked.discard("completed")
+    return picked
 
 
 def _search_active(control: Path, query: str) -> list[_SearchHit]:
