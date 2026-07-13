@@ -58,11 +58,11 @@ def test_imp_deferred_sweep_drains_deferred_md_append_only() -> None:
     assert "append-only" in low
     assert "check off" in low
     # The fixed disposition still records the durable opportunistic line in progress.md.
-    assert "under `## Completed plans` in\n  `{{ quest.home }}/progress.md`" in sw
+    assert "under `## Completed plans` in `{{ quest.home }}/progress.md`" in sw
     # The verify-triage toleration is recorded in deferred.md.
     assert (
-        "Record a toleration as a normal `## Deferred Followups` entry in\n"
-        "`{{ quest.home }}/deferred.md`"
+        "Record a toleration as a normal `## Deferred Followups` entry in"
+        " `{{ quest.home }}/deferred.md`"
     ) in sw
 
 
@@ -146,6 +146,5 @@ def test_imp_completed_plans_and_per_task_status_stay_on_progress_md() -> None:
     # The deferred-sweep records the durable opportunistic line under Completed plans
     # in progress.md (status), not deferred.md.
     assert (
-        "under `## Completed plans` in\n"
-        "  `{{ quest.home }}/progress.md`"
+        "under `## Completed plans` in `{{ quest.home }}/progress.md`"
     ) in _imp("deferred-sweep.md")
