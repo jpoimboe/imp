@@ -110,3 +110,21 @@ def test_threshold_has_lazy_orientation_cue() -> None:
     start = body.index(marker)
     section = body[start:body.index("{% include", start)].lower()
     assert "speak plainly" in section
+
+
+def test_sandbox_debugging_partial_documents_both_hatches() -> None:
+    text = (PARTIALS / "sandbox-debugging.md").read_text()
+    # Self-contained section header.
+    assert "## Debugging live processes" in text
+    # (a) the /sandbox off escape hatch and its human-only property.
+    assert "/sandbox off" in text
+    assert "human-only" in text
+    assert "only the user can type it" in text
+    # (b) the reminder to re-enable the sandbox afterward.
+    assert "/sandbox on" in text
+    # names a concrete live-process debugger so "when to recommend" is grounded.
+    assert "gdb" in text
+    # (c) the SIGUSR1 self-dump path: trigger, pid discovery, and dump file.
+    assert "kill -USR1 <pid>" in text
+    assert ".imp/quests/<id>/lock" in text
+    assert ".imp/quests/<id>/stack-dump.txt" in text
