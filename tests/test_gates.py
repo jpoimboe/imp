@@ -111,10 +111,21 @@ def test_run_script_wraps_with_active_policy(tmp_path, monkeypatch) -> None:
             captured["argv"] = argv
             self._inner = real_popen(["true"], **{k: v for k, v in kw.items()
                                                   if k in ("cwd", "env", "start_new_session",
-                                                           "stdout", "stderr", "text")})
+                                                           "stdout", "stderr")})
 
-        def communicate(self, timeout=None):
-            return self._inner.communicate(timeout=timeout)
+        @property
+        def stdout(self):
+            return self._inner.stdout
+
+        @property
+        def stderr(self):
+            return self._inner.stderr
+
+        def poll(self):
+            return self._inner.poll()
+
+        def wait(self, timeout=None):
+            return self._inner.wait(timeout)
 
         @property
         def returncode(self):
@@ -150,10 +161,21 @@ def test_run_script_refreshes_stale_imp_slug_in_sandbox(tmp_path, monkeypatch) -
             captured["argv"] = argv
             self._inner = real_popen(["true"], **{k: v for k, v in kw.items()
                                                   if k in ("cwd", "env", "start_new_session",
-                                                           "stdout", "stderr", "text")})
+                                                           "stdout", "stderr")})
 
-        def communicate(self, timeout=None):
-            return self._inner.communicate(timeout=timeout)
+        @property
+        def stdout(self):
+            return self._inner.stdout
+
+        @property
+        def stderr(self):
+            return self._inner.stderr
+
+        def poll(self):
+            return self._inner.poll()
+
+        def wait(self, timeout=None):
+            return self._inner.wait(timeout)
 
         @property
         def returncode(self):
@@ -866,3 +888,97 @@ def test_route_script_non_interruptible_passes_no_abort(tmp_path) -> None:
         assert captured["abort"] is None
 
     anyio.run(main)
+
+
+def test_run_script_output_cap_kills_group_and_raises(tmp_path, monkeypatch) -> None:
+    """A child flooding stdout past GATE_OUTPUT_CAP_BYTES is torn down (group and
+    all) and run_script raises ScriptOutputExceeded rather than accumulating
+    unboundedly. Proves the bounded-retain property under a fast chatty runaway."""
+    import imp.engine.gates as gatesmod
+    from imp.engine.gates import ScriptOutputExceeded, run_script
+
+    assert issubclass(ScriptOutputExceeded, subprocess.SubprocessError)
+    monkeypatch.setattr(gatesmod, "GATE_OUTPUT_CAP_BYTES", 1_000_000)
+
+    pidfile = tmp_path / "child.pid"
+    prog = (
+        "import sys\n"
+        "buf = b'x' * 65536\n"
+        "while True:\n"
+        "    sys.stdout.buffer.write(buf)\n"
+        "    sys.stdout.buffer.flush()\n"
+    )
+    # Background a sleeper as a group member so we can prove the WHOLE group is
+    # torn down; exec the flooder so it becomes the group leader (was sh).
+    cmd = (f"sleep 30 & echo $! > {shlex.quote(str(pidfile))}; "
+           f"exec {sys.executable} -c {shlex.quote(prog)}")
+    step = _script_step(cmd)
+
+    with pytest.raises(ScriptOutputExceeded):
+        run_script(step, cwd=tmp_path)
+
+    child_pid = int(pidfile.read_text())
+    deadline = time.monotonic() + 2.0
+    while time.monotonic() < deadline:
+        try:
+            os.kill(child_pid, 0)
+        except ProcessLookupError:
+            break
+        time.sleep(0.05)
+    else:
+        pytest.fail("backgrounded child survived the output-cap group kill")
+
+
+def test_run_script_hard_ceiling_kills_when_no_timeout(tmp_path, monkeypatch) -> None:
+    """A step with timeout_seconds=None running a non-exiting child is killed at
+    GATE_HARD_CEILING_S and raises subprocess.TimeoutExpired. Tested against a
+    reduced ceiling so it runs fast."""
+    import imp.engine.gates as gatesmod
+    from imp.engine.gates import run_script
+
+    monkeypatch.setattr(gatesmod, "GATE_HARD_CEILING_S", 1)
+    step = _script_step("sleep 30", timeout_seconds=None)
+
+    t0 = time.monotonic()
+    with pytest.raises(subprocess.TimeoutExpired):
+        run_script(step, cwd=tmp_path)
+    elapsed = time.monotonic() - t0
+    assert 1 <= elapsed < 5
+
+
+def test_run_script_explicit_timeout_beats_hard_ceiling(tmp_path, monkeypatch) -> None:
+    """An explicit step.timeout_seconds still wins over the (here large) hard
+    ceiling: the step is killed at its own 1s timeout, not the ceiling."""
+    import imp.engine.gates as gatesmod
+    from imp.engine.gates import run_script
+
+    monkeypatch.setattr(gatesmod, "GATE_HARD_CEILING_S", 3600)
+    step = _script_step("sleep 30", timeout_seconds=1)
+
+    t0 = time.monotonic()
+    with pytest.raises(subprocess.TimeoutExpired):
+        run_script(step, cwd=tmp_path)
+    elapsed = time.monotonic() - t0
+    assert 1 <= elapsed < 5
+
+
+def test_run_script_decodes_utf8_multibyte(tmp_path) -> None:
+    """Binary drain decodes child bytes as utf-8: a multibyte sequence round-trips
+    to the correct str (not latin-1 mojibake, not raw bytes)."""
+    from imp.engine.gates import run_script
+
+    step = _script_step(r"printf '\303\251'")   # UTF-8 bytes for 'é'
+    out = run_script(step, cwd=tmp_path)
+    assert out["stdout"] == "é"
+
+
+def test_run_script_large_output_below_cap_returns_full(tmp_path) -> None:
+    """Output well under the cap (but far past a pipe buffer) is drained in full
+    without tripping the cap — proves the drain reads past a full pipe."""
+    from imp.engine.gates import run_script
+
+    prog = "import sys; sys.stdout.write('y' * 500000)"
+    step = _script_step(f"exec {sys.executable} -c {shlex.quote(prog)}")
+    out = run_script(step, cwd=tmp_path)
+    assert out["exit"] == 0
+    assert len(out["stdout"]) == 500000

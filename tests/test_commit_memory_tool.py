@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -209,3 +210,27 @@ def test_top_level_only_guard(tmp_path: Path) -> None:
             content="x\n",
             message="memory: x",
         )
+
+
+def test_commit_memory_registers_regardless_of_import_order() -> None:
+    # Cold-import regression: when imp.engine.executor — hence a
+    # partially warm imp.engine.agent_run — is imported before the tools
+    # registry, commit_memory's old MODULE-LEVEL imp.providers.* imports
+    # re-entered the agent_run circular import, ImportError'd inside
+    # _register_builtins, and the tool was silently skipped. Run that provoking
+    # order in a FRESH interpreter and assert the tool still registers.
+    code = (
+        "import imp.engine.executor\n"
+        "import imp.agents.tools\n"
+        "from imp.agents.tools import get_registry\n"
+        "assert 'commit_memory' in get_registry(), 'commit_memory missing'\n"
+        "print('REGISTERED-OK')\n"
+    )
+    out = subprocess.run(
+        [sys.executable, "-c", code], capture_output=True, text=True
+    )
+    assert out.returncode == 0, (
+        f"cold import left commit_memory unregistered:\n"
+        f"stdout={out.stdout!r}\nstderr={out.stderr!r}"
+    )
+    assert "REGISTERED-OK" in out.stdout

@@ -12,9 +12,6 @@ from typing import Any
 
 from imp.agents.tools import imp_tool
 from imp.engine.worktree import RepoGitLock, _git, _git_ok
-from imp.providers.config import parse_project_facts
-from imp.providers.effective import memory_validation_scopes
-from imp.providers.memory import validate_memory_tree
 
 
 @imp_tool(
@@ -30,6 +27,10 @@ from imp.providers.memory import validate_memory_tree
     ),
 )
 def commit_memory(ctx: Any, path: str, content: str, message: str) -> str:
+    from imp.providers.config import parse_project_facts
+    from imp.providers.effective import memory_validation_scopes
+    from imp.providers.memory import validate_memory_tree
+
     if ctx.quest is None:
         raise RuntimeError(
             "commit_memory is only available to top-level quest steps"

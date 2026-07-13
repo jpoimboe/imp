@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import contextlib
 import os
+import selectors
 import signal
 import subprocess
 import time
@@ -18,6 +19,9 @@ from imp.engine.types import Action, Continue, Rule, Step
 
 GATE_KILL_GRACE_S = 2.0  # SIGTERM-to-SIGKILL grace window for a gate subprocess group
 _POLL_INTERVAL_S = 0.5  # max interrupt-to-kill latency: one poll tick
+_READ_CHUNK_BYTES = 64 * 1024  # per os.read() chunk off each stream
+GATE_OUTPUT_CAP_BYTES = 128 * 1024 * 1024  # total stdout+stderr retained before teardown
+GATE_HARD_CEILING_S = 1800  # wall-clock deadline used only when step.timeout_seconds is None
 
 
 class ScriptInterrupted(Exception):
@@ -26,7 +30,14 @@ class ScriptInterrupted(Exception):
     pre-navigation pause, not a gate verdict."""
 
 
-def _graceful_kill(proc: subprocess.Popen[str]) -> None:
+class ScriptOutputExceeded(subprocess.SubprocessError):
+    """Raised by run_script when a gate's total stdout+stderr exceeds
+    GATE_OUTPUT_CAP_BYTES. The process group has already been torn down
+    gracefully; the caller lets it propagate to the executor's last-resort guard,
+    exactly as a gate TimeoutExpired does today (no dedicated pause verb)."""
+
+
+def _graceful_kill(proc: subprocess.Popen[bytes]) -> None:
     """Tear down a gate subprocess GROUP gracefully, then close its read FDs.
 
     SIGTERM the group (with start_new_session=True, proc.pid is the group
@@ -35,7 +46,7 @@ def _graceful_kill(proc: subprocess.Popen[str]) -> None:
     survivors, then reap. The final proc.wait() cannot deadlock on a full pipe:
     a SIGKILLed process is already dead, so wait returns regardless of unread
     buffer. Closing proc.stdout/proc.stderr releases the parent-side read FDs
-    that a timed-out or aborted communicate() leaves open."""
+    that a timed-out or aborted selector drain leaves open."""
     with contextlib.suppress(ProcessLookupError):
         os.killpg(proc.pid, signal.SIGTERM)
     try:
@@ -90,11 +101,11 @@ def run_script(
     bwrap (build_sandbox_argv appends `sh -c <command>`); otherwise the bare
     `sh -c` runs.
 
-    Reaping (spec B.9/H-A): because the sandbox drops --die-with-parent, a timeout
-    must kill the process GROUP, not just the bwrap pid — else the inner `sh` is
-    orphaned. So this uses Popen(start_new_session=True) + a poll loop of
-    communicate(timeout=poll) calls and a graceful group kill (SIGTERM -> grace ->
-    SIGKILL) on both the timeout and abort paths. A gate's cwd (step.cwd or cwd)
+    Reaping (spec B.9/H-A): because the sandbox drops --die-with-parent, a
+    timeout must kill the process GROUP, not just the bwrap pid — else the inner
+    `sh` is orphaned. So this uses Popen(start_new_session=True) + an owned
+    selectors drain loop and a graceful group kill (SIGTERM -> grace -> SIGKILL)
+    on the timeout, abort, and output-cap paths. A gate's cwd (step.cwd or cwd)
     must lie inside the writable set (worktree/`/tmp`); a gate pointed at the RO
     floor fails.
 
@@ -114,25 +125,78 @@ def run_script(
             if policy is not None else ["sh", "-c", cmd])
     proc = subprocess.Popen(
         argv, cwd=run_cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-        text=True, env=env, start_new_session=True,
+        env=env, start_new_session=True,
     )
-    # Drain-preserving poll loop: each tick is a communicate() call (NOT
-    # wait()/poll()), which is what reads stdout/stderr — so a chatty child never
-    # deadlocks on a full pipe. CPython accumulates output across repeated
-    # communicate(timeout=...) retries without loss. On each caught timeout,
-    # check the abort predicate (interruptible steps only) and the overall
-    # elapsed timeout; both terminal paths tear the group down gracefully.
+    # Owned selector drain: os.read chunks off stdout/stderr as they arrive (so a
+    # chatty child never deadlocks on a full pipe) into per-stream bytearrays with
+    # a running total. communicate() is avoided precisely because it retains
+    # everything internally with no exposed byte count — which is what let a
+    # wedged gate balloon RSS unbounded. The abort predicate and the wall-clock
+    # deadline are evaluated on a _POLL_INTERVAL_S cadence (one check per tick,
+    # NOT per read) so interrupt/timeout latency matches the old
+    # communicate(timeout=_POLL_INTERVAL_S) loop exactly; within a tick every
+    # ready stream is drained fully (non-blocking reads until EWOULDBLOCK/EOF).
+    # The output cap is checked after every chunk, so worst-case retained memory
+    # is cap + one chunk. All three terminal paths tear the group down via
+    # _graceful_kill. A stream returning EOF is unregistered; the loop ends once
+    # the child has exited and both streams are drained.
+    assert proc.stdout is not None and proc.stderr is not None
     start = time.monotonic()
-    timeout = step.timeout_seconds
-    while True:
-        try:
-            stdout, stderr = proc.communicate(timeout=_POLL_INTERVAL_S)
-        except subprocess.TimeoutExpired:
-            if abort is not None and abort():
-                _graceful_kill(proc)
-                raise ScriptInterrupted from None
-            if timeout is not None and time.monotonic() - start >= timeout:
-                _graceful_kill(proc)
-                raise subprocess.TimeoutExpired(proc.args, timeout) from None
-            continue
-        return {"exit": proc.returncode, "stdout": stdout.rstrip(), "stderr": stderr}
+    timeout = (step.timeout_seconds if step.timeout_seconds is not None
+               else GATE_HARD_CEILING_S)
+    out_buf = bytearray()
+    err_buf = bytearray()
+    total = 0
+    out_fd = proc.stdout.fileno()
+    err_fd = proc.stderr.fileno()
+    os.set_blocking(out_fd, False)
+    os.set_blocking(err_fd, False)
+    bufs: dict[int, bytearray] = {out_fd: out_buf, err_fd: err_buf}
+    selector = selectors.DefaultSelector()
+    try:
+        selector.register(out_fd, selectors.EVENT_READ)
+        selector.register(err_fd, selectors.EVENT_READ)
+        # First abort/deadline check falls one tick in, matching the old loop
+        # (which checked only after its first communicate(timeout=_POLL_INTERVAL_S)
+        # tick).
+        next_check = start + _POLL_INTERVAL_S
+        while proc.poll() is None or selector.get_map():
+            now = time.monotonic()
+            if now >= next_check:
+                if abort is not None and abort():
+                    _graceful_kill(proc)
+                    raise ScriptInterrupted from None
+                if now - start >= timeout:
+                    _graceful_kill(proc)
+                    raise subprocess.TimeoutExpired(proc.args, timeout) from None
+                next_check = now + _POLL_INTERVAL_S
+            if selector.get_map():
+                for key, _mask in selector.select(_POLL_INTERVAL_S):
+                    while True:
+                        try:
+                            chunk = os.read(key.fd, _READ_CHUNK_BYTES)
+                        except BlockingIOError:
+                            break
+                        if not chunk:
+                            selector.unregister(key.fd)
+                            break
+                        bufs[key.fd].extend(chunk)
+                        total += len(chunk)
+                        if total > GATE_OUTPUT_CAP_BYTES:
+                            _graceful_kill(proc)
+                            raise ScriptOutputExceeded(
+                                f"gate output exceeded {GATE_OUTPUT_CAP_BYTES} bytes"
+                            ) from None
+            else:
+                time.sleep(_POLL_INTERVAL_S)
+        proc.wait()
+    finally:
+        selector.close()
+        for stream in (proc.stdout, proc.stderr):
+            if stream is not None:
+                stream.close()
+    return {
+        "exit": proc.returncode,
+        "stdout": out_buf.decode("utf-8", "replace").rstrip(),
+        "stderr": err_buf.decode("utf-8", "replace"),
+    }
