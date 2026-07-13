@@ -125,9 +125,9 @@ def test_persona_designs_bad_states_out_before_skipping_guards() -> None:
     text = pathlib.Path(
         "src/imp/assets/workflows/imp/persona.md"
     ).read_text()
-    assert "Design so bad states can't arise; then don't add error handling, fallbacks," in text
+    assert "Design so bad states can't arise; then add no error handling, fallbacks," in text
     # The remainder of the rule stays intact.
-    assert "Only validate at system boundaries (user input," in text
+    assert "validate only at system boundaries (user input," in text
     # The old bare opener is gone.
     assert "- Don't add error handling, fallbacks, or validation for scenarios" not in text
 
