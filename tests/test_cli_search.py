@@ -163,3 +163,26 @@ def test_cmd_search_composes_two_zone_flags(tmp_path: Path, capsys) -> None:
     assert rc == 0
     assert "darkactive" in out and "darkbk" in out    # both selected zones included
     assert "darkarc" not in out                       # archive excluded
+
+
+def test_search_parser_accepts_completed_and_merged_after() -> None:
+    ns = _build_parser().parse_args(
+        ["search", "dark", "--completed", "--merged-after", "abc123"])
+    assert ns.completed is True
+    assert ns.merged_after == "abc123"
+
+
+def test_search_parser_defaults_completed_false_merged_after_none() -> None:
+    ns = _build_parser().parse_args(["search", "dark"])
+    assert ns.completed is False
+    assert ns.merged_after is None
+
+
+def test_search_help_mentions_completed_and_merged_after(capsys) -> None:
+    with pytest.raises(SystemExit):
+        _build_parser().parse_args(["search", "--help"])
+    out = capsys.readouterr().out
+    out_flat = " ".join(out.split())
+    assert "Search completed (merged) quests." in out
+    assert "keep only quests whose" in out
+    assert "--completed scopes to merged quests" in out_flat

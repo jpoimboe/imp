@@ -3284,7 +3284,7 @@ def _build_parser() -> argparse.ArgumentParser:
             "Search active (in-flight + drafts), backlog, and archived quests "
             "for the query as a case-insensitive substring of a quest's id, "
             "title, or conversation content. With no zone flag, all three zones "
-            "are searched."),
+            "are searched. --completed scopes to merged quests."),
     )
     p_search.add_argument(
         "query", metavar="QUERY",
@@ -3298,6 +3298,13 @@ def _build_parser() -> argparse.ArgumentParser:
     p_search.add_argument(
         "--archived", action="store_true",
         help="Search archived (completed, abandoned, left) quests.")
+    p_search.add_argument(
+        "--completed", action="store_true",
+        help="Search completed (merged) quests.")
+    p_search.add_argument(
+        "--merged-after", metavar="COMMIT", default=None,
+        help="With --completed, keep only quests whose merge landed after "
+             "COMMIT (not an ancestor of it).")
     p_search.add_argument(
         "-l", "--list", action="store_true", dest="list",
         help="One terse line per quest (id, title, zone); no excerpts.")
