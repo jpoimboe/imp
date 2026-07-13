@@ -2936,3 +2936,61 @@ def test_compose_startup_spinner_only_when_id_absent() -> None:
     assert rows is not None
     assert len(rows) == 1                            # degrades to spinner-only
     assert "resuming" in rows[0]
+
+
+def test_compose_position_row_shows_unsandboxed_after_title() -> None:
+    from imp.cli.live_driver import compose_position_row
+    row = compose_position_row(activity=_pos_activity(), quest_id="z9gixx",
+                               title="streaming footer", prompt_tokens=None,
+                               color=False, width=80, unsandboxed=True)
+    assert row == ("z9gixx · streaming footer · unsandboxed · implementation "
+                   "phase · plan 1/1 · task 1/3 · m")
+
+
+def test_compose_position_row_unsandboxed_after_id_when_no_title() -> None:
+    from imp.cli.live_driver import compose_position_row
+    row = compose_position_row(activity=_pos_activity(), quest_id="z9gixx",
+                               title="", prompt_tokens=None,
+                               color=False, width=80, unsandboxed=True)
+    assert row == ("z9gixx · unsandboxed · implementation "
+                   "phase · plan 1/1 · task 1/3 · m")
+
+
+def test_compose_identity_toolbar_unsandboxed_after_title() -> None:
+    from imp.cli.live_driver import compose_identity_toolbar
+    bar = compose_identity_toolbar(quest_id="z9gixx", title="t", color=False,
+                                   width=80, unsandboxed=True)
+    assert bar == "z9gixx · t · unsandboxed"
+
+
+def test_compose_identity_toolbar_unsandboxed_after_id_when_no_title() -> None:
+    from imp.cli.live_driver import compose_identity_toolbar
+    bar = compose_identity_toolbar(quest_id="z9gixx", title="", color=False,
+                                   width=80, unsandboxed=True)
+    assert bar == "z9gixx · unsandboxed"
+
+
+def test_compose_position_row_unsandboxed_is_bold_red_under_ansi() -> None:
+    from imp.cli.live_driver import compose_position_row
+    try:
+        pal.set_theme("ansi")
+        row = compose_position_row(activity=_pos_activity(), quest_id="z9gixx",
+                                   title="t", prompt_tokens=None, color=True,
+                                   width=120, unsandboxed=True)
+    finally:
+        pal.set_theme("ansi")
+    parts = row.split(" · ")
+    # id · title · unsandboxed · phase · ...
+    assert "unsandboxed" in parts[2]
+    assert "\x1b[1m" in parts[2] and "\x1b[31m" in parts[2]
+
+
+def test_driver_unsandboxed_flag_defaults_off_and_toggles_into_toolbar() -> None:
+    drv = LiveDriver(stream=io.StringIO(), color=False, width=80,
+                     status=LiveStatus(io.StringIO()), quest_id="z9gixx",
+                     title="t")
+    assert drv.unsandboxed is False
+    assert "unsandboxed" not in (drv.compose_toolbar_static() or "")
+    drv.set_unsandboxed(True)
+    assert drv.unsandboxed is True
+    assert "unsandboxed" in (drv.compose_toolbar_static() or "")

@@ -142,7 +142,7 @@ def _slate_wrap(body: str, bg: str, width: int) -> str:
 
 
 def compose_identity_toolbar(*, quest_id: str | None, title: str, color: bool,
-                             width: int) -> str | None:
+                             width: int, unsandboxed: bool = False) -> str | None:
     """Minimal id · title identity bar for the opening prompt, before any activity exists."""
     if not quest_id:
         return None
@@ -150,20 +150,25 @@ def compose_identity_toolbar(*, quest_id: str | None, title: str, color: bool,
     over = bool(bg)
     id_seg = _paint(quest_id, "wordmark", color=color, over_bg=over)
     title_seg = title if title else None
-    body = rt.compose_label([id_seg, title_seg])
+    unsandboxed_seg = (_paint("unsandboxed", *pal.NODE_COLORS["error"],
+                              color=color, over_bg=over) if unsandboxed else None)
+    body = rt.compose_label([id_seg, title_seg, unsandboxed_seg])
     return _slate_wrap(body, bg, width)
 
 
 def compose_position_row(*, activity: nv.Activity, quest_id: str | None,
                          title: str, prompt_tokens: int | None, color: bool,
                          width: int, context_pct: float | None = None,
-                         checkpoint_threshold: float | int | None = None) -> str:
+                         checkpoint_threshold: float | int | None = None,
+                         unsandboxed: bool = False) -> str:
     """Row 3 of the live footer: one flat, left-aligned line ordered
     id · title · phase · plan · counter · model context-bar."""
     bg = pal.user_bg_open(enabled=color)
     over = bool(bg)
     id_seg = _paint(quest_id, "wordmark", color=color, over_bg=over) if quest_id else None
     title_seg = title if title else None
+    unsandboxed_seg = (_paint("unsandboxed", *pal.NODE_COLORS["error"],
+                              color=color, over_bg=over) if unsandboxed else None)
     phase_seg = (_paint(activity.phase, *pal.NODE_COLORS["step"], color=color, over_bg=over)
                  if activity.phase else None)
     plan_seg = (_paint(activity.plan, *pal.NODE_COLORS["step"], color=color, over_bg=over)
@@ -177,8 +182,8 @@ def compose_position_row(*, activity: nv.Activity, quest_id: str | None,
         bar = context_bar(activity.model, prompt_tokens, context_pct=context_pct,
                           checkpoint_threshold=checkpoint_threshold,
                           color=color, over_bg=over)
-    body = rt.compose_label([id_seg, title_seg, phase_seg, plan_seg, counter_seg,
-                             rt.join_space(model_seg, bar)])
+    body = rt.compose_label([id_seg, title_seg, unsandboxed_seg, phase_seg, plan_seg,
+                             counter_seg, rt.join_space(model_seg, bar)])
     return _slate_wrap(body, bg, width)
 
 
@@ -317,6 +322,7 @@ class LiveDriver:
         self._preceded_by_blank = preceded_by_blank
         self._startup_verb = startup_verb
         self._startup_start_iso: str | None = None   # block start for the startup block-age timer
+        self._unsandboxed = False
         self._emitted_any = False
         self._last_header_position: str | None = None
         self._deferred: list[tuple[list[str], bool, str]] = []
@@ -362,6 +368,14 @@ class LiveDriver:
         self._walk()
         self._refresh_status()
 
+    @property
+    def unsandboxed(self) -> bool:
+        return self._unsandboxed
+
+    def set_unsandboxed(self, value: bool) -> None:
+        self._unsandboxed = value
+        self._refresh_status()
+
     def seed_opening_intent(self, text: str) -> None:
         # Optimistic local echo at submit time; mirrors seed_pending_reply (emits via _walk).
         self._builder.seed_opening_intent(text)
@@ -391,7 +405,8 @@ class LiveDriver:
             prompt_tokens=self._builder.latest_prompt_tokens,
             color=self._color, width=w,
             context_pct=self._builder.latest_context_pct,
-            checkpoint_threshold=self._builder.latest_checkpoint_threshold)
+            checkpoint_threshold=self._builder.latest_checkpoint_threshold,
+            unsandboxed=self._unsandboxed)
         rows = [a_line, "", p_row]
         rows += compose_subagent_rows(
             self._builder, color=self._color, width=w, now_iso=now_iso)
@@ -408,7 +423,7 @@ class LiveDriver:
         root = self._builder.tree.root
         identity_row = compose_identity_toolbar(
             quest_id=root.id, title=root.title,
-            color=self._color, width=term_width())
+            color=self._color, width=term_width(), unsandboxed=self._unsandboxed)
         if identity_row is None:
             return [a_line]
         return [a_line, "", identity_row]
@@ -429,13 +444,14 @@ class LiveDriver:
         if activity is None:
             return compose_identity_toolbar(
                 quest_id=root.id, title=root.title,
-                color=self._color, width=term_width())
+                color=self._color, width=term_width(), unsandboxed=self._unsandboxed)
         return compose_position_row(
             activity=activity, quest_id=root.id, title=root.title,
             prompt_tokens=self._builder.latest_prompt_tokens,
             color=self._color, width=term_width(),
             context_pct=self._builder.latest_context_pct,
-            checkpoint_threshold=self._builder.latest_checkpoint_threshold)
+            checkpoint_threshold=self._builder.latest_checkpoint_threshold,
+            unsandboxed=self._unsandboxed)
 
     # -- emission -------------------------------------------------------------
     def _cur_width(self) -> int:
