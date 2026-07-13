@@ -59,7 +59,7 @@ class SandboxPolicy:
     secret_files: tuple[str, ...]             # --ro-bind /dev/null masks (existing only)
     setenv: tuple[tuple[str, str], ...]       # resolved env allowlist key/value pairs
     network: bool                             # True → no --unshare-net
-    note: str = ""                            # "" | "unsandboxed_by_config" | "sandbox_disabled"
+    note: str = "" # "" | "unsandboxed_by_config" | "sandbox_disabled" | "unsandboxed_override"
     quest_home: str = ""                     # <control>/.imp/quests/<id> rw bind ("" → none)
     readonly_overlays: tuple[str, ...] = ()  # ro subtrees; after git_ro_remask, before caches
     git_ref_reexpose: tuple[str, ...] = ()   # rw re-expose of refs/heads/imp; after git_ro_remask
