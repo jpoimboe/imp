@@ -342,7 +342,7 @@ def _parse_provider_envs(raw: Any, src: SourceLoc) -> dict[str, str]:
 _SANDBOX_BOOL_KEYS = ("enabled", "allow_unsandboxed", "network")
 _DRIVER_KNOWN_KEYS = {"name", "events", "startup_timeout"}
 _SANDBOX_LIST_KEYS = (
-    "secret_paths", "writable_caches", "extra_readable", "extra_writable", "extra_env",
+    "secret_paths", "writable_caches", "extra_readable", "extra_writable", "env_passthrough",
 )
 
 
