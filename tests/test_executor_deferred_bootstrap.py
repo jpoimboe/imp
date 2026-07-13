@@ -4,6 +4,7 @@ shared seed_workflow_start helper, without a spurious vars_backfilled event; a
 genuinely completed quest (step None, has_started True) still completes untouched."""
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -104,3 +105,69 @@ async def test_completed_quest_still_completes_without_bootstrap(tmp_path: Path)
 
     assert result is RunResult.COMPLETED
     assert not sink, "a completed quest must not re-seed and dispatch a step"
+
+
+def _seed_var_workflow_with_git(root: Path) -> object:
+    """Like _seed_var_workflow but also initialises a minimal git repo so
+    Quest.create_draft can call head_of() when exercising the eager path."""
+
+    def _g(*args: str) -> None:
+        subprocess.run(["git", *args], cwd=root, capture_output=True, check=True)
+
+    _g("init", "-q", "-b", "main")
+    _g("config", "user.email", "t@t")
+    _g("config", "user.name", "t")
+    (root / ".gitignore").write_text(".imp/\n")
+    (root / "README.md").write_text("seed\n")
+    _g("add", "-A")
+    _g("commit", "-qm", "seed")
+    return _seed_var_workflow(root)
+
+
+@pytest.mark.anyio
+async def test_deferred_and_eager_creation_yield_identical_seeded_state(
+    tmp_path: Path,
+) -> None:
+    """Acceptance criterion for quest vava71: a deferred-then-resumed draft and
+    an eagerly-created quest reach byte-identical seeded State fields."""
+    sink: list = []
+    _register_invocation_capturing({"status": "Success"}, sink)
+
+    quest_deferred = _seed_var_workflow_with_git(tmp_path)
+    State(id=quest_deferred.id, step=None, step_attempt=0, status="new").save(
+        quest_deferred.state_dir,
+    )
+
+    first_seeded: list[State] = []
+
+    def _snap(_e: object) -> None:
+        if first_seeded:
+            return
+        st = State.load(quest_deferred.state_dir)
+        if st.step is not None:
+            first_seeded.append(st)
+
+    await run_quest(quest_deferred, on_event=_snap)
+    assert first_seeded, "deferred path never bootstrapped"
+
+    from imp.engine.quest import Quest
+
+    quest_eager = Quest.create_draft(
+        tmp_path,
+        title="eager",
+        quest_id="eager-q",
+        base_branch="main",
+        defer_seed=False,
+    )
+    state_eager = State.load(quest_eager.state_dir)
+
+    st_d = first_seeded[0]
+    deferred_tuple = (st_d.step, st_d.step_label, st_d.phase_label, st_d.vars.get("n"))
+    eager_tuple = (
+        state_eager.step,
+        state_eager.step_label,
+        state_eager.phase_label,
+        state_eager.vars.get("n"),
+    )
+    assert deferred_tuple == eager_tuple
+    assert st_d.vars == state_eager.vars
