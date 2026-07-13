@@ -310,6 +310,16 @@ def test_finalize_cover_check_marks_covered_by() -> None:
     low = body.lower()
     # The cover-check consumes imp search's terse -l list across active + backlog.
     assert "imp search --active --backlog -l" in body
+    # §1a now also searches the completed zone, timing-filtered by the fork point.
+    assert (
+        "imp search --active --backlog --completed "
+        "--merged-after {{ quest.orig_base_head }} -l" in body
+    )
+    # A Jinja guard keeps the completed dimension only when a fork point exists;
+    # the plain active+backlog search is the no-fork-point fallback.
+    assert "{% if quest.orig_base_head %}" in body
+    # The §1a framing names completed quests alongside active and backlog.
+    assert "active, backlog, or completed" in body
     # A confirmed cover writes the covered-by terminal marker.
     assert "— covered-by <id>" in body
     # Fail-safe: only a positively confirmed tracker suppresses the human ask.
