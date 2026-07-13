@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from imp.cli.main import _abandon, _build_parser, _status_rows
+from imp.cli.main import _abandon, _status_rows
 from imp.engine import worktree
 from imp.engine.abandon import tear_down_quest
 from imp.engine.quest import Quest
@@ -96,55 +96,6 @@ def test_abandon_already_gone_is_idempotent_and_reaps_branch(tmp_path: Path) -> 
     assert rc == 0                                              # not the rc=2 LoadError path
     assert _git(tmp_path, "branch", "--list", "imp/feat").stdout.strip() == ""  # reaped
 
-
-def test_abandon_accepts_yes_flag() -> None:
-    parser = _build_parser()
-    assert parser.parse_args(["abandon", "feat"]).yes is False
-    assert parser.parse_args(["abandon", "--yes", "feat"]).yes is True
-
-
-def test_abandon_materialized_confirms_on_tty(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    _seed_control(tmp_path)
-    Quest.create(tmp_path, title="x", quest_id="feat", base_branch="main")
-    monkeypatch.setattr("imp.cli.main._interactive", lambda: True)
-    monkeypatch.setattr("builtins.input", lambda _p: "y")
-    rc = _abandon(tmp_path, "feat")
-    assert rc == 0
-    assert "Abandon feat?" in capsys.readouterr().out  # prompt was shown
-    assert not (tmp_path / ".imp" / "worktrees" / "feat").exists()  # torn down
-
-
-def test_abandon_declined_keeps_change(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    _seed_control(tmp_path)
-    Quest.create(tmp_path, title="x", quest_id="feat", base_branch="main")
-    monkeypatch.setattr("imp.cli.main._interactive", lambda: True)
-    monkeypatch.setattr("builtins.input", lambda _p: "n")
-    rc = _abandon(tmp_path, "feat")
-    assert rc == 0
-    assert (tmp_path / ".imp" / "worktrees" / "feat").exists()  # untouched
-    assert "Left feat in place." in capsys.readouterr().out
-
-
-def test_abandon_yes_flag_skips_confirm(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    _seed_control(tmp_path)
-    Quest.create(tmp_path, title="x", quest_id="feat", base_branch="main")
-    monkeypatch.setattr("imp.cli.main._interactive", lambda: True)
-
-    def _boom(_p: str) -> str:
-        raise AssertionError("--yes must skip the prompt")
-
-    monkeypatch.setattr("builtins.input", _boom)
-    rc = _abandon(tmp_path, "feat", yes=True)
-    assert rc == 0
-    assert not (tmp_path / ".imp" / "worktrees" / "feat").exists()  # torn down
 
 
 def test_commit_count_reflects_branch_commits(tmp_path: Path) -> None:
@@ -295,22 +246,38 @@ def test_tear_down_quest_on_draft_skips_worktree_teardown(
     assert rec is not None and rec["resumable"] is False             # non-resumable tombstone
 
 
-def test_abandon_draft_confirm_copy_on_tty(
+def test_abandon_draft_no_prompt_on_tty(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
 ) -> None:
     _seed_control(tmp_path)
     Quest.create_draft(tmp_path, title="An idea", quest_id="idea1",
                         base_branch="main", origin="idea",
                         seed_opening="An idea\n\ndo a thing")
     monkeypatch.setattr("imp.cli.main._interactive", lambda: True)
-    monkeypatch.setattr("builtins.input", lambda _p: "y")
+
+    def _boom(_p: str) -> str:
+        raise AssertionError("abandon must not prompt")
+
+    monkeypatch.setattr("builtins.input", _boom)
     rc = _abandon(tmp_path, "idea1")
-    out = capsys.readouterr().out
     assert rc == 0
-    assert "Abandon idea1? This permanently discards it." in out   # draft-specific copy
-    assert "worktree, branch, and state" not in out                # not the built-out copy
-    assert not (tmp_path / ".imp" / "quests" / "idea1").exists()   # torn down
+    assert not (tmp_path / ".imp" / "quests" / "idea1").exists()  # torn down, no prompt
+
+
+def test_abandon_materialized_no_prompt_on_tty(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _seed_control(tmp_path)
+    Quest.create(tmp_path, title="x", quest_id="feat", base_branch="main")
+    monkeypatch.setattr("imp.cli.main._interactive", lambda: True)
+
+    def _boom(_p: str) -> str:
+        raise AssertionError("abandon must not prompt")
+
+    monkeypatch.setattr("builtins.input", _boom)
+    rc = _abandon(tmp_path, "feat")
+    assert rc == 0
+    assert not (tmp_path / ".imp" / "worktrees" / "feat").exists()  # torn down, no prompt
 
 
 def test_resume_refuses_abandoned_draft(
