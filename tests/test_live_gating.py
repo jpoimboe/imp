@@ -115,3 +115,77 @@ def test_live_skip_reason_selected_and_available_runs(monkeypatch):
     import tests._live as live
     monkeypatch.setattr(live, "provider_available", lambda _p: None)
     assert live.live_skip_reason(frozenset({"anthropic"}), "anthropic") is None
+
+
+from tests._live import RUN_LIVE_ALL as _ALL  # noqa: E402
+
+
+class _StubItem:
+    """Minimal stand-in for pytest.Item for exercising the collection hook."""
+
+    def __init__(self, fspath, live_provider=None):
+        self.fspath = fspath
+        self._markers = {}
+        if live_provider is not None:
+            self._markers["live"] = pytest.mark.live(live_provider).mark
+        self.added = []
+
+    def get_closest_marker(self, name):
+        for deco in self.added:
+            if deco.mark.name == name:
+                return deco.mark
+        return self._markers.get(name)
+
+    def add_marker(self, deco):
+        self.added.append(deco)
+
+
+class _StubConfig:
+    def __init__(self, run_live):
+        self._run_live = run_live
+
+    def getoption(self, name):
+        assert name == "--run-live"
+        return self._run_live
+
+
+def _skip_reasons(item):
+    return [d.mark.kwargs["reason"] for d in item.added if d.mark.name == "skip"]
+
+
+def test_hook_no_flag_skips_live_marked_test():
+    from tests.conftest import pytest_collection_modifyitems
+    item = _StubItem("tests/test_x_live.py", live_provider="anthropic")
+    pytest_collection_modifyitems(_StubConfig(None), [item])
+    assert "live-API test — pass --run-live to run" in _skip_reasons(item)
+
+
+def test_hook_adds_raised_timeout_to_live_file():
+    from tests.conftest import _LIVE_TEST_TIMEOUT, pytest_collection_modifyitems
+    item = _StubItem("tests/test_x_live.py", live_provider="anthropic")
+    pytest_collection_modifyitems(_StubConfig(None), [item])
+    timeouts = [d for d in item.added if d.mark.name == "timeout"]
+    assert timeouts and timeouts[0].mark.args[0] == _LIVE_TEST_TIMEOUT
+
+
+def test_hook_runs_selected_available_provider(monkeypatch):
+    import tests._live as live
+    from tests.conftest import pytest_collection_modifyitems
+    monkeypatch.setattr(live, "provider_available", lambda _p: None)
+    item = _StubItem("tests/test_x_live.py", live_provider="claude_code")
+    pytest_collection_modifyitems(_StubConfig(_ALL), [item])
+    assert _skip_reasons(item) == []
+
+
+def test_hook_ignores_non_live_item():
+    from tests.conftest import pytest_collection_modifyitems
+    item = _StubItem("tests/test_ordinary.py", live_provider=None)
+    pytest_collection_modifyitems(_StubConfig(None), [item])
+    assert item.added == []
+
+
+def test_hook_unknown_provider_flag_raises_usage_error():
+    from tests.conftest import pytest_collection_modifyitems
+    item = _StubItem("tests/test_x_live.py", live_provider="anthropic")
+    with pytest.raises(pytest.UsageError):
+        pytest_collection_modifyitems(_StubConfig("bogus"), [item])

@@ -24,18 +24,44 @@ FIXTURES = Path(__file__).parent / "fixtures"
 _LIVE_TEST_TIMEOUT = 240
 
 
-def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
-    """Raise the per-test timeout for live-API tests (see _LIVE_TEST_TIMEOUT).
+def pytest_addoption(parser: pytest.Parser) -> None:
+    from tests._live import RUN_LIVE_ALL
 
-    Applied at collection so a single rule covers every current and future
-    `*_live.py` test. Tests that already declare their own `timeout` marker keep
-    it (e.g. the resume tests that pick 240 explicitly)."""
+    parser.addoption(
+        "--run-live",
+        nargs="?",
+        const=RUN_LIVE_ALL,
+        default=None,
+        help=(
+            "Run live-API tests. Bare --run-live runs every provider whose "
+            "toolchain/credentials are present; --run-live=claude_code,openai "
+            "scopes to a subset (valid: anthropic, openai, claude_code, codex)."
+        ),
+    )
+
+
+def pytest_collection_modifyitems(
+    config: pytest.Config, items: list[pytest.Item],
+) -> None:
+    """Two jobs at collection: (1) raise the per-test timeout for live-API
+    `*_live.py` files (see _LIVE_TEST_TIMEOUT), and (2) gate every
+    `@pytest.mark.live(<provider>)` test behind --run-live (see tests/_live.py's
+    live_skip_reason). A `*_live.py` file keeps its own explicit `timeout`
+    marker if it declares one (e.g. the resume tests that pick 240)."""
+    from tests._live import live_skip_reason, parse_run_live
+
+    requested = parse_run_live(config.getoption("--run-live"))
     for item in items:
         name = Path(str(item.fspath)).name
-        if "_live" not in name or name.startswith("test_live_"):
-            continue
-        if item.get_closest_marker("timeout") is None:
+        is_live_file = "_live" in name and not name.startswith("test_live_")
+        if is_live_file and item.get_closest_marker("timeout") is None:
             item.add_marker(pytest.mark.timeout(_LIVE_TEST_TIMEOUT))
+        marker = item.get_closest_marker("live")
+        if marker is None:
+            continue
+        reason = live_skip_reason(requested, marker.args[0])
+        if reason is not None:
+            item.add_marker(pytest.mark.skip(reason=reason))
 
 
 def _pin_subprocess_imp_to_working_tree() -> None:
