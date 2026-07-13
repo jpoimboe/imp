@@ -447,7 +447,7 @@ def _emit_merge_blocked(
     cid, base = quest.id, quest.base_branch
     if reason == "worktree_dirty":
         msg = f"Uncommitted work in the worktree; commit it, then `imp resume {cid}`."
-    elif reason =="refused":
+    elif reason == "refused":
         msg = (f"git refused to merge `imp/{cid}` into `{base}` (commonly: uncommitted "
                f"changes on `{base}` that the merge would overwrite). Resolve, then "
                f"`imp resume {cid}`.")
