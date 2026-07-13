@@ -126,6 +126,20 @@ def _is_engine_passthrough(key: str) -> bool:
     return key.startswith("IMP_") or key == "PYTHONPATH" or key in HEADLESS_ENV
 
 
+# Loud-failure guard: prints this marker and exits the reserved code on mount failure.
+OVERLAY_SETUP_FAILED_MARKER = "__IMP_OVERLAY_MOUNT_SETUP_FAILED__"
+OVERLAY_SETUP_FAILED_CODE = 122   # reserved; distinct from ordinary command codes
+OVERLAY_SETUP_FAILED_MESSAGE = (
+    "sandbox home overlay could not be mounted; your command did NOT run "
+    "(this is a sandbox-setup failure, not your command's own exit)"
+)
+
+
+def overlay_setup_failed(stderr: str) -> bool:
+    """True iff `stderr` carries the overlay wrapper's controlled failure marker."""
+    return OVERLAY_SETUP_FAILED_MARKER in stderr
+
+
 def build_sandbox_argv(
     command: str, *, cwd: str, policy: SandboxPolicy,
     engine_env: Mapping[str, str],
@@ -198,11 +212,14 @@ def build_sandbox_argv(
     argv += ["sh", "-c", command]
     hl = policy.home_layer
     if hl is not None and hl.is_overlay:
+        # Fail loud on mount failure: print the marker, exit the reserved code, skip the cmd.
         mount = (
             f"mount -t overlay overlay -o "
             f"lowerdir={shlex.quote(hl.home)},"
             f"upperdir={shlex.quote(hl.upper)},"
-            f"workdir={shlex.quote(hl.work)} {shlex.quote(hl.merged)} && "
+            f"workdir={shlex.quote(hl.work)} {shlex.quote(hl.merged)} "
+            f"|| {{ printf '%s\\n' {shlex.quote(OVERLAY_SETUP_FAILED_MARKER)} >&2; "
+            f"exit {OVERLAY_SETUP_FAILED_CODE}; }}; "
             f"exec {shlex.join(argv)}"
         )
         return ["unshare", "--user", "--map-root-user", "--mount",
