@@ -2,72 +2,70 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from imp.cli.main import _pause_lines, _phase_from_events
+from imp.cli.main import _pause_lines
 from tests._event_fixtures import ev
 
 
-def test_pause_lines_named_change_renders_id_middot_title_plain() -> None:
-    lines = _pause_lines("dufa26", "implement", "dufa26",
-                         title="Add version flag", color=False)
+def test_pause_lines_named_reasonless_pause_uses_paused_tail() -> None:
+    lines = _pause_lines("dufa26", "dufa26", title="Add version flag", color=False)
     assert lines == [
-        "dufa26 · Add version flag  at implement",
-        "   resume:  imp resume dufa26",
+        "dufa26 · Add version flag · paused",
+        "resume: imp resume dufa26",
     ]
 
 
-def test_pause_lines_unnamed_change_renders_bare_id_no_middot() -> None:
-    lines = _pause_lines("dufa26", "implement", "dufa26", color=False)
-    assert lines[0] == "dufa26  at implement"
-    assert " · " not in lines[0]
+def test_pause_lines_unnamed_pause_drops_the_title_segment() -> None:
+    lines = _pause_lines("dufa26", "dufa26", color=False)
+    assert lines[0] == "dufa26 · paused"
+    assert lines[0].count(" · ") == 1
 
 
-def test_pause_lines_without_a_phase_drop_the_at_clause() -> None:
-    lines = _pause_lines("dufa26", None, "dufa26",
-                         title="Add version flag", color=False)
-    assert lines[0] == "dufa26 · Add version flag"
-
-
-def test_pause_lines_reason_joins_with_a_middot_not_parens() -> None:
-    lines = _pause_lines("dufa26", "implement", "dufa26",
-                         title="Add version flag",
-                         reason="internal_error: cannot access 'ev'",
-                         color=False)
-    assert lines[0] == (
-        "dufa26 · Add version flag  at implement · "
-        "internal_error: cannot access 'ev'")
+def test_pause_lines_reason_becomes_the_tail_no_at_locator_no_parens() -> None:
+    lines = _pause_lines("dufa26", "dufa26", title="Add version flag",
+                         reason="interrupt", color=False)
+    assert lines[0] == "dufa26 · Add version flag · interrupt"
+    assert " at " not in lines[0]
     assert "(" not in lines[0]
 
 
-def test_pause_lines_color_tints_headline_no_glyph_no_paused_word() -> None:
-    lines = _pause_lines("dufa26", "implement", "dufa26",
-                         title="Add version flag", color=True)
-    assert lines[0] == "\x1b[33mdufa26 · Add version flag  at implement\x1b[0m"
-    assert lines[1] == "\x1b[33m   resume:  imp resume dufa26\x1b[0m"
-    assert "⏸" not in lines[0]
-    assert "Paused" not in lines[0]
-
-
-def test_pause_lines_color_with_reason_tints_whole_headline() -> None:
-    lines = _pause_lines("dufa26", "implement", "dufa26",
-                         title="Add version flag",
-                         reason="internal_error: cannot access 'ev'",
+def test_pause_lines_clean_reason_tail_is_gold_id_gold() -> None:
+    from imp.cli import palette as pal
+    lines = _pause_lines("dufa26", "dufa26", title="T", reason="interrupt",
                          color=True)
+    assert lines[0] == (f'{pal.ansi("dufa26", "wordmark")} · T · '
+                        f'{pal.ansi("interrupt", "wordmark")}')
+    assert lines[1] == "resume: imp resume dufa26"     # resume line stays plain
+    assert "⏸" not in lines[0]
+    assert "paused" not in lines[0]                    # a reason replaces the bare word
+
+
+def test_pause_lines_error_reason_tail_is_red_id_stays_gold() -> None:
+    from imp.cli import palette as pal
+    lines = _pause_lines("dufa26", "dufa26", title="T",
+                         reason="terminated: API Error 400", color=True)
     assert lines[0] == (
-        "\x1b[33mdufa26 · Add version flag  at implement · "
-        "internal_error: cannot access 'ev'\x1b[0m")
+        f'{pal.ansi("dufa26", "wordmark")} · T · '
+        f'{pal.ansi("terminated: API Error 400", "red")}')
 
 
-def test_phase_from_events_takes_the_last_step_started_phase() -> None:
-    phase = _phase_from_events([
-        ev("1", "step_started", step="spec-writer", kind="agent", phase="spec"),
-        ev("2", "step_started", step="task-lead", kind="agent", phase="implement"),
-        ev("3", "tool_call", agent_id="a", id="b", name="bash", input={}),
-    ])
-    assert phase == "implement"
+def test_pause_lines_crash_pointer_reason_tail_is_red() -> None:
+    from imp.cli import palette as pal
+    reason = "ended unexpectedly — see .imp/quests/dufa26/daemon.stderr"
+    lines = _pause_lines("dufa26", "dufa26", reason=reason, color=True)
+    assert pal.ansi(reason, "red") in lines[0]
 
 
-def test_phase_from_events_none_when_no_step_started() -> None:
-    assert _phase_from_events([ev("1", "quest_created", quest_id=1, title="x")]) is None
+def test_pause_lines_internal_error_reason_tail_is_red() -> None:
+    from imp.cli import palette as pal
+    reason = "internal_error: project has no fact 'guidance'"
+    lines = _pause_lines("dufa26", "dufa26", reason=reason, color=True)
+    assert pal.ansi(reason, "red") in lines[0]        # an internal error is red, not gold
+
+
+def test_pause_lines_deliberate_leave_trigger_tail_is_gold() -> None:
+    from imp.cli import palette as pal
+    lines = _pause_lines("dufa26", "dufa26", reason="ctrl-d", color=True)
+    assert pal.ansi("ctrl-d", "wordmark") in lines[0]  # a clean leave stays gold
 
 
 def test_pause_facts_unnamed_change_shows_bare_id(tmp_path: Path) -> None:
@@ -77,7 +75,7 @@ def test_pause_facts_unnamed_change_shows_bare_id(tmp_path: Path) -> None:
     quest = Quest(id="qzbscf", title="", base_branch="main",
                     control_root=tmp_path, project_root=tmp_path,
                     quest_dir=tmp_path / ".imp" / "change")
-    name, title, _phase, token, _reason = _pause_facts(quest)
+    name, title, token, _reason = _pause_facts(quest)
     assert name == "qzbscf"
     assert token == "qzbscf"
     assert title == ""
@@ -91,7 +89,7 @@ def test_pause_facts_named_change_shows_bare_id(tmp_path: Path) -> None:
                     base_branch="main", control_root=tmp_path,
                     project_root=tmp_path,
                     quest_dir=tmp_path / ".imp" / "change")
-    name, title, _phase, token, _reason = _pause_facts(quest)
+    name, title, token, _reason = _pause_facts(quest)
     assert name == "qzbscf"          # the bare id, not a slugified handle
     assert token == "qzbscf"
     assert title == "Add version flag"
@@ -266,9 +264,8 @@ def test_pause_facts_stale_with_crash_stderr_renders_unexpected_death_banner(
     quest = Quest(id="mona44", title="", base_branch="main",
                     control_root=tmp_path, project_root=tmp_path,
                     quest_dir=quest_dir)
-    name, _title, phase, token, reason = _pause_facts(quest)
+    name, _title, token, reason = _pause_facts(quest)
     assert name == "mona44"
-    assert phase == "converge"
     assert token == "mona44"
     assert reason == "ended unexpectedly — see .imp/quests/mona44/daemon.stderr"
 
@@ -296,7 +293,7 @@ def test_pause_facts_stale_clean_detach_renders_calm_interrupt(
     quest = Quest(id="mona44", title="", base_branch="main",
                     control_root=tmp_path, project_root=tmp_path,
                     quest_dir=quest_dir)
-    _name, _title, _phase, _token, reason = _pause_facts(quest)
+    _name, _title, _token, reason = _pause_facts(quest)
     assert reason == "interrupt"
     assert "daemon.stderr" not in (reason or "")
     assert "ended unexpectedly" not in (reason or "")
@@ -351,10 +348,9 @@ def test_pause_facts_deliberate_leave_renders_trigger_over_stale(tmp_path: Path)
                     control_root=tmp_path, project_root=tmp_path,
                     quest_dir=quest_dir)
 
-    name, title, phase, token, reason = _pause_facts(quest, leave_trigger="sigterm")
+    name, title, token, reason = _pause_facts(quest, leave_trigger="sigterm")
     assert name == "krol99"
     assert title == "Leave now"          # title carried on the deliberate-leave path
-    assert phase == "implement"          # last-seen phase, local knowledge
     assert token == "krol99"
     assert reason == "sigterm"           # the client's trigger, NOT "ended unexpectedly"
 
@@ -414,8 +410,8 @@ def test_daemon_stderr_has_crash_false_when_file_absent(tmp_path: Path) -> None:
 def test_pause_reason_awaiting_user_has_no_reason() -> None:
     from imp.cli.main import _pause_reason
 
-    # A genuine your-turn park surfaces no banner reason suffix: the trailing
-    # line reads "Paused <name> at <phase>" with no "(...)".
+    # A genuine your-turn park surfaces no reason: the trailing status line is
+    # "<id> · paused" (gold) with no "at <phase>" locator and no parenthesized suffix.
     reason = _pause_reason([
         ev("1", "step_started", step="coder", kind="agent", phase="implement"),
         ev("2", "workflow_paused", reason="awaiting_user"),

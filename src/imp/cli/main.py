@@ -280,15 +280,6 @@ def _emit_completed(quest: Quest, *, merged: bool,
     _print_warnings_block(warnings or [])
 
 
-def _phase_from_events(events: list[dict[str, Any]]) -> str | None:
-    """The current phase: the phase of the most recent step_started event."""
-    phase: str | None = None
-    for e in events:
-        if e.get("type") == "step_started":
-            phase = (e.get("payload") or {}).get("phase") or phase
-    return phase
-
-
 class _PauseBanner(enum.Enum):
     """Sentinel: latest segment ended without a pause; its reason is stale."""
     STALE = enum.auto()
@@ -337,8 +328,8 @@ def _pause_reason(events: list[dict[str, Any]]) -> str | _PauseBanner | None:
     if not base:
         return None
     # A genuine your-turn park is a normal solicit, not an interrupt: surface no
-    # reason, so the trailing banner omits the "(...)" suffix (via _pause_lines'
-    # `why` guard). Scoped to awaiting_user; STALE / error-cause paths untouched.
+    # reason, so the trailing status line shows the bare `paused` tail rather than
+    # a reason. Scoped to awaiting_user; STALE / error-cause paths untouched.
     if base == "awaiting_user":
         return None
     cause: str | None = None
@@ -353,17 +344,27 @@ def _pause_reason(events: list[dict[str, Any]]) -> str | _PauseBanner | None:
     return f"{base}: {cause}" if cause else str(base)
 
 
+def _pause_is_error(reason: str | None) -> bool:
+    """A pause reason is an error (red tail) when it denotes an abnormal
+    termination: a `terminated: …` reason, an `internal_error: …` reason, or the
+    `ended unexpectedly — see …` crash pointer. A clean reason (`interrupt`, or a
+    deliberate-leave trigger such as `ctrl-d`/`sigterm`) or no reason (the bare
+    `paused` fallback) is not — it renders gold."""
+    return reason is not None and (
+        reason.startswith("terminated")
+        or reason.startswith("internal_error")
+        or reason.startswith("ended unexpectedly"))
+
+
 def _pause_lines(
-    name: str, phase: str | None, token: str,
+    name: str, token: str,
     *, reason: str | None = None, title: str = "", color: bool,
 ) -> list[str]:
-    head = f"{name} · {title}" if title else name
-    at = f"  at {phase}" if phase else ""
-    why = f" · {reason}" if reason else ""
+    tail = reason if reason else "paused"
+    tail_code = "red" if _pause_is_error(reason) else "wordmark"
     return [
-        ansi(f"{head}{at}{why}", *pal.NODE_COLORS["lifecycle"], enabled=color),
-        ansi(f"   resume:  imp resume {token}", *pal.NODE_COLORS["lifecycle"],
-             enabled=color),
+        _status_spine(name, title, tail, tail_code, color=color),
+        _resume_line(token),
     ]
 
 
@@ -398,13 +399,12 @@ def _daemon_stderr_has_crash(path: Path) -> bool:
 
 def _pause_facts(
     quest: Quest, leave_trigger: str | None = None,
-) -> tuple[str, str, str | None, str, str | None]:
+) -> tuple[str, str, str, str | None]:
     name = quest.id
     events = list(quest.event_log().read())
-    phase = _phase_from_events(events)
     if leave_trigger is not None:
         # Deliberate leave: render the trigger locally (daemon reason may lag / read STALE).
-        return name, quest.title, phase, quest.id, leave_trigger
+        return name, quest.title, quest.id, leave_trigger
     reason_val = _pause_reason(events)
     if reason_val is _PauseBanner.STALE:
         if _daemon_stderr_has_crash(quest.quest_dir / "daemon.stderr"):
@@ -416,14 +416,15 @@ def _pause_facts(
             reason = "interrupt"
     else:
         reason = reason_val
-    return name, quest.title, phase, quest.id, reason
+    return name, quest.title, quest.id, reason
 
 
 def _emit_paused_summary(quest: Quest, leave_trigger: str | None = None) -> None:
-    """The trailing run-status line on a non-interactive pause / merge-block."""
+    """The trailing run-status line on a non-interactive pause."""
     color = should_use_color(sys.stdout)
-    name, title, phase, token, reason = _pause_facts(quest, leave_trigger)
-    for ln in _pause_lines(name, phase, token, reason=reason, title=title, color=color):
+    name, title, token, reason = _pause_facts(quest, leave_trigger)
+    print()
+    for ln in _pause_lines(name, token, reason=reason, title=title, color=color):
         print(ln)
 
 

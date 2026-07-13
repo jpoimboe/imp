@@ -102,7 +102,7 @@ def test_merge_blocked_outcome_forwards_exhaustion_note() -> None:
     assert mb.call_args.args[3] == note     # the note reached _emit_merge_blocked as the note arg
 
 
-def test_emit_paused_summary_renders_terminated_reason(capsys) -> None:
+def test_emit_paused_summary_renders_terminated_reason_red_no_at_locator(capsys) -> None:
     quest = _Change([
         {"type": "step_started", "payload": {"phase": "reviewing plan"}},
         {"type": "error",
@@ -113,8 +113,11 @@ def test_emit_paused_summary_renders_terminated_reason(capsys) -> None:
     ])
     main._emit_paused_summary(quest)
     out = capsys.readouterr().out
-    assert "· terminated: API Error 400 — tool use concurrency" in out
-    assert "at reviewing plan" in out
+    assert out.startswith("\n")                        # one leading blank
+    assert not out.startswith("\n\n")                  # exactly one
+    assert "terminated: API Error 400 — tool use concurrency" in out
+    assert " at reviewing plan" not in out             # locator dropped
+    assert "resume: imp resume 2026-06-12-run-x" in out
 
 
 def test_emit_paused_summary_interrupt_renders_bare_reason(capsys) -> None:
@@ -124,7 +127,8 @@ def test_emit_paused_summary_interrupt_renders_bare_reason(capsys) -> None:
     ])
     main._emit_paused_summary(quest)
     out = capsys.readouterr().out
-    assert "· interrupt" in out
+    assert out.startswith("\n")                        # one leading blank
+    assert "2026-06-12-run-x · interrupt" in out
 
 
 def test_status_spine_named_renders_plain_id_title_tail_structure() -> None:
