@@ -60,7 +60,6 @@ from imp.engine.abandon import (
 from imp.engine.archive import read as archive_read
 from imp.engine.awaiting_user_input import AwaitingUserInput
 from imp.engine.errors import LayoutMismatch, LoadError, LoadErrors
-from imp.engine.events_digest import digest_event, full_line
 from imp.engine.executor import RunResult
 from imp.engine.project_root import find_project_root
 from imp.engine.quest import Quest, live_quest_ids, live_stems
@@ -1651,16 +1650,6 @@ def _cmd_show(args: argparse.Namespace) -> int:
         return 0
     if resource == "spec":
         data = _show_artifact(control, quest_id, f"spec/{quest_id}.md")
-    elif resource == "events":
-        events = _load_events_for_id(control, quest_id)
-        if events is None:
-            print(f"imp: no events for {quest_id!r}", file=sys.stderr)
-            return 2
-        events = _filter_events(
-            events, types=args.type, agent=args.agent, limit=args.limit)
-        render = full_line if args.full else digest_event
-        _page_or_print([render(e) for e in events], no_pager=args.no_pager)
-        return 0
     if data is None:
         print(f"imp: no {resource} for {quest_id!r}", file=sys.stderr)
         return 2
@@ -1686,26 +1675,6 @@ def _load_events_for_id(control: Path, quest_id: str) -> list[dict[str, Any]] | 
     if raw is None:
         return None
     return _parse_jsonl(raw)
-
-
-def _filter_events(
-    events: list[dict[str, Any]],
-    *,
-    types: str | None = None,
-    agent: str | None = None,
-    limit: int | None = None,
-) -> list[dict[str, Any]]:
-    tset = {t.strip() for t in types.split(",") if t.strip()} if types else None
-    out: list[dict[str, Any]] = []
-    for e in events:
-        if tset is not None and e.get("type") not in tset:
-            continue
-        if agent and agent not in (e.get("agent_id") or ""):
-            continue
-        out.append(e)
-    if limit is not None and limit > 0:
-        out = out[-limit:]
-    return out
 
 
 def _resolve_default_id(control: Path) -> str | None:
@@ -3479,8 +3448,8 @@ def _build_parser() -> argparse.ArgumentParser:
         "show",
         help="Show one quest's detail or a named artifact (imp show <id>).",
         description=(
-            "Print a quest's detail card, or name an artifact "
-            "(spec/events) to print just that. "
+            "Print a quest's detail card, or name the spec artifact to print "
+            "just that. "
             "Reads the live worktree files while a quest is in flight and "
             "falls back to the archive once it is merged."),
     )
@@ -3489,26 +3458,11 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Quest id or its short token.")
     p_show.add_argument(
         "resource", nargs="?", default=None,
-        choices=["spec", "events"],
+        choices=["spec"],
         help="Which artifact to print (default: a detail card).")
     p_show.add_argument(
         "--no-pager", action="store_true",
         help="Disable the pager even when stdout is a TTY.")
-    p_show.add_argument(
-        "--full", action="store_true",
-        help="For the events resource: print raw event payloads (step_context "
-             "redacted, byte-capped) instead of digest lines.")
-    p_show.add_argument(
-        "--type", default=None,
-        help="For the events resource: keep only these event types "
-             "(comma-separated).")
-    p_show.add_argument(
-        "--agent", default=None,
-        help="For the events resource: keep only events whose agent id "
-             "contains this substring.")
-    p_show.add_argument(
-        "--limit", type=int, default=None,
-        help="For the events resource: keep only the last N events.")
     p_show.set_defaults(func=_cmd_show)
 
     p_search = sub.add_parser(

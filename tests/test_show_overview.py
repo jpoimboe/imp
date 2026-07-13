@@ -155,10 +155,10 @@ def test_resource_routes_through_pager(tmp_path: Path, monkeypatch) -> None:
         m, "_page_or_print",
         lambda lines, *, no_pager: captured.append((list(lines), no_pager)))
 
-    rc = main(["show", "liveid", "events"])
+    rc = main(["show", "liveid"])
     assert rc == 0
     assert len(captured) == 1
-    assert captured[0][0]                 # the resource lines were paged
+    assert captured[0][0]                 # the detail card lines were paged
 
 
 def test_no_pager_flag_propagates_to_pager(tmp_path: Path, monkeypatch) -> None:
