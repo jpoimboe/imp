@@ -22,10 +22,16 @@ import sys
 import textwrap
 import time
 from pathlib import Path
+from typing import NoReturn
 
 import pytest
 
-from tests._live import _await_change_dir, anthropic_key, openai_key
+from tests._live import (
+    _await_change_dir,
+    anthropic_key,
+    openai_key,
+    sandbox_sleep_precondition_failed,
+)
 from tests.conftest import _init_repo
 
 # Ensure subprocesses use this worktree's imp, not the editable install
@@ -145,6 +151,28 @@ def _wait_for_paused(state_path: Path, timeout: float) -> dict[str, object]:
     return last
 
 
+def _skip_or_fail_unpaused(
+    events: Path, state: dict[str, object], proc: subprocess.Popen
+) -> NoReturn:
+    """Skip on the overlay-mount precondition failure, else fail with diagnostics."""
+    reason = sandbox_sleep_precondition_failed(events)
+    if reason is not None:
+        pytest.skip(reason)
+    out = proc.stdout.read().decode(errors="replace") if proc.stdout else ""
+    err = proc.stderr.read().decode(errors="replace") if proc.stderr else ""
+    tail = (
+        "\n".join(events.read_text().splitlines()[-40:])
+        if events.exists() else "<no events.jsonl>"
+    )
+    pytest.fail(
+        f"expected state 'paused', got {state.get('status')!r}\n"
+        f"state.json: {state}\n"
+        f"events.jsonl tail:\n{tail}\n"
+        f"subprocess stdout:\n{out}\n"
+        f"subprocess stderr:\n{err}"
+    )
+
+
 @pytest.mark.live("anthropic")
 # 600s > this test's ~360-480s internal subprocess-timeout budget, so conftest's
 # 240s live-test backstop can't fire mid-subprocess before imp's own internal
@@ -195,7 +223,8 @@ def test_ctrl_c_during_bash_pauses_then_resume_completes(tmp_path: Path) -> None
         assert rc == 130, f"expected exit 130, got {rc}"
 
         state = _wait_for_paused(state_path, timeout=30.0)
-        assert state.get("status") == "paused", state
+        if state.get("status") != "paused":
+            _skip_or_fail_unpaused(events, state, proc)
         assert state["step"] == "w"
     finally:
         if proc.poll() is None:
@@ -285,7 +314,8 @@ def test_ctrl_c_during_bash_pauses_then_resume_completes_openai(
             proc.wait()
 
     state = _wait_for_paused(state_path, timeout=30.0)
-    assert state.get("status") == "paused", state
+    if state.get("status") != "paused":
+        _skip_or_fail_unpaused(events, state, proc)
 
     resume = subprocess.run(
         [sys.executable, "-m", "imp", "resume", slug],
@@ -359,7 +389,8 @@ def test_ctrl_c_during_bash_pauses_then_resume_completes_claude_code(
             proc.wait()
 
     state = _wait_for_paused(state_path, timeout=30.0)
-    assert state.get("status") == "paused", state
+    if state.get("status") != "paused":
+        _skip_or_fail_unpaused(events, state, proc)
 
     resume = subprocess.run(
         [sys.executable, "-m", "imp", "resume", slug],

@@ -9,6 +9,7 @@ toolchain or credentials are absent skips (not fails) at collection.
 from __future__ import annotations
 
 import importlib.util
+import json
 import os
 import shutil
 import subprocess
@@ -103,6 +104,86 @@ def live_skip_reason(requested: frozenset[str] | None, provider: str) -> str | N
     if provider not in requested:
         return f"{provider} not selected by --run-live"
     return provider_available(provider)
+
+
+_OVERLAY_MOUNT_SKIP_REASON = (
+    'imp bash-sandbox overlay mount failed (rc 32: "wrong fs type … on '
+    'overlay"); the writer\'s `sleep 30` never ran, so the '
+    "mid-turn-interrupt precondition is unmet. This is a sandbox/environment "
+    "failure, not an interrupt-resume regression."
+)
+
+
+def _bash_result_dicts(content: object):
+    """Yield each parsed {stdout, stderr, returncode} dict from a bash
+    tool_result `content`, which is EITHER a JSON string (the anthropic/openai
+    in-process runner stores the bash JSON verbatim) OR a list of
+    {"type": "text", "text": <json string>} parts (claude_code's SDK wraps it;
+    see tests/fixtures/cc_tool_counter_burst.jsonl and the non-string branch in
+    src/imp/engine/events_digest.py)."""
+    texts: list[str] = []
+    if isinstance(content, str):
+        texts.append(content)
+    elif isinstance(content, list):
+        texts.extend(
+            part["text"]
+            for part in content
+            if isinstance(part, dict)
+            and part.get("type") == "text"
+            and isinstance(part.get("text"), str)
+        )
+    for text in texts:
+        try:
+            result = json.loads(text)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(result, dict):
+            yield result
+
+
+def sandbox_sleep_precondition_failed(events_path: Path) -> str | None:
+    """Scan events.jsonl for the writer's bash `tool_result`. When it shows
+    imp's per-command COW overlay home failing to mount (returncode 32 with the
+    'wrong fs type … on overlay' / 'w.overlay-merged' signature in stderr), the
+    scripted `sleep 30` never ran and the mid-turn-interrupt precondition is
+    unmet — return a fixed descriptive skip reason. Otherwise return None.
+
+    A `tool_result` payload carries no tool name, so bash results are found by
+    correlating `payload["id"]` back to a preceding bash `tool_call`. The bash
+    result JSON ({stdout, stderr, returncode}) is a string for the in-process
+    providers and list-wrapped for claude_code — `_bash_result_dicts`
+    normalises both shapes.
+    """
+    if not events_path.exists():
+        return None
+    try:
+        body = events_path.read_text()
+    except OSError:
+        return None
+    bash_ids: set[str] = set()
+    for line in body.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            rec = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        payload = rec.get("payload", {})
+        if (rec.get("type") == "tool_call"
+                and payload.get("name") in ("bash", "mcp__imp__bash")):
+            tool_id = payload.get("id")
+            if tool_id is not None:
+                bash_ids.add(tool_id)
+        elif rec.get("type") == "tool_result" and payload.get("id") in bash_ids:
+            for result in _bash_result_dicts(payload.get("content")):
+                stderr = result.get("stderr", "")
+                if (result.get("returncode") == 32
+                        and isinstance(stderr, str)
+                        and "wrong fs type" in stderr
+                        and "overlay" in stderr):
+                    return _OVERLAY_MOUNT_SKIP_REASON
+    return None
 
 
 def build_isolated_venv(
