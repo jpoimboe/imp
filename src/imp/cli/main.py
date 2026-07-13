@@ -2939,6 +2939,28 @@ def _search_archived(control: Path, query: str) -> list[_SearchHit]:
     ]
 
 
+def _merged_after(control: Path, quest_id: str, base_commit: str) -> bool:
+    """True iff the recorded merge landed AFTER base_commit; fail-safe False otherwise."""
+    merge_commit = archive_read.merge_commit_of(control, quest_id)
+    if not merge_commit:
+        return False
+    # git exit 1 = not an ancestor (landed after) → keep; exit 0/any-other = exclude (fail-safe).
+    return worktree._git(
+        control, "merge-base", "--is-ancestor", merge_commit, base_commit,
+    ).returncode == 1
+
+
+def _search_completed(
+    control: Path, query: str, merged_after: str | None,
+) -> list[_SearchHit]:
+    hits: list[_SearchHit] = []
+    for cid, title, content in archive_read.search_archive_completed(control, query):
+        if merged_after is not None and not _merged_after(control, cid, merged_after):
+            continue
+        hits.append(_SearchHit(cid, title, "completed", content))
+    return hits
+
+
 def _highlight(text: str, query: str, *, color: bool) -> str:
     """Wrap every case-insensitive occurrence of `query` in `text` with a bold-yellow accent."""
     if not color or not query:

@@ -2,12 +2,15 @@ from __future__ import annotations
 
 import argparse
 import json
+import subprocess
 from pathlib import Path
 
 from imp.cli.main import (
+    _merged_after,
     _search_active,
     _search_archived,
     _search_backlog,
+    _search_completed,
     _selected_search_zones,
 )
 from imp.engine import archive
@@ -15,7 +18,10 @@ from imp.engine.quest import Quest
 from tests.conftest import _seed_control
 
 
-def _archive(tmp_path: Path, quest_id: str, title: str) -> None:
+def _archive(
+    tmp_path: Path, quest_id: str, title: str,
+    status: str = "abandoned", merge_commit: str | None = None,
+) -> None:
     events = tmp_path / f"{quest_id}.jsonl"
     events.write_text("")
     quest_json = tmp_path / f"{quest_id}.quest.json"
@@ -23,11 +29,31 @@ def _archive(tmp_path: Path, quest_id: str, title: str) -> None:
         "id": quest_id, "title": title, "base_branch": "main",
         "created_at": "2026-06-01T00:00:00+00:00", "depends_on": []}))
     state_json = tmp_path / f"{quest_id}.state.json"
-    state_json.write_text(json.dumps(
-        {"id": quest_id, "status": "abandoned", "step": "spec"}))
+    state_json.write_text(json.dumps({
+        "id": quest_id, "status": status, "step": "spec",
+        "merge_commit": merge_commit}))
     archive.archive_quest(
         tmp_path, quest_id, events_path=events,
         quest_json_path=quest_json, state_json_path=state_json)
+
+
+def _init_git_commits(root: Path) -> tuple[str, str]:
+    def git(*args: str) -> str:
+        return subprocess.run(
+            ["git", *args], cwd=root, check=True,
+            capture_output=True, text=True).stdout.strip()
+    git("init", "-q")
+    git("config", "user.email", "t@t")
+    git("config", "user.name", "t")
+    (root / "a.txt").write_text("a")
+    git("add", "a.txt")
+    git("commit", "-qm", "a")
+    sha_a = git("rev-parse", "HEAD")
+    (root / "b.txt").write_text("b")
+    git("add", "b.txt")
+    git("commit", "-qm", "b")
+    sha_b = git("rev-parse", "HEAD")
+    return sha_a, sha_b
 
 
 def _ns(**kw: bool) -> argparse.Namespace:
@@ -124,3 +150,37 @@ def test_search_active_excludes_nonhuman_user_message(tmp_path: Path) -> None:
     # The term lives only in a non-human (injected) user_message -> not searchable,
     # and it is in neither the id "liveid" nor the title "Quiet chat".
     assert _search_active(tmp_path, "cover-check") == []
+
+
+def test_search_completed_labels_zone_and_filters(tmp_path: Path) -> None:
+    _archive(tmp_path, "alpha", "Dark mode", status="completed")
+    _archive(tmp_path, "beta", "Dark login", status="abandoned")
+    hits = _search_completed(tmp_path, "dark", None)
+    assert [h.quest_id for h in hits] == ["alpha"]     # abandoned excluded
+    assert hits[0].zone == "completed"
+    assert hits[0].title == "Dark mode"
+
+
+def test_merged_after_keeps_only_fixes_that_landed_after(tmp_path: Path) -> None:
+    sha_a, sha_b = _init_git_commits(tmp_path)          # b is a child of a
+    _archive(tmp_path, "alpha", "Dark", status="completed", merge_commit=sha_b)
+    # b is NOT an ancestor of a -> landed after -> kept (git exit 1).
+    assert _merged_after(tmp_path, "alpha", sha_a) is True
+    # b IS an ancestor of b (itself) -> landed at/before -> excluded (git exit 0).
+    assert _merged_after(tmp_path, "alpha", sha_b) is False
+
+
+def test_merged_after_excludes_missing_and_unverifiable(tmp_path: Path) -> None:
+    sha_a, _sha_b = _init_git_commits(tmp_path)
+    _archive(tmp_path, "nomerge", "Dark", status="completed", merge_commit=None)
+    assert _merged_after(tmp_path, "nomerge", sha_a) is False   # no recorded merge SHA
+    _archive(tmp_path, "alpha", "Dark", status="completed", merge_commit=sha_a)
+    # Unknown ref -> git exits 128 (not 1) -> unverifiable -> excluded.
+    assert _merged_after(tmp_path, "alpha", "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef") is False
+
+
+def test_search_completed_applies_merged_after(tmp_path: Path) -> None:
+    sha_a, sha_b = _init_git_commits(tmp_path)
+    _archive(tmp_path, "alpha", "Dark", status="completed", merge_commit=sha_b)
+    assert [h.quest_id for h in _search_completed(tmp_path, "dark", sha_a)] == ["alpha"]
+    assert _search_completed(tmp_path, "dark", sha_b) == []
