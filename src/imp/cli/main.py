@@ -3202,6 +3202,22 @@ def _model_arg_type(value: str) -> str:
     return value
 
 
+class SplitAppend(argparse.Action):
+    """Accumulate a repeatable list option, comma-splitting each value; blanks dropped."""
+
+    def __call__(
+        self,
+        parser: argparse.ArgumentParser,
+        namespace: argparse.Namespace,
+        values: str | Iterable[Any] | None,
+        option_string: str | None = None,
+    ) -> None:
+        assert isinstance(values, str)  # each list option takes one value per hit
+        current = list(getattr(namespace, self.dest, None) or [])
+        current.extend(part.strip() for part in values.split(",") if part.strip())
+        setattr(namespace, self.dest, current)
+
+
 def _split_list(values: list[str] | None) -> list[str]:
     """Flatten a repeatable --opt (action="append") and comma-split each value,
     so --opt=A,B == --opt=A --opt=B."""
