@@ -6,43 +6,29 @@ output:
   status: {type: enum, values: [Success, Error]}
 ---
 
-You write the quest's **intent-level summary** — a durable artifact that says what
-this quest accomplishes and why, at the level a human operates on. You run once,
-near the end of a full-ceremony quest, after the code has been reviewed and settled.
+Write the quest's **intent-level summary** — what it accomplishes and why, at the level a human operates on. Runs once, near the end of a full-ceremony quest, after the code has been reviewed and settled.
 
-## Source — read only; never modify project source
+## Source
 
-You may write **only** under `{{ quest.home }}/artifacts/`. Do **not** modify any
-project source file, do not run a build, and make no code change.
+Write **only** under `{{ quest.home }}/artifacts/`. Do not modify project source, run a build, or make any code change.
 
-Read, to ground the summary:
-- the spec at `{{ quest.home }}/artifacts/spec/{{ quest.id }}.md` — imp's durable
-  carrier of intent; its **Goal** and **Decisions summary** are your primary source
-  for the *why*;
-- the newest plan(s) under `{{ quest.home }}/artifacts/plans/`;
+Read to ground the summary:
+- `{{ quest.home }}/artifacts/spec/{{ quest.id }}.md` — **Goal** and **Decisions summary** are the primary source for the *why*;
+- newest plan(s) under `{{ quest.home }}/artifacts/plans/`;
 - `{{ quest.home }}/progress.md`;
-- the quest diff via `bash` (`git diff <base>..HEAD`) for the *what*.
+- `git diff <base>..HEAD` (via `bash`) for the *what*.
 
-When the spec is thin on the *why*, recover the threshold rationale — what was
-said, not current state — with `imp_events` as a fallback.
+When the spec is thin on the *why*, recover the threshold rationale — what was said, not current state — with `imp_events` as a fallback.
 
-## Write the summary
+## Write
 
 Write `{{ quest.home }}/artifacts/summary/{{ quest.id }}.md`:
 
-- **Headline** — one tight paragraph: what this quest accomplishes and why,
-  intent-level, ruthless signal/noise. No task-by-task enumeration (that lives in
-  `progress.md`, the commit messages, and `imp log`).
-- **Optional diagram** — a text/ASCII diagram, included **only when the quest
-  genuinely altered structure** (a new component, a changed data flow). It must
-  render in a terminal — no mermaid. Omit it entirely when structure did not change.
+- **Headline** — one tight paragraph: what this quest accomplishes and why, intent-level, ruthless signal/noise. No task-by-task enumeration (that lives in `progress.md`, commit messages, and `imp log`).
+- **Optional diagram** — text/ASCII only; include **only when the quest genuinely altered structure** (new component, changed data flow); must render in a terminal — no mermaid. Omit when structure did not change.
 
 ## Finish
 
-You only write the summary file under `{{ quest.home }}/artifacts/`; the engine
-journals it at the step boundary. Do not run `git add`/`git commit` yourself.
+Write only the summary file; the engine journals it. Do not `git add`/`git commit`.
 
-Then finish with `complete_step(status="Success")`. On an unrecoverable failure
-finish with `complete_step(status="Error")` instead — you route to `finalize`
-either way, and a missing summary is not fatal (finalize falls back to its audit
-fields).
+Finish with `complete_step(status="Success")`. On unrecoverable failure use `complete_step(status="Error")` — routes to `finalize` either way; a missing summary is not fatal.
