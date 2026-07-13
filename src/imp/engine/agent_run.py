@@ -744,21 +744,25 @@ async def drive_invocation(
                         # An interrupt-caused teardown pauses cleanly with
                         # interrupt=True so the resume CONTINUES the step (the
                         # executor arms State.resume_mode = "continue"), NOT
-                        # classified by the error's own category. Two cases reach here:
+                        # classified by the error's own category. Classify off the
+                        # DURABLE coordinator.interrupted latch, not the racy
+                        # should_pause: end_gesture_round clears should_pause the
+                        # instant the client processes the pause, but interrupted
+                        # survives. Two cases reach here:
                         #   * kind == "interrupted": the runner surfaced the interrupt
                         #     as an error event rather than the cooperative-steer
-                        #     AwaitingUserInput — and the steer may have ALREADY
-                        #     cleared should_pause, so the should_pause arm alone would
+                        #     AwaitingUserInput. Even if should_pause was already
+                        #     cleared, interrupted is still True, so we don't
                         #     misclassify it as a fatal `config` pause (interrupt lost
                         #     → resume parks instead of continuing).
-                        #   * should_pause set: a pause is already in flight and wins.
-                        #     A (process-group) interrupt kills a provider's CLI child
-                        #     instantly, so the runner can surface a teardown artifact
-                        #     (e.g. a subagent's `network`/no_result_message) a beat
-                        #     before signal_pause's interrupt() sets _cancel; retrying
-                        #     that replays an interrupted transcript (a 400).
+                        #   * interrupted set: a cooperative pause drove this teardown
+                        #     and wins. A (process-group) interrupt kills a provider's
+                        #     CLI child instantly, so the runner can surface a teardown
+                        #     artifact (e.g. a subagent's `network`/no_result_message)
+                        #     a beat before signal_pause's interrupt() sets _cancel;
+                        #     retrying that replays an interrupted transcript (a 400).
                         interrupting = kind == "interrupted" or (
-                            coordinator is not None and coordinator.should_pause)
+                            coordinator is not None and coordinator.interrupted)
                         if interrupting:
                             return AgentRunResult(None, False, True, False, None,
                                                   interrupt=True)
@@ -798,10 +802,19 @@ async def drive_invocation(
         # A headless/subagent bare-turn-end yield with no human attached.
         # paused=True drives normal pause handling; awaiting_user=True tells the
         # executor to mark the step resumable so the paused step survives reload.
-        # interrupt=True (cooperative-interrupt steer) arms
-        # State.resume_mode = "continue" so a no-message resume continues the step.
+        # A cooperative interrupt can reach here with exc.interrupt=False (the
+        # turn closed normally, so the steer was lost) while the durable
+        # coordinator.interrupted latch is still True — end_gesture_round clears
+        # should_pause but never interrupted. Classify off that durable latch so
+        # interrupt=True arms State.resume_mode = "continue" and a no-message
+        # resume continues the step instead of parking at a phantom gate.
+        # This cannot leak a false interrupt=True onto an ordinary resumed run:
+        # clear_pause() runs before any resume and resets interrupted, so the
+        # widened check only fires inside the post-end_gesture_round window.
+        interrupt = exc.interrupt or (
+            coordinator is not None and coordinator.interrupted)
         return AgentRunResult(None, False, True, False, None,
-                              awaiting_user=True, interrupt=exc.interrupt)
+                              awaiting_user=True, interrupt=interrupt)
 
     if stall["hit"]:
         # B.2: the watchdog tore the agent down. Route through the policy so the

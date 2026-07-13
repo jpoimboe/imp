@@ -523,3 +523,47 @@ async def test_interrupt_on_resume_goto_arms_solicit(tmp_path: Path) -> None:
     assert state.step == "review"
     assert state.resume_pending == "review"   # resume-goto target preserved
     assert state.resume_mode == "solicit"      # a rework re-entry solicits
+
+
+@pytest.mark.anyio
+async def test_lost_steer_race_arms_continue(tmp_path: Path) -> None:
+    """The lost-steer race: a cooperative interrupt whose steer is lost because
+    the turn closed normally (bare-turn-end AwaitingUserInput with
+    interrupt=False) AND end_gesture_round already cleared should_pause. The
+    durable coordinator.interrupted latch is still True, so classification must
+    key off it and persist resume_mode == "continue" (not "solicit")."""
+    quest = _seed_single_agent(tmp_path)
+    from imp.providers import resolve
+    resolve.reset_providers_for_tests()
+    from imp.cli.signals import InterruptCoordinator
+    from imp.engine.awaiting_user_input import AwaitingUserInput
+    coord = InterruptCoordinator()
+
+    class _LostSteerRunner:
+        async def run(self, inv: AgentInvocation) -> AsyncIterator[Event]:
+            # Cooperative Ctrl-C: set both flags (should_pause + interrupted)...
+            await coord.signal_pause(reason="ctrl-c")
+            # ...then the client round-over reset clears should_pause but LEAVES
+            # the durable interrupted latch set (the raced window).
+            coord.end_gesture_round()
+            # The turn closed normally, so the continuation handler raises a
+            # bare-turn-end yield with interrupt=False (the lost steer).
+            raise AwaitingUserInput("nothing more to do", interrupt=False)
+            yield {}  # unreachable; marks run() as an async generator
+
+        async def interrupt(self) -> None:
+            pass
+
+    class _P:
+        name = "fake"
+        model = "m"
+        def create_runner(self, _inv: AgentInvocation) -> AgentRunner:
+            return _LostSteerRunner()
+
+    resolve.register_provider("fake", env_check=lambda: True, factory=lambda _m: _P())
+
+    result = await run_quest(quest, coordinator=coord)
+    assert result is RunResult.PAUSED
+    state = State.load(quest.state_dir)
+    assert state.resume_pending == state.step
+    assert state.resume_mode == "continue"   # lost-steer interrupt still continues

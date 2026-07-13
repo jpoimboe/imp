@@ -86,8 +86,17 @@ async def test_gen_closed_on_subagent_suspended(tmp_path: Path) -> None:
 
 
 class _NoPauseCoordinator(_PauseCoordinator):
-    """Cooperative-steer already cleared the pause: should_pause is False."""
+    """Cooperative steer cleared should_pause, but the durable interrupted latch
+    survives (end_gesture_round clears only should_pause). interrupted stays
+    True (inherited)."""
     should_pause = False
+
+
+class _NoInterruptCoordinator(_PauseCoordinator):
+    """No cooperative gesture at all: neither should_pause nor the durable
+    interrupted latch is set — a genuine, non-interrupt error."""
+    should_pause = False
+    interrupted = False
 
 
 @pytest.mark.anyio
@@ -143,7 +152,7 @@ async def test_non_interrupt_error_stays_fatal_without_interrupt_flag(
     }])
     result = await drive_invocation(
         _inv(tmp_path, {"complete_step"}), runner,
-        coordinator=_NoPauseCoordinator(), log=None, emit_events=False)
+        coordinator=_NoInterruptCoordinator(), log=None, emit_events=False)
     assert result.errored is True
     assert result.fatal is True
     assert result.interrupt is False
