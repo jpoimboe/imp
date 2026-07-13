@@ -561,6 +561,20 @@ async def run_quest(
             else:
                 raise AssertionError(f"unexpected action {action!r}")
 
+            # state.step just moved to a DIFFERENT step: if the unsandboxed override
+            # was live it was step-scoped, so retire it here. Same-step pause/resume
+            # paths (Pause return, max_loops pause, action-less re-dispatch)
+            # short-circuit before this point, so the override survives a resume of
+            # the same step. The guard skips the whole hook when the override was
+            # never set, so an ordinary sandboxed quest broadcasts no redundant
+            # marker. Broadcast the transient marker via the raw on_event callback —
+            # NOT the persisting _emit(log, ...) — so it never reaches events.jsonl.
+            if state.unsandboxed or coordinator.unsandboxed:
+                state.unsandboxed = False
+                coordinator.set_unsandboxed(False)
+                on_event({"type": "sandbox_marker",
+                          "payload": {"unsandboxed": False}})
+
             # Stash wrapper feedback for the target step to consume via the
             # fresh-entry opening message: the goto's rework feedback and/or a
             # prior-attempts memory of the target step's own recent outcomes.
