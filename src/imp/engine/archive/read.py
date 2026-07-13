@@ -152,6 +152,15 @@ def read_state_json(control_root: Path, quest_id: str) -> bytes | None:
     return json.dumps(rec["final_state"]).encode("utf-8")
 
 
+def merge_commit_of(control_root: Path, quest_id: str) -> str | None:
+    """Recorded merge SHA for an archived quest, or None when absent/unrecorded."""
+    rec = record.read_record(records_root(control_root), quest_id)
+    if rec is None:
+        return None
+    merge_commit = (rec.get("final_state") or {}).get("merge_commit")
+    return str(merge_commit) if merge_commit else None
+
+
 def read_quest_json(control_root: Path, quest_id: str) -> bytes | None:
     rec = record.read_record(records_root(control_root), quest_id)
     if rec is None:
