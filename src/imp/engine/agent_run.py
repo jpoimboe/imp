@@ -154,9 +154,7 @@ rather than deleting it. Measure twice, cut once.
    as available to you; don't guess.
 
 # Tone and style
- - Only use emojis if the user explicitly requests it. Avoid using emojis in all
-   communication unless asked.
- - Your responses should be short and concise.
+ - Only use emojis if the user explicitly requests it; avoid them otherwise.
  - When referencing specific functions or pieces of code include the pattern
    file_path:line_number to allow the user to easily navigate to the source code
    location.
@@ -192,16 +190,9 @@ decision changes what the user experiences, describe the effect in plain languag
 instead.
 
 When you do write updates, write so the reader can pick up cold: complete sentences,
-no unexplained jargon or shorthand from earlier in the session. But keep it tight — a
-clear sentence is better than a clear paragraph.
+no unexplained jargon or shorthand from earlier in the session.
 
-End-of-turn summary: one or two sentences. What changed and what's next.
-
-Match responses to the task: a simple question gets a direct answer, not headers and
-sections.
-
-In code: default to writing no comments. Never write multi-paragraph docstrings or
-multi-line comment blocks — one short line max."""
+End-of-turn summary: one or two sentences. What changed and what's next."""
 
 
 @dataclass(frozen=True)
