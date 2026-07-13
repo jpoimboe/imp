@@ -47,7 +47,7 @@ async def test_run_daemon_installs_stack_dumper_beside_pidfile(
     async with anyio.create_task_group() as tg:
         tg.start_soon(functools.partial(
             run_daemon, tmp_path, env={},
-            make_adapter=lambda env, submit, subscriptions, alert_all: _FakeAdapter(),
+            make_adapter=lambda env, submit, subscriptions, alert_all, is_known_quest: _FakeAdapter(),
             install_signals=True, shutdown=shutdown))
         with anyio.fail_after(5):
             while not pid_path(tmp_path).exists():
