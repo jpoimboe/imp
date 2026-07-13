@@ -1464,6 +1464,19 @@ def _quest_meta(control: Path, quest_id: str) -> dict[str, Any] | None:
         return None
 
 
+def _quest_state(control: Path, quest_id: str) -> dict[str, Any] | None:
+    cdir = _quest_home(control, quest_id)
+    sj = cdir / "state" / "state.json"
+    raw = sj.read_bytes() if sj.exists() else archive_read.read_state_json(control, quest_id)
+    if raw is None:
+        return None
+    try:
+        result: dict[str, Any] = json.loads(raw)
+        return result
+    except json.JSONDecodeError:
+        return None
+
+
 def _is_backlog_home(
     meta: dict[str, Any], *, conversed: bool, lock_live: Callable[[], bool]
 ) -> bool:
@@ -1557,6 +1570,9 @@ def _quest_card(control: Path, quest_id: str, *, now: datetime) -> list[str]:
     meta = _quest_meta(control, quest_id) or {}
     if meta.get("base_branch"):
         lines.append(f"base_branch:   {meta['base_branch']}")
+    state = _quest_state(control, quest_id) or {}
+    if state.get("merge_commit"):
+        lines.append(f"merge_commit:  {state['merge_commit']}")
     if meta.get("depends_on"):
         lines.append(f"depends_on:    {', '.join(meta['depends_on'])}")
     opening = _resolve_intent(events)
@@ -2888,9 +2904,14 @@ def _selected_search_zones(args: argparse.Namespace) -> set[str]:
             ("active", args.active),
             ("backlog", args.backlog),
             ("archive", args.archived),
+            ("completed", args.completed),
         ) if on
     }
-    return picked or set(_SEARCH_ZONES)
+    picked = picked or set(_SEARCH_ZONES)
+    if "archive" in picked:
+        # Archive is the superset; drop the completed subset so nothing double-lists.
+        picked.discard("completed")
+    return picked
 
 
 def _search_active(control: Path, query: str) -> list[_SearchHit]:
@@ -2932,6 +2953,28 @@ def _search_archived(control: Path, query: str) -> list[_SearchHit]:
         _SearchHit(cid, title, "archive", content)
         for (cid, title, content) in archive_read.search_archive_content(control, query)
     ]
+
+
+def _merged_after(control: Path, quest_id: str, base_commit: str) -> bool:
+    """True iff the recorded merge landed AFTER base_commit; fail-safe False otherwise."""
+    merge_commit = archive_read.merge_commit_of(control, quest_id)
+    if not merge_commit:
+        return False
+    # git exit 1 = not an ancestor (landed after) → keep; exit 0/any-other = exclude (fail-safe).
+    return worktree._git(
+        control, "merge-base", "--is-ancestor", merge_commit, base_commit,
+    ).returncode == 1
+
+
+def _search_completed(
+    control: Path, query: str, merged_after: str | None,
+) -> list[_SearchHit]:
+    hits: list[_SearchHit] = []
+    for cid, title, content in archive_read.search_archive_completed(control, query):
+        if merged_after is not None and not _merged_after(control, cid, merged_after):
+            continue
+        hits.append(_SearchHit(cid, title, "completed", content))
+    return hits
 
 
 def _highlight(text: str, query: str, *, color: bool) -> str:
@@ -2983,6 +3026,10 @@ def _search_list_line(hit: _SearchHit) -> str:
 
 
 def _cmd_search(args: argparse.Namespace, _control: Path | None = None) -> int:
+    if args.merged_after is not None and not args.completed:
+        print("imp: --merged-after is only meaningful with --completed",
+              file=sys.stderr)
+        raise SystemExit(2)
     control = _control if _control is not None else _control_root()
     zones = _selected_search_zones(args)
     hits: list[_SearchHit] = []
@@ -2992,6 +3039,8 @@ def _cmd_search(args: argparse.Namespace, _control: Path | None = None) -> int:
         hits += _search_backlog(control, args.query)
     if "archive" in zones:
         hits += _search_archived(control, args.query)
+    if "completed" in zones:
+        hits += _search_completed(control, args.query, args.merged_after)
     if not hits:
         print(f"No quests match {args.query!r}.")
         return 0
@@ -3284,7 +3333,7 @@ def _build_parser() -> argparse.ArgumentParser:
             "Search active (in-flight + drafts), backlog, and archived quests "
             "for the query as a case-insensitive substring of a quest's id, "
             "title, or conversation content. With no zone flag, all three zones "
-            "are searched."),
+            "are searched. --completed scopes to merged quests."),
     )
     p_search.add_argument(
         "query", metavar="QUERY",
@@ -3298,6 +3347,13 @@ def _build_parser() -> argparse.ArgumentParser:
     p_search.add_argument(
         "--archived", action="store_true",
         help="Search archived (completed, abandoned, left) quests.")
+    p_search.add_argument(
+        "--completed", action="store_true",
+        help="Search completed (merged) quests.")
+    p_search.add_argument(
+        "--merged-after", metavar="COMMIT", default=None,
+        help="With --completed, keep only quests whose merge landed after "
+             "COMMIT (not an ancestor of it).")
     p_search.add_argument(
         "-l", "--list", action="store_true", dest="list",
         help="One terse line per quest (id, title, zone); no excerpts.")

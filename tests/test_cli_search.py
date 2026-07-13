@@ -20,7 +20,8 @@ def _user_msg_line(text: str) -> str:
     }) + "\n"
 
 
-def _archive(tmp_path: Path, quest_id: str, title: str) -> None:
+def _archive(tmp_path: Path, quest_id: str, title: str,
+             status: str = "abandoned") -> None:
     events = tmp_path / f"{quest_id}.jsonl"
     events.write_text("")
     quest_json = tmp_path / f"{quest_id}.quest.json"
@@ -29,17 +30,19 @@ def _archive(tmp_path: Path, quest_id: str, title: str) -> None:
         "created_at": "2026-06-01T00:00:00+00:00", "depends_on": []}))
     state_json = tmp_path / f"{quest_id}.state.json"
     state_json.write_text(json.dumps(
-        {"id": quest_id, "status": "abandoned", "step": "spec"}))
+        {"id": quest_id, "status": status, "step": "spec"}))
     archive.archive_quest(
         tmp_path, quest_id, events_path=events,
         quest_json_path=quest_json, state_json_path=state_json)
 
 
 def _ns(query: str, *, active: bool = False, backlog: bool = False,
-        archived: bool = False, list: bool = False,
+        archived: bool = False, completed: bool = False,
+        merged_after: str | None = None, list: bool = False,
         no_pager: bool = True) -> argparse.Namespace:
     return argparse.Namespace(
         query=query, active=active, backlog=backlog, archived=archived,
+        completed=completed, merged_after=merged_after,
         list=list, no_pager=no_pager)
 
 
@@ -163,3 +166,54 @@ def test_cmd_search_composes_two_zone_flags(tmp_path: Path, capsys) -> None:
     assert rc == 0
     assert "darkactive" in out and "darkbk" in out    # both selected zones included
     assert "darkarc" not in out                       # archive excluded
+
+
+def test_cmd_search_completed_zone_tags_and_filters(tmp_path: Path, capsys) -> None:
+    _archive(tmp_path, "alpha", "Dark mode toggle", status="completed")
+    _archive(tmp_path, "beta", "Dark login flow", status="abandoned")
+    rc = _cmd_search(_ns("dark", completed=True, list=True), tmp_path)
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "alpha" in out and "[completed]" in out    # zone tag from _search_list_line
+    assert "beta" not in out                           # abandoned excluded
+
+
+def test_cmd_search_archive_wins_over_completed(tmp_path: Path, capsys) -> None:
+    _archive(tmp_path, "alpha", "Dark mode toggle", status="completed")
+    rc = _cmd_search(_ns("dark", archived=True, completed=True, list=True), tmp_path)
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert out.count("alpha") == 1                     # not double-listed
+    assert "[archive]" in out and "[completed]" not in out
+
+
+def test_cmd_search_merged_after_without_completed_is_rejected(
+        tmp_path: Path, capsys) -> None:
+    with pytest.raises(SystemExit) as exc:
+        _cmd_search(_ns("dark", merged_after="abc123"), tmp_path)
+    assert exc.value.code == 2
+    err = capsys.readouterr().err
+    assert "--merged-after" in err and "--completed" in err
+
+
+def test_search_parser_accepts_completed_and_merged_after() -> None:
+    ns = _build_parser().parse_args(
+        ["search", "dark", "--completed", "--merged-after", "abc123"])
+    assert ns.completed is True
+    assert ns.merged_after == "abc123"
+
+
+def test_search_parser_defaults_completed_false_merged_after_none() -> None:
+    ns = _build_parser().parse_args(["search", "dark"])
+    assert ns.completed is False
+    assert ns.merged_after is None
+
+
+def test_search_help_mentions_completed_and_merged_after(capsys) -> None:
+    with pytest.raises(SystemExit):
+        _build_parser().parse_args(["search", "--help"])
+    out = capsys.readouterr().out
+    out_flat = " ".join(out.split())
+    assert "Search completed (merged) quests." in out
+    assert "keep only quests whose" in out
+    assert "--completed scopes to merged quests" in out_flat

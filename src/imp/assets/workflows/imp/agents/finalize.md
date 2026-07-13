@@ -88,17 +88,24 @@ Before §2 decides, run a **cover-check** over the **verify-family tolerations**
 §1 surfaced set — the `— needs-decision:` lines whose source is `verify` /
 `converge-verify` / `integration-verify`. Design/spec `— needs-decision:` items authored
 by `spec-finalizer` / `plan-writer` are **never** cover-checked; they always surface.
-Per toleration, ask: is the failing test **already tracked or fixed by another active or
-backlog quest**? If so, re-asking a human is redundant. A **two-stage funnel**:
+Per toleration, ask: is the failing test **already tracked or fixed by another
+active, backlog, or completed quest**? If so, re-asking a human is redundant. A **two-stage funnel**:
 
-1. **Find candidates.** Run `imp search --active --backlog -l "<test identity>"` on the
-   test's identity (its node id / name / signature, read from the toleration line), and
+1. **Find candidates.** Run
+   {% if quest.orig_base_head %}`imp search --active --backlog --completed --merged-after {{ quest.orig_base_head }} -l "<test identity>"`{% else %}`imp search --active --backlog -l "<test identity>"`{% endif %}
+   on the test's identity (its node id / name / signature, read from the toleration line), and
    **exclude the quest being finalized** (`{{ quest.id }}`). This is a **candidate finder**
-   only — a substring match — so it also returns quests that merely *mention* the test.
+   only — a substring match — so it also returns quests that merely *mention* the test. When
+   the fork point is set, the search also scopes the completed
+   zone with `--merged-after`, which the CLI keeps to only completed quests whose merge landed
+   **after** the fork point (a fix that predates it was already in this quest's tree when
+   verify saw the flake, so it is not a valid cover); when the fork point is empty, it
+   falls back to the active + backlog search only and the flake surfaces, safely.
 2. **Confirm intent.** For each candidate, read its stated purpose — `imp show <id>` for
-   a backlog quest's title + description, `imp show <id> spec` for an in-flight quest's
-   goal — and confirm it is genuinely **about fixing or tracking this specific test's
-   flakiness**, matched on identity, not an incidental mention.
+   a backlog or completed quest's title + description (which now also shows the quest's
+   `merge_commit`), `imp show <id> spec` for an in-flight quest's goal — and confirm it is
+   genuinely **about fixing or tracking this specific test's flakiness**, matched on identity,
+   not an incidental mention.
 
 **Fail safe = surface, never suppress.** The cover-check only ever *removes* a human ask,
 so its default is *not* to remove one. Only a **positively confirmed** tracker counts: no candidate,

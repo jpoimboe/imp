@@ -130,3 +130,20 @@ def search_content(
         (cid, title or "", content or "")
         for (cid, title, content) in rows
     ]
+
+
+def search_completed(
+    conn: sqlite3.Connection, query: str,
+) -> list[tuple[str, str, str]]:
+    like = _like_pattern(query)
+    rows = conn.execute(
+        "SELECT id, title, content FROM quests"
+        " WHERE status = 'completed'"
+        " AND (id LIKE ? ESCAPE '\\' OR title LIKE ? ESCAPE '\\'"
+        " OR content LIKE ? ESCAPE '\\')"
+        " ORDER BY created_at DESC, id",
+        (like, like, like)).fetchall()
+    return [
+        (cid, title or "", content or "")
+        for (cid, title, content) in rows
+    ]

@@ -5,6 +5,7 @@ from pathlib import Path
 
 from imp.engine.archive.read import (
     completed_rows,
+    merge_commit_of,
     read_quest_json,
     read_state_json,
     status_of,
@@ -277,3 +278,32 @@ def test_last_event_ts_none_when_not_archived(tmp_path: Path) -> None:
 
     _git_init(tmp_path)
     assert last_event_ts(tmp_path, "ghost") is None
+
+
+def test_merge_commit_of_reads_recorded_sha(tmp_path: Path) -> None:
+    _git_init(tmp_path)
+    _archive(tmp_path, "alpha", "completed")
+    assert merge_commit_of(tmp_path, "alpha") == "c0ffee"
+
+
+def test_merge_commit_of_none_when_absent(tmp_path: Path) -> None:
+    from imp.engine import archive
+
+    _git_init(tmp_path)
+    events = tmp_path / "beta.jsonl"
+    events.write_bytes(_events_bytes("beta"))
+    quest_json = tmp_path / "beta-quest.json"
+    quest_json.write_text(json.dumps({
+        "id": "beta", "title": "Beta", "base_branch": "main",
+        "created_at": "2026-06-01T00:00:00+00:00", "depends_on": []}))
+    state_json = tmp_path / "beta-state.json"
+    state_json.write_text(json.dumps({"id": "beta", "status": "completed", "step": None}))
+    archive.archive_quest(
+        tmp_path, "beta", events_path=events,
+        quest_json_path=quest_json, state_json_path=state_json)
+    assert merge_commit_of(tmp_path, "beta") is None
+
+
+def test_merge_commit_of_none_for_unknown_quest(tmp_path: Path) -> None:
+    _git_init(tmp_path)
+    assert merge_commit_of(tmp_path, "nope") is None
