@@ -23,4 +23,4 @@ When the project under change is imp itself, `scripts/capture_imp_ui.py` renders
 imp's own TUI from fixtures — the cheap, deterministic way to see the real
 appearance without a live run (its human companion is `scripts/snap_imp_ui.py`).
 This is the imp-specific home for that knowledge; the project-agnostic manual for
-driving *any* terminal program is the `driving-terminal-uis` skill.
+driving *any* terminal program is the `imp-driving-terminal-uis` skill.

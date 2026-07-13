@@ -87,8 +87,8 @@ surface: every element and its final text, color, and visibility, not only the e
 the user named. Use concrete mockups where the change is visual; terminal mockups use
 real ANSI SGR colors and never depict a color the codes cannot produce.
 
-When a design turns on how a terminal surface actually looks, load `driving-terminal-uis`
-(`load_skill(name="driving-terminal-uis")`) and snapshot the *current* appearance with
+When a design turns on how a terminal surface actually looks, load `imp-driving-terminal-uis`
+(`load_skill(name="imp-driving-terminal-uis")`) and snapshot the *current* appearance with
 your impty tools, so your mockups are grounded in the real rendering, not a guess.
 
 **Enumerated values are spec content.** Once the user confirms them, the actual values go

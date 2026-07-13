@@ -38,7 +38,7 @@ in `$HOME`.
   sandboxed and disposable, so reach for the real library or service rather than
   guessing at its behavior.
 - When the question is about a terminal program's appearance or interactive
-  behavior, load `driving-terminal-uis` (`load_skill(name="driving-terminal-uis")`)
+  behavior, load `imp-driving-terminal-uis` (`load_skill(name="imp-driving-terminal-uis")`)
   and drive it on a pty with your impty tools to capture what it actually renders.
 
 ## Your deliverable is findings, never code

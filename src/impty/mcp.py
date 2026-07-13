@@ -30,7 +30,7 @@ from mcp.server.fastmcp import FastMCP
 from impty.driver import ImptyDriver
 
 # The provider surfaces (claude_code SDK + codex) show these one-liners instead
-# of the full ImptyDriver docstrings; the driving-terminal-uis skill is the
+# of the full ImptyDriver docstrings; the imp-driving-terminal-uis skill is the
 # manual. Authored deliberately (not truncated from docstrings). Keyed by tool
 # name and guarded by test_thin_description_mapping_covers_exactly_the_tool_methods
 # so a tool added/removed without a matching entry fails the suite. The standalone
