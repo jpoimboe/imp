@@ -69,11 +69,11 @@ install: ## Editable install of imp + dev deps (pytest, ruff, mypy).
 # Scope a run: make test PYTEST_ARGS="tests/foo.py -k name"
 .PHONY: test
 test: ## Fast test suite (skips live-API tests). What CI runs.
-	IMP_LIVE_PROVIDERS= $(PYTEST_PYTHONPATH) $(PYTEST) $(XDIST) -q $(PYTEST_ARGS)
+	$(PYTEST_PYTHONPATH) $(PYTEST) $(XDIST) -q $(PYTEST_ARGS)
 
 .PHONY: test-verbose
 test-verbose: ## Same as `test` but with -v.
-	IMP_LIVE_PROVIDERS= $(PYTEST_PYTHONPATH) $(PYTEST) $(XDIST) -v $(PYTEST_ARGS)
+	$(PYTEST_PYTHONPATH) $(PYTEST) $(XDIST) -v $(PYTEST_ARGS)
 
 _LIVE_TEST_FILES := \
   tests/test_default_workflow_e2e_live.py \
@@ -89,31 +89,31 @@ _LIVE_TEST_FILES := \
   tests/test_parallel_elicitation_live.py
 
 .PHONY: test-live
-test-live: ## Run live-API tests for providers opted in via IMP_LIVE_PROVIDERS.
-	@$(_REQUIRE_PROVIDERS) && \
-	  IMP_LIVE_PROVIDERS="$$IMP_LIVE_PROVIDERS" $(PYTEST_PYTHONPATH) \
-	    timeout --foreground 1800 $(PYTEST) $(LIVE_XDIST) -v -m "not codex_parallel" $(_LIVE_TEST_FILES)
+test-live: ## Run live-API tests (--run-live); providers whose toolchain/creds are present run, the rest skip.
+	@$(_LOAD_LIVE_KEYS) && \
+	  $(PYTEST_PYTHONPATH) \
+	    timeout --foreground 1800 $(PYTEST) $(LIVE_XDIST) --run-live -v -m "not codex_parallel" $(_LIVE_TEST_FILES)
 
 .PHONY: test-live-verbose
 test-live-verbose: ## test-live but with live progress + raw PTY output streamed to your terminal.
-	@$(_REQUIRE_PROVIDERS) && \
-	  IMP_LIVE_PROVIDERS="$$IMP_LIVE_PROVIDERS" $(PYTEST_PYTHONPATH) \
-	    timeout --foreground 1800 $(PYTEST) -s -v -m "not codex_parallel" $(_LIVE_TEST_FILES)
+	@$(_LOAD_LIVE_KEYS) && \
+	  $(PYTEST_PYTHONPATH) \
+	    timeout --foreground 1800 $(PYTEST) --run-live -s -v -m "not codex_parallel" $(_LIVE_TEST_FILES)
 
 .PHONY: test-live-quick
-test-live-quick: ## One-step live test for the first opted-in provider only.
-	@$(_REQUIRE_PROVIDERS) && \
-	  IMP_LIVE_PROVIDERS="$$IMP_LIVE_PROVIDERS" $(PYTEST_PYTHONPATH) \
-	    $(PYTEST) -v \
+test-live-quick: ## One-step live test for each provider whose toolchain/creds are present.
+	@$(_LOAD_LIVE_KEYS) && \
+	  $(PYTEST_PYTHONPATH) \
+	    $(PYTEST) --run-live -v \
 	      tests/test_default_workflow_e2e_live.py \
 	      tests/test_default_workflow_e2e_live_openai.py \
 	      tests/test_default_workflow_e2e_live_claude_code.py
 
 .PHONY: test-live-codex-parallel
 test-live-codex-parallel: ## Run the codex parallel-MCP concurrency probe (XFAIL on codex builds that serialize MCP dispatch).
-	@$(_REQUIRE_PROVIDERS) && \
-	  IMP_LIVE_PROVIDERS="$$IMP_LIVE_PROVIDERS" $(PYTEST_PYTHONPATH) \
-	    $(PYTEST) -v -m codex_parallel \
+	@$(_LOAD_LIVE_KEYS) && \
+	  $(PYTEST_PYTHONPATH) \
+	    $(PYTEST) --run-live -v -m codex_parallel \
 	      tests/test_codex_started_keying_live.py
 
 .PHONY: test-all
@@ -190,61 +190,25 @@ define _LOAD_KEY
 }
 endef
 
-# Validate IMP_LIVE_PROVIDERS is set, every token is a recognized provider,
-# and the matching auth is present (loading key files into env vars as the
-# legacy _LOAD_KEY did). Use as `@$(_REQUIRE_PROVIDERS) && ...`.
-define _REQUIRE_PROVIDERS
+# Best-effort load of provider key files into env vars for live tests. For each
+# of ANTHROPIC_API_KEY / OPENAI_API_KEY: if unset, export it from the first
+# readable key file ($(KEY_FILE) or ~/.anthropic-key for anthropic; ~/.openai-key
+# for openai). NEVER fails on a missing key or CLI — capability detection at
+# collection skips a provider whose credentials/toolchain are absent. Use as
+# `@$(_LOAD_LIVE_KEYS) && ...`.
+define _LOAD_LIVE_KEYS
 { \
-  if [[ -z "$${IMP_LIVE_PROVIDERS:-}" ]]; then \
-    echo "ERROR: IMP_LIVE_PROVIDERS is not set." >&2; \
-    echo "" >&2; \
-    echo "Set it to a comma-separated list of providers you have auth for:" >&2; \
-    echo "  IMP_LIVE_PROVIDERS=anthropic       (needs ANTHROPIC_API_KEY or ~/.anthropic-key)" >&2; \
-    echo "  IMP_LIVE_PROVIDERS=openai          (needs OPENAI_API_KEY or ~/.openai-key)" >&2; \
-    echo "  IMP_LIVE_PROVIDERS=claude_code     (needs \`claude\` CLI on PATH)" >&2; \
-    echo "  IMP_LIVE_PROVIDERS=codex           (needs \`codex\` CLI on PATH + openai_codex_sdk)" >&2; \
-    echo "  IMP_LIVE_PROVIDERS=anthropic,openai,claude_code,codex  (combine as desired)" >&2; \
-    echo "" >&2; \
-    echo "Note: per-provider one-step tests run for every provider listed." >&2; \
-    exit 1; \
+  if [[ -z "$${ANTHROPIC_API_KEY:-}" ]]; then \
+    if [[ -r "$(KEY_FILE)" && -s "$(KEY_FILE)" ]]; then \
+      export ANTHROPIC_API_KEY="$$(cat "$(KEY_FILE)")"; \
+    elif [[ -r "$$HOME/.anthropic-key" && -s "$$HOME/.anthropic-key" ]]; then \
+      export ANTHROPIC_API_KEY="$$(cat "$$HOME/.anthropic-key")"; \
+    fi; \
   fi; \
-  IFS=',' read -r -a _provs <<< "$${IMP_LIVE_PROVIDERS}"; \
-  for prov in "$${_provs[@]}"; do \
-    case "$$prov" in \
-      anthropic) \
-        if [[ -z "$${ANTHROPIC_API_KEY:-}" ]]; then \
-          if [[ -r "$(KEY_FILE)" && -s "$(KEY_FILE)" ]]; then \
-            export ANTHROPIC_API_KEY="$$(cat "$(KEY_FILE)")"; \
-          elif [[ -r "$$HOME/.anthropic-key" && -s "$$HOME/.anthropic-key" ]]; then \
-            export ANTHROPIC_API_KEY="$$(cat "$$HOME/.anthropic-key")"; \
-          else \
-            echo "ERROR: provider 'anthropic' opted in but no ANTHROPIC_API_KEY / ~/.anthropic-key." >&2; \
-            exit 1; \
-          fi; \
-        fi ;; \
-      openai) \
-        if [[ -z "$${OPENAI_API_KEY:-}" ]]; then \
-          if [[ -r "$$HOME/.openai-key" && -s "$$HOME/.openai-key" ]]; then \
-            export OPENAI_API_KEY="$$(cat "$$HOME/.openai-key")"; \
-          else \
-            echo "ERROR: provider 'openai' opted in but no OPENAI_API_KEY / ~/.openai-key." >&2; \
-            exit 1; \
-          fi; \
-        fi ;; \
-      claude_code) \
-        if ! command -v claude >/dev/null 2>&1; then \
-          echo "ERROR: provider 'claude_code' opted in but \`claude\` CLI not on PATH." >&2; \
-          exit 1; \
-        fi ;; \
-      codex) \
-        if ! command -v codex >/dev/null 2>&1; then \
-          echo "ERROR: provider 'codex' opted in but \`codex\` CLI not on PATH." >&2; \
-          exit 1; \
-        fi ;; \
-      *) \
-        echo "ERROR: unknown provider '$$prov' in IMP_LIVE_PROVIDERS (valid: anthropic, openai, claude_code, codex)." >&2; \
-        exit 1 ;; \
-    esac; \
-  done; \
+  if [[ -z "$${OPENAI_API_KEY:-}" ]]; then \
+    if [[ -r "$$HOME/.openai-key" && -s "$$HOME/.openai-key" ]]; then \
+      export OPENAI_API_KEY="$$(cat "$$HOME/.openai-key")"; \
+    fi; \
+  fi; \
 }
 endef
