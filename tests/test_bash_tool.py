@@ -41,6 +41,52 @@ def test_bash_exposes_returncode(tmp_path: Path) -> None:
     assert out["returncode"] == 7
 
 
+class _RecLog:
+    def __init__(self) -> None:
+        self.events: list[tuple[str, dict]] = []
+
+    def append(self, *, agent_id, type, payload):
+        self.events.append((type, payload))
+        return {"id": "e", "type": type}
+
+    def warnings(self) -> list[dict]:
+        return [p for t, p in self.events if t == "runner_warning"]
+
+
+def test_bash_reports_overlay_setup_failure_distinctly(tmp_path: Path) -> None:
+    from imp.engine.sandbox import (
+        OVERLAY_SETUP_FAILED_CODE,
+        OVERLAY_SETUP_FAILED_MARKER,
+    )
+    cmd = f"printf '%s\\n' {OVERLAY_SETUP_FAILED_MARKER} >&2; exit {OVERLAY_SETUP_FAILED_CODE}"
+    out = json.loads(_run_bash(_ctx(tmp_path), {"command": cmd}))
+    # A distinct sandbox-setup failure — NOT a plain command result with rc 122.
+    assert out["status"] == "sandbox_setup_failed"
+    assert "did NOT run" in out["error"]
+
+
+def test_bash_exit_122_without_marker_is_a_plain_result(tmp_path: Path) -> None:
+    # Detection is marker-driven, not returncode-driven: exit 122 alone is an
+    # ordinary command exit, not a sandbox-setup failure.
+    out = json.loads(_run_bash(_ctx(tmp_path), {"command": "exit 122"}))
+    assert "status" not in out
+    assert out["returncode"] == 122
+
+
+def test_bash_overlay_setup_failure_emits_event(tmp_path: Path) -> None:
+    from imp.engine.sandbox import (
+        OVERLAY_SETUP_FAILED_CODE,
+        OVERLAY_SETUP_FAILED_MARKER,
+    )
+    ctx = _ctx(tmp_path)
+    log = _RecLog()
+    ctx.event_log = log
+    cmd = f"printf '%s\\n' {OVERLAY_SETUP_FAILED_MARKER} >&2; exit {OVERLAY_SETUP_FAILED_CODE}"
+    json.loads(_run_bash(ctx, {"command": cmd}))
+    [w] = log.warnings()
+    assert w["reason"] == "overlay-setup-failed"
+
+
 def test_bash_default_cwd_is_project_root(tmp_path: Path) -> None:
     out = json.loads(_run_bash(_ctx(tmp_path), {"command": "pwd"}))
     assert str(tmp_path) in out["stdout"]

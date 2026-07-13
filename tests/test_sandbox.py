@@ -291,7 +291,7 @@ def test_overlay_available_true_when_mount_succeeds(tmp_path, monkeypatch):
 
     monkeypatch.setattr(sb.subprocess, "run", fake_run)
     sb.overlay_available.cache_clear()
-    assert sb.overlay_available(tmp_path) is True
+    assert sb.overlay_available(tmp_path, tmp_path / "home") is True
     # probes via unshare with a real overlay mount, then removes its scratch dir
     assert calls["argv"][0] == "unshare"
     assert "mount -t overlay" in calls["argv"][-1]
@@ -305,7 +305,7 @@ def test_overlay_available_false_when_mount_fails(tmp_path, monkeypatch):
     monkeypatch.setattr(sb.subprocess, "run",
                         lambda *a, **k: _types.SimpleNamespace(returncode=32))
     sb.overlay_available.cache_clear()
-    assert sb.overlay_available(tmp_path) is False
+    assert sb.overlay_available(tmp_path, tmp_path / "home") is False
     assert not (tmp_path / ".overlay-probe").exists()
 
 
@@ -314,14 +314,14 @@ def test_overlay_available_false_without_unshare(tmp_path, monkeypatch):
     monkeypatch.setattr(sb.platform, "system", lambda: "Linux")
     monkeypatch.setattr(sb.shutil, "which", lambda _: None)
     sb.overlay_available.cache_clear()
-    assert sb.overlay_available(tmp_path) is False
+    assert sb.overlay_available(tmp_path, tmp_path / "home") is False
 
 
 def test_overlay_available_false_on_non_linux(tmp_path, monkeypatch):
     import imp.engine.sandbox as sb
     monkeypatch.setattr(sb.platform, "system", lambda: "Darwin")
     sb.overlay_available.cache_clear()
-    assert sb.overlay_available(tmp_path) is False
+    assert sb.overlay_available(tmp_path, tmp_path / "home") is False
 
 
 def test_overlay_available_false_when_subprocess_raises(tmp_path, monkeypatch):
@@ -334,8 +334,29 @@ def test_overlay_available_false_when_subprocess_raises(tmp_path, monkeypatch):
 
     monkeypatch.setattr(sb.subprocess, "run", boom)
     sb.overlay_available.cache_clear()
-    assert sb.overlay_available(tmp_path) is False
+    assert sb.overlay_available(tmp_path, tmp_path / "home") is False
     assert not (tmp_path / ".overlay-probe").exists()
+
+
+def test_overlay_available_probes_with_real_home_as_lowerdir(tmp_path, monkeypatch):
+    import imp.engine.sandbox as sb
+    monkeypatch.setattr(sb.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(sb.shutil, "which", lambda _: "/usr/bin/unshare")
+    calls: dict = {}
+
+    def fake_run(argv, **kw):
+        calls["argv"] = argv
+        return _types.SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(sb.subprocess, "run", fake_run)
+    sb.overlay_available.cache_clear()
+    home = tmp_path / "agent-home"
+    assert sb.overlay_available(tmp_path, home) is True
+    mount_cmd = calls["argv"][-1]
+    # probes with the REAL home as lowerdir — the same shape the per-command mount
+    # in build_sandbox_argv uses — not a synthetic empty lower under the probe dir.
+    assert f"lowerdir={home}" in mount_cmd
+    assert str(tmp_path / ".overlay-probe" / "lower") not in mount_cmd
 
 
 def test_resolve_policy_secret_paths_classified_dir_and_file(tmp_path):
@@ -789,10 +810,12 @@ def test_overlay_home_wraps_bwrap_with_unshare_mount():
     assert ("mount -t overlay overlay -o "
             "lowerdir=/home/u,upperdir=/up/upper,workdir=/up/work "
             "/up/merged") in script
-    # `&&` (not `;`) is fail-loud: a runtime mount failure short-circuits so bwrap
-    # never binds an empty merged dir over $HOME. exec (not a child bwrap) keeps
-    # pgid == pid so signals reach the whole tree.
-    assert " && exec bwrap" in script
+    # Fail-loud: on mount failure the wrapper prints the sentinel + exits the
+    # reserved code WITHOUT running the command; on success it execs bwrap
+    # (exec, not a child bwrap, keeps pgid == pid so signals reach the tree).
+    assert " && exec" not in script
+    assert "|| {" in script
+    assert "exec bwrap" in script
     # merged view bound onto the real home: source == merged, dest == home.
     assert "--bind /up/merged /home/u" in script
 
@@ -824,6 +847,41 @@ def test_rw_fallback_home_layer_is_not_wrapped():
     pol = _policy(home="/home/u", home_layer=HomeLayer(home="/home/u"))
     argv = build_sandbox_argv("x", cwd="/wt", policy=pol, engine_env={})
     assert argv[0] == "bwrap"
+
+
+def test_overlay_setup_failed_keys_on_marker():
+    from imp.engine.sandbox import (
+        OVERLAY_SETUP_FAILED_MARKER,
+        overlay_setup_failed,
+    )
+    # True only when the controlled sentinel is present — NOT on the kernel's
+    # own mount-error text (which the wrapper also lets through to stderr).
+    assert overlay_setup_failed(f"noise\n{OVERLAY_SETUP_FAILED_MARKER}\nmore") is True
+    assert overlay_setup_failed(
+        "mount: wrong fs type, bad option, bad superblock on overlay") is False
+    assert overlay_setup_failed("") is False
+
+
+def test_overlay_wrapper_fails_loud_without_running_command():
+    from imp.engine.sandbox import (
+        OVERLAY_SETUP_FAILED_CODE,
+        OVERLAY_SETUP_FAILED_MARKER,
+    )
+    hl = HomeLayer(home="/home/u", merged="/up/merged",
+                   upper="/up/upper", work="/up/work")
+    pol = _policy(home="/home/u", home_layer=hl)
+    argv = build_sandbox_argv("echo hi", cwd="/wt", policy=pol, engine_env={})
+    script = argv[6]
+    # On mount FAILURE: print the sentinel marker to stderr, exit the reserved
+    # code, and do NOT run the command (no `&&`-guarded exec that could still
+    # fall through to bwrap over an empty $HOME).
+    assert " && exec" not in script
+    assert script.count("|| {") == 1
+    assert OVERLAY_SETUP_FAILED_MARKER in script
+    assert f"exit {OVERLAY_SETUP_FAILED_CODE}" in script
+    assert ">&2" in script
+    # On mount SUCCESS the command still runs via exec (not a child bwrap).
+    assert "exec bwrap" in script
 
 
 def test_make_home_layer_overlay_builds_dirs_and_cleanup(tmp_path):

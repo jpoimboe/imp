@@ -126,6 +126,20 @@ def _is_engine_passthrough(key: str) -> bool:
     return key.startswith("IMP_") or key == "PYTHONPATH" or key in HEADLESS_ENV
 
 
+# Loud-failure guard: prints this marker and exits the reserved code on mount failure.
+OVERLAY_SETUP_FAILED_MARKER = "__IMP_OVERLAY_MOUNT_SETUP_FAILED__"
+OVERLAY_SETUP_FAILED_CODE = 122   # reserved; distinct from ordinary command codes
+OVERLAY_SETUP_FAILED_MESSAGE = (
+    "sandbox home overlay could not be mounted; your command did NOT run "
+    "(this is a sandbox-setup failure, not your command's own exit)"
+)
+
+
+def overlay_setup_failed(stderr: str) -> bool:
+    """True iff `stderr` carries the overlay wrapper's controlled failure marker."""
+    return OVERLAY_SETUP_FAILED_MARKER in stderr
+
+
 def build_sandbox_argv(
     command: str, *, cwd: str, policy: SandboxPolicy,
     engine_env: Mapping[str, str],
@@ -198,11 +212,14 @@ def build_sandbox_argv(
     argv += ["sh", "-c", command]
     hl = policy.home_layer
     if hl is not None and hl.is_overlay:
+        # Fail loud on mount failure: print the marker, exit the reserved code, skip the cmd.
         mount = (
             f"mount -t overlay overlay -o "
             f"lowerdir={shlex.quote(hl.home)},"
             f"upperdir={shlex.quote(hl.upper)},"
-            f"workdir={shlex.quote(hl.work)} {shlex.quote(hl.merged)} && "
+            f"workdir={shlex.quote(hl.work)} {shlex.quote(hl.merged)} "
+            f"|| {{ printf '%s\\n' {shlex.quote(OVERLAY_SETUP_FAILED_MARKER)} >&2; "
+            f"exit {OVERLAY_SETUP_FAILED_CODE}; }}; "
             f"exec {shlex.join(argv)}"
         )
         return ["unshare", "--user", "--map-root-user", "--mount",
@@ -281,29 +298,32 @@ def _force_rmtree(path: Path) -> None:
 
 
 @lru_cache(maxsize=1)
-def overlay_available(probe_base: Path) -> bool:
+def overlay_available(probe_base: Path, home: Path) -> bool:
     """Linux + `unshare` on PATH + a one-shot unprivileged `mount -t overlay`
-    inside a user namespace succeeds at `probe_base` (a real dir under `.imp/`,
-    NOT /tmp — some hosts refuse an overlay upperdir on tmpfs). Cached like
-    sandbox_available(); Part 2 calls this to choose the COW home vs. the rw
-    fallback.
+    inside a user namespace succeeds using the agent's REAL home as lowerdir.
+    The upper/work/merged scratch dirs live under `probe_base/.overlay-probe` (a
+    real dir under `.imp/`, NOT /tmp — some hosts refuse an overlay upperdir on
+    tmpfs), but the lowerdir is `home` — the SAME shape the per-command mount in
+    build_sandbox_argv uses — so the probe exercises the overlapping-layers
+    condition the real mount hits instead of a synthetic empty lower that overlaps
+    nothing. Cached like sandbox_available(); Part 2 calls this to choose the COW
+    home vs. the rw fallback.
 
     Tests that monkeypatch subprocess.run / shutil.which / platform.system must
     call overlay_available.cache_clear() first (the result is process-global
-    cached).
+    cached, keyed on (probe_base, home)).
     """
     if platform.system() != "Linux" or shutil.which("unshare") is None:
         return False
     probe = probe_base / ".overlay-probe"
-    lower, upper, work, merged = (
-        probe / "lower", probe / "upper", probe / "work", probe / "merged")
+    upper, work, merged = probe / "upper", probe / "work", probe / "merged"
     try:
-        for d in (lower, upper, work, merged):
+        for d in (upper, work, merged):
             d.mkdir(parents=True, exist_ok=True)
         r = subprocess.run(
             ["unshare", "--user", "--map-root-user", "--mount", "sh", "-c",
              f"mount -t overlay overlay -o "
-             f"lowerdir={shlex.quote(str(lower))},"
+             f"lowerdir={shlex.quote(str(home))},"
              f"upperdir={shlex.quote(str(upper))},"
              f"workdir={shlex.quote(str(work))} {shlex.quote(str(merged))}"],
             capture_output=True, timeout=10,

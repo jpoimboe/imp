@@ -778,7 +778,7 @@ def _attach_home_layer(
         upper=base / f"{step.name}.overlay-upper",
         work=base / f"{step.name}.overlay-work",
         merged=base / f"{step.name}.overlay-merged",
-        use_overlay=overlay_available(quest.quest_dir),
+        use_overlay=overlay_available(quest.quest_dir, Path(policy.home)),
     )
     return dataclasses.replace(policy, home_layer=layer), cleanup
 
@@ -1728,7 +1728,8 @@ def _warn_if_no_overlay(policy: Any, quest: Quest, log: EventLog) -> None:
     """When the sandbox is active but the host lacks unprivileged overlayfs, $HOME
     falls back to a writable bind of the REAL home (home isolation lost; secret
     masks still apply). Emit one durable warning, modeled on sandbox_inactive."""
-    if policy.active and not overlay_available(quest.quest_dir):
+    if policy.active and policy.home and not overlay_available(
+            quest.quest_dir, Path(policy.home)):
         _emit(log, "sandbox_overlay_unavailable",
               {"reason": "unprivileged overlayfs unavailable; $HOME is a writable "
                          "bind of the real home (home isolation lost; secrets "
