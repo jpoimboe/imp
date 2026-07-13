@@ -209,3 +209,79 @@ def test_render_index_shows_header_ranges_loop_and_fanout() -> None:
     assert "types:" in text
     assert "step_started" in text
     assert "→ --step" in text
+
+
+def test_build_step_index_tiles_window_across_own_agent_and_subagents() -> None:
+    # task-lead owns the gaps; coder-1 owns its contiguous block.
+    events = [
+        _ev(None, "step_started", step="task-lead"),                    # 1 own
+        _ev("D1", "tool_call", agent_id="step:main/task-lead",
+            name="sub_agent", input={"subagent_name": "coder"}),        # 2 own
+        _ev("e1", "tool_call", agent_id="sub:D1"),                      # 3 coder-1
+        _ev("e2", "tool_result", agent_id="sub:D1"),                   # 4 coder-1
+        _ev("f1", "agent_output", agent_id="step:main/task-lead"),     # 5 own
+        _ev(None, "step_completed", step="task-lead"),                  # 6 own
+    ]
+    handles = ei.subagent_handle_map(_indexed(events))
+    si = ei.build_step_index(_indexed(events), "task-lead", handles)
+    assert si is not None
+    assert si.step_name == "task-lead"
+    assert si.windows == [(1, 6)]
+    roster = {a.handle: a for a in si.agents}
+    # own agent is gappy: two segments around the subagent block.
+    assert roster["task-lead"].ranges == [(1, 2), (5, 6)]
+    assert roster["task-lead"].count == 4
+    # subagent is one contiguous run.
+    assert roster["coder-1"].ranges == [(3, 4)]
+    assert roster["coder-1"].count == 2
+    # own agent listed first.
+    assert si.agents[0].handle == "task-lead"
+
+
+def test_build_step_index_unknown_step_returns_none() -> None:
+    si = ei.build_step_index(_indexed([_ev(None, "step_started", step="spec"),
+                                       _ev(None, "step_completed", step="spec")]),
+                             "nope", {})
+    assert si is None
+
+
+def test_render_step_index_shows_window_agents_and_types() -> None:
+    events = [
+        _ev(None, "step_started", step="task-lead"),                    # 1
+        _ev("D1", "tool_call", agent_id="step:main/task-lead",
+            name="sub_agent", input={"subagent_name": "coder"}),        # 2
+        _ev("e1", "tool_call", agent_id="sub:D1"),                      # 3
+        _ev(None, "step_completed", step="task-lead"),                  # 4
+    ]
+    handles = ei.subagent_handle_map(_indexed(events))
+    si = ei.build_step_index(_indexed(events), "task-lead", handles)
+    text = "\n".join(ei.render_step_index(si))
+    assert "step task-lead · #1-4 · 4 events" in text
+    assert "agents:" in text
+    assert "task-lead" in text
+    assert "coder-1" in text
+    assert "types:" in text
+
+
+def test_build_step_index_covers_multiple_windows_for_looped_step() -> None:
+    events = [
+        _ev(None, "step_started", step="task-lead"),        # 1
+        _ev("a", "tool_call", agent_id="step:main/task-lead"),  # 2
+        _ev(None, "step_completed", step="task-lead"),      # 3
+        _ev(None, "step_started", step="review"),           # 4
+        _ev(None, "step_completed", step="review"),         # 5
+        _ev(None, "step_started", step="task-lead"),        # 6
+        _ev("b", "tool_call", agent_id="step:main/task-lead"),  # 7
+        _ev(None, "step_completed", step="task-lead"),      # 8
+    ]
+    handles = ei.subagent_handle_map(_indexed(events))
+    si = ei.build_step_index(_indexed(events), "task-lead", handles)
+    assert si is not None
+    # both occurrences' windows are captured, in order.
+    assert si.windows == [(1, 3), (6, 8)]
+    assert si.total_events == 6  # the review step's 2 events are outside the window
+    roster = {a.handle: a for a in si.agents}
+    assert roster["task-lead"].ranges == [(1, 3), (6, 8)]
+    assert roster["task-lead"].count == 6
+    text = "\n".join(ei.render_step_index(si))
+    assert "#1-3, #6-8" in text

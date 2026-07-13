@@ -261,3 +261,85 @@ def render_index(index: Index) -> list[str]:
         ["", "→ --step <name> · --type <type> · <range> · --all · --json"]
     )
     return lines
+
+
+@dataclass
+class AgentRow:
+    handle: str
+    ranges: list[tuple[int, int]]
+    count: int
+
+
+@dataclass
+class ScopedIndex:
+    step_name: str
+    windows: list[tuple[int, int]]
+    total_events: int
+    agents: list[AgentRow]
+    types: list[tuple[str, int]]
+
+
+def build_step_index(
+    indexed: Sequence[tuple[int, dict[str, Any]]],
+    step_name: str,
+    handle_map: dict[str, str],
+) -> ScopedIndex | None:
+    step = next(
+        (s for s in step_windows(indexed) if s.name == step_name), None)
+    if step is None:
+        return None
+    windows = sorted(step.windows)
+    own_key = f"__own__:{step_name}"
+    buckets: dict[str, list[int]] = {}
+    for ordinal, event in indexed:
+        if is_suppressed(event) or not _in_windows(ordinal, windows):
+            continue
+        aid = event.get("agent_id") or ""
+        key = aid if aid.startswith("sub:") else own_key
+        buckets.setdefault(key, []).append(ordinal)
+    agents: list[AgentRow] = []
+    if own_key in buckets:
+        agents.append(AgentRow(
+            handle=step_name,
+            ranges=coalesce_ranges(buckets[own_key]),
+            count=len(buckets[own_key]),
+        ))
+    sub_keys = sorted(
+        (k for k in buckets if k.startswith("sub:")),
+        key=lambda k: min(buckets[k]),
+    )
+    for key in sub_keys:
+        agents.append(AgentRow(
+            handle=handle_map.get(key, key),
+            ranges=coalesce_ranges(buckets[key]),
+            count=len(buckets[key]),
+        ))
+    return ScopedIndex(
+        step_name=step_name,
+        windows=windows,
+        total_events=_displayable_count(indexed, windows),
+        agents=agents,
+        types=_type_histogram(indexed, windows),
+    )
+
+
+def render_step_index(index: ScopedIndex) -> list[str]:
+    lines = [
+        f"step {index.step_name} · {format_ranges(index.windows)} "
+        f"· {index.total_events} events",
+        "",
+        "agents:",
+    ]
+    handle_w = max((len(a.handle) for a in index.agents), default=0)
+    range_w = max(
+        (len(format_ranges(a.ranges)) for a in index.agents), default=0)
+    for a in index.agents:
+        lines.append(
+            f"  {a.handle:<{handle_w}}  "
+            f"{format_ranges(a.ranges):<{range_w}}  {a.count}".rstrip()
+        )
+    lines.extend(["", "types:"])
+    count_w = max((len(str(c)) for _, c in index.types), default=0)
+    for etype, count in index.types:
+        lines.append(f"  {count:>{count_w}}  {etype}")
+    return lines
