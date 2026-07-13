@@ -7,11 +7,44 @@ asserted (not skipped) — opt-in implies the user has set up credentials.
 
 from __future__ import annotations
 
+import importlib.util
 import os
+import shutil
 import subprocess
 import sys
 import time
 from pathlib import Path
+
+import pytest
+
+KNOWN_PROVIDERS: tuple[str, ...] = ("anthropic", "openai", "claude_code", "codex")
+
+# Sentinel stored as the --run-live option's `const` (bare flag => all providers).
+RUN_LIVE_ALL = object()
+
+
+def parse_run_live(value: object) -> frozenset[str] | None:
+    """Resolve the raw --run-live option value into the requested provider set.
+
+    None  -> flag not passed (skip every live test).
+    RUN_LIVE_ALL (bare --run-live) -> all known providers.
+    "a,b" -> that subset; an unknown token is a pytest.UsageError.
+    """
+    if value is None:
+        return None
+    if value is RUN_LIVE_ALL:
+        return frozenset(KNOWN_PROVIDERS)
+    assert isinstance(value, str)
+    tokens = [tok.strip() for tok in value.split(",") if tok.strip()]
+    unknown = [tok for tok in tokens if tok not in KNOWN_PROVIDERS]
+    if unknown:
+        raise pytest.UsageError(
+            "--run-live: unknown provider(s): "
+            + ", ".join(unknown)
+            + "; valid providers: "
+            + ", ".join(KNOWN_PROVIDERS)
+        )
+    return frozenset(tokens)
 
 
 def _parse() -> list[str]:
