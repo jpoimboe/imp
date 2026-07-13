@@ -1,6 +1,6 @@
 """Resumed claude_code step does not redo prior reads (ckx9f5 regression).
 
-Gated on IMP_LIVE_PROVIDERS=claude_code + the `claude` CLI on PATH. A multi-read
+Gated behind `--run-live` (claude_code) + the `claude` CLI on PATH. A multi-read
 step is paused mid-bash and resumed; the prior reads must be recalled faithfully
 (no '[Tool result missing…]' placeholder redo) and the resume must complete without
 re-reading either file. A mid-bash SIGINT lands before any `result`, so the SDK
@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import json
 import os
-import shutil
 import signal
 import subprocess
 import sys
@@ -22,7 +21,7 @@ from pathlib import Path
 
 import pytest
 
-from tests._live import _await_change_dir, opted_in
+from tests._live import _await_change_dir
 from tests.conftest import _init_repo
 
 _WORKTREE_SRC = str(Path(__file__).parent.parent / "src")
@@ -144,10 +143,7 @@ def _read_paths(events_path: Path) -> list[str]:
     return paths
 
 
-@pytest.mark.skipif(
-    not opted_in("claude_code"),
-    reason="claude_code not in IMP_LIVE_PROVIDERS",
-)
+@pytest.mark.live("claude_code")
 # Serialize the 3 crash-prone resume tests onto one worker (under --dist
 # loadgroup) to cap the peak concurrent claude-CLI footprint they contribute.
 @pytest.mark.xdist_group("live_claude_resume")
@@ -174,10 +170,6 @@ def test_resumed_step_recalls_prior_reads_without_redo_or_400(
     session bytes and the resume takes the stream-json fallback (replay + Part-3
     manifest) that backs both invariants.
     """
-    assert shutil.which("claude") is not None, (
-        "claude_code opted in via IMP_LIVE_PROVIDERS but `claude` CLI "
-        "not found on PATH"
-    )
     _seed_multiread_project(tmp_path)
     env = os.environ.copy()
     env.pop("CLAUDECODE", None)

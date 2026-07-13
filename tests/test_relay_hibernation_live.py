@@ -1,6 +1,6 @@
 """Relay-hibernation invariant, codified (u8rfr8).
 
-IMP_LIVE_PROVIDERS=claude_code-gated. Drives, over a real pty via impty's
+Gated behind `--run-live` (claude_code). Drives, over a real pty via impty's
 TerminalSession Python API:
 
   start → poll events.jsonl for the bash tool_call → SIGINT (the cooperative
@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import json
 import os
-import shutil
 import signal
 import subprocess
 import sys
@@ -28,7 +27,7 @@ import pytest
 
 from imp.engine.state import LockHeld, ProjectLock
 from impty import TerminalSession
-from tests._live import _await_change_dir, opted_in
+from tests._live import _await_change_dir
 from tests.conftest import _init_repo
 
 _WORKTREE_SRC = str(Path(__file__).parent.parent / "src")
@@ -128,14 +127,8 @@ def _event_types(events_path: Path) -> list[str]:
     return out
 
 
-@pytest.mark.skipif(
-    not opted_in("claude_code"),
-    reason="claude_code not in IMP_LIVE_PROVIDERS",
-)
+@pytest.mark.live("claude_code")
 def test_relay_hibernate_then_resume_reengages(tmp_path: Path) -> None:
-    assert shutil.which("claude") is not None, (
-        "claude_code opted in via IMP_LIVE_PROVIDERS but `claude` CLI not on PATH"
-    )
     _seed_cc_project(tmp_path)
     env = {k: v for k, v in os.environ.items() if k != "CLAUDECODE"}
     _pypath = env.get("PYTHONPATH", "")
