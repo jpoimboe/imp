@@ -11,13 +11,12 @@ from imp.agents.tools import imp_tool
 from imp.agents.tools.context import ToolContext
 
 _DESCRIPTION = (
-    "Read another quest's durable record by id. `overview` (the default) returns "
-    "its detail card — id, title, status, timing, dependencies, the opening "
-    "intent, and its summary inlined — for both live and archived quests. `spec` "
-    "returns its raw spec. Defaults to the current quest when no `quest_id` is "
-    "given. Returns a JSON `{\"error\": …}` string for an unknown id or a facet "
-    "that doesn't exist yet. For the event timeline, use `imp_events`; this reads "
-    "the distilled record, not the raw log."
+    "Read a quest's durable record by id (defaults to the current quest). "
+    "`resource='overview'` (default) returns its detail card — id, title, "
+    "status, timing, dependencies, opening intent, and summary; "
+    "`resource='spec'` returns the raw spec. Works for live and archived quests. "
+    "For the event timeline use `imp_events` instead — this reads the distilled "
+    "record, not the raw log."
 )
 
 

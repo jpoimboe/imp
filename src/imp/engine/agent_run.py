@@ -56,9 +56,10 @@ from imp.engine.types import AgentDef, OutputField
 if TYPE_CHECKING:
     from imp.agents.transcript import SkillReply
 
-# Injected into the system prompt of every agent that has the `bash` tool (see
-# build_agent_invocation). This is a PROPERTY OF HOLDING `bash`, not something
-# each prompt author must remember to paste — code-reviewer and summarizer once
+# Injected into the system prompt of every agent that holds any filesystem tool
+# (see build_agent_invocation / _FILESYSTEM_TOOLS). This is a PROPERTY OF HOLDING
+# a filesystem tool, not something each prompt author must remember to paste —
+# code-reviewer and summarizer once
 # lacked path guidance and burned tool calls feeding bad paths to `find`/
 # `head`/`sed`. The path model mirrors bash: sandbox-bounded, no virtual prefix.
 _BASH_VIRTUAL_PATHS_NOTE = """\
@@ -74,6 +75,13 @@ reject absolute paths and `..` escapes.
 The `bash` tool already runs with its working directory set to the project root,
 so use **relative paths** there too (`cat src/foo.py`, `cd src && ...`). When you
 need an absolute path on disk, use `$IMP_PROJECT_ROOT` (the real root path)."""
+
+
+# Filesystem tools whose path model the note above documents. The note is
+# injected when an agent holds ANY of these (not `bash` alone) so it stays
+# correct for a future agent granted file tools without `bash`.
+_FILESYSTEM_TOOLS = frozenset(
+    {"read_file", "write_file", "edit_file", "grep", "glob", "bash"})
 
 
 # Cribbed into the shared system prompt (non-resume only) so BOTH providers see
@@ -146,9 +154,7 @@ rather than deleting it. Measure twice, cut once.
    as available to you; don't guess.
 
 # Tone and style
- - Only use emojis if the user explicitly requests it. Avoid using emojis in all
-   communication unless asked.
- - Your responses should be short and concise.
+ - Only use emojis if the user explicitly requests it; avoid them otherwise.
  - When referencing specific functions or pieces of code include the pattern
    file_path:line_number to allow the user to easily navigate to the source code
    location.
@@ -184,16 +190,9 @@ decision changes what the user experiences, describe the effect in plain languag
 instead.
 
 When you do write updates, write so the reader can pick up cold: complete sentences,
-no unexplained jargon or shorthand from earlier in the session. But keep it tight — a
-clear sentence is better than a clear paragraph.
+no unexplained jargon or shorthand from earlier in the session.
 
-End-of-turn summary: one or two sentences. What changed and what's next.
-
-Match responses to the task: a simple question gets a direct answer, not headers and
-sections.
-
-In code: default to writing no comments. Never write multi-paragraph docstrings or
-multi-line comment blocks — one short line max."""
+End-of-turn summary: one or two sentences. What changed and what's next."""
 
 
 @dataclass(frozen=True)
@@ -604,14 +603,14 @@ def build_agent_invocation(
         date_note = _CURRENT_DATE_NOTE.format(date=date.today().isoformat())
         if is_subagent:
             body = f"{base}\n\n{body_source}"
-            if "bash" in agent_def.tools:
+            if agent_def.tools & _FILESYSTEM_TOOLS:
                 body = f"{body}\n\n{_BASH_VIRTUAL_PATHS_NOTE}"
             body = f"{body}\n\n{date_note}"
             body = reflow_markdown(body)
             system_prompt = f"{body}\n\n{SUBAGENT_DELIVERABLE_NOTE}"
         else:
             header = base
-            if "bash" in agent_def.tools:
+            if agent_def.tools & _FILESYSTEM_TOOLS:
                 header = f"{header}\n\n{_BASH_VIRTUAL_PATHS_NOTE}"
             header = f"{header}\n\n{date_note}"
             system_prompt = reflow_markdown(header)

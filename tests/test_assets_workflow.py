@@ -52,6 +52,8 @@ def test_default_agents_resolve_to_position_appropriate_tools(tmp_path: Path) ->
     }
     dispatchers = {"task-lead", "deferred-sweep",
                    "plan-writer", "spec-finalizer", "threshold", "finalize"}
+    review_pruned = {"spec-reviewer", "plan-reviewer", "gap-check",
+                     "integration-review", "batch-code-reviewer"}
 
     for name, agent in wf.agents.items():
         assert "complete_step" not in agent.tools, name
@@ -64,6 +66,9 @@ def test_default_agents_resolve_to_position_appropriate_tools(tmp_path: Path) ->
             assert agent.tools == BASE_CAPS | agent.allow_tools, name
         elif name in dispatchers:
             assert agent.tools == top_dispatcher | agent.allow_tools, name
+        elif name in review_pruned:
+            # deny_tools strips the three TOP_LEVEL_CAPS, leaving the base grant.
+            assert agent.tools == BASE_CAPS | agent.allow_tools, name
         else:
             assert agent.tools == top_leaf | agent.allow_tools, name
 

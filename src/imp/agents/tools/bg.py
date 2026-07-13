@@ -272,23 +272,12 @@ async def _wait_for_terminal(
 @imp_tool(
     name="bash_output",
     description=(
-        "Read incremental output from a background process started with "
-        "bash(run_in_background=true). Returns JSON {stdout, stderr, status, "
-        "returncode, kill_reason?, wait_ended?}; status is running|exited|"
-        "killed. Each call returns only NEW output since the previous call "
-        "(per-stream cursors), capped at 50 KB per stream per call; when more "
-        "remains, the result carries a notice with per-stream remaining byte "
-        "counts and the stream-file paths. Page fully only when the content "
-        "matters — for bulk logs (a 5 MB stream is ~100 pages of context), "
-        "use bash (grep/tail) or read_file on the stream files instead. An "
-        "exited or killed id stays readable until the invocation ends. "
-        "wait=true blocks until the process reaches a terminal status, your "
-        "timeout elapses, or the 20-minute wait budget is exhausted — "
-        "wait_ended says which ('exit'|'timeout'|'budget'); timeout/budget "
-        "returns are normal results, and a timeout above the budget is "
-        "clipped to it. timeout requires wait=true and must be > 0. Note: "
-        "file-redirected output is block-buffered (~4 KB) by most programs, "
-        "so very recent output may lag until the child flushes."
+        "Read new output from a background process started with "
+        "`bash(run_in_background=true)`. Returns JSON {stdout, stderr, status, "
+        "returncode, …}; each call returns only output new since the last call "
+        "(per-stream cursors), capped 50 KB/stream. `wait=true` blocks until "
+        "the process exits, your `timeout` elapses, or a 20-minute budget runs "
+        "out. See `tool-reference` for buffering and bulk-log handling."
     ),
 )
 async def bash_output(
@@ -342,13 +331,10 @@ async def _kill_group_escalate(bp: BgProc) -> None:
     name="bash_kill",
     description=(
         "Terminate a background process started with "
-        "bash(run_in_background=true): SIGTERM to its process group, 4 s "
-        "grace, then SIGKILL. Returns a final-status JSON snapshot {stdout, "
-        "stderr, status, returncode, kill_reason?} — the snapshot is a real "
-        "read and advances the output cursors, so a follow-up bash_output "
-        "continues from there without duplicate bytes; remaining output "
-        "stays pageable. Idempotent on an already-exited or already-killed "
-        "id (returns the current snapshot)."
+        "`bash(run_in_background=true)`: SIGTERM, 4s grace, then SIGKILL. "
+        "Returns a final-status JSON snapshot that also advances the output "
+        "cursors (so a follow-up `bash_output` continues without duplicates). "
+        "Idempotent on an already-exited id."
     ),
 )
 async def bash_kill(ctx: ToolContext, id: str) -> str:

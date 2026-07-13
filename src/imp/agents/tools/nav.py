@@ -186,20 +186,11 @@ def _cap_lines(lines: list[str]) -> str:
 @imp_tool(
     name="glob",
     description=(
-        "List file paths matching a relative glob (e.g. **/*.py or "
-        "src/**/*.ts) under an optional `path` base (default '.'). Absolute "
-        "and out-of-worktree bases are accepted, bounded by the sandbox like "
-        "bash; in-worktree matches are reported relative to the root, external "
-        "matches as absolute paths. Skips paths git ignores (build artifacts, "
-        "caches, .venv, etc.) and the .git/ dir; the quest's "
-        ".imp/quests/<id>/artifacts/ subtree stays visible, and explicitly targeting "
-        "an ignored path searches it anyway. Uses pathlib glob "
-        "semantics — a bare *.py matches top-level files only; this differs "
-        "from grep's `glob` parameter, where * and ** cross /. The `pattern` "
-        "stays relative; search elsewhere via `path`, not an absolute pattern. "
-        "Results are ordered most-recent-first by mtime (ties broken by path) "
-        "and capped at 50 KB, head-truncated with a `… +N not shown` notice so "
-        "the most-recent matches are the ones kept."
+        "List files matching a relative glob (e.g. `**/*.py`) under `path` "
+        "(default '.'). Uses pathlib semantics — bare `*.py` matches top-level "
+        "only, unlike `grep`'s `glob` where `*`/`**` cross `/`. Respects "
+        ".gitignore; results are most-recent-first, capped at 50 KB. "
+        "See `tool-reference` for path and sandbox details."
     ),
     read_only=True,
 )
@@ -305,36 +296,15 @@ _GREP_MODES = ("files_with_matches", "content", "count")
 @imp_tool(
     name="grep",
     description=(
-        "Search file contents with a regex under a relative path (default "
-        "'.'). output_mode: 'files_with_matches' (default) lists matching "
-        "file paths only; 'content' shows path:lineno:line rows (context "
-        "rows from before/after/context use path-lineno-line); 'count' shows "
-        "path:count for files with matches. before/after/context require "
-        "content mode. head_limit caps result rows. multiline=True lets the "
-        "regex span line boundaries (matched with DOTALL+MULTILINE over the "
-        "whole file); each match is reported at its START line. "
-        "case_insensitive applies "
-        "to the REGEX only — the `glob` filter is always case-sensitive. "
-        "`glob` filters by the worktree-relative path for in-worktree targets, "
-        "or the absolute path for external targets (NOT "
-        "relative to the `path` argument — use glob=\"src/a/*.py\" or a "
-        "wildcard basename pattern like *.py), with fnmatch semantics where "
-        "both * and ** cross "
-        "/ — unlike the glob tool, whose patterns do not. Lines are split on "
-        "\\n only: on CRLF files match the invisible trailing \\r with "
-        "`\\r?$`. Output rows can carry display artifacts that are not file "
-        "content (`…[truncated]` on >2000-char lines, U+FFFD for invalid "
-        "bytes) plus the invisible trailing \\r that IS content on CRLF "
-        "lines — never paste rows into edit_file/write_file. "
-        "Skips paths git ignores (build artifacts, caches, .venv, etc.), the "
-        ".git/ dir, and binary files (like ripgrep); the quest's "
-        ".imp/quests/<id>/artifacts/ subtree stays visible, and explicitly targeting "
-        "an ignored path searches it anyway. "
-        "Scans the first 5 MB per file; output capped "
-        "at 50 KB. Absolute and out-of-worktree paths are accepted, bounded by "
-        "the sandbox like bash (in-worktree matches reported relative, external "
-        "matches as absolute paths); an external-directory search stops after a "
-        "fixed file-count cap, disclosed in the output."
+        "Regex search over file contents under `path` (default '.'). "
+        "`output_mode`: 'files_with_matches' (default), 'content' "
+        "(path:lineno:line), or 'count'. `glob` filters paths (fnmatch — both "
+        "`*` and `**` cross `/`, unlike the glob tool). "
+        "`before`/`after`/`context`/`head_limit`/`case_insensitive`/`multiline` "
+        "refine results. Respects .gitignore, skips binaries. "
+        "WARNING: result rows carry display artifacts (`…[truncated]`, U+FFFD, "
+        "and the CRLF `\\r`) — never paste them into `edit_file`/`write_file`. "
+        "See `tool-reference` for multiline, caps, and sandbox details."
     ),
     read_only=True,
 )

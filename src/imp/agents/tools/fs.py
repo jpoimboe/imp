@@ -32,25 +32,12 @@ from imp.agents.tools.lines import file_is_cap_truncated, split_lines, truncate_
 @imp_tool(
     name="read_file",
     description=(
-        "Read a file — text or image (PNG/JPEG/GIF/WebP detected by content, "
-        "regardless of extension). Images return a viewable image part plus a "
-        "short caption; text files return 1-based line numbers (`cat -n` style). "
-        "For text: `offset` (default 1) is the first line to show; `limit` "
-        "(default 2000) caps the lines returned; a trailing [notice] says how "
-        "to continue when more lines remain (output is also bounded at 50 KB, "
-        "and only the first 5 MB of a file is readable). Paths are relative to "
-        "the project root (e.g. src/foo.py); absolute and out-of-worktree paths "
-        "are also accepted, bounded by the sandbox like bash. IMPORTANT: the "
-        "line-number prefix is display-only — "
-        "never copy it into any write path (edit_file's `old`, write_file's "
-        "`content`, or a bash heredoc); doing so writes numbered garbage and "
-        "nothing errors. Two more display artifacts are not file content: "
-        "the `…[truncated]` suffix on lines over 2000 chars, and U+FFFD "
-        "replacement characters standing in for invalid bytes — pasting "
-        "either into edit_file/write_file corrupts or never matches. The "
-        "opposite trap on CRLF files: every line ends in an invisible "
-        "carriage return that IS file content — preserve it when copying "
-        "multi-line text into edit_file's `old`/`new` or write_file."
+        "Read a text file or image (type detected by content). Text returns "
+        "1-based `cat -n` line numbers; `offset`/`limit` page (defaults 1/2000). "
+        "WARNING: the line-number prefix, `…[truncated]` suffixes, and U+FFFD "
+        "characters are display-only — never paste them into `edit_file`/`write_file`. "
+        "On CRLF files the trailing `\\r` IS content; preserve it. "
+        "See the `tool-reference` skill for image handling and caps."
     ),
     read_only=True,
 )
@@ -253,11 +240,9 @@ def _gate_write(ctx: ToolContext, resolved: Path, display_path: str) -> None:
 @imp_tool(
     name="write_file",
     description=(
-        "Write (overwrite) a file. Creates parent dirs as needed. Absolute and "
-        "out-of-worktree paths are accepted, bounded by the sandbox like bash. "
-        "`content` "
-        "must be file-faithful text — never read_file's numbered display "
-        "output (the `{lineno}<TAB>` prefixes would be written literally)."
+        "Write (overwrite) a file, creating parent dirs as needed. "
+        "`content` must be file-faithful text — never `read_file`'s numbered "
+        "display output (the line-number prefixes would be written literally)."
     ),
 )
 def write_file(ctx: ToolContext, path: str, content: str) -> str:
@@ -371,23 +356,12 @@ def _atomic_write_bytes(resolved: Path, data: bytes, *, display_path: str) -> No
 @imp_tool(
     name="edit_file",
     description=(
-        "Replace `old` with `new` in `path`. Absolute and out-of-worktree "
-        "paths are accepted, bounded by the sandbox like bash. Default: `old` "
-        "must occur "
-        "exactly once (raises if absent or not unique). With "
-        "`replace_all=true`: replaces every occurrence (raises only if "
-        "absent). Refuses files larger than 5 MB and files that are not "
-        "valid UTF-8 — use bash for those (a non-UTF-8 file LOOKS editable; "
-        "retrying edit_file on it will keep failing). `old` must be "
-        "file-faithful text — never read_file/grep display output with its "
-        "line-number prefixes, `…[truncated]` suffixes, or U+FFFD "
-        "characters; those exist only in the display and will never match. "
-        "To batch several edits to one file in a single call, pass `edits`: a "
-        "list of items, each `{old, new, replace_all?}` with the same match "
-        "rules as a single edit. The file is read once, the edits apply "
-        "sequentially (each edit sees the result of the earlier ones), and the "
-        "batch is all-or-nothing — if any edit fails its match rule the file is "
-        "left untouched. Pass EITHER `edits` OR top-level `old`/`new`, not both."
+        "Replace `old` with `new` in `path`. `old` must occur exactly once, or "
+        "set `replace_all=true` to replace every occurrence. `old` must be "
+        "file-faithful text — never `read_file`/`grep` display output (line-number "
+        "prefixes, `…[truncated]`, U+FFFD will never match). Batch several "
+        "edits to one file via `edits=[{old, new, replace_all?}]`, applied "
+        "sequentially, all-or-nothing. See `tool-reference` for size/UTF-8 limits."
     ),
 )
 async def edit_file(ctx: ToolContext, path: str, old: str | None = None,

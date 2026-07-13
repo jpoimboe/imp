@@ -120,6 +120,27 @@ def test_core_tail_emphasizes_parallel_tool_batching() -> None:
     assert "a later call genuinely depends" in _CORE_TAIL
 
 
+def test_no_comments_rule_merged_into_persona_and_deduped_from_core() -> None:
+    # AC 4: the single no-comments rule lives in the persona and carries BOTH the
+    # WHY-only exception criteria AND the docstring/one-line ceiling; the core
+    # tail no longer restates it, the emoji rule, or brevity.
+    persona = _PERSONA.read_text()
+    # WHY-only exception criteria retained:
+    assert "Only add one when the WHY is non-obvious" in persona
+    # docstring / one-line ceiling folded into the SAME rule:
+    assert "multi-paragraph docstrings" in persona
+    assert "one short line max" in persona
+    # duplicated no-comments statement removed from the core tail:
+    assert "default to writing no comments" not in _CORE_TAIL
+    assert "multi-paragraph docstrings" not in _CORE_TAIL
+    # emoji rule stated once (the redundant second sentence is gone):
+    assert "Only use emojis if the user explicitly requests it" in _CORE_TAIL
+    assert "Avoid using emojis in all communication" not in _CORE_TAIL
+    # brevity stated once (the redundant restatements are gone):
+    assert "Your responses should be short and concise" not in _CORE_TAIL
+    assert "Match responses to the task" not in _CORE_TAIL
+
+
 def test_base_has_recommendation_anchored_and_no_jargon_conventions() -> None:
     low = _CORE_TAIL.lower()
     assert "plain affirmative" in low

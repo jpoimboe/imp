@@ -53,23 +53,13 @@ _PAUSE_POLL_S = 0.05      # mid-command coordinator.should_pause poll cadence
 @imp_tool(
     name="bash",
     description=(
-        "Run a shell command. Foreground (default): returns JSON {stdout, "
-        "stderr, returncode}; each displayed stream is the 50 KB head — when "
-        "combined output exceeds 50 KB the full output is spilled to a file and "
-        "a `notice` field carries a read_file-able path to recover the tail "
-        "(runaway output is killed at 5 MB); interruptible (SIGTERM to the "
-        "process group, 4 s grace, SIGKILL). "
-        "With run_in_background=true: returns immediately with JSON {id, pid, "
-        "command, status, out_path, err_path} while the process keeps "
-        "running; read incremental output with bash_output(id), stop it with "
-        "bash_kill(id). The spawn return does not validate the command — a "
-        "typo'd command still spawns and fails milliseconds later, so check "
-        "bash_output shortly after spawning. Background output is "
-        "file-redirected, so most programs block-buffer (~4 KB): early lines "
-        "(e.g. a server's 'listening' banner) may lag until a flush. "
-        "out_path/err_path are relative to the project root (bash's default "
-        "cwd) and readable via bash or read_file; grep/glob exclude them "
-        "(.imp/). No permission gate (shell access is total at OS-user level)."
+        "Run a shell command. Foreground: returns JSON {stdout, stderr, "
+        "returncode}; output over 50 KB spills to a file with a `notice` path "
+        "to read the tail. `run_in_background=true` returns {id, pid, …} "
+        "immediately — read output with `bash_output(id)`, stop with "
+        "`bash_kill(id)`; a bad command still spawns then fails, so check "
+        "`bash_output` after. No permission gate. "
+        "See `tool-reference` for buffering and path details."
     ),
 )
 async def bash(

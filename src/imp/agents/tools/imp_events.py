@@ -56,16 +56,12 @@ def _filter_and_limit(
 @imp_tool(
     name="imp_events",
     description=(
-        "The quest's event log: the provenance record, in order, of what was "
-        "said and what prior agents and reviews did on this quest. Returns one "
-        "compact digest line per event by default; pass full=True for raw event "
-        "payloads (each capped at ~2 KB, marked when truncated). Narrow the "
-        "result with type (an event type, or a comma-separated list of them), "
-        "agent_id (a substring matched against an event's role/phase id), and "
-        "limit (the last N events; default 100). By default it reads the current "
-        "quest; pass quest_id to read another quest's timeline. A history "
-        "channel, not a status one — for current state, prefer your durable "
-        "working files."
+        "The quest's event log: an ordered record of what was said and what "
+        "prior agents and reviews did. Returns one digest line per event by "
+        "default; `full=True` for raw payloads. Narrow with `type`, `agent_id`, "
+        "and `limit` (the last N events). Reads the current quest, or pass "
+        "`quest_id` for another. A history channel, not a status one — for "
+        "current state, prefer your durable working files."
     ),
 )
 def imp_events(
