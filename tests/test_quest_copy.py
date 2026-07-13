@@ -71,7 +71,7 @@ def test_tool_descriptions_name_quest() -> None:
 
 
 def test_knowledge_primer_names_quest() -> None:
-    text = (_ASSETS / "skills/agent/imp-knowledge.md").read_text()
+    text = Path("src/imp/assets/skills/imp-knowledge.md").read_text()
     assert "## Quest and its home" in text
     assert "A **quest** is one unit of work imp tracks from idea to merge." in text
     assert "per-quest home on disk at " in text

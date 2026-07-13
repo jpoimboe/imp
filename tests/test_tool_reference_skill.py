@@ -1,21 +1,21 @@
 from __future__ import annotations
 
-from imp.agents.skills import load_agent_skill
-from imp.assets import bundled_workflow_dir
+from imp.agents.skills import load_internal_skill
+from imp.assets import bundled_skills_dir
 
 
 def _skills_dir():
-    return bundled_workflow_dir("imp") / "skills"
+    return bundled_skills_dir()
 
 
-def test_tool_reference_loads_via_agent_path_without_frontmatter() -> None:
-    body = load_agent_skill(_skills_dir(), "tool-reference")
-    assert body.strip(), "tool-reference skill missing/empty"
+def test_tool_reference_loads_via_internal_path_without_frontmatter() -> None:
+    body = load_internal_skill(_skills_dir(), "imp-tool-reference")
+    assert body.strip(), "imp-tool-reference skill missing/empty"
     assert not body.lstrip().startswith("---"), "skill must carry no frontmatter"
 
 
 def test_tool_reference_holds_relocated_reference_detail() -> None:
-    body = load_agent_skill(_skills_dir(), "tool-reference")
+    body = load_internal_skill(_skills_dir(), "imp-tool-reference")
     # One sentinel per tool whose description relocated detail here (AC 3):
     # every removed reference detail must still be present, only relocated.
     for sentinel in (
@@ -37,4 +37,4 @@ def test_tool_reference_holds_relocated_reference_detail() -> None:
         "comma-separated",       # imp_events type filter
         "durable working files",  # imp_events current-state nudge
     ):
-        assert sentinel in body, f"tool-reference missing: {sentinel!r}"
+        assert sentinel in body, f"imp-tool-reference missing: {sentinel!r}"
