@@ -567,3 +567,49 @@ async def test_lost_steer_race_arms_continue(tmp_path: Path) -> None:
     state = State.load(quest.state_dir)
     assert state.resume_pending == state.step
     assert state.resume_mode == "continue"   # lost-steer interrupt still continues
+
+
+@pytest.mark.anyio
+async def test_forcekill_escalation_arms_continue(tmp_path: Path) -> None:
+    """The force-kill escalation branch: a cooperative interrupt whose teardown
+    unwinds as paused with interrupt=False AND awaiting_user=False (the
+    SubagentSuspended-shaped unwind), while end_gesture_round has already
+    cleared should_pause. The durable coordinator.interrupted latch is still
+    True, so the executor's arm decision must key off it and persist
+    resume_mode == "continue" (not "solicit"). Fails pre-fix (arms solicit),
+    passes after."""
+    quest = _seed_single_agent(tmp_path)
+    from imp.providers import resolve
+    resolve.reset_providers_for_tests()
+    from imp.cli.signals import InterruptCoordinator
+    from imp.engine.agent_run import SubagentSuspended
+    coord = InterruptCoordinator()
+
+    class _EscalationRunner:
+        async def run(self, inv: AgentInvocation) -> AsyncIterator[Event]:
+            # Cooperative Ctrl-C: set should_pause + the durable interrupted latch.
+            await coord.signal_pause(reason="ctrl-c")
+            # Client round-over clears should_pause but LEAVES interrupted set
+            # (end_gesture_round resets only the racy flag) — the escalation window.
+            coord.end_gesture_round()
+            # The interrupt teardown unwinds as a paused result with interrupt=False
+            # and awaiting_user=False (the force-kill escalation shape).
+            raise SubagentSuspended()
+            yield {}  # unreachable; marks run() as an async generator
+
+        async def interrupt(self) -> None:
+            pass
+
+    class _P:
+        name = "fake"
+        model = "m"
+        def create_runner(self, _inv: AgentInvocation) -> AgentRunner:
+            return _EscalationRunner()
+
+    resolve.register_provider("fake", env_check=lambda: True, factory=lambda _m: _P())
+
+    result = await run_quest(quest, coordinator=coord)
+    assert result is RunResult.PAUSED
+    state = State.load(quest.state_dir)
+    assert state.resume_pending == state.step   # escalation park keeps the transcript
+    assert state.resume_mode == "continue"      # durable-latch interrupt continues
