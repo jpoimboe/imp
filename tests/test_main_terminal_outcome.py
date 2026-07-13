@@ -57,32 +57,6 @@ def test_non_merge_pause_still_emits_paused_summary() -> None:
     ps.assert_called_once()          # ordinary pauses keep the summary line
 
 
-def test_emit_completed_merge_lines_render_lifecycle_wordmark(monkeypatch, capsys) -> None:
-    from imp.cli import palette as pal
-    monkeypatch.setattr(main, "should_use_color", lambda stream: True)
-    for theme in ("ansi", "dark", "light"):
-        pal.set_theme(theme)
-        try:
-            main._emit_completed(_Change([]), "shipped it", merged=True)
-            out = capsys.readouterr().out
-            assert "✓ Merged 2026-06-12-run-x into master." in out
-            assert "quest 2026-06-12-run-x: shipped it" in out
-            assert pal.sgr("wordmark", enabled=True) in out
-            assert pal._ANSI["green"] not in out
-        finally:
-            pal.set_theme("ansi")
-
-
-def test_emit_completed_non_merge_stays_green(monkeypatch, capsys) -> None:
-    from imp.cli import palette as pal
-    monkeypatch.setattr(main, "should_use_color", lambda stream: True)
-    main._emit_completed(_Change([]), "all done", merged=False)
-    out = capsys.readouterr().out
-    assert "quest 2026-06-12-run-x: all done" in out
-    assert pal._ANSI["green"] in out
-    assert pal._ANSI["yellow"] not in out
-
-
 def test_emit_merge_blocked_notice_is_wordmark_under_dark_theme(monkeypatch, capsys) -> None:
     from imp.cli import palette as pal
     monkeypatch.setattr(main, "should_use_color", lambda stream: True)
@@ -153,37 +127,86 @@ def test_emit_paused_summary_interrupt_renders_bare_reason(capsys) -> None:
     assert "· interrupt" in out
 
 
-def test_emit_completed_appends_warning_count_suffix(monkeypatch, capsys) -> None:
-    monkeypatch.setattr(main, "should_use_color", lambda stream: False)
-    main._emit_completed(_Change([]), "all done", merged=False, warnings=2)
+def test_status_spine_named_renders_plain_id_title_tail_structure() -> None:
+    line = main._status_spine("vahi04", "One-line title", "completed", "green",
+                              color=False)
+    assert line == "vahi04 · One-line title · completed"
+
+
+def test_status_spine_unnamed_drops_the_title_segment() -> None:
+    line = main._status_spine("vahi04", "", "completed", "green", color=False)
+    assert line == "vahi04 · completed"
+    # exactly one separator: id · tail, no empty title slot
+    assert line.count(" · ") == 1
+
+
+def test_status_spine_colors_id_gold_and_tail_by_role() -> None:
+    from imp.cli import palette as pal
+    line = main._status_spine("vahi04", "T", "completed", "green", color=True)
+    assert line == (f'{pal.ansi("vahi04", "wordmark")} · T · '
+                    f'{pal.ansi("completed", "green")}')
+
+
+def test_emit_completed_merged_prints_single_green_tail_no_glyph(
+    monkeypatch, capsys,
+) -> None:
+    from imp.cli import palette as pal
+    monkeypatch.setattr(main, "should_use_color", lambda stream: True)
+    main._emit_completed(_Change([]), merged=True)
     out = capsys.readouterr().out
-    assert "quest 2026-06-12-run-x: all done  (2 warnings)" in out
+    assert out.startswith("\n")                 # exactly one leading blank
+    assert not out.startswith("\n\n")
+    assert "2026-06-12-run-x" in out
+    assert pal.ansi("merged into master", "green") in out
+    assert "✓" not in out
+    assert "quest 2026-06-12-run-x:" not in out  # the old second line is gone
+    assert "Merged 2026-06-12-run-x into" not in out
 
 
-def test_emit_completed_warning_suffix_singular(monkeypatch, capsys) -> None:
-    monkeypatch.setattr(main, "should_use_color", lambda stream: False)
-    main._emit_completed(_Change([]), "all done", merged=False, warnings=1)
+def test_emit_completed_non_merge_tail_is_completed_green(monkeypatch, capsys) -> None:
+    from imp.cli import palette as pal
+    monkeypatch.setattr(main, "should_use_color", lambda stream: True)
+    main._emit_completed(_Change([]), merged=False)
     out = capsys.readouterr().out
-    assert "(1 warning)" in out
-    assert "warnings" not in out
+    # Target the TAIL, not a raw escape scan of the whole line: under the autouse
+    # `ansi` theme the gold id (wordmark) and yellow share `\x1b[33m`, so a
+    # line-wide `yellow not in out` check would fail on the legitimately-gold id.
+    assert pal.ansi("completed", "green") in out
+    assert pal.ansi("completed", "wordmark") not in out   # tail is green, not gold
 
 
-def test_emit_completed_no_suffix_when_zero_warnings(monkeypatch, capsys) -> None:
+def test_emit_completed_warnings_render_plain_deduped_list(monkeypatch, capsys) -> None:
     monkeypatch.setattr(main, "should_use_color", lambda stream: False)
-    main._emit_completed(_Change([]), "all done", merged=False, warnings=0)
+    main._emit_completed(
+        _Change([]), merged=True,
+        warnings=["clamped to 4", "clamped to 4", "id reused"])
     out = capsys.readouterr().out
-    assert "all done" in out
+    assert "3 warnings this run" in out
+    assert "- clamped to 4 (×2)" in out
+    assert "- id reused" in out
+    assert "(3 warnings)" not in out            # the old count suffix is gone
+    assert out.index("- clamped to 4 (×2)") < out.index("- id reused")  # first-seen order
+
+
+def test_emit_completed_single_warning_header_is_singular(monkeypatch, capsys) -> None:
+    monkeypatch.setattr(main, "should_use_color", lambda stream: False)
+    main._emit_completed(_Change([]), merged=False, warnings=["only one"])
+    out = capsys.readouterr().out
+    assert "1 warning this run" in out
+    assert "warnings this run" not in out
+    assert "- only one" in out
+    assert "(×" not in out                       # no count suffix at a single occurrence
+
+
+def test_emit_completed_no_warnings_prints_no_block(monkeypatch, capsys) -> None:
+    monkeypatch.setattr(main, "should_use_color", lambda stream: False)
+    main._emit_completed(_Change([]), merged=False, warnings=[])
+    out = capsys.readouterr().out
     assert "warning" not in out
+    assert "this run" not in out
 
 
-def test_emit_completed_appends_warning_suffix_on_merged_line(monkeypatch, capsys) -> None:
-    monkeypatch.setattr(main, "should_use_color", lambda stream: False)
-    main._emit_completed(_Change([]), "all done", merged=True, warnings=2)
-    out = capsys.readouterr().out
-    assert "quest 2026-06-12-run-x: all done  (2 warnings)" in out
-
-
-def test_handle_terminal_outcome_threads_runner_warning_count(monkeypatch) -> None:
+def test_handle_terminal_outcome_threads_runner_warning_messages(monkeypatch) -> None:
     events = [
         {"type": "runner_warning", "payload": {"message": "a"}},
         {"type": "runner_warning", "payload": {"message": "a"}},
@@ -194,10 +217,10 @@ def test_handle_terminal_outcome_threads_runner_warning_count(monkeypatch) -> No
     captured: dict = {}
     monkeypatch.setattr(
         main, "_emit_completed",
-        lambda ch, value, *, merged, warnings: captured.update(warnings=warnings))
+        lambda ch, *, merged, warnings: captured.update(warnings=warnings))
     rc = main._handle_terminal_outcome(quest, RunResult.COMPLETED, coord=None)
     assert rc == 0
-    assert captured["warnings"] == 2
+    assert captured["warnings"] == ["a", "a"]    # ordered messages, not a count
 
 
 def test_handle_terminal_outcome_threads_deliberate_leave_trigger() -> None:
@@ -219,13 +242,9 @@ def test_handle_terminal_outcome_threads_deliberate_leave_trigger() -> None:
     assert ps.call_args.args[1] == "ctrl-d"   # the trigger reached the summary
 
 
-def test_handle_terminal_outcome_counts_warnings_from_archive_when_home_reaped(monkeypatch) -> None:
-    # _Change([]) has no events_path attribute and event_log().read() returns [] —
-    # so the code falls through to the archive_read.read_events fallback branch.
+def test_handle_terminal_outcome_reads_warning_messages_from_archive(monkeypatch) -> None:
     quest = _Change([])
     quest.control_root = main.Path("/tmp/imp-no-such-worktree-xyz")
-
-    # Two runner_warning events plus one non-warning event in the archived blob.
     archive_blob = (
         b'{"type": "runner_warning", "payload": {"message": "a"}}\n'
         b'{"type": "runner_warning", "payload": {"message": "b"}}\n'
@@ -234,12 +253,10 @@ def test_handle_terminal_outcome_counts_warnings_from_archive_when_home_reaped(m
     monkeypatch.setattr(
         main.archive_read, "read_events",
         lambda control_root, quest_id: archive_blob)
-
     captured: dict = {}
     monkeypatch.setattr(
         main, "_emit_completed",
-        lambda ch, value, *, merged, warnings: captured.update(warnings=warnings))
-
+        lambda ch, *, merged, warnings: captured.update(warnings=warnings))
     rc = main._handle_terminal_outcome(quest, RunResult.COMPLETED, coord=None)
     assert rc == 0
-    assert captured["warnings"] == 2
+    assert captured["warnings"] == ["a", "b"]

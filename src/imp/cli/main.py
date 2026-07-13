@@ -229,25 +229,55 @@ def make_message_reply_fn(message: str | None) -> Callable[[], Awaitable[str]]:
 
 
 # -- end-of-run status lines ------------------------------------------------
-# Semantic color + a leading glyph tell you at a glance how a run ended. The
-# decoration is gated on `should_use_color` (TTY + NO_COLOR aware), so piped /
-# redirected output stays plain and script-parseable. Shared by `new`/`resume`.
+# Every terminal line shares one spine: a gold quest id, a white (default-fg)
+# title, and a dot-joined outcome tail whose color carries meaning (green =
+# success, red = error, gold = everything-else). No glyphs, no dim, flush left,
+# so NO_COLOR / non-TTY output stays plain and script-parseable. Shared by
+# `new`/`resume` and the leave echoes.
 
-def _emit_completed(quest: Quest, value: str, *, merged: bool, warnings: int = 0) -> None:
-    """Run finished cleanly — ✓ on the headline."""
+def _status_spine(quest_id: str, title: str, tail: str, *tail_codes: str,
+                  color: bool) -> str:
+    """`<id>gold · <title>white · <tail>colored`; the title segment is dropped
+    when the quest has no title (`<id>gold · <tail>colored`)."""
+    stripped = title.strip()
+    mid = f" · {stripped} · " if stripped else " · "
+    return (ansi(quest_id, *pal.NODE_COLORS["quest_id"], enabled=color)
+            + mid + ansi(tail, *tail_codes, enabled=color))
+
+
+def _resume_line(token: str, suffix: str = "") -> str:
+    """A plain (default-fg), flush-left resume hint; one space after `resume:`."""
+    return f"resume: imp resume {token}{suffix}"
+
+
+def _print_warnings_block(messages: list[str]) -> None:
+    """A plain `N warnings this run` header + a plain dashed list of the distinct
+    messages in first-seen order, `(×N)` on repeats. No-op on an empty list."""
+    if not messages:
+        return
+    counts: dict[str, int] = {}
+    order: list[str] = []
+    for msg in messages:
+        if msg not in counts:
+            counts[msg] = 0
+            order.append(msg)
+        counts[msg] += 1
+    print()
+    noun = "warning" if len(messages) == 1 else "warnings"
+    print(f"{len(messages)} {noun} this run")
+    for msg in order:
+        suffix = f" (×{counts[msg]})" if counts[msg] > 1 else ""
+        print(f"- {msg}{suffix}")
+
+
+def _emit_completed(quest: Quest, *, merged: bool,
+                    warnings: list[str] | None = None) -> None:
+    """The clean-finish line: one green-tailed spine, then the warnings block."""
     color = should_use_color(sys.stdout)
-    mark = "✓ " if color else ""
-    suffix = ""
-    if warnings:
-        noun = "warning" if warnings == 1 else "warnings"
-        suffix = f"  ({warnings} {noun})"
-    if merged:
-        print(ansi(f"{mark}Merged {quest.id} into {quest.base_branch}.",
-                   *pal.NODE_COLORS["lifecycle"], enabled=color))
-        print(ansi(f"quest {quest.id}: {value}{suffix}",
-                   *pal.NODE_COLORS["lifecycle"], enabled=color))
-    else:
-        print(ansi(f"{mark}quest {quest.id}: {value}{suffix}", "green", enabled=color))
+    tail = f"merged into {quest.base_branch}" if merged else "completed"
+    print()
+    print(_status_spine(quest.id, quest.title, tail, "green", color=color))
+    _print_warnings_block(warnings or [])
 
 
 def _phase_from_events(events: list[dict[str, Any]]) -> str | None:
@@ -452,9 +482,10 @@ def _handle_terminal_outcome(
         if not events:
             raw = archive_read.read_events(quest.control_root, quest.id)
             events = _parse_jsonl(raw) if raw is not None else []
-        warnings = sum(1 for ev in events if ev.get("type") == "runner_warning")
-        _emit_completed(quest, result.value, merged=not wt_path.exists(),
-                        warnings=warnings)
+        warning_msgs = [
+            str((ev.get("payload") or {}).get("message", "?"))
+            for ev in events if ev.get("type") == "runner_warning"]
+        _emit_completed(quest, merged=not wt_path.exists(), warnings=warning_msgs)
         return 0
     # PAUSED — surface merge_blocked; every other pause falls through to the summary.
     final_state = State.load(quest.state_dir)
