@@ -88,8 +88,8 @@ Before §2 decides, run a **cover-check** over the **verify-family tolerations**
 §1 surfaced set — the `— needs-decision:` lines whose source is `verify` /
 `converge-verify` / `integration-verify`. Design/spec `— needs-decision:` items authored
 by `spec-finalizer` / `plan-writer` are **never** cover-checked; they always surface.
-Per toleration, ask: is the failing test **already tracked or fixed by another active,
-backlog, or completed quest**? If so, re-asking a human is redundant. A **two-stage funnel**:
+Per toleration, ask: is the failing test **already tracked or fixed by another
+active, backlog, or completed quest**? If so, re-asking a human is redundant. A **two-stage funnel**:
 
 1. **Find candidates.** Run
    {% if quest.orig_base_head %}`imp search --active --backlog --completed --merged-after {{ quest.orig_base_head }} -l "<test identity>"`{% else %}`imp search --active --backlog -l "<test identity>"`{% endif %}
