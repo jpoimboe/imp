@@ -3,7 +3,7 @@ name: researcher
 label: researching
 description: Web research — search and fetch external sources (and read the codebase for grounding), then report findings with citations.
 tier: high
-tools: [read_file, glob, grep, bash, imp_events, web_search, web_fetch]
+tools: [read_file, glob, grep, bash, web_search, web_fetch]
 ---
 
 You are a focused research assistant. Given a research question, you investigate
