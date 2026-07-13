@@ -27,7 +27,8 @@ from imp.engine.worktree import RepoGitLock, _git, _git_ok
     ),
 )
 def commit_memory(ctx: Any, path: str, content: str, message: str) -> str:
-    from imp.providers.config import parse_project_facts
+    from imp.engine.loader import load_workflow
+    from imp.providers.config import parse_default_workflow, parse_project_facts
     from imp.providers.effective import memory_validation_scopes
     from imp.providers.memory import validate_memory_tree
 
@@ -35,7 +36,8 @@ def commit_memory(ctx: Any, path: str, content: str, message: str) -> str:
         raise RuntimeError(
             "commit_memory is only available to top-level quest steps"
         )
-    control_root = ctx.quest.control_root
+    quest = ctx.quest
+    control_root = quest.control_root
 
     pp = PurePosixPath(path)
     if (
@@ -52,8 +54,16 @@ def commit_memory(ctx: Any, path: str, content: str, message: str) -> str:
 
     with RepoGitLock(control_root).acquire():
         project_facts = parse_project_facts(control_root / "imp" / "project.yaml")
+        # Use the frozen snapshot to avoid diza15 (live tree may have advanced past this loader).
+        wf_name = quest.workflow or parse_default_workflow(
+            control_root / "imp" / "project.yaml"
+        )
+        wf = load_workflow(
+            quest.workflow_dir, project_keys=frozenset(project_facts)
+        )
+        preloaded_steps = {wf_name: frozenset(s.name for s in wf.flat_steps())}
         valid, workflow_steps = memory_validation_scopes(
-            control_root, [path], project_facts
+            control_root, [path], project_facts, preloaded_steps=preloaded_steps
         )
         errors = validate_memory_tree(
             [path], valid_workflows=valid, workflow_steps=workflow_steps

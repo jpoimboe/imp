@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -234,3 +235,85 @@ def test_commit_memory_registers_regardless_of_import_order() -> None:
         f"stdout={out.stdout!r}\nstderr={out.stderr!r}"
     )
     assert "REGISTERED-OK" in out.stdout
+
+
+def test_validation_uses_snapshot_step_names(tmp_path: Path) -> None:
+    quest = _quest(tmp_path)
+    # Materialize the frozen snapshot (a copy of the live workflow tree), then
+    # rename its step so the snapshot's step set ({"snap_step"}) diverges from
+    # the live tree's ({"s"}). quest.workflow_dir now resolves to this snapshot.
+    snapshot = quest.quest_dir / "workflow"
+    shutil.copytree(tmp_path / "imp" / "workflows" / "imp", snapshot)
+    (snapshot / "workflow.yaml").write_text(
+        'name: t\ndescription: ""\n'
+        "phases:\n  - name: p\n    steps:\n"
+        "      - {name: snap_step, file: agents/stub.md}\n"
+    )
+
+    # A path valid per the SNAPSHOT (step snap_step) commits.
+    ok = _invoke(
+        _ctx(quest, tmp_path),
+        path="imp/snap_step.md",
+        content="x\n",
+        message="memory: snap",
+    )
+    assert "imp/memory/imp/snap_step.md" in ok
+    assert (tmp_path / "imp" / "memory" / "imp" / "snap_step.md").exists()
+
+    # A path valid only on the LIVE tree (step s) is rejected, and the error
+    # lists the snapshot's step names — proving validation sources step names
+    # from the snapshot, not the live tree.
+    before = _git(tmp_path, "rev-parse", "HEAD").strip()
+    bad = _invoke(
+        _ctx(quest, tmp_path),
+        path="imp/s.md",
+        content="y\n",
+        message="memory: live",
+    )
+    assert "snap_step" in bad
+    assert not (tmp_path / "imp" / "memory" / "imp" / "s.md").exists()
+    assert _git(tmp_path, "rev-parse", "HEAD").strip() == before
+
+
+def test_diza15_validates_against_snapshot_when_live_tree_unloadable(
+    tmp_path: Path,
+) -> None:
+    from imp.assets import resolve_workflow_dir
+    from imp.engine.errors import LoadError
+    from imp.engine.loader import load_workflow
+
+    quest = _quest(tmp_path)
+    # Freeze a valid snapshot first (the copy this process loaded at entry).
+    shutil.copytree(
+        tmp_path / "imp" / "workflows" / "imp", quest.quest_dir / "workflow"
+    )
+    # Now diverge the LIVE control-root workflow so loading it off the tree
+    # raises: an agent file naming a tool that is not opt-in-grantable.
+    (tmp_path / "imp" / "workflows" / "imp" / "agents" / "stub.md").write_text(
+        "---\n"
+        "name: stub\n"
+        "allow_tools: [bogus_nonexistent_tool]\n"
+        "output:\n  status: {type: enum, values: [Success, Error]}\n"
+        "---\n"
+        "prompt body\n"
+    )
+    # The live tree is genuinely unloadable — the diza15 failure mode.
+    with pytest.raises(LoadError):
+        load_workflow(
+            resolve_workflow_dir(tmp_path, "imp"), project_keys=frozenset()
+        )
+
+    # commit_memory still validates and commits, using the frozen snapshot.
+    result = _invoke(
+        _ctx(quest, tmp_path),
+        path="imp/s.md",
+        content="prefer prose\n",
+        message="memory: prefer prose at step s",
+    )
+    assert "imp/memory/imp/s.md" in result
+    assert (
+        tmp_path / "imp" / "memory" / "imp" / "s.md"
+    ).read_text() == "prefer prose\n"
+    assert _git(tmp_path, "log", "-1", "--pretty=%s").strip() == (
+        "memory: prefer prose at step s"
+    )

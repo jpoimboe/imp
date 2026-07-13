@@ -46,3 +46,38 @@ def test_validate_project_memory_empty_is_noop(tmp_path: Path) -> None:
     _seed_control(tmp_path)
     # An empty snapshot returns without touching workflows.
     assert validate_project_memory(tmp_path, {}, {}) is None
+
+
+def test_preloaded_steps_used_without_tree_load(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _seed_control(tmp_path)
+
+    def _boom(*args: object, **kwargs: object) -> object:
+        raise AssertionError("load_workflow must not be called for a preloaded workflow")
+
+    monkeypatch.setattr("imp.engine.loader.load_workflow", _boom)
+    valid, workflow_steps = memory_validation_scopes(
+        tmp_path,
+        ["imp/x.md"],
+        {},
+        preloaded_steps={"imp": frozenset({"planted"})},
+    )
+    # Supplied step set is used verbatim — NOT the tree's real step set {"s"}.
+    assert workflow_steps == {"imp": frozenset({"planted"})}
+    # valid workflow-name list is unaffected by the parameter.
+    assert "imp" in valid
+
+
+def test_absent_workflow_still_loads_off_tree(tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+    # `imp` is referenced but absent from preloaded_steps, so its steps are
+    # still loaded off the tree exactly as today: {"s"}.
+    valid, workflow_steps = memory_validation_scopes(
+        tmp_path,
+        ["imp/x.md"],
+        {},
+        preloaded_steps={"other": frozenset({"z"})},
+    )
+    assert workflow_steps == {"imp": frozenset({"s"})}
+    assert "imp" in valid

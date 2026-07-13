@@ -151,6 +151,7 @@ def memory_validation_scopes(
     project_root: Path,
     relpaths: Iterable[str],
     project_facts: Mapping[str, str],
+    preloaded_steps: Mapping[str, frozenset[str]] | None = None,
 ) -> tuple[list[str], dict[str, frozenset[str]]]:
     """Build the (valid_workflows, workflow_steps) inputs for
     `validate_memory_tree`: every known workflow name, plus the step names of
@@ -170,6 +171,9 @@ def memory_validation_scopes(
     )
     workflow_steps: dict[str, frozenset[str]] = {}
     for name in referenced:
+        if preloaded_steps is not None and name in preloaded_steps:
+            workflow_steps[name] = preloaded_steps[name]
+            continue
         wf = load_workflow(
             resolve_workflow_dir(project_root, name),
             project_keys=frozenset(project_facts),
