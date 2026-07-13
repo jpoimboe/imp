@@ -3010,6 +3010,10 @@ def _search_list_line(hit: _SearchHit) -> str:
 
 
 def _cmd_search(args: argparse.Namespace, _control: Path | None = None) -> int:
+    if args.merged_after is not None and not args.completed:
+        print("imp: --merged-after is only meaningful with --completed",
+              file=sys.stderr)
+        raise SystemExit(2)
     control = _control if _control is not None else _control_root()
     zones = _selected_search_zones(args)
     hits: list[_SearchHit] = []
@@ -3019,6 +3023,8 @@ def _cmd_search(args: argparse.Namespace, _control: Path | None = None) -> int:
         hits += _search_backlog(control, args.query)
     if "archive" in zones:
         hits += _search_archived(control, args.query)
+    if "completed" in zones:
+        hits += _search_completed(control, args.query, args.merged_after)
     if not hits:
         print(f"No quests match {args.query!r}.")
         return 0
