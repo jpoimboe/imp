@@ -1,8 +1,9 @@
-"""Helpers for parsing IMP_LIVE_PROVIDERS in live-API tests.
+"""Gating helpers for live-API tests.
 
-Live tests opt in via the IMP_LIVE_PROVIDERS env var (comma-separated).
-Each test's skipif checks `opted_in(<provider>)`. Auth presence is then
-asserted (not skipped) — opt-in implies the user has set up credentials.
+Live tests carry `@pytest.mark.live(<provider>)` and run only under
+`--run-live` (see tests/conftest.py's collection hook and parse_run_live /
+live_skip_reason / provider_available below). A selected provider whose
+toolchain or credentials are absent skips (not fails) at collection.
 """
 
 from __future__ import annotations
@@ -102,39 +103,6 @@ def live_skip_reason(requested: frozenset[str] | None, provider: str) -> str | N
     if provider not in requested:
         return f"{provider} not selected by --run-live"
     return provider_available(provider)
-
-
-def _parse() -> list[str]:
-    raw = os.environ.get("IMP_LIVE_PROVIDERS", "")
-    return [tok.strip() for tok in raw.split(",") if tok.strip()]
-
-
-def opted_in(provider: str) -> bool:
-    return provider in _parse()
-
-
-def first_opted_in() -> str | None:
-    items = _parse()
-    return items[0] if items else None
-
-
-def assert_codex_toolchain() -> None:
-    """Assert the codex CLI binary and SDK are both present.
-
-    Opting codex into IMP_LIVE_PROVIDERS implies the toolchain is installed, so
-    this asserts (fails loudly) rather than skipping — mirroring how the other
-    providers assert their auth once opted in. `make test-live` validates the
-    `codex` binary up front in _REQUIRE_PROVIDERS; this also covers the
-    pytest-direct path and the SDK import the Makefile does not check."""
-    import importlib.util
-    import shutil
-
-    assert shutil.which("codex") is not None, (
-        "codex opted in via IMP_LIVE_PROVIDERS but `codex` CLI not on PATH"
-    )
-    assert importlib.util.find_spec("openai_codex_sdk") is not None, (
-        "codex opted in via IMP_LIVE_PROVIDERS but openai_codex_sdk not importable"
-    )
 
 
 def build_isolated_venv(
