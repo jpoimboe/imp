@@ -372,3 +372,60 @@ def digest_line(
     return (
         f"#{ordinal}  {etype:<{_TYPE_WIDTH}} [{agent}]  {summarize(event)}"
     ).rstrip()
+
+
+def _agent_matches(
+    event: dict[str, Any],
+    selectors: set[str],
+    handle_map: dict[str, str],
+) -> bool:
+    aid = event.get("agent_id") or ""
+    display = agent_display(aid, handle_map)
+    for sel in selectors:
+        # Exact match on the display handle (step name / <name>-<n>) or the raw
+        # agent_id; substring only for an explicit sub:<id> selector (partial
+        # uuid), so a step-name/handle selector never over-matches.
+        if sel in (display, aid):
+            return True
+        if sel.startswith("sub:") and sel in aid:
+            return True
+    return False
+
+
+def select_event_lines(
+    indexed: Sequence[tuple[int, dict[str, Any]]],
+    *,
+    types: set[str] | None = None,
+    agents: set[str] | None = None,
+    ranges: Sequence[tuple[int, int]] | None = None,
+    step_names: set[str] | None = None,
+    all_: bool = False,
+    limit: int | None = None,
+    handle_map: dict[str, str],
+) -> list[tuple[int, dict[str, Any]]]:
+    """Displayable events matching every provided filter (AND across filter
+    kinds; OR within a multi-valued one). `step_names` scopes to the union of
+    those steps' windows. `all_` adds no constraint. `limit` keeps the last N
+    of the result. Suppressed rows never appear but keep their ordinal."""
+    windows: list[tuple[int, int]] | None = None
+    if step_names:
+        windows = []
+        for step in step_windows(indexed):
+            if step.name in step_names:
+                windows.extend(step.windows)
+    out: list[tuple[int, dict[str, Any]]] = []
+    for ordinal, event in indexed:
+        if is_suppressed(event):
+            continue
+        if windows is not None and not _in_windows(ordinal, windows):
+            continue
+        if types is not None and (event.get("type") or "?") not in types:
+            continue
+        if agents is not None and not _agent_matches(event, agents, handle_map):
+            continue
+        if ranges is not None and not in_intervals(ordinal, ranges):
+            continue
+        out.append((ordinal, event))
+    if limit is not None and limit > 0:
+        out = out[-limit:]
+    return out

@@ -313,3 +313,93 @@ def test_digest_line_blank_agent_for_none_author() -> None:
     line = ei.digest_line(3, _ev(None, "step_started", step="spec"), {})
     assert line.startswith("#3")
     assert "[]" in line
+
+
+def _selection_fixture() -> list[dict[str, Any]]:
+    return [
+        _ev(None, "step_started", step="task-lead"),                    # 1
+        _ev("D1", "tool_call", agent_id="step:main/task-lead",
+            name="sub_agent", input={"subagent_name": "coder"}),        # 2
+        _ev("e1", "tool_call", agent_id="sub:D1"),                      # 3
+        _ev("e2", "agent_output", agent_id="sub:D1"),                   # 4
+        _ev(None, "step_completed", step="task-lead"),                  # 5
+        _ev(None, "step_started", step="review"),                       # 6
+        _ev("r1", "tool_call", agent_id="step:review/review"),         # 7
+        {"type": "llm_response_usage_patch", "agent_id": "sub:D1"},      # 8 suppressed
+        _ev(None, "step_completed", step="review"),                     # 9
+    ]
+
+
+def test_select_by_type_intersects_across_options() -> None:
+    events = _selection_fixture()
+    handles = ei.subagent_handle_map(_indexed(events))
+    got = ei.select_event_lines(
+        _indexed(events), types={"tool_call"}, handle_map=handles)
+    assert [o for o, _ in got] == [2, 3, 7]
+
+
+def test_select_by_agent_handle_and_step_name() -> None:
+    events = _selection_fixture()
+    handles = ei.subagent_handle_map(_indexed(events))
+    # subagent handle resolves to its sub:<id> author.
+    by_handle = ei.select_event_lines(
+        _indexed(events), agents={"coder-1"}, handle_map=handles)
+    assert [o for o, _ in by_handle] == [3, 4]
+    # a step name matches that agent's own turns.
+    by_step = ei.select_event_lines(
+        _indexed(events), agents={"task-lead"}, handle_map=handles)
+    assert [o for o, _ in by_step] == [2]
+
+
+def test_select_type_and_agent_intersect() -> None:
+    events = _selection_fixture()
+    handles = ei.subagent_handle_map(_indexed(events))
+    got = ei.select_event_lines(
+        _indexed(events), types={"tool_call"}, agents={"coder-1"},
+        handle_map=handles)
+    assert [o for o, _ in got] == [3]
+
+
+def test_select_by_range_and_step_window() -> None:
+    events = _selection_fixture()
+    handles = ei.subagent_handle_map(_indexed(events))
+    by_range = ei.select_event_lines(
+        _indexed(events), ranges=[(3, 4)], handle_map=handles)
+    assert [o for o, _ in by_range] == [3, 4]
+    # --step scopes to the window; suppressed line 8 never appears.
+    by_step_window = ei.select_event_lines(
+        _indexed(events), step_names={"review"}, all_=True, handle_map=handles)
+    assert [o for o, _ in by_step_window] == [6, 7, 9]
+
+
+def test_select_limit_keeps_last_n_and_excludes_suppressed() -> None:
+    events = _selection_fixture()
+    handles = ei.subagent_handle_map(_indexed(events))
+    got = ei.select_event_lines(
+        _indexed(events), all_=True, limit=2, handle_map=handles)
+    # last 2 displayable rows are ordinals 7 and 9 (line 8 suppressed).
+    assert [o for o, _ in got] == [7, 9]
+
+
+def test_select_agent_selector_is_exact_not_substring() -> None:
+    events = _selection_fixture()
+    handles = ei.subagent_handle_map(_indexed(events))
+    # a step-name / handle PREFIX must NOT substring-match a full handle.
+    assert ei.select_event_lines(
+        _indexed(events), agents={"task"}, handle_map=handles) == []
+    assert ei.select_event_lines(
+        _indexed(events), agents={"coder"}, handle_map=handles) == []
+    # but a raw sub:<id> selector DOES substring-match (partial uuid support).
+    partial = ei.select_event_lines(
+        _indexed(events), agents={"sub:D"}, handle_map=handles)
+    assert [o for o, _ in partial] == [3, 4]
+
+
+def test_select_type_or_within_multivalue_set() -> None:
+    events = _selection_fixture()
+    handles = ei.subagent_handle_map(_indexed(events))
+    # OR within the types set: tool_call (2,3,7) OR agent_output (4).
+    got = ei.select_event_lines(
+        _indexed(events), types={"tool_call", "agent_output"},
+        handle_map=handles)
+    assert [o for o, _ in got] == [2, 3, 4, 7]
