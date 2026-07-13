@@ -1852,6 +1852,7 @@ def _follow_conflict(args: argparse.Namespace) -> str | None:
     for name, present in (
         ("--summary", args.summary),
         ("--full", args.full),
+        ("--show/--hide", bool(args.show or args.hide)),
         ("--html", args.html is not None),
         ("--md", args.md is not None),
     ):
@@ -1993,9 +1994,25 @@ async def _follow_poll_loop(
     return rc
 
 
+def _log_show_set(full: bool, show: list[str], hide: list[str]) -> frozenset[str]:
+    """Resolve imp log's content categories: --full=all, --show adds, --hide removes."""
+    from imp.cli.render_text import LOG_CATEGORIES
+    base = set(LOG_CATEGORIES) if full else set()
+    return frozenset((base | set(show)) - set(hide))
+
+
 def _cmd_log(args: argparse.Namespace) -> int:
     from imp.cli import narrative
-    from imp.cli.render_text import render_tree
+    from imp.cli.render_text import LOG_CATEGORIES, render_tree
+
+    show_names = _split_list(args.show)
+    hide_names = _split_list(args.hide)
+    unknown = sorted((set(show_names) | set(hide_names)) - set(LOG_CATEGORIES))
+    if unknown:
+        print(f"imp log: error: unknown category {unknown[0]!r} "
+              f"(choose from: {', '.join(LOG_CATEGORIES)})", file=sys.stderr)
+        return 2
+    show = _log_show_set(args.full, show_names, hide_names)
 
     control = _control_root()
     if args.follow:
@@ -2061,7 +2078,7 @@ def _cmd_log(args: argparse.Namespace) -> int:
         return 0
 
     tree = narrative.build_tree(events)
-    lines = render_tree(tree, full=args.full, color=color, width=width,
+    lines = render_tree(tree, show=show, color=color, width=width,
                         display_width=_display_width())
     _page_or_print(lines, no_pager=args.no_pager)
     return 0
@@ -3398,8 +3415,10 @@ def _build_parser() -> argparse.ArgumentParser:
         "log",
         help="Show the narrative for a quest.",
         description=(
-            "Show the narrative for a quest as plain text. --full starts every "
-            "fold expanded. Set NO_COLOR=1 to disable colors. "
+            "Show the narrative for a quest as plain text. --full expands "
+            "every fold; --show/--hide toggle individual content categories "
+            "(thinking, tools, subagents, prompts, tiers) over the lean view. "
+            "Set NO_COLOR=1 to disable colors. "
             "Tip: imp log <id> --full | grep ... for line-oriented scripting."
         ),
     )
@@ -3426,6 +3445,13 @@ def _build_parser() -> argparse.ArgumentParser:
              "events until the quest reaches a terminal status. Renders the "
              "live run view; implies --no-pager.",
     )
+    p_log.add_argument(
+        "--show", action="append", default=None, metavar="CAT",
+        help="Reveal a content category over the lean view: thinking, tools, "
+             "subagents, prompts, tiers (repeatable / comma-joined).")
+    p_log.add_argument(
+        "--hide", action="append", default=None, metavar="CAT",
+        help="Hide a content category (repeatable / comma-joined).")
     p_log_export = p_log.add_mutually_exclusive_group()
     p_log_export.add_argument(
         "--html", nargs="?", metavar="FILE", const=_LOG_EXPORT_DEFAULT,

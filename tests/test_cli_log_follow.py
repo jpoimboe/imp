@@ -20,7 +20,7 @@ from tests.conftest import FIXTURES
 
 def _log_ns(**over: object) -> argparse.Namespace:
     base = dict(token=None, follow=False, summary=False, full=False,
-                html=None, md=None, no_pager=False)
+                html=None, md=None, no_pager=False, show=None, hide=None)
     base.update(over)
     return argparse.Namespace(**base)
 
