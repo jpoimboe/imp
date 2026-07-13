@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from imp.agents.prompts import build_context, render_prompt
 from imp.assets import bundled_workflow_dir
 from imp.engine.loader import load_workflow
@@ -14,7 +16,7 @@ def test_explorer_agent_is_read_only_leaf() -> None:
     a = _wf().agents["explorer"]
     assert a.name == "explorer"
     tools = set(a.tools)
-    assert tools == {"read_file", "glob", "grep", "bash", "imp_events", "symbol_outline"}
+    assert tools == {"read_file", "glob", "grep", "bash", "symbol_outline"}
     for forbidden in ("write_file", "edit_file", "web_search", "web_fetch",
                       "sub_agent", "wait_for_user"):
         assert forbidden not in tools
@@ -26,7 +28,7 @@ def test_explorer_agent_is_read_only_leaf() -> None:
 def test_researcher_agent_has_web_tools_read_only() -> None:
     a = _wf().agents["researcher"]
     assert set(a.tools) == {"read_file", "glob", "grep", "bash",
-                             "imp_events", "web_search", "web_fetch"}
+                             "web_search", "web_fetch"}
     assert a.subagents == ()
     assert a.output_schema.fields == ()
 
@@ -116,3 +118,15 @@ def test_spec_writer_design_quality_and_coverage_guidance(tmp_path) -> None:
     assert "do not propose unrelated refactoring" not in out
     assert "improvements to the code this quest touches." in out
     assert "architecture, components, data flow, error handling, and testing" in out
+
+
+@pytest.mark.parametrize("workflow", ["imp", "patent"])
+def test_imp_events_implies_imp_show_for_every_agent(workflow) -> None:
+    wf = load_workflow(bundled_workflow_dir(workflow))
+    offenders = [
+        name for name, a in wf.agents.items()
+        if "imp_events" in a.tools and "imp_show" not in a.tools
+    ]
+    assert offenders == [], (
+        f"{workflow}: agents hold imp_events without imp_show: {offenders}"
+    )
