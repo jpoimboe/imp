@@ -17,8 +17,9 @@ def test_set_unsandboxed_flips_the_flag() -> None:
 
 
 def test_override_survives_a_gesture_round_reset() -> None:
-    # Session-scoped: a between-rounds reset() (interrupt bookkeeping) must NOT
-    # silently re-sandbox a session the human deliberately unsandboxed.
+    # A between-rounds reset() (interrupt bookkeeping) must NOT clear the override:
+    # the flag's lifecycle is owned by the executor step-advance clear and the
+    # daemon persist/restore, never by the per-round reset().
     coord = InterruptCoordinator()
     coord.set_unsandboxed(True)
     coord.reset()

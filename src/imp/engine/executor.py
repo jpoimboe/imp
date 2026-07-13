@@ -723,12 +723,12 @@ def _apply_readonly_overlay(policy: Any, step: Step, project_root: Path) -> Any:
 
 
 def _apply_unsandboxed_override(policy: Any, step: Step, coordinator: Any) -> Any:
-    """Compose the session unsandboxed override into a dispatch-time inactive
-    policy copy. Applies ONLY to an interactive step: an autonomous phase step
-    always keeps the full resolved policy, so no autonomous phase can be
-    unsandboxed by this toggle. No-op when the policy is None, the coordinator
-    is absent, or the override is not set."""
-    if policy is None or not step.interactive:
+    """Compose the step-scoped unsandboxed override into a dispatch-time inactive
+    policy copy. Applies to ANY running step while the override is set — its
+    lifetime is bounded by the step (cleared at step advance, restored on resume),
+    not by whether the step is interactive. No-op when the policy is None, the
+    coordinator is absent, or the override is not set."""
+    if policy is None:
         return policy
     if coordinator is None or not coordinator.unsandboxed:
         return policy
