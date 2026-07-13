@@ -31,7 +31,7 @@ from imp.agents.runner import (
     Message,
     QuestContext,
 )
-from imp.agents.skills import overlay_project_skills
+from imp.agents.skills import overlay_global_skills, overlay_project_skills
 from imp.engine import test_lane as _test_lane
 from imp.engine.agent_run import (
     AgentRunResult,
@@ -233,6 +233,7 @@ def _refresh_workflow_snapshot(quest: Quest) -> bool:
 
     # 3. Build the candidate exactly as the initial snapshot does.
     shutil.copytree(live, tmp)
+    overlay_global_skills(tmp / "skills")
     overlay_project_skills(quest.project_root, tmp / "skills" / "user")
 
     # 4. No-op when the candidate matches the current snapshot.

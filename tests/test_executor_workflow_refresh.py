@@ -448,6 +448,17 @@ def test_refresh_sources_from_control_root_not_worktree(tmp_path: Path) -> None:
     assert "name: t" in snap.read_text()                 # the control-root content
 
 
+def test_refresh_overlays_global_skills_into_snapshot(tmp_path: Path) -> None:
+    quest, _, _ = _seed_minimal_workflow(tmp_path)
+    # The minimal live workflow ships no skills/ dir, so any global skill in the
+    # snapshot can ONLY have arrived via overlay_global_skills.
+    assert _refresh_workflow_snapshot(quest) is False        # initial copy
+    snap_skills = quest.quest_dir / "workflow" / "skills"
+    for name in ("imp-knowledge", "imp-introspection", "imp-memory",
+                 "imp-tool-reference", "imp-driving-terminal-uis"):
+        assert (snap_skills / f"{name}.md").is_file(), name
+
+
 def test_refresh_ignores_worktree_edits_stays_noop(tmp_path: Path) -> None:
     """With the source anchored at the control root, editing ONLY the worktree
     leaves the refresh a no-op (no swap, snapshot bytes unchanged) — a change
