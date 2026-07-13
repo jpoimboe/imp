@@ -16,12 +16,11 @@ and not dropped). Hitting the real API also proves the Responses API accepts a
 function_call_output followed by a user message in the same input array — the
 open question behind the chosen fix.
 
-Skips unless `openai` is in IMP_LIVE_PROVIDERS. Costs a fraction of a cent.
+Skips unless `--run-live` selects openai. Costs a fraction of a cent.
 """
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 from typing import Any
 
@@ -29,20 +28,10 @@ import pytest
 
 from imp.engine.executor import RunResult, run_quest
 from imp.engine.quest import Quest
-from tests._live import opted_in
+from tests._live import openai_key
 from tests.conftest import _git
 
 _GATE_TOKEN = "MAGIC_GATE_TOKEN_BANANA"
-
-
-def _openai_key() -> str | None:
-    key = os.environ.get("OPENAI_API_KEY")
-    if key:
-        return key
-    key_file = Path.home() / ".openai-key"
-    if key_file.exists():
-        return key_file.read_text().strip()
-    return None
 
 
 @pytest.fixture
@@ -83,19 +72,13 @@ def _delivered_texts(inp: list[dict[str, Any]]) -> list[str]:
     return texts
 
 
-@pytest.mark.skipif(
-    not opted_in("openai"),
-    reason="openai not in IMP_LIVE_PROVIDERS",
-)
+@pytest.mark.live("openai")
 @pytest.mark.anyio
 async def test_gate_feedback_reaches_model_on_openai_resume(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    key = _openai_key()
-    assert key is not None, (
-        "openai opted in via IMP_LIVE_PROVIDERS but no "
-        "OPENAI_API_KEY env var or ~/.openai-key file found"
-    )
+    key = openai_key()
+    assert key is not None
     monkeypatch.setenv("OPENAI_API_KEY", key)
 
     _git(tmp_path, "init", "-q", "-b", "main")
