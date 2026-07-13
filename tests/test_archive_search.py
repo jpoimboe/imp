@@ -120,7 +120,8 @@ def test_search_completed_filters_to_completed_status(tmp_path: Path) -> None:
     hits = archive_read.search_archive_completed(tmp_path, "dark")
     assert [h[0] for h in hits] == ["alpha"]        # abandoned 'beta' excluded by status
     assert hits[0][1] == "Dark mode toggle"          # title carried
-    assert len(hits[0]) == 3  # (id, title, content) triple, like search_content
+    assert len(hits[0]) == 4  # (id, title, content, last_event_ts), like search_content
+    assert hits[0][3] is None  # no events archived → no last_event_ts
 
 
 def test_search_completed_matches_content_body(tmp_path: Path) -> None:
