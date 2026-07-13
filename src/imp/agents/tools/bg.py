@@ -229,6 +229,9 @@ def _snapshot_or_tombstone(
         result: dict[str, Any] = {"stdout": "", "stderr": "",
                                   "status": bp.status,
                                   "returncode": bp.returncode}
+        if bp.overlay_setup_failed:
+            result["status"] = "sandbox_setup_failed"
+            result["error"] = OVERLAY_SETUP_FAILED_MESSAGE
         if bp.kill_reason is not None:
             result["kill_reason"] = bp.kill_reason
         if wait_ended is not None:
@@ -245,6 +248,9 @@ def _tombstone_result(ctx: ToolContext, bg_id: str) -> str | None:
         "status": ts.get("status", "killed"),
         "returncode": ts.get("returncode"),
     }
+    if ts.get("overlay_setup_failed"):
+        result["status"] = "sandbox_setup_failed"
+        result["error"] = OVERLAY_SETUP_FAILED_MESSAGE
     if ts.get("kill_reason") is not None:
         result["kill_reason"] = ts.get("kill_reason")
     return json.dumps(result, ensure_ascii=False)
@@ -498,6 +504,7 @@ async def terminate_background_processes(ctx: ToolContext) -> None:
     # warning promised.
     for bp in procs:
         _reap(bp)
+        _detect_overlay_setup_failure(ctx, bp)
         if bp.status == "running":
             bp.status = "killed"
             bp.kill_reason = "interrupted"
@@ -573,6 +580,7 @@ async def terminate_background_processes(ctx: ToolContext) -> None:
                 "kill_reason": bp.kill_reason,
                 "returncode": bp.returncode,
                 "command": bp.command[:_CMD_TRUNC],
+                "overlay_setup_failed": bp.overlay_setup_failed,
             }
         tmp = path.with_name(path.name + ".tmp")
         tmp.write_text(json.dumps(merged, ensure_ascii=False), encoding="utf-8")

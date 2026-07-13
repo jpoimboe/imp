@@ -59,6 +59,49 @@ def test_background_overlay_setup_failure_detected_and_reported(tmp_path: Path) 
     anyio.run(main)
 
 
+def test_background_overlay_setup_failure_survives_teardown(tmp_path: Path) -> None:
+    # Flag set via a prior sweep, then persisted through teardown and surfaced
+    # on resume from the PERSISTED tombstone.
+    async def main() -> None:
+        from imp.agents.tools.bg import (
+            _sweep_bg,
+            terminate_background_processes,
+        )
+        ctx = _ctx(tmp_path)
+        ctx.event_log = _RecLog()
+        out = await _spawn(ctx, _FAIL_CMD)
+        await _wait_exit(ctx, out["id"])
+        await _sweep_bg(ctx)                          # flag set via sweep
+        await terminate_background_processes(ctx)     # writes the tombstone file
+        # Resume: a FRESH ToolContext (same agent_id + run dir) has an empty
+        # registry, so bash_output resolves the PERSISTED tombstone.
+        ctx2 = _ctx(tmp_path)
+        r = json.loads(await get_registry()["bash_output"].async_invoke(
+            ctx2, {"id": out["id"]}))
+        assert r["status"] == "sandbox_setup_failed"
+        assert "did NOT run" in r["error"]
+    anyio.run(main)
+
+
+def test_background_overlay_setup_failure_detected_in_teardown(tmp_path: Path) -> None:
+    # No sweep/snapshot ever ran — teardown itself must catch the failure while
+    # the stderr file still exists (step 1 runs before the step-4 file delete),
+    # else the tombstone masquerades as an ordinary exit-122 result (AC 6).
+    async def main() -> None:
+        from imp.agents.tools.bg import terminate_background_processes
+        ctx = _ctx(tmp_path)
+        ctx.event_log = _RecLog()
+        out = await _spawn(ctx, _FAIL_CMD)
+        await _wait_exit(ctx, out["id"])
+        await terminate_background_processes(ctx)     # NO prior sweep
+        ctx2 = _ctx(tmp_path)
+        r = json.loads(await get_registry()["bash_output"].async_invoke(
+            ctx2, {"id": out["id"]}))
+        assert r["status"] == "sandbox_setup_failed"
+        assert "did NOT run" in r["error"]
+    anyio.run(main)
+
+
 def test_snapshot_backstop_sets_flag_without_prior_sweep(tmp_path: Path) -> None:
     # The _snapshot backstop must classify a setup failure even when NO sweep
     # ran first: call _snapshot directly on an exited proc whose flag is still
