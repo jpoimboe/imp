@@ -501,3 +501,82 @@ def test_show_rejects_events_resource(
     with pytest.raises(SystemExit):
         main(["show", _ID, "events"])
     assert "invalid choice: 'events'" in capsys.readouterr().err
+
+
+def test_show_json_emits_structured_overview(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _seed_control(tmp_path)
+    ch = _seed_with_artifacts(tmp_path, _ID, "Feat")
+    with ch.events_path.open("a", encoding="utf-8") as fh:
+        fh.write(json.dumps({
+            "type": "opening_intent", "agent_id": None,
+            "payload": {"text": "wire up the widget"}}) + "\n")
+    out = _run(monkeypatch, tmp_path, "show", _ID, "--json")
+    data = json.loads(out)
+    assert data["id"] == _ID
+    assert data["title"] == "Feat"
+    assert data["status"] == "new"
+    assert data["intent"] == "wire up the widget"
+    assert data["depends_on"] == []
+    assert data["created"] is not None
+
+
+def test_show_json_backlog_quest(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import imp.cli.main as m
+
+    _seed_control(tmp_path)
+    meta = {
+        "id": "idea01", "title": "Add OAuth", "origin": "idea",
+        "materialized": False, "depends_on": [],
+        "created_at": "2026-06-20T11:00:00+00:00",
+        "seed_opening": "wire up OAuth login",
+    }
+    monkeypatch.setattr(m, "_unstarted_backlog_meta", lambda control, qid: meta)
+    monkeypatch.setattr(m, "_resolve_id", lambda control, token: "idea01")
+    monkeypatch.setattr(m, "_iter_quest_ids", lambda control: ["idea01"])
+    out = _run(monkeypatch, tmp_path, "show", "idea01", "--json")
+    data = json.loads(out)
+    assert data["id"] == "idea01"
+    assert data["status"] == "backlog"
+    assert data["provenance"] == "idea"
+    assert data["readiness"] == "ready"
+    assert data["body"] == "wire up OAuth login"
+
+
+def test_show_json_backlog_body_strips_title_prefix(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import imp.cli.main as m
+
+    _seed_control(tmp_path)
+    meta = {
+        "id": "idea02", "title": "Add OAuth", "origin": "idea",
+        "materialized": False, "depends_on": [],
+        "created_at": "2026-06-20T11:00:00+00:00",
+        "seed_opening": "Add OAuth\nwire up OAuth login",
+    }
+    monkeypatch.setattr(m, "_unstarted_backlog_meta", lambda control, qid: meta)
+    monkeypatch.setattr(m, "_resolve_id", lambda control, token: "idea02")
+    monkeypatch.setattr(m, "_iter_quest_ids", lambda control: ["idea02"])
+    out = _run(monkeypatch, tmp_path, "show", "idea02", "--json")
+    data = json.loads(out)
+    assert data["body"] == "wire up OAuth login"
+
+
+def test_show_json_none_quest_prints_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    import imp.cli.main as m
+
+    _seed_control(tmp_path)
+    monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
+    monkeypatch.setattr(m, "_iter_quest_ids", lambda control: ["lostid"])
+    monkeypatch.setattr(m, "_resolve_id", lambda control, token: "lostid")
+    monkeypatch.setattr(m, "_unstarted_backlog_meta", lambda control, qid: None)
+    monkeypatch.setattr(m, "_row_for_id", lambda control, qid: None)
+    rc = main(["show", "lostid", "--json"])
+    assert rc == 2
+    assert "no such quest" in capsys.readouterr().err

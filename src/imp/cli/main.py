@@ -1597,6 +1597,51 @@ def _detail_card(control: Path, quest_id: str, *, now: datetime) -> list[str]:
     return _quest_card(control, quest_id, now=now)
 
 
+def _quest_json(control: Path, quest_id: str) -> dict[str, Any] | None:
+    row = _row_for_id(control, quest_id)
+    if row is None:
+        return None
+    _id, status, step, last, title, created, step_label, phase_label = row
+    events = _load_events_for_id(control, quest_id) or []
+    meta = _quest_meta(control, quest_id) or {}
+    data: dict[str, Any] = {
+        "id": _id,
+        "title": title.strip() or None,
+        "status": status,
+        "created": created or None,
+        "last_activity": last or None,
+        "base_branch": meta.get("base_branch"),
+        "depends_on": meta.get("depends_on", []),
+        "intent": _resolve_intent(events),
+        "summary": None,
+    }
+    if status in _INFLIGHT and step not in ("", "-"):
+        data["step"] = {"phase": phase_label or None, "name": step_label or step}
+    summary = _show_artifact(control, quest_id, f"summary/{quest_id}.md")
+    if summary:
+        data["summary"] = summary.decode("utf-8", errors="replace").strip() or None
+    return data
+
+
+def _backlog_json(meta: dict[str, Any], control: Path) -> dict[str, Any]:
+    ready, unmerged = backlog.readiness(control, meta.get("depends_on", []))
+    body = meta.get("seed_opening") or ""
+    title = meta.get("title") or ""
+    if title and (body == title or body.startswith(title + "\n")):
+        body = body[len(title):].lstrip("\n")
+    return {
+        "id": meta["id"],
+        "title": meta.get("title") or None,
+        "status": "backlog",
+        "provenance": meta.get("origin", "draft"),
+        "readiness": "ready" if ready else "blocked",
+        "blocked_on": list(unmerged),
+        "created": meta.get("created_at"),
+        "depends_on": meta.get("depends_on", []),
+        "body": body or None,
+    }
+
+
 def _cmd_list(args: argparse.Namespace) -> int:
     try:
         control = _control_root()
@@ -1638,6 +1683,11 @@ def _cmd_show(args: argparse.Namespace) -> int:
     meta = _unstarted_backlog_meta(control, quest_id)
     if meta is not None:
         if resource is None:
+            if args.json:
+                _page_or_print(
+                    json.dumps(_backlog_json(meta, control), indent=2).splitlines(),
+                    no_pager=args.no_pager)
+                return 0
             _page_or_print(_backlog_card(meta, control, now=datetime.now(UTC)),
                            no_pager=args.no_pager)
             return 0
@@ -1645,6 +1695,14 @@ def _cmd_show(args: argparse.Namespace) -> int:
               f"no {resource} yet", file=sys.stderr)
         return 2
     if resource is None:
+        if args.json:
+            card = _quest_json(control, quest_id)
+            if card is None:
+                print(f"imp: no such quest {quest_id!r}", file=sys.stderr)
+                return 2
+            _page_or_print(json.dumps(card, indent=2).splitlines(),
+                           no_pager=args.no_pager)
+            return 0
         _page_or_print(_detail_card(control, quest_id, now=datetime.now(UTC)),
                        no_pager=args.no_pager)
         return 0
@@ -3463,6 +3521,9 @@ def _build_parser() -> argparse.ArgumentParser:
     p_show.add_argument(
         "--no-pager", action="store_true",
         help="Disable the pager even when stdout is a TTY.")
+    p_show.add_argument(
+        "--json", action="store_true",
+        help="Emit the overview detail card as a structured JSON object.")
     p_show.set_defaults(func=_cmd_show)
 
     p_search = sub.add_parser(

@@ -93,7 +93,7 @@ async def test_pick_show_matches_non_tty_lists_candidates(
 
 
 def _ns(token, resource=None):
-    return argparse.Namespace(token=token, resource=resource, no_pager=True)
+    return argparse.Namespace(token=token, resource=resource, no_pager=True, json=False)
 
 
 def test_cmd_show_two_matches_open_picker(monkeypatch, tmp_path: Path) -> None:
