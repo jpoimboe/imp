@@ -33,7 +33,12 @@ from imp.agents.tools.limits import (
 )
 from imp.agents.tools.spill import spill_tool_output
 from imp.engine.env import engine_env, overlay_engine_env
-from imp.engine.sandbox import build_sandbox_argv
+from imp.engine.sandbox import (
+    OVERLAY_SETUP_FAILED_CODE,
+    OVERLAY_SETUP_FAILED_MESSAGE,
+    build_sandbox_argv,
+    overlay_setup_failed,
+)
 
 
 @dataclass
@@ -48,6 +53,21 @@ class _Counter:
 
 _PAUSE_POLL_S = 0.05      # mid-command coordinator.should_pause poll cadence
                           # (a real idle sleep — matches bg.py's _WAIT_POLL_S)
+_EVENT_COMMAND_PREVIEW_LEN = 200
+
+
+def _emit_overlay_setup_warning(ctx: ToolContext, command: str) -> None:
+    """Best-effort event for an overlay mount-setup failure; never crashes the tool call."""
+    if ctx.event_log is None:
+        return
+    with contextlib.suppress(Exception):
+        ctx.event_log.append(
+            agent_id=ctx.agent_id, type="runner_warning",
+            payload={
+                "message": ("sandbox home overlay mount failed; the command did "
+                            "not run (sandbox-setup failure, not a command exit)"),
+                "command": command[:_EVENT_COMMAND_PREVIEW_LEN], "reason": "overlay-setup-failed",
+            })
 
 
 @imp_tool(
@@ -242,6 +262,17 @@ async def bash(
     err_bytes = b"".join(stderr_chunks)
     stdout = out_bytes.decode("utf-8", "replace")
     stderr = err_bytes.decode("utf-8", "replace")
+    if overlay_setup_failed(stderr):
+        # Mount-setup failure: the command never ran; report it distinctly.
+        _emit_overlay_setup_warning(ctx, command)
+        return json.dumps({
+            "stdout": stdout,
+            "stderr": stderr,
+            "status": "sandbox_setup_failed",
+            "error": OVERLAY_SETUP_FAILED_MESSAGE,
+            "returncode": (proc.returncode if proc.returncode is not None
+                           else OVERLAY_SETUP_FAILED_CODE),
+        }, ensure_ascii=False)
     if paused:
         # A pause landed mid-command: the poller SIGKILL'd the group. Return the
         # terminated-by-pause tombstone (status/kill_reason) — the same shape
