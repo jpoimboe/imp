@@ -381,7 +381,7 @@ async def _handle_command(
                     "to save it — it may still be running."))
             else:
                 responses.put(Notice(
-                    f"Saved @{handle_for(quest_id)} to your Backlog."))
+                    f"Saved @{handle_for(quest_id)} to your backlog."))
     elif isinstance(command, Alerts):
         if command.on is None:
             responses.put(Notice(

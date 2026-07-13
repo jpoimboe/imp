@@ -86,3 +86,18 @@ def test_no_note_leaves_output_unchanged(
     out = capsys.readouterr().out
     assert "recovery passes" not in out
     assert "boom" in out
+
+
+def test_headline_is_red_merge_blocked_spine_no_glyph(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from imp.cli import palette as pal
+    monkeypatch.setattr(cli_main, "should_use_color", lambda stream: True)
+    ch = _change(tmp_path)
+    cli_main._emit_merge_blocked(ch, "worktree_dirty")
+    out = capsys.readouterr().out
+    assert out.startswith("\n")                        # one leading blank
+    assert pal.ansi("merge blocked", "red") in out     # red headline tail
+    assert "feat" in out                               # gold id in the spine
+    assert "⚠" not in out
+    assert "Uncommitted work" in out                   # gold explanation preserved

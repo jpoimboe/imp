@@ -37,17 +37,17 @@ A quest carries one at-rest status: `new`, `paused`, `saved`, `completed`,
 quest's lock — and is never stored. A **new** or **paused** quest that has not
 been built yet (un-materialized) is shown to the user as **draft**.
 
-## Zones: active list, Backlog, archive
+## Zones: active list, backlog, archive
 
 Where a quest appears is **derived** — never a separate status string. Two facts
 decide it: whether it has been **materialized**, and its **origin**.
 
-- **Active list** — quests in flight, plus un-materialized **drafts**: a fresh
+- **active list** — quests in flight, plus un-materialized **drafts**: a fresh
   `imp new` draft has `origin: draft`, so it shows here relabeled `draft`, not in
-  the Backlog.
-- **Backlog** — un-materialized **ideas / follow-ups** (`origin` of `idea` or
+  the backlog.
+- **backlog** — un-materialized **ideas / follow-ups** (`origin` of `idea` or
   `followup`) parked for later; pick one up when you are ready.
-- **Archive** — finished (`completed`/`abandoned`) and left conversations,
+- **archive** — finished (`completed`/`abandoned`) and left conversations,
   reachable by search.
 
 ## Materialize / go-live
@@ -60,7 +60,7 @@ draft is just a conversation and its artifacts on disk.
 ## Entry points and what happens to a left draft
 
 - `imp new` — start a fresh quest; a left draft stays in the active list, shown
-  as a `draft` (not the Backlog), resumable later.
+  as a `draft` (not the backlog), resumable later.
 - `imp chat` — open the threshold conversation.
 - `imp resume <id>` — pick a parked or left quest back up.
 

@@ -487,7 +487,7 @@ async def test_save_calls_control_save_and_confirms() -> None:
     assert saved == ["2026-06-17-zzz"]
     notice = responses.get_nowait()
     assert isinstance(notice, Notice)
-    assert "Backlog" in notice.text
+    assert "backlog" in notice.text
 
 
 @pytest.mark.anyio
@@ -517,7 +517,7 @@ async def test_save_unreachable_session_surfaces_a_notice() -> None:
     notice = responses.get_nowait()
     assert isinstance(notice, Notice)
     assert "Couldn't reach" in notice.text
-    assert "Backlog" not in notice.text
+    assert "backlog" not in notice.text
 
 
 @pytest.mark.anyio

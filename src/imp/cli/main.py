@@ -229,34 +229,55 @@ def make_message_reply_fn(message: str | None) -> Callable[[], Awaitable[str]]:
 
 
 # -- end-of-run status lines ------------------------------------------------
-# Semantic color + a leading glyph tell you at a glance how a run ended. The
-# decoration is gated on `should_use_color` (TTY + NO_COLOR aware), so piped /
-# redirected output stays plain and script-parseable. Shared by `new`/`resume`.
+# Every terminal line shares one spine: a gold quest id, a white (default-fg)
+# title, and a dot-joined outcome tail whose color carries meaning (green =
+# success, red = error, gold = everything-else). No glyphs, no dim, flush left,
+# so NO_COLOR / non-TTY output stays plain and script-parseable. Shared by
+# `new`/`resume` and the leave echoes.
 
-def _emit_completed(quest: Quest, value: str, *, merged: bool, warnings: int = 0) -> None:
-    """Run finished cleanly — ✓ on the headline."""
+def _status_spine(quest_id: str, title: str, tail: str, *tail_codes: str,
+                  color: bool) -> str:
+    """`<id>gold · <title>white · <tail>colored`; the title segment is dropped
+    when the quest has no title (`<id>gold · <tail>colored`)."""
+    stripped = title.strip()
+    mid = f" · {stripped} · " if stripped else " · "
+    return (ansi(quest_id, *pal.NODE_COLORS["quest_id"], enabled=color)
+            + mid + ansi(tail, *tail_codes, enabled=color))
+
+
+def _resume_line(token: str, suffix: str = "") -> str:
+    """A plain (default-fg), flush-left resume hint; one space after `resume:`."""
+    return f"resume: imp resume {token}{suffix}"
+
+
+def _print_warnings_block(messages: list[str]) -> None:
+    """A plain `N warnings this run` header + a plain dashed list of the distinct
+    messages in first-seen order, `(×N)` on repeats. No-op on an empty list."""
+    if not messages:
+        return
+    counts: dict[str, int] = {}
+    order: list[str] = []
+    for msg in messages:
+        if msg not in counts:
+            counts[msg] = 0
+            order.append(msg)
+        counts[msg] += 1
+    print()
+    noun = "warning" if len(messages) == 1 else "warnings"
+    print(f"{len(messages)} {noun} this run")
+    for msg in order:
+        suffix = f" (×{counts[msg]})" if counts[msg] > 1 else ""
+        print(f"- {msg}{suffix}")
+
+
+def _emit_completed(quest: Quest, *, merged: bool,
+                    warnings: list[str] | None = None) -> None:
+    """The clean-finish line: one green-tailed spine, then the warnings block."""
     color = should_use_color(sys.stdout)
-    mark = "✓ " if color else ""
-    suffix = ""
-    if warnings:
-        noun = "warning" if warnings == 1 else "warnings"
-        suffix = f"  ({warnings} {noun})"
-    if merged:
-        print(ansi(f"{mark}Merged {quest.id} into {quest.base_branch}.",
-                   *pal.NODE_COLORS["lifecycle"], enabled=color))
-        print(ansi(f"quest {quest.id}: {value}{suffix}",
-                   *pal.NODE_COLORS["lifecycle"], enabled=color))
-    else:
-        print(ansi(f"{mark}quest {quest.id}: {value}{suffix}", "green", enabled=color))
-
-
-def _phase_from_events(events: list[dict[str, Any]]) -> str | None:
-    """The current phase: the phase of the most recent step_started event."""
-    phase: str | None = None
-    for e in events:
-        if e.get("type") == "step_started":
-            phase = (e.get("payload") or {}).get("phase") or phase
-    return phase
+    tail = f"merged into {quest.base_branch}" if merged else "completed"
+    print()
+    print(_status_spine(quest.id, quest.title, tail, "green", color=color))
+    _print_warnings_block(warnings or [])
 
 
 class _PauseBanner(enum.Enum):
@@ -307,8 +328,8 @@ def _pause_reason(events: list[dict[str, Any]]) -> str | _PauseBanner | None:
     if not base:
         return None
     # A genuine your-turn park is a normal solicit, not an interrupt: surface no
-    # reason, so the trailing banner omits the "(...)" suffix (via _pause_lines'
-    # `why` guard). Scoped to awaiting_user; STALE / error-cause paths untouched.
+    # reason, so the trailing status line shows the bare `paused` tail rather than
+    # a reason. Scoped to awaiting_user; STALE / error-cause paths untouched.
     if base == "awaiting_user":
         return None
     cause: str | None = None
@@ -323,17 +344,27 @@ def _pause_reason(events: list[dict[str, Any]]) -> str | _PauseBanner | None:
     return f"{base}: {cause}" if cause else str(base)
 
 
+def _pause_is_error(reason: str | None) -> bool:
+    """A pause reason is an error (red tail) when it denotes an abnormal
+    termination: a `terminated: …` reason, an `internal_error: …` reason, or the
+    `ended unexpectedly — see …` crash pointer. A clean reason (`interrupt`, or a
+    deliberate-leave trigger such as `ctrl-d`/`sigterm`) or no reason (the bare
+    `paused` fallback) is not — it renders gold."""
+    return reason is not None and (
+        reason.startswith("terminated")
+        or reason.startswith("internal_error")
+        or reason.startswith("ended unexpectedly"))
+
+
 def _pause_lines(
-    name: str, phase: str | None, token: str,
+    name: str, token: str,
     *, reason: str | None = None, title: str = "", color: bool,
 ) -> list[str]:
-    head = f"{name} · {title}" if title else name
-    at = f"  at {phase}" if phase else ""
-    why = f" · {reason}" if reason else ""
+    tail = reason if reason else "paused"
+    tail_code = "red" if _pause_is_error(reason) else "wordmark"
     return [
-        ansi(f"{head}{at}{why}", *pal.NODE_COLORS["lifecycle"], enabled=color),
-        ansi(f"   resume:  imp resume {token}", *pal.NODE_COLORS["lifecycle"],
-             enabled=color),
+        _status_spine(name, title, tail, tail_code, color=color),
+        _resume_line(token),
     ]
 
 
@@ -368,13 +399,12 @@ def _daemon_stderr_has_crash(path: Path) -> bool:
 
 def _pause_facts(
     quest: Quest, leave_trigger: str | None = None,
-) -> tuple[str, str, str | None, str, str | None]:
+) -> tuple[str, str, str, str | None]:
     name = quest.id
     events = list(quest.event_log().read())
-    phase = _phase_from_events(events)
     if leave_trigger is not None:
         # Deliberate leave: render the trigger locally (daemon reason may lag / read STALE).
-        return name, quest.title, phase, quest.id, leave_trigger
+        return name, quest.title, quest.id, leave_trigger
     reason_val = _pause_reason(events)
     if reason_val is _PauseBanner.STALE:
         if _daemon_stderr_has_crash(quest.quest_dir / "daemon.stderr"):
@@ -386,14 +416,15 @@ def _pause_facts(
             reason = "interrupt"
     else:
         reason = reason_val
-    return name, quest.title, phase, quest.id, reason
+    return name, quest.title, quest.id, reason
 
 
 def _emit_paused_summary(quest: Quest, leave_trigger: str | None = None) -> None:
-    """The trailing run-status line on a non-interactive pause / merge-block."""
+    """The trailing run-status line on a non-interactive pause."""
     color = should_use_color(sys.stdout)
-    name, title, phase, token, reason = _pause_facts(quest, leave_trigger)
-    for ln in _pause_lines(name, phase, token, reason=reason, title=title, color=color):
+    name, title, token, reason = _pause_facts(quest, leave_trigger)
+    print()
+    for ln in _pause_lines(name, token, reason=reason, title=title, color=color):
         print(ln)
 
 
@@ -401,17 +432,18 @@ def _emit_merge_blocked(
     quest: Quest, reason: str | None, detail: str | None = None,
     note: str | None = None,
 ) -> None:
-    """Merge couldn't complete — the user must act: wordmark, ⚠.
+    """Merge couldn't complete — the user must act. A red `… · merge blocked`
+    headline over the existing per-reason explanation in gold, flush left.
 
     `detail` is git's own stderr (carried on the `merge_blocked` event).
-    `note` is an optional message rendered before git's detail (e.g. the recovery-exhaustion note).
-    The `refused` and `conflict` reasons are neutral buckets — REFUSED alone covers
-    overwrite, unrelated histories, ref-lock, and object-store corruption — so the
-    template can only describe the common case. We append git's actual words for
-    those two so the surfaced reason is truthful for every refusal, not just the
-    overwrite one. `worktree_dirty` has a precise template and gets no detail."""
+    `note` is an optional message rendered before git's detail (e.g. the
+    recovery-exhaustion note). The `refused` and `conflict` reasons are neutral
+    buckets — REFUSED alone covers overwrite, unrelated histories, ref-lock, and
+    object-store corruption — so the template can only describe the common case.
+    We append git's actual words for those two so the surfaced reason is truthful
+    for every refusal, not just the overwrite one. `worktree_dirty` has a precise
+    template and gets no detail."""
     color = should_use_color(sys.stdout)
-    mark = "⚠ " if color else ""
     cid, base = quest.id, quest.base_branch
     if reason == "worktree_dirty":
         msg = f"Uncommitted work in the worktree; commit it, then `imp resume {cid}`."
@@ -430,7 +462,9 @@ def _emit_merge_blocked(
         msg = f"{msg}\n{note}"
     if detail and reason in ("refused", "conflict"):
         msg = f"{msg}\ngit said: {detail.strip()}"
-    print(ansi(f"{mark}{msg}", "wordmark", enabled=color))
+    print()
+    print(_status_spine(cid, quest.title, "merge blocked", "red", color=color))
+    print(ansi(msg, "wordmark", enabled=color))
 
 
 def _handle_terminal_outcome(
@@ -452,9 +486,10 @@ def _handle_terminal_outcome(
         if not events:
             raw = archive_read.read_events(quest.control_root, quest.id)
             events = _parse_jsonl(raw) if raw is not None else []
-        warnings = sum(1 for ev in events if ev.get("type") == "runner_warning")
-        _emit_completed(quest, result.value, merged=not wt_path.exists(),
-                        warnings=warnings)
+        warning_msgs = [
+            str((ev.get("payload") or {}).get("message", "?"))
+            for ev in events if ev.get("type") == "runner_warning"]
+        _emit_completed(quest, merged=not wt_path.exists(), warnings=warning_msgs)
         return 0
     # PAUSED — surface merge_blocked; every other pause falls through to the summary.
     final_state = State.load(quest.state_dir)
@@ -480,31 +515,35 @@ def _print_leave_disposition(
     """Print the optimistic leave message for a daemon-applied disposition.
 
     The disposition itself is applied by the daemon after it releases the lock;
-    here we only echo what was (or is being) done. Returns 0 when a leave was
-    handled, None to fall through to the normal exit-code path.
+    here we only echo what was (or is being) done, on the shared spine. Returns 0
+    when a leave was handled, None to fall through to the normal exit-code path.
     """
+    color = should_use_color(sys.stdout)
     intent = leave_state.get("intent")
     if intent == "abandon":
-        label = quest.title or quest.id
-        if leave_state.get("materialized") == "1":
-            print(f"imp: '{label}' abandoned — torn down; "
-                  f"find it later with `imp search`")
-        else:
-            print(f"imp: '{label}' abandoned")
+        print()
+        print(_status_spine(quest.id, quest.title, "abandoned", "wordmark", color=color))
         return None
     disposition = leave_state.get("disposition")
     if disposition == "save":
-        print(f"imp: saved '{quest.title or quest.id}' to your Backlog "
-              f"(resume with `imp resume {quest.id}`)")
+        print()
+        print(_status_spine(quest.id, quest.title, "saved to backlog", "wordmark",
+                            color=color))
+        print(_resume_line(quest.id))
         return 0
     if disposition == "archive":
-        print(f"imp: conversation saved — resume with `imp resume {quest.id}` "
-              f"or find it later with `imp search`")
+        print()
+        print(_status_spine(quest.id, quest.title, "conversation saved", "wordmark",
+                            color=color))
+        print(_resume_line(quest.id, " — or find it later with imp search"))
         return 0
     if disposition == "discard":
         return 0
     if leave_state.get("send_failed"):
-        print(f"imp: left running — resume with `imp resume {quest.id}`")
+        print()
+        print(_status_spine(quest.id, quest.title, "left running", "wordmark",
+                            color=color))
+        print(_resume_line(quest.id))
         return 0
     return None
 
@@ -2779,7 +2818,7 @@ def _overview_lines(control: Path, *, show_all: bool, now: datetime,
             intent=intents.get(r[0])))
     if backlog_rows:
         lines.append("")
-        lines.append(pal.ansi("Backlog", "dim", enabled=color))
+        lines.append(pal.ansi("backlog", "dim", enabled=color))
         for r in backlog_rows:
             lines.append(quest_row.format_quest_line(
                 quest_id=r[0], title=r[4], status=r[1], step=r[2],
@@ -3177,7 +3216,7 @@ def _build_parser() -> argparse.ArgumentParser:
         help="List your quests: in-flight, backlog, and recently merged.",
         description=(
             "With no argument, an overview of your quests — in-flight, the "
-            "Backlog, and recently merged. -a/--all lifts the 10-cap and "
+            "backlog, and recently merged. -a/--all lifts the 10-cap and "
             "includes abandoned/left quests (the block is then labelled "
             "`history`)."),
     )
@@ -3298,7 +3337,7 @@ def _build_parser() -> argparse.ArgumentParser:
     p_edit_zone = p_edit.add_mutually_exclusive_group()
     p_edit_zone.add_argument(
         "--backlog", action="store_true",
-        help="Move an un-materialized quest to the Backlog zone (origin=idea).")
+        help="Move an un-materialized quest to the backlog zone (origin=idea).")
     p_edit_zone.add_argument(
         "--active", action="store_true",
         help="Return an un-materialized quest to the Active zone (origin=draft).")

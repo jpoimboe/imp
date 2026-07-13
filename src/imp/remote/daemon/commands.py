@@ -118,7 +118,7 @@ HELP_TEXT = (
     "/abandon (reply or @handle) — stop a quest\n"
     "/search <query> — search archived conversations by title or id\n"
     "/resume <id or text> — rehydrate and continue a saved/archived conversation\n"
-    "/save (reply or @handle) — save a conversation to your Backlog\n"
+    "/save (reply or @handle) — save a conversation to your backlog\n"
     "/alerts on|off — alert on every quest, not just the ones you follow (default: on)\n"
     "/help — this message\n"
     "Reply to a quest's message (or @handle) to answer it.")

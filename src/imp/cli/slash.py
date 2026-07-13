@@ -195,7 +195,7 @@ def _help(out: Callable[[str], None]) -> None:
     out("  /skills            List loadable skills")
     out("  /list [-a]         List your quests (-a adds completed/abandoned)")
     out("  /search <query>    Search archived quests by content, title, or id")
-    out("  /save              Save this conversation to your Backlog")
+    out("  /save              Save this conversation to your backlog")
     out("  /clear             Park this chat and start a fresh one")
     out("  /model <model>     Switch this step's model (or provider:model)")
     out("  /sandbox [on|off]  Show or set the filesystem sandbox for this session")
