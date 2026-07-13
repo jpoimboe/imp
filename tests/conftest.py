@@ -24,18 +24,44 @@ FIXTURES = Path(__file__).parent / "fixtures"
 _LIVE_TEST_TIMEOUT = 240
 
 
-def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
-    """Raise the per-test timeout for live-API tests (see _LIVE_TEST_TIMEOUT).
+def pytest_addoption(parser: pytest.Parser) -> None:
+    from tests._live import RUN_LIVE_ALL
 
-    Applied at collection so a single rule covers every current and future
-    `*_live.py` test. Tests that already declare their own `timeout` marker keep
-    it (e.g. the resume tests that pick 240 explicitly)."""
+    parser.addoption(
+        "--run-live",
+        nargs="?",
+        const=RUN_LIVE_ALL,
+        default=None,
+        help=(
+            "Run live-API tests. Bare --run-live runs every provider whose "
+            "toolchain/credentials are present; --run-live=claude_code,openai "
+            "scopes to a subset (valid: anthropic, openai, claude_code, codex)."
+        ),
+    )
+
+
+def pytest_collection_modifyitems(
+    config: pytest.Config, items: list[pytest.Item],
+) -> None:
+    """Two jobs at collection: (1) raise the per-test timeout for live-API
+    `*_live.py` files (see _LIVE_TEST_TIMEOUT), and (2) gate every
+    `@pytest.mark.live(<provider>)` test behind --run-live (see tests/_live.py's
+    live_skip_reason). A `*_live.py` file keeps its own explicit `timeout`
+    marker if it declares one (e.g. the resume tests that pick 240)."""
+    from tests._live import live_skip_reason, parse_run_live
+
+    requested = parse_run_live(config.getoption("--run-live"))
     for item in items:
         name = Path(str(item.fspath)).name
-        if "_live" not in name or name.startswith("test_live_"):
-            continue
-        if item.get_closest_marker("timeout") is None:
+        is_live_file = "_live" in name and not name.startswith("test_live_")
+        if is_live_file and item.get_closest_marker("timeout") is None:
             item.add_marker(pytest.mark.timeout(_LIVE_TEST_TIMEOUT))
+        marker = item.get_closest_marker("live")
+        if marker is None:
+            continue
+        reason = live_skip_reason(requested, marker.args[0])
+        if reason is not None:
+            item.add_marker(pytest.mark.skip(reason=reason))
 
 
 def _pin_subprocess_imp_to_working_tree() -> None:
@@ -80,15 +106,15 @@ def _stub_provider_api_keys(
     request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Stub provider env vars only if not already set. Live-API tests get
-    the real env through (their own skipif handles the "no auth" case);
+    the real env through (the collection gate handles the "no auth" case);
     ordinary tests get the stub so module-level provider construction works.
 
     Live-API tests spawn subprocesses (or the claude_code provider's nested
     `claude`) that read ANTHROPIC_API_KEY from the real env. Stubbing it to
     "sk-test" would give the subprocess a fake key and cause "Invalid API key"
     / 401 errors. These tests follow a `_live` suffix convention
-    (`*_live.py`, `*_live_<provider>.py`) and gate themselves with their own
-    skipif, so exempt them from stubbing. The unrelated `test_live_*` UI
+    (`*_live.py`, `*_live_<provider>.py`) and gate themselves with the
+    `live` marker, so exempt them from stubbing. The unrelated `test_live_*` UI
     tests (live_status/live_driver) are NOT live-API tests and still get the
     stub.
     """

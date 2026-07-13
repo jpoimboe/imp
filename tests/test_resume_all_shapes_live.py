@@ -1,6 +1,6 @@
 """Store-backed native-resume round-trips against a real `claude` subprocess.
 
-Gated on IMP_LIVE_PROVIDERS=claude_code + the `claude` CLI on PATH. Each test
+Gated behind `--run-live` (claude_code) + the `claude` CLI on PATH. Each test
 seeds a PARTIAL session store (the turns the SDK batcher would have flushed at
 the prior `result` boundary) plus the matching transcript.jsonl tail, then drives
 ClaudeCodeAgentRunner.run against a live claude (client_factory=None). The
@@ -11,7 +11,6 @@ re-execution and no `400 due to tool use concurrency issues`.
 
 from __future__ import annotations
 
-import shutil
 from dataclasses import replace
 from pathlib import Path
 
@@ -37,7 +36,6 @@ from imp.providers.claude_code_session_store import (
     session_key,
     session_store_for,
 )
-from tests._live import opted_in
 from tests.conftest import _init_repo
 
 _MODEL = "claude-haiku-4-5-20251001"
@@ -101,18 +99,11 @@ def anyio_backend() -> str:
     return "asyncio"
 
 
-@pytest.mark.skipif(
-    not opted_in("claude_code"),
-    reason="claude_code not in IMP_LIVE_PROVIDERS",
-)
+@pytest.mark.live("claude_code")
 @pytest.mark.timeout(240)  # live resume turn can exceed the 60s global cap under load
 @pytest.mark.anyio
 async def test_send_to_llm_store_backed_native_resume(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    assert shutil.which("claude") is not None, (
-        "claude_code opted in via IMP_LIVE_PROVIDERS but `claude` CLI "
-        "not found on PATH"
-    )
     _init_repo(tmp_path)
     (tmp_path / "a.txt").write_text("ALPHA-CONTENT\n")
     inv = _live_inv(tmp_path)
@@ -182,10 +173,7 @@ async def test_send_to_llm_store_backed_native_resume(
                for b in streamed[0][0].content)
 
 
-@pytest.mark.skipif(
-    not opted_in("claude_code"),
-    reason="claude_code not in IMP_LIVE_PROVIDERS",
-)
+@pytest.mark.live("claude_code")
 # Serialize the 3 crash-prone resume tests onto one worker (under --dist
 # loadgroup) to cap the peak concurrent claude-CLI footprint they contribute.
 @pytest.mark.xdist_group("live_claude_resume")
@@ -193,10 +181,6 @@ async def test_send_to_llm_store_backed_native_resume(
 @pytest.mark.anyio
 async def test_dangling_tool_use_store_backed_native_resume(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    assert shutil.which("claude") is not None, (
-        "claude_code opted in via IMP_LIVE_PROVIDERS but `claude` CLI "
-        "not found on PATH"
-    )
     _init_repo(tmp_path)
     (tmp_path / "a.txt").write_text("ALPHA-CONTENT\n")
     (tmp_path / "b.txt").write_text("BRAVO-CONTENT\n")
@@ -309,18 +293,11 @@ def _corrective_live_inv(tmp_path: Path) -> AgentInvocation:
     )
 
 
-@pytest.mark.skipif(
-    not opted_in("claude_code"),
-    reason="claude_code not in IMP_LIVE_PROVIDERS",
-)
+@pytest.mark.live("claude_code")
 @pytest.mark.timeout(240)
 @pytest.mark.anyio
 async def test_complete_step_handback_native_resume(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    assert shutil.which("claude") is not None, (
-        "claude_code opted in via IMP_LIVE_PROVIDERS but `claude` CLI "
-        "not found on PATH"
-    )
     _init_repo(tmp_path)
     inv = _corrective_live_inv(tmp_path)
     # Production gate/review handback: balance_on_resume + retry_feedback.
@@ -385,10 +362,7 @@ async def test_complete_step_handback_native_resume(
         for b in reconciled["message"]["content"]), reconciled
 
 
-@pytest.mark.skipif(
-    not opted_in("claude_code"),
-    reason="claude_code not in IMP_LIVE_PROVIDERS",
-)
+@pytest.mark.live("claude_code")
 @pytest.mark.timeout(240)  # live resume turn can exceed the 60s global cap under load
 @pytest.mark.anyio
 async def test_step_completed_native_resume_redrives_with_feedback(
@@ -397,10 +371,6 @@ async def test_step_completed_native_resume_redrives_with_feedback(
     rework feedback native-resumes against real claude-p: the feedback streams as
     the single delta, the model re-drives and calls complete_step again, and no
     awaiting_user_input / runner_warning is emitted."""
-    assert shutil.which("claude") is not None, (
-        "claude_code opted in via IMP_LIVE_PROVIDERS but `claude` CLI "
-        "not found on PATH"
-    )
     _init_repo(tmp_path)
     inv = _corrective_live_inv(tmp_path)
     # Mirror the executor's real kept-transcript resume config.
@@ -468,10 +438,7 @@ def _must_not_solicit(_prompt: str) -> str:
         "continue the agent, not park at a prompt")
 
 
-@pytest.mark.skipif(
-    not opted_in("claude_code"),
-    reason="claude_code not in IMP_LIVE_PROVIDERS",
-)
+@pytest.mark.live("claude_code")
 @pytest.mark.timeout(240)  # live resume turn can exceed the 60s global cap under load
 @pytest.mark.anyio
 async def test_midrun_interrupt_resume_continues_agent(
@@ -479,10 +446,6 @@ async def test_midrun_interrupt_resume_continues_agent(
     """R4: a mid-run leave (Ctrl-D) arms resume_should_continue; on a bare-turn-end
     (AWAITING_USER) tail the native resume takes the continuation nudge and drives
     the agent to complete_step — it never solicits / parks at a prompt."""
-    assert shutil.which("claude") is not None, (
-        "claude_code opted in via IMP_LIVE_PROVIDERS but `claude` CLI "
-        "not found on PATH"
-    )
     _init_repo(tmp_path)
     (tmp_path / "a.txt").write_text("ALPHA-CONTENT\n")
     inv = _live_inv(tmp_path)

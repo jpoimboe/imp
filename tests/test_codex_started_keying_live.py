@@ -1,14 +1,11 @@
 """Gated codex regression (promoted from spike_codex_started_timing.py): one live
 parallel-task turn confirms the Quest-2 keying — each `task` tool_call is keyed on
 the SDK item id and opens before its result; the two task results pair to the two
-task calls by id (out-of-order safe). Billable; opt in via `codex` in
-IMP_LIVE_PROVIDERS.
+task calls by id (out-of-order safe). Billable; gated behind `--run-live` (codex).
 """
 from __future__ import annotations
 
 import pytest
-
-from tests._live import assert_codex_toolchain, opted_in
 
 
 @pytest.fixture
@@ -25,11 +22,8 @@ def anyio_backend() -> str:
     "gains parallel MCP tool-call support (see codex source: Direct ToolMode + model "
     "supports_parallel_tool_calls=true).",
     strict=False)
-@pytest.mark.skipif(
-    not opted_in("codex"),
-    reason="codex not in IMP_LIVE_PROVIDERS")
+@pytest.mark.live("codex")
 async def test_codex_task_lifecycle_keyed_on_sdk_item_id() -> None:
-    assert_codex_toolchain()
     from tests.live_helpers import run_parallel_task_turn
 
     events = await run_parallel_task_turn(provider="codex")

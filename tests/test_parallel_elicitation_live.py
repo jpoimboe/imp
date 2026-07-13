@@ -1,5 +1,5 @@
-"""Gated live elicitation (spec AC43). Billable; opt in via IMP_LIVE_PROVIDERS
-(`anthropic` and/or `openai` — each variant skips unless its provider is listed).
+"""Gated live elicitation (spec AC43). Billable; gated behind `--run-live`
+(`anthropic` and/or `openai` — each variant skips unless its provider is selected).
 
 Confirms the task-tool description actually elicits >=2 task calls in ONE
 assistant message from a real model on BOTH in-process providers, with schema-valid
@@ -9,8 +9,6 @@ from __future__ import annotations
 
 import pytest
 
-from tests._live import opted_in
-
 
 @pytest.fixture
 def anyio_backend() -> str:
@@ -19,10 +17,8 @@ def anyio_backend() -> str:
 
 @pytest.mark.anyio
 @pytest.mark.parametrize("provider", [
-    pytest.param("anthropic", marks=pytest.mark.skipif(
-        not opted_in("anthropic"), reason="anthropic not in IMP_LIVE_PROVIDERS")),
-    pytest.param("openai", marks=pytest.mark.skipif(
-        not opted_in("openai"), reason="openai not in IMP_LIVE_PROVIDERS")),
+    pytest.param("anthropic", marks=pytest.mark.live("anthropic")),
+    pytest.param("openai", marks=pytest.mark.live("openai")),
 ])
 async def test_independent_subtasks_elicit_parallel_task_calls(provider: str) -> None:
     # A prompt describing two INDEPENDENT subtasks should produce >=2 task tool_use

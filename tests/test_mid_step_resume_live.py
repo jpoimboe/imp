@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import json
 import os
-import shutil
 import signal
 import subprocess
 import sys
@@ -26,22 +25,12 @@ from pathlib import Path
 
 import pytest
 
-from tests._live import _await_change_dir, opted_in
+from tests._live import _await_change_dir, anthropic_key, openai_key
 from tests.conftest import _init_repo
 
 # Ensure subprocesses use this worktree's imp, not the editable install
 # pointing to master (which has different code).
 _WORKTREE_SRC = str(Path(__file__).parent.parent / "src")
-
-
-def _anthropic_key() -> str | None:
-    key = os.environ.get("ANTHROPIC_API_KEY")
-    if key:
-        return key
-    key_file = Path.home() / ".anthropic-key"
-    if key_file.exists():
-        return key_file.read_text().strip()
-    return None
 
 
 def _seed_project(tmp_path: Path) -> None:
@@ -156,22 +145,15 @@ def _wait_for_paused(state_path: Path, timeout: float) -> dict[str, object]:
     return last
 
 
-@pytest.mark.skipif(
-    not opted_in("anthropic"),
-    reason="anthropic not in IMP_LIVE_PROVIDERS",
-)
+@pytest.mark.live("anthropic")
 # 600s > this test's ~360-480s internal subprocess-timeout budget, so conftest's
 # 240s live-test backstop can't fire mid-subprocess before imp's own internal
 # timeouts do (which yield real diagnostics instead of a killed worker).
 @pytest.mark.timeout(600)
 def test_ctrl_c_during_bash_pauses_then_resume_completes(tmp_path: Path) -> None:
-    assert _anthropic_key() is not None, (
-        "anthropic opted in via IMP_LIVE_PROVIDERS but no "
-        "ANTHROPIC_API_KEY env var or ~/.anthropic-key file found"
-    )
     _seed_project(tmp_path)
     env = os.environ.copy()
-    key = _anthropic_key()
+    key = anthropic_key()
     assert key is not None
     env["ANTHROPIC_API_KEY"] = key
     env.pop("CLAUDECODE", None)  # avoid stub-api-key clamp from conftest
@@ -235,20 +217,7 @@ def test_ctrl_c_during_bash_pauses_then_resume_completes(tmp_path: Path) -> None
     assert final_state["status"] == "completed"
 
 
-def _openai_key() -> str | None:
-    key = os.environ.get("OPENAI_API_KEY")
-    if key:
-        return key
-    key_file = Path.home() / ".openai-key"
-    if key_file.exists():
-        return key_file.read_text().strip()
-    return None
-
-
-@pytest.mark.skipif(
-    not opted_in("openai"),
-    reason="openai not in IMP_LIVE_PROVIDERS",
-)
+@pytest.mark.live("openai")
 # 600s > this test's ~360-480s internal subprocess-timeout budget, so conftest's
 # 240s live-test backstop can't fire mid-subprocess before imp's own internal
 # timeouts do (which yield real diagnostics instead of a killed worker).
@@ -256,10 +225,6 @@ def _openai_key() -> str | None:
 def test_ctrl_c_during_bash_pauses_then_resume_completes_openai(
     tmp_path: Path,
 ) -> None:
-    assert _openai_key() is not None, (
-        "openai opted in via IMP_LIVE_PROVIDERS but no "
-        "OPENAI_API_KEY env var or ~/.openai-key file found"
-    )
     _seed_project(tmp_path)
     # Override the anthropic project.yaml _seed_project committed; re-commit so
     # the subprocess `imp new` worktree (project layer read from the committed
@@ -286,7 +251,7 @@ def test_ctrl_c_during_bash_pauses_then_resume_completes_openai(
         cwd=tmp_path, check=True,
     )
     env = os.environ.copy()
-    key = _openai_key()
+    key = openai_key()
     assert key is not None
     env["OPENAI_API_KEY"] = key
     env.pop("CLAUDECODE", None)
@@ -332,10 +297,7 @@ def test_ctrl_c_during_bash_pauses_then_resume_completes_openai(
     )
 
 
-@pytest.mark.skipif(
-    not opted_in("claude_code"),
-    reason="claude_code not in IMP_LIVE_PROVIDERS",
-)
+@pytest.mark.live("claude_code")
 # Serialize the 3 crash-prone resume tests onto one worker (under --dist
 # loadgroup) to cap the peak concurrent claude-CLI footprint they contribute.
 @pytest.mark.xdist_group("live_claude_resume")
@@ -346,10 +308,6 @@ def test_ctrl_c_during_bash_pauses_then_resume_completes_openai(
 def test_ctrl_c_during_bash_pauses_then_resume_completes_claude_code(
     tmp_path: Path,
 ) -> None:
-    assert shutil.which("claude") is not None, (
-        "claude_code opted in via IMP_LIVE_PROVIDERS but `claude` CLI "
-        "not found on PATH"
-    )
     _seed_project(tmp_path)
     # Override the anthropic project.yaml _seed_project committed; re-commit so
     # the subprocess `imp new` worktree (project layer read from the committed

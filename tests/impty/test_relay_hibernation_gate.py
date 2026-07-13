@@ -8,7 +8,7 @@ natural bare-turn-end gate, then:
   -> imp resume idles at the pending question; typing the first line
      re-engages (workflow_resumed + a FRESH daemon re-holds the flock).
 
-Unconditional in the default suite: no IMP_LIVE_PROVIDERS / opted_in skip. The
+Unconditional in the default suite: no `live` marker / `--run-live` gate. The
 pty is required — a non-tty would exercise the Part A headless path, not the tty
 gate-render path this invariant guards.
 

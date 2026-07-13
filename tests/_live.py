@@ -1,50 +1,108 @@
-"""Helpers for parsing IMP_LIVE_PROVIDERS in live-API tests.
+"""Gating helpers for live-API tests.
 
-Live tests opt in via the IMP_LIVE_PROVIDERS env var (comma-separated).
-Each test's skipif checks `opted_in(<provider>)`. Auth presence is then
-asserted (not skipped) — opt-in implies the user has set up credentials.
+Live tests carry `@pytest.mark.live(<provider>)` and run only under
+`--run-live` (see tests/conftest.py's collection hook and parse_run_live /
+live_skip_reason / provider_available below). A selected provider whose
+toolchain or credentials are absent skips (not fails) at collection.
 """
 
 from __future__ import annotations
 
+import importlib.util
 import os
+import shutil
 import subprocess
 import sys
 import time
 from pathlib import Path
 
+import pytest
 
-def _parse() -> list[str]:
-    raw = os.environ.get("IMP_LIVE_PROVIDERS", "")
-    return [tok.strip() for tok in raw.split(",") if tok.strip()]
+KNOWN_PROVIDERS: tuple[str, ...] = ("anthropic", "openai", "claude_code", "codex")
 
-
-def opted_in(provider: str) -> bool:
-    return provider in _parse()
+# Sentinel stored as the --run-live option's `const` (bare flag => all providers).
+RUN_LIVE_ALL = object()
 
 
-def first_opted_in() -> str | None:
-    items = _parse()
-    return items[0] if items else None
+def parse_run_live(value: object) -> frozenset[str] | None:
+    """Resolve the raw --run-live option value into the requested provider set.
+
+    None  -> flag not passed (skip every live test).
+    RUN_LIVE_ALL (bare --run-live) -> all known providers.
+    "a,b" -> that subset; an unknown token is a pytest.UsageError.
+    """
+    if value is None:
+        return None
+    if value is RUN_LIVE_ALL:
+        return frozenset(KNOWN_PROVIDERS)
+    assert isinstance(value, str)
+    tokens = [tok.strip() for tok in value.split(",") if tok.strip()]
+    unknown = [tok for tok in tokens if tok not in KNOWN_PROVIDERS]
+    if unknown:
+        raise pytest.UsageError(
+            "--run-live: unknown provider(s): "
+            + ", ".join(unknown)
+            + "; valid providers: "
+            + ", ".join(KNOWN_PROVIDERS)
+        )
+    return frozenset(tokens)
 
 
-def assert_codex_toolchain() -> None:
-    """Assert the codex CLI binary and SDK are both present.
+def anthropic_key() -> str | None:
+    """Resolve the anthropic key file-or-env: ~/.anthropic-key before the env
+    var, so the conftest "sk-test" stub never shadows a real key."""
+    key_file = Path.home() / ".anthropic-key"
+    if key_file.exists():
+        val = key_file.read_text().strip()
+        if val:
+            return val
+    return os.environ.get("ANTHROPIC_API_KEY") or None
 
-    Opting codex into IMP_LIVE_PROVIDERS implies the toolchain is installed, so
-    this asserts (fails loudly) rather than skipping — mirroring how the other
-    providers assert their auth once opted in. `make test-live` validates the
-    `codex` binary up front in _REQUIRE_PROVIDERS; this also covers the
-    pytest-direct path and the SDK import the Makefile does not check."""
-    import importlib.util
-    import shutil
 
-    assert shutil.which("codex") is not None, (
-        "codex opted in via IMP_LIVE_PROVIDERS but `codex` CLI not on PATH"
-    )
-    assert importlib.util.find_spec("openai_codex_sdk") is not None, (
-        "codex opted in via IMP_LIVE_PROVIDERS but openai_codex_sdk not importable"
-    )
+def openai_key() -> str | None:
+    """Resolve the openai key file-or-env: ~/.openai-key before the env var."""
+    key_file = Path.home() / ".openai-key"
+    if key_file.exists():
+        val = key_file.read_text().strip()
+        if val:
+            return val
+    return os.environ.get("OPENAI_API_KEY") or None
+
+
+def provider_available(provider: str) -> str | None:
+    """None if the provider's toolchain + credentials are present on this
+    machine, else a human-readable reason naming what is missing."""
+    if provider == "claude_code":
+        return None if shutil.which("claude") else "claude CLI not on PATH"
+    if provider == "codex":
+        if shutil.which("codex") is None:
+            return "codex CLI not on PATH"
+        if importlib.util.find_spec("openai_codex_sdk") is None:
+            return "openai_codex_sdk not importable"
+        return None
+    if provider == "anthropic":
+        return None if anthropic_key() else (
+            "anthropic credentials not found "
+            "(set ANTHROPIC_API_KEY or create ~/.anthropic-key)"
+        )
+    if provider == "openai":
+        return None if openai_key() else (
+            "openai credentials not found "
+            "(set OPENAI_API_KEY or create ~/.openai-key)"
+        )
+    raise ValueError(f"unknown provider: {provider!r}")
+
+
+def live_skip_reason(requested: frozenset[str] | None, provider: str) -> str | None:
+    """Two-layer gate for one live-marked test. Returns a skip reason, or None
+    to run. Layer 1: no --run-live -> skip all. Layer 2: not in the requested
+    set -> skip as not-selected; requested but toolchain/creds missing -> skip
+    with the capability reason."""
+    if requested is None:
+        return "live-API test — pass --run-live to run"
+    if provider not in requested:
+        return f"{provider} not selected by --run-live"
+    return provider_available(provider)
 
 
 def build_isolated_venv(
