@@ -96,7 +96,7 @@ backlog, or completed quest**? If so, re-asking a human is redundant. A **two-st
    on the test's identity (its node id / name / signature, read from the toleration line), and
    **exclude the quest being finalized** (`{{ quest.id }}`). This is a **candidate finder**
    only — a substring match — so it also returns quests that merely *mention* the test. When
-   the fork point (`{{ quest.orig_base_head }}`) is set, the search also scopes the completed
+   the fork point is set, the search also scopes the completed
    zone with `--merged-after`, which the CLI keeps to only completed quests whose merge landed
    **after** the fork point (a fix that predates it was already in this quest's tree when
    verify saw the flake, so it is not a valid cover); when the fork point is empty, it
