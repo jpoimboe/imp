@@ -536,3 +536,31 @@ def test_state_lane_retained_defaults_false(tmp_path: Path) -> None:
     assert State.load(tmp_path).lane_retained is False
     raw = json.loads((tmp_path / "state.json").read_text())
     assert raw["lane_retained"] is False
+
+
+def test_state_unsandboxed_round_trips_true(tmp_path: Path) -> None:
+    s = State(id="c1", step="coder", step_attempt=0, status="new",
+              unsandboxed=True)
+    s.save(tmp_path)
+    raw = json.loads((tmp_path / "state.json").read_text())
+    assert raw["unsandboxed"] is True          # persisted into the JSON payload
+    assert State.load(tmp_path).unsandboxed is True
+
+
+def test_state_unsandboxed_defaults_false(tmp_path: Path) -> None:
+    s = State(id="c1", step=None, step_attempt=0, status="new")
+    assert s.unsandboxed is False
+    s.save(tmp_path)
+    raw = json.loads((tmp_path / "state.json").read_text())
+    assert raw["unsandboxed"] is False
+    assert State.load(tmp_path).unsandboxed is False
+
+
+def test_state_load_forward_compatible_without_unsandboxed(tmp_path: Path) -> None:
+    # A state.json written before this field existed loads with unsandboxed=False.
+    (tmp_path / "state.json").write_text(json.dumps({
+        "id": "c1", "step": "coder", "step_attempt": 0, "status": "new",
+        "vars": {}, "loop_counts": {}, "current_step": None,
+        "retry_feedback": None,
+    }))
+    assert State.load(tmp_path).unsandboxed is False
