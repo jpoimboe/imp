@@ -60,6 +60,13 @@ def resume_quest(control_root: Path, token: str) -> str:
     return f"Resuming @{target}…"
 
 
+def start_quest(control_root: Path, quest_id: str) -> None:
+    """Spawn a detached, non-interactive, autonomous `imp resume` for a started draft."""
+    _spawn_detached(
+        _imp("resume", quest_id, "--non-interactive", "--autonomous"),
+        _base_env(), control_root)
+
+
 def abandon_quest(control_root: Path, quest_id: str) -> int:
     """Abandon a quest via `imp abandon`, synchronously; returns its exit code."""
     return _run_foreground(

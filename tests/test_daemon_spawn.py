@@ -63,6 +63,19 @@ def test_resume_quest_reports_no_match_and_does_not_spawn(
     assert "'ghost'" in msg
 
 
+def test_start_quest_spawns_autonomous_resume(
+    monkeypatch: Any, tmp_path: Path,
+) -> None:
+    calls = _capture(monkeypatch)
+    spawn.start_quest(tmp_path, "2026-06-13-aaaaaa")
+    assert calls[0]["argv"] == [
+        sys.executable, "-m", "imp", "resume", "2026-06-13-aaaaaa",
+        "--non-interactive", "--autonomous"]
+    assert calls[0]["cwd"] == tmp_path
+    assert "IMP_REMOTE_CONTROL_SOCK" not in calls[0]["env"]
+    assert "IMP_REMOTE_AUTOSUBSCRIBE" not in calls[0]["env"]
+
+
 def test_abandon_quest_runs_imp_abandon_and_returns_rc(
     monkeypatch: Any, tmp_path: Path,
 ) -> None:
