@@ -5,6 +5,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from imp.cli import main
+from imp.engine import archive
 from imp.engine.quest import LAYOUT_VERSION, Quest
 from imp.engine.state import State
 from tests.conftest import _seed_control
@@ -204,3 +205,56 @@ def test_detail_card_created_trims_microseconds_and_offset(tmp_path: Path) -> No
     assert ".123456" not in created_line            # microseconds dropped
     assert "+00:00" not in created_line              # tz offset dropped
     assert "(" in created_line and ")" in created_line   # friendly age still present
+
+
+def test_detail_card_shows_merge_commit_for_live_quest(tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+    cdir = tmp_path / ".imp" / "quests" / "2026-06-20-mrg01"
+    (cdir / "state").mkdir(parents=True)
+    (cdir / "quest.json").write_text(json.dumps({
+        "id": "2026-06-20-mrg01", "title": "Widget", "base_branch": "main",
+        "created_at": "2026-06-20T11:00:00+00:00", "layout_version": LAYOUT_VERSION}))
+    (cdir / "events.jsonl").write_text("")
+    State(id="2026-06-20-mrg01", status="completed", step="done",
+          merge_commit="deadbeefcafe", step_attempt=0).save(cdir / "state")
+    lines = main._detail_card(tmp_path, "2026-06-20-mrg01", now=_NOW)
+    card = "\n".join(lines)
+    assert "merge_commit:  deadbeefcafe" in card          # two spaces after the colon
+    base_idx = next(i for i, ln in enumerate(lines)
+                    if ln.startswith("base_branch:"))
+    assert lines[base_idx + 1] == "merge_commit:  deadbeefcafe"   # placed right after base_branch
+    # value column aligns with the base_branch value column (15-char label field)
+    assert lines[base_idx + 1].index("deadbeefcafe") == lines[base_idx].index("main")
+
+
+def test_detail_card_omits_merge_commit_when_absent(tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+    cdir = tmp_path / ".imp" / "quests" / "2026-06-20-mrg02"
+    (cdir / "state").mkdir(parents=True)
+    (cdir / "quest.json").write_text(json.dumps({
+        "id": "2026-06-20-mrg02", "title": "Widget", "base_branch": "main",
+        "created_at": "2026-06-20T11:00:00+00:00", "layout_version": LAYOUT_VERSION}))
+    (cdir / "events.jsonl").write_text("")
+    State(id="2026-06-20-mrg02", status="paused", step="spec-writer",
+          step_attempt=0).save(cdir / "state")   # merge_commit defaults to None
+    card = "\n".join(main._detail_card(tmp_path, "2026-06-20-mrg02", now=_NOW))
+    assert "merge_commit" not in card             # no line when no recorded SHA
+
+
+def test_detail_card_shows_merge_commit_for_archived_quest(tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+    events = tmp_path / "arc.jsonl"
+    events.write_text("")
+    quest_json = tmp_path / "arc.quest.json"
+    quest_json.write_text(json.dumps({
+        "id": "2026-06-20-arc01", "title": "Archived widget", "base_branch": "main",
+        "created_at": "2026-06-20T11:00:00+00:00", "depends_on": []}))
+    state_json = tmp_path / "arc.state.json"
+    state_json.write_text(json.dumps({
+        "id": "2026-06-20-arc01", "status": "completed", "step": None,
+        "merge_commit": "beefcafe1234"}))
+    archive.archive_quest(
+        tmp_path, "2026-06-20-arc01", events_path=events,
+        quest_json_path=quest_json, state_json_path=state_json)
+    card = "\n".join(main._detail_card(tmp_path, "2026-06-20-arc01", now=_NOW))
+    assert "merge_commit:  beefcafe1234" in card   # read via archive_read.read_state_json

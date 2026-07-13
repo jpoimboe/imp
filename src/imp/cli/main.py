@@ -1464,6 +1464,19 @@ def _quest_meta(control: Path, quest_id: str) -> dict[str, Any] | None:
         return None
 
 
+def _quest_state(control: Path, quest_id: str) -> dict[str, Any] | None:
+    cdir = _quest_home(control, quest_id)
+    sj = cdir / "state" / "state.json"
+    raw = sj.read_bytes() if sj.exists() else archive_read.read_state_json(control, quest_id)
+    if raw is None:
+        return None
+    try:
+        result: dict[str, Any] = json.loads(raw)
+        return result
+    except json.JSONDecodeError:
+        return None
+
+
 def _is_backlog_home(
     meta: dict[str, Any], *, conversed: bool, lock_live: Callable[[], bool]
 ) -> bool:
@@ -1557,6 +1570,9 @@ def _quest_card(control: Path, quest_id: str, *, now: datetime) -> list[str]:
     meta = _quest_meta(control, quest_id) or {}
     if meta.get("base_branch"):
         lines.append(f"base_branch:   {meta['base_branch']}")
+    state = _quest_state(control, quest_id) or {}
+    if state.get("merge_commit"):
+        lines.append(f"merge_commit:  {state['merge_commit']}")
     if meta.get("depends_on"):
         lines.append(f"depends_on:    {', '.join(meta['depends_on'])}")
     opening = _resolve_intent(events)
