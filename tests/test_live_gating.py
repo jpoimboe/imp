@@ -57,3 +57,61 @@ def test_openai_key_prefers_key_file_over_env(monkeypatch, tmp_path):
     monkeypatch.setenv("OPENAI_API_KEY", "env-key")
     from tests._live import openai_key
     assert openai_key() == "file-key"
+
+
+def test_provider_available_claude_code_missing_cli(monkeypatch):
+    import tests._live as live
+    monkeypatch.setattr(live.shutil, "which", lambda _name: None)
+    assert live.provider_available("claude_code") == "claude CLI not on PATH"
+
+
+def test_provider_available_claude_code_present(monkeypatch):
+    import tests._live as live
+    monkeypatch.setattr(live.shutil, "which", lambda _name: "/usr/bin/claude")
+    assert live.provider_available("claude_code") is None
+
+
+def test_provider_available_codex_missing_sdk(monkeypatch):
+    import tests._live as live
+    monkeypatch.setattr(live.shutil, "which", lambda _name: "/usr/bin/codex")
+    monkeypatch.setattr(live.importlib.util, "find_spec", lambda _name: None)
+    assert live.provider_available("codex") == "openai_codex_sdk not importable"
+
+
+def test_provider_available_anthropic_missing_key(monkeypatch):
+    import tests._live as live
+    monkeypatch.setattr(live, "anthropic_key", lambda: None)
+    reason = live.provider_available("anthropic")
+    assert reason is not None and "anthropic" in reason.lower() and "ANTHROPIC_API_KEY" in reason
+
+
+def test_provider_available_anthropic_present(monkeypatch):
+    import tests._live as live
+    monkeypatch.setattr(live, "anthropic_key", lambda: "real-key")
+    assert live.provider_available("anthropic") is None
+
+
+def test_live_skip_reason_no_flag_skips_all():
+    from tests._live import live_skip_reason
+    assert live_skip_reason(None, "anthropic") == "live-API test — pass --run-live to run"
+
+
+def test_live_skip_reason_provider_not_selected():
+    from tests._live import live_skip_reason
+    reason = live_skip_reason(frozenset({"openai"}), "anthropic")
+    assert reason == "anthropic not selected by --run-live"
+
+
+def test_live_skip_reason_selected_but_unavailable(monkeypatch):
+    import tests._live as live
+    monkeypatch.setattr(live, "provider_available", lambda _p: "claude CLI not on PATH")
+    assert (
+        live.live_skip_reason(frozenset({"claude_code"}), "claude_code")
+        == "claude CLI not on PATH"
+    )
+
+
+def test_live_skip_reason_selected_and_available_runs(monkeypatch):
+    import tests._live as live
+    monkeypatch.setattr(live, "provider_available", lambda _p: None)
+    assert live.live_skip_reason(frozenset({"anthropic"}), "anthropic") is None

@@ -68,6 +68,42 @@ def openai_key() -> str | None:
     return os.environ.get("OPENAI_API_KEY") or None
 
 
+def provider_available(provider: str) -> str | None:
+    """None if the provider's toolchain + credentials are present on this
+    machine, else a human-readable reason naming what is missing."""
+    if provider == "claude_code":
+        return None if shutil.which("claude") else "claude CLI not on PATH"
+    if provider == "codex":
+        if shutil.which("codex") is None:
+            return "codex CLI not on PATH"
+        if importlib.util.find_spec("openai_codex_sdk") is None:
+            return "openai_codex_sdk not importable"
+        return None
+    if provider == "anthropic":
+        return None if anthropic_key() else (
+            "anthropic credentials not found "
+            "(set ANTHROPIC_API_KEY or create ~/.anthropic-key)"
+        )
+    if provider == "openai":
+        return None if openai_key() else (
+            "openai credentials not found "
+            "(set OPENAI_API_KEY or create ~/.openai-key)"
+        )
+    raise ValueError(f"unknown provider: {provider!r}")
+
+
+def live_skip_reason(requested: frozenset[str] | None, provider: str) -> str | None:
+    """Two-layer gate for one live-marked test. Returns a skip reason, or None
+    to run. Layer 1: no --run-live -> skip all. Layer 2: not in the requested
+    set -> skip as not-selected; requested but toolchain/creds missing -> skip
+    with the capability reason."""
+    if requested is None:
+        return "live-API test — pass --run-live to run"
+    if provider not in requested:
+        return f"{provider} not selected by --run-live"
+    return provider_available(provider)
+
+
 def _parse() -> list[str]:
     raw = os.environ.get("IMP_LIVE_PROVIDERS", "")
     return [tok.strip() for tok in raw.split(",") if tok.strip()]
