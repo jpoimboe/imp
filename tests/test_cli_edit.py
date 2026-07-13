@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -25,7 +26,7 @@ def _meta(quest: Quest) -> dict:
 
 def _edit_args(token: str, **kw) -> argparse.Namespace:
     base = dict(token=token, title=None, backlog=False, active=False,
-                depends_on=None, clear_deps=False)
+                depends_on=None, clear_deps=False, append_intent=None)
     base.update(kw)
     return argparse.Namespace(**base)
 
@@ -145,10 +146,125 @@ def test_edit_depends_on_and_clear_deps_are_mutually_exclusive() -> None:
             ["edit", "2026-06-24-x", "--depends-on", "A", "--clear-deps"])
 
 
-def test_edit_title_prints_confirmation(tmp_path: Path, monkeypatch, capsys) -> None:
+def test_edit_title_is_silent_on_success(
+        tmp_path: Path, monkeypatch, capsys) -> None:
     _seed_control(tmp_path)
     monkeypatch.chdir(tmp_path)
     _make_draft(tmp_path, "2026-06-24-edit10")  # fixture title is "Original"
     rc = main._cmd_edit(_edit_args("2026-06-24-edit10", title="Renamed"))
     assert rc == 0
-    assert 'title: "Original" → "Renamed"' in capsys.readouterr().out
+    assert Quest.load(tmp_path, "2026-06-24-edit10").title == "Renamed"
+    assert capsys.readouterr().out == ""
+
+
+def test_edit_append_intent_first_note_multiparagraph(
+        tmp_path: Path, monkeypatch, capsys) -> None:
+    # The common case: a backlog opening is `title\n\ndescription` (already
+    # contains a blank line). The first note must still be separated by a blank
+    # line (AC #1), not glued under the description.
+    _seed_control(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    quest = _make_draft(tmp_path, "2026-06-24-edit20")
+    quest.set_seed_opening("Title\n\nDescription body")
+    rc = main._cmd_edit(_edit_args("2026-06-24-edit20", append_intent="hello"))
+    assert rc == 0
+    assert Quest.load(tmp_path, "2026-06-24-edit20").seed_opening == \
+        "Title\n\nDescription body\n\nhello"
+    assert capsys.readouterr().out == ""
+
+
+def test_edit_append_intent_first_note_single_line(
+        tmp_path: Path, monkeypatch) -> None:
+    _seed_control(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    quest = _make_draft(tmp_path, "2026-06-24-edit21")
+    quest.set_seed_opening("Original opening")
+    rc = main._cmd_edit(_edit_args("2026-06-24-edit21", append_intent="hello"))
+    assert rc == 0
+    assert Quest.load(tmp_path, "2026-06-24-edit21").seed_opening == \
+        "Original opening\n\nhello"
+
+
+def test_edit_append_intent_stacks(tmp_path: Path, monkeypatch) -> None:
+    _seed_control(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    quest = _make_draft(tmp_path, "2026-06-24-edit22")
+    quest.set_seed_opening("Original opening")
+    main._cmd_edit(_edit_args("2026-06-24-edit22", append_intent="hello"))
+    rc = main._cmd_edit(_edit_args("2026-06-24-edit22", append_intent="world"))
+    assert rc == 0
+    # Each appended note is blank-line separated (see plan `## Decisions`:
+    # honors AC #1 for multi-paragraph openings; deviates from AC #2's
+    # consecutive-line stacking, ratified at the merge gate).
+    assert Quest.load(tmp_path, "2026-06-24-edit22").seed_opening == \
+        "Original opening\n\nhello\n\nworld"
+
+
+def test_edit_append_intent_empty_opening(tmp_path: Path, monkeypatch) -> None:
+    _seed_control(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    _make_draft(tmp_path, "2026-06-24-edit23")  # seed_opening is None
+    rc = main._cmd_edit(_edit_args("2026-06-24-edit23", append_intent="n"))
+    assert rc == 0
+    assert Quest.load(tmp_path, "2026-06-24-edit23").seed_opening == "n"
+
+
+def test_edit_append_intent_rejects_materialized(
+        tmp_path: Path, monkeypatch, capsys) -> None:
+    _seed_control(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    quest = _make_draft(tmp_path, "2026-06-24-edit24")
+    quest.set_seed_opening("Original opening")
+    meta = _meta(quest)
+    meta["materialized"] = True
+    (quest.quest_dir / "quest.json").write_text(
+        json.dumps(meta, indent=2, sort_keys=True))
+    rc = main._cmd_edit(_edit_args("2026-06-24-edit24", append_intent="hello"))
+    assert rc == 2
+    assert "already started" in capsys.readouterr().err
+    assert Quest.load(tmp_path, "2026-06-24-edit24").seed_opening == \
+        "Original opening"
+
+
+def test_edit_append_intent_rejects_conversed(
+        tmp_path: Path, monkeypatch, capsys) -> None:
+    _seed_control(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    quest = _make_draft(tmp_path, "2026-06-24-edit25")
+    quest.set_seed_opening("Original opening")
+    quest.event_log().append(
+        agent_id=None, type="user_message",
+        payload={"content": [{"type": "text", "text": "hi"}], "human": True})
+    rc = main._cmd_edit(_edit_args("2026-06-24-edit25", append_intent="hello"))
+    assert rc == 2
+    assert "already started" in capsys.readouterr().err
+    assert Quest.load(tmp_path, "2026-06-24-edit25").seed_opening == \
+        "Original opening"
+
+
+def test_edit_no_flags_names_append_intent(
+        tmp_path: Path, monkeypatch, capsys) -> None:
+    _seed_control(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    _make_draft(tmp_path, "2026-06-24-edit26")
+    rc = main._cmd_edit(_edit_args("2026-06-24-edit26"))
+    assert rc == 2
+    assert "--append-intent" in capsys.readouterr().err
+
+
+def test_edit_append_intent_surfaces_in_show(tmp_path: Path, monkeypatch) -> None:
+    _seed_control(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    quest = _make_draft(tmp_path, "2026-06-24-edit27", origin="idea")
+    quest.set_seed_opening("Original opening")
+    main._cmd_edit(_edit_args("2026-06-24-edit27", append_intent="hello"))
+    meta = _meta(Quest.load(tmp_path, "2026-06-24-edit27"))
+    lines = main._backlog_card(meta, tmp_path, now=datetime.now(UTC))
+    assert "hello" in "\n".join(lines)
+
+
+def test_edit_append_intent_parses_as_sole_flag() -> None:
+    parser = main._build_parser()
+    ns = parser.parse_args(
+        ["edit", "2026-06-24-x", "--append-intent", "a note"])
+    assert ns.append_intent == "a note"

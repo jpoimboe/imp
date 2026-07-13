@@ -2711,9 +2711,10 @@ def _cmd_edit(args: argparse.Namespace) -> int:
 
     zone_change = args.backlog or args.active
     dep_change = args.depends_on is not None or args.clear_deps
-    if args.title is None and not zone_change and not dep_change:
+    if (args.title is None and not zone_change and not dep_change
+            and args.append_intent is None):
         print("imp: imp edit needs at least one of --title, --backlog/--active, "
-              "or --depends-on/--clear-deps", file=sys.stderr)
+              "--depends-on/--clear-deps, or --append-intent", file=sys.stderr)
         return 2
 
     if zone_change and quest.materialized:
@@ -2722,10 +2723,15 @@ def _cmd_edit(args: argparse.Namespace) -> int:
               file=sys.stderr)
         return 2
 
+    if args.append_intent is not None:
+        conversed = _first_user_message(list(quest.event_log().read())) is not None
+        if quest.materialized or conversed:
+            print(f"imp: {quest_id} has already started; --append-intent only "
+                  "applies before a quest is picked up", file=sys.stderr)
+            return 2
+
     if args.title is not None and args.title != quest.title:
-        old_title = quest.title
         quest.rename(args.title, log=quest.event_log())
-        print(f'title: "{old_title}" → "{args.title}"')
     if args.backlog:
         quest.set_origin("idea")
     elif args.active:
@@ -2734,6 +2740,12 @@ def _cmd_edit(args: argparse.Namespace) -> int:
         quest.set_depends_on([])
     elif args.depends_on is not None:
         quest.set_depends_on(args.depends_on)
+    if args.append_intent is not None:
+        existing = quest.seed_opening or ""
+        if existing:
+            quest.set_seed_opening(existing + "\n\n" + args.append_intent)
+        else:
+            quest.set_seed_opening(args.append_intent)
     return 0
 
 
@@ -3327,13 +3339,17 @@ def _build_parser() -> argparse.ArgumentParser:
 
     p_edit = sub.add_parser(
         "edit",
-        help="Edit a quest's title, backlog membership, or dependencies.",
+        help="Edit a quest's title, backlog membership, dependencies, or opening intent.",
         description=(
-            "Edit a quest's title, backlog membership, or dependencies. Zone "
-            "moves (--backlog/--active) apply to un-materialized quests only."))
+            "Edit a quest's title, backlog membership, dependencies, or append to "
+            "its opening intent. Zone moves (--backlog/--active) apply to "
+            "un-materialized quests only."))
     p_edit.add_argument("token", help="Quest id or its short token.")
     p_edit.add_argument("--title", metavar="TEXT", default=None,
                         help="Set the quest title.")
+    p_edit.add_argument(
+        "--append-intent", metavar="TEXT", default=None,
+        help="Append a verbatim note to an unstarted quest's opening intent.")
     p_edit_zone = p_edit.add_mutually_exclusive_group()
     p_edit_zone.add_argument(
         "--backlog", action="store_true",
