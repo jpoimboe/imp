@@ -147,7 +147,7 @@ to score).
   - `imp new -h` — the flag surface (`--backlog`, `--depends-on`, `--workflow`,
     `--autonomous`, `--non-interactive`/`--message`): can a new user tell which they need?
   - `imp chat` — the conversation surface (own item below).
-  - `imp list` — the overview: zones (in-flight / Backlog / recently merged) legible? ids vs
+  - `imp list` — the overview: zones (in-flight / backlog / recently merged) legible? ids vs
     titles? Then `imp show <id>` (detail card) and one artifact view (e.g.
     `imp show <id> status`), plus `imp list -a`.
   - `imp log <id>` — a readable story or a wall of internals? Also `imp log <id> --summary`
@@ -174,15 +174,15 @@ to score).
   once); and paste a bare path like `/home/user/foo.py` — it must submit as ordinary input,
   **not** error as an unknown command.
 - **`imp chat`** — the lightweight conversation surface: open it, exchange a couple of turns
-  (ask something about the repo), then `/save` — is the saved-to-Backlog messaging clear? Try
+  (ask something about the repo), then `/save` — is the saved-to-backlog messaging clear? Try
   `/clear` (parks the chat, starts fresh). Also compare Ctrl-D dispositions: after an
   exchange (saves) vs in a brand-new chat with no exchange (cancels). Does chat read as a
   distinct, lighter thing than `imp new`?
 - **Inline pickers** — no-arg `imp resume` and no-arg `imp abandon` open an arrow-key picker:
   `send("\x1b[B")` / `send("\x1b[A")` to move, Enter selects, ESC cancels (escape-flush
   caveat, §2). Judge the candidate rows: enough context to pick confidently?
-- **Backlog flow** — `imp new --backlog "some idea"` files an idea and exits: does the
-  message tell you how to start it later? Confirm it appears in `imp list`'s Backlog zone.
+- **backlog flow** — `imp new --backlog "some idea"` files an idea and exits: does the
+  message tell you how to start it later? Confirm it appears in `imp list`'s backlog zone.
 - **Empty states** — `imp list` / `imp log` before any Change exists.
 - **`NO_COLOR=1`** — rerun `imp log <id>` with `NO_COLOR=1` in the env: fully legible, no
   meaning carried by color alone?
