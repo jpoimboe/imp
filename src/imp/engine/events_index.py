@@ -151,3 +151,113 @@ def subagent_handle_map(
             name = (src or {}).get("subagent_name") if isinstance(src, dict) else None
             handles[f"sub:{sid}"] = f"{name or 'sub'}-{n}"
     return handles
+
+
+@dataclass
+class StepRow:
+    name: str
+    ranges: list[tuple[int, int]]
+    count: int
+    occurrences: int
+    subagents: int
+
+
+@dataclass
+class Index:
+    quest_id: str
+    total_events: int
+    step_count: int
+    steps: list[StepRow]
+    types: list[tuple[str, int]]
+
+
+def _type_histogram(
+    indexed: Sequence[tuple[int, dict[str, Any]]],
+    windows: Sequence[tuple[int, int]] | None = None,
+) -> list[tuple[str, int]]:
+    counts: dict[str, int] = {}
+    for ordinal, event in indexed:
+        if is_suppressed(event):
+            continue
+        if windows is not None and not _in_windows(ordinal, windows):
+            continue
+        etype = event.get("type") or "?"
+        counts[etype] = counts.get(etype, 0) + 1
+    # Count-descending; ties keep first-appearance order. `counts` is
+    # insertion-ordered and sorted() is stable, so a plain -count key preserves
+    # the order types were first seen (spec mandates count-descending only).
+    return sorted(counts.items(), key=lambda kv: -kv[1])
+
+
+def _displayable_count(
+    indexed: Sequence[tuple[int, dict[str, Any]]],
+    windows: Sequence[tuple[int, int]],
+) -> int:
+    return sum(
+        1 for ordinal, event in indexed
+        if not is_suppressed(event) and _in_windows(ordinal, windows)
+    )
+
+
+def _subagent_count(
+    indexed: Sequence[tuple[int, dict[str, Any]]],
+    windows: Sequence[tuple[int, int]],
+) -> int:
+    seen: set[str] = set()
+    for ordinal, event in indexed:
+        aid = event.get("agent_id") or ""
+        if aid.startswith("sub:") and _in_windows(ordinal, windows):
+            seen.add(aid)
+    return len(seen)
+
+
+def build_index(
+    indexed: Sequence[tuple[int, dict[str, Any]]], quest_id: str,
+) -> Index:
+    steps = step_windows(indexed)
+    rows = [
+        StepRow(
+            name=s.name,
+            ranges=sorted(s.windows),
+            count=_displayable_count(indexed, s.windows),
+            occurrences=s.occurrences(),
+            subagents=_subagent_count(indexed, s.windows),
+        )
+        for s in steps
+    ]
+    total = sum(1 for _, event in indexed if not is_suppressed(event))
+    return Index(
+        quest_id=quest_id,
+        total_events=total,
+        step_count=len(rows),
+        steps=rows,
+        types=_type_histogram(indexed),
+    )
+
+
+def render_index(index: Index) -> list[str]:
+    lines = [
+        f"quest {index.quest_id} · {index.total_events} events "
+        f"· {index.step_count} steps",
+        "",
+        "steps:",
+    ]
+    name_w = max((len(r.name) for r in index.steps), default=0)
+    range_w = max((len(format_ranges(r.ranges)) for r in index.steps), default=0)
+    for r in index.steps:
+        loop = f"  (×{r.occurrences})" if r.occurrences > 1 else ""
+        lines.append(
+            f"  {r.name:<{name_w}}  {format_ranges(r.ranges):<{range_w}}  "
+            f"{r.count}{loop}".rstrip()
+        )
+        if r.subagents:
+            noun = "subagent" if r.subagents == 1 else "subagents"
+            lines.append(f"    ↳ {r.subagents} {noun}")
+    lines.extend(["", "types:"])
+    count_w = max((len(str(c)) for _, c in index.types), default=0)
+    for etype, count in index.types:
+        lines.append(f"  {count:>{count_w}}  {etype}")
+    lines.extend(
+        ["", "→ --step <name> · --type <type> · <range> · --all · --json"]
+    )
+    return lines

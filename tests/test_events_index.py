@@ -144,3 +144,68 @@ def test_subagent_handle_map_numbers_globally_by_dispatch_order() -> None:
         "sub:D2": "coder-2",
         "sub:D3": "code-reviewer-3",
     }
+
+
+def test_build_index_step_ranges_counts_and_types_histogram() -> None:
+    events = [
+        _ev(None, "step_started", step="spec"),                # 1
+        _ev("a", "tool_call", agent_id="step:design/spec"),     # 2
+        _ev("b", "tool_result", agent_id="step:design/spec"),   # 3
+        _ev(None, "step_completed", step="spec"),               # 4
+        _ev(None, "step_started", step="coder"),                # 5
+        _ev("c", "tool_call", agent_id="step:build/coder"),     # 6
+        {"type": "llm_response_usage_patch", "agent_id": "step:build/coder"},  # 7 (suppressed)
+        _ev(None, "step_completed", step="coder"),              # 8
+    ]
+    idx = ei.build_index(_indexed(events), quest_id="q1")
+    assert idx.quest_id == "q1"
+    assert idx.step_count == 2
+    # 7 displayable events (line 7 suppressed).
+    assert idx.total_events == 7
+    rows = {r.name: r for r in idx.steps}
+    assert rows["spec"].ranges == [(1, 4)]
+    assert rows["spec"].count == 4
+    assert rows["coder"].ranges == [(5, 8)]
+    assert rows["coder"].count == 3  # line 7 excluded from the count
+    # types histogram is count-descending; suppressed type absent.
+    assert idx.types[0] == ("step_started", 2)
+    assert dict(idx.types).get("llm_response_usage_patch") is None
+
+
+def test_build_index_marks_loop_and_subagent_fanout() -> None:
+    events = [
+        _ev(None, "step_started", step="task-lead"),        # 1
+        _ev("D1", "tool_call", agent_id="step:main/task-lead",
+            name="sub_agent", input={"subagent_name": "coder"}),  # 2
+        _ev("e1", "tool_call", agent_id="sub:D1"),          # 3
+        _ev(None, "step_completed", step="task-lead"),      # 4
+        _ev(None, "step_started", step="task-lead"),        # 5
+        _ev(None, "step_completed", step="task-lead"),      # 6
+    ]
+    idx = ei.build_index(_indexed(events), quest_id="q1")
+    row = {r.name: r for r in idx.steps}["task-lead"]
+    assert row.occurrences == 2
+    assert row.ranges == [(1, 4), (5, 6)]
+    assert row.subagents == 1
+
+
+def test_render_index_shows_header_ranges_loop_and_fanout() -> None:
+    events = [
+        _ev(None, "step_started", step="task-lead"),        # 1
+        _ev("D1", "tool_call", agent_id="step:main/task-lead",
+            name="sub_agent", input={"subagent_name": "coder"}),  # 2
+        _ev("e1", "tool_call", agent_id="sub:D1"),          # 3
+        _ev(None, "step_completed", step="task-lead"),      # 4
+        _ev(None, "step_started", step="task-lead"),        # 5
+        _ev(None, "step_completed", step="task-lead"),      # 6
+    ]
+    idx = ei.build_index(_indexed(events), quest_id="q1")
+    text = "\n".join(ei.render_index(idx))
+    assert "quest q1 · 6 events · 1 steps" in text
+    assert "steps:" in text
+    assert "#1-4, #5-6" in text
+    assert "(×2)" in text
+    assert "↳ 1 subagent" in text
+    assert "types:" in text
+    assert "step_started" in text
+    assert "→ --step" in text
