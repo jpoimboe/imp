@@ -125,7 +125,7 @@ def test_build_agent_invocation_injects_bash_paths_note_when_bash_present(
 def test_build_agent_invocation_omits_bash_paths_note_without_bash(
     tmp_path: Path,
 ) -> None:
-    # No `bash` tool -> no note (the rule is irrelevant to file-tool-only agents).
+    # No filesystem tool -> no note (complete_step alone doesn't trigger it).
     from imp.engine.agent_run import build_agent_invocation
 
     inv = build_agent_invocation(
@@ -141,6 +141,30 @@ def test_build_agent_invocation_omits_bash_paths_note_without_bash(
         resolved_tiers=None, coordinator=None)
 
     assert "IMP_PROJECT_ROOT" not in inv.system_prompt
+
+
+def test_build_agent_invocation_injects_paths_note_for_file_tool_without_bash(
+    tmp_path: Path,
+) -> None:
+    # AC 5b: an agent holding a filesystem tool (read_file) but NOT bash still
+    # receives the relative-paths note — the descriptions now lean on it as the
+    # single path-rules source, so it must track file tools, not bash alone.
+    from imp.engine.agent_run import build_agent_invocation
+
+    inv = build_agent_invocation(
+        agent_def=_agent(tools={"complete_step", "read_file"}),
+        provider_name="anthropic", model_name="m",
+        rendered_system_prompt="RENDERED BODY",
+        initial_messages=(), quest_context=_cc(tmp_path),
+        user_chat_input_fn=None,
+        transcript_dir=tmp_path / "td",
+        events_path=tmp_path / "e.jsonl", subagent_defs={}, tiers=(),
+        max_tool_calls=None, agent_id="step:p/s", event_log=None,
+        quest_state=None, first_event_parent_id=None,
+        resolved_tiers=None, coordinator=None)
+
+    assert "IMP_PROJECT_ROOT" in inv.system_prompt
+    assert "relative to the project root" in inv.system_prompt
 
 
 def test_build_agent_invocation_wires_user_input_unconditionally(
