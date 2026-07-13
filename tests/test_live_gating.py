@@ -27,3 +27,33 @@ def test_parse_run_live_unknown_provider_raises_usage_error():
     msg = str(exc.value)
     assert "bogus" in msg
     assert all(p in msg for p in KNOWN_PROVIDERS)  # names the valid providers
+
+
+def test_anthropic_key_prefers_key_file_over_env(monkeypatch, tmp_path):
+    (tmp_path / ".anthropic-key").write_text("file-key\n")
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "env-key")
+    from tests._live import anthropic_key
+    assert anthropic_key() == "file-key"
+
+
+def test_anthropic_key_falls_back_to_env_when_no_file(monkeypatch, tmp_path):
+    monkeypatch.setenv("HOME", str(tmp_path))  # no ~/.anthropic-key present
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "env-key")
+    from tests._live import anthropic_key
+    assert anthropic_key() == "env-key"
+
+
+def test_anthropic_key_none_when_neither(monkeypatch, tmp_path):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    from tests._live import anthropic_key
+    assert anthropic_key() is None
+
+
+def test_openai_key_prefers_key_file_over_env(monkeypatch, tmp_path):
+    (tmp_path / ".openai-key").write_text("file-key\n")
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("OPENAI_API_KEY", "env-key")
+    from tests._live import openai_key
+    assert openai_key() == "file-key"

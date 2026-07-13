@@ -47,6 +47,27 @@ def parse_run_live(value: object) -> frozenset[str] | None:
     return frozenset(tokens)
 
 
+def anthropic_key() -> str | None:
+    """Resolve the anthropic key file-or-env: ~/.anthropic-key before the env
+    var, so the conftest "sk-test" stub never shadows a real key."""
+    key_file = Path.home() / ".anthropic-key"
+    if key_file.exists():
+        val = key_file.read_text().strip()
+        if val:
+            return val
+    return os.environ.get("ANTHROPIC_API_KEY") or None
+
+
+def openai_key() -> str | None:
+    """Resolve the openai key file-or-env: ~/.openai-key before the env var."""
+    key_file = Path.home() / ".openai-key"
+    if key_file.exists():
+        val = key_file.read_text().strip()
+        if val:
+            return val
+    return os.environ.get("OPENAI_API_KEY") or None
+
+
 def _parse() -> list[str]:
     raw = os.environ.get("IMP_LIVE_PROVIDERS", "")
     return [tok.strip() for tok in raw.split(",") if tok.strip()]
