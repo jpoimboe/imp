@@ -475,10 +475,20 @@ async def run_quest(
 
             # §3 case 1 — mid-flight Pause: pause BEFORE navigation (as today).
             if isinstance(action, Pause):
-                # Retain the held lane on a clean interrupt or transient give-up:
-                # the step resumes in place on an untouched tree. should_pause is
-                # an OR term, so an interrupt wins over an otherwise-evicting reason.
-                retain = (coordinator.should_pause or action.interrupt
+                # An interrupt-caused pause resumes in place and continues the step.
+                # Consult the DURABLE coordinator.interrupted latch, not just the
+                # racy should_pause (end_gesture_round clears should_pause the
+                # instant the client processes the pause, but interrupted survives
+                # the whole in-flight run) nor action.interrupt alone (False on the
+                # force-kill escalation teardown). clear_pause() resets interrupted
+                # before any resume, so this term only fires inside the run that was
+                # actually interrupted — a bare-turn-end yield leaves it False.
+                interrupt_caused = (
+                    coordinator.should_pause or coordinator.interrupted
+                    or action.interrupt)
+                # Retain the held lane on an interrupt or transient give-up: the
+                # step resumes in place on an untouched tree.
+                retain = (interrupt_caused
                           or action.reason in ("retry_ceiling", "reauth_needed"))
                 if retain and state.held_lane is not None:
                     state.lane_retained = True
@@ -488,7 +498,7 @@ async def run_quest(
                 if not evicted and step.kind == "agent":
                     state.arm_step_resume(
                         mode="continue" if (
-                            coordinator.should_pause or action.interrupt
+                            interrupt_caused
                             or action.reason in ("retry_ceiling", "reauth_needed"))
                         else "solicit")
                 reason = action.reason or "interrupt"
