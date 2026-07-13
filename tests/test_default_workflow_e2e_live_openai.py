@@ -7,26 +7,14 @@ API call → tool dispatch → complete_step → agent_output validation.
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 import pytest
 
 from imp.engine.executor import RunResult, run_quest
 from imp.engine.quest import Quest
-from tests._live import opted_in
+from tests._live import openai_key
 from tests.conftest import _git
-
-
-def _openai_key() -> str | None:
-    """Resolve OpenAI API key from env var or `~/.openai-key` file."""
-    key = os.environ.get("OPENAI_API_KEY")
-    if key:
-        return key
-    key_file = Path.home() / ".openai-key"
-    if key_file.exists():
-        return key_file.read_text().strip()
-    return None
 
 
 @pytest.fixture
@@ -43,19 +31,13 @@ def _ensure_builtin_providers() -> None:
     register_builtin_providers()
 
 
-@pytest.mark.skipif(
-    not opted_in("openai"),
-    reason="openai not in IMP_LIVE_PROVIDERS",
-)
+@pytest.mark.live("openai")
 @pytest.mark.anyio
 async def test_one_step_walk_against_openai(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    key = _openai_key()
-    assert key is not None, (
-        "openai opted in via IMP_LIVE_PROVIDERS but no "
-        "OPENAI_API_KEY env var or ~/.openai-key file found"
-    )
+    key = openai_key()
+    assert key is not None
     monkeypatch.setenv("OPENAI_API_KEY", key)
     _git(tmp_path, "init", "-q", "-b", "main")
     _git(tmp_path, "config", "user.email", "t@t")

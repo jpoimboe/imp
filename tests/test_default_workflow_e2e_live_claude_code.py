@@ -6,14 +6,12 @@ costs on your account (subscription, Bedrock, Vertex, etc.).
 
 from __future__ import annotations
 
-import shutil
 from pathlib import Path
 
 import pytest
 
 from imp.engine.executor import RunResult, run_quest
 from imp.engine.quest import Quest
-from tests._live import opted_in
 from tests.conftest import _git
 
 
@@ -31,16 +29,9 @@ def _ensure_builtin_providers() -> None:
     register_builtin_providers()
 
 
-@pytest.mark.skipif(
-    not opted_in("claude_code"),
-    reason="claude_code not in IMP_LIVE_PROVIDERS",
-)
+@pytest.mark.live("claude_code")
 @pytest.mark.anyio
 async def test_one_step_walk_against_claude_code(tmp_path: Path) -> None:
-    assert shutil.which("claude") is not None, (
-        "claude_code opted in via IMP_LIVE_PROVIDERS but `claude` CLI "
-        "not found on PATH"
-    )
     _git(tmp_path, "init", "-q", "-b", "main")
     _git(tmp_path, "config", "user.email", "t@t")
     _git(tmp_path, "config", "user.name", "t")
