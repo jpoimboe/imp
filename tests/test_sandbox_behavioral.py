@@ -279,7 +279,7 @@ def test_rm_outside_fails() -> None:
 # ---------------------------------------------------------------------------
 
 def test_secret_env_dropped() -> None:
-    """The sandbox env allowlist (spec B.4) only passes PATH/HOME/LANG/LC_*/IMP_*.
+    """The sandbox env allowlist (spec B.4) only passes PATH/HOME/LANG/LC_*/engine-managed IMP_*.
 
     AWS_SECRET_ACCESS_KEY is not in the allowlist and must NOT be visible inside
     the sandbox even when set in the ambient environment. We use a hand-built
@@ -293,7 +293,7 @@ def test_secret_env_dropped() -> None:
         # Hand-built policy: setenv does NOT include AWS_SECRET_ACCESS_KEY.
         # This directly tests the bwrap --clearenv + --setenv mechanism.
         # (resolve_policy produces the same setenv via _build_setenv, which only
-        # allows PATH/HOME/USER/LOGNAME/LANG/TERM/TZ/LC_*/IMP_* + extra_env.)
+        # allows PATH/HOME/USER/LOGNAME/LANG/TERM/TZ/LC_*/engine-managed IMP_* + env_passthrough.)
         pol = _active_policy(root)
         ctx = _ctx(root, pol)
         result = _bash(ctx, "echo [$AWS_SECRET_ACCESS_KEY]")

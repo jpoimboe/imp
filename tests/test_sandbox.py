@@ -378,11 +378,11 @@ def test_resolve_policy_extra_readable_writable_plumbed(tmp_path):
     assert "/opt/rw" in pol.extra_writable
 
 
-def test_build_setenv_dedups_overlapping_extra_env(tmp_path):
+def test_build_setenv_dedups_overlapping_env_passthrough(tmp_path):
     control, wt = _layout(tmp_path)
     pol = resolve_policy(
         worktree=wt, control_root=control, quest_id="abc",
-        cfg=SandboxConfig(extra_env=("TMPDIR",)),
+        cfg=SandboxConfig(env_passthrough=("TMPDIR",)),
         engine_env_result={},
         environ={"PATH": "/usr/bin", "TMPDIR": "/var/tmp"},
         available=True,
@@ -421,25 +421,30 @@ def test_build_setenv_omits_pythonpath_when_engine_env_lacks_it(tmp_path):
     assert "PYTHONPATH" not in keys
 
 
-def test_build_setenv_admits_ambient_imp_toggles(tmp_path):
-    # AC 5: user-set non-engine IMP_* vars in the launching environment reach the
-    # sandboxed agent, and an engine-managed var still arrives authoritatively.
+def test_build_setenv_drops_ambient_imp_vars(tmp_path):
+    # AC 1-3: a non-engine IMP_* var set in the launching environment must NOT
+    # reach the sandboxed agent; an engine-managed var still arrives
+    # authoritatively from engine_env_result; a var named in env_passthrough and
+    # present in the environment does pass through.
     control, wt = _layout(tmp_path)
     pol = resolve_policy(
         worktree=wt, control_root=control, quest_id="abc",
-        cfg=SandboxConfig(),
+        cfg=SandboxConfig(env_passthrough=("IMP_ALLOWED",)),
         engine_env_result={"IMP_PROJECT_ROOT": str(wt)},
-        environ={"PATH": "/usr/bin", "IMP_SPIKE_LOG": "1", "IMP_DEBUG": "verbose"},
+        environ={"PATH": "/usr/bin", "IMP_SPIKE_LOG": "1", "IMP_DEBUG": "verbose",
+                 "IMP_ALLOWED": "yes"},
         available=True,
     )
-    assert ("IMP_SPIKE_LOG", "1") in pol.setenv
-    assert ("IMP_DEBUG", "verbose") in pol.setenv
+    keys = {k for k, _ in pol.setenv}
+    assert "IMP_SPIKE_LOG" not in keys
+    assert "IMP_DEBUG" not in keys
     assert ("IMP_PROJECT_ROOT", str(wt)) in pol.setenv
+    assert ("IMP_ALLOWED", "yes") in pol.setenv
 
 
 def test_build_setenv_strips_provider_api_keys(tmp_path):
     # AC 5: provider key env vars are never on the allowlist (not IMP_-prefixed,
-    # not generic/LC_/extra_env), so they never reach the agent.
+    # not generic/LC_/env_passthrough), so they never reach the agent.
     control, wt = _layout(tmp_path)
     pol = resolve_policy(
         worktree=wt, control_root=control, quest_id="abc",
@@ -455,8 +460,8 @@ def test_build_setenv_strips_provider_api_keys(tmp_path):
 
 
 def test_build_setenv_ambient_engine_managed_imp_var_does_not_leak(tmp_path):
-    # AC 5: an ambient IMP_TEST_CMD_FAST (an ENGINE_ENV_VARS member) that
-    # engine_env_result does NOT provide must NOT leak in — the engine's
+    # AC 1-2: an ambient IMP_TEST_CMD_FAST that engine_env_result does NOT provide
+    # must NOT leak in — ambient IMP_* is never passed through, so the engine's
     # "absent => no fast gate" contract holds.
     control, wt = _layout(tmp_path)
     pol = resolve_policy(
@@ -471,9 +476,9 @@ def test_build_setenv_ambient_engine_managed_imp_var_does_not_leak(tmp_path):
 
 
 def test_build_setenv_engine_imp_var_wins_over_ambient(tmp_path):
-    # AC 5: when both ambient and engine provide IMP_TEST_CMD_FAST, the engine
-    # value is authoritative (ambient pass excludes ENGINE_ENV_VARS; engine loop
-    # runs after it).
+    # AC 2: when both ambient and engine provide IMP_TEST_CMD_FAST, only the engine
+    # value reaches the agent (ambient IMP_* is never passed through; the engine
+    # loop is the sole IMP_* source).
     control, wt = _layout(tmp_path)
     pol = resolve_policy(
         worktree=wt, control_root=control, quest_id="abc",
@@ -905,9 +910,9 @@ def test_sandbox_config_from_raw_maps_fields_and_defaults() -> None:
     from imp.engine.sandbox import sandbox_config_from_raw
 
     cfg = sandbox_config_from_raw(
-        {"network": False, "extra_env": ["FOO", "BAR"], "allow_unsandboxed": True})
+        {"network": False, "env_passthrough": ["FOO", "BAR"], "allow_unsandboxed": True})
     assert cfg.network is False
-    assert cfg.extra_env == ("FOO", "BAR")
+    assert cfg.env_passthrough == ("FOO", "BAR")
     assert cfg.allow_unsandboxed is True
     # fields absent from the raw mapping fall back to the code defaults:
     assert cfg.enabled is True

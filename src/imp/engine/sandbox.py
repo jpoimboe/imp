@@ -27,7 +27,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
-from imp.engine.env import ENGINE_ENV_VARS, HEADLESS_ENV
+from imp.engine.env import HEADLESS_ENV
 
 
 @dataclass(frozen=True, slots=True)
@@ -244,7 +244,7 @@ class SandboxConfig:
     writable_caches: tuple[str, ...] = ()     # REPLACES the code default caches when non-empty
     extra_readable: tuple[str, ...] = ()
     extra_writable: tuple[str, ...] = ()
-    extra_env: tuple[str, ...] = ()
+    env_passthrough: tuple[str, ...] = ()
     # Injected for testability; default to the live host values.
     home: Path | None = None
     uid: int | None = None
@@ -355,7 +355,7 @@ def sandbox_config_from_raw(raw: Mapping[str, Any]) -> SandboxConfig:
         writable_caches=tuple(raw.get("writable_caches", ())),
         extra_readable=tuple(raw.get("extra_readable", ())),
         extra_writable=tuple(raw.get("extra_writable", ())),
-        extra_env=tuple(raw.get("extra_env", ())),
+        env_passthrough=tuple(raw.get("env_passthrough", ())),
     )
 
 
@@ -451,7 +451,7 @@ def resolve_policy(
         extra_writable=tuple(cfg.extra_writable),
         secret_dirs=tuple(secret_dirs),
         secret_files=tuple(secret_files),
-        setenv=_build_setenv(engine_env_result, environ, cfg.extra_env),
+        setenv=_build_setenv(engine_env_result, environ, cfg.env_passthrough),
         network=cfg.network,
         note="",
     )
@@ -467,18 +467,18 @@ def _inactive(*, note: str) -> SandboxPolicy:
 
 def _build_setenv(
     engine_env_result: Mapping[str, str], environ: Mapping[str, str],
-    extra_env: tuple[str, ...],
+    env_passthrough: tuple[str, ...],
 ) -> tuple[tuple[str, str], ...]:
     """Env allowlist (spec B.4). IMP_* and PYTHONPATH come from engine_env_result
     (authoritative, M2-r5; PYTHONPATH is the single deliberate non-IMP_ exception
-    — the imp-on-imp import shadow); generic + LC_* + extra_env pass through from
-    `environ`; ambient non-engine IMP_* toggles pass through from `environ` too
-    (engine-managed IMP_* keys are excluded here so engine_env_result stays
-    authoritative); TMPDIR=/tmp.
+    — the imp-on-imp import shadow); generic + LC_* + env_passthrough pass through
+    from `environ`; TMPDIR=/tmp. Ambient non-engine IMP_* vars are NOT passed
+    through — the only IMP_* an agent sees is the engine-managed set from
+    engine_env_result, plus anything a user explicitly names in env_passthrough.
 
     Dedup: accumulated into a dict (insertion-ordered); re-assigning a key updates
     its value in place (first-seen position, last value wins). TMPDIR is assigned
-    last so the forced /tmp override beats any ambient or extra_env value.
+    last so the forced /tmp override beats any ambient or env_passthrough value.
     """
     d: dict[str, str] = {}
     for k in _GENERIC_ENV:
@@ -487,18 +487,11 @@ def _build_setenv(
     for k, v in environ.items():
         if k.startswith("LC_"):
             d[k] = v
-    for k in extra_env:
+    for k in env_passthrough:
         if k in environ:
             d[k] = environ[k]
-    # Ambient IMP_* toggles: admit user-set IMP_-prefixed vars (e.g. IMP_SPIKE_LOG,
-    # IMP_DEBUG) EXCEPT the engine-managed set, which arrives authoritatively from
-    # engine_env_result below. Placed before that loop so a stale ambient engine var
-    # (e.g. IMP_TEST_CMD_FAST from an outer imp) can never leak in.
-    for k, v in environ.items():
-        if k.startswith("IMP_") and k not in ENGINE_ENV_VARS:
-            d[k] = v
     for k, v in engine_env_result.items():
         if _is_engine_passthrough(k):
             d[k] = v
-    d["TMPDIR"] = "/tmp"   # forced last — wins over any ambient/extra_env value
+    d["TMPDIR"] = "/tmp"   # forced last — wins over any ambient/env_passthrough value
     return tuple(d.items())
