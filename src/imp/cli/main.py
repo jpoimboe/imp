@@ -2467,7 +2467,7 @@ def _deliver_abandon_resident(control: Path, quest_id: str) -> None:
     anyio.run(_run)
 
 
-def _abandon(control: Path, quest_id: str, *, yes: bool = False) -> int:
+def _abandon(control: Path, quest_id: str) -> int:
     """Tear down a quest (worktree, branch, state) as one logged operation.
 
     Order is pinned by git (spec §2): archive the runtime snapshot BEFORE
@@ -2485,14 +2485,6 @@ def _abandon(control: Path, quest_id: str, *, yes: bool = False) -> int:
         return 0
 
     token = quest.id
-    if not yes and _interactive():
-        if quest.materialized:
-            print(f"Abandon {token}? This removes its worktree, branch, and state.")
-        else:
-            print(f"Abandon {token}? This permanently discards it.")
-        if input("Type 'y' to confirm: ").strip().lower() not in ("y", "yes"):
-            print(f"Left {token} in place.")
-            return 0
     if session_is_resident(control, quest_id):
         try:
             _deliver_abandon_resident(control, quest_id)
@@ -2640,21 +2632,20 @@ async def _pick_show_matches(control: Path, matches: list[str]) -> str | int:
 
 def _cmd_abandon(args: argparse.Namespace) -> int:
     control = _control_root()
-    yes = args.yes
     token = args.token
     if token is None or not token.strip():
         target = anyio.run(_pick_abandon_target, control)
         if isinstance(target, int):
             return target
-        return _abandon(control, target, yes=yes)
+        return _abandon(control, target)
     matches = _abandon_match_rows(control, token)
     if len(matches) >= 2:
         target = anyio.run(_pick_abandon_matches, control, token, matches)
         if isinstance(target, int):
             return target
-        return _abandon(control, target, yes=yes)
+        return _abandon(control, target)
     if len(matches) == 1:
-        return _abandon(control, matches[0][0], yes=yes)
+        return _abandon(control, matches[0][0])
     try:
         quest_id = _resolve_id(control, token)
     except SystemExit:
@@ -2667,11 +2658,11 @@ def _cmd_abandon(args: argparse.Namespace) -> int:
         hits = [cid for cid in ids if cid == token] or \
                [cid for cid in ids if cid.endswith(token)]
         if len(hits) == 1:
-            return _abandon(control, hits[0], yes=yes)
+            return _abandon(control, hits[0])
         # Truly unknown (never existed, or ambiguous) — nothing to reap.
         print(f"imp: no quest matches {token!r}", file=sys.stderr)
         return 2
-    return _abandon(control, quest_id, yes=yes)
+    return _abandon(control, quest_id)
 
 
 def _cmd_edit(args: argparse.Namespace) -> int:
@@ -3287,17 +3278,12 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Tear down a quest's worktree, branch, and state (logged).",
         description=(
             "Tear down a materialized quest — its worktree, branch, and state — "
-            "or discard a pure backlog idea. On a tty, confirm before tearing "
-            "down a materialized quest; pass --yes to skip. With no token, pick "
-            "from a list."),
+            "or discard a pure backlog idea. With no token, pick from a list."),
     )
     p_abandon.add_argument(
         "token", nargs="?",
         help="Quest id or short token identifying which quest to abandon "
              "(omit on a tty to pick from a list).")
-    p_abandon.add_argument(
-        "--yes", action="store_true",
-        help="Skip the confirmation prompt before tearing down a materialized quest.")
     p_abandon.set_defaults(func=_cmd_abandon)
 
     p_edit = sub.add_parser(
