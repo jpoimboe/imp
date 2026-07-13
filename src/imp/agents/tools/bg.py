@@ -277,7 +277,7 @@ async def _wait_for_terminal(
         "returncode, …}; each call returns only output new since the last call "
         "(per-stream cursors), capped 50 KB/stream. `wait=true` blocks until "
         "the process exits, your `timeout` elapses, or a 20-minute budget runs "
-        "out. See `tool-reference` for buffering and bulk-log handling."
+        "out. See `imp-tool-reference` for buffering and bulk-log handling."
     ),
 )
 async def bash_output(

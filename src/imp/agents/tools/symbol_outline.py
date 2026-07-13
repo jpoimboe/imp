@@ -563,7 +563,7 @@ async def _outline_dir(
         "A directory recurses gitignore-aware with counts. `detail`: "
         "'signatures' (default) or 'counts'. Not a substitute for `read_file` "
         "— use it to choose what to read. "
-        "See `tool-reference` for `max_depth` and caps."
+        "See `imp-tool-reference` for `max_depth` and caps."
     ),
     read_only=True,
 )

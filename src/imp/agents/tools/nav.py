@@ -190,7 +190,7 @@ def _cap_lines(lines: list[str]) -> str:
         "(default '.'). Uses pathlib semantics — bare `*.py` matches top-level "
         "only, unlike `grep`'s `glob` where `*`/`**` cross `/`. Respects "
         ".gitignore; results are most-recent-first, capped at 50 KB. "
-        "See `tool-reference` for path and sandbox details."
+        "See `imp-tool-reference` for path and sandbox details."
     ),
     read_only=True,
 )
@@ -304,7 +304,7 @@ _GREP_MODES = ("files_with_matches", "content", "count")
         "refine results. Respects .gitignore, skips binaries. "
         "WARNING: result rows carry display artifacts (`…[truncated]`, U+FFFD, "
         "and the CRLF `\\r`) — never paste them into `edit_file`/`write_file`. "
-        "See `tool-reference` for multiline, caps, and sandbox details."
+        "See `imp-tool-reference` for multiline, caps, and sandbox details."
     ),
     read_only=True,
 )

@@ -59,7 +59,7 @@ _PAUSE_POLL_S = 0.05      # mid-command coordinator.should_pause poll cadence
         "immediately — read output with `bash_output(id)`, stop with "
         "`bash_kill(id)`; a bad command still spawns then fails, so check "
         "`bash_output` after. No permission gate. "
-        "See `tool-reference` for buffering and path details."
+        "See `imp-tool-reference` for buffering and path details."
     ),
 )
 async def bash(
