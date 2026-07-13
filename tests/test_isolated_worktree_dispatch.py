@@ -448,6 +448,22 @@ def test_attach_isolated_home_noop_for_inactive(tmp_path, monkeypatch):
     assert cleanup is None
 
 
+def test_attach_isolated_home_threads_resolved_home(tmp_path, monkeypatch):
+    import imp.agents.subagents as subagents
+    seen: dict = {}
+
+    def capture(base, home):
+        seen["base"], seen["home"] = base, home
+        return False
+
+    monkeypatch.setattr("imp.engine.sandbox.overlay_available", capture)
+    spike = tmp_path / ".imp" / "worktrees" / "spike-x-1"
+    spike.mkdir(parents=True)
+    subagents._attach_isolated_home(_active_home_policy(), spike, tmp_path / "q")
+    assert seen["base"] == tmp_path / "q"
+    assert seen["home"] == Path("/home/u")
+
+
 def test_isolated_dispatch_overlay_home_torn_down_with_worktree(
         tmp_path, monkeypatch):
     # AC 1/6 (wiring): dispatch attaches an overlay home keyed to the spike

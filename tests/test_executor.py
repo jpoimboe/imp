@@ -3657,3 +3657,45 @@ def test_warn_if_no_overlay_silent_when_available(monkeypatch):
     quest = types.SimpleNamespace(quest_dir=Path("/x"))
     ex._warn_if_no_overlay(_active_home_policy(), quest, log)
     assert log.events == []
+
+
+def test_attach_home_layer_threads_resolved_home(tmp_path, monkeypatch):
+    from imp.engine import executor as ex
+    seen: dict = {}
+
+    def capture(base, home):
+        seen["base"], seen["home"] = base, home
+        return False
+
+    monkeypatch.setattr(ex, "overlay_available", capture)
+    quest = types.SimpleNamespace(quest_dir=tmp_path)
+    step = types.SimpleNamespace(phase="build", name="coder")
+    ex._attach_home_layer(_active_home_policy(), step, quest)
+    assert seen["base"] == tmp_path
+    assert seen["home"] == Path("/home/u")
+
+
+def test_warn_if_no_overlay_threads_resolved_home(monkeypatch):
+    from imp.engine import executor as ex
+    seen: dict = {}
+
+    def capture(base, home):
+        seen["home"] = home
+        return True
+
+    monkeypatch.setattr(ex, "overlay_available", capture)
+    quest = types.SimpleNamespace(quest_dir=Path("/x"))
+    ex._warn_if_no_overlay(_active_home_policy(), quest, _CapLog())
+    assert seen["home"] == Path("/home/u")
+
+
+def test_warn_if_no_overlay_skips_probe_when_home_absent(monkeypatch):
+    from imp.engine import executor as ex
+    called: list = []
+    monkeypatch.setattr(ex, "overlay_available",
+                        lambda *a: called.append(a) or False)
+    log = _CapLog()
+    quest = types.SimpleNamespace(quest_dir=Path("/x"))
+    ex._warn_if_no_overlay(_active_home_policy(home=""), quest, log)
+    assert called == []
+    assert log.events == []
