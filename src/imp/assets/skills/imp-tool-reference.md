@@ -1,9 +1,9 @@
-# tool-reference
+# imp-tool-reference
 
 On-demand reference detail for imp's built-in tools. The one-line tool
 descriptions carry only the silent-corruption warnings; every other mechanical
 detail — caps, sandbox path rules, buffering, image handling, `max_depth`, and
-the like — lives here. Load it with `load_skill(name="tool-reference")` when you
+the like — lives here. Load it with `load_skill(name="imp-tool-reference")` when you
 need the specifics.
 
 ## Paths & the sandbox (all filesystem tools)
