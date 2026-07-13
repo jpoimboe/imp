@@ -15,7 +15,6 @@ from prompt_toolkit.filters import vi_navigation_mode
 from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.key_binding.key_processor import KeyPress
 from prompt_toolkit.key_binding.vi_state import InputMode
-from prompt_toolkit.keys import Keys
 
 _INSERTISH = (
     InputMode.INSERT,
@@ -25,8 +24,8 @@ _INSERTISH = (
 )
 
 # Keys whose change must never become the last change: vim's '.' never repeats an
-# undo. Redo has no vi binding in 3.0.52; Keys.ControlR is excluded defensively.
-_NON_REPEATABLE = {"u", Keys.ControlR}
+# undo (u). Redo has no vi binding in 3.0.52, so nothing else belongs here.
+_NON_REPEATABLE = {"u"}
 
 
 class DotState:

@@ -164,6 +164,15 @@ async def test_dot_state_does_not_leak_across_prompts() -> None:
     assert second == "abc"  # would be "abc\nY" if the stale insert-change leaked
 
 
+def test_non_repeatable_is_only_undo() -> None:
+    # '.' must never repeat an undo, so 'u' stays in the set. c-r in vi
+    # navigation mode is reverse-incremental-search, NOT redo (redo has no vi
+    # binding in 3.0.52), so it must NOT be specially excluded (defect 3).
+    from imp.cli import vi_dot
+
+    assert {"u"} == vi_dot._NON_REPEATABLE
+
+
 def _recorded_change_keys(session: object) -> list[str]:
     """The keys of the recorder's last recorded change, read from the installed
     _call_handler wrapper's closure (the `state` free variable holds DotState)."""
