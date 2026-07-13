@@ -1,34 +1,15 @@
-"""Helpers for live elicitation and concurrency tests (gated on the relevant
-provider in IMP_LIVE_PROVIDERS)."""
+"""Helpers for live elicitation and concurrency tests (gated behind `--run-live`
+via each caller's `live` marker)."""
 from __future__ import annotations
 
 import json
-import os
 import subprocess
 import tempfile
 from pathlib import Path
 
 from imp.agents.runner import ContentBlock
 from imp.agents.subagents import TASK_TOOL_SCHEMA, make_task_tool
-
-
-def _anthropic_key() -> str | None:
-    # Check key file before env so the conftest "sk-test" stub doesn't shadow it.
-    key_file = Path.home() / ".anthropic-key"
-    if key_file.exists():
-        val = key_file.read_text().strip()
-        if val:
-            return val
-    return os.environ.get("ANTHROPIC_API_KEY") or None
-
-
-def _openai_key() -> str | None:
-    key_file = Path.home() / ".openai-key"
-    if key_file.exists():
-        val = key_file.read_text().strip()
-        if val:
-            return val
-    return os.environ.get("OPENAI_API_KEY") or None
+from tests._live import anthropic_key, openai_key
 
 
 async def collect_first_assistant_tool_uses(
@@ -54,7 +35,7 @@ async def _call_anthropic(prompt: str, tool_description: str) -> list[ContentBlo
         _serialize_anthropic_response,
     )
 
-    key = _anthropic_key()
+    key = anthropic_key()
     assert key is not None, (
         "anthropic credentials missing: set ANTHROPIC_API_KEY or create ~/.anthropic-key"
     )
@@ -88,7 +69,7 @@ async def _call_openai(prompt: str, tool_description: str) -> list[ContentBlock]
         _serialize_responses_response,
     )
 
-    key = _openai_key()
+    key = openai_key()
     assert key is not None, (
         "openai credentials missing: set OPENAI_API_KEY or create ~/.openai-key"
     )

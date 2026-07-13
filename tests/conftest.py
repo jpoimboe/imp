@@ -106,15 +106,15 @@ def _stub_provider_api_keys(
     request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Stub provider env vars only if not already set. Live-API tests get
-    the real env through (their own skipif handles the "no auth" case);
+    the real env through (the collection gate handles the "no auth" case);
     ordinary tests get the stub so module-level provider construction works.
 
     Live-API tests spawn subprocesses (or the claude_code provider's nested
     `claude`) that read ANTHROPIC_API_KEY from the real env. Stubbing it to
     "sk-test" would give the subprocess a fake key and cause "Invalid API key"
     / 401 errors. These tests follow a `_live` suffix convention
-    (`*_live.py`, `*_live_<provider>.py`) and gate themselves with their own
-    skipif, so exempt them from stubbing. The unrelated `test_live_*` UI
+    (`*_live.py`, `*_live_<provider>.py`) and gate themselves with the
+    `live` marker, so exempt them from stubbing. The unrelated `test_live_*` UI
     tests (live_status/live_driver) are NOT live-API tests and still get the
     stub.
     """
