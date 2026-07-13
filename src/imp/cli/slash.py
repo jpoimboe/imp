@@ -21,6 +21,37 @@ from imp.remote.session.protocol import SkillRequest
 # and the caller should re-prompt (do NOT submit anything to the agent).
 REPROMPT = object()
 
+# Sentinel: /sandbox off printed its confirmation prompt; the async caller must
+# read one y/N line and, on yes, forward the "/sandbox off" control line.
+CONFIRM_SANDBOX_OFF = object()
+
+SANDBOX_STATE_ON = (
+    "Sandbox is on. Shell and file tools are confined to this quest's "
+    "worktree; secrets are masked.")
+SANDBOX_STATE_OFF = (
+    "Sandbox is off — this session is unsandboxed. Shell and file tools run "
+    "as you: your home directory and secrets are readable and writes are "
+    "unconfined. Run /sandbox on to re-enable it.")
+SANDBOX_CONFIRM_PROMPT = (
+    "Disabling the sandbox runs every shell and file-tool command as you, "
+    "with no confinement:\n"
+    "  · your home directory and secrets (~/.ssh, ~/.aws, credentials) "
+    "become readable\n"
+    "  · writes are no longer limited to this quest's worktree\n"
+    "This is what lets you attach debuggers (gdb, py-spy, strace) to live "
+    "processes.\n"
+    "Disable the sandbox for the rest of this session? [y/N]")
+SANDBOX_OFF_CONFIRMED = (
+    "Sandbox off — this session is now unsandboxed. Run /sandbox on to "
+    "re-enable it.")
+SANDBOX_OFF_DECLINED = "Left the sandbox on."
+SANDBOX_ON_FROM_OFF = (
+    "Sandbox on. Shell and file tools are confined to the worktree again. "
+    "Processes already started while unsandboxed keep their current access.")
+SANDBOX_ALREADY_ON = "Sandbox is already on."
+SANDBOX_ALREADY_OFF = "Sandbox is already off."
+SANDBOX_USAGE = "Usage: /sandbox [on|off]"
+
 
 def is_slash_command(text: str) -> bool:
     return text.lstrip().startswith("/")
@@ -32,7 +63,7 @@ def _echo_command(text: str, out: Callable[[str], None], *, color: bool) -> None
 
 def handle_slash_line(
     text: str, *, quest: Any, output_fn: Callable[[str], None],
-    color: bool = False,
+    color: bool = False, unsandboxed: bool = False,
 ) -> object | str | SkillRequest:
     """Dispatch a /-line. Returns REPROMPT for /help, /skills, and builtins that
     print usage (each prints via output_fn). Returns a SkillRequest(name, args)
@@ -90,6 +121,27 @@ def handle_slash_line(
             output_fn(err)
             return REPROMPT
         return f"/model {args}"
+    if cmd == "sandbox":
+        if args == "on":
+            if not unsandboxed:
+                _echo_command(text, output_fn, color=color)
+                output_fn(SANDBOX_ALREADY_ON)
+                return REPROMPT
+            output_fn(SANDBOX_ON_FROM_OFF)
+            return "/sandbox on"
+        if args == "off":
+            if unsandboxed:
+                _echo_command(text, output_fn, color=color)
+                output_fn(SANDBOX_ALREADY_OFF)
+                return REPROMPT
+            output_fn(SANDBOX_CONFIRM_PROMPT)
+            return CONFIRM_SANDBOX_OFF
+        _echo_command(text, output_fn, color=color)
+        if args == "":
+            output_fn(SANDBOX_STATE_OFF if unsandboxed else SANDBOX_STATE_ON)
+            return REPROMPT
+        output_fn(SANDBOX_USAGE)
+        return REPROMPT
     if cmd == "resume":
         _echo_command(text, output_fn, color=color)
         if not args:
@@ -146,6 +198,7 @@ def _help(out: Callable[[str], None]) -> None:
     out("  /save              Save this conversation to your Backlog")
     out("  /clear             Park this chat and start a fresh one")
     out("  /model <model>     Switch this step's model (or provider:model)")
+    out("  /sandbox [on|off]  Show or set the filesystem sandbox for this session")
     out("  /abandon           Abandon the current quest")
     out("  /resume <id|query> Rehydrate a saved/archived conversation to continue")
     out("  /<name> [args]     Load a skill (trailing args appended to it)")
@@ -297,10 +350,28 @@ async def ask_line_with_slash(
                             raise EOFError
                         if not is_slash_command(line):
                             return line
+                        current_unsandboxed = bool(
+                            getattr(driver, "unsandboxed", False))
                         result = handle_slash_line(
-                            line, quest=quest, output_fn=print, color=color)
+                            line, quest=quest, output_fn=print, color=color,
+                            unsandboxed=current_unsandboxed)
                         if result is REPROMPT:
                             print("")  # one blank between slash output and the reprompt
+                            continue
+                        if result is CONFIRM_SANDBOX_OFF:
+                            if exit_evt is None:
+                                answer = await prompt.ask_async(
+                                    width=width, indent=indent,
+                                    bottom_toolbar=toolbar, hint=None)
+                            else:
+                                answer = await _ask_or_exit(
+                                    prompt, exit_evt, width=width, indent=indent,
+                                    bottom_toolbar=toolbar, hint=None)
+                            if answer.strip().lower() in ("y", "yes"):
+                                print(SANDBOX_OFF_CONFIRMED)
+                                return "/sandbox off"
+                            print(SANDBOX_OFF_DECLINED)
+                            print("")
                             continue
                         if isinstance(result, SkillRequest):
                             return result

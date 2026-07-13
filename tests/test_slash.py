@@ -439,3 +439,130 @@ def test_slash_model_bare_prints_roster(tmp_path, monkeypatch) -> None:
     assert result is slash.REPROMPT
     assert calls["change"] is quest
     assert any("Current:" in line for line in out)
+
+
+def test_sandbox_no_arg_reports_state(tmp_path: Path) -> None:
+    from imp.cli.slash import SANDBOX_STATE_OFF, SANDBOX_STATE_ON, handle_slash_line
+    quest = _FakeChange(tmp_path)
+    out: list[str] = []
+    assert handle_slash_line("/sandbox", quest=quest, output_fn=out.append,
+                             unsandboxed=False) is REPROMPT
+    assert any(SANDBOX_STATE_ON in line for line in out)
+    out.clear()
+    assert handle_slash_line("/sandbox", quest=quest, output_fn=out.append,
+                             unsandboxed=True) is REPROMPT
+    assert any(SANDBOX_STATE_OFF in line for line in out)
+
+
+def test_sandbox_on_from_off_returns_literal(tmp_path: Path) -> None:
+    from imp.cli.slash import SANDBOX_ON_FROM_OFF, handle_slash_line
+    quest = _FakeChange(tmp_path)
+    out: list[str] = []
+    result = handle_slash_line("/sandbox on", quest=quest, output_fn=out.append,
+                               unsandboxed=True)
+    assert result == "/sandbox on"
+    assert any(SANDBOX_ON_FROM_OFF in line for line in out)
+    assert not any(line.strip().startswith(">") and "/sandbox on" in line for line in out)
+
+
+def test_sandbox_on_when_already_on_reprompts(tmp_path: Path) -> None:
+    from imp.cli.slash import SANDBOX_ALREADY_ON, handle_slash_line
+    quest = _FakeChange(tmp_path)
+    out: list[str] = []
+    result = handle_slash_line("/sandbox on", quest=quest, output_fn=out.append,
+                               unsandboxed=False)
+    assert result is REPROMPT
+    assert any(SANDBOX_ALREADY_ON in line for line in out)
+
+
+def test_sandbox_off_when_on_returns_confirm_sentinel(tmp_path: Path) -> None:
+    from imp.cli.slash import CONFIRM_SANDBOX_OFF, handle_slash_line
+    quest = _FakeChange(tmp_path)
+    out: list[str] = []
+    result = handle_slash_line("/sandbox off", quest=quest, output_fn=out.append,
+                               unsandboxed=False)
+    assert result is CONFIRM_SANDBOX_OFF
+    assert any("Disable the sandbox for the rest of this session? [y/N]" in line
+               for line in out)
+    assert not any(line.strip().startswith(">") and "/sandbox off" in line for line in out)
+
+
+def test_sandbox_off_when_already_off_reprompts(tmp_path: Path) -> None:
+    from imp.cli.slash import SANDBOX_ALREADY_OFF, handle_slash_line
+    quest = _FakeChange(tmp_path)
+    out: list[str] = []
+    result = handle_slash_line("/sandbox off", quest=quest, output_fn=out.append,
+                               unsandboxed=True)
+    assert result is REPROMPT
+    assert any(SANDBOX_ALREADY_OFF in line for line in out)
+
+
+def test_sandbox_invalid_arg_prints_usage(tmp_path: Path) -> None:
+    from imp.cli.slash import SANDBOX_USAGE, handle_slash_line
+    quest = _FakeChange(tmp_path)
+    out: list[str] = []
+    result = handle_slash_line("/sandbox maybe", quest=quest, output_fn=out.append)
+    assert result is REPROMPT
+    assert any(SANDBOX_USAGE in line for line in out)
+
+
+def test_sandbox_copy_strings_are_verbatim() -> None:
+    from imp.cli import slash
+    assert slash.SANDBOX_STATE_ON == (
+        "Sandbox is on. Shell and file tools are confined to this quest's "
+        "worktree; secrets are masked.")
+    assert slash.SANDBOX_STATE_OFF == (
+        "Sandbox is off — this session is unsandboxed. Shell and file tools run "
+        "as you: your home directory and secrets are readable and writes are "
+        "unconfined. Run /sandbox on to re-enable it.")
+    assert slash.SANDBOX_OFF_CONFIRMED == (
+        "Sandbox off — this session is now unsandboxed. Run /sandbox on to "
+        "re-enable it.")
+    assert slash.SANDBOX_OFF_DECLINED == "Left the sandbox on."
+    assert slash.SANDBOX_ON_FROM_OFF == (
+        "Sandbox on. Shell and file tools are confined to the worktree again. "
+        "Processes already started while unsandboxed keep their current access.")
+    assert slash.SANDBOX_ALREADY_ON == "Sandbox is already on."
+    assert slash.SANDBOX_ALREADY_OFF == "Sandbox is already off."
+    assert slash.SANDBOX_USAGE == "Usage: /sandbox [on|off]"
+    assert slash.SANDBOX_CONFIRM_PROMPT == (
+        "Disabling the sandbox runs every shell and file-tool command as you, "
+        "with no confinement:\n"
+        "  · your home directory and secrets (~/.ssh, ~/.aws, credentials) "
+        "become readable\n"
+        "  · writes are no longer limited to this quest's worktree\n"
+        "This is what lets you attach debuggers (gdb, py-spy, strace) to live "
+        "processes.\n"
+        "Disable the sandbox for the rest of this session? [y/N]")
+
+
+def test_sandbox_off_confirm_yes_returns_control_line(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    from imp.cli.slash import SANDBOX_OFF_CONFIRMED, ask_line_with_slash
+    quest = _FakeChange(tmp_path)
+    prompt = _FakePrompt(["/sandbox off", "y"])
+    line = anyio.run(ask_line_with_slash, prompt, _NullStatus(), quest)
+    assert line == "/sandbox off"
+    assert SANDBOX_OFF_CONFIRMED in capsys.readouterr().out
+
+
+def test_sandbox_off_confirm_no_reprompts(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    from imp.cli.slash import SANDBOX_OFF_DECLINED, ask_line_with_slash
+    quest = _FakeChange(tmp_path)
+    prompt = _FakePrompt(["/sandbox off", "n", "real input"])
+    line = anyio.run(ask_line_with_slash, prompt, _NullStatus(), quest)
+    assert line == "real input"
+    assert SANDBOX_OFF_DECLINED in capsys.readouterr().out
+
+
+def test_help_lists_sandbox() -> None:
+    from imp.cli.slash import _help
+    out: list[str] = []
+    _help(out.append)
+    assert any("/sandbox [on|off]" in line for line in out)
+
+
+def test_sandbox_is_tab_completable() -> None:
+    from imp.cli.prompt import SlashCompleter
+    assert "sandbox" in SlashCompleter._BUILTINS
