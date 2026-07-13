@@ -77,14 +77,28 @@ def fmt_seconds_done(seconds: float | int | None) -> str:
     return fmt_seconds(seconds)
 
 
-def render_tree(tree: nv.NarrativeTree, *, full: bool, color: bool,
+LOG_CATEGORIES: tuple[str, ...] = ("thinking", "tools", "subagents", "prompts", "tiers")
+_ALL_CATEGORIES = frozenset(LOG_CATEGORIES)
+
+
+def _resolve_cats(full: bool, show: frozenset[str] | None) -> frozenset[str]:
+    """`show` (an explicit category set) wins when given; otherwise `full`
+    is the convenience shorthand — all categories on, or none (the lean view)."""
+    if show is not None:
+        return show
+    return _ALL_CATEGORIES if full else frozenset()
+
+
+def render_tree(tree: nv.NarrativeTree, *, full: bool = False,
+                show: frozenset[str] | None = None, color: bool,
                 width: int = 80, display_width: int = 80,
                 live_viewer: bool = False) -> Iterator[str]:
     # No slug/title header: the transcript opens directly on the first turn. The
     # quest id/title belong to `imp` chrome (the run header, `imp show`), not the
     # narrative body — so live and log both start with content, not a banner.
+    cats = _resolve_cats(full, show)
     root = tree.root
-    yield from _render_children(root.children, depth=0, full=full, color=color, width=width,
+    yield from _render_children(root.children, depth=0, cats=cats, color=color, width=width,
                                 display_width=display_width, gutters=(), live_viewer=live_viewer)
 
 
@@ -369,7 +383,8 @@ def spaces_before(node: Any) -> bool:
     )
 
 
-def _render_children(children: list[Any], *, depth: int, full: bool, color: bool,
+def _render_children(children: list[Any], *, depth: int, full: bool = False,
+                     cats: frozenset[str] | None = None, color: bool,
                      width: int, display_width: int = 80, gutters: tuple[int, ...] = (),
                      prime: bool = False, live_viewer: bool = False) -> Iterator[str]:
     """Render a container's children in order, inserting ONE blank line between
@@ -381,9 +396,10 @@ def _render_children(children: list[Any], *, depth: int, full: bool, color: bool
     continuous inside a SubagentFold. `prime=True` seeds the prose-adjacency
     state so the FIRST child gets a blank above it — used to put air below a
     phase's start line before its first step."""
+    cats = _resolve_cats(full, cats)
     prev_prose = prime
     for child in children:
-        lines = list(_render(child, depth=depth, full=full, color=color, width=width,
+        lines = list(_render(child, depth=depth, cats=cats, color=color, width=width,
                              display_width=display_width, gutters=gutters,
                              live_viewer=live_viewer))
         if not lines:
@@ -391,7 +407,7 @@ def _render_children(children: list[Any], *, depth: int, full: bool, color: bool
         if prev_prose or spaces_before(child):
             yield _gutter_indent(depth, gutters, color)
         yield from lines
-        prev_prose = spaces_after(child, full=full)
+        prev_prose = spaces_after(child, full=cats >= _ALL_CATEGORIES)
 
 
 def compose_label(segments: Iterable[str | None]) -> str:
@@ -588,9 +604,11 @@ def subagent_outcome_lines(sub: nv.SubagentFold, *, depth: int, color: bool,
         yield from _wrap(_caret_escape(v), width, depth + 1, color, *codes, gutters=gutters)
 
 
-def _render(node: Any, *, depth: int, full: bool, color: bool,
+def _render(node: Any, *, depth: int, full: bool = False,
+            cats: frozenset[str] | None = None, color: bool,
             width: int, display_width: int = 80, gutters: tuple[int, ...] = (),
             live_viewer: bool = False) -> Iterator[str]:
+    cats = _resolve_cats(full, cats)
     if isinstance(node, nv.PhaseNode):
         # The phase start line is surrounded by blank lines: the blank ABOVE comes
         # from the root walk (spaces_before(PhaseNode)); the blank BELOW comes from
@@ -598,7 +616,7 @@ def _render(node: Any, *, depth: int, full: bool, color: bool,
         suppress = frame_suppressed(node)
         if not suppress:
             yield header_line(node, depth=depth, color=color, gutters=gutters)
-        yield from _render_children(node.children, depth=depth, full=full,
+        yield from _render_children(node.children, depth=depth, cats=cats,
                                     color=color, width=width, display_width=display_width,
                                     gutters=gutters, prime=True, live_viewer=live_viewer)
         if not suppress and node.closed and nv.phase_elapsed(node) is not None:
@@ -636,10 +654,10 @@ def _render(node: Any, *, depth: int, full: bool, color: bool,
         # doubled one.
         children = ([c for c in node.children if not isinstance(c, nv.BreadcrumbLine)]
                     if suppress else node.children)
-        yield from _render_children(children, depth=depth, full=full,
+        yield from _render_children(children, depth=depth, cats=cats,
                                     color=color, width=width, display_width=display_width,
                                     gutters=gutters, prime=True, live_viewer=live_viewer)
-        if full and node.agent_output:
+        if cats >= _ALL_CATEGORIES and node.agent_output:
             yield from _render_output_args(node.agent_output, depth=depth,
                                            color=color, width=width, gutters=gutters)
         return
@@ -672,7 +690,7 @@ def _render(node: Any, *, depth: int, full: bool, color: bool,
             # block, mirroring the step_context metadata dump. Body is text, not
             # markdown — it is a verbatim prompt. An empty/whitespace-only body
             # renders nothing, leaving adjacency state untouched.
-            if not (full and node.text.strip()):
+            if not ("prompts" in cats and node.text.strip()):
                 return
             yield _line("injected message:", depth, color,
                         *pal.NODE_COLORS["metadata"], gutters=gutters)
@@ -709,7 +727,7 @@ def _render(node: Any, *, depth: int, full: bool, color: bool,
     if isinstance(node, nv.ThinkingFold):
         if not node.content.strip():
             return  # blank/whitespace thinking is pure noise — drop in both modes
-        if full:
+        if "thinking" in cats:
             yield _line(f"{pal.fold_glyph(expanded=True)} thinking", depth, color,
                         *pal.NODE_COLORS["thinking"], gutters=gutters)
             yield from _wrap(_caret_escape(node.content), width, depth + 1, color,
@@ -719,18 +737,18 @@ def _render(node: Any, *, depth: int, full: bool, color: bool,
         return
 
     if isinstance(node, nv.ToolBurstFold):
-        yield from _render_burst(node, depth=depth, full=full, color=color, width=width,
+        yield from _render_burst(node, depth=depth, cats=cats, color=color, width=width,
                                  gutters=gutters)
         return
 
     if isinstance(node, nv.SubagentFold):
-        yield from _render_subagent(node, depth=depth, full=full, color=color, width=width,
+        yield from _render_subagent(node, depth=depth, cats=cats, color=color, width=width,
                                     display_width=display_width, gutters=gutters,
                                     live_viewer=live_viewer)
         return
 
     if isinstance(node, nv.StepContextNode):
-        yield from _render_step_context(node, depth=depth, full=full, color=color, width=width,
+        yield from _render_step_context(node, depth=depth, cats=cats, color=color, width=width,
                                         gutters=gutters, live_viewer=live_viewer)
         return
 
@@ -752,7 +770,7 @@ def _render(node: Any, *, depth: int, full: bool, color: bool,
         else:
             parts = [f"{name} · complete" if node.show_complete else name]
         parts.insert(0, node.phase_label)
-        if full:
+        if cats >= _ALL_CATEGORIES:
             parts.extend(_caret_escape(e) for e in node.extras)
         if not (node.interrupted or blocked) and (act is None or act.get("verb") != "goto"):
             verb_text = pal.action_text(node.action) if node.action is not None else None
@@ -793,9 +811,10 @@ def _render(node: Any, *, depth: int, full: bool, color: bool,
             yield _line(f"error: {tag}{_caret_escape(node.message)}", depth, color,
                         *pal.NODE_COLORS["error"], gutters=gutters)
             is_script = node.category == "script"
-            if (full or is_script) and node.detail and node.detail not in node.message:
+            if (cats >= _ALL_CATEGORIES or is_script) and node.detail \
+                    and node.detail not in node.message:
                 detail = node.detail
-                if is_script and not full:
+                if is_script and not (cats >= _ALL_CATEGORIES):
                     lines = detail.split("\n")
                     if len(lines) > _SCRIPT_DETAIL_TAIL_LINES:
                         hidden = len(lines) - _SCRIPT_DETAIL_TAIL_LINES
@@ -817,7 +836,7 @@ def _render(node: Any, *, depth: int, full: bool, color: bool,
         return
 
     if isinstance(node, nv.TiersResolvedNode):
-        if not full:
+        if "tiers" not in cats:
             # Run-level tier resolution is setup noise at the top of every run —
             # dropped from the lean view; it survives in imp log --full below.
             return
@@ -865,7 +884,7 @@ def _render(node: Any, *, depth: int, full: bool, color: bool,
         return
 
     if isinstance(node, nv.FallbackLine):
-        if not full:
+        if not (cats >= _ALL_CATEGORIES):
             # An event with no curated rendering is engine bookkeeping
             # (vars_backfilled, workflow_refreshed, …) — raw `type k=v` noise in
             # the lean/live view; it survives in imp log --full below.
@@ -943,10 +962,12 @@ def _render_output_args(args: dict[str, Any], *, depth: int, color: bool,
                          *pal.NODE_COLORS["tools"], gutters=gutters)
 
 
-def _render_burst(burst: nv.ToolBurstFold, *, depth: int, full: bool,
+def _render_burst(burst: nv.ToolBurstFold, *, depth: int, full: bool = False,
+                  cats: frozenset[str] | None = None,
                   color: bool, width: int,
                   gutters: tuple[int, ...] = ()) -> Iterator[str]:
-    if not full:
+    cats = _resolve_cats(full, cats)
+    if "tools" not in cats:
         # Lean: leave a single dark-gray recap line (not the full per-call dump),
         # so interleaved tool work stays visible between prose turns (point 8).
         summary = _burst_summary(burst)
@@ -991,11 +1012,13 @@ def _render_burst(burst: nv.ToolBurstFold, *, depth: int, full: bool,
                                  *pal.NODE_COLORS["tools"], gutters=gutters)
 
 
-def _render_subagent(sub: nv.SubagentFold, *, depth: int, full: bool,
+def _render_subagent(sub: nv.SubagentFold, *, depth: int, full: bool = False,
+                     cats: frozenset[str] | None = None,
                      color: bool, width: int, display_width: int = 80,
                      gutters: tuple[int, ...] = (),
                      live_viewer: bool = False) -> Iterator[str]:
-    if not full:
+    cats = _resolve_cats(full, cats)
+    if "subagents" not in cats:
         # Lean: ONE status row, no children, no outcome (Part D). Structurally
         # eliminates the SDK cancellation-sentinel leak — lean renders no subagent
         # I/O at all, only `· {name}` (plus elapsed / abnormal-state tag).
@@ -1011,24 +1034,26 @@ def _render_subagent(sub: nv.SubagentFold, *, depth: int, full: bool,
             task = task[:_SUBAGENT_TASK_CLIP] + "…"
         header += f" · {_caret_escape(task)}"
     yield _line(header, depth, color, *pal.NODE_COLORS["subagent"], gutters=gutters)
-    yield from _render_children(sub.tree.root.children, depth=depth + 1, full=full,
+    yield from _render_children(sub.tree.root.children, depth=depth + 1, cats=cats,
                                 color=color, width=width, display_width=display_width,
                                 gutters=(*gutters, depth), live_viewer=live_viewer)
     yield from subagent_outcome_lines(sub, depth=depth + 1, color=color, width=width,
                                       gutters=(*gutters, depth))
 
 
-def _render_step_context(ctx: nv.StepContextNode, *, depth: int, full: bool,
+def _render_step_context(ctx: nv.StepContextNode, *, depth: int, full: bool = False,
+                         cats: frozenset[str] | None = None,
                          color: bool, width: int,
                          gutters: tuple[int, ...] = (),
                          live_viewer: bool = False) -> Iterator[str]:
+    cats = _resolve_cats(full, cats)
     if live_viewer:
         return
     p = ctx.payload
     provider = p.get("provider", "?")
     model = p.get("model", "?")
     tools = p.get("tools_schema") or []
-    if not full:
+    if "prompts" not in cats:
         # Lean view: the model now rides on the step header (see header_line);
         # the provider and tool count are detail the eye doesn't need every step,
         # so render nothing here. The full block below survives for imp log --full.
