@@ -2,6 +2,7 @@ from pathlib import Path
 
 from imp.assets import resolve_workflow_dir
 from imp.engine.loader import load_workflow
+from imp.engine.quest import Quest
 from imp.engine.seed import seed_workflow_start
 from imp.engine.state import State
 from imp.providers.effective import load_effective_config
@@ -44,6 +45,26 @@ def test_seed_workflow_start_seeds_cursor_and_vars(tmp_path: Path) -> None:
 
     seed_workflow_start(state, workflow, config)
 
+    assert state.step == "s"
+    assert state.step_label == "s"
+    assert state.phase_label == "P"
+    assert state.vars["n"] == 42
+
+
+def test_create_routes_seeded_cursor_and_var_override(tmp_path: Path) -> None:
+    _seed_with_var(tmp_path)
+    ch = Quest.create(tmp_path, title="X", quest_id="seedq", base_branch="main")
+    state = State.load(ch.quest_dir / "state")
+    assert state.step == "s"
+    assert state.step_label == "s"
+    assert state.phase_label == "P"
+    assert state.vars["n"] == 42
+
+
+def test_create_draft_routes_seeded_cursor_and_var_override(tmp_path: Path) -> None:
+    _seed_with_var(tmp_path)
+    ch = Quest.create_draft(tmp_path, title="X", quest_id="seeddr", base_branch="main")
+    state = State.load(ch.quest_dir / "state")
     assert state.step == "s"
     assert state.step_label == "s"
     assert state.phase_label == "P"

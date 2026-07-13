@@ -14,9 +14,9 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from imp.agents.prompts import render_label
 from imp.engine import worktree
 from imp.engine.errors import LayoutMismatch, LoadError, LoadErrors
+from imp.engine.seed import seed_workflow_start
 from imp.engine.state import JsonlEventLog, State
 from imp.engine.types import SourceLoc
 
@@ -309,7 +309,6 @@ class Quest:
         }, indent=2, sort_keys=True))
 
         from imp.engine.loader import load_workflow
-        from imp.providers.config import apply_var_overrides
         from imp.providers.effective import (
             load_effective_config,
             validate_project_memory,
@@ -334,21 +333,9 @@ class Quest:
             worktree.destroy_worktree(control_root, quest_id)
             shutil.rmtree(quest_dir, ignore_errors=True)
             raise
-        flat = loaded_workflow.flat_steps()
-        State(
-            id=quest_id, step=flat[0].name if flat else None, step_attempt=0,
-            step_label=(
-                render_label(flat[0].label, quest=None, log=None, state=None)
-                or flat[0].name
-            ) if flat else None,
-            phase_label=(
-                render_label(flat[0].phase_label, quest=None, log=None, state=None)
-                if flat[0].phase_label is not None else None
-            ) if flat else None,
-            status="new",
-            vars=apply_var_overrides(loaded_workflow.vars, config.var_overrides),
-            loop_counts={},
-        ).save(quest_dir / "state")
+        state = State(id=quest_id, step=None, step_attempt=0, status="new")
+        seed_workflow_start(state, loaded_workflow, config)
+        state.save(quest_dir / "state")
 
         link_quest_home(wt_path, quest_dir)
         quest = cls(
@@ -398,7 +385,7 @@ class Quest:
         }, indent=2, sort_keys=True))
 
         from imp.engine.loader import load_workflow
-        from imp.providers.config import apply_var_overrides, parse_default_workflow
+        from imp.providers.config import parse_default_workflow
         from imp.providers.effective import (
             load_effective_config,
             validate_project_memory,
@@ -421,21 +408,9 @@ class Quest:
         except (LoadError, LoadErrors):
             shutil.rmtree(quest_dir, ignore_errors=True)
             raise
-        flat = loaded_workflow.flat_steps()
-        State(
-            id=quest_id, step=flat[0].name if flat else None, step_attempt=0,
-            step_label=(
-                render_label(flat[0].label, quest=None, log=None, state=None)
-                or flat[0].name
-            ) if flat else None,
-            phase_label=(
-                render_label(flat[0].phase_label, quest=None, log=None, state=None)
-                if flat[0].phase_label is not None else None
-            ) if flat else None,
-            status="new",
-            vars=apply_var_overrides(loaded_workflow.vars, config.var_overrides),
-            loop_counts={},
-        ).save(quest_dir / "state")
+        state = State(id=quest_id, step=None, step_attempt=0, status="new")
+        seed_workflow_start(state, loaded_workflow, config)
+        state.save(quest_dir / "state")
 
         quest = cls(
             id=quest_id, title=title, base_branch=base_branch,
