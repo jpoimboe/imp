@@ -58,6 +58,11 @@ async def run_terminal_client(
             if not event.get("_replay"):
                 resolved_send.send_nowait(None)
             return
+        if event.get("type") == "sandbox_marker":
+            # Transient daemon mirror; drive the marker directly, never through driver.on_event.
+            driver.set_unsandboxed(
+                bool((event.get("payload") or {}).get("unsandboxed")))
+            return
         driver.on_event(event)
         replay = bool(event.get("_replay"))
         etype = event.get("type")
@@ -173,7 +178,6 @@ async def run_terminal_client(
                                 continue
                             if reply.strip() in ("/sandbox on", "/sandbox off"):
                                 arg = reply.strip()[len("/sandbox "):].strip()
-                                driver.set_unsandboxed(arg == "off")
                                 await controls.set_sandbox(arg)
                                 continue
                             if local_echo is not None:
