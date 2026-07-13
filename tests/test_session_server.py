@@ -1751,3 +1751,23 @@ async def test_set_sandbox_control_flips_override_and_pauses(tmp_path: Path) -> 
 
     await server._dispatch_control(CONTROL_SET_SANDBOX, "on")
     assert coord.unsandboxed is False
+
+
+@pytest.mark.anyio
+async def test_set_sandbox_control_broadcasts_transient_marker(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from imp.cli.signals import InterruptCoordinator
+    from imp.remote.session.protocol import CONTROL_SET_SANDBOX
+
+    coord = InterruptCoordinator()
+    server = SessionServer(str(tmp_path / "s.sock"), coordinator=coord)
+    broadcasts: list[dict[str, Any]] = []
+    # Capture at broadcast to prove the marker rides the broadcast-only channel, not events.jsonl.
+    monkeypatch.setattr(server._socket, "broadcast", broadcasts.append)
+
+    await server._dispatch_control(CONTROL_SET_SANDBOX, "off")
+    await server._dispatch_control(CONTROL_SET_SANDBOX, "on")
+
+    markers = [e for e in broadcasts if e.get("type") == "sandbox_marker"]
+    assert [m["payload"]["unsandboxed"] for m in markers] == [True, False]

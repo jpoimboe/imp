@@ -412,6 +412,9 @@ class SessionServer:
             self._pulse_model_override()
         elif action == CONTROL_SET_SANDBOX and self._coordinator is not None:
             self._coordinator.set_unsandboxed(reason == "off")
+            # Transient: broadcast-only via _emit, never the event log, so it can't replay stale.
+            self._emit({"type": "sandbox_marker",
+                        "payload": {"unsandboxed": reason == "off"}})
             await self._coordinator.signal_pause(
                 reason="sandbox-override", via="frame")
         elif action == CONTROL_INTERRUPT_LEAVE and self._coordinator is not None:
