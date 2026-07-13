@@ -70,7 +70,7 @@ def test_imp_task_lead_files_ledger_and_forward_notes_to_deferred_md() -> None:
     tl = _imp("task-lead.md")
     # The deferred-finding append target is deferred.md.
     assert (
-        "under a\n   `## Deferred Followups` heading in the append-only"
+        "one line under a `## Deferred Followups` heading in the append-only"
         " `{{ quest.home }}/deferred.md`"
     ) in tl
     # Forward notes are appended to deferred.md, never the rewritable progress.md.
@@ -78,8 +78,8 @@ def test_imp_task_lead_files_ledger_and_forward_notes_to_deferred_md() -> None:
     assert "append-only ledger" in tl
     # The verify-triage toleration is recorded in deferred.md.
     assert (
-        "Record a toleration as a normal `## Deferred Followups` entry in\n"
-        "`{{ quest.home }}/deferred.md`"
+        "Record a toleration as a normal `## Deferred Followups` entry in"
+        " `{{ quest.home }}/deferred.md`"
     ) in tl
     # progress.md keeps the per-task commit-subject ledger and the Completed-plans collapse.
     assert "keep each task's **commit subject** in `progress.md`" in tl
@@ -133,7 +133,7 @@ def test_imp_forward_notes_survive_progress_md_rewrite() -> None:
     # The open NEEDS-REPLAN note and resolved-forward note are appended to the
     # append-only deferred.md, which the progress.md collapse never touches.
     assert "by appending to `{{ quest.home }}/deferred.md` — the" in tl
-    assert "`deferred.md` is\n   never collapsed" in tl
+    assert "`deferred.md` is never collapsed" in tl
     # progress.md's collapse is explicitly scoped to status only.
     assert "Keep `progress.md` bounded — it holds status only." in tl
 
