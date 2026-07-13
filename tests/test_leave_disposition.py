@@ -59,7 +59,7 @@ def _draft_with_exchange(tmp_path: Path, quest_id: str) -> Quest:
     return ch
 
 
-def test_disposition_abandon_draft_prints_honest_line(
+def test_disposition_abandon_prints_spine_no_torn_down(
     tmp_path: Path, capsys: pytest.CaptureFixture[str],
 ) -> None:
     _seed_control(tmp_path)
@@ -68,13 +68,13 @@ def test_disposition_abandon_draft_prints_honest_line(
     rc = m._print_leave_disposition(ch, {"intent": "abandon"})
     assert rc is None
     out = capsys.readouterr().out
-    assert out.strip() == "imp: 'Dark mode' abandoned"
+    assert out.strip() == "ab1 · Dark mode · abandoned"
+    assert "torn down" not in out
     assert "imp resume" not in out
     assert "imp search" not in out
-    assert "torn down" not in out
 
 
-def test_disposition_abandon_prints_materialized_torndown_line(
+def test_disposition_abandon_materialized_also_has_no_torn_down_line(
     tmp_path: Path, capsys: pytest.CaptureFixture[str],
 ) -> None:
     _seed_control(tmp_path)
@@ -83,9 +83,9 @@ def test_disposition_abandon_prints_materialized_torndown_line(
     rc = m._print_leave_disposition(ch, {"intent": "abandon", "materialized": "1"})
     assert rc is None
     out = capsys.readouterr().out
-    assert "'Big feature' abandoned" in out
-    assert "torn down" in out
-    assert "imp search" in out
+    assert out.strip() == "ab2 · Big feature · abandoned"
+    assert "torn down" not in out
+    assert "imp search" not in out
 
 
 def test_print_leave_disposition_archive_is_lock_free(
@@ -93,20 +93,17 @@ def test_print_leave_disposition_archive_is_lock_free(
 ) -> None:
     _seed_control(tmp_path)
     ch = _draft_with_exchange(tmp_path, "fast1")
-    # The daemon is "still tearing down": it holds the per-change lock. The
-    # old foreground retried ~10s on this lock; the new path must not touch it.
     with ProjectLock(ch.quest_dir / "lock").acquire():
         rc = m._print_leave_disposition(ch, {"disposition": "archive"})
     assert rc == 0
-    # The foreground did NOT archive — the daemon owns the disposition.
     assert (tmp_path / ".imp" / "quests" / "fast1").exists()
     assert record.read_record(records_root(tmp_path), "fast1") is None
     out = capsys.readouterr().out
-    assert "conversation saved" in out
-    assert "imp resume fast1" in out
+    assert "· conversation saved" in out
+    assert "resume: imp resume fast1 — or find it later with imp search" in out
 
 
-def test_print_leave_disposition_save_prints_backlog_line(
+def test_print_leave_disposition_save_prints_backlog_spine(
     tmp_path: Path, capsys: pytest.CaptureFixture[str],
 ) -> None:
     _seed_control(tmp_path)
@@ -114,8 +111,9 @@ def test_print_leave_disposition_save_prints_backlog_line(
     rc = m._print_leave_disposition(ch, {"disposition": "save"})
     assert rc == 0
     out = capsys.readouterr().out
-    assert "to your Backlog" in out
-    assert "imp resume bk1" in out
+    assert "· saved to backlog" in out
+    assert "Backlog" not in out                          # lowercase in this emitter
+    assert "resume: imp resume bk1" in out
 
 
 def test_print_leave_disposition_discard_is_silent(
@@ -136,7 +134,7 @@ def test_print_leave_disposition_none_without_recorded_disposition(
     assert m._print_leave_disposition(ch, {}) is None
 
 
-def test_print_leave_disposition_send_failed_prints_running_line(
+def test_print_leave_disposition_send_failed_prints_running_spine(
     tmp_path: Path, capsys: pytest.CaptureFixture[str],
 ) -> None:
     _seed_control(tmp_path)
@@ -144,8 +142,8 @@ def test_print_leave_disposition_send_failed_prints_running_line(
     rc = m._print_leave_disposition(ch, {"send_failed": "1"})
     assert rc == 0
     out = capsys.readouterr().out
-    assert "left running" in out
-    assert "imp resume sf1" in out
+    assert "· left running" in out
+    assert "resume: imp resume sf1" in out
 
 
 def test_save_to_backlog_arms_resume_pending(tmp_path: Path) -> None:

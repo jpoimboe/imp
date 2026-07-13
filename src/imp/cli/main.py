@@ -515,31 +515,35 @@ def _print_leave_disposition(
     """Print the optimistic leave message for a daemon-applied disposition.
 
     The disposition itself is applied by the daemon after it releases the lock;
-    here we only echo what was (or is being) done. Returns 0 when a leave was
-    handled, None to fall through to the normal exit-code path.
+    here we only echo what was (or is being) done, on the shared spine. Returns 0
+    when a leave was handled, None to fall through to the normal exit-code path.
     """
+    color = should_use_color(sys.stdout)
     intent = leave_state.get("intent")
     if intent == "abandon":
-        label = quest.title or quest.id
-        if leave_state.get("materialized") == "1":
-            print(f"imp: '{label}' abandoned — torn down; "
-                  f"find it later with `imp search`")
-        else:
-            print(f"imp: '{label}' abandoned")
+        print()
+        print(_status_spine(quest.id, quest.title, "abandoned", "wordmark", color=color))
         return None
     disposition = leave_state.get("disposition")
     if disposition == "save":
-        print(f"imp: saved '{quest.title or quest.id}' to your Backlog "
-              f"(resume with `imp resume {quest.id}`)")
+        print()
+        print(_status_spine(quest.id, quest.title, "saved to backlog", "wordmark",
+                            color=color))
+        print(_resume_line(quest.id))
         return 0
     if disposition == "archive":
-        print(f"imp: conversation saved — resume with `imp resume {quest.id}` "
-              f"or find it later with `imp search`")
+        print()
+        print(_status_spine(quest.id, quest.title, "conversation saved", "wordmark",
+                            color=color))
+        print(_resume_line(quest.id, " — or find it later with imp search"))
         return 0
     if disposition == "discard":
         return 0
     if leave_state.get("send_failed"):
-        print(f"imp: left running — resume with `imp resume {quest.id}`")
+        print()
+        print(_status_spine(quest.id, quest.title, "left running", "wordmark",
+                            color=color))
+        print(_resume_line(quest.id))
         return 0
     return None
 
