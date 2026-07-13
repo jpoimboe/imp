@@ -1,5 +1,6 @@
 ---
 name: batch-code-reviewer
+deny_tools: [rename_quest, create_quest, create_and_enter_worktree]
 label: reviewing entire diff
 drivers: [impty]
 description: Reviews the quest's whole diff against its spec, then routes the result — emits a verdict of approve / task_gap, blocking Critical/Major fixes for re-review and deferring the rest. It adjudicates and routes, not merely advises.
