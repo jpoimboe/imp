@@ -126,20 +126,23 @@ _OVERLAY_BASE = Path("/var/tmp")
 
 
 def _probe_overlay_at_base() -> bool:
-    """Probe overlay support at the /var/tmp base, removing the probe dir after.
-    overlay_available() only rmtrees its own inner .overlay-probe subdir, so the
-    mkdtemp'd parent is cleaned up here — otherwise it would leak one empty
-    /var/tmp/imp-ovl-probe-XXXX dir per test-collection on an overlay-capable host."""
+    """Probe overlay support at the /var/tmp base, removing the probe dirs after.
+    overlay_available() only rmtrees its own inner .overlay-probe subdir; the
+    mkdtemp'd probe/home parents are cleaned up here. `home` is a separate empty
+    dir (non-overlapping with the probe's scratch layers) so a bare host mounts it
+    cleanly — the same real-home lowerdir shape the per-command mount uses."""
     if not sandbox_available() or not _OVERLAY_BASE.is_dir():
         return False
     try:
         probe = Path(tempfile.mkdtemp(prefix="imp-ovl-probe-", dir=_OVERLAY_BASE))
+        home = Path(tempfile.mkdtemp(prefix="imp-ovl-home-", dir=_OVERLAY_BASE))
     except OSError:
         return False
     try:
-        return overlay_available(probe)
+        return overlay_available(probe, home)
     finally:
         shutil.rmtree(probe, ignore_errors=True)
+        shutil.rmtree(home, ignore_errors=True)
 
 
 _OVERLAY_OK = _probe_overlay_at_base()

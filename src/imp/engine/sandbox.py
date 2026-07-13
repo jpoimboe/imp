@@ -281,29 +281,32 @@ def _force_rmtree(path: Path) -> None:
 
 
 @lru_cache(maxsize=1)
-def overlay_available(probe_base: Path) -> bool:
+def overlay_available(probe_base: Path, home: Path) -> bool:
     """Linux + `unshare` on PATH + a one-shot unprivileged `mount -t overlay`
-    inside a user namespace succeeds at `probe_base` (a real dir under `.imp/`,
-    NOT /tmp — some hosts refuse an overlay upperdir on tmpfs). Cached like
-    sandbox_available(); Part 2 calls this to choose the COW home vs. the rw
-    fallback.
+    inside a user namespace succeeds using the agent's REAL home as lowerdir.
+    The upper/work/merged scratch dirs live under `probe_base/.overlay-probe` (a
+    real dir under `.imp/`, NOT /tmp — some hosts refuse an overlay upperdir on
+    tmpfs), but the lowerdir is `home` — the SAME shape the per-command mount in
+    build_sandbox_argv uses — so the probe exercises the overlapping-layers
+    condition the real mount hits instead of a synthetic empty lower that overlaps
+    nothing. Cached like sandbox_available(); Part 2 calls this to choose the COW
+    home vs. the rw fallback.
 
     Tests that monkeypatch subprocess.run / shutil.which / platform.system must
     call overlay_available.cache_clear() first (the result is process-global
-    cached).
+    cached, keyed on (probe_base, home)).
     """
     if platform.system() != "Linux" or shutil.which("unshare") is None:
         return False
     probe = probe_base / ".overlay-probe"
-    lower, upper, work, merged = (
-        probe / "lower", probe / "upper", probe / "work", probe / "merged")
+    upper, work, merged = probe / "upper", probe / "work", probe / "merged"
     try:
-        for d in (lower, upper, work, merged):
+        for d in (upper, work, merged):
             d.mkdir(parents=True, exist_ok=True)
         r = subprocess.run(
             ["unshare", "--user", "--map-root-user", "--mount", "sh", "-c",
              f"mount -t overlay overlay -o "
-             f"lowerdir={shlex.quote(str(lower))},"
+             f"lowerdir={shlex.quote(str(home))},"
              f"upperdir={shlex.quote(str(upper))},"
              f"workdir={shlex.quote(str(work))} {shlex.quote(str(merged))}"],
             capture_output=True, timeout=10,

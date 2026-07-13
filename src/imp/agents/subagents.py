@@ -219,7 +219,7 @@ def _attach_isolated_home(
         upper=base / f"{spike_worktree.name}.overlay-upper",
         work=base / f"{spike_worktree.name}.overlay-work",
         merged=base / f"{spike_worktree.name}.overlay-merged",
-        use_overlay=overlay_available(quest_dir),
+        use_overlay=overlay_available(quest_dir, Path(policy.home)),
     )
     return dataclasses.replace(policy, home_layer=layer), cleanup
 
