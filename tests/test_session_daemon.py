@@ -1983,3 +1983,60 @@ async def test_sandbox_override_frame_reprompts_via_redispatch(tmp_path: Path) -
         assert seen["unsandboxed"] is True     # override survived reset() into the re-run
         await client.aclose()
         tg.cancel_scope.cancel()
+
+
+@pytest.mark.anyio
+async def test_sandbox_override_pause_persists_unsandboxed_on_state(
+    tmp_path: Path,
+) -> None:
+    quest = _make_change(tmp_path, "2026-06-15-sbp")
+
+    calls = {"n": 0}
+
+    async def _run_fn(
+        ch: Quest, *, on_event: Any, user_chat_input_fn: Any, coordinator: Any,
+        wait_for_turn_fn: Any = None, **kw: Any,
+    ) -> RunResult:
+        calls["n"] += 1
+        if calls["n"] == 1:
+            State(id=ch.id, step="brainstorm", step_attempt=0,
+                  status="running").save(ch.state_dir)
+            coordinator.set_unsandboxed(True)
+            await coordinator.signal_pause(reason="sandbox-override", via="frame")
+            return RunResult.PAUSED
+        return RunResult.COMPLETED
+
+    with anyio.fail_after(5):
+        result = await serve_quest_session(quest, run_fn=_run_fn, hibernate=False)
+
+    assert result is RunResult.COMPLETED
+    assert calls["n"] == 2                               # re-entered once
+    assert State.load(quest.state_dir).unsandboxed is True   # persisted by the branch
+
+
+@pytest.mark.anyio
+async def test_resume_restores_unsandboxed_into_coordinator(tmp_path: Path) -> None:
+    from tests.conftest import _seed_control
+
+    _seed_control(tmp_path)
+    quest = Quest.create(tmp_path, title="x", quest_id="feat", base_branch="main")
+    st = State.load(quest.state_dir)
+    st.status = "paused"
+    st.unsandboxed = True
+    st.save(quest.state_dir)
+
+    seen: dict[str, object] = {}
+
+    async def fake_run(
+        quest: Quest, *, on_event: Any, user_chat_input_fn: Any, coordinator: Any,
+        wait_for_turn_fn: Any = None,
+    ) -> RunResult:
+        seen["unsandboxed"] = coordinator.unsandboxed
+        return RunResult.COMPLETED
+
+    with anyio.fail_after(5):
+        result = await serve_quest_session(
+            quest, run_fn=fake_run, hibernate=False, resume=True)
+
+    assert result is RunResult.COMPLETED
+    assert seen["unsandboxed"] is True     # restored from State into a fresh coordinator

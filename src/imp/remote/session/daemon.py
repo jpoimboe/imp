@@ -147,6 +147,7 @@ async def serve_quest_session(
             if crashed:
                 state.arm_step_resume(mode="continue")
             state.save(quest.state_dir)
+            coordinator.set_unsandboxed(state.unsandboxed)
             # A crash replays the interrupted agent step, so it always lands in
             # the agent regardless of the last-stamped target.
             resume_target = None if crashed else state.resume_target
@@ -192,8 +193,13 @@ async def serve_quest_session(
                     apply_model_override(quest, state, arg, step_name=state.step)
                 coordinator.reset()
             elif _is_sandbox_override_pause(result, coordinator):
-                # /sandbox mid-conversation: the frame already set the override flag;
-                # clear the pause and re-enter so the fresh _dispatch_step inherits it.
+                # /sandbox mid-conversation: the frame already set the override flag.
+                # Persist it onto State (so a resume of this step restores it) BEFORE
+                # reset(), then clear the pause and re-enter so the fresh
+                # _dispatch_step inherits the still-live coordinator flag.
+                state = State.load(quest.state_dir)
+                state.unsandboxed = coordinator.unsandboxed
+                state.save(quest.state_dir)
                 coordinator.reset()
             else:
                 on_event({"type": "awaiting_user_input",
