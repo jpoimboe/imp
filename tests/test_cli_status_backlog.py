@@ -17,7 +17,7 @@ def test_status_lists_unmaterialized_home_in_backlog(
     rc = main._cmd_status(argparse.Namespace(all=False), tmp_path)
     assert rc == 0
     out = capsys.readouterr().out
-    assert "Backlog" in out              # headed Backlog section
+    assert "backlog" in out              # headed backlog section
     assert "2026-06-16-idea11" in out
     assert "idea" in out                 # provenance shown
     assert "Idea one" in out
@@ -35,7 +35,7 @@ def test_status_materialized_in_active_before_backlog(
     out = capsys.readouterr().out
     # Materialized change appears in the Active list, ABOVE the Backlog section;
     # the unmaterialized home never leaks into Active.
-    assert out.index("live222") < out.index("Backlog") < out.index("2026-06-16-bk333")
+    assert out.index("live222") < out.index("backlog") < out.index("2026-06-16-bk333")
 
 
 def test_status_blocked_backlog_home_shows_blocked(
@@ -60,5 +60,5 @@ def test_status_empty_prints_no_changes(
     rc = main._cmd_status(argparse.Namespace(all=False), tmp_path)
     assert rc == 0
     out = capsys.readouterr().out
-    assert "Backlog" not in out
+    assert "backlog" not in out
     assert out.strip()

@@ -2818,7 +2818,7 @@ def _overview_lines(control: Path, *, show_all: bool, now: datetime,
             intent=intents.get(r[0])))
     if backlog_rows:
         lines.append("")
-        lines.append(pal.ansi("Backlog", "dim", enabled=color))
+        lines.append(pal.ansi("backlog", "dim", enabled=color))
         for r in backlog_rows:
             lines.append(quest_row.format_quest_line(
                 quest_id=r[0], title=r[4], status=r[1], step=r[2],
@@ -3216,7 +3216,7 @@ def _build_parser() -> argparse.ArgumentParser:
         help="List your quests: in-flight, backlog, and recently merged.",
         description=(
             "With no argument, an overview of your quests — in-flight, the "
-            "Backlog, and recently merged. -a/--all lifts the 10-cap and "
+            "backlog, and recently merged. -a/--all lifts the 10-cap and "
             "includes abandoned/left quests (the block is then labelled "
             "`history`)."),
     )
@@ -3337,7 +3337,7 @@ def _build_parser() -> argparse.ArgumentParser:
     p_edit_zone = p_edit.add_mutually_exclusive_group()
     p_edit_zone.add_argument(
         "--backlog", action="store_true",
-        help="Move an un-materialized quest to the Backlog zone (origin=idea).")
+        help="Move an un-materialized quest to the backlog zone (origin=idea).")
     p_edit_zone.add_argument(
         "--active", action="store_true",
         help="Return an un-materialized quest to the Active zone (origin=draft).")

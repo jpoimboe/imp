@@ -209,7 +209,7 @@ def test_cmd_status_renders_draft_in_active(
     rc = _cmd_status(argparse.Namespace(all=False), tmp_path)
     out = capsys.readouterr().out
     assert rc == 0
-    assert "Backlog" not in out          # a lone draft creates no Backlog section
+    assert "backlog" not in out          # a lone draft creates no backlog section
     d1_line = next(ln for ln in out.splitlines() if ln.startswith("d1"))
     assert "draft" in d1_line          # a fresh un-materialized draft shows draft in Active
 

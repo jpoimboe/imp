@@ -21,14 +21,14 @@ def test_abandon_documents_token_positional() -> None:
 def test_list_documents_overview() -> None:
     sp = _subparser("list")
     help_text = sp.format_help()
-    assert "Backlog" in help_text
+    assert "backlog" in help_text
     assert sp.description is not None
 
 
 def test_show_documents_detail_only() -> None:
     sp = _subparser("show")
     help_text = sp.format_help()
-    assert "Backlog" not in help_text          # no overview language on show
+    assert "backlog" not in help_text          # no overview language on show
     assert "detail card" in help_text
     assert sp.description is not None
 
