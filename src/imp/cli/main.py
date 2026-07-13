@@ -2005,8 +2005,8 @@ def _cmd_log(args: argparse.Namespace) -> int:
     from imp.cli import narrative
     from imp.cli.render_text import LOG_CATEGORIES, render_tree
 
-    show_names = _split_list(args.show)
-    hide_names = _split_list(args.hide)
+    show_names = args.show or []
+    hide_names = args.hide or []
     unknown = sorted((set(show_names) | set(hide_names)) - set(LOG_CATEGORIES))
     if unknown:
         print(f"imp log: error: unknown category {unknown[0]!r} "
@@ -3218,17 +3218,6 @@ class SplitAppend(argparse.Action):
         setattr(namespace, self.dest, current)
 
 
-def _split_list(values: list[str] | None) -> list[str]:
-    """Flatten a repeatable --opt (action="append") and comma-split each value,
-    so --opt=A,B == --opt=A --opt=B."""
-    if not values:
-        return []
-    out: list[str] = []
-    for v in values:
-        out.extend(part.strip() for part in v.split(",") if part.strip())
-    return out
-
-
 def _cmd_events(args: argparse.Namespace) -> int:
     from imp.engine import events_index as ei
 
@@ -3253,10 +3242,10 @@ def _cmd_events(args: argparse.Namespace) -> int:
     handle_map = ei.subagent_handle_map(indexed)
     max_ord = indexed[-1][0] if indexed else 0
 
-    types = set(_split_list(args.type)) or None
-    agents = set(_split_list(args.agent)) or None
-    steps = set(_split_list(args.step)) or None
-    range_specs = _split_list(args.range)
+    types = set(args.type) if args.type else None
+    agents = set(args.agent) if args.agent else None
+    steps = set(args.step) if args.step else None
+    range_specs = list(args.range) if args.range else []
     if args.range_pos:
         range_specs.append(args.range_pos)
     intervals: list[tuple[int, int]] = []
@@ -3462,11 +3451,11 @@ def _build_parser() -> argparse.ArgumentParser:
              "live run view; implies --no-pager.",
     )
     p_log.add_argument(
-        "--show", action="append", default=None, metavar="CAT",
+        "--show", action=SplitAppend, default=None, metavar="CAT",
         help="Reveal a content category over the lean view: thinking, tools, "
              "subagents, prompts, tiers (repeatable / comma-joined).")
     p_log.add_argument(
-        "--hide", action="append", default=None, metavar="CAT",
+        "--hide", action=SplitAppend, default=None, metavar="CAT",
         help="Hide a content category (repeatable / comma-joined).")
     p_log_export = p_log.add_mutually_exclusive_group()
     p_log_export.add_argument(
@@ -3501,17 +3490,17 @@ def _build_parser() -> argparse.ArgumentParser:
         "range_pos", nargs="?", default=None, metavar="RANGE",
         help="Ordinal selector, e.g. 42, 59-120,210-255, 59-, -80.")
     p_events.add_argument(
-        "--step", action="append", default=None,
+        "--step", action=SplitAppend, default=None,
         help="Scope to a step's window (repeatable / comma-joined).")
     p_events.add_argument(
-        "--type", action="append", default=None,
+        "--type", action=SplitAppend, default=None,
         help="Keep only these event types (repeatable / comma-joined).")
     p_events.add_argument(
-        "--agent", action="append", default=None,
+        "--agent", action=SplitAppend, default=None,
         help="Keep only these authors: step name, subagent handle, or "
              "sub:<id> (repeatable / comma-joined).")
     p_events.add_argument(
-        "--range", action="append", default=None, dest="range",
+        "--range", action=SplitAppend, default=None, dest="range",
         help="Ordinal selector (repeatable / comma-joined).")
     p_events.add_argument(
         "--limit", type=int, default=None,
