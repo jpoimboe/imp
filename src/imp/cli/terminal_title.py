@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import Any
 
-GLYPH_BUSY = "๏"
+GLYPH_BUSY = "⛤"
 GLYPH_IDLE = "ѱ"
 
 
@@ -67,9 +67,9 @@ class TerminalTitle:
             return
         prefix = f"{glyph} " if glyph else ""
         label = (
-            f"imp · {self._quest_id} · {self._name}"
+            f"{self._quest_id} · {self._name}"
             if self._name
-            else f"imp · {self._quest_id}"
+            else self._quest_id
         )
         self._stream.write(f"\x1b]2;{prefix}{label}\x07")
         self._stream.flush()

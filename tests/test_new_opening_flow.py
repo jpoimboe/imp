@@ -243,9 +243,9 @@ async def test_title_written_before_opening_prompt(stub_new, monkeypatch) -> Non
     rc = await m._async_cmd_new(_new_args(), leave_mode="new")
 
     assert rc == 0
-    # The idle escape (unnamed draft → "ѱ imp · <id>") is already on stdout:
+    # The idle escape (unnamed draft → "ѱ <id>") is already on stdout:
     # the opening prompt is blocked on the user, so it shows the idle glyph.
-    assert "\x1b]2;ѱ imp · z9y8x7\x07" in at_prompt["value"]
+    assert "\x1b]2;ѱ z9y8x7\x07" in at_prompt["value"]
     # The same instance is threaded into run_session_client.
     assert captured["title"]._quest_id == "z9y8x7"
 
