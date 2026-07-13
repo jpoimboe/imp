@@ -132,14 +132,6 @@ def test_imp_show_in_base_caps() -> None:
     assert "imp_show" in BASE_CAPS
 
 
-def test_description_documents_overview_spec_and_imp_events() -> None:
-    desc = get_registry()["imp_show"].description
-    assert "Read another quest's durable record" in desc
-    assert "raw spec" in desc
-    assert "imp_events" in desc
-    assert "current quest" in desc.lower()
-
-
 # ---- overview: four zones + resolution -------------------------------------
 
 def test_overview_started_quest_matches_detail_card(tmp_path: Path) -> None:

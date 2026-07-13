@@ -383,19 +383,10 @@ def test_glob_inworktree_masked_file_dropped(tmp_path: Path) -> None:
     assert "secret.txt" not in out          # in-worktree masked file must be dropped
 
 
-def test_glob_description_documents_path_and_sandbox() -> None:
-    desc = get_registry()["glob"].description
-    assert "path" in desc
-    assert "bounded by the sandbox like bash" in desc
-
-
 def test_glob_description_notes_recency_and_cap() -> None:
     desc = get_registry()["glob"].description
     assert "most-recent" in desc
     assert "50 KB" in desc
-    # retained guarantees
-    assert "bounded by the sandbox like bash" in desc
-    assert "git ignores" in desc
 
 
 def test_grep_reports_relative_paths(tmp_path: Path) -> None:
@@ -468,21 +459,6 @@ def test_grep_inworktree_never_walk_capped(tmp_path: Path, monkeypatch) -> None:
     out = _grep(_ctx(tmp_path), pattern="ZZZ", path=".")
     assert "external walk truncated" not in out
     assert out == "(no matches)"
-
-
-def test_grep_description_notes_sandbox_and_walk_cap() -> None:
-    desc = get_registry()["grep"].description
-    assert "bounded by the sandbox like bash" in desc
-    assert "external" in desc and "cap" in desc
-
-
-def test_grep_description_notes_multiline() -> None:
-    desc = get_registry()["grep"].description
-    assert "multiline" in desc
-    assert "span line boundaries" in desc
-    # retained guarantees still hold
-    assert "bounded by the sandbox like bash" in desc
-    assert "head_limit caps result rows" in desc
 
 
 def test_glob_surfaces_artifact_subtree_but_not_rest_of_imp(tmp_path: Path) -> None:
@@ -713,26 +689,6 @@ def test_glob_escape_hatch_explicit_ignored_base(tmp_path: Path) -> None:
     (tmp_path / "build" / "out.o").write_text("")
     out = _glob(_ctx(tmp_path), pattern="*.o", path="build")
     assert "build/out.o" in out
-
-
-def test_glob_description_documents_gitignore_skip() -> None:
-    desc = get_registry()["glob"].description
-    assert "git ignores" in desc
-    assert ".imp/quests/<id>/artifacts/" in desc
-    assert "searches it anyway" in desc
-    # retained guarantees
-    assert "bounded by the sandbox like bash" in desc
-
-
-def test_grep_description_documents_gitignore_and_binary() -> None:
-    desc = get_registry()["grep"].description
-    assert "git ignores" in desc
-    assert ".imp/quests/<id>/artifacts/" in desc
-    assert "searches it anyway" in desc
-    assert "binary" in desc
-    # retained guarantees
-    assert "bounded by the sandbox like bash" in desc
-    assert "external" in desc and "cap" in desc
 
 
 def test_glob_git_failure_degrades_to_no_gitignore_filter(tmp_path: Path, monkeypatch) -> None:

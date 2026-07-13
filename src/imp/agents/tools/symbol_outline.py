@@ -558,18 +558,12 @@ async def _outline_dir(
     name="symbol_outline",
     description=(
         "Compact structural outline of a file or directory: defined symbols "
-        "(functions, classes, types, …) with signatures and 1-based line "
-        "numbers, bodies elided, so you can see a file's or subtree's shape "
-        "before paying full-read tokens for the few bodies you actually need. "
-        "A file path gives a per-file outline; a directory path recurses "
-        "gitignore-aware with per-file and recursive per-directory counts. "
-        "`detail` is 'signatures' (default: counts plus signatures) or 'counts' "
-        "(names and counts only). `max_depth` caps directory recursion depth "
-        "(directory paths only; ignored for a file). Paths are relative to the "
-        "worktree root, like glob/grep. Read-only and never raises: an "
-        "unsupported or unparseable file degrades to a one-line 'read directly' "
-        "note, and output is capped at 50 KB with breadth-first thinning. Not a "
-        "substitute for read_file — use it to choose what to read."
+        "(functions, classes, types) with signatures and 1-based line numbers, "
+        "bodies elided — so you see a file's shape before paying to read it. "
+        "A directory recurses gitignore-aware with counts. `detail`: "
+        "'signatures' (default) or 'counts'. Not a substitute for `read_file` "
+        "— use it to choose what to read. "
+        "See `tool-reference` for `max_depth` and caps."
     ),
     read_only=True,
 )

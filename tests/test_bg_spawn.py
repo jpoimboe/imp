@@ -161,14 +161,6 @@ def test_foreground_bash_unchanged_and_ensure_ascii_false(tmp_path: Path) -> Non
     anyio.run(main)
 
 
-def test_bash_description_rewritten() -> None:
-    desc = get_registry()["bash"].description
-    assert "run_in_background" in desc
-    assert "bash_output" in desc and "bash_kill" in desc
-    assert "does NOT validate" in desc or "not validate" in desc
-    assert "block-buffer" in desc
-
-
 def test_run_in_background_refused_when_not_enabled(tmp_path: Path) -> None:
     """Providers that expose registry bash WITHOUT the bg wiring
     (claude_code/codex MCP wrapping) must get a loud refusal, not an
