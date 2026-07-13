@@ -354,6 +354,7 @@ class Quest:
         cls, control_root: Path, *, title: str, quest_id: str, base_branch: str,
         depends_on: list[str] | None = None, workflow: str | None = None,
         origin: str = "draft", seed_opening: str | None = None,
+        defer_seed: bool = False,
     ) -> Quest:
         """An un-materialized draft: NO branch, NO worktree. State is seeded at the
         permanent home; project_root points at the main checkout so the spec
@@ -384,33 +385,40 @@ class Quest:
             "seed_opening": seed_opening,
         }, indent=2, sort_keys=True))
 
-        from imp.engine.loader import load_workflow
-        from imp.providers.config import parse_default_workflow
-        from imp.providers.effective import (
-            load_effective_config,
-            validate_project_memory,
-        )
-
-        config = load_effective_config(
-            project_root=control_root, control_root=control_root,
-        ).config
-        try:
-            validate_project_memory(
-                control_root, config.memory, config.project_facts)
-            from imp.assets import resolve_workflow_dir
-            wf_name = workflow or parse_default_workflow(
-                control_root / "imp" / "project.yaml")
-            loaded_workflow = load_workflow(
-                resolve_workflow_dir(control_root, wf_name),
-                configured_tiers=config.tier_names(),
-                project_keys=frozenset(config.project_facts),
+        if defer_seed:
+            # Skip load/validate/seed so workflow skew can't veto stub creation;
+            # the cursor is seeded at first resume instead.
+            State(
+                id=quest_id, step=None, step_attempt=0, status="new",
+            ).save(quest_dir / "state")
+        else:
+            from imp.engine.loader import load_workflow
+            from imp.providers.config import parse_default_workflow
+            from imp.providers.effective import (
+                load_effective_config,
+                validate_project_memory,
             )
-        except (LoadError, LoadErrors):
-            shutil.rmtree(quest_dir, ignore_errors=True)
-            raise
-        state = State(id=quest_id, step=None, step_attempt=0, status="new")
-        seed_workflow_start(state, loaded_workflow, config)
-        state.save(quest_dir / "state")
+
+            config = load_effective_config(
+                project_root=control_root, control_root=control_root,
+            ).config
+            try:
+                validate_project_memory(
+                    control_root, config.memory, config.project_facts)
+                from imp.assets import resolve_workflow_dir
+                wf_name = workflow or parse_default_workflow(
+                    control_root / "imp" / "project.yaml")
+                loaded_workflow = load_workflow(
+                    resolve_workflow_dir(control_root, wf_name),
+                    configured_tiers=config.tier_names(),
+                    project_keys=frozenset(config.project_facts),
+                )
+            except (LoadError, LoadErrors):
+                shutil.rmtree(quest_dir, ignore_errors=True)
+                raise
+            state = State(id=quest_id, step=None, step_attempt=0, status="new")
+            seed_workflow_start(state, loaded_workflow, config)
+            state.save(quest_dir / "state")
 
         quest = cls(
             id=quest_id, title=title, base_branch=base_branch,
