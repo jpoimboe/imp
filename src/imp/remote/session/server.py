@@ -308,6 +308,10 @@ class SessionServer:
             if self._events_path is not None else None)
         if self._pending_prompt is not None:
             send_one(self._pending_prompt)
+        # Seed the transient marker to a client attaching while the override is live.
+        if self._coordinator is not None and self._coordinator.unsandboxed:
+            send_one({"type": "sandbox_marker",
+                      "payload": {"unsandboxed": True}})
         self._note_first_leased()
         return snapshot
 
