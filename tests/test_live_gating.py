@@ -349,3 +349,58 @@ def test_precondition_detects_mcp_qualified_bash_name(tmp_path):
         _bash_result(returncode=32, stderr=_OVERLAY_STDERR),
     ])
     assert sandbox_sleep_precondition_failed(ev) == _EXPECTED_REASON
+
+
+from tests.test_relay_hibernation_live import _interrupt_gate_engaged  # noqa: E402
+
+
+def _awaiting(interrupt):
+    return {
+        "type": "awaiting_user_input",
+        "payload": {
+            "steer_hint": "interrupted — type to redirect, or Ctrl-D to leave it paused",
+            "interrupt": interrupt,
+        },
+    }
+
+
+def test_interrupt_gate_engaged_true_on_interrupt_event(tmp_path):
+    ev = tmp_path / "events.jsonl"
+    _write_events(ev, [
+        _bash_call(),
+        _bash_result(returncode=0, stderr="", stdout="done"),
+        _awaiting(True),
+    ])
+    assert _interrupt_gate_engaged(ev) is True
+
+
+def test_interrupt_gate_engaged_false_on_noninterrupt_yield(tmp_path):
+    # A bare-turn-end yield ALSO emits awaiting_user_input, but with
+    # interrupt=False; it must NOT be read as the cooperative-interrupt steer
+    # gate. This is the falsifiable case: a type-only check would wrongly pass.
+    ev = tmp_path / "events.jsonl"
+    _write_events(ev, [_awaiting(False)])
+    assert _interrupt_gate_engaged(ev) is False
+
+
+def test_interrupt_gate_engaged_false_when_no_awaiting_event(tmp_path):
+    ev = tmp_path / "events.jsonl"
+    _write_events(ev, [
+        _bash_call(),
+        _bash_result(returncode=0, stderr="", stdout="done"),
+    ])
+    assert _interrupt_gate_engaged(ev) is False
+
+
+def test_interrupt_gate_engaged_false_when_events_missing(tmp_path):
+    assert _interrupt_gate_engaged(tmp_path / "nope.jsonl") is False
+
+
+def test_interrupt_gate_engaged_tolerates_blank_and_garbage_lines(tmp_path):
+    ev = tmp_path / "events.jsonl"
+    _write_events(
+        ev,
+        [_awaiting(True)],
+        extra_lines=("", "   ", "{not valid json", "no-brace-line"),
+    )
+    assert _interrupt_gate_engaged(ev) is True

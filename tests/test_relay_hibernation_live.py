@@ -27,7 +27,7 @@ import pytest
 
 from imp.engine.state import LockHeld, ProjectLock
 from impty import TerminalSession
-from tests._live import _await_change_dir
+from tests._live import _await_change_dir, sandbox_sleep_precondition_failed
 from tests.conftest import _init_repo
 
 _WORKTREE_SRC = str(Path(__file__).parent.parent / "src")
@@ -116,6 +116,8 @@ def _poll(predicate, timeout: float) -> bool:
 
 
 def _event_types(events_path: Path) -> list[str]:
+    if not events_path.exists():
+        return []
     out: list[str] = []
     for line in events_path.read_text().splitlines():
         if not line.strip():
@@ -125,6 +127,76 @@ def _event_types(events_path: Path) -> list[str]:
         except (json.JSONDecodeError, KeyError):
             continue
     return out
+
+
+def _interrupt_gate_engaged(events_path: Path) -> bool:
+    """True once the durable cooperative-interrupt steer signal is persisted: an
+    `awaiting_user_input` record whose payload `interrupt` flag is True. The
+    engine journals this event (event_log.append, src/imp/engine/completion.py)
+    the instant the steer gate engages — before any socket relay or pty repaint —
+    so it is the render-independent authority that the gate engaged, unlike the pty screen
+    which can lag. A bare-turn-end yield also emits awaiting_user_input but with
+    interrupt=False, so the flag, not the type alone, is the discriminator."""
+    if not events_path.exists():
+        return False
+    try:
+        body = events_path.read_text()
+    except OSError:
+        return False
+    for line in body.splitlines():
+        if not line.strip():
+            continue
+        try:
+            rec = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if (rec.get("type") == "awaiting_user_input"
+                and rec.get("payload", {}).get("interrupt") is True):
+            return True
+    return False
+
+
+def _usr1_stack_dump(daemon_pid: int, quest_dir: Path, timeout: float = 5.0) -> str:
+    """Signal the daemon to dump its own stacks and return the freshly appended
+    text. The daemon installs a SIGUSR1 stack dumper at quest_dir/stack-dump.txt
+    (src/imp/remote/session/daemon.py); return the newly written section, or a
+    marker string if the daemon is gone or wrote nothing within `timeout`."""
+    dump = quest_dir / "stack-dump.txt"
+    before = dump.read_text() if dump.exists() else ""
+    try:
+        os.kill(daemon_pid, signal.SIGUSR1)
+    except (ProcessLookupError, PermissionError) as exc:
+        return f"<could not signal daemon pid {daemon_pid}: {exc!r}>"
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        current = dump.read_text() if dump.exists() else ""
+        if current != before:
+            return current[len(before):] or current
+        time.sleep(0.2)
+    return f"<no new stack dump at {dump} within {timeout}s>"
+
+
+def _relay_skip_or_fail(
+    what: str,
+    events: Path,
+    screen: list[str],
+    daemon_pid: int,
+    quest_dir: Path,
+) -> None:
+    """On a gate miss: skip legibly when imp's bash-sandbox overlay mount failed
+    (the writer's `sleep 30` never ran, so the mid-turn SIGINT never interrupted
+    a live turn); otherwise fail with diagnostics — the current screen lines, the
+    events.jsonl event-type sequence, and the daemon's own SIGUSR1 stack dump."""
+    reason = sandbox_sleep_precondition_failed(events)
+    if reason is not None:
+        pytest.skip(reason)
+    stack = _usr1_stack_dump(daemon_pid, quest_dir)
+    pytest.fail(
+        f"{what}\n"
+        f"screen lines:\n" + "\n".join(screen) + "\n"
+        f"events.jsonl types: {_event_types(events)}\n"
+        f"daemon stack dump:\n{stack}"
+    )
 
 
 @pytest.mark.live("claude_code")
@@ -152,18 +224,44 @@ def test_relay_hibernate_then_resume_reengages(tmp_path: Path) -> None:
         assert _wait_for_bash_tool_call(events, timeout=120.0), "never saw bash tool_call"
         time.sleep(_CC_STARTUP_GRACE)
 
+        # The daemon holds the flock throughout the live turn; capture its pid now
+        # so a residual-failure diagnostic can SIGUSR1 it for a stack dump before
+        # the SIGQUIT detach below tears it down.
+        daemon_pid = int(lock_path.read_text().strip())
+
         # SIGINT mid-turn is the cooperative interrupt: the run yields inline to
         # the human (it does NOT pause yet — that happens on the SIGQUIT detach
-        # below). The steer gate renders INTERRUPT_STEER_HINT on the pty, so the
-        # human can redirect or detach. Anchor on that hint, not "paused".
+        # below). The steer gate renders INTERRUPT_STEER_HINT on the pty so the
+        # human can redirect or detach.
         s.send_signal(signal.SIGINT)
-        # The hint renders within a few seconds idle; the timeout is generous
-        # because under the full -n 4 live gate the render/event loop can be
-        # starved. It still requires the hint to appear — only tolerates lag.
-        assert _poll(
+
+        # Authoritative gate-engaged check: the engine journals an
+        # awaiting_user_input{interrupt: true} event the instant the steer gate
+        # engages — before any socket relay or pty repaint — so it is
+        # render-independent. When it never arrives the cause is imp's bash-sandbox
+        # per-command overlay home failing to mount: `sleep 30` never ran, the
+        # model's turn ended in ~2s, and the mid-turn SIGINT landed too late to
+        # interrupt a live turn (the cooperative interrupt then times out ~2002ms
+        # and escalates to a hard-kill paused). _relay_skip_or_fail SKIPs on that
+        # precondition and otherwise fails with diagnostics.
+        if not _poll(lambda: _interrupt_gate_engaged(events), timeout=60.0):
+            _relay_skip_or_fail(
+                "cooperative interrupt-steer gate never engaged "
+                "(no durable awaiting_user_input{interrupt: true} event)",
+                events, s.lines(), daemon_pid, quest_dir,
+            )
+
+        # The tty must still paint the hint once the gate genuinely engaged: this
+        # guards the pty render path, so a real render regression fails here — now
+        # distinguishable from the overlay-mount precondition handled above.
+        if not _poll(
             lambda: "type to redirect" in "\n".join(s.lines()).lower(), timeout=60.0
-        ), "interrupt-steer gate never rendered"
-        daemon_pid = int(lock_path.read_text().strip())  # holder PID, read before detach
+        ):
+            _relay_skip_or_fail(
+                "steer gate engaged (durable event present) but the pty never "
+                "rendered INTERRUPT_STEER_HINT",
+                events, s.lines(), daemon_pid, quest_dir,
+            )
 
         # SIGQUIT → deliberate detach: daemon hibernates, flock released, paused.
         s.send_signal(signal.SIGQUIT)
