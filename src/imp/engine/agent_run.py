@@ -65,16 +65,16 @@ if TYPE_CHECKING:
 _BASH_VIRTUAL_PATHS_NOTE = """\
 ## Paths are relative to the project root
 
-`read_file`, `write_file`, and `edit_file` take paths **relative to the project
-root** (e.g. `src/foo.py`, `imp/specs/x.md`), and also accept absolute or
-out-of-worktree paths: those are bounded exactly like `bash` — unrestricted when
-the run is unsandboxed, and confined to the sandbox's readable/writable set when
-it is active (secrets stay masked). `grep` and `glob` stay worktree-relative and
-reject absolute paths and `..` escapes.
+`read_file`, `write_file`, and `edit_file` take paths
+**relative to the project root** (e.g. `src/foo.py`), and also accept absolute
+or out-of-worktree paths, bounded exactly like `bash`: unrestricted when the run
+is unsandboxed, confined to the sandbox's readable/writable set when active
+(secrets stay masked). `grep` and `glob` stay worktree-relative and reject
+absolute paths and `..` escapes.
 
-The `bash` tool already runs with its working directory set to the project root,
-so use **relative paths** there too (`cat src/foo.py`, `cd src && ...`). When you
-need an absolute path on disk, use `$IMP_PROJECT_ROOT` (the real root path)."""
+`bash` runs with its working directory at the project root, so use relative
+paths there too (e.g. `cat src/foo.py`). For an absolute path on disk, use
+`$IMP_PROJECT_ROOT`."""
 
 
 # Filesystem tools whose path model the note above documents. The note is
@@ -99,9 +99,9 @@ _CURRENT_DATE_NOTE = "Today's date is {date}."
 SUBAGENT_DELIVERABLE_NOTE = """\
 ## Your deliverable
 
-Your final message is your entire deliverable to the agent that dispatched you.
-Everything else you do — tool calls, intermediate notes — is invisible to them.
-State your full conclusion in your last message."""
+Your final message is your entire deliverable to the agent that dispatched you —
+everything else (tool calls, intermediate notes) is invisible to them. State
+your full conclusion in that last message."""
 
 
 # Universal behavioral base, split into a HEAD (identity + `# System`) and a TAIL
