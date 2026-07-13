@@ -441,7 +441,7 @@ async def test_run_cleared_session_writes_title_before_prompt(
     assert rc == 0
     # The idle escape for the freshly minted (unnamed) draft is already written:
     # this pre-attach opening prompt is blocked on the user, so it shows the idle glyph.
-    assert "\x1b]2;ѱ imp · " in at_prompt["value"]
+    assert f"\x1b]2;ѱ {captured['change'].id}\x07" in at_prompt["value"]
     title = captured["title"]
     assert title._quest_id == captured["change"].id   # one instance threaded through
 
