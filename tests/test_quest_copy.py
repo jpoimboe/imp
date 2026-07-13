@@ -50,8 +50,6 @@ def test_slash_help_listing_names_quests() -> None:
     lines: list[str] = []
     _help(lines.append)
     text = "\n".join(lines)
-    assert "List your quests (-a adds completed/abandoned)" in text
-    assert "Search archived quests by content, title, or id" in text
     assert "Abandon the current quest" in text
     assert "change" not in text
 
