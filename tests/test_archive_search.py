@@ -93,12 +93,14 @@ def test_search_content_carries_conversation_body(tmp_path: Path) -> None:
     assert "300s deadline holds" in hits[0][2]         # content column carried for excerpting
 
 
-def test_search_content_matches_title_and_returns_triples(tmp_path: Path) -> None:
-    _archive(tmp_path, "alpha", "Dark mode toggle")
+def test_search_content_returns_id_title_content_and_last_activity(tmp_path: Path) -> None:
+    _archive(tmp_path, "alpha", "Dark mode toggle",
+             events_text=_prose_line("dark discussion here"))
     hits = archive_read.search_archive_content(tmp_path, "dark")
     assert [h[0] for h in hits] == ["alpha"]
     assert hits[0][1] == "Dark mode toggle"
-    assert len(hits[0]) == 3                            # (id, title, content), no status/created
+    assert len(hits[0]) == 4                       # (id, title, content, last_activity)
+    assert hits[0][3] == "2026-06-01T00:00:01+00:00"   # the event's timestamp
 
 
 def test_search_content_missing_index_returns_empty(tmp_path: Path) -> None:

@@ -73,7 +73,7 @@ def search_archive(
 
 def search_archive_content(
     control_root: Path, query: str,
-) -> list[tuple[str, str, str]]:
+) -> list[tuple[str, str, str, str | None]]:
     ensure_current(control_root)
     db = index_path(control_root)
     if not db.exists():
