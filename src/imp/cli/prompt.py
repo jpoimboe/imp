@@ -52,6 +52,13 @@ def _build_session(skills_dir: Any | None = None, *, editing_mode: str = "emacs"
     kb = KeyBindings()
     mode = EditingMode.VI if editing_mode == "vi" else EditingMode.EMACS
 
+    dot_state: Any = None
+    if mode == EditingMode.VI:
+        from imp.cli import vi_dot
+
+        dot_state = vi_dot.DotState()
+        vi_dot.add_dot_binding(kb, dot_state)
+
     hint_shown = False
 
     @kb.add("c-c")
@@ -96,10 +103,15 @@ def _build_session(skills_dir: Any | None = None, *, editing_mode: str = "emacs"
     color_depth = ColorDepth.DEPTH_24_BIT if pal.active_theme() in ("dark", "light") else None
     # No app bg + reserve_space_for_menu=0: terminal default, no slate bleed; slash menu still pops.
     # Filler removed: it forced a full-terminal repaint on every keystroke once input wrapped.
-    return PromptSession(
+    session: Any = PromptSession(
         history=history, key_bindings=kb, completer=completer,  # type: ignore[arg-type]
         editing_mode=mode, erase_when_done=True,
         multiline=True, reserve_space_for_menu=0, color_depth=color_depth)
+    if dot_state is not None:
+        from imp.cli import vi_dot
+
+        vi_dot.install_dot_recorder(session, dot_state)
+    return session
 
 
 class SlashCompleter:
