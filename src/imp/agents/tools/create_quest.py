@@ -30,7 +30,7 @@ def create_quest(
     Quest.create_draft(
         parent.control_root, title=title, quest_id=new_id,
         base_branch=parent.base_branch, depends_on=deps,
-        origin="followup", seed_opening=seed)
+        origin="followup", seed_opening=seed, defer_seed=True)
     log = ctx.event_log or JsonlEventLog(ctx.events_path)
     log.append(
         agent_id=ctx.agent_id, type="quest_created",

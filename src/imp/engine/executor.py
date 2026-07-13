@@ -69,6 +69,7 @@ from imp.engine.sandbox import (
     sandbox_config_from_raw,
 )
 from imp.engine.schema import validate_agent_output
+from imp.engine.seed import seed_workflow_start
 from imp.engine.state import CurrentStep, EventLog, JsonlEventLog, State
 from imp.engine.types import (
     Action,
@@ -336,6 +337,16 @@ async def run_quest(
             on_event=_liveness_on_event(coordinator, on_event, state, quest.state_dir))
         if workflow_refreshed:
             _emit(log, "workflow_refreshed", {}, agent_id=None)
+        # First-resume bootstrap for a deferred backlog draft: an unstarted,
+        # never-seeded stub (step None, has_started False) had its cursor + vars
+        # deferred at creation. Seed now, before backfill, so apply_var_overrides
+        # runs in full and backfill finds nothing to add (no spurious
+        # vars_backfilled). A completed quest has has_started=True, so this
+        # sentinel skips it and the step-None completion check below stays
+        # authoritative.
+        if state.step is None and not state.has_started:
+            seed_workflow_start(state, workflow, config)
+            state.save(quest.state_dir)
         # Seed any workflow var introduced after this quest was created (its
         # default is missing from the persisted vars); otherwise a StrictUndefined
         # template reference to it crashes the render on resume.

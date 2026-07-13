@@ -10,7 +10,7 @@ from imp.agents.tools.context import ToolContext
 from imp.engine.loader import TOP_LEVEL_CAPS
 from imp.engine.quest import Quest
 from imp.engine.state import State
-from tests.conftest import _seed_control
+from tests.conftest import _git, _seed_control
 
 
 def _make(tmp_path: Path) -> tuple[Quest, State]:
@@ -110,3 +110,27 @@ def test_create_quest_avoids_live_cvcv_stem(
     new_id = next(p.name for p in (ch.control_root / ".imp" / "quests").iterdir()
                   if p.name not in {ch.id, "kobe10"})
     assert new_id[:4] == "mira"
+
+
+def test_create_quest_defers_seed_and_survives_skew_workflow(tmp_path: Path) -> None:
+    # The parent is created over a VALID workflow; then the on-disk workflow is
+    # broken (ungrantable allow_tools). create_quest must still record the backlog
+    # stub — proof it passes defer_seed=True (an eager load would raise LoadError).
+    ch, state = _make(tmp_path)
+    agent = ch.control_root / "imp" / "workflows" / "imp" / "agents" / "stub.md"
+    agent.write_text(
+        "---\nname: stub\nallow_tools: [not_grantable]\n"
+        "output:\n  status: {type: enum, values: [Success, Error]}\n---\nbody\n")
+    _git(ch.control_root, "add", "-A")
+    _git(ch.control_root, "commit", "-qm", "skew")
+
+    get_registry()["create_quest"].invoke(
+        _ctx(ch, state), {"title": "T", "description": "b"})
+
+    new_id = next(p.name for p in (ch.control_root / ".imp" / "quests").iterdir()
+                  if p.name != ch.id)
+    created = Quest.load(ch.control_root, new_id)
+    assert created.origin == "followup"
+    seeded = State.load(created.state_dir)
+    assert seeded.step is None
+    assert seeded.has_started is False

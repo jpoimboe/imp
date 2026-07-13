@@ -652,3 +652,47 @@ def test_control_workflow_dir_falls_back_to_bundled(tmp_path: Path) -> None:
         control_root=ctl, project_root=tmp_path / "wt", quest_dir=tmp_path / "cd",
     )
     assert ch.control_workflow_dir == bundled_workflow_dir("imp")
+
+
+def _seed_control_with_skew_workflow(root: Path) -> None:
+    """Seeded control root with an ungrantable allow_tools agent; load_workflow raises LoadError."""
+    _seed_control(root)
+    agent = root / "imp" / "workflows" / "imp" / "agents" / "stub.md"
+    agent.write_text(
+        "---\nname: stub\nallow_tools: [not_grantable]\n"
+        "output:\n  status: {type: enum, values: [Success, Error]}\n---\nbody\n")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-qm", "skew: ungrantable allow_tools")
+
+
+def test_create_draft_defer_seed_writes_unseeded_state(tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+    ch = Quest.create_draft(
+        tmp_path, title="X", quest_id="dfr1", base_branch="main", defer_seed=True)
+    state = State.load(ch.state_dir)
+    assert state.step is None
+    assert state.step_label is None
+    assert state.phase_label is None
+    assert state.status == "new"
+    assert state.vars == {}
+    assert state.has_started is False
+
+
+def test_create_draft_defer_seed_survives_skew_workflow(tmp_path: Path) -> None:
+    _seed_control_with_skew_workflow(tmp_path)
+    # The eager load would raise LoadError; defer_seed skips it entirely, so the
+    # backlog stub is recorded despite the broken on-disk workflow.
+    ch = Quest.create_draft(
+        tmp_path, title="X", quest_id="dfr2", base_branch="main", defer_seed=True)
+    assert (tmp_path / ".imp" / "quests" / "dfr2").exists()
+    state = State.load(ch.state_dir)
+    assert state.step is None
+    assert state.status == "new"
+
+
+def test_create_draft_eager_still_fails_fast_on_skew_workflow(tmp_path: Path) -> None:
+    _seed_control_with_skew_workflow(tmp_path)
+    with pytest.raises(LoadError):
+        Quest.create_draft(
+            tmp_path, title="X", quest_id="dfr3", base_branch="main")
+    assert not (tmp_path / ".imp" / "quests" / "dfr3").exists()

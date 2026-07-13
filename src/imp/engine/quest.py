@@ -14,9 +14,9 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from imp.agents.prompts import render_label
 from imp.engine import worktree
 from imp.engine.errors import LayoutMismatch, LoadError, LoadErrors
+from imp.engine.seed import seed_workflow_start
 from imp.engine.state import JsonlEventLog, State
 from imp.engine.types import SourceLoc
 
@@ -309,7 +309,6 @@ class Quest:
         }, indent=2, sort_keys=True))
 
         from imp.engine.loader import load_workflow
-        from imp.providers.config import apply_var_overrides
         from imp.providers.effective import (
             load_effective_config,
             validate_project_memory,
@@ -334,21 +333,9 @@ class Quest:
             worktree.destroy_worktree(control_root, quest_id)
             shutil.rmtree(quest_dir, ignore_errors=True)
             raise
-        flat = loaded_workflow.flat_steps()
-        State(
-            id=quest_id, step=flat[0].name if flat else None, step_attempt=0,
-            step_label=(
-                render_label(flat[0].label, quest=None, log=None, state=None)
-                or flat[0].name
-            ) if flat else None,
-            phase_label=(
-                render_label(flat[0].phase_label, quest=None, log=None, state=None)
-                if flat[0].phase_label is not None else None
-            ) if flat else None,
-            status="new",
-            vars=apply_var_overrides(loaded_workflow.vars, config.var_overrides),
-            loop_counts={},
-        ).save(quest_dir / "state")
+        state = State(id=quest_id, step=None, step_attempt=0, status="new")
+        seed_workflow_start(state, loaded_workflow, config)
+        state.save(quest_dir / "state")
 
         link_quest_home(wt_path, quest_dir)
         quest = cls(
@@ -367,6 +354,7 @@ class Quest:
         cls, control_root: Path, *, title: str, quest_id: str, base_branch: str,
         depends_on: list[str] | None = None, workflow: str | None = None,
         origin: str = "draft", seed_opening: str | None = None,
+        defer_seed: bool = False,
     ) -> Quest:
         """An un-materialized draft: NO branch, NO worktree. State is seeded at the
         permanent home; project_root points at the main checkout so the spec
@@ -397,45 +385,40 @@ class Quest:
             "seed_opening": seed_opening,
         }, indent=2, sort_keys=True))
 
-        from imp.engine.loader import load_workflow
-        from imp.providers.config import apply_var_overrides, parse_default_workflow
-        from imp.providers.effective import (
-            load_effective_config,
-            validate_project_memory,
-        )
-
-        config = load_effective_config(
-            project_root=control_root, control_root=control_root,
-        ).config
-        try:
-            validate_project_memory(
-                control_root, config.memory, config.project_facts)
-            from imp.assets import resolve_workflow_dir
-            wf_name = workflow or parse_default_workflow(
-                control_root / "imp" / "project.yaml")
-            loaded_workflow = load_workflow(
-                resolve_workflow_dir(control_root, wf_name),
-                configured_tiers=config.tier_names(),
-                project_keys=frozenset(config.project_facts),
+        if defer_seed:
+            # Skip load/validate/seed so workflow skew can't veto stub creation;
+            # the cursor is seeded at first resume instead.
+            State(
+                id=quest_id, step=None, step_attempt=0, status="new",
+            ).save(quest_dir / "state")
+        else:
+            from imp.engine.loader import load_workflow
+            from imp.providers.config import parse_default_workflow
+            from imp.providers.effective import (
+                load_effective_config,
+                validate_project_memory,
             )
-        except (LoadError, LoadErrors):
-            shutil.rmtree(quest_dir, ignore_errors=True)
-            raise
-        flat = loaded_workflow.flat_steps()
-        State(
-            id=quest_id, step=flat[0].name if flat else None, step_attempt=0,
-            step_label=(
-                render_label(flat[0].label, quest=None, log=None, state=None)
-                or flat[0].name
-            ) if flat else None,
-            phase_label=(
-                render_label(flat[0].phase_label, quest=None, log=None, state=None)
-                if flat[0].phase_label is not None else None
-            ) if flat else None,
-            status="new",
-            vars=apply_var_overrides(loaded_workflow.vars, config.var_overrides),
-            loop_counts={},
-        ).save(quest_dir / "state")
+
+            config = load_effective_config(
+                project_root=control_root, control_root=control_root,
+            ).config
+            try:
+                validate_project_memory(
+                    control_root, config.memory, config.project_facts)
+                from imp.assets import resolve_workflow_dir
+                wf_name = workflow or parse_default_workflow(
+                    control_root / "imp" / "project.yaml")
+                loaded_workflow = load_workflow(
+                    resolve_workflow_dir(control_root, wf_name),
+                    configured_tiers=config.tier_names(),
+                    project_keys=frozenset(config.project_facts),
+                )
+            except (LoadError, LoadErrors):
+                shutil.rmtree(quest_dir, ignore_errors=True)
+                raise
+            state = State(id=quest_id, step=None, step_attempt=0, status="new")
+            seed_workflow_start(state, loaded_workflow, config)
+            state.save(quest_dir / "state")
 
         quest = cls(
             id=quest_id, title=title, base_branch=base_branch,
