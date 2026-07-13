@@ -29,9 +29,10 @@ SANDBOX_STATE_ON = (
     "Sandbox is on. Shell and file tools are confined to this quest's "
     "worktree; secrets are masked.")
 SANDBOX_STATE_OFF = (
-    "Sandbox is off — this session is unsandboxed. Shell and file tools run "
-    "as you: your home directory and secrets are readable and writes are "
-    "unconfined. Run /sandbox on to re-enable it.")
+    "Sandbox is off — this step is running unsandboxed. Shell and file "
+    "tools run as you: your home directory and secrets are readable and "
+    "writes are unconfined. It re-enables when the step finishes; run "
+    "/sandbox on to re-enable it now.")
 SANDBOX_CONFIRM_PROMPT = (
     "Disabling the sandbox runs every shell and file-tool command as you, "
     "with no confinement:\n"
@@ -40,10 +41,11 @@ SANDBOX_CONFIRM_PROMPT = (
     "  · writes are no longer limited to this quest's worktree\n"
     "This is what lets you attach debuggers (gdb, py-spy, strace) to live "
     "processes.\n"
-    "Disable the sandbox for the rest of this session? [y/N]")
+    "It re-enables automatically when this step finishes.\n"
+    "Disable the sandbox for this step? [y/N]")
 SANDBOX_OFF_CONFIRMED = (
-    "Sandbox off — this session is now unsandboxed. Run /sandbox on to "
-    "re-enable it.")
+    "Sandbox off — this step is now unsandboxed. It re-enables when the "
+    "step finishes; run /sandbox on to re-enable it now.")
 SANDBOX_OFF_DECLINED = "Left the sandbox on."
 SANDBOX_ON_FROM_OFF = (
     "Sandbox on. Shell and file tools are confined to the worktree again. "
