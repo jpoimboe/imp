@@ -16,6 +16,18 @@ def is_bundled_workflow(name: str) -> bool:
     return Path(str(resource)).is_dir()
 
 
+def bundled_skills_dir() -> Path:
+    """Return a real filesystem Path to the bundled global skills pool
+    (src/imp/assets/skills/), mirroring bundled_workflow_dir. Raises if absent."""
+    p = Path(str(files("imp.assets").joinpath("skills")))
+    if not p.is_dir():
+        raise RuntimeError(
+            f"bundled skills pool not found at {p}; was the package installed "
+            f"without its assets? Try `pip install -e .` from a checkout."
+        )
+    return p
+
+
 def bundled_workflow_dir(name: str) -> Path:
     """Return a real filesystem Path to a bundled workflow by name.
 

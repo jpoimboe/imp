@@ -23,7 +23,7 @@ Assertion layout
       Anthropic/OpenAI: real in-process invocation → real body
       ClaudeCode (full-runner test): scripted FakeToolResultBlock content → same body
 
-2. Exactly ONE skill_load event with payload={"name":"refactor","source":"agent"}
+2. Exactly ONE skill_load event with payload={"name":"refactor","source":"internal"}
    and agent_id is None.
       Anthropic/OpenAI: via full-runner fake harness.
       ClaudeCode: via test_claude_code_load_skill_via_wrap_one (_wrap_one/_impl path).
@@ -99,7 +99,7 @@ def _make_invocation(tmp_path: Path, provider_name: str, model: str) -> AgentInv
     assertion 3 verifies it still appears in the step_context tools_schema.
     """
     workflow_dir = tmp_path / ".imp" / "change" / "workflow"
-    skills_dir = workflow_dir / "skills" / "agent"
+    skills_dir = workflow_dir / "skills"
     skills_dir.mkdir(parents=True, exist_ok=True)
     (skills_dir / "refactor.md").write_text(SKILL_BODY)
 
@@ -167,7 +167,7 @@ def _assert_skill_load_event(events: list[dict[str, Any]]) -> None:
     """Assertion 2: exactly ONE skill_load event with correct payload/agent_id."""
     loads = [e for e in events if e["type"] == "skill_load"]
     assert len(loads) == 1, f"expected 1 skill_load event, got {len(loads)}: {loads}"
-    assert loads[0]["payload"] == {"name": "refactor", "source": "agent"}, (
+    assert loads[0]["payload"] == {"name": "refactor", "source": "internal"}, (
         f"skill_load payload mismatch: {loads[0]['payload']}"
     )
     assert loads[0]["agent_id"] is None, (
@@ -326,7 +326,7 @@ async def test_claude_code_load_skill_via_wrap_one(tmp_path: Path) -> None:
     """
     # Set up workflow_dir with skills/refactor.md
     workflow_dir = tmp_path / ".imp" / "change" / "workflow"
-    skills_dir = workflow_dir / "skills" / "agent"
+    skills_dir = workflow_dir / "skills"
     skills_dir.mkdir(parents=True, exist_ok=True)
     (skills_dir / "refactor.md").write_text(SKILL_BODY)
 
@@ -385,7 +385,7 @@ async def test_claude_code_load_skill_flush_orders_below_narration(
     membership assertion fails; with the fix it is emitted, and before skill_load.
     """
     workflow_dir = tmp_path / ".imp" / "change" / "workflow"
-    skills_dir = workflow_dir / "skills" / "agent"
+    skills_dir = workflow_dir / "skills"
     skills_dir.mkdir(parents=True, exist_ok=True)
     (skills_dir / "refactor.md").write_text(SKILL_BODY)
 

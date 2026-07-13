@@ -1,20 +1,22 @@
-"""Skill resolution shared by the load_skill tool (agent path, spec §3) and the
-interactive slash dispatcher (human path, spec §4).
+"""Skill resolution shared by the load_skill tool (internal path) and the
+interactive slash dispatcher (human path).
 
-Skills live in two audience-scoped subdirectories of <workflow_dir>/skills/:
-  agent/  — disciplines loaded by subagents (load_agent_skill)
-  user/   — skills surfaced to the human (load_user_skill / list_user_skills)
+Skills live under <skills_dir>/:
+  <skills_dir>/*.md       — internal skills loaded by agents (load_internal_skill)
+  <skills_dir>/user/*.md  — skills surfaced to the human (load_user_skill / list_user_skills)
 
-Agent path: resolves skills/agent/<name>.md, falling back to skills/user/<name>.md.
-Human path: reads skills/user/ only; agent disciplines are never reachable here.
-Each subdir applies the same name sanitization (reject empty / dot / traversal /
-separator names). A missing subdir reads as not-found/empty, never a bare OSError.
+Internal path: resolves skills/<name>.md, falling back to skills/user/<name>.md.
+Human path: reads skills/user/ only; internal skills are never reachable here.
+Each lookup applies the same name sanitization (reject empty / dot / traversal /
+separator names). A missing dir reads as not-found/empty, never a bare OSError.
 """
 
 from __future__ import annotations
 
 import shutil
 from pathlib import Path
+
+from imp.assets import bundled_skills_dir
 
 
 class SkillError(Exception):
@@ -66,19 +68,19 @@ def _split_frontmatter(text: str) -> tuple[str | None, str]:
     return description, body
 
 
-def load_agent_skill(skills_dir: Path, name: str) -> str:
-    """Agent path: resolve <skills_dir>/agent/<name>.md, falling back to
+def load_internal_skill(skills_dir: Path, name: str) -> str:
+    """Internal path: resolve <skills_dir>/<name>.md, falling back to
     <skills_dir>/user/<name>.md. Strip any leading frontmatter from the body.
     Raises SkillNameError for a bad name, SkillNotFound if neither file exists."""
-    for audience in ("agent", "user"):
-        path = _safe_skill_path(skills_dir / audience, name)
+    for base in (skills_dir, skills_dir / "user"):
+        path = _safe_skill_path(base, name)
         if path.is_file():
             return _split_frontmatter(path.read_text())[1]
     raise SkillNotFound(f"no such skill {name!r}")
 
 
 def load_user_skill(skills_dir: Path, name: str) -> str:
-    """Human path: resolve <skills_dir>/user/<name>.md ONLY (agent disciplines
+    """Human path: resolve <skills_dir>/user/<name>.md ONLY (internal skills
     are never reachable here). Strip any leading frontmatter from the body."""
     path = _safe_skill_path(skills_dir / "user", name)
     if not path.is_file():
@@ -90,8 +92,8 @@ def overlay_project_skills(project_root: Path, dest_user_dir: Path) -> None:
     """Overlay <project_root>/imp/skills/*.md into `dest_user_dir` (a snapshot's
     skills/user/), so a bundled-workflow user drops skills there without forking.
     On a name collision the project file shadows the workflow's user skill. A
-    missing imp/skills/ source is a no-op. Only user/ is ever written — agent
-    disciplines are never overlaid."""
+    missing imp/skills/ source is a no-op. Only user/ is ever written — internal
+    skills are never overlaid."""
     src = project_root / "imp" / "skills"
     if not src.is_dir():
         return
@@ -99,6 +101,20 @@ def overlay_project_skills(project_root: Path, dest_user_dir: Path) -> None:
     for md in sorted(src.glob("*.md")):
         if md.is_file():
             shutil.copy2(md, dest_user_dir / md.name)
+
+
+def overlay_global_skills(dest_skills_dir: Path) -> None:
+    """Overlay the bundled global pool (src/imp/assets/skills/*.md) into
+    `dest_skills_dir` (a snapshot's skills/ root). On a name collision the file
+    already present wins — the workflow's own internal skill, landed by the prior
+    copytree — so the overlay never clobbers a workflow-provided skill. The dest
+    dir is created if absent."""
+    src = bundled_skills_dir()
+    dest_skills_dir.mkdir(parents=True, exist_ok=True)
+    for md in sorted(src.glob("*.md")):
+        target = dest_skills_dir / md.name
+        if md.is_file() and not target.exists():
+            shutil.copy2(md, target)
 
 
 def list_user_skills(skills_dir: Path) -> list[tuple[str, str | None]]:
@@ -114,4 +130,3 @@ def list_user_skills(skills_dir: Path) -> list[tuple[str, str | None]]:
             description = _split_frontmatter(p.read_text())[0]
             out.append((p.stem, description))
     return out
-
