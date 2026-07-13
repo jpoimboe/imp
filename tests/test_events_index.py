@@ -45,3 +45,34 @@ def test_coalesce_ranges_merges_adjacent_and_splits_gaps() -> None:
 def test_format_ranges_uses_hash_prefix_and_dash() -> None:
     assert ei.format_ranges([(59, 120), (210, 255)]) == "#59-120, #210-255"
     assert ei.format_ranges([(42, 42)]) == "#42"
+
+
+def test_parse_range_spec_single_list_and_ranges() -> None:
+    assert ei.parse_range_spec("42", max_ordinal=500) == [(42, 42)]
+    assert ei.parse_range_spec("42,55,60", max_ordinal=500) == [
+        (42, 42), (55, 55), (60, 60)]
+    assert ei.parse_range_spec("59-120,210-255", max_ordinal=500) == [
+        (59, 120), (210, 255)]
+
+
+def test_parse_range_spec_open_ends_resolve_against_max() -> None:
+    assert ei.parse_range_spec("59-", max_ordinal=300) == [(59, 300)]
+    assert ei.parse_range_spec("-80", max_ordinal=300) == [(1, 80)]
+
+
+def test_parse_range_spec_tolerates_hash_and_whitespace() -> None:
+    assert ei.parse_range_spec(" #59-120 , #210-255 ", max_ordinal=999) == [
+        (59, 120), (210, 255)]
+
+
+def test_in_intervals_membership() -> None:
+    intervals = [(59, 120), (210, 255)]
+    assert ei.in_intervals(59, intervals) is True
+    assert ei.in_intervals(255, intervals) is True
+    assert ei.in_intervals(200, intervals) is False
+
+
+def test_format_ranges_round_trips_through_parse() -> None:
+    ranges = [(59, 120), (210, 255)]
+    text = ei.format_ranges(ranges)
+    assert ei.parse_range_spec(text, max_ordinal=999) == ranges

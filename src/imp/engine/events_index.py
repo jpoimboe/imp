@@ -35,3 +35,28 @@ def format_ranges(ranges: Sequence[tuple[int, int]]) -> str:
     """Render spans as the paste-back selector syntax: `#59-120, #210-255`."""
     parts = [f"#{lo}" if lo == hi else f"#{lo}-{hi}" for lo, hi in ranges]
     return ", ".join(parts)
+
+
+def parse_range_spec(spec: str, max_ordinal: int) -> list[tuple[int, int]]:
+    """Parse a comma-separated selector of ordinals and ranges with open ends
+    (`42`, `42,55,60`, `59-120`, `59-120,210-255`, `59-`, `-80`) into inclusive
+    (lo, hi) intervals. An open low end resolves to 1; an open high end to
+    `max_ordinal`. A leading `#` and surrounding whitespace are tolerated so a
+    printed range pastes back verbatim."""
+    intervals: list[tuple[int, int]] = []
+    for token in spec.split(","):
+        token = token.strip().lstrip("#")
+        if not token:
+            continue
+        if "-" in token:
+            lo_s, hi_s = token.split("-", 1)
+            lo = int(lo_s) if lo_s.strip() else 1
+            hi = int(hi_s) if hi_s.strip() else max_ordinal
+        else:
+            lo = hi = int(token)
+        intervals.append((lo, hi))
+    return intervals
+
+
+def in_intervals(n: int, intervals: Sequence[tuple[int, int]]) -> bool:
+    return any(lo <= n <= hi for lo, hi in intervals)
