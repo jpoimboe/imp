@@ -2364,3 +2364,67 @@ async def test_skill_request_is_routed_and_command_line_echoed(
         command="/refactor src/foo.py", name="refactor",
         body="BODY\n\nsrc/foo.py\n")]
     assert echoed == ["/refactor src/foo.py"]
+
+
+@pytest.mark.anyio
+async def test_sandbox_off_at_gate_forwards_frame_and_flips_marker(
+    tmp_path: Path,
+) -> None:
+    sock = str(tmp_path / "s.sock")
+    server_coord = InterruptCoordinator()
+    server = SessionServer(sock, hibernate=False, coordinator=server_coord)
+
+    async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
+        with anyio.fail_after(5):
+            while server.attached_count == 0:
+                await server.wait_for_attach_change()
+        on_event({"type": "awaiting_user_input", "payload": {"steer_hint": "reply?"}})
+        with anyio.fail_after(5):
+            while not server_coord.unsandboxed:
+                await anyio.sleep(0.02)
+        return "done"
+
+    coord = InterruptCoordinator()
+
+    async def _attach(
+        on_event: Callable[[dict[str, Any]], None],
+    ) -> SessionClient:
+        client = SessionClient(sock, "c1", "T", on_event=on_event)
+        await client.connect()
+        return client
+
+    replies = iter(["/sandbox off"])
+
+    async def _solicit(_prompt: str) -> str:
+        try:
+            return next(replies)
+        except StopIteration:
+            await anyio.sleep_forever()
+
+    marker: list[bool] = []
+
+    class _Driver:
+        def on_event(self, _event: dict[str, Any]) -> None: ...
+        def finish(self) -> None: ...
+        def append_committed_reply(self, _text: str) -> None: ...
+        def set_unsandboxed(self, value: bool) -> None:
+            marker.append(value)
+
+    with anyio.fail_after(10):
+        async with anyio.create_task_group() as tg:
+            await server.open()
+            tg.start_soon(server.serve, run_fn)
+
+            async def _client() -> None:
+                await run_terminal_client(
+                    attach=_attach, driver=_Driver(),
+                    coord=coord, solicit=_solicit, quest_id="c1")
+
+            tg.start_soon(_client)
+            with anyio.fail_after(8):
+                while not server_coord.unsandboxed:
+                    await anyio.sleep(0.02)
+            tg.cancel_scope.cancel()
+
+    assert server_coord.unsandboxed is True
+    assert marker == [True]

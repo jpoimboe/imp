@@ -226,6 +226,7 @@ class InterruptCoordinator:
         self._interrupted = False
         self.pause_reason: str | None = None
         self._pending_model: str | None = None
+        self._unsandboxed = False
         self._loop: Any = None          # event loop owning the signal handlers
         self._sig_send: Any = None      # memory-stream send half (loop cb -> task)
         self._interjects: list[str] = []
@@ -309,6 +310,14 @@ class InterruptCoordinator:
         arg = self._pending_model
         self._pending_model = None
         return arg
+
+    def set_unsandboxed(self, value: bool) -> None:
+        """Set the session unsandboxed override. Session-scoped."""
+        self._unsandboxed = value
+
+    @property
+    def unsandboxed(self) -> bool:
+        return self._unsandboxed
 
     @property
     def solicit_active(self) -> bool:

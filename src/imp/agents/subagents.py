@@ -164,7 +164,8 @@ def _emit_collision_warning(
             })
 
 
-def _build_isolated_policy(quest: Any, worktree_path: Path, test_gates: Any) -> Any:
+def _build_isolated_policy(quest: Any, worktree_path: Path, test_gates: Any,
+                           *, parent_policy: Any = None) -> Any:
     """Build the sandbox policy for an isolated (disposable-tree) subagent, rooted
     at its throwaway worktree and drawn from the universal home/caches/masks. No
     network force and no bespoke home — network follows the run-level config, and
@@ -187,12 +188,16 @@ def _build_isolated_policy(quest: Any, worktree_path: Path, test_gates: Any) -> 
                    quest_title=quest.title, quest_dir=quest.quest_dir,
                    test_gates=test_gates, pythonpath=config.pythonpath),
     )
-    return resolve_policy(
+    policy = resolve_policy(
         worktree=worktree_path, control_root=quest.control_root,
         quest_id=quest.id, cfg=cfg, engine_env_result=eng,
         environ=os.environ, available=sandbox_available(),
         quest_dir=quest.quest_dir, disposable_tree=True,
     )
+    if parent_policy is not None and not parent_policy.active:
+        policy = dataclasses.replace(
+            policy, active=False, note=parent_policy.note or "unsandboxed_override")
+    return policy
 
 
 def _attach_isolated_home(
@@ -267,7 +272,8 @@ async def dispatch_task(
             assert spike_worktree is not None
             link_quest_home(spike_worktree, ctx.quest.quest_dir)
             dispatch_policy = _build_isolated_policy(
-                ctx.quest, spike_worktree, ctx.test_gates)
+                ctx.quest, spike_worktree, ctx.test_gates,
+                parent_policy=ctx.sandbox_policy)
             dispatch_policy, home_cleanup = _attach_isolated_home(
                 dispatch_policy, spike_worktree, ctx.quest.quest_dir)
             if not dispatch_policy.active and ctx.event_log is not None:

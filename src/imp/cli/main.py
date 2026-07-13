@@ -51,6 +51,7 @@ from imp.cli.session_run import (
 from imp.cli.signals import install_process_group, prompt_sigint_guard
 from imp.cli.slash import ask_line_with_slash
 from imp.cli.terminal_title import TerminalTitle
+from imp.diagnostics import install_stack_dumper
 from imp.engine import backlog, worktree
 from imp.engine.abandon import (
     discard_conversation,
@@ -3413,6 +3414,9 @@ def _init_logging() -> None:
 
 def main(argv: list[str] | None = None) -> int:
     _init_logging()
+    with contextlib.suppress(Exception):
+        install_stack_dumper(
+            _control_root() / ".imp" / f"cli.{os.getpid()}.stack-dump.txt")
     args = sys.argv[1:] if argv is None else argv
     parser = _build_parser()
     try:

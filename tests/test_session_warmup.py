@@ -3,6 +3,7 @@ from __future__ import annotations
 import subprocess
 import sys
 import textwrap
+from types import SimpleNamespace
 
 
 def test_warmup_imports_full_graph_with_zero_failures() -> None:
@@ -58,9 +59,10 @@ def test_main_warms_module_graph_before_serving(monkeypatch, tmp_path) -> None:
         return 0
 
     monkeypatch.setattr(daemon, "warm_module_graph", _fake_warm)
+    monkeypatch.setattr(daemon, "install_stack_dumper", lambda p: None)
     def _fake_load(cls, root, qid):
         calls.append("load")
-        return object()
+        return SimpleNamespace(quest_dir=tmp_path)
 
     monkeypatch.setattr(daemon.Quest, "load", classmethod(_fake_load))
     monkeypatch.setattr(daemon.anyio, "run", _fake_run)

@@ -9,6 +9,7 @@ from imp.remote.session.protocol import (
     CONTROL_INTERRUPT,
     CONTROL_INTERRUPT_FORCE,
     CONTROL_SET_MODEL,
+    CONTROL_SET_SANDBOX,
 )
 
 
@@ -29,6 +30,9 @@ class SessionControls:
 
     async def set_model(self, arg: str) -> None:
         await self._client.send_control(CONTROL_SET_MODEL, arg)
+
+    async def set_sandbox(self, arg: str) -> None:
+        await self._client.send_control(CONTROL_SET_SANDBOX, arg)
 
     async def detach(self) -> None:
         await self._client.aclose()

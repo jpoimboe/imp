@@ -21,6 +21,7 @@ from imp.remote.session.protocol import (
     CONTROL_INTERRUPT_LEAVE,
     CONTROL_SAVE,
     CONTROL_SET_MODEL,
+    CONTROL_SET_SANDBOX,
     SkillRequest,
 )
 from imp.remote.session.socket_server import ReplaySnapshot, SessionSocket
@@ -409,6 +410,10 @@ class SessionServer:
             await self._coordinator.signal_pause(
                 reason="model-override", via="frame")
             self._pulse_model_override()
+        elif action == CONTROL_SET_SANDBOX and self._coordinator is not None:
+            self._coordinator.set_unsandboxed(reason == "off")
+            await self._coordinator.signal_pause(
+                reason="sandbox-override", via="frame")
         elif action == CONTROL_INTERRUPT_LEAVE and self._coordinator is not None:
             await self._coordinator.signal_pause(reason=reason or "ctrl-d", via="frame")
         elif action == CONTROL_INTERRUPT_FORCE and self._coordinator is not None:

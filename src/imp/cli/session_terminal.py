@@ -138,7 +138,8 @@ async def run_terminal_client(
                                 continue
                             # Echo a recognized control command before handling (non-reconciling).
                             control = reply.strip()
-                            if (control in ("/abandon", "/save", "/clear")
+                            if (control in ("/abandon", "/save", "/clear",
+                                            "/sandbox on", "/sandbox off")
                                     or control.startswith("/model ")):
                                 driver.append_committed_reply(control)
                             if reply.strip() == "/abandon":
@@ -169,6 +170,11 @@ async def run_terminal_client(
                                 # Sent as a control; stay attached, daemon applies it + re-prompts.
                                 arg = reply.strip()[len("/model "):].strip()
                                 await controls.set_model(arg)
+                                continue
+                            if reply.strip() in ("/sandbox on", "/sandbox off"):
+                                arg = reply.strip()[len("/sandbox "):].strip()
+                                driver.set_unsandboxed(arg == "off")
+                                await controls.set_sandbox(arg)
                                 continue
                             if local_echo is not None:
                                 local_echo(reply)

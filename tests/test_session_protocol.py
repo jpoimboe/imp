@@ -219,3 +219,15 @@ def test_set_model_control_round_trips() -> None:
     line = encode_control(CONTROL_SET_MODEL, "anthropic:claude-fable-5")
     assert parse_client_message(line) == Control(
         "set-model", "anthropic:claude-fable-5")
+
+
+def test_encode_and_parse_set_sandbox_control() -> None:
+    from imp.remote.session.protocol import (
+        CONTROL_SET_SANDBOX,
+        Control,
+        encode_control,
+        parse_client_message,
+    )
+    line = encode_control(CONTROL_SET_SANDBOX, "off")
+    assert "\n" not in line
+    assert parse_client_message(line) == Control(CONTROL_SET_SANDBOX, "off")

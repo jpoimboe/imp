@@ -1733,3 +1733,21 @@ async def test_wait_for_model_override_returns_when_pause_already_committed(
     # evt.wait(). A regression to await-only would time out here.
     with anyio.fail_after(1):
         await server._wait_for_model_override()
+
+
+@pytest.mark.anyio
+async def test_set_sandbox_control_flips_override_and_pauses(tmp_path: Path) -> None:
+    from imp.cli.signals import InterruptCoordinator
+    from imp.remote.session.protocol import CONTROL_SET_SANDBOX
+
+    coord = InterruptCoordinator()
+    server = SessionServer(str(tmp_path / "s.sock"), coordinator=coord)
+    assert coord.unsandboxed is False
+
+    await server._dispatch_control(CONTROL_SET_SANDBOX, "off")
+    assert coord.unsandboxed is True
+    assert coord.should_pause is True
+    assert coord.pause_reason == "sandbox-override"
+
+    await server._dispatch_control(CONTROL_SET_SANDBOX, "on")
+    assert coord.unsandboxed is False
