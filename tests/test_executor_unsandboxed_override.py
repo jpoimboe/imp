@@ -33,14 +33,15 @@ def test_interactive_step_without_override_is_unchanged() -> None:
     assert out is policy
 
 
-def test_autonomous_step_ignores_the_override() -> None:
-    # Acceptance criterion 7: a non-interactive phase step stays sandboxed even
-    # when the session override is set.
+def test_non_interactive_step_honors_the_override() -> None:
+    # Step-scoped: with the interactive gate removed, a non-interactive phase
+    # step is deactivated when the session override is set (acceptance criterion:
+    # non-interactive-step-honors-override).
     coord = SimpleNamespace(unsandboxed=True)
     policy = _active_policy()
     out = _apply_unsandboxed_override(policy, _step(interactive=False), coord)
-    assert out.active is True
-    assert out is policy
+    assert out.active is False
+    assert out.note == "unsandboxed_override"
 
 
 def test_none_policy_and_none_coordinator_are_safe() -> None:

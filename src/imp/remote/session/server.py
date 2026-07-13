@@ -308,6 +308,10 @@ class SessionServer:
             if self._events_path is not None else None)
         if self._pending_prompt is not None:
             send_one(self._pending_prompt)
+        # Seed the transient marker to a client attaching while the override is live.
+        if self._coordinator is not None and self._coordinator.unsandboxed:
+            send_one({"type": "sandbox_marker",
+                      "payload": {"unsandboxed": True}})
         self._note_first_leased()
         return snapshot
 
@@ -412,6 +416,9 @@ class SessionServer:
             self._pulse_model_override()
         elif action == CONTROL_SET_SANDBOX and self._coordinator is not None:
             self._coordinator.set_unsandboxed(reason == "off")
+            # Transient: broadcast-only via _emit, never the event log, so it can't replay stale.
+            self._emit({"type": "sandbox_marker",
+                        "payload": {"unsandboxed": reason == "off"}})
             await self._coordinator.signal_pause(
                 reason="sandbox-override", via="frame")
         elif action == CONTROL_INTERRUPT_LEAVE and self._coordinator is not None:

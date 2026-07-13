@@ -312,7 +312,9 @@ class InterruptCoordinator:
         return arg
 
     def set_unsandboxed(self, value: bool) -> None:
-        """Set the session unsandboxed override. Session-scoped."""
+        """Set the unsandboxed override flag. Step-scoped: the durable truth lives
+        on State.unsandboxed (restored into this coordinator on resume, cleared at
+        step advance). reset() deliberately does NOT clear this flag."""
         self._unsandboxed = value
 
     @property

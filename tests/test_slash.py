@@ -482,7 +482,7 @@ def test_sandbox_off_when_on_returns_confirm_sentinel(tmp_path: Path) -> None:
     result = handle_slash_line("/sandbox off", quest=quest, output_fn=out.append,
                                unsandboxed=False)
     assert result is CONFIRM_SANDBOX_OFF
-    assert any("Disable the sandbox for the rest of this session? [y/N]" in line
+    assert any("Disable the sandbox for this step? [y/N]" in line
                for line in out)
     assert not any(line.strip().startswith(">") and "/sandbox off" in line for line in out)
 
@@ -512,12 +512,13 @@ def test_sandbox_copy_strings_are_verbatim() -> None:
         "Sandbox is on. Shell and file tools are confined to this quest's "
         "worktree; secrets are masked.")
     assert slash.SANDBOX_STATE_OFF == (
-        "Sandbox is off — this session is unsandboxed. Shell and file tools run "
-        "as you: your home directory and secrets are readable and writes are "
-        "unconfined. Run /sandbox on to re-enable it.")
+        "Sandbox is off — this step is running unsandboxed. Shell and file "
+        "tools run as you: your home directory and secrets are readable and "
+        "writes are unconfined. It re-enables when the step finishes; run "
+        "/sandbox on to re-enable it now.")
     assert slash.SANDBOX_OFF_CONFIRMED == (
-        "Sandbox off — this session is now unsandboxed. Run /sandbox on to "
-        "re-enable it.")
+        "Sandbox off — this step is now unsandboxed. It re-enables when the "
+        "step finishes; run /sandbox on to re-enable it now.")
     assert slash.SANDBOX_OFF_DECLINED == "Left the sandbox on."
     assert slash.SANDBOX_ON_FROM_OFF == (
         "Sandbox on. Shell and file tools are confined to the worktree again. "
@@ -533,7 +534,8 @@ def test_sandbox_copy_strings_are_verbatim() -> None:
         "  · writes are no longer limited to this quest's worktree\n"
         "This is what lets you attach debuggers (gdb, py-spy, strace) to live "
         "processes.\n"
-        "Disable the sandbox for the rest of this session? [y/N]")
+        "It re-enables automatically when this step finishes.\n"
+        "Disable the sandbox for this step? [y/N]")
 
 
 def test_sandbox_off_confirm_yes_returns_control_line(

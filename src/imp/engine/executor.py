@@ -561,6 +561,20 @@ async def run_quest(
             else:
                 raise AssertionError(f"unexpected action {action!r}")
 
+            # state.step just moved to a DIFFERENT step: if the unsandboxed override
+            # was live it was step-scoped, so retire it here. Same-step pause/resume
+            # paths (Pause return, max_loops pause, action-less re-dispatch)
+            # short-circuit before this point, so the override survives a resume of
+            # the same step. The guard skips the whole hook when the override was
+            # never set, so an ordinary sandboxed quest broadcasts no redundant
+            # marker. Broadcast the transient marker via the raw on_event callback —
+            # NOT the persisting _emit(log, ...) — so it never reaches events.jsonl.
+            if state.unsandboxed or coordinator.unsandboxed:
+                state.unsandboxed = False
+                coordinator.set_unsandboxed(False)
+                on_event({"type": "sandbox_marker",
+                          "payload": {"unsandboxed": False}})
+
             # Stash wrapper feedback for the target step to consume via the
             # fresh-entry opening message: the goto's rework feedback and/or a
             # prior-attempts memory of the target step's own recent outcomes.
@@ -723,12 +737,12 @@ def _apply_readonly_overlay(policy: Any, step: Step, project_root: Path) -> Any:
 
 
 def _apply_unsandboxed_override(policy: Any, step: Step, coordinator: Any) -> Any:
-    """Compose the session unsandboxed override into a dispatch-time inactive
-    policy copy. Applies ONLY to an interactive step: an autonomous phase step
-    always keeps the full resolved policy, so no autonomous phase can be
-    unsandboxed by this toggle. No-op when the policy is None, the coordinator
-    is absent, or the override is not set."""
-    if policy is None or not step.interactive:
+    """Compose the step-scoped unsandboxed override into a dispatch-time inactive
+    policy copy. Applies to ANY running step while the override is set — its
+    lifetime is bounded by the step (cleared at step advance, restored on resume),
+    not by whether the step is interactive. No-op when the policy is None, the
+    coordinator is absent, or the override is not set."""
+    if policy is None:
         return policy
     if coordinator is None or not coordinator.unsandboxed:
         return policy

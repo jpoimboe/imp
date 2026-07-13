@@ -1751,3 +1751,49 @@ async def test_set_sandbox_control_flips_override_and_pauses(tmp_path: Path) -> 
 
     await server._dispatch_control(CONTROL_SET_SANDBOX, "on")
     assert coord.unsandboxed is False
+
+
+@pytest.mark.anyio
+async def test_set_sandbox_control_broadcasts_transient_marker(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from imp.cli.signals import InterruptCoordinator
+    from imp.remote.session.protocol import CONTROL_SET_SANDBOX
+
+    coord = InterruptCoordinator()
+    server = SessionServer(str(tmp_path / "s.sock"), coordinator=coord)
+    broadcasts: list[dict[str, Any]] = []
+    # Capture at broadcast to prove the marker rides the broadcast-only channel, not events.jsonl.
+    monkeypatch.setattr(server._socket, "broadcast", broadcasts.append)
+
+    await server._dispatch_control(CONTROL_SET_SANDBOX, "off")
+    await server._dispatch_control(CONTROL_SET_SANDBOX, "on")
+
+    markers = [e for e in broadcasts if e.get("type") == "sandbox_marker"]
+    assert [m["payload"]["unsandboxed"] for m in markers] == [True, False]
+
+
+def test_attach_pulse_seeds_marker_when_unsandboxed(tmp_path: Path) -> None:
+    from imp.cli.signals import InterruptCoordinator
+
+    coord = InterruptCoordinator()
+    coord.set_unsandboxed(True)
+    server = SessionServer(str(tmp_path / "s.sock"), coordinator=coord)
+
+    sent: list[dict[str, Any]] = []
+    server._on_attach_pulse(object(), sent.append)
+
+    assert {"type": "sandbox_marker",
+            "payload": {"unsandboxed": True}} in sent
+
+
+def test_attach_pulse_does_not_seed_marker_when_sandboxed(tmp_path: Path) -> None:
+    from imp.cli.signals import InterruptCoordinator
+
+    coord = InterruptCoordinator()   # sandboxed: override not set
+    server = SessionServer(str(tmp_path / "s.sock"), coordinator=coord)
+
+    sent: list[dict[str, Any]] = []
+    server._on_attach_pulse(object(), sent.append)
+
+    assert not any(e.get("type") == "sandbox_marker" for e in sent)

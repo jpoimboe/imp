@@ -44,4 +44,5 @@ status
 step
 step_attempt
 step_label
+unsandboxed
 vars
