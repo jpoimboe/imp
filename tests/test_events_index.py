@@ -403,3 +403,52 @@ def test_select_type_or_within_multivalue_set() -> None:
         _indexed(events), types={"tool_call", "agent_output"},
         handle_map=handles)
     assert [o for o, _ in got] == [2, 3, 4, 7]
+
+
+def test_index_json_carries_steps_and_types() -> None:
+    events = [
+        _ev(None, "step_started", step="spec"),
+        _ev("a", "tool_call", agent_id="step:design/spec"),
+        _ev(None, "step_completed", step="spec"),
+    ]
+    idx = ei.build_index(_indexed(events), quest_id="q1")
+    obj = ei.index_json(idx)
+    assert obj["quest_id"] == "q1"
+    assert obj["steps"][0]["name"] == "spec"
+    assert obj["steps"][0]["ranges"] == [[1, 3]]
+    assert isinstance(obj["types"], list)
+    assert obj["types"][0]["type"] == "step_started"
+    assert isinstance(obj["types"][0]["count"], int)
+
+
+def test_events_json_includes_ordinal_and_full_payload() -> None:
+    ev = _ev("a", "tool_call", agent_id="step:design/spec",
+             timestamp="2026-07-01T00:00:00+00:00",
+             name="read_file", input={"path": "x.py"})
+    obj = ei.events_json([(42, ev)])
+    assert obj[0]["ordinal"] == 42
+    assert obj[0]["type"] == "tool_call"
+    # full payload retains the wall-clock timestamp (unlike the digest line).
+    assert obj[0]["timestamp"] == "2026-07-01T00:00:00+00:00"
+    assert obj[0]["payload"]["name"] == "read_file"
+
+
+def test_step_index_json_carries_windows_agents_and_types() -> None:
+    events = [
+        _ev(None, "step_started", step="task-lead"),                    # 1
+        _ev("D1", "tool_call", agent_id="step:main/task-lead",
+            name="sub_agent", input={"subagent_name": "coder"}),        # 2
+        _ev("e1", "tool_call", agent_id="sub:D1"),                      # 3
+        _ev(None, "step_completed", step="task-lead"),                  # 4
+    ]
+    handles = ei.subagent_handle_map(_indexed(events))
+    si = ei.build_step_index(_indexed(events), "task-lead", handles)
+    obj = ei.step_index_json(si)
+    assert obj["step"] == "task-lead"
+    assert obj["windows"] == [[1, 4]]
+    handles_out = {a["handle"] for a in obj["agents"]}
+    assert "task-lead" in handles_out
+    assert "coder-1" in handles_out
+    assert isinstance(obj["types"], list)
+    assert obj["types"][0]["type"]
+    assert isinstance(obj["types"][0]["count"], int)

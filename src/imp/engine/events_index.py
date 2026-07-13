@@ -429,3 +429,47 @@ def select_event_lines(
     if limit is not None and limit > 0:
         out = out[-limit:]
     return out
+
+
+def index_json(index: Index) -> dict[str, Any]:
+    return {
+        "quest_id": index.quest_id,
+        "total_events": index.total_events,
+        "step_count": index.step_count,
+        "steps": [
+            {
+                "name": r.name,
+                "ranges": [[lo, hi] for lo, hi in r.ranges],
+                "count": r.count,
+                "occurrences": r.occurrences,
+                "subagents": r.subagents,
+            }
+            for r in index.steps
+        ],
+        "types": [{"type": t, "count": c} for t, c in index.types],
+    }
+
+
+def step_index_json(index: ScopedIndex) -> dict[str, Any]:
+    return {
+        "step": index.step_name,
+        "windows": [[lo, hi] for lo, hi in index.windows],
+        "total_events": index.total_events,
+        "agents": [
+            {
+                "handle": a.handle,
+                "ranges": [[lo, hi] for lo, hi in a.ranges],
+                "count": a.count,
+            }
+            for a in index.agents
+        ],
+        "types": [{"type": t, "count": c} for t, c in index.types],
+    }
+
+
+def events_json(
+    selected: Sequence[tuple[int, dict[str, Any]]],
+) -> list[dict[str, Any]]:
+    """Full structured payloads (with the wall-clock timestamp) plus the `#N`
+    ordinal, one object per selected event."""
+    return [{**event, "ordinal": ordinal} for ordinal, event in selected]

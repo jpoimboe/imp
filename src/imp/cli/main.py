@@ -3214,10 +3214,19 @@ def _cmd_events(args: argparse.Namespace) -> int:
                 or args.limit is not None)
 
     if not leaf and steps is not None:
-        lines: list[str] = []
-        for i, name in enumerate(sorted(steps)):
+        scoped_all = []
+        for name in sorted(steps):
             scoped = ei.build_step_index(indexed, name, handle_map)
-            assert scoped is not None  # validated above
+            assert scoped is not None  # validated in the up-front step check
+            scoped_all.append(scoped)
+        if args.json:
+            payload = (ei.step_index_json(scoped_all[0]) if len(scoped_all) == 1
+                       else [ei.step_index_json(s) for s in scoped_all])
+            _page_or_print(json.dumps(payload, indent=2).splitlines(),
+                           no_pager=args.no_pager)
+            return 0
+        lines = []
+        for i, scoped in enumerate(scoped_all):
             if i:
                 lines.append("")
             lines.extend(ei.render_step_index(scoped))
@@ -3226,6 +3235,11 @@ def _cmd_events(args: argparse.Namespace) -> int:
 
     if not leaf:
         index = ei.build_index(indexed, quest_id)
+        if args.json:
+            _page_or_print(
+                json.dumps(ei.index_json(index), indent=2).splitlines(),
+                no_pager=args.no_pager)
+            return 0
         _page_or_print(ei.render_index(index), no_pager=args.no_pager)
         return 0
 
@@ -3233,6 +3247,11 @@ def _cmd_events(args: argparse.Namespace) -> int:
         indexed, types=types, agents=agents,
         ranges=intervals or None, step_names=steps,
         all_=args.all, limit=args.limit, handle_map=handle_map)
+    if args.json:
+        _page_or_print(
+            json.dumps(ei.events_json(selected), indent=2).splitlines(),
+            no_pager=args.no_pager)
+        return 0
     _page_or_print(
         [ei.digest_line(o, ev, handle_map) for o, ev in selected],
         no_pager=args.no_pager)

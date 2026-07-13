@@ -119,3 +119,30 @@ def test_events_unknown_step_errors(tmp_path, monkeypatch) -> None:
     with redirect_stdout(buf):
         rc = main(["events", "aaa111", "--step", "nope", "--all"])
     assert rc == 2
+
+
+def test_events_json_index_parses(tmp_path, monkeypatch) -> None:
+    _make_live_quest(tmp_path, "aaa111", _EVENTS)
+    out = _run(monkeypatch, tmp_path, "events", "aaa111", "--json")
+    obj = json.loads(out)
+    assert obj["quest_id"] == "aaa111"
+    assert obj["step_count"] == 1
+
+
+def test_events_json_lines_include_timestamp(tmp_path, monkeypatch) -> None:
+    _make_live_quest(tmp_path, "aaa111", _EVENTS)
+    out = _run(monkeypatch, tmp_path, "events", "aaa111",
+               "--type", "tool_call", "--json")
+    obj = json.loads(out)
+    assert obj[0]["type"] == "tool_call"
+    assert "timestamp" in obj[0]
+    assert obj[0]["ordinal"] == 2
+
+
+def test_events_json_step_scoped_parses(tmp_path, monkeypatch) -> None:
+    _make_live_quest(tmp_path, "aaa111", _EVENTS)
+    out = _run(monkeypatch, tmp_path, "events", "aaa111", "--step", "spec", "--json")
+    obj = json.loads(out)
+    assert obj["step"] == "spec"
+    assert obj["windows"] == [[1, 4]]
+    assert isinstance(obj["agents"], list)
