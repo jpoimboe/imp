@@ -3,9 +3,16 @@ tests/conftest.py collection hook. These are ordinary (non-live) unit tests —
 the `test_live_` filename prefix keeps them out of the live-file convention."""
 from __future__ import annotations
 
+import os
+import subprocess
+import sys
+from pathlib import Path
+
 import pytest
 
 from tests._live import KNOWN_PROVIDERS, RUN_LIVE_ALL, parse_run_live
+
+_REPO_ROOT = Path(__file__).resolve().parent.parent
 
 
 def test_parse_run_live_absent_returns_none():
@@ -189,3 +196,25 @@ def test_hook_unknown_provider_flag_raises_usage_error():
     item = _StubItem("tests/test_x_live.py", live_provider="anthropic")
     with pytest.raises(pytest.UsageError):
         pytest_collection_modifyitems(_StubConfig("bogus"), [item])
+
+
+@pytest.mark.timeout(120)  # raise the 60s global cap: this spawns a nested pytest
+def test_bare_pytest_skips_converted_live_file_despite_env():
+    """AC-1 (accident scenario): with IMP_LIVE_PROVIDERS exported, a bare pytest
+    run (no --run-live) skips every live test in a converted module, citing the
+    run-live reason. The ambient env is powerless against the flag gate."""
+    env = {**os.environ, "IMP_LIVE_PROVIDERS": "anthropic,openai,claude_code,codex"}
+    env["PYTHONPATH"] = (
+        str(_REPO_ROOT / "src") + os.pathsep + env.get("PYTHONPATH", "")
+    )
+    proc = subprocess.run(
+        [
+            sys.executable, "-m", "pytest", "-p", "no:randomly", "-rs", "-q",
+            "tests/test_codex_provider_live.py",
+        ],
+        cwd=_REPO_ROOT, env=env, capture_output=True, text=True, timeout=110,
+    )
+    combined = proc.stdout + proc.stderr
+    assert proc.returncode == 0, combined
+    assert "live-API test — pass --run-live to run" in combined
+    assert "IMP_LIVE_PROVIDERS" not in combined  # old skip reason is gone
