@@ -3158,6 +3158,87 @@ def _model_arg_type(value: str) -> str:
     return value
 
 
+def _split_list(values: list[str] | None) -> list[str]:
+    """Flatten a repeatable --opt (action="append") and comma-split each value,
+    so --opt=A,B == --opt=A --opt=B."""
+    if not values:
+        return []
+    out: list[str] = []
+    for v in values:
+        out.extend(part.strip() for part in v.split(",") if part.strip())
+    return out
+
+
+def _cmd_events(args: argparse.Namespace) -> int:
+    from imp.engine import events_index as ei
+
+    control = _control_root()
+    quest_id: str | None
+    if args.token is not None:
+        try:
+            quest_id = _resolve_id(control, args.token)
+        except SystemExit:
+            return 2
+    else:
+        quest_id = _resolve_default_id(control)
+    if quest_id is None:
+        print(_NO_QUESTS_MESSAGE)
+        return 0
+    events = _load_events_for_id(control, quest_id)
+    if events is None:
+        print(f"imp: no such quest {quest_id!r}", file=sys.stderr)
+        return 2
+
+    indexed = list(enumerate(events, start=1))
+    handle_map = ei.subagent_handle_map(indexed)
+    max_ord = indexed[-1][0] if indexed else 0
+
+    types = set(_split_list(args.type)) or None
+    agents = set(_split_list(args.agent)) or None
+    steps = set(_split_list(args.step)) or None
+    range_specs = _split_list(args.range)
+    if args.range_pos:
+        range_specs.append(args.range_pos)
+    intervals: list[tuple[int, int]] = []
+    for spec in range_specs:
+        intervals.extend(ei.parse_range_spec(spec, max_ord))
+
+    if steps is not None:
+        known = {s.name for s in ei.step_windows(indexed)}
+        missing = sorted(steps - known)
+        if missing:
+            print(f"imp: no step {missing[0]!r} in {quest_id}", file=sys.stderr)
+            return 2
+
+    leaf = bool(types or agents or intervals or args.all
+                or args.limit is not None)
+
+    if not leaf and steps is not None:
+        lines: list[str] = []
+        for i, name in enumerate(sorted(steps)):
+            scoped = ei.build_step_index(indexed, name, handle_map)
+            assert scoped is not None  # validated above
+            if i:
+                lines.append("")
+            lines.extend(ei.render_step_index(scoped))
+        _page_or_print(lines, no_pager=args.no_pager)
+        return 0
+
+    if not leaf:
+        index = ei.build_index(indexed, quest_id)
+        _page_or_print(ei.render_index(index), no_pager=args.no_pager)
+        return 0
+
+    selected = ei.select_event_lines(
+        indexed, types=types, agents=agents,
+        ranges=intervals or None, step_names=steps,
+        all_=args.all, limit=args.limit, handle_map=handle_map)
+    _page_or_print(
+        [ei.digest_line(o, ev, handle_map) for o, ev in selected],
+        no_pager=args.no_pager)
+    return 0
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="imp")
     parser.add_argument("--version", action="version", version=f"imp {__version__}")
@@ -3313,6 +3394,50 @@ def _build_parser() -> argparse.ArgumentParser:
              "(FILE, or imp-log-<id>.md when omitted; '-' streams to stdout).",
     )
     p_log.set_defaults(func=_cmd_log)
+
+    p_events = sub.add_parser(
+        "events",
+        help="Slice and dice a quest's event log (imp events <id>).",
+        description=(
+            "Index and filter a quest's event log. Bare: a steps+types index. "
+            "--step <name>: a scoped index for that step's window. "
+            "--type / --agent / <range> / --all: compact event lines "
+            "(#N ordinal, type, [agent], summary). --json for structured "
+            "output. Omit <id> for the most recent quest."
+        ),
+    )
+    p_events.add_argument(
+        "token", nargs="?", default=None,
+        help="Quest id or short token (omit for the most recent quest).")
+    p_events.add_argument(
+        "range_pos", nargs="?", default=None, metavar="RANGE",
+        help="Ordinal selector, e.g. 42, 59-120,210-255, 59-, -80.")
+    p_events.add_argument(
+        "--step", action="append", default=None,
+        help="Scope to a step's window (repeatable / comma-joined).")
+    p_events.add_argument(
+        "--type", action="append", default=None,
+        help="Keep only these event types (repeatable / comma-joined).")
+    p_events.add_argument(
+        "--agent", action="append", default=None,
+        help="Keep only these authors: step name, subagent handle, or "
+             "sub:<id> (repeatable / comma-joined).")
+    p_events.add_argument(
+        "--range", action="append", default=None, dest="range",
+        help="Ordinal selector (repeatable / comma-joined).")
+    p_events.add_argument(
+        "--limit", type=int, default=None,
+        help="Keep only the last N event lines.")
+    p_events.add_argument(
+        "--all", action="store_true",
+        help="All event lines (escape hatch from the index/filters).")
+    p_events.add_argument(
+        "--json", action="store_true",
+        help="Structured output instead of text.")
+    p_events.add_argument(
+        "--no-pager", action="store_true",
+        help="Disable the pager even when stdout is a TTY.")
+    p_events.set_defaults(func=_cmd_events)
 
     p_list = sub.add_parser(
         "list",
