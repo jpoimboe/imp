@@ -81,6 +81,7 @@ def install_dot_recorder(session: Any, state: DotState) -> None:
         before_buffer = app.current_buffer
         before_text = before_buffer.text
         before_working_index = before_buffer.working_index
+        before_selection = before_buffer.selection_state is not None
         original(handler, key_sequence=key_sequence)
         if replay:
             return
@@ -106,6 +107,12 @@ def install_dot_recorder(session: Any, state: DotState) -> None:
             if key_sequence[-1].key in _NON_REPEATABLE:
                 # undo is never the last change, and any pending count is
                 # discarded (vim's '.' never repeats an undo).
+                state._prefix = []
+            elif before_selection:
+                # A visual-mode change (selection active BEFORE the handler; `d`
+                # clears it as it deletes, so read it pre-handler). Replaying its
+                # keys in navigation mode arms a dangling operator, so never
+                # record it; '.' keeps repeating the last non-visual change.
                 state._prefix = []
             elif after_mode in _INSERTISH:
                 # Entered insert/replace: start an insert-change (count/operator

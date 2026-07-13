@@ -223,6 +223,27 @@ async def test_history_navigation_is_not_recorded_as_change() -> None:
 
 
 @pytest.mark.anyio
+async def test_visual_mode_change_is_not_recorded() -> None:
+    # x records the delete (abcdef -> bcdef). A visual delete (v l d -> def) must
+    # NOT overwrite it, so . replays the earlier x: def -> ef. Before the fix,
+    # . replayed the visual d and left the buffer "def".
+    assert await _drive(
+        ["abcdef", ESC, "0", "x", "v", "l", "d", ".", "\r"]) == "ef"
+
+
+@pytest.mark.anyio
+@pytest.mark.timeout(10)
+async def test_dot_after_visual_delete_does_not_swallow_next_key() -> None:
+    # After a visual delete, . must replay the earlier x (def -> ef), not arm a
+    # dangling d operator that parks the prompt in operator-pending and swallows
+    # the next key. The following x then deletes again (ef -> f). Before the fix,
+    # . left the processor operator-pending and the trailing keys never reached
+    # submit (the prompt hung).
+    assert await _drive(
+        ["abcdef", ESC, "0", "x", "v", "l", "d", ".", "x", "\r"]) == "f"
+
+
+@pytest.mark.anyio
 async def test_search_across_history_is_not_recorded_as_change() -> None:
     # `n` (search-next in navigation mode) applies the current search across
     # history, moving working_index without editing. It must NOT overwrite the
