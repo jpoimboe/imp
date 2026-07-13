@@ -97,6 +97,29 @@ archived quest, whose artifacts live in a git ref, not on disk):
   `llm_response` churn. Returns the digest by default (or raw payloads with
   `full=True`), resolving live and archived quests alike.
 
+## Linking a related backlog quest
+
+When you notice that an existing **backlog** quest relates to the work in front
+of you — the same error, a shared root cause, or a fix here that supersedes it —
+record that linkage on the *target* quest itself, not just in this quest's
+ledger, with:
+
+`imp edit <id> --append-intent "<note>"`
+
+This appends the note to that quest's opening intent, so whoever picks it up
+sees it. It works **only before that quest is picked up** (any quest not yet built or conversed with); once a quest is built or conversed with, the command is rejected.
+
+Lead the note with your own quest id in brackets, then phrase the linkage as a
+plain sentence that names the related quest — not a coined token like
+`related-to`:
+
+```
+imp edit tepa94 --append-intent "[nuvu48] hit this same uploader timeout, likely the same root cause"
+```
+
+This lands the linkage on the referenced quest itself instead of only in the
+deferring quest's ledger.
+
 ## Keep the output bounded
 
 The event log grows without limit; pulling all of it floods your context. Scope
