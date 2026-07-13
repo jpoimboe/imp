@@ -786,7 +786,7 @@ def test_task_lead_reads_subagent_final_message_not_named_field() -> None:
 def test_deferred_sweep_reads_subagent_final_message_not_named_field() -> None:
     text = SWEEP.read_text()
     assert "When a subagent returns\n`result: NEEDS_CONTEXT`" not in text
-    assert "final message reports\n`NEEDS_CONTEXT` or `BLOCKED`" in text
+    assert "final message reports `NEEDS_CONTEXT` or `BLOCKED`" in text
 
 
 @pytest.mark.parametrize("tree", ["imp", "patent"])
