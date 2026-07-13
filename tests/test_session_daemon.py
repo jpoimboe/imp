@@ -898,6 +898,13 @@ def test_hold_prompt_none_for_model_override() -> None:
     assert daemon._hold_prompt(RunResult.PAUSED, coord) is None
 
 
+def test_hold_prompt_none_for_sandbox_override() -> None:
+    import imp.remote.session.daemon as daemon
+
+    coord = SimpleNamespace(should_pause=True, pause_reason="sandbox-override")
+    assert daemon._hold_prompt(RunResult.PAUSED, coord) is None
+
+
 def test_hold_prompt_none_for_script_blocked() -> None:
     import imp.remote.session.daemon as daemon
 
@@ -1914,3 +1921,65 @@ def test_resolve_step_kind_maps_step_names_to_kinds(tmp_path: Path) -> None:
     st.step = "not-a-real-step"
     st.save(quest.state_dir)
     assert daemon._resolve_step_kind(quest) is None
+
+
+def test_is_sandbox_override_pause_matches_only_that_reason() -> None:
+    from imp.remote.session.daemon import _is_sandbox_override_pause
+    on = SimpleNamespace(should_pause=True, pause_reason="sandbox-override")
+    other = SimpleNamespace(should_pause=True, pause_reason="ctrl-c")
+    assert _is_sandbox_override_pause(RunResult.PAUSED, on) is True
+    assert _is_sandbox_override_pause(RunResult.PAUSED, other) is False
+    assert _is_sandbox_override_pause(RunResult.COMPLETED, on) is False
+
+
+@pytest.mark.anyio
+async def test_sandbox_override_frame_reprompts_via_redispatch(tmp_path: Path) -> None:
+    from imp.remote.session.protocol import CONTROL_SET_SANDBOX
+
+    quest = _make_change(tmp_path, "2026-06-15-sbx")
+    sock = str(session_socket_path(quest.control_root, quest.id))
+    calls = {"n": 0}
+    seen: dict[str, Any] = {}
+
+    # Wait until fake_run is actively polling should_pause before sending the frame.
+    run_ready = anyio.Event()
+
+    async def fake_run(
+        quest: Quest, *, on_event: Any, user_chat_input_fn: Any,
+        coordinator: Any, wait_for_turn_fn: Any = None,
+    ) -> RunResult:
+        calls["n"] += 1
+        if calls["n"] == 1:
+            run_ready.set()
+            with anyio.fail_after(5):
+                while not coordinator.should_pause:   # the frame pauses us
+                    await anyio.sleep(0.02)
+            return RunResult.PAUSED
+        # Re-dispatch: reset() cleared the pause but NOT the override flag.
+        seen["unsandboxed"] = coordinator.unsandboxed
+        assert not coordinator.should_pause
+        return RunResult.COMPLETED
+
+    async with anyio.create_task_group() as tg:
+        result: dict[str, Any] = {}
+
+        async def _serve() -> None:
+            result["r"] = await serve_quest_session(
+                quest, run_fn=fake_run, hibernate=False)
+
+        tg.start_soon(_serve)
+        await _wait_for_socket(sock)
+        client = SessionClient(sock, quest.id, quest.title,
+                               on_event=lambda _e: None)
+        await client.connect()
+        with anyio.fail_after(5):
+            await run_ready.wait()
+        await client.send_control(CONTROL_SET_SANDBOX, "off")
+        with anyio.fail_after(5):
+            while "r" not in result:
+                await anyio.sleep(0.02)
+        assert result["r"] is RunResult.COMPLETED
+        assert calls["n"] == 2                 # frame → pause → hold-loop re-dispatch
+        assert seen["unsandboxed"] is True     # override survived reset() into the re-run
+        await client.aclose()
+        tg.cancel_scope.cancel()
