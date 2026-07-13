@@ -112,7 +112,7 @@ def test_introspection_search_entry_spans_all_zones_and_content() -> None:
 
 
 def test_introspection_documents_completed_search_and_merge_commit() -> None:
-    body = load_agent_skill(_skills_dir(), "imp-introspection")
+    body = load_internal_skill(_skills_dir(), "imp-introspection")
     # The completed-zone scope flag is documented alongside the other zone flags.
     assert "--completed" in body
     # The imp show detail card surfaces the quest's merge commit.
