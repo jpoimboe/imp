@@ -285,3 +285,31 @@ def test_build_step_index_covers_multiple_windows_for_looped_step() -> None:
     assert roster["task-lead"].count == 6
     text = "\n".join(ei.render_step_index(si))
     assert "#1-3, #6-8" in text
+
+
+def test_agent_display_strips_step_and_resolves_handle() -> None:
+    handles = {"sub:D1": "coder-1"}
+    assert ei.agent_display("step:design/spec", handles) == "spec"
+    assert ei.agent_display("sub:D1", handles) == "coder-1"
+    assert ei.agent_display("sub:UNKNOWN", handles) == "sub:UNKNOWN"
+    assert ei.agent_display(None, handles) == ""
+
+
+def test_digest_line_format_ordinal_type_agent_no_timestamp() -> None:
+    handles = {"sub:D1": "coder-1"}
+    ev = _ev("a", "tool_call", agent_id="step:design/spec",
+             timestamp="2026-07-01T00:00:00+00:00",
+             name="read_file", input={"path": "src/imp/cli/main.py"})
+    line = ei.digest_line(42, ev, handles)
+    assert line.startswith("#42")
+    assert "tool_call" in line
+    assert "[spec]" in line
+    assert "read_file" in line
+    # the ordinal conveys order — the wall-clock timestamp never appears.
+    assert "2026-07-01T00:00:00+00:00" not in line
+
+
+def test_digest_line_blank_agent_for_none_author() -> None:
+    line = ei.digest_line(3, _ev(None, "step_started", step="spec"), {})
+    assert line.startswith("#3")
+    assert "[]" in line

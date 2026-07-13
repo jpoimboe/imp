@@ -10,6 +10,8 @@ from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
+from imp.engine.events_digest import summarize
+
 _SUPPRESSED_TYPES = {"llm_response_usage_patch"}
 
 
@@ -343,3 +345,30 @@ def render_step_index(index: ScopedIndex) -> list[str]:
     for etype, count in index.types:
         lines.append(f"  {count:>{count_w}}  {etype}")
     return lines
+
+
+_TYPE_WIDTH = 16
+
+
+def agent_display(agent_id: str | None, handle_map: dict[str, str]) -> str:
+    """Column form of an author: `step:<phase>/<name>` → `<name>`; `sub:<id>` →
+    its `<name>-<n>` handle (raw `sub:<id>` when unmapped); `None` → blank."""
+    if not agent_id:
+        return ""
+    if agent_id.startswith("sub:"):
+        return handle_map.get(agent_id, agent_id)
+    if agent_id.startswith("step:"):
+        return agent_id.split("/", 1)[-1]
+    return agent_id
+
+
+def digest_line(
+    ordinal: int, event: dict[str, Any], handle_map: dict[str, str],
+) -> str:
+    """Compact one-line rendering: `#N  <type>  [agent]  <summary>` — no
+    wall-clock timestamp (the ordinal conveys order)."""
+    etype = event.get("type") or "?"
+    agent = agent_display(event.get("agent_id"), handle_map)
+    return (
+        f"#{ordinal}  {etype:<{_TYPE_WIDTH}} [{agent}]  {summarize(event)}"
+    ).rstrip()

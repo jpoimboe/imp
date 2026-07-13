@@ -129,6 +129,12 @@ def _summarize(event: dict[str, Any]) -> str:
     return handler(payload) if handler is not None else _generic(payload)
 
 
+def summarize(event: dict[str, Any]) -> str:
+    """Public type-aware one-line summary (the digest tail, no envelope) —
+    reused by `imp events`' compact `#N` digest line."""
+    return _summarize(event)
+
+
 def digest_event(event: dict[str, Any]) -> str:
     """Render one event as a single slim digest line."""
     if event.get("_malformed"):

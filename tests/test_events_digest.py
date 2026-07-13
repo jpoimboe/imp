@@ -207,3 +207,13 @@ def test_warning_digest_missing_message_key() -> None:
     line = digest_event(ev)
     assert "warning: " in line
     assert "\n" not in line
+
+
+def test_summarize_exposes_type_aware_tail() -> None:
+    from imp.engine.events_digest import summarize
+    tail = summarize({"type": "tool_call",
+                      "payload": {"name": "grep", "input": {"pattern": "x"}}})
+    assert "grep" in tail
+    # the type-aware tool_call handler json-serializes the input dict; the
+    # generic fallback would render it as `input=<dict>` instead.
+    assert '"pattern": "x"' in tail
