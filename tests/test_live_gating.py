@@ -218,3 +218,134 @@ def test_bare_pytest_skips_converted_live_file_despite_env():
     assert proc.returncode == 0, combined
     assert "live-API test — pass --run-live to run" in combined
     assert "IMP_LIVE_PROVIDERS" not in combined  # old skip reason is gone
+
+
+import json as _json  # noqa: E402
+
+from tests._live import sandbox_sleep_precondition_failed  # noqa: E402
+
+# The imp sandbox's per-command COW overlay home failing to mount:
+_OVERLAY_STDERR = (
+    "mount: /tmp/imp-abc123/w.overlay-merged: wrong fs type, bad option, "
+    "bad superblock on overlay, missing codepage or helper program, "
+    "or other error"
+)
+
+# Exact AC text (spec §"Acceptance criteria"); the "…" is U+2026.
+_EXPECTED_REASON = (
+    'imp bash-sandbox overlay mount failed (rc 32: "wrong fs type … on '
+    'overlay"); the writer\'s `sleep 30` never ran, so the '
+    "mid-turn-interrupt precondition is unmet. This is a sandbox/environment "
+    "failure, not an interrupt-resume regression."
+)
+
+
+def _write_events(path, records, *, extra_lines=()):
+    """Write each record dict as one JSON line; append any raw extra_lines
+    (blank/garbage) verbatim to exercise tolerant parsing."""
+    lines = [_json.dumps(rec) for rec in records]
+    lines.extend(extra_lines)
+    path.write_text("\n".join(lines) + "\n")
+
+
+def _bash_call(tool_id="b1"):
+    return {"type": "tool_call",
+            "payload": {"id": tool_id, "name": "bash",
+                        "input": {"command": "sleep 30"}}}
+
+
+def _bash_result(tool_id="b1", *, returncode, stderr, stdout="", shape="str"):
+    # shape="str": the anthropic/openai in-process runner stores the bash JSON
+    # verbatim as a string. shape="list": claude_code's SDK wraps it as a list
+    # of {"type":"text","text": <json string>} parts (see the real fixture
+    # tests/fixtures/cc_tool_counter_burst.jsonl).
+    inner = _json.dumps(
+        {"stdout": stdout, "stderr": stderr, "returncode": returncode})
+    content = inner if shape == "str" else [{"type": "text", "text": inner}]
+    return {"type": "tool_result",
+            "payload": {"id": tool_id, "content": content, "error": returncode != 0}}
+
+
+def test_precondition_failed_returns_exact_reason_on_overlay_mount(tmp_path):
+    ev = tmp_path / "events.jsonl"
+    _write_events(ev, [
+        _bash_call(),
+        _bash_result(returncode=32, stderr=_OVERLAY_STDERR),
+    ])
+    assert sandbox_sleep_precondition_failed(ev) == _EXPECTED_REASON
+
+
+def test_precondition_failed_returns_reason_on_claude_code_list_content(tmp_path):
+    # claude_code's bash tool_result content is a LIST of text parts, not a
+    # string; the mount failure must still be detected so the two claude_code
+    # targets SKIP (spec AC: all five tests SKIP on the overlay mount failure).
+    ev = tmp_path / "events.jsonl"
+    _write_events(ev, [
+        _bash_call(),
+        _bash_result(returncode=32, stderr=_OVERLAY_STDERR, shape="list"),
+    ])
+    assert sandbox_sleep_precondition_failed(ev) == _EXPECTED_REASON
+
+
+def test_precondition_returns_none_on_clean_claude_code_list_content(tmp_path):
+    ev = tmp_path / "events.jsonl"
+    _write_events(ev, [
+        _bash_call(),
+        _bash_result(returncode=0, stderr="", stdout="done", shape="list"),
+    ])
+    assert sandbox_sleep_precondition_failed(ev) is None
+
+
+def test_precondition_returns_none_on_clean_bash(tmp_path):
+    ev = tmp_path / "events.jsonl"
+    _write_events(ev, [
+        _bash_call(),
+        _bash_result(returncode=0, stderr="", stdout="done"),
+    ])
+    assert sandbox_sleep_precondition_failed(ev) is None
+
+
+def test_precondition_returns_none_on_rc32_without_overlay_signature(tmp_path):
+    ev = tmp_path / "events.jsonl"
+    _write_events(ev, [
+        _bash_call(),
+        _bash_result(returncode=32, stderr="mount: some unrelated error"),
+    ])
+    assert sandbox_sleep_precondition_failed(ev) is None
+
+
+def test_precondition_returns_none_for_non_bash_tool(tmp_path):
+    ev = tmp_path / "events.jsonl"
+    read_call = {"type": "tool_call",
+                 "payload": {"id": "r1", "name": "read_file",
+                             "input": {"path": "a.txt"}}}
+    # A rc-32 overlay-looking result on a NON-bash tool id must not match.
+    _write_events(ev, [read_call, _bash_result("r1", returncode=32,
+                                               stderr=_OVERLAY_STDERR)])
+    assert sandbox_sleep_precondition_failed(ev) is None
+
+
+def test_precondition_returns_none_when_events_missing(tmp_path):
+    assert sandbox_sleep_precondition_failed(tmp_path / "nope.jsonl") is None
+
+
+def test_precondition_tolerates_blank_and_garbage_lines(tmp_path):
+    ev = tmp_path / "events.jsonl"
+    _write_events(
+        ev,
+        [_bash_call(), _bash_result(returncode=32, stderr=_OVERLAY_STDERR)],
+        extra_lines=("", "   ", "{not valid json", "partial-line-no-brace"),
+    )
+    assert sandbox_sleep_precondition_failed(ev) == _EXPECTED_REASON
+
+
+def test_precondition_detects_mcp_qualified_bash_name(tmp_path):
+    ev = tmp_path / "events.jsonl"
+    mcp_bash_call = {"type": "tool_call",
+                     "payload": {"id": "b1", "name": "mcp__imp__bash",
+                                 "input": {"command": "sleep 30"}}}
+    _write_events(ev, [
+        mcp_bash_call,
+        _bash_result(returncode=32, stderr=_OVERLAY_STDERR),
+    ])
+    assert sandbox_sleep_precondition_failed(ev) == _EXPECTED_REASON
