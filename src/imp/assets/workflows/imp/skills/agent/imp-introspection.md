@@ -41,7 +41,7 @@ names rather than guessing them.
 
 ## What work exists
 
-- `imp list` — the board: active in-flight quests plus the Backlog (including
+- `imp list` — the board: active in-flight quests plus the backlog (including
   parked / `saved` quests).
 - `imp list --all` — also includes completed and abandoned past quests.
 - `imp search <query>` — a live-and-archive scout: search **active** (in-flight +
