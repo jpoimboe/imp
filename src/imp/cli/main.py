@@ -1342,31 +1342,6 @@ def _show_artifact(control: Path, quest_id: str, rel: str) -> bytes | None:
     return archive_read.read_artifact(control, quest_id, rel)
 
 
-def _show_newest_plan_rel(control: Path, quest_id: str) -> str | None:
-    """plans/<id>-plan-N.md for the highest N: live worktree first, then the
-    retained wip ref. Returns None when no plan exists anywhere."""
-    live_dir = _quest_home(control, quest_id) / "artifacts" / "plans"
-    if live_dir.is_dir():
-        pick = archive_read.pick_newest_plan(
-            quest_id, [p.name for p in live_dir.iterdir() if p.is_file()])
-        if pick:
-            return f"plans/{pick}"
-    pick = archive_read.newest_plan_name(control, quest_id)
-    if pick:
-        return f"plans/{pick}"
-    return None
-
-
-def _show_runtime(control: Path, quest_id: str, name: str) -> bytes | None:
-    quest = _quest_home(control, quest_id)
-    live = quest / "state" / "state.json" if name == "state.json" else quest / name
-    if live.is_file():
-        return live.read_bytes()
-    if name == "state.json":
-        return archive_read.read_state_json(control, quest_id)
-    return archive_read.read_events(control, quest_id)
-
-
 def _user_message_text(payload: dict[str, Any]) -> str:
     return "".join(
         b.get("text", "") for b in (payload.get("content") or [])
@@ -1607,9 +1582,6 @@ def _cmd_show(args: argparse.Namespace) -> int:
             _page_or_print(_backlog_card(meta, control, now=datetime.now(UTC)),
                            no_pager=args.no_pager)
             return 0
-        if resource == "status":
-            _page_or_print(["backlog"], no_pager=args.no_pager)
-            return 0
         print(f"imp: {quest_id} is in the backlog (not started); "
               f"no {resource} yet", file=sys.stderr)
         return 2
@@ -1619,11 +1591,6 @@ def _cmd_show(args: argparse.Namespace) -> int:
         return 0
     if resource == "spec":
         data = _show_artifact(control, quest_id, f"spec/{quest_id}.md")
-    elif resource == "summary":
-        data = _show_artifact(control, quest_id, f"summary/{quest_id}.md")
-    elif resource == "plan":
-        rel = _show_newest_plan_rel(control, quest_id)
-        data = _show_artifact(control, quest_id, rel) if rel else None
     elif resource == "events":
         events = _load_events_for_id(control, quest_id)
         if events is None:
@@ -1633,14 +1600,6 @@ def _cmd_show(args: argparse.Namespace) -> int:
             events, types=args.type, agent=args.agent, limit=args.limit)
         render = full_line if args.full else digest_event
         _page_or_print([render(e) for e in events], no_pager=args.no_pager)
-        return 0
-    elif resource == "status":
-        raw = _show_runtime(control, quest_id, "state.json")
-        if raw is None:
-            print(f"imp: no state for {quest_id!r}", file=sys.stderr)
-            return 2
-        _page_or_print([json.loads(raw).get("status", "unknown")],
-                       no_pager=args.no_pager)
         return 0
     if data is None:
         print(f"imp: no {resource} for {quest_id!r}", file=sys.stderr)
@@ -3244,7 +3203,7 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Show one quest's detail or a named artifact (imp show <id>).",
         description=(
             "Print a quest's detail card, or name an artifact "
-            "(spec/plan/events/status/summary) to print just that. "
+            "(spec/events) to print just that. "
             "Reads the live worktree files while a quest is in flight and "
             "falls back to the archive once it is merged."),
     )
@@ -3253,7 +3212,7 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Quest id or its short token.")
     p_show.add_argument(
         "resource", nargs="?", default=None,
-        choices=["spec", "plan", "events", "status", "summary"],
+        choices=["spec", "events"],
         help="Which artifact to print (default: a detail card).")
     p_show.add_argument(
         "--no-pager", action="store_true",

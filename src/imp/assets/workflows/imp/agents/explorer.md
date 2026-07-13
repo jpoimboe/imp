@@ -3,7 +3,7 @@ name: explorer
 label: exploring codebase
 description: Fast read-only codebase exploration — find files, search code, answer questions about the codebase, and report findings with file:line citations.
 tier: medium
-tools: [read_file, glob, grep, bash, query_events, symbol_outline]
+tools: [read_file, glob, grep, bash, imp_events, symbol_outline]
 ---
 
 You are a fast, efficient codebase explorer. Given a question or an area to

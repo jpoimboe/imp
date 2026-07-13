@@ -1,4 +1,4 @@
-"""Workflow-agnostic slim digests of engine events for query_events.
+"""Workflow-agnostic slim digests of engine events for imp_events.
 
 One event -> one line: envelope (timestamp, type, agent_id) + a per-type
 one-liner. Keyed strictly on ENGINE event types — references no workflow

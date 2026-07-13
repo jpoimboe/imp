@@ -9,7 +9,7 @@ def test_all_builtins_registered() -> None:
         "read_file", "write_file", "edit_file",
         "glob", "grep",
         "bash",
-        "query_events",
+        "imp_events",
         "symbol_outline",
     }
     missing = expected - reg.keys()
@@ -25,7 +25,7 @@ def test_full_builtin_set_schema_builds_under_resolver() -> None:
     # non-degenerate object schemas.
     reg = get_registry()
     for name in ("bash", "read_file", "write_file", "edit_file",
-                 "glob", "grep", "query_events", "rename_quest"):
+                 "glob", "grep", "imp_events", "rename_quest"):
         schema = reg[name].input_schema
         assert schema.get("type") == "object", name
         assert "properties" in schema, name

@@ -541,7 +541,7 @@ def test_abandon_without_wip_still_archives_runtime(tmp_path: Path) -> None:
         cwd=tmp_path, capture_output=True).returncode != 0
 
 
-def test_show_events_and_status_from_archive(tmp_path, monkeypatch) -> None:
+def test_show_events_from_archive(tmp_path, monkeypatch) -> None:
     import imp.cli.main as m
 
     subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
@@ -572,7 +572,6 @@ def test_show_events_and_status_from_archive(tmp_path, monkeypatch) -> None:
         return buf.getvalue()
 
     assert "quest_created" in _run("show", "arch01", "events")
-    assert "completed" in _run("show", "arch01", "status")
 
 
 def test_finalize_archives_runtime_and_retains_wip(tmp_path: Path) -> None:

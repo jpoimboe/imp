@@ -63,7 +63,8 @@ def test_introspection_names_the_read_commands() -> None:
     assert "imp list" in body
     assert "imp list --all" in body
     assert "imp search" in body
-    assert "imp show <id> [spec|plan|events|status]" in body
+    assert "imp show <id> spec" in body
+    assert "imp show <id> events" in body
 
 
 def test_introspection_documents_the_three_tier_split() -> None:
@@ -78,10 +79,9 @@ def test_introspection_documents_the_three_tier_split() -> None:
 
 def test_introspection_documents_the_cross_change_query() -> None:
     body = load_agent_skill(_skills_dir(), "imp-introspection")
-    # in-loop cross-change front door, keyword-form as an agent would call it
-    assert "query_events(quest_id=" in body
-    # bash cross-change front door
-    assert "imp show <id> events" in body
+    # in-loop cross-quest front doors, keyword-form as an agent would call them
+    assert "imp_show(quest_id=" in body
+    assert "imp_events(quest_id=" in body
 
 
 def test_introspection_documents_bounded_output_techniques() -> None:

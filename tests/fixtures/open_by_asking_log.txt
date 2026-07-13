@@ -74,12 +74,12 @@ fast-path-spec-gate · complete
 
 spec-reviewer · opus
 
-  7 calls · ToolSearch · read_file · glob · query_events · 39s
+  7 calls · ToolSearch · read_file · glob · imp_events · 39s
 
 • The events file is large and the spec's factual claims are already verified
   against source. Let me check for the relevant brainstorm turn type.
 
-  1 call · query_events · 13s
+  1 call · imp_events · 13s
 
 • I have verified all of the spec's load-bearing claims against the actual
   source. Findings:
@@ -411,7 +411,7 @@ summarizer · complete · 1m 15s
 
 final-review · sonnet
 
-  2 calls · ToolSearch · query_events · 26s
+  2 calls · ToolSearch · imp_events · 26s
 
 • Change Summary: 2026-06-06-add-version-flag
 

@@ -1,7 +1,7 @@
 ---
 name: summarizer
 label: summarizing quest
-description: Write the quest's intent-level summary artifact at end-of-quest, sourcing the what from the spec, plans, progress, and diff, and the why from the spec (query_events fallback).
+description: Write the quest's intent-level summary artifact at end-of-quest, sourcing the what from the spec, plans, progress, and diff, and the why from the spec (imp_events fallback).
 output:
   status: {type: enum, values: [Success, Error]}
 ---
@@ -24,7 +24,7 @@ Read, to ground the summary:
 - the quest diff via `bash` (`git diff <base>..HEAD`) for the *what*.
 
 When the spec is thin on the *why*, recover the threshold rationale — what was
-said, not current state — with `query_events` as a fallback.
+said, not current state — with `imp_events` as a fallback.
 
 ## Write the summary
 

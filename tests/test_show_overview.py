@@ -155,7 +155,7 @@ def test_resource_routes_through_pager(tmp_path: Path, monkeypatch) -> None:
         m, "_page_or_print",
         lambda lines, *, no_pager: captured.append((list(lines), no_pager)))
 
-    rc = main(["show", "liveid", "status"])
+    rc = main(["show", "liveid", "events"])
     assert rc == 0
     assert len(captured) == 1
     assert captured[0][0]                 # the resource lines were paged

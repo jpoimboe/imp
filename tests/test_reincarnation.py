@@ -42,13 +42,13 @@ def test_stash_returns_none_when_nothing_to_stash(tmp_path: Path) -> None:
     assert stash_transcript(empty) is None                  # empty transcript
 
 
-def test_seed_tier_b_points_at_stashed_transcript_and_query_events() -> None:
+def test_seed_tier_b_points_at_stashed_transcript_and_imp_events() -> None:
     # Tier B: no handoff was captured (hard error). The seed points the reborn
-    # session at the stashed transcript and at query_events for orientation.
+    # session at the stashed transcript and at imp_events for orientation.
     seed = reincarnation_seed(
         stashed_dir=Path("/x/steps/impl/coder.attempt-1"), handoff_path=None)
     assert "/x/steps/impl/coder.attempt-1/transcript.jsonl" in seed
-    assert "query_events" in seed
+    assert "imp_events" in seed
     assert "handoff" not in seed.lower()
     # No handoff was written, so the seed must not refer to a summary above it.
     assert "summary above" not in seed
@@ -66,29 +66,29 @@ def test_seed_tier_a_names_handoff_as_primary() -> None:
 
 
 def test_seed_drops_false_claim_points_at_bounded_query_and_names_transcript_primary() -> None:
-    # Part 3: the orientation pointer must no longer claim query_events excludes
-    # this step's own tool calls (it doesn't), must point at a BOUNDED query_events
+    # Part 3: the orientation pointer must no longer claim imp_events excludes
+    # this step's own tool calls (it doesn't), must point at a BOUNDED imp_events
     # limit=N call, and the stashed transcript must be labelled the primary detail
     # source.
     seed = reincarnation_seed(
         stashed_dir=Path("/x/steps/impl/coder.attempt-1"), handoff_path=None)
     assert "this step's own tool calls" not in seed
-    assert "query_events limit=N" in seed
+    assert "imp_events limit=N" in seed
     assert "Primary detail source" in seed
     assert "/x/steps/impl/coder.attempt-1/transcript.jsonl" in seed
 
 
-def test_seed_frames_query_events_as_provenance_not_current_state() -> None:
+def test_seed_frames_imp_events_as_provenance_not_current_state() -> None:
     seed = reincarnation_seed(stashed_dir=None, handoff_path=None)
     assert "provenance" in seed
     assert "not for current state" in seed
-    assert "query_events limit=N" in seed
+    assert "imp_events limit=N" in seed
 
 
 def test_seed_degrades_to_orientation_only_when_nothing_stashed() -> None:
     seed = reincarnation_seed(stashed_dir=None, handoff_path=None)
     assert seed                                  # non-empty
-    assert "query_events" in seed
+    assert "imp_events" in seed
     assert "transcript.jsonl" not in seed
 
 

@@ -158,12 +158,12 @@ def test_batch_code_reviewer_description_is_whole_diff() -> None:
     assert "whole diff" in desc
 
 
-def test_query_events_references_frame_provenance_not_current_state() -> None:
+def test_imp_events_references_frame_provenance_not_current_state() -> None:
     for wf_name in ("imp",):
         wf = load_workflow(bundled_workflow_dir(wf_name))
         for name in ("summarizer", "spec-reviewer", "plan-reviewer"):
             body = wf.agents[name].prompt_template_source
-            assert "query_events" in body, f"{wf_name}/{name}"
+            assert "imp_events" in body, f"{wf_name}/{name}"
             assert "not current state" in body, f"{wf_name}/{name}"
 
 

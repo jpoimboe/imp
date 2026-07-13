@@ -28,7 +28,7 @@ def reincarnation_seed(
     The prior session approached its context limit and is restarting fresh.
     Point it at its recovery sources in priority order: the agent-authored
     handoff note (primary; present only for the proactive Tier A path), the
-    stashed prior transcript for deeper detail, and `query_events` for
+    stashed prior transcript for deeper detail, and `imp_events` for
     quest-level orientation. Built to serve both the no-handoff (reactive,
     Tier B) and handoff (proactive, Tier A) shapes.
     """
@@ -53,7 +53,7 @@ def reincarnation_seed(
             f"- Primary detail source: the prior transcript is stashed at "
             f"`{stashed_dir}/transcript.jsonl`{tail}")
     lines.append(
-        "- Orientation only: `query_events limit=N` returns the last N entries of "
+        "- Orientation only: `imp_events limit=N` returns the last N entries of "
         "the quest's event log — the provenance record of what was said and what "
         "prior steps did (a bare call is bounded to the last 100). Use it for "
         "quest-level bearings, not for current state and not as the primary "
