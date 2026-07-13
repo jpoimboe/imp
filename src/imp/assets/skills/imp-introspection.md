@@ -48,9 +48,11 @@ names rather than guessing them.
   drafts), **backlog**, and **archive** quests for `<query>` as a case-insensitive
   substring of a quest's id, title, or conversation content (a required substring;
   bare `imp search` errors). Composable `--active` / `--backlog` / `--archived` flags
-  scope it to those zones; with none given, all three are searched. Default output is
-  grep-style matched excerpts per quest; `-l` / `--list` prints one terse line per
-  quest (`id  title  [zone]`).
+  scope it to those zones; with none given, all three are searched. `--completed`
+  narrows the archive to just the merged (completed) subset, tagging hits `[completed]`;
+  add `--merged-after <commit>` to keep only completed quests whose merge landed after
+  `<commit>`. Default output is grep-style matched excerpts per quest; `-l` / `--list`
+  prints one terse line per quest (`id  title  [zone]`).
 
 Summarize the rows in plain language (what is in flight, what is parked, what is
 finished); do not invent quests that the commands did not list.
@@ -58,8 +60,9 @@ finished); do not invent quests that the commands did not list.
 ## Detail on one quest
 
 `imp show <id>` — the overview detail card: id, title, status, timing,
-dependencies, opening intent, and the summary inlined. Add a subcommand to
-narrow to one facet: `imp show <id> spec` for the raw spec,
+dependencies, opening intent, and the summary inlined. A quest that completed with a
+recorded merge SHA also shows a `merge_commit:` line beneath `base_branch:`. Add a
+subcommand to narrow to one facet: `imp show <id> spec` for the raw spec,
 `imp show <id> events` for the timeline. Read the facet the user asked about and
 answer from it.
 
