@@ -1,12 +1,14 @@
 """The threshold and finalize personas name only the imp-knowledge hub and
-include the shared grounding partial (spec AC 6)."""
+include the shared grounding, memory-authoring, and sandbox-debugging partials."""
 
 from __future__ import annotations
 
 from pathlib import Path
 
+from imp.agents.prompts import build_context, render_prompt
 from imp.assets import bundled_workflow_dir
 from imp.engine.loader import load_workflow
+from imp.engine.state import JsonlEventLog
 
 PARTIALS = Path("src/imp/assets/workflows/imp/partials")
 
@@ -110,6 +112,31 @@ def test_threshold_has_lazy_orientation_cue() -> None:
     start = body.index(marker)
     section = body[start:body.index("{% include", start)].lower()
     assert "speak plainly" in section
+
+
+def test_threshold_includes_sandbox_debugging_partial() -> None:
+    assert '{% include "partials/sandbox-debugging.md" %}' in _threshold()
+
+
+def test_finalize_includes_sandbox_debugging_partial() -> None:
+    assert '{% include "partials/sandbox-debugging.md" %}' in _finalize()
+
+
+def test_threshold_and_finalize_render_sandbox_debugging_partial(tmp_path) -> None:
+    # A within-line sentinel from the partial: proves the include actually
+    # resolves into each rendered prompt, not merely that the directive text is
+    # present in the source.
+    log = JsonlEventLog(tmp_path / "events.jsonl")
+    wf = load_workflow(bundled_workflow_dir("imp"))
+    for name, extra_vars in (("threshold", {}), ("finalize", {"auto_merge": False})):
+        body = wf.agents[name].prompt_template_source
+        rendered = render_prompt(
+            body,
+            build_context(
+                quest_title="t", event_log=log, quest_id="abc",
+                quest_home=".imp/quests/abc", vars=extra_vars),
+            workflow_dir=bundled_workflow_dir("imp"))
+        assert "only the user can type it" in rendered, name
 
 
 def test_sandbox_debugging_partial_documents_both_hatches() -> None:

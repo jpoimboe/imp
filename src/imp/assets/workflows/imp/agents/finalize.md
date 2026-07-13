@@ -28,6 +28,8 @@ review routed any problem back to the reconciler (no human gate).
 
 {% include "partials/memory-authoring.md" %}
 
+{% include "partials/sandbox-debugging.md" %}
+
 ## 1. Gather the summary and the audit record
 
 Read the intent-level summary the `summarizer` step wrote at

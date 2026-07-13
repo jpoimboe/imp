@@ -184,6 +184,8 @@ is saved and they can return with `imp resume <id>`.
 
 {% include "partials/memory-authoring.md" %}
 
+{% include "partials/sandbox-debugging.md" %}
+
 ## Speak plainly
 
 The user reads only your prose; **never surface these internal terms** to them:
