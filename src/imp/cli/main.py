@@ -50,7 +50,7 @@ from imp.cli.session_run import (
 )
 from imp.cli.signals import install_process_group, prompt_sigint_guard
 from imp.cli.slash import ask_line_with_slash
-from imp.cli.store import make_store
+from imp.cli.store import CompletedRow, make_store
 from imp.cli.terminal_title import TerminalTitle
 from imp.diagnostics import install_stack_dumper
 from imp.engine import backlog, worktree
@@ -1310,11 +1310,11 @@ def _quest_home(control: Path, quest_id: str) -> Path:
 
 
 def _iter_quest_ids(control: Path) -> list[str]:
-    """All known quest ids: permanent homes first, then archived ids not live."""
+    """Live homes first, then archived ids not in the live set."""
     live = _list_quest_homes(control)
     seen = set(live)
     out = list(live)
-    for cid in archive_read.archived_ids(control):
+    for cid in sorted(r.quest_id for r in make_store(control).completed_rows()):
         if cid not in seen:
             out.append(cid)
             seen.add(cid)
@@ -1774,7 +1774,10 @@ def _resolve_default_id(control: Path) -> str | None:
     if homes:
         return max(homes, key=lambda s: (_quest_home(control, s)
                                          / "events.jsonl").stat().st_mtime)
-    return archive_read.most_recent_archived_id(control)
+    dated = [r for r in make_store(control).completed_rows() if r.last]
+    if not dated:
+        return None
+    return max(dated, key=lambda r: (r.last, r.quest_id)).quest_id
 
 
 _NO_QUESTS_MESSAGE = "No quests yet — start one with imp new"
@@ -2264,7 +2267,10 @@ def _last_event_iso(events_path: Path) -> str | None:
 
 
 def _journal_last_iso(control: Path, quest_id: str) -> str | None:
-    return archive_read.last_event_ts(control, quest_id)
+    for r in make_store(control).completed_rows():
+        if r.quest_id == quest_id:
+            return r.last or None
+    return None
 
 
 def _journal_status(control: Path, quest_id: str) -> str | None:
@@ -2473,22 +2479,20 @@ def _completed_rows(control: Path, live_ids: set[str] | None = None) -> list[_Ro
     the in-flight id set it already computed instead of re-deriving it."""
     live = {r[0] for r in _status_rows(control)} if live_ids is None else live_ids
     rows: list[_Row] = []
-    for row in archive_read.completed_rows(control):
-        if row[0] in live or row[1] in _INFLIGHT:
+    for r in make_store(control).completed_rows():
+        if r.quest_id in live or r.status in _INFLIGHT:
             continue
-        rows.append((*row, None))
+        rows.append((r.quest_id, r.status, r.step, r.last, r.title, r.created, None, None))
     return rows
 
 
 def _shelved_rows(control: Path, live_ids: set[str] | None = None) -> list[_Row]:
     """Shelved conversations — archived final status `paused` with no live home —
-    for the `--all` history block. Mirrors _completed_rows' live-id dedup so a
-    resumed shelved conversation, which now has a live home and shows in-flight,
-    is not duplicated here. Reads the same indexed archive query as
-    _completed_rows but selects `paused` rows instead of terminal ones."""
+    for the `--all` history block. Mirrors _completed_rows' live-id dedup."""
     live = {r[0] for r in _status_rows(control)} if live_ids is None else live_ids
-    return [(*r, None) for r in archive_read.completed_rows(control)
-            if r[1] == "paused" and r[0] not in live]
+    return [(r.quest_id, r.status, r.step, r.last, r.title, r.created, None, None)
+            for r in make_store(control).completed_rows()
+            if r.status == "paused" and r.quest_id not in live]
 
 
 def _sort_rows_newest_first(rows: list[_Row]) -> list[_Row]:

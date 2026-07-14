@@ -64,3 +64,19 @@ def test_get_artifact_live_and_missing(tmp_path: Path) -> None:
 
     assert store.get_artifact("artq", "spec") == b"# the spec\n"
     assert store.get_artifact("artq", "summary") is None
+
+
+def test_completed_rows_from_archive(tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+    Quest.create(tmp_path, title="Done Thing", quest_id="doneq", base_branch="main")
+    _archive(tmp_path, "doneq")
+    rows = make_store(tmp_path).completed_rows()
+    match = [r for r in rows if r.quest_id == "doneq"]
+    assert len(match) == 1
+    assert match[0].status == "completed"
+    assert match[0].title == "Done Thing"
+
+
+def test_completed_rows_empty_archive(tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+    assert make_store(tmp_path).completed_rows() == []
