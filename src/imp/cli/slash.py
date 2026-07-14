@@ -39,6 +39,11 @@ SANDBOX_ALREADY_ON = "Sandbox is already on."
 SANDBOX_ALREADY_OFF = "Sandbox is already off."
 SANDBOX_USAGE = "Usage: /sandbox [on|off]"
 
+MATERIALIZED_LEAVE_REDIRECT = (
+    "/keep, /shelve, and /clear apply only before a quest is built — this one "
+    "is live. Press Ctrl-D to pause it (resume with imp resume {qid}), or "
+    "/abandon to tear it down.")
+
 
 def is_slash_command(text: str) -> bool:
     return text.lstrip().startswith("/")
@@ -46,6 +51,20 @@ def is_slash_command(text: str) -> bool:
 
 def _echo_command(text: str, out: Callable[[str], None], *, color: bool) -> None:
     out(caret(enabled=color) + text.strip())
+
+
+def _is_materialized(quest: Any) -> bool:
+    """Reload from disk: the in-memory quest is stale once live, so read disk as /abandon does."""
+    control_root = getattr(quest, "control_root", None)
+    quest_id = getattr(quest, "id", None)
+    if control_root is None or not quest_id:
+        return False
+    from imp.engine.errors import LoadError, LoadErrors
+    from imp.engine.quest import Quest
+    try:
+        return bool(Quest.load(control_root, quest_id).materialized)
+    except (LoadError, LoadErrors):
+        return False
 
 
 def handle_slash_line(
@@ -64,7 +83,7 @@ def handle_slash_line(
 
     if cmd in ("", "help"):
         _echo_command(text, output_fn, color=color)
-        _help(output_fn)
+        _help(output_fn, materialized=_is_materialized(quest))
         return REPROMPT
     if cmd == "skills":
         _echo_command(text, output_fn, color=color)
@@ -72,10 +91,12 @@ def handle_slash_line(
         return REPROMPT
     if cmd == "abandon":
         return "/abandon"
-    if cmd == "save":
-        return "/save"
-    if cmd == "clear":
-        return "/clear"
+    if cmd in ("keep", "shelve", "clear"):
+        if _is_materialized(quest):
+            _echo_command(text, output_fn, color=color)
+            output_fn(MATERIALIZED_LEAVE_REDIRECT.format(qid=quest.id))
+            return REPROMPT
+        return f"/{cmd}"
     if cmd == "model":
         if not args:
             _echo_command(text, output_fn, color=color)
@@ -127,19 +148,24 @@ def _list(skills_dir: Any, out: Callable[[str], None]) -> None:
         out(f"  /{name}    {description}" if description else f"  /{name}")
 
 
-def _help(out: Callable[[str], None]) -> None:
+def _help(out: Callable[[str], None], *, materialized: bool) -> None:
     out("Available slash commands:")
     out("  /help              Show this message")
     out("  /skills            List loadable skills")
-    out("  /save              Save this conversation to your backlog")
-    out("  /clear             Park this chat and start a fresh one")
+    if not materialized:
+        out("  /keep              Keep this conversation as a draft in your active list")
+        out("  /shelve            Shelve this conversation to the archive (find via `imp search`)")
+        out("  /clear             Shelve this conversation and start a fresh one")
     out("  /model <model>     Switch this step's model (or provider:model)")
     out("  /sandbox [on|off]  Show or set the filesystem sandbox for this session")
     out("  /abandon           Abandon the current quest")
     out("  /<name> [args]     Load a skill (trailing args appended to it)")
     out("")
     out("Keybindings:")
-    out("  Ctrl+C / Ctrl+D    Pause and exit; resume with `imp resume <id>`")
+    if materialized:
+        out("  Ctrl+C / Ctrl+D    Pause and exit; resume with imp resume <id>")
+    else:
+        out("  Ctrl+C / Ctrl+D    Leave this conversation; resume with imp resume <id>")
     out("  Up-arrow           Recall previous input")
     out("  Tab                Complete a /command or skill name")
 

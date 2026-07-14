@@ -56,7 +56,8 @@ def test_threshold_action_rule_present() -> None:
     body = _threshold()
     assert "## Acting on imp" in body
     # current-session mutations handed back via the slash commands
-    assert "/save" in body
+    assert "/keep" in body
+    assert "/save" not in body
     assert "/abandon" in body
     assert "/clear" in body
     low = body.lower()

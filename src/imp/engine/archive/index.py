@@ -118,32 +118,15 @@ def search(
 
 def search_content(
     conn: sqlite3.Connection, query: str,
-) -> list[tuple[str, str, str, str | None]]:
+) -> list[tuple[str, str, str, str, str | None]]:
     like = _like_pattern(query)
     rows = conn.execute(
-        "SELECT id, title, content, last_event_ts FROM quests"
+        "SELECT id, title, content, status, last_event_ts FROM quests"
         " WHERE id LIKE ? ESCAPE '\\' OR title LIKE ? ESCAPE '\\'"
         " OR content LIKE ? ESCAPE '\\'"
         " ORDER BY created_at DESC, id",
         (like, like, like)).fetchall()
     return [
-        (cid, title or "", content or "", last)
-        for (cid, title, content, last) in rows
-    ]
-
-
-def search_completed(
-    conn: sqlite3.Connection, query: str,
-) -> list[tuple[str, str, str, str | None]]:
-    like = _like_pattern(query)
-    rows = conn.execute(
-        "SELECT id, title, content, last_event_ts FROM quests"
-        " WHERE status = 'completed'"
-        " AND (id LIKE ? ESCAPE '\\' OR title LIKE ? ESCAPE '\\'"
-        " OR content LIKE ? ESCAPE '\\')"
-        " ORDER BY created_at DESC, id",
-        (like, like, like)).fetchall()
-    return [
-        (cid, title or "", content or "", last)
-        for (cid, title, content, last) in rows
+        (cid, title or "", content or "", status or "", last)
+        for (cid, title, content, status, last) in rows
     ]

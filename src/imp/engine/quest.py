@@ -172,7 +172,7 @@ class Quest:
     orig_base_head: str = ""     # base tip captured at draft creation; NEVER a diff base
     cur_base_head: str = ""      # the SHA the branch is currently planted on (the fork)
     workflow: str | None = None  # per-quest workflow name; None = project default
-    origin: str = "draft"        # provenance: idea | draft | followup (Backlog only)
+    origin: str = "draft"        # provenance: draft | backlog (Backlog only)
     seed_opening: str | None = None  # title+description seed for a fresh resume open
 
     def rename(self, name: str, *, log: JsonlEventLog) -> str:

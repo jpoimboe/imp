@@ -304,15 +304,15 @@ def test_help_does_not_mention_continue(tmp_path: Path) -> None:
     assert not any("/continue" in line for line in out)
 
 
-def test_hint_and_help_describe_ctrlc_pause_without_esc(tmp_path: Path) -> None:
+def test_hint_and_help_describe_ctrlc_leave_without_esc(tmp_path: Path) -> None:
     quest = _FakeChange(tmp_path)
     out: list[str] = []
     handle_slash_line("/help", quest=quest, output_fn=out.append)
     ctrl_c_line = next(line for line in out if "Ctrl+C" in line)
 
-    # Both surfaces describe Ctrl-C with "pause", neither with "interrupt", and
-    # neither advertises ESC as a pause key anymore.
-    assert "pause" in ctrl_c_line.lower()
+    # Pre-live quests use "Leave this conversation" wording; neither surface
+    # says "interrupt" or advertises ESC as a key.
+    assert "Leave this conversation" in ctrl_c_line
     assert "Esc" not in ctrl_c_line
     assert "interrupt" not in ctrl_c_line.lower()
 
@@ -539,7 +539,7 @@ def test_sandbox_off_applies_immediately_with_no_prompt(
 def test_help_lists_sandbox() -> None:
     from imp.cli.slash import _help
     out: list[str] = []
-    _help(out.append)
+    _help(out.append, materialized=False)
     assert any("/sandbox [on|off]" in line for line in out)
 
 

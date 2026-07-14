@@ -529,7 +529,7 @@ async def test_replayed_gates_do_not_crash_only_live_gate_solicits(
 
 
 @pytest.mark.anyio
-async def test_save_slash_command_at_gate_records_intent_and_detaches(
+async def test_keep_slash_command_at_gate_records_intent_and_detaches(
     tmp_path: Path,
 ) -> None:
     sock = str(tmp_path / "s.sock")
@@ -541,7 +541,7 @@ async def test_save_slash_command_at_gate_records_intent_and_detaches(
             while server.attached_count == 0:
                 await server.wait_for_attach_change()
         on_event({"type": "awaiting_user_input", "payload": {"steer_hint": "reply?"}})
-        # /save detaches the client; the run pauses (survives) — no abandon.
+        # /keep detaches the client; the run pauses (survives) — no abandon.
         with anyio.fail_after(5):
             while server.attached_count != 0:
                 await server.wait_for_attach_change()
@@ -556,7 +556,7 @@ async def test_save_slash_command_at_gate_records_intent_and_detaches(
         return client
 
     async def _solicit(_prompt: str) -> str:
-        return "/save"
+        return "/keep"
 
     class _Driver:
         def on_event(self, _event: dict[str, Any]) -> None: ...
@@ -578,6 +578,59 @@ async def test_save_slash_command_at_gate_records_intent_and_detaches(
 
     assert survived == [True]
     assert leave_state == {"intent": "save"}
+    assert not server.abandoned
+
+
+@pytest.mark.anyio
+async def test_shelve_slash_command_records_shelve_intent(
+    tmp_path: Path,
+) -> None:
+    sock = str(tmp_path / "s.sock")
+    server = SessionServer(sock, hibernate=False)
+    survived: list[bool] = []
+
+    async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
+        with anyio.fail_after(5):
+            while server.attached_count == 0:
+                await server.wait_for_attach_change()
+        on_event({"type": "awaiting_user_input", "payload": {"steer_hint": "reply?"}})
+        # /shelve detaches the client; the run pauses (survives) — no abandon.
+        with anyio.fail_after(5):
+            while server.attached_count != 0:
+                await server.wait_for_attach_change()
+        survived.append(True)
+        return "done"
+
+    coord = InterruptCoordinator()
+
+    async def _attach(on_event: Callable[[dict[str, Any]], None]) -> SessionClient:
+        client = SessionClient(sock, "c1", "T", on_event=on_event)
+        await client.connect()
+        return client
+
+    async def _solicit(_prompt: str) -> str:
+        return "/shelve"
+
+    class _Driver:
+        def on_event(self, _event: dict[str, Any]) -> None: ...
+        def finish(self) -> None: ...
+        def append_committed_reply(self, _text: str) -> None: ...
+
+    leave_state: dict[str, str] = {}
+    with anyio.fail_after(15):
+        async with anyio.create_task_group() as tg:
+            await server.open()
+            tg.start_soon(server.serve, run_fn)
+
+            async def _client() -> None:
+                await run_terminal_client(
+                    attach=_attach, driver=_Driver(), coord=coord,
+                    solicit=_solicit, quest_id="c1", leave_state=leave_state)
+
+            tg.start_soon(_client)
+
+    assert survived == [True]
+    assert leave_state == {"intent": "shelve"}
     assert not server.abandoned
 
 
@@ -2126,11 +2179,12 @@ async def test_local_echo_not_invoked_when_answered_elsewhere(
 
 
 @pytest.mark.anyio
-@pytest.mark.parametrize("command", ["/save", "/clear"])
+@pytest.mark.parametrize("command,expected_intent",
+                         [("/keep", "save"), ("/clear", "clear")])
 async def test_local_echo_not_invoked_on_leave_command(
-    tmp_path: Path, command: str,
+    tmp_path: Path, command: str, expected_intent: str,
 ) -> None:
-    # A leave command (/save, /clear) detaches the client and returns BEFORE the
+    # A leave command (/keep, /clear) detaches the client and returns BEFORE the
     # local_echo / send_input line, so no optimistic echo fires. (/abandon shares
     # the same pre-send early-return placement and is covered by the next test.)
     sock = str(tmp_path / "s.sock")
@@ -2179,7 +2233,7 @@ async def test_local_echo_not_invoked_on_leave_command(
             tg.start_soon(_client)
 
     # The leave command detached the client before send_input; no local echo fired.
-    assert leave_state["intent"] == command.lstrip("/")
+    assert leave_state["intent"] == expected_intent
     assert echoed == []
 
 

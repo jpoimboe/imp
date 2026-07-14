@@ -38,7 +38,7 @@ def test_match_rows_include_live_resumable(tmp_path: Path) -> None:
 
 
 def test_match_rows_include_archived_resumable(tmp_path: Path) -> None:
-    # AC 9: an archived-but-resumable "left" conversation (live home deleted,
+    # AC 9: an archived-but-resumable "shelved" conversation (live home deleted,
     # archive record resumable=True) is a match by its stem.
     _seed_control(tmp_path)
     ch = Quest.create_draft(tmp_path, title="Left", quest_id="lodo40",

@@ -36,7 +36,7 @@ def create_quest(
     Quest.create_draft(
         parent.control_root, title=title, quest_id=new_id,
         base_branch=parent.base_branch, depends_on=deps, workflow=workflow,
-        origin="draft" if start else "followup",
+        origin="draft" if start else "backlog",
         seed_opening=seed, defer_seed=True)
     kind = "started" if start else "backlog"
     log = ctx.event_log or JsonlEventLog(ctx.events_path)

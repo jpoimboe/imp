@@ -160,8 +160,8 @@ ordering need, and tell the user it is saved and they can return with `imp resum
 - **Standing `imp/memory/` preferences** you record by launching a background `memory`
   quest on the user's confirmation — see "Recording standing preferences to memory";
   never write the tree yourself, never `.imp/`.
-- **This conversation** (save it, abandon it, clear it) you hand back to the user via
-  the `/save`, `/abandon`, and `/clear` commands — do **not** run `imp` against your
+- **This conversation** (keep it, abandon it, clear it) you hand back to the user via
+  the `/keep`, `/abandon`, and `/clear` commands — do **not** run `imp` against your
   own quest to mutate it.
 - **Another quest** you may mutate with `imp …` only after the user explicitly confirms.
 

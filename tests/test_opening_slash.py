@@ -91,6 +91,34 @@ async def test_opening_prompt_session_verb_reprompts(
 
 
 @pytest.mark.anyio
+async def test_opening_prompt_keep_reprompts(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    quest = SimpleNamespace(id="z9y8x7", title="")
+    reply = await main._read_opening_message(
+        quest, leave_mode="new", banner_shown=False, color=False,
+        width=80, editing_mode="emacs",
+        _prompt_factory=lambda: _QueuePrompt(["/keep", "real intent"]))
+    assert reply == "real intent"        # /keep did not become the draft intent
+    out = capsys.readouterr().out
+    assert "/keep" in out                # a note explained why it was ignored
+
+
+@pytest.mark.anyio
+async def test_opening_prompt_shelve_reprompts(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    quest = SimpleNamespace(id="z9y8x7", title="")
+    reply = await main._read_opening_message(
+        quest, leave_mode="new", banner_shown=False, color=False,
+        width=80, editing_mode="emacs",
+        _prompt_factory=lambda: _QueuePrompt(["/shelve", "real intent"]))
+    assert reply == "real intent"        # /shelve did not become the draft intent
+    out = capsys.readouterr().out
+    assert "/shelve" in out              # a note explained why it was ignored
+
+
+@pytest.mark.anyio
 async def test_opening_prompt_leading_slash_path_submits_as_input(
     tmp_path: Path,
 ) -> None:

@@ -29,7 +29,7 @@ def test_rehydrate_restores_loadable_draft_from_archive(tmp_path: Path) -> None:
     assert loaded.materialized is False
     assert loaded.orig_base_head == orig_head
     state = State.load(loaded.state_dir)
-    assert state.status == "paused"  # the left-conversation resting status
+    assert state.status == "paused"  # the shelved-conversation resting status
     events = (quest_dir / "events.jsonl").read_bytes()
     assert b"quest_created" in events  # the original conversation events survive
 

@@ -201,3 +201,23 @@ def test_knowledge_memory_entry_notes_authoring_help() -> None:
     # while keeping the load_skill invocation intact.
     assert 'load_skill(name="imp-memory")' in body
     assert "help you author memory" in body
+
+
+def test_knowledge_archive_zone_says_shelved_not_left() -> None:
+    body = load_internal_skill(_skills_dir(), "imp-knowledge")
+    # The archive-zone disposition noun is "shelved", never "left".
+    assert "shelved conversations" in body
+    assert "left conversations" not in body
+    # The archive_conversation outcome carries the shelved cue.
+    assert "resumable (shelved)" in body
+
+
+def test_knowledge_backlog_zone_names_backlog_origin_only() -> None:
+    body = load_internal_skill(_skills_dir(), "imp-knowledge")
+    # The backlog zone is described by the single surviving origin word.
+    assert "backlog items" in body
+    assert "`origin` `backlog`" in body
+    # The collapsed origin tokens are gone as origin values (backtick-quoted);
+    # ordinary prose like "from idea to merge" is untouched.
+    assert "`idea`" not in body
+    assert "`followup`" not in body

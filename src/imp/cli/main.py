@@ -21,7 +21,7 @@ import subprocess
 import sys
 from collections.abc import Awaitable, Callable, Iterable
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, NamedTuple, NoReturn
 
@@ -134,7 +134,7 @@ class ReplyInterjectRouter:
 
 
 OPENING_HINT = "type a message, /help for commands, or /model to switch models"
-_OPENING_SESSION_VERBS = ("/save", "/clear", "/abandon")
+_OPENING_SESSION_VERBS = ("/keep", "/shelve", "/clear", "/abandon")
 
 
 def _should_prompt_opening(
@@ -526,13 +526,13 @@ def _print_leave_disposition(
     disposition = leave_state.get("disposition")
     if disposition == "save":
         print()
-        print(_status_spine(quest.id, quest.title, "saved to backlog", "wordmark",
+        print(_status_spine(quest.id, quest.title, "kept as draft", "wordmark",
                             color=color))
         print(_resume_line(quest.id))
         return 0
     if disposition == "archive":
         print()
-        print(_status_spine(quest.id, quest.title, "conversation saved", "wordmark",
+        print(_status_spine(quest.id, quest.title, "shelved", "wordmark",
                             color=color))
         print(_resume_line(quest.id, " — or find it later with imp search"))
         return 0
@@ -809,7 +809,7 @@ def _record_idea(args: argparse.Namespace, control: Path, base: str) -> int:
             control, title=title, quest_id=quest_id, base_branch=base,
             depends_on=list(getattr(args, "depends_on", None) or []),
             workflow=getattr(args, "workflow", None),
-            origin="idea", seed_opening=seed)
+            origin="backlog", seed_opening=seed)
     except (LoadError, LoadErrors) as e:
         print(f"imp: {e}", file=sys.stderr)
         return 2
@@ -1499,7 +1499,7 @@ def _is_backlog_home(
 
 def _unstarted_backlog_meta(control: Path, quest_id: str) -> dict[str, Any] | None:
     """quest.json of a LIVE un-materialized, non-draft-origin, never-conversed,
-    unlocked Backlog home (idea or followup) — sourced from the worktree home
+    unlocked Backlog home (origin `backlog`) — sourced from the worktree home
     only, never the archive: an abandoned home leaves an archived
     materialized:false quest.json that would otherwise render as a queued
     `status: backlog` brief instead of a History item. None for any archived-only
@@ -1648,8 +1648,21 @@ def _cmd_list(args: argparse.Namespace) -> int:
     except worktree.PreconditionError:
         print(_NO_QUESTS_MESSAGE)
         return 0
-    lines = _overview_lines(control, show_all=args.all, now=datetime.now(UTC),
-                            color=should_use_color(sys.stdout))
+    now = datetime.now(UTC)
+    color = should_use_color(sys.stdout)
+    dispositions = _selected_list_dispositions(args)
+    if not dispositions and args.since is None:
+        lines = _overview_lines(control, show_all=args.all, now=now, color=color)
+        _page_or_print(lines, no_pager=args.no_pager)
+        return 0
+    try:
+        cutoff = _since_cutoff(args.since, now) if args.since is not None else None
+    except ValueError:
+        print(_SINCE_ERROR, file=sys.stderr)
+        raise SystemExit(2) from None
+    selected = dispositions or {"active", "backlog", "merged"}
+    lines = _filtered_overview_lines(
+        control, dispositions=selected, cutoff=cutoff, now=now, color=color)
     _page_or_print(lines, no_pager=args.no_pager)
     return 0
 
@@ -2397,10 +2410,10 @@ def _completed_rows(control: Path, live_ids: set[str] | None = None) -> list[_Ro
     return rows
 
 
-def _left_rows(control: Path, live_ids: set[str] | None = None) -> list[_Row]:
-    """Left conversations — archived final status `paused` with no live home —
+def _shelved_rows(control: Path, live_ids: set[str] | None = None) -> list[_Row]:
+    """Shelved conversations — archived final status `paused` with no live home —
     for the `--all` history block. Mirrors _completed_rows' live-id dedup so a
-    resumed left conversation, which now has a live home and shows in-flight,
+    resumed shelved conversation, which now has a live home and shows in-flight,
     is not duplicated here. Reads the same indexed archive query as
     _completed_rows but selects `paused` rows instead of terminal ones."""
     live = {r[0] for r in _status_rows(control)} if live_ids is None else live_ids
@@ -2427,7 +2440,7 @@ def _resumable_match_rows(control: Path, token: str) -> list[_Row]:
 
     Spans live-resumable rows (`_resumable_rows`) AND archived-but-resumable
     records — an archived id whose archive record reads `resumable=True` (a
-    "left" conversation whose live home was deleted). A live row wins when an id
+    "shelved" conversation whose live home was deleted). A live row wins when an id
     appears in both. Archived completed/abandoned (non-resumable) ids are never
     matches, so a terminal id sharing a stem never joins the menu."""
     from imp.engine.archive import record, records_root
@@ -2797,7 +2810,7 @@ def _cmd_edit(args: argparse.Namespace) -> int:
     if args.title is not None and args.title != quest.title:
         quest.rename(args.title, log=quest.event_log())
     if args.backlog:
-        quest.set_origin("idea")
+        quest.set_origin("backlog")
     elif args.active:
         quest.set_origin("draft")
     if args.clear_deps:
@@ -2831,33 +2844,79 @@ def _backlog_rows(control: Path, scanned: list[_HomeScan] | None = None) -> list
     return rows
 
 
+_HISTORY_CAP = 10
+
+_SINCE_ERROR = (
+    "imp: --since expects 'today' or a number with a unit — "
+    "h/d/w/m/y (e.g. 2d, 1w, 3m).")
+
+
+def _since_cutoff(spec: str, now: datetime) -> datetime:
+    """Resolve a --since SPEC to an absolute cutoff instant (ValueError if unrecognized)."""
+    s = spec.strip().lower()
+    local = now.astimezone()
+    midnight = local.replace(hour=0, minute=0, second=0, microsecond=0)
+    if s == "today":
+        return midnight
+    if s == "yesterday":
+        return midnight - timedelta(days=1)
+    if s == "this-week":
+        return midnight - timedelta(days=local.weekday())
+    if s == "this-month":
+        return midnight.replace(day=1)
+    match = re.fullmatch(r"(\d+)([hdwmy])", s)
+    if match is None:
+        raise ValueError(spec)
+    n = int(match.group(1))
+    unit = match.group(2)
+    if unit == "h":
+        return now - timedelta(hours=n)
+    if unit == "d":
+        return now - timedelta(days=n)
+    if unit == "w":
+        return now - timedelta(weeks=n)
+    if unit == "m":
+        return now - timedelta(days=30 * n)
+    return now - timedelta(days=365 * n)  # unit == "y"
+
+
+def _selected_list_dispositions(args: argparse.Namespace) -> set[str]:
+    """Union of the disposition tokens selected by the `imp list` flags."""
+    picked: set[str] = set()
+    if args.active:
+        picked.add("active")
+    if args.backlog:
+        picked.add("backlog")
+    if args.merged:
+        picked.add("merged")
+    if args.abandoned:
+        picked.add("abandoned")
+    if args.shelved:
+        picked.add("shelved")
+    if args.archived:
+        picked |= {"merged", "abandoned", "shelved"}
+    return picked
+
+
 # Display-only disposition word for the overview history block.
-_DISPOSITION = {"completed": "merged", "abandoned": "abandoned", "paused": "left"}
+_DISPOSITION = {"completed": "merged", "abandoned": "abandoned", "paused": "shelved"}
 
 
 def _history_rows(control: Path, *, show_all: bool,
                   live_ids: set[str] | None = None) -> list[_Row]:
-    """History-block rows: completed/abandoned, plus left (paused) rows under --all."""
+    """History-block rows: completed/abandoned, plus shelved (paused) rows under --all."""
     rows = [r for r in _completed_rows(control, live_ids) if r[1] in _DISPOSITION]
     if show_all:
-        rows += _left_rows(control, live_ids)
+        rows += _shelved_rows(control, live_ids)
     else:
         rows = [r for r in rows if r[1] == "completed"]
     return _sort_rows_newest_first(rows)
 
 
-def _overview_lines(control: Path, *, show_all: bool, now: datetime,
-                    color: bool) -> list[str]:
-    """Overview lines across all zones, sharing one content-sized STATUS/NAME width."""
-    scanned = _scan_quest_homes(control)
-    status_rows = _status_rows(control, scanned)
-    inflight = _sort_rows_newest_first(status_rows)
-    backlog_rows = _sort_rows_newest_first(_backlog_rows(control, scanned))
-    history = _history_rows(control, show_all=show_all,
-                            live_ids={r[0] for r in status_rows})
-    if not inflight and not backlog_rows and not history:
-        return [_NO_QUESTS_MESSAGE]
-
+def _overview_body(control: Path, inflight: list[_Row], backlog_rows: list[_Row],
+                   history: list[_Row], *, history_label: str, now: datetime,
+                   color: bool) -> list[str]:
+    """Render the sectioned overview for already-gathered rows."""
     intents: dict[str, str | None] = {}
     for r in inflight:
         if not r[4].strip():
@@ -2899,14 +2958,74 @@ def _overview_lines(control: Path, *, show_all: bool, now: datetime,
                 color=color, name_width=name_width, status_width=status_width))
     if history:
         lines.append("")
-        label = "history:" if show_all else "merged:"
-        lines.append(pal.ansi(label, "dim", enabled=color))
+        lines.append(pal.ansi(history_label, "dim", enabled=color))
         for r in history:
             lines.append(quest_row.format_quest_line(
                 quest_id=r[0], title=r[4], status=_DISPOSITION[r[1]], step="-",
                 last_iso=r[3], now=now, color=color, name_width=name_width,
                 status_width=status_width, dim=True))
     return lines
+
+
+def _overview_lines(control: Path, *, show_all: bool, now: datetime,
+                    color: bool) -> list[str]:
+    """Overview lines across all zones, sharing one content-sized STATUS/NAME width."""
+    scanned = _scan_quest_homes(control)
+    status_rows = _status_rows(control, scanned)
+    inflight = _sort_rows_newest_first(status_rows)
+    backlog_rows = _sort_rows_newest_first(_backlog_rows(control, scanned))
+    history = _history_rows(control, show_all=show_all,
+                            live_ids={r[0] for r in status_rows})
+    if not inflight and not backlog_rows and not history:
+        return [_NO_QUESTS_MESSAGE]
+    label = "history:" if show_all else "merged:"
+    return _overview_body(control, inflight, backlog_rows, history,
+                          history_label=label, now=now, color=color)
+
+
+_NO_FILTER_MATCH_MESSAGE = "No quests match that filter."
+
+# Disposition token -> archived final-state status.
+_ARCHIVE_STATUS = {"merged": "completed", "abandoned": "abandoned",
+                   "shelved": "paused"}
+
+
+def _row_since(r: _Row, cutoff: datetime | None) -> bool:
+    """True when the row's last-activity timestamp is at or after the cutoff."""
+    if cutoff is None:
+        return True
+    if not r[3]:
+        return False
+    try:
+        return datetime.fromisoformat(r[3]) >= cutoff
+    except (ValueError, TypeError):
+        return False
+
+
+def _filtered_overview_lines(control: Path, *, dispositions: set[str],
+                              cutoff: datetime | None, now: datetime,
+                              color: bool) -> list[str]:
+    """Sectioned overview over the full uncapped set, filtered by disposition and cutoff."""
+    scanned = _scan_quest_homes(control)
+    status_rows = _status_rows(control, scanned)
+    live_ids = {r[0] for r in status_rows}
+    inflight = (_sort_rows_newest_first(status_rows)
+                if "active" in dispositions else [])
+    backlog_rows = (_sort_rows_newest_first(_backlog_rows(control, scanned))
+                    if "backlog" in dispositions else [])
+    wanted = {_ARCHIVE_STATUS[d]
+              for d in dispositions & {"merged", "abandoned", "shelved"}}
+    history_all = _completed_rows(control, live_ids) + _shelved_rows(control, live_ids)
+    history = _sort_rows_newest_first([r for r in history_all if r[1] in wanted])
+
+    inflight = [r for r in inflight if _row_since(r, cutoff)]
+    backlog_rows = [r for r in backlog_rows if _row_since(r, cutoff)]
+    history = [r for r in history if _row_since(r, cutoff)]
+
+    if not inflight and not backlog_rows and not history:
+        return [_NO_FILTER_MATCH_MESSAGE]
+    return _overview_body(control, inflight, backlog_rows, history,
+                          history_label="history:", now=now, color=color)
 
 
 def _cmd_status(args: argparse.Namespace, _control: Path | None = None) -> int:
@@ -2944,20 +3063,22 @@ class _SearchHit:
     last_activity: str | None   # ISO of last activity; None/"" renders age "-"
 
 
-def _selected_search_zones(args: argparse.Namespace) -> set[str]:
-    picked = {
-        zone for zone, on in (
-            ("active", args.active),
-            ("backlog", args.backlog),
-            ("archive", args.archived),
-            ("completed", args.completed),
-        ) if on
-    }
-    picked = picked or set(_SEARCH_ZONES)
-    if "archive" in picked:
-        # Archive is the superset; drop the completed subset so nothing double-lists.
-        picked.discard("completed")
-    return picked
+def _selected_search(args: argparse.Namespace) -> tuple[bool, bool, set[str]]:
+    """(search_active, search_backlog, archive_statuses) from the search flags."""
+    statuses: set[str] = set()
+    if args.merged:
+        statuses.add("completed")
+    if args.abandoned:
+        statuses.add("abandoned")
+    if args.shelved:
+        statuses.add("paused")
+    if args.archived:
+        statuses |= {"completed", "abandoned", "paused"}
+    if args.merged_after is not None:
+        statuses.add("completed")
+    if not (args.active or args.backlog or statuses):
+        return True, True, {"completed", "abandoned", "paused"}
+    return args.active, args.backlog, statuses
 
 
 def _search_active(control: Path, query: str) -> list[_SearchHit]:
@@ -2994,11 +3115,19 @@ def _search_backlog(control: Path, query: str) -> list[_SearchHit]:
     return hits
 
 
-def _search_archived(control: Path, query: str) -> list[_SearchHit]:
-    return [
-        _SearchHit(cid, title, "archive", content, last)
-        for (cid, title, content, last) in archive_read.search_archive_content(control, query)
-    ]
+def _search_archived(control: Path, query: str, statuses: set[str],
+                     merged_after: str | None) -> list[_SearchHit]:
+    """Archive hits in `statuses`; completed hits also gated by merged_after."""
+    hits: list[_SearchHit] = []
+    for cid, title, content, status, last in archive_read.search_archive_content(
+            control, query):
+        if status not in statuses:
+            continue
+        if (status == "completed" and merged_after is not None
+                and not _merged_after(control, cid, merged_after)):
+            continue
+        hits.append(_SearchHit(cid, title, "archive", content, last))
+    return hits
 
 
 def _merged_after(control: Path, quest_id: str, base_commit: str) -> bool:
@@ -3010,17 +3139,6 @@ def _merged_after(control: Path, quest_id: str, base_commit: str) -> bool:
     return worktree._git(
         control, "merge-base", "--is-ancestor", merge_commit, base_commit,
     ).returncode == 1
-
-
-def _search_completed(
-    control: Path, query: str, merged_after: str | None,
-) -> list[_SearchHit]:
-    hits: list[_SearchHit] = []
-    for cid, title, content, last in archive_read.search_archive_completed(control, query):
-        if merged_after is not None and not _merged_after(control, cid, merged_after):
-            continue
-        hits.append(_SearchHit(cid, title, "completed", content, last))
-    return hits
 
 
 def _spine_segment(text: str, query: str, *base_codes: str, color: bool) -> str:
@@ -3104,27 +3222,21 @@ def _search_list_line(
 
 
 def _cmd_search(args: argparse.Namespace, _control: Path | None = None) -> int:
-    if args.merged_after is not None and not args.completed:
-        print("imp: --merged-after is only meaningful with --completed",
-              file=sys.stderr)
-        raise SystemExit(2)
     control = _control if _control is not None else _control_root()
-    zones = _selected_search_zones(args)
+    want_active, want_backlog, statuses = _selected_search(args)
     hits: list[_SearchHit] = []
-    if "active" in zones:
+    if want_active:
         hits += _search_active(control, args.query)
-    if "backlog" in zones:
+    if want_backlog:
         hits += _search_backlog(control, args.query)
-    if "archive" in zones:
-        hits += _search_archived(control, args.query)
-    if "completed" in zones:
-        hits += _search_completed(control, args.query, args.merged_after)
+    if statuses:
+        hits += _search_archived(control, args.query, statuses, args.merged_after)
     if not hits:
         print(f"No quests match {args.query!r}.")
         return 0
     now = datetime.now(UTC)
     color = should_use_color(sys.stdout)
-    zone_order = {z: i for i, z in enumerate((*_SEARCH_ZONES, "completed"))}
+    zone_order = {z: i for i, z in enumerate(_SEARCH_ZONES)}
     hits.sort(key=lambda h: h.last_activity or "", reverse=True)
     hits.sort(key=lambda h: zone_order[h.zone])
     if args.list:
@@ -3526,12 +3638,34 @@ def _build_parser() -> argparse.ArgumentParser:
         description=(
             "With no argument, an overview of your quests — in-flight, the "
             "backlog, and every merged quest. -a/--all also includes "
-            "abandoned/left quests (the block is then labelled `history`)."),
+            "abandoned/shelved quests (the block is then labelled `history`)."),
     )
     p_list.add_argument(
         "-a", "--all", action="store_true",
-        help="Also include abandoned/left quests "
+        help="Also include abandoned and shelved quests "
              "(the block is then labelled `history`).")
+    p_list.add_argument(
+        "--active", action="store_true",
+        help="Show only in-flight quests and drafts.")
+    p_list.add_argument(
+        "--backlog", action="store_true",
+        help="Show only backlog items.")
+    p_list.add_argument(
+        "--merged", action="store_true",
+        help="Show only merged quests.")
+    p_list.add_argument(
+        "--abandoned", action="store_true",
+        help="Show only abandoned quests.")
+    p_list.add_argument(
+        "--shelved", action="store_true",
+        help="Show only shelved conversations.")
+    p_list.add_argument(
+        "--archived", action="store_true",
+        help="Show merged, abandoned, and shelved quests (the archive).")
+    p_list.add_argument(
+        "--since", metavar="SPEC", default=None,
+        help="Show only quests active since SPEC — today, yesterday, this-week, "
+             "this-month, or a number + unit h/d/w/m/y (e.g. 2d, 1w).")
     p_list.add_argument(
         "--no-pager", action="store_true",
         help="Disable the pager even when stdout is a TTY.")
@@ -3568,7 +3702,7 @@ def _build_parser() -> argparse.ArgumentParser:
             "Search active (in-flight + drafts), backlog, and archived quests "
             "for the query as a case-insensitive substring of a quest's id, "
             "title, or conversation content. With no zone flag, all three zones "
-            "are searched. --completed scopes to merged quests."),
+            "are searched. --merged scopes to merged quests."),
     )
     p_search.add_argument(
         "query", metavar="QUERY",
@@ -3580,15 +3714,21 @@ def _build_parser() -> argparse.ArgumentParser:
         "--backlog", action="store_true",
         help="Search backlog quests.")
     p_search.add_argument(
-        "--archived", action="store_true",
-        help="Search archived (completed, abandoned, left) quests.")
+        "--merged", action="store_true",
+        help="Search merged quests.")
     p_search.add_argument(
-        "--completed", action="store_true",
-        help="Search completed (merged) quests.")
+        "--abandoned", action="store_true",
+        help="Search abandoned quests.")
+    p_search.add_argument(
+        "--shelved", action="store_true",
+        help="Search shelved conversations.")
+    p_search.add_argument(
+        "--archived", action="store_true",
+        help="Search archived (merged, abandoned, shelved) quests.")
     p_search.add_argument(
         "--merged-after", metavar="COMMIT", default=None,
-        help="With --completed, keep only quests whose merge landed after "
-             "COMMIT (not an ancestor of it).")
+        help="Keep only merged quests whose merge landed after COMMIT "
+             "(implies --merged).")
     p_search.add_argument(
         "-l", "--list", action="store_true", dest="list",
         help="One terse line per quest (id, title, zone); no excerpts.")
@@ -3644,7 +3784,7 @@ def _build_parser() -> argparse.ArgumentParser:
     p_edit_zone = p_edit.add_mutually_exclusive_group()
     p_edit_zone.add_argument(
         "--backlog", action="store_true",
-        help="Move an un-materialized quest to the backlog zone (origin=idea).")
+        help="Move an un-materialized quest to the backlog zone (origin=backlog).")
     p_edit_zone.add_argument(
         "--active", action="store_true",
         help="Return an un-materialized quest to the Active zone (origin=draft).")

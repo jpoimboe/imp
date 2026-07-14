@@ -42,8 +42,8 @@ def leave_control_action(
     if intent == "abandon":
         return None
     explicit_save = intent == "save"
-    is_clear = intent == "clear"
-    if leave_mode is None and not explicit_save and not is_clear:
+    is_archive = intent in ("clear", "shelve")
+    if leave_mode is None and not explicit_save and not is_archive:
         return None
     if quest.materialized:
         return None
@@ -51,7 +51,7 @@ def leave_control_action(
         return CONTROL_DISCARD
     if explicit_save:
         return CONTROL_SAVE
-    if is_clear:
+    if is_archive:
         return CONTROL_ARCHIVE
     if leave_mode == "new":
         return CONTROL_SAVE

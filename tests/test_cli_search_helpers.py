@@ -10,8 +10,7 @@ from imp.cli.main import (
     _search_active,
     _search_archived,
     _search_backlog,
-    _search_completed,
-    _selected_search_zones,
+    _selected_search,
 )
 from imp.engine import archive
 from imp.engine.quest import Quest
@@ -56,33 +55,36 @@ def _init_git_commits(root: Path) -> tuple[str, str]:
     return sha_a, sha_b
 
 
-def _ns(**kw: bool) -> argparse.Namespace:
-    base = {"active": False, "backlog": False, "archived": False, "completed": False}
+def _ns(**kw: object) -> argparse.Namespace:
+    base = {"active": False, "backlog": False, "merged": False,
+            "abandoned": False, "shelved": False, "archived": False,
+            "merged_after": None}
     base.update(kw)
     return argparse.Namespace(**base)
 
 
-def test_selected_zones_defaults_to_all_three() -> None:
-    assert _selected_search_zones(_ns()) == {"active", "backlog", "archive"}
+def test_selected_search_defaults_to_active_backlog_and_all_archive() -> None:
+    assert _selected_search(_ns()) == (True, True, {"completed", "abandoned", "paused"})
 
 
-def test_selected_zones_are_composable() -> None:
-    assert _selected_search_zones(_ns(backlog=True)) == {"backlog"}
-    assert _selected_search_zones(_ns(active=True, archived=True)) == {"active", "archive"}
+def test_selected_search_single_zone_scopes() -> None:
+    assert _selected_search(_ns(backlog=True)) == (False, True, set())
+    assert _selected_search(_ns(active=True)) == (True, False, set())
 
 
-def test_selected_zones_completed_alone() -> None:
-    assert _selected_search_zones(_ns(completed=True)) == {"completed"}
+def test_selected_search_disposition_flags_map_to_statuses() -> None:
+    assert _selected_search(_ns(merged=True)) == (False, False, {"completed"})
+    assert _selected_search(_ns(abandoned=True)) == (False, False, {"abandoned"})
+    assert _selected_search(_ns(shelved=True)) == (False, False, {"paused"})
 
 
-def test_selected_zones_archive_wins_over_completed() -> None:
-    # Passing both drops "completed" so a completed quest never double-lists.
-    assert _selected_search_zones(_ns(archived=True, completed=True)) == {"archive"}
+def test_selected_search_archived_expands_to_three_statuses() -> None:
+    assert _selected_search(_ns(archived=True)) == (
+        False, False, {"completed", "abandoned", "paused"})
 
 
-def test_selected_zones_default_excludes_completed() -> None:
-    # No-flag default is unchanged: completed quests appear under [archive].
-    assert "completed" not in _selected_search_zones(_ns())
+def test_selected_search_merged_after_self_enables_merged() -> None:
+    assert _selected_search(_ns(merged_after="abc")) == (False, False, {"completed"})
 
 
 def test_search_active_labels_zone_and_carries_prose(tmp_path: Path) -> None:
@@ -115,12 +117,12 @@ def test_search_backlog_excludes_nonmatching(tmp_path: Path) -> None:
     assert _search_backlog(tmp_path, "zzznope") == []
 
 
-def test_search_archived_labels_zone_and_carries_content(tmp_path: Path) -> None:
-    _archive(tmp_path, "arcid", "Dark archived work")
-    hits = _search_archived(tmp_path, "dark")
-    assert [h.quest_id for h in hits] == ["arcid"]
+def test_search_archived_filters_by_disposition_and_labels_zone(tmp_path: Path) -> None:
+    _archive(tmp_path, "arccomp", "Dark archived merged", status="completed")
+    _archive(tmp_path, "arcaband", "Dark archived abandoned", status="abandoned")
+    hits = _search_archived(tmp_path, "dark", {"abandoned"}, None)
+    assert [h.quest_id for h in hits] == ["arcaband"]   # completed excluded by status
     assert hits[0].zone == "archive"
-    assert hits[0].title == "Dark archived work"
 
 
 def _user_msg_line(text: str, *, human: bool = True) -> str:
@@ -152,12 +154,11 @@ def test_search_active_excludes_nonhuman_user_message(tmp_path: Path) -> None:
     assert _search_active(tmp_path, "cover-check") == []
 
 
-def test_search_completed_labels_zone_and_filters(tmp_path: Path) -> None:
+def test_search_archived_merged_disposition_excludes_abandoned(tmp_path: Path) -> None:
     _archive(tmp_path, "alpha", "Dark mode", status="completed")
     _archive(tmp_path, "beta", "Dark login", status="abandoned")
-    hits = _search_completed(tmp_path, "dark", None)
-    assert [h.quest_id for h in hits] == ["alpha"]     # abandoned excluded
-    assert hits[0].zone == "completed"
+    hits = _search_archived(tmp_path, "dark", {"completed"}, None)
+    assert [h.quest_id for h in hits] == ["alpha"]      # abandoned excluded
     assert hits[0].title == "Dark mode"
 
 
@@ -179,8 +180,9 @@ def test_merged_after_excludes_missing_and_unverifiable(tmp_path: Path) -> None:
     assert _merged_after(tmp_path, "alpha", "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef") is False
 
 
-def test_search_completed_applies_merged_after(tmp_path: Path) -> None:
+def test_search_archived_applies_merged_after_to_completed(tmp_path: Path) -> None:
     sha_a, sha_b = _init_git_commits(tmp_path)
     _archive(tmp_path, "alpha", "Dark", status="completed", merge_commit=sha_b)
-    assert [h.quest_id for h in _search_completed(tmp_path, "dark", sha_a)] == ["alpha"]
-    assert _search_completed(tmp_path, "dark", sha_b) == []
+    assert [h.quest_id for h in
+            _search_archived(tmp_path, "dark", {"completed"}, sha_a)] == ["alpha"]
+    assert _search_archived(tmp_path, "dark", {"completed"}, sha_b) == []

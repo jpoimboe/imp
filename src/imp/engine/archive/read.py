@@ -73,7 +73,7 @@ def search_archive(
 
 def search_archive_content(
     control_root: Path, query: str,
-) -> list[tuple[str, str, str, str | None]]:
+) -> list[tuple[str, str, str, str, str | None]]:
     ensure_current(control_root)
     db = index_path(control_root)
     if not db.exists():
@@ -81,20 +81,6 @@ def search_archive_content(
     conn = index.connect(db)
     try:
         return index.search_content(conn, query)
-    finally:
-        conn.close()
-
-
-def search_archive_completed(
-    control_root: Path, query: str,
-) -> list[tuple[str, str, str, str | None]]:
-    ensure_current(control_root)
-    db = index_path(control_root)
-    if not db.exists():
-        return []
-    conn = index.connect(db)
-    try:
-        return index.search_completed(conn, query)
     finally:
         conn.close()
 
@@ -188,7 +174,7 @@ def read_artifact(control_root: Path, quest_id: str, rel: str) -> bytes | None:
 
 
 def rehydrate_quest(control_root: Path, quest_id: str) -> Path:
-    """Recreate a live scratch dir from the archive so a left conversation can be resumed."""
+    """Recreate a live scratch dir from the archive so a shelved conversation can be resumed."""
     quest_dir = control_root / ".imp" / "quests" / quest_id
     if quest_dir.exists():
         raise FileExistsError(f"live home for {quest_id!r} already exists")
