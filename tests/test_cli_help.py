@@ -50,7 +50,7 @@ def test_log_help_documents_the_token_positional(
 def test_help_lists_model_command() -> None:
     from imp.cli.slash import _help
     out: list[str] = []
-    _help(out.append)
+    _help(out.append, materialized=False)
     assert any(line.strip().startswith("/model") for line in out)
 
 
