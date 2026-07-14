@@ -37,7 +37,7 @@ def test_step_context_digest_drops_prompt_and_schema() -> None:
     assert "SECRET_TOOL_SCHEMA" not in line
 
 
-def test_llm_response_digest_shows_stop_tools_usage_and_text() -> None:
+def test_llm_response_digest_shows_stop_tools_in_out_and_text() -> None:
     ev = {
         "id": "e3", "parent_id": None, "agent_id": "step:x/y",
         "timestamp": "2026-07-01T00:00:02+00:00", "type": "llm_response",
@@ -53,10 +53,12 @@ def test_llm_response_digest_shows_stop_tools_usage_and_text() -> None:
     }
     line = digest_event(ev)
     assert "\n" not in line
-    assert "tool_use" in line          # stop_reason
-    assert "111" in line               # usage token count
+    assert "stop=tool_use" in line
+    assert "tools=1" in line
+    assert "in=111" in line
+    assert "out=22" in line
     assert "here is my analysis" in line
-    assert "tools=1" in line           # one tool_use counted
+    assert "usage=" not in line          # the raw usage dict is gone
 
 
 def test_tool_result_digest_shows_error_and_byte_size() -> None:

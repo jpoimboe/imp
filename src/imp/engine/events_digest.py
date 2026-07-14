@@ -69,7 +69,8 @@ def _h_llm_response(payload: dict[str, Any]) -> str:
     texts, n_tools = _parse_llm(payload)
     usage = payload.get("usage") or {}
     return (f"stop={payload.get('stop_reason')} tools={n_tools} "
-            f"usage={usage} {_clip(texts, _TEXT_CAP)}")
+            f"in={usage.get('input_tokens')} out={usage.get('output_tokens')} "
+            f"{_clip(texts, _TEXT_CAP)}")
 
 
 def _h_tool_call(payload: dict[str, Any]) -> str:
