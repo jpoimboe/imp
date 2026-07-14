@@ -2797,7 +2797,7 @@ async def _pick_events_matches(control: Path, matches: list[str]) -> str | int:
         control=control,
         rows=rows,
         header=_EVENTS_PICKER_HEADER,
-        on_empty=_log_picker_empty,
+        on_empty=_show_picker_empty,
         on_non_tty=_non_tty,
     )
 
