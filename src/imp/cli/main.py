@@ -1556,9 +1556,9 @@ def _quest_card(control: Path, quest_id: str, *, now: datetime) -> list[str]:
     if row is None:
         return []
     _id, status, step, last, title, created, step_label, phase_label = row
-    if not (_quest_home(control, quest_id) / "quest.json").exists():
-        if archive_read.status_of(control, quest_id) == "paused":
-            status = _DISPOSITION["paused"]
+    if (not (_quest_home(control, quest_id) / "quest.json").exists()
+            and archive_read.status_of(control, quest_id) == "paused"):
+        status = _DISPOSITION["paused"]
     events = _load_events_for_id(control, quest_id) or []
     lines = [
         f"id:            {_id}",
