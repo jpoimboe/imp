@@ -319,4 +319,4 @@ def test_search_finds_abandoned_draft(
     out = capsys.readouterr().out
     assert rc == 0
     assert "idea1" in out            # abandoned draft is found
-    assert "[archive]" in out        # surfaced from the archive zone
+    assert "· archive ·" in out      # surfaced from the archive zone

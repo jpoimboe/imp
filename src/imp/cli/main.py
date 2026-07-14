@@ -2896,6 +2896,7 @@ class _SearchHit:
     title: str
     zone: str      # one of _SEARCH_ZONES
     content: str   # searchable prose for excerpting ("" when the zone has none)
+    last_activity: str | None   # ISO of last activity; None/"" renders age "-"
 
 
 def _selected_search_zones(args: argparse.Namespace) -> set[str]:
@@ -2922,7 +2923,7 @@ def _search_active(control: Path, query: str) -> list[_SearchHit]:
     for r in _status_rows(control):
         prose = _inflight_prose(control, r[0])
         if q in r[0].lower() or q in r[4].lower() or q in prose.lower():
-            hits.append(_SearchHit(r[0], r[4], "active", prose))
+            hits.append(_SearchHit(r[0], r[4], "active", prose, r[3]))
     return hits
 
 
@@ -2944,14 +2945,14 @@ def _search_backlog(control: Path, query: str) -> list[_SearchHit]:
         quest_id, title = r[0], r[4]
         seed = _backlog_seed_opening(control, quest_id)
         if q in quest_id.lower() or q in title.lower() or q in seed.lower():
-            hits.append(_SearchHit(quest_id, title, "backlog", seed))
+            hits.append(_SearchHit(quest_id, title, "backlog", seed, r[3]))
     return hits
 
 
 def _search_archived(control: Path, query: str) -> list[_SearchHit]:
     return [
-        _SearchHit(cid, title, "archive", content)
-        for (cid, title, content) in archive_read.search_archive_content(control, query)
+        _SearchHit(cid, title, "archive", content, last)
+        for (cid, title, content, last) in archive_read.search_archive_content(control, query)
     ]
 
 
@@ -2970,11 +2971,29 @@ def _search_completed(
     control: Path, query: str, merged_after: str | None,
 ) -> list[_SearchHit]:
     hits: list[_SearchHit] = []
-    for cid, title, content in archive_read.search_archive_completed(control, query):
+    for cid, title, content, last in archive_read.search_archive_completed(control, query):
         if merged_after is not None and not _merged_after(control, cid, merged_after):
             continue
-        hits.append(_SearchHit(cid, title, "completed", content))
+        hits.append(_SearchHit(cid, title, "completed", content, last))
     return hits
+
+
+def _spine_segment(text: str, query: str, *base_codes: str, color: bool) -> str:
+    """Paint text in base_codes, over-painting each query run bold-yellow."""
+    if not color:
+        return text
+    if not query:
+        return pal.ansi(text, *base_codes, enabled=True)
+    out: list[str] = []
+    last = 0
+    for m in re.finditer(re.escape(query), text, flags=re.IGNORECASE):
+        if m.start() > last:
+            out.append(pal.ansi(text[last:m.start()], *base_codes, enabled=True))
+        out.append(pal.ansi(m.group(), "bold", "yellow", enabled=True))
+        last = m.end()
+    if last < len(text):
+        out.append(pal.ansi(text[last:], *base_codes, enabled=True))
+    return "".join(out)
 
 
 def _highlight(text: str, query: str, *, color: bool) -> str:
@@ -2992,37 +3011,51 @@ def _highlight(text: str, query: str, *, color: bool) -> str:
 
 
 def _excerpts(
-    content: str, query: str, *, color: bool, context: int = 40, limit: int = 3,
-) -> list[str]:
-    """Up to `limit` grep-style match spans, whitespace-collapsed and query-highlighted."""
+    content: str, query: str, *, color: bool, limit: int = 3,
+) -> tuple[list[str], int]:
+    """Up to `limit` grep-style match spans — whitespace-collapsed,
+    query-highlighted, `…`-truncated toward the terminal width — plus the count
+    of query occurrences beyond `limit`."""
     if not query:
-        return []
+        return [], 0
+    width = shutil.get_terminal_size((80, 24)).columns
+    context = max(20, (width - len(query) - 6) // 2)
+    matches = list(re.finditer(re.escape(query), content, flags=re.IGNORECASE))
     spans: list[str] = []
-    for m in re.finditer(re.escape(query), content, flags=re.IGNORECASE):
-        if len(spans) >= limit:
-            break
+    for m in matches[:limit]:
         start = max(0, m.start() - context)
         end = min(len(content), m.end() + context)
         body = " ".join(content[start:end].split())
         prefix = "… " if start > 0 else ""
         suffix = " …" if end < len(content) else ""
         spans.append(prefix + _highlight(body, query, color=color) + suffix)
-    return spans
+    return spans, max(0, len(matches) - limit)
 
 
 def _render_search_hit(
-    hit: _SearchHit, query: str, *, color: bool,
+    hit: _SearchHit, query: str, *, now: datetime, color: bool,
 ) -> list[str]:
-    header = _search_list_line(hit)
-    spans = _excerpts(hit.content, query, color=color)
-    if spans:
-        return [header, *(f"    {s}" for s in spans)]
-    field = "id" if query.lower() in hit.quest_id.lower() else "title"
-    return [header, f"    (matched on {field})"]
+    lines = [_search_list_line(hit, query=query, now=now, color=color)]
+    spans, extra = _excerpts(hit.content, query, color=color)
+    lines.extend(f"  {s}" for s in spans)
+    if extra > 0:
+        lines.append(pal.ansi(f"  … +{extra} more", "dim", enabled=color))
+    return lines
 
 
-def _search_list_line(hit: _SearchHit) -> str:
-    return f"{hit.quest_id}  {hit.title or '(untitled)'}  [{hit.zone}]"
+def _search_list_line(
+    hit: _SearchHit, *, query: str, now: datetime, color: bool,
+) -> str:
+    """Spine heading id · title · zone · age; query highlighted; title dropped when empty."""
+    id_seg = _spine_segment(hit.quest_id, query, *pal.NODE_COLORS["quest_id"],
+                            color=color)
+    age = quest_row.relative_age(hit.last_activity, now=now)
+    tail = pal.ansi(f"{hit.zone} · {age}", "dim", enabled=color)
+    title = hit.title.strip()
+    if not title:
+        return f"{id_seg} · {tail}"
+    title_seg = _spine_segment(title, query, color=color)
+    return f"{id_seg} · {title_seg} · {tail}"
 
 
 def _cmd_search(args: argparse.Namespace, _control: Path | None = None) -> int:
@@ -3044,13 +3077,21 @@ def _cmd_search(args: argparse.Namespace, _control: Path | None = None) -> int:
     if not hits:
         print(f"No quests match {args.query!r}.")
         return 0
+    now = datetime.now(UTC)
+    color = should_use_color(sys.stdout)
+    zone_order = {z: i for i, z in enumerate((*_SEARCH_ZONES, "completed"))}
+    hits.sort(key=lambda h: h.last_activity or "", reverse=True)
+    hits.sort(key=lambda h: zone_order[h.zone])
     if args.list:
-        lines = [_search_list_line(h) for h in hits]
+        lines = [_search_list_line(h, query=args.query, now=now, color=color)
+                 for h in hits]
     else:
-        color = should_use_color(sys.stdout)
-        lines = []
+        noun = "match" if len(hits) == 1 else "matches"
+        lines = [pal.ansi(f'{len(hits)} {noun} for "{args.query}"',
+                          "dim", enabled=color)]
         for h in hits:
-            lines.extend(_render_search_hit(h, args.query, color=color))
+            lines.append("")
+            lines.extend(_render_search_hit(h, args.query, now=now, color=color))
     _page_or_print(lines, no_pager=args.no_pager)
     return 0
 

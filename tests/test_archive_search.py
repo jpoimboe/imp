@@ -93,12 +93,24 @@ def test_search_content_carries_conversation_body(tmp_path: Path) -> None:
     assert "300s deadline holds" in hits[0][2]         # content column carried for excerpting
 
 
-def test_search_content_matches_title_and_returns_triples(tmp_path: Path) -> None:
-    _archive(tmp_path, "alpha", "Dark mode toggle")
+def test_search_content_returns_id_title_content_and_last_activity(tmp_path: Path) -> None:
+    _archive(tmp_path, "alpha", "Dark mode toggle",
+             events_text=_prose_line("dark discussion here"))
     hits = archive_read.search_archive_content(tmp_path, "dark")
     assert [h[0] for h in hits] == ["alpha"]
     assert hits[0][1] == "Dark mode toggle"
-    assert len(hits[0]) == 3                            # (id, title, content), no status/created
+    assert len(hits[0]) == 4                       # (id, title, content, last_activity)
+    assert hits[0][3] == "2026-06-01T00:00:01+00:00"   # the event's timestamp
+
+
+def test_search_content_matches_title_only_when_body_lacks_term(tmp_path: Path) -> None:
+    # Query is in the title but NOT the body — search_content's title branch
+    # (id OR title OR content) must still surface the hit.
+    _archive(tmp_path, "alpha", "Dark mode toggle",
+             events_text=_prose_line("an unrelated discussion happened here"))
+    _archive(tmp_path, "other", "Login flow",
+             events_text=_prose_line("nothing relevant in this body"))
+    assert [h[0] for h in archive_read.search_archive_content(tmp_path, "dark")] == ["alpha"]
 
 
 def test_search_content_missing_index_returns_empty(tmp_path: Path) -> None:
@@ -118,7 +130,8 @@ def test_search_completed_filters_to_completed_status(tmp_path: Path) -> None:
     hits = archive_read.search_archive_completed(tmp_path, "dark")
     assert [h[0] for h in hits] == ["alpha"]        # abandoned 'beta' excluded by status
     assert hits[0][1] == "Dark mode toggle"          # title carried
-    assert len(hits[0]) == 3  # (id, title, content) triple, like search_content
+    assert len(hits[0]) == 4  # (id, title, content, last_event_ts), like search_content
+    assert hits[0][3] is None  # no events archived → no last_event_ts
 
 
 def test_search_completed_matches_content_body(tmp_path: Path) -> None:

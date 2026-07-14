@@ -85,27 +85,6 @@ def handle_slash_line(
         _echo_command(text, output_fn, color=color)
         _list(quest.workflow_dir / "skills", output_fn)
         return REPROMPT
-    if cmd == "list":
-        _echo_command(text, output_fn, color=color)
-        import argparse
-
-        from imp.cli.main import _cmd_status
-        show_all = args in ("-a", "--all", "all")
-        _cmd_status(argparse.Namespace(all=show_all), quest.control_root)
-        return REPROMPT
-    if cmd == "search":
-        _echo_command(text, output_fn, color=color)
-        if not args:
-            output_fn("Usage: /search <query>")
-            return REPROMPT
-        from imp.engine.archive import read as archive_read
-        hits = archive_read.search_archive(quest.control_root, args)
-        if not hits:
-            output_fn(f"No archived quests match {args!r}.")
-        else:
-            for quest_id, title, status, _created in hits:
-                output_fn(f"  {quest_id}  {title or '(untitled)'}  [{status or '-'}]")
-        return REPROMPT
     if cmd == "abandon":
         return "/abandon"
     if cmd == "save":
@@ -144,34 +123,6 @@ def handle_slash_line(
             return REPROMPT
         output_fn(SANDBOX_USAGE)
         return REPROMPT
-    if cmd == "resume":
-        _echo_command(text, output_fn, color=color)
-        if not args:
-            output_fn("Usage: /resume <id|query>")
-            return REPROMPT
-        from imp.cli.main import _iter_quest_ids, _quest_home
-        from imp.engine.archive import read as archive_read
-        from imp.engine.archive import record, records_root
-        control = quest.control_root
-        matches = [cid for cid in _iter_quest_ids(control) if args in cid]
-        if len(matches) != 1:
-            if not matches:
-                output_fn(f"No quest matches {args!r}.")
-            else:
-                output_fn(f"{args!r} is ambiguous: {', '.join(matches)}")
-            return REPROMPT
-        target = matches[0]
-        if _quest_home(control, target).exists():
-            output_fn(f"{target} is live; continue it with `imp resume {target}`.")
-            return REPROMPT
-        rec = record.read_record(records_root(control), target)
-        if rec is None or not rec.get("resumable"):
-            output_fn(f"{target} is not resumable.")
-            return REPROMPT
-        archive_read.rehydrate_quest(control, target)
-        output_fn(f"Rehydrated {target}; continue it with `imp resume {target}`.")
-        return REPROMPT
-
     known = {name for name, _ in list_user_skills(quest.workflow_dir / "skills")}
     if cmd in known:
         return SkillRequest(cmd, args)
@@ -195,14 +146,11 @@ def _help(out: Callable[[str], None]) -> None:
     out("Available slash commands:")
     out("  /help              Show this message")
     out("  /skills            List loadable skills")
-    out("  /list [-a]         List your quests (-a adds completed/abandoned)")
-    out("  /search <query>    Search archived quests by content, title, or id")
     out("  /save              Save this conversation to your backlog")
     out("  /clear             Park this chat and start a fresh one")
     out("  /model <model>     Switch this step's model (or provider:model)")
     out("  /sandbox [on|off]  Show or set the filesystem sandbox for this session")
     out("  /abandon           Abandon the current quest")
-    out("  /resume <id|query> Rehydrate a saved/archived conversation to continue")
     out("  /<name> [args]     Load a skill (trailing args appended to it)")
     out("")
     out("Keybindings:")
