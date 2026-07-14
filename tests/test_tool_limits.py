@@ -214,3 +214,35 @@ def test_bg_stream_cap_not_aliased_to_read_cap() -> None:
     m = re.search(r"^BG_STREAM_FILE_CAP_BYTES = ([^#\n]+)", src, re.M)
     assert m is not None
     assert m.group(1).strip() == "5_000_000"     # a literal, not an alias
+
+
+def test_bash_foreground_timeout_default_and_cap() -> None:
+    """Bash foreground deadline is short (2 min) and its caller cap (10 min) sits
+    strictly below the 30-min fs/nav wall clock — a runaway foreground command is
+    reaped in minutes, not the general per-tool ceiling (spec AC 3 & 4)."""
+    from imp.agents.tools.limits import (
+        BASH_FOREGROUND_TIMEOUT_MAX_S,
+        BASH_FOREGROUND_TIMEOUT_S,
+        TOOL_WALLCLOCK_TIMEOUT_S,
+    )
+    assert BASH_FOREGROUND_TIMEOUT_S == 120.0
+    assert BASH_FOREGROUND_TIMEOUT_MAX_S == 600.0
+    assert (BASH_FOREGROUND_TIMEOUT_S
+            < BASH_FOREGROUND_TIMEOUT_MAX_S
+            < TOOL_WALLCLOCK_TIMEOUT_S)
+
+
+def test_bash_output_cap_below_shared_display_cap() -> None:
+    """The bash inline cap (30 KB) is tighter than the shared read_file/grep
+    display cap (50 KB) and is its OWN literal, not an alias — a future shared-cap
+    bump must not silently widen the bash inline head (spec AC 6)."""
+    import inspect
+    import re
+
+    from imp.agents.tools import limits
+    assert limits.BASH_OUTPUT_CAP_BYTES == 30_000
+    assert limits.BASH_OUTPUT_CAP_BYTES < limits.TOOL_OUTPUT_CAP_BYTES
+    src = inspect.getsource(limits)
+    m = re.search(r"^BASH_OUTPUT_CAP_BYTES = ([^#\n]+)", src, re.M)
+    assert m is not None
+    assert m.group(1).strip() == "30_000"     # a literal, not an alias

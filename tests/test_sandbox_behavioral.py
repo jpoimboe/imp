@@ -1122,3 +1122,69 @@ def test_readonly_overlay_blocks_bash_write_to_tree() -> None:
     finally:
         shutil.rmtree(root, ignore_errors=True)
 
+
+# ---------------------------------------------------------------------------
+# B10.10  Quest steps/ subtree is masked; artifacts/ and events.jsonl stay readable
+# ---------------------------------------------------------------------------
+
+def test_quest_steps_masked_but_artifacts_readable() -> None:
+    """steps/ masked by --tmpfs; artifacts/ and events.jsonl stay readable inside the sandbox."""
+    control = Path(tempfile.mkdtemp(prefix="imp-test-steps-mask-"))
+    try:
+        _init_repo(control)
+        wt_path = wt.create_worktree(control, "q1", "main")
+
+        quest_dir = control / ".imp" / "quests" / "q1"
+        steps_phase = quest_dir / "steps" / "phase1"
+        steps_phase.mkdir(parents=True)
+        (steps_phase / "SECRET.txt").write_text("OVERLAY_SENTINEL\n")
+
+        artifacts_dir = quest_dir / "artifacts"
+        artifacts_dir.mkdir(parents=True)
+        (artifacts_dir / "spec.md").write_text("ARTIFACT_OK\n")
+
+        (quest_dir / "events.jsonl").write_text('{"e":1}\n')
+
+        pol = resolve_policy(
+            worktree=wt_path,
+            control_root=control,
+            quest_id="q1",
+            cfg=SandboxConfig(home=control / "home", uid=os.getuid()),
+            engine_env_result={"IMP_PROJECT_ROOT": str(wt_path)},
+            environ=os.environ,
+            available=True,
+            quest_dir=quest_dir,
+        )
+        ctx = ToolContext(
+            project_root=wt_path,
+            events_path=wt_path / "events.jsonl",
+        )
+        ctx.quest_context = QuestContext(
+            title="Steps Mask Test",
+            project_root=wt_path,
+            workflow_dir=wt_path / ".imp" / "wf",
+        )
+        ctx.base_sandbox_policy = pol
+
+        # steps/ sentinel must NOT be visible (tmpfs masks it, dir appears empty)
+        r1 = _bash(ctx, f"cat {steps_phase}/SECRET.txt 2>&1; echo rc=$?")
+        assert "OVERLAY_SENTINEL" not in r1["stdout"], (
+            f"steps/ sentinel visible inside sandbox — tmpfs mask not applied: {r1['stdout']!r}"
+        )
+        r2 = _bash(ctx, f"ls {quest_dir}/steps 2>&1")
+        assert "phase1" not in r2["stdout"], (
+            f"steps/phase1 visible inside sandbox — tmpfs mask not applied: {r2['stdout']!r}"
+        )
+
+        # artifacts/ and events.jsonl must remain readable
+        r3 = _bash(ctx, f"cat {artifacts_dir}/spec.md")
+        assert "ARTIFACT_OK" in r3["stdout"], (
+            f"artifacts/spec.md not readable inside sandbox: {r3!r}"
+        )
+        r4 = _bash(ctx, f"cat {quest_dir}/events.jsonl")
+        assert '{"e":1}' in r4["stdout"], (
+            f"events.jsonl not readable inside sandbox: {r4!r}"
+        )
+    finally:
+        shutil.rmtree(control, ignore_errors=True)
+

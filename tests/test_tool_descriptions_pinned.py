@@ -24,7 +24,7 @@ NEW_SENTINELS = {
     "write_file": "creating parent dirs as needed",
     "grep": "Regex search over file contents",
     "glob": "Uses pathlib semantics",
-    "bash": "output over 50 KB spills to a file",
+    "bash": "output over 30 KB spills to a file",
     "bash_output": "Read new output from a background process",
     "bash_kill": "advances the output cursors",
     "symbol_outline": "Compact structural outline",

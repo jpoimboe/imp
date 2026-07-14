@@ -180,14 +180,14 @@ def test_bash_terminates_on_runner_interrupt(tmp_path: Path) -> None:
 
 
 def test_bash_over_cap_spills_full_output_and_previews_head(tmp_path: Path) -> None:
-    # Natural completion emitting > 50 KB (but < 5 MB): the FULL stream is
-    # spilled to tool-results/ (recoverable), the displayed stdout is the 50 KB
+    # Natural completion emitting > 30 KB (but < 5 MB): the FULL stream is
+    # spilled to tool-results/ (recoverable), the displayed stdout is the 30 KB
     # head, a notice carries the spill path, and returncode is a normal 0.
     ctx = _ctx(tmp_path)
     out = json.loads(_run_bash(ctx, {
         "command": "yes ABCDEFGHIJ | head -c 100000"}))
     assert out["returncode"] == 0
-    assert len(out["stdout"]) == 50_000              # 50 KB head display
+    assert len(out["stdout"]) == 30_000              # 30 KB head display
     assert "[output truncated" not in out["stdout"]  # marker replaced by notice
     assert "tool-results" in out["notice"]
     assert "read with read_file offset=1" in out["notice"]
@@ -217,39 +217,38 @@ def test_bash_over_cap_spill_labels_stdout_and_stderr(tmp_path: Path) -> None:
 
 def test_bash_caps_runaway_output(tmp_path: Path) -> None:
     # A command that floods stdout past the 5 MB kill ceiling is killed AT the
-    # ceiling; the displayed stdout is the 50 KB head + a spill notice (the old
+    # ceiling; the displayed stdout is the 30 KB head + a spill notice (the old
     # inline marker is gone), and it is NOT surfaced as an interrupt.
     ctx = _ctx(tmp_path)
     out = json.loads(_run_bash(ctx, {"command": "yes ABCDEFGHIJ"}))
     assert "[output truncated" not in out["stdout"]
     assert "notice" in out
     assert (tmp_path / "tool-results").exists()
-    assert len(out["stdout"]) == 50_000
+    assert len(out["stdout"]) == 30_000
     assert out["returncode"] == 0                    # cap is a NORMAL result
     assert ctx.running_processes == []
 
 
 def test_bash_caps_runaway_stderr(tmp_path: Path) -> None:
     # A stderr-dominant flood past the ceiling truncates the displayed stderr to
-    # the 50 KB head and emits a spill notice; no inline marker on either stream.
+    # the 30 KB head and emits a spill notice; no inline marker on either stream.
     ctx = _ctx(tmp_path)
     out = json.loads(_run_bash(ctx, {"command": "yes ABCDEFGHIJ 1>&2"}))
     assert "[output truncated" not in out["stderr"]
     assert "[output truncated" not in out["stdout"]
     assert "notice" in out
     assert (tmp_path / "tool-results").exists()
-    assert len(out["stderr"]) == 50_000
+    assert len(out["stderr"]) == 30_000
     assert out["returncode"] == 0                    # cap is a NORMAL result
     assert ctx.running_processes == []
 
 
-def test_bash_wall_clock_timeout(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    # B.1: a command sleeping past the wall-clock is killed and raises ToolAborted
-    # ('timed-out'), asserted at the TOOL layer. Inject a short timeout.
+def test_bash_default_foreground_timeout(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # AC 3: with NO per-call timeout, the DEFAULT foreground deadline reaps a long
+    # command — monkeypatch the default tiny and assert ToolAborted('timed-out').
     import imp.agents.tools.bash as bash_mod
-    from imp.agents.tools.limits import ToolAborted
 
-    monkeypatch.setattr(bash_mod, "TOOL_WALLCLOCK_TIMEOUT_S", 0.3)
+    monkeypatch.setattr(bash_mod, "BASH_FOREGROUND_TIMEOUT_S", 0.3)
     ctx = _ctx(tmp_path)
     with pytest.raises(ToolAborted) as ei:
         _run_bash(ctx, {"command": "sleep 30"})
@@ -262,7 +261,7 @@ def test_bash_normal_output_uncapped(tmp_path: Path) -> None:
     out = json.loads(_run_bash(ctx, {"command": "echo hello"}))
     assert out["stdout"].strip() == "hello"
     assert "[output truncated" not in out["stdout"]
-    assert "notice" not in out                       # <= 50 KB is unchanged
+    assert "notice" not in out                       # <= 30 KB is unchanged
     assert out["returncode"] == 0
 
 
@@ -393,9 +392,9 @@ def test_bash_midcommand_pause_kills_and_returns_tombstone(tmp_path: Path) -> No
 
 
 def test_bash_midcommand_pause_over_cap_spills_tombstone(tmp_path: Path) -> None:
-    # A pause landing mid-command after the command already emitted > 50 KB must
+    # A pause landing mid-command after the command already emitted > 30 KB must
     # spill the full output like the normal path: the tombstone keeps its
-    # status/kill_reason but its displayed stdout is the 50 KB head + a notice,
+    # status/kill_reason but its displayed stdout is the 30 KB head + a notice,
     # not up to the 5 MB kill ceiling inline.
     class _Coord:
         should_pause = False
@@ -425,7 +424,7 @@ def test_bash_midcommand_pause_over_cap_spills_tombstone(tmp_path: Path) -> None
     out = holder["out"]
     assert out["status"] == "killed"
     assert out["kill_reason"] == "interrupted"
-    assert len(out["stdout"]) == 50_000              # 50 KB head display
+    assert len(out["stdout"]) == 30_000              # 30 KB head display
     assert "notice" in out
     spilled = list((tmp_path / "tool-results").iterdir())
     assert len(spilled) == 1
@@ -466,3 +465,82 @@ def test_bash_with_coordinator_no_pause_completes_normally(tmp_path: Path) -> No
     assert "status" not in out                 # normal result, not a tombstone
     assert "kill_reason" not in out
     assert ctx.running_processes == []
+
+
+def test_effective_foreground_timeout_defaults_and_clamps() -> None:
+    # AC 4: None/0 -> default; a value under the cap is used as-is; a value ABOVE
+    # the cap clamps down to the cap. Expectations derive from the spec's 120/600.
+    from imp.agents.tools.bash import _effective_foreground_timeout
+    from imp.agents.tools.limits import (
+        BASH_FOREGROUND_TIMEOUT_MAX_S,
+        BASH_FOREGROUND_TIMEOUT_S,
+    )
+    assert _effective_foreground_timeout(None) == BASH_FOREGROUND_TIMEOUT_S
+    assert _effective_foreground_timeout(0) == BASH_FOREGROUND_TIMEOUT_S
+    assert _effective_foreground_timeout(60) == 60
+    assert _effective_foreground_timeout(5000) == BASH_FOREGROUND_TIMEOUT_MAX_S
+
+
+def test_bash_timeout_param_enforced_foreground(tmp_path: Path) -> None:
+    # AC 3 & 4: a per-call `timeout` bounds a foreground command — sleep 30 under a
+    # 0.3 s timeout is SIGKILL'd and raises ToolAborted('timed-out'), not a result.
+    ctx = _ctx(tmp_path)
+    with pytest.raises(ToolAborted) as ei:
+        _run_bash(ctx, {"command": "sleep 30", "timeout": 0.3})
+    assert ei.value.reason == "timed-out"
+    assert ctx.running_processes == []
+
+
+def test_bash_schema_advertises_timeout_param() -> None:
+    # AC 4: the tool the model sees exposes `timeout` (optional) and its
+    # description states the positive-seconds / 600 s-cap contract.
+    tool = get_registry()["bash"]
+    assert "timeout" in tool.input_schema["properties"]
+    assert "timeout" not in tool.input_schema.get("required", [])
+    assert "600" in tool.description
+    assert "120" in tool.description
+
+
+def test_bash_background_ignores_timeout(tmp_path: Path) -> None:
+    # AC 4: run_in_background=True structurally bypasses the foreground deadline —
+    # a tiny `timeout` does NOT abort the spawn; the call returns a background
+    # descriptor ({id, ...}) at once and the child keeps running past that timeout.
+    import contextlib as _cl
+    import signal as _sig
+
+    from imp.agents.tools.context import kill_process_group
+
+    ctx = _ctx(tmp_path)
+    ctx.agent_id = "step:t/coder"
+    ctx.background_enabled = True
+
+    async def go() -> dict:
+        raw = await get_registry()["bash"].async_invoke(
+            ctx, {"command": "sleep 30", "run_in_background": True, "timeout": 0.1})
+        out = json.loads(raw)
+        for bp in ctx.background_processes.values():
+            await kill_process_group(bp.proc, _sig.SIGKILL)
+            with _cl.suppress(Exception):
+                await bp.proc.wait()
+        return out
+
+    out = anyio.run(go)
+    assert "id" in out              # a background descriptor, not a timed-out abort
+    assert "returncode" not in out  # bg spawn returns immediately, no rc yet
+    assert ctx.running_processes == []
+
+
+def test_bash_foreground_cap_is_30kb_not_50kb(tmp_path: Path) -> None:
+    # AC 6: bash inline foreground output truncates at 30 KB (its OWN bash-specific
+    # cap), NOT the 50 KB shared read_file/grep display cap; the full output still
+    # spills to a recoverable file with a notice.
+    from imp.agents.tools.limits import BASH_OUTPUT_CAP_BYTES
+    ctx = _ctx(tmp_path)
+    out = json.loads(_run_bash(ctx, {"command": "yes ABCDEFGHIJ | head -c 100000"}))
+    assert BASH_OUTPUT_CAP_BYTES == 30_000
+    assert len(out["stdout"]) == BASH_OUTPUT_CAP_BYTES
+    assert len(out["stdout"]) != 50_000     # regression guard vs the old shared cap
+    assert "notice" in out
+    spilled = list((tmp_path / "tool-results").iterdir())
+    assert len(spilled) == 1
+    assert len(spilled[0].read_bytes()) == 100_000   # FULL output recoverable

@@ -450,6 +450,11 @@ def resolve_policy(
             secret_files.append(str(p))
     secret_dirs.append(f"/run/user/{uid}")   # H2 — agent sockets; mask even if abs
 
+    # Mask each quest's steps/ (siblings too) — overlay-home mountpoints a raw walk would stall on.
+    quests_root = control_root / ".imp" / "quests"
+    secret_dirs += list(_existing(
+        [str(p / "steps") for p in sorted(quests_root.glob("*")) if p.is_dir()]))
+
     # ro overlay of workflow snapshot — bind_plan emits it after the quest_home rw
     # bind, so last-covering-wins makes only workflow/ read-only.
     readonly_overlays: tuple[str, ...] = ()

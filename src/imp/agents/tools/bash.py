@@ -25,9 +25,10 @@ import anyio
 from imp.agents.tools import imp_tool
 from imp.agents.tools.context import ToolContext, kill_process_tree
 from imp.agents.tools.limits import (
+    BASH_FOREGROUND_TIMEOUT_MAX_S,
+    BASH_FOREGROUND_TIMEOUT_S,
+    BASH_OUTPUT_CAP_BYTES,
     BG_STREAM_FILE_CAP_BYTES,
-    TOOL_OUTPUT_CAP_BYTES,
-    TOOL_WALLCLOCK_TIMEOUT_S,
     ToolAborted,
     tool_checkpoint,
 )
@@ -70,21 +71,31 @@ def _emit_overlay_setup_warning(ctx: ToolContext, command: str) -> None:
             })
 
 
+def _effective_foreground_timeout(timeout: float | None) -> float:
+    """Foreground deadline (seconds): the caller's `timeout` or the default,
+    clamped to the max. timeout=None/0 -> default; a request above the cap clamps
+    down. Only the foreground path consults this — run_in_background returns before
+    the deadline is applied, so it is structurally exempt."""
+    return min(timeout or BASH_FOREGROUND_TIMEOUT_S, BASH_FOREGROUND_TIMEOUT_MAX_S)
+
+
 @imp_tool(
     name="bash",
     description=(
         "Run a shell command. Foreground: returns JSON {stdout, stderr, "
-        "returncode}; output over 50 KB spills to a file with a `notice` path "
+        "returncode}; output over 30 KB spills to a file with a `notice` path "
         "to read the tail. `run_in_background=true` returns {id, pid, …} "
         "immediately — read output with `bash_output(id)`, stop with "
         "`bash_kill(id)`; a bad command still spawns then fails, so check "
-        "`bash_output` after. No permission gate. "
+        "`bash_output` after. A foreground command is reaped after 120 s; pass "
+        "`timeout` (positive seconds, max 600) to extend a slow one. No "
+        "permission gate. "
         "See `imp-tool-reference` for buffering and path details."
     ),
 )
 async def bash(
     ctx: ToolContext, command: str, cwd: str | None = None,
-    *, run_in_background: bool = False,
+    *, run_in_background: bool = False, timeout: float | None = None,
 ) -> str:
     cwd_path = cwd or str(ctx.project_root)
     # Engine vars come from the LIVE quest when available (top-level steps), so a
@@ -157,7 +168,7 @@ async def bash(
     # buffer is the same bound background processes already accept.
     # N5: peak buffered bytes is kill_cap + up to one in-flight chunk PER stream
     # (both drains can append before either observes `capped`), i.e.
-    # <= ~5 MB + 2*READ chunk. The 50 KB display truncation happens later, on the
+    # <= ~5 MB + 2*READ chunk. The 30 KB display truncation happens later, on the
     # assemble path, independent of whether this ceiling was hit.
     # Single mutable record shared by both drains. Typed fields (not a bag of
     # `object`) so the arithmetic below stays mypy-clean.
@@ -230,7 +241,7 @@ async def bash(
 
     try:
         try:
-            with anyio.fail_after(TOOL_WALLCLOCK_TIMEOUT_S):
+            with anyio.fail_after(_effective_foreground_timeout(timeout)):
                 async with anyio.create_task_group() as tg:
                     tg.start_soon(_drain, proc.stdout, stdout_chunks)
                     tg.start_soon(_drain, proc.stderr, stderr_chunks)
@@ -299,10 +310,10 @@ async def bash(
             "stderr": stderr,
             "returncode": returncode,
         }
-    if len(out_bytes) + len(err_bytes) > TOOL_OUTPUT_CAP_BYTES:
-        # Over the 50 KB display cap: spill the FULL decoded output so the
+    if len(out_bytes) + len(err_bytes) > BASH_OUTPUT_CAP_BYTES:
+        # Over the 30 KB display cap: spill the FULL decoded output so the
         # truncated tail is recoverable with an ordinary read_file, then bound
-        # each displayed stream to the 50 KB head. When stderr is non-empty the
+        # each displayed stream to the 30 KB head. When stderr is non-empty the
         # spill file carries both tails under labeled sections; otherwise it is
         # just the full stdout. The notice supersedes the old inline marker. This
         # also covers the pause tombstone: a pause landing mid-flood must not
@@ -311,7 +322,7 @@ async def bash(
                 if stderr else stdout)
         result["notice"] = spill_tool_output(
             ctx, uuid4().hex, full, preview_bytes=0)
-        result["stdout"] = stdout[:TOOL_OUTPUT_CAP_BYTES]
-        result["stderr"] = stderr[:TOOL_OUTPUT_CAP_BYTES]
+        result["stdout"] = stdout[:BASH_OUTPUT_CAP_BYTES]
+        result["stderr"] = stderr[:BASH_OUTPUT_CAP_BYTES]
 
     return json.dumps(result, ensure_ascii=False)
