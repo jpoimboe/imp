@@ -58,8 +58,7 @@ def stub_new(monkeypatch, tmp_path):
 @pytest.mark.parametrize(
     "opening_arg,reply,expected",
     [("build a parser", None, "build a parser"),   # positional: argv intent, no prompt
-     (None, "wire up json", "wire up json"),        # interactive: prompt reply
-     (None, "", None)],                             # empty interactive reply -> unseeded (None)
+     (None, "wire up json", "wire up json")],       # interactive: prompt reply
 )
 async def test_new_persists_finalized_opening_intent(
     stub_new, monkeypatch, tmp_path, opening_arg, reply, expected,

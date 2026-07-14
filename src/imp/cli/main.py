@@ -504,7 +504,10 @@ def _handle_terminal_outcome(
                 mb_note = payload.get("note")
         _emit_merge_blocked(quest, mb_reason, mb_detail, mb_note)
         return 1  # friendly block already carries the resume command; skip redundant summary
-    _emit_paused_summary(quest, _leave_trigger(coord))
+    trigger = _leave_trigger(coord)
+    if trigger == "ctrl-d":
+        print(pal.caret(enabled=should_use_color(sys.stdout)))
+    _emit_paused_summary(quest, trigger)
     return 1
 
 
@@ -753,7 +756,8 @@ async def _run_cleared_session(
         except (EOFError, KeyboardInterrupt):
             if term_title is not None:
                 term_title.reset()
-            print("imp: cancelled", file=sys.stderr)
+            print(pal.caret(enabled=color))
+            print()
             return 130
         _session_started = True
         cleared_model = cleared_model_sink.get("model")
@@ -1025,7 +1029,8 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
             if term_title is not None:
                 term_title.reset()
             discard_conversation(quest)   # drop the just-minted draft on cancel
-            print("imp: cancelled", file=sys.stderr)
+            print(pal.caret(enabled=color))
+            print()
             return 130
         header_printed = True
         # An empty reply falls back to the unseeded path (the opening step

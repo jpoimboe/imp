@@ -269,3 +269,41 @@ def test_handle_terminal_outcome_reads_warning_messages_from_archive(monkeypatch
     rc = main._handle_terminal_outcome(quest, RunResult.COMPLETED, coord=None)
     assert rc == 0
     assert captured["warnings"] == ["a", "b"]
+
+
+class _CtrlDCoord:
+    interrupted = True
+    leave_reason = "ctrl-d"
+
+    class _Evt:
+        def is_set(self) -> bool:
+            return True
+
+    escalation_event = _Evt()
+
+
+def test_ctrl_d_pause_retains_caret_above_banner(monkeypatch, capsys) -> None:
+    # An in-session Ctrl-D leave prints the retained `> ` caret immediately
+    # above the (here mocked) pause banner.
+    monkeypatch.setattr(main, "should_use_color", lambda stream: False)
+    quest = _Change([])
+    with patch.object(main, "State") as State, \
+         patch.object(main, "_emit_paused_summary") as ps:
+        State.load.return_value = _State("paused", step=None)
+        rc = main._handle_terminal_outcome(quest, RunResult.PAUSED, _CtrlDCoord())
+    assert rc == 1
+    ps.assert_called_once()
+    assert capsys.readouterr().out == "> \n"   # caret line, then the mocked banner
+
+
+def test_non_ctrl_d_pause_prints_no_caret(monkeypatch, capsys) -> None:
+    # A pause that was not a Ctrl-D prompt leave retains no caret.
+    monkeypatch.setattr(main, "should_use_color", lambda stream: False)
+    quest = _Change([])
+    with patch.object(main, "State") as State, \
+         patch.object(main, "_emit_paused_summary") as ps:
+        State.load.return_value = _State("paused", step=None)
+        rc = main._handle_terminal_outcome(quest, RunResult.PAUSED, coord=None)
+    assert rc == 1
+    ps.assert_called_once()
+    assert capsys.readouterr().out == ""

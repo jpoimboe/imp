@@ -546,3 +546,15 @@ def test_help_lists_sandbox() -> None:
 def test_sandbox_is_tab_completable() -> None:
     from imp.cli.prompt import SlashCompleter
     assert "sandbox" in SlashCompleter._BUILTINS
+
+
+def test_ask_line_with_slash_empty_line_reprompts_silently(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    # A bare Enter and a whitespace-only line each silently re-prompt; only the
+    # real line is returned, and nothing is printed for the skipped blanks.
+    from imp.cli.slash import ask_line_with_slash
+    quest = _FakeChange(tmp_path)
+    prompt = _FakePrompt(["", "   ", "real input"])
+    line = anyio.run(ask_line_with_slash, prompt, _NullStatus(), quest)
+    assert line == "real input"
+    assert capsys.readouterr().out == ""
