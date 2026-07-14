@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from imp.agents.prompts import PromptRenderError, build_context, render_prompt
-from imp.assets import bundled_workflow_dir
+from imp.assets import bundled_docs_dir, bundled_workflow_dir
 from imp.engine.state import EventLog, JsonlEventLog
 
 
@@ -406,4 +406,28 @@ def test_build_or_save_autonomous_takes_build_default(tmp_path: Path) -> None:
     assert "take the default and proceed without yielding" in rendered
     assert "Want me to build this out now?" not in rendered
     assert "create_and_enter_worktree" in rendered
+
+
+def test_docs_namespace_defaults_to_resolved_corpus(tmp_path: Path) -> None:
+    # With no explicit docs_path, build_context resolves the real corpus path,
+    # so every agent prompt gets the right location with no per-call wiring.
+    ctx = build_context(quest_title="t", event_log=_log(tmp_path / "e.jsonl", []))
+    assert render_prompt("{{ docs.path }}", ctx) == str(bundled_docs_dir())
+
+
+def test_docs_namespace_accepts_explicit_override(tmp_path: Path) -> None:
+    ctx = build_context(
+        quest_title="t", event_log=_log(tmp_path / "e.jsonl", []),
+        docs_path="/abs/imp/docs",
+    )
+    assert render_prompt("corpus at {{ docs.path }}", ctx) == "corpus at /abs/imp/docs"
+
+
+def test_docs_namespace_is_strict_on_unknown_attr(tmp_path: Path) -> None:
+    ctx = build_context(
+        quest_title="t", event_log=_log(tmp_path / "e.jsonl", []),
+        docs_path="/x",
+    )
+    with pytest.raises(PromptRenderError):
+        render_prompt("{{ docs.typo }}", ctx)
 

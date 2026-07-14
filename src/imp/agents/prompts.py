@@ -1,6 +1,6 @@
 """Prompt template rendering for agent .md bodies.
 
-Six namespaces (spec §7.5):
+Seven namespaces (spec §7.5):
   quest.id — stable identity; quest.title — human title
   events.<step-name>.<field> — validated agent_output of prior step;
       missing steps render as empty (lenient-within)
@@ -12,6 +12,8 @@ Six namespaces (spec §7.5):
       (strict-within), like quest/project
   step.lap — this step's 1-based lap number (1 = first forward pass);
       step.prior_laps — retained {lap, outcome, head} entries of prior laps
+  docs.path — absolute path to imp's repo-root docs/ corpus, resolved in
+      place relative to the install (readable in any project via bash/read_file)
 
 Unknown top-level namespaces raise PromptRenderError (strict; catches typos).
 """
@@ -24,6 +26,7 @@ from typing import TYPE_CHECKING, Any
 
 import jinja2
 
+from imp.assets import bundled_docs_dir
 from imp.engine.state import EventLog, State
 
 if TYPE_CHECKING:
@@ -97,6 +100,11 @@ class _StepNamespace:
     prior_laps: tuple[dict[str, Any], ...]
 
 
+@dataclass(frozen=True, slots=True)
+class _DocsNamespace:
+    path: str = ""
+
+
 class _ProjectNamespace:
     """Strict project-facts namespace: raises UndefinedError on a missing key,
     AttributeError for dunder/leading-underscore names."""
@@ -131,6 +139,7 @@ class PromptContext:
     project: _ProjectNamespace
     run: _RunNamespace
     step: _StepNamespace
+    docs: _DocsNamespace
 
 
 def build_context(
@@ -141,9 +150,11 @@ def build_context(
     project_facts: dict[str, str] | None = None,
     autonomous: bool = False, opening: str = "",
     prior_laps: list[dict[str, Any]] | None = None,
+    docs_path: str | None = None,
 ) -> PromptContext:
     facts = dict(project_facts or {})
     laps = tuple(prior_laps or ())
+    resolved_docs = docs_path if docs_path is not None else str(bundled_docs_dir())
     # lap from the stored lap, not len: history truncates to OUTCOME_HISTORY_K so len saturates.
     return PromptContext(
         quest=_QuestNamespace(id=quest_id, title=quest_title,
@@ -155,6 +166,7 @@ def build_context(
         run=_RunNamespace(autonomous=autonomous, opening=opening),
         step=_StepNamespace(
             lap=(laps[-1]["lap"] + 1 if laps else 1), prior_laps=laps),
+        docs=_DocsNamespace(path=resolved_docs),
     )
 
 
@@ -212,7 +224,7 @@ def render_prompt(
     try:
         return _env_for(workflow_dir).from_string(template_source).render(
             quest=ctx.quest, events=ctx.events, vars=ctx.vars,
-            project=ctx.project, run=ctx.run, step=ctx.step,
+            project=ctx.project, run=ctx.run, step=ctx.step, docs=ctx.docs,
         )
     except jinja2.exceptions.UndefinedError as e:
         raise PromptRenderError(str(e)) from e
