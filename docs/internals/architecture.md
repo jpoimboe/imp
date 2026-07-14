@@ -273,3 +273,7 @@ All four live under `.imp/quest/` (gitignored); spec/plan artifacts are journale
 | `.imp/quest/artifacts/spec/{slug}.md` | spec-writer | all phases |
 | `.imp/quest/artifacts/plans/{slug}-plan-N.md` | plan-writer | task-lead, plan-reviewer, plan-cycle-check, deferred-sweep, finalize |
 | `.imp/quest/progress.md` | task-lead, deferred-sweep | all implement/review steps (tasks, commit subjects, deferred followups) |
+
+---
+
+*Part of imp's self-knowledge corpus. Runtime entry point: load the `imp-knowledge` skill (`load_skill(name="imp-knowledge")`), the thin index that maps into this corpus.*

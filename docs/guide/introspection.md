@@ -149,3 +149,7 @@ it deliberately:
 
 Read `state/state.json` in the current quest home, or run `imp show <id>`
 (the overview card), to report where this conversation's quest stands.
+
+---
+
+*Part of imp's self-knowledge corpus. Runtime entry point: load the `imp-knowledge` skill (`load_skill(name="imp-knowledge")`), the thin index that maps into this corpus.*

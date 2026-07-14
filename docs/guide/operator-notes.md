@@ -21,3 +21,7 @@ Runbook for operating a running imp quest.
   invariant, producing an infinite remove/restore loop; `max_loops` is the only
   backstop. Recognize it when a quest loops on "removing/restoring its own
   plan/workflow file"; unblock by editing the snapshot.
+
+---
+
+*Part of imp's self-knowledge corpus. Runtime entry point: load the `imp-knowledge` skill (`load_skill(name="imp-knowledge")`), the thin index that maps into this corpus.*

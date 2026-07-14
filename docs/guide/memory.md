@@ -78,3 +78,7 @@ file(s) off a fresh base tip, validates the tree, and merges the change through 
 normal queue. imp never auto-writes memory and never writes outside `imp/memory/`.
 The recording runs in the background and appears in the active list, so a user grows
 memory over time instead of composing the markdown by hand.
+
+---
+
+*Part of imp's self-knowledge corpus. Runtime entry point: load the `imp-knowledge` skill (`load_skill(name="imp-knowledge")`), the thin index that maps into this corpus.*

@@ -63,3 +63,7 @@ the draft stays in your active list, shown as a `draft`, rather than being
 archived. Likewise, a renamed `imp chat` conversation is kept as an active draft,
 not archived — the rename (a design formed), not the entry point, is what keeps
 it in the active list; and `save_as_draft` never moves anything to the backlog.
+
+---
+
+*Part of imp's self-knowledge corpus. Runtime entry point: load the `imp-knowledge` skill (`load_skill(name="imp-knowledge")`), the thin index that maps into this corpus.*

@@ -28,3 +28,7 @@ A few things worth knowing:
 
 In practice, the threshold phase can answer how imp works, report on what work you
 already have in flight, or help you scope and kick off something new.
+
+---
+
+*Part of imp's self-knowledge corpus. Runtime entry point: load the `imp-knowledge` skill (`load_skill(name="imp-knowledge")`), the thin index that maps into this corpus.*

@@ -47,3 +47,7 @@ merge boundaries by design.
 Every byte of every run is appended to a per-quest event log. The event log is the
 single source of truth — not a side effect you hope was captured — making every run
 auditable after the fact and resumable if it is interrupted.
+
+---
+
+*Part of imp's self-knowledge corpus. Runtime entry point: load the `imp-knowledge` skill (`load_skill(name="imp-knowledge")`), the thin index that maps into this corpus.*

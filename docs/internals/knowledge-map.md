@@ -57,3 +57,7 @@ it's a skill; if it's tied to a specific agent's job, it's a workflow prompt.
 map topics to the right `docs/` files rather than duplicating content. This is the
 hub-as-index pattern: the skill names where to look, the corpus contains the detail.
 Deep hubs that reproduce corpus content violate this pattern and cause drift.
+
+---
+
+*Part of imp's self-knowledge corpus. Runtime entry point: load the `imp-knowledge` skill (`load_skill(name="imp-knowledge")`), the thin index that maps into this corpus.*

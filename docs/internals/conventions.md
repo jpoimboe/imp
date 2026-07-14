@@ -24,3 +24,7 @@ imp's own TUI from fixtures — the cheap, deterministic way to see the real
 appearance without a live run (its human companion is `scripts/snap_imp_ui.py`).
 This is the imp-specific home for that knowledge; the project-agnostic manual for
 driving *any* terminal program is the `imp-driving-terminal-uis` skill.
+
+---
+
+*Part of imp's self-knowledge corpus. Runtime entry point: load the `imp-knowledge` skill (`load_skill(name="imp-knowledge")`), the thin index that maps into this corpus.*
