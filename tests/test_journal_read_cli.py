@@ -541,39 +541,6 @@ def test_abandon_without_wip_still_archives_runtime(tmp_path: Path) -> None:
         cwd=tmp_path, capture_output=True).returncode != 0
 
 
-def test_show_events_from_archive(tmp_path, monkeypatch) -> None:
-    import imp.cli.main as m
-
-    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
-    subprocess.run(["git", "config", "user.email", "t@t"], cwd=tmp_path, check=True)
-    subprocess.run(["git", "config", "user.name", "t"], cwd=tmp_path, check=True)
-
-    events = tmp_path / "e.jsonl"
-    events.write_text(
-        '{"id":"a-e0","parent_id":null,"agent_id":null,'
-        '"timestamp":"2026-06-01T00:00:01+00:00","type":"quest_created",'
-        '"payload":{"id":"arch01"}}\n')
-    cj = tmp_path / "c.json"
-    cj.write_text(json.dumps({
-        "id": "arch01", "title": "Arch", "base_branch": "main",
-        "created_at": "2026-06-01T00:00:00+00:00", "depends_on": []}))
-    sj = tmp_path / "s.json"
-    sj.write_text(json.dumps({"id": "arch01", "status": "completed", "step": None}))
-    archive.archive_quest(
-        tmp_path, "arch01", events_path=events,
-        quest_json_path=cj, state_json_path=sj)
-
-    monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
-
-    def _run(*argv: str) -> str:
-        buf = io.StringIO()
-        with redirect_stdout(buf):
-            assert m.main(list(argv)) == 0, buf.getvalue()
-        return buf.getvalue()
-
-    assert "quest_created" in _run("show", "arch01", "events")
-
-
 def test_finalize_archives_runtime_and_retains_wip(tmp_path: Path) -> None:
     from imp.engine import executor
     from imp.engine.state import JsonlEventLog
@@ -661,6 +628,29 @@ def test_quest_meta_resolves_archived_from_archive(tmp_path: Path) -> None:
     assert meta is not None
     assert meta["base_branch"] == "main"
     assert meta["title"] == "Meta One"
+
+
+def test_events_reads_index_from_archive_after_merge(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import imp.cli.main as m
+
+    _seed_control(tmp_path)
+    Quest.create(tmp_path, title="Done Thing", quest_id="done-thing", base_branch="main")
+    _seed_marker_phase(tmp_path, "done-thing")
+    _complete_and_archive(tmp_path, "done-thing")
+    assert not (tmp_path / ".imp" / "worktrees" / "done-thing").exists()
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
+    monkeypatch.delenv("NO_COLOR", raising=False)
+    buf = io.StringIO()
+    with redirect_stdout(buf):
+        rc = main(["events", "done-thing"])
+    out = buf.getvalue()
+    assert rc == 0, out
+    assert "quest done-thing" in out   # the index header, read from the archive
+    assert "steps:" in out
 
 
 def test_status_all_lists_archived(tmp_path, monkeypatch) -> None:

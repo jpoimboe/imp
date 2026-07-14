@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import pytest
-
 from imp.agents.prompts import build_context, render_prompt
 from imp.assets import bundled_workflow_dir
 from imp.engine.loader import load_workflow
@@ -119,14 +117,3 @@ def test_spec_writer_design_quality_and_coverage_guidance(tmp_path) -> None:
     assert "improvements to the code this quest touches." in out
     assert "architecture, components, data flow, error handling, and testing" in out
 
-
-@pytest.mark.parametrize("workflow", ["imp", "patent"])
-def test_imp_events_implies_imp_show_for_every_agent(workflow) -> None:
-    wf = load_workflow(bundled_workflow_dir(workflow))
-    offenders = [
-        name for name, a in wf.agents.items()
-        if "imp_events" in a.tools and "imp_show" not in a.tools
-    ]
-    assert offenders == [], (
-        f"{workflow}: agents hold imp_events without imp_show: {offenders}"
-    )

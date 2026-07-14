@@ -129,18 +129,3 @@ external matches as absolute paths.
   so a follow-up `bash_output` continues from there without duplicate bytes;
   remaining output stays pageable. Idempotent on an already-exited or
   already-killed id.
-
-## imp_events
-
-- Digest lines by default; `full=True` returns raw event payloads (each capped
-  at ~2 KB, marked when truncated). Narrow with `type` (an event type, or a
-  comma-separated list), `agent_id` (a substring matched against an event's
-  role/phase id), and `limit` (the last N events; default 100). Defaults to the
-  current quest; pass `quest_id` for another quest's timeline. A history channel,
-  not a status one — for current state, prefer your durable working files.
-
-## imp_show
-
-- `resource='overview'` (default) returns the detail card; `resource='spec'`
-  returns the raw spec. Returns a JSON `{"error": …}` string for an unknown id or
-  a facet that doesn't exist yet.

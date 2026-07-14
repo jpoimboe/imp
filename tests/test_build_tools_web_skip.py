@@ -57,10 +57,10 @@ def test_openai_researcher_toolset_loads() -> None:
     tools = openai_build(_inv(
         "openai",
         frozenset({"complete_step", "read_file", "glob", "grep", "bash",
-                   "imp_events", "web_search", "web_fetch"})))
+                   "symbol_outline", "web_search", "web_fetch"})))
     assert "web_fetch" not in tools and "web_search" not in tools
     assert {"complete_step", "read_file", "glob", "grep", "bash",
-            "imp_events"} <= set(tools)
+            "symbol_outline"} <= set(tools)
 
 
 def test_anthropic_web_fetch_declaration_is_allowed() -> None:

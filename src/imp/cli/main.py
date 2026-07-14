@@ -60,7 +60,6 @@ from imp.engine.abandon import (
 from imp.engine.archive import read as archive_read
 from imp.engine.awaiting_user_input import AwaitingUserInput
 from imp.engine.errors import LayoutMismatch, LoadError, LoadErrors
-from imp.engine.events_digest import digest_event, full_line
 from imp.engine.executor import RunResult
 from imp.engine.project_root import find_project_root
 from imp.engine.quest import Quest, live_quest_ids, live_stems
@@ -1598,6 +1597,51 @@ def _detail_card(control: Path, quest_id: str, *, now: datetime) -> list[str]:
     return _quest_card(control, quest_id, now=now)
 
 
+def _quest_json(control: Path, quest_id: str) -> dict[str, Any] | None:
+    row = _row_for_id(control, quest_id)
+    if row is None:
+        return None
+    _id, status, step, last, title, created, step_label, phase_label = row
+    events = _load_events_for_id(control, quest_id) or []
+    meta = _quest_meta(control, quest_id) or {}
+    data: dict[str, Any] = {
+        "id": _id,
+        "title": title.strip() or None,
+        "status": status,
+        "created": created or None,
+        "last_activity": last or None,
+        "base_branch": meta.get("base_branch"),
+        "depends_on": meta.get("depends_on", []),
+        "intent": _resolve_intent(events),
+        "summary": None,
+    }
+    if status in _INFLIGHT and step not in ("", "-"):
+        data["step"] = {"phase": phase_label or None, "name": step_label or step}
+    summary = _show_artifact(control, quest_id, f"summary/{quest_id}.md")
+    if summary:
+        data["summary"] = summary.decode("utf-8", errors="replace").strip() or None
+    return data
+
+
+def _backlog_json(meta: dict[str, Any], control: Path) -> dict[str, Any]:
+    ready, unmerged = backlog.readiness(control, meta.get("depends_on", []))
+    body = meta.get("seed_opening") or ""
+    title = meta.get("title") or ""
+    if title and (body == title or body.startswith(title + "\n")):
+        body = body[len(title):].lstrip("\n")
+    return {
+        "id": meta["id"],
+        "title": meta.get("title") or None,
+        "status": "backlog",
+        "provenance": meta.get("origin", "draft"),
+        "readiness": "ready" if ready else "blocked",
+        "blocked_on": list(unmerged),
+        "created": meta.get("created_at"),
+        "depends_on": meta.get("depends_on", []),
+        "body": body or None,
+    }
+
+
 def _cmd_list(args: argparse.Namespace) -> int:
     try:
         control = _control_root()
@@ -1639,6 +1683,11 @@ def _cmd_show(args: argparse.Namespace) -> int:
     meta = _unstarted_backlog_meta(control, quest_id)
     if meta is not None:
         if resource is None:
+            if args.json:
+                _page_or_print(
+                    json.dumps(_backlog_json(meta, control), indent=2).splitlines(),
+                    no_pager=args.no_pager)
+                return 0
             _page_or_print(_backlog_card(meta, control, now=datetime.now(UTC)),
                            no_pager=args.no_pager)
             return 0
@@ -1646,21 +1695,19 @@ def _cmd_show(args: argparse.Namespace) -> int:
               f"no {resource} yet", file=sys.stderr)
         return 2
     if resource is None:
+        if args.json:
+            card = _quest_json(control, quest_id)
+            if card is None:
+                print(f"imp: no such quest {quest_id!r}", file=sys.stderr)
+                return 2
+            _page_or_print(json.dumps(card, indent=2).splitlines(),
+                           no_pager=args.no_pager)
+            return 0
         _page_or_print(_detail_card(control, quest_id, now=datetime.now(UTC)),
                        no_pager=args.no_pager)
         return 0
     if resource == "spec":
         data = _show_artifact(control, quest_id, f"spec/{quest_id}.md")
-    elif resource == "events":
-        events = _load_events_for_id(control, quest_id)
-        if events is None:
-            print(f"imp: no events for {quest_id!r}", file=sys.stderr)
-            return 2
-        events = _filter_events(
-            events, types=args.type, agent=args.agent, limit=args.limit)
-        render = full_line if args.full else digest_event
-        _page_or_print([render(e) for e in events], no_pager=args.no_pager)
-        return 0
     if data is None:
         print(f"imp: no {resource} for {quest_id!r}", file=sys.stderr)
         return 2
@@ -1686,26 +1733,6 @@ def _load_events_for_id(control: Path, quest_id: str) -> list[dict[str, Any]] | 
     if raw is None:
         return None
     return _parse_jsonl(raw)
-
-
-def _filter_events(
-    events: list[dict[str, Any]],
-    *,
-    types: str | None = None,
-    agent: str | None = None,
-    limit: int | None = None,
-) -> list[dict[str, Any]]:
-    tset = {t.strip() for t in types.split(",") if t.strip()} if types else None
-    out: list[dict[str, Any]] = []
-    for e in events:
-        if tset is not None and e.get("type") not in tset:
-            continue
-        if agent and agent not in (e.get("agent_id") or ""):
-            continue
-        out.append(e)
-    if limit is not None and limit > 0:
-        out = out[-limit:]
-    return out
 
 
 def _resolve_default_id(control: Path) -> str | None:
@@ -1825,6 +1852,7 @@ def _follow_conflict(args: argparse.Namespace) -> str | None:
     for name, present in (
         ("--summary", args.summary),
         ("--full", args.full),
+        ("--show/--hide", bool(args.show or args.hide)),
         ("--html", args.html is not None),
         ("--md", args.md is not None),
     ):
@@ -1966,9 +1994,25 @@ async def _follow_poll_loop(
     return rc
 
 
+def _log_show_set(full: bool, show: list[str], hide: list[str]) -> frozenset[str]:
+    """Resolve imp log's content categories: --full=all, --show adds, --hide removes."""
+    from imp.cli.render_text import LOG_CATEGORIES
+    base = set(LOG_CATEGORIES) if full else set()
+    return frozenset((base | set(show)) - set(hide))
+
+
 def _cmd_log(args: argparse.Namespace) -> int:
     from imp.cli import narrative
-    from imp.cli.render_text import render_tree
+    from imp.cli.render_text import LOG_CATEGORIES, render_tree
+
+    show_names = args.show or []
+    hide_names = args.hide or []
+    unknown = sorted((set(show_names) | set(hide_names)) - set(LOG_CATEGORIES))
+    if unknown:
+        print(f"imp log: error: unknown category {unknown[0]!r} "
+              f"(choose from: {', '.join(LOG_CATEGORIES)})", file=sys.stderr)
+        return 2
+    show = _log_show_set(args.full, show_names, hide_names)
 
     control = _control_root()
     if args.follow:
@@ -2034,7 +2078,7 @@ def _cmd_log(args: argparse.Namespace) -> int:
         return 0
 
     tree = narrative.build_tree(events)
-    lines = render_tree(tree, full=args.full, color=color, width=width,
+    lines = render_tree(tree, show=show, color=color, width=width,
                         display_width=_display_width())
     _page_or_print(lines, no_pager=args.no_pager)
     return 0
@@ -3158,6 +3202,115 @@ def _model_arg_type(value: str) -> str:
     return value
 
 
+class SplitAppend(argparse.Action):
+    """Accumulate a repeatable list option, comma-splitting each value; blanks dropped."""
+
+    def __call__(
+        self,
+        parser: argparse.ArgumentParser,
+        namespace: argparse.Namespace,
+        values: str | Iterable[Any] | None,
+        option_string: str | None = None,
+    ) -> None:
+        assert isinstance(values, str)  # each list option takes one value per hit
+        current = list(getattr(namespace, self.dest, None) or [])
+        current.extend(part.strip() for part in values.split(",") if part.strip())
+        setattr(namespace, self.dest, current)
+
+
+def _cmd_events(args: argparse.Namespace) -> int:
+    from imp.engine import events_index as ei
+
+    control = _control_root()
+    quest_id: str | None
+    if args.token is not None:
+        try:
+            quest_id = _resolve_id(control, args.token)
+        except SystemExit:
+            return 2
+    else:
+        quest_id = _resolve_default_id(control)
+    if quest_id is None:
+        print(_NO_QUESTS_MESSAGE)
+        return 0
+    events = _load_events_for_id(control, quest_id)
+    if events is None:
+        print(f"imp: no such quest {quest_id!r}", file=sys.stderr)
+        return 2
+
+    indexed = list(enumerate(events, start=1))
+    handle_map = ei.subagent_handle_map(indexed)
+    max_ord = indexed[-1][0] if indexed else 0
+
+    types = set(args.type) if args.type else None
+    agents = set(args.agent) if args.agent else None
+    steps = set(args.step) if args.step else None
+    range_specs = list(args.range) if args.range else []
+    if args.range_pos:
+        range_specs.append(args.range_pos)
+    intervals: list[tuple[int, int]] = []
+    try:
+        for spec in range_specs:
+            intervals.extend(ei.parse_range_spec(spec, max_ord))
+    except ei.RangeSpecError as exc:
+        print(f"imp: {exc}", file=sys.stderr)
+        return 2
+
+    if steps is not None:
+        known = {s.name for s in ei.step_windows(indexed)}
+        missing = sorted(steps - known)
+        if missing:
+            print(f"imp: no step {missing[0]!r} in {quest_id}", file=sys.stderr)
+            return 2
+
+    leaf = bool(types or agents or intervals or args.all
+                or args.limit is not None)
+
+    if not leaf and steps is not None:
+        scoped_all = []
+        for name in sorted(steps):
+            scoped = ei.build_step_index(indexed, name, handle_map)
+            assert scoped is not None  # validated in the up-front step check
+            scoped_all.append(scoped)
+        if args.json:
+            payload = (ei.step_index_json(scoped_all[0]) if len(scoped_all) == 1
+                       else [ei.step_index_json(s) for s in scoped_all])
+            _page_or_print(json.dumps(payload, indent=2).splitlines(),
+                           no_pager=args.no_pager)
+            return 0
+        lines = []
+        for i, scoped in enumerate(scoped_all):
+            if i:
+                lines.append("")
+            lines.extend(ei.render_step_index(scoped))
+        _page_or_print(lines, no_pager=args.no_pager)
+        return 0
+
+    if not leaf:
+        index = ei.build_index(indexed, quest_id)
+        if args.json:
+            _page_or_print(
+                json.dumps(ei.index_json(index), indent=2).splitlines(),
+                no_pager=args.no_pager)
+            return 0
+        _page_or_print(ei.render_index(index), no_pager=args.no_pager)
+        return 0
+
+    selected = ei.select_event_lines(
+        indexed, types=types, agents=agents,
+        ranges=intervals or None, step_names=steps,
+        all_=args.all, limit=args.limit, handle_map=handle_map)
+    if args.json:
+        _page_or_print(
+            json.dumps(ei.events_json(selected), indent=2).splitlines(),
+            no_pager=args.no_pager)
+        return 0
+    _page_or_print(
+        [ei.digest_line(o, ev, handle_map) for o, ev in selected],
+        no_pager=args.no_pager)
+    return 0
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="imp")
     parser.add_argument("--version", action="version", version=f"imp {__version__}")
@@ -3271,8 +3424,10 @@ def _build_parser() -> argparse.ArgumentParser:
         "log",
         help="Show the narrative for a quest.",
         description=(
-            "Show the narrative for a quest as plain text. --full starts every "
-            "fold expanded. Set NO_COLOR=1 to disable colors. "
+            "Show the narrative for a quest as plain text. --full expands "
+            "every fold; --show/--hide toggle individual content categories "
+            "(thinking, tools, subagents, prompts, tiers) over the lean view. "
+            "Set NO_COLOR=1 to disable colors. "
             "Tip: imp log <id> --full | grep ... for line-oriented scripting."
         ),
     )
@@ -3299,6 +3454,13 @@ def _build_parser() -> argparse.ArgumentParser:
              "events until the quest reaches a terminal status. Renders the "
              "live run view; implies --no-pager.",
     )
+    p_log.add_argument(
+        "--show", action=SplitAppend, default=None, metavar="CAT",
+        help="Reveal a content category over the lean view: thinking, tools, "
+             "subagents, prompts, tiers (repeatable / comma-joined).")
+    p_log.add_argument(
+        "--hide", action=SplitAppend, default=None, metavar="CAT",
+        help="Hide a content category (repeatable / comma-joined).")
     p_log_export = p_log.add_mutually_exclusive_group()
     p_log_export.add_argument(
         "--html", nargs="?", metavar="FILE", const=_LOG_EXPORT_DEFAULT,
@@ -3313,6 +3475,50 @@ def _build_parser() -> argparse.ArgumentParser:
              "(FILE, or imp-log-<id>.md when omitted; '-' streams to stdout).",
     )
     p_log.set_defaults(func=_cmd_log)
+
+    p_events = sub.add_parser(
+        "events",
+        help="Slice and dice a quest's event log (imp events <id>).",
+        description=(
+            "Index and filter a quest's event log. Bare: a steps+types index. "
+            "--step <name>: a scoped index for that step's window. "
+            "--type / --agent / <range> / --all: compact event lines "
+            "(#N ordinal, type, [agent], summary). --json for structured "
+            "output. Omit <id> for the most recent quest."
+        ),
+    )
+    p_events.add_argument(
+        "token", nargs="?", default=None,
+        help="Quest id or short token (omit for the most recent quest).")
+    p_events.add_argument(
+        "range_pos", nargs="?", default=None, metavar="RANGE",
+        help="Ordinal selector, e.g. 42, 59-120,210-255, 59-, -80.")
+    p_events.add_argument(
+        "--step", action=SplitAppend, default=None,
+        help="Scope to a step's window (repeatable / comma-joined).")
+    p_events.add_argument(
+        "--type", action=SplitAppend, default=None,
+        help="Keep only these event types (repeatable / comma-joined).")
+    p_events.add_argument(
+        "--agent", action=SplitAppend, default=None,
+        help="Keep only these authors: step name, subagent handle, or "
+             "sub:<id> (repeatable / comma-joined).")
+    p_events.add_argument(
+        "--range", action=SplitAppend, default=None, dest="range",
+        help="Ordinal selector (repeatable / comma-joined).")
+    p_events.add_argument(
+        "--limit", type=int, default=None,
+        help="Keep only the last N event lines.")
+    p_events.add_argument(
+        "--all", action="store_true",
+        help="All event lines (escape hatch from the index/filters).")
+    p_events.add_argument(
+        "--json", action="store_true",
+        help="Structured output instead of text.")
+    p_events.add_argument(
+        "--no-pager", action="store_true",
+        help="Disable the pager even when stdout is a TTY.")
+    p_events.set_defaults(func=_cmd_events)
 
     p_list = sub.add_parser(
         "list",
@@ -3335,8 +3541,8 @@ def _build_parser() -> argparse.ArgumentParser:
         "show",
         help="Show one quest's detail or a named artifact (imp show <id>).",
         description=(
-            "Print a quest's detail card, or name an artifact "
-            "(spec/events) to print just that. "
+            "Print a quest's detail card, or name the spec artifact to print "
+            "just that. "
             "Reads the live worktree files while a quest is in flight and "
             "falls back to the archive once it is merged."),
     )
@@ -3345,26 +3551,14 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Quest id or its short token.")
     p_show.add_argument(
         "resource", nargs="?", default=None,
-        choices=["spec", "events"],
+        choices=["spec"],
         help="Which artifact to print (default: a detail card).")
     p_show.add_argument(
         "--no-pager", action="store_true",
         help="Disable the pager even when stdout is a TTY.")
     p_show.add_argument(
-        "--full", action="store_true",
-        help="For the events resource: print raw event payloads (step_context "
-             "redacted, byte-capped) instead of digest lines.")
-    p_show.add_argument(
-        "--type", default=None,
-        help="For the events resource: keep only these event types "
-             "(comma-separated).")
-    p_show.add_argument(
-        "--agent", default=None,
-        help="For the events resource: keep only events whose agent id "
-             "contains this substring.")
-    p_show.add_argument(
-        "--limit", type=int, default=None,
-        help="For the events resource: keep only the last N events.")
+        "--json", action="store_true",
+        help="Emit the overview detail card as a structured JSON object.")
     p_show.set_defaults(func=_cmd_show)
 
     p_search = sub.add_parser(

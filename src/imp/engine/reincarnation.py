@@ -21,15 +21,15 @@ def stash_transcript(transcript_dir: Path) -> Path | None:
 
 
 def reincarnation_seed(
-    *, stashed_dir: Path | None, handoff_path: Path | None
+    *, stashed_dir: Path | None, handoff_path: Path | None, quest_id: str
 ) -> str:
     """Opening user message for a reincarnated (reborn) session.
 
     The prior session approached its context limit and is restarting fresh.
     Point it at its recovery sources in priority order: the agent-authored
     handoff note (primary; present only for the proactive Tier A path), the
-    stashed prior transcript for deeper detail, and `imp_events` for
-    quest-level orientation. Built to serve both the no-handoff (reactive,
+    stashed prior transcript for deeper detail, and `imp events <id> --limit N`
+    for quest-level orientation. Built to serve both the no-handoff (reactive,
     Tier B) and handoff (proactive, Tier A) shapes.
     """
     lines = [
@@ -53,10 +53,10 @@ def reincarnation_seed(
             f"- Primary detail source: the prior transcript is stashed at "
             f"`{stashed_dir}/transcript.jsonl`{tail}")
     lines.append(
-        "- Orientation only: `imp_events limit=N` returns the last N entries of "
-        "the quest's event log — the provenance record of what was said and what "
-        "prior steps did (a bare call is bounded to the last 100). Use it for "
-        "quest-level bearings, not for current state and not as the primary "
+        f"- Orientation only: `imp events {quest_id} --limit N` returns the last N "
+        "entries of the quest's event log — the provenance record of what was said "
+        "and what prior steps did (a bare call prints the quest's index). Use it "
+        "for quest-level bearings, not for current state and not as the primary "
         "source of detail.")
     return "\n".join(lines)
 

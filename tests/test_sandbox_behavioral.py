@@ -678,6 +678,51 @@ def test_sandboxed_python_imports_worktree_imp() -> None:
 
 
 # ---------------------------------------------------------------------------
+# PATH resolution (spec §7 / AC 12): the console-script `imp` on PATH runs the
+# worktree's code, because the injected PYTHONPATH shadows imp.cli.main even
+# though PATH itself is never modified by the sandbox.
+# ---------------------------------------------------------------------------
+
+def test_sandboxed_imp_console_script_resolves_worktree_code() -> None:
+    """A bash `imp` inside a sandboxed step executes the worktree's imp.cli.main."""
+    if shutil.which("imp") is None:
+        pytest.skip("imp console script not on PATH")
+    sentinel = "WORKTREE-IMP-SENTINEL-dafu54"
+    root = _make_root()
+    try:
+        cli = root / "src" / "imp" / "cli"
+        cli.mkdir(parents=True)
+        (root / "src" / "imp" / "__init__.py").write_text("")
+        (cli / "__init__.py").write_text("")
+        (cli / "main.py").write_text(
+            f'def main():\n    print("{sentinel}")\n    return 0\n')
+        pol = _active_policy(root)
+
+        argv_shadow = build_sandbox_argv(
+            "imp --help", cwd=str(root), policy=pol,
+            engine_env={"PYTHONPATH": str(root / "src")})
+        shadowed = subprocess.run(argv_shadow, capture_output=True, text=True)
+
+        argv_bare = build_sandbox_argv(
+            "imp --help", cwd=str(root), policy=pol, engine_env={})
+        bare = subprocess.run(argv_bare, capture_output=True, text=True)
+
+        assert sentinel in shadowed.stdout, (
+            f"sandboxed `imp` ignored the PYTHONPATH shadow — it did not run the "
+            f"worktree stub (rc={shadowed.returncode}) "
+            f"stdout={shadowed.stdout!r} stderr={shadowed.stderr!r}")
+        assert bare.returncode == 0 and "usage" in bare.stdout.lower(), (
+            f"negative control did not actually run the real imp CLI "
+            f"(rc={bare.returncode}) — the `sentinel not in` check would pass "
+            f"vacuously; stdout={bare.stdout!r} stderr={bare.stderr!r}")
+        assert sentinel not in bare.stdout, (
+            f"negative control failed: sentinel leaked with no shadow "
+            f"stdout={bare.stdout!r}")
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+# ---------------------------------------------------------------------------
 # Git-ref protection (nate82): real-bwrap integration + regression
 # ---------------------------------------------------------------------------
 

@@ -1453,7 +1453,8 @@ async def _route_agent(
             _emit(log, "reincarnating", {"reason": reason}, agent_id=None)
             seed = reincarnation_seed(
                 stashed_dir=stashed,
-                handoff_path=hp if note_exists else None)
+                handoff_path=hp if note_exists else None,
+                quest_id=quest.id)
             return await _route_agent(
                 step, workflow, quest, state, log,
                 user_chat_input_fn=user_chat_input_fn, coordinator=coordinator,
@@ -1479,7 +1480,8 @@ async def _route_agent(
         stashed = stash_transcript(transcript_dir)
         _emit(log, "reincarnating",
               {"reason": "context window exceeded"}, agent_id=None)
-        seed = reincarnation_seed(stashed_dir=stashed, handoff_path=None)
+        seed = reincarnation_seed(stashed_dir=stashed, handoff_path=None,
+                                   quest_id=quest.id)
         return await _route_agent(
             step, workflow, quest, state, log,
             user_chat_input_fn=user_chat_input_fn, coordinator=coordinator,

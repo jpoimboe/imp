@@ -2727,3 +2727,84 @@ def test_subagent_status_row_paints_model_and_frozen_elapsed_gray() -> None:
     finished = rt.subagent_status_row(done, depth=0, color=True)
     assert pal.ansi(" · 42s", "gray") in finished  # frozen elapsed dim gray
     assert rt.subagent_status_row(done, depth=0, color=False) == "  reviewer · 42s"
+
+
+def _show_lines(events, cats):
+    return list(render_tree(nv.build_tree(events), show=frozenset(cats),
+                            color=False, width=80))
+
+
+_RICH_EVENTS = [
+    _ev("2", "step_started", step="s", kind="agent", phase="p",
+        model="m", provider="anthropic"),
+    _ev("3", "step_context", agent_id="step:p/s", provider="anthropic",
+        model="claude", system_prompt="SECRETPROMPT",
+        tools_schema=[{"name": "a"}], params={}, max_tool_calls=50),
+    _ev("4", "thinking", agent_id="step:p/s", content="deep thoughts here"),
+    _ev("5", "tool_call", agent_id="step:p/s", id="b1", name="bash",
+        input={"command": "ls -la"}),
+    _ev("6", "tool_result", agent_id="step:p/s", id="b1", content="total 0",
+        error=False),
+    _ev("tk1", "tool_call", agent_id="step:p/s", id="b2", name="sub_agent",
+        input={"subagent_name": "reviewer", "task_description": "go"}),
+    _ev("su1", "llm_response", agent_id="sub:tk1", provider="anthropic",
+        model="m", stop_reason="end_turn", usage={},
+        raw={"content": [{"type": "text", "text": "verdict: approve"}]}),
+    _ev("r1", "tool_result", agent_id="step:p/s", id="b2",
+        content='{"status":"Success","summary":"ok"}', error=False),
+]
+
+
+def test_show_all_matches_full_and_empty_matches_lean() -> None:
+    tree = nv.build_tree(_RICH_EVENTS)
+    all_cats = list(render_tree(tree, show=frozenset(rt.LOG_CATEGORIES),
+                                color=False, width=80))
+    none_cats = list(render_tree(tree, show=frozenset(), color=False, width=80))
+    assert all_cats == _lines(_RICH_EVENTS, full=True)
+    assert none_cats == _lines(_RICH_EVENTS, full=False)
+
+
+def test_show_thinking_reveals_only_thinking() -> None:
+    out = "\n".join(_show_lines(_RICH_EVENTS, {"thinking"}))
+    assert "▾ thinking" in out and "deep thoughts here" in out
+    assert "▾ tools" not in out          # tools stay a lean recap
+    assert "SECRETPROMPT" not in out     # prompts hidden
+    assert "▾ reviewer" not in out       # subagent stays a lean status row
+
+
+def test_show_tools_reveals_only_tools() -> None:
+    out = "\n".join(_show_lines(_RICH_EVENTS, {"tools"}))
+    assert "▾ tools" in out and "command=ls -la" in out and "total 0" in out
+    assert "▾ thinking" not in out
+    assert "SECRETPROMPT" not in out
+
+
+def test_show_subagents_reveals_subagent_output_only() -> None:
+    out = "\n".join(_show_lines(_RICH_EVENTS, {"subagents"}))
+    assert "▾ reviewer" in out and "verdict: approve" in out
+    assert "→ status=Success · summary=ok" in out
+    assert "▾ thinking" not in out       # nested thinking not revealed
+    assert "SECRETPROMPT" not in out
+
+
+def test_show_prompts_reveals_step_context_only() -> None:
+    out = "\n".join(_show_lines(_RICH_EVENTS, {"prompts"}))
+    assert "SECRETPROMPT" in out         # system prompt dump
+    assert "▾ thinking" not in out
+    assert "▾ reviewer" not in out       # subagent stays a lean status row
+
+
+def test_show_tiers_reveals_only_tiers() -> None:
+    events = [
+        _ev("e1", "quest_created", title="t", quest_id=1),
+        _ev("e2", "tiers_resolved",
+            tiers={"medium": {"provider": "anthropic", "model": "haiku",
+                              "differ_tier": None, "differ_from": None}},
+            steps={}),
+    ]
+    out = "\n".join(_show_lines(events, {"tiers"}))
+    assert "tiers resolved:" in out
+    assert "→ anthropic/haiku" in out
+    out_no_tiers = "\n".join(_show_lines(events, {"thinking", "tools", "subagents", "prompts"}))
+    assert "tiers resolved:" not in out_no_tiers
+    assert "→ anthropic/haiku" not in out_no_tiers

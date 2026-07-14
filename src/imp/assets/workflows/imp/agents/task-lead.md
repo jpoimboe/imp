@@ -296,7 +296,7 @@ final message reports `NEEDS_CONTEXT` or `BLOCKED`, do not move on: supply the m
 **re-dispatch**. Because the re-dispatch is a fresh subagent with an empty context
 window, **re-pack the full context into the new `task_description`** — the original
 task + your answer + what the subagent's final message surfaced (and, if that
-message is thin, an `imp_events` peek at the subagent's events —
-filter with `agent_id=sub:<…>`). The next subagent inherits *only* what you write. Before
+message is thin, an `imp events {{ quest.id }} --agent sub:<…>` peek at the
+subagent's events). The next subagent inherits *only* what you write. Before
 returning at the end of the plan, load verification-before-completion and confirm
 the plan's tasks are actually done.

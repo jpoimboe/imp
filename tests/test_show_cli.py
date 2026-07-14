@@ -60,38 +60,6 @@ def test_show_spec_live(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None
     assert "SPEC BODY" in _run(monkeypatch, tmp_path, "show", _ID, "spec")
 
 
-def test_show_events_live(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    _seed_control(tmp_path)
-    ch = _seed_with_artifacts(tmp_path, _ID, "Feat")
-    # Append step events so the events resource has lines to show.
-    with ch.events_path.open("a", encoding="utf-8") as fh:
-        fh.write(
-            json.dumps(
-                {
-                    "type": "step_started",
-                    "agent_id": None,
-                    "payload": {"step": "plan-reviewer", "phase": "plan"},
-                }
-            )
-            + "\n"
-        )
-        fh.write(
-            json.dumps(
-                {
-                    "type": "step_started",
-                    "agent_id": None,
-                    "payload": {"step": "task-lead", "phase": "implement"},
-                }
-            )
-            + "\n"
-        )
-    # events: the raw line is present.
-    assert "plan-reviewer" in _run(monkeypatch, tmp_path, "show", _ID, "events")
-
-
 def test_show_rejects_review_resource(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
@@ -149,9 +117,8 @@ def test_show_spec_falls_back_after_archive(
     assert _git_wip_present(tmp_path, _ID)
     worktree.remove_worktree(tmp_path, _ID)
     assert not (tmp_path / ".imp" / "worktrees" / _ID).exists()
-    # Worktree gone -> archive/journal fallback.
+    # Worktree gone -> spec resolves from the archive.
     assert "SPEC BODY" in _run(monkeypatch, tmp_path, "show", _ID, "spec")
-    assert "plan-reviewer" in _run(monkeypatch, tmp_path, "show", _ID, "events")
 
 
 def test_show_missing_change_returns_error(
@@ -522,214 +489,94 @@ def test_show_default_card_renders_summary_after_archive(
     assert "SUMMARY BODY" in _run(monkeypatch, tmp_path, "show", _ID)
 
 
-def test_filter_events_type_set_selects_named_types() -> None:
-    from imp.cli.main import _filter_events
-
-    events = [
-        {"type": "user_message", "agent_id": "a"},
-        {"type": "tool_call", "agent_id": "b"},
-        {"type": "llm_response", "agent_id": "c"},
-    ]
-    out = _filter_events(events, types="tool_call,llm_response")
-    assert [e["type"] for e in out] == ["tool_call", "llm_response"]
-
-
-def test_filter_events_agent_is_substring_match() -> None:
-    from imp.cli.main import _filter_events
-
-    events = [
-        {"type": "x", "agent_id": "step:plan/plan-writer"},
-        {"type": "y", "agent_id": "sub:abc123"},
-        {"type": "z", "agent_id": None},
-    ]
-    out = _filter_events(events, agent="sub:")
-    assert [e["type"] for e in out] == ["y"]
-
-
-def test_filter_events_limit_keeps_last_n() -> None:
-    from imp.cli.main import _filter_events
-
-    events = [{"type": "tick", "agent_id": "a", "seq": i} for i in range(5)]
-    out = _filter_events(events, limit=2)
-    assert [e["seq"] for e in out] == [3, 4]
-
-
-def test_filter_events_no_limit_returns_all() -> None:
-    from imp.cli.main import _filter_events
-
-    events = [{"type": "tick", "agent_id": "a"} for _ in range(5)]
-    assert len(_filter_events(events)) == 5
-
-
-def test_filter_events_combines_type_agent_then_limit() -> None:
-    from imp.cli.main import _filter_events
-
-    events = [
-        {"type": "tool_call", "agent_id": "sub:1"},
-        {"type": "tool_call", "agent_id": "step:plan"},
-        {"type": "tool_call", "agent_id": "sub:2"},
-        {"type": "user_message", "agent_id": "sub:3"},
-    ]
-    # type==tool_call AND agent contains "sub:" -> [sub:1, sub:2]; last 1 -> [sub:2].
-    out = _filter_events(events, types="tool_call", agent="sub:", limit=1)
-    assert len(out) == 1
-    assert out[0]["agent_id"] == "sub:2"
-
-
-def test_filter_events_non_positive_limit_returns_all() -> None:
-    from imp.cli.main import _filter_events
-
-    events = [{"type": "tick", "agent_id": "a"} for _ in range(5)]
-    assert len(_filter_events(events, limit=0)) == 5
-    assert len(_filter_events(events, limit=-1)) == 5
-
-
 def _seed_events(ch: Quest, events: list[dict]) -> None:
     with ch.events_path.open("a", encoding="utf-8") as fh:
         for e in events:
             fh.write(json.dumps(e) + "\n")
 
 
-def test_show_events_digest_by_default(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+def test_show_rejects_events_resource(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    with pytest.raises(SystemExit):
+        main(["show", _ID, "events"])
+    assert "invalid choice: 'events'" in capsys.readouterr().err
+
+
+def test_show_json_emits_structured_overview(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _seed_control(tmp_path)
     ch = _seed_with_artifacts(tmp_path, _ID, "Feat")
-    _seed_events(ch, [
-        {"type": "user_message", "agent_id": "step:plan/plan-writer",
-         "timestamp": "2026-06-01T00:00:00+00:00",
-         "payload": {"role": "user",
-                     "content": [{"type": "text", "text": "hello world"}]}},
-    ])
-    out = _run(monkeypatch, tmp_path, "show", _ID, "events")
-    # A digest line: envelope + summarized text, NOT a raw JSONL dump.
-    assert "user_message" in out
-    assert "hello world" in out
-    assert '{"type"' not in out
+    with ch.events_path.open("a", encoding="utf-8") as fh:
+        fh.write(json.dumps({
+            "type": "opening_intent", "agent_id": None,
+            "payload": {"text": "wire up the widget"}}) + "\n")
+    out = _run(monkeypatch, tmp_path, "show", _ID, "--json")
+    data = json.loads(out)
+    assert data["id"] == _ID
+    assert data["title"] == "Feat"
+    assert data["status"] == "new"
+    assert data["intent"] == "wire up the widget"
+    assert data["depends_on"] == []
+    assert data["created"] is not None
 
 
-def test_show_events_full_prints_raw_json(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+def test_show_json_backlog_quest(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    import imp.cli.main as m
+
     _seed_control(tmp_path)
-    ch = _seed_with_artifacts(tmp_path, _ID, "Feat")
-    _seed_events(ch, [
-        {"type": "user_message", "agent_id": "a",
-         "timestamp": "2026-06-01T00:00:00+00:00",
-         "payload": {"role": "user",
-                     "content": [{"type": "text", "text": "hi"}]}},
-    ])
-    # --type isolates the seeded event from the quest_created event that
-    # Quest.create writes; --full then renders it as raw JSON via full_line.
-    out = _run(monkeypatch, tmp_path, "show", _ID, "events",
-               "--type", "user_message", "--full")
-    lines = [ln for ln in out.splitlines() if ln]
-    assert len(lines) == 1
-    obj = json.loads(lines[0])
-    assert obj["type"] == "user_message"
-    assert obj["payload"]["content"][0]["text"] == "hi"
+    meta = {
+        "id": "idea01", "title": "Add OAuth", "origin": "idea",
+        "materialized": False, "depends_on": [],
+        "created_at": "2026-06-20T11:00:00+00:00",
+        "seed_opening": "wire up OAuth login",
+    }
+    monkeypatch.setattr(m, "_unstarted_backlog_meta", lambda control, qid: meta)
+    monkeypatch.setattr(m, "_resolve_id", lambda control, token: "idea01")
+    monkeypatch.setattr(m, "_iter_quest_ids", lambda control: ["idea01"])
+    out = _run(monkeypatch, tmp_path, "show", "idea01", "--json")
+    data = json.loads(out)
+    assert data["id"] == "idea01"
+    assert data["status"] == "backlog"
+    assert data["provenance"] == "idea"
+    assert data["readiness"] == "ready"
+    assert data["body"] == "wire up OAuth login"
 
 
-def test_show_events_full_redacts_step_context(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+def test_show_json_backlog_body_strips_title_prefix(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    import imp.cli.main as m
+
     _seed_control(tmp_path)
-    ch = _seed_with_artifacts(tmp_path, _ID, "Feat")
-    _seed_events(ch, [
-        {"type": "step_context", "agent_id": "step:plan/plan-writer",
-         "timestamp": "2026-06-01T00:00:00+00:00",
-         "payload": {"provider": "p", "model": "m",
-                     "system_prompt": "TOP SECRET PROMPT",
-                     "tools_schema": [{"name": "x"}]}},
-    ])
-    out = _run(monkeypatch, tmp_path, "show", _ID, "events", "--full")
-    assert "TOP SECRET PROMPT" not in out
-    assert "[redacted]" in out
+    meta = {
+        "id": "idea02", "title": "Add OAuth", "origin": "idea",
+        "materialized": False, "depends_on": [],
+        "created_at": "2026-06-20T11:00:00+00:00",
+        "seed_opening": "Add OAuth\nwire up OAuth login",
+    }
+    monkeypatch.setattr(m, "_unstarted_backlog_meta", lambda control, qid: meta)
+    monkeypatch.setattr(m, "_resolve_id", lambda control, token: "idea02")
+    monkeypatch.setattr(m, "_iter_quest_ids", lambda control: ["idea02"])
+    out = _run(monkeypatch, tmp_path, "show", "idea02", "--json")
+    data = json.loads(out)
+    assert data["body"] == "wire up OAuth login"
 
 
-def test_show_events_type_filter(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+def test_show_json_none_quest_prints_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
+    import imp.cli.main as m
+
     _seed_control(tmp_path)
-    ch = _seed_with_artifacts(tmp_path, _ID, "Feat")
-    _seed_events(ch, [
-        {"type": "user_message", "agent_id": "a",
-         "timestamp": "2026-06-01T00:00:00+00:00",
-         "payload": {"role": "user",
-                     "content": [{"type": "text", "text": "keep-me"}]}},
-        {"type": "tool_call", "agent_id": "b",
-         "timestamp": "2026-06-01T00:00:01+00:00",
-         "payload": {"id": "t1", "name": "read_file", "input": {}}},
-    ])
-    out = _run(monkeypatch, tmp_path, "show", _ID, "events",
-               "--type", "user_message")
-    assert "keep-me" in out
-    assert "read_file" not in out
-
-
-def test_show_events_agent_filter(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    _seed_control(tmp_path)
-    ch = _seed_with_artifacts(tmp_path, _ID, "Feat")
-    _seed_events(ch, [
-        {"type": "tool_call", "agent_id": "step:plan/plan-writer",
-         "timestamp": "2026-06-01T00:00:00+00:00",
-         "payload": {"id": "t1", "name": "read_file", "input": {}}},
-        {"type": "tool_call", "agent_id": "sub:abc123",
-         "timestamp": "2026-06-01T00:00:01+00:00",
-         "payload": {"id": "t2", "name": "write_file", "input": {}}},
-    ])
-    out = _run(monkeypatch, tmp_path, "show", _ID, "events", "--agent", "sub:")
-    assert "write_file" in out
-    assert "read_file" not in out
-
-
-def test_show_events_limit_keeps_last_n(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    _seed_control(tmp_path)
-    ch = _seed_with_artifacts(tmp_path, _ID, "Feat")
-    _seed_events(ch, [
-        {"type": "tick", "agent_id": "a",
-         "timestamp": f"2026-06-01T00:00:0{i}+00:00",
-         "payload": {"seq": i}}
-        for i in range(5)
-    ])
-    out = _run(monkeypatch, tmp_path, "show", _ID, "events", "--limit", "2")
-    lines = [ln for ln in out.splitlines() if ln]
-    assert len(lines) == 2
-    assert "seq=3" in out
-    assert "seq=4" in out
-    assert "seq=0" not in out
-
-
-def test_show_events_digest_from_archive(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    _seed_control(tmp_path)
-    events = tmp_path / "arch-events.jsonl"
-    events.write_text(
-        json.dumps({
-            "id": "arch01", "type": "user_message",
-            "agent_id": "step:plan/plan-writer",
-            "timestamp": "2026-06-01T00:00:00+00:00",
-            "payload": {"role": "user",
-                        "content": [{"type": "text", "text": "archived hello"}]},
-        }) + "\n"
-    )
-    cj = tmp_path / "arch-quest.json"
-    cj.write_text(json.dumps({
-        "id": "arch01", "title": "Arch", "base_branch": "main",
-        "created_at": "2026-06-01T00:00:00+00:00", "depends_on": [],
-    }))
-    sj = tmp_path / "arch-state.json"
-    sj.write_text(json.dumps({"id": "arch01", "status": "completed", "step": None}))
-    archive.archive_quest(
-        tmp_path, "arch01", events_path=events, quest_json_path=cj,
-        state_json_path=sj,
-    )
-    out = _run(monkeypatch, tmp_path, "show", "arch01", "events")
-    assert "user_message" in out
-    assert "archived hello" in out
-    assert '{"type"' not in out
+    monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
+    monkeypatch.setattr(m, "_iter_quest_ids", lambda control: ["lostid"])
+    monkeypatch.setattr(m, "_resolve_id", lambda control, token: "lostid")
+    monkeypatch.setattr(m, "_unstarted_backlog_meta", lambda control, qid: None)
+    monkeypatch.setattr(m, "_row_for_id", lambda control, qid: None)
+    rc = main(["show", "lostid", "--json"])
+    assert rc == 2
+    assert "no such quest" in capsys.readouterr().err

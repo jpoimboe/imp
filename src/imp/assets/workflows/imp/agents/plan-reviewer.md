@@ -23,7 +23,7 @@ Spec file: `{{ quest.home }}/artifacts/spec/{{ quest.id }}.md`
    the highest-N file — the plan under review.
 2. Read the spec.
 3. To confirm the plan reflects a brainstorm or spec-review decision, use
-   `imp_events` — the provenance record of what was decided, not current state.
+   `imp events {{ quest.id }}` — the provenance record of what was decided, not current state.
 
 Read exactly these two artifacts — the newest plan and the spec. Do not read prior or future
 plan files: a requirement absent here may belong to another plan. You are read-only with a single exception — the sole file you may write is `{{ quest.home }}/deferred.md`, only to append an untagged scope-out line (see backstop below). Write no other file.

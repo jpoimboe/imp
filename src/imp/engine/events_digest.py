@@ -1,4 +1,4 @@
-"""Workflow-agnostic slim digests of engine events for imp_events.
+"""Workflow-agnostic slim digests of engine events for the imp events command.
 
 One event -> one line: envelope (timestamp, type, agent_id) + a per-type
 one-liner. Keyed strictly on ENGINE event types — references no workflow
@@ -127,6 +127,12 @@ def _summarize(event: dict[str, Any]) -> str:
     etype = event.get("type")
     handler = _HANDLERS.get(etype) if isinstance(etype, str) else None
     return handler(payload) if handler is not None else _generic(payload)
+
+
+def summarize(event: dict[str, Any]) -> str:
+    """Public type-aware one-line summary (the digest tail, no envelope) —
+    reused by `imp events`' compact `#N` digest line."""
+    return _summarize(event)
 
 
 def digest_event(event: dict[str, Any]) -> str:

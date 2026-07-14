@@ -496,7 +496,8 @@ async def dispatch_task(
                         payload={"reason": reason})
                     seed = reincarnation_seed(
                         stashed_dir=stashed,
-                        handoff_path=hp if note_exists else None)
+                        handoff_path=hp if note_exists else None,
+                        quest_id=cc.id)
                     _, target_dir = _allocate_subagent_dir(ctx, subagent_name)
                     sub_inv = _build_sub_inv(
                         target_dir,
@@ -520,7 +521,8 @@ async def dispatch_task(
                     ctx.event_log.append(
                         agent_id=None, type="reincarnating",
                         payload={"reason": "context window exceeded"})
-                    seed = reincarnation_seed(stashed_dir=stashed, handoff_path=None)
+                    seed = reincarnation_seed(stashed_dir=stashed, handoff_path=None,
+                                               quest_id=cc.id)
                     _, target_dir = _allocate_subagent_dir(ctx, subagent_name)
                     sub_inv = _build_sub_inv(
                         target_dir,

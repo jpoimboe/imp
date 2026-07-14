@@ -62,9 +62,10 @@ finished); do not invent quests that the commands did not list.
 `imp show <id>` — the overview detail card: id, title, status, timing,
 dependencies, opening intent, and the summary inlined. A quest that completed with a
 recorded merge SHA also shows a `merge_commit:` line beneath `base_branch:`. Add a
-subcommand to narrow to one facet: `imp show <id> spec` for the raw spec,
-`imp show <id> events` for the timeline. Read the facet the user asked about and
-answer from it.
+subcommand to narrow to one facet: `imp show <id> spec` for the raw spec, or add
+`--json` to get the overview card as a structured object. For the event timeline,
+use `imp events <id>` (below). Read the facet the user asked about and answer from
+it.
 
 ## Reading an event timeline — three tiers
 
@@ -73,32 +74,31 @@ answers the question, and never dump the raw log as your default.
 
 - **Narrative** — `imp log <id>`. The human "read the story" view: prose with
   tool bursts folded. Use it when you want to follow what happened, in order.
-- **Digest** — `imp_events(...)` in-loop, or `imp show <id> events` from bash.
-  One compact line per event. This is the default view for scanning and
-  filtering, and it is what both front doors return unless you ask for raw.
-- **Raw** — `full=True` (the tool) or `--full` on `imp show <id> events` (the
-  CLI). The exact event
-  payloads, with `step_context` redacted and each event byte-capped. Drop to
-  this tier only for the few events whose full contents you actually need.
+- **Digest** — `imp events <id>`. A bare call prints a self-describing index
+  (steps + types); add a leaf selector (`--type`, `--agent`, a `<range>`, or
+  `--all`) to get one compact line per event. This is the default for scanning
+  and filtering an event stream from bash.
+- **Raw** — `imp events <id> --json` (composes with any filter). The exact event
+  payloads, including the full timestamp, each event byte-capped. Drop to this
+  tier only for the few events whose full contents you actually need.
 
 ## Reading another quest
 
-To understand a *different* quest — live or archived — reach for the in-loop
+To understand a *different* quest — live or archived — reach for the `imp` CLI
 readers rather than cat-ing its files (a raw `read_file` silently fails for an
-archived quest, whose artifacts live in a git ref, not on disk):
+archived quest, whose artifacts live in a git ref, not on disk). The bash sandbox
+mounts the whole host read-only, so any quest — current, other, or archived — is
+readable:
 
-- **`imp_show(quest_id="<id>")`** — the primary "what is this quest / what did it
-  accomplish" read. Its `overview` (the default) returns the quest's detail card:
-  id, title, status, timing, dependencies, the opening intent, and the summary
-  inlined. Pass `resource="spec"` for the raw spec. Returns a clear
-  `{"error": ...}` string for an unknown id or a facet that does not exist yet,
-  never raising.
-- **`imp_events(quest_id="<id>")`** — the filtered trace tool, for when you need
-  the event history rather than the distilled record. Steer it toward the
-  high-signal event types (`agent_output`, `user_message`,
-  `awaiting_user_input`) and away from the `tool_call` / `tool_result` /
-  `llm_response` churn. Returns the digest by default (or raw payloads with
-  `full=True`), resolving live and archived quests alike.
+- **`imp show <id>`** — the primary "what is this quest / what did it accomplish"
+  read: the quest's detail card (id, title, status, timing, dependencies, the
+  opening intent, and the summary inlined). Add `spec` for the raw spec, or
+  `--json` for the card as a structured object.
+- **`imp events <id>`** — the event history, when you need the trace rather than
+  the distilled record. A bare call prints the index; steer into the high-signal
+  types with `--type agent_output` (and away from the `tool_call` / `tool_result`
+  / `llm_response` churn), or scope to an author with `--agent`. Resolves live and
+  archived quests alike.
 
 ## Linking a related backlog quest
 
@@ -128,11 +128,11 @@ deferring quest's ledger.
 The event log grows without limit; pulling all of it floods your context. Scope
 it deliberately:
 
-- **Scope the query.** Narrow with `--limit` / `limit` (the last N events),
-  `--type` / `type` (a comma-separated event-type set), and `--agent` /
-  `agent_id` (an agent-id substring) rather than pulling the whole log.
-- **Scan, then zoom.** Read the digest first; drop to `--full` / `full=True`
-  only for the handful of events whose exact payload you need.
+- **Scope the query.** Narrow with `--limit` (the last N events), `--type` (a
+  comma-separated event-type set), and `--agent` (an author handle) rather than
+  pulling the whole log.
+- **Scan, then zoom.** Read the index or digest first; drop to `--json` only for
+  the handful of events whose exact payload you need.
 - **Prefer state over history.** When you only need where a quest stands now —
   not how it got there — reach for the board (`imp list`) or `imp show <id>`'s
   overview card instead of the event log.
