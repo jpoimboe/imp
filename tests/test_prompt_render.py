@@ -273,7 +273,7 @@ def test_plain_gate_asks_build_affirmative(tmp_path: Path) -> None:
         src,
         build_context(quest_title="t", event_log=log),
         workflow_dir=bundled_workflow_dir("imp"))
-    assert "Want me to build this out now?" in rendered
+    assert "a single recommendation-anchored question, not a menu" in rendered
     assert "save this to your backlog" not in rendered
 
 
@@ -325,7 +325,7 @@ def test_build_or_save_attended_build_default_yields(tmp_path: Path) -> None:
     rendered = render_prompt(
         src, build_context(quest_title="t", event_log=log),
         workflow_dir=bundled_workflow_dir("imp"))
-    assert "Want me to build this out now?" in rendered
+    assert "a single recommendation-anchored question, not a menu" in rendered
     assert "end your turn to yield" in rendered
     assert "take the default and proceed without yielding" not in rendered
     assert "headless run" not in src

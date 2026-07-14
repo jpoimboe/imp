@@ -42,11 +42,31 @@ def test_brainstorm_dialogue_carries_conduct_only() -> None:
     # propose 2-3 + design-then-approve in sections
     assert "present it in sections" in text
     # build-or-save gate
-    assert "build this out now" in text.lower()
+    assert "build it out now" in text.lower()
     assert "imp resume <id>" in text
     # final readback
     assert "Final readback before committing" in text
     assert "consolidated" in text.lower()
+
+
+def test_brainstorm_dialogue_build_gate_reads_honestly() -> None:
+    text = (PARTIALS / "brainstorm-dialogue.md").read_text()
+    # Honest header replaces the "save for later" fiction.
+    assert "## Build now, or leave it as a draft" in text
+    assert "## Build now or save for later" not in text
+    # Ctrl-D is named as how the user keeps the draft, in both the attended
+    # solicitation and the decline bullet.
+    assert "the user keeps it by leaving the session (Ctrl-D)" in text
+    assert "the user keeps by leaving (Ctrl-D)" in text
+    # The dishonest "the agent saves it" framing is gone.
+    assert "save it as a draft" not in text.lower()
+    assert "saving as a resumable draft is the opt-in" not in text
+    assert "Want me to build this out now?" not in text
+    # Attended solicitation trimmed to a single recommendation, not a scripted menu.
+    assert "a single recommendation-anchored question, not a menu" in text
+    # Preserved structure: the autonomous/attended split and build mechanics remain.
+    assert "{% if run.autonomous %}" in text
+    assert "create_and_enter_worktree" in text
 
 
 def test_brainstorm_dialogue_carries_cleanup_proposal_beat() -> None:

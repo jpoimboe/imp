@@ -23,10 +23,10 @@ def _render(tmp_path: Path, *, autonomous: bool = False) -> str:
 
 def test_attended_keeps_build_solicit(tmp_path: Path) -> None:
     out = _render(tmp_path)
-    assert "build this out now" in out.lower()
+    assert "build it out now" in out.lower()
     assert "create_and_enter_worktree" in out
     assert "imp resume <id>" in out
-    assert "spec phase pauses" in out.lower()
+    assert "keeps by leaving" in out.lower()
 
 
 def test_autonomous_takes_build_default_without_solicit(tmp_path: Path) -> None:

@@ -120,16 +120,16 @@ two near-identical summaries are the exact noise this rule guards against.
 
 {% include "partials/live-gate-dialogue.md" %}
 
-## Build now or save for later
+## Build now, or leave it as a draft
 
 `imp new` starts this quest as an **un-materialized draft** — no git branch, no worktree
 — and this brainstorm runs read-only against the main checkout; nothing is set up until
 you confirm the build.
 
 This is a **recommendation-bearing gate**: a safe, input-driven **default** below the
-human-decision "Ask vs. decide" bar. The default is **build it out now** (saving as a
-resumable draft is the opt-in). Settle it only once the design is approved and **before
-you write and commit the spec**.
+human-decision "Ask vs. decide" bar. The default is **build it out now**; declining leaves
+it as a resumable draft — building is the only real action here. Settle it only once the
+design is approved and **before you write and commit the spec**.
 
 {% if run.autonomous %}
 **Autonomous run:** take the default and proceed without yielding — state the choice
@@ -140,14 +140,13 @@ spec against current code in this same turn** — re-read the files the brainsto
 and reconcile any drift — before writing. Then proceed to threshold's **Going live**
 section to write and commit the spec.
 {% else %}
-**Attended run:** present the default and **end your turn to yield** to confirm it. Ask
-exactly one question here — the bare build affirmative, e.g.
-**"Want me to build this out now?"** As a follow-on (not a co-equal option), name plainly
-what declining does: it saves the work as a draft you can resume later with
-`imp resume <id>`. Do not present a numbered Build/Save list, pair it with a co-equal
-"…, or save?" alternative, or script reply tokens. There is no separate "does this sound
-right?" approval — design approval was settled continuously through the brainstorm.
-Surface the question in your turn text and end your turn to yield.
+**Attended run:** present the default and **end your turn to yield** to confirm it —
+a single recommendation-anchored question, not a menu. Name plainly what declining
+does: the quest is already a draft, so nothing is "saved" —
+the user keeps it by leaving the session (Ctrl-D) and resumes later with
+`imp resume <id>`. There is no separate "does this sound right?" approval — design
+approval was settled continuously through the brainstorm. Surface the question in
+your turn text and end your turn to yield.
 
 - **If the user picks build, build it now.** Call `create_and_enter_worktree` (no
   arguments): it forks the branch and worktree from the base branch's current tip,
@@ -155,11 +154,10 @@ Surface the question in your turn text and end your turn to yield.
   `head_changed=true`, re-ground the spec against current code in this same turn** —
   re-read the files the brainstorm assumed and reconcile any drift — before writing. Then
   proceed to threshold's **Going live** section to write and commit the spec.
-- **If the user picks save, save it as a draft.** Do **not** call
-  `create_and_enter_worktree`. Tell them the draft is saved and resumable later with
-  `imp resume <id>`, then end your turn to yield. The spec phase pauses with the work
-  saved — nothing built, no branch, no worktree. On a later resume you re-offer this same
-  choice.
+- **If the user declines, leave it as a draft.** Do **not** call
+  `create_and_enter_worktree` — nothing is built, no branch, no worktree. It's
+  already a draft the user keeps by leaving (Ctrl-D), resumable with
+  `imp resume <id>`. On a later resume you re-offer this same choice.
 {% endif %}
 
 A genuine intent-fork (at or above the "Ask vs. decide" bar — no safe default without
