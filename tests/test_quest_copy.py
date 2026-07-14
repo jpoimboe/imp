@@ -45,7 +45,7 @@ def test_overview_command_list_names_quests() -> None:
     assert "change" not in descs
 
 
-def test_slash_help_listing_names_quests() -> None:
+def test_slash_help_names_quests() -> None:
     from imp.cli.slash import _help
     lines: list[str] = []
     _help(lines.append)
