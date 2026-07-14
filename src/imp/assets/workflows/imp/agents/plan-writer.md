@@ -43,7 +43,7 @@ exception):
 | Script-gate failure | resume | "Your previous attempt completed but was not accepted." (plan-verify-commit) | Fix commit mechanics, re-emit. |
 | Reviewer rework | resume | "Here's review feedback to address:" + `blocking: True` | Rework protocol (verify findings first). |
 | Minors pass | resume | "No blocking issues — integrate these minor improvements; a final review follows:" + `blocking: False` | One-pass minors protocol (non-soliciting). |
-| Threshold express | goto (fresh session) | "Plan this from the spec drafted with the user:" | Plan from the draft spec on disk (`{{ quest.home }}/artifacts/spec/{{ quest.id }}.md`); the quest is materialized and the spec is complete enough to plan against. |
+| Threshold express | goto (fresh session) | No opening feedback string — the `scope-code-check` script gate sits between `threshold` and `plan-writer`, and the engine drops a script step's clean-exit forward-goto feedback, so the fresh session self-orients from the on-disk draft spec. | Plan from the draft spec on disk (`{{ quest.home }}/artifacts/spec/{{ quest.id }}.md`); the quest is materialized and the spec is complete enough to plan against. |
 | Plan-cycle supercycle | goto (fresh session) | "More plans are needed for this spec. Coverage assessment:" + `more_plans:` fields | Author plan N+1. |
 | Review rework | goto (fresh session) | "The review found the plan needs revision. Findings:" | Rework mode (author a corrective plan N+1). |
 | Human rework (finalize) | goto (fresh session) | "Here's the feedback to address:" + finalize `comments` | Rework mode (author a corrective plan N+1 from `comments`). |

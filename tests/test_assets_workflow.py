@@ -1117,6 +1117,16 @@ def test_task_lead_prose_allows_implementation_local_spikes() -> None:
     assert "spike" in low
 
 
+def test_plan_writer_express_row_drops_delivered_feedback_string() -> None:
+    from imp.assets import bundled_workflow_dir
+    text = (bundled_workflow_dir("imp") / "agents" / "plan-writer.md").read_text()
+    # The gate drops the express opener, so the doc must not claim it is delivered.
+    assert "Plan this from the spec drafted with the user:" not in text
+    # The row still exists and directs self-orientation from the on-disk draft spec.
+    assert "Threshold express" in text
+    assert "self-orient" in text
+
+
 def test_engine_and_agents_code_never_names_spiker() -> None:
     # AC#4: the isolated_worktree primitive is generic — no engine/dispatch code
     # references the role name. Only workflow assets (.md) may name it.
