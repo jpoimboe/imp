@@ -241,6 +241,58 @@ def test_detail_card_omits_merge_commit_when_absent(tmp_path: Path) -> None:
     assert "merge_commit" not in card             # no line when no recorded SHA
 
 
+def test_quest_card_dims_labels_and_intent_header(tmp_path: Path) -> None:
+    from imp.cli import palette as pal
+
+    _seed_control(tmp_path)
+    _live_change(tmp_path, "2026-06-20-dim01")
+    lines = main._quest_card(tmp_path, "2026-06-20-dim01", now=_NOW, color=True)
+    joined = "\n".join(lines)
+    assert pal.ansi("id:", "dim") in joined              # metadata label dimmed
+    assert pal.ansi("status:", "dim") in joined
+    assert pal.ansi("base_branch:", "dim") in joined
+    assert pal.ansi("title:", "dim") in joined
+    assert pal.ansi("step:", "dim") in joined
+    assert pal.ansi("created:", "dim") in joined
+    assert pal.ansi("last activity:", "dim") in joined
+    assert pal.ansi("intent:", "dim") in lines            # dim intent section header
+    idx = lines.index(pal.ansi("intent:", "dim"))
+    assert lines[idx - 1] == ""                            # one blank line precedes it
+    assert lines[idx + 1] == "build a widget please"       # intent prose follows header
+
+
+def test_quest_card_dims_summary_header(tmp_path: Path) -> None:
+    from imp.cli import palette as pal
+
+    _seed_control(tmp_path)
+    _live_change(tmp_path, "2026-06-20-dim02")
+    summary = (tmp_path / ".imp" / "quests" / "2026-06-20-dim02"
+               / "artifacts" / "summary")
+    summary.mkdir(parents=True)
+    (summary / "2026-06-20-dim02.md").write_text("Shipped the widget.\n")
+    lines = main._quest_card(tmp_path, "2026-06-20-dim02", now=_NOW, color=True)
+    assert pal.ansi("summary:", "dim") in lines           # dim summary section header
+    idx = lines.index(pal.ansi("summary:", "dim"))
+    assert lines[idx - 1] == ""                            # one blank line precedes it
+    assert lines[idx + 1] == "Shipped the widget."         # summary prose follows header
+
+
+def test_quest_card_plain_without_color_keeps_headers(tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+    _live_change(tmp_path, "2026-06-20-dim03")
+    lines = main._quest_card(tmp_path, "2026-06-20-dim03", now=_NOW, color=False)
+    joined = "\n".join(lines)
+    assert "\x1b[" not in joined                            # no SGR escapes anywhere
+    assert "intent:" in lines                               # header text still present
+    assert "id:            2026-06-20-dim03" in joined      # label plain, value aligned at col 15
+    la = next(line for line in lines if line.startswith("last activity:"))
+    assert la[:15] == "last activity: "     # 14-char label + exactly one pad space
+    st = next(line for line in lines if line.startswith("step:"))
+    assert st[:15] == "step:          "     # 5-char label padded to column 15
+    idx = lines.index("intent:")
+    assert lines[idx - 1] == ""             # blank line precedes header in plain mode too
+
+
 def test_detail_card_shows_merge_commit_for_archived_quest(tmp_path: Path) -> None:
     _seed_control(tmp_path)
     events = tmp_path / "arc.jsonl"

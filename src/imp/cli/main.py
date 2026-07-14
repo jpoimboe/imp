@@ -1574,34 +1574,42 @@ def _backlog_card(meta: dict[str, Any], control: Path, *, now: datetime,
     return lines
 
 
-def _quest_card(control: Path, quest_id: str, *, now: datetime) -> list[str]:
+def _quest_card(control: Path, quest_id: str, *, now: datetime,
+                color: bool) -> list[str]:
     card = make_store(control).quest_card(quest_id)
     if card is None:
         return []
     lines = [
-        f"id:            {card.quest_id}",
-        f"title:         {card.title.strip() or '(unnamed)'}",
-        f"status:        {card.status}",
+        _card_field("id:", card.quest_id, 15, color=color),
+        _card_field("title:", card.title.strip() or "(unnamed)", 15, color=color),
+        _card_field("status:", card.status, 15, color=color),
     ]
     if card.status in _INFLIGHT and card.step not in ("", "-"):
         step_text = card.step_label or card.step
         position = f"{card.phase_label} · {step_text}" if card.phase_label else step_text
-        lines.append(pal.clip_display(f"step:          {position}", _display_width()))
-    lines.append(
-        f"created:       {quest_row.format_timestamp(card.created)} "
-        f"({quest_row.relative_age(card.created, now=now)})")
-    lines.append(f"last activity: {quest_row.relative_age(card.last, now=now)}")
+        lines.append(pal.clip_display(
+            _card_field("step:", position, 15, color=color), _display_width()))
+    lines.append(_card_field(
+        "created:",
+        f"{quest_row.format_timestamp(card.created)} "
+        f"({quest_row.relative_age(card.created, now=now)})",
+        15, color=color))
+    lines.append(_card_field(
+        "last activity:", quest_row.relative_age(card.last, now=now), 15, color=color))
     if card.base_branch:
-        lines.append(f"base_branch:   {card.base_branch}")
+        lines.append(_card_field("base_branch:", card.base_branch, 15, color=color))
     if card.merge_commit:
-        lines.append(f"merge_commit:  {card.merge_commit}")
+        lines.append(_card_field("merge_commit:", card.merge_commit, 15, color=color))
     if card.depends_on:
-        lines.append(f"depends_on:    {', '.join(card.depends_on)}")
+        lines.append(_card_field("depends_on:", ", ".join(card.depends_on),
+                                 15, color=color))
     if card.intent:
         lines.append("")
+        lines.append(pal.ansi("intent:", "dim", enabled=color))
         lines.append(card.intent)
     if card.summary:
         lines.append("")
+        lines.append(pal.ansi("summary:", "dim", enabled=color))
         lines.extend(
             card.summary.decode("utf-8", errors="replace").rstrip("\n").splitlines())
     return lines
@@ -1612,7 +1620,7 @@ def _detail_card(control: Path, quest_id: str, *, now: datetime,
     meta = _unstarted_backlog_meta(control, quest_id)
     if meta is not None:
         return _backlog_card(meta, control, now=now, color=color)
-    return _quest_card(control, quest_id, now=now)
+    return _quest_card(control, quest_id, now=now, color=color)
 
 
 def _quest_json(control: Path, quest_id: str) -> dict[str, Any] | None:
