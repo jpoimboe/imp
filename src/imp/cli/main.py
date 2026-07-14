@@ -20,7 +20,6 @@ import signal
 import subprocess
 import sys
 from collections.abc import Awaitable, Callable, Iterable
-from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, NamedTuple, NoReturn
@@ -50,7 +49,7 @@ from imp.cli.session_run import (
 )
 from imp.cli.signals import install_process_group, prompt_sigint_guard
 from imp.cli.slash import ask_line_with_slash
-from imp.cli.store import HomeDigest, make_store
+from imp.cli.store import HomeDigest, SearchHit, SearchZones, make_store
 from imp.cli.terminal_title import TerminalTitle
 from imp.diagnostics import install_stack_dumper
 from imp.engine import backlog, worktree
@@ -3089,26 +3088,7 @@ def _cmd_status(args: argparse.Namespace, _control: Path | None = None) -> int:
     return 0
 
 
-def _inflight_prose(control: Path, quest_id: str) -> str:
-    """Same prose extractor as the archive ingest, so both search paths agree."""
-    from imp.cli.render_helpers import conversation_prose
-    try:
-        raw = (_quest_home(control, quest_id) / "events.jsonl").read_bytes()
-    except OSError:
-        return ""
-    return conversation_prose(_parse_jsonl(raw))
-
-
 _SEARCH_ZONES = ("active", "backlog", "archive")
-
-
-@dataclass(frozen=True)
-class _SearchHit:
-    quest_id: str
-    title: str
-    zone: str      # one of _SEARCH_ZONES
-    content: str   # searchable prose for excerpting ("" when the zone has none)
-    last_activity: str | None   # ISO of last activity; None/"" renders age "-"
 
 
 def _selected_search(args: argparse.Namespace) -> tuple[bool, bool, set[str]]:
@@ -3129,15 +3109,17 @@ def _selected_search(args: argparse.Namespace) -> tuple[bool, bool, set[str]]:
     return args.active, args.backlog, statuses
 
 
-def _search_active(control: Path, query: str) -> list[_SearchHit]:
+def _search_active(control: Path, query: str) -> list[SearchHit]:
     """In-flight + draft-origin quests whose id, title, or conversation prose
     contains `query` (case-insensitive)."""
     q = query.lower()
-    hits: list[_SearchHit] = []
-    for r in _status_rows(control):
-        prose = _inflight_prose(control, r[0])
+    scanned = make_store(control).scan_homes()
+    prose_by_id = {d.quest_id: d.prose for d in scanned}
+    hits: list[SearchHit] = []
+    for r in _status_rows(control, scanned):
+        prose = prose_by_id.get(r[0], "")
         if q in r[0].lower() or q in r[4].lower() or q in prose.lower():
-            hits.append(_SearchHit(r[0], r[4], "active", prose, r[3]))
+            hits.append(SearchHit(r[0], r[4], "active", prose, r[3]))
     return hits
 
 
@@ -3150,23 +3132,23 @@ def _backlog_seed_opening(control: Path, quest_id: str) -> str:
     return str(meta.get("seed_opening") or "")
 
 
-def _search_backlog(control: Path, query: str) -> list[_SearchHit]:
+def _search_backlog(control: Path, query: str) -> list[SearchHit]:
     """Backlog quests whose id, title, or seed_opening body (title + description)
     contains `query` (case-insensitive)."""
     q = query.lower()
-    hits: list[_SearchHit] = []
+    hits: list[SearchHit] = []
     for r in _backlog_rows(control):
         quest_id, title = r[0], r[4]
         seed = _backlog_seed_opening(control, quest_id)
         if q in quest_id.lower() or q in title.lower() or q in seed.lower():
-            hits.append(_SearchHit(quest_id, title, "backlog", seed, r[3]))
+            hits.append(SearchHit(quest_id, title, "backlog", seed, r[3]))
     return hits
 
 
 def _search_archived(control: Path, query: str, statuses: set[str],
-                     merged_after: str | None) -> list[_SearchHit]:
+                     merged_after: str | None) -> list[SearchHit]:
     """Archive hits in `statuses`; completed hits also gated by merged_after."""
-    hits: list[_SearchHit] = []
+    hits: list[SearchHit] = []
     for cid, title, content, status, last in archive_read.search_archive_content(
             control, query):
         if status not in statuses:
@@ -3174,7 +3156,7 @@ def _search_archived(control: Path, query: str, statuses: set[str],
         if (status == "completed" and merged_after is not None
                 and not _merged_after(control, cid, merged_after)):
             continue
-        hits.append(_SearchHit(cid, title, "archive", content, last))
+        hits.append(SearchHit(cid, title, "archive", content, last))
     return hits
 
 
@@ -3244,7 +3226,7 @@ def _excerpts(
 
 
 def _render_search_hit(
-    hit: _SearchHit, query: str, *, now: datetime, color: bool,
+    hit: SearchHit, query: str, *, now: datetime, color: bool,
 ) -> list[str]:
     lines = [_search_list_line(hit, query=query, now=now, color=color)]
     spans, extra = _excerpts(hit.content, query, color=color)
@@ -3255,7 +3237,7 @@ def _render_search_hit(
 
 
 def _search_list_line(
-    hit: _SearchHit, *, query: str, now: datetime, color: bool,
+    hit: SearchHit, *, query: str, now: datetime, color: bool,
 ) -> str:
     """Spine heading id · title · zone · age; query highlighted; title dropped when empty."""
     id_seg = _spine_segment(hit.quest_id, query, *pal.NODE_COLORS["quest_id"],
@@ -3272,13 +3254,9 @@ def _search_list_line(
 def _cmd_search(args: argparse.Namespace, _control: Path | None = None) -> int:
     control = _control if _control is not None else _control_root()
     want_active, want_backlog, statuses = _selected_search(args)
-    hits: list[_SearchHit] = []
-    if want_active:
-        hits += _search_active(control, args.query)
-    if want_backlog:
-        hits += _search_backlog(control, args.query)
-    if statuses:
-        hits += _search_archived(control, args.query, statuses, args.merged_after)
+    zones = SearchZones(active=want_active, backlog=want_backlog,
+                        statuses=frozenset(statuses), merged_after=args.merged_after)
+    hits: list[SearchHit] = list(make_store(control).search(args.query, zones))
     if not hits:
         print(f"No quests match {args.query!r}.")
         return 0

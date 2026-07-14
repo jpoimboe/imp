@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from imp.cli.store import LocalStore, make_store
+from imp.cli.store import LocalStore, SearchZones, make_store
 from imp.engine import archive, worktree
 from imp.engine.quest import Quest
 from imp.engine.state import State
@@ -135,3 +135,22 @@ def test_quest_card_composes_row_intent_and_summary(tmp_path: Path) -> None:
     assert card.intent == "build the widget"
     assert card.summary == b"all done\n"
     assert make_store(tmp_path).quest_card("nosuch") is None
+
+
+def test_search_active_zone(tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+    ch = Quest.create(tmp_path, title="Live One", quest_id="liveone", base_branch="main")
+    _append_event(ch, {
+        "id": "e1", "timestamp": "2026-06-01T00:00:00+00:00",
+        "type": "user_message",
+        "payload": {"human": True,
+                    "content": [{"type": "text", "text": "darkmode toggle"}]}})
+    store = make_store(tmp_path)
+
+    zones = SearchZones(active=True, backlog=False, statuses=frozenset(),
+                        merged_after=None)
+    hits = store.search("darkmode", zones)
+    assert [h.quest_id for h in hits] == ["liveone"]
+    assert hits[0].zone == "active"
+
+    assert store.search("no-such-text", zones) == []

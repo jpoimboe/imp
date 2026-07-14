@@ -51,6 +51,23 @@ class QuestCard:
     summary: bytes | None
 
 
+@dataclass(frozen=True)
+class SearchHit:
+    quest_id: str
+    title: str
+    zone: str
+    content: str
+    last_activity: str | None
+
+
+@dataclass(frozen=True)
+class SearchZones:
+    active: bool
+    backlog: bool
+    statuses: frozenset[str]
+    merged_after: str | None
+
+
 class Store(Protocol):
     def get_events(self, quest_id: str) -> list[dict[str, Any]] | None: ...
     def get_artifact(self, quest_id: str, kind: str) -> bytes | None: ...
@@ -58,6 +75,7 @@ class Store(Protocol):
     def backlog_readiness(self, depends_on: list[str]) -> Readiness: ...
     def scan_homes(self) -> list[HomeDigest]: ...
     def quest_card(self, quest_id: str) -> QuestCard | None: ...
+    def search(self, query: str, zones: SearchZones) -> list[SearchHit]: ...
 
 
 class LocalStore:
@@ -151,6 +169,19 @@ class LocalStore:
             intent=_resolve_intent(events),
             summary=_show_artifact(self.control_root, quest_id, f"summary/{quest_id}.md"),
         )
+
+
+    def search(self, query: str, zones: SearchZones) -> list[SearchHit]:
+        from imp.cli.main import _search_active, _search_archived, _search_backlog
+        hits: list[SearchHit] = []
+        if zones.active:
+            hits += _search_active(self.control_root, query)
+        if zones.backlog:
+            hits += _search_backlog(self.control_root, query)
+        if zones.statuses:
+            hits += _search_archived(
+                self.control_root, query, set(zones.statuses), zones.merged_after)
+        return hits
 
 
 def make_store(control_root: Path) -> Store:
