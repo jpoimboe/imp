@@ -129,3 +129,86 @@ async def test_pick_events_matches_non_tty_prints_candidates_and_exits_2(
     err = capsys.readouterr().err
     assert rc == 2
     assert "ambiguous token; candidates:" in err
+
+
+def test_cmd_events_tty_no_token_routes_to_target_picker(
+    monkeypatch, tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
+    monkeypatch.setattr(m, "_interactive", lambda: True)
+
+    async def fake_pick(control):
+        return "2026-06-11-picked"
+
+    monkeypatch.setattr(m, "_pick_events_target", fake_pick)
+    monkeypatch.setattr(m, "_unstarted_backlog_meta", lambda c, i: None)
+    seen: dict[str, str] = {}
+
+    def fake_load(control, quest_id):
+        seen["id"] = quest_id
+        return None  # → "no such quest" rc 2, but proves the routing
+
+    monkeypatch.setattr(m, "_load_events_for_id", fake_load)
+    rc = m._cmd_events(_events_ns(token=None))
+    assert seen["id"] == "2026-06-11-picked"
+    assert rc == 2
+
+
+def test_cmd_events_tty_no_token_picker_cancel_short_circuits(
+    monkeypatch, tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
+    monkeypatch.setattr(m, "_interactive", lambda: True)
+
+    async def fake_pick(control):
+        return 2  # picker cancel code
+
+    monkeypatch.setattr(m, "_pick_events_target", fake_pick)
+
+    def boom(*a, **k):
+        raise AssertionError("load/backlog attempted despite picker cancel")
+
+    monkeypatch.setattr(m, "_unstarted_backlog_meta", boom)
+    monkeypatch.setattr(m, "_load_events_for_id", boom)
+    assert m._cmd_events(_events_ns(token=None)) == 2
+
+
+def test_cmd_events_non_tty_no_token_uses_resolve_default(
+    monkeypatch, tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
+    monkeypatch.setattr(m, "_interactive", lambda: False)
+
+    def boom(*a, **k):
+        raise AssertionError("picker invoked on a non-tty")
+
+    monkeypatch.setattr(m, "_pick_events_target", boom)
+    monkeypatch.setattr(m, "_resolve_default_id", lambda c: "2026-06-09-default")
+    monkeypatch.setattr(m, "_unstarted_backlog_meta", lambda c, i: None)
+    seen: dict[str, str] = {}
+
+    def fake_load(control, quest_id):
+        seen["id"] = quest_id
+        return None
+
+    monkeypatch.setattr(m, "_load_events_for_id", fake_load)
+    rc = m._cmd_events(_events_ns(token=None))
+    assert seen["id"] == "2026-06-09-default"
+    assert rc == 2
+
+
+def test_cmd_events_non_tty_no_quests_prints_message(
+    monkeypatch, tmp_path: Path, capsys,
+) -> None:
+    monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
+    monkeypatch.setattr(m, "_interactive", lambda: False)
+    monkeypatch.setattr(m, "_resolve_default_id", lambda c: None)
+
+    def boom(*a, **k):
+        raise AssertionError("picker invoked on a non-tty")
+
+    monkeypatch.setattr(m, "_pick_events_target", boom)
+    rc = m._cmd_events(_events_ns(token=None))
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "No quests yet — start one with imp new" in out
