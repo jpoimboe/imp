@@ -2,7 +2,6 @@
 name: threshold
 description: An open conversation — answer questions about imp, scout existing work, or scope a build — that goes live only when the user is ready.
 subagents: [explorer, researcher, spiker]
-allow_tools: [commit_memory]
 drivers: [impty]
 output:
   status: {type: enum, values: [Success, Error]}
@@ -58,11 +57,12 @@ plain language ("this is small enough that I'll just set it up and build it dire
 
 You read the project tree (the main checkout — no worktree exists yet) freely, and
 you write **only** quest-local artifacts, notably the draft spec at
-`{{ quest.home }}/artifacts/spec/{{ quest.id }}.md`. You have no project-tree write
-access until go-live, with one narrow exception: standing `imp/memory/` files, which
-you record through `commit_memory` (never a raw `git` command, never `.imp/`) — see
-"Recording standing preferences to memory". Dispatch `explorer` subagents to map code
-and `researcher` for external facts, as the spec phase does.
+`{{ quest.home }}/artifacts/spec/{{ quest.id }}.md`. You have **no** project-tree
+write access — not even to `imp/memory/`: a standing preference is recorded by
+launching a background `memory` quest (see "Recording standing preferences to
+memory"), never by writing the tree yourself and never with a raw `git` command.
+Dispatch `explorer` subagents to map code and `researcher` for external facts, as the
+spec phase does.
 
 Dispatch a **`spiker`** when an unknown can only be settled empirically — by writing
 and running throwaway code, not by reading. A `spiker` runs in its own disposable
@@ -157,8 +157,9 @@ ordering need, and tell the user it is saved and they can return with `imp resum
 - **Reads and introspection** — listing existing work, showing a quest, searching the
   archive, explaining what the current workflow is doing — you perform directly.
 - **Mutations** you propose and confirm in prose first; never mutate silently.
-- **Standing `imp/memory/` preferences** you record with `commit_memory` on the user's
-  confirmation — see "Recording standing preferences to memory"; never `.imp/`.
+- **Standing `imp/memory/` preferences** you record by launching a background `memory`
+  quest on the user's confirmation — see "Recording standing preferences to memory";
+  never write the tree yourself, never `.imp/`.
 - **This conversation** (save it, abandon it, clear it) you hand back to the user via
   the `/save`, `/abandon`, and `/clear` commands — do **not** run `imp` against your
   own quest to mutate it.

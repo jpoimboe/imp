@@ -19,7 +19,8 @@ def test_memory_authoring_partial_has_pinned_prose() -> None:
     assert "Work out the target file (narrowest scope that fits):" in text
     assert "be reluctant with either `all.md`" in text
     assert "Never invent a step name." in text
-    assert "only `commit_memory` takes the lock" in text
+    assert "create_quest(workflow='memory', start=True" in text
+    assert "intent, not file bytes" in text
     assert "never `.imp/`" in text
 
 
@@ -39,10 +40,15 @@ def _render_agent(name: str, vars: dict) -> str:
     )
 
 
-def test_both_gates_grant_commit_memory() -> None:
+def test_commit_memory_is_fully_retired() -> None:
+    from imp.agents.tools import get_registry
+    from imp.engine.loader import ALLOWABLE_TOOLS
+
+    assert "commit_memory" not in get_registry()
+    assert "commit_memory" not in ALLOWABLE_TOOLS
     wf = load_workflow(bundled_workflow_dir("imp"))
-    assert "commit_memory" in wf.agents["threshold"].tools
-    assert "commit_memory" in wf.agents["finalize"].tools
+    assert "commit_memory" not in wf.agents["threshold"].tools
+    assert "commit_memory" not in wf.agents["finalize"].tools
 
 
 def test_threshold_prompt_includes_memory_authoring() -> None:
@@ -57,10 +63,3 @@ def test_finalize_prompt_includes_memory_authoring() -> None:
     out = _render_agent("finalize", {"auto_merge": False})
     assert "## Recording standing preferences to memory" in out
 
-
-def test_threshold_access_permits_memory_writes() -> None:
-    out = _render_agent("threshold", {})
-    # The Access section now carves out imp/memory writes via commit_memory,
-    # still forbidding raw git and .imp/.
-    assert "one narrow exception" in out
-    assert "record through `commit_memory`" in out

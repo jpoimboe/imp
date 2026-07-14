@@ -4,7 +4,6 @@ label: finalizing
 drivers: [impty]
 description: Final gate at the head of the merge queue — runs after the quest has already been rebased, re-verified, and integration-reviewed at the lane head. Opens with the summarizer's intent-level summary (falling back to the audit record) and takes human merge approval (merge / rework / pause); a merge decision proceeds straight into the mechanical merge.
 subagents: [explorer, researcher, spiker]
-allow_tools: [commit_memory]
 output:
   status: {type: enum, values: [Success, Error]}
   decision: {type: enum, values: [merge, rework, pause]}

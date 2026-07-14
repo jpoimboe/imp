@@ -988,7 +988,8 @@ def build_tree(events: Iterable[dict[str, Any]]) -> NarrativeTree:
 # Handlers populate this in subsequent tasks; quest_created lives here so the
 # skeleton test passes.
 def _h_quest_created(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
-    if p.get("kind") == "backlog":
+    # Any child-creation event carries a `kind`; only the root creation is kind-less.
+    if p.get("kind") is not None:
         return
     self._root.title = p.get("title", "")
     self._root.id = p.get("id")

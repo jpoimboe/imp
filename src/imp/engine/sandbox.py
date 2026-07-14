@@ -422,10 +422,10 @@ def resolve_policy(
     # agent's project_root IS the control root (the threshold concierge and its
     # non-isolated explorer/researcher subagents). This is a deliberate asymmetry
     # with _enforce_clean_tree, which keeps its project_root == control_root skip:
-    # the ref-mask must cover draft agents precisely because commit_memory now
-    # gives them a real (locked) commit capability that a raw bash git must not
-    # bypass, whereas clean-tree tolerance for the user's pre-existing WIP is
-    # unchanged.
+    # the ref-mask must cover draft agents precisely because the draft concierge is
+    # read-only to the project tree — the mask stops a raw bash `git commit` from
+    # bypassing that read-only contract, whereas clean-tree tolerance for the user's
+    # pre-existing WIP is unchanged.
     refs_heads = git / "refs" / "heads"
     remask += list(_existing(
         [str(refs_heads), str(git / "refs" / "stash"), str(git / "index")]))

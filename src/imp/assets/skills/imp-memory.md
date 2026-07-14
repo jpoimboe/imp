@@ -73,8 +73,8 @@ The user needn't hand-author these files. In the interactive gates — the
 `threshold` chat and the `finalize` merge gate — when the user voices a standing,
 cross-quest preference ("always show me exact prose at threshold", "always run X
 before planning"), imp offers to record it: it works out the narrowest correct
-target file, shows the exact path and content, and writes it only on
-confirmation, via the `commit_memory` tool (which commits the single file under
-imp's shared-repo lock). imp never auto-writes memory and never writes outside
-`imp/memory/`. This is how a user grows memory over time instead of composing the
-markdown by hand.
+target scope with the user, then launches a background `memory` quest that edits the
+file(s) off a fresh base tip, validates the tree, and merges the change through the
+normal queue. imp never auto-writes memory and never writes outside `imp/memory/`.
+The recording runs in the background and appears in the active list, so a user grows
+memory over time instead of composing the markdown by hand.

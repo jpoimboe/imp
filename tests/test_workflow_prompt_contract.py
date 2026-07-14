@@ -690,16 +690,18 @@ def test_threshold_adopts_discovered_work_by_default(tmp_path) -> None:
     assert "forcing every idea" not in attended
     assert "before calling `create_quest`" not in attended
 
-    # Autonomous runs omit the whole {% if not run.autonomous %} block; because
-    # create_quest appears nowhere else in threshold.md, its absence proves the
-    # block was dropped.
+    # Autonomous runs omit the whole {% if not run.autonomous %} block. Its
+    # `depends_on=["abc"]` bullet appears nowhere else in the rendered prompt, so
+    # its absence proves the block was dropped. (`create_quest` itself now also
+    # appears in the always-rendered memory-authoring partial, so it is no longer a
+    # valid proxy.)
     autonomous = render_prompt(body, build_context(
         quest_title="t", event_log=log, quest_id="abc",
         quest_home=".imp/quests/abc", autonomous=True,
         project_facts={}),
         workflow_dir=bundled_workflow_dir("imp"))
     assert "## Keep discovered work here by default" not in autonomous
-    assert "create_quest" not in autonomous
+    assert 'depends_on=["abc"]' not in autonomous
 
 
 def test_task_lead_sources_human_decision_bar() -> None:

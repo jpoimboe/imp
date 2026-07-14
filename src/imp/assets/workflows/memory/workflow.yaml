@@ -1,0 +1,51 @@
+name: memory
+description: |
+  edit -> validate -> merge
+
+  A third bundled workflow demonstrating imp's workflow-agnostic engine: it
+  carries out a single seeded standing-preference intent by editing
+  imp/memory/*.md off a fresh base tip, mechanically validates the edited tree
+  against the same load-time check every run runs, and lands the change through
+  the locked FIFO merge queue. Fully autonomous — no human gate and no
+  test/build gate participates; a validation failure or non-MERGED verdict
+  pauses the quest, visible in the active list, never a silent loss.
+
+defaults:
+  max_retries: 3
+  max_loops: 1000
+  max_tool_calls: 10000
+
+phases:
+  - name: edit
+    steps:
+      - name: memory-editor
+        file: agents/memory-editor.md
+        tier: high
+        label: editing memory
+        rules:
+          - {if: {status: Error}, pause: true}
+          - {else: true, continue: true}
+
+      # Mechanical validation gate: re-runs imp's own load-time memory validation
+      # over the edited worktree. On an invalid tree it exits non-zero; the engine
+      # injects the validator's errors as the resumed editor's feedback.
+      - name: validate-memory
+        show_label: false
+        command: python3 -m imp.providers.validate_memory_cli "$IMP_PROJECT_ROOT"
+        max_loops: 6
+        rules:
+          - {if: {exit: 0}, continue: true}
+          - {else: true, resume: memory-editor}
+
+      - name: wait-for-head
+        acquire: merge-lane
+        label: waiting in merge queue
+        rules:
+          - {else: true, continue: true}
+
+      - name: merge-to-base
+        kind: merge_and_exit_worktree
+        label: merging
+        rules:
+          - {if: {merge: MERGED}, continue: true}
+          - {else: true, pause: true}
