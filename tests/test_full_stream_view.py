@@ -63,6 +63,16 @@ _LOG_REFRESH = (
 )
 
 
+_HANDLER_DRIFT = (
+    "fixture event-type drift. The fixture "
+    "tests/fixtures/cc_open_by_asking_full.jsonl.gz carries event type(s) that "
+    "are NOT registered in NarrativeBuilder._HANDLERS "
+    "(src/imp/cli/narrative.py) — an unregistered type renders as a bland "
+    "FallbackLine and hides behind the render goldens. Sweep the fixture forward "
+    "to the renamed type(s), or register the handler. Offending type(s): "
+)
+
+
 def test_live_body_matches_golden() -> None:
     actual = _live_body(_events())
     golden = (FIXTURES / "open_by_asking_live.txt").read_text(encoding="utf-8")
@@ -101,3 +111,10 @@ def test_live_log_body_parity() -> None:
     assert _live_body(events) == _log_body(events), (
         "live and log bodies diverged — live/log parity invariant broken"
     )
+
+
+def test_fixture_event_types_are_registered_handlers() -> None:
+    fixture_types = {e.get("type") for e in _events()}
+    handler_keys = set(nv.NarrativeBuilder._HANDLERS)
+    unregistered = fixture_types - handler_keys
+    assert not unregistered, _HANDLER_DRIFT + ", ".join(sorted(unregistered))
