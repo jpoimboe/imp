@@ -193,7 +193,7 @@ def test_warning_digest_shows_message() -> None:
     assert "\n" not in line
 
 
-def test_warning_digest_clips_long_message() -> None:
+def test_warning_digest_preserves_full_message() -> None:
     long_msg = "x" * 500
     ev = {
         "id": "e10", "parent_id": None, "agent_id": None,
@@ -202,9 +202,8 @@ def test_warning_digest_clips_long_message() -> None:
     }
     line = digest_event(ev)
     assert line.startswith("2026-07-01T00:00:09+00:00 warning")
-    assert "warning: " in line
-    assert "\n" not in line
-    assert len(line) < len(long_msg)
+    assert long_msg in line          # per-field cap removed: full message survives
+    assert "\n" not in line          # whitespace-collapse keeps one logical line
 
 
 def test_warning_digest_missing_message_key() -> None:

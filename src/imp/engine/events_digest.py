@@ -12,14 +12,10 @@ import json
 from collections.abc import Callable
 from typing import Any
 
-_TEXT_CAP = 200
-_RESULT_CAP = 120
 
-
-def _clip(text: str, cap: int) -> str:
-    """Collapse whitespace (keeps the digest single-line) and cap length."""
-    text = " ".join(text.split())
-    return text if len(text) <= cap else text[:cap] + "…"
+def _collapse(text: str) -> str:
+    """Collapse whitespace to keep the digest one logical line; length is clipped in digest_line."""
+    return " ".join(text.split())
 
 
 def _envelope(event: dict[str, Any]) -> str:
@@ -69,11 +65,11 @@ def _parse_llm(payload: dict[str, Any]) -> tuple[str, int]:
 
 def _h_user(payload: dict[str, Any]) -> str:
     role = payload.get("role", "user")
-    return f"{role}: {_clip(_message_text(payload), _TEXT_CAP)}"
+    return f"{role}: {_collapse(_message_text(payload))}"
 
 
 def _h_awaiting(payload: dict[str, Any]) -> str:
-    return _clip(str(payload.get("steer_hint", "")), _TEXT_CAP)
+    return _collapse(str(payload.get("steer_hint", "")))
 
 
 def _h_llm_response(payload: dict[str, Any]) -> str:
@@ -81,22 +77,22 @@ def _h_llm_response(payload: dict[str, Any]) -> str:
     usage = payload.get("usage") or {}
     return (f"stop={payload.get('stop_reason')} tools={n_tools} "
             f"in={usage.get('input_tokens')} out={usage.get('output_tokens')} "
-            f"{_clip(texts, _TEXT_CAP)}")
+            f"{_collapse(texts)}")
 
 
 def _h_tool_call(payload: dict[str, Any]) -> str:
-    summary = _clip(json.dumps(payload.get("input"), default=str), _RESULT_CAP)
+    summary = _collapse(json.dumps(payload.get("input"), default=str))
     return f"{payload.get('name', '?')} {summary}"
 
 
 def _h_tool_result(payload: dict[str, Any]) -> str:
     text = _content_text(payload.get("content"))
     return (f"error={payload.get('error')} bytes={len(text.encode())} "
-            f"{_clip(text, _RESULT_CAP)}")
+            f"{_collapse(text)}")
 
 
 def _h_agent_output(payload: dict[str, Any]) -> str:
-    return _clip(json.dumps(payload, default=str), _TEXT_CAP)
+    return _collapse(json.dumps(payload, default=str))
 
 
 def _h_step_context(payload: dict[str, Any]) -> str:
@@ -128,11 +124,11 @@ def _generic(payload: dict[str, Any]) -> str:
             parts.append(f"{k}={v}")
         else:
             parts.append(f"{k}=<{type(v).__name__}>")
-    return _clip(" ".join(parts), _TEXT_CAP)
+    return _collapse(" ".join(parts))
 
 
 def _h_warning(payload: dict[str, Any]) -> str:
-    return f"warning: {_clip(str(payload.get('message', '')), _TEXT_CAP)}"
+    return f"warning: {_collapse(str(payload.get('message', '')))}"
 
 
 _HANDLERS: dict[str, Callable[[dict[str, Any]], str]] = {
@@ -168,5 +164,5 @@ def summarize(event: dict[str, Any]) -> str:
 def digest_event(event: dict[str, Any]) -> str:
     """Render one event as a single slim digest line."""
     if event.get("_malformed"):
-        return f"<malformed> {_clip(str(event.get('raw', '')), _RESULT_CAP)}"
+        return f"<malformed> {_collapse(str(event.get('raw', '')))}"
     return f"{_envelope(event)} {_summarize(event)}"
