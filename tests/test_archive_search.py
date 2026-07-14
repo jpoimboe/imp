@@ -103,6 +103,16 @@ def test_search_content_returns_id_title_content_and_last_activity(tmp_path: Pat
     assert hits[0][3] == "2026-06-01T00:00:01+00:00"   # the event's timestamp
 
 
+def test_search_content_matches_title_only_when_body_lacks_term(tmp_path: Path) -> None:
+    # Query is in the title but NOT the body — search_content's title branch
+    # (id OR title OR content) must still surface the hit.
+    _archive(tmp_path, "alpha", "Dark mode toggle",
+             events_text=_prose_line("an unrelated discussion happened here"))
+    _archive(tmp_path, "other", "Login flow",
+             events_text=_prose_line("nothing relevant in this body"))
+    assert [h[0] for h in archive_read.search_archive_content(tmp_path, "dark")] == ["alpha"]
+
+
 def test_search_content_missing_index_returns_empty(tmp_path: Path) -> None:
     assert archive_read.search_archive_content(tmp_path, "anything") == []
 
