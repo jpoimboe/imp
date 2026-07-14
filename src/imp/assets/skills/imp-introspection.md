@@ -74,13 +74,21 @@ answers the question, and never dump the raw log as your default.
 
 - **Narrative** — `imp log <id>`. The human "read the story" view: prose with
   tool bursts folded. Use it when you want to follow what happened, in order.
+  Scope it to a slice with the same windowing filters `imp events` accepts —
+  `--step`, `--range` (or a positional `<range>`), `--limit`, and `--agent`
+  (no `--type`, which fights the folded narrative) — and those filters carry
+  through the `--md`/`--html` exports; `--follow` stays unfiltered. For example,
+  `imp log <id> --step threshold` reads just the seed conversation.
 - **Digest** — `imp events <id>`. A bare call prints a self-describing index
   (steps + types); add a leaf selector (`--type`, `--agent`, a `<range>`, or
-  `--all`) to get one compact line per event. This is the default for scanning
-  and filtering an event stream from bash.
+  `--all`) to get one compact line per event. On a TTY each compact line is
+  clipped to one terminal row so the stream stays scannable; add `--full` to
+  lift the clip and render the full untruncated line (still one logical line per
+  event). Piped output is effectively unclipped already. This is the default for
+  scanning and filtering an event stream from bash.
 - **Raw** — `imp events <id> --json` (composes with any filter). The exact event
-  payloads, including the full timestamp, each event byte-capped. Drop to this
-  tier only for the few events whose full contents you actually need.
+  payloads, including the full timestamp, uncapped. Drop to this tier only for
+  the few events whose full contents you actually need.
 
 ## Reading another quest
 

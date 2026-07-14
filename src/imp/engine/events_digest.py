@@ -12,14 +12,10 @@ import json
 from collections.abc import Callable
 from typing import Any
 
-_TEXT_CAP = 200
-_RESULT_CAP = 120
 
-
-def _clip(text: str, cap: int) -> str:
-    """Collapse whitespace (keeps the digest single-line) and cap length."""
-    text = " ".join(text.split())
-    return text if len(text) <= cap else text[:cap] + "…"
+def _collapse(text: str) -> str:
+    """Collapse whitespace to keep the digest one logical line; length is clipped in digest_line."""
+    return " ".join(text.split())
 
 
 def _envelope(event: dict[str, Any]) -> str:
@@ -40,6 +36,17 @@ def _message_text(payload: dict[str, Any]) -> str:
     return " ".join(parts)
 
 
+def _content_text(content: Any) -> str:
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts = [str(b.get("text", "")) for b in content
+                 if isinstance(b, dict) and b.get("type") == "text"]
+        if parts:
+            return " ".join(parts)
+    return json.dumps(content, default=str)
+
+
 def _parse_llm(payload: dict[str, Any]) -> tuple[str, int]:
     """Best-effort text + tool_use count from llm_response.raw. Never raises:
     a provider with no parser or a malformed raw degrades to ("", 0)."""
@@ -58,39 +65,56 @@ def _parse_llm(payload: dict[str, Any]) -> tuple[str, int]:
 
 def _h_user(payload: dict[str, Any]) -> str:
     role = payload.get("role", "user")
-    return f"{role}: {_clip(_message_text(payload), _TEXT_CAP)}"
+    return f"{role}: {_collapse(_message_text(payload))}"
 
 
 def _h_awaiting(payload: dict[str, Any]) -> str:
-    return _clip(str(payload.get("steer_hint", "")), _TEXT_CAP)
+    return _collapse(str(payload.get("steer_hint", "")))
 
 
 def _h_llm_response(payload: dict[str, Any]) -> str:
     texts, n_tools = _parse_llm(payload)
     usage = payload.get("usage") or {}
     return (f"stop={payload.get('stop_reason')} tools={n_tools} "
-            f"usage={usage} {_clip(texts, _TEXT_CAP)}")
+            f"in={usage.get('input_tokens')} out={usage.get('output_tokens')} "
+            f"{_collapse(texts)}")
 
 
 def _h_tool_call(payload: dict[str, Any]) -> str:
-    summary = _clip(json.dumps(payload.get("input"), default=str), _RESULT_CAP)
+    summary = _collapse(json.dumps(payload.get("input"), default=str))
     return f"{payload.get('name', '?')} {summary}"
 
 
 def _h_tool_result(payload: dict[str, Any]) -> str:
-    content = payload.get("content")
-    text = content if isinstance(content, str) else json.dumps(content, default=str)
-    return (f"id={payload.get('id', '?')} error={payload.get('error')} "
-            f"bytes={len(text.encode())} {_clip(text, _RESULT_CAP)}")
+    text = _content_text(payload.get("content"))
+    return (f"error={payload.get('error')} bytes={len(text.encode())} "
+            f"{_collapse(text)}")
 
 
 def _h_agent_output(payload: dict[str, Any]) -> str:
-    return _clip(json.dumps(payload, default=str), _TEXT_CAP)
+    return _collapse(json.dumps(payload, default=str))
 
 
 def _h_step_context(payload: dict[str, Any]) -> str:
     # Deliberately omits system_prompt + tools_schema (redaction by construction).
     return f"provider={payload.get('provider')} model={payload.get('model')}"
+
+
+def _h_step_started(payload: dict[str, Any]) -> str:
+    # model/provider absent on script/gate steps; None output is acceptable.
+    return (f"step={payload.get('step')} phase={payload.get('phase')} "
+            f"kind={payload.get('kind')} model={payload.get('model')} "
+            f"provider={payload.get('provider')}")
+
+
+def _h_query_result(payload: dict[str, Any]) -> str:
+    # Positive-select five fields; every other payload key drops by construction.
+    cost = payload.get("total_cost_usd")
+    dur = payload.get("duration_ms")
+    cost_s = f"${cost:.2f}" if isinstance(cost, (int, float)) else f"${cost}"
+    dur_s = f"{dur / 1000:.1f}s" if isinstance(dur, (int, float)) else f"{dur}s"
+    return (f"cost={cost_s} dur={dur_s} turns={payload.get('num_turns')} "
+            f"stop={payload.get('stop_reason')} subtype={payload.get('subtype')}")
 
 
 def _generic(payload: dict[str, Any]) -> str:
@@ -100,11 +124,11 @@ def _generic(payload: dict[str, Any]) -> str:
             parts.append(f"{k}={v}")
         else:
             parts.append(f"{k}=<{type(v).__name__}>")
-    return _clip(" ".join(parts), _TEXT_CAP)
+    return _collapse(" ".join(parts))
 
 
 def _h_warning(payload: dict[str, Any]) -> str:
-    return f"warning: {_clip(str(payload.get('message', '')), _TEXT_CAP)}"
+    return f"warning: {_collapse(str(payload.get('message', '')))}"
 
 
 _HANDLERS: dict[str, Callable[[dict[str, Any]], str]] = {
@@ -112,6 +136,8 @@ _HANDLERS: dict[str, Callable[[dict[str, Any]], str]] = {
     "user_interjected": _h_user,
     "awaiting_user_input": _h_awaiting,
     "llm_response": _h_llm_response,
+    "step_started": _h_step_started,
+    "query_result": _h_query_result,
     "tool_call": _h_tool_call,
     "tool_result": _h_tool_result,
     "agent_output": _h_agent_output,
@@ -138,33 +164,5 @@ def summarize(event: dict[str, Any]) -> str:
 def digest_event(event: dict[str, Any]) -> str:
     """Render one event as a single slim digest line."""
     if event.get("_malformed"):
-        return f"<malformed> {_clip(str(event.get('raw', '')), _RESULT_CAP)}"
+        return f"<malformed> {_collapse(str(event.get('raw', '')))}"
     return f"{_envelope(event)} {_summarize(event)}"
-
-
-_FULL_CAP = 2048
-_TRUNC_MARK = "…[truncated — narrow the query]"
-_REDACTED = "…[redacted]"
-
-
-def _redact(event: dict[str, Any]) -> dict[str, Any]:
-    if event.get("type") != "step_context":
-        return event
-    payload = event.get("payload")
-    if not isinstance(payload, dict):
-        return event
-    redacted = dict(event)
-    p = dict(payload)
-    for key in ("system_prompt", "tools_schema"):
-        if key in p:
-            p[key] = _REDACTED
-    redacted["payload"] = p
-    return redacted
-
-
-def full_line(event: dict[str, Any]) -> str:
-    """One raw event object as JSON, step_context-redacted and byte-capped."""
-    serialized = json.dumps(_redact(event), default=str)
-    if len(serialized) > _FULL_CAP:
-        return serialized[:_FULL_CAP] + _TRUNC_MARK
-    return serialized

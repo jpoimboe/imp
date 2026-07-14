@@ -1,9 +1,7 @@
 # tests/test_events_digest.py
 from __future__ import annotations
 
-import json
-
-from imp.engine.events_digest import _FULL_CAP, _TRUNC_MARK, digest_event, full_line
+from imp.engine.events_digest import digest_event
 
 
 def test_digest_event_is_single_line() -> None:
@@ -37,7 +35,7 @@ def test_step_context_digest_drops_prompt_and_schema() -> None:
     assert "SECRET_TOOL_SCHEMA" not in line
 
 
-def test_llm_response_digest_shows_stop_tools_usage_and_text() -> None:
+def test_llm_response_digest_shows_stop_tools_in_out_and_text() -> None:
     ev = {
         "id": "e3", "parent_id": None, "agent_id": "step:x/y",
         "timestamp": "2026-07-01T00:00:02+00:00", "type": "llm_response",
@@ -53,21 +51,61 @@ def test_llm_response_digest_shows_stop_tools_usage_and_text() -> None:
     }
     line = digest_event(ev)
     assert "\n" not in line
-    assert "tool_use" in line          # stop_reason
-    assert "111" in line               # usage token count
+    assert "stop=tool_use" in line
+    assert "tools=1" in line
+    assert "in=111" in line
+    assert "out=22" in line
     assert "here is my analysis" in line
-    assert "tools=1" in line           # one tool_use counted
+    assert "usage=" not in line          # the raw usage dict is gone
 
 
-def test_tool_result_digest_shows_error_and_byte_size() -> None:
+def test_tool_result_digest_shows_error_bytes_and_no_id() -> None:
     ev = {
         "id": "e4", "parent_id": None, "agent_id": "step:x/y",
         "timestamp": "2026-07-01T00:00:03+00:00", "type": "tool_result",
-        "payload": {"id": "t1", "content": "ABCDEFGHIJ", "error": True},
+        "payload": {"id": "toolu_abc", "content": "ABCDEFGHIJ", "error": True},
     }
     line = digest_event(ev)
     assert "error=True" in line
     assert "bytes=10" in line          # byte size of "ABCDEFGHIJ"
+    assert "id=" not in line           # opaque tool-use id dropped
+    assert "toolu_abc" not in line
+
+
+def test_tool_result_digest_unwraps_text_content_block() -> None:
+    ev = {
+        "id": "e4b", "parent_id": None, "agent_id": "step:x/y",
+        "timestamp": "2026-07-01T00:00:03+00:00", "type": "tool_result",
+        "payload": {"id": "toolu_x", "error": False,
+                    "content": [{"type": "text", "text": "unwrapped body"}]},
+    }
+    line = digest_event(ev)
+    assert "unwrapped body" in line
+    assert '"type"' not in line         # the raw block wrapper is gone
+    assert "bytes=14" in line           # byte size of "unwrapped body"
+
+
+def test_tool_result_digest_json_dumps_non_text_content() -> None:
+    ev = {
+        "id": "e4c", "parent_id": None, "agent_id": "step:x/y",
+        "timestamp": "2026-07-01T00:00:03+00:00", "type": "tool_result",
+        "payload": {"error": False,
+                    "content": [{"type": "image", "source": "data:xyz"}]},
+    }
+    line = digest_event(ev)
+    assert "image" in line              # non-text content falls back to json.dumps
+    assert "data:xyz" in line
+
+
+def test_tool_result_digest_handles_missing_content() -> None:
+    ev = {
+        "id": "e4d", "parent_id": None, "agent_id": "step:x/y",
+        "timestamp": "2026-07-01T00:00:03+00:00", "type": "tool_result",
+        "payload": {"error": False},
+    }
+    line = digest_event(ev)          # must not raise
+    assert "error=False" in line
+    assert "\n" not in line
 
 
 def test_unknown_type_uses_generic_scalar_fallback() -> None:
@@ -140,35 +178,6 @@ def test_tool_call_digest_shows_name_and_input() -> None:
     assert "\n" not in line
 
 
-def test_full_line_roundtrips_a_small_event() -> None:
-    ev = {"id": "e", "parent_id": None, "agent_id": "step:x/y",
-          "timestamp": "2026-07-01T00:00:00+00:00", "type": "tool_call",
-          "payload": {"id": "t1", "name": "grep", "input": {"pattern": "z"}}}
-    assert json.loads(full_line(ev)) == ev
-
-
-def test_full_line_truncates_a_large_payload() -> None:
-    ev = {"id": "e", "parent_id": None, "agent_id": "step:x/y",
-          "timestamp": "2026-07-01T00:00:00+00:00", "type": "tool_result",
-          "payload": {"id": "t1", "error": False, "content": "A" * 10000}}
-    line = full_line(ev)
-    assert line.endswith("…[truncated — narrow the query]")
-    assert len(line) == _FULL_CAP + len(_TRUNC_MARK)
-
-
-def test_full_line_redacts_step_context_secrets() -> None:
-    ev = {"id": "e", "parent_id": None, "agent_id": "step:plan/plan-writer",
-          "timestamp": "2026-07-01T00:00:00+00:00", "type": "step_context",
-          "payload": {"provider": "anthropic", "model": "claude-x",
-                      "system_prompt": "SECRET_SYSTEM_PROMPT_BODY",
-                      "tools_schema": [{"name": "SECRET_TOOL_SCHEMA"}],
-                      "params": {}, "max_tool_calls": 40}}
-    line = full_line(ev)
-    assert "SECRET_SYSTEM_PROMPT_BODY" not in line
-    assert "SECRET_TOOL_SCHEMA" not in line
-    assert "claude-x" in line
-
-
 def test_warning_digest_shows_message() -> None:
     ev = {
         "id": "e9", "parent_id": None, "agent_id": None,
@@ -184,7 +193,7 @@ def test_warning_digest_shows_message() -> None:
     assert "\n" not in line
 
 
-def test_warning_digest_clips_long_message() -> None:
+def test_warning_digest_preserves_full_message() -> None:
     long_msg = "x" * 500
     ev = {
         "id": "e10", "parent_id": None, "agent_id": None,
@@ -193,9 +202,8 @@ def test_warning_digest_clips_long_message() -> None:
     }
     line = digest_event(ev)
     assert line.startswith("2026-07-01T00:00:09+00:00 warning")
-    assert "warning: " in line
-    assert "\n" not in line
-    assert len(line) < len(long_msg)
+    assert long_msg in line          # per-field cap removed: full message survives
+    assert "\n" not in line          # whitespace-collapse keeps one logical line
 
 
 def test_warning_digest_missing_message_key() -> None:
@@ -217,3 +225,97 @@ def test_summarize_exposes_type_aware_tail() -> None:
     # the type-aware tool_call handler json-serializes the input dict; the
     # generic fallback would render it as `input=<dict>` instead.
     assert '"pattern": "x"' in tail
+
+
+def test_step_started_digest_positive_selects_five_fields() -> None:
+    ev = {
+        "id": "e12", "parent_id": None, "agent_id": None,
+        "timestamp": "2026-07-01T00:00:11+00:00", "type": "step_started",
+        "payload": {
+            "step": "plan-writer", "phase": "plan", "kind": "agent",
+            "model": "claude-x", "provider": "anthropic",
+            "show_label": True, "show_output": False, "label": "Planning",
+            "tools": ["read_file", "grep"], "resumed": False, "command": "noop",
+        },
+    }
+    line = digest_event(ev)
+    assert "step=plan-writer" in line
+    assert "phase=plan" in line
+    assert "kind=agent" in line
+    assert "model=claude-x" in line
+    assert "provider=anthropic" in line
+    # dropped-by-construction render/lifecycle keys never leak
+    assert "show_label" not in line
+    assert "show_output" not in line
+    assert "Planning" not in line
+    assert "resumed" not in line
+    assert "noop" not in line
+    assert "\n" not in line
+
+
+def test_step_started_script_step_renders_none_model_provider() -> None:
+    ev = {
+        "id": "e13", "parent_id": None, "agent_id": None,
+        "timestamp": "2026-07-01T00:00:12+00:00", "type": "step_started",
+        "payload": {"step": "verify", "phase": "impl", "kind": "script",
+                    "command": "pytest -q", "show_label": True},
+    }
+    line = digest_event(ev)
+    assert "step=verify" in line
+    assert "kind=script" in line
+    assert "model=None" in line          # absent on script/gate emits
+    assert "provider=None" in line
+    assert "pytest" not in line          # command dropped
+    assert "\n" not in line
+
+
+def test_query_result_digest_positive_selects_and_humanizes() -> None:
+    ev = {
+        "id": "e14", "parent_id": None, "agent_id": "step:x/y",
+        "timestamp": "2026-07-01T00:00:13+00:00", "type": "query_result",
+        "payload": {
+            "total_cost_usd": 0.12345, "duration_ms": 4500,
+            "duration_api_ms": 4200, "num_turns": 7,
+            "stop_reason": "end_turn", "subtype": "success", "is_error": False,
+            "usage": {"input_tokens": 5}, "model_usage": {"claude-x": {}},
+            "permission_denials": [{"tool": "bash"}],
+        },
+    }
+    line = digest_event(ev)
+    assert "cost=$0.12" in line          # rounded from 0.12345
+    assert "dur=4.5s" in line            # 4500ms humanized
+    assert "turns=7" in line
+    assert "stop=end_turn" in line
+    assert "subtype=success" in line
+    # noisy dict/list placeholders and bookkeeping keys dropped by construction
+    assert "usage=" not in line
+    assert "model_usage" not in line
+    assert "permission_denials" not in line
+    assert "duration_api_ms" not in line
+    assert "\n" not in line
+
+
+def test_query_result_digest_renders_error_subtype() -> None:
+    ev = {
+        "id": "e15", "parent_id": None, "agent_id": "step:x/y",
+        "timestamp": "2026-07-01T00:00:14+00:00", "type": "query_result",
+        "payload": {"total_cost_usd": 0.0, "duration_ms": 100, "num_turns": 1,
+                    "stop_reason": None, "subtype": "error_during_execution",
+                    "is_error": True, "usage": {}, "model_usage": {}},
+    }
+    line = digest_event(ev)
+    assert "subtype=error_during_execution" in line
+    assert "cost=$0.00" in line
+
+
+def test_query_result_digest_guards_none_cost_and_duration() -> None:
+    ev = {
+        "id": "e16", "parent_id": None, "agent_id": "step:x/y",
+        "timestamp": "2026-07-01T00:00:15+00:00", "type": "query_result",
+        "payload": {"total_cost_usd": None, "duration_ms": None,
+                    "num_turns": 0, "stop_reason": None, "subtype": None},
+    }
+    line = digest_event(ev)              # must not raise on None numerics
+    assert "cost=$None" in line
+    assert "dur=Nones" in line
+    assert "\n" not in line

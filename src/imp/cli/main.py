@@ -2014,6 +2014,42 @@ def _log_show_set(full: bool, show: list[str], hide: list[str]) -> frozenset[str
     return frozenset((base | set(show)) - set(hide))
 
 
+def _select_log_events(
+    args: argparse.Namespace, quest_id: str, events: list[dict[str, Any]],
+) -> list[dict[str, Any]] | int:
+    """Filter events by imp log's windowing options, or return exit code 2 on bad input."""
+    from imp.engine import events_index as ei
+
+    range_specs = list(args.range) if args.range else []
+    if args.range_pos:
+        range_specs.append(args.range_pos)
+    steps = set(args.step) if args.step else None
+    agents = set(args.agent) if args.agent else None
+    if not (steps or agents or range_specs or args.limit is not None):
+        return events
+
+    indexed = list(enumerate(events, start=1))
+    handle_map = ei.subagent_handle_map(indexed)
+    max_ord = indexed[-1][0] if indexed else 0
+    intervals: list[tuple[int, int]] = []
+    try:
+        for spec in range_specs:
+            intervals.extend(ei.parse_range_spec(spec, max_ord))
+    except ei.RangeSpecError as exc:
+        print(f"imp: {exc}", file=sys.stderr)
+        return 2
+    if steps is not None:
+        known = {s.name for s in ei.step_windows(indexed)}
+        missing = sorted(steps - known)
+        if missing:
+            print(f"imp: no step {missing[0]!r} in {quest_id}", file=sys.stderr)
+            return 2
+    selected = ei.select_event_lines(
+        indexed, agents=agents, ranges=intervals or None,
+        step_names=steps, limit=args.limit, handle_map=handle_map)
+    return [ev for _, ev in selected]
+
+
 def _cmd_log(args: argparse.Namespace) -> int:
     from imp.cli import narrative
     from imp.cli.render_text import LOG_CATEGORIES, render_tree
@@ -2066,6 +2102,11 @@ def _cmd_log(args: argparse.Namespace) -> int:
         if home.exists():
             return _follow_live(control, quest_id, home)
         return _follow_log(events)
+
+    selected = _select_log_events(args, quest_id, events)
+    if isinstance(selected, int):
+        return selected
+    events = selected
 
     if args.html is not None or args.md is not None:
         return _write_log_export(args, control, quest_id, events)
@@ -3491,8 +3532,9 @@ def _cmd_events(args: argparse.Namespace) -> int:
             json.dumps(ei.events_json(selected), indent=2).splitlines(),
             no_pager=args.no_pager)
         return 0
+    width = None if args.full else _term_width()
     _page_or_print(
-        [ei.digest_line(o, ev, handle_map) for o, ev in selected],
+        [ei.digest_line(o, ev, handle_map, width=width) for o, ev in selected],
         no_pager=args.no_pager)
     return 0
 
@@ -3620,6 +3662,9 @@ def _build_parser() -> argparse.ArgumentParser:
     p_log.add_argument(
         "token", nargs="?",
         help="Quest id or its short token (omit for the most recent quest).")
+    p_log.add_argument(
+        "range_pos", nargs="?", default=None, metavar="RANGE",
+        help="Ordinal selector, e.g. 42, 59-120, 59-, -80 (like imp events).")
     p_log_mode = p_log.add_mutually_exclusive_group()
     p_log_mode.add_argument(
         "--full", action="store_true",
@@ -3647,6 +3692,19 @@ def _build_parser() -> argparse.ArgumentParser:
     p_log.add_argument(
         "--hide", action=SplitAppend, default=None, metavar="CAT",
         help="Hide a content category (repeatable / comma-joined).")
+    p_log.add_argument(
+        "--step", action=SplitAppend, default=None,
+        help="Scope to a step's window (repeatable / comma-joined).")
+    p_log.add_argument(
+        "--range", action=SplitAppend, default=None, dest="range",
+        help="Ordinal selector (repeatable / comma-joined).")
+    p_log.add_argument(
+        "--agent", action=SplitAppend, default=None,
+        help="Keep only these authors: step name, subagent handle, or "
+             "sub:<id> (repeatable / comma-joined).")
+    p_log.add_argument(
+        "--limit", type=int, default=None,
+        help="Keep only the last N events.")
     p_log_export = p_log.add_mutually_exclusive_group()
     p_log_export.add_argument(
         "--html", nargs="?", metavar="FILE", const=_LOG_EXPORT_DEFAULT,
@@ -3698,6 +3756,10 @@ def _build_parser() -> argparse.ArgumentParser:
     p_events.add_argument(
         "--all", action="store_true",
         help="All event lines (escape hatch from the index/filters).")
+    p_events.add_argument(
+        "--full", action="store_true",
+        help="Render full untruncated event lines (lift the one-terminal-row "
+             "width clip); composes with every filter.")
     p_events.add_argument(
         "--json", action="store_true",
         help="Structured output instead of text.")

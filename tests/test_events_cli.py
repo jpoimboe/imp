@@ -158,3 +158,22 @@ def test_events_malformed_range_errors(tmp_path, monkeypatch) -> None:
             rc = main(["events", "aaa111", bad])
         assert rc == 2
         assert "range" in err.getvalue()
+
+
+def test_events_full_widens_past_the_width_clip(tmp_path, monkeypatch) -> None:
+    # Content is short (~38 chars) so the per-field cap still present until Task 3
+    # neither truncates it nor injects a `…`; the assembled compact line still far
+    # exceeds the forced 40-column width, so only the line-level clip bites.
+    long_result = {
+        "type": "tool_result", "agent_id": "step:d/spec",
+        "payload": {"id": "t1", "error": False,
+                    "content": "Y" * 30 + "TAILMARK"},
+    }
+    _make_live_quest(tmp_path, "bbb222", [long_result])
+    monkeypatch.setenv("COLUMNS", "40")             # force a narrow clip width
+    clipped = _run(monkeypatch, tmp_path, "events", "bbb222", "--all")
+    full = _run(monkeypatch, tmp_path, "events", "bbb222", "--all", "--full")
+    assert "…" in clipped                           # clipped to $COLUMNS
+    assert "TAILMARK" not in clipped                # the tail was clipped off
+    assert "TAILMARK" in full                       # --full lifts the clip
+    assert "…" not in full
