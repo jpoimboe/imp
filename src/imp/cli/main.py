@@ -2410,10 +2410,10 @@ def _completed_rows(control: Path, live_ids: set[str] | None = None) -> list[_Ro
     return rows
 
 
-def _left_rows(control: Path, live_ids: set[str] | None = None) -> list[_Row]:
-    """Left conversations — archived final status `paused` with no live home —
+def _shelved_rows(control: Path, live_ids: set[str] | None = None) -> list[_Row]:
+    """Shelved conversations — archived final status `paused` with no live home —
     for the `--all` history block. Mirrors _completed_rows' live-id dedup so a
-    resumed left conversation, which now has a live home and shows in-flight,
+    resumed shelved conversation, which now has a live home and shows in-flight,
     is not duplicated here. Reads the same indexed archive query as
     _completed_rows but selects `paused` rows instead of terminal ones."""
     live = {r[0] for r in _status_rows(control)} if live_ids is None else live_ids
@@ -2440,7 +2440,7 @@ def _resumable_match_rows(control: Path, token: str) -> list[_Row]:
 
     Spans live-resumable rows (`_resumable_rows`) AND archived-but-resumable
     records — an archived id whose archive record reads `resumable=True` (a
-    "left" conversation whose live home was deleted). A live row wins when an id
+    "shelved" conversation whose live home was deleted). A live row wins when an id
     appears in both. Archived completed/abandoned (non-resumable) ids are never
     matches, so a terminal id sharing a stem never joins the menu."""
     from imp.engine.archive import record, records_root
@@ -2899,15 +2899,15 @@ def _selected_list_dispositions(args: argparse.Namespace) -> set[str]:
 
 
 # Display-only disposition word for the overview history block.
-_DISPOSITION = {"completed": "merged", "abandoned": "abandoned", "paused": "left"}
+_DISPOSITION = {"completed": "merged", "abandoned": "abandoned", "paused": "shelved"}
 
 
 def _history_rows(control: Path, *, show_all: bool,
                   live_ids: set[str] | None = None) -> list[_Row]:
-    """History-block rows: completed/abandoned, plus left (paused) rows under --all."""
+    """History-block rows: completed/abandoned, plus shelved (paused) rows under --all."""
     rows = [r for r in _completed_rows(control, live_ids) if r[1] in _DISPOSITION]
     if show_all:
-        rows += _left_rows(control, live_ids)
+        rows += _shelved_rows(control, live_ids)
     else:
         rows = [r for r in rows if r[1] == "completed"]
     return _sort_rows_newest_first(rows)
@@ -3015,7 +3015,7 @@ def _filtered_overview_lines(control: Path, *, dispositions: set[str],
                     if "backlog" in dispositions else [])
     wanted = {_ARCHIVE_STATUS[d]
               for d in dispositions & {"merged", "abandoned", "shelved"}}
-    history_all = _completed_rows(control, live_ids) + _left_rows(control, live_ids)
+    history_all = _completed_rows(control, live_ids) + _shelved_rows(control, live_ids)
     history = _sort_rows_newest_first([r for r in history_all if r[1] in wanted])
 
     inflight = [r for r in inflight if _row_since(r, cutoff)]
