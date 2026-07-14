@@ -78,6 +78,68 @@ def test_list_ends_with_one_trailing_blank_on_tty(
     assert not out.endswith("\n\n\n")    # never two or more
 
 
+def test_show_ends_with_one_trailing_blank_on_tty(
+    tmp_path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from imp.engine.quest import Quest
+    from tests.conftest import _seed_control
+
+    _seed_control(tmp_path)
+    Quest.create(tmp_path, title="A", quest_id="alpha", base_branch="main")
+    rc, out = _run_tty(monkeypatch, capsys, tmp_path, "show", "alpha", "--no-pager")
+    assert rc == 0
+    assert out.endswith("\n\n")
+    assert not out.endswith("\n\n\n")
+
+
+def test_log_ends_with_one_trailing_blank_on_tty(
+    tmp_path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from imp.engine.quest import Quest
+    from imp.engine.state import JsonlEventLog
+    from tests.conftest import _seed_control
+
+    _seed_control(tmp_path)
+    Quest.create(tmp_path, title="A", quest_id="alpha", base_branch="main")
+    # Add step events so the narrative tree has visible content to render.
+    log = JsonlEventLog(tmp_path / ".imp" / "quests" / "alpha" / "events.jsonl")
+    log.append(agent_id=None, type="step_started", payload={"step": "s"})
+    log.append(agent_id=None, type="step_completed",
+               payload={"step": "s", "status": "Success"})
+    rc, out = _run_tty(monkeypatch, capsys, tmp_path, "log", "alpha", "--no-pager")
+    assert rc == 0
+    assert out.endswith("\n\n")
+    assert not out.endswith("\n\n\n")
+
+
+def test_search_hits_end_with_one_trailing_blank_on_tty(
+    tmp_path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from imp.engine.quest import Quest
+    from tests.conftest import _seed_control
+
+    _seed_control(tmp_path)
+    Quest.create(tmp_path, title="A", quest_id="alpha", base_branch="main")
+    rc, out = _run_tty(monkeypatch, capsys, tmp_path, "search", "alpha", "--no-pager")
+    assert rc == 0
+    assert out.endswith("\n\n")
+    assert not out.endswith("\n\n\n")
+
+
+def test_events_index_ends_with_one_trailing_blank_on_tty(
+    tmp_path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from imp.engine.quest import Quest
+    from tests.conftest import _seed_control
+
+    _seed_control(tmp_path)
+    Quest.create(tmp_path, title="A", quest_id="alpha", base_branch="main")
+    rc, out = _run_tty(monkeypatch, capsys, tmp_path, "events", "alpha", "--no-pager")
+    assert rc == 0
+    assert out.endswith("\n\n")
+    assert not out.endswith("\n\n\n")
+
+
 def test_show_json_has_no_trailing_blank_on_tty(
     tmp_path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
