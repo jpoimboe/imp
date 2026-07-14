@@ -267,6 +267,7 @@ def test_main_log_follow_implies_no_pager_on_tty(
     _make_live_home(tmp_path, slug)
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
+    monkeypatch.delenv("IMP_SESSION_SOCKET", raising=False)
     monkeypatch.delenv("PAGER", raising=False)
     _fake_tty(monkeypatch, isatty=True)
     monkeypatch.setattr(m, "_follow_live", lambda control, cid, home: 0)
@@ -389,6 +390,7 @@ def test_cmd_log_follow_routes_live_home_to_follow_live(
     _make_live_home(tmp_path, slug)
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
+    monkeypatch.delenv("IMP_SESSION_SOCKET", raising=False)
     _fake_tty(monkeypatch, isatty=False)
     seen: dict[str, object] = {}
     monkeypatch.setattr(
@@ -543,6 +545,7 @@ def test_cmd_log_follow_long_form_starts_follow(
     _make_live_home(tmp_path, slug)
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
+    monkeypatch.delenv("IMP_SESSION_SOCKET", raising=False)
     _fake_tty(monkeypatch, isatty=False)
     seen: dict[str, object] = {}
     monkeypatch.setattr(
@@ -575,3 +578,41 @@ def test_cmd_log_follow_backlog_id_prints_card_and_exits(
     rc = m.main(["log", "-f", "back"])
     assert rc == 0
     assert "BACKLOG CARD" in capsys.readouterr().out
+
+
+def test_cmd_log_follow_in_sandbox_degrades_to_snapshot(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """In-sandbox (IMP_SESSION_SOCKET set), `imp log -f <id>` on a LIVE home never
+    tails the masked events.jsonl: it prints a note to stderr and routes the
+    store-served events through the one-shot _follow_log, exiting cleanly."""
+    import types
+
+    import imp.cli.main as m
+    slug = "sandboxed"
+    _make_live_home(tmp_path, slug)  # live home exists → would normally _follow_live
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
+    monkeypatch.setenv("IMP_SESSION_SOCKET", "/tmp/imp-1000/deadbeef.sock")
+    snapshot = [{"type": "quest_created", "payload": {"title": "follow"}}]
+    # IMP_SESSION_SOCKET set → the real make_store picks ProxyStore; stub it so the
+    # events come from the store without a live daemon socket.
+    monkeypatch.setattr(
+        m, "make_store",
+        lambda control: types.SimpleNamespace(
+            get_events=lambda qid: snapshot,
+            completed_rows=lambda: []))
+
+    def _boom(*a: object, **k: object) -> int:
+        raise AssertionError("live follow must not run inside the sandbox")
+
+    monkeypatch.setattr(m, "_follow_live", _boom)
+    seen: dict[str, object] = {}
+    monkeypatch.setattr(
+        m, "_follow_log",
+        lambda events: (seen.update(events=events), 0)[1])
+    rc = m.main(["log", "-f", slug])
+    assert rc == 0
+    assert seen["events"] == snapshot  # the store snapshot went to the one-shot path
+    assert "live follow is unavailable inside the sandbox" in capsys.readouterr().err

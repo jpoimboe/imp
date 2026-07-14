@@ -2121,6 +2121,10 @@ def _cmd_log(args: argparse.Namespace) -> int:
         return 2
 
     if args.follow:
+        if os.environ.get("IMP_SESSION_SOCKET"):
+            print("imp log: live follow is unavailable inside the sandbox; "
+                  "showing a one-shot snapshot.", file=sys.stderr)
+            return _follow_log(events)
         home = _quest_home(control, quest_id)
         if home.exists():
             return _follow_live(control, quest_id, home)
