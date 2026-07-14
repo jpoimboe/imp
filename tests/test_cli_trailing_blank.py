@@ -313,3 +313,96 @@ def test_abandon_picker_empty_unchanged_when_piped(
     rc = m._abandon_picker_empty()
     assert rc == 2
     assert capsys.readouterr().out == "Nothing to abandon.\n"
+
+
+def test_cmd_config_trailing_blank_on_tty(
+    tmp_path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    import argparse
+    import io
+
+    import imp.cli.config_cmd as cc
+    import imp.cli.main as m
+    import imp.providers.effective as eff_mod
+
+    monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
+    monkeypatch.setattr(m, "_project_root", lambda: tmp_path)
+    monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
+    monkeypatch.setattr(
+        eff_mod, "load_effective_config",
+        lambda *, project_root, control_root: object())
+
+    captured: dict = {}
+
+    def fake_render(eff, out, *, color, show_all):
+        captured["out"] = out
+        out.write("tiers:\n")
+        out.write("  high opus\n")
+
+    monkeypatch.setattr(cc, "render_config", fake_render)
+    rc = m._cmd_config(argparse.Namespace(explain=None, all=False))
+    assert rc == 0
+    assert isinstance(captured["out"], io.StringIO)
+    assert capsys.readouterr().out == "tiers:\n  high opus\n\n"
+
+
+def test_cmd_config_unchanged_when_piped(
+    tmp_path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    import argparse
+    import io
+
+    import imp.cli.config_cmd as cc
+    import imp.cli.main as m
+    import imp.providers.effective as eff_mod
+
+    monkeypatch.setattr(sys.stdout, "isatty", lambda: False)
+    monkeypatch.setattr(m, "_project_root", lambda: tmp_path)
+    monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
+    monkeypatch.setattr(
+        eff_mod, "load_effective_config",
+        lambda *, project_root, control_root: object())
+
+    captured: dict = {}
+
+    def fake_render(eff, out, *, color, show_all):
+        captured["out"] = out
+        out.write("tiers:\n")
+        out.write("  high opus\n")
+
+    monkeypatch.setattr(cc, "render_config", fake_render)
+    rc = m._cmd_config(argparse.Namespace(explain=None, all=False))
+    assert rc == 0
+    assert isinstance(captured["out"], io.StringIO)
+    assert capsys.readouterr().out == "tiers:\n  high opus\n"
+
+
+def test_cmd_config_explain_trailing_blank_on_tty(
+    tmp_path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    import argparse
+    import io
+
+    import imp.cli.config_cmd as cc
+    import imp.cli.main as m
+    import imp.providers.effective as eff_mod
+
+    monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
+    monkeypatch.setattr(m, "_project_root", lambda: tmp_path)
+    monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
+    monkeypatch.setattr(
+        eff_mod, "load_effective_config",
+        lambda *, project_root, control_root: object())
+
+    captured: dict = {}
+
+    def fake_explain(eff, tier, out, *, color):
+        captured["out"] = out
+        out.write("explain high:\n")
+        out.write("  opus\n")
+
+    monkeypatch.setattr(cc, "render_explain", fake_explain)
+    rc = m._cmd_config(argparse.Namespace(explain="high", all=False))
+    assert rc == 0
+    assert isinstance(captured["out"], io.StringIO)
+    assert capsys.readouterr().out == "explain high:\n  opus\n\n"

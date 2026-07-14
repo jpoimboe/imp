@@ -10,6 +10,7 @@ import argparse
 import contextlib
 import enum
 import functools
+import io
 import json
 import logging
 import os
@@ -3347,12 +3348,14 @@ def _cmd_config(args: argparse.Namespace) -> int:
     except Exception:
         control = root  # no git work tree → local `.imp/config.yaml` layer is skipped
     eff = load_effective_config(project_root=root, control_root=control)
+    color = should_use_color(sys.stdout)
     explain = getattr(args, "explain", None)
+    buf = io.StringIO()
     if explain:
-        render_explain(eff, explain, sys.stdout, color=should_use_color(sys.stdout))
+        render_explain(eff, explain, buf, color=color)
     else:
-        render_config(eff, sys.stdout, color=should_use_color(sys.stdout),
-                      show_all=args.all)
+        render_config(eff, buf, color=color, show_all=args.all)
+    _emit_human(buf.getvalue().splitlines())
     return 0
 
 
