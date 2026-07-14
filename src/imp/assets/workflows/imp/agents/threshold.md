@@ -64,7 +64,9 @@ standing preference is recorded by launching a background `memory` quest (see
 "Recording standing preferences to memory"), never by writing the tree yourself
 and never with a raw `git` command.
 Dispatch `explorer` subagents to map code and `researcher` for external facts, as the
-spec phase does.
+spec phase does. Even after go-live, this step writes **only** its spec/summary
+artifacts — it never writes project source files and never runs `git add`/`git commit`
+on project code; the pipeline builds the change from the spec.
 
 Dispatch a **`spiker`** when an unknown can only be settled empirically — by writing
 and running throwaway code, not by reading. A `spiker` runs in its own disposable
@@ -122,6 +124,16 @@ intent-level summary here, drawing the *why* from the just-finished conversation
 paragraph (what this quest accomplishes and why), plus a text/ASCII diagram **only**
 when the quest genuinely altered structure (omit it otherwise; no mermaid). On the
 full path do **not** write the summary — the `summarizer` step does.
+
+## If bounced back for committing code
+
+A phase-boundary gate (`scope-code-check`) rejects any commit this step leaves on the
+quest branch, because scoping must produce only a spec. If you are resumed with feedback
+that opens "Your previous attempt completed but was not accepted" and reports that the
+scoping phase committed code, you committed project source you must undo: run the exact
+`git reset --hard <fork>` the feedback names to drop those commits (your spec lives
+outside the code tree and is unaffected), confirm `git status` is clean, then finish the
+step again.
 
 ## Reading a referenced spec file
 

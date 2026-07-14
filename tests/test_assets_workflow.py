@@ -260,6 +260,56 @@ def test_threshold_authors_summary_on_express() -> None:
     assert "full path do **not** write the summary" in body
 
 
+def test_threshold_rules_route_through_scope_gate() -> None:
+    from imp.assets import bundled_workflow_dir
+    wf = load_workflow(bundled_workflow_dir("imp"))
+    rules = _steps(wf)["threshold"].rules
+    express = evaluate_rules(rules, vars=_BASE_VARS,
+                             output={"status": "Success", "ceremony": "express"})
+    assert isinstance(express.action, Goto)
+    assert express.action.target == "scope-code-check"
+    assert express.var_mutations["fast_path"] is True
+    full = evaluate_rules(rules, vars=_BASE_VARS,
+                          output={"status": "Success", "ceremony": "full"})
+    assert full.action.target == "scope-code-check"
+    assert full.var_mutations["fast_path"] is False
+
+
+def test_scope_code_check_clean_routes_by_fast_path() -> None:
+    from imp.assets import bundled_workflow_dir
+    wf = load_workflow(bundled_workflow_dir("imp"))
+    rules = _steps(wf)["scope-code-check"].rules
+    express = evaluate_rules(rules, vars={**_BASE_VARS, "fast_path": True},
+                             output={"exit": 0, "stdout": "", "stderr": ""})
+    assert isinstance(express.action, Goto)
+    assert express.action.target == "plan-writer" and express.action.resume is False
+    full = evaluate_rules(rules, vars={**_BASE_VARS, "fast_path": False},
+                          output={"exit": 0, "stdout": "", "stderr": ""})
+    assert full.action.target == "spec-finalizer" and full.action.resume is False
+    # Deliberate: the clean-exit script goto carries NO feedback (the engine drops a
+    # script step's clean-goto feedback; destinations self-orient from the on-disk spec).
+    assert express.action.feedback is None
+    assert full.action.feedback is None
+
+
+def test_scope_code_check_dirty_resumes_threshold() -> None:
+    from imp.assets import bundled_workflow_dir
+    wf = load_workflow(bundled_workflow_dir("imp"))
+    rules = _steps(wf)["scope-code-check"].rules
+    m = evaluate_rules(rules, vars={**_BASE_VARS, "fast_path": False},
+                       output={"exit": 1, "stdout": "", "stderr": "boom"})
+    assert m.action.target == "threshold" and m.action.resume is True
+
+
+def test_scope_code_check_is_bounded_and_label_suppressed() -> None:
+    from imp.assets import bundled_workflow_dir
+    wf = load_workflow(bundled_workflow_dir("imp"))
+    step = _steps(wf)["scope-code-check"]
+    assert step.max_loops == 3
+    assert step.show_label is False
+    assert step.command == "./scripts/scope-code-check.sh"
+
+
 def test_commit_tool_is_removed_from_registry() -> None:
     # Fix #3: the commit tool is gone; all agents commit with raw git.
     import imp.agents.tools  # noqa: F401 — triggers _register_builtins
@@ -406,7 +456,7 @@ def test_no_goto_spec_finalizer_edge() -> None:
     # Rework edges back into spec-finalizer must be `resume:` (transcript kept), so a
     # resumed spec-finalizer always has its rename_quest result in history. The one
     # permitted `goto: spec-finalizer` is threshold's forward entry on the full path.
-    assert wf.count("goto: spec-finalizer") == 1  # only threshold's forward entry
+    assert wf.count("goto: spec-finalizer") == 1  # only the scope-code-check gate's forward entry
     assert "goto: spec_finalizer" not in wf
 
 
@@ -742,7 +792,7 @@ def test_workflow_yaml_has_no_spec_writer_identifier() -> None:
     wf = Path("src/imp/assets/workflows/imp/workflow.yaml").read_text()
     assert "spec-writer" not in wf
     assert "spec_writer" not in wf
-    assert wf.count("goto: spec-finalizer") == 1   # only threshold's forward entry
+    assert wf.count("goto: spec-finalizer") == 1   # only the scope-code-check gate's forward entry
 
 
 def test_summarizer_immediately_precedes_finalize():

@@ -46,8 +46,21 @@ phases:
         tier: high
         interactive: true
         rules:
-          - {if: {ceremony: express}, set: {fast_path: true}, goto: plan-writer, label: "writing plan", feedback: "Plan this from the spec drafted with the user:"}
-          - {else: true, set: {fast_path: false}, goto: spec-finalizer, label: "writing spec", feedback: "Adopt the spec drafted with the user and finalize it:"}
+          - {if: {ceremony: express}, set: {fast_path: true}, goto: scope-code-check}
+          - {else: true, set: {fast_path: false}, goto: scope-code-check}
+
+      - name: scope-code-check
+        show_label: false
+        command: ./scripts/scope-code-check.sh
+        max_loops: 3
+        # Pass rules carry `label:` only. A script step's clean-exit (exit 0) goto
+        # cannot forward a `feedback:` string (executor.py:1024-1029); plan-writer and
+        # spec-finalizer self-orient from the on-disk draft spec, so no feedback is
+        # needed here. Dirty (exit != 0) -> resume threshold, whose stderr IS delivered.
+        rules:
+          - {if: {exit: 0, fast_path: true}, goto: plan-writer, label: "writing plan"}
+          - {if: {exit: 0}, goto: spec-finalizer, label: "writing spec"}
+          - {else: true, resume: threshold}
 
   - name: spec
     label: "spec phase"
