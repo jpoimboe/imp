@@ -15,7 +15,7 @@ from imp.diagnostics import install_stack_dumper
 from imp.engine.abandon import (
     archive_conversation,
     discard_conversation,
-    save_to_backlog,
+    save_as_draft,
     tear_down_quest,
 )
 from imp.engine.errors import LoadError, LoadErrors
@@ -93,7 +93,7 @@ async def serve_quest_session(
     hibernate: bool = True,
     tear_down: Callable[[Quest], None] = tear_down_quest,
     archive_left: Callable[[Quest], None] = archive_conversation,
-    save_left: Callable[[Quest, str | None], None] = save_to_backlog,
+    save_left: Callable[[Quest, str | None], None] = save_as_draft,
     discard_left: Callable[[Quest], None] = discard_conversation,
     resume: bool = False,
     non_interactive: bool = False,

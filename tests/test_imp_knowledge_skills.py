@@ -32,7 +32,7 @@ def test_knowledge_lists_status_set_and_draft_relabel() -> None:
 def test_knowledge_names_the_three_left_draft_dispositions() -> None:
     body = load_internal_skill(_skills_dir(), "imp-knowledge")
     assert "discard_conversation" in body
-    assert "save_to_backlog" in body
+    assert "save_as_draft" in body
     assert "archive_conversation" in body
 
 

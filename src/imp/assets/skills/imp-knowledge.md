@@ -67,15 +67,20 @@ draft is just a conversation and its artifacts on disk.
 When a phase-0 conversation is left, its fate depends on what happened:
 
 - **Never answered / no real exchange** → `discard_conversation` (it goes away).
-- **`imp new`, or an explicit `/keep`** → `save_to_backlog`: it stays in the
-  active list, shown as a **draft**, resumable later.
-- **Otherwise** → `archive_conversation`: it leaves the active list but stays
-  resumable (shelved) via `imp resume` or findable with `imp search`.
+- **`imp new`, an explicit `/keep`, or the quest was renamed (a design formed)**
+  → `save_as_draft`: `origin` stays `draft`, so it remains in the active list,
+  shown as a **draft**, resumable later. It does **not** move to the backlog.
+- **Otherwise** (an un-renamed `imp chat` conversation) → `archive_conversation`:
+  it leaves the active list but stays resumable (shelved) via `imp resume` or
+  findable with `imp search`.
 
 This is the exact point training data gets wrong (it once claimed `imp new`
-"archives a draft as resumable" — it does not; `imp new` runs `save_to_backlog`,
+"archives a draft as resumable" — it does not; `imp new` runs `save_as_draft`,
 so the draft stays in your active list, shown as a `draft`, rather than being
-archived).
+archived). Likewise, a renamed `imp chat` conversation is kept as an active
+draft, not archived — the rename (a design formed), not the entry point, is what
+keeps it in the active list; and `save_as_draft` never moves anything to the
+backlog.
 
 ## Core vocabulary
 

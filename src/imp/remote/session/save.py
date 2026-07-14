@@ -1,11 +1,11 @@
-"""Save a (possibly resident) quest to the Backlog."""
+"""Save a (possibly resident) un-materialized quest as an active draft."""
 from __future__ import annotations
 
 from pathlib import Path
 
 import anyio
 
-from imp.engine.abandon import save_to_backlog
+from imp.engine.abandon import save_as_draft
 from imp.engine.quest import Quest
 from imp.remote.daemon.directory import session_is_resident
 from imp.remote.session.client import SessionClient
@@ -20,7 +20,7 @@ def save_quest(control_root: Path, quest_id: str) -> None:
         ch = Quest.load(control_root, quest_id)
         if ch.materialized:
             return
-        save_to_backlog(ch)
+        save_as_draft(ch)
 
 
 _SAVE_CLOSE_TIMEOUT = 10  # seconds to wait for resident session to close on save
