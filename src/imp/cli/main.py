@@ -1751,6 +1751,13 @@ def _load_events_for_id(control: Path, quest_id: str) -> list[dict[str, Any]] | 
     return _parse_jsonl(raw)
 
 
+def _resolve_row_intent(control: Path, r: _Row) -> str | None:
+    """Fallback display name for a title-less row: its opening prompt, else None."""
+    if r[4].strip():
+        return None
+    return _resolve_intent(_load_events_for_id(control, r[0]) or [])
+
+
 def _resolve_default_id(control: Path) -> str | None:
     """No-arg default: most-recent quest home by its events.jsonl mtime, else
     the most-recent archived id (by the index's last_event_ts), else None."""
@@ -2559,8 +2566,7 @@ async def _pick_quest_target(
     candidates = [resume_select.Candidate(
         quest_id=r[0], title=r[4], status=r[1], step=r[2], last_iso=r[3],
         step_label=r[6],
-        intent=(_resolve_intent(_load_events_for_id(control, r[0]) or [])
-                if not r[4].strip() else None))
+        intent=_resolve_row_intent(control, r))
         for r in rows]
     chosen = await resume_select.run_picker(
         candidates, now=datetime.now(UTC),
@@ -3017,10 +3023,10 @@ def _overview_body(control: Path, inflight: list[_Row], backlog_rows: list[_Row]
                    history: list[_Row], *, history_label: str, now: datetime,
                    color: bool) -> list[str]:
     """Render the sectioned overview for already-gathered rows."""
-    intents: dict[str, str | None] = {}
-    for r in inflight:
-        if not r[4].strip():
-            intents[r[0]] = _resolve_intent(_load_events_for_id(control, r[0]) or [])
+    intents: dict[str, str | None] = {
+        r[0]: _resolve_row_intent(control, r)
+        for r in (*inflight, *backlog_rows, *history)
+        if not r[4].strip()}
 
     def _name_text(r: _Row) -> str:
         raw = r[4].strip()
@@ -3055,7 +3061,8 @@ def _overview_body(control: Path, inflight: list[_Row], backlog_rows: list[_Row]
             lines.append(quest_row.format_quest_line(
                 quest_id=r[0], title=r[4], status=r[1], step=r[2],
                 step_label=r[6], phase_label=None, last_iso=r[3], now=now,
-                color=color, name_width=name_width, status_width=status_width))
+                color=color, name_width=name_width, status_width=status_width,
+                intent=intents.get(r[0])))
     if history:
         lines.append("")
         lines.append(pal.ansi(history_label, "dim", enabled=color))
@@ -3063,7 +3070,7 @@ def _overview_body(control: Path, inflight: list[_Row], backlog_rows: list[_Row]
             lines.append(quest_row.format_quest_line(
                 quest_id=r[0], title=r[4], status=_DISPOSITION[r[1]], step="-",
                 last_iso=r[3], now=now, color=color, name_width=name_width,
-                status_width=status_width, dim=True))
+                status_width=status_width, dim=True, intent=intents.get(r[0])))
     return lines
 
 
