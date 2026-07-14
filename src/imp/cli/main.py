@@ -3249,8 +3249,12 @@ def _cmd_events(args: argparse.Namespace) -> int:
     if args.range_pos:
         range_specs.append(args.range_pos)
     intervals: list[tuple[int, int]] = []
-    for spec in range_specs:
-        intervals.extend(ei.parse_range_spec(spec, max_ord))
+    try:
+        for spec in range_specs:
+            intervals.extend(ei.parse_range_spec(spec, max_ord))
+    except ei.RangeSpecError as exc:
+        print(f"imp: {exc}", file=sys.stderr)
+        return 2
 
     if steps is not None:
         known = {s.name for s in ei.step_windows(indexed)}

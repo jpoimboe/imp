@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import io
 import json
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 
 import pytest
@@ -146,3 +146,15 @@ def test_events_json_step_scoped_parses(tmp_path, monkeypatch) -> None:
     assert obj["step"] == "spec"
     assert obj["windows"] == [[1, 4]]
     assert isinstance(obj["agents"], list)
+
+
+def test_events_malformed_range_errors(tmp_path, monkeypatch) -> None:
+    import imp.cli.main as m
+    monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
+    _make_live_quest(tmp_path, "aaa111", _EVENTS)
+    for bad in ("5-x", "xyz"):
+        err = io.StringIO()
+        with redirect_stderr(err):
+            rc = main(["events", "aaa111", bad])
+        assert rc == 2
+        assert "range" in err.getvalue()

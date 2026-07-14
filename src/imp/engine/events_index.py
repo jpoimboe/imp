@@ -15,6 +15,10 @@ from imp.engine.events_digest import summarize
 _SUPPRESSED_TYPES = {"llm_response_usage_patch"}
 
 
+class RangeSpecError(ValueError):
+    """A malformed <range> selector token."""
+
+
 def is_suppressed(event: dict[str, Any]) -> bool:
     """True for rows that consume an ordinal but never render and are excluded
     from counts/histograms: `_malformed` lines and envelope-less
@@ -51,12 +55,15 @@ def parse_range_spec(spec: str, max_ordinal: int) -> list[tuple[int, int]]:
         token = token.strip().lstrip("#")
         if not token:
             continue
-        if "-" in token:
-            lo_s, hi_s = token.split("-", 1)
-            lo = int(lo_s) if lo_s.strip() else 1
-            hi = int(hi_s) if hi_s.strip() else max_ordinal
-        else:
-            lo = hi = int(token)
+        try:
+            if "-" in token:
+                lo_s, hi_s = token.split("-", 1)
+                lo = int(lo_s) if lo_s.strip() else 1
+                hi = int(hi_s) if hi_s.strip() else max_ordinal
+            else:
+                lo = hi = int(token)
+        except ValueError as exc:
+            raise RangeSpecError(f"invalid range {spec!r}") from exc
         intervals.append((lo, hi))
     return intervals
 
