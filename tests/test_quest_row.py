@@ -162,10 +162,11 @@ def test_draft_status_renders_step_suffix():
     assert "draft (blocked)" in line
 
 
-def test_provenance_statuses_have_colors():
+def test_provenance_status_is_backlog_only():
     from imp.cli.quest_row import STATUS_COLORS
-    assert "idea" in STATUS_COLORS
-    assert "followup" in STATUS_COLORS
+    assert STATUS_COLORS["backlog"] == ("dim",)
+    assert "idea" not in STATUS_COLORS
+    assert "followup" not in STATUS_COLORS
 
 
 def test_status_word_never_truncated_only_label_is():
