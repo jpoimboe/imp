@@ -53,21 +53,22 @@ def test_abandon_is_in_the_help_text() -> None:
     assert any("/abandon" in line for line in lines)
 
 
-def test_save_builtin_returns_literal_for_the_gate_loop(tmp_path: Path) -> None:
-    # /save is a built-in (NOT a skill): it returns the literal so the session gate
-    # loop (cli/session_terminal) records the save intent and detaches.
+def test_keep_builtin_returns_literal_for_the_gate_loop(tmp_path: Path) -> None:
+    # /keep is a built-in (NOT a skill): it returns the literal so the session gate
+    # loop (cli/session_terminal) records the keep-as-draft intent and detaches.
     quest = SimpleNamespace(control_root=tmp_path)
     out: list[str] = []
-    result = handle_slash_line("/save", quest=quest, output_fn=out.append)
-    assert result == "/save"
+    result = handle_slash_line("/keep", quest=quest, output_fn=out.append)
+    assert result == "/keep"
     assert not any("no such skill" in line for line in out)
 
 
-def test_save_is_in_the_help_text() -> None:
+def test_keep_is_in_the_help_text() -> None:
     from imp.cli.slash import _help
     lines: list[str] = []
     _help(lines.append)
-    assert any("/save" in line for line in lines)
+    assert any("/keep" in line for line in lines)
+    assert not any("/save" in line for line in lines)
 
 
 def test_clear_builtin_returns_literal_for_the_gate_loop(tmp_path: Path) -> None:

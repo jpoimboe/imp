@@ -62,7 +62,7 @@ def test_save_intent_saves_even_with_zero_exchange(tmp_path: Path) -> None:
 
 
 def test_save_intent_with_no_leave_mode_still_saves(tmp_path: Path) -> None:
-    # Explicit /save is exempt from the leave_mode-None early-return guard.
+    # Explicit /keep is exempt from the leave_mode-None early-return guard.
     _seed_control(tmp_path)
     ch = _draft(tmp_path, "sn1", exchange=True)
     assert leave_control_action(ch, None, "save") == "save"

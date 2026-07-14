@@ -7,7 +7,7 @@ The client's signals map to two distinct intents (the keep-alive-lease design):
     yields inline and the client stays attached; with no inline channel the stop
     lands as a clean pause.
   - Intent B — "this client is leaving" (SIGTERM, SIGHUP, terminal close,
-    Ctrl-D, /save). Acts on the *attachment*: release the lease, detach, exit. The
+    Ctrl-D, /keep). Acts on the *attachment*: release the lease, detach, exit. The
     client does NOT decide whether the run pauses — the session daemon's lease
     rule does.
 

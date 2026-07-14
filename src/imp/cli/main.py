@@ -134,7 +134,7 @@ class ReplyInterjectRouter:
 
 
 OPENING_HINT = "type a message, /help for commands, or /model to switch models"
-_OPENING_SESSION_VERBS = ("/save", "/clear", "/abandon")
+_OPENING_SESSION_VERBS = ("/keep", "/clear", "/abandon")
 
 
 def _should_prompt_opening(
@@ -526,7 +526,7 @@ def _print_leave_disposition(
     disposition = leave_state.get("disposition")
     if disposition == "save":
         print()
-        print(_status_spine(quest.id, quest.title, "saved to backlog", "wordmark",
+        print(_status_spine(quest.id, quest.title, "kept as draft", "wordmark",
                             color=color))
         print(_resume_line(quest.id))
         return 0

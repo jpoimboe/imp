@@ -67,7 +67,7 @@ draft is just a conversation and its artifacts on disk.
 When a phase-0 conversation is left, its fate depends on what happened:
 
 - **Never answered / no real exchange** → `discard_conversation` (it goes away).
-- **`imp new`, or an explicit `/save`** → `save_to_backlog`: it stays in the
+- **`imp new`, or an explicit `/keep`** → `save_to_backlog`: it stays in the
   active list, shown as a **draft**, resumable later.
 - **Otherwise** → `archive_conversation`: it leaves the active list but stays
   resumable (shelved) via `imp resume` or findable with `imp search`.

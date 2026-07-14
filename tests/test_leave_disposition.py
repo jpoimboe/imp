@@ -103,7 +103,7 @@ def test_print_leave_disposition_archive_is_lock_free(
     assert "resume: imp resume fast1 — or find it later with imp search" in out
 
 
-def test_print_leave_disposition_save_prints_backlog_spine(
+def test_print_leave_disposition_save_prints_kept_as_draft_spine(
     tmp_path: Path, capsys: pytest.CaptureFixture[str],
 ) -> None:
     _seed_control(tmp_path)
@@ -111,8 +111,8 @@ def test_print_leave_disposition_save_prints_backlog_spine(
     rc = m._print_leave_disposition(ch, {"disposition": "save"})
     assert rc == 0
     out = capsys.readouterr().out
-    assert "· saved to backlog" in out
-    assert "Backlog" not in out                          # lowercase in this emitter
+    assert "· kept as draft" in out
+    assert "saved to backlog" not in out
     assert "resume: imp resume bk1" in out
 
 

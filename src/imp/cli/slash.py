@@ -72,8 +72,8 @@ def handle_slash_line(
         return REPROMPT
     if cmd == "abandon":
         return "/abandon"
-    if cmd == "save":
-        return "/save"
+    if cmd == "keep":
+        return "/keep"
     if cmd == "clear":
         return "/clear"
     if cmd == "model":
@@ -131,7 +131,7 @@ def _help(out: Callable[[str], None]) -> None:
     out("Available slash commands:")
     out("  /help              Show this message")
     out("  /skills            List loadable skills")
-    out("  /save              Save this conversation to your backlog")
+    out("  /keep              Keep this conversation as a draft in your active list")
     out("  /clear             Park this chat and start a fresh one")
     out("  /model <model>     Switch this step's model (or provider:model)")
     out("  /sandbox [on|off]  Show or set the filesystem sandbox for this session")
