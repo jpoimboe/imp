@@ -1670,7 +1670,7 @@ def _cmd_list(args: argparse.Namespace) -> int:
     try:
         control = _control_root()
     except worktree.PreconditionError:
-        print(_NO_QUESTS_MESSAGE)
+        _emit_human([_NO_QUESTS_MESSAGE])
         return 0
     now = datetime.now(UTC)
     color = should_use_color(sys.stdout)
@@ -1800,7 +1800,7 @@ _NO_QUESTS_MESSAGE = "No quests yet — start one with imp new"
 
 
 def _log_picker_empty() -> int:
-    print(_NO_QUESTS_MESSAGE)
+    _emit_human([_NO_QUESTS_MESSAGE])
     return 2
 
 
@@ -2154,7 +2154,7 @@ def _cmd_log(args: argparse.Namespace) -> int:
     else:
         quest_id = _resolve_default_id(control)
     if quest_id is None:
-        print(_NO_QUESTS_MESSAGE)
+        _emit_human([_NO_QUESTS_MESSAGE])
         return 0
     meta = _unstarted_backlog_meta(control, quest_id)
     if meta is not None:
@@ -2710,7 +2710,7 @@ def _cmd_remote_control_stop(args: argparse.Namespace) -> int:
 
 
 def _abandon_picker_empty() -> int:
-    print("Nothing to abandon.")
+    _emit_human(["Nothing to abandon."])
     return 2
 
 
@@ -2761,7 +2761,7 @@ _SHOW_PICKER_HEADER = (
 
 
 def _show_picker_empty() -> int:
-    print("No quests to show.")
+    _emit_human(["No quests to show."])
     return 2
 
 
@@ -3136,12 +3136,11 @@ def _cmd_status(args: argparse.Namespace, _control: Path | None = None) -> int:
     try:
         control = _control if _control is not None else _control_root()
     except worktree.PreconditionError:
-        print(_NO_QUESTS_MESSAGE)
+        _emit_human([_NO_QUESTS_MESSAGE])
         return 0
     lines = _overview_lines(control, show_all=args.all, now=datetime.now(UTC),
                             color=should_use_color(sys.stdout))
-    for line in lines:
-        print(line)
+    _emit_human(lines)
     return 0
 
 
@@ -3315,7 +3314,7 @@ def _cmd_search(args: argparse.Namespace, _control: Path | None = None) -> int:
                         statuses=frozenset(statuses), merged_after=args.merged_after)
     hits: list[SearchHit] = list(make_store(control).search(args.query, zones))
     if not hits:
-        print(f"No quests match {args.query!r}.")
+        _emit_human([f"No quests match {args.query!r}."])
         return 0
     now = datetime.now(UTC)
     color = should_use_color(sys.stdout)
@@ -3440,11 +3439,11 @@ def _cmd_events(args: argparse.Namespace) -> int:
     else:
         quest_id = _resolve_default_id(control)
     if quest_id is None:
-        print(_NO_QUESTS_MESSAGE)
+        _emit_human([_NO_QUESTS_MESSAGE])
         return 0
     meta = _unstarted_backlog_meta(control, quest_id)
     if meta is not None:
-        print(f"Quest {quest_id} hasn't started yet — no events to show.")
+        _emit_human([f"Quest {quest_id} hasn't started yet — no events to show."])
         return 0
     events = make_store(control).get_events(quest_id)
     if events is None:
@@ -3945,7 +3944,7 @@ def _command_names(parser: argparse.ArgumentParser) -> set[str]:
 def _help_command(rest: list[str], parser: argparse.ArgumentParser) -> int:
     if not rest:
         _apply_theme()
-        print(render_overview(should_use_color(sys.stdout)))
+        _emit_human(render_overview(should_use_color(sys.stdout)).splitlines())
         return 0
     cmd = rest[0]
     if cmd not in _command_names(parser):
@@ -3960,7 +3959,7 @@ def _help_command(rest: list[str], parser: argparse.ArgumentParser) -> int:
 def _dispatch_meta(args: list[str], parser: argparse.ArgumentParser) -> int | None:
     if not args:
         _apply_theme()
-        print(render_overview(should_use_color(sys.stdout)))
+        _emit_human(render_overview(should_use_color(sys.stdout)).splitlines())
         return 0
     if args[0] == "help":
         return _help_command(args[1:], parser)
