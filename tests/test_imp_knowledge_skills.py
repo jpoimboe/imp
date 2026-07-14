@@ -109,10 +109,10 @@ def test_introspection_search_entry_spans_all_zones_and_content() -> None:
     assert "search the archive (completed, abandoned, and left" not in body
 
 
-def test_introspection_documents_completed_search_and_merge_commit() -> None:
+def test_introspection_documents_merged_search_and_merge_commit() -> None:
     body = load_internal_skill(_skills_dir(), "imp-introspection")
-    # The completed-zone scope flag is documented alongside the other zone flags.
-    assert "--completed" in body
+    # The merged-subset flag is documented alongside the zone flags.
+    assert "--merged" in body
     # The imp show detail card surfaces the quest's merge commit.
     assert "merge_commit" in body
     # The stale archive-only framing must not be reintroduced by the edit.

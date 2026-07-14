@@ -91,7 +91,7 @@ Per toleration, ask: is the failing test **already tracked or fixed by another
 active, backlog, or completed quest**? If so, re-asking a human is redundant. A **two-stage funnel**:
 
 1. **Find candidates.** Run
-   {% if quest.orig_base_head %}`imp search --active --backlog --completed --merged-after {{ quest.orig_base_head }} -l "<test identity>"`{% else %}`imp search --active --backlog -l "<test identity>"`{% endif %}
+   {% if quest.orig_base_head %}`imp search --active --backlog --merged-after {{ quest.orig_base_head }} -l "<test identity>"`{% else %}`imp search --active --backlog -l "<test identity>"`{% endif %}
    on the test's identity (its node id / name / signature, read from the toleration line), and
    **exclude the quest being finalized** (`{{ quest.id }}`). This is a **candidate finder**
    only — a substring match — so it also returns quests that merely *mention* the test. When

@@ -48,10 +48,10 @@ names rather than guessing them.
   drafts), **backlog**, and **archive** quests for `<query>` as a case-insensitive
   substring of a quest's id, title, or conversation content (a required substring;
   bare `imp search` errors). Composable `--active` / `--backlog` / `--archived` flags
-  scope it to those zones; with none given, all three are searched. `--completed`
-  narrows the archive to just the merged (completed) subset, tagging hits `[completed]`;
-  add `--merged-after <commit>` to keep only completed quests whose merge landed after
-  `<commit>`. Default output is grep-style matched excerpts per quest; `-l` / `--list`
+  scope it to those zones; with none given, all three are searched. `--merged`
+  narrows the archive to just the merged subset; add `--merged-after <commit>` to keep
+  only merged quests whose merge landed after `<commit>` (implies `--merged`). Default
+  output is grep-style matched excerpts per quest; `-l` / `--list`
   prints one terse line per quest (`id  title  [zone]`).
 
 Summarize the rows in plain language (what is in flight, what is parked, what is

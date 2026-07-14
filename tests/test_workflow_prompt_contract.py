@@ -852,9 +852,9 @@ def test_finalize_cover_check_two_stage_funnel() -> None:
     assert "cover-check" in low
     # Stage 1: candidate finder — imp search -l over active + backlog, excluding self.
     assert "imp search --active --backlog -l" in text
-    # The completed dimension is present in the raw template, fork-point gated.
+    # The merged-after-fork dimension is present in the raw template, fork-point gated.
     assert (
-        "imp search --active --backlog --completed "
+        "imp search --active --backlog "
         "--merged-after {{ quest.orig_base_head }} -l" in text
     )
     assert "{% if quest.orig_base_head %}" in text
@@ -871,7 +871,7 @@ def test_finalize_cover_check_two_stage_funnel() -> None:
     assert "plan-writer" in low
 
 
-def test_finalize_cover_check_completed_dimension_is_fork_point_gated(tmp_path) -> None:
+def test_finalize_cover_check_merged_after_dimension_is_fork_point_gated(tmp_path) -> None:
     body = FINALIZE.read_text()
     log = JsonlEventLog(tmp_path / "events.jsonl")
 
@@ -881,8 +881,8 @@ def test_finalize_cover_check_completed_dimension_is_fork_point_gated(tmp_path) 
         cur_base_head="NEWTIP", orig_base_head="OLDTIP",
         project_facts={}, vars={"auto_merge": True}),
         workflow_dir=bundled_workflow_dir("imp")).lower()
-    # With a fork point, §1a searches the completed zone, timing-filtered to it.
-    assert "imp search --active --backlog --completed --merged-after oldtip -l" in with_fork
+    # With a fork point, §1a searches the merged-after-fork archive subset.
+    assert "imp search --active --backlog --merged-after oldtip -l" in with_fork
 
     without_fork = render_prompt(body, build_context(
         quest_title="t", event_log=log, quest_id="abc",
@@ -890,9 +890,9 @@ def test_finalize_cover_check_completed_dimension_is_fork_point_gated(tmp_path) 
         cur_base_head="X", orig_base_head="",
         project_facts={}, vars={"auto_merge": True}),
         workflow_dir=bundled_workflow_dir("imp")).lower()
-    # No fork point → fall back to the plain active+backlog search, no completed dimension.
+    # No fork point → fall back to the plain active+backlog search, no merged-after dimension.
     assert "imp search --active --backlog -l" in without_fork
-    assert "--completed --merged-after" not in without_fork
+    assert "imp search --active --backlog --merged-after" not in without_fork
 
 
 def test_finalize_cover_check_fails_safe_to_surface() -> None:
