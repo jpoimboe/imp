@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 
 import imp.cli.main as m
+from imp.cli.store import HomeDigest
 from imp.engine import archive
 
 
@@ -81,3 +82,42 @@ def test_resolve_default_id_uses_index_not_blob(monkeypatch, tmp_path: Path) -> 
 
     monkeypatch.setattr(LocalBlobStore, "get", _boom_get)
     assert m._resolve_default_id(tmp_path) == "newer"
+
+
+def _make_home(quest_id: str, last_iso: str) -> HomeDigest:
+    return HomeDigest(quest_id, b"{}", None, {}, last_iso, False, "", None)
+
+
+class _StubStore:
+    def __init__(self, homes, rows=()):
+        self._homes = homes
+        self._rows = rows
+
+    def scan_homes(self) -> list[HomeDigest]:
+        return list(self._homes)
+
+    def completed_rows(self):
+        return list(self._rows)
+
+
+def test_resolve_default_id_live_homes_picks_most_recent_last_iso(
+    monkeypatch, tmp_path: Path,
+) -> None:
+    homes = [
+        _make_home("older", "2026-06-01T00:00:00+00:00"),
+        _make_home("newer", "2026-06-09T00:00:00+00:00"),
+    ]
+    monkeypatch.setattr(m, "make_store", lambda _: _StubStore(homes))
+    assert m._resolve_default_id(tmp_path) == "newer"
+
+
+def test_resolve_default_id_live_homes_tiebreak_by_quest_id(
+    monkeypatch, tmp_path: Path,
+) -> None:
+    ts = "2026-06-09T00:00:00+00:00"
+    homes = [
+        _make_home("quest-a", ts),
+        _make_home("quest-z", ts),
+    ]
+    monkeypatch.setattr(m, "make_store", lambda _: _StubStore(homes))
+    assert m._resolve_default_id(tmp_path) == "quest-z"

@@ -1759,13 +1759,13 @@ def _resolve_row_intent(control: Path, r: _Row) -> str | None:
 
 
 def _resolve_default_id(control: Path) -> str | None:
-    """No-arg default: most-recent quest home by its events.jsonl mtime, else
+    """No-arg default: most-recent quest home by its last event ts, else
     the most-recent archived id (by the index's last_event_ts), else None."""
-    homes = _list_quest_homes(control)
+    store = make_store(control)
+    homes = store.scan_homes()
     if homes:
-        return max(homes, key=lambda s: (_quest_home(control, s)
-                                         / "events.jsonl").stat().st_mtime)
-    dated = [r for r in make_store(control).completed_rows() if r.last]
+        return max(homes, key=lambda h: (h.last_iso, h.quest_id)).quest_id
+    dated = [r for r in store.completed_rows() if r.last]
     if not dated:
         return None
     return max(dated, key=lambda r: (r.last, r.quest_id)).quest_id
