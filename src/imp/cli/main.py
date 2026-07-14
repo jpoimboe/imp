@@ -38,7 +38,7 @@ from imp.cli.inert_resume import (
     run_inert_resume,
 )
 from imp.cli.init import GitSetupDeclined, IntegrationBranchUnresolved, run_init
-from imp.cli.live_driver import LiveDriver, compose_identity_toolbar
+from imp.cli.live_driver import LiveDriver
 from imp.cli.live_status import LiveStatus
 from imp.cli.palette import ansi, should_use_color
 from imp.cli.prompt import Prompt
@@ -134,6 +134,7 @@ class ReplyInterjectRouter:
 
 
 OPENING_HINT = "type a message, /help for commands, or /model to switch models"
+INERT_HINT = "type your reply, /help for commands"
 _OPENING_SESSION_VERBS = ("/keep", "/shelve", "/clear", "/abandon")
 
 
@@ -274,9 +275,9 @@ def _emit_completed(quest: Quest, *, merged: bool,
     """The clean-finish line: one green-tailed spine, then the warnings block."""
     color = should_use_color(sys.stdout)
     tail = f"merged into {quest.base_branch}" if merged else "completed"
-    print()
     print(_status_spine(quest.id, quest.title, tail, "green", color=color))
     _print_warnings_block(warnings or [])
+    print()
 
 
 class _PauseBanner(enum.Enum):
@@ -422,9 +423,9 @@ def _emit_paused_summary(quest: Quest, leave_trigger: str | None = None) -> None
     """The trailing run-status line on a non-interactive pause."""
     color = should_use_color(sys.stdout)
     name, title, token, reason = _pause_facts(quest, leave_trigger)
-    print()
     for ln in _pause_lines(name, token, reason=reason, title=title, color=color):
         print(ln)
+    print()
 
 
 def _emit_merge_blocked(
@@ -461,9 +462,9 @@ def _emit_merge_blocked(
         msg = f"{msg}\n{note}"
     if detail and reason in ("refused", "conflict"):
         msg = f"{msg}\ngit said: {detail.strip()}"
-    print()
     print(_status_spine(cid, quest.title, "merge blocked", "red", color=color))
     print(ansi(msg, "wordmark", enabled=color))
+    print()
 
 
 def _handle_terminal_outcome(
@@ -504,7 +505,10 @@ def _handle_terminal_outcome(
                 mb_note = payload.get("note")
         _emit_merge_blocked(quest, mb_reason, mb_detail, mb_note)
         return 1  # friendly block already carries the resume command; skip redundant summary
-    _emit_paused_summary(quest, _leave_trigger(coord))
+    trigger = _leave_trigger(coord)
+    if trigger == "ctrl-d":
+        print(pal.caret(enabled=should_use_color(sys.stdout)))
+    _emit_paused_summary(quest, trigger)
     return 1
 
 
@@ -520,29 +524,29 @@ def _print_leave_disposition(
     color = should_use_color(sys.stdout)
     intent = leave_state.get("intent")
     if intent == "abandon":
-        print()
         print(_status_spine(quest.id, quest.title, "abandoned", "wordmark", color=color))
-        return None
+        print()
+        return 0
     disposition = leave_state.get("disposition")
     if disposition == "save":
-        print()
         print(_status_spine(quest.id, quest.title, "kept as draft", "wordmark",
                             color=color))
         print(_resume_line(quest.id))
+        print()
         return 0
     if disposition == "archive":
-        print()
         print(_status_spine(quest.id, quest.title, "shelved", "wordmark",
                             color=color))
         print(_resume_line(quest.id, " — or find it later with imp search"))
+        print()
         return 0
     if disposition == "discard":
         return 0
     if leave_state.get("send_failed"):
-        print()
         print(_status_spine(quest.id, quest.title, "left running", "wordmark",
                             color=color))
         print(_resume_line(quest.id))
+        print()
         return 0
     return None
 
@@ -683,12 +687,12 @@ def _print_opening(quest: Quest, marker: str, *, interactive: bool, color: bool)
 
 async def _read_intent_line(
     prompt: Any, quest: Any, *, color: bool, width: int,
-    model_sink: dict[str, str] | None = None,
+    model_sink: dict[str, str] | None = None, hint: str = OPENING_HINT,
 ) -> str:
-    """Read one opening-intent line, capturing an opening `/model` selection into `model_sink`."""
+    """Read one pre-session intent line, capturing a `/model` selection into `model_sink`."""
     while True:
         line = await ask_line_with_slash(
-            prompt, None, quest, color=color, width=width, hint=OPENING_HINT)
+            prompt, None, quest, color=color, width=width, hint=hint)
         if isinstance(line, SkillRequest):
             # Opening prompt is pre-session: no daemon gate exists yet, so the
             # skill body is loaded here and becomes the opening message.
@@ -700,8 +704,7 @@ async def _read_intent_line(
                 model_sink["model"] = line.strip()[len("/model "):].strip()
             continue
         if line in _OPENING_SESSION_VERBS:
-            print(f"{line} isn't available at the opening prompt — "
-                  f"describe your quest, or /help for commands.")
+            print(f"{line} isn't available here — /help for commands.")
             continue
         return line
 
@@ -753,7 +756,8 @@ async def _run_cleared_session(
         except (EOFError, KeyboardInterrupt):
             if term_title is not None:
                 term_title.reset()
-            print("imp: cancelled", file=sys.stderr)
+            print(pal.caret(enabled=color))
+            print()
             return 130
         _session_started = True
         cleared_model = cleared_model_sink.get("model")
@@ -1025,7 +1029,8 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
             if term_title is not None:
                 term_title.reset()
             discard_conversation(quest)   # drop the just-minted draft on cancel
-            print("imp: cancelled", file=sys.stderr)
+            print(pal.caret(enabled=color))
+            print()
             return 130
         header_printed = True
         # An empty reply falls back to the unseeded path (the opening step
@@ -1201,18 +1206,21 @@ def _cmd_resume(args: argparse.Namespace) -> int:
 
 
 async def _inert_ask_line(quest: Quest) -> str | None:
-    """Read one prompt-toolkit line at inert resume; EOF / Ctrl-C maps to None."""
+    """Read one line at inert resume through the shared slash-aware reader
+    (session-verb rejection, /help, /skills, empty-submit guard); EOF / Ctrl-C
+    retains the `> ` caret and maps to None — the quest stays parked."""
     color = should_use_color(sys.stdout)
     width = _term_width()
     prompt = Prompt(
         skills_dir=quest.workflow_dir / "skills",
         editing_mode=_editing_mode(quest.control_root),
         color=color, quest=quest)
-    toolbar = compose_identity_toolbar(
-        quest_id=quest.id, title=quest.title, color=color, width=width)
     try:
-        return await prompt.ask_async(width=width, bottom_toolbar=toolbar)
+        return await _read_intent_line(
+            prompt, quest, color=color, width=width, hint=INERT_HINT)
     except (EOFError, KeyboardInterrupt):
+        print(pal.caret(enabled=color))
+        print()
         return None
 
 

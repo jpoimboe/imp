@@ -114,11 +114,12 @@ def test_emit_paused_summary_renders_terminated_reason_red_no_at_locator(capsys)
     ])
     main._emit_paused_summary(quest)
     out = capsys.readouterr().out
-    assert out.startswith("\n")                        # one leading blank
-    assert not out.startswith("\n\n")                  # exactly one
+    assert not out.startswith("\n")                    # no leading blank
     assert "terminated: API Error 400 — tool use concurrency" in out
     assert " at reviewing plan" not in out             # locator dropped
     assert "resume: imp resume 2026-06-12-run-x" in out
+    assert out.endswith("\n\n")
+    assert not out.endswith("\n\n\n")
 
 
 def test_emit_paused_summary_interrupt_renders_bare_reason(capsys) -> None:
@@ -128,8 +129,10 @@ def test_emit_paused_summary_interrupt_renders_bare_reason(capsys) -> None:
     ])
     main._emit_paused_summary(quest)
     out = capsys.readouterr().out
-    assert out.startswith("\n")                        # one leading blank
+    assert not out.startswith("\n")                    # no leading blank
     assert "2026-06-12-run-x · interrupt" in out
+    assert out.endswith("\n\n")
+    assert not out.endswith("\n\n\n")
 
 
 def test_status_spine_named_renders_plain_id_title_tail_structure() -> None:
@@ -159,13 +162,14 @@ def test_emit_completed_merged_prints_single_green_tail_no_glyph(
     monkeypatch.setattr(main, "should_use_color", lambda stream: True)
     main._emit_completed(_Change([]), merged=True)
     out = capsys.readouterr().out
-    assert out.startswith("\n")                 # exactly one leading blank
-    assert not out.startswith("\n\n")
+    assert not out.startswith("\n")              # no leading blank
     assert "2026-06-12-run-x" in out
     assert pal.ansi("merged into master", "green") in out
     assert "✓" not in out
     assert "quest 2026-06-12-run-x:" not in out  # the old second line is gone
     assert "Merged 2026-06-12-run-x into" not in out
+    assert out.endswith("\n\n")
+    assert not out.endswith("\n\n\n")
 
 
 def test_emit_completed_non_merge_tail_is_completed_green(monkeypatch, capsys) -> None:
@@ -265,3 +269,41 @@ def test_handle_terminal_outcome_reads_warning_messages_from_archive(monkeypatch
     rc = main._handle_terminal_outcome(quest, RunResult.COMPLETED, coord=None)
     assert rc == 0
     assert captured["warnings"] == ["a", "b"]
+
+
+class _CtrlDCoord:
+    interrupted = True
+    leave_reason = "ctrl-d"
+
+    class _Evt:
+        def is_set(self) -> bool:
+            return True
+
+    escalation_event = _Evt()
+
+
+def test_ctrl_d_pause_retains_caret_above_banner(monkeypatch, capsys) -> None:
+    # An in-session Ctrl-D leave prints the retained `> ` caret immediately
+    # above the (here mocked) pause banner.
+    monkeypatch.setattr(main, "should_use_color", lambda stream: False)
+    quest = _Change([])
+    with patch.object(main, "State") as State, \
+         patch.object(main, "_emit_paused_summary") as ps:
+        State.load.return_value = _State("paused", step=None)
+        rc = main._handle_terminal_outcome(quest, RunResult.PAUSED, _CtrlDCoord())
+    assert rc == 1
+    ps.assert_called_once()
+    assert capsys.readouterr().out == "> \n"   # caret line, then the mocked banner
+
+
+def test_non_ctrl_d_pause_prints_no_caret(monkeypatch, capsys) -> None:
+    # A pause that was not a Ctrl-D prompt leave retains no caret.
+    monkeypatch.setattr(main, "should_use_color", lambda stream: False)
+    quest = _Change([])
+    with patch.object(main, "State") as State, \
+         patch.object(main, "_emit_paused_summary") as ps:
+        State.load.return_value = _State("paused", step=None)
+        rc = main._handle_terminal_outcome(quest, RunResult.PAUSED, coord=None)
+    assert rc == 1
+    ps.assert_called_once()
+    assert capsys.readouterr().out == ""

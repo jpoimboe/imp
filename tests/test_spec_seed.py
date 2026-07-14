@@ -268,7 +268,7 @@ def test_opening_prompt_reply_wires_to_seed_opening(
     assert captured["change"].seed_opening == "add a feature"  # type: ignore[union-attr]
 
 
-def test_opening_prompt_empty_reply_gives_none_seed_opening(
+def test_opening_prompt_empty_reply_reprompts(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     _seed_control(tmp_path)
     monkeypatch.chdir(tmp_path)
@@ -289,9 +289,11 @@ def test_opening_prompt_empty_reply_gives_none_seed_opening(
 
     monkeypatch.setattr(cli_main, "run_session_client", _fake_client)
 
+    replies = iter(["   ", "add a feature"])
+
     async def _fake_ask(self: object, *, width: object = None,
                         hint: object = None, **kwargs: object) -> str:
-        return "   "
+        return next(replies)
 
     monkeypatch.setattr(prompt_mod.Prompt, "ask_async", _fake_ask)
 
@@ -306,7 +308,7 @@ def test_opening_prompt_empty_reply_gives_none_seed_opening(
         sys.stdout.isatty = orig_out  # type: ignore[method-assign]
 
     assert rc == 0
-    assert captured["change"].seed_opening is None  # type: ignore[union-attr]
+    assert captured["change"].seed_opening == "add a feature"  # type: ignore[union-attr]
 
 
 def test_new_creates_unmaterialized_draft(

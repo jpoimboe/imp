@@ -35,17 +35,21 @@ async def test_read_opening_message_prints_run_header_before_reading(
 
 
 @pytest.mark.anyio
-async def test_read_opening_message_returns_none_for_empty_reply() -> None:
+async def test_read_opening_message_reprompts_on_empty_reply() -> None:
+    # A whitespace-only submit re-prompts silently; only the real line returns.
     class _FakePrompt:
+        def __init__(self) -> None:
+            self._lines = iter(["   ", "real intent"])
+
         async def ask_async(self, **kwargs: object) -> str:
-            return "   "
+            return next(self._lines)
 
     quest = SimpleNamespace(id="aa11bb", title="")
     reply = await main._read_opening_message(
         quest, leave_mode="new", banner_shown=False, color=False,
         width=80, editing_mode="emacs",
         _prompt_factory=lambda: _FakePrompt())
-    assert reply is None
+    assert reply == "real intent"
 
 
 def test_print_opening_leads_with_header_then_splash(monkeypatch, capsys) -> None:

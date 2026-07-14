@@ -310,6 +310,8 @@ async def ask_line_with_slash(
                             # run loop's existing EOFError handler (cli/main.py) pauses.
                             raise EOFError
                         if not is_slash_command(line):
+                            if not line.strip():
+                                continue
                             return line
                         current_unsandboxed = bool(
                             getattr(driver, "unsandboxed", False))

@@ -58,8 +58,7 @@ def stub_new(monkeypatch, tmp_path):
 @pytest.mark.parametrize(
     "opening_arg,reply,expected",
     [("build a parser", None, "build a parser"),   # positional: argv intent, no prompt
-     (None, "wire up json", "wire up json"),        # interactive: prompt reply
-     (None, "", None)],                             # empty interactive reply -> unseeded (None)
+     (None, "wire up json", "wire up json")],       # interactive: prompt reply
 )
 async def test_new_persists_finalized_opening_intent(
     stub_new, monkeypatch, tmp_path, opening_arg, reply, expected,
@@ -168,6 +167,36 @@ async def test_cancel_at_opening_prompt_discards_the_minted_draft(
 
     assert rc == 130
     assert discarded["id"] == "z9y8x7"   # the just-minted draft was torn down
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("exc", [EOFError, KeyboardInterrupt])
+async def test_cancel_at_opening_prompt_retains_caret_and_says_nothing(
+    stub_new, monkeypatch, capsys, exc,
+) -> None:
+    # AC5: Ctrl-D at the opening prompt leaves the gold `> ` caret and one
+    # trailing blank on screen, prints no message after it (no `imp: cancelled`),
+    # and exits 130. stub_new forces should_use_color -> False, so the caret is
+    # the plain "> " (see tests/test_palette.py: pal.caret(enabled=False) == "> ").
+    m = stub_new
+    monkeypatch.setattr(m, "_print_run_header", lambda *a, **k: None)
+    monkeypatch.setattr(m, "discard_conversation", lambda quest: None)
+
+    class _CancelPrompt:
+        def __init__(self, **kwargs: object) -> None: ...
+
+        async def ask_async(self, **kwargs: object) -> str:
+            raise exc()
+
+    monkeypatch.setattr(m, "Prompt", _CancelPrompt)
+
+    rc = await m._async_cmd_new(_new_args(), leave_mode="new")
+
+    assert rc == 130
+    out = capsys.readouterr().out
+    assert out.endswith("> \n\n")          # retained caret + exactly one trailing blank
+    assert not out.endswith("> \n\n\n")    # not two trailing blanks
+    assert "cancelled" not in out          # no `imp: cancelled` message anywhere in the output
 
 
 @pytest.mark.anyio

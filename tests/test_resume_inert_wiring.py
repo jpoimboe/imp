@@ -214,3 +214,74 @@ async def test_resume_inert_receives_autonomous(
 
     assert rc == 0
     assert seen["autonomous"] is True
+
+
+class _QueueInertPrompt:
+    """Returns queued lines in order from ask_async (accepts the reader's kwargs)."""
+
+    def __init__(self, lines: list[str], **kwargs: object) -> None:
+        self._lines = list(lines)
+
+    async def ask_async(self, *args: object, **kwargs: object) -> str:
+        return self._lines.pop(0)
+
+
+@pytest.mark.anyio
+async def test_inert_ask_line_rejects_session_verb_and_reprompts(
+        monkeypatch, tmp_path: Path, capsys) -> None:
+    # A pre-launch session verb (/keep) is rejected with a nudge and re-prompt,
+    # exactly as the opening prompt does — only the real line is returned.
+    ch = _seed(tmp_path)
+    (ch.workflow_dir / "skills" / "user").mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(m, "should_use_color", lambda _s: False)
+    monkeypatch.setattr(m, "_term_width", lambda: 80)
+    monkeypatch.setattr(
+        m, "Prompt",
+        lambda **kw: _QueueInertPrompt(["/keep", "real answer"], **kw))
+
+    line = await m._inert_ask_line(ch)
+
+    assert line == "real answer"
+    assert "/keep" in capsys.readouterr().out   # the nudge explained the rejection
+
+
+@pytest.mark.anyio
+async def test_inert_ask_line_ctrl_d_retains_caret(
+        monkeypatch, tmp_path: Path, capsys) -> None:
+    # Ctrl-D retains the gold `> ` caret + one trailing blank, prints nothing
+    # else, and maps to None (the quest stays parked).
+    ch = _seed(tmp_path)
+    monkeypatch.setattr(m, "should_use_color", lambda _s: False)
+    monkeypatch.setattr(m, "_term_width", lambda: 80)
+    monkeypatch.setattr(
+        m, "Prompt", lambda **kw: _RaisingPrompt(EOFError, **kw))
+
+    line = await m._inert_ask_line(ch)
+
+    assert line is None
+    assert capsys.readouterr().out == "> \n\n"   # caret line, then one blank
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("exc", [EOFError, KeyboardInterrupt])
+async def test_resume_inert_ctrl_d_retains_caret_parks_and_returns_zero(
+    exc: type[BaseException], monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
+    # AC7: cancel at the inert prompt parks the quest, returns 0, caret kept.
+    ch = _seed(tmp_path)
+    before = ch.events_path.read_bytes() if ch.events_path.exists() else b""
+    monkeypatch.setattr(m, "should_use_color", lambda _s: False)
+    monkeypatch.setattr(m, "_term_width", lambda: 80)
+    monkeypatch.setattr(m, "Prompt", lambda **kw: _RaisingPrompt(exc, **kw))
+
+    rc = await m._resume_inert(ch, "Which DB should I use?")
+
+    assert rc == 0
+    after = ch.events_path.read_bytes() if ch.events_path.exists() else b""
+    assert after == before                       # nothing launched -> quest parked
+    out = capsys.readouterr().out
+    assert "c · C · resuming" in out             # resuming header printed
+    assert "Which DB should I use?" in out       # pending question replayed
+    assert out.endswith("> \n\n")                # retained caret + one trailing blank
+    assert "cancelled" not in out                # no `imp: cancelled` message
