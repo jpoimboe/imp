@@ -17,7 +17,7 @@ def test_change_home_helpers_renamed_to_quest() -> None:
     import imp.cli.main as m
     for old in ("_change_home", "_list_change_homes", "_scan_change_homes"):
         assert not hasattr(m, old), f"{old} must be renamed to a _quest_* name"
-    for new in ("_quest_home", "_list_quest_homes", "_scan_quest_homes"):
+    for new in ("_quest_home", "_list_quest_homes"):
         assert callable(getattr(m, new, None)), f"{new} must exist and be callable"
 
 

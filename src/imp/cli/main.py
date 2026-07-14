@@ -50,7 +50,7 @@ from imp.cli.session_run import (
 )
 from imp.cli.signals import install_process_group, prompt_sigint_guard
 from imp.cli.slash import ask_line_with_slash
-from imp.cli.store import make_store
+from imp.cli.store import HomeDigest, make_store
 from imp.cli.terminal_title import TerminalTitle
 from imp.diagnostics import install_stack_dumper
 from imp.engine import backlog, worktree
@@ -2347,21 +2347,6 @@ def resolve_display_status(
 _Row = tuple[str, str, str, str, str, str, str | None, str | None]
 
 
-class _HomeScan(NamedTuple):
-    """One live quest home parsed exactly once for the overview's row builders.
-
-    quest_json/state_json are the raw bytes (state_json is None when a home has
-    no state.json yet); meta is the parsed quest.json (homes whose quest.json
-    is missing or malformed are dropped from the scan, so meta is always valid);
-    has_user_message records whether events.jsonl holds any user_message event,
-    the conversed signal the shared backlog predicate consumes."""
-    quest_id: str
-    quest_json: bytes
-    state_json: bytes | None
-    meta: dict[str, Any]
-    last_iso: str
-    has_user_message: bool
-
 
 def _events_have_user_message(events_path: Path) -> bool:
     """True iff events.jsonl holds at least one user_message event. Read line by
@@ -2382,27 +2367,6 @@ def _events_have_user_message(events_path: Path) -> bool:
         return False
     return False
 
-
-def _scan_quest_homes(control: Path) -> list[_HomeScan]:
-    """Read and parse every live quest home once, so the overview's three row
-    builders share a single pass instead of re-reading each home three times."""
-    scanned: list[_HomeScan] = []
-    for quest_id in _list_quest_homes(control):
-        cdir = _quest_home(control, quest_id)
-        try:
-            quest_json = (cdir / "quest.json").read_bytes()
-            meta = json.loads(quest_json)
-        except (FileNotFoundError, json.JSONDecodeError):
-            continue
-        try:
-            state_json: bytes | None = (cdir / "state" / "state.json").read_bytes()
-        except FileNotFoundError:
-            state_json = None
-        last_iso = _last_event_iso(cdir / "events.jsonl") or ""
-        has_um = _events_have_user_message(cdir / "events.jsonl")
-        scanned.append(
-            _HomeScan(quest_id, quest_json, state_json, meta, last_iso, has_um))
-    return scanned
 
 
 def _status_row(quest_id: str, state_json: bytes, quest_json: bytes,
@@ -2432,7 +2396,7 @@ def _row_for_id(control: Path, quest_id: str) -> _Row | None:
     if (cdir / "quest.json").exists():
         # A quest home mid-creation has quest.json written but state.json not
         # yet (Quest.create is not atomic across the two files). The daemon's
-        # scan loop can hit that window, so tolerate it like _scan_quest_homes
+        # scan loop can hit that window, so tolerate it like scan_homes
         # rather than crashing the whole listing.
         try:
             state_json = (cdir / "state" / "state.json").read_bytes()
@@ -2454,8 +2418,8 @@ def _row_for_id(control: Path, quest_id: str) -> _Row | None:
     return (row[0], status, *row[2:])
 
 
-def _status_rows(control: Path, scanned: list[_HomeScan] | None = None) -> list[_Row]:
-    homes = _scan_quest_homes(control) if scanned is None else scanned
+def _status_rows(control: Path, scanned: list[HomeDigest] | None = None) -> list[_Row]:
+    homes = make_store(control).scan_homes() if scanned is None else scanned
     rows: list[_Row] = []
     for h in homes:
         if h.state_json is None:
@@ -2917,8 +2881,8 @@ def _cmd_edit(args: argparse.Namespace) -> int:
     return 0
 
 
-def _backlog_rows(control: Path, scanned: list[_HomeScan] | None = None) -> list[_Row]:
-    homes = _scan_quest_homes(control) if scanned is None else scanned
+def _backlog_rows(control: Path, scanned: list[HomeDigest] | None = None) -> list[_Row]:
+    homes = make_store(control).scan_homes() if scanned is None else scanned
     rows: list[_Row] = []
     for h in homes:
         meta = h.meta
@@ -3004,14 +2968,11 @@ def _history_rows(control: Path, *, show_all: bool,
     return _sort_rows_newest_first(rows)
 
 
-def _overview_body(control: Path, inflight: list[_Row], backlog_rows: list[_Row],
-                   history: list[_Row], *, history_label: str, now: datetime,
+def _overview_body(inflight: list[_Row], backlog_rows: list[_Row],
+                   history: list[_Row], *, intents: dict[str, str | None],
+                   history_label: str, now: datetime,
                    color: bool) -> list[str]:
     """Render the sectioned overview for already-gathered rows."""
-    intents: dict[str, str | None] = {
-        r[0]: _resolve_row_intent(control, r)
-        for r in (*inflight, *backlog_rows, *history)
-        if not r[4].strip()}
 
     def _name_text(r: _Row) -> str:
         raw = r[4].strip()
@@ -3062,7 +3023,7 @@ def _overview_body(control: Path, inflight: list[_Row], backlog_rows: list[_Row]
 def _overview_lines(control: Path, *, show_all: bool, now: datetime,
                     color: bool) -> list[str]:
     """Overview lines across all zones, sharing one content-sized STATUS/NAME width."""
-    scanned = _scan_quest_homes(control)
+    scanned = make_store(control).scan_homes()
     status_rows = _status_rows(control, scanned)
     inflight = _sort_rows_newest_first(status_rows)
     backlog_rows = _sort_rows_newest_first(_backlog_rows(control, scanned))
@@ -3071,7 +3032,10 @@ def _overview_lines(control: Path, *, show_all: bool, now: datetime,
     if not inflight and not backlog_rows and not history:
         return [_NO_QUESTS_MESSAGE]
     label = "history:" if show_all else "merged:"
-    return _overview_body(control, inflight, backlog_rows, history,
+    inflight_ids = {r[0] for r in inflight}
+    intents = {d.quest_id: d.intent_title
+               for d in scanned if d.quest_id in inflight_ids}
+    return _overview_body(inflight, backlog_rows, history, intents=intents,
                           history_label=label, now=now, color=color)
 
 
@@ -3098,7 +3062,7 @@ def _filtered_overview_lines(control: Path, *, dispositions: set[str],
                               cutoff: datetime | None, now: datetime,
                               color: bool) -> list[str]:
     """Sectioned overview over the full uncapped set, filtered by disposition and cutoff."""
-    scanned = _scan_quest_homes(control)
+    scanned = make_store(control).scan_homes()
     status_rows = _status_rows(control, scanned)
     live_ids = {r[0] for r in status_rows}
     inflight = (_sort_rows_newest_first(status_rows)
@@ -3116,7 +3080,10 @@ def _filtered_overview_lines(control: Path, *, dispositions: set[str],
 
     if not inflight and not backlog_rows and not history:
         return [_NO_FILTER_MATCH_MESSAGE]
-    return _overview_body(control, inflight, backlog_rows, history,
+    inflight_ids = {r[0] for r in inflight}
+    intents = {d.quest_id: d.intent_title
+               for d in scanned if d.quest_id in inflight_ids}
+    return _overview_body(inflight, backlog_rows, history, intents=intents,
                           history_label="history:", now=now, color=color)
 
 

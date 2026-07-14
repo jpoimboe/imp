@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any, NamedTuple, Protocol
 
 
 @dataclass(frozen=True)
@@ -23,11 +23,23 @@ class Readiness:
     blocked_on: tuple[str, ...]
 
 
+class HomeDigest(NamedTuple):
+    quest_id: str
+    quest_json: bytes
+    state_json: bytes | None
+    meta: dict[str, Any]
+    last_iso: str
+    has_user_message: bool
+    prose: str
+    intent_title: str | None
+
+
 class Store(Protocol):
     def get_events(self, quest_id: str) -> list[dict[str, Any]] | None: ...
     def get_artifact(self, quest_id: str, kind: str) -> bytes | None: ...
     def completed_rows(self) -> list[CompletedRow]: ...
     def backlog_readiness(self, depends_on: list[str]) -> Readiness: ...
+    def scan_homes(self) -> list[HomeDigest]: ...
 
 
 class LocalStore:
@@ -51,6 +63,43 @@ class LocalStore:
         from imp.engine import backlog
         ready, unmerged = backlog.readiness(self.control_root, depends_on)
         return Readiness(ready, tuple(unmerged))
+
+    def scan_homes(self) -> list[HomeDigest]:
+        import json
+
+        from imp.cli.main import (
+            _events_have_user_message,
+            _last_event_iso,
+            _list_quest_homes,
+            _parse_jsonl,
+            _quest_home,
+            _resolve_intent,
+        )
+        from imp.cli.render_helpers import conversation_prose
+
+        out: list[HomeDigest] = []
+        for quest_id in _list_quest_homes(self.control_root):
+            cdir = _quest_home(self.control_root, quest_id)
+            try:
+                quest_json = (cdir / "quest.json").read_bytes()
+                meta = json.loads(quest_json)
+            except (FileNotFoundError, json.JSONDecodeError):
+                continue
+            try:
+                state_json: bytes | None = (cdir / "state" / "state.json").read_bytes()
+            except FileNotFoundError:
+                state_json = None
+            events_path = cdir / "events.jsonl"
+            last_iso = _last_event_iso(events_path) or ""
+            has_um = _events_have_user_message(events_path)
+            try:
+                parsed = _parse_jsonl(events_path.read_bytes())
+            except OSError:
+                parsed = []
+            out.append(HomeDigest(
+                quest_id, quest_json, state_json, meta, last_iso, has_um,
+                conversation_prose(parsed), _resolve_intent(parsed)))
+        return out
 
 
 def make_store(control_root: Path) -> Store:

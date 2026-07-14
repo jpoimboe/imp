@@ -82,6 +82,26 @@ def test_completed_rows_empty_archive(tmp_path: Path) -> None:
     assert make_store(tmp_path).completed_rows() == []
 
 
+def test_scan_homes_digest_fields(tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+    ch = Quest.create(tmp_path, title="Scan Me", quest_id="scanq", base_branch="main")
+    _append_event(ch, {
+        "id": "e1", "timestamp": "2026-06-01T00:00:00+00:00",
+        "type": "opening_intent", "payload": {"text": "wire the widget"}})
+    _append_event(ch, {
+        "id": "e2", "timestamp": "2026-06-01T00:00:05+00:00",
+        "type": "user_message",
+        "payload": {"human": True,
+                    "content": [{"type": "text", "text": "please wire the widget"}]}})
+
+    digs = {d.quest_id: d for d in make_store(tmp_path).scan_homes()}
+    d = digs["scanq"]
+    assert d.meta["title"] == "Scan Me"
+    assert d.has_user_message is True
+    assert "please wire the widget" in d.prose
+    assert d.intent_title == "wire the widget"
+
+
 def test_backlog_readiness_blocked_then_ready(tmp_path: Path) -> None:
     _seed_control(tmp_path)
     Quest.create(tmp_path, title="Dep", quest_id="depq", base_branch="main")
