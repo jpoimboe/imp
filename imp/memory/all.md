@@ -8,3 +8,8 @@ specs.
 When working on imp's TUI, output, or user-facing copy, read
 docs/imp-conventions.md. When editing imp's engine/renderer or workflow
 prompts, read docs/imp-invariants.md.
+
+When changing a tool/CLI interface, update the affected agent/skill/doc files
+in the same change. When editing agent/skill prose, be maximally succinct —
+every token counts. Before changing user-facing copy or agent prompt text, get
+the user's approval on exact wording, showing before/after.
