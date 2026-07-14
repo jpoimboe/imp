@@ -274,9 +274,9 @@ def _emit_completed(quest: Quest, *, merged: bool,
     """The clean-finish line: one green-tailed spine, then the warnings block."""
     color = should_use_color(sys.stdout)
     tail = f"merged into {quest.base_branch}" if merged else "completed"
-    print()
     print(_status_spine(quest.id, quest.title, tail, "green", color=color))
     _print_warnings_block(warnings or [])
+    print()
 
 
 class _PauseBanner(enum.Enum):
@@ -422,9 +422,9 @@ def _emit_paused_summary(quest: Quest, leave_trigger: str | None = None) -> None
     """The trailing run-status line on a non-interactive pause."""
     color = should_use_color(sys.stdout)
     name, title, token, reason = _pause_facts(quest, leave_trigger)
-    print()
     for ln in _pause_lines(name, token, reason=reason, title=title, color=color):
         print(ln)
+    print()
 
 
 def _emit_merge_blocked(
@@ -461,9 +461,9 @@ def _emit_merge_blocked(
         msg = f"{msg}\n{note}"
     if detail and reason in ("refused", "conflict"):
         msg = f"{msg}\ngit said: {detail.strip()}"
-    print()
     print(_status_spine(cid, quest.title, "merge blocked", "red", color=color))
     print(ansi(msg, "wordmark", enabled=color))
+    print()
 
 
 def _handle_terminal_outcome(
@@ -520,29 +520,29 @@ def _print_leave_disposition(
     color = should_use_color(sys.stdout)
     intent = leave_state.get("intent")
     if intent == "abandon":
-        print()
         print(_status_spine(quest.id, quest.title, "abandoned", "wordmark", color=color))
-        return None
+        print()
+        return 0
     disposition = leave_state.get("disposition")
     if disposition == "save":
-        print()
         print(_status_spine(quest.id, quest.title, "kept as draft", "wordmark",
                             color=color))
         print(_resume_line(quest.id))
+        print()
         return 0
     if disposition == "archive":
-        print()
         print(_status_spine(quest.id, quest.title, "shelved", "wordmark",
                             color=color))
         print(_resume_line(quest.id, " — or find it later with imp search"))
+        print()
         return 0
     if disposition == "discard":
         return 0
     if leave_state.get("send_failed"):
-        print()
         print(_status_spine(quest.id, quest.title, "left running", "wordmark",
                             color=color))
         print(_resume_line(quest.id))
+        print()
         return 0
     return None
 

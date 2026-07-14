@@ -66,9 +66,9 @@ def test_disposition_abandon_prints_spine_no_torn_down(
     ch = Quest.create_draft(
         tmp_path, title="Dark mode", quest_id="ab1", base_branch="main")
     rc = m._print_leave_disposition(ch, {"intent": "abandon"})
-    assert rc is None
+    assert rc == 0
     out = capsys.readouterr().out
-    assert out.strip() == "ab1 · Dark mode · abandoned"
+    assert out == "ab1 · Dark mode · abandoned\n\n"
     assert "torn down" not in out
     assert "imp resume" not in out
     assert "imp search" not in out
@@ -81,9 +81,9 @@ def test_disposition_abandon_materialized_also_has_no_torn_down_line(
     ch = Quest.create_draft(
         tmp_path, title="Big feature", quest_id="ab2", base_branch="main")
     rc = m._print_leave_disposition(ch, {"intent": "abandon", "materialized": "1"})
-    assert rc is None
+    assert rc == 0
     out = capsys.readouterr().out
-    assert out.strip() == "ab2 · Big feature · abandoned"
+    assert out == "ab2 · Big feature · abandoned\n\n"
     assert "torn down" not in out
     assert "imp search" not in out
 
@@ -101,6 +101,9 @@ def test_print_leave_disposition_archive_is_lock_free(
     out = capsys.readouterr().out
     assert "· shelved" in out
     assert "resume: imp resume fast1 — or find it later with imp search" in out
+    assert not out.startswith("\n")
+    assert out.endswith("\n\n")
+    assert not out.endswith("\n\n\n")
 
 
 def test_print_leave_disposition_save_prints_kept_as_draft_spine(
@@ -114,6 +117,9 @@ def test_print_leave_disposition_save_prints_kept_as_draft_spine(
     assert "· kept as draft" in out
     assert "saved to backlog" not in out
     assert "resume: imp resume bk1" in out
+    assert not out.startswith("\n")
+    assert out.endswith("\n\n")
+    assert not out.endswith("\n\n\n")
 
 
 def test_print_leave_disposition_discard_is_silent(
@@ -144,6 +150,9 @@ def test_print_leave_disposition_send_failed_prints_running_spine(
     out = capsys.readouterr().out
     assert "· left running" in out
     assert "resume: imp resume sf1" in out
+    assert not out.startswith("\n")
+    assert out.endswith("\n\n")
+    assert not out.endswith("\n\n\n")
 
 
 def test_save_as_draft_arms_resume_pending(tmp_path: Path) -> None:

@@ -114,11 +114,12 @@ def test_emit_paused_summary_renders_terminated_reason_red_no_at_locator(capsys)
     ])
     main._emit_paused_summary(quest)
     out = capsys.readouterr().out
-    assert out.startswith("\n")                        # one leading blank
-    assert not out.startswith("\n\n")                  # exactly one
+    assert not out.startswith("\n")                    # no leading blank
     assert "terminated: API Error 400 — tool use concurrency" in out
     assert " at reviewing plan" not in out             # locator dropped
     assert "resume: imp resume 2026-06-12-run-x" in out
+    assert out.endswith("\n\n")
+    assert not out.endswith("\n\n\n")
 
 
 def test_emit_paused_summary_interrupt_renders_bare_reason(capsys) -> None:
@@ -128,8 +129,10 @@ def test_emit_paused_summary_interrupt_renders_bare_reason(capsys) -> None:
     ])
     main._emit_paused_summary(quest)
     out = capsys.readouterr().out
-    assert out.startswith("\n")                        # one leading blank
+    assert not out.startswith("\n")                    # no leading blank
     assert "2026-06-12-run-x · interrupt" in out
+    assert out.endswith("\n\n")
+    assert not out.endswith("\n\n\n")
 
 
 def test_status_spine_named_renders_plain_id_title_tail_structure() -> None:
@@ -159,13 +162,14 @@ def test_emit_completed_merged_prints_single_green_tail_no_glyph(
     monkeypatch.setattr(main, "should_use_color", lambda stream: True)
     main._emit_completed(_Change([]), merged=True)
     out = capsys.readouterr().out
-    assert out.startswith("\n")                 # exactly one leading blank
-    assert not out.startswith("\n\n")
+    assert not out.startswith("\n")              # no leading blank
     assert "2026-06-12-run-x" in out
     assert pal.ansi("merged into master", "green") in out
     assert "✓" not in out
     assert "quest 2026-06-12-run-x:" not in out  # the old second line is gone
     assert "Merged 2026-06-12-run-x into" not in out
+    assert out.endswith("\n\n")
+    assert not out.endswith("\n\n\n")
 
 
 def test_emit_completed_non_merge_tail_is_completed_green(monkeypatch, capsys) -> None:
