@@ -3391,17 +3391,18 @@ def _cmd_events(args: argparse.Namespace) -> int:
 
     control = _control_root()
     quest_id: str | None
-    if args.token is not None:
+    token = args.token
+    if token is not None:
         # Same comprehension as _resolve_id — picker and resolver agree on candidates.
-        matches = [cid for cid in _iter_quest_ids(control) if args.token in cid]
-        if _interactive() and args.token.strip() and len(matches) >= 2:
+        matches = [cid for cid in _iter_quest_ids(control) if token in cid]
+        if _interactive() and token.strip() and len(matches) >= 2:
             picked = anyio.run(_pick_events_matches, control, matches)
             if isinstance(picked, int):
                 return picked
             quest_id = picked
         else:
             try:
-                quest_id = _resolve_id(control, args.token)
+                quest_id = _resolve_id(control, token)
             except SystemExit:
                 return 2
     elif _interactive():
