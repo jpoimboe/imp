@@ -506,3 +506,14 @@ def test_refresh_workflow_skill_shadows_global_on_name_collision(tmp_path: Path)
     assert load_internal_skill(snap_skills, "imp-knowledge") == sentinel
     # …and the non-colliding pool skills still overlay alongside it.
     assert (snap_skills / "imp-memory.md").read_text().strip()
+
+
+def test_snapshot_does_not_copy_the_docs_corpus(tmp_path: Path) -> None:
+    quest, _, _ = _seed_minimal_workflow(tmp_path)
+    _refresh_workflow_snapshot(quest)
+    snapshot = quest.quest_dir / "workflow"
+    assert snapshot.is_dir()
+    # The corpus is resolved in place, never overlaid — the snapshot carries
+    # no docs/ copy (contrast with skills/, which IS overlaid).
+    assert not (snapshot / "docs").exists()
+    assert (snapshot / "skills").is_dir()
