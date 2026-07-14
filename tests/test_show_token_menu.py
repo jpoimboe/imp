@@ -134,7 +134,7 @@ def test_cmd_show_picker_selection_dispatches(monkeypatch, tmp_path: Path) -> No
     monkeypatch.setattr(m, "_unstarted_backlog_meta", lambda c, cid: None)
     seen = {}
 
-    def fake_detail(control, quest_id, *, now):
+    def fake_detail(control, quest_id, *, now, color):
         seen["id"] = quest_id
         return ["card"]
 
@@ -159,7 +159,7 @@ def test_cmd_show_single_match_skips_picker(monkeypatch, tmp_path: Path) -> None
     monkeypatch.setattr(m, "_unstarted_backlog_meta", lambda c, cid: None)
     seen = {}
 
-    def fake_detail(control, quest_id, *, now):
+    def fake_detail(control, quest_id, *, now, color):
         seen["id"] = quest_id
         return []
 
@@ -222,7 +222,7 @@ def test_cmd_show_no_token_interactive_picker(monkeypatch, tmp_path: Path) -> No
     monkeypatch.setattr(m, "_unstarted_backlog_meta", lambda c, cid: None)
     seen = {}
 
-    def fake_detail(control, quest_id, *, now):
+    def fake_detail(control, quest_id, *, now, color):
         seen["id"] = quest_id
         return []
 

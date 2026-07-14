@@ -24,7 +24,7 @@ def test_detail_card_backlog_source(tmp_path: Path) -> None:
         depends_on=["2026-06-16-dep001"],
         seed_opening="Add OAuth\n\nwire up OAuth login",
     )
-    card = "\n".join(main._detail_card(tmp_path, "2026-06-16-bkg111", now=_NOW))
+    card = "\n".join(main._detail_card(tmp_path, "2026-06-16-bkg111", now=_NOW, color=False))
     assert "2026-06-16-bkg111" in card
     assert "Add OAuth" in card
     assert "backlog" in card
@@ -141,7 +141,7 @@ def _live_change_task_prompt(control: Path, quest_id: str) -> None:
 def test_detail_card_omits_synthetic_task_prompt_opening(tmp_path: Path) -> None:
     _seed_control(tmp_path)
     _live_change_task_prompt(tmp_path, "2026-06-20-task01")
-    card = "\n".join(main._detail_card(tmp_path, "2026-06-20-task01", now=_NOW))
+    card = "\n".join(main._detail_card(tmp_path, "2026-06-20-task01", now=_NOW, color=False))
     assert "2026-06-20-task01" in card          # the change card still renders
     assert "Resumed seed" in card               # title shown
     assert "you are a coder" not in card        # no prompt-dump opening
@@ -151,7 +151,7 @@ def test_detail_card_omits_synthetic_task_prompt_opening(tmp_path: Path) -> None
 def test_detail_card_live_source(tmp_path: Path) -> None:
     _seed_control(tmp_path)
     _live_change(tmp_path, "2026-06-20-live01")
-    card = "\n".join(main._detail_card(tmp_path, "2026-06-20-live01", now=_NOW))
+    card = "\n".join(main._detail_card(tmp_path, "2026-06-20-live01", now=_NOW, color=False))
     assert "2026-06-20-live01" in card
     assert "Build widget" in card
     assert "paused" in card
@@ -179,7 +179,7 @@ def test_detail_card_sources_phase_from_persisted_state(tmp_path: Path) -> None:
     State(id="2026-06-20-src01", status="paused", step="spec-writer",
           step_label="writing spec", phase_label="state phase",
           step_attempt=0).save(cdir / "state")
-    card = "\n".join(main._detail_card(tmp_path, "2026-06-20-src01", now=_NOW))
+    card = "\n".join(main._detail_card(tmp_path, "2026-06-20-src01", now=_NOW, color=False))
     assert "state phase · writing spec" in card    # sourced from persisted field
     assert "EVENT PHASE" not in card               # not the event-log scan
 
@@ -199,7 +199,7 @@ def test_detail_card_created_trims_microseconds_and_offset(tmp_path: Path) -> No
     (cdir / "events.jsonl").write_text("")
     State(id="2026-06-20-tsx001", status="paused", step="spec-writer",
           step_attempt=0).save(cdir / "state")
-    card = "\n".join(main._detail_card(tmp_path, "2026-06-20-tsx001", now=_NOW))
+    card = "\n".join(main._detail_card(tmp_path, "2026-06-20-tsx001", now=_NOW, color=False))
     created_line = next(ln for ln in card.splitlines() if ln.startswith("created:"))
     assert "2026-06-20 11:00:00" in created_line   # trimmed to seconds, space-separated
     assert ".123456" not in created_line            # microseconds dropped
@@ -217,7 +217,7 @@ def test_detail_card_shows_merge_commit_for_live_quest(tmp_path: Path) -> None:
     (cdir / "events.jsonl").write_text("")
     State(id="2026-06-20-mrg01", status="completed", step="done",
           merge_commit="deadbeefcafe", step_attempt=0).save(cdir / "state")
-    lines = main._detail_card(tmp_path, "2026-06-20-mrg01", now=_NOW)
+    lines = main._detail_card(tmp_path, "2026-06-20-mrg01", now=_NOW, color=False)
     card = "\n".join(lines)
     assert "merge_commit:  deadbeefcafe" in card          # two spaces after the colon
     base_idx = next(i for i, ln in enumerate(lines)
@@ -237,7 +237,7 @@ def test_detail_card_omits_merge_commit_when_absent(tmp_path: Path) -> None:
     (cdir / "events.jsonl").write_text("")
     State(id="2026-06-20-mrg02", status="paused", step="spec-writer",
           step_attempt=0).save(cdir / "state")   # merge_commit defaults to None
-    card = "\n".join(main._detail_card(tmp_path, "2026-06-20-mrg02", now=_NOW))
+    card = "\n".join(main._detail_card(tmp_path, "2026-06-20-mrg02", now=_NOW, color=False))
     assert "merge_commit" not in card             # no line when no recorded SHA
 
 
@@ -256,7 +256,7 @@ def test_detail_card_shows_merge_commit_for_archived_quest(tmp_path: Path) -> No
     archive.archive_quest(
         tmp_path, "2026-06-20-arc01", events_path=events,
         quest_json_path=quest_json, state_json_path=state_json)
-    card = "\n".join(main._detail_card(tmp_path, "2026-06-20-arc01", now=_NOW))
+    card = "\n".join(main._detail_card(tmp_path, "2026-06-20-arc01", now=_NOW, color=False))
     assert "merge_commit:  beefcafe1234" in card   # read via archive_read.read_state_json
 
 

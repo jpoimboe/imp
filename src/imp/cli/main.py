@@ -1542,28 +1542,34 @@ def _card_field(label: str, value: str, width: int, *, color: bool) -> str:
     return pal.ansi(label, "dim", enabled=color) + " " * (width - len(label)) + value
 
 
-def _backlog_card(meta: dict[str, Any], control: Path, *, now: datetime) -> list[str]:
+def _backlog_card(meta: dict[str, Any], control: Path, *, now: datetime,
+                  color: bool) -> list[str]:
     r = make_store(control).backlog_readiness(meta.get("depends_on", []))
     ready, unmerged = r.ready, list(r.blocked_on)
     readiness = "ready" if ready else f"blocked on {', '.join(unmerged)}"
     created = meta.get("created_at")
     lines = [
-        f"id:         {meta['id']}",
-        f"title:      {meta.get('title') or '(unnamed)'}",
-        "status:     backlog",
-        f"provenance: {meta.get('origin', 'draft')}",
-        f"readiness:  {readiness}",
-        f"created:    {quest_row.format_timestamp(created)} "
-        f"({quest_row.relative_age(created, now=now)})",
+        _card_field("id:", meta["id"], 12, color=color),
+        _card_field("title:", meta.get("title") or "(unnamed)", 12, color=color),
+        _card_field("status:", "backlog", 12, color=color),
+        _card_field("provenance:", meta.get("origin", "draft"), 12, color=color),
+        _card_field("readiness:", readiness, 12, color=color),
+        _card_field(
+            "created:",
+            f"{quest_row.format_timestamp(created)} "
+            f"({quest_row.relative_age(created, now=now)})",
+            12, color=color),
     ]
     if meta.get("depends_on"):
-        lines.append(f"depends_on: {', '.join(meta['depends_on'])}")
+        lines.append(_card_field("depends_on:", ", ".join(meta["depends_on"]),
+                                 12, color=color))
     body = meta.get("seed_opening") or ""
     title = meta.get("title") or ""
     if title and (body == title or body.startswith(title + "\n")):
         body = body[len(title):].lstrip("\n")
     if body:
         lines.append("")
+        lines.append(pal.ansi("intent:", "dim", enabled=color))
         lines.append(body)
     return lines
 
@@ -1601,10 +1607,11 @@ def _quest_card(control: Path, quest_id: str, *, now: datetime) -> list[str]:
     return lines
 
 
-def _detail_card(control: Path, quest_id: str, *, now: datetime) -> list[str]:
+def _detail_card(control: Path, quest_id: str, *, now: datetime,
+                 color: bool) -> list[str]:
     meta = _unstarted_backlog_meta(control, quest_id)
     if meta is not None:
-        return _backlog_card(meta, control, now=now)
+        return _backlog_card(meta, control, now=now, color=color)
     return _quest_card(control, quest_id, now=now)
 
 
@@ -1710,8 +1717,10 @@ def _cmd_show(args: argparse.Namespace) -> int:
                     json.dumps(_backlog_json(meta, control), indent=2).splitlines(),
                     no_pager=args.no_pager)
                 return 0
-            _page_or_print(_backlog_card(meta, control, now=datetime.now(UTC)),
-                           no_pager=args.no_pager)
+            _page_or_print(
+                _backlog_card(meta, control, now=datetime.now(UTC),
+                              color=should_use_color(sys.stdout)),
+                no_pager=args.no_pager)
             return 0
         print(f"imp: {quest_id} is in the backlog (not started); "
               f"no {resource} yet", file=sys.stderr)
@@ -1725,8 +1734,10 @@ def _cmd_show(args: argparse.Namespace) -> int:
             _page_or_print(json.dumps(card, indent=2).splitlines(),
                            no_pager=args.no_pager)
             return 0
-        _page_or_print(_detail_card(control, quest_id, now=datetime.now(UTC)),
-                       no_pager=args.no_pager)
+        _page_or_print(
+            _detail_card(control, quest_id, now=datetime.now(UTC),
+                         color=should_use_color(sys.stdout)),
+            no_pager=args.no_pager)
         return 0
     if resource == "spec":
         data = make_store(control).get_artifact(quest_id, "spec")
@@ -2118,7 +2129,9 @@ def _cmd_log(args: argparse.Namespace) -> int:
         return 0
     meta = _unstarted_backlog_meta(control, quest_id)
     if meta is not None:
-        lines: Iterable[str] = _backlog_card(meta, control, now=datetime.now(UTC))
+        lines: Iterable[str] = _backlog_card(
+            meta, control, now=datetime.now(UTC),
+            color=should_use_color(sys.stdout))
         _page_or_print(lines, no_pager=args.no_pager)
         return 0
     events = make_store(control).get_events(quest_id)
