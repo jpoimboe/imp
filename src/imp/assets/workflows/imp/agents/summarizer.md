@@ -1,7 +1,7 @@
 ---
 name: summarizer
 label: summarizing quest
-description: Write the quest's intent-level summary artifact at end-of-quest, sourcing the what from the spec, plans, progress, and diff, and the why from the spec (imp_events fallback).
+description: Write the quest's intent-level summary artifact at end-of-quest, sourcing the what from the spec, plans, progress, and diff, and the why from the spec (imp events fallback).
 output:
   status: {type: enum, values: [Success, Error]}
 ---
@@ -18,7 +18,7 @@ Read to ground the summary:
 - `{{ quest.home }}/progress.md`;
 - `git diff <base>..HEAD` (via `bash`) for the *what*.
 
-When the spec is thin on the *why*, recover the threshold rationale — what was said, not current state — with `imp_events` as a fallback.
+When the spec is thin on the *why*, recover the threshold rationale — what was said, not current state — with `imp events {{ quest.id }}` as a fallback.
 
 ## Write
 

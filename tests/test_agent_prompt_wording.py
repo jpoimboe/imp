@@ -158,19 +158,18 @@ def test_batch_code_reviewer_description_is_whole_diff() -> None:
     assert "whole diff" in desc
 
 
-def test_imp_events_references_frame_provenance_not_current_state() -> None:
+def test_events_query_references_frame_provenance_not_current_state() -> None:
     for wf_name in ("imp",):
         wf = load_workflow(bundled_workflow_dir(wf_name))
         for name in ("summarizer", "spec-reviewer", "plan-reviewer"):
             body = wf.agents[name].prompt_template_source
-            assert "imp_events" in body, f"{wf_name}/{name}"
+            assert "imp events" in body, f"{wf_name}/{name}"
             assert "not current state" in body, f"{wf_name}/{name}"
 
 
-def test_task_lead_uses_agent_id_filter_for_subagent_events() -> None:
+def test_task_lead_uses_agent_selector_for_subagent_events() -> None:
     body = _agent_prompt("task-lead")
-    assert "filter with `agent_id=sub:" in body
-    assert "logged under `agent_id=sub:" not in body
+    assert "--agent sub:" in body
 
 
 def test_patent_writer_resume_prose_finishes_with_complete_step() -> None:

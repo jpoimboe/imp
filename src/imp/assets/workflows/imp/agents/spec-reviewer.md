@@ -22,7 +22,7 @@ Verify the spec is complete, consistent, and ready for implementation planning. 
 ## Process
 
 1. Read `{{ quest.home }}/artifacts/spec/{{ quest.id }}.md`.
-2. To check the spec reflects the user's clarifications, use `imp_events` for prior brainstorm turns — the provenance record of what was said, not current state.
+2. To check the spec reflects the user's clarifications, use `imp events {{ quest.id }}` for prior brainstorm turns — the provenance record of what was said, not current state.
 3. Evaluate against the checks below.
 4. Produce a severity-classified findings report and call `complete_step`.
 
