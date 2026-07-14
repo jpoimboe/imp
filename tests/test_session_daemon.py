@@ -898,11 +898,14 @@ def test_hold_prompt_none_for_model_override() -> None:
     assert daemon._hold_prompt(RunResult.PAUSED, coord) is None
 
 
-def test_hold_prompt_none_for_sandbox_override() -> None:
+def test_hold_prompt_returns_resume_for_sandbox_override_style_interrupt() -> None:
+    # "sandbox-override" is no longer excluded from _hold_prompt's guard: since
+    # CONTROL_SET_SANDBOX no longer calls signal_pause, the scenario can't arise
+    # in production, but the guard itself must not suppress arbitrary interrupt reasons.
     import imp.remote.session.daemon as daemon
 
     coord = SimpleNamespace(should_pause=True, pause_reason="sandbox-override")
-    assert daemon._hold_prompt(RunResult.PAUSED, coord) is None
+    assert daemon._hold_prompt(RunResult.PAUSED, coord) is not None
 
 
 def test_hold_prompt_none_for_script_blocked() -> None:
@@ -1923,41 +1926,32 @@ def test_resolve_step_kind_maps_step_names_to_kinds(tmp_path: Path) -> None:
     assert daemon._resolve_step_kind(quest) is None
 
 
-def test_is_sandbox_override_pause_matches_only_that_reason() -> None:
-    from imp.remote.session.daemon import _is_sandbox_override_pause
-    on = SimpleNamespace(should_pause=True, pause_reason="sandbox-override")
-    other = SimpleNamespace(should_pause=True, pause_reason="ctrl-c")
-    assert _is_sandbox_override_pause(RunResult.PAUSED, on) is True
-    assert _is_sandbox_override_pause(RunResult.PAUSED, other) is False
-    assert _is_sandbox_override_pause(RunResult.COMPLETED, on) is False
-
 
 @pytest.mark.anyio
-async def test_sandbox_override_frame_reprompts_via_redispatch(tmp_path: Path) -> None:
+async def test_sandbox_control_no_pause_single_dispatch(tmp_path: Path) -> None:
+    """CONTROL_SET_SANDBOX sets coordinator.unsandboxed but must NOT call signal_pause.
+
+    Old behavior: the server called signal_pause("sandbox-override"), the daemon
+    detected it, persisted state, and re-dispatched (calls["n"] == 2).
+    New behavior: no signal_pause at all — the flag is live-only; the run
+    continues to completion in a single dispatch (calls["n"] == 1).
+    """
     from imp.remote.session.protocol import CONTROL_SET_SANDBOX
 
     quest = _make_change(tmp_path, "2026-06-15-sbx")
     sock = str(session_socket_path(quest.control_root, quest.id))
-    calls = {"n": 0}
-    seen: dict[str, Any] = {}
-
-    # Wait until fake_run is actively polling should_pause before sending the frame.
     run_ready = anyio.Event()
+    seen: dict[str, Any] = {}
 
     async def fake_run(
         quest: Quest, *, on_event: Any, user_chat_input_fn: Any,
         coordinator: Any, wait_for_turn_fn: Any = None,
     ) -> RunResult:
-        calls["n"] += 1
-        if calls["n"] == 1:
-            run_ready.set()
-            with anyio.fail_after(5):
-                while not coordinator.should_pause:   # the frame pauses us
-                    await anyio.sleep(0.02)
-            return RunResult.PAUSED
-        # Re-dispatch: reset() cleared the pause but NOT the override flag.
-        seen["unsandboxed"] = coordinator.unsandboxed
-        assert not coordinator.should_pause
+        run_ready.set()
+        with anyio.fail_after(5):
+            while not coordinator.unsandboxed:   # wait for control to be processed
+                await anyio.sleep(0.02)
+        seen["should_pause"] = coordinator.should_pause
         return RunResult.COMPLETED
 
     async with anyio.create_task_group() as tg:
@@ -1979,39 +1973,9 @@ async def test_sandbox_override_frame_reprompts_via_redispatch(tmp_path: Path) -
             while "r" not in result:
                 await anyio.sleep(0.02)
         assert result["r"] is RunResult.COMPLETED
-        assert calls["n"] == 2                 # frame → pause → hold-loop re-dispatch
-        assert seen["unsandboxed"] is True     # override survived reset() into the re-run
+        assert seen["should_pause"] is False    # no signal_pause was issued
         await client.aclose()
         tg.cancel_scope.cancel()
-
-
-@pytest.mark.anyio
-async def test_sandbox_override_pause_persists_unsandboxed_on_state(
-    tmp_path: Path,
-) -> None:
-    quest = _make_change(tmp_path, "2026-06-15-sbp")
-
-    calls = {"n": 0}
-
-    async def _run_fn(
-        ch: Quest, *, on_event: Any, user_chat_input_fn: Any, coordinator: Any,
-        wait_for_turn_fn: Any = None, **kw: Any,
-    ) -> RunResult:
-        calls["n"] += 1
-        if calls["n"] == 1:
-            State(id=ch.id, step="brainstorm", step_attempt=0,
-                  status="running").save(ch.state_dir)
-            coordinator.set_unsandboxed(True)
-            await coordinator.signal_pause(reason="sandbox-override", via="frame")
-            return RunResult.PAUSED
-        return RunResult.COMPLETED
-
-    with anyio.fail_after(5):
-        result = await serve_quest_session(quest, run_fn=_run_fn, hibernate=False)
-
-    assert result is RunResult.COMPLETED
-    assert calls["n"] == 2                               # re-entered once
-    assert State.load(quest.state_dir).unsandboxed is True   # persisted by the branch
 
 
 @pytest.mark.anyio

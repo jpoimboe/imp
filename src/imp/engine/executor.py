@@ -505,6 +505,7 @@ async def run_quest(
                 reason = action.reason or "interrupt"
                 state.status = (
                     "merge_blocked" if reason == "merge_blocked" else "paused")
+                state.unsandboxed = coordinator.unsandboxed
                 state.save(quest.state_dir)
                 _emit_paused_event(
                     log, reason, kind=action.kind,
@@ -624,10 +625,12 @@ async def run_quest(
                 else:
                     _evict_if_holding(quest, state, log)
                 state.status = "paused"
+                state.unsandboxed = coordinator.unsandboxed
                 state.save(quest.state_dir)
                 _emit_paused_event(
                     log, "interrupt", interrupt_reason=coordinator.pause_reason)
                 return RunResult.PAUSED
+            state.unsandboxed = coordinator.unsandboxed
             state.save(quest.state_dir)
     except Exception as exc:
         # Last-resort guard: except Exception (not BaseException) pauses resumably on an
@@ -651,6 +654,7 @@ async def run_quest(
             _emit_paused_event(log, "internal_error", kind=kind)
             state.arm_step_resume(mode="solicit")
             state.status = "paused"
+            state.unsandboxed = coordinator.unsandboxed
             state.save(quest.state_dir)
         except Exception:
             # Best-effort: if the emit/save fails (or log/state was never bound), re-raise
@@ -680,6 +684,7 @@ def _complete_or_park(
     if coordinator.should_pause:
         state.completion_pending = True
         state.status = "paused"
+        state.unsandboxed = coordinator.unsandboxed
         state.save(quest.state_dir)
         _emit_paused_event(log, "interrupt", interrupt_reason=coordinator.pause_reason)
         return RunResult.PAUSED

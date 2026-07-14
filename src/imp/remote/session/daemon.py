@@ -46,11 +46,6 @@ def _is_model_override_pause(result: Any, coordinator: Any) -> bool:
             and coordinator.pause_reason == "model-override")
 
 
-def _is_sandbox_override_pause(result: Any, coordinator: Any) -> bool:
-    return (result is RunResult.PAUSED and coordinator.should_pause
-            and coordinator.pause_reason == "sandbox-override")
-
-
 def _trailing_is_workflow_resumed(log: EventLog) -> bool:
     entries = log.tail(2)
     return bool(entries) and entries[-1].get("type") == "workflow_resumed"
@@ -75,7 +70,7 @@ def _hold_prompt(
     result: Any, coordinator: Any, *, is_script: bool = False,
 ) -> str | None:
     if (_is_interrupt_pause(result, coordinator)
-            and coordinator.pause_reason not in ("model-override", "sandbox-override")):
+            and coordinator.pause_reason != "model-override"):
         return _SCRIPT_HOLD_PROMPT if is_script else _RESUME_PROMPT
     return None
 
@@ -181,8 +176,7 @@ async def serve_quest_session(
             coordinator.note_yield()  # run_quest returned -> the run has yielded
             prompt = _hold_prompt(result, coordinator, is_script=_paused_is_script())
         while (prompt is not None
-               or _is_model_override_pause(result, coordinator)
-               or _is_sandbox_override_pause(result, coordinator)):
+               or _is_model_override_pause(result, coordinator)):
             if _is_model_override_pause(result, coordinator):
                 # /model mid-conversation: executor parked+saved the step. Apply the
                 # override AFTER that save (no write race), then re-enter the same step.
@@ -191,15 +185,6 @@ async def serve_quest_session(
                     state = State.load(quest.state_dir)
                     assert state.step is not None
                     apply_model_override(quest, state, arg, step_name=state.step)
-                coordinator.reset()
-            elif _is_sandbox_override_pause(result, coordinator):
-                # /sandbox mid-conversation: the frame already set the override flag.
-                # Persist it onto State (so a resume of this step restores it) BEFORE
-                # reset(), then clear the pause and re-enter so the fresh
-                # _dispatch_step inherits the still-live coordinator flag.
-                state = State.load(quest.state_dir)
-                state.unsandboxed = coordinator.unsandboxed
-                state.save(quest.state_dir)
                 coordinator.reset()
             else:
                 on_event({"type": "awaiting_user_input",
