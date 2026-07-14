@@ -5,6 +5,7 @@ from imp.engine.reincarnation import (
     handoff_path_for,
     reincarnation_seed,
     stash_transcript,
+    write_handoff_note,
 )
 
 
@@ -101,9 +102,35 @@ def test_handoff_path_is_sibling_of_transcript_dir() -> None:
     assert p == Path("/x/steps/impl/coder.handoff.md")
 
 
-def test_handoff_instruction_names_path_and_tells_agent_to_write_and_stop() -> None:
+def test_handoff_instruction_tells_agent_to_reply_and_stop() -> None:
     instr = handoff_instruction(Path("/x/steps/impl/coder.handoff.md"))
-    assert "/x/steps/impl/coder.handoff.md" in instr
-    assert "write_file" in instr
+    assert "write_file" not in instr
     assert "context limit" in instr
     assert "stop" in instr.lower()
+    # Must direct the agent to emit the handoff as its final reply text.
+    assert "final reply" in instr.lower()
+    assert "remains" in instr.lower()
+    # Must mention file:line citation style.
+    assert "file:line" in instr
+
+
+def test_write_handoff_note_writes_nonempty_text(tmp_path: Path) -> None:
+    note = tmp_path / "coder.handoff.md"
+    text = "Goal: finish the thing\nProgress: 50%\n"
+    result = write_handoff_note(note, text)
+    assert result is True
+    assert note.read_text() == text
+
+
+def test_write_handoff_note_empty_string_writes_nothing(tmp_path: Path) -> None:
+    note = tmp_path / "coder.handoff.md"
+    result = write_handoff_note(note, "")
+    assert result is False
+    assert not note.exists()
+
+
+def test_write_handoff_note_whitespace_only_writes_nothing(tmp_path: Path) -> None:
+    note = tmp_path / "coder.handoff.md"
+    result = write_handoff_note(note, "   \n\t ")
+    assert result is False
+    assert not note.exists()
