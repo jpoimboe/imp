@@ -154,7 +154,7 @@ def _help(out: Callable[[str], None], *, materialized: bool) -> None:
     out("  /skills            List loadable skills")
     if not materialized:
         out("  /keep              Keep this conversation as a draft in your active list")
-        out("  /shelve            Shelve this conversation to the archive (find it with `imp search`)")
+        out("  /shelve            Shelve this conversation to the archive (find via `imp search`)")
         out("  /clear             Shelve this conversation and start a fresh one")
     out("  /model <model>     Switch this step's model (or provider:model)")
     out("  /sandbox [on|off]  Show or set the filesystem sandbox for this session")
