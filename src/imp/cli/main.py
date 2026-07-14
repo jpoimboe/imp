@@ -1732,7 +1732,7 @@ def _cmd_show(args: argparse.Namespace) -> int:
                        no_pager=args.no_pager)
         return 0
     if resource == "spec":
-        data = _show_artifact(control, quest_id, f"spec/{quest_id}.md")
+        data = make_store(control).get_artifact(quest_id, "spec")
     if data is None:
         print(f"imp: no {resource} for {quest_id!r}", file=sys.stderr)
         return 2

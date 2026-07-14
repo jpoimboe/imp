@@ -52,3 +52,15 @@ def test_get_events_live_archived_and_unknown(tmp_path: Path) -> None:
     assert archived is not None and len(archived) >= 1
 
     assert store.get_events("nosuch") is None
+
+
+def test_get_artifact_live_and_missing(tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+    ch = Quest.create(tmp_path, title="Art", quest_id="artq", base_branch="main")
+    spec_dir = ch.quest_dir / "artifacts" / "spec"
+    spec_dir.mkdir(parents=True)
+    (spec_dir / "artq.md").write_text("# the spec\n")
+    store = make_store(tmp_path)
+
+    assert store.get_artifact("artq", "spec") == b"# the spec\n"
+    assert store.get_artifact("artq", "summary") is None
