@@ -9,7 +9,6 @@ def test_all_builtins_registered() -> None:
         "read_file", "write_file", "edit_file",
         "glob", "grep",
         "bash",
-        "imp_events",
         "symbol_outline",
     }
     missing = expected - reg.keys()
@@ -25,7 +24,7 @@ def test_full_builtin_set_schema_builds_under_resolver() -> None:
     # non-degenerate object schemas.
     reg = get_registry()
     for name in ("bash", "read_file", "write_file", "edit_file",
-                 "glob", "grep", "imp_events", "rename_quest"):
+                 "glob", "grep", "rename_quest"):
         schema = reg[name].input_schema
         assert schema.get("type") == "object", name
         assert "properties" in schema, name
@@ -59,6 +58,12 @@ def test_register_builtins_isolates_a_broken_module(monkeypatch, caplog) -> None
 def test_symbol_outline_in_base_caps() -> None:
     from imp.engine.loader import BASE_CAPS
     assert "symbol_outline" in BASE_CAPS
+
+
+def test_removed_introspection_tools_are_absent() -> None:
+    reg = get_registry()
+    assert "imp_events" not in reg
+    assert "imp_show" not in reg
 
 
 def test_grep_schema_exports_output_mode_enum() -> None:

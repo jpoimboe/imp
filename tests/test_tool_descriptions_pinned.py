@@ -2,17 +2,17 @@ from __future__ import annotations
 
 from imp.agents.tools import get_registry
 
-# The eleven built-in tools rewritten in spec §1.
+# The nine built-in tools rewritten in spec §1.
 ALL_TOOLS = [
     "read_file", "edit_file", "write_file", "grep", "glob", "bash",
-    "bash_output", "bash_kill", "symbol_outline", "imp_events", "imp_show",
+    "bash_output", "bash_kill", "symbol_outline",
 ]
 
-# explorer's toolset: its 6 declared tools plus bash_output/bash_kill, which
+# explorer's toolset: its 5 declared tools plus bash_output/bash_kill, which
 # the provider auto-grants alongside bash. This is the budget scope for AC 2a.
 EXPLORER_TOOLSET = [
     "read_file", "glob", "grep", "bash",
-    "bash_output", "bash_kill", "symbol_outline", "imp_events",
+    "bash_output", "bash_kill", "symbol_outline",
 ]
 
 # One distinctive phrase from each tool's NEW pinned text — proves the rewrite
@@ -28,8 +28,6 @@ NEW_SENTINELS = {
     "bash_output": "Read new output from a background process",
     "bash_kill": "advances the output cursors",
     "symbol_outline": "Compact structural outline",
-    "imp_events": "an ordered record of what was said",
-    "imp_show": "Read a quest's durable record by id",
 }
 
 # Clauses the rewrite removes from every description (paths/sandbox live centrally
@@ -70,6 +68,6 @@ def test_relocating_tools_advertise_the_skill() -> None:
 
 def test_explorer_toolset_description_word_budget() -> None:
     total = sum(len(_desc(n).split()) for n in EXPLORER_TOOLSET)
-    # AC 2a: down from ~1,230 words to ~500 or fewer (a 60%+ cut). The pinned
-    # text totals 443 words; 500 is the ceiling the reduction must stay under.
+    # AC 2a: down from ~1,230 words to ~500 or fewer (a 60%+ cut).
+    # The pinned text stays well under the 500-word ceiling.
     assert total <= 500, f"explorer toolset description budget exceeded: {total} words"
