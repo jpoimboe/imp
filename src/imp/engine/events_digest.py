@@ -104,6 +104,13 @@ def _h_step_context(payload: dict[str, Any]) -> str:
     return f"provider={payload.get('provider')} model={payload.get('model')}"
 
 
+def _h_step_started(payload: dict[str, Any]) -> str:
+    # model/provider absent on script/gate steps; None output is acceptable.
+    return (f"step={payload.get('step')} phase={payload.get('phase')} "
+            f"kind={payload.get('kind')} model={payload.get('model')} "
+            f"provider={payload.get('provider')}")
+
+
 def _generic(payload: dict[str, Any]) -> str:
     parts: list[str] = []
     for k, v in payload.items():
@@ -123,6 +130,7 @@ _HANDLERS: dict[str, Callable[[dict[str, Any]], str]] = {
     "user_interjected": _h_user,
     "awaiting_user_input": _h_awaiting,
     "llm_response": _h_llm_response,
+    "step_started": _h_step_started,
     "tool_call": _h_tool_call,
     "tool_result": _h_tool_result,
     "agent_output": _h_agent_output,

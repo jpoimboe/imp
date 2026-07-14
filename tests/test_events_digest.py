@@ -257,3 +257,45 @@ def test_summarize_exposes_type_aware_tail() -> None:
     # the type-aware tool_call handler json-serializes the input dict; the
     # generic fallback would render it as `input=<dict>` instead.
     assert '"pattern": "x"' in tail
+
+
+def test_step_started_digest_positive_selects_five_fields() -> None:
+    ev = {
+        "id": "e12", "parent_id": None, "agent_id": None,
+        "timestamp": "2026-07-01T00:00:11+00:00", "type": "step_started",
+        "payload": {
+            "step": "plan-writer", "phase": "plan", "kind": "agent",
+            "model": "claude-x", "provider": "anthropic",
+            "show_label": True, "show_output": False, "label": "Planning",
+            "tools": ["read_file", "grep"], "resumed": False, "command": "noop",
+        },
+    }
+    line = digest_event(ev)
+    assert "step=plan-writer" in line
+    assert "phase=plan" in line
+    assert "kind=agent" in line
+    assert "model=claude-x" in line
+    assert "provider=anthropic" in line
+    # dropped-by-construction render/lifecycle keys never leak
+    assert "show_label" not in line
+    assert "show_output" not in line
+    assert "Planning" not in line
+    assert "resumed" not in line
+    assert "noop" not in line
+    assert "\n" not in line
+
+
+def test_step_started_script_step_renders_none_model_provider() -> None:
+    ev = {
+        "id": "e13", "parent_id": None, "agent_id": None,
+        "timestamp": "2026-07-01T00:00:12+00:00", "type": "step_started",
+        "payload": {"step": "verify", "phase": "impl", "kind": "script",
+                    "command": "pytest -q", "show_label": True},
+    }
+    line = digest_event(ev)
+    assert "step=verify" in line
+    assert "kind=script" in line
+    assert "model=None" in line          # absent on script/gate emits
+    assert "provider=None" in line
+    assert "pytest" not in line          # command dropped
+    assert "\n" not in line
