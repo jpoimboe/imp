@@ -2705,6 +2705,61 @@ def test_append_committed_reply_lifts_replay_suppression_on_resume() -> None:
     assert out.getvalue().count("> /abandon") == 1
 
 
+def test_seed_pending_reply_lifts_replay_suppression_after_open_burst_tail() -> None:
+    out = _Pipe()
+    drv = LiveDriver(stream=out, color=False, width=80, status=LiveStatus(out),
+                     suppress_replay=True)
+    # Replayed prefix whose tail is an OPEN tool burst: a tool_call/tool_result
+    # with no following prose turn, so _current_burst is still set when the
+    # awaiting_user_input gate is replayed. All suppressed — nothing printed.
+    for e in [
+        ev("1", "quest_created", quest_id=1, title="t"),
+        ev("2", "step_started", step="spec-writer", kind="agent", phase="spec",
+           model="m", provider="anthropic"),
+        ev("3", "tool_call", agent_id="step:spec/spec-writer", id="b1",
+           name="read_file", input={"p": "1"}),
+        ev("4", "tool_result", agent_id="step:spec/spec-writer", id="b1",
+           content="ok"),
+        ev("2b", "awaiting_user_input", agent_id="step:spec/spec-writer"),
+    ]:
+        e["_replay"] = True
+        drv.on_event(e)
+    # The boundary freezes the replayed-node snapshot; the prefix stays hidden.
+    drv.on_event({"type": "replay_complete"})
+    assert out.getvalue() == ""
+    # The seeded node is created AFTER the boundary. The gate must have flushed
+    # the open burst so the walk can reach the reply node and emit its echo.
+    drv.seed_pending_reply("resume reply")
+    assert out.getvalue().count("> resume reply") == 1
+
+
+def test_append_committed_reply_lifts_replay_suppression_after_open_burst_tail() -> None:
+    out = _Pipe()
+    drv = LiveDriver(stream=out, color=False, width=80, status=LiveStatus(out),
+                     suppress_replay=True)
+    # Replayed prefix whose tail is an OPEN tool burst (see the seeded-pending
+    # sibling). All suppressed — nothing printed until the post-boundary reply.
+    for e in [
+        ev("1", "change_created", quest_id=1, title="t"),
+        ev("2", "step_started", step="spec-writer", kind="agent", phase="spec",
+           model="m", provider="anthropic"),
+        ev("3", "tool_call", agent_id="step:spec/spec-writer", id="b1",
+           name="read_file", input={"p": "1"}),
+        ev("4", "tool_result", agent_id="step:spec/spec-writer", id="b1",
+           content="ok"),
+        ev("2b", "awaiting_user_input", agent_id="step:spec/spec-writer"),
+    ]:
+        e["_replay"] = True
+        drv.on_event(e)
+    # The boundary freezes the replayed-node snapshot; the prefix stays hidden.
+    drv.on_event({"type": "replay_complete"})
+    assert out.getvalue() == ""
+    # The committed node is created AFTER the boundary; the gate must have
+    # flushed the open burst so the walk reaches it and emits the echo once.
+    drv.append_committed_reply("/abandon")
+    assert out.getvalue().count("> /abandon") == 1
+
+
 def test_reset_wait_does_not_re_emit_running_step_header() -> None:
     # A running non-position_label agent step interrupted by a hinted rate-limit
     # wait keeps its single header; the wait banner must not print it a 2nd time.

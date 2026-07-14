@@ -1432,6 +1432,16 @@ def _h_awaiting_user_input(
     if self._step_stack:
         self._step_stack[-1].interactive = True
     self._awaiting_reply = True
+    # Settle an open tool burst so the live _walk does not block on it: a burst
+    # is not closed by its own tool_result (only by the next prose/flush), so a
+    # replayed tail that ran a tool then solicited the human without closing
+    # prose leaves current_burst set across the replay_complete boundary. That
+    # keeps _is_final False for the burst, the walk stops there, and the first
+    # post-boundary reply node is never reached — its echo is dropped until the
+    # daemon's user_message flushes. awaiting_user_input is always a real solicit
+    # boundary, so flush unconditionally. Mirrors the un-hold loop below and the
+    # flush in _h_llm_response / _h_user_message.
+    self._flush_burst()
     # Un-hold any held narration in the current container: the prose carried by
     # the llm_response context the human must read to answer, and the agent is now blocked
     # settled, NOT a trailing narration that could still fold into a step
