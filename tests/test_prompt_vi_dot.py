@@ -16,12 +16,22 @@ def anyio_backend() -> str:
     return "asyncio"
 
 
-async def _drive(sends: list[str], *, editing_mode: str = "vi") -> str:
-    """Build a session in the given editing mode and feed it keystrokes."""
+async def _drive(
+    sends: list[str],
+    *,
+    editing_mode: str = "vi",
+    seed_history: list[str] | None = None,
+) -> str:
+    """Build a session in the given editing mode and feed it keystrokes.
+
+    seed_history seeds the in-memory history (as imp does across resumes), so
+    `k`/`j` and history search reach a prior entry."""
     with create_pipe_input() as pipe, create_app_session(
         input=pipe, output=DummyOutput()
     ):
         session = _build_session(editing_mode=editing_mode)
+        for line in seed_history or []:
+            session.history.append_string(line)
         for chunk in sends:
             pipe.send_text(chunk)
         result = await session.prompt_async("> ")
@@ -164,6 +174,15 @@ async def test_dot_state_does_not_leak_across_prompts() -> None:
     assert second == "abc"  # would be "abc\nY" if the stale insert-change leaked
 
 
+def test_non_repeatable_is_only_undo() -> None:
+    # '.' must never repeat an undo, so 'u' stays in the set. c-r in vi
+    # navigation mode is reverse-incremental-search, NOT redo (redo has no vi
+    # binding in 3.0.52), so it must NOT be specially excluded (defect 3).
+    from imp.cli import vi_dot
+
+    assert {"u"} == vi_dot._NON_REPEATABLE
+
+
 def _recorded_change_keys(session: object) -> list[str]:
     """The keys of the recorder's last recorded change, read from the installed
     _call_handler wrapper's closure (the `state` free variable holds DotState)."""
@@ -183,6 +202,61 @@ async def test_count_before_undo_does_not_leak_into_next_change() -> None:
     ):
         session = _build_session(editing_mode="vi")
         for chunk in ["abcdefgh", ESC, "0", "3", "u", "x", "\r"]:
+            pipe.send_text(chunk)
+        await session.prompt_async("> ")
+        recorded = _recorded_change_keys(session)
+    assert recorded == ["x"]
+
+
+@pytest.mark.anyio
+async def test_history_navigation_is_not_recorded_as_change() -> None:
+    # With history seeded, x records the delete (abc -> bc). Glancing at the
+    # previous entry with k and returning with j moves working_index but edits
+    # nothing, so it must NOT overwrite the recorded change: . replays x again
+    # (bc -> c). Before the fix, k/j were recorded and . replayed the jump,
+    # leaving the buffer "bc".
+    result = await _drive(
+        ["abc", ESC, "0", "x", "k", "j", ".", "\r"],
+        seed_history=["previous entry"],
+    )
+    assert result == "c"
+
+
+@pytest.mark.anyio
+async def test_visual_mode_change_is_not_recorded() -> None:
+    # x records the delete (abcdef -> bcdef). A visual delete (v l d -> def) must
+    # NOT overwrite it, so . replays the earlier x: def -> ef. Before the fix,
+    # . replayed the visual d and left the buffer "def".
+    assert await _drive(
+        ["abcdef", ESC, "0", "x", "v", "l", "d", ".", "\r"]) == "ef"
+
+
+@pytest.mark.anyio
+@pytest.mark.timeout(10)
+async def test_dot_after_visual_delete_does_not_swallow_next_key() -> None:
+    # After a visual delete, . must replay the earlier x (def -> ef), not arm a
+    # dangling d operator that parks the prompt in operator-pending and swallows
+    # the next key. The following x then deletes again (ef -> f). Before the fix,
+    # . left the processor operator-pending and the trailing keys never reached
+    # submit (the prompt hung).
+    assert await _drive(
+        ["abcdef", ESC, "0", "x", "v", "l", "d", ".", "x", "\r"]) == "f"
+
+
+@pytest.mark.anyio
+async def test_search_across_history_is_not_recorded_as_change() -> None:
+    # `n` (search-next in navigation mode) applies the current search across
+    # history, moving working_index without editing. It must NOT overwrite the
+    # recorded change: after x then n, the recorded change stays ["x"]. Before
+    # the fix it became ["n"].
+    with create_pipe_input() as pipe, create_app_session(
+        input=pipe, output=DummyOutput()
+    ):
+        session = _build_session(editing_mode="vi")
+        for line in ["zz1", "zz2"]:
+            session.history.append_string(line)
+        session.app.current_search_state.text = "zz"
+        for chunk in ["abc", ESC, "0", "x", "n", "\r"]:
             pipe.send_text(chunk)
         await session.prompt_async("> ")
         recorded = _recorded_change_keys(session)

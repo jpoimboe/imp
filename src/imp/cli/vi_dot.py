@@ -15,7 +15,6 @@ from prompt_toolkit.filters import vi_navigation_mode
 from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.key_binding.key_processor import KeyPress
 from prompt_toolkit.key_binding.vi_state import InputMode
-from prompt_toolkit.keys import Keys
 
 _INSERTISH = (
     InputMode.INSERT,
@@ -25,8 +24,8 @@ _INSERTISH = (
 )
 
 # Keys whose change must never become the last change: vim's '.' never repeats an
-# undo. Redo has no vi binding in 3.0.52; Keys.ControlR is excluded defensively.
-_NON_REPEATABLE = {"u", Keys.ControlR}
+# undo (u). Redo has no vi binding in 3.0.52, so nothing else belongs here.
+_NON_REPEATABLE = {"u"}
 
 
 class DotState:
@@ -79,14 +78,24 @@ def install_dot_recorder(session: Any, state: DotState) -> None:
     def wrapped(handler: Any, key_sequence: list[KeyPress]) -> None:
         replay = any(getattr(k, "_dot_replay", False) for k in key_sequence)
         before_mode = app.vi_state.input_mode
-        before_text = app.current_buffer.text
+        before_buffer = app.current_buffer
+        before_text = before_buffer.text
+        before_working_index = before_buffer.working_index
+        before_selection = before_buffer.selection_state is not None
         original(handler, key_sequence=key_sequence)
         if replay:
             return
         after_mode = app.vi_state.input_mode
-        after_text = app.current_buffer.text
         vi_state = app.vi_state
         pending = kp.arg is not None or vi_state.operator_func is not None
+        # A real edit: the SAME buffer's text changed at an UNCHANGED
+        # working_index. Differing working_index (history/search jump) or a
+        # focus change to another buffer is not an edit.
+        edited = (
+            app.current_buffer is before_buffer
+            and before_buffer.working_index == before_working_index
+            and before_buffer.text != before_text
+        )
         if state._accum is not None:
             # Mid insert-change: keep appending until mode returns to NAVIGATION.
             state._accum.extend(key_sequence)
@@ -96,8 +105,14 @@ def install_dot_recorder(session: Any, state: DotState) -> None:
                 state._prefix = []
         elif before_mode == InputMode.NAVIGATION:
             if key_sequence[-1].key in _NON_REPEATABLE:
-                # undo/redo is never the last change, and any pending count is
+                # undo is never the last change, and any pending count is
                 # discarded (vim's '.' never repeats an undo).
+                state._prefix = []
+            elif before_selection:
+                # A visual-mode change (selection active BEFORE the handler; `d`
+                # clears it as it deletes, so read it pre-handler). Replaying its
+                # keys in navigation mode arms a dangling operator, so never
+                # record it; '.' keeps repeating the last non-visual change.
                 state._prefix = []
             elif after_mode in _INSERTISH:
                 # Entered insert/replace: start an insert-change (count/operator
@@ -107,12 +122,12 @@ def install_dot_recorder(session: Any, state: DotState) -> None:
             elif pending:
                 # A pending count or operator: stash as a prefix.
                 state._prefix.extend(key_sequence)
-            elif after_text != before_text:
+            elif edited:
                 # A direct nav-mode change: single-shot change.
                 state.last_change = state._prefix + list(key_sequence)
                 state._prefix = []
             else:
-                # Pure motion / no-op: reset the prefix.
+                # Pure motion / history jump / no-op: reset the prefix.
                 state._prefix = []
 
     wrapped._imp_dot_recorder = True  # type: ignore[attr-defined]  # smoke-test seam marker
