@@ -38,7 +38,7 @@ from imp.cli.inert_resume import (
     run_inert_resume,
 )
 from imp.cli.init import GitSetupDeclined, IntegrationBranchUnresolved, run_init
-from imp.cli.live_driver import LiveDriver, compose_identity_toolbar
+from imp.cli.live_driver import LiveDriver
 from imp.cli.live_status import LiveStatus
 from imp.cli.palette import ansi, should_use_color
 from imp.cli.prompt import Prompt
@@ -1206,18 +1206,20 @@ def _cmd_resume(args: argparse.Namespace) -> int:
 
 
 async def _inert_ask_line(quest: Quest) -> str | None:
-    """Read one prompt-toolkit line at inert resume; EOF / Ctrl-C maps to None."""
+    """Read one line at inert resume through the shared slash-aware reader
+    (session-verb rejection, /help, /skills, empty-submit guard); EOF / Ctrl-C
+    retains the `> ` caret and maps to None — the quest stays parked."""
     color = should_use_color(sys.stdout)
     width = _term_width()
     prompt = Prompt(
         skills_dir=quest.workflow_dir / "skills",
         editing_mode=_editing_mode(quest.control_root),
         color=color, quest=quest)
-    toolbar = compose_identity_toolbar(
-        quest_id=quest.id, title=quest.title, color=color, width=width)
     try:
-        return await prompt.ask_async(width=width, bottom_toolbar=toolbar)
+        return await _read_intent_line(prompt, quest, color=color, width=width)
     except (EOFError, KeyboardInterrupt):
+        print(pal.caret(enabled=color))
+        print()
         return None
 
 

@@ -214,3 +214,49 @@ async def test_resume_inert_receives_autonomous(
 
     assert rc == 0
     assert seen["autonomous"] is True
+
+
+class _QueueInertPrompt:
+    """Returns queued lines in order from ask_async (accepts the reader's kwargs)."""
+
+    def __init__(self, lines: list[str], **kwargs: object) -> None:
+        self._lines = list(lines)
+
+    async def ask_async(self, *args: object, **kwargs: object) -> str:
+        return self._lines.pop(0)
+
+
+@pytest.mark.anyio
+async def test_inert_ask_line_rejects_session_verb_and_reprompts(
+        monkeypatch, tmp_path: Path, capsys) -> None:
+    # A pre-launch session verb (/keep) is rejected with a nudge and re-prompt,
+    # exactly as the opening prompt does — only the real line is returned.
+    ch = _seed(tmp_path)
+    (ch.workflow_dir / "skills" / "user").mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(m, "should_use_color", lambda _s: False)
+    monkeypatch.setattr(m, "_term_width", lambda: 80)
+    monkeypatch.setattr(
+        m, "Prompt",
+        lambda **kw: _QueueInertPrompt(["/keep", "real answer"], **kw))
+
+    line = await m._inert_ask_line(ch)
+
+    assert line == "real answer"
+    assert "/keep" in capsys.readouterr().out   # the nudge explained the rejection
+
+
+@pytest.mark.anyio
+async def test_inert_ask_line_ctrl_d_retains_caret(
+        monkeypatch, tmp_path: Path, capsys) -> None:
+    # Ctrl-D retains the gold `> ` caret + one trailing blank, prints nothing
+    # else, and maps to None (the quest stays parked).
+    ch = _seed(tmp_path)
+    monkeypatch.setattr(m, "should_use_color", lambda _s: False)
+    monkeypatch.setattr(m, "_term_width", lambda: 80)
+    monkeypatch.setattr(
+        m, "Prompt", lambda **kw: _RaisingPrompt(EOFError, **kw))
+
+    line = await m._inert_ask_line(ch)
+
+    assert line is None
+    assert capsys.readouterr().out == "> \n\n"   # caret line, then one blank
