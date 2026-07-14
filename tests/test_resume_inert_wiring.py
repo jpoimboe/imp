@@ -260,3 +260,28 @@ async def test_inert_ask_line_ctrl_d_retains_caret(
 
     assert line is None
     assert capsys.readouterr().out == "> \n\n"   # caret line, then one blank
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("exc", [EOFError, KeyboardInterrupt])
+async def test_resume_inert_ctrl_d_retains_caret_parks_and_returns_zero(
+    exc: type[BaseException], monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
+    # AC7: cancel at the inert prompt parks the quest, returns 0, caret kept.
+    ch = _seed(tmp_path)
+    before = ch.events_path.read_bytes() if ch.events_path.exists() else b""
+    monkeypatch.setattr(m, "should_use_color", lambda _s: False)
+    monkeypatch.setattr(m, "_term_width", lambda: 80)
+    monkeypatch.setattr(m, "Prompt", lambda **kw: _RaisingPrompt(exc, **kw))
+
+    rc = await m._resume_inert(ch, "Which DB should I use?")
+
+    assert rc == 0
+    after = ch.events_path.read_bytes() if ch.events_path.exists() else b""
+    assert after == before                       # nothing launched -> quest parked
+    out = capsys.readouterr().out
+    assert "c · C · resuming" in out             # resuming header printed
+    assert "Which DB should I use?" in out       # pending question replayed
+    assert out.endswith("> \n\n")                # retained caret + one trailing blank
+    assert "cancelled" not in out                # no `imp: cancelled` message
