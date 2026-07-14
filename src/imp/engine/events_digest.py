@@ -111,6 +111,16 @@ def _h_step_started(payload: dict[str, Any]) -> str:
             f"provider={payload.get('provider')}")
 
 
+def _h_query_result(payload: dict[str, Any]) -> str:
+    # Positive-select five fields; every other payload key drops by construction.
+    cost = payload.get("total_cost_usd")
+    dur = payload.get("duration_ms")
+    cost_s = f"${cost:.2f}" if isinstance(cost, (int, float)) else f"${cost}"
+    dur_s = f"{dur / 1000:.1f}s" if isinstance(dur, (int, float)) else f"{dur}s"
+    return (f"cost={cost_s} dur={dur_s} turns={payload.get('num_turns')} "
+            f"stop={payload.get('stop_reason')} subtype={payload.get('subtype')}")
+
+
 def _generic(payload: dict[str, Any]) -> str:
     parts: list[str] = []
     for k, v in payload.items():
@@ -131,6 +141,7 @@ _HANDLERS: dict[str, Callable[[dict[str, Any]], str]] = {
     "awaiting_user_input": _h_awaiting,
     "llm_response": _h_llm_response,
     "step_started": _h_step_started,
+    "query_result": _h_query_result,
     "tool_call": _h_tool_call,
     "tool_result": _h_tool_result,
     "agent_output": _h_agent_output,

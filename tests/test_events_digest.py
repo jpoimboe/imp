@@ -299,3 +299,55 @@ def test_step_started_script_step_renders_none_model_provider() -> None:
     assert "provider=None" in line
     assert "pytest" not in line          # command dropped
     assert "\n" not in line
+
+
+def test_query_result_digest_positive_selects_and_humanizes() -> None:
+    ev = {
+        "id": "e14", "parent_id": None, "agent_id": "step:x/y",
+        "timestamp": "2026-07-01T00:00:13+00:00", "type": "query_result",
+        "payload": {
+            "total_cost_usd": 0.12345, "duration_ms": 4500,
+            "duration_api_ms": 4200, "num_turns": 7,
+            "stop_reason": "end_turn", "subtype": "success", "is_error": False,
+            "usage": {"input_tokens": 5}, "model_usage": {"claude-x": {}},
+            "permission_denials": [{"tool": "bash"}],
+        },
+    }
+    line = digest_event(ev)
+    assert "cost=$0.12" in line          # rounded from 0.12345
+    assert "dur=4.5s" in line            # 4500ms humanized
+    assert "turns=7" in line
+    assert "stop=end_turn" in line
+    assert "subtype=success" in line
+    # noisy dict/list placeholders and bookkeeping keys dropped by construction
+    assert "usage=" not in line
+    assert "model_usage" not in line
+    assert "permission_denials" not in line
+    assert "duration_api_ms" not in line
+    assert "\n" not in line
+
+
+def test_query_result_digest_renders_error_subtype() -> None:
+    ev = {
+        "id": "e15", "parent_id": None, "agent_id": "step:x/y",
+        "timestamp": "2026-07-01T00:00:14+00:00", "type": "query_result",
+        "payload": {"total_cost_usd": 0.0, "duration_ms": 100, "num_turns": 1,
+                    "stop_reason": None, "subtype": "error_during_execution",
+                    "is_error": True, "usage": {}, "model_usage": {}},
+    }
+    line = digest_event(ev)
+    assert "subtype=error_during_execution" in line
+    assert "cost=$0.00" in line
+
+
+def test_query_result_digest_guards_none_cost_and_duration() -> None:
+    ev = {
+        "id": "e16", "parent_id": None, "agent_id": "step:x/y",
+        "timestamp": "2026-07-01T00:00:15+00:00", "type": "query_result",
+        "payload": {"total_cost_usd": None, "duration_ms": None,
+                    "num_turns": 0, "stop_reason": None, "subtype": None},
+    }
+    line = digest_event(ev)              # must not raise on None numerics
+    assert "cost=$None" in line
+    assert "dur=Nones" in line
+    assert "\n" not in line
