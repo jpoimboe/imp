@@ -45,7 +45,7 @@ def test_project_memory_all_md_carries_prerelease_pointers() -> None:
 
 
 def test_imp_conventions_has_visual_and_plainspeak_sections() -> None:
-    body = pathlib.Path("docs/imp-conventions.md").read_text()
+    body = pathlib.Path("docs/internals/conventions.md").read_text()
     assert "## Visual identity" in body
     assert "## Plain-speak copy" in body
     assert "imp-native" in body
@@ -54,7 +54,7 @@ def test_imp_conventions_has_visual_and_plainspeak_sections() -> None:
 
 
 def test_imp_invariants_has_layering_and_future_sections() -> None:
-    body = pathlib.Path("docs/imp-invariants.md").read_text()
+    body = pathlib.Path("docs/internals/invariants.md").read_text()
     assert "## Layering invariants" in body
     assert "## Future / unbuilt" in body
     assert "$IMP_TEST_COMMAND" in body
@@ -65,7 +65,7 @@ def test_imp_invariants_has_layering_and_future_sections() -> None:
 
 
 def test_imp_operator_notes_has_unblocking_section() -> None:
-    body = pathlib.Path("docs/imp-operator-notes.md").read_text()
+    body = pathlib.Path("docs/guide/operator-notes.md").read_text()
     assert "## Unblocking a paused quest" in body
     assert "snapshot" in body
     assert "cherry-pick" in body
