@@ -212,3 +212,105 @@ def test_cmd_events_non_tty_no_quests_prints_message(
     out = capsys.readouterr().out
     assert rc == 0
     assert "No quests yet — start one with imp new" in out
+
+
+def test_cmd_events_ambiguous_token_tty_routes_to_scoped_picker(
+    monkeypatch, tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
+    monkeypatch.setattr(m, "_interactive", lambda: True)
+    monkeypatch.setattr(
+        m, "_iter_quest_ids",
+        lambda c: ["2026-06-10-foo", "2026-06-11-foo", "2026-06-12-bar"])
+
+    def boom_resolve(*a, **k):
+        raise AssertionError("_resolve_id invoked for an ambiguous tty token")
+
+    monkeypatch.setattr(m, "_resolve_id", boom_resolve)
+    captured: dict[str, object] = {}
+
+    async def fake_matches(control, matches):
+        captured["matches"] = matches
+        return "2026-06-10-foo"
+
+    monkeypatch.setattr(m, "_pick_events_matches", fake_matches)
+    monkeypatch.setattr(m, "_unstarted_backlog_meta", lambda c, i: None)
+    seen: dict[str, str] = {}
+
+    def fake_load(control, quest_id):
+        seen["id"] = quest_id
+        return None
+
+    monkeypatch.setattr(m, "_load_events_for_id", fake_load)
+    rc = m._cmd_events(_events_ns(token="foo"))
+    # picker receives exactly the substring matches (the "bar" id is excluded) —
+    # the invariant that picker and _resolve_id agree on the candidate set.
+    assert captured["matches"] == ["2026-06-10-foo", "2026-06-11-foo"]
+    assert seen["id"] == "2026-06-10-foo"
+    assert rc == 2
+
+
+def test_cmd_events_ambiguous_token_non_tty_falls_through_to_resolve_id(
+    monkeypatch, tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
+    monkeypatch.setattr(m, "_interactive", lambda: False)
+    monkeypatch.setattr(
+        m, "_iter_quest_ids", lambda c: ["2026-06-10-foo", "2026-06-11-foo"])
+
+    def raise_exit(control, token):
+        raise SystemExit(2)  # real _resolve_id → _exit_ambiguous prints + exits 2
+
+    monkeypatch.setattr(m, "_resolve_id", raise_exit)
+
+    def boom(*a, **k):
+        raise AssertionError("picker invoked on a non-tty ambiguous token")
+
+    monkeypatch.setattr(m, "_pick_events_matches", boom)
+    assert m._cmd_events(_events_ns(token="foo")) == 2
+
+
+def test_cmd_events_single_match_token_resolves_without_picker(
+    monkeypatch, tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
+    monkeypatch.setattr(m, "_interactive", lambda: True)  # tty, yet no picker
+    monkeypatch.setattr(
+        m, "_iter_quest_ids", lambda c: ["2026-06-10-uniq", "2026-06-11-other"])
+    monkeypatch.setattr(m, "_resolve_id", lambda c, t: "2026-06-10-uniq")
+
+    def boom(*a, **k):
+        raise AssertionError("picker invoked for a single-match token")
+
+    monkeypatch.setattr(m, "_pick_events_matches", boom)
+    monkeypatch.setattr(m, "_unstarted_backlog_meta", lambda c, i: None)
+    seen: dict[str, str] = {}
+
+    def fake_load(control, quest_id):
+        seen["id"] = quest_id
+        return None
+
+    monkeypatch.setattr(m, "_load_events_for_id", fake_load)
+    rc = m._cmd_events(_events_ns(token="uniq"))
+    assert seen["id"] == "2026-06-10-uniq"
+    assert rc == 2
+
+
+def test_cmd_events_backlog_selection_prints_friendly_line_and_returns_0(
+    monkeypatch, tmp_path: Path, capsys,
+) -> None:
+    monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
+    monkeypatch.setattr(m, "_interactive", lambda: False)
+    monkeypatch.setattr(m, "_iter_quest_ids", lambda c: ["2026-06-10-back01"])
+    monkeypatch.setattr(m, "_resolve_id", lambda c, t: "2026-06-10-back01")
+    monkeypatch.setattr(
+        m, "_unstarted_backlog_meta", lambda c, i: {"materialized": False})
+
+    def boom(*a, **k):
+        raise AssertionError("event load attempted for an un-started backlog quest")
+
+    monkeypatch.setattr(m, "_load_events_for_id", boom)
+    rc = m._cmd_events(_events_ns(token="back01"))
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert out == "Quest 2026-06-10-back01 hasn't started yet — no events to show.\n"
