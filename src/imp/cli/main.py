@@ -1830,6 +1830,24 @@ async def _pick_log_target(control: Path) -> str | int:
     return await _pick_full_pool_target(control, header=_LOG_PICKER_HEADER)
 
 
+def _with_trailing_blank(lines: list[str]) -> list[str]:
+    """Strip trailing empty strings, then append exactly one blank line."""
+    out = list(lines)
+    while out and out[-1] == "":
+        out.pop()
+    out.append("")
+    return out
+
+
+def _emit_human(lines: Iterable[str]) -> None:
+    """Print lines to stdout; add one trailing blank line only on a tty."""
+    out = list(lines)
+    if sys.stdout.isatty():
+        out = _with_trailing_blank(out)
+    for line in out:
+        print(line)
+
+
 def _page_or_print(lines: Iterable[str], *, no_pager: bool) -> None:
     # Pages lines through $PAGER on a tty; falls back to print() otherwise.
     if no_pager or not sys.stdout.isatty():
