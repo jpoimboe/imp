@@ -134,6 +134,7 @@ class ReplyInterjectRouter:
 
 
 OPENING_HINT = "type a message, /help for commands, or /model to switch models"
+INERT_HINT = "type your reply, /help for commands"
 _OPENING_SESSION_VERBS = ("/keep", "/shelve", "/clear", "/abandon")
 
 
@@ -686,12 +687,12 @@ def _print_opening(quest: Quest, marker: str, *, interactive: bool, color: bool)
 
 async def _read_intent_line(
     prompt: Any, quest: Any, *, color: bool, width: int,
-    model_sink: dict[str, str] | None = None,
+    model_sink: dict[str, str] | None = None, hint: str = OPENING_HINT,
 ) -> str:
-    """Read one opening-intent line, capturing an opening `/model` selection into `model_sink`."""
+    """Read one pre-session intent line, capturing a `/model` selection into `model_sink`."""
     while True:
         line = await ask_line_with_slash(
-            prompt, None, quest, color=color, width=width, hint=OPENING_HINT)
+            prompt, None, quest, color=color, width=width, hint=hint)
         if isinstance(line, SkillRequest):
             # Opening prompt is pre-session: no daemon gate exists yet, so the
             # skill body is loaded here and becomes the opening message.
@@ -703,8 +704,7 @@ async def _read_intent_line(
                 model_sink["model"] = line.strip()[len("/model "):].strip()
             continue
         if line in _OPENING_SESSION_VERBS:
-            print(f"{line} isn't available at the opening prompt — "
-                  f"describe your quest, or /help for commands.")
+            print(f"{line} isn't available here — /help for commands.")
             continue
         return line
 
@@ -1216,7 +1216,8 @@ async def _inert_ask_line(quest: Quest) -> str | None:
         editing_mode=_editing_mode(quest.control_root),
         color=color, quest=quest)
     try:
-        return await _read_intent_line(prompt, quest, color=color, width=width)
+        return await _read_intent_line(
+            prompt, quest, color=color, width=width, hint=INERT_HINT)
     except (EOFError, KeyboardInterrupt):
         print(pal.caret(enabled=color))
         print()
