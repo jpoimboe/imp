@@ -926,6 +926,57 @@ def test_resolve_policy_binds_quest_home_rw(tmp_path):
     assert f"--bind {home} {home}" in argv
 
 
+def test_resolve_policy_masks_quest_steps_dirs(tmp_path):
+    control, wt = _layout(tmp_path)
+    quest_dir = control / ".imp" / "quests" / "abc"
+    (quest_dir / "steps").mkdir(parents=True)
+    (quest_dir / "artifacts").mkdir()
+    (quest_dir / "workflow").mkdir()
+    (quest_dir / "events.jsonl").write_text("")
+    sib_dir = control / ".imp" / "quests" / "sib"
+    (sib_dir / "steps").mkdir(parents=True)
+    pol = resolve_policy(
+        worktree=wt, control_root=control, quest_id="abc",
+        cfg=SandboxConfig(), engine_env_result={}, environ={},
+        available=True, quest_dir=quest_dir,
+    )
+    assert str(quest_dir / "steps") in pol.secret_dirs
+    assert str(sib_dir / "steps") in pol.secret_dirs
+
+
+def test_resolve_policy_allows_read_reflects_steps_mask(tmp_path):
+    control, wt = _layout(tmp_path)
+    quest_dir = control / ".imp" / "quests" / "abc"
+    (quest_dir / "steps").mkdir(parents=True)
+    (quest_dir / "artifacts").mkdir()
+    (quest_dir / "workflow").mkdir()
+    (quest_dir / "events.jsonl").write_text("")
+    sib_dir = control / ".imp" / "quests" / "sib"
+    (sib_dir / "steps").mkdir(parents=True)
+    pol = resolve_policy(
+        worktree=wt, control_root=control, quest_id="abc",
+        cfg=SandboxConfig(), engine_env_result={}, environ={},
+        available=True, quest_dir=quest_dir,
+    )
+    assert pol.allows_read(quest_dir / "steps" / "phase" / "x") is False
+    assert pol.allows_read(quest_dir / "artifacts" / "spec.md") is True
+    assert pol.allows_read(quest_dir / "workflow" / "w.md") is True
+    assert pol.allows_read(quest_dir / "events.jsonl") is True
+
+
+def test_resolve_policy_steps_mask_is_existence_gated(tmp_path):
+    control, wt = _layout(tmp_path)
+    quest_dir = control / ".imp" / "quests" / "abc"
+    quest_dir.mkdir(parents=True)
+    # No steps/ subdirectory created — the existence-gate must produce no entry.
+    pol = resolve_policy(
+        worktree=wt, control_root=control, quest_id="abc",
+        cfg=SandboxConfig(), engine_env_result={}, environ={},
+        available=True, quest_dir=quest_dir,
+    )
+    assert str(quest_dir / "steps") not in pol.secret_dirs
+
+
 def test_readonly_overlay_denies_write_inside_allows_sibling():
     p = _policy(
         worktree="/wt", git_common_dir="/ctl/.git",
