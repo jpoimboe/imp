@@ -99,8 +99,8 @@ def test_search_content_returns_id_title_content_and_last_activity(tmp_path: Pat
     hits = archive_read.search_archive_content(tmp_path, "dark")
     assert [h[0] for h in hits] == ["alpha"]
     assert hits[0][1] == "Dark mode toggle"
-    assert len(hits[0]) == 4                       # (id, title, content, last_activity)
-    assert hits[0][3] == "2026-06-01T00:00:01+00:00"   # the event's timestamp
+    assert len(hits[0]) == 5                       # (id, title, content, status, last_activity)
+    assert hits[0][4] == "2026-06-01T00:00:01+00:00"   # the event's timestamp
 
 
 def test_search_content_matches_title_only_when_body_lacks_term(tmp_path: Path) -> None:
@@ -111,6 +111,15 @@ def test_search_content_matches_title_only_when_body_lacks_term(tmp_path: Path) 
     _archive(tmp_path, "other", "Login flow",
              events_text=_prose_line("nothing relevant in this body"))
     assert [h[0] for h in archive_read.search_archive_content(tmp_path, "dark")] == ["alpha"]
+
+
+def test_search_content_returns_quads_with_status(tmp_path: Path) -> None:
+    _archive(tmp_path, "alpha", "Dark mode toggle", status="completed")
+    hits = archive_read.search_archive_content(tmp_path, "dark")
+    assert [h[0] for h in hits] == ["alpha"]
+    assert hits[0][1] == "Dark mode toggle"
+    assert len(hits[0]) == 5                  # (id, title, content, status, last_activity)
+    assert hits[0][3] == "completed"          # status carried for disposition filtering
 
 
 def test_search_content_missing_index_returns_empty(tmp_path: Path) -> None:

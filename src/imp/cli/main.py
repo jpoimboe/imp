@@ -3116,7 +3116,7 @@ def _search_backlog(control: Path, query: str) -> list[_SearchHit]:
 def _search_archived(control: Path, query: str) -> list[_SearchHit]:
     return [
         _SearchHit(cid, title, "archive", content, last)
-        for (cid, title, content, last) in archive_read.search_archive_content(control, query)
+        for (cid, title, content, _status, last) in archive_read.search_archive_content(control, query)
     ]
 
 
