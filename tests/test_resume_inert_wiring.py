@@ -136,6 +136,38 @@ async def test_resume_routes_to_inert_reading_recorded_message(
     assert seen["question"] == "Which DB should I use?"
 
 
+class _CapturingPrompt:
+    def __init__(self, sink: dict[str, object], **kwargs: object) -> None:
+        self._sink = sink
+
+    async def ask_async(self, *args: object, **kwargs: object) -> str:
+        self._sink["bottom_toolbar"] = kwargs.get("bottom_toolbar")
+        self._sink["width"] = kwargs.get("width")
+        return "go"
+
+
+@pytest.mark.anyio
+async def test_inert_ask_line_passes_identity_toolbar(
+        monkeypatch, tmp_path: Path) -> None:
+    from imp.cli.live_driver import compose_identity_toolbar
+
+    ch = _seed(tmp_path)
+    monkeypatch.setattr(m, "should_use_color", lambda _stream: False)
+    monkeypatch.setattr(m, "_term_width", lambda: 80)
+    sink: dict[str, object] = {}
+    monkeypatch.setattr(
+        m, "Prompt", lambda **kwargs: _CapturingPrompt(sink, **kwargs))
+
+    line = await m._inert_ask_line(ch)
+
+    assert line == "go"
+    expected = compose_identity_toolbar(
+        quest_id="c", title="C", color=False, width=80)
+    assert expected is not None
+    assert sink["bottom_toolbar"] == expected
+    assert sink["width"] == 80
+
+
 class _RaisingPrompt:
     def __init__(self, exc: type[BaseException], **kwargs: object) -> None:
         self._exc = exc
