@@ -103,7 +103,7 @@ def test_introspection_documents_the_three_tier_split() -> None:
 
 
 def test_introspection_documents_events_full_and_one_row() -> None:
-    body = load_internal_skill(_skills_dir(), "imp-introspection")
+    body = _introspection_doc()
     low = body.lower()
     # The digest tier documents the one-terminal-row clip and the --full widen.
     assert "one terminal row" in low
@@ -113,7 +113,7 @@ def test_introspection_documents_events_full_and_one_row() -> None:
 
 
 def test_introspection_documents_log_windowing_filters() -> None:
-    body = load_internal_skill(_skills_dir(), "imp-introspection")
+    body = _introspection_doc()
     # imp log now takes the same windowing filters imp events has (no --type).
     assert "imp log <id> --step" in body
     # The full windowing set is documented together in the log context, tying
