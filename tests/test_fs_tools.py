@@ -88,7 +88,7 @@ def test_write_file_allowed_by_loose_default(tmp_path: Path) -> None:
 
 def test_write_file_denied_under_readonly_worktree(tmp_path: Path) -> None:
     ctx = _ctx(tmp_path)
-    ctx.sandbox_policy = SandboxPolicy(
+    ctx.base_sandbox_policy = SandboxPolicy(
         active=True, worktree=str(tmp_path), git_common_dir=str(tmp_path / ".git"),
         git_ro_remask=(), writable_caches=(), extra_readable=(), extra_writable=(),
         secret_dirs=(), secret_files=(), setenv=(), network=True, note="",
@@ -135,7 +135,7 @@ def test_write_then_read_out_of_worktree_unsandboxed(tmp_path: Path) -> None:
 
 def test_write_out_of_worktree_denied_when_sandboxed_and_uncovered(tmp_path: Path) -> None:
     ctx = _ctx(tmp_path, "read", "write")
-    ctx.sandbox_policy = SandboxPolicy(
+    ctx.base_sandbox_policy = SandboxPolicy(
         active=True, worktree=str(tmp_path), git_common_dir=str(tmp_path / ".git"),
         git_ro_remask=(), writable_caches=(), extra_readable=(), extra_writable=(),
         secret_dirs=(), secret_files=(), setenv=(), network=True, note="",
@@ -422,7 +422,7 @@ def test_image_read_denied_under_secret_dir(tmp_path: Path) -> None:
     secret.mkdir()
     (secret / "shot.png").write_bytes(_png_bytes(8, 8))
     ctx = _vision_ctx(tmp_path)
-    ctx.sandbox_policy = SandboxPolicy(
+    ctx.base_sandbox_policy = SandboxPolicy(
         active=True, worktree=str(tmp_path), git_common_dir=str(tmp_path / ".git"),
         git_ro_remask=(), writable_caches=(), extra_readable=(), extra_writable=(),
         secret_dirs=(str(secret),), secret_files=(), setenv=(), network=True, note="",

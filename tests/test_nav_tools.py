@@ -319,7 +319,7 @@ def test_grep_external_masked_target_denied_when_policy_active(tmp_path: Path) -
     secret.mkdir()
     (secret / "id_rsa").write_text("KEY\n")
     ctx = _ctx(wt)
-    ctx.sandbox_policy = _policy(wt, secret_dirs=(str(secret),))
+    ctx.base_sandbox_policy = _policy(wt, secret_dirs=(str(secret),))
     with pytest.raises(PermissionDenied):
         _grep(ctx, pattern="KEY", path=str(secret))
 
@@ -348,7 +348,7 @@ def test_glob_external_masked_base_denied_when_policy_active(tmp_path: Path) -> 
     secret.mkdir()
     (secret / "id_rsa").write_text("")
     ctx = _ctx(wt)
-    ctx.sandbox_policy = _policy(wt, secret_dirs=(str(secret),))
+    ctx.base_sandbox_policy = _policy(wt, secret_dirs=(str(secret),))
     with pytest.raises(PermissionDenied):
         _glob(ctx, pattern="*", path=str(secret))
 
@@ -365,7 +365,7 @@ def test_glob_external_per_result_symlink_into_masked_dir_dropped(tmp_path: Path
     (ext / "link").symlink_to(secret / "id_rsa")
     (ext / "ok.txt").write_text("")
     ctx = _ctx(wt)
-    ctx.sandbox_policy = _policy(wt, secret_dirs=(str(secret),))
+    ctx.base_sandbox_policy = _policy(wt, secret_dirs=(str(secret),))
     out = _glob(ctx, pattern="*", path=str(ext))
     assert "ok.txt" in out
     assert "link" not in out                   # symlink into masked dir must be dropped
@@ -377,7 +377,7 @@ def test_glob_inworktree_masked_file_dropped(tmp_path: Path) -> None:
     (wt / "ok.txt").write_text("")
     (wt / "secret.txt").write_text("")
     ctx = _ctx(wt)
-    ctx.sandbox_policy = _policy(wt, secret_files=(str(wt / "secret.txt"),))
+    ctx.base_sandbox_policy = _policy(wt, secret_files=(str(wt / "secret.txt"),))
     out = _glob(ctx, pattern="*.txt")
     assert "ok.txt" in out
     assert "secret.txt" not in out          # in-worktree masked file must be dropped
@@ -412,7 +412,7 @@ def test_grep_external_walk_prunes_masked_dir(tmp_path: Path) -> None:
     sub.mkdir()
     (sub / "id_rsa").write_text("SECRET key\n")
     ctx = _ctx(wt)
-    ctx.sandbox_policy = _policy(wt, secret_dirs=(str(sub),))
+    ctx.base_sandbox_policy = _policy(wt, secret_dirs=(str(sub),))
     out = _grep(ctx, pattern="SECRET", path=str(ext))
     assert (ext / "ok.txt").as_posix() in out
     assert "id_rsa" not in out                 # masked dir pruned, file never scanned
@@ -430,7 +430,7 @@ def test_grep_external_walk_symlink_into_masked_dir_dropped(tmp_path: Path) -> N
     (ext / "link").symlink_to(secret / "id_rsa")
     (ext / "ok.txt").write_text("KEY ok\n")
     ctx = _ctx(wt)
-    ctx.sandbox_policy = _policy(wt, secret_dirs=(str(secret),))
+    ctx.base_sandbox_policy = _policy(wt, secret_dirs=(str(secret),))
     out = _grep(ctx, pattern="KEY", path=str(ext))
     assert (ext / "ok.txt").as_posix() in out
     assert "link" not in out                   # symlink into masked dir dropped
@@ -729,7 +729,7 @@ def test_grep_git_path_respects_sandbox_masking(tmp_path: Path) -> None:
     subprocess.run(["git", "commit", "-qm", "add files"], cwd=tmp_path,
                    capture_output=True, text=True, check=True)
     ctx = _ctx(tmp_path)
-    ctx.sandbox_policy = _policy(tmp_path, secret_files=(str(tmp_path / "secret.py"),))
+    ctx.base_sandbox_policy = _policy(tmp_path, secret_files=(str(tmp_path / "secret.py"),))
     out = _grep(ctx, pattern="NEEDLE", path=".")
     assert "ok.py" in out
     assert "secret.py" not in out

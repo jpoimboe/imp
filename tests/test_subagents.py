@@ -833,7 +833,7 @@ async def test_dispatch_task_threads_sandbox_policy(tmp_path: Path) -> None:
         secret_dirs=(), secret_files=(),
         setenv=(), network=True, note="",
     )
-    ctx.sandbox_policy = pol
+    ctx.base_sandbox_policy = pol
 
     await dispatch_task(ctx, "helper", "do it")
     assert capture["inv"].sandbox_policy is pol
@@ -858,7 +858,7 @@ async def test_dispatch_task_inherits_readonly_overlay(tmp_path: Path) -> None:
         capture=capture)
     ctx.quest_context = QuestContext(id="c", title="C", project_root=tmp_path,
                                        workflow_dir=tmp_path / "wf")
-    ctx.sandbox_policy = SandboxPolicy(
+    ctx.base_sandbox_policy = SandboxPolicy(
         active=True, worktree=str(tmp_path), git_common_dir=str(tmp_path / ".git"),
         git_ro_remask=(), writable_caches=(), extra_readable=(), extra_writable=(),
         secret_dirs=(), secret_files=(), setenv=(), network=True, note="",

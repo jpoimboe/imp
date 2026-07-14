@@ -192,7 +192,7 @@ def test_authorize_fs_worktree_writable_by_default_when_unsandboxed(tmp_path: Pa
 
 def test_authorize_fs_worktree_writable_under_active_policy(tmp_path: Path) -> None:
     ctx = _ctx(tmp_path)
-    ctx.sandbox_policy = _active_policy(tmp_path)
+    ctx.base_sandbox_policy = _active_policy(tmp_path)
     assert ctx.authorize_fs(("write",), "src/x.py") == (tmp_path / "src" / "x.py").resolve()
 
 
@@ -201,7 +201,7 @@ def test_authorize_fs_quest_home_writable_by_default(tmp_path: Path) -> None:
     # special config must succeed (quest_home is an rw bind).
     pol = _active_policy(tmp_path)
     ctx = _ctx(tmp_path)
-    ctx.sandbox_policy = pol
+    ctx.base_sandbox_policy = pol
     target = Path(pol.quest_home) / "progress.md"
     assert ctx.authorize_fs(("write",), str(target)) == target.resolve()
 
@@ -209,7 +209,7 @@ def test_authorize_fs_quest_home_writable_by_default(tmp_path: Path) -> None:
 def test_authorize_fs_read_only_overlay_denies_worktree_allows_quest_home(tmp_path: Path) -> None:
     pol = _active_policy(tmp_path, readonly_overlays=(str(tmp_path),))
     ctx = _ctx(tmp_path)
-    ctx.sandbox_policy = pol
+    ctx.base_sandbox_policy = pol
     with pytest.raises(PermissionDenied):
         ctx.authorize_fs(("write",), "src/x.py")            # worktree locked
     target = Path(pol.quest_home) / "progress.md"
@@ -225,7 +225,7 @@ def test_authorize_fs_out_of_worktree_unsandboxed_allows(tmp_path: Path) -> None
 
 def test_authorize_fs_out_of_worktree_sandboxed_read(tmp_path: Path) -> None:
     ctx = _ctx(tmp_path)
-    ctx.sandbox_policy = _active_policy(tmp_path)
+    ctx.base_sandbox_policy = _active_policy(tmp_path)
     # secret-masked read denied; ordinary out-of-worktree read allowed
     with pytest.raises(PermissionDenied):
         ctx.authorize_fs(("read",), "/home/u/.ssh/id_rsa")
@@ -236,7 +236,7 @@ def test_authorize_fs_out_of_worktree_sandboxed_read(tmp_path: Path) -> None:
 
 def test_authorize_fs_out_of_worktree_sandboxed_write(tmp_path: Path) -> None:
     ctx = _ctx(tmp_path)
-    ctx.sandbox_policy = _active_policy(tmp_path)
+    ctx.base_sandbox_policy = _active_policy(tmp_path)
     assert ctx.authorize_fs(("write",), "/tmp/scratch.txt") == Path("/tmp/scratch.txt")
     with pytest.raises(PermissionDenied):
         ctx.authorize_fs(("write",), "/usr/lib/x")          # no writable bind
@@ -350,3 +350,36 @@ def test_tool_context_quest_home_defaults_none(tmp_path: Path) -> None:
     assert ctx.quest_home == tmp_path / ".imp" / "quests" / "abc"
     assert ToolContext(project_root=tmp_path, events_path=tmp_path / "e.jsonl",
                        quest_home=tmp_path).quest_home == tmp_path
+
+
+def test_sandbox_policy_is_live_property(tmp_path: Path) -> None:
+    """sandbox_policy is a live computed property reading coordinator.unsandboxed."""
+    from types import SimpleNamespace
+
+    ctx = _ctx(tmp_path)
+    pol = _active_policy(tmp_path)
+
+    # No coordinator — base policy returned as-is.
+    ctx.base_sandbox_policy = pol
+    assert ctx.sandbox_policy is pol
+
+    # Coordinator present but NOT unsandboxed — still base policy.
+    ctx.coordinator = SimpleNamespace(unsandboxed=False)
+    assert ctx.sandbox_policy is pol
+    assert ctx.sandbox_policy.active is True
+
+    # Coordinator flipped to unsandboxed=True — computed inactive copy returned.
+    ctx.coordinator = SimpleNamespace(unsandboxed=True)
+    result = ctx.sandbox_policy
+    assert result is not pol
+    assert result.active is False
+    assert result.note == "unsandboxed_override"
+
+    # Flip back — policy goes live again WITHOUT re-entering the step.
+    ctx.coordinator = SimpleNamespace(unsandboxed=False)
+    assert ctx.sandbox_policy.active is True
+
+    # base_sandbox_policy None → None regardless of coordinator.
+    ctx.base_sandbox_policy = None
+    ctx.coordinator = SimpleNamespace(unsandboxed=True)
+    assert ctx.sandbox_policy is None

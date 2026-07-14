@@ -99,7 +99,7 @@ class ScriptedAgentRunner:
         ctx.test_gates = invocation.test_gates
         ctx.pythonpath = invocation.pythonpath
         ctx.non_interactive = invocation.headless
-        ctx.sandbox_policy = invocation.sandbox_policy
+        ctx.base_sandbox_policy = invocation.sandbox_policy
         ctx.user_input_fn = invocation.user_input_fn
         ctx.event_log = elog
         self._ctx = ctx

@@ -100,7 +100,7 @@ def _ctx(worktree: Path, policy: SandboxPolicy) -> ToolContext:
         project_root=worktree,
         workflow_dir=worktree / ".imp" / "wf",
     )
-    ctx.sandbox_policy = policy
+    ctx.base_sandbox_policy = policy
     return ctx
 
 
@@ -538,7 +538,7 @@ def test_git_commit_works_but_escape_vectors_blocked() -> None:
             project_root=wt_path,
             workflow_dir=wt_path / ".imp" / "wf",
         )
-        ctx.sandbox_policy = pol
+        ctx.base_sandbox_policy = pol
 
         # ------------------------------------------------------------------
         # 1. git commit SUCCEEDS and commit is visible on the host
@@ -751,7 +751,7 @@ def _refprot_ctx(control: Path, worktree: Path) -> tuple[ToolContext, SandboxPol
     ctx.quest_context = QuestContext(
         title="Ref Test", project_root=worktree,
         workflow_dir=worktree / ".imp" / "wf")
-    ctx.sandbox_policy = pol
+    ctx.base_sandbox_policy = pol
     return ctx, pol
 
 

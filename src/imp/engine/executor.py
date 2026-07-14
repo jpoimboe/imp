@@ -747,19 +747,6 @@ def _apply_readonly_overlay(policy: Any, step: Step, project_root: Path) -> Any:
         policy, readonly_overlays=policy.readonly_overlays + overlays)
 
 
-def _apply_unsandboxed_override(policy: Any, step: Step, coordinator: Any) -> Any:
-    """Compose the step-scoped unsandboxed override into a dispatch-time inactive
-    policy copy. Applies to ANY running step while the override is set — its
-    lifetime is bounded by the step (cleared at step advance, restored on resume),
-    not by whether the step is interactive. No-op when the policy is None, the
-    coordinator is absent, or the override is not set."""
-    if policy is None:
-        return policy
-    if coordinator is None or not coordinator.unsandboxed:
-        return policy
-    return dataclasses.replace(policy, active=False, note="unsandboxed_override")
-
-
 def _attach_home_layer(
     policy: Any, step: Step, quest: Quest,
 ) -> tuple[Any, Callable[[], None]]:
@@ -813,7 +800,6 @@ async def _dispatch_step(
         return await _route_acquire(step, quest, state, log, wait_for_turn_fn)
 
     sandbox_policy = _apply_readonly_overlay(sandbox_policy, step, quest.project_root)
-    sandbox_policy = _apply_unsandboxed_override(sandbox_policy, step, coordinator)
 
     if step.kind == "branch":
         return _route_branch(step, quest, state, log)

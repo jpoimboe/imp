@@ -1499,7 +1499,7 @@ class ClaudeCodeAgentRunner:
         ctx.test_gates = invocation.test_gates
         ctx.pythonpath = invocation.pythonpath
         ctx.non_interactive = invocation.headless
-        ctx.sandbox_policy = invocation.sandbox_policy
+        ctx.base_sandbox_policy = invocation.sandbox_policy
         ctx.checkpoint_threshold = invocation.checkpoint_threshold
         ctx.event_log = elog
         if self._user_input_fn is not None:
