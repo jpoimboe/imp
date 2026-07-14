@@ -243,13 +243,12 @@ def test_bash_caps_runaway_stderr(tmp_path: Path) -> None:
     assert ctx.running_processes == []
 
 
-def test_bash_wall_clock_timeout(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    # B.1: a command sleeping past the wall-clock is killed and raises ToolAborted
-    # ('timed-out'), asserted at the TOOL layer. Inject a short timeout.
+def test_bash_default_foreground_timeout(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # AC 3: with NO per-call timeout, the DEFAULT foreground deadline reaps a long
+    # command — monkeypatch the default tiny and assert ToolAborted('timed-out').
     import imp.agents.tools.bash as bash_mod
-    from imp.agents.tools.limits import ToolAborted
 
-    monkeypatch.setattr(bash_mod, "TOOL_WALLCLOCK_TIMEOUT_S", 0.3)
+    monkeypatch.setattr(bash_mod, "BASH_FOREGROUND_TIMEOUT_S", 0.3)
     ctx = _ctx(tmp_path)
     with pytest.raises(ToolAborted) as ei:
         _run_bash(ctx, {"command": "sleep 30"})
@@ -465,4 +464,67 @@ def test_bash_with_coordinator_no_pause_completes_normally(tmp_path: Path) -> No
     assert "hi" in out["stdout"]
     assert "status" not in out                 # normal result, not a tombstone
     assert "kill_reason" not in out
+    assert ctx.running_processes == []
+
+
+def test_effective_foreground_timeout_defaults_and_clamps() -> None:
+    # AC 4: None/0 -> default; a value under the cap is used as-is; a value ABOVE
+    # the cap clamps down to the cap. Expectations derive from the spec's 120/600.
+    from imp.agents.tools.bash import _effective_foreground_timeout
+    from imp.agents.tools.limits import (
+        BASH_FOREGROUND_TIMEOUT_MAX_S,
+        BASH_FOREGROUND_TIMEOUT_S,
+    )
+    assert _effective_foreground_timeout(None) == BASH_FOREGROUND_TIMEOUT_S
+    assert _effective_foreground_timeout(0) == BASH_FOREGROUND_TIMEOUT_S
+    assert _effective_foreground_timeout(60) == 60
+    assert _effective_foreground_timeout(5000) == BASH_FOREGROUND_TIMEOUT_MAX_S
+
+
+def test_bash_timeout_param_enforced_foreground(tmp_path: Path) -> None:
+    # AC 3 & 4: a per-call `timeout` bounds a foreground command — sleep 30 under a
+    # 0.3 s timeout is SIGKILL'd and raises ToolAborted('timed-out'), not a result.
+    ctx = _ctx(tmp_path)
+    with pytest.raises(ToolAborted) as ei:
+        _run_bash(ctx, {"command": "sleep 30", "timeout": 0.3})
+    assert ei.value.reason == "timed-out"
+    assert ctx.running_processes == []
+
+
+def test_bash_schema_advertises_timeout_param() -> None:
+    # AC 4: the tool the model sees exposes `timeout` (optional) and its
+    # description states the positive-seconds / 600 s-cap contract.
+    tool = get_registry()["bash"]
+    assert "timeout" in tool.input_schema["properties"]
+    assert "timeout" not in tool.input_schema.get("required", [])
+    assert "600" in tool.description
+    assert "120" in tool.description
+
+
+def test_bash_background_ignores_timeout(tmp_path: Path) -> None:
+    # AC 4: run_in_background=True structurally bypasses the foreground deadline —
+    # a tiny `timeout` does NOT abort the spawn; the call returns a background
+    # descriptor ({id, ...}) at once and the child keeps running past that timeout.
+    import contextlib as _cl
+    import signal as _sig
+
+    from imp.agents.tools.context import kill_process_group
+
+    ctx = _ctx(tmp_path)
+    ctx.agent_id = "step:t/coder"
+    ctx.background_enabled = True
+
+    async def go() -> dict:
+        raw = await get_registry()["bash"].async_invoke(
+            ctx, {"command": "sleep 30", "run_in_background": True, "timeout": 0.1})
+        out = json.loads(raw)
+        for bp in ctx.background_processes.values():
+            await kill_process_group(bp.proc, _sig.SIGKILL)
+            with _cl.suppress(Exception):
+                await bp.proc.wait()
+        return out
+
+    out = anyio.run(go)
+    assert "id" in out              # a background descriptor, not a timed-out abort
+    assert "returncode" not in out  # bg spawn returns immediately, no rc yet
     assert ctx.running_processes == []

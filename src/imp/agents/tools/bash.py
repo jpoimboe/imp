@@ -25,9 +25,10 @@ import anyio
 from imp.agents.tools import imp_tool
 from imp.agents.tools.context import ToolContext, kill_process_tree
 from imp.agents.tools.limits import (
+    BASH_FOREGROUND_TIMEOUT_MAX_S,
+    BASH_FOREGROUND_TIMEOUT_S,
     BG_STREAM_FILE_CAP_BYTES,
     TOOL_OUTPUT_CAP_BYTES,
-    TOOL_WALLCLOCK_TIMEOUT_S,
     ToolAborted,
     tool_checkpoint,
 )
@@ -70,6 +71,14 @@ def _emit_overlay_setup_warning(ctx: ToolContext, command: str) -> None:
             })
 
 
+def _effective_foreground_timeout(timeout: float | None) -> float:
+    """Foreground deadline (seconds): the caller's `timeout` or the default,
+    clamped to the max. timeout=None/0 -> default; a request above the cap clamps
+    down. Only the foreground path consults this — run_in_background returns before
+    the deadline is applied, so it is structurally exempt."""
+    return min(timeout or BASH_FOREGROUND_TIMEOUT_S, BASH_FOREGROUND_TIMEOUT_MAX_S)
+
+
 @imp_tool(
     name="bash",
     description=(
@@ -78,13 +87,15 @@ def _emit_overlay_setup_warning(ctx: ToolContext, command: str) -> None:
         "to read the tail. `run_in_background=true` returns {id, pid, …} "
         "immediately — read output with `bash_output(id)`, stop with "
         "`bash_kill(id)`; a bad command still spawns then fails, so check "
-        "`bash_output` after. No permission gate. "
+        "`bash_output` after. A foreground command is reaped after 120 s; pass "
+        "`timeout` (positive seconds, max 600) to extend a slow one. No "
+        "permission gate. "
         "See `imp-tool-reference` for buffering and path details."
     ),
 )
 async def bash(
     ctx: ToolContext, command: str, cwd: str | None = None,
-    *, run_in_background: bool = False,
+    *, run_in_background: bool = False, timeout: float | None = None,
 ) -> str:
     cwd_path = cwd or str(ctx.project_root)
     # Engine vars come from the LIVE quest when available (top-level steps), so a
@@ -230,7 +241,7 @@ async def bash(
 
     try:
         try:
-            with anyio.fail_after(TOOL_WALLCLOCK_TIMEOUT_S):
+            with anyio.fail_after(_effective_foreground_timeout(timeout)):
                 async with anyio.create_task_group() as tg:
                     tg.start_soon(_drain, proc.stdout, stdout_chunks)
                     tg.start_soon(_drain, proc.stderr, stderr_chunks)
