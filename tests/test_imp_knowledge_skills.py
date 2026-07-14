@@ -87,6 +87,23 @@ def test_introspection_documents_events_full_and_one_row() -> None:
     assert "byte-capped" not in low
 
 
+def test_introspection_documents_log_windowing_filters() -> None:
+    body = load_internal_skill(_skills_dir(), "imp-introspection")
+    # imp log now takes the same windowing filters imp events has (no --type).
+    assert "imp log <id> --step" in body
+    # The full windowing set is documented together in the log context, tying
+    # --limit / --agent to imp log rather than matching their pre-existing
+    # occurrences elsewhere in the skill.
+    assert "`--step`, `--range` (or a positional `<range>`), `--limit`, and `--agent`" in body
+    # The --type exclusion is explicitly called out with its rationale.
+    assert "fights the folded narrative" in body
+    # Export carry-through and the --follow exemption are documented.
+    assert "`--md`/`--html` exports" in body
+    assert "`--follow` stays unfiltered" in body
+    # The named-consumer read of the seed conversation is called out.
+    assert "--step threshold" in body
+
+
 def test_introspection_documents_the_cross_change_query() -> None:
     body = load_internal_skill(_skills_dir(), "imp-introspection")
     # CLI front doors for cross-quest reads

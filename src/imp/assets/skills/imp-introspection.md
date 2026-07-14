@@ -74,6 +74,11 @@ answers the question, and never dump the raw log as your default.
 
 - **Narrative** — `imp log <id>`. The human "read the story" view: prose with
   tool bursts folded. Use it when you want to follow what happened, in order.
+  Scope it to a slice with the same windowing filters `imp events` accepts —
+  `--step`, `--range` (or a positional `<range>`), `--limit`, and `--agent`
+  (no `--type`, which fights the folded narrative) — and those filters carry
+  through the `--md`/`--html` exports; `--follow` stays unfiltered. For example,
+  `imp log <id> --step threshold` reads just the seed conversation.
 - **Digest** — `imp events <id>`. A bare call prints a self-describing index
   (steps + types); add a leaf selector (`--type`, `--agent`, a `<range>`, or
   `--all`) to get one compact line per event. On a TTY each compact line is
