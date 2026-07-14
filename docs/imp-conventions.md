@@ -4,10 +4,10 @@ Read this when working on imp's terminal output or any user-facing copy.
 
 ## Visual identity
 
-imp keeps its own style — Claude-like in spirit, not a copy. The prompt caret
+imp keeps its own style — familiar in spirit to other coding CLIs, not a copy. The prompt caret
 settled to a plain `>`. Prefer plainer, imp-native glyphs over borrowed ones.
-When proposing a visual change, offer an imp-native option and flag any Claude
-borrowings so the choice is deliberate rather than inherited.
+When proposing a visual change, offer an imp-native option and flag any borrowed
+conventions so the choice is deliberate rather than inherited.
 
 ## Plain-speak copy
 

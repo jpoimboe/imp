@@ -1,6 +1,6 @@
 # Playbooks — agent-driven acceptance tests
 
-A **playbook** is a prose acceptance test written for an *agent* (Claude) to execute by driving
+A **playbook** is a prose acceptance test written for an *agent* to execute by driving
 the real `imp` through the **impty** MCP pty harness. Unlike the Python suite next door
 (`tests/`, `tests/impty/`), a playbook is not collected by pytest — it is a self-contained
 instruction set the agent follows to drive imp and judge whether it behaves *and speaks*
