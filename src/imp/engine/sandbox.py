@@ -22,7 +22,7 @@ import shlex
 import shutil
 import subprocess
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
@@ -225,6 +225,32 @@ def build_sandbox_argv(
         return ["unshare", "--user", "--map-root-user", "--mount",
                 "sh", "-c", mount]
     return argv
+
+
+def prune_missing_masks(policy: SandboxPolicy) -> SandboxPolicy:
+    """Return a copy of `policy` with any mask/ro-bind path that has since
+    vanished dropped. Three of the frozen sets name paths OTHER quests own —
+    secret_dirs (each sibling's `steps/`), secret_files (post-rifa59 each
+    sibling's `events.jsonl`), and git_ro_remask (each sibling worktree's
+    `config.worktree`) — enumerated once at run start by resolve_policy. A
+    long-running quest outlives its siblings: when one finishes mid-run its
+    home and worktree are removed, so those paths disappear from disk. bwrap
+    must still create/bind each over the read-only floor, so a spawn that
+    carries a vanished path dies in sandbox SETUP ("Read-only file system")
+    before the command runs — wedging every later gate and bash call. A mask
+    over a path that no longer exists protects nothing, so existence-gating at
+    spawn is always safe. Own-quest binds (worktree, quest_home, refs) and
+    stable config (caches, extra_*) never churn and are left untouched. Scoped
+    to the spawn argv only; the in-process allows_read/allows_write mirrors keep
+    the unpruned policy (a gone path is denied either way)."""
+    if not policy.active:
+        return policy
+    return replace(
+        policy,
+        git_ro_remask=_existing(list(policy.git_ro_remask)),
+        secret_dirs=_existing(list(policy.secret_dirs)),
+        secret_files=_existing(list(policy.secret_files)),
+    )
 
 
 # Code-default secret denylist (spec B.3). Paths are home-relative; resolve_policy

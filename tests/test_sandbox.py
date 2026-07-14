@@ -13,6 +13,7 @@ from imp.engine.sandbox import (
     SandboxUnavailable,
     build_sandbox_argv,
     make_home_layer,
+    prune_missing_masks,
     resolve_policy,
     sandbox_available,
 )
@@ -66,6 +67,45 @@ def test_git_escape_vectors_are_remasked_ro_including_siblings():
     assert "--ro-bind /ctl/.git/hooks /ctl/.git/hooks" in argv
     assert "--ro-bind /ctl/.git/config /ctl/.git/config" in argv
     assert "--ro-bind /ctl/.git/worktrees/sib/config.worktree" in argv  # sibling (M1)
+
+
+def test_prune_missing_masks_drops_vanished_sibling_paths(tmp_path):
+    # A long-running quest outlives a sibling: the sibling's steps/ (secret_dirs),
+    # events.jsonl (secret_files), and config.worktree (git_ro_remask) are enumerated
+    # at run start, then vanish when the sibling finishes. bwrap would fail creating
+    # each over the ro floor; prune drops them so later spawns keep running.
+    live_steps = tmp_path / "live" / "steps"
+    live_steps.mkdir(parents=True)
+    gone_steps = tmp_path / "gone" / "steps"          # never created
+    live_events = tmp_path / "live" / "events.jsonl"
+    live_events.write_text("{}")
+    gone_events = tmp_path / "gone" / "events.jsonl"  # never created
+    live_cfg = tmp_path / "live.worktree"
+    live_cfg.write_text("x")
+    gone_cfg = tmp_path / "gone.worktree"             # never created
+
+    p = _policy(
+        secret_dirs=(str(live_steps), str(gone_steps)),
+        secret_files=(str(live_events), str(gone_events)),
+        git_ro_remask=(str(live_cfg), str(gone_cfg)),
+    )
+    pruned = prune_missing_masks(p)
+
+    assert pruned.secret_dirs == (str(live_steps),)
+    assert pruned.secret_files == (str(live_events),)
+    assert pruned.git_ro_remask == (str(live_cfg),)
+    # The resulting argv references none of the vanished paths.
+    argv = " ".join(build_sandbox_argv("x", cwd="/wt", policy=pruned, engine_env={}))
+    for gone in (gone_steps, gone_events, gone_cfg):
+        assert str(gone) not in argv
+    # Live paths still masked.
+    assert str(live_steps) in argv
+    assert str(live_events) in argv
+
+
+def test_prune_missing_masks_noop_on_inactive_policy():
+    p = _policy(active=False)
+    assert prune_missing_masks(p) is p
 
 
 def test_secret_masks_emitted_after_every_bind_even_overlapping_extra_writable():

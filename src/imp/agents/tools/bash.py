@@ -36,6 +36,7 @@ from imp.engine.sandbox import (
     OVERLAY_SETUP_FAILED_MESSAGE,
     build_sandbox_argv,
     overlay_setup_failed,
+    prune_missing_masks,
 )
 
 _PAUSE_POLL_S = 0.05      # mid-command coordinator.should_pause poll cadence
@@ -104,7 +105,8 @@ async def bash(
     )
     env = overlay_engine_env(os.environ, eng)
     policy = ctx.sandbox_policy
-    argv = (build_sandbox_argv(command, cwd=cwd_path, policy=policy, engine_env=eng)
+    argv = (build_sandbox_argv(command, cwd=cwd_path,
+                               policy=prune_missing_masks(policy), engine_env=eng)
             if policy is not None else ["sh", "-c", command])
     if run_in_background:
         if not ctx.background_enabled:
