@@ -42,4 +42,5 @@ def test_lifecycle_carries_the_training_data_correction() -> None:
     # the correction: `imp new` runs save_as_draft (draft stays active), it does
     # NOT archive the draft as resumable.
     assert "training data" in body.lower()
-    assert "imp new" in body
+    # pin the correction paragraph itself: the wrong claim it explicitly rebuts
+    assert "archives a draft as resumable" in body

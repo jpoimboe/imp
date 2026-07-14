@@ -1,4 +1,4 @@
-"""docs/architecture.md (a living doc) names the renamed artifact ref and no
+"""docs/internals/architecture.md (a living doc) names the renamed artifact ref and no
 longer mentions the deleted journal-wip ref or the agent-commits-via-CLI command."""
 
 from __future__ import annotations
