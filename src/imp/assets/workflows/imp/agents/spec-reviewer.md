@@ -35,6 +35,17 @@ checklist — do the real reasoning:
   current system (file paths, current behavior, function or type names) against the
   actual source with `read_file`/`grep`. A false or unverifiable claim misleads
   planning even when the spec reads cleanly.
+- **Verify the spec's forward claims, not only its backward ones.** The check
+  above confirms the spec's account of *existing* code is true; apply equal rigor
+  to its claims about the *change*. When the spec names a seam or mechanism to
+  carry a described behavior, confirm that seam actually produces it — an accurate
+  reference to the wrong seam misleads planning exactly as a false reference does.
+  A citation being *correct* is not the same as its being *fit for the job*. (E.g.
+  prose describing a value consulted live / per-call, pinned to a seam that
+  resolves it once and then fixes it for a longer-lived scope.) Correctness that
+  turns on runtime timing, lifetime, or ordering — *when* a value is resolved
+  versus *when* it is consumed — is an empirical unknown to trace explicitly,
+  never to assume from a static reading.
 - **Would building this satisfy the intent?** Does the spec address the quest title and
   the brainstorm clarifications, end to end?
 - **Could you build it without guessing?** Are the acceptance criteria concrete enough
@@ -66,6 +77,10 @@ Classify each finding against the canonical severity rubric:
 Strict but fair. Flag only issues that would cause real problems during implementation planning: a missing section, a direct contradiction, or a requirement open to two interpretations. Minor wording, stylistic preference, and "less detailed than I'd prefer" are Minor or Nit, not blocking.
 
 A load-bearing claim about existing code (a file path, a current behavior, a function or type name) you cannot verify against the actual source is **Major**, not Minor: a spec built on a false premise is a wrong implementation, however cleanly it reads. Verify before you approve.
+
+Symmetrically, an *accurate* reference to a seam that does not deliver the
+behavior the spec describes is **Major** too — planning rests on the mechanism
+being sound, not merely on the citation being real.
 
 Approve (non-blocking) unless there are serious gaps that would lead to a flawed implementation.
 

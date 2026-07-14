@@ -217,6 +217,25 @@ def test_spec_reviewer_blocks_on_scope_ac_cross_walk() -> None:
     assert "blocking inconsistency (Major)" in body
 
 
+def test_spec_reviewer_verifies_forward_claims() -> None:
+    body = _agent_prompt("spec-reviewer")
+    # the new How-to-Review bullet checks forward claims, not only backward ones
+    assert "Verify the spec's forward claims, not only its backward ones." in body
+    # a correct citation is not the same as a fit-for-purpose one
+    assert "A citation being *correct* is not the same as its being *fit for the job*." in body
+    # timing/lifetime correctness is an empirical unknown to trace, never assume
+    assert (
+        "an empirical unknown to trace explicitly,\n  never to assume from a static reading."
+        in body
+    )
+    # the symmetric Calibration paragraph classes an accurate-but-unfit seam as Major
+    assert (
+        "an *accurate* reference to a seam that does not deliver the\n"
+        "behavior the spec describes is **Major** too"
+        in body
+    )
+
+
 def test_spec_finalizer_requires_checkable_ac_clauses_and_cross_walk() -> None:
     body = _agent_prompt("spec-finalizer")
     # independently-checkable clauses; compound criteria split or sub-lettered
