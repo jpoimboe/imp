@@ -1,7 +1,7 @@
 """Provider-side model catalog: the single source of model metadata.
 
 Each provider owns its own alias→metadata table here (kept in the providers
-layer, never the renderer — see docs/imp-invariants.md "Layering invariants").
+layer, never the renderer — see docs/internals/invariants.md "Layering invariants").
 `window` is a static fallback; for Claude Code the live SDK `rawMaxTokens`
 supersedes it once a turn completes. `cli_model` overrides the alias passed to
 the CLI/SDK when the alias is not the wire model id (e.g. the raw Anthropic API

@@ -94,6 +94,8 @@ agents. imp's answer to each is structural, not a promise.
 
 ## Highlights
 
+The full capabilities catalog lives in [`docs/guide/features.md`](docs/guide/features.md).
+
 - **Drive a run from your phone.** imp can stream a run's events to a chat surface
   (Telegram out of the box) and accept your replies back, so you can watch and steer a
   change from anywhere — not only the terminal you launched it from.

@@ -68,9 +68,10 @@ def test_tool_descriptions_name_quest() -> None:
 
 def test_knowledge_primer_names_quest() -> None:
     text = Path("src/imp/assets/skills/imp-knowledge.md").read_text()
-    assert "## Quest and its home" in text
-    assert "A **quest** is one unit of work imp tracks from idea to merge." in text
-    assert "per-quest home on disk at " in text
+    # the thin hub still uses "quest" vocabulary and points at the corpus, and
+    # must never revert to the old "change" naming
+    assert "quest" in text.lower()
+    assert "{{ docs.path }}" in text
     assert "**Change**" not in text
     assert "## Change and its home" not in text
 

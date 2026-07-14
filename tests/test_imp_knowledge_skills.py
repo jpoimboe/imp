@@ -1,13 +1,25 @@
-"""The grounding skills (imp-knowledge, imp-introspection, imp-memory) ship in the
-default workflow, are loadable via the skills mechanism with no frontmatter
-(Profile B), and cover the spec-mandated topics verified against live code."""
+"""imp-knowledge is a thin index skill: a primer, the map into imp's docs corpus
+(the guide/ and internals/ areas, reached via the injected {{ docs.path }}
+variable), and Core vocabulary. The introspection/memory depth now lives in the
+corpus docs (docs/guide/introspection.md, docs/guide/memory.md), covered here by
+reading those files directly."""
 
 from __future__ import annotations
+
+from pathlib import Path
 
 import pytest
 
 from imp.agents.skills import SkillNotFound, load_internal_skill
 from imp.assets import bundled_skills_dir
+
+
+def _introspection_doc() -> str:
+    return Path("docs/guide/introspection.md").read_text()
+
+
+def _memory_doc() -> str:
+    return Path("docs/guide/memory.md").read_text()
 
 
 def _skills_dir():
@@ -20,45 +32,58 @@ def test_knowledge_skill_is_loadable_profile_b() -> None:
     assert not body.lstrip().startswith("---"), "imp-knowledge has frontmatter"
 
 
-def test_knowledge_lists_status_set_and_draft_relabel() -> None:
-    body = load_internal_skill(_skills_dir(), "imp-knowledge").lower()
-    for status in ("new", "running", "paused", "saved", "completed",
-                   "merge_blocked", "abandoned"):
-        assert status in body, status
-    assert "errored" not in body
-    assert "draft" in body
-
-
-def test_knowledge_names_the_three_left_draft_dispositions() -> None:
+def test_knowledge_maps_into_the_corpus_by_path_variable() -> None:
     body = load_internal_skill(_skills_dir(), "imp-knowledge")
-    assert "discard_conversation" in body
-    assert "save_as_draft" in body
-    assert "archive_conversation" in body
+    # the injected corpus-path variable and both corpus areas are named
+    assert "{{ docs.path }}" in body
+    assert "guide/" in body
+    assert "internals/" in body
+    # agents are told to reach the corpus with bash / read_file (the grep/glob
+    # tools are worktree-bound and cannot see the in-place corpus path)
+    low = body.lower()
+    assert "bash" in low
+    assert "read_file" in low
 
 
-def test_knowledge_covers_home_zones_materialize_and_vocabulary() -> None:
-    body = load_internal_skill(_skills_dir(), "imp-knowledge").lower()
-    assert ".imp/quests/" in body
-    assert "backlog" in body
-    assert "materialize" in body
-    for term in ("spec", "plan", "phase", "step", "lane"):
-        assert term in body, term
+def test_knowledge_hub_carries_no_inlined_lifecycle_depth() -> None:
+    body = load_internal_skill(_skills_dir(), "imp-knowledge")
+    # lifecycle depth moved to docs/guide/lifecycle.md — the hub only points at it
+    for moved in ("discard_conversation", "save_as_draft", "archive_conversation",
+                  "create_and_enter_worktree"):
+        assert moved not in body, moved
+
+
+def test_knowledge_vocabulary_uses_tier_not_lane() -> None:
+    body = load_internal_skill(_skills_dir(), "imp-knowledge")
+    low = body.lower()
+    for term in ("spec", "plan", "phase", "step", "tier", "workflow"):
+        assert term in low, term
+    # the incorrect `lane` vocabulary entry is gone; the correct term is `tier`
+    assert "**lane**" not in body
+    assert "a model tier a step runs at" not in body
+    assert "**tier**" in body
+
+
+def test_knowledge_hub_no_longer_maps_to_removed_spokes() -> None:
+    body = load_internal_skill(_skills_dir(), "imp-knowledge")
+    assert 'load_skill(name="imp-introspection")' not in body
+    assert 'load_skill(name="imp-memory")' not in body
 
 
 def test_introspection_skill_is_loadable_profile_b() -> None:
-    body = load_internal_skill(_skills_dir(), "imp-introspection")
+    body = _introspection_doc()
     assert body.strip(), "imp-introspection is empty"
     assert not body.lstrip().startswith("---"), "imp-introspection has frontmatter"
 
 
 def test_introspection_names_ground_truth_files() -> None:
-    body = load_internal_skill(_skills_dir(), "imp-introspection")
+    body = _introspection_doc()
     assert "workflow/workflow.yaml" in body
     assert "state/state.json" in body
 
 
 def test_introspection_names_the_read_commands() -> None:
-    body = load_internal_skill(_skills_dir(), "imp-introspection")
+    body = _introspection_doc()
     assert "imp help" in body
     assert "imp list" in body
     assert "imp list --all" in body
@@ -68,7 +93,7 @@ def test_introspection_names_the_read_commands() -> None:
 
 
 def test_introspection_documents_the_three_tier_split() -> None:
-    body = load_internal_skill(_skills_dir(), "imp-introspection").lower()
+    body = _introspection_doc().lower()
     # narrative / digest / raw are the three named timeline tiers
     for tier in ("narrative", "digest", "raw"):
         assert tier in body, tier
@@ -78,7 +103,7 @@ def test_introspection_documents_the_three_tier_split() -> None:
 
 
 def test_introspection_documents_events_full_and_one_row() -> None:
-    body = load_internal_skill(_skills_dir(), "imp-introspection")
+    body = _introspection_doc()
     low = body.lower()
     # The digest tier documents the one-terminal-row clip and the --full widen.
     assert "one terminal row" in low
@@ -88,7 +113,7 @@ def test_introspection_documents_events_full_and_one_row() -> None:
 
 
 def test_introspection_documents_log_windowing_filters() -> None:
-    body = load_internal_skill(_skills_dir(), "imp-introspection")
+    body = _introspection_doc()
     # imp log now takes the same windowing filters imp events has (no --type).
     assert "imp log <id> --step" in body
     # The full windowing set is documented together in the log context, tying
@@ -105,7 +130,7 @@ def test_introspection_documents_log_windowing_filters() -> None:
 
 
 def test_introspection_documents_the_cross_change_query() -> None:
-    body = load_internal_skill(_skills_dir(), "imp-introspection")
+    body = _introspection_doc()
     # CLI front doors for cross-quest reads
     assert "imp show <id>" in body
     assert "imp events <id>" in body
@@ -113,7 +138,7 @@ def test_introspection_documents_the_cross_change_query() -> None:
 
 
 def test_introspection_documents_bounded_output_techniques() -> None:
-    body = load_internal_skill(_skills_dir(), "imp-introspection")
+    body = _introspection_doc()
     # scope-the-query flags (CLI)
     for flag in ("--limit", "--type", "--agent"):
         assert flag in body, flag
@@ -122,7 +147,7 @@ def test_introspection_documents_bounded_output_techniques() -> None:
 
 
 def test_introspection_search_entry_spans_all_zones_and_content() -> None:
-    body = load_internal_skill(_skills_dir(), "imp-introspection")
+    body = _introspection_doc()
     low = body.lower()
     # imp search now spans active + backlog + archive, not archive-only.
     for zone in ("active", "backlog", "archive"):
@@ -137,7 +162,7 @@ def test_introspection_search_entry_spans_all_zones_and_content() -> None:
 
 
 def test_introspection_documents_merged_search_and_merge_commit() -> None:
-    body = load_internal_skill(_skills_dir(), "imp-introspection")
+    body = _introspection_doc()
     # The merged-subset flag is documented alongside the zone flags.
     assert "--merged" in body
     # The imp show detail card surfaces the quest's merge commit.
@@ -146,14 +171,14 @@ def test_introspection_documents_merged_search_and_merge_commit() -> None:
     assert "search the archive (completed, abandoned, and left" not in body
 
 
-def test_memory_skill_is_loadable_profile_b() -> None:
-    body = load_internal_skill(_skills_dir(), "imp-memory")
-    assert body.strip(), "imp-memory is empty"
-    assert not body.lstrip().startswith("---"), "imp-memory has frontmatter"
+def test_memory_doc_is_present_and_frontmatter_free() -> None:
+    body = _memory_doc()
+    assert body.strip(), "memory doc is empty"
+    assert not body.lstrip().startswith("---"), "memory doc has frontmatter"
 
 
 def test_memory_covers_two_tiers_of_durable_state() -> None:
-    body = load_internal_skill(_skills_dir(), "imp-memory")
+    body = _memory_doc()
     low = body.lower()
     # two-tiers framing
     assert "two tiers" in low
@@ -177,13 +202,6 @@ def test_memory_covers_two_tiers_of_durable_state() -> None:
 def test_knowledge_no_longer_references_removed_guidance_key() -> None:
     body = load_internal_skill(_skills_dir(), "imp-knowledge")
     assert "guidance" not in body.lower()
-    assert "imp/memory/" in body
-
-
-def test_knowledge_maps_to_both_spokes() -> None:
-    body = load_internal_skill(_skills_dir(), "imp-knowledge")
-    assert 'load_skill(name="imp-introspection")' in body
-    assert 'load_skill(name="imp-memory")' in body
 
 
 def test_old_skill_names_are_gone() -> None:
@@ -193,7 +211,7 @@ def test_old_skill_names_are_gone() -> None:
 
 
 def test_memory_teaches_the_in_depth_model() -> None:
-    body = load_internal_skill(_skills_dir(), "imp-memory")
+    body = _memory_doc()
     low = body.lower()
     # The new in-depth section and its additive-layering claim.
     assert "## The memory model in depth" in body
@@ -212,7 +230,7 @@ def test_memory_teaches_the_in_depth_model() -> None:
 
 
 def test_memory_teaches_the_authoring_affordance() -> None:
-    body = load_internal_skill(_skills_dir(), "imp-memory")
+    body = _memory_doc()
     assert "## Building up memory with imp" in body
     # The affordance names the interactive gates and the background memory
     # quest, and states imp never auto-writes memory.
@@ -220,31 +238,3 @@ def test_memory_teaches_the_authoring_affordance() -> None:
     assert "never auto-writes memory" in body
     assert "threshold" in body
     assert "finalize" in body
-
-
-def test_knowledge_memory_entry_notes_authoring_help() -> None:
-    body = load_internal_skill(_skills_dir(), "imp-knowledge")
-    # The refreshed map entry points past inspection to authoring help,
-    # while keeping the load_skill invocation intact.
-    assert 'load_skill(name="imp-memory")' in body
-    assert "help you author memory" in body
-
-
-def test_knowledge_archive_zone_says_shelved_not_left() -> None:
-    body = load_internal_skill(_skills_dir(), "imp-knowledge")
-    # The archive-zone disposition noun is "shelved", never "left".
-    assert "shelved conversations" in body
-    assert "left conversations" not in body
-    # The archive_conversation outcome carries the shelved cue.
-    assert "resumable (shelved)" in body
-
-
-def test_knowledge_backlog_zone_names_backlog_origin_only() -> None:
-    body = load_internal_skill(_skills_dir(), "imp-knowledge")
-    # The backlog zone is described by the single surviving origin word.
-    assert "backlog items" in body
-    assert "`origin` `backlog`" in body
-    # The collapsed origin tokens are gone as origin values (backtick-quoted);
-    # ordinary prose like "from idea to merge" is untouched.
-    assert "`idea`" not in body
-    assert "`followup`" not in body

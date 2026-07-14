@@ -32,3 +32,7 @@ Read this when editing imp's engine/renderer or workflow prompts.
   Candidate feature: a user-level memory dir (e.g. under `~/.config/imp/`) whose
   `all.md` layers into every agent's `## Project memory` section alongside the
   project's.
+
+---
+
+*Part of imp's self-knowledge corpus. Runtime entry point: load the `imp-knowledge` skill (`load_skill(name="imp-knowledge")`), the thin index that maps into this corpus.*

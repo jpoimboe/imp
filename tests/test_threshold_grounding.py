@@ -140,6 +140,22 @@ def test_threshold_and_finalize_render_sandbox_debugging_partial(tmp_path) -> No
         assert "only the user can type it" in rendered, name
 
 
+def test_grounding_partial_points_at_the_corpus_path_variable() -> None:
+    text = (PARTIALS / "imp-grounding.md").read_text()
+    # the partial names the hub as an index into the corpus at the injected path
+    assert "{{ docs.path }}" in text
+    assert "corpus" in text.lower()
+    # the stale spoke-era phrasing is gone (the deeper skills no longer exist)
+    assert "deeper skill" not in text.lower()
+
+
+def test_threshold_concierge_routes_to_corpus_not_removed_spokes() -> None:
+    body = _threshold()
+    concierge = body[body.index("**concierge**"):body.index("**scout**")]
+    assert "corpus" in concierge.lower()
+    assert "the skills it maps to" not in concierge
+
+
 def test_sandbox_debugging_partial_documents_both_hatches() -> None:
     text = (PARTIALS / "sandbox-debugging.md").read_text()
     # Self-contained section header.

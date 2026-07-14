@@ -1,8 +1,8 @@
 """The shipped default workflow ships its discipline skills under skills/ (root),
 loadable via the internal path with no YAML frontmatter; skills/user/ ships empty.
-This module covers the four core disciplines; the three imp-* grounding skills
-(imp-knowledge, imp-introspection, imp-memory) now live in the global pool and are
-covered in test_imp_knowledge_skills.py."""
+This module covers the four core disciplines; the surviving imp-knowledge grounding
+skill (the introspection/memory spokes are now docs-corpus files) lives in the
+global pool and is covered in test_imp_knowledge_skills.py."""
 
 from __future__ import annotations
 

@@ -21,8 +21,6 @@ _POOL = (
     "imp-tool-reference",
     "imp-driving-terminal-uis",
     "imp-knowledge",
-    "imp-introspection",
-    "imp-memory",
 )
 
 
@@ -214,4 +212,4 @@ def test_overlay_global_does_not_clobber_a_workflow_skill(tmp_path: Path) -> Non
     # Workflow-wins: an already-present same-named file is left untouched.
     assert (dest / "imp-knowledge.md").read_text() == "WORKFLOW OWN\n"
     # …while the other pool skills are still overlaid alongside it.
-    assert (dest / "imp-memory.md").read_text().strip()
+    assert (dest / "imp-tool-reference.md").read_text().strip()
