@@ -25,9 +25,12 @@ from imp.remote.session.protocol import (
     Attach,
     Control,
     Input,
+    Query,
     SetLease,
     SkillRequest,
     encode_event,
+    encode_result,
+    encode_result_error,
     parse_client_message,
 )
 
@@ -88,6 +91,7 @@ class SessionSocket:
         on_detach: Callable[[], None] | None = None,
         on_control: Callable[[str, str | None], None] | None = None,
         on_lease_change: Callable[[], None] | None = None,
+        on_query: Callable[[str, dict[str, Any]], Any] | None = None,
         client_buffer: int = _CLIENT_BUFFER,
     ) -> None:
         self._path = path
@@ -95,6 +99,7 @@ class SessionSocket:
         self._on_detach = on_detach
         self._on_control = on_control
         self._on_lease_change = on_lease_change
+        self._on_query = on_query
         self._client_buffer = client_buffer
         self._clients: set[_Client] = set()
         self._listener: SocketListener | None = None
@@ -217,6 +222,9 @@ class SessionSocket:
         try:
             first = (await buf.receive_until(b"\n", _MAX_FRAME)).decode("utf-8")
             hello = parse_client_message(first)
+            if isinstance(hello, Query):
+                await self._serve_query(stream, hello)
+                return
             if not isinstance(hello, Attach):
                 return
             send, recv = anyio.create_memory_object_stream[dict[str, Any]](
@@ -261,6 +269,18 @@ class SessionSocket:
                 if self._on_detach is not None:
                     self._on_detach()
             await stream.aclose()
+
+    async def _serve_query(self, stream: SocketStream, query: Query) -> None:
+        if self._on_query is None:
+            return
+        try:
+            value = await self._on_query(query.op, query.args)
+            frame = encode_result(value)
+        except Exception as exc:  # RPC boundary: report to caller, never crash the server
+            _log.warning("query op %r failed: %s", query.op, exc)
+            frame = encode_result_error(str(exc))
+        with contextlib.suppress(anyio.BrokenResourceError, anyio.ClosedResourceError):
+            await stream.send((frame + "\n").encode("utf-8"))
 
     async def detach_all(self) -> None:
         for client in list(self._clients):
