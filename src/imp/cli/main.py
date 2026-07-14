@@ -2014,6 +2014,42 @@ def _log_show_set(full: bool, show: list[str], hide: list[str]) -> frozenset[str
     return frozenset((base | set(show)) - set(hide))
 
 
+def _select_log_events(
+    args: argparse.Namespace, quest_id: str, events: list[dict[str, Any]],
+) -> list[dict[str, Any]] | int:
+    """Filter events by imp log's windowing options, or return exit code 2 on bad input."""
+    from imp.engine import events_index as ei
+
+    range_specs = list(args.range) if args.range else []
+    if args.range_pos:
+        range_specs.append(args.range_pos)
+    steps = set(args.step) if args.step else None
+    agents = set(args.agent) if args.agent else None
+    if not (steps or agents or range_specs or args.limit is not None):
+        return events
+
+    indexed = list(enumerate(events, start=1))
+    handle_map = ei.subagent_handle_map(indexed)
+    max_ord = indexed[-1][0] if indexed else 0
+    intervals: list[tuple[int, int]] = []
+    try:
+        for spec in range_specs:
+            intervals.extend(ei.parse_range_spec(spec, max_ord))
+    except ei.RangeSpecError as exc:
+        print(f"imp: {exc}", file=sys.stderr)
+        return 2
+    if steps is not None:
+        known = {s.name for s in ei.step_windows(indexed)}
+        missing = sorted(steps - known)
+        if missing:
+            print(f"imp: no step {missing[0]!r} in {quest_id}", file=sys.stderr)
+            return 2
+    selected = ei.select_event_lines(
+        indexed, agents=agents, ranges=intervals or None,
+        step_names=steps, limit=args.limit, handle_map=handle_map)
+    return [ev for _, ev in selected]
+
+
 def _cmd_log(args: argparse.Namespace) -> int:
     from imp.cli import narrative
     from imp.cli.render_text import LOG_CATEGORIES, render_tree
