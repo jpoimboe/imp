@@ -6,8 +6,9 @@ point-in-time: write each self-contained; don't reconcile or update superseded
 specs.
 
 When working on imp's TUI, output, or user-facing copy, read
-docs/imp-conventions.md. When editing imp's engine/renderer or workflow
-prompts, read docs/imp-invariants.md.
+docs/internals/conventions.md. When editing imp's engine/renderer or workflow
+prompts, read docs/internals/invariants.md. When editing imp's skills or docs,
+read docs/internals/knowledge-map.md.
 
 When changing a tool/CLI interface, update the affected agent/skill/doc files
 in the same change. When editing agent/skill prose, be maximally succinct —

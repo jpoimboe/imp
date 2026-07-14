@@ -40,8 +40,9 @@ def test_project_memory_all_md_carries_prerelease_pointers() -> None:
     memo = snap["all.md"]
     assert "pre-release" in memo
     assert "Skip backward-compatibility" in memo
-    assert "docs/imp-conventions.md" in memo
-    assert "docs/imp-invariants.md" in memo
+    assert "docs/internals/conventions.md" in memo
+    assert "docs/internals/invariants.md" in memo
+    assert "docs/internals/knowledge-map.md" in memo
 
 
 def test_imp_conventions_has_visual_and_plainspeak_sections() -> None:
