@@ -381,17 +381,18 @@ def test_overview_default_shows_all_merged(
     assert sum(1 for ln in all_out.splitlines() if "done" in ln) == 12
 
 
-def test_overview_excludes_left_conversations(
+def test_overview_excludes_unknown_archived_status(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """A `left` archived conversation never appears in the history block, with or
-    without -a (only completed/abandoned dispositions are rendered)."""
+    """An archived conversation whose final status is not a rendered disposition
+    (completed/abandoned/paused) never appears in the history block, with or
+    without -a."""
     import imp.cli.main as m
 
     _seed_control(tmp_path)
     Quest.create(tmp_path, title="Chat", quest_id="chatid", base_branch="main")
-    _complete_and_archive(tmp_path, "chatid", status="left")
+    _complete_and_archive(tmp_path, "chatid", status="unknown")
 
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(m, "_control_root", lambda: tmp_path)

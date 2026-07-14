@@ -42,7 +42,7 @@ def tear_down_quest(quest: Quest) -> None:
 
 
 def archive_conversation(quest: Quest) -> None:
-    """Archive a left conversation as resumable (paused, not abandoned); drop the live home."""
+    """Archive a shelved conversation as resumable (paused, not abandoned); drop the live home."""
     control = quest.control_root
     quest_id = quest.id
     base_branch = quest.base_branch

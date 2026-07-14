@@ -174,7 +174,7 @@ def read_artifact(control_root: Path, quest_id: str, rel: str) -> bytes | None:
 
 
 def rehydrate_quest(control_root: Path, quest_id: str) -> Path:
-    """Recreate a live scratch dir from the archive so a left conversation can be resumed."""
+    """Recreate a live scratch dir from the archive so a shelved conversation can be resumed."""
     quest_dir = control_root / ".imp" / "quests" / quest_id
     if quest_dir.exists():
         raise FileExistsError(f"live home for {quest_id!r} already exists")
