@@ -6,7 +6,6 @@ from imp.remote.daemon.commands import (
     NEW_USAGE,
     RESUME_USAGE,
     ROUTE_HINT,
-    SEARCH_USAGE,
     UNKNOWN_COMMAND,
     Abandon,
     Alerts,
@@ -18,7 +17,6 @@ from imp.remote.daemon.commands import (
     Reply,
     Resume,
     Save,
-    Search,
     parse,
 )
 from imp.remote.daemon.discover import QuestInfo
@@ -105,12 +103,13 @@ def test_bare_at_handle_with_no_text_is_a_route_hint() -> None:
     assert parse("@good", None, fake_resolve) == Notice(ROUTE_HINT)
 
 
-def test_slash_search_with_query_is_a_search() -> None:
-    assert parse("/search dark mode", None, fake_resolve) == Search("dark mode")
+def test_slash_search_is_no_longer_recognized() -> None:
+    assert parse("/search dark mode", None, fake_resolve) == Notice(UNKNOWN_COMMAND)
+    assert parse("/search   ", None, fake_resolve) == Notice(UNKNOWN_COMMAND)
 
 
-def test_slash_search_empty_is_a_usage_notice() -> None:
-    assert parse("/search   ", None, fake_resolve) == Notice(SEARCH_USAGE)
+def test_help_text_no_longer_mentions_search() -> None:
+    assert "/search" not in HELP_TEXT
 
 
 def test_slash_resume_with_token_is_a_resume() -> None:

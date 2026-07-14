@@ -20,7 +20,6 @@ class ControlPlane:
         subscriptions: Subscriptions,
         snapshot: Callable[[str], tuple[str, str, str] | None],
         recent_narrative: Callable[[str, int], list[dict[str, Any]]],
-        search: Callable[[str], list[tuple[str, str, str, str]]] | None = None,
         resume: Callable[[str], str] | None = None,
         save: Callable[[str], None] | None = None,
         full_history: Callable[[str], list[dict[str, Any]]] | None = None,
@@ -34,7 +33,6 @@ class ControlPlane:
         self.subscriptions = subscriptions
         self._snapshot = snapshot
         self._recent_narrative = recent_narrative
-        self._search = search
         self._resume = resume
         self._save = save
         self._full_history = full_history
@@ -44,10 +42,6 @@ class ControlPlane:
 
     def recent_narrative(self, quest_id: str, n: int) -> list[dict[str, Any]]:
         return self._recent_narrative(quest_id, n)
-
-    def search(self, query: str) -> list[tuple[str, str, str, str]]:
-        assert self._search is not None  # run_daemon always wires it
-        return self._search(query)
 
     def resume(self, token: str) -> str:
         assert self._resume is not None  # run_daemon always wires it

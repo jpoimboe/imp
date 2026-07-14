@@ -17,7 +17,6 @@ import anyio
 
 from imp.diagnostics import install_stack_dumper
 from imp.engine.archive import maintenance as archive_maintenance
-from imp.engine.archive import read as archive_read
 from imp.engine.errors import LoadError
 from imp.engine.quest import Quest
 from imp.remote.daemon import discover, spawn
@@ -41,7 +40,6 @@ from imp.remote.daemon.commands import (
     Response,
     Resume,
     Save,
-    Search,
     Subscribe,
     Unsubscribe,
 )
@@ -355,16 +353,6 @@ async def _handle_command(
         except Exception:
             _log.warning("list or residency probe failed", exc_info=True)
             responses.put(Notice("Error: could not list quests."))
-    elif isinstance(command, Search):
-        hits = await anyio.to_thread.run_sync(control.search, command.query)
-        if not hits:
-            responses.put(Notice(f"No archived conversations match {command.query!r}."))
-        else:
-            lines = [
-                f"@{handle_for(cid)}  {title or '(untitled)'}  [{status or '-'}]"
-                for cid, title, status, _created in hits
-            ]
-            responses.put(Notice("\n".join(lines)))
     elif isinstance(command, Resume):
         message = await anyio.to_thread.run_sync(control.resume, command.token)
         responses.put(Notice(message))
@@ -459,7 +447,6 @@ async def run_daemon(
     abandon: Callable[[str], int] | None = None,
     list_quests: Callable[[], list[discover.QuestInfo]] | None = None,
     resident_ids: Callable[[], frozenset[str]] | None = None,
-    search: Callable[[str], list[tuple[str, str, str, str]]] | None = None,
     resume: Callable[[str], str] | None = None,
     save: Callable[[str], None] | None = None,
     install_signals: bool = True,
@@ -474,7 +461,6 @@ async def run_daemon(
     list_quests = list_quests or (lambda: discover.list_quests(control_root))
     resident_ids = resident_ids or (
         lambda: frozenset(resident_session_ids(control_root)))
-    search = search or (lambda q: archive_read.search_archive(control_root, q))
     resume = resume or (lambda token: spawn.resume_quest(control_root, token))
     save = save or (lambda cid: _save_quest(control_root, cid))
 
@@ -508,7 +494,7 @@ async def run_daemon(
         snapshot=lambda cid: discover.snapshot(control_root, cid),
         recent_narrative=lambda cid, n: discover.recent_narrative(
             control_root, cid, n),
-        search=search, resume=resume, save=save,
+        resume=resume, save=save,
         full_history=lambda cid: discover.full_history(control_root, cid))
     adapter = make_adapter(env, inbound.put, subscriptions, alert_all, is_known_quest)
 
