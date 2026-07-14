@@ -274,15 +274,26 @@ def test_bash_caps_runaway_stderr(
 
 
 def test_bash_default_foreground_timeout(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    # AC 3: with NO per-call timeout, the DEFAULT foreground deadline reaps a long
-    # command — monkeypatch the default tiny and assert ToolAborted('timed-out').
+    # AC 1: with NO per-call timeout, a command that outruns the DEFAULT foreground
+    # deadline is PROMOTED to a background task (not SIGKILL'd / ToolAborted).
+    # Monkeypatch the default tiny; assert the running-notice shape.
     import imp.agents.tools.bash as bash_mod
+    from imp.agents.tools.bg import terminate_background_processes
 
     monkeypatch.setattr(bash_mod, "BASH_FOREGROUND_TIMEOUT_S", 0.3)
     ctx = _ctx(tmp_path)
-    with pytest.raises(ToolAborted) as ei:
-        _run_bash(ctx, {"command": "sleep 30"})
-    assert ei.value.reason == "timed-out"
+
+    async def go() -> dict:
+        with anyio.fail_after(15):
+            out = json.loads(await get_registry()["bash"].async_invoke(
+                ctx, {"command": "sleep 30"}))
+            await terminate_background_processes(ctx)   # cleanup the promoted proc
+            return out
+
+    out = anyio.run(go)
+    assert out["id"] == "bg1"
+    assert out["status"] == "running"
+    assert "bash_output" in out["note"]
     assert ctx.running_processes == []
 
 
@@ -511,16 +522,6 @@ def test_effective_foreground_timeout_defaults_and_clamps() -> None:
     assert _effective_foreground_timeout(5000) == BASH_FOREGROUND_TIMEOUT_MAX_S
 
 
-def test_bash_timeout_param_enforced_foreground(tmp_path: Path) -> None:
-    # AC 3 & 4: a per-call `timeout` bounds a foreground command — sleep 30 under a
-    # 0.3 s timeout is SIGKILL'd and raises ToolAborted('timed-out'), not a result.
-    ctx = _ctx(tmp_path)
-    with pytest.raises(ToolAborted) as ei:
-        _run_bash(ctx, {"command": "sleep 30", "timeout": 0.3})
-    assert ei.value.reason == "timed-out"
-    assert ctx.running_processes == []
-
-
 def test_bash_schema_advertises_timeout_param() -> None:
     # AC 4: the tool the model sees exposes `timeout` (optional) and its
     # description states the positive-seconds / 600 s-cap contract.
@@ -597,3 +598,82 @@ def test_bash_foreground_unlinks_scratch_files(tmp_path: Path) -> None:
     assert out["returncode"] == 0
     assert "hi" in out["stdout"]
     assert list(_bg_dir(ctx).glob("fg-*")) == []
+
+
+def test_bash_foreground_timeout_promotes_to_background(tmp_path: Path) -> None:
+    # AC 1 & 2: a foreground command that outruns its (per-call) deadline is NOT
+    # aborted — it is promoted to a managed background task. The result carries a
+    # fresh bgN id, an int pid, status "running", the canonical stream-file paths,
+    # and a note naming bash_output/bash_kill; the proc lands in
+    # background_processes and leaves running_processes.
+    from imp.agents.tools.bg import terminate_background_processes
+    ctx = _ctx(tmp_path)
+
+    async def go() -> dict:
+        with anyio.fail_after(15):
+            out = json.loads(await get_registry()["bash"].async_invoke(
+                ctx, {"command": "sleep 30", "timeout": 0.3}))
+            await terminate_background_processes(ctx)
+            return out
+
+    out = anyio.run(go)
+    assert out["id"] == "bg1"
+    assert isinstance(out["pid"], int)
+    assert out["status"] == "running"
+    assert "bash_output" in out["note"]
+    assert "bash_kill" in out["note"]
+    assert out["out_path"].endswith("bg1.out")
+    assert out["err_path"].endswith("bg1.err")
+    assert ctx.running_processes == []
+    assert "bg1" in ctx.background_processes
+
+
+def test_bash_promotion_preserves_pre_promotion_output(tmp_path: Path) -> None:
+    # AC 3: output produced BEFORE promotion is preserved in the renamed bgN file
+    # and returned by the first bash_output("bg1") (read from cursor 0); the
+    # promoted files are canonically named bg1.out/bg1.err and the fg-<uuid>
+    # scratch names are renamed away (so resume seeding cannot re-alias the id).
+    from imp.agents.tools.bg import _bg_dir, terminate_background_processes
+    ctx = _ctx(tmp_path)
+
+    async def go() -> tuple:
+        with anyio.fail_after(15):
+            promo = json.loads(await get_registry()["bash"].async_invoke(
+                ctx, {"command": "echo BEFORE_PROMO; sleep 30", "timeout": 1.0}))
+            snap = json.loads(await get_registry()["bash_output"].async_invoke(
+                ctx, {"id": "bg1"}))
+            files = sorted(p.name for p in _bg_dir(ctx).glob("bg1.*"))
+            leftover_fg = list(_bg_dir(ctx).glob("fg-*"))
+            await terminate_background_processes(ctx)
+            return promo, snap, files, leftover_fg
+
+    promo, snap, files, leftover_fg = anyio.run(go)
+    assert promo["id"] == "bg1"
+    assert "BEFORE_PROMO" in snap["stdout"]
+    assert files == ["bg1.err", "bg1.out"]
+    assert leftover_fg == []
+
+
+def test_bash_promoted_proc_is_killable_and_torn_down(tmp_path: Path) -> None:
+    # AC 2 & 9: a promoted proc is managed exactly like an explicitly-backgrounded
+    # one — bash_kill("bg1") stops it (agent kill) and
+    # terminate_background_processes persists a tombstone for it.
+    from imp.agents.tools.bg import (
+        _tombstone_path,
+        terminate_background_processes,
+    )
+    ctx = _ctx(tmp_path)
+
+    async def go() -> dict:
+        with anyio.fail_after(15):
+            json.loads(await get_registry()["bash"].async_invoke(
+                ctx, {"command": "sleep 30", "timeout": 0.3}))
+            killed = json.loads(await get_registry()["bash_kill"].async_invoke(
+                ctx, {"id": "bg1"}))
+            await terminate_background_processes(ctx)
+            return killed
+
+    killed = anyio.run(go)
+    assert killed["status"] == "killed"
+    assert killed["kill_reason"] == "agent"
+    assert _tombstone_path(ctx).exists()

@@ -27,7 +27,6 @@ from imp.agents.tools.limits import (
     BASH_FOREGROUND_TIMEOUT_MAX_S,
     BASH_FOREGROUND_TIMEOUT_S,
     BASH_OUTPUT_CAP_BYTES,
-    ToolAborted,
     tool_checkpoint,
 )
 from imp.agents.tools.spill import spill_tool_output
@@ -126,7 +125,7 @@ async def bash(
     # foreground call from consuming a bgN id; Part 3 renames these to bgN on
     # promotion. The M1 invariant holds: the core spawns start_new_session, so
     # pgid == pid and terminate_running_processes / kill_process_group can killpg.
-    from imp.agents.tools.bg import _bg_dir, _spawn_to_files
+    from imp.agents.tools.bg import BgProc, _bg_dir, _seed_counter, _spawn_to_files
     d = _bg_dir(ctx)
     d.mkdir(parents=True, exist_ok=True)
     stem = f"fg-{uuid4().hex}"
@@ -210,18 +209,39 @@ async def bash(
                     if coordinator is not None:
                         pause_scope.cancel()
         except TimeoutError:
-            # B.1 (Part 2): the call outran the wall clock. Kill the group, reap,
-            # unlink the scratch files, and surface a timeout the agent can react
-            # to. Part 3 REPLACES this whole branch with promotion (rename
-            # fg-<uuid> -> bgN, register a BgProc, return a running notice) — the
-            # only remaining foreground-specific change after this part.
-            await kill_process_tree(proc, signal.SIGKILL)
-            with contextlib.suppress(Exception):
-                await proc.wait()
-            for p in (out_path, err_path):
-                with contextlib.suppress(OSError):
-                    p.unlink()
-            raise ToolAborted("timed-out") from None
+            # Deadline exceeded: PROMOTE, don't kill. Seed the counter, allocate a
+            # canonical bgN, and same-dir rename the fg-<uuid> scratch files to
+            # bgN.* — the child's open write fds stay valid (unchanged inode), so it
+            # keeps writing to the renamed paths. Canonical bgN naming is REQUIRED:
+            # resume counter-seeding scans stream filenames (_FILE_RE) to never
+            # re-alias a transcript-referenced id, and a promoted id is exactly such
+            # an id. Wrap the still-running proc in a BgProc and register it; the
+            # `finally` removes it from running_processes, so it is now managed
+            # solely through the background lifecycle.
+            _seed_counter(ctx)
+            bg_id = ctx.next_bg_id()
+            new_out = d / f"{bg_id}.out"
+            new_err = d / f"{bg_id}.err"
+            os.rename(out_path, new_out)
+            os.rename(err_path, new_err)
+            ctx.background_processes[bg_id] = BgProc(
+                id=bg_id, proc=proc, out_path=new_out, err_path=new_err,
+                command=command)
+            root = ctx.project_root.resolve()
+            deadline_s = _effective_foreground_timeout(timeout)
+            note = (
+                f"foreground command exceeded its {deadline_s:g} s deadline and was "
+                f'moved to the background; read it with bash_output("{bg_id}") and '
+                f'stop it with bash_kill("{bg_id}")')
+            return json.dumps({
+                "id": bg_id,
+                "pid": proc.pid,
+                "command": command,
+                "status": "running",
+                "note": note,
+                "out_path": os.path.relpath(new_out.resolve(), root),
+                "err_path": os.path.relpath(new_err.resolve(), root),
+            }, ensure_ascii=False)
     finally:
         with contextlib.suppress(ValueError):
             ctx.running_processes.remove(proc)
