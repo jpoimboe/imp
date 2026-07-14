@@ -228,9 +228,10 @@ async def test_subagent_missing_handoff_note_logs_recovering_reason(
     seeded_handoff_paths: list = []
     orig_seed = reinc.reincarnation_seed
 
-    def _recording_seed(*, stashed_dir, handoff_path):
+    def _recording_seed(*, stashed_dir, handoff_path, quest_id):
         seeded_handoff_paths.append(handoff_path)
-        return orig_seed(stashed_dir=stashed_dir, handoff_path=handoff_path)
+        return orig_seed(stashed_dir=stashed_dir, handoff_path=handoff_path,
+                         quest_id=quest_id)
 
     monkeypatch.setattr(reinc, "reincarnation_seed", _recording_seed)
 
@@ -269,3 +270,77 @@ async def test_subagent_missing_handoff_note_logs_recovering_reason(
             == "handoff failed — recovering from transcript")
     # AC: a missing note degrades the seed to transcript-only.
     assert seeded_handoff_paths == [None]
+
+
+@pytest.mark.anyio
+async def test_subagent_reincarnation_quest_id_forwarded_from_cc(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """reincarnation_seed receives cc.id, not ctx.quest_context.id.
+
+    Calls dispatch_task directly with ctx.quest_context=None so cc falls back to
+    QuestContext(id="", ...) and the seed receives quest_id="" — ruling out the
+    AttributeError the original ctx.quest_context.id would have raised and pinning
+    the forwarded value.
+    """
+    import imp.engine.reincarnation as reinc
+    from imp.agents.subagents import dispatch_task
+    from imp.agents.tools.context import ToolContext
+    from imp.engine.state import JsonlEventLog, State
+    from imp.providers import resolve
+    from imp.providers.resolve import spawn_subagent_via_registry
+
+    resolve.reset_providers_for_tests()
+
+    class _CtxWindowSubRunner:
+        async def run(self, inv):
+            from imp.agents.transcript import Transcript
+            Transcript(inv.transcript_dir / "transcript.jsonl").append(
+                Message(role="user", content=(TextBlock(text="work"),)))
+            yield {"type": "error", "payload": {
+                "category": "context_window", "kind": "prompt_too_long",
+                "message": "prompt is too long"}}
+
+        async def interrupt(self): ...
+
+    class _SubProvider:
+        name = "fake"
+        model = "m"
+
+        def create_runner(self, _inv):
+            return _CtxWindowSubRunner()
+
+    resolve.register_provider("fake", env_check=lambda: True,
+                              factory=lambda _m: _SubProvider())
+
+    elog = JsonlEventLog(tmp_path / "events.jsonl")
+    ctx = ToolContext(
+        project_root=tmp_path,
+        events_path=tmp_path / "events.jsonl",
+        subagent_defs={"coder": _agent("coder", tools={"complete_step"})},
+        provider_name="fake",
+        model_name="m",
+        parent_transcript_dir=tmp_path / "step",
+        agent_id="step:impl/lead",
+        quest_state=State(id="c", step="lead", step_attempt=0,
+                          status="running", max_reincarnations=1),
+        event_log=elog,
+        spawn_subagent=spawn_subagent_via_registry,
+        # quest_context intentionally omitted (defaults to None) so cc falls back to
+        # QuestContext(id="", ...) and reincarnation_seed receives quest_id="".
+    )
+
+    captured_quest_ids: list = []
+    orig_seed = reinc.reincarnation_seed
+
+    def _recording_seed(*, stashed_dir, handoff_path, quest_id):
+        captured_quest_ids.append(quest_id)
+        return orig_seed(stashed_dir=stashed_dir, handoff_path=handoff_path,
+                         quest_id=quest_id)
+
+    monkeypatch.setattr(reinc, "reincarnation_seed", _recording_seed)
+
+    with pytest.raises(RuntimeError, match=r"subagent.*failed"):
+        await dispatch_task(ctx, "coder", "edit")
+
+    # cc.id is "" when quest_context is None; the seed must receive that value.
+    assert captured_quest_ids == [""]
