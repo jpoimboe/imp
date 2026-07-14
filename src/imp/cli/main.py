@@ -1751,6 +1751,13 @@ def _load_events_for_id(control: Path, quest_id: str) -> list[dict[str, Any]] | 
     return _parse_jsonl(raw)
 
 
+def _resolve_row_intent(control: Path, r: _Row) -> str | None:
+    """Fallback display name for a title-less row: its opening prompt, else None."""
+    if r[4].strip():
+        return None
+    return _resolve_intent(_load_events_for_id(control, r[0]) or [])
+
+
 def _resolve_default_id(control: Path) -> str | None:
     """No-arg default: most-recent quest home by its events.jsonl mtime, else
     the most-recent archived id (by the index's last_event_ts), else None."""
@@ -1769,7 +1776,13 @@ def _log_picker_empty() -> int:
     return 2
 
 
-async def _pick_log_target(control: Path) -> str | int:
+_LOG_PICKER_HEADER = (
+    "Show log for which quest?  (↑/↓ to move · enter to select · q to cancel)"
+)
+
+
+async def _pick_full_pool_target(control: Path, *, header: str) -> str | int:
+    """No-token picker over the full pool, shared by the log and events pickers."""
     rows = _sort_rows_newest_first(
         _status_rows(control) + _backlog_rows(control) + _completed_rows(control))
     default_id = _resolve_default_id(control)
@@ -1779,10 +1792,14 @@ async def _pick_log_target(control: Path) -> str | int:
     return await _pick_quest_target(
         control=control,
         rows=rows,
-        header="Show log for which quest?  (↑/↓ to move · enter to select · q to cancel)",
+        header=header,
         on_empty=_log_picker_empty,
         selected_index=selected_index,
     )
+
+
+async def _pick_log_target(control: Path) -> str | int:
+    return await _pick_full_pool_target(control, header=_LOG_PICKER_HEADER)
 
 
 def _page_or_print(lines: Iterable[str], *, no_pager: bool) -> None:
@@ -2559,8 +2576,7 @@ async def _pick_quest_target(
     candidates = [resume_select.Candidate(
         quest_id=r[0], title=r[4], status=r[1], step=r[2], last_iso=r[3],
         step_label=r[6],
-        intent=(_resolve_intent(_load_events_for_id(control, r[0]) or [])
-                if not r[4].strip() else None))
+        intent=_resolve_row_intent(control, r))
         for r in rows]
     chosen = await resume_select.run_picker(
         candidates, now=datetime.now(UTC),
@@ -2757,37 +2773,36 @@ async def _pick_show_target(control: Path) -> str | int:
     )
 
 
-async def _pick_show_matches(control: Path, matches: list[str]) -> str | int:
-    """Scoped show picker over a token's raw _iter_quest_ids matches (>=2).
+def _ambiguous_matches_non_tty(rows: list[_Row]) -> int:
+    print("imp: ambiguous token; candidates:", file=sys.stderr)
+    color = should_use_color(sys.stderr)
+    now = datetime.now(UTC)
+    print(quest_row.header_line(color=color), file=sys.stderr)
+    name_w = quest_row.name_budget()
+    for r in rows:
+        print(quest_row.format_quest_line(
+            quest_id=r[0], title=r[4], status=r[1], step=r[2],
+            step_label=r[6], last_iso=r[3], now=now, color=color,
+            name_width=name_w), file=sys.stderr)
+    return 2
 
-    `matches` is the raw id list (the exact set the ambiguity fork counted);
-    display rows come from _row_for_id, so an unreadable id is dropped from the
-    menu only, never from the count. on_non_tty is defensive parity — the real
-    non-tty ambiguous path routes through _resolve_id/_exit_ambiguous."""
+
+async def _pick_id_matches(
+    control: Path, matches: list[str], *,
+    header: str, on_empty: Callable[[], int],
+) -> str | int:
+    """Scoped picker over a token's raw _iter_quest_ids matches (>=2)."""
     rows = _sort_rows_newest_first(
         [r for r in (_row_for_id(control, cid) for cid in matches)
          if r is not None])
-
-    def _non_tty(rows: list[_Row]) -> int:
-        print("imp: ambiguous token; candidates:", file=sys.stderr)
-        color = should_use_color(sys.stderr)
-        now = datetime.now(UTC)
-        print(quest_row.header_line(color=color), file=sys.stderr)
-        name_w = quest_row.name_budget()
-        for r in rows:
-            print(quest_row.format_quest_line(
-                quest_id=r[0], title=r[4], status=r[1], step=r[2],
-                step_label=r[6], last_iso=r[3], now=now, color=color,
-                name_width=name_w), file=sys.stderr)
-        return 2
-
     return await _pick_quest_target(
-        control=control,
-        rows=rows,
-        header=_SHOW_PICKER_HEADER,
-        on_empty=_show_picker_empty,
-        on_non_tty=_non_tty,
-    )
+        control=control, rows=rows, header=header, on_empty=on_empty,
+        on_non_tty=_ambiguous_matches_non_tty)
+
+
+async def _pick_show_matches(control: Path, matches: list[str]) -> str | int:
+    return await _pick_id_matches(
+        control, matches, header=_SHOW_PICKER_HEADER, on_empty=_show_picker_empty)
 
 
 _EVENTS_PICKER_HEADER = (
@@ -2796,54 +2811,14 @@ _EVENTS_PICKER_HEADER = (
 
 
 async def _pick_events_target(control: Path) -> str | int:
-    """No-token events picker over the full pool (in-flight + backlog +
-    completed), newest-first, with the most-recent quest pre-selected — the
-    same pool and pre-select `_pick_log_target` uses. No on_non_tty: `_cmd_events`
+    """No-token events picker over the shared full pool. No on_non_tty: `_cmd_events`
     routes the non-tty no-token case to `_resolve_default_id` before calling this."""
-    rows = _sort_rows_newest_first(
-        _status_rows(control) + _backlog_rows(control) + _completed_rows(control))
-    default_id = _resolve_default_id(control)
-    selected_index = next(
-        (i for i, r in enumerate(rows) if r[0] == default_id), 0)
-    return await _pick_quest_target(
-        control=control,
-        rows=rows,
-        header=_EVENTS_PICKER_HEADER,
-        on_empty=_log_picker_empty,
-        selected_index=selected_index,
-    )
+    return await _pick_full_pool_target(control, header=_EVENTS_PICKER_HEADER)
 
 
 async def _pick_events_matches(control: Path, matches: list[str]) -> str | int:
-    """Scoped events picker over a token's raw _iter_quest_ids matches (>=2).
-
-    Rows come from _row_for_id, so an unreadable id is dropped from the menu
-    only, never from the count. on_non_tty is defensive parity — the real
-    non-tty ambiguous path routes through _resolve_id/_exit_ambiguous."""
-    rows = _sort_rows_newest_first(
-        [r for r in (_row_for_id(control, cid) for cid in matches)
-         if r is not None])
-
-    def _non_tty(rows: list[_Row]) -> int:
-        print("imp: ambiguous token; candidates:", file=sys.stderr)
-        color = should_use_color(sys.stderr)
-        now = datetime.now(UTC)
-        print(quest_row.header_line(color=color), file=sys.stderr)
-        name_w = quest_row.name_budget()
-        for r in rows:
-            print(quest_row.format_quest_line(
-                quest_id=r[0], title=r[4], status=r[1], step=r[2],
-                step_label=r[6], last_iso=r[3], now=now, color=color,
-                name_width=name_w), file=sys.stderr)
-        return 2
-
-    return await _pick_quest_target(
-        control=control,
-        rows=rows,
-        header=_EVENTS_PICKER_HEADER,
-        on_empty=_show_picker_empty,
-        on_non_tty=_non_tty,
-    )
+    return await _pick_id_matches(
+        control, matches, header=_EVENTS_PICKER_HEADER, on_empty=_log_picker_empty)
 
 
 def _cmd_abandon(args: argparse.Namespace) -> int:
@@ -3017,10 +2992,10 @@ def _overview_body(control: Path, inflight: list[_Row], backlog_rows: list[_Row]
                    history: list[_Row], *, history_label: str, now: datetime,
                    color: bool) -> list[str]:
     """Render the sectioned overview for already-gathered rows."""
-    intents: dict[str, str | None] = {}
-    for r in inflight:
-        if not r[4].strip():
-            intents[r[0]] = _resolve_intent(_load_events_for_id(control, r[0]) or [])
+    intents: dict[str, str | None] = {
+        r[0]: _resolve_row_intent(control, r)
+        for r in (*inflight, *backlog_rows, *history)
+        if not r[4].strip()}
 
     def _name_text(r: _Row) -> str:
         raw = r[4].strip()
@@ -3055,7 +3030,8 @@ def _overview_body(control: Path, inflight: list[_Row], backlog_rows: list[_Row]
             lines.append(quest_row.format_quest_line(
                 quest_id=r[0], title=r[4], status=r[1], step=r[2],
                 step_label=r[6], phase_label=None, last_iso=r[3], now=now,
-                color=color, name_width=name_width, status_width=status_width))
+                color=color, name_width=name_width, status_width=status_width,
+                intent=intents.get(r[0])))
     if history:
         lines.append("")
         lines.append(pal.ansi(history_label, "dim", enabled=color))
@@ -3063,7 +3039,7 @@ def _overview_body(control: Path, inflight: list[_Row], backlog_rows: list[_Row]
             lines.append(quest_row.format_quest_line(
                 quest_id=r[0], title=r[4], status=_DISPOSITION[r[1]], step="-",
                 last_iso=r[3], now=now, color=color, name_width=name_width,
-                status_width=status_width, dim=True))
+                status_width=status_width, dim=True, intent=intents.get(r[0])))
     return lines
 
 
