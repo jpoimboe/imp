@@ -2,7 +2,6 @@
 name: threshold
 description: An open conversation — answer questions about imp, scout existing work, or scope a build — that goes live only when the user is ready.
 subagents: [explorer, researcher, spiker]
-allow_tools: [commit_memory]
 drivers: [impty]
 output:
   status: {type: enum, values: [Success, Error]}

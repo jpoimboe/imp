@@ -39,10 +39,15 @@ def _render_agent(name: str, vars: dict) -> str:
     )
 
 
-def test_both_gates_grant_commit_memory() -> None:
+def test_commit_memory_is_fully_retired() -> None:
+    from imp.agents.tools import get_registry
+    from imp.engine.loader import ALLOWABLE_TOOLS
+
+    assert "commit_memory" not in get_registry()
+    assert "commit_memory" not in ALLOWABLE_TOOLS
     wf = load_workflow(bundled_workflow_dir("imp"))
-    assert "commit_memory" in wf.agents["threshold"].tools
-    assert "commit_memory" in wf.agents["finalize"].tools
+    assert "commit_memory" not in wf.agents["threshold"].tools
+    assert "commit_memory" not in wf.agents["finalize"].tools
 
 
 def test_threshold_prompt_includes_memory_authoring() -> None:
