@@ -1677,7 +1677,7 @@ def _cmd_list(args: argparse.Namespace) -> int:
     dispositions = _selected_list_dispositions(args)
     if not dispositions and args.since is None:
         lines = _overview_lines(control, show_all=args.all, now=now, color=color)
-        _page_or_print(lines, no_pager=args.no_pager)
+        _page_or_print(lines, no_pager=args.no_pager, trailing_blank=True)
         return 0
     try:
         cutoff = _since_cutoff(args.since, now) if args.since is not None else None
@@ -1687,7 +1687,7 @@ def _cmd_list(args: argparse.Namespace) -> int:
     selected = dispositions or {"active", "backlog", "merged"}
     lines = _filtered_overview_lines(
         control, dispositions=selected, cutoff=cutoff, now=now, color=color)
-    _page_or_print(lines, no_pager=args.no_pager)
+    _page_or_print(lines, no_pager=args.no_pager, trailing_blank=True)
     return 0
 
 
@@ -1728,7 +1728,7 @@ def _cmd_show(args: argparse.Namespace) -> int:
             _page_or_print(
                 _backlog_card(meta, control, now=datetime.now(UTC),
                               color=should_use_color(sys.stdout)),
-                no_pager=args.no_pager)
+                no_pager=args.no_pager, trailing_blank=True)
             return 0
         print(f"imp: {quest_id} is in the backlog (not started); "
               f"no {resource} yet", file=sys.stderr)
@@ -1745,7 +1745,7 @@ def _cmd_show(args: argparse.Namespace) -> int:
         _page_or_print(
             _detail_card(control, quest_id, now=datetime.now(UTC),
                          color=should_use_color(sys.stdout)),
-            no_pager=args.no_pager)
+            no_pager=args.no_pager, trailing_blank=True)
         return 0
     if resource == "spec":
         data = make_store(control).get_artifact(quest_id, "spec")
@@ -1753,7 +1753,7 @@ def _cmd_show(args: argparse.Namespace) -> int:
         print(f"imp: no {resource} for {quest_id!r}", file=sys.stderr)
         return 2
     _page_or_print(data.decode("utf-8", errors="replace").splitlines(),
-                   no_pager=args.no_pager)
+                   no_pager=args.no_pager, trailing_blank=True)
     return 0
 
 
@@ -1848,8 +1848,11 @@ def _emit_human(lines: Iterable[str]) -> None:
         print(line)
 
 
-def _page_or_print(lines: Iterable[str], *, no_pager: bool) -> None:
+def _page_or_print(lines: Iterable[str], *, no_pager: bool,
+                   trailing_blank: bool = False) -> None:
     # Pages lines through $PAGER on a tty; falls back to print() otherwise.
+    if trailing_blank and sys.stdout.isatty():
+        lines = _with_trailing_blank(list(lines))
     if no_pager or not sys.stdout.isatty():
         for line in lines:
             print(line)
@@ -2158,7 +2161,7 @@ def _cmd_log(args: argparse.Namespace) -> int:
         lines: Iterable[str] = _backlog_card(
             meta, control, now=datetime.now(UTC),
             color=should_use_color(sys.stdout))
-        _page_or_print(lines, no_pager=args.no_pager)
+        _page_or_print(lines, no_pager=args.no_pager, trailing_blank=True)
         return 0
     events = make_store(control).get_events(quest_id)
     if events is None:
@@ -2200,13 +2203,13 @@ def _cmd_log(args: argparse.Namespace) -> int:
                                status=status, total_seconds=summary_total(events))
         lines = render_summary(build_summary(events), header=header,
                                color=color, width=width)
-        _page_or_print(lines, no_pager=args.no_pager)
+        _page_or_print(lines, no_pager=args.no_pager, trailing_blank=True)
         return 0
 
     tree = narrative.build_tree(events)
     lines = render_tree(tree, show=show, color=color, width=width,
                         display_width=_display_width())
-    _page_or_print(lines, no_pager=args.no_pager)
+    _page_or_print(lines, no_pager=args.no_pager, trailing_blank=True)
     return 0
 
 
@@ -3329,7 +3332,7 @@ def _cmd_search(args: argparse.Namespace, _control: Path | None = None) -> int:
         for h in hits:
             lines.append("")
             lines.extend(_render_search_hit(h, args.query, now=now, color=color))
-    _page_or_print(lines, no_pager=args.no_pager)
+    _page_or_print(lines, no_pager=args.no_pager, trailing_blank=True)
     return 0
 
 
@@ -3493,7 +3496,7 @@ def _cmd_events(args: argparse.Namespace) -> int:
             if i:
                 lines.append("")
             lines.extend(ei.render_step_index(scoped))
-        _page_or_print(lines, no_pager=args.no_pager)
+        _page_or_print(lines, no_pager=args.no_pager, trailing_blank=True)
         return 0
 
     if not leaf:
@@ -3503,7 +3506,8 @@ def _cmd_events(args: argparse.Namespace) -> int:
                 json.dumps(ei.index_json(index), indent=2).splitlines(),
                 no_pager=args.no_pager)
             return 0
-        _page_or_print(ei.render_index(index), no_pager=args.no_pager)
+        _page_or_print(ei.render_index(index), no_pager=args.no_pager,
+                       trailing_blank=True)
         return 0
 
     selected = ei.select_event_lines(
@@ -3518,7 +3522,7 @@ def _cmd_events(args: argparse.Namespace) -> int:
     width = None if args.full else _term_width()
     _page_or_print(
         [ei.digest_line(o, ev, handle_map, width=width) for o, ev in selected],
-        no_pager=args.no_pager)
+        no_pager=args.no_pager, trailing_blank=True)
     return 0
 
 

@@ -135,7 +135,7 @@ def test_detail_card_routes_through_pager(tmp_path: Path, monkeypatch) -> None:
     captured: list[tuple[list[str], bool]] = []
     monkeypatch.setattr(
         m, "_page_or_print",
-        lambda lines, *, no_pager: captured.append((list(lines), no_pager)))
+        lambda lines, *, no_pager, trailing_blank=False: captured.append((list(lines), no_pager)))
 
     rc = main(["show", "liveid"])
     assert rc == 0
@@ -153,7 +153,7 @@ def test_resource_routes_through_pager(tmp_path: Path, monkeypatch) -> None:
     captured: list[tuple[list[str], bool]] = []
     monkeypatch.setattr(
         m, "_page_or_print",
-        lambda lines, *, no_pager: captured.append((list(lines), no_pager)))
+        lambda lines, *, no_pager, trailing_blank=False: captured.append((list(lines), no_pager)))
 
     rc = main(["show", "liveid", "--json"])
     assert rc == 0
@@ -171,7 +171,7 @@ def test_no_pager_flag_propagates_to_pager(tmp_path: Path, monkeypatch) -> None:
     captured: list[bool] = []
     monkeypatch.setattr(
         m, "_page_or_print",
-        lambda lines, *, no_pager: captured.append(no_pager))
+        lambda lines, *, no_pager, trailing_blank=False: captured.append(no_pager))
 
     main(["show", "liveid"])
     main(["show", "liveid", "--no-pager"])
