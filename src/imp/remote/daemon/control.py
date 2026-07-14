@@ -1,4 +1,4 @@
-"""Transport-agnostic control plane: list / reply / create / abandon, routed by quest_id."""
+"""Transport-agnostic control plane: list / reply / create, routed by quest_id."""
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
@@ -15,28 +15,22 @@ class ControlPlane:
         *,
         deliver: Callable[[str, str], Awaitable[DeliveryOutcome]],
         create: Callable[[str], None],
-        abandon: Callable[[str], int],
         list_quests: Callable[[], list[QuestInfo]],
         subscriptions: Subscriptions,
         snapshot: Callable[[str], tuple[str, str, str] | None],
         recent_narrative: Callable[[str, int], list[dict[str, Any]]],
-        search: Callable[[str], list[tuple[str, str, str, str]]] | None = None,
         resume: Callable[[str], str] | None = None,
-        save: Callable[[str], None] | None = None,
         full_history: Callable[[str], list[dict[str, Any]]] | None = None,
         resident_ids: Callable[[], frozenset[str]] | None = None,
     ) -> None:
         self._deliver = deliver
         self._create = create
-        self._abandon = abandon
         self._list_fn = list_quests
         self._resident_ids = resident_ids
         self.subscriptions = subscriptions
         self._snapshot = snapshot
         self._recent_narrative = recent_narrative
-        self._search = search
         self._resume = resume
-        self._save = save
         self._full_history = full_history
 
     def snapshot(self, quest_id: str) -> tuple[str, str, str] | None:
@@ -45,17 +39,9 @@ class ControlPlane:
     def recent_narrative(self, quest_id: str, n: int) -> list[dict[str, Any]]:
         return self._recent_narrative(quest_id, n)
 
-    def search(self, query: str) -> list[tuple[str, str, str, str]]:
-        assert self._search is not None  # run_daemon always wires it
-        return self._search(query)
-
     def resume(self, token: str) -> str:
         assert self._resume is not None  # run_daemon always wires it
         return self._resume(token)
-
-    def save(self, quest_id: str) -> None:
-        assert self._save is not None  # run_daemon always wires it
-        self._save(quest_id)
 
     def full_history(self, quest_id: str) -> list[dict[str, Any]]:
         assert self._full_history is not None  # run_daemon always wires it
@@ -67,9 +53,6 @@ class ControlPlane:
 
     def create(self, prompt: str) -> None:
         self._create(prompt)
-
-    def abandon(self, quest_id: str) -> int:
-        return self._abandon(quest_id)
 
     def list_quests(self) -> list[QuestInfo]:
         return self._list_fn()

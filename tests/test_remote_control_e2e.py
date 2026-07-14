@@ -49,7 +49,6 @@ async def test_e2e_chat_commands_round_trip(
     monkeypatch.setenv("IMP_TELEGRAM_API_BASE", fake.url)
 
     created: list[str] = []
-    abandoned: list[str] = []
     listed = [QuestInfo(id="q1w2e3", title="Listed",
                          status="running", step="plan")]
     spath = socket_path(tmp_path)
@@ -66,7 +65,6 @@ async def test_e2e_chat_commands_round_trip(
                 run_daemon, tmp_path,
                 env={"IMP_TELEGRAM_TOKEN": "TOK", "IMP_TELEGRAM_CHAT_ID": "4242"},
                 create=created.append,
-                abandon=lambda cid: (abandoned.append(cid), 0)[1],
                 list_quests=lambda: listed,
                 resident_ids=lambda: frozenset({"q1w2e3"}),
                 deliver=_capture_deliver,
@@ -106,11 +104,6 @@ async def test_e2e_chat_commands_round_trip(
             # A threaded reply is delivered into the change's session (attach + inject).
             fake.inject_reply("approved", reply_to_message_id=m1)
             await _wait(lambda: delivered == [(CHANGE, "approved")])
-
-            # /abandon, addressed by replying to the Quest's message.
-            fake.inject_reply("/abandon", reply_to_message_id=m1)
-            await _wait(lambda: abandoned == [CHANGE])
-            await _wait(lambda: _text_in_outbox(fake, "Abandoned @zzzzzz."))
 
             # An unroutable bare message gets a hint, never a silent drop.
             fake.inject("who is this even")

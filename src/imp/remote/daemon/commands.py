@@ -24,11 +24,6 @@ class Create:
 
 
 @dataclass(frozen=True)
-class Abandon:
-    quest_id: str
-
-
-@dataclass(frozen=True)
 class ListQuests:
     pass
 
@@ -61,18 +56,8 @@ class Replay:
 
 
 @dataclass(frozen=True)
-class Search:
-    query: str
-
-
-@dataclass(frozen=True)
 class Resume:
     token: str
-
-
-@dataclass(frozen=True)
-class Save:
-    quest_id: str | None
 
 
 @dataclass(frozen=True)
@@ -87,19 +72,12 @@ class ListResult:
 
 
 Command = (
-    Reply | Create | Abandon | ListQuests | Help | Notice |
-    Subscribe | Unsubscribe | Replay | Search | Resume | Save | Alerts)
+    Reply | Create | ListQuests | Help | Notice |
+    Subscribe | Unsubscribe | Replay | Resume | Alerts)
 Response = ListResult | Notice
 
 NEW_USAGE = "Usage: /new <what to build>"
-SEARCH_USAGE = "Usage: /search <query>"
 RESUME_USAGE = "Usage: /resume <id or search text>"
-SAVE_USAGE = (
-    "To save a conversation, reply to one of its messages or use @handle "
-    "(e.g. /save @ab12cd).")
-ABANDON_USAGE = (
-    "To abandon a quest, reply to one of its messages or use @handle "
-    "(e.g. /abandon @ab12cd).")
 UNSUBSCRIBE_USAGE = (
     "To unsubscribe, reply to one of its messages or use @handle "
     "(e.g. /unsubscribe @ab12cd).")
@@ -115,10 +93,7 @@ HELP_TEXT = (
     "/subscribe @handle — follow a quest (streams from now; /replay for history)\n"
     "/unsubscribe (reply or @handle) — stop all messages for a quest\n"
     "/replay [n] (reply or @handle) — re-send last n messages\n"
-    "/abandon (reply or @handle) — stop a quest\n"
-    "/search <query> — search archived conversations by title or id\n"
     "/resume <id or text> — rehydrate and continue a saved/archived conversation\n"
-    "/save (reply or @handle) — save a conversation to your backlog\n"
     "/alerts on|off — alert on every quest, not just the ones you follow (default: on)\n"
     "/help — this message\n"
     "Reply to a quest's message (or @handle) to answer it.")
@@ -158,9 +133,6 @@ def parse(
             return Help()
         if verb == "new":
             return Create(rest) if rest else Notice(NEW_USAGE)
-        if verb == "abandon":
-            quest_id = _resolve_target(rest, reply_to, resolve_lookup, "abandon")
-            return Abandon(quest_id) if quest_id is not None else Notice(ABANDON_USAGE)
         if verb in ("subscribe", "sub"):
             quest_id = (
                 resolve_handle(rest) if resolve_handle is not None
@@ -175,12 +147,8 @@ def parse(
             n = _parse_replay_n(rest)
             quest_id = _resolve_target(rest, reply_to, resolve_lookup, "replay")
             return Replay(quest_id, n)
-        if verb == "search":
-            return Search(rest) if rest else Notice(SEARCH_USAGE)
         if verb == "resume":
             return Resume(rest) if rest else Notice(RESUME_USAGE)
-        if verb == "save":
-            return Save(_resolve_target(rest, reply_to, resolve_lookup, "save"))
         if verb == "alerts":
             arg = rest.lower()
             if arg == "on":

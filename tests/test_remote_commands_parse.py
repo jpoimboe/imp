@@ -1,14 +1,11 @@
 from __future__ import annotations
 
 from imp.remote.daemon.commands import (
-    ABANDON_USAGE,
     HELP_TEXT,
     NEW_USAGE,
     RESUME_USAGE,
     ROUTE_HINT,
-    SEARCH_USAGE,
     UNKNOWN_COMMAND,
-    Abandon,
     Alerts,
     Create,
     Help,
@@ -17,8 +14,6 @@ from imp.remote.daemon.commands import (
     Notice,
     Reply,
     Resume,
-    Save,
-    Search,
     parse,
 )
 from imp.remote.daemon.discover import QuestInfo
@@ -63,20 +58,12 @@ def test_slash_new_empty_is_a_usage_notice() -> None:
     assert parse("/new   ", None, fake_resolve) == Notice(NEW_USAGE)
 
 
-def test_slash_abandon_reply_to_resolves_the_target() -> None:
-    assert parse("/abandon", 42, fake_resolve) == Abandon(A)
+def test_slash_abandon_is_no_longer_recognized() -> None:
+    assert parse("/abandon @good", None, fake_resolve) == Notice(UNKNOWN_COMMAND)
 
 
-def test_slash_abandon_at_handle_resolves_the_target() -> None:
-    assert parse("/abandon @good", None, fake_resolve) == Abandon(B)
-
-
-def test_slash_abandon_untargeted_is_a_usage_notice() -> None:
-    assert parse("/abandon", None, fake_resolve) == Notice(ABANDON_USAGE)
-
-
-def test_slash_abandon_unresolvable_handle_is_a_usage_notice() -> None:
-    assert parse("/abandon @nope", None, fake_resolve) == Notice(ABANDON_USAGE)
+def test_help_text_no_longer_mentions_abandon() -> None:
+    assert "/abandon" not in HELP_TEXT
 
 
 def test_slash_ls_is_no_longer_an_alias_for_listquests() -> None:
@@ -105,12 +92,13 @@ def test_bare_at_handle_with_no_text_is_a_route_hint() -> None:
     assert parse("@good", None, fake_resolve) == Notice(ROUTE_HINT)
 
 
-def test_slash_search_with_query_is_a_search() -> None:
-    assert parse("/search dark mode", None, fake_resolve) == Search("dark mode")
+def test_slash_search_is_no_longer_recognized() -> None:
+    assert parse("/search dark mode", None, fake_resolve) == Notice(UNKNOWN_COMMAND)
+    assert parse("/search   ", None, fake_resolve) == Notice(UNKNOWN_COMMAND)
 
 
-def test_slash_search_empty_is_a_usage_notice() -> None:
-    assert parse("/search   ", None, fake_resolve) == Notice(SEARCH_USAGE)
+def test_help_text_no_longer_mentions_search() -> None:
+    assert "/search" not in HELP_TEXT
 
 
 def test_slash_resume_with_token_is_a_resume() -> None:
@@ -121,16 +109,12 @@ def test_slash_resume_empty_is_a_usage_notice() -> None:
     assert parse("/resume   ", None, fake_resolve) == Notice(RESUME_USAGE)
 
 
-def test_slash_save_reply_to_resolves_the_target() -> None:
-    assert parse("/save", 42, fake_resolve) == Save(A)
+def test_slash_save_is_no_longer_recognized() -> None:
+    assert parse("/save @good", None, fake_resolve) == Notice(UNKNOWN_COMMAND)
 
 
-def test_slash_save_at_handle_resolves_the_target() -> None:
-    assert parse("/save @good", None, fake_resolve) == Save(B)
-
-
-def test_slash_save_untargeted_carries_no_quest_id() -> None:
-    assert parse("/save", None, fake_resolve) == Save(None)
+def test_help_text_no_longer_mentions_save() -> None:
+    assert "/save" not in HELP_TEXT
 
 
 def test_listresult_defaults_resident_to_empty_frozenset() -> None:

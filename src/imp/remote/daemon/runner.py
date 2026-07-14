@@ -17,7 +17,6 @@ import anyio
 
 from imp.diagnostics import install_stack_dumper
 from imp.engine.archive import maintenance as archive_maintenance
-from imp.engine.archive import read as archive_read
 from imp.engine.errors import LoadError
 from imp.engine.quest import Quest
 from imp.remote.daemon import discover, spawn
@@ -27,8 +26,6 @@ from imp.remote.daemon.commands import (
     ALERTS_ON_REPLY,
     HELP_TEXT,
     ROUTE_HINT,
-    SAVE_USAGE,
-    Abandon,
     Alerts,
     Command,
     Create,
@@ -40,8 +37,6 @@ from imp.remote.daemon.commands import (
     Reply,
     Response,
     Resume,
-    Save,
-    Search,
     Subscribe,
     Unsubscribe,
 )
@@ -57,7 +52,6 @@ from imp.remote.daemon.telegram_adapter import (
     handle_for,
 )
 from imp.remote.session.reply import DeliveryOutcome, deliver_session_reply
-from imp.remote.session.save import save_quest as _save_quest
 
 _log = logging.getLogger("imp.daemon")
 
@@ -339,14 +333,6 @@ async def _handle_command(
     elif isinstance(command, Create):
         control.create(command.prompt)
         responses.put(Notice("Spawning a new quest… watch for its first question"))
-    elif isinstance(command, Abandon):
-        handle = handle_for(command.quest_id)
-        rc = await anyio.to_thread.run_sync(control.abandon, command.quest_id)
-        if rc == 0:
-            responses.put(Notice(f"Abandoned @{handle}."))
-        else:
-            responses.put(Notice(
-                f"@{handle} is still running — stop it first, then /abandon again."))
     elif isinstance(command, ListQuests):
         try:
             quests = await anyio.to_thread.run_sync(control.list_quests)
@@ -355,33 +341,9 @@ async def _handle_command(
         except Exception:
             _log.warning("list or residency probe failed", exc_info=True)
             responses.put(Notice("Error: could not list quests."))
-    elif isinstance(command, Search):
-        hits = await anyio.to_thread.run_sync(control.search, command.query)
-        if not hits:
-            responses.put(Notice(f"No archived conversations match {command.query!r}."))
-        else:
-            lines = [
-                f"@{handle_for(cid)}  {title or '(untitled)'}  [{status or '-'}]"
-                for cid, title, status, _created in hits
-            ]
-            responses.put(Notice("\n".join(lines)))
     elif isinstance(command, Resume):
         message = await anyio.to_thread.run_sync(control.resume, command.token)
         responses.put(Notice(message))
-    elif isinstance(command, Save):
-        quest_id = command.quest_id
-        if quest_id is None:
-            responses.put(Notice(SAVE_USAGE))
-        else:
-            try:
-                await anyio.to_thread.run_sync(control.save, quest_id)
-            except (OSError, TimeoutError):
-                responses.put(Notice(
-                    f"Couldn't reach the session for @{handle_for(quest_id)} "
-                    "to save it — it may still be running."))
-            else:
-                responses.put(Notice(
-                    f"Saved @{handle_for(quest_id)} to your backlog."))
     elif isinstance(command, Alerts):
         if command.on is None:
             responses.put(Notice(
@@ -456,12 +418,9 @@ async def run_daemon(
     ] = _make_telegram_adapter,
     deliver: Callable[[str, str], Awaitable[DeliveryOutcome]] | None = None,
     create: Callable[[str], None] | None = None,
-    abandon: Callable[[str], int] | None = None,
     list_quests: Callable[[], list[discover.QuestInfo]] | None = None,
     resident_ids: Callable[[], frozenset[str]] | None = None,
-    search: Callable[[str], list[tuple[str, str, str, str]]] | None = None,
     resume: Callable[[str], str] | None = None,
-    save: Callable[[str], None] | None = None,
     install_signals: bool = True,
     shutdown: anyio.Event | None = None,
 ) -> None:
@@ -470,14 +429,10 @@ async def run_daemon(
     shutdown = anyio.Event() if shutdown is None else shutdown
     deliver = deliver or (lambda cid, text: deliver_to_session(control_root, cid, text))
     create = create or (lambda prompt: spawn.create_quest(control_root, prompt))
-    abandon = abandon or (lambda cid: spawn.abandon_quest(control_root, cid))
     list_quests = list_quests or (lambda: discover.list_quests(control_root))
     resident_ids = resident_ids or (
         lambda: frozenset(resident_session_ids(control_root)))
-    search = search or (lambda q: archive_read.search_archive(control_root, q))
     resume = resume or (lambda token: spawn.resume_quest(control_root, token))
-    save = save or (lambda cid: _save_quest(control_root, cid))
-
     def is_known_quest(cid: str) -> bool:
         return quest_home_exists(control_root, cid)
 
@@ -502,13 +457,13 @@ async def run_daemon(
         subscriptions=subscriptions)
     control = ControlPlane(
         deliver=deliver, create=create,
-        abandon=abandon, list_quests=list_quests,
+        list_quests=list_quests,
         resident_ids=resident_ids,
         subscriptions=subscriptions,
         snapshot=lambda cid: discover.snapshot(control_root, cid),
         recent_narrative=lambda cid, n: discover.recent_narrative(
             control_root, cid, n),
-        search=search, resume=resume, save=save,
+        resume=resume,
         full_history=lambda cid: discover.full_history(control_root, cid))
     adapter = make_adapter(env, inbound.put, subscriptions, alert_all, is_known_quest)
 

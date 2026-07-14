@@ -11,7 +11,6 @@ from imp.remote.daemon.commands import (
     ALERTS_ON_REPLY,
     HELP_TEXT,
     ROUTE_HINT,
-    Abandon,
     Alerts,
     Create,
     Help,
@@ -36,16 +35,14 @@ def anyio_backend() -> str:
 
 class FakeControl:
     def __init__(
-        self, quests: list[QuestInfo] | None = None, *, abandon_rc: int = 0,
+        self, quests: list[QuestInfo] | None = None, *,
         snapshots: dict | None = None, narratives: dict | None = None,
         resident: frozenset[str] | None = None,
         reply_outcome: DeliveryOutcome = DeliveryOutcome.DELIVERED,
     ) -> None:
         self.replies: list[tuple[str, str]] = []
         self.created: list[str] = []
-        self.abandoned: list[str] = []
         self._quests = quests or []
-        self._abandon_rc = abandon_rc
         self.subscriptions = Subscriptions()
         self._snapshots = snapshots or {}
         self._narratives = narratives or {}
@@ -68,10 +65,6 @@ class FakeControl:
 
     def create(self, prompt: str) -> None:
         self.created.append(prompt)
-
-    def abandon(self, quest_id: str) -> int:
-        self.abandoned.append(quest_id)
-        return self._abandon_rc
 
     def list_quests(self) -> list[QuestInfo]:
         return self._quests
@@ -96,29 +89,6 @@ async def test_create_calls_create_and_enqueues_a_notice() -> None:
     await _handle_command(Create("add a foo"), control, responses)
     assert control.created == ["add a foo"]
     assert isinstance(responses.get_nowait(), Notice)
-
-
-@pytest.mark.anyio
-async def test_abandon_success_enqueues_abandoned_notice() -> None:
-    control = FakeControl(abandon_rc=0)
-    responses: queue.Queue = queue.Queue()
-    await _handle_command(Abandon("k3f9qa"), control, responses)
-    assert control.abandoned == ["k3f9qa"]
-    notice = responses.get_nowait()
-    assert isinstance(notice, Notice) and notice.text == "Abandoned @k3f9qa."
-    assert responses.empty()   # no optimistic pre-result ack
-
-
-@pytest.mark.anyio
-async def test_abandon_running_change_enqueues_still_running_notice() -> None:
-    control = FakeControl(abandon_rc=2)
-    responses: queue.Queue = queue.Queue()
-    await _handle_command(Abandon("k3f9qa"), control, responses)
-    assert control.abandoned == ["k3f9qa"]
-    notice = responses.get_nowait()
-    assert isinstance(notice, Notice)
-    assert "k3f9qa" in notice.text and "still running" in notice.text
-    assert responses.empty()
 
 
 @pytest.mark.anyio

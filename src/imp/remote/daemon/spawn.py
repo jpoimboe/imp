@@ -1,4 +1,4 @@
-"""Detached imp subprocess spawners: resume, create, and abandon for the control plane."""
+"""Detached imp subprocess spawners: resume and create for the control plane."""
 from __future__ import annotations
 
 import os
@@ -23,14 +23,6 @@ def _spawn_detached(argv: list[str], env: Mapping[str, str], cwd: Path) -> None:
         argv, env=dict(env), cwd=str(cwd),
         stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL, start_new_session=True)
-
-
-def _run_foreground(argv: list[str], env: Mapping[str, str], cwd: Path) -> int:
-    """Run imp synchronously (the daemon owns it), discarding I/O; returns its exit code."""
-    return subprocess.run(
-        argv, env=dict(env), cwd=str(cwd),
-        stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL).returncode
 
 
 def _imp(*args: str) -> list[str]:
@@ -66,8 +58,3 @@ def start_quest(control_root: Path, quest_id: str) -> None:
         _imp("resume", quest_id, "--non-interactive", "--autonomous"),
         _base_env(), control_root)
 
-
-def abandon_quest(control_root: Path, quest_id: str) -> int:
-    """Abandon a quest via `imp abandon`, synchronously; returns its exit code."""
-    return _run_foreground(
-        _imp("abandon", quest_id), _base_env(), control_root)
