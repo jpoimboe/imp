@@ -21,7 +21,7 @@ import subprocess
 import sys
 from collections.abc import Awaitable, Callable, Iterable
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, NamedTuple, NoReturn
 
@@ -2829,6 +2829,42 @@ def _backlog_rows(control: Path, scanned: list[_HomeScan] | None = None) -> list
         rows.append((h.quest_id, origin, blocked, h.last_iso,
                      meta.get("title") or "", created, blocked or None, None))
     return rows
+
+
+_HISTORY_CAP = 10
+
+_SINCE_ERROR = (
+    "imp: --since expects 'today' or a number with a unit — "
+    "h/d/w/m/y (e.g. 2d, 1w, 3m).")
+
+
+def _since_cutoff(spec: str, now: datetime) -> datetime:
+    """Resolve a --since SPEC to an absolute cutoff instant (ValueError if unrecognized)."""
+    s = spec.strip().lower()
+    local = now.astimezone()
+    midnight = local.replace(hour=0, minute=0, second=0, microsecond=0)
+    if s == "today":
+        return midnight
+    if s == "yesterday":
+        return midnight - timedelta(days=1)
+    if s == "this-week":
+        return midnight - timedelta(days=local.weekday())
+    if s == "this-month":
+        return midnight.replace(day=1)
+    match = re.fullmatch(r"(\d+)([hdwmy])", s)
+    if match is None:
+        raise ValueError(spec)
+    n = int(match.group(1))
+    unit = match.group(2)
+    if unit == "h":
+        return now - timedelta(hours=n)
+    if unit == "d":
+        return now - timedelta(days=n)
+    if unit == "w":
+        return now - timedelta(weeks=n)
+    if unit == "m":
+        return now - timedelta(days=30 * n)
+    return now - timedelta(days=365 * n)  # unit == "y"
 
 
 # Display-only disposition word for the overview history block.
