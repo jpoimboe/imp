@@ -592,31 +592,23 @@ async def terminate_background_processes(ctx: ToolContext) -> None:
                     p.unlink()
 
 
-async def spawn_background(
-    ctx: ToolContext, *, command: str, argv: list[str], cwd: str,
+async def _spawn_to_files(
+    argv: list[str], *, out_path: Path, err_path: Path, cwd: str,
     env: dict[str, str],
-) -> str:
-    """Spawn ordering (no orphan window): scratch dir + both write-side files
-    BEFORE the spawn; register the BgProc immediately AFTER open_process
-    returns; close the parent's fd copies LAST. No parent-side write handles
-    are retained — the child writes through its own inherited fds; a retained
-    parent handle would never be written through and its flush would flush
-    nothing. Truncating open ('wb') is belt-and-braces: counter seeding means
-    the same <id>.out is never legitimately reopened."""
-    _seed_counter(ctx)
-    # A pre-spawn/spawn failure CONSUMES this id (the next spawn is bg2 even
-    # if bg1 never existed). Harmless — seeding tolerates gaps — and must NOT
-    # be "fixed" with a decrement, which would re-open the aliasing window.
-    bg_id = ctx.next_bg_id()
-    d = _bg_dir(ctx)
-    d.mkdir(parents=True, exist_ok=True)
-    out_path = d / f"{bg_id}.out"
-    err_path = d / f"{bg_id}.err"
+) -> Any:
+    """Shared spawn body for background AND (Part 2/3) foreground procs.
+
+    Ordering (no orphan window): open both write-side files, spawn the child
+    with stdin=DEVNULL and stdout/stderr redirected to them under a new session
+    (start_new_session => pgid == pid, the invariant kill_process_group /
+    teardown rely on), then close the parent's fd copies and return the live
+    process. The child writes through its own inherited fds; a retained parent
+    handle would flush nothing. On any failure the partially-created files are
+    unlinked. Truncating open ('wb') is belt-and-braces: counter seeding means
+    the same <id>.out is never legitimately reopened.
+    """
     kwargs: dict[str, object] = {}
     if hasattr(os, "setsid"):
-        # Same session-leader invariant as foreground bash: pgid == pid, so
-        # kill_process_group / os.killpg reaches the whole tree — including
-        # forked children that survive the leader.
         kwargs["start_new_session"] = True
     out_f = open(out_path, "wb")  # noqa: SIM115
     try:
@@ -646,11 +638,34 @@ async def spawn_background(
         with contextlib.suppress(OSError):
             err_path.unlink()
         raise
+    # Close the parent's redundant fd copies right after the spawn succeeds and
+    # BEFORE the caller registers the proc: there is no await between here and
+    # registration, so no orphan window opens.
+    out_f.close()
+    err_f.close()
+    return proc
+
+
+async def spawn_background(
+    ctx: ToolContext, *, command: str, argv: list[str], cwd: str,
+    env: dict[str, str],
+) -> str:
+    """Spawn ordering (no orphan window): scratch dir + both write-side files
+    BEFORE the spawn (in the shared core); register the BgProc immediately AFTER
+    the core returns the live process. A pre-spawn/spawn failure CONSUMES this id
+    (the next spawn is bg2 even if bg1 never existed) — harmless, and must NOT be
+    'fixed' with a decrement, which would re-open the aliasing window."""
+    _seed_counter(ctx)
+    bg_id = ctx.next_bg_id()
+    d = _bg_dir(ctx)
+    d.mkdir(parents=True, exist_ok=True)
+    out_path = d / f"{bg_id}.out"
+    err_path = d / f"{bg_id}.err"
+    proc = await _spawn_to_files(
+        argv, out_path=out_path, err_path=err_path, cwd=cwd, env=env)
     bp = BgProc(id=bg_id, proc=proc, out_path=out_path, err_path=err_path,
                 command=command)
     ctx.background_processes[bg_id] = bp
-    out_f.close()
-    err_f.close()
     root = ctx.project_root.resolve()
     return json.dumps({
         "id": bg_id,
