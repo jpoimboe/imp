@@ -53,7 +53,7 @@ def test_create_quest_writes_quest_home_and_emits_event(tmp_path: Path) -> None:
 
     created = Quest.load(ch.control_root, new_id)
     assert created.materialized is False
-    assert created.origin == "followup"
+    assert created.origin == "backlog"
     assert created.title == "Follow-up: extract helper"
     assert created.seed_opening == (
         "Follow-up: extract helper\n\n"
@@ -131,7 +131,7 @@ def test_create_quest_defers_seed_and_survives_skew_workflow(tmp_path: Path) -> 
     new_id = next(p.name for p in (ch.control_root / ".imp" / "quests").iterdir()
                   if p.name != ch.id)
     created = Quest.load(ch.control_root, new_id)
-    assert created.origin == "followup"
+    assert created.origin == "backlog"
     seeded = State.load(created.state_dir)
     assert seeded.step is None
     assert seeded.has_started is False
@@ -189,7 +189,7 @@ def test_start_false_records_backlog_and_does_not_spawn(
     new_id = next(p.name for p in (ch.control_root / ".imp" / "quests").iterdir()
                   if p.name != ch.id)
     created = Quest.load(ch.control_root, new_id)
-    assert created.origin == "followup"
+    assert created.origin == "backlog"
     assert calls == []
 
     child = next(e for e in ch.event_log().read()
