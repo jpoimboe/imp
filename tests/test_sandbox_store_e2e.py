@@ -279,3 +279,39 @@ def test_current_events_served_and_raw_masked(project) -> None:
         "grep -rn CURMARK .imp/quests 2>/dev/null; echo SCAN_DONE")
     assert "SCAN_DONE" in scan
     assert CUR_MARK not in scan, "events.jsonl not masked inside sandbox — mask leaked"
+
+
+def test_sibling_and_dormant_events_served(project) -> None:
+    """AC 2(b)+(c): `imp events` for a live sibling and a dormant sibling both return
+    correct events via the current quest's daemon, though each sibling's own
+    events.jsonl is masked in-sandbox (the daemon reads them from disk unsandboxed)."""
+    control = project
+    for qid, mark in ((LIVE_SIB, SIB_MARK), (DORM_SIB, DORM_MARK)):
+        rc, out, err = _imp(control, "events", qid, "--all")
+        assert rc == 0, f"imp events {qid} failed: rc={rc} err={err!r}"
+        assert mark in out, f"proxied sibling events missing marker for {qid}: {out!r}"
+
+
+def test_archived_events_served_and_blobs_masked(project) -> None:
+    """AC 2(d) + AC 1: `imp events <archived>` returns the archived quest's events via
+    the daemon (which reads the archive blob unsandboxed) while the raw archive
+    blobs/ and index.db are masked in-sandbox."""
+    control = project
+    rc, out, err = _imp(control, "events", ARCH, "--all")
+    assert rc == 0, f"imp events {ARCH} failed: rc={rc} err={err!r}"
+    assert ARCH_MARK in out, f"proxied archived events missing marker: {out!r}"
+
+    _, scan, _ = anyio.run(
+        _serve_and_run, control,
+        "grep -rn ARCHMARK .imp/archive 2>/dev/null; echo SCAN_DONE")
+    assert "SCAN_DONE" in scan
+    assert ARCH_MARK not in scan, "archive blobs/index.db not masked — mask leaked"
+
+
+def test_list_all_shows_archived_history(project) -> None:
+    """AC 2(f): `imp list --all` renders the archived quest as a history row through
+    the proxied `completed_rows` op (reading the masked index.db via the daemon)."""
+    control = project
+    rc, out, err = _imp(control, "list", "--all")
+    assert rc == 0, f"imp list --all failed: rc={rc} err={err!r}"
+    assert ARCH in out, f"archived quest missing from history rows: {out!r}"
