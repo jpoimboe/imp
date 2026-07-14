@@ -654,6 +654,18 @@ def test_bash_promotion_preserves_pre_promotion_output(tmp_path: Path) -> None:
     assert leftover_fg == []
 
 
+def test_bash_description_describes_promotion_not_reaping() -> None:
+    # AC 10: the tool the model sees no longer says a foreground command is
+    # "reaped after 120 s"; it describes promotion to a background task
+    # readable/killable via bash_output/bash_kill, and still states the
+    # 120 s default / 600 s cap contract.
+    desc = get_registry()["bash"].description
+    assert "reaped" not in desc
+    assert "promoted to a background task" in desc
+    assert "bash_output" in desc and "bash_kill" in desc
+    assert "120" in desc and "600" in desc
+
+
 def test_bash_promoted_proc_is_killable_and_torn_down(tmp_path: Path) -> None:
     # AC 2 & 9: a promoted proc is managed exactly like an explicitly-backgrounded
     # one — bash_kill("bg1") stops it (agent kill) and

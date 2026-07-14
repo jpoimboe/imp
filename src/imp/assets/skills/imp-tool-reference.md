@@ -95,8 +95,12 @@ external matches as absolute paths.
   exceeds 30 KB the full output spills to a file and a `notice` field carries a
   `read_file`-able path to recover the tail. Runaway output is killed at 5 MB. A
   foreground command is interruptible (SIGTERM to the process group, 4 s grace,
-  then SIGKILL) and is reaped after 120 s by default — pass `timeout` (positive
-  seconds, capped at 600) to extend a slow foreground command.
+  then SIGKILL). A foreground command that exceeds its deadline (120 s by
+  default — pass `timeout`, positive seconds, capped at 600, to extend) is
+  promoted to a background task instead of being killed: the call returns the
+  same `{id, pid, command, status, out_path, err_path}` descriptor plus a
+  `note`, and the task is thereafter read via `bash_output(id)` and stopped via
+  `bash_kill(id)`.
 - Background (`run_in_background=true`): returns `{id, pid, command, status,
   out_path, err_path}` immediately while the process keeps running.
   `out_path`/`err_path` are relative to the project root (bash's default cwd) and

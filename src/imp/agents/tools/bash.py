@@ -76,8 +76,10 @@ def _effective_foreground_timeout(timeout: float | None) -> float:
         "to read the tail. `run_in_background=true` returns {id, pid, …} "
         "immediately — read output with `bash_output(id)`, stop with "
         "`bash_kill(id)`; a bad command still spawns then fails, so check "
-        "`bash_output` after. A foreground command is reaped after 120 s; pass "
-        "`timeout` (positive seconds, max 600) to extend a slow one. No "
+        "`bash_output` after. A foreground command that exceeds its deadline "
+        "(default 120 s; pass `timeout`, positive seconds, max 600, to extend) "
+        "is promoted to a background task readable via `bash_output`/killable "
+        "via `bash_kill`. No "
         "permission gate. "
         "See `imp-tool-reference` for buffering and path details."
     ),
