@@ -3642,7 +3642,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     p_list.add_argument(
         "-a", "--all", action="store_true",
-        help="Also include abandoned/shelved quests "
+        help="Also include abandoned and shelved quests "
              "(the block is then labelled `history`).")
     p_list.add_argument(
         "--active", action="store_true",
