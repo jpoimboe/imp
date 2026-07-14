@@ -1001,7 +1001,7 @@ def test_resolve_policy_allows_read_reflects_steps_mask(tmp_path):
     assert pol.allows_read(quest_dir / "steps" / "phase" / "x") is False
     assert pol.allows_read(quest_dir / "artifacts" / "spec.md") is True
     assert pol.allows_read(quest_dir / "workflow" / "w.md") is True
-    assert pol.allows_read(quest_dir / "events.jsonl") is True
+    assert pol.allows_read(quest_dir / "events.jsonl") is False
 
 
 def test_resolve_policy_steps_mask_is_existence_gated(tmp_path):
@@ -1015,6 +1015,37 @@ def test_resolve_policy_steps_mask_is_existence_gated(tmp_path):
         available=True, quest_dir=quest_dir,
     )
     assert str(quest_dir / "steps") not in pol.secret_dirs
+
+
+def test_resolve_policy_masks_quest_events_jsonl(tmp_path):
+    control, wt = _layout(tmp_path)
+    quest_dir = control / ".imp" / "quests" / "abc"
+    quest_dir.mkdir(parents=True)
+    (quest_dir / "events.jsonl").write_text('{"e":1}\n')
+    sib_dir = control / ".imp" / "quests" / "sib"
+    sib_dir.mkdir(parents=True)
+    (sib_dir / "events.jsonl").write_text("")
+    pol = resolve_policy(
+        worktree=wt, control_root=control, quest_id="abc",
+        cfg=SandboxConfig(), engine_env_result={}, environ={},
+        available=True, quest_dir=quest_dir,
+    )
+    assert str(quest_dir / "events.jsonl") in pol.secret_files
+    assert str(sib_dir / "events.jsonl") in pol.secret_files
+    assert pol.allows_read(quest_dir / "events.jsonl") is False
+
+
+def test_resolve_policy_events_mask_is_existence_gated(tmp_path):
+    control, wt = _layout(tmp_path)
+    quest_dir = control / ".imp" / "quests" / "abc"
+    quest_dir.mkdir(parents=True)
+    # No events.jsonl written — the existence-gate must produce no entry.
+    pol = resolve_policy(
+        worktree=wt, control_root=control, quest_id="abc",
+        cfg=SandboxConfig(), engine_env_result={}, environ={},
+        available=True, quest_dir=quest_dir,
+    )
+    assert str(quest_dir / "events.jsonl") not in pol.secret_files
 
 
 def test_readonly_overlay_denies_write_inside_allows_sibling():

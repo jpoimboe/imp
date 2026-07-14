@@ -476,10 +476,13 @@ def resolve_policy(
             secret_files.append(str(p))
     secret_dirs.append(f"/run/user/{uid}")   # H2 — agent sockets; mask even if abs
 
-    # Mask each quest's steps/ (siblings too) — overlay-home mountpoints a raw walk would stall on.
+    # Mask each quest's steps/ + events.jsonl (siblings too): steps/ are overlay-home
+    # mountpoints a raw walk would stall on; events.jsonl is the unbounded footgun log
+    # whose sole in-sandbox reader is the CLI (now routed through the daemon store).
     quests_root = control_root / ".imp" / "quests"
-    secret_dirs += list(_existing(
-        [str(p / "steps") for p in sorted(quests_root.glob("*")) if p.is_dir()]))
+    quest_dirs = [p for p in sorted(quests_root.glob("*")) if p.is_dir()]
+    secret_dirs += list(_existing([str(p / "steps") for p in quest_dirs]))
+    secret_files += list(_existing([str(p / "events.jsonl") for p in quest_dirs]))
 
     # ro overlay of workflow snapshot — bind_plan emits it after the quest_home rw
     # bind, so last-covering-wins makes only workflow/ read-only.
