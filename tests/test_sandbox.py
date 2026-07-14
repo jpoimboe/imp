@@ -1452,3 +1452,48 @@ def test_resolve_policy_archive_mask_is_existence_gated(tmp_path):
     archive = control / ".imp" / "archive"
     assert str(archive / "blobs") not in pol.secret_dirs
     assert str(archive / "index.db") not in pol.secret_files
+
+
+def test_resolve_policy_injects_session_socket_marker(tmp_path):
+    from imp.remote.session.discover import session_socket_path
+
+    control, wt = _layout(tmp_path)
+    pol = resolve_policy(
+        worktree=wt, control_root=control, quest_id="abc",
+        cfg=SandboxConfig(), engine_env_result={}, environ={"PATH": "/usr/bin"},
+        available=True,
+    )
+    expected = str(session_socket_path(control, "abc"))
+    assert ("IMP_SESSION_SOCKET", expected) in pol.setenv
+
+
+def test_session_socket_marker_absent_when_inactive(tmp_path):
+    control, wt = _layout(tmp_path)
+    pol = resolve_policy(
+        worktree=wt, control_root=control, quest_id="abc",
+        cfg=SandboxConfig(enabled=False), engine_env_result={},
+        environ={}, available=True,
+    )
+    assert "IMP_SESSION_SOCKET" not in {k for k, _ in pol.setenv}
+
+    pol = resolve_policy(
+        worktree=wt, control_root=control, quest_id="abc",
+        cfg=SandboxConfig(allow_unsandboxed=True), engine_env_result={},
+        environ={}, available=False,
+    )
+    assert "IMP_SESSION_SOCKET" not in {k for k, _ in pol.setenv}
+
+
+def test_session_socket_marker_reaches_bwrap_setenv(tmp_path):
+    from imp.remote.session.discover import session_socket_path
+
+    control, wt = _layout(tmp_path)
+    pol = resolve_policy(
+        worktree=wt, control_root=control, quest_id="abc",
+        cfg=SandboxConfig(), engine_env_result={}, environ={"PATH": "/usr/bin"},
+        available=True,
+    )
+    argv = build_sandbox_argv("x", cwd=str(wt), policy=pol, engine_env={})
+    i = argv.index("IMP_SESSION_SOCKET")
+    assert argv[i - 1] == "--setenv"
+    assert argv[i + 1] == str(session_socket_path(control, "abc"))
