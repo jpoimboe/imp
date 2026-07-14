@@ -630,6 +630,29 @@ def test_quest_meta_resolves_archived_from_archive(tmp_path: Path) -> None:
     assert meta["title"] == "Meta One"
 
 
+def test_events_reads_index_from_archive_after_merge(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import imp.cli.main as m
+
+    _seed_control(tmp_path)
+    Quest.create(tmp_path, title="Done Thing", quest_id="done-thing", base_branch="main")
+    _seed_marker_phase(tmp_path, "done-thing")
+    _complete_and_archive(tmp_path, "done-thing")
+    assert not (tmp_path / ".imp" / "worktrees" / "done-thing").exists()
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
+    monkeypatch.delenv("NO_COLOR", raising=False)
+    buf = io.StringIO()
+    with redirect_stdout(buf):
+        rc = main(["events", "done-thing"])
+    out = buf.getvalue()
+    assert rc == 0, out
+    assert "quest done-thing" in out   # the index header, read from the archive
+    assert "steps:" in out
+
+
 def test_status_all_lists_archived(tmp_path, monkeypatch) -> None:
     import imp.cli.main as m
 
