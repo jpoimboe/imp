@@ -2900,18 +2900,10 @@ def _history_rows(control: Path, *, show_all: bool,
     return _sort_rows_newest_first(rows)
 
 
-def _overview_lines(control: Path, *, show_all: bool, now: datetime,
-                    color: bool) -> list[str]:
-    """Overview lines across all zones, sharing one content-sized STATUS/NAME width."""
-    scanned = _scan_quest_homes(control)
-    status_rows = _status_rows(control, scanned)
-    inflight = _sort_rows_newest_first(status_rows)
-    backlog_rows = _sort_rows_newest_first(_backlog_rows(control, scanned))
-    history = _history_rows(control, show_all=show_all,
-                            live_ids={r[0] for r in status_rows})
-    if not inflight and not backlog_rows and not history:
-        return [_NO_QUESTS_MESSAGE]
-
+def _overview_body(control: Path, inflight: list[_Row], backlog_rows: list[_Row],
+                   history: list[_Row], *, history_label: str, now: datetime,
+                   color: bool) -> list[str]:
+    """Render the sectioned overview for already-gathered rows."""
     intents: dict[str, str | None] = {}
     for r in inflight:
         if not r[4].strip():
@@ -2953,14 +2945,74 @@ def _overview_lines(control: Path, *, show_all: bool, now: datetime,
                 color=color, name_width=name_width, status_width=status_width))
     if history:
         lines.append("")
-        label = "history:" if show_all else "merged:"
-        lines.append(pal.ansi(label, "dim", enabled=color))
+        lines.append(pal.ansi(history_label, "dim", enabled=color))
         for r in history:
             lines.append(quest_row.format_quest_line(
                 quest_id=r[0], title=r[4], status=_DISPOSITION[r[1]], step="-",
                 last_iso=r[3], now=now, color=color, name_width=name_width,
                 status_width=status_width, dim=True))
     return lines
+
+
+def _overview_lines(control: Path, *, show_all: bool, now: datetime,
+                    color: bool) -> list[str]:
+    """Overview lines across all zones, sharing one content-sized STATUS/NAME width."""
+    scanned = _scan_quest_homes(control)
+    status_rows = _status_rows(control, scanned)
+    inflight = _sort_rows_newest_first(status_rows)
+    backlog_rows = _sort_rows_newest_first(_backlog_rows(control, scanned))
+    history = _history_rows(control, show_all=show_all,
+                            live_ids={r[0] for r in status_rows})
+    if not inflight and not backlog_rows and not history:
+        return [_NO_QUESTS_MESSAGE]
+    label = "history" if show_all else "recently merged"
+    return _overview_body(control, inflight, backlog_rows, history,
+                          history_label=label, now=now, color=color)
+
+
+_NO_FILTER_MATCH_MESSAGE = "No quests match that filter."
+
+# Disposition token -> archived final-state status.
+_ARCHIVE_STATUS = {"merged": "completed", "abandoned": "abandoned",
+                   "shelved": "paused"}
+
+
+def _row_since(r: _Row, cutoff: datetime | None) -> bool:
+    """True when the row's last-activity timestamp is at or after the cutoff."""
+    if cutoff is None:
+        return True
+    if not r[3]:
+        return False
+    try:
+        return datetime.fromisoformat(r[3]) >= cutoff
+    except (ValueError, TypeError):
+        return False
+
+
+def _filtered_overview_lines(control: Path, *, dispositions: set[str],
+                              cutoff: datetime | None, now: datetime,
+                              color: bool) -> list[str]:
+    """Sectioned overview over the full uncapped set, filtered by disposition and cutoff."""
+    scanned = _scan_quest_homes(control)
+    status_rows = _status_rows(control, scanned)
+    live_ids = {r[0] for r in status_rows}
+    inflight = (_sort_rows_newest_first(status_rows)
+                if "active" in dispositions else [])
+    backlog_rows = (_sort_rows_newest_first(_backlog_rows(control, scanned))
+                    if "backlog" in dispositions else [])
+    wanted = {_ARCHIVE_STATUS[d]
+              for d in dispositions & {"merged", "abandoned", "shelved"}}
+    history_all = _completed_rows(control, live_ids) + _left_rows(control, live_ids)
+    history = _sort_rows_newest_first([r for r in history_all if r[1] in wanted])
+
+    inflight = [r for r in inflight if _row_since(r, cutoff)]
+    backlog_rows = [r for r in backlog_rows if _row_since(r, cutoff)]
+    history = [r for r in history if _row_since(r, cutoff)]
+
+    if not inflight and not backlog_rows and not history:
+        return [_NO_FILTER_MATCH_MESSAGE]
+    return _overview_body(control, inflight, backlog_rows, history,
+                          history_label="history", now=now, color=color)
 
 
 def _cmd_status(args: argparse.Namespace, _control: Path | None = None) -> int:
