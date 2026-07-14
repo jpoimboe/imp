@@ -549,8 +549,10 @@ def test_no_agent_prompt_mentions_breakage_or_bypass_gate() -> None:
 
 def test_spec_writer_recognizes_threshold_handoff() -> None:
     body = _read("spec-finalizer.md")
-    # The handoff opening and its adopt-with-light-review section are named.
-    assert "Adopt the spec drafted with the user and finalize it:" in body
+    # The scope-code-check gate drops the clean-exit forward-goto feedback, so no
+    # adopt preamble arrives; the step self-orients from the on-disk draft spec.
+    assert "Adopt the spec drafted with the user and finalize it:" not in body
+    assert "self-orient" in body
     assert "Threshold handoff" in body
     # head_changed is re-derived from the two persisted heads, not the tool return.
     assert "quest.cur_base_head" in body
