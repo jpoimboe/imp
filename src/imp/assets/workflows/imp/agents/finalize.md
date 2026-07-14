@@ -114,6 +114,13 @@ an untracked toleration. On a **confirmed cover**, rewrite the line to
 neither present it at the gate nor seed a quest for it, and note the auto-cover in
 `comments`.
 
+**Back-link the cover.** When the cover target is a **backlog quest**, record the
+linkage on it so its future owner sees the corroborating hit:
+`imp edit <id> --append-intent "[{{ quest.id }}] <note>"`, where `<note>` is just
+a few plain words naming the shared failure (e.g. `also hit this failing test`).
+Best-effort: never block the merge; if rejected, note it in `comments`. Since
+`— covered-by` is terminal (below), the back-link is written at most once.
+
 `— covered-by <id>` is **terminal**, joining `— seeded <id>` / `— ignored-at-gate` /
 `— dismissed`: a later `deferred-sweep` or `finalize` pass treats it as inert and never
 re-raises it.
