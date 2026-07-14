@@ -580,3 +580,20 @@ def test_show_json_none_quest_prints_error(
     rc = main(["show", "lostid", "--json"])
     assert rc == 2
     assert "no such quest" in capsys.readouterr().err
+
+
+def test_card_field_dims_label_and_aligns_value() -> None:
+    from imp.cli import main
+
+    field = main._card_field("id:", "abc123", 15, color=True)
+    assert field == "\x1b[2mid:\x1b[0m" + " " * 12 + "abc123"
+    assert "\x1b[2m" in field                 # dim SGR wraps the label
+    assert field.endswith("abc123")           # value stays plain, no trailing SGR
+
+
+def test_card_field_plain_when_color_disabled() -> None:
+    from imp.cli import main
+
+    field = main._card_field("provenance:", "idea", 12, color=False)
+    assert field == "provenance: idea"        # exactly one pad space, no escapes
+    assert "\x1b[" not in field

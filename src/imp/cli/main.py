@@ -1536,6 +1536,12 @@ def _unstarted_backlog_meta(control: Path, quest_id: str) -> dict[str, Any] | No
     return meta
 
 
+def _card_field(label: str, value: str, width: int, *, color: bool) -> str:
+    """A card metadata row: the `label:` glyph dimmed (SGR 2 when color is on),
+    padded to `width` columns, then the plain value at its aligned column."""
+    return pal.ansi(label, "dim", enabled=color) + " " * (width - len(label)) + value
+
+
 def _backlog_card(meta: dict[str, Any], control: Path, *, now: datetime) -> list[str]:
     r = make_store(control).backlog_readiness(meta.get("depends_on", []))
     ready, unmerged = r.ready, list(r.blocked_on)
