@@ -50,6 +50,7 @@ from imp.cli.session_run import (
 )
 from imp.cli.signals import install_process_group, prompt_sigint_guard
 from imp.cli.slash import ask_line_with_slash
+from imp.cli.store import make_store
 from imp.cli.terminal_title import TerminalTitle
 from imp.diagnostics import install_stack_dumper
 from imp.engine import backlog, worktree
@@ -2120,7 +2121,7 @@ def _cmd_log(args: argparse.Namespace) -> int:
         lines: Iterable[str] = _backlog_card(meta, control, now=datetime.now(UTC))
         _page_or_print(lines, no_pager=args.no_pager)
         return 0
-    events = _load_events_for_id(control, quest_id)
+    events = make_store(control).get_events(quest_id)
     if events is None:
         print(f"imp: no such quest {quest_id!r}", file=sys.stderr)
         return 2
@@ -3447,7 +3448,7 @@ def _cmd_events(args: argparse.Namespace) -> int:
     if meta is not None:
         print(f"Quest {quest_id} hasn't started yet — no events to show.")
         return 0
-    events = _load_events_for_id(control, quest_id)
+    events = make_store(control).get_events(quest_id)
     if events is None:
         print(f"imp: no such quest {quest_id!r}", file=sys.stderr)
         return 2
