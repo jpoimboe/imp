@@ -3063,20 +3063,22 @@ class _SearchHit:
     last_activity: str | None   # ISO of last activity; None/"" renders age "-"
 
 
-def _selected_search_zones(args: argparse.Namespace) -> set[str]:
-    picked = {
-        zone for zone, on in (
-            ("active", args.active),
-            ("backlog", args.backlog),
-            ("archive", args.archived),
-            ("completed", args.completed),
-        ) if on
-    }
-    picked = picked or set(_SEARCH_ZONES)
-    if "archive" in picked:
-        # Archive is the superset; drop the completed subset so nothing double-lists.
-        picked.discard("completed")
-    return picked
+def _selected_search(args: argparse.Namespace) -> tuple[bool, bool, set[str]]:
+    """(search_active, search_backlog, archive_statuses) from the search flags."""
+    statuses: set[str] = set()
+    if args.merged:
+        statuses.add("completed")
+    if args.abandoned:
+        statuses.add("abandoned")
+    if args.shelved:
+        statuses.add("paused")
+    if args.archived:
+        statuses |= {"completed", "abandoned", "paused"}
+    if args.merged_after is not None:
+        statuses.add("completed")
+    if not (args.active or args.backlog or statuses):
+        return True, True, {"completed", "abandoned", "paused"}
+    return args.active, args.backlog, statuses
 
 
 def _search_active(control: Path, query: str) -> list[_SearchHit]:
@@ -3113,11 +3115,19 @@ def _search_backlog(control: Path, query: str) -> list[_SearchHit]:
     return hits
 
 
-def _search_archived(control: Path, query: str) -> list[_SearchHit]:
-    return [
-        _SearchHit(cid, title, "archive", content, last)
-        for (cid, title, content, _status, last) in archive_read.search_archive_content(control, query)
-    ]
+def _search_archived(control: Path, query: str, statuses: set[str],
+                     merged_after: str | None) -> list[_SearchHit]:
+    """Archive hits in `statuses`; completed hits also gated by merged_after."""
+    hits: list[_SearchHit] = []
+    for cid, title, content, status, last in archive_read.search_archive_content(
+            control, query):
+        if status not in statuses:
+            continue
+        if (status == "completed" and merged_after is not None
+                and not _merged_after(control, cid, merged_after)):
+            continue
+        hits.append(_SearchHit(cid, title, "archive", content, last))
+    return hits
 
 
 def _merged_after(control: Path, quest_id: str, base_commit: str) -> bool:
@@ -3129,17 +3139,6 @@ def _merged_after(control: Path, quest_id: str, base_commit: str) -> bool:
     return worktree._git(
         control, "merge-base", "--is-ancestor", merge_commit, base_commit,
     ).returncode == 1
-
-
-def _search_completed(
-    control: Path, query: str, merged_after: str | None,
-) -> list[_SearchHit]:
-    hits: list[_SearchHit] = []
-    for cid, title, content, last in archive_read.search_archive_completed(control, query):
-        if merged_after is not None and not _merged_after(control, cid, merged_after):
-            continue
-        hits.append(_SearchHit(cid, title, "completed", content, last))
-    return hits
 
 
 def _spine_segment(text: str, query: str, *base_codes: str, color: bool) -> str:
@@ -3223,27 +3222,21 @@ def _search_list_line(
 
 
 def _cmd_search(args: argparse.Namespace, _control: Path | None = None) -> int:
-    if args.merged_after is not None and not args.completed:
-        print("imp: --merged-after is only meaningful with --completed",
-              file=sys.stderr)
-        raise SystemExit(2)
     control = _control if _control is not None else _control_root()
-    zones = _selected_search_zones(args)
+    want_active, want_backlog, statuses = _selected_search(args)
     hits: list[_SearchHit] = []
-    if "active" in zones:
+    if want_active:
         hits += _search_active(control, args.query)
-    if "backlog" in zones:
+    if want_backlog:
         hits += _search_backlog(control, args.query)
-    if "archive" in zones:
-        hits += _search_archived(control, args.query)
-    if "completed" in zones:
-        hits += _search_completed(control, args.query, args.merged_after)
+    if statuses:
+        hits += _search_archived(control, args.query, statuses, args.merged_after)
     if not hits:
         print(f"No quests match {args.query!r}.")
         return 0
     now = datetime.now(UTC)
     color = should_use_color(sys.stdout)
-    zone_order = {z: i for i, z in enumerate((*_SEARCH_ZONES, "completed"))}
+    zone_order = {z: i for i, z in enumerate(_SEARCH_ZONES)}
     hits.sort(key=lambda h: h.last_activity or "", reverse=True)
     hits.sort(key=lambda h: zone_order[h.zone])
     if args.list:
@@ -3709,7 +3702,7 @@ def _build_parser() -> argparse.ArgumentParser:
             "Search active (in-flight + drafts), backlog, and archived quests "
             "for the query as a case-insensitive substring of a quest's id, "
             "title, or conversation content. With no zone flag, all three zones "
-            "are searched. --completed scopes to merged quests."),
+            "are searched. --merged scopes to merged quests."),
     )
     p_search.add_argument(
         "query", metavar="QUERY",
@@ -3721,15 +3714,21 @@ def _build_parser() -> argparse.ArgumentParser:
         "--backlog", action="store_true",
         help="Search backlog quests.")
     p_search.add_argument(
-        "--archived", action="store_true",
-        help="Search archived (completed, abandoned, left) quests.")
+        "--merged", action="store_true",
+        help="Search merged quests.")
     p_search.add_argument(
-        "--completed", action="store_true",
-        help="Search completed (merged) quests.")
+        "--abandoned", action="store_true",
+        help="Search abandoned quests.")
+    p_search.add_argument(
+        "--shelved", action="store_true",
+        help="Search shelved conversations.")
+    p_search.add_argument(
+        "--archived", action="store_true",
+        help="Search archived (merged, abandoned, left) quests.")
     p_search.add_argument(
         "--merged-after", metavar="COMMIT", default=None,
-        help="With --completed, keep only quests whose merge landed after "
-             "COMMIT (not an ancestor of it).")
+        help="Keep only merged quests whose merge landed after COMMIT "
+             "(implies --merged).")
     p_search.add_argument(
         "-l", "--list", action="store_true", dest="list",
         help="One terse line per quest (id, title, zone); no excerpts.")

@@ -133,25 +133,6 @@ def test_search_content_percent_is_literal(tmp_path: Path) -> None:
     assert [h[0] for h in archive_read.search_archive_content(tmp_path, "50%")] == ["pct"]
 
 
-def test_search_completed_filters_to_completed_status(tmp_path: Path) -> None:
-    _archive(tmp_path, "alpha", "Dark mode toggle", status="completed")
-    _archive(tmp_path, "beta", "Dark login flow", status="abandoned")
-    hits = archive_read.search_archive_completed(tmp_path, "dark")
-    assert [h[0] for h in hits] == ["alpha"]        # abandoned 'beta' excluded by status
-    assert hits[0][1] == "Dark mode toggle"          # title carried
-    assert len(hits[0]) == 4  # (id, title, content, last_event_ts), like search_content
-    assert hits[0][3] is None  # no events archived → no last_event_ts
-
-
-def test_search_completed_matches_content_body(tmp_path: Path) -> None:
-    _archive(tmp_path, "quiet", "", status="completed",
-             events_text=_prose_line("the 300s deadline holds"))
-    _archive(tmp_path, "loud", "", status="abandoned",
-             events_text=_prose_line("the 300s deadline holds"))
-    hits = archive_read.search_archive_completed(tmp_path, "300s")
-    assert [h[0] for h in hits] == ["quiet"]          # only the completed one
-    assert "300s deadline holds" in hits[0][2]        # content column carried for excerpting
-
 
 def test_search_content_surfaces_human_reply_not_injected_prompt(tmp_path: Path) -> None:
     _archive(tmp_path, "reply", "",

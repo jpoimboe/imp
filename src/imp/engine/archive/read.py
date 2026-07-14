@@ -85,20 +85,6 @@ def search_archive_content(
         conn.close()
 
 
-def search_archive_completed(
-    control_root: Path, query: str,
-) -> list[tuple[str, str, str, str | None]]:
-    ensure_current(control_root)
-    db = index_path(control_root)
-    if not db.exists():
-        return []
-    conn = index.connect(db)
-    try:
-        return index.search_completed(conn, query)
-    finally:
-        conn.close()
-
-
 def most_recent_archived_id(control_root: Path) -> str | None:
     ensure_current(control_root)
     db = index_path(control_root)
