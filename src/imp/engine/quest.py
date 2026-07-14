@@ -217,6 +217,14 @@ class Quest:
         meta["seed_opening"] = text
         _write_quest_json(meta_path, meta)
 
+    def set_title(self, name: str) -> None:
+        """Metadata-only rename: set title, rewrite quest.json, emit no event."""
+        self.title = name
+        meta_path = self.quest_dir / "quest.json"
+        meta = json.loads(meta_path.read_text())
+        meta["title"] = name
+        _write_quest_json(meta_path, meta)
+
     def materialize(self) -> bool:
         """Go live: fork branch imp/<id> + worktree from base_branch's CURRENT tip,
         flip project_root to the worktree, and persist project_root + cur_base_head.

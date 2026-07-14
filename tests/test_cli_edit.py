@@ -268,3 +268,40 @@ def test_edit_append_intent_parses_as_sole_flag() -> None:
     ns = parser.parse_args(
         ["edit", "2026-06-24-x", "--append-intent", "a note"])
     assert ns.append_intent == "a note"
+
+
+def _events(quest: Quest) -> list[dict]:
+    path = quest.quest_dir / "events.jsonl"
+    return [json.loads(line) for line in path.read_text().splitlines() if line]
+
+
+def test_edit_title_unmaterialized_writes_metadata_only(
+        tmp_path: Path, monkeypatch) -> None:
+    _seed_control(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    _make_draft(tmp_path, "2026-06-24-edit30")  # create_draft → materialized False
+    rc = main._cmd_edit(_edit_args("2026-06-24-edit30", title="Renamed"))
+    assert rc == 0
+    quest = Quest.load(tmp_path, "2026-06-24-edit30")
+    assert quest.title == "Renamed"
+    assert _meta(quest)["title"] == "Renamed"
+    # The one CLI mutation that would write the masked log must NOT fire.
+    assert all(e["type"] != "quest_renamed" for e in _events(quest))
+
+
+def test_edit_title_materialized_keeps_logged_rename(
+        tmp_path: Path, monkeypatch) -> None:
+    _seed_control(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    quest = _make_draft(tmp_path, "2026-06-24-edit31")
+    meta = _meta(quest)
+    meta["materialized"] = True
+    (quest.quest_dir / "quest.json").write_text(
+        json.dumps(meta, indent=2, sort_keys=True))
+    rc = main._cmd_edit(_edit_args("2026-06-24-edit31", title="Renamed"))
+    assert rc == 0
+    reloaded = Quest.load(tmp_path, "2026-06-24-edit31")
+    assert reloaded.title == "Renamed"
+    renamed = [e for e in _events(reloaded) if e["type"] == "quest_renamed"]
+    assert len(renamed) == 1
+    assert renamed[0]["payload"]["new_title"] == "Renamed"

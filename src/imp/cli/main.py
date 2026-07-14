@@ -2851,7 +2851,10 @@ def _cmd_edit(args: argparse.Namespace) -> int:
             return 2
 
     if args.title is not None and args.title != quest.title:
-        quest.rename(args.title, log=quest.event_log())
+        if quest.materialized:
+            quest.rename(args.title, log=quest.event_log())
+        else:
+            quest.set_title(args.title)
     if args.backlog:
         quest.set_origin("backlog")
     elif args.active:
