@@ -22,7 +22,7 @@ def _only_new_id(control: Path) -> str:
     return next(p.name for p in (control / ".imp" / "quests").iterdir())
 
 
-def test_new_idea_creates_quest_home_with_origin_idea(
+def test_new_backlog_creates_quest_home_with_origin_backlog(
         tmp_path: Path, monkeypatch, capsys) -> None:
     _seed_control(tmp_path)
     monkeypatch.chdir(tmp_path)
@@ -31,7 +31,7 @@ def test_new_idea_creates_quest_home_with_origin_idea(
     new_id = _only_new_id(tmp_path)
     quest = Quest.load(tmp_path, new_id)
     assert quest.materialized is False
-    assert quest.origin == "idea"
+    assert quest.origin == "backlog"
     assert quest.title == "Wire OAuth login"
     assert quest.seed_opening == "Wire OAuth login"
     meta = json.loads((quest.quest_dir / "quest.json").read_text())
@@ -226,7 +226,7 @@ def test_interactive_backlog_files_instantly_no_session(
 
     assert rc == 0
     quest = Quest.load(tmp_path, _only_new_id(tmp_path))
-    assert quest.origin == "idea"
+    assert quest.origin == "backlog"
     assert quest.title == "My backlog item"
     assert quest.materialized is False
     assert quest.seed_opening == "My backlog item\n\na longer brief"

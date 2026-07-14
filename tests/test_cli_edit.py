@@ -40,13 +40,13 @@ def test_edit_title_rewrites_title(tmp_path: Path, monkeypatch) -> None:
     assert Quest.load(tmp_path, "2026-06-24-edit01").title == "Renamed"
 
 
-def test_edit_backlog_moves_to_idea_zone(tmp_path: Path, monkeypatch) -> None:
+def test_edit_backlog_moves_to_backlog_zone(tmp_path: Path, monkeypatch) -> None:
     _seed_control(tmp_path)
     monkeypatch.chdir(tmp_path)
     _make_draft(tmp_path, "2026-06-24-edit02", origin="draft")
     rc = main._cmd_edit(_edit_args("2026-06-24-edit02", backlog=True))
     assert rc == 0
-    assert Quest.load(tmp_path, "2026-06-24-edit02").origin == "idea"
+    assert Quest.load(tmp_path, "2026-06-24-edit02").origin == "backlog"
 
 
 def test_edit_active_moves_to_draft_zone(tmp_path: Path, monkeypatch) -> None:
@@ -111,7 +111,7 @@ def test_edit_combined_title_zone_and_deps(tmp_path: Path, monkeypatch) -> None:
     assert rc == 0
     quest = Quest.load(tmp_path, "2026-06-24-edit08")
     assert quest.title == "Combined"
-    assert quest.origin == "idea"
+    assert quest.origin == "backlog"
     assert _meta(quest)["depends_on"] == ["X"]
 
 

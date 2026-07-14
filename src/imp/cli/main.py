@@ -809,7 +809,7 @@ def _record_idea(args: argparse.Namespace, control: Path, base: str) -> int:
             control, title=title, quest_id=quest_id, base_branch=base,
             depends_on=list(getattr(args, "depends_on", None) or []),
             workflow=getattr(args, "workflow", None),
-            origin="idea", seed_opening=seed)
+            origin="backlog", seed_opening=seed)
     except (LoadError, LoadErrors) as e:
         print(f"imp: {e}", file=sys.stderr)
         return 2
@@ -1499,7 +1499,7 @@ def _is_backlog_home(
 
 def _unstarted_backlog_meta(control: Path, quest_id: str) -> dict[str, Any] | None:
     """quest.json of a LIVE un-materialized, non-draft-origin, never-conversed,
-    unlocked Backlog home (idea or followup) — sourced from the worktree home
+    unlocked Backlog home (origin `backlog`) — sourced from the worktree home
     only, never the archive: an abandoned home leaves an archived
     materialized:false quest.json that would otherwise render as a queued
     `status: backlog` brief instead of a History item. None for any archived-only
@@ -2810,7 +2810,7 @@ def _cmd_edit(args: argparse.Namespace) -> int:
     if args.title is not None and args.title != quest.title:
         quest.rename(args.title, log=quest.event_log())
     if args.backlog:
-        quest.set_origin("idea")
+        quest.set_origin("backlog")
     elif args.active:
         quest.set_origin("draft")
     if args.clear_deps:
@@ -3784,7 +3784,7 @@ def _build_parser() -> argparse.ArgumentParser:
     p_edit_zone = p_edit.add_mutually_exclusive_group()
     p_edit_zone.add_argument(
         "--backlog", action="store_true",
-        help="Move an un-materialized quest to the backlog zone (origin=idea).")
+        help="Move an un-materialized quest to the backlog zone (origin=backlog).")
     p_edit_zone.add_argument(
         "--active", action="store_true",
         help="Return an un-materialized quest to the Active zone (origin=draft).")
