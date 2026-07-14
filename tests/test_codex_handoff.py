@@ -84,6 +84,44 @@ async def test_threshold_crossing_elicits_codex_handoff(tmp_path: Path) -> None:
     user_msgs = [e for e in elog.read() if e["type"] == "user_message"]
     assert any("approaching the context limit" in str(e["payload"])
                for e in user_msgs)
+    assert hp.exists()
+    assert hp.read_text() == "wrote the handoff"
+
+
+@pytest.mark.anyio
+async def test_silent_handoff_turn_does_not_write_note(tmp_path: Path) -> None:
+    """When the handoff turn is agent-silent (no agent_message event), no note
+    must be written. The handoff event must still fire so the engine reincarnates."""
+    _seed_git_and_auth(tmp_path)
+    elog = InMemoryEventLog()
+    hp = handoff_path_for(tmp_path / "tx")
+
+    scripted = [
+        # Turn 1: crosses (350000/400000 = 0.875).
+        [thread_started("thr-1"), agent_message("working on it"),
+         turn_completed(input_tokens=350_000)],
+        # Turn 2: agent is completely silent (no agent_message).
+        [turn_completed(input_tokens=350_000)],
+    ]
+    runner = CodexAgentRunner(
+        model_name="gpt-5.5",
+        client_factory=lambda options=None: FakeCodex(scripted_turns=scripted))
+    runner._canonical_auth_override = tmp_path / "auth.json"
+
+    inv = AgentInvocation(
+        agent_def=_agent_def(), provider_name="codex", model_name="gpt-5.5",
+        system_prompt="you are a test agent", initial_messages=(),
+        quest_context=QuestContext(title="t", project_root=tmp_path,
+                                     workflow_dir=tmp_path, id="c1"),
+        transcript_dir=tmp_path / "tx", events_path=tmp_path / "events.jsonl",
+        agent_id="step:t", event_log=elog, checkpoint_threshold=0.8)
+
+    events = [ev async for ev in runner.run(inv)]
+
+    handoff = [e for e in events if e["type"] == "handoff"]
+    assert len(handoff) == 1
+    assert handoff[0]["payload"]["handoff_path"] == str(hp)
+    assert not hp.exists()
 
 
 @pytest.mark.anyio

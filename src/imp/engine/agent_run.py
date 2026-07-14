@@ -364,6 +364,19 @@ def last_assistant_text(messages: list[Message]) -> str:
     return ""
 
 
+def most_recent_assistant_text(messages: list[Message]) -> str:
+    """Text of the MOST RECENT assistant message, even when it is empty.
+
+    Unlike last_assistant_text (which walks back over empty turns), this returns
+    the current turn's text verbatim — empty stays empty — so the reincarnation
+    handoff degrades to transcript-only recovery when the handoff turn said
+    nothing."""
+    for m in reversed(messages):
+        if m.role == "assistant":
+            return "".join(b.text for b in m.content if isinstance(b, TextBlock))
+    return ""
+
+
 def _join_pending_interjects(coordinator: Any) -> str | None:
     """Drain ALL queued interjects and join them newline-separated into ONE
     string, or None if the queue is empty. Used to satisfy a bare-turn-end

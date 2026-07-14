@@ -615,7 +615,11 @@ class CodexAgentRunner:
         # Tier A proactive-handoff watch state (Mechanism 3). handoff_phase is
         # None until the threshold crosses, then "instruction_sent" for the one
         # handoff-writing turn that follows.
-        from imp.engine.reincarnation import handoff_instruction, handoff_path_for
+        from imp.engine.reincarnation import (
+            handoff_instruction,
+            handoff_path_for,
+            write_handoff_note,
+        )
         from imp.providers.catalog import context_threshold_crossed
         handoff_phase: str | None = None
         handoff_path = handoff_path_for(invocation.transcript_dir)
@@ -627,6 +631,7 @@ class CodexAgentRunner:
             proc_state["complete_step_called"] = False
             proc_state["complete_step_args"] = {}
             proc_state["turn_tool_outcomes"] = []
+            proc_state["last_agent_text"] = ""
             # Mirror onto the shared MCP RunState (which the dispatcher writes).
             state.complete_step_called = False
             state.complete_step_args = {}
@@ -747,6 +752,7 @@ class CodexAgentRunner:
                             return
                     if handoff_phase == "instruction_sent":
                         # Handoff wins over a stray complete_step on this turn.
+                        write_handoff_note(handoff_path, proc_state.get("last_agent_text", ""))
                         yield {"type": "handoff",
                                "payload": {"handoff_path": str(handoff_path)}}
                         return

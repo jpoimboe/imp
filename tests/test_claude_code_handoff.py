@@ -16,9 +16,7 @@ from tests.cc_fakes import (
     context_usage,
     result,
     text,
-    tool_result,
     tool_use,
-    user,
 )
 
 
@@ -70,12 +68,9 @@ async def test_threshold_crossing_continues_with_instruction_increment(
                   tool_use("u1", "write_file", {"path": "scratch", "content": "x"})),
         # The SDK closes the interrupted turn balanced.
         result(subtype="error_during_execution", is_error=True),
-        # Turn 2 (after the plain instruction increment): the agent writes the
-        # handoff note, the tool_result lands, the ResultMessage ends the turn.
-        assistant(text("writing handoff"),
-                  tool_use("u2", "write_file",
-                           {"path": str(hp), "content": "# handoff\n"})),
-        user(tool_result("u2", "ok")),
+        # Turn 2 (after the plain instruction increment): the agent emits its
+        # handoff as plain text; the provider persists it before signalling.
+        assistant(text("writing handoff")),
         result(),
     ]
 
@@ -112,6 +107,8 @@ async def test_threshold_crossing_continues_with_instruction_increment(
     # `messages` only — NOT logged as a real tool_result (it never ran).
     tool_results = [e for e in log.read() if e["type"] == "tool_result"]
     assert not any(e["payload"]["id"] == "u1" for e in tool_results)
+    assert hp.exists()
+    assert hp.read_text() == "writing handoff"
 
 
 @pytest.mark.anyio
@@ -132,10 +129,7 @@ async def test_threshold_watchdog_does_not_refire_mid_interrupt(
         assistant(text("still working"),
                   tool_use("u1b", "write_file", {"path": "scratch2", "content": "y"})),
         result(subtype="error_during_execution", is_error=True),
-        assistant(text("writing handoff"),
-                  tool_use("u2", "write_file",
-                           {"path": str(hp), "content": "# handoff\n"})),
-        user(tool_result("u2", "ok")),
+        assistant(text("writing handoff")),
         result(),
     ]
 
@@ -157,6 +151,8 @@ async def test_threshold_watchdog_does_not_refire_mid_interrupt(
     assert holder["client"].interrupts == 1
     handoff = [e for e in events if e["type"] == "handoff"]
     assert len(handoff) == 1
+    assert hp.exists()
+    assert hp.read_text() == "writing handoff"
 
 
 @pytest.mark.anyio
@@ -173,8 +169,9 @@ async def test_handoff_reported_even_when_note_missing_and_error(
         assistant(text("working"),
                   tool_use("u1", "write_file", {"path": "scratch", "content": "x"})),
         result(subtype="error_during_execution", is_error=True),
-        # Turn 2: the agent does NOT write the note and the turn ends is_error.
-        assistant(text("I am approaching the limit but will not write the note")),
+        # Turn 2: the agent produces no final text; the provider writes no note
+        # and recovery degrades to transcript-only.
+        assistant(text("")),
         result(is_error=True),
     ]
 
