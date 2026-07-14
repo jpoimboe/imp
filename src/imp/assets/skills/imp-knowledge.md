@@ -47,7 +47,7 @@ decide it: whether it has been **materialized**, and its **origin**.
   the backlog.
 - **backlog** — un-materialized **ideas / follow-ups** (`origin` of `idea` or
   `followup`) parked for later; pick one up when you are ready.
-- **archive** — finished (`completed`/`abandoned`) and left conversations,
+- **archive** — finished (`completed`/`abandoned`) and shelved conversations,
   reachable by search.
 
 ## Materialize / go-live
@@ -70,7 +70,7 @@ When a phase-0 conversation is left, its fate depends on what happened:
 - **`imp new`, or an explicit `/save`** → `save_to_backlog`: it stays in the
   active list, shown as a **draft**, resumable later.
 - **Otherwise** → `archive_conversation`: it leaves the active list but stays
-  resumable via `imp resume` or findable with `imp search`.
+  resumable (shelved) via `imp resume` or findable with `imp search`.
 
 This is the exact point training data gets wrong (it once claimed `imp new`
 "archives a draft as resumable" — it does not; `imp new` runs `save_to_backlog`,
