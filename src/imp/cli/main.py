@@ -2103,6 +2103,11 @@ def _cmd_log(args: argparse.Namespace) -> int:
             return _follow_live(control, quest_id, home)
         return _follow_log(events)
 
+    selected = _select_log_events(args, quest_id, events)
+    if isinstance(selected, int):
+        return selected
+    events = selected
+
     if args.html is not None or args.md is not None:
         return _write_log_export(args, control, quest_id, events)
 
@@ -3657,6 +3662,9 @@ def _build_parser() -> argparse.ArgumentParser:
     p_log.add_argument(
         "token", nargs="?",
         help="Quest id or its short token (omit for the most recent quest).")
+    p_log.add_argument(
+        "range_pos", nargs="?", default=None, metavar="RANGE",
+        help="Ordinal selector, e.g. 42, 59-120, 59-, -80 (like imp events).")
     p_log_mode = p_log.add_mutually_exclusive_group()
     p_log_mode.add_argument(
         "--full", action="store_true",
@@ -3684,6 +3692,19 @@ def _build_parser() -> argparse.ArgumentParser:
     p_log.add_argument(
         "--hide", action=SplitAppend, default=None, metavar="CAT",
         help="Hide a content category (repeatable / comma-joined).")
+    p_log.add_argument(
+        "--step", action=SplitAppend, default=None,
+        help="Scope to a step's window (repeatable / comma-joined).")
+    p_log.add_argument(
+        "--range", action=SplitAppend, default=None, dest="range",
+        help="Ordinal selector (repeatable / comma-joined).")
+    p_log.add_argument(
+        "--agent", action=SplitAppend, default=None,
+        help="Keep only these authors: step name, subagent handle, or "
+             "sub:<id> (repeatable / comma-joined).")
+    p_log.add_argument(
+        "--limit", type=int, default=None,
+        help="Keep only the last N events.")
     p_log_export = p_log.add_mutually_exclusive_group()
     p_log_export.add_argument(
         "--html", nargs="?", metavar="FILE", const=_LOG_EXPORT_DEFAULT,
