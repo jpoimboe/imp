@@ -77,6 +77,16 @@ def test_introspection_documents_the_three_tier_split() -> None:
     assert "imp events <id>" in body
 
 
+def test_introspection_documents_events_full_and_one_row() -> None:
+    body = load_internal_skill(_skills_dir(), "imp-introspection")
+    low = body.lower()
+    # The digest tier documents the one-terminal-row clip and the --full widen.
+    assert "one terminal row" in low
+    assert "--full" in body
+    # The stale "--json is byte-capped" claim is gone from the raw tier.
+    assert "byte-capped" not in low
+
+
 def test_introspection_documents_the_cross_change_query() -> None:
     body = load_internal_skill(_skills_dir(), "imp-introspection")
     # CLI front doors for cross-quest reads
