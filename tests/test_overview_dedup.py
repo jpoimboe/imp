@@ -226,5 +226,5 @@ def test_overview_lines_renders_inflight_and_backlog(tmp_path: Path) -> None:
     lines = m._overview_lines(tmp_path, show_all=False,
                               now=datetime(2026, 6, 28, tzinfo=UTC), color=False)
     assert any(ln.startswith("alpha") for ln in lines)   # in-flight zone preserved
-    assert "backlog" in lines                            # backlog section preserved
+    assert "backlog:" in lines                           # backlog section preserved
     assert any(ln.startswith("bk1") for ln in lines)

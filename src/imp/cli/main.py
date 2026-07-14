@@ -2787,8 +2787,6 @@ def _backlog_rows(control: Path, scanned: list[_HomeScan] | None = None) -> list
     return rows
 
 
-_HISTORY_CAP = 10
-
 # Display-only disposition word for the overview history block.
 _DISPOSITION = {"completed": "merged", "abandoned": "abandoned", "paused": "left"}
 
@@ -2801,8 +2799,7 @@ def _history_rows(control: Path, *, show_all: bool,
         rows += _left_rows(control, live_ids)
     else:
         rows = [r for r in rows if r[1] == "completed"]
-    rows = _sort_rows_newest_first(rows)
-    return rows if show_all else rows[:_HISTORY_CAP]
+    return _sort_rows_newest_first(rows)
 
 
 def _overview_lines(control: Path, *, show_all: bool, now: datetime,
@@ -2850,7 +2847,7 @@ def _overview_lines(control: Path, *, show_all: bool, now: datetime,
             intent=intents.get(r[0])))
     if backlog_rows:
         lines.append("")
-        lines.append(pal.ansi("backlog", "dim", enabled=color))
+        lines.append(pal.ansi("backlog:", "dim", enabled=color))
         for r in backlog_rows:
             lines.append(quest_row.format_quest_line(
                 quest_id=r[0], title=r[4], status=r[1], step=r[2],
@@ -2858,7 +2855,7 @@ def _overview_lines(control: Path, *, show_all: bool, now: datetime,
                 color=color, name_width=name_width, status_width=status_width))
     if history:
         lines.append("")
-        label = "history" if show_all else "recently merged"
+        label = "history:" if show_all else "merged:"
         lines.append(pal.ansi(label, "dim", enabled=color))
         for r in history:
             lines.append(quest_row.format_quest_line(
@@ -3125,7 +3122,7 @@ _OVERVIEW_COMMANDS: tuple[tuple[str, str], ...] = (
     ("chat", "Open a conversation with imp — ask questions, scout work, or scope a quest."),
     ("new", "Scope a new quest in conversation (optional opening message)."),
     ("resume", "Continue an in-flight quest (the sole resumable one, else a picker)."),
-    ("list", "List your quests: in-flight, backlog, and recently merged."),
+    ("list", "List your quests: in-flight, backlog, and merged."),
     ("show", "Show one quest's detail or a named artifact (imp show <id>)."),
     ("log", "Show a quest's narrative as plain text."),
     ("abandon", "Tear down a quest's worktree, branch, and state."),
@@ -3319,16 +3316,15 @@ def _build_parser() -> argparse.ArgumentParser:
 
     p_list = sub.add_parser(
         "list",
-        help="List your quests: in-flight, backlog, and recently merged.",
+        help="List your quests: in-flight, backlog, and merged.",
         description=(
             "With no argument, an overview of your quests — in-flight, the "
-            "backlog, and recently merged. -a/--all lifts the 10-cap and "
-            "includes abandoned/left quests (the block is then labelled "
-            "`history`)."),
+            "backlog, and every merged quest. -a/--all also includes "
+            "abandoned/left quests (the block is then labelled `history`)."),
     )
     p_list.add_argument(
         "-a", "--all", action="store_true",
-        help="Lift the 10-cap and include abandoned quests "
+        help="Also include abandoned/left quests "
              "(the block is then labelled `history`).")
     p_list.add_argument(
         "--no-pager", action="store_true",

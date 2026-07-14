@@ -81,7 +81,7 @@ def test_list_all_renders_history_block(tmp_path: Path, monkeypatch) -> None:
         rc = main(["list", "-a"])
     out = buf.getvalue()
     assert rc == 0
-    assert "history" in out
+    assert "history:" in out
     assert "doneid" in out and "merged" in out
 
 
@@ -110,7 +110,7 @@ def test_list_and_show_both_resolve() -> None:
 
 def test_overview_lists_list_then_show_with_copy() -> None:
     text = render_overview(color=False)
-    assert "List your quests: in-flight, backlog, and recently merged." in text
+    assert "List your quests: in-flight, backlog, and merged." in text
     assert "Show one quest's detail or a named artifact (imp show <id>)." in text
     assert text.index("List your quests") < text.index("Show one quest's detail")
 
