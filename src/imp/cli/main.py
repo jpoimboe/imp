@@ -1557,8 +1557,7 @@ def _quest_card(control: Path, quest_id: str, *, now: datetime) -> list[str]:
         return []
     _id, status, step, last, title, created, step_label, phase_label = row
     if not (_quest_home(control, quest_id) / "quest.json").exists():
-        archived = archive_read.read_state_json(control, quest_id)
-        if archived is not None and json.loads(archived).get("status") == "paused":
+        if archive_read.status_of(control, quest_id) == "paused":
             status = _DISPOSITION["paused"]
     events = _load_events_for_id(control, quest_id) or []
     lines = [
