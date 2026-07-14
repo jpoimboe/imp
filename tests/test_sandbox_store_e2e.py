@@ -315,3 +315,53 @@ def test_list_all_shows_archived_history(project) -> None:
     rc, out, err = _imp(control, "list", "--all")
     assert rc == 0, f"imp list --all failed: rc={rc} err={err!r}"
     assert ARCH in out, f"archived quest missing from history rows: {out!r}"
+
+
+def test_show_spec_via_get_artifact(project) -> None:
+    """AC 2(e): `imp show <cur> spec` returns the spec artifact through the proxied
+    `get_artifact` op."""
+    control = project
+    rc, out, err = _imp(control, "show", CUR, "spec")
+    assert rc == 0, f"imp show spec failed: rc={rc} err={err!r}"
+    assert SPEC_MARK in out, f"proxied spec artifact missing marker: {out!r}"
+
+
+def test_show_detail_card_via_quest_card(project) -> None:
+    """`imp show <cur>` renders the detail card through the proxied `quest_card` op."""
+    control = project
+    rc, out, err = _imp(control, "show", CUR)
+    assert rc == 0, f"imp show failed: rc={rc} err={err!r}"
+    assert CUR in out, f"detail card missing quest id: {out!r}"
+    assert "Current" in out, f"detail card missing title: {out!r}"
+
+
+def test_list_overview_lists_live_homes_via_scan_homes(project) -> None:
+    """`imp list` surfaces the live sibling in its overview through the proxied
+    `scan_homes` op (reading the masked events.jsonl via the daemon)."""
+    control = project
+    rc, out, err = _imp(control, "list")
+    assert rc == 0, f"imp list failed: rc={rc} err={err!r}"
+    assert LIVE_SIB in out, f"live sibling missing from overview: {out!r}"
+
+
+def test_search_finds_active_and_archived_zones(project) -> None:
+    """AC 2 search surface: `imp search` finds a live sibling (active zone) and the
+    archived quest (archived zone, reading the masked index.db via the daemon)."""
+    control = project
+    rc, out, err = _imp(control, "search", SIB_MARK)
+    assert rc == 0, f"imp search {SIB_MARK} failed: rc={rc} err={err!r}"
+    assert LIVE_SIB in out, f"active-zone search missed live sibling: {out!r}"
+
+    rc2, out2, err2 = _imp(control, "search", ARCH_MARK)
+    assert rc2 == 0, f"imp search {ARCH_MARK} failed: rc={rc2} err={err2!r}"
+    assert ARCH in out2, f"archived-zone search missed archived quest: {out2!r}"
+
+
+def test_backlog_quest_classified_blocked_via_readiness(project) -> None:
+    """AC 2(g): `imp list` classifies the dependency-blocked backlog quest as blocked
+    through the proxied `backlog_readiness` op (dep id is not archived)."""
+    control = project
+    rc, out, err = _imp(control, "list")
+    assert rc == 0, f"imp list failed: rc={rc} err={err!r}"
+    assert BLK in out, f"backlog quest missing from overview: {out!r}"
+    assert "blocked" in out, f"backlog quest not classified blocked: {out!r}"
