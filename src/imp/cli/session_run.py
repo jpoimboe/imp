@@ -70,7 +70,8 @@ async def run_session_client(
                 attach=attach, driver=driver, coord=coord, solicit=solicit,
                 quest_id=quest.id, control_root=quest.control_root,
                 leave_state=leave_state, leave_mode=leave_mode, title=title,
-                local_echo=driver.seed_pending_reply)
+                local_echo=driver.seed_pending_reply,
+                on_title=lambda new: setattr(quest, "title", new))
         except TimeoutError:
             startup_failed = True
             # attach raised before run_terminal_client's teardown finally runs.

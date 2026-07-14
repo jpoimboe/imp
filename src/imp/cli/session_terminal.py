@@ -46,6 +46,7 @@ async def run_terminal_client(
     leave_mode: str | None = None,
     title: TerminalTitle | None = None,
     local_echo: Callable[[str], None] | None = None,
+    on_title: Callable[[str], None] | None = None,
 ) -> None:
     gate_send, gate_recv = anyio.create_memory_object_stream[str](
         max_buffer_size=math.inf)
@@ -66,6 +67,8 @@ async def run_terminal_client(
         driver.on_event(event)
         replay = bool(event.get("_replay"))
         etype = event.get("type")
+        if etype == "quest_renamed" and on_title is not None:
+            on_title((event.get("payload") or {})["new_title"])
         if title is not None:
             if etype == "lane_acquired":
                 title.set_hold_glyph((event.get("payload") or {}).get("glyph"))
