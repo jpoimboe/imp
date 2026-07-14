@@ -4,10 +4,16 @@ default workflow, are loadable via the skills mechanism with no frontmatter
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from imp.agents.skills import SkillNotFound, load_internal_skill
 from imp.assets import bundled_skills_dir
+
+
+def _introspection_doc() -> str:
+    return Path("docs/guide/introspection.md").read_text()
 
 
 def _skills_dir():
@@ -46,19 +52,19 @@ def test_knowledge_covers_home_zones_materialize_and_vocabulary() -> None:
 
 
 def test_introspection_skill_is_loadable_profile_b() -> None:
-    body = load_internal_skill(_skills_dir(), "imp-introspection")
+    body = _introspection_doc()
     assert body.strip(), "imp-introspection is empty"
     assert not body.lstrip().startswith("---"), "imp-introspection has frontmatter"
 
 
 def test_introspection_names_ground_truth_files() -> None:
-    body = load_internal_skill(_skills_dir(), "imp-introspection")
+    body = _introspection_doc()
     assert "workflow/workflow.yaml" in body
     assert "state/state.json" in body
 
 
 def test_introspection_names_the_read_commands() -> None:
-    body = load_internal_skill(_skills_dir(), "imp-introspection")
+    body = _introspection_doc()
     assert "imp help" in body
     assert "imp list" in body
     assert "imp list --all" in body
@@ -68,7 +74,7 @@ def test_introspection_names_the_read_commands() -> None:
 
 
 def test_introspection_documents_the_three_tier_split() -> None:
-    body = load_internal_skill(_skills_dir(), "imp-introspection").lower()
+    body = _introspection_doc().lower()
     # narrative / digest / raw are the three named timeline tiers
     for tier in ("narrative", "digest", "raw"):
         assert tier in body, tier
@@ -105,7 +111,7 @@ def test_introspection_documents_log_windowing_filters() -> None:
 
 
 def test_introspection_documents_the_cross_change_query() -> None:
-    body = load_internal_skill(_skills_dir(), "imp-introspection")
+    body = _introspection_doc()
     # CLI front doors for cross-quest reads
     assert "imp show <id>" in body
     assert "imp events <id>" in body
@@ -113,7 +119,7 @@ def test_introspection_documents_the_cross_change_query() -> None:
 
 
 def test_introspection_documents_bounded_output_techniques() -> None:
-    body = load_internal_skill(_skills_dir(), "imp-introspection")
+    body = _introspection_doc()
     # scope-the-query flags (CLI)
     for flag in ("--limit", "--type", "--agent"):
         assert flag in body, flag
@@ -122,7 +128,7 @@ def test_introspection_documents_bounded_output_techniques() -> None:
 
 
 def test_introspection_search_entry_spans_all_zones_and_content() -> None:
-    body = load_internal_skill(_skills_dir(), "imp-introspection")
+    body = _introspection_doc()
     low = body.lower()
     # imp search now spans active + backlog + archive, not archive-only.
     for zone in ("active", "backlog", "archive"):
@@ -137,7 +143,7 @@ def test_introspection_search_entry_spans_all_zones_and_content() -> None:
 
 
 def test_introspection_documents_merged_search_and_merge_commit() -> None:
-    body = load_internal_skill(_skills_dir(), "imp-introspection")
+    body = _introspection_doc()
     # The merged-subset flag is documented alongside the zone flags.
     assert "--merged" in body
     # The imp show detail card surfaces the quest's merge commit.

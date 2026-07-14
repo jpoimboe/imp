@@ -22,7 +22,7 @@ workflow, refreshed at the start of each run, that is exactly what drove
 this quest. When a question turns on what a step *does*, not just its name,
 read the snapshot:
 
-- `workflow.yaml` — phases, steps, lanes, vars: the order of what runs.
+- `workflow.yaml` — phases, steps, tiers, vars: the order of what runs.
 - `agents/<name>.md` — the full prompt a given agent step follows; where a
   step's real behavior lives.
 - `partials/*.md` — shared prompt fragments the agent files include.

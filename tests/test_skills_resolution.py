@@ -21,7 +21,6 @@ _POOL = (
     "imp-tool-reference",
     "imp-driving-terminal-uis",
     "imp-knowledge",
-    "imp-introspection",
     "imp-memory",
 )
 

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-_SKILL = Path("src/imp/assets/skills/imp-introspection.md")
+_SKILL = Path("docs/guide/introspection.md")
 
 
 def test_skill_documents_append_intent() -> None:
