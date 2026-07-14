@@ -61,15 +61,53 @@ def test_llm_response_digest_shows_stop_tools_in_out_and_text() -> None:
     assert "usage=" not in line          # the raw usage dict is gone
 
 
-def test_tool_result_digest_shows_error_and_byte_size() -> None:
+def test_tool_result_digest_shows_error_bytes_and_no_id() -> None:
     ev = {
         "id": "e4", "parent_id": None, "agent_id": "step:x/y",
         "timestamp": "2026-07-01T00:00:03+00:00", "type": "tool_result",
-        "payload": {"id": "t1", "content": "ABCDEFGHIJ", "error": True},
+        "payload": {"id": "toolu_abc", "content": "ABCDEFGHIJ", "error": True},
     }
     line = digest_event(ev)
     assert "error=True" in line
     assert "bytes=10" in line          # byte size of "ABCDEFGHIJ"
+    assert "id=" not in line           # opaque tool-use id dropped
+    assert "toolu_abc" not in line
+
+
+def test_tool_result_digest_unwraps_text_content_block() -> None:
+    ev = {
+        "id": "e4b", "parent_id": None, "agent_id": "step:x/y",
+        "timestamp": "2026-07-01T00:00:03+00:00", "type": "tool_result",
+        "payload": {"id": "toolu_x", "error": False,
+                    "content": [{"type": "text", "text": "unwrapped body"}]},
+    }
+    line = digest_event(ev)
+    assert "unwrapped body" in line
+    assert '"type"' not in line         # the raw block wrapper is gone
+    assert "bytes=14" in line           # byte size of "unwrapped body"
+
+
+def test_tool_result_digest_json_dumps_non_text_content() -> None:
+    ev = {
+        "id": "e4c", "parent_id": None, "agent_id": "step:x/y",
+        "timestamp": "2026-07-01T00:00:03+00:00", "type": "tool_result",
+        "payload": {"error": False,
+                    "content": [{"type": "image", "source": "data:xyz"}]},
+    }
+    line = digest_event(ev)
+    assert "image" in line              # non-text content falls back to json.dumps
+    assert "data:xyz" in line
+
+
+def test_tool_result_digest_handles_missing_content() -> None:
+    ev = {
+        "id": "e4d", "parent_id": None, "agent_id": "step:x/y",
+        "timestamp": "2026-07-01T00:00:03+00:00", "type": "tool_result",
+        "payload": {"error": False},
+    }
+    line = digest_event(ev)          # must not raise
+    assert "error=False" in line
+    assert "\n" not in line
 
 
 def test_unknown_type_uses_generic_scalar_fallback() -> None:

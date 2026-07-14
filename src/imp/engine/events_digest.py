@@ -40,6 +40,17 @@ def _message_text(payload: dict[str, Any]) -> str:
     return " ".join(parts)
 
 
+def _content_text(content: Any) -> str:
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts = [str(b.get("text", "")) for b in content
+                 if isinstance(b, dict) and b.get("type") == "text"]
+        if parts:
+            return " ".join(parts)
+    return json.dumps(content, default=str)
+
+
 def _parse_llm(payload: dict[str, Any]) -> tuple[str, int]:
     """Best-effort text + tool_use count from llm_response.raw. Never raises:
     a provider with no parser or a malformed raw degrades to ("", 0)."""
@@ -79,10 +90,9 @@ def _h_tool_call(payload: dict[str, Any]) -> str:
 
 
 def _h_tool_result(payload: dict[str, Any]) -> str:
-    content = payload.get("content")
-    text = content if isinstance(content, str) else json.dumps(content, default=str)
-    return (f"id={payload.get('id', '?')} error={payload.get('error')} "
-            f"bytes={len(text.encode())} {_clip(text, _RESULT_CAP)}")
+    text = _content_text(payload.get("content"))
+    return (f"error={payload.get('error')} bytes={len(text.encode())} "
+            f"{_clip(text, _RESULT_CAP)}")
 
 
 def _h_agent_output(payload: dict[str, Any]) -> str:
