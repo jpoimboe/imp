@@ -2867,6 +2867,24 @@ def _since_cutoff(spec: str, now: datetime) -> datetime:
     return now - timedelta(days=365 * n)  # unit == "y"
 
 
+def _selected_list_dispositions(args: argparse.Namespace) -> set[str]:
+    """Union of the disposition tokens selected by the `imp list` flags."""
+    picked: set[str] = set()
+    if args.active:
+        picked.add("active")
+    if args.backlog:
+        picked.add("backlog")
+    if args.merged:
+        picked.add("merged")
+    if args.abandoned:
+        picked.add("abandoned")
+    if args.shelved:
+        picked.add("shelved")
+    if args.archived:
+        picked |= {"merged", "abandoned", "shelved"}
+    return picked
+
+
 # Display-only disposition word for the overview history block.
 _DISPOSITION = {"completed": "merged", "abandoned": "abandoned", "paused": "left"}
 
