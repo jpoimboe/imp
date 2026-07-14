@@ -34,7 +34,5 @@ def test_tool_reference_holds_relocated_reference_detail() -> None:
         "err_path",
         "20-minute wait budget",  # bash_output budget/clip
         "advances the output cursors",  # bash_kill
-        "comma-separated",       # imp_events type filter
-        "durable working files",  # imp_events current-state nudge
     ):
         assert sentinel in body, f"imp-tool-reference missing: {sentinel!r}"

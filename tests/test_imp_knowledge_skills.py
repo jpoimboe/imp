@@ -64,7 +64,7 @@ def test_introspection_names_the_read_commands() -> None:
     assert "imp list --all" in body
     assert "imp search" in body
     assert "imp show <id> spec" in body
-    assert "imp show <id> events" in body
+    assert "imp events <id>" in body
 
 
 def test_introspection_documents_the_three_tier_split() -> None:
@@ -72,28 +72,26 @@ def test_introspection_documents_the_three_tier_split() -> None:
     # narrative / digest / raw are the three named timeline tiers
     for tier in ("narrative", "digest", "raw"):
         assert tier in body, tier
-    # narrative tier names imp log; digest tier names both front doors
+    # narrative tier names imp log; digest tier names imp events
     assert "imp log <id>" in body
-    assert "imp show <id> events" in body
+    assert "imp events <id>" in body
 
 
 def test_introspection_documents_the_cross_change_query() -> None:
     body = load_internal_skill(_skills_dir(), "imp-introspection")
-    # in-loop cross-quest front doors, keyword-form as an agent would call them
-    assert "imp_show(quest_id=" in body
-    assert "imp_events(quest_id=" in body
+    # CLI front doors for cross-quest reads
+    assert "imp show <id>" in body
+    assert "imp events <id>" in body
+    assert "cat-ing its files" in body
 
 
 def test_introspection_documents_bounded_output_techniques() -> None:
     body = load_internal_skill(_skills_dir(), "imp-introspection")
-    # scope-the-query flags, in both CLI and tool spelling
+    # scope-the-query flags (CLI)
     for flag in ("--limit", "--type", "--agent"):
         assert flag in body, flag
-    for kw in ("`limit`", "`type`", "`agent_id`"):
-        assert kw in body, kw
-    # scan-then-zoom: raw tier is opt-in, in both spellings
-    assert "--full" in body
-    assert "full=True" in body
+    # scan-then-zoom: the raw tier is opt-in via --json
+    assert "--json" in body
 
 
 def test_introspection_search_entry_spans_all_zones_and_content() -> None:
