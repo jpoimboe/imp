@@ -1776,7 +1776,13 @@ def _log_picker_empty() -> int:
     return 2
 
 
-async def _pick_log_target(control: Path) -> str | int:
+_LOG_PICKER_HEADER = (
+    "Show log for which quest?  (↑/↓ to move · enter to select · q to cancel)"
+)
+
+
+async def _pick_full_pool_target(control: Path, *, header: str) -> str | int:
+    """No-token picker over the full pool, shared by the log and events pickers."""
     rows = _sort_rows_newest_first(
         _status_rows(control) + _backlog_rows(control) + _completed_rows(control))
     default_id = _resolve_default_id(control)
@@ -1786,10 +1792,14 @@ async def _pick_log_target(control: Path) -> str | int:
     return await _pick_quest_target(
         control=control,
         rows=rows,
-        header="Show log for which quest?  (↑/↓ to move · enter to select · q to cancel)",
+        header=header,
         on_empty=_log_picker_empty,
         selected_index=selected_index,
     )
+
+
+async def _pick_log_target(control: Path) -> str | int:
+    return await _pick_full_pool_target(control, header=_LOG_PICKER_HEADER)
 
 
 def _page_or_print(lines: Iterable[str], *, no_pager: bool) -> None:
@@ -2802,22 +2812,9 @@ _EVENTS_PICKER_HEADER = (
 
 
 async def _pick_events_target(control: Path) -> str | int:
-    """No-token events picker over the full pool (in-flight + backlog +
-    completed), newest-first, with the most-recent quest pre-selected — the
-    same pool and pre-select `_pick_log_target` uses. No on_non_tty: `_cmd_events`
+    """No-token events picker over the shared full pool. No on_non_tty: `_cmd_events`
     routes the non-tty no-token case to `_resolve_default_id` before calling this."""
-    rows = _sort_rows_newest_first(
-        _status_rows(control) + _backlog_rows(control) + _completed_rows(control))
-    default_id = _resolve_default_id(control)
-    selected_index = next(
-        (i for i, r in enumerate(rows) if r[0] == default_id), 0)
-    return await _pick_quest_target(
-        control=control,
-        rows=rows,
-        header=_EVENTS_PICKER_HEADER,
-        on_empty=_log_picker_empty,
-        selected_index=selected_index,
-    )
+    return await _pick_full_pool_target(control, header=_EVENTS_PICKER_HEADER)
 
 
 async def _pick_events_matches(control: Path, matches: list[str]) -> str | int:

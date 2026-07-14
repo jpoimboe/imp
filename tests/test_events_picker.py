@@ -314,3 +314,23 @@ def test_cmd_events_backlog_selection_prints_friendly_line_and_returns_0(
     out = capsys.readouterr().out
     assert rc == 0
     assert out == "Quest 2026-06-10-back01 hasn't started yet — no events to show.\n"
+
+
+@pytest.mark.anyio
+async def test_log_and_events_pickers_delegate_to_full_pool_helper(
+    monkeypatch, tmp_path: Path,
+) -> None:
+    # AC: the log and events no-token pickers share one implementation
+    # (_pick_full_pool_target); their only difference is the header string.
+    seen: list[str] = []
+
+    async def fake_full_pool(control, *, header):
+        seen.append(header)
+        return "picked"
+
+    monkeypatch.setattr(m, "_pick_full_pool_target", fake_full_pool)
+    assert await m._pick_log_target(tmp_path) == "picked"
+    assert await m._pick_events_target(tmp_path) == "picked"
+    assert seen == [m._LOG_PICKER_HEADER, m._EVENTS_PICKER_HEADER]
+    assert m._LOG_PICKER_HEADER == (
+        "Show log for which quest?  (↑/↓ to move · enter to select · q to cancel)")
