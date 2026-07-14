@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import anyio
@@ -578,15 +579,29 @@ def test_bash_foreground_cap_is_30kb_not_50kb(tmp_path: Path) -> None:
 
 
 def test_bash_foreground_stdin_is_devnull(tmp_path: Path) -> None:
-    # AC 4: foreground now spawns with stdin=DEVNULL (via the shared
-    # spawn-to-files core), not the old pipe path's inherited stdin. The child's
-    # fd 0 points at /dev/null, so a stdin reader gets instant EOF instead of
-    # hanging on a prompt or stealing the runner's stdin. readlink is the decisive
-    # observable: the old inherited-stdin path never pointed fd 0 at /dev/null.
-    out = json.loads(_run_bash(_ctx(tmp_path),
-                               {"command": "readlink /proc/self/fd/0"}))
+    # AC 4: foreground spawns with stdin=DEVNULL (via the shared spawn-to-files
+    # core), not the old pipe path's inherited stdin. Redirect this process's own
+    # fd 0 at a real file for the duration of the call so the assertion cannot
+    # pass vacuously when the runner's fd 0 is already /dev/null (headless CI): an
+    # inherited-stdin regression would surface that real file in the child's
+    # readlink and echo its bytes through `cat`, while DEVNULL keeps fd 0 at
+    # /dev/null and yields instant EOF.
+    stdin_file = tmp_path / "real_stdin"
+    stdin_file.write_text("stolen-stdin-marker\n")
+    saved_fd0 = os.dup(0)
+    with open(stdin_file, "rb") as f:
+        os.dup2(f.fileno(), 0)
+    try:
+        out = json.loads(_run_bash(_ctx(tmp_path),
+                                   {"command": "readlink /proc/self/fd/0; cat"}))
+    finally:
+        os.dup2(saved_fd0, 0)
+        os.close(saved_fd0)
     assert out["returncode"] == 0
+    # readlink prints /dev/null (not the redirected real file), and `cat` draining
+    # a DEVNULL stdin hits instant EOF and echoes none of the file's bytes.
     assert out["stdout"].strip() == "/dev/null"
+    assert "stolen-stdin-marker" not in out["stdout"]
 
 
 def test_bash_foreground_unlinks_scratch_files(tmp_path: Path) -> None:
