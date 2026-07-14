@@ -215,31 +215,61 @@ def test_bash_over_cap_spill_labels_stdout_and_stderr(tmp_path: Path) -> None:
     assert "OUT" in content and "ERR" in content
 
 
-def test_bash_caps_runaway_output(tmp_path: Path) -> None:
-    # A command that floods stdout past the 5 MB kill ceiling is killed AT the
-    # ceiling; the displayed stdout is the 30 KB head + a spill notice (the old
-    # inline marker is gone), and it is NOT surfaced as an interrupt.
+def test_bash_caps_runaway_output(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # AC 5: a foreground command whose COMBINED scratch-file size crosses the cap
+    # is cap-killed on the own-cap poll (both cap and cadence shrunk here) and
+    # returns a NORMAL result: returncode 0, the displayed stdout truncated to the
+    # 30 KB head (no inline marker), and a spill notice. The SIGKILL is cleanup,
+    # not a tool_killed signal. Reading the cap through the limits module is what
+    # lets this test shrink it (the old in-memory drain path ignored it).
+    import imp.agents.tools.bash as bash_mod
+    from imp.agents.tools import limits
+    monkeypatch.setattr(limits, "BG_STREAM_FILE_CAP_BYTES", 50_000)
+    monkeypatch.setattr(bash_mod, "_FG_CAP_POLL_S", 0.05)
     ctx = _ctx(tmp_path)
-    out = json.loads(_run_bash(ctx, {"command": "yes ABCDEFGHIJ"}))
+
+    async def go() -> dict:
+        with anyio.fail_after(10):
+            raw = await get_registry()["bash"].async_invoke(
+                ctx, {"command": "while true; do echo "
+                                 "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx; done"})
+            return json.loads(raw)
+
+    out = anyio.run(go)
+    assert out["returncode"] == 0                    # cap is a NORMAL result
+    assert len(out["stdout"]) == 30_000
     assert "[output truncated" not in out["stdout"]
     assert "notice" in out
     assert (tmp_path / "tool-results").exists()
-    assert len(out["stdout"]) == 30_000
-    assert out["returncode"] == 0                    # cap is a NORMAL result
     assert ctx.running_processes == []
 
 
-def test_bash_caps_runaway_stderr(tmp_path: Path) -> None:
-    # A stderr-dominant flood past the ceiling truncates the displayed stderr to
-    # the 30 KB head and emits a spill notice; no inline marker on either stream.
+def test_bash_caps_runaway_stderr(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # As above but the flood is on stderr: the combined file size still trips the
+    # cap, the displayed stderr is truncated to the 30 KB head, and returncode 0.
+    import imp.agents.tools.bash as bash_mod
+    from imp.agents.tools import limits
+    monkeypatch.setattr(limits, "BG_STREAM_FILE_CAP_BYTES", 50_000)
+    monkeypatch.setattr(bash_mod, "_FG_CAP_POLL_S", 0.05)
     ctx = _ctx(tmp_path)
-    out = json.loads(_run_bash(ctx, {"command": "yes ABCDEFGHIJ 1>&2"}))
+
+    async def go() -> dict:
+        with anyio.fail_after(10):
+            raw = await get_registry()["bash"].async_invoke(
+                ctx, {"command": "while true; do echo "
+                                 "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx 1>&2; done"})
+            return json.loads(raw)
+
+    out = anyio.run(go)
+    assert out["returncode"] == 0
+    assert len(out["stderr"]) == 30_000
     assert "[output truncated" not in out["stderr"]
-    assert "[output truncated" not in out["stdout"]
     assert "notice" in out
     assert (tmp_path / "tool-results").exists()
-    assert len(out["stderr"]) == 30_000
-    assert out["returncode"] == 0                    # cap is a NORMAL result
     assert ctx.running_processes == []
 
 
@@ -544,3 +574,26 @@ def test_bash_foreground_cap_is_30kb_not_50kb(tmp_path: Path) -> None:
     spilled = list((tmp_path / "tool-results").iterdir())
     assert len(spilled) == 1
     assert len(spilled[0].read_bytes()) == 100_000   # FULL output recoverable
+
+
+def test_bash_foreground_stdin_is_devnull(tmp_path: Path) -> None:
+    # AC 4: foreground now spawns with stdin=DEVNULL (via the shared
+    # spawn-to-files core), not the old pipe path's inherited stdin. The child's
+    # fd 0 points at /dev/null, so a stdin reader gets instant EOF instead of
+    # hanging on a prompt or stealing the runner's stdin. readlink is the decisive
+    # observable: the old inherited-stdin path never pointed fd 0 at /dev/null.
+    out = json.loads(_run_bash(_ctx(tmp_path),
+                               {"command": "readlink /proc/self/fd/0"}))
+    assert out["returncode"] == 0
+    assert out["stdout"].strip() == "/dev/null"
+
+
+def test_bash_foreground_unlinks_scratch_files(tmp_path: Path) -> None:
+    # A non-promoted foreground command reads its scratch files whole then unlinks
+    # them: no fg-<uuid> files are left behind in the per-agent bg dir.
+    from imp.agents.tools.bg import _bg_dir
+    ctx = _ctx(tmp_path)
+    out = json.loads(_run_bash(ctx, {"command": "echo hi"}))
+    assert out["returncode"] == 0
+    assert "hi" in out["stdout"]
+    assert list(_bg_dir(ctx).glob("fg-*")) == []
