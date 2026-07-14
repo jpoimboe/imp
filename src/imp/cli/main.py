@@ -3392,14 +3392,31 @@ def _cmd_events(args: argparse.Namespace) -> int:
     control = _control_root()
     quest_id: str | None
     if args.token is not None:
-        try:
-            quest_id = _resolve_id(control, args.token)
-        except SystemExit:
-            return 2
+        # Same comprehension as _resolve_id — picker and resolver agree on candidates.
+        matches = [cid for cid in _iter_quest_ids(control) if args.token in cid]
+        if _interactive() and args.token.strip() and len(matches) >= 2:
+            picked = anyio.run(_pick_events_matches, control, matches)
+            if isinstance(picked, int):
+                return picked
+            quest_id = picked
+        else:
+            try:
+                quest_id = _resolve_id(control, args.token)
+            except SystemExit:
+                return 2
+    elif _interactive():
+        picked = anyio.run(_pick_events_target, control)
+        if isinstance(picked, int):
+            return picked
+        quest_id = picked
     else:
         quest_id = _resolve_default_id(control)
     if quest_id is None:
         print(_NO_QUESTS_MESSAGE)
+        return 0
+    meta = _unstarted_backlog_meta(control, quest_id)
+    if meta is not None:
+        print(f"Quest {quest_id} hasn't started yet — no events to show.")
         return 0
     events = _load_events_for_id(control, quest_id)
     if events is None:
