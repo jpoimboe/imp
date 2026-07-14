@@ -19,7 +19,8 @@ def test_memory_authoring_partial_has_pinned_prose() -> None:
     assert "Work out the target file (narrowest scope that fits):" in text
     assert "be reluctant with either `all.md`" in text
     assert "Never invent a step name." in text
-    assert "only `commit_memory` takes the lock" in text
+    assert "create_quest(workflow='memory', start=True" in text
+    assert "intent, not file bytes" in text
     assert "never `.imp/`" in text
 
 
@@ -62,10 +63,3 @@ def test_finalize_prompt_includes_memory_authoring() -> None:
     out = _render_agent("finalize", {"auto_merge": False})
     assert "## Recording standing preferences to memory" in out
 
-
-def test_threshold_access_permits_memory_writes() -> None:
-    out = _render_agent("threshold", {})
-    # The Access section now carves out imp/memory writes via commit_memory,
-    # still forbidding raw git and .imp/.
-    assert "one narrow exception" in out
-    assert "record through `commit_memory`" in out

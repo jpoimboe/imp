@@ -24,13 +24,16 @@ Never invent a step name. Read the real names from the running workflow snapshot
 directory name. When the scope is genuinely ambiguous — one step or the whole
 workflow — ask which the user wants rather than guessing.
 
-**Propose, then write only on confirmation.** Show the target path and the file
-content, merging into any existing file rather than clobbering it; once the user is
-happy, record it with `commit_memory`, which writes and commits that one file under
-imp's shared-repo lock. Compose the `memory: <summary>` commit message yourself.
+**Resolve the scope with the user, then launch a background quest.** Once the user
+is happy with the target scope, call
+`create_quest(workflow='memory', start=True, title="<short title>", description="<a
+clear plain-language intent, including the resolved target scope and whether to add,
+change, or remove>")`. You pass **intent, not file bytes**: the background `memory`
+quest resolves the exact file(s), makes the edit off a fresh base tip, validates the
+tree, and lands it through the merge queue. It appears in the **active** list, so
+tell the user it is running and will merge on its own.
 
-**Guardrails.** Never write memory without the user's agreement, never with a raw
-`git` command (only `commit_memory` takes the lock), and only ever under
-`imp/memory/`, never `.imp/`. Recording a preference isn't building — it doesn't
-consume the quest or go live, and a file you write now takes effect on future runs,
-not the one you're in.
+**Guardrails.** Never record memory without the user's agreement, never with a raw
+`git` command, and only ever under `imp/memory/`, never `.imp/`. Recording a
+preference isn't building — the write happens in the background, and a preference
+recorded now takes effect on future runs, not the one you're in.

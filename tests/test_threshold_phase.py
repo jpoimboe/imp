@@ -103,7 +103,7 @@ def test_threshold_adoption_section_omitted_on_autonomous_runs(tmp_path) -> None
         workflow_dir=bundled_workflow_dir("imp"))
     # Autonomous runs omit the whole {% if not run.autonomous %} block.
     assert "## Keep discovered work here by default" not in autonomous
-    assert "create_quest" not in autonomous
+    assert 'depends_on=["abc"]' not in autonomous
     # The retired unconditional / spin-off-first heading and phrasing are gone.
     assert "## Splitting off a separate change" not in attended
     assert "ending your turn to yield** before calling `create_quest`" not in attended
