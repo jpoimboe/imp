@@ -27,6 +27,12 @@ READ_CHUNK_BYTES = 65_536                # cooperative read granularity
 # skeletons and their tests in lockstep.
 OUTPUT_TRUNCATION_MARKER = "\n... [output truncated at 50 KB] ..."
 
+# Bash-tool-specific inline output cap. Deliberately SMALLER than the shared
+# TOOL_OUTPUT_CAP_BYTES (50 KB) that read_file/grep display with: a raw shell
+# command is the likeliest flooder, so its inline head is tightened while the
+# full output still spills to a recoverable file. NOT an alias of the shared cap.
+BASH_OUTPUT_CAP_BYTES = 30_000
+
 # grep ONLY: an external-target walk halts after this many files SCANNED (not
 # matched) and discloses a truncation notice. A performance brake (bounds work),
 # not a security one — applies whenever the target is external, sandbox or not.
@@ -37,6 +43,12 @@ EXTERNAL_WALK_FILE_CAP = 20_000
 # --- Watchdog / teardown timing (a per-tool-call deadline, distinct from the
 # per-category retry-backoff budgets in error_policy.py) ---------------------
 TOOL_WALLCLOCK_TIMEOUT_S = 1800.0        # B.1: per-tool-call deadline (30 min)
+# Bash foreground deadline: a raw recursive shell walk is the runaway hazard, so
+# a foreground bash command is reaped in minutes, not the 30-min fs/nav ceiling.
+# A caller may pass a larger `timeout` (positive seconds) up to the MAX cap; the
+# in-process fs/nav/symbol_outline tools keep TOOL_WALLCLOCK_TIMEOUT_S untouched.
+BASH_FOREGROUND_TIMEOUT_S = 120.0        # default foreground bash deadline (2 min)
+BASH_FOREGROUND_TIMEOUT_MAX_S = 600.0    # cap on a caller-supplied timeout (10 min)
 # B.2 is INDEPENDENT of B.1: the coordinator suspends the inactivity watchdog
 # for the full duration of every foreground tool call (begin/end_tool_watchdog;
 # see agent_run._pull_with_inactivity_watchdog and cli/signals.py), so B.2 never
