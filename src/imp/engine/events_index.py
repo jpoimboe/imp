@@ -371,14 +371,20 @@ def agent_display(agent_id: str | None, handle_map: dict[str, str]) -> str:
 
 def digest_line(
     ordinal: int, event: dict[str, Any], handle_map: dict[str, str],
+    *, width: int | None = None,
 ) -> str:
     """Compact one-line rendering: `#N  <type>  [agent]  <summary>` — no
-    wall-clock timestamp (the ordinal conveys order)."""
+    wall-clock timestamp (the ordinal conveys order). When `width` is an int the
+    assembled line is clipped to that many columns (one reserved for a trailing
+    `…`); `width=None` renders the full untruncated line (the `--full` path)."""
     etype = event.get("type") or "?"
     agent = agent_display(event.get("agent_id"), handle_map)
-    return (
+    line = (
         f"#{ordinal}  {etype:<{_TYPE_WIDTH}} [{agent}]  {summarize(event)}"
     ).rstrip()
+    if width is not None and len(line) > width:
+        line = line[: width - 1] + "…"
+    return line
 
 
 def _agent_matches(
