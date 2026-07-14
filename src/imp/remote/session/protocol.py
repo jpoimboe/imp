@@ -3,11 +3,11 @@
 Each frame is a single JSON line. Client -> daemon frames carry a "kind" of
 "attach" (the opening handshake), "input" (a gate reply), "skill" (a skill
 load request), "control" (an interrupt/detach/abandon/save/archive/discard
-action), or "set-lease" (toggle
-this attachment's keep-alive lease). The daemon -> client
-frame is "event", wrapping one curated engine event. Encoders return a line
-WITHOUT a trailing newline; the caller frames it (matching
-remote/daemon/protocol.py:make_hello)."""
+action), "set-lease" (toggle this attachment's keep-alive lease), or "query"
+(a read-only introspection query). Daemon -> client frames are "event"
+(wrapping one curated engine event) or "result" (the reply to a query).
+Encoders return a line WITHOUT a trailing newline; the caller frames it
+(matching remote/daemon/protocol.py:make_hello)."""
 from __future__ import annotations
 
 import json
@@ -64,7 +64,13 @@ class SkillRequest:
     args: str
 
 
-ClientMessage = Attach | Input | Control | SetLease | SkillRequest
+@dataclass(frozen=True, slots=True)
+class Query:
+    op: str
+    args: dict[str, Any]
+
+
+ClientMessage = Attach | Input | Control | SetLease | SkillRequest | Query
 
 
 def encode_attach(quest_id: str, title: str, lease: bool = False) -> str:
@@ -93,6 +99,18 @@ def encode_control(action: str, reason: str | None = None) -> str:
     return json.dumps(payload)
 
 
+def encode_query(op: str, args: dict[str, Any]) -> str:
+    return json.dumps({"kind": "query", "op": op, "args": args})
+
+
+def encode_result(value: Any) -> str:
+    return json.dumps({"kind": "result", "ok": True, "value": value})
+
+
+def encode_result_error(message: str) -> str:
+    return json.dumps({"kind": "result", "ok": False, "error": message})
+
+
 def encode_event(event: dict[str, Any]) -> str:
     return json.dumps({"kind": "event", "event": event})
 
@@ -116,6 +134,8 @@ def parse_client_message(line: str) -> ClientMessage:
             if action not in _CONTROL_ACTIONS:
                 raise ValueError(f"unknown control action {action!r}")
             return Control(action, obj.get("reason"))
+        if kind == "query":
+            return Query(obj["op"], dict(obj.get("args") or {}))
     except KeyError as exc:
         raise ValueError(f"missing required field {exc}") from exc
     raise ValueError(f"unknown client message kind {kind!r}")
@@ -134,3 +154,13 @@ def parse_event(line: str) -> dict[str, Any]:
     if not isinstance(event, dict):
         raise ValueError(f"expected 'event' to be a JSON object, got {type(event).__name__}")
     return event
+
+
+def parse_result(line: str) -> Any:
+    obj = json.loads(line)
+    if not isinstance(obj, dict) or obj.get("kind") != "result":
+        got = obj.get("kind") if isinstance(obj, dict) else type(obj).__name__
+        raise ValueError(f"expected result frame, got {got!r}")
+    if not obj.get("ok", False):
+        raise RuntimeError(obj.get("error", "query failed"))
+    return obj.get("value")
