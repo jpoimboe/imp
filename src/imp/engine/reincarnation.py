@@ -71,13 +71,21 @@ def handoff_path_for(transcript_dir: Path) -> Path:
 
 
 def handoff_instruction(handoff_path: Path) -> str:
-    """The user-turn text that elicits an agent-authored handoff when a session
-    approaches its context limit (Tier A proactive handoff). The agent writes the
-    note to `handoff_path` with write_file and stops; the engine then reincarnates
-    the session seeded from it."""
+    """The user-turn text that elicits a handoff when a session approaches its
+    context limit (Tier A proactive handoff). The agent emits the handoff as its
+    final reply text (plain text, no tool calls) and stops; the provider persists
+    that text to `handoff_path` and the engine reincarnates the session from it."""
     return (
-        "You are approaching the context limit. Stop new work now. Write a "
-        f"compact handoff to `{handoff_path}` capturing: the current goal and "
-        "progress, decisions made, key findings as `file:line` citations, and "
-        "exactly what remains to be done. Use write_file. After you have written "
-        "it, stop — do not start anything new.")
+        "You are approaching the context limit. Stop new work now. Your final "
+        "reply must be a compact handoff note — plain text, no tool calls — "
+        "capturing: the current goal and progress, decisions made, key findings "
+        "as `file:line` citations, and exactly what remains to be done. After "
+        "you have written your reply, stop — do not start anything new.")
+
+
+def write_handoff_note(handoff_path: Path, text: str) -> bool:
+    """Write `text` to `handoff_path` unless empty/whitespace; return whether it wrote."""
+    if not text.strip():
+        return False
+    handoff_path.write_text(text)
+    return True

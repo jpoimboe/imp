@@ -64,6 +64,7 @@ from imp.engine.agent_run import (
     deliver_interject,
     drain_all_interjects_at_resume,
     last_assistant_text,
+    most_recent_assistant_text,
 )
 from imp.engine.awaiting_user_input import AwaitingUserInput
 from imp.providers import errors as perr
@@ -678,7 +679,11 @@ class AnthropicAgentRunner:
         # Tier A proactive-handoff watch state (Mechanism 3). handoff_phase is
         # None until the threshold crosses, then "instruction_sent" for the one
         # handoff-writing turn that follows.
-        from imp.engine.reincarnation import handoff_instruction, handoff_path_for
+        from imp.engine.reincarnation import (
+            handoff_instruction,
+            handoff_path_for,
+            write_handoff_note,
+        )
         from imp.providers.catalog import (
             context_threshold_crossed,
             context_tokens_from_usage,
@@ -804,6 +809,7 @@ class AnthropicAgentRunner:
                 if handoff_phase == "instruction_sent":
                     # The handoff-writing turn ended without a tool: signal the
                     # captured handoff and stop (the engine reincarnates).
+                    write_handoff_note(handoff_path, most_recent_assistant_text(messages))
                     yield {"type": "handoff",
                            "payload": {"handoff_path": str(handoff_path)}}
                     return
@@ -900,9 +906,9 @@ class AnthropicAgentRunner:
                     return
 
             if handoff_phase == "instruction_sent":
-                # The agent's handoff-writing turn just completed (its write_file
-                # tool_result is recorded). Signal the captured handoff and stop;
-                # the engine stashes the transcript and reincarnates seeded with it.
+                # Provider persists the agent's final reply text to the note,
+                # then signals the handoff; the engine reincarnates seeded from it.
+                write_handoff_note(handoff_path, most_recent_assistant_text(messages))
                 yield {"type": "handoff",
                        "payload": {"handoff_path": str(handoff_path)}}
                 return

@@ -49,10 +49,10 @@ async def test_threshold_crossing_elicits_handoff_and_signals(tmp_path: Path) ->
         response(tool_use("u1", "write_file",
                           {"path": "scratch.txt", "content": "x"}),
                  usage={"input_tokens": 170_000}),
-        # Turn 2: the agent writes the handoff note as instructed, then the
-        # runner emits the terminal `handoff` signal.
-        response(tool_use("u2", "write_file",
-                          {"path": str(hp), "content": "# handoff\n"})),
+        # Turn 2: agent replies with text + a write to a different file.
+        # The provider captures the text and writes hp itself.
+        response(text("# handoff from provider"),
+                 tool_use("u2", "write_file", {"path": "scratch2.txt", "content": "y"})),
     ])
     runner = AnthropicAgentRunner(model_name="sonnet", client_factory=lambda: fake)
 
@@ -63,7 +63,8 @@ async def test_threshold_crossing_elicits_handoff_and_signals(tmp_path: Path) ->
     assert handoff[0]["payload"]["handoff_path"] == str(hp)
     transcript = (tmp_path / "step" / "transcript.jsonl").read_text()
     assert "approaching the context limit" in transcript   # instruction injected
-    assert hp.exists()                                      # turn 2 wrote the note
+    assert hp.exists()
+    assert hp.read_text() == "# handoff from provider"
 
 
 @pytest.mark.anyio
@@ -83,6 +84,34 @@ async def test_below_threshold_does_not_elicit_handoff(tmp_path: Path) -> None:
     assert any(e["type"] == "agent_output" for e in events)
     transcript = (tmp_path / "step" / "transcript.jsonl").read_text()
     assert "approaching the context limit" not in transcript
+
+
+@pytest.mark.anyio
+async def test_empty_handoff_turn_does_not_write_note(tmp_path: Path) -> None:
+    # When the handoff turn produces empty final text the note must NOT be
+    # written (degrade to transcript-only recovery), but the handoff event still
+    # fires so the engine can reincarnate.
+    # Turn 1 carries prose so the buggy last_assistant_text walks back to stale
+    # text; most_recent_assistant_text returns "" so no note is written.
+    hp = handoff_path_for(tmp_path / "step")
+    fake = FakeAsyncAnthropic([
+        # Turn 1 crosses 0.8 * 200000 = 160000 (170000); also carries prose so
+        # last_assistant_text (the buggy helper) has stale text to pick up.
+        response(text("I will write the files"),
+                 tool_use("u1", "write_file",
+                          {"path": "scratch.txt", "content": "x"}),
+                 usage={"input_tokens": 170_000}),
+        # Turn 2: agent replies with empty text and no tool (tool-less site 1).
+        response(text(""), stop_reason="end_turn"),
+    ])
+    runner = AnthropicAgentRunner(model_name="sonnet", client_factory=lambda: fake)
+
+    events = [e async for e in runner.run(_invocation(tmp_path, threshold=0.8))]
+
+    handoff = [e for e in events if e["type"] == "handoff"]
+    assert len(handoff) == 1
+    assert handoff[0]["payload"]["handoff_path"] == str(hp)
+    assert not hp.exists()
 
 
 @pytest.mark.anyio
@@ -107,3 +136,5 @@ async def test_handoff_fires_on_tool_less_writing_turn(tmp_path: Path) -> None:
     assert handoff[0]["payload"]["handoff_path"] == str(hp)
     transcript = (tmp_path / "step" / "transcript.jsonl").read_text()
     assert "approaching the context limit" in transcript   # instruction injected
+    assert hp.exists()
+    assert hp.read_text() == "Understood, stopping here."

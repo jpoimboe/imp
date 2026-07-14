@@ -107,6 +107,7 @@ from imp.engine.agent_run import (
     build_inline_solicit,
     drain_all_interjects_at_resume,
     last_assistant_text,
+    most_recent_assistant_text,
 )
 from imp.engine.awaiting_user_input import AwaitingUserInput
 from imp.engine.drivers import driver_allowed_tools
@@ -1916,7 +1917,11 @@ class ClaudeCodeAgentRunner:
             # follow-up turn is consumed from a fresh generator (issue 7:
             # receive_response() terminates after the first ResultMessage).
             next_query: Any = _stream_history(messages[resume_base:])
-            from imp.engine.reincarnation import handoff_instruction, handoff_path_for
+            from imp.engine.reincarnation import (
+                handoff_instruction,
+                handoff_path_for,
+                write_handoff_note,
+            )
             from imp.providers.catalog import sdk_context_threshold_crossed
             # Tier A proactive-handoff watch state (Mechanism 3).
             handoff_phase: str | None = None
@@ -2334,6 +2339,7 @@ class ClaudeCodeAgentRunner:
                             # stashes the transcript and reincarnates the session
                             # seeded from the note. Wins over a stray
                             # complete_step on this turn.
+                            write_handoff_note(handoff_path, most_recent_assistant_text(messages))
                             yield {"type": "handoff",
                                    "payload": {"handoff_path": str(handoff_path)}}
                             return
