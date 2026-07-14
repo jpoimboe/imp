@@ -1419,3 +1419,36 @@ def test_resolve_policy_omits_workflow_overlay_when_workflow_is_plain_file(tmp_p
         available=True, quest_dir=quest_dir,
     )
     assert pol.readonly_overlays == ()
+
+
+def test_resolve_policy_masks_archive_footguns(tmp_path):
+    control, wt = _layout(tmp_path)
+    archive = control / ".imp" / "archive"
+    (archive / "blobs").mkdir(parents=True)
+    (archive / "index.db").write_text("")
+    (archive / "records").mkdir()
+    pol = resolve_policy(
+        worktree=wt, control_root=control, quest_id="abc",
+        cfg=SandboxConfig(), engine_env_result={}, environ={},
+        available=True,
+    )
+    assert str(archive / "blobs") in pol.secret_dirs
+    assert str(archive / "index.db") in pol.secret_files
+    # records/ stays readable — never masked.
+    assert str(archive / "records") not in pol.secret_dirs
+    assert pol.allows_read(archive / "blobs" / "ab" / "cd") is False
+    assert pol.allows_read(archive / "index.db") is False
+    assert pol.allows_read(archive / "records" / "x.json") is True
+
+
+def test_resolve_policy_archive_mask_is_existence_gated(tmp_path):
+    control, wt = _layout(tmp_path)
+    # No .imp/archive tree created — the existence-gate must produce no entry.
+    pol = resolve_policy(
+        worktree=wt, control_root=control, quest_id="abc",
+        cfg=SandboxConfig(), engine_env_result={}, environ={},
+        available=True,
+    )
+    archive = control / ".imp" / "archive"
+    assert str(archive / "blobs") not in pol.secret_dirs
+    assert str(archive / "index.db") not in pol.secret_files

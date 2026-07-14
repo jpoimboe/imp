@@ -484,6 +484,11 @@ def resolve_policy(
     secret_dirs += list(_existing([str(p / "steps") for p in quest_dirs]))
     secret_files += list(_existing([str(p / "events.jsonl") for p in quest_dirs]))
 
+    # Mask the archive footguns (blob pile + SQLite content index); records/ stays readable.
+    archive = control_root / ".imp" / "archive"
+    secret_dirs += list(_existing([str(archive / "blobs")]))
+    secret_files += list(_existing([str(archive / "index.db")]))
+
     # ro overlay of workflow snapshot — bind_plan emits it after the quest_home rw
     # bind, so last-covering-wins makes only workflow/ read-only.
     readonly_overlays: tuple[str, ...] = ()
