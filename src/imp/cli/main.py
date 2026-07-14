@@ -2978,7 +2978,7 @@ def _overview_lines(control: Path, *, show_all: bool, now: datetime,
                             live_ids={r[0] for r in status_rows})
     if not inflight and not backlog_rows and not history:
         return [_NO_QUESTS_MESSAGE]
-    label = "history" if show_all else "recently merged"
+    label = "history:" if show_all else "merged:"
     return _overview_body(control, inflight, backlog_rows, history,
                           history_label=label, now=now, color=color)
 
@@ -3025,7 +3025,7 @@ def _filtered_overview_lines(control: Path, *, dispositions: set[str],
     if not inflight and not backlog_rows and not history:
         return [_NO_FILTER_MATCH_MESSAGE]
     return _overview_body(control, inflight, backlog_rows, history,
-                          history_label="history", now=now, color=color)
+                          history_label="history:", now=now, color=color)
 
 
 def _cmd_status(args: argparse.Namespace, _control: Path | None = None) -> int:
