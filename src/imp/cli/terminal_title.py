@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import Any
 
-GLYPH_BUSY = "⛤"
+GLYPH_BUSY = "✦"  # next candidate: ⣿
 GLYPH_IDLE = "ѱ"
 
 
