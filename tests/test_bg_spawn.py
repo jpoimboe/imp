@@ -175,3 +175,54 @@ def test_run_in_background_refused_when_not_enabled(tmp_path: Path) -> None:
         raw = await get_registry()["bash"].async_invoke(ctx, {"command": "echo ok"})
         assert json.loads(raw)["returncode"] == 0
     anyio.run(main)
+
+
+@pytest.mark.skipif(not sys.platform.startswith("linux"),
+                    reason="/proc/self/fd is Linux-only")
+def test_spawn_to_files_redirects_devnull_and_new_session(tmp_path: Path) -> None:
+    """The shared core redirects stdout/stderr to the given files, feeds the
+    child DEVNULL on stdin (a `read` sees instant EOF), and makes it a session
+    leader (pgid == pid) so the group is kill-reachable."""
+    async def main() -> None:
+        from imp.agents.tools.bg import _spawn_to_files
+        out_path = tmp_path / "core.out"
+        err_path = tmp_path / "core.err"
+        proc = await _spawn_to_files(
+            ["sh", "-c", 'read line; echo "out:[$line]"; echo err 1>&2'],
+            out_path=out_path, err_path=err_path,
+            cwd=str(tmp_path), env=dict(os.environ),
+        )
+        assert os.getpgid(proc.pid) == proc.pid          # start_new_session
+        with anyio.fail_after(10):
+            await proc.wait()
+        assert out_path.read_text() == "out:[]\n"        # DEVNULL stdin -> EOF
+        assert err_path.read_text() == "err\n"
+        # Parent fd copies are closed by the core (no leak to the scratch files).
+        assert _fds_open_to(out_path) == 0
+        assert _fds_open_to(err_path) == 0
+    anyio.run(main)
+
+
+def test_spawn_to_files_unlinks_both_on_spawn_failure(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    """A spawn failure after both files are opened unlinks BOTH — no orphan
+    scratch is left behind."""
+    async def main() -> None:
+        import imp.agents.tools.bg as bg_mod
+        from imp.agents.tools.bg import _spawn_to_files
+        out_path = tmp_path / "fail.out"
+        err_path = tmp_path / "fail.err"
+
+        async def boom(*a, **k):
+            raise RuntimeError("spawn failed")
+
+        monkeypatch.setattr(bg_mod.anyio, "open_process", boom)
+        with pytest.raises(RuntimeError):
+            await _spawn_to_files(
+                ["true"], out_path=out_path, err_path=err_path,
+                cwd=str(tmp_path), env=dict(os.environ),
+            )
+        assert not out_path.exists()
+        assert not err_path.exists()
+    anyio.run(main)

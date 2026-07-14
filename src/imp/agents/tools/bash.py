@@ -15,21 +15,18 @@ import contextlib
 import json
 import os
 import signal
-from dataclasses import dataclass
 from pathlib import Path
-from subprocess import PIPE
 from uuid import uuid4
 
 import anyio
 
 from imp.agents.tools import imp_tool
+from imp.agents.tools import limits as _limits
 from imp.agents.tools.context import ToolContext, kill_process_tree
 from imp.agents.tools.limits import (
     BASH_FOREGROUND_TIMEOUT_MAX_S,
     BASH_FOREGROUND_TIMEOUT_S,
     BASH_OUTPUT_CAP_BYTES,
-    BG_STREAM_FILE_CAP_BYTES,
-    ToolAborted,
     tool_checkpoint,
 )
 from imp.agents.tools.spill import spill_tool_output
@@ -41,19 +38,11 @@ from imp.engine.sandbox import (
     overlay_setup_failed,
 )
 
-
-@dataclass
-class _Counter:
-    """Shared combined-output state for the two drain tasks. `total` is the
-    running byte count across BOTH sinks; `capped` flips once it crosses the
-    kill ceiling (BG_STREAM_FILE_CAP_BYTES) and the process group is killed."""
-
-    total: int = 0
-    capped: bool = False
-
-
 _PAUSE_POLL_S = 0.05      # mid-command coordinator.should_pause poll cadence
                           # (a real idle sleep — matches bg.py's _WAIT_POLL_S)
+_FG_CAP_POLL_S = 1.0      # foreground own-cap stat cadence (~1 s, mirrors bg's
+                          # _sweep_bg trigger; the file-size analogue of the old
+                          # combined-byte kill ceiling)
 _EVENT_COMMAND_PREVIEW_LEN = 200
 
 
@@ -87,8 +76,10 @@ def _effective_foreground_timeout(timeout: float | None) -> float:
         "to read the tail. `run_in_background=true` returns {id, pid, …} "
         "immediately — read output with `bash_output(id)`, stop with "
         "`bash_kill(id)`; a bad command still spawns then fails, so check "
-        "`bash_output` after. A foreground command is reaped after 120 s; pass "
-        "`timeout` (positive seconds, max 600) to extend a slow one. No "
+        "`bash_output` after. A foreground command that exceeds its deadline "
+        "(default 120 s; pass `timeout`, positive seconds, max 600, to extend) "
+        "is promoted to a background task readable via `bash_output`/killable "
+        "via `bash_kill`. No "
         "permission gate. "
         "See `imp-tool-reference` for buffering and path details."
     ),
@@ -101,8 +92,6 @@ async def bash(
     # Engine vars come from the LIVE quest when available (top-level steps), so a
     # mid-run rename_quest is reflected immediately; subagents have no live quest
     # (and no rename authority) and fall back to the frozen quest_context snapshot.
-    # quest_context is a render-time snapshot that rename_quest never updates, so
-    # reading it here would leak a stale (empty name-on-intent) title.
     src = ctx.quest or ctx.quest_context
     eng = engine_env(
         project_root=ctx.project_root,
@@ -114,97 +103,45 @@ async def bash(
         pythonpath=ctx.pythonpath,
     )
     env = overlay_engine_env(os.environ, eng)
-    # POSIX: start_new_session=True makes the child a new session leader so
-    # SIGTERM to the PG affects the whole tree. Windows: this kwarg is ignored
-    # and signal handling differs — out of V1 scope (we ship POSIX-first).
-    kwargs: dict[str, object] = {}
-    if hasattr(os, "setsid"):
-        kwargs["start_new_session"] = True
-
-    # anyio.open_process accepts stdlib subprocess constants for stdin/stdout/
-    # stderr; PIPE is the documented way to capture both streams.
     policy = ctx.sandbox_policy
     argv = (build_sandbox_argv(command, cwd=cwd_path, policy=policy, engine_env=eng)
             if policy is not None else ["sh", "-c", command])
     if run_in_background:
         if not ctx.background_enabled:
-            # Future-provider defense: all four current providers wire the
-            # full bg surface and set the flag, so this is unreachable in
-            # production today. A NEW provider that exposes registry bash
-            # without the wiring (injection + sweeps + teardown) gets a loud
-            # refusal with the foreground alternative rather than spawning an
-            # unmanageable, unsweepable, leak-past-exit process.
+            # Future-provider defense: a provider exposing registry bash without
+            # the bg wiring (injection + sweeps + teardown) gets a loud refusal
+            # with the foreground alternative rather than an unmanageable orphan.
             raise ValueError(
                 "run_in_background is not supported under this provider's "
                 "tool loop; run the command in the foreground instead")
-        # Same engine_env overlay and sandbox argv as foreground; only the
-        # stdio plumbing differs. Lazy import: bg is a sibling tool module
-        # registered by the same _register_builtins pass.
         from imp.agents.tools.bg import spawn_background
         return await spawn_background(
             ctx, command=command, argv=argv, cwd=cwd_path, env=env)
     # §4: a pending pause must not spawn the child (mirrors the bg-process contract).
     coordinator = getattr(ctx, "coordinator", None)
     await tool_checkpoint(coordinator, None)
-    proc = await anyio.open_process(
-        argv,
-        stdin=None,
-        stdout=PIPE,
-        stderr=PIPE,
-        cwd=cwd_path,
-        env=env,
-        **kwargs,  # type: ignore[arg-type]
-    )
-    # M1 invariant: every proc registered here is a setsid session leader
-    # (start_new_session above), so pgid == pid and terminate_running_processes /
-    # kill_process_group can os.killpg(pid, …) without os.getpgid. If a future
-    # caller ever registers a NON-setsid proc, revisit kill_process_group.
+
+    # Foreground now spawns to scratch FILES via the shared core (like bg.py), not
+    # pipes: this is what makes a deadline-exceeding command promotable (Part 3)
+    # and gives foreground stdin=DEVNULL for free. fg-<uuid> naming keeps a fast
+    # foreground call from consuming a bgN id; Part 3 renames these to bgN on
+    # promotion. The M1 invariant holds: the core spawns start_new_session, so
+    # pgid == pid and terminate_running_processes / kill_process_group can killpg.
+    from imp.agents.tools.bg import BgProc, _bg_dir, _seed_counter, _spawn_to_files
+    d = _bg_dir(ctx)
+    d.mkdir(parents=True, exist_ok=True)
+    stem = f"fg-{uuid4().hex}"
+    out_path = d / f"{stem}.out"
+    err_path = d / f"{stem}.err"
+    proc = await _spawn_to_files(
+        argv, out_path=out_path, err_path=err_path, cwd=cwd_path, env=env)
     ctx.running_processes.append(proc)
-    kill_cap = BG_STREAM_FILE_CAP_BYTES
-    # Combined running counter across BOTH sinks: counting separately would let
-    # the total reach 2x the ceiling. When the combined total crosses the 5 MB
-    # kill ceiling and the process is still producing, kill the GROUP (cleanup)
-    # and stop draining. A foreground process is short-lived, so the ~5 MB peak
-    # buffer is the same bound background processes already accept.
-    # N5: peak buffered bytes is kill_cap + up to one in-flight chunk PER stream
-    # (both drains can append before either observes `capped`), i.e.
-    # <= ~5 MB + 2*READ chunk. The 30 KB display truncation happens later, on the
-    # assemble path, independent of whether this ceiling was hit.
-    # Single mutable record shared by both drains. Typed fields (not a bag of
-    # `object`) so the arithmetic below stays mypy-clean.
-    counter = _Counter()
-    stdout_chunks: list[bytes] = []
-    stderr_chunks: list[bytes] = []
 
-    async def _drain(stream: object, sink: list[bytes]) -> None:
-        if stream is None:
-            return
-        # Post-cap the loop keeps consuming (discarding) to EOF: asyncio only
-        # resolves proc.wait() once every pipe transport disconnects, and an
-        # abandoned stream gets flow-control-paused on the killed child's pipe
-        # residue — its fd leaves the selector, EOF is never seen, and wait()
-        # deadlocks to the tool wall-clock. Residue is bounded (kernel pipe +
-        # reader buffer), so this costs a few reads, not another flood.
-        async for chunk in stream:  # type: ignore[attr-defined]
-            if counter.capped:
-                continue
-            sink.append(chunk)
-            counter.total += len(chunk)
-            if counter.total >= kill_cap:
-                counter.capped = True
-                await kill_process_tree(proc, signal.SIGKILL)
-
-    # Decision 10 ticker (pinned lifecycle): sweeps the background registry
-    # while THIS foreground call runs — the only coverage for a long QUIET
-    # command (no chunks => the drain bodies never run; chatty-then-silent
-    # EOFs both drains and sits in proc.wait()). It runs in its OWN
-    # CancelScope, cancelled right after proc.wait() returns: an uncancelled
-    # ticker would hold the task group open to the B.1 fail_after (every
-    # quick bash "times out"), while cancelling the whole group would also
-    # cancel the drains mid-flush (silent tail truncation). Not a long-lived-
-    # task violation: scoped inside one call's own task group, exactly like
-    # the drains.
-    # Skip ticker when empty: foreground bash owns the loop, so an empty registry stays empty.
+    # Decision 10 ticker: sweeps the background registry while THIS foreground call
+    # blocks the loop — the only coverage for a long QUIET command. Own
+    # CancelScope, cancelled right after proc.wait() (an uncancelled ticker would
+    # hold the task group open to the fail_after; cancelling the whole group would
+    # race the other pollers). Skipped when the registry is empty.
     has_bg = bool(ctx.background_processes)
     ticker_scope = anyio.CancelScope()
 
@@ -215,13 +152,35 @@ async def bash(
                 await anyio.sleep(1.0)
                 await _sweep_bg(ctx)
 
-    # §4: watch for a pause landing MID-COMMAND. On one, SIGKILL the child's
-    # group (the same wait-free single-shot kill the cap/timeout paths use) so
-    # proc.wait() returns, and flag the call to return the terminated-by-pause
-    # tombstone instead of a normal result. Runs in its own CancelScope,
-    # cancelled right after proc.wait() returns (same discipline as _bg_ticker).
-    # The poller only sets `paused` while proc.returncode is None (still
-    # running), so a completed command can never be tombstoned by a stray tick.
+    # Foreground own-cap check: the file-model analogue of the old combined-byte
+    # ceiling. On the ~1 s cadence, stat BOTH scratch files; if their COMBINED
+    # size crosses BG_STREAM_FILE_CAP_BYTES (read through _limits so tests can
+    # shrink it, matching _sweep_bg), SIGKILL the group (single-shot, wait-free,
+    # so proc.wait() returns) and flag `capped`. A cap-kill is cleanup, not a
+    # tool_killed signal — the result carries returncode 0. Own CancelScope,
+    # cancelled after proc.wait().
+    capped = False
+    capcheck_scope = anyio.CancelScope()
+
+    async def _own_cap_poller() -> None:
+        nonlocal capped
+        with capcheck_scope:
+            while True:
+                await anyio.sleep(_FG_CAP_POLL_S)
+                try:
+                    total = (os.stat(out_path).st_size
+                             + os.stat(err_path).st_size)
+                except OSError:
+                    continue
+                if total > _limits.BG_STREAM_FILE_CAP_BYTES:
+                    capped = True
+                    await kill_process_tree(proc, signal.SIGKILL)
+                    return
+
+    # §4: a pause landing MID-COMMAND -> SIGKILL the group so proc.wait() returns,
+    # and flag the call to return the terminated-by-pause tombstone. Own
+    # CancelScope, cancelled synchronously the instant proc.wait() returns so a
+    # pause flipping right after a natural completion cannot tombstone it.
     paused = False
     pause_scope = anyio.CancelScope()
 
@@ -231,9 +190,6 @@ async def bash(
         with pause_scope:
             while True:
                 await anyio.sleep(_PAUSE_POLL_S)
-                # proc.returncode is None => still running: a stray final tick
-                # after a natural completion (returncode already set) cannot
-                # tombstone a just-finished command.
                 if coordinator.should_pause and proc.returncode is None:
                     paused = True
                     await kill_process_tree(proc, signal.SIGKILL)
@@ -243,38 +199,68 @@ async def bash(
         try:
             with anyio.fail_after(_effective_foreground_timeout(timeout)):
                 async with anyio.create_task_group() as tg:
-                    tg.start_soon(_drain, proc.stdout, stdout_chunks)
-                    tg.start_soon(_drain, proc.stderr, stderr_chunks)
+                    tg.start_soon(_own_cap_poller)
                     if has_bg:
                         tg.start_soon(_bg_ticker)
                     if coordinator is not None:
                         tg.start_soon(_pause_poller)
                     await proc.wait()
+                    capcheck_scope.cancel()
                     if has_bg:
                         ticker_scope.cancel()
                     if coordinator is not None:
-                        # Cancel synchronously the instant proc.wait() returns:
-                        # a natural completion must stop the poller before its
-                        # next tick, so a pause flipping right after cannot set
-                        # `paused` on an already-finished command.
                         pause_scope.cancel()
         except TimeoutError:
-            # B.1: the call outran the wall clock. Kill the group, reap, and
-            # surface a timeout the agent can react to (NOT a normal result).
-            await kill_process_tree(proc, signal.SIGKILL)
-            with contextlib.suppress(Exception):
-                await proc.wait()
-            raise ToolAborted("timed-out") from None
+            # Deadline exceeded: PROMOTE, don't kill. Seed the counter, allocate a
+            # canonical bgN, and same-dir rename the fg-<uuid> scratch files to
+            # bgN.* — the child's open write fds stay valid (unchanged inode), so it
+            # keeps writing to the renamed paths. Canonical bgN naming is REQUIRED:
+            # resume counter-seeding scans stream filenames (_FILE_RE) to never
+            # re-alias a transcript-referenced id, and a promoted id is exactly such
+            # an id. Wrap the still-running proc in a BgProc and register it; the
+            # `finally` removes it from running_processes, so it is now managed
+            # solely through the background lifecycle.
+            _seed_counter(ctx)
+            bg_id = ctx.next_bg_id()
+            new_out = d / f"{bg_id}.out"
+            new_err = d / f"{bg_id}.err"
+            os.rename(out_path, new_out)
+            os.rename(err_path, new_err)
+            ctx.background_processes[bg_id] = BgProc(
+                id=bg_id, proc=proc, out_path=new_out, err_path=new_err,
+                command=command)
+            root = ctx.project_root.resolve()
+            deadline_s = _effective_foreground_timeout(timeout)
+            note = (
+                f"foreground command exceeded its {deadline_s:g} s deadline and was "
+                f'moved to the background; read it with bash_output("{bg_id}") and '
+                f'stop it with bash_kill("{bg_id}")')
+            return json.dumps({
+                "id": bg_id,
+                "pid": proc.pid,
+                "command": command,
+                "status": "running",
+                "note": note,
+                "out_path": os.path.relpath(new_out.resolve(), root),
+                "err_path": os.path.relpath(new_err.resolve(), root),
+            }, ensure_ascii=False)
     finally:
         with contextlib.suppress(ValueError):
             ctx.running_processes.remove(proc)
 
-    out_bytes = b"".join(stdout_chunks)
-    err_bytes = b"".join(stderr_chunks)
+    # Whole-file read (NOT bg.py's cursor-paged _read_page — that reader is for
+    # incremental background tailing). Bounded by the own-cap kill above. Then
+    # unlink the scratch files: a non-promoted foreground proc leaves nothing.
+    out_bytes = out_path.read_bytes()
+    err_bytes = err_path.read_bytes()
+    for p in (out_path, err_path):
+        with contextlib.suppress(OSError):
+            p.unlink()
     stdout = out_bytes.decode("utf-8", "replace")
     stderr = err_bytes.decode("utf-8", "replace")
     if overlay_setup_failed(stderr):
-        # Mount-setup failure: the command never ran; report it distinctly.
+        # Mount-setup failure: the command never ran; report it distinctly. An
+        # overlay-setup failure exits immediately, so it never reaches promotion.
         _emit_overlay_setup_warning(ctx, command)
         return json.dumps({
             "stdout": stdout,
@@ -286,11 +272,9 @@ async def bash(
         }, ensure_ascii=False)
     if paused:
         # A pause landed mid-command: the poller SIGKILL'd the group. Return the
-        # terminated-by-pause tombstone (status/kill_reason) — the same shape
-        # terminate_background_processes writes — so a resumed agent understands
-        # why its command died. returncode stays the real negative signal (an
-        # honest kill: unlike the cap path, this IS why the command died, so the
-        # provider's returncode<0 -> tool_killed heuristic firing is correct).
+        # terminated-by-pause tombstone (the same shape
+        # terminate_background_processes writes). returncode stays the real
+        # negative signal (an honest kill — unlike the cap path).
         result: dict[str, object] = {
             "stdout": stdout,
             "stderr": stderr,
@@ -301,9 +285,9 @@ async def bash(
         }
     else:
         # returncode 0 on a cap-kill — a cap-truncation is a NORMAL result; the
-        # SIGKILL we issued was cleanup and must NOT read as `tool_killed` (the
-        # provider keys that on returncode < 0; see anthropic.py:704).
-        returncode = 0 if counter.capped else (
+        # SIGKILL we issued was cleanup and must NOT read as tool_killed (the
+        # provider keys that on returncode < 0).
+        returncode = 0 if capped else (
             proc.returncode if proc.returncode is not None else -signal.SIGKILL)
         result = {
             "stdout": stdout,
@@ -313,11 +297,7 @@ async def bash(
     if len(out_bytes) + len(err_bytes) > BASH_OUTPUT_CAP_BYTES:
         # Over the 30 KB display cap: spill the FULL decoded output so the
         # truncated tail is recoverable with an ordinary read_file, then bound
-        # each displayed stream to the 30 KB head. When stderr is non-empty the
-        # spill file carries both tails under labeled sections; otherwise it is
-        # just the full stdout. The notice supersedes the old inline marker. This
-        # also covers the pause tombstone: a pause landing mid-flood must not
-        # return up to the 5 MB kill ceiling inline.
+        # each displayed stream to the 30 KB head. Covers the pause tombstone too.
         full = (f"=== stdout ===\n{stdout}\n=== stderr ===\n{stderr}"
                 if stderr else stdout)
         result["notice"] = spill_tool_output(

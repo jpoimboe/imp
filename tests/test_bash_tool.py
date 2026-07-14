@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import anyio
@@ -215,44 +216,85 @@ def test_bash_over_cap_spill_labels_stdout_and_stderr(tmp_path: Path) -> None:
     assert "OUT" in content and "ERR" in content
 
 
-def test_bash_caps_runaway_output(tmp_path: Path) -> None:
-    # A command that floods stdout past the 5 MB kill ceiling is killed AT the
-    # ceiling; the displayed stdout is the 30 KB head + a spill notice (the old
-    # inline marker is gone), and it is NOT surfaced as an interrupt.
+def test_bash_caps_runaway_output(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # AC 5: a foreground command whose COMBINED scratch-file size crosses the cap
+    # is cap-killed on the own-cap poll (both cap and cadence shrunk here) and
+    # returns a NORMAL result: returncode 0, the displayed stdout truncated to the
+    # 30 KB head (no inline marker), and a spill notice. The SIGKILL is cleanup,
+    # not a tool_killed signal. Reading the cap through the limits module is what
+    # lets this test shrink it (the old in-memory drain path ignored it).
+    import imp.agents.tools.bash as bash_mod
+    from imp.agents.tools import limits
+    monkeypatch.setattr(limits, "BG_STREAM_FILE_CAP_BYTES", 50_000)
+    monkeypatch.setattr(bash_mod, "_FG_CAP_POLL_S", 0.05)
     ctx = _ctx(tmp_path)
-    out = json.loads(_run_bash(ctx, {"command": "yes ABCDEFGHIJ"}))
+
+    async def go() -> dict:
+        with anyio.fail_after(10):
+            raw = await get_registry()["bash"].async_invoke(
+                ctx, {"command": "while true; do echo "
+                                 "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx; done"})
+            return json.loads(raw)
+
+    out = anyio.run(go)
+    assert out["returncode"] == 0                    # cap is a NORMAL result
+    assert len(out["stdout"]) == 30_000
     assert "[output truncated" not in out["stdout"]
     assert "notice" in out
     assert (tmp_path / "tool-results").exists()
-    assert len(out["stdout"]) == 30_000
-    assert out["returncode"] == 0                    # cap is a NORMAL result
     assert ctx.running_processes == []
 
 
-def test_bash_caps_runaway_stderr(tmp_path: Path) -> None:
-    # A stderr-dominant flood past the ceiling truncates the displayed stderr to
-    # the 30 KB head and emits a spill notice; no inline marker on either stream.
+def test_bash_caps_runaway_stderr(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # As above but the flood is on stderr: the combined file size still trips the
+    # cap, the displayed stderr is truncated to the 30 KB head, and returncode 0.
+    import imp.agents.tools.bash as bash_mod
+    from imp.agents.tools import limits
+    monkeypatch.setattr(limits, "BG_STREAM_FILE_CAP_BYTES", 50_000)
+    monkeypatch.setattr(bash_mod, "_FG_CAP_POLL_S", 0.05)
     ctx = _ctx(tmp_path)
-    out = json.loads(_run_bash(ctx, {"command": "yes ABCDEFGHIJ 1>&2"}))
+
+    async def go() -> dict:
+        with anyio.fail_after(10):
+            raw = await get_registry()["bash"].async_invoke(
+                ctx, {"command": "while true; do echo "
+                                 "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx 1>&2; done"})
+            return json.loads(raw)
+
+    out = anyio.run(go)
+    assert out["returncode"] == 0
+    assert len(out["stderr"]) == 30_000
     assert "[output truncated" not in out["stderr"]
-    assert "[output truncated" not in out["stdout"]
     assert "notice" in out
     assert (tmp_path / "tool-results").exists()
-    assert len(out["stderr"]) == 30_000
-    assert out["returncode"] == 0                    # cap is a NORMAL result
     assert ctx.running_processes == []
 
 
 def test_bash_default_foreground_timeout(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    # AC 3: with NO per-call timeout, the DEFAULT foreground deadline reaps a long
-    # command — monkeypatch the default tiny and assert ToolAborted('timed-out').
+    # AC 1: with NO per-call timeout, a command that outruns the DEFAULT foreground
+    # deadline is PROMOTED to a background task (not SIGKILL'd / ToolAborted).
+    # Monkeypatch the default tiny; assert the running-notice shape.
     import imp.agents.tools.bash as bash_mod
+    from imp.agents.tools.bg import terminate_background_processes
 
     monkeypatch.setattr(bash_mod, "BASH_FOREGROUND_TIMEOUT_S", 0.3)
     ctx = _ctx(tmp_path)
-    with pytest.raises(ToolAborted) as ei:
-        _run_bash(ctx, {"command": "sleep 30"})
-    assert ei.value.reason == "timed-out"
+
+    async def go() -> dict:
+        with anyio.fail_after(15):
+            out = json.loads(await get_registry()["bash"].async_invoke(
+                ctx, {"command": "sleep 30"}))
+            await terminate_background_processes(ctx)   # cleanup the promoted proc
+            return out
+
+    out = anyio.run(go)
+    assert out["id"] == "bg1"
+    assert out["status"] == "running"
+    assert "bash_output" in out["note"]
     assert ctx.running_processes == []
 
 
@@ -481,16 +523,6 @@ def test_effective_foreground_timeout_defaults_and_clamps() -> None:
     assert _effective_foreground_timeout(5000) == BASH_FOREGROUND_TIMEOUT_MAX_S
 
 
-def test_bash_timeout_param_enforced_foreground(tmp_path: Path) -> None:
-    # AC 3 & 4: a per-call `timeout` bounds a foreground command — sleep 30 under a
-    # 0.3 s timeout is SIGKILL'd and raises ToolAborted('timed-out'), not a result.
-    ctx = _ctx(tmp_path)
-    with pytest.raises(ToolAborted) as ei:
-        _run_bash(ctx, {"command": "sleep 30", "timeout": 0.3})
-    assert ei.value.reason == "timed-out"
-    assert ctx.running_processes == []
-
-
 def test_bash_schema_advertises_timeout_param() -> None:
     # AC 4: the tool the model sees exposes `timeout` (optional) and its
     # description states the positive-seconds / 600 s-cap contract.
@@ -544,3 +576,131 @@ def test_bash_foreground_cap_is_30kb_not_50kb(tmp_path: Path) -> None:
     spilled = list((tmp_path / "tool-results").iterdir())
     assert len(spilled) == 1
     assert len(spilled[0].read_bytes()) == 100_000   # FULL output recoverable
+
+
+def test_bash_foreground_stdin_is_devnull(tmp_path: Path) -> None:
+    # AC 4: foreground spawns with stdin=DEVNULL (via the shared spawn-to-files
+    # core), not the old pipe path's inherited stdin. Redirect this process's own
+    # fd 0 at a real file for the duration of the call so the assertion cannot
+    # pass vacuously when the runner's fd 0 is already /dev/null (headless CI): an
+    # inherited-stdin regression would surface that real file in the child's
+    # readlink and echo its bytes through `cat`, while DEVNULL keeps fd 0 at
+    # /dev/null and yields instant EOF.
+    stdin_file = tmp_path / "real_stdin"
+    stdin_file.write_text("stolen-stdin-marker\n")
+    saved_fd0 = os.dup(0)
+    with open(stdin_file, "rb") as f:
+        os.dup2(f.fileno(), 0)
+    try:
+        out = json.loads(_run_bash(_ctx(tmp_path),
+                                   {"command": "readlink /proc/self/fd/0; cat"}))
+    finally:
+        os.dup2(saved_fd0, 0)
+        os.close(saved_fd0)
+    assert out["returncode"] == 0
+    # readlink prints /dev/null (not the redirected real file), and `cat` draining
+    # a DEVNULL stdin hits instant EOF and echoes none of the file's bytes.
+    assert out["stdout"].strip() == "/dev/null"
+    assert "stolen-stdin-marker" not in out["stdout"]
+
+
+def test_bash_foreground_unlinks_scratch_files(tmp_path: Path) -> None:
+    # A non-promoted foreground command reads its scratch files whole then unlinks
+    # them: no fg-<uuid> files are left behind in the per-agent bg dir.
+    from imp.agents.tools.bg import _bg_dir
+    ctx = _ctx(tmp_path)
+    out = json.loads(_run_bash(ctx, {"command": "echo hi"}))
+    assert out["returncode"] == 0
+    assert "hi" in out["stdout"]
+    assert list(_bg_dir(ctx).glob("fg-*")) == []
+
+
+def test_bash_foreground_timeout_promotes_to_background(tmp_path: Path) -> None:
+    # AC 1 & 2: a foreground command that outruns its (per-call) deadline is NOT
+    # aborted — it is promoted to a managed background task. The result carries a
+    # fresh bgN id, an int pid, status "running", the canonical stream-file paths,
+    # and a note naming bash_output/bash_kill; the proc lands in
+    # background_processes and leaves running_processes.
+    from imp.agents.tools.bg import terminate_background_processes
+    ctx = _ctx(tmp_path)
+
+    async def go() -> dict:
+        with anyio.fail_after(15):
+            out = json.loads(await get_registry()["bash"].async_invoke(
+                ctx, {"command": "sleep 30", "timeout": 0.3}))
+            await terminate_background_processes(ctx)
+            return out
+
+    out = anyio.run(go)
+    assert out["id"] == "bg1"
+    assert isinstance(out["pid"], int)
+    assert out["status"] == "running"
+    assert "bash_output" in out["note"]
+    assert "bash_kill" in out["note"]
+    assert out["out_path"].endswith("bg1.out")
+    assert out["err_path"].endswith("bg1.err")
+    assert ctx.running_processes == []
+    assert "bg1" in ctx.background_processes
+
+
+def test_bash_promotion_preserves_pre_promotion_output(tmp_path: Path) -> None:
+    # AC 3: output produced BEFORE promotion is preserved in the renamed bgN file
+    # and returned by the first bash_output("bg1") (read from cursor 0); the
+    # promoted files are canonically named bg1.out/bg1.err and the fg-<uuid>
+    # scratch names are renamed away (so resume seeding cannot re-alias the id).
+    from imp.agents.tools.bg import _bg_dir, terminate_background_processes
+    ctx = _ctx(tmp_path)
+
+    async def go() -> tuple:
+        with anyio.fail_after(15):
+            promo = json.loads(await get_registry()["bash"].async_invoke(
+                ctx, {"command": "echo BEFORE_PROMO; sleep 30", "timeout": 1.0}))
+            snap = json.loads(await get_registry()["bash_output"].async_invoke(
+                ctx, {"id": "bg1"}))
+            files = sorted(p.name for p in _bg_dir(ctx).glob("bg1.*"))
+            leftover_fg = list(_bg_dir(ctx).glob("fg-*"))
+            await terminate_background_processes(ctx)
+            return promo, snap, files, leftover_fg
+
+    promo, snap, files, leftover_fg = anyio.run(go)
+    assert promo["id"] == "bg1"
+    assert "BEFORE_PROMO" in snap["stdout"]
+    assert files == ["bg1.err", "bg1.out"]
+    assert leftover_fg == []
+
+
+def test_bash_description_describes_promotion_not_reaping() -> None:
+    # AC 10: the tool the model sees no longer says a foreground command is
+    # "reaped after 120 s"; it describes promotion to a background task
+    # readable/killable via bash_output/bash_kill, and still states the
+    # 120 s default / 600 s cap contract.
+    desc = get_registry()["bash"].description
+    assert "reaped" not in desc
+    assert "promoted to a background task" in desc
+    assert "bash_output" in desc and "bash_kill" in desc
+    assert "120" in desc and "600" in desc
+
+
+def test_bash_promoted_proc_is_killable_and_torn_down(tmp_path: Path) -> None:
+    # AC 2 & 9: a promoted proc is managed exactly like an explicitly-backgrounded
+    # one — bash_kill("bg1") stops it (agent kill) and
+    # terminate_background_processes persists a tombstone for it.
+    from imp.agents.tools.bg import (
+        _tombstone_path,
+        terminate_background_processes,
+    )
+    ctx = _ctx(tmp_path)
+
+    async def go() -> dict:
+        with anyio.fail_after(15):
+            json.loads(await get_registry()["bash"].async_invoke(
+                ctx, {"command": "sleep 30", "timeout": 0.3}))
+            killed = json.loads(await get_registry()["bash_kill"].async_invoke(
+                ctx, {"id": "bg1"}))
+            await terminate_background_processes(ctx)
+            return killed
+
+    killed = anyio.run(go)
+    assert killed["status"] == "killed"
+    assert killed["kill_reason"] == "agent"
+    assert _tombstone_path(ctx).exists()

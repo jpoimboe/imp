@@ -14,6 +14,14 @@ def test_tool_reference_loads_via_internal_path_without_frontmatter() -> None:
     assert not body.lstrip().startswith("---"), "skill must carry no frontmatter"
 
 
+def test_tool_reference_describes_bash_promotion() -> None:
+    body = load_internal_skill(_skills_dir(), "imp-tool-reference")
+    # AC 10: the skill's bash section no longer says a foreground command is
+    # "reaped after 120 s" — it describes promotion to a background task.
+    assert "reaped after 120" not in body
+    assert "promoted to a background task" in body
+
+
 def test_tool_reference_holds_relocated_reference_detail() -> None:
     body = load_internal_skill(_skills_dir(), "imp-tool-reference")
     # One sentinel per tool whose description relocated detail here (AC 3):
