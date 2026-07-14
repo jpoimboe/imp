@@ -189,9 +189,9 @@ def test_memory_teaches_the_in_depth_model() -> None:
 def test_memory_teaches_the_authoring_affordance() -> None:
     body = load_internal_skill(_skills_dir(), "imp-memory")
     assert "## Building up memory with imp" in body
-    # The affordance names the interactive gates and the commit_memory tool,
-    # and states imp never auto-writes memory.
-    assert "the `commit_memory` tool" in body
+    # The affordance names the interactive gates and the background memory
+    # quest, and states imp never auto-writes memory.
+    assert "background `memory` quest" in body
     assert "never auto-writes memory" in body
     assert "threshold" in body
     assert "finalize" in body
