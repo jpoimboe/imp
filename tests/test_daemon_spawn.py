@@ -76,22 +76,3 @@ def test_start_quest_spawns_autonomous_resume(
     assert "IMP_REMOTE_AUTOSUBSCRIBE" not in calls[0]["env"]
 
 
-def test_abandon_quest_runs_imp_abandon_and_returns_rc(
-    monkeypatch: Any, tmp_path: Path,
-) -> None:
-    captured: dict[str, Any] = {}
-
-    def fake(argv: list[str], env: dict[str, str], cwd: Path) -> int:
-        captured["argv"] = argv
-        captured["env"] = env
-        captured["cwd"] = cwd
-        return 2
-
-    monkeypatch.setattr(spawn, "_run_foreground", fake)
-    rc = spawn.abandon_quest(tmp_path, "2026-06-13-abc")
-    assert rc == 2
-    assert captured["argv"] == [
-        sys.executable, "-m", "imp", "abandon", "2026-06-13-abc"]
-    assert captured["cwd"] == tmp_path
-    assert "IMP_REMOTE_CONTROL_SOCK" not in captured["env"]
-

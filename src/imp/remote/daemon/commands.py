@@ -24,11 +24,6 @@ class Create:
 
 
 @dataclass(frozen=True)
-class Abandon:
-    quest_id: str
-
-
-@dataclass(frozen=True)
 class ListQuests:
     pass
 
@@ -77,15 +72,12 @@ class ListResult:
 
 
 Command = (
-    Reply | Create | Abandon | ListQuests | Help | Notice |
+    Reply | Create | ListQuests | Help | Notice |
     Subscribe | Unsubscribe | Replay | Resume | Alerts)
 Response = ListResult | Notice
 
 NEW_USAGE = "Usage: /new <what to build>"
 RESUME_USAGE = "Usage: /resume <id or search text>"
-ABANDON_USAGE = (
-    "To abandon a quest, reply to one of its messages or use @handle "
-    "(e.g. /abandon @ab12cd).")
 UNSUBSCRIBE_USAGE = (
     "To unsubscribe, reply to one of its messages or use @handle "
     "(e.g. /unsubscribe @ab12cd).")
@@ -101,7 +93,6 @@ HELP_TEXT = (
     "/subscribe @handle — follow a quest (streams from now; /replay for history)\n"
     "/unsubscribe (reply or @handle) — stop all messages for a quest\n"
     "/replay [n] (reply or @handle) — re-send last n messages\n"
-    "/abandon (reply or @handle) — stop a quest\n"
     "/resume <id or text> — rehydrate and continue a saved/archived conversation\n"
     "/alerts on|off — alert on every quest, not just the ones you follow (default: on)\n"
     "/help — this message\n"
@@ -142,9 +133,6 @@ def parse(
             return Help()
         if verb == "new":
             return Create(rest) if rest else Notice(NEW_USAGE)
-        if verb == "abandon":
-            quest_id = _resolve_target(rest, reply_to, resolve_lookup, "abandon")
-            return Abandon(quest_id) if quest_id is not None else Notice(ABANDON_USAGE)
         if verb in ("subscribe", "sub"):
             quest_id = (
                 resolve_handle(rest) if resolve_handle is not None

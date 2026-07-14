@@ -1,13 +1,11 @@
 from __future__ import annotations
 
 from imp.remote.daemon.commands import (
-    ABANDON_USAGE,
     HELP_TEXT,
     NEW_USAGE,
     RESUME_USAGE,
     ROUTE_HINT,
     UNKNOWN_COMMAND,
-    Abandon,
     Alerts,
     Create,
     Help,
@@ -60,20 +58,12 @@ def test_slash_new_empty_is_a_usage_notice() -> None:
     assert parse("/new   ", None, fake_resolve) == Notice(NEW_USAGE)
 
 
-def test_slash_abandon_reply_to_resolves_the_target() -> None:
-    assert parse("/abandon", 42, fake_resolve) == Abandon(A)
+def test_slash_abandon_is_no_longer_recognized() -> None:
+    assert parse("/abandon @good", None, fake_resolve) == Notice(UNKNOWN_COMMAND)
 
 
-def test_slash_abandon_at_handle_resolves_the_target() -> None:
-    assert parse("/abandon @good", None, fake_resolve) == Abandon(B)
-
-
-def test_slash_abandon_untargeted_is_a_usage_notice() -> None:
-    assert parse("/abandon", None, fake_resolve) == Notice(ABANDON_USAGE)
-
-
-def test_slash_abandon_unresolvable_handle_is_a_usage_notice() -> None:
-    assert parse("/abandon @nope", None, fake_resolve) == Notice(ABANDON_USAGE)
+def test_help_text_no_longer_mentions_abandon() -> None:
+    assert "/abandon" not in HELP_TEXT
 
 
 def test_slash_ls_is_no_longer_an_alias_for_listquests() -> None:

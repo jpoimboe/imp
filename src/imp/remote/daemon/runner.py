@@ -26,7 +26,6 @@ from imp.remote.daemon.commands import (
     ALERTS_ON_REPLY,
     HELP_TEXT,
     ROUTE_HINT,
-    Abandon,
     Alerts,
     Command,
     Create,
@@ -334,14 +333,6 @@ async def _handle_command(
     elif isinstance(command, Create):
         control.create(command.prompt)
         responses.put(Notice("Spawning a new quest… watch for its first question"))
-    elif isinstance(command, Abandon):
-        handle = handle_for(command.quest_id)
-        rc = await anyio.to_thread.run_sync(control.abandon, command.quest_id)
-        if rc == 0:
-            responses.put(Notice(f"Abandoned @{handle}."))
-        else:
-            responses.put(Notice(
-                f"@{handle} is still running — stop it first, then /abandon again."))
     elif isinstance(command, ListQuests):
         try:
             quests = await anyio.to_thread.run_sync(control.list_quests)
@@ -427,7 +418,6 @@ async def run_daemon(
     ] = _make_telegram_adapter,
     deliver: Callable[[str, str], Awaitable[DeliveryOutcome]] | None = None,
     create: Callable[[str], None] | None = None,
-    abandon: Callable[[str], int] | None = None,
     list_quests: Callable[[], list[discover.QuestInfo]] | None = None,
     resident_ids: Callable[[], frozenset[str]] | None = None,
     resume: Callable[[str], str] | None = None,
@@ -439,7 +429,6 @@ async def run_daemon(
     shutdown = anyio.Event() if shutdown is None else shutdown
     deliver = deliver or (lambda cid, text: deliver_to_session(control_root, cid, text))
     create = create or (lambda prompt: spawn.create_quest(control_root, prompt))
-    abandon = abandon or (lambda cid: spawn.abandon_quest(control_root, cid))
     list_quests = list_quests or (lambda: discover.list_quests(control_root))
     resident_ids = resident_ids or (
         lambda: frozenset(resident_session_ids(control_root)))
@@ -468,7 +457,7 @@ async def run_daemon(
         subscriptions=subscriptions)
     control = ControlPlane(
         deliver=deliver, create=create,
-        abandon=abandon, list_quests=list_quests,
+        list_quests=list_quests,
         resident_ids=resident_ids,
         subscriptions=subscriptions,
         snapshot=lambda cid: discover.snapshot(control_root, cid),

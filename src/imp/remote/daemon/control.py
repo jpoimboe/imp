@@ -1,4 +1,4 @@
-"""Transport-agnostic control plane: list / reply / create / abandon, routed by quest_id."""
+"""Transport-agnostic control plane: list / reply / create, routed by quest_id."""
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
@@ -15,7 +15,6 @@ class ControlPlane:
         *,
         deliver: Callable[[str, str], Awaitable[DeliveryOutcome]],
         create: Callable[[str], None],
-        abandon: Callable[[str], int],
         list_quests: Callable[[], list[QuestInfo]],
         subscriptions: Subscriptions,
         snapshot: Callable[[str], tuple[str, str, str] | None],
@@ -26,7 +25,6 @@ class ControlPlane:
     ) -> None:
         self._deliver = deliver
         self._create = create
-        self._abandon = abandon
         self._list_fn = list_quests
         self._resident_ids = resident_ids
         self.subscriptions = subscriptions
@@ -55,9 +53,6 @@ class ControlPlane:
 
     def create(self, prompt: str) -> None:
         self._create(prompt)
-
-    def abandon(self, quest_id: str) -> int:
-        return self._abandon(quest_id)
 
     def list_quests(self) -> list[QuestInfo]:
         return self._list_fn()

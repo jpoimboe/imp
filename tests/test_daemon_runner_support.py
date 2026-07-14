@@ -365,7 +365,6 @@ async def test_reply_to_unknown_change_surfaces_a_user_facing_notice() -> None:
     control = ControlPlane(
         deliver=deliver,
         create=lambda _p: None,
-        abandon=lambda _c: 0,
         list_quests=lambda: [],
         subscriptions=Subscriptions(),
         snapshot=lambda _c: None,
@@ -391,7 +390,6 @@ async def test_resume_relays_the_control_message_as_a_notice() -> None:
     control = ControlPlane(
         deliver=deliver,
         create=lambda _p: None,
-        abandon=lambda _c: 0,
         list_quests=lambda: [],
         subscriptions=Subscriptions(),
         snapshot=lambda _c: None,
