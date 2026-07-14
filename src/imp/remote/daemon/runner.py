@@ -26,7 +26,6 @@ from imp.remote.daemon.commands import (
     ALERTS_ON_REPLY,
     HELP_TEXT,
     ROUTE_HINT,
-    SAVE_USAGE,
     Abandon,
     Alerts,
     Command,
@@ -39,7 +38,6 @@ from imp.remote.daemon.commands import (
     Reply,
     Response,
     Resume,
-    Save,
     Subscribe,
     Unsubscribe,
 )
@@ -55,7 +53,6 @@ from imp.remote.daemon.telegram_adapter import (
     handle_for,
 )
 from imp.remote.session.reply import DeliveryOutcome, deliver_session_reply
-from imp.remote.session.save import save_quest as _save_quest
 
 _log = logging.getLogger("imp.daemon")
 
@@ -356,20 +353,6 @@ async def _handle_command(
     elif isinstance(command, Resume):
         message = await anyio.to_thread.run_sync(control.resume, command.token)
         responses.put(Notice(message))
-    elif isinstance(command, Save):
-        quest_id = command.quest_id
-        if quest_id is None:
-            responses.put(Notice(SAVE_USAGE))
-        else:
-            try:
-                await anyio.to_thread.run_sync(control.save, quest_id)
-            except (OSError, TimeoutError):
-                responses.put(Notice(
-                    f"Couldn't reach the session for @{handle_for(quest_id)} "
-                    "to save it — it may still be running."))
-            else:
-                responses.put(Notice(
-                    f"Saved @{handle_for(quest_id)} to your backlog."))
     elif isinstance(command, Alerts):
         if command.on is None:
             responses.put(Notice(
@@ -448,7 +431,6 @@ async def run_daemon(
     list_quests: Callable[[], list[discover.QuestInfo]] | None = None,
     resident_ids: Callable[[], frozenset[str]] | None = None,
     resume: Callable[[str], str] | None = None,
-    save: Callable[[str], None] | None = None,
     install_signals: bool = True,
     shutdown: anyio.Event | None = None,
 ) -> None:
@@ -462,8 +444,6 @@ async def run_daemon(
     resident_ids = resident_ids or (
         lambda: frozenset(resident_session_ids(control_root)))
     resume = resume or (lambda token: spawn.resume_quest(control_root, token))
-    save = save or (lambda cid: _save_quest(control_root, cid))
-
     def is_known_quest(cid: str) -> bool:
         return quest_home_exists(control_root, cid)
 
@@ -494,7 +474,7 @@ async def run_daemon(
         snapshot=lambda cid: discover.snapshot(control_root, cid),
         recent_narrative=lambda cid, n: discover.recent_narrative(
             control_root, cid, n),
-        resume=resume, save=save,
+        resume=resume,
         full_history=lambda cid: discover.full_history(control_root, cid))
     adapter = make_adapter(env, inbound.put, subscriptions, alert_all, is_known_quest)
 

@@ -16,7 +16,6 @@ from imp.remote.daemon.commands import (
     Notice,
     Reply,
     Resume,
-    Save,
     parse,
 )
 from imp.remote.daemon.discover import QuestInfo
@@ -120,16 +119,12 @@ def test_slash_resume_empty_is_a_usage_notice() -> None:
     assert parse("/resume   ", None, fake_resolve) == Notice(RESUME_USAGE)
 
 
-def test_slash_save_reply_to_resolves_the_target() -> None:
-    assert parse("/save", 42, fake_resolve) == Save(A)
+def test_slash_save_is_no_longer_recognized() -> None:
+    assert parse("/save @good", None, fake_resolve) == Notice(UNKNOWN_COMMAND)
 
 
-def test_slash_save_at_handle_resolves_the_target() -> None:
-    assert parse("/save @good", None, fake_resolve) == Save(B)
-
-
-def test_slash_save_untargeted_carries_no_quest_id() -> None:
-    assert parse("/save", None, fake_resolve) == Save(None)
+def test_help_text_no_longer_mentions_save() -> None:
+    assert "/save" not in HELP_TEXT
 
 
 def test_listresult_defaults_resident_to_empty_frozenset() -> None:

@@ -66,11 +66,6 @@ class Resume:
 
 
 @dataclass(frozen=True)
-class Save:
-    quest_id: str | None
-
-
-@dataclass(frozen=True)
 class Alerts:
     on: bool | None
 
@@ -83,14 +78,11 @@ class ListResult:
 
 Command = (
     Reply | Create | Abandon | ListQuests | Help | Notice |
-    Subscribe | Unsubscribe | Replay | Resume | Save | Alerts)
+    Subscribe | Unsubscribe | Replay | Resume | Alerts)
 Response = ListResult | Notice
 
 NEW_USAGE = "Usage: /new <what to build>"
 RESUME_USAGE = "Usage: /resume <id or search text>"
-SAVE_USAGE = (
-    "To save a conversation, reply to one of its messages or use @handle "
-    "(e.g. /save @ab12cd).")
 ABANDON_USAGE = (
     "To abandon a quest, reply to one of its messages or use @handle "
     "(e.g. /abandon @ab12cd).")
@@ -111,7 +103,6 @@ HELP_TEXT = (
     "/replay [n] (reply or @handle) — re-send last n messages\n"
     "/abandon (reply or @handle) — stop a quest\n"
     "/resume <id or text> — rehydrate and continue a saved/archived conversation\n"
-    "/save (reply or @handle) — save a conversation to your backlog\n"
     "/alerts on|off — alert on every quest, not just the ones you follow (default: on)\n"
     "/help — this message\n"
     "Reply to a quest's message (or @handle) to answer it.")
@@ -170,8 +161,6 @@ def parse(
             return Replay(quest_id, n)
         if verb == "resume":
             return Resume(rest) if rest else Notice(RESUME_USAGE)
-        if verb == "save":
-            return Save(_resolve_target(rest, reply_to, resolve_lookup, "save"))
         if verb == "alerts":
             arg = rest.lower()
             if arg == "on":

@@ -21,7 +21,6 @@ class ControlPlane:
         snapshot: Callable[[str], tuple[str, str, str] | None],
         recent_narrative: Callable[[str, int], list[dict[str, Any]]],
         resume: Callable[[str], str] | None = None,
-        save: Callable[[str], None] | None = None,
         full_history: Callable[[str], list[dict[str, Any]]] | None = None,
         resident_ids: Callable[[], frozenset[str]] | None = None,
     ) -> None:
@@ -34,7 +33,6 @@ class ControlPlane:
         self._snapshot = snapshot
         self._recent_narrative = recent_narrative
         self._resume = resume
-        self._save = save
         self._full_history = full_history
 
     def snapshot(self, quest_id: str) -> tuple[str, str, str] | None:
@@ -46,10 +44,6 @@ class ControlPlane:
     def resume(self, token: str) -> str:
         assert self._resume is not None  # run_daemon always wires it
         return self._resume(token)
-
-    def save(self, quest_id: str) -> None:
-        assert self._save is not None  # run_daemon always wires it
-        self._save(quest_id)
 
     def full_history(self, quest_id: str) -> list[dict[str, Any]]:
         assert self._full_history is not None  # run_daemon always wires it
