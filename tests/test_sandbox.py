@@ -1133,8 +1133,8 @@ def test_resolve_policy_draft_change_masks_git_refs_and_reexposes_imp(tmp_path):
     # The draft/degenerate case (worktree IS the
     # control root — the threshold concierge and its non-isolated explorer/
     # researcher subagents) now gets the SAME ref-mask as a real worktree, so a
-    # raw `git commit` from bash cannot bypass commit_memory's lock. Only
-    # refs/heads/imp stays writable.
+    # raw `git commit` from bash cannot bypass the draft concierge's read-only
+    # contract with the project tree. Only refs/heads/imp stays writable.
     control, _wt = _layout(tmp_path)
     git = control / ".git"
     (git / "refs" / "heads").mkdir(parents=True)
