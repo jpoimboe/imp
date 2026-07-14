@@ -80,3 +80,18 @@ def test_completed_rows_from_archive(tmp_path: Path) -> None:
 def test_completed_rows_empty_archive(tmp_path: Path) -> None:
     _seed_control(tmp_path)
     assert make_store(tmp_path).completed_rows() == []
+
+
+def test_backlog_readiness_blocked_then_ready(tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+    Quest.create(tmp_path, title="Dep", quest_id="depq", base_branch="main")
+    store = make_store(tmp_path)
+
+    r = store.backlog_readiness(["depq"])
+    assert r.ready is False
+    assert r.blocked_on == ("depq",)
+
+    _archive(tmp_path, "depq")
+    r2 = store.backlog_readiness(["depq"])
+    assert r2.ready is True
+    assert r2.blocked_on == ()

@@ -50,7 +50,7 @@ from imp.cli.session_run import (
 )
 from imp.cli.signals import install_process_group, prompt_sigint_guard
 from imp.cli.slash import ask_line_with_slash
-from imp.cli.store import CompletedRow, make_store
+from imp.cli.store import make_store
 from imp.cli.terminal_title import TerminalTitle
 from imp.diagnostics import install_stack_dumper
 from imp.engine import backlog, worktree
@@ -1115,7 +1115,8 @@ def _warn_if_blocked(quest: Quest) -> None:
         deps = json.loads((quest.quest_dir / "quest.json").read_bytes()).get("depends_on", [])
     except (FileNotFoundError, json.JSONDecodeError):
         return
-    ready, unmerged = backlog.readiness(quest.control_root, deps)
+    r = make_store(quest.control_root).backlog_readiness(deps)
+    ready, unmerged = r.ready, list(r.blocked_on)
     if not ready:
         print(f"imp: backlog quest {quest.id} is blocked on unmerged dep(s): "
               f"{', '.join(unmerged)}; starting anyway.", file=sys.stderr)
@@ -1536,7 +1537,8 @@ def _unstarted_backlog_meta(control: Path, quest_id: str) -> dict[str, Any] | No
 
 
 def _backlog_card(meta: dict[str, Any], control: Path, *, now: datetime) -> list[str]:
-    ready, unmerged = backlog.readiness(control, meta.get("depends_on", []))
+    r = make_store(control).backlog_readiness(meta.get("depends_on", []))
+    ready, unmerged = r.ready, list(r.blocked_on)
     readiness = "ready" if ready else f"blocked on {', '.join(unmerged)}"
     created = meta.get("created_at")
     lines = [
@@ -1636,7 +1638,8 @@ def _quest_json(control: Path, quest_id: str) -> dict[str, Any] | None:
 
 
 def _backlog_json(meta: dict[str, Any], control: Path) -> dict[str, Any]:
-    ready, unmerged = backlog.readiness(control, meta.get("depends_on", []))
+    r = make_store(control).backlog_readiness(meta.get("depends_on", []))
+    ready, unmerged = r.ready, list(r.blocked_on)
     body = meta.get("seed_opening") or ""
     title = meta.get("title") or ""
     if title and (body == title or body.startswith(title + "\n")):
@@ -2924,7 +2927,7 @@ def _backlog_rows(control: Path, scanned: list[_HomeScan] | None = None) -> list
                                 lock_live=lambda: lock_is_live(cdir / "lock")):  # noqa: B023
             continue  # materialized / draft-origin / conversed / lock-live -> Active
         origin = meta.get("origin", "draft")
-        ready, _unmerged = backlog.readiness(control, meta.get("depends_on", []))
+        ready = make_store(control).backlog_readiness(meta.get("depends_on", [])).ready
         created = meta.get("created_at", "")
         blocked = "" if ready else "blocked"
         rows.append((h.quest_id, origin, blocked, h.last_iso,
