@@ -406,3 +406,77 @@ def test_cmd_config_explain_trailing_blank_on_tty(
     assert rc == 0
     assert isinstance(captured["out"], io.StringIO)
     assert capsys.readouterr().out == "explain high:\n  opus\n\n"
+
+
+def test_abandon_already_gone_trailing_blank_on_tty(
+    tmp_path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    import imp.cli.main as m
+    from tests.conftest import _seed_control
+
+    _seed_control(tmp_path)
+    monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
+    rc = m._abandon(tmp_path, "ghost")
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert out == "quest ghost already gone; ensured branch imp/ghost is removed.\n\n"
+
+
+def test_record_idea_trailing_blank_on_tty(
+    tmp_path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    import argparse
+
+    import imp.cli.main as m
+    from tests.conftest import _seed_control
+
+    _seed_control(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
+    rc = m._record_idea(
+        argparse.Namespace(idea="Wire OAuth", opening=None, depends_on=None,
+                           title=None, workflow=None),
+        tmp_path, "main")
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert out.endswith("`)\n\n")        # confirmation line + exactly one blank
+    assert not out.endswith("\n\n\n")
+
+
+def test_cmd_init_appends_trailing_blank_on_tty(
+    tmp_path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    import argparse
+
+    import imp.cli.main as m
+
+    monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
+    monkeypatch.setattr(m, "_project_root", lambda: tmp_path)
+
+    def fake_run_init(project, *, input_fn, output_fn):
+        output_fn("Created:")
+        output_fn("  imp/project.yaml")
+
+    monkeypatch.setattr(m, "run_init", fake_run_init)
+    rc = m._cmd_init(argparse.Namespace())
+    assert rc == 0
+    assert capsys.readouterr().out == "Created:\n  imp/project.yaml\n\n"
+
+
+def test_cmd_init_unchanged_when_piped(
+    tmp_path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    import argparse
+
+    import imp.cli.main as m
+
+    monkeypatch.setattr(sys.stdout, "isatty", lambda: False)
+    monkeypatch.setattr(m, "_project_root", lambda: tmp_path)
+
+    def fake_run_init(project, *, input_fn, output_fn):
+        output_fn("Created:")
+
+    monkeypatch.setattr(m, "run_init", fake_run_init)
+    rc = m._cmd_init(argparse.Namespace())
+    assert rc == 0
+    assert capsys.readouterr().out == "Created:\n"

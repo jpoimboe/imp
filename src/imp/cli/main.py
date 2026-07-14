@@ -660,6 +660,8 @@ def _cmd_init(args: argparse.Namespace) -> int:
     except KeyboardInterrupt:
         print("\nimp: init cancelled", file=sys.stderr)
         return 130
+    if sys.stdout.isatty():
+        print()
     return 0
 
 
@@ -818,8 +820,8 @@ def _record_idea(args: argparse.Namespace, control: Path, base: str) -> int:
     except (LoadError, LoadErrors) as e:
         print(f"imp: {e}", file=sys.stderr)
         return 2
-    print(f"imp: recorded backlog quest {quest_id} "
-          f"(start it with `imp resume {quest_id}`)")
+    _emit_human([f"imp: recorded backlog quest {quest_id} "
+                 f"(start it with `imp resume {quest_id}`)"])
     return 0
 
 
@@ -2678,7 +2680,7 @@ def _abandon(control: Path, quest_id: str) -> int:
         # home directory is absent (already fully torn down, or never existed).
         # Idempotent teardown — reap a possibly-orphaned branch and exit 0.
         worktree.delete_branch(control, quest_id)
-        print(f"quest {quest_id} already gone; ensured branch imp/{quest_id} is removed.")
+        _emit_human([f"quest {quest_id} already gone; ensured branch imp/{quest_id} is removed."])
         return 0
 
     token = quest.id
@@ -2688,7 +2690,7 @@ def _abandon(control: Path, quest_id: str) -> int:
         except OSError:
             pass  # daemon gone, wedged, or startup-window hang (TimeoutError ⊂ OSError)
         else:
-            print(f"Abandoned {token}.")
+            _emit_human([f"Abandoned {token}."])
             return 0
     try:
         tear_down_quest(quest)
@@ -2696,7 +2698,7 @@ def _abandon(control: Path, quest_id: str) -> int:
         print(f"imp: quest {quest_id} is running (pid {e.held_by_pid or '?'}); "
               f"stop it before abandoning", file=sys.stderr)
         return 2
-    print(f"Abandoned {token}.")
+    _emit_human([f"Abandoned {token}."])
     return 0
 
 
