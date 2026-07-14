@@ -99,7 +99,7 @@ def test_print_leave_disposition_archive_is_lock_free(
     assert (tmp_path / ".imp" / "quests" / "fast1").exists()
     assert record.read_record(records_root(tmp_path), "fast1") is None
     out = capsys.readouterr().out
-    assert "· conversation saved" in out
+    assert "· shelved" in out
     assert "resume: imp resume fast1 — or find it later with imp search" in out
 
 

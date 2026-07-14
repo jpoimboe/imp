@@ -532,7 +532,7 @@ def _print_leave_disposition(
         return 0
     if disposition == "archive":
         print()
-        print(_status_spine(quest.id, quest.title, "conversation saved", "wordmark",
+        print(_status_spine(quest.id, quest.title, "shelved", "wordmark",
                             color=color))
         print(_resume_line(quest.id, " — or find it later with imp search"))
         return 0
@@ -3638,11 +3638,11 @@ def _build_parser() -> argparse.ArgumentParser:
         description=(
             "With no argument, an overview of your quests — in-flight, the "
             "backlog, and every merged quest. -a/--all also includes "
-            "abandoned/left quests (the block is then labelled `history`)."),
+            "abandoned/shelved quests (the block is then labelled `history`)."),
     )
     p_list.add_argument(
         "-a", "--all", action="store_true",
-        help="Also include abandoned/left quests "
+        help="Also include abandoned/shelved quests "
              "(the block is then labelled `history`).")
     p_list.add_argument(
         "--active", action="store_true",
@@ -3724,7 +3724,7 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Search shelved conversations.")
     p_search.add_argument(
         "--archived", action="store_true",
-        help="Search archived (merged, abandoned, left) quests.")
+        help="Search archived (merged, abandoned, shelved) quests.")
     p_search.add_argument(
         "--merged-after", metavar="COMMIT", default=None,
         help="Keep only merged quests whose merge landed after COMMIT "
