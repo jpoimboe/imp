@@ -480,3 +480,12 @@ def test_cmd_init_unchanged_when_piped(
     rc = m._cmd_init(argparse.Namespace())
     assert rc == 0
     assert capsys.readouterr().out == "Created:\n"
+
+
+def test_conventions_doc_records_trailing_blank_rule() -> None:
+    from pathlib import Path
+
+    text = Path("docs/imp-conventions.md").read_text()
+    assert "trailing blank line" in text
+    assert "pipes" in text or "redirect" in text
+    assert "machine" in text or "--json" in text
