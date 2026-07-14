@@ -317,6 +317,35 @@ def test_cmd_events_backlog_selection_prints_friendly_line_and_returns_0(
 
 
 @pytest.mark.anyio
+async def test_events_ambiguous_empty_uses_log_picker_message(
+    monkeypatch, tmp_path: Path, capsys,
+) -> None:
+    # AC: the events ambiguous-match empty-state uses the log/events message
+    # (_log_picker_empty), not "No quests to show." When every match's row is
+    # unreadable the row list is empty, so on_empty fires.
+    monkeypatch.setattr(m, "_row_for_id", lambda c, cid: None)
+    rc = await m._pick_events_matches(
+        tmp_path, ["2026-06-10-aa", "2026-06-11-bb"])
+    out = capsys.readouterr().out
+    assert rc == 2
+    assert "No quests yet — start one with imp new" in out
+    assert "No quests to show." not in out
+
+
+@pytest.mark.anyio
+async def test_show_ambiguous_empty_keeps_show_message(
+    monkeypatch, tmp_path: Path, capsys,
+) -> None:
+    # Guard: the show ambiguous-match empty-state is unchanged (_show_picker_empty).
+    monkeypatch.setattr(m, "_row_for_id", lambda c, cid: None)
+    rc = await m._pick_show_matches(
+        tmp_path, ["2026-06-10-aa", "2026-06-11-bb"])
+    out = capsys.readouterr().out
+    assert rc == 2
+    assert "No quests to show." in out
+
+
+@pytest.mark.anyio
 async def test_log_and_events_pickers_delegate_to_full_pool_helper(
     monkeypatch, tmp_path: Path,
 ) -> None:
