@@ -45,8 +45,8 @@ decide it: whether it has been **materialized**, and its **origin**.
 - **active list** — quests in flight, plus un-materialized **drafts**: a fresh
   `imp new` draft has `origin: draft`, so it shows here relabeled `draft`, not in
   the backlog.
-- **backlog** — un-materialized **ideas / follow-ups** (`origin` of `idea` or
-  `followup`) parked for later; pick one up when you are ready.
+- **backlog** — un-materialized **backlog items** (`origin` `backlog`) parked for
+  later; pick one up when you are ready.
 - **archive** — finished (`completed`/`abandoned`) and shelved conversations,
   reachable by search.
 
