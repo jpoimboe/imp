@@ -70,7 +70,7 @@ def archive_conversation(quest: Quest) -> None:
     shutil.rmtree(quest.quest_dir, ignore_errors=True)
 
 
-def save_to_backlog(quest: Quest, reason: str | None = None) -> None:
+def save_as_draft(quest: Quest, reason: str | None = None) -> None:
     """Pause a conversation: the un-materialized quest-home is kept (not archived) and
     remains resumable. Zone is derived from both `materialized` and `origin` — no bespoke
     status string is needed for zone placement. When the save was driven by a mid-run

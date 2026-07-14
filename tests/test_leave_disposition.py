@@ -5,32 +5,32 @@ from pathlib import Path
 import pytest
 
 import imp.cli.main as m
-from imp.engine.abandon import discard_conversation, save_to_backlog
+from imp.engine.abandon import discard_conversation, save_as_draft
 from imp.engine.archive import record, records_root
 from imp.engine.quest import Quest
 from imp.engine.state import LockHeld, ProjectLock, State
 from tests.conftest import _seed_control
 
 
-def test_save_to_backlog_sets_paused_status_and_keeps_home(tmp_path: Path) -> None:
+def test_save_as_draft_sets_paused_status_and_keeps_home(tmp_path: Path) -> None:
     _seed_control(tmp_path)
     ch = Quest.create_draft(tmp_path, title="Draft", quest_id="d1", base_branch="main")
     assert State.load(ch.state_dir).status == "new"
 
-    save_to_backlog(ch)
+    save_as_draft(ch)
 
-    assert State.load(ch.state_dir).status == "paused"            # resting Backlog state
+    assert State.load(ch.state_dir).status == "paused"            # resting draft state
     assert (tmp_path / ".imp" / "quests" / "d1").exists()       # live home KEPT
     assert record.read_record(records_root(tmp_path), "d1") is None  # NOT archived
     events = ch.event_log().read()
     assert any(e.get("type") == "conversation_saved" for e in events)
 
 
-def test_save_to_backlog_raises_lock_held_when_lock_is_held(tmp_path: Path) -> None:
+def test_save_as_draft_raises_lock_held_when_lock_is_held(tmp_path: Path) -> None:
     _seed_control(tmp_path)
     ch = Quest.create_draft(tmp_path, title="Draft", quest_id="d3", base_branch="main")
     with ProjectLock(ch.quest_dir / "lock").acquire(), pytest.raises(LockHeld):
-        save_to_backlog(ch)
+        save_as_draft(ch)
 
 
 def test_discard_conversation_raises_lock_held_when_lock_is_held(tmp_path: Path) -> None:
@@ -146,7 +146,7 @@ def test_print_leave_disposition_send_failed_prints_running_spine(
     assert "resume: imp resume sf1" in out
 
 
-def test_save_to_backlog_arms_resume_pending(tmp_path: Path) -> None:
+def test_save_as_draft_arms_resume_pending(tmp_path: Path) -> None:
     _seed_control(tmp_path)
     ch = Quest.create_draft(tmp_path, title="Draft", quest_id="bkarm", base_branch="main")
     initial = State.load(ch.state_dir)
@@ -154,29 +154,29 @@ def test_save_to_backlog_arms_resume_pending(tmp_path: Path) -> None:
     assert step is not None
     assert initial.resume_pending is None                      # fresh: not yet armed
 
-    save_to_backlog(ch)
+    save_as_draft(ch)
 
     reloaded = State.load(ch.state_dir)                         # home kept, reload in place
     assert reloaded.resume_pending == step                     # armed to the step on leave
     assert reloaded.resume_mode == "solicit"                   # clean yield re-solicits
 
 
-def test_save_to_backlog_stamps_interrupt_reason_when_reason_given(tmp_path: Path) -> None:
+def test_save_as_draft_stamps_interrupt_reason_when_reason_given(tmp_path: Path) -> None:
     _seed_control(tmp_path)
     ch = Quest.create_draft(tmp_path, title="Draft", quest_id="bkcd", base_branch="main")
 
-    save_to_backlog(ch, reason="ctrl-d")
+    save_as_draft(ch, reason="ctrl-d")
 
     saved = [e for e in ch.event_log().read() if e.get("type") == "conversation_saved"]
     assert len(saved) == 1
     assert saved[0]["payload"] == {"interrupt_reason": "ctrl-d"}
 
 
-def test_save_to_backlog_without_reason_carries_no_interrupt_reason(tmp_path: Path) -> None:
+def test_save_as_draft_without_reason_carries_no_interrupt_reason(tmp_path: Path) -> None:
     _seed_control(tmp_path)
     ch = Quest.create_draft(tmp_path, title="Draft", quest_id="bknr", base_branch="main")
 
-    save_to_backlog(ch)
+    save_as_draft(ch)
 
     saved = [e for e in ch.event_log().read() if e.get("type") == "conversation_saved"]
     assert len(saved) == 1
