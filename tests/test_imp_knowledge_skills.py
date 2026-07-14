@@ -16,6 +16,10 @@ def _introspection_doc() -> str:
     return Path("docs/guide/introspection.md").read_text()
 
 
+def _memory_doc() -> str:
+    return Path("docs/guide/memory.md").read_text()
+
+
 def _skills_dir():
     return bundled_skills_dir()
 
@@ -153,13 +157,13 @@ def test_introspection_documents_merged_search_and_merge_commit() -> None:
 
 
 def test_memory_skill_is_loadable_profile_b() -> None:
-    body = load_internal_skill(_skills_dir(), "imp-memory")
+    body = _memory_doc()
     assert body.strip(), "imp-memory is empty"
     assert not body.lstrip().startswith("---"), "imp-memory has frontmatter"
 
 
 def test_memory_covers_two_tiers_of_durable_state() -> None:
-    body = load_internal_skill(_skills_dir(), "imp-memory")
+    body = _memory_doc()
     low = body.lower()
     # two-tiers framing
     assert "two tiers" in low
@@ -199,7 +203,7 @@ def test_old_skill_names_are_gone() -> None:
 
 
 def test_memory_teaches_the_in_depth_model() -> None:
-    body = load_internal_skill(_skills_dir(), "imp-memory")
+    body = _memory_doc()
     low = body.lower()
     # The new in-depth section and its additive-layering claim.
     assert "## The memory model in depth" in body
@@ -218,7 +222,7 @@ def test_memory_teaches_the_in_depth_model() -> None:
 
 
 def test_memory_teaches_the_authoring_affordance() -> None:
-    body = load_internal_skill(_skills_dir(), "imp-memory")
+    body = _memory_doc()
     assert "## Building up memory with imp" in body
     # The affordance names the interactive gates and the background memory
     # quest, and states imp never auto-writes memory.

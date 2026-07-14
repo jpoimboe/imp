@@ -456,7 +456,7 @@ def test_refresh_overlays_global_skills_into_snapshot(tmp_path: Path) -> None:
     # snapshot can ONLY have arrived via overlay_global_skills.
     assert _refresh_workflow_snapshot(quest) is False        # initial copy
     snap_skills = quest.quest_dir / "workflow" / "skills"
-    for name in ("imp-knowledge", "imp-memory",
+    for name in ("imp-knowledge",
                  "imp-tool-reference", "imp-driving-terminal-uis"):
         assert (snap_skills / f"{name}.md").is_file(), name
 
@@ -505,7 +505,7 @@ def test_refresh_workflow_skill_shadows_global_on_name_collision(tmp_path: Path)
     # The resolver returns the workflow copy (no frontmatter on the sentinel).
     assert load_internal_skill(snap_skills, "imp-knowledge") == sentinel
     # …and the non-colliding pool skills still overlay alongside it.
-    assert (snap_skills / "imp-memory.md").read_text().strip()
+    assert (snap_skills / "imp-tool-reference.md").read_text().strip()
 
 
 def test_snapshot_does_not_copy_the_docs_corpus(tmp_path: Path) -> None:
