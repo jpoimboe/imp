@@ -1736,7 +1736,7 @@ async def test_wait_for_model_override_returns_when_pause_already_committed(
 
 
 @pytest.mark.anyio
-async def test_set_sandbox_control_flips_override_and_pauses(tmp_path: Path) -> None:
+async def test_set_sandbox_control_flips_override_no_pause(tmp_path: Path) -> None:
     from imp.cli.signals import InterruptCoordinator
     from imp.remote.session.protocol import CONTROL_SET_SANDBOX
 
@@ -1746,11 +1746,11 @@ async def test_set_sandbox_control_flips_override_and_pauses(tmp_path: Path) -> 
 
     await server._dispatch_control(CONTROL_SET_SANDBOX, "off")
     assert coord.unsandboxed is True
-    assert coord.should_pause is True
-    assert coord.pause_reason == "sandbox-override"
+    assert coord.should_pause is False   # no signal_pause — live flag only
 
     await server._dispatch_control(CONTROL_SET_SANDBOX, "on")
     assert coord.unsandboxed is False
+    assert coord.should_pause is False
 
 
 @pytest.mark.anyio

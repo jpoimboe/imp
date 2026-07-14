@@ -286,7 +286,7 @@ def test_bash_wraps_with_active_policy(tmp_path: Path, monkeypatch: pytest.Monke
 
     monkeypatch.setattr(bashmod.anyio, "open_process", fake_open_process)
     ctx = _ctx(tmp_path)
-    ctx.sandbox_policy = SandboxPolicy(
+    ctx.base_sandbox_policy = SandboxPolicy(
         active=True, worktree=str(tmp_path), git_common_dir=str(tmp_path / ".git"),
         git_ro_remask=(), writable_caches=(), extra_readable=(), extra_writable=(),
         secret_dirs=(), secret_files=(),

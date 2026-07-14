@@ -533,7 +533,7 @@ class OpenAIAgentRunner:
         ctx.test_gates = invocation.test_gates
         ctx.pythonpath = invocation.pythonpath
         ctx.non_interactive = invocation.headless
-        ctx.sandbox_policy = invocation.sandbox_policy
+        ctx.base_sandbox_policy = invocation.sandbox_policy
         ctx.event_log = elog                       # shared write instance
         if self._user_input_fn is not None:
             ctx.user_input_fn = self._user_input_fn

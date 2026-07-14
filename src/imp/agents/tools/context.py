@@ -11,6 +11,7 @@ worktree-relative. No virtual `/project`/`/scratch` namespace; system paths are
 from __future__ import annotations
 
 import contextlib
+import dataclasses
 import os
 import signal as _signal
 from collections.abc import AsyncIterator, Iterable, Iterator
@@ -117,10 +118,9 @@ class ToolContext:
     # Tier A proactive-handoff watch threshold, propagated parent -> subagent via
     # this ctx so dispatch_task seeds each subagent's checkpoint_threshold.
     checkpoint_threshold: float | int | None = None
-    # Resolved SandboxPolicy for shell wrapping (spec Part B). None => bare sh -c
-    # (no sandbox), preserving pre-sandbox behavior. Set by the runner from
-    # invocation.sandbox_policy.
-    sandbox_policy: Any = None
+    # Stored BASE policy (home-layer-attached); None => bare sh -c (no sandbox).
+    # Tools read the effective policy via the sandbox_policy property below.
+    base_sandbox_policy: Any = None
     # §10/§12: when True, the run is headless (no human at the keyboard). The
     # subagent backoff loop applies a wall-clock ceiling instead of retrying
     # forever. Copied from invocation.headless by each provider.
@@ -132,6 +132,15 @@ class ToolContext:
     parallel_limiter: Any = None
     # invocation_id counter for disambiguating same-named subagent invocations
     _subagent_counter: int = 0
+
+    @property
+    def sandbox_policy(self) -> Any:
+        if self.base_sandbox_policy is None:
+            return None
+        if self.coordinator is not None and self.coordinator.unsandboxed:
+            return dataclasses.replace(
+                self.base_sandbox_policy, active=False, note="unsandboxed_override")
+        return self.base_sandbox_policy
 
     def next_subagent_invocation_id(self) -> int:
         """1, 2, 3, ... — per-invocation. subagents.py seeds _subagent_counter

@@ -419,8 +419,6 @@ class SessionServer:
             # Transient: broadcast-only via _emit, never the event log, so it can't replay stale.
             self._emit({"type": "sandbox_marker",
                         "payload": {"unsandboxed": reason == "off"}})
-            await self._coordinator.signal_pause(
-                reason="sandbox-override", via="frame")
         elif action == CONTROL_INTERRUPT_LEAVE and self._coordinator is not None:
             await self._coordinator.signal_pause(reason=reason or "ctrl-d", via="frame")
         elif action == CONTROL_INTERRUPT_FORCE and self._coordinator is not None:

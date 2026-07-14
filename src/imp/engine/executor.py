@@ -505,6 +505,7 @@ async def run_quest(
                 reason = action.reason or "interrupt"
                 state.status = (
                     "merge_blocked" if reason == "merge_blocked" else "paused")
+                state.unsandboxed = coordinator.unsandboxed
                 state.save(quest.state_dir)
                 _emit_paused_event(
                     log, reason, kind=action.kind,
@@ -624,10 +625,12 @@ async def run_quest(
                 else:
                     _evict_if_holding(quest, state, log)
                 state.status = "paused"
+                state.unsandboxed = coordinator.unsandboxed
                 state.save(quest.state_dir)
                 _emit_paused_event(
                     log, "interrupt", interrupt_reason=coordinator.pause_reason)
                 return RunResult.PAUSED
+            state.unsandboxed = coordinator.unsandboxed
             state.save(quest.state_dir)
     except Exception as exc:
         # Last-resort guard: except Exception (not BaseException) pauses resumably on an
@@ -651,6 +654,7 @@ async def run_quest(
             _emit_paused_event(log, "internal_error", kind=kind)
             state.arm_step_resume(mode="solicit")
             state.status = "paused"
+            state.unsandboxed = coordinator.unsandboxed
             state.save(quest.state_dir)
         except Exception:
             # Best-effort: if the emit/save fails (or log/state was never bound), re-raise
@@ -680,6 +684,7 @@ def _complete_or_park(
     if coordinator.should_pause:
         state.completion_pending = True
         state.status = "paused"
+        state.unsandboxed = coordinator.unsandboxed
         state.save(quest.state_dir)
         _emit_paused_event(log, "interrupt", interrupt_reason=coordinator.pause_reason)
         return RunResult.PAUSED
@@ -747,19 +752,6 @@ def _apply_readonly_overlay(policy: Any, step: Step, project_root: Path) -> Any:
         policy, readonly_overlays=policy.readonly_overlays + overlays)
 
 
-def _apply_unsandboxed_override(policy: Any, step: Step, coordinator: Any) -> Any:
-    """Compose the step-scoped unsandboxed override into a dispatch-time inactive
-    policy copy. Applies to ANY running step while the override is set — its
-    lifetime is bounded by the step (cleared at step advance, restored on resume),
-    not by whether the step is interactive. No-op when the policy is None, the
-    coordinator is absent, or the override is not set."""
-    if policy is None:
-        return policy
-    if coordinator is None or not coordinator.unsandboxed:
-        return policy
-    return dataclasses.replace(policy, active=False, note="unsandboxed_override")
-
-
 def _attach_home_layer(
     policy: Any, step: Step, quest: Quest,
 ) -> tuple[Any, Callable[[], None]]:
@@ -813,7 +805,6 @@ async def _dispatch_step(
         return await _route_acquire(step, quest, state, log, wait_for_turn_fn)
 
     sandbox_policy = _apply_readonly_overlay(sandbox_policy, step, quest.project_root)
-    sandbox_policy = _apply_unsandboxed_override(sandbox_policy, step, coordinator)
 
     if step.kind == "branch":
         return _route_branch(step, quest, state, log)

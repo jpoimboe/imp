@@ -62,7 +62,7 @@ def _ctx(worktree: Path) -> ToolContext:
         project_root=worktree,
         workflow_dir=worktree / ".imp" / "wf",
     )
-    ctx.sandbox_policy = _active_policy(worktree)
+    ctx.base_sandbox_policy = _active_policy(worktree)
     return ctx
 
 

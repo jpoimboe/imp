@@ -21,10 +21,6 @@ from imp.remote.session.protocol import SkillRequest
 # and the caller should re-prompt (do NOT submit anything to the agent).
 REPROMPT = object()
 
-# Sentinel: /sandbox off printed its confirmation prompt; the async caller must
-# read one y/N line and, on yes, forward the "/sandbox off" control line.
-CONFIRM_SANDBOX_OFF = object()
-
 SANDBOX_STATE_ON = (
     "Sandbox is on. Shell and file tools are confined to this quest's "
     "worktree; secrets are masked.")
@@ -33,20 +29,9 @@ SANDBOX_STATE_OFF = (
     "tools run as you: your home directory and secrets are readable and "
     "writes are unconfined. It re-enables when the step finishes; run "
     "/sandbox on to re-enable it now.")
-SANDBOX_CONFIRM_PROMPT = (
-    "Disabling the sandbox runs every shell and file-tool command as you, "
-    "with no confinement:\n"
-    "  · your home directory and secrets (~/.ssh, ~/.aws, credentials) "
-    "become readable\n"
-    "  · writes are no longer limited to this quest's worktree\n"
-    "This is what lets you attach debuggers (gdb, py-spy, strace) to live "
-    "processes.\n"
-    "It re-enables automatically when this step finishes.\n"
-    "Disable the sandbox for this step? [y/N]")
 SANDBOX_OFF_CONFIRMED = (
     "Sandbox off — this step is now unsandboxed. It re-enables when the "
     "step finishes; run /sandbox on to re-enable it now.")
-SANDBOX_OFF_DECLINED = "Left the sandbox on."
 SANDBOX_ON_FROM_OFF = (
     "Sandbox on. Shell and file tools are confined to the worktree again. "
     "Processes already started while unsandboxed keep their current access.")
@@ -115,8 +100,8 @@ def handle_slash_line(
                 _echo_command(text, output_fn, color=color)
                 output_fn(SANDBOX_ALREADY_OFF)
                 return REPROMPT
-            output_fn(SANDBOX_CONFIRM_PROMPT)
-            return CONFIRM_SANDBOX_OFF
+            output_fn(SANDBOX_OFF_CONFIRMED)
+            return "/sandbox off"
         _echo_command(text, output_fn, color=color)
         if args == "":
             output_fn(SANDBOX_STATE_OFF if unsandboxed else SANDBOX_STATE_ON)
@@ -307,21 +292,6 @@ async def ask_line_with_slash(
                             unsandboxed=current_unsandboxed)
                         if result is REPROMPT:
                             print("")  # one blank between slash output and the reprompt
-                            continue
-                        if result is CONFIRM_SANDBOX_OFF:
-                            if exit_evt is None:
-                                answer = await prompt.ask_async(
-                                    width=width, indent=indent,
-                                    bottom_toolbar=toolbar, hint=None)
-                            else:
-                                answer = await _ask_or_exit(
-                                    prompt, exit_evt, width=width, indent=indent,
-                                    bottom_toolbar=toolbar, hint=None)
-                            if answer.strip().lower() in ("y", "yes"):
-                                print(SANDBOX_OFF_CONFIRMED)
-                                return "/sandbox off"
-                            print(SANDBOX_OFF_DECLINED)
-                            print("")
                             continue
                         if isinstance(result, SkillRequest):
                             return result

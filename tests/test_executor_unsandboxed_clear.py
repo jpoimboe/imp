@@ -52,6 +52,47 @@ async def test_advance_to_different_step_clears_override_and_broadcasts_marker(
 
 
 @pytest.mark.anyio
+async def test_coordinator_unsandboxed_synced_to_state_before_pause(
+    tmp_path: Path, provider_registry: Any,
+) -> None:
+    """Executor must sync coordinator.unsandboxed → state before each pause save.
+
+    State starts with the default (unsandboxed=False). The coordinator carries
+    unsandboxed=True (set by a live /sandbox off toggle). A same-step interrupt
+    pause must persist coordinator.unsandboxed so that a leave-and-resume
+    restores the toggle correctly.
+    """
+    quest = _make_change(tmp_path, agents={"writer.md": _WRITER}, workflow_yaml=_SINGLE_WF)
+    # State file starts with unsandboxed=False (factory default); coordinator is True.
+    coord = InterruptCoordinator()
+    coord.set_unsandboxed(True)
+
+    class _InterruptingRunner:
+        async def run(self, invocation: Any) -> Any:
+            await coord.signal_pause(reason="ctrl-c")
+            yield {"type": "agent_output",
+                   "payload": {"outcome": "ok", "status": "Success"}}
+
+        async def interrupt(self) -> None:
+            pass
+
+    class _P:
+        name = "fake"
+        model = "m"
+
+        def create_runner(self, _inv: Any) -> _InterruptingRunner:
+            return _InterruptingRunner()
+
+    provider_registry("fake", env_check=lambda: True, factory=lambda _m: _P())
+
+    result = await run_quest(quest, on_event=lambda _e: None, coordinator=coord)
+
+    assert result is RunResult.PAUSED
+    # Without the sync the persisted flag would stay False (the on-disk default).
+    assert State.load(quest.state_dir).unsandboxed is True
+
+
+@pytest.mark.anyio
 async def test_same_step_pause_and_resume_preserves_override(
     tmp_path: Path, provider_registry: Any,
 ) -> None:

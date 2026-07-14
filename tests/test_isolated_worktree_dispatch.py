@@ -89,7 +89,7 @@ def _ctx(tmp_path: Path, quest: Quest, *, name: str, agent: AgentDef,
         id=quest.id, title=quest.title, project_root=quest.project_root,
         quest_home=f".imp/quests/{quest.id}",
         workflow_dir=quest.workflow_dir)
-    ctx.sandbox_policy = None
+    ctx.base_sandbox_policy = None
     ctx.spawn_subagent = spawn
     return ctx
 
@@ -228,7 +228,7 @@ def test_non_isolated_subagent_inherits_parent_policy(tmp_path: Path) -> None:
     ctx = _ctx(tmp_path, quest, name="rev", agent=_plain_agent("rev"),
                spawn=_spawn([{"type": "agent_output", "payload": {"text": "ok"}}],
                             capture=capture))
-    ctx.sandbox_policy = sentinel
+    ctx.base_sandbox_policy = sentinel
 
     anyio.run(dispatch_task, ctx, "rev", "review")
 
