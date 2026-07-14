@@ -115,3 +115,23 @@ def test_backlog_readiness_blocked_then_ready(tmp_path: Path) -> None:
     r2 = store.backlog_readiness(["depq"])
     assert r2.ready is True
     assert r2.blocked_on == ()
+
+
+def test_quest_card_composes_row_intent_and_summary(tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+    ch = Quest.create(tmp_path, title="Card Q", quest_id="cardq", base_branch="main")
+    _append_event(ch, {
+        "id": "e1", "timestamp": "2026-06-01T00:00:00+00:00",
+        "type": "opening_intent", "payload": {"text": "build the widget"}})
+    summ = ch.quest_dir / "artifacts" / "summary"
+    summ.mkdir(parents=True)
+    (summ / "cardq.md").write_text("all done\n")
+
+    card = make_store(tmp_path).quest_card("cardq")
+    assert card is not None
+    assert card.quest_id == "cardq"
+    assert card.title == "Card Q"
+    assert card.base_branch == "main"
+    assert card.intent == "build the widget"
+    assert card.summary == b"all done\n"
+    assert make_store(tmp_path).quest_card("nosuch") is None

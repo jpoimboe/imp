@@ -1526,10 +1526,11 @@ def _unstarted_backlog_meta(control: Path, quest_id: str) -> dict[str, Any] | No
     if meta.get("materialized", True):
         return None  # materialized homes are never Backlog; skip the event-log read
     try:
-        quest = Quest.load(control, quest_id)
+        Quest.load(control, quest_id)
     except (LoadError, LoadErrors):
         return None
-    conversed = _first_user_message(list(quest.event_log().read())) is not None
+    conversed = _first_user_message(
+        make_store(control).get_events(quest_id) or []) is not None
     if not _is_backlog_home(meta, conversed=conversed,
                             lock_live=lambda: lock_is_live(cdir / "lock")):
         return None
@@ -1563,44 +1564,35 @@ def _backlog_card(meta: dict[str, Any], control: Path, *, now: datetime) -> list
 
 
 def _quest_card(control: Path, quest_id: str, *, now: datetime) -> list[str]:
-    row = _row_for_id(control, quest_id)
-    if row is None:
+    card = make_store(control).quest_card(quest_id)
+    if card is None:
         return []
-    _id, status, step, last, title, created, step_label, phase_label = row
-    if (not (_quest_home(control, quest_id) / "quest.json").exists()
-            and archive_read.status_of(control, quest_id) == "paused"):
-        status = _DISPOSITION["paused"]
-    events = _load_events_for_id(control, quest_id) or []
     lines = [
-        f"id:            {_id}",
-        f"title:         {title.strip() or '(unnamed)'}",
-        f"status:        {status}",
+        f"id:            {card.quest_id}",
+        f"title:         {card.title.strip() or '(unnamed)'}",
+        f"status:        {card.status}",
     ]
-    if status in _INFLIGHT and step not in ("", "-"):
-        step_text = step_label or step
-        position = f"{phase_label} · {step_text}" if phase_label else step_text
+    if card.status in _INFLIGHT and card.step not in ("", "-"):
+        step_text = card.step_label or card.step
+        position = f"{card.phase_label} · {step_text}" if card.phase_label else step_text
         lines.append(pal.clip_display(f"step:          {position}", _display_width()))
     lines.append(
-        f"created:       {quest_row.format_timestamp(created)} "
-        f"({quest_row.relative_age(created, now=now)})")
-    lines.append(f"last activity: {quest_row.relative_age(last, now=now)}")
-    meta = _quest_meta(control, quest_id) or {}
-    if meta.get("base_branch"):
-        lines.append(f"base_branch:   {meta['base_branch']}")
-    state = _quest_state(control, quest_id) or {}
-    if state.get("merge_commit"):
-        lines.append(f"merge_commit:  {state['merge_commit']}")
-    if meta.get("depends_on"):
-        lines.append(f"depends_on:    {', '.join(meta['depends_on'])}")
-    opening = _resolve_intent(events)
-    if opening:
+        f"created:       {quest_row.format_timestamp(card.created)} "
+        f"({quest_row.relative_age(card.created, now=now)})")
+    lines.append(f"last activity: {quest_row.relative_age(card.last, now=now)}")
+    if card.base_branch:
+        lines.append(f"base_branch:   {card.base_branch}")
+    if card.merge_commit:
+        lines.append(f"merge_commit:  {card.merge_commit}")
+    if card.depends_on:
+        lines.append(f"depends_on:    {', '.join(card.depends_on)}")
+    if card.intent:
         lines.append("")
-        lines.append(opening)
-    summary = _show_artifact(control, quest_id, f"summary/{quest_id}.md")
-    if summary:
+        lines.append(card.intent)
+    if card.summary:
         lines.append("")
         lines.extend(
-            summary.decode("utf-8", errors="replace").rstrip("\n").splitlines())
+            card.summary.decode("utf-8", errors="replace").rstrip("\n").splitlines())
     return lines
 
 
@@ -1612,28 +1604,25 @@ def _detail_card(control: Path, quest_id: str, *, now: datetime) -> list[str]:
 
 
 def _quest_json(control: Path, quest_id: str) -> dict[str, Any] | None:
-    row = _row_for_id(control, quest_id)
-    if row is None:
+    card = make_store(control).quest_card(quest_id)
+    if card is None:
         return None
-    _id, status, step, last, title, created, step_label, phase_label = row
-    events = _load_events_for_id(control, quest_id) or []
-    meta = _quest_meta(control, quest_id) or {}
     data: dict[str, Any] = {
-        "id": _id,
-        "title": title.strip() or None,
-        "status": status,
-        "created": created or None,
-        "last_activity": last or None,
-        "base_branch": meta.get("base_branch"),
-        "depends_on": meta.get("depends_on", []),
-        "intent": _resolve_intent(events),
+        "id": card.quest_id,
+        "title": card.title.strip() or None,
+        "status": card.status,
+        "created": card.created or None,
+        "last_activity": card.last or None,
+        "base_branch": card.base_branch,
+        "depends_on": card.depends_on,
+        "intent": card.intent,
         "summary": None,
     }
-    if status in _INFLIGHT and step not in ("", "-"):
-        data["step"] = {"phase": phase_label or None, "name": step_label or step}
-    summary = _show_artifact(control, quest_id, f"summary/{quest_id}.md")
-    if summary:
-        data["summary"] = summary.decode("utf-8", errors="replace").strip() or None
+    if card.status in _INFLIGHT and card.step not in ("", "-"):
+        data["step"] = {"phase": card.phase_label or None,
+                        "name": card.step_label or card.step}
+    if card.summary:
+        data["summary"] = card.summary.decode("utf-8", errors="replace").strip() or None
     return data
 
 

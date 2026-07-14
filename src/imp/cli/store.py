@@ -34,12 +34,30 @@ class HomeDigest(NamedTuple):
     intent_title: str | None
 
 
+@dataclass(frozen=True)
+class QuestCard:
+    quest_id: str
+    status: str
+    step: str
+    last: str
+    title: str
+    created: str
+    step_label: str | None
+    phase_label: str | None
+    base_branch: str | None
+    merge_commit: str | None
+    depends_on: list[str]
+    intent: str | None
+    summary: bytes | None
+
+
 class Store(Protocol):
     def get_events(self, quest_id: str) -> list[dict[str, Any]] | None: ...
     def get_artifact(self, quest_id: str, kind: str) -> bytes | None: ...
     def completed_rows(self) -> list[CompletedRow]: ...
     def backlog_readiness(self, depends_on: list[str]) -> Readiness: ...
     def scan_homes(self) -> list[HomeDigest]: ...
+    def quest_card(self, quest_id: str) -> QuestCard | None: ...
 
 
 class LocalStore:
@@ -100,6 +118,39 @@ class LocalStore:
                 quest_id, quest_json, state_json, meta, last_iso, has_um,
                 conversation_prose(parsed), _resolve_intent(parsed)))
         return out
+
+    def quest_card(self, quest_id: str) -> QuestCard | None:
+        from imp.engine.archive import read as archive_read
+
+        from imp.cli.main import (
+            _DISPOSITION,
+            _load_events_for_id,
+            _quest_home,
+            _quest_meta,
+            _quest_state,
+            _resolve_intent,
+            _row_for_id,
+            _show_artifact,
+        )
+        row = _row_for_id(self.control_root, quest_id)
+        if row is None:
+            return None
+        _id, status, step, last, title, created, step_label, phase_label = row
+        if (not (_quest_home(self.control_root, quest_id) / "quest.json").exists()
+                and archive_read.status_of(self.control_root, quest_id) == "paused"):
+            status = _DISPOSITION["paused"]
+        events = _load_events_for_id(self.control_root, quest_id) or []
+        meta = _quest_meta(self.control_root, quest_id) or {}
+        state = _quest_state(self.control_root, quest_id) or {}
+        return QuestCard(
+            quest_id=_id, status=status, step=step, last=last, title=title,
+            created=created, step_label=step_label, phase_label=phase_label,
+            base_branch=meta.get("base_branch"),
+            merge_commit=state.get("merge_commit"),
+            depends_on=list(meta.get("depends_on", [])),
+            intent=_resolve_intent(events),
+            summary=_show_artifact(self.control_root, quest_id, f"summary/{quest_id}.md"),
+        )
 
 
 def make_store(control_root: Path) -> Store:

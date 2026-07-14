@@ -119,7 +119,7 @@ def test_summary_merged_change_via_journal_status(tmp_path, monkeypatch, capsys)
     monkeypatch.setattr(
         m, "_row_for_id",
         lambda control, c: (cid, "merged", "merge", "2026-01-01T00:00:10+00:00",
-                            cid, "2026-01-01T00:00:00+00:00"))
+                            cid, "2026-01-01T00:00:00+00:00", None, None))
     rc = main(["log", "-s", cid])
     assert rc == 0
     out = capsys.readouterr().out
