@@ -258,3 +258,71 @@ def test_detail_card_shows_merge_commit_for_archived_quest(tmp_path: Path) -> No
         quest_json_path=quest_json, state_json_path=state_json)
     card = "\n".join(main._detail_card(tmp_path, "2026-06-20-arc01", now=_NOW))
     assert "merge_commit:  beefcafe1234" in card   # read via archive_read.read_state_json
+
+
+def test_detail_card_shows_shelved_for_archived_paused_quest(tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+
+    # Materialized case: quest.json has no "materialized" key (defaults True).
+    # Row status would be "paused"; card must show "shelved".
+    events_m = tmp_path / "arc_m.jsonl"
+    events_m.write_text("")
+    quest_json_m = tmp_path / "arc_m.quest.json"
+    quest_json_m.write_text(json.dumps({
+        "id": "2026-06-20-shv01", "title": "Shelved widget", "base_branch": "main",
+        "created_at": "2026-06-20T11:00:00+00:00", "depends_on": []}))
+    state_json_m = tmp_path / "arc_m.state.json"
+    state_json_m.write_text(json.dumps({
+        "id": "2026-06-20-shv01", "status": "paused", "step": None}))
+    archive.archive_quest(
+        tmp_path, "2026-06-20-shv01", events_path=events_m,
+        quest_json_path=quest_json_m, state_json_path=state_json_m)
+
+    card_m = "\n".join(main._detail_card(tmp_path, "2026-06-20-shv01", now=_NOW))
+    status_line_m = next(ln for ln in card_m.splitlines() if ln.startswith("status:"))
+    assert "shelved" in status_line_m
+    assert "paused" not in status_line_m
+    assert "draft" not in status_line_m
+
+    # Un-materialized case: quest.json has "materialized": false.
+    # Row status would be "draft" (resolve_display_status maps paused+unmaterialized->draft);
+    # card must still show "shelved" because the raw final_state.status is "paused".
+    events_u = tmp_path / "arc_u.jsonl"
+    events_u.write_text("")
+    quest_json_u = tmp_path / "arc_u.quest.json"
+    quest_json_u.write_text(json.dumps({
+        "id": "2026-06-20-shv02", "title": "Shelved unmaterialized", "base_branch": "main",
+        "created_at": "2026-06-20T11:00:00+00:00", "depends_on": [],
+        "materialized": False}))
+    state_json_u = tmp_path / "arc_u.state.json"
+    state_json_u.write_text(json.dumps({
+        "id": "2026-06-20-shv02", "status": "paused", "step": None}))
+    archive.archive_quest(
+        tmp_path, "2026-06-20-shv02", events_path=events_u,
+        quest_json_path=quest_json_u, state_json_path=state_json_u)
+
+    card_u = "\n".join(main._detail_card(tmp_path, "2026-06-20-shv02", now=_NOW))
+    status_line_u = next(ln for ln in card_u.splitlines() if ln.startswith("status:"))
+    assert "shelved" in status_line_u
+    assert "paused" not in status_line_u
+    assert "draft" not in status_line_u
+
+    # Mid-step case: state.json has a non-null step (quest archived while a step was
+    # in flight). Card must still show "shelved" and must NOT show the step: line.
+    events_s = tmp_path / "arc_s.jsonl"
+    events_s.write_text("")
+    quest_json_s = tmp_path / "arc_s.quest.json"
+    quest_json_s.write_text(json.dumps({
+        "id": "2026-06-20-shv03", "title": "Shelved mid-step", "base_branch": "main",
+        "created_at": "2026-06-20T11:00:00+00:00", "depends_on": []}))
+    state_json_s = tmp_path / "arc_s.state.json"
+    state_json_s.write_text(json.dumps({
+        "id": "2026-06-20-shv03", "status": "paused", "step": "spec-writer"}))
+    archive.archive_quest(
+        tmp_path, "2026-06-20-shv03", events_path=events_s,
+        quest_json_path=quest_json_s, state_json_path=state_json_s)
+
+    card_s = "\n".join(main._detail_card(tmp_path, "2026-06-20-shv03", now=_NOW))
+    status_line_s = next(ln for ln in card_s.splitlines() if ln.startswith("status:"))
+    assert "shelved" in status_line_s
+    assert not any(ln.startswith("step:") for ln in card_s.splitlines())
