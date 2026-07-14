@@ -1127,6 +1127,15 @@ def test_plan_writer_express_row_drops_delivered_feedback_string() -> None:
     assert "self-orient" in text
 
 
+def test_spec_finalizer_drops_delivered_adopt_preamble_string() -> None:
+    from imp.assets import bundled_workflow_dir
+    text = (bundled_workflow_dir("imp") / "agents" / "spec-finalizer.md").read_text()
+    # The gate drops the adopt preamble, so the doc must not claim it is delivered.
+    assert "Adopt the spec drafted with the user and finalize it:" not in text
+    # The step self-orients from the on-disk draft spec instead.
+    assert "self-orient" in text
+
+
 def test_engine_and_agents_code_never_names_spiker() -> None:
     # AC#4: the isolated_worktree primitive is generic — no engine/dispatch code
     # references the role name. Only workflow assets (.md) may name it.
