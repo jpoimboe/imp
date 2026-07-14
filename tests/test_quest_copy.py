@@ -40,7 +40,7 @@ def test_overview_command_list_names_quests() -> None:
     descs = " | ".join(d for _verb, d in _OVERVIEW_COMMANDS)
     assert "scope a quest." in descs
     assert "Scope a new quest in conversation" in descs
-    assert "List your quests: in-flight, backlog, and recently merged." in descs
+    assert "List your quests: in-flight, backlog, and merged." in descs
     assert "Show one quest's detail or a named artifact (imp show <id>)." in descs
     assert "change" not in descs
 

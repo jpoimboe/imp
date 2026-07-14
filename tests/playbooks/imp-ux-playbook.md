@@ -147,7 +147,7 @@ to score).
   - `imp new -h` — the flag surface (`--backlog`, `--depends-on`, `--workflow`,
     `--autonomous`, `--non-interactive`/`--message`): can a new user tell which they need?
   - `imp chat` — the conversation surface (own item below).
-  - `imp list` — the overview: zones (in-flight / backlog / recently merged) legible? ids vs
+  - `imp list` — the overview: zones (in-flight / backlog / merged) legible? ids vs
     titles? Then `imp show <id>` (detail card) and one artifact view (e.g.
     `imp show <id> status`), plus `imp list -a`.
   - `imp log <id>` — a readable story or a wall of internals? Also `imp log <id> --summary`

@@ -300,7 +300,7 @@ def test_overview_default_shows_merged_disposition(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """Default overview: completed changes appear under `recently merged` with
+    """Default overview: completed changes appear under `merged:` with
     disposition `merged` (not the raw `completed`); abandoned are excluded."""
     import imp.cli.main as m
 
@@ -319,8 +319,8 @@ def test_overview_default_shows_merged_disposition(
     assert rc == 0
     out = capsys.readouterr().out
     assert "live" in out
-    assert "recently merged" in out
-    assert "history" not in out
+    assert "merged:" in out
+    assert "history:" not in out
     assert "done" in out
     assert "merged" in out
     assert "completed" not in out      # disposition is shown, not raw status
@@ -332,7 +332,7 @@ def test_overview_all_shows_history_label_and_abandoned(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """-a: label is `history`; abandoned appears as `abandoned`, completed as
+    """-a: label is `history:`; abandoned appears as `abandoned`, completed as
     `merged`."""
     import imp.cli.main as m
 
@@ -349,17 +349,17 @@ def test_overview_all_shows_history_label_and_abandoned(
     rc = m._cmd_status(type("NS", (), {"all": True})(), tmp_path)
     assert rc == 0
     out = capsys.readouterr().out
-    assert "history" in out
-    assert "recently merged" not in out
+    assert "history:" in out
+    assert "merged:" not in out
     assert "done" in out and "merged" in out
     assert "dead" in out and "abandoned" in out
 
 
-def test_overview_default_caps_at_ten(
+def test_overview_default_shows_all_merged(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """Default keeps at most 10 merged rows; -a lifts the cap."""
+    """Default lists every merged quest (no 10-cap); -a matches."""
     import imp.cli.main as m
 
     _seed_control(tmp_path)
@@ -374,7 +374,7 @@ def test_overview_default_caps_at_ten(
 
     m._cmd_status(type("NS", (), {"all": False})(), tmp_path)
     default_out = capsys.readouterr().out
-    assert sum(1 for ln in default_out.splitlines() if "done" in ln) == 10
+    assert sum(1 for ln in default_out.splitlines() if "done" in ln) == 12
 
     m._cmd_status(type("NS", (), {"all": True})(), tmp_path)
     all_out = capsys.readouterr().out
@@ -420,8 +420,8 @@ def test_overview_empty_history_omits_block(
     m._cmd_status(type("NS", (), {"all": False})(), tmp_path)
     out = capsys.readouterr().out
     assert "live" in out
-    assert "recently merged" not in out
-    assert "history" not in out
+    assert "merged:" not in out
+    assert "history:" not in out
 
 
 def test_overview_only_history_not_reported_empty(
