@@ -91,8 +91,8 @@ external matches as absolute paths.
 
 ## bash
 
-- Foreground: the 50 KB head of each stream is shown; when combined output
-  exceeds 50 KB the full output spills to a file and a `notice` field carries a
+- Foreground: the 30 KB head of each stream is shown; when combined output
+  exceeds 30 KB the full output spills to a file and a `notice` field carries a
   `read_file`-able path to recover the tail. Runaway output is killed at 5 MB. A
   foreground command is interruptible (SIGTERM to the process group, 4 s grace,
   then SIGKILL) and is reaped after 120 s by default — pass `timeout` (positive

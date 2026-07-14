@@ -180,14 +180,14 @@ def test_bash_terminates_on_runner_interrupt(tmp_path: Path) -> None:
 
 
 def test_bash_over_cap_spills_full_output_and_previews_head(tmp_path: Path) -> None:
-    # Natural completion emitting > 50 KB (but < 5 MB): the FULL stream is
-    # spilled to tool-results/ (recoverable), the displayed stdout is the 50 KB
+    # Natural completion emitting > 30 KB (but < 5 MB): the FULL stream is
+    # spilled to tool-results/ (recoverable), the displayed stdout is the 30 KB
     # head, a notice carries the spill path, and returncode is a normal 0.
     ctx = _ctx(tmp_path)
     out = json.loads(_run_bash(ctx, {
         "command": "yes ABCDEFGHIJ | head -c 100000"}))
     assert out["returncode"] == 0
-    assert len(out["stdout"]) == 50_000              # 50 KB head display
+    assert len(out["stdout"]) == 30_000              # 30 KB head display
     assert "[output truncated" not in out["stdout"]  # marker replaced by notice
     assert "tool-results" in out["notice"]
     assert "read with read_file offset=1" in out["notice"]
@@ -217,28 +217,28 @@ def test_bash_over_cap_spill_labels_stdout_and_stderr(tmp_path: Path) -> None:
 
 def test_bash_caps_runaway_output(tmp_path: Path) -> None:
     # A command that floods stdout past the 5 MB kill ceiling is killed AT the
-    # ceiling; the displayed stdout is the 50 KB head + a spill notice (the old
+    # ceiling; the displayed stdout is the 30 KB head + a spill notice (the old
     # inline marker is gone), and it is NOT surfaced as an interrupt.
     ctx = _ctx(tmp_path)
     out = json.loads(_run_bash(ctx, {"command": "yes ABCDEFGHIJ"}))
     assert "[output truncated" not in out["stdout"]
     assert "notice" in out
     assert (tmp_path / "tool-results").exists()
-    assert len(out["stdout"]) == 50_000
+    assert len(out["stdout"]) == 30_000
     assert out["returncode"] == 0                    # cap is a NORMAL result
     assert ctx.running_processes == []
 
 
 def test_bash_caps_runaway_stderr(tmp_path: Path) -> None:
     # A stderr-dominant flood past the ceiling truncates the displayed stderr to
-    # the 50 KB head and emits a spill notice; no inline marker on either stream.
+    # the 30 KB head and emits a spill notice; no inline marker on either stream.
     ctx = _ctx(tmp_path)
     out = json.loads(_run_bash(ctx, {"command": "yes ABCDEFGHIJ 1>&2"}))
     assert "[output truncated" not in out["stderr"]
     assert "[output truncated" not in out["stdout"]
     assert "notice" in out
     assert (tmp_path / "tool-results").exists()
-    assert len(out["stderr"]) == 50_000
+    assert len(out["stderr"]) == 30_000
     assert out["returncode"] == 0                    # cap is a NORMAL result
     assert ctx.running_processes == []
 
@@ -261,7 +261,7 @@ def test_bash_normal_output_uncapped(tmp_path: Path) -> None:
     out = json.loads(_run_bash(ctx, {"command": "echo hello"}))
     assert out["stdout"].strip() == "hello"
     assert "[output truncated" not in out["stdout"]
-    assert "notice" not in out                       # <= 50 KB is unchanged
+    assert "notice" not in out                       # <= 30 KB is unchanged
     assert out["returncode"] == 0
 
 
@@ -392,9 +392,9 @@ def test_bash_midcommand_pause_kills_and_returns_tombstone(tmp_path: Path) -> No
 
 
 def test_bash_midcommand_pause_over_cap_spills_tombstone(tmp_path: Path) -> None:
-    # A pause landing mid-command after the command already emitted > 50 KB must
+    # A pause landing mid-command after the command already emitted > 30 KB must
     # spill the full output like the normal path: the tombstone keeps its
-    # status/kill_reason but its displayed stdout is the 50 KB head + a notice,
+    # status/kill_reason but its displayed stdout is the 30 KB head + a notice,
     # not up to the 5 MB kill ceiling inline.
     class _Coord:
         should_pause = False
@@ -424,7 +424,7 @@ def test_bash_midcommand_pause_over_cap_spills_tombstone(tmp_path: Path) -> None
     out = holder["out"]
     assert out["status"] == "killed"
     assert out["kill_reason"] == "interrupted"
-    assert len(out["stdout"]) == 50_000              # 50 KB head display
+    assert len(out["stdout"]) == 30_000              # 30 KB head display
     assert "notice" in out
     spilled = list((tmp_path / "tool-results").iterdir())
     assert len(spilled) == 1
@@ -528,3 +528,19 @@ def test_bash_background_ignores_timeout(tmp_path: Path) -> None:
     assert "id" in out              # a background descriptor, not a timed-out abort
     assert "returncode" not in out  # bg spawn returns immediately, no rc yet
     assert ctx.running_processes == []
+
+
+def test_bash_foreground_cap_is_30kb_not_50kb(tmp_path: Path) -> None:
+    # AC 6: bash inline foreground output truncates at 30 KB (its OWN bash-specific
+    # cap), NOT the 50 KB shared read_file/grep display cap; the full output still
+    # spills to a recoverable file with a notice.
+    from imp.agents.tools.limits import BASH_OUTPUT_CAP_BYTES
+    ctx = _ctx(tmp_path)
+    out = json.loads(_run_bash(ctx, {"command": "yes ABCDEFGHIJ | head -c 100000"}))
+    assert BASH_OUTPUT_CAP_BYTES == 30_000
+    assert len(out["stdout"]) == BASH_OUTPUT_CAP_BYTES
+    assert len(out["stdout"]) != 50_000     # regression guard vs the old shared cap
+    assert "notice" in out
+    spilled = list((tmp_path / "tool-results").iterdir())
+    assert len(spilled) == 1
+    assert len(spilled[0].read_bytes()) == 100_000   # FULL output recoverable
