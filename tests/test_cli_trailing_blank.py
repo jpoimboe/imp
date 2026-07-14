@@ -544,6 +544,75 @@ def test_cmd_init_unchanged_when_piped(
     assert capsys.readouterr().out == "Created:\n"
 
 
+def test_abandon_already_gone_unchanged_when_piped(
+    tmp_path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    import imp.cli.main as m
+    from tests.conftest import _seed_control
+
+    _seed_control(tmp_path)
+    monkeypatch.setattr(sys.stdout, "isatty", lambda: False)
+    rc = m._abandon(tmp_path, "ghost")
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert out == "quest ghost already gone; ensured branch imp/ghost is removed.\n"
+
+
+def test_record_idea_unchanged_when_piped(
+    tmp_path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    import argparse
+
+    import imp.cli.main as m
+    from tests.conftest import _seed_control
+
+    _seed_control(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(sys.stdout, "isatty", lambda: False)
+    rc = m._record_idea(
+        argparse.Namespace(idea="Wire OAuth", opening=None, depends_on=None,
+                           title=None, workflow=None),
+        tmp_path, "main")
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert out.endswith("`)\n")          # confirmation line + single newline
+    assert not out.endswith("\n\n")      # no added blank when piped
+
+
+def test_abandon_resident_delivery_trailing_blank_on_tty(
+    tmp_path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    import imp.cli.main as m
+    from imp.engine.quest import Quest
+    from tests.conftest import _seed_control
+
+    _seed_control(tmp_path)
+    Quest.create(tmp_path, title="x", quest_id="feat", base_branch="main")
+    monkeypatch.setattr(m, "session_is_resident", lambda _ctrl, cid: True)
+    monkeypatch.setattr(m, "_deliver_abandon_resident", lambda _ctrl, cid: None)
+    monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
+    rc = m._abandon(tmp_path, "feat")
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert out == "Abandoned feat.\n\n"
+
+
+def test_abandon_tear_down_trailing_blank_on_tty(
+    tmp_path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    import imp.cli.main as m
+    from imp.engine.quest import Quest
+    from tests.conftest import _seed_control
+
+    _seed_control(tmp_path)
+    Quest.create(tmp_path, title="x", quest_id="feat", base_branch="main")
+    monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
+    rc = m._abandon(tmp_path, "feat")
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert out == "Abandoned feat.\n\n"
+
+
 def test_conventions_doc_records_trailing_blank_rule() -> None:
     from pathlib import Path
 
