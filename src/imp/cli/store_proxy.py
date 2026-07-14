@@ -123,6 +123,18 @@ def run_query(store: Store, op: str, args: dict[str, Any]) -> Any:
     raise ValueError(f"unknown store op {op!r}")
 
 
+def build_query_handler(control_root: Any) -> Any:
+    """Daemon on_query: runs store ops off the loop so the reentrant self-read is deadlock-free."""
+    from imp.cli.store import LocalStore
+
+    store = LocalStore(control_root)
+
+    async def _on_query(op: str, args: dict[str, Any]) -> Any:
+        return await anyio.to_thread.run_sync(run_query, store, op, args)
+
+    return _on_query
+
+
 class ProxyStore:
     """Ships each Store op to the quest daemon over its session socket.
 
