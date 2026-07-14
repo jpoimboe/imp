@@ -2746,6 +2746,62 @@ async def _pick_show_matches(control: Path, matches: list[str]) -> str | int:
     )
 
 
+_EVENTS_PICKER_HEADER = (
+    "Show events for which quest?  (↑/↓ to move · enter to select · q to cancel)"
+)
+
+
+async def _pick_events_target(control: Path) -> str | int:
+    """No-token events picker over the full pool (in-flight + backlog +
+    completed), newest-first, with the most-recent quest pre-selected — the
+    same pool and pre-select `_pick_log_target` uses. No on_non_tty: `_cmd_events`
+    routes the non-tty no-token case to `_resolve_default_id` before calling this."""
+    rows = _sort_rows_newest_first(
+        _status_rows(control) + _backlog_rows(control) + _completed_rows(control))
+    default_id = _resolve_default_id(control)
+    selected_index = next(
+        (i for i, r in enumerate(rows) if r[0] == default_id), 0)
+    return await _pick_quest_target(
+        control=control,
+        rows=rows,
+        header=_EVENTS_PICKER_HEADER,
+        on_empty=_log_picker_empty,
+        selected_index=selected_index,
+    )
+
+
+async def _pick_events_matches(control: Path, matches: list[str]) -> str | int:
+    """Scoped events picker over a token's raw _iter_quest_ids matches (>=2).
+
+    Rows come from _row_for_id, so an unreadable id is dropped from the menu
+    only, never from the count. on_non_tty is defensive parity — the real
+    non-tty ambiguous path routes through _resolve_id/_exit_ambiguous."""
+    rows = _sort_rows_newest_first(
+        [r for r in (_row_for_id(control, cid) for cid in matches)
+         if r is not None])
+
+    def _non_tty(rows: list[_Row]) -> int:
+        print("imp: ambiguous token; candidates:", file=sys.stderr)
+        color = should_use_color(sys.stderr)
+        now = datetime.now(UTC)
+        print(quest_row.header_line(color=color), file=sys.stderr)
+        name_w = quest_row.name_budget()
+        for r in rows:
+            print(quest_row.format_quest_line(
+                quest_id=r[0], title=r[4], status=r[1], step=r[2],
+                step_label=r[6], last_iso=r[3], now=now, color=color,
+                name_width=name_w), file=sys.stderr)
+        return 2
+
+    return await _pick_quest_target(
+        control=control,
+        rows=rows,
+        header=_EVENTS_PICKER_HEADER,
+        on_empty=_show_picker_empty,
+        on_non_tty=_non_tty,
+    )
+
+
 def _cmd_abandon(args: argparse.Namespace) -> int:
     control = _control_root()
     token = args.token
@@ -3335,15 +3391,33 @@ def _cmd_events(args: argparse.Namespace) -> int:
 
     control = _control_root()
     quest_id: str | None
-    if args.token is not None:
-        try:
-            quest_id = _resolve_id(control, args.token)
-        except SystemExit:
-            return 2
+    token = args.token
+    if token is not None:
+        # Same comprehension as _resolve_id — picker and resolver agree on candidates.
+        matches = [cid for cid in _iter_quest_ids(control) if token in cid]
+        if _interactive() and token.strip() and len(matches) >= 2:
+            picked = anyio.run(_pick_events_matches, control, matches)
+            if isinstance(picked, int):
+                return picked
+            quest_id = picked
+        else:
+            try:
+                quest_id = _resolve_id(control, token)
+            except SystemExit:
+                return 2
+    elif _interactive():
+        picked = anyio.run(_pick_events_target, control)
+        if isinstance(picked, int):
+            return picked
+        quest_id = picked
     else:
         quest_id = _resolve_default_id(control)
     if quest_id is None:
         print(_NO_QUESTS_MESSAGE)
+        return 0
+    meta = _unstarted_backlog_meta(control, quest_id)
+    if meta is not None:
+        print(f"Quest {quest_id} hasn't started yet — no events to show.")
         return 0
     events = _load_events_for_id(control, quest_id)
     if events is None:
