@@ -170,6 +170,36 @@ async def test_cancel_at_opening_prompt_discards_the_minted_draft(
 
 
 @pytest.mark.anyio
+@pytest.mark.parametrize("exc", [EOFError, KeyboardInterrupt])
+async def test_cancel_at_opening_prompt_retains_caret_and_says_nothing(
+    stub_new, monkeypatch, capsys, exc,
+) -> None:
+    # AC5: Ctrl-D at the opening prompt leaves the gold `> ` caret and one
+    # trailing blank on screen, prints no message after it (no `imp: cancelled`),
+    # and exits 130. stub_new forces should_use_color -> False, so the caret is
+    # the plain "> " (see tests/test_palette.py: pal.caret(enabled=False) == "> ").
+    m = stub_new
+    monkeypatch.setattr(m, "_print_run_header", lambda *a, **k: None)
+    monkeypatch.setattr(m, "discard_conversation", lambda quest: None)
+
+    class _CancelPrompt:
+        def __init__(self, **kwargs: object) -> None: ...
+
+        async def ask_async(self, **kwargs: object) -> str:
+            raise exc()
+
+    monkeypatch.setattr(m, "Prompt", _CancelPrompt)
+
+    rc = await m._async_cmd_new(_new_args(), leave_mode="new")
+
+    assert rc == 130
+    out = capsys.readouterr().out
+    assert out.endswith("> \n\n")          # retained caret + exactly one trailing blank
+    assert not out.endswith("> \n\n\n")    # not two trailing blanks
+    assert "cancelled" not in out          # no `imp: cancelled` message anywhere in the output
+
+
+@pytest.mark.anyio
 async def test_seeded_interactive_leads_with_header_before_splash(
     stub_new, monkeypatch, capsys,
 ) -> None:

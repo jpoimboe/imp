@@ -101,6 +101,39 @@ async def test_run_cleared_session_cancel_returns_130_no_draft(
 
 
 @pytest.mark.anyio
+@pytest.mark.parametrize("exc", [EOFError, KeyboardInterrupt])
+async def test_run_cleared_session_cancel_retains_caret_and_says_nothing(
+    exc: type[BaseException], tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    # AC5 on the /clear-reopened prompt: Ctrl-D retains the `> ` caret + one
+    # trailing blank, prints no `imp: cancelled` message, and returns 130.
+    # Stub should_use_color -> False so the caret renders as the plain "> "
+    # regardless of FORCE_COLOR/CLICOLOR_FORCE in the environment (hermetic,
+    # matching the sibling output-asserting _run_cleared_session tests).
+    _seed_control(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(m, "should_use_color", lambda *a, **k: False)
+    monkeypatch.setattr(m, "_print_splash_banner", lambda *, interactive: False)
+
+    class _FakePromptCancel:
+        def __init__(self, *a: object, **k: object) -> None: ...
+
+        async def ask_async(self, *a: object, **k: object) -> str:
+            raise exc()
+
+    monkeypatch.setattr(m, "Prompt", _FakePromptCancel)
+
+    rc = await m._run_cleared_session(tmp_path, "main", leave_state={})
+
+    assert rc == 130
+    out = capsys.readouterr().out
+    assert out.endswith("> \n\n")          # retained caret at the tail + one trailing blank
+    assert not out.endswith("> \n\n\n")    # not two trailing blanks
+    assert "cancelled" not in out          # no `imp: cancelled` message anywhere in the output
+
+
+@pytest.mark.anyio
 async def test_clear_loop_reopens_only_on_clear(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
