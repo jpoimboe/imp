@@ -134,7 +134,7 @@ class ReplyInterjectRouter:
 
 
 OPENING_HINT = "type a message, /help for commands, or /model to switch models"
-_OPENING_SESSION_VERBS = ("/keep", "/clear", "/abandon")
+_OPENING_SESSION_VERBS = ("/keep", "/shelve", "/clear", "/abandon")
 
 
 def _should_prompt_opening(

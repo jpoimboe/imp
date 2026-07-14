@@ -74,6 +74,8 @@ def handle_slash_line(
         return "/abandon"
     if cmd == "keep":
         return "/keep"
+    if cmd == "shelve":
+        return "/shelve"
     if cmd == "clear":
         return "/clear"
     if cmd == "model":
@@ -132,6 +134,7 @@ def _help(out: Callable[[str], None]) -> None:
     out("  /help              Show this message")
     out("  /skills            List loadable skills")
     out("  /keep              Keep this conversation as a draft in your active list")
+    out("  /shelve            Shelve this conversation to the archive (find it with `imp search`)")
     out("  /clear             Park this chat and start a fresh one")
     out("  /model <model>     Switch this step's model (or provider:model)")
     out("  /sandbox [on|off]  Show or set the filesystem sandbox for this session")

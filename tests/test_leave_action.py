@@ -194,3 +194,16 @@ def test_was_renamed_false_without_quest_renamed_event() -> None:
         {"type": "user_message"},
     ])
     assert _was_renamed(log) is False
+
+
+def test_shelve_intent_with_exchange_archives(tmp_path: Path) -> None:
+    # /shelve is chat-style: archive (not save), like /clear.
+    _seed_control(tmp_path)
+    ch = _draft(tmp_path, "sh1", exchange=True)
+    assert leave_control_action(ch, "new", "shelve") == "archive"
+
+
+def test_shelve_intent_zero_exchange_discards(tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+    ch = _draft(tmp_path, "sh2", exchange=False)
+    assert leave_control_action(ch, "new", "shelve") == "discard"

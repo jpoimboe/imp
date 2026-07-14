@@ -169,6 +169,22 @@ async def test_clear_loop_exits_when_cleared_session_sets_no_intent(
 
 
 @pytest.mark.anyio
+async def test_clear_loop_shelve_intent_does_not_reopen(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def _boom(*a: object, **k: object) -> int:
+        raise AssertionError("shelve must not reopen a fresh conversation")
+
+    monkeypatch.setattr(m, "_run_cleared_session", _boom)
+
+    async def _first(leave_state: dict[str, str]) -> int:
+        leave_state["intent"] = "shelve"
+        return 4
+
+    assert await m._clear_loop(tmp_path, first=_first) == 4
+
+
+@pytest.mark.anyio
 async def test_clear_loop_propagates_exception_from_cleared_session(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:

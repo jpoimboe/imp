@@ -118,7 +118,8 @@ class SlashCompleter:
     """Completes client-side slash commands and user skill names when the line starts with '/'."""
 
     _BUILTINS = (
-        "help", "skills", "keep", "clear", "model", "sandbox", "abandon")
+        "help", "skills", "keep", "shelve", "clear", "model", "sandbox",
+        "abandon")
 
     def __init__(
         self, skills_dir: Any,

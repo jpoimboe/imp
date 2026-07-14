@@ -88,6 +88,23 @@ def test_clear_is_in_the_help_text() -> None:
     assert any("/clear" in line for line in lines)
 
 
+def test_shelve_builtin_returns_literal_for_the_gate_loop(tmp_path: Path) -> None:
+    # /shelve is a built-in (NOT a skill): it returns the literal so the session
+    # gate loop records the shelve intent and detaches (archive, no reopen).
+    quest = SimpleNamespace(control_root=tmp_path)
+    out: list[str] = []
+    result = handle_slash_line("/shelve", quest=quest, output_fn=out.append)
+    assert result == "/shelve"
+    assert not any("no such skill" in line for line in out)
+
+
+def test_shelve_is_in_the_help_text() -> None:
+    from imp.cli.slash import _help
+    lines: list[str] = []
+    _help(lines.append)
+    assert any("/shelve" in line for line in lines)
+
+
 def test_help_is_echoed_with_caret(tmp_path: Path) -> None:
     quest = SimpleNamespace()
     out: list[str] = []

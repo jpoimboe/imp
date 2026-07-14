@@ -164,10 +164,10 @@ to score).
   the screen (send `"q"` to quit); `--no-pager` prints straight through (use it or
   `view(full=True)` when *you* need to read). Judge that paging feels intentional, not broken.
 - **Slash commands at the interactive prompt** — at any imp prompt, including the opening
-  `imp new` / `imp chat` intent prompt and the post-`/clear` prompt: the full eight-command
+  `imp new` / `imp chat` intent prompt and the post-`/clear` prompt: the full nine-command
   client-side set — `/help` (readable, and does it match reality?), `/skills`, `/list [-a]`,
-  `/search <q>`, `/resume <id>`, `/keep`, `/clear`, `/abandon` — each handled client-side
-  without spending a model turn; Tab completion covers all eight (`send("/sk\t")` →
+  `/search <q>`, `/resume <id>`, `/keep`, `/shelve`, `/clear`, `/abandon` — each handled client-side
+  without spending a model turn; Tab completion covers all nine (`send("/sk\t")` →
   `/skills`, `send("/li\t")` → `/list`), so an unambiguous prefix fills and an ambiguous one
   lists candidates; Up-arrow recalls your previous input; Alt+Enter (`send("\x1b\r")`) inserts
   a newline instead of submitting; Ctrl-C at the prompt clears the buffer (and hints at Ctrl-D
