@@ -135,7 +135,6 @@ class StepNode:
                                        # resource (test/merge) lane wait; None when
                                        # unset; highest precedence over `label` in
                                        # the live footer, never persisted
-    lane_waiting_node: Any = None      # in-place merge-queue transcript node; None when unset
     lane_wait: bool = False            # parked in a lane semaphore wait (test or merge); live-only
     phase_label: str | None = None     # owning phase's rendered label
     command: str | None = None         # script step's shell command shown on the status line
@@ -1063,15 +1062,10 @@ NarrativeBuilder._HANDLERS["merge_retry"] = _h_merge_retry
 
 def _h_lane_waiting(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
     self._flush_burst()
+    # Lane-waits are live-footer-only: no scrollback node. Override the footer verb
+    # with the merge-queue label (count updates in place) until lane_acquired clears it.
     text = f"waiting to merge ({p.get('ahead', 0)} ahead)"
     step = self._step_stack[-1] if self._step_stack else None
-    if step is not None and step.lane_waiting_node is not None:
-        step.lane_waiting_node.text = text
-    else:
-        node = LiteralTextNode(text=text, color_role="lifecycle")
-        self._append(node)
-        if step is not None:
-            step.lane_waiting_node = node
     if step is not None:
         step.lane_wait_label = text
         step.lane_wait = True
@@ -1148,7 +1142,6 @@ def _h_lane_acquired(self: NarrativeBuilder, event: dict[str, Any], p: dict[str,
     if self._step_stack:
         top = self._step_stack[-1]
         top.lane_wait_label = None
-        top.lane_waiting_node = None
         top.lane_wait = False
 
 
@@ -1216,7 +1209,6 @@ def _h_step_started(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, 
                     top.lane_wait_label = None
                 elif p.get("route_label"):
                     top.label = p.get("label")
-                top.lane_waiting_node = None
                 top.resumed = True
             return
     # Resume re-entry: the first step_started after a resume re-enters the
@@ -1239,7 +1231,6 @@ def _h_step_started(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, 
             existing.outcome = None
             existing.closed = False
             existing.interrupted = False
-            existing.lane_waiting_node = None
             existing.resumed = True
             if p.get("restarted"):
                 # Genuine re-run from scratch: the fresh run supersedes the
