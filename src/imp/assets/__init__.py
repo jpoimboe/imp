@@ -28,6 +28,20 @@ def bundled_skills_dir() -> Path:
     return p
 
 
+def bundled_docs_dir() -> Path:
+    """Return a real filesystem Path to imp's repo-root docs/ corpus, resolved
+    relative to the install (editable-from-a-clone), mirroring
+    bundled_skills_dir. Read in place — never copied into a quest snapshot, so
+    a threshold agent can grep it in any project. Raises if absent."""
+    p = Path(str(files("imp.assets"))).parents[2] / "docs"
+    if not p.is_dir():
+        raise RuntimeError(
+            f"imp docs corpus not found at {p}; was the package installed "
+            f"without its repo checkout? Try `pip install -e .` from a checkout."
+        )
+    return p
+
+
 def bundled_workflow_dir(name: str) -> Path:
     """Return a real filesystem Path to a bundled workflow by name.
 
