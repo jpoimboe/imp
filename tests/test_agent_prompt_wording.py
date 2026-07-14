@@ -161,7 +161,7 @@ def test_batch_code_reviewer_description_is_whole_diff() -> None:
 def test_events_query_references_frame_provenance_not_current_state() -> None:
     for wf_name in ("imp",):
         wf = load_workflow(bundled_workflow_dir(wf_name))
-        for name in ("summarizer", "spec-reviewer", "plan-reviewer"):
+        for name in ("summarizer", "plan-reviewer"):
             body = wf.agents[name].prompt_template_source
             assert "imp events" in body, f"{wf_name}/{name}"
             assert "not current state" in body, f"{wf_name}/{name}"
@@ -234,6 +234,21 @@ def test_spec_reviewer_verifies_forward_claims() -> None:
         "behavior the spec describes is **Major** too"
         in body
     )
+
+
+def test_spec_reviewer_checks_threshold_decision_fidelity() -> None:
+    body = _agent_prompt("spec-reviewer")
+    # the new How-to-Review bullet mandates a transcript-fidelity check
+    assert "Keep faith with what was decided." in body
+    # it reads the clean threshold dialogue via imp log --step threshold
+    assert "imp log {{ quest.id }} --step threshold" in body
+    # the new Calibration paragraph classes a dropped/reversed decision as Major
+    assert "silently drops or contradicts is **Major**" in body
+    assert (
+        "recorded dialogue, not your assumption of what was decided." in body
+    )
+    # the retarget removes imp events from spec-reviewer entirely
+    assert "imp events" not in body
 
 
 def test_spec_finalizer_requires_checkable_ac_clauses_and_cross_walk() -> None:

@@ -22,7 +22,10 @@ Verify the spec is complete, consistent, and ready for implementation planning. 
 ## Process
 
 1. Read `{{ quest.home }}/artifacts/spec/{{ quest.id }}.md`.
-2. To check the spec reflects the user's clarifications, use `imp events {{ quest.id }}` for prior brainstorm turns — the provenance record of what was said, not current state.
+2. To check the spec keeps faith with what was decided, read the threshold
+   dialogue with `imp log {{ quest.id }} --step threshold` — the human-and-agent
+   brainstorm prose (tool noise elided), the provenance record of what was
+   decided, not current state.
 3. Evaluate against the checks below.
 4. Produce a severity-classified findings report and call `complete_step`.
 
@@ -46,6 +49,14 @@ checklist — do the real reasoning:
   turns on runtime timing, lifetime, or ordering — *when* a value is resolved
   versus *when* it is consumed — is an empirical unknown to trace explicitly,
   never to assume from a static reading.
+- **Keep faith with what was decided.** The spec must carry the design actually
+  reached with the human at the threshold, not a plausible-looking substitute.
+  Read the brainstorm dialogue with `imp log {{ quest.id }} --step threshold`
+  (human and agent prose, tool noise elided) and confirm every load-bearing
+  decision settled there survives into the spec. A decision the conversation
+  reached that the spec silently drops or reverses misleads planning exactly as
+  a false claim about existing code does — planning builds from the spec, not the
+  transcript, so the drift ships unless caught here.
 - **Would building this satisfy the intent?** Does the spec address the quest title and
   the brainstorm clarifications, end to end?
 - **Could you build it without guessing?** Are the acceptance criteria concrete enough
@@ -81,6 +92,12 @@ A load-bearing claim about existing code (a file path, a current behavior, a fun
 Symmetrically, an *accurate* reference to a seam that does not deliver the
 behavior the spec describes is **Major** too — planning rests on the mechanism
 being sound, not merely on the citation being real.
+
+A load-bearing decision reached with the human at the threshold — a mechanism,
+constraint, or approach the conversation explicitly settled — that the spec
+silently drops or contradicts is **Major**: a reversed decision becomes a wrong
+implementation however cleanly the spec reads. Check the spec against the
+recorded dialogue, not your assumption of what was decided.
 
 Approve (non-blocking) unless there are serious gaps that would lead to a flawed implementation.
 
