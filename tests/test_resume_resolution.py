@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 
 import imp.cli.main as m
-from imp.cli.store import HomeDigest
+from imp.cli.store import CompletedRow, HomeDigest
 from imp.engine import archive
 
 
@@ -88,6 +88,10 @@ def _make_home(quest_id: str, last_iso: str) -> HomeDigest:
     return HomeDigest(quest_id, b"{}", None, {}, last_iso, False, "", None)
 
 
+def _completed_row(cid: str, last: str) -> CompletedRow:
+    return CompletedRow(cid, "completed", "plan", last, "Title " + cid, "2026-06-01T00:00:00+00:00")
+
+
 class _StubStore:
     def __init__(self, homes, rows=()):
         self._homes = homes
@@ -121,3 +125,43 @@ def test_resolve_default_id_live_homes_tiebreak_by_quest_id(
     ]
     monkeypatch.setattr(m, "make_store", lambda _: _StubStore(homes))
     assert m._resolve_default_id(tmp_path) == "quest-z"
+
+
+def test_resolve_default_id_archived_tiebreak_by_quest_id(
+    monkeypatch, tmp_path: Path,
+) -> None:
+    # Two archived rows with identical last timestamps: quest_id tie-break must win.
+    ts = "2026-06-09T00:00:05+00:00"
+    rows = [
+        _completed_row("quest-a", ts),
+        _completed_row("quest-z", ts),
+    ]
+    monkeypatch.setattr(m, "make_store", lambda _: _StubStore([], rows))
+    assert m._resolve_default_id(tmp_path) == "quest-z"
+
+
+def test_resolve_default_id_all_archived_empty_last_returns_none(
+    monkeypatch, tmp_path: Path,
+) -> None:
+    # No live homes; every archived row has an empty last-event timestamp.
+    rows = [
+        _completed_row("quest-a", ""),
+        _completed_row("quest-b", ""),
+    ]
+    monkeypatch.setattr(m, "make_store", lambda _: _StubStore([], rows))
+    assert m._resolve_default_id(tmp_path) is None
+
+
+def test_iter_quest_ids_live_first_then_archived_sorted_deduped(
+    monkeypatch, tmp_path: Path,
+) -> None:
+    # Live order is preserved; archived ids follow sorted; quest-a (in both) appears once.
+    live = ["quest-b", "quest-a"]
+    rows = [
+        _completed_row("quest-a", "2026-06-01T00:00:00+00:00"),  # already live → deduped
+        _completed_row("quest-c", "2026-06-01T00:00:00+00:00"),
+        _completed_row("quest-d", "2026-06-01T00:00:00+00:00"),
+    ]
+    monkeypatch.setattr(m, "_list_quest_homes", lambda _: live)
+    monkeypatch.setattr(m, "make_store", lambda _: _StubStore([], rows))
+    assert m._iter_quest_ids(tmp_path) == ["quest-b", "quest-a", "quest-c", "quest-d"]
