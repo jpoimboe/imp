@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, NamedTuple, Protocol
@@ -185,4 +186,8 @@ class LocalStore:
 
 
 def make_store(control_root: Path) -> Store:
+    sock = os.environ.get("IMP_SESSION_SOCKET")
+    if sock:
+        from imp.cli.store_proxy import ProxyStore
+        return ProxyStore(sock)
     return LocalStore(control_root)

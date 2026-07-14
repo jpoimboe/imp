@@ -7,7 +7,9 @@ strings on the wire; everything else is JSON-native."""
 from __future__ import annotations
 
 import base64
-from typing import Any
+from typing import Any, cast
+
+import anyio
 
 from imp.cli.store import (
     CompletedRow,
@@ -18,6 +20,7 @@ from imp.cli.store import (
     SearchZones,
     Store,
 )
+from imp.remote.session.protocol import encode_query, parse_result
 
 
 def _b64e(b: bytes | None) -> str | None:
@@ -118,3 +121,57 @@ def run_query(store: Store, op: str, args: dict[str, Any]) -> Any:
         return [_hit_to_wire(h)
                 for h in store.search(args["query"], _zones_from_wire(args["zones"]))]
     raise ValueError(f"unknown store op {op!r}")
+
+
+class ProxyStore:
+    """Ships each Store op to the quest daemon over its session socket.
+
+    One connection per call: send the query line, read the reply to EOF (the
+    daemon closes after the single result frame -- no frame-size cap needed),
+    decode. Runs only in-sandbox, where the socket is guaranteed present."""
+
+    def __init__(self, path: str) -> None:
+        self._path = path
+
+    async def _roundtrip(self, op: str, args: dict[str, Any]) -> Any:
+        stream = await anyio.connect_unix(self._path)
+        try:
+            await stream.send((encode_query(op, args) + "\n").encode("utf-8"))
+            chunks: list[bytes] = []
+            try:
+                while True:
+                    chunks.append(await stream.receive())
+            except (anyio.EndOfStream, anyio.ClosedResourceError,
+                    anyio.BrokenResourceError):
+                pass
+            return parse_result(b"".join(chunks).decode("utf-8").rstrip("\n"))
+        finally:
+            await stream.aclose()
+
+    def _call(self, op: str, args: dict[str, Any]) -> Any:
+        return anyio.run(self._roundtrip, op, args)
+
+    def get_events(self, quest_id: str) -> list[dict[str, Any]] | None:
+        return cast(
+            "list[dict[str, Any]] | None",
+            self._call("get_events", {"quest_id": quest_id}))
+
+    def get_artifact(self, quest_id: str, kind: str) -> bytes | None:
+        return _b64d(self._call("get_artifact", {"quest_id": quest_id, "kind": kind}))
+
+    def completed_rows(self) -> list[CompletedRow]:
+        return [_row_from_wire(d) for d in self._call("completed_rows", {})]
+
+    def backlog_readiness(self, depends_on: list[str]) -> Readiness:
+        return _readiness_from_wire(
+            self._call("backlog_readiness", {"depends_on": depends_on}))
+
+    def scan_homes(self) -> list[HomeDigest]:
+        return [_home_from_wire(d) for d in self._call("scan_homes", {})]
+
+    def quest_card(self, quest_id: str) -> QuestCard | None:
+        return _card_from_wire(self._call("quest_card", {"quest_id": quest_id}))
+
+    def search(self, query: str, zones: SearchZones) -> list[SearchHit]:
+        return [_hit_from_wire(d) for d in self._call(
+            "search", {"query": query, "zones": _zones_to_wire(zones)})]
