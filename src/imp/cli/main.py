@@ -1648,8 +1648,21 @@ def _cmd_list(args: argparse.Namespace) -> int:
     except worktree.PreconditionError:
         print(_NO_QUESTS_MESSAGE)
         return 0
-    lines = _overview_lines(control, show_all=args.all, now=datetime.now(UTC),
-                            color=should_use_color(sys.stdout))
+    now = datetime.now(UTC)
+    color = should_use_color(sys.stdout)
+    dispositions = _selected_list_dispositions(args)
+    if not dispositions and args.since is None:
+        lines = _overview_lines(control, show_all=args.all, now=now, color=color)
+        _page_or_print(lines, no_pager=args.no_pager)
+        return 0
+    try:
+        cutoff = _since_cutoff(args.since, now) if args.since is not None else None
+    except ValueError:
+        print(_SINCE_ERROR, file=sys.stderr)
+        raise SystemExit(2) from None
+    selected = dispositions or {"active", "backlog", "merged"}
+    lines = _filtered_overview_lines(
+        control, dispositions=selected, cutoff=cutoff, now=now, color=color)
     _page_or_print(lines, no_pager=args.no_pager)
     return 0
 
@@ -3638,6 +3651,28 @@ def _build_parser() -> argparse.ArgumentParser:
         "-a", "--all", action="store_true",
         help="Also include abandoned/left quests "
              "(the block is then labelled `history`).")
+    p_list.add_argument(
+        "--active", action="store_true",
+        help="Show only in-flight quests and drafts.")
+    p_list.add_argument(
+        "--backlog", action="store_true",
+        help="Show only backlog items.")
+    p_list.add_argument(
+        "--merged", action="store_true",
+        help="Show only merged quests.")
+    p_list.add_argument(
+        "--abandoned", action="store_true",
+        help="Show only abandoned quests.")
+    p_list.add_argument(
+        "--shelved", action="store_true",
+        help="Show only shelved conversations.")
+    p_list.add_argument(
+        "--archived", action="store_true",
+        help="Show merged, abandoned, and shelved quests (the archive).")
+    p_list.add_argument(
+        "--since", metavar="SPEC", default=None,
+        help="Show only quests active since SPEC — today, yesterday, this-week, "
+             "this-month, or a number + unit h/d/w/m/y (e.g. 2d, 1w).")
     p_list.add_argument(
         "--no-pager", action="store_true",
         help="Disable the pager even when stdout is a TTY.")
