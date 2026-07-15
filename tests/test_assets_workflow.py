@@ -286,10 +286,10 @@ def test_scope_code_check_clean_routes_by_fast_path() -> None:
     full = evaluate_rules(rules, vars={**_BASE_VARS, "fast_path": False},
                           output={"exit": 0, "stdout": "", "stderr": ""})
     assert full.action.target == "spec-finalizer" and full.action.resume is False
-    # Deliberate: the clean-exit script goto carries NO feedback (the engine drops a
-    # script step's clean-goto feedback; destinations self-orient from the on-disk spec).
-    assert express.action.feedback is None
-    assert full.action.feedback is None
+    # The clean-exit goto forwards the configured hand-off opener (the engine forwards
+    # a script step's configured feedback: on an exit-0 route).
+    assert express.action.feedback == "Plan this from the spec drafted with the user:"
+    assert full.action.feedback == "Adopt the spec drafted with the user and finalize it:"
 
 
 def test_scope_code_check_dirty_resumes_threshold() -> None:
@@ -299,6 +299,8 @@ def test_scope_code_check_dirty_resumes_threshold() -> None:
     m = evaluate_rules(rules, vars={**_BASE_VARS, "fast_path": False},
                        output={"exit": 1, "stdout": "", "stderr": "boom"})
     assert m.action.target == "threshold" and m.action.resume is True
+    # The dirty resume carries no configured feedback: — the engine delivers the script's stderr.
+    assert m.action.feedback is None
 
 
 def test_scope_code_check_is_bounded_and_label_suppressed() -> None:
