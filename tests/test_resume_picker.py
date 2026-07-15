@@ -117,3 +117,21 @@ async def test_picker_enter_with_preselect_returns_that_index() -> None:
         chosen = await run_picker(_cands(), now=_NOW, color=False,
                                   header="Show log for which Quest?", selected_index=1)
     assert chosen == "2026-06-10-bbb222"
+
+
+@pytest.mark.anyio
+async def test_picker_constructs_application_with_erase_when_done(monkeypatch) -> None:
+    import prompt_toolkit.application as pta
+
+    real_application = pta.Application
+    captured: dict[str, object] = {}
+
+    def spy(*args, **kwargs):
+        captured.update(kwargs)
+        return real_application(*args, **kwargs)
+
+    monkeypatch.setattr(pta, "Application", spy)
+    with create_pipe_input() as pipe, create_app_session(input=pipe, output=DummyOutput()):
+        pipe.send_text("q")                          # cancel; we only assert construction
+        await run_picker(_cands(), now=_NOW, color=False, header=_HEADER)
+    assert captured.get("erase_when_done") is True
