@@ -210,8 +210,9 @@ class AgentRunResult:
     # State.resume_mode = "continue" so a no-message resume continues the step.
     interrupt: bool = False
     # Tier A proactive handoff: the runner captured an agent-authored handoff
-    # note at this path before stopping. The caller (executor / dispatch_task)
-    # reincarnates the session seeded from it. None on every other outcome.
+    # note at this path before stopping. The executor reincarnates the session
+    # seeded from it; dispatch_task hands it back to the parent. None on every
+    # other outcome.
     handoff_path: str | None = None
 
 

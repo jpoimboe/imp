@@ -532,32 +532,34 @@ def subagent_status_row(sub: nv.SubagentFold, *, depth: int, color: bool,
     eliminates the SDK cancellation-sentinel leak from the default views. No
     leading bullet: the row is indented two cols (like the tool-burst recap) to
     sit under the agent turn's words, and the magenta color marks it as subagent
-    identity. A finished subagent appends `· {elapsed}` (how long it ran); an
-    abnormal terminal state (running-at-pause, failed, stalled, interrupted, context exhausted)
-    appends a plain `(state)` tag so a subagent that didn't cleanly finish still
-    stands out."""
+    identity. Uniform dot-separated layout `name · model · elapsed · tag`: the
+    model is gray, a finished subagent's frozen run duration is gray, and the
+    terminal-state tag comes LAST. A clean success carries no tag; `running` is
+    subagent magenta; the abnormal states (stalled, interrupted, context
+    exhausted, failed) are imp's brand gold (`wordmark`) so a subagent that did
+    not cleanly finish stands out."""
     sub_c = pal.NODE_COLORS["subagent"]
     parts = [pal.ansi(f"  {sub.subagent_name}", *sub_c, enabled=color)]
     model = subagent_model(sub)
     if model:
         # Gray, like the step header's model.
         parts.append(pal.ansi(f" · {model}", "gray", enabled=color))
-    if sub.running:
-        parts.append(pal.ansi(" (running)", *sub_c, enabled=color))
-    elif sub.terminal_state == "stalled":
-        parts.append(pal.ansi(" (stalled)", *sub_c, enabled=color))
-    elif sub.terminal_state == "interrupted":
-        parts.append(pal.ansi(" (interrupted)", *sub_c, enabled=color))
-    elif sub.terminal_state == "context_exhausted":
-        parts.append(pal.ansi(" (context exhausted)", *sub_c, enabled=color))
-    elif sub.is_error:
-        parts.append(pal.ansi(" (failed)", *sub_c, enabled=color))
     elapsed = nv.elapsed_seconds(sub.start_ts, sub.end_ts)
     if elapsed is not None:
         elapsed = max(0.0, elapsed - sub.nested.backoff_wait_seconds(sub.end_ts))
     done = "" if sub.running else fmt_seconds_done(elapsed)
     if done:
         parts.append(pal.ansi(f" · {done}", "gray", enabled=color))
+    if sub.running:
+        parts.append(pal.ansi(" · running", *sub_c, enabled=color))
+    elif sub.terminal_state == "stalled":
+        parts.append(pal.ansi(" · stalled", "wordmark", enabled=color))
+    elif sub.terminal_state == "interrupted":
+        parts.append(pal.ansi(" · interrupted", "wordmark", enabled=color))
+    elif sub.terminal_state == "context_exhausted":
+        parts.append(pal.ansi(" · context exhausted", "wordmark", enabled=color))
+    elif sub.is_error:
+        parts.append(pal.ansi(" · failed", "wordmark", enabled=color))
     return _gutter_indent(depth, gutters, color) + "".join(parts)
 
 

@@ -346,9 +346,8 @@ async def dispatch_task(
         }
 
         def _build_sub_inv(target: Path, init_msgs: tuple[Message, ...]) -> Any:
-            # Rebuilt verbatim per (re)dispatch so a reincarnation can re-seed the
-            # initial message and re-target a fresh transcript dir; every other arg
-            # is captured unchanged.
+            # Builds this dispatch's invocation; every arg besides the target dir
+            # and initial messages is captured unchanged.
             return build_agent_invocation(
                 agent_def=subagent_def,
                 provider_name=sub_provider,
@@ -415,134 +414,111 @@ async def dispatch_task(
         # Lazy import: error_policy pulls providers/__init__, and this module is
         # in that cold-import chain — a top-level import would cycle.
         from imp.engine.error_policy import budget_for
-        from imp.engine.reincarnation import reincarnation_seed, stash_transcript
 
         limiter = ctx.get_parallel_limiter()
         emit_parallelism_warning_once(ctx.event_log, ctx.agent_id)
-        reincarnation_key = f"sub:{tool_call_event_id}"
         async with limiter:
-            while True:  # reincarnation loop (Tier B backstop)
-                backoff = 0
-                cumulative_backoff = 0.0
-                hint_exempt_sleeps = 0
-                while True:
-                    runner = await ctx.spawn_subagent(sub_inv)
-                    result = await drive_invocation(
-                        sub_inv, runner, coordinator=ctx.coordinator,
-                        log=ctx.event_log, emit_events=False,
-                        prior_backoff_attempts=backoff)
-                    if result.delay is None:
-                        break
-                    # Per-category wall-clock budget (checked BEFORE sleeping,
-                    # matching executor). category comes from the plumbed ErrorInfo,
-                    # defaulting to "unknown" when absent. On exhaustion raise
-                    # SubagentSuspended — this path's own clean-pause unwind (it
-                    # cannot return an executor Pause).
-                    category = result.error.category if result.error else "unknown"
-                    # A hinted delay is an announced reset wait, not blind retrying:
-                    # exempt it from the budget and don't accrue it, capped at 3 such
-                    # sleeps per loop (the 4th is budgeted). Mirrors _route_agent.
-                    hinted = result.delay_hinted and hint_exempt_sleeps < 3
-                    if not hinted:
-                        budget = budget_for(category)
-                        if budget is not None and cumulative_backoff + result.delay > budget:
-                            detail = ("re-authentication needed" if category == "auth"
-                                      else "retry ceiling reached")
-                            raise SubagentSuspended(
-                                f"{detail} during subagent backoff (category={category})")
-                    backoff += 1
-                    # Surface the subagent backoff so a self-healed retry isn't silent.
-                    if ctx.event_log is not None:
-                        retry_payload = {
-                            "category": category,
-                            "attempt": backoff,
-                            "backoff_seconds": result.delay,
-                        }
-                        if hinted:
-                            retry_payload["hinted"] = True
-                        ctx.event_log.append(
-                            agent_id=sub_inv.agent_id, type="agent_retry",
-                            payload=retry_payload)
-                    await _interruptible_sleep(result.delay, ctx.coordinator)
+            backoff = 0
+            cumulative_backoff = 0.0
+            hint_exempt_sleeps = 0
+            while True:
+                runner = await ctx.spawn_subagent(sub_inv)
+                result = await drive_invocation(
+                    sub_inv, runner, coordinator=ctx.coordinator,
+                    log=ctx.event_log, emit_events=False,
+                    prior_backoff_attempts=backoff)
+                if result.delay is None:
+                    break
+                # Per-category wall-clock budget (checked BEFORE sleeping,
+                # matching executor). category comes from the plumbed ErrorInfo,
+                # defaulting to "unknown" when absent. On exhaustion raise
+                # SubagentSuspended — this path's own clean-pause unwind (it
+                # cannot return an executor Pause).
+                category = result.error.category if result.error else "unknown"
+                # A hinted delay is an announced reset wait, not blind retrying:
+                # exempt it from the budget and don't accrue it, capped at 3 such
+                # sleeps per loop (the 4th is budgeted). Mirrors _route_agent.
+                hinted = result.delay_hinted and hint_exempt_sleeps < 3
+                if not hinted:
+                    budget = budget_for(category)
+                    if budget is not None and cumulative_backoff + result.delay > budget:
+                        detail = ("re-authentication needed" if category == "auth"
+                                  else "retry ceiling reached")
+                        raise SubagentSuspended(
+                            f"{detail} during subagent backoff (category={category})")
+                backoff += 1
+                # Surface the subagent backoff so a self-healed retry isn't silent.
+                if ctx.event_log is not None:
+                    retry_payload = {
+                        "category": category,
+                        "attempt": backoff,
+                        "backoff_seconds": result.delay,
+                    }
                     if hinted:
-                        hint_exempt_sleeps += 1
-                    else:
-                        cumulative_backoff += result.delay
-                    if ctx.coordinator is not None and ctx.coordinator.should_pause:
-                        raise SubagentSuspended("paused during subagent backoff")
-
-                # Tier A proactive handoff: the subagent approached its window and
-                # wrote a handoff note before stopping. Reborn INSIDE this dispatch
-                # (the parent still sees one resolved sub_agent call) — stash its
-                # transcript, seed a fresh instance from the handoff, and re-dispatch
-                # — up to the same per-session cap. At the cap, fall through to the
-                # is_error degrade below (result.output is None). The counter lives on
-                # the shared top-level State (ctx.quest_state); a nested dispatch has
-                # none, so it falls through unchanged.
-                if (result.handoff_path is not None
-                        and ctx.quest_state is not None
-                        and ctx.quest_state.reincarnation_count(reincarnation_key)
-                        < ctx.quest_state.max_reincarnations):
-                    ctx.quest_state.bump_reincarnation(reincarnation_key)
-                    stashed = stash_transcript(target_dir)
-                    # Note existence is the sole arbiter of handoff success;
-                    # a missing note degrades the seed to transcript-only.
-                    hp = Path(result.handoff_path)
-                    note_exists = hp.exists()
-                    reason = ("context threshold crossed" if note_exists
-                              else "handoff failed — recovering from transcript")
+                        retry_payload["hinted"] = True
                     ctx.event_log.append(
-                        agent_id=None, type="reincarnating",
-                        payload={"reason": reason})
-                    seed = reincarnation_seed(
-                        stashed_dir=stashed,
-                        handoff_path=hp if note_exists else None,
-                        quest_id=cc.id)
-                    _, target_dir = _allocate_subagent_dir(ctx, subagent_name)
-                    sub_inv = _build_sub_inv(
-                        target_dir,
-                        (Message(role="user", content=(TextBlock(text=seed),)),))
-                    continue
-                # Tier B backstop: a subagent that hit the hard window error is reborn
-                # INSIDE this dispatch (the parent still sees one resolved sub_agent
-                # call) — stash its transcript, seed a fresh instance from it, and
-                # re-dispatch — up to the per-session cap. An inner loop (not a
-                # recursive dispatch_task call) avoids re-acquiring `limiter` and
-                # deadlocking when the width cap is 1. The counter lives on the shared
-                # top-level State (ctx.quest_state); a nested dispatch has none, so it
-                # falls through to today's failure path unchanged.
-                if (result.fatal and result.error is not None
-                        and result.error.category == "context_window"
-                        and ctx.quest_state is not None
-                        and ctx.quest_state.reincarnation_count(reincarnation_key)
-                        < ctx.quest_state.max_reincarnations):
-                    ctx.quest_state.bump_reincarnation(reincarnation_key)
-                    stashed = stash_transcript(target_dir)
-                    ctx.event_log.append(
-                        agent_id=None, type="reincarnating",
-                        payload={"reason": "context window exceeded"})
-                    seed = reincarnation_seed(stashed_dir=stashed, handoff_path=None,
-                                               quest_id=cc.id)
-                    _, target_dir = _allocate_subagent_dir(ctx, subagent_name)
-                    sub_inv = _build_sub_inv(
-                        target_dir,
-                        (Message(role="user", content=(TextBlock(text=seed),)),))
-                    continue
-                break
+                        agent_id=sub_inv.agent_id, type="agent_retry",
+                        payload=retry_payload)
+                await _interruptible_sleep(result.delay, ctx.coordinator)
+                if hinted:
+                    hint_exempt_sleeps += 1
+                else:
+                    cumulative_backoff += result.delay
+                if ctx.coordinator is not None and ctx.coordinator.should_pause:
+                    raise SubagentSuspended("paused during subagent backoff")
 
             if result.paused:
                 # Unwind to the executor; resume restarts the subagent subtree fresh.
                 raise SubagentSuspended("subagent paused")
+
+            # Context-ceiling handback: the subagent reached its window — it wrote a
+            # handoff as it approached, or hit the hard context_window error. Instead
+            # of reincarnating in place, hand its progress back to the parent as an
+            # is_error tool_result (the raise below reuses that path) so the parent
+            # adjudicates: re-dispatch narrower/higher-tier, point a fresh subagent at
+            # the handoff/transcript, or carry on itself.
+            # CONSUMER CONTRACT: narrative._close_subagent_fold scans this is_error
+            # content for the literal "[context_exhausted]" marker to derive the
+            # subagent's terminal state — keep that bracketed marker in the body.
+            context_ceiling = (
+                result.handoff_path is not None
+                or (result.fatal and result.error is not None
+                    and result.error.category == "context_window"))
+            if context_ceiling:
+                tx = target_dir / "transcript.jsonl"
+                note = None
+                if result.handoff_path is not None:
+                    hp = Path(result.handoff_path)
+                    if hp.exists():
+                        note = hp.read_text()
+                header = (f"subagent {subagent_name!r} reached its context limit and "
+                          f"stopped before finishing. [context_exhausted]")
+                if note is not None:
+                    body = (
+                        f"{header}\n\n"
+                        f"It wrote this handoff before stopping:\n\n"
+                        f"{note}\n\n"
+                        f"Full prior transcript: {tx}\n\n"
+                        f"You decide what happens next — re-dispatch a fresh subagent "
+                        f"(narrower, at a higher tier, or pointed at the "
+                        f"handoff/transcript above to continue), or carry on from this "
+                        f"handoff yourself.")
+                else:
+                    body = (
+                        f"{header}\n\n"
+                        f"It hit the hard context limit without writing a handoff. "
+                        f"Full prior transcript: {tx}\n\n"
+                        f"You decide what happens next — re-dispatch a fresh subagent "
+                        f"(narrower, at a higher tier, or pointed at the transcript "
+                        f"above to continue), or carry on from what you have.")
+                raise RuntimeError(body)
+
             if result.fatal or result.errored or result.output is None:
                 # The parent adjudicates a flaky subagent (is_error tool_result) — it
                 # must not kill the task-lead. error_policy backoff has already been
                 # applied above, so transient errors retried before reaching here.
                 cat = result.error.category if result.error else "unknown"
                 kind = result.error.kind if result.error else None
-                # Tier A cap-exhausted: the subagent wrote a handoff but we have no
-                # reincarnation budget left. No error object exists, so tag it explicitly.
-                if kind is None and result.handoff_path is not None:
-                    kind = "context_exhausted"
                 # Embed the kind (e.g. "stalled" from the B.2 watchdog) so the parent's
                 # is_error tool_result content carries it — Part D derives the subagent's
                 # terminal glyph from this marker. Without it, a stalled subagent reads

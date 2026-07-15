@@ -1066,3 +1066,112 @@ def test_task_tool_tier_description_omit_uses_default_not_inherit() -> None:
     # The factually-wrong clause is gone.
     assert "inherit the caller's model" not in desc
     assert "Pick by subtask difficulty" not in desc
+
+
+def test_dispatch_task_hands_back_handoff_note_inline(tmp_path: Path) -> None:
+    # Tier A: subagent wrote a handoff as it neared its window. dispatch_task must
+    # NOT reincarnate — it hands the note back to the parent as an is_error
+    # tool_result inlining the note text, a transcript pointer, the guidance
+    # footer, and the [context_exhausted] marker.
+    import anyio
+
+    from imp.engine.agent_run import AgentRunResult
+
+    ctx = _dispatch_ctx(tmp_path)
+
+    note_path = tmp_path / "handoff.md"
+    note_path.write_text("# handoff\nExplored module X; next wire up Y.\n")
+
+    spawns = {"n": 0}
+    orig_spawn = ctx.spawn_subagent
+    async def _counting_spawn(inv):
+        spawns["n"] += 1
+        return await orig_spawn(inv)
+    ctx.spawn_subagent = _counting_spawn
+
+    async def _fake_drive(*_a, **_k):
+        return AgentRunResult(output=None, errored=False, paused=False,
+                              fatal=False, delay=None,
+                              handoff_path=str(note_path))
+
+    import imp.agents.subagents as sub_mod
+    orig = sub_mod.drive_invocation
+    sub_mod.drive_invocation = _fake_drive  # type: ignore[assignment]
+    try:
+        with pytest.raises(RuntimeError) as ei:
+            anyio.run(dispatch_task, ctx, "reviewer", "do x")
+    finally:
+        sub_mod.drive_invocation = orig  # type: ignore[assignment]
+
+    body = str(ei.value)
+    assert "reached its context limit and stopped before finishing." in body
+    assert "[context_exhausted]" in body
+    assert "It wrote this handoff before stopping:" in body
+    assert "Explored module X; next wire up Y." in body
+    assert "Full prior transcript: " in body
+    assert "transcript.jsonl" in body
+    assert "You decide what happens next" in body
+    assert spawns["n"] == 1  # no reincarnation respawn
+
+
+def test_dispatch_task_hands_back_hard_context_window(tmp_path: Path) -> None:
+    # Tier B: subagent hit the hard context_window fatal error with no handoff.
+    # dispatch_task hands back a transcript-only body (not the old generic
+    # "failed (context_window)" message) still carrying [context_exhausted].
+    import anyio
+
+    from imp.engine.agent_run import AgentRunResult, ErrorInfo
+
+    ctx = _dispatch_ctx(tmp_path)
+
+    async def _fake_drive(*_a, **_k):
+        return AgentRunResult(output=None, errored=False, paused=False,
+                              fatal=True, delay=None,
+                              error=ErrorInfo("context_window", "prompt_too_long"))
+
+    import imp.agents.subagents as sub_mod
+    orig = sub_mod.drive_invocation
+    sub_mod.drive_invocation = _fake_drive  # type: ignore[assignment]
+    try:
+        with pytest.raises(RuntimeError) as ei:
+            anyio.run(dispatch_task, ctx, "reviewer", "do x")
+    finally:
+        sub_mod.drive_invocation = orig  # type: ignore[assignment]
+
+    body = str(ei.value)
+    assert "reached its context limit and stopped before finishing." in body
+    assert "[context_exhausted]" in body
+    assert "It hit the hard context limit without writing a handoff." in body
+    assert "Full prior transcript: " in body
+    assert "transcript.jsonl" in body
+    assert "It wrote this handoff before stopping:" not in body
+
+
+def test_dispatch_task_missing_handoff_note_degrades_to_transcript(
+        tmp_path: Path) -> None:
+    # A handoff_path is set but the note file is absent on disk. dispatch_task
+    # must NOT crash — it degrades to the transcript-only body, same as Tier B.
+    import anyio
+
+    from imp.engine.agent_run import AgentRunResult
+
+    ctx = _dispatch_ctx(tmp_path)
+
+    async def _fake_drive(*_a, **_k):
+        return AgentRunResult(output=None, errored=False, paused=False,
+                              fatal=False, delay=None,
+                              handoff_path=str(tmp_path / "absent.md"))
+
+    import imp.agents.subagents as sub_mod
+    orig = sub_mod.drive_invocation
+    sub_mod.drive_invocation = _fake_drive  # type: ignore[assignment]
+    try:
+        with pytest.raises(RuntimeError) as ei:
+            anyio.run(dispatch_task, ctx, "reviewer", "do x")
+    finally:
+        sub_mod.drive_invocation = orig  # type: ignore[assignment]
+
+    body = str(ei.value)
+    assert "[context_exhausted]" in body
+    assert "It hit the hard context limit without writing a handoff." in body
+    assert "It wrote this handoff before stopping:" not in body

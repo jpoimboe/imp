@@ -307,7 +307,7 @@ def test_finish_force_pops_running_subagent_without_outcome() -> None:
     # row shows the (still-running) status; internal prose and outcome stay hidden.
     drv.finish()
     body = _body(out)
-    assert any(ln.strip() == "reviewer (running)" for ln in body)
+    assert any(ln.strip() == "reviewer · running" for ln in body)
     assert not any("partial work" in ln for ln in body)
     assert not any("→ status" in ln for ln in body)   # no outcome ever
 

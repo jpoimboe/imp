@@ -165,7 +165,7 @@ def test_subagent_outcome_suppressed_in_lean() -> None:
 
 
 def test_subagent_error_renders_failed_status_row() -> None:
-    # Part D: a failed subagent surfaces as (failed) in lean — NOT the raw
+    # Part D: a failed subagent surfaces as · failed in lean — NOT the raw
     # error outcome prose (which could leak the SDK sentinel).
     out = list(_lines([
         _ev("2", "step_started", step="s", kind="agent", phase="p",
@@ -175,10 +175,10 @@ def test_subagent_error_renders_failed_status_row() -> None:
         _ev("r1", "tool_result", agent_id="step:p/s", id="b1",
             content="dispatch failed: boom", error=True),
     ], width=80))
-    assert any("reviewer (failed)" in ln for ln in out)
+    assert any("reviewer · failed" in ln for ln in out)
     assert not any("· reviewer" in ln for ln in out)              # no leading bullet
     assert not any("dispatch failed: boom" in ln for ln in out)   # outcome suppressed
-    # The status row carries the subagent (magenta) color when color is on.
+    # With color on, the row renders ANSI; the failed tag's gold is asserted below.
     color_out = list(render_tree(nv.build_tree([
         _ev("2", "step_started", step="s", kind="agent", phase="p",
             model="m", provider="anthropic"),
@@ -187,7 +187,9 @@ def test_subagent_error_renders_failed_status_row() -> None:
         _ev("r1", "tool_result", agent_id="step:p/s", id="b1",
             content="dispatch failed: boom", error=True),
     ]), full=False, color=True, width=80))
-    assert any("(failed)" in ln and "\x1b[35m" in ln for ln in color_out)
+    # The failed tag is imp's brand gold (wordmark) when color is on.
+    assert any("· failed" in ln and pal.sgr("wordmark", enabled=True) in ln
+               for ln in color_out)
 
 
 def test_full_mode_also_emits_subagent_outcome() -> None:
@@ -1180,25 +1182,55 @@ def test_lean_subagent_status_glyphs() -> None:
     from imp.cli import narrative as nv
     from imp.cli.render_text import subagent_status_row
 
-    def row(**kw):
+    def row(*, color=False, running=False, **kw):
         f = nv.SubagentFold(subagent_name="s", event_id="e", block_id="b",
-                            nested=nv.NarrativeBuilder())
+                            nested=nv.NarrativeBuilder(), running=running)
         for k, v in kw.items():
             setattr(f, k, v)
-        return subagent_status_row(f, depth=0, color=False, gutters=())
+        return subagent_status_row(f, depth=0, color=color, gutters=())
 
-    # Success carries NO status suffix (point 6 — it read as noise); only the
-    # abnormal terminal states keep a (state) tag so a broken subagent still stands out.
-    # No leading bullet: the name is indented two cols under the agent turn.
-    assert row(running=False) == "  s"
-    assert "(" not in row(running=False)
-    assert "(running)" in row(running=True)
-    assert "(failed)" in row(running=False, is_error=True)
-    assert "(stalled)" in row(running=False, is_error=True, terminal_state="stalled")
-    assert "(interrupted)" in row(running=False, is_error=True,
-                                  terminal_state="interrupted")
-    assert "(context exhausted)" in row(running=False, is_error=True,
-                                       terminal_state="context_exhausted")
+    # Clean success carries NO tag (it read as noise); only running + the three
+    # abnormal terminal states + the generic error keep a tag. New format: the tag
+    # is LAST and dot-separated (no parentheses). No leading bullet; the name is
+    # indented two cols under the agent turn.
+    assert row() == "  s"
+    assert "(" not in row()
+    assert row(running=True) == "  s · running"
+    assert row(is_error=True) == "  s · failed"
+    assert row(is_error=True, terminal_state="stalled") == "  s · stalled"
+    assert row(is_error=True, terminal_state="interrupted") == "  s · interrupted"
+    assert row(is_error=True, terminal_state="context_exhausted") \
+        == "  s · context exhausted"
+    # No parentheses survive on any tag.
+    assert "(" not in row(running=True)
+    assert "(" not in row(is_error=True, terminal_state="stalled")
+
+    # Per-tag colors: running is subagent magenta; the four error/warning tags are
+    # imp's brand gold (wordmark).
+    sub_c = pal.NODE_COLORS["subagent"]
+    assert pal.ansi(" · running", *sub_c) in row(color=True, running=True)
+    assert pal.ansi(" · stalled", "wordmark") \
+        in row(color=True, is_error=True, terminal_state="stalled")
+    assert pal.ansi(" · interrupted", "wordmark") \
+        in row(color=True, is_error=True, terminal_state="interrupted")
+    assert pal.ansi(" · context exhausted", "wordmark") \
+        in row(color=True, is_error=True, terminal_state="context_exhausted")
+    assert pal.ansi(" · failed", "wordmark") in row(color=True, is_error=True)
+
+
+def test_subagent_status_row_tag_follows_elapsed() -> None:
+    # The abnormal tag renders LAST — after the frozen elapsed suffix, not before
+    # it. This is the crux of the reformat (old layout put the tag mid-row).
+    from imp.cli import narrative as nv
+    from imp.cli.render_text import subagent_status_row
+
+    fold = nv.SubagentFold(subagent_name="reviewer", event_id="e", block_id="b",
+                           nested=nv.NarrativeBuilder(), running=False,
+                           is_error=True, terminal_state="stalled",
+                           start_ts="2026-01-01T00:00:00",
+                           end_ts="2026-01-01T00:00:42")
+    assert subagent_status_row(fold, depth=0, color=False) \
+        == "  reviewer · 42s · stalled"
 
 
 def test_full_subagent_unchanged_shows_children() -> None:
@@ -1235,7 +1267,7 @@ def test_stalled_subagent_renders_stalled_glyph_through_builder() -> None:
     fold = folds[0]
     assert fold.terminal_state == "stalled"
     lines = list(_render(fold, depth=0, full=False, color=False, width=80))
-    assert any("(stalled)" in ln for ln in lines)
+    assert any("· stalled" in ln for ln in lines)
 
 
 def test_full_burst_per_call_args_and_output_block() -> None:
@@ -1527,8 +1559,8 @@ def test_subagent_suspended_structured_kind_renders_interrupted() -> None:
             content="SubagentSuspended: subagent paused", error=True,
             kind="interrupted"),
     ]))
-    assert "(interrupted)" in out
-    assert "(failed)" not in out
+    assert "· interrupted" in out
+    assert "· failed" not in out
 
 
 def test_subagent_suspended_bracket_marker_renders_interrupted() -> None:
@@ -1541,8 +1573,8 @@ def test_subagent_suspended_bracket_marker_renders_interrupted() -> None:
         _ev("4", "tool_result", agent_id="step:p/s", id="b1",
             content="SubagentSuspended: subagent paused [interrupted]", error=True),
     ]))
-    assert "(interrupted)" in out
-    assert "(failed)" not in out
+    assert "· interrupted" in out
+    assert "· failed" not in out
 
 
 def test_abnormal_then_healthy_same_name_subagent_shows_no_retrying() -> None:
@@ -1561,7 +1593,7 @@ def test_abnormal_then_healthy_same_name_subagent_shows_no_retrying() -> None:
         _ev("6", "tool_result", agent_id="step:p/s", id="b2",
             content='{"status": "Success"}', error=False),
     ]))
-    assert "(failed)" in out          # the abnormal first close still reads (failed)
+    assert "· failed" in out          # the abnormal first close still reads · failed
     assert "retrying" not in out      # but no retry annotation anywhere
 
 
