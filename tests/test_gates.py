@@ -320,6 +320,77 @@ def test_route_script_goto_nonzero_keeps_feedback(tmp_path) -> None:
     anyio.run(main)
 
 
+def test_route_script_goto_exit0_forwards_configured_feedback(tmp_path) -> None:
+    """A configured feedback: on an exit-0 forward goto is delivered verbatim."""
+    import types
+
+    import anyio
+
+    from imp.engine.executor import _route_script
+    from imp.engine.state import InMemoryEventLog
+
+    quest = types.SimpleNamespace(
+        workflow_dir=tmp_path, project_root=tmp_path,
+        id="test-id", handle="test", title="Test",
+        quest_dir=tmp_path / ".imp" / "change",
+    )
+    step = Step(
+        name="scope-code-check", phase="p", kind="script",
+        rules=(_rule(None, Goto(
+            "plan-writer",
+            feedback="Plan this from the spec drafted with the user:")),),
+        on_max_retries=Pause(), max_loops=10, source=loc(),
+        command="exit 0",
+    )
+
+    async def main() -> None:
+        state = types.SimpleNamespace(vars={}, route_label=None)
+        log = InMemoryEventLog()
+        action, feedback, _ = await _route_script(step, quest, state, log)
+        assert isinstance(action, Goto)
+        assert feedback == "Plan this from the spec drafted with the user:"
+
+    anyio.run(main)
+
+
+def test_route_script_nonzero_synthesizes_despite_configured_feedback(tmp_path) -> None:
+    """On a non-zero exit the synthesized script output is delivered even when the matched
+    rule carries a configured feedback: — the failure diagnostics that the converge-verify
+    and integration-verify triage agents reason over (and are forbidden to re-run) must
+    never be replaced by the static preamble."""
+    import types
+
+    import anyio
+
+    from imp.engine.executor import _route_script
+    from imp.engine.state import InMemoryEventLog
+
+    quest = types.SimpleNamespace(
+        workflow_dir=tmp_path, project_root=tmp_path,
+        id="test-id", handle="test", title="Test",
+        quest_dir=tmp_path / ".imp" / "change",
+    )
+    preamble = "Integration tests failed on the merged tree. Adjudicate fix-vs-tolerate:"
+    step = Step(
+        name="integration-verify", phase="p", kind="script",
+        rules=(_rule(None, Goto("integration-reviewer", feedback=preamble)),),
+        on_max_retries=Pause(), max_loops=10, source=loc(),
+        command="echo boom; exit 1",
+    )
+
+    async def main() -> None:
+        state = types.SimpleNamespace(vars={}, route_label=None)
+        log = InMemoryEventLog()
+        action, feedback, _ = await _route_script(step, quest, state, log)
+        assert isinstance(action, Goto)
+        assert feedback is not None
+        assert "boom" in feedback            # actual failure output delivered
+        assert "failed (exit 1)" in feedback
+        assert feedback != preamble          # NOT replaced by the configured preamble
+
+    anyio.run(main)
+
+
 def test_run_script_rstrips_stdout(tmp_path) -> None:
     """Gate stdout exposed to rules/feedback has trailing whitespace trimmed."""
     step = _script_step("printf 'abc123\\n\\n'")

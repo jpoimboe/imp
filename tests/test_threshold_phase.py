@@ -33,22 +33,22 @@ def test_threshold_is_first_phase_with_show_label_false() -> None:
     assert step.label is None  # label removed; reveal-on-error falls back to raw step name
 
 
-def test_threshold_express_routes_to_plan_writer_and_sets_fast_path() -> None:
+def test_threshold_express_routes_to_scope_gate_and_sets_fast_path() -> None:
     rules = _steps(_wf())["threshold"].rules
     m = evaluate_rules(rules, vars=_BASE_VARS,
                        output={"status": "Success", "ceremony": "express"})
     assert isinstance(m.action, Goto)
-    assert m.action.target == "plan-writer"
-    assert m.action.resume is False                 # cross-phase plain goto, skips spec beat
+    assert m.action.target == "scope-code-check"  # gate first; then plan-writer on a clean tree
+    assert m.action.resume is False
     assert m.var_mutations["fast_path"] is True
 
 
-def test_threshold_full_routes_to_spec_finalizer_and_clears_fast_path() -> None:
+def test_threshold_full_routes_to_scope_gate_and_clears_fast_path() -> None:
     rules = _steps(_wf())["threshold"].rules
     m = evaluate_rules(rules, vars=_BASE_VARS,
                        output={"status": "Success", "ceremony": "full"})
     assert isinstance(m.action, Goto)
-    assert m.action.target == "spec-finalizer"
+    assert m.action.target == "scope-code-check"  # gate first; then spec-finalizer on a clean tree
     assert m.action.resume is False
     assert m.var_mutations["fast_path"] is False
 
@@ -190,14 +190,22 @@ def test_threshold_bare_open_keeps_concierge_and_scout_hats(tmp_path) -> None:
 def test_express_path_skips_spec_beat_full_path_keeps_it() -> None:
     wf = _wf()
     steps = _steps(wf)
-    # express: threshold jumps straight to plan-writer (the spec phase is bypassed).
+    # Both ceremonies enter the scope-code-check gate first.
     express = evaluate_rules(steps["threshold"].rules, vars=_BASE_VARS,
                              output={"status": "Success", "ceremony": "express"})
-    assert isinstance(express.action, Goto) and express.action.target == "plan-writer"
-    # full: threshold enters spec-finalizer, the first chromed beat.
+    assert isinstance(express.action, Goto) and express.action.target == "scope-code-check"
     full = evaluate_rules(steps["threshold"].rules, vars=_BASE_VARS,
                           output={"status": "Success", "ceremony": "full"})
-    assert isinstance(full.action, Goto) and full.action.target == "spec-finalizer"
+    assert isinstance(full.action, Goto) and full.action.target == "scope-code-check"
+    # On a clean tree the gate forwards by fast_path: express -> plan-writer (spec
+    # phase bypassed), full -> spec-finalizer (the first chromed beat).
+    gate = steps["scope-code-check"].rules
+    gate_express = evaluate_rules(gate, vars={**_BASE_VARS, "fast_path": True},
+                                  output={"exit": 0, "stdout": "", "stderr": ""})
+    assert isinstance(gate_express.action, Goto) and gate_express.action.target == "plan-writer"
+    gate_full = evaluate_rules(gate, vars={**_BASE_VARS, "fast_path": False},
+                               output={"exit": 0, "stdout": "", "stderr": ""})
+    assert isinstance(gate_full.action, Goto) and gate_full.action.target == "spec-finalizer"
     # The spec phase is still the second phase, entered only on the full path.
     assert [p.name for p in wf.phases][:2] == ["threshold", "spec"]
 

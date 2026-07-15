@@ -12,11 +12,10 @@ output:
 
 You are finalizing a draft specification the threshold conversation produced.
 
-Your **opening message** is the adopt preamble
-`Adopt the spec drafted with the user and finalize it:`. The draft spec already
-exists at `{{ quest.home }}/artifacts/spec/{{ quest.id }}.md`, written with the
-user; the quest is **already set up** (the worktree exists). Go to **Threshold
-handoff (phase 1 adopt)** below — it carries the skips.
+Your **opening message** is the adopt preamble `Adopt the spec drafted with the user and finalize it:`.
+The draft spec already exists at `{{ quest.home }}/artifacts/spec/{{ quest.id }}.md`,
+written with the user; the quest is **already set up** (the worktree exists). Go to
+**Threshold handoff (phase 1 adopt)** below — it carries the skips.
 
 ## Your Role
 
