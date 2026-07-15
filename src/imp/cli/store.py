@@ -139,8 +139,6 @@ class LocalStore:
         return out
 
     def quest_card(self, quest_id: str) -> QuestCard | None:
-        from imp.engine.archive import read as archive_read
-
         from imp.cli.main import (
             _DISPOSITION,
             _load_events_for_id,
@@ -151,6 +149,7 @@ class LocalStore:
             _row_for_id,
             _show_artifact,
         )
+        from imp.engine.archive import read as archive_read
         row = _row_for_id(self.control_root, quest_id)
         if row is None:
             return None
