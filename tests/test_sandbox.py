@@ -1001,7 +1001,7 @@ def test_resolve_policy_allows_read_reflects_steps_mask(tmp_path):
     assert pol.allows_read(quest_dir / "steps" / "phase" / "x") is False
     assert pol.allows_read(quest_dir / "artifacts" / "spec.md") is True
     assert pol.allows_read(quest_dir / "workflow" / "w.md") is True
-    assert pol.allows_read(quest_dir / "events.jsonl") is True
+    assert pol.allows_read(quest_dir / "events.jsonl") is False
 
 
 def test_resolve_policy_steps_mask_is_existence_gated(tmp_path):
@@ -1015,6 +1015,37 @@ def test_resolve_policy_steps_mask_is_existence_gated(tmp_path):
         available=True, quest_dir=quest_dir,
     )
     assert str(quest_dir / "steps") not in pol.secret_dirs
+
+
+def test_resolve_policy_masks_quest_events_jsonl(tmp_path):
+    control, wt = _layout(tmp_path)
+    quest_dir = control / ".imp" / "quests" / "abc"
+    quest_dir.mkdir(parents=True)
+    (quest_dir / "events.jsonl").write_text('{"e":1}\n')
+    sib_dir = control / ".imp" / "quests" / "sib"
+    sib_dir.mkdir(parents=True)
+    (sib_dir / "events.jsonl").write_text("")
+    pol = resolve_policy(
+        worktree=wt, control_root=control, quest_id="abc",
+        cfg=SandboxConfig(), engine_env_result={}, environ={},
+        available=True, quest_dir=quest_dir,
+    )
+    assert str(quest_dir / "events.jsonl") in pol.secret_files
+    assert str(sib_dir / "events.jsonl") in pol.secret_files
+    assert pol.allows_read(quest_dir / "events.jsonl") is False
+
+
+def test_resolve_policy_events_mask_is_existence_gated(tmp_path):
+    control, wt = _layout(tmp_path)
+    quest_dir = control / ".imp" / "quests" / "abc"
+    quest_dir.mkdir(parents=True)
+    # No events.jsonl written — the existence-gate must produce no entry.
+    pol = resolve_policy(
+        worktree=wt, control_root=control, quest_id="abc",
+        cfg=SandboxConfig(), engine_env_result={}, environ={},
+        available=True, quest_dir=quest_dir,
+    )
+    assert str(quest_dir / "events.jsonl") not in pol.secret_files
 
 
 def test_readonly_overlay_denies_write_inside_allows_sibling():
@@ -1388,3 +1419,81 @@ def test_resolve_policy_omits_workflow_overlay_when_workflow_is_plain_file(tmp_p
         available=True, quest_dir=quest_dir,
     )
     assert pol.readonly_overlays == ()
+
+
+def test_resolve_policy_masks_archive_footguns(tmp_path):
+    control, wt = _layout(tmp_path)
+    archive = control / ".imp" / "archive"
+    (archive / "blobs").mkdir(parents=True)
+    (archive / "index.db").write_text("")
+    (archive / "records").mkdir()
+    pol = resolve_policy(
+        worktree=wt, control_root=control, quest_id="abc",
+        cfg=SandboxConfig(), engine_env_result={}, environ={},
+        available=True,
+    )
+    assert str(archive / "blobs") in pol.secret_dirs
+    assert str(archive / "index.db") in pol.secret_files
+    # records/ stays readable — never masked.
+    assert str(archive / "records") not in pol.secret_dirs
+    assert pol.allows_read(archive / "blobs" / "ab" / "cd") is False
+    assert pol.allows_read(archive / "index.db") is False
+    assert pol.allows_read(archive / "records" / "x.json") is True
+
+
+def test_resolve_policy_archive_mask_is_existence_gated(tmp_path):
+    control, wt = _layout(tmp_path)
+    # No .imp/archive tree created — the existence-gate must produce no entry.
+    pol = resolve_policy(
+        worktree=wt, control_root=control, quest_id="abc",
+        cfg=SandboxConfig(), engine_env_result={}, environ={},
+        available=True,
+    )
+    archive = control / ".imp" / "archive"
+    assert str(archive / "blobs") not in pol.secret_dirs
+    assert str(archive / "index.db") not in pol.secret_files
+
+
+def test_resolve_policy_injects_session_socket_marker(tmp_path):
+    from imp.remote.session.discover import session_socket_path
+
+    control, wt = _layout(tmp_path)
+    pol = resolve_policy(
+        worktree=wt, control_root=control, quest_id="abc",
+        cfg=SandboxConfig(), engine_env_result={}, environ={"PATH": "/usr/bin"},
+        available=True,
+    )
+    expected = str(session_socket_path(control, "abc"))
+    assert ("IMP_SESSION_SOCKET", expected) in pol.setenv
+
+
+def test_session_socket_marker_absent_when_inactive(tmp_path):
+    control, wt = _layout(tmp_path)
+    pol = resolve_policy(
+        worktree=wt, control_root=control, quest_id="abc",
+        cfg=SandboxConfig(enabled=False), engine_env_result={},
+        environ={}, available=True,
+    )
+    assert "IMP_SESSION_SOCKET" not in {k for k, _ in pol.setenv}
+
+    pol = resolve_policy(
+        worktree=wt, control_root=control, quest_id="abc",
+        cfg=SandboxConfig(allow_unsandboxed=True), engine_env_result={},
+        environ={}, available=False,
+    )
+    assert "IMP_SESSION_SOCKET" not in {k for k, _ in pol.setenv}
+
+
+def test_session_socket_marker_reaches_bwrap_setenv(tmp_path):
+    from imp.remote.session.discover import session_socket_path
+
+    control, wt = _layout(tmp_path)
+    pol = resolve_policy(
+        worktree=wt, control_root=control, quest_id="abc",
+        cfg=SandboxConfig(), engine_env_result={}, environ={"PATH": "/usr/bin"},
+        available=True,
+    )
+    argv = build_sandbox_argv("x", cwd=str(wt), policy=pol, engine_env={})
+    i = argv.index("IMP_SESSION_SOCKET")
+    assert argv[i - 1] == "--setenv"
+    assert argv[i + 1] == str(session_socket_path(control, "abc"))

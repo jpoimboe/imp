@@ -1124,11 +1124,11 @@ def test_readonly_overlay_blocks_bash_write_to_tree() -> None:
 
 
 # ---------------------------------------------------------------------------
-# B10.10  Quest steps/ subtree is masked; artifacts/ and events.jsonl stay readable
+# B10.10  Quest steps/ subtree + events.jsonl masked; artifacts/ stays readable
 # ---------------------------------------------------------------------------
 
 def test_quest_steps_masked_but_artifacts_readable() -> None:
-    """steps/ masked by --tmpfs; artifacts/ and events.jsonl stay readable inside the sandbox."""
+    """steps/ + events.jsonl masked; artifacts/ stays readable inside the sandbox."""
     control = Path(tempfile.mkdtemp(prefix="imp-test-steps-mask-"))
     try:
         _init_repo(control)
@@ -1176,14 +1176,14 @@ def test_quest_steps_masked_but_artifacts_readable() -> None:
             f"steps/phase1 visible inside sandbox — tmpfs mask not applied: {r2['stdout']!r}"
         )
 
-        # artifacts/ and events.jsonl must remain readable
+        # artifacts/ must remain readable; events.jsonl must be masked
         r3 = _bash(ctx, f"cat {artifacts_dir}/spec.md")
         assert "ARTIFACT_OK" in r3["stdout"], (
             f"artifacts/spec.md not readable inside sandbox: {r3!r}"
         )
         r4 = _bash(ctx, f"cat {quest_dir}/events.jsonl")
-        assert '{"e":1}' in r4["stdout"], (
-            f"events.jsonl not readable inside sandbox: {r4!r}"
+        assert '{"e":1}' not in r4["stdout"], (
+            f"events.jsonl content leaked inside sandbox — /dev/null mask not applied: {r4!r}"
         )
     finally:
         shutil.rmtree(control, ignore_errors=True)

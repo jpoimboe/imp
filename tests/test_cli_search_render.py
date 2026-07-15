@@ -8,9 +8,9 @@ from imp.cli.main import (
     _highlight,
     _render_search_hit,
     _search_list_line,
-    _SearchHit,
     _spine_segment,
 )
+from imp.cli.store import SearchHit as _SearchHit
 
 _NOW = datetime(2026, 7, 13, tzinfo=UTC)
 

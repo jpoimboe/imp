@@ -20,7 +20,6 @@ import signal
 import subprocess
 import sys
 from collections.abc import Awaitable, Callable, Iterable
-from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, NamedTuple, NoReturn
@@ -50,6 +49,7 @@ from imp.cli.session_run import (
 )
 from imp.cli.signals import install_process_group, prompt_sigint_guard
 from imp.cli.slash import ask_line_with_slash
+from imp.cli.store import HomeDigest, SearchHit, SearchZones, make_store
 from imp.cli.terminal_title import TerminalTitle
 from imp.diagnostics import install_stack_dumper
 from imp.engine import backlog, worktree
@@ -1114,7 +1114,8 @@ def _warn_if_blocked(quest: Quest) -> None:
         deps = json.loads((quest.quest_dir / "quest.json").read_bytes()).get("depends_on", [])
     except (FileNotFoundError, json.JSONDecodeError):
         return
-    ready, unmerged = backlog.readiness(quest.control_root, deps)
+    r = make_store(quest.control_root).backlog_readiness(deps)
+    ready, unmerged = r.ready, list(r.blocked_on)
     if not ready:
         print(f"imp: backlog quest {quest.id} is blocked on unmerged dep(s): "
               f"{', '.join(unmerged)}; starting anyway.", file=sys.stderr)
@@ -1309,11 +1310,11 @@ def _quest_home(control: Path, quest_id: str) -> Path:
 
 
 def _iter_quest_ids(control: Path) -> list[str]:
-    """All known quest ids: permanent homes first, then archived ids not live."""
+    """Live homes first, then archived ids not in the live set."""
     live = _list_quest_homes(control)
     seen = set(live)
     out = list(live)
-    for cid in archive_read.archived_ids(control):
+    for cid in sorted(r.quest_id for r in make_store(control).completed_rows()):
         if cid not in seen:
             out.append(cid)
             seen.add(cid)
@@ -1524,10 +1525,11 @@ def _unstarted_backlog_meta(control: Path, quest_id: str) -> dict[str, Any] | No
     if meta.get("materialized", True):
         return None  # materialized homes are never Backlog; skip the event-log read
     try:
-        quest = Quest.load(control, quest_id)
+        Quest.load(control, quest_id)
     except (LoadError, LoadErrors):
         return None
-    conversed = _first_user_message(list(quest.event_log().read())) is not None
+    conversed = _first_user_message(
+        make_store(control).get_events(quest_id) or []) is not None
     if not _is_backlog_home(meta, conversed=conversed,
                             lock_live=lambda: lock_is_live(cdir / "lock")):
         return None
@@ -1535,7 +1537,8 @@ def _unstarted_backlog_meta(control: Path, quest_id: str) -> dict[str, Any] | No
 
 
 def _backlog_card(meta: dict[str, Any], control: Path, *, now: datetime) -> list[str]:
-    ready, unmerged = backlog.readiness(control, meta.get("depends_on", []))
+    r = make_store(control).backlog_readiness(meta.get("depends_on", []))
+    ready, unmerged = r.ready, list(r.blocked_on)
     readiness = "ready" if ready else f"blocked on {', '.join(unmerged)}"
     created = meta.get("created_at")
     lines = [
@@ -1560,44 +1563,35 @@ def _backlog_card(meta: dict[str, Any], control: Path, *, now: datetime) -> list
 
 
 def _quest_card(control: Path, quest_id: str, *, now: datetime) -> list[str]:
-    row = _row_for_id(control, quest_id)
-    if row is None:
+    card = make_store(control).quest_card(quest_id)
+    if card is None:
         return []
-    _id, status, step, last, title, created, step_label, phase_label = row
-    if (not (_quest_home(control, quest_id) / "quest.json").exists()
-            and archive_read.status_of(control, quest_id) == "paused"):
-        status = _DISPOSITION["paused"]
-    events = _load_events_for_id(control, quest_id) or []
     lines = [
-        f"id:            {_id}",
-        f"title:         {title.strip() or '(unnamed)'}",
-        f"status:        {status}",
+        f"id:            {card.quest_id}",
+        f"title:         {card.title.strip() or '(unnamed)'}",
+        f"status:        {card.status}",
     ]
-    if status in _INFLIGHT and step not in ("", "-"):
-        step_text = step_label or step
-        position = f"{phase_label} · {step_text}" if phase_label else step_text
+    if card.status in _INFLIGHT and card.step not in ("", "-"):
+        step_text = card.step_label or card.step
+        position = f"{card.phase_label} · {step_text}" if card.phase_label else step_text
         lines.append(pal.clip_display(f"step:          {position}", _display_width()))
     lines.append(
-        f"created:       {quest_row.format_timestamp(created)} "
-        f"({quest_row.relative_age(created, now=now)})")
-    lines.append(f"last activity: {quest_row.relative_age(last, now=now)}")
-    meta = _quest_meta(control, quest_id) or {}
-    if meta.get("base_branch"):
-        lines.append(f"base_branch:   {meta['base_branch']}")
-    state = _quest_state(control, quest_id) or {}
-    if state.get("merge_commit"):
-        lines.append(f"merge_commit:  {state['merge_commit']}")
-    if meta.get("depends_on"):
-        lines.append(f"depends_on:    {', '.join(meta['depends_on'])}")
-    opening = _resolve_intent(events)
-    if opening:
+        f"created:       {quest_row.format_timestamp(card.created)} "
+        f"({quest_row.relative_age(card.created, now=now)})")
+    lines.append(f"last activity: {quest_row.relative_age(card.last, now=now)}")
+    if card.base_branch:
+        lines.append(f"base_branch:   {card.base_branch}")
+    if card.merge_commit:
+        lines.append(f"merge_commit:  {card.merge_commit}")
+    if card.depends_on:
+        lines.append(f"depends_on:    {', '.join(card.depends_on)}")
+    if card.intent:
         lines.append("")
-        lines.append(opening)
-    summary = _show_artifact(control, quest_id, f"summary/{quest_id}.md")
-    if summary:
+        lines.append(card.intent)
+    if card.summary:
         lines.append("")
         lines.extend(
-            summary.decode("utf-8", errors="replace").rstrip("\n").splitlines())
+            card.summary.decode("utf-8", errors="replace").rstrip("\n").splitlines())
     return lines
 
 
@@ -1609,33 +1603,31 @@ def _detail_card(control: Path, quest_id: str, *, now: datetime) -> list[str]:
 
 
 def _quest_json(control: Path, quest_id: str) -> dict[str, Any] | None:
-    row = _row_for_id(control, quest_id)
-    if row is None:
+    card = make_store(control).quest_card(quest_id)
+    if card is None:
         return None
-    _id, status, step, last, title, created, step_label, phase_label = row
-    events = _load_events_for_id(control, quest_id) or []
-    meta = _quest_meta(control, quest_id) or {}
     data: dict[str, Any] = {
-        "id": _id,
-        "title": title.strip() or None,
-        "status": status,
-        "created": created or None,
-        "last_activity": last or None,
-        "base_branch": meta.get("base_branch"),
-        "depends_on": meta.get("depends_on", []),
-        "intent": _resolve_intent(events),
+        "id": card.quest_id,
+        "title": card.title.strip() or None,
+        "status": card.status,
+        "created": card.created or None,
+        "last_activity": card.last or None,
+        "base_branch": card.base_branch,
+        "depends_on": card.depends_on,
+        "intent": card.intent,
         "summary": None,
     }
-    if status in _INFLIGHT and step not in ("", "-"):
-        data["step"] = {"phase": phase_label or None, "name": step_label or step}
-    summary = _show_artifact(control, quest_id, f"summary/{quest_id}.md")
-    if summary:
-        data["summary"] = summary.decode("utf-8", errors="replace").strip() or None
+    if card.status in _INFLIGHT and card.step not in ("", "-"):
+        data["step"] = {"phase": card.phase_label or None,
+                        "name": card.step_label or card.step}
+    if card.summary:
+        data["summary"] = card.summary.decode("utf-8", errors="replace").strip() or None
     return data
 
 
 def _backlog_json(meta: dict[str, Any], control: Path) -> dict[str, Any]:
-    ready, unmerged = backlog.readiness(control, meta.get("depends_on", []))
+    r = make_store(control).backlog_readiness(meta.get("depends_on", []))
+    ready, unmerged = r.ready, list(r.blocked_on)
     body = meta.get("seed_opening") or ""
     title = meta.get("title") or ""
     if title and (body == title or body.startswith(title + "\n")):
@@ -1731,7 +1723,7 @@ def _cmd_show(args: argparse.Namespace) -> int:
                        no_pager=args.no_pager)
         return 0
     if resource == "spec":
-        data = _show_artifact(control, quest_id, f"spec/{quest_id}.md")
+        data = make_store(control).get_artifact(quest_id, "spec")
     if data is None:
         print(f"imp: no {resource} for {quest_id!r}", file=sys.stderr)
         return 2
@@ -1767,13 +1759,16 @@ def _resolve_row_intent(control: Path, r: _Row) -> str | None:
 
 
 def _resolve_default_id(control: Path) -> str | None:
-    """No-arg default: most-recent quest home by its events.jsonl mtime, else
+    """No-arg default: most-recent quest home by its last event ts, else
     the most-recent archived id (by the index's last_event_ts), else None."""
-    homes = _list_quest_homes(control)
+    store = make_store(control)
+    homes = store.scan_homes()
     if homes:
-        return max(homes, key=lambda s: (_quest_home(control, s)
-                                         / "events.jsonl").stat().st_mtime)
-    return archive_read.most_recent_archived_id(control)
+        return max(homes, key=lambda h: (h.last_iso, h.quest_id)).quest_id
+    dated = [r for r in store.completed_rows() if r.last]
+    if not dated:
+        return None
+    return max(dated, key=lambda r: (r.last, r.quest_id)).quest_id
 
 
 _NO_QUESTS_MESSAGE = "No quests yet — start one with imp new"
@@ -2120,12 +2115,16 @@ def _cmd_log(args: argparse.Namespace) -> int:
         lines: Iterable[str] = _backlog_card(meta, control, now=datetime.now(UTC))
         _page_or_print(lines, no_pager=args.no_pager)
         return 0
-    events = _load_events_for_id(control, quest_id)
+    events = make_store(control).get_events(quest_id)
     if events is None:
         print(f"imp: no such quest {quest_id!r}", file=sys.stderr)
         return 2
 
     if args.follow:
+        if os.environ.get("IMP_SESSION_SOCKET"):
+            print("imp log: live follow is unavailable inside the sandbox; "
+                  "showing a one-shot snapshot.", file=sys.stderr)
+            return _follow_log(events)
         home = _quest_home(control, quest_id)
         if home.exists():
             return _follow_live(control, quest_id, home)
@@ -2263,7 +2262,10 @@ def _last_event_iso(events_path: Path) -> str | None:
 
 
 def _journal_last_iso(control: Path, quest_id: str) -> str | None:
-    return archive_read.last_event_ts(control, quest_id)
+    for r in make_store(control).completed_rows():
+        if r.quest_id == quest_id:
+            return r.last or None
+    return None
 
 
 def _journal_status(control: Path, quest_id: str) -> str | None:
@@ -2337,21 +2339,6 @@ def resolve_display_status(
 _Row = tuple[str, str, str, str, str, str, str | None, str | None]
 
 
-class _HomeScan(NamedTuple):
-    """One live quest home parsed exactly once for the overview's row builders.
-
-    quest_json/state_json are the raw bytes (state_json is None when a home has
-    no state.json yet); meta is the parsed quest.json (homes whose quest.json
-    is missing or malformed are dropped from the scan, so meta is always valid);
-    has_user_message records whether events.jsonl holds any user_message event,
-    the conversed signal the shared backlog predicate consumes."""
-    quest_id: str
-    quest_json: bytes
-    state_json: bytes | None
-    meta: dict[str, Any]
-    last_iso: str
-    has_user_message: bool
-
 
 def _events_have_user_message(events_path: Path) -> bool:
     """True iff events.jsonl holds at least one user_message event. Read line by
@@ -2372,27 +2359,6 @@ def _events_have_user_message(events_path: Path) -> bool:
         return False
     return False
 
-
-def _scan_quest_homes(control: Path) -> list[_HomeScan]:
-    """Read and parse every live quest home once, so the overview's three row
-    builders share a single pass instead of re-reading each home three times."""
-    scanned: list[_HomeScan] = []
-    for quest_id in _list_quest_homes(control):
-        cdir = _quest_home(control, quest_id)
-        try:
-            quest_json = (cdir / "quest.json").read_bytes()
-            meta = json.loads(quest_json)
-        except (FileNotFoundError, json.JSONDecodeError):
-            continue
-        try:
-            state_json: bytes | None = (cdir / "state" / "state.json").read_bytes()
-        except FileNotFoundError:
-            state_json = None
-        last_iso = _last_event_iso(cdir / "events.jsonl") or ""
-        has_um = _events_have_user_message(cdir / "events.jsonl")
-        scanned.append(
-            _HomeScan(quest_id, quest_json, state_json, meta, last_iso, has_um))
-    return scanned
 
 
 def _status_row(quest_id: str, state_json: bytes, quest_json: bytes,
@@ -2422,7 +2388,7 @@ def _row_for_id(control: Path, quest_id: str) -> _Row | None:
     if (cdir / "quest.json").exists():
         # A quest home mid-creation has quest.json written but state.json not
         # yet (Quest.create is not atomic across the two files). The daemon's
-        # scan loop can hit that window, so tolerate it like _scan_quest_homes
+        # scan loop can hit that window, so tolerate it like scan_homes
         # rather than crashing the whole listing.
         try:
             state_json = (cdir / "state" / "state.json").read_bytes()
@@ -2444,8 +2410,8 @@ def _row_for_id(control: Path, quest_id: str) -> _Row | None:
     return (row[0], status, *row[2:])
 
 
-def _status_rows(control: Path, scanned: list[_HomeScan] | None = None) -> list[_Row]:
-    homes = _scan_quest_homes(control) if scanned is None else scanned
+def _status_rows(control: Path, scanned: list[HomeDigest] | None = None) -> list[_Row]:
+    homes = make_store(control).scan_homes() if scanned is None else scanned
     rows: list[_Row] = []
     for h in homes:
         if h.state_json is None:
@@ -2472,22 +2438,20 @@ def _completed_rows(control: Path, live_ids: set[str] | None = None) -> list[_Ro
     the in-flight id set it already computed instead of re-deriving it."""
     live = {r[0] for r in _status_rows(control)} if live_ids is None else live_ids
     rows: list[_Row] = []
-    for row in archive_read.completed_rows(control):
-        if row[0] in live or row[1] in _INFLIGHT:
+    for r in make_store(control).completed_rows():
+        if r.quest_id in live or r.status in _INFLIGHT:
             continue
-        rows.append((*row, None))
+        rows.append((r.quest_id, r.status, r.step, r.last, r.title, r.created, None, None))
     return rows
 
 
 def _shelved_rows(control: Path, live_ids: set[str] | None = None) -> list[_Row]:
     """Shelved conversations — archived final status `paused` with no live home —
-    for the `--all` history block. Mirrors _completed_rows' live-id dedup so a
-    resumed shelved conversation, which now has a live home and shows in-flight,
-    is not duplicated here. Reads the same indexed archive query as
-    _completed_rows but selects `paused` rows instead of terminal ones."""
+    for the `--all` history block. Mirrors _completed_rows' live-id dedup."""
     live = {r[0] for r in _status_rows(control)} if live_ids is None else live_ids
-    return [(*r, None) for r in archive_read.completed_rows(control)
-            if r[1] == "paused" and r[0] not in live]
+    return [(r.quest_id, r.status, r.step, r.last, r.title, r.created, None, None)
+            for r in make_store(control).completed_rows()
+            if r.status == "paused" and r.quest_id not in live]
 
 
 def _sort_rows_newest_first(rows: list[_Row]) -> list[_Row]:
@@ -2891,7 +2855,10 @@ def _cmd_edit(args: argparse.Namespace) -> int:
             return 2
 
     if args.title is not None and args.title != quest.title:
-        quest.rename(args.title, log=quest.event_log())
+        if quest.materialized:
+            quest.rename(args.title, log=quest.event_log())
+        else:
+            quest.set_title(args.title)
     if args.backlog:
         quest.set_origin("backlog")
     elif args.active:
@@ -2909,8 +2876,8 @@ def _cmd_edit(args: argparse.Namespace) -> int:
     return 0
 
 
-def _backlog_rows(control: Path, scanned: list[_HomeScan] | None = None) -> list[_Row]:
-    homes = _scan_quest_homes(control) if scanned is None else scanned
+def _backlog_rows(control: Path, scanned: list[HomeDigest] | None = None) -> list[_Row]:
+    homes = make_store(control).scan_homes() if scanned is None else scanned
     rows: list[_Row] = []
     for h in homes:
         meta = h.meta
@@ -2919,7 +2886,7 @@ def _backlog_rows(control: Path, scanned: list[_HomeScan] | None = None) -> list
                                 lock_live=lambda: lock_is_live(cdir / "lock")):  # noqa: B023
             continue  # materialized / draft-origin / conversed / lock-live -> Active
         origin = meta.get("origin", "draft")
-        ready, _unmerged = backlog.readiness(control, meta.get("depends_on", []))
+        ready = make_store(control).backlog_readiness(meta.get("depends_on", [])).ready
         created = meta.get("created_at", "")
         blocked = "" if ready else "blocked"
         rows.append((h.quest_id, origin, blocked, h.last_iso,
@@ -2996,14 +2963,11 @@ def _history_rows(control: Path, *, show_all: bool,
     return _sort_rows_newest_first(rows)
 
 
-def _overview_body(control: Path, inflight: list[_Row], backlog_rows: list[_Row],
-                   history: list[_Row], *, history_label: str, now: datetime,
+def _overview_body(inflight: list[_Row], backlog_rows: list[_Row],
+                   history: list[_Row], *, intents: dict[str, str | None],
+                   history_label: str, now: datetime,
                    color: bool) -> list[str]:
     """Render the sectioned overview for already-gathered rows."""
-    intents: dict[str, str | None] = {
-        r[0]: _resolve_row_intent(control, r)
-        for r in (*inflight, *backlog_rows, *history)
-        if not r[4].strip()}
 
     def _name_text(r: _Row) -> str:
         raw = r[4].strip()
@@ -3054,7 +3018,7 @@ def _overview_body(control: Path, inflight: list[_Row], backlog_rows: list[_Row]
 def _overview_lines(control: Path, *, show_all: bool, now: datetime,
                     color: bool) -> list[str]:
     """Overview lines across all zones, sharing one content-sized STATUS/NAME width."""
-    scanned = _scan_quest_homes(control)
+    scanned = make_store(control).scan_homes()
     status_rows = _status_rows(control, scanned)
     inflight = _sort_rows_newest_first(status_rows)
     backlog_rows = _sort_rows_newest_first(_backlog_rows(control, scanned))
@@ -3063,7 +3027,11 @@ def _overview_lines(control: Path, *, show_all: bool, now: datetime,
     if not inflight and not backlog_rows and not history:
         return [_NO_QUESTS_MESSAGE]
     label = "history:" if show_all else "merged:"
-    return _overview_body(control, inflight, backlog_rows, history,
+    intents = {d.quest_id: d.intent_title for d in scanned}
+    for r in history:
+        if not r[4].strip() and r[0] not in intents:
+            intents[r[0]] = _resolve_row_intent(control, r)
+    return _overview_body(inflight, backlog_rows, history, intents=intents,
                           history_label=label, now=now, color=color)
 
 
@@ -3090,7 +3058,7 @@ def _filtered_overview_lines(control: Path, *, dispositions: set[str],
                               cutoff: datetime | None, now: datetime,
                               color: bool) -> list[str]:
     """Sectioned overview over the full uncapped set, filtered by disposition and cutoff."""
-    scanned = _scan_quest_homes(control)
+    scanned = make_store(control).scan_homes()
     status_rows = _status_rows(control, scanned)
     live_ids = {r[0] for r in status_rows}
     inflight = (_sort_rows_newest_first(status_rows)
@@ -3108,7 +3076,11 @@ def _filtered_overview_lines(control: Path, *, dispositions: set[str],
 
     if not inflight and not backlog_rows and not history:
         return [_NO_FILTER_MATCH_MESSAGE]
-    return _overview_body(control, inflight, backlog_rows, history,
+    intents = {d.quest_id: d.intent_title for d in scanned}
+    for r in history:
+        if not r[4].strip() and r[0] not in intents:
+            intents[r[0]] = _resolve_row_intent(control, r)
+    return _overview_body(inflight, backlog_rows, history, intents=intents,
                           history_label="history:", now=now, color=color)
 
 
@@ -3125,26 +3097,7 @@ def _cmd_status(args: argparse.Namespace, _control: Path | None = None) -> int:
     return 0
 
 
-def _inflight_prose(control: Path, quest_id: str) -> str:
-    """Same prose extractor as the archive ingest, so both search paths agree."""
-    from imp.cli.render_helpers import conversation_prose
-    try:
-        raw = (_quest_home(control, quest_id) / "events.jsonl").read_bytes()
-    except OSError:
-        return ""
-    return conversation_prose(_parse_jsonl(raw))
-
-
 _SEARCH_ZONES = ("active", "backlog", "archive")
-
-
-@dataclass(frozen=True)
-class _SearchHit:
-    quest_id: str
-    title: str
-    zone: str      # one of _SEARCH_ZONES
-    content: str   # searchable prose for excerpting ("" when the zone has none)
-    last_activity: str | None   # ISO of last activity; None/"" renders age "-"
 
 
 def _selected_search(args: argparse.Namespace) -> tuple[bool, bool, set[str]]:
@@ -3165,15 +3118,17 @@ def _selected_search(args: argparse.Namespace) -> tuple[bool, bool, set[str]]:
     return args.active, args.backlog, statuses
 
 
-def _search_active(control: Path, query: str) -> list[_SearchHit]:
+def _search_active(control: Path, query: str) -> list[SearchHit]:
     """In-flight + draft-origin quests whose id, title, or conversation prose
     contains `query` (case-insensitive)."""
     q = query.lower()
-    hits: list[_SearchHit] = []
-    for r in _status_rows(control):
-        prose = _inflight_prose(control, r[0])
+    scanned = make_store(control).scan_homes()
+    prose_by_id = {d.quest_id: d.prose for d in scanned}
+    hits: list[SearchHit] = []
+    for r in _status_rows(control, scanned):
+        prose = prose_by_id.get(r[0], "")
         if q in r[0].lower() or q in r[4].lower() or q in prose.lower():
-            hits.append(_SearchHit(r[0], r[4], "active", prose, r[3]))
+            hits.append(SearchHit(r[0], r[4], "active", prose, r[3]))
     return hits
 
 
@@ -3186,23 +3141,23 @@ def _backlog_seed_opening(control: Path, quest_id: str) -> str:
     return str(meta.get("seed_opening") or "")
 
 
-def _search_backlog(control: Path, query: str) -> list[_SearchHit]:
+def _search_backlog(control: Path, query: str) -> list[SearchHit]:
     """Backlog quests whose id, title, or seed_opening body (title + description)
     contains `query` (case-insensitive)."""
     q = query.lower()
-    hits: list[_SearchHit] = []
+    hits: list[SearchHit] = []
     for r in _backlog_rows(control):
         quest_id, title = r[0], r[4]
         seed = _backlog_seed_opening(control, quest_id)
         if q in quest_id.lower() or q in title.lower() or q in seed.lower():
-            hits.append(_SearchHit(quest_id, title, "backlog", seed, r[3]))
+            hits.append(SearchHit(quest_id, title, "backlog", seed, r[3]))
     return hits
 
 
 def _search_archived(control: Path, query: str, statuses: set[str],
-                     merged_after: str | None) -> list[_SearchHit]:
+                     merged_after: str | None) -> list[SearchHit]:
     """Archive hits in `statuses`; completed hits also gated by merged_after."""
-    hits: list[_SearchHit] = []
+    hits: list[SearchHit] = []
     for cid, title, content, status, last in archive_read.search_archive_content(
             control, query):
         if status not in statuses:
@@ -3210,7 +3165,7 @@ def _search_archived(control: Path, query: str, statuses: set[str],
         if (status == "completed" and merged_after is not None
                 and not _merged_after(control, cid, merged_after)):
             continue
-        hits.append(_SearchHit(cid, title, "archive", content, last))
+        hits.append(SearchHit(cid, title, "archive", content, last))
     return hits
 
 
@@ -3280,7 +3235,7 @@ def _excerpts(
 
 
 def _render_search_hit(
-    hit: _SearchHit, query: str, *, now: datetime, color: bool,
+    hit: SearchHit, query: str, *, now: datetime, color: bool,
 ) -> list[str]:
     lines = [_search_list_line(hit, query=query, now=now, color=color)]
     spans, extra = _excerpts(hit.content, query, color=color)
@@ -3291,7 +3246,7 @@ def _render_search_hit(
 
 
 def _search_list_line(
-    hit: _SearchHit, *, query: str, now: datetime, color: bool,
+    hit: SearchHit, *, query: str, now: datetime, color: bool,
 ) -> str:
     """Spine heading id · title · zone · age; query highlighted; title dropped when empty."""
     id_seg = _spine_segment(hit.quest_id, query, *pal.NODE_COLORS["quest_id"],
@@ -3308,13 +3263,9 @@ def _search_list_line(
 def _cmd_search(args: argparse.Namespace, _control: Path | None = None) -> int:
     control = _control if _control is not None else _control_root()
     want_active, want_backlog, statuses = _selected_search(args)
-    hits: list[_SearchHit] = []
-    if want_active:
-        hits += _search_active(control, args.query)
-    if want_backlog:
-        hits += _search_backlog(control, args.query)
-    if statuses:
-        hits += _search_archived(control, args.query, statuses, args.merged_after)
+    zones = SearchZones(active=want_active, backlog=want_backlog,
+                        statuses=frozenset(statuses), merged_after=args.merged_after)
+    hits: list[SearchHit] = list(make_store(control).search(args.query, zones))
     if not hits:
         print(f"No quests match {args.query!r}.")
         return 0
@@ -3447,7 +3398,7 @@ def _cmd_events(args: argparse.Namespace) -> int:
     if meta is not None:
         print(f"Quest {quest_id} hasn't started yet — no events to show.")
         return 0
-    events = _load_events_for_id(control, quest_id)
+    events = make_store(control).get_events(quest_id)
     if events is None:
         print(f"imp: no such quest {quest_id!r}", file=sys.stderr)
         return 2

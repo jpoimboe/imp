@@ -56,6 +56,7 @@ class SessionServer:
         on_first_attach: Callable[[], None] | None = None,
         first_attach_timeout: float = _DEFAULT_FIRST_ATTACH_TIMEOUT,
         skill_loader: Callable[[str], str] | None = None,
+        on_query: Callable[[str, dict[str, Any]], Any] | None = None,
     ) -> None:
         self._coordinator = coordinator
         self._on_abandon = on_abandon
@@ -93,6 +94,7 @@ class SessionServer:
             on_detach=self._on_detach_pulse,
             on_control=self._enqueue_control,
             on_lease_change=self._on_lease_change,
+            on_query=on_query,
         )
         ctl_send, ctl_recv = anyio.create_memory_object_stream[tuple[str, str | None]](
             max_buffer_size=_CONTROL_QUEUE_DEPTH)

@@ -28,6 +28,7 @@ from pathlib import Path
 from typing import Any
 
 from imp.engine.env import HEADLESS_ENV
+from imp.remote.session.discover import session_socket_path
 
 
 @dataclass(frozen=True, slots=True)
@@ -476,10 +477,18 @@ def resolve_policy(
             secret_files.append(str(p))
     secret_dirs.append(f"/run/user/{uid}")   # H2 — agent sockets; mask even if abs
 
-    # Mask each quest's steps/ (siblings too) — overlay-home mountpoints a raw walk would stall on.
+    # Mask each quest's steps/ + events.jsonl (siblings too): steps/ are overlay-home
+    # mountpoints a raw walk would stall on; events.jsonl is the unbounded footgun log
+    # whose sole in-sandbox reader is the CLI (now routed through the daemon store).
     quests_root = control_root / ".imp" / "quests"
-    secret_dirs += list(_existing(
-        [str(p / "steps") for p in sorted(quests_root.glob("*")) if p.is_dir()]))
+    quest_dirs = [p for p in sorted(quests_root.glob("*")) if p.is_dir()]
+    secret_dirs += list(_existing([str(p / "steps") for p in quest_dirs]))
+    secret_files += list(_existing([str(p / "events.jsonl") for p in quest_dirs]))
+
+    # Mask the archive footguns (blob pile + SQLite content index); records/ stays readable.
+    archive = control_root / ".imp" / "archive"
+    secret_dirs += list(_existing([str(archive / "blobs")]))
+    secret_files += list(_existing([str(archive / "index.db")]))
 
     # ro overlay of workflow snapshot — bind_plan emits it after the quest_home rw
     # bind, so last-covering-wins makes only workflow/ read-only.
@@ -502,7 +511,9 @@ def resolve_policy(
         extra_writable=tuple(cfg.extra_writable),
         secret_dirs=tuple(secret_dirs),
         secret_files=tuple(secret_files),
-        setenv=_build_setenv(engine_env_result, environ, cfg.env_passthrough),
+        setenv=_build_setenv(
+            engine_env_result, environ, cfg.env_passthrough,
+            session_socket=str(session_socket_path(control_root, quest_id))),
         network=cfg.network,
         note="",
     )
@@ -518,7 +529,7 @@ def _inactive(*, note: str) -> SandboxPolicy:
 
 def _build_setenv(
     engine_env_result: Mapping[str, str], environ: Mapping[str, str],
-    env_passthrough: tuple[str, ...],
+    env_passthrough: tuple[str, ...], session_socket: str = "",
 ) -> tuple[tuple[str, str], ...]:
     """Env allowlist (spec B.4). IMP_* and PYTHONPATH come from engine_env_result
     (authoritative, M2-r5; PYTHONPATH is the single deliberate non-IMP_ exception
@@ -544,5 +555,7 @@ def _build_setenv(
     for k, v in engine_env_result.items():
         if _is_engine_passthrough(k):
             d[k] = v
+    if session_socket:
+        d["IMP_SESSION_SOCKET"] = session_socket   # in-sandbox signal + daemon target
     d["TMPDIR"] = "/tmp"   # forced last — wins over any ambient/env_passthrough value
     return tuple(d.items())

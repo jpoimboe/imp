@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -370,5 +371,78 @@ async def test_open_gate_resolves_to_a_skill_request(tmp_path: Path) -> None:
                 await anyio.sleep(0.02)
         assert got == [SkillRequest("refactor", "src/foo.py")]
         await client.aclose()
+        await session.close()
+        tg.cancel_scope.cancel()
+
+
+async def _query(sock_path: str, op: str, args: dict) -> str:
+    from imp.remote.session.protocol import encode_query
+
+    client = await anyio.connect_unix(sock_path)
+    try:
+        await client.send((encode_query(op, args) + "\n").encode())
+        chunks: list[bytes] = []
+        with contextlib.suppress(anyio.EndOfStream, anyio.ClosedResourceError,
+                                 anyio.BrokenResourceError):
+            while True:
+                chunks.append(await client.receive())
+        return b"".join(chunks).decode("utf-8").rstrip("\n")
+    finally:
+        await client.aclose()
+
+
+@pytest.mark.anyio
+async def test_query_frame_is_served_without_registering_a_client(
+    tmp_path: Path,
+) -> None:
+    from imp.remote.session.protocol import parse_result
+
+    sock = str(tmp_path / "s.sock")
+
+    async def on_query(op: str, args: dict) -> object:
+        return {"echo": op, "args": args}
+
+    session = SessionSocket(sock, on_query=on_query)
+    async with anyio.create_task_group() as tg:
+        await session.open()
+        tg.start_soon(session.serve)
+        line = await _query(sock, "get_events", {"quest_id": "q1"})
+        assert parse_result(line) == {"echo": "get_events", "args": {"quest_id": "q1"}}
+        assert session.attached_count == 0   # query never becomes an attachment
+        await session.close()
+        tg.cancel_scope.cancel()
+
+
+@pytest.mark.anyio
+async def test_query_handler_exception_becomes_an_error_result(tmp_path: Path) -> None:
+    from imp.remote.session.protocol import parse_result
+
+    sock = str(tmp_path / "s.sock")
+
+    async def on_query(op: str, args: dict) -> object:
+        raise ValueError("bad op")
+
+    session = SessionSocket(sock, on_query=on_query)
+    async with anyio.create_task_group() as tg:
+        await session.open()
+        tg.start_soon(session.serve)
+        line = await _query(sock, "nope", {})
+        with pytest.raises(RuntimeError, match="bad op"):
+            parse_result(line)
+        await session.close()
+        tg.cancel_scope.cancel()
+
+
+@pytest.mark.anyio
+async def test_query_frame_is_dropped_when_no_on_query_handler(tmp_path: Path) -> None:
+    sock = str(tmp_path / "s.sock")
+
+    session = SessionSocket(sock)   # no on_query
+    async with anyio.create_task_group() as tg:
+        await session.open()
+        tg.start_soon(session.serve)
+        reply = await _query(sock, "get_events", {"quest_id": "q1"})
+        assert reply == ""                     # dropped: no result frame sent
+        assert session.attached_count == 0     # never registered as a client
         await session.close()
         tg.cancel_scope.cancel()
