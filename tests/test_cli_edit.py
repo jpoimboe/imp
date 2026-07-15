@@ -259,7 +259,7 @@ def test_edit_append_intent_surfaces_in_show(tmp_path: Path, monkeypatch) -> Non
     quest.set_seed_opening("Original opening")
     main._cmd_edit(_edit_args("2026-06-24-edit27", append_intent="hello"))
     meta = _meta(Quest.load(tmp_path, "2026-06-24-edit27"))
-    lines = main._backlog_card(meta, tmp_path, now=datetime.now(UTC))
+    lines = main._backlog_card(meta, tmp_path, now=datetime.now(UTC), color=False)
     assert "hello" in "\n".join(lines)
 
 

@@ -25,6 +25,16 @@ appearance without a live run (its human companion is `scripts/snap_imp_ui.py`).
 This is the imp-specific home for that knowledge; the project-agnostic manual for
 driving *any* terminal program is the `imp-driving-terminal-uis` skill.
 
+## Trailing output spacing
+
+Human-facing subcommand output ends with exactly one trailing blank line when
+stdout is a terminal (`sys.stdout.isatty()`) — never zero, never two; existing
+trailing blanks collapse to one. Route list-building commands through
+`_page_or_print(..., trailing_blank=True)` or `_emit_human(lines)`, both of which
+reuse `_with_trailing_blank`. Piped/redirected output and machine formats
+(`--json`, `log --html/--md/-`, `wrote <path>` confirmations) stay byte-clean —
+no added blank line. New human subcommands must follow this rule.
+
 ---
 
 *Part of imp's self-knowledge corpus. Runtime entry point: load the `imp-knowledge` skill (`load_skill(name="imp-knowledge")`), the thin index that maps into this corpus.*

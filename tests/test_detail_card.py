@@ -24,7 +24,7 @@ def test_detail_card_backlog_source(tmp_path: Path) -> None:
         depends_on=["2026-06-16-dep001"],
         seed_opening="Add OAuth\n\nwire up OAuth login",
     )
-    card = "\n".join(main._detail_card(tmp_path, "2026-06-16-bkg111", now=_NOW))
+    card = "\n".join(main._detail_card(tmp_path, "2026-06-16-bkg111", now=_NOW, color=False))
     assert "2026-06-16-bkg111" in card
     assert "Add OAuth" in card
     assert "backlog" in card
@@ -141,7 +141,7 @@ def _live_change_task_prompt(control: Path, quest_id: str) -> None:
 def test_detail_card_omits_synthetic_task_prompt_opening(tmp_path: Path) -> None:
     _seed_control(tmp_path)
     _live_change_task_prompt(tmp_path, "2026-06-20-task01")
-    card = "\n".join(main._detail_card(tmp_path, "2026-06-20-task01", now=_NOW))
+    card = "\n".join(main._detail_card(tmp_path, "2026-06-20-task01", now=_NOW, color=False))
     assert "2026-06-20-task01" in card          # the change card still renders
     assert "Resumed seed" in card               # title shown
     assert "you are a coder" not in card        # no prompt-dump opening
@@ -151,7 +151,7 @@ def test_detail_card_omits_synthetic_task_prompt_opening(tmp_path: Path) -> None
 def test_detail_card_live_source(tmp_path: Path) -> None:
     _seed_control(tmp_path)
     _live_change(tmp_path, "2026-06-20-live01")
-    card = "\n".join(main._detail_card(tmp_path, "2026-06-20-live01", now=_NOW))
+    card = "\n".join(main._detail_card(tmp_path, "2026-06-20-live01", now=_NOW, color=False))
     assert "2026-06-20-live01" in card
     assert "Build widget" in card
     assert "paused" in card
@@ -179,7 +179,7 @@ def test_detail_card_sources_phase_from_persisted_state(tmp_path: Path) -> None:
     State(id="2026-06-20-src01", status="paused", step="spec-writer",
           step_label="writing spec", phase_label="state phase",
           step_attempt=0).save(cdir / "state")
-    card = "\n".join(main._detail_card(tmp_path, "2026-06-20-src01", now=_NOW))
+    card = "\n".join(main._detail_card(tmp_path, "2026-06-20-src01", now=_NOW, color=False))
     assert "state phase · writing spec" in card    # sourced from persisted field
     assert "EVENT PHASE" not in card               # not the event-log scan
 
@@ -199,7 +199,7 @@ def test_detail_card_created_trims_microseconds_and_offset(tmp_path: Path) -> No
     (cdir / "events.jsonl").write_text("")
     State(id="2026-06-20-tsx001", status="paused", step="spec-writer",
           step_attempt=0).save(cdir / "state")
-    card = "\n".join(main._detail_card(tmp_path, "2026-06-20-tsx001", now=_NOW))
+    card = "\n".join(main._detail_card(tmp_path, "2026-06-20-tsx001", now=_NOW, color=False))
     created_line = next(ln for ln in card.splitlines() if ln.startswith("created:"))
     assert "2026-06-20 11:00:00" in created_line   # trimmed to seconds, space-separated
     assert ".123456" not in created_line            # microseconds dropped
@@ -217,7 +217,7 @@ def test_detail_card_shows_merge_commit_for_live_quest(tmp_path: Path) -> None:
     (cdir / "events.jsonl").write_text("")
     State(id="2026-06-20-mrg01", status="completed", step="done",
           merge_commit="deadbeefcafe", step_attempt=0).save(cdir / "state")
-    lines = main._detail_card(tmp_path, "2026-06-20-mrg01", now=_NOW)
+    lines = main._detail_card(tmp_path, "2026-06-20-mrg01", now=_NOW, color=False)
     card = "\n".join(lines)
     assert "merge_commit:  deadbeefcafe" in card          # two spaces after the colon
     base_idx = next(i for i, ln in enumerate(lines)
@@ -237,8 +237,60 @@ def test_detail_card_omits_merge_commit_when_absent(tmp_path: Path) -> None:
     (cdir / "events.jsonl").write_text("")
     State(id="2026-06-20-mrg02", status="paused", step="spec-writer",
           step_attempt=0).save(cdir / "state")   # merge_commit defaults to None
-    card = "\n".join(main._detail_card(tmp_path, "2026-06-20-mrg02", now=_NOW))
+    card = "\n".join(main._detail_card(tmp_path, "2026-06-20-mrg02", now=_NOW, color=False))
     assert "merge_commit" not in card             # no line when no recorded SHA
+
+
+def test_quest_card_dims_labels_and_intent_header(tmp_path: Path) -> None:
+    from imp.cli import palette as pal
+
+    _seed_control(tmp_path)
+    _live_change(tmp_path, "2026-06-20-dim01")
+    lines = main._quest_card(tmp_path, "2026-06-20-dim01", now=_NOW, color=True)
+    joined = "\n".join(lines)
+    assert pal.ansi("id:", "dim") in joined              # metadata label dimmed
+    assert pal.ansi("status:", "dim") in joined
+    assert pal.ansi("base_branch:", "dim") in joined
+    assert pal.ansi("title:", "dim") in joined
+    assert pal.ansi("step:", "dim") in joined
+    assert pal.ansi("created:", "dim") in joined
+    assert pal.ansi("last activity:", "dim") in joined
+    assert pal.ansi("intent:", "dim") in lines            # dim intent section header
+    idx = lines.index(pal.ansi("intent:", "dim"))
+    assert lines[idx - 1] == ""                            # one blank line precedes it
+    assert lines[idx + 1] == "build a widget please"       # intent prose follows header
+
+
+def test_quest_card_dims_summary_header(tmp_path: Path) -> None:
+    from imp.cli import palette as pal
+
+    _seed_control(tmp_path)
+    _live_change(tmp_path, "2026-06-20-dim02")
+    summary = (tmp_path / ".imp" / "quests" / "2026-06-20-dim02"
+               / "artifacts" / "summary")
+    summary.mkdir(parents=True)
+    (summary / "2026-06-20-dim02.md").write_text("Shipped the widget.\n")
+    lines = main._quest_card(tmp_path, "2026-06-20-dim02", now=_NOW, color=True)
+    assert pal.ansi("summary:", "dim") in lines           # dim summary section header
+    idx = lines.index(pal.ansi("summary:", "dim"))
+    assert lines[idx - 1] == ""                            # one blank line precedes it
+    assert lines[idx + 1] == "Shipped the widget."         # summary prose follows header
+
+
+def test_quest_card_plain_without_color_keeps_headers(tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+    _live_change(tmp_path, "2026-06-20-dim03")
+    lines = main._quest_card(tmp_path, "2026-06-20-dim03", now=_NOW, color=False)
+    joined = "\n".join(lines)
+    assert "\x1b[" not in joined                            # no SGR escapes anywhere
+    assert "intent:" in lines                               # header text still present
+    assert "id:            2026-06-20-dim03" in joined      # label plain, value aligned at col 15
+    la = next(line for line in lines if line.startswith("last activity:"))
+    assert la[:15] == "last activity: "     # 14-char label + exactly one pad space
+    st = next(line for line in lines if line.startswith("step:"))
+    assert st[:15] == "step:          "     # 5-char label padded to column 15
+    idx = lines.index("intent:")
+    assert lines[idx - 1] == ""             # blank line precedes header in plain mode too
 
 
 def test_detail_card_shows_merge_commit_for_archived_quest(tmp_path: Path) -> None:
@@ -256,7 +308,7 @@ def test_detail_card_shows_merge_commit_for_archived_quest(tmp_path: Path) -> No
     archive.archive_quest(
         tmp_path, "2026-06-20-arc01", events_path=events,
         quest_json_path=quest_json, state_json_path=state_json)
-    card = "\n".join(main._detail_card(tmp_path, "2026-06-20-arc01", now=_NOW))
+    card = "\n".join(main._detail_card(tmp_path, "2026-06-20-arc01", now=_NOW, color=False))
     assert "merge_commit:  beefcafe1234" in card   # read via archive_read.read_state_json
 
 
@@ -278,7 +330,7 @@ def test_detail_card_shows_shelved_for_archived_paused_quest(tmp_path: Path) -> 
         tmp_path, "2026-06-20-shv01", events_path=events_m,
         quest_json_path=quest_json_m, state_json_path=state_json_m)
 
-    card_m = "\n".join(main._detail_card(tmp_path, "2026-06-20-shv01", now=_NOW))
+    card_m = "\n".join(main._detail_card(tmp_path, "2026-06-20-shv01", now=_NOW, color=False))
     status_line_m = next(ln for ln in card_m.splitlines() if ln.startswith("status:"))
     assert "shelved" in status_line_m
     assert "paused" not in status_line_m
@@ -301,7 +353,7 @@ def test_detail_card_shows_shelved_for_archived_paused_quest(tmp_path: Path) -> 
         tmp_path, "2026-06-20-shv02", events_path=events_u,
         quest_json_path=quest_json_u, state_json_path=state_json_u)
 
-    card_u = "\n".join(main._detail_card(tmp_path, "2026-06-20-shv02", now=_NOW))
+    card_u = "\n".join(main._detail_card(tmp_path, "2026-06-20-shv02", now=_NOW, color=False))
     status_line_u = next(ln for ln in card_u.splitlines() if ln.startswith("status:"))
     assert "shelved" in status_line_u
     assert "paused" not in status_line_u
@@ -322,7 +374,7 @@ def test_detail_card_shows_shelved_for_archived_paused_quest(tmp_path: Path) -> 
         tmp_path, "2026-06-20-shv03", events_path=events_s,
         quest_json_path=quest_json_s, state_json_path=state_json_s)
 
-    card_s = "\n".join(main._detail_card(tmp_path, "2026-06-20-shv03", now=_NOW))
+    card_s = "\n".join(main._detail_card(tmp_path, "2026-06-20-shv03", now=_NOW, color=False))
     status_line_s = next(ln for ln in card_s.splitlines() if ln.startswith("status:"))
     assert "shelved" in status_line_s
     assert not any(ln.startswith("step:") for ln in card_s.splitlines())

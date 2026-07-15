@@ -134,12 +134,12 @@ def test_cmd_show_picker_selection_dispatches(monkeypatch, tmp_path: Path) -> No
     monkeypatch.setattr(m, "_unstarted_backlog_meta", lambda c, cid: None)
     seen = {}
 
-    def fake_detail(control, quest_id, *, now):
+    def fake_detail(control, quest_id, *, now, color):
         seen["id"] = quest_id
         return ["card"]
 
     monkeypatch.setattr(m, "_detail_card", fake_detail)
-    monkeypatch.setattr(m, "_page_or_print", lambda lines, *, no_pager: None)
+    monkeypatch.setattr(m, "_page_or_print", lambda lines, *, no_pager, trailing_blank=False: None)
     rc = m._cmd_show(_ns("lodo"))
     assert rc == 0
     assert seen["id"] == "lodo77"
@@ -159,12 +159,12 @@ def test_cmd_show_single_match_skips_picker(monkeypatch, tmp_path: Path) -> None
     monkeypatch.setattr(m, "_unstarted_backlog_meta", lambda c, cid: None)
     seen = {}
 
-    def fake_detail(control, quest_id, *, now):
+    def fake_detail(control, quest_id, *, now, color):
         seen["id"] = quest_id
         return []
 
     monkeypatch.setattr(m, "_detail_card", fake_detail)
-    monkeypatch.setattr(m, "_page_or_print", lambda lines, *, no_pager: None)
+    monkeypatch.setattr(m, "_page_or_print", lambda lines, *, no_pager, trailing_blank=False: None)
     rc = m._cmd_show(_ns("lodo"))
     assert rc == 0
     assert seen["id"] == "lodo40"
@@ -222,12 +222,12 @@ def test_cmd_show_no_token_interactive_picker(monkeypatch, tmp_path: Path) -> No
     monkeypatch.setattr(m, "_unstarted_backlog_meta", lambda c, cid: None)
     seen = {}
 
-    def fake_detail(control, quest_id, *, now):
+    def fake_detail(control, quest_id, *, now, color):
         seen["id"] = quest_id
         return []
 
     monkeypatch.setattr(m, "_detail_card", fake_detail)
-    monkeypatch.setattr(m, "_page_or_print", lambda lines, *, no_pager: None)
+    monkeypatch.setattr(m, "_page_or_print", lambda lines, *, no_pager, trailing_blank=False: None)
     rc = m._cmd_show(_ns(None))
     assert rc == 0
     assert seen["id"] == "lodo40"

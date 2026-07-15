@@ -572,7 +572,7 @@ def test_cmd_log_follow_backlog_id_prints_card_and_exits(
     monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
     monkeypatch.setattr(m, "_resolve_id", lambda control, tok: "back")
     monkeypatch.setattr(m, "_unstarted_backlog_meta", lambda c, i: {"stub": True})
-    monkeypatch.setattr(m, "_backlog_card", lambda meta, control, now: ["BACKLOG CARD"])
+    monkeypatch.setattr(m, "_backlog_card", lambda meta, control, now, color: ["BACKLOG CARD"])
     monkeypatch.setattr(m, "_follow_live", _boom)
     monkeypatch.setattr(m, "_follow_log", _boom)
     rc = m.main(["log", "-f", "back"])

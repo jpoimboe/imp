@@ -10,6 +10,7 @@ import argparse
 import contextlib
 import enum
 import functools
+import io
 import json
 import logging
 import os
@@ -659,6 +660,8 @@ def _cmd_init(args: argparse.Namespace) -> int:
     except KeyboardInterrupt:
         print("\nimp: init cancelled", file=sys.stderr)
         return 130
+    if sys.stdout.isatty():
+        print()
     return 0
 
 
@@ -817,8 +820,8 @@ def _record_idea(args: argparse.Namespace, control: Path, base: str) -> int:
     except (LoadError, LoadErrors) as e:
         print(f"imp: {e}", file=sys.stderr)
         return 2
-    print(f"imp: recorded backlog quest {quest_id} "
-          f"(start it with `imp resume {quest_id}`)")
+    _emit_human([f"imp: recorded backlog quest {quest_id} "
+                 f"(start it with `imp resume {quest_id}`)"])
     return 0
 
 
@@ -1536,70 +1539,91 @@ def _unstarted_backlog_meta(control: Path, quest_id: str) -> dict[str, Any] | No
     return meta
 
 
-def _backlog_card(meta: dict[str, Any], control: Path, *, now: datetime) -> list[str]:
+def _card_field(label: str, value: str, width: int, *, color: bool) -> str:
+    """A card metadata row: the `label:` glyph dimmed (SGR 2 when color is on),
+    padded to `width` columns, then the plain value at its aligned column."""
+    return pal.ansi(label, "dim", enabled=color) + " " * (width - len(label)) + value
+
+
+def _backlog_card(meta: dict[str, Any], control: Path, *, now: datetime,
+                  color: bool) -> list[str]:
     r = make_store(control).backlog_readiness(meta.get("depends_on", []))
     ready, unmerged = r.ready, list(r.blocked_on)
     readiness = "ready" if ready else f"blocked on {', '.join(unmerged)}"
     created = meta.get("created_at")
     lines = [
-        f"id:         {meta['id']}",
-        f"title:      {meta.get('title') or '(unnamed)'}",
-        "status:     backlog",
-        f"provenance: {meta.get('origin', 'draft')}",
-        f"readiness:  {readiness}",
-        f"created:    {quest_row.format_timestamp(created)} "
-        f"({quest_row.relative_age(created, now=now)})",
+        _card_field("id:", meta["id"], 12, color=color),
+        _card_field("title:", meta.get("title") or "(unnamed)", 12, color=color),
+        _card_field("status:", "backlog", 12, color=color),
+        _card_field("provenance:", meta.get("origin", "draft"), 12, color=color),
+        _card_field("readiness:", readiness, 12, color=color),
+        _card_field(
+            "created:",
+            f"{quest_row.format_timestamp(created)} "
+            f"({quest_row.relative_age(created, now=now)})",
+            12, color=color),
     ]
     if meta.get("depends_on"):
-        lines.append(f"depends_on: {', '.join(meta['depends_on'])}")
+        lines.append(_card_field("depends_on:", ", ".join(meta["depends_on"]),
+                                 12, color=color))
     body = meta.get("seed_opening") or ""
     title = meta.get("title") or ""
     if title and (body == title or body.startswith(title + "\n")):
         body = body[len(title):].lstrip("\n")
     if body:
         lines.append("")
+        lines.append(pal.ansi("intent:", "dim", enabled=color))
         lines.append(body)
     return lines
 
 
-def _quest_card(control: Path, quest_id: str, *, now: datetime) -> list[str]:
+def _quest_card(control: Path, quest_id: str, *, now: datetime,
+                color: bool) -> list[str]:
     card = make_store(control).quest_card(quest_id)
     if card is None:
         return []
     lines = [
-        f"id:            {card.quest_id}",
-        f"title:         {card.title.strip() or '(unnamed)'}",
-        f"status:        {card.status}",
+        _card_field("id:", card.quest_id, 15, color=color),
+        _card_field("title:", card.title.strip() or "(unnamed)", 15, color=color),
+        _card_field("status:", card.status, 15, color=color),
     ]
     if card.status in _INFLIGHT and card.step not in ("", "-"):
         step_text = card.step_label or card.step
         position = f"{card.phase_label} · {step_text}" if card.phase_label else step_text
-        lines.append(pal.clip_display(f"step:          {position}", _display_width()))
-    lines.append(
-        f"created:       {quest_row.format_timestamp(card.created)} "
-        f"({quest_row.relative_age(card.created, now=now)})")
-    lines.append(f"last activity: {quest_row.relative_age(card.last, now=now)}")
+        lines.append(pal.clip_display(
+            _card_field("step:", position, 15, color=color), _display_width()))
+    lines.append(_card_field(
+        "created:",
+        f"{quest_row.format_timestamp(card.created)} "
+        f"({quest_row.relative_age(card.created, now=now)})",
+        15, color=color))
+    lines.append(_card_field(
+        "last activity:", quest_row.relative_age(card.last, now=now), 15, color=color))
     if card.base_branch:
-        lines.append(f"base_branch:   {card.base_branch}")
+        lines.append(_card_field("base_branch:", card.base_branch, 15, color=color))
     if card.merge_commit:
-        lines.append(f"merge_commit:  {card.merge_commit}")
+        lines.append(_card_field("merge_commit:", card.merge_commit, 15, color=color))
     if card.depends_on:
-        lines.append(f"depends_on:    {', '.join(card.depends_on)}")
+        lines.append(_card_field("depends_on:", ", ".join(card.depends_on),
+                                 15, color=color))
     if card.intent:
         lines.append("")
+        lines.append(pal.ansi("intent:", "dim", enabled=color))
         lines.append(card.intent)
     if card.summary:
         lines.append("")
+        lines.append(pal.ansi("summary:", "dim", enabled=color))
         lines.extend(
             card.summary.decode("utf-8", errors="replace").rstrip("\n").splitlines())
     return lines
 
 
-def _detail_card(control: Path, quest_id: str, *, now: datetime) -> list[str]:
+def _detail_card(control: Path, quest_id: str, *, now: datetime,
+                 color: bool) -> list[str]:
     meta = _unstarted_backlog_meta(control, quest_id)
     if meta is not None:
-        return _backlog_card(meta, control, now=now)
-    return _quest_card(control, quest_id, now=now)
+        return _backlog_card(meta, control, now=now, color=color)
+    return _quest_card(control, quest_id, now=now, color=color)
 
 
 def _quest_json(control: Path, quest_id: str) -> dict[str, Any] | None:
@@ -1649,14 +1673,14 @@ def _cmd_list(args: argparse.Namespace) -> int:
     try:
         control = _control_root()
     except worktree.PreconditionError:
-        print(_NO_QUESTS_MESSAGE)
+        _emit_human([_NO_QUESTS_MESSAGE])
         return 0
     now = datetime.now(UTC)
     color = should_use_color(sys.stdout)
     dispositions = _selected_list_dispositions(args)
     if not dispositions and args.since is None:
         lines = _overview_lines(control, show_all=args.all, now=now, color=color)
-        _page_or_print(lines, no_pager=args.no_pager)
+        _page_or_print(lines, no_pager=args.no_pager, trailing_blank=True)
         return 0
     try:
         cutoff = _since_cutoff(args.since, now) if args.since is not None else None
@@ -1666,7 +1690,7 @@ def _cmd_list(args: argparse.Namespace) -> int:
     selected = dispositions or {"active", "backlog", "merged"}
     lines = _filtered_overview_lines(
         control, dispositions=selected, cutoff=cutoff, now=now, color=color)
-    _page_or_print(lines, no_pager=args.no_pager)
+    _page_or_print(lines, no_pager=args.no_pager, trailing_blank=True)
     return 0
 
 
@@ -1704,8 +1728,10 @@ def _cmd_show(args: argparse.Namespace) -> int:
                     json.dumps(_backlog_json(meta, control), indent=2).splitlines(),
                     no_pager=args.no_pager)
                 return 0
-            _page_or_print(_backlog_card(meta, control, now=datetime.now(UTC)),
-                           no_pager=args.no_pager)
+            _page_or_print(
+                _backlog_card(meta, control, now=datetime.now(UTC),
+                              color=should_use_color(sys.stdout)),
+                no_pager=args.no_pager, trailing_blank=True)
             return 0
         print(f"imp: {quest_id} is in the backlog (not started); "
               f"no {resource} yet", file=sys.stderr)
@@ -1719,8 +1745,10 @@ def _cmd_show(args: argparse.Namespace) -> int:
             _page_or_print(json.dumps(card, indent=2).splitlines(),
                            no_pager=args.no_pager)
             return 0
-        _page_or_print(_detail_card(control, quest_id, now=datetime.now(UTC)),
-                       no_pager=args.no_pager)
+        _page_or_print(
+            _detail_card(control, quest_id, now=datetime.now(UTC),
+                         color=should_use_color(sys.stdout)),
+            no_pager=args.no_pager, trailing_blank=True)
         return 0
     if resource == "spec":
         data = make_store(control).get_artifact(quest_id, "spec")
@@ -1728,7 +1756,7 @@ def _cmd_show(args: argparse.Namespace) -> int:
         print(f"imp: no {resource} for {quest_id!r}", file=sys.stderr)
         return 2
     _page_or_print(data.decode("utf-8", errors="replace").splitlines(),
-                   no_pager=args.no_pager)
+                   no_pager=args.no_pager, trailing_blank=True)
     return 0
 
 
@@ -1775,7 +1803,7 @@ _NO_QUESTS_MESSAGE = "No quests yet — start one with imp new"
 
 
 def _log_picker_empty() -> int:
-    print(_NO_QUESTS_MESSAGE)
+    _emit_human([_NO_QUESTS_MESSAGE])
     return 2
 
 
@@ -1805,8 +1833,29 @@ async def _pick_log_target(control: Path) -> str | int:
     return await _pick_full_pool_target(control, header=_LOG_PICKER_HEADER)
 
 
-def _page_or_print(lines: Iterable[str], *, no_pager: bool) -> None:
+def _with_trailing_blank(lines: list[str]) -> list[str]:
+    """Strip trailing empty strings, then append exactly one blank line."""
+    out = list(lines)
+    while out and out[-1] == "":
+        out.pop()
+    out.append("")
+    return out
+
+
+def _emit_human(lines: Iterable[str]) -> None:
+    """Print lines to stdout; add one trailing blank line only on a tty."""
+    out = list(lines)
+    if sys.stdout.isatty():
+        out = _with_trailing_blank(out)
+    for line in out:
+        print(line)
+
+
+def _page_or_print(lines: Iterable[str], *, no_pager: bool,
+                   trailing_blank: bool = False) -> None:
     # Pages lines through $PAGER on a tty; falls back to print() otherwise.
+    if trailing_blank and sys.stdout.isatty():
+        lines = _with_trailing_blank(list(lines))
     if no_pager or not sys.stdout.isatty():
         for line in lines:
             print(line)
@@ -2108,12 +2157,14 @@ def _cmd_log(args: argparse.Namespace) -> int:
     else:
         quest_id = _resolve_default_id(control)
     if quest_id is None:
-        print(_NO_QUESTS_MESSAGE)
+        _emit_human([_NO_QUESTS_MESSAGE])
         return 0
     meta = _unstarted_backlog_meta(control, quest_id)
     if meta is not None:
-        lines: Iterable[str] = _backlog_card(meta, control, now=datetime.now(UTC))
-        _page_or_print(lines, no_pager=args.no_pager)
+        lines: Iterable[str] = _backlog_card(
+            meta, control, now=datetime.now(UTC),
+            color=should_use_color(sys.stdout))
+        _page_or_print(lines, no_pager=args.no_pager, trailing_blank=True)
         return 0
     events = make_store(control).get_events(quest_id)
     if events is None:
@@ -2155,13 +2206,13 @@ def _cmd_log(args: argparse.Namespace) -> int:
                                status=status, total_seconds=summary_total(events))
         lines = render_summary(build_summary(events), header=header,
                                color=color, width=width)
-        _page_or_print(lines, no_pager=args.no_pager)
+        _page_or_print(lines, no_pager=args.no_pager, trailing_blank=True)
         return 0
 
     tree = narrative.build_tree(events)
     lines = render_tree(tree, show=show, color=color, width=width,
                         display_width=_display_width())
-    _page_or_print(lines, no_pager=args.no_pager)
+    _page_or_print(lines, no_pager=args.no_pager, trailing_blank=True)
     return 0
 
 
@@ -2629,7 +2680,7 @@ def _abandon(control: Path, quest_id: str) -> int:
         # home directory is absent (already fully torn down, or never existed).
         # Idempotent teardown — reap a possibly-orphaned branch and exit 0.
         worktree.delete_branch(control, quest_id)
-        print(f"quest {quest_id} already gone; ensured branch imp/{quest_id} is removed.")
+        _emit_human([f"quest {quest_id} already gone; ensured branch imp/{quest_id} is removed."])
         return 0
 
     token = quest.id
@@ -2639,7 +2690,7 @@ def _abandon(control: Path, quest_id: str) -> int:
         except OSError:
             pass  # daemon gone, wedged, or startup-window hang (TimeoutError ⊂ OSError)
         else:
-            print(f"Abandoned {token}.")
+            _emit_human([f"Abandoned {token}."])
             return 0
     try:
         tear_down_quest(quest)
@@ -2647,7 +2698,7 @@ def _abandon(control: Path, quest_id: str) -> int:
         print(f"imp: quest {quest_id} is running (pid {e.held_by_pid or '?'}); "
               f"stop it before abandoning", file=sys.stderr)
         return 2
-    print(f"Abandoned {token}.")
+    _emit_human([f"Abandoned {token}."])
     return 0
 
 
@@ -2662,7 +2713,7 @@ def _cmd_remote_control_stop(args: argparse.Namespace) -> int:
 
 
 def _abandon_picker_empty() -> int:
-    print("Nothing to abandon.")
+    _emit_human(["Nothing to abandon."])
     return 2
 
 
@@ -2713,7 +2764,7 @@ _SHOW_PICKER_HEADER = (
 
 
 def _show_picker_empty() -> int:
-    print("No quests to show.")
+    _emit_human(["No quests to show."])
     return 2
 
 
@@ -3088,12 +3139,11 @@ def _cmd_status(args: argparse.Namespace, _control: Path | None = None) -> int:
     try:
         control = _control if _control is not None else _control_root()
     except worktree.PreconditionError:
-        print(_NO_QUESTS_MESSAGE)
+        _emit_human([_NO_QUESTS_MESSAGE])
         return 0
     lines = _overview_lines(control, show_all=args.all, now=datetime.now(UTC),
                             color=should_use_color(sys.stdout))
-    for line in lines:
-        print(line)
+    _emit_human(lines)
     return 0
 
 
@@ -3267,7 +3317,7 @@ def _cmd_search(args: argparse.Namespace, _control: Path | None = None) -> int:
                         statuses=frozenset(statuses), merged_after=args.merged_after)
     hits: list[SearchHit] = list(make_store(control).search(args.query, zones))
     if not hits:
-        print(f"No quests match {args.query!r}.")
+        _emit_human([f"No quests match {args.query!r}."])
         return 0
     now = datetime.now(UTC)
     color = should_use_color(sys.stdout)
@@ -3284,7 +3334,7 @@ def _cmd_search(args: argparse.Namespace, _control: Path | None = None) -> int:
         for h in hits:
             lines.append("")
             lines.extend(_render_search_hit(h, args.query, now=now, color=color))
-    _page_or_print(lines, no_pager=args.no_pager)
+    _page_or_print(lines, no_pager=args.no_pager, trailing_blank=True)
     return 0
 
 
@@ -3300,12 +3350,14 @@ def _cmd_config(args: argparse.Namespace) -> int:
     except Exception:
         control = root  # no git work tree → local `.imp/config.yaml` layer is skipped
     eff = load_effective_config(project_root=root, control_root=control)
+    color = should_use_color(sys.stdout)
     explain = getattr(args, "explain", None)
+    buf = io.StringIO()
     if explain:
-        render_explain(eff, explain, sys.stdout, color=should_use_color(sys.stdout))
+        render_explain(eff, explain, buf, color=color)
     else:
-        render_config(eff, sys.stdout, color=should_use_color(sys.stdout),
-                      show_all=args.all)
+        render_config(eff, buf, color=color, show_all=args.all)
+    _emit_human(buf.getvalue().splitlines())
     return 0
 
 
@@ -3392,11 +3444,11 @@ def _cmd_events(args: argparse.Namespace) -> int:
     else:
         quest_id = _resolve_default_id(control)
     if quest_id is None:
-        print(_NO_QUESTS_MESSAGE)
+        _emit_human([_NO_QUESTS_MESSAGE])
         return 0
     meta = _unstarted_backlog_meta(control, quest_id)
     if meta is not None:
-        print(f"Quest {quest_id} hasn't started yet — no events to show.")
+        _emit_human([f"Quest {quest_id} hasn't started yet — no events to show."])
         return 0
     events = make_store(control).get_events(quest_id)
     if events is None:
@@ -3448,7 +3500,7 @@ def _cmd_events(args: argparse.Namespace) -> int:
             if i:
                 lines.append("")
             lines.extend(ei.render_step_index(scoped))
-        _page_or_print(lines, no_pager=args.no_pager)
+        _page_or_print(lines, no_pager=args.no_pager, trailing_blank=True)
         return 0
 
     if not leaf:
@@ -3458,7 +3510,8 @@ def _cmd_events(args: argparse.Namespace) -> int:
                 json.dumps(ei.index_json(index), indent=2).splitlines(),
                 no_pager=args.no_pager)
             return 0
-        _page_or_print(ei.render_index(index), no_pager=args.no_pager)
+        _page_or_print(ei.render_index(index), no_pager=args.no_pager,
+                       trailing_blank=True)
         return 0
 
     selected = ei.select_event_lines(
@@ -3473,7 +3526,7 @@ def _cmd_events(args: argparse.Namespace) -> int:
     width = None if args.full else _term_width()
     _page_or_print(
         [ei.digest_line(o, ev, handle_map, width=width) for o, ev in selected],
-        no_pager=args.no_pager)
+        no_pager=args.no_pager, trailing_blank=True)
     return 0
 
 
@@ -3896,7 +3949,7 @@ def _command_names(parser: argparse.ArgumentParser) -> set[str]:
 def _help_command(rest: list[str], parser: argparse.ArgumentParser) -> int:
     if not rest:
         _apply_theme()
-        print(render_overview(should_use_color(sys.stdout)))
+        _emit_human(render_overview(should_use_color(sys.stdout)).splitlines())
         return 0
     cmd = rest[0]
     if cmd not in _command_names(parser):
@@ -3911,7 +3964,7 @@ def _help_command(rest: list[str], parser: argparse.ArgumentParser) -> int:
 def _dispatch_meta(args: list[str], parser: argparse.ArgumentParser) -> int | None:
     if not args:
         _apply_theme()
-        print(render_overview(should_use_color(sys.stdout)))
+        _emit_human(render_overview(should_use_color(sys.stdout)).splitlines())
         return 0
     if args[0] == "help":
         return _help_command(args[1:], parser)

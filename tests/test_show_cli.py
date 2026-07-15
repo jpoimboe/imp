@@ -190,7 +190,7 @@ def test_backlog_card_omits_depends_on_when_empty(
         "created_at": None,
         "seed_opening": "Do X",
     }
-    joined = "\n".join(_backlog_card(meta, tmp_path, now=datetime.now(UTC)))
+    joined = "\n".join(_backlog_card(meta, tmp_path, now=datetime.now(UTC), color=False))
     assert "depends_on" not in joined
     assert "provenance: idea" in joined  # new meta-sourced field
     assert "status:     backlog" in joined
@@ -214,7 +214,7 @@ def test_backlog_card_omits_body_section_when_seed_empty(
         "created_at": None,
         "seed_opening": "",
     }
-    lines = _backlog_card(meta, tmp_path, now=datetime.now(UTC))
+    lines = _backlog_card(meta, tmp_path, now=datetime.now(UTC), color=False)
     # no blank separator line and no body text
     assert "" not in lines
 
@@ -236,7 +236,7 @@ def test_backlog_card_includes_depends_on_when_present(
         "created_at": None,
         "seed_opening": "Do X",
     }
-    lines = _backlog_card(meta, tmp_path, now=datetime.now(UTC))
+    lines = _backlog_card(meta, tmp_path, now=datetime.now(UTC), color=False)
     assert any("depends_on" in line for line in lines)
     assert any("dep001" in line for line in lines)
     assert any(line == "provenance: followup" for line in lines)  # new meta-sourced field
@@ -580,3 +580,96 @@ def test_show_json_none_quest_prints_error(
     rc = main(["show", "lostid", "--json"])
     assert rc == 2
     assert "no such quest" in capsys.readouterr().err
+
+
+def test_card_field_dims_label_and_aligns_value() -> None:
+    from imp.cli import main
+
+    field = main._card_field("id:", "abc123", 15, color=True)
+    assert field == "\x1b[2mid:\x1b[0m" + " " * 12 + "abc123"
+    assert "\x1b[2m" in field                 # dim SGR wraps the label
+    assert field.endswith("abc123")           # value stays plain, no trailing SGR
+
+
+def test_card_field_plain_when_color_disabled() -> None:
+    from imp.cli import main
+
+    field = main._card_field("provenance:", "idea", 12, color=False)
+    assert field == "provenance: idea"        # exactly one pad space, no escapes
+    assert "\x1b[" not in field
+
+
+def test_backlog_card_dims_labels_and_intent_header(tmp_path: Path) -> None:
+    from datetime import UTC, datetime
+
+    from imp.cli import palette as pal
+    from imp.cli.main import _backlog_card
+
+    _seed_control(tmp_path)
+    meta = {
+        "id": "bk009", "title": "Do X", "origin": "idea",
+        "depends_on": [], "created_at": None,
+        "seed_opening": "Do X\n\nbody prose",
+    }
+    lines = _backlog_card(meta, tmp_path, now=datetime.now(UTC), color=True)
+    joined = "\n".join(lines)
+    assert pal.ansi("id:", "dim") in joined            # metadata label dimmed
+    assert pal.ansi("provenance:", "dim") in joined
+    assert pal.ansi("intent:", "dim") in lines          # dim intent header line
+    idx = lines.index(pal.ansi("intent:", "dim"))
+    assert lines[idx - 1] == ""                          # one blank line precedes it
+    assert lines[idx + 1] == "body prose"                # body prose follows header
+
+
+def test_backlog_card_plain_without_color_keeps_header(tmp_path: Path) -> None:
+    from datetime import UTC, datetime
+
+    from imp.cli.main import _backlog_card
+
+    _seed_control(tmp_path)
+    meta = {
+        "id": "bk010", "title": "Do X", "origin": "idea",
+        "depends_on": [], "created_at": None,
+        "seed_opening": "Do X\n\nbody prose",
+    }
+    lines = _backlog_card(meta, tmp_path, now=datetime.now(UTC), color=False)
+    joined = "\n".join(lines)
+    assert "\x1b[" not in joined                          # no SGR escapes anywhere
+    assert "intent:" in lines                             # header text still present
+    assert "provenance: idea" in joined                  # label plain, value aligned
+
+
+def test_show_backlog_card_threads_color(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from imp.cli import palette as pal
+    from imp.engine.quest import Quest
+
+    monkeypatch.delenv("NO_COLOR", raising=False)
+    monkeypatch.setenv("FORCE_COLOR", "1")
+    _seed_control(tmp_path)
+    Quest.create_draft(
+        tmp_path, title="Add OAuth", quest_id="2026-06-16-bkg333",
+        base_branch="main", origin="followup",
+        seed_opening="Add OAuth\n\nwire up OAuth")
+    out = _run(monkeypatch, tmp_path, "show", "2026-06-16-bkg333")
+    assert pal.ansi("id:", "dim") in out                 # label dimmed via threaded color
+    assert pal.ansi("intent:", "dim") in out             # dim intent header via threaded color
+
+
+def test_log_backlog_card_threads_color(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from imp.cli import palette as pal
+    from imp.engine.quest import Quest
+
+    monkeypatch.delenv("NO_COLOR", raising=False)
+    monkeypatch.setenv("FORCE_COLOR", "1")
+    _seed_control(tmp_path)
+    Quest.create_draft(
+        tmp_path, title="Add OAuth", quest_id="2026-06-16-bkg444",
+        base_branch="main", origin="followup",
+        seed_opening="Add OAuth\n\nwire up OAuth")
+    out = _run(monkeypatch, tmp_path, "log", "2026-06-16-bkg444")
+    assert pal.ansi("id:", "dim") in out                 # label dimmed via _cmd_log call site
+    assert pal.ansi("intent:", "dim") in out             # dim intent header via _cmd_log call site
