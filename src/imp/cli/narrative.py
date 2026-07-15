@@ -1240,6 +1240,8 @@ def _h_step_started(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, 
                 # from the event stream (a re-emitted awaiting_user_input re-arms it).
                 existing.label = p.get("label")
                 existing.lane_wait_label = None
+                existing.lane_wait = False
+                existing.lane_wait_start_ts = None
                 existing.children.clear()
                 existing.kind = kind
                 existing.model = p.get("model")

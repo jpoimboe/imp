@@ -126,21 +126,30 @@ def test_retry_reentry_leaves_footer_ready() -> None:
 
 def test_restarted_reentry_leaves_footer_ready() -> None:
     b = _acquire_open()
-    b.add(ev("3", "lane_waiting", base="main", ahead=3))
+    b.add(ev("3", "lane_waiting", base="main", ahead=3,
+             timestamp="2026-06-03T00:00:03+00:00"))
     step = b._step_stack[-1]
+    assert step.lane_wait_start_ts == "2026-06-03T00:00:03+00:00"
 
-    # Genuine re-run (restarted=True): the shared reopen wipes children; the next
-    # wait must still render cleanly.
+    # Genuine re-run (restarted=True): the shared reopen wipes children AND the
+    # stale lane-wait state; the next wait must render cleanly and restamp the
+    # block-age clock from the new queue-entry.
     b.add(ev("4", "workflow_resumed"))
     b.add(ev("5", "step_started", step="acquire", kind="agent", phase="merge",
              label="waiting in merge queue", restarted=True))
     reopened = b._step_stack[-1]
     assert reopened is step
+    # Stale lane-wait state cleared on the re-run.
+    assert reopened.lane_wait is False
+    assert reopened.lane_wait_start_ts is None
 
-    b.add(ev("6", "lane_waiting", base="main", ahead=1))
+    b.add(ev("6", "lane_waiting", base="main", ahead=1,
+             timestamp="2026-06-03T00:00:20+00:00"))
     assert _wait_nodes(reopened) == []
     assert reopened.lane_wait_label == "waiting to merge (1 ahead)"
     assert b.current_activity().verb == "waiting to merge (1 ahead)"
+    # Block-age clock restamped from the NEW queue-entry, not the pre-restart one.
+    assert reopened.lane_wait_start_ts == "2026-06-03T00:00:20+00:00"
 
 
 def test_lane_wait_toggles_through_merge_lane_handlers() -> None:
