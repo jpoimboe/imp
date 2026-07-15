@@ -1023,8 +1023,10 @@ async def _route_script(
     action, _, muts = _finish(log, step, quest, match, state)
     feedback = None
     if isinstance(action, Goto):
-        # exit-0 Goto is a success forward-route; only non-zero exit is a failure-retry.
-        if out["exit"] != 0:
+        # exit-0: forward configured feedback (or None); non-zero: synthesize failure diagnostics.
+        if out["exit"] == 0:
+            feedback = action.feedback
+        else:
             feedback = format_script_feedback(
                 command, out["exit"], out["stdout"], out["stderr"])
     elif isinstance(action, Pause):
