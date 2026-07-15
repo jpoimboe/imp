@@ -3027,9 +3027,10 @@ def _overview_lines(control: Path, *, show_all: bool, now: datetime,
     if not inflight and not backlog_rows and not history:
         return [_NO_QUESTS_MESSAGE]
     label = "history:" if show_all else "merged:"
-    inflight_ids = {r[0] for r in inflight}
-    intents = {d.quest_id: d.intent_title
-               for d in scanned if d.quest_id in inflight_ids}
+    intents = {d.quest_id: d.intent_title for d in scanned}
+    for r in history:
+        if not r[4].strip() and r[0] not in intents:
+            intents[r[0]] = _resolve_row_intent(control, r)
     return _overview_body(inflight, backlog_rows, history, intents=intents,
                           history_label=label, now=now, color=color)
 
@@ -3075,9 +3076,10 @@ def _filtered_overview_lines(control: Path, *, dispositions: set[str],
 
     if not inflight and not backlog_rows and not history:
         return [_NO_FILTER_MATCH_MESSAGE]
-    inflight_ids = {r[0] for r in inflight}
-    intents = {d.quest_id: d.intent_title
-               for d in scanned if d.quest_id in inflight_ids}
+    intents = {d.quest_id: d.intent_title for d in scanned}
+    for r in history:
+        if not r[4].strip() and r[0] not in intents:
+            intents[r[0]] = _resolve_row_intent(control, r)
     return _overview_body(inflight, backlog_rows, history, intents=intents,
                           history_label="history:", now=now, color=color)
 
