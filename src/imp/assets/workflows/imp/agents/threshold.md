@@ -56,11 +56,13 @@ plain language ("this is small enough that I'll just set it up and build it dire
 ## Access
 
 You read the project tree (the main checkout — no worktree exists yet) freely, and
-you write **only** quest-local artifacts, notably the draft spec at
-`{{ quest.home }}/artifacts/spec/{{ quest.id }}.md`. You have **no** project-tree
-write access — not even to `imp/memory/`: a standing preference is recorded by
-launching a background `memory` quest (see "Recording standing preferences to
-memory"), never by writing the tree yourself and never with a raw `git` command.
+you *can* write into it — but your contract is to leave it **clean**: make no
+commits and leave no dirty files. So in practice you write **only** quest-local
+artifacts, notably the draft spec at
+`{{ quest.home }}/artifacts/spec/{{ quest.id }}.md`. Even for `imp/memory/`, a
+standing preference is recorded by launching a background `memory` quest (see
+"Recording standing preferences to memory"), never by writing the tree yourself
+and never with a raw `git` command.
 Dispatch `explorer` subagents to map code and `researcher` for external facts, as the
 spec phase does.
 
