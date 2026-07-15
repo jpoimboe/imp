@@ -1435,6 +1435,17 @@ def _h_awaiting_user_input(
     # boundary, so flush unconditionally. Mirrors the un-hold loop below and the
     # flush in _h_llm_response / _h_user_message.
     self._flush_burst()
+    # Settle any still-open subagent fold the same narrow way _h_workflow_paused
+    # does: a Ctrl-C interrupt of a running subagent solicits here while its fold
+    # is still running=True (no tool_result ever closed it), which keeps
+    # _is_final False and stalls the live _walk ahead of the freshly-seeded reply
+    # node, so the optimistic echo only paints once a later event flips the fold.
+    # Unconditional: a no-op on a normal your-turn yield (no subagent can be open
+    # then). Narrow settle only — no membership/salvage mutation (that is
+    # _h_workflow_resumed's job).
+    for fold in self._open_sub_by_event.values():
+        fold.running = False
+        fold.terminal_state = "interrupted"
     # Un-hold any held narration in the current container: the prose carried by
     # the llm_response context the human must read to answer, and the agent is now blocked
     # settled, NOT a trailing narration that could still fold into a step
