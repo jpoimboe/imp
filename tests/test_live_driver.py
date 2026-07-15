@@ -3049,3 +3049,40 @@ def test_driver_unsandboxed_flag_defaults_off_and_toggles_into_toolbar() -> None
     drv.set_unsandboxed(True)
     assert drv.unsandboxed is True
     assert "unsandboxed" in (drv.compose_toolbar_static() or "")
+
+
+def test_seed_pending_reply_reaches_reply_past_open_subagent_fold() -> None:
+    # Ctrl-C interrupting a running subagent lands on the inline steer prompt via
+    # awaiting_user_input. The interrupted subagent never emitted a tool_result,
+    # so its SubagentFold stays running=True and sits ahead of the freshly-seeded
+    # reply node in walk order. Unless the solicit boundary settles the open
+    # fold, the live _walk stalls on it (_is_final is False while running) and the
+    # optimistic echo is never painted. Drive events ONLY up to
+    # awaiting_user_input, and do NOT call finish() (which would force-flush and
+    # mask the stall).
+    drv, out = _driver()
+    for e in [
+        ev("1", "quest_created", quest_id=1, title="t"),
+        ev("2", "step_started", step="task-lead", kind="agent", phase="build",
+           model="m", provider="anthropic"),
+        ev("3", "tool_call", agent_id="step:build/task-lead", id="t1",
+           name="sub_agent", id_ns="block", input={"subagent_name": "coder"}),
+        # No tool_result for the sub_agent call: the interrupted subagent never
+        # emitted one, so its SubagentFold stays running=True. id_ns="block"
+        # (awaits_result=True) prevents _resume_close_folds from closing the
+        # fold before _h_awaiting_user_input runs, which is the actual scenario.
+        ev("4", "awaiting_user_input", agent_id="step:build/task-lead"),
+    ]:
+        drv.on_event(e)
+    drv.seed_pending_reply("steer this way")
+    body = out.getvalue()
+    assert body.count("> steer this way") == 1, (
+        "optimistic steer echo not painted — the live cursor is wedged behind "
+        f"the open (running) subagent fold; body={body!r}")
+    # Walk order preserved: the interrupted subagent status row renders before
+    # the user's echoed reply.
+    lines = body.splitlines()
+    sub_i = next(i for i, ln in enumerate(lines) if "interrupted" in ln)
+    reply_i = next(i for i, ln in enumerate(lines) if "> steer this way" in ln)
+    assert sub_i < reply_i, (
+        f"interrupted subagent row must precede the echoed reply; body={body!r}")
