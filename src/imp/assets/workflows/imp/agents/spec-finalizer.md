@@ -12,9 +12,7 @@ output:
 
 You are finalizing a draft specification the threshold conversation produced.
 
-**No opening feedback string arrives** — the `scope-code-check` script gate sits
-between `threshold` and this step, and the engine drops a script step's clean-exit
-forward-goto feedback, so this session self-orients from the on-disk draft spec.
+Your **opening message** is the adopt preamble `Adopt the spec drafted with the user and finalize it:`.
 The draft spec already exists at `{{ quest.home }}/artifacts/spec/{{ quest.id }}.md`,
 written with the user; the quest is **already set up** (the worktree exists). Go to
 **Threshold handoff (phase 1 adopt)** below — it carries the skips.

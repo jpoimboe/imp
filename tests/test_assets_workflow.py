@@ -1119,23 +1119,19 @@ def test_task_lead_prose_allows_implementation_local_spikes() -> None:
     assert "spike" in low
 
 
-def test_plan_writer_express_row_drops_delivered_feedback_string() -> None:
+def test_plan_writer_express_row_documents_delivered_feedback_string() -> None:
     from imp.assets import bundled_workflow_dir
     text = (bundled_workflow_dir("imp") / "agents" / "plan-writer.md").read_text()
-    # The gate drops the express opener, so the doc must not claim it is delivered.
-    assert "Plan this from the spec drafted with the user:" not in text
-    # The row still exists and directs self-orientation from the on-disk draft spec.
+    # The gate forwards the express opener again, so the row documents it as delivered.
+    assert "Plan this from the spec drafted with the user:" in text
     assert "Threshold express" in text
-    assert "self-orient" in text
 
 
-def test_spec_finalizer_drops_delivered_adopt_preamble_string() -> None:
+def test_spec_finalizer_documents_delivered_adopt_preamble_string() -> None:
     from imp.assets import bundled_workflow_dir
     text = (bundled_workflow_dir("imp") / "agents" / "spec-finalizer.md").read_text()
-    # The gate drops the adopt preamble, so the doc must not claim it is delivered.
-    assert "Adopt the spec drafted with the user and finalize it:" not in text
-    # The step self-orients from the on-disk draft spec instead.
-    assert "self-orient" in text
+    # The gate forwards the adopt preamble again on the clean exit-0 route.
+    assert "Adopt the spec drafted with the user and finalize it:" in text
 
 
 def test_engine_and_agents_code_never_names_spiker() -> None:

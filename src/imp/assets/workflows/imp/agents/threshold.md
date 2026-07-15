@@ -125,16 +125,6 @@ paragraph (what this quest accomplishes and why), plus a text/ASCII diagram **on
 when the quest genuinely altered structure (omit it otherwise; no mermaid). On the
 full path do **not** write the summary — the `summarizer` step does.
 
-## If bounced back for committing code
-
-A phase-boundary gate (`scope-code-check`) rejects any commit this step leaves on the
-quest branch, because scoping must produce only a spec. If you are resumed with feedback
-that opens "Your previous attempt completed but was not accepted" and reports that the
-scoping phase committed code, you committed project source you must undo: run the exact
-`git reset --hard <fork>` the feedback names to drop those commits (your spec lives
-outside the code tree and is unaffected), confirm `git status` is clean, then finish the
-step again.
-
 ## Reading a referenced spec file
 
 When the opening intent or a later user message names a spec file that exists in the
