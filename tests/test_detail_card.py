@@ -330,7 +330,7 @@ def test_detail_card_shows_shelved_for_archived_paused_quest(tmp_path: Path) -> 
         tmp_path, "2026-06-20-shv01", events_path=events_m,
         quest_json_path=quest_json_m, state_json_path=state_json_m)
 
-    card_m = "\n".join(main._detail_card(tmp_path, "2026-06-20-shv01", now=_NOW))
+    card_m = "\n".join(main._detail_card(tmp_path, "2026-06-20-shv01", now=_NOW, color=False))
     status_line_m = next(ln for ln in card_m.splitlines() if ln.startswith("status:"))
     assert "shelved" in status_line_m
     assert "paused" not in status_line_m
@@ -353,7 +353,7 @@ def test_detail_card_shows_shelved_for_archived_paused_quest(tmp_path: Path) -> 
         tmp_path, "2026-06-20-shv02", events_path=events_u,
         quest_json_path=quest_json_u, state_json_path=state_json_u)
 
-    card_u = "\n".join(main._detail_card(tmp_path, "2026-06-20-shv02", now=_NOW))
+    card_u = "\n".join(main._detail_card(tmp_path, "2026-06-20-shv02", now=_NOW, color=False))
     status_line_u = next(ln for ln in card_u.splitlines() if ln.startswith("status:"))
     assert "shelved" in status_line_u
     assert "paused" not in status_line_u
@@ -374,7 +374,7 @@ def test_detail_card_shows_shelved_for_archived_paused_quest(tmp_path: Path) -> 
         tmp_path, "2026-06-20-shv03", events_path=events_s,
         quest_json_path=quest_json_s, state_json_path=state_json_s)
 
-    card_s = "\n".join(main._detail_card(tmp_path, "2026-06-20-shv03", now=_NOW))
+    card_s = "\n".join(main._detail_card(tmp_path, "2026-06-20-shv03", now=_NOW, color=False))
     status_line_s = next(ln for ln in card_s.splitlines() if ln.startswith("status:"))
     assert "shelved" in status_line_s
     assert not any(ln.startswith("step:") for ln in card_s.splitlines())
