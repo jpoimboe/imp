@@ -33,9 +33,7 @@ def test_make_store_returns_proxy_when_env_set(
     assert store._path == "/tmp/imp-x/y.sock"
 
 
-def test_make_store_returns_local_when_env_unset(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_make_store_returns_local_when_env_unset(tmp_path: Path) -> None:
     _seed_control(tmp_path)
     assert isinstance(make_store(tmp_path), LocalStore)
 
