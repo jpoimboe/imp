@@ -61,3 +61,34 @@ def conversation_prose(events: list[Any]) -> str:
         if text:
             parts.append(text)
     return "\n".join(parts)
+
+
+def _collect_strings(value: Any, out: list[str]) -> None:
+    if isinstance(value, str):
+        out.append(value)
+    elif isinstance(value, dict):
+        for v in value.values():
+            _collect_strings(v, out)
+    elif isinstance(value, list):
+        for v in value:
+            _collect_strings(v, out)
+
+
+def event_text(event: Any) -> str:
+    """Per-event payload strings, minus static step_context boilerplate."""
+    if not isinstance(event, dict):
+        return ""
+    payload = event.get("payload")
+    if not isinstance(payload, dict):
+        return ""
+    if event.get("type") == "step_context":
+        payload = {k: v for k, v in payload.items()
+                   if k not in ("system_prompt", "tools_schema")}
+    parts: list[str] = []
+    _collect_strings(payload, parts)
+    return "\n".join(parts)
+
+
+def events_content(events: list[Any]) -> str:
+    """Full-quest text projection: every event's `event_text`, newline-joined."""
+    return "\n".join(t for ev in events if (t := event_text(ev)))

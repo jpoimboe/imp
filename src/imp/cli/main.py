@@ -3224,6 +3224,101 @@ def _search_archived(control: Path, query: str, statuses: set[str],
     return hits
 
 
+def _selected_events_search(args: argparse.Namespace) -> tuple[bool, bool, bool]:
+    """(active, backlog, archived) zone flags; none given searches all three."""
+    if not (args.active or args.backlog or args.archived):
+        return True, True, True
+    return args.active, args.backlog, args.archived
+
+
+def _matched_events(
+    events: list[dict[str, Any]], query: str, *,
+    types: set[str] | None, agents: set[str] | None,
+) -> tuple[list[tuple[int, dict[str, Any]]], dict[str, str]]:
+    """Matched (ordinal, event) pairs after type/agent filters, plus the handle map."""
+    from imp.cli.render_helpers import event_text
+    from imp.engine import events_index as ei
+    indexed = list(enumerate(events, start=1))
+    handle_map = ei.subagent_handle_map(indexed)
+    candidates = ei.select_event_lines(
+        indexed, types=types, agents=agents, handle_map=handle_map)
+    q = query.lower()
+    matched = [(o, ev) for o, ev in candidates if q in event_text(ev).lower()]
+    return matched, handle_map
+
+
+class EventSearchHit(NamedTuple):
+    quest_id: str
+    title: str
+    zone: str
+    last_activity: str | None
+    events: list[tuple[int, dict[str, Any]]]
+    handle_map: dict[str, str]
+    match_count: int
+
+
+def _events_search_active(
+    control: Path, query: str, *, types: set[str] | None, agents: set[str] | None,
+) -> list[EventSearchHit]:
+    """In-flight quests with >=1 event matching query (after type/agent filters)."""
+    store = make_store(control)
+    scanned = store.scan_homes()
+    hits: list[EventSearchHit] = []
+    for r in _status_rows(control, scanned):
+        events = store.get_events(r[0]) or []
+        matched, handle_map = _matched_events(events, query, types=types, agents=agents)
+        if matched:
+            hits.append(EventSearchHit(
+                r[0], r[4], "active", r[3], matched, handle_map, len(matched)))
+    return hits
+
+
+def _events_search_backlog(
+    control: Path, query: str, *, types: set[str] | None, agents: set[str] | None,
+) -> list[EventSearchHit]:
+    """Backlog quests matched on id/title/intent. Skipped when type/agent filter is set."""
+    if types is not None or agents is not None:
+        return []
+    q = query.lower()
+    hits: list[EventSearchHit] = []
+    for r in _backlog_rows(control):
+        quest_id, title = r[0], r[4]
+        seed = _backlog_seed_opening(control, quest_id)
+        if q in quest_id.lower() or q in title.lower() or q in seed.lower():
+            hits.append(EventSearchHit(quest_id, title, "backlog", r[3], [], {}, 1))
+    return hits
+
+
+def _events_search_archived(
+    control: Path, query: str, *, types: set[str] | None, agents: set[str] | None,
+) -> list[EventSearchHit]:
+    """Archived quests: index candidates re-scanned to specific matching events."""
+    store = make_store(control)
+    hits: list[EventSearchHit] = []
+    for cid, title, _status, last in archive_read.search_archive_events_content(control, query):
+        events = store.get_events(cid) or []
+        matched, handle_map = _matched_events(events, query, types=types, agents=agents)
+        if matched:
+            hits.append(EventSearchHit(
+                cid, title, "archive", last, matched, handle_map, len(matched)))
+    return hits
+
+
+def _events_search(
+    control: Path, query: str, zones: tuple[bool, bool, bool], *,
+    types: set[str] | None, agents: set[str] | None,
+) -> list[EventSearchHit]:
+    active, backlog, archived = zones
+    hits: list[EventSearchHit] = []
+    if active:
+        hits += _events_search_active(control, query, types=types, agents=agents)
+    if backlog:
+        hits += _events_search_backlog(control, query, types=types, agents=agents)
+    if archived:
+        hits += _events_search_archived(control, query, types=types, agents=agents)
+    return hits
+
+
 def _merged_after(control: Path, quest_id: str, base_commit: str) -> bool:
     """True iff the recorded merge landed AFTER base_commit; fail-safe False otherwise."""
     merge_commit = archive_read.merge_commit_of(control, quest_id)
@@ -3339,6 +3434,93 @@ def _cmd_search(args: argparse.Namespace, _control: Path | None = None) -> int:
         for h in hits:
             lines.append("")
             lines.extend(_render_search_hit(h, args.query, now=now, color=color))
+    _page_or_print(lines, no_pager=args.no_pager, trailing_blank=True)
+    return 0
+
+
+def _events_search_list_line(
+    hit: EventSearchHit, *, query: str, color: bool,
+) -> str:
+    id_seg = _spine_segment(hit.quest_id, query, *pal.NODE_COLORS["quest_id"],
+                            color=color)
+    tail = pal.ansi(hit.zone, "dim", enabled=color)
+    title = hit.title.strip()
+    if not title:
+        return f"{id_seg} · {tail}"
+    title_seg = _spine_segment(title, query, color=color)
+    return f"{id_seg} · {title_seg} · {tail}"
+
+
+def _render_events_search_hit(
+    hit: EventSearchHit, query: str, *, now: datetime, color: bool,
+    width: int, limit: int = 3,
+) -> list[str]:
+    from imp.engine import events_index as ei
+    spine = _search_list_line(
+        SearchHit(hit.quest_id, hit.title, hit.zone, "", hit.last_activity),
+        query=query, now=now, color=color)
+    lines = [spine]
+    for ordinal, event in hit.events[:limit]:
+        digest = ei.digest_line(ordinal, event, hit.handle_map, width=width)
+        lines.append("  " + _highlight(digest, query, color=color))
+    extra = len(hit.events) - limit
+    if extra > 0:
+        lines.append(pal.ansi(f"  … +{extra} more", "dim", enabled=color))
+    return lines
+
+
+def _events_search_json(hits: list[EventSearchHit]) -> list[dict[str, Any]]:
+    from imp.engine import events_index as ei
+    return [
+        {"quest_id": h.quest_id, "title": h.title, "zone": h.zone,
+         "last_activity": h.last_activity, "events": ei.events_json(h.events)}
+        for h in hits
+    ]
+
+
+def _cmd_events_search(
+    args: argparse.Namespace, _control: Path | None = None,
+) -> int:
+    control = _control if _control is not None else _control_root()
+    types = set(args.type) if args.type else None
+    agents = set(args.agent) if args.agent else None
+    zones = _selected_events_search(args)
+    hits = _events_search(control, args.query, zones, types=types, agents=agents)
+    if not hits:
+        _emit_human([f'0 matches for "{args.query}"'])
+        return 0
+    color = should_use_color(sys.stdout)
+    zone_order = {z: i for i, z in enumerate(_SEARCH_ZONES)}
+    hits.sort(key=lambda h: h.last_activity or "", reverse=True)
+    hits.sort(key=lambda h: zone_order[h.zone])
+    if args.json:
+        _page_or_print(
+            json.dumps(_events_search_json(hits), indent=2).splitlines(),
+            no_pager=args.no_pager)
+        return 0
+    if args.list:
+        lines = [_events_search_list_line(h, query=args.query, color=color)
+                 for h in hits]
+        _page_or_print(lines, no_pager=args.no_pager, trailing_blank=True)
+        return 0
+    now = datetime.now(UTC)
+    total = sum(h.match_count for h in hits)
+    quests = len(hits)
+    noun_m = "match" if total == 1 else "matches"
+    noun_q = "quest" if quests == 1 else "quests"
+    header = pal.ansi(f'{total} {noun_m} in {quests} {noun_q} for "{args.query}"',
+                      "dim", enabled=color)
+    cap = args.limit if args.limit is not None else 3
+    width = _term_width()
+    lines = [header]
+    for h in hits[:cap]:
+        lines.append("")
+        lines.extend(_render_events_search_hit(
+            h, args.query, now=now, color=color, width=width))
+    extra = len(hits) - cap
+    if extra > 0:
+        lines.append("")
+        lines.append(pal.ansi(f"… +{extra} more quests", "dim", enabled=color))
     _page_or_print(lines, no_pager=args.no_pager, trailing_blank=True)
     return 0
 
@@ -3533,6 +3715,44 @@ def _cmd_events(args: argparse.Namespace) -> int:
         [ei.digest_line(o, ev, handle_map, width=width) for o, ev in selected],
         no_pager=args.no_pager, trailing_blank=True)
     return 0
+
+
+def _build_events_search_parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(
+        prog="imp events search",
+        description=(
+            "Case-insensitive substring search over structured event content "
+            "(tool calls, tool results, agent reasoning, skill loads) across "
+            "quests — the structured-event sibling of `imp search` (prose only). "
+            "Searches active, backlog, and archive by default; --type / --agent "
+            "narrow which events match."),
+    )
+    p.add_argument(
+        "query", metavar="QUERY",
+        help="Substring matched case-insensitively against event content.")
+    p.add_argument("--active", action="store_true",
+                   help="Search in-flight quests' events.")
+    p.add_argument("--backlog", action="store_true",
+                   help="Search backlog quests (matched on title + intent).")
+    p.add_argument("--archived", action="store_true",
+                   help="Search archived quests' events.")
+    p.add_argument(
+        "--type", action=SplitAppend, default=None,
+        help="Keep only these event types (repeatable / comma-joined).")
+    p.add_argument(
+        "--agent", action=SplitAppend, default=None,
+        help="Keep only these authors: step name, subagent handle, or sub:<id> "
+             "(repeatable / comma-joined).")
+    p.add_argument("--limit", type=int, default=None,
+                   help="Raise the matched-quest cap above the default 3.")
+    p.add_argument("-l", "--list", action="store_true", dest="list",
+                   help="One terse line per matched quest (id, title, zone).")
+    p.add_argument("--json", action="store_true",
+                   help="Structured output of matched events.")
+    p.add_argument("--no-pager", action="store_true",
+                   help="Disable the pager even when stdout is a TTY.")
+    p.set_defaults(func=_cmd_events_search)
+    return p
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -4031,7 +4251,10 @@ def main(argv: list[str] | None = None) -> int:
             # for the same buffered-pipe reason as the command path below.
             sys.stdout.flush()
             return result
-        ns = parser.parse_args(args)
+        if len(args) >= 2 and args[0] == "events" and args[1] == "search":
+            ns = _build_events_search_parser().parse_args(args[2:])
+        else:
+            ns = parser.parse_args(args)
         _apply_theme()   # resolve dark/light/ansi once, before any command renders
         rc: int = ns.func(ns)
         # Flush here, inside the guard: output small enough to fit Python's

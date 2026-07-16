@@ -75,6 +75,26 @@ def _write_stale_v2_db(db_path: Path) -> None:
         conn.close()
 
 
+def _write_stale_v4_db(db_path: Path) -> None:
+    """A v4 db: quests/deps present, a content column but NO events_content
+    column, user_version 4, a bogus 'stale' row. Records/blobs on disk carry the
+    real events, so a rebuild backfills events_content for the real rows and
+    drops 'stale'."""
+    db_path.unlink(missing_ok=True)
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.execute(
+            "CREATE TABLE quests (id TEXT PRIMARY KEY, title TEXT, base TEXT,"
+            " created_at TEXT, status TEXT, step TEXT, events_hash TEXT,"
+            " ingested_at TEXT, last_event_ts TEXT, content TEXT)")
+        conn.execute("CREATE TABLE deps (quest_id TEXT, depends_on_id TEXT)")
+        conn.execute("INSERT INTO quests (id, title) VALUES ('stale', 'Stale')")
+        conn.execute("PRAGMA user_version = 4")
+        conn.commit()
+    finally:
+        conn.close()
+
+
 def _seed_prose_change(control: Path, cid: str, body: str) -> None:
     """Archive one change whose events carry an assistant prose line."""
     events = control / f"{cid}.jsonl"
@@ -129,7 +149,7 @@ def _rows_by_id(db: Path) -> dict[str, str | None]:
 
 def test_ensure_current_fast_path_skips_rebuild(tmp_path: Path, monkeypatch) -> None:
     _seed_change(tmp_path, "alpha", "2026-06-01T00:00:01+00:00")
-    assert _user_version(archive.index_path(tmp_path)) == 4  # fresh ingest stamped v4
+    assert _user_version(archive.index_path(tmp_path)) == 5  # fresh ingest stamped v5
 
     calls: list[int] = []
     monkeypatch.setattr(archive, "rebuild_index", lambda _root: calls.append(1))
@@ -151,7 +171,7 @@ def test_ensure_current_migrates_legacy_v0_db(tmp_path: Path) -> None:
     archive.ensure_current(tmp_path)
 
     assert "events" not in _table_names(db)
-    assert _user_version(db) == 4
+    assert _user_version(db) == 5
     rows = _rows_by_id(db)
     assert "stale" not in rows                       # rebuilt from records, not the old db
     assert rows["alpha"] == "2026-06-01T00:00:01+00:00"  # last_event_ts denormalized
@@ -165,10 +185,10 @@ def test_completed_rows_migrates_before_query(tmp_path: Path) -> None:
     rows = read.completed_rows(tmp_path)
 
     # Migration ran first: the new last_event_ts query would OperationalError on
-    # the legacy schema; instead it returns the rebuilt v4 rows.
+    # the legacy schema; instead it returns the rebuilt v5 rows.
     ids = {r[0] for r in rows}
     assert ids == {"alpha"}            # rebuilt from records; 'stale' dropped
-    assert _user_version(db) == 4
+    assert _user_version(db) == 5
 
 
 def test_search_archive_migrates_before_query(tmp_path: Path) -> None:
@@ -181,7 +201,7 @@ def test_search_archive_migrates_before_query(tmp_path: Path) -> None:
     # Without the gate the legacy db has no 'alpha' row -> []. With it, the
     # rebuild restores 'alpha' (title "Alpha") and the search finds it.
     assert [h[0] for h in hits] == ["alpha"]
-    assert _user_version(db) == 4
+    assert _user_version(db) == 5
 
 
 def test_archive_quest_on_legacy_v0_db_migrates_and_ingests(tmp_path: Path) -> None:
@@ -194,7 +214,7 @@ def test_archive_quest_on_legacy_v0_db_migrates_and_ingests(tmp_path: Path) -> N
     _seed_change(tmp_path, "gamma", "2026-06-02T00:00:02+00:00")
 
     assert "events" not in _table_names(db)
-    assert _user_version(db) == 4
+    assert _user_version(db) == 5
     rows = _rows_by_id(db)
     assert set(rows) == {"alpha", "gamma"}        # 'stale' dropped by the rebuild
     assert rows["alpha"] == "2026-06-01T00:00:01+00:00"
@@ -258,7 +278,7 @@ def test_rebuild_backfills_content_column(tmp_path: Path) -> None:
 
     archive.ensure_current(tmp_path)              # stale -> one-time rebuild
 
-    assert _user_version(db) == 4
+    assert _user_version(db) == 5
     conn = sqlite3.connect(db)
     try:
         rows = {r[0]: r[1] for r in conn.execute("SELECT id, content FROM quests")}
@@ -308,9 +328,9 @@ def test_schema_bump_reindexes_and_drops_injected_prompt(tmp_path: Path) -> None
     finally:
         conn.close()
 
-    archive.ensure_current(control)               # stale v3 -> reindex to v4
+    archive.ensure_current(control)               # stale v3 -> reindex to v5
 
-    assert _user_version(db) == 4
+    assert _user_version(db) == 5
     conn = sqlite3.connect(db)
     try:
         content = conn.execute(
@@ -319,3 +339,39 @@ def test_schema_bump_reindexes_and_drops_injected_prompt(tmp_path: Path) -> None
         conn.close()
     assert "INJECTED" not in content              # injected prompt dropped by reindex
     assert "HUMANTERM" in content                 # human reply retained
+
+
+def test_rebuild_backfills_events_content_column(tmp_path: Path) -> None:
+    control = tmp_path
+    cid = "evt"
+    events = control / f"{cid}.jsonl"
+    events.write_text(json.dumps({
+        "id": f"{cid}-e0", "timestamp": "2026-06-01T00:00:01+00:00",
+        "type": "tool_result",
+        "payload": {"id": "t1", "content": "BACKFILL_TRACE"}}) + "\n")
+    quest_json = control / f"{cid}-quest.json"
+    quest_json.write_text(json.dumps({
+        "id": cid, "title": "", "base_branch": "main",
+        "created_at": "2026-06-01T00:00:00+00:00", "depends_on": []}))
+    state_json = control / f"{cid}-state.json"
+    state_json.write_text(json.dumps({
+        "id": cid, "status": "completed", "step": "finalize"}))
+    archive.archive_quest(
+        control, cid, events_path=events,
+        quest_json_path=quest_json, state_json_path=state_json)
+
+    db = archive.index_path(control)
+    _write_stale_v4_db(db)                        # genuine v4 db, no events_content column
+    assert _user_version(db) == 4
+
+    archive.ensure_current(control)               # stale v4 -> reindex to v5
+
+    assert _user_version(db) == 5
+    conn = sqlite3.connect(db)
+    try:
+        rows = {r[0]: r[1] for r in conn.execute(
+            "SELECT id, events_content FROM quests")}
+    finally:
+        conn.close()
+    assert "stale" not in rows                    # rebuilt from records, not the old db
+    assert "BACKFILL_TRACE" in rows["evt"]        # events_content backfilled from the blob

@@ -176,7 +176,7 @@ def test_ingest_last_event_ts_all_malformed(tmp_path: Path) -> None:
 def test_connect_stamps_fresh_db_user_version(tmp_path: Path) -> None:
     conn = index.connect(tmp_path / "index.db")
     try:
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 4
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 5
     finally:
         conn.close()
 
@@ -291,6 +291,46 @@ def test_last_event_ts_none_when_column_null(tmp_path: Path) -> None:
             "INSERT INTO quests (id, last_event_ts) VALUES (?, NULL)", ("alpha",))
         conn.commit()
         assert index.last_event_ts(conn, "alpha") is None
+    finally:
+        conn.close()
+
+
+def test_ingest_populates_events_content(tmp_path: Path) -> None:
+    conn = index.connect(tmp_path / "index.db")
+    try:
+        events = [
+            {"id": "e0", "type": "tool_result",
+             "payload": {"id": "t1", "content": "STACKTRACE_XYZ"}},
+            {"id": "e1", "type": "step_context",
+             "payload": {"provider": "anthropic", "model": "m",
+                         "system_prompt": "PROMPTNOISE", "tools_schema": []}},
+        ]
+        index.ingest(conn, _sample_record(), events)
+        ev = conn.execute(
+            "SELECT events_content FROM quests WHERE id='alpha'").fetchone()[0]
+        assert "STACKTRACE_XYZ" in ev
+        assert "PROMPTNOISE" not in ev
+    finally:
+        conn.close()
+
+
+def test_search_events_content_matches_structured_events_only(tmp_path: Path) -> None:
+    conn = index.connect(tmp_path / "index.db")
+    try:
+        events = [
+            {"id": "e0", "type": "opening_intent",
+             "payload": {"text": "add a deadline"}},
+            {"id": "e1", "type": "tool_call",
+             "payload": {"name": "bash", "input": {"cmd": "GREPTARGET"}}},
+        ]
+        index.ingest(conn, _sample_record(), events)
+        assert [r[0] for r in index.search_events_content(conn, "GREPTARGET")] == ["alpha"]
+        assert [r[0] for r in index.search_events_content(conn, "greptarget")] == ["alpha"]
+        assert index.search_events_content(conn, "nonexistent-zzz") == []
+        assert index.search_events_content(conn, "alpha") == []   # id not searched
+        assert index.search_events_content(conn, "Alpha") == []   # title not searched
+        assert index.search_events_content(conn, "GREPTARGET")[0] == (
+            "alpha", "Alpha", "completed", None)
     finally:
         conn.close()
 

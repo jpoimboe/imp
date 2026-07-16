@@ -64,11 +64,14 @@ bookkeeping. Ask the CLI instead:
 - `imp show <id>` — a quest's card: status, current step, intent, and summary
   (`show <id> spec` for the raw spec, `--json` for a structured card).
 - `imp search <query>` — case-insensitive substring search across in-flight,
-  backlog, and archived quests.
+  backlog, and archived quests' conversation content.
 - `imp log <id>` — the readable narrative of what happened; `--step <name>` scopes
   it to one step.
 - `imp events <id>` — the event index (steps, subagents, types); add `--step
   <name>` for a per-agent breakdown, or `--agent <handle>` to follow one subagent.
+- `imp events search <query>` — the same substring search over structured event
+  content (tool calls, results, reasoning) across all quests, reaching what `imp
+  search` (prose only) can't; `--type` / `--agent` narrow it.
 - `imp help`, `imp <cmd> --help` — the command list, or one command's flags.
 
 The event log is unbounded — filter (`--step`, `--agent`, `--limit`) rather than
