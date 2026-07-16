@@ -3717,6 +3717,44 @@ def _cmd_events(args: argparse.Namespace) -> int:
     return 0
 
 
+def _build_events_search_parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(
+        prog="imp events search",
+        description=(
+            "Case-insensitive substring search over structured event content "
+            "(tool calls, tool results, agent reasoning, skill loads) across "
+            "quests — the structured-event sibling of `imp search` (prose only). "
+            "Searches active, backlog, and archive by default; --type / --agent "
+            "narrow which events match."),
+    )
+    p.add_argument(
+        "query", metavar="QUERY",
+        help="Substring matched case-insensitively against event content.")
+    p.add_argument("--active", action="store_true",
+                   help="Search in-flight quests' events.")
+    p.add_argument("--backlog", action="store_true",
+                   help="Search backlog quests (matched on title + intent).")
+    p.add_argument("--archived", action="store_true",
+                   help="Search archived quests' events.")
+    p.add_argument(
+        "--type", action=SplitAppend, default=None,
+        help="Keep only these event types (repeatable / comma-joined).")
+    p.add_argument(
+        "--agent", action=SplitAppend, default=None,
+        help="Keep only these authors: step name, subagent handle, or sub:<id> "
+             "(repeatable / comma-joined).")
+    p.add_argument("--limit", type=int, default=None,
+                   help="Raise the matched-quest cap above the default 3.")
+    p.add_argument("-l", "--list", action="store_true", dest="list",
+                   help="One terse line per matched quest (id, title, zone).")
+    p.add_argument("--json", action="store_true",
+                   help="Structured output of matched events.")
+    p.add_argument("--no-pager", action="store_true",
+                   help="Disable the pager even when stdout is a TTY.")
+    p.set_defaults(func=_cmd_events_search)
+    return p
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="imp")
     parser.add_argument("--version", action="version", version=f"imp {__version__}")
@@ -4213,7 +4251,10 @@ def main(argv: list[str] | None = None) -> int:
             # for the same buffered-pipe reason as the command path below.
             sys.stdout.flush()
             return result
-        ns = parser.parse_args(args)
+        if len(args) >= 2 and args[0] == "events" and args[1] == "search":
+            ns = _build_events_search_parser().parse_args(args[2:])
+        else:
+            ns = parser.parse_args(args)
         _apply_theme()   # resolve dark/light/ansi once, before any command renders
         rc: int = ns.func(ns)
         # Flush here, inside the guard: output small enough to fit Python's

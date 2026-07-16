@@ -1,11 +1,16 @@
 from __future__ import annotations
 
 import argparse
+import io
 import json as _json
+from contextlib import redirect_stdout
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 import imp.cli.main as m
+from imp.cli.main import main
 from imp.engine import archive
 
 
@@ -311,3 +316,43 @@ def test_cmd_events_search_zone_major_then_last_activity_desc_sort(
     idx_bkl = out.index("bkl001")
     idx_arc = out.index("arc001")
     assert idx_act_new < idx_act_old < idx_bkl < idx_arc
+
+
+def test_main_routes_events_search_against_archive(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.delenv("IMP_SESSION_SOCKET", raising=False)
+    monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
+    import json as _json
+    line = _json.dumps({
+        "id": "e0", "type": "tool_call",
+        "payload": {"name": "bash", "input": {"cmd": "GREPTARGET"}}}) + "\n"
+    _archive_events(tmp_path, "arch01", "Archived one", line)
+    buf = io.StringIO()
+    with redirect_stdout(buf):
+        rc = main(["events", "search", "GREPTARGET", "--archived", "--no-pager"])
+    out = buf.getvalue()
+    assert rc == 0
+    assert "arch01" in out
+    assert '1 match in 1 quest for "GREPTARGET"' in out
+
+
+def test_main_events_id_still_flat_after_search_route(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.delenv("IMP_SESSION_SOCKET", raising=False)
+    called: dict[str, object] = {}
+
+    def _fake_cmd_events(args: argparse.Namespace) -> int:
+        called["token"] = args.token
+        return 0
+
+    monkeypatch.setattr(m, "_cmd_events", _fake_cmd_events)
+    monkeypatch.setattr(m, "_apply_theme", lambda: None)
+    rc = main(["events", "searchxyz"])
+    assert rc == 0
+    assert called["token"] == "searchxyz"
+
+
+def test_events_search_help_exits_zero(capsys) -> None:
+    with pytest.raises(SystemExit) as exc:
+        main(["events", "search", "--help"])
+    assert exc.value.code == 0
+    out = capsys.readouterr().out
+    assert "events search" in out
