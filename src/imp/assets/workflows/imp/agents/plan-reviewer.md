@@ -61,6 +61,10 @@ implementations:
   assigned to a later plan by the spec's `## Plan outline` or recorded on an
   untagged `- [ ] DEFERRED …: … [scope: quest]` line in `{{ quest.home }}/deferred.md`.
   An unrecorded scope-out of a spec-mandated item is a gap — apply the backstop.
+- **Green at this plan's end** — the prescribed code leaves the fast suite
+  green. A plan that defers greening to a later plan (renames or removes
+  something and leaves its consumers or tests red) is a **Major** finding: the
+  `verify` gate runs after every plan and will reject it.
 
 ## Backstop: record an unrecorded scope-out
 

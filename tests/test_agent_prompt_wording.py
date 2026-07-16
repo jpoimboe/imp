@@ -393,3 +393,55 @@ def test_synced_pair_notes_stripped_from_rendered_prompts(tmp_path) -> None:
 
     # Regression: plan-writer.md's intentional inline example comment is untouched.
     assert "<!-- HARD tasks ONLY" in _agent_prompt("plan-writer")
+
+
+def test_spec_finalizer_teaches_green_per_plan_slicing() -> None:
+    body = " ".join(_agent_prompt("spec-finalizer").split())
+    assert (
+        "**Each plan must land the tree green.** The `verify` gate runs the "
+        "project's fast suite after *every* plan, not once at the end — so no "
+        "plan may defer greening to a later one. Slice **end-to-end** (carry "
+        "one unit through emit, readers, and tests together), never in "
+        "**horizontal layers** that leave the suite red between plans (e.g. "
+        "rename an API in plan 1, fix its consumers in a later plan). If scope "
+        "genuinely can't be sliced green, raise it as a `— needs-decision:` "
+        "item rather than bake a red tree into the outline."
+    ) in body
+
+
+def test_plan_writer_consume_outline_notes_green_this_plan() -> None:
+    body = " ".join(_agent_prompt("plan-writer").split())
+    assert (
+        "The `verify` gate runs the project's fast suite after **this** plan "
+        "(and every plan) — so your tasks must leave the tree green at this "
+        "plan's end; never defer greening to a later plan. If the outline "
+        "slice you were handed can't land green, that's an outline defect: "
+        "flag it as a `— needs-decision:` item, don't plan a red tree."
+    ) in body
+
+
+def test_plan_writer_gate_phrases_are_per_plan() -> None:
+    body = " ".join(_agent_prompt("plan-writer").split())
+    # No Redundant Whole-Project Gate Task section
+    assert (
+        "gate runs the project's `test_cmd_fast` after **each plan's** "
+        "implement phase and routes any failure"
+    ) in body
+    # Self-Review item 5 (Lint vs. test scope)
+    assert (
+        "runs after **each plan's** implement phase and routes back on any "
+        "failure"
+    ) in body
+    # both ambiguous "after the implement phase" phrasings are gone from this prompt
+    assert "after the implement phase" not in body
+
+
+def test_plan_reviewer_flags_red_leaving_plan_as_major() -> None:
+    body = " ".join(_agent_prompt("plan-reviewer").split())
+    assert (
+        "- **Green at this plan's end** — the prescribed code leaves the fast "
+        "suite green. A plan that defers greening to a later plan (renames or "
+        "removes something and leaves its consumers or tests red) is a "
+        "**Major** finding: the `verify` gate runs after every plan and will "
+        "reject it."
+    ) in body
