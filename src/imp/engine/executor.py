@@ -549,7 +549,9 @@ async def run_quest(
                         _emit_paused_event(log, "max_loops", step=step.name)
                         return RunResult.PAUSED
                 else:
-                    state.loop_counts.pop(step.name, None)       # forward goto resets
+                    state.loop_counts.pop(step.name, None)       # forward goto resets source
+                    for leaped in range(idx + 1, target_idx):    # reset every leaped-over step
+                        state.loop_counts.pop(flat[leaped].name, None)
                 state.step = flat[target_idx].name
                 state.step_label = (
                     state.route_label

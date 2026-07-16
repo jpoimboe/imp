@@ -497,6 +497,90 @@ async def test_backward_goto_increments_loop_count_and_trips_max_loops(
     assert state.loop_counts["reviewer"] == 3
 
 
+# ── forward goto resets every leaped-over step's counter ─────────────────────
+
+
+@pytest.mark.anyio
+async def test_forward_goto_resets_leaped_over_step_counter(tmp_path: Path) -> None:
+    """`a` gotos forward over `b` to `c`; `b`'s counter (left at 1 by a prior
+    backward goto) must be popped by the leap. Without the fix it stays 1."""
+    wf = tmp_path / "imp" / "workflows" / "imp"
+    (wf / "agents").mkdir(parents=True)
+    for stem in ("a", "c"):
+        (wf / "agents" / f"{stem}.md").write_text(
+            "---\nname: " + stem + "\ntools: [complete_step]\n"
+            "output:\n  status: {type: enum, values: [Success, Error]}\n"
+            "  route: {type: enum, values: [toB, toC]}\n---\ngo\n"
+        )
+    (wf / "workflow.yaml").write_text(
+        "name: t\ndescription: t\n"
+        "defaults: {max_retries: 1, max_loops: 10}\n"
+        "phases:\n"
+        "  - name: work\n"
+        "    steps:\n"
+        "      - name: a\n"
+        "        file: agents/a.md\n"
+        "        tier: low\n"
+        "        rules:\n"
+        "          - {if: {route: toC}, goto: c}\n"
+        "          - {else: true, continue: true}\n"
+        "      - name: b\n"
+        "        command: 'exit 1'\n"
+        "        rules:\n"
+        "          - {if: {exit: 0}, continue: true}\n"
+        "          - {else: true, goto: a}\n"
+        "      - name: c\n"
+        "        file: agents/c.md\n"
+        "        tier: low\n"
+        "        rules:\n"
+        "          - {else: true, continue: true}\n"
+    )
+    _write_fake_config(tmp_path)
+    import subprocess
+    subprocess.run(["git", "init", str(tmp_path)], check=True, capture_output=True)
+    quest = _make_change(tmp_path)
+
+    from imp.providers import resolve
+    resolve.reset_providers_for_tests()
+
+    a_calls: list[int] = []
+
+    class _Runner:
+        def __init__(self, name: str) -> None:
+            self._name = name
+
+        async def run(self, invocation: AgentInvocation) -> AsyncIterator[Event]:
+            if self._name == "a":
+                a_calls.append(1)
+                route = "toB" if len(a_calls) == 1 else "toC"
+                yield {"type": "agent_output",
+                       "payload": {"outcome": "ok", "status": "Success", "route": route}}
+            else:
+                yield {"type": "agent_output",
+                       "payload": {"outcome": "ok", "status": "Success", "route": "toC"}}
+
+        async def interrupt(self) -> None:
+            pass
+
+    class _Provider:
+        name = "fake"
+        model = "m"
+
+        def create_runner(self, invocation: AgentInvocation) -> AgentRunner:
+            return _Runner(invocation.agent_def.name)
+
+    resolve.register_provider(
+        "fake", env_check=lambda: True, factory=lambda _m: _Provider(),
+    )
+
+    result = await run_quest(quest, on_event=lambda _e: None)
+    assert result is RunResult.COMPLETED
+    state = State.load(quest.state_dir)
+    # The leap a→c popped b's counter; the accumulating-leak bug leaves it at 1.
+    assert state.loop_counts.get("b", 0) == 0
+    assert a_calls == [1, 1]                       # a ran twice: continue, then leap
+
+
 # ── goto into an empty trailing phase completes ─────────────────────────────
 
 
