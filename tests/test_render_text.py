@@ -2079,17 +2079,17 @@ def test_route_label_header_suffix_renders_lifecycle_yellow() -> None:
 
 
 def test_pause_node_renders_lifecycle_yellow_with_glyph() -> None:
-    node = nv.PauseNode(reason="ctrl-c")
+    node = nv.PauseNode(reason="max_loops")
     plain = "\n".join(rt._render(node, depth=0, full=False, color=False, width=80))
-    assert plain == "paused (ctrl-c)"          # no glyph when color is off
+    assert plain == "paused (max_loops)"          # no glyph when color is off
     colored = "\n".join(rt._render(node, depth=0, full=False, color=True, width=80))
-    assert "⏸ paused (ctrl-c)" in colored
+    assert "⏸ paused (max_loops)" in colored
     assert pal._ANSI["yellow"] in colored
     assert pal._ANSI["dim"] not in colored     # was dim metadata; no longer
 
 
 def test_pause_node_renders_lifecycle_wordmark_in_all_themes() -> None:
-    node = nv.PauseNode(reason="ctrl-c")
+    node = nv.PauseNode(reason="max_loops")
     for theme in ("ansi", "dark", "light"):
         pal.set_theme(theme)
         try:
