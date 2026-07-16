@@ -170,25 +170,23 @@ def format_quest_line(*, quest_id: str, title: str, status: str, step: str,
                        color: bool, name_width: int = 80,
                        status_width: int = STATUS_W, dim: bool = False,
                        intent: str | None = None) -> str:
-    raw = title.strip()
     id_pad = f"{quest_id:<{ID_W}}"
     visible = _status_segment(status, step, step_label,
                               phase_label=phase_label, status_width=status_width)
     status_pad = f"{visible:<{status_width}}"
     age_pad = f"{relative_age(last_iso, now=now):<{AGE_W}}"
-    # NAME is the final column, so it needs no trailing pad — only a cap so a
-    # very long name can't spill past the terminal's right edge.
-    if not raw and intent:
-        # The intent fallback is the verbatim opening prompt, which can be
-        # multi-line (e.g. a pasted traceback). Flatten internal whitespace to
-        # single spaces so the NAME cell stays on one row before truncating.
-        name_text = _truncate(" ".join(intent.split()), name_width)
+    # PROMPT fallback gets the `> ` prefix and dim, clipped to name_width.
+    resolved = resolve_display_name(title, intent)
+    if resolved.kind is NameKind.PROMPT:
+        name_text = PROMPT_PREFIX + _truncate(resolved.text,
+                                              name_width - len(PROMPT_PREFIX))
     else:
-        name_text = "(unnamed)" if not raw else _truncate(raw, name_width)
+        name_text = _truncate(resolved.text, name_width)
+    is_fallback = resolved.kind is not NameKind.TITLE
     if dim:
         line = f"{id_pad}  {status_pad}  {age_pad}  {name_text}"
         return pal.ansi(line, "dim", enabled=color)
-    name_cell = pal.ansi(name_text, "dim", enabled=color) if not raw else name_text
+    name_cell = pal.ansi(name_text, "dim", enabled=color) if is_fallback else name_text
     codes = STATUS_COLORS.get(status, ())
     pad = " " * (status_width - len(visible))
     if color:
