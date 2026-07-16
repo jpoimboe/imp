@@ -147,20 +147,21 @@ def caret(*, enabled: bool) -> str:
     return ansi(CARET, "wordmark", enabled=enabled)
 
 
-# Subtle "entered input" background, per truecolor theme — the quiet highlight
-# that marks a SUBMITTED (scrolled-back) user turn. Only the reprinted turn
-# carries it; the live input field stays unpainted while typing. The `ansi`
-# 16-color theme has no good subtle slate, so it gets none there (the │ bar marks
-# the turn). dark: a hair above the #1e1e1e surface; light: a pale blue tint.
+# Warm "entered input" background, per truecolor theme — the quiet highlight
+# that marks a SUBMITTED (scrolled-back) user turn and ties visually to the gold
+# `>` caret. Only the reprinted turn carries it; the live input field stays
+# unpainted while typing. The `ansi` 16-color theme has no good subtle band, so
+# it gets none there (the │ bar marks the turn). dark: a warm amber above the
+# #1e1e1e surface; light: a pale warm cream.
 _USER_BG_RGB: dict[str, tuple[int, int, int]] = {
-    "dark": (0x2B, 0x2F, 0x3A),
-    "light": (0xE4, 0xEA, 0xF2),
+    "dark": (0x43, 0x38, 0x28),
+    "light": (0xF1, 0xE9, 0xDB),
 }
 
 
 def user_bg_open(*, enabled: bool) -> str:
     """The opening SGR for the entered-input background, or '' when color is off
-    or the active theme is `ansi` (no subtle slate in 16 colors)."""
+    or the active theme is `ansi` (no subtle band in 16 colors)."""
     if not enabled:
         return ""
     rgb = _USER_BG_RGB.get(_active_theme)
