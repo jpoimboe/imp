@@ -30,6 +30,7 @@ from imp.agents.prompts import build_context, render_label, render_prompt
 from imp.agents.runner import (
     Message,
     QuestContext,
+    TextBlock,
 )
 from imp.agents.skills import overlay_global_skills, overlay_project_skills
 from imp.engine import test_lane as _test_lane
@@ -374,8 +375,11 @@ async def run_quest(
                    "checkpoint_threshold": config.context_checkpoint_threshold()},
                   agent_id=None)
             if quest.seed_opening:
-                _emit(log, "opening_intent", {"text": quest.seed_opening},
-                      agent_id=None)
+                log.append_user_message(
+                    agent_id=None,
+                    message=Message(role="user",
+                                    content=(TextBlock(text=quest.seed_opening),)),
+                    subtype="intent")
         elif workflow_refreshed:
             if _reconcile_resolved_run(state, workflow, config):
                 state.save(quest.state_dir)
