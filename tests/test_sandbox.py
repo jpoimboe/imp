@@ -688,6 +688,23 @@ def test_build_sandbox_policy_threads_pythonpath_to_setenv(tmp_path, monkeypatch
         str(quest.project_root / "src"))
 
 
+@pytest.mark.real_sandbox_policy
+def test_build_sandbox_policy_writes_run_shim(tmp_path, monkeypatch):
+    """The per-run `imp` shim is written at run startup, even on the unsandboxed
+    posture (before the policy is resolved)."""
+    import imp.engine.executor as ex
+    monkeypatch.setattr(ex, "sandbox_available", lambda: False)
+    from imp.engine import sandbox as _sb
+    _sb.sandbox_available.cache_clear()
+
+    quest = _fake_change(tmp_path)
+    config = _fake_config(sandbox={"allow_unsandboxed": True})
+    ex._build_sandbox_policy(quest, config, _CaptureLog())
+    shim = quest.quest_dir / "imp-shim" / "imp"
+    assert shim.exists()
+    assert shim.stat().st_mode & 0o111
+
+
 def _mirror_policy() -> SandboxPolicy:
     # A synthetic policy that exercises every bind class, including a remask
     # under git_common_dir, a remask OUTSIDE all writable roots, and an
@@ -1497,3 +1514,37 @@ def test_session_socket_marker_reaches_bwrap_setenv(tmp_path):
     i = argv.index("IMP_SESSION_SOCKET")
     assert argv[i - 1] == "--setenv"
     assert argv[i + 1] == str(session_socket_path(control, "abc"))
+
+
+def test_build_setenv_prepends_shim_dir_to_path():
+    import os
+
+    from imp.engine.sandbox import _build_setenv
+    setenv = dict(_build_setenv({}, {"PATH": "/usr/bin"}, (), shim_dir="/q/imp-shim"))
+    assert setenv["PATH"] == "/q/imp-shim" + os.pathsep + "/usr/bin"
+
+
+def test_build_setenv_no_shim_dir_leaves_path_untouched():
+    from imp.engine.sandbox import _build_setenv
+    setenv = dict(_build_setenv({}, {"PATH": "/usr/bin"}, ()))
+    assert setenv["PATH"] == "/usr/bin"
+
+
+def test_build_setenv_prepends_shim_dir_no_existing_path():
+    from imp.engine.sandbox import _build_setenv
+    setenv = dict(_build_setenv({}, {}, (), shim_dir="/q/imp-shim"))
+    assert setenv["PATH"] == "/q/imp-shim"
+
+
+def test_resolve_policy_prepends_shim_dir_when_quest_dir_given(tmp_path):
+    import os
+    control, wt = _layout(tmp_path)
+    qd = control / ".imp" / "quests" / "abc"
+    pol = resolve_policy(
+        worktree=wt, control_root=control, quest_id="abc", cfg=SandboxConfig(),
+        engine_env_result={}, environ={"PATH": "/usr/bin"}, available=True,
+        quest_dir=qd,
+    )
+    path = dict(pol.setenv)["PATH"]
+    assert path.startswith(str(qd / "imp-shim") + os.pathsep)
+    assert path.endswith("/usr/bin")

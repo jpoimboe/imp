@@ -70,6 +70,7 @@ from imp.engine.sandbox import (
 )
 from imp.engine.schema import validate_agent_output
 from imp.engine.seed import seed_workflow_start
+from imp.engine.shim import imp_shim_dir, write_imp_shim
 from imp.engine.state import CurrentStep, EventLog, JsonlEventLog, State
 from imp.engine.types import (
     Action,
@@ -996,7 +997,8 @@ async def _route_script(
                                      output_path=output_path,
                                      test_gates=test_gates,
                                      pythonpath=pythonpath),
-                policy=sandbox_policy, command=command, abort=abort))
+                policy=sandbox_policy, command=command, abort=abort,
+                shim_dir=str(imp_shim_dir(quest.quest_dir))))
         if output_path is not None:
             assert step.output_schema is not None
             try:
@@ -1737,6 +1739,7 @@ def _build_sandbox_policy(quest: Quest, config: Any, log: EventLog) -> Any:
     quest-stable, but project_root can flip on go-live, triggering a rebuild).
     Emit a durable posture event; on a hard-fail posture, emit + re-raise so the
     run stops rather than silently running bare."""
+    write_imp_shim(quest.quest_dir)
     cfg = sandbox_config_from_raw(config.sandbox or {})
     eng = overlay_engine_env(
         os.environ,

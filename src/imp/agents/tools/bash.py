@@ -38,6 +38,7 @@ from imp.engine.sandbox import (
     overlay_setup_failed,
     prune_missing_masks,
 )
+from imp.engine.shim import imp_shim_dir
 
 _PAUSE_POLL_S = 0.05      # mid-command coordinator.should_pause poll cadence
                           # (a real idle sleep — matches bg.py's _WAIT_POLL_S)
@@ -94,16 +95,19 @@ async def bash(
     # mid-run rename_quest is reflected immediately; subagents have no live quest
     # (and no rename authority) and fall back to the frozen quest_context snapshot.
     src = ctx.quest or ctx.quest_context
+    qdir = (getattr(src, "quest_dir", None)
+            or (Path(h) if (h := getattr(src, "quest_home", None)) else None))
     eng = engine_env(
         project_root=ctx.project_root,
         quest_id=src.id if src else "",
         quest_title=src.title if src else "",
-        quest_dir=(getattr(src, "quest_dir", None)
-                    or (Path(h) if (h := getattr(src, "quest_home", None)) else None)),
+        quest_dir=qdir,
         test_gates=ctx.test_gates,
         pythonpath=ctx.pythonpath,
     )
     env = overlay_engine_env(os.environ, eng)
+    if qdir is not None:
+        env["PATH"] = f"{imp_shim_dir(qdir)}{os.pathsep}{env.get('PATH', '')}"
     policy = ctx.sandbox_policy
     argv = (build_sandbox_argv(command, cwd=cwd_path,
                                policy=prune_missing_masks(policy), engine_env=eng)

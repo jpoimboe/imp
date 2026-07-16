@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 
+from imp.engine.env import overlay_engine_env
 from imp.engine.expr import Binary, BoolLit, Name, StrLit
 from imp.engine.gates import evaluate_rules, run_script
 from imp.engine.types import Continue, Goto, Pause, Rule, SourceLoc, Step
@@ -1053,3 +1054,22 @@ def test_run_script_large_output_below_cap_returns_full(tmp_path) -> None:
     out = run_script(step, cwd=tmp_path)
     assert out["exit"] == 0
     assert len(out["stdout"]) == 500000
+
+
+def test_run_script_prepends_shim_dir_to_path(tmp_path) -> None:
+    step = Step(name="g", phase="p", kind="script",
+                rules=(_rule(None, Continue()),),
+                on_max_retries=Pause(), max_loops=10, source=loc(),
+                command='printf %s "$PATH"')
+    out = run_script(step, cwd=tmp_path, shim_dir="/q/imp-shim")
+    assert out["stdout"].startswith("/q/imp-shim" + os.pathsep)
+
+
+def test_run_script_no_shim_dir_leaves_path_untouched(tmp_path) -> None:
+    step = Step(name="g", phase="p", kind="script",
+                rules=(_rule(None, Continue()),),
+                on_max_retries=Pause(), max_loops=10, source=loc(),
+                command='printf %s "$PATH"')
+    out = run_script(step, cwd=tmp_path)
+    expected = overlay_engine_env(os.environ, {}).get("PATH", "")
+    assert out["stdout"] == expected

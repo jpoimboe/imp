@@ -474,6 +474,28 @@ def test_bash_midcommand_pause_over_cap_spills_tombstone(tmp_path: Path) -> None
     assert ctx.running_processes == []
 
 
+def test_bash_prepends_shim_dir_to_path(tmp_path: Path) -> None:
+    ctx = ToolContext(project_root=tmp_path, events_path=tmp_path / "events.jsonl")
+    ctx.quest_context = QuestContext(
+        id="test01", title="Test Quest", project_root=tmp_path,
+        workflow_dir=tmp_path / ".imp" / "change" / "workflow",
+        quest_home=str(tmp_path / ".imp" / "change"),
+    )
+    out = json.loads(_run_bash(ctx, {"command": 'printf %s "$PATH"'}))
+    shim = tmp_path / ".imp" / "change" / "imp-shim"
+    assert out["stdout"].startswith(str(shim) + os.pathsep)
+
+
+def test_bash_no_quest_home_leaves_path_unchanged(tmp_path: Path) -> None:
+    ctx = ToolContext(project_root=tmp_path, events_path=tmp_path / "events.jsonl")
+    ctx.quest_context = QuestContext(
+        id="test01", title="Test Quest", project_root=tmp_path,
+        workflow_dir=tmp_path / ".imp" / "change" / "workflow",
+    )
+    out = json.loads(_run_bash(ctx, {"command": 'printf %s "$PATH"'}))
+    assert "imp-shim" not in out["stdout"]
+
+
 def test_bash_exposes_pythonpath_from_ctx(tmp_path: Path) -> None:
     # The bash tool prepends the worktree-resolved pythonpath roots onto the
     # subprocess PYTHONPATH so an editable install can't shadow the worktree.

@@ -28,6 +28,7 @@ from pathlib import Path
 from typing import Any
 
 from imp.engine.env import HEADLESS_ENV
+from imp.engine.shim import imp_shim_dir
 from imp.remote.session.discover import session_socket_path
 
 
@@ -513,7 +514,8 @@ def resolve_policy(
         secret_files=tuple(secret_files),
         setenv=_build_setenv(
             engine_env_result, environ, cfg.env_passthrough,
-            session_socket=str(session_socket_path(control_root, quest_id))),
+            session_socket=str(session_socket_path(control_root, quest_id)),
+            shim_dir=str(imp_shim_dir(quest_dir)) if quest_dir is not None else ""),
         network=cfg.network,
         note="",
     )
@@ -530,6 +532,7 @@ def _inactive(*, note: str) -> SandboxPolicy:
 def _build_setenv(
     engine_env_result: Mapping[str, str], environ: Mapping[str, str],
     env_passthrough: tuple[str, ...], session_socket: str = "",
+    shim_dir: str = "",
 ) -> tuple[tuple[str, str], ...]:
     """Env allowlist (spec B.4). IMP_* and PYTHONPATH come from engine_env_result
     (authoritative, M2-r5; PYTHONPATH is the single deliberate non-IMP_ exception
@@ -557,5 +560,7 @@ def _build_setenv(
             d[k] = v
     if session_socket:
         d["IMP_SESSION_SOCKET"] = session_socket   # in-sandbox signal + daemon target
+    if shim_dir:
+        d["PATH"] = (shim_dir + os.pathsep + d["PATH"]) if d.get("PATH") else shim_dir
     d["TMPDIR"] = "/tmp"   # forced last — wins over any ambient/env_passthrough value
     return tuple(d.items())
