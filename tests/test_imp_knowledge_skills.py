@@ -1,8 +1,7 @@
-"""imp-knowledge is a thin index skill: a primer, the map into imp's docs corpus
-(the guide/ and internals/ areas, reached via the injected {{ docs.path }}
-variable), and Core vocabulary. The introspection/memory depth now lives in the
-corpus docs (docs/guide/introspection.md, docs/guide/memory.md), covered here by
-reading those files directly."""
+"""imp-knowledge is a flat, self-contained quick reference: inline CLI cheat-sheet,
+memory layering, and glossary, with a {{ docs.path }} corpus pointer for depth.
+Introspection/memory depth lives in docs/guide/introspection.md and
+docs/guide/memory.md, covered here by reading those files directly."""
 
 from __future__ import annotations
 
@@ -34,15 +33,8 @@ def test_knowledge_skill_is_loadable_profile_b() -> None:
 
 def test_knowledge_maps_into_the_corpus_by_path_variable() -> None:
     body = load_internal_skill(_skills_dir(), "imp-knowledge")
-    # the injected corpus-path variable and both corpus areas are named
+    # the injected corpus-path variable is retained as the depth pointer
     assert "{{ docs.path }}" in body
-    assert "guide/" in body
-    assert "internals/" in body
-    # agents are told to reach the corpus with bash / read_file (the grep/glob
-    # tools are worktree-bound and cannot see the in-place corpus path)
-    low = body.lower()
-    assert "bash" in low
-    assert "read_file" in low
 
 
 def test_knowledge_hub_carries_no_inlined_lifecycle_depth() -> None:
