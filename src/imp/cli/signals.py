@@ -281,6 +281,13 @@ class InterruptCoordinator:
         # request scopes stay correct; the ceiling only lifts back to the plain
         # finite window when the LAST in-flight request completes.
         self._request_depth = 0
+        # Retry-now gesture (this quest): a live `r` keypress during a backoff
+        # wait skips the remaining sleep and re-drives the step. A request only
+        # latches while a backoff wait is armed; the depth counter mirrors
+        # _tool_depth so concurrent subagent backoff sleeps each hold the arm.
+        # Clear-on-consume is the loop's (take_retry_now), never disarm's.
+        self._backoff_wait_depth = 0
+        self._retry_now = False
 
     def add_activity_listener(self, fn: Any) -> Any:
         """Register a no-arg callback fired on each `note_activity()`. Returns
@@ -382,6 +389,39 @@ class InterruptCoordinator:
         self._request_depth -= 1
         self.note_activity()
 
+    @property
+    def backoff_wait_active(self) -> bool:
+        """True while one or more backoff sleeps are armed for the retry-now
+        gesture."""
+        return self._backoff_wait_depth > 0
+
+    def begin_backoff_wait(self) -> None:
+        """Arm the retry-now gesture around a backoff sleep. Depth-counted so
+        concurrent subagent backoff sleeps each hold the arm."""
+        self._backoff_wait_depth += 1
+
+    def end_backoff_wait(self) -> None:
+        """Disarm one backoff sleep. Deliberately does NOT clear _retry_now — the
+        loop consumes it via take_retry_now()."""
+        self._backoff_wait_depth -= 1
+
+    def request_retry_now(self) -> None:
+        """Record a live retry-now request. Ignored (never stored) unless a
+        backoff wait is armed, so a stray `r` outside a wait is a no-op."""
+        if self._backoff_wait_depth > 0:
+            self._retry_now = True
+
+    @property
+    def retry_now_requested(self) -> bool:
+        """True while an un-consumed retry-now request is latched."""
+        return self._retry_now
+
+    def take_retry_now(self) -> bool:
+        """Read and clear the retry-now latch (one-shot)."""
+        v = self._retry_now
+        self._retry_now = False
+        return v
+
     def set_at_prompt(self, value: bool) -> None:
         """Mark whether an interactive prompt is currently being awaited. A plain
         boolean, NOT depth-counted: prompts are serialized (single controlling
@@ -445,6 +485,8 @@ class InterruptCoordinator:
         self._first_gesture_at = None
         self.escalated = False
         self._yielded = None
+        self._backoff_wait_depth = 0
+        self._retry_now = False
 
     def clear_pause(self) -> None:
         """Consume a pause that a cooperative interrupt resolved inline. The
