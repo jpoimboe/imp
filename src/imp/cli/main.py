@@ -1814,8 +1814,7 @@ _LOG_PICKER_HEADER = (
 
 async def _pick_full_pool_target(control: Path, *, header: str) -> str | int:
     """No-token picker over the full pool, shared by the log and events pickers."""
-    rows = _sort_rows_newest_first(
-        _status_rows(control) + _backlog_rows(control) + _completed_rows(control))
+    rows = _all_quest_rows(control)
     default_id = _resolve_default_id(control)
     selected_index = next(
         (i for i, r in enumerate(rows) if r[0] == default_id), 0)
@@ -2779,8 +2778,8 @@ def _show_picker_non_tty(rows: list[_Row]) -> int:
     return 2
 
 
-def _show_all_rows(control: Path) -> list[_Row]:
-    """Display rows for the no-token show picker: every _iter_quest_ids id
+def _all_quest_rows(control: Path) -> list[_Row]:
+    """Display rows for the full-pool pickers: every _iter_quest_ids id
     (live homes + backlog + archived), via _row_for_id, unreadable ids
     dropped, newest-first — the same pool `imp show <exact-id>` reaches."""
     rows = [r for r in (_row_for_id(control, cid)
@@ -2791,7 +2790,7 @@ def _show_all_rows(control: Path) -> list[_Row]:
 async def _pick_show_target(control: Path) -> str | int:
     return await _pick_quest_target(
         control=control,
-        rows=_show_all_rows(control),
+        rows=_all_quest_rows(control),
         header=_SHOW_PICKER_HEADER,
         on_empty=_show_picker_empty,
         on_non_tty=_show_picker_non_tty,

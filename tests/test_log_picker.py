@@ -24,8 +24,7 @@ def _row(cid: str, status: str = "paused",
 async def test_log_picker_empty_prints_and_exits_2(
     monkeypatch, tmp_path: Path, capsys,
 ) -> None:
-    monkeypatch.setattr(m, "_status_rows", lambda c: [])
-    monkeypatch.setattr(m, "_completed_rows", lambda c: [])
+    monkeypatch.setattr(m, "_all_quest_rows", lambda c: [])
     monkeypatch.setattr(m, "_resolve_default_id", lambda c: None)
     rc = await m._pick_log_target(tmp_path)
     out = capsys.readouterr().out
@@ -42,8 +41,7 @@ async def test_log_picker_preselects_resolve_default_target(
     # one, so the pre-select must land on index 1 (AC #5 mixed case).
     inflight = _row("2026-06-10-inflit", "paused", "2026-06-10T00:00:00+00:00")
     completed = _row("2026-06-12-donexx", "completed", "2026-06-12T00:00:00+00:00")
-    monkeypatch.setattr(m, "_status_rows", lambda c: [inflight])
-    monkeypatch.setattr(m, "_completed_rows", lambda c: [completed])
+    monkeypatch.setattr(m, "_all_quest_rows", lambda c: [completed, inflight])
     monkeypatch.setattr(m, "_resolve_default_id", lambda c: "2026-06-10-inflit")
     monkeypatch.setattr(m, "_interactive", lambda: True)
     captured = {}

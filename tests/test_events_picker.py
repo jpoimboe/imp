@@ -32,9 +32,7 @@ def _events_ns(token: str | None = None, **over: object) -> argparse.Namespace:
 async def test_pick_events_target_empty_prints_no_quests_and_exits_2(
     monkeypatch, tmp_path: Path, capsys,
 ) -> None:
-    monkeypatch.setattr(m, "_status_rows", lambda c: [])
-    monkeypatch.setattr(m, "_backlog_rows", lambda c: [])
-    monkeypatch.setattr(m, "_completed_rows", lambda c: [])
+    monkeypatch.setattr(m, "_all_quest_rows", lambda c: [])
     monkeypatch.setattr(m, "_resolve_default_id", lambda c: None)
     rc = await m._pick_events_target(tmp_path)
     out = capsys.readouterr().out
@@ -53,9 +51,7 @@ async def test_pick_events_target_includes_backlog_and_preselects_default(
     inflight = _row("2026-06-10-inflit", "paused", "2026-06-10T00:00:00+00:00")
     backlog = _row("2026-06-11-backlg", "backlog", "2026-06-11T00:00:00+00:00")
     completed = _row("2026-06-12-donexx", "completed", "2026-06-12T00:00:00+00:00")
-    monkeypatch.setattr(m, "_status_rows", lambda c: [inflight])
-    monkeypatch.setattr(m, "_backlog_rows", lambda c: [backlog])
-    monkeypatch.setattr(m, "_completed_rows", lambda c: [completed])
+    monkeypatch.setattr(m, "_all_quest_rows", lambda c: [completed, backlog, inflight])
     monkeypatch.setattr(m, "_resolve_default_id", lambda c: "2026-06-10-inflit")
     monkeypatch.setattr(m, "_interactive", lambda: True)
     captured: dict[str, object] = {}
@@ -81,9 +77,7 @@ async def test_pick_events_target_single_pool_skips_picker(
     monkeypatch, tmp_path: Path,
 ) -> None:
     only = _row("2026-06-10-only01")
-    monkeypatch.setattr(m, "_status_rows", lambda c: [only])
-    monkeypatch.setattr(m, "_backlog_rows", lambda c: [])
-    monkeypatch.setattr(m, "_completed_rows", lambda c: [])
+    monkeypatch.setattr(m, "_all_quest_rows", lambda c: [only])
     monkeypatch.setattr(m, "_resolve_default_id", lambda c: "2026-06-10-only01")
     monkeypatch.setattr(m, "_interactive", lambda: True)
 
