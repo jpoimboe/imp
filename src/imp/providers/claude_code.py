@@ -96,7 +96,6 @@ from imp.agents.transcript import (
     captured_result_key,
     deliver_continuation_reply,
     deliver_engine_continuation,
-    deliver_reply_on_resume,
     repair_dangling_tool_use_on_resume,
     synthesize_native_success_on_resume,
 )
@@ -466,10 +465,7 @@ def _drain_interject_message(coordinator: Any, elog: Any,
     with a STRING, not a messages list, so the caller folds the returned
     message's text into the next query itself — here we only drain the queue,
     returning a user Message (or None when empty). The caller appends it to
-    messages/transcript and emits the `user_message` THEN `user_interjected`
-    events (in that order, uniform with deliver_interject and codex) so a log
-    consumer sees `user_message` before `user_interjected` across all providers,
-    and the persisted history matches the nudge re-query path exactly."""
+    messages/transcript and emits a single `user_message`/`interject` event."""
     if coordinator is None:
         return None
     text = coordinator.drain_interject()
@@ -1728,14 +1724,14 @@ class ClaudeCodeAgentRunner:
                     messages, transcript, elog, aid)
                 if injected is not None:
                     resume_base += 1
-                deliver_reply_on_resume(
-                    messages, transcript, elog, aid, RESUME_REDO_NUDGE, human=False)
+                deliver_engine_continuation(
+                    messages, transcript, elog, aid, RESUME_REDO_NUDGE)
             elif tail_step_completed and invocation.retry_feedback:
-                deliver_reply_on_resume(
-                    messages, transcript, elog, aid, invocation.retry_feedback, human=False)
+                deliver_engine_continuation(
+                    messages, transcript, elog, aid, invocation.retry_feedback)
             elif tail_step_completed:
-                deliver_reply_on_resume(
-                    messages, transcript, elog, aid, RESUME_REDO_NUDGE, human=False)
+                deliver_engine_continuation(
+                    messages, transcript, elog, aid, RESUME_REDO_NUDGE)
             elif classify_resume(existing) is ResumeState.DANGLING_TOOL_USE:
                 synth = repair_dangling_tool_use_on_resume(
                     messages, transcript,
@@ -1745,8 +1741,8 @@ class ClaudeCodeAgentRunner:
                         elog.append_tool_result(agent_id=aid, block=rb)
             elif (invocation.retry_feedback
                     and classify_resume(existing) is not ResumeState.AWAITING_USER):
-                deliver_reply_on_resume(
-                    messages, transcript, elog, aid, invocation.retry_feedback, human=False)
+                deliver_engine_continuation(
+                    messages, transcript, elog, aid, invocation.retry_feedback)
             resume_state = classify_resume(messages)
             if resume_state is ResumeState.AWAITING_USER:
                 if ctx.user_input_fn is None:
@@ -1826,15 +1822,20 @@ class ClaudeCodeAgentRunner:
             elog.append_step_context(
                 agent_id=aid, parent_id_override=invocation.first_event_parent_id,
                 provider=invocation.provider_name, model=self.model,
-                system_prompt=invocation.system_prompt,
                 # Name-only schemas: the in-process MCP server owns the full
                 # input schemas; unlike anthropic/openai we don't pass them here.
                 tools_schema=[{"name": _canon_tool_name(n)} for n in tools],
                 params={"env.CLAUDE_CONFIG_DIR": str(config_dir)},
                 max_tool_calls=invocation.max_tool_calls)
+            elog.append_engine_message(
+                agent_id=aid,
+                message=Message(role="system",
+                                content=(TextBlock(text=invocation.system_prompt),)),
+                subtype="system_prompt")
             for m in invocation.initial_messages:
                 if all(isinstance(b, TextBlock) for b in m.content):
-                    elog.append_user_message(agent_id=aid, message=m, human=False)
+                    elog.append_engine_message(
+                        agent_id=aid, message=m, subtype="agent_prompt")
 
         ceiling = invocation.max_tool_calls  # may be None (no cap)
 
@@ -2293,8 +2294,8 @@ class ClaudeCodeAgentRunner:
                                     content=(TextBlock(text=instr),))
                                 messages.append(instr_msg)
                                 transcript.append(instr_msg)
-                                elog.append_user_message(
-                                    agent_id=aid, message=instr_msg, human=False)
+                                elog.append_engine_message(
+                                    agent_id=aid, message=instr_msg, subtype="continuation")
                                 next_query = instr
                                 handoff_phase = "instruction_sent"
                                 requery = True
@@ -2415,8 +2416,8 @@ class ClaudeCodeAgentRunner:
                                     content=(TextBlock(text=res.message),))
                                 messages.append(nudge_msg)
                                 transcript.append(nudge_msg)
-                                elog.append_user_message(
-                                    agent_id=aid, message=nudge_msg, human=False)
+                                elog.append_engine_message(
+                                    agent_id=aid, message=nudge_msg, subtype="continuation")
                                 next_query = res.message
                                 requery = True
                                 break
@@ -2507,24 +2508,18 @@ class ClaudeCodeAgentRunner:
                             # Turn boundary: this is the only point where THIS
                             # runner sets up the next SDK query (the SDK owns the
                             # in-query tool loop). Deliver any queued human
-                            # interject as a user message + user_interjected event,
-                            # and fold its text into the next query string so the
-                            # SDK actually sees it on this re-query. Reached only
-                            # after the turn's tool results are flushed, so no
-                            # subagent is mid-dispatch — S4 holds.
+                            # interject as a user_message/interject event and fold
+                            # its text into the next query string so the SDK
+                            # actually sees it on this re-query. Reached only after
+                            # the turn's tool results are flushed — S4 holds.
                             interject_msg = _drain_interject_message(
                                 invocation.coordinator, elog, aid)
                             if interject_msg is not None:
                                 messages.append(interject_msg)
                                 transcript.append(interject_msg)
-                                # Emit user_message THEN user_interjected, uniform
-                                # with deliver_interject/codex (issue: order was
-                                # reversed here).
                                 elog.append_user_message(
-                                    agent_id=aid, message=interject_msg, human=True)
-                                elog.append(
-                                    agent_id=aid, type="user_interjected",
-                                    payload={"text": _text_of(interject_msg)})
+                                    agent_id=aid, message=interject_msg,
+                                    subtype="interject")
                                 next_query = f"{next_query}\n\n{_text_of(interject_msg)}"
                             # Re-query on a FRESH receive_response() (issue 7):
                             # break the inner loop so the outer while restarts.

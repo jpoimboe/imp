@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -9,8 +10,15 @@ from imp.agents.runner import AgentInvocation, Message, QuestContext, TextBlock
 from imp.engine.state import InMemoryEventLog
 from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
 from imp.providers.anthropic import AnthropicAgentRunner
+from imp.providers.claude_code import ClaudeCodeAgentRunner
 from imp.providers.openai import OpenAIAgentRunner
 from tests.anthropic_fakes import FakeAsyncAnthropic, response, text, tool_use
+from tests.cc_fakes import (
+    FakeClaudeSDKClient,
+    assistant as cc_assistant,
+    tool_use as cc_tool_use,
+    result as cc_result,
+)
 from tests.openai_fakes import FakeResponsesClient, resp_function_call, resp_response
 
 
@@ -128,6 +136,47 @@ async def test_openai_fresh_entry_emits_triad_order(tmp_path: Path) -> None:
             workflow_dir=tmp_path / ".imp" / "change" / "workflow"),
         transcript_dir=tmp_path / "step", events_path=tmp_path / "events.jsonl",
         agent_id="step:p/s", event_log=log)
+    async for _ in runner.run(inv):
+        pass
+    evs = [e for e in log.read() if e.get("agent_id") == "step:p/s"]
+    sc = next(e for e in evs if e["type"] == "step_context")
+    assert "system_prompt" not in sc["payload"]
+    ems = [e for e in evs if e["type"] == "engine_message"]
+    assert [e["payload"]["subtype"] for e in ems][:2] == ["system_prompt", "agent_prompt"]
+    assert not [e for e in evs if e["type"] == "user_message"]
+
+
+def _cc_drive(
+    tmp_path: Path, log: InMemoryEventLog,
+) -> tuple[ClaudeCodeAgentRunner, AgentInvocation]:
+    scripted = [
+        cc_assistant(cc_tool_use("c1", "complete_step", {"status": "Success"})),
+        cc_result(),
+    ]
+    def fake_client_factory(opts: Any) -> FakeClaudeSDKClient:
+        return FakeClaudeSDKClient(opts, scripted_messages=scripted)
+    runner = ClaudeCodeAgentRunner(
+        model_name="claude-sonnet-4-5",
+        client_factory=fake_client_factory,
+    )
+    inv = AgentInvocation(
+        agent_def=_agent_def(),
+        provider_name="claude_code", model_name="claude-sonnet-4-5",
+        system_prompt="be terse",
+        initial_messages=(Message(role="user", content=(TextBlock(text="go"),)),),
+        quest_context=QuestContext(
+            title="T", project_root=tmp_path,
+            workflow_dir=tmp_path / ".imp" / "change" / "workflow"),
+        transcript_dir=tmp_path / "step", events_path=tmp_path / "events.jsonl",
+        agent_id="step:p/s", event_log=log)
+    return runner, inv
+
+
+@pytest.mark.anyio
+async def test_claude_code_fresh_entry_emits_triad_order(tmp_path: Path) -> None:
+    (tmp_path / "art").mkdir()
+    log = InMemoryEventLog()
+    runner, inv = _cc_drive(tmp_path, log)
     async for _ in runner.run(inv):
         pass
     evs = [e for e in log.read() if e.get("agent_id") == "step:p/s"]
