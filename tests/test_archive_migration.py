@@ -75,6 +75,26 @@ def _write_stale_v2_db(db_path: Path) -> None:
         conn.close()
 
 
+def _write_stale_v4_db(db_path: Path) -> None:
+    """A v4 db: quests/deps present, a content column but NO events_content
+    column, user_version 4, a bogus 'stale' row. Records/blobs on disk carry the
+    real events, so a rebuild backfills events_content for the real rows and
+    drops 'stale'."""
+    db_path.unlink(missing_ok=True)
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.execute(
+            "CREATE TABLE quests (id TEXT PRIMARY KEY, title TEXT, base TEXT,"
+            " created_at TEXT, status TEXT, step TEXT, events_hash TEXT,"
+            " ingested_at TEXT, last_event_ts TEXT, content TEXT)")
+        conn.execute("CREATE TABLE deps (quest_id TEXT, depends_on_id TEXT)")
+        conn.execute("INSERT INTO quests (id, title) VALUES ('stale', 'Stale')")
+        conn.execute("PRAGMA user_version = 4")
+        conn.commit()
+    finally:
+        conn.close()
+
+
 def _seed_prose_change(control: Path, cid: str, body: str) -> None:
     """Archive one change whose events carry an assistant prose line."""
     events = control / f"{cid}.jsonl"
@@ -341,21 +361,17 @@ def test_rebuild_backfills_events_content_column(tmp_path: Path) -> None:
         quest_json_path=quest_json, state_json_path=state_json)
 
     db = archive.index_path(control)
-    conn = sqlite3.connect(db)
-    try:
-        conn.execute("UPDATE quests SET events_content = '' WHERE id = ?", (cid,))
-        conn.execute("PRAGMA user_version = 4")   # pre-bump index
-        conn.commit()
-    finally:
-        conn.close()
+    _write_stale_v4_db(db)                        # genuine v4 db, no events_content column
+    assert _user_version(db) == 4
 
     archive.ensure_current(control)               # stale v4 -> reindex to v5
 
     assert _user_version(db) == 5
     conn = sqlite3.connect(db)
     try:
-        ev = conn.execute(
-            "SELECT events_content FROM quests WHERE id = ?", (cid,)).fetchone()[0]
+        rows = {r[0]: r[1] for r in conn.execute(
+            "SELECT id, events_content FROM quests")}
     finally:
         conn.close()
-    assert "BACKFILL_TRACE" in ev
+    assert "stale" not in rows                    # rebuilt from records, not the old db
+    assert "BACKFILL_TRACE" in rows["evt"]        # events_content backfilled from the blob
