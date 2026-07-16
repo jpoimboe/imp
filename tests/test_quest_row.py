@@ -354,3 +354,54 @@ def test_overview_widths_empty_rows(monkeypatch):
     _term(monkeypatch, 80)
     # region = 61; no rows -> status_floor=status_content=6, name_content=0.
     assert overview_widths([]) == (6, 55)
+
+
+def test_resolve_display_name_title_kind_and_text():
+    from imp.cli.quest_row import NameKind, resolve_display_name
+    r = resolve_display_name("Add version flag", None)
+    assert r.text == "Add version flag"
+    assert r.kind is NameKind.TITLE
+
+
+def test_resolve_display_name_strips_title():
+    from imp.cli.quest_row import NameKind, resolve_display_name
+    r = resolve_display_name("  Add version flag  ", None)
+    assert r.text == "Add version flag"
+    assert r.kind is NameKind.TITLE
+
+
+def test_resolve_display_name_prompt_flattens_whitespace():
+    from imp.cli.quest_row import NameKind, resolve_display_name
+    r = resolve_display_name("   ", "add a\n  dark   mode\ttoggle")
+    assert r.text == "add a dark mode toggle"
+    assert r.kind is NameKind.PROMPT
+
+
+def test_resolve_display_name_prompt_is_not_truncated():
+    # The resolver holds no width; truncation is the caller's job.
+    from imp.cli.quest_row import NameKind, resolve_display_name
+    r = resolve_display_name("", "y" * 300)
+    assert r.text == "y" * 300
+    assert r.kind is NameKind.PROMPT
+
+
+def test_resolve_display_name_unnamed_when_no_intent():
+    from imp.cli.quest_row import NameKind, resolve_display_name
+    r = resolve_display_name("", None)
+    assert r.text == "(unnamed)"
+    assert r.kind is NameKind.UNNAMED
+
+
+def test_resolve_display_name_unnamed_when_intent_is_blank():
+    # A whitespace-only prompt flattens to empty, so it lands on (unnamed).
+    from imp.cli.quest_row import NameKind, resolve_display_name
+    r = resolve_display_name(None, "   \n  \t ")
+    assert r.text == "(unnamed)"
+    assert r.kind is NameKind.UNNAMED
+
+
+def test_resolve_display_name_title_wins_over_intent():
+    from imp.cli.quest_row import NameKind, resolve_display_name
+    r = resolve_display_name("Real title", "some intent")
+    assert r.text == "Real title"
+    assert r.kind is NameKind.TITLE
