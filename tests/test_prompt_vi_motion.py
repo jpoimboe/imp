@@ -34,6 +34,35 @@ async def _drive(
     return str(result)
 
 
+async def _drive_capture(
+    sends: list[str],
+    *,
+    seed_history: list[str] | None = None,
+) -> tuple[str, int]:
+    """Drive vi-mode keystrokes, capturing cursor_position just before submit.
+
+    A sentinel `Q` binding snapshots the landed cursor so a test can assert the
+    display ROW reached (not merely the final text), pinning j/k to the
+    display-row path rather than the logical `cursor_up`/`cursor_down` fallback.
+    Send `Q` immediately before the final `\\r`."""
+    captured: dict[str, int] = {}
+    with create_pipe_input() as pipe, create_app_session(
+        input=pipe, output=DummyOutput()
+    ):
+        session = _build_session(editing_mode="vi")
+        for line in seed_history or []:
+            session.history.append_string(line)
+
+        @session.key_bindings.add("Q")  # type: ignore[untyped-decorator]
+        def _capture(event: object) -> None:
+            captured["cursor"] = event.current_buffer.cursor_position  # type: ignore[attr-defined]
+
+        for chunk in sends:
+            pipe.send_text(chunk)
+        result = await session.prompt_async("> ")
+    return str(result), captured["cursor"]
+
+
 def test_motion_bindings_installed_on_vi_not_emacs() -> None:
     # Tripwire: j binding exists in vi session key bindings, absent from emacs.
     with create_pipe_input() as pipe, create_app_session(
@@ -178,3 +207,32 @@ async def test_emacs_j_inserts_letter() -> None:
         editing_mode="emacs",
     )
     assert result == "j"
+
+
+@pytest.mark.anyio
+async def test_k_on_wrapped_line_lands_in_first_display_row() -> None:
+    # A single logical line of 100 chars wraps at the 78-col usable width
+    # (80-col DummyOutput minus the `> ` prompt) into two display rows: 0-77
+    # and 78-99. After ESC the cursor is at 99 (second row). `k` moves UP one
+    # DISPLAY row to offset 21 (first row). The logical fallback on this lone
+    # logical line would be a no-op, leaving the cursor at 99 — so this pins the
+    # display-row path. Buffer stays intact; history is never recalled.
+    line = "A" * 100
+    result, cursor = await _drive_capture(
+        [line, ESC, "k", "Q", "\r"], seed_history=["old history"]
+    )
+    assert result == line
+    assert cursor == 21
+
+
+@pytest.mark.anyio
+async def test_j_on_wrapped_line_lands_in_second_display_row() -> None:
+    # Same wrapped single logical line. `gg` lands at offset 0 (first display
+    # row); `j` moves DOWN one DISPLAY row to offset 78 (start of the second
+    # row). The logical fallback would leave the cursor at 0.
+    line = "A" * 100
+    result, cursor = await _drive_capture(
+        [line, ESC, "gg", "j", "Q", "\r"], seed_history=["old history"]
+    )
+    assert result == line
+    assert cursor == 78
