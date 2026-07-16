@@ -934,6 +934,10 @@ class CtrlDReader:
                 if byte == b"\x04":
                     await self._coord.leave_mid_run(reason="ctrl-d")
                     return
+                if byte == b"r":
+                    # Retry-now: coordinator gates a stray r; keep watching so Ctrl-D still leaves.
+                    self._coord.request_retry_now()
+                    continue
                 # Any other byte (incl. b"" timeout / quiesce race) → keep watching.
         finally:
             self._armed = False
