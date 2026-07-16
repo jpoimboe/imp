@@ -2579,7 +2579,8 @@ def _resume_picker_non_tty(rows: list[_Row]) -> str | int:
     for r in rows:
         print(quest_row.format_quest_line(
             quest_id=r[0], title=r[4], status=r[1], step=r[2], step_label=r[6],
-            last_iso=r[3], now=now, color=color, name_width=name_w), file=sys.stderr)
+            phase_label=r[7], last_iso=r[3], now=now, color=color,
+            name_width=name_w), file=sys.stderr)
     return 2
 
 
@@ -2599,7 +2600,7 @@ async def _pick_quest_target(
         return rows[0][0]
     candidates = [resume_select.Candidate(
         quest_id=r[0], title=r[4], status=r[1], step=r[2], last_iso=r[3],
-        step_label=r[6],
+        step_label=r[6], phase_label=r[7],
         intent=_resolve_row_intent(control, r))
         for r in rows]
     chosen = await resume_select.run_picker(
@@ -2806,7 +2807,7 @@ def _ambiguous_matches_non_tty(rows: list[_Row]) -> int:
     for r in rows:
         print(quest_row.format_quest_line(
             quest_id=r[0], title=r[4], status=r[1], step=r[2],
-            step_label=r[6], last_iso=r[3], now=now, color=color,
+            step_label=r[6], phase_label=r[7], last_iso=r[3], now=now, color=color,
             name_width=name_w), file=sys.stderr)
     return 2
 

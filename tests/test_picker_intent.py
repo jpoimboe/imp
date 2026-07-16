@@ -28,7 +28,7 @@ async def test_pick_quest_target_threads_intent(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
 ) -> None:
     row = ("c1", "draft", "plan", "2026-06-11T00:00:00+00:00", "",
-           "2026-06-01T00:00:00+00:00", None)
+           "2026-06-01T00:00:00+00:00", None, None)
     monkeypatch.setattr(m, "_interactive", lambda: True)
     monkeypatch.setattr(
         m, "_load_events_for_id",
@@ -53,9 +53,9 @@ async def test_pick_quest_target_skips_event_load_for_titled_rows(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
 ) -> None:
     titled_row = ("t1", "draft", "plan", "2026-06-11T00:00:00+00:00", "Named feature",
-                  "2026-06-01T00:00:00+00:00", None)
+                  "2026-06-01T00:00:00+00:00", None, None)
     untitled_row = ("u1", "draft", "plan", "2026-06-11T00:00:00+00:00", "",
-                    "2026-06-01T00:00:00+00:00", None)
+                    "2026-06-01T00:00:00+00:00", None, None)
     monkeypatch.setattr(m, "_interactive", lambda: True)
 
     called_with: list[str] = []

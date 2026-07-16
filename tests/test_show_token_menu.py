@@ -15,9 +15,9 @@ def anyio_backend() -> str:
 
 # _Row = (id, status, step, last_iso, title, created_at, step_label[, _])
 def _row(cid: str, last: str = "2026-06-11T00:00:00+00:00",
-         ) -> tuple[str, str, str, str, str, str, str | None]:
+         ) -> tuple[str, str, str, str, str, str, str | None, str | None]:
     return (cid, "paused", "plan", last, "Title " + cid,
-            "2026-06-01T00:00:00+00:00", None)
+            "2026-06-01T00:00:00+00:00", None, None)
 
 
 def test_show_all_rows_spans_pool_and_skips_unreadable(
