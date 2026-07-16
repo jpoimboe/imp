@@ -28,6 +28,7 @@ from typing import Any, NamedTuple, NoReturn
 import anyio
 
 from imp import __version__
+from imp.agents.random_status import random_status_phrase
 from imp.agents.skills import load_user_skill
 from imp.cli import palette as pal
 from imp.cli import quest_row, resume_select, splash
@@ -1120,6 +1121,19 @@ def _warn_if_blocked(quest: Quest) -> None:
               f"{', '.join(unmerged)}; starting anyway.", file=sys.stderr)
 
 
+def _build_resume_driver(
+    *, quest: Quest, state: State, status: LiveStatus,
+    color: bool, preceded_by_blank: bool = False,
+) -> LiveDriver:
+    # startup_verb is drawn once at construction — compose_startup stores it, never re-draws.
+    return LiveDriver(
+        stream=sys.stdout, color=color,
+        width=_term_width, display_width=_display_width, status=status,
+        suppress_replay=True, preceded_by_blank=preceded_by_blank,
+        startup_verb=state.step_label or random_status_phrase(),
+        quest_id=quest.id, title=quest.title)
+
+
 async def _async_cmd_resume(args: argparse.Namespace) -> int:
     install_process_group()
     from imp.cli.signals import InterruptCoordinator
@@ -1158,12 +1172,9 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
         print(_run_header_line(
             quest.id, quest.title, "resuming", color=should_use_color(sys.stdout)))
         status = LiveStatus(sys.stdout)
-        driver = LiveDriver(stream=sys.stdout,
-                            color=should_use_color(sys.stdout),
-                            width=_term_width, display_width=_display_width, status=status,
-                            suppress_replay=True,
-                            startup_verb="resuming",
-                            quest_id=quest.id, title=quest.title)
+        driver = _build_resume_driver(
+            quest=quest, state=state, status=status,
+            color=should_use_color(sys.stdout))
         coord = InterruptCoordinator()
         solicit = make_headless_solicit(getattr(args, "message", None), coord)
         return await run_session_client(
@@ -1183,13 +1194,9 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
 
     async def _first(leave_state: dict[str, str]) -> int:
         status = LiveStatus(sys.stdout)
-        driver = LiveDriver(stream=sys.stdout,
-                            color=should_use_color(sys.stdout),
-                            width=_term_width, display_width=_display_width, status=status,
-                            suppress_replay=True,
-                            preceded_by_blank=splash_shown,
-                            startup_verb="resuming",
-                            quest_id=quest.id, title=quest.title)
+        driver = _build_resume_driver(
+            quest=quest, state=state, status=status,
+            color=should_use_color(sys.stdout), preceded_by_blank=splash_shown)
         coord = InterruptCoordinator()
         solicit = make_interactive_solicit(
             quest, status=status, driver=driver, coord=coord)
@@ -1231,18 +1238,16 @@ async def _resume_inert(
     from imp.cli.signals import InterruptCoordinator
 
     color = should_use_color(sys.stdout)
+    state = State.load(quest.state_dir)
     print(_run_header_line(quest.id, quest.title, "resuming", color=color))
     question = render_inert_question(question, width=_term_width(), color=color)
 
     async def _launch(line: str) -> int:
         async def _first(leave_state: dict[str, str]) -> int:
             status = LiveStatus(sys.stdout)
-            driver = LiveDriver(stream=sys.stdout, color=color,
-                                width=_term_width, status=status,
-                                suppress_replay=True,
-                                preceded_by_blank=True,
-                                startup_verb="resuming",
-                                quest_id=quest.id, title=quest.title)
+            driver = _build_resume_driver(
+                quest=quest, state=state, status=status,
+                color=color, preceded_by_blank=True)
             coord = InterruptCoordinator()
             inner = make_interactive_solicit(
                 quest, status=status, driver=driver, coord=coord)
