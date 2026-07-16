@@ -103,8 +103,9 @@ async def test_exit_event_cancels_open_prompt(tmp_path: Path) -> None:
             _BlockingPrompt(), _FakeStatus(), _fake_change(tmp_path), coord=coord)
     # The synthesized KBI routes through D2's catch → request_exit (the
     # pause-and-exit handoff the CLI arm finalizes). The reason is "ctrl-c" to
-    # match _reason_for_signal(SIGINT) and the _dispatch_signal exit routing, so
-    # the final headline reads `paused (ctrl-c)` consistently.
+    # match _reason_for_signal(SIGINT) and the _dispatch_signal exit routing.
+    # A human interrupt prints no `paused (ctrl-c)` line; the exit reason still
+    # routes as "ctrl-c".
     assert coord.exit_reason == "ctrl-c"
 
 
