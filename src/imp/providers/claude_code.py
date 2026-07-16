@@ -574,7 +574,7 @@ class _RunState:
     tool_durations: dict[str, float] = field(default_factory=dict)
     # The flush-lock-guarded _flush_llm_group closure, assigned once by _run so
     # the out-of-band _impl sub_agent path can commit accumulated parent prose
-    # (as an llm_response) BEFORE it eagerly appends the sub_agent tool_call.
+    # (as an agent_message) BEFORE it eagerly appends the sub_agent tool_call.
     # None until _run assigns it (pre-loop); _impl guards on that.
     flush_llm_group: Any = None
 
@@ -817,7 +817,7 @@ def _wrap_one(
                     # link (agent_id="sub:" + this event id) depends on it.
                     sub_def = ctx.subagent_defs.get(args["subagent_name"])
                     label = sub_def.label if sub_def is not None else None
-                    # Commit any accumulated parent prose as an llm_response BEFORE
+                    # Commit any accumulated parent prose as an agent_message BEFORE
                     # this eager tool_call, so narration renders above the sub_agent
                     # fold it introduces (parity with ordinary tools). The flush's
                     # lock makes this wait for any in-flight receive-loop flush's
@@ -874,7 +874,7 @@ def _wrap_one(
                 state.complete_step_args = args
                 return _tool_response("step complete", is_error=False)
             if name == "load_skill" and state.flush_llm_group is not None:
-                # Commit any accumulated turn prose as an llm_response BEFORE
+                # Commit any accumulated turn prose as an agent_message BEFORE
                 # load_skill appends its skill_load event from inside async_invoke,
                 # so the event log lands narration-then-load (parity with the eager
                 # sub_agent flush above). No-ops when no llm group is open; None
@@ -1116,7 +1116,7 @@ def _join_text(content: tuple[Any, ...]) -> str:
 
 
 def _serialize_claude_code_message(sdk_msg: Any) -> dict[str, Any]:
-    """Serialize an SDK AssistantMessage to llm_response.raw. claude_code has
+    """Serialize an SDK AssistantMessage to agent_message.raw. claude_code has
     no interceptable per-turn API call, so this is a normalized view: canonical
     tool names, thinking preserved, best-effort usage/stop_reason."""
     content: list[dict[str, Any]] = []
@@ -1919,7 +1919,7 @@ class ClaudeCodeAgentRunner:
                     usage = llm_usage
                     stop = llm_stop_reason if llm_stop_reason is not None \
                         else backstop_stop_reason
-                elog.append_llm_response(
+                elog.append_agent_message(
                     agent_id=aid, provider=invocation.provider_name,
                     model=llm_model or self.model,
                     raw={"content": llm_blocks, "stop_reason": stop,
@@ -2098,11 +2098,11 @@ class ClaudeCodeAgentRunner:
                                             await client.interrupt()
                                         continue
                             # Close the coalesced prose group at the text->tool_use
-                            # transition: emit its llm_response BEFORE this fragment's
+                            # transition: emit its agent_message BEFORE this fragment's
                             # tool_calls, so narration renders above the tools it
                             # introduced. Guard on tool-bearing fragments only — a
                             # pure-text fragment must not flush (its text is still
-                            # accumulating toward one llm_response). The flush is a
+                            # accumulating toward one agent_message). The flush is a
                             # no-op when the group is already closed.
                             if any(isinstance(b, ToolUseBlock)
                                    for b in imp_msg.content):

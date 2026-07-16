@@ -310,7 +310,7 @@ _REQUIRED_KEYS: dict[str, tuple[str, ...]] = {
     "step_context": ("provider", "model", "system_prompt",
                      "tools_schema", "params", "max_tool_calls"),
     "user_message": ("role", "content"),
-    "llm_response": ("provider", "model", "raw", "usage", "stop_reason"),
+    "agent_message": ("provider", "model", "raw", "usage", "stop_reason"),
     "tool_call": ("id", "name", "input"),
     "tool_result": ("id", "content", "error"),
     "skill_load": ("name", "source"),
@@ -362,16 +362,16 @@ class EventLog(Protocol):
                             max_tool_calls: int | None) -> dict[str, Any]: ...
     def append_user_message(self, *, agent_id: str | None,
                             message: Message, human: bool) -> dict[str, Any]: ...
-    def append_llm_response(self, *, agent_id: str | None, provider: str,
-                            model: str, raw: Any, usage: dict[str, Any],
-                            stop_reason: Any,
-                            auth_mode: str | None = None,
-                            context_window: int | None = None,
-                            context_pct: float | None = None,
-                            context_tokens: int | None = None,
-                            message_id: str | None = None,
-                            request_id: str | None = None,
-                            duration_ms: float | None = None) -> dict[str, Any]: ...
+    def append_agent_message(self, *, agent_id: str | None, provider: str,
+                             model: str, raw: Any, usage: dict[str, Any],
+                             stop_reason: Any,
+                             auth_mode: str | None = None,
+                             context_window: int | None = None,
+                             context_pct: float | None = None,
+                             context_tokens: int | None = None,
+                             message_id: str | None = None,
+                             request_id: str | None = None,
+                             duration_ms: float | None = None) -> dict[str, Any]: ...
     def append_tool_call(self, *, agent_id: str | None,
                          block: Any, label: str | None = None,
                          id_ns: str | None = None) -> dict[str, Any]: ...
@@ -399,7 +399,7 @@ class EventLog(Protocol):
                payload: dict[str, Any]) -> dict[str, Any]: ...
     def read(self) -> Iterator[dict[str, Any]]: ...
     def tail(self, n: int) -> list[dict[str, Any]]: ...
-    def update_last_llm_response_usage(
+    def update_last_agent_message_usage(
         self, *, agent_id: str, usage: dict[str, Any],
         context_tokens: int | None = None,
     ) -> None: ...
@@ -499,16 +499,16 @@ class _BaseEventLog:
                      "content": [_block_to_dict(b) for b in message.content],
                      "human": human})
 
-    def append_llm_response(self, *, agent_id: str | None, provider: str,
-                            model: str, raw: Any, usage: dict[str, Any],
-                            stop_reason: Any,
-                            auth_mode: str | None = None,
-                            context_window: int | None = None,
-                            context_pct: float | None = None,
-                            context_tokens: int | None = None,
-                            message_id: str | None = None,
-                            request_id: str | None = None,
-                            duration_ms: float | None = None) -> dict[str, Any]:
+    def append_agent_message(self, *, agent_id: str | None, provider: str,
+                             model: str, raw: Any, usage: dict[str, Any],
+                             stop_reason: Any,
+                             auth_mode: str | None = None,
+                             context_window: int | None = None,
+                             context_pct: float | None = None,
+                             context_tokens: int | None = None,
+                             message_id: str | None = None,
+                             request_id: str | None = None,
+                             duration_ms: float | None = None) -> dict[str, Any]:
         payload: dict[str, Any] = {
             "provider": provider, "model": model, "raw": raw,
             "usage": usage, "stop_reason": stop_reason,
@@ -528,7 +528,7 @@ class _BaseEventLog:
         if duration_ms is not None:
             payload["duration_ms"] = duration_ms
         return self._emit(
-            agent_id=agent_id, type="llm_response", payload=payload)
+            agent_id=agent_id, type="agent_message", payload=payload)
 
     def append_tool_call(self, *, agent_id: str | None,
                          block: Any, label: str | None = None,
@@ -682,19 +682,19 @@ class JsonlEventLog(_BaseEventLog):
                 out.append({"_malformed": True, "raw": line})
         return out[-n:]
 
-    def update_last_llm_response_usage(
+    def update_last_agent_message_usage(
         self, *, agent_id: str, usage: dict[str, Any],
         context_tokens: int | None = None,
     ) -> None:
         # JsonlEventLog is append-only on disk. Write a usage-patch row so
-        # read_telemetry can fold it into the preceding llm_response totals.
-        # NOT a second llm_response — that would double-count under telemetry's
+        # read_telemetry can fold it into the preceding agent_message totals.
+        # NOT a second agent_message — that would double-count under telemetry's
         # one-response-per-turn invariant.
         payload: dict[str, Any] = {"usage": usage}
         if context_tokens is not None:
             payload["context_tokens"] = context_tokens
         self._persist({
-            "type": "llm_response_usage_patch",
+            "type": "agent_message_usage_patch",
             "agent_id": agent_id,
             "payload": payload,
         })
@@ -739,22 +739,22 @@ class InMemoryEventLog(_BaseEventLog):
             return []
         return list(self._events[-n:])
 
-    def update_last_llm_response_usage(
+    def update_last_agent_message_usage(
         self, *, agent_id: str, usage: dict[str, Any],
         context_tokens: int | None = None,
     ) -> None:
         for ev in reversed(self._events):
-            if ev.get("type") == "llm_response" and ev.get("agent_id") == agent_id:
+            if ev.get("type") == "agent_message" and ev.get("agent_id") == agent_id:
                 payload = ev.setdefault("payload", {})
                 existing = payload.get("usage") or {}
                 # Merge: codex emits full usage at turn.completed; the prior
-                # llm_response (from item:agent_message) carries no usage.
+                # agent_message (from item:agent_message) carries no usage.
                 payload["usage"] = {**existing, **usage}
                 if context_tokens is not None:
                     payload["context_tokens"] = context_tokens
                 return
         raise RuntimeError(
-            f"no prior llm_response for agent_id={agent_id!r} to attach usage to"
+            f"no prior agent_message for agent_id={agent_id!r} to attach usage to"
         )
 
 

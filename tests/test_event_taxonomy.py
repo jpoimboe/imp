@@ -35,3 +35,19 @@ def test_no_agent_output_control_yields_remain() -> None:
     # the consumer no longer looks for the old type
     from imp.engine import agent_run
     assert 'event["type"] == "agent_output"' not in inspect.getsource(agent_run)
+
+
+def test_append_agent_message_emits_agent_message_and_patch_merges() -> None:
+    from imp.engine.state import InMemoryEventLog
+
+    log = InMemoryEventLog()
+    ev = log.append_agent_message(
+        agent_id="step:x/plan", provider="anthropic", model="m",
+        raw={"content": []}, usage={"input_tokens": 1}, stop_reason="end_turn")
+    assert ev["type"] == "agent_message"
+    log.update_last_agent_message_usage(
+        agent_id="step:x/plan",
+        usage={"output_tokens": 9}, context_tokens=1000)
+    resp = next(e for e in log.read() if e["type"] == "agent_message")
+    assert resp["payload"]["context_tokens"] == 1000
+    assert resp["payload"]["usage"]["output_tokens"] == 9

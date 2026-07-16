@@ -1028,14 +1028,14 @@ class CodexAgentRunner:
 # ── Event mapping ─────────────────────────────────────────────────────────────
 
 
-def _attach_usage_to_last_llm_response(
+def _attach_usage_to_last_agent_message(
     elog: Any, *, agent_id: str, usage: dict[str, Any],
     context_tokens: int | None = None,
 ) -> None:
-    """Patch the most recent `llm_response` payload for `agent_id` with
+    """Patch the most recent `agent_message` payload for `agent_id` with
     `usage` (and the canonical `context_tokens` when supplied). Required on
     every `EventLog` implementation — see `src/imp/engine/state.py`."""
-    elog.update_last_llm_response_usage(
+    elog.update_last_agent_message_usage(
         agent_id=agent_id, usage=usage, context_tokens=context_tokens)
 
 
@@ -1072,14 +1072,14 @@ def _flush_codex_prose(
     elog: Any, *, agent_id: str, provider: str, model: str,
     state: dict[str, Any],
 ) -> None:
-    """Emit the turn's buffered agent_message prose as a prose-only
-    `llm_response` and clear the buffer. No-op when the buffer is empty.
+    """Emit the turn's buffered prose as a prose-only `agent_message` and
+    clear the buffer. No-op when the buffer is empty.
     Sets `state["turn_had_llm"]` so `turn.completed` knows whether a
     prose-less turn still needs an empty-prose usage carrier."""
     parts = state.pop("prose_buffer", [])
     if not parts:
         return
-    elog.append_llm_response(
+    elog.append_agent_message(
         agent_id=agent_id, provider=provider, model=model,
         raw={"content": [{"type": "text", "text": t} for t in parts]},
         usage={}, stop_reason=None, auth_mode=state.get("auth_mode"))
@@ -1087,7 +1087,7 @@ def _flush_codex_prose(
 
 
 def _parse_codex_message(raw: dict[str, Any]) -> Message:
-    """raw → assistant Message for codex.  A codex `llm_response.raw` now
+    """raw → assistant Message for codex.  A codex `agent_message.raw` now
     carries prose text blocks only (tool_use lives in the standalone
     `tool_call` events); this parser also tolerates a tool_use block for the
     hand-built audit/parse fixtures.  A web_search appears as a query-only
@@ -1180,7 +1180,7 @@ def process_event(
         if itype == "agent_message":
             text = getattr(item, "text", "") or ""
             state["last_agent_text"] = text  # still needed by nudge/classify
-            # Buffer prose; it is emitted as a prose-only llm_response at the
+            # Buffer prose; it is emitted as a prose-only agent_message at the
             # next text->tool transition (or at turn.completed for trailing /
             # text-only prose). tool_use lives only in the standalone tool_call
             # events, so a turn's prose can lead its tool_calls.
@@ -1333,11 +1333,11 @@ def process_event(
 
     if etype == "turn.completed":
         # Flush any trailing prose (a post-tool summary, or a text-only turn) as
-        # a prose-only llm_response BEFORE usage attaches. A prose-less tool-only
-        # turn emitted no llm_response this turn, so synthesize an empty-prose
-        # carrier to hold the usage patch — update_last_llm_response_usage would
+        # a prose-only agent_message BEFORE usage attaches. A prose-less tool-only
+        # turn emitted no agent_message this turn, so synthesize an empty-prose
+        # carrier to hold the usage patch — update_last_agent_message_usage would
         # otherwise land on the PRIOR turn's response (or raise on turn one).
-        # tool_use never rides in a codex llm_response now; it lives only in the
+        # tool_use never rides in a codex agent_message now; it lives only in the
         # standalone tool_call events.
         _flush_codex_prose(elog, agent_id=agent_id, provider=provider,
                            model=model, state=state)
@@ -1346,7 +1346,7 @@ def process_event(
         if usage is None:
             return
         if not turn_had_llm:
-            elog.append_llm_response(
+            elog.append_agent_message(
                 agent_id=agent_id, provider=provider, model=model,
                 raw={"content": []}, usage={}, stop_reason=None,
                 auth_mode=state.get("auth_mode"),
@@ -1372,9 +1372,9 @@ def process_event(
         # Expose the turn's occupancy to the driver's Tier A watch (Mechanism 3)
         # — the same anthropic-shaped dict context_threshold_crossed consumes.
         state["pending_usage"] = normalized
-        # Attach to the most recent llm_response payload for this agent_id,
+        # Attach to the most recent agent_message payload for this agent_id,
         # carrying the canonical context_tokens computed from the same dict.
-        _attach_usage_to_last_llm_response(
+        _attach_usage_to_last_agent_message(
             elog, agent_id=agent_id, usage=normalized,
             context_tokens=context_tokens_from_usage(normalized))
         return

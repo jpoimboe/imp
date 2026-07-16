@@ -143,7 +143,7 @@ class ScriptedAgentRunner:
                 assistant = Message(role="assistant", content=tuple(blocks))
                 messages.append(assistant)
                 transcript.append(assistant)
-                elog.append_llm_response(
+                elog.append_agent_message(
                     agent_id=aid, provider=invocation.provider_name,
                     model=self.model, raw={"content": []}, usage={},
                     stop_reason=None)
