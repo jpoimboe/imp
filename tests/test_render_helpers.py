@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from imp.cli.render_helpers import (
     conversation_prose,
+    events_content,
     render_llm_response,
     user_message_text,
 )
@@ -173,3 +174,61 @@ def test_conversation_prose_treats_missing_human_field_as_nonhuman() -> None:
          "payload": {"content": [{"type": "text", "text": "no human field here"}]}},
     ]
     assert conversation_prose(events) == ""  # absent human field -> excluded
+
+
+def test_events_content_collects_structured_payload_strings() -> None:
+    events = [
+        {"type": "tool_call",
+         "payload": {"name": "load_skill", "input": {"name": "imp-tool-reference"}}},
+        {"type": "tool_result",
+         "payload": {"id": "t1", "content": "Traceback: BOOMERROR at line 5"}},
+        {"type": "skill_load", "payload": {"name": "imp-knowledge", "source": "internal"}},
+    ]
+    text = events_content(events)
+    assert "load_skill" in text
+    assert "imp-tool-reference" in text
+    assert "BOOMERROR" in text
+    assert "imp-knowledge" in text
+
+
+def test_events_content_excludes_step_context_boilerplate() -> None:
+    events = [
+        {"type": "step_context",
+         "payload": {"provider": "anthropic", "model": "claude-x",
+                     "system_prompt": "BOILERPLATE_PROMPT",
+                     "tools_schema": [{"name": "SCHEMANOISE"}]}},
+    ]
+    text = events_content(events)
+    assert "anthropic" in text
+    assert "claude-x" in text
+    assert "BOILERPLATE_PROMPT" not in text
+    assert "SCHEMANOISE" not in text
+
+
+def test_events_content_collects_nested_list_content_blocks() -> None:
+    events = [
+        {"type": "tool_result",
+         "payload": {"id": "t1", "content": [{"type": "text", "text": "NESTEDHIT"}]}},
+    ]
+    assert "NESTEDHIT" in events_content(events)
+
+
+def test_events_content_includes_llm_response_raw_text() -> None:
+    events = [
+        {"type": "llm_response",
+         "payload": {"provider": "anthropic",
+                     "raw": {"content": [{"type": "text", "text": "REASONING_TEXT"}]}}},
+    ]
+    assert "REASONING_TEXT" in events_content(events)
+
+
+def test_events_content_skips_non_dict_and_missing_payload() -> None:
+    events = [
+        "NOT_A_DICT",
+        {"type": "x"},
+        {"type": "y", "payload": "notadict"},
+        {"type": "z", "payload": {"k": "KEPT"}},
+    ]
+    text = events_content(events)
+    assert "KEPT" in text
+    assert "NOT_A_DICT" not in text

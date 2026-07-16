@@ -61,3 +61,30 @@ def conversation_prose(events: list[Any]) -> str:
         if text:
             parts.append(text)
     return "\n".join(parts)
+
+
+def _collect_strings(value: Any, out: list[str]) -> None:
+    if isinstance(value, str):
+        out.append(value)
+    elif isinstance(value, dict):
+        for v in value.values():
+            _collect_strings(v, out)
+    elif isinstance(value, list):
+        for v in value:
+            _collect_strings(v, out)
+
+
+def events_content(events: list[Any]) -> str:
+    """Full per-event text: every payload string minus static step_context boilerplate."""
+    parts: list[str] = []
+    for ev in events:
+        if not isinstance(ev, dict):
+            continue
+        payload = ev.get("payload")
+        if not isinstance(payload, dict):
+            continue
+        if ev.get("type") == "step_context":
+            payload = {k: v for k, v in payload.items()
+                       if k not in ("system_prompt", "tools_schema")}
+        _collect_strings(payload, parts)
+    return "\n".join(parts)
