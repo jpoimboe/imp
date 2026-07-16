@@ -953,7 +953,7 @@ def test_step_started_stashes_start_ts_normal_and_resume() -> None:
     b.add(e1)
     step = b._step_stack[-1]
     assert step.start_ts == "2026-05-30T10:00:00+00:00"
-    assert step.agent_output is None
+    assert step.agent_result is None
 
     # Resume re-entry path reuses the open StepNode and must restamp start_ts.
     b.add(_ev("2", "workflow_resumed"))
@@ -2689,9 +2689,9 @@ def test_subagent_query_result_folds_into_change_total() -> None:
 def test_claude_code_turn_end_detection_uses_real_stop_reason() -> None:
     # The coalesced claude_code llm_response now carries a real stop_reason, so
     # turn-end detection works through the standard frozenset path.
-    assert nv._llm_response_is_turn_end(
+    assert nv._agent_message_is_turn_end(
         {"provider": "claude_code", "stop_reason": "end_turn"}) is True
-    assert nv._llm_response_is_turn_end(
+    assert nv._agent_message_is_turn_end(
         {"provider": "claude_code", "stop_reason": None}) is False
 
 
@@ -3017,3 +3017,16 @@ def test_seeded_identity_survives_quest_created_replay_unchanged() -> None:
            "payload": {"id": "lufu50", "title": "Instant opening identity bar"}})
     assert b.tree.root.id == "lufu50"                     # replay supersedes with identical values
     assert b.tree.root.title == "Instant opening identity bar"
+
+
+def test_agent_message_event_renders_prose_node():
+    tree = nv.build_tree([
+        _ev("1", "step_started", step="plan", kind="agent", phase="build",
+            model="m", provider="anthropic"),
+        _ev("a1", "agent_message", agent_id="step:build/plan",
+            provider="anthropic", model="m", stop_reason="end_turn", usage={},
+            raw={"content": [{"type": "text", "text": "hello from the model"}]}),
+    ])
+    step = tree.root.children[0].children[0]
+    texts = [c.text for c in step.children if isinstance(c, nv.AgentTextNode)]
+    assert texts == ["hello from the model"]

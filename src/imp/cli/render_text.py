@@ -659,8 +659,8 @@ def _render(node: Any, *, depth: int, full: bool = False,
         yield from _render_children(children, depth=depth, cats=cats,
                                     color=color, width=width, display_width=display_width,
                                     gutters=gutters, prime=True, live_viewer=live_viewer)
-        if cats >= _ALL_CATEGORIES and node.agent_output:
-            yield from _render_output_args(node.agent_output, depth=depth,
+        if cats >= _ALL_CATEGORIES and node.agent_result:
+            yield from _render_output_args(node.agent_result, depth=depth,
                                            color=color, width=width, gutters=gutters)
         return
 

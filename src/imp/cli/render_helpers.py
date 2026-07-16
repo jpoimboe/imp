@@ -1,6 +1,6 @@
-"""Shared rendering of llm_response / user_message payloads. Both the `imp log`
+"""Shared rendering of agent_message / user_message payloads. Both the `imp log`
 renderer and the live ChatRenderer derive the assistant Message from
-llm_response.raw via parse_message, so factor the extraction here."""
+agent_message.raw via parse_message, so factor the extraction here."""
 
 from __future__ import annotations
 
@@ -19,7 +19,7 @@ class RenderedMessage:
     usage: dict[str, Any]
 
 
-def render_llm_response(payload: dict[str, Any]) -> RenderedMessage:
+def render_agent_message(payload: dict[str, Any]) -> RenderedMessage:
     provider = payload.get("provider", "anthropic")
     raw = payload.get("raw") or {}
     msg = parse_message(provider, raw)
@@ -53,7 +53,7 @@ def conversation_prose(events: list[Any]) -> str:
                     continue
                 text = user_message_text(payload)
             elif etype == "llm_response":
-                text = "\n".join(render_llm_response(payload).texts)
+                text = "\n".join(render_agent_message(payload).texts)
             else:
                 continue
         except Exception:

@@ -234,8 +234,8 @@ def _llm_response_text(payload: Mapping[str, Any]) -> str:
     the live chat). Imported lazily so this module stays import-light, and guarded
     so a parse failure degrades to an empty body instead of crashing."""
     try:
-        from imp.cli.render_helpers import render_llm_response
-        rendered = render_llm_response(dict(payload))
+        from imp.cli.render_helpers import render_agent_message
+        rendered = render_agent_message(dict(payload))
     except Exception:
         return ""
     return "\n".join(t for t in rendered.texts if t and t.strip()).strip()

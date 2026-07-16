@@ -4,12 +4,12 @@ from imp.cli.render_helpers import (
     conversation_prose,
     event_text,
     events_content,
-    render_llm_response,
+    render_agent_message,
     user_message_text,
 )
 
 
-def test_render_llm_response_extracts_text_and_tool_uses() -> None:
+def test_render_agent_message_extracts_text_and_tool_uses() -> None:
     payload = {
         "provider": "anthropic", "model": "m",
         "raw": {"content": [
@@ -19,7 +19,7 @@ def test_render_llm_response_extracts_text_and_tool_uses() -> None:
         "usage": {"input_tokens": 10, "output_tokens": 3},
         "stop_reason": "tool_use",
     }
-    r = render_llm_response(payload)
+    r = render_agent_message(payload)
     assert "hello" in r.texts
     assert r.tool_uses[0].name == "read_file"
     assert r.stop_reason == "tool_use"
