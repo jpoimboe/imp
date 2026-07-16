@@ -3247,6 +3247,78 @@ def _matched_events(
     return matched, handle_map
 
 
+class EventSearchHit(NamedTuple):
+    quest_id: str
+    title: str
+    zone: str
+    last_activity: str | None
+    events: list[tuple[int, dict[str, Any]]]
+    handle_map: dict[str, str]
+    match_count: int
+
+
+def _events_search_active(
+    control: Path, query: str, *, types: set[str] | None, agents: set[str] | None,
+) -> list[EventSearchHit]:
+    """In-flight quests with >=1 event matching query (after type/agent filters)."""
+    store = make_store(control)
+    scanned = store.scan_homes()
+    hits: list[EventSearchHit] = []
+    for r in _status_rows(control, scanned):
+        events = store.get_events(r[0]) or []
+        matched, handle_map = _matched_events(events, query, types=types, agents=agents)
+        if matched:
+            hits.append(EventSearchHit(
+                r[0], r[4], "active", r[3], matched, handle_map, len(matched)))
+    return hits
+
+
+def _events_search_backlog(
+    control: Path, query: str, *, types: set[str] | None, agents: set[str] | None,
+) -> list[EventSearchHit]:
+    """Backlog quests matched on id/title/intent. Skipped when type/agent filter is set."""
+    if types is not None or agents is not None:
+        return []
+    q = query.lower()
+    hits: list[EventSearchHit] = []
+    for r in _backlog_rows(control):
+        quest_id, title = r[0], r[4]
+        seed = _backlog_seed_opening(control, quest_id)
+        if q in quest_id.lower() or q in title.lower() or q in seed.lower():
+            hits.append(EventSearchHit(quest_id, title, "backlog", r[3], [], {}, 1))
+    return hits
+
+
+def _events_search_archived(
+    control: Path, query: str, *, types: set[str] | None, agents: set[str] | None,
+) -> list[EventSearchHit]:
+    """Archived quests: index candidates re-scanned to specific matching events."""
+    store = make_store(control)
+    hits: list[EventSearchHit] = []
+    for cid, title, _status, last in archive_read.search_archive_events_content(control, query):
+        events = store.get_events(cid) or []
+        matched, handle_map = _matched_events(events, query, types=types, agents=agents)
+        if matched:
+            hits.append(EventSearchHit(
+                cid, title, "archive", last, matched, handle_map, len(matched)))
+    return hits
+
+
+def _events_search(
+    control: Path, query: str, zones: tuple[bool, bool, bool], *,
+    types: set[str] | None, agents: set[str] | None,
+) -> list[EventSearchHit]:
+    active, backlog, archived = zones
+    hits: list[EventSearchHit] = []
+    if active:
+        hits += _events_search_active(control, query, types=types, agents=agents)
+    if backlog:
+        hits += _events_search_backlog(control, query, types=types, agents=agents)
+    if archived:
+        hits += _events_search_archived(control, query, types=types, agents=agents)
+    return hits
+
+
 def _merged_after(control: Path, quest_id: str, base_commit: str) -> bool:
     """True iff the recorded merge landed AFTER base_commit; fail-safe False otherwise."""
     merge_commit = archive_read.merge_commit_of(control, quest_id)
