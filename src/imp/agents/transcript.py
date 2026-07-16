@@ -323,7 +323,7 @@ def balance_success_on_resume(
     injected = Message(role="user", content=tuple(blocks))
     messages.append(injected)
     transcript.append(injected)
-    elog.append_user_message(agent_id=agent_id, message=injected, human=False)
+    elog.append_engine_message(agent_id=agent_id, message=injected, subtype="continuation")
     return injected
 
 
@@ -364,7 +364,7 @@ def synthesize_native_success_on_resume(
     injected = Message(role="user", content=tuple(result_blocks))
     messages.append(injected)
     transcript.append(injected)
-    elog.append_user_message(agent_id=agent_id, message=injected, human=False)
+    elog.append_engine_message(agent_id=agent_id, message=injected, subtype="continuation")
     return injected
 
 
@@ -376,13 +376,17 @@ def deliver_reply_on_resume(
 
     A bare-turn-end pause leaves the transcript ending on assistant text with no
     tool_use — nothing to repair, the reply is simply the next user turn. Append
-    it to `messages`, persist it, and journal a user_message event; the now
+    it to `messages`, persist it, and journal a user_message/reply event (human)
+    or engine_message/continuation (framework injection); the now
     user-terminated transcript drives the next LLM turn.
     """
     injected = Message(role="user", content=(TextBlock(text=reply),))
     messages.append(injected)
     transcript.append(injected)
-    elog.append_user_message(agent_id=agent_id, message=injected, human=human)
+    if human:
+        elog.append_user_message(agent_id=agent_id, message=injected, subtype="reply")
+    else:
+        elog.append_engine_message(agent_id=agent_id, message=injected, subtype="continuation")
     return injected
 
 
@@ -397,10 +401,11 @@ def deliver_continuation_reply(
 ) -> str:
     """Deliver a bare-turn-end / resume continuation reply as the next user turn.
 
-    A plain str reply journals a single human=<human> user_message and appends it
-    to messages/transcript. A SkillReply journals the command user_message
-    (event-only, human=true, step agent_id) + a skill_load(source="human") event +
-    the human=false body user_message, appending ONLY the body — so the command
+    A plain str reply journals a user_message/reply (human=True) or
+    engine_message/continuation (human=False) and appends it to
+    messages/transcript. A SkillReply journals the command as user_message/reply
+    (event-only, step agent_id) + a skill_load(source="human") event + the body
+    as engine_message/continuation, appending ONLY the body — so the command
     provenance renders `>` and consumes the awaiting-reply arm while the body
     lands non-interactive (dropped in lean, `injected message:` under --full).
 
@@ -412,7 +417,7 @@ def deliver_continuation_reply(
         command_msg = Message(
             role="user", content=(TextBlock(text=reply.command),))
         elog.append_user_message(
-            agent_id=agent_id, message=command_msg, human=True)
+            agent_id=agent_id, message=command_msg, subtype="reply")
         elog.append(agent_id=None, type="skill_load",
                     payload={"name": reply.name, "source": "human"})
         body_msg = Message(role="user", content=(TextBlock(text=reply.body),))
@@ -420,15 +425,18 @@ def deliver_continuation_reply(
             messages.append(body_msg)
         if transcript is not None:
             transcript.append(body_msg)
-        elog.append_user_message(
-            agent_id=agent_id, message=body_msg, human=False)
+        elog.append_engine_message(
+            agent_id=agent_id, message=body_msg, subtype="continuation")
         return reply.body
     msg = Message(role="user", content=(TextBlock(text=reply),))
     if messages is not None:
         messages.append(msg)
     if transcript is not None:
         transcript.append(msg)
-    elog.append_user_message(agent_id=agent_id, message=msg, human=human)
+    if human:
+        elog.append_user_message(agent_id=agent_id, message=msg, subtype="reply")
+    else:
+        elog.append_engine_message(agent_id=agent_id, message=msg, subtype="continuation")
     return reply
 
 
@@ -440,13 +448,13 @@ def deliver_engine_continuation(
 
     Same transcript effect as deliver_reply_on_resume — append the nudge to
     `messages`/`transcript` so it drives the next LLM turn — but journal an
-    INTERNAL `engine_continuation` event (payload `{"text": reply}`) instead of a
-    human `user_message`. The nudge is the engine self-continuing a retry, not a
-    person speaking, so it must NOT render with the `>` caret.
+    `engine_message`/`continuation` event instead of a human `user_message`.
+    The nudge is the engine self-continuing a retry, not a person speaking,
+    so it must NOT render with the `>` caret.
     """
     injected = Message(role="user", content=(TextBlock(text=reply),))
     messages.append(injected)
     transcript.append(injected)
-    elog.append(agent_id=agent_id, type="engine_continuation", payload={"text": reply})
+    elog.append_engine_message(agent_id=agent_id, message=injected, subtype="continuation")
     return injected
 
