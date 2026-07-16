@@ -53,6 +53,17 @@ names rather than guessing them.
   only merged quests whose merge landed after `<commit>` (implies `--merged`). Default
   output is grep-style matched excerpts per quest; `-l` / `--list`
   prints one terse line per quest (`id  title  [zone]`).
+- `imp events search <query>` — the structured-event sibling of `imp search`: the
+  same case-insensitive substring search, but over quests' **event content** (tool
+  calls, tool results, agent reasoning, skill loads) rather than only their
+  conversation prose — so it answers questions like which agents loaded a given
+  skill, which `imp search` cannot. Searches **active**, **backlog** (matched on
+  title + intent, since drafts have no events), and **archive** quests; the same
+  `--active` / `--backlog` / `--archived` flags scope it, and `imp events`'
+  `--type` / `--agent` filters narrow which events match (`--type tool_call` for
+  "where invoked", the default for anywhere). Default output caps at the 3
+  newest-matched quests with per-quest matched-event lines; `--limit` raises the
+  cap and `-l` / `--list` prints one terse line per matched quest.
 
 Summarize the rows in plain language (what is in flight, what is parked, what is
 finished); do not invent quests that the commands did not list.

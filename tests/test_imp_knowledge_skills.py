@@ -230,3 +230,13 @@ def test_memory_teaches_the_authoring_affordance() -> None:
     assert "never auto-writes memory" in body
     assert "threshold" in body
     assert "finalize" in body
+
+
+def test_knowledge_cheatsheet_documents_events_search() -> None:
+    body = load_internal_skill(_skills_dir(), "imp-knowledge")
+    # the new cheat-sheet bullet for the structured-event search command
+    assert "imp events search <query>" in body
+    assert "content (tool calls, results, reasoning) across all quests, reaching what" in body
+    assert "(prose only) can't; `--type` / `--agent` narrow it." in body
+    # the imp search bullet now names conversation content as its match target
+    assert "backlog, and archived quests' conversation content." in body
