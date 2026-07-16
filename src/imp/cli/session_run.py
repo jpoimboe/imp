@@ -136,7 +136,7 @@ def make_interactive_solicit(
     async def _solicit(_prompt: str) -> str | SkillRequest:
         # The gate's prompt (the interrupt-steer hint, or the daemon's resume
         # prompt) surfaces as the field placeholder; an empty prompt — the bare
-        # turn-end yield — falls back to the default "type your reply".
+        # turn-end yield — falls back to the shared DEFAULT_HINT placeholder.
         return await ask_line_with_slash(
             prompt, status, quest,
             color=should_use_color(sys.stdout), width=_term_width(),
