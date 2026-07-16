@@ -46,7 +46,7 @@ def test_summary_status_from_store_survives_masked_events(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """`imp log <id> -s [--no-pager|--md=-|--html=-]` reads status from quest_card, not the masked events.jsonl."""
+    """`imp log <id> -s` (render paths) reads status from quest_card, not masked events.jsonl."""
     import imp.cli.main as m
     from imp.engine.quest import Quest
     from tests.conftest import _seed_control
