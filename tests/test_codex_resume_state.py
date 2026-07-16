@@ -192,3 +192,67 @@ def test_pending_reply_none_when_tool_call_after_reply(tmp_path: Path) -> None:
          "payload": {"name": "edit_file"}},
     ])
     assert pending_human_reply(ev, "step:t") is None
+
+
+def _agent_msg(text: str, agent_id: str = "step:t") -> dict:
+    return {"agent_id": agent_id, "type": "agent_message",
+            "payload": {"raw": {"content": [{"type": "text", "text": text}]}}}
+
+
+def _reply(text: str, agent_id: str = "step:t") -> dict:
+    return {"agent_id": agent_id, "type": "user_message",
+            "payload": {"role": "user", "subtype": "reply",
+                        "content": [{"type": "text", "text": text}]}}
+
+
+def test_derive_reads_agent_message_turn(tmp_path: Path) -> None:
+    ev = tmp_path / "events.jsonl"
+    _write_events(ev, [_agent_msg("done?")])
+    state, last = derive_codex_resume_state(ev, "step:t")
+    assert state is ResumeState.MISSING_COMPLETE_STEP
+    assert last == "done?"
+
+
+def test_pending_reply_recognizes_reply_subtype(tmp_path: Path) -> None:
+    ev = tmp_path / "events.jsonl"
+    _write_events(ev, [
+        {"agent_id": "step:t", "type": "awaiting_user_input",
+         "payload": {"prompt": "which file?"}},
+        _reply("use config.py"),
+    ])
+    assert pending_human_reply(ev, "step:t") == "use config.py"
+
+
+def test_pending_reply_cleared_by_agent_message(tmp_path: Path) -> None:
+    ev = tmp_path / "events.jsonl"
+    _write_events(ev, [
+        {"agent_id": "step:t", "type": "awaiting_user_input",
+         "payload": {"prompt": "which file?"}},
+        _reply("use config.py"),
+        _agent_msg("ok, editing"),
+    ])
+    assert pending_human_reply(ev, "step:t") is None
+
+
+def test_pending_reply_ignores_intent_subtype(tmp_path: Path) -> None:
+    ev = tmp_path / "events.jsonl"
+    _write_events(ev, [
+        {"agent_id": "step:t", "type": "awaiting_user_input",
+         "payload": {"prompt": "which file?"}},
+        {"agent_id": "step:t", "type": "user_message",
+         "payload": {"role": "user", "subtype": "intent",
+                     "content": [{"type": "text", "text": "unrelated opening"}]}},
+    ])
+    assert pending_human_reply(ev, "step:t") is None
+
+
+def test_pending_reply_recognizes_interject_subtype(tmp_path: Path) -> None:
+    ev = tmp_path / "events.jsonl"
+    _write_events(ev, [
+        {"agent_id": "step:t", "type": "awaiting_user_input",
+         "payload": {"prompt": "which file?"}},
+        {"agent_id": "step:t", "type": "user_message",
+         "payload": {"role": "user", "subtype": "interject",
+                     "content": [{"type": "text", "text": "actually, use db.py"}]}},
+    ])
+    assert pending_human_reply(ev, "step:t") == "actually, use db.py"
