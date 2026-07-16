@@ -3224,6 +3224,29 @@ def _search_archived(control: Path, query: str, statuses: set[str],
     return hits
 
 
+def _selected_events_search(args: argparse.Namespace) -> tuple[bool, bool, bool]:
+    """(active, backlog, archived) zone flags; none given searches all three."""
+    if not (args.active or args.backlog or args.archived):
+        return True, True, True
+    return args.active, args.backlog, args.archived
+
+
+def _matched_events(
+    events: list[dict[str, Any]], query: str, *,
+    types: set[str] | None, agents: set[str] | None,
+) -> tuple[list[tuple[int, dict[str, Any]]], dict[str, str]]:
+    """Matched (ordinal, event) pairs after type/agent filters, plus the handle map."""
+    from imp.cli.render_helpers import event_text
+    from imp.engine import events_index as ei
+    indexed = list(enumerate(events, start=1))
+    handle_map = ei.subagent_handle_map(indexed)
+    candidates = ei.select_event_lines(
+        indexed, types=types, agents=agents, handle_map=handle_map)
+    q = query.lower()
+    matched = [(o, ev) for o, ev in candidates if q in event_text(ev).lower()]
+    return matched, handle_map
+
+
 def _merged_after(control: Path, quest_id: str, base_commit: str) -> bool:
     """True iff the recorded merge landed AFTER base_commit; fail-safe False otherwise."""
     merge_commit = archive_read.merge_commit_of(control, quest_id)
