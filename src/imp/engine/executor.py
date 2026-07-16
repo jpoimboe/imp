@@ -1400,7 +1400,13 @@ async def _route_agent(
         if hinted:
             retry_payload["hinted"] = True
         _emit(log, "agent_retry", retry_payload, agent_id=None)
-        await _interruptible_sleep(result.delay, coordinator)
+        coordinator.begin_backoff_wait()
+        try:
+            await _interruptible_sleep(result.delay, coordinator)
+        finally:
+            coordinator.end_backoff_wait()
+        # Consume the retry-now latch so it doesn't leak into the next backoff sleep.
+        coordinator.take_retry_now()
         if hinted:
             hint_exempt_sleeps += 1
         else:
