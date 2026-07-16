@@ -50,7 +50,7 @@ from imp.cli.session_run import (
 )
 from imp.cli.signals import install_process_group, prompt_sigint_guard
 from imp.cli.slash import ask_line_with_slash
-from imp.cli.store import HomeDigest, SearchHit, SearchZones, make_store
+from imp.cli.store import HomeDigest, SearchHit, SearchZones, Store, make_store
 from imp.cli.terminal_title import TerminalTitle
 from imp.diagnostics import install_stack_dumper
 from imp.engine import backlog, worktree
@@ -2166,7 +2166,8 @@ def _cmd_log(args: argparse.Namespace) -> int:
             color=should_use_color(sys.stdout))
         _page_or_print(lines, no_pager=args.no_pager, trailing_blank=True)
         return 0
-    events = make_store(control).get_events(quest_id)
+    store = make_store(control)
+    events = store.get_events(quest_id)
     if events is None:
         print(f"imp: no such quest {quest_id!r}", file=sys.stderr)
         return 2
@@ -2187,7 +2188,7 @@ def _cmd_log(args: argparse.Namespace) -> int:
     events = selected
 
     if args.html is not None or args.md is not None:
-        return _write_log_export(args, control, quest_id, events)
+        return _write_log_export(args, control, store, quest_id, events)
 
     width = _term_width()
     color = should_use_color(sys.stdout)
@@ -2199,8 +2200,8 @@ def _cmd_log(args: argparse.Namespace) -> int:
             render_summary,
             summary_total,
         )
-        row = _row_for_id(control, quest_id)
-        status = row[1] if row is not None else "?"
+        card = store.quest_card(quest_id)
+        status = card.status if card is not None else "?"
         workflow = parse_default_workflow(control / "imp" / "project.yaml")
         header = SummaryHeader(workflow=workflow, quest_id=quest_id,
                                status=status, total_seconds=summary_total(events))
@@ -2216,7 +2217,7 @@ def _cmd_log(args: argparse.Namespace) -> int:
     return 0
 
 
-def _write_log_export(args: argparse.Namespace, control: Path,
+def _write_log_export(args: argparse.Namespace, control: Path, store: Store,
                       quest_id: str, events: list[dict[str, Any]]) -> int:
     if args.summary:
         from imp.cli.render_markdown import render_summary_markdown
@@ -2225,8 +2226,8 @@ def _write_log_export(args: argparse.Namespace, control: Path,
             build_summary,
             summary_total,
         )
-        row = _row_for_id(control, quest_id)
-        status = row[1] if row is not None else "?"
+        card = store.quest_card(quest_id)
+        status = card.status if card is not None else "?"
         workflow = parse_default_workflow(control / "imp" / "project.yaml")
         header = SummaryHeader(workflow=workflow, quest_id=quest_id,
                                status=status, total_seconds=summary_total(events))
