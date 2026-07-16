@@ -37,7 +37,6 @@ def test_make_store_returns_local_when_env_unset(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _seed_control(tmp_path)
-    monkeypatch.delenv("IMP_SESSION_SOCKET", raising=False)
     assert isinstance(make_store(tmp_path), LocalStore)
 
 

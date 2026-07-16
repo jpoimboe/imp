@@ -267,7 +267,6 @@ def test_main_log_follow_implies_no_pager_on_tty(
     _make_live_home(tmp_path, slug)
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
-    monkeypatch.delenv("IMP_SESSION_SOCKET", raising=False)
     monkeypatch.delenv("PAGER", raising=False)
     _fake_tty(monkeypatch, isatty=True)
     monkeypatch.setattr(m, "_follow_live", lambda control, cid, home: 0)
@@ -390,7 +389,6 @@ def test_cmd_log_follow_routes_live_home_to_follow_live(
     _make_live_home(tmp_path, slug)
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
-    monkeypatch.delenv("IMP_SESSION_SOCKET", raising=False)
     _fake_tty(monkeypatch, isatty=False)
     seen: dict[str, object] = {}
     monkeypatch.setattr(
@@ -545,7 +543,6 @@ def test_cmd_log_follow_long_form_starts_follow(
     _make_live_home(tmp_path, slug)
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
-    monkeypatch.delenv("IMP_SESSION_SOCKET", raising=False)
     _fake_tty(monkeypatch, isatty=False)
     seen: dict[str, object] = {}
     monkeypatch.setattr(

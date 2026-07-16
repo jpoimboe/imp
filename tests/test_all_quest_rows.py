@@ -35,9 +35,6 @@ def test_all_quest_rows_includes_shelved_paused_archive(
     # appears in _all_quest_rows.  _completed_rows drops it (paused in
     # _INFLIGHT), _status_rows and _backlog_rows never see archived ids without
     # live homes.
-    # Unset IMP_SESSION_SOCKET so make_store uses LocalStore on tmp_path rather
-    # than the daemon's proxy (which wouldn't see our test archive).
-    monkeypatch.delenv("IMP_SESSION_SOCKET", raising=False)
     cid = "2026-06-11-shvd01"
     events = tmp_path / f"{cid}.jsonl"
     events.write_bytes(
