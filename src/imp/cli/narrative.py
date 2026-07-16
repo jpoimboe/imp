@@ -38,6 +38,10 @@ _TURN_END_STOP_REASONS: frozenset[str] = frozenset(
 _OPENAI_TERMINAL_STATUSES: frozenset[str] = frozenset(
     {"completed", "incomplete", "failed", "cancelled"})
 
+# Human interrupt/leave reasons: like the silent yield, they append no PauseNode.
+_HUMAN_INTERRUPT_REASONS: frozenset[str] = frozenset(
+    {"ctrl-c", "ctrl-d", "sigterm", "sighup", "sigquit"})
+
 
 def _llm_response_is_turn_end(payload: dict[str, Any]) -> bool:
     # load-bearing: codex None = turn-end; claude_code None = mid-stream fragment
@@ -1371,6 +1375,10 @@ def _h_workflow_paused(self: NarrativeBuilder, event: dict[str, Any], p: dict[st
         # line is redundant. Finalize folds and mark paused above, but append no
         # PauseNode. (Shared render path — covers both imp log and the live view.)
         if reason == "awaiting_user":
+            return
+        if reason in _HUMAN_INTERRUPT_REASONS:
+            # No PauseNode; unlike awaiting_user, keep the flag so the digest flushes.
+            self._pause_outcome_shown = True
             return
         # Anchor the pause in the innermost open scope so it renders where it fired.
         self._append(PauseNode(reason=reason))

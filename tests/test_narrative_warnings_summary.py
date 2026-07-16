@@ -139,7 +139,7 @@ def test_completed_node_lands_at_root_even_with_open_phase() -> None:
     assert len(summaries) == 1
 
 
-def _paused(eid: str = "z", reason: str = "ctrl-c") -> dict:
+def _paused(eid: str = "z", reason: str = "max_loops") -> dict:
     return {"id": eid, "agent_id": None, "type": "workflow_paused",
             "payload": {"interrupt_reason": reason}}
 

@@ -1411,8 +1411,35 @@ def test_interrupt_renders_interrupted_not_complete_pause() -> None:
     assert "complete · pause" not in out
     assert "error:" not in out
     assert "runner cancelled by interrupt" not in out
-    assert "paused (ctrl-c)" in out
+    assert "paused (ctrl-c)" not in out
     assert "⏸" not in out
+
+
+def test_human_interrupt_reasons_suppress_pause_line_but_keep_digest() -> None:
+    for reason in ("ctrl-c", "ctrl-d", "sigterm", "sighup", "sigquit"):
+        tree = nv.build_tree([
+            _ev("1", "step_started", step="build", kind="agent", phase="implement",
+                model="m", provider="anthropic"),
+            _ev("2", "runner_warning", message="dropped block"),
+            _ev("3", "step_completed", step="build", kind="agent",
+                action={"verb": "pause"}, var_mutations={}),
+            _ev("4", "workflow_paused", reason="interrupt", interrupt_reason=reason),
+        ])
+        out = "\n".join(render_tree(tree, full=False, color=False, width=80))
+        assert f"paused ({reason})" not in out
+        assert "⏸" not in out
+        assert tree.root.status == "paused"
+        assert "1 warning this run" in out
+
+
+def test_non_interrupt_pause_reason_still_renders_line() -> None:
+    tree = nv.build_tree([
+        _ev("1", "step_started", step="build", kind="agent", phase="implement",
+            model="m", provider="anthropic"),
+        _ev("2", "workflow_paused", reason="max_loops"),
+    ])
+    out = "\n".join(render_tree(tree, full=False, color=False, width=80))
+    assert "paused (max_loops)" in out
 
 
 def test_intentional_pause_still_renders_complete_pause() -> None:
