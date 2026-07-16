@@ -106,6 +106,12 @@ the current plan (`plan {{ vars.plan_index }}` of `{{ vars.plan_total }}`), and 
 is preserved — you still read `progress.md`, so plan N's HOW reacts to what plans `1..N-1`
 actually landed.
 
+The `verify` gate runs the project's fast suite after **this** plan (and every
+plan) — so your tasks must leave the tree green at this plan's end; never defer
+greening to a later plan. If the outline slice you were handed can't land green,
+that's an outline defect: flag it as a `— needs-decision:` item, don't plan a
+red tree.
+
 **Express carve-out.** On the **express** path threshold routes straight here with
 `fast_path: true` and **no `spec-finalizer`**, so **no `## Plan outline` exists**. Do
 **not** hard-depend on the outline: when it is absent, **self-scope** the single plan
@@ -369,7 +375,7 @@ the configured provider may not be Anthropic.
 
 A plan MUST NOT contain a task or step whose **only** purpose is running the whole-project
 test suite, lint, or typecheck with no source change and no commit. The mechanical `verify`
-gate runs the project's `test_cmd_fast` after the implement phase and routes any failure
+gate runs the project's `test_cmd_fast` after **each plan's** implement phase and routes any failure
 back to `task-lead`, so a hand-run full gate is wasted work. The plan ends at the last real
 task's `Commit` step.
 
@@ -413,7 +419,7 @@ After writing the complete plan, check it against the spec and prior plans with 
 2. **Placeholder scan:** Search for any red flag from "No Placeholders" above and fix it.
 3. **Type consistency:** Do the types, signatures, and property names in later tasks match those defined earlier (this plan or a prior one)? A `clearLayers()` in Task 3 but `clearFullLayers()` in Task 7 is a bug.
 4. **Bite-size check:** Could any task be split at a natural commit boundary? Could any step be clarified without inflating the plan?
-5. **Lint vs. test scope:** A "skip verification / no tests needed" instruction scopes out the **slow test suite** only — never a lint-dirty or type-dirty tree. The mechanical `verify` gate (the project's `test_cmd_fast`) runs after the implement phase and routes back on any failure, so even a waived-tests task is still lint/typecheck-gated.
+5. **Lint vs. test scope:** A "skip verification / no tests needed" instruction scopes out the **slow test suite** only — never a lint-dirty or type-dirty tree. The mechanical `verify` gate (the project's `test_cmd_fast`) runs after **each plan's** implement phase and routes back on any failure, so even a waived-tests task is still lint/typecheck-gated.
 6. **Falsifiability:** Would each test fail if the implementation were wrong or absent? A test whose expected value is just the literal the implementation returns is a tautology (plan-echo) — pin an observable consequence instead.
 7. **Redundant whole-project gate:** Did you emit a standalone task or step whose only purpose is running the whole-project test suite, lint, or typecheck with no source change and no commit? If so, remove it — the `verify` gate covers it. Keep per-task focused TDD steps and any genuine committing final task.
 

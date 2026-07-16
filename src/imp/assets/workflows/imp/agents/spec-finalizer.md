@@ -104,6 +104,14 @@ independently-reviewable unit — neither a giant catch-all nor a trivial one-ta
 sliver. There is **no task-count floor** and no ceiling. A trivial / fast-path
 quest is a **single** outline plan.
 
+**Each plan must land the tree green.** The `verify` gate runs the project's
+fast suite after *every* plan, not once at the end — so no plan may defer
+greening to a later one. Slice **end-to-end** (carry one unit through emit,
+readers, and tests together), never in **horizontal layers** that leave the
+suite red between plans (e.g. rename an API in plan 1, fix its consumers in a
+later plan). If scope genuinely can't be sliced green, raise it as a `—
+needs-decision:` item rather than bake a red tree into the outline.
+
 Shape:
 
 ```
