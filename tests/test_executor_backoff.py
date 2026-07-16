@@ -42,3 +42,24 @@ def test_headless_ceiling_constant_removed_but_sleep_retained() -> None:
     import imp.engine.backoff as backoff
     assert not hasattr(backoff, "HEADLESS_RETRY_CEILING_SECONDS")
     assert hasattr(backoff, "interruptible_sleep")
+
+
+def test_interruptible_sleep_returns_within_a_tick_on_retry_now() -> None:
+    class _RetryCoord:
+        def __init__(self) -> None:
+            self.should_pause = False
+            self.retry_now_requested = False
+
+    coord = _RetryCoord()
+
+    async def main() -> None:
+        async with anyio.create_task_group() as tg:
+            async def flip() -> None:
+                await anyio.sleep(0.05)
+                coord.retry_now_requested = True
+            tg.start_soon(flip)
+            # a 10s sleep must abandon well before 10s once retry_now flips
+            with anyio.fail_after(1.0):
+                await _interruptible_sleep(10.0, coord, tick=0.02)
+
+    anyio.run(main)

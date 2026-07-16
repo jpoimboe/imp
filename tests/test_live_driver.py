@@ -3086,3 +3086,53 @@ def test_seed_pending_reply_reaches_reply_past_open_subagent_fold() -> None:
     reply_i = next(i for i, ln in enumerate(lines) if "> steer this way" in ln)
     assert sub_i < reply_i, (
         f"interrupted subagent row must precede the echoed reply; body={body!r}")
+
+
+def test_compose_activity_line_shows_retry_hint_when_total_at_least_60() -> None:
+    from imp.cli.live_driver import compose_activity_line
+    act = nv.Activity(verb="waiting for limit reset", countdown_total=2940.0,
+                      start_ts="2026-01-01T00:00:00+00:00")
+    line = compose_activity_line(activity=act, frame=0, color=False,
+                                 now_iso="2026-01-01T00:11:00+00:00")
+    # the hint is the trailing ` · `-joined segment, after the countdown
+    assert line.endswith("press r to retry now")
+    assert " · press r to retry now" in line
+    assert line.index("left") < line.index("press r to retry now")
+
+
+def test_compose_activity_line_retry_hint_survives_final_minute() -> None:
+    from imp.cli.live_driver import compose_activity_line
+    # total 120s (>= 60) but only 20s remaining -> gated on total, so hint stays
+    act = nv.Activity(verb="waiting for limit reset", countdown_total=120.0,
+                      start_ts="2026-01-01T00:00:00+00:00")
+    line = compose_activity_line(activity=act, frame=0, color=False,
+                                 now_iso="2026-01-01T00:01:40+00:00")
+    assert "20s left" in line
+    assert line.endswith("press r to retry now")
+
+
+def test_compose_activity_line_no_retry_hint_below_60() -> None:
+    from imp.cli.live_driver import compose_activity_line
+    act = nv.Activity(verb="waiting for limit reset", countdown_total=30.0,
+                      start_ts="2026-01-01T00:00:00+00:00")
+    line = compose_activity_line(activity=act, frame=0, color=False,
+                                 now_iso="2026-01-01T00:00:05+00:00")
+    assert "press r to retry now" not in line
+
+
+def test_compose_activity_line_no_retry_hint_without_countdown() -> None:
+    from imp.cli.live_driver import compose_activity_line
+    act = nv.Activity(verb="coding", detail="bash pytest",
+                      start_ts="2026-01-01T00:00:00+00:00")
+    line = compose_activity_line(activity=act, frame=0, color=False,
+                                 now_iso="2026-01-01T00:00:14+00:00")
+    assert "press r to retry now" not in line
+
+
+def test_compose_activity_line_retry_hint_at_exactly_60() -> None:
+    from imp.cli.live_driver import compose_activity_line
+    act = nv.Activity(verb="waiting for limit reset", countdown_total=60.0,
+                      start_ts="2026-01-01T00:00:00+00:00")
+    line = compose_activity_line(activity=act, frame=0, color=False,
+                                 now_iso="2026-01-01T00:00:05+00:00")
+    assert line.endswith("press r to retry now")

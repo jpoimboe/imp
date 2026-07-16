@@ -116,7 +116,7 @@ from imp.providers._cc_builtins import ALL_CLAUDE_CODE_BUILTIN_TOOLS
 from imp.providers.base import Provider
 from imp.providers.claude_code_config_dir import materialize_fresh_config_dir
 from imp.providers.claude_code_session_store import (
-    _SESSION_LIMIT_RE,
+    _USAGE_LIMIT_RE,
     reconcile_store_tail,
     resume_session_id,
     session_key,
@@ -154,28 +154,43 @@ _QUOTA_PATTERNS = (
 # wrong nudge loop.
 _API_ERROR_RE = re.compile(r"API Error:\s*(\d{3})(?!\d)")
 
-# Matches the CLI session-limit reset announcement, e.g.
-# "resets 4am (America/Los_Angeles)", "resets 4:30pm (...)", "resets 16:00 (...)".
+# Matches the CLI usage-limit reset announcement in two shapes:
+#   bare-time (session):  "resets 4am (America/Los_Angeles)", "resets 16:00 (...)"
+#   dated (weekly):       "resets Jul 16, 8pm (America/Los_Angeles)"
+# The optional leading "<Mon> <DD>," group (present only on the weekly form)
+# selects the dated branch in _reset_hint_seconds.
 _RESET_RE = re.compile(
-    r"resets\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\s*\(([^)]+)\)",
+    r"resets\s+(?:([A-Za-z]{3})\s+(\d{1,2}),\s+)?"
+    r"(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\s*\(([^)]+)\)",
     re.IGNORECASE,
 )
+_MONTH_ABBR = {
+    "jan": 1, "feb": 2, "mar": 3, "apr": 4, "may": 5, "jun": 6,
+    "jul": 7, "aug": 8, "sep": 9, "oct": 10, "nov": 11, "dec": 12,
+}
 _RESET_MARGIN_SECONDS = 120.0
 _MAX_RESET_WAIT_SECONDS = 6 * 3600.0
+_MAX_WEEKLY_WAIT_SECONDS = 8 * 24 * 3600.0
 
 
 def _reset_hint_seconds(text: str, now: float) -> float | None:
-    """Seconds to wait until the announced session-limit reset, + a 2-minute
+    """Seconds to wait until the announced usage-limit reset, + a 2-minute
     margin, or None. `now` is epoch seconds, injected for testability.
 
-    Returns None on any parse failure, an unknown/bad zone, an out-of-range
-    time, or a computed wait over 6 h (session windows are 5 h, so a larger
-    figure means a bad parse we distrust). None means exactly today's behavior.
+    Two shapes, keyed off whether the match carries a date:
+      - Bare-time (session): today-or-tomorrow, distrusted beyond 6 h
+        (session windows are 5 h, so a larger figure means a bad parse).
+      - Dated (weekly): the explicit month/day + time in the stated zone,
+        this year and rolled forward a year if already past; distrusted
+        beyond 8 days.
+    Returns None on any parse failure, an unknown month or zone, an
+    out-of-range time, a still-past target, or an over-ceiling wait.
+    None means exactly today's fall-back backoff behavior.
     """
     m = _RESET_RE.search(text)
     if m is None:
         return None
-    hour_s, minute_s, ampm, zone_name = m.groups()
+    month_s, day_s, hour_s, minute_s, ampm, zone_name = m.groups()
     try:
         tz = zoneinfo.ZoneInfo(zone_name)
     except (KeyError, ValueError):
@@ -193,17 +208,36 @@ def _reset_hint_seconds(text: str, now: float) -> float | None:
     if not (0 <= hour <= 23 and 0 <= minute <= 59):
         return None
     now_local = datetime.fromtimestamp(now, tz=tz)
-    target = now_local.replace(hour=hour, minute=minute, second=0, microsecond=0)
-    if target <= now_local:
-        target += timedelta(days=1)
+    if month_s is not None:
+        month = _MONTH_ABBR.get(month_s.lower())
+        if month is None:
+            return None
+        try:
+            target = now_local.replace(
+                month=month, day=int(day_s), hour=hour, minute=minute,
+                second=0, microsecond=0)
+            if target <= now_local:
+                target = target.replace(year=target.year + 1)
+        except ValueError:
+            # An impossible day for the month (e.g. "Feb 30") or a Feb-29
+            # roll into a non-leap year.
+            return None
+        if target <= now_local:
+            return None
+        ceiling = _MAX_WEEKLY_WAIT_SECONDS
+    else:
+        target = now_local.replace(hour=hour, minute=minute, second=0, microsecond=0)
+        if target <= now_local:
+            target += timedelta(days=1)
+        ceiling = _MAX_RESET_WAIT_SECONDS
     delta = target.timestamp() - now
-    if delta > _MAX_RESET_WAIT_SECONDS:
+    if delta > ceiling:
         return None
     return delta + _RESET_MARGIN_SECONDS
 
 
 def _rate_limit_with_reset_hint(text: str) -> perr.RateLimitError:
-    """Build the session-limit RateLimitError, attaching the parsed reset time as
+    """Build the usage-limit RateLimitError, attaching the parsed reset time as
     detail={"retry_after_seconds": <hint>} when one is available. The key is
     disjoint from every diagnostic key _termination_from_result later merges via
     labeled.detail.update(...), so a hint set here survives that merge."""
@@ -249,7 +283,7 @@ def _classify_agent_text(
     for pat in _QUOTA_PATTERNS:
         if pat in scan:
             return perr.QuotaError(f"claude CLI: {pat}")
-    if _SESSION_LIMIT_RE.search(scan):
+    if _USAGE_LIMIT_RE.search(scan):
         return _rate_limit_with_reset_hint(text)
     m = _API_ERROR_RE.search(scan)
     if m:

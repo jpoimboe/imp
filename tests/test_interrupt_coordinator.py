@@ -399,3 +399,58 @@ def test_pending_model_survives_reset_and_gesture_round() -> None:
     coord.set_pending_model("anthropic:claude-fable-5")
     coord.end_gesture_round()
     assert coord.take_pending_model() == "anthropic:claude-fable-5"
+
+
+def test_backoff_wait_arm_gates_retry_now_latch() -> None:
+    coord = InterruptCoordinator()
+    # Not armed: a retry-now request is ignored, never stored.
+    assert coord.backoff_wait_active is False
+    coord.request_retry_now()
+    assert coord.retry_now_requested is False
+    # Armed: the request latches.
+    coord.begin_backoff_wait()
+    assert coord.backoff_wait_active is True
+    coord.request_retry_now()
+    assert coord.retry_now_requested is True
+    # take_retry_now consumes it (one-shot).
+    assert coord.take_retry_now() is True
+    assert coord.retry_now_requested is False
+    assert coord.take_retry_now() is False
+    coord.end_backoff_wait()
+    assert coord.backoff_wait_active is False
+    coord.request_retry_now()
+    assert coord.retry_now_requested is False
+
+
+def test_backoff_wait_depth_counter_holds_across_concurrent_waits() -> None:
+    coord = InterruptCoordinator()
+    coord.begin_backoff_wait()
+    coord.begin_backoff_wait()   # a second concurrent backoff sleep
+    coord.end_backoff_wait()
+    # One wait still active -> a request must still latch (NOT a bare bool).
+    assert coord.backoff_wait_active is True
+    coord.request_retry_now()
+    assert coord.retry_now_requested is True
+    coord.end_backoff_wait()
+    assert coord.backoff_wait_active is False
+
+
+def test_end_backoff_wait_does_not_consume_latch() -> None:
+    # Clear-on-consume is the caller's job (take_retry_now), NOT disarm: a latch
+    # set during the wait must survive end_backoff_wait so the loop can consume it.
+    coord = InterruptCoordinator()
+    coord.begin_backoff_wait()
+    coord.request_retry_now()
+    coord.end_backoff_wait()
+    assert coord.retry_now_requested is True
+
+
+def test_reset_clears_backoff_wait_and_retry_now() -> None:
+    # reset() runs between session-loop rounds; the new gesture fields must clear
+    # too, for symmetry with should_pause/pause_reason.
+    coord = InterruptCoordinator()
+    coord.begin_backoff_wait()
+    coord.request_retry_now()
+    coord.reset()
+    assert coord.backoff_wait_active is False
+    assert coord.retry_now_requested is False

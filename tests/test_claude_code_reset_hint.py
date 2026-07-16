@@ -138,3 +138,89 @@ def test_hint_survives_termination_merge(monkeypatch) -> None:
     assert term.detail["retry_after_seconds"] == 9000.0
     # ...and the disjoint diagnostic keys are merged in alongside it.
     assert term.detail["is_error"] is True
+
+
+def test_weekly_dated_same_day_plus_margin() -> None:
+    # now Jul 16 09:00, resets Jul 16 8pm -> 11h + 120s
+    now = _epoch(2026, 7, 16, 9, 0)
+    assert _reset_hint_seconds(
+        "You've hit your weekly limit · resets Jul 16, 8pm (America/Los_Angeles)",
+        now,
+    ) == 39720.0
+
+
+def test_weekly_dated_rolls_over_to_next_year() -> None:
+    # now Dec 31 23:00, resets Jan 2 8pm -> current-year Jan 2 is past ->
+    # next year Jan 2 8pm -> 45h + 120s
+    now = _epoch(2026, 12, 31, 23, 0)
+    assert _reset_hint_seconds(
+        "resets Jan 2, 8pm (America/Los_Angeles)", now) == 162120.0
+
+
+def test_weekly_dated_past_target_returns_none() -> None:
+    # now Jul 16 21:00, resets Jul 16 8pm already passed -> next-year target
+    # is ~365 days out, beyond the 8-day ceiling -> None
+    now = _epoch(2026, 7, 16, 21, 0)
+    assert _reset_hint_seconds(
+        "resets Jul 16, 8pm (America/Los_Angeles)", now) is None
+
+
+def test_weekly_dated_beyond_eight_days_returns_none() -> None:
+    # now Jul 16 09:00, resets Jul 27 8pm -> ~11 days out > 8-day ceiling -> None
+    now = _epoch(2026, 7, 16, 9, 0)
+    assert _reset_hint_seconds(
+        "resets Jul 27, 8pm (America/Los_Angeles)", now) is None
+
+
+def test_weekly_dated_unknown_month_returns_none() -> None:
+    now = _epoch(2026, 7, 16, 9, 0)
+    assert _reset_hint_seconds(
+        "resets Xxx 16, 8pm (America/Los_Angeles)", now) is None
+
+
+def test_weekly_dated_with_minutes_and_24h() -> None:
+    # now Jul 16 09:00, resets Jul 16 20:30 -> 11h30m + 120s
+    now = _epoch(2026, 7, 16, 9, 0)
+    assert _reset_hint_seconds(
+        "resets Jul 16, 20:30 (America/Los_Angeles)", now) == 41520.0
+
+
+def test_weekly_dated_invalid_day_for_month_returns_none() -> None:
+    now = _epoch(2026, 2, 10, 9, 0)
+    assert _reset_hint_seconds(
+        "resets Feb 30, 8pm (America/Los_Angeles)", now) is None
+
+
+def test_weekly_dated_month_is_case_insensitive() -> None:
+    # now Jul 16 09:00, resets JUL 16 8pm -> 11h + 120s (same as lowercase)
+    now = _epoch(2026, 7, 16, 9, 0)
+    assert _reset_hint_seconds(
+        "resets JUL 16, 8pm (America/Los_Angeles)", now) == 39720.0
+
+
+def test_weekly_dated_at_eight_day_ceiling_is_trusted() -> None:
+    # now Jul 16 20:00, resets Jul 24 20:00 -> exactly 8 days out -> trusted,
+    # 8*24*3600 + 120s margin.
+    now = _epoch(2026, 7, 16, 20, 0)
+    assert _reset_hint_seconds(
+        "resets Jul 24, 20:00 (America/Los_Angeles)", now) == 691320.0
+
+
+def test_weekly_text_only_classifies_as_rate_limit(monkeypatch) -> None:
+    # status absent -> the widened wording alternative alone must classify.
+    monkeypatch.setattr(cc, "_reset_hint_seconds", lambda text, now: 7200.0)
+    exc = cc._classify_agent_text(
+        "You've hit your weekly limit · resets Jul 16, 8pm (America/Los_Angeles)")
+    assert isinstance(exc, perr.RateLimitError)
+    assert exc.detail["retry_after_seconds"] == 7200.0
+
+
+def test_weekly_429_classifies_as_rate_limit_not_terminated() -> None:
+    sdk = result(is_error=True, api_error_status=429)
+    term = cc._termination_from_result(
+        sdk,
+        "You've hit your weekly limit · resets Jul 16, 8pm (America/Los_Angeles)",
+        {},
+    )
+    assert isinstance(term, perr.RateLimitError)
+    assert not isinstance(term, perr.TerminatedError)

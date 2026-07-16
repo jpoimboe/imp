@@ -539,6 +539,22 @@ def test_reconcile_store_tail_truncates_surplus_turns() -> None:
     )
 
 
+def test_strip_trailing_error_turn_drops_weekly_limit_turn() -> None:
+    from imp.providers.claude_code_session_store import strip_trailing_error_turn
+
+    entries = [
+        {"type": "assistant", "uuid": "a",
+         "message": {"role": "assistant", "content": [
+             {"type": "text", "text": "all good"}]}},
+        {"type": "assistant", "uuid": "b",
+         "message": {"role": "assistant", "content": [
+             {"type": "text",
+              "text": "You've hit your weekly limit · resets Jul 16, 8pm "
+                      "(America/Los_Angeles)"}]}},
+    ]
+    assert strip_trailing_error_turn(entries) == entries[:1]
+
+
 def test_reconcile_store_tail_empty_messages_returns_empty() -> None:
     from imp.providers.claude_code_session_store import (
         message_to_session_records,

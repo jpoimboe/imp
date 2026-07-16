@@ -459,12 +459,22 @@ async def dispatch_task(
                     ctx.event_log.append(
                         agent_id=sub_inv.agent_id, type="agent_retry",
                         payload=retry_payload)
-                await _interruptible_sleep(result.delay, ctx.coordinator)
+                coord = ctx.coordinator
+                if coord is not None:
+                    coord.begin_backoff_wait()
+                try:
+                    await _interruptible_sleep(result.delay, coord)
+                finally:
+                    if coord is not None:
+                        coord.end_backoff_wait()
+                # Consume the retry-now latch so it doesn't leak into the next backoff sleep.
+                if coord is not None:
+                    coord.take_retry_now()
                 if hinted:
                     hint_exempt_sleeps += 1
                 else:
                     cumulative_backoff += result.delay
-                if ctx.coordinator is not None and ctx.coordinator.should_pause:
+                if coord is not None and coord.should_pause:
                     raise SubagentSuspended("paused during subagent backoff")
 
             if result.paused:

@@ -181,13 +181,16 @@ def _session_block_to_dict(block: Any) -> dict[str, Any]:
     raise TypeError(f"unexpected content block: {type(block).__name__}")
 
 
-_SESSION_LIMIT_RE = re.compile(
-    r"hit (?:your|a|the) session limit|resets\s+\d{1,2}:\d{2}[^\s]*\s*\(America/",
+# Usage-limit wording backstop: matches both "session limit" and "weekly limit"
+# phrasings, plus the bare-time reset announcement. Spans both usage-limit kinds.
+_USAGE_LIMIT_RE = re.compile(
+    r"hit (?:your|a|the) (?:session|weekly) limit"
+    r"|resets\s+\d{1,2}:\d{2}[^\s]*\s*\(America/",
     re.IGNORECASE)
 
 
 def session_record_is_error_turn(entry: Any) -> bool:
-    """True for a synthetic API-error / session-limit turn (isApiErrorMessage flag or text)."""
+    """True for a synthetic API-error / usage-limit turn (isApiErrorMessage flag or text)."""
     if not isinstance(entry, dict):
         return False
     if entry.get("isApiErrorMessage") is True:
@@ -206,7 +209,7 @@ def session_record_is_error_turn(entry: Any) -> bool:
             if isinstance(b, dict) and b.get("type") == "text")
     else:
         text = ""
-    return bool(_SESSION_LIMIT_RE.search(text))
+    return bool(_USAGE_LIMIT_RE.search(text))
 
 
 def strip_trailing_error_turn(

@@ -525,3 +525,38 @@ def test_prompt_sigint_does_not_pollute_next_round_suppression(monkeypatch) -> N
     t["now"] = 110.2                          # rapid second, <1s from the first
     coord._dispatch_signal(_sig.SIGINT)
     assert _FORCE_FORWARD not in sent         # suppressed within the fresh window
+
+
+@pytest.mark.skipif(not _can_pty(), reason="pty not available")
+@pytest.mark.anyio
+async def test_r_byte_requests_retry_now_and_keeps_reading(monkeypatch) -> None:
+    import pty
+
+    import anyio
+
+    from imp.cli.signals import CtrlDReader
+    master, slave = pty.openpty()
+    try:
+        _patch_dev_tty(monkeypatch, slave)
+        coord = InterruptCoordinator()
+        coord.escalation_event = anyio.Event()
+        coord.begin_backoff_wait()          # a backoff wait is counting down
+        reader = CtrlDReader(coord)
+        async with anyio.create_task_group() as tg:
+            await tg.start(reader.run)
+            os.write(master, b"r")
+            with anyio.fail_after(5):
+                while not coord.retry_now_requested:
+                    await anyio.sleep(0.02)
+            # The reader did NOT exit on `r`: a following \x04 still routes to leave.
+            os.write(master, b"\x04")
+            with anyio.fail_after(5):
+                while not coord.should_pause:
+                    await anyio.sleep(0.02)
+            tg.cancel_scope.cancel()
+        assert coord.retry_now_requested is True   # `r` latched the request
+        assert coord.pause_reason == "ctrl-d"       # reader kept watching, then left
+    finally:
+        os.close(master)
+        with contextlib.suppress(OSError):
+            os.close(slave)
