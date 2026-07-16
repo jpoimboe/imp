@@ -1816,6 +1816,10 @@ async def _pick_full_pool_target(control: Path, *, header: str) -> str | int:
     """No-token picker over the full pool, shared by the log and events pickers."""
     rows = _all_quest_rows(control)
     default_id = _resolve_default_id(control)
+
+    def _non_tty(_rows: list[_Row]) -> str | int:
+        return default_id if default_id is not None else 2
+
     selected_index = next(
         (i for i, r in enumerate(rows) if r[0] == default_id), 0)
 
@@ -1824,6 +1828,7 @@ async def _pick_full_pool_target(control: Path, *, header: str) -> str | int:
         rows=rows,
         header=header,
         on_empty=_log_picker_empty,
+        on_non_tty=_non_tty,
         selected_index=selected_index,
     )
 
@@ -2586,14 +2591,13 @@ def _resume_picker_non_tty(rows: list[_Row]) -> str | int:
 async def _pick_quest_target(
     *, control: Path, rows: list[_Row], header: str,
     on_empty: Callable[[], int],
-    on_non_tty: Callable[[list[_Row]], str | int] | None = None,
+    on_non_tty: Callable[[list[_Row]], str | int],
     selected_index: int = 0,
     non_interactive: bool = False,
 ) -> str | int:
     if not rows:
         return on_empty()
     if non_interactive or not _interactive():
-        assert on_non_tty is not None
         return on_non_tty(rows)
     if len(rows) == 1:
         return rows[0][0]
@@ -2835,8 +2839,8 @@ _EVENTS_PICKER_HEADER = (
 
 
 async def _pick_events_target(control: Path) -> str | int:
-    """No-token events picker over the shared full pool. No on_non_tty: `_cmd_events`
-    routes the non-tty no-token case to `_resolve_default_id` before calling this."""
+    """No-token events picker over the shared full pool. `_cmd_events` routes the
+    non-tty no-token case to `_resolve_default_id` directly, so this runs only on a tty."""
     return await _pick_full_pool_target(control, header=_EVENTS_PICKER_HEADER)
 
 

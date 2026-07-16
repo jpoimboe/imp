@@ -135,14 +135,13 @@ def test_cmd_events_tty_no_token_routes_to_target_picker(
         return "2026-06-11-picked"
 
     monkeypatch.setattr(m, "_pick_events_target", fake_pick)
-    monkeypatch.setattr(m, "_unstarted_backlog_meta", lambda c, i: None)
     seen: dict[str, str] = {}
 
-    def fake_load(control, quest_id):
+    def capture_meta(control, quest_id):
         seen["id"] = quest_id
-        return None  # → "no such quest" rc 2, but proves the routing
+        return None
 
-    monkeypatch.setattr(m, "_load_events_for_id", fake_load)
+    monkeypatch.setattr(m, "_unstarted_backlog_meta", capture_meta)
     rc = m._cmd_events(_events_ns(token=None))
     assert seen["id"] == "2026-06-11-picked"
     assert rc == 2
@@ -178,14 +177,13 @@ def test_cmd_events_non_tty_no_token_uses_resolve_default(
 
     monkeypatch.setattr(m, "_pick_events_target", boom)
     monkeypatch.setattr(m, "_resolve_default_id", lambda c: "2026-06-09-default")
-    monkeypatch.setattr(m, "_unstarted_backlog_meta", lambda c, i: None)
     seen: dict[str, str] = {}
 
-    def fake_load(control, quest_id):
+    def capture_meta(control, quest_id):
         seen["id"] = quest_id
         return None
 
-    monkeypatch.setattr(m, "_load_events_for_id", fake_load)
+    monkeypatch.setattr(m, "_unstarted_backlog_meta", capture_meta)
     rc = m._cmd_events(_events_ns(token=None))
     assert seen["id"] == "2026-06-09-default"
     assert rc == 2
@@ -228,14 +226,13 @@ def test_cmd_events_ambiguous_token_tty_routes_to_scoped_picker(
         return "2026-06-10-foo"
 
     monkeypatch.setattr(m, "_pick_events_matches", fake_matches)
-    monkeypatch.setattr(m, "_unstarted_backlog_meta", lambda c, i: None)
     seen: dict[str, str] = {}
 
-    def fake_load(control, quest_id):
+    def capture_meta(control, quest_id):
         seen["id"] = quest_id
         return None
 
-    monkeypatch.setattr(m, "_load_events_for_id", fake_load)
+    monkeypatch.setattr(m, "_unstarted_backlog_meta", capture_meta)
     rc = m._cmd_events(_events_ns(token="foo"))
     # picker receives exactly the substring matches (the "bar" id is excluded) —
     # the invariant that picker and _resolve_id agree on the candidate set.
@@ -277,14 +274,13 @@ def test_cmd_events_single_match_token_resolves_without_picker(
         raise AssertionError("picker invoked for a single-match token")
 
     monkeypatch.setattr(m, "_pick_events_matches", boom)
-    monkeypatch.setattr(m, "_unstarted_backlog_meta", lambda c, i: None)
     seen: dict[str, str] = {}
 
-    def fake_load(control, quest_id):
+    def capture_meta(control, quest_id):
         seen["id"] = quest_id
         return None
 
-    monkeypatch.setattr(m, "_load_events_for_id", fake_load)
+    monkeypatch.setattr(m, "_unstarted_backlog_meta", capture_meta)
     rc = m._cmd_events(_events_ns(token="uniq"))
     assert seen["id"] == "2026-06-10-uniq"
     assert rc == 2
