@@ -74,17 +74,21 @@ def _collect_strings(value: Any, out: list[str]) -> None:
             _collect_strings(v, out)
 
 
-def events_content(events: list[Any]) -> str:
-    """Full per-event text: every payload string minus static step_context boilerplate."""
+def event_text(event: Any) -> str:
+    """Per-event payload strings, minus static step_context boilerplate."""
+    if not isinstance(event, dict):
+        return ""
+    payload = event.get("payload")
+    if not isinstance(payload, dict):
+        return ""
+    if event.get("type") == "step_context":
+        payload = {k: v for k, v in payload.items()
+                   if k not in ("system_prompt", "tools_schema")}
     parts: list[str] = []
-    for ev in events:
-        if not isinstance(ev, dict):
-            continue
-        payload = ev.get("payload")
-        if not isinstance(payload, dict):
-            continue
-        if ev.get("type") == "step_context":
-            payload = {k: v for k, v in payload.items()
-                       if k not in ("system_prompt", "tools_schema")}
-        _collect_strings(payload, parts)
+    _collect_strings(payload, parts)
     return "\n".join(parts)
+
+
+def events_content(events: list[Any]) -> str:
+    """Full-quest text projection: every event's `event_text`, newline-joined."""
+    return "\n".join(t for ev in events if (t := event_text(ev)))

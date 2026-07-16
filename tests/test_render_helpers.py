@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from imp.cli.render_helpers import (
     conversation_prose,
+    event_text,
     events_content,
     render_llm_response,
     user_message_text,
@@ -232,3 +233,41 @@ def test_events_content_skips_non_dict_and_missing_payload() -> None:
     text = events_content(events)
     assert "KEPT" in text
     assert "NOT_A_DICT" not in text
+
+
+def test_event_text_collects_payload_strings() -> None:
+    ev = {"type": "tool_call",
+          "payload": {"name": "load_skill", "input": {"name": "imp-tool-reference"}}}
+    text = event_text(ev)
+    assert "load_skill" in text
+    assert "imp-tool-reference" in text
+
+
+def test_event_text_excludes_step_context_boilerplate() -> None:
+    ev = {"type": "step_context",
+          "payload": {"provider": "anthropic", "model": "claude-x",
+                      "system_prompt": "BOILERPLATE_PROMPT",
+                      "tools_schema": [{"name": "SCHEMANOISE"}]}}
+    text = event_text(ev)
+    assert "anthropic" in text
+    assert "claude-x" in text
+    assert "BOILERPLATE_PROMPT" not in text
+    assert "SCHEMANOISE" not in text
+
+
+def test_event_text_empty_for_non_dict_or_missing_payload() -> None:
+    assert event_text("NOT_A_DICT") == ""
+    assert event_text({"type": "x"}) == ""
+    assert event_text({"type": "y", "payload": "notadict"}) == ""
+
+
+def test_events_content_still_matches_after_refactor() -> None:
+    events = [
+        {"type": "tool_result", "payload": {"id": "t1", "content": "STACKTRACE_XYZ"}},
+        {"type": "step_context",
+         "payload": {"system_prompt": "PROMPTNOISE", "model": "m"}},
+    ]
+    text = events_content(events)
+    assert "STACKTRACE_XYZ" in text
+    assert "m" in text
+    assert "PROMPTNOISE" not in text
