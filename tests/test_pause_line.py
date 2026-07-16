@@ -407,6 +407,24 @@ def test_daemon_stderr_has_crash_false_when_file_absent(tmp_path: Path) -> None:
     assert _daemon_stderr_has_crash(tmp_path / "daemon.stderr") is False
 
 
+def test_error_labels_cover_every_policy_category() -> None:
+    from imp.cli.main import _ERROR_LABELS
+    from imp.engine.error_policy import _POLICY
+
+    missing = set(_POLICY) - set(_ERROR_LABELS)
+    assert missing == set(), f"unmapped categories: {missing}"
+
+
+def test_error_labels_map_tokens_to_user_facing_prefixes() -> None:
+    from imp.cli.main import _ERROR_LABELS
+
+    # A category renders its human prefix, never the raw internal token.
+    assert _ERROR_LABELS["internal_error"] == "internal error"
+    assert _ERROR_LABELS["api"] == "API error"
+    assert _ERROR_LABELS["terminated"] == "agent error"
+    assert _ERROR_LABELS["crash"] == "crash"
+
+
 def test_pause_reason_awaiting_user_has_no_reason() -> None:
     from imp.cli.main import _pause_reason
 

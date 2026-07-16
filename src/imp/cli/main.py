@@ -282,6 +282,28 @@ class _PauseBanner(enum.Enum):
     STALE = enum.auto()
 
 
+# Single source: error pause-reason base token -> user-facing label; covers all _POLICY.
+_ERROR_LABELS: dict[str, str] = {
+    "terminated": "agent error",
+    "internal_error": "internal error",
+    "api": "API error",
+    "quota": "quota exceeded",
+    "context_window": "context limit",
+    "config": "config error",
+    "content_filter": "content filtered",
+    "loop": "loop detected",
+    "unknown": "unknown error",
+    "retry_ceiling": "retries exhausted",
+    "reauth_needed": "auth failed",
+    "auth": "auth failed",
+    "rate_limit": "rate limited",
+    "network": "network error",
+    "stalled": "stalled",
+    "agent_output_missing": "no output",
+    "crash": "crash",
+}
+
+
 def _pause_reason(events: list[dict[str, Any]]) -> str | _PauseBanner | None:
     """The terminal pause's reason line for the headline.
 
