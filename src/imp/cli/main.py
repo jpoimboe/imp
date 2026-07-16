@@ -3438,6 +3438,93 @@ def _cmd_search(args: argparse.Namespace, _control: Path | None = None) -> int:
     return 0
 
 
+def _events_search_list_line(
+    hit: EventSearchHit, *, query: str, color: bool,
+) -> str:
+    id_seg = _spine_segment(hit.quest_id, query, *pal.NODE_COLORS["quest_id"],
+                            color=color)
+    tail = pal.ansi(hit.zone, "dim", enabled=color)
+    title = hit.title.strip()
+    if not title:
+        return f"{id_seg} · {tail}"
+    title_seg = _spine_segment(title, query, color=color)
+    return f"{id_seg} · {title_seg} · {tail}"
+
+
+def _render_events_search_hit(
+    hit: EventSearchHit, query: str, *, now: datetime, color: bool,
+    width: int, limit: int = 3,
+) -> list[str]:
+    from imp.engine import events_index as ei
+    spine = _search_list_line(
+        SearchHit(hit.quest_id, hit.title, hit.zone, "", hit.last_activity),
+        query=query, now=now, color=color)
+    lines = [spine]
+    for ordinal, event in hit.events[:limit]:
+        digest = ei.digest_line(ordinal, event, hit.handle_map, width=width)
+        lines.append("  " + _highlight(digest, query, color=color))
+    extra = len(hit.events) - limit
+    if extra > 0:
+        lines.append(pal.ansi(f"  … +{extra} more", "dim", enabled=color))
+    return lines
+
+
+def _events_search_json(hits: list[EventSearchHit]) -> list[dict[str, Any]]:
+    from imp.engine import events_index as ei
+    return [
+        {"quest_id": h.quest_id, "title": h.title, "zone": h.zone,
+         "last_activity": h.last_activity, "events": ei.events_json(h.events)}
+        for h in hits
+    ]
+
+
+def _cmd_events_search(
+    args: argparse.Namespace, _control: Path | None = None,
+) -> int:
+    control = _control if _control is not None else _control_root()
+    types = set(args.type) if args.type else None
+    agents = set(args.agent) if args.agent else None
+    zones = _selected_events_search(args)
+    hits = _events_search(control, args.query, zones, types=types, agents=agents)
+    if not hits:
+        _emit_human([f'0 matches for "{args.query}"'])
+        return 0
+    color = should_use_color(sys.stdout)
+    zone_order = {z: i for i, z in enumerate(_SEARCH_ZONES)}
+    hits.sort(key=lambda h: h.last_activity or "", reverse=True)
+    hits.sort(key=lambda h: zone_order[h.zone])
+    if args.json:
+        _page_or_print(
+            json.dumps(_events_search_json(hits), indent=2).splitlines(),
+            no_pager=args.no_pager)
+        return 0
+    if args.list:
+        lines = [_events_search_list_line(h, query=args.query, color=color)
+                 for h in hits]
+        _page_or_print(lines, no_pager=args.no_pager, trailing_blank=True)
+        return 0
+    now = datetime.now(UTC)
+    total = sum(h.match_count for h in hits)
+    quests = len(hits)
+    noun_m = "match" if total == 1 else "matches"
+    noun_q = "quest" if quests == 1 else "quests"
+    header = pal.ansi(f'{total} {noun_m} in {quests} {noun_q} for "{args.query}"',
+                      "dim", enabled=color)
+    cap = args.limit if args.limit is not None else 3
+    width = _term_width()
+    lines = [header]
+    for h in hits[:cap]:
+        lines.append("")
+        lines.extend(_render_events_search_hit(
+            h, args.query, now=now, color=color, width=width))
+    extra = len(hits) - cap
+    if extra > 0:
+        lines.append("")
+        lines.append(pal.ansi(f"… +{extra} more quests", "dim", enabled=color))
+    _page_or_print(lines, no_pager=args.no_pager, trailing_blank=True)
+    return 0
+
+
 def _cmd_config(args: argparse.Namespace) -> int:
     from imp.cli.config_cmd import render_config, render_explain
     from imp.providers.effective import load_effective_config
