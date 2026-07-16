@@ -1213,6 +1213,7 @@ async def _route_merge_and_exit_worktree(
     if isinstance(match.action, Goto):                # a recovery route
         attempt = state.loop_counts.get(step.name, 0)
         if attempt >= step.max_loops:                 # exhausted — pause one attempt early
+            state.loop_counts.pop(step.name, None)    # reset-on-pause: resume re-enters fresh
             note = (f"imp attempted {step.max_loops} recovery passes and the "
                     "merge still failed.")
             return _merge_blocked_pause(
