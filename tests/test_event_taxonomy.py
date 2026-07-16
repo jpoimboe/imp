@@ -37,6 +37,39 @@ def test_no_agent_output_control_yields_remain() -> None:
     assert 'event["type"] == "agent_output"' not in inspect.getsource(agent_run)
 
 
+def test_engine_message_and_optional_subtype_and_optional_system_prompt() -> None:
+    from imp.agents.runner import Message, TextBlock
+    from imp.engine.state import InMemoryEventLog
+
+    log = InMemoryEventLog()
+    em = log.append_engine_message(
+        agent_id="step:x/plan",
+        message=Message(role="system", content=(TextBlock(text="be terse"),)),
+        subtype="system_prompt")
+    assert em["type"] == "engine_message"
+    assert em["payload"] == {
+        "role": "system",
+        "content": [{"type": "text", "text": "be terse"}],
+        "subtype": "system_prompt"}
+
+    um = log.append_user_message(
+        agent_id="step:x/plan",
+        message=Message(role="user", content=(TextBlock(text="hi"),)),
+        subtype="reply")
+    assert um["payload"]["subtype"] == "reply"
+
+    um2 = log.append_user_message(
+        agent_id="step:x/plan",
+        message=Message(role="user", content=(TextBlock(text="hi"),)))
+    assert "subtype" not in um2["payload"]
+
+    # system_prompt is now optional on step_context and omitted from the payload
+    sc = log.append_step_context(
+        agent_id="step:x/plan", provider="p", model="m",
+        tools_schema=[], params={}, max_tool_calls=1)
+    assert "system_prompt" not in sc["payload"]
+
+
 def test_append_agent_message_emits_agent_message_and_patch_merges() -> None:
     from imp.engine.state import InMemoryEventLog
 

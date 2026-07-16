@@ -307,7 +307,7 @@ class State:
 # ── EventLog: audit trail with envelope + typed appends + chain map ──────────
 
 _REQUIRED_KEYS: dict[str, tuple[str, ...]] = {
-    "step_context": ("provider", "model", "system_prompt",
+    "step_context": ("provider", "model",
                      "tools_schema", "params", "max_tool_calls"),
     "user_message": ("role", "content"),
     "agent_message": ("provider", "model", "raw", "usage", "stop_reason"),
@@ -357,11 +357,15 @@ class EventLog(Protocol):
 
     def append_step_context(self, *, agent_id: str | None,
                             parent_id_override: str | None = None,
-                            provider: str, model: str, system_prompt: Any,
+                            provider: str, model: str,
                             tools_schema: Any, params: dict[str, Any],
-                            max_tool_calls: int | None) -> dict[str, Any]: ...
+                            max_tool_calls: int | None,
+                            system_prompt: Any = None) -> dict[str, Any]: ...
     def append_user_message(self, *, agent_id: str | None,
-                            message: Message, human: bool) -> dict[str, Any]: ...
+                            message: Message, human: bool = True,
+                            subtype: str | None = None) -> dict[str, Any]: ...
+    def append_engine_message(self, *, agent_id: str | None,
+                              message: Any, subtype: str) -> dict[str, Any]: ...
     def append_agent_message(self, *, agent_id: str | None, provider: str,
                              model: str, raw: Any, usage: dict[str, Any],
                              stop_reason: Any,
@@ -481,23 +485,38 @@ class _BaseEventLog:
 
     def append_step_context(self, *, agent_id: str | None,
                             parent_id_override: str | None = None,
-                            provider: str, model: str, system_prompt: Any,
+                            provider: str, model: str,
                             tools_schema: Any, params: dict[str, Any],
-                            max_tool_calls: int | None) -> dict[str, Any]:
+                            max_tool_calls: int | None,
+                            system_prompt: Any = None) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "provider": provider, "model": model, "tools_schema": tools_schema,
+            "params": params, "max_tool_calls": max_tool_calls}
+        if system_prompt is not None:
+            payload["system_prompt"] = system_prompt
         return self._emit(
             agent_id=agent_id, type="step_context",
-            parent_id_override=parent_id_override,
-            payload={"provider": provider, "model": model,
-                     "system_prompt": system_prompt, "tools_schema": tools_schema,
-                     "params": params, "max_tool_calls": max_tool_calls})
+            parent_id_override=parent_id_override, payload=payload)
 
     def append_user_message(self, *, agent_id: str | None,
-                            message: Any, human: bool) -> dict[str, Any]:
+                            message: Any, human: bool = True,
+                            subtype: str | None = None) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "role": message.role,
+            "content": [_block_to_dict(b) for b in message.content],
+            "human": human}
+        if subtype is not None:
+            payload["subtype"] = subtype
         return self._emit(
-            agent_id=agent_id, type="user_message",
+            agent_id=agent_id, type="user_message", payload=payload)
+
+    def append_engine_message(self, *, agent_id: str | None,
+                              message: Any, subtype: str) -> dict[str, Any]:
+        return self._emit(
+            agent_id=agent_id, type="engine_message",
             payload={"role": message.role,
                      "content": [_block_to_dict(b) for b in message.content],
-                     "human": human})
+                     "subtype": subtype})
 
     def append_agent_message(self, *, agent_id: str | None, provider: str,
                              model: str, raw: Any, usage: dict[str, Any],
