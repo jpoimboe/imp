@@ -1814,9 +1814,12 @@ _LOG_PICKER_HEADER = (
 
 async def _pick_full_pool_target(control: Path, *, header: str) -> str | int:
     """No-token picker over the full pool, shared by the log and events pickers."""
-    rows = _sort_rows_newest_first(
-        _status_rows(control) + _backlog_rows(control) + _completed_rows(control))
+    rows = _all_quest_rows(control)
     default_id = _resolve_default_id(control)
+
+    def _non_tty(_rows: list[_Row]) -> str | int:
+        return default_id if default_id is not None else 2
+
     selected_index = next(
         (i for i, r in enumerate(rows) if r[0] == default_id), 0)
 
@@ -1825,6 +1828,7 @@ async def _pick_full_pool_target(control: Path, *, header: str) -> str | int:
         rows=rows,
         header=header,
         on_empty=_log_picker_empty,
+        on_non_tty=_non_tty,
         selected_index=selected_index,
     )
 
@@ -2579,27 +2583,27 @@ def _resume_picker_non_tty(rows: list[_Row]) -> str | int:
     for r in rows:
         print(quest_row.format_quest_line(
             quest_id=r[0], title=r[4], status=r[1], step=r[2], step_label=r[6],
-            last_iso=r[3], now=now, color=color, name_width=name_w), file=sys.stderr)
+            phase_label=r[7], last_iso=r[3], now=now, color=color,
+            name_width=name_w), file=sys.stderr)
     return 2
 
 
 async def _pick_quest_target(
     *, control: Path, rows: list[_Row], header: str,
     on_empty: Callable[[], int],
-    on_non_tty: Callable[[list[_Row]], str | int] | None = None,
+    on_non_tty: Callable[[list[_Row]], str | int],
     selected_index: int = 0,
     non_interactive: bool = False,
 ) -> str | int:
     if not rows:
         return on_empty()
     if non_interactive or not _interactive():
-        assert on_non_tty is not None
         return on_non_tty(rows)
     if len(rows) == 1:
         return rows[0][0]
     candidates = [resume_select.Candidate(
         quest_id=r[0], title=r[4], status=r[1], step=r[2], last_iso=r[3],
-        step_label=r[6],
+        step_label=r[6], phase_label=r[7],
         intent=_resolve_row_intent(control, r))
         for r in rows]
     chosen = await resume_select.run_picker(
@@ -2778,8 +2782,8 @@ def _show_picker_non_tty(rows: list[_Row]) -> int:
     return 2
 
 
-def _show_all_rows(control: Path) -> list[_Row]:
-    """Display rows for the no-token show picker: every _iter_quest_ids id
+def _all_quest_rows(control: Path) -> list[_Row]:
+    """Display rows for the full-pool pickers: every _iter_quest_ids id
     (live homes + backlog + archived), via _row_for_id, unreadable ids
     dropped, newest-first — the same pool `imp show <exact-id>` reaches."""
     rows = [r for r in (_row_for_id(control, cid)
@@ -2790,7 +2794,7 @@ def _show_all_rows(control: Path) -> list[_Row]:
 async def _pick_show_target(control: Path) -> str | int:
     return await _pick_quest_target(
         control=control,
-        rows=_show_all_rows(control),
+        rows=_all_quest_rows(control),
         header=_SHOW_PICKER_HEADER,
         on_empty=_show_picker_empty,
         on_non_tty=_show_picker_non_tty,
@@ -2806,7 +2810,7 @@ def _ambiguous_matches_non_tty(rows: list[_Row]) -> int:
     for r in rows:
         print(quest_row.format_quest_line(
             quest_id=r[0], title=r[4], status=r[1], step=r[2],
-            step_label=r[6], last_iso=r[3], now=now, color=color,
+            step_label=r[6], phase_label=r[7], last_iso=r[3], now=now, color=color,
             name_width=name_w), file=sys.stderr)
     return 2
 
@@ -2835,8 +2839,8 @@ _EVENTS_PICKER_HEADER = (
 
 
 async def _pick_events_target(control: Path) -> str | int:
-    """No-token events picker over the shared full pool. No on_non_tty: `_cmd_events`
-    routes the non-tty no-token case to `_resolve_default_id` before calling this."""
+    """No-token events picker over the shared full pool. `_cmd_events` routes the
+    non-tty no-token case to `_resolve_default_id` directly, so this runs only on a tty."""
     return await _pick_full_pool_target(control, header=_EVENTS_PICKER_HEADER)
 
 

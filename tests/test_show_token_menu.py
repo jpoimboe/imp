@@ -15,12 +15,12 @@ def anyio_backend() -> str:
 
 # _Row = (id, status, step, last_iso, title, created_at, step_label[, _])
 def _row(cid: str, last: str = "2026-06-11T00:00:00+00:00",
-         ) -> tuple[str, str, str, str, str, str, str | None]:
+         ) -> tuple[str, str, str, str, str, str, str | None, str | None]:
     return (cid, "paused", "plan", last, "Title " + cid,
-            "2026-06-01T00:00:00+00:00", None)
+            "2026-06-01T00:00:00+00:00", None, None)
 
 
-def test_show_all_rows_spans_pool_and_skips_unreadable(
+def test_all_quest_rows_spans_pool_and_skips_unreadable(
     monkeypatch, tmp_path: Path,
 ) -> None:
     # AC 3: the no-token pool is the full _iter_quest_ids set (live + backlog +
@@ -32,7 +32,7 @@ def test_show_all_rows_spans_pool_and_skips_unreadable(
         return None if cid == "bad30" else _row(cid)
 
     monkeypatch.setattr(m, "_row_for_id", fake_row)
-    ids = {r[0] for r in m._show_all_rows(tmp_path)}
+    ids = {r[0] for r in m._all_quest_rows(tmp_path)}
     assert ids == {"live10", "arch20"}
 
 
@@ -42,7 +42,7 @@ async def test_pick_show_target_empty_pool(
 ) -> None:
     # AC 8: bare `imp show` on an interactive tty with no changes prints
     # "No Quests to show." and returns 2, opening no menu.
-    monkeypatch.setattr(m, "_show_all_rows", lambda c: [])
+    monkeypatch.setattr(m, "_all_quest_rows", lambda c: [])
     monkeypatch.setattr(m, "_interactive", lambda: True)
 
     async def boom(*a, **k):

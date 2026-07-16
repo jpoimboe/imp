@@ -119,6 +119,17 @@ async def test_picker_enter_with_preselect_returns_that_index() -> None:
     assert chosen == "2026-06-10-bbb222"
 
 
+def test_render_phase_label_status_cell_matches_list_formatter() -> None:
+    """Picker STATUS cell contains the 'phase · step' suffix when both labels are set."""
+    c = Candidate(
+        quest_id="run01", title="Widget", status="running", step="write",
+        last_iso="2026-06-20T11:00:01+00:00",
+        step_label="coding", phase_label="implement phase")
+    picker = ResumePicker([c], now=_NOW, color=False, header="pick")
+    # The status cell must carry the same (phase · step) suffix as imp list
+    assert "running (implement phase · coding)" in picker.render()
+
+
 @pytest.mark.anyio
 async def test_picker_constructs_application_with_erase_when_done(monkeypatch) -> None:
     import prompt_toolkit.application as pta

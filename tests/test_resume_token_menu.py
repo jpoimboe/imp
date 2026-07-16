@@ -17,11 +17,11 @@ def anyio_backend() -> str:
     return "asyncio"
 
 
-# _Row = (id, status, step, last_iso, title, created_at, step_label)
+# _Row = (id, status, step, last_iso, title, created_at, step_label, phase_label)
 def _row(cid: str, last: str = "2026-06-11T00:00:00+00:00",
-         ) -> tuple[str, str, str, str, str, str, str | None]:
+         ) -> tuple[str, str, str, str, str, str, str | None, str | None]:
     return (cid, "paused", "plan", last, "Title " + cid,
-            "2026-06-01T00:00:00+00:00", None)
+            "2026-06-01T00:00:00+00:00", None, None)
 
 
 def _archive_terminal(control: Path, cid: str, status: str) -> None:

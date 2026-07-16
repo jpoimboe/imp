@@ -12,9 +12,11 @@ def anyio_backend() -> str:
     return "asyncio"
 
 
-# _Row = (id, status, step, last_iso, title, created_at)
-def _row(cid: str, status: str, last: str) -> tuple[str, str, str, str, str, str, str | None]:
-    return (cid, status, "plan", last, "Title " + cid, "2026-06-01T00:00:00+00:00", None)
+# _Row = (id, status, step, last_iso, title, created_at, step_label, phase_label)
+def _row(
+    cid: str, status: str, last: str,
+) -> tuple[str, str, str, str, str, str, str | None, str | None]:
+    return (cid, status, "plan", last, "Title " + cid, "2026-06-01T00:00:00+00:00", None, None)
 
 
 @pytest.mark.anyio

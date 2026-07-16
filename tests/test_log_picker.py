@@ -15,17 +15,16 @@ def anyio_backend() -> str:
 
 def _row(cid: str, status: str = "paused",
          last: str = "2026-06-11T00:00:00+00:00",
-         ) -> tuple[str, str, str, str, str, str, str | None]:
+         ) -> tuple[str, str, str, str, str, str, str | None, str | None]:
     return (cid, status, "plan", last, "Title " + cid,
-            "2026-06-01T00:00:00+00:00", "planning")
+            "2026-06-01T00:00:00+00:00", "planning", None)
 
 
 @pytest.mark.anyio
 async def test_log_picker_empty_prints_and_exits_2(
     monkeypatch, tmp_path: Path, capsys,
 ) -> None:
-    monkeypatch.setattr(m, "_status_rows", lambda c: [])
-    monkeypatch.setattr(m, "_completed_rows", lambda c: [])
+    monkeypatch.setattr(m, "_all_quest_rows", lambda c: [])
     monkeypatch.setattr(m, "_resolve_default_id", lambda c: None)
     rc = await m._pick_log_target(tmp_path)
     out = capsys.readouterr().out
@@ -42,8 +41,7 @@ async def test_log_picker_preselects_resolve_default_target(
     # one, so the pre-select must land on index 1 (AC #5 mixed case).
     inflight = _row("2026-06-10-inflit", "paused", "2026-06-10T00:00:00+00:00")
     completed = _row("2026-06-12-donexx", "completed", "2026-06-12T00:00:00+00:00")
-    monkeypatch.setattr(m, "_status_rows", lambda c: [inflight])
-    monkeypatch.setattr(m, "_completed_rows", lambda c: [completed])
+    monkeypatch.setattr(m, "_all_quest_rows", lambda c: [completed, inflight])
     monkeypatch.setattr(m, "_resolve_default_id", lambda c: "2026-06-10-inflit")
     monkeypatch.setattr(m, "_interactive", lambda: True)
     captured = {}
@@ -87,13 +85,13 @@ def test_cmd_log_tty_no_token_routes_to_picker(
         return "2026-06-11-picked"
 
     monkeypatch.setattr(m, "_pick_log_target", fake_pick)
-    seen = {}
+    seen: dict[str, str] = {}
 
-    def fake_load(control, quest_id):
+    def capture_meta(control, quest_id):
         seen["id"] = quest_id
-        return None  # → "no such quest" rc 2, but proves the routing
+        return None
 
-    monkeypatch.setattr(m, "_load_events_for_id", fake_load)
+    monkeypatch.setattr(m, "_unstarted_backlog_meta", capture_meta)
     rc = m._cmd_log(argparse.Namespace(token=None, full=False, follow=False, show=None, hide=None))
     assert seen["id"] == "2026-06-11-picked"
     assert rc == 2
