@@ -18,11 +18,9 @@ from imp.remote.session.protocol import (
 
 
 def _had_exchange(log: object) -> bool:
-    """True if the user contributed at least one message to a conversation."""
-    for ev in log.read():  # type: ignore[attr-defined]
-        if ev.get("type") in ("opening_intent", "user_message", "user_interjected"):
-            return True
-    return False
+    """True if the user contributed at least one message — every human turn is a
+    user_message (subtype intent/reply/interject) now."""
+    return any(ev.get("type") == "user_message" for ev in log.read())  # type: ignore[attr-defined]
 
 
 def _was_renamed(log: object) -> bool:

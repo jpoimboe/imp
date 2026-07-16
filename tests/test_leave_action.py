@@ -207,3 +207,16 @@ def test_shelve_intent_zero_exchange_discards(tmp_path: Path) -> None:
     _seed_control(tmp_path)
     ch = _draft(tmp_path, "sh2", exchange=False)
     assert leave_control_action(ch, "new", "shelve") == "discard"
+
+
+def test_had_exchange_true_for_user_message_intent() -> None:
+    assert _had_exchange(_Log([
+        {"type": "user_message", "payload": {"subtype": "intent"}}])) is True
+
+
+def test_had_exchange_false_for_engine_and_system_only() -> None:
+    assert _had_exchange(_Log([
+        {"type": "engine_message", "payload": {"subtype": "agent_prompt"}},
+        {"type": "step_context", "payload": {}},
+        {"type": "agent_message", "payload": {}},
+    ])) is False
