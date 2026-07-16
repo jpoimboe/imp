@@ -1514,3 +1514,37 @@ def test_session_socket_marker_reaches_bwrap_setenv(tmp_path):
     i = argv.index("IMP_SESSION_SOCKET")
     assert argv[i - 1] == "--setenv"
     assert argv[i + 1] == str(session_socket_path(control, "abc"))
+
+
+def test_build_setenv_prepends_shim_dir_to_path():
+    import os
+
+    from imp.engine.sandbox import _build_setenv
+    setenv = dict(_build_setenv({}, {"PATH": "/usr/bin"}, (), shim_dir="/q/imp-shim"))
+    assert setenv["PATH"] == "/q/imp-shim" + os.pathsep + "/usr/bin"
+
+
+def test_build_setenv_no_shim_dir_leaves_path_untouched():
+    from imp.engine.sandbox import _build_setenv
+    setenv = dict(_build_setenv({}, {"PATH": "/usr/bin"}, ()))
+    assert setenv["PATH"] == "/usr/bin"
+
+
+def test_build_setenv_prepends_shim_dir_no_existing_path():
+    from imp.engine.sandbox import _build_setenv
+    setenv = dict(_build_setenv({}, {}, (), shim_dir="/q/imp-shim"))
+    assert setenv["PATH"] == "/q/imp-shim"
+
+
+def test_resolve_policy_prepends_shim_dir_when_quest_dir_given(tmp_path):
+    import os
+    control, wt = _layout(tmp_path)
+    qd = control / ".imp" / "quests" / "abc"
+    pol = resolve_policy(
+        worktree=wt, control_root=control, quest_id="abc", cfg=SandboxConfig(),
+        engine_env_result={}, environ={"PATH": "/usr/bin"}, available=True,
+        quest_dir=qd,
+    )
+    path = dict(pol.setenv)["PATH"]
+    assert path.startswith(str(qd / "imp-shim") + os.pathsep)
+    assert path.endswith("/usr/bin")
