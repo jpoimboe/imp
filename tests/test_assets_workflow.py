@@ -1220,3 +1220,11 @@ def test_wait_for_head_has_no_hold_glyph(tmp_path: Path) -> None:
     step = _steps(wf)["wait-for-head"]
     assert step.acquire == "merge-lane"
     assert step.glyph is None
+
+
+def test_loop_budget_prose_is_de_hardcoded() -> None:
+    base = Path("src/imp/assets/workflows/imp/agents")
+    for fname in ("deferred-sweep.md", "finalize.md", "task-lead.md"):
+        text = (base / fname).read_text()
+        assert "capped at 5 fix laps" not in text, fname
+        assert "5 fix laps" not in text, fname
