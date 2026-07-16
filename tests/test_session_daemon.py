@@ -2004,3 +2004,38 @@ async def test_resume_restores_unsandboxed_into_coordinator(tmp_path: Path) -> N
 
     assert result is RunResult.COMPLETED
     assert seen["unsandboxed"] is True     # restored from State into a fresh coordinator
+
+
+def test_is_side_effect_pause_fires_for_reason_in_set() -> None:
+    from imp.remote.session.daemon import _is_side_effect_pause
+
+    coord = SimpleNamespace(should_pause=True, pause_reason="model-override")
+    assert _is_side_effect_pause(RunResult.PAUSED, coord) is True
+
+
+def test_is_side_effect_pause_false_for_plain_interrupt_reason() -> None:
+    from imp.remote.session.daemon import _is_side_effect_pause
+
+    coord = SimpleNamespace(should_pause=True, pause_reason="ctrl-c")
+    assert _is_side_effect_pause(RunResult.PAUSED, coord) is False
+
+
+def test_is_side_effect_pause_false_when_result_not_paused() -> None:
+    from imp.remote.session.daemon import _is_side_effect_pause
+
+    coord = SimpleNamespace(should_pause=True, pause_reason="model-override")
+    assert _is_side_effect_pause(RunResult.COMPLETED, coord) is False
+
+
+def test_hold_prompt_suppressed_for_side_effect_reason() -> None:
+    from imp.remote.session.daemon import _hold_prompt
+
+    coord = SimpleNamespace(should_pause=True, pause_reason="model-override")
+    assert _hold_prompt(RunResult.PAUSED, coord) is None
+
+
+def test_hold_prompt_returns_resume_for_plain_interrupt() -> None:
+    from imp.remote.session.daemon import _RESUME_PROMPT, _hold_prompt
+
+    coord = SimpleNamespace(should_pause=True, pause_reason="ctrl-c")
+    assert _hold_prompt(RunResult.PAUSED, coord) == _RESUME_PROMPT
