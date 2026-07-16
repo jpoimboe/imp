@@ -584,6 +584,83 @@ async def test_max_loops_pause_resets_counter_for_fresh_resume(tmp_path: Path) -
     assert len(reviewer_calls) == 3
 
 
+# ── progress: true on a backward goto resets the counter instead of counting ─
+
+
+@pytest.mark.anyio
+async def test_progress_goto_resets_counter_and_never_trips(tmp_path: Path) -> None:
+    """reviewer loops back 5× via a progress:true goto (cap 2) then approves.
+    Each backward goto resets the source counter, so the run completes (6 reviewer
+    runs) and the counter is 0; an unmarked goto would pause on the 3rd run."""
+    wf = tmp_path / "imp" / "workflows" / "imp"
+    (wf / "agents").mkdir(parents=True)
+    (wf / "agents" / "writer.md").write_text(
+        "---\nname: writer\ntools: [complete_step]\n"
+        "output:\n  status: {type: enum, values: [Success, Error]}\n---\ngo\n"
+    )
+    (wf / "agents" / "reviewer.md").write_text(
+        "---\nname: reviewer\ntools: [complete_step]\n"
+        "output:\n  status: {type: enum, values: [Success, Error]}\n"
+        "  verdict: {type: enum, values: [approve, rework]}\n---\ngo\n"
+    )
+    (wf / "workflow.yaml").write_text(
+        "name: t\ndescription: t\n"
+        "defaults: {max_retries: 1, max_loops: 10}\n"
+        "phases:\n"
+        "  - name: work\n"
+        "    steps:\n"
+        "      - {name: writer, file: agents/writer.md, tier: low}\n"
+        "      - name: reviewer\n"
+        "        file: agents/reviewer.md\n"
+        "        tier: low\n"
+        "        max_loops: 2\n"
+        "        rules:\n"
+        "          - {if: {verdict: rework}, goto: writer, progress: true}\n"
+        "          - {else: true, continue: true}\n"
+    )
+    _write_fake_config(tmp_path)
+    quest = _make_change(tmp_path)
+
+    from imp.providers import resolve
+    resolve.reset_providers_for_tests()
+
+    reviewer_calls: list[int] = []
+
+    class _Runner:
+        def __init__(self, name: str) -> None:
+            self._name = name
+
+        async def run(self, invocation: AgentInvocation) -> AsyncIterator[Event]:
+            if self._name == "reviewer":
+                reviewer_calls.append(1)
+                verdict = "rework" if len(reviewer_calls) <= 5 else "approve"
+                yield {"type": "agent_output",
+                       "payload": {"outcome": "ok", "status": "Success", "verdict": verdict}}
+            else:
+                yield {"type": "agent_output",
+                       "payload": {"outcome": "ok", "status": "Success"}}
+
+        async def interrupt(self) -> None:
+            pass
+
+    class _Provider:
+        name = "fake"
+        model = "m"
+
+        def create_runner(self, invocation: AgentInvocation) -> AgentRunner:
+            return _Runner(invocation.agent_def.name)
+
+    resolve.register_provider(
+        "fake", env_check=lambda: True, factory=lambda _m: _Provider(),
+    )
+
+    result = await run_quest(quest, on_event=lambda _e: None)
+    assert result is RunResult.COMPLETED           # progress edge never trips max_loops
+    assert len(reviewer_calls) == 6                # 5 progress reworks + 1 approve
+    state = State.load(quest.state_dir)
+    assert state.loop_counts.get("reviewer", 0) == 0   # reset to 0 by each progress goto
+
+
 # ── forward goto resets every leaped-over step's counter ─────────────────────
 
 
