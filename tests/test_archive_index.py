@@ -314,6 +314,27 @@ def test_ingest_populates_events_content(tmp_path: Path) -> None:
         conn.close()
 
 
+def test_search_events_content_matches_structured_events_only(tmp_path: Path) -> None:
+    conn = index.connect(tmp_path / "index.db")
+    try:
+        events = [
+            {"id": "e0", "type": "opening_intent",
+             "payload": {"text": "add a deadline"}},
+            {"id": "e1", "type": "tool_call",
+             "payload": {"name": "bash", "input": {"cmd": "GREPTARGET"}}},
+        ]
+        index.ingest(conn, _sample_record(), events)
+        assert [r[0] for r in index.search_events_content(conn, "GREPTARGET")] == ["alpha"]
+        assert [r[0] for r in index.search_events_content(conn, "greptarget")] == ["alpha"]
+        assert index.search_events_content(conn, "nonexistent-zzz") == []
+        assert index.search_events_content(conn, "alpha") == []   # id not searched
+        assert index.search_events_content(conn, "Alpha") == []   # title not searched
+        assert index.search_events_content(conn, "GREPTARGET")[0] == (
+            "alpha", "Alpha", "completed", None)
+    finally:
+        conn.close()
+
+
 def test_search_matches_content_and_still_matches_id_title(tmp_path: Path) -> None:
     conn = index.connect(tmp_path / "index.db")
     try:
