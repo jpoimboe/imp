@@ -8,7 +8,7 @@ from imp.engine.state import InMemoryEventLog
 def test_step_context_accepts_none_max_tool_calls() -> None:
     log = InMemoryEventLog()
     rec = log.append_step_context(
-        agent_id="a", provider="p", model="m", system_prompt="s",
+        agent_id="a", provider="p", model="m",
         tools_schema=[], params={}, max_tool_calls=None)
     assert rec["payload"]["max_tool_calls"] is None
 

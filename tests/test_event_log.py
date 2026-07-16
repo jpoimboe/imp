@@ -16,7 +16,7 @@ def test_typed_appends_have_envelope(tmp_path: Path) -> None:
     log = JsonlEventLog(tmp_path / "e.jsonl")
     ev = log.append_step_context(
         agent_id="step:p/s", parent_id_override="seed-1",
-        provider="anthropic", model="m", system_prompt="sys",
+        provider="anthropic", model="m",
         tools_schema=[{"name": "read_file"}], params={"max_tokens": 8192},
         max_tool_calls=50,
     )
@@ -32,10 +32,10 @@ def test_auto_chain_within_agent(tmp_path: Path) -> None:
     log = JsonlEventLog(tmp_path / "e.jsonl")
     a = log.append_step_context(
         agent_id="step:p/s", parent_id_override="seed",
-        provider="anthropic", model="m", system_prompt="s",
+        provider="anthropic", model="m",
         tools_schema=[], params={}, max_tool_calls=1,
     )
-    b = log.append_llm_response(
+    b = log.append_agent_message(
         agent_id="step:p/s", provider="anthropic", model="m",
         raw={"content": []}, usage={"input_tokens": 1}, stop_reason="end_turn",
     )
@@ -44,9 +44,9 @@ def test_auto_chain_within_agent(tmp_path: Path) -> None:
 
 def test_separate_agents_dont_cross_link(tmp_path: Path) -> None:
     log = JsonlEventLog(tmp_path / "e.jsonl")
-    log.append_llm_response(agent_id="A", provider="p", model="m",
+    log.append_agent_message(agent_id="A", provider="p", model="m",
                             raw={}, usage={}, stop_reason=None)
-    b = log.append_llm_response(agent_id="B", provider="p", model="m",
+    b = log.append_agent_message(agent_id="B", provider="p", model="m",
                                 raw={}, usage={}, stop_reason=None)
     assert b["parent_id"] is None           # first event for agent B
 
@@ -65,11 +65,11 @@ def test_chain_rebuild_on_construction(tmp_path: Path) -> None:
     first = JsonlEventLog(p)
     seed = first.append_step_context(
         agent_id="step:p/s", parent_id_override="root",
-        provider="a", model="m", system_prompt="s",
+        provider="a", model="m",
         tools_schema=[], params={}, max_tool_calls=1)
     # Fresh instance over the same file rebuilds last[agent_id] by scanning.
     second = JsonlEventLog(p)
-    nxt = second.append_llm_response(
+    nxt = second.append_agent_message(
         agent_id="step:p/s", provider="a", model="m",
         raw={}, usage={}, stop_reason=None)
     assert nxt["parent_id"] == seed["id"]
@@ -87,17 +87,20 @@ def test_on_event_fan_out_fires_once_with_persisted_dict(tmp_path: Path) -> None
 def test_append_user_message_serializes_text(tmp_path: Path) -> None:
     log = JsonlEventLog(tmp_path / "e.jsonl")
     msg = Message(role="user", content=(TextBlock(text="hello"),))
-    ev = log.append_user_message(agent_id="step:p/s", message=msg, human=True)
+    ev = log.append_user_message(agent_id="step:p/s", message=msg, subtype="reply")
     assert ev["payload"] == {"role": "user",
                              "content": [{"type": "text", "text": "hello"}],
-                             "human": True}
+                             "subtype": "reply"}
 
 
-def test_append_user_message_records_human_false(tmp_path: Path) -> None:
+def test_append_engine_message_serializes_text(tmp_path: Path) -> None:
     log = JsonlEventLog(tmp_path / "e.jsonl")
-    msg = Message(role="user", content=(TextBlock(text="injected prompt"),))
-    ev = log.append_user_message(agent_id="step:p/s", message=msg, human=False)
-    assert ev["payload"]["human"] is False
+    msg = Message(role="user", content=(TextBlock(text="hello"),))
+    ev = log.append_engine_message(agent_id="step:p/s", message=msg, subtype="system_prompt")
+    assert ev["type"] == "engine_message"
+    assert ev["payload"] == {"role": "user",
+                             "content": [{"type": "text", "text": "hello"}],
+                             "subtype": "system_prompt"}
 
 
 def test_append_tool_call_and_result_shapes(tmp_path: Path) -> None:
@@ -132,7 +135,7 @@ def test_inmemory_matches_jsonl_shape(tmp_path: Path) -> None:
     for log in (mem, jl):
         log.append_step_context(
             agent_id="A", parent_id_override="seed",
-            provider="a", model="m", system_prompt="s",
+            provider="a", model="m",
             tools_schema=[], params={}, max_tool_calls=1)
     mem_ev = next(iter(mem.read()))
     jl_ev = next(iter(jl.read()))
@@ -220,16 +223,16 @@ def test_append_query_result_includes_present_optional_fields(tmp_path: Path) ->
     assert p["errors"] == ["boom"]
 
 
-def test_append_llm_response_stamps_optional_fields_when_provided(tmp_path: Path) -> None:
+def test_append_agent_message_stamps_optional_fields_when_provided(tmp_path: Path) -> None:
     log = JsonlEventLog(tmp_path / "e.jsonl")
-    a = log.append_llm_response(
+    a = log.append_agent_message(
         agent_id="A", provider="claude_code", model="served-x",
         raw={"content": []}, usage={}, stop_reason="end_turn",
         message_id="msg_1", request_id="req_9", duration_ms=1234)
     assert a["payload"]["message_id"] == "msg_1"
     assert a["payload"]["request_id"] == "req_9"
     assert a["payload"]["duration_ms"] == 1234
-    b = log.append_llm_response(
+    b = log.append_agent_message(
         agent_id="A", provider="anthropic", model="m",
         raw={"content": []}, usage={}, stop_reason="end_turn")
     assert "message_id" not in b["payload"]
@@ -248,45 +251,45 @@ def test_append_tool_result_stamps_duration_ms_when_provided(tmp_path: Path) -> 
     assert "duration_ms" not in b["payload"]
 
 
-def test_in_memory_patch_lands_context_tokens_on_llm_response() -> None:
+def test_in_memory_patch_lands_context_tokens_on_agent_message() -> None:
     log = InMemoryEventLog()
-    log.append_llm_response(agent_id="step:a", provider="codex", model="m",
+    log.append_agent_message(agent_id="step:a", provider="codex", model="m",
                             raw={}, usage={}, stop_reason=None)
-    log.update_last_llm_response_usage(
+    log.update_last_agent_message_usage(
         agent_id="step:a",
         usage={"input_tokens": 800, "cache_read_input_tokens": 200},
         context_tokens=1000)
-    resp = next(e for e in log.read() if e["type"] == "llm_response")
+    resp = next(e for e in log.read() if e["type"] == "agent_message")
     assert resp["payload"]["context_tokens"] == 1000
     assert resp["payload"]["usage"]["cache_read_input_tokens"] == 200
 
 
 def test_in_memory_patch_omits_context_tokens_when_none() -> None:
     log = InMemoryEventLog()
-    log.append_llm_response(agent_id="step:a", provider="codex", model="m",
+    log.append_agent_message(agent_id="step:a", provider="codex", model="m",
                             raw={}, usage={}, stop_reason=None)
-    log.update_last_llm_response_usage(
+    log.update_last_agent_message_usage(
         agent_id="step:a", usage={"input_tokens": 5})
-    resp = next(e for e in log.read() if e["type"] == "llm_response")
+    resp = next(e for e in log.read() if e["type"] == "agent_message")
     assert "context_tokens" not in resp["payload"]
 
 
 def test_jsonl_usage_patch_row_carries_context_tokens(tmp_path: Path) -> None:
     log = JsonlEventLog(tmp_path / "e.jsonl")
-    log.append_llm_response(agent_id="step:a", provider="codex", model="m",
+    log.append_agent_message(agent_id="step:a", provider="codex", model="m",
                             raw={}, usage={}, stop_reason=None)
-    log.update_last_llm_response_usage(
+    log.update_last_agent_message_usage(
         agent_id="step:a", usage={"input_tokens": 800}, context_tokens=1000)
     patch = next(e for e in _read(tmp_path / "e.jsonl")
-                 if e["type"] == "llm_response_usage_patch")
+                 if e["type"] == "agent_message_usage_patch")
     assert patch["payload"]["context_tokens"] == 1000
 
 
 def test_jsonl_usage_patch_row_omits_context_tokens_when_none(tmp_path: Path) -> None:
     log = JsonlEventLog(tmp_path / "e.jsonl")
-    log.append_llm_response(agent_id="step:a", provider="codex", model="m",
+    log.append_agent_message(agent_id="step:a", provider="codex", model="m",
                             raw={}, usage={}, stop_reason=None)
-    log.update_last_llm_response_usage(agent_id="step:a", usage={"input_tokens": 5})
+    log.update_last_agent_message_usage(agent_id="step:a", usage={"input_tokens": 5})
     patch = next(e for e in _read(tmp_path / "e.jsonl")
-                 if e["type"] == "llm_response_usage_patch")
+                 if e["type"] == "agent_message_usage_patch")
     assert "context_tokens" not in patch["payload"]

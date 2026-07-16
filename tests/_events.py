@@ -2,7 +2,7 @@
 
 The in-process runners now yield `tool_heartbeat` after each model-API
 response and after each non-terminal tool_use. Tests that assert control
-signals (agent_output / error) filter through this."""
+signals (agent_result / error) filter through this."""
 
 from __future__ import annotations
 

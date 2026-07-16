@@ -251,7 +251,7 @@ class AgentRunner(Protocol):
     """Each provider's runner implements this. Engine consumes the event stream."""
 
     def run(self, invocation: AgentInvocation) -> AsyncGenerator[Event, None]:
-        """Yield events. Terminal event is `agent_output` (success) or `error`."""
+        """Yield events. Terminal event is `agent_result` (success) or `error`."""
         ...
 
     async def interrupt(self) -> None:

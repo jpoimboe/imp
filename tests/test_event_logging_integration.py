@@ -209,7 +209,7 @@ async def test_subagent_events_isolated_by_agent_id(tmp_path: Path, provider_reg
         client_factory=lambda: shared_fake,
     )
     events_out = [e async for e in runner.run(inv)]
-    assert events_out[-1]["type"] == "agent_output"
+    assert events_out[-1]["type"] == "agent_result"
 
     events = list(log.read())
 
@@ -311,7 +311,7 @@ async def test_backward_goto_emits_step_started_each_iteration(tmp_path: Path) -
             self._output = output
 
         async def run(self, invocation: AgentInvocation):
-            yield {"type": "agent_output", "payload": {"outcome": "ok", **self._output}}
+            yield {"type": "agent_result", "payload": {"outcome": "ok", **self._output}}
 
         async def interrupt(self) -> None:
             pass
@@ -430,13 +430,12 @@ async def test_resume_does_not_reemit_step_context(tmp_path: Path) -> None:
     log1.append_step_context(
         agent_id="step:p/s", parent_id_override="seed-run1",
         provider="anthropic", model="claude-sonnet-4-6",
-        system_prompt="be terse",
         tools_schema=[], params={"max_tokens": 8192}, max_tool_calls=50,
     )
     log1.append_user_message(
         agent_id="step:p/s",
         message=Message(role="user", content=(TextBlock(text="go"),)),
-        human=True,
+        subtype="reply",
     )
 
     # ── Run 2: resume over the same transcript + fresh JsonlEventLog ──────────
@@ -452,8 +451,8 @@ async def test_resume_does_not_reemit_step_context(tmp_path: Path) -> None:
     # Run 2 will see the existing transcript and take the resume branch
     # (no step_context emitted, no initial user_message re-emitted)
     out2 = [e async for e in runner2.run(inv2)]
-    assert out2[-1]["type"] == "agent_output", (
-        f"expected agent_output, got {[e['type'] for e in out2]}"
+    assert out2[-1]["type"] == "agent_result", (
+        f"expected agent_result, got {[e['type'] for e in out2]}"
     )
 
     # ── Verify exactly one step_context and one initial "go" user_message ─────
