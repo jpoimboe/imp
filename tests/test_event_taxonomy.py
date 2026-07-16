@@ -37,7 +37,7 @@ def test_no_agent_output_control_yields_remain() -> None:
     assert 'event["type"] == "agent_output"' not in inspect.getsource(agent_run)
 
 
-def test_engine_message_and_optional_subtype_and_optional_system_prompt() -> None:
+def test_engine_message_and_user_message_with_subtype_and_step_context() -> None:
     from imp.agents.runner import Message, TextBlock
     from imp.engine.state import InMemoryEventLog
 
@@ -58,16 +58,42 @@ def test_engine_message_and_optional_subtype_and_optional_system_prompt() -> Non
         subtype="reply")
     assert um["payload"]["subtype"] == "reply"
 
-    um2 = log.append_user_message(
-        agent_id="step:x/plan",
-        message=Message(role="user", content=(TextBlock(text="hi"),)))
-    assert "subtype" not in um2["payload"]
-
-    # system_prompt is now optional on step_context and omitted from the payload
     sc = log.append_step_context(
         agent_id="step:x/plan", provider="p", model="m",
         tools_schema=[], params={}, max_tool_calls=1)
     assert "system_prompt" not in sc["payload"]
+
+
+def test_required_keys_enforce_subtype_and_drop_system_prompt() -> None:
+    import pytest
+
+    from imp.agents.runner import Message, TextBlock
+    from imp.engine.state import InMemoryEventLog
+
+    strict = InMemoryEventLog(strict=True)
+    # user_message without subtype is now invalid
+    with pytest.raises(ValueError):
+        strict.append(agent_id="a", type="user_message",
+                      payload={"role": "user", "content": []})
+    # engine_message without subtype is now invalid
+    with pytest.raises(ValueError):
+        strict.append(agent_id="a", type="engine_message",
+                      payload={"role": "user", "content": []})
+    # append_user_message rejects the removed `human` kwarg
+    with pytest.raises(TypeError):
+        strict.append_user_message(
+            agent_id="a",
+            message=Message(role="user", content=(TextBlock(text="x"),)),
+            human=True)
+    # step_context is valid with no system_prompt and rejects the removed kwarg
+    ev = strict.append_step_context(
+        agent_id="a", provider="p", model="m",
+        tools_schema=[], params={}, max_tool_calls=1)
+    assert "system_prompt" not in ev["payload"]
+    with pytest.raises(TypeError):
+        strict.append_step_context(
+            agent_id="a", provider="p", model="m", tools_schema=[],
+            params={}, max_tool_calls=1, system_prompt="s")
 
 
 def test_append_agent_message_emits_agent_message_and_patch_merges() -> None:
