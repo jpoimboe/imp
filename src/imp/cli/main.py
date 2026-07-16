@@ -2166,7 +2166,8 @@ def _cmd_log(args: argparse.Namespace) -> int:
             color=should_use_color(sys.stdout))
         _page_or_print(lines, no_pager=args.no_pager, trailing_blank=True)
         return 0
-    events = make_store(control).get_events(quest_id)
+    store = make_store(control)
+    events = store.get_events(quest_id)
     if events is None:
         print(f"imp: no such quest {quest_id!r}", file=sys.stderr)
         return 2
@@ -2199,8 +2200,8 @@ def _cmd_log(args: argparse.Namespace) -> int:
             render_summary,
             summary_total,
         )
-        row = _row_for_id(control, quest_id)
-        status = row[1] if row is not None else "?"
+        card = store.quest_card(quest_id)
+        status = card.status if card is not None else "?"
         workflow = parse_default_workflow(control / "imp" / "project.yaml")
         header = SummaryHeader(workflow=workflow, quest_id=quest_id,
                                status=status, total_seconds=summary_total(events))
