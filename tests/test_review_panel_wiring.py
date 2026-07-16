@@ -253,10 +253,11 @@ def test_task_lead_step0_admits_panel_task_gap() -> None:
     assert "human finalize decision" not in text
 
 
-def test_rework_path_loop_budgets_unchanged() -> None:
+def test_rework_path_loop_budgets_ride_default() -> None:
     steps = _steps(_wf())
-    assert steps["quest-review"].max_loops == 6
-    assert steps["finalize"].max_loops == 20
+    # Both dropped their bespoke caps and ride the uniform convergence default of 10.
+    assert steps["quest-review"].max_loops == 10
+    assert steps["finalize"].max_loops == 10
 
 
 def test_panel_and_slice_files_are_deleted() -> None:

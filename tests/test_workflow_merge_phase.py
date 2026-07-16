@@ -134,7 +134,7 @@ def test_cleanup_merge_routes_by_exit_code() -> None:
     assert resolver.kind == "agent" and resolver.tier == "high"
     assert resolver.file is not None and resolver.file.name == "autosquash-resolve.md"
     assert resolver.rules[-1].action.target == "cleanup-merge"
-    assert resolver.max_loops == 6
+    assert resolver.max_loops == 10  # rides the default; cleanup.sh owns the real 3-attempt bound
     assert resolver.clean_tree is False        # sole clean_tree opt-out
 
 
