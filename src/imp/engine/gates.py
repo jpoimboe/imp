@@ -91,7 +91,7 @@ def evaluate_rules(
 def run_script(
     step: Step, *, cwd: Path, env_extra: dict[str, str] | None = None,
     policy: SandboxPolicy | None = None, command: str | None = None,
-    abort: Callable[[], bool] | None = None,
+    abort: Callable[[], bool] | None = None, shim_dir: str = "",
 ) -> dict[str, Any]:
     """Run a script step; return {exit, stdout, stderr} for rule evaluation.
 
@@ -116,6 +116,8 @@ def run_script(
     cmd = command if command is not None else step.command
     assert cmd is not None, "script step must have a command"
     env = overlay_engine_env(os.environ, env_extra or {})
+    if shim_dir:
+        env["PATH"] = shim_dir + os.pathsep + env.get("PATH", "")
     run_cwd = step.cwd or str(cwd)
     # The policy's setenv was frozen at run start (possibly with an empty
     # name-on-intent slug), so the live engine_env (env_extra) is the authoritative

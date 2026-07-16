@@ -70,7 +70,7 @@ from imp.engine.sandbox import (
 )
 from imp.engine.schema import validate_agent_output
 from imp.engine.seed import seed_workflow_start
-from imp.engine.shim import write_imp_shim
+from imp.engine.shim import imp_shim_dir, write_imp_shim
 from imp.engine.state import CurrentStep, EventLog, JsonlEventLog, State
 from imp.engine.types import (
     Action,
@@ -997,7 +997,8 @@ async def _route_script(
                                      output_path=output_path,
                                      test_gates=test_gates,
                                      pythonpath=pythonpath),
-                policy=sandbox_policy, command=command, abort=abort))
+                policy=sandbox_policy, command=command, abort=abort,
+                shim_dir=str(imp_shim_dir(quest.quest_dir))))
         if output_path is not None:
             assert step.output_schema is not None
             try:
