@@ -44,6 +44,11 @@ MATERIALIZED_LEAVE_REDIRECT = (
     "is live. Press Ctrl-D to pause it (resume with imp resume {qid}), or "
     "/abandon to tear it down.")
 
+PRE_SESSION_LEAVE_REDIRECT = (
+    "/keep, /shelve, and /clear apply to a conversation already under way — "
+    "there's nothing to leave yet. Press Ctrl-D to keep this quest as a draft "
+    "(resume with imp resume {qid}), or /abandon to tear it down.")
+
 
 def is_slash_command(text: str) -> bool:
     return text.lstrip().startswith("/")
@@ -69,7 +74,7 @@ def _is_materialized(quest: Any) -> bool:
 
 def handle_slash_line(
     text: str, *, quest: Any, output_fn: Callable[[str], None],
-    color: bool = False, unsandboxed: bool = False,
+    color: bool = False, unsandboxed: bool = False, pre_session: bool = False,
 ) -> object | str | SkillRequest:
     """Dispatch a /-line. Returns REPROMPT for /help, /skills, and builtins that
     print usage (each prints via output_fn). Returns a SkillRequest(name, args)
@@ -83,7 +88,7 @@ def handle_slash_line(
 
     if cmd in ("", "help"):
         _echo_command(text, output_fn, color=color)
-        _help(output_fn, materialized=_is_materialized(quest))
+        _help(output_fn, materialized=_is_materialized(quest), pre_session=pre_session)
         return REPROMPT
     if cmd == "skills":
         _echo_command(text, output_fn, color=color)
@@ -92,6 +97,10 @@ def handle_slash_line(
     if cmd == "abandon":
         return "/abandon"
     if cmd in ("keep", "shelve", "clear"):
+        if pre_session:
+            _echo_command(text, output_fn, color=color)
+            output_fn(PRE_SESSION_LEAVE_REDIRECT.format(qid=quest.id))
+            return REPROMPT
         if _is_materialized(quest):
             _echo_command(text, output_fn, color=color)
             output_fn(MATERIALIZED_LEAVE_REDIRECT.format(qid=quest.id))
@@ -148,11 +157,11 @@ def _list(skills_dir: Any, out: Callable[[str], None]) -> None:
         out(f"  /{name}    {description}" if description else f"  /{name}")
 
 
-def _help(out: Callable[[str], None], *, materialized: bool) -> None:
+def _help(out: Callable[[str], None], *, materialized: bool, pre_session: bool = False) -> None:
     out("Available slash commands:")
     out("  /help              Show this message")
     out("  /skills            List loadable skills")
-    if not materialized:
+    if not materialized and not pre_session:
         out("  /keep              Keep this conversation as a draft in your active list")
         out("  /shelve            Shelve this conversation to the archive (find via `imp search`)")
         out("  /clear             Shelve this conversation and start a fresh one")
@@ -218,6 +227,7 @@ async def _ask_or_exit(prompt: Any, exit_evt: Any, *, question: str = "",
 async def ask_line_with_slash(
     prompt: Any, status: Any | None, quest: Any, *, color: bool = False, width: int = 80,
     coord: Any = None, driver: Any = None, hint: str | None = None,
+    pre_session: bool = False,
 ) -> str | SkillRequest:
     """Read one interactive line, intercepting slash commands. /help, /skills,
     unknown, and not-found commands print and re-prompt; /<name> that matches a
@@ -317,7 +327,7 @@ async def ask_line_with_slash(
                             getattr(driver, "unsandboxed", False))
                         result = handle_slash_line(
                             line, quest=quest, output_fn=print, color=color,
-                            unsandboxed=current_unsandboxed)
+                            unsandboxed=current_unsandboxed, pre_session=pre_session)
                         if result is REPROMPT:
                             print("")  # one blank between slash output and the reprompt
                             continue

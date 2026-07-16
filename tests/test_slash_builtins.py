@@ -238,3 +238,63 @@ def test_skills_is_echoed_with_caret(tmp_path: Path) -> None:
     result = handle_slash_line("/skills", quest=quest, output_fn=out.append, color=False)
     assert result is REPROMPT
     assert out[0] == "> /skills"
+
+
+PRE_SESSION_REDIRECT = (
+    "/keep, /shelve, and /clear apply to a conversation already under way — "
+    "there's nothing to leave yet. Press Ctrl-D to keep this quest as a draft "
+    "(resume with imp resume pre9), or /abandon to tear it down.")
+
+
+@pytest.mark.parametrize("command", ["/keep", "/shelve", "/clear"])
+def test_leave_command_pre_session_shows_redirect(
+    tmp_path: Path, command: str,
+) -> None:
+    # Pre-session: no daemon, no conversation. The trio must not return a
+    # disposition literal; it prints the pre-session redirect and re-prompts.
+    quest = SimpleNamespace(id="pre9", control_root=tmp_path, workflow_dir=tmp_path)
+    out: list[str] = []
+    result = handle_slash_line(
+        command, quest=quest, output_fn=out.append, pre_session=True)
+    assert result is REPROMPT
+    assert any(PRE_SESSION_REDIRECT in line for line in out)
+    assert out[0] == f"> {command}"          # command is echoed with the caret
+
+
+@pytest.mark.parametrize("command", ["/keep", "/shelve", "/clear"])
+def test_leave_command_pre_session_takes_precedence_over_materialized(
+    tmp_path: Path, command: str, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # pre_session wins even if the quest reads materialized: the pre-session copy
+    # is shown, NOT the materialized redirect, and no disk reload is needed.
+    monkeypatch.setattr("imp.cli.slash._is_materialized", lambda quest: True)
+    quest = SimpleNamespace(id="pre9", control_root=tmp_path, workflow_dir=tmp_path)
+    out: list[str] = []
+    result = handle_slash_line(
+        command, quest=quest, output_fn=out.append, pre_session=True)
+    assert result is REPROMPT
+    assert not any("apply only before a quest is built" in line for line in out)
+    assert any("there's nothing to leave yet" in line for line in out)
+
+
+def test_abandon_pre_session_returns_literal(tmp_path: Path) -> None:
+    # /abandon stays a pure dispatch even pre-session: the reader runs teardown.
+    quest = SimpleNamespace(id="pre9", control_root=tmp_path, workflow_dir=tmp_path)
+    out: list[str] = []
+    result = handle_slash_line(
+        "/abandon", quest=quest, output_fn=out.append, pre_session=True)
+    assert result == "/abandon"
+
+
+def test_help_pre_session_omits_leave_trio_keeps_abandon() -> None:
+    from imp.cli.slash import _help
+    lines: list[str] = []
+    _help(lines.append, materialized=False, pre_session=True)
+    body = "\n".join(lines)
+    assert not any(line.strip().startswith("/keep") for line in lines)
+    assert not any(line.strip().startswith("/shelve") for line in lines)
+    assert not any(line.strip().startswith("/clear") for line in lines)
+    assert "/abandon" in body
+    # Keybindings block is unchanged: materialized=False still says "Leave...".
+    assert "Leave this conversation; resume with imp resume <id>" in body
+    assert "Pause and exit" not in body

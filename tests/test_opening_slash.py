@@ -47,6 +47,29 @@ def _fake_change(tmp_path: Path) -> _FakeChange:
     return _FakeChange(tmp_path)
 
 
+@pytest.mark.anyio
+async def test_pre_session_abandon_tears_down_and_exits(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    quest = _fake_change(tmp_path)
+    calls: dict[str, object] = {}
+
+    def _fake_abandon(control, quest_id):
+        calls["control"] = control
+        calls["quest_id"] = quest_id
+        return 3                       # non-zero proves the rc is threaded, not hardcoded
+
+    monkeypatch.setattr(main, "_abandon", _fake_abandon)
+
+    with pytest.raises(SystemExit) as excinfo:
+        await main._read_intent_line(
+            _QueuePrompt(["/abandon"]), quest, color=False, width=80)
+
+    assert excinfo.value.code == 3
+    assert calls["control"] == tmp_path
+    assert calls["quest_id"] == "z9y8x7"
+
+
 def _fake_intent_line(*, model: str, reply: str):
     """Stand-in for _read_intent_line: populates the passed model_sink and returns
     the reply, mirroring the new signature."""
@@ -77,45 +100,22 @@ async def test_opening_prompt_intercepts_help_then_returns_intent(
 
 
 @pytest.mark.anyio
-async def test_opening_prompt_session_verb_reprompts(
-    capsys: pytest.CaptureFixture[str],
+@pytest.mark.parametrize("command", ["/clear", "/keep", "/shelve"])
+async def test_opening_prompt_leave_verb_shows_pre_session_redirect(
+    command: str, capsys: pytest.CaptureFixture[str],
 ) -> None:
     quest = SimpleNamespace(id="z9y8x7", title="")
     reply = await main._read_opening_message(
         quest, leave_mode="new", banner_shown=False, color=False,
         width=80, editing_mode="emacs",
-        _prompt_factory=lambda: _QueuePrompt(["/clear", "real intent"]))
-    assert reply == "real intent"        # /clear did not become the draft intent
+        _prompt_factory=lambda: _QueuePrompt([command, "real intent"]))
+    assert reply == "real intent"        # the leave-verb did not become the draft intent
     out = capsys.readouterr().out
-    assert "/clear" in out               # a note explained why it was ignored
-
-
-@pytest.mark.anyio
-async def test_opening_prompt_keep_reprompts(
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    quest = SimpleNamespace(id="z9y8x7", title="")
-    reply = await main._read_opening_message(
-        quest, leave_mode="new", banner_shown=False, color=False,
-        width=80, editing_mode="emacs",
-        _prompt_factory=lambda: _QueuePrompt(["/keep", "real intent"]))
-    assert reply == "real intent"        # /keep did not become the draft intent
-    out = capsys.readouterr().out
-    assert "/keep" in out                # a note explained why it was ignored
-
-
-@pytest.mark.anyio
-async def test_opening_prompt_shelve_reprompts(
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    quest = SimpleNamespace(id="z9y8x7", title="")
-    reply = await main._read_opening_message(
-        quest, leave_mode="new", banner_shown=False, color=False,
-        width=80, editing_mode="emacs",
-        _prompt_factory=lambda: _QueuePrompt(["/shelve", "real intent"]))
-    assert reply == "real intent"        # /shelve did not become the draft intent
-    out = capsys.readouterr().out
-    assert "/shelve" in out              # a note explained why it was ignored
+    assert (
+        "apply to a conversation already under way — there's nothing to leave yet"
+        in out)
+    assert "resume with imp resume z9y8x7" in out
+    assert "/abandon to tear it down" in out
 
 
 @pytest.mark.anyio
