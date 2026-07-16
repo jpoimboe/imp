@@ -168,6 +168,63 @@ async def test_inert_ask_line_passes_identity_toolbar(
     assert sink["width"] == 80
 
 
+@pytest.mark.anyio
+async def test_inert_ask_line_forwards_toolbar_override(
+        monkeypatch, tmp_path: Path) -> None:
+    # The inert path passes a precomposed position row; the shared reader threads
+    # it to ask_async as the bottom toolbar (no re-fork of _read_intent_line).
+    ch = _seed(tmp_path)
+    monkeypatch.setattr(m, "should_use_color", lambda _stream: False)
+    monkeypatch.setattr(m, "_term_width", lambda: 80)
+    sink: dict[str, object] = {}
+    monkeypatch.setattr(
+        m, "Prompt", lambda **kwargs: _CapturingPrompt(sink, **kwargs))
+
+    line = await m._inert_ask_line(ch, toolbar="POSITION-ROW")
+
+    assert line == "go"
+    assert sink["bottom_toolbar"] == "POSITION-ROW"
+
+
+@pytest.mark.anyio
+async def test_resume_inert_composes_position_row_for_prompt(
+        monkeypatch, tmp_path: Path) -> None:
+    ch = _seed(tmp_path)
+    captured: dict[str, object] = {}
+
+    async def _cap_ask(quest, *, toolbar=None):
+        captured["toolbar"] = toolbar
+        return None
+
+    monkeypatch.setattr(m, "should_use_color", lambda _stream: False)
+    monkeypatch.setattr(m, "_term_width", lambda: 80)
+    monkeypatch.setattr(m, "compose_prelaunch_position_row", lambda **k: "POS-ROW")
+    monkeypatch.setattr(m, "_inert_ask_line", _cap_ask)
+
+    async def _fake_run_inert(*, question, ask_line, launch):
+        await ask_line()
+        return 0
+
+    monkeypatch.setattr(m, "run_inert_resume", _fake_run_inert)
+
+    rc = await m._resume_inert(ch, "Which DB should I use?")
+
+    assert rc == 0
+    assert captured["toolbar"] == "POS-ROW"      # the composed row reached the reader
+
+
+def test_prelaunch_position_model_resolves_step_tier_from_state(
+        tmp_path: Path) -> None:
+    from imp.providers.config import ProviderModel
+    ch = _seed(tmp_path)
+    state = State.load(ch.state_dir)
+    state.step = "s"                    # a real workflow step (default tier: medium)
+    state.resolved_steps = None         # no per-step override → resolve via tier map
+    state.resolved_tiers = {
+        "medium": ProviderModel(provider="anthropic", model="tier-model")}
+    assert m._prelaunch_position_model(ch, state) == "tier-model"
+
+
 class _RaisingPrompt:
     def __init__(self, exc: type[BaseException], **kwargs: object) -> None:
         self._exc = exc
