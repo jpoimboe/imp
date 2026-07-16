@@ -21,6 +21,13 @@ from imp.cli.render_summary import (
 
 _MAX_HEADING = 6
 
+_ENGINE_MD_LABELS = {
+    "system_prompt": "system prompt",
+    "agent_prompt": "agent prompt",
+    "continuation": "continuation",
+    "completion": "completion nudge",
+}
+
 
 def _md_escape(text: str) -> str:
     """Neutralize untrusted content: caret-escape C0/DEL control bytes (reusing
@@ -142,6 +149,13 @@ def _walk(node: Any, *, full: bool, level: int) -> Iterator[str]:
         if text:
             yield _md_escape(text)
         return
+    if isinstance(node, nv.EngineMessageNode):
+        text = node.text.strip()
+        if not full or not text:
+            return
+        label = _ENGINE_MD_LABELS.get(node.subtype, node.subtype)
+        yield _details(_md_escape(label), _fence(text), full=full)
+        return
     if isinstance(node, nv.UserMessageNode):
         text = node.text.strip()
         if node.interactive and text:
@@ -168,11 +182,7 @@ def _walk(node: Any, *, full: bool, level: int) -> Iterator[str]:
         parts = [f"provider: {provider}", f"model: {model}",
                  f"max_tool_calls: {p.get('max_tool_calls', '?')}"]
         inner_blocks = [_md_escape(" · ".join(parts))]
-        system_prompt = str(p.get("system_prompt", ""))
-        if system_prompt:
-            inner_blocks.append("system_prompt:")
-            inner_blocks.append(_fence(system_prompt))
-        summary = f"Internal context (imp system prompts) — {provider}/{model}"
+        summary = f"Internal context — {provider}/{model}"
         yield _details(_md_escape(summary), "\n\n".join(inner_blocks), full=full)
         return
     if isinstance(node, nv.SubagentFold):

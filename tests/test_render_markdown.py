@@ -460,3 +460,40 @@ def test_summary_markdown_open_step_reflects_paused_status() -> None:
     out = render_summary_markdown(rows, header=hdr)
     assert "| task-lead | paused |" in out
     assert "| task-lead | running |" not in out
+
+
+def test_markdown_full_renders_engine_message_labels():
+    out = _md([
+        _ev("1", "step_started", step="plan", kind="agent", phase="build",
+            model="m", provider="anthropic"),
+        _ev("e1", "engine_message", agent_id="step:build/plan",
+            subtype="continuation", role="user",
+            content=[{"type": "text", "text": "keep going"}]),
+    ], full=True)
+    assert "continuation" in out
+    assert "keep going" in out
+
+
+def test_markdown_step_context_has_no_system_prompt():
+    out = _md([
+        _ev("1", "step_started", step="plan", kind="agent", phase="build",
+            model="m", provider="anthropic"),
+        _ev("c1", "step_context", agent_id="step:build/plan",
+            provider="anthropic", model="m", tools_schema=[], params={},
+            max_tool_calls=40, system_prompt="do the thing SECRETLY"),
+    ], full=True)
+    assert "system_prompt:" not in out
+    assert "Internal context" in out
+    assert "do the thing SECRETLY" not in out
+
+
+def test_markdown_lean_hides_engine_message():
+    out = _md([
+        _ev("1", "step_started", step="plan", kind="agent", phase="build",
+            model="m", provider="anthropic"),
+        _ev("e1", "engine_message", agent_id="step:build/plan",
+            subtype="continuation", role="user",
+            content=[{"type": "text", "text": "keep going"}]),
+    ], full=False)
+    assert "keep going" not in out
+    assert "continuation" not in out
