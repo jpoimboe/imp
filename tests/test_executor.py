@@ -3975,3 +3975,84 @@ async def test_cross_plan_verify_counter_independent(tmp_path: Path) -> None:
     assert len(cnp_calls) == PLANS                 # all 12 plans ran
     state = State.load(quest.state_dir)
     assert state.loop_counts.get("verify", 0) <= 1  # reset each plan, never accumulates
+
+
+# ── distinct step counters are independent and never sum ─────────────────────
+
+
+@pytest.mark.anyio
+async def test_per_step_counters_do_not_sum(tmp_path: Path) -> None:
+    """r1 loops 6× then approves, r2 loops 6× then approves, cap 10. Each stays
+    under the cap so the run completes; a shared/summing counter would exceed the
+    cap partway through r2 and pause."""
+    wf = tmp_path / "imp" / "workflows" / "imp"
+    (wf / "agents").mkdir(parents=True)
+    for stem in ("w1", "r1", "w2", "r2"):
+        verdict = ("\n  verdict: {type: enum, values: [approve, rework]}"
+                   if stem.startswith("r") else "")
+        (wf / "agents" / f"{stem}.md").write_text(
+            "---\nname: " + stem + "\ntools: [complete_step]\n"
+            "output:\n  status: {type: enum, values: [Success, Error]}"
+            + verdict + "\n---\ngo\n"
+        )
+    (wf / "workflow.yaml").write_text(
+        "name: t\ndescription: t\n"
+        "defaults: {max_retries: 1, max_loops: 10}\n"
+        "phases:\n"
+        "  - name: work\n"
+        "    steps:\n"
+        "      - {name: w1, file: agents/w1.md, tier: low}\n"
+        "      - name: r1\n"
+        "        file: agents/r1.md\n"
+        "        tier: low\n"
+        "        rules:\n"
+        "          - {if: {verdict: rework}, goto: w1}\n"
+        "          - {else: true, continue: true}\n"
+        "      - {name: w2, file: agents/w2.md, tier: low}\n"
+        "      - name: r2\n"
+        "        file: agents/r2.md\n"
+        "        tier: low\n"
+        "        rules:\n"
+        "          - {if: {verdict: rework}, goto: w2}\n"
+        "          - {else: true, continue: true}\n"
+    )
+    _write_fake_config(tmp_path)
+    quest = _make_change(tmp_path)
+
+    from imp.providers import resolve
+    resolve.reset_providers_for_tests()
+
+    calls: dict[str, int] = {"r1": 0, "r2": 0}
+
+    class _Runner:
+        def __init__(self, name: str) -> None:
+            self._name = name
+
+        async def run(self, invocation: AgentInvocation) -> AsyncIterator[Event]:
+            name = self._name
+            if name in calls:
+                calls[name] += 1
+                verdict = "rework" if calls[name] <= 6 else "approve"
+                yield {"type": "agent_output",
+                       "payload": {"outcome": "ok", "status": "Success", "verdict": verdict}}
+            else:
+                yield {"type": "agent_output",
+                       "payload": {"outcome": "ok", "status": "Success"}}
+
+        async def interrupt(self) -> None:
+            pass
+
+    class _Provider:
+        name = "fake"
+        model = "m"
+
+        def create_runner(self, invocation: AgentInvocation) -> AgentRunner:
+            return _Runner(invocation.agent_def.name)
+
+    resolve.register_provider(
+        "fake", env_check=lambda: True, factory=lambda _m: _Provider(),
+    )
+
+    result = await run_quest(quest, on_event=lambda _e: None)
+    assert result is RunResult.COMPLETED           # neither counter tripped the cap
+    assert calls == {"r1": 7, "r2": 7}             # 6 reworks + 1 approve each
