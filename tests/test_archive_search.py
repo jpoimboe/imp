@@ -144,3 +144,28 @@ def test_search_content_surfaces_human_reply_not_injected_prompt(tmp_path: Path)
             archive_read.search_archive_content(tmp_path, "HUMANTERM")] == ["reply"]
     # ...but the injected prompt term matches nothing (excluded from content).
     assert archive_read.search_archive_content(tmp_path, "INJECTEDTERM") == []
+
+
+def _tool_call_line(cmd: str) -> str:
+    return json.dumps({
+        "id": "e0", "timestamp": "2026-06-01T00:00:01+00:00", "type": "tool_call",
+        "payload": {"name": "bash", "input": {"cmd": cmd}}}) + "\n"
+
+
+def test_search_archive_events_content_matches_structured_event(tmp_path: Path) -> None:
+    _archive(tmp_path, "alpha", "Dark mode toggle",
+             events_text=_tool_call_line("GREPTARGET here"))
+    _archive(tmp_path, "beta", "Login flow")
+    rows = archive_read.search_archive_events_content(tmp_path, "GREPTARGET")
+    assert [r[0] for r in rows] == ["alpha"]
+    assert rows[0] == ("alpha", "Dark mode toggle", "abandoned", "2026-06-01T00:00:01+00:00")
+
+
+def test_search_archive_events_content_case_insensitive(tmp_path: Path) -> None:
+    _archive(tmp_path, "alpha", "T", events_text=_tool_call_line("GREPTARGET"))
+    rows = archive_read.search_archive_events_content(tmp_path, "greptarget")
+    assert [r[0] for r in rows] == ["alpha"]
+
+
+def test_search_archive_events_content_missing_index_returns_empty(tmp_path: Path) -> None:
+    assert archive_read.search_archive_events_content(tmp_path, "anything") == []
