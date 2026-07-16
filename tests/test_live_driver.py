@@ -3040,6 +3040,24 @@ def test_compose_position_row_unsandboxed_is_bold_red_under_ansi() -> None:
     assert "\x1b[1m" in parts[2] and "\x1b[31m" in parts[2]
 
 
+def test_compose_prelaunch_position_row_renders_state_segments_no_context_bar() -> None:
+    from imp.cli.live_driver import compose_prelaunch_position_row
+    row = compose_prelaunch_position_row(
+        phase="planning phase", plan="plan 2/4", step_label="reviewing spec",
+        model="sonnet", quest_id="feat", title="demo",
+        color=False, width=200)
+    assert row == "feat · demo · planning phase · plan 2/4 · reviewing spec · sonnet"
+    assert "%" not in row      # context-usage bar omitted pre-launch
+
+
+def test_compose_prelaunch_position_row_omits_absent_segments() -> None:
+    from imp.cli.live_driver import compose_prelaunch_position_row
+    row = compose_prelaunch_position_row(
+        phase=None, plan=None, step_label=None, model=None,
+        quest_id="feat", title="demo", color=False, width=200)
+    assert row == "feat · demo"      # residual: less state → fewer segments, no drift
+
+
 def test_driver_unsandboxed_flag_defaults_off_and_toggles_into_toolbar() -> None:
     drv = LiveDriver(stream=io.StringIO(), color=False, width=80,
                      status=LiveStatus(io.StringIO()), quest_id="z9gixx",
