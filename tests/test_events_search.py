@@ -78,6 +78,25 @@ def test_matched_events_empty_when_no_match() -> None:
     assert matched == []
 
 
+def test_matched_events_resolves_handle_from_filtered_out_dispatch() -> None:
+    # The subagent-dispatch tool_call (id D1) defines the handle coder-1 for
+    # sub:D1. A --type tool_result filter drops that dispatch but keeps the
+    # subagent's own tool_result; the handle must still resolve because
+    # subagent_handle_map is computed over the FULL event list, before the
+    # filter. Computing it post-filter would lose the dispatch and the handle.
+    events = [
+        _ev(None, "step_started", step="task-lead"),
+        _ev("D1", "tool_call", "step:main/task-lead",
+            name="sub_agent", input={"subagent_name": "coder"}),
+        _ev("e1", "tool_result", "sub:D1", id="t1", content="GREPTARGET body"),
+        _ev(None, "step_completed", step="task-lead"),
+    ]
+    matched, handle_map = m._matched_events(
+        events, "greptarget", types={"tool_result"}, agents=None)
+    assert [o for o, _ in matched] == [3]
+    assert handle_map["sub:D1"] == "coder-1"
+
+
 class _FakeStore:
     def __init__(self, events_by_id: dict[str, list[dict[str, Any]]]) -> None:
         self._events = events_by_id
