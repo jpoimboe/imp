@@ -136,7 +136,6 @@ class ReplyInterjectRouter:
 
 OPENING_HINT = "type a message, /help for commands, or /model to switch models"
 INERT_HINT = "type your reply, /help for commands"
-_OPENING_SESSION_VERBS = ("/keep", "/shelve", "/clear", "/abandon")
 
 
 def _should_prompt_opening(
@@ -695,7 +694,8 @@ async def _read_intent_line(
     """Read one pre-session intent line, capturing a `/model` selection into `model_sink`."""
     while True:
         line = await ask_line_with_slash(
-            prompt, None, quest, color=color, width=width, hint=hint)
+            prompt, None, quest, color=color, width=width, hint=hint,
+            pre_session=True)
         if isinstance(line, SkillRequest):
             # Opening prompt is pre-session: no daemon gate exists yet, so the
             # skill body is loaded here and becomes the opening message.
@@ -706,9 +706,9 @@ async def _read_intent_line(
             if model_sink is not None:
                 model_sink["model"] = line.strip()[len("/model "):].strip()
             continue
-        if line in _OPENING_SESSION_VERBS:
-            print(f"{line} isn't available here — /help for commands.")
-            continue
+        if line == "/abandon":
+            # No daemon pre-session; _abandon's rc threads out through SystemExit.
+            raise SystemExit(_abandon(quest.control_root, quest.id))
         return line
 
 
