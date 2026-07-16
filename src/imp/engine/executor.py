@@ -126,15 +126,22 @@ class RunResult(Enum):
     ERRORED = "errored"
 
 
-def _latest_step_context_system_prompt(log: EventLog, agent_id: str) -> str | None:
-    """The verbatim system_prompt from the LATEST step_context for this agent_id,
-    or None if none exists. 'Latest' matters: a goto re-entry renders afresh and
-    emits a newer step_context; resume must replay the newest, not an earlier row.
+def _latest_engine_system_prompt(log: EventLog, agent_id: str) -> str | None:
+    """The verbatim wire system prompt from the LATEST engine_message/system_prompt
+    for this agent_id, or None if none exists. 'Latest' matters: a goto re-entry
+    renders afresh and emits a newer engine_message; resume must replay the newest,
+    not an earlier row. The prompt was emitted as a single text block
+    (providers/*.py fresh-entry), so joining the block texts recovers it byte-exact.
     Resume is not a hot path and the log is per-quest, so a linear scan is fine."""
     found: str | None = None
     for e in log.read():
-        if e.get("type") == "step_context" and e.get("agent_id") == agent_id:
-            found = (e.get("payload") or {}).get("system_prompt")
+        payload = e.get("payload") or {}
+        if (e.get("type") == "engine_message"
+                and e.get("agent_id") == agent_id
+                and payload.get("subtype") == "system_prompt"):
+            found = "".join(
+                b.get("text", "") for b in (payload.get("content") or [])
+                if isinstance(b, dict) and b.get("type") == "text")
     return found
 
 
@@ -143,16 +150,17 @@ def _resume_system_prompt(
 ) -> str | None:
     """Resume-replay source. Returns the stored prompt to replay verbatim, or
     None when the caller should re-render. Aborts on the invariant violation:
-    a non-empty transcript with no stored step_context means messages were
-    rendered against a now-lost prompt — re-rendering would silently diverge."""
+    a non-empty transcript with no stored engine_message/system_prompt means
+    messages were rendered against a now-lost prompt — re-rendering would
+    silently diverge."""
     from imp.agents.transcript import Transcript
-    stored = _latest_step_context_system_prompt(log, agent_id)
+    stored = _latest_engine_system_prompt(log, agent_id)
     if stored is not None:
         return stored
     if Transcript(transcript_dir / "transcript.jsonl").exists_and_nonempty():
         raise RuntimeError(
             f"resume invariant violated: step {agent_id!r} has a non-empty "
-            "transcript but no stored step_context system prompt; refusing to "
+            "transcript but no stored engine_message system prompt; refusing to "
             "re-render against a lost prompt")
     return None       # empty transcript (pre-emit crash, or no-transcript provider)
 

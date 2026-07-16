@@ -571,8 +571,9 @@ def build_agent_invocation(
         completion_instruction(agent_def.output_schema) if has_schema else "")
     messages = initial_messages
     if system_prompt_override is not None:
-        # Resume-replay: the override IS the stored role-only system prompt; the
-        # first user message replays from its logged user_message event.
+        # Resume-replay: the override IS the stored role-only system prompt
+        # (recovered from the engine_message/system_prompt event). The wire
+        # messages replay from transcript.jsonl, not from the event log.
         system_prompt = system_prompt_override
     else:
         # Lazy import (see module docstring): `imp.providers.memory` is a pure
