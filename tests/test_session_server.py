@@ -1713,7 +1713,7 @@ async def test_model_override_frame_no_interrupt_or_kill_events(tmp_path: Path) 
 
 
 @pytest.mark.anyio
-async def test_wait_for_model_override_returns_when_pause_already_committed(
+async def test_wait_for_side_effect_returns_when_pause_already_committed(
     tmp_path: Path,
 ) -> None:
     from imp.cli.signals import InterruptCoordinator
@@ -1723,16 +1723,16 @@ async def test_wait_for_model_override_returns_when_pause_already_committed(
     server = SessionServer(sock, coordinator=coord, hibernate=True)
     await server.open()
 
-    # Commit the model-override pause state BEFORE the wait — mirrors a set-model
+    # Commit the side-effect pause state BEFORE the wait — mirrors a set-model
     # frame processed before the gate is entered. No pulse happens after this
-    # point, so the _model_override_pending event stays unset.
+    # point, so the _side_effect_pending event stays unset.
     coord.set_pending_model("opus")
     await coord.signal_pause(reason="model-override", via="frame")
 
     # Level-triggered: must return on the first predicate check, not hang on
     # evt.wait(). A regression to await-only would time out here.
     with anyio.fail_after(1):
-        await server._wait_for_model_override()
+        await server._wait_for_side_effect()
 
 
 @pytest.mark.anyio
