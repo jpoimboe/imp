@@ -44,9 +44,15 @@ def test_opening_question_helpers_are_removed() -> None:
     assert not hasattr(main_mod, "_opening_question")
 
 
-def test_opening_hint_is_kept() -> None:
+def test_hint_constants_collapsed_into_shared_default() -> None:
+    import inspect
+
     import imp.cli.main as main_mod
-    assert main_mod.OPENING_HINT == "type a message, /help for commands, or /model to switch models"
+    from imp.cli.prompt import DEFAULT_HINT
+    assert not hasattr(main_mod, "OPENING_HINT")
+    assert not hasattr(main_mod, "INERT_HINT")
+    sig = inspect.signature(main_mod._read_intent_line)
+    assert sig.parameters["hint"].default == DEFAULT_HINT
 
 
 def test_empty_reply_falls_back_to_unseeded() -> None:

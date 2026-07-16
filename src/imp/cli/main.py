@@ -41,7 +41,7 @@ from imp.cli.init import GitSetupDeclined, IntegrationBranchUnresolved, run_init
 from imp.cli.live_driver import LiveDriver
 from imp.cli.live_status import LiveStatus
 from imp.cli.palette import ansi, should_use_color
-from imp.cli.prompt import Prompt
+from imp.cli.prompt import DEFAULT_HINT, Prompt
 from imp.cli.session_run import (
     infer_session_result,
     make_headless_solicit,
@@ -132,10 +132,6 @@ class ReplyInterjectRouter:
                 self._reply_sink(line)
         else:
             self._coord.enqueue_interject(line)
-
-
-OPENING_HINT = "type a message, /help for commands, or /model to switch models"
-INERT_HINT = "type your reply, /help for commands"
 
 
 def _should_prompt_opening(
@@ -689,7 +685,7 @@ def _print_opening(quest: Quest, marker: str, *, interactive: bool, color: bool)
 
 async def _read_intent_line(
     prompt: Any, quest: Any, *, color: bool, width: int,
-    model_sink: dict[str, str] | None = None, hint: str = OPENING_HINT,
+    model_sink: dict[str, str] | None = None, hint: str = DEFAULT_HINT,
 ) -> str:
     """Read one pre-session intent line, capturing a `/model` selection into `model_sink`."""
     while True:
@@ -1221,7 +1217,7 @@ async def _inert_ask_line(quest: Quest) -> str | None:
         color=color, quest=quest)
     try:
         return await _read_intent_line(
-            prompt, quest, color=color, width=width, hint=INERT_HINT)
+            prompt, quest, color=color, width=width)
     except (EOFError, KeyboardInterrupt):
         print(pal.caret(enabled=color))
         print()
