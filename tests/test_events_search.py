@@ -116,7 +116,6 @@ def _row(cid: str, title: str, last: str = "2026-06-11T00:00:00+00:00",
 
 def test_events_search_active_includes_only_quests_with_matching_events(
         monkeypatch, tmp_path: Path) -> None:
-    monkeypatch.delenv("IMP_SESSION_SOCKET", raising=False)
     monkeypatch.setattr(m, "_status_rows", lambda control, scanned=None: [_row("aaa111", "Alpha"),
                                                                       _row("bbb222", "Beta")])
     store = _FakeStore({
@@ -133,7 +132,6 @@ def test_events_search_active_includes_only_quests_with_matching_events(
 
 
 def test_events_search_backlog_matches_title_and_intent(monkeypatch, tmp_path: Path) -> None:
-    monkeypatch.delenv("IMP_SESSION_SOCKET", raising=False)
     monkeypatch.setattr(m, "_backlog_rows", lambda control: [_row("ccc333", "Payments")])
     monkeypatch.setattr(m, "_backlog_seed_opening",
                         lambda control, qid: "add a GREPTARGET to checkout")
@@ -145,7 +143,6 @@ def test_events_search_backlog_matches_title_and_intent(monkeypatch, tmp_path: P
 
 
 def test_events_search_backlog_matches_on_title(monkeypatch, tmp_path: Path) -> None:
-    monkeypatch.delenv("IMP_SESSION_SOCKET", raising=False)
     monkeypatch.setattr(
         m, "_backlog_rows", lambda control: [_row("ccc333", "GREPTARGET dashboard")])
     monkeypatch.setattr(m, "_backlog_seed_opening", lambda control, qid: "unrelated intent")
@@ -154,7 +151,6 @@ def test_events_search_backlog_matches_on_title(monkeypatch, tmp_path: Path) -> 
 
 
 def test_events_search_backlog_matches_on_quest_id(monkeypatch, tmp_path: Path) -> None:
-    monkeypatch.delenv("IMP_SESSION_SOCKET", raising=False)
     monkeypatch.setattr(m, "_backlog_rows", lambda control: [_row("greptarget99", "Some title")])
     monkeypatch.setattr(m, "_backlog_seed_opening", lambda control, qid: "unrelated intent")
     hits = m._events_search_backlog(tmp_path, "greptarget", types=None, agents=None)
@@ -163,7 +159,6 @@ def test_events_search_backlog_matches_on_quest_id(monkeypatch, tmp_path: Path) 
 
 def test_events_search_backlog_skipped_when_type_filter_present(
         monkeypatch, tmp_path: Path) -> None:
-    monkeypatch.delenv("IMP_SESSION_SOCKET", raising=False)
     monkeypatch.setattr(m, "_backlog_rows", lambda control: [_row("ccc333", "GREPTARGET")])
     monkeypatch.setattr(m, "_backlog_seed_opening", lambda control, qid: "GREPTARGET")
     assert m._events_search_backlog(
@@ -186,7 +181,6 @@ def _archive_events(tmp_path: Path, quest_id: str, title: str,
 
 
 def test_events_search_archived_end_to_end(monkeypatch, tmp_path: Path) -> None:
-    monkeypatch.delenv("IMP_SESSION_SOCKET", raising=False)
     line = _json.dumps({
         "id": "e0", "parent_id": None, "agent_id": "step:impl/coder",
         "timestamp": "2026-06-01T00:00:01+00:00", "type": "tool_call",
@@ -338,7 +332,6 @@ def test_cmd_events_search_zone_major_then_last_activity_desc_sort(
 
 
 def test_main_routes_events_search_against_archive(monkeypatch, tmp_path: Path) -> None:
-    monkeypatch.delenv("IMP_SESSION_SOCKET", raising=False)
     monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
     import json as _json
     line = _json.dumps({
@@ -355,7 +348,6 @@ def test_main_routes_events_search_against_archive(monkeypatch, tmp_path: Path) 
 
 
 def test_main_events_id_still_flat_after_search_route(monkeypatch, tmp_path: Path) -> None:
-    monkeypatch.delenv("IMP_SESSION_SOCKET", raising=False)
     called: dict[str, object] = {}
 
     def _fake_cmd_events(args: argparse.Namespace) -> int:

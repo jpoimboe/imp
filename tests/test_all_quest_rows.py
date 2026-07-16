@@ -28,16 +28,11 @@ def test_all_quest_rows_includes_no_merge_completed_live_home(tmp_path: Path) ->
     assert cid in ids
 
 
-def test_all_quest_rows_includes_shelved_paused_archive(
-    monkeypatch, tmp_path: Path,
-) -> None:
+def test_all_quest_rows_includes_shelved_paused_archive(tmp_path: Path) -> None:
     # AC 5b: a quest archived with final status paused (shelved, no live home)
     # appears in _all_quest_rows.  _completed_rows drops it (paused in
     # _INFLIGHT), _status_rows and _backlog_rows never see archived ids without
     # live homes.
-    # Unset IMP_SESSION_SOCKET so make_store uses LocalStore on tmp_path rather
-    # than the daemon's proxy (which wouldn't see our test archive).
-    monkeypatch.delenv("IMP_SESSION_SOCKET", raising=False)
     cid = "2026-06-11-shvd01"
     events = tmp_path / f"{cid}.jsonl"
     events.write_bytes(

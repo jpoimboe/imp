@@ -155,6 +155,12 @@ def _isolate_user_config(
 
 
 @pytest.fixture(autouse=True)
+def _isolate_session_socket(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Drop ambient IMP_SESSION_SOCKET so make_store uses LocalStore, not a live daemon."""
+    monkeypatch.delenv("IMP_SESSION_SOCKET", raising=False)
+
+
+@pytest.fixture(autouse=True)
 def _sandbox_fallback_without_bwrap(
     request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
