@@ -116,7 +116,7 @@ from imp.providers._cc_builtins import ALL_CLAUDE_CODE_BUILTIN_TOOLS
 from imp.providers.base import Provider
 from imp.providers.claude_code_config_dir import materialize_fresh_config_dir
 from imp.providers.claude_code_session_store import (
-    _SESSION_LIMIT_RE,
+    _USAGE_LIMIT_RE,
     reconcile_store_tail,
     resume_session_id,
     session_key,
@@ -237,7 +237,7 @@ def _reset_hint_seconds(text: str, now: float) -> float | None:
 
 
 def _rate_limit_with_reset_hint(text: str) -> perr.RateLimitError:
-    """Build the session-limit RateLimitError, attaching the parsed reset time as
+    """Build the usage-limit RateLimitError, attaching the parsed reset time as
     detail={"retry_after_seconds": <hint>} when one is available. The key is
     disjoint from every diagnostic key _termination_from_result later merges via
     labeled.detail.update(...), so a hint set here survives that merge."""
@@ -283,7 +283,7 @@ def _classify_agent_text(
     for pat in _QUOTA_PATTERNS:
         if pat in scan:
             return perr.QuotaError(f"claude CLI: {pat}")
-    if _SESSION_LIMIT_RE.search(scan):
+    if _USAGE_LIMIT_RE.search(scan):
         return _rate_limit_with_reset_hint(text)
     m = _API_ERROR_RE.search(scan)
     if m:

@@ -204,3 +204,23 @@ def test_weekly_dated_at_eight_day_ceiling_is_trusted() -> None:
     now = _epoch(2026, 7, 16, 20, 0)
     assert _reset_hint_seconds(
         "resets Jul 24, 20:00 (America/Los_Angeles)", now) == 691320.0
+
+
+def test_weekly_text_only_classifies_as_rate_limit(monkeypatch) -> None:
+    # status absent -> the widened wording alternative alone must classify.
+    monkeypatch.setattr(cc, "_reset_hint_seconds", lambda text, now: 7200.0)
+    exc = cc._classify_agent_text(
+        "You've hit your weekly limit · resets Jul 16, 8pm (America/Los_Angeles)")
+    assert isinstance(exc, perr.RateLimitError)
+    assert exc.detail["retry_after_seconds"] == 7200.0
+
+
+def test_weekly_429_classifies_as_rate_limit_not_terminated() -> None:
+    sdk = result(is_error=True, api_error_status=429)
+    term = cc._termination_from_result(
+        sdk,
+        "You've hit your weekly limit · resets Jul 16, 8pm (America/Los_Angeles)",
+        {},
+    )
+    assert isinstance(term, perr.RateLimitError)
+    assert not isinstance(term, perr.TerminatedError)
