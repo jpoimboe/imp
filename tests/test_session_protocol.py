@@ -8,6 +8,7 @@ from imp.remote.session.protocol import (
     CONTROL_ARCHIVE,
     CONTROL_DISCARD,
     CONTROL_SAVE,
+    SIDE_EFFECT_REASONS,
     Attach,
     Control,
     Input,
@@ -231,3 +232,7 @@ def test_encode_and_parse_set_sandbox_control() -> None:
     line = encode_control(CONTROL_SET_SANDBOX, "off")
     assert "\n" not in line
     assert parse_client_message(line) == Control(CONTROL_SET_SANDBOX, "off")
+
+
+def test_side_effect_reasons_seeds_only_model_override() -> None:
+    assert frozenset({"model-override"}) == SIDE_EFFECT_REASONS

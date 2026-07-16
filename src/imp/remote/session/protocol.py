@@ -34,6 +34,9 @@ _CONTROL_ACTIONS = frozenset({
     CONTROL_DISCARD, CONTROL_SET_MODEL, CONTROL_SET_SANDBOX,
 })
 
+# Pause reasons on the park→mutate→re-enter seam (daemon hold loop, not a runner interrupt).
+SIDE_EFFECT_REASONS = frozenset({"model-override"})
+
 
 @dataclass(frozen=True, slots=True)
 class Attach:
