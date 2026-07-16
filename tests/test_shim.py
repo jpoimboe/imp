@@ -88,3 +88,38 @@ def test_shim_survives_cwd_imp_namespace_trap(tmp_path: Path) -> None:
     result = _run_shim(shim, "--version", cwd=trap_cwd)
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip() == f"imp {__version__}"
+
+
+def test_command_v_imp_resolves_to_shim_on_path(tmp_path: Path) -> None:
+    """With the shim dir on PATH, `command -v imp` resolves to the shim file, so
+    an agent shell can invoke `imp`. Falsifiable: if the shim were not written as
+    an executable file named `imp`, command -v would resolve elsewhere or fail."""
+    shim_dir = write_imp_shim(tmp_path)
+    env = {**os.environ, "PATH": f"{shim_dir}{os.pathsep}/usr/bin{os.pathsep}/bin"}
+    result = subprocess.run(
+        ["sh", "-c", "command -v imp"],
+        env=env, capture_output=True, text=True, timeout=10,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == str(shim_dir / "imp")
+
+
+def test_shim_dir_precedes_preexisting_imp_on_path(tmp_path: Path) -> None:
+    """When the shim dir precedes another PATH dir that also contains an `imp`
+    executable, the shim's imp is chosen (prepend wins). Falsifiable: appending
+    the shim dir instead of prepending would resolve to the decoy `imp` first."""
+    shim_dir = write_imp_shim(tmp_path)
+    decoy_dir = tmp_path / "decoy"
+    decoy_dir.mkdir()
+    decoy = decoy_dir / "imp"
+    decoy.write_text("#!/bin/sh\necho DECOY\n")
+    decoy.chmod(0o755)
+
+    env = {**os.environ,
+           "PATH": f"{shim_dir}{os.pathsep}{decoy_dir}{os.pathsep}/usr/bin{os.pathsep}/bin"}
+    result = subprocess.run(
+        ["sh", "-c", "command -v imp"],
+        env=env, capture_output=True, text=True, timeout=10,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == str(shim_dir / "imp")
