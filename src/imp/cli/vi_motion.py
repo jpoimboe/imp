@@ -1,8 +1,17 @@
-"""Pure vi-mode display-row motion core: move cursor by display row (wrapped or hard-newline) rather than logical line."""
+"""Vi-mode display-row motion for imp's prompt.
+
+Pure core: ``display_line_move`` moves a cursor by display row given a uniform
+per-row usable width. Installer: ``add_motion_bindings`` binds ``j``/``k``/``gj``/``gk``
+in vi navigation mode to display-row motion. Wired by ``prompt._build_session``.
+"""
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any
 
+from prompt_toolkit.filters import vi_navigation_mode
+from prompt_toolkit.formatted_text import fragment_list_width
+from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.utils import get_cwidth
 
 
@@ -94,3 +103,63 @@ def display_line_move(
     new_cursor = _cursor_at_x(text, rows[target_idx], target_x)
 
     return new_cursor, target_x
+
+
+class _MotionState:
+    def __init__(self) -> None:
+        self._last_cursor: int | None = None
+        self._preferred_x: int | None = None
+
+
+def add_motion_bindings(kb: KeyBindings) -> None:
+    """Add vi j/k/gj/gk display-row motion bindings (navigation mode only)."""
+    state = _MotionState()
+
+    def _move(event: Any, direction: int) -> None:
+        buf = event.current_buffer
+        preferred_x = (
+            state._preferred_x
+            if buf.cursor_position == state._last_cursor
+            else None
+        )
+        window = event.app.layout.current_window
+        info = window.render_info
+        if info is None:
+            if direction == -1:
+                buf.cursor_up(count=event.arg)
+            else:
+                buf.cursor_down(count=event.arg)
+            return
+        prefix_width = (
+            fragment_list_width(window.get_line_prefix(info.ui_content.cursor_position.y, 0))
+            if window.get_line_prefix is not None
+            else 0
+        )
+        W = max(1, info.window_width - prefix_width)
+        new_cursor, new_preferred_x = display_line_move(
+            buf.text,
+            buf.cursor_position,
+            w=W,
+            count=event.arg,
+            direction=direction,
+            preferred_x=preferred_x,
+        )
+        buf.cursor_position = new_cursor
+        state._last_cursor = new_cursor
+        state._preferred_x = new_preferred_x
+
+    @kb.add("j", filter=vi_navigation_mode)
+    def _j(event: Any) -> None:
+        _move(event, 1)
+
+    @kb.add("g", "j", filter=vi_navigation_mode)
+    def _gj(event: Any) -> None:
+        _move(event, 1)
+
+    @kb.add("k", filter=vi_navigation_mode)
+    def _k(event: Any) -> None:
+        _move(event, -1)
+
+    @kb.add("g", "k", filter=vi_navigation_mode)
+    def _gk(event: Any) -> None:
+        _move(event, -1)

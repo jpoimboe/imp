@@ -9,7 +9,9 @@ Alt+Enter (`escape c-m`) is bound by `_build_session` to insert a newline.
 
 History is in-memory and seeded at construction from the quest's durable
 event record (the seed opening plus each human-typed line), so up-arrow
-recalls prior lines across an imp resume.
+recalls prior lines across an imp resume. In vi mode, ``j``/``k``/``gj``/``gk``
+are display-row motions bounded to the buffer; history is reached only via
+arrows or Ctrl-P/Ctrl-N.
 """
 
 from __future__ import annotations
@@ -54,10 +56,11 @@ def _build_session(skills_dir: Any | None = None, *, editing_mode: str = "emacs"
 
     dot_state: Any = None
     if mode == EditingMode.VI:
-        from imp.cli import vi_dot
+        from imp.cli import vi_dot, vi_motion
 
         dot_state = vi_dot.DotState()
         vi_dot.add_dot_binding(kb, dot_state)
+        vi_motion.add_motion_bindings(kb)
 
     hint_shown = False
 
