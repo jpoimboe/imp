@@ -190,6 +190,13 @@ class UserMessageNode:
 
 
 @dataclass
+class EngineMessageNode:
+    text: str
+    subtype: str            # system_prompt | agent_prompt | continuation | completion
+    collapsible = False
+
+
+@dataclass
 class ThinkingFold:
     content: str
     collapsible = True
@@ -523,17 +530,10 @@ class NarrativeBuilder:
         # re-emitted step_started, so resume re-entry can reuse nodes instead of
         # duplicating them (see Task 10B). Default False; goto loops never set it.
         self._resuming = False
-        # True between an awaiting_user_input event and the user_message that
-        # answers it, so the next user_message is tagged as a genuine human turn
-        # (rendered as `> …`) rather than a synthetic engine prompt (dropped).
-        self._awaiting_reply = False
-        # Armed by a completion_nudge; the next prose agent_message consumes it and
-        # drops a bare WAITING protocol reply (pure plumbing). Survives non-prose events.
+        # Armed by an engine_message completion nudge; the next prose agent_message
+        # consumes it and drops a bare WAITING protocol reply (pure plumbing).
+        # Survives non-prose events.
         self._completion_nudge_pending = False
-        # One-shot: armed alongside _completion_nudge_pending by a completion_nudge;
-        # consumed by the single following user_message to drop the injected nudge
-        # node so it never renders as an `injected message:` block in --full.
-        self._suppress_next_injected = False
         self._opening_intent_node: UserMessageNode | None = None
         # Optimistic reply echo: reconciled by the next user_message.
         self._pending_reply_node: UserMessageNode | None = None
@@ -726,8 +726,8 @@ class NarrativeBuilder:
     def seed_opening_intent(self, text: str) -> None:
         """Optimistic echo of the opening message: seed the committed opening-intent
         node at root so frame one shows it. Used by the non-TUI
-        LiveDriver.seed_opening_intent; _h_opening_intent reconciles the
-        authoritative event into it in place."""
+        LiveDriver.seed_opening_intent; the _h_user_message intent-subtype branch
+        reconciles the seeded _opening_intent_node in place."""
         node = UserMessageNode(text=text, interactive=True)
         self._opening_intent_node = node
         self._root.children.append(node)
@@ -1294,15 +1294,6 @@ def _h_step_started(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, 
 def _h_step_completed(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
     self._flush_pending_rename()
     self._flush_burst()
-    # D1: an awaiting-reply arm is valid only within the step that raised it — a
-    # solicit is always answered before its step ends. If the arm was never
-    # consumed by a human user_message (e.g. the run paused at the gate and
-    # resumed with an engine-continuation nudge, which is not a user_message), it
-    # must not survive the step boundary; otherwise the next step's begin-kickoff
-    # user_message is mis-tagged interactive and leaks as a `> ...` human turn in
-    # live stream and imp log replay. Disarm at completion (not at step start, so
-    # a resume-interject reply delivered on re-entry is still classified human).
-    self._awaiting_reply = False
     self._close_open_folds_at_step_end(event.get("timestamp"))
     action = p.get("action")          # dict {verb, target?}; var_mutations is a sibling
     node = self._pop_step(p.get("step"))
@@ -1424,14 +1415,11 @@ def _h_awaiting_user_input(
 ) -> None:
     # The authoritative signal that this step is soliciting the human (Task 8):
     # mark the CURRENT open step interactive (drives the conversational-beat
-    # blank-line spacing in render_text), and arm the flag so the next
-    # user_message is tagged as a genuine human turn (rendered as `> …`) rather
-    # than a synthetic engine prompt (dropped). The event's prompt payload is
-    # carried onto the pending reply as its question line (M3); render nothing
-    # here — the reply node renders the question above its caret.
+    # blank-line spacing in render_text). The event's prompt payload is carried
+    # onto the pending reply as its question line (M3); render nothing here — the
+    # reply node renders the question above its caret.
     if self._step_stack:
         self._step_stack[-1].interactive = True
-    self._awaiting_reply = True
     # Settle an open tool burst so the live _walk does not block on it: a burst
     # is not closed by its own tool_result (only by the next prose/flush), so a
     # replayed tail that ran a tool then solicited the human without closing
@@ -1466,25 +1454,7 @@ def _h_awaiting_user_input(
     return None
 
 
-def _h_user_interjected(
-    self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any],
-) -> None:
-    # A human interject is delivered UNPROMPTED (no preceding awaiting_user_input),
-    # so deliver_interject emits user_message THEN user_interjected (that emit order
-    # is a deliberate prior decision — keep it). The user_message just appended a
-    # UserMessageNode with interactive=False, which render_text would drop as a
-    # synthetic engine prompt. Retroactively mark that node interactive=True so it
-    # renders as a genuine `> …` human turn. The node is the most-recently-appended child of
-    # the current container (post-append mutation is an established pattern — see
-    # the resume re-entry path mutating existing.interactive).
-    children = self._container().children
-    if children and isinstance(children[-1], UserMessageNode):
-        children[-1].interactive = True
-    return None
-
-
 NarrativeBuilder._HANDLERS["awaiting_user_input"] = _h_awaiting_user_input
-NarrativeBuilder._HANDLERS["user_interjected"] = _h_user_interjected
 
 
 def _sanitize_activity_arg(value: Any, *, limit: int = 50) -> str:
@@ -1600,40 +1570,63 @@ def _rotate_status_phrase(self: NarrativeBuilder) -> None:
         self._step_stack[-1].rotated_phrase = _draw_status_phrase()
 
 
+def _h_engine_message(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
+    subtype = str(p.get("subtype") or "")
+    if subtype == "completion":
+        # Preserve old completion_nudge behavior exactly: arm the WAITING-drop and
+        # render nothing structural. Do NOT flush — a turn-end nudge must not split
+        # an open tool burst (byte-identity, AC #1).
+        self._completion_nudge_pending = True
+    else:
+        self._flush_burst()
+    if subtype == "agent_prompt":
+        # Replicate the old human=False user_message seed: reseed the burst/stretch
+        # span clock from the body ts for agent_prompt ONLY, so lean imp log stays
+        # byte-identical (system_prompt/continuation/completion never seeded span).
+        _rotate_status_phrase(self)
+        self._span_start_ts = event.get("timestamp")
+        self._stretch_start_ts = event.get("timestamp")
+        self._stretch_backoff_base = self.backoff_wait_seconds(None)
+    self._append(EngineMessageNode(text=_user_message_text(p), subtype=subtype))
+
+
 def _h_user_message(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
-    if self._suppress_next_injected:
-        # One-shot: this user_message is the engine's completion nudge (a
-        # human=False injection armed by the preceding completion_nudge event).
-        # Drop its node so it never renders as an `injected message:` block;
-        # leave _completion_nudge_pending set so the WAITING-drop still fires.
-        self._suppress_next_injected = False
-        return
     self._flush_burst()
     _rotate_status_phrase(self)
     self._span_start_ts = event.get("timestamp")
     self._stretch_start_ts = event.get("timestamp")
     self._stretch_backoff_base = self.backoff_wait_seconds(None)
-    interactive, self._awaiting_reply = self._awaiting_reply, False
+    subtype = p.get("subtype")
     text = _user_message_text(p)
-    if interactive and not text.strip():
+    if subtype == "reply" and not text.strip():
         block = _sole_success_tool_result(p)
         if block is not None:
-            # Live-safe resume reply: the injected message's sole block is a
-            # success tool_result carrying the human's reply (anthropic/openai/
-            # claude_code resume shape).
+            # Live-safe resume reply: the sole block is a success tool_result
+            # carrying the human's reply (anthropic/openai/claude_code resume shape).
             text = _summarize_result(block.get("content"))
     if event.get("_replay"):
         # A replayed user_message never consumes an optimistic echo — only the live turn does.
-        self._append(UserMessageNode(text=text, interactive=interactive))
+        node = UserMessageNode(text=text, interactive=True)
+        if subtype == "intent":
+            self._opening_intent_node = node
+        self._append(node)
+        return
+    if subtype == "intent" and self._opening_intent_node is not None:
+        # Already seeded optimistically (non-TUI live path): adopt the authoritative
+        # text in place; never append a duplicate.
+        self._opening_intent_node.text = text
         return
     pending, self._pending_reply_node = self._pending_reply_node, None
     if pending is not None:
         # Reconcile the optimistic echo: adopt authoritative text in place
         # (one-to-one awaiting-reply match).
         pending.text = text
-        pending.interactive = interactive
+        pending.interactive = True
         return
-    self._append(UserMessageNode(text=text, interactive=interactive))
+    node = UserMessageNode(text=text, interactive=True)
+    if subtype == "intent":
+        self._opening_intent_node = node
+    self._append(node)
 
 
 def _h_agent_message(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
@@ -1707,26 +1700,14 @@ def _h_agent_result(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, 
         children[narration_idx].held = False
 
 
-def _h_opening_intent(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
-    text = p.get("text", "")
-    if self._opening_intent_node is not None:
-        # Already seeded optimistically (non-TUI live path): adopt the authoritative
-        # text in place; never append a duplicate.
-        self._opening_intent_node.text = text
-        return
-    node = UserMessageNode(text=text, interactive=True)
-    self._opening_intent_node = node
-    self._append(node)
-
-
 def _h_query_result(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
     # Token totals + cost are accumulated in add() (pre-routing, so subagent
     # query_results fold into the quest total). No visible node.
     return
 
 
-NarrativeBuilder._HANDLERS["opening_intent"] = _h_opening_intent
 NarrativeBuilder._HANDLERS["user_message"] = _h_user_message
+NarrativeBuilder._HANDLERS["engine_message"] = _h_engine_message
 NarrativeBuilder._HANDLERS["agent_message"] = _h_agent_message
 NarrativeBuilder._HANDLERS["thinking"] = _h_thinking
 NarrativeBuilder._HANDLERS["step_context"] = _h_step_context
@@ -2101,16 +2082,6 @@ def _h_output_validation_nudge(
         is_warning=True))
 
 
-def _h_completion_nudge(
-    self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]
-) -> None:
-    # Telemetry-only (events.jsonl keeps the forensic record; render nothing).
-    # Arm the flag so the next prose agent_message can drop a bare WAITING reply.
-    self._completion_nudge_pending = True
-    # Arm the one-shot so the single following (nudge) user_message node is dropped.
-    self._suppress_next_injected = True
-
-
 def _h_script_blocked(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
     self._flush_burst()
     step = str(p.get("step", "?"))
@@ -2134,23 +2105,13 @@ def _h_max_tokens_truncated(
     return
 
 
-def _h_engine_continuation(
-    self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]
-) -> None:
-    # _awaiting_reply left untouched: the stale-arm disarm is owned by _h_step_completed.
-    self._flush_burst()
-    self._append(UserMessageNode(text=p.get("text", ""), interactive=False))
-
-
 NarrativeBuilder._HANDLERS["error"] = _h_error
 NarrativeBuilder._HANDLERS["runner_warning"] = _h_runner_warning
 NarrativeBuilder._HANDLERS["warning"] = _h_warning
 NarrativeBuilder._HANDLERS["agent_retry"] = _h_agent_retry
 NarrativeBuilder._HANDLERS["output_validation_nudge"] = _h_output_validation_nudge
-NarrativeBuilder._HANDLERS["completion_nudge"] = _h_completion_nudge
 NarrativeBuilder._HANDLERS["script_blocked"] = _h_script_blocked
 NarrativeBuilder._HANDLERS["max_tokens_truncated"] = _h_max_tokens_truncated
-NarrativeBuilder._HANDLERS["engine_continuation"] = _h_engine_continuation
 
 
 def _h_script_output(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:

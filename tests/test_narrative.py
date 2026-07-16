@@ -3030,3 +3030,69 @@ def test_agent_message_event_renders_prose_node():
     step = tree.root.children[0].children[0]
     texts = [c.text for c in step.children if isinstance(c, nv.AgentTextNode)]
     assert texts == ["hello from the model"]
+
+
+def test_interject_is_single_interactive_human_turn():
+    tree = nv.build_tree([
+        _ev("u1", "user_message", subtype="interject", role="user",
+            content=[{"type": "text", "text": "hold on"}]),
+    ])
+    ums = [c for c in tree.root.children if isinstance(c, nv.UserMessageNode)]
+    assert len(ums) == 1
+    assert ums[0].text == "hold on"
+    assert ums[0].interactive is True
+
+
+def test_engine_message_becomes_subtyped_engine_node():
+    tree = nv.build_tree([
+        _ev("1", "step_started", step="plan", kind="agent", phase="build",
+            model="m", provider="anthropic"),
+        _ev("e1", "engine_message", agent_id="step:build/plan",
+            subtype="continuation", role="user",
+            content=[{"type": "text", "text": "please continue"}]),
+    ])
+    step = tree.root.children[0].children[0]
+    ems = [c for c in step.children if isinstance(c, nv.EngineMessageNode)]
+    assert len(ems) == 1
+    assert ems[0].subtype == "continuation"
+    assert ems[0].text == "please continue"
+    assert not any(isinstance(c, nv.UserMessageNode) for c in step.children)
+
+
+def test_completion_engine_message_drops_bare_waiting_reply():
+    tree = nv.build_tree([
+        _ev("1", "step_started", step="plan", kind="agent", phase="build",
+            model="m", provider="anthropic"),
+        _ev("e1", "engine_message", agent_id="step:build/plan",
+            subtype="completion", role="user",
+            content=[{"type": "text", "text": "did you finish?"}]),
+        _ev("a1", "agent_message", agent_id="step:build/plan",
+            provider="anthropic", model="m", stop_reason="end_turn", usage={},
+            raw={"content": [{"type": "text", "text": "WAITING"}]}),
+    ])
+    step = tree.root.children[0].children[0]
+    assert not any(isinstance(c, nv.AgentTextNode) for c in step.children)
+
+
+def test_agent_prompt_seeds_burst_span_from_body_ts():
+    t0 = "2026-06-03T00:00:00+00:00"
+    t2 = "2026-06-03T00:00:05+00:00"
+    tree = nv.build_tree([
+        {"id": "1", "agent_id": None, "type": "step_started", "timestamp": t0,
+         "payload": {"step": "plan", "kind": "agent", "phase": "build",
+                     "model": "m", "provider": "anthropic"}},
+        {"id": "e1", "agent_id": "step:build/plan", "type": "engine_message",
+         "timestamp": t2,
+         "payload": {"role": "user", "subtype": "agent_prompt",
+                     "content": [{"type": "text", "text": "body"}]}},
+        {"id": "a1", "agent_id": "step:build/plan", "type": "agent_message",
+         "payload": {"provider": "anthropic", "model": "m", "stop_reason": None,
+                     "usage": {}, "raw": {"content": [
+                         {"type": "tool_use", "id": "b1", "name": "bash",
+                          "input": {"command": "ls"}}]}}},
+        {"id": "t1", "agent_id": "step:build/plan", "type": "tool_call",
+         "payload": {"id": "b1", "name": "bash", "input": {"command": "ls"}}},
+    ])
+    step = tree.root.children[0].children[0]
+    burst = next(c for c in step.children if isinstance(c, nv.ToolBurstFold))
+    assert burst.span_start_ts == t2
