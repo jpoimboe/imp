@@ -42,10 +42,10 @@ def test_create_seeds_step_label(tmp_path: Path) -> None:
     ch = Quest.create(tmp_path, title="A", quest_id="alpha", base_branch="main")
     st = State.load(ch.state_dir)
     flat0_name = st.step                       # the seeded initial cursor
-    # The stub workflow's first step has no label:, so step_label falls back to the
-    # step NAME — but it must be set (not None), proving the seed wrote it.
+    # The stub workflow's first step has no label:, so step_label is honestly None
+    # (the step-name fallback is dropped); the cursor itself is still set.
     assert flat0_name is not None
-    assert st.step_label == flat0_name
+    assert st.step_label is None
 
 
 def test_status_row_carries_step_label_as_seventh_element(tmp_path: Path) -> None:
@@ -53,7 +53,7 @@ def test_status_row_carries_step_label_as_seventh_element(tmp_path: Path) -> Non
     Quest.create(tmp_path, title="A", quest_id="alpha", base_branch="main")
     row = next(r for r in _status_rows(tmp_path) if r[0] == "alpha")
     assert len(row) == 8
-    assert row[6] == row[2]    # stub step has no label → step_label == step name
+    assert row[6] is None      # stub step has no label → step_label honestly None
     assert row[7] is None      # stub step has no phase label
 
 

@@ -23,10 +23,7 @@ def seed_workflow_start(state: State, workflow: Workflow, config: Config) -> Non
     if flat:
         first = flat[0]
         state.step = first.name
-        state.step_label = (
-            render_label(first.label, quest=None, log=None, state=None)
-            or first.name
-        )
+        state.step_label = render_label(first.label, quest=None, log=None, state=None)
         state.phase_label = (
             render_label(first.phase_label, quest=None, log=None, state=None)
             if first.phase_label is not None else None
