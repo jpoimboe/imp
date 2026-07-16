@@ -3,7 +3,7 @@
 One event -> one line: envelope (timestamp, type, agent_id) + a per-type
 one-liner. Keyed strictly on ENGINE event types — references no workflow
 step/phase/artifact names. Tolerant of missing envelope keys (raw
-llm_response_usage_patch rows), malformed rows, and unparseable payloads.
+agent_message_usage_patch rows), malformed rows, and unparseable payloads.
 """
 
 from __future__ import annotations
@@ -48,7 +48,7 @@ def _content_text(content: Any) -> str:
 
 
 def _parse_llm(payload: dict[str, Any]) -> tuple[str, int]:
-    """Best-effort text + tool_use count from llm_response.raw. Never raises:
+    """Best-effort text + tool_use count from agent_message.raw. Never raises:
     a provider with no parser or a malformed raw degrades to ("", 0)."""
     try:
         from imp.engine.replay import parse_message
@@ -64,15 +64,20 @@ def _parse_llm(payload: dict[str, Any]) -> tuple[str, int]:
 
 
 def _h_user(payload: dict[str, Any]) -> str:
-    role = payload.get("role", "user")
-    return f"{role}: {_collapse(_message_text(payload))}"
+    subtype = payload.get("subtype", "")
+    return f"{subtype} {_collapse(_message_text(payload))}".strip()
 
 
 def _h_awaiting(payload: dict[str, Any]) -> str:
     return _collapse(str(payload.get("steer_hint", "")))
 
 
-def _h_llm_response(payload: dict[str, Any]) -> str:
+def _h_engine_message(payload: dict[str, Any]) -> str:
+    subtype = payload.get("subtype", "")
+    return f"{subtype} {_collapse(_message_text(payload))}".strip()
+
+
+def _h_agent_message(payload: dict[str, Any]) -> str:
     texts, n_tools = _parse_llm(payload)
     usage = payload.get("usage") or {}
     return (f"stop={payload.get('stop_reason')} tools={n_tools} "
@@ -91,12 +96,12 @@ def _h_tool_result(payload: dict[str, Any]) -> str:
             f"{_collapse(text)}")
 
 
-def _h_agent_output(payload: dict[str, Any]) -> str:
+def _h_agent_result(payload: dict[str, Any]) -> str:
     return _collapse(json.dumps(payload, default=str))
 
 
 def _h_step_context(payload: dict[str, Any]) -> str:
-    # Deliberately omits system_prompt + tools_schema (redaction by construction).
+    # system_prompt moved to engine_message/system_prompt; reports provider/model only.
     return f"provider={payload.get('provider')} model={payload.get('model')}"
 
 
@@ -133,14 +138,14 @@ def _h_warning(payload: dict[str, Any]) -> str:
 
 _HANDLERS: dict[str, Callable[[dict[str, Any]], str]] = {
     "user_message": _h_user,
-    "user_interjected": _h_user,
+    "engine_message": _h_engine_message,
     "awaiting_user_input": _h_awaiting,
-    "llm_response": _h_llm_response,
+    "agent_message": _h_agent_message,
     "step_started": _h_step_started,
     "query_result": _h_query_result,
     "tool_call": _h_tool_call,
     "tool_result": _h_tool_result,
-    "agent_output": _h_agent_output,
+    "agent_result": _h_agent_result,
     "step_context": _h_step_context,
     "warning": _h_warning,
 }
