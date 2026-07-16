@@ -103,7 +103,7 @@ def test_merge_blocked_outcome_forwards_exhaustion_note() -> None:
     assert mb.call_args.args[3] == note     # the note reached _emit_merge_blocked as the note arg
 
 
-def test_emit_paused_summary_renders_terminated_reason_red_no_at_locator(capsys) -> None:
+def test_emit_paused_summary_renders_agent_error_block(capsys) -> None:
     quest = _Change([
         {"type": "step_started", "payload": {"phase": "reviewing plan"}},
         {"type": "error",
@@ -115,11 +115,43 @@ def test_emit_paused_summary_renders_terminated_reason_red_no_at_locator(capsys)
     main._emit_paused_summary(quest)
     out = capsys.readouterr().out
     assert not out.startswith("\n")                    # no leading blank
-    assert "terminated: API Error 400 — tool use concurrency" in out
+    assert "agent error: API Error 400 — tool use concurrency" in out
+    assert "\ntrace\n" in out                          # remaining cause line → body
+    assert "terminated:" not in out                    # raw token never shown
     assert " at reviewing plan" not in out             # locator dropped
-    assert "resume: imp resume 2026-06-12-run-x" in out
+    assert "resume: imp resume" not in out             # error block has no resume line
     assert out.endswith("\n\n")
     assert not out.endswith("\n\n\n")
+
+
+def test_emit_paused_summary_api_pause_renders_red_block_not_gold(capsys) -> None:
+    from imp.cli import palette as pal
+    quest = _Change([
+        {"type": "step_started", "payload": {"phase": "reviewing plan"}},
+        {"type": "error",
+         "payload": {"detail": {"last_agent_text": "API Error 400 — tool use concurrency"}}},
+        {"type": "workflow_paused", "payload": {"reason": "api", "kind": "api"}},
+    ])
+    with patch.object(main, "should_use_color", lambda stream: True):
+        main._emit_paused_summary(quest)
+    out = capsys.readouterr().out
+    assert pal.ansi("API error: API Error 400 — tool use concurrency", "red") in out
+    assert "resume: imp resume" not in out          # error block carries no resume line
+    assert "2026-06-12-run-x" in out                # bare-id identity line (untitled)
+    assert out.endswith("\n\n")
+
+
+def test_emit_paused_summary_error_block_plain_under_no_color(capsys) -> None:
+    quest = _Change([
+        {"type": "error", "payload": {"detail": {"last_agent_text": "API Error 400"}}},
+        {"type": "workflow_paused", "payload": {"reason": "api", "kind": "api"}},
+    ])
+    with patch.object(main, "should_use_color", lambda stream: False):
+        main._emit_paused_summary(quest)
+    out = capsys.readouterr().out
+    assert "API error: API Error 400" in out
+    assert "\x1b[" not in out                        # no SGR under NO_COLOR / non-TTY
+    assert "resume: imp resume" not in out
 
 
 def test_emit_paused_summary_interrupt_renders_bare_reason(capsys) -> None:

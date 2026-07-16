@@ -21,6 +21,7 @@ import signal
 import subprocess
 import sys
 from collections.abc import Awaitable, Callable, Iterable
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, NamedTuple, NoReturn
@@ -319,13 +320,24 @@ def _error_block(head: str, body: list[str], quest_id: str, title: str,
     return lines
 
 
-def _pause_reason(events: list[dict[str, Any]]) -> str | _PauseBanner | None:
-    """The terminal pause's reason line for the headline.
+@dataclass(frozen=True)
+class _PauseInfo:
+    """A terminal pause's structured reason: the base token (`api`, `terminated`,
+    `interrupt`, a deliberate-leave trigger, `crash`, …) and the full cause text
+    (multi-line allowed), or None when the reason carries no cause."""
+    base: str
+    cause: str | None
+
+
+def _pause_reason(events: list[dict[str, Any]]) -> _PauseInfo | _PauseBanner | None:
+    """The terminal pause's structured reason (a _PauseInfo) for the headline.
 
     The last workflow_paused reason (interrupt_reason wins, mirroring
-    _h_workflow_paused), plus a one-line cause from the error that drove that
-    pause (the error's detail.last_agent_text, else its message, first line
-    only). The event log is cumulative across resume, so each error is paired
+    _h_workflow_paused), plus the full cause text from the error that drove that
+    pause (the error's detail.last_agent_text, else its message — the full cause
+    text, multi-line allowed; the renderer splits its first line as the red
+    summary from the remaining body lines). The event log is cumulative across
+    resume, so each error is paired
     with the workflow_paused that immediately follows it; only an error in the
     terminal pause's own segment contributes a cause. An interrupt pause with no
     error in its segment renders the bare reason, even when an earlier segment
@@ -370,34 +382,36 @@ def _pause_reason(events: list[dict[str, Any]]) -> str | _PauseBanner | None:
     if paused_error is not None:
         d = paused_error.get("detail")
         if isinstance(d, dict) and d.get("last_agent_text"):
-            text = str(d["last_agent_text"]).strip()
-            cause = text.splitlines()[0].strip() if text else None
+            cause = str(d["last_agent_text"]).strip() or None
         if cause is None and paused_error.get("message"):
-            msg = str(paused_error["message"]).strip()
-            cause = msg.splitlines()[0].strip() if msg else None
-    return f"{base}: {cause}" if cause else str(base)
+            cause = str(paused_error["message"]).strip() or None
+    return _PauseInfo(base=str(base), cause=cause)
 
 
-def _pause_is_error(reason: str | None) -> bool:
-    """A pause reason is an error (red tail) when it denotes an abnormal
-    termination: a `terminated: …` reason, an `internal_error: …` reason, or the
-    `ended unexpectedly — see …` crash pointer. A clean reason (`interrupt`, or a
-    deliberate-leave trigger such as `ctrl-d`/`sigterm`) or no reason (the bare
-    `paused` fallback) is not — it renders gold."""
-    return reason is not None and (
-        reason.startswith("terminated")
-        or reason.startswith("internal_error")
-        or reason.startswith("ended unexpectedly"))
+def _pause_is_error(info: _PauseInfo | None) -> bool:
+    """A pause is an error (red block) exactly when its base token is a key in the
+    label map. Everything else — interrupt, deliberate-leave triggers, a your-turn
+    `paused`, and any other current gold reason (e.g. `script_blocked`) — is not."""
+    return info is not None and info.base in _ERROR_LABELS
 
 
 def _pause_lines(
     name: str, token: str,
-    *, reason: str | None = None, title: str = "", color: bool,
+    *, info: _PauseInfo | None = None, title: str = "", color: bool,
 ) -> list[str]:
-    tail = reason if reason else "paused"
-    tail_code = "red" if _pause_is_error(reason) else "wordmark"
+    if _pause_is_error(info):
+        assert info is not None
+        label = _ERROR_LABELS[info.base]
+        head, body = label, []
+        if info.cause:
+            first, *rest = info.cause.splitlines()
+            first = first.strip()
+            head = f"{label}: {first}" if first else label
+            body = rest
+        return _error_block(head, body, name, title, color=color)
+    tail = info.base if info is not None else "paused"
     return [
-        _status_spine(name, title, tail, tail_code, color=color),
+        _status_spine(name, title, tail, "wordmark", color=color),
         _resume_line(token),
     ]
 
@@ -433,31 +447,31 @@ def _daemon_stderr_has_crash(path: Path) -> bool:
 
 def _pause_facts(
     quest: Quest, leave_trigger: str | None = None,
-) -> tuple[str, str, str, str | None]:
+) -> tuple[str, str, str, _PauseInfo | None]:
     name = quest.id
     events = list(quest.event_log().read())
     if leave_trigger is not None:
         # Deliberate leave: render the trigger locally (daemon reason may lag / read STALE).
-        return name, quest.title, quest.id, leave_trigger
+        return name, quest.title, quest.id, _PauseInfo(leave_trigger, None)
     reason_val = _pause_reason(events)
     if reason_val is _PauseBanner.STALE:
         if _daemon_stderr_has_crash(quest.quest_dir / "daemon.stderr"):
-            reason: str | None = (
-                f"ended unexpectedly — see .imp/quests/{quest.id}/daemon.stderr")
+            info: _PauseInfo | None = _PauseInfo(
+                "crash", f"see .imp/quests/{quest.id}/daemon.stderr")
         else:
             # A resumed-without-pause segment with no crash traceback is a clean
             # deliberate detach — render the calm interrupt reason, no pointer.
-            reason = "interrupt"
+            info = _PauseInfo("interrupt", None)
     else:
-        reason = reason_val
-    return name, quest.title, quest.id, reason
+        info = reason_val
+    return name, quest.title, quest.id, info
 
 
 def _emit_paused_summary(quest: Quest, leave_trigger: str | None = None) -> None:
     """The trailing run-status line on a non-interactive pause."""
     color = should_use_color(sys.stdout)
-    name, title, token, reason = _pause_facts(quest, leave_trigger)
-    for ln in _pause_lines(name, token, reason=reason, title=title, color=color):
+    name, title, token, info = _pause_facts(quest, leave_trigger)
+    for ln in _pause_lines(name, token, info=info, title=title, color=color):
         print(ln)
     print()
 
