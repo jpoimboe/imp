@@ -3783,3 +3783,108 @@ def test_warn_if_no_overlay_skips_probe_when_home_absent(monkeypatch):
     ex._warn_if_no_overlay(_active_home_policy(home=""), quest, log)
     assert called == []
     assert log.events == []
+
+
+# ── hutu62 shape: cross-plan verify counter does not accumulate ──────────────
+
+
+@pytest.mark.anyio
+async def test_cross_plan_verify_counter_independent(tmp_path: Path) -> None:
+    """Each plan bounces verify once then leaps it via task-lead's forward goto.
+    With the leap-over reset, verify's counter resets per plan and 12 plans
+    complete; the leak bug accumulates it past the cap-10 default and pauses."""
+    import subprocess
+
+    wf = tmp_path / "imp" / "workflows" / "imp"
+    (wf / "agents").mkdir(parents=True)
+    (wf / "agents" / "plan-writer.md").write_text(
+        "---\nname: plan-writer\ntools: [complete_step]\n"
+        "output:\n  status: {type: enum, values: [Success, Error]}\n---\ngo\n"
+    )
+    (wf / "agents" / "task-lead.md").write_text(
+        "---\nname: task-lead\ntools: [complete_step]\n"
+        "output:\n  status: {type: enum, values: [Success, Error]}\n"
+        "  tol: {type: bool}\n---\ngo\n"
+    )
+    (wf / "agents" / "check-next-plan.md").write_text(
+        "---\nname: check-next-plan\ntools: [complete_step]\n"
+        "output:\n  status: {type: enum, values: [Success, Error]}\n"
+        "  more: {type: bool}\n---\ngo\n"
+    )
+    (wf / "workflow.yaml").write_text(
+        "name: t\ndescription: t\n"
+        "defaults: {max_retries: 1, max_loops: 10}\n"
+        "phases:\n"
+        "  - name: work\n"
+        "    steps:\n"
+        "      - {name: plan-writer, file: agents/plan-writer.md, tier: low}\n"
+        "      - name: task-lead\n"
+        "        file: agents/task-lead.md\n"
+        "        tier: low\n"
+        "        rules:\n"
+        "          - {if: {tol: true}, goto: check-next-plan}\n"
+        "          - {else: true, continue: true}\n"
+        "      - name: verify\n"
+        "        command: 'exit 1'\n"
+        "        rules:\n"
+        "          - {if: {exit: 0}, continue: true}\n"
+        "          - {else: true, resume: task-lead}\n"
+        "      - name: check-next-plan\n"
+        "        file: agents/check-next-plan.md\n"
+        "        tier: low\n"
+        "        max_loops: 100\n"
+        "        rules:\n"
+        "          - {if: {more: true}, goto: plan-writer}\n"
+        "          - {else: true, continue: true}\n"
+    )
+    _write_fake_config(tmp_path)
+    subprocess.run(["git", "init", str(tmp_path)], check=True, capture_output=True)
+    quest = _make_change(tmp_path)
+
+    from imp.providers import resolve
+    resolve.reset_providers_for_tests()
+
+    PLANS = 12
+    cnp_calls: list[int] = []
+
+    class _Runner:
+        def __init__(self, name: str) -> None:
+            self._name = name
+
+        async def run(self, invocation: AgentInvocation) -> AsyncIterator[Event]:
+            if self._name == "task-lead":
+                # A verify bounce resumes task-lead with an empty transcript; that
+                # resumed visit tolerates and leaps verify. The fresh visit (from
+                # plan-writer) has a non-empty seed and continues to verify.
+                tol = not invocation.initial_messages
+                _persist_initial(invocation)
+                yield {"type": "agent_output",
+                       "payload": {"outcome": "ok", "status": "Success", "tol": tol}}
+            elif self._name == "check-next-plan":
+                cnp_calls.append(1)
+                more = len(cnp_calls) < PLANS
+                yield {"type": "agent_output",
+                       "payload": {"outcome": "ok", "status": "Success", "more": more}}
+            else:
+                yield {"type": "agent_output",
+                       "payload": {"outcome": "ok", "status": "Success"}}
+
+        async def interrupt(self) -> None:
+            pass
+
+    class _Provider:
+        name = "fake"
+        model = "m"
+
+        def create_runner(self, invocation: AgentInvocation) -> AgentRunner:
+            return _Runner(invocation.agent_def.name)
+
+    resolve.register_provider(
+        "fake", env_check=lambda: True, factory=lambda _m: _Provider(),
+    )
+
+    result = await run_quest(quest, on_event=lambda _e: None)
+    assert result is RunResult.COMPLETED           # no cross-plan max_loops pause
+    assert len(cnp_calls) == PLANS                 # all 12 plans ran
+    state = State.load(quest.state_dir)
+    assert state.loop_counts.get("verify", 0) <= 1  # reset each plan, never accumulates
