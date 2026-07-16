@@ -46,13 +46,9 @@ def conversation_prose(events: list[Any]) -> str:
             continue
         etype = ev.get("type")
         try:
-            if etype == "opening_intent":
-                text = str(payload.get("text", ""))
-            elif etype == "user_message":
-                if not payload.get("human"):
-                    continue
+            if etype == "user_message":
                 text = user_message_text(payload)
-            elif etype == "llm_response":
+            elif etype == "agent_message":
                 text = "\n".join(render_agent_message(payload).texts)
             else:
                 continue

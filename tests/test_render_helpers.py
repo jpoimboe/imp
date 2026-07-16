@@ -271,3 +271,32 @@ def test_events_content_still_matches_after_refactor() -> None:
     assert "STACKTRACE_XYZ" in text
     assert "m" in text
     assert "PROMPTNOISE" not in text
+
+
+def test_conversation_prose_triad_vocabulary() -> None:
+    events = [
+        {"type": "user_message",
+         "payload": {"subtype": "intent",
+                     "content": [{"type": "text", "text": "make search better"}]}},
+        {"type": "user_message",
+         "payload": {"subtype": "reply",
+                     "content": [{"type": "text", "text": "add a 300s timeout"}]}},
+        {"type": "user_message",
+         "payload": {"subtype": "interject",
+                     "content": [{"type": "text", "text": "wait, use sqlite"}]}},
+        {"type": "engine_message",
+         "payload": {"subtype": "agent_prompt",
+                     "content": [{"type": "text", "text": "FRAMEWORK BODY"}]}},
+        {"type": "agent_message",
+         "payload": {"provider": "anthropic",
+                     "raw": {"content": [{"type": "text",
+                                          "text": "the deadline is wired"}],
+                             "stop_reason": "end_turn", "usage": {}}}},
+    ]
+    prose = conversation_prose(events)
+    assert prose == (
+        "make search better\n"
+        "add a 300s timeout\n"
+        "wait, use sqlite\n"
+        "the deadline is wired")
+    assert "FRAMEWORK BODY" not in prose      # engine turns are not conversation
