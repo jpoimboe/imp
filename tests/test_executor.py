@@ -493,8 +493,95 @@ async def test_backward_goto_increments_loop_count_and_trips_max_loops(
 
     state = State.load(quest.state_dir)
     assert state.status == "paused"
-    # max_loops: 2 → loop trips on the 3rd backward goto (n == 3 > 2).
-    assert state.loop_counts["reviewer"] == 3
+    # max_loops: 2 trips on the 3rd backward goto; the pause clears the counter
+    # so a subsequent resume re-enters with a fresh budget.
+    assert state.loop_counts.get("reviewer", 0) == 0
+
+
+@pytest.mark.anyio
+async def test_max_loops_pause_resets_counter_for_fresh_resume(tmp_path: Path) -> None:
+    """After a max_loops pause the persisted counter is cleared, so resuming the
+    parked step runs a full fresh lap-set (cap+1 reviewer runs) before pausing
+    again — not an immediate re-trip on the first backward edge."""
+    wf = tmp_path / "imp" / "workflows" / "imp"
+    (wf / "agents").mkdir(parents=True)
+    (wf / "agents" / "writer.md").write_text(
+        "---\nname: writer\ntools: [complete_step]\n"
+        "output:\n  status: {type: enum, values: [Success, Error]}\n---\ngo\n"
+    )
+    (wf / "agents" / "reviewer.md").write_text(
+        "---\nname: reviewer\ntools: [complete_step]\n"
+        "output:\n  status: {type: enum, values: [Success, Error]}\n"
+        "  verdict: {type: enum, values: [approve, rework]}\n---\ngo\n"
+    )
+    (wf / "workflow.yaml").write_text(
+        "name: t\ndescription: t\n"
+        "defaults: {max_retries: 1, max_loops: 10}\n"
+        "phases:\n"
+        "  - name: work\n"
+        "    steps:\n"
+        "      - {name: writer, file: agents/writer.md, tier: low}\n"
+        "      - name: reviewer\n"
+        "        file: agents/reviewer.md\n"
+        "        tier: low\n"
+        "        max_loops: 2\n"
+        "        rules:\n"
+        "          - {if: {verdict: rework}, goto: writer}\n"
+        "          - {else: true, continue: true}\n"
+    )
+    _write_fake_config(tmp_path)
+    quest = _make_change(tmp_path)
+
+    from imp.providers import resolve
+    resolve.reset_providers_for_tests()
+
+    reviewer_calls: list[int] = []
+
+    class _Runner:
+        def __init__(self, name: str) -> None:
+            self._name = name
+
+        async def run(self, invocation: AgentInvocation) -> AsyncIterator[Event]:
+            if self._name == "reviewer":
+                reviewer_calls.append(1)
+                yield {"type": "agent_output",
+                       "payload": {"outcome": "ok", "status": "Success", "verdict": "rework"}}
+            else:
+                yield {"type": "agent_output",
+                       "payload": {"outcome": "ok", "status": "Success"}}
+
+        async def interrupt(self) -> None:
+            pass
+
+    class _Provider:
+        name = "fake"
+        model = "m"
+
+        def create_runner(self, invocation: AgentInvocation) -> AgentRunner:
+            return _Runner(invocation.agent_def.name)
+
+    resolve.register_provider(
+        "fake", env_check=lambda: True, factory=lambda _m: _Provider(),
+    )
+
+    # First run trips max_loops (cap 2 → reviewer runs 3 times) and pauses.
+    result = await run_quest(quest, on_event=lambda _e: None)
+    assert result is RunResult.PAUSED
+    assert len(reviewer_calls) == 3
+
+    state = State.load(quest.state_dir)
+    assert state.status == "paused"
+    assert state.loop_counts.get("reviewer", 0) == 0    # counter cleared on pause
+    assert state.step == "reviewer"                     # cursor parked on the tripping step
+
+    # Simulate `imp resume`: clear the pause and re-run the parked step.
+    reviewer_calls.clear()
+    state.status = "running"
+    state.save(quest.state_dir)
+    result2 = await run_quest(quest, on_event=lambda _e: None)
+    assert result2 is RunResult.PAUSED
+    # Fresh budget: 3 more reviewer runs (cap+1), not an immediate 1-run re-trip.
+    assert len(reviewer_calls) == 3
 
 
 # ── forward goto resets every leaped-over step's counter ─────────────────────

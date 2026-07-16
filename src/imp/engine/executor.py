@@ -544,6 +544,7 @@ async def run_quest(
                     state.loop_counts[step.name] = n
                     if n > step.max_loops and not coordinator.should_pause:
                         _evict_if_holding(quest, state, log)
+                        state.loop_counts.pop(step.name, None)   # reset-on-pause: resume fresh
                         state.status = "paused"
                         state.save(quest.state_dir)
                         _emit_paused_event(log, "max_loops", step=step.name)
