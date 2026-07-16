@@ -1271,6 +1271,7 @@ async def _resume_inert(
             driver = _build_resume_driver(
                 quest=quest, state=state, status=status,
                 color=color, preceded_by_blank=True)
+            driver.echo_submitted_reply(line)   # visible echo, before the boot spinner
             coord = InterruptCoordinator()
             inner = make_interactive_solicit(
                 quest, status=status, driver=driver, coord=coord)

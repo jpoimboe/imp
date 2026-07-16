@@ -3138,6 +3138,35 @@ def test_compose_activity_line_no_retry_hint_below_60() -> None:
     assert "press r to retry now" not in line
 
 
+def test_echo_submitted_reply_shows_before_replay_and_reconciles_once() -> None:
+    out = _Pipe()
+    drv = LiveDriver(stream=out, color=False, width=80, status=LiveStatus(out),
+                     suppress_replay=True)
+    # Submit-time echo: rendered NOW, before any replay boundary (pre-spinner).
+    drv.echo_submitted_reply("my answer")
+    assert out.getvalue().count("> my answer") == 1
+    # Replay the parked history — including a PRIOR human turn — then the boundary.
+    for e in [
+        ev("1", "quest_created", quest_id=1, title="t"),
+        ev("2", "step_started", step="planner", kind="agent", phase="plan",
+           model="m", provider="anthropic"),
+        ev("3", "user_message", agent_id="step:plan/planner", role="user",
+           content=[{"type": "text", "text": "an earlier turn"}]),
+        ev("3b", "awaiting_user_input", agent_id="step:plan/planner"),
+    ]:
+        e["_replay"] = True
+        drv.on_event(e)
+    drv.on_event({"type": "replay_complete"})
+    # Replayed history stays hidden; the echo is neither duplicated nor consumed.
+    assert out.getvalue().count("> my answer") == 1
+    assert "an earlier turn" not in out.getvalue()
+    # The daemon's LIVE user_message for the submitted line reconciles in place —
+    # no second echo.
+    drv.on_event(ev("4", "user_message", agent_id="step:plan/planner", role="user",
+                    content=[{"type": "text", "text": "my answer"}]))
+    assert out.getvalue().count("> my answer") == 1
+
+
 def test_compose_activity_line_no_retry_hint_without_countdown() -> None:
     from imp.cli.live_driver import compose_activity_line
     act = nv.Activity(verb="coding", detail="bash pytest",

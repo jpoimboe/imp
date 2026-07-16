@@ -39,6 +39,8 @@ def _capture_driver(monkeypatch: pytest.MonkeyPatch) -> dict[str, object]:
 
         def install_startup_status(self) -> None: ...
 
+        def echo_submitted_reply(self, text: str) -> None: ...
+
     monkeypatch.setattr(m, "LiveDriver", _CapDriver)
     monkeypatch.setattr(m, "LiveStatus", lambda *a, **k: SimpleNamespace())
     monkeypatch.setattr(sig, "InterruptCoordinator", lambda *a, **k: SimpleNamespace())

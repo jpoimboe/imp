@@ -376,6 +376,16 @@ class LiveDriver:
         self._walk()
         self._refresh_status()
 
+    def echo_submitted_reply(self, text: str) -> None:
+        # Force this node past suppress_replay now; survives replay, reconciles the live turn.
+        self._builder.seed_pending_reply(text)
+        was_suppressing, self._suppressing = self._suppressing, False
+        try:
+            self._walk()
+        finally:
+            self._suppressing = was_suppressing
+        self._refresh_status()
+
     def append_committed_reply(self, text: str) -> None:
         # Committed, non-reconciling echo for a control slash command (no daemon
         # user_message will arrive). Mirrors seed_pending_reply's walk/refresh but
