@@ -2867,3 +2867,54 @@ def test_show_tiers_reveals_only_tiers() -> None:
     out_no_tiers = "\n".join(_show_lines(events, {"thinking", "tools", "subagents", "prompts"}))
     assert "tiers resolved:" not in out_no_tiers
     assert "→ anthropic/haiku" not in out_no_tiers
+
+
+def test_full_labels_each_engine_subtype_verbatim():
+    out = "\n".join(_lines([
+        _ev("1", "step_started", step="plan", kind="agent", phase="build",
+            model="m", provider="anthropic"),
+        _ev("e0", "engine_message", agent_id="step:build/plan",
+            subtype="system_prompt", role="user",
+            content=[{"type": "text", "text": "SYS " + "x" * 400}]),
+        _ev("e1", "engine_message", agent_id="step:build/plan",
+            subtype="agent_prompt", role="user",
+            content=[{"type": "text", "text": "the body"}]),
+        _ev("e2", "engine_message", agent_id="step:build/plan",
+            subtype="continuation", role="user",
+            content=[{"type": "text", "text": "keep going"}]),
+        _ev("e3", "engine_message", agent_id="step:build/plan",
+            subtype="completion", role="user",
+            content=[{"type": "text", "text": "done?"}]),
+    ], full=True))
+    assert "system prompt:" in out
+    assert "agent prompt:" in out
+    assert "continuation:" in out
+    assert "completion nudge:" in out
+    assert "injected message:" not in out
+    assert "x" * 40 in out
+    # the 400-char body is under the system-prompt label, not a mislabeled block
+    assert out.index("system prompt:") < out.index("x" * 40) < out.index("agent prompt:")
+
+
+def test_lean_hides_engine_messages():
+    out = "\n".join(_lines([
+        _ev("1", "step_started", step="plan", kind="agent", phase="build",
+            model="m", provider="anthropic"),
+        _ev("e1", "engine_message", agent_id="step:build/plan",
+            subtype="continuation", role="user",
+            content=[{"type": "text", "text": "keep going"}]),
+    ], full=False))
+    assert "keep going" not in out
+    assert "continuation:" not in out
+
+
+def test_step_context_full_has_no_system_prompt_line():
+    out = "\n".join(_lines([
+        _ev("1", "step_started", step="plan", kind="agent", phase="build",
+            model="m", provider="anthropic"),
+        _ev("c1", "step_context", agent_id="step:build/plan",
+            provider="anthropic", model="m",
+            tools_schema=[{"name": "read_file"}], params={}, max_tool_calls=40),
+    ], full=True))
+    assert "system_prompt:" not in out
+    assert "tools:" in out

@@ -25,6 +25,13 @@ _INDENT_W = len(_INDENT)  # logical indent width per level; the gutter SUBSTITUT
 
 _DIFFER_LABELS = {1: "vendor jump", 2: "same-vendor fallback", 3: "identical"}
 
+_ENGINE_LABELS = {
+    "system_prompt": "system prompt:",
+    "agent_prompt": "agent prompt:",
+    "continuation": "continuation:",
+    "completion": "completion nudge:",
+}
+
 # Plain-speak copy for pause reasons that need more than the verbatim token.
 # imp-canon nouns (quest, resume); unmapped reasons render as paused (<reason>).
 _PAUSE_REASON_COPY: dict[str, str] = {
@@ -363,7 +370,8 @@ def spaces_after(node: Any, *, full: bool) -> bool:
                              nv.PhaseNode, nv.StepNode, nv.BreadcrumbLine,
                              nv.ErrorNode, nv.PauseNode, nv.RenameNode))
         or (isinstance(node, nv.ToolBurstFold) and node.calls)
-        or (full and isinstance(node, (nv.ThinkingFold, nv.StepContextNode)))
+        or (full and isinstance(node, (nv.ThinkingFold, nv.StepContextNode,
+                                        nv.EngineMessageNode)))
     )
 
 
@@ -683,22 +691,20 @@ def _render(node: Any, *, depth: int, full: bool = False,
                                           color, display_width, gutters)
         return
 
+    if isinstance(node, nv.EngineMessageNode):
+        # Lean/live: engine turns are hidden. --full ("prompts" in cats): a labeled
+        # verbatim block, wrapped to width but never truncated.
+        if not ("prompts" in cats and node.text.strip()):
+            return
+        label = _ENGINE_LABELS.get(node.subtype, f"{node.subtype}:")
+        yield _line(label, depth, color, *pal.NODE_COLORS["metadata"], gutters=gutters)
+        yield from _wrap(_caret_escape(node.text), width, depth + 1, color,
+                         *pal.NODE_COLORS["metadata"], gutters=gutters)
+        return
+
     if isinstance(node, nv.UserMessageNode):
         if not node.interactive:
-            # A non-interactive message is an injected prompt, not a human turn:
-            # the top-level agent's real instructions, or (inside a fold) the
-            # parent's task_description to a subagent. Lean/live keep dropping it;
-            # --full surfaces it as a dim `injected message:` labeled verbatim
-            # block, mirroring the step_context metadata dump. Body is text, not
-            # markdown — it is a verbatim prompt. An empty/whitespace-only body
-            # renders nothing, leaving adjacency state untouched.
-            if not ("prompts" in cats and node.text.strip()):
-                return
-            yield _line("injected message:", depth, color,
-                        *pal.NODE_COLORS["metadata"], gutters=gutters)
-            yield from _wrap(_caret_escape(node.text), width, depth + 1, color,
-                             *pal.NODE_COLORS["metadata"], gutters=gutters)
-            return
+            return                       # invariant: user_message is always a human turn
         # A brand-orange `>` caret marks the human turn on the first line only; it
         # sits OUTSIDE the slate. The separating space + the wrapped text sit ON the
         # slate so the band hugs the text. Continuation lines carry a blank caret
@@ -1063,10 +1069,6 @@ def _render_step_context(ctx: nv.StepContextNode, *, depth: int, full: bool = Fa
     yield _line(f"{pal.fold_glyph(expanded=True)} context · {provider}/{model} · "
                 f"max_tool_calls={p.get('max_tool_calls', '?')}", depth, color,
                 *pal.NODE_COLORS["metadata"], gutters=gutters)
-    yield _line("system_prompt:", depth + 1, color, *pal.NODE_COLORS["metadata"],
-                gutters=gutters)
-    yield from _wrap(_caret_escape(str(p.get("system_prompt", ""))), width, depth + 2,
-                     color, *pal.NODE_COLORS["metadata"], gutters=gutters)
     yield _line("tools:", depth + 1, color, *pal.NODE_COLORS["metadata"], gutters=gutters)
     for t in tools:
         name = t.get("name", t) if isinstance(t, dict) else t
