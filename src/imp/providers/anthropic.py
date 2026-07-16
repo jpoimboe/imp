@@ -654,13 +654,18 @@ class AnthropicAgentRunner:
             elog.append_step_context(
                 agent_id=aid, parent_id_override=invocation.first_event_parent_id,
                 provider=invocation.provider_name, model=self.model,
-                system_prompt=invocation.system_prompt,
                 tools_schema=[_anthropic_tool_schema(t) for t in tools.values()],
                 params={"max_tokens": max_output_tokens},
                 max_tool_calls=invocation.max_tool_calls)
+            elog.append_engine_message(
+                agent_id=aid,
+                message=Message(role="system",
+                                content=(TextBlock(text=invocation.system_prompt),)),
+                subtype="system_prompt")
             for m in invocation.initial_messages:
                 if all(isinstance(b, TextBlock) for b in m.content):
-                    elog.append_user_message(agent_id=aid, message=m, human=False)
+                    elog.append_engine_message(
+                        agent_id=aid, message=m, subtype="agent_prompt")
 
         # max_tool_calls is opt-in; None means no cap. The engine resolves
         # agent_def -> workflow.defaults -> None and passes the result via
@@ -920,7 +925,7 @@ class AnthropicAgentRunner:
                 hmsg = Message(role="user", content=(TextBlock(text=instr),))
                 messages.append(hmsg)
                 transcript.append(hmsg)
-                elog.append_user_message(agent_id=aid, message=hmsg, human=False)
+                elog.append_engine_message(agent_id=aid, message=hmsg, subtype="continuation")
                 handoff_phase = "instruction_sent"
                 continue
 
