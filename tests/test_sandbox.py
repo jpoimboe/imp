@@ -688,6 +688,23 @@ def test_build_sandbox_policy_threads_pythonpath_to_setenv(tmp_path, monkeypatch
         str(quest.project_root / "src"))
 
 
+@pytest.mark.real_sandbox_policy
+def test_build_sandbox_policy_writes_run_shim(tmp_path, monkeypatch):
+    """The per-run `imp` shim is written at run startup, even on the unsandboxed
+    posture (before the policy is resolved)."""
+    import imp.engine.executor as ex
+    monkeypatch.setattr(ex, "sandbox_available", lambda: False)
+    from imp.engine import sandbox as _sb
+    _sb.sandbox_available.cache_clear()
+
+    quest = _fake_change(tmp_path)
+    config = _fake_config(sandbox={"allow_unsandboxed": True})
+    ex._build_sandbox_policy(quest, config, _CaptureLog())
+    shim = quest.quest_dir / "imp-shim" / "imp"
+    assert shim.exists()
+    assert shim.stat().st_mode & 0o111
+
+
 def _mirror_policy() -> SandboxPolicy:
     # A synthetic policy that exercises every bind class, including a remask
     # under git_common_dir, a remask OUTSIDE all writable roots, and an

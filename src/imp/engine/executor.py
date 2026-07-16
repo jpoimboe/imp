@@ -70,6 +70,7 @@ from imp.engine.sandbox import (
 )
 from imp.engine.schema import validate_agent_output
 from imp.engine.seed import seed_workflow_start
+from imp.engine.shim import write_imp_shim
 from imp.engine.state import CurrentStep, EventLog, JsonlEventLog, State
 from imp.engine.types import (
     Action,
@@ -1737,6 +1738,7 @@ def _build_sandbox_policy(quest: Quest, config: Any, log: EventLog) -> Any:
     quest-stable, but project_root can flip on go-live, triggering a rebuild).
     Emit a durable posture event; on a hard-fail posture, emit + re-raise so the
     run stops rather than silently running bare."""
+    write_imp_shim(quest.quest_dir)
     cfg = sandbox_config_from_raw(config.sandbox or {})
     eng = overlay_engine_env(
         os.environ,
