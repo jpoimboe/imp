@@ -1,45 +1,97 @@
 # imp knowledge
 
-The entry point to imp's self-knowledge: a stable primer plus a **map into imp's
-docs corpus**. Load this first whenever you need to ground an answer about how imp
-works, then follow the map to the corpus doc the question needs. Everything
-specific (the live workflow, what quests exist, what memory is active) is read
-fresh — this file is only the durable index.
+## What imp is
 
-## The corpus (the map)
+imp drives a software **quest** — one unit of work — from idea to merged code
+through a structured, reviewable sequence of phases. A fresh quest starts as a
+**draft** (a conversation and notes on disk, no git branch) until you choose to
+build it.
 
-imp's *descriptive* self-knowledge lives in a docs corpus resolved on disk at the
-path injected into every agent prompt as `{{ docs.path }}`. The corpus is resolved
-**in place** — never copied into a quest snapshot — so it is readable in **any**
-project. Reach it with `bash` and `read_file` using absolute paths under
-`{{ docs.path }}`; the `grep` and `glob` *tools* are worktree-bound and will not
-see it. For example:
+## What imp can do
 
-```bash
-grep -rn "materialize" {{ docs.path }}/guide
-```
+No more babysitting Claude Code. With imp you work at the level of intent: you say
+what you want, and it owns the mechanism of turning that into a reviewed, tested,
+and integrated change. Each step runs with fresh, tightly-scoped context instead
+of one sprawling chat session, so there's nothing to hover over and the code that
+lands stays maintainable.
 
-Two areas live under that path:
+- **Intent-driven.** State intent in the opening threshold interview — the primary
+  human touchpoint — then imp drives the rest end-to-end (build, reviews, and
+  merge) on its own, surfacing again only if something needs discussing at merge
+  (e.g. a follow-up to file).
+- **Draft-first scoping.** A fresh quest is a draft — a conversation with zero
+  commitment — that you later build or park.
+- **Adversarial review.** Multiple automated rounds of design review, plan review,
+  code review, and testing — reviewers kept independent by model tier — plus
+  automatic merge-conflict resolution. Front-loading the design and plan review
+  catches the majority of bugs before a line of code is written.
+- **Cleaner code by design.** imp's coding stance pushes back on the reflexive
+  fallbacks and dead error-handling agents pile up, so changes stay lean and
+  maintainable.
+- **Isolated & sandboxed.** Each change lives in its own git worktree; agent
+  shell/tool access is sandboxed.
+- **Lean context.** Every step runs as a fresh agent with tightly-scoped context,
+  so there's no long session to drift — the root of most agent failures.
+- **Deterministic engine.** The engine decides nothing about your code — it
+  sequences steps, routes on their results, and records every byte to an
+  append-only log that is the single source of truth.
+- **Pause, resume, interrupt.** Ctrl-D to set a quest aside for later; Ctrl-C to
+  interrupt a running agent and re-steer; a run interrupted mid-call resumes from
+  the log with nothing lost.
+- **Full provenance.** Trace any line of code back through the run to the
+  conversation that spawned it.
+- **Search & backlog.** Full search across every quest, and a tracked backlog
+  agents can file ideas into for you.
+- **Project memory.** Standing instructions applied to every run.
+- **Remote & parallel.** Steer a run from chat (Telegram), and run several imps at
+  once, one per terminal tab.
+- **Provider-flexible.** Claude and Codex CLI subscriptions plus OpenAI and
+  Anthropic APIs, per-role and multi-vendor in one run; imp uses its own tools (not
+  the vendor CLIs) for consistent cross-provider behavior (production-tested with
+  Claude Code so far).
+- **Batteries-included, customizable.** A default workflow encoding current
+  best-practice agentic engineering; author your own if you like.
+- **Beyond software.** Not limited to code — imp can drive other structured
+  processes (e.g. business workflows).
 
-- **`guide/`** — imp's descriptive self-knowledge (the portable expert corpus):
-  `what-is-imp.md` (conceptual intro), `features.md` (capabilities catalog),
-  `lifecycle.md` (quest statuses, the derived zones, materialize / go-live, entry
-  points, and what happens to a left draft), `introspection.md` (reading live
-  state via the `imp` CLI), `memory.md` (what imp remembers and where),
-  `operator-notes.md` (runbook for a live quest).
-- **`internals/`** — imp-on-imp contributor reference: `architecture.md`,
-  `conventions.md`, `invariants.md`, `subagent-authoring.md`, and
-  `knowledge-map.md` (how this self-knowledge is organized and where new knowledge
-  belongs).
+## Introspect with the `imp` CLI
 
-## Core vocabulary
+Don't dig through `.imp/` — the raw event log is masked and the rest is internal
+bookkeeping. Ask the CLI instead:
 
-- **spec** — what the quest must accomplish.
-- **plan** — the step-by-step implementation a coder executes.
-- **phase** — a stage of the workflow (threshold, spec, plan, implement,
-  integrate).
-- **step** — one agent or gate run inside a phase.
-- **tier** — the model capability level a step runs at, chosen per role from
-  cheapest to strongest.
-- **workflow** — the ordered phases/steps imp drives a quest through, defined in
-  the quest's `workflow/workflow.yaml`.
+- `imp list` — the board: in-flight quests and drafts, the backlog, and merged
+  quests; `--all` adds abandoned and shelved conversations.
+- `imp show <id>` — a quest's card: status, current step, intent, and summary
+  (`show <id> spec` for the raw spec, `--json` for a structured card).
+- `imp search <query>` — case-insensitive substring search across in-flight,
+  backlog, and archived quests.
+- `imp log <id>` — the readable narrative of what happened; `--step <name>` scopes
+  it to one step.
+- `imp events <id>` — the event index (steps, subagents, types); add `--step
+  <name>` for a per-agent breakdown, or `--agent <handle>` to follow one subagent.
+- `imp help`, `imp <cmd> --help` — the command list, or one command's flags.
+
+The event log is unbounded — filter (`--step`, `--agent`, `--limit`) rather than
+dumping it all into your context.
+
+## Memory
+
+Standing, cross-quest instructions live in the repo's `imp/memory/` directory,
+layered broad→narrow (`all.md` → every agent; `<workflow>/<step>.md` → one step).
+Keep each memory very succinct and use it sparingly — every line is injected into
+agent context on every run; for anything long, keep a doc and point the memory at
+its path. Don't hand-edit the tree — record a change with a memory quest:
+`imp new --workflow memory "<what to change>"`.
+
+## More depth
+
+imp's full self-knowledge lives at `{{ docs.path }}`.
+
+## Glossary
+
+- **spec** — what the quest must accomplish
+- **plan** — a coding/testing plan
+- **phase** — a stage of the workflow
+- **step** — one agent or script run
+- **tier** — the model capability level a step runs at
+- **workflow** — the ordered phases and steps

@@ -53,10 +53,11 @@ it's a skill; if it's tied to a specific agent's job, it's a workflow prompt.
 
 ## Skills as a Thin Index
 
-`imp-knowledge` and similar hub skills act as a **thin index** into the corpus — they
-map topics to the right `docs/` files rather than duplicating content. This is the
-hub-as-index pattern: the skill names where to look, the corpus contains the detail.
-Deep hubs that reproduce corpus content violate this pattern and cause drift.
+`imp-knowledge` and similar hub skills front-load the **high-frequency basics inline**
+— the CLI cheat-sheet, memory layering, a glossary — then **map into the corpus for
+depth**, naming where to look rather than reproducing the detail. Keep the inline part
+to the everyday essentials; push anything deeper to the `docs/` files it points at, so
+the hub stays lean and drift-free.
 
 ---
 
