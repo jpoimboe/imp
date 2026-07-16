@@ -304,6 +304,21 @@ _ERROR_LABELS: dict[str, str] = {
 }
 
 
+def _error_block(head: str, body: list[str], quest_id: str, title: str,
+                 *, color: bool) -> list[str]:
+    """The shared three-part error block: a red `head` line, `body` lines in the
+    default fg, then the identity line (gold id, ` · `, default-fg title; a bare
+    gold id when the quest has no title). No resume line."""
+    lines = [ansi(head, "red", enabled=color)]
+    lines.extend(body)
+    ident = ansi(quest_id, *pal.NODE_COLORS["quest_id"], enabled=color)
+    stripped = title.strip()
+    if stripped:
+        ident = f"{ident} · {stripped}"
+    lines.append(ident)
+    return lines
+
+
 def _pause_reason(events: list[dict[str, Any]]) -> str | _PauseBanner | None:
     """The terminal pause's reason line for the headline.
 

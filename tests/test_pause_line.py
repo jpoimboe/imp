@@ -425,6 +425,28 @@ def test_error_labels_map_tokens_to_user_facing_prefixes() -> None:
     assert _ERROR_LABELS["crash"] == "crash"
 
 
+def test_error_block_red_head_plain_body_gold_id_title() -> None:
+    from imp.cli import palette as pal
+    from imp.cli.main import _error_block
+
+    lines = _error_block("agent error: boom", ["line two", "line three"],
+                         "dufa26", "My title", color=True)
+    assert lines == [
+        pal.ansi("agent error: boom", "red"),
+        "line two",
+        "line three",
+        f'{pal.ansi("dufa26", "wordmark")} · My title',
+    ]
+
+
+def test_error_block_untitled_drops_title_and_body_when_empty() -> None:
+    from imp.cli.main import _error_block
+
+    lines = _error_block("crash: see x", [], "dufa26", "", color=False)
+    assert lines == ["crash: see x", "dufa26"]
+    assert lines[-1].count(" · ") == 0
+
+
 def test_pause_reason_awaiting_user_has_no_reason() -> None:
     from imp.cli.main import _pause_reason
 
