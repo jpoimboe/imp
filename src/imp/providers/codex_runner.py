@@ -765,7 +765,7 @@ class CodexAgentRunner:
                                 ev = make_recovery_event(res)
                                 elog.append(agent_id=aid, type=ev["type"],
                                             payload=ev["payload"])
-                            yield {"type": "agent_output", "payload": res.payload}
+                            yield {"type": "agent_result", "payload": res.payload}
                             return
                         if isinstance(res, Nudge):
                             ev = make_nudge_event(res)
@@ -819,7 +819,7 @@ class CodexAgentRunner:
                         return
                     if invocation.subagent_depth > 0:
                         if last_text:
-                            yield {"type": "agent_output",
+                            yield {"type": "agent_result",
                                    "payload": {"text": last_text}}
                         return
                     # Turn ended without complete_step. If a continuation_fn is
@@ -829,7 +829,7 @@ class CodexAgentRunner:
                         break  # exit inner for; outer while handles nudge
                     # No continuation_fn (degenerate top-level): the inline return
                     # below ends the run, and drive_invocation surfaces the
-                    # errored (no agent_output) result.
+                    # errored (no agent_result) result.
                     return
             # Stream ended (possibly silently) after a cancel without the
             # in-loop check firing — classify it as a clean interrupt.

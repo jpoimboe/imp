@@ -138,14 +138,14 @@ async def dispatch_one_tool_use(
                     "kind": "output_validation",
                     "message": str(ve),
                 }}
-            return {"type": "agent_output", "payload": sc.args_payload}
+            return {"type": "agent_result", "payload": sc.args_payload}
         res = validate_output_or_nudge(
             sc.args_payload, invocation.agent_def.output_schema, guard)
         if isinstance(res, Ok):
             if res.recovered is not None:
                 ev = make_recovery_event(res)
                 elog.append(agent_id=aid, type=ev["type"], payload=ev["payload"])
-            return {"type": "agent_output", "payload": res.payload}
+            return {"type": "agent_result", "payload": res.payload}
         if isinstance(res, Nudge):
             block = ToolResultBlock(tu.id, res.message, is_error=True)
             tool_results.append(block)

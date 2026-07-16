@@ -869,7 +869,7 @@ def _wrap_one(
             if name == "complete_step":
                 # Capture the args; return a "success" body so claude proceeds
                 # to ResultMessage cleanly. The runner sees the captured args
-                # after the next yielded message and emits agent_output.
+                # after the next yielded message and emits agent_result.
                 state.complete_step_called = True
                 state.complete_step_args = args
                 return _tool_response("step complete", is_error=False)
@@ -1331,7 +1331,7 @@ class ClaudeCodeAgentRunner:
         self._handoff_requested = False
         # Part A completion-interrupt intent flag: set when complete_step is seen
         # (preempting the trailing turn via interrupt), consumed at the balanced
-        # close to fall through to agent_output.
+        # close to fall through to agent_result.
         self._complete_requested = False
 
     def _build_options(self, invocation: AgentInvocation, mcp_server: Any,
@@ -1587,7 +1587,7 @@ class ClaudeCodeAgentRunner:
                 and classify_resume(existing) is ResumeState.AWAITING_USER):
             final_text = last_assistant_text(existing)
             if final_text:
-                yield {"type": "agent_output", "payload": {"text": final_text}}
+                yield {"type": "agent_result", "payload": {"text": final_text}}
             return
         store = session_store_for(invocation.transcript_dir)
         skey = session_key(invocation.quest_context.project_root, aid)
@@ -2260,7 +2260,7 @@ class ClaudeCodeAgentRunner:
                         if (self._complete_requested
                                 and getattr(sdk_msg, "subtype", None)
                                 == "error_during_execution"):
-                            # Part A: interrupt landed — fall through to agent_output;
+                            # Part A: interrupt landed — fall through to agent_result;
                             # deliberately do NOT balance the tail so the dangling
                             # result-less complete_step stays the persisted tail (parity
                             # with anthropic/openai; the Part B resume relies on it).
@@ -2379,7 +2379,7 @@ class ClaudeCodeAgentRunner:
                             return
 
                         # End-of-turn:
-                        #   a) complete_step captured → emit agent_output, return
+                        #   a) complete_step captured → emit agent_result, return
                         #   b) nudge via continuation_fn → send another query
                         #   c) no complete_step and no nudge → error
                         if state.complete_step_called:
@@ -2397,7 +2397,7 @@ class ClaudeCodeAgentRunner:
                                     ev = make_recovery_event(res)
                                     elog.append(agent_id=aid, type=ev["type"],
                                                 payload=ev["payload"])
-                                yield {"type": "agent_output",
+                                yield {"type": "agent_result",
                                        "payload": res.payload}
                                 return
                             if isinstance(res, Nudge):
@@ -2478,7 +2478,7 @@ class ClaudeCodeAgentRunner:
                         if invocation.subagent_depth > 0:
                             final_text = last_assistant_text(messages)
                             if final_text:
-                                yield {"type": "agent_output",
+                                yield {"type": "agent_result",
                                        "payload": {"text": final_text}}
                             return
 

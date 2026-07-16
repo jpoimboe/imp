@@ -174,7 +174,7 @@ class ScriptedAgentRunner:
                     # nothing so drive_invocation surfaces an errored result.
                     final_text = last_assistant_text(messages)
                     if final_text:
-                        yield {"type": "agent_output",
+                        yield {"type": "agent_result",
                                "payload": {"text": final_text}}
                     return
 

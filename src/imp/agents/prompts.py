@@ -2,7 +2,7 @@
 
 Seven namespaces (spec §7.5):
   quest.id — stable identity; quest.title — human title
-  events.<step-name>.<field> — validated agent_output of prior step;
+  events.<step-name>.<field> — validated agent_result of prior step;
       missing steps render as empty (lenient-within)
   vars.<name> — workflow vars from state.vars; a typo'd key raises at render
       because the dict is passed directly under StrictUndefined (strict-within)
@@ -67,7 +67,7 @@ class _EventsNamespace:
             etype = e.get("type")
             if etype == "step_started":
                 current = (e.get("payload") or {}).get("step")
-            elif etype == "agent_output" and current:
+            elif etype == "agent_result" and current:
                 self._outputs[current] = e.get("payload") or {}
 
     def __getattr__(self, step: str) -> _StepEvents | _EmptyOnMissing:

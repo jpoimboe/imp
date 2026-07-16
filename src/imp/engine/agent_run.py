@@ -733,7 +733,7 @@ async def drive_invocation(
                         log.append(agent_id=invocation.agent_id,
                                    type=event["type"],
                                    payload=event.get("payload", {}))
-                    if event["type"] == "agent_output":
+                    if event["type"] == "agent_result":
                         agent_output = event["payload"]
                     if event["type"] == "error":
                         payload = event.get("payload") or {}

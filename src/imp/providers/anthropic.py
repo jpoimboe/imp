@@ -5,10 +5,10 @@ Loop:
   2. POST to messages.stream with declared tools; pulse coordinator per event
   3. Append assistant response to transcript; append llm_response to EventLog
   4. For each tool_use block: dispatch tool, append tool_result to EventLog
-  5. complete_step catches StepComplete → validate, emit agent_output, return
+  5. complete_step catches StepComplete → validate, emit agent_result, return
   6. No tool_use in assistant: nudge via continuation_fn; else error
 
-Yields ONLY control signals: agent_output, error.
+Yields ONLY control signals: agent_result, error.
 All audit events (step_context, user_message, llm_response, tool_call,
 tool_result, thinking, runner_warning, tool_killed) are written via EventLog.
 """
@@ -562,7 +562,7 @@ class AnthropicAgentRunner:
                     and classify_resume(messages) is ResumeState.AWAITING_USER):
                 final_text = last_assistant_text(messages)
                 if final_text:
-                    yield {"type": "agent_output",
+                    yield {"type": "agent_result",
                            "payload": {"text": final_text}}
                 return
             # Mid-tool Ctrl+C (spec §6.15) can leave a dangling tool_use when
@@ -820,7 +820,7 @@ class AnthropicAgentRunner:
                 if invocation.subagent_depth > 0:
                     final_text = last_assistant_text(messages)
                     if final_text:
-                        yield {"type": "agent_output",
+                        yield {"type": "agent_result",
                                "payload": {"text": final_text}}
                     return
                 cont = invocation.continuation_fn
