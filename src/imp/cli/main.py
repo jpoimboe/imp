@@ -1237,6 +1237,8 @@ async def _inert_ask_line(quest: Quest, *, toolbar: str | None = None) -> str | 
         skills_dir=quest.workflow_dir / "skills",
         editing_mode=_editing_mode(quest.control_root),
         color=color, quest=quest)
+    prompt.seed_history(
+        _prompt_history_lines(quest.seed_opening, quest.event_log().read()))
     try:
         return await _read_intent_line(
             prompt, quest, color=color, width=width, toolbar=toolbar)

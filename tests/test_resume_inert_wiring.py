@@ -140,6 +140,9 @@ class _CapturingPrompt:
     def __init__(self, sink: dict[str, object], **kwargs: object) -> None:
         self._sink = sink
 
+    def seed_history(self, lines: list[str]) -> None:
+        pass
+
     async def ask_async(self, *args: object, **kwargs: object) -> str:
         self._sink["bottom_toolbar"] = kwargs.get("bottom_toolbar")
         self._sink["width"] = kwargs.get("width")
@@ -229,6 +232,9 @@ class _RaisingPrompt:
     def __init__(self, exc: type[BaseException], **kwargs: object) -> None:
         self._exc = exc
 
+    def seed_history(self, lines: list[str]) -> None:
+        pass
+
     async def ask_async(self, *args: object, **kwargs: object) -> str:
         raise self._exc
 
@@ -278,6 +284,9 @@ class _QueueInertPrompt:
 
     def __init__(self, lines: list[str], **kwargs: object) -> None:
         self._lines = list(lines)
+
+    def seed_history(self, lines: list[str]) -> None:
+        pass
 
     async def ask_async(self, *args: object, **kwargs: object) -> str:
         return self._lines.pop(0)
@@ -342,3 +351,38 @@ async def test_resume_inert_ctrl_d_retains_caret_parks_and_returns_zero(
     assert "Which DB should I use?" in out       # pending question replayed
     assert out.endswith("> \n\n")                # retained caret + one trailing blank
     assert "cancelled" not in out                # no `imp: cancelled` message
+
+
+@pytest.mark.anyio
+async def test_inert_ask_line_seeds_history_from_event_log(
+        monkeypatch, tmp_path: Path) -> None:
+    # Up-arrow recalls prior HUMAN turns; synthetic turns are excluded.
+    ch = _seed(tmp_path)
+    ch.event_log().append(
+        agent_id="step:p/s", type="user_message",
+        payload={"role": "user", "human": True,
+                 "content": [{"type": "text", "text": "a human reply"}]})
+    ch.event_log().append(
+        agent_id="step:p/s", type="user_message",
+        payload={"role": "user", "human": False,
+                 "content": [{"type": "text", "text": "engine nudge"}]})
+    seeded: dict[str, object] = {}
+
+    class _RecordingPrompt:
+        def __init__(self, **kwargs: object) -> None:
+            pass
+
+        def seed_history(self, lines: list[str]) -> None:
+            seeded["lines"] = lines
+
+        async def ask_async(self, *args: object, **kwargs: object) -> str:
+            return "go"
+
+    monkeypatch.setattr(m, "should_use_color", lambda _stream: False)
+    monkeypatch.setattr(m, "_term_width", lambda: 80)
+    monkeypatch.setattr(m, "Prompt", lambda **kwargs: _RecordingPrompt(**kwargs))
+
+    line = await m._inert_ask_line(ch)
+
+    assert line == "go"
+    assert seeded["lines"] == ["a human reply"]      # synthetic turn excluded
