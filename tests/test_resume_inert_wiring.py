@@ -435,3 +435,50 @@ async def test_inert_resume_echoes_reply_before_session_boot(
     assert rc == 0
     assert echoed == ["my answer"]                 # echoed at submit
     assert seen_at_boot["echoed"] == ["my answer"] # BEFORE run_session_client ran
+
+
+@pytest.mark.anyio
+async def test_inert_resume_carries_idle_terminal_title_into_boot(
+        monkeypatch, tmp_path: Path) -> None:
+    from imp.cli.terminal_title import TerminalTitle
+    ch = _seed(tmp_path)
+    seen: dict[str, object] = {}
+
+    class _Drv:
+        def __init__(self, **kwargs: object) -> None:
+            pass
+
+        def echo_submitted_reply(self, text: str) -> None:
+            pass
+
+        def install_startup_status(self) -> None:
+            pass
+
+    monkeypatch.setattr(m, "should_use_color", lambda _stream: False)
+    monkeypatch.setattr(m, "_build_resume_driver", lambda **k: _Drv())
+    monkeypatch.setattr(m, "LiveStatus", lambda *a, **k: SimpleNamespace())
+    monkeypatch.setattr(sig, "InterruptCoordinator", lambda *a, **k: SimpleNamespace())
+    monkeypatch.setattr(m, "make_interactive_solicit", lambda *a, **k: None)
+    monkeypatch.setattr(m, "make_buffered_solicit", lambda line, inner: None)
+
+    async def _client(*a: object, title: object = None, **k: object) -> int:
+        seen["title"] = title
+        return 0
+
+    monkeypatch.setattr(m, "run_session_client", _client)
+
+    async def _fake_run_inert(*, question, ask_line, launch):
+        return await launch("my answer")
+
+    monkeypatch.setattr(m, "run_inert_resume", _fake_run_inert)
+
+    async def _fake_loop(control, *, first):
+        return await first({})
+
+    monkeypatch.setattr(m, "_clear_loop", _fake_loop)
+
+    rc = await m._resume_inert(ch, "Which DB should I use?")
+
+    assert rc == 0
+    assert isinstance(seen["title"], TerminalTitle)
+    assert seen["title"]._idle is True        # created idle for the wait

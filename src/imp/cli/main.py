@@ -1255,6 +1255,7 @@ async def _resume_inert(
     from imp.cli.signals import InterruptCoordinator
 
     color = should_use_color(sys.stdout)
+    term_title = TerminalTitle(sys.stdout, quest.id, quest.title, initial="idle")
     state = State.load(quest.state_dir)
     phase_head, _sep, plan_tail = (state.phase_label or "").partition(" · ")
     toolbar_row = compose_prelaunch_position_row(
@@ -1279,7 +1280,7 @@ async def _resume_inert(
             return await run_session_client(
                 quest, driver=driver, coord=coord, solicit=solicit,
                 resume=True, status=status, leave_state=leave_state,
-                autonomous=autonomous)
+                title=term_title, autonomous=autonomous)
 
         return await _clear_loop(quest.control_root, first=_first)
 
