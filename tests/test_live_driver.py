@@ -2422,8 +2422,12 @@ def test_compose_position_row_context_bar_only_for_agent_kind() -> None:
     script = compose_position_row(activity=_pos_activity(kind="script"), quest_id="z",
                                   title="t", prompt_tokens=None, color=False, width=80,
                                   context_pct=42.0)
+    none_kind = compose_position_row(activity=_pos_activity(kind=None), quest_id="z",
+                                     title="t", prompt_tokens=None, color=False, width=80,
+                                     context_pct=42.0)
     assert "42%" in agent
     assert "%" not in script
+    assert "%" not in none_kind   # prelaunch kind=None suppresses the bar even with usage present
     assert "implementation phase" in script
 
 
