@@ -467,6 +467,20 @@ def test_digest_line_width_larger_than_line_is_untouched() -> None:
     assert "step=spec" in line
 
 
+def test_select_filters_by_subtype():
+    events = [
+        {"type": "user_message", "agent_id": None,
+         "payload": {"role": "user", "subtype": "intent",
+                     "content": [{"type": "text", "text": "go"}]}},
+        {"type": "engine_message", "agent_id": "step:build/plan",
+         "payload": {"role": "user", "subtype": "system_prompt",
+                     "content": [{"type": "text", "text": "sys"}]}},
+    ]
+    indexed = list(enumerate(events, start=1))
+    got = ei.select_event_lines(indexed, subtypes={"system_prompt"}, handle_map={})
+    assert [o for o, _ in got] == [2]
+
+
 def test_step_index_json_carries_windows_agents_and_types() -> None:
     events = [
         _ev(None, "step_started", step="task-lead"),                    # 1

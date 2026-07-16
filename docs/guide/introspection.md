@@ -91,7 +91,7 @@ answers the question, and never dump the raw log as your default.
   through the `--md`/`--html` exports; `--follow` stays unfiltered. For example,
   `imp log <id> --step threshold` reads just the seed conversation.
 - **Digest** — `imp events <id>`. A bare call prints a self-describing index
-  (steps + types); add a leaf selector (`--type`, `--agent`, a `<range>`, or
+  (steps + types); add a leaf selector (`--type`, `--subtype`, `--wire`, `--agent`, a `<range>`, or
   `--all`) to get one compact line per event. On a TTY each compact line is
   clipped to one terminal row so the stream stays scannable; add `--full` to
   lift the clip and render the full untruncated line (still one logical line per
@@ -115,8 +115,8 @@ readable:
   `--json` for the card as a structured object.
 - **`imp events <id>`** — the event history, when you need the trace rather than
   the distilled record. A bare call prints the index; steer into the high-signal
-  types with `--type agent_output` (and away from the `tool_call` / `tool_result`
-  / `llm_response` churn), or scope to an author with `--agent`. Resolves live and
+  types with `--type agent_result` (and away from the `tool_call` / `tool_result`
+  / `agent_message` churn), or scope to an author with `--agent`. Resolves live and
   archived quests alike.
 
 ## Linking a related backlog quest
@@ -148,8 +148,9 @@ The event log grows without limit; pulling all of it floods your context. Scope
 it deliberately:
 
 - **Scope the query.** Narrow with `--limit` (the last N events), `--type` (a
-  comma-separated event-type set), and `--agent` (an author handle) rather than
-  pulling the whole log.
+  comma-separated event-type set), `--subtype` (message subtypes like
+  `system_prompt`/`intent`), `--wire` (just the human + framework turns), and
+  `--agent` (an author handle) rather than pulling the whole log.
 - **Scan, then zoom.** Read the index or digest first; drop to `--json` only for
   the handful of events whose exact payload you need.
 - **Prefer state over history.** When you only need where a quest stands now —

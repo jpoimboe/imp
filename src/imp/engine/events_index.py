@@ -409,6 +409,7 @@ def select_event_lines(
     indexed: Sequence[tuple[int, dict[str, Any]]],
     *,
     types: set[str] | None = None,
+    subtypes: set[str] | None = None,
     agents: set[str] | None = None,
     ranges: Sequence[tuple[int, int]] | None = None,
     step_names: set[str] | None = None,
@@ -433,6 +434,9 @@ def select_event_lines(
         if windows is not None and not _in_windows(ordinal, windows):
             continue
         if types is not None and (event.get("type") or "?") not in types:
+            continue
+        if subtypes is not None and \
+                (event.get("payload") or {}).get("subtype") not in subtypes:
             continue
         if agents is not None and not _agent_matches(event, agents, handle_map):
             continue
