@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -12,14 +13,28 @@ from imp.engine.state import InMemoryEventLog
 from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
 from imp.providers.anthropic import AnthropicAgentRunner
 from imp.providers.claude_code import ClaudeCodeAgentRunner
+from imp.providers.codex_runner import CodexAgentRunner
 from imp.providers.openai import OpenAIAgentRunner
 from imp.providers.scripted import ScriptedAgentRunner
 from tests.anthropic_fakes import FakeAsyncAnthropic, response, text, tool_use
 from tests.cc_fakes import (
     FakeClaudeSDKClient,
+)
+from tests.cc_fakes import (
     assistant as cc_assistant,
-    tool_use as cc_tool_use,
+)
+from tests.cc_fakes import (
     result as cc_result,
+)
+from tests.cc_fakes import (
+    tool_use as cc_tool_use,
+)
+from tests.codex_fakes import (
+    FakeCodex,
+    agent_message,
+    mcp_call,
+    thread_started,
+    turn_completed,
 )
 from tests.openai_fakes import FakeResponsesClient, resp_function_call, resp_response
 
@@ -227,3 +242,55 @@ async def test_scripted_fresh_entry_emits_triad_order(
     ems = [e for e in evs if e["type"] == "engine_message"]
     assert [e["payload"]["subtype"] for e in ems][:2] == ["system_prompt", "agent_prompt"]
     assert not [e for e in evs if e["type"] == "user_message"]
+
+
+def _codex_git_init(p: Path) -> None:
+    subprocess.run(["git", "init", "-q", str(p)], check=True)
+    subprocess.run(["git", "-C", str(p), "config", "user.email", "t@t.t"], check=True)
+    subprocess.run(["git", "-C", str(p), "config", "user.name", "T"], check=True)
+    (p / ".gitkeep").write_text("")
+    subprocess.run(["git", "-C", str(p), "add", ".gitkeep"], check=True)
+    subprocess.run(["git", "-C", str(p), "commit", "-q", "-m", "init"], check=True)
+
+
+def _codex_drive(
+    tmp_path: Path, log: InMemoryEventLog,
+) -> tuple[CodexAgentRunner, AgentInvocation]:
+    _codex_git_init(tmp_path)
+    (tmp_path / "auth.json").write_text('{"auth_mode": "chatgpt", "tokens": {}}')
+    (tmp_path / "tx").mkdir(exist_ok=True)
+    scripted = [[
+        thread_started("thr-1"),
+        agent_message("ok, calling complete_step"),
+        mcp_call(name="complete_step", args={"status": "Success"},
+                 result="step complete", item_id="cs-1"),
+        turn_completed(input_tokens=100, output_tokens=50),
+    ]]
+    runner = CodexAgentRunner(
+        model_name="gpt-5.5",
+        client_factory=lambda options=None: FakeCodex(scripted_turns=scripted),
+    )
+    runner._canonical_auth_override = tmp_path / "auth.json"  # test seam
+    inv = AgentInvocation(
+        agent_def=_agent_def(), provider_name="codex", model_name="gpt-5.5",
+        system_prompt="be terse",
+        initial_messages=(Message(role="user", content=(TextBlock(text="go"),)),),
+        quest_context=QuestContext(
+            title="T", project_root=tmp_path, workflow_dir=tmp_path, id="c1"),
+        transcript_dir=tmp_path / "tx", events_path=tmp_path / "events.jsonl",
+        agent_id="step:p/s", event_log=log)
+    return runner, inv
+
+
+@pytest.mark.anyio
+async def test_codex_fresh_entry_emits_system_and_agent_prompt(tmp_path: Path) -> None:
+    log = InMemoryEventLog()
+    runner, inv = _codex_drive(tmp_path, log)
+    async for _ in runner.run(inv):
+        pass
+    evs = [e for e in log.read() if e.get("agent_id") == "step:p/s"]
+    assert not [e for e in evs if e["type"] == "step_context"]   # codex emits none
+    ems = [e for e in evs if e["type"] == "engine_message"]
+    subs = [e["payload"]["subtype"] for e in ems]
+    assert subs[:2] == ["system_prompt", "agent_prompt"]
+    assert not [e for e in evs if e["type"] == "user_message"]   # no human spoke

@@ -520,7 +520,7 @@ class CodexAgentRunner:
                 # Fakes ignore the options arg.
                 thread = client.start_thread()
         # Build initial prompt with anti-native-tool instruction prepended.
-        next_prompt = self._build_prompt(invocation)
+        next_prompt = self._build_prompt(invocation, elog, aid)
         # Hoist rstate so the §2 resume-entry drain below can reference it safely
         # even when balance_on_resume is False (fresh-entry path has no rstate).
         rstate = None
@@ -559,10 +559,12 @@ class CodexAgentRunner:
                     last_agent_message=last_agent_text)
                 if source == "nudge":
                     assert isinstance(reply, str)
-                    # Internal continuation, not a human turn: journal an internal
-                    # engine_continuation event (no `>` caret), not a user_message.
-                    elog.append(agent_id=aid, type="engine_continuation",
-                                payload={"text": reply})
+                    # Internal continuation, not a human turn: emit an
+                    # engine_message/continuation event (no `>` caret).
+                    elog.append_engine_message(
+                        agent_id=aid,
+                        message=Message(role="user", content=(TextBlock(text=reply),)),
+                        subtype="continuation")
                     next_prompt = reply
                 elif source == "pending_reply":
                     # The reply's user_message is already durable in events.jsonl
@@ -577,7 +579,7 @@ class CodexAgentRunner:
                 from imp.agents.transcript import RESUME_CONTINUE_NUDGE
                 nudge_msg = Message(
                     role="user", content=(TextBlock(text=RESUME_CONTINUE_NUDGE),))
-                elog.append_user_message(agent_id=aid, message=nudge_msg, human=False)
+                elog.append_engine_message(agent_id=aid, message=nudge_msg, subtype="continuation")
                 next_prompt = RESUME_CONTINUE_NUDGE
         # §2 resume-entry drain: fold pending interject texts into the first
         # resumed prompt (codex re-prompts with a string). AWAITING_USER already
@@ -596,9 +598,7 @@ class CodexAgentRunner:
                     elog.append_user_message(
                         agent_id=aid,
                         message=Message(role="user", content=(TextBlock(text=t),)),
-                        human=True)
-                    elog.append(agent_id=aid, type="user_interjected",
-                                payload={"text": t})
+                        subtype="interject")
                 if parts:
                     next_prompt = next_prompt + "\n\n" + "\n".join(parts)
         # AbortController for interrupt() — tolerate a fake/SDK without one.
@@ -771,12 +771,12 @@ class CodexAgentRunner:
                             ev = make_nudge_event(res)
                             elog.append(agent_id=aid, type=ev["type"],
                                         payload=ev["payload"])
-                            elog.append_user_message(
+                            elog.append_engine_message(
                                 agent_id=aid,
                                 message=Message(
                                     role="user",
                                     content=(TextBlock(text=res.message),)),
-                                human=False)
+                                subtype="continuation")
                             # Re-drive this session with the nudge as the next
                             # prompt (per-turn proc_state reset at the loop top
                             # clears the stale capture).
@@ -797,11 +797,11 @@ class CodexAgentRunner:
                                 proc_state.get("pending_usage"), self.model,
                                 invocation.checkpoint_threshold)):
                         instr = handoff_instruction(handoff_path)
-                        elog.append_user_message(
+                        elog.append_engine_message(
                             agent_id=aid,
                             message=Message(role="user",
                                             content=(TextBlock(text=instr),)),
-                            human=False)
+                            subtype="continuation")
                         next_prompt = instr
                         handoff_phase = "instruction_sent"
                         handoff_turn_queued = True
@@ -882,7 +882,7 @@ class CodexAgentRunner:
             # loop). Codex has no message-list transcript and re-prompts with a
             # STRING, so the shared agent_run.deliver_interject helper does not
             # fit — implement the equivalent inline: drain a queued human
-            # interject, emit user_interjected + a user_message, and fold the
+            # interject, emit a single user_message/interject, and fold the
             # text into next_prompt so codex actually receives it. Reached only
             # after the turn completed (turn.completed), so no subagent is
             # mid-dispatch — S4 holds.
@@ -894,9 +894,7 @@ class CodexAgentRunner:
                         agent_id=aid,
                         message=Message(role="user",
                                         content=(TextBlock(text=interject_text),)),
-                        human=True)
-                    elog.append(agent_id=aid, type="user_interjected",
-                                payload={"text": interject_text})
+                        subtype="interject")
                     next_prompt = f"{next_prompt}\n\n{interject_text}"
 
     def _build_thread_options(self) -> Any:
@@ -930,7 +928,7 @@ class CodexAgentRunner:
             networkAccessEnabled=False,
         )
 
-    def _build_prompt(self, invocation: AgentInvocation) -> str:
+    def _build_prompt(self, invocation: AgentInvocation, elog: Any, aid: str) -> str:
         """Prepend the anti-native-tool instruction (design: soft enforcement
         backstopped by the tripwire). For a subagent the completion line is
         replaced by the deliverable note; the tool_search and
@@ -970,13 +968,25 @@ class CodexAgentRunner:
             )
         prompt = invocation.system_prompt + "\n\n" + policy
         # Codex takes a string and never reads initial_messages: fold the task
-        # in on fresh entry only (resumes already carry it).
-        if not invocation.balance_on_resume and invocation.initial_messages:
-            first = invocation.initial_messages[0]
-            body = "\n\n".join(
-                b.text for b in first.content if isinstance(b, TextBlock))
-            if body:
-                prompt = f"{prompt}\n\n{body}"
+        # in on fresh entry only (resumes already carry it). Emit the taxonomy
+        # ONLY on fresh entry — a resume must not re-emit system_prompt/agent_prompt
+        # (the wire string is unchanged either way).
+        if not invocation.balance_on_resume:
+            elog.append_engine_message(
+                agent_id=aid,
+                message=Message(role="system",
+                                content=(TextBlock(text=invocation.system_prompt),)),
+                subtype="system_prompt")
+            if invocation.initial_messages:
+                first = invocation.initial_messages[0]
+                body = "\n\n".join(
+                    b.text for b in first.content if isinstance(b, TextBlock))
+                if body:
+                    prompt = f"{prompt}\n\n{body}"
+                    elog.append_engine_message(
+                        agent_id=aid,
+                        message=Message(role="user", content=(TextBlock(text=body),)),
+                        subtype="agent_prompt")
         return prompt
 
     async def interrupt(self) -> None:
