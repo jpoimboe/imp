@@ -9,7 +9,9 @@ from imp.agents.runner import AgentInvocation, Message, QuestContext, TextBlock
 from imp.engine.state import InMemoryEventLog
 from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
 from imp.providers.anthropic import AnthropicAgentRunner
+from imp.providers.openai import OpenAIAgentRunner
 from tests.anthropic_fakes import FakeAsyncAnthropic, response, text, tool_use
+from tests.openai_fakes import FakeResponsesClient, resp_function_call, resp_response
 
 
 @pytest.fixture
@@ -106,4 +108,31 @@ async def test_anthropic_handoff_injection_emits_engine_message_continuation(
     ]
     assert len(continuations) == 1
     assert "approaching the context limit" in continuations[0]["payload"]["content"][0]["text"]
+    assert not [e for e in evs if e["type"] == "user_message"]
+
+
+@pytest.mark.anyio
+async def test_openai_fresh_entry_emits_triad_order(tmp_path: Path) -> None:
+    (tmp_path / "art").mkdir()
+    log = InMemoryEventLog()
+    fake = FakeResponsesClient([
+        resp_response(resp_function_call("c1", "complete_step", '{"status":"Success"}')),
+    ])
+    runner = OpenAIAgentRunner(model_name="gpt-4o-mini", client_factory=lambda: fake)
+    inv = AgentInvocation(
+        agent_def=_agent_def(), provider_name="openai", model_name="gpt-4o-mini",
+        system_prompt="be terse",
+        initial_messages=(Message(role="user", content=(TextBlock(text="go"),)),),
+        quest_context=QuestContext(
+            id="test", title="T", project_root=tmp_path,
+            workflow_dir=tmp_path / ".imp" / "change" / "workflow"),
+        transcript_dir=tmp_path / "step", events_path=tmp_path / "events.jsonl",
+        agent_id="step:p/s", event_log=log)
+    async for _ in runner.run(inv):
+        pass
+    evs = [e for e in log.read() if e.get("agent_id") == "step:p/s"]
+    sc = next(e for e in evs if e["type"] == "step_context")
+    assert "system_prompt" not in sc["payload"]
+    ems = [e for e in evs if e["type"] == "engine_message"]
+    assert [e["payload"]["subtype"] for e in ems][:2] == ["system_prompt", "agent_prompt"]
     assert not [e for e in evs if e["type"] == "user_message"]
