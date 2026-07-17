@@ -146,7 +146,7 @@ async def run_terminal_client(
                                 continue
                             # Echo a recognized control command before handling (non-reconciling).
                             control = reply.strip()
-                            if (control in ("/abandon", "/keep", "/shelve", "/clear",
+                            if (control in ("/abandon", "/save", "/shelve", "/clear",
                                             "/sandbox on", "/sandbox off", "/compact")
                                     or control.startswith("/model ")):
                                 driver.append_committed_reply(control)
@@ -164,7 +164,7 @@ async def run_terminal_client(
                                             leave_state["materialized"] = ""
                                 await controls.abandon()
                                 return
-                            if reply.strip() == "/keep":
+                            if reply.strip() == "/save":
                                 if leave_state is not None:
                                     leave_state["intent"] = "save"
                                 coord.escalation_event.set()
@@ -241,7 +241,7 @@ async def run_terminal_client(
             driver.finish()
             if title is not None:
                 title.reset()
-            # Deliberate leave (ctrl-d / sigterm / sighup / Ctrl-\ / EOF / /keep /
+            # Deliberate leave (ctrl-d / sigterm / sighup / Ctrl-\ / EOF / /save /
             # /shelve / /clear / headless): decide the disposition lock-free and flush a
             # control frame BEFORE aclose so the daemon observes it ahead of the
             # detach (spec "Sequencing"). A materialized/mid-run leave has no
