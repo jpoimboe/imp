@@ -1601,6 +1601,9 @@ async def test_interrupt_leave_control_pauses_with_ctrl_d_reason(tmp_path: Path)
         def __init__(self) -> None:
             self.reasons: list[str] = []
 
+        def set_save_hook(self, fn: Any) -> None:
+            pass
+
         async def signal_pause(self, *, reason: str = "ctrl-c",
                                via: str = "signal") -> None:
             self.reasons.append(reason)
@@ -1619,6 +1622,9 @@ async def test_interrupt_leave_control_passes_frame_reason_through(tmp_path: Pat
     class _FakeCoord:
         def __init__(self) -> None:
             self.reasons: list[str] = []
+
+        def set_save_hook(self, fn: Any) -> None:
+            pass
 
         async def signal_pause(self, *, reason: str = "ctrl-c",
                                via: str = "signal") -> None:
@@ -1671,6 +1677,9 @@ async def test_dispatch_set_model_stashes_arg_and_pauses(tmp_path: Path) -> None
     class _Coord:
         def __init__(self) -> None:
             self.pending: str | None = None
+
+        def set_save_hook(self, fn: Any) -> None:
+            pass
 
         def set_pending_model(self, arg: str) -> None:
             self.pending = arg

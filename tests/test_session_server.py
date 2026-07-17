@@ -1836,3 +1836,20 @@ async def test_retry_now_control_is_noop_when_no_backoff_armed(tmp_path: Path) -
     # No backoff wait armed: the daemon's arm-gate leaves a stray `r` a no-op.
     await server._dispatch_control(CONTROL_RETRY_NOW)
     assert coord.retry_now_requested is False
+
+
+def test_request_save_sets_save_flags(tmp_path: Path) -> None:
+    server = SessionServer(str(tmp_path / "s.sock"))
+    server.request_save("save_and_exit")
+    assert server._save_requested is True
+    assert server._save_reason == "save_and_exit"
+
+
+def test_server_registers_save_hook_on_coordinator(tmp_path: Path) -> None:
+    from imp.cli.signals import InterruptCoordinator
+
+    coord = InterruptCoordinator()
+    server = SessionServer(str(tmp_path / "s.sock"), coordinator=coord)
+    coord.request_save(reason="save_and_exit")
+    assert server._save_requested is True
+    assert server._save_reason == "save_and_exit"
