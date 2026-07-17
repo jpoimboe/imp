@@ -118,7 +118,7 @@ def test_resolve_leave_action_returns_none_when_home_gone(tmp_path: Path) -> Non
 def test_had_exchange_false_for_only_system_events() -> None:
     log = _Log([
         {"type": "step_context", "payload": {}},
-        {"type": "llm_response", "payload": {}},
+        {"type": "agent_message", "payload": {}},
         {"type": "awaiting_user_input", "payload": {}},
     ])
     assert _had_exchange(log) is False
@@ -192,7 +192,7 @@ def test_zero_exchange_renamed_chat_discards(tmp_path: Path) -> None:
 
 def test_was_renamed_false_without_quest_renamed_event() -> None:
     log = _Log([
-        {"type": "opening_intent"},
+        {"type": "user_message", "payload": {"subtype": "intent"}},
         {"type": "user_message"},
     ])
     assert _was_renamed(log) is False

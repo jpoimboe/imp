@@ -136,17 +136,15 @@ def test_resolve_intent_falls_back_to_solicited_reply() -> None:
 def test_resolve_intent_returns_interjected_message() -> None:
     events = [
         {"type": "user_message",
-         "payload": {"role": "user",
+         "payload": {"role": "user", "subtype": "interject",
                      "content": [{"type": "text", "text": "wait, use postgres"}]}},
-        {"type": "user_interjected", "payload": {"text": "wait, use postgres"}},
     ]
     assert m._resolve_intent(events) == "wait, use postgres"
 
 
 def test_resolve_intent_skips_synthetic_task_prompt() -> None:
-    # A composed task prompt is a user_message that is neither solicited by an
-    # awaiting_user_input nor tagged by a following user_interjected, so it is
-    # not a genuine human turn -> intent resolves to None (card omits opening).
+    # A composed task prompt is an engine_message/agent_prompt, not a user_message,
+    # so it is not a genuine human turn -> intent resolves to None (card omits opening).
     events = [
         {"type": "engine_message",
          "payload": {"role": "user", "subtype": "agent_prompt",

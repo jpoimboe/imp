@@ -122,10 +122,10 @@ def test_strict_mode_raises_on_bad_payload(tmp_path: Path) -> None:
 def test_lenient_mode_coerces_and_warns(tmp_path: Path) -> None:
     seen: list[dict] = []
     log = JsonlEventLog(tmp_path / "e.jsonl", on_event=seen.append)  # strict defaults False
-    log.append(agent_id="A", type="llm_response", payload="not-a-dict")
+    log.append(agent_id="A", type="agent_message", payload="not-a-dict")
     types = [e["type"] for e in _read(tmp_path / "e.jsonl")]
     # best-effort write of the original event PLUS a runner_warning
-    assert "llm_response" in types
+    assert "agent_message" in types
     assert "runner_warning" in types
 
 
