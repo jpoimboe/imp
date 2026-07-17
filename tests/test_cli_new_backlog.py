@@ -129,7 +129,7 @@ def test_async_cmd_new_routes_to_record_idea(tmp_path: Path, monkeypatch) -> Non
 
 
 @pytest.mark.parametrize("flag,expected", [
-    ({"non_interactive": True}, "--non-interactive"),
+    ({"non_interactive": True}, "--headless"),
     ({"message": "do the thing"}, "--message"),
     ({"autonomous": True}, "--autonomous"),
 ])

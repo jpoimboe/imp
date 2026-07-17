@@ -1022,7 +1022,7 @@ async def _run_fresh_session(
 
 def _backlog_run_only_flag(args: argparse.Namespace) -> str | None:
     if getattr(args, "non_interactive", False):
-        return "--non-interactive"
+        return "--headless"
     if getattr(args, "message", None) is not None:
         return "--message"
     if getattr(args, "autonomous", False):
@@ -3996,17 +3996,17 @@ def _build_parser() -> argparse.ArgumentParser:
     p_new.add_argument("--title", metavar="TEXT", default=None,
                        help="Set the quest title explicitly; the workflow's "
                             "opening step names the quest if omitted.")
-    p_new.add_argument("--non-interactive", action="store_true",
+    p_new.add_argument("--headless", action="store_true", dest="non_interactive",
                        help="Run headless: no live prompt; supply the first reply "
                             "via --message.")
     p_new.add_argument("--autonomous", action="store_true",
                        help="Auto-take the recommendation at recommendation-bearing "
                             "gates instead of confirming each; genuine intent-forks "
-                            "still pause for a human. Independent of --non-interactive.")
+                            "still pause for a human. Independent of --headless.")
     p_new.add_argument("--message", metavar="TEXT", default=None,
                        help="Headless reply consumed by the first bare-turn-end prompt; "
                             "pause then resume with another --message. "
-                            "Requires --non-interactive.")
+                            "Requires --headless.")
     new_mode = p_new.add_mutually_exclusive_group()
     new_mode.add_argument("--backlog", metavar="TITLE", default=None, dest="idea",
                           help="File an idea for your backlog with this TITLE and "
@@ -4044,15 +4044,15 @@ def _build_parser() -> argparse.ArgumentParser:
     p_chat.add_argument(
         "opening", nargs="?", metavar="MESSAGE",
         help="Optional opening message; omit to start with an interactive prompt.")
-    p_chat.add_argument("--non-interactive", action="store_true",
+    p_chat.add_argument("--headless", action="store_true", dest="non_interactive",
                         help="Headless: no live prompt; supply the reply via --message.")
     p_chat.add_argument("--autonomous", action="store_true",
                         help="Auto-take the recommendation at recommendation-bearing "
                              "gates instead of confirming each; genuine intent-forks "
-                             "still pause for a human. Independent of --non-interactive.")
+                             "still pause for a human. Independent of --headless.")
     p_chat.add_argument("--message", metavar="TEXT", default=None,
                         help="Headless reply consumed by the first bare-turn-end prompt; "
-                             "requires --non-interactive.")
+                             "requires --headless.")
     p_chat.add_argument("--model", metavar="ARG", default=None, type=_model_arg_type,
                         help="Run the opening step under a chosen model "
                              "(provider:model or bare model); the same override as "
@@ -4069,16 +4069,16 @@ def _build_parser() -> argparse.ArgumentParser:
     p_resume.add_argument(
         "token", nargs="?",
         help="Quest id or resume token identifying which quest to resume.")
-    p_resume.add_argument("--non-interactive", action="store_true",
+    p_resume.add_argument("--headless", action="store_true", dest="non_interactive",
                           help="Headless: no live prompt; supply the reply via --message.")
     p_resume.add_argument("--autonomous", action="store_true",
                           help="Auto-take the recommendation at recommendation-bearing "
                                "gates instead of confirming each; genuine intent-forks "
-                               "still pause for a human. Independent of --non-interactive.")
+                               "still pause for a human. Independent of --headless.")
     p_resume.add_argument("--message", metavar="TEXT", default=None,
                           help="Headless reply consumed by the first bare-turn-end prompt; "
                                "pause+resume with another --message. "
-                               "Requires --non-interactive.")
+                               "Requires --headless.")
     p_resume.set_defaults(func=_cmd_resume)
 
     p_log = sub.add_parser(

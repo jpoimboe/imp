@@ -33,7 +33,7 @@ def create_quest(control_root: Path, prompt: str) -> None:
     env = _base_env()
     env["IMP_REMOTE_AUTOSUBSCRIBE"] = "1"
     _spawn_detached(
-        _imp("new", "--non-interactive", "--message", prompt), env, control_root)
+        _imp("new", "--headless", "--message", prompt), env, control_root)
 
 
 def resume_quest(control_root: Path, token: str) -> str:
@@ -48,13 +48,13 @@ def resume_quest(control_root: Path, token: str) -> str:
     env = _base_env()
     env["IMP_REMOTE_AUTOSUBSCRIBE"] = "1"
     _spawn_detached(
-        _imp("resume", target, "--non-interactive"), env, control_root)
+        _imp("resume", target, "--headless"), env, control_root)
     return f"Resuming @{target}…"
 
 
 def start_quest(control_root: Path, quest_id: str) -> None:
     """Spawn a detached, non-interactive, autonomous `imp resume` for a started draft."""
     _spawn_detached(
-        _imp("resume", quest_id, "--non-interactive", "--autonomous"),
+        _imp("resume", quest_id, "--headless", "--autonomous"),
         _base_env(), control_root)
 

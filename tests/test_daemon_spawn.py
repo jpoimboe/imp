@@ -21,7 +21,7 @@ def test_create_quest_spawns_imp_new(monkeypatch: Any, tmp_path: Path) -> None:
     calls = _capture(monkeypatch)
     spawn.create_quest(tmp_path, "add dark mode")
     assert calls[0]["argv"] == [
-        sys.executable, "-m", "imp", "new", "--non-interactive",
+        sys.executable, "-m", "imp", "new", "--headless",
         "--message", "add dark mode"]
     assert "IMP_REMOTE_CONTROL_SOCK" not in calls[0]["env"]
 
@@ -35,7 +35,7 @@ def test_resume_quest_spawns_imp_resume_for_a_unique_match(
     msg = spawn.resume_quest(tmp_path, "aaaa")
     assert calls[0]["argv"] == [
         sys.executable, "-m", "imp", "resume", "2026-06-13-aaaaaa",
-        "--non-interactive"]
+        "--headless"]
     assert calls[0]["env"]["IMP_REMOTE_AUTOSUBSCRIBE"] == "1"
     assert "2026-06-13-aaaaaa" in msg
 
@@ -70,7 +70,7 @@ def test_start_quest_spawns_autonomous_resume(
     spawn.start_quest(tmp_path, "2026-06-13-aaaaaa")
     assert calls[0]["argv"] == [
         sys.executable, "-m", "imp", "resume", "2026-06-13-aaaaaa",
-        "--non-interactive", "--autonomous"]
+        "--headless", "--autonomous"]
     assert calls[0]["cwd"] == tmp_path
     assert "IMP_REMOTE_CONTROL_SOCK" not in calls[0]["env"]
     assert "IMP_REMOTE_AUTOSUBSCRIBE" not in calls[0]["env"]
