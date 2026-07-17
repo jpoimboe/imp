@@ -159,3 +159,129 @@ def test_search_active_zone(tmp_path: Path) -> None:
     assert hits[0].zone == "active"
 
     assert store.search("no-such-text", zones) == []
+
+
+def test_scan_homes_migrates_v5_home(tmp_path: Path) -> None:
+    from imp.engine.quest import LAYOUT_VERSION
+
+    _seed_control(tmp_path)
+    ch = Quest.create(tmp_path, title="", quest_id="v5q", base_branch="main")
+
+    # Downgrade to v5 so the migration fires on next scan_homes.
+    quest_json_path = ch.quest_dir / "quest.json"
+    meta = json.loads(quest_json_path.read_text())
+    meta["layout_version"] = 5
+    quest_json_path.write_text(json.dumps(meta, indent=2, sort_keys=True))
+
+    # Write v5 (pre-triad) events.  step_context sets prompt_pending for
+    # agent1, so the following human:false user_message is reclassified to
+    # engine_message/agent_prompt on migration.
+    agent_id = "agent1"
+    v5_events = [
+        {
+            "id": "ev0", "agent_id": None,
+            "timestamp": "2026-06-01T00:00:00+00:00",
+            "type": "opening_intent", "payload": {"text": ""},
+        },
+        {
+            "id": "ev1", "agent_id": agent_id,
+            "timestamp": "2026-06-01T00:00:01+00:00",
+            "type": "step_context",
+            "payload": {"system_prompt": "You are a helpful assistant.", "step": "s"},
+        },
+        {
+            "id": "ev2", "agent_id": agent_id,
+            "timestamp": "2026-06-01T00:00:02+00:00",
+            "type": "user_message",
+            "payload": {
+                "role": "user", "human": False,
+                "content": [{"type": "text", "text": "Framework prompt here"}],
+            },
+        },
+        {
+            "id": "ev3", "agent_id": agent_id,
+            "timestamp": "2026-06-01T00:00:03+00:00",
+            "type": "llm_response",
+            "payload": {"role": "assistant",
+                        "content": [{"type": "text", "text": "agent response"}]},
+        },
+        {
+            "id": "ev4", "agent_id": agent_id,
+            "timestamp": "2026-06-01T00:00:04+00:00",
+            "type": "user_message",
+            "payload": {
+                "role": "user", "human": True,
+                "content": [{"type": "text", "text": "genuine reply here"}],
+            },
+        },
+    ]
+    ch.events_path.write_text(
+        "".join(json.dumps(ev) + "\n" for ev in v5_events)
+    )
+
+    digs = {d.quest_id: d for d in make_store(tmp_path).scan_homes()}
+    assert "v5q" in digs
+    d = digs["v5q"]
+
+    # The genuine human reply is the title, NOT the engine-injected prompt.
+    assert d.intent_title == "genuine reply here"
+
+    # quest.json must be stamped to the current layout version.
+    updated_meta = json.loads(quest_json_path.read_bytes())
+    assert updated_meta["layout_version"] == LAYOUT_VERSION
+
+    # events.jsonl must be rewritten in the triad schema.
+    migrated = [
+        json.loads(line)
+        for line in ch.events_path.read_text().strip().splitlines()
+    ]
+    # Framework prompt became engine_message/agent_prompt.
+    agent_prompts = [
+        e for e in migrated
+        if e.get("type") == "engine_message"
+        and e.get("payload", {}).get("subtype") == "agent_prompt"
+    ]
+    assert len(agent_prompts) == 1
+    # No user_message payload carries the legacy 'human' key.
+    assert not any(
+        "human" in e.get("payload", {})
+        for e in migrated if e.get("type") == "user_message"
+    )
+    # The genuine reply is now subtype=reply.
+    reply_events = [
+        e for e in migrated
+        if e.get("type") == "user_message"
+        and e.get("payload", {}).get("subtype") == "reply"
+    ]
+    assert reply_events[0]["payload"]["content"][0]["text"] == "genuine reply here"
+
+    # Second scan is idempotent — events.jsonl bytes must not change.
+    events_bytes_after_first_scan = ch.events_path.read_bytes()
+    make_store(tmp_path).scan_homes()
+    assert ch.events_path.read_bytes() == events_bytes_after_first_scan
+
+
+def test_scan_homes_tolerates_future_layout_version(tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+    Quest.create(tmp_path, title="Future", quest_id="futq", base_branch="main")
+
+    # Stamp a future (unknowable) layout_version — migration must fail gracefully.
+    quest_json_path = tmp_path / ".imp" / "quests" / "futq" / "quest.json"
+    meta = json.loads(quest_json_path.read_text())
+    meta["layout_version"] = 99
+    quest_json_path.write_text(json.dumps(meta, indent=2, sort_keys=True))
+
+    # A second, valid home to confirm the list still renders.
+    ch2 = Quest.create(tmp_path, title="Good", quest_id="goodq", base_branch="main")
+    _append_event(ch2, {
+        "id": "e1", "timestamp": "2026-06-01T00:00:00+00:00",
+        "type": "user_message",
+        "payload": {"role": "user", "subtype": "intent",
+                    "content": [{"type": "text", "text": "some intent"}]},
+    })
+
+    # Must not raise; both homes survive.
+    digs = {d.quest_id: d for d in make_store(tmp_path).scan_homes()}
+    assert "futq" in digs
+    assert "goodq" in digs
+    assert digs["goodq"].intent_title == "some intent"
