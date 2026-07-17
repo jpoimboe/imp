@@ -16,6 +16,8 @@ def test_dependency_wait_line_shows_verb_elapsed_and_pause_hint() -> None:
     assert "waiting for tuhe55, koze82 to merge" in line
     assert "4m 0s" in line
     assert "press ctrl-d to pause" in line
+    assert line.endswith("4m 0s")
+    assert line.index("press ctrl-d to pause") < line.index("4m 0s")
 
 
 def test_non_dependency_wait_line_has_no_pause_hint() -> None:

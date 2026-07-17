@@ -3119,10 +3119,10 @@ def test_compose_activity_line_shows_retry_hint_when_total_at_least_60() -> None
                       start_ts="2026-01-01T00:00:00+00:00")
     line = compose_activity_line(activity=act, frame=0, color=False,
                                  now_iso="2026-01-01T00:11:00+00:00")
-    # the hint is the trailing ` · `-joined segment, after the countdown
-    assert line.endswith("press r to retry now")
-    assert " · press r to retry now" in line
-    assert line.index("left") < line.index("press r to retry now")
+    # the countdown timer is the trailing ` · `-joined segment, after the hint
+    assert line.endswith("38m left")
+    assert " · 38m left" in line
+    assert line.index("press r to retry now") < line.index("38m left")
 
 
 def test_compose_activity_line_retry_hint_survives_final_minute() -> None:
@@ -3132,8 +3132,8 @@ def test_compose_activity_line_retry_hint_survives_final_minute() -> None:
                       start_ts="2026-01-01T00:00:00+00:00")
     line = compose_activity_line(activity=act, frame=0, color=False,
                                  now_iso="2026-01-01T00:01:40+00:00")
-    assert "20s left" in line
-    assert line.endswith("press r to retry now")
+    assert line.endswith("20s left")
+    assert line.index("press r to retry now") < line.index("20s left")
 
 
 def test_compose_activity_line_no_retry_hint_below_60() -> None:
@@ -3189,4 +3189,5 @@ def test_compose_activity_line_retry_hint_at_exactly_60() -> None:
                       start_ts="2026-01-01T00:00:00+00:00")
     line = compose_activity_line(activity=act, frame=0, color=False,
                                  now_iso="2026-01-01T00:00:05+00:00")
-    assert line.endswith("press r to retry now")
+    assert line.endswith("55s left")
+    assert line.index("press r to retry now") < line.index("55s left")
