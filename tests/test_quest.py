@@ -696,3 +696,19 @@ def test_create_draft_eager_still_fails_fast_on_skew_workflow(tmp_path: Path) ->
         Quest.create_draft(
             tmp_path, title="X", quest_id="dfr3", base_branch="main")
     assert not (tmp_path / ".imp" / "quests" / "dfr3").exists()
+
+
+def test_create_draft_persists_parent_id(tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+    ch = Quest.create_draft(
+        tmp_path, title="X", quest_id="par1", base_branch="main", parent="mom42")
+    meta = json.loads((ch.quest_dir / "quest.json").read_text())
+    assert meta["parent"] == "mom42"
+
+
+def test_create_draft_parent_defaults_none(tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+    ch = Quest.create_draft(
+        tmp_path, title="X", quest_id="par2", base_branch="main")
+    meta = json.loads((ch.quest_dir / "quest.json").read_text())
+    assert meta["parent"] is None

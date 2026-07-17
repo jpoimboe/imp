@@ -362,7 +362,7 @@ class Quest:
         cls, control_root: Path, *, title: str, quest_id: str, base_branch: str,
         depends_on: list[str] | None = None, workflow: str | None = None,
         origin: str = "draft", seed_opening: str | None = None,
-        defer_seed: bool = False,
+        parent: str | None = None, defer_seed: bool = False,
     ) -> Quest:
         """An un-materialized draft: NO branch, NO worktree. State is seeded at the
         permanent home; project_root points at the main checkout so the spec
@@ -391,6 +391,7 @@ class Quest:
             "workflow": workflow,
             "origin": origin,
             "seed_opening": seed_opening,
+            "parent": parent,
         }, indent=2, sort_keys=True))
 
         if defer_seed:
