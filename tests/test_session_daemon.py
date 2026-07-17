@@ -2039,3 +2039,69 @@ def test_hold_prompt_returns_resume_for_plain_interrupt() -> None:
 
     coord = SimpleNamespace(should_pause=True, pause_reason="ctrl-c")
     assert _hold_prompt(RunResult.PAUSED, coord) == _RESUME_PROMPT
+
+
+def test_run_compaction_slims_transcript_and_emits_confirmation(
+    tmp_path: Path,
+) -> None:
+    from imp.agents.compaction import RESULT_PLACEHOLDER
+    from imp.agents.runner import Message, ToolResultBlock, ToolUseBlock
+    from imp.agents.transcript import Transcript
+    from imp.engine.state import CurrentStep, State
+    from imp.remote.session.daemon import _run_compaction
+
+    quest = _make_change(tmp_path, "2026-06-15-cmp")
+    tdir = tmp_path / "steps" / "brainstorm"
+    tdir.mkdir(parents=True)
+    t = Transcript(tdir / "transcript.jsonl")
+    t.append(Message(role="assistant", content=(
+        ToolUseBlock(id="tu1", name="read_file", input={"path": "a"}),)))
+    t.append(Message(role="user", content=(
+        ToolResultBlock(tool_use_id="tu1", content="BIG BODY"),)))
+    State(id=quest.id, step="brainstorm", step_attempt=0, status="running",
+          current_step=CurrentStep(transcript_dir=tdir)).save(quest.state_dir)
+
+    events: list[dict[str, Any]] = []
+    _run_compaction(quest, events.append)
+
+    results = [b for m in t.load() for b in m.content
+               if isinstance(b, ToolResultBlock)]
+    assert results and all(b.content == RESULT_PLACEHOLDER for b in results)
+    assert events == [{"type": "script_output",
+                       "payload": {"stdout": "compacted — omitted 1 tool results"}}]
+
+
+@pytest.mark.anyio
+async def test_compact_pause_reenters_after_running_compaction(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import imp.remote.session.daemon as daemon_mod
+
+    quest = _make_change(tmp_path, "2026-06-15-cmp2")
+
+    ran: list[str] = []
+    monkeypatch.setattr(
+        daemon_mod, "_run_compaction",
+        lambda ch, on_event: ran.append(ch.id))
+
+    calls = {"n": 0}
+
+    async def _run_fn(
+        ch: Quest, *, on_event: Any, user_chat_input_fn: Any, coordinator: Any,
+        wait_for_turn_fn: Any = None, **kw: Any,
+    ) -> RunResult:
+        calls["n"] += 1
+        if calls["n"] == 1:
+            State(id=ch.id, step="brainstorm", step_attempt=0,
+                  status="running").save(ch.state_dir)
+            await coordinator.signal_pause(reason="compact", via="frame")
+            return RunResult.PAUSED
+        return RunResult.COMPLETED
+
+    with anyio.fail_after(5):
+        result = await serve_quest_session(
+            quest, run_fn=_run_fn, hibernate=False)
+
+    assert result is RunResult.COMPLETED
+    assert calls["n"] == 2
+    assert ran == [quest.id]
