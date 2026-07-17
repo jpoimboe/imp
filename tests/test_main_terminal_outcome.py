@@ -186,15 +186,21 @@ def test_emit_paused_summary_error_block_plain_under_no_color(capsys) -> None:
     assert "resume: imp resume" not in out
 
 
-def test_emit_paused_summary_interrupt_renders_bare_reason(capsys) -> None:
+def test_emit_paused_summary_interrupt_renders_gold_block(monkeypatch, capsys) -> None:
+    monkeypatch.setattr(main, "should_use_color", lambda stream: False)
     quest = _Change([
         {"type": "workflow_paused",
          "payload": {"reason": "interrupt", "interrupt_reason": "interrupt"}},
     ])
     main._emit_paused_summary(quest)
     out = capsys.readouterr().out
-    assert not out.startswith("\n")                    # no leading blank
-    assert "2026-06-12-run-x · (unnamed) · interrupt" in out
+    lines = out.split("\n")
+    assert lines[0] == "interrupt"  # gold headline, own line (plain here)
+    assert lines[1] == "2026-06-12-run-x"                      # identity, bare id (untitled)
+    assert lines[2] == "resume: imp resume 2026-06-12-run-x"   # resume line kept
+    assert "(unnamed)" not in out
+    assert "· interrupt" not in out                            # no crammed spine tail
+    assert not out.startswith("\n")                            # no leading blank
     assert out.endswith("\n\n")
     assert not out.endswith("\n\n\n")
 
@@ -477,7 +483,10 @@ def test_emit_paused_summary_titleless_shows_prompt_fallback(monkeypatch, capsys
     ])
     main._emit_paused_summary(quest)
     out = capsys.readouterr().out
-    assert "2026-06-12-run-x · > add a dark mode toggle · interrupt" in out
+    lines = out.split("\n")
+    assert lines[0] == "interrupt"                                    # gold headline, own line
+    assert lines[1] == "2026-06-12-run-x · > add a dark mode toggle"  # identity, prompt fallback
+    assert lines[2] == "resume: imp resume 2026-06-12-run-x"         # resume line kept
     assert "(unnamed)" not in out
 
 

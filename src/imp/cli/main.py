@@ -450,9 +450,9 @@ def _pause_lines(
             head = f"{label}: {first}" if first else label
             body = rest
         return _error_block(head, body, name, title, color=color, intent=intent)
-    tail = info.base if info is not None else "paused"
+    head = info.base if info is not None else "paused"
     return [
-        _status_spine(name, title, tail, "wordmark", color=color, intent=intent),
+        *_clean_block(head, name, title, color=color, intent=intent),
         _resume_line(token),
     ]
 
