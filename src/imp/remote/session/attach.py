@@ -14,14 +14,14 @@ from imp.engine.quest import Quest
 from imp.remote.session.client import SessionClient
 from imp.remote.session.discover import session_socket_path
 
-SpawnFn = Callable[[Quest], None]
+SpawnFn = Callable[[Quest], "subprocess.Popen[bytes] | None"]
 
 
 def spawn_session_daemon(
     quest: Quest, *, resume: bool = False,
     non_interactive: bool = False, autonomous: bool = False,
     model: str | None = None,
-) -> None:
+) -> subprocess.Popen[bytes] | None:
     argv = [
         sys.executable, "-m", "imp.remote.session.daemon",
         "--control-root", str(quest.control_root),
@@ -39,7 +39,7 @@ def spawn_session_daemon(
     env.pop("IMP_REMOTE_CONTROL_SOCK", None)
     quest.quest_dir.mkdir(parents=True, exist_ok=True)
     with open(quest.quest_dir / "daemon.stderr", "wb") as stderr_file:
-        subprocess.Popen(
+        return subprocess.Popen(
             argv,
             env=env,
             cwd=str(quest.control_root),

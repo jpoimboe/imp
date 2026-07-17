@@ -366,3 +366,13 @@ def test_spawn_session_daemon_omits_model_when_none(
                         lambda argv, **kw: captured.update(argv=argv) or object())
     spawn_session_daemon(quest)
     assert "--model" not in captured["argv"]
+
+
+def test_spawn_session_daemon_returns_the_popen_handle(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    quest = _make_change(tmp_path, "2026-06-15-handle")
+    sentinel = object()
+    monkeypatch.setattr(subprocess, "Popen", lambda argv, **kw: sentinel)
+
+    assert spawn_session_daemon(quest) is sentinel
