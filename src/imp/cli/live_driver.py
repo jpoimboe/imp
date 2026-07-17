@@ -413,7 +413,7 @@ class LiveDriver:
         self._refresh_status()
 
     def finish(self, *, exit_block: bool = True) -> None:
-        """Flush the final block, then tear the footer down: exit_block keeps its owned blank as the pre-exit-block separator (end_run), else flush flat (reset)."""
+        """Flush the block; exit_block descends past the owned blank (end_run) else resets."""
         self._builder.finalize()
         self._walk(force=True)
         if exit_block:
