@@ -508,6 +508,23 @@ def test_show_json_emits_structured_overview(
 ) -> None:
     _seed_control(tmp_path)
     ch = _seed_with_artifacts(tmp_path, _ID, "Feat")
+    # Archive a dependency so its title resolves and merged=True.
+    dep_events = tmp_path / "dep.jsonl"
+    dep_events.write_text("")
+    dep_qj = tmp_path / "dep.quest.json"
+    dep_qj.write_text(json.dumps({
+        "id": "depa01", "title": "Dep A", "base_branch": "main",
+        "created_at": "2026-06-20T11:00:00+00:00", "depends_on": []}))
+    dep_sj = tmp_path / "dep.state.json"
+    dep_sj.write_text(json.dumps({
+        "id": "depa01", "status": "completed", "step": None,
+        "merge_commit": "abc123"}))
+    archive.archive_quest(tmp_path, "depa01", events_path=dep_events,
+                          quest_json_path=dep_qj, state_json_path=dep_sj)
+    meta_path = ch.quest_dir / "quest.json"
+    meta = json.loads(meta_path.read_text())
+    meta["depends_on"] = ["depa01"]
+    meta_path.write_text(json.dumps(meta))
     with ch.events_path.open("a", encoding="utf-8") as fh:
         fh.write(json.dumps({
             "type": "user_message", "agent_id": None,
@@ -519,7 +536,8 @@ def test_show_json_emits_structured_overview(
     assert data["title"] == "Feat"
     assert data["status"] == "new"
     assert data["intent"] == "wire up the widget"
-    assert data["depends_on"] == []
+    assert data["depends_on"] == [
+        {"id": "depa01", "title": "Dep A", "merged": True}]
     assert data["created"] is not None
 
 

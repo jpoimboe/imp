@@ -350,6 +350,59 @@ def test_detail_card_omits_parent_line_when_absent(tmp_path: Path) -> None:
     assert "parent:" not in card
 
 
+def _archive_dep(control: Path, qid: str, title: str) -> None:
+    """Archive a dep so is_archived is True and its title resolves from the archive record."""
+    events = control / f"{qid}.jsonl"
+    events.write_text("")
+    qj = control / f"{qid}.quest.json"
+    qj.write_text(json.dumps({
+        "id": qid, "title": title, "base_branch": "main",
+        "created_at": "2026-06-20T11:00:00+00:00", "depends_on": []}))
+    sj = control / f"{qid}.state.json"
+    sj.write_text(json.dumps({
+        "id": qid, "status": "completed", "step": None, "merge_commit": "abc123"}))
+    archive.archive_quest(control, qid, events_path=events,
+                          quest_json_path=qj, state_json_path=sj)
+
+
+def test_detail_card_reshapes_depends_on(tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+    # Live (unmerged) dep resolves its title from the live home.
+    lhome = tmp_path / ".imp" / "quests" / "livedp"
+    lhome.mkdir(parents=True)
+    (lhome / "quest.json").write_text(json.dumps(
+        {"id": "livedp", "title": "Live Dep", "base_branch": "main"}))
+    # Merged (archived) dep resolves from the archive.
+    _archive_dep(tmp_path, "mrgdp1", "Merged Dep")
+    # Parent quest's live home supplies the resolved title.
+    phome = tmp_path / ".imp" / "quests" / "prntdp"
+    phome.mkdir(parents=True)
+    (phome / "quest.json").write_text(json.dumps(
+        {"id": "prntdp", "title": "Parent P", "base_branch": "main"}))
+    cdir = tmp_path / ".imp" / "quests" / "2026-06-20-chd20"
+    (cdir / "state").mkdir(parents=True)
+    (cdir / "quest.json").write_text(json.dumps({
+        "id": "2026-06-20-chd20", "title": "Child", "base_branch": "main",
+        "parent": "prntdp",
+        "depends_on": ["livedp", "mrgdp1"],
+        "created_at": "2026-06-20T11:00:00+00:00", "layout_version": LAYOUT_VERSION}))
+    (cdir / "events.jsonl").write_text("")
+    State(id="2026-06-20-chd20", status="paused", step="spec-writer",
+          merge_commit="def456", step_attempt=0).save(cdir / "state")
+    lines = main._detail_card(tmp_path, "2026-06-20-chd20", now=_NOW, color=False)
+    dep_line = next(ln for ln in lines if ln.startswith("depends_on:"))
+    assert dep_line.endswith(
+        "livedp · Live Dep (unmerged), mrgdp1 · Merged Dep (merged)")
+    base_idx = next(i for i, ln in enumerate(lines) if ln.startswith("base_branch:"))
+    parent_idx = next(i for i, ln in enumerate(lines) if ln.startswith("parent:"))
+    depends_idx = next(i for i, ln in enumerate(lines) if ln.startswith("depends_on:"))
+    merge_idx = next(i for i, ln in enumerate(lines) if ln.startswith("merge_commit:"))
+    assert base_idx < parent_idx < depends_idx < merge_idx
+    assert parent_idx == base_idx + 1
+    assert depends_idx == parent_idx + 1
+    assert merge_idx == depends_idx + 1
+
+
 def test_detail_card_shows_shelved_for_archived_paused_quest(tmp_path: Path) -> None:
     _seed_control(tmp_path)
 

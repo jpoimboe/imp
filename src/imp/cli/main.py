@@ -1786,11 +1786,13 @@ def _quest_card(control: Path, quest_id: str, *, now: datetime,
         lines.append(_card_field(
             "parent:", f"{card.parent['id']} · {card.parent['title']}",
             15, color=color))
+    if card.depends_on:
+        deps = ", ".join(
+            f"{d['id']} · {d['title']} ({'merged' if d['merged'] else 'unmerged'})"
+            for d in card.depends_on)
+        lines.append(_card_field("depends_on:", deps, 15, color=color))
     if card.merge_commit:
         lines.append(_card_field("merge_commit:", card.merge_commit, 15, color=color))
-    if card.depends_on:
-        lines.append(_card_field("depends_on:", ", ".join(card.depends_on),
-                                 15, color=color))
     if card.intent:
         lines.append("")
         lines.append(pal.ansi("intent:", "dim", enabled=color))

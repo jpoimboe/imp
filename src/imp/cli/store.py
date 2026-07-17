@@ -48,7 +48,7 @@ class QuestCard:
     base_branch: str | None
     merge_commit: str | None
     parent: dict[str, str] | None
-    depends_on: list[str]
+    depends_on: list[dict[str, Any]]
     intent: str | None
     summary: bytes | None
 
@@ -168,7 +168,8 @@ class LocalStore:
             base_branch=meta.get("base_branch"),
             merge_commit=state.get("merge_commit"),
             parent=quest_refs.resolve_parent(self.control_root, meta.get("parent")),
-            depends_on=list(meta.get("depends_on", [])),
+            depends_on=quest_refs.resolve_dependencies(
+                self.control_root, list(meta.get("depends_on", []))),
             intent=_resolve_intent(events),
             summary=_show_artifact(self.control_root, quest_id, f"summary/{quest_id}.md"),
         )
