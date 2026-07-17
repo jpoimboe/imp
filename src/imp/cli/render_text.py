@@ -412,7 +412,7 @@ def _render_children(children: list[Any], *, depth: int, full: bool = False,
                              live_viewer=live_viewer))
         if not lines:
             continue
-        if prev_prose or spaces_before(child):
+        if prev_prose or (spaces_before(child) and not frame_suppressed(child)):
             yield _gutter_indent(depth, gutters, color)
         yield from lines
         prev_prose = spaces_after(child, full=cats >= _ALL_CATEGORIES)
@@ -631,7 +631,7 @@ def _render(node: Any, *, depth: int, full: bool = False,
             yield header_line(node, depth=depth, color=color, gutters=gutters)
         yield from _render_children(node.children, depth=depth, cats=cats,
                                     color=color, width=width, display_width=display_width,
-                                    gutters=gutters, prime=True, live_viewer=live_viewer)
+                                    gutters=gutters, prime=not suppress, live_viewer=live_viewer)
         if not suppress and node.closed and nv.phase_elapsed(node) is not None:
             # Blank ABOVE the phase-complete line (it's surrounded too); the blank
             # BELOW comes from the root walk (spaces_after(PhaseNode)).
@@ -669,7 +669,7 @@ def _render(node: Any, *, depth: int, full: bool = False,
                     if suppress else node.children)
         yield from _render_children(children, depth=depth, cats=cats,
                                     color=color, width=width, display_width=display_width,
-                                    gutters=gutters, prime=True, live_viewer=live_viewer)
+                                    gutters=gutters, prime=not suppress, live_viewer=live_viewer)
         if cats >= _ALL_CATEGORIES and node.agent_result:
             yield from _render_output_args(node.agent_result, depth=depth,
                                            color=color, width=width, gutters=gutters)

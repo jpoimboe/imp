@@ -3191,3 +3191,28 @@ def test_compose_activity_line_retry_hint_at_exactly_60() -> None:
                                  now_iso="2026-01-01T00:00:05+00:00")
     assert line.endswith("55s left")
     assert line.index("press r to retry now") < line.index("55s left")
+
+
+def test_frame_suppressed_opening_live_log_parity() -> None:
+    # Direct AC assertion: the opening frame-suppressed threshold phase+step renders
+    # byte-for-byte identically in the live viewer and in `imp log` (render_tree).
+    # Pre-fix the batch walk stacks three blanks while the live path already shows
+    # one, so this parity fails until the render_text guards land.
+    events = [
+        ev("1", "quest_created", quest_id=1, title="x"),
+        ev("2", "user_message", subtype="intent",
+           content=[{"type": "text", "text": "do the thing"}]),
+        ev("3", "step_started", step="threshold", kind="agent", phase="threshold",
+           model="m", provider="anthropic", label="chatting",
+           phase_label="threshold phase", show_label=False, phase_show_label=False),
+        ev("4", "agent_message", agent_id="step:threshold/threshold",
+           provider="anthropic", model="m", stop_reason="end_turn", usage={},
+           raw={"content": [{"type": "text", "text": "I can help with that"}]}),
+        ev("5", "step_completed", step="threshold", kind="agent",
+           action={"verb": "continue"}, var_mutations={}),
+    ]
+    drv, out = _driver()
+    for e in events:
+        drv.on_event(e)
+    drv.finish()
+    assert _body(out) == _render_body(events)   # live == imp log, byte-for-byte
