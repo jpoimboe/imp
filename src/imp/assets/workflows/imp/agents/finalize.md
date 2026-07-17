@@ -133,8 +133,8 @@ cover-check has already run, so any verify-family toleration confirmed as tracke
 elsewhere is marked `— covered-by <id>` and is **not** re-seeded. Hand every remaining
 **needs-decision** item (the closed set from §1) to the backlog: run
 `imp new --backlog "<short title>" --depends-on {{ quest.id }} "<self-contained brief that needs no other context>"` — group related items into one quest or
-split unrelated ones, whatever fits. When the item is a verify-family toleration, the
-`description` must embed the failing test's identity (node id / name / signature) so a
+split unrelated ones, whatever fits. When the item is a verify-family toleration,
+the brief must embed the failing test's identity (node id / name / signature) so a
 later quest's cover-check matches it instead of seeding a duplicate. Then rewrite each
 `deferred.md` line to `- [x] DEFERRED <src>: <desc> [scope: …] — seeded <new-quest-id>`.
 With every item now trusted-and-merged or seeded, take the **merge** disposition. The one
@@ -185,7 +185,7 @@ take the items in whatever order and grouping the discussion warrants. For each 
     `imp new --backlog "<short title>" --depends-on {{ quest.id }} "<self-contained brief that needs no other context>"`, rewrite the line to
     `- [x] DEFERRED <src>: <desc> [scope: …] — seeded <new-quest-id>`, and tell them it is
     startable via `imp resume <new-quest-id>` once this quest merges. When the item is a
-    verify-family toleration, the `description` must embed the failing test's identity
+    verify-family toleration, the brief must embed the failing test's identity
     (node id / name / signature) so a later quest's cover-check can match it.
   - **ignore** — drop it. Rewrite the line to
     `- [x] DEFERRED <src>: <desc> [scope: …] — ignored-at-gate`.
