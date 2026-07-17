@@ -9,7 +9,7 @@ import os
 import shutil
 import tempfile
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -174,6 +174,8 @@ class Quest:
     workflow: str | None = None  # per-quest workflow name; None = project default
     origin: str = "draft"        # provenance: draft | backlog (Backlog only)
     seed_opening: str | None = None  # title+description seed for a fresh resume open
+    parent: str | None = None  # parent quest id (create_draft provenance); None when standalone
+    depends_on: list[str] = field(default_factory=list)  # dependency quest ids (gates go-live)
 
     def rename(self, name: str, *, log: JsonlEventLog) -> str:
         """Content-only rename (no git): set title, rewrite quest.json under the
@@ -205,6 +207,7 @@ class Quest:
         _write_quest_json(meta_path, meta)
 
     def set_depends_on(self, depends_on: list[str]) -> None:
+        self.depends_on = list(depends_on)
         meta_path = self.quest_dir / "quest.json"
         meta = json.loads(meta_path.read_text())
         meta["depends_on"] = list(depends_on)
@@ -350,6 +353,7 @@ class Quest:
             id=quest_id, title=title, base_branch=base_branch,
             control_root=control_root, project_root=wt_path, quest_dir=quest_dir,
             cur_base_head=cur_base_head, workflow=workflow,
+            depends_on=list(depends_on or []),
         )
         quest.event_log().append(
             agent_id=None, type="quest_created",
@@ -434,6 +438,7 @@ class Quest:
             control_root=control_root, project_root=control_root,
             quest_dir=quest_dir, materialized=False, orig_base_head=orig_base_head,
             workflow=workflow, origin=origin, seed_opening=seed_opening,
+            parent=parent, depends_on=list(depends_on or []),
         )
         quest.event_log().append(
             agent_id=None, type="quest_created",
@@ -465,4 +470,6 @@ class Quest:
             workflow=meta.get("workflow"),
             origin=meta.get("origin", "draft"),
             seed_opening=meta.get("seed_opening"),
+            parent=meta.get("parent"),
+            depends_on=list(meta.get("depends_on") or []),
         )
