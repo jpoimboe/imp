@@ -50,7 +50,7 @@ def test_burst_recap_streams_then_prose_in_live_path() -> None:
     for e in events:
         drv.on_event(e)
     assert not any("call" in ln for ln in _body(out))  # burst open — held
-    drv.on_event(ev("8", "llm_response", agent_id="a",
+    drv.on_event(ev("8", "agent_message", agent_id="a",
                     raw={"content": [{"type": "text", "text": "done"}]},
                     usage={}))
     # The closed burst is final immediately; prose is held until step_completed
@@ -70,7 +70,7 @@ def test_burst_recap_then_prose_kept_in_order() -> None:
            model="m", provider="anthropic"),
         ev("4", "tool_call", agent_id="a", id="b1", name="grep", input={"q": "x"}),
         ev("5", "tool_result", agent_id="a", id="b1", content="ok"),
-        ev("6", "llm_response", agent_id="a",
+        ev("6", "agent_message", agent_id="a",
            raw={"content": [{"type": "text", "text": "the answer"}]}, usage={}),
         ev("7", "step_completed", step="spec", kind="agent",
            action={"verb": "continue"}, var_mutations={}),
@@ -92,7 +92,7 @@ def test_live_subagent_only_status_rows() -> None:
            model="m", provider="anthropic"),
         ev("4", "tool_call", agent_id="a", id="t1", name="sub_agent",
            input={"subagent_name": "reviewer"}),
-        ev("5", "llm_response", agent_id="sub:4",
+        ev("5", "agent_message", agent_id="sub:4",
            raw={"content": [{"type": "text", "text": "some internal chatter"}]},
            usage={}),
         ev("6", "tool_result", agent_id="a", id="t1",
@@ -156,7 +156,7 @@ def test_body_parity_with_render_tree() -> None:
         ev("4", "thinking", agent_id="a", content="real thinking here"),
         ev("5", "tool_call", agent_id="a", id="b1", name="read_file", input={"p": "1"}),
         ev("6", "tool_result", agent_id="a", id="b1", content="ok"),
-        ev("7", "llm_response", agent_id="a",
+        ev("7", "agent_message", agent_id="a",
            raw={"content": [{"type": "text", "text": "prose"}]}, usage={}),
         ev("8", "step_completed", step="spec", kind="agent",
            action={"verb": "continue"}, var_mutations={}),
@@ -176,12 +176,12 @@ def test_consecutive_prose_blank_separated_and_parity() -> None:
         ev("1", "quest_created", quest_id=1, title="x"),
         ev("3", "step_started", step="spec", kind="agent", phase="design",
            model="m", provider="anthropic"),
-        ev("4", "llm_response", agent_id="a",
+        ev("4", "agent_message", agent_id="a",
            raw={"content": [{"type": "text", "text": "First turn."}]}, usage={}),
         ev("5", "thinking", agent_id="a", content="hmm"),
-        ev("6", "llm_response", agent_id="a",   # thinking-only → emits nothing
+        ev("6", "agent_message", agent_id="a",   # thinking-only → emits nothing
            raw={"content": [{"type": "thinking", "thinking": "hmm"}]}, usage={}),
-        ev("7", "llm_response", agent_id="a",
+        ev("7", "agent_message", agent_id="a",
            raw={"content": [{"type": "text", "text": "Second turn."}]}, usage={}),
         ev("8", "step_completed", step="spec", kind="agent",
            action={"verb": "continue"}, var_mutations={}),
@@ -252,7 +252,7 @@ def test_subagent_row_resolves_only_on_close() -> None:
            model="m", provider="anthropic"),
         ev("4", "tool_call", agent_id="a", id="t1", name="sub_agent",
            input={"subagent_name": "reviewer"}),
-        ev("5", "llm_response", agent_id="sub:4",
+        ev("5", "agent_message", agent_id="sub:4",
            raw={"content": [{"type": "text", "text": "interim finding"}]}, usage={}),
     ]:
         drv.on_event(e)
@@ -276,7 +276,7 @@ def test_subagent_status_row_column_matches_render_tree() -> None:
            model="m", provider="anthropic"),
         ev("4", "tool_call", agent_id="a", id="t1", name="sub_agent",
            input={"subagent_name": "reviewer"}),
-        ev("5", "llm_response", agent_id="sub:4",
+        ev("5", "agent_message", agent_id="sub:4",
            raw={"content": [{"type": "text", "text": "finding"}]}, usage={}),
         ev("6", "tool_result", agent_id="a", id="t1",
            content='{"status":"Success"}'),
@@ -299,7 +299,7 @@ def test_finish_force_pops_running_subagent_without_outcome() -> None:
            model="m", provider="anthropic"),
         ev("4", "tool_call", agent_id="a", id="t1", name="sub_agent",
            input={"subagent_name": "reviewer"}),
-        ev("5", "llm_response", agent_id="sub:4",
+        ev("5", "agent_message", agent_id="sub:4",
            raw={"content": [{"type": "text", "text": "partial work"}]}, usage={}),
     ]:
         drv.on_event(e)
@@ -323,7 +323,7 @@ def test_subagent_body_parity_with_render_tree() -> None:
            model="m", provider="anthropic"),
         ev("4", "tool_call", agent_id="a", id="t1", name="sub_agent",
            input={"subagent_name": "reviewer"}),
-        ev("5", "llm_response", agent_id="sub:4",
+        ev("5", "agent_message", agent_id="sub:4",
            raw={"content": [{"type": "text", "text": "the finding"}]}, usage={}),
         ev("6", "tool_result", agent_id="a", id="t1",
            content='{"status":"Success","summary":"ok"}'),
@@ -362,7 +362,7 @@ def test_background_subagent_row_keeps_duration_in_live() -> None:
            input={"p": "x"}, timestamp="2026-01-01T00:00:00.4+00:00"),
         ev("6", "tool_result", agent_id="a", id="r1", content="ok",
            timestamp="2026-01-01T00:00:00.5+00:00"),
-        ev("7", "llm_response", agent_id="sub:4",
+        ev("7", "agent_message", agent_id="sub:4",
            raw={"content": [{"type": "text", "text": "the finding"}]}, usage={}),
         # Authoritative close, 10s after dispatch.
         ev("8", "tool_result", agent_id="a", id="t1", id_ns="block",
@@ -401,7 +401,7 @@ def test_nested_subagent_io_never_leaks() -> None:
         # Nested burst left OPEN (no flushing event inside the subagent).
         ev("5", "tool_call", agent_id="sub:4", id="n1", name="bash", input={}),
         ev("6", "tool_result", agent_id="sub:4", id="n1", content="ok"),
-        ev("7", "llm_response", agent_id="sub:4",
+        ev("7", "agent_message", agent_id="sub:4",
            raw={"content": [{"type": "text", "text": "after burst"}]}, usage={}),
     ]:
         drv.on_event(e)
@@ -450,7 +450,7 @@ def test_phase_b_streams_live_without_finish() -> None:
            action={"verb": "continue"}, var_mutations={}),
         ev("4", "step_started", step="build", kind="agent", phase="implement",
            model="m", provider="anthropic"),
-        ev("5", "llm_response", agent_id="a",
+        ev("5", "agent_message", agent_id="a",
            raw={"content": [{"type": "text", "text": "building now"}]}, usage={}),
     ]
     for e in events:
@@ -482,7 +482,7 @@ def test_live_subagent_collapses_to_status_row_byte_identical_to_log() -> None:
            model="m", provider="anthropic"),
         ev("4", "tool_call", agent_id="a", id="t1", name="sub_agent",
            input={"subagent_name": "reviewer"}),
-        ev("5", "llm_response", agent_id="sub:4",
+        ev("5", "agent_message", agent_id="sub:4",
            raw={"content": [{"type": "text", "text": "the finding"}]}, usage={}),
         ev("6", "tool_result", agent_id="a", id="t1", content='{"status":"Success"}'),
     ]
@@ -596,7 +596,7 @@ def test_live_prose_then_breadcrumb_blank_separated_and_parity() -> None:
         ev("1", "quest_created", quest_id=1, title="x"),
         ev("3", "step_started", step="spec", kind="agent", phase="design",
            model="m", provider="anthropic"),
-        ev("4", "llm_response", agent_id="a",
+        ev("4", "agent_message", agent_id="a",
            raw={"content": [{"type": "text", "text": "the prose"}]}, usage={}),
         ev("5", "step_completed", step="spec", kind="agent",
            action={"verb": "continue"}, var_mutations={}),
@@ -621,7 +621,7 @@ def test_live_subagent_emits_no_internal_io_or_outcome() -> None:
            model="m", provider="anthropic"),
         ev("4", "tool_call", agent_id="a", id="t1", name="sub_agent",
            input={"subagent_name": "reviewer"}),
-        ev("5", "llm_response", agent_id="sub:4",
+        ev("5", "agent_message", agent_id="sub:4",
            raw={"content": [{"type": "text", "text": "the finding"}]}, usage={}),
         ev("6", "tool_result", agent_id="a", id="t1",
            content='{"status":"Success"}'),
@@ -642,7 +642,7 @@ def test_live_prose_then_subagent_header_blank_separated() -> None:
         ev("1", "quest_created", quest_id=1, title="x"),
         ev("3", "step_started", step="spec", kind="agent", phase="design",
            model="m", provider="anthropic"),
-        ev("4", "llm_response", agent_id="a",
+        ev("4", "agent_message", agent_id="a",
            raw={"content": [{"type": "text", "text": "Pre-task prose."}]}, usage={}),
         ev("tk", "tool_call", agent_id="a", id="t1", name="sub_agent",
            input={"subagent_name": "reviewer"}),
@@ -681,7 +681,7 @@ def test_tty_chrome_steps_no_committed_status_no_double_blanks(monkeypatch) -> N
         ev("1", "quest_created", quest_id=1, title="x"),
         ev("2", "step_started", step="spec-writer", kind="agent", phase="spec",
            model="m", provider="anthropic"),
-        ev("3", "llm_response", agent_id="a",
+        ev("3", "agent_message", agent_id="a",
            raw={"content": [{"type": "text", "text": "Spec written."}]}, usage={}),
         ev("4", "step_completed", step="spec-writer", kind="agent",
            action={"verb": "continue"}, var_mutations={}),
@@ -825,7 +825,7 @@ def test_prose_before_wait_for_user_emitted_before_the_prompt() -> None:
         ev("1", "quest_created", quest_id=1, title="x"),
         ev("2", "step_started", step="s", kind="agent", phase="p",
            model="m", provider="anthropic"),
-        ev("3", "llm_response", agent_id="a",
+        ev("3", "agent_message", agent_id="a",
            raw={"content": [{"type": "text",
                              "text": "Here are two options. Which do you prefer?"}]},
            usage={}),
@@ -851,7 +851,7 @@ def test_quiet_continue_is_silent_live_and_matches_log() -> None:
         ev("1", "quest_created", quest_id=1, title="x"),
         ev("2", "step_started", step="spec", kind="agent", phase="spec",
            model="m", provider="anthropic"),
-        ev("3", "llm_response", agent_id="step:spec/spec",
+        ev("3", "agent_message", agent_id="step:spec/spec",
            raw={"content": [{"type": "text", "text": "done"}]}, usage={}),
         ev("4", "step_completed", step="spec", kind="agent",
            action={"verb": "continue"}, var_mutations={}),
@@ -878,7 +878,7 @@ def test_quiet_forward_goto_renders_nothing_matches_log() -> None:
            var_mutations={}),
         ev("4", "step_started", step="plan-writer", kind="agent", phase="plan",
            model="m", provider="anthropic"),
-        ev("5", "llm_response", agent_id="step:plan/plan-writer",
+        ev("5", "agent_message", agent_id="step:plan/plan-writer",
            raw={"content": [{"type": "text", "text": "planning"}]}, usage={}),
         ev("6", "step_completed", step="plan-writer", kind="agent",
            action={"verb": "continue"}, var_mutations={}),
@@ -990,14 +990,14 @@ def test_loud_forward_goto_breadcrumb_emits_immediately() -> None:
         ev("1", "quest_created", quest_id=1, title="x"),
         ev("2", "step_started", step="spec-reviewer", kind="agent", phase="spec",
            model="m", provider="anthropic"),
-        ev("3", "llm_response", agent_id="step:spec/spec-reviewer",
+        ev("3", "agent_message", agent_id="step:spec/spec-reviewer",
            raw={"content": [{"type": "text", "text": "approved"}]}, usage={}),
         ev("4", "step_completed", step="spec-reviewer", kind="agent",
            action={"verb": "goto", "target": "plan-writer",
                    "resume": False, "rework": False}, var_mutations={}),
         ev("5", "step_started", step="plan-writer", kind="agent", phase="plan",
            model="m", provider="anthropic"),
-        ev("6", "llm_response", agent_id="step:plan/plan-writer",
+        ev("6", "agent_message", agent_id="step:plan/plan-writer",
            raw={"content": [{"type": "text", "text": "planning"}]}, usage={}),
         ev("7", "step_completed", step="plan-writer", kind="agent",
            action={"verb": "continue"}, var_mutations={}),
@@ -1069,7 +1069,7 @@ def test_narration_un_held_after_agent_output_findings_hidden_live() -> None:
         ev("1", "quest_created", quest_id=1, title="x"),
         ev("2", "step_started", step="spec-reviewer", kind="agent", phase="spec",
            model="m", provider="anthropic"),
-        ev("3", "llm_response", agent_id="step:spec/spec-reviewer",
+        ev("3", "agent_message", agent_id="step:spec/spec-reviewer",
            provider="anthropic", model="m", usage={},
            raw={"content": [{"type": "text", "text": narration}]}),
         ev("4", "tool_call", agent_id="step:spec/spec-reviewer", id="cs1",
@@ -1077,7 +1077,7 @@ def test_narration_un_held_after_agent_output_findings_hidden_live() -> None:
            input={"status": "Success", "result": "DONE", "findings": findings}),
         ev("5", "tool_result", agent_id="step:spec/spec-reviewer", id="cs1",
            content="ok"),
-        ev("6", "agent_output", agent_id="step:spec/spec-reviewer",
+        ev("6", "agent_result", agent_id="step:spec/spec-reviewer",
            status="Success", result="DONE", findings=findings),
         ev("7", "step_completed", step="spec-reviewer", kind="agent",
            action={"verb": "continue"}, var_mutations={}),
@@ -1114,7 +1114,7 @@ def test_interleaved_narration_does_not_permanently_hold_live_cursor() -> None:
         ev("2", "step_started", step="spec-writer", kind="agent", phase="spec",
            model="m", provider="anthropic"),
         # First narration — held.
-        ev("3", "llm_response", agent_id="step:spec/spec-writer",
+        ev("3", "agent_message", agent_id="step:spec/spec-writer",
            raw={"content": [{"type": "text", "text": "First narration."}]}),
         # A thinking turn + a tool burst separate it from the next narration —
         # exactly what `_last_narration_index` cannot scan past.
@@ -1124,20 +1124,20 @@ def test_interleaved_narration_does_not_permanently_hold_live_cursor() -> None:
         ev("6", "tool_result", agent_id="step:spec/spec-writer", id="b1",
            content="ok"),
         # Second narration — the new trailing block; must un-hold the first.
-        ev("7", "llm_response", agent_id="step:spec/spec-writer",
+        ev("7", "agent_message", agent_id="step:spec/spec-writer",
            raw={"content": [{"type": "text", "text": "Second narration."}]}),
         ev("8", "tool_call", agent_id="step:spec/spec-writer", id="cs1",
            name="complete_step", input={"status": "Success"}),
         ev("9", "tool_result", agent_id="step:spec/spec-writer", id="cs1",
            content="ok"),
-        ev("10", "agent_output", agent_id="step:spec/spec-writer", status="Success"),
+        ev("10", "agent_result", agent_id="step:spec/spec-writer", status="Success"),
         ev("11", "step_completed", step="spec-writer", kind="agent",
            action={"verb": "continue"}, var_mutations={}),
         # A SECOND step. Before the fix its header never rendered live because the
         # held opening narration blocked the cursor.
         ev("12", "step_started", step="plan-writer", kind="agent", phase="plan",
            model="m", provider="anthropic"),
-        ev("13", "llm_response", agent_id="step:plan/plan-writer",
+        ev("13", "agent_message", agent_id="step:plan/plan-writer",
            raw={"content": [{"type": "text", "text": "Planning."}]}),
     ]
     drv, out = _driver()
@@ -1192,7 +1192,7 @@ def test_labeled_route_reason_rides_target_header_in_both_paths() -> None:
         ev("1", "quest_created", quest_id=1, title="x"),
         ev("2", "step_started", step="code-reviewer", kind="agent", phase="review",
            model="m", provider="anthropic"),
-        ev("3", "llm_response", agent_id="step:review/code-reviewer",
+        ev("3", "agent_message", agent_id="step:review/code-reviewer",
            raw={"content": [{"type": "text", "text": "rework"}]}, usage={}),
         ev("4", "step_completed", step="code-reviewer", kind="agent",
            action={"verb": "goto", "target": "task-lead",
@@ -1225,7 +1225,7 @@ def test_held_narration_emits_before_open_burst_live() -> None:
         ev("1", "quest_created", quest_id=1, title="x"),
         ev("2", "step_started", step="spec", kind="agent", phase="design",
            model="m", provider="anthropic"),
-        ev("3", "llm_response", agent_id="a",
+        ev("3", "agent_message", agent_id="a",
            raw={"content": [{"type": "text", "text": "Reading the files now."}]},
            usage={}),
         ev("4", "tool_call", agent_id="a", id="b1", name="read_file",
@@ -1243,7 +1243,7 @@ def test_quiet_goto_renders_nothing_in_live_path() -> None:
         ev("1", "quest_created", quest_id=1, title="x"),
         ev("2", "step_started", step="spec-reviewer", kind="agent", phase="spec",
            model="m", provider="anthropic"),
-        ev("3", "llm_response", agent_id="step:spec/spec-reviewer",
+        ev("3", "agent_message", agent_id="step:spec/spec-reviewer",
            raw={"content": [{"type": "text", "text": "approved"}]}, usage={}),
         ev("4", "step_completed", step="spec-reviewer", kind="agent",
            action={"verb": "goto", "target": "plan-writer",
@@ -1347,7 +1347,7 @@ def test_live_parallel_batch_rows_show_correct_elapsed() -> None:
         ev("tk2", "tool_call", agent_id="a", id="b2", name="sub_agent",
            input={"subagent_name": "tester"},
            timestamp="2026-06-19T10:00:01+00:00"),
-        ev("a1", "llm_response", agent_id="a", stop_reason=None, usage={},
+        ev("a1", "agent_message", agent_id="a", stop_reason=None, usage={},
            raw={"content": [{"type": "text", "text": "still working"}]},
            timestamp="2026-06-19T10:00:02+00:00"),
         ev("r1", "tool_result", agent_id="a", id="b1", id_ns="block",
@@ -1400,7 +1400,7 @@ def test_multiphase_subagent_reentry_live_log_parity() -> None:
            model="m", provider="anthropic", timestamp="2026-06-03T00:00:01+00:00"),
         ev("e4", "tool_call", agent_id="a", id="t1", name="sub_agent",
            input={"subagent_name": "reviewer"}),
-        ev("e5", "llm_response", agent_id="sub:e4",
+        ev("e5", "agent_message", agent_id="sub:e4",
            raw={"content": [{"type": "text", "text": "finding"}]}, usage={}),
         ev("e6", "tool_result", agent_id="a", id="t1", content='{"status":"Success"}'),
         ev("e7", "step_completed", step="build", kind="agent",
@@ -1430,8 +1430,9 @@ def _opening_intent_events():
     return [
         {"type": "quest_created", "agent_id": None, "payload": {"title": "t"},
          "id": "e0", "timestamp": "2026-06-03T00:00:00+00:00"},
-        {"type": "opening_intent", "agent_id": None,
-         "payload": {"text": "build the parser"},
+        {"type": "user_message", "agent_id": None,
+         "payload": {"role": "user", "subtype": "intent",
+                     "content": [{"type": "text", "text": "build the parser"}]},
          "id": "e1", "timestamp": "2026-06-03T00:00:00+00:00"},
         {"type": "step_started", "agent_id": None,
          "payload": {"step": "draft", "kind": "branch", "phase": "spec"},
@@ -1451,10 +1452,11 @@ def test_opening_intent_does_not_drop_following_step_output() -> None:
     drv, out = _driver()
     events = [
         ev("1", "quest_created", quest_id=1, title="x"),
-        ev("e1", "opening_intent", text="build the parser"),
+        ev("e1", "user_message", role="user", subtype="intent",
+           content=[{"type": "text", "text": "build the parser"}]),
         ev("3", "step_started", step="spec-writer", kind="agent", phase="spec",
            model="m", provider="anthropic"),
-        ev("8", "llm_response", agent_id="a",
+        ev("8", "agent_message", agent_id="a",
            raw={"content": [{"type": "text", "text": "drafting the spec now"}]},
            usage={}),
         ev("9", "step_completed", step="spec-writer", kind="agent",
@@ -1862,7 +1864,7 @@ def test_subagent_row_orders_elapsed_before_model_graph() -> None:
     b.add(ev("t1", "tool_call", agent_id="step:p/s", id="blk-t1",
              name="sub_agent", input={"subagent_name": "coder"},
              timestamp="2026-01-01T00:00:00+00:00"))
-    b.add(ev("r1", "llm_response", agent_id="sub:t1", provider="anthropic",
+    b.add(ev("r1", "agent_message", agent_id="sub:t1", provider="anthropic",
              model="sonnet", stop_reason="end_turn",
              raw={"content": [{"type": "text", "text": "hi"}]},
              usage={"input_tokens": 60000, "output_tokens": 5,
@@ -1968,7 +1970,7 @@ def test_live_driver_caps_hr_at_display_width() -> None:
     drv.on_event(ev("1", "quest_created", quest_id=1, title="x"))
     drv.on_event(ev("2", "step_started", step="s", kind="agent", phase="p",
                     model="m", provider="anthropic"))
-    drv.on_event(ev("3", "llm_response", agent_id="a", usage={},
+    drv.on_event(ev("3", "agent_message", agent_id="a", usage={},
                     raw={"content": [{"type": "text",
                                       "text": long_line + "\n\n---\n\nafter"}]}))
     drv.on_event(ev("4", "step_completed", step="s", kind="agent",
@@ -2174,7 +2176,7 @@ def test_show_label_false_script_silent_live_and_matches_log() -> None:
         ev("1", "quest_created", quest_id=1, title="x"),
         ev("2", "step_started", step="spec", kind="agent", phase="spec",
            model="m", provider="anthropic"),
-        ev("3", "llm_response", agent_id="step:spec/spec",
+        ev("3", "agent_message", agent_id="step:spec/spec",
            raw={"content": [{"type": "text", "text": "done"}]}, usage={}),
         ev("4", "step_completed", step="spec", kind="agent",
            action={"verb": "continue"}, var_mutations={}),
@@ -2345,7 +2347,7 @@ def test_prose_reflows_to_live_width_between_emissions() -> None:
         ev("1", "quest_created", quest_id=1, title="x"),
         ev("2", "step_started", step="one", kind="agent", phase="design",
            model="m", provider="anthropic"),
-        ev("3", "llm_response", agent_id="a",
+        ev("3", "agent_message", agent_id="a",
            raw={"content": [{"type": "text", "text": first}]}, usage={}),
     ]:
         drv.on_event(e)
@@ -2353,7 +2355,7 @@ def test_prose_reflows_to_live_width_between_emissions() -> None:
     for e in [
         ev("4", "step_started", step="two", kind="agent", phase="design",
            model="m", provider="anthropic"),
-        ev("5", "llm_response", agent_id="a",
+        ev("5", "agent_message", agent_id="a",
            raw={"content": [{"type": "text", "text": second}]}, usage={}),
     ]:
         drv.on_event(e)
@@ -2500,7 +2502,7 @@ def test_compose_subagent_rows_number_colliding_roles() -> None:
 
 def test_compose_subagent_rows_carry_own_context_and_elapsed() -> None:
     from imp.cli.live_driver import compose_subagent_rows
-    reading = ev("r1", "llm_response", agent_id="sub:t1", provider="anthropic", model="m",
+    reading = ev("r1", "agent_message", agent_id="sub:t1", provider="anthropic", model="m",
                  stop_reason="end_turn",
                  usage={"input_tokens": 60000, "output_tokens": 5,
                         "cache_read_input_tokens": 20000, "cache_creation_input_tokens": 0},
@@ -2824,7 +2826,8 @@ def test_seed_opening_intent_reconciles_with_daemon_event_no_duplicate() -> None
     assert out.getvalue().count("build the parser") == 1
     # The daemon's authoritative opening_intent event adopts the seeded node in
     # place: no second line, no second node.
-    drv.on_event(ev("e1", "opening_intent", text="build the parser"))
+    drv.on_event(ev("e1", "user_message", role="user", subtype="intent",
+                    content=[{"type": "text", "text": "build the parser"}]))
     assert out.getvalue().count("build the parser") == 1
     # And the first step_started does not re-home it — still exactly one at root.
     drv.on_event(ev("3", "step_started", step="spec-writer", kind="agent",

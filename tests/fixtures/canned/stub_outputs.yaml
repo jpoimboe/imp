@@ -1,11 +1,11 @@
-# name → canned events; engine asserts the final event is agent_output or error.
+# name → canned events; engine asserts the final event is agent_result or error.
 stub:
   events:
-    - {type: agent_output, payload: {status: Success}}
+    - {type: agent_result, payload: {status: Success}}
 
 failing-stub:
   events:
-    - {type: agent_output, payload: {status: Error}}
+    - {type: agent_result, payload: {status: Error}}
 
 crashing-stub:
   events:
@@ -13,20 +13,20 @@ crashing-stub:
 
 context-loader:
   events:
-    - {type: agent_output, payload: {status: Success, notes: "loaded"}}
+    - {type: agent_result, payload: {status: Success, notes: "loaded"}}
 
 intent-clarifier:
   events:
-    - {type: agent_output, payload: {status: Success, summary: "captured"}}
+    - {type: agent_result, payload: {status: Success, summary: "captured"}}
 
 coder:
   events:
-    - {type: agent_output, payload: {status: Success}}
+    - {type: agent_result, payload: {status: Success}}
 
 reviewer:
   events:
-    - {type: agent_output, payload: {status: Success, verdict: ok}}
+    - {type: agent_result, payload: {status: Success, verdict: ok}}
 
 reviewer-bad:
   events:
-    - {type: agent_output, payload: {status: Success, verdict: bad}}
+    - {type: agent_result, payload: {status: Success, verdict: bad}}
