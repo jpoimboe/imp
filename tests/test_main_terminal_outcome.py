@@ -57,18 +57,50 @@ def test_non_merge_pause_still_emits_paused_summary() -> None:
     ps.assert_called_once()          # ordinary pauses keep the summary line
 
 
-def test_emit_merge_blocked_headline_red_explanation_wordmark(monkeypatch, capsys) -> None:
+def test_emit_merge_blocked_worktree_dirty_three_part_block(capsys) -> None:
     from imp.cli import palette as pal
-    monkeypatch.setattr(main, "should_use_color", lambda stream: True)
-    try:
-        pal.set_theme("dark")
+    with patch.object(main, "should_use_color", lambda stream: True):
         main._emit_merge_blocked(_Change([]), "worktree_dirty")
-        out = capsys.readouterr().out
-        assert pal.sgr("red", enabled=True) in out       # red headline tail
-        assert pal.sgr("wordmark", enabled=True) in out  # gold explanation body
-        assert "⚠" not in out
-    finally:
-        pal.set_theme("ansi")
+    out = capsys.readouterr().out
+    lines = out.split("\n")
+    assert lines[0] == pal.ansi("merge blocked: uncommitted work in the worktree", "red")
+    assert lines[1] == "Commit it, then `imp resume 2026-06-12-run-x`."
+    assert lines[2] == pal.ansi("2026-06-12-run-x", "wordmark")   # bare gold id, untitled
+    assert "⚠" not in out                                    # no ⚠ glyph
+    assert out.endswith("\n\n")
+    assert not out.endswith("\n\n\n")
+
+
+def test_emit_merge_blocked_refused_summary_and_git_said(capsys) -> None:
+    with patch.object(main, "should_use_color", lambda stream: False):
+        main._emit_merge_blocked(_Change([]), "refused", detail="error: Aborting\n")
+    out = capsys.readouterr().out
+    assert "merge blocked: git refused to merge imp/2026-06-12-run-x into master" in out
+    assert "Commonly: uncommitted changes on `master`" in out
+    assert "Resolve, then `imp resume 2026-06-12-run-x`." in out
+    assert "git said: error: Aborting" in out          # detail.strip() — trailing newline gone
+    assert "\x1b[" not in out                           # plain under NO_COLOR / non-TTY
+
+
+def test_emit_merge_blocked_conflict_body_order_note_before_git_said(capsys) -> None:
+    with patch.object(main, "should_use_color", lambda stream: False):
+        main._emit_merge_blocked(_Change([]), "conflict",
+                                 detail="CONFLICT (content): f.txt", note="tried 3 passes")
+    out = capsys.readouterr().out
+    assert "merge blocked: imp/2026-06-12-run-x doesn't auto-merge into master" in out
+    assert "imp can't resolve conflicts in this version" in out
+    assert "`.imp/worktrees/2026-06-12-run-x` can be removed" in out
+    assert out.index("tried 3 passes") < out.index("git said: CONFLICT (content): f.txt")
+    assert "resume: imp resume" not in out             # no standalone resume line
+
+
+def test_emit_merge_blocked_fallback_couldnt_merge(capsys) -> None:
+    with patch.object(main, "should_use_color", lambda stream: False):
+        main._emit_merge_blocked(_Change([]), "some_unknown_reason")
+    out = capsys.readouterr().out
+    assert "merge blocked: couldn't merge" in out
+    assert "Resolve, then `imp resume 2026-06-12-run-x`." in out
+    assert "git said:" not in out                       # fallback carries no git detail
 
 
 

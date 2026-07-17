@@ -480,38 +480,41 @@ def _emit_merge_blocked(
     quest: Quest, reason: str | None, detail: str | None = None,
     note: str | None = None,
 ) -> None:
-    """Merge couldn't complete — the user must act. A red `… · merge blocked`
-    headline over the existing per-reason explanation in gold, flush left.
+    """Merge couldn't complete — the user must act. Renders the shared three-part
+    error block: a red `merge blocked: <summary>` head, the per-reason instruction
+    body (plus `note`, then git's own `git said: <detail>`) in the default fg, then
+    the gold `id · title` identity line. No standalone resume line — the inline
+    `imp resume <id>` in the body is the remediation.
 
-    `detail` is git's own stderr (carried on the `merge_blocked` event).
-    `note` is an optional message rendered before git's detail (e.g. the
-    recovery-exhaustion note). The `refused` and `conflict` reasons are neutral
-    buckets — REFUSED alone covers overwrite, unrelated histories, ref-lock, and
-    object-store corruption — so the template can only describe the common case.
-    We append git's actual words for those two so the surfaced reason is truthful
-    for every refusal, not just the overwrite one. `worktree_dirty` has a precise
-    template and gets no detail."""
+    `detail` is git's own stderr (carried on the `merge_blocked` event); appended
+    as `git said:` only for the neutral `refused` / `conflict` buckets, so the
+    surfaced reason is truthful for every refusal, not just the overwrite one.
+    `note` (e.g. the recovery-exhaustion note) renders before git's detail.
+    `worktree_dirty` has a precise template and gets no detail."""
     color = should_use_color(sys.stdout)
     cid, base = quest.id, quest.base_branch
     if reason == "worktree_dirty":
-        msg = f"Uncommitted work in the worktree; commit it, then `imp resume {cid}`."
+        summary = "uncommitted work in the worktree"
+        body = [f"Commit it, then `imp resume {cid}`."]
     elif reason == "refused":
-        msg = (f"git refused to merge `imp/{cid}` into `{base}` (commonly: uncommitted "
-               f"changes on `{base}` that the merge would overwrite). Resolve, then "
-               f"`imp resume {cid}`.")
+        summary = f"git refused to merge imp/{cid} into {base}"
+        body = [f"Commonly: uncommitted changes on `{base}` that the merge would "
+                f"overwrite. Resolve, then `imp resume {cid}`."]
     elif reason == "conflict":
-        msg = (f"`imp/{cid}` doesn't auto-merge into `{base}`. imp can't resolve "
-               f"conflicts in this version — merge `imp/{cid}` into `{base}` manually, "
-               f"then the quest is done (its worktree at `.imp/worktrees/{cid}` "
-               f"can be removed).")
+        summary = f"imp/{cid} doesn't auto-merge into {base}"
+        body = [f"imp can't resolve conflicts in this version — merge `imp/{cid}` "
+                f"into `{base}` manually, then the quest is done (its worktree at "
+                f"`.imp/worktrees/{cid}` can be removed)."]
     else:
-        msg = f"quest {cid}: merge_blocked. Resolve, then `imp resume {cid}`."
+        summary = "couldn't merge"
+        body = [f"Resolve, then `imp resume {cid}`."]
     if note:
-        msg = f"{msg}\n{note}"
+        body.append(note)
     if detail and reason in ("refused", "conflict"):
-        msg = f"{msg}\ngit said: {detail.strip()}"
-    print(_status_spine(cid, quest.title, "merge blocked", "red", color=color))
-    print(ansi(msg, "wordmark", enabled=color))
+        body.append(f"git said: {detail.strip()}")
+    for ln in _error_block(f"merge blocked: {summary}", body, cid, quest.title,
+                           color=color):
+        print(ln)
     print()
 
 
