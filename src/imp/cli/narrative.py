@@ -248,6 +248,7 @@ class Activity:
     countdown_total: float | None = None
     kind: str | None = None            # active step kind, for context-bar gating at compose time
     lane_wait: bool = False            # active step parked in a lane semaphore wait (test or merge)
+    dep_wait: bool = False             # active step parked waiting on an unmerged dependency
     # Row-3 position segments, pre-split (compare=False) so the driver never re-slices `position`.
     phase: str | None = field(default=None, compare=False)     # phase head (step-blue)
     plan: str | None = field(default=None, compare=False)      # plan counter (step-blue)
@@ -257,6 +258,13 @@ class Activity:
     start_ts: str | None = field(default=None, compare=False)
     backoff_source: Any = field(default=None, compare=False)
     backoff_base: float = field(default=0.0, compare=False)
+
+
+@dataclass
+class DepWait:
+    """Footer state for a go-live blocked on unmerged deps: waited ids + pinned clock start."""
+    ids: list[str]
+    start_ts: str | None
 
 
 def _join(*parts: str | None) -> str | None:
@@ -497,6 +505,7 @@ class NarrativeBuilder:
         self._current_burst: ToolBurstFold | None = None
         self._span_start_ts: str | None = None
         self._reset_wait: ResetWait | None = None
+        self._dep_wait: DepWait | None = None
         # Per-agent backoff-wait accounting (timer honesty). This builder stands
         # for exactly one agent, so it sees only that agent's agent_retry / resume
         # events. `_accum` is the sum of completed wait spans (seconds); `_start`
@@ -620,6 +629,22 @@ class NarrativeBuilder:
                 kind=top_kind, lane_wait=top_lane_wait,
                 phase=top_phase, plan=top_plan, counter=top_counter,
                 start_ts=self._backoff_wait_start,
+            )
+        if self._dep_wait is not None:
+            if top is None:
+                position = None
+            elif top.position_label:
+                position = _join(top.phase_label, top_label)
+            else:
+                position = top.phase_label
+            return Activity(
+                position=position,
+                verb=f"waiting for {', '.join(self._dep_wait.ids)} to merge",
+                model=top.model if top else None,
+                kind=top_kind, lane_wait=top_lane_wait,
+                phase=top_phase, plan=top_plan, counter=top_counter,
+                start_ts=self._dep_wait.start_ts,
+                dep_wait=True,
             )
         if top is not None:
             model = top.model
@@ -816,6 +841,7 @@ class NarrativeBuilder:
                     self._step_stack[-1].backoff_wait_s += span
                 self._backoff_wait_start = None
             self._reset_wait = None
+            self._dep_wait = None
 
         # 0. token accumulation — before sub routing (F2) so subagent events fold
         #    into the quest total. The context-bar value (_latest_prompt_tokens)
@@ -1151,6 +1177,28 @@ def _h_lane_acquired(self: NarrativeBuilder, event: dict[str, Any], p: dict[str,
 NarrativeBuilder._HANDLERS["lane_acquired"] = _h_lane_acquired
 NarrativeBuilder._HANDLERS["lane_released"] = _h_lane_event
 NarrativeBuilder._HANDLERS["lane_evicted"] = _h_lane_event
+
+
+def _h_dependency_waiting(
+    self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]
+) -> None:
+    self._flush_burst()
+    ids = list(p.get("depends_on", []))
+    start = self._dep_wait.start_ts if self._dep_wait is not None else event.get("timestamp")
+    self._dep_wait = DepWait(ids=ids, start_ts=start)
+
+
+NarrativeBuilder._HANDLERS["dependency_waiting"] = _h_dependency_waiting
+
+
+def _h_dependency_ready(
+    self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]
+) -> None:
+    self._flush_burst()
+    self._dep_wait = None
+
+
+NarrativeBuilder._HANDLERS["dependency_ready"] = _h_dependency_ready
 
 
 def _ensure_phase(self: NarrativeBuilder, name: str,
