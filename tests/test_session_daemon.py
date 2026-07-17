@@ -70,36 +70,51 @@ async def test_serves_on_per_change_socket_and_bridges_run_quest_seams(
         coordinator: Any,
         wait_for_turn_fn: Any = None,
     ) -> str:
+        # Emit the prompt before soliciting (as run_quest does): the client's readiness signal.
+        on_event({"type": "awaiting_user_input",
+                  "payload": {"steer_hint": "go", "interrupt": False}})
         reply = await user_chat_input_fn("")
         on_event({"type": "agent_result", "payload": {"reply": reply}})
         return reply
 
     async with anyio.create_task_group() as tg:
         result: dict[str, Any] = {}
+        run_done = anyio.Event()
 
         async def _serve() -> None:
             result["r"] = await serve_quest_session(
                 quest, run_fn=fake_run, hibernate=False)
+            run_done.set()
 
         tg.start_soon(_serve)
         await _wait_for_socket(sock)
         received: list[dict[str, Any]] = []
-        client = SessionClient(sock, quest.id, quest.title,
-                               on_event=received.append)
+        gate_seen = anyio.Event()
+        output_seen = anyio.Event()
+
+        def _on_event(e: dict[str, Any]) -> None:
+            received.append(e)
+            if e.get("type") == "awaiting_user_input":
+                gate_seen.set()
+            if e.get("type") == "agent_result":
+                output_seen.set()
+
+        client = SessionClient(sock, quest.id, quest.title, on_event=_on_event)
         await client.connect()
         tg.start_soon(client.receive_events)
-        await anyio.sleep(0.05)  # let the gate open (next_input is awaiting)
+        with anyio.fail_after(30):   # deadlock backstop only
+            await gate_seen.wait()   # the gate is armed; the reply cannot be lost
         await client.send_input("ship it")
-        with anyio.fail_after(5):
-            while "r" not in result:
-                await anyio.sleep(0.02)
+        with anyio.fail_after(30):   # deadlock backstop only; starts after send
+            await run_done.wait()
         assert result["r"] == "ship it"
-        with anyio.fail_after(5):
-            while not any(e["type"] == "agent_result" for e in received):
-                await anyio.sleep(0.02)
+        with anyio.fail_after(30):   # deadlock backstop only
+            await output_seen.wait()
         assert received[0] == {"type": "replay_complete"}  # boundary leads the attach stream
         assert [e for e in received
-                if e["type"] not in ("user_input_resolved", "replay_complete")] == [
+                if e["type"] not in (
+                    "user_input_resolved", "replay_complete",
+                    "awaiting_user_input")] == [
             {"type": "agent_result", "payload": {"reply": "ship it"}}]
         await client.aclose()
         tg.cancel_scope.cancel()
