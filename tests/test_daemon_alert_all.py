@@ -34,7 +34,7 @@ def _adapter(
         is_known_quest=lambda _cid: True)
 
 
-def _narration(text: str, *, replay: bool = False) -> dict:
+def _agent_message(text: str, *, replay: bool = False) -> dict:
     event = {"id": "n1", "type": "agent_message", "timestamp": TS,
              "quest": {"id": "k3f9qa", "title": "t"},
              "payload": {"raw": {"content": [{"type": "text", "text": text}]}}}
@@ -43,16 +43,16 @@ def _narration(text: str, *, replay: bool = False) -> dict:
     return event
 
 
-def _prompt_less_await() -> dict:
-    return {"id": "a1", "type": "awaiting_user_input", "timestamp": TS,
-            "quest": {"id": "k3f9qa", "title": "t"},
-            "payload": {"steer_hint": ""}}
-
-
-def _prompt_await(prompt: str) -> dict:
-    return {"id": "a2", "type": "awaiting_user_input", "timestamp": TS,
-            "quest": {"id": "k3f9qa", "title": "t"},
-            "payload": {"steer_hint": prompt}}
+def _gate(agent_message: str | None = None, *, replay: bool = False) -> dict:
+    payload: dict = {"steer_hint": ""}
+    if agent_message is not None:
+        payload["last_agent_message"] = agent_message
+    event = {"id": "a1", "type": "awaiting_user_input", "timestamp": TS,
+             "quest": {"id": "k3f9qa", "title": "t"},
+             "payload": payload}
+    if replay:
+        event["_replay"] = True
+    return event
 
 
 def test_default_is_on() -> None:
@@ -106,66 +106,67 @@ def test_set_false_clears_the_delivery_log() -> None:
     assert a.seen("c1", "e1") is False
 
 
-def test_alert_all_prompt_less_await_carries_last_narration() -> None:
+def test_alert_all_gate_renders_agent_message_without_label() -> None:
     sent: list = []
     adapter = _adapter(sent)
-    adapter.on_event(_narration("Should I merge the branch?"))
-    adapter.on_event(_prompt_less_await())
+    adapter.on_event(_gate("Should I merge the branch?"))
     loud = [text for text, silent in sent if not silent]
     assert len(loud) == 1
     assert "Should I merge the branch?" in loud[0]
-    assert "needs your input" in loud[0]
+    assert "needs your input" not in loud[0]
+    assert "↩ @k3f9qa" in loud[0]
 
 
-def test_alert_all_prompt_less_await_alert_is_reply_routable() -> None:
+def test_alert_all_gate_uses_own_payload_not_prior_session_message() -> None:
     sent: list = []
     adapter = _adapter(sent)
-    adapter.on_event(_narration("Should I merge the branch?"))
-    adapter.on_event(_prompt_less_await())
+    adapter.on_event(_agent_message("stale earlier prose"))
+    adapter.on_event(_gate("the current question"))
+    loud = [text for text, silent in sent if not silent]
+    assert len(loud) == 1
+    assert "the current question" in loud[0]
+    assert "stale earlier prose" not in loud[0]
+
+
+def test_alert_all_gate_falls_back_to_label_when_no_agent_message() -> None:
+    sent: list = []
+    adapter = _adapter(sent)
+    adapter.on_event(_gate(None))
+    loud = [text for text, silent in sent if not silent]
+    assert len(loud) == 1
+    assert "needs your input" in loud[0]
+    assert "↩ @k3f9qa" in loud[0]
+
+
+def test_alert_all_gate_falls_back_to_label_when_agent_message_empty() -> None:
+    sent: list = []
+    adapter = _adapter(sent)
+    adapter.on_event(_gate(""))
+    loud = [text for text, silent in sent if not silent]
+    assert len(loud) == 1
+    assert "needs your input" in loud[0]
+    assert "↩ @k3f9qa" in loud[0]
+
+
+def test_alert_all_gate_with_message_is_reply_routable() -> None:
+    sent: list = []
+    adapter = _adapter(sent)
+    adapter.on_event(_gate("Should I merge the branch?"))
     assert adapter.resolve(
         Inbound(text="yes do it", reply_to_message_id=42)) == ("k3f9qa", "yes do it")
     assert adapter.resolve(
         Inbound(text="@k3f9qa go", reply_to_message_id=None)) == ("k3f9qa", "go")
 
 
-def test_alert_all_non_empty_prompt_renders_prompt_not_narration() -> None:
+def test_alert_all_replayed_gate_is_marked_not_sent() -> None:
     sent: list = []
-    adapter = _adapter(sent)
-    adapter.on_event(_narration("Should I merge the branch?"))
-    adapter.on_event(_prompt_await("Pick option A or B"))
-    loud = [text for text, silent in sent if not silent]
-    assert len(loud) == 1
-    assert "Pick option A or B" in loud[0]
-    assert "Should I merge the branch?" not in loud[0]
-
-
-def test_alert_all_prompt_less_await_with_no_narration_sends_header_only() -> None:
-    sent: list = []
-    adapter = _adapter(sent)
-    adapter.on_event(_prompt_less_await())
-    loud = [text for text, silent in sent if not silent]
-    assert len(loud) == 1
-    assert "needs your input" in loud[0]
-
-
-def test_alert_all_narration_tracked_while_off_is_used_after_on() -> None:
-    sent: list = []
-    alert = _off()
+    alert = _on()
     adapter = _adapter(sent, alert_all=alert)
-    adapter.on_event(_narration("Proceed with the merge?"))  # tracked while OFF
-    alert.set(True)
-    adapter.on_event(_prompt_less_await())
-    loud = [text for text, silent in sent if not silent]
-    assert len(loud) == 1
-    assert "Proceed with the merge?" in loud[0]
+    adapter.on_event(_gate("Should I merge the branch?", replay=True))
+    assert sent == []
+    assert alert.seen("k3f9qa", "a1") is True
 
 
-def test_alert_all_replayed_narration_does_not_track() -> None:
-    sent: list = []
-    adapter = _adapter(sent)
-    adapter.on_event(_narration("Pre-boot context", replay=True))  # history: not tracked
-    adapter.on_event(_prompt_less_await())
-    loud = [text for text, silent in sent if not silent]
-    assert len(loud) == 1
-    assert "Pre-boot context" not in loud[0]
-    assert adapter._last_narration == {}
+def test_adapter_has_no_last_narration_attribute() -> None:
+    adapter = _adapter([])
+    assert not hasattr(adapter, "_last_narration")

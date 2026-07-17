@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 from typing import Any
 
 from imp.remote.daemon import telegram_adapter
@@ -75,3 +76,12 @@ def test_send_message_leaves_short_text_unchanged(monkeypatch: Any) -> None:
     monkeypatch.setattr(telegram_adapter, "api_call", fake_api_call)
     send_message("tok", 4242, "short", silent=False)
     assert captured["params"]["text"] == "short"
+
+
+def test_format_outbound_signature_has_no_body_override() -> None:
+    params = list(inspect.signature(format_outbound).parameters)
+    assert params == ["event", "handle"]
+
+
+def test_adapter_no_longer_imports_compose_message() -> None:
+    assert not hasattr(telegram_adapter, "_compose_message")
