@@ -88,7 +88,7 @@ def test_prompt_message_caps_hr_at_display_width() -> None:
 
 def _llm_event(text: str) -> dict:
     return {
-        "type": "llm_response",
+        "type": "agent_message",
         "payload": {
             "provider": "anthropic",
             "raw": {
@@ -106,10 +106,12 @@ def _llm_event(text: str) -> dict:
 
 def test_conversation_prose_concatenates_prose_in_order() -> None:
     events = [
-        {"type": "opening_intent", "payload": {"text": "make search better"}},
+        {"type": "user_message", "agent_id": None,
+         "payload": {"role": "user", "subtype": "intent",
+                     "content": [{"type": "text", "text": "make search better"}]}},
         {"type": "user_message",
-         "payload": {"content": [{"type": "text", "text": "add a 300s timeout"}],
-                     "human": True}},
+         "payload": {"subtype": "reply", "role": "user",
+                     "content": [{"type": "text", "text": "add a 300s timeout"}]}},
         _llm_event("sure, the 300s deadline is wired"),
     ]
     prose = conversation_prose(events)
@@ -134,14 +136,16 @@ def test_conversation_prose_excludes_tool_and_nonprose_events() -> None:
 
 def test_conversation_prose_skips_malformed_without_raising() -> None:
     events = [
-        {"type": "opening_intent", "payload": {"text": "first"}},
+        {"type": "user_message",
+         "payload": {"subtype": "intent",
+                     "content": [{"type": "text", "text": "first"}]}},
         {"_malformed": True, "raw": "NOT_JSON"},              # sentinel, no type/payload
         "NOT_AN_EVENT_DICT",                                  # non-dict event
-        {"type": "llm_response", "payload": "not-a-dict-payload"},   # non-dict payload value
-        {"type": "llm_response", "payload": {"raw": "not-a-dict"}},  # would raise if parsed
+        {"type": "agent_message", "payload": "not-a-dict-payload"},   # non-dict payload value
+        {"type": "agent_message", "payload": {"raw": "not-a-dict"}},  # would raise if parsed
         {"type": "user_message",
-         "payload": {"content": [{"type": "text", "text": "second"}],
-                     "human": True}},
+         "payload": {"subtype": "reply",
+                     "content": [{"type": "text", "text": "second"}]}},
     ]
     assert conversation_prose(events) == "first\nsecond"
 
@@ -149,20 +153,20 @@ def test_conversation_prose_skips_malformed_without_raising() -> None:
 def test_conversation_prose_includes_human_user_message() -> None:
     events = [
         {"type": "user_message",
-         "payload": {"content": [{"type": "text", "text": "typed human reply"}],
-                     "human": True}},
+         "payload": {"subtype": "reply",
+                     "content": [{"type": "text", "text": "typed human reply"}]}},
     ]
     assert conversation_prose(events) == "typed human reply"
 
 
 def test_conversation_prose_excludes_nonhuman_user_message() -> None:
     events = [
+        {"type": "engine_message",
+         "payload": {"subtype": "agent_prompt", "role": "user",
+                     "content": [{"type": "text", "text": "INJECTED cover-check prompt"}]}},
         {"type": "user_message",
-         "payload": {"content": [{"type": "text", "text": "INJECTED cover-check prompt"}],
-                     "human": False}},
-        {"type": "user_message",
-         "payload": {"content": [{"type": "text", "text": "genuine human reply"}],
-                     "human": True}},
+         "payload": {"subtype": "reply", "role": "user",
+                     "content": [{"type": "text", "text": "genuine human reply"}]}},
     ]
     prose = conversation_prose(events)
     assert prose == "genuine human reply"    # only the human turn indexed
@@ -171,10 +175,11 @@ def test_conversation_prose_excludes_nonhuman_user_message() -> None:
 
 def test_conversation_prose_treats_missing_human_field_as_nonhuman() -> None:
     events = [
-        {"type": "user_message",
-         "payload": {"content": [{"type": "text", "text": "no human field here"}]}},
+        {"type": "engine_message",
+         "payload": {"subtype": "agent_prompt", "role": "user",
+                     "content": [{"type": "text", "text": "no human field here"}]}},
     ]
-    assert conversation_prose(events) == ""  # absent human field -> excluded
+    assert conversation_prose(events) == ""  # engine turns are not conversation
 
 
 def test_events_content_collects_structured_payload_strings() -> None:
