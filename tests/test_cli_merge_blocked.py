@@ -50,7 +50,7 @@ def test_worktree_dirty_ignores_detail(
     cli_main._emit_merge_blocked(ch, "worktree_dirty", "some git noise")
     out = capsys.readouterr().out
     assert "some git noise" not in out
-    assert "Uncommitted work" in out
+    assert "uncommitted work in the worktree" in out
 
 
 def test_refused_without_detail_is_safe(
@@ -96,10 +96,10 @@ def test_headline_is_red_merge_blocked_spine_no_glyph(
     ch = _change(tmp_path)
     cli_main._emit_merge_blocked(ch, "worktree_dirty")
     out = capsys.readouterr().out
-    assert not out.startswith("\n")                    # no leading blank
-    assert pal.ansi("merge blocked", "red") in out     # red headline tail
-    assert "feat" in out                               # gold id in the spine
+    assert not out.startswith("\n")                                       # no leading blank
+    assert pal.ansi("merge blocked: uncommitted work in the worktree", "red") in out
+    assert "Commit it, then `imp resume feat`." in out                    # default-fg body
+    assert "feat" in out                                                  # gold id on last line
     assert "⚠" not in out
-    assert "Uncommitted work" in out                   # gold explanation preserved
     assert out.endswith("\n\n")
     assert not out.endswith("\n\n\n")

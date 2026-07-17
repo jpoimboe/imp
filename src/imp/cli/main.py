@@ -21,6 +21,7 @@ import signal
 import subprocess
 import sys
 from collections.abc import Awaitable, Callable, Iterable
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, NamedTuple, NoReturn
@@ -282,13 +283,61 @@ class _PauseBanner(enum.Enum):
     STALE = enum.auto()
 
 
-def _pause_reason(events: list[dict[str, Any]]) -> str | _PauseBanner | None:
-    """The terminal pause's reason line for the headline.
+# Single source: error pause-reason base token -> user-facing label; covers all _POLICY.
+_ERROR_LABELS: dict[str, str] = {
+    "terminated": "agent error",
+    "internal_error": "internal error",
+    "api": "API error",
+    "quota": "quota exceeded",
+    "context_window": "context limit",
+    "config": "config error",
+    "content_filter": "content filtered",
+    "loop": "loop detected",
+    "unknown": "unknown error",
+    "retry_ceiling": "retries exhausted",
+    "reauth_needed": "auth failed",
+    "auth": "auth failed",
+    "rate_limit": "rate limited",
+    "network": "network error",
+    "stalled": "stalled",
+    "agent_output_missing": "no output",
+    "crash": "crash",
+}
+
+
+def _error_block(head: str, body: list[str], quest_id: str, title: str,
+                 *, color: bool) -> list[str]:
+    """The shared three-part error block: a red `head` line, `body` lines in the
+    default fg, then the identity line (gold id, ` · `, default-fg title; a bare
+    gold id when the quest has no title). No resume line."""
+    lines = [ansi(head, "red", enabled=color)]
+    lines.extend(body)
+    ident = ansi(quest_id, *pal.NODE_COLORS["quest_id"], enabled=color)
+    stripped = title.strip()
+    if stripped:
+        ident = f"{ident} · {stripped}"
+    lines.append(ident)
+    return lines
+
+
+@dataclass(frozen=True)
+class _PauseInfo:
+    """A terminal pause's structured reason: the base token (`api`, `terminated`,
+    `interrupt`, a deliberate-leave trigger, `crash`, …) and the full cause text
+    (multi-line allowed), or None when the reason carries no cause."""
+    base: str
+    cause: str | None
+
+
+def _pause_reason(events: list[dict[str, Any]]) -> _PauseInfo | _PauseBanner | None:
+    """The terminal pause's structured reason (a _PauseInfo) for the headline.
 
     The last workflow_paused reason (interrupt_reason wins, mirroring
-    _h_workflow_paused), plus a one-line cause from the error that drove that
-    pause (the error's detail.last_agent_text, else its message, first line
-    only). The event log is cumulative across resume, so each error is paired
+    _h_workflow_paused), plus the full cause text from the error that drove that
+    pause (the error's detail.last_agent_text, else its message — the full cause
+    text, multi-line allowed; the renderer splits its first line as the red
+    summary from the remaining body lines). The event log is cumulative across
+    resume, so each error is paired
     with the workflow_paused that immediately follows it; only an error in the
     terminal pause's own segment contributes a cause. An interrupt pause with no
     error in its segment renders the bare reason, even when an earlier segment
@@ -333,34 +382,36 @@ def _pause_reason(events: list[dict[str, Any]]) -> str | _PauseBanner | None:
     if paused_error is not None:
         d = paused_error.get("detail")
         if isinstance(d, dict) and d.get("last_agent_text"):
-            text = str(d["last_agent_text"]).strip()
-            cause = text.splitlines()[0].strip() if text else None
+            cause = str(d["last_agent_text"]).strip() or None
         if cause is None and paused_error.get("message"):
-            msg = str(paused_error["message"]).strip()
-            cause = msg.splitlines()[0].strip() if msg else None
-    return f"{base}: {cause}" if cause else str(base)
+            cause = str(paused_error["message"]).strip() or None
+    return _PauseInfo(base=str(base), cause=cause)
 
 
-def _pause_is_error(reason: str | None) -> bool:
-    """A pause reason is an error (red tail) when it denotes an abnormal
-    termination: a `terminated: …` reason, an `internal_error: …` reason, or the
-    `ended unexpectedly — see …` crash pointer. A clean reason (`interrupt`, or a
-    deliberate-leave trigger such as `ctrl-d`/`sigterm`) or no reason (the bare
-    `paused` fallback) is not — it renders gold."""
-    return reason is not None and (
-        reason.startswith("terminated")
-        or reason.startswith("internal_error")
-        or reason.startswith("ended unexpectedly"))
+def _pause_is_error(info: _PauseInfo | None) -> bool:
+    """A pause is an error (red block) exactly when its base token is a key in the
+    label map. Everything else — interrupt, deliberate-leave triggers, a your-turn
+    `paused`, and any other current gold reason (e.g. `script_blocked`) — is not."""
+    return info is not None and info.base in _ERROR_LABELS
 
 
 def _pause_lines(
     name: str, token: str,
-    *, reason: str | None = None, title: str = "", color: bool,
+    *, info: _PauseInfo | None = None, title: str = "", color: bool,
 ) -> list[str]:
-    tail = reason if reason else "paused"
-    tail_code = "red" if _pause_is_error(reason) else "wordmark"
+    if _pause_is_error(info):
+        assert info is not None
+        label = _ERROR_LABELS[info.base]
+        head, body = label, []
+        if info.cause:
+            first, *rest = info.cause.splitlines()
+            first = first.strip()
+            head = f"{label}: {first}" if first else label
+            body = rest
+        return _error_block(head, body, name, title, color=color)
+    tail = info.base if info is not None else "paused"
     return [
-        _status_spine(name, title, tail, tail_code, color=color),
+        _status_spine(name, title, tail, "wordmark", color=color),
         _resume_line(token),
     ]
 
@@ -396,31 +447,31 @@ def _daemon_stderr_has_crash(path: Path) -> bool:
 
 def _pause_facts(
     quest: Quest, leave_trigger: str | None = None,
-) -> tuple[str, str, str, str | None]:
+) -> tuple[str, str, str, _PauseInfo | None]:
     name = quest.id
     events = list(quest.event_log().read())
     if leave_trigger is not None:
         # Deliberate leave: render the trigger locally (daemon reason may lag / read STALE).
-        return name, quest.title, quest.id, leave_trigger
+        return name, quest.title, quest.id, _PauseInfo(leave_trigger, None)
     reason_val = _pause_reason(events)
     if reason_val is _PauseBanner.STALE:
         if _daemon_stderr_has_crash(quest.quest_dir / "daemon.stderr"):
-            reason: str | None = (
-                f"ended unexpectedly — see .imp/quests/{quest.id}/daemon.stderr")
+            info: _PauseInfo | None = _PauseInfo(
+                "crash", f"see .imp/quests/{quest.id}/daemon.stderr")
         else:
             # A resumed-without-pause segment with no crash traceback is a clean
             # deliberate detach — render the calm interrupt reason, no pointer.
-            reason = "interrupt"
+            info = _PauseInfo("interrupt", None)
     else:
-        reason = reason_val
-    return name, quest.title, quest.id, reason
+        info = reason_val
+    return name, quest.title, quest.id, info
 
 
 def _emit_paused_summary(quest: Quest, leave_trigger: str | None = None) -> None:
     """The trailing run-status line on a non-interactive pause."""
     color = should_use_color(sys.stdout)
-    name, title, token, reason = _pause_facts(quest, leave_trigger)
-    for ln in _pause_lines(name, token, reason=reason, title=title, color=color):
+    name, title, token, info = _pause_facts(quest, leave_trigger)
+    for ln in _pause_lines(name, token, info=info, title=title, color=color):
         print(ln)
     print()
 
@@ -429,38 +480,41 @@ def _emit_merge_blocked(
     quest: Quest, reason: str | None, detail: str | None = None,
     note: str | None = None,
 ) -> None:
-    """Merge couldn't complete — the user must act. A red `… · merge blocked`
-    headline over the existing per-reason explanation in gold, flush left.
+    """Merge couldn't complete — the user must act. Renders the shared three-part
+    error block: a red `merge blocked: <summary>` head, the per-reason instruction
+    body (plus `note`, then git's own `git said: <detail>`) in the default fg, then
+    the gold `id · title` identity line. No standalone resume line — the inline
+    `imp resume <id>` in the body is the remediation.
 
-    `detail` is git's own stderr (carried on the `merge_blocked` event).
-    `note` is an optional message rendered before git's detail (e.g. the
-    recovery-exhaustion note). The `refused` and `conflict` reasons are neutral
-    buckets — REFUSED alone covers overwrite, unrelated histories, ref-lock, and
-    object-store corruption — so the template can only describe the common case.
-    We append git's actual words for those two so the surfaced reason is truthful
-    for every refusal, not just the overwrite one. `worktree_dirty` has a precise
-    template and gets no detail."""
+    `detail` is git's own stderr (carried on the `merge_blocked` event); appended
+    as `git said:` only for the neutral `refused` / `conflict` buckets, so the
+    surfaced reason is truthful for every refusal, not just the overwrite one.
+    `note` (e.g. the recovery-exhaustion note) renders before git's detail.
+    `worktree_dirty` has a precise template and gets no detail."""
     color = should_use_color(sys.stdout)
     cid, base = quest.id, quest.base_branch
     if reason == "worktree_dirty":
-        msg = f"Uncommitted work in the worktree; commit it, then `imp resume {cid}`."
+        summary = "uncommitted work in the worktree"
+        body = [f"Commit it, then `imp resume {cid}`."]
     elif reason == "refused":
-        msg = (f"git refused to merge `imp/{cid}` into `{base}` (commonly: uncommitted "
-               f"changes on `{base}` that the merge would overwrite). Resolve, then "
-               f"`imp resume {cid}`.")
+        summary = f"git refused to merge imp/{cid} into {base}"
+        body = [f"Commonly: uncommitted changes on `{base}` that the merge would "
+                f"overwrite. Resolve, then `imp resume {cid}`."]
     elif reason == "conflict":
-        msg = (f"`imp/{cid}` doesn't auto-merge into `{base}`. imp can't resolve "
-               f"conflicts in this version — merge `imp/{cid}` into `{base}` manually, "
-               f"then the quest is done (its worktree at `.imp/worktrees/{cid}` "
-               f"can be removed).")
+        summary = f"imp/{cid} doesn't auto-merge into {base}"
+        body = [f"imp can't resolve conflicts in this version — merge `imp/{cid}` "
+                f"into `{base}` manually, then the quest is done (its worktree at "
+                f"`.imp/worktrees/{cid}` can be removed)."]
     else:
-        msg = f"quest {cid}: merge_blocked. Resolve, then `imp resume {cid}`."
+        summary = "couldn't merge"
+        body = [f"Resolve, then `imp resume {cid}`."]
     if note:
-        msg = f"{msg}\n{note}"
+        body.append(note)
     if detail and reason in ("refused", "conflict"):
-        msg = f"{msg}\ngit said: {detail.strip()}"
-    print(_status_spine(cid, quest.title, "merge blocked", "red", color=color))
-    print(ansi(msg, "wordmark", enabled=color))
+        body.append(f"git said: {detail.strip()}")
+    for ln in _error_block(f"merge blocked: {summary}", body, cid, quest.title,
+                           color=color):
+        print(ln)
     print()
 
 

@@ -57,18 +57,50 @@ def test_non_merge_pause_still_emits_paused_summary() -> None:
     ps.assert_called_once()          # ordinary pauses keep the summary line
 
 
-def test_emit_merge_blocked_headline_red_explanation_wordmark(monkeypatch, capsys) -> None:
+def test_emit_merge_blocked_worktree_dirty_three_part_block(capsys) -> None:
     from imp.cli import palette as pal
-    monkeypatch.setattr(main, "should_use_color", lambda stream: True)
-    try:
-        pal.set_theme("dark")
+    with patch.object(main, "should_use_color", lambda stream: True):
         main._emit_merge_blocked(_Change([]), "worktree_dirty")
-        out = capsys.readouterr().out
-        assert pal.sgr("red", enabled=True) in out       # red headline tail
-        assert pal.sgr("wordmark", enabled=True) in out  # gold explanation body
-        assert "⚠" not in out
-    finally:
-        pal.set_theme("ansi")
+    out = capsys.readouterr().out
+    lines = out.split("\n")
+    assert lines[0] == pal.ansi("merge blocked: uncommitted work in the worktree", "red")
+    assert lines[1] == "Commit it, then `imp resume 2026-06-12-run-x`."
+    assert lines[2] == pal.ansi("2026-06-12-run-x", "wordmark")   # bare gold id, untitled
+    assert "⚠" not in out                                    # no ⚠ glyph
+    assert out.endswith("\n\n")
+    assert not out.endswith("\n\n\n")
+
+
+def test_emit_merge_blocked_refused_summary_and_git_said(capsys) -> None:
+    with patch.object(main, "should_use_color", lambda stream: False):
+        main._emit_merge_blocked(_Change([]), "refused", detail="error: Aborting\n")
+    out = capsys.readouterr().out
+    assert "merge blocked: git refused to merge imp/2026-06-12-run-x into master" in out
+    assert "Commonly: uncommitted changes on `master`" in out
+    assert "Resolve, then `imp resume 2026-06-12-run-x`." in out
+    assert "git said: error: Aborting" in out          # detail.strip() — trailing newline gone
+    assert "\x1b[" not in out                           # plain under NO_COLOR / non-TTY
+
+
+def test_emit_merge_blocked_conflict_body_order_note_before_git_said(capsys) -> None:
+    with patch.object(main, "should_use_color", lambda stream: False):
+        main._emit_merge_blocked(_Change([]), "conflict",
+                                 detail="CONFLICT (content): f.txt", note="tried 3 passes")
+    out = capsys.readouterr().out
+    assert "merge blocked: imp/2026-06-12-run-x doesn't auto-merge into master" in out
+    assert "imp can't resolve conflicts in this version" in out
+    assert "`.imp/worktrees/2026-06-12-run-x` can be removed" in out
+    assert out.index("tried 3 passes") < out.index("git said: CONFLICT (content): f.txt")
+    assert "resume: imp resume" not in out             # no standalone resume line
+
+
+def test_emit_merge_blocked_fallback_couldnt_merge(capsys) -> None:
+    with patch.object(main, "should_use_color", lambda stream: False):
+        main._emit_merge_blocked(_Change([]), "some_unknown_reason")
+    out = capsys.readouterr().out
+    assert "merge blocked: couldn't merge" in out
+    assert "Resolve, then `imp resume 2026-06-12-run-x`." in out
+    assert "git said:" not in out                       # fallback carries no git detail
 
 
 
@@ -103,7 +135,7 @@ def test_merge_blocked_outcome_forwards_exhaustion_note() -> None:
     assert mb.call_args.args[3] == note     # the note reached _emit_merge_blocked as the note arg
 
 
-def test_emit_paused_summary_renders_terminated_reason_red_no_at_locator(capsys) -> None:
+def test_emit_paused_summary_renders_agent_error_block(capsys) -> None:
     quest = _Change([
         {"type": "step_started", "payload": {"phase": "reviewing plan"}},
         {"type": "error",
@@ -115,11 +147,43 @@ def test_emit_paused_summary_renders_terminated_reason_red_no_at_locator(capsys)
     main._emit_paused_summary(quest)
     out = capsys.readouterr().out
     assert not out.startswith("\n")                    # no leading blank
-    assert "terminated: API Error 400 — tool use concurrency" in out
+    assert "agent error: API Error 400 — tool use concurrency" in out
+    assert "\ntrace\n" in out                          # remaining cause line → body
+    assert "terminated:" not in out                    # raw token never shown
     assert " at reviewing plan" not in out             # locator dropped
-    assert "resume: imp resume 2026-06-12-run-x" in out
+    assert "resume: imp resume" not in out             # error block has no resume line
     assert out.endswith("\n\n")
     assert not out.endswith("\n\n\n")
+
+
+def test_emit_paused_summary_api_pause_renders_red_block_not_gold(capsys) -> None:
+    from imp.cli import palette as pal
+    quest = _Change([
+        {"type": "step_started", "payload": {"phase": "reviewing plan"}},
+        {"type": "error",
+         "payload": {"detail": {"last_agent_text": "API Error 400 — tool use concurrency"}}},
+        {"type": "workflow_paused", "payload": {"reason": "api", "kind": "api"}},
+    ])
+    with patch.object(main, "should_use_color", lambda stream: True):
+        main._emit_paused_summary(quest)
+    out = capsys.readouterr().out
+    assert pal.ansi("API error: API Error 400 — tool use concurrency", "red") in out
+    assert "resume: imp resume" not in out          # error block carries no resume line
+    assert "2026-06-12-run-x" in out                # bare-id identity line (untitled)
+    assert out.endswith("\n\n")
+
+
+def test_emit_paused_summary_error_block_plain_under_no_color(capsys) -> None:
+    quest = _Change([
+        {"type": "error", "payload": {"detail": {"last_agent_text": "API Error 400"}}},
+        {"type": "workflow_paused", "payload": {"reason": "api", "kind": "api"}},
+    ])
+    with patch.object(main, "should_use_color", lambda stream: False):
+        main._emit_paused_summary(quest)
+    out = capsys.readouterr().out
+    assert "API error: API Error 400" in out
+    assert "\x1b[" not in out                        # no SGR under NO_COLOR / non-TTY
+    assert "resume: imp resume" not in out
 
 
 def test_emit_paused_summary_interrupt_renders_bare_reason(capsys) -> None:
