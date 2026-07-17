@@ -449,7 +449,7 @@ class Quest:
     @classmethod
     def load(cls, control_root: Path, quest_id: str) -> Quest:
         quest_dir = control_root / ".imp" / "quests" / quest_id
-        if not quest_dir.is_dir():
+        if not (quest_dir / "quest.json").is_file():
             raise LoadError(f"no such quest {quest_id!r}", SourceLoc(file=quest_dir, line=1))
         meta = json.loads((quest_dir / "quest.json").read_text())
         stored = meta.get("layout_version", 0)

@@ -64,3 +64,25 @@ def test_home_absent_raises_plain_loaderror_not_layoutmismatch(tmp_path: Path) -
     with pytest.raises(LoadError) as ei:
         Quest.load(tmp_path, "no-such-change")
     assert not isinstance(ei.value, LayoutMismatch)
+
+
+def test_dir_without_quest_json_raises_plain_loaderror(tmp_path: Path) -> None:
+    """A quest dir that exists but has no quest.json must raise LoadError (same
+    shape as a missing dir), never a raw FileNotFoundError — the stale-empty-dir
+    case that used to crash imp log / imp show."""
+    _seed_control(tmp_path)
+    stale = tmp_path / ".imp" / "quests" / "stale1"
+    stale.mkdir(parents=True)                    # dir present, no quest.json
+    assert not (stale / "quest.json").exists()
+    with pytest.raises(LoadError) as ei:
+        Quest.load(tmp_path, "stale1")
+    assert not isinstance(ei.value, LayoutMismatch)
+    assert "stale1" in str(ei.value)
+
+
+def test_live_quest_still_loads(tmp_path: Path) -> None:
+    """The dir+quest.json happy path is unchanged by the guard."""
+    _seed_control(tmp_path)
+    Quest.create(tmp_path, title="Live", quest_id="live1", base_branch="main")
+    loaded = Quest.load(tmp_path, "live1")
+    assert loaded.id == "live1"
