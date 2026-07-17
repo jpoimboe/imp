@@ -646,10 +646,10 @@ class JsonlEventLog(_BaseEventLog):
     def __init__(self, path: Path, *, on_event: Any = None,
                  strict: bool = False) -> None:
         self.path = path
-        path.parent.mkdir(parents=True, exist_ok=True)
         super().__init__(on_event=on_event, strict=strict)
 
     def _persist(self, record: dict[str, Any]) -> None:
+        self.path.parent.mkdir(parents=True, exist_ok=True)
         with self.path.open("a") as f:
             f.write(json.dumps(record))
             f.write("\n")

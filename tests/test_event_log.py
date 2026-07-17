@@ -293,3 +293,35 @@ def test_jsonl_usage_patch_row_omits_context_tokens_when_none(tmp_path: Path) ->
     patch = next(e for e in _read(tmp_path / "e.jsonl")
                  if e["type"] == "agent_message_usage_patch")
     assert "context_tokens" not in patch["payload"]
+
+
+def test_read_and_tail_do_not_create_missing_parent(tmp_path: Path) -> None:
+    parent = tmp_path / "missing"
+    log = JsonlEventLog(parent / "e.jsonl")
+    assert not parent.exists()                 # AC3: construction never mkdirs
+    assert list(log.read()) == []              # AC1: read yields nothing, no raise
+    assert log.tail(5) == []                    # AC1: tail yields nothing, no raise
+    assert not parent.exists()                 # AC1: reads left the fs untouched
+
+
+def test_append_creates_missing_parent_and_persists(tmp_path: Path) -> None:
+    parent = tmp_path / "missing"
+    log = JsonlEventLog(parent / "e.jsonl")
+    ev = log.append(agent_id=None, type="step_started", payload={"step": "s"})
+    assert parent.is_dir()                     # AC2: the append created the parent dir
+    assert _read(parent / "e.jsonl") == [ev]   # AC2: record persisted on write path
+
+
+def test_reader_does_not_resurrect_rmtreed_quest_home(tmp_path: Path) -> None:
+    # .imp/quests/ exists (other quests live here) but this quest's home was rmtree'd.
+    quests_root = tmp_path / ".imp" / "quests"
+    quests_root.mkdir(parents=True)
+    home = quests_root / "archived-gone"
+    assert not home.exists()
+
+    # A reader constructs the event log exactly as Quest.event_log() does and reads.
+    log = JsonlEventLog(home / "events.jsonl")
+    assert list(log.read()) == []
+    assert log.tail(10) == []
+
+    assert not home.exists()            # AC6: the rmtree'd home was NOT recreated
