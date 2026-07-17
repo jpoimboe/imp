@@ -33,7 +33,7 @@ class _ScriptRunner:
                 "category": "rate_limit", "kind": "429",
                 "message": "slow down", "detail": detail}}
         else:
-            yield {"type": "agent_output",
+            yield {"type": "agent_result",
                    "payload": {"status": "Success", "outcome": "done"}}
 
     async def interrupt(self) -> None:

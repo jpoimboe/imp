@@ -93,7 +93,7 @@ async def test_mid_turn_interrupt_sets_resume_pending(tmp_path: Path) -> None:
             # so drive_invocation's per-event should_pause check observes it and
             # returns paused (the clean cooperative interrupt).
             await coord.signal_pause(reason="ctrl-c")
-            yield {"type": "agent_output", "payload": {"outcome": "ok", "status": "Success"}}
+            yield {"type": "agent_result", "payload": {"outcome": "ok", "status": "Success"}}
 
         async def interrupt(self) -> None:
             pass
@@ -142,7 +142,7 @@ async def test_interrupt_after_step_completed_advances_then_pauses(tmp_path: Pat
         async def run(self, inv: AgentInvocation) -> AsyncIterator[Event]:
             # Complete cleanly (→ Continue). The interrupt is injected AFTER the
             # step completes, via the on_event hook below — NOT inside run().
-            yield {"type": "agent_output", "payload": {"outcome": "ok", "status": "Success"}}
+            yield {"type": "agent_result", "payload": {"outcome": "ok", "status": "Success"}}
 
         async def interrupt(self) -> None:
             pass
@@ -212,10 +212,10 @@ async def test_interrupt_does_not_override_resume_goto_target(tmp_path: Path) ->
             # First call: code step → Success
             # Second call: review step → rework (triggers resume: code)
             if call_count[0] == 1:
-                yield {"type": "agent_output", "payload": {"outcome": "ok", "status": "Success"}}
+                yield {"type": "agent_result", "payload": {"outcome": "ok", "status": "Success"}}
             else:
                 # verdict=rework matches the {if: {verdict: rework}} rule → resume: code
-                yield {"type": "agent_output",
+                yield {"type": "agent_result",
                        "payload": {"outcome": "ok", "status": "Success", "verdict": "rework"}}
 
         async def interrupt(self) -> None:
@@ -286,7 +286,7 @@ async def test_completion_pending_finalizes_without_redispatch(tmp_path: Path) -
     class _Runner:
         async def run(self, inv: AgentInvocation) -> AsyncIterator[Event]:
             runs["n"] += 1
-            yield {"type": "agent_output", "payload": {"outcome": "ok", "status": "Success"}}
+            yield {"type": "agent_result", "payload": {"outcome": "ok", "status": "Success"}}
 
         async def interrupt(self) -> None:
             pass
@@ -338,7 +338,7 @@ async def test_mid_turn_interrupt_arms_continue(tmp_path: Path) -> None:
     class _InterruptingRunner:
         async def run(self, inv: AgentInvocation) -> AsyncIterator[Event]:
             await coord.signal_pause(reason="ctrl-c")
-            yield {"type": "agent_output",
+            yield {"type": "agent_result",
                    "payload": {"outcome": "ok", "status": "Success"}}
 
         async def interrupt(self) -> None:
@@ -430,7 +430,7 @@ async def test_interrupt_after_complete_clears_resume_pair(tmp_path: Path) -> No
 
     class _Runner:
         async def run(self, inv: AgentInvocation) -> AsyncIterator[Event]:
-            yield {"type": "agent_output",
+            yield {"type": "agent_result",
                    "payload": {"outcome": "ok", "status": "Success"}}
 
         async def interrupt(self) -> None:
@@ -496,7 +496,7 @@ async def test_interrupt_on_resume_goto_arms_solicit(tmp_path: Path) -> None:
 
     class _Runner:
         async def run(self, inv: AgentInvocation) -> AsyncIterator[Event]:
-            yield {"type": "agent_output",
+            yield {"type": "agent_result",
                    "payload": {"outcome": "ok", "status": "Success",
                                "verdict": "rework"}}
 

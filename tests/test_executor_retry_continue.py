@@ -92,7 +92,7 @@ class _StallNthRunner:
                 "category": "stalled", "kind": "stalled",
                 "message": "no events for 240s"}}
         else:
-            yield {"type": "agent_output",
+            yield {"type": "agent_result",
                    "payload": {"status": "Success", "outcome": "done"}}
 
     async def interrupt(self) -> None:
@@ -203,7 +203,7 @@ _RESUME_GOTO_WF = (
 
 class _SuccessRunner:
     async def run(self, invocation: Any) -> Any:
-        yield {"type": "agent_output",
+        yield {"type": "agent_result",
                "payload": {"outcome": "ok", "status": "Success"}}
 
     async def interrupt(self) -> None:
@@ -220,7 +220,7 @@ class _SuccessProvider:
 
 class _ReworkRunner:
     async def run(self, invocation: Any) -> Any:
-        yield {"type": "agent_output",
+        yield {"type": "agent_result",
                "payload": {"outcome": "ok", "status": "Success",
                            "verdict": "rework"}}
 
@@ -407,7 +407,7 @@ async def test_ctrl_c_park_arms_continue(
     class _InterruptingRunner:
         async def run(self, invocation: Any) -> Any:
             await coord.signal_pause(reason="ctrl-c")
-            yield {"type": "agent_output",
+            yield {"type": "agent_result",
                    "payload": {"outcome": "ok", "status": "Success"}}
 
         async def interrupt(self) -> None:

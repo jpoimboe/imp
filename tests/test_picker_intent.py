@@ -34,7 +34,8 @@ async def test_pick_quest_target_threads_intent(
     monkeypatch.setattr(
         m, "_load_events_for_id",
         lambda control, cid: [
-            {"type": "opening_intent", "payload": {"text": "add dark mode"}}])
+            {"type": "user_message", "payload": {"subtype": "intent",
+             "content": [{"type": "text", "text": "add dark mode"}]}}])
     captured: dict[str, list] = {}
 
     async def fake_picker(candidates, *, now, color, header, selected_index):
@@ -63,7 +64,8 @@ async def test_pick_quest_target_skips_event_load_for_titled_rows(
 
     def fake_load_events(control, cid):
         called_with.append(cid)
-        return [{"type": "opening_intent", "payload": {"text": "add dark mode"}}]
+        return [{"type": "user_message", "payload": {"subtype": "intent",
+                 "content": [{"type": "text", "text": "add dark mode"}]}}]
 
     monkeypatch.setattr(m, "_load_events_for_id", fake_load_events)
 

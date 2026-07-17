@@ -54,7 +54,7 @@ class _RenamingRunner:
         ch = invocation.quest
         if ch is not None and ch.title == "x":
             ch.rename("Renamed Thing", log=invocation.event_log or ch.event_log())
-        yield {"type": "agent_output", "payload": {"outcome": "ok", "status": "Success"}}
+        yield {"type": "agent_result", "payload": {"outcome": "ok", "status": "Success"}}
 
     async def interrupt(self) -> None:
         pass
@@ -148,7 +148,7 @@ class _RecordingRunner:
 
     async def run(self, invocation: AgentInvocation) -> AsyncIterator[Event]:
         self._sink[invocation.agent_id] = invocation.initial_messages
-        yield {"type": "agent_output", "payload": {"outcome": "ok", "status": "Success"}}
+        yield {"type": "agent_result", "payload": {"outcome": "ok", "status": "Success"}}
 
     async def interrupt(self) -> None:
         pass
@@ -235,7 +235,11 @@ async def test_seed_opening_not_forwarded_to_downstream_step_on_resume(
         Message(role="user", content=(TextBlock(text="prior turn"),)))
     ch.event_log().append_step_context(
         agent_id="step:p/s1", provider="anthropic", model="m",
-        system_prompt="sys", tools_schema=[], params={}, max_tool_calls=None)
+        tools_schema=[], params={}, max_tool_calls=None)
+    ch.event_log().append(
+        agent_id="step:p/s1", type="engine_message",
+        payload={"role": "system", "subtype": "system_prompt",
+                 "content": [{"type": "text", "text": "sys"}]})
 
     result = await run_quest(ch, on_event=lambda _e: None, headless=True)
 

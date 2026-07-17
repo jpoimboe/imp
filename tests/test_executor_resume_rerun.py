@@ -110,11 +110,13 @@ async def test_resume_truncated_autonomous_replays_and_advances(
     tdir.mkdir(parents=True, exist_ok=True)
     Transcript(tdir / "transcript.jsonl").append(
         Message(role="assistant", content=(TextBlock(text="still working"),)))
-    # Seed the step_context event so _resume_system_prompt finds the stored
-    # prompt (in production this is always present when a transcript exists).
+    # Seed the engine_message/system_prompt event so _resume_system_prompt
+    # finds the stored prompt (in production this is always present when a
+    # transcript exists).
     quest.event_log().append(
-        agent_id="step:only/w", type="step_context",
-        payload={"system_prompt": "test"})
+        agent_id="step:only/w", type="engine_message",
+        payload={"role": "system", "subtype": "system_prompt",
+                 "content": [{"type": "text", "text": "test"}]})
 
     seen_nonempty: list[bool] = []
 
@@ -124,7 +126,7 @@ async def test_resume_truncated_autonomous_replays_and_advances(
             # runner sees a non-empty transcript at entry.
             seen_nonempty.append(
                 Transcript(tdir / "transcript.jsonl").exists_and_nonempty())
-            yield {"type": "agent_output", "payload": {"outcome": "ok", "status": "Success"}}
+            yield {"type": "agent_result", "payload": {"outcome": "ok", "status": "Success"}}
 
         async def interrupt(self) -> None:
             pass
@@ -146,8 +148,8 @@ async def test_resume_truncated_autonomous_replays_and_advances(
 @pytest.mark.anyio
 async def test_resume_empty_transcript_with_stored_context_runs_fresh(
         tmp_path: Path, provider_registry) -> None:
-    # The watchdog-kill shape: the step RAN before, so the log holds a
-    # step_context with its system prompt — but the provider never flushed a
+    # The watchdog-kill shape: the step RAN before, so the log holds an
+    # engine_message/system_prompt event — but the provider never flushed a
     # transcript (claude_code flushes only at the end-of-run result boundary),
     # so the restart finds an empty one. The stored-prompt restore must not win
     # over the fresh re-render: system_prompt_override suppresses first-user-
@@ -160,15 +162,16 @@ async def test_resume_empty_transcript_with_stored_context_runs_fresh(
     tdir = quest.quest_dir / "steps" / "only" / "w"
     tdir.mkdir(parents=True, exist_ok=True)
     quest.event_log().append(
-        agent_id="step:only/w", type="step_context",
-        payload={"system_prompt": "stored from the killed run"})
+        agent_id="step:only/w", type="engine_message",
+        payload={"role": "system", "subtype": "system_prompt",
+                 "content": [{"type": "text", "text": "stored from the killed run"}]})
 
     seen_initial_nonempty: list[bool] = []
 
     class _Runner:
         async def run(self, inv: AgentInvocation) -> AsyncIterator[Event]:
             seen_initial_nonempty.append(len(inv.initial_messages) > 0)
-            yield {"type": "agent_output", "payload": {"outcome": "ok", "status": "Success"}}
+            yield {"type": "agent_result", "payload": {"outcome": "ok", "status": "Success"}}
 
         async def interrupt(self) -> None:
             pass
@@ -211,7 +214,7 @@ async def test_resume_empty_transcript_seeds_fresh_and_advances(
             # The crux: a fresh re-run must hand the runner a non-empty seed so
             # the provider sends a real first query (no infinite receive_response).
             seen_initial_nonempty.append(len(inv.initial_messages) > 0)
-            yield {"type": "agent_output", "payload": {"outcome": "ok", "status": "Success"}}
+            yield {"type": "agent_result", "payload": {"outcome": "ok", "status": "Success"}}
 
         async def interrupt(self) -> None:
             pass
