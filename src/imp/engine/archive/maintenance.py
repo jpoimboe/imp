@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 from pathlib import Path
 
@@ -34,3 +35,22 @@ def reap_archived_homes(control_root: Path) -> int:
         return reaped
     finally:
         conn.close()
+
+
+def reap_stray_homes(control_root: Path) -> int:
+    """Remove empty stray quest-home dirs (no quest.json) under .imp/quests/; return the count."""
+    quests_root = control_root / ".imp" / "quests"
+    if not quests_root.is_dir():
+        return 0
+    reaped = 0
+    for entry in quests_root.iterdir():
+        if not entry.is_dir() or entry.name.startswith("."):
+            continue
+        if (entry / "quest.json").exists():
+            continue
+        try:
+            os.rmdir(entry)
+            reaped += 1
+        except OSError:
+            pass
+    return reaped
