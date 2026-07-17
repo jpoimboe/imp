@@ -270,6 +270,28 @@ def test_edit_append_intent_parses_as_sole_flag() -> None:
     assert ns.append_intent == "a note"
 
 
+def test_apply_edit_sets_title_and_returns_ok(tmp_path: Path, monkeypatch) -> None:
+    _seed_control(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    _make_draft(tmp_path, "2026-06-24-edit90")
+    rc, msg = main.apply_edit(
+        tmp_path, "2026-06-24-edit90", title="Renamed", backlog=False,
+        active=False, depends_on=None, clear_deps=False, append_intent=None)
+    assert (rc, msg) == (0, None)
+    assert Quest.load(tmp_path, "2026-06-24-edit90").title == "Renamed"
+
+
+def test_apply_edit_no_fields_returns_usage_error(tmp_path: Path, monkeypatch) -> None:
+    _seed_control(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    _make_draft(tmp_path, "2026-06-24-edit91")
+    rc, msg = main.apply_edit(
+        tmp_path, "2026-06-24-edit91", title=None, backlog=False,
+        active=False, depends_on=None, clear_deps=False, append_intent=None)
+    assert rc == 2
+    assert msg is not None and "at least one of" in msg
+
+
 def _events(quest: Quest) -> list[dict]:
     path = quest.quest_dir / "events.jsonl"
     return [json.loads(line) for line in path.read_text().splitlines() if line]

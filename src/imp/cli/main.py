@@ -2985,52 +2985,63 @@ def _cmd_abandon(args: argparse.Namespace) -> int:
     return _abandon(control, quest_id)
 
 
+def apply_edit(
+    control: Path, quest_id: str, *, title: str | None, backlog: bool,
+    active: bool, depends_on: list[str] | None, clear_deps: bool,
+    append_intent: str | None,
+) -> tuple[int, str | None]:
+    """Return (rc, message) for an `imp edit` mutation so host CLI and daemon proxy share it."""
+    quest = Quest.load(control, quest_id)
+
+    zone_change = backlog or active
+    dep_change = depends_on is not None or clear_deps
+    if (title is None and not zone_change and not dep_change
+            and append_intent is None):
+        return 2, ("imp: imp edit needs at least one of --title, --backlog/--active, "
+                   "--depends-on/--clear-deps, or --append-intent")
+
+    if zone_change and quest.materialized:
+        return 2, (f"imp: {quest_id} is already built; zone moves apply to "
+                   "un-materialized quests only (use abandon/pause instead)")
+
+    if append_intent is not None:
+        conversed = _first_user_message(list(quest.event_log().read())) is not None
+        if quest.materialized or conversed:
+            return 2, (f"imp: {quest_id} has already started; --append-intent only "
+                       "applies before a quest is picked up")
+
+    if title is not None and title != quest.title:
+        if quest.materialized:
+            quest.rename(title, log=quest.event_log())
+        else:
+            quest.set_title(title)
+    if backlog:
+        quest.set_origin("backlog")
+    elif active:
+        quest.set_origin("draft")
+    if clear_deps:
+        quest.set_depends_on([])
+    elif depends_on is not None:
+        quest.set_depends_on(depends_on)
+    if append_intent is not None:
+        existing = quest.seed_opening or ""
+        if existing:
+            quest.set_seed_opening(existing + "\n\n" + append_intent)
+        else:
+            quest.set_seed_opening(append_intent)
+    return 0, None
+
+
 def _cmd_edit(args: argparse.Namespace) -> int:
     control = _control_root()
     quest_id = _resolve_id(control, args.token)
-    quest = Quest.load(control, quest_id)
-
-    zone_change = args.backlog or args.active
-    dep_change = args.depends_on is not None or args.clear_deps
-    if (args.title is None and not zone_change and not dep_change
-            and args.append_intent is None):
-        print("imp: imp edit needs at least one of --title, --backlog/--active, "
-              "--depends-on/--clear-deps, or --append-intent", file=sys.stderr)
-        return 2
-
-    if zone_change and quest.materialized:
-        print(f"imp: {quest_id} is already built; zone moves apply to "
-              "un-materialized quests only (use abandon/pause instead)",
-              file=sys.stderr)
-        return 2
-
-    if args.append_intent is not None:
-        conversed = _first_user_message(list(quest.event_log().read())) is not None
-        if quest.materialized or conversed:
-            print(f"imp: {quest_id} has already started; --append-intent only "
-                  "applies before a quest is picked up", file=sys.stderr)
-            return 2
-
-    if args.title is not None and args.title != quest.title:
-        if quest.materialized:
-            quest.rename(args.title, log=quest.event_log())
-        else:
-            quest.set_title(args.title)
-    if args.backlog:
-        quest.set_origin("backlog")
-    elif args.active:
-        quest.set_origin("draft")
-    if args.clear_deps:
-        quest.set_depends_on([])
-    elif args.depends_on is not None:
-        quest.set_depends_on(args.depends_on)
-    if args.append_intent is not None:
-        existing = quest.seed_opening or ""
-        if existing:
-            quest.set_seed_opening(existing + "\n\n" + args.append_intent)
-        else:
-            quest.set_seed_opening(args.append_intent)
-    return 0
+    rc, msg = apply_edit(
+        control, quest_id, title=args.title, backlog=args.backlog,
+        active=args.active, depends_on=args.depends_on,
+        clear_deps=args.clear_deps, append_intent=args.append_intent)
+    if msg:
+        print(msg, file=sys.stderr if rc else sys.stdout)
+    return rc
 
 
 def _backlog_rows(control: Path, scanned: list[HomeDigest] | None = None) -> list[_Row]:
