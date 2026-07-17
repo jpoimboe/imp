@@ -569,3 +569,69 @@ def test_pause_lines_error_block_untitled_leaves_bare_gold_id() -> None:
                          info=_PauseInfo("api", "boom"), color=True)
     assert lines[-1] == pal.ansi("dufa26", "wordmark")
     assert lines[-1].count(" · ") == 0
+
+
+def test_pause_reason_routed_pause_drops_recovered_error() -> None:
+    from imp.cli.main import _pause_reason, _PauseInfo
+
+    # A transient error that self-healed (step_started clears it) must NOT leak
+    # onto a later engine-routed pause such as max_loops.
+    reason = _pause_reason([
+        ev("1", "error", category="auth",
+           detail={"last_agent_text": "You've hit your session limit · resets 4pm"}),
+        ev("2", "step_started", step="verify", kind="agent", phase="verify"),
+        ev("3", "step_completed", step="verify"),
+        ev("4", "workflow_paused", reason="max_loops", step="verify"),
+    ])
+    assert reason == _PauseInfo("max_loops", None)
+
+
+def test_pause_reason_adjacent_error_still_attaches() -> None:
+    from imp.cli.main import _pause_reason, _PauseInfo
+
+    # Regression guard: an error with NO intervening step_started must still
+    # attach as the pause's cause.
+    reason = _pause_reason([
+        ev("1", "step_started", step="task-lead", kind="agent", phase="converge"),
+        ev("2", "error", category="auth",
+           detail={"last_agent_text": "401 Unauthorized — token revoked"}),
+        ev("3", "workflow_paused", reason="reauth_needed", kind="auth"),
+    ])
+    assert reason == _PauseInfo("reauth_needed", "401 Unauthorized — token revoked")
+
+
+def test_pause_reason_multi_attempt_burst_keeps_only_final_error() -> None:
+    from imp.cli.main import _pause_reason, _PauseInfo
+
+    # In a backoff burst each non-final error is cleared by the next attempt's
+    # step_started; only the final failed attempt's error contributes a cause.
+    reason = _pause_reason([
+        ev("1", "step_started", step="task-lead", kind="agent", phase="converge"),
+        ev("2", "error", category="network",
+           detail={"last_agent_text": "first blip"}),
+        ev("3", "step_started", step="task-lead", kind="agent", phase="converge"),
+        ev("4", "error", category="network",
+           detail={"last_agent_text": "final failure"}),
+        ev("5", "workflow_paused", reason="retry_ceiling"),
+    ])
+    assert reason == _PauseInfo("retry_ceiling", "final failure")
+
+
+def test_pause_reason_burst_final_error_cleared_by_step_started_renders_bare() -> None:
+    from imp.cli.main import _pause_reason, _PauseInfo
+
+    # Falsifiable coverage of the step_started-clears clause inside a burst: the
+    # final attempt's error is followed by the retry's step_started before the
+    # routed pause, so no error survives as the cause. Without the clause the
+    # stale "final failure" would leak as "retry_ceiling: final failure".
+    reason = _pause_reason([
+        ev("1", "step_started", step="task-lead", kind="agent", phase="converge"),
+        ev("2", "error", category="network",
+           detail={"last_agent_text": "first blip"}),
+        ev("3", "step_started", step="task-lead", kind="agent", phase="converge"),
+        ev("4", "error", category="network",
+           detail={"last_agent_text": "final failure"}),
+        ev("5", "step_started", step="task-lead", kind="agent", phase="converge"),
+        ev("6", "workflow_paused", reason="retry_ceiling"),
+    ])
+    assert reason == _PauseInfo("retry_ceiling", None)
