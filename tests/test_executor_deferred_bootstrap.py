@@ -79,9 +79,9 @@ async def test_first_resume_bootstraps_deferred_draft(tmp_path: Path) -> None:
     # draft keeps step=None and _complete's immediately, invoking no provider.
     assert sink, "provider was never invoked -> cursor was not seeded"
     # The seeded cursor + vars captured at first dispatch match an eagerly-seeded
-    # draft: step w, label w (no step label -> the step name), phase label P, and
-    # the var override 42 (not the bare default 7).
-    assert snapshots[0] == ("w", "w", "P", 42)
+    # draft: step w, no step label (unlabeled step -> honest None), phase label P,
+    # and the var override 42 (not the bare default 7).
+    assert snapshots[0] == ("w", None, "P", 42)
     # The override reached the agent through apply_var_overrides, not backfill.
     assert "n=42" in _task_text(sink[0])
     # The initial seed must not masquerade as a late backfill.
