@@ -1797,3 +1797,18 @@ def test_attach_pulse_does_not_seed_marker_when_sandboxed(tmp_path: Path) -> Non
     server._on_attach_pulse(object(), sent.append)
 
     assert not any(e.get("type") == "sandbox_marker" for e in sent)
+
+
+@pytest.mark.anyio
+async def test_dispatch_compact_signals_side_effect_pause(tmp_path: Path) -> None:
+    from imp.cli.signals import InterruptCoordinator
+    from imp.remote.session.protocol import CONTROL_COMPACT
+
+    coord = InterruptCoordinator()
+    server = SessionServer(str(tmp_path / "s.sock"), coordinator=coord)
+    await server.open()
+    pending = server._side_effect_pending      # snapshot the event the pulse must set
+    await server._dispatch_control(CONTROL_COMPACT)
+    assert coord.should_pause
+    assert coord.pause_reason == "compact"
+    assert pending is not None and pending.is_set()   # the side-effect wake pulse fired

@@ -14,6 +14,7 @@ from imp.agents.transcript import SkillReply
 from imp.remote.session.protocol import (
     CONTROL_ABANDON,
     CONTROL_ARCHIVE,
+    CONTROL_COMPACT,
     CONTROL_DETACH,
     CONTROL_DISCARD,
     CONTROL_INTERRUPT,
@@ -416,6 +417,9 @@ class SessionServer:
             self._coordinator.set_pending_model(reason or "")
             await self._coordinator.signal_pause(
                 reason="model-override", via="frame")
+            self._pulse_side_effect()
+        elif action == CONTROL_COMPACT and self._coordinator is not None:
+            await self._coordinator.signal_pause(reason="compact", via="frame")
             self._pulse_side_effect()
         elif action == CONTROL_SET_SANDBOX and self._coordinator is not None:
             self._coordinator.set_unsandboxed(reason == "off")
