@@ -22,6 +22,15 @@ FIXTURES = Path(__file__).parent / "fixtures"
 # and the timeout only ever catches a genuine hang. This is what lets the live
 # suite parallelize past -n 2 without the cap turning a slow call into a flake.
 _LIVE_TEST_TIMEOUT = 240
+# impty PTY e2e tests (tests/impty/test_e2e_*.py) drive a full real `imp` binary
+# to completion over a pty. Under `-n auto` oversubscription — most visibly from
+# inside a live imp/dogfood session — pyte's pure-Python VT parse plus the run's
+# own work crosses the global `timeout = 60` (signal method, pyproject.toml),
+# and SIGALRM kills a structurally-sound test. Grant them a generous liveness
+# ceiling so the timeout only ever catches a genuine hang; nothing asserts how
+# much of it is used. Independent of _LIVE_TEST_TIMEOUT (different rationale)
+# though it currently shares the value.
+_IMPTY_E2E_TIMEOUT = 240
 
 
 def pytest_addoption(parser: pytest.Parser) -> None:
@@ -43,19 +52,25 @@ def pytest_addoption(parser: pytest.Parser) -> None:
 def pytest_collection_modifyitems(
     config: pytest.Config, items: list[pytest.Item],
 ) -> None:
-    """Two jobs at collection: (1) raise the per-test timeout for live-API
-    `*_live.py` files (see _LIVE_TEST_TIMEOUT), and (2) gate every
+    """Two jobs at collection: (1) raise the per-test timeout for the slow
+    liveness families — live-API `*_live.py` files (see _LIVE_TEST_TIMEOUT) and
+    impty PTY e2e `tests/impty/test_e2e_*.py` files (see _IMPTY_E2E_TIMEOUT) —
+    each keeping its own explicit `timeout` marker if it declares one (e.g. the
+    resume tests that pick 240); and (2) gate every
     `@pytest.mark.live(<provider>)` test behind --run-live (see tests/_live.py's
-    live_skip_reason). A `*_live.py` file keeps its own explicit `timeout`
-    marker if it declares one (e.g. the resume tests that pick 240)."""
+    live_skip_reason)."""
     from tests._live import live_skip_reason, parse_run_live
 
     requested = parse_run_live(config.getoption("--run-live"))
     for item in items:
-        name = Path(str(item.fspath)).name
+        path = Path(str(item.fspath))
+        name = path.name
         is_live_file = "_live" in name and not name.startswith("test_live_")
         if is_live_file and item.get_closest_marker("timeout") is None:
             item.add_marker(pytest.mark.timeout(_LIVE_TEST_TIMEOUT))
+        is_impty_e2e = path.parent.name == "impty" and name.startswith("test_e2e_")
+        if is_impty_e2e and item.get_closest_marker("timeout") is None:
+            item.add_marker(pytest.mark.timeout(_IMPTY_E2E_TIMEOUT))
         marker = item.get_closest_marker("live")
         if marker is None:
             continue
