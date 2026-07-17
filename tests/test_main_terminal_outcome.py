@@ -194,9 +194,50 @@ def test_emit_paused_summary_interrupt_renders_bare_reason(capsys) -> None:
     main._emit_paused_summary(quest)
     out = capsys.readouterr().out
     assert not out.startswith("\n")                    # no leading blank
-    assert "2026-06-12-run-x · interrupt" in out
+    assert "2026-06-12-run-x · (unnamed) · interrupt" in out
     assert out.endswith("\n\n")
     assert not out.endswith("\n\n\n")
+
+
+def test_status_spine_prompt_fallback_dim_and_prefixed_color() -> None:
+    from imp.cli import palette as pal
+    line = main._status_spine("z1", "", "shelved", "wordmark", color=True,
+                              intent="add a dark mode toggle")
+    # the opening-prompt fallback is the dim, `> `-prefixed middle segment
+    assert pal.ansi("> add a dark mode toggle", "dim") in line
+    assert "(unnamed)" not in line
+
+
+def test_status_spine_prompt_fallback_flattens_and_caps_at_60() -> None:
+    line = main._status_spine("z1", "   ", "shelved", "wordmark", color=False,
+                              intent="add a\n   dark   mode\ttoggle " + "y" * 80)
+    # flattened to single spaces, then "> " (2) + 57 chars + "…" = 60 display cols
+    body = "add a dark mode toggle " + "y" * 80
+    assert "> " + body[:57] + "…" in line
+    assert "> " + body[:58] not in line
+
+
+def test_status_spine_unnamed_has_no_prompt_prefix() -> None:
+    line = main._status_spine("z1", "", "shelved", "wordmark", color=False,
+                              intent=None)
+    assert line == "z1 · (unnamed) · shelved"
+    assert "> (unnamed)" not in line
+
+
+def test_status_spine_title_unchanged_when_intent_present() -> None:
+    # A real title wins over the opening prompt: plain, no dim, no `> `.
+    line = main._status_spine("z1", "Real title", "shelved", "wordmark",
+                              color=False, intent="ignored prompt")
+    assert line == "z1 · Real title · shelved"
+
+
+def test_status_spine_prompt_fallback_no_color_is_plain_and_parseable() -> None:
+    line = main._status_spine("z1", "", "shelved", "wordmark", color=False,
+                              intent="when I hit save it crashed")
+    # NO_COLOR / piped: plain ASCII `> `, no ANSI, dot-delimited spine intact
+    assert line == "z1 · > when I hit save it crashed · shelved"
+    assert "\x1b[" not in line
+    assert line.count(" · ") == 2
 
 
 def test_status_spine_named_renders_plain_id_title_tail_structure() -> None:
@@ -205,11 +246,11 @@ def test_status_spine_named_renders_plain_id_title_tail_structure() -> None:
     assert line == "vahi04 · One-line title · completed"
 
 
-def test_status_spine_unnamed_drops_the_title_segment() -> None:
+def test_status_spine_titleless_renders_unnamed_middle_segment() -> None:
     line = main._status_spine("vahi04", "", "completed", "green", color=False)
-    assert line == "vahi04 · completed"
-    # exactly one separator: id · tail, no empty title slot
-    assert line.count(" · ") == 1
+    assert line == "vahi04 · (unnamed) · completed"
+    # exactly two separators now: id · (unnamed) · tail
+    assert line.count(" · ") == 2
 
 
 def test_status_spine_colors_id_gold_and_tail_by_role() -> None:

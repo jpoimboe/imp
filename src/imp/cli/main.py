@@ -227,20 +227,28 @@ def make_message_reply_fn(message: str | None) -> Callable[[], Awaitable[str]]:
 
 
 # -- end-of-run status lines ------------------------------------------------
-# Every terminal line shares one spine: a gold quest id, a white (default-fg)
-# title, and a dot-joined outcome tail whose color carries meaning (green =
-# success, red = error, gold = everything-else). No glyphs, no dim, flush left,
-# so NO_COLOR / non-TTY output stays plain and script-parseable. Shared by
-# `new`/`resume` and the leave echoes.
+# Every terminal line shares one spine: a gold quest id, a middle display-name
+# segment, and a dot-joined outcome tail whose color carries meaning (green =
+# success, red = error, gold = everything-else). The middle segment is always
+# present via the shared resolver (quest_row.resolve_display_name): a real title
+# is plain, else the opening prompt renders dim with a plain-ASCII `> ` prefix,
+# else the dim `(unnamed)` placeholder. Exception to the old "no dim, no glyphs"
+# rule — but dim is color-only and `> ` is plain ASCII, so NO_COLOR / non-TTY
+# output stays plain and script-parseable. Shared by `new`/`resume` and leaves.
 
 def _status_spine(quest_id: str, title: str, tail: str, *tail_codes: str,
-                  color: bool) -> str:
-    """`<id>gold · <title>white · <tail>colored`; the title segment is dropped
-    when the quest has no title (`<id>gold · <tail>colored`)."""
-    stripped = title.strip()
-    mid = f" · {stripped} · " if stripped else " · "
+                  color: bool, intent: str | None = None) -> str:
+    """`<id>gold · <name> · <tail>colored`; the middle segment is always present."""
+    resolved = quest_row.resolve_display_name(title, intent)
+    if resolved.kind is quest_row.NameKind.PROMPT:
+        name = quest_row.PROMPT_PREFIX + quest_row._truncate(
+            resolved.text, quest_row.NAME_CAP - len(quest_row.PROMPT_PREFIX))
+    else:
+        name = quest_row._truncate(resolved.text, quest_row.NAME_CAP)
+    if resolved.kind is not quest_row.NameKind.TITLE:
+        name = pal.ansi(name, "dim", enabled=color)
     return (ansi(quest_id, *pal.NODE_COLORS["quest_id"], enabled=color)
-            + mid + ansi(tail, *tail_codes, enabled=color))
+            + f" · {name} · " + ansi(tail, *tail_codes, enabled=color))
 
 
 def _resume_line(token: str, suffix: str = "") -> str:

@@ -16,10 +16,10 @@ def test_pause_lines_named_reasonless_pause_uses_paused_tail() -> None:
     ]
 
 
-def test_pause_lines_unnamed_pause_drops_the_title_segment() -> None:
+def test_pause_lines_titleless_pause_shows_unnamed_middle() -> None:
     lines = _pause_lines("dufa26", "dufa26", color=False)
-    assert lines[0] == "dufa26 · paused"
-    assert lines[0].count(" · ") == 1
+    assert lines[0] == "dufa26 · (unnamed) · paused"
+    assert lines[0].count(" · ") == 2
 
 
 def test_pause_lines_reason_becomes_the_tail_no_at_locator_no_parens() -> None:
