@@ -109,7 +109,7 @@ def compose_position_bar(*, activity: nv.Activity, quest_id: str | None,
                          title: str, prompt_tokens: int | None, color: bool,
                          width: int, context_pct: float | None = None,
                          checkpoint_threshold: float | int | None = None,
-                         pad_slate: bool = True) -> str:
+                         pad_band: bool = True) -> str:
     """Position bar: id · title · position · model context-bar (no spinner, no elapsed)."""
     bg = pal.user_bg_open(enabled=color)
     over = bool(bg)
@@ -124,7 +124,7 @@ def compose_position_bar(*, activity: nv.Activity, quest_id: str | None,
                       color=color, over_bg=over)
     body = rt.compose_label([id_seg, title_seg, position_seg,
                              rt.join_space(model_seg, bar)])
-    if pad_slate and bg:
+    if pad_band and bg:
         body_dw = pal.display_width(body)
         target = width - 2
         if body_dw < target:
@@ -132,8 +132,8 @@ def compose_position_bar(*, activity: nv.Activity, quest_id: str | None,
     return f"{bg}{body}{_RESET}" if bg else body
 
 
-def _slate_wrap(body: str, bg: str, width: int) -> str:
-    """Pad `body` to width-2 and wrap it in the slate bg/reset pair; no-op when bg is empty."""
+def _band_wrap(body: str, bg: str, width: int) -> str:
+    """Pad `body` to width-2 and wrap it in the band bg/reset pair; no-op when bg is empty."""
     if not bg:
         return body
     body_dw = pal.display_width(body)
@@ -155,7 +155,7 @@ def compose_identity_toolbar(*, quest_id: str | None, title: str, color: bool,
     unsandboxed_seg = (_paint("unsandboxed", *pal.NODE_COLORS["error"],
                               color=color, over_bg=over) if unsandboxed else None)
     body = rt.compose_label([id_seg, title_seg, unsandboxed_seg])
-    return _slate_wrap(body, bg, width)
+    return _band_wrap(body, bg, width)
 
 
 def compose_position_row(*, activity: nv.Activity, quest_id: str | None,
@@ -186,14 +186,14 @@ def compose_position_row(*, activity: nv.Activity, quest_id: str | None,
                           color=color, over_bg=over)
     body = rt.compose_label([id_seg, title_seg, unsandboxed_seg, phase_seg, plan_seg,
                              counter_seg, rt.join_space(model_seg, bar)])
-    return _slate_wrap(body, bg, width)
+    return _band_wrap(body, bg, width)
 
 
 def compose_subagent_rows(builder: nv.NarrativeBuilder, *, color: bool,
                           width: int, now_iso: str) -> list[str]:
     """One row per running subagent (B4/AC5); colliding roles numbered.
-    Each row carries the parent position row's slate background, padded to width-2
-    so the slate spans the full footer width and aligns with the row above it."""
+    Each row carries the parent position row's band background, padded to width-2
+    so the band spans the full footer width and aligns with the row above it."""
     folds = builder.running_subagents()
     if not folds:
         return []
@@ -251,7 +251,7 @@ def compose_activity_status(
         activity=activity, quest_id=root.id, title=root.title,
         prompt_tokens=builder.latest_prompt_tokens, color=color, width=w,
         context_pct=builder.latest_context_pct,
-        checkpoint_threshold=builder.latest_checkpoint_threshold, pad_slate=False)
+        checkpoint_threshold=builder.latest_checkpoint_threshold, pad_band=False)
     line = compose_activity_line(activity=activity, frame=frame, color=color, now_iso=now_iso)
     return rt.compose_label([line, bar])
 

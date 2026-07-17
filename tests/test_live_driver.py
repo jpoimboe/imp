@@ -1933,7 +1933,7 @@ def test_compose_identity_toolbar_carries_slate_and_padding_under_dark_theme() -
     finally:
         pal.set_theme("ansi")
     assert bar is not None
-    assert bar.startswith("\x1b[48;2;43;47;58m")   # same slate open as the position row
+    assert bar.startswith("\x1b[48;2;67;56;40m")   # same warm band open as the position row
     assert bar.endswith("\x1b[0m")
     assert pal.display_width(bar) == 118           # padded to width-2, aligned with the footer
 
@@ -1948,7 +1948,7 @@ def test_compose_identity_toolbar_title_is_unpainted_under_ansi_theme() -> None:
         pal.set_theme("ansi")
     assert bar is not None
     parts = bar.split(" · ")
-    # id · title; under ansi the slate bg is empty, so gray would be the only \x1b[90m.
+    # id · title; under ansi the band bg is empty, so gray would be the only \x1b[90m.
     assert "\x1b[33m" in parts[0]                # id still wordmark gold
     assert "\x1b[90m" not in bar                 # title no longer gray-painted
     assert "\x1b[" not in parts[1]               # title: unpainted default fg
@@ -2030,7 +2030,7 @@ def test_compose_position_bar_slate_survives_livestatus_clip_under_dark_theme() 
                                     prompt_tokens=1000, color=True, width=120)
     finally:
         pal.set_theme("ansi")
-    assert line.startswith("\x1b[48;2;43;47;58m")
+    assert line.startswith("\x1b[48;2;67;56;40m")
     assert line.endswith("\x1b[0m")
     assert pal.display_width(line) == 118
     clipped = pal.clip_display(line, 120 - 1)
@@ -2528,7 +2528,7 @@ def test_compose_subagent_rows_carry_the_slate_and_align_under_dark_theme() -> N
     finally:
         pal.set_theme("ansi")
     assert len(rows) == 1
-    assert rows[0].startswith("\x1b[48;2;43;47;58m")   # the position row's slate open
+    assert rows[0].startswith("\x1b[48;2;67;56;40m")   # the position row's warm band open
     assert rows[0].endswith("\x1b[0m")
     assert pal.display_width(rows[0]) == 118           # padded to width-2, aligned with parent
 
@@ -2555,7 +2555,7 @@ def test_compose_subagent_rows_render_plain_without_slate_under_ansi_theme() -> 
     finally:
         pal.set_theme("ansi")
     assert len(rows) == 1
-    assert not rows[0].startswith("\x1b[48")   # 16-color theme has no slate background
+    assert not rows[0].startswith("\x1b[48")   # 16-color theme has no band background
     assert not rows[0].startswith(" ")         # no leading indent; row begins at the arrow
     assert "↳" in rows[0]                       # child arrow present
 

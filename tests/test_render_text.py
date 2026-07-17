@@ -1105,7 +1105,7 @@ def test_prose_then_subagent_header_separated_by_blank() -> None:
 
 def test_user_message_orange_caret_then_text_color_on() -> None:
     """The user turn renders at the node's own depth (depth=1 → a 2-space indent).
-    First line: a brand-orange `>` caret (outside any slate) + one space + the body.
+    First line: a brand-orange `>` caret (outside any band) + one space + the body.
     Continuation lines drop the caret (a blank column in its place) so the body
     aligns under the first line's text. No background fill in the ansi theme."""
     node = nv.UserMessageNode(text="line one\nline two", interactive=True)
@@ -1119,7 +1119,7 @@ def test_user_message_orange_caret_then_text_color_on() -> None:
 def test_user_message_caret_with_subtle_bg_in_truecolor_theme() -> None:
     """The reprinted (scrolled-back) user turn carries a subtle entered-input
     background in a truecolor theme, opened AFTER the caret: the `>` sits outside
-    the slate; the separating space + the text sit on it, and it closes at text end
+    the band; the separating space + the text sit on it, and it closes at text end
     (no full-width fill → clean copy/paste)."""
     pal.set_theme("dark")
     try:
@@ -1129,13 +1129,13 @@ def test_user_message_caret_with_subtle_bg_in_truecolor_theme() -> None:
         pal.set_theme("ansi")
     assert len(out) == 1
     caret = "\x1b[38;2;255;154;60m>\x1b[0m"   # truecolor brand-orange caret
-    bg = "\x1b[48;2;43;47;58m"                 # subtle slate (#2B2F3A) after the caret
+    bg = "\x1b[48;2;67;56;40m"                 # warm amber band (#433828) after the caret
     assert out[0] == caret + bg + " hello\x1b[0m"   # space + text on the bg, reset at end
 
 
 def test_user_message_multiline_continuation_carries_slate_no_caret() -> None:
     """A multi-line truecolor turn: the continuation line drops the caret (blank
-    column in its place) but still carries the slate band, aligned under the body."""
+    column in its place) but still carries the warm band, aligned under the body."""
     pal.set_theme("dark")
     try:
         node = nv.UserMessageNode(text="one\ntwo", interactive=True)
@@ -1144,7 +1144,7 @@ def test_user_message_multiline_continuation_carries_slate_no_caret() -> None:
         pal.set_theme("ansi")
     assert len(out) == 2
     caret = "\x1b[38;2;255;154;60m>\x1b[0m"
-    bg = "\x1b[48;2;43;47;58m"
+    bg = "\x1b[48;2;67;56;40m"
     assert out[0] == caret + bg + " one\x1b[0m"   # caret outside, band hugs the text
     assert out[1] == " " + bg + " two\x1b[0m"     # blank caret column, band continues
 
