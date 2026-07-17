@@ -3281,3 +3281,39 @@ def test_breadcrumb_to_completion_block_has_exactly_one_blank_end_to_end(
     assert rows[c - 1].strip() == ""            # exactly one blank directly above the block
     assert rows[c - 2].strip() != ""            # …and not two — the row above the blank has content
     assert "merging · complete" in rows[c - 2]  # breadcrumb, directly above the blank
+
+
+def test_finish_exit_block_false_resets_without_trailing_blank() -> None:
+    """finish(exit_block=False) uses reset(): no descend past the footer's owned blank."""
+    out = _TTYPipe()
+    status = LiveStatus(out)
+    status._width_fn = lambda: 80
+    drv = LiveDriver(stream=out, color=False, width=80, status=status)
+    drv.on_event(ev("1", "quest_created", quest_id=1, title="x"))
+    drv.on_event(ev("2", "step_started", step="s", kind="agent", phase="spec",
+                    model="m", provider="anthropic"))
+    assert status._visible                 # footer is visible — sanity check
+    out.truncate(0)
+    out.seek(0)
+    drv.finish(exit_block=False)
+    v = out.getvalue()
+    assert not v.endswith("\n")            # reset(): no trailing descend past the owned blank
+    assert status._compose is None         # compose cleared
+
+
+def test_finish_default_descends_past_owned_blank() -> None:
+    """finish() with default exit_block=True uses end_run(): descends past the owned blank."""
+    out = _TTYPipe()
+    status = LiveStatus(out)
+    status._width_fn = lambda: 80
+    drv = LiveDriver(stream=out, color=False, width=80, status=status)
+    drv.on_event(ev("1", "quest_created", quest_id=1, title="x"))
+    drv.on_event(ev("2", "step_started", step="s", kind="agent", phase="spec",
+                    model="m", provider="anthropic"))
+    assert status._visible
+    out.truncate(0)
+    out.seek(0)
+    drv.finish()
+    v = out.getvalue()
+    assert v.endswith("\n")               # end_run(): descend past the owned blank
+    assert status._compose is None

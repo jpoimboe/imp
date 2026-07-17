@@ -2167,7 +2167,7 @@ def _follow_log(events: list[dict[str, Any]]) -> int:
         width=_term_width, display_width=_display_width, status=status)
     for event in events:
         driver.on_event(event)
-    driver.finish()
+    driver.finish(exit_block=False)
     return 0
 
 
@@ -2223,7 +2223,7 @@ def _drain_from_archive(driver: LiveDriver, tail: _EventTail,
     if raw is not None:
         for event in _parse_jsonl(raw)[tail.emitted:]:
             driver.on_event(event)
-    driver.finish()
+    driver.finish(exit_block=False)
     return 0
 
 
@@ -2244,7 +2244,7 @@ def _follow_step(driver: LiveDriver, tail: _EventTail, status: LiveStatus,
     if state_status in _FOLLOW_TERMINAL:
         for event in tail.read_new():
             driver.on_event(event)
-        driver.finish()
+        driver.finish(exit_block=False)
         return 0
     if lock_is_live(home / "lock"):
         status.update(driver.compose_status)
