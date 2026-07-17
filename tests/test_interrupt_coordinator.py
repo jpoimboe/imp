@@ -454,3 +454,38 @@ def test_reset_clears_backoff_wait_and_retry_now() -> None:
     coord.reset()
     assert coord.backoff_wait_active is False
     assert coord.retry_now_requested is False
+
+
+@pytest.mark.anyio
+async def test_dispatch_retry_now_awaits_hook_when_attached() -> None:
+    coord = InterruptCoordinator()
+    calls: list[str] = []
+
+    async def hook() -> None:
+        calls.append("forwarded")
+
+    coord.begin_backoff_wait()          # arm the gate so the assertion is falsifiable
+    coord.set_retry_now_hook(hook)
+    await coord.dispatch_retry_now()
+    # With a hook attached the forward is awaited and NO local latch is set
+    # (the daemon owns the arm-gate on the far side of the boundary).
+    assert calls == ["forwarded"]
+    assert coord.retry_now_requested is False
+
+
+@pytest.mark.anyio
+async def test_dispatch_retry_now_falls_back_to_local_when_no_hook() -> None:
+    coord = InterruptCoordinator()
+    # No hook: purely local/in-process run. The local request_retry_now() runs,
+    # which latches only while a backoff wait is armed.
+    coord.begin_backoff_wait()
+    await coord.dispatch_retry_now()
+    assert coord.retry_now_requested is True
+
+
+@pytest.mark.anyio
+async def test_dispatch_retry_now_local_fallback_respects_arm_gate() -> None:
+    coord = InterruptCoordinator()
+    # No hook and no armed wait: the local fallback is a no-op (stray `r`).
+    await coord.dispatch_retry_now()
+    assert coord.retry_now_requested is False

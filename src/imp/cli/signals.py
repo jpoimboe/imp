@@ -237,6 +237,7 @@ class InterruptCoordinator:
         self._trigger_escalation: Any = None
         self._trigger_exit: Any = None
         self._forward_force: Any = None   # client force-forward hook (SessionControls)
+        self._forward_retry_now: Any = None   # client retry-now forward hook (SessionControls)
         self._now = time.monotonic      # injectable for tests
         self._ack_hook: Any = None
         # True ONLY while an interactive prompt is being awaited (set/cleared by
@@ -553,6 +554,18 @@ class InterruptCoordinator:
         send). Invoked by the receiver on the _FORCE_FORWARD sentinel — a repeat
         ctrl-c hard-kills the run via the daemon and the client stays attached."""
         self._forward_force = fn
+
+    def set_retry_now_hook(self, fn: Any) -> None:
+        """Register the client's retry-now forwarder (used by dispatch_retry_now)."""
+        self._forward_retry_now = fn
+
+    async def dispatch_retry_now(self) -> None:
+        """Forward the retry-now gesture via the hook when set, else latch locally."""
+        fn = self._forward_retry_now
+        if fn is not None:
+            await fn()
+            return
+        self.request_retry_now()
 
     def set_event_log(self, log: Any) -> None:
         """Attach the EventLog so interrupt delivery is journaled."""
@@ -935,8 +948,9 @@ class CtrlDReader:
                     await self._coord.leave_mid_run(reason="ctrl-d")
                     return
                 if byte == b"r":
-                    # Retry-now: coordinator gates a stray r; keep watching so Ctrl-D still leaves.
-                    self._coord.request_retry_now()
+                    # Retry-now: dispatch across the client/daemon boundary (or
+                    # locally when no client). Keep watching so Ctrl-D still leaves.
+                    await self._coord.dispatch_retry_now()
                     continue
                 # Any other byte (incl. b"" timeout / quiesce race) → keep watching.
         finally:
