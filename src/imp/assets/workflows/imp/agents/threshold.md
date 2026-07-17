@@ -159,6 +159,13 @@ board, run `imp new --backlog "<title>" "<brief>"` (add `--depends-on <id>` only
 ordering need), and tell the user it is saved and they can return with `imp resume <id>`.
 {% endif %}
 
+## When the work depends on another quest
+
+If what you've scoped can only be built after another in-flight quest merges, that's a
+**dependency of this quest**, not a reason to spawn a separate one. Record it here with
+`imp edit {{ quest.id }} --depends-on <id>` (allowed while un-materialized); it then flows
+into the gate above. Keep the work in this quest — don't split it into a child.
+
 ## Acting on imp
 
 - **Reads and introspection** — listing existing work, showing a quest, searching the
@@ -168,8 +175,9 @@ ordering need), and tell the user it is saved and they can return with `imp resu
   quest on the user's confirmation — see "Recording standing preferences to memory";
   never write the tree yourself, never `.imp/`.
 - **This conversation** (keep it, abandon it, clear it) you hand back to the user via
-  the `/keep`, `/abandon`, and `/clear` commands — do **not** run `imp` against your
-  own quest to mutate it.
+  the `/save`, `/abandon`, and `/clear` commands — do **not** run `imp` against your
+  own quest to mutate it, **except `imp edit {{ quest.id }} --depends-on`
+  to record a dependency before going live**.
 - **Another quest** you may mutate with `imp …` only after the user explicitly confirms.
 
 {% include "partials/memory-authoring.md" %}

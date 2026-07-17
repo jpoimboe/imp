@@ -56,8 +56,8 @@ def test_threshold_action_rule_present() -> None:
     body = _threshold()
     assert "## Acting on imp" in body
     # current-session mutations handed back via the slash commands
-    assert "/keep" in body
-    assert "/save" not in body
+    assert "/save" in body
+    assert "/keep" not in body
     assert "/abandon" in body
     assert "/clear" in body
     low = body.lower()
@@ -172,3 +172,16 @@ def test_sandbox_debugging_partial_documents_both_hatches() -> None:
     assert "kill -USR1 <pid>" in text
     assert ".imp/quests/<id>/lock" in text
     assert ".imp/quests/<id>/stack-dump.txt" in text
+
+
+def test_threshold_surfaces_dependency_subsection_and_carveout_exception() -> None:
+    body = _threshold()
+    # The new "keep dependency-blocked work here" subsection.
+    assert "## When the work depends on another quest" in body
+    # the phrase wraps after "that's a" in the source; assert from the within-line part
+    assert "**dependency of this quest**, not a reason to spawn a separate one" in body
+    assert "imp edit {{ quest.id }} --depends-on <id>" in body
+    assert "Keep the work in this quest — don't split it into a child." in body
+    # The Acting-on-imp carve-out permits the one self-quest dependency edit.
+    assert "except `imp edit {{ quest.id }} --depends-on`" in body
+    assert "to record a dependency before going live" in body
