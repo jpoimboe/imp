@@ -12,14 +12,13 @@ def _events() -> list[dict]:
          "type": "user_message",
          "payload": {"role": "user",
                      "content": [{"type": "text", "text": "/refactor src/foo.py"}],
-                     "human": True}},
+                     "subtype": "reply"}},
         {"id": "s", "parent_id": None, "agent_id": None,
          "type": "skill_load", "payload": {"name": "refactor", "source": "human"}},
         {"id": "b", "parent_id": None, "agent_id": "step:x",
-         "type": "user_message",
-         "payload": {"role": "user",
-                     "content": [{"type": "text", "text": "BODY\n\nsrc/foo.py\n"}],
-                     "human": False}},
+         "type": "engine_message",
+         "payload": {"role": "user", "subtype": "agent_prompt",
+                     "content": [{"type": "text", "text": "BODY\n\nsrc/foo.py\n"}]}},
     ]
 
 
@@ -34,7 +33,7 @@ def test_skill_sequence_lean_shows_command_and_load_hides_body() -> None:
 def test_skill_sequence_full_shows_body_as_injected_message() -> None:
     full = "\n".join(
         render_tree(nv.build_tree(_events()), full=True, color=False, width=80))
-    assert "injected message:" in full
+    assert "agent prompt:" in full
     assert "BODY" in full
 
 

@@ -53,7 +53,7 @@ def test_prose_thinking_and_tool_do_not_advance_stretch_start() -> None:
              timestamp="2026-01-01T00:00:05+00:00"))
     b.add(ev("4", "tool_call", agent_id="step:p/s", id="c1", name="read_file",
              input={"p": "x"}, timestamp="2026-01-01T00:00:06+00:00"))
-    b.add(ev("5", "llm_response", agent_id="step:p/s", provider="anthropic",
+    b.add(ev("5", "agent_message", agent_id="step:p/s", provider="anthropic",
              stop_reason="end_turn", usage={},
              raw={"content": [{"type": "text", "text": "narration"}]},
              timestamp="2026-01-01T00:00:07+00:00"))
@@ -83,7 +83,7 @@ def test_subagent_return_sets_stretch_start_when_last_fold_closes() -> None:
              input={"subagent_name": "coder"}, timestamp="2026-01-01T00:00:04+00:00"))
     # Parent's next turn-end llm_response returns control -> resume-close fires and
     # the last running fold closes, so the parent regains the block at THIS ts.
-    b.add(ev("p1", "llm_response", agent_id="step:p/s", provider="anthropic",
+    b.add(ev("p1", "agent_message", agent_id="step:p/s", provider="anthropic",
              stop_reason="end_turn", usage={},
              raw={"content": [{"type": "text", "text": "back"}]},
              timestamp="2026-01-01T00:00:44+00:00"))
@@ -192,7 +192,7 @@ def test_parent_reset_wait_countdown_anchors_to_own_wait_entry() -> None:
 
 def test_parent_stretch_activity_uses_stretch_start_not_prose() -> None:
     b = _stepped("2026-01-01T00:00:03+00:00")
-    b.add(ev("5", "llm_response", agent_id="step:p/s", provider="anthropic",
+    b.add(ev("5", "agent_message", agent_id="step:p/s", provider="anthropic",
              stop_reason="end_turn", usage={},
              raw={"content": [{"type": "text", "text": "narration"}]},
              timestamp="2026-01-01T00:00:30+00:00"))

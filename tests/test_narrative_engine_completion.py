@@ -1,4 +1,4 @@
-"""completion_nudge is telemetry-only: it renders nothing in the narrative."""
+"""engine_message/completion arms the WAITING-drop; the body seeds as agent_prompt."""
 
 from __future__ import annotations
 
@@ -8,14 +8,16 @@ from imp.cli.render_text import render_tree
 
 
 def test_completion_nudge_handler_registered() -> None:
-    assert "completion_nudge" in NarrativeBuilder._HANDLERS
+    assert "engine_message" in NarrativeBuilder._HANDLERS
 
 
 def test_completion_nudge_renders_nothing() -> None:
     tree = nv.build_tree([
         {"id": "e1", "parent_id": None, "agent_id": None,
-         "type": "completion_nudge",
-         "payload": {"message": "Your turn ended without complete_step..."}},
+         "type": "engine_message",
+         "payload": {"role": "user", "subtype": "completion",
+                     "content": [{"type": "text",
+                                  "text": "Your turn ended without complete_step..."}]}},
     ])
     out = "\n".join(render_tree(tree, full=False, color=False, width=80))
     assert "nudged" not in out
@@ -26,20 +28,21 @@ def test_completion_nudge_renders_nothing() -> None:
 
 def _nudge() -> dict:
     return {"id": "n1", "parent_id": None, "agent_id": "step:x",
-            "type": "completion_nudge",
-            "payload": {"message": "bare turn-end"}}
+            "type": "engine_message",
+            "payload": {"role": "user", "subtype": "completion",
+                        "content": [{"type": "text", "text": "bare turn-end"}]}}
 
 
 def _text_response(eid: str, text: str) -> dict:
     return {"id": eid, "parent_id": None, "agent_id": "step:x",
-            "type": "llm_response",
+            "type": "agent_message",
             "payload": {"provider": "anthropic",
                         "raw": {"content": [{"type": "text", "text": text}]}}}
 
 
 def _tool_carrier(eid: str) -> dict:
     return {"id": eid, "parent_id": None, "agent_id": "step:x",
-            "type": "llm_response",
+            "type": "agent_message",
             "payload": {"provider": "anthropic",
                         "raw": {"content": [
                             {"type": "tool_use", "id": "t1",
@@ -98,9 +101,9 @@ def _render_full(events: list[dict]) -> str:
 
 def _injected(eid: str, text: str) -> dict:
     return {"id": eid, "parent_id": None, "agent_id": "step:x",
-            "type": "user_message",
-            "payload": {"content": [{"type": "text", "text": text}],
-                        "human": False}}
+            "type": "engine_message",
+            "payload": {"role": "user", "subtype": "agent_prompt",
+                        "content": [{"type": "text", "text": text}]}}
 
 
 def test_nudge_user_message_suppressed_in_full() -> None:
@@ -109,12 +112,13 @@ def test_nudge_user_message_suppressed_in_full() -> None:
         _injected("u1", "Your turn ended without calling complete_step"),
     ])
     assert "injected message:" not in out
-    assert "complete_step" not in out
+    assert "agent prompt:" in out
+    assert "complete_step" in out
 
 
 def test_non_nudge_injected_message_still_renders_in_full() -> None:
     out = _render_full([_injected("u1", "You are the spec-writer. Begin.")])
-    assert "injected message:" in out
+    assert "agent prompt:" in out
     assert "spec-writer" in out
 
 
@@ -124,7 +128,7 @@ def test_nudge_suppression_is_one_shot() -> None:
         _injected("u1", "nudge injection body"),
         _injected("u2", "steer the agent here"),
     ])
-    assert "nudge injection body" not in out
+    assert "nudge injection body" in out
     assert "steer the agent here" in out
 
 
@@ -134,5 +138,5 @@ def test_nudge_user_message_then_waiting_both_dropped() -> None:
         _injected("u1", "nudge injection body"),
         _text_response("e1", "WAITING"),
     ])
-    assert "nudge injection body" not in out
+    assert "nudge injection body" in out
     assert "WAITING" not in out
