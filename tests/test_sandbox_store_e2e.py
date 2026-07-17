@@ -25,7 +25,7 @@ from pathlib import Path
 import anyio
 import pytest
 
-from imp.cli.store_proxy import build_query_handler
+from imp.cli.mutation_proxy import build_session_handler
 from imp.engine import archive
 from imp.engine.quest import LAYOUT_VERSION
 from imp.engine.sandbox import (
@@ -188,7 +188,7 @@ def project():
 async def _serve_and_run(
     control: Path, command: str, *, timeout: float = 90.0,
 ) -> tuple[int | None, str, str]:
-    """Serve CUR's real daemon (build_query_handler) concurrently while running
+    """Serve CUR's real daemon (build_session_handler) concurrently while running
     `command` in a REAL bwrap sandbox whose policy comes from resolve_policy (masks
     events.jsonl / archive blobs / index.db and injects IMP_SESSION_SOCKET). The
     in-sandbox command connects back to the daemon over the socket (the reentrant
@@ -212,7 +212,7 @@ async def _serve_and_run(
         command, cwd=str(control), policy=policy, engine_env=engine_env)
 
     sock_path = session_socket_path(control, CUR)
-    socket = SessionSocket(str(sock_path), on_query=build_query_handler(control))
+    socket = SessionSocket(str(sock_path), on_query=build_session_handler(control))
     await socket.open()
 
     out: dict[str, object] = {"rc": None, "stdout": b"", "stderr": b""}

@@ -7,8 +7,9 @@ from typing import Any
 import anyio
 import pytest
 
+from imp.cli.mutation_proxy import build_session_handler
 from imp.cli.store import LocalStore
-from imp.cli.store_proxy import ProxyStore, build_query_handler
+from imp.cli.store_proxy import ProxyStore
 from imp.engine.quest import Quest
 from imp.remote.session.server import SessionServer
 from tests.conftest import _seed_control
@@ -25,14 +26,14 @@ def _append_event(quest: Quest, event: dict) -> None:
 
 
 @pytest.mark.anyio
-async def test_build_query_handler_reads_off_the_event_loop(tmp_path: Path) -> None:
+async def test_build_session_handler_reads_off_the_event_loop(tmp_path: Path) -> None:
     # The handler must not block the loop: assert it hands the blocking store
     # call to a worker thread (a different thread id than the loop thread).
     import threading
 
     _seed_control(tmp_path)
     Quest.create(tmp_path, title="Q", quest_id="q1", base_branch="main")
-    handler = build_query_handler(tmp_path)
+    handler = build_session_handler(tmp_path)
     loop_thread = threading.get_ident()
 
     seen: dict[str, int] = {}
@@ -66,7 +67,7 @@ async def test_query_is_served_while_run_fn_is_parked(tmp_path: Path) -> None:
 
     sock = str(tmp_path / "s.sock")
     release = anyio.Event()
-    server = SessionServer(sock, on_query=build_query_handler(tmp_path))
+    server = SessionServer(sock, on_query=build_session_handler(tmp_path))
 
     async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
         await release.wait()          # park run_fn (cooperative wait; loop stays free)

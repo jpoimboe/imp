@@ -45,6 +45,21 @@ def run_mutation(control_root: Path, op: str, args: dict[str, Any]) -> dict[str,
     raise ValueError(f"unknown mutation op {op!r}")
 
 
+def build_session_handler(control_root: Path) -> Any:
+    """Daemon on_query: mutation ops -> run_mutation, else -> run_query; both off-loop."""
+    from imp.cli import store_proxy
+    from imp.cli.store import LocalStore
+
+    store = LocalStore(control_root)
+
+    async def _on_query(op: str, args: dict[str, Any]) -> Any:
+        if op in _MUTATION_OPS:
+            return await anyio.to_thread.run_sync(run_mutation, control_root, op, args)
+        return await anyio.to_thread.run_sync(store_proxy.run_query, store, op, args)
+
+    return _on_query
+
+
 async def _roundtrip(sock: str, op: str, args: dict[str, Any]) -> Any:
     stream = await anyio.connect_unix(sock)
     try:

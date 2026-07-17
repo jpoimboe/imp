@@ -3,12 +3,14 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import anyio
 import pytest
 
 import imp.remote.daemon.spawn as spawn_mod
-from imp.cli.mutation_proxy import run_mutation
+from imp.cli.mutation_proxy import build_session_handler, proxy_mutation, run_mutation
 from imp.engine import worktree
 from imp.engine.quest import Quest
+from imp.remote.session.socket_server import SessionSocket
 from tests.conftest import _seed_control
 
 
@@ -89,3 +91,29 @@ def test_run_mutation_new_records_backlog(tmp_path: Path) -> None:
     assert "recorded backlog quest" in result["message"]
     quests = sorted((tmp_path / ".imp" / "quests").iterdir())
     assert Quest.load(tmp_path, quests[-1].name).title == "From the agent"
+
+
+@pytest.mark.anyio
+async def test_proxy_mutation_edit_round_trips_over_socket(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _seed_control(tmp_path)
+    _draft(tmp_path, "2026-06-24-mut50")
+    sock = str(tmp_path / "s.sock")
+    monkeypatch.setenv("IMP_SESSION_SOCKET", sock)
+
+    session = SessionSocket(sock, on_query=build_session_handler(tmp_path))
+    async with anyio.create_task_group() as tg:
+        await session.open()
+        tg.start_soon(session.serve)
+
+        result = await anyio.to_thread.run_sync(
+            proxy_mutation, "edit", {
+                "token": "mut50", "title": "Renamed via socket", "backlog": False,
+                "active": False, "depends_on": None, "clear_deps": False,
+                "append_intent": None})
+        assert result == {"returncode": 0, "message": ""}
+        assert Quest.load(tmp_path, "2026-06-24-mut50").title == "Renamed via socket"
+
+        await session.close()
+        tg.cancel_scope.cancel()
