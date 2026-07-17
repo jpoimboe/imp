@@ -60,8 +60,8 @@ def _drain(q: queue.Queue) -> list:
 async def test_subscribe_streams_from_now_without_replaying_history() -> None:
     subs = Subscriptions()
     history = [
-        _event("e1", "agent_output", {"text": "one"}),
-        _event("e2", "agent_output", {"text": "two"}),
+        _event("e1", "agent_result", {"text": "one"}),
+        _event("e2", "agent_result", {"text": "two"}),
     ]
     control = _Control(subs, history)
     responses: queue.Queue = queue.Queue()
@@ -81,9 +81,9 @@ async def test_subscribe_streams_from_now_without_replaying_history() -> None:
         chat_id=1, submit=lambda _c: None,
         send=lambda text, silent: (sent.append((text, silent)) or 1),
         get_updates=lambda _o: {"result": []}, subscriptions=subs)
-    adapter.on_event(_event("e1", "agent_output", {"text": "one"}))   # already seeded
+    adapter.on_event(_event("e1", "agent_result", {"text": "one"}))   # already seeded
     assert sent == []
-    adapter.on_event(_event("e9", "agent_output", {"text": "live"}))  # new → streams
+    adapter.on_event(_event("e9", "agent_result", {"text": "live"}))  # new → streams
     assert len(sent) == 1 and sent[0][1] is True
 
 

@@ -59,7 +59,7 @@ _WORKTREE_SRC = str(Path(__file__).parent.parent.parent / "src")
 # "workflow_resumed"` (unescaped quotes) and NOT the bare word: the executor
 # journals THIS bash command's own tool_call event -- command text and all --
 # BEFORE running it (dispatch.py's append_tool_call precedes the tool
-# invocation), and the same command text is echoed in the preceding llm_response
+# invocation), and the same command text is echoed in the preceding agent_message
 # raw payload. In both, json.dumps backslash-escapes the embedded quotes
 # (\"type\": \"cli_attached\"), so a pattern with literal unescaped quotes
 # matches only the real daemon event records and never this command's self-echo.

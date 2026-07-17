@@ -24,11 +24,11 @@ async def test_events_reach_sink_tagged_with_quest_id(tmp_path: Path) -> None:
         tg.start_soon(hub.serve)
         client = await anyio.connect_unix(sock)
         await client.send((make_hello("2026-06-13-abc", "T") + "\n").encode())
-        await client.send(b'{"type": "agent_output"}\n')
+        await client.send(b'{"type": "agent_result"}\n')
         with anyio.fail_after(5):
             while not seen:
                 await anyio.sleep(0.02)
-        assert seen == [("2026-06-13-abc", '{"type": "agent_output"}')]
+        assert seen == [("2026-06-13-abc", '{"type": "agent_result"}')]
         await client.aclose()
         await hub.close()
         tg.cancel_scope.cancel()

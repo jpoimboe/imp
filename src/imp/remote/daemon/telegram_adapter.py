@@ -207,7 +207,7 @@ class TelegramNorthAdapter:
         full curated path below (buzz + silent, deduped via Subscriptions.seen). An
         unsubscribed quest no longer returns here — it falls through to
         _alert_all_event, which delivers only buzz events and only while alert-all
-        is on. A subscribed quest streams every llm_response as its own quiet
+        is on. A subscribed quest streams every agent_message as its own quiet
         message, so a gate (awaiting_user_input) is delivered terse — its label and
         reply handle, with no re-dump of the preceding narration. The _last_narration
         write is kept: it still feeds the alert-all path across a subscribe/
@@ -237,7 +237,7 @@ class TelegramNorthAdapter:
                 self._send(divider, True)
             return
         body = event_body(etype, event.get("payload") or {})
-        if etype == "llm_response" and body.strip():
+        if etype == "agent_message" and body.strip():
             self._last_narration[quest_id] = body
         if kind == "silent" and not body.strip():
             return
@@ -258,7 +258,7 @@ class TelegramNorthAdapter:
         must not record the event as delivered, or the re-attach replay that
         re-surfaces this blocked quest would be permanently suppressed. A
         prompt-less awaiting_user_input falls back to this quest's preceding
-        llm_response narration (recorded before the enabled gate so the first
+        agent_message narration (recorded before the enabled gate so the first
         alert after /alerts on carries current context). An unsubscribed quest
         never streamed that narration, so the gate carries it as its only copy
         (unlike the subscribed path, which streams narration live and keeps its gate
@@ -272,7 +272,7 @@ class TelegramNorthAdapter:
         etype = event.get("type")
         payload = event.get("payload") or {}
         body = event_body(etype, payload)
-        if etype == "llm_response" and body.strip():
+        if etype == "agent_message" and body.strip():
             self._last_narration[quest_id] = body
         if not self._alert_all.enabled():
             return

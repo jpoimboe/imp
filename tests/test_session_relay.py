@@ -33,14 +33,14 @@ async def test_relay_forwards_curated_events_with_quest_context(
             while socket.attached_count == 0:
                 await anyio.sleep(0.02)
         socket.broadcast(
-            {"id": "e1", "type": "agent_output", "payload": {"text": "hi"}})
+            {"id": "e1", "type": "agent_result", "payload": {"text": "hi"}})
         with anyio.fail_after(5):
             while not sink:
                 await anyio.sleep(0.02)
         tg.cancel_scope.cancel()
     await socket.close()
     assert sink[0]["id"] == "e1"
-    assert sink[0]["type"] == "agent_output"
+    assert sink[0]["type"] == "agent_result"
     assert sink[0]["quest"] == {
         "id": "cid", "title": "T", "step": None, "status": "running"}
 
@@ -107,14 +107,14 @@ async def test_relay_awaiting_then_live_events_reach_sink_and_toggle_lease(
             while socket.leased_count != 1:
                 await anyio.sleep(0.02)
         socket.broadcast(
-            {"id": "r1", "type": "llm_response", "payload": {"text": "ok"}})
+            {"id": "r1", "type": "agent_message", "payload": {"text": "ok"}})
         with anyio.fail_after(5):
             while len(sink) < 3:
                 await anyio.sleep(0.02)
         tg.cancel_scope.cancel()
     await socket.close()
     assert [s["type"] for s in sink] == [
-        "awaiting_user_input", "user_message", "llm_response"]
+        "awaiting_user_input", "user_message", "agent_message"]
 
 
 @pytest.mark.anyio
@@ -246,12 +246,12 @@ async def test_relay_reflects_title_rename_after_start(tmp_path: Path) -> None:
         with anyio.fail_after(5):
             while socket.attached_count == 0:
                 await anyio.sleep(0.02)
-        socket.broadcast({"id": "e1", "type": "agent_output", "payload": {}})
+        socket.broadcast({"id": "e1", "type": "agent_result", "payload": {}})
         with anyio.fail_after(5):
             while len(sink) < 1:
                 await anyio.sleep(0.02)
         holder["title"] = "Real Title"     # rename lands mid-session
-        socket.broadcast({"id": "e2", "type": "agent_output", "payload": {}})
+        socket.broadcast({"id": "e2", "type": "agent_result", "payload": {}})
         with anyio.fail_after(5):
             while len(sink) < 2:
                 await anyio.sleep(0.02)

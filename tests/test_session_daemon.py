@@ -71,7 +71,7 @@ async def test_serves_on_per_change_socket_and_bridges_run_quest_seams(
         wait_for_turn_fn: Any = None,
     ) -> str:
         reply = await user_chat_input_fn("")
-        on_event({"type": "agent_output", "payload": {"reply": reply}})
+        on_event({"type": "agent_result", "payload": {"reply": reply}})
         return reply
 
     async with anyio.create_task_group() as tg:
@@ -95,12 +95,12 @@ async def test_serves_on_per_change_socket_and_bridges_run_quest_seams(
                 await anyio.sleep(0.02)
         assert result["r"] == "ship it"
         with anyio.fail_after(5):
-            while not any(e["type"] == "agent_output" for e in received):
+            while not any(e["type"] == "agent_result" for e in received):
                 await anyio.sleep(0.02)
         assert received[0] == {"type": "replay_complete"}  # boundary leads the attach stream
         assert [e for e in received
                 if e["type"] not in ("user_input_resolved", "replay_complete")] == [
-            {"type": "agent_output", "payload": {"reply": "ship it"}}]
+            {"type": "agent_result", "payload": {"reply": "ship it"}}]
         await client.aclose()
         tg.cancel_scope.cancel()
 
@@ -340,7 +340,7 @@ async def test_interrupt_pause_reprompts_and_resumes_in_place(
             await coordinator.signal_pause(reason="ctrl-c")
             return RunResult.PAUSED
         assert not coordinator.should_pause  # reset() must have cleared this
-        on_event({"type": "agent_output",
+        on_event({"type": "agent_result",
                   "payload": {"redirect": coordinator.drain_interject()}})
         return RunResult.COMPLETED
 
@@ -368,7 +368,7 @@ async def test_interrupt_pause_reprompts_and_resumes_in_place(
                 await anyio.sleep(0.02)
         assert result["r"] is RunResult.COMPLETED
         assert calls["n"] == 2
-        assert {"type": "agent_output",
+        assert {"type": "agent_result",
                 "payload": {"redirect": "go left"}} in received
         await client.aclose()
         tg.cancel_scope.cancel()
@@ -1406,7 +1406,7 @@ async def test_resume_prompt_target_holds_before_running_agent(
     ) -> RunResult:
         calls["n"] += 1
         calls["interject"] = coordinator.drain_interject()
-        on_event({"type": "agent_output", "payload": {}})
+        on_event({"type": "agent_result", "payload": {}})
         return RunResult.COMPLETED
 
     async with anyio.create_task_group() as tg:

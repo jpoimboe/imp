@@ -161,7 +161,7 @@ async def test_reply_does_not_subscribe() -> None:
 async def test_subscribe_seeds_seen_set_without_replaying() -> None:
     control = FakeControl(snapshots={"k3f9qa": ("running", "plan", "Dark mode")})
     control._histories["k3f9qa"] = [
-        {"id": "e1", "type": "agent_output", "timestamp": "2026-06-25T14:32:05+00:00",
+        {"id": "e1", "type": "agent_result", "timestamp": "2026-06-25T14:32:05+00:00",
          "quest": {"id": "k3f9qa", "title": "Dark mode"}, "payload": {"text": "hi"}},
     ]
     responses: queue.Queue = queue.Queue()
@@ -208,7 +208,7 @@ async def test_unsubscribe_removes_the_target_and_confirms() -> None:
 
 def _narr_event(eid: str, text: str) -> dict:
     return {
-        "id": eid, "type": "llm_response",
+        "id": eid, "type": "agent_message",
         "timestamp": "2026-06-25T14:32:05+00:00",
         "quest": {"id": "k3f9qa", "title": "Dark mode"},
         "payload": {"raw": {"content": [{"type": "text", "text": text}]}},
@@ -224,7 +224,7 @@ async def test_replay_renders_each_event_through_the_common_envelope() -> None:
     first = responses.get_nowait()
     second = responses.get_nowait()
     assert responses.empty()
-    # Full envelope: id · title · time header + body. A narrative (llm_response)
+    # Full envelope: id · title · time header + body. A narrative (agent_message)
     # event carries NO reply footer (only awaiting_user_input gates append the
     # handle); routing still works via the Notice's quest_id tag, asserted below.
     assert isinstance(first, Notice) and isinstance(second, Notice)

@@ -35,7 +35,7 @@ def test_silent_agent_output_renders_header_and_body_no_footer(set_tz) -> None:
     set_tz("UTC")
     # A silent narrative event carries no reply footer — only the awaiting_user_input
     # gate appends ↩ @handle.
-    assert format_replay_event(_event("agent_output", {"text": "hello"})) == (
+    assert format_replay_event(_event("agent_result", {"text": "hello"})) == (
         "tozi28 · T · 2:32pm\nhello")
 
 
@@ -58,7 +58,7 @@ def test_dropped_type_returns_none() -> None:
 
 
 def test_empty_body_silent_returns_none() -> None:
-    assert format_replay_event(_event("agent_output", {"text": ""})) is None
+    assert format_replay_event(_event("agent_result", {"text": ""})) is None
 
 
 def test_step_started_with_show_label_false_renders_no_divider() -> None:

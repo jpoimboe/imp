@@ -27,7 +27,7 @@ _BUZZ = frozenset({
     "error",
 })
 _SILENT = frozenset({
-    "llm_response", "agent_output", "script_output", "step_started",
+    "agent_message", "agent_result", "script_output", "step_started",
     "workflow_resumed", "quest_abandoned",
 })
 
@@ -227,8 +227,8 @@ def load_config(env: Mapping[str, str], file_text: str | None = None) -> Telegra
     return TelegramConfig(token=token, chat_id=chat_id)
 
 
-def _llm_response_text(payload: Mapping[str, Any]) -> str:
-    """Render the assistant's prose from an llm_response payload. The text lives
+def _agent_message_text(payload: Mapping[str, Any]) -> str:
+    """Render the assistant's prose from an agent_message payload. The text lives
     in payload['raw'] in a provider-specific shape, so reuse imp's own
     provider-aware renderer (the single source of truth shared with `imp log` and
     the live chat). Imported lazily so this module stays import-light, and guarded
@@ -247,8 +247,8 @@ def event_body(event_type: Any, payload: Mapping[str, Any]) -> str:
     to the generic text/message keys for everything else."""
     if event_type == "awaiting_user_input":
         return str(payload.get("steer_hint") or payload.get("text") or "")
-    if event_type == "llm_response":
-        return _llm_response_text(payload)
+    if event_type == "agent_message":
+        return _agent_message_text(payload)
     if event_type == "script_output":
         return str(payload.get("stdout") or "")
     if event_type == "merge_blocked":
@@ -268,8 +268,8 @@ def event_body(event_type: Any, payload: Mapping[str, Any]) -> str:
 def _compose_message(event: Mapping[str, Any], body: str) -> str:
     """Render the message text for an event.
 
-    Silent narrative events (the quiet running commentary — llm_response,
-    agent_output) are sent as their prose alone: the body *is* the message. Loud
+    Silent narrative events (the quiet running commentary — agent_message,
+    agent_result) are sent as their prose alone: the body *is* the message. Loud
     lifecycle events render as their humanized label alone (via _EVENT_LABELS —
     "needs your input", "merge blocked", "done"), optionally followed by the body.
     Identity (id · title · time) is carried once by the always-prepended

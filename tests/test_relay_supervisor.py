@@ -85,14 +85,14 @@ async def test_supervisor_relays_a_resident_sessions_events(
             while sock.attached_count == 0:
                 await anyio.sleep(0.02)
         sock.broadcast(
-            {"id": "e1", "type": "agent_output", "payload": {"text": "hi"}})
+            {"id": "e1", "type": "agent_result", "payload": {"text": "hi"}})
         with anyio.fail_after(5):
             while not sink:
                 await anyio.sleep(0.02)
         tg.cancel_scope.cancel()
     await sock.close()
     assert sink[0]["id"] == "e1"
-    assert sink[0]["type"] == "agent_output"
+    assert sink[0]["type"] == "agent_result"
     assert sink[0]["quest"] == {
         "id": cid, "title": "T", "step": None, "status": "running"}
 
@@ -120,8 +120,8 @@ async def test_supervisor_multiplexes_two_resident_sessions(
         with anyio.fail_after(5):
             while sock_a.attached_count == 0 or sock_b.attached_count == 0:
                 await anyio.sleep(0.02)
-        sock_a.broadcast({"id": "ea", "type": "agent_output", "payload": {}})
-        sock_b.broadcast({"id": "eb", "type": "agent_output", "payload": {}})
+        sock_a.broadcast({"id": "ea", "type": "agent_result", "payload": {}})
+        sock_b.broadcast({"id": "eb", "type": "agent_result", "payload": {}})
         with anyio.fail_after(5):
             while len(sink) < 2:
                 await anyio.sleep(0.02)
@@ -281,12 +281,12 @@ async def test_supervisor_reflects_late_title_via_live_provider(
         with anyio.fail_after(5):
             while sock.attached_count == 0:
                 await anyio.sleep(0.02)
-        sock.broadcast({"id": "e1", "type": "agent_output", "payload": {}})
+        sock.broadcast({"id": "e1", "type": "agent_result", "payload": {}})
         with anyio.fail_after(5):
             while len(sink) < 1:
                 await anyio.sleep(0.02)
         holder["title"] = "Real Title"
-        sock.broadcast({"id": "e2", "type": "agent_output", "payload": {}})
+        sock.broadcast({"id": "e2", "type": "agent_result", "payload": {}})
         with anyio.fail_after(5):
             while len(sink) < 2:
                 await anyio.sleep(0.02)

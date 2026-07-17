@@ -29,12 +29,12 @@ async def test_start_spawns_and_feeds_events(tmp_path: Path) -> None:
     async with anyio.create_task_group() as tg:
         assert await ch.start(tg) is True
         # An allowlisted event reaches the driver and is logged (NDJSON framed).
-        ch.on_event({"id": "e1", "type": "agent_output", "payload": {"k": "v"}})
+        ch.on_event({"id": "e1", "type": "agent_result", "payload": {"k": "v"}})
         with anyio.fail_after(5):
             while not (log.exists() and log.read_text().strip()):
                 await anyio.sleep(0.02)
         logged = json.loads(log.read_text().splitlines()[0])
-        assert logged["type"] == "agent_output"
+        assert logged["type"] == "agent_result"
         assert logged["quest"]["id"] == "2026-06-11-abc"
         await ch.stop()
         tg.cancel_scope.cancel()
@@ -51,11 +51,11 @@ async def test_start_drains_stderr_so_driver_stays_unblocked(tmp_path: Path) -> 
     async with anyio.create_task_group() as tg:
         assert await ch.start(tg) is True
         assert ch._proc.stderr is not None       # captured, not inherited onto the tty
-        ch.on_event({"id": "e1", "type": "agent_output", "payload": {"k": "v"}})
+        ch.on_event({"id": "e1", "type": "agent_result", "payload": {"k": "v"}})
         with anyio.fail_after(5):
             while not (log.exists() and log.read_text().strip()):
                 await anyio.sleep(0.02)
-        assert json.loads(log.read_text().splitlines()[0])["type"] == "agent_output"
+        assert json.loads(log.read_text().splitlines()[0])["type"] == "agent_result"
         await ch.stop()
         tg.cancel_scope.cancel()
 
