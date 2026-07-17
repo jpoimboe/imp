@@ -234,7 +234,7 @@ def test_edit_append_intent_rejects_conversed(
     quest.set_seed_opening("Original opening")
     quest.event_log().append(
         agent_id=None, type="user_message",
-        payload={"content": [{"type": "text", "text": "hi"}], "human": True})
+        payload={"content": [{"type": "text", "text": "hi"}], "subtype": "reply"})
     rc = main._cmd_edit(_edit_args("2026-06-24-edit25", append_intent="hello"))
     assert rc == 2
     assert "already started" in capsys.readouterr().err

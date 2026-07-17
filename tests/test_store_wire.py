@@ -93,7 +93,7 @@ def test_run_query_get_events_matches_local_store(tmp_path: Path) -> None:
     _append_event(ch, {
         "id": "e1", "timestamp": "2026-06-01T00:00:00+00:00",
         "type": "user_message",
-        "payload": {"human": True, "content": [{"type": "text", "text": "hi"}]}})
+        "payload": {"subtype": "reply", "content": [{"type": "text", "text": "hi"}]}})
     store = LocalStore(tmp_path)
 
     wire = run_query(store, "get_events", {"quest_id": "liveq"})
@@ -118,7 +118,7 @@ def test_run_query_search_decodes_zones(tmp_path: Path) -> None:
     _append_event(ch, {
         "id": "e1", "timestamp": "2026-06-01T00:00:00+00:00",
         "type": "user_message",
-        "payload": {"human": True,
+        "payload": {"subtype": "reply",
                     "content": [{"type": "text", "text": "darkmode toggle"}]}})
     zones = {"active": True, "backlog": False, "statuses": [], "merged_after": None}
     wire = run_query(LocalStore(tmp_path), "search", {"query": "darkmode", "zones": zones})

@@ -62,7 +62,7 @@ async def test_query_is_served_while_run_fn_is_parked(tmp_path: Path) -> None:
     _append_event(ch, {
         "id": "e1", "timestamp": "2026-06-01T00:00:00+00:00",
         "type": "user_message",
-        "payload": {"human": True, "content": [{"type": "text", "text": "hi"}]}})
+        "payload": {"subtype": "reply", "content": [{"type": "text", "text": "hi"}]}})
 
     sock = str(tmp_path / "s.sock")
     release = anyio.Event()

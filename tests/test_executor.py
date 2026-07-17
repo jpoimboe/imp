@@ -548,10 +548,10 @@ async def test_max_loops_pause_resets_counter_for_fresh_resume(tmp_path: Path) -
         async def run(self, invocation: AgentInvocation) -> AsyncIterator[Event]:
             if self._name == "reviewer":
                 reviewer_calls.append(1)
-                yield {"type": "agent_output",
+                yield {"type": "agent_result",
                        "payload": {"outcome": "ok", "status": "Success", "verdict": "rework"}}
             else:
-                yield {"type": "agent_output",
+                yield {"type": "agent_result",
                        "payload": {"outcome": "ok", "status": "Success"}}
 
         async def interrupt(self) -> None:
@@ -638,10 +638,10 @@ async def test_progress_goto_resets_counter_and_never_trips(tmp_path: Path) -> N
             if self._name == "reviewer":
                 reviewer_calls.append(1)
                 verdict = "rework" if len(reviewer_calls) <= 5 else "approve"
-                yield {"type": "agent_output",
+                yield {"type": "agent_result",
                        "payload": {"outcome": "ok", "status": "Success", "verdict": verdict}}
             else:
-                yield {"type": "agent_output",
+                yield {"type": "agent_result",
                        "payload": {"outcome": "ok", "status": "Success"}}
 
         async def interrupt(self) -> None:
@@ -721,10 +721,10 @@ async def test_forward_goto_resets_leaped_over_step_counter(tmp_path: Path) -> N
             if self._name == "a":
                 a_calls.append(1)
                 route = "toB" if len(a_calls) == 1 else "toC"
-                yield {"type": "agent_output",
+                yield {"type": "agent_result",
                        "payload": {"outcome": "ok", "status": "Success", "route": route}}
             else:
-                yield {"type": "agent_output",
+                yield {"type": "agent_result",
                        "payload": {"outcome": "ok", "status": "Success", "route": "toC"}}
 
         async def interrupt(self) -> None:
@@ -4026,15 +4026,15 @@ async def test_cross_plan_verify_counter_independent(tmp_path: Path) -> None:
                 # plan-writer) has a non-empty seed and continues to verify.
                 tol = not invocation.initial_messages
                 _persist_initial(invocation)
-                yield {"type": "agent_output",
+                yield {"type": "agent_result",
                        "payload": {"outcome": "ok", "status": "Success", "tol": tol}}
             elif self._name == "check-next-plan":
                 cnp_calls.append(1)
                 more = len(cnp_calls) < PLANS
-                yield {"type": "agent_output",
+                yield {"type": "agent_result",
                        "payload": {"outcome": "ok", "status": "Success", "more": more}}
             else:
-                yield {"type": "agent_output",
+                yield {"type": "agent_result",
                        "payload": {"outcome": "ok", "status": "Success"}}
 
         async def interrupt(self) -> None:
@@ -4114,10 +4114,10 @@ async def test_per_step_counters_do_not_sum(tmp_path: Path) -> None:
             if name in calls:
                 calls[name] += 1
                 verdict = "rework" if calls[name] <= 6 else "approve"
-                yield {"type": "agent_output",
+                yield {"type": "agent_result",
                        "payload": {"outcome": "ok", "status": "Success", "verdict": verdict}}
             else:
-                yield {"type": "agent_output",
+                yield {"type": "agent_result",
                        "payload": {"outcome": "ok", "status": "Success"}}
 
         async def interrupt(self) -> None:

@@ -197,7 +197,8 @@ def _titleless_draft_with_intent(tmp_path: Path, quest_id: str, text: str) -> Qu
     ch = Quest.create_draft(
         tmp_path, title="", quest_id=quest_id, base_branch="main")
     ch.event_log().append(
-        agent_id=None, type="opening_intent", payload={"text": text})
+        agent_id=None, type="user_message",
+        payload={"subtype": "intent", "content": [{"type": "text", "text": text}]})
     return ch
 
 

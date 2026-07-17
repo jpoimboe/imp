@@ -18,7 +18,7 @@ from tests.test_cli_search_helpers import _init_git_commits
 def _user_msg_line(text: str) -> str:
     return json.dumps({
         "type": "user_message",
-        "payload": {"content": [{"type": "text", "text": text}], "human": True},
+        "payload": {"content": [{"type": "text", "text": text}], "subtype": "reply"},
     }) + "\n"
 
 
@@ -44,7 +44,7 @@ def _archive_conv(tmp_path: Path, quest_id: str, title: str,
     events = tmp_path / f"{quest_id}.jsonl"
     events.write_text(json.dumps({
         "type": "user_message", "timestamp": ts,
-        "payload": {"content": [{"type": "text", "text": text}], "human": True},
+        "payload": {"content": [{"type": "text", "text": text}], "subtype": "reply"},
     }) + "\n")
     quest_json = tmp_path / f"{quest_id}.quest.json"
     quest_json.write_text(json.dumps({
@@ -90,7 +90,7 @@ def test_search_active_hit_carries_last_activity(tmp_path: Path) -> None:
     live.events_path.write_text(json.dumps({
         "type": "user_message", "timestamp": "2026-06-11T00:00:00+00:00",
         "payload": {"content": [{"type": "text", "text": "dark note"}],
-                    "human": True}}) + "\n")
+                    "subtype": "reply"}}) + "\n")
     hits = _search_active(tmp_path, "dark")
     assert hits and hits[0].last_activity == "2026-06-11T00:00:00+00:00"
 

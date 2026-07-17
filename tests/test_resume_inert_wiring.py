@@ -362,11 +362,11 @@ async def test_inert_ask_line_seeds_history_from_event_log(
     ch = _seed(tmp_path)
     ch.event_log().append(
         agent_id="step:p/s", type="user_message",
-        payload={"role": "user", "human": True,
+        payload={"role": "user", "subtype": "reply",
                  "content": [{"type": "text", "text": "a human reply"}]})
     ch.event_log().append(
-        agent_id="step:p/s", type="user_message",
-        payload={"role": "user", "human": False,
+        agent_id="step:p/s", type="engine_message",
+        payload={"role": "user", "subtype": "continuation",
                  "content": [{"type": "text", "text": "engine nudge"}]})
     seeded: dict[str, object] = {}
 

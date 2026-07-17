@@ -319,8 +319,9 @@ def test_search_events_content_matches_structured_events_only(tmp_path: Path) ->
     conn = index.connect(tmp_path / "index.db")
     try:
         events = [
-            {"id": "e0", "type": "opening_intent",
-             "payload": {"text": "add a deadline"}},
+            {"id": "e0", "type": "user_message",
+             "payload": {"subtype": "intent",
+                         "content": [{"type": "text", "text": "add a deadline"}]}},
             {"id": "e1", "type": "tool_call",
              "payload": {"name": "bash", "input": {"cmd": "GREPTARGET"}}},
         ]

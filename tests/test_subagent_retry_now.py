@@ -49,7 +49,7 @@ async def test_subagent_backoff_arms_wait_and_consumes_retry_now(
                     "category": "rate_limit", "kind": "rate_limit",
                     "message": "429 rate limited"}}
             else:
-                yield {"type": "agent_output",
+                yield {"type": "agent_result",
                        "payload": {"status": "Success", "outcome": "done"}}
 
         async def interrupt(self) -> None:

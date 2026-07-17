@@ -219,9 +219,9 @@ def test_events_content_collects_nested_list_content_blocks() -> None:
     assert "NESTEDHIT" in events_content(events)
 
 
-def test_events_content_includes_llm_response_raw_text() -> None:
+def test_events_content_includes_agent_message_raw_text() -> None:
     events = [
-        {"type": "llm_response",
+        {"type": "agent_message",
          "payload": {"provider": "anthropic",
                      "raw": {"content": [{"type": "text", "text": "REASONING_TEXT"}]}}},
     ]
