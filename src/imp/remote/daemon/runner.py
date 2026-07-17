@@ -479,6 +479,8 @@ async def run_daemon(
                 control_root / ".imp" / "remote-control.stack-dump.txt")
         reaped = archive_maintenance.reap_archived_homes(control_root)
         _log.info("reaped %d archived-terminal quest home(s) at startup", reaped)
+        strays = archive_maintenance.reap_stray_homes(control_root)
+        _log.info("reaped %d empty stray quest home(s) at startup", strays)
         await hub.open()
         # Daemon threads are not joined at interpreter shutdown, so a worker parked
         # in a blocking long-poll syscall is reaped at process exit rather than

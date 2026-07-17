@@ -385,3 +385,31 @@ async def test_run_daemon_reaps_archived_homes_at_startup(tmp_path: Path) -> Non
 
     assert not home.exists()                       # leaked home reaped at startup
     assert "reaped 1" in log_path.read_text()       # INFO count logged
+
+
+@pytest.mark.anyio
+async def test_run_daemon_reaps_stray_homes_at_startup(tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+    stray = tmp_path / ".imp" / "quests" / "empty-stray"
+    stray.mkdir(parents=True)                       # empty stray, no quest.json
+
+    shutdown = anyio.Event()
+    log_path = tmp_path / ".imp" / "remote-control.log"
+    spath = socket_path(tmp_path)
+
+    async with anyio.create_task_group() as tg:
+        tg.start_soon(functools.partial(
+            run_daemon, tmp_path, env={},
+            make_adapter=(
+                lambda env, submit, subscriptions, alert_all, is_known_quest: FakeAdapter()
+            ),
+            install_signals=False, shutdown=shutdown))
+        # The socket only binds AFTER the startup sweep runs, so socket-live
+        # guarantees the sweep already executed.
+        with anyio.fail_after(5):
+            while not socket_is_live(spath):
+                await anyio.sleep(0.02)
+        shutdown.set()
+
+    assert not stray.exists()                        # empty stray reaped at startup
+    assert "reaped 1 empty stray" in log_path.read_text()   # INFO count logged
