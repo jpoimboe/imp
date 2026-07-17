@@ -97,3 +97,129 @@ def test_step_context_without_system_prompt_passes_through_unchanged():
                         "tools_schema": [], "params": {}, "max_tool_calls": 50}}]
     out = migrate_events(old)
     assert out == old
+
+
+def test_human_true_reply():
+    old = [{"id": "u2", "parent_id": "a1", "agent_id": "A", "timestamp": "T",
+            "type": "user_message",
+            "payload": {"role": "user", "content": [{"type": "text", "text": "go on"}],
+                        "human": True}}]
+    out = migrate_events(old)
+    assert out == [{"id": "u2", "parent_id": "a1", "agent_id": "A", "timestamp": "T",
+                    "type": "user_message",
+                    "payload": {"role": "user",
+                                "content": [{"type": "text", "text": "go on"}],
+                                "subtype": "reply"}}]
+
+
+def test_human_true_interject_drops_following_user_interjected():
+    old = [
+        {"id": "u3", "parent_id": "u2", "agent_id": "A", "timestamp": "T1",
+         "type": "user_message",
+         "payload": {"role": "user", "content": [{"type": "text", "text": "stop"}],
+                     "human": True}},
+        {"id": "j1", "parent_id": "u3", "agent_id": "A", "timestamp": "T2",
+         "type": "user_interjected", "payload": {}},
+    ]
+    out = migrate_events(old)
+    assert out == [{"id": "u3", "parent_id": "u2", "agent_id": "A", "timestamp": "T1",
+                    "type": "user_message",
+                    "payload": {"role": "user",
+                                "content": [{"type": "text", "text": "stop"}],
+                                "subtype": "interject"}}]
+
+
+def test_engine_injected_first_after_step_context_is_agent_prompt():
+    old = [
+        {"id": "c1", "parent_id": None, "agent_id": "A", "timestamp": "T1",
+         "type": "step_context",
+         "payload": {"provider": "p", "model": "m", "tools_schema": [],
+                     "params": {}, "max_tool_calls": 1}},
+        {"id": "u1", "parent_id": "c1", "agent_id": "A", "timestamp": "T2",
+         "type": "user_message",
+         "payload": {"role": "user", "content": [{"type": "text", "text": "begin"}],
+                     "human": False}},
+    ]
+    out = migrate_events(old)
+    assert out[1] == {"id": "u1", "parent_id": "c1", "agent_id": "A", "timestamp": "T2",
+                      "type": "engine_message",
+                      "payload": {"role": "user",
+                                  "content": [{"type": "text", "text": "begin"}],
+                                  "subtype": "agent_prompt"}}
+
+
+def test_engine_injected_without_step_context_is_continuation():
+    old = [{"id": "u5", "parent_id": "e1", "agent_id": "A", "timestamp": "T",
+            "type": "user_message",
+            "payload": {"role": "user", "content": [{"type": "text", "text": "resume"}],
+                        "human": False}}]
+    out = migrate_events(old)
+    assert out[0]["type"] == "engine_message"
+    assert out[0]["payload"]["subtype"] == "continuation"
+    assert "human" not in out[0]["payload"]
+
+
+def test_completion_nudge_collapses_with_following_injection():
+    old = [
+        {"id": "n1", "parent_id": "u3", "agent_id": "A", "timestamp": "T1",
+         "type": "completion_nudge", "payload": {"message": "Your turn ended"}},
+        {"id": "u4", "parent_id": "n1", "agent_id": "A", "timestamp": "T2",
+         "type": "user_message",
+         "payload": {"role": "user", "content": [{"type": "text", "text": "x"}],
+                     "human": False}},
+    ]
+    out = migrate_events(old)
+    assert out == [{"id": "n1", "parent_id": "u3", "agent_id": "A", "timestamp": "T1",
+                    "type": "engine_message",
+                    "payload": {"role": "user",
+                                "content": [{"type": "text", "text": "Your turn ended"}],
+                                "subtype": "completion"}}]
+
+
+def test_new_format_user_message_passes_through_unchanged():
+    new = [{"id": "u2", "parent_id": "a1", "agent_id": "A", "timestamp": "T",
+            "type": "user_message",
+            "payload": {"role": "user", "content": [{"type": "text", "text": "hi"}],
+                        "subtype": "reply"}}]
+    out = migrate_events(new)
+    assert out == new
+
+
+def test_completion_nudge_suppression_is_per_agent():
+    old = [
+        {"id": "n1", "parent_id": "u3", "agent_id": "A", "timestamp": "T1",
+         "type": "completion_nudge", "payload": {"message": "ended"}},
+        {"id": "u1", "parent_id": "x", "agent_id": "B", "timestamp": "T2",
+         "type": "user_message",
+         "payload": {"role": "user", "content": [{"type": "text", "text": "b-msg"}],
+                     "human": False}},
+    ]
+    out = migrate_events(old)
+    assert len(out) == 2
+    assert out[0]["type"] == "engine_message"
+    assert out[0]["payload"]["subtype"] == "completion"
+    assert out[1] == {"id": "u1", "parent_id": "x", "agent_id": "B", "timestamp": "T2",
+                      "type": "engine_message",
+                      "payload": {"role": "user",
+                                  "content": [{"type": "text", "text": "b-msg"}],
+                                  "subtype": "continuation"}}
+
+
+def test_agent_prompt_pending_is_per_agent():
+    old = [
+        {"id": "c1", "parent_id": None, "agent_id": "A", "timestamp": "T1",
+         "type": "step_context",
+         "payload": {"provider": "p", "model": "m", "tools_schema": [],
+                     "params": {}, "max_tool_calls": 1}},
+        {"id": "u1", "parent_id": "c1", "agent_id": "B", "timestamp": "T2",
+         "type": "user_message",
+         "payload": {"role": "user", "content": [{"type": "text", "text": "b-begin"}],
+                     "human": False}},
+    ]
+    out = migrate_events(old)
+    assert len(out) == 2
+    assert out[1] == {"id": "u1", "parent_id": "c1", "agent_id": "B", "timestamp": "T2",
+                      "type": "engine_message",
+                      "payload": {"role": "user",
+                                  "content": [{"type": "text", "text": "b-begin"}],
+                                  "subtype": "continuation"}}
