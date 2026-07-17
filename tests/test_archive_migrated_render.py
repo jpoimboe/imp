@@ -73,8 +73,12 @@ def test_imp_log_archived_migrated_quest_renders(
     out_s = out.getvalue()
 
     assert rc == 0, err.getvalue()
-    assert _INTENT in out_s          # real opening intent rendered
-    assert _MODEL in out_s           # model turn (former llm_response) rendered
+    # After migration: opening_intent → user_message(subtype=intent) → > caret turn.
+    intent_lines = [ln for ln in out_s.splitlines() if _INTENT in ln]
+    assert intent_lines and intent_lines[0].lstrip().startswith(">")
+    assert "opening_intent" not in out_s
+    assert _MODEL in out_s           # model turn (former llm_response) rendered as agent prose
+    assert "llm_response" not in out_s
     # The real typed human reply renders as a `>` human-turn line (color off under
     # redirect, so the caret is the literal ">"; it marks the turn's first line).
     reply_lines = [ln for ln in out_s.splitlines() if _REPLY in ln]
