@@ -495,7 +495,8 @@ def test_main_log_summary_routes_through_pager(
     proc.stdin = MagicMock()
     proc.wait = MagicMock(return_value=0)
 
-    with patch("imp.cli.main.subprocess.Popen", return_value=proc) as popen:
+    with patch("imp.cli.main._show_artifact", return_value=None), \
+         patch("imp.cli.main.subprocess.Popen", return_value=proc) as popen:
         rc = m.main(["log", "-s", slug])
 
     assert rc == 0
