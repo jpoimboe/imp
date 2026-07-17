@@ -20,6 +20,7 @@ from imp.remote.session.protocol import (
     CONTROL_INTERRUPT,
     CONTROL_INTERRUPT_FORCE,
     CONTROL_INTERRUPT_LEAVE,
+    CONTROL_RETRY_NOW,
     CONTROL_SAVE,
     CONTROL_SET_MODEL,
     CONTROL_SET_SANDBOX,
@@ -430,6 +431,8 @@ class SessionServer:
             await self._coordinator.signal_pause(reason=reason or "ctrl-d", via="frame")
         elif action == CONTROL_INTERRUPT_FORCE and self._coordinator is not None:
             await self._coordinator.signal_force()
+        elif action == CONTROL_RETRY_NOW and self._coordinator is not None:
+            self._coordinator.request_retry_now()
         elif action == CONTROL_DETACH:
             await self._socket.detach_all()
         elif action == CONTROL_ABANDON:

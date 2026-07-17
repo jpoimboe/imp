@@ -246,3 +246,27 @@ def test_control_compact_is_registered_and_round_trips() -> None:
     line = encode_control(CONTROL_COMPACT)
     assert "\n" not in line
     assert parse_client_message(line) == Control(CONTROL_COMPACT, None)
+
+
+def test_retry_now_control_round_trips() -> None:
+    from imp.remote.session.protocol import (
+        CONTROL_RETRY_NOW,
+        Control,
+        encode_control,
+        parse_client_message,
+    )
+
+    assert CONTROL_RETRY_NOW == "retry-now"
+    line = encode_control(CONTROL_RETRY_NOW)
+    assert "\n" not in line
+    assert json.loads(line) == {"kind": "control", "action": CONTROL_RETRY_NOW}
+    assert parse_client_message(line) == Control(CONTROL_RETRY_NOW, None)
+
+
+def test_retry_now_unknown_action_still_rejected_at_both_layers() -> None:
+    # The new action does not weaken validation: an unknown action still raises
+    # at both the encode and the parse layer (the frozenset gate is unchanged).
+    with pytest.raises(ValueError, match="unknown control action"):
+        encode_control("explode")
+    with pytest.raises(ValueError, match="unknown control action"):
+        parse_client_message('{"kind": "control", "action": "explode"}')
