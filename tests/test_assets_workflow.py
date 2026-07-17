@@ -303,7 +303,7 @@ def test_scope_code_check_dirty_resumes_threshold() -> None:
     assert m.action.feedback is None
 
 
-def test_scope_code_check_is_bounded_and_label_suppressed() -> None:
+def test_scope_code_check_rides_default_cap_and_label_suppressed() -> None:
     from imp.assets import bundled_workflow_dir
     wf = load_workflow(bundled_workflow_dir("imp"))
     step = _steps(wf)["scope-code-check"]
