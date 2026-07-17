@@ -189,6 +189,20 @@ def compose_position_row(*, activity: nv.Activity, quest_id: str | None,
     return _band_wrap(body, bg, width)
 
 
+def compose_prelaunch_position_row(
+    *, phase: str | None, plan: str | None, step_label: str | None,
+    model: str | None, quest_id: str | None, title: str,
+    color: bool, width: int, unsandboxed: bool = False,
+) -> str:
+    """Pre-launch position row for the inert-resume prompt (no context-usage bar)."""
+    activity = nv.Activity(
+        phase=phase, plan=plan, counter=step_label, model=model,
+        kind=None, lane_wait=False)
+    return compose_position_row(
+        activity=activity, quest_id=quest_id, title=title,
+        prompt_tokens=None, color=color, width=width, unsandboxed=unsandboxed)
+
+
 def compose_subagent_rows(builder: nv.NarrativeBuilder, *, color: bool,
                           width: int, now_iso: str) -> list[str]:
     """One row per running subagent (B4/AC5); colliding roles numbered.
@@ -360,6 +374,16 @@ class LiveDriver:
         # lifts at the brand-new pending node before it emits.
         self._builder.seed_pending_reply(text)
         self._walk()
+        self._refresh_status()
+
+    def echo_submitted_reply(self, text: str) -> None:
+        # Force this node past suppress_replay now; survives replay, reconciles the live turn.
+        self._builder.seed_pending_reply(text)
+        was_suppressing, self._suppressing = self._suppressing, False
+        try:
+            self._walk()
+        finally:
+            self._suppressing = was_suppressing
         self._refresh_status()
 
     def append_committed_reply(self, text: str) -> None:

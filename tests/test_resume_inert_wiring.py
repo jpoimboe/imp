@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
 import imp.cli.main as m
+import imp.cli.signals as sig
 from imp.engine.quest import Quest
 from imp.engine.state import State
 from tests.conftest import _seed_control
@@ -140,6 +142,9 @@ class _CapturingPrompt:
     def __init__(self, sink: dict[str, object], **kwargs: object) -> None:
         self._sink = sink
 
+    def seed_history(self, lines: list[str]) -> None:
+        pass
+
     async def ask_async(self, *args: object, **kwargs: object) -> str:
         self._sink["bottom_toolbar"] = kwargs.get("bottom_toolbar")
         self._sink["width"] = kwargs.get("width")
@@ -168,9 +173,69 @@ async def test_inert_ask_line_passes_identity_toolbar(
     assert sink["width"] == 80
 
 
+@pytest.mark.anyio
+async def test_inert_ask_line_forwards_toolbar_override(
+        monkeypatch, tmp_path: Path) -> None:
+    # The inert path passes a precomposed position row; the shared reader threads
+    # it to ask_async as the bottom toolbar (no re-fork of _read_intent_line).
+    ch = _seed(tmp_path)
+    monkeypatch.setattr(m, "should_use_color", lambda _stream: False)
+    monkeypatch.setattr(m, "_term_width", lambda: 80)
+    sink: dict[str, object] = {}
+    monkeypatch.setattr(
+        m, "Prompt", lambda **kwargs: _CapturingPrompt(sink, **kwargs))
+
+    line = await m._inert_ask_line(ch, toolbar="POSITION-ROW")
+
+    assert line == "go"
+    assert sink["bottom_toolbar"] == "POSITION-ROW"
+
+
+@pytest.mark.anyio
+async def test_resume_inert_composes_position_row_for_prompt(
+        monkeypatch, tmp_path: Path) -> None:
+    ch = _seed(tmp_path)
+    captured: dict[str, object] = {}
+
+    async def _cap_ask(quest, *, toolbar=None):
+        captured["toolbar"] = toolbar
+        return None
+
+    monkeypatch.setattr(m, "should_use_color", lambda _stream: False)
+    monkeypatch.setattr(m, "_term_width", lambda: 80)
+    monkeypatch.setattr(m, "compose_prelaunch_position_row", lambda **k: "POS-ROW")
+    monkeypatch.setattr(m, "_inert_ask_line", _cap_ask)
+
+    async def _fake_run_inert(*, question, ask_line, launch):
+        await ask_line()
+        return 0
+
+    monkeypatch.setattr(m, "run_inert_resume", _fake_run_inert)
+
+    rc = await m._resume_inert(ch, "Which DB should I use?")
+
+    assert rc == 0
+    assert captured["toolbar"] == "POS-ROW"      # the composed row reached the reader
+
+
+def test_prelaunch_position_model_resolves_step_tier_from_state(
+        tmp_path: Path) -> None:
+    from imp.providers.config import ProviderModel
+    ch = _seed(tmp_path)
+    state = State.load(ch.state_dir)
+    state.step = "s"                    # a real workflow step (default tier: medium)
+    state.resolved_steps = None         # no per-step override → resolve via tier map
+    state.resolved_tiers = {
+        "medium": ProviderModel(provider="anthropic", model="tier-model")}
+    assert m._prelaunch_position_model(ch, state) == "tier-model"
+
+
 class _RaisingPrompt:
     def __init__(self, exc: type[BaseException], **kwargs: object) -> None:
         self._exc = exc
+
+    def seed_history(self, lines: list[str]) -> None:
+        pass
 
     async def ask_async(self, *args: object, **kwargs: object) -> str:
         raise self._exc
@@ -221,6 +286,9 @@ class _QueueInertPrompt:
 
     def __init__(self, lines: list[str], **kwargs: object) -> None:
         self._lines = list(lines)
+
+    def seed_history(self, lines: list[str]) -> None:
+        pass
 
     async def ask_async(self, *args: object, **kwargs: object) -> str:
         return self._lines.pop(0)
@@ -285,3 +353,132 @@ async def test_resume_inert_ctrl_d_retains_caret_parks_and_returns_zero(
     assert "Which DB should I use?" in out       # pending question replayed
     assert out.endswith("> \n\n")                # retained caret + one trailing blank
     assert "cancelled" not in out                # no `imp: cancelled` message
+
+
+@pytest.mark.anyio
+async def test_inert_ask_line_seeds_history_from_event_log(
+        monkeypatch, tmp_path: Path) -> None:
+    # Up-arrow recalls prior HUMAN turns; synthetic turns are excluded.
+    ch = _seed(tmp_path)
+    ch.event_log().append(
+        agent_id="step:p/s", type="user_message",
+        payload={"role": "user", "human": True,
+                 "content": [{"type": "text", "text": "a human reply"}]})
+    ch.event_log().append(
+        agent_id="step:p/s", type="user_message",
+        payload={"role": "user", "human": False,
+                 "content": [{"type": "text", "text": "engine nudge"}]})
+    seeded: dict[str, object] = {}
+
+    class _RecordingPrompt:
+        def __init__(self, **kwargs: object) -> None:
+            pass
+
+        def seed_history(self, lines: list[str]) -> None:
+            seeded["lines"] = lines
+
+        async def ask_async(self, *args: object, **kwargs: object) -> str:
+            return "go"
+
+    monkeypatch.setattr(m, "should_use_color", lambda _stream: False)
+    monkeypatch.setattr(m, "_term_width", lambda: 80)
+    monkeypatch.setattr(m, "Prompt", lambda **kwargs: _RecordingPrompt(**kwargs))
+
+    line = await m._inert_ask_line(ch)
+
+    assert line == "go"
+    assert seeded["lines"] == ["a human reply"]      # synthetic turn excluded
+
+
+@pytest.mark.anyio
+async def test_inert_resume_echoes_reply_before_session_boot(
+        monkeypatch, tmp_path: Path) -> None:
+    ch = _seed(tmp_path)
+    echoed: list[str] = []
+    seen_at_boot: dict[str, list[str]] = {}
+
+    class _EchoDriver:
+        def __init__(self, **kwargs: object) -> None:
+            pass
+
+        def echo_submitted_reply(self, text: str) -> None:
+            echoed.append(text)
+
+        def install_startup_status(self) -> None:
+            pass
+
+    monkeypatch.setattr(m, "should_use_color", lambda _stream: False)
+    monkeypatch.setattr(m, "_build_resume_driver", lambda **k: _EchoDriver())
+    monkeypatch.setattr(m, "LiveStatus", lambda *a, **k: SimpleNamespace())
+    monkeypatch.setattr(sig, "InterruptCoordinator", lambda *a, **k: SimpleNamespace())
+    monkeypatch.setattr(m, "make_interactive_solicit", lambda *a, **k: None)
+    monkeypatch.setattr(m, "make_buffered_solicit", lambda line, inner: None)
+
+    async def _client(*a: object, **k: object) -> int:
+        seen_at_boot["echoed"] = list(echoed)      # snapshot when boot begins
+        return 0
+
+    monkeypatch.setattr(m, "run_session_client", _client)
+
+    async def _fake_run_inert(*, question, ask_line, launch):
+        return await launch("my answer")
+
+    monkeypatch.setattr(m, "run_inert_resume", _fake_run_inert)
+
+    async def _fake_loop(control, *, first):
+        return await first({})
+
+    monkeypatch.setattr(m, "_clear_loop", _fake_loop)
+
+    rc = await m._resume_inert(ch, "Which DB should I use?")
+
+    assert rc == 0
+    assert echoed == ["my answer"]                 # echoed at submit
+    assert seen_at_boot["echoed"] == ["my answer"] # BEFORE run_session_client ran
+
+
+@pytest.mark.anyio
+async def test_inert_resume_carries_idle_terminal_title_into_boot(
+        monkeypatch, tmp_path: Path) -> None:
+    from imp.cli.terminal_title import TerminalTitle
+    ch = _seed(tmp_path)
+    seen: dict[str, object] = {}
+
+    class _Drv:
+        def __init__(self, **kwargs: object) -> None:
+            pass
+
+        def echo_submitted_reply(self, text: str) -> None:
+            pass
+
+        def install_startup_status(self) -> None:
+            pass
+
+    monkeypatch.setattr(m, "should_use_color", lambda _stream: False)
+    monkeypatch.setattr(m, "_build_resume_driver", lambda **k: _Drv())
+    monkeypatch.setattr(m, "LiveStatus", lambda *a, **k: SimpleNamespace())
+    monkeypatch.setattr(sig, "InterruptCoordinator", lambda *a, **k: SimpleNamespace())
+    monkeypatch.setattr(m, "make_interactive_solicit", lambda *a, **k: None)
+    monkeypatch.setattr(m, "make_buffered_solicit", lambda line, inner: None)
+
+    async def _client(*a: object, title: object = None, **k: object) -> int:
+        seen["title"] = title
+        return 0
+
+    monkeypatch.setattr(m, "run_session_client", _client)
+
+    async def _fake_run_inert(*, question, ask_line, launch):
+        return await launch("my answer")
+
+    monkeypatch.setattr(m, "run_inert_resume", _fake_run_inert)
+
+    async def _fake_loop(control, *, first):
+        return await first({})
+
+    monkeypatch.setattr(m, "_clear_loop", _fake_loop)
+
+    rc = await m._resume_inert(ch, "Which DB should I use?")
+
+    assert rc == 0
+    assert isinstance(seen["title"], TerminalTitle)
+    assert seen["title"]._idle is True        # created idle for the wait

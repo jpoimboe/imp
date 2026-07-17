@@ -54,6 +54,6 @@ def test_help_lists_model_command() -> None:
     assert any(line.strip().startswith("/model") for line in out)
 
 
-def test_opening_hint_mentions_model() -> None:
-    from imp.cli.main import OPENING_HINT
-    assert "/model" in OPENING_HINT
+def test_opening_hint_omits_model() -> None:
+    from imp.cli.prompt import DEFAULT_HINT
+    assert "/model" not in DEFAULT_HINT

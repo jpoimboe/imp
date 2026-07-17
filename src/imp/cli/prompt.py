@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Any
 
 EMPTY_PROMPT_HINT = "press ctrl-d to pause & exit"
+DEFAULT_HINT = "type a message, or /help for commands"
 
 
 def _prompt_message_text(question: str, *, color: bool, width: int = 80,
@@ -36,7 +37,7 @@ def _prompt_message_text(question: str, *, color: bool, width: int = 80,
     return body + "\n\n" + indent + pal.caret(enabled=color)
 
 
-def _placeholder_text(*, color: bool, text: str = "type your reply") -> str:
+def _placeholder_text(*, color: bool, text: str = DEFAULT_HINT) -> str:
     from imp.cli import palette as pal
     return pal.ansi(text, "dim", enabled=color)
 
@@ -263,7 +264,7 @@ class Prompt:
         else:
             msg = self._message(prompt_text, indent=indent)
         cont = " " * (len(indent) + len(pal.CARET))
-        ph_text = hint or "type your reply"
+        ph_text = hint or DEFAULT_HINT
         placeholder: Any = (ANSI(_placeholder_text(color=True, text=ph_text)) if self._color
                             else _placeholder_text(color=False, text=ph_text))
         extra: dict[str, Any] = {}

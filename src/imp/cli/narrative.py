@@ -741,10 +741,9 @@ class NarrativeBuilder:
         self._seed_phrase = _draw_status_phrase()
 
     def seed_pending_reply(self, text: str) -> None:
-        """Optimistic echo for a your-turn reply (terminal via
-        LiveDriver.seed_pending_reply): append a pending interactive node; the
-        next user_message reconciles into it via the single-outstanding
-        awaiting-reply invariant."""
+        """Optimistic echo for a your-turn reply; a second seed while outstanding is a no-op."""
+        if self._pending_reply_node is not None:
+            return
         node = UserMessageNode(text=text, interactive=True)
         self._pending_reply_node = node
         self._append(node)
@@ -1623,6 +1622,10 @@ def _h_user_message(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, 
             # success tool_result carrying the human's reply (anthropic/openai/
             # claude_code resume shape).
             text = _summarize_result(block.get("content"))
+    if event.get("_replay"):
+        # A replayed user_message never consumes an optimistic echo — only the live turn does.
+        self._append(UserMessageNode(text=text, interactive=interactive))
+        return
     pending, self._pending_reply_node = self._pending_reply_node, None
     if pending is not None:
         # Reconcile the optimistic echo: adopt authoritative text in place

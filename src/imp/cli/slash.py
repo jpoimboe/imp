@@ -227,7 +227,7 @@ async def _ask_or_exit(prompt: Any, exit_evt: Any, *, question: str = "",
 async def ask_line_with_slash(
     prompt: Any, status: Any | None, quest: Any, *, color: bool = False, width: int = 80,
     coord: Any = None, driver: Any = None, hint: str | None = None,
-    pre_session: bool = False,
+    pre_session: bool = False, toolbar_override: str | None = None,
 ) -> str | SkillRequest:
     """Read one interactive line, intercepting slash commands. /help, /skills,
     unknown, and not-found commands print and re-prompt; /<name> that matches a
@@ -286,6 +286,7 @@ async def ask_line_with_slash(
                             driver.prepare_for_prompt()
                         toolbar = (
                             driver.compose_toolbar_static() if driver is not None
+                            else toolbar_override if toolbar_override is not None
                             else compose_identity_toolbar(
                                 quest_id=quest.id, title=quest.title,
                                 color=color, width=width))

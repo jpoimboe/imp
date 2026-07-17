@@ -28,6 +28,7 @@ from typing import Any, NamedTuple, NoReturn
 import anyio
 
 from imp import __version__
+from imp.agents.random_status import random_status_phrase
 from imp.agents.skills import load_user_skill
 from imp.cli import palette as pal
 from imp.cli import quest_row, resume_select, splash
@@ -38,10 +39,10 @@ from imp.cli.inert_resume import (
     run_inert_resume,
 )
 from imp.cli.init import GitSetupDeclined, IntegrationBranchUnresolved, run_init
-from imp.cli.live_driver import LiveDriver
+from imp.cli.live_driver import LiveDriver, compose_prelaunch_position_row
 from imp.cli.live_status import LiveStatus
 from imp.cli.palette import ansi, should_use_color
-from imp.cli.prompt import Prompt
+from imp.cli.prompt import DEFAULT_HINT, Prompt
 from imp.cli.session_run import (
     infer_session_result,
     make_headless_solicit,
@@ -132,10 +133,6 @@ class ReplyInterjectRouter:
                 self._reply_sink(line)
         else:
             self._coord.enqueue_interject(line)
-
-
-OPENING_HINT = "type a message, /help for commands, or /model to switch models"
-INERT_HINT = "type your reply, /help for commands"
 
 
 def _should_prompt_opening(
@@ -689,13 +686,14 @@ def _print_opening(quest: Quest, marker: str, *, interactive: bool, color: bool)
 
 async def _read_intent_line(
     prompt: Any, quest: Any, *, color: bool, width: int,
-    model_sink: dict[str, str] | None = None, hint: str = OPENING_HINT,
+    model_sink: dict[str, str] | None = None, hint: str = DEFAULT_HINT,
+    toolbar: str | None = None,
 ) -> str:
     """Read one pre-session intent line, capturing a `/model` selection into `model_sink`."""
     while True:
         line = await ask_line_with_slash(
             prompt, None, quest, color=color, width=width, hint=hint,
-            pre_session=True)
+            pre_session=True, toolbar_override=toolbar)
         if isinstance(line, SkillRequest):
             # Opening prompt is pre-session: no daemon gate exists yet, so the
             # skill body is loaded here and becomes the opening message.
@@ -1124,6 +1122,19 @@ def _warn_if_blocked(quest: Quest) -> None:
               f"{', '.join(unmerged)}; starting anyway.", file=sys.stderr)
 
 
+def _build_resume_driver(
+    *, quest: Quest, state: State, status: LiveStatus,
+    color: bool, preceded_by_blank: bool = False,
+) -> LiveDriver:
+    # startup_verb is drawn once at construction — compose_startup stores it, never re-draws.
+    return LiveDriver(
+        stream=sys.stdout, color=color,
+        width=_term_width, display_width=_display_width, status=status,
+        suppress_replay=True, preceded_by_blank=preceded_by_blank,
+        startup_verb=state.step_label or random_status_phrase(),
+        quest_id=quest.id, title=quest.title)
+
+
 async def _async_cmd_resume(args: argparse.Namespace) -> int:
     install_process_group()
     from imp.cli.signals import InterruptCoordinator
@@ -1162,12 +1173,9 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
         print(_run_header_line(
             quest.id, quest.title, "resuming", color=should_use_color(sys.stdout)))
         status = LiveStatus(sys.stdout)
-        driver = LiveDriver(stream=sys.stdout,
-                            color=should_use_color(sys.stdout),
-                            width=_term_width, display_width=_display_width, status=status,
-                            suppress_replay=True,
-                            startup_verb="resuming",
-                            quest_id=quest.id, title=quest.title)
+        driver = _build_resume_driver(
+            quest=quest, state=state, status=status,
+            color=should_use_color(sys.stdout))
         coord = InterruptCoordinator()
         solicit = make_headless_solicit(getattr(args, "message", None), coord)
         return await run_session_client(
@@ -1187,13 +1195,9 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
 
     async def _first(leave_state: dict[str, str]) -> int:
         status = LiveStatus(sys.stdout)
-        driver = LiveDriver(stream=sys.stdout,
-                            color=should_use_color(sys.stdout),
-                            width=_term_width, display_width=_display_width, status=status,
-                            suppress_replay=True,
-                            preceded_by_blank=splash_shown,
-                            startup_verb="resuming",
-                            quest_id=quest.id, title=quest.title)
+        driver = _build_resume_driver(
+            quest=quest, state=state, status=status,
+            color=should_use_color(sys.stdout), preceded_by_blank=splash_shown)
         coord = InterruptCoordinator()
         solicit = make_interactive_solicit(
             quest, status=status, driver=driver, coord=coord)
@@ -1209,7 +1213,21 @@ def _cmd_resume(args: argparse.Namespace) -> int:
     return anyio.run(_async_cmd_resume, args)
 
 
-async def _inert_ask_line(quest: Quest) -> str | None:
+def _prelaunch_position_model(quest: Quest, state: State) -> str | None:
+    """Resolve the resumed step's model from state.json; None when unresolved."""
+    if state.step is None or state.resolved_tiers is None:
+        return None
+    from imp.engine.loader import load_workflow
+    from imp.engine.model_override import current_provider_model
+    workflow = load_workflow(
+        quest.workflow_dir, project_keys=frozenset(state.project_facts or {}))
+    try:
+        return current_provider_model(state, workflow, state.step).model
+    except (StopIteration, KeyError):
+        return None
+
+
+async def _inert_ask_line(quest: Quest, *, toolbar: str | None = None) -> str | None:
     """Read one line at inert resume through the shared slash-aware reader
     (session-verb rejection, /help, /skills, empty-submit guard); EOF / Ctrl-C
     retains the `> ` caret and maps to None — the quest stays parked."""
@@ -1219,9 +1237,11 @@ async def _inert_ask_line(quest: Quest) -> str | None:
         skills_dir=quest.workflow_dir / "skills",
         editing_mode=_editing_mode(quest.control_root),
         color=color, quest=quest)
+    prompt.seed_history(
+        _prompt_history_lines(quest.seed_opening, quest.event_log().read()))
     try:
         return await _read_intent_line(
-            prompt, quest, color=color, width=width, hint=INERT_HINT)
+            prompt, quest, color=color, width=width, toolbar=toolbar)
     except (EOFError, KeyboardInterrupt):
         print(pal.caret(enabled=color))
         print()
@@ -1235,18 +1255,24 @@ async def _resume_inert(
     from imp.cli.signals import InterruptCoordinator
 
     color = should_use_color(sys.stdout)
+    term_title = TerminalTitle(sys.stdout, quest.id, quest.title, initial="idle")
+    state = State.load(quest.state_dir)
+    phase_head, _sep, plan_tail = (state.phase_label or "").partition(" · ")
+    toolbar_row = compose_prelaunch_position_row(
+        phase=phase_head or None, plan=plan_tail or None,
+        step_label=state.step_label, model=_prelaunch_position_model(quest, state),
+        quest_id=quest.id, title=quest.title,
+        color=color, width=_term_width(), unsandboxed=state.unsandboxed)
     print(_run_header_line(quest.id, quest.title, "resuming", color=color))
     question = render_inert_question(question, width=_term_width(), color=color)
 
     async def _launch(line: str) -> int:
         async def _first(leave_state: dict[str, str]) -> int:
             status = LiveStatus(sys.stdout)
-            driver = LiveDriver(stream=sys.stdout, color=color,
-                                width=_term_width, status=status,
-                                suppress_replay=True,
-                                preceded_by_blank=True,
-                                startup_verb="resuming",
-                                quest_id=quest.id, title=quest.title)
+            driver = _build_resume_driver(
+                quest=quest, state=state, status=status,
+                color=color, preceded_by_blank=True)
+            driver.echo_submitted_reply(line)   # visible echo, before the boot spinner
             coord = InterruptCoordinator()
             inner = make_interactive_solicit(
                 quest, status=status, driver=driver, coord=coord)
@@ -1254,13 +1280,13 @@ async def _resume_inert(
             return await run_session_client(
                 quest, driver=driver, coord=coord, solicit=solicit,
                 resume=True, status=status, leave_state=leave_state,
-                autonomous=autonomous)
+                title=term_title, autonomous=autonomous)
 
         return await _clear_loop(quest.control_root, first=_first)
 
     return await run_inert_resume(
         question=question,
-        ask_line=lambda: _inert_ask_line(quest),
+        ask_line=lambda: _inert_ask_line(quest, toolbar=toolbar_row),
         launch=_launch)
 
 

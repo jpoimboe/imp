@@ -46,7 +46,7 @@ def test_seed_workflow_start_seeds_cursor_and_vars(tmp_path: Path) -> None:
     seed_workflow_start(state, workflow, config)
 
     assert state.step == "s"
-    assert state.step_label == "s"
+    assert state.step_label is None      # step `s` has no label: → honestly None
     assert state.phase_label == "P"
     assert state.vars["n"] == 42
 
@@ -56,7 +56,7 @@ def test_create_routes_seeded_cursor_and_var_override(tmp_path: Path) -> None:
     ch = Quest.create(tmp_path, title="X", quest_id="seedq", base_branch="main")
     state = State.load(ch.quest_dir / "state")
     assert state.step == "s"
-    assert state.step_label == "s"
+    assert state.step_label is None      # step `s` has no label: → honestly None
     assert state.phase_label == "P"
     assert state.vars["n"] == 42
 
@@ -66,6 +66,6 @@ def test_create_draft_routes_seeded_cursor_and_var_override(tmp_path: Path) -> N
     ch = Quest.create_draft(tmp_path, title="X", quest_id="seeddr", base_branch="main")
     state = State.load(ch.quest_dir / "state")
     assert state.step == "s"
-    assert state.step_label == "s"
+    assert state.step_label is None      # step `s` has no label: → honestly None
     assert state.phase_label == "P"
     assert state.vars["n"] == 42

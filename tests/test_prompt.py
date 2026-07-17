@@ -194,8 +194,14 @@ def test_message_plain_question_still_sits_above_the_caret() -> None:
 
 
 def test_placeholder_hint_is_the_dim_reply_prompt() -> None:
-    assert _placeholder_text(color=False) == "type your reply"
-    assert _placeholder_text(color=True) == "\x1b[2mtype your reply\x1b[0m"
+    assert _placeholder_text(color=False) == "type a message, or /help for commands"
+    assert _placeholder_text(color=True) == "\x1b[2mtype a message, or /help for commands\x1b[0m"
+
+
+def test_default_hint_constant_is_the_shared_copy() -> None:
+    from imp.cli.prompt import DEFAULT_HINT
+    assert DEFAULT_HINT == "type a message, or /help for commands"
+    assert "/model" not in DEFAULT_HINT
 
 
 @pytest.fixture
@@ -238,7 +244,7 @@ async def test_ask_async_caret_prefix_at_root() -> None:
     assert captured["msg"] == "> "                        # `> ` caret, body at col 2
     assert captured["prompt_continuation"](80, 1, False) == "  "
     # The plain hint must still render (not None) even with color off.
-    assert captured["placeholder"] == "type your reply"
+    assert captured["placeholder"] == "type a message, or /help for commands"
 
 
 def test_placeholder_text_accepts_custom_text() -> None:

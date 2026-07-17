@@ -2422,8 +2422,12 @@ def test_compose_position_row_context_bar_only_for_agent_kind() -> None:
     script = compose_position_row(activity=_pos_activity(kind="script"), quest_id="z",
                                   title="t", prompt_tokens=None, color=False, width=80,
                                   context_pct=42.0)
+    none_kind = compose_position_row(activity=_pos_activity(kind=None), quest_id="z",
+                                     title="t", prompt_tokens=None, color=False, width=80,
+                                     context_pct=42.0)
     assert "42%" in agent
     assert "%" not in script
+    assert "%" not in none_kind   # prelaunch kind=None suppresses the bar even with usage present
     assert "implementation phase" in script
 
 
@@ -3040,6 +3044,24 @@ def test_compose_position_row_unsandboxed_is_bold_red_under_ansi() -> None:
     assert "\x1b[1m" in parts[2] and "\x1b[31m" in parts[2]
 
 
+def test_compose_prelaunch_position_row_renders_state_segments_no_context_bar() -> None:
+    from imp.cli.live_driver import compose_prelaunch_position_row
+    row = compose_prelaunch_position_row(
+        phase="planning phase", plan="plan 2/4", step_label="reviewing spec",
+        model="sonnet", quest_id="feat", title="demo",
+        color=False, width=200)
+    assert row == "feat · demo · planning phase · plan 2/4 · reviewing spec · sonnet"
+    assert "%" not in row      # context-usage bar omitted pre-launch
+
+
+def test_compose_prelaunch_position_row_omits_absent_segments() -> None:
+    from imp.cli.live_driver import compose_prelaunch_position_row
+    row = compose_prelaunch_position_row(
+        phase=None, plan=None, step_label=None, model=None,
+        quest_id="feat", title="demo", color=False, width=200)
+    assert row == "feat · demo"      # residual: less state → fewer segments, no drift
+
+
 def test_driver_unsandboxed_flag_defaults_off_and_toggles_into_toolbar() -> None:
     drv = LiveDriver(stream=io.StringIO(), color=False, width=80,
                      status=LiveStatus(io.StringIO()), quest_id="z9gixx",
@@ -3118,6 +3140,35 @@ def test_compose_activity_line_no_retry_hint_below_60() -> None:
     line = compose_activity_line(activity=act, frame=0, color=False,
                                  now_iso="2026-01-01T00:00:05+00:00")
     assert "press r to retry now" not in line
+
+
+def test_echo_submitted_reply_shows_before_replay_and_reconciles_once() -> None:
+    out = _Pipe()
+    drv = LiveDriver(stream=out, color=False, width=80, status=LiveStatus(out),
+                     suppress_replay=True)
+    # Submit-time echo: rendered NOW, before any replay boundary (pre-spinner).
+    drv.echo_submitted_reply("my answer")
+    assert out.getvalue().count("> my answer") == 1
+    # Replay the parked history — including a PRIOR human turn — then the boundary.
+    for e in [
+        ev("1", "quest_created", quest_id=1, title="t"),
+        ev("2", "step_started", step="planner", kind="agent", phase="plan",
+           model="m", provider="anthropic"),
+        ev("3", "user_message", agent_id="step:plan/planner", role="user",
+           content=[{"type": "text", "text": "an earlier turn"}]),
+        ev("3b", "awaiting_user_input", agent_id="step:plan/planner"),
+    ]:
+        e["_replay"] = True
+        drv.on_event(e)
+    drv.on_event({"type": "replay_complete"})
+    # Replayed history stays hidden; the echo is neither duplicated nor consumed.
+    assert out.getvalue().count("> my answer") == 1
+    assert "an earlier turn" not in out.getvalue()
+    # The daemon's LIVE user_message for the submitted line reconciles in place —
+    # no second echo.
+    drv.on_event(ev("4", "user_message", agent_id="step:plan/planner", role="user",
+                    content=[{"type": "text", "text": "my answer"}]))
+    assert out.getvalue().count("> my answer") == 1
 
 
 def test_compose_activity_line_no_retry_hint_without_countdown() -> None:

@@ -20,11 +20,12 @@ def anyio_backend() -> str:
     return "asyncio"
 
 
-def _seed(tmp_path: Path) -> Quest:
+def _seed(tmp_path: Path, *, step_label: str | None = None) -> Quest:
     _seed_control(tmp_path)
     ch = Quest.create(tmp_path, title="demo", quest_id="feat", base_branch="main")
     st = State.load(ch.state_dir)
     st.status = "paused"
+    st.step_label = step_label
     st.save(ch.state_dir)
     return ch
 
@@ -38,16 +39,18 @@ def _capture_driver(monkeypatch: pytest.MonkeyPatch) -> dict[str, object]:
 
         def install_startup_status(self) -> None: ...
 
+        def echo_submitted_reply(self, text: str) -> None: ...
+
     monkeypatch.setattr(m, "LiveDriver", _CapDriver)
     monkeypatch.setattr(m, "LiveStatus", lambda *a, **k: SimpleNamespace())
     monkeypatch.setattr(sig, "InterruptCoordinator", lambda *a, **k: SimpleNamespace())
     return captured
 
 
-def test_interactive_resume_passes_startup_verb(
+def test_interactive_resume_derives_verb_from_step_label(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _seed(tmp_path)
+    _seed(tmp_path, step_label="reviewing spec")
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(m, "_print_splash_banner", lambda **k: True)
     monkeypatch.setattr(m, "_is_interactive", lambda **k: True)
@@ -71,17 +74,19 @@ def test_interactive_resume_passes_startup_verb(
         token="feat", non_interactive=False, message=None))
 
     assert rc == 0
-    assert captured["startup_verb"] == "resuming"
+    assert captured["startup_verb"] == "reviewing spec"     # labeled step → its label
+    assert captured["display_width"] is m._display_width     # real terminal width
 
 
-def test_headless_resume_passes_startup_verb(
+def test_headless_resume_unlabeled_step_uses_random_phrase(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _seed(tmp_path)
+    _seed(tmp_path)                                         # unlabeled step → step_label None
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(m, "should_use_color", lambda *a, **k: False)
     monkeypatch.setattr(m, "_select_headless", lambda args: (True, False))
     monkeypatch.setattr(m, "make_headless_solicit", lambda *a, **k: None)
+    monkeypatch.setattr(m, "random_status_phrase", lambda: "scheming")
     captured = _capture_driver(monkeypatch)
 
     async def _ok(*a: object, **k: object) -> int:
@@ -94,15 +99,16 @@ def test_headless_resume_passes_startup_verb(
         autonomous=False))
 
     assert rc == 0
-    assert captured["startup_verb"] == "resuming"
+    assert captured["startup_verb"] == "scheming"           # unlabeled → random imp phrase
+    assert captured["display_width"] is m._display_width
     assert captured.get("preceded_by_blank", False) is False
 
 
 @pytest.mark.anyio
-async def test_inert_resume_passes_startup_verb_and_preceded_by_blank(
+async def test_inert_resume_derives_verb_and_passes_display_width(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    ch = _seed(tmp_path)
+    ch = _seed(tmp_path, step_label="writing plan")
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(m, "should_use_color", lambda *a, **k: False)
     monkeypatch.setattr(m, "make_interactive_solicit", lambda *a, **k: None)
@@ -127,5 +133,6 @@ async def test_inert_resume_passes_startup_verb_and_preceded_by_blank(
     rc = await m._resume_inert(ch, "Pending Q?")
 
     assert rc == 0
-    assert captured["startup_verb"] == "resuming"
+    assert captured["startup_verb"] == "writing plan"       # labeled step → its label
+    assert captured["display_width"] is m._display_width     # item 7: inert now passes width
     assert captured["preceded_by_blank"] is True

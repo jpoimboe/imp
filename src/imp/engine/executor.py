@@ -525,7 +525,6 @@ async def run_quest(
                 state.step_label = (
                     state.route_label
                     or render_label(flat[nxt].label, quest, log, state)
-                    or flat[nxt].name
                 )
                 state.phase_label = (
                     render_label(flat[nxt].phase_label, quest, log, state)
@@ -555,7 +554,6 @@ async def run_quest(
                 state.step_label = (
                     state.route_label
                     or render_label(flat[target_idx].label, quest, log, state)
-                    or flat[target_idx].name
                 )
                 state.phase_label = (
                     render_label(flat[target_idx].phase_label, quest, log, state)

@@ -2412,6 +2412,44 @@ def test_seeded_pending_reply_reconciles_into_single_node() -> None:
     assert replies[0].interactive is True
 
 
+def test_seed_pending_reply_second_seed_while_outstanding_is_noop() -> None:
+    b = nv.NarrativeBuilder()
+    b.add(_ev("s1", "step_started", step="spec", kind="agent", phase="design",
+              model="m", provider="anthropic"))
+    b.add(_ev("aw", "awaiting_user_input", agent_id="step:design/spec"))
+    b.seed_pending_reply("my answer")
+    b.seed_pending_reply("my answer")       # single-outstanding: no second node
+    phase = next(c for c in b.tree.root.children if isinstance(c, nv.PhaseNode))
+    step = next(c for c in phase.children if isinstance(c, nv.StepNode))
+    replies = [c for c in step.children if isinstance(c, nv.UserMessageNode)]
+    assert len(replies) == 1
+    assert replies[0].text == "my answer"
+    # After the authoritative user_message reconciles, the pointer clears, so a
+    # later distinct reply seeds fresh (the guard must not block future turns).
+    b.add(_ev("um", "user_message", agent_id="step:design/spec", role="user",
+              content=[{"type": "text", "text": "my answer"}]))
+    b.seed_pending_reply("next turn")
+    replies2 = [c for c in step.children if isinstance(c, nv.UserMessageNode)]
+    assert len(replies2) == 2
+    assert replies2[1].text == "next turn"
+
+
+def test_replayed_user_message_leaves_optimistic_echo_armed() -> None:
+    b = nv.NarrativeBuilder()
+    b.add(_ev("s1", "step_started", step="planner", kind="agent", phase="plan",
+              model="m", provider="anthropic"))
+    b.seed_pending_reply("my answer")            # armed at submit, before replay
+    replay = _ev("um", "user_message", agent_id="step:plan/planner", role="user",
+                 content=[{"type": "text", "text": "an earlier turn"}])
+    replay["_replay"] = True
+    b.add(replay)
+    assert b._pending_reply_node is not None      # a replayed turn never consumes it
+    # The armed echo pairs only with the LIVE turn, reconciling in place.
+    b.add(_ev("um2", "user_message", agent_id="step:plan/planner", role="user",
+              content=[{"type": "text", "text": "my answer"}]))
+    assert b._pending_reply_node is None
+
+
 def test_append_committed_reply_is_non_reconciling() -> None:
     b = nv.NarrativeBuilder()
     b.add(_ev("s1", "step_started", step="spec", kind="agent", phase="design",
