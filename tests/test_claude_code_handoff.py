@@ -224,7 +224,7 @@ async def test_below_threshold_completing_turn_interrupts_and_completes(
     events = [ev async for ev in runner.run(_inv(tmp_path, log, threshold=0.8))]
 
     assert not [e for e in events if e["type"] == "handoff"]
-    assert any(e["type"] == "agent_output" for e in events)
+    assert any(e["type"] == "agent_result" for e in events)
     # Part A: a completing turn is interrupted regardless of the context
     # threshold — the completion-interrupt, not a handoff.
     assert holder["client"].interrupts == 1
@@ -265,6 +265,6 @@ async def test_completing_turn_above_threshold_completes_not_handoff(
     events = [ev async for ev in runner.run(_inv(tmp_path, log, threshold=0.8))]
 
     assert not [e for e in events if e["type"] == "handoff"]
-    assert any(e["type"] == "agent_output" for e in events)
+    assert any(e["type"] == "agent_result" for e in events)
     # Part A: the completing turn is interrupted (completion path), not a handoff.
     assert holder["client"].interrupts == 1

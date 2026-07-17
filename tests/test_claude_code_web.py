@@ -155,7 +155,7 @@ async def test_cc_web_search_normalized_and_non_counting(tmp_path: Path) -> None
     inv = _web_inv(tmp_path, elog, max_tool_calls=1)
     events = await _run_cc(scripted, inv)
 
-    assert any(e["type"] == "agent_output" for e in events)
+    assert any(e["type"] == "agent_result" for e in events)
     assert not any(e["type"] == "error" for e in events)
 
     recs = list(elog.read())

@@ -101,7 +101,7 @@ async def test_gen_close_runs_teardown_before_redrive(tmp_path: Path) -> None:
     assert spawn2["id"] == "bg2"
     tomb = json.loads(results[1]["payload"]["content"])
     assert tomb["status"] == "killed" and tomb["kill_reason"] == "interrupted"
-    assert events[-1]["type"] == "agent_output"
+    assert events[-1]["type"] == "agent_result"
 
 
 @pytest.mark.anyio
@@ -151,7 +151,7 @@ async def test_bash_kill_emits_no_tool_killed(tmp_path: Path) -> None:
     runner = AnthropicAgentRunner(model_name="m", client_factory=lambda: fake)
     events = [e async for e in runner.run(
         _inv(tmp_path, {"complete_step", "bash"}, event_log=log))]
-    assert events[-1]["type"] == "agent_output"
+    assert events[-1]["type"] == "agent_result"
     assert "tool_killed" not in [e["type"] for e in log.read()]
     kill_result = json.loads(
         [e for e in log.read() if e["type"] == "tool_result"][1]["payload"]["content"])
@@ -228,5 +228,5 @@ async def test_cap_warning_reaches_hooked_event_log_from_wait_tick(
     runner = AnthropicAgentRunner(model_name="m", client_factory=lambda: fake)
     events = [e async for e in runner.run(
         _inv(tmp_path, {"complete_step", "bash"}, event_log=log))]
-    assert events[-1]["type"] == "agent_output"
+    assert events[-1]["type"] == "agent_result"
     assert "runner_warning" in hooked                # rode the on_event hook

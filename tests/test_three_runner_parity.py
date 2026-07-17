@@ -1,10 +1,10 @@
 """Three-runner parity fixture (spec §12 acceptance #2).
 
-Same agent definition. Same canned conversation. Same agent_output.
+Same agent definition. Same canned conversation. Same agent_result.
 
 Each runner gets a fake client wired to emit one assistant turn with a
 single complete_step tool_use carrying {"status": "Success", "note": "p"}.
-The terminal event is `agent_output`; we assert the payload is identical
+The terminal event is `agent_result`; we assert the payload is identical
 across the three.
 """
 
@@ -91,19 +91,19 @@ EXPECTED = {"status": "Success", "note": "p"}
 async def _drive(runner: Any, inv: AgentInvocation) -> Any:
     final: Any = None
     async for ev in runner.run(inv):
-        if ev["type"] == "agent_output":
+        if ev["type"] == "agent_result":
             final = ev["payload"]
     return final
 
 
 def _assert_event_log_parity(events_path: Path) -> None:
     """Assert that the event log contains the required audit event kinds:
-    step_context + user_message + llm_response (spec §5.3 parity assertion)."""
+    step_context + engine_message + agent_message (spec §5.3 parity assertion)."""
     events = [json.loads(line) for line in events_path.read_text().splitlines() if line.strip()]
     kinds = {e["type"] for e in events}
     assert "step_context" in kinds, f"missing step_context in {kinds}"
-    assert "user_message" in kinds, f"missing user_message in {kinds}"
-    assert "llm_response" in kinds, f"missing llm_response in {kinds}"
+    assert "engine_message" in kinds, f"missing engine_message in {kinds}"
+    assert "agent_message" in kinds, f"missing agent_message in {kinds}"
 
 
 @pytest.mark.anyio

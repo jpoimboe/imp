@@ -94,11 +94,11 @@ async def test_runs_to_complete_step(tmp_path: Path) -> None:
 
     log_types = [e["type"] for e in log.read()]
     assert "step_context" in log_types
-    assert "user_message" in log_types
-    assert "llm_response" in log_types
+    assert "engine_message" in log_types
+    assert "agent_message" in log_types
     # audit events are NOT yielded any more — only control signals
-    assert [e["type"] for e in control_events(yielded)] == ["agent_output"]
-    resp = next(e for e in log.read() if e["type"] == "llm_response")
+    assert [e["type"] for e in control_events(yielded)] == ["agent_result"]
+    resp = next(e for e in log.read() if e["type"] == "agent_message")
     assert "raw" in resp["payload"]
     assert resp["agent_id"] == "step:p/s"
     assert yielded[-1]["payload"] == {"status": "Success", "note": "ok"}
@@ -152,7 +152,7 @@ async def test_resume_from_existing_transcript(tmp_path: Path) -> None:
         events.append(ev)
 
     kinds = [e["type"] for e in events]
-    assert kinds[-1] == "agent_output"
+    assert kinds[-1] == "agent_result"
     # Initial-messages were NOT re-appended because transcript was non-empty.
     loaded = t.load()
     # Original 3 + new assistant turn = 4 messages.
@@ -311,8 +311,8 @@ async def test_runs_subagent_via_task(tmp_path: Path, provider_registry) -> None
     async for ev in runner.run(replace(inv, event_log=log)):
         events.append(ev)
 
-    # The terminal event is the parent's agent_output, NOT the subagent's.
-    assert events[-1]["type"] == "agent_output"
+    # The terminal event is the parent's agent_result, NOT the subagent's.
+    assert events[-1]["type"] == "agent_result"
     assert events[-1]["payload"] == {"status": "Success"}
     # tool_call and tool_result go to the log, not the yield stream
     log_types = [e["type"] for e in log.read()]
@@ -374,8 +374,8 @@ async def test_bare_turn_end_resume_delivers_reply_then_continues(
 
     types = [e["type"] for e in log.read()]
     assert "awaiting_user_input" in types
-    assert types.index("user_message") < types.index("llm_response")
-    assert events[-1]["type"] == "agent_output"
+    assert types.index("user_message") < types.index("agent_message")
+    assert events[-1]["type"] == "agent_result"
     loaded = t.load()
     assert len(loaded) == 4
     assert loaded[2].role == "user"
@@ -504,7 +504,7 @@ async def test_response_wait_is_request_bracketed(tmp_path: Path) -> None:
     inv = dataclasses.replace(_inv(tmp_path), coordinator=coord)
     events = [e async for e in runner.run(inv)]
 
-    assert events[-1]["type"] == "agent_output"
+    assert events[-1]["type"] == "agent_result"
     # request_active is armed while awaiting each of the 3 streamed events.
     assert sum(1 for s in snaps if s) >= 3
     assert coord.request_active is False
@@ -527,7 +527,7 @@ async def test_continuation_resumes_then_completes(tmp_path: Path) -> None:
     inv = replace(_inv(tmp_path, event_log=log),
                   continuation_fn=lambda _last: ("please call complete_step", False))
     events = [e async for e in runner.run(inv)]
-    assert events[-1]["type"] == "agent_output"
+    assert events[-1]["type"] == "agent_result"
 
 
 @pytest.mark.anyio
@@ -776,7 +776,7 @@ async def test_openai_llm_response_records_served_model(tmp_path: Path) -> None:
     async for _ev in runner.run(_inv(tmp_path, event_log=log)):
         pass
 
-    resp = next(e for e in log.read() if e["type"] == "llm_response")
+    resp = next(e for e in log.read() if e["type"] == "agent_message")
     assert resp["payload"]["model"] == "gpt-served-fallback"      # served, not configured
     assert "duration_ms" in resp["payload"]
     assert resp["payload"]["duration_ms"] >= 0
@@ -796,7 +796,7 @@ async def test_openai_llm_response_records_request_id(tmp_path: Path) -> None:
     async for _ev in runner.run(_inv(tmp_path, event_log=log)):
         pass
 
-    resp = next(e for e in log.read() if e["type"] == "llm_response")
+    resp = next(e for e in log.read() if e["type"] == "agent_message")
     assert resp["payload"]["request_id"] == "req_openai_xyz"
 
 
@@ -817,7 +817,7 @@ async def test_llm_response_carries_context_tokens(tmp_path: Path) -> None:
                                client_factory=lambda: fake)
     async for _ in runner.run(_inv(tmp_path, event_log=log)):
         pass
-    resp = next(e for e in log.read() if e["type"] == "llm_response")
+    resp = next(e for e in log.read() if e["type"] == "agent_message")
     # No cache fields, so the canonical value is input_tokens (not total_tokens).
     assert resp["payload"]["context_tokens"] == 1234
 
@@ -831,7 +831,7 @@ async def test_subagent_bare_turn_end_returns_text(tmp_path: Path) -> None:
                                client_factory=lambda: fake)
     inv = replace(_inv(tmp_path, event_log=log), subagent_depth=1)
     events = [e async for e in runner.run(inv)]
-    outs = [e for e in events if e["type"] == "agent_output"]
+    outs = [e for e in events if e["type"] == "agent_result"]
     assert outs and outs[-1]["payload"] == {"text": "the final conclusion"}
     assert not any(e["type"] == "error" for e in events)
 
@@ -855,9 +855,9 @@ async def test_subagent_bare_turn_end_resume_returns_deliverable(
     inv = replace(_inv(tmp_path, event_log=log), subagent_depth=1)
 
     yielded = [ev async for ev in runner.run(inv)]
-    assert [e["type"] for e in control_events(yielded)] == ["agent_output"]
+    assert [e["type"] for e in control_events(yielded)] == ["agent_result"]
     assert yielded[-1]["payload"] == {"text": "the conclusion"}
-    assert not any(e["type"] == "llm_response" for e in log.read())
+    assert not any(e["type"] == "agent_message" for e in log.read())
 
 
 @pytest.mark.anyio
@@ -865,7 +865,7 @@ async def test_bare_turn_end_retry_continue_uses_engine_continuation_not_user_me
     tmp_path: Path,
 ) -> None:
     """openai retry-continue on a bare turn-end: no awaiting_user_input, no
-    user_message; the nudge is an internal engine_continuation event."""
+    user_message; the nudge is an internal engine_message/continuation event."""
     from dataclasses import replace
 
     from imp.agents.transcript import Transcript
@@ -902,9 +902,11 @@ async def test_bare_turn_end_retry_continue_uses_engine_continuation_not_user_me
     types = [e["type"] for e in log.read()]
     assert "awaiting_user_input" not in types
     assert "user_message" not in types
-    assert "engine_continuation" in types
-    cont = next(e for e in log.read() if e["type"] == "engine_continuation")
-    assert cont["payload"] == {"text": _CONTINUATION_NUDGE}
+    assert "engine_message" in types
+    cont = next(e for e in log.read() if e["type"] == "engine_message")
+    assert cont["payload"] == {
+        "role": "user", "subtype": "continuation",
+        "content": [{"type": "text", "text": _CONTINUATION_NUDGE}]}
     loaded = t.load()
     assert loaded[2].role == "user"
     assert loaded[2].content[0].text == _CONTINUATION_NUDGE
