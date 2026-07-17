@@ -16,11 +16,12 @@ from typing import Any
 
 from imp.engine import worktree
 from imp.engine.errors import LayoutMismatch, LoadError, LoadErrors
+from imp.engine.event_migrations import migrate_events
 from imp.engine.seed import seed_workflow_start
-from imp.engine.state import JsonlEventLog, State
+from imp.engine.state import JsonlEventLog, State, parse_events_jsonl
 from imp.engine.types import SourceLoc
 
-LAYOUT_VERSION = 5  # bump in the SAME commit as any breaking quest-home layout/schema change
+LAYOUT_VERSION = 6  # bump in the SAME commit as any breaking quest-home layout/schema change
 
 
 def _write_quest_json(meta_path: Path, meta: dict[str, Any]) -> None:
@@ -133,11 +134,45 @@ def _migrate_v4_to_v5(quest_dir: Path) -> None:
     _write_quest_json(meta_path, meta)
 
 
+def _rewrite_events_jsonl(path: Path, events: list[dict[str, Any]]) -> None:
+    """Atomically overwrite events.jsonl (tmp + fsync + os.replace) with one
+    compact JSON object per line — the on-disk shape JsonlEventLog._persist writes."""
+    fd, tmp_name = tempfile.mkstemp(prefix=".events-", dir=path.parent)
+    try:
+        with os.fdopen(fd, "w") as f:
+            for ev in events:
+                f.write(json.dumps(ev))
+                f.write("\n")
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp_name, path)
+    except BaseException:
+        with contextlib.suppress(FileNotFoundError):
+            os.unlink(tmp_name)
+        raise
+
+
+def _migrate_v5_to_v6(quest_dir: Path) -> None:
+    """v5->v6: rewrite events.jsonl from the pre-triad schema to the triad schema
+    (hutu62) via migrate_events, then stamp layout_version. The event rewrite
+    precedes the version stamp so a failed rewrite leaves the home at v5 and the
+    migration re-runs on the next load."""
+    events_path = quest_dir / "events.jsonl"
+    if events_path.exists():
+        migrated = migrate_events(parse_events_jsonl(events_path.read_bytes()))
+        _rewrite_events_jsonl(events_path, migrated)
+    meta_path = quest_dir / "quest.json"
+    meta = json.loads(meta_path.read_text())
+    meta["layout_version"] = 6
+    _write_quest_json(meta_path, meta)
+
+
 _MIGRATIONS: dict[tuple[int, int], Callable[[Path], None]] = {
     (1, 2): _migrate_v1_to_v2,
     (2, 3): _migrate_v2_to_v3,
     (3, 4): _migrate_v3_to_v4,
     (4, 5): _migrate_v4_to_v5,
+    (5, 6): _migrate_v5_to_v6,
 }
 
 
