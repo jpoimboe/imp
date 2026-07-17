@@ -474,7 +474,7 @@ def test_run_to_completion_fast_on_streaming_slave_pinning_grandchild(
     # alive ~0.2 s while it does. Continuous output keeps select() always
     # readable, so ONLY a per-iteration poll() check lets Phase 1 exit — a
     # not-readable-branch-only poll() would stall to the hard cap. Phase 2 then
-    # stops on `grace` expiry.
+    # stops on the first QUIET (the grandchild's inter-byte gap).
     pidfile = tmp_path / "gc.pid"
     gc_pid: int | None = None
     try:
