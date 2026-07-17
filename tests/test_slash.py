@@ -308,13 +308,51 @@ def test_hint_and_help_describe_ctrlc_leave_without_esc(tmp_path: Path) -> None:
     quest = _FakeChange(tmp_path)
     out: list[str] = []
     handle_slash_line("/help", quest=quest, output_fn=out.append)
+    ctrl_d_line = next(line for line in out if "Ctrl+D" in line)
     ctrl_c_line = next(line for line in out if "Ctrl+C" in line)
 
-    # Pre-live quests use "Leave this conversation" wording; neither surface
-    # says "interrupt" or advertises ESC as a key.
-    assert "Leave this conversation" in ctrl_c_line
+    # Ctrl+D carries "Leave this conversation" for pre-live quests; Ctrl+C does not
+    # advertise ESC as a key.
+    assert "Leave this conversation" in ctrl_d_line
     assert "Esc" not in ctrl_c_line
-    assert "interrupt" not in ctrl_c_line.lower()
+
+
+def test_help_ctrlc_and_ctrld_are_separate_lines(tmp_path: Path) -> None:
+    from imp.cli.slash import _help
+
+    # Not-materialized: Ctrl+D = leave wording; Ctrl+C = clear/interrupt wording.
+    out: list[str] = []
+    _help(out.append, materialized=False)
+    ctrl_d_lines = [line for line in out if "Ctrl+D" in line]
+    ctrl_c_lines = [line for line in out if "Ctrl+C" in line]
+    assert len(ctrl_d_lines) == 1
+    assert len(ctrl_c_lines) == 1
+    assert "Leave this conversation" in ctrl_d_lines[0]
+    assert "Clear the typed line, or interrupt a running step" in ctrl_c_lines[0]
+    # No combined "Ctrl+C / Ctrl+D" line
+    assert not any("Ctrl+C / Ctrl+D" in line for line in out)
+
+    # Materialized: Ctrl+D = pause wording; Ctrl+C = clear/interrupt wording.
+    out_mat: list[str] = []
+    _help(out_mat.append, materialized=True)
+    ctrl_d_mat = [line for line in out_mat if "Ctrl+D" in line]
+    ctrl_c_mat = [line for line in out_mat if "Ctrl+C" in line]
+    assert len(ctrl_d_mat) == 1
+    assert len(ctrl_c_mat) == 1
+    assert "Pause and exit" in ctrl_d_mat[0]
+    assert "Clear the typed line, or interrupt a running step" in ctrl_c_mat[0]
+
+
+def test_echo_command_followed_by_one_blank_line(tmp_path: Path) -> None:
+    # _echo_command must emit the caret echo AND a trailing blank so the output
+    # body is separated from the echoed command by exactly one blank line.
+    quest = _FakeChange(tmp_path)
+    out: list[str] = []
+    handle_slash_line("/help", quest=quest, output_fn=out.append)
+    # out[0] = "> /help" (echo), out[1] = "" (blank), out[2] = first help line
+    assert out[0] == "> /help"
+    assert out[1] == ""
+    assert out[2] != ""  # body starts immediately after the blank
 
 
 def test_ask_line_with_slash_pins_driver_toolbar_below_the_prompt(tmp_path: Path) -> None:

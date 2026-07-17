@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import Any
 
 EMPTY_PROMPT_HINT = "press ctrl-d to pause & exit"
-DEFAULT_HINT = "type a message, or /help for commands"
+DEFAULT_HINT = "type a message, or /help"
 
 
 def _prompt_message_text(question: str, *, color: bool, width: int = 80,

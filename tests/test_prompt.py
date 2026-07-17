@@ -194,13 +194,13 @@ def test_message_plain_question_still_sits_above_the_caret() -> None:
 
 
 def test_placeholder_hint_is_the_dim_reply_prompt() -> None:
-    assert _placeholder_text(color=False) == "type a message, or /help for commands"
-    assert _placeholder_text(color=True) == "\x1b[2mtype a message, or /help for commands\x1b[0m"
+    assert _placeholder_text(color=False) == "type a message, or /help"
+    assert _placeholder_text(color=True) == "\x1b[2mtype a message, or /help\x1b[0m"
 
 
 def test_default_hint_constant_is_the_shared_copy() -> None:
     from imp.cli.prompt import DEFAULT_HINT
-    assert DEFAULT_HINT == "type a message, or /help for commands"
+    assert DEFAULT_HINT == "type a message, or /help"
     assert "/model" not in DEFAULT_HINT
 
 
@@ -244,14 +244,14 @@ async def test_ask_async_caret_prefix_at_root() -> None:
     assert captured["msg"] == "> "                        # `> ` caret, body at col 2
     assert captured["prompt_continuation"](80, 1, False) == "  "
     # The plain hint must still render (not None) even with color off.
-    assert captured["placeholder"] == "type a message, or /help for commands"
+    assert captured["placeholder"] == "type a message, or /help"
 
 
 def test_placeholder_text_accepts_custom_text() -> None:
-    assert _placeholder_text(color=False, text="type a message, or /help for commands") \
-        == "type a message, or /help for commands"
-    assert _placeholder_text(color=True, text="type a message, or /help for commands") \
-        == "\x1b[2mtype a message, or /help for commands\x1b[0m"
+    assert _placeholder_text(color=False, text="a custom placeholder") \
+        == "a custom placeholder"
+    assert _placeholder_text(color=True, text="a custom placeholder") \
+        == "\x1b[2ma custom placeholder\x1b[0m"
 
 
 @pytest.mark.anyio
@@ -267,8 +267,8 @@ async def test_ask_async_opening_hint_overrides_placeholder() -> None:
 
     prompt = Prompt(color=False, _session_factory=lambda: _SpySession())
     await prompt.ask_async(question="What's on your mind?",
-                           hint="type a message, or /help for commands")
-    assert captured["placeholder"] == "type a message, or /help for commands"
+                           hint="a custom placeholder")
+    assert captured["placeholder"] == "a custom placeholder"
 
     captured_color: dict[str, object] = {}
 
@@ -279,10 +279,10 @@ async def test_ask_async_opening_hint_overrides_placeholder() -> None:
 
     prompt_color = Prompt(color=True, _session_factory=lambda: _SpySessionColor())
     await prompt_color.ask_async(question="What's on your mind?",
-                                 hint="type a message, or /help for commands")
+                                 hint="a custom placeholder")
     ph = captured_color["placeholder"]
     assert isinstance(ph, ANSI)
-    assert ph.value == "\x1b[2mtype a message, or /help for commands\x1b[0m"
+    assert ph.value == "\x1b[2ma custom placeholder\x1b[0m"
 
 
 @pytest.mark.anyio
