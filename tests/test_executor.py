@@ -4138,3 +4138,36 @@ async def test_per_step_counters_do_not_sum(tmp_path: Path) -> None:
     result = await run_quest(quest, on_event=lambda _e: None)
     assert result is RunResult.COMPLETED           # neither counter tripped the cap
     assert calls == {"r1": 7, "r2": 7}             # 6 reworks + 1 approve each
+
+
+@pytest.mark.anyio
+async def test_unknown_tool_grant_surfaces_as_warning_event(tmp_path: Path) -> None:
+    """AC 3(c): each unrecognized deny_tools/allow_tools entry surfaces as exactly
+    one `warning` event in the run narrative, carrying the exact skew copy — and,
+    once per process, only on the capturing entry (a same-process re-entry does
+    NOT re-append the skew warnings)."""
+    quest, _, _ = _seed_minimal_workflow(tmp_path)
+    writer = tmp_path / "imp" / "workflows" / "imp" / "agents" / "writer.md"
+    writer.write_text(
+        "---\nname: writer\n"
+        "deny_tools: [bogus_deny]\nallow_tools: [bogus_allow]\n"
+        "output:\n  status: {type: enum, values: [Success, Error]}\n---\ngo\n"
+    )
+    _register_fake({"status": "Success"})
+
+    events: list[dict] = []
+    await run_quest(quest, on_event=events.append)   # first entry: captures + warns
+    await run_quest(quest, on_event=events.append)   # re-entry: gated, no re-warn
+
+    skew = [
+        e["payload"]["message"]
+        for e in events
+        if e["type"] == "warning"
+        and "unknown to this engine" in e["payload"]["message"]
+    ]
+    assert skew == [
+        "writer: deny_tools lists 'bogus_deny', unknown to this engine "
+        "— ignoring (workflow/engine version skew?)",
+        "writer: allow_tools lists 'bogus_allow', unknown to this engine "
+        "— ignoring (workflow/engine version skew?)",
+    ]

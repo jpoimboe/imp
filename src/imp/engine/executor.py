@@ -375,11 +375,12 @@ async def run_quest(
     # without revisiting (all git calls already pass explicit control_root).
     try:
         snapshot_key = str(quest.quest_dir)
-        if snapshot_key in _SNAPSHOT_CAPTURED:
-            workflow_refreshed = False
-        else:
+        captured_this_entry = snapshot_key not in _SNAPSHOT_CAPTURED
+        if captured_this_entry:
             workflow_refreshed = _refresh_workflow_snapshot(quest)
             _SNAPSHOT_CAPTURED.add(snapshot_key)
+        else:
+            workflow_refreshed = False
         config = load_effective_config(
             project_root=quest.project_root, control_root=quest.control_root,
         ).config
@@ -405,6 +406,12 @@ async def run_quest(
             on_event=_liveness_on_event(coordinator, on_event, state, quest.state_dir))
         if workflow_refreshed:
             _emit(log, "workflow_refreshed", {}, agent_id=None)
+        if captured_this_entry:
+            for warning_message in workflow.load_warnings:
+                _emit(log, "warning",
+                      {"source": "workflow_load", "message": warning_message,
+                       "detail": {}},
+                      agent_id=None)
         # First-resume bootstrap for a deferred backlog draft: an unstarted,
         # never-seeded stub (step None, has_started False) had its cursor + vars
         # deferred at creation. Seed now, before backfill, so apply_var_overrides
