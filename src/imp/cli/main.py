@@ -355,12 +355,13 @@ def _pause_reason(events: list[dict[str, Any]]) -> _PauseInfo | _PauseBanner | N
     pause (the error's detail.last_agent_text, else its message — the full cause
     text, multi-line allowed; the renderer splits its first line as the red
     summary from the remaining body lines). The event log is cumulative across
-    resume, so each error is paired
-    with the workflow_paused that immediately follows it; only an error in the
-    terminal pause's own segment contributes a cause. An interrupt pause with no
-    error in its segment renders the bare reason, even when an earlier segment
-    terminated. Returns _PauseBanner.STALE when the latest segment ended without
-    its own segment-terminal event — a resume with no workflow_paused (or, for a
+    resume, so only an error with no intervening step_started before the pause
+    contributes a cause — a recovered transient error followed by a step_started
+    is dropped, and only the causal error (same invocation, no step start after
+    it) reaches the pause. An interrupt pause with no error in its segment
+    renders the bare reason, even when an earlier segment terminated. Returns
+    _PauseBanner.STALE when the latest segment ended without its own
+    segment-terminal event — a resume with no workflow_paused (or, for a
     draft, conversation_saved) after it — so the stored reason is a fossil;
     _pause_facts then classifies it — the unexpected-death banner only when
     daemon.stderr holds a crash traceback (e.g. a workflow LoadError at daemon
@@ -382,6 +383,8 @@ def _pause_reason(events: list[dict[str, Any]]) -> _PauseInfo | _PauseBanner | N
             resume_pending = True
         elif t == "conversation_saved":
             resume_pending = False
+        elif t == "step_started":
+            pending_error = None
         elif t == "error":
             pending_error = e.get("payload") or {}
     if resume_pending:
