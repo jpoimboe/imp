@@ -96,6 +96,10 @@ EventCallback = Callable[[dict[str, Any]], None]
 
 OUTCOME_HISTORY_K = 4
 
+# Quest homes (keyed by quest_dir) whose snapshot this PROCESS already captured
+# — captured at most once per process to stay version-consistent with this loader.
+_SNAPSHOT_CAPTURED: set[str] = set()
+
 
 def _record_outcome(
     state: State, step_name: str, output: dict[str, Any], head: str,
@@ -370,7 +374,12 @@ async def run_quest(
     # process (the foreground CLI model). Do not parallelize runs in-process
     # without revisiting (all git calls already pass explicit control_root).
     try:
-        workflow_refreshed = _refresh_workflow_snapshot(quest)
+        snapshot_key = str(quest.quest_dir)
+        if snapshot_key in _SNAPSHOT_CAPTURED:
+            workflow_refreshed = False
+        else:
+            workflow_refreshed = _refresh_workflow_snapshot(quest)
+            _SNAPSHOT_CAPTURED.add(snapshot_key)
         config = load_effective_config(
             project_root=quest.project_root, control_root=quest.control_root,
         ).config

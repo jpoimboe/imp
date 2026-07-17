@@ -272,22 +272,35 @@ async def test_refresh_dropping_cursor_step_pauses_unknown_step(tmp_path: Path) 
 
 
 @pytest.mark.anyio
-async def test_self_edit_picked_up_on_reentry(tmp_path: Path) -> None:
-    """A change whose live workflow source was edited (self-edit) sees that edit
-    in its snapshot on the next re-entry (the completed change is re-entered,
-    not resumed from a pause), with one workflow_refreshed event."""
+async def test_self_edit_not_adopted_same_process(tmp_path: Path) -> None:
+    """AC 1(b): the snapshot is captured once per process. A live-source edit
+    made AFTER the first entry is NOT adopted on a later entry in the same
+    process — no swap, no workflow_refreshed event. (A merged workflow change is
+    adopted only on the next fresh daemon.)"""
     quest, _, _ = _seed_minimal_workflow(tmp_path)
     _register_fake({"status": "Success"})
-    await run_quest(quest, on_event=lambda _e: None)   # snapshot v1
+    await run_quest(quest, on_event=lambda _e: None)          # first entry: captures
 
     writer = tmp_path / "imp" / "workflows" / "imp" / "agents" / "writer.md"
-    writer.write_text(writer.read_text() + "\nedited-by-self\n")
+    writer.write_text(writer.read_text() + "\nlate-edit\n")
 
     events: list[dict] = []
-    await run_quest(quest, on_event=events.append)      # re-entry re-snapshots
+    await run_quest(quest, on_event=events.append)            # second entry: gated
     snap_writer = quest.quest_dir / "workflow" / "agents" / "writer.md"
-    assert "edited-by-self" in snap_writer.read_text()
-    assert sum(1 for e in events if e["type"] == "workflow_refreshed") == 1
+    assert "late-edit" not in snap_writer.read_text()
+    assert not [e for e in events if e["type"] == "workflow_refreshed"]
+
+
+@pytest.mark.anyio
+async def test_new_quest_snapshots_on_first_entry(tmp_path: Path) -> None:
+    """AC 1(c): a brand-new quest still gets its initial snapshot on the first
+    run_quest entry (the gate skips only second-and-later entries)."""
+    quest, _, _ = _seed_minimal_workflow(tmp_path)
+    _register_fake({"status": "Success"})
+    assert not (quest.quest_dir / "workflow").exists()
+
+    await run_quest(quest, on_event=lambda _e: None)
+    assert (quest.quest_dir / "workflow" / "workflow.yaml").exists()
 
 
 def _load_workflow_and_config(quest):
@@ -389,7 +402,11 @@ async def test_resume_reconciles_new_step_override_keeps_pinned(tmp_path: Path) 
         "      - {name: w2, file: agents/writer.md, tier: high, differ_from: w}\n"
     )
 
-    await run_quest(quest, on_event=lambda _e: None)   # resume: refresh + reconcile
+    # A merged workflow change is adopted on a FRESH daemon, not a same-process
+    # re-entry: clear the once-per-process gate to model that process restart.
+    from imp.engine import executor as _executor
+    _executor._SNAPSHOT_CAPTURED.clear()
+    await run_quest(quest, on_event=lambda _e: None)   # fresh process: refresh + reconcile
 
     state = State.load(quest.state_dir)
     assert "w2" in state.resolved_steps                        # new step override merged

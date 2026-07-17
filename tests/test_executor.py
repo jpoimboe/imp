@@ -3081,7 +3081,8 @@ async def test_first_run_overlays_project_skills_into_snapshot_user(
     tmp_path: Path,
 ) -> None:
     """At snapshot creation, project_root/imp/skills/*.md land in the snapshot's
-    skills/user/; a resume re-snapshots and picks up a changed source skill."""
+    skills/user/; a later same-process entry does NOT re-snapshot, so a changed
+    source skill is not adopted until a fresh process (once per process)."""
     quest, _, _ = _seed_minimal_workflow(tmp_path)
     _register_fake({"status": "Success"})
     (tmp_path / "imp" / "skills").mkdir(parents=True, exist_ok=True)
@@ -3091,13 +3092,13 @@ async def test_first_run_overlays_project_skills_into_snapshot_user(
     overlaid = quest.quest_dir / "workflow" / "skills" / "user" / "mine.md"
     assert overlaid.read_text() == "# Mine\nv1\n"
 
-    # Resume re-snapshots (escape-hatch inversion): the changed source is picked
-    # up and exactly one workflow_refreshed event is emitted.
+    # Once per process: a source-skill edit AFTER the first capture is NOT
+    # adopted on a later same-process entry — no re-snapshot, no event.
     (tmp_path / "imp" / "skills" / "mine.md").write_text("# Mine\nv2\n")
     events: list[dict] = []
     await run_quest(quest, on_event=events.append)
-    assert overlaid.read_text() == "# Mine\nv2\n"
-    assert sum(1 for e in events if e["type"] == "workflow_refreshed") == 1
+    assert overlaid.read_text() == "# Mine\nv1\n"
+    assert not [e for e in events if e["type"] == "workflow_refreshed"]
 
 
 @pytest.mark.anyio
