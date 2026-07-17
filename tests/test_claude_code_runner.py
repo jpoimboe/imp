@@ -4664,10 +4664,10 @@ async def test_prose_llm_response_precedes_concurrent_sub_agent_tool_call(
     await box["impl_task"]
 
     events = log._events
-    llm_responses = [e for e in events if e["type"] == "agent_message"]
-    assert len(llm_responses) == 1, (
-        f"expected exactly one agent_message, got {len(llm_responses)}")
-    assert llm_responses[0]["payload"]["message_id"] == "m1"
+    agent_messages = [e for e in events if e["type"] == "agent_message"]
+    assert len(agent_messages) == 1, (
+        f"expected exactly one agent_message, got {len(agent_messages)}")
+    assert agent_messages[0]["payload"]["message_id"] == "m1"
     i_llm = next(i for i, e in enumerate(events) if e["type"] == "agent_message")
     i_sub = next(i for i, e in enumerate(events)
                  if e["type"] == "tool_call"
@@ -4756,9 +4756,9 @@ async def test_parallel_sub_agents_emit_single_llm_response_before_both(
     await asyncio.gather(*box["impl_tasks"])
 
     events = log._events
-    llm_responses = [e for e in events if e["type"] == "agent_message"]
-    assert len(llm_responses) == 1, (
-        f"expected exactly one agent_message, got {len(llm_responses)}")
+    agent_messages = [e for e in events if e["type"] == "agent_message"]
+    assert len(agent_messages) == 1, (
+        f"expected exactly one agent_message, got {len(agent_messages)}")
     i_llm = next(i for i, e in enumerate(events) if e["type"] == "agent_message")
     sub_calls = [i for i, e in enumerate(events)
                  if e["type"] == "tool_call"
