@@ -24,7 +24,7 @@ def test_resolve_intent_falls_back_to_first_reply() -> None:
         == "add a 300s timeout"
 
 
-def test_first_genuine_human_turn_skips_the_opening_intent() -> None:
+def test_first_genuine_human_turn_skips_the_intent() -> None:
     events = [_um("intent", "the opening"), _um("reply", "first real answer")]
     assert _first_genuine_human_turn(events) == "first real answer"
 

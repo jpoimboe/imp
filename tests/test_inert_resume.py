@@ -74,9 +74,10 @@ def test_bare_turn_end_question_none_when_answer_marker_follows(
         tmp_path: Path, marker: str) -> None:
     # A real reply (user_message) or a wait-consuming step transition after the
     # gate means the run advanced past the wait -> not parked at a prompt.
+    payload: dict = {"subtype": "reply"} if marker == "user_message" else {}
     ch = _seed_quest_with_events(tmp_path, [
         _gate("Which DB?"),
-        {"type": marker, "payload": {}},
+        {"type": marker, "payload": payload},
     ])
     assert bare_turn_end_question(ch) is None
 

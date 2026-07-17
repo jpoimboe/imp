@@ -87,13 +87,17 @@ def _write_awaiting_user_transcript(quest: Quest, step_name: str) -> Path:
     (tdir / "claude_session").mkdir(parents=True, exist_ok=True)
     (tdir / "claude_session" / "sentinel").write_text("native session bytes")
     # On the armed resume path (is_resume=True) the executor replays the stored
-    # step_context system prompt; a non-empty transcript with NO stored prompt
+    # engine_message/system_prompt; a non-empty transcript with NO stored prompt
     # trips the resume-invariant guard (executor.py:_resume_system_prompt) and
-    # raises before the provider runs. Seed the step_context the first run emitted.
+    # raises before the provider runs. Seed the engine_message the first run emitted.
     quest.event_log().append_step_context(
         agent_id=f"step:only/{step_name}", provider="fake", model="m",
-        system_prompt=f"brainstorm partner. opening: {SEED}",
         tools_schema=[], params={}, max_tool_calls=None)
+    quest.event_log().append(
+        agent_id=f"step:only/{step_name}", type="engine_message",
+        payload={"role": "system", "subtype": "system_prompt",
+                 "content": [{"type": "text",
+                              "text": f"brainstorm partner. opening: {SEED}"}]})
     return tdir
 
 
@@ -109,7 +113,7 @@ def _register_observing_provider(provider_registry, tdir: Path, observed: dict) 
                 Transcript(tdir / "transcript.jsonl").exists_and_nonempty())
             observed["native_store_present_at_run"] = (
                 tdir / "claude_session" / "sentinel").exists()
-            yield {"type": "agent_output",
+            yield {"type": "agent_result",
                    "payload": {"outcome": "ok", "status": "Success"}}
 
         async def interrupt(self) -> None:

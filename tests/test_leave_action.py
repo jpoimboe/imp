@@ -150,11 +150,13 @@ def test_had_exchange_true_for_a_typed_reply() -> None:
 
 
 def test_had_exchange_true_for_a_seed_opening_intent() -> None:
-    assert _had_exchange(_Log([{"type": "opening_intent"}])) is True
+    assert _had_exchange(_Log([
+        {"type": "user_message", "payload": {"subtype": "intent"}}])) is True
 
 
 def test_had_exchange_true_for_user_interjected() -> None:
-    assert _had_exchange(_Log([{"type": "user_interjected"}])) is True
+    assert _had_exchange(_Log([
+        {"type": "user_message", "payload": {"subtype": "interject"}}])) is True
 
 
 def test_renamed_chat_leave_saves(tmp_path: Path) -> None:
