@@ -292,6 +292,67 @@ def test_apply_edit_no_fields_returns_usage_error(tmp_path: Path, monkeypatch) -
     assert msg is not None and "at least one of" in msg
 
 
+def test_apply_edit_depends_on_rejected_for_materialized(
+        tmp_path: Path, monkeypatch) -> None:
+    _seed_control(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    quest = _make_draft(tmp_path, "2026-06-24-edit40")
+    quest.set_depends_on(["A"])
+    meta = _meta(quest)
+    meta["materialized"] = True
+    (quest.quest_dir / "quest.json").write_text(
+        json.dumps(meta, indent=2, sort_keys=True))
+    rc, msg = main.apply_edit(
+        tmp_path, "2026-06-24-edit40", title=None, backlog=False,
+        active=False, depends_on=["B"], clear_deps=False, append_intent=None)
+    assert (rc, msg) == (2, "imp: cannot set dependencies on a materialized quest")
+    # The rejected edit must not have mutated the dependency list.
+    assert _meta(Quest.load(tmp_path, "2026-06-24-edit40"))["depends_on"] == ["A"]
+
+
+def test_apply_edit_clear_deps_rejected_for_materialized(
+        tmp_path: Path, monkeypatch) -> None:
+    _seed_control(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    quest = _make_draft(tmp_path, "2026-06-24-edit41")
+    quest.set_depends_on(["A"])
+    meta = _meta(quest)
+    meta["materialized"] = True
+    (quest.quest_dir / "quest.json").write_text(
+        json.dumps(meta, indent=2, sort_keys=True))
+    rc, msg = main.apply_edit(
+        tmp_path, "2026-06-24-edit41", title=None, backlog=False,
+        active=False, depends_on=None, clear_deps=True, append_intent=None)
+    assert (rc, msg) == (2, "imp: cannot set dependencies on a materialized quest")
+    assert _meta(Quest.load(tmp_path, "2026-06-24-edit41"))["depends_on"] == ["A"]
+
+
+def test_edit_deps_rejected_for_materialized_via_cmd(
+        tmp_path: Path, monkeypatch, capsys) -> None:
+    _seed_control(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    quest = _make_draft(tmp_path, "2026-06-24-edit42")
+    quest.set_depends_on(["A"])
+    meta = _meta(quest)
+    meta["materialized"] = True
+    (quest.quest_dir / "quest.json").write_text(
+        json.dumps(meta, indent=2, sort_keys=True))
+    rc = main._cmd_edit(_edit_args("2026-06-24-edit42", depends_on=["B"]))
+    assert rc == 2
+    assert "cannot set dependencies on a materialized quest" in capsys.readouterr().err
+    assert _meta(Quest.load(tmp_path, "2026-06-24-edit42"))["depends_on"] == ["A"]
+
+
+def test_edit_depends_on_unmaterialized_still_succeeds(
+        tmp_path: Path, monkeypatch) -> None:
+    _seed_control(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    _make_draft(tmp_path, "2026-06-24-edit43")  # create_draft → materialized False
+    rc = main._cmd_edit(_edit_args("2026-06-24-edit43", depends_on=["C"]))
+    assert rc == 0
+    assert _meta(Quest.load(tmp_path, "2026-06-24-edit43"))["depends_on"] == ["C"]
+
+
 def _events(quest: Quest) -> list[dict]:
     path = quest.quest_dir / "events.jsonl"
     return [json.loads(line) for line in path.read_text().splitlines() if line]

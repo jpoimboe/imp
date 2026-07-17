@@ -85,6 +85,22 @@ def test_run_mutation_edit_ambiguous_returns_error(tmp_path: Path) -> None:
     assert "is ambiguous" in result["message"]
 
 
+def test_run_mutation_edit_rejects_materialized_deps(tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+    quest = _draft(tmp_path, "2026-06-24-mut15")
+    quest.set_depends_on(["A"])
+    meta = json.loads((quest.quest_dir / "quest.json").read_text())
+    meta["materialized"] = True
+    (quest.quest_dir / "quest.json").write_text(
+        json.dumps(meta, indent=2, sort_keys=True))
+    result = run_mutation(tmp_path, "edit", {
+        "token": "mut15", "title": None, "backlog": False, "active": False,
+        "depends_on": ["B"], "clear_deps": False, "append_intent": None})
+    assert result["returncode"] == 2
+    assert result["message"] == "imp: cannot set dependencies on a materialized quest"
+    assert _meta(tmp_path, "2026-06-24-mut15")["depends_on"] == ["A"]
+
+
 def test_run_mutation_new_records_backlog(tmp_path: Path) -> None:
     _seed_control(tmp_path)
     result = run_mutation(tmp_path, "new", {

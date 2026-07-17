@@ -3084,6 +3084,9 @@ def apply_edit(
         return 2, (f"imp: {quest_id} is already built; zone moves apply to "
                    "un-materialized quests only (use abandon/pause instead)")
 
+    if dep_change and quest.materialized:
+        return 2, "imp: cannot set dependencies on a materialized quest"
+
     if append_intent is not None:
         conversed = _first_user_message(list(quest.event_log().read())) is not None
         if quest.materialized or conversed:
