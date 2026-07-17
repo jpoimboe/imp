@@ -194,9 +194,50 @@ def test_emit_paused_summary_interrupt_renders_bare_reason(capsys) -> None:
     main._emit_paused_summary(quest)
     out = capsys.readouterr().out
     assert not out.startswith("\n")                    # no leading blank
-    assert "2026-06-12-run-x · interrupt" in out
+    assert "2026-06-12-run-x · (unnamed) · interrupt" in out
     assert out.endswith("\n\n")
     assert not out.endswith("\n\n\n")
+
+
+def test_status_spine_prompt_fallback_dim_and_prefixed_color() -> None:
+    from imp.cli import palette as pal
+    line = main._status_spine("z1", "", "shelved", "wordmark", color=True,
+                              intent="add a dark mode toggle")
+    # the opening-prompt fallback is the dim, `> `-prefixed middle segment
+    assert pal.ansi("> add a dark mode toggle", "dim") in line
+    assert "(unnamed)" not in line
+
+
+def test_status_spine_prompt_fallback_flattens_and_caps_at_60() -> None:
+    line = main._status_spine("z1", "   ", "shelved", "wordmark", color=False,
+                              intent="add a\n   dark   mode\ttoggle " + "y" * 80)
+    # flattened to single spaces, then "> " (2) + 57 chars + "…" = 60 display cols
+    body = "add a dark mode toggle " + "y" * 80
+    assert "> " + body[:57] + "…" in line
+    assert "> " + body[:58] not in line
+
+
+def test_status_spine_unnamed_has_no_prompt_prefix() -> None:
+    line = main._status_spine("z1", "", "shelved", "wordmark", color=False,
+                              intent=None)
+    assert line == "z1 · (unnamed) · shelved"
+    assert "> (unnamed)" not in line
+
+
+def test_status_spine_title_unchanged_when_intent_present() -> None:
+    # A real title wins over the opening prompt: plain, no dim, no `> `.
+    line = main._status_spine("z1", "Real title", "shelved", "wordmark",
+                              color=False, intent="ignored prompt")
+    assert line == "z1 · Real title · shelved"
+
+
+def test_status_spine_prompt_fallback_no_color_is_plain_and_parseable() -> None:
+    line = main._status_spine("z1", "", "shelved", "wordmark", color=False,
+                              intent="when I hit save it crashed")
+    # NO_COLOR / piped: plain ASCII `> `, no ANSI, dot-delimited spine intact
+    assert line == "z1 · > when I hit save it crashed · shelved"
+    assert "\x1b[" not in line
+    assert line.count(" · ") == 2
 
 
 def test_status_spine_named_renders_plain_id_title_tail_structure() -> None:
@@ -205,11 +246,11 @@ def test_status_spine_named_renders_plain_id_title_tail_structure() -> None:
     assert line == "vahi04 · One-line title · completed"
 
 
-def test_status_spine_unnamed_drops_the_title_segment() -> None:
+def test_status_spine_titleless_renders_unnamed_middle_segment() -> None:
     line = main._status_spine("vahi04", "", "completed", "green", color=False)
-    assert line == "vahi04 · completed"
-    # exactly one separator: id · tail, no empty title slot
-    assert line.count(" · ") == 1
+    assert line == "vahi04 · (unnamed) · completed"
+    # exactly two separators now: id · (unnamed) · tail
+    assert line.count(" · ") == 2
 
 
 def test_status_spine_colors_id_gold_and_tail_by_role() -> None:
@@ -290,7 +331,7 @@ def test_handle_terminal_outcome_threads_runner_warning_messages(monkeypatch) ->
     captured: dict = {}
     monkeypatch.setattr(
         main, "_emit_completed",
-        lambda ch, *, merged, warnings: captured.update(warnings=warnings))
+        lambda ch, *, merged, warnings, intent: captured.update(warnings=warnings))
     rc = main._handle_terminal_outcome(quest, RunResult.COMPLETED, coord=None)
     assert rc == 0
     assert captured["warnings"] == ["a", "a"]    # ordered messages, not a count
@@ -319,6 +360,7 @@ def test_handle_terminal_outcome_reads_warning_messages_from_archive(monkeypatch
     quest = _Change([])
     quest.control_root = main.Path("/tmp/imp-no-such-worktree-xyz")
     archive_blob = (
+        b'{"type": "opening_intent", "payload": {"text": "resolve me from archive"}}\n'
         b'{"type": "runner_warning", "payload": {"message": "a"}}\n'
         b'{"type": "runner_warning", "payload": {"message": "b"}}\n'
         b'{"type": "step_started", "payload": {"step": "s"}}\n'
@@ -329,10 +371,11 @@ def test_handle_terminal_outcome_reads_warning_messages_from_archive(monkeypatch
     captured: dict = {}
     monkeypatch.setattr(
         main, "_emit_completed",
-        lambda ch, *, merged, warnings: captured.update(warnings=warnings))
+        lambda ch, *, merged, warnings, intent: captured.update(warnings=warnings, intent=intent))
     rc = main._handle_terminal_outcome(quest, RunResult.COMPLETED, coord=None)
     assert rc == 0
     assert captured["warnings"] == ["a", "b"]
+    assert captured["intent"] == "resolve me from archive"
 
 
 class _CtrlDCoord:
@@ -358,6 +401,53 @@ def test_ctrl_d_pause_retains_caret_above_banner(monkeypatch, capsys) -> None:
     assert rc == 1
     ps.assert_called_once()
     assert capsys.readouterr().out == "> \n"   # caret line, then the mocked banner
+
+
+def test_emit_completed_titleless_shows_prompt_fallback(monkeypatch, capsys) -> None:
+    monkeypatch.setattr(main, "should_use_color", lambda stream: False)
+    main._emit_completed(_Change([]), merged=False, intent="add a dark mode toggle")
+    out = capsys.readouterr().out
+    assert "2026-06-12-run-x · > add a dark mode toggle · completed" in out
+    assert "(unnamed)" not in out
+
+
+def test_handle_terminal_outcome_forwards_opening_intent(monkeypatch) -> None:
+    events = [
+        {"type": "opening_intent", "payload": {"text": "add a dark mode toggle"}},
+        {"type": "step_started", "payload": {"step": "s", "kind": "agent"}},
+    ]
+    quest = _Change(events)
+    quest.control_root = main.Path("/tmp/imp-no-such-worktree-xyz")
+    captured: dict = {}
+    monkeypatch.setattr(
+        main, "_emit_completed",
+        lambda ch, *, merged, warnings, intent: captured.update(intent=intent))
+    rc = main._handle_terminal_outcome(quest, RunResult.COMPLETED, coord=None)
+    assert rc == 0
+    assert captured["intent"] == "add a dark mode toggle"
+
+
+def test_emit_merge_blocked_titleless_shows_prompt_fallback(monkeypatch, capsys) -> None:
+    monkeypatch.setattr(main, "should_use_color", lambda stream: False)
+    quest = _Change([{"type": "opening_intent", "payload": {"text": "fix the crash"}}])
+    main._emit_merge_blocked(quest, "worktree_dirty")
+    out = capsys.readouterr().out
+    assert "merge blocked: uncommitted work in the worktree" in out
+    assert "2026-06-12-run-x · > fix the crash" in out   # identity line, prompt fallback
+    assert "(unnamed)" not in out
+
+
+def test_emit_paused_summary_titleless_shows_prompt_fallback(monkeypatch, capsys) -> None:
+    monkeypatch.setattr(main, "should_use_color", lambda stream: False)
+    quest = _Change([
+        {"type": "opening_intent", "payload": {"text": "add a dark mode toggle"}},
+        {"type": "workflow_paused",
+         "payload": {"reason": "interrupt", "interrupt_reason": "interrupt"}},
+    ])
+    main._emit_paused_summary(quest)
+    out = capsys.readouterr().out
+    assert "2026-06-12-run-x · > add a dark mode toggle · interrupt" in out
+    assert "(unnamed)" not in out
 
 
 def test_non_ctrl_d_pause_prints_no_caret(monkeypatch, capsys) -> None:

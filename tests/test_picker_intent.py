@@ -20,7 +20,8 @@ def test_render_shows_intent_for_untitled_candidate() -> None:
         last_iso="2026-06-01T00:00:00+00:00", intent="fix the flaky login test")
     picker = resume_select.ResumePicker(
         [c], now=datetime.now(UTC), color=False, header="pick")
-    assert "fix the flaky login test" in picker.render()
+    # untitled candidate falls back to its opening prompt, `> `-prefixed
+    assert "> fix the flaky login" in picker.render()
 
 
 @pytest.mark.anyio

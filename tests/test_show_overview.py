@@ -215,4 +215,4 @@ def test_overview_subfloor_drops_suffix_no_overflow(tmp_path, monkeypatch) -> No
     row = next(ln for ln in lines if ln.startswith("subf01"))
     assert "spec phase" not in row                    # suffix dropped
     assert "(" not in row.split("please")[0]          # no ` (…)` before NAME
-    assert header.index("NAME") == row.index("please")  # cell width == status_width
+    assert header.index("NAME") == row.index("> please")  # `> ` cell starts at status_width

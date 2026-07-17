@@ -2,8 +2,36 @@ from __future__ import annotations
 
 import shutil
 from datetime import datetime
+from enum import Enum
+from typing import NamedTuple
 
 from imp.cli import palette as pal
+
+# Quoted-prompt prefix, shared so surfaces can't drift; callers apply dim.
+PROMPT_PREFIX = "> "
+
+
+class NameKind(Enum):
+    """Which of the three display-name cases a resolved name is."""
+    TITLE = "title"        # a real title: plain default foreground
+    PROMPT = "prompt"      # titleless, falls back to the opening prompt: dim, `> `-prefixed
+    UNNAMED = "unnamed"    # titleless with no prompt: the dim `(unnamed)` placeholder
+
+
+class ResolvedName(NamedTuple):
+    text: str          # flattened but UNtruncated; callers clip to their own width
+    kind: NameKind
+
+
+def resolve_display_name(title: str | None, intent: str | None) -> ResolvedName:
+    """Resolve (title, intent) to display text plus a case signal for callers to style."""
+    raw = (title or "").strip()
+    if raw:
+        return ResolvedName(raw, NameKind.TITLE)
+    flat = " ".join(intent.split()) if intent else ""
+    if flat:
+        return ResolvedName(flat, NameKind.PROMPT)
+    return ResolvedName("(unnamed)", NameKind.UNNAMED)
 
 
 def relative_age(then_iso: str | None, *, now: datetime) -> str:
@@ -142,25 +170,23 @@ def format_quest_line(*, quest_id: str, title: str, status: str, step: str,
                        color: bool, name_width: int = 80,
                        status_width: int = STATUS_W, dim: bool = False,
                        intent: str | None = None) -> str:
-    raw = title.strip()
     id_pad = f"{quest_id:<{ID_W}}"
     visible = _status_segment(status, step, step_label,
                               phase_label=phase_label, status_width=status_width)
     status_pad = f"{visible:<{status_width}}"
     age_pad = f"{relative_age(last_iso, now=now):<{AGE_W}}"
-    # NAME is the final column, so it needs no trailing pad — only a cap so a
-    # very long name can't spill past the terminal's right edge.
-    if not raw and intent:
-        # The intent fallback is the verbatim opening prompt, which can be
-        # multi-line (e.g. a pasted traceback). Flatten internal whitespace to
-        # single spaces so the NAME cell stays on one row before truncating.
-        name_text = _truncate(" ".join(intent.split()), name_width)
+    # PROMPT fallback gets the `> ` prefix and dim, clipped to name_width.
+    resolved = resolve_display_name(title, intent)
+    if resolved.kind is NameKind.PROMPT:
+        name_text = PROMPT_PREFIX + _truncate(resolved.text,
+                                              name_width - len(PROMPT_PREFIX))
     else:
-        name_text = "(unnamed)" if not raw else _truncate(raw, name_width)
+        name_text = _truncate(resolved.text, name_width)
+    is_fallback = resolved.kind is not NameKind.TITLE
     if dim:
         line = f"{id_pad}  {status_pad}  {age_pad}  {name_text}"
         return pal.ansi(line, "dim", enabled=color)
-    name_cell = pal.ansi(name_text, "dim", enabled=color) if not raw else name_text
+    name_cell = pal.ansi(name_text, "dim", enabled=color) if is_fallback else name_text
     codes = STATUS_COLORS.get(status, ())
     pad = " " * (status_width - len(visible))
     if color:

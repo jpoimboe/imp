@@ -227,20 +227,35 @@ def make_message_reply_fn(message: str | None) -> Callable[[], Awaitable[str]]:
 
 
 # -- end-of-run status lines ------------------------------------------------
-# Every terminal line shares one spine: a gold quest id, a white (default-fg)
-# title, and a dot-joined outcome tail whose color carries meaning (green =
-# success, red = error, gold = everything-else). No glyphs, no dim, flush left,
-# so NO_COLOR / non-TTY output stays plain and script-parseable. Shared by
-# `new`/`resume` and the leave echoes.
+# Every terminal line shares one spine: a gold quest id, a middle display-name
+# segment, and a dot-joined outcome tail whose color carries meaning (green =
+# success, red = error, gold = everything-else). The middle segment is always
+# present via the shared resolver (quest_row.resolve_display_name): a real title
+# is plain, else the opening prompt renders dim with a plain-ASCII `> ` prefix,
+# else the dim `(unnamed)` placeholder. Exception to the old "no dim, no glyphs"
+# rule — but dim is color-only and `> ` is plain ASCII, so NO_COLOR / non-TTY
+# output stays plain and script-parseable. Shared by `new`/`resume` and leaves.
+
+def _spine_name(title: str, intent: str | None, *,
+                color: bool) -> tuple[str, quest_row.NameKind]:
+    """The styled middle name segment and its kind, resolved title→intent→(unnamed)."""
+    resolved = quest_row.resolve_display_name(title, intent)
+    if resolved.kind is quest_row.NameKind.PROMPT:
+        name = quest_row.PROMPT_PREFIX + quest_row._truncate(
+            resolved.text, quest_row.NAME_CAP - len(quest_row.PROMPT_PREFIX))
+    else:
+        name = quest_row._truncate(resolved.text, quest_row.NAME_CAP)
+    if resolved.kind is not quest_row.NameKind.TITLE:
+        name = pal.ansi(name, "dim", enabled=color)
+    return name, resolved.kind
+
 
 def _status_spine(quest_id: str, title: str, tail: str, *tail_codes: str,
-                  color: bool) -> str:
-    """`<id>gold · <title>white · <tail>colored`; the title segment is dropped
-    when the quest has no title (`<id>gold · <tail>colored`)."""
-    stripped = title.strip()
-    mid = f" · {stripped} · " if stripped else " · "
+                  color: bool, intent: str | None = None) -> str:
+    """`<id>gold · <name> · <tail>colored`; the middle segment is always present."""
+    name, _ = _spine_name(title, intent, color=color)
     return (ansi(quest_id, *pal.NODE_COLORS["quest_id"], enabled=color)
-            + mid + ansi(tail, *tail_codes, enabled=color))
+            + f" · {name} · " + ansi(tail, *tail_codes, enabled=color))
 
 
 def _resume_line(token: str, suffix: str = "") -> str:
@@ -269,11 +284,13 @@ def _print_warnings_block(messages: list[str]) -> None:
 
 
 def _emit_completed(quest: Quest, *, merged: bool,
-                    warnings: list[str] | None = None) -> None:
+                    warnings: list[str] | None = None,
+                    intent: str | None = None) -> None:
     """The clean-finish line: one green-tailed spine, then the warnings block."""
     color = should_use_color(sys.stdout)
     tail = f"merged into {quest.base_branch}" if merged else "completed"
-    print(_status_spine(quest.id, quest.title, tail, "green", color=color))
+    print(_status_spine(quest.id, quest.title, tail, "green", color=color,
+                        intent=intent))
     _print_warnings_block(warnings or [])
     print()
 
@@ -306,16 +323,17 @@ _ERROR_LABELS: dict[str, str] = {
 
 
 def _error_block(head: str, body: list[str], quest_id: str, title: str,
-                 *, color: bool) -> list[str]:
+                 *, color: bool, intent: str | None = None) -> list[str]:
     """The shared three-part error block: a red `head` line, `body` lines in the
-    default fg, then the identity line (gold id, ` · `, default-fg title; a bare
-    gold id when the quest has no title). No resume line."""
+    default fg, then the identity line (gold id, ` · `, then the resolved name —
+    the title, else the dim opening-prompt fallback; a bare gold id only when the
+    quest has neither). No resume line."""
     lines = [ansi(head, "red", enabled=color)]
     lines.extend(body)
     ident = ansi(quest_id, *pal.NODE_COLORS["quest_id"], enabled=color)
-    stripped = title.strip()
-    if stripped:
-        ident = f"{ident} · {stripped}"
+    name, kind = _spine_name(title, intent, color=color)
+    if kind is not quest_row.NameKind.UNNAMED:
+        ident = f"{ident} · {name}"
     lines.append(ident)
     return lines
 
@@ -398,6 +416,7 @@ def _pause_is_error(info: _PauseInfo | None) -> bool:
 def _pause_lines(
     name: str, token: str,
     *, info: _PauseInfo | None = None, title: str = "", color: bool,
+    intent: str | None = None,
 ) -> list[str]:
     if _pause_is_error(info):
         assert info is not None
@@ -408,10 +427,10 @@ def _pause_lines(
             first = first.strip()
             head = f"{label}: {first}" if first else label
             body = rest
-        return _error_block(head, body, name, title, color=color)
+        return _error_block(head, body, name, title, color=color, intent=intent)
     tail = info.base if info is not None else "paused"
     return [
-        _status_spine(name, title, tail, "wordmark", color=color),
+        _status_spine(name, title, tail, "wordmark", color=color, intent=intent),
         _resume_line(token),
     ]
 
@@ -447,12 +466,13 @@ def _daemon_stderr_has_crash(path: Path) -> bool:
 
 def _pause_facts(
     quest: Quest, leave_trigger: str | None = None,
-) -> tuple[str, str, str, _PauseInfo | None]:
+) -> tuple[str, str, str, _PauseInfo | None, str | None]:
     name = quest.id
     events = list(quest.event_log().read())
+    opening = _resolve_intent(events)
     if leave_trigger is not None:
         # Deliberate leave: render the trigger locally (daemon reason may lag / read STALE).
-        return name, quest.title, quest.id, _PauseInfo(leave_trigger, None)
+        return name, quest.title, quest.id, _PauseInfo(leave_trigger, None), opening
     reason_val = _pause_reason(events)
     if reason_val is _PauseBanner.STALE:
         if _daemon_stderr_has_crash(quest.quest_dir / "daemon.stderr"):
@@ -464,14 +484,15 @@ def _pause_facts(
             info = _PauseInfo("interrupt", None)
     else:
         info = reason_val
-    return name, quest.title, quest.id, info
+    return name, quest.title, quest.id, info, opening
 
 
 def _emit_paused_summary(quest: Quest, leave_trigger: str | None = None) -> None:
     """The trailing run-status line on a non-interactive pause."""
     color = should_use_color(sys.stdout)
-    name, title, token, info = _pause_facts(quest, leave_trigger)
-    for ln in _pause_lines(name, token, info=info, title=title, color=color):
+    name, title, token, info, opening = _pause_facts(quest, leave_trigger)
+    for ln in _pause_lines(name, token, info=info, title=title, color=color,
+                           intent=opening):
         print(ln)
     print()
 
@@ -483,7 +504,8 @@ def _emit_merge_blocked(
     """Merge couldn't complete — the user must act. Renders the shared three-part
     error block: a red `merge blocked: <summary>` head, the per-reason instruction
     body (plus `note`, then git's own `git said: <detail>`) in the default fg, then
-    the gold `id · title` identity line. No standalone resume line — the inline
+    the gold identity line (`id · title`, or the opening-prompt fallback when the
+    quest has no title). No standalone resume line — the inline
     `imp resume <id>` in the body is the remediation.
 
     `detail` is git's own stderr (carried on the `merge_blocked` event); appended
@@ -512,8 +534,9 @@ def _emit_merge_blocked(
         body.append(note)
     if detail and reason in ("refused", "conflict"):
         body.append(f"git said: {detail.strip()}")
+    opening = _resolve_intent(list(quest.event_log().read()))
     for ln in _error_block(f"merge blocked: {summary}", body, cid, quest.title,
-                           color=color):
+                           color=color, intent=opening):
         print(ln)
     print()
 
@@ -540,7 +563,8 @@ def _handle_terminal_outcome(
         warning_msgs = [
             str((ev.get("payload") or {}).get("message", "?"))
             for ev in events if ev.get("type") == "runner_warning"]
-        _emit_completed(quest, merged=not wt_path.exists(), warnings=warning_msgs)
+        _emit_completed(quest, merged=not wt_path.exists(), warnings=warning_msgs,
+                        intent=_resolve_intent(events))
         return 0
     # PAUSED — surface merge_blocked; every other pause falls through to the summary.
     final_state = State.load(quest.state_dir)
@@ -574,20 +598,22 @@ def _print_leave_disposition(
     """
     color = should_use_color(sys.stdout)
     intent = leave_state.get("intent")
+    opening = _resolve_intent(list(quest.event_log().read()))
     if intent == "abandon":
-        print(_status_spine(quest.id, quest.title, "abandoned", "wordmark", color=color))
+        print(_status_spine(quest.id, quest.title, "abandoned", "wordmark", color=color,
+                            intent=opening))
         print()
         return 0
     disposition = leave_state.get("disposition")
     if disposition == "save":
         print(_status_spine(quest.id, quest.title, "kept as draft", "wordmark",
-                            color=color))
+                            color=color, intent=opening))
         print(_resume_line(quest.id))
         print()
         return 0
     if disposition == "archive":
         print(_status_spine(quest.id, quest.title, "shelved", "wordmark",
-                            color=color))
+                            color=color, intent=opening))
         print(_resume_line(quest.id, " — or find it later with imp search"))
         print()
         return 0
@@ -595,7 +621,7 @@ def _print_leave_disposition(
         return 0
     if leave_state.get("send_failed"):
         print(_status_spine(quest.id, quest.title, "left running", "wordmark",
-                            color=color))
+                            color=color, intent=opening))
         print(_resume_line(quest.id))
         print()
         return 0
