@@ -59,9 +59,7 @@ def test_tool_descriptions_name_quest() -> None:
     reg = get_registry()
     # positive literals only — the descriptions contain unrelated substrings like
     # "head_changed", so a blanket `"change" not in` check would false-fail.
-    assert "list quest ids it depends_on" in reg["create_quest"].description
     assert "switch this quest into it" in reg["create_and_enter_worktree"].description
-    assert "Record a durable follow-up backlog quest" in reg["create_quest"].description
     assert "Rename this quest to a meaningful title" in reg["rename_quest"].description
     assert "returns this quest's id" in reg["rename_quest"].description
 

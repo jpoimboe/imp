@@ -1,6 +1,6 @@
 ---
 name: plan-reviewer
-deny_tools: [rename_quest, create_quest, create_and_enter_worktree, save_and_exit]
+deny_tools: [rename_quest, create_and_enter_worktree, save_and_exit]
 label: reviewing plan
 description: Review the newest plan's prescribed code like a diff for correctness, with a short doc-integrity tail; severity-classified; blocking iff Critical/Major.
 output:

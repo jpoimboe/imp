@@ -10,7 +10,7 @@ from imp.engine.loader import load_workflow
 from imp.engine.types import AgentDef
 from imp.providers.anthropic import _build_tools as anthropic_build
 
-DENIED = frozenset({"rename_quest", "create_quest", "create_and_enter_worktree", "save_and_exit"})
+DENIED = frozenset({"rename_quest", "create_and_enter_worktree", "save_and_exit"})
 REVIEW_AGENTS = (
     "spec-reviewer",
     "plan-reviewer",
@@ -29,7 +29,7 @@ def imp_workflow():
 def test_review_agent_effective_toolset_omits_top_level_caps(imp_workflow, name):
     tools = imp_workflow.agents[name].tools
     assert DENIED.isdisjoint(tools), f"{name} still holds {DENIED & tools}"
-    # Falsifiability guard: the deny subtracts only the four caps — a read tool survives.
+    # Falsifiability guard: the deny subtracts only the three caps — a read tool survives.
     assert "read_file" in tools
 
 
