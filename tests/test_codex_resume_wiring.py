@@ -304,7 +304,7 @@ async def test_resume_missing_complete_step_continues_with_nudge(tmp_path: Path)
 
 
 @pytest.mark.anyio
-async def test_awaiting_user_retry_continue_journals_engine_continuation_not_user_message(
+async def test_awaiting_user_retry_continue_journals_continuation_not_user_message(
     tmp_path: Path,
 ) -> None:
     """codex retry-continue of a bare-turn-end AWAITING_USER (derived from

@@ -140,7 +140,7 @@ async def test_codex_live_round_trip_under_production_flags(tmp_path: Path) -> N
             json.loads(ln) for ln in ev_lines
             if ln and json.loads(ln).get("type") == "tool_call"
         ]
-        # Success = the round-trip completed: agent_output yielded AND at least
+        # Success = the round-trip completed: agent_result yielded AND at least
         # one tool_call recorded (proves the codex->server round-trip works with
         # `network_access_enabled=False`).
         if any(e.get("type") == "agent_result" for e in events) and tool_calls:

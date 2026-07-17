@@ -85,7 +85,7 @@ async def test_teardown_runs_on_no_complete_step_error_exit(
     """The `finally:` in run() must tear down on EVERY exit path, not just
     interrupt(). Here a degenerate top-level agent (no continuation_fn) ends its
     turn without calling complete_step: run() returns silently — drive_invocation
-    surfaces the errored (no agent_output) result downstream — but the finally
+    surfaces the errored (no agent_result) result downstream — but the finally
     must still tear the codex_home down."""
     _seed_git_and_auth(tmp_path)
     # A turn that completes WITHOUT calling complete_step. With no continuation_fn

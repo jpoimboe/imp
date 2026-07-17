@@ -5,7 +5,7 @@ from imp.providers.codex_runner import process_event
 from tests.codex_fakes import agent_message, turn_completed
 
 
-def test_turn_completed_attaches_normalized_usage_to_last_llm_response() -> None:
+def test_turn_completed_attaches_normalized_usage_to_last_agent_message() -> None:
     """Codex emits FLAT usage keys: `cached_input_tokens` →
     `cache_read_tokens`, `reasoning_output_tokens` → reasoning bucket. Do NOT
     rely on `_normalize_usage`'s OpenAI nested-key picker — it silently records
@@ -36,7 +36,7 @@ def test_turn_completed_attaches_normalized_usage_to_last_llm_response() -> None
     assert usage.get("reasoning_output_tokens") == 100
 
 
-def test_turn_completed_lands_context_tokens_on_last_llm_response() -> None:
+def test_turn_completed_lands_context_tokens_on_last_agent_message() -> None:
     elog = InMemoryEventLog()
     state: dict[str, Any] = {"pending_usage": None, "auth_mode": "chatgpt"}
     process_event(agent_message("done"), elog=elog, agent_id="step:a",
@@ -56,7 +56,7 @@ def test_turn_completed_lands_context_tokens_on_last_llm_response() -> None:
 def test_turn_completed_stashes_normalized_usage_in_proc_state() -> None:
     """The Tier A watch reads proc_state['pending_usage']; process_event must
     populate it with the SAME anthropic-shaped normalized dict it attaches to
-    the llm_response (fresh = total - cached; cached -> cache_read)."""
+    the agent_message (fresh = total - cached; cached -> cache_read)."""
     elog = InMemoryEventLog()
     state: dict[str, Any] = {"pending_usage": None, "auth_mode": "chatgpt"}
     process_event(agent_message("done"), elog=elog, agent_id="step:a",

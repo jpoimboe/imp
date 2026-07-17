@@ -198,7 +198,7 @@ async def test_interactive_nudge_recovers_with_complete_step_on_second_turn(
     runner._canonical_auth_override = tmp_path / "auth.json"
     inv = _inv_with_continuation(tmp_path, continuation_fn=_cont)
     events = [ev async for ev in runner.run(inv)]
-    # Second turn captured complete_step; runner yields agent_output, not error.
+    # Second turn captured complete_step; runner yields agent_result, not error.
     outs = [e for e in events if e.get("type") == "agent_result"]
     assert len(outs) == 1 and outs[0]["payload"]["status"] == "ok"
     # continuation_fn was called exactly once with turn-1's last text.

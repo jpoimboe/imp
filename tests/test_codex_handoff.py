@@ -160,7 +160,7 @@ async def test_below_threshold_does_not_elicit_codex_handoff(tmp_path: Path) -> 
 async def test_completing_turn_above_threshold_completes_not_handoff(
         tmp_path: Path) -> None:
     """Completion wins over a mere crossing: a turn that crosses the threshold
-    (350000/400000 = 0.875) AND calls complete_step yields agent_output, never a
+    (350000/400000 = 0.875) AND calls complete_step yields agent_result, never a
     handoff. Pins the ordering invariant (complete_step check precedes crossing
     detection) against a reordering regression."""
     _seed_git_and_auth(tmp_path)

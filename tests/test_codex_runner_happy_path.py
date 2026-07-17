@@ -88,7 +88,7 @@ def _build_invocation(
 
 
 @pytest.mark.anyio
-async def test_run_yields_agent_output_when_complete_step_captured(
+async def test_run_yields_agent_result_when_complete_step_captured(
     tmp_path: Path,
 ) -> None:
     _seed_git_and_auth(tmp_path)
@@ -272,7 +272,7 @@ async def test_codex_gen_close_runs_teardown(tmp_path: Path) -> None:
     impossible to break at a mid-stream yield and call gen.aclose() from the
     same task. Cancellation is equivalent for the finally assertion.
 
-    Construction mirrored from test_run_yields_agent_output_when_complete_step_captured
+    Construction mirrored from test_run_yields_agent_result_when_complete_step_captured
     (same file): _seed_git_and_auth, _canonical_auth_override, FakeCodex
     client_factory, _build_invocation — adapted to add bash to agent_def.tools.
     """

@@ -235,7 +235,7 @@ async def test_awaiting_user_resume_injects_reply_not_system_prompt(
     # persisted rollout; stub it so the test exercises the prompt-selection branch.
     monkeypatch.setattr(
         "imp.providers.codex_rollout.restore_rollout", lambda **k: "thr-1")
-    # Pre-seed events.jsonl: a tail llm_response (agent asked a question) plus the
+    # Pre-seed events.jsonl: a tail agent_message (agent asked a question) plus the
     # awaiting_user_input event the wait_for_user tool journals before pausing.
     (tmp_path / "events.jsonl").write_text(
         json.dumps({

@@ -115,7 +115,7 @@ def test_non_task_item_completed_still_emits_call_and_result() -> None:
     assert "id_ns" not in next(e for e in rows if e["type"] == "tool_result")["payload"]
 
 
-def test_preamble_prose_llm_response_precedes_tool_calls() -> None:
+def test_preamble_prose_agent_message_precedes_tool_calls() -> None:
     elog = InMemoryEventLog()
     state = {"web_search_enabled": False}
     run_state = RunState(cap=10, agent_id="step:t")
@@ -137,7 +137,7 @@ def test_preamble_prose_llm_response_precedes_tool_calls() -> None:
     assert llms[0]["payload"]["usage"]  # usage attached to the prose response
 
 
-def test_summary_prose_llm_response_follows_tool_calls() -> None:
+def test_summary_prose_agent_message_follows_tool_calls() -> None:
     elog = InMemoryEventLog()
     state = {"web_search_enabled": False}
     run_state = RunState(cap=10, agent_id="step:t")
