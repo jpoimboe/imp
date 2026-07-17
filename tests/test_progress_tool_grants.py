@@ -68,14 +68,15 @@ def test_allowable_tools_disjoint_from_base_caps() -> None:
     assert ALLOWABLE_TOOLS.isdisjoint(BASE_CAPS)
 
 
-def test_allow_tools_unknown_tool_raises(tmp_path: Path) -> None:
+def test_allow_tools_unknown_tool_kept_not_fatal(tmp_path: Path) -> None:
+    """An unknown allow entry no longer raises at parse time: it is kept verbatim
+    (its unknown-ness becomes a non-fatal load warning)."""
     p = _write_agent_md(
         tmp_path / "x.md",
         frontmatter="name: x\nallow_tools: [bogus_tool]",
     )
-    with pytest.raises(LoadError) as ei:
-        parse_agent_file(p)
-    assert "bogus_tool" in str(ei.value) and "allow_tools" in str(ei.value)
+    agent = parse_agent_file(p)
+    assert agent.allow_tools == frozenset({"bogus_tool"})
 
 
 def test_tools_and_allow_tools_conflict_raises(tmp_path: Path) -> None:

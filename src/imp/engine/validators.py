@@ -42,6 +42,7 @@ def validate(
     _v_differ_from_targets_exist(workflow, errors)
     _v_subagent_forbidden_tools(workflow, errors)
     _v_project_refs(workflow, project_keys, errors)
+    _v_unknown_tool_grants(workflow, warnings)
 
     return errors, warnings
 
@@ -357,3 +358,21 @@ def _v_project_refs(
                     agent.source,
                     hint=f"configured project keys: {sorted(known)}",
                 ))
+
+
+def _v_unknown_tool_grants(workflow: Workflow, warnings: list[LoadError]) -> None:
+    """Warn (not raise) on a deny/allow_tools entry unknown to this engine."""
+    from imp.engine.loader import ALLOWABLE_TOOLS, DENYABLE_TOOLS
+    for agent in workflow.agents.values():
+        for tool in sorted(agent.deny_tools - DENYABLE_TOOLS):
+            warnings.append(LoadError(
+                f"{agent.name}: deny_tools lists '{tool}', unknown to this "
+                f"engine — ignoring (workflow/engine version skew?)",
+                agent.source,
+            ))
+        for tool in sorted(agent.allow_tools - ALLOWABLE_TOOLS):
+            warnings.append(LoadError(
+                f"{agent.name}: allow_tools lists '{tool}', unknown to this "
+                f"engine — ignoring (workflow/engine version skew?)",
+                agent.source,
+            ))

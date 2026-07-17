@@ -1222,6 +1222,18 @@ def test_wait_for_head_has_no_hold_glyph(tmp_path: Path) -> None:
     assert step.glyph is None
 
 
+def test_shipped_workflow_has_no_unknown_tool_grant_warnings(tmp_path: Path) -> None:
+    """AC 3(d): the runtime load path is now lenient on an unknown grant, so a
+    real typo in a shipped agent's deny_tools/allow_tools would silently no-op.
+    Guard it in CI: loading the shipped default workflow must yield ZERO
+    unknown-grant warnings."""
+    asset = Path("src/imp/assets/workflows/imp").resolve()
+    shutil.copytree(asset, tmp_path / "wf")
+    wf = load_workflow(tmp_path / "wf")
+    skew = [w for w in wf.load_warnings if "unknown to this engine" in w]
+    assert skew == [], skew
+
+
 def test_loop_budget_prose_is_de_hardcoded() -> None:
     base = Path("src/imp/assets/workflows/imp/agents")
     for fname in ("deferred-sweep.md", "finalize.md", "task-lead.md"):

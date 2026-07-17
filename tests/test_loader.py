@@ -824,8 +824,9 @@ def test_parse_agent_tools_and_deny_tools_conflict(tmp_path: Path) -> None:
     assert "deny_tools" in str(ei.value) and "not both" in str(ei.value)
 
 
-def test_parse_agent_deny_tools_unknown_name_rejected(tmp_path: Path) -> None:
-    """A typo'd deny entry would silently no-op; reject it at parse time."""
+def test_parse_agent_deny_tools_unknown_name_kept_not_fatal(tmp_path: Path) -> None:
+    """An unknown deny entry is no longer fatal at parse time: it is kept
+    verbatim (its unknown-ness is surfaced later as a non-fatal load warning)."""
     p = write_agent_md(
         tmp_path / "x.md",
         frontmatter=(
@@ -833,9 +834,8 @@ def test_parse_agent_deny_tools_unknown_name_rejected(tmp_path: Path) -> None:
             "output:\n  status: {type: enum, values: [Success, Error]}"
         ),
     )
-    with pytest.raises(LoadError) as ei:
-        parse_agent_file(p)
-    assert "bsah" in str(ei.value) and "deny_tools" in str(ei.value)
+    agent = parse_agent_file(p)
+    assert agent.deny_tools == frozenset({"bash", "bsah"})
 
 
 def test_parse_agent_deny_tools_real_name_other_context_ok(tmp_path: Path) -> None:

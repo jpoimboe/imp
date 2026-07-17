@@ -229,6 +229,7 @@ class Workflow:
     workflow_dir: Path
     source: SourceLoc
     persona_source: str = ""
+    load_warnings: tuple[str, ...] = ()  # non-fatal validator warning messages
 
     def flat_steps(self) -> tuple[Step, ...]:
         return tuple(s for p in self.phases for s in p.steps)

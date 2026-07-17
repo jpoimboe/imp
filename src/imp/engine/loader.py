@@ -117,28 +117,12 @@ def parse_agent_file(path: Path) -> AgentDef:
     ):
         raise LoadError("'deny_tools' must be a list of strings", source)
     deny_tools = frozenset(deny_raw or [])
-    unknown_deny = deny_tools - DENYABLE_TOOLS
-    if unknown_deny:
-        raise LoadError(
-            "'deny_tools' names tools that are never default-granted "
-            f"(no-op): {sorted(unknown_deny)}; denyable tools are "
-            f"{sorted(DENYABLE_TOOLS)}",
-            source,
-        )
     allow_raw = fm.get("allow_tools")
     if allow_raw is not None and not (
         isinstance(allow_raw, list) and all(isinstance(x, str) for x in allow_raw)
     ):
         raise LoadError("'allow_tools' must be a list of strings", source)
     allow_tools = frozenset(allow_raw or [])
-    unknown_allow = allow_tools - ALLOWABLE_TOOLS
-    if unknown_allow:
-        raise LoadError(
-            "'allow_tools' names tools that are not opt-in-grantable: "
-            f"{sorted(unknown_allow)}; allowable tools are "
-            f"{sorted(ALLOWABLE_TOOLS)}",
-            source,
-        )
     subagents = tuple(fm.get("subagents") or [])
 
     drivers_raw = fm.get("drivers")
@@ -208,15 +192,15 @@ TOP_LEVEL_CAPS: frozenset[str] = frozenset(
 
 # The maximal default grant any agent can receive. deny_tools only ever
 # subtracts from this set, so a deny entry outside it is a silent no-op
-# (almost always a typo). Validated at parse time. Subagents receive a
-# subset of this, so denying e.g. rename_quest on a subagent is a harmless
-# no-op rather than an error — the name is real, just not in that context.
+# (almost always a typo). Surfaced as a non-fatal load warning. Subagents
+# receive a subset of this, so denying e.g. rename_quest on a subagent is a
+# harmless no-op rather than an error — the name is real, just not in that context.
 DENYABLE_TOOLS: frozenset[str] = BASE_CAPS | TOP_LEVEL_CAPS | frozenset({"sub_agent"})
 
 # Tools removed from the default grant that an agent may re-request via
 # allow_tools:. An allow_tools entry outside this set is a no-op/typo,
-# validated at parse time. Disjoint from BASE_CAPS: a tool is either
-# default-granted or opt-in, never both.
+# surfaced as a non-fatal load warning. Disjoint from BASE_CAPS: a tool is
+# either default-granted or opt-in, never both.
 ALLOWABLE_TOOLS: frozenset[str] = frozenset({"update_step_label"})
 
 
@@ -224,7 +208,7 @@ def _effective_tools(agent: AgentDef, is_sub: bool) -> frozenset[str]:
     if agent.explicit_tools:
         return frozenset(agent.tools)
     effective = set(BASE_CAPS)
-    effective |= agent.allow_tools
+    effective |= (agent.allow_tools & ALLOWABLE_TOOLS)
     if not is_sub:
         effective |= TOP_LEVEL_CAPS
         if agent.subagents:
@@ -928,4 +912,5 @@ def load_workflow(
         raise LoadErrors(errors=errors, warnings=warnings)
     for w in warnings:
         print(str(w), file=sys.stderr)
-    return workflow
+    return dataclasses.replace(
+        workflow, load_warnings=tuple(w.message for w in warnings))
