@@ -72,6 +72,11 @@ bookkeeping. Ask the CLI instead:
 - `imp events search <query>` — the same substring search over structured event
   content (tool calls, results, reasoning) across all quests, reaching what `imp
   search` (prose only) can't; `--type` / `--agent` narrow it.
+- `imp edit <id>` — link or annotate a quest that hasn't run yet: `--append-intent
+  "[<quest>] <note>"` cross-links a note onto another quest's opening intent (only
+  while that quest is still an untouched draft — rejected once it's been built or even
+  conversed with); `--depends-on <id>` adds a dependency edge (only before go-live —
+  rejected once materialized).
 - `imp help`, `imp <cmd> --help` — the command list, or one command's flags.
 
 The event log is unbounded — filter (`--step`, `--agent`, `--limit`) rather than
@@ -84,7 +89,7 @@ layered broad→narrow (`all.md` → every agent; `<workflow>/<step>.md` → one
 Keep each memory very succinct and use it sparingly — every line is injected into
 agent context on every run; for anything long, keep a doc and point the memory at
 its path. Don't hand-edit the tree — record a change with a memory quest:
-`imp new --workflow memory "<what to change>"`.
+`imp new --workflow memory --background "<what to change>"`.
 
 ## More depth
 

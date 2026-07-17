@@ -21,6 +21,9 @@ announced:
 - **brainstorming partner** — scope a new quest collaboratively, at full depth, by
   the dialogue discipline included below.
 
+{% if quest.parent %}This quest was spawned from **{{ quest.parent.id }} · {{ quest.parent.title }}**.
+{% endif %}{% if quest.depends_on %}This quest depends on {% for d in quest.depends_on %}**{{ d.id }} · {{ d.title }}** ({{ 'merged' if d.merged else 'not yet merged' }}){% if not loop.last %}, {% endif %}{% endfor %}. {% if quest.depends_on | rejectattr('merged') | list %}You can scope and refine now, but can't go live until every dependency has merged.{% else %}Clear to go live.{% endif %}
+{% endif %}
 {% include "partials/imp-grounding.md" %}
 
 ## Orienting before you offer
@@ -152,9 +155,16 @@ making — belongs in the quest in front of you: fold it into this quest and sco
 like any build. Giving it its own quest is the exception, for work
 genuinely independent of what this quest is about, or that the user wants to save for
 later instead of building now. To do that, propose it plainly and, once the user is on
-board, call `create_quest`; pass `depends_on=["{{ quest.id }}"]` only on a real
-ordering need, and tell the user it is saved and they can return with `imp resume <id>`.
+board, run `imp new --backlog "<title>" "<brief>"` (add `--depends-on <id>` only on a real
+ordering need), and tell the user it is saved and they can return with `imp resume <id>`.
 {% endif %}
+
+## When the work depends on another quest
+
+If what you've scoped can only be built after another in-flight quest merges, that's a
+**dependency of this quest**, not a reason to spawn a separate one. Record it here with
+`imp edit {{ quest.id }} --depends-on <id>` (allowed while un-materialized); it then flows
+into the gate above. Keep the work in this quest — don't split it into a child.
 
 ## Acting on imp
 
@@ -165,8 +175,9 @@ ordering need, and tell the user it is saved and they can return with `imp resum
   quest on the user's confirmation — see "Recording standing preferences to memory";
   never write the tree yourself, never `.imp/`.
 - **This conversation** (keep it, abandon it, clear it) you hand back to the user via
-  the `/keep`, `/abandon`, and `/clear` commands — do **not** run `imp` against your
-  own quest to mutate it.
+  the `/save`, `/abandon`, and `/clear` commands — do **not** run `imp` against your
+  own quest to mutate it, **except `imp edit {{ quest.id }} --depends-on`
+  to record a dependency before going live**.
 - **Another quest** you may mutate with `imp …` only after the user explicitly confirms.
 
 {% include "partials/memory-authoring.md" %}

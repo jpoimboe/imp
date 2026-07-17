@@ -251,7 +251,7 @@ def test_finalize_walks_open_items_fix_defer_ignore() -> None:
     assert "one item per turn" not in low
     assert "recommendation" in low
     assert "fix now" in low
-    assert "create_quest" in low
+    assert "imp new --backlog" in low
     assert "seeded" in low
     assert "ignored-at-gate" in low
     # Prose, not a labelled field-dump.
@@ -681,9 +681,9 @@ def test_threshold_adopts_discovered_work_by_default(tmp_path) -> None:
     assert "fold it into this quest" in attended
     # Spin-off is demoted to the exception, not a first-class move.
     assert "is the exception" in attended
-    # The create_quest capability survives, in condensed conditional form.
-    assert "create_quest" in attended
-    assert 'depends_on=["abc"]' in attended
+    # The imp new capability survives, in condensed conditional form.
+    assert "imp new --backlog" in attended
+    assert "--depends-on <id>" in attended
     assert "imp resume" in attended
     # The old spin-off-first section and its framing are gone.
     assert "## Splitting off a separate change" not in attended
@@ -691,17 +691,16 @@ def test_threshold_adopts_discovered_work_by_default(tmp_path) -> None:
     assert "before calling `create_quest`" not in attended
 
     # Autonomous runs omit the whole {% if not run.autonomous %} block. Its
-    # `depends_on=["abc"]` bullet appears nowhere else in the rendered prompt, so
-    # its absence proves the block was dropped. (`create_quest` itself now also
-    # appears in the always-rendered memory-authoring partial, so it is no longer a
-    # valid proxy.)
+    # `imp new --backlog` command appears only in that block (the always-rendered
+    # memory-authoring partial uses `imp new --workflow memory --background`), so
+    # its absence proves the block was dropped.
     autonomous = render_prompt(body, build_context(
         quest_title="t", event_log=log, quest_id="abc",
         quest_home=".imp/quests/abc", autonomous=True,
         project_facts={}),
         workflow_dir=bundled_workflow_dir("imp"))
     assert "## Keep discovered work here by default" not in autonomous
-    assert 'depends_on=["abc"]' not in autonomous
+    assert "imp new --backlog" not in autonomous
 
 
 def test_task_lead_sources_human_decision_bar() -> None:
@@ -911,7 +910,7 @@ def test_finalize_seed_paths_embed_test_identity() -> None:
     text = FINALIZE.read_text()
     low = text.lower()
     # Both the autonomous seed and the interactive defer embed the test identity
-    # in the new change's create_quest description.
+    # in the new quest's `imp new` brief.
     assert low.count("must embed the failing test's identity") >= 2
     assert "node id / name / signature" in low
 

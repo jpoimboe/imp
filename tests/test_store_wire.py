@@ -46,8 +46,17 @@ def test_quest_card_none_and_bytes_survive_round_trip() -> None:
     card = QuestCard(
         quest_id="q1", status="active", step="plan", last="", title="Q",
         created="", step_label=None, phase_label=None, base_branch="main",
-        merge_commit=None, depends_on=["dep"], intent="why", summary=b"done\n")
+        merge_commit=None, parent={"id": "par1", "title": "Parent"},
+        depends_on=[{"id": "dep", "title": "Dep", "merged": True}],
+        intent="why", summary=b"done\n")
     assert _card_from_wire(_json_round_trip(_card_to_wire(card))) == card
+    card2 = QuestCard(
+        quest_id="q1", status="active", step="plan", last="", title="Q",
+        created="", step_label=None, phase_label=None, base_branch="main",
+        merge_commit=None, parent=None,
+        depends_on=[{"id": "dep", "title": "Dep", "merged": True}],
+        intent="why", summary=b"done\n")
+    assert _card_from_wire(_json_round_trip(_card_to_wire(card2))) == card2
 
 
 def test_completed_row_survives_round_trip() -> None:

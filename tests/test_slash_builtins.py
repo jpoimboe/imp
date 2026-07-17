@@ -58,22 +58,22 @@ def test_abandon_is_in_the_help_text() -> None:
     assert any("/abandon" in line for line in lines)
 
 
-def test_keep_builtin_returns_literal_for_the_gate_loop(tmp_path: Path) -> None:
-    # /keep is a built-in (NOT a skill): it returns the literal so the session gate
-    # loop (cli/session_terminal) records the keep-as-draft intent and detaches.
+def test_save_builtin_returns_literal_for_the_gate_loop(tmp_path: Path) -> None:
+    # /save is a built-in (NOT a skill): it returns the literal so the session gate
+    # loop (cli/session_terminal) records the save-as-draft intent and detaches.
     quest = SimpleNamespace(control_root=tmp_path)
     out: list[str] = []
-    result = handle_slash_line("/keep", quest=quest, output_fn=out.append)
-    assert result == "/keep"
+    result = handle_slash_line("/save", quest=quest, output_fn=out.append)
+    assert result == "/save"
     assert not any("no such skill" in line for line in out)
 
 
-def test_keep_is_in_the_help_text() -> None:
+def test_save_is_in_the_help_text() -> None:
     from imp.cli.slash import _help
     lines: list[str] = []
     _help(lines.append, materialized=False)
-    assert any("/keep" in line for line in lines)
-    assert not any("/save" in line for line in lines)
+    assert any("/save" in line for line in lines)
+    assert not any("/keep" in line for line in lines)
 
 
 def test_clear_builtin_returns_literal_for_the_gate_loop(tmp_path: Path) -> None:
@@ -115,7 +115,7 @@ def test_help_prelive_lists_leave_commands_and_leave_keybinding() -> None:
     lines: list[str] = []
     _help(lines.append, materialized=False)
     body = "\n".join(lines)
-    assert "/keep" in body
+    assert "/save" in body
     assert "/shelve" in body
     assert "/clear" in body
     assert "/abandon" in body
@@ -133,7 +133,7 @@ def test_help_materialized_omits_leave_commands_and_uses_pause_keybinding() -> N
     body = "\n".join(lines)
     # Command lines are absent (leading-space format distinguishes from "shelved"
     # in the /list description which contains "/shelved" as a substring).
-    assert not any(line.strip().startswith("/keep") for line in lines)
+    assert not any(line.strip().startswith("/save") for line in lines)
     assert not any(line.strip().startswith("/shelve") for line in lines)
     assert not any(line.strip().startswith("/clear") for line in lines)
     assert "/abandon" in body                       # stays available live
@@ -141,7 +141,7 @@ def test_help_materialized_omits_leave_commands_and_uses_pause_keybinding() -> N
     assert "Leave this conversation" not in body
 
 
-@pytest.mark.parametrize("command", ["/keep", "/shelve", "/clear"])
+@pytest.mark.parametrize("command", ["/save", "/shelve", "/clear"])
 def test_leave_command_on_materialized_quest_is_rejected(
     tmp_path: Path, command: str,
 ) -> None:
@@ -158,13 +158,13 @@ def test_leave_command_on_materialized_quest_is_rejected(
     result = handle_slash_line(command, quest=quest, output_fn=out.append)
     assert result is REPROMPT                        # no disposition literal returned
     expected = (
-        "/keep, /shelve, and /clear apply only before a quest is built — this "
+        "/save, /shelve, and /clear apply only before a quest is built — this "
         "one is live. Press Ctrl-D to pause it (resume with imp resume mat9), "
         "or /abandon to tear it down.")
     assert any(expected in line for line in out)
 
 
-@pytest.mark.parametrize("command", ["/keep", "/shelve", "/clear"])
+@pytest.mark.parametrize("command", ["/save", "/shelve", "/clear"])
 def test_leave_command_on_prelive_quest_returns_literal(
     tmp_path: Path, command: str,
 ) -> None:
@@ -241,12 +241,12 @@ def test_skills_is_echoed_with_caret(tmp_path: Path) -> None:
 
 
 PRE_SESSION_REDIRECT = (
-    "/keep, /shelve, and /clear apply to a conversation already under way — "
+    "/save, /shelve, and /clear apply to a conversation already under way — "
     "there's nothing to leave yet. Press Ctrl-D to keep this quest as a draft "
     "(resume with imp resume pre9), or /abandon to tear it down.")
 
 
-@pytest.mark.parametrize("command", ["/keep", "/shelve", "/clear"])
+@pytest.mark.parametrize("command", ["/save", "/shelve", "/clear"])
 def test_leave_command_pre_session_shows_redirect(
     tmp_path: Path, command: str,
 ) -> None:
@@ -261,7 +261,7 @@ def test_leave_command_pre_session_shows_redirect(
     assert out[0] == f"> {command}"          # command is echoed with the caret
 
 
-@pytest.mark.parametrize("command", ["/keep", "/shelve", "/clear"])
+@pytest.mark.parametrize("command", ["/save", "/shelve", "/clear"])
 def test_leave_command_pre_session_takes_precedence_over_materialized(
     tmp_path: Path, command: str, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -321,7 +321,7 @@ def test_help_pre_session_omits_leave_trio_keeps_abandon() -> None:
     lines: list[str] = []
     _help(lines.append, materialized=False, pre_session=True)
     body = "\n".join(lines)
-    assert not any(line.strip().startswith("/keep") for line in lines)
+    assert not any(line.strip().startswith("/save") for line in lines)
     assert not any(line.strip().startswith("/shelve") for line in lines)
     assert not any(line.strip().startswith("/clear") for line in lines)
     assert "/abandon" in body

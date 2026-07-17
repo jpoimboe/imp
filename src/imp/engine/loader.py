@@ -204,7 +204,7 @@ BASE_CAPS: frozenset[str] = frozenset({
     "symbol_outline",
 })
 TOP_LEVEL_CAPS: frozenset[str] = frozenset(
-    {"rename_quest", "create_quest", "create_and_enter_worktree"})
+    {"rename_quest", "create_and_enter_worktree", "save_and_exit"})
 
 # The maximal default grant any agent can receive. deny_tools only ever
 # subtracts from this set, so a deny entry outside it is a silent no-op

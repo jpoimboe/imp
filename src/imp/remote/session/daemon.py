@@ -12,7 +12,7 @@ import anyio
 
 from imp.agents.compaction import compact_transcript
 from imp.agents.skills import load_user_skill
-from imp.cli.store_proxy import build_query_handler
+from imp.cli.mutation_proxy import build_session_handler
 from imp.diagnostics import install_stack_dumper
 from imp.engine.abandon import (
     archive_conversation,
@@ -134,7 +134,7 @@ async def serve_quest_session(
         first_attach_timeout=first_attach_timeout,
         skill_loader=lambda name: load_user_skill(
             quest.workflow_dir / "skills", name),
-        on_query=build_query_handler(quest.control_root),
+        on_query=build_session_handler(quest.control_root, parent_id=quest.id),
     )
 
     async def _bound(*, on_event: Any, user_chat_input_fn: Any) -> Any:

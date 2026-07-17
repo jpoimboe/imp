@@ -10,7 +10,7 @@ from imp.engine.loader import load_workflow
 from imp.engine.types import AgentDef
 from imp.providers.anthropic import _build_tools as anthropic_build
 
-DENIED = frozenset({"rename_quest", "create_quest", "create_and_enter_worktree"})
+DENIED = frozenset({"rename_quest", "create_and_enter_worktree", "save_and_exit"})
 REVIEW_AGENTS = (
     "spec-reviewer",
     "plan-reviewer",

@@ -240,3 +240,23 @@ def test_knowledge_cheatsheet_documents_events_search() -> None:
     assert "(prose only) can't; `--type` / `--agent` narrow it." in body
     # the imp search bullet now names conversation content as its match target
     assert "backlog, and archived quests' conversation content." in body
+
+
+def test_knowledge_memory_line_uses_background_and_carries_imp_edit_bullet() -> None:
+    body = load_internal_skill(_skills_dir(), "imp-knowledge")
+    # the memory-recording line now launches the memory quest in the background
+    assert 'imp new --workflow memory --background "<what to change>"' in body
+    assert 'imp new --workflow memory "<what to change>"' not in body
+    # the new imp edit cheat-sheet bullet, verbatim in its load-bearing parts
+    assert "- `imp edit <id>` — link or annotate a quest that hasn't run yet:" in body
+    # the inline code span wraps across a newline in the source, so assert each
+    # within-line half separately (load_internal_skill returns raw, unnormalized text)
+    assert "--append-intent" in body
+    assert '"[<quest>] <note>"' in body
+    assert "cross-links a note onto another quest's opening intent" in body
+    assert "`--depends-on <id>` adds a dependency edge (only before go-live" in body
+    assert "rejected once materialized)." in body
+    # placement: after the events-search bullet, before the imp help bullet
+    assert (body.index("imp events search <query>")
+            < body.index("imp edit <id>")
+            < body.index("the command list, or one command"))

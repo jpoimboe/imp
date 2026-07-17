@@ -1,6 +1,6 @@
 ---
 name: spec-reviewer
-deny_tools: [rename_quest, create_quest, create_and_enter_worktree]
+deny_tools: [rename_quest, create_and_enter_worktree, save_and_exit]
 label: reviewing spec
 description: Review the spec against the captured intent; severity-classified findings; blocking iff any Critical/Major.
 output:

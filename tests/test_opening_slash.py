@@ -100,7 +100,7 @@ async def test_opening_prompt_intercepts_help_then_returns_intent(
 
 
 @pytest.mark.anyio
-@pytest.mark.parametrize("command", ["/clear", "/keep", "/shelve"])
+@pytest.mark.parametrize("command", ["/clear", "/save", "/shelve"])
 async def test_opening_prompt_leave_verb_shows_pre_session_redirect(
     command: str, capsys: pytest.CaptureFixture[str],
 ) -> None:

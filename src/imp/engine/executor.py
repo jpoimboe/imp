@@ -33,6 +33,7 @@ from imp.agents.runner import (
     TextBlock,
 )
 from imp.agents.skills import overlay_global_skills, overlay_project_skills
+from imp.engine import quest_refs
 from imp.engine import test_lane as _test_lane
 from imp.engine.agent_run import (
     AgentRunResult,
@@ -1626,6 +1627,7 @@ async def _run_agent_invocation(
         rendered = stored
         system_prompt_override: str | None = stored
     else:
+        parent_ref, depends_refs = quest_refs.resolve_for_quest(quest)
         ctx = build_context(
             quest_id=quest.id, quest_title=quest.title,
             quest_home=f".imp/quests/{quest.id}",
@@ -1635,6 +1637,7 @@ async def _run_agent_invocation(
             project_facts=project_facts,
             autonomous=autonomous, opening=opening,
             prior_laps=state.outcome_history.get(step_name, []),
+            parent=parent_ref, depends_on=depends_refs,
         )
         rendered = render_prompt(
             agent_def.prompt_template_source, ctx,

@@ -1,6 +1,6 @@
 ---
 name: gap-check
-deny_tools: [rename_quest, create_quest, create_and_enter_worktree]
+deny_tools: [rename_quest, create_and_enter_worktree, save_and_exit]
 label: checking plan coverage
 description: Run once at end-of-quest to decide whether the implemented plans fully cover the spec, or a corrective plan is needed.
 output:

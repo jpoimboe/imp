@@ -103,6 +103,8 @@ class SessionServer:
             max_buffer_size=_CONTROL_QUEUE_DEPTH)
         self._control_send: MemoryObjectSendStream[tuple[str, str | None]] = ctl_send
         self._control_recv: MemoryObjectReceiveStream[tuple[str, str | None]] = ctl_recv
+        if coordinator is not None:
+            coordinator.set_save_hook(self.request_save)
 
     @property
     def attached_count(self) -> int:
@@ -354,6 +356,9 @@ class SessionServer:
         with contextlib.suppress(anyio.WouldBlock, anyio.ClosedResourceError,
                                  anyio.BrokenResourceError):
             self._control_send.send_nowait((_INTERNAL_PAUSE, None))
+
+    def request_save(self, reason: str | None = None) -> None:
+        self._enqueue_control(CONTROL_SAVE, reason)
 
     def _enqueue_control(self, action: str, reason: str | None = None) -> None:
         if action == CONTROL_ABANDON:

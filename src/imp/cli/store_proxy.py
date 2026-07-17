@@ -69,6 +69,7 @@ def _card_to_wire(c: QuestCard | None) -> dict[str, Any] | None:
             "last": c.last, "title": c.title, "created": c.created,
             "step_label": c.step_label, "phase_label": c.phase_label,
             "base_branch": c.base_branch, "merge_commit": c.merge_commit,
+            "parent": c.parent,
             "depends_on": list(c.depends_on), "intent": c.intent,
             "summary": _b64e(c.summary)}
 
@@ -81,6 +82,7 @@ def _card_from_wire(d: dict[str, Any] | None) -> QuestCard | None:
         last=d["last"], title=d["title"], created=d["created"],
         step_label=d["step_label"], phase_label=d["phase_label"],
         base_branch=d["base_branch"], merge_commit=d["merge_commit"],
+        parent=d["parent"],
         depends_on=list(d["depends_on"]), intent=d["intent"],
         summary=_b64d(d["summary"]))
 
@@ -121,18 +123,6 @@ def run_query(store: Store, op: str, args: dict[str, Any]) -> Any:
         return [_hit_to_wire(h)
                 for h in store.search(args["query"], _zones_from_wire(args["zones"]))]
     raise ValueError(f"unknown store op {op!r}")
-
-
-def build_query_handler(control_root: Any) -> Any:
-    """Daemon on_query: runs store ops off the loop so the reentrant self-read is deadlock-free."""
-    from imp.cli.store import LocalStore
-
-    store = LocalStore(control_root)
-
-    async def _on_query(op: str, args: dict[str, Any]) -> Any:
-        return await anyio.to_thread.run_sync(run_query, store, op, args)
-
-    return _on_query
 
 
 class ProxyStore:

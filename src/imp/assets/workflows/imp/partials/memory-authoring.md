@@ -25,10 +25,8 @@ directory name. When the scope is genuinely ambiguous — one step or the whole
 workflow — ask which the user wants rather than guessing.
 
 **Resolve the scope with the user, then launch a background quest.** Once the user
-is happy with the target scope, call
-`create_quest(workflow='memory', start=True, title="<short title>", description="<a
-clear plain-language intent, including the resolved target scope and whether to add,
-change, or remove>")`. You pass **intent, not file bytes**: the background `memory`
+is happy with the target scope, run
+`imp new --workflow memory --background --title "<short title>" "<a clear plain-language intent, including the resolved target scope and whether to add, change, or remove>"`. You pass **intent, not file bytes**: the background `memory`
 quest resolves the exact file(s), makes the edit off a fresh base tip, validates the
 tree, and lands it through the merge queue. It appears in the **active** list, so
 tell the user it is running and will merge on its own.

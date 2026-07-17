@@ -696,3 +696,59 @@ def test_create_draft_eager_still_fails_fast_on_skew_workflow(tmp_path: Path) ->
         Quest.create_draft(
             tmp_path, title="X", quest_id="dfr3", base_branch="main")
     assert not (tmp_path / ".imp" / "quests" / "dfr3").exists()
+
+
+def test_create_draft_persists_parent_id(tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+    ch = Quest.create_draft(
+        tmp_path, title="X", quest_id="par1", base_branch="main", parent="mom42")
+    meta = json.loads((ch.quest_dir / "quest.json").read_text())
+    assert meta["parent"] == "mom42"
+
+
+def test_create_draft_parent_defaults_none(tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+    ch = Quest.create_draft(
+        tmp_path, title="X", quest_id="par2", base_branch="main")
+    meta = json.loads((ch.quest_dir / "quest.json").read_text())
+    assert meta["parent"] is None
+
+
+def test_load_carries_parent_and_depends_on(tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+    made = Quest.create_draft(
+        tmp_path, title="Child", quest_id="chld01", base_branch="main",
+        parent="prnt01", depends_on=["dep001", "dep002"], defer_seed=True)
+    # The freshly-created instance already carries the fields...
+    assert made.parent == "prnt01"
+    assert made.depends_on == ["dep001", "dep002"]
+    # ...and so does a reload off quest.json.
+    reloaded = Quest.load(tmp_path, "chld01")
+    assert reloaded.parent == "prnt01"
+    assert reloaded.depends_on == ["dep001", "dep002"]
+
+
+def test_load_defaults_parent_none_and_depends_on_empty(tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+    Quest.create(tmp_path, title="X", quest_id="pln001", base_branch="main")
+    q = Quest.load(tmp_path, "pln001")
+    assert q.parent is None
+    assert q.depends_on == []
+
+
+def test_create_returns_instance_carrying_depends_on(tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+    q = Quest.create(tmp_path, title="X", quest_id="pln002", base_branch="main",
+                     depends_on=["dep001"])
+    assert q.depends_on == ["dep001"]
+
+
+def test_set_depends_on_updates_in_memory_field(tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+    q = Quest.create_draft(
+        tmp_path, title="Child", quest_id="chld03", base_branch="main",
+        defer_seed=True)
+    q.set_depends_on(["dep009"])
+    # In-memory field tracks the write (no reload needed).
+    assert q.depends_on == ["dep009"]
+    assert Quest.load(tmp_path, "chld03").depends_on == ["dep009"]

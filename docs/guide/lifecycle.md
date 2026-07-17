@@ -50,7 +50,7 @@ draft is just a conversation and its artifacts on disk.
 When a phase-0 conversation is left, its fate depends on what happened:
 
 - **Never answered / no real exchange** → `discard_conversation` (it goes away).
-- **`imp new`, an explicit `/keep`, or the quest was renamed (a design formed)**
+- **`imp new`, an explicit `/save`, or the quest was renamed (a design formed)**
   → `save_as_draft`: `origin` stays `draft`, so it remains in the active list,
   shown as a **draft**, resumable later. It does **not** move to the backlog.
 - **Otherwise** (an un-renamed `imp chat` conversation) → `archive_conversation`:

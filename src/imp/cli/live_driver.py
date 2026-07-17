@@ -102,6 +102,8 @@ def compose_activity_line(*, activity: nv.Activity, frame: int, color: bool,
     parts.append(_paint(tail, "dim", color=color, over_bg=False))
     if activity.countdown_total is not None and activity.countdown_total >= 60:
         parts.append(_paint("press r to retry now", "dim", color=color, over_bg=False))
+    if activity.dep_wait:
+        parts.append(_paint("press ctrl-d to pause", "dim", color=color, over_bg=False))
     return f"{spin} " + rt.compose_label([p for p in parts if p])
 
 

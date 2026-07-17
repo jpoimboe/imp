@@ -42,6 +42,7 @@ from imp.cli.inert_resume import (
 from imp.cli.init import GitSetupDeclined, IntegrationBranchUnresolved, run_init
 from imp.cli.live_driver import LiveDriver, compose_prelaunch_position_row
 from imp.cli.live_status import LiveStatus
+from imp.cli.mutation_proxy import proxy_mutation, proxy_mutation_async
 from imp.cli.palette import ansi, should_use_color
 from imp.cli.prompt import DEFAULT_HINT, Prompt
 from imp.cli.session_run import (
@@ -897,13 +898,69 @@ def _record_idea(args: argparse.Namespace, control: Path, base: str) -> int:
             control, title=title, quest_id=quest_id, base_branch=base,
             depends_on=list(getattr(args, "depends_on", None) or []),
             workflow=getattr(args, "workflow", None),
-            origin="backlog", seed_opening=seed)
+            origin="backlog", seed_opening=seed, defer_seed=True)
     except (LoadError, LoadErrors) as e:
         print(f"imp: {e}", file=sys.stderr)
         return 2
     _emit_human([f"imp: recorded backlog quest {quest_id} "
                  f"(start it with `imp resume {quest_id}`)"])
     return 0
+
+
+def apply_new(
+    control: Path, *, opening: str | None, title: str | None,
+    workflow: str | None, base: str | None, idea: str | None,
+    depends_on: list[str] | None, parent: str | None = None,
+    background: bool = False,
+) -> tuple[int, str]:
+    """Non-interactive create for the mutation proxy: record a backlog quest or plain draft."""
+    try:
+        resolved_base = _resolve_new_base(control, base)
+    except BaseResolutionError as e:
+        return 2, f"imp: {e}"
+
+    deps = list(depends_on or [])
+    quest_id = new_quest_id(existing_stems=live_stems(control))
+
+    if background:
+        seed = backlog.seed_opening(
+            {"title": title or "", "description": opening or ""})
+        try:
+            Quest.create_draft(
+                control, title=title or "", quest_id=quest_id,
+                base_branch=resolved_base, depends_on=deps, workflow=workflow,
+                origin="draft", seed_opening=seed, parent=parent,
+                defer_seed=True)
+        except (LoadError, LoadErrors) as e:
+            return 2, f"imp: {e}"
+        from imp.remote.daemon import spawn
+        spawn.start_quest(control, quest_id)
+        return 0, (f"imp: started quest {quest_id} (running autonomously in the "
+                   f"background; appears in the active list)")
+
+    if idea is not None:
+        if not idea.strip():
+            return 2, "imp: --backlog title must be non-empty"
+        seed = backlog.seed_opening({"title": idea, "description": opening or ""})
+        try:
+            Quest.create_draft(
+                control, title=idea, quest_id=quest_id, base_branch=resolved_base,
+                depends_on=deps, workflow=workflow, origin="backlog",
+                seed_opening=seed, parent=parent, defer_seed=True)
+        except (LoadError, LoadErrors) as e:
+            return 2, f"imp: {e}"
+        return 0, (f"imp: recorded backlog quest {quest_id} "
+                   f"(start it with `imp resume {quest_id}`)")
+
+    try:
+        Quest.create_draft(
+            control, title=title or "", quest_id=quest_id,
+            base_branch=resolved_base, depends_on=deps, workflow=workflow,
+            origin="draft", seed_opening=opening, parent=parent, defer_seed=True)
+    except (LoadError, LoadErrors) as e:
+        return 2, f"imp: {e}"
+    return 0, (f"imp: created draft {quest_id} "
+               f"(resume with `imp resume {quest_id}`)")
 
 
 def _select_headless(
@@ -965,7 +1022,7 @@ async def _run_fresh_session(
 
 def _backlog_run_only_flag(args: argparse.Namespace) -> str | None:
     if getattr(args, "non_interactive", False):
-        return "--non-interactive"
+        return "--headless"
     if getattr(args, "message", None) is not None:
         return "--message"
     if getattr(args, "autonomous", False):
@@ -1006,6 +1063,15 @@ def _resolve_new_base(control: Path, base_flag: str | None) -> str:
 
 
 async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -> int:
+    if os.environ.get("IMP_SESSION_SOCKET") and leave_mode == "new":
+        return _emit_mutation_result(await proxy_mutation_async("new", {
+            "opening": getattr(args, "opening", None),
+            "title": getattr(args, "title", None),
+            "workflow": getattr(args, "workflow", None),
+            "base": getattr(args, "base", None),
+            "idea": getattr(args, "idea", None),
+            "depends_on": getattr(args, "depends_on", None),
+            "background": getattr(args, "background", False)}))
     install_process_group()
     from imp.cli.signals import InterruptCoordinator
 
@@ -1022,6 +1088,16 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
     if wf_arg is not None and not validate_workflow_name(wf_arg):
         print(f"imp: invalid workflow name {wf_arg!r}", file=sys.stderr)
         return 2
+
+    if getattr(args, "background", False):
+        rc, message = apply_new(
+            control, opening=getattr(args, "opening", None),
+            title=getattr(args, "title", None), workflow=wf_arg,
+            base=getattr(args, "base", None), idea=None,
+            depends_on=list(getattr(args, "depends_on", None) or []),
+            background=True)
+        print(message, file=sys.stderr if rc else sys.stdout)
+        return rc
 
     if getattr(args, "idea", None) is not None:
         if getattr(args, "title", None):
@@ -1083,7 +1159,8 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
         quest = Quest.create_draft(
             control, title=title, quest_id=quest_id, base_branch=base,
             workflow=wf_arg, origin="draft",
-            depends_on=None, seed_opening=None)
+            depends_on=list(getattr(args, "depends_on", None) or []),
+            seed_opening=None)
     except (LoadError, LoadErrors) as e:
         print(f"imp: {e}", file=sys.stderr)
         return 2
@@ -1219,6 +1296,9 @@ def _build_resume_driver(
 
 
 async def _async_cmd_resume(args: argparse.Namespace) -> int:
+    if os.environ.get("IMP_SESSION_SOCKET"):
+        return _emit_mutation_result(
+            await proxy_mutation_async("resume", {"token": args.token}))
     install_process_group()
     from imp.cli.signals import InterruptCoordinator
 
@@ -1702,11 +1782,17 @@ def _quest_card(control: Path, quest_id: str, *, now: datetime,
         "last activity:", quest_row.relative_age(card.last, now=now), 15, color=color))
     if card.base_branch:
         lines.append(_card_field("base_branch:", card.base_branch, 15, color=color))
+    if card.parent:
+        lines.append(_card_field(
+            "parent:", f"{card.parent['id']} · {card.parent['title']}",
+            15, color=color))
+    if card.depends_on:
+        deps = ", ".join(
+            f"{d['id']} · {d['title']} ({'merged' if d['merged'] else 'unmerged'})"
+            for d in card.depends_on)
+        lines.append(_card_field("depends_on:", deps, 15, color=color))
     if card.merge_commit:
         lines.append(_card_field("merge_commit:", card.merge_commit, 15, color=color))
-    if card.depends_on:
-        lines.append(_card_field("depends_on:", ", ".join(card.depends_on),
-                                 15, color=color))
     if card.intent:
         lines.append("")
         lines.append(pal.ansi("intent:", "dim", enabled=color))
@@ -1738,6 +1824,7 @@ def _quest_json(control: Path, quest_id: str) -> dict[str, Any] | None:
         "created": card.created or None,
         "last_activity": card.last or None,
         "base_branch": card.base_branch,
+        "parent": card.parent,
         "depends_on": card.depends_on,
         "intent": card.intent,
         "summary": None,
@@ -2985,52 +3072,79 @@ def _cmd_abandon(args: argparse.Namespace) -> int:
     return _abandon(control, quest_id)
 
 
-def _cmd_edit(args: argparse.Namespace) -> int:
-    control = _control_root()
-    quest_id = _resolve_id(control, args.token)
+def apply_edit(
+    control: Path, quest_id: str, *, title: str | None, backlog: bool,
+    active: bool, depends_on: list[str] | None, clear_deps: bool,
+    append_intent: str | None,
+) -> tuple[int, str | None]:
+    """Return (rc, message) for an `imp edit` mutation so host CLI and daemon proxy share it."""
     quest = Quest.load(control, quest_id)
 
-    zone_change = args.backlog or args.active
-    dep_change = args.depends_on is not None or args.clear_deps
-    if (args.title is None and not zone_change and not dep_change
-            and args.append_intent is None):
-        print("imp: imp edit needs at least one of --title, --backlog/--active, "
-              "--depends-on/--clear-deps, or --append-intent", file=sys.stderr)
-        return 2
+    zone_change = backlog or active
+    dep_change = depends_on is not None or clear_deps
+    if (title is None and not zone_change and not dep_change
+            and append_intent is None):
+        return 2, ("imp: imp edit needs at least one of --title, --backlog/--active, "
+                   "--depends-on/--clear-deps, or --append-intent")
 
     if zone_change and quest.materialized:
-        print(f"imp: {quest_id} is already built; zone moves apply to "
-              "un-materialized quests only (use abandon/pause instead)",
-              file=sys.stderr)
-        return 2
+        return 2, (f"imp: {quest_id} is already built; zone moves apply to "
+                   "un-materialized quests only (use abandon/pause instead)")
 
-    if args.append_intent is not None:
+    if dep_change and quest.materialized:
+        return 2, "imp: cannot set dependencies on a materialized quest"
+
+    if append_intent is not None:
         conversed = _first_user_message(list(quest.event_log().read())) is not None
         if quest.materialized or conversed:
-            print(f"imp: {quest_id} has already started; --append-intent only "
-                  "applies before a quest is picked up", file=sys.stderr)
-            return 2
+            return 2, (f"imp: {quest_id} has already started; --append-intent only "
+                       "applies before a quest is picked up")
 
-    if args.title is not None and args.title != quest.title:
+    if title is not None and title != quest.title:
         if quest.materialized:
-            quest.rename(args.title, log=quest.event_log())
+            quest.rename(title, log=quest.event_log())
         else:
-            quest.set_title(args.title)
-    if args.backlog:
+            quest.set_title(title)
+    if backlog:
         quest.set_origin("backlog")
-    elif args.active:
+    elif active:
         quest.set_origin("draft")
-    if args.clear_deps:
+    if clear_deps:
         quest.set_depends_on([])
-    elif args.depends_on is not None:
-        quest.set_depends_on(args.depends_on)
-    if args.append_intent is not None:
+    elif depends_on is not None:
+        quest.set_depends_on(depends_on)
+    if append_intent is not None:
         existing = quest.seed_opening or ""
         if existing:
-            quest.set_seed_opening(existing + "\n\n" + args.append_intent)
+            quest.set_seed_opening(existing + "\n\n" + append_intent)
         else:
-            quest.set_seed_opening(args.append_intent)
-    return 0
+            quest.set_seed_opening(append_intent)
+    return 0, None
+
+
+def _emit_mutation_result(result: dict[str, Any]) -> int:
+    rc: int = result["returncode"]
+    message = result.get("message")
+    if message:
+        print(message, file=sys.stderr if rc else sys.stdout)
+    return rc
+
+
+def _cmd_edit(args: argparse.Namespace) -> int:
+    if os.environ.get("IMP_SESSION_SOCKET"):
+        return _emit_mutation_result(proxy_mutation("edit", {
+            "token": args.token, "title": args.title, "backlog": args.backlog,
+            "active": args.active, "depends_on": args.depends_on,
+            "clear_deps": args.clear_deps, "append_intent": args.append_intent}))
+    control = _control_root()
+    quest_id = _resolve_id(control, args.token)
+    rc, msg = apply_edit(
+        control, quest_id, title=args.title, backlog=args.backlog,
+        active=args.active, depends_on=args.depends_on,
+        clear_deps=args.clear_deps, append_intent=args.append_intent)
+    if msg:
+        print(msg, file=sys.stderr if rc else sys.stdout)
+    return rc
 
 
 def _backlog_rows(control: Path, scanned: list[HomeDigest] | None = None) -> list[_Row]:
@@ -3889,27 +4003,33 @@ def _build_parser() -> argparse.ArgumentParser:
     p_new.add_argument("--title", metavar="TEXT", default=None,
                        help="Set the quest title explicitly; the workflow's "
                             "opening step names the quest if omitted.")
-    p_new.add_argument("--non-interactive", action="store_true",
+    p_new.add_argument("--headless", action="store_true", dest="non_interactive",
                        help="Run headless: no live prompt; supply the first reply "
                             "via --message.")
     p_new.add_argument("--autonomous", action="store_true",
                        help="Auto-take the recommendation at recommendation-bearing "
                             "gates instead of confirming each; genuine intent-forks "
-                            "still pause for a human. Independent of --non-interactive.")
+                            "still pause for a human. Independent of --headless.")
     p_new.add_argument("--message", metavar="TEXT", default=None,
                        help="Headless reply consumed by the first bare-turn-end prompt; "
                             "pause then resume with another --message. "
-                            "Requires --non-interactive.")
-    p_new.add_argument("--backlog", metavar="TITLE", default=None, dest="idea",
-                       help="File an idea for your backlog with this TITLE and "
-                            "exit immediately without running (the positional "
-                            "MESSAGE is an optional longer brief). Start it later "
-                            "with `imp resume <id>`.")
+                            "Requires --headless.")
+    new_mode = p_new.add_mutually_exclusive_group()
+    new_mode.add_argument("--backlog", metavar="TITLE", default=None, dest="idea",
+                          help="File an idea for your backlog with this TITLE and "
+                               "exit immediately without running (the positional "
+                               "MESSAGE is an optional longer brief). Start it later "
+                               "with `imp resume <id>`.")
+    new_mode.add_argument("--background", action="store_true",
+                          help="Create the quest and launch it detached in the "
+                               "background, running headless and autonomous; it "
+                               "appears in the active list. Implies --headless "
+                               "and --autonomous.")
     p_new.add_argument("--depends-on", metavar="ID", action="append",
                        default=None, dest="depends_on",
-                       help="A quest id this backlog quest depends on "
-                            "(repeatable). Gates ready/blocked; never changes the "
-                            "base branch.")
+                       help="A quest id this quest depends on (repeatable). "
+                            "Gates go-live until the dep merges; never changes "
+                            "the base branch.")
     p_new.add_argument("--workflow", metavar="NAME", default=None,
                        help="Run this quest on workflow NAME instead of the "
                             "project default. A bundled name needs no commit; a "
@@ -3931,15 +4051,15 @@ def _build_parser() -> argparse.ArgumentParser:
     p_chat.add_argument(
         "opening", nargs="?", metavar="MESSAGE",
         help="Optional opening message; omit to start with an interactive prompt.")
-    p_chat.add_argument("--non-interactive", action="store_true",
+    p_chat.add_argument("--headless", action="store_true", dest="non_interactive",
                         help="Headless: no live prompt; supply the reply via --message.")
     p_chat.add_argument("--autonomous", action="store_true",
                         help="Auto-take the recommendation at recommendation-bearing "
                              "gates instead of confirming each; genuine intent-forks "
-                             "still pause for a human. Independent of --non-interactive.")
+                             "still pause for a human. Independent of --headless.")
     p_chat.add_argument("--message", metavar="TEXT", default=None,
                         help="Headless reply consumed by the first bare-turn-end prompt; "
-                             "requires --non-interactive.")
+                             "requires --headless.")
     p_chat.add_argument("--model", metavar="ARG", default=None, type=_model_arg_type,
                         help="Run the opening step under a chosen model "
                              "(provider:model or bare model); the same override as "
@@ -3956,16 +4076,16 @@ def _build_parser() -> argparse.ArgumentParser:
     p_resume.add_argument(
         "token", nargs="?",
         help="Quest id or resume token identifying which quest to resume.")
-    p_resume.add_argument("--non-interactive", action="store_true",
+    p_resume.add_argument("--headless", action="store_true", dest="non_interactive",
                           help="Headless: no live prompt; supply the reply via --message.")
     p_resume.add_argument("--autonomous", action="store_true",
                           help="Auto-take the recommendation at recommendation-bearing "
                                "gates instead of confirming each; genuine intent-forks "
-                               "still pause for a human. Independent of --non-interactive.")
+                               "still pause for a human. Independent of --headless.")
     p_resume.add_argument("--message", metavar="TEXT", default=None,
                           help="Headless reply consumed by the first bare-turn-end prompt; "
                                "pause+resume with another --message. "
-                               "Requires --non-interactive.")
+                               "Requires --headless.")
     p_resume.set_defaults(func=_cmd_resume)
 
     p_log = sub.add_parser(

@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
 from pathlib import Path
 
 import pytest
 
+from imp.cli import main
 from imp.cli.main import (
     BaseResolutionError,
     _async_cmd_new,
@@ -14,6 +16,7 @@ from imp.cli.main import (
     _resolve_new_base,
 )
 from imp.engine.quest import Quest
+from imp.engine.state import State
 from tests.conftest import _git, _seed_control
 
 
@@ -140,3 +143,155 @@ def test_record_idea_uses_passed_base_not_current_branch(
     assert len(ids) == 1, ids
     quest = Quest.load(tmp_path, ids[0])
     assert quest.base_branch == "release/9"
+
+
+def test_apply_new_backlog_records_quest(tmp_path: Path, monkeypatch) -> None:
+    _seed_control(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    rc, msg = main.apply_new(
+        tmp_path, opening="wire the widget", title=None, workflow=None,
+        base=None, idea="Widget work", depends_on=["dep55"])
+    assert rc == 0
+    assert "recorded backlog quest" in msg
+    quests = sorted((tmp_path / ".imp" / "quests").iterdir())
+    quest = Quest.load(tmp_path, quests[-1].name)
+    meta = json.loads((quest.quest_dir / "quest.json").read_text())
+    assert quest.origin == "backlog"
+    assert quest.title == "Widget work"
+    assert meta["depends_on"] == ["dep55"]
+
+
+def test_apply_new_draft_records_quest(tmp_path: Path, monkeypatch) -> None:
+    _seed_control(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    rc, msg = main.apply_new(
+        tmp_path, opening="do the thing", title="Thing", workflow=None,
+        base=None, idea=None, depends_on=None)
+    assert rc == 0
+    assert "created draft" in msg
+    quests = sorted((tmp_path / ".imp" / "quests").iterdir())
+    quest = Quest.load(tmp_path, quests[-1].name)
+    assert quest.origin == "draft"
+    assert quest.title == "Thing"
+    assert quest.seed_opening == "do the thing"
+
+
+def test_apply_new_empty_idea_returns_error(tmp_path: Path, monkeypatch) -> None:
+    _seed_control(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    rc, msg = main.apply_new(
+        tmp_path, opening="x", title=None, workflow=None,
+        base=None, idea="   ", depends_on=None)
+    assert rc == 2
+    assert "non-empty" in msg
+
+
+def test_apply_new_bad_base_returns_error(tmp_path: Path, monkeypatch) -> None:
+    _seed_control(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    rc, msg = main.apply_new(
+        tmp_path, opening="x", title=None, workflow=None,
+        base="no-such-branch", idea=None, depends_on=None)
+    assert rc == 2
+    assert "does not name an existing branch" in msg
+
+
+def test_apply_new_backlog_defers_seed_and_records_parent(
+        tmp_path: Path, monkeypatch) -> None:
+    _seed_control(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    rc, _msg = main.apply_new(
+        tmp_path, opening="brief", title=None, workflow=None, base=None,
+        idea="Child work", depends_on=None, parent="mom7")
+    assert rc == 0
+    quests = sorted((tmp_path / ".imp" / "quests").iterdir())
+    quest = Quest.load(tmp_path, quests[-1].name)
+    meta = json.loads((quest.quest_dir / "quest.json").read_text())
+    assert meta["parent"] == "mom7"
+    assert State.load(quest.quest_dir / "state").step is None
+
+
+def test_apply_new_draft_defers_seed(tmp_path: Path, monkeypatch) -> None:
+    _seed_control(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    rc, _ = main.apply_new(
+        tmp_path, opening="do it", title="Thing", workflow=None, base=None,
+        idea=None, depends_on=None, parent="pdraft")
+    assert rc == 0
+    quests = sorted((tmp_path / ".imp" / "quests").iterdir())
+    quest = Quest.load(tmp_path, quests[-1].name)
+    assert State.load(quest.quest_dir / "state").step is None
+    meta = json.loads((quest.quest_dir / "quest.json").read_text())
+    assert meta["parent"] == "pdraft"
+
+
+def test_apply_new_background_starts_quest(tmp_path: Path, monkeypatch) -> None:
+    _seed_control(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    started: dict[str, object] = {}
+    import imp.remote.daemon.spawn as spawn_mod
+    monkeypatch.setattr(
+        spawn_mod, "start_quest",
+        lambda control, qid: started.update(control=control, qid=qid))
+    rc, msg = main.apply_new(
+        tmp_path, opening="do the thing", title="Task", workflow=None,
+        base=None, idea=None, depends_on=None, background=True, parent="mom3")
+    assert rc == 0
+    assert "started quest" in msg
+    quests = sorted((tmp_path / ".imp" / "quests").iterdir())
+    quest = Quest.load(tmp_path, quests[-1].name)
+    assert quest.origin == "draft"
+    assert started["qid"] == quest.id
+    meta = json.loads((quest.quest_dir / "quest.json").read_text())
+    assert meta["parent"] == "mom3"
+    assert started["control"] == tmp_path
+    assert State.load(quest.quest_dir / "state").step is None
+
+
+def _new_subparser(parser: argparse.ArgumentParser) -> argparse.ArgumentParser:
+    sub = next(a for a in parser._actions
+               if getattr(a, "choices", None) and "new" in a.choices)
+    return sub.choices["new"]
+
+
+def test_new_parser_accepts_background() -> None:
+    args = main._build_parser().parse_args(["new", "--background", "brief"])
+    assert args.background is True
+
+
+def test_new_background_help_verbatim() -> None:
+    p_new = _new_subparser(main._build_parser())
+    bg = next(a for a in p_new._actions if a.dest == "background")
+    assert bg.help == (
+        "Create the quest and launch it detached in the background, "
+        "running headless and autonomous; it appears in the active list. "
+        "Implies --headless and --autonomous."
+    )
+
+
+def test_new_depends_on_help_mentions_go_live() -> None:
+    p_new = _new_subparser(main._build_parser())
+    dep = next(a for a in p_new._actions if a.dest == "depends_on")
+    assert dep.help == (
+        "A quest id this quest depends on (repeatable). "
+        "Gates go-live until the dep merges; never changes the base branch."
+    )
+
+
+def test_new_rejects_backlog_with_background(capsys) -> None:
+    with pytest.raises(SystemExit):
+        main._build_parser().parse_args(
+            ["new", "--backlog", "x", "--background"])
+    assert "not allowed with" in capsys.readouterr().err
+
+
+def test_record_idea_defers_seed(tmp_path: Path, monkeypatch) -> None:
+    _seed_control(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    ns = argparse.Namespace(
+        idea="my idea", opening=None, depends_on=None, workflow=None)
+    rc = _record_idea(ns, tmp_path, "main")
+    assert rc == 0
+    ids = [p.name for p in (tmp_path / ".imp" / "quests").iterdir()]
+    quest = Quest.load(tmp_path, ids[0])
+    assert State.load(quest.quest_dir / "state").step is None

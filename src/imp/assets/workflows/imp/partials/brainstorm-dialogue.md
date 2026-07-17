@@ -120,49 +120,32 @@ two near-identical summaries are the exact noise this rule guards against.
 
 {% include "partials/live-gate-dialogue.md" %}
 
-## Build now, or leave it as a draft
+## Build now, wait for a dependency, or save
 
-`imp new` starts this quest as an **un-materialized draft** — no git branch, no worktree
-— and this brainstorm runs read-only against the main checkout; nothing is set up until
-you confirm the build.
+This is a **recommendation-bearing gate** below the "Ask vs. decide" bar; settle it once
+the design is approved and **before you write and commit the spec**. The default outcome
+depends on whether this quest has an **unmerged dependency** — flagged at the top of this
+conversation, or one you recorded during the design. **If none was flagged and you recorded
+none, there is no blocking dependency:**
+- **No blocking dependency** → default **build now**: `create_and_enter_worktree`.
+- **A blocking dependency** → default **build when it lands**: call `create_and_enter_worktree`
+  and it waits for the dependency to merge, then goes live. The wait holds only while
+  attached; Ctrl-D pauses cleanly and a later `imp resume` retries it.
+- **Declining to build, either case** → `save_and_exit`: nothing built, the quest is set
+  aside and resumable.
 
-This is a **recommendation-bearing gate**: a safe, input-driven **default** below the
-human-decision "Ask vs. decide" bar. The default is **build it out now**; declining leaves
-it as a resumable draft — building is the only real action here. Settle it only once the
-design is approved and **before you write and commit the spec**.
+{% if run.autonomous %} **Autonomous run:** take the default and proceed without yielding —
+state it plainly. Call `create_and_enter_worktree` (it waits first if a dependency is still
+unmerged); on `head_changed=true`, re-ground the spec this turn before writing. Then proceed
+to **Going live**. {% else %} **Attended run:** present the default and **end your turn to
+yield** — a single recommendation-anchored question, not a menu. State plainly that declining
+**sets the quest aside for you to pick up later with `imp resume <id>`**. Design approval was
+settled through the brainstorm.
+- **Build:** call `create_and_enter_worktree`; if a dependency is still unmerged it waits for
+  the merge first (Ctrl-D pauses, resume retries). On `head_changed=true`, re-ground the spec
+  this turn. Then go to **Going live**.
+- **Decline:** call `save_and_exit`. Nothing is built; a later resume re-offers this choice. {% endif %}
 
-{% if run.autonomous %}
-**Autonomous run:** take the default and proceed without yielding — state the choice
-plainly in your prose. Call `create_and_enter_worktree` (no arguments): it forks the
-branch and worktree from the base branch's current tip, switches this quest in, and
-reports whether the base advanced. **If it reports `head_changed=true`, re-ground the
-spec against current code in this same turn** — re-read the files the brainstorm assumed
-and reconcile any drift — before writing. Then proceed to threshold's **Going live**
-section to write and commit the spec.
-{% else %}
-**Attended run:** present the default and **end your turn to yield** to confirm it —
-a single recommendation-anchored question, not a menu. Name plainly what declining
-does: the quest is already a draft, so nothing is "saved" —
-the user keeps it by leaving the session (Ctrl-D) and resumes later with
-`imp resume <id>`. There is no separate "does this sound right?" approval — design
-approval was settled continuously through the brainstorm. Surface the question in
-your turn text and end your turn to yield.
-
-- **If the user picks build, build it now.** Call `create_and_enter_worktree` (no
-  arguments): it forks the branch and worktree from the base branch's current tip,
-  switches this quest in, and reports whether the base advanced. **If it reports
-  `head_changed=true`, re-ground the spec against current code in this same turn** —
-  re-read the files the brainstorm assumed and reconcile any drift — before writing. Then
-  proceed to threshold's **Going live** section to write and commit the spec.
-- **If the user declines, leave it as a draft.** Do **not** call
-  `create_and_enter_worktree` — nothing is built, no branch, no worktree. It's
-  already a draft the user keeps by leaving (Ctrl-D), resumable with
-  `imp resume <id>`. On a later resume you re-offer this same choice.
-{% endif %}
-
-A genuine intent-fork (at or above the "Ask vs. decide" bar — no safe default without
-guessing the user's high-level intent) still parks for a human even under an autonomous
-run; only this recommendation-bearing build-or-save gate auto-resolves under autonomy.
-
-Calling `create_and_enter_worktree` a second time on an already-set-up quest is a
-harmless no-op, so a resumed build is safe.
+A genuine intent-fork still parks for a human even under autonomy; only this gate
+auto-resolves. `create_and_enter_worktree` is a harmless no-op once already live, so a
+resumed build is safe.

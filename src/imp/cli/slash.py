@@ -40,12 +40,12 @@ SANDBOX_ALREADY_OFF = "Sandbox is already off."
 SANDBOX_USAGE = "Usage: /sandbox [on|off]"
 
 MATERIALIZED_LEAVE_REDIRECT = (
-    "/keep, /shelve, and /clear apply only before a quest is built — this one "
+    "/save, /shelve, and /clear apply only before a quest is built — this one "
     "is live. Press Ctrl-D to pause it (resume with imp resume {qid}), or "
     "/abandon to tear it down.")
 
 PRE_SESSION_LEAVE_REDIRECT = (
-    "/keep, /shelve, and /clear apply to a conversation already under way — "
+    "/save, /shelve, and /clear apply to a conversation already under way — "
     "there's nothing to leave yet. Press Ctrl-D to keep this quest as a draft "
     "(resume with imp resume {qid}), or /abandon to tear it down.")
 
@@ -99,7 +99,7 @@ def handle_slash_line(
         return "/abandon"
     if cmd == "compact":
         return "/compact"
-    if cmd in ("keep", "shelve", "clear"):
+    if cmd in ("save", "shelve", "clear"):
         if pre_session:
             _echo_command(text, output_fn, color=color)
             output_fn(PRE_SESSION_LEAVE_REDIRECT.format(qid=quest.id))
@@ -165,7 +165,7 @@ def _help(out: Callable[[str], None], *, materialized: bool, pre_session: bool =
     out("  /help              Show this message")
     out("  /skills            List loadable skills")
     if not materialized and not pre_session:
-        out("  /keep              Keep this conversation as a draft in your active list")
+        out("  /save              Keep this conversation as a draft in your active list")
         out("  /shelve            Shelve this conversation to the archive (find via `imp search`)")
         out("  /clear             Shelve this conversation and start a fresh one")
     out("  /model <model>     Switch this step's model (or provider:model)")

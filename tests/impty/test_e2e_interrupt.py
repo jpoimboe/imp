@@ -24,7 +24,7 @@ def test_midrun_sigint_pauses_with_exit_130_and_a_resume_hint(tmp_path: Path) ->
     env = clean_env(IMP_SCRIPTED_SCRIPT=str(script_path), IMP_THEME="ansi")
 
     with TerminalSession(
-        [sys.executable, "-m", "imp", "new", "demo", "--non-interactive"],
+        [sys.executable, "-m", "imp", "new", "demo", "--headless"],
         cwd=str(tmp_path), env=env, cols=80, rows=24,
     ) as s:
         # Poll until the scripted bash's "echo running" is visible, which

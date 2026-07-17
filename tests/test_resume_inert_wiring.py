@@ -297,7 +297,7 @@ class _QueueInertPrompt:
 @pytest.mark.anyio
 async def test_inert_ask_line_rejects_session_verb_and_reprompts(
         monkeypatch, tmp_path: Path, capsys) -> None:
-    # A pre-launch session verb (/keep) is rejected with a nudge and re-prompt,
+    # A pre-launch session verb (/save) is rejected with a nudge and re-prompt,
     # exactly as the opening prompt does — only the real line is returned.
     ch = _seed(tmp_path)
     (ch.workflow_dir / "skills" / "user").mkdir(parents=True, exist_ok=True)
@@ -305,12 +305,12 @@ async def test_inert_ask_line_rejects_session_verb_and_reprompts(
     monkeypatch.setattr(m, "_term_width", lambda: 80)
     monkeypatch.setattr(
         m, "Prompt",
-        lambda **kw: _QueueInertPrompt(["/keep", "real answer"], **kw))
+        lambda **kw: _QueueInertPrompt(["/save", "real answer"], **kw))
 
     line = await m._inert_ask_line(ch)
 
     assert line == "real answer"
-    assert "/keep" in capsys.readouterr().out   # the nudge explained the rejection
+    assert "/save" in capsys.readouterr().out   # the nudge explained the rejection
 
 
 @pytest.mark.anyio

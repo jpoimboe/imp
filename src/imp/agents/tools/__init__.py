@@ -120,10 +120,10 @@ _BUILTIN_MODULES = (
     "bash",
     "bg",
     "create_and_enter_worktree",
-    "create_quest",
     "fs",
     "nav",
     "rename_quest",
+    "save_and_exit",
     "step_label",
     "symbol_outline",
 )

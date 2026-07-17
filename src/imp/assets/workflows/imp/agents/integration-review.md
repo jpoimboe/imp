@@ -1,6 +1,6 @@
 ---
 name: integration-review
-deny_tools: [rename_quest, create_quest, create_and_enter_worktree]
+deny_tools: [rename_quest, create_and_enter_worktree, save_and_exit]
 label: reviewing merge
 description: At-head semantic-integration review — the base moved, so reason about whether the rebased/resolved branch silently breaks against the base-side incoming diff and whether each reconciliation stayed faithful to the quest's intent. Non-soliciting; classifies findings and routes them back to the reconciler.
 output:

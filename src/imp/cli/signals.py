@@ -7,7 +7,7 @@ The client's signals map to two distinct intents (the keep-alive-lease design):
     yields inline and the client stays attached; with no inline channel the stop
     lands as a clean pause.
   - Intent B — "this client is leaving" (SIGTERM, SIGHUP, terminal close,
-    Ctrl-D, /keep). Acts on the *attachment*: release the lease, detach, exit. The
+    Ctrl-D, /save). Acts on the *attachment*: release the lease, detach, exit. The
     client does NOT decide whether the run pauses — the session daemon's lease
     rule does.
 
@@ -236,6 +236,7 @@ class InterruptCoordinator:
         self.escalation_event: Any = None   # anyio.Event set on escalation (C4)
         self._trigger_escalation: Any = None
         self._trigger_exit: Any = None
+        self._save_hook: Any = None
         self._forward_force: Any = None   # client force-forward hook (SessionControls)
         self._forward_retry_now: Any = None   # client retry-now forward hook (SessionControls)
         self._now = time.monotonic      # injectable for tests
@@ -549,6 +550,11 @@ class InterruptCoordinator:
     def set_exit_hook(self, fn: Any) -> None:
         self._trigger_exit = fn
 
+    def set_save_hook(self, fn: Any) -> None:
+        """Register the daemon's save-and-exit trigger (SessionServer.request_save).
+        Fired by the save_and_exit tool to route a clean pause through CONTROL_SAVE."""
+        self._save_hook = fn
+
     def set_force_forward_hook(self, fn: Any) -> None:
         """Register the client's CONTROL_INTERRUPT_FORCE forwarder (a network frame
         send). Invoked by the receiver on the _FORCE_FORWARD sentinel — a repeat
@@ -677,6 +683,13 @@ class InterruptCoordinator:
         evt = self._yielded
         if evt is not None:
             evt.set()
+
+    def request_save(self, reason: str | None = None) -> None:
+        """Route an agent-triggered clean save through the registered save hook
+        (enqueues CONTROL_SAVE on the daemon). No-op when unregistered."""
+        fn = self._save_hook
+        if fn is not None:
+            fn(reason)
 
     def request_exit(self, reason: str) -> None:
         """Route an out-of-band stop (prompt-level SIGINT) to the exit path —
