@@ -223,3 +223,26 @@ def test_apply_new_draft_defers_seed(tmp_path: Path, monkeypatch) -> None:
     assert State.load(quest.quest_dir / "state").step is None
     meta = json.loads((quest.quest_dir / "quest.json").read_text())
     assert meta["parent"] == "pdraft"
+
+
+def test_apply_new_background_starts_quest(tmp_path: Path, monkeypatch) -> None:
+    _seed_control(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    started: dict[str, object] = {}
+    import imp.remote.daemon.spawn as spawn_mod
+    monkeypatch.setattr(
+        spawn_mod, "start_quest",
+        lambda control, qid: started.update(control=control, qid=qid))
+    rc, msg = main.apply_new(
+        tmp_path, opening="do the thing", title="Task", workflow=None,
+        base=None, idea=None, depends_on=None, background=True, parent="mom3")
+    assert rc == 0
+    assert "started quest" in msg
+    quests = sorted((tmp_path / ".imp" / "quests").iterdir())
+    quest = Quest.load(tmp_path, quests[-1].name)
+    assert quest.origin == "draft"
+    assert started["qid"] == quest.id
+    meta = json.loads((quest.quest_dir / "quest.json").read_text())
+    assert meta["parent"] == "mom3"
+    assert started["control"] == tmp_path
+    assert State.load(quest.quest_dir / "state").step is None

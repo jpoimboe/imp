@@ -911,6 +911,7 @@ def apply_new(
     control: Path, *, opening: str | None, title: str | None,
     workflow: str | None, base: str | None, idea: str | None,
     depends_on: list[str] | None, parent: str | None = None,
+    background: bool = False,
 ) -> tuple[int, str]:
     """Non-interactive create for the mutation proxy: record a backlog quest or plain draft."""
     try:
@@ -920,6 +921,22 @@ def apply_new(
 
     deps = list(depends_on or [])
     quest_id = new_quest_id(existing_stems=live_stems(control))
+
+    if background:
+        seed = backlog.seed_opening(
+            {"title": title or "", "description": opening or ""})
+        try:
+            Quest.create_draft(
+                control, title=title or "", quest_id=quest_id,
+                base_branch=resolved_base, depends_on=deps, workflow=workflow,
+                origin="draft", seed_opening=seed, parent=parent,
+                defer_seed=True)
+        except (LoadError, LoadErrors) as e:
+            return 2, f"imp: {e}"
+        from imp.remote.daemon import spawn
+        spawn.start_quest(control, quest_id)
+        return 0, (f"imp: started quest {quest_id} (running autonomously in the "
+                   f"background; appears in the active list)")
 
     if idea is not None:
         if not idea.strip():
