@@ -780,3 +780,45 @@ def test_read_only_on_non_agent_step_is_silently_ignored(tmp_path: Path) -> None
     loaded = load_workflow(wf)
     step = next(s for s in loaded.flat_steps() if s.name == "s")
     assert step.read_only == ()
+
+
+def test_unknown_tool_grants_warn_not_fatal(tmp_path: Path) -> None:
+    """AC 3(a,b) + exact warning copy: an unknown deny_tools/allow_tools entry no longer raises;
+    it loads, is ignored (effective tools unchanged), and each offending entry
+    lands on Workflow.load_warnings with the exact skew copy."""
+    wf = _wf(
+        tmp_path,
+        """\
+        name: t
+        description: t
+        defaults: {max_retries: 1, max_loops: 6}
+        phases:
+          - name: only
+            steps:
+              - {name: w, file: agents/stub.md}
+        """,
+        agents={
+            "stub": """\
+            ---
+            name: stub
+            deny_tools: [bogus_deny]
+            allow_tools: [bogus_allow]
+            output:
+              status: {type: enum, values: [Success, Error]}
+            ---
+            prompt body
+            """
+        },
+    )
+
+    loaded = load_workflow(wf)  # must NOT raise
+
+    assert loaded.load_warnings == (
+        "stub: deny_tools lists 'bogus_deny', unknown to this engine "
+        "— ignoring (workflow/engine version skew?)",
+        "stub: allow_tools lists 'bogus_allow', unknown to this engine "
+        "— ignoring (workflow/engine version skew?)",
+    )
+    agent = loaded.agents["stub"]
+    assert "bogus_deny" not in agent.tools
+    assert "bogus_allow" not in agent.tools

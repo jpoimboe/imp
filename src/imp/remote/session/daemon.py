@@ -272,6 +272,36 @@ async def serve_quest_session(
     return result
 
 
+def _leaf_load_error(exc: BaseException) -> LoadError | LoadErrors | None:
+    """Return a LoadError/LoadErrors leaf inside exc or a nested BaseExceptionGroup, else None."""
+    if isinstance(exc, (LoadError, LoadErrors)):
+        return exc
+    if isinstance(exc, BaseExceptionGroup):
+        for sub in exc.exceptions:
+            found = _leaf_load_error(sub)
+            if found is not None:
+                return found
+    return None
+
+
+def _record_load_failure(quest: Quest, exc: LoadError | LoadErrors) -> int:
+    """Record a residual load failure as a config-classified error pause; exit 2."""
+    message = str(exc)
+    print(f"imp: {message}", file=sys.stderr)
+    log = quest.event_log()
+    log.append(
+        agent_id=None, type="error",
+        payload={"category": "config", "kind": type(exc).__name__,
+                 "message": message, "detail": {}})
+    log.append(
+        agent_id=None, type="workflow_paused",
+        payload={"reason": "config", "kind": type(exc).__name__})
+    state = State.load(quest.state_dir)
+    state.status = "paused"
+    state.save(quest.state_dir)
+    return 2
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="imp-session-daemon")
     parser.add_argument("--control-root", required=True)
@@ -303,8 +333,12 @@ def main(argv: list[str] | None = None) -> int:
         else:
             result = anyio.run(serve_quest_session, quest)
     except (LoadError, LoadErrors) as exc:
-        print(f"imp: {exc}", file=sys.stderr)
-        return 2
+        return _record_load_failure(quest, exc)
+    except BaseExceptionGroup as eg:
+        load_exc = _leaf_load_error(eg)
+        if load_exc is None:
+            raise
+        return _record_load_failure(quest, load_exc)
     return 1 if result is RunResult.PAUSED else 0
 
 

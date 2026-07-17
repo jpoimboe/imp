@@ -655,14 +655,14 @@ def test_control_workflow_dir_falls_back_to_bundled(tmp_path: Path) -> None:
 
 
 def _seed_control_with_skew_workflow(root: Path) -> None:
-    """Seeded control root with an ungrantable allow_tools agent; load_workflow raises LoadError."""
+    """Seeded control root with an unknown-driver agent; load_workflow raises LoadError."""
     _seed_control(root)
     agent = root / "imp" / "workflows" / "imp" / "agents" / "stub.md"
     agent.write_text(
-        "---\nname: stub\nallow_tools: [not_grantable]\n"
+        "---\nname: stub\ndrivers: [not_a_driver]\n"
         "output:\n  status: {type: enum, values: [Success, Error]}\n---\nbody\n")
     _git(root, "add", "-A")
-    _git(root, "commit", "-qm", "skew: ungrantable allow_tools")
+    _git(root, "commit", "-qm", "skew: unknown driver")
 
 
 def test_create_draft_defer_seed_writes_unseeded_state(tmp_path: Path) -> None:

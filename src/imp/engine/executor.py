@@ -16,6 +16,7 @@ import functools
 import json
 import os
 import shutil
+import subprocess
 import sys
 import tempfile
 import traceback
@@ -94,6 +95,10 @@ if TYPE_CHECKING:
 EventCallback = Callable[[dict[str, Any]], None]
 
 OUTCOME_HISTORY_K = 4
+
+# Quest homes (keyed by quest_dir) whose snapshot this PROCESS already captured
+# — captured at most once per process to stay version-consistent with this loader.
+_SNAPSHOT_CAPTURED: set[str] = set()
 
 
 def _record_outcome(
@@ -215,6 +220,50 @@ def _trees_identical(a: Path, b: Path) -> bool:
     )
 
 
+def _tracked_workflow_path(control_root: Path, live: Path) -> str | None:
+    """The workflow source's control-root-relative POSIX path when that path is
+    present in the control root's HEAD (following the imp/workflows symlink to
+    its real target), else None — the signal to fall back to a plain copy for a
+    non-git source (a bundled/static workflow no merge queue mutates). Gating on
+    HEAD (not the index) matches exactly what _capture_workflow_tree archives, so
+    a staged-but-not-committed path never passes the check and then fails the
+    archive."""
+    try:
+        rel = live.resolve().relative_to(control_root.resolve())
+    except (OSError, ValueError):
+        return None
+    posix = rel.as_posix()
+    try:
+        done = subprocess.run(
+            ["git", "-C", str(control_root), "cat-file", "-e", f"HEAD:{posix}"],
+            capture_output=True, check=False,
+        )
+    except OSError:
+        return None
+    return posix if done.returncode == 0 else None
+
+
+def _capture_workflow_tree(control_root: Path, live: Path, dest: Path) -> None:
+    """Populate dest with the workflow tree. When the source is a git-tracked
+    path under control_root, extract it from the control root's HEAD — a
+    committed tree cannot be torn by a concurrent merge and pins exactly to the
+    merge queue's committed state. Otherwise copy the live tree verbatim."""
+    tracked = _tracked_workflow_path(control_root, live)
+    if tracked is None:
+        shutil.copytree(live, dest)
+        return
+    archived = subprocess.run(
+        ["git", "-C", str(control_root), "archive", "--format=tar",
+         f"HEAD:{tracked}"],
+        capture_output=True, check=True,
+    )
+    dest.mkdir(parents=True)
+    subprocess.run(
+        ["tar", "-x", "-f", "-", "-C", str(dest)],
+        input=archived.stdout, check=True,
+    )
+
+
 def _refresh_workflow_snapshot(quest: Quest) -> bool:
     """Re-snapshot the live workflow into quest_dir/workflow at a run_quest
     entry. Returns True only when an EXISTING snapshot's content was replaced
@@ -242,8 +291,10 @@ def _refresh_workflow_snapshot(quest: Quest) -> bool:
     if not live.is_dir():
         return False
 
-    # 3. Build the candidate exactly as the initial snapshot does.
-    shutil.copytree(live, tmp)
+    # 3. Build the candidate exactly as the initial snapshot does — but from a
+    #    git-consistent HEAD view when the source is tracked, so a concurrent
+    #    merge cannot tear it or feed a newer-than-HEAD tree to this loader.
+    _capture_workflow_tree(quest.control_root, live, tmp)
     overlay_global_skills(tmp / "skills")
     overlay_project_skills(quest.project_root, tmp / "skills" / "user")
 
@@ -323,7 +374,13 @@ async def run_quest(
     # process (the foreground CLI model). Do not parallelize runs in-process
     # without revisiting (all git calls already pass explicit control_root).
     try:
-        workflow_refreshed = _refresh_workflow_snapshot(quest)
+        snapshot_key = str(quest.quest_dir)
+        captured_this_entry = snapshot_key not in _SNAPSHOT_CAPTURED
+        if captured_this_entry:
+            workflow_refreshed = _refresh_workflow_snapshot(quest)
+            _SNAPSHOT_CAPTURED.add(snapshot_key)
+        else:
+            workflow_refreshed = False
         config = load_effective_config(
             project_root=quest.project_root, control_root=quest.control_root,
         ).config
@@ -349,6 +406,12 @@ async def run_quest(
             on_event=_liveness_on_event(coordinator, on_event, state, quest.state_dir))
         if workflow_refreshed:
             _emit(log, "workflow_refreshed", {}, agent_id=None)
+        if captured_this_entry:
+            for warning_message in workflow.load_warnings:
+                _emit(log, "warning",
+                      {"source": "workflow_load", "message": warning_message,
+                       "detail": {}},
+                      agent_id=None)
         # First-resume bootstrap for a deferred backlog draft: an unstarted,
         # never-seeded stub (step None, has_started False) had its cursor + vars
         # deferred at creation. Seed now, before backfill, so apply_var_overrides

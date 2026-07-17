@@ -3081,7 +3081,8 @@ async def test_first_run_overlays_project_skills_into_snapshot_user(
     tmp_path: Path,
 ) -> None:
     """At snapshot creation, project_root/imp/skills/*.md land in the snapshot's
-    skills/user/; a resume re-snapshots and picks up a changed source skill."""
+    skills/user/; a later same-process entry does NOT re-snapshot, so a changed
+    source skill is not adopted until a fresh process (once per process)."""
     quest, _, _ = _seed_minimal_workflow(tmp_path)
     _register_fake({"status": "Success"})
     (tmp_path / "imp" / "skills").mkdir(parents=True, exist_ok=True)
@@ -3091,13 +3092,13 @@ async def test_first_run_overlays_project_skills_into_snapshot_user(
     overlaid = quest.quest_dir / "workflow" / "skills" / "user" / "mine.md"
     assert overlaid.read_text() == "# Mine\nv1\n"
 
-    # Resume re-snapshots (escape-hatch inversion): the changed source is picked
-    # up and exactly one workflow_refreshed event is emitted.
+    # Once per process: a source-skill edit AFTER the first capture is NOT
+    # adopted on a later same-process entry — no re-snapshot, no event.
     (tmp_path / "imp" / "skills" / "mine.md").write_text("# Mine\nv2\n")
     events: list[dict] = []
     await run_quest(quest, on_event=events.append)
-    assert overlaid.read_text() == "# Mine\nv2\n"
-    assert sum(1 for e in events if e["type"] == "workflow_refreshed") == 1
+    assert overlaid.read_text() == "# Mine\nv1\n"
+    assert not [e for e in events if e["type"] == "workflow_refreshed"]
 
 
 @pytest.mark.anyio
@@ -4137,3 +4138,36 @@ async def test_per_step_counters_do_not_sum(tmp_path: Path) -> None:
     result = await run_quest(quest, on_event=lambda _e: None)
     assert result is RunResult.COMPLETED           # neither counter tripped the cap
     assert calls == {"r1": 7, "r2": 7}             # 6 reworks + 1 approve each
+
+
+@pytest.mark.anyio
+async def test_unknown_tool_grant_surfaces_as_warning_event(tmp_path: Path) -> None:
+    """AC 3(c): each unrecognized deny_tools/allow_tools entry surfaces as exactly
+    one `warning` event in the run narrative, carrying the exact skew copy — and,
+    once per process, only on the capturing entry (a same-process re-entry does
+    NOT re-append the skew warnings)."""
+    quest, _, _ = _seed_minimal_workflow(tmp_path)
+    writer = tmp_path / "imp" / "workflows" / "imp" / "agents" / "writer.md"
+    writer.write_text(
+        "---\nname: writer\n"
+        "deny_tools: [bogus_deny]\nallow_tools: [bogus_allow]\n"
+        "output:\n  status: {type: enum, values: [Success, Error]}\n---\ngo\n"
+    )
+    _register_fake({"status": "Success"})
+
+    events: list[dict] = []
+    await run_quest(quest, on_event=events.append)   # first entry: captures + warns
+    await run_quest(quest, on_event=events.append)   # re-entry: gated, no re-warn
+
+    skew = [
+        e["payload"]["message"]
+        for e in events
+        if e["type"] == "warning"
+        and "unknown to this engine" in e["payload"]["message"]
+    ]
+    assert skew == [
+        "writer: deny_tools lists 'bogus_deny', unknown to this engine "
+        "— ignoring (workflow/engine version skew?)",
+        "writer: allow_tools lists 'bogus_allow', unknown to this engine "
+        "— ignoring (workflow/engine version skew?)",
+    ]

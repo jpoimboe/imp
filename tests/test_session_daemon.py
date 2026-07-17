@@ -2199,3 +2199,92 @@ async def test_compact_pause_reenters_after_running_compaction(
     assert result is RunResult.COMPLETED
     assert calls["n"] == 2
     assert ran == [quest.id]
+
+
+def test_leaf_load_error_passes_a_bare_load_error(tmp_path: Path) -> None:
+    """A bare (un-grouped) LoadError is returned unchanged."""
+    from imp.engine.errors import LoadError
+    from imp.remote.session.daemon import _leaf_load_error
+
+    exc = LoadError("bad yaml")
+    assert _leaf_load_error(exc) is exc
+
+
+def test_leaf_load_error_unwraps_real_anyio_group() -> None:
+    """A LoadError raised inside an anyio task group surfaces as a
+    BaseExceptionGroup (possibly nested); _leaf_load_error extracts the leaf."""
+    from imp.engine.errors import LoadError
+    from imp.remote.session.daemon import _leaf_load_error
+
+    async def _boom() -> None:
+        async with anyio.create_task_group() as outer:
+            async def _inner() -> None:
+                async with anyio.create_task_group() as inner:
+                    async def _raise() -> None:
+                        raise LoadError("phases: required key missing")
+                    inner.start_soon(_raise)
+            outer.start_soon(_inner)
+
+    with pytest.raises(BaseExceptionGroup) as ei:
+        anyio.run(_boom)
+    leaf = _leaf_load_error(ei.value)
+    assert isinstance(leaf, LoadError)
+    assert leaf.message == "phases: required key missing"
+
+
+def test_leaf_load_error_returns_none_for_a_non_load_group() -> None:
+    """A group carrying only a non-LoadError crash yields None, so main
+    re-raises it unchanged (AC 4b: the crash keeps its traceback)."""
+    from imp.remote.session.daemon import _leaf_load_error
+
+    async def _boom() -> None:
+        async with anyio.create_task_group() as tg:
+            async def _raise() -> None:
+                raise ValueError("kaboom")
+            tg.start_soon(_raise)
+
+    with pytest.raises(BaseExceptionGroup) as ei:
+        anyio.run(_boom)
+    assert _leaf_load_error(ei.value) is None
+
+
+def test_main_records_config_error_pause_on_wrapped_load_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """AC 4a: a load failure that reaches main() wrapped in a BaseExceptionGroup
+    is recorded as a config-classified error pause (error + workflow_paused
+    reason='config') so the foreground's _pause_reason classifies it as a
+    `config error`; the quest is left cleanly paused and main exits 2, with no
+    traceback printed."""
+    import imp.remote.session.daemon as daemon
+    from imp.cli.main import _pause_reason
+    from imp.engine.errors import LoadError
+    from tests.conftest import _seed_control
+
+    _seed_control(tmp_path)
+    quest = Quest.create(tmp_path, title="x", quest_id="feat", base_branch="main")
+    monkeypatch.setattr(daemon.Quest, "load", staticmethod(lambda r, c: quest))
+
+    def _raise(*_a: object, **_k: object) -> object:
+        raise BaseExceptionGroup(
+            "eg", [LoadError("phases: required key missing")])
+
+    monkeypatch.setattr(daemon.anyio, "run", _raise)
+
+    rc = daemon.main(["--control-root", str(tmp_path), "--quest-id", "feat"])
+    assert rc == 2
+
+    events = list(quest.event_log().read())
+    err = [e for e in events if e["type"] == "error"][-1]
+    assert err["payload"]["category"] == "config"
+    assert "phases: required key missing" in err["payload"]["message"]
+    paused = [e for e in events if e["type"] == "workflow_paused"][-1]
+    assert paused["payload"]["reason"] == "config"
+
+    info = _pause_reason(events)
+    assert info.base == "config"
+    assert "phases: required key missing" in info.cause
+
+    assert State.load(quest.state_dir).status == "paused"
+    assert "Traceback (most recent call last):" not in capsys.readouterr().err
