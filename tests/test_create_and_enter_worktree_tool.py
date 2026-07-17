@@ -69,3 +69,13 @@ def test_tool_from_subagent_raises(tmp_path: Path) -> None:
     tool = get_registry()["create_and_enter_worktree"]
     with pytest.raises(RuntimeError):
         tool.invoke(ctx, {})
+
+
+def test_tool_description_mentions_dependency_wait() -> None:
+    desc = get_registry()["create_and_enter_worktree"].description
+    assert (
+        "If this quest depends on a quest that hasn't merged yet, it first "
+        "waits for that merge before forking"
+    ) in desc
+    assert "the wait is interruptible (Ctrl-D pauses; a later resume retries)" in desc
+    assert desc.rstrip().endswith("Idempotent — a no-op once the worktree already exists.")
