@@ -12,18 +12,18 @@ def test_turn_completed_attaches_normalized_usage_to_last_llm_response() -> None
     zeros for codex (design "Event mapping" table)."""
     elog = InMemoryEventLog()
     state: dict[str, Any] = {"pending_usage": None, "auth_mode": "chatgpt"}
-    # First emit an agent_message so a llm_response exists to receive usage.
+    # First emit an agent_message so an agent_message exists to receive usage.
     process_event(agent_message("done"), elog=elog, agent_id="step:a",
                   state=state, provider="codex", model="gpt-5.5")
     # turn.completed carries flat usage; runner attaches it to the last
-    # llm_response payload + emits a synthetic usage event for telemetry.
+    # agent_message payload + emits a synthetic usage event for telemetry.
     process_event(
         turn_completed(input_tokens=1000, output_tokens=500,
                        cached_input_tokens=200, reasoning_output_tokens=100),
         elog=elog, agent_id="step:a", state=state,
         provider="codex", model="gpt-5.5",
     )
-    llm = [e for e in elog.read() if e["type"] == "llm_response"]
+    llm = [e for e in elog.read() if e["type"] == "agent_message"]
     assert len(llm) == 1
     usage = llm[0]["payload"]["usage"]
     # Anthropic-style keys (read_telemetry's anthropic branch maps these), so
@@ -47,7 +47,7 @@ def test_turn_completed_lands_context_tokens_on_last_llm_response() -> None:
         elog=elog, agent_id="step:a", state=state,
         provider="codex", model="gpt-5.5",
     )
-    llm = [e for e in elog.read() if e["type"] == "llm_response"]
+    llm = [e for e in elog.read() if e["type"] == "agent_message"]
     assert len(llm) == 1
     # full prompt = fresh(1000 - 200) + cache_read(200) + cache_creation(0)
     assert llm[0]["payload"]["context_tokens"] == 1000

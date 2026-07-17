@@ -137,6 +137,6 @@ def test_real_agent_message_records_llm_response() -> None:
         ),
         elog=elog, agent_id="step:t", state=st, provider="codex", model="gpt-5.5",
     )
-    resp = [e for e in elog.read() if e["type"] == "llm_response"]
+    resp = [e for e in elog.read() if e["type"] == "agent_message"]
     assert len(resp) == 1
     assert resp[0]["payload"]["raw"]["content"][0]["text"] == "the answer is 42"

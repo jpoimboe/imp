@@ -77,7 +77,7 @@ async def test_malformed_complete_step_nudged_then_recovers(
 
     events = [e async for e in runner.run(_inv(tmp_path, elog))]
 
-    outs = [e for e in events if e.get("type") == "agent_output"]
+    outs = [e for e in events if e.get("type") == "agent_result"]
     assert len(outs) == 1 and outs[0]["payload"] == {"answer": "42"}
     log_types = [e["type"] for e in elog.read()]
     assert log_types.count("output_validation_nudge") == 1

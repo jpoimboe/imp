@@ -123,7 +123,7 @@ async def test_codex_live_round_trip_under_production_flags(tmp_path: Path) -> N
         try:
             async for ev in runner.run(inv):
                 events.append(ev)
-                if ev.get("type") == "agent_output":
+                if ev.get("type") == "agent_result":
                     break
         except AwaitingUserInput:
             # Headless nudge-then-park backstop fired: the model ended two turns
@@ -143,7 +143,7 @@ async def test_codex_live_round_trip_under_production_flags(tmp_path: Path) -> N
         # Success = the round-trip completed: agent_output yielded AND at least
         # one tool_call recorded (proves the codex->server round-trip works with
         # `network_access_enabled=False`).
-        if any(e.get("type") == "agent_output" for e in events) and tool_calls:
+        if any(e.get("type") == "agent_result" for e in events) and tool_calls:
             break
     else:
         raise AssertionError(

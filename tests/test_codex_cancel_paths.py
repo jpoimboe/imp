@@ -239,7 +239,7 @@ async def test_awaiting_user_resume_injects_reply_not_system_prompt(
     # awaiting_user_input event the wait_for_user tool journals before pausing.
     (tmp_path / "events.jsonl").write_text(
         json.dumps({
-            "agent_id": "step:t", "type": "llm_response",
+            "agent_id": "step:t", "type": "agent_message",
             "payload": {"raw": {"content": [
                 {"type": "text", "text": "which file?"}]}}}) + "\n" +
         json.dumps({

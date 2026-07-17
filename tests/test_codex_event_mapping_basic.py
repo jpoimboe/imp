@@ -38,7 +38,7 @@ def test_agent_message_appends_llm_response() -> None:
     process_event(turn_completed(input_tokens=1, output_tokens=1), elog=elog,
                   agent_id="step:a", state=state,
                   provider="codex", model="gpt-5.5")
-    events = [e for e in elog.read() if e["type"] == "llm_response"]
+    events = [e for e in elog.read() if e["type"] == "agent_message"]
     assert len(events) == 1
     p = events[0]["payload"]
     assert p["provider"] == "codex"
@@ -57,6 +57,6 @@ def test_agent_message_omits_auth_mode_when_none() -> None:
     process_event(turn_completed(input_tokens=1, output_tokens=1), elog=elog,
                   agent_id="step:a", state=state,
                   provider="codex", model="gpt-5.5")
-    events = [e for e in elog.read() if e["type"] == "llm_response"]
+    events = [e for e in elog.read() if e["type"] == "agent_message"]
     assert len(events) == 1
     assert "auth_mode" not in events[0]["payload"]

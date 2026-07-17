@@ -143,9 +143,9 @@ async def test_fresh_run_persists_rollout_to_transcript_dir(tmp_path: Path) -> N
     # thread_id was captured from thread.started and (when a rollout exists)
     # persisted. With the fake client no real rollout is written, so persist is a
     # no-op — assert it did NOT crash the run and teardown still completed.
-    # `agent_output` is a YIELDED event (codex_runner.py:516), never written to
+    # `agent_result` is a YIELDED event (codex_runner.py:516), never written to
     # the event log, so assert on the yielded stream, not elog.read().
-    assert any(e.get("type") == "agent_output" for e in evs), \
+    assert any(e.get("type") == "agent_result" for e in evs), \
         "run completed cleanly with persist wired into finally"
 
 
@@ -168,7 +168,7 @@ def _write_events(p: Path, records: list[dict]) -> None:
 def test_derive_awaiting_user_when_awaiting_event_present(tmp_path: Path) -> None:
     ev = tmp_path / "events.jsonl"
     _write_events(ev, [
-        {"agent_id": "step:t", "type": "llm_response",
+        {"agent_id": "step:t", "type": "agent_message",
          "payload": {"raw": {"content": [{"type": "text", "text": "merge?"}]}}},
         {"agent_id": "step:t", "type": "awaiting_user_input",
          "payload": {"prompt": "merge?"}},
@@ -181,7 +181,7 @@ def test_derive_awaiting_user_when_awaiting_event_present(tmp_path: Path) -> Non
 def test_derive_missing_complete_step_without_awaiting(tmp_path: Path) -> None:
     ev = tmp_path / "events.jsonl"
     _write_events(ev, [
-        {"agent_id": "step:t", "type": "llm_response",
+        {"agent_id": "step:t", "type": "agent_message",
          "payload": {"raw": {"content": [{"type": "text", "text": "done?"}]}}},
     ])
     state, _ = derive_codex_resume_state(ev, "step:t")
@@ -197,7 +197,7 @@ def test_derive_send_to_llm_when_complete_step_present(tmp_path: Path) -> None:
          "payload": {"prompt": "merge?"}},
         {"agent_id": "step:t", "type": "tool_call",
          "payload": {"name": "complete_step", "input": {}}},
-        {"agent_id": "step:t", "type": "llm_response",
+        {"agent_id": "step:t", "type": "agent_message",
          "payload": {"raw": {"content": [{"type": "text", "text": "answer"}]}}},
     ])
     state, _ = derive_codex_resume_state(ev, "step:t")
@@ -205,15 +205,15 @@ def test_derive_send_to_llm_when_complete_step_present(tmp_path: Path) -> None:
 
 
 def test_derive_skips_trailing_empty_prose_usage_carrier(tmp_path: Path) -> None:
-    # A prose turn, then a prose-less turn whose only llm_response is the empty-
+    # A prose turn, then a prose-less turn whose only agent_message is the empty-
     # prose usage carrier. last_text must come from the prose turn, not "".
     ev = tmp_path / "events.jsonl"
     _write_events(ev, [
-        {"agent_id": "step:t", "type": "llm_response",
+        {"agent_id": "step:t", "type": "agent_message",
          "payload": {"raw": {"content": [{"type": "text", "text": "which file?"}]}}},
         {"agent_id": "step:t", "type": "awaiting_user_input",
          "payload": {"prompt": "which file?"}},
-        {"agent_id": "step:t", "type": "llm_response",
+        {"agent_id": "step:t", "type": "agent_message",
          "payload": {"raw": {"content": []}}},   # empty-prose usage carrier
     ])
     state, last_text = derive_codex_resume_state(ev, "step:t")
@@ -222,13 +222,13 @@ def test_derive_skips_trailing_empty_prose_usage_carrier(tmp_path: Path) -> None
 
 
 def test_derive_send_to_llm_when_only_empty_prose_carriers(tmp_path: Path) -> None:
-    # A run whose only llm_responses are empty-prose usage carriers (all turns
-    # tool-only, no agent_message) has no prose to replay -> SEND_TO_LLM.
+    # A run whose only agent_messages are empty-prose usage carriers (all turns
+    # tool-only, no prose) has no prose to replay -> SEND_TO_LLM.
     ev = tmp_path / "events.jsonl"
     _write_events(ev, [
         {"agent_id": "step:t", "type": "tool_call",
          "payload": {"name": "write_file", "input": {}}},
-        {"agent_id": "step:t", "type": "llm_response",
+        {"agent_id": "step:t", "type": "agent_message",
          "payload": {"raw": {"content": []}}},
     ])
     state, last_text = derive_codex_resume_state(ev, "step:t")
@@ -238,18 +238,18 @@ def test_derive_send_to_llm_when_only_empty_prose_carriers(tmp_path: Path) -> No
 
 def test_derive_preamble_only_turn_recovers_last_text(tmp_path: Path) -> None:
     # A preamble turn whose prose leads its tool_call, followed by a prose-less
-    # continuation whose only llm_response is an empty-prose usage carrier.
-    # Under old code the trailing carrier is last_llm → last_text == ""; under
+    # continuation whose only agent_message is an empty-prose usage carrier.
+    # Under old code the trailing carrier is last_agent_message → last_text == "";
     # new code the prose-bearing lookup skips it and recovers "drafting the fix".
     ev = tmp_path / "events.jsonl"
     _write_events(ev, [
-        {"agent_id": "step:t", "type": "llm_response",
+        {"agent_id": "step:t", "type": "agent_message",
          "payload": {"raw": {"content": [{"type": "text", "text": "drafting the fix"}]}}},
         {"agent_id": "step:t", "type": "tool_call",
          "payload": {"name": "write_file", "input": {}}},
         {"agent_id": "step:t", "type": "tool_result",
          "payload": {"tool_use_id": "c1", "content": "ok"}},
-        {"agent_id": "step:t", "type": "llm_response",
+        {"agent_id": "step:t", "type": "agent_message",
          "payload": {"raw": {"content": []}}},   # trailing empty-prose carrier
     ])
     state, last_text = derive_codex_resume_state(ev, "step:t")
@@ -269,9 +269,9 @@ async def test_resume_missing_complete_step_continues_with_nudge(tmp_path: Path)
     saved.parent.mkdir(parents=True, exist_ok=True)
     saved.write_text('{"id": "thr-cont-1"}\n')
 
-    # events.jsonl that derives MISSING_COMPLETE_STEP (llm_response, no complete_step).
+    # events.jsonl that derives MISSING_COMPLETE_STEP (agent_message, no complete_step).
     _write_events(tmp_path / "events.jsonl", [
-        {"agent_id": "step:t", "type": "llm_response",
+        {"agent_id": "step:t", "type": "agent_message",
          "payload": {"raw": {"content": [{"type": "text", "text": "stopped before finishing"}]}}},
     ])
 
@@ -294,9 +294,10 @@ async def test_resume_missing_complete_step_continues_with_nudge(tmp_path: Path)
     assert not any(e.get("type") == "error"
                    and e["payload"].get("kind") == "missing_complete_step"
                    for e in events)
-    assert any(e.get("type") == "agent_output" for e in events)
-    # The continue nudge was journaled as the resumed user message.
-    assert any(e.get("type") == "user_message"
+    assert any(e.get("type") == "agent_result" for e in events)
+    # The continue nudge was journaled as an engine_message/continuation.
+    assert any(e.get("type") == "engine_message"
+               and e.get("payload", {}).get("subtype") == "continuation"
                and RESUME_CONTINUE_NUDGE in json.dumps(e.get("payload", {}),
                                                        ensure_ascii=False)
                for e in elog.read())
@@ -308,7 +309,7 @@ async def test_awaiting_user_retry_continue_journals_engine_continuation_not_use
 ) -> None:
     """codex retry-continue of a bare-turn-end AWAITING_USER (derived from
     events.jsonl): the resume branch emits NO awaiting_user_input, journals the
-    nudge as an internal engine_continuation event (not a user_message), and
+    nudge as an internal engine_message/continuation event (not a user_message), and
     still drives the resumed prompt with the nudge."""
     from imp.engine.agent_run import _CONTINUATION_NUDGE
 
@@ -321,10 +322,10 @@ async def test_awaiting_user_retry_continue_journals_engine_continuation_not_use
     saved.parent.mkdir(parents=True, exist_ok=True)
     saved.write_text('{"id": "thr-rc-1"}\n')
 
-    # events.jsonl deriving AWAITING_USER: a tail llm_response + the journaled
+    # events.jsonl deriving AWAITING_USER: a tail agent_message + the journaled
     # awaiting_user_input, with no complete_step.
     _write_events(tmp_path / "events.jsonl", [
-        {"agent_id": "step:t", "type": "llm_response",
+        {"agent_id": "step:t", "type": "agent_message",
          "payload": {"raw": {"content": [{"type": "text", "text": "which file?"}]}}},
         {"agent_id": "step:t", "type": "awaiting_user_input",
          "payload": {"prompt": "which file?"}},
@@ -353,7 +354,10 @@ async def test_awaiting_user_retry_continue_journals_engine_continuation_not_use
     events = [ev async for ev in runner.run(inv)]
 
     types = [e["type"] for e in elog.read()]
-    assert "engine_continuation" in types
+    assert any(
+        e["type"] == "engine_message"
+        and e.get("payload", {}).get("subtype") == "continuation"
+        for e in elog.read())
     # The resume branch no longer emits awaiting_user_input to the event log
     # (the seeded one is on-disk in events.jsonl, a separate file the classifier
     # reads; elog is the fresh in-memory log the run writes to).
@@ -364,11 +368,14 @@ async def test_awaiting_user_retry_continue_journals_engine_continuation_not_use
         and _CONTINUATION_NUDGE in json.dumps(e.get("payload", {}),
                                               ensure_ascii=False)
         for e in elog.read())
-    cont = next(e for e in elog.read() if e["type"] == "engine_continuation")
-    assert cont["payload"] == {"text": _CONTINUATION_NUDGE}
+    cont = next(
+        e for e in elog.read()
+        if e["type"] == "engine_message"
+        and e.get("payload", {}).get("subtype") == "continuation")
+    assert cont["payload"]["content"][0]["text"] == _CONTINUATION_NUDGE
     # The resumed prompt is the nudge, so the run continues and completes.
     assert _CONTINUATION_NUDGE in str(fake.thread.run_calls[0][0])
-    assert any(e.get("type") == "agent_output" for e in events)
+    assert any(e.get("type") == "agent_result" for e in events)
 
 
 @pytest.mark.anyio
@@ -377,7 +384,7 @@ async def test_awaiting_user_retry_redrives_pending_reply_not_nudge(
 ) -> None:
     """codex retry at an AWAITING_USER resume whose events.jsonl tail carries an
     un-answered solicited reply: the resume drives the REPLY text (not the
-    continuation nudge), emits no engine_continuation, and does NOT re-journal
+    continuation nudge), emits no engine_message/continuation, and does NOT re-journal
     the reply's user_message (it is already durable in events.jsonl)."""
     from imp.engine.agent_run import _CONTINUATION_NUDGE
 
@@ -391,15 +398,15 @@ async def test_awaiting_user_retry_redrives_pending_reply_not_nudge(
     saved.write_text('{"id": "thr-pr-1"}\n')
 
     # events.jsonl deriving AWAITING_USER with a trailing solicited reply:
-    # llm_response(question) -> awaiting_user_input -> user_message(reply),
-    # no complete_step, no llm_response after the reply.
+    # agent_message(question) -> awaiting_user_input -> user_message(reply),
+    # no complete_step, no agent_message after the reply.
     _write_events(tmp_path / "events.jsonl", [
-        {"agent_id": "step:t", "type": "llm_response",
+        {"agent_id": "step:t", "type": "agent_message",
          "payload": {"raw": {"content": [{"type": "text", "text": "which file?"}]}}},
         {"agent_id": "step:t", "type": "awaiting_user_input",
          "payload": {"prompt": "which file?"}},
         {"agent_id": "step:t", "type": "user_message",
-         "payload": {"role": "user",
+         "payload": {"role": "user", "subtype": "reply",
                      "content": [{"type": "text", "text": "use config.py"}]}},
     ])
 
@@ -432,10 +439,13 @@ async def test_awaiting_user_retry_redrives_pending_reply_not_nudge(
     assert _CONTINUATION_NUDGE not in driven
 
     types = [e["type"] for e in elog.read()]
-    # Recovered-reply path journals nothing: no engine_continuation, and the
+    # Recovered-reply path journals nothing: no engine_message/continuation, and the
     # reply is not re-journaled into the fresh in-memory log (it lives in the
     # on-disk events.jsonl the classifier read).
-    assert "engine_continuation" not in types
+    assert not any(
+        e["type"] == "engine_message"
+        and e.get("payload", {}).get("subtype") == "continuation"
+        for e in elog.read())
     assert not any(
         e["type"] == "user_message"
         and "use config.py" in json.dumps(e.get("payload", {}), ensure_ascii=False)
@@ -460,10 +470,10 @@ async def test_awaiting_user_solicit_emits_gate_with_last_agent_message(
     saved.parent.mkdir(parents=True, exist_ok=True)
     saved.write_text('{"id": "thr-s-1"}\n')
 
-    # events.jsonl deriving AWAITING_USER: a tail prose llm_response + the
+    # events.jsonl deriving AWAITING_USER: a tail prose agent_message + the
     # journaled awaiting_user_input, no complete_step, no following user_message.
     _write_events(tmp_path / "events.jsonl", [
-        {"agent_id": "step:t", "type": "llm_response",
+        {"agent_id": "step:t", "type": "agent_message",
          "payload": {"raw": {"content": [{"type": "text", "text": "which file?"}]}}},
         {"agent_id": "step:t", "type": "awaiting_user_input",
          "payload": {"steer_hint": "", "last_agent_message": "which file?",
