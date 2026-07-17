@@ -404,3 +404,35 @@ def test_interrupt_gate_engaged_tolerates_blank_and_garbage_lines(tmp_path):
         extra_lines=("", "   ", "{not valid json", "no-brace-line"),
     )
     assert _interrupt_gate_engaged(ev) is True
+
+
+def test_impty_e2e_timeout_exceeds_global_cap():
+    # The global ini timeout is 60s (signal). The impty e2e ceiling MUST exceed
+    # it, else the marker override is a no-op against the SIGALRM cap.
+    from tests.conftest import _IMPTY_E2E_TIMEOUT
+    assert _IMPTY_E2E_TIMEOUT >= 180
+
+
+def test_hook_adds_raised_timeout_to_impty_e2e_file():
+    from tests.conftest import _IMPTY_E2E_TIMEOUT, pytest_collection_modifyitems
+    item = _StubItem("tests/impty/test_e2e_pipeline.py")
+    pytest_collection_modifyitems(_StubConfig(None), [item])
+    timeouts = [d for d in item.added if d.mark.name == "timeout"]
+    assert timeouts and timeouts[0].mark.args[0] == _IMPTY_E2E_TIMEOUT
+    assert timeouts[0].mark.args[0] > 60  # overrides the global SIGALRM cap
+
+
+def test_hook_ignores_non_e2e_impty_file():
+    # A non-e2e impty test (e.g. the session unit tests) keeps the global 60s
+    # cap — the raised ceiling is scoped to the full-pipeline e2e files only.
+    from tests.conftest import pytest_collection_modifyitems
+    item = _StubItem("tests/impty/test_session.py")
+    pytest_collection_modifyitems(_StubConfig(None), [item])
+    assert [d for d in item.added if d.mark.name == "timeout"] == []
+
+
+def test_hook_does_not_add_timeout_to_ordinary_top_level_file():
+    from tests.conftest import pytest_collection_modifyitems
+    item = _StubItem("tests/test_ordinary.py")
+    pytest_collection_modifyitems(_StubConfig(None), [item])
+    assert [d for d in item.added if d.mark.name == "timeout"] == []

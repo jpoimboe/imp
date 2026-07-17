@@ -11,6 +11,7 @@ from anyio.streams.buffered import BufferedByteReceiveStream
 
 from imp.remote.session.protocol import (
     Attach,
+    Input,
     SkillRequest,
     encode_attach,
     encode_control,
@@ -210,6 +211,92 @@ async def test_input_outside_a_gate_is_dropped(tmp_path: Path) -> None:
             while not got:
                 await anyio.sleep(0.02)
         assert got == ["now"]
+        await client.aclose()
+        await session.close()
+        tg.cancel_scope.cancel()
+
+
+def test_arm_input_latches_a_pre_gate_reply_frame() -> None:
+    session = SessionSocket("/unused.sock")
+    session.arm_input()
+    session._dispatch(SimpleNamespace(), Input("early"))
+    assert session._pending_input == "early"
+
+
+def test_disarm_input_drops_an_unconsumed_latched_frame() -> None:
+    session = SessionSocket("/unused.sock")
+    session.arm_input()
+    session._dispatch(SimpleNamespace(), Input("early"))
+    session.disarm_input()
+    assert session._pending_input is None
+    # A frame arriving while disarmed (type-ahead during a run) is not latched,
+    # so it can never leak into a later, unrelated gate.
+    session._dispatch(SimpleNamespace(), Input("stale"))
+    assert session._pending_input is None
+
+
+@pytest.mark.anyio
+async def test_next_input_delivers_a_latched_pre_gate_reply(tmp_path: Path) -> None:
+    sock = str(tmp_path / "s.sock")
+    session = SessionSocket(sock)
+    async with anyio.create_task_group() as tg:
+        await session.open()
+        tg.start_soon(session.serve)
+        client = await _attach(sock, "c1")
+        with anyio.fail_after(5):
+            while session.attached_count != 1:
+                await anyio.sleep(0.02)
+        session.arm_input()
+        await client.send((encode_input("early") + "\n").encode())
+        # The reply arrives before the gate opens; wait until it is latched.
+        with anyio.fail_after(5):
+            while session._pending_input is None:
+                await anyio.sleep(0.02)
+        got: list[str] = []
+
+        async def _gate() -> None:
+            got.append(await session.next_input())
+
+        tg.start_soon(_gate)
+        with anyio.fail_after(5):
+            while not got:
+                await anyio.sleep(0.02)
+        assert got == ["early"]
+        await client.aclose()
+        await session.close()
+        tg.cancel_scope.cancel()
+
+
+@pytest.mark.anyio
+async def test_next_input_delivers_a_latched_pre_gate_skill_request(
+    tmp_path: Path,
+) -> None:
+    sock = str(tmp_path / "s.sock")
+    session = SessionSocket(sock)
+    async with anyio.create_task_group() as tg:
+        await session.open()
+        tg.start_soon(session.serve)
+        client = await _attach(sock, "c1")
+        with anyio.fail_after(5):
+            while session.attached_count != 1:
+                await anyio.sleep(0.02)
+        session.arm_input()
+        await client.send(
+            (encode_skill_request("refactor", "src/foo.py") + "\n").encode())
+        # The skill request arrives before the gate opens; wait until it is latched.
+        with anyio.fail_after(5):
+            while session._pending_input is None:
+                await anyio.sleep(0.02)
+        got: list[object] = []
+
+        async def _gate() -> None:
+            got.append(await session.next_input())
+
+        tg.start_soon(_gate)
+        with anyio.fail_after(5):
+            while not got:
+                await anyio.sleep(0.02)
+        assert got == [SkillRequest("refactor", "src/foo.py")]
         await client.aclose()
         await session.close()
         tg.cancel_scope.cancel()

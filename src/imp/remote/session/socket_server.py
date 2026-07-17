@@ -35,6 +35,7 @@ from imp.remote.session.protocol import (
 )
 
 _CLIENT_BUFFER = 256  # per-client send-stream depth; overflow drops that one client
+_FLUSH_TIMEOUT = 5.0   # teardown backstop: a dead client can't wedge the flush
 _log = logging.getLogger("imp.remote.session.socket_server")
 
 
@@ -78,6 +79,8 @@ class _Client:
     send: MemoryObjectSendStream[dict[str, Any]]
     scope: Any
     leased: bool = False
+    # Set on pump exit; teardown flush awaits it. None until wired in _handle (needs a loop).
+    pump_done: anyio.Event | None = None
 
 
 class SessionSocket:
@@ -104,6 +107,10 @@ class SessionSocket:
         self._clients: set[_Client] = set()
         self._listener: SocketListener | None = None
         self._input_send: MemoryObjectSendStream[str | SkillRequest] | None = None
+        # Single-slot latch for a reply that arrives after a solicit armed but
+        # before next_input() opened the gate. Armed only while soliciting.
+        self._pending_input: str | SkillRequest | None = None
+        self._input_armed: bool = False
         self._serve_scope: anyio.CancelScope | None = None
         self._serve_done: anyio.Event | None = None
 
@@ -169,25 +176,49 @@ class SessionSocket:
     async def _pump_client(
         self, client: _Client, recv: MemoryObjectReceiveStream[dict[str, Any]],
     ) -> None:
-        with contextlib.suppress(anyio.ClosedResourceError, anyio.BrokenResourceError):
-            async for event in recv:
-                # Coalesce all currently-buffered events into one write: at run
-                # teardown the pump is cancelled right after run_fn returns, so a
-                # per-event await would flush only the first queued event and drop
-                # the rest. Draining synchronously into one send closes that window.
-                batch = [event]
-                while True:
+        try:
+            with contextlib.suppress(anyio.ClosedResourceError, anyio.BrokenResourceError):
+                async for event in recv:
+                    # Coalesce all currently-buffered events into one write: at run
+                    # teardown the pump is cancelled right after run_fn returns, so a
+                    # per-event await would flush only the first queued event and drop
+                    # the rest. Draining synchronously into one send closes that window.
+                    batch = [event]
+                    while True:
+                        try:
+                            batch.append(recv.receive_nowait())
+                        except (anyio.WouldBlock, anyio.EndOfStream):
+                            break
+                    line = b"".join(
+                        (encode_event(e) + "\n").encode("utf-8") for e in batch)
                     try:
-                        batch.append(recv.receive_nowait())
-                    except (anyio.WouldBlock, anyio.EndOfStream):
+                        await client.stream.send(line)
+                    except (anyio.BrokenResourceError, anyio.ClosedResourceError):
+                        self._drop(client)
                         break
-                line = b"".join(
-                    (encode_event(e) + "\n").encode("utf-8") for e in batch)
-                try:
-                    await client.stream.send(line)
-                except (anyio.BrokenResourceError, anyio.ClosedResourceError):
-                    self._drop(client)
-                    break
+        finally:
+            if client.pump_done is not None:
+                client.pump_done.set()
+
+    async def flush_pending(self) -> None:
+        """Drain queued client events before teardown; bounded against a dead client."""
+        clients = list(self._clients)
+        for client in clients:
+            with contextlib.suppress(anyio.ClosedResourceError):
+                client.send.close()
+        for client in clients:
+            if client.pump_done is not None:
+                with anyio.move_on_after(_FLUSH_TIMEOUT):
+                    await client.pump_done.wait()
+
+    def arm_input(self) -> None:
+        """Latch a reply arriving before the gate opens. Pair with disarm_input()."""
+        self._input_armed = True
+
+    def disarm_input(self) -> None:
+        """Stop expecting a reply; drop any unconsumed latched frame so it can't leak later."""
+        self._input_armed = False
+        self._pending_input = None
 
     async def next_input(self) -> str | SkillRequest:
         if self._input_send is not None:
@@ -195,6 +226,10 @@ class SessionSocket:
         # capacity-1 stream + WouldBlock drop: first write wins, loser not queued for next gate
         send, recv = anyio.create_memory_object_stream[str | SkillRequest](max_buffer_size=1)
         self._input_send = send
+        if self._pending_input is not None:
+            # A reply latched between arm and gate-open; deliver it to this gate.
+            send.send_nowait(self._pending_input)
+            self._pending_input = None
         try:
             return await recv.receive()
         finally:
@@ -203,12 +238,14 @@ class SessionSocket:
             recv.close()
 
     def _dispatch(self, client: _Client, message: object) -> None:
-        if isinstance(message, Input) and self._input_send is not None:
-            with contextlib.suppress(anyio.WouldBlock):
-                self._input_send.send_nowait(message.text)
-        elif isinstance(message, SkillRequest) and self._input_send is not None:
-            with contextlib.suppress(anyio.WouldBlock):
-                self._input_send.send_nowait(message)
+        if isinstance(message, (Input, SkillRequest)):
+            payload = message.text if isinstance(message, Input) else message
+            if self._input_send is not None:
+                with contextlib.suppress(anyio.WouldBlock):
+                    self._input_send.send_nowait(payload)
+            elif self._input_armed and self._pending_input is None:
+                # Latch the first pre-gate reply (first-wins, like the open gate).
+                self._pending_input = payload
         elif isinstance(message, Control) and self._on_control is not None:
             self._on_control(message.action, message.reason)
         elif isinstance(message, SetLease):
@@ -233,6 +270,7 @@ class SessionSocket:
                 client = _Client(
                     stream=stream, send=send, scope=ctg.cancel_scope,
                     leased=hello.lease)
+                client.pump_done = anyio.Event()
                 self._clients.add(client)
                 snapshot: ReplaySnapshot | None = None
                 if self._on_attach is not None:

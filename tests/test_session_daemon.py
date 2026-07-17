@@ -70,37 +70,109 @@ async def test_serves_on_per_change_socket_and_bridges_run_quest_seams(
         coordinator: Any,
         wait_for_turn_fn: Any = None,
     ) -> str:
+        # Emit the prompt before soliciting (as run_quest does): the client's readiness signal.
+        on_event({"type": "awaiting_user_input",
+                  "payload": {"steer_hint": "go", "interrupt": False}})
         reply = await user_chat_input_fn("")
         on_event({"type": "agent_result", "payload": {"reply": reply}})
         return reply
 
     async with anyio.create_task_group() as tg:
         result: dict[str, Any] = {}
+        run_done = anyio.Event()
 
         async def _serve() -> None:
             result["r"] = await serve_quest_session(
                 quest, run_fn=fake_run, hibernate=False)
+            run_done.set()
 
         tg.start_soon(_serve)
         await _wait_for_socket(sock)
         received: list[dict[str, Any]] = []
-        client = SessionClient(sock, quest.id, quest.title,
-                               on_event=received.append)
+        gate_seen = anyio.Event()
+        output_seen = anyio.Event()
+
+        def _on_event(e: dict[str, Any]) -> None:
+            received.append(e)
+            if e.get("type") == "awaiting_user_input":
+                gate_seen.set()
+            if e.get("type") == "agent_result":
+                output_seen.set()
+
+        client = SessionClient(sock, quest.id, quest.title, on_event=_on_event)
         await client.connect()
         tg.start_soon(client.receive_events)
-        await anyio.sleep(0.05)  # let the gate open (next_input is awaiting)
+        with anyio.fail_after(30):   # deadlock backstop only
+            await gate_seen.wait()   # the gate is armed; the reply cannot be lost
         await client.send_input("ship it")
-        with anyio.fail_after(5):
-            while "r" not in result:
-                await anyio.sleep(0.02)
+        with anyio.fail_after(30):   # deadlock backstop only; starts after send
+            await run_done.wait()
         assert result["r"] == "ship it"
-        with anyio.fail_after(5):
-            while not any(e["type"] == "agent_result" for e in received):
-                await anyio.sleep(0.02)
+        with anyio.fail_after(30):   # deadlock backstop only
+            await output_seen.wait()
         assert received[0] == {"type": "replay_complete"}  # boundary leads the attach stream
         assert [e for e in received
-                if e["type"] not in ("user_input_resolved", "replay_complete")] == [
+                if e["type"] not in (
+                    "user_input_resolved", "replay_complete",
+                    "awaiting_user_input")] == [
             {"type": "agent_result", "payload": {"reply": "ship it"}}]
+        await client.aclose()
+        tg.cancel_scope.cancel()
+
+
+@pytest.mark.anyio
+async def test_client_attached_at_completion_receives_final_agent_output(
+    tmp_path: Path,
+) -> None:
+    quest = _make_change(tmp_path, "2026-06-15-flush")
+    sock = str(session_socket_path(quest.control_root, quest.id))
+    client_ready = anyio.Event()
+
+    async def fake_run(
+        quest: Quest, *, on_event: Any, user_chat_input_fn: Any,
+        coordinator: Any,
+        wait_for_turn_fn: Any = None,
+    ) -> str:
+        # Emit the final event as the very last action before returning, so the
+        # pump must flush it before the teardown cancel or it is lost.
+        await client_ready.wait()
+        on_event({"type": "agent_output", "payload": {"reply": "final"}})
+        return "done"
+
+    async with anyio.create_task_group() as tg:
+        result: dict[str, Any] = {}
+        run_done = anyio.Event()
+
+        async def _serve() -> None:
+            result["r"] = await serve_quest_session(
+                quest, run_fn=fake_run, hibernate=False)
+            run_done.set()
+
+        tg.start_soon(_serve)
+        await _wait_for_socket(sock)
+        received: list[dict[str, Any]] = []
+        attached = anyio.Event()
+        output_seen = anyio.Event()
+
+        def _on_event(e: dict[str, Any]) -> None:
+            received.append(e)
+            if e.get("type") == "replay_complete":
+                attached.set()
+            if e.get("type") == "agent_output":
+                output_seen.set()
+
+        client = SessionClient(sock, quest.id, quest.title, on_event=_on_event)
+        await client.connect()
+        tg.start_soon(client.receive_events)
+        with anyio.fail_after(30):   # deadlock backstop only
+            await attached.wait()    # client fully attached (got replay boundary)
+        client_ready.set()           # now fake_run may emit its final event + return
+        with anyio.fail_after(30):   # deadlock backstop only
+            await output_seen.wait()
+        assert {"type": "agent_output", "payload": {"reply": "final"}} in received
+        with anyio.fail_after(30):   # deadlock backstop only
+            await run_done.wait()
+        assert result["r"] == "done"
         await client.aclose()
         tg.cancel_scope.cancel()
 
@@ -168,14 +240,21 @@ async def test_interrupt_control_pauses_the_shared_coordinator(
     quest = _make_change(tmp_path, "2026-06-15-jkl")
     sock = str(session_socket_path(quest.control_root, quest.id))
 
+    run_returned = anyio.Event()
+
     async def fake_run(
         quest: Quest, *, on_event: Any, user_chat_input_fn: Any,
         coordinator: Any,
         wait_for_turn_fn: Any = None,
     ) -> str:
-        with anyio.fail_after(5):
-            while not coordinator.should_pause:
-                await anyio.sleep(0.02)
+        # Await the real interrupt-delivery seam (_deliver_interrupt), not a should_pause poll.
+        interrupt_delivered = anyio.Event()
+
+        async def _interrupt() -> None:
+            interrupt_delivered.set()
+
+        coordinator.attach_runner(_interrupt)
+        await interrupt_delivered.wait()
         return "paused"
 
     async with anyio.create_task_group() as tg:
@@ -184,6 +263,7 @@ async def test_interrupt_control_pauses_the_shared_coordinator(
         async def _serve() -> None:
             result["r"] = await serve_quest_session(
                 quest, run_fn=fake_run, hibernate=False)
+            run_returned.set()
 
         tg.start_soon(_serve)
         await _wait_for_socket(sock)
@@ -191,9 +271,8 @@ async def test_interrupt_control_pauses_the_shared_coordinator(
                                on_event=lambda _e: None)
         await client.connect()
         await client.send_control("interrupt")
-        with anyio.fail_after(5):
-            while "r" not in result:
-                await anyio.sleep(0.02)
+        with anyio.fail_after(30):   # deadlock backstop only; starts after send
+            await run_returned.wait()
         assert result["r"] == "paused"
         await client.aclose()
         tg.cancel_scope.cancel()
@@ -1399,6 +1478,7 @@ async def test_resume_prompt_target_holds_before_running_agent(
     sock = str(session_socket_path(quest.control_root, quest.id))
 
     calls: dict[str, Any] = {"n": 0, "interject": None}
+    run_done = anyio.Event()
 
     async def fake_run(
         quest: Quest, *, on_event: Any, user_chat_input_fn: Any,
@@ -1415,18 +1495,24 @@ async def test_resume_prompt_target_holds_before_running_agent(
         async def _serve() -> None:
             result["r"] = await serve_quest_session(
                 quest, run_fn=fake_run, hibernate=False, resume=True)
+            run_done.set()
 
         tg.start_soon(_serve)
         await _wait_for_socket(sock)
         received: list[dict[str, Any]] = []
+        gate_seen = anyio.Event()
+
+        def _on_event(e: dict[str, Any]) -> None:
+            received.append(e)
+            if e.get("type") == "awaiting_user_input":
+                gate_seen.set()
+
         client = SessionClient(sock, quest.id, quest.title,
-                               on_event=received.append)
+                               on_event=_on_event)
         await client.connect()
         tg.start_soon(client.receive_events)
-        with anyio.fail_after(5):
-            while not any(
-                    e.get("type") == "awaiting_user_input" for e in received):
-                await anyio.sleep(0.02)
+        with anyio.fail_after(30):   # deadlock backstop only
+            await gate_seen.wait()
         # The hold prompt is surfaced FIRST — the agent has not run yet.
         assert calls["n"] == 0
         gates = [e for e in received if e.get("type") == "awaiting_user_input"]
@@ -1436,9 +1522,8 @@ async def test_resume_prompt_target_holds_before_running_agent(
         # curation silences it instead of buzzing the operator.
         assert gates[-1]["payload"]["interrupt"] is True
         await client.send_input("steer me")
-        with anyio.fail_after(5):
-            while "r" not in result:
-                await anyio.sleep(0.02)
+        with anyio.fail_after(30):   # deadlock backstop only; starts after send_input
+            await run_done.wait()
         assert result["r"] is RunResult.COMPLETED
         assert calls["n"] == 1
         assert calls["interject"] == "steer me"

@@ -305,14 +305,16 @@ def test_run_to_completion_drains_flood_and_keeps_trailing_sentinel() -> None:
     #   - DONE-1 present proves the post-flood trailing sentinel survived to the
     #     end, i.e. the drain went past the buffer-fill point.
     # A wall-clock bound is deliberately NOT asserted: the drain's cost is
-    # dominated by pyte's feed() rendering the ~2350-line flood through its
-    # history buffer (~0.85 s idle, and it grows under CPU load), so any fixed
-    # ceiling is a load-dependent timing flake under `-n auto` saturation. `hard`
-    # below is a generous liveness ceiling only — nothing asserts how much of it
-    # was used.
+    # dominated by pyte's feed() rendering the ~1640-line flood through its
+    # history buffer, and it grows under CPU load, so any fixed ceiling is a
+    # load-dependent timing flake under `-n auto` saturation. The flood is sized
+    # to 128 KiB — comfortably past the 64 KiB tty-buffer fill point yet small
+    # enough that pyte's parse cost stays well under `hard` even under `-n auto`
+    # oversubscription. `hard` below is a generous liveness ceiling only —
+    # nothing asserts how much of it was used.
     prog = (
         "import sys\n"
-        "sys.stdout.write('A' * 200000)\n"  # ≫ 64 KiB kernel tty buffer
+        "sys.stdout.write('A' * 131072)\n"  # 128 KiB, ≫ the 64 KiB tty-buffer fill point
         "sys.stdout.write('\\nDONE-1\\n')\n"  # trailing sentinel AFTER the flood
         "sys.stdout.flush()\n"
     )
@@ -346,7 +348,7 @@ def test_wait_hangs_then_run_to_completion_drains_same_session() -> None:
         "import sys\n"
         "sys.stdin.readline()\n"  # wait for the first send() below
         "sys.stdin.readline()\n"  # holds the child alive across wait(0.5)
-        "sys.stdout.write('A' * 300000)\n"  # ≥ 256 KiB ≫ kernel tty buffer
+        "sys.stdout.write('A' * 131072)\n"  # 128 KiB, ≫ the 64 KiB tty-buffer fill point
         "sys.stdout.write('\\nDONE-5\\n')\n"
         "sys.stdout.flush()\n"
     )
@@ -356,9 +358,10 @@ def test_wait_hangs_then_run_to_completion_drains_same_session() -> None:
         # cannot have exited — proc.wait(0.5) always raises (the old hang).
         with pytest.raises(subprocess.TimeoutExpired):
             s.wait(timeout=0.5)
-        s.send("flood\r")  # NOW the 300 KB flood starts
-        # Generous hard budget: pyte chews the flood at ~1.5 s serial; a
-        # CPU-saturated -n auto box needs headroom (budget is liveness only).
+        s.send("flood\r")  # NOW the 128 KiB flood starts
+        # Generous hard budget: pyte parses the minimized 128 KiB flood well
+        # under `hard`; the budget is a pure deadlock backstop (liveness only,
+        # nothing asserts how much of it is used).
         rc = s.run_to_completion(hard=30.0)  # same child, drained + reaped
         assert rc == 0
         assert "DONE-5" in "\n".join(s.lines())
