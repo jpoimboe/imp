@@ -110,7 +110,7 @@ def test_cmd_status_intent_falls_back_to_user_message(tmp_path: Path, capsys) ->
     assert "fix the flaky test" in out
 
 
-def test_resolve_intent_prefers_opening_intent() -> None:
+def test_resolve_intent_prefers_seeded_intent() -> None:
     events = [
         {"type": "user_message",
          "payload": {"role": "user", "subtype": "intent",
