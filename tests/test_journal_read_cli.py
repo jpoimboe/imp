@@ -654,6 +654,62 @@ def test_events_reads_index_from_archive_after_merge(
     assert "steps:" in out
 
 
+def _archive_then_stale_empty_dir(control: Path, slug: str) -> None:
+    """Post-archival state the fix targets: the quest is in the archive AND a
+    stray empty .imp/quests/<slug>/ dir (no quest.json) sits on disk."""
+    _complete_and_archive(control, slug)
+    home = control / ".imp" / "quests" / slug
+    shutil.rmtree(home)                          # archival rmtree
+    home.mkdir()                                 # stray empty dir reappears
+    assert home.is_dir() and not (home / "quest.json").exists()
+
+
+def test_log_falls_through_stale_empty_dir_to_archive(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """imp log resolves the archived quest even with a stale empty home dir
+    present — no traceback, exit 0 (spec AC 2)."""
+    import imp.cli.main as m
+
+    _seed_control(tmp_path)
+    Quest.create(tmp_path, title="Stale Log", quest_id="stalelog", base_branch="main")
+    _seed_marker_phase(tmp_path, "stalelog")
+    _archive_then_stale_empty_dir(tmp_path, "stalelog")
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
+    monkeypatch.delenv("NO_COLOR", raising=False)
+
+    buf = io.StringIO()
+    with redirect_stdout(buf):
+        rc = main(["log", "stalelog"])
+    assert rc == 0
+    assert _MARKER_PHASE in buf.getvalue()
+
+
+def test_show_falls_through_stale_empty_dir_to_archive(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """imp show renders the archived quest's card even with a stale empty home
+    dir present — no traceback, exit 0 (spec AC 3)."""
+    import imp.cli.main as m
+
+    _seed_control(tmp_path)
+    Quest.create(tmp_path, title="Stale Show", quest_id="staleshow", base_branch="main")
+    _seed_marker_phase(tmp_path, "staleshow")
+    _archive_then_stale_empty_dir(tmp_path, "staleshow")
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
+    monkeypatch.delenv("NO_COLOR", raising=False)
+
+    buf = io.StringIO()
+    with redirect_stdout(buf):
+        rc = main(["show", "staleshow"])
+    assert rc == 0
+    assert "Stale Show" in buf.getvalue()
+
+
 def test_status_all_lists_archived(tmp_path, monkeypatch) -> None:
     import imp.cli.main as m
 
