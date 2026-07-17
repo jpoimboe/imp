@@ -191,3 +191,59 @@ def test_save_as_draft_without_reason_carries_no_interrupt_reason(tmp_path: Path
     assert len(saved) == 1
     assert "interrupt_reason" not in saved[0]["payload"]
     assert saved[0]["payload"] == {}
+
+
+def _titleless_draft_with_intent(tmp_path: Path, quest_id: str, text: str) -> Quest:
+    ch = Quest.create_draft(
+        tmp_path, title="", quest_id=quest_id, base_branch="main")
+    ch.event_log().append(
+        agent_id=None, type="opening_intent", payload={"text": text})
+    return ch
+
+
+def test_leave_disposition_titleless_shelved_shows_prompt_fallback(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
+    _seed_control(tmp_path)
+    ch = _titleless_draft_with_intent(tmp_path, "tl1", "when I hit save it crashed")
+    rc = m._print_leave_disposition(ch, {"disposition": "archive"})
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "tl1 · > when I hit save it crashed · shelved" in out
+    assert "(unnamed)" not in out
+
+
+def test_leave_disposition_titleless_abandon_shows_prompt_fallback(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
+    _seed_control(tmp_path)
+    ch = _titleless_draft_with_intent(tmp_path, "tl3", "make dark mode work")
+    rc = m._print_leave_disposition(ch, {"intent": "abandon"})
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "tl3 · > make dark mode work · abandoned" in out
+    assert "(unnamed)" not in out
+
+
+def test_leave_disposition_titleless_left_running_shows_prompt_fallback(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
+    _seed_control(tmp_path)
+    ch = _titleless_draft_with_intent(tmp_path, "tl4", "fix the login crash")
+    rc = m._print_leave_disposition(ch, {"send_failed": "1"})
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "tl4 · > fix the login crash · left running" in out
+    assert "(unnamed)" not in out
+
+
+def test_leave_disposition_titleless_no_prompt_shows_unnamed(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
+    _seed_control(tmp_path)
+    ch = Quest.create_draft(tmp_path, title="", quest_id="tl2", base_branch="main")
+    rc = m._print_leave_disposition(ch, {"disposition": "save"})
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "tl2 · (unnamed) · kept as draft" in out
+    assert "> (unnamed)" not in out

@@ -598,20 +598,22 @@ def _print_leave_disposition(
     """
     color = should_use_color(sys.stdout)
     intent = leave_state.get("intent")
+    opening = _resolve_intent(list(quest.event_log().read()))
     if intent == "abandon":
-        print(_status_spine(quest.id, quest.title, "abandoned", "wordmark", color=color))
+        print(_status_spine(quest.id, quest.title, "abandoned", "wordmark", color=color,
+                            intent=opening))
         print()
         return 0
     disposition = leave_state.get("disposition")
     if disposition == "save":
         print(_status_spine(quest.id, quest.title, "kept as draft", "wordmark",
-                            color=color))
+                            color=color, intent=opening))
         print(_resume_line(quest.id))
         print()
         return 0
     if disposition == "archive":
         print(_status_spine(quest.id, quest.title, "shelved", "wordmark",
-                            color=color))
+                            color=color, intent=opening))
         print(_resume_line(quest.id, " — or find it later with imp search"))
         print()
         return 0
@@ -619,7 +621,7 @@ def _print_leave_disposition(
         return 0
     if leave_state.get("send_failed"):
         print(_status_spine(quest.id, quest.title, "left running", "wordmark",
-                            color=color))
+                            color=color, intent=opening))
         print(_resume_line(quest.id))
         print()
         return 0
