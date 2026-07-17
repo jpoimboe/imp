@@ -42,6 +42,7 @@ from imp.cli.inert_resume import (
 from imp.cli.init import GitSetupDeclined, IntegrationBranchUnresolved, run_init
 from imp.cli.live_driver import LiveDriver, compose_prelaunch_position_row
 from imp.cli.live_status import LiveStatus
+from imp.cli.mutation_proxy import proxy_mutation, proxy_mutation_async
 from imp.cli.palette import ansi, should_use_color
 from imp.cli.prompt import DEFAULT_HINT, Prompt
 from imp.cli.session_run import (
@@ -1045,6 +1046,14 @@ def _resolve_new_base(control: Path, base_flag: str | None) -> str:
 
 
 async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -> int:
+    if os.environ.get("IMP_SESSION_SOCKET") and leave_mode == "new":
+        return _emit_mutation_result(await proxy_mutation_async("new", {
+            "opening": getattr(args, "opening", None),
+            "title": getattr(args, "title", None),
+            "workflow": getattr(args, "workflow", None),
+            "base": getattr(args, "base", None),
+            "idea": getattr(args, "idea", None),
+            "depends_on": getattr(args, "depends_on", None)}))
     install_process_group()
     from imp.cli.signals import InterruptCoordinator
 
@@ -1258,6 +1267,9 @@ def _build_resume_driver(
 
 
 async def _async_cmd_resume(args: argparse.Namespace) -> int:
+    if os.environ.get("IMP_SESSION_SOCKET"):
+        return _emit_mutation_result(
+            await proxy_mutation_async("resume", {"token": args.token}))
     install_process_group()
     from imp.cli.signals import InterruptCoordinator
 
@@ -3071,7 +3083,20 @@ def apply_edit(
     return 0, None
 
 
+def _emit_mutation_result(result: dict[str, Any]) -> int:
+    rc: int = result["returncode"]
+    message = result.get("message")
+    if message:
+        print(message, file=sys.stderr if rc else sys.stdout)
+    return rc
+
+
 def _cmd_edit(args: argparse.Namespace) -> int:
+    if os.environ.get("IMP_SESSION_SOCKET"):
+        return _emit_mutation_result(proxy_mutation("edit", {
+            "token": args.token, "title": args.title, "backlog": args.backlog,
+            "active": args.active, "depends_on": args.depends_on,
+            "clear_deps": args.clear_deps, "append_intent": args.append_intent}))
     control = _control_root()
     quest_id = _resolve_id(control, args.token)
     rc, msg = apply_edit(

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import argparse
+import asyncio
 import json
 from pathlib import Path
 
@@ -7,6 +9,7 @@ import anyio
 import pytest
 
 import imp.remote.daemon.spawn as spawn_mod
+from imp.cli import main
 from imp.cli.mutation_proxy import build_session_handler, proxy_mutation, run_mutation
 from imp.engine import worktree
 from imp.engine.quest import Quest
@@ -117,3 +120,88 @@ async def test_proxy_mutation_edit_round_trips_over_socket(
 
         await session.close()
         tg.cancel_scope.cancel()
+
+
+def test_cmd_edit_proxies_when_socket_set(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("IMP_SESSION_SOCKET", "/tmp/imp-x/y.sock")
+    seen: dict[str, object] = {}
+
+    def _fake(op: str, args: dict) -> dict:
+        seen["op"] = op
+        seen["args"] = args
+        return {"returncode": 0, "message": ""}
+
+    monkeypatch.setattr(main, "proxy_mutation", _fake)
+    args = argparse.Namespace(
+        token="q1", title="New", backlog=False, active=False,
+        depends_on=None, clear_deps=False, append_intent=None)
+    assert main._cmd_edit(args) == 0
+    assert seen["op"] == "edit"
+    assert seen["args"]["token"] == "q1"
+    assert seen["args"]["title"] == "New"
+
+
+def test_async_cmd_resume_proxies_when_socket_set(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("IMP_SESSION_SOCKET", "/tmp/imp-x/y.sock")
+    seen: dict[str, object] = {}
+
+    async def _fake(op: str, args: dict) -> dict:
+        seen["op"] = op
+        seen["args"] = args
+        return {"returncode": 0, "message": "Resuming @q1…"}
+
+    monkeypatch.setattr(main, "proxy_mutation_async", _fake)
+    args = argparse.Namespace(token="q1")
+    assert asyncio.run(main._async_cmd_resume(args)) == 0
+    assert seen == {"op": "resume", "args": {"token": "q1"}}
+
+
+def test_async_cmd_new_proxies_when_socket_set(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("IMP_SESSION_SOCKET", "/tmp/imp-x/y.sock")
+    seen: dict[str, object] = {}
+
+    async def _fake(op: str, args: dict) -> dict:
+        seen["op"] = op
+        seen["args"] = args
+        return {"returncode": 0, "message": "imp: recorded backlog quest q9"}
+
+    monkeypatch.setattr(main, "proxy_mutation_async", _fake)
+    args = argparse.Namespace(
+        opening="brief", title=None, workflow=None, base=None,
+        idea="Idea", depends_on=["dep1"])
+    assert asyncio.run(main._async_cmd_new(args)) == 0
+    assert seen["op"] == "new"
+    assert seen["args"]["idea"] == "Idea"
+    assert seen["args"]["depends_on"] == ["dep1"]
+
+
+def test_async_cmd_new_chat_mode_does_not_proxy(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("IMP_SESSION_SOCKET", "/tmp/imp-x/y.sock")
+    called = False
+
+    async def _fake(op: str, args: dict) -> dict:
+        nonlocal called
+        called = True
+        return {"returncode": 0, "message": ""}
+
+    monkeypatch.setattr(main, "proxy_mutation_async", _fake)
+
+    class _Stop(Exception):
+        pass
+
+    def _boom(*a, **k):
+        raise _Stop
+
+    monkeypatch.setattr(main, "install_process_group", _boom)
+    args = argparse.Namespace(
+        opening="brief", title=None, workflow=None, base=None,
+        idea=None, depends_on=None)
+    with pytest.raises(_Stop):
+        asyncio.run(main._async_cmd_new(args, leave_mode="chat"))
+    assert called is False
