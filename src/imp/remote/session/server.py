@@ -141,6 +141,8 @@ class SessionServer:
                         if self._coordinator is not None:
                             self._coordinator.clear_delivery_spawner()
                         await self._control_send.aclose()
+                # Drain queued client events before the cancel tears down the pumps.
+                await self._socket.flush_pending()
                 tg.cancel_scope.cancel()
         finally:
             await self._socket.close()

@@ -35,6 +35,7 @@ from imp.remote.session.protocol import (
 )
 
 _CLIENT_BUFFER = 256  # per-client send-stream depth; overflow drops that one client
+_FLUSH_TIMEOUT = 5.0   # teardown backstop: a dead client can't wedge the flush
 _log = logging.getLogger("imp.remote.session.socket_server")
 
 
@@ -78,6 +79,8 @@ class _Client:
     send: MemoryObjectSendStream[dict[str, Any]]
     scope: Any
     leased: bool = False
+    # Set on pump exit; teardown flush awaits it. None until wired in _handle (needs a loop).
+    pump_done: anyio.Event | None = None
 
 
 class SessionSocket:
@@ -169,25 +172,40 @@ class SessionSocket:
     async def _pump_client(
         self, client: _Client, recv: MemoryObjectReceiveStream[dict[str, Any]],
     ) -> None:
-        with contextlib.suppress(anyio.ClosedResourceError, anyio.BrokenResourceError):
-            async for event in recv:
-                # Coalesce all currently-buffered events into one write: at run
-                # teardown the pump is cancelled right after run_fn returns, so a
-                # per-event await would flush only the first queued event and drop
-                # the rest. Draining synchronously into one send closes that window.
-                batch = [event]
-                while True:
+        try:
+            with contextlib.suppress(anyio.ClosedResourceError, anyio.BrokenResourceError):
+                async for event in recv:
+                    # Coalesce all currently-buffered events into one write: at run
+                    # teardown the pump is cancelled right after run_fn returns, so a
+                    # per-event await would flush only the first queued event and drop
+                    # the rest. Draining synchronously into one send closes that window.
+                    batch = [event]
+                    while True:
+                        try:
+                            batch.append(recv.receive_nowait())
+                        except (anyio.WouldBlock, anyio.EndOfStream):
+                            break
+                    line = b"".join(
+                        (encode_event(e) + "\n").encode("utf-8") for e in batch)
                     try:
-                        batch.append(recv.receive_nowait())
-                    except (anyio.WouldBlock, anyio.EndOfStream):
+                        await client.stream.send(line)
+                    except (anyio.BrokenResourceError, anyio.ClosedResourceError):
+                        self._drop(client)
                         break
-                line = b"".join(
-                    (encode_event(e) + "\n").encode("utf-8") for e in batch)
-                try:
-                    await client.stream.send(line)
-                except (anyio.BrokenResourceError, anyio.ClosedResourceError):
-                    self._drop(client)
-                    break
+        finally:
+            if client.pump_done is not None:
+                client.pump_done.set()
+
+    async def flush_pending(self) -> None:
+        """Drain queued client events before teardown; bounded against a dead client."""
+        clients = list(self._clients)
+        for client in clients:
+            with contextlib.suppress(anyio.ClosedResourceError):
+                client.send.close()
+        for client in clients:
+            if client.pump_done is not None:
+                with anyio.move_on_after(_FLUSH_TIMEOUT):
+                    await client.pump_done.wait()
 
     async def next_input(self) -> str | SkillRequest:
         if self._input_send is not None:
@@ -233,6 +251,7 @@ class SessionSocket:
                 client = _Client(
                     stream=stream, send=send, scope=ctg.cancel_scope,
                     leased=hello.lease)
+                client.pump_done = anyio.Event()
                 self._clients.add(client)
                 snapshot: ReplaySnapshot | None = None
                 if self._on_attach is not None:
