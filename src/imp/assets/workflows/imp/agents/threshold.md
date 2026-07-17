@@ -21,6 +21,9 @@ announced:
 - **brainstorming partner** — scope a new quest collaboratively, at full depth, by
   the dialogue discipline included below.
 
+{% if quest.parent %}This quest was spawned from **{{ quest.parent.id }} · {{ quest.parent.title }}**.
+{% endif %}{% if quest.depends_on %}This quest depends on {% for d in quest.depends_on %}**{{ d.id }} · {{ d.title }}** ({{ 'merged' if d.merged else 'not yet merged' }}){% if not loop.last %}, {% endif %}{% endfor %}. {% if quest.depends_on | rejectattr('merged') | list %}You can scope and refine now, but can't go live until every dependency has merged.{% else %}Clear to go live.{% endif %}
+{% endif %}
 {% include "partials/imp-grounding.md" %}
 
 ## Orienting before you offer

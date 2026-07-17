@@ -226,6 +226,41 @@ def test_threshold_routes_inline_satisfiable_requests_to_bare_turn_end_yield() -
     assert "no-build exit" in low
 
 
+def _render_threshold(tmp_path, **ctx_kwargs) -> str:
+    body = _wf().agents["threshold"].prompt_template_source
+    log = JsonlEventLog(tmp_path / "events.jsonl")
+    return render_prompt(body, build_context(
+        quest_title="t", event_log=log, quest_id="abc",
+        quest_home=".imp/quests/abc", project_facts={}, **ctx_kwargs),
+        workflow_dir=bundled_workflow_dir("imp"))
+
+
+def test_threshold_surfaces_parent_only(tmp_path) -> None:
+    out = _render_threshold(tmp_path, parent={"id": "dute11", "title": "Open front"})
+    assert "This quest was spawned from **dute11 · Open front**." in out
+    assert "This quest depends on" not in out
+
+
+def test_threshold_surfaces_unmerged_dependency(tmp_path) -> None:
+    out = _render_threshold(tmp_path, depends_on=[
+        {"id": "tuhe55", "title": "Rewrite imp-knowledge", "merged": False}])
+    assert "This quest depends on **tuhe55 · Rewrite imp-knowledge** (not yet merged)." in out
+    assert "can't go live until every dependency has merged." in out
+
+
+def test_threshold_surfaces_all_merged_dependencies(tmp_path) -> None:
+    out = _render_threshold(tmp_path, depends_on=[
+        {"id": "tuhe55", "title": "Rewrite imp-knowledge", "merged": True}])
+    assert "**tuhe55 · Rewrite imp-knowledge** (merged)." in out
+    assert "Clear to go live." in out
+
+
+def test_threshold_surfacing_block_empty_when_no_refs(tmp_path) -> None:
+    out = _render_threshold(tmp_path)
+    assert "This quest was spawned from" not in out
+    assert "This quest depends on" not in out
+
+
 def test_threshold_live_gate_conventions_relocated_to_partial(tmp_path) -> None:
     body = _wf().agents["threshold"].prompt_template_source
     # The inline convention list is gone from threshold's own raw body...
