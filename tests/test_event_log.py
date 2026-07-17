@@ -310,3 +310,18 @@ def test_append_creates_missing_parent_and_persists(tmp_path: Path) -> None:
     ev = log.append(agent_id=None, type="step_started", payload={"step": "s"})
     assert parent.is_dir()                     # AC2: the append created the parent dir
     assert _read(parent / "e.jsonl") == [ev]   # AC2: record persisted on write path
+
+
+def test_reader_does_not_resurrect_rmtreed_quest_home(tmp_path: Path) -> None:
+    # .imp/quests/ exists (other quests live here) but this quest's home was rmtree'd.
+    quests_root = tmp_path / ".imp" / "quests"
+    quests_root.mkdir(parents=True)
+    home = quests_root / "archived-gone"
+    assert not home.exists()
+
+    # A reader constructs the event log exactly as Quest.event_log() does and reads.
+    log = JsonlEventLog(home / "events.jsonl")
+    assert list(log.read()) == []
+    assert log.tail(10) == []
+
+    assert not home.exists()            # AC6: the rmtree'd home was NOT recreated
