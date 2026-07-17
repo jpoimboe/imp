@@ -94,7 +94,7 @@ def test_last_assistant_text_walks_back_to_most_recent_text() -> None:
 
 def test_last_assistant_text_empty_when_no_text() -> None:
     # The "no deliverable" corner (criterion 5): no assistant text at all ->
-    # "" -> provider emits no agent_output -> drive_invocation errors ->
+    # "" -> provider emits no agent_result -> drive_invocation errors ->
     # dispatch_task raises. The helper is the root of that chain.
     assert last_assistant_text([]) == ""
     assert last_assistant_text(
@@ -119,7 +119,7 @@ async def test_drive_invocation_skips_validation_for_subagent(tmp_path: Path) ->
     inv = _sub_invocation(tmp_path)
     # Payload {"text": ...} would FAIL the status-enum schema; the subagent path
     # must skip validation and return it as success.
-    runner = _FakeRunner([{"type": "agent_output", "payload": {"text": "hi"}}])
+    runner = _FakeRunner([{"type": "agent_result", "payload": {"text": "hi"}}])
     result = await drive_invocation(
         inv, runner, coordinator=None, log=None, emit_events=False)
     assert result.errored is False
@@ -137,7 +137,7 @@ async def test_scripted_subagent_bare_turn_end_emits_text(
 
     runner = ScriptedAgentRunner(model_name="x")
     events = [ev async for ev in runner.run(_sub_invocation(tmp_path))]
-    outs = [e for e in events if e["type"] == "agent_output"]
+    outs = [e for e in events if e["type"] == "agent_result"]
     assert outs and outs[-1]["payload"] == {"text": "the conclusion"}
     assert not any(e["type"] == "error" for e in events)
 
@@ -147,7 +147,7 @@ async def test_scripted_subagent_empty_turn_yields_no_output_then_errors(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     # Criterion 5 end-to-end: an empty terminal turn -> last_assistant_text ""
-    # -> provider emits NO agent_output -> drive_invocation surfaces errored.
+    # -> provider emits NO agent_result -> drive_invocation surfaces errored.
     script = {"default": [{"text": ""}]}
     p = tmp_path / "script.json"
     p.write_text(json.dumps(script))
@@ -155,7 +155,7 @@ async def test_scripted_subagent_empty_turn_yields_no_output_then_errors(
 
     runner = ScriptedAgentRunner(model_name="x")
     events = [ev async for ev in runner.run(_sub_invocation(tmp_path))]
-    assert not any(e["type"] == "agent_output" for e in events)
+    assert not any(e["type"] == "agent_result" for e in events)
 
     result = await drive_invocation(
         _sub_invocation(tmp_path), ScriptedAgentRunner(model_name="x"),
@@ -179,7 +179,7 @@ async def test_dispatch_task_returns_raw_final_text(tmp_path: Path) -> None:
 
     async def _spawn(_inv):
         return _FakeRunner(
-            [{"type": "agent_output", "payload": {"text": "looks good"}}])
+            [{"type": "agent_result", "payload": {"text": "looks good"}}])
 
     ctx.spawn_subagent = _spawn
     out = await dispatch_task(ctx, "reviewer", "review please")

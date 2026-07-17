@@ -3,8 +3,8 @@
 across consecutive tool calls within a single burst.
 
 Root cause that was fixed in §8: the provider emits an empty-text
-`llm_response` — a lone `tool_use` block, so `AgentTextNode.text` is empty —
-between consecutive `tool_call`s. Before the fix, `_h_llm_response` (and
+`agent_message` — a lone `tool_use` block, so `AgentTextNode.text` is empty —
+between consecutive `tool_call`s. Before the fix, `_h_agent_message` (and
 `_h_thinking`) called `_flush_burst()` unconditionally, nulling `_current_burst`
 before the next tool started, so every tool began a fresh burst with count 1.
 The fix gates the flush on non-empty text, so consecutive tool calls now
@@ -45,5 +45,5 @@ def test_consecutive_tools_accumulate_into_one_burst() -> None:
     # must climb above 1 as they accumulate into a single burst.
     assert max_count > 1, (
         f"tool counter stuck at {max_count}; consecutive tool calls are not "
-        f"accumulating into one burst (empty-text llm_response flushes between them)"
+        f"accumulating into one burst (empty-text agent_message flushes between them)"
     )

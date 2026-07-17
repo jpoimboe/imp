@@ -517,7 +517,7 @@ async def test_express_runs_full_implement_pipeline_with_change_panel(
 async def test_finalize_bare_turn_end_solicit_then_merge(tmp_path: Path) -> None:
     """finalize ends its turn with a bare question (no complete_step, no tool).
     finalize is interactive:true, so the FIRST bare turn-end solicits the human
-    immediately — no completion_nudge, no WAITING round-trip. The human reply
+    immediately — no engine_message/completion, no WAITING round-trip. The human reply
     becomes the next user message, after which finalize completes with
     decision=merge. Positioned directly at finalize so only finalize -> merge runs."""
     quest = _seed_default_workflow(tmp_path)
@@ -562,7 +562,10 @@ async def test_finalize_bare_turn_end_solicit_then_merge(tmp_path: Path) -> None
     seen_types = [e["type"] for e in events_seen]
     assert len(human_replies) == 1, human_replies
     assert "awaiting_user_input" in seen_types
-    assert "completion_nudge" not in seen_types, seen_types
+    assert not any(
+        e["type"] == "engine_message"
+        and e.get("payload", {}).get("subtype") == "completion"
+        for e in events_seen), seen_types
 
 
 @pytest.mark.anyio

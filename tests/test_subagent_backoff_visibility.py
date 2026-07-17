@@ -72,7 +72,7 @@ async def test_subagent_backoff_emits_agent_retry(
                     "category": "rate_limit", "kind": "rate_limit",
                     "message": "429 rate limited"}}
             else:
-                yield {"type": "agent_output",
+                yield {"type": "agent_result",
                        "payload": {"status": "Success", "outcome": "done"}}
 
         async def interrupt(self) -> None:
@@ -130,7 +130,7 @@ async def test_clean_subagent_emits_no_agent_retry(tmp_path: Path) -> None:
             from imp.agents.transcript import Transcript
             Transcript(inv.transcript_dir / "transcript.jsonl").append(
                 Message(role="user", content=(TextBlock(text="work"),)))
-            yield {"type": "agent_output",
+            yield {"type": "agent_result",
                    "payload": {"status": "Success", "outcome": "done"}}
 
         async def interrupt(self) -> None:

@@ -62,12 +62,14 @@ def test_deliver_interject_appends_user_message_and_emits_event():
     assert isinstance(messages[0].content[0], TextBlock)
     assert messages[0].content[0].text == "look at the README"
     assert transcript.messages == messages
-    # Emitted both a user_message and a user_interjected event.
+    # Emitted a user_message/interject event.
     types = [e["type"] for e in elog.read()]
     assert "user_message" in types
-    assert "user_interjected" in types
-    interjected = next(e for e in elog.read() if e["type"] == "user_interjected")
-    assert interjected["payload"]["text"] == "look at the README"
+    interjected = next(
+        e for e in elog.read()
+        if e["type"] == "user_message"
+        and e["payload"].get("subtype") == "interject")
+    assert interjected["payload"]["content"][0]["text"] == "look at the README"
     # FIFO queue is now drained.
     assert coord.drain_interject() is None
 
@@ -147,12 +149,14 @@ async def test_anthropic_delivers_interject_at_turn_boundary(tmp_path: Path) -> 
     events = [e async for e in runner.run(
         _inv(tmp_path, event_log=log, coordinator=coord))]
 
-    assert "agent_output" in [e["type"] for e in events]
-    # user_interjected was emitted (at the turn boundary, not mid-turn).
+    assert "agent_result" in [e["type"] for e in events]
+    # user_message/interject was emitted (at the turn boundary, not mid-turn).
     log_events = list(log.read())
-    interjected = [e for e in log_events if e["type"] == "user_interjected"]
+    interjected = [e for e in log_events
+                   if e["type"] == "user_message"
+                   and e["payload"].get("subtype") == "interject"]
     assert len(interjected) == 1
-    assert interjected[0]["payload"]["text"] == "please also check the tests"
+    assert interjected[0]["payload"]["content"][0]["text"] == "please also check the tests"
     # The interject rode into turn 2's model call as a user TextBlock message.
     second_call = fake.messages.calls[1]
     texts = [
@@ -218,10 +222,12 @@ async def test_openai_delivers_interject_at_turn_boundary(tmp_path: Path) -> Non
     runner = OpenAIAgentRunner(model_name="gpt-4o-mini", client_factory=lambda: fake)
     events = [e async for e in runner.run(inv)]
 
-    assert "agent_output" in [e["type"] for e in events]
-    interjected = [e for e in log.read() if e["type"] == "user_interjected"]
+    assert "agent_result" in [e["type"] for e in events]
+    interjected = [e for e in log.read()
+                   if e["type"] == "user_message"
+                   and e["payload"].get("subtype") == "interject"]
     assert len(interjected) == 1
-    assert interjected[0]["payload"]["text"] == "please also check the tests"
+    assert interjected[0]["payload"]["content"][0]["text"] == "please also check the tests"
     # The interject rode into turn 2's model call as a user input_text item.
     second_call = fake.responses.calls[1]
     texts = [
@@ -305,10 +311,12 @@ async def test_claude_code_delivers_interject_at_requery_boundary(
         model_name="claude-sonnet-4-5", client_factory=capturing_factory)
     events = [e async for e in runner.run(inv)]
 
-    assert "agent_output" in [e["type"] for e in events]
-    interjected = [e for e in log.read() if e["type"] == "user_interjected"]
+    assert "agent_result" in [e["type"] for e in events]
+    interjected = [e for e in log.read()
+                   if e["type"] == "user_message"
+                   and e["payload"].get("subtype") == "interject"]
     assert len(interjected) == 1
-    assert interjected[0]["payload"]["text"] == "please also check the tests"
+    assert interjected[0]["payload"]["content"][0]["text"] == "please also check the tests"
     # The re-query (queries[1]) folded the interject text into the next prompt.
     requery = captured["client"].queries[1]
     assert "please also check the tests" in requery
@@ -382,10 +390,12 @@ async def test_codex_delivers_interject_at_turn_boundary(tmp_path: Path) -> None
 
     events = [ev async for ev in runner.run(inv)]
 
-    assert "agent_output" in [e["type"] for e in events], events
-    interjected = [e for e in log.read() if e["type"] == "user_interjected"]
+    assert "agent_result" in [e["type"] for e in events], events
+    interjected = [e for e in log.read()
+                   if e["type"] == "user_message"
+                   and e["payload"].get("subtype") == "interject"]
     assert len(interjected) == 1
-    assert interjected[0]["payload"]["text"] == "please also check the tests"
+    assert interjected[0]["payload"]["content"][0]["text"] == "please also check the tests"
     # The interject folded into turn 2's prompt (run_calls[1]).
     second_prompt = fake.thread.run_calls[1][0]
     assert "please also check the tests" in second_prompt
@@ -423,10 +433,12 @@ async def test_anthropic_delivers_interject_on_nudge_branch(tmp_path: Path) -> N
         model_name="claude-sonnet-4-6", client_factory=lambda: fake)
     events = [e async for e in runner.run(inv)]
 
-    assert "agent_output" in [e["type"] for e in events], events
-    interjected = [e for e in log.read() if e["type"] == "user_interjected"]
+    assert "agent_result" in [e["type"] for e in events], events
+    interjected = [e for e in log.read()
+                   if e["type"] == "user_message"
+                   and e["payload"].get("subtype") == "interject"]
     assert len(interjected) == 1
-    assert interjected[0]["payload"]["text"] == "please also check the tests"
+    assert interjected[0]["payload"]["content"][0]["text"] == "please also check the tests"
     # The interject rode into turn 2's (the nudge re-query) model call.
     second_call = fake.messages.calls[1]
     texts = [
@@ -489,10 +501,12 @@ async def test_openai_delivers_interject_on_nudge_branch(tmp_path: Path) -> None
     runner = OpenAIAgentRunner(model_name="gpt-4o-mini", client_factory=lambda: fake)
     events = [e async for e in runner.run(inv)]
 
-    assert "agent_output" in [e["type"] for e in events], events
-    interjected = [e for e in log.read() if e["type"] == "user_interjected"]
+    assert "agent_result" in [e["type"] for e in events], events
+    interjected = [e for e in log.read()
+                   if e["type"] == "user_message"
+                   and e["payload"].get("subtype") == "interject"]
     assert len(interjected) == 1
-    assert interjected[0]["payload"]["text"] == "please also check the tests"
+    assert interjected[0]["payload"]["content"][0]["text"] == "please also check the tests"
     # The interject rode into turn 2's (the nudge re-query) model call.
     second_call = fake.responses.calls[1]
     texts = [

@@ -29,7 +29,7 @@ def test_drain_all_appends_in_order_and_clears() -> None:
     class _T:
         def append(self, m): sink.append(("t", m))
     class _E:
-        def append_user_message(self, *, agent_id, message, human): sink.append(("u", message))
+        def append_user_message(self, *, agent_id, message, subtype): sink.append(("u", message))
         def append(self, **k): sink.append(("e", k))
     delivered = drain_all_interjects_at_resume(coord, messages, _T(), _E(), "aid")
     assert [m.content[0].text for m in messages] == ["one", "two"]
@@ -135,7 +135,7 @@ async def test_anthropic_resume_entry_drain_before_first_send(tmp_path: Path) ->
     events = [e async for e in runner.run(inv)]
 
     # Run completed successfully.
-    assert events[-1]["type"] == "agent_output"
+    assert events[-1]["type"] == "agent_result"
 
     # The FIRST messages.create call must include BOTH interject texts
     # (appended right after the 3 transcript messages).
@@ -274,7 +274,7 @@ async def test_openai_resume_entry_drain_before_first_send(tmp_path: Path) -> No
     events = [e async for e in runner.run(inv)]
 
     # Run completed successfully.
-    assert events[-1]["type"] == "agent_output"
+    assert events[-1]["type"] == "agent_result"
 
     # The FIRST responses.create call must include BOTH interject texts
     # (appended right after the 3 transcript messages).
@@ -431,7 +431,7 @@ async def test_claude_code_resume_entry_drain_before_first_query(
     events = [e async for e in runner.run(inv)]
 
     # Run completed successfully.
-    assert events[-1]["type"] == "agent_output"
+    assert events[-1]["type"] == "agent_result"
 
     assert created, "client was never instantiated"
     fake = created[0]
@@ -543,7 +543,7 @@ async def test_codex_resume_entry_drain_folds_into_first_prompt(
     events_path.write_text(
         json.dumps({"agent_id": "step:t", "type": "tool_call",
                     "payload": {"name": "complete_step", "input": {}}}) + "\n" +
-        json.dumps({"agent_id": "step:t", "type": "llm_response",
+        json.dumps({"agent_id": "step:t", "type": "agent_message",
                     "payload": {"raw": {"content": [{"type": "text", "text": "done"}]}}}) + "\n"
     )
 
@@ -608,7 +608,7 @@ async def test_codex_resume_entry_drain_folds_into_first_prompt(
     events = [e async for e in runner.run(inv)]
 
     # Run completed successfully.
-    assert events[-1]["type"] == "agent_output", events
+    assert events[-1]["type"] == "agent_result", events
 
     # There must have been exactly one run_streamed call (the first turn).
     thread = fake.thread
@@ -773,7 +773,7 @@ async def test_anthropic_bare_turn_end_resume_joins_pending_interjects(
     events = [e async for e in runner.run(inv)]
 
     # Run completed successfully.
-    assert events[-1]["type"] == "agent_output"
+    assert events[-1]["type"] == "agent_result"
 
     # user_input_fn must NOT have been called.
     assert not user_input_fn_called[0], (
@@ -850,7 +850,7 @@ def test_subagent_suspended_resume_drains_via_parent_replay() -> None:
 
     class _E:
         def append_user_message(self, *, agent_id: str, message: object,
-                                human: bool) -> None:
+                                subtype: str) -> None:
             sink.append(("u", message))
 
         def append(self, **k: object) -> None:

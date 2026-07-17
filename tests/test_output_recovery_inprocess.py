@@ -2,7 +2,7 @@
 
 A complete_step call whose decoder folded a required field into a preceding
 string field is recovered IN THE SAME turn: no nudge, no re-emit, exactly one
-output_recovered event, and agent_output carries the repaired payload. The
+output_recovered event, and agent_result carries the repaired payload. The
 in-process anthropic runner routes complete_step through dispatch.py's Ok branch.
 """
 
@@ -41,7 +41,7 @@ async def test_anthropic_folded_field_recovered_in_one_turn(
     events = [e async for e in runner.run(_anthropic_inv(tmp_path, event_log=log))]
 
     ctrl = control_events(events)
-    assert [e["type"] for e in ctrl] == ["agent_output"]
+    assert [e["type"] for e in ctrl] == ["agent_result"]
     assert ctrl[-1]["payload"] == {"note": "did the work", "status": "Success"}
     log_types = [e["type"] for e in log.read()]
     assert log_types.count("output_recovered") == 1
@@ -65,7 +65,7 @@ async def test_anthropic_clean_call_emits_no_recovery_event(
     events = [e async for e in runner.run(_anthropic_inv(tmp_path, event_log=log))]
 
     ctrl = control_events(events)
-    assert [e["type"] for e in ctrl] == ["agent_output"]
+    assert [e["type"] for e in ctrl] == ["agent_result"]
     assert ctrl[-1]["payload"] == {"status": "Success", "note": "ok"}
     log_types = [e["type"] for e in log.read()]
     assert "output_recovered" not in log_types

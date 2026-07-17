@@ -40,7 +40,7 @@ class _EchoRunner:
 
     async def run(self, invocation):
         td = invocation.initial_messages[0].content[0].text
-        yield {"type": "agent_output",
+        yield {"type": "agent_result",
                "payload": {"text": td}}
 
     async def interrupt(self) -> None: ...
@@ -113,7 +113,7 @@ async def test_single_task_turn_routes_through_batch(
     tmp_path: Path, provider: str, provider_registry,
 ) -> None:
     """AC1 (structural N=1 parity, both loops): a single-task turn produces one
-    tool_call THEN one tool_result for that tu and completes with agent_output —
+    tool_call THEN one tool_result for that tu and completes with agent_result —
     today's shape, now via the batch helper."""
     (tmp_path / "art").mkdir()
     reset_parallelism_cache()
@@ -140,7 +140,7 @@ async def test_single_task_turn_routes_through_batch(
     events = [e async for e in runner.run(_inv(tmp_path, log, provider))]
     reset_parallelism_cache()
 
-    assert events[-1]["type"] == "agent_output"
+    assert events[-1]["type"] == "agent_result"
     rows = [e for e in log.read() if e["agent_id"] == "step:p/s"]
     call_idx = next(i for i, e in enumerate(rows)
                     if e["type"] == "tool_call" and e["payload"]["id"] == "t1")
@@ -189,7 +189,7 @@ async def test_two_task_turn_both_results_land(
     events = [e async for e in runner.run(_inv(tmp_path, log, provider))]
     reset_parallelism_cache()
 
-    assert events[-1]["type"] == "agent_output"
+    assert events[-1]["type"] == "agent_result"
     results = {e["payload"]["id"]: e for e in log.read()
                if e["type"] == "tool_result" and e["agent_id"] == "step:p/s"}
     assert set(results) == {"t1", "t2"}
@@ -254,7 +254,7 @@ async def test_task_tu_does_not_route_through_dispatch_one_tool_use(
     # If dispatch_one_tool_use was called for a task tu, _guard_task_tus would
     # raise RuntimeError inside the provider loop. The fact that the run
     # completes proves the batch path owns task tus end-to-end.
-    assert events[-1]["type"] == "agent_output"
+    assert events[-1]["type"] == "agent_result"
     results = {e["payload"]["id"]: e for e in log.read()
                if e["type"] == "tool_result" and e["agent_id"] == "step:p/s"}
     assert set(results) == {"t1", "t2"}

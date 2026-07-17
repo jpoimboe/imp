@@ -117,7 +117,7 @@ async def test_agent_interrupt_in_held_region_keeps_lane_and_resumes_in_place(
             # Mid-turn Ctrl-C: flip should_pause, then yield one event so the
             # per-event should_pause check returns a clean cooperative interrupt.
             await coord.signal_pause(reason="ctrl-c")
-            yield {"type": "agent_output",
+            yield {"type": "agent_result",
                    "payload": {"outcome": "ok", "status": "Success"}}
 
         async def interrupt(self) -> None:
@@ -152,7 +152,7 @@ async def test_command_interrupt_in_held_region_keeps_lane(
 
     class _SuccessRunner:  # only the `after` agent (never reached here)
         async def run(self, _inv: AgentInvocation) -> AsyncIterator[Event]:
-            yield {"type": "agent_output",
+            yield {"type": "agent_result",
                    "payload": {"outcome": "ok", "status": "Success"}}
 
         async def interrupt(self) -> None:
@@ -232,7 +232,7 @@ async def test_post_navigation_interrupt_keeps_lane(
         async def run(self, _inv: AgentInvocation) -> AsyncIterator[Event]:
             # Complete cleanly (=> Continue). The interrupt is injected AFTER this
             # step completes, via the on_event hook — never inside run().
-            yield {"type": "agent_output",
+            yield {"type": "agent_result",
                    "payload": {"outcome": "ok", "status": "Success"}}
 
         async def interrupt(self) -> None:
@@ -275,7 +275,7 @@ async def test_retained_lane_resume_does_not_reevict_at_entry(
 
     class _SuccessRunner:
         async def run(self, _inv: AgentInvocation) -> AsyncIterator[Event]:
-            yield {"type": "agent_output",
+            yield {"type": "agent_result",
                    "payload": {"outcome": "ok", "status": "Success"}}
 
         async def interrupt(self) -> None:

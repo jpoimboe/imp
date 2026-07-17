@@ -2,7 +2,7 @@
 
 Skips without OPENAI_API_KEY env var or ~/.openai-key file. Costs ~1 cent
 per run. Tests the whole stack: provider resolution → message translation →
-API call → tool dispatch → complete_step → agent_output validation.
+API call → tool dispatch → complete_step → agent_result validation.
 """
 
 from __future__ import annotations
