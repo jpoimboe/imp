@@ -45,7 +45,7 @@ def test_default_agents_resolve_to_position_appropriate_tools(tmp_path: Path) ->
     wf = load_workflow(tmp_path / "wf")
 
     top_leaf = BASE_CAPS | {"rename_quest", "create_quest",
-                            "create_and_enter_worktree"}
+                            "create_and_enter_worktree", "save_and_exit"}
     top_dispatcher = top_leaf | {"sub_agent"}
     subagents = {
         "coder", "code-reviewer", "spiker",
@@ -67,7 +67,7 @@ def test_default_agents_resolve_to_position_appropriate_tools(tmp_path: Path) ->
         elif name in dispatchers:
             assert agent.tools == top_dispatcher | agent.allow_tools, name
         elif name in review_pruned:
-            # deny_tools strips the three TOP_LEVEL_CAPS, leaving the base grant.
+            # deny_tools strips the four TOP_LEVEL_CAPS, leaving the base grant.
             assert agent.tools == BASE_CAPS | agent.allow_tools, name
         else:
             assert agent.tools == top_leaf | agent.allow_tools, name
