@@ -356,7 +356,8 @@ def test_pause_facts_returns_the_opening_prompt(tmp_path: Path) -> None:
     quest_dir = tmp_path / ".imp" / "quests" / "opn11"
     quest_dir.mkdir(parents=True)
     events = [
-        ev("1", "opening_intent", text="add a dark mode toggle"),
+        ev("1", "user_message", subtype="intent",
+           content=[{"type": "text", "text": "add a dark mode toggle"}]),
         ev("2", "workflow_paused", reason="interrupt", interrupt_reason="interrupt"),
     ]
     (quest_dir / "events.jsonl").write_text(

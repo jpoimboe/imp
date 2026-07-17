@@ -65,7 +65,7 @@ async def test_gen_closed_on_error_event_return(tmp_path: Path) -> None:
 async def test_gen_closed_on_pause_return(tmp_path: Path) -> None:
     runner = _ClosableRunner([
         {"type": "tool_heartbeat", "payload": {}},
-        {"type": "agent_output", "payload": {"status": "Success"}},
+        {"type": "agent_result", "payload": {"status": "Success"}},
     ])
     result = await drive_invocation(
         _inv(tmp_path, {"complete_step"}), runner,
@@ -162,7 +162,7 @@ async def test_non_interrupt_error_stays_fatal_without_interrupt_flag(
 @pytest.mark.anyio
 async def test_gen_closed_on_success(tmp_path: Path) -> None:
     runner = _ClosableRunner([
-        {"type": "agent_output", "payload": {"status": "Success"}},
+        {"type": "agent_result", "payload": {"status": "Success"}},
     ])
     result = await drive_invocation(
         _inv(tmp_path, {"complete_step"}), runner,

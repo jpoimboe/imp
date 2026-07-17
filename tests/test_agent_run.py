@@ -237,7 +237,7 @@ async def test_drive_invocation_success(tmp_path: Path) -> None:
     from imp.engine.agent_run import drive_invocation
 
     coord = InterruptCoordinator()
-    runner = _Runner([{"type": "agent_output", "payload": {"status": "Success"}}])
+    runner = _Runner([{"type": "agent_result", "payload": {"status": "Success"}}])
     res = await drive_invocation(_inv(tmp_path), runner,
                                  coordinator=coord, log=None, emit_events=False)
     assert res.output == {"status": "Success"}
@@ -378,7 +378,7 @@ async def test_drive_invocation_emit_events_appends_to_log(tmp_path: Path) -> No
     log = _Log()
     runner = _Runner([
         {"type": "thinking", "payload": {"x": 1}},
-        {"type": "agent_output", "payload": {"status": "Success"}},
+        {"type": "agent_result", "payload": {"status": "Success"}},
     ])
     inv = _inv(tmp_path)
     res = await drive_invocation(inv, runner, coordinator=coord, log=log, emit_events=True)
@@ -391,9 +391,9 @@ async def test_drive_invocation_emit_events_appends_to_log(tmp_path: Path) -> No
         for c in log.calls
     ), f"thinking event not found in log.calls: {log.calls}"
     assert any(
-        c["agent_id"] == "step:p/s" and c["type"] == "agent_output"
+        c["agent_id"] == "step:p/s" and c["type"] == "agent_result"
         for c in log.calls
-    ), f"agent_output event not found in log.calls: {log.calls}"
+    ), f"agent_result event not found in log.calls: {log.calls}"
 
 
 @pytest.mark.anyio
@@ -410,7 +410,7 @@ async def test_drive_invocation_output_validation_failure(tmp_path: Path) -> Non
 
     coord = InterruptCoordinator()
     log = _Log()
-    runner = _Runner([{"type": "agent_output", "payload": {"status": "Nope"}}])
+    runner = _Runner([{"type": "agent_result", "payload": {"status": "Nope"}}])
     inv = _inv(tmp_path)
     res = await drive_invocation(inv, runner, coordinator=coord, log=log, emit_events=True)
 
@@ -443,7 +443,7 @@ async def test_drive_invocation_stalls_on_inactivity(
 
         async def run(self, _invocation):
             await anyio.sleep(3600)   # emit nothing, ever
-            yield {"type": "agent_output", "payload": {}}  # never reached
+            yield {"type": "agent_result", "payload": {}}  # never reached
 
     with anyio.fail_after(5):
         result = await ar.drive_invocation(
@@ -484,7 +484,7 @@ async def test_drive_invocation_stall_logs_stalled_category(
 
         async def run(self, _invocation):
             await anyio.sleep(3600)
-            yield {"type": "agent_output", "payload": {}}  # never reached
+            yield {"type": "agent_result", "payload": {}}  # never reached
 
     log = _Log()
     with anyio.fail_after(5):
@@ -522,7 +522,7 @@ async def test_watchdog_teardown_force_kills_when_interrupt_ignores_grace(
 
         async def run(self, _invocation):
             await anyio.sleep(3600)   # emit nothing, ever
-            yield {"type": "agent_output", "payload": {}}  # never reached
+            yield {"type": "agent_result", "payload": {}}  # never reached
 
     start = anyio.current_time()
     with anyio.fail_after(5):
@@ -575,7 +575,7 @@ async def test_drive_invocation_survives_when_subtree_active(
             for _ in range(8):
                 await anyio.sleep(0.1)
                 coord.note_activity()
-            yield {"type": "agent_output", "payload": {"status": "Success"}}
+            yield {"type": "agent_result", "payload": {"status": "Success"}}
 
     with anyio.fail_after(5):
         result = await ar.drive_invocation(
@@ -608,7 +608,7 @@ async def test_drive_invocation_stalls_with_coordinator_but_no_activity(
 
         async def run(self, _invocation):
             await anyio.sleep(3600)   # no events, no note_activity, ever
-            yield {"type": "agent_output", "payload": {}}  # never reached
+            yield {"type": "agent_result", "payload": {}}  # never reached
 
     with anyio.fail_after(5):
         result = await ar.drive_invocation(
@@ -814,7 +814,7 @@ async def test_drive_invocation_stalls_mid_stream(
             yield {"type": "thinking", "payload": {"content": "warming up"}}
             yield {"type": "thinking", "payload": {"content": "still going"}}
             await anyio.sleep(3600)        # now go silent forever
-            yield {"type": "agent_output", "payload": {}}  # never reached
+            yield {"type": "agent_result", "payload": {}}  # never reached
 
     with anyio.fail_after(5):
         result = await ar.drive_invocation(
@@ -846,7 +846,7 @@ async def test_pull_watchdog_frozen_during_solicit_does_not_stall(monkeypatch) -
         coord.begin_solicit_watchdog()   # freeze (single call, no further activity)
         await anyio.sleep(0.8)           # 4x window, silent
         coord.end_solicit_watchdog()
-        yield {"type": "agent_output", "payload": {"status": "Success"}}
+        yield {"type": "agent_result", "payload": {"status": "Success"}}
 
     stall = {"hit": False}
     events = []
@@ -857,7 +857,7 @@ async def test_pull_watchdog_frozen_during_solicit_does_not_stall(monkeypatch) -
 
     assert stall["hit"] is False
     assert interrupted["called"] is False
-    assert events == [{"type": "agent_output", "payload": {"status": "Success"}}]
+    assert events == [{"type": "agent_result", "payload": {"status": "Success"}}]
 
 
 @pytest.mark.anyio
@@ -876,7 +876,7 @@ async def test_pull_watchdog_stalls_when_not_soliciting(monkeypatch) -> None:
 
     async def _gen():
         await anyio.sleep(3600)          # never solicits, never signals activity
-        yield {"type": "agent_output", "payload": {}}  # unreached
+        yield {"type": "agent_result", "payload": {}}  # unreached
 
     stall = {"hit": False}
     events = []
@@ -910,7 +910,7 @@ async def test_pull_watchdog_restores_finite_window_after_end(monkeypatch) -> No
         await anyio.sleep(0.4)           # frozen: survives 2x window
         coord.end_solicit_watchdog()     # restore finite window
         await anyio.sleep(3600)          # now silent past the window -> must stall
-        yield {"type": "agent_output", "payload": {}}  # unreached
+        yield {"type": "agent_result", "payload": {}}  # unreached
 
     stall = {"hit": False}
     events = []
@@ -1023,7 +1023,7 @@ async def test_real_bare_turn_end_solicit_is_not_torn_down_by_watchdog(
                 event_log=log, agent_id="step:p/s")
             _text, _human = cont("merge?")
             captured["reply"] = await _text
-            yield {"type": "agent_output", "payload": {"status": "Success"}}
+            yield {"type": "agent_result", "payload": {"status": "Success"}}
 
     result_holder = {}
 
@@ -1127,7 +1127,7 @@ async def test_pull_watchdog_frozen_during_tool_does_not_stall(monkeypatch) -> N
         coord.begin_tool_watchdog()   # freeze (single call, no further activity)
         await anyio.sleep(0.8)        # 4x window, silent
         coord.end_tool_watchdog()
-        yield {"type": "agent_output", "payload": {"status": "Success"}}
+        yield {"type": "agent_result", "payload": {"status": "Success"}}
 
     stall = {"hit": False}
     events = []
@@ -1138,7 +1138,7 @@ async def test_pull_watchdog_frozen_during_tool_does_not_stall(monkeypatch) -> N
 
     assert stall["hit"] is False
     assert interrupted["called"] is False
-    assert events == [{"type": "agent_output", "payload": {"status": "Success"}}]
+    assert events == [{"type": "agent_result", "payload": {"status": "Success"}}]
 
 
 @pytest.mark.anyio
@@ -1161,7 +1161,7 @@ async def test_pull_watchdog_restores_finite_window_after_tool_end(monkeypatch) 
         await anyio.sleep(0.4)        # frozen: survives 2x window
         coord.end_tool_watchdog()     # last tool returns -> finite window restored
         await anyio.sleep(3600)       # now silent past the window -> must stall
-        yield {"type": "agent_output", "payload": {}}  # unreached
+        yield {"type": "agent_result", "payload": {}}  # unreached
 
     stall = {"hit": False}
     events = []
@@ -1242,7 +1242,7 @@ async def test_bump_leaves_deadline_untouched_once_cancel_called(monkeypatch) ->
         bump(s4)
         results["tool"] = s4.deadline
 
-        yield {"type": "agent_output", "payload": {"status": "Success"}}
+        yield {"type": "agent_result", "payload": {"status": "Success"}}
 
     stall = {"hit": False}
     events = []
@@ -1257,7 +1257,7 @@ async def test_bump_leaves_deadline_untouched_once_cancel_called(monkeypatch) ->
     assert results["solicit"] == math.inf
     assert results["tool"] == math.inf
     assert stall["hit"] is False                    # happy path is not a stall
-    assert events == [{"type": "agent_output", "payload": {"status": "Success"}}]
+    assert events == [{"type": "agent_result", "payload": {"status": "Success"}}]
 
 
 @pytest.mark.anyio
@@ -1325,7 +1325,7 @@ async def test_pull_watchdog_request_in_flight_survives_under_ceiling(monkeypatc
         coord.begin_request_watchdog()   # ceiling (single call, no further activity)
         await anyio.sleep(0.5)           # > 2x general window, < ceiling
         coord.end_request_watchdog()
-        yield {"type": "agent_output", "payload": {"status": "Success"}}
+        yield {"type": "agent_result", "payload": {"status": "Success"}}
 
     stall = {"hit": False}
     events = []
@@ -1336,7 +1336,7 @@ async def test_pull_watchdog_request_in_flight_survives_under_ceiling(monkeypatc
 
     assert stall["hit"] is False
     assert interrupted["called"] is False
-    assert events == [{"type": "agent_output", "payload": {"status": "Success"}}]
+    assert events == [{"type": "agent_result", "payload": {"status": "Success"}}]
 
 
 @pytest.mark.anyio
@@ -1358,7 +1358,7 @@ async def test_pull_watchdog_request_in_flight_stalls_over_ceiling(monkeypatch) 
     async def _gen():
         coord.begin_request_watchdog()
         await anyio.sleep(3600)          # silent past the ceiling -> must stall
-        yield {"type": "agent_output", "payload": {}}  # unreached
+        yield {"type": "agent_result", "payload": {}}  # unreached
 
     stall = {"hit": False}
     events = []
@@ -1395,7 +1395,7 @@ async def test_pull_watchdog_solicit_precedence_wins_over_request(monkeypatch) -
         await anyio.sleep(0.8)           # > ceiling: would stall if request won
         coord.end_solicit_watchdog()
         coord.end_request_watchdog()
-        yield {"type": "agent_output", "payload": {"status": "Success"}}
+        yield {"type": "agent_result", "payload": {"status": "Success"}}
 
     stall = {"hit": False}
     events = []
@@ -1406,7 +1406,7 @@ async def test_pull_watchdog_solicit_precedence_wins_over_request(monkeypatch) -
 
     assert stall["hit"] is False
     assert interrupted["called"] is False
-    assert events == [{"type": "agent_output", "payload": {"status": "Success"}}]
+    assert events == [{"type": "agent_result", "payload": {"status": "Success"}}]
 
 
 @pytest.mark.anyio

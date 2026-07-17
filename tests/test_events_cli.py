@@ -27,6 +27,7 @@ def _make_live_quest(control: Path, cid: str, events: list[dict]) -> None:
 def _run(monkeypatch: pytest.MonkeyPatch, control: Path, *argv: str) -> str:
     import imp.cli.main as m
     monkeypatch.setattr(m, "_control_root", lambda: control)
+    monkeypatch.delenv("IMP_SESSION_SOCKET", raising=False)
     buf = io.StringIO()
     with redirect_stdout(buf):
         rc = main(list(argv))
@@ -158,6 +159,34 @@ def test_events_malformed_range_errors(tmp_path, monkeypatch) -> None:
             rc = main(["events", "aaa111", bad])
         assert rc == 2
         assert "range" in err.getvalue()
+
+
+_WIRE_EVENTS = [
+    {"type": "user_message", "agent_id": None,
+     "payload": {"role": "user", "subtype": "intent",
+                 "content": [{"type": "text", "text": "please do X"}]}},
+    {"type": "engine_message", "agent_id": "step:build/plan",
+     "payload": {"role": "user", "subtype": "system_prompt",
+                 "content": [{"type": "text", "text": "You are a coder."}]}},
+    {"type": "tool_call", "agent_id": "step:build/plan",
+     "payload": {"id": "tc1", "name": "read_file", "input": {"path": "x.py"}}},
+]
+
+
+def test_events_wire_selects_only_user_and_engine(tmp_path, monkeypatch):
+    _make_live_quest(tmp_path, "wire01", _WIRE_EVENTS)
+    out = _run(monkeypatch, tmp_path, "events", "wire01", "--wire")
+    assert "user_message" in out
+    assert "engine_message" in out
+    assert "tool_call" not in out
+
+
+def test_events_subtype_reaches_system_prompt(tmp_path, monkeypatch):
+    _make_live_quest(tmp_path, "wire01", _WIRE_EVENTS)
+    out = _run(monkeypatch, tmp_path, "events", "wire01",
+               "--subtype", "system_prompt")
+    assert "You are a coder." in out
+    assert "please do X" not in out
 
 
 def test_events_full_widens_past_the_width_clip(tmp_path, monkeypatch) -> None:

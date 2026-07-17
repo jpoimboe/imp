@@ -3,7 +3,7 @@
 
 A real AnthropicAgentRunner parent dispatches a `task` to a `reviewer` subagent
 whose tier (`medium`) resolves to openai. The child must run on the
-openai recording runner (vendor B != the anthropic parent), and its agent_output
+openai recording runner (vendor B != the anthropic parent), and its agent_result
 must flow back as the parent's task tool_result.
 
 This is NOT a literal reuse of test_anthropic_runner.py's same-vendor dispatch
@@ -36,7 +36,7 @@ _SRC = SourceLoc(file=Path("a.md"), line=1)
 
 class _RecordingRunner:
     """A child runner that consumes nothing from the parent's queue and yields a
-    single agent_output reporting the vendor/model it actually ran on."""
+    single agent_result reporting the vendor/model it actually ran on."""
 
     def __init__(self, name: str, model: str) -> None:
         self.name = name
@@ -44,7 +44,7 @@ class _RecordingRunner:
 
     async def run(self, invocation):
         yield {
-            "type": "agent_output",
+            "type": "agent_result",
             "payload": {"text": f"ran_on={self.name} model={self.model}"},
         }
 
@@ -143,10 +143,10 @@ async def test_cross_vendor_subagent_runs_on_child_vendor(
     events = [e async for e in runner.run(inv)]
 
     # Parent completed.
-    assert events[-1]["type"] == "agent_output"
+    assert events[-1]["type"] == "agent_result"
     assert events[-1]["payload"]["status"] == "Success"
 
-    # The child's agent_output flowed back as the parent's `task` tool_result,
+    # The child's agent_result flowed back as the parent's `task` tool_result,
     # and it ran on the RESOLVED child vendor/model (openai/gpt-5.2) — not the
     # anthropic parent. This is the cross-vendor assertion.
     task_result_ev = next(

@@ -15,7 +15,7 @@ LOUD_EVENT = {
 }
 
 SILENT_EVENT = {
-    "id": "S1", "type": "agent_output", "timestamp": TS,
+    "id": "S1", "type": "agent_result", "timestamp": TS,
     "payload": {"text": "working on it"},
     "quest": {"id": CHANGE_ID, "title": "My change"},
 }
@@ -71,7 +71,7 @@ def test_at_handle_reply_resolves_when_quest_is_known() -> None:
 def test_on_event_drops_a_silent_event_with_an_empty_body() -> None:
     sent: list = []
     adapter = _adapter(sent)
-    adapter.on_event({"id": "x", "type": "llm_response", "timestamp": TS,
+    adapter.on_event({"id": "x", "type": "agent_message", "timestamp": TS,
                       "payload": {}, "quest": {"id": "k3f9qa", "title": "X"}})
     assert sent == []
 
@@ -83,7 +83,7 @@ def test_unsubscribed_event_is_dropped_and_records_no_maps() -> None:
 
 
 def _narration(text: str) -> dict:
-    return {"id": "n1", "type": "llm_response", "timestamp": TS,
+    return {"id": "n1", "type": "agent_message", "timestamp": TS,
             "quest": {"id": "k3f9qa", "title": "t"},
             "payload": {"raw": {"content": [{"type": "text", "text": text}]}}}
 
@@ -172,7 +172,7 @@ def test_prompt_less_await_does_not_borrow_another_changes_narration() -> None:
 
 
 SILENT_K3 = {
-    "id": "S2", "type": "agent_output", "timestamp": TS,
+    "id": "S2", "type": "agent_result", "timestamp": TS,
     "payload": {"text": "working on it"},
     "quest": {"id": "k3f9qa", "title": "Dark mode"},
 }
@@ -210,7 +210,7 @@ def test_alert_all_on_still_drops_unsubscribed_silent_narrative() -> None:
     sent: list = []
     adapter = _adapter(
         sent, subscriptions=Subscriptions(), alert_all=_alert_all_on())
-    adapter.on_event(SILENT_K3)   # agent_output -> silent tier
+    adapter.on_event(SILENT_K3)   # agent_result -> silent tier
     assert sent == []
 
 

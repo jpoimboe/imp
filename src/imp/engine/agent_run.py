@@ -337,9 +337,9 @@ async def _pull_with_inactivity_watchdog(
 
 def deliver_interject(coordinator: Any, messages: Any, transcript: Any,
                       elog: Any, agent_id: str) -> bool:
-    """If a human interject is queued, append it as a user message and emit
-    user_interjected. Returns True if one was delivered. Called at the agent's
-    turn boundary (not mid-turn, not while awaiting a subagent)."""
+    """If a human interject is queued, append it as a user_message/interject
+    event. Returns True if one was delivered. Called at the agent's turn
+    boundary (not mid-turn, not while awaiting a subagent)."""
     if coordinator is None:
         return False
     text = coordinator.drain_interject()
@@ -349,8 +349,7 @@ def deliver_interject(coordinator: Any, messages: Any, transcript: Any,
     msg = Message(role="user", content=(TextBlock(text=text),))
     messages.append(msg)
     transcript.append(msg)
-    elog.append_user_message(agent_id=agent_id, message=msg, human=True)
-    elog.append(agent_id=agent_id, type="user_interjected", payload={"text": text})
+    elog.append_user_message(agent_id=agent_id, message=msg, subtype="interject")
     return True
 
 
@@ -474,8 +473,7 @@ def drain_all_interjects_at_resume(
         msg = Message(role="user", content=(TextBlock(text=text),))
         messages.append(msg)
         transcript.append(msg)
-        elog.append_user_message(agent_id=agent_id, message=msg, human=True)
-        elog.append(agent_id=agent_id, type="user_interjected", payload={"text": text})
+        elog.append_user_message(agent_id=agent_id, message=msg, subtype="interject")
         n += 1
     return n
 
@@ -573,8 +571,9 @@ def build_agent_invocation(
         completion_instruction(agent_def.output_schema) if has_schema else "")
     messages = initial_messages
     if system_prompt_override is not None:
-        # Resume-replay: the override IS the stored role-only system prompt; the
-        # first user message replays from its logged user_message event.
+        # Resume-replay: the override IS the stored role-only system prompt
+        # (recovered from the engine_message/system_prompt event). The wire
+        # messages replay from transcript.jsonl, not from the event log.
         system_prompt = system_prompt_override
     else:
         # Lazy import (see module docstring): `imp.providers.memory` is a pure
@@ -733,7 +732,7 @@ async def drive_invocation(
                         log.append(agent_id=invocation.agent_id,
                                    type=event["type"],
                                    payload=event.get("payload", {}))
-                    if event["type"] == "agent_output":
+                    if event["type"] == "agent_result":
                         agent_output = event["payload"]
                     if event["type"] == "error":
                         payload = event.get("payload") or {}

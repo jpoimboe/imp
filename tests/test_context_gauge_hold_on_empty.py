@@ -10,7 +10,7 @@ def _ev(eid, etype, agent_id=None, **payload):
 def _reading(eid, *, input_tokens, cache_read, context_pct, context_window,
              agent_id="step:p/s", provider="claude_code"):
     return _ev(
-        eid, "llm_response", agent_id=agent_id, provider=provider, model="m",
+        eid, "agent_message", agent_id=agent_id, provider=provider, model="m",
         stop_reason="end_turn",
         usage={"input_tokens": input_tokens, "output_tokens": 5,
                "cache_read_input_tokens": cache_read,
@@ -91,14 +91,14 @@ def test_nested_subagent_builder_records_its_own_context() -> None:
 
 def test_token_totals_are_untouched_by_the_gauge_guard() -> None:
     b = nv.NarrativeBuilder()
-    # provider "anthropic" accumulates llm_response usage into _tokens.
-    b.add(_ev("a", "llm_response", agent_id="step:p/s", provider="anthropic",
+    # provider "anthropic" accumulates agent_message usage into _tokens.
+    b.add(_ev("a", "agent_message", agent_id="step:p/s", provider="anthropic",
               model="m", stop_reason="end_turn",
               usage={"input_tokens": 100, "output_tokens": 20}))
-    b.add(_ev("b", "llm_response", agent_id="step:p/s", provider="anthropic",
+    b.add(_ev("b", "agent_message", agent_id="step:p/s", provider="anthropic",
               model="m", stop_reason="end_turn",
               usage={"input_tokens": 0, "output_tokens": 0}))
-    b.add(_ev("c", "llm_response", agent_id="step:p/s", provider="anthropic",
+    b.add(_ev("c", "agent_message", agent_id="step:p/s", provider="anthropic",
               model="m", stop_reason="end_turn",
               usage={"input_tokens": 200, "output_tokens": 30}))
     # the empty middle reading skips the gauge but every usage still accumulates

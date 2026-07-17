@@ -84,7 +84,7 @@ def test_agent_prose_escaped_and_passed_through() -> None:
     out = _md([
         _ev("2", "step_started", step="s", kind="agent", phase="p",
             model="m", provider="anthropic"),
-        _ev("3", "llm_response", agent_id="step:p/s", provider="anthropic", model="m",
+        _ev("3", "agent_message", agent_id="step:p/s", provider="anthropic", model="m",
             stop_reason="end_turn", usage={},
             raw={"content": [{"type": "text",
                               "text": "hello **world** and <b>x</b>"}]}),
@@ -98,7 +98,7 @@ def test_hostile_agent_prose_is_escaped() -> None:
     out = _md([
         _ev("2", "step_started", step="s", kind="agent", phase="p",
             model="m", provider="anthropic"),
-        _ev("3", "llm_response", agent_id="step:p/s", provider="anthropic", model="m",
+        _ev("3", "agent_message", agent_id="step:p/s", provider="anthropic", model="m",
             stop_reason="end_turn", usage={},
             raw={"content": [{"type": "text",
                               "text": "<script>alert(1)</script>\x00tail"}]}),
@@ -112,10 +112,12 @@ def test_hostile_agent_prose_is_escaped() -> None:
 def test_genuine_user_turn_is_blockquote_synthetic_dropped() -> None:
     out = _md([
         _ev("1", "step_started", step="s", kind="agent", phase="p", model="m"),
-        _ev("2", "user_message", agent_id="step:p/s",
+        _ev("2", "engine_message", agent_id="step:p/s",
+            subtype="agent_prompt", role="user",
             content=[{"type": "text", "text": "begin"}]),          # synthetic kickoff
         _ev("3", "awaiting_user_input", agent_id="step:p/s"),
         _ev("4", "user_message", agent_id="step:p/s",
+            subtype="reply", role="user",
             content=[{"type": "text", "text": "do the real thing"}]),
     ])
     assert "> do the real thing" in out    # genuine human turn → blockquote
@@ -189,19 +191,20 @@ def test_hostile_tool_result_inert_in_code_fence() -> None:
 
 
 def test_step_context_fold_default_full_and_hostile_prompt() -> None:
+    sys_node = nv.EngineMessageNode(text="<script>alert(1)</script>",
+                                    subtype="system_prompt")
     ctx = nv.StepContextNode(payload={"provider": "anthropic", "model": "claude",
-                                      "max_tool_calls": 50,
-                                      "system_prompt": "<script>alert(1)</script>"})
+                                      "max_tool_calls": 50})
     root = nv.WorkflowNode(title="t")
-    root.children = [ctx]
+    root.children = [sys_node, ctx]
     tree = nv.NarrativeTree(root=root, tokens=nv.TokenTotals())
 
     default = render_markdown(tree, full=False)
-    assert "<summary>Internal context (imp system prompts) — anthropic/claude</summary>" in default
+    assert "<summary>Internal context — anthropic/claude</summary>" in default
     assert "context ·" not in default
 
     full = render_markdown(tree, full=True)
-    assert "**Internal context (imp system prompts) — anthropic/claude**" in full
+    assert "**Internal context — anthropic/claude**" in full
     assert "provider: anthropic" in full
     assert "max_tool_calls: 50" in full
     assert _in_code_fence(full, "<script>")   # untrusted system_prompt is fenced/inert
@@ -213,7 +216,7 @@ def _subagent_events():
             model="m", provider="anthropic"),
         _ev("tk1", "tool_call", agent_id="step:p/s", id="b1", name="sub_agent",
             input={"subagent_name": "reviewer", "task_description": "go"}),
-        _ev("su1", "llm_response", agent_id="sub:tk1", provider="anthropic",
+        _ev("su1", "agent_message", agent_id="sub:tk1", provider="anthropic",
             model="m", stop_reason="end_turn", usage={},
             raw={"content": [{"type": "text", "text": "looks good"}]}),
         _ev("r1", "tool_result", agent_id="step:p/s", id="b1",
@@ -263,7 +266,7 @@ def test_completion_breadcrumb_and_end_to_end_structure() -> None:
         _ev("1", "quest_created", title="add auth"),
         _ev("2", "step_started", step="spec", kind="agent", phase="design",
             model="m", provider="anthropic"),
-        _ev("3", "llm_response", agent_id="step:design/spec", provider="anthropic",
+        _ev("3", "agent_message", agent_id="step:design/spec", provider="anthropic",
             model="m", stop_reason="end_turn", usage={},
             raw={"content": [{"type": "text", "text": "drafted the spec"}]}),
         _ev("4", "step_completed", step="spec", kind="agent",
@@ -305,7 +308,7 @@ def test_structure_covers_line_and_footer_nodes() -> None:
         nv.OutcomeLine(action={"verb": "continue"}),
         nv.RenameNode(name="new title"),
         nv.StepContextNode(payload={"provider": "anthropic", "model": "claude",
-                                    "max_tool_calls": 50, "system_prompt": "SYS"}),
+                                    "max_tool_calls": 50}),
     ]
     phase.children = [step]
     root.children = [
@@ -323,7 +326,7 @@ def test_structure_covers_line_and_footer_nodes() -> None:
     assert "loading skill brainstorming" in out        # SkillLoadNode
     assert "→ continue" in out                         # OutcomeLine
     assert 'Set name to "new title"' in out            # RenameNode
-    assert "Internal context (imp system prompts) — anthropic/claude" in out  # ctx fold
+    assert "Internal context — anthropic/claude" in out  # ctx fold
     assert "tiers resolved:" in out                    # TiersResolvedNode (full)
     assert "- high → anthropic/claude" in out          # tiers list item
     assert "**2 warnings this run**" in out            # WarningsSummaryNode
@@ -460,3 +463,40 @@ def test_summary_markdown_open_step_reflects_paused_status() -> None:
     out = render_summary_markdown(rows, header=hdr)
     assert "| task-lead | paused |" in out
     assert "| task-lead | running |" not in out
+
+
+def test_markdown_full_renders_engine_message_labels():
+    out = _md([
+        _ev("1", "step_started", step="plan", kind="agent", phase="build",
+            model="m", provider="anthropic"),
+        _ev("e1", "engine_message", agent_id="step:build/plan",
+            subtype="continuation", role="user",
+            content=[{"type": "text", "text": "keep going"}]),
+    ], full=True)
+    assert "continuation" in out
+    assert "keep going" in out
+
+
+def test_markdown_step_context_has_no_system_prompt():
+    out = _md([
+        _ev("1", "step_started", step="plan", kind="agent", phase="build",
+            model="m", provider="anthropic"),
+        _ev("c1", "step_context", agent_id="step:build/plan",
+            provider="anthropic", model="m", tools_schema=[], params={},
+            max_tool_calls=40, system_prompt="do the thing SECRETLY"),
+    ], full=True)
+    assert "system_prompt:" not in out
+    assert "Internal context" in out
+    assert "do the thing SECRETLY" not in out
+
+
+def test_markdown_lean_hides_engine_message():
+    out = _md([
+        _ev("1", "step_started", step="plan", kind="agent", phase="build",
+            model="m", provider="anthropic"),
+        _ev("e1", "engine_message", agent_id="step:build/plan",
+            subtype="continuation", role="user",
+            content=[{"type": "text", "text": "keep going"}]),
+    ], full=False)
+    assert "keep going" not in out
+    assert "continuation" not in out

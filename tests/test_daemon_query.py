@@ -33,9 +33,9 @@ def _append_event(tmp_path: Path, cid: str, event: dict) -> None:
         f.write(json.dumps(event) + "\n")
 
 
-def _llm_response(text: str) -> dict:
+def _agent_message(text: str) -> dict:
     return {
-        "type": "llm_response",
+        "type": "agent_message",
         "payload": {
             "provider": "anthropic",
             "raw": {"content": [{"type": "text", "text": text}]},
@@ -58,12 +58,12 @@ def test_recent_narrative_returns_last_n_augmented_events_oldest_first(
 ) -> None:
     cid = _seed_change(tmp_path)
     for word in ("first", "second", "third"):
-        _append_event(tmp_path, cid, _llm_response(word))
+        _append_event(tmp_path, cid, _agent_message(word))
     events = discover.recent_narrative(tmp_path, cid, 2)
     # The last two, oldest-first, as curated events — not bare strings.
-    assert [event_body("llm_response", e["payload"]) for e in events] == [
+    assert [event_body("agent_message", e["payload"]) for e in events] == [
         "second", "third"]
-    assert all(e["type"] == "llm_response" for e in events)
+    assert all(e["type"] == "agent_message" for e in events)
     # Augmented with change context so header_line can render id · title.
     assert all(e["quest"]["id"] == cid for e in events)
     assert all(e["quest"]["title"] == "Dark mode" for e in events)
@@ -71,9 +71,9 @@ def test_recent_narrative_returns_last_n_augmented_events_oldest_first(
 
 def test_recent_narrative_skips_tool_only_responses(tmp_path: Path) -> None:
     cid = _seed_change(tmp_path)
-    _append_event(tmp_path, cid, _llm_response("hello"))
+    _append_event(tmp_path, cid, _agent_message("hello"))
     _append_event(tmp_path, cid, {
-        "type": "llm_response",
+        "type": "agent_message",
         "payload": {
             "provider": "anthropic",
             "raw": {"content": [
@@ -81,7 +81,7 @@ def test_recent_narrative_skips_tool_only_responses(tmp_path: Path) -> None:
         },
     })
     events = discover.recent_narrative(tmp_path, cid, 5)
-    assert [event_body("llm_response", e["payload"]) for e in events] == ["hello"]
+    assert [event_body("agent_message", e["payload"]) for e in events] == ["hello"]
 
 
 def test_recent_narrative_is_empty_for_unknown_change(tmp_path: Path) -> None:

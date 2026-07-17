@@ -131,7 +131,7 @@ async def _run_anthropic(
     )
 
     events = [e async for e in runner.run(inv)]
-    assert events[-1]["type"] == "agent_output"
+    assert events[-1]["type"] == "agent_result"
 
     texts: list[str] = []
     for call in fake.messages.calls:
@@ -227,7 +227,7 @@ async def test_claude_code_interrupt_resume_appends_continuation_nudge(
     )
 
     events = [e async for e in runner.run(inv)]
-    assert events[-1]["type"] == "agent_output"
+    assert events[-1]["type"] == "agent_result"
     assert created, "client was never instantiated"
 
     def _texts_in_query(q: list) -> list[str]:
@@ -306,11 +306,14 @@ async def test_claude_code_pending_human_tail_suppresses_nudge(
     )
 
     events = [e async for e in runner.run(inv)]
-    assert events[-1]["type"] == "agent_output"
+    assert events[-1]["type"] == "agent_result"
     assert created, "client was never instantiated"
 
     # No engine continuation was journaled — the human reply was not buried.
-    assert not any(e["type"] == "engine_continuation" for e in log.read())
+    assert not any(
+        e["type"] == "engine_message"
+        and e["payload"].get("subtype") == "continuation"
+        for e in log.read())
 
     def _texts_in_query(q: list) -> list[str]:
         texts: list[str] = []
@@ -395,7 +398,7 @@ async def _run_openai(
     )
 
     events = [e async for e in runner.run(inv)]
-    assert events[-1]["type"] == "agent_output"
+    assert events[-1]["type"] == "agent_result"
 
     texts: list[str] = []
     for call in fake.responses.calls:
@@ -423,6 +426,9 @@ async def test_openai_pending_human_tail_suppresses_nudge(
     texts, log = await _run_openai(
         tmp_path, resume_should_continue=True,
         seed=_seed_text_user_tail_transcript)
-    assert not any(e["type"] == "engine_continuation" for e in log.read())
+    assert not any(
+        e["type"] == "engine_message"
+        and e["payload"].get("subtype") == "continuation"
+        for e in log.read())
     assert _CONTINUATION_NUDGE not in texts, texts
     assert "ignore" in texts, texts

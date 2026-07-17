@@ -128,7 +128,7 @@ async def test_auth_retry_recovers_through_backoff_loop(
     log_types = [e["type"] for e in quest.event_log().read()]
     assert "agent_retry" in log_types
     assert "awaiting_user_input" not in log_types
-    assert "llm_response" in log_types
+    assert "agent_message" in log_types
 
 
 @pytest.mark.anyio
@@ -176,4 +176,4 @@ async def test_concurrency_400_retry_recovers_through_backoff_loop(
     log_types = [e["type"] for e in quest.event_log().read()]
     assert "agent_retry" in log_types
     assert "workflow_paused" not in log_types
-    assert "llm_response" in log_types
+    assert "agent_message" in log_types

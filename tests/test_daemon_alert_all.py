@@ -35,7 +35,7 @@ def _adapter(
 
 
 def _narration(text: str, *, replay: bool = False) -> dict:
-    event = {"id": "n1", "type": "llm_response", "timestamp": TS,
+    event = {"id": "n1", "type": "agent_message", "timestamp": TS,
              "quest": {"id": "k3f9qa", "title": "t"},
              "payload": {"raw": {"content": [{"type": "text", "text": text}]}}}
     if replay:

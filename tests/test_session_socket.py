@@ -81,11 +81,11 @@ async def test_broadcast_reaches_all_concurrent_clients(tmp_path: Path) -> None:
         with anyio.fail_after(5):
             while session.attached_count != 2:
                 await anyio.sleep(0.02)
-        session.broadcast({"type": "agent_output", "payload": {"n": 1}})
+        session.broadcast({"type": "agent_result", "payload": {"n": 1}})
         for client in (a, b):
             buf = BufferedByteReceiveStream(client)
             line = (await buf.receive_until(b"\n", 1 << 20)).decode()
-            assert parse_event(line) == {"type": "agent_output", "payload": {"n": 1}}
+            assert parse_event(line) == {"type": "agent_result", "payload": {"n": 1}}
         await a.aclose()
         await b.aclose()
         await session.close()

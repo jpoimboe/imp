@@ -6,6 +6,7 @@ from pathlib import Path
 from imp.agents.reflow import reflow_markdown
 from imp.agents.runner import QuestContext
 from imp.engine.agent_run import _CORE_HEAD, _CORE_TAIL, build_agent_invocation
+from imp.engine.state import InMemoryEventLog
 from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
 
 _PERSONA = Path("src/imp/assets/workflows/imp/persona.md")
@@ -97,7 +98,7 @@ def test_base_reaches_verbatim_provider_field(tmp_path: Path) -> None:
 def test_base_survives_codex_prompt_wrap(tmp_path: Path) -> None:
     from imp.providers.codex_runner import CodexAgentRunner
     inv = _build(tmp_path, name="rev", body="BODY")
-    built = CodexAgentRunner._build_prompt(None, inv)
+    built = CodexAgentRunner._build_prompt(None, inv, InMemoryEventLog(), "step:t")
     assert built.startswith(inv.system_prompt)
     assert reflow_markdown(_CORE_HEAD) in built
     assert reflow_markdown(_CORE_TAIL) in built

@@ -56,7 +56,7 @@ BLK = "blk-quest"
 
 # Short, unique, per-quest markers. `imp events <id> --all` takes the leaf path
 # (main.py:3445 `leaf = bool(... or args.all ...)`) and emits one per-event digest
-# line per event (main.py:3478-3490); the opening_intent renders as `text=<marker>`,
+# line per event (main.py:3478-3490); the user_message/intent renders as `text=<marker>`,
 # so the marker appears in stdout. Bare `imp events <id>` (no --all) would instead
 # print only the summary index (header + steps table + types histogram, main.py:3468-
 # 3476) with no payload text — hence every event-path invocation below passes --all.
@@ -87,15 +87,17 @@ def _init_repo(root: Path) -> None:
 
 
 def _events(marker: str) -> list[dict[str, object]]:
-    """An opening_intent (renders in `imp events`) + a human user_message (feeds
+    """A user_message/intent (renders in `imp events`) + a human user_message/reply (feeds
     conversation prose for `imp search`'s active/archived zones), both carrying the
     marker."""
     return [
-        {"id": "e1", "timestamp": "2026-06-01T00:00:01+00:00",
-         "type": "opening_intent", "payload": {"text": marker}},
+        {"id": "e1", "timestamp": "2026-06-01T00:00:01+00:00", "agent_id": None,
+         "type": "user_message",
+         "payload": {"role": "user", "subtype": "intent",
+                     "content": [{"type": "text", "text": marker}]}},
         {"id": "e2", "timestamp": "2026-06-01T00:00:02+00:00",
          "type": "user_message",
-         "payload": {"human": True,
+         "payload": {"role": "user", "subtype": "reply",
                      "content": [{"type": "text", "text": marker}]}},
     ]
 

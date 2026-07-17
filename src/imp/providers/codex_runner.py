@@ -520,7 +520,7 @@ class CodexAgentRunner:
                 # Fakes ignore the options arg.
                 thread = client.start_thread()
         # Build initial prompt with anti-native-tool instruction prepended.
-        next_prompt = self._build_prompt(invocation)
+        next_prompt = self._build_prompt(invocation, elog, aid)
         # Hoist rstate so the §2 resume-entry drain below can reference it safely
         # even when balance_on_resume is False (fresh-entry path has no rstate).
         rstate = None
@@ -559,10 +559,12 @@ class CodexAgentRunner:
                     last_agent_message=last_agent_text)
                 if source == "nudge":
                     assert isinstance(reply, str)
-                    # Internal continuation, not a human turn: journal an internal
-                    # engine_continuation event (no `>` caret), not a user_message.
-                    elog.append(agent_id=aid, type="engine_continuation",
-                                payload={"text": reply})
+                    # Internal continuation, not a human turn: emit an
+                    # engine_message/continuation event (no `>` caret).
+                    elog.append_engine_message(
+                        agent_id=aid,
+                        message=Message(role="user", content=(TextBlock(text=reply),)),
+                        subtype="continuation")
                     next_prompt = reply
                 elif source == "pending_reply":
                     # The reply's user_message is already durable in events.jsonl
@@ -577,7 +579,7 @@ class CodexAgentRunner:
                 from imp.agents.transcript import RESUME_CONTINUE_NUDGE
                 nudge_msg = Message(
                     role="user", content=(TextBlock(text=RESUME_CONTINUE_NUDGE),))
-                elog.append_user_message(agent_id=aid, message=nudge_msg, human=False)
+                elog.append_engine_message(agent_id=aid, message=nudge_msg, subtype="continuation")
                 next_prompt = RESUME_CONTINUE_NUDGE
         # §2 resume-entry drain: fold pending interject texts into the first
         # resumed prompt (codex re-prompts with a string). AWAITING_USER already
@@ -596,9 +598,7 @@ class CodexAgentRunner:
                     elog.append_user_message(
                         agent_id=aid,
                         message=Message(role="user", content=(TextBlock(text=t),)),
-                        human=True)
-                    elog.append(agent_id=aid, type="user_interjected",
-                                payload={"text": t})
+                        subtype="interject")
                 if parts:
                     next_prompt = next_prompt + "\n\n" + "\n".join(parts)
         # AbortController for interrupt() — tolerate a fake/SDK without one.
@@ -765,18 +765,18 @@ class CodexAgentRunner:
                                 ev = make_recovery_event(res)
                                 elog.append(agent_id=aid, type=ev["type"],
                                             payload=ev["payload"])
-                            yield {"type": "agent_output", "payload": res.payload}
+                            yield {"type": "agent_result", "payload": res.payload}
                             return
                         if isinstance(res, Nudge):
                             ev = make_nudge_event(res)
                             elog.append(agent_id=aid, type=ev["type"],
                                         payload=ev["payload"])
-                            elog.append_user_message(
+                            elog.append_engine_message(
                                 agent_id=aid,
                                 message=Message(
                                     role="user",
                                     content=(TextBlock(text=res.message),)),
-                                human=False)
+                                subtype="continuation")
                             # Re-drive this session with the nudge as the next
                             # prompt (per-turn proc_state reset at the loop top
                             # clears the stale capture).
@@ -797,11 +797,11 @@ class CodexAgentRunner:
                                 proc_state.get("pending_usage"), self.model,
                                 invocation.checkpoint_threshold)):
                         instr = handoff_instruction(handoff_path)
-                        elog.append_user_message(
+                        elog.append_engine_message(
                             agent_id=aid,
                             message=Message(role="user",
                                             content=(TextBlock(text=instr),)),
-                            human=False)
+                            subtype="continuation")
                         next_prompt = instr
                         handoff_phase = "instruction_sent"
                         handoff_turn_queued = True
@@ -819,7 +819,7 @@ class CodexAgentRunner:
                         return
                     if invocation.subagent_depth > 0:
                         if last_text:
-                            yield {"type": "agent_output",
+                            yield {"type": "agent_result",
                                    "payload": {"text": last_text}}
                         return
                     # Turn ended without complete_step. If a continuation_fn is
@@ -829,7 +829,7 @@ class CodexAgentRunner:
                         break  # exit inner for; outer while handles nudge
                     # No continuation_fn (degenerate top-level): the inline return
                     # below ends the run, and drive_invocation surfaces the
-                    # errored (no agent_output) result.
+                    # errored (no agent_result) result.
                     return
             # Stream ended (possibly silently) after a cancel without the
             # in-loop check firing — classify it as a clean interrupt.
@@ -882,7 +882,7 @@ class CodexAgentRunner:
             # loop). Codex has no message-list transcript and re-prompts with a
             # STRING, so the shared agent_run.deliver_interject helper does not
             # fit — implement the equivalent inline: drain a queued human
-            # interject, emit user_interjected + a user_message, and fold the
+            # interject, emit a single user_message/interject, and fold the
             # text into next_prompt so codex actually receives it. Reached only
             # after the turn completed (turn.completed), so no subagent is
             # mid-dispatch — S4 holds.
@@ -894,9 +894,7 @@ class CodexAgentRunner:
                         agent_id=aid,
                         message=Message(role="user",
                                         content=(TextBlock(text=interject_text),)),
-                        human=True)
-                    elog.append(agent_id=aid, type="user_interjected",
-                                payload={"text": interject_text})
+                        subtype="interject")
                     next_prompt = f"{next_prompt}\n\n{interject_text}"
 
     def _build_thread_options(self) -> Any:
@@ -930,7 +928,7 @@ class CodexAgentRunner:
             networkAccessEnabled=False,
         )
 
-    def _build_prompt(self, invocation: AgentInvocation) -> str:
+    def _build_prompt(self, invocation: AgentInvocation, elog: Any, aid: str) -> str:
         """Prepend the anti-native-tool instruction (design: soft enforcement
         backstopped by the tripwire). For a subagent the completion line is
         replaced by the deliverable note; the tool_search and
@@ -970,13 +968,25 @@ class CodexAgentRunner:
             )
         prompt = invocation.system_prompt + "\n\n" + policy
         # Codex takes a string and never reads initial_messages: fold the task
-        # in on fresh entry only (resumes already carry it).
-        if not invocation.balance_on_resume and invocation.initial_messages:
-            first = invocation.initial_messages[0]
-            body = "\n\n".join(
-                b.text for b in first.content if isinstance(b, TextBlock))
-            if body:
-                prompt = f"{prompt}\n\n{body}"
+        # in on fresh entry only (resumes already carry it). Emit the taxonomy
+        # ONLY on fresh entry — a resume must not re-emit system_prompt/agent_prompt
+        # (the wire string is unchanged either way).
+        if not invocation.balance_on_resume:
+            elog.append_engine_message(
+                agent_id=aid,
+                message=Message(role="system",
+                                content=(TextBlock(text=invocation.system_prompt),)),
+                subtype="system_prompt")
+            if invocation.initial_messages:
+                first = invocation.initial_messages[0]
+                body = "\n\n".join(
+                    b.text for b in first.content if isinstance(b, TextBlock))
+                if body:
+                    prompt = f"{prompt}\n\n{body}"
+                    elog.append_engine_message(
+                        agent_id=aid,
+                        message=Message(role="user", content=(TextBlock(text=body),)),
+                        subtype="agent_prompt")
         return prompt
 
     async def interrupt(self) -> None:
@@ -1028,14 +1038,14 @@ class CodexAgentRunner:
 # ── Event mapping ─────────────────────────────────────────────────────────────
 
 
-def _attach_usage_to_last_llm_response(
+def _attach_usage_to_last_agent_message(
     elog: Any, *, agent_id: str, usage: dict[str, Any],
     context_tokens: int | None = None,
 ) -> None:
-    """Patch the most recent `llm_response` payload for `agent_id` with
+    """Patch the most recent `agent_message` payload for `agent_id` with
     `usage` (and the canonical `context_tokens` when supplied). Required on
     every `EventLog` implementation — see `src/imp/engine/state.py`."""
-    elog.update_last_llm_response_usage(
+    elog.update_last_agent_message_usage(
         agent_id=agent_id, usage=usage, context_tokens=context_tokens)
 
 
@@ -1072,14 +1082,14 @@ def _flush_codex_prose(
     elog: Any, *, agent_id: str, provider: str, model: str,
     state: dict[str, Any],
 ) -> None:
-    """Emit the turn's buffered agent_message prose as a prose-only
-    `llm_response` and clear the buffer. No-op when the buffer is empty.
+    """Emit the turn's buffered prose as a prose-only `agent_message` and
+    clear the buffer. No-op when the buffer is empty.
     Sets `state["turn_had_llm"]` so `turn.completed` knows whether a
     prose-less turn still needs an empty-prose usage carrier."""
     parts = state.pop("prose_buffer", [])
     if not parts:
         return
-    elog.append_llm_response(
+    elog.append_agent_message(
         agent_id=agent_id, provider=provider, model=model,
         raw={"content": [{"type": "text", "text": t} for t in parts]},
         usage={}, stop_reason=None, auth_mode=state.get("auth_mode"))
@@ -1087,7 +1097,7 @@ def _flush_codex_prose(
 
 
 def _parse_codex_message(raw: dict[str, Any]) -> Message:
-    """raw → assistant Message for codex.  A codex `llm_response.raw` now
+    """raw → assistant Message for codex.  A codex `agent_message.raw` now
     carries prose text blocks only (tool_use lives in the standalone
     `tool_call` events); this parser also tolerates a tool_use block for the
     hand-built audit/parse fixtures.  A web_search appears as a query-only
@@ -1180,7 +1190,7 @@ def process_event(
         if itype == "agent_message":
             text = getattr(item, "text", "") or ""
             state["last_agent_text"] = text  # still needed by nudge/classify
-            # Buffer prose; it is emitted as a prose-only llm_response at the
+            # Buffer prose; it is emitted as a prose-only agent_message at the
             # next text->tool transition (or at turn.completed for trailing /
             # text-only prose). tool_use lives only in the standalone tool_call
             # events, so a turn's prose can lead its tool_calls.
@@ -1333,11 +1343,11 @@ def process_event(
 
     if etype == "turn.completed":
         # Flush any trailing prose (a post-tool summary, or a text-only turn) as
-        # a prose-only llm_response BEFORE usage attaches. A prose-less tool-only
-        # turn emitted no llm_response this turn, so synthesize an empty-prose
-        # carrier to hold the usage patch — update_last_llm_response_usage would
+        # a prose-only agent_message BEFORE usage attaches. A prose-less tool-only
+        # turn emitted no agent_message this turn, so synthesize an empty-prose
+        # carrier to hold the usage patch — update_last_agent_message_usage would
         # otherwise land on the PRIOR turn's response (or raise on turn one).
-        # tool_use never rides in a codex llm_response now; it lives only in the
+        # tool_use never rides in a codex agent_message now; it lives only in the
         # standalone tool_call events.
         _flush_codex_prose(elog, agent_id=agent_id, provider=provider,
                            model=model, state=state)
@@ -1346,7 +1356,7 @@ def process_event(
         if usage is None:
             return
         if not turn_had_llm:
-            elog.append_llm_response(
+            elog.append_agent_message(
                 agent_id=agent_id, provider=provider, model=model,
                 raw={"content": []}, usage={}, stop_reason=None,
                 auth_mode=state.get("auth_mode"),
@@ -1372,9 +1382,9 @@ def process_event(
         # Expose the turn's occupancy to the driver's Tier A watch (Mechanism 3)
         # — the same anthropic-shaped dict context_threshold_crossed consumes.
         state["pending_usage"] = normalized
-        # Attach to the most recent llm_response payload for this agent_id,
+        # Attach to the most recent agent_message payload for this agent_id,
         # carrying the canonical context_tokens computed from the same dict.
-        _attach_usage_to_last_llm_response(
+        _attach_usage_to_last_agent_message(
             elog, agent_id=agent_id, usage=normalized,
             context_tokens=context_tokens_from_usage(normalized))
         return

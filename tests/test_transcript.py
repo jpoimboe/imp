@@ -89,7 +89,7 @@ def test_inject_after_complete_step_delivers_feedback_as_error_result(
     # Persisted to disk and audit-logged once.
     reloaded = Transcript(tmp_path / "transcript.jsonl").load()
     assert classify_resume(reloaded) is ResumeState.SEND_TO_LLM
-    assert [e["type"] for e in elog.read()] == ["user_message"]
+    assert [e["type"] for e in elog.read()] == ["engine_message"]
 
 
 def test_inject_after_genuine_interrupt_uses_error_result(tmp_path: Path) -> None:
@@ -392,9 +392,9 @@ def test_synthesize_native_success_appends_result_only_no_notes(tmp_path: Path) 
     assert results[0].content == "previous step output recorded; resuming"
     # NO durability note and NO feedback — the handback rides the streamed delta.
     assert texts == []
-    # Persisted to disk and audit-logged exactly once as a user_message.
+    # Persisted to disk and audit-logged exactly once as an engine_message.
     assert classify_resume(t.load()) is ResumeState.SEND_TO_LLM
-    assert [e["type"] for e in elog.read()] == ["user_message"]
+    assert [e["type"] for e in elog.read()] == ["engine_message"]
 
 
 def test_synthesize_native_success_error_flavors_non_complete_step(tmp_path: Path) -> None:
@@ -439,12 +439,14 @@ def test_deliver_engine_continuation_journals_internal_event_not_user_message(
     assert injected.content[0].text == "CONTINUE NOW"
     assert t.load()[-1].content[0].text == "CONTINUE NOW"
 
-    # Journaled as an INTERNAL engine_continuation event — never a human user_message.
+    # Journaled as an INTERNAL engine_message event — never a human user_message.
     types = [e["type"] for e in elog.read()]
-    assert "engine_continuation" in types
+    assert types == ["engine_message"]
     assert "user_message" not in types
-    cont = next(e for e in elog.read() if e["type"] == "engine_continuation")
-    assert cont["payload"] == {"text": "CONTINUE NOW"}
+    cont = next(e for e in elog.read() if e["type"] == "engine_message")
+    assert cont["payload"] == {
+        "role": "user", "subtype": "continuation",
+        "content": [{"type": "text", "text": "CONTINUE NOW"}]}
 
 
 def test_repair_dangling_complete_step_with_feedback_carries_feedback(tmp_path: Path) -> None:
@@ -744,9 +746,14 @@ class _FakeElog:
     def __init__(self) -> None:
         self.events: list[tuple] = []
 
-    def append_user_message(self, *, agent_id, message, human):
+    def append_user_message(self, *, agent_id, message, subtype):
         self.events.append(
-            ("user_message", agent_id, message.content[0].text, human))
+            ("user_message", agent_id, message.content[0].text, subtype))
+
+    def append_engine_message(self, *, agent_id, message, subtype):
+        self.events.append(
+            ("engine_message", agent_id, message.content[0].text, subtype))
+        return {}
 
     def append(self, *, agent_id, type, payload):
         self.events.append((type, agent_id, payload))
@@ -767,7 +774,7 @@ def test_deliver_continuation_reply_plain_appends_and_journals_human() -> None:
     out = deliver_continuation_reply(
         messages, tr, elog, "step:coder", "hello", human=True)
     assert out == "hello"
-    assert elog.events == [("user_message", "step:coder", "hello", True)]
+    assert elog.events == [("user_message", "step:coder", "hello", "reply")]
     assert [m.content[0].text for m in messages] == ["hello"]
     assert [m.content[0].text for m in tr.msgs] == ["hello"]
 
@@ -786,9 +793,9 @@ def test_deliver_continuation_reply_skill_journals_command_load_body_in_order(
     assert out == "BODY\n\nsrc/foo.py\n"
     # AC-4 ordering: command user_message (human), then skill_load, then body.
     assert elog.events == [
-        ("user_message", "step:coder", "/refactor src/foo.py", True),
+        ("user_message", "step:coder", "/refactor src/foo.py", "reply"),
         ("skill_load", None, {"name": "refactor", "source": "human"}),
-        ("user_message", "step:coder", "BODY\n\nsrc/foo.py\n", False),
+        ("engine_message", "step:coder", "BODY\n\nsrc/foo.py\n", "continuation"),
     ]
     # The command is event-only: only the body is appended to messages/transcript.
     assert [m.content[0].text for m in messages] == ["BODY\n\nsrc/foo.py\n"]
@@ -802,7 +809,7 @@ def test_deliver_continuation_reply_string_model_skips_append() -> None:
     out = deliver_continuation_reply(
         None, None, elog, "step:coder", "hello", human=False)
     assert out == "hello"
-    assert elog.events == [("user_message", "step:coder", "hello", False)]
+    assert elog.events == [("engine_message", "step:coder", "hello", "continuation")]
 
 
 def test_deliver_continuation_reply_skill_string_model_skips_append() -> None:
@@ -814,7 +821,7 @@ def test_deliver_continuation_reply_skill_string_model_skips_append() -> None:
         None, None, elog, "step:coder", reply, human=True)
     assert out == "BODY\n\nsrc/foo.py\n"
     assert elog.events == [
-        ("user_message", "step:coder", "/refactor src/foo.py", True),
+        ("user_message", "step:coder", "/refactor src/foo.py", "reply"),
         ("skill_load", None, {"name": "refactor", "source": "human"}),
-        ("user_message", "step:coder", "BODY\n\nsrc/foo.py\n", False),
+        ("engine_message", "step:coder", "BODY\n\nsrc/foo.py\n", "continuation"),
     ]

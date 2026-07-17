@@ -157,7 +157,7 @@ async def test_send_to_llm_store_backed_native_resume(
     # Native resume drove a real claude turn to completion (no deadlock, no 400,
     # no abort): the stdin tool_result paired against the --resume session's
     # tool_use and the model generated the next turn.
-    assert events[-1]["type"] == "agent_output", events[-1]
+    assert events[-1]["type"] == "agent_result", events[-1]
     assert not any(e["type"] == "error" for e in events), [
         e for e in events if e["type"] == "error"]
     # Zero re-execution: the folded tool_result was recalled, not redone.
@@ -232,7 +232,7 @@ async def test_dangling_tool_use_store_backed_native_resume(
     # The run reached completion past the dangling call without the legacy
     # transcript_invalid abort (which the store assertion below ties to the
     # native path).
-    assert events[-1]["type"] == "agent_output", events[-1]
+    assert events[-1]["type"] == "agent_result", events[-1]
     # The synthesized tool_result for t1 was streamed as the delta (not an empty
     # query): one trailing user turn carrying a tool_result.
     assert len(streamed) == 1, streamed
@@ -335,7 +335,7 @@ async def test_complete_step_handback_native_resume(
     events = [ev async for ev in runner.run(inv)]
 
     # Native resume drove a real claude turn to completion (no deadlock, no 400).
-    assert events[-1]["type"] == "agent_output", events[-1]
+    assert events[-1]["type"] == "agent_result", events[-1]
     assert not any(e["type"] == "error" for e in events), [
         e for e in events if e["type"] == "error"]
     # The handback is the single streamed delta turn — the is_error complete_step
@@ -417,7 +417,7 @@ async def test_step_completed_native_resume_redrives_with_feedback(
     runner = ClaudeCodeAgentRunner(model_name=_MODEL)
     events = [ev async for ev in runner.run(inv)]
 
-    assert events[-1]["type"] == "agent_output", events[-1]
+    assert events[-1]["type"] == "agent_result", events[-1]
     assert not any(e["type"] == "error" for e in events), [
         e for e in events if e["type"] == "error"]
     log_types = [ev["type"] for ev in inv.event_log.read()]
@@ -495,7 +495,7 @@ async def test_midrun_interrupt_resume_continues_agent(
 
     from imp.engine.agent_run import _CONTINUATION_NUDGE
     # Continued to completion — no deadlock, no 400, no abort.
-    assert events[-1]["type"] == "agent_output", events[-1]
+    assert events[-1]["type"] == "agent_result", events[-1]
     assert not any(e["type"] == "error" for e in events), [
         e for e in events if e["type"] == "error"]
     # R4 crux: it did NOT park — no solicit gate was emitted (the _must_not_solicit

@@ -316,21 +316,18 @@ def test_make_interactive_solicit_seeds_prompt_history_from_record(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The persistent prompt is seeded at construction from quest.seed_opening
-    plus its human=True user_message texts (synthetic messages excluded),
-    oldest-first."""
+    plus user_message reply texts (engine_message turns excluded), oldest-first."""
     quest = _make_change(tmp_path, "2026-06-15-seedhist")
     quest.seed_opening = "the seed goal"
     elog = quest.event_log()
     elog.append(
         agent_id=None, type="user_message",
-        payload={"role": "user",
-                 "content": [{"type": "text", "text": "a human reply"}],
-                 "human": True})
+        payload={"role": "user", "subtype": "reply",
+                 "content": [{"type": "text", "text": "a human reply"}]})
     elog.append(
-        agent_id=None, type="user_message",
-        payload={"role": "user",
-                 "content": [{"type": "text", "text": "engine nudge"}],
-                 "human": False})
+        agent_id=None, type="engine_message",
+        payload={"subtype": "agent_prompt",
+                 "content": [{"type": "text", "text": "engine nudge"}]})
 
     seeded: dict[str, list[str]] = {}
 
@@ -507,7 +504,9 @@ async def test_run_session_client_forwards_chat_leave_mode_to_terminal(
     quest = Quest.create_draft(
         tmp_path, title="Draft", quest_id="c1", base_branch="main")
     quest.event_log().append(
-        agent_id=None, type="opening_intent", payload={"text": "a question"})
+        agent_id=None, type="user_message",
+        payload={"role": "user", "subtype": "intent",
+                 "content": [{"type": "text", "text": "a question"}]})
 
     captured: dict[str, object] = {}
 

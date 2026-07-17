@@ -40,14 +40,14 @@ def _channel(write_fd: int, *, events: tuple[str, ...]) -> RemoteChannel:
 def test_on_event_writes_ndjson_with_quest_context() -> None:
     r, w = os.pipe()
     ch = _channel(w, events=("all",))
-    ch.on_event({"id": "ev1", "type": "agent_output",
+    ch.on_event({"id": "ev1", "type": "agent_result",
                  "payload": {"text": "hi"}})
     line = os.read(r, 65536).decode()
     assert line.endswith("\n")
     obj = json.loads(line)
     # The event's own fields are preserved (event id NOT clobbered)...
     assert obj["id"] == "ev1"
-    assert obj["type"] == "agent_output"
+    assert obj["type"] == "agent_result"
     # ...and change context is namespaced under "quest" (spec AC 2).
     assert obj["quest"] == {
         "id": "2026-06-11-abc", "title": "My Quest",
@@ -98,7 +98,7 @@ def test_on_event_dead_proc_never_raises() -> None:
     r, w = os.pipe()
     ch = _channel(w, events=("all",))
     ch._proc.die()
-    ch.on_event({"id": "e", "type": "agent_output", "payload": {}})  # no raise
+    ch.on_event({"id": "e", "type": "agent_result", "payload": {}})  # no raise
     os.close(r)
     os.close(w)
 
@@ -108,7 +108,7 @@ def test_on_event_full_pipe_is_dropped_not_blocked() -> None:
     ch = _channel(w, events=("all",))
     # Fill the pipe buffer so the next os.write would block on a blocking fd;
     # the channel's fd is non-blocking, so the write must be dropped, not hang.
-    big = {"id": "e", "type": "agent_output", "payload": {"x": "z" * 4096}}
+    big = {"id": "e", "type": "agent_result", "payload": {"x": "z" * 4096}}
     for _ in range(512):
         ch.on_event(big)   # must return promptly, never block or raise
     os.close(r)

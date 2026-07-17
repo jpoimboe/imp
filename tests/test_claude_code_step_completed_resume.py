@@ -98,7 +98,7 @@ async def test_step_completed_rework_delivers_feedback_as_user_turn_natively(
         model_name="claude-sonnet-4-5", client_factory=factory)
     events = [ev async for ev in runner.run(inv)]
 
-    assert events[-1]["type"] == "agent_output"
+    assert events[-1]["type"] == "agent_result"
     log_types = [e["type"] for e in log.read()]
     # Harm 2 killed: no phantom human solicit.
     assert "awaiting_user_input" not in log_types
@@ -143,7 +143,7 @@ async def test_step_completed_bare_goto_delivers_redo_nudge_natively(
         model_name="claude-sonnet-4-5", client_factory=factory)
     events = [ev async for ev in runner.run(inv)]
 
-    assert events[-1]["type"] == "agent_output"
+    assert events[-1]["type"] == "agent_result"
     log_types = [e["type"] for e in log.read()]
     assert "awaiting_user_input" not in log_types
     assert "runner_warning" not in log_types

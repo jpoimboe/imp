@@ -41,9 +41,10 @@ def _inflight_home(control, cid, *, title, phase_label, step_label,
             "timestamp": "2026-06-20T11:00:01+00:00",
             "payload": {"step": step, "phase": "p", "phase_label": phase_label}}]
     if intent is not None:
-        evs.insert(0, {"type": "opening_intent", "agent_id": None,
+        evs.insert(0, {"type": "user_message", "agent_id": None,
                        "timestamp": "2026-06-20T11:00:00+00:00",
-                       "payload": {"text": intent}})
+                       "payload": {"role": "user", "subtype": "intent",
+                                   "content": [{"type": "text", "text": intent}]}})
     (cdir / "events.jsonl").write_text("\n".join(json.dumps(e) for e in evs) + "\n")
     State(id=cid, status="running", step=step, step_attempt=0,
           step_label=step_label, phase_label=phase_label).save(cdir / "state")

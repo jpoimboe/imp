@@ -20,7 +20,7 @@ def _adapter(subs: Subscriptions, sent: list) -> TelegramNorthAdapter:
 
 
 def _silent(quest_id: str, event_id: str = "s1") -> dict:
-    return {"id": event_id, "type": "agent_output", "timestamp": TS,
+    return {"id": event_id, "type": "agent_result", "timestamp": TS,
             "payload": {"text": "narrative"}, "quest": {"id": quest_id, "title": "t"}}
 
 
@@ -84,6 +84,6 @@ def test_subscribed_silent_empty_body_stays_dropped() -> None:
     subs.add(A)
     sent: list = []
     _adapter(subs, sent).on_event(
-        {"id": "e0", "type": "agent_output", "timestamp": TS,
+        {"id": "e0", "type": "agent_result", "timestamp": TS,
          "payload": {"text": ""}, "quest": {"id": A, "title": "t"}})
     assert sent == []

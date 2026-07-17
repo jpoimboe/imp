@@ -114,11 +114,12 @@ def _live_change_task_prompt(control: Path, quest_id: str) -> None:
     (cdir / "events.jsonl").write_text(
         json.dumps(
             {
-                "type": "user_message",
+                "type": "engine_message",
                 "agent_id": "step:implement/coder",
                 "timestamp": "2026-06-20T11:00:00+00:00",
                 "payload": {
                     "role": "user",
+                    "subtype": "agent_prompt",
                     "content": [{"type": "text",
                                  "text": "## Task\nyou are a coder; do the thing"}],
                 },

@@ -73,6 +73,6 @@ async def test_on_event_after_mid_run_crash_does_not_raise(tmp_path: Path) -> No
         ch._proc.kill()                       # driver dies mid-run
         await anyio.to_thread.run_sync(ch._proc.wait)
         # The event tap survives a dead driver: no raise, run unaffected.
-        ch.on_event({"id": "e", "type": "agent_output", "payload": {}})
+        ch.on_event({"id": "e", "type": "agent_result", "payload": {}})
         await ch.stop()                       # idempotent on an already-dead proc
         tg.cancel_scope.cancel()

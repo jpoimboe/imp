@@ -70,11 +70,11 @@ def test_malformed_events_become_error_nodes_and_never_abort() -> None:
     assert any(isinstance(c, nv.PhaseNode) for c in tree.root.children)
 
 
-def test_token_totals_accumulate_across_all_llm_responses() -> None:
+def test_token_totals_accumulate_across_all_agent_messages() -> None:
     tree = nv.build_tree([
-        {"id": "a", "agent_id": "step:p/s", "type": "llm_response",
+        {"id": "a", "agent_id": "step:p/s", "type": "agent_message",
          "payload": {"usage": {"input_tokens": 100, "output_tokens": 20}}},
-        {"id": "b", "agent_id": "step:p/s", "type": "llm_response",
+        {"id": "b", "agent_id": "step:p/s", "type": "agent_message",
          "payload": {"usage": {"input_tokens": 50, "output_tokens": 5}}},
     ])
     assert tree.tokens.input == 150
@@ -173,8 +173,11 @@ def test_thinking_and_step_context_become_collapsible_folds() -> None:
     tree = nv.build_tree([
         _ev("2", "step_started", step="s", kind="agent", phase="p",
             model="m", provider="anthropic"),
+        _ev("2e", "engine_message", agent_id="step:p/s",
+            role="user", subtype="system_prompt",
+            content=[{"type": "text", "text": "SYS"}]),
         _ev("3", "step_context", agent_id="step:p/s", provider="anthropic",
-            model="m", system_prompt="SYS", tools_schema=[{"name": "a"}],
+            model="m", tools_schema=[{"name": "a"}],
             params={"max_tokens": 8192}, max_tool_calls=50),
         _ev("4", "thinking", agent_id="step:p/s", content="let me think hard"),
     ])
@@ -182,8 +185,8 @@ def test_thinking_and_step_context_become_collapsible_folds() -> None:
     kinds = [type(c).__name__ for c in step.children]
     assert "StepContextNode" in kinds
     assert "ThinkingFold" in kinds
-    ctx = next(c for c in step.children if isinstance(c, nv.StepContextNode))
-    assert ctx.payload["system_prompt"] == "SYS"
+    eng = next(c for c in step.children if isinstance(c, nv.EngineMessageNode))
+    assert eng.text == "SYS" and eng.subtype == "system_prompt"
     think = next(c for c in step.children if isinstance(c, nv.ThinkingFold))
     assert think.content == "let me think hard"
 
@@ -192,7 +195,7 @@ def test_agent_text_node_holds_payload_and_parses_lazily() -> None:
     tree = nv.build_tree([
         _ev("2", "step_started", step="s", kind="agent", phase="p",
             model="m", provider="anthropic"),
-        _ev("3", "llm_response", agent_id="step:p/s", provider="anthropic",
+        _ev("3", "agent_message", agent_id="step:p/s", provider="anthropic",
             model="m", stop_reason="end_turn",
             usage={"input_tokens": 1, "output_tokens": 1},
             raw={"content": [{"type": "text", "text": "hello world"}],
@@ -241,7 +244,7 @@ def test_non_tool_event_flushes_burst_into_two() -> None:
     tree = nv.build_tree(_step_events(
         _ev("1", "tool_call", agent_id="step:p/s", id="b1", name="bash", input={}),
         _ev("2", "tool_result", agent_id="step:p/s", id="b1", content="ok", error=False),
-        _ev("3", "llm_response", agent_id="step:p/s", provider="anthropic", model="m",
+        _ev("3", "agent_message", agent_id="step:p/s", provider="anthropic", model="m",
             stop_reason="tool_use", usage={},
             raw={"content": [{"type": "text", "text": "thinking out loud"}]}),
         _ev("4", "tool_call", agent_id="step:p/s", id="b2", name="grep", input={}),
@@ -303,15 +306,15 @@ def test_interleaved_sub_events_route_into_fold_without_breaking_burst() -> None
             input={"subagent_name": "reviewer", "task_description": "go"}),
         # subagent's own stream (agent_id = sub:tk1):
         _ev("s1", "step_context", agent_id="sub:tk1", provider="anthropic",
-            model="m", system_prompt="SYS", tools_schema=[], params={}, max_tool_calls=50),
-        _ev("s2", "llm_response", agent_id="sub:tk1", provider="anthropic", model="m",
+            model="m", tools_schema=[], params={}, max_tool_calls=50),
+        _ev("s2", "agent_message", agent_id="sub:tk1", provider="anthropic", model="m",
             stop_reason="end_turn", usage={"input_tokens": 7, "output_tokens": 2},
             raw={"content": [{"type": "text", "text": "subagent says hi"}]}),
         # parent's task tool_result closes the fold:
         _ev("r1", "tool_result", agent_id="step:p/s", id="b1",
             content='{"status":"Success"}', error=False),
         # parent content after the subagent — must attach to the step, not the fold:
-        _ev("a1", "llm_response", agent_id="step:p/s", provider="anthropic", model="m",
+        _ev("a1", "agent_message", agent_id="step:p/s", provider="anthropic", model="m",
             stop_reason="end_turn", usage={"input_tokens": 3, "output_tokens": 1},
             raw={"content": [{"type": "text", "text": "parent resumes"}]}),
     ))
@@ -336,7 +339,7 @@ def test_subagent_running_until_task_result_arrives() -> None:
               model="m", provider="anthropic"))
     b.add(_ev("tk1", "tool_call", agent_id="step:p/s", id="b1", name="sub_agent",
               input={"subagent_name": "reviewer", "task_description": "go"}))
-    b.add(_ev("s1", "llm_response", agent_id="sub:tk1", provider="anthropic", model="m",
+    b.add(_ev("s1", "agent_message", agent_id="sub:tk1", provider="anthropic", model="m",
               stop_reason="end_turn", usage={}, raw={"content": []}))
     step = b._step_stack[-1]
     sub = next(c for c in step.children if isinstance(c, nv.SubagentFold))
@@ -400,9 +403,9 @@ INTERLEAVED_LOG = [
     _ev("b1r", "tool_result", agent_id="step:impl/build", id="b1", content="data", error=False),
     _ev("tk1", "tool_call", agent_id="step:impl/build", id="b2", name="sub_agent",
         input={"subagent_name": "reviewer", "task_description": "review"}),
-    _ev("su1", "step_context", agent_id="sub:tk1", provider="anthropic", model="m",
-        system_prompt="S", tools_schema=[], params={}, max_tool_calls=50),
-    _ev("su2", "llm_response", agent_id="sub:tk1", provider="anthropic", model="m",
+    _ev("su1", "step_context", agent_id="sub:tk1", provider="anthropic",
+        model="m", tools_schema=[], params={}, max_tool_calls=50),
+    _ev("su2", "agent_message", agent_id="sub:tk1", provider="anthropic", model="m",
         stop_reason="end_turn", usage={"input_tokens": 4, "output_tokens": 1},
         raw={"content": [{"type": "text", "text": "looks good"}]}),
     _ev("tkr", "tool_result", agent_id="step:impl/build", id="b2",
@@ -447,7 +450,7 @@ def test_resume_reentry_reuses_phase_and_resets_step() -> None:
             action={"verb": "continue"}, var_mutations={}),
         _ev("s2", "step_started", step="build", kind="agent", phase="design",
             model="m", provider="anthropic"),
-        _ev("ll1", "llm_response", agent_id="step:design/build", provider="anthropic",
+        _ev("ll1", "agent_message", agent_id="step:design/build", provider="anthropic",
             model="m", stop_reason="end_turn", usage={},
             raw={"content": [{"type": "text", "text": "partial attempt"}]}),
         _ev("wp", "workflow_paused", reason="ctrl-c"),
@@ -457,7 +460,7 @@ def test_resume_reentry_reuses_phase_and_resets_step() -> None:
         # re-emitted on resume — same phase + step → re-enters, does not duplicate
         _ev("s2b", "step_started", step="build", kind="agent", phase="design",
             model="m", provider="anthropic", restarted=True),
-        _ev("ll2", "llm_response", agent_id="step:design/build", provider="anthropic",
+        _ev("ll2", "agent_message", agent_id="step:design/build", provider="anthropic",
             model="m", stop_reason="end_turn", usage={},
             raw={"content": [{"type": "text", "text": "fresh complete"}]}),
         _ev("s2c", "step_completed", step="build", kind="agent",
@@ -740,11 +743,11 @@ def test_task_result_present_canonical_close_carries_outcome_no_orphan() -> None
         _ev("tk1", "tool_call", agent_id="step:p/s", id="b1", name="sub_agent",
             input={"subagent_name": "reviewer", "task_description": "go"}),
         _ev("s1", "step_context", agent_id="sub:tk1", provider="anthropic",
-            model="m", system_prompt="SYS", tools_schema=[], params={},
+            model="m", tools_schema=[], params={},
             max_tool_calls=50),
         _ev("r1", "tool_result", agent_id="step:p/s", id="b1",
             content="RuntimeError: boom", error=True),
-        _ev("a1", "llm_response", agent_id="step:p/s", provider="anthropic", model="m",
+        _ev("a1", "agent_message", agent_id="step:p/s", provider="anthropic", model="m",
             stop_reason="end_turn", usage={}, raw={"content": [
                 {"type": "text", "text": "parent resumes"}]}),
     ))
@@ -774,7 +777,7 @@ def test_task_result_missing_salvaged_by_resume_close(block_id: str) -> None:
     b.add(_ev("tk1", "tool_call", agent_id="step:p/s", id=block_id, name="sub_agent",
               input={"subagent_name": "reviewer", "task_description": "go"}))
     b.add(_ev("s1", "step_context", agent_id="sub:tk1", provider="anthropic",
-              model="m", system_prompt="SYS", tools_schema=[], params={},
+              model="m", tools_schema=[], params={},
               max_tool_calls=50))
     step = b._step_stack[-1]
     sub = next(c for c in step.children if isinstance(c, nv.SubagentFold))
@@ -782,7 +785,7 @@ def test_task_result_missing_salvaged_by_resume_close(block_id: str) -> None:
     # current_activity sits on the running subagent before the parent resumes.
     assert "subagent(reviewer)" in (b.current_activity().verb or "")
     # Parent resumes (same agent_id) with NO task tool_result — resume-close fires.
-    b.add(_ev("a1", "llm_response", agent_id="step:p/s", provider="anthropic",
+    b.add(_ev("a1", "agent_message", agent_id="step:p/s", provider="anthropic",
               model="m", stop_reason="end_turn", usage={}, raw={"content": [
                   {"type": "text", "text": "parent resumes"}]}))
     assert sub.running is False
@@ -802,13 +805,13 @@ def test_task_result_missing_salvaged_by_resume_close_codex() -> None:
     b.add(_ev("tk1", "tool_call", agent_id="step:p/s", id="b1", name="sub_agent",
               input={"subagent_name": "reviewer", "task_description": "go"}))
     b.add(_ev("s1", "step_context", agent_id="sub:tk1", provider="codex",
-              model="m", system_prompt="SYS", tools_schema=[], params={},
+              model="m", tools_schema=[], params={},
               max_tool_calls=50))
     step = b._step_stack[-1]
     sub = next(c for c in step.children if isinstance(c, nv.SubagentFold))
     assert sub.running is True
     assert "subagent(reviewer)" in (b.current_activity().verb or "")
-    b.add(_ev("a1", "llm_response", agent_id="step:p/s", provider="codex",
+    b.add(_ev("a1", "agent_message", agent_id="step:p/s", provider="codex",
               model="m", stop_reason=None, usage={}, raw={"content": [
                   {"type": "text", "text": "parent resumes"}]}))
     assert sub.running is False
@@ -827,12 +830,12 @@ def test_claude_code_midstream_fragment_does_not_salvage_close() -> None:
     b.add(_ev("tk1", "tool_call", agent_id="step:p/s", id="b1", name="sub_agent",
               input={"subagent_name": "reviewer", "task_description": "go"}))
     b.add(_ev("s1", "step_context", agent_id="sub:tk1", provider="claude_code",
-              model="m", system_prompt="SYS", tools_schema=[], params={},
+              model="m", tools_schema=[], params={},
               max_tool_calls=50))
     step = b._step_stack[-1]
     sub = next(c for c in step.children if isinstance(c, nv.SubagentFold))
     assert sub.running is True
-    b.add(_ev("a1", "llm_response", agent_id="step:p/s", provider="claude_code",
+    b.add(_ev("a1", "agent_message", agent_id="step:p/s", provider="claude_code",
               model="m", stop_reason=None, usage={}, raw={"content": [
                   {"type": "text", "text": "still streaming"}]}))
     assert sub.running is True
@@ -848,13 +851,13 @@ def test_task_result_missing_salvaged_by_resume_close_openai() -> None:
     b.add(_ev("tk1", "tool_call", agent_id="step:p/s", id="b1", name="sub_agent",
               input={"subagent_name": "reviewer", "task_description": "go"}))
     b.add(_ev("s1", "step_context", agent_id="sub:tk1", provider="openai",
-              model="m", system_prompt="SYS", tools_schema=[], params={},
+              model="m", tools_schema=[], params={},
               max_tool_calls=50))
     step = b._step_stack[-1]
     sub = next(c for c in step.children if isinstance(c, nv.SubagentFold))
     assert sub.running is True
     assert "subagent(reviewer)" in (b.current_activity().verb or "")
-    b.add(_ev("a1", "llm_response", agent_id="step:p/s", provider="openai",
+    b.add(_ev("a1", "agent_message", agent_id="step:p/s", provider="openai",
               model="m", stop_reason="completed", usage={}, raw={"content": [
                   {"type": "text", "text": "parent resumes"}]}))
     assert sub.running is False
@@ -880,7 +883,7 @@ def test_block_tracked_fold_survives_parents_own_tool_call() -> None:
                  id_ns="block"),
            "timestamp": "2026-06-23T16:14:14+00:00"})
     b.add(_ev("s1", "step_context", agent_id="sub:tk1", provider="claude_code",
-              model="m", system_prompt="SYS", tools_schema=[], params={},
+              model="m", tools_schema=[], params={},
               max_tool_calls=50))
     step = b._step_stack[-1]
     sub = next(c for c in step.children if isinstance(c, nv.SubagentFold))
@@ -913,12 +916,12 @@ def test_openai_non_terminal_status_does_not_salvage_close() -> None:
     b.add(_ev("tk1", "tool_call", agent_id="step:p/s", id="b1", name="sub_agent",
               input={"subagent_name": "reviewer", "task_description": "go"}))
     b.add(_ev("s1", "step_context", agent_id="sub:tk1", provider="openai",
-              model="m", system_prompt="SYS", tools_schema=[], params={},
+              model="m", tools_schema=[], params={},
               max_tool_calls=50))
     step = b._step_stack[-1]
     sub = next(c for c in step.children if isinstance(c, nv.SubagentFold))
     assert sub.running is True
-    b.add(_ev("a1", "llm_response", agent_id="step:p/s", provider="openai",
+    b.add(_ev("a1", "agent_message", agent_id="step:p/s", provider="openai",
               model="m", stop_reason="in_progress", usage={}, raw={"content": [
                   {"type": "text", "text": "more to come"}]}))
     assert sub.running is True
@@ -933,12 +936,12 @@ def test_anthropic_tool_use_midturn_does_not_salvage_close() -> None:
     b.add(_ev("tk1", "tool_call", agent_id="step:p/s", id="b1", name="sub_agent",
               input={"subagent_name": "reviewer", "task_description": "go"}))
     b.add(_ev("s1", "step_context", agent_id="sub:tk1", provider="anthropic",
-              model="m", system_prompt="SYS", tools_schema=[], params={},
+              model="m", tools_schema=[], params={},
               max_tool_calls=50))
     step = b._step_stack[-1]
     sub = next(c for c in step.children if isinstance(c, nv.SubagentFold))
     assert sub.running is True
-    b.add(_ev("a1", "llm_response", agent_id="step:p/s", provider="anthropic",
+    b.add(_ev("a1", "agent_message", agent_id="step:p/s", provider="anthropic",
               model="m", stop_reason="tool_use", usage={}, raw={"content": [
                   {"type": "tool_use", "id": "b2", "name": "bash", "input": {}}]}))
     assert sub.running is True
@@ -953,7 +956,7 @@ def test_step_started_stashes_start_ts_normal_and_resume() -> None:
     b.add(e1)
     step = b._step_stack[-1]
     assert step.start_ts == "2026-05-30T10:00:00+00:00"
-    assert step.agent_output is None
+    assert step.agent_result is None
 
     # Resume re-entry path reuses the open StepNode and must restamp start_ts.
     b.add(_ev("2", "workflow_resumed"))
@@ -966,30 +969,30 @@ def test_step_started_stashes_start_ts_normal_and_resume() -> None:
     assert reused.start_ts == "2026-05-30T10:05:00+00:00"
 
 
-def test_agent_output_stashes_args_without_emitting_prose_node() -> None:
+def test_agent_result_stashes_args_without_emitting_prose_node() -> None:
     b = nv.NarrativeBuilder()
     b.add(_ev("0", "quest_created", quest_id=1, title="x"))
     b.add(_ev("1", "step_started", step="coder", kind="agent", phase="build"))
     # agent_output fires before step_completed; its long free-text field is
     # stashed for the breadcrumb/--full view, NEVER promoted to a prose block.
-    b.add(_ev("2", "agent_output", agent_id="step:build/coder",
+    b.add(_ev("2", "agent_result", agent_id="step:build/coder",
               summary="A long summary. " * 10, status="Success",
               plan_path="docs/plan.md"))
     step = b._step_stack[-1]
-    assert step.agent_output["status"] == "Success"
-    assert step.agent_output["summary"].startswith("A long summary.")
+    assert step.agent_result["status"] == "Success"
+    assert step.agent_result["summary"].startswith("A long summary.")
     lits = [c for c in step.children if isinstance(c, nv.LiteralTextNode)]
     assert lits == []          # output fields are not prose blocks (E1)
 
 
-def test_agent_output_skips_whitespace_only_prose_field() -> None:
+def test_agent_result_skips_whitespace_only_prose_field() -> None:
     # A whitespace-only multi-line field passes _is_prose_field (it contains a
     # newline) but must NOT promote to _render_output_args output — the v.strip()
     # guard in _render_output_args skips empty/whitespace values.
     b = nv.NarrativeBuilder()
     b.add(_ev("0", "quest_created", quest_id=1, title="x"))
     b.add(_ev("1", "step_started", step="coder", kind="agent", phase="build"))
-    b.add(_ev("2", "agent_output", agent_id="step:build/coder",
+    b.add(_ev("2", "agent_result", agent_id="step:build/coder",
               notes="   \n   ", status="Success"))
     step = b._step_stack[-1]
     lits = [c for c in step.children if isinstance(c, nv.LiteralTextNode)]
@@ -1029,7 +1032,7 @@ def test_step_completed_emits_merged_breadcrumb_and_preserves_outcome() -> None:
     s = _ev("1", "step_started", step="coder", kind="agent", phase="build")
     s["timestamp"] = "2026-05-30T10:00:00+00:00"
     b.add(s)
-    b.add(_ev("2", "agent_output", agent_id="step:build/coder",
+    b.add(_ev("2", "agent_result", agent_id="step:build/coder",
               status="Success", plan_path="docs/plan.md"))
     c = _ev("3", "step_completed", step="coder", kind="agent",
             action={"verb": "continue"}, var_mutations={})
@@ -1080,15 +1083,15 @@ def test_same_phase_call_leaves_current_phase_open() -> None:
     assert phases[0].closed is False
 
 
-def test_empty_prose_llm_response_yields_no_agent_text_node() -> None:
+def test_empty_prose_agent_message_yields_no_agent_text_node() -> None:
     # A thinking-only turn (no text block) renders to empty prose. It must NOT
     # produce an AgentTextNode — that would render as an indent-only blank line.
     tree = nv.build_tree([
         _ev("1", "step_started", step="spec", kind="agent", phase="design"),
         _ev("2", "thinking", agent_id="a", content="hmm"),
-        _ev("3", "llm_response", agent_id="a",
+        _ev("3", "agent_message", agent_id="a",
             raw={"content": [{"type": "thinking", "thinking": "hmm"}]}, usage={}),
-        _ev("4", "llm_response", agent_id="a",
+        _ev("4", "agent_message", agent_id="a",
             raw={"content": [{"type": "text", "text": "real prose"}]}, usage={}),
     ])
     # Collect AgentTextNodes anywhere under the tree (they live under the StepNode).
@@ -1105,7 +1108,7 @@ def test_empty_prose_llm_response_yields_no_agent_text_node() -> None:
     assert nodes[0].text == "real prose"
 
 
-def test_empty_llm_response_between_tools_keeps_burst_open() -> None:
+def test_empty_agent_message_between_tools_keeps_burst_open() -> None:
     # §8: an empty-text llm_response (lone tool_use block, no prose) is a
     # tool-use-turn carrier and must NOT flush an open burst — otherwise
     # consecutive tool_calls each start a fresh burst with count 1.
@@ -1116,7 +1119,7 @@ def test_empty_llm_response_between_tools_keeps_burst_open() -> None:
     b.add({"type": "tool_call", "agent_id": None,
            "payload": {"name": "bash", "id": "t1", "input": {"command": "ls"}}, "id": "e2"})
     # tool-use-turn carrier: an llm_response whose only block is a tool_use (no text)
-    b.add({"type": "llm_response", "agent_id": None,
+    b.add({"type": "agent_message", "agent_id": None,
            "payload": {"raw": {"content": [{"type": "tool_use", "id": "t2",
                                             "name": "grep", "input": {}}]}}, "id": "e3"})
     b.add({"type": "tool_call", "agent_id": None,
@@ -1133,7 +1136,7 @@ def test_real_prose_flushes_the_burst() -> None:
            "timestamp": "2026-06-03T00:00:00+00:00"})
     b.add({"type": "tool_call", "agent_id": None,
            "payload": {"name": "bash", "id": "t1", "input": {}}, "id": "e2"})
-    b.add({"type": "llm_response", "agent_id": None,
+    b.add({"type": "agent_message", "agent_id": None,
            "payload": {"raw": {"content": [{"type": "text", "text": "done."}]}}, "id": "e3"})
     assert b.current_burst is None
 
@@ -1403,7 +1406,7 @@ def test_resume_tool_result_shaped_user_message_renders_reply():    # [I1]
     b = nv.NarrativeBuilder()
     b.add(ev("1", "step_started", step="s", kind="agent", phase="p"))
     b.add(ev("aw", "awaiting_user_input", agent_id="a", prompt="continue?"))
-    b.add(ev("um", "user_message", agent_id="a", content=[
+    b.add(ev("um", "user_message", agent_id="a", subtype="reply", content=[
         {"type": "tool_result", "tool_use_id": "w1", "is_error": False,
          "content": "the human reply"}]))
     step = _step_node(b)            # PhaseNode→StepNode helper from Task 8's block
@@ -1412,18 +1415,17 @@ def test_resume_tool_result_shaped_user_message_renders_reply():    # [I1]
     assert user.text == "the human reply"
 
 
-def test_resume_unarmed_balance_injection_renders_nothing():         # [I1] negative
+def test_resume_balance_injection_is_engine_message_not_user():
     b = nv.NarrativeBuilder()
     b.add(ev("1", "step_started", step="s", kind="agent", phase="p"))
-    # no awaiting_user_input → flag unarmed; balance-shaped sole tool_result block
-    b.add(ev("um", "user_message", agent_id="a", content=[
+    # A resume balance-injection is an engine_message/continuation
+    # (transcript.balance_success_on_resume), never a human user_message — so it
+    # produces no UserMessageNode.
+    b.add(ev("um", "engine_message", agent_id="a", subtype="continuation", content=[
         {"type": "tool_result", "tool_use_id": "x", "is_error": False,
          "content": "previous step output recorded; resuming"}]))
     step = _step_node(b)            # PhaseNode→StepNode helper from Task 8's block
-    users = [k for k in step.children if isinstance(k, nv.UserMessageNode)]
-    # interactive=False (unarmed) → synthetic, and text stays empty (no text block)
-    assert all(not u.interactive for u in users)
-    assert all(u.text == "" for u in users)
+    assert not any(isinstance(k, nv.UserMessageNode) for k in step.children)
 
 
 def test_error_node_threads_full_summary_absent_tolerantly() -> None:
@@ -1556,7 +1558,7 @@ def test_late_result_after_resume_close_is_benign_not_a_warning() -> None:
     step = b._step_stack[-1]
     fold = next(c for c in step.children if isinstance(c, nv.SubagentFold))
     # A non-matching parent event triggers the resume-close fallback (pops m1).
-    b.add(_ev("a1", "llm_response", agent_id="step:p/s", provider="anthropic",
+    b.add(_ev("a1", "agent_message", agent_id="step:p/s", provider="anthropic",
               model="m", stop_reason="end_turn", usage={},
               raw={"content": [{"type": "text", "text": "hmm"}]}))
     assert fold.running is False                     # provisionally closed
@@ -1664,7 +1666,7 @@ def test_resume_drops_interrupted_fold_membership_so_late_events_dont_reattach()
     count_before = dangling.event_count
 
     # A late event carrying the interrupted fold's sub: id must NOT reattach.
-    b.add(_ev("late", "llm_response", agent_id="sub:tk1", usage={}))
+    b.add(_ev("late", "agent_message", agent_id="sub:tk1", usage={}))
     assert dangling.event_count == count_before
 
 
@@ -1773,13 +1775,13 @@ def _reviewer_conclusion(narration: str, findings: str) -> nv.NarrativeTree:
     return nv.build_tree([
         _ev("1", "step_started", step="spec-reviewer", kind="agent", phase="spec",
             model="m", provider="anthropic"),
-        _ev("2", "llm_response", agent_id="step:spec/spec-reviewer",
+        _ev("2", "agent_message", agent_id="step:spec/spec-reviewer",
             provider="anthropic", model="m", usage={},
             raw={"content": [{"type": "text", "text": narration}]}),
         _ev("3", "tool_call", agent_id="step:spec/spec-reviewer", id="cs1",
             name="complete_step",
             input={"status": "Success", "verdict": "approve", "findings": findings}),
-        _ev("4", "agent_output", agent_id="step:spec/spec-reviewer",
+        _ev("4", "agent_result", agent_id="step:spec/spec-reviewer",
             status="Success", verdict="approve", findings=findings),
         _ev("5", "step_completed", step="spec-reviewer", kind="agent",
             action={"verb": "continue"}, var_mutations={}),
@@ -1826,7 +1828,7 @@ def test_clean_panel_findings_not_promoted_to_prose() -> None:
     events += _panel_member("3", "approve", "nit: add a comment")
     events += _panel_member("4", "approve", "")
     events += [
-        _ev("ao", "agent_output", agent_id="step:review/review",
+        _ev("ao", "agent_result", agent_id="step:review/review",
             status="Success", verdict="approve",
             findings="all four approve; two nits were noted\n(foo rename, comment style)"),
         _ev("sc", "step_completed", step="review", kind="agent",
@@ -1849,7 +1851,7 @@ def test_blocking_panel_findings_not_promoted_to_prose() -> None:
     events += _panel_member("1", "task_gap", "blocking: missing handler")
     events += _panel_member("2", "approve", "")
     events += [
-        _ev("ao", "agent_output", agent_id="step:review/review",
+        _ev("ao", "agent_result", agent_id="step:review/review",
             status="Success", verdict="rework",
             findings="### member-1 (task-level)\nblocking: missing handler that is "
                      "reachable in normal usage and clearly blocks the merge gate"),
@@ -1985,11 +1987,11 @@ def test_parallel_batch_folds_ignore_interleaved_parent_chunks() -> None:
              if isinstance(f, nv.SubagentFold)}
     assert folds["reviewer"].running is True and folds["tester"].running is True
     # Parent mid-turn streaming chunks -- must NOT close either sibling.
-    b.add(ev("a1", "llm_response", agent_id="step:p/s", provider="anthropic",
+    b.add(ev("a1", "agent_message", agent_id="step:p/s", provider="anthropic",
              model="m", stop_reason=None, usage={},
              raw={"content": [{"type": "text", "text": "still working"}]},
              timestamp="2026-06-19T10:00:02+00:00"))
-    b.add(ev("a2", "llm_response", agent_id="step:p/s", provider="anthropic",
+    b.add(ev("a2", "agent_message", agent_id="step:p/s", provider="anthropic",
              model="m", stop_reason="tool_use", usage={},
              raw={"content": []},
              timestamp="2026-06-19T10:00:02.500000+00:00"))
@@ -2014,12 +2016,13 @@ def test_parallel_batch_folds_ignore_interleaved_parent_chunks() -> None:
         folds["tester"].start_ts, folds["tester"].end_ts) == 19.0
 
 
-def test_opening_intent_stays_at_root_after_first_step() -> None:
+def test_intent_stays_at_root_after_first_step() -> None:
     tree = nv.build_tree([
         {"id": "e1", "agent_id": None, "type": "quest_created",
          "payload": {"handle": "h", "title": "t"}},
-        {"id": "e2", "agent_id": None, "type": "opening_intent",
-         "payload": {"text": "add a --json flag"}},
+        {"id": "e2", "agent_id": None, "type": "user_message",
+         "payload": {"role": "user", "subtype": "intent",
+                     "content": [{"type": "text", "text": "add a --json flag"}]}},
         _ev("e3", "step_started", step="spec", kind="agent", phase="design",
             model="m", provider="anthropic"),
     ])
@@ -2037,7 +2040,7 @@ def test_opening_intent_stays_at_root_after_first_step() -> None:
     assert root_kinds.index(nv.UserMessageNode) < root_kinds.index(nv.PhaseNode)
 
 
-def test_no_opening_intent_yields_no_user_message_node() -> None:
+def test_no_intent_yields_no_user_message_node() -> None:
     tree = nv.build_tree([
         _ev("e1", "step_started", step="spec", kind="agent", phase="design",
             model="m", provider="anthropic"),
@@ -2048,12 +2051,13 @@ def test_no_opening_intent_yields_no_user_message_node() -> None:
     assert not any(isinstance(c, nv.UserMessageNode) for c in tree.root.children)
 
 
-def test_opening_intent_at_root_not_under_any_step() -> None:
+def test_intent_at_root_not_under_any_step() -> None:
     tree = nv.build_tree([
         {"id": "e1", "agent_id": None, "type": "quest_created",
          "payload": {"handle": "h", "title": "t"}},
-        {"id": "e2", "agent_id": None, "type": "opening_intent",
-         "payload": {"text": "add a --json flag"}},
+        {"id": "e2", "agent_id": None, "type": "user_message",
+         "payload": {"role": "user", "subtype": "intent",
+                     "content": [{"type": "text", "text": "add a --json flag"}]}},
         _ev("s1", "step_started", step="spec", kind="agent", phase="design",
             model="m", provider="anthropic"),
         _ev("s1c", "step_completed", step="spec", kind="agent",
@@ -2071,10 +2075,11 @@ def test_opening_intent_at_root_not_under_any_step() -> None:
     assert not any(isinstance(c, nv.UserMessageNode) for c in steps[1].children)
 
 
-def test_opening_intent_stays_at_root_across_resume_reentry() -> None:
+def test_intent_stays_at_root_across_resume_reentry() -> None:
     seed = [
-        {"id": "e1", "agent_id": None, "type": "opening_intent",
-         "payload": {"text": "add a --json flag"}},
+        {"id": "e1", "agent_id": None, "type": "user_message",
+         "payload": {"role": "user", "subtype": "intent",
+                     "content": [{"type": "text", "text": "add a --json flag"}]}},
         _ev("s1", "step_started", step="spec", kind="agent", phase="design",
             model="m", provider="anthropic"),
         _ev("wp", "workflow_paused", reason="ctrl-c"),
@@ -2110,7 +2115,7 @@ def test_lost_task_result_resume_closed_at_step_completed() -> None:
              timestamp="2026-06-19T11:00:01+00:00"))
     step = b._step_stack[-1]
     fold = next(c for c in step.children if isinstance(c, nv.SubagentFold))
-    b.add(ev("a1", "llm_response", agent_id="step:p/s", provider="anthropic",
+    b.add(ev("a1", "agent_message", agent_id="step:p/s", provider="anthropic",
              model="m", stop_reason=None, usage={},
              raw={"content": [{"type": "text", "text": "working"}]},
              timestamp="2026-06-19T11:00:02+00:00"))
@@ -2177,7 +2182,7 @@ def test_burst_span_brackets_surrounding_prose() -> None:
     tree = nv.build_tree([
         ev("s", "step_started", step="s", kind="agent", phase="p",
            model="m", provider="anthropic", timestamp="2026-06-03T00:00:00+00:00"),
-        ev("p1", "llm_response", agent_id="step:p/s", provider="anthropic", model="m",
+        ev("p1", "agent_message", agent_id="step:p/s", provider="anthropic", model="m",
            stop_reason="tool_use", usage={},
            raw={"content": [{"type": "text", "text": "let me look"}]},
            timestamp="2026-06-03T00:00:04+00:00"),
@@ -2185,7 +2190,7 @@ def test_burst_span_brackets_surrounding_prose() -> None:
            timestamp="2026-06-03T00:00:05+00:00"),
         ev("2", "tool_result", agent_id="step:p/s", id="b1", content="ok", error=False,
            timestamp="2026-06-03T00:00:06+00:00"),
-        ev("p2", "llm_response", agent_id="step:p/s", provider="anthropic", model="m",
+        ev("p2", "agent_message", agent_id="step:p/s", provider="anthropic", model="m",
            stop_reason="end_turn", usage={},
            raw={"content": [{"type": "text", "text": "done"}]},
            timestamp="2026-06-03T00:00:10+00:00"),
@@ -2201,11 +2206,11 @@ def test_burst_span_brackets_surrounding_prose() -> None:
     assert burst.span_end_ts == "2026-06-03T00:00:10+00:00"
 
 
-def test_tool_use_carrier_llm_response_does_not_split_span() -> None:
+def test_tool_use_carrier_agent_message_does_not_split_span() -> None:
     tree = nv.build_tree([
         ev("s", "step_started", step="s", kind="agent", phase="p",
            model="m", provider="anthropic", timestamp="2026-06-03T00:00:00+00:00"),
-        ev("p1", "llm_response", agent_id="step:p/s", provider="anthropic", model="m",
+        ev("p1", "agent_message", agent_id="step:p/s", provider="anthropic", model="m",
            stop_reason="tool_use", usage={},
            raw={"content": [{"type": "text", "text": "starting"}]},
            timestamp="2026-06-03T00:00:01+00:00"),
@@ -2214,7 +2219,7 @@ def test_tool_use_carrier_llm_response_does_not_split_span() -> None:
         ev("2", "tool_result", agent_id="step:p/s", id="b1", content="ok", error=False,
            timestamp="2026-06-03T00:00:03+00:00"),
         # tool-use carrier: a lone tool_use block, no prose text.
-        ev("carrier", "llm_response", agent_id="step:p/s", provider="anthropic",
+        ev("carrier", "agent_message", agent_id="step:p/s", provider="anthropic",
            model="m", stop_reason="tool_use", usage={},
            raw={"content": [{"type": "tool_use", "id": "b2", "name": "grep", "input": {}}]},
            timestamp="2026-06-03T00:00:04+00:00"),
@@ -2297,13 +2302,13 @@ def test_latest_prompt_tokens_tracks_most_recent_turn_not_cumulative() -> None:
     b.add(ev("1", "quest_created", id="z9gixx", title="streaming toolbar"))
     b.add(ev("2", "step_started", step="s", kind="agent", phase="p", model="sonnet"))
     assert b.latest_prompt_tokens is None          # no llm_response yet
-    b.add(ev("3", "llm_response", agent_id="step:p/s", provider="anthropic",
+    b.add(ev("3", "agent_message", agent_id="step:p/s", provider="anthropic",
              model="sonnet",
              usage={"input_tokens": 100, "cache_read_input_tokens": 20,
                     "cache_creation_input_tokens": 5, "output_tokens": 9},
              raw={"content": []}))
     assert b.latest_prompt_tokens == 125           # input + both caches, this turn only
-    b.add(ev("4", "llm_response", agent_id="step:p/s", provider="anthropic",
+    b.add(ev("4", "agent_message", agent_id="step:p/s", provider="anthropic",
              model="sonnet",
              usage={"input_tokens": 200, "output_tokens": 4}, raw={"content": []}))
     assert b.latest_prompt_tokens == 200           # latest turn REPLACES, does not sum
@@ -2312,21 +2317,21 @@ def test_latest_prompt_tokens_tracks_most_recent_turn_not_cumulative() -> None:
 
 def test_latest_prompt_tokens_keeps_last_value_when_usage_absent() -> None:
     b = nv.NarrativeBuilder()
-    b.add(ev("1", "llm_response", agent_id="step:p/s", provider="anthropic", model="m",
+    b.add(ev("1", "agent_message", agent_id="step:p/s", provider="anthropic", model="m",
              usage={"input_tokens": 42}, raw={"content": []}))
-    b.add(ev("2", "llm_response", agent_id="step:p/s", provider="anthropic", model="m",
+    b.add(ev("2", "agent_message", agent_id="step:p/s", provider="anthropic", model="m",
              raw={"content": []}))                 # no usage key at all
     assert b.latest_prompt_tokens == 42            # untouched by a usage-less turn
 
 
-def test_subagent_llm_response_does_not_move_latest_prompt_tokens() -> None:
+def test_subagent_agent_message_does_not_move_latest_prompt_tokens() -> None:
     # A subagent turn must NOT flip the context bar to its own prompt count, but
     # its tokens must still fold into the cumulative change total (F2).
     b = nv.NarrativeBuilder()
     b.add(ev("st", "step_started", step="s", kind="agent", phase="p",
              model="m", provider="anthropic"))
     # A top-level turn sets the bar.
-    b.add(ev("p1", "llm_response", agent_id="step:p/s", provider="anthropic",
+    b.add(ev("p1", "agent_message", agent_id="step:p/s", provider="anthropic",
              model="m", stop_reason="end_turn",
              usage={"input_tokens": 100, "output_tokens": 5}, raw={"content": []}))
     assert b.latest_prompt_tokens == 100
@@ -2334,7 +2339,7 @@ def test_subagent_llm_response_does_not_move_latest_prompt_tokens() -> None:
     b.add(ev("tk1", "tool_call", agent_id="step:p/s", id="b1", name="sub_agent",
              input={"subagent_name": "reviewer", "task_description": "go"}))
     # The subagent turn carries usage but a sub: agent_id — the bar must not move.
-    b.add(ev("s1", "llm_response", agent_id="sub:tk1", provider="anthropic",
+    b.add(ev("s1", "agent_message", agent_id="sub:tk1", provider="anthropic",
              model="m", stop_reason="end_turn",
              usage={"input_tokens": 999, "output_tokens": 7}, raw={"content": []}))
     assert b.latest_prompt_tokens == 100        # frozen at the parent's last value
@@ -2362,8 +2367,9 @@ def test_current_activity_model_none_without_a_step() -> None:
 def test_seeded_opening_intent_reconciles_in_place_at_root() -> None:
     b = nv.NarrativeBuilder()
     b.seed_opening_intent("typed text")
-    b.add({"id": "oi", "agent_id": None, "type": "opening_intent",
-           "payload": {"text": "authoritative text"}})
+    b.add({"id": "oi", "agent_id": None, "type": "user_message",
+         "payload": {"role": "user", "subtype": "intent",
+                     "content": [{"type": "text", "text": "authoritative text"}]}})
     b.add(_ev("s1", "step_started", step="spec", kind="agent", phase="design",
               model="m", provider="anthropic"))
     tree = b.tree
@@ -2379,8 +2385,9 @@ def test_seeded_opening_intent_reconciles_in_place_at_root() -> None:
 
 def test_unseeded_opening_intent_still_creates_single_node() -> None:
     b = nv.NarrativeBuilder()
-    b.add({"id": "oi", "agent_id": None, "type": "opening_intent",
-           "payload": {"text": "add a --json flag"}})
+    b.add({"id": "oi", "agent_id": None, "type": "user_message",
+         "payload": {"role": "user", "subtype": "intent",
+                     "content": [{"type": "text", "text": "add a --json flag"}]}})
     b.add(_ev("s1", "step_started", step="spec", kind="agent", phase="design",
               model="m", provider="anthropic"))
     tree = b.tree
@@ -2497,7 +2504,7 @@ def test_builder_captures_context_pct_and_window() -> None:
     # A lone tool_use carrier (no prose) — exercises the add() step-0 capture
     # without needing an open container.
     b.add({
-        "type": "llm_response", "agent_id": None,
+        "type": "agent_message", "agent_id": None,
         "payload": {
             "provider": "claude_code", "model": "opus-1m",
             "stop_reason": "tool_use",
@@ -2513,13 +2520,13 @@ def test_builder_captures_context_pct_and_window() -> None:
     assert b.latest_context_window == 1_000_000
 
 
-def test_subagent_llm_response_does_not_move_context_pct_or_window() -> None:
+def test_subagent_agent_message_does_not_move_context_pct_or_window() -> None:
     # A subagent turn carries its own session context usage; like prompt tokens,
     # it must NOT flip the top-level context bar to the subagent's values.
     b = nv.NarrativeBuilder()
     b.add(ev("st", "step_started", step="s", kind="agent", phase="p",
              model="m", provider="anthropic"))
-    b.add(ev("p1", "llm_response", agent_id="step:p/s", provider="claude_code",
+    b.add(ev("p1", "agent_message", agent_id="step:p/s", provider="claude_code",
              model="opus-1m", stop_reason="end_turn", usage={},
              raw={"content": []}, context_pct=20.0, context_window=1_000_000))
     assert b.latest_context_pct == 20.0
@@ -2527,7 +2534,7 @@ def test_subagent_llm_response_does_not_move_context_pct_or_window() -> None:
     # Open a subagent fold so the sub: turn routes through a registered child.
     b.add(ev("tk1", "tool_call", agent_id="step:p/s", id="b1", name="sub_agent",
              input={"subagent_name": "reviewer", "task_description": "go"}))
-    b.add(ev("s1", "llm_response", agent_id="sub:tk1", provider="claude_code",
+    b.add(ev("s1", "agent_message", agent_id="sub:tk1", provider="claude_code",
              model="opus-1m", stop_reason="end_turn", usage={},
              raw={"content": []}, context_pct=88.0, context_window=200_000))
     assert b.latest_context_pct == 20.0          # frozen at the parent's value
@@ -2621,11 +2628,11 @@ def test_current_activity_two_running_subagents_show_the_count_not_a_detail() ->
     assert act.detail is None or "+" not in (act.detail or "")   # no "+N subagents" tail
 
 
-def test_claude_code_totals_come_from_query_result_not_llm_response() -> None:
+def test_claude_code_totals_come_from_query_result_not_agent_message() -> None:
     # The coalesced claude_code llm_response usage is streaming-partial and must
     # NOT drive the displayed totals; query_result is authoritative.
     b = nv.NarrativeBuilder()
-    b.add(ev("1", "llm_response", agent_id="step:p/s", provider="claude_code",
+    b.add(ev("1", "agent_message", agent_id="step:p/s", provider="claude_code",
              model="served-x", stop_reason="end_turn",
              usage={"input_tokens": 9999, "output_tokens": 8888},
              raw={"content": []}))
@@ -2638,13 +2645,13 @@ def test_claude_code_totals_come_from_query_result_not_llm_response() -> None:
     assert tree.tokens.cost == 0.05
 
 
-def test_anthropic_totals_still_sum_from_llm_response() -> None:
+def test_anthropic_totals_still_sum_from_agent_message() -> None:
     # Non-claude_code providers (no query_result) keep summing llm_response usage.
     b = nv.NarrativeBuilder()
-    b.add(ev("1", "llm_response", agent_id="step:p/s", provider="anthropic",
+    b.add(ev("1", "agent_message", agent_id="step:p/s", provider="anthropic",
              model="m", stop_reason="end_turn",
              usage={"input_tokens": 100, "output_tokens": 20}, raw={"content": []}))
-    b.add(ev("2", "llm_response", agent_id="step:p/s", provider="anthropic",
+    b.add(ev("2", "agent_message", agent_id="step:p/s", provider="anthropic",
              model="m", stop_reason="end_turn",
              usage={"input_tokens": 50, "output_tokens": 5}, raw={"content": []}))
     assert b.tree.tokens.input == 150
@@ -2689,9 +2696,9 @@ def test_subagent_query_result_folds_into_change_total() -> None:
 def test_claude_code_turn_end_detection_uses_real_stop_reason() -> None:
     # The coalesced claude_code llm_response now carries a real stop_reason, so
     # turn-end detection works through the standard frozenset path.
-    assert nv._llm_response_is_turn_end(
+    assert nv._agent_message_is_turn_end(
         {"provider": "claude_code", "stop_reason": "end_turn"}) is True
-    assert nv._llm_response_is_turn_end(
+    assert nv._agent_message_is_turn_end(
         {"provider": "claude_code", "stop_reason": None}) is False
 
 
@@ -2723,7 +2730,7 @@ def test_resume_continuation_preserves_pre_interrupt_children() -> None:
         ev("c", "quest_created", quest_id=1, title="t"),
         ev("s", "step_started", step="build", kind="agent", phase="design",
            model="m", provider="anthropic", timestamp="2026-06-28T00:00:00+00:00"),
-        ev("ll1", "llm_response", agent_id="step:design/build", provider="anthropic",
+        ev("ll1", "agent_message", agent_id="step:design/build", provider="anthropic",
            model="m", stop_reason="end_turn", usage={},
            raw={"content": [{"type": "text", "text": "partial attempt"}]}),
         ev("wp", "workflow_paused", reason="ctrl-c"),
@@ -2733,7 +2740,7 @@ def test_resume_continuation_preserves_pre_interrupt_children() -> None:
         ev("sb", "step_started", step="build", kind="agent", phase="design",
            model="m", provider="anthropic", resumed=True, restarted=False,
            timestamp="2026-06-28T00:05:00+00:00"),
-        ev("ll2", "llm_response", agent_id="step:design/build", provider="anthropic",
+        ev("ll2", "agent_message", agent_id="step:design/build", provider="anthropic",
            model="m", stop_reason="end_turn", usage={},
            raw={"content": [{"type": "text", "text": "fresh complete"}]}),
         ev("sc", "step_completed", step="build", kind="agent",
@@ -2757,7 +2764,7 @@ def test_resume_restart_clears_pre_interrupt_children() -> None:
         ev("c", "quest_created", quest_id=1, title="t"),
         ev("s", "step_started", step="build", kind="agent", phase="design",
            model="m", provider="anthropic", timestamp="2026-06-28T00:00:00+00:00"),
-        ev("ll1", "llm_response", agent_id="step:design/build", provider="anthropic",
+        ev("ll1", "agent_message", agent_id="step:design/build", provider="anthropic",
            model="m", stop_reason="end_turn", usage={},
            raw={"content": [{"type": "text", "text": "partial attempt"}]}),
         ev("wp", "workflow_paused", reason="ctrl-c"),
@@ -2767,7 +2774,7 @@ def test_resume_restart_clears_pre_interrupt_children() -> None:
         ev("sb", "step_started", step="build", kind="agent", phase="design",
            model="m", provider="anthropic", resumed=True, restarted=True,
            timestamp="2026-06-28T00:05:00+00:00"),
-        ev("ll2", "llm_response", agent_id="step:design/build", provider="anthropic",
+        ev("ll2", "agent_message", agent_id="step:design/build", provider="anthropic",
            model="m", stop_reason="end_turn", usage={},
            raw={"content": [{"type": "text", "text": "fresh complete"}]}),
         ev("sc", "step_completed", step="build", kind="agent",
@@ -2901,19 +2908,22 @@ def test_current_activity_counter_prefers_pushed_label_for_non_position_step() -
     assert act.counter == "running 42 tests"
 
 
-def test_engine_continuation_folds_into_injected_message_node() -> None:
+def test_continuation_folds_into_injected_message_node() -> None:
     tree = nv.build_tree([
         _ev("1", "step_started", step="s", kind="agent", phase="p"),
-        _ev("2", "engine_continuation", text="continue from where you left off"),
+        {"id": "2", "agent_id": None, "type": "engine_message",
+         "payload": {"role": "user", "subtype": "continuation",
+                     "content": [{"type": "text",
+                                  "text": "continue from where you left off"}]}},
     ])
     step = tree.root.children[0].children[0]
     # No FallbackLine (raw fallthrough would leak the nudge as a plain line).
     assert [c for c in step.children if isinstance(c, nv.FallbackLine)] == []
-    # The nudge folds into one non-interactive UserMessageNode carrying the text.
+    # The continuation folds into one EngineMessageNode carrying the text.
     assert len(step.children) == 1
     node = step.children[0]
-    assert isinstance(node, nv.UserMessageNode)
-    assert node.interactive is False
+    assert isinstance(node, nv.EngineMessageNode)
+    assert node.subtype == "continuation"
     assert node.text == "continue from where you left off"
 
 
@@ -3017,3 +3027,82 @@ def test_seeded_identity_survives_quest_created_replay_unchanged() -> None:
            "payload": {"id": "lufu50", "title": "Instant opening identity bar"}})
     assert b.tree.root.id == "lufu50"                     # replay supersedes with identical values
     assert b.tree.root.title == "Instant opening identity bar"
+
+
+def test_agent_message_event_renders_prose_node():
+    tree = nv.build_tree([
+        _ev("1", "step_started", step="plan", kind="agent", phase="build",
+            model="m", provider="anthropic"),
+        _ev("a1", "agent_message", agent_id="step:build/plan",
+            provider="anthropic", model="m", stop_reason="end_turn", usage={},
+            raw={"content": [{"type": "text", "text": "hello from the model"}]}),
+    ])
+    step = tree.root.children[0].children[0]
+    texts = [c.text for c in step.children if isinstance(c, nv.AgentTextNode)]
+    assert texts == ["hello from the model"]
+
+
+def test_interject_is_single_interactive_human_turn():
+    tree = nv.build_tree([
+        _ev("u1", "user_message", subtype="interject", role="user",
+            content=[{"type": "text", "text": "hold on"}]),
+    ])
+    ums = [c for c in tree.root.children if isinstance(c, nv.UserMessageNode)]
+    assert len(ums) == 1
+    assert ums[0].text == "hold on"
+    assert ums[0].interactive is True
+
+
+def test_engine_message_becomes_subtyped_engine_node():
+    tree = nv.build_tree([
+        _ev("1", "step_started", step="plan", kind="agent", phase="build",
+            model="m", provider="anthropic"),
+        _ev("e1", "engine_message", agent_id="step:build/plan",
+            subtype="continuation", role="user",
+            content=[{"type": "text", "text": "please continue"}]),
+    ])
+    step = tree.root.children[0].children[0]
+    ems = [c for c in step.children if isinstance(c, nv.EngineMessageNode)]
+    assert len(ems) == 1
+    assert ems[0].subtype == "continuation"
+    assert ems[0].text == "please continue"
+    assert not any(isinstance(c, nv.UserMessageNode) for c in step.children)
+
+
+def test_completion_engine_message_drops_bare_waiting_reply():
+    tree = nv.build_tree([
+        _ev("1", "step_started", step="plan", kind="agent", phase="build",
+            model="m", provider="anthropic"),
+        _ev("e1", "engine_message", agent_id="step:build/plan",
+            subtype="completion", role="user",
+            content=[{"type": "text", "text": "did you finish?"}]),
+        _ev("a1", "agent_message", agent_id="step:build/plan",
+            provider="anthropic", model="m", stop_reason="end_turn", usage={},
+            raw={"content": [{"type": "text", "text": "WAITING"}]}),
+    ])
+    step = tree.root.children[0].children[0]
+    assert not any(isinstance(c, nv.AgentTextNode) for c in step.children)
+
+
+def test_agent_prompt_seeds_burst_span_from_body_ts():
+    t0 = "2026-06-03T00:00:00+00:00"
+    t2 = "2026-06-03T00:00:05+00:00"
+    tree = nv.build_tree([
+        {"id": "1", "agent_id": None, "type": "step_started", "timestamp": t0,
+         "payload": {"step": "plan", "kind": "agent", "phase": "build",
+                     "model": "m", "provider": "anthropic"}},
+        {"id": "e1", "agent_id": "step:build/plan", "type": "engine_message",
+         "timestamp": t2,
+         "payload": {"role": "user", "subtype": "agent_prompt",
+                     "content": [{"type": "text", "text": "body"}]}},
+        {"id": "a1", "agent_id": "step:build/plan", "type": "agent_message",
+         "payload": {"provider": "anthropic", "model": "m", "stop_reason": None,
+                     "usage": {}, "raw": {"content": [
+                         {"type": "tool_use", "id": "b1", "name": "bash",
+                          "input": {"command": "ls"}}]}}},
+        {"id": "t1", "agent_id": "step:build/plan", "type": "tool_call",
+         "payload": {"id": "b1", "name": "bash", "input": {"command": "ls"}}},
+    ])
+    step = tree.root.children[0].children[0]
+    burst = next(c for c in step.children if isinstance(c, nv.ToolBurstFold))
+    assert burst.span_start_ts == t2

@@ -69,7 +69,7 @@ async def test_anthropic_healthy_run_never_trips(tmp_path) -> None:
              event_log=log),
         continuation_fn=lambda _last: ("keep going", False))
     events = [e async for e in runner.run(inv)]
-    assert events[-1]["type"] == "agent_output"
+    assert events[-1]["type"] == "agent_result"
     assert not any(e["type"] == "error" and e["payload"].get("category") == "loop"
                    for e in events)
 
@@ -113,6 +113,6 @@ async def test_anthropic_interactive_never_trips_loop(tmp_path) -> None:
                   interactive=True,
                   continuation_fn=lambda _last: ("keep going", False))
     events = [e async for e in runner.run(inv)]
-    assert events[-1]["type"] == "agent_output"
+    assert events[-1]["type"] == "agent_result"
     assert not any(e["type"] == "error" and e["payload"].get("category") == "loop"
                    for e in events)

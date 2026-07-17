@@ -81,11 +81,11 @@ async def test_run_daemon_relays_a_resident_session_event_and_cleans_up(
             while sess.attached_count == 0:
                 await anyio.sleep(0.02)
         sess.broadcast(
-            {"id": "e1", "type": "agent_output", "payload": {"text": "hi"}})
+            {"id": "e1", "type": "agent_result", "payload": {"text": "hi"}})
         with anyio.fail_after(5):
             while not adapter.events:
                 await anyio.sleep(0.02)
-        assert adapter.events[0]["type"] == "agent_output"
+        assert adapter.events[0]["type"] == "agent_result"
         assert adapter.events[0]["quest"]["id"] == cid
 
         await sess.close()

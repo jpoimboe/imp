@@ -757,7 +757,7 @@ async def test_title_flips_busy_idle_back_to_busy_and_resets(
         await user_chat_input_fn("name?")
         # A wait_for_user resume fires NO new step_started; the first live event
         # the resumed agent emits must flip the glyph back to working.
-        on_event({"type": "llm_response", "payload": {}})
+        on_event({"type": "agent_message", "payload": {}})
         return "done"
 
     class _Driver:
@@ -1885,7 +1885,7 @@ async def test_replayed_ordinary_event_does_not_flip_to_busy(
                    "payload": {"steer_hint": "name?"}})
         await user_chat_input_fn("name?")
         # A replayed ordinary event must NOT flip activity back to working.
-        on_event({"type": "llm_response", "_replay": True, "payload": {}})
+        on_event({"type": "agent_message", "_replay": True, "payload": {}})
         return "done"
 
     class _Driver:

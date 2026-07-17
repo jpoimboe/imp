@@ -118,7 +118,7 @@ def test_resolve_leave_action_returns_none_when_home_gone(tmp_path: Path) -> Non
 def test_had_exchange_false_for_only_system_events() -> None:
     log = _Log([
         {"type": "step_context", "payload": {}},
-        {"type": "llm_response", "payload": {}},
+        {"type": "agent_message", "payload": {}},
         {"type": "awaiting_user_input", "payload": {}},
     ])
     assert _had_exchange(log) is False
@@ -150,11 +150,13 @@ def test_had_exchange_true_for_a_typed_reply() -> None:
 
 
 def test_had_exchange_true_for_a_seed_opening_intent() -> None:
-    assert _had_exchange(_Log([{"type": "opening_intent"}])) is True
+    assert _had_exchange(_Log([
+        {"type": "user_message", "payload": {"subtype": "intent"}}])) is True
 
 
 def test_had_exchange_true_for_user_interjected() -> None:
-    assert _had_exchange(_Log([{"type": "user_interjected"}])) is True
+    assert _had_exchange(_Log([
+        {"type": "user_message", "payload": {"subtype": "interject"}}])) is True
 
 
 def test_renamed_chat_leave_saves(tmp_path: Path) -> None:
@@ -190,7 +192,7 @@ def test_zero_exchange_renamed_chat_discards(tmp_path: Path) -> None:
 
 def test_was_renamed_false_without_quest_renamed_event() -> None:
     log = _Log([
-        {"type": "opening_intent"},
+        {"type": "user_message", "payload": {"subtype": "intent"}},
         {"type": "user_message"},
     ])
     assert _was_renamed(log) is False
@@ -207,3 +209,16 @@ def test_shelve_intent_zero_exchange_discards(tmp_path: Path) -> None:
     _seed_control(tmp_path)
     ch = _draft(tmp_path, "sh2", exchange=False)
     assert leave_control_action(ch, "new", "shelve") == "discard"
+
+
+def test_had_exchange_true_for_user_message_intent() -> None:
+    assert _had_exchange(_Log([
+        {"type": "user_message", "payload": {"subtype": "intent"}}])) is True
+
+
+def test_had_exchange_false_for_engine_and_system_only() -> None:
+    assert _had_exchange(_Log([
+        {"type": "engine_message", "payload": {"subtype": "agent_prompt"}},
+        {"type": "step_context", "payload": {}},
+        {"type": "agent_message", "payload": {}},
+    ])) is False

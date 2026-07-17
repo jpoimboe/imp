@@ -46,7 +46,7 @@ def test_agent_text_rendered_in_full_not_truncated() -> None:
     out = "\n".join(_lines([
         _ev("2", "step_started", step="s", kind="agent", phase="p",
             model="m", provider="anthropic"),
-        _ev("3", "llm_response", agent_id="step:p/s", provider="anthropic", model="m",
+        _ev("3", "agent_message", agent_id="step:p/s", provider="anthropic", model="m",
             stop_reason="end_turn", usage={},
             raw={"content": [{"type": "text", "text": long}]}),
     ], width=40))
@@ -84,11 +84,11 @@ def test_collapsed_subagent_renders_single_status_row() -> None:
         _ev("2", "step_started", step="s", kind="agent", phase="p",
             model="m", provider="anthropic"),
         _ev("3", "step_context", agent_id="step:p/s", provider="anthropic",
-            model="claude", system_prompt="S", tools_schema=[{"name": "a"}, {"name": "b"}],
+            model="claude", tools_schema=[{"name": "a"}, {"name": "b"}],
             params={}, max_tool_calls=50),
         _ev("tk1", "tool_call", agent_id="step:p/s", id="b1", name="sub_agent",
             input={"subagent_name": "reviewer", "task_description": "go"}),
-        _ev("su1", "llm_response", agent_id="sub:tk1", provider="anthropic", model="m",
+        _ev("su1", "agent_message", agent_id="sub:tk1", provider="anthropic", model="m",
             stop_reason="end_turn", usage={},
             raw={"content": [{"type": "text", "text": "looks good"}]}),
         _ev("r1", "tool_result", agent_id="step:p/s", id="b1",
@@ -120,7 +120,7 @@ def test_subagent_lean_suppresses_all_nested_io() -> None:
         _ev("t1", "thinking", agent_id="sub:tk1", content="nested musings"),
         _ev("c1", "tool_call", agent_id="sub:tk1", id="n1", name="bash", input={}),
         _ev("c2", "tool_result", agent_id="sub:tk1", id="n1", content="ok", error=False),
-        _ev("su1", "llm_response", agent_id="sub:tk1", provider="anthropic", model="m",
+        _ev("su1", "agent_message", agent_id="sub:tk1", provider="anthropic", model="m",
             stop_reason="end_turn", usage={},
             raw={"content": [{"type": "text", "text": "nested prose"}]}),
         _ev("r1", "tool_result", agent_id="step:p/s", id="b1",
@@ -141,7 +141,7 @@ def test_subagent_outcome_suppressed_in_lean() -> None:
             model="m", provider="anthropic"),
         _ev("tk1", "tool_call", agent_id="step:p/s", id="b1", name="sub_agent",
             input={"subagent_name": "reviewer", "task_description": "go"}),
-        _ev("su1", "llm_response", agent_id="sub:tk1", provider="anthropic", model="m",
+        _ev("su1", "agent_message", agent_id="sub:tk1", provider="anthropic", model="m",
             stop_reason="end_turn", usage={},
             raw={"content": [{"type": "text", "text": "the prose"}]}),
         _ev("r1", "tool_result", agent_id="step:p/s", id="b1",
@@ -201,7 +201,7 @@ def test_full_mode_also_emits_subagent_outcome() -> None:
             model="m", provider="anthropic"),
         _ev("tk1", "tool_call", agent_id="step:p/s", id="b1", name="sub_agent",
             input={"subagent_name": "reviewer", "task_description": "go"}),
-        _ev("su1", "llm_response", agent_id="sub:tk1", provider="anthropic", model="m",
+        _ev("su1", "agent_message", agent_id="sub:tk1", provider="anthropic", model="m",
             stop_reason="end_turn", usage={},
             raw={"content": [{"type": "text", "text": "verdict: approve"}]}),
         _ev("r1", "tool_result", agent_id="step:p/s", id="b1",
@@ -222,7 +222,7 @@ def test_full_mode_expands_tools_thinking_and_subagent() -> None:
         _ev("5", "tool_result", agent_id="step:p/s", id="b1", content="total 0", error=False),
         _ev("tk1", "tool_call", agent_id="step:p/s", id="b2", name="sub_agent",
             input={"subagent_name": "reviewer", "task_description": "go"}),
-        _ev("su1", "llm_response", agent_id="sub:tk1", provider="anthropic", model="m",
+        _ev("su1", "agent_message", agent_id="sub:tk1", provider="anthropic", model="m",
             stop_reason="end_turn", usage={},
             raw={"content": [{"type": "text", "text": "subagent verdict: approve"}]}),
         _ev("r1", "tool_result", agent_id="step:p/s", id="b2",
@@ -241,25 +241,31 @@ def test_full_mode_expands_step_context_config_dump() -> None:
         _ev("2", "step_started", step="s", kind="agent", phase="p",
             model="m", provider="anthropic"),
         _ev("3", "step_context", agent_id="step:p/s", provider="anthropic", model="claude",
-            system_prompt="SYSTEM PROMPT TEXT", tools_schema=[{"name": "bash"}],
-            params={"max_tokens": 8192}, max_tool_calls=50),
+            tools_schema=[{"name": "bash"}], params={"max_tokens": 8192}, max_tool_calls=50),
+        _ev("4", "engine_message", agent_id="step:p/s",
+            role="system", subtype="system_prompt",
+            content=[{"type": "text", "text": "SYSTEM PROMPT TEXT"}]),
     ], full=True))
+    assert "system prompt:" in out
     assert "SYSTEM PROMPT TEXT" in out
     assert "- bash" in out
 
 
 def test_full_mode_shows_the_replay_source_system_prompt() -> None:
-    # The system prompt rendered by --full is the SAME step_context.system_prompt
-    # that Task 11 replays on resume — so the displayed prompt is exactly what the
-    # model saw on every turn, not a first-entry snapshot that drifts.
+    # The system prompt rendered by --full is the engine_message/system_prompt event
+    # emitted on each turn — so the displayed prompt is exactly what the model saw.
     stored = "ASSEMBLED SYSTEM PROMPT v1"
     out = "\n".join(_lines([
         _ev("2", "step_started", step="s", kind="agent", phase="p",
             model="m", provider="anthropic"),
         _ev("3", "step_context", agent_id="step:p/s", provider="anthropic",
-            model="claude", system_prompt=stored, tools_schema=[{"name": "bash"}],
+            model="claude", tools_schema=[{"name": "bash"}],
             params={"max_tokens": 8192}, max_tool_calls=50),
+        _ev("4", "engine_message", agent_id="step:p/s",
+            role="system", subtype="system_prompt",
+            content=[{"type": "text", "text": stored}]),
     ], full=True))
+    assert "system prompt:" in out
     assert stored in out
 
 
@@ -270,15 +276,19 @@ def test_step_context_dropped_from_lean_model_on_step_header() -> None:
         _ev("2", "step_started", step="s", kind="agent", phase="p",
             model="claude-opus-4-7", provider="anthropic"),
         _ev("3", "step_context", agent_id="step:p/s", provider="anthropic",
-            model="claude-opus-4-7", system_prompt="SYSTEM PROMPT TEXT",
-            tools_schema=[], params={}, max_tool_calls=50),
+            model="claude-opus-4-7", tools_schema=[], params={}, max_tool_calls=50),
+        _ev("4", "engine_message", agent_id="step:p/s",
+            role="system", subtype="system_prompt",
+            content=[{"type": "text", "text": "SYSTEM PROMPT TEXT"}]),
     ]
     lean = "\n".join(_lines(events, full=False))
     assert "▸ context" not in lean
     assert "SYSTEM PROMPT TEXT" not in lean
     assert "s · claude-opus-4-7" in lean      # model on the step header
     full = "\n".join(_lines(events, full=True))
-    assert "context" in full and "SYSTEM PROMPT TEXT" in full
+    assert "context" in full
+    assert "system prompt:" in full
+    assert "SYSTEM PROMPT TEXT" in full
 
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -306,14 +316,16 @@ def test_snapshot_full(monkeypatch) -> None:
 
 
 def test_synthetic_user_message_dropped_genuine_shown() -> None:
-    # point 3: only a human reply the engine awaited renders as a gutter turn; the
-    # synthetic "begin" kickoff (no preceding awaiting_user_input) is dropped.
+    # Engine-sent kickoff (engine_message/agent_prompt) is hidden; only a
+    # human reply the engine awaited renders as a gutter turn (user_message/reply).
     out = "\n".join(_lines([
         _ev("1", "step_started", step="s", kind="agent", phase="p", model="m"),
-        _ev("2", "user_message", agent_id="step:p/s",
+        _ev("2", "engine_message", agent_id="step:p/s",
+            role="user", subtype="agent_prompt",
             content=[{"type": "text", "text": "begin"}]),
         _ev("3", "awaiting_user_input", agent_id="step:p/s"),
         _ev("4", "user_message", agent_id="step:p/s",
+            role="user", subtype="reply",
             content=[{"type": "text", "text": "do the real thing"}]),
     ]))
     assert "begin" not in out
@@ -322,19 +334,16 @@ def test_synthetic_user_message_dropped_genuine_shown() -> None:
 
 def test_interjected_user_message_renders_as_human_turn() -> None:
     # A human INTERJECT is delivered unprompted while the agent runs: the engine
-    # emits user_message (the typed text) IMMEDIATELY followed by user_interjected
-    # — with NO preceding awaiting_user_input. Without consuming user_interjected
-    # the message would be tagged interactive=False and dropped as a synthetic
-    # engine prompt. It must instead render as a genuine human turn (gutter).
+    # emits a user_message/interject event — with NO preceding awaiting_user_input.
+    # It must render as a genuine human turn (gutter).
     events = [
         _ev("1", "step_started", step="s", kind="agent", phase="p", model="m"),
-        _ev("2", "llm_response", agent_id="step:p/s", provider="anthropic",
+        _ev("2", "agent_message", agent_id="step:p/s", provider="anthropic",
             model="m", stop_reason="end_turn", usage={},
             raw={"content": [{"type": "text", "text": "working on it"}]}),
         _ev("3", "user_message", agent_id="step:p/s",
+            role="user", subtype="interject",
             content=[{"type": "text", "text": "actually use postgres"}]),
-        _ev("4", "user_interjected", agent_id="step:p/s",
-            text="actually use postgres"),
     ]
     tree = nv.build_tree(events)
     out = "\n".join(render_tree(tree, full=False, color=False, width=80))
@@ -635,12 +644,12 @@ def test_consecutive_prose_turns_separated_by_blank_line() -> None:
     # blank line separates them, restoring the spacing the empty-node used to give.
     out = _lines([
         _ev("1", "step_started", step="spec", kind="agent", phase="design"),
-        _ev("2", "llm_response", agent_id="a",
+        _ev("2", "agent_message", agent_id="a",
             raw={"content": [{"type": "text", "text": "First prose turn."}]}, usage={}),
         _ev("3", "thinking", agent_id="a", content="hmm"),
-        _ev("4", "llm_response", agent_id="a",   # thinking-only → no AgentTextNode
+        _ev("4", "agent_message", agent_id="a",   # thinking-only → no AgentTextNode
             raw={"content": [{"type": "thinking", "thinking": "hmm"}]}, usage={}),
-        _ev("5", "llm_response", agent_id="a",
+        _ev("5", "agent_message", agent_id="a",
             raw={"content": [{"type": "text", "text": "Second prose turn."}]}, usage={}),
     ])
     body = [ln for ln in out if ln.strip()]   # sanity: both prose lines present
@@ -655,7 +664,7 @@ def test_step_header_separated_from_first_prose_by_one_blank() -> None:
     # agent's first words — the label and the speech get air, but not a double gap.
     out = _lines([
         _ev("1", "step_started", step="spec", kind="agent", phase="design"),
-        _ev("2", "llm_response", agent_id="a",
+        _ev("2", "agent_message", agent_id="a",
             raw={"content": [{"type": "text", "text": "Only prose."}]}, usage={}),
     ])
     idx = next(i for i, ln in enumerate(out) if "Only prose." in ln)
@@ -839,7 +848,7 @@ def test_full_subagent_content_carries_magenta_gutter() -> None:
             model="m", provider="anthropic"),
         _ev("tk1", "tool_call", agent_id="step:p/s", id="b1", name="sub_agent",
             input={"subagent_name": "reviewer", "task_description": "go"}),
-        _ev("su1", "llm_response", agent_id="sub:tk1", provider="anthropic", model="m",
+        _ev("su1", "agent_message", agent_id="sub:tk1", provider="anthropic", model="m",
             stop_reason="end_turn", usage={},
             raw={"content": [{"type": "text", "text": "looks good"}]}),
         _ev("r1", "tool_result", agent_id="step:p/s", id="b1",
@@ -857,7 +866,7 @@ def test_steps_de_indent_to_column_zero() -> None:
     out = _lines([
         _ev("1", "quest_created", title="t"),
         _ev("2", "step_started", step="spec", kind="agent", phase="design", model="m"),
-        _ev("3", "llm_response", agent_id="a",
+        _ev("3", "agent_message", agent_id="a",
             raw={"content": [{"type": "text", "text": "hi"}]}, usage={}),
     ])
     header = next(ln for ln in out if "spec · m" in ln)
@@ -872,7 +881,7 @@ def test_subagent_row_de_indents_to_column_two() -> None:
         _ev("2", "step_started", step="spec", kind="agent", phase="design", model="m"),
         _ev("3", "tool_call", agent_id="a", id="t1", name="sub_agent",
             input={"subagent_name": "reviewer"}),
-        _ev("4", "llm_response", agent_id="sub:3",
+        _ev("4", "agent_message", agent_id="sub:3",
             raw={"content": [{"type": "text", "text": "x"}]}, usage={}),
         _ev("5", "tool_result", agent_id="a", id="t1", content='{"status":"Success"}'),
     ])
@@ -1070,7 +1079,7 @@ def test_prose_then_structural_leaf_separated_by_blank() -> None:
         _ev("1", "quest_created", title="t"),
         _ev("2", "step_started", step="spec", kind="agent", phase="design",
             model="m", provider="anthropic"),
-        _ev("3", "llm_response", agent_id="a",
+        _ev("3", "agent_message", agent_id="a",
             raw={"content": [{"type": "text", "text": "Drafting."}]}, usage={}),
         _ev("4", "step_completed", step="spec", kind="agent",
             action={"verb": "continue"}, var_mutations={}),
@@ -1090,7 +1099,7 @@ def test_prose_then_subagent_header_separated_by_blank() -> None:
         _ev("1", "quest_created", title="t"),
         _ev("2", "step_started", step="spec", kind="agent", phase="design",
             model="m", provider="anthropic"),
-        _ev("3", "llm_response", agent_id="a",
+        _ev("3", "agent_message", agent_id="a",
             raw={"content": [{"type": "text", "text": "Drafting."}]}, usage={}),
         _ev("tk", "tool_call", agent_id="a", id="b1", name="sub_agent",
             input={"subagent_name": "reviewer"}),
@@ -1507,7 +1516,7 @@ def test_complete_step_findings_hidden_lean_visible_full() -> None:
     events = [
         _ev("1", "step_started", step="rev", kind="agent", phase="review",
             model="m", provider="anthropic"),
-        _ev("2", "agent_output", agent_id="step:review/rev",
+        _ev("2", "agent_result", agent_id="step:review/rev",
             verdict="rework",
             findings="Line 1 is wrong.\nLine 2 needs a guard.\nLine 3 leaks."),
         _ev("3", "step_completed", step="rev", kind="agent",
@@ -1529,7 +1538,7 @@ def test_clean_review_findings_hidden_by_default() -> None:
         _ev("r1", "tool_result", agent_id="step:review/review", id="b1",
             content=json.dumps({"status": "Success", "verdict": "approve",
                                 "findings": ""}), error=False),
-        _ev("ao", "agent_output", agent_id="step:review/review",
+        _ev("ao", "agent_result", agent_id="step:review/review",
             status="Success", verdict="approve",
             findings="review complete: one nit\nno blocking issues"),
         _ev("sc", "step_completed", step="review", kind="agent",
@@ -1648,17 +1657,21 @@ def test_live_viewer_suppresses_step_context_block_even_in_full() -> None:
         _ev("2", "step_started", step="s", kind="agent", phase="p",
             model="m", provider="anthropic"),
         _ev("3", "step_context", agent_id="step:p/s", provider="anthropic",
-            model="claude", system_prompt="SYSTEM PROMPT TEXT",
-            tools_schema=[{"name": "bash"}], params={}, max_tool_calls=50),
+            model="claude", tools_schema=[{"name": "bash"}],
+            params={}, max_tool_calls=50),
+        _ev("4", "engine_message", agent_id="step:p/s", role="system",
+            subtype="system_prompt",
+            content=[{"type": "text", "text": "SYSTEM PROMPT TEXT"}]),
     ]
     live = "\n".join(render_tree(nv.build_tree(events), full=True, color=False,
                                  width=80, live_viewer=True))
-    assert "SYSTEM PROMPT TEXT" not in live
     assert "- bash" not in live
     assert "context ·" not in live          # the whole fold (header included) is gone
+    assert "SYSTEM PROMPT TEXT" not in live  # engine turns hidden in live even under --full
     log = "\n".join(render_tree(nv.build_tree(events), full=True, color=False,
                                 width=80))
-    assert "SYSTEM PROMPT TEXT" in log and "- bash" in log   # imp log --full unchanged
+    assert "- bash" in log   # imp log --full shows tools
+    assert "SYSTEM PROMPT TEXT" in log       # imp log --full shows the system prompt
 
 
 def test_live_viewer_keeps_raw_tool_output_in_full() -> None:
@@ -1826,7 +1839,7 @@ def test_prose_leaf_control_bytes_escaped() -> None:
     out = "\n".join(_lines([
         _ev("2", "step_started", step="s", kind="agent", phase="p",
             model="m", provider="anthropic"),
-        _ev("3", "llm_response", agent_id="step:p/s", provider="anthropic", model="m",
+        _ev("3", "agent_message", agent_id="step:p/s", provider="anthropic", model="m",
             stop_reason="end_turn", usage={},
             raw={"content": [{"type": "text", "text": "hello\x07 world\x00"}]}),
     ], full=True))
@@ -1922,17 +1935,15 @@ def test_fallback_payload_values_control_bytes_escaped() -> None:
 
 
 def test_step_context_content_control_bytes_escaped() -> None:
+    # step_context no longer carries system_prompt; tools_schema escaping is tested here.
     node = nv.StepContextNode(payload={
         "provider": "anthropic", "model": "m", "max_tool_calls": 5,
-        "system_prompt": "be helpful\x07 always\x00",
         "tools_schema": [{"name": "bash\x1b"}],
     })
     out = "\n".join(rt._render_step_context(node, depth=0, full=True, color=False,
                                             width=80))
-    assert "\x07" not in out
-    assert "\x00" not in out
     assert "\x1b" not in out
-    assert "^G" in out and "^@" in out and "^[" in out
+    assert "^[" in out
 
 
 def test_fmt_seconds_done_suppresses_sub_second_keeps_whole() -> None:
@@ -1991,8 +2002,9 @@ def test_opening_intent_renders_user_turn_with_gutter() -> None:
     tree = nv.build_tree([
         {"id": "e1", "agent_id": None, "type": "quest_created",
          "payload": {"handle": "h", "title": "t"}},
-        {"id": "e2", "agent_id": None, "type": "opening_intent",
-         "payload": {"text": "add a flag"}},
+        {"id": "e2", "agent_id": None, "type": "user_message",
+         "payload": {"role": "user", "subtype": "intent",
+                     "content": [{"type": "text", "text": "add a flag"}]}},
     ])
     body = list(rt.render_tree(tree, full=False, color=False, width=80))
     assert any(ln == "> add a flag" for ln in body)   # depth-0, caret-marked human turn
@@ -2237,11 +2249,12 @@ def test_phase_breadcrumb_uses_phase_label() -> None:
 def test_opening_intent_renders_at_root_before_step_header_and_narration() -> None:
     out = _lines([
         _ev("e1", "quest_created", title="add auth"),
-        {"id": "e2", "agent_id": None, "type": "opening_intent",
-         "payload": {"text": "add a --json flag"}},
+        {"id": "e2", "agent_id": None, "type": "user_message",
+         "payload": {"role": "user", "subtype": "intent",
+                     "content": [{"type": "text", "text": "add a --json flag"}]}},
         _ev("s1", "step_started", step="spec", kind="agent", phase="design",
             model="m", provider="anthropic"),
-        _ev("ll", "llm_response", agent_id="step:design/spec", provider="anthropic",
+        _ev("ll", "agent_message", agent_id="step:design/spec", provider="anthropic",
             model="m", stop_reason="end_turn", usage={},
             raw={"content": [{"type": "text", "text": "starting the work"}]}),
     ])
@@ -2336,7 +2349,7 @@ def test_render_tree_caps_hr_while_prose_stays_unwrapped() -> None:
         nv.build_tree([
             _ev("2", "step_started", step="s", kind="agent", phase="p",
                 model="m", provider="anthropic"),
-            _ev("3", "llm_response", agent_id="step:p/s", provider="anthropic",
+            _ev("3", "agent_message", agent_id="step:p/s", provider="anthropic",
                 model="m", stop_reason="end_turn", usage={},
                 raw={"content": [{"type": "text", "text": long_line + "\n\n---\n\nafter"}]}),
         ]),
@@ -2419,7 +2432,7 @@ def test_result_less_complete_step_renders_closed_terminal() -> None:
         ev("2", "step_started", step="coder", kind="agent", phase="implement",
            model="m", provider="claude_code",
            timestamp="2026-07-01T00:00:00+00:00"),
-        ev("3", "llm_response", agent_id="step:implement/coder",
+        ev("3", "agent_message", agent_id="step:implement/coder",
            provider="claude_code", model="m", usage={},
            raw={"content": [{"type": "text", "text": "Implemented the fix."}]},
            timestamp="2026-07-01T00:00:01+00:00"),
@@ -2427,7 +2440,7 @@ def test_result_less_complete_step_renders_closed_terminal() -> None:
         ev("4", "tool_call", agent_id="step:implement/coder", id="cs1",
            name="complete_step", input={"status": "Success", "summary": "did it"},
            timestamp="2026-07-01T00:00:02+00:00"),
-        ev("5", "agent_output", agent_id="step:implement/coder",
+        ev("5", "agent_result", agent_id="step:implement/coder",
            status="Success", summary="did it",
            timestamp="2026-07-01T00:00:03+00:00"),
         ev("6", "step_completed", step="coder", kind="agent",
@@ -2462,75 +2475,70 @@ def test_result_less_complete_step_renders_closed_terminal() -> None:
 
 def test_stale_awaiting_reply_disarmed_at_step_boundary_drops_next_kickoff() -> None:
     # D1: a step that SOLICITED (awaiting_user_input) but whose arm was never
-    # consumed by a human user_message — the run paused at the gate and resumed
-    # with an engine-continuation nudge (an engine_continuation event, NOT a
-    # user_message) — must not leave _awaiting_reply armed across the step
-    # boundary. Otherwise the NEXT step's begin-kickoff user_message (a synthetic
-    # engine prompt) is mis-tagged interactive and leaks as a `> ...` human turn.
+    # consumed by a human reply — the run resumed with an engine_message/continuation
+    # nudge — must not leave _awaiting_reply armed across the step boundary.
+    # The NEXT step's begin-kickoff engine_message/agent_prompt must not leak as
+    # a `> ...` human turn.
     events = [
         _ev("1", "step_started", step="a", kind="agent", phase="p", model="m"),
         _ev("2", "awaiting_user_input", agent_id="step:p/a", prompt="Continue?"),
-        _ev("3", "engine_continuation", agent_id="step:p/a", text="continue"),
+        _ev("3", "engine_message", agent_id="step:p/a",
+            role="user", subtype="continuation",
+            content=[{"type": "text", "text": "continue"}]),
         _ev("4", "step_completed", step="a", kind="agent",
             action={"verb": "continue"}, var_mutations={}),
         _ev("5", "step_started", step="b", kind="agent", phase="p", model="m"),
-        _ev("6", "step_context", agent_id="step:p/b",
-            system_prompt="INTERNAL STEP B PROMPT"),
-        _ev("7", "user_message", agent_id="step:p/b",
+        _ev("6", "step_context", agent_id="step:p/b"),
+        _ev("7", "engine_message", agent_id="step:p/b",
+            role="user", subtype="agent_prompt",
             content=[{"type": "text", "text": "INTERNAL STEP B KICKOFF"}]),
     ]
     tree = nv.build_tree(events)
     out = "\n".join(render_tree(tree, full=False, color=False, width=80))
-    # Render side: the kickoff never appears as a human `>` turn, and being a
-    # synthetic prompt is dropped from output entirely.
+    # Render side: the kickoff never appears (engine_message hidden in lean mode).
     assert "> INTERNAL STEP B KICKOFF" not in out
     assert "INTERNAL STEP B KICKOFF" not in out
-    # Model side: step b's kickoff node exists but is non-interactive (dropped).
-    phase = tree.root.children[0]
-    step_b = next(c for c in phase.children
-                  if isinstance(c, nv.StepNode) and c.name == "b")
-    um = next(c for c in step_b.children if isinstance(c, nv.UserMessageNode))
-    assert um.interactive is False
 
 
 def test_engine_continuation_renders_injected_message_in_full_only() -> None:
-    # AC-10: engine continuation is invisible in lean/live, `injected message:` under --full.
+    # engine_message/continuation is invisible in lean, `continuation:` label under --full.
     events = [
         _ev("1", "step_started", step="a", kind="agent", phase="p", model="m"),
-        _ev("2", "engine_continuation", agent_id="step:p/a",
-            text="continue from where you left off"),
+        _ev("2", "engine_message", agent_id="step:p/a",
+            role="user", subtype="continuation",
+            content=[{"type": "text", "text": "continue from where you left off"}]),
     ]
     tree = nv.build_tree(events)
     lean = "\n".join(render_tree(tree, full=False, color=False, width=80))
     full = "\n".join(render_tree(tree, full=True, color=False, width=80))
     assert "continue from where you left off" not in lean
-    assert "injected message:" not in lean
-    assert "injected message:" in full
+    assert "continuation:" not in lean
+    assert "continuation:" in full
     assert "continue from where you left off" in full
 
 
 def test_begin_kickoff_never_replays_as_human_turn_from_events_jsonl(tmp_path) -> None:
     # D1 (persist + imp log replay): the same scenario persisted to a real
     # events.jsonl and replayed the way `imp log` reads it (line-delimited JSON).
-    # The begin-kickoff IS persisted as a user_message (fresh-step path, by
-    # design) — that is the persist side; the guard is that replaying the on-disk
-    # stream never renders it as a `> ...` human turn.
+    # The begin-kickoff is an engine_message/agent_prompt; replaying must never
+    # render it as a `> ...` human turn.
     events = [
         {"id": "1", "agent_id": None, "type": "step_started",
          "payload": {"step": "a", "kind": "agent", "phase": "p", "model": "m"}},
         {"id": "2", "agent_id": "step:p/a", "type": "awaiting_user_input",
          "payload": {"prompt": "Continue?"}},
-        {"id": "3", "agent_id": "step:p/a", "type": "engine_continuation",
-         "payload": {"text": "continue"}},
+        {"id": "3", "agent_id": "step:p/a", "type": "engine_message",
+         "payload": {"role": "user", "subtype": "continuation",
+                     "content": [{"type": "text", "text": "continue"}]}},
         {"id": "4", "agent_id": None, "type": "step_completed",
          "payload": {"step": "a", "kind": "agent",
                      "action": {"verb": "continue"}, "var_mutations": {}}},
         {"id": "5", "agent_id": None, "type": "step_started",
          "payload": {"step": "b", "kind": "agent", "phase": "p", "model": "m"}},
         {"id": "6", "agent_id": "step:p/b", "type": "step_context",
-         "payload": {"system_prompt": "INTERNAL STEP B PROMPT"}},
-        {"id": "7", "agent_id": "step:p/b", "type": "user_message",
-         "payload": {"role": "user",
+         "payload": {}},
+        {"id": "7", "agent_id": "step:p/b", "type": "engine_message",
+         "payload": {"role": "user", "subtype": "agent_prompt",
                      "content": [{"type": "text",
                                   "text": "INTERNAL STEP B KICKOFF"}]}},
     ]
@@ -2539,8 +2547,8 @@ def test_begin_kickoff_never_replays_as_human_turn_from_events_jsonl(tmp_path) -
 
     on_disk = [json.loads(ln) for ln in log_path.read_text().splitlines()
                if ln.strip()]
-    # Persist side: the kickoff IS present on disk as a user_message event.
-    assert any(e["type"] == "user_message"
+    # Persist side: the kickoff IS present on disk as an engine_message event.
+    assert any(e["type"] == "engine_message"
                and e["payload"]["content"][0]["text"] == "INTERNAL STEP B KICKOFF"
                for e in on_disk)
     # Replay/render side: it never replays as a human `>` turn.
@@ -2559,15 +2567,15 @@ def test_full_view_spaces_unlike_block_kinds() -> None:
         _ev("1", "step_started", step="s", kind="agent", phase="p",
             model="m", provider="anthropic"),
         _ev("2", "step_context", agent_id="step:p/s", provider="anthropic",
-            model="claude", system_prompt="SYS", tools_schema=[{"name": "bash"}],
+            model="claude", tools_schema=[{"name": "bash"}],
             params={}, max_tool_calls=50),
         _ev("3", "thinking", agent_id="step:p/s", content="deep thoughts"),
         _ev("4", "tool_call", agent_id="step:p/s", id="b1", name="bash",
             input={"command": "ls"}),
         _ev("5", "tool_result", agent_id="step:p/s", id="b1", content="ok", error=False),
-        _ev("6", "llm_response", agent_id="step:p/s",
+        _ev("6", "agent_message", agent_id="step:p/s",
             raw={"content": [{"type": "text", "text": "First prose turn."}]}, usage={}),
-        _ev("7", "llm_response", agent_id="step:p/s",
+        _ev("7", "agent_message", agent_id="step:p/s",
             raw={"content": [{"type": "text", "text": "Second prose turn."}]}, usage={}),
     ], full=True)
 
@@ -2588,10 +2596,10 @@ def test_full_view_whitespace_thinking_leaves_spacing_intact() -> None:
     # a doubled or missing blank between the prose turns around it. (spec acceptance #1)
     out = _lines([
         _ev("1", "step_started", step="s", kind="agent", phase="p"),
-        _ev("2", "llm_response", agent_id="a",
+        _ev("2", "agent_message", agent_id="a",
             raw={"content": [{"type": "text", "text": "First prose turn."}]}, usage={}),
         _ev("3", "thinking", agent_id="a", content="   "),   # whitespace-only → renders nothing
-        _ev("4", "llm_response", agent_id="a",
+        _ev("4", "agent_message", agent_id="a",
             raw={"content": [{"type": "text", "text": "Second prose turn."}]}, usage={}),
     ], full=True)
     i = next(k for k, ln in enumerate(out) if "Second prose turn." in ln)
@@ -2604,11 +2612,12 @@ def test_full_view_whitespace_injected_message_leaves_spacing_intact() -> None:
     # not create a doubled or missing blank between the prose turns around it.
     out = _lines([
         _ev("1", "step_started", step="s", kind="agent", phase="p"),
-        _ev("2", "llm_response", agent_id="a",
+        _ev("2", "agent_message", agent_id="a",
             raw={"content": [{"type": "text", "text": "First prose turn."}]}, usage={}),
-        _ev("3", "user_message", agent_id="step:p/s",
+        _ev("3", "engine_message", agent_id="step:p/s",
+            role="user", subtype="agent_prompt",
             content=[{"type": "text", "text": "   \n  "}]),  # whitespace-only → renders nothing
-        _ev("4", "llm_response", agent_id="a",
+        _ev("4", "agent_message", agent_id="a",
             raw={"content": [{"type": "text", "text": "Second prose turn."}]}, usage={}),
     ], full=True)
     i = next(k for k, ln in enumerate(out) if "Second prose turn." in ln)
@@ -2617,38 +2626,38 @@ def test_full_view_whitespace_injected_message_leaves_spacing_intact() -> None:
 
 
 def test_full_view_renders_injected_top_level_prompt() -> None:
-    # In --full a non-interactive user_message (no preceding awaiting_user_input)
-    # is the agent's injected prompt: it renders under a dim `injected message:`
-    # label with its verbatim body visible. The lean view still drops it entirely
-    # (spec acceptance #2, #5).
+    # In --full an engine_message/agent_prompt renders under an `agent prompt:` label
+    # with its verbatim body visible. The lean view drops it entirely.
     events = [
         _ev("1", "step_started", step="s", kind="agent", phase="p",
             model="m", provider="anthropic"),
-        _ev("2", "user_message", agent_id="step:p/s",
+        _ev("2", "engine_message", agent_id="step:p/s",
+            role="user", subtype="agent_prompt",
             content=[{"type": "text", "text": "REAL PROMPT: build the widget"}]),
     ]
     full = "\n".join(_lines(events, full=True))
-    assert "injected message:" in full
+    assert "agent prompt:" in full
     assert "REAL PROMPT: build the widget" in full
 
     lean = "\n".join(_lines(events))
-    assert "injected message:" not in lean
+    assert "agent prompt:" not in lean
     assert "REAL PROMPT: build the widget" not in lean
 
 
 def test_full_view_renders_subagent_task_description_injected() -> None:
-    # A subagent's first injected message is the parent's task_description to it.
+    # A subagent's first engine_message/agent_prompt is the parent's task_description to it.
     # It routes into the fold's nested tree (agent_id "sub:<event-id>") and, in
-    # --full, renders as an `injected message:` block INSIDE the expanded fold.
-    # The lean view drops it (spec acceptance #2, #5).
+    # --full, renders under an `agent prompt:` label INSIDE the expanded fold.
+    # The lean view drops it.
     events = [
         _ev("1", "step_started", step="s", kind="agent", phase="p",
             model="m", provider="anthropic"),
         _ev("tk1", "tool_call", agent_id="step:p/s", id="b1", name="sub_agent",
             input={"subagent_name": "explorer", "task_description": "go"}),
-        _ev("um1", "user_message", agent_id="sub:tk1",
+        _ev("um1", "engine_message", agent_id="sub:tk1",
+            role="user", subtype="agent_prompt",
             content=[{"type": "text", "text": "map the auth module end to end"}]),
-        _ev("su1", "llm_response", agent_id="sub:tk1", provider="anthropic",
+        _ev("su1", "agent_message", agent_id="sub:tk1", provider="anthropic",
             model="m", stop_reason="end_turn", usage={},
             raw={"content": [{"type": "text", "text": "found it"}]}),
         _ev("r1", "tool_result", agent_id="step:p/s", id="b1",
@@ -2656,12 +2665,12 @@ def test_full_view_renders_subagent_task_description_injected() -> None:
     ]
     full = "\n".join(_lines(events, full=True))
     assert "▾ explorer" in full
-    assert "injected message:" in full
+    assert "agent prompt:" in full
     assert "map the auth module end to end" in full
 
     lean = "\n".join(_lines(events))
     assert "map the auth module end to end" not in lean
-    assert "injected message:" not in lean
+    assert "agent prompt:" not in lean
 
 
 def test_full_parallel_subagents_show_distinct_task_descriptions() -> None:
@@ -2677,10 +2686,10 @@ def test_full_parallel_subagents_show_distinct_task_descriptions() -> None:
         _ev("tk2", "tool_call", agent_id="step:p/s", id="b2", name="sub_agent",
             input={"subagent_name": "explorer",
                    "task_description": "Map the billing module"}),
-        _ev("su1", "llm_response", agent_id="sub:tk1", provider="anthropic", model="m",
+        _ev("su1", "agent_message", agent_id="sub:tk1", provider="anthropic", model="m",
             stop_reason="end_turn", usage={},
             raw={"content": [{"type": "text", "text": "found auth"}]}),
-        _ev("su2", "llm_response", agent_id="sub:tk2", provider="anthropic", model="m",
+        _ev("su2", "agent_message", agent_id="sub:tk2", provider="anthropic", model="m",
             stop_reason="end_turn", usage={},
             raw={"content": [{"type": "text", "text": "found billing"}]}),
         _ev("r1", "tool_result", agent_id="step:p/s", id="b1",
@@ -2736,7 +2745,7 @@ def test_full_subagent_plain_string_success_shown_once() -> None:
         _ev("tk1", "tool_call", agent_id="step:p/s", id="b1", name="sub_agent",
             input={"subagent_name": "explorer",
                    "task_description": "Map the billing module"}),
-        _ev("su1", "llm_response", agent_id="sub:tk1", provider="anthropic",
+        _ev("su1", "agent_message", agent_id="sub:tk1", provider="anthropic",
             model="m", stop_reason="end_turn", usage={},
             raw={"content": [{"type": "text", "text": "found the auth module"}]}),
         _ev("r1", "tool_result", agent_id="step:p/s", id="b1",
@@ -2771,7 +2780,7 @@ def test_subagent_status_row_paints_model_and_frozen_elapsed_gray() -> None:
              model="m", provider="anthropic"))
     b.add(ev("t1", "tool_call", agent_id="step:p/s", id="blk", name="sub_agent",
              input={"subagent_name": "reviewer"}))
-    b.add(ev("r1", "llm_response", agent_id="sub:t1", provider="anthropic", model="opus",
+    b.add(ev("r1", "agent_message", agent_id="sub:t1", provider="anthropic", model="opus",
              stop_reason="end_turn", usage={},
              raw={"content": [{"type": "text", "text": "hi"}]}))
     fold = b.running_subagents()[0]
@@ -2797,8 +2806,10 @@ _RICH_EVENTS = [
     _ev("2", "step_started", step="s", kind="agent", phase="p",
         model="m", provider="anthropic"),
     _ev("3", "step_context", agent_id="step:p/s", provider="anthropic",
-        model="claude", system_prompt="SECRETPROMPT",
-        tools_schema=[{"name": "a"}], params={}, max_tool_calls=50),
+        model="claude", tools_schema=[{"name": "a"}], params={}, max_tool_calls=50),
+    _ev("sp", "engine_message", agent_id="step:p/s",
+        role="system", subtype="system_prompt",
+        content=[{"type": "text", "text": "SECRETPROMPT"}]),
     _ev("4", "thinking", agent_id="step:p/s", content="deep thoughts here"),
     _ev("5", "tool_call", agent_id="step:p/s", id="b1", name="bash",
         input={"command": "ls -la"}),
@@ -2806,7 +2817,7 @@ _RICH_EVENTS = [
         error=False),
     _ev("tk1", "tool_call", agent_id="step:p/s", id="b2", name="sub_agent",
         input={"subagent_name": "reviewer", "task_description": "go"}),
-    _ev("su1", "llm_response", agent_id="sub:tk1", provider="anthropic",
+    _ev("su1", "agent_message", agent_id="sub:tk1", provider="anthropic",
         model="m", stop_reason="end_turn", usage={},
         raw={"content": [{"type": "text", "text": "verdict: approve"}]}),
     _ev("r1", "tool_result", agent_id="step:p/s", id="b2",
@@ -2867,3 +2878,54 @@ def test_show_tiers_reveals_only_tiers() -> None:
     out_no_tiers = "\n".join(_show_lines(events, {"thinking", "tools", "subagents", "prompts"}))
     assert "tiers resolved:" not in out_no_tiers
     assert "→ anthropic/haiku" not in out_no_tiers
+
+
+def test_full_labels_each_engine_subtype_verbatim():
+    out = "\n".join(_lines([
+        _ev("1", "step_started", step="plan", kind="agent", phase="build",
+            model="m", provider="anthropic"),
+        _ev("e0", "engine_message", agent_id="step:build/plan",
+            subtype="system_prompt", role="system",
+            content=[{"type": "text", "text": "SYS " + "x" * 400}]),
+        _ev("e1", "engine_message", agent_id="step:build/plan",
+            subtype="agent_prompt", role="user",
+            content=[{"type": "text", "text": "the body"}]),
+        _ev("e2", "engine_message", agent_id="step:build/plan",
+            subtype="continuation", role="user",
+            content=[{"type": "text", "text": "keep going"}]),
+        _ev("e3", "engine_message", agent_id="step:build/plan",
+            subtype="completion", role="user",
+            content=[{"type": "text", "text": "done?"}]),
+    ], full=True))
+    assert "system prompt:" in out
+    assert "agent prompt:" in out
+    assert "continuation:" in out
+    assert "completion nudge:" in out
+    assert "injected message:" not in out
+    assert "x" * 40 in out
+    # the 400-char body is under the system-prompt label, not a mislabeled block
+    assert out.index("system prompt:") < out.index("x" * 40) < out.index("agent prompt:")
+
+
+def test_lean_hides_engine_messages():
+    out = "\n".join(_lines([
+        _ev("1", "step_started", step="plan", kind="agent", phase="build",
+            model="m", provider="anthropic"),
+        _ev("e1", "engine_message", agent_id="step:build/plan",
+            subtype="continuation", role="user",
+            content=[{"type": "text", "text": "keep going"}]),
+    ], full=False))
+    assert "keep going" not in out
+    assert "continuation:" not in out
+
+
+def test_step_context_full_has_no_system_prompt_line():
+    out = "\n".join(_lines([
+        _ev("1", "step_started", step="plan", kind="agent", phase="build",
+            model="m", provider="anthropic"),
+        _ev("c1", "step_context", agent_id="step:build/plan",
+            provider="anthropic", model="m",
+            tools_schema=[{"name": "read_file"}], params={}, max_tool_calls=40),
+    ], full=True))
+    assert "system_prompt:" not in out
+    assert "tools:" in out

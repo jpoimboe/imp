@@ -124,11 +124,11 @@ def _build_with_wait() -> nv.NarrativeBuilder:
 
 @pytest.mark.parametrize("etype, payload", [
     ("user_message", {"text": "hi"}),
-    ("llm_response", {"provider": "anthropic", "model": "m",
+    ("agent_message", {"provider": "anthropic", "model": "m",
                       "stop_reason": "end_turn", "usage": {}, "raw": {"content": []}}),
     ("thinking", {"content": "x"}),
     ("tool_call", {"id": "z", "name": "read_file", "input": {}}),
-    ("agent_output", {"text": "ok"}),
+    ("agent_result", {"text": "ok"}),
     ("step_started", {"step": "s2", "kind": "agent", "phase": "convergence"}),
     ("step_completed", {"step": "deferred-sweep", "kind": "agent",
                         "action": {"verb": "continue"}, "var_mutations": {}}),

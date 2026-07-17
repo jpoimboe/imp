@@ -1522,8 +1522,8 @@ def _prompt_history_lines(
         if ev.get("type") != "user_message":
             continue
         payload = ev.get("payload") or {}
-        if payload.get("human") is not True:
-            continue
+        if payload.get("subtype") == "intent":
+            continue          # the opening is already represented by seed_opening
         text = _user_message_text(payload)
         if text.strip():
             lines.append(text)
@@ -1540,33 +1540,25 @@ def _first_user_message(events: list[dict[str, Any]]) -> str | None:
 
 
 def _first_genuine_human_turn(events: list[dict[str, Any]]) -> str | None:
-    """First user_message a human actually typed: one that answers an
-    awaiting_user_input solicitation, or one tagged by an immediately following
-    user_interjected event. The composed task prompt -- a synthetic user_message
-    that is neither solicited nor interjected -- is skipped. Mirrors the
-    genuine-turn test narrative.py applies statefully while rendering."""
-    awaiting = False
-    for i, ev in enumerate(events):
-        etype = ev.get("type")
-        if etype == "awaiting_user_input":
-            awaiting = True
+    """First reply/interject a human actually typed. The opening intent is
+    resolved separately (by _resolve_intent), so it is skipped here; every
+    non-intent user_message is, by construction, a genuine human turn."""
+    for ev in events:
+        if ev.get("type") != "user_message":
             continue
-        if etype != "user_message":
+        if (ev.get("payload") or {}).get("subtype") == "intent":
             continue
-        nxt = events[i + 1] if i + 1 < len(events) else None
-        interjected = nxt is not None and nxt.get("type") == "user_interjected"
-        if awaiting or interjected:
-            text = _user_message_text(ev.get("payload") or {}).strip()
-            if text:
-                return text
-        awaiting = False
+        text = _user_message_text(ev.get("payload") or {}).strip()
+        if text:
+            return text
     return None
 
 
 def _resolve_intent(events: list[dict[str, Any]]) -> str | None:
     for ev in events:
-        if ev.get("type") == "opening_intent":
-            text = ((ev.get("payload") or {}).get("text") or "").strip()
+        if ev.get("type") == "user_message" and \
+                (ev.get("payload") or {}).get("subtype") == "intent":
+            text = _user_message_text(ev.get("payload") or {}).strip()
             if text:
                 return text
     return _first_genuine_human_turn(events)
@@ -3756,6 +3748,9 @@ def _cmd_events(args: argparse.Namespace) -> int:
     max_ord = indexed[-1][0] if indexed else 0
 
     types = set(args.type) if args.type else None
+    if args.wire:
+        types = (types or set()) | {"user_message", "engine_message"}
+    subtypes = set(args.subtype) if args.subtype else None
     agents = set(args.agent) if args.agent else None
     steps = set(args.step) if args.step else None
     range_specs = list(args.range) if args.range else []
@@ -3776,7 +3771,7 @@ def _cmd_events(args: argparse.Namespace) -> int:
             print(f"imp: no step {missing[0]!r} in {quest_id}", file=sys.stderr)
             return 2
 
-    leaf = bool(types or agents or intervals or args.all
+    leaf = bool(types or subtypes or agents or intervals or args.all
                 or args.limit is not None)
 
     if not leaf and steps is not None:
@@ -3811,7 +3806,7 @@ def _cmd_events(args: argparse.Namespace) -> int:
         return 0
 
     selected = ei.select_event_lines(
-        indexed, types=types, agents=agents,
+        indexed, types=types, subtypes=subtypes, agents=agents,
         ranges=intervals or None, step_names=steps,
         all_=args.all, limit=args.limit, handle_map=handle_map)
     if args.json:
@@ -4068,6 +4063,14 @@ def _build_parser() -> argparse.ArgumentParser:
     p_events.add_argument(
         "--type", action=SplitAppend, default=None,
         help="Keep only these event types (repeatable / comma-joined).")
+    p_events.add_argument(
+        "--subtype", action=SplitAppend, default=None,
+        help="Keep only these message subtypes, e.g. system_prompt, intent, "
+             "continuation (repeatable / comma-joined).")
+    p_events.add_argument(
+        "--wire", action="store_true",
+        help="Shorthand for --type user_message,engine_message (everything that "
+             "went out on the wire).")
     p_events.add_argument(
         "--agent", action=SplitAppend, default=None,
         help="Keep only these authors: step name, subagent handle, or "

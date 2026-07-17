@@ -5,7 +5,7 @@ from imp.engine.state import InMemoryEventLog
 
 def test_context_fields_present_when_supplied() -> None:
     log = InMemoryEventLog()
-    ev = log.append_llm_response(
+    ev = log.append_agent_message(
         agent_id="step:p/s", provider="claude_code", model="opus-1m",
         raw={}, usage={}, stop_reason=None,
         context_window=1_000_000, context_pct=12.5, context_tokens=125_000,
@@ -17,7 +17,7 @@ def test_context_fields_present_when_supplied() -> None:
 
 def test_context_fields_omitted_when_absent() -> None:
     log = InMemoryEventLog()
-    ev = log.append_llm_response(
+    ev = log.append_agent_message(
         agent_id="step:p/s", provider="claude_code", model="opus",
         raw={}, usage={}, stop_reason=None,
     )

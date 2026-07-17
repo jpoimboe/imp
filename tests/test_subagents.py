@@ -92,7 +92,7 @@ def _dispatch_ctx(tmp_path: Path) -> ToolContext:
     ctx.parent_transcript_dir = tmp_path / "steps/p/s"
     ctx.coordinator = InterruptCoordinator()
     ctx.spawn_subagent = _spawn_yielding(
-        [{"type": "agent_output", "payload": {"text": "ok"}}])
+        [{"type": "agent_result", "payload": {"text": "ok"}}])
     ctx.quest_context = QuestContext(
         id="change-42", title="Quest 42", project_root=tmp_path,
         workflow_dir=tmp_path / ".imp" / "change" / "workflow")
@@ -154,7 +154,7 @@ async def test_dispatch_task_awaits_spawn_subagent(tmp_path: Path) -> None:
     ctx.parent_transcript_dir = tmp_path / "steps/p/s"
     ctx.coordinator = InterruptCoordinator()
     ctx.spawn_subagent = _spawn_yielding(
-        [{"type": "agent_output", "payload": {"text": "ok"}}],
+        [{"type": "agent_result", "payload": {"text": "ok"}}],
         capture=capture)
     ctx.quest_context = QuestContext(
         id="change-42", title="Quest 42", project_root=tmp_path,
@@ -222,7 +222,7 @@ events_path=tmp_path / "events.jsonl",
 
     capture: dict = {}
     ctx.spawn_subagent = _spawn_yielding(
-        [{"type": "agent_output", "payload": {"text": "ok"}}],
+        [{"type": "agent_result", "payload": {"text": "ok"}}],
         capture=capture)
 
     result = anyio.run(dispatch_task, ctx, "sub", "do the thing")
@@ -230,7 +230,7 @@ events_path=tmp_path / "events.jsonl",
     # prompt — check the rendered portion is correct.
     assert capture["inv"].system_prompt.startswith(reflow_markdown(_CORE_HEAD))
     assert "hello change-7" in capture["inv"].system_prompt
-    # Sanity: dispatch_task returns the raw text from agent_output.
+    # Sanity: dispatch_task returns the raw text from agent_result.
     assert result == "ok"
 
 
@@ -251,7 +251,7 @@ async def test_dispatch_task_threads_shared_event_log_and_agent_id(tmp_path) -> 
     ctx.event_log = shared
     ctx.coordinator = InterruptCoordinator()
     ctx.spawn_subagent = _spawn_yielding(
-        [{"type": "agent_output", "payload": {"text": "ok"}}],
+        [{"type": "agent_result", "payload": {"text": "ok"}}],
         capture=capture)
 
     out = await dispatch_task(ctx, "helper", "do it", tool_call_event_id="tc-99")
@@ -287,7 +287,7 @@ async def test_dispatch_task_uses_subagent_tier(tmp_path: Path) -> None:
     ctx.parent_transcript_dir = tmp_path / "steps/p/s"
     ctx.coordinator = InterruptCoordinator()
     ctx.spawn_subagent = _spawn_yielding(
-        [{"type": "agent_output", "payload": {"text": "ok"}}],
+        [{"type": "agent_result", "payload": {"text": "ok"}}],
         capture=capture)
     ctx.quest_context = QuestContext(
         id="test", title="Test", project_root=tmp_path,
@@ -314,7 +314,7 @@ async def test_dispatch_task_roleless_subagent_inherits_parent(tmp_path: Path) -
     ctx.parent_transcript_dir = tmp_path / "steps/p/s"
     ctx.coordinator = InterruptCoordinator()
     ctx.spawn_subagent = _spawn_yielding(
-        [{"type": "agent_output", "payload": {"text": "ok"}}],
+        [{"type": "agent_result", "payload": {"text": "ok"}}],
         capture=capture)
     ctx.quest_context = QuestContext(
         id="test", title="Test", project_root=tmp_path,
@@ -381,7 +381,7 @@ async def test_dispatch_task_runtime_tier_overrides_frontmatter(tmp_path: Path) 
     ctx.parent_transcript_dir = tmp_path / "steps/p/s"
     ctx.coordinator = InterruptCoordinator()
     ctx.spawn_subagent = _spawn_yielding(
-        [{"type": "agent_output", "payload": {"text": "ok"}}],
+        [{"type": "agent_result", "payload": {"text": "ok"}}],
         capture=capture)
     ctx.quest_context = QuestContext(
         id="test", title="Test", project_root=tmp_path,
@@ -421,7 +421,7 @@ async def test_dispatch_task_none_tier_falls_through_to_frontmatter(tmp_path: Pa
     ctx.parent_transcript_dir = tmp_path / "steps/p/s"
     ctx.coordinator = InterruptCoordinator()
     ctx.spawn_subagent = _spawn_yielding(
-        [{"type": "agent_output", "payload": {"text": "ok"}}],
+        [{"type": "agent_result", "payload": {"text": "ok"}}],
         capture=capture)
     ctx.quest_context = QuestContext(
         id="test", title="Test", project_root=tmp_path,
@@ -461,7 +461,7 @@ async def test_dispatch_task_blank_tier_falls_through_to_frontmatter(tmp_path: P
     ctx.parent_transcript_dir = tmp_path / "steps/p/s"
     ctx.coordinator = InterruptCoordinator()
     ctx.spawn_subagent = _spawn_yielding(
-        [{"type": "agent_output", "payload": {"text": "ok"}}],
+        [{"type": "agent_result", "payload": {"text": "ok"}}],
         capture=capture)
     ctx.quest_context = QuestContext(
         id="test", title="Test", project_root=tmp_path,
@@ -517,7 +517,7 @@ async def test_dispatch_task_powerful_tier_cross_vendor(tmp_path: Path) -> None:
     ctx.parent_transcript_dir = tmp_path / "steps/p/s"
     ctx.coordinator = InterruptCoordinator()
     ctx.spawn_subagent = _spawn_yielding(
-        [{"type": "agent_output", "payload": {"text": "ok"}}],
+        [{"type": "agent_result", "payload": {"text": "ok"}}],
         capture=capture)
     ctx.quest_context = QuestContext(
         id="test", title="Test", project_root=tmp_path,
@@ -550,7 +550,7 @@ async def test_subagent_construction_parity(tmp_path: Path) -> None:
     ctx.parent_transcript_dir = tmp_path / "steps/p/s"
     ctx.coordinator = InterruptCoordinator()
     ctx.spawn_subagent = _spawn_yielding(
-        [{"type": "agent_output", "payload": {"text": "ok"}}],
+        [{"type": "agent_result", "payload": {"text": "ok"}}],
         capture=capture)
     ctx.quest_context = QuestContext(
         id="c", title="C c", project_root=tmp_path,
@@ -605,7 +605,7 @@ async def test_subagent_backs_off_on_rate_limit(tmp_path: Path, monkeypatch) -> 
         if calls["n"] == 1:
             return _FakeRunner([{"type": "error", "payload": {
                 "category": "rate_limit", "kind": "429", "message": "slow"}}])
-        return _FakeRunner([{"type": "agent_output",
+        return _FakeRunner([{"type": "agent_result",
                              "payload": {"text": "ok"}}])
 
     ctx = ToolContext(project_root=tmp_path,
@@ -680,7 +680,7 @@ async def test_subagent_backoff_sleep_is_interruptible(tmp_path: Path) -> None:
                 "category": "rate_limit", "kind": "429", "message": "slow",
                 "detail": {"retry_after_seconds": None}}}])
         # Second call would succeed, but coordinator should interrupt before we get here.
-        return _FakeRunner([{"type": "agent_output",
+        return _FakeRunner([{"type": "agent_result",
                              "payload": {"text": "ok"}}])
 
     ctx = ToolContext(project_root=tmp_path,
@@ -774,7 +774,7 @@ async def test_dispatch_task_forwards_non_interactive_true(tmp_path: Path) -> No
     ctx.parent_transcript_dir = tmp_path / "steps/p/s"
     ctx.coordinator = InterruptCoordinator()
     ctx.spawn_subagent = _spawn_yielding(
-        [{"type": "agent_output", "payload": {"text": "ok"}}],
+        [{"type": "agent_result", "payload": {"text": "ok"}}],
         capture=capture)
     ctx.quest_context = QuestContext(id="c", title="C", project_root=tmp_path,
                                        workflow_dir=tmp_path / "wf")
@@ -796,7 +796,7 @@ async def test_dispatch_task_forwards_non_interactive_false(tmp_path: Path) -> N
     ctx.parent_transcript_dir = tmp_path / "steps/p/s"
     ctx.coordinator = InterruptCoordinator()
     ctx.spawn_subagent = _spawn_yielding(
-        [{"type": "agent_output", "payload": {"text": "ok"}}],
+        [{"type": "agent_result", "payload": {"text": "ok"}}],
         capture=capture)
     ctx.quest_context = QuestContext(id="c", title="C", project_root=tmp_path,
                                        workflow_dir=tmp_path / "wf")
@@ -823,7 +823,7 @@ async def test_dispatch_task_threads_sandbox_policy(tmp_path: Path) -> None:
     ctx.parent_transcript_dir = tmp_path / "steps/p/s"
     ctx.coordinator = InterruptCoordinator()
     ctx.spawn_subagent = _spawn_yielding(
-        [{"type": "agent_output", "payload": {"text": "ok"}}],
+        [{"type": "agent_result", "payload": {"text": "ok"}}],
         capture=capture)
     ctx.quest_context = QuestContext(id="c", title="C", project_root=tmp_path,
                                        workflow_dir=tmp_path / "wf")
@@ -854,7 +854,7 @@ async def test_dispatch_task_inherits_readonly_overlay(tmp_path: Path) -> None:
     ctx.parent_transcript_dir = tmp_path / "steps/p/s"
     ctx.coordinator = InterruptCoordinator()
     ctx.spawn_subagent = _spawn_yielding(
-        [{"type": "agent_output", "payload": {"text": "ok"}}],
+        [{"type": "agent_result", "payload": {"text": "ok"}}],
         capture=capture)
     ctx.quest_context = QuestContext(id="c", title="C", project_root=tmp_path,
                                        workflow_dir=tmp_path / "wf")
@@ -885,7 +885,7 @@ async def test_dispatch_task_holds_limiter_during_drive(tmp_path: Path) -> None:
         seen["borrowed"] = ctx.parallel_limiter.borrowed_tokens
 
     ctx.spawn_subagent = _spawn_yielding(
-        [{"type": "agent_output", "payload": {"text": "ok"}}],
+        [{"type": "agent_result", "payload": {"text": "ok"}}],
         on_run=_capture_borrowed)
 
     out = await dispatch_task(ctx, "reviewer", "go")
@@ -990,7 +990,7 @@ async def test_subagent_hinted_delay_is_budget_exempt(tmp_path: Path,
             return _FakeRunner([{"type": "error", "payload": {
                 "category": "rate_limit", "kind": "429", "message": "slow",
                 "detail": {"retry_after_seconds": 7200.0}}}])
-        return _FakeRunner([{"type": "agent_output", "payload": {"text": "ok"}}])
+        return _FakeRunner([{"type": "agent_result", "payload": {"text": "ok"}}])
 
     log = InMemoryEventLog()
     ctx = ToolContext(project_root=tmp_path,

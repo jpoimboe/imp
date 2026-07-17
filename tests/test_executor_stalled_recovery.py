@@ -88,7 +88,7 @@ class _StallNthRunner:
                 "category": "stalled", "kind": "stalled",
                 "message": "no events for 240s"}}
         else:
-            yield {"type": "agent_output", "payload": {"status": "Success", "outcome": "done"}}
+            yield {"type": "agent_result", "payload": {"status": "Success", "outcome": "done"}}
 
     async def interrupt(self) -> None:
         pass

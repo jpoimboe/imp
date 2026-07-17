@@ -136,7 +136,7 @@ async def test_termination_401_rolls_back_and_keeps_llm_event(tmp_path: Path) ->
     assert classify_resume(loaded) is ResumeState.SEND_TO_LLM
 
     # AC4: the error turn's llm_response event remains queryable.
-    assert any(e["type"] == "llm_response" for e in log.read())
+    assert any(e["type"] == "agent_message" for e in log.read())
 
 
 @pytest.mark.anyio
@@ -225,7 +225,7 @@ async def test_auth_fails_then_recovers_on_redrive(tmp_path: Path) -> None:
         client_factory=lambda o: FakeClaudeSDKClient(o, scripted_messages=drive2))
     ev2 = [ev async for ev in runner2.run(inv)]
 
-    assert ev2[-1]["type"] == "agent_output", ev2
+    assert ev2[-1]["type"] == "agent_result", ev2
     assert ev2[-1]["payload"]["status"] == "Success"
 
     # The bug's signature must be absent across the whole recovery.

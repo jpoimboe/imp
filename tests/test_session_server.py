@@ -54,7 +54,7 @@ async def test_run_fn_events_are_broadcast_to_attached_client(tmp_path: Path) ->
         with anyio.fail_after(5):
             while server.attached_count < 1:
                 await anyio.sleep(0.02)
-        on_event({"type": "agent_output", "payload": {"text": "hi"}})
+        on_event({"type": "agent_result", "payload": {"text": "hi"}})
         await release.wait()
         return "ok"
 
@@ -70,7 +70,7 @@ async def test_run_fn_events_are_broadcast_to_attached_client(tmp_path: Path) ->
         buf = BufferedByteReceiveStream(client)
         line = (await buf.receive_until(b"\n", 1 << 20)).decode()
         assert parse_event(line) == {
-            "type": "agent_output", "payload": {"text": "hi"}}
+            "type": "agent_result", "payload": {"text": "hi"}}
         release.set()
         with anyio.fail_after(5):
             while "r" not in result:
@@ -673,7 +673,7 @@ async def test_cli_attached_emission_contract(tmp_path: Path) -> None:
     sock = str(tmp_path / "s.sock")
     log = JsonlEventLog(events_path)
     release = anyio.Event()
-    sentinel = {"type": "agent_output", "payload": {"text": "live"}}
+    sentinel = {"type": "agent_result", "payload": {"text": "live"}}
     server = SessionServer(
         sock,
         events_path=events_path,
@@ -795,7 +795,7 @@ async def test_synthetic_resume_prompt_lands_once_after_replay(tmp_path: Path) -
     events_path = tmp_path / "events.jsonl"
     sock = str(tmp_path / "s.sock")
     recs = [{"id": "e0", "type": "step_started", "payload": {"step": "spec"}},
-            {"id": "e1", "type": "agent_output", "payload": {"text": "hi"}}]
+            {"id": "e1", "type": "agent_result", "payload": {"text": "hi"}}]
     events_path.write_text("".join(json.dumps(r) + "\n" for r in recs))
     synthetic = {"type": "awaiting_user_input", "payload": {"prompt": "paused"}}  # no id
     prompt_ready = anyio.Event()

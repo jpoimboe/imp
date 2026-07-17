@@ -9,11 +9,12 @@ tiers resolved:
 spec · claude-sonnet-4-6
 
 ▾ context · anthropic/claude-sonnet-4-6 · max_tool_calls=50
-  system_prompt:
-    You are a spec writer. Draft a detailed specification.
   tools:
     - bash
     - read_file
+
+system prompt:
+  You are a spec writer. Draft a detailed specification.
 
 • Drafting the spec.
 
@@ -31,9 +32,10 @@ spec · claude-sonnet-4-6
 
 ▾ reviewer · Review the draft spec for completeness.
 │ ▾ context · anthropic/claude-sonnet-4-6 · max_tool_calls=10
-│   system_prompt:
-│     You are a reviewer.
 │   tools:
+│ 
+│ system prompt:
+│   You are a reviewer.
 │ 
 │ • The spec looks good. Auth flows are clearly defined.
 │ → status=Success · summary=Spec approved

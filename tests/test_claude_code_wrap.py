@@ -150,7 +150,7 @@ async def test_wrap_task_routes_to_dispatch_task(tmp_path: Path) -> None:
 
     class _FakeRunner:
         async def run(self, inv):
-            yield {"type": "agent_output", "payload": {"text": "done successfully"}}
+            yield {"type": "agent_result", "payload": {"text": "done successfully"}}
         async def interrupt(self) -> None: ...
 
     async def fake_spawn(_inv: object) -> object:
@@ -205,7 +205,7 @@ async def test_wrap_task_emits_matching_call_and_result(tmp_path: Path) -> None:
 
     class _FakeRunner:
         async def run(self, inv):
-            yield {"type": "agent_output", "payload": {"text": "done successfully"}}
+            yield {"type": "agent_result", "payload": {"text": "done successfully"}}
         async def interrupt(self) -> None: ...
 
     async def fake_spawn(_inv: object) -> object:
@@ -438,7 +438,7 @@ async def test_wrap_task_success_result_stamps_id_ns_block(tmp_path: Path) -> No
 
     class _FakeRunner:
         async def run(self, inv):
-            yield {"type": "agent_output", "payload": {"text": "done successfully"}}
+            yield {"type": "agent_result", "payload": {"text": "done successfully"}}
         async def interrupt(self) -> None: ...
 
     async def fake_spawn(_inv: object) -> object:

@@ -22,12 +22,12 @@ def test_format_awaiting_user_input_uses_real_steer_hint_payload() -> None:
         "needs your input\nWhich DB should I use?")
 
 
-def test_format_llm_response_renders_assistant_text_without_type_header() -> None:
-    # llm_response carries the assistant turn under payload["raw"]; the prose must
-    # be rendered (provider-aware) and sent ALONE — no "[title] llm_response"
+def test_format_agent_message_renders_assistant_text_without_type_header() -> None:
+    # agent_message carries the assistant turn under payload["raw"]; the prose must
+    # be rendered (provider-aware) and sent ALONE — no "[title] agent_message"
     # header leaking the internal event type into a narrative message.
     event = {
-        "type": "llm_response",
+        "type": "agent_message",
         "quest": {"title": "T"},
         "payload": {
             "provider": "anthropic", "model": "m",

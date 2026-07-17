@@ -81,7 +81,7 @@ async def test_below_threshold_does_not_elicit_handoff(tmp_path: Path) -> None:
     events = [e async for e in runner.run(_invocation(tmp_path, threshold=0.8))]
 
     assert not [e for e in events if e["type"] == "handoff"]
-    assert any(e["type"] == "agent_output" for e in events)
+    assert any(e["type"] == "agent_result" for e in events)
     transcript = (tmp_path / "step" / "transcript.jsonl").read_text()
     assert "approaching the context limit" not in transcript
 

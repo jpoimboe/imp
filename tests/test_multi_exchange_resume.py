@@ -90,7 +90,7 @@ async def test_resumed_run_supports_multiple_exchanges_to_completion(
 
     # The run reached complete_step: it did NOT drop to the shell between
     # exchanges (the p9ebp1 regression).
-    assert "agent_output" in [e["type"] for e in events]
+    assert "agent_result" in [e["type"] for e in events]
     # The inner (interactive) reader was consulted exactly once — for the SECOND
     # exchange. The first reply came from the buffer, not the reader.
     assert inner_calls == [""]

@@ -104,7 +104,7 @@ def test_isolated_dispatch_runs_in_throwaway_with_distinct_policy(
     quest = _make_change(tmp_path)
     capture: dict = {}
     ctx = _ctx(tmp_path, quest, name="prober", agent=_isolated_agent("prober"),
-               spawn=_spawn([{"type": "agent_output", "payload": {"text": "ok"}}],
+               spawn=_spawn([{"type": "agent_result", "payload": {"text": "ok"}}],
                             capture=capture))
 
     result = anyio.run(dispatch_task, ctx, "prober", "measure it")
@@ -142,7 +142,7 @@ def test_isolated_dispatch_parks_artifact_surviving_teardown(
         dest.write_text("empirical result: 42\n")
 
     ctx = _ctx(tmp_path, quest, name="prober", agent=_isolated_agent("prober"),
-               spawn=_spawn([{"type": "agent_output", "payload": {"text": "done"}}],
+               spawn=_spawn([{"type": "agent_result", "payload": {"text": "done"}}],
                             on_run=_park))
 
     anyio.run(dispatch_task, ctx, "prober", "park a finding")
@@ -226,7 +226,7 @@ def test_non_isolated_subagent_inherits_parent_policy(tmp_path: Path) -> None:
     capture: dict = {}
     sentinel = object()
     ctx = _ctx(tmp_path, quest, name="rev", agent=_plain_agent("rev"),
-               spawn=_spawn([{"type": "agent_output", "payload": {"text": "ok"}}],
+               spawn=_spawn([{"type": "agent_result", "payload": {"text": "ok"}}],
                             capture=capture))
     ctx.base_sandbox_policy = sentinel
 
@@ -243,7 +243,7 @@ def test_dispatch_task_forwards_ctx_pythonpath_to_invocation(tmp_path: Path) -> 
     quest = _make_change(tmp_path)
     capture: dict = {}
     ctx = _ctx(tmp_path, quest, name="rev", agent=_plain_agent("rev"),
-               spawn=_spawn([{"type": "agent_output", "payload": {"text": "ok"}}],
+               spawn=_spawn([{"type": "agent_result", "payload": {"text": "ok"}}],
                             capture=capture))
     ctx.pythonpath = ("src",)
 
@@ -260,7 +260,7 @@ def test_inactive_spike_policy_emits_sandbox_inactive_event(
 
     quest = _make_change(tmp_path)
     ctx = _ctx(tmp_path, quest, name="prober", agent=_isolated_agent("prober"),
-               spawn=_spawn([{"type": "agent_output", "payload": {"text": "ok"}}]))
+               spawn=_spawn([{"type": "agent_result", "payload": {"text": "ok"}}]))
     ctx.agent_id = "prober"
 
     recorded: list[dict] = []
@@ -289,7 +289,7 @@ def test_isolated_dispatch_without_quest_context_raises(tmp_path: Path) -> None:
     ctx.quest = None                                     # nested-dispatch shape
     ctx.quest_context = QuestContext(
         id="x", title="X", project_root=tmp_path, workflow_dir=tmp_path / "wf")
-    ctx.spawn_subagent = _spawn([{"type": "agent_output", "payload": {"text": "ok"}}])
+    ctx.spawn_subagent = _spawn([{"type": "agent_result", "payload": {"text": "ok"}}])
 
     with pytest.raises(RuntimeError, match="isolated_worktree"):
         anyio.run(dispatch_task, ctx, "prober", "go")
@@ -473,7 +473,7 @@ def test_isolated_dispatch_overlay_home_torn_down_with_worktree(
     quest = _make_change(tmp_path)
     capture: dict = {}
     ctx = _ctx(tmp_path, quest, name="prober", agent=_isolated_agent("prober"),
-               spawn=_spawn([{"type": "agent_output", "payload": {"text": "ok"}}],
+               spawn=_spawn([{"type": "agent_result", "payload": {"text": "ok"}}],
                             capture=capture))
 
     anyio.run(dispatch_task, ctx, "prober", "measure it")
@@ -508,7 +508,7 @@ def test_isolated_dispatch_honors_network_off(tmp_path, monkeypatch):
     )
     capture: dict = {}
     ctx = _ctx(tmp_path, quest, name="prober", agent=_isolated_agent("prober"),
-               spawn=_spawn([{"type": "agent_output", "payload": {"text": "ok"}}],
+               spawn=_spawn([{"type": "agent_result", "payload": {"text": "ok"}}],
                             capture=capture))
 
     anyio.run(dispatch_task, ctx, "prober", "measure it")

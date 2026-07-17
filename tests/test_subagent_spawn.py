@@ -27,7 +27,7 @@ class _RecordingRunner:
         self.model = model
 
     async def run(self, invocation):
-        yield {"type": "agent_output",
+        yield {"type": "agent_result",
                "payload": {"status": "Success", "ran_on": self.name,
                            "model": self.model}}
 
@@ -87,7 +87,7 @@ async def test_spawn_subagent_via_registry_returns_runner(tmp_path) -> None:
 
     class _Runner:
         async def run(self, inv):
-            yield {"type": "agent_output", "payload": {"status": "Success"}}
+            yield {"type": "agent_result", "payload": {"status": "Success"}}
         async def interrupt(self) -> None: ...
 
     class _Provider:

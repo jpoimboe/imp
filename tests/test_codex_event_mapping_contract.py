@@ -124,9 +124,9 @@ def test_real_error_item_is_diagnostic_not_unhandled() -> None:
     assert "web_search_request" in warns[0]["payload"]["message"]
 
 
-def test_real_agent_message_records_llm_response() -> None:
+def test_real_agent_message_records_agent_message_event() -> None:
     # agent_message is buffered + last_agent_text captured immediately; a
-    # text-only turn flushes its prose-only llm_response at turn.completed.
+    # text-only turn flushes its prose-only agent_message at turn.completed.
     item = AgentMessageItem(id="a1", type="agent_message", text="the answer is 42")
     elog, st = _feed(item)
     assert st["last_agent_text"] == "the answer is 42"
@@ -137,6 +137,6 @@ def test_real_agent_message_records_llm_response() -> None:
         ),
         elog=elog, agent_id="step:t", state=st, provider="codex", model="gpt-5.5",
     )
-    resp = [e for e in elog.read() if e["type"] == "llm_response"]
+    resp = [e for e in elog.read() if e["type"] == "agent_message"]
     assert len(resp) == 1
     assert resp[0]["payload"]["raw"]["content"][0]["text"] == "the answer is 42"

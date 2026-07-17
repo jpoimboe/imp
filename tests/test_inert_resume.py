@@ -74,9 +74,10 @@ def test_bare_turn_end_question_none_when_answer_marker_follows(
         tmp_path: Path, marker: str) -> None:
     # A real reply (user_message) or a wait-consuming step transition after the
     # gate means the run advanced past the wait -> not parked at a prompt.
+    payload: dict = {"subtype": "reply"} if marker == "user_message" else {}
     ch = _seed_quest_with_events(tmp_path, [
         _gate("Which DB?"),
-        {"type": marker, "payload": {}},
+        {"type": marker, "payload": payload},
     ])
     assert bare_turn_end_question(ch) is None
 
@@ -247,6 +248,32 @@ async def test_run_inert_resume_ctrl_c_leaves_change_untouched(tmp_path: Path) -
     assert rc == 0
     after = ch.events_path.read_bytes() if ch.events_path.exists() else b""
     assert after == before              # launch never ran -> no events appended
+
+
+def _um(subtype: str, text: str) -> dict:
+    return {"agent_id": "step:p/s", "type": "user_message",
+            "payload": {"role": "user", "subtype": subtype,
+                        "content": [{"type": "text", "text": text}]}}
+
+
+def test_reply_subtype_answers_the_gate(tmp_path: Path) -> None:
+    ch = _seed_quest_with_events(tmp_path, [
+        _gate("Which DB?"), _um("reply", "postgres")])
+    assert bare_turn_end_question(ch) is None      # reply consumes the wait
+
+
+def test_interject_subtype_answers_the_gate(tmp_path: Path) -> None:
+    ch = _seed_quest_with_events(tmp_path, [
+        _gate("Which DB?"), _um("interject", "actually, use sqlite")])
+    assert bare_turn_end_question(ch) is None      # interject consumes the wait
+
+
+def test_intent_subtype_does_not_answer_the_gate(tmp_path: Path) -> None:
+    # An opening intent (never a solicited answer) after the gate must NOT count
+    # as answering it — the gate is still parked and reprints its question.
+    ch = _seed_quest_with_events(tmp_path, [
+        _gate("Which DB?"), _um("intent", "unrelated opening")])
+    assert bare_turn_end_question(ch) == "Which DB?"
 
 
 def test_bare_turn_end_question_reprints_after_archive_and_rehydrate(

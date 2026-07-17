@@ -115,7 +115,7 @@ def test_non_task_item_completed_still_emits_call_and_result() -> None:
     assert "id_ns" not in next(e for e in rows if e["type"] == "tool_result")["payload"]
 
 
-def test_preamble_prose_llm_response_precedes_tool_calls() -> None:
+def test_preamble_prose_agent_message_precedes_tool_calls() -> None:
     elog = InMemoryEventLog()
     state = {"web_search_enabled": False}
     run_state = RunState(cap=10, agent_id="step:t")
@@ -128,8 +128,8 @@ def test_preamble_prose_llm_response_precedes_tool_calls() -> None:
         process_event(ev, elog=elog, agent_id="step:t", state=state,
                       provider="codex", model="gpt-5.5", run_state=run_state)
     types = [e["type"] for e in elog.read()]
-    assert types.index("llm_response") < types.index("tool_call")
-    llms = [e for e in elog.read() if e["type"] == "llm_response"]
+    assert types.index("agent_message") < types.index("tool_call")
+    llms = [e for e in elog.read() if e["type"] == "agent_message"]
     assert len(llms) == 1
     content = llms[0]["payload"]["raw"]["content"]
     assert content == [{"type": "text", "text": "editing now"}]
@@ -137,7 +137,7 @@ def test_preamble_prose_llm_response_precedes_tool_calls() -> None:
     assert llms[0]["payload"]["usage"]  # usage attached to the prose response
 
 
-def test_summary_prose_llm_response_follows_tool_calls() -> None:
+def test_summary_prose_agent_message_follows_tool_calls() -> None:
     elog = InMemoryEventLog()
     state = {"web_search_enabled": False}
     run_state = RunState(cap=10, agent_id="step:t")
@@ -150,8 +150,8 @@ def test_summary_prose_llm_response_follows_tool_calls() -> None:
         process_event(ev, elog=elog, agent_id="step:t", state=state,
                       provider="codex", model="gpt-5.5", run_state=run_state)
     types = [e["type"] for e in elog.read()]
-    assert types.index("tool_call") < types.index("llm_response")
-    llms = [e for e in elog.read() if e["type"] == "llm_response"]
+    assert types.index("tool_call") < types.index("agent_message")
+    llms = [e for e in elog.read() if e["type"] == "agent_message"]
     assert len(llms) == 1
     assert llms[0]["payload"]["raw"]["content"] == [{"type": "text", "text": "all done"}]
 
@@ -166,7 +166,7 @@ def test_text_only_turn_flushes_prose_at_turn_completed() -> None:
     for ev in (msg, done):
         process_event(ev, elog=elog, agent_id="step:t", state=state,
                       provider="codex", model="gpt-5.5", run_state=run_state)
-    llms = [e for e in elog.read() if e["type"] == "llm_response"]
+    llms = [e for e in elog.read() if e["type"] == "agent_message"]
     assert len(llms) == 1
     assert llms[0]["payload"]["raw"]["content"] == [{"type": "text", "text": "just chatting"}]
     assert llms[0]["payload"]["usage"]
@@ -183,7 +183,7 @@ def test_prose_less_turn_emits_empty_prose_usage_carrier() -> None:
     for ev in (call, done):
         process_event(ev, elog=elog, agent_id="step:t", state=state,
                       provider="codex", model="gpt-5.5", run_state=run_state)
-    llms = [e for e in elog.read() if e["type"] == "llm_response"]
+    llms = [e for e in elog.read() if e["type"] == "agent_message"]
     assert len(llms) == 1
     assert llms[0]["payload"]["raw"]["content"] == []      # empty-prose carrier
     assert llms[0]["payload"]["usage"]                      # usage attached to it
@@ -203,8 +203,8 @@ def test_preamble_before_subagent_dispatch_leads_tool_call() -> None:
     process_event(FakeTurnCompletedEvent(
         usage=FakeUsage(input_tokens=5, output_tokens=1)), **kw)
     types = [e["type"] for e in elog.read()]
-    assert types.index("llm_response") < types.index("tool_call")
-    llms = [e for e in elog.read() if e["type"] == "llm_response"]
+    assert types.index("agent_message") < types.index("tool_call")
+    llms = [e for e in elog.read() if e["type"] == "agent_message"]
     assert len(llms) == 1
     assert llms[0]["payload"]["raw"]["content"] == [{"type": "text", "text": "dispatching impl"}]
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
+from typing import Any
 
 from imp.engine.quest import Quest
 from imp.remote.session.protocol import SkillRequest
@@ -18,7 +19,19 @@ def render_inert_question(text: str, *, width: int, color: bool) -> str:
     return "\n".join(_render_markdown_block(text, width, 0, color))
 
 
-_ANSWER_MARKERS = frozenset({"user_message", "step_started", "step_completed"})
+_ANSWER_TRANSITIONS = frozenset({"step_started", "step_completed"})
+_HUMAN_ANSWER_SUBTYPES = frozenset({"reply", "interject"})
+
+
+def _is_gate_answer(event: dict[str, Any]) -> bool:
+    """A wait is consumed by a solicited human turn (user_message reply/interject)
+    or a step transition. An opening intent is not a solicited answer."""
+    etype = event.get("type")
+    if etype in _ANSWER_TRANSITIONS:
+        return True
+    if etype == "user_message":
+        return (event.get("payload") or {}).get("subtype") in _HUMAN_ANSWER_SUBTYPES
+    return False
 
 
 def bare_turn_end_question(quest: Quest) -> str | None:
@@ -34,7 +47,7 @@ def bare_turn_end_question(quest: Quest) -> str | None:
     payload = gate.get("payload") or {}
     if payload.get("interrupt"):
         return None
-    if any(e.get("type") in _ANSWER_MARKERS for e in following):
+    if any(_is_gate_answer(e) for e in following):
         return None
     return payload.get("last_agent_message") or None
 

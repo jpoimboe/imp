@@ -4,13 +4,13 @@ Loop:
   1. Build messages (transcript or initial_messages)
   2. Stream via responses.stream (store=False) with declared tools; pulse
      coordinator.note_activity() per streamed event for the inactivity watchdog
-  3. Append assistant response to transcript; append llm_response to EventLog
+  3. Append assistant response to transcript; append agent_message to EventLog
   4. For each tool_call block: dispatch tool, append tool_result to EventLog
-  5. complete_step catches StepComplete → validate, emit agent_output, return
+  5. complete_step catches StepComplete → validate, emit agent_result, return
   6. No tool_calls in assistant: nudge via continuation_fn; else error
 
-Yields ONLY control signals: agent_output, error.
-All audit events (step_context, user_message, llm_response, tool_call,
+Yields ONLY control signals: agent_result, error.
+All audit events (step_context, user_message, agent_message, tool_call,
 tool_result, runner_warning, tool_killed) are written via EventLog.
 """
 
@@ -262,7 +262,7 @@ def _join_text(content: tuple[Any, ...]) -> str:
 
 
 def _serialize_responses_response(response: Any) -> dict[str, Any]:
-    """response → llm_response.raw dict. SDK .model_dump() preferred; the fake
+    """response → agent_message.raw dict. SDK .model_dump() preferred; the fake
     path returns {output, usage} directly. Replaces _serialize_openai_response
     at the Task 17 flip."""
     dump = getattr(response, "model_dump", None)
@@ -392,7 +392,7 @@ def _emit_openai_web_events(raw: dict[str, Any], elog: Any, aid: str) -> None:
 
 
 def _openai_stop_reason(raw: dict[str, Any]) -> str | None:
-    """Best-effort terminal marker for the llm_response event. Responses exposes
+    """Best-effort terminal marker for the agent_message event. Responses exposes
     `status` at the top level; the fake omits it → None, which is fine."""
     return raw.get("status")
 
@@ -552,7 +552,7 @@ class OpenAIAgentRunner:
                     and classify_resume(messages) is ResumeState.AWAITING_USER):
                 final_text = last_assistant_text(messages)
                 if final_text:
-                    yield {"type": "agent_output",
+                    yield {"type": "agent_result",
                            "payload": {"text": final_text}}
                 return
             # Mid-tool Ctrl+C (spec §6.15) can leave a dangling tool_use when
@@ -640,13 +640,18 @@ class OpenAIAgentRunner:
             elog.append_step_context(
                 agent_id=aid, parent_id_override=invocation.first_event_parent_id,
                 provider=invocation.provider_name, model=self.model,
-                system_prompt=invocation.system_prompt,
                 tools_schema=[_responses_tool_schema(t) for t in tools.values()],
                 params={"store": False},
                 max_tool_calls=invocation.max_tool_calls)
+            elog.append_engine_message(
+                agent_id=aid,
+                message=Message(role="system",
+                                content=(TextBlock(text=invocation.system_prompt),)),
+                subtype="system_prompt")
             for m in invocation.initial_messages:
                 if all(isinstance(b, TextBlock) for b in m.content):
-                    elog.append_user_message(agent_id=aid, message=m, human=False)
+                    elog.append_engine_message(
+                        agent_id=aid, message=m, subtype="agent_prompt")
 
         ceiling = invocation.max_tool_calls  # may be None (no cap)
         openai_tools = [_responses_tool_schema(t) for t in tools.values()]
@@ -713,7 +718,7 @@ class OpenAIAgentRunner:
             messages.append(assistant_msg)
             transcript.append(assistant_msg)
             usage = raw.get("usage") or {}
-            elog.append_llm_response(
+            elog.append_agent_message(
                 agent_id=aid, provider=invocation.provider_name,
                 model=raw.get("model") or self.model,
                 raw=raw, usage=usage,
@@ -738,7 +743,7 @@ class OpenAIAgentRunner:
                 if invocation.subagent_depth > 0:
                     final_text = last_assistant_text(messages)
                     if final_text:
-                        yield {"type": "agent_output",
+                        yield {"type": "agent_result",
                                "payload": {"text": final_text}}
                     return
                 cont = invocation.continuation_fn

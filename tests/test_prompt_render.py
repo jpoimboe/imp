@@ -45,7 +45,7 @@ def test_renders_events_namespace(tmp_path: Path) -> None:
         tmp_path / "events.jsonl",
         [
             ("step_started", {"step": "spec-writer"}),
-            ("agent_output", {"status": "Success", "summary": "hi"}),
+            ("agent_result", {"status": "Success", "summary": "hi"}),
             ("step_completed", {"step": "spec-writer", "action": "continue"}),
         ],
     )
@@ -138,12 +138,12 @@ def test_events_render_skips_torn_trailing_line(tmp_path: Path) -> None:
         path,
         [
             ("step_started", {"step": "spec-writer"}),
-            ("agent_output", {"status": "Success", "summary": "good"}),
+            ("agent_result", {"status": "Success", "summary": "good"}),
         ],
     )
     # Simulate a crash mid-append: a partial JSON line, no trailing newline.
     with path.open("a") as f:
-        f.write('{"type": "agent_output", "payload": {"summa')
+        f.write('{"type": "agent_result", "payload": {"summa')
     ctx = build_context(quest_title="t", event_log=log)
     assert render_prompt(
         "Prev: {{ events['spec-writer'].summary }}", ctx,

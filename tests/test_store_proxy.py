@@ -46,11 +46,13 @@ async def test_proxy_store_matches_local_store_over_the_socket(
     ch = Quest.create(tmp_path, title="Live", quest_id="liveq", base_branch="main")
     _append_event(ch, {
         "id": "e1", "timestamp": "2026-06-01T00:00:00+00:00",
-        "type": "opening_intent", "payload": {"text": "wire the widget"}})
+        "type": "user_message",
+        "payload": {"role": "user", "subtype": "intent",
+                    "content": [{"type": "text", "text": "wire the widget"}]}})
     _append_event(ch, {
         "id": "e2", "timestamp": "2026-06-01T00:00:05+00:00",
         "type": "user_message",
-        "payload": {"human": True,
+        "payload": {"role": "user", "subtype": "reply",
                     "content": [{"type": "text", "text": "darkmode toggle"}]}})
 
     local = LocalStore(tmp_path)

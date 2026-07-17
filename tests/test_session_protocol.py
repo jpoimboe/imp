@@ -68,11 +68,11 @@ def test_encode_control_rejects_unknown_action() -> None:
 
 
 def test_encode_event_wraps_event_under_event_key() -> None:
-    line = encode_event({"type": "agent_output", "payload": {"text": "hi"}})
+    line = encode_event({"type": "agent_result", "payload": {"text": "hi"}})
     assert "\n" not in line
     assert json.loads(line) == {
         "kind": "event",
-        "event": {"type": "agent_output", "payload": {"text": "hi"}},
+        "event": {"type": "agent_result", "payload": {"text": "hi"}},
     }
 
 

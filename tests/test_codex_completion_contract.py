@@ -7,6 +7,7 @@ import pytest
 
 from imp.agents.loop_guard import DEFAULT_REPEAT_K
 from imp.agents.runner import AgentInvocation, Message, QuestContext, TextBlock
+from imp.engine.state import InMemoryEventLog
 from imp.engine.types import (
     AgentDef,
     OutputField,
@@ -197,8 +198,8 @@ async def test_interactive_nudge_recovers_with_complete_step_on_second_turn(
     runner._canonical_auth_override = tmp_path / "auth.json"
     inv = _inv_with_continuation(tmp_path, continuation_fn=_cont)
     events = [ev async for ev in runner.run(inv)]
-    # Second turn captured complete_step; runner yields agent_output, not error.
-    outs = [e for e in events if e.get("type") == "agent_output"]
+    # Second turn captured complete_step; runner yields agent_result, not error.
+    outs = [e for e in events if e.get("type") == "agent_result"]
     assert len(outs) == 1 and outs[0]["payload"]["status"] == "ok"
     # continuation_fn was called exactly once with turn-1's last text.
     assert seen == ["forgot to call complete_step"]
@@ -244,7 +245,7 @@ def test_build_prompt_folds_first_user_message_on_fresh_entry(
         "`status` (ok|bad)."
     )
     inv = _inv_with_task(tmp_path, task_text=task)
-    built = CodexAgentRunner._build_prompt(None, inv)
+    built = CodexAgentRunner._build_prompt(None, inv, InMemoryEventLog(), "step:t")
     assert built.startswith("ROLE_HEADER_SENTINEL")   # role header first
     assert "tool_search" in built                     # tool policy retained
     assert "RENDER_BODY_SENTINEL_9f3a" in built       # rendered body folded in
@@ -259,7 +260,7 @@ def test_build_prompt_omits_first_user_message_on_resume(
     # On resume the task must NOT be re-folded (the rollout already carries it).
     task = "RENDER_BODY_SENTINEL_9f3a\n\nresume must not re-deliver this"
     inv = _inv_with_task(tmp_path, task_text=task, balance_on_resume=True)
-    built = CodexAgentRunner._build_prompt(None, inv)
+    built = CodexAgentRunner._build_prompt(None, inv, InMemoryEventLog(), "step:t")
     assert built.startswith("ROLE_HEADER_SENTINEL")   # role header + policy still built
     assert "tool_search" in built
     assert "RENDER_BODY_SENTINEL_9f3a" not in built    # task NOT re-folded on resume
@@ -271,7 +272,7 @@ def test_build_prompt_folds_subagent_task_with_deliverable_policy(
     # A subagent task is folded the same way, with the deliverable-note policy branch.
     inv = _inv_with_task(
         tmp_path, task_text="SUBAGENT_BODY_SENTINEL", subagent_depth=1)
-    built = CodexAgentRunner._build_prompt(None, inv)
+    built = CodexAgentRunner._build_prompt(None, inv, InMemoryEventLog(), "step:t")
     assert "SUBAGENT_BODY_SENTINEL" in built           # subagent task folded in
     assert "your entire deliverable" in built          # deliverable-note branch
     assert "complete_step" not in built                # completion line absent for subagents

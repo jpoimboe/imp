@@ -360,7 +360,8 @@ def test_handle_terminal_outcome_reads_warning_messages_from_archive(monkeypatch
     quest = _Change([])
     quest.control_root = main.Path("/tmp/imp-no-such-worktree-xyz")
     archive_blob = (
-        b'{"type": "opening_intent", "payload": {"text": "resolve me from archive"}}\n'
+        b'{"type": "user_message", "payload": {"subtype": "intent", '
+        b'"content": [{"type": "text", "text": "resolve me from archive"}]}}\n'
         b'{"type": "runner_warning", "payload": {"message": "a"}}\n'
         b'{"type": "runner_warning", "payload": {"message": "b"}}\n'
         b'{"type": "step_started", "payload": {"step": "s"}}\n'
@@ -413,7 +414,9 @@ def test_emit_completed_titleless_shows_prompt_fallback(monkeypatch, capsys) -> 
 
 def test_handle_terminal_outcome_forwards_opening_intent(monkeypatch) -> None:
     events = [
-        {"type": "opening_intent", "payload": {"text": "add a dark mode toggle"}},
+        {"type": "user_message",
+         "payload": {"subtype": "intent",
+                     "content": [{"type": "text", "text": "add a dark mode toggle"}]}},
         {"type": "step_started", "payload": {"step": "s", "kind": "agent"}},
     ]
     quest = _Change(events)
@@ -429,7 +432,9 @@ def test_handle_terminal_outcome_forwards_opening_intent(monkeypatch) -> None:
 
 def test_emit_merge_blocked_titleless_shows_prompt_fallback(monkeypatch, capsys) -> None:
     monkeypatch.setattr(main, "should_use_color", lambda stream: False)
-    quest = _Change([{"type": "opening_intent", "payload": {"text": "fix the crash"}}])
+    quest = _Change([{"type": "user_message",
+                      "payload": {"subtype": "intent",
+                                  "content": [{"type": "text", "text": "fix the crash"}]}}])
     main._emit_merge_blocked(quest, "worktree_dirty")
     out = capsys.readouterr().out
     assert "merge blocked: uncommitted work in the worktree" in out
@@ -440,7 +445,9 @@ def test_emit_merge_blocked_titleless_shows_prompt_fallback(monkeypatch, capsys)
 def test_emit_paused_summary_titleless_shows_prompt_fallback(monkeypatch, capsys) -> None:
     monkeypatch.setattr(main, "should_use_color", lambda stream: False)
     quest = _Change([
-        {"type": "opening_intent", "payload": {"text": "add a dark mode toggle"}},
+        {"type": "user_message",
+         "payload": {"subtype": "intent",
+                     "content": [{"type": "text", "text": "add a dark mode toggle"}]}},
         {"type": "workflow_paused",
          "payload": {"reason": "interrupt", "interrupt_reason": "interrupt"}},
     ])

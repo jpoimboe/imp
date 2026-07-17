@@ -80,10 +80,10 @@ async def test_threshold_crossing_elicits_codex_handoff(tmp_path: Path) -> None:
     handoff = [e for e in events if e["type"] == "handoff"]
     assert len(handoff) == 1
     assert handoff[0]["payload"]["handoff_path"] == str(hp)
-    # The instruction was injected as a user turn the agent then acted on.
-    user_msgs = [e for e in elog.read() if e["type"] == "user_message"]
+    # The instruction was injected as an engine_message/continuation the agent acted on.
+    engine_msgs = [e for e in elog.read() if e["type"] == "engine_message"]
     assert any("approaching the context limit" in str(e["payload"])
-               for e in user_msgs)
+               for e in engine_msgs)
     assert hp.exists()
     assert hp.read_text() == "wrote the handoff"
 
@@ -153,14 +153,14 @@ async def test_below_threshold_does_not_elicit_codex_handoff(tmp_path: Path) -> 
     events = [ev async for ev in runner.run(inv)]
 
     assert not [e for e in events if e["type"] == "handoff"]
-    assert any(e["type"] == "agent_output" for e in events)
+    assert any(e["type"] == "agent_result" for e in events)
 
 
 @pytest.mark.anyio
 async def test_completing_turn_above_threshold_completes_not_handoff(
         tmp_path: Path) -> None:
     """Completion wins over a mere crossing: a turn that crosses the threshold
-    (350000/400000 = 0.875) AND calls complete_step yields agent_output, never a
+    (350000/400000 = 0.875) AND calls complete_step yields agent_result, never a
     handoff. Pins the ordering invariant (complete_step check precedes crossing
     detection) against a reordering regression."""
     _seed_git_and_auth(tmp_path)
@@ -190,4 +190,4 @@ async def test_completing_turn_above_threshold_completes_not_handoff(
     events = [ev async for ev in runner.run(inv)]
 
     assert not [e for e in events if e["type"] == "handoff"]
-    assert any(e["type"] == "agent_output" for e in events)
+    assert any(e["type"] == "agent_result" for e in events)

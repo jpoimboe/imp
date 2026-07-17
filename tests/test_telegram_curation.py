@@ -16,7 +16,7 @@ def test_buzz_event_types_notify(event_type: str) -> None:
 @pytest.mark.parametrize(
     "event_type",
     [
-        "llm_response", "agent_output", "script_output", "step_started",
+        "agent_message", "agent_result", "script_output", "step_started",
         "workflow_resumed", "quest_abandoned",
     ],
 )
@@ -61,8 +61,8 @@ def test_workflow_paused_unknown_reason_fails_safe_to_buzz() -> None:
     "event_type",
     [
         "tool_call", "tool_result", "thinking", "step_context",
-        "llm_response_usage_patch", "skill_load", "step_label_updated",
-        "user_message", "user_interjected", "quest_created", "quest_renamed",
+        "agent_message_usage_patch", "skill_load", "step_label_updated",
+        "user_message", "quest_created", "quest_renamed",
         "cli_attached", "runner_warning", "tool_killed", "completed",
     ],
 )

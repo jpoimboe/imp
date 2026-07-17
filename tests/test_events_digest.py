@@ -35,10 +35,10 @@ def test_step_context_digest_drops_prompt_and_schema() -> None:
     assert "SECRET_TOOL_SCHEMA" not in line
 
 
-def test_llm_response_digest_shows_stop_tools_in_out_and_text() -> None:
+def test_agent_message_digest_shows_stop_tools_in_out_and_text() -> None:
     ev = {
         "id": "e3", "parent_id": None, "agent_id": "step:x/y",
-        "timestamp": "2026-07-01T00:00:02+00:00", "type": "llm_response",
+        "timestamp": "2026-07-01T00:00:02+00:00", "type": "agent_message",
         "payload": {
             "provider": "anthropic", "model": "claude-x",
             "stop_reason": "tool_use",
@@ -121,13 +121,13 @@ def test_unknown_type_uses_generic_scalar_fallback() -> None:
 
 
 def test_usage_patch_row_missing_envelope_renders_without_error() -> None:
-    # llm_response_usage_patch rows are persisted raw: no id/parent_id/timestamp.
+    # agent_message_usage_patch rows are persisted raw: no id/parent_id/timestamp.
     ev = {
-        "type": "llm_response_usage_patch", "agent_id": "step:x/y",
+        "type": "agent_message_usage_patch", "agent_id": "step:x/y",
         "payload": {"usage": {"input_tokens": 7}},
     }
     line = digest_event(ev)
-    assert "llm_response_usage_patch" in line
+    assert "agent_message_usage_patch" in line
     assert "\n" not in line
 
 
@@ -137,10 +137,10 @@ def test_malformed_line_is_recognizable() -> None:
     assert "{not valid json" in line
 
 
-def test_llm_response_with_unparseable_raw_does_not_raise() -> None:
+def test_agent_message_with_unparseable_raw_does_not_raise() -> None:
     ev = {
         "id": "e6", "parent_id": None, "agent_id": "step:x/y",
-        "timestamp": "2026-07-01T00:00:05+00:00", "type": "llm_response",
+        "timestamp": "2026-07-01T00:00:05+00:00", "type": "agent_message",
         "payload": {
             "provider": "no_such_provider", "model": "m",
             "stop_reason": "end_turn",
@@ -158,11 +158,15 @@ def test_user_message_digest_shows_role_and_text() -> None:
     ev = {
         "id": "e7", "parent_id": None, "agent_id": "step:x/y",
         "timestamp": "2026-07-01T00:00:06+00:00", "type": "user_message",
-        "payload": {"role": "user", "content": [{"type": "text", "text": "hello there"}]},
+        "payload": {
+            "role": "user", "subtype": "intent",
+            "content": [{"type": "text", "text": "hello there"}],
+        },
     }
     line = digest_event(ev)
     assert "user" in line
     assert "hello there" in line
+    assert "intent" in line
     assert "\n" not in line
 
 
@@ -319,3 +323,24 @@ def test_query_result_digest_guards_none_cost_and_duration() -> None:
     assert "cost=$None" in line
     assert "dur=Nones" in line
     assert "\n" not in line
+
+
+def test_engine_system_prompt_text_is_reachable():
+    ev = {"id": "e1", "type": "engine_message", "agent_id": "step:build/plan",
+          "payload": {"role": "user", "subtype": "system_prompt",
+                      "content": [{"type": "text",
+                                   "text": "You are a coder in imp."}]}}
+    line = digest_event(ev)
+    assert "system_prompt" in line
+    assert "You are a coder in imp." in line
+
+
+def test_agent_message_digest_reports_tools_and_stop():
+    ev = {"id": "e1", "type": "agent_message", "agent_id": "step:build/plan",
+          "payload": {"provider": "anthropic", "model": "m",
+                      "stop_reason": "end_turn",
+                      "usage": {"input_tokens": 3, "output_tokens": 5},
+                      "raw": {"content": [{"type": "text", "text": "hi"}]}}}
+    line = digest_event(ev)
+    assert "stop=end_turn" in line
+    assert "hi" in line

@@ -24,7 +24,7 @@ def test_reincarnating_reports_crossing_context_from_subagent_turn() -> None:
     # line must report the occupancy that actually crossed the checkpoint — which
     # (as in change loko19) was a subagent's. Sourced from the last llm_response.
     b = NarrativeBuilder()
-    b.add({"type": "llm_response", "agent_id": "sub:abc",
+    b.add({"type": "agent_message", "agent_id": "sub:abc",
            "payload": {"provider": "claude_code", "context_tokens": 166941,
                        "context_window": 200000, "context_pct": 83,
                        "usage": {"input_tokens": 3,

@@ -31,7 +31,7 @@ def test_auth_error_drops_matching_held_prose_and_suppresses_line() -> None:
     # suppressed, the prose node is dropped, and the agent_retry breadcrumb
     # survives as the single line for the blip.
     events = [
-        _ev("a1", "llm_response", agent_id=None,
+        _ev("a1", "agent_message", agent_id=None,
             raw={"content": [{"type": "text", "text": AUTH_PROSE}]}, usage={}),
         _ev("e1", "error", agent_id=None,
             category="auth", kind="http_401", message="claude CLI: 401",
@@ -53,7 +53,7 @@ def test_auth_error_prefix_match_drops_prose_over_500_chars() -> None:
     full = (AUTH_PROSE + " ") * 12          # > 500 chars
     assert len(full) > 500
     events = [
-        _ev("a1", "llm_response", agent_id=None,
+        _ev("a1", "agent_message", agent_id=None,
             raw={"content": [{"type": "text", "text": full}]}, usage={}),
         _ev("e1", "error", agent_id=None,
             category="auth", message="claude CLI: 401",
@@ -68,7 +68,7 @@ def test_network_error_keeps_unrelated_narration() -> None:
     # NOT match last_agent_text: suppress the error line but KEEP the narration.
     narration = "Reading the config file and planning the edits."
     events = [
-        _ev("a1", "llm_response", agent_id=None,
+        _ev("a1", "agent_message", agent_id=None,
             raw={"content": [{"type": "text", "text": narration}]}, usage={}),
         _ev("e1", "error", agent_id=None,
             category="network", message="claude CLI: connection reset",
@@ -86,7 +86,7 @@ def test_network_error_without_last_agent_text_keeps_narration() -> None:
     # the error line is still suppressed.
     narration = "Analyzing the failing test output."
     events = [
-        _ev("a1", "llm_response", agent_id=None,
+        _ev("a1", "agent_message", agent_id=None,
             raw={"content": [{"type": "text", "text": narration}]}, usage={}),
         _ev("e1", "error", agent_id=None,
             category="network", message="claude CLI: EOF", detail={}),
@@ -103,7 +103,7 @@ def test_auth_error_drops_held_prose_even_behind_a_flushed_rename() -> None:
     # RenameNode and still drop the prose; the rename line itself survives.
     events = [
         _ev("n1", "quest_renamed", agent_id=None, new_title="A better title"),
-        _ev("a1", "llm_response", agent_id=None,
+        _ev("a1", "agent_message", agent_id=None,
             raw={"content": [{"type": "text", "text": AUTH_PROSE}]}, usage={}),
         _ev("e1", "error", agent_id=None,
             category="auth", kind="http_401", message="claude CLI: 401",

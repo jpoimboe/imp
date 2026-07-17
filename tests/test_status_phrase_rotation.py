@@ -19,7 +19,7 @@ def _tool(eid: str, call_id: str) -> dict:
 
 
 def _prose(eid: str) -> dict:
-    return ev(eid, "llm_response", agent_id="a",
+    return ev(eid, "agent_message", agent_id="a",
               raw={"content": [{"type": "text", "text": "narration"}]}, usage={})
 
 

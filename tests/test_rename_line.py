@@ -69,7 +69,7 @@ def test_rename_line_bullet_and_name_are_wordmark_under_dark_theme() -> None:
 
 
 def test_rename_renders_after_narration_in_sdk_order() -> None:
-    # SDK-path log order is [quest_renamed, llm_response(prose), tool_call]; the
+    # SDK-path log order is [quest_renamed, agent_message(prose), tool_call]; the
     # built tree must place the narration (AgentTextNode) BEFORE the rename effect
     # line (RenameNode) within their container.
     tree = nv.build_tree([
@@ -78,7 +78,7 @@ def test_rename_renders_after_narration_in_sdk_order() -> None:
            model="m", provider="anthropic"),
         ev("3", "quest_renamed", agent_id="step:design/spec", id=1,
            old_title="", new_title="Order the rename"),
-        ev("4", "llm_response", agent_id="step:design/spec", provider="anthropic",
+        ev("4", "agent_message", agent_id="step:design/spec", provider="anthropic",
            model="m", stop_reason="end_turn", usage={},
            raw={"content": [{"type": "text", "text": "Naming this change now."}]}),
         ev("5", "tool_call", agent_id="step:design/spec", id="c1",
@@ -98,7 +98,7 @@ def test_rename_renders_after_narration_in_sdk_order() -> None:
 
 
 def test_rename_without_narration_flushes_at_step_boundary() -> None:
-    # A rename with no following llm_response before the step ends still produces
+    # A rename with no following agent_message before the step ends still produces
     # exactly one RenameNode, flushed into the step at the step_completed boundary.
     tree = nv.build_tree([
         ev("1", "quest_created", quest_id=1, title=""),

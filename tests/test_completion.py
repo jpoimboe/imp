@@ -75,6 +75,20 @@ class _RecordingLog:
     def append(self, **ev: object) -> None:
         self.events.append(ev)
 
+    def append_engine_message(self, *, agent_id: str | None,
+                              message: object, subtype: str) -> dict:
+        ev: dict = {
+            "agent_id": agent_id, "type": "engine_message",
+            "payload": {
+                "role": message.role,  # type: ignore[union-attr]
+                "content": [{"type": "text", "text": b.text}  # type: ignore[union-attr]
+                            for b in message.content],  # type: ignore[union-attr]
+                "subtype": subtype,
+            },
+        }
+        self.events.append(ev)
+        return ev
+
 
 @pytest.fixture
 def anyio_backend() -> str:
@@ -258,15 +272,17 @@ def test_first_bare_turn_end_returns_the_nudge_string() -> None:
     assert fn("the real question") == (COMPLETION_NUDGE, False)
 
 
-def test_nudge_emits_completion_nudge_event_with_message() -> None:
+def test_nudge_emits_engine_message_completion_with_message() -> None:
     log = _RecordingLog()
     fn = build_continuation_fn(
         event_log=log, agent_id="a1", has_schema=True, interactive=False)
     fn("prose without complete_step")
-    nudges = [e for e in log.events if e["type"] == "completion_nudge"]
+    nudges = [e for e in log.events
+              if e["type"] == "engine_message"
+              and e["payload"].get("subtype") == "completion"]
     assert len(nudges) == 1
     assert nudges[0]["agent_id"] == "a1"
-    assert nudges[0]["payload"] == {"message": COMPLETION_NUDGE}
+    assert nudges[0]["payload"]["content"][0]["text"] == COMPLETION_NUDGE
 
 
 def test_second_bare_turn_end_falls_through_to_park_no_second_nudge() -> None:
@@ -278,7 +294,9 @@ def test_second_bare_turn_end_falls_through_to_park_no_second_nudge() -> None:
     assert fn("the real question") == (COMPLETION_NUDGE, False)
     with pytest.raises(AwaitingUserInput):
         fn("WAITING")
-    nudges = [e for e in log.events if e["type"] == "completion_nudge"]
+    nudges = [e for e in log.events
+              if e["type"] == "engine_message"
+              and e["payload"].get("subtype") == "completion"]
     assert len(nudges) == 1
 
 
@@ -299,7 +317,10 @@ def test_interactive_true_never_nudges_and_parks_immediately() -> None:
     with pytest.raises(AwaitingUserInput) as exc_info:
         fn("a question")
     assert exc_info.value.prompt == "a question"
-    assert not any(e["type"] == "completion_nudge" for e in log.events)
+    assert not any(
+        e["type"] == "engine_message"
+        and e["payload"].get("subtype") == "completion"
+        for e in log.events)
 
 
 def test_no_schema_never_nudges_and_parks_immediately() -> None:
@@ -311,7 +332,10 @@ def test_no_schema_never_nudges_and_parks_immediately() -> None:
     with pytest.raises(AwaitingUserInput) as exc_info:
         fn("a question")
     assert exc_info.value.prompt == "a question"
-    assert not any(e["type"] == "completion_nudge" for e in log.events)
+    assert not any(
+        e["type"] == "engine_message"
+        and e["payload"].get("subtype") == "completion"
+        for e in log.events)
 
 
 def test_pending_interject_wins_over_nudge() -> None:
@@ -322,7 +346,10 @@ def test_pending_interject_wins_over_nudge() -> None:
         coordinator=coord, event_log=log, agent_id="a1",
         has_schema=True, interactive=False)
     assert fn("which database?") == ("stop and reconsider", True)
-    assert not any(e["type"] == "completion_nudge" for e in log.events)
+    assert not any(
+        e["type"] == "engine_message"
+        and e["payload"].get("subtype") == "completion"
+        for e in log.events)
 
 
 @pytest.mark.anyio
@@ -347,7 +374,9 @@ async def test_attended_first_yield_nudges_then_solicits(
     assert human is True
     assert inspect.isawaitable(text)
     assert await text == "use postgres"
-    nudges = [e for e in log.events if e["type"] == "completion_nudge"]
+    nudges = [e for e in log.events
+              if e["type"] == "engine_message"
+              and e["payload"].get("subtype") == "completion"]
     assert len(nudges) == 1
 
 
@@ -375,7 +404,9 @@ async def test_two_consecutive_yields_each_get_exactly_one_nudge(
     assert await text == "carry on"
     # Yield 2 — a later, separate bare turn-end
     assert fn("question two") == (COMPLETION_NUDGE, False)
-    nudges = [e for e in log.events if e["type"] == "completion_nudge"]
+    nudges = [e for e in log.events
+              if e["type"] == "engine_message"
+              and e["payload"].get("subtype") == "completion"]
     assert len(nudges) == 2
 
 
@@ -397,7 +428,9 @@ def test_interject_after_nudge_clears_bit_so_later_yield_re_nudges() -> None:
     assert fn("WAITING") == ("actually, do X instead", True)
     # Yield 2: a later separate bare turn-end must get a FRESH nudge, not a park.
     assert fn("question two") == (COMPLETION_NUDGE, False)
-    nudges = [e for e in log.events if e["type"] == "completion_nudge"]
+    nudges = [e for e in log.events
+              if e["type"] == "engine_message"
+              and e["payload"].get("subtype") == "completion"]
     assert len(nudges) == 2
 
 

@@ -41,7 +41,7 @@ async def test_anthropic_malformed_complete_step_nudged_then_recovers(
     fake = FakeAsyncAnthropic([
         # Turn 1: missing required 'status' -> nudge.
         response(tool_use("c1", "complete_step", {"note": "no status"})),
-        # Turn 2: valid -> agent_output.
+        # Turn 2: valid -> agent_result.
         response(tool_use("c2", "complete_step",
                           {"status": "Success", "note": "ok"})),
     ])
@@ -51,7 +51,7 @@ async def test_anthropic_malformed_complete_step_nudged_then_recovers(
     events = [e async for e in runner.run(_anthropic_inv(tmp_path, event_log=log))]
 
     ctrl = control_events(events)
-    assert [e["type"] for e in ctrl] == ["agent_output"]
+    assert [e["type"] for e in ctrl] == ["agent_result"]
     assert ctrl[-1]["payload"] == {"status": "Success", "note": "ok"}
     log_types = [e["type"] for e in log.read()]
     assert log_types.count("output_validation_nudge") == 1
@@ -93,7 +93,7 @@ async def test_openai_malformed_complete_step_nudged_then_recovers(
     events = [e async for e in runner.run(_openai_inv(tmp_path, event_log=log))]
 
     ctrl = control_events(events)
-    assert [e["type"] for e in ctrl] == ["agent_output"]
+    assert [e["type"] for e in ctrl] == ["agent_result"]
     assert ctrl[-1]["payload"] == {"status": "Success", "note": "ok"}
     log_types = [e["type"] for e in log.read()]
     assert log_types.count("output_validation_nudge") == 1

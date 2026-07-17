@@ -1,5 +1,5 @@
-"""run_quest emits a display-only opening_intent event once on a fresh run,
-right after tiers_resolved; never on a resume, never when seed_opening is empty."""
+"""run_quest emits a user_message/intent event (agent_id=None) once on a fresh run;
+never on a resume, never when seed_opening is absent or empty."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -160,7 +160,7 @@ async def test_opening_not_delivered_to_downstream_step(tmp_path: Path) -> None:
 
 
 @pytest.mark.anyio
-async def test_opening_intent_emitted_from_seed_opening(tmp_path: Path) -> None:
+async def test_intent_user_message_emitted_from_seed_opening(tmp_path: Path) -> None:
     quest = _seed(tmp_path)
     quest.seed_opening = "add a --json flag"
     _register_prompt_capturing({"status": "Success"}, [])
@@ -168,28 +168,31 @@ async def test_opening_intent_emitted_from_seed_opening(tmp_path: Path) -> None:
     assert result is RunResult.COMPLETED
 
     types = [e["type"] for e in JsonlEventLog(quest.events_path).read()]
-    assert "opening_intent" in types
-    assert types.index("opening_intent") == types.index("tiers_resolved") + 1
-    payload = next(e["payload"] for e in JsonlEventLog(quest.events_path).read()
-                   if e["type"] == "opening_intent")
-    assert payload == {"text": "add a --json flag"}
+    assert "user_message" in types
+    intent = next(e for e in JsonlEventLog(quest.events_path).read()
+                  if e["type"] == "user_message")
+    assert intent["agent_id"] is None
+    assert intent["payload"]["subtype"] == "intent"
+    assert intent["payload"]["content"][0]["text"] == "add a --json flag"
 
 
 @pytest.mark.anyio
-async def test_no_opening_intent_when_seed_opening_absent_or_empty(tmp_path: Path) -> None:
+async def test_no_intent_user_message_when_seed_opening_absent_or_empty(tmp_path: Path) -> None:
     quest = _seed(tmp_path)                    # change.seed_opening is None
     _register_prompt_capturing({"status": "Success"}, [])
-    await run_quest(quest)
+    result = await run_quest(quest)
+    assert result is RunResult.COMPLETED
     types = [e["type"] for e in JsonlEventLog(quest.events_path).read()]
-    assert "opening_intent" not in types
+    assert "user_message" not in types
 
     (tmp_path / "other").mkdir()
     change2 = _seed(tmp_path / "other")
     change2.seed_opening = ""                   # empty string is suppressed (falsy)
     _register_prompt_capturing({"status": "Success"}, [])
-    await run_quest(change2)
+    result2 = await run_quest(change2)
+    assert result2 is RunResult.COMPLETED
     types2 = [e["type"] for e in JsonlEventLog(change2.events_path).read()]
-    assert "opening_intent" not in types2
+    assert "user_message" not in types2
 
 
 @pytest.mark.anyio

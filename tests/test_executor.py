@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from imp.agents.runner import AgentInvocation, AgentRunner, Event
+from imp.agents.runner import AgentInvocation, AgentRunner, Event, Message, TextBlock
 from imp.agents.transcript import Transcript
 from imp.engine.executor import RunResult, run_quest
 from imp.engine.feedback import COMPLETION_BACKSTOP
@@ -35,8 +35,12 @@ def _persist_initial(invocation: AgentInvocation) -> None:
             agent_id=invocation.agent_id,
             parent_id_override=invocation.first_event_parent_id,
             provider=invocation.provider_name, model="m",
-            system_prompt=invocation.system_prompt,
             tools_schema=[], params={}, max_tool_calls=None)
+        invocation.event_log.append_engine_message(
+            agent_id=invocation.agent_id,
+            message=Message(role="system",
+                            content=(TextBlock(text=invocation.system_prompt),)),
+            subtype="system_prompt")
 
 
 def _make_change(root: Path, *, quest_id: str = "test-change", title: str = "t") -> Quest:
@@ -97,7 +101,7 @@ class _FakeRunner:
         self._output = output
 
     async def run(self, invocation: AgentInvocation) -> AsyncIterator[Event]:
-        yield {"type": "agent_output", "payload": {"outcome": "ok", **self._output}}
+        yield {"type": "agent_result", "payload": {"outcome": "ok", **self._output}}
 
     async def interrupt(self) -> None:
         pass
@@ -130,7 +134,7 @@ class _CapturingRunner:
 
     async def run(self, invocation: AgentInvocation) -> AsyncGenerator[Event, None]:
         self._sink.append(invocation.system_prompt)
-        yield {"type": "agent_output", "payload": {"outcome": "ok", **self._output}}
+        yield {"type": "agent_result", "payload": {"outcome": "ok", **self._output}}
 
     async def interrupt(self) -> None:
         pass
@@ -164,7 +168,7 @@ class _InvocationCapturingRunner:
 
     async def run(self, invocation: AgentInvocation) -> AsyncGenerator[Event, None]:
         self._sink.append(invocation)
-        yield {"type": "agent_output", "payload": {"outcome": "ok", **self._output}}
+        yield {"type": "agent_result", "payload": {"outcome": "ok", **self._output}}
 
     async def interrupt(self) -> None:
         pass
@@ -469,10 +473,10 @@ async def test_backward_goto_increments_loop_count_and_trips_max_loops(
 
         async def run(self, invocation: AgentInvocation) -> AsyncIterator[Event]:
             if self._name == "reviewer":
-                yield {"type": "agent_output",
+                yield {"type": "agent_result",
                        "payload": {"outcome": "ok", "status": "Success", "verdict": "rework"}}
             else:
-                yield {"type": "agent_output", "payload": {"outcome": "ok", "status": "Success"}}
+                yield {"type": "agent_result", "payload": {"outcome": "ok", "status": "Success"}}
 
         async def interrupt(self) -> None:
             pass
@@ -544,10 +548,10 @@ async def test_max_loops_pause_resets_counter_for_fresh_resume(tmp_path: Path) -
         async def run(self, invocation: AgentInvocation) -> AsyncIterator[Event]:
             if self._name == "reviewer":
                 reviewer_calls.append(1)
-                yield {"type": "agent_output",
+                yield {"type": "agent_result",
                        "payload": {"outcome": "ok", "status": "Success", "verdict": "rework"}}
             else:
-                yield {"type": "agent_output",
+                yield {"type": "agent_result",
                        "payload": {"outcome": "ok", "status": "Success"}}
 
         async def interrupt(self) -> None:
@@ -634,10 +638,10 @@ async def test_progress_goto_resets_counter_and_never_trips(tmp_path: Path) -> N
             if self._name == "reviewer":
                 reviewer_calls.append(1)
                 verdict = "rework" if len(reviewer_calls) <= 5 else "approve"
-                yield {"type": "agent_output",
+                yield {"type": "agent_result",
                        "payload": {"outcome": "ok", "status": "Success", "verdict": verdict}}
             else:
-                yield {"type": "agent_output",
+                yield {"type": "agent_result",
                        "payload": {"outcome": "ok", "status": "Success"}}
 
         async def interrupt(self) -> None:
@@ -717,10 +721,10 @@ async def test_forward_goto_resets_leaped_over_step_counter(tmp_path: Path) -> N
             if self._name == "a":
                 a_calls.append(1)
                 route = "toB" if len(a_calls) == 1 else "toC"
-                yield {"type": "agent_output",
+                yield {"type": "agent_result",
                        "payload": {"outcome": "ok", "status": "Success", "route": route}}
             else:
-                yield {"type": "agent_output",
+                yield {"type": "agent_result",
                        "payload": {"outcome": "ok", "status": "Success", "route": "toC"}}
 
         async def interrupt(self) -> None:
@@ -827,7 +831,7 @@ async def test_step_events_carry_step_agent_id_and_step_started_seeds_chain(
     await run_quest(quest, on_event=lambda _e: None)
     events = list(quest.event_log().read())
     started = next(e for e in events if e["type"] == "step_started")
-    output = next(e for e in events if e["type"] == "agent_output")
+    output = next(e for e in events if e["type"] == "agent_result")
     assert started["agent_id"] is None
     assert output["agent_id"] == f"step:{phase}/{step}"
 
@@ -951,7 +955,7 @@ class _RateLimitThenSuccessRunner:
                 "message": "429 Too Many Requests",
             }}
             return
-        yield {"type": "agent_output", "payload": {"outcome": "ok", **self._output}}
+        yield {"type": "agent_result", "payload": {"outcome": "ok", **self._output}}
 
     async def interrupt(self) -> None:
         pass
@@ -974,7 +978,7 @@ class _AuthThenSuccessRunner:
                 "message": "401 Invalid authentication credentials",
             }}
             return
-        yield {"type": "agent_output", "payload": {"outcome": "ok", **self._output}}
+        yield {"type": "agent_result", "payload": {"outcome": "ok", **self._output}}
 
     async def interrupt(self) -> None:
         pass
@@ -1244,7 +1248,7 @@ async def test_system_prompt_carries_completion_instruction_and_continuation(
     class _CapRunner:
         async def run(self, invocation: AgentInvocation) -> AsyncIterator[Event]:
             captured["inv"] = invocation
-            yield {"type": "agent_output",
+            yield {"type": "agent_result",
                    "payload": {"outcome": "ok", "status": "Success", "verdict": "approve"}}
 
         async def interrupt(self) -> None:
@@ -1333,10 +1337,10 @@ async def test_goto_feedback_resumes_target_with_wrapper(tmp_path: Path) -> None
             if invocation.agent_def.name == "reviewer":
                 reviewer_calls["n"] += 1
                 verdict = "Reject" if reviewer_calls["n"] == 1 else "Accept"
-                yield {"type": "agent_output",
+                yield {"type": "agent_result",
                        "payload": {"outcome": "ok", "status": "Success", "verdict": verdict}}
             else:
-                yield {"type": "agent_output", "payload": {"outcome": "ok", "status": "Success"}}
+                yield {"type": "agent_result", "payload": {"outcome": "ok", "status": "Success"}}
 
         async def interrupt(self) -> None:
             pass
@@ -1443,7 +1447,7 @@ async def test_fresh_start_puts_task_in_first_user_message(
     class _CapRunner:
         async def run(self, invocation: AgentInvocation) -> AsyncIterator[Event]:
             captured["inv"] = invocation
-            yield {"type": "agent_output", "payload": {"outcome": "ok", "status": "Success"}}
+            yield {"type": "agent_result", "payload": {"outcome": "ok", "status": "Success"}}
 
         async def interrupt(self) -> None:
             pass
@@ -1529,11 +1533,11 @@ def _register_capturing(coder_behavior, reviewer_verdicts: list[str], runs: list
                         "category": "api",
                         "kind": "api_error", "message": "x"}}
                     return
-                yield {"type": "agent_output", "payload": {"outcome": "ok", **payload}}
+                yield {"type": "agent_result", "payload": {"outcome": "ok", **payload}}
             else:
                 counts["reviewer"] += 1
                 verdict = reviewer_verdicts[counts["reviewer"] - 1]
-                yield {"type": "agent_output",
+                yield {"type": "agent_result",
                        "payload": {"outcome": "ok", "status": "Success", "verdict": verdict}}
 
         async def interrupt(self) -> None:
@@ -1592,10 +1596,10 @@ async def test_goto_feedback_prepended_to_fresh_user_message(tmp_path: Path) -> 
             if invocation.agent_def.name == "reviewer":
                 reviewer_n = len([i for i in invs if i.agent_def.name == "reviewer"])
                 verdict = "rework" if reviewer_n == 1 else "approve"
-                yield {"type": "agent_output",
+                yield {"type": "agent_result",
                        "payload": {"outcome": "ok", "verdict": verdict, "status": "Success"}}
             else:
-                yield {"type": "agent_output",
+                yield {"type": "agent_result",
                        "payload": {"outcome": "ok", "status": "Success"}}
 
         async def interrupt(self) -> None:
@@ -1680,11 +1684,11 @@ async def test_resume_is_constant_across_error_retry(tmp_path: Path) -> None:
                         "category": "agent_output_missing",
                         "kind": "missing", "message": "x"}}
                     return
-                yield {"type": "agent_output", "payload": {"outcome": "ok", "status": "Success"}}
+                yield {"type": "agent_result", "payload": {"outcome": "ok", "status": "Success"}}
             else:
                 counts["reviewer"] += 1
                 verdict = "rework" if counts["reviewer"] == 1 else "approve"
-                yield {"type": "agent_output",
+                yield {"type": "agent_result",
                        "payload": {"outcome": "ok", "status": "Success", "verdict": verdict}}
 
         async def interrupt(self) -> None:
@@ -1730,11 +1734,11 @@ async def test_resume_survives_pause_and_reload(tmp_path: Path) -> None:
                         "category": "api",
                         "kind": "api_error", "message": "x"}}
                     return
-                yield {"type": "agent_output", "payload": {"outcome": "ok", "status": "Success"}}
+                yield {"type": "agent_result", "payload": {"outcome": "ok", "status": "Success"}}
             else:
                 counts["reviewer"] += 1
                 verdict = "rework" if counts["reviewer"] == 1 else "approve"
-                yield {"type": "agent_output",
+                yield {"type": "agent_result",
                        "payload": {"outcome": "ok", "status": "Success", "verdict": verdict}}
 
         async def interrupt(self) -> None:
@@ -1789,10 +1793,10 @@ async def test_resume_keep_branch_passes_empty_initial_messages(
             if invocation.agent_def.name == "reviewer":
                 reviewer_calls["n"] += 1
                 verdict = "rework" if reviewer_calls["n"] == 1 else "approve"
-                yield {"type": "agent_output",
+                yield {"type": "agent_result",
                        "payload": {"outcome": "ok", "status": "Success", "verdict": verdict}}
             else:
-                yield {"type": "agent_output", "payload": {"outcome": "ok", "status": "Success"}}
+                yield {"type": "agent_result", "payload": {"outcome": "ok", "status": "Success"}}
 
         async def interrupt(self) -> None:
             pass
@@ -2162,7 +2166,7 @@ async def test_tolerated_forward_advance_resets_gate_loop_counter(
             # Gate resumes have empty initial_messages; those tolerate.
             tol = not invocation.initial_messages
             _persist_initial(invocation)
-            yield {"type": "agent_output",
+            yield {"type": "agent_result",
                    "payload": {"outcome": "ok", "status": "Success", "tol": tol}}
 
         async def interrupt(self) -> None:
@@ -2234,7 +2238,7 @@ async def test_agent_step_without_outcome_fails_to_complete(tmp_path: Path) -> N
 
     class _NoOutcomeRunner:
         async def run(self, invocation: AgentInvocation) -> AsyncIterator[Event]:
-            yield {"type": "agent_output", "payload": {"status": "Success"}}
+            yield {"type": "agent_result", "payload": {"status": "Success"}}
 
         async def interrupt(self) -> None:
             pass
@@ -2312,12 +2316,12 @@ async def test_rework_reentry_injects_prior_attempts(tmp_path: Path) -> None:
             if self._name == "writer":
                 writer_openings.append(
                     invocation.initial_messages[0].content[0].text)
-                yield {"type": "agent_output", "payload": {
+                yield {"type": "agent_result", "payload": {
                     "status": "Success", "outcome": "WROTE THE PLAN"}}
             else:
                 verdict = "rework" if review_count[0] == 0 else "approve"
                 review_count[0] += 1
-                yield {"type": "agent_output", "payload": {
+                yield {"type": "agent_result", "payload": {
                     "status": "Success", "verdict": verdict, "outcome": "reviewed"}}
 
         async def interrupt(self) -> None:
@@ -2389,12 +2393,12 @@ async def test_step_lap_render_var_increments_across_bounce(tmp_path: Path) -> N
             if self._name == "writer":
                 writer_prompts.append(
                     invocation.initial_messages[0].content[0].text)
-                yield {"type": "agent_output",
+                yield {"type": "agent_result",
                        "payload": {"status": "Success", "outcome": "wrote"}}
             else:
                 verdict = "rework" if review_count[0] == 0 else "approve"
                 review_count[0] += 1
-                yield {"type": "agent_output",
+                yield {"type": "agent_result",
                        "payload": {"status": "Success", "outcome": "reviewed",
                                    "verdict": verdict}}
 
@@ -2540,10 +2544,10 @@ async def test_step_started_payload_carries_label_and_resumed(tmp_path: Path) ->
             if invocation.agent_def.name == "reviewer":
                 reviewer_calls["n"] += 1
                 verdict = "Reject" if reviewer_calls["n"] == 1 else "Accept"
-                yield {"type": "agent_output",
+                yield {"type": "agent_result",
                        "payload": {"outcome": "ok", "status": "Success", "verdict": verdict}}
             else:
-                yield {"type": "agent_output", "payload": {"outcome": "ok", "status": "Success"}}
+                yield {"type": "agent_result", "payload": {"outcome": "ok", "status": "Success"}}
 
         async def interrupt(self) -> None:
             pass
@@ -2617,10 +2621,10 @@ async def test_step_started_restarted_true_when_resumed_transcript_empty(tmp_pat
                 _persist_initial(invocation)
                 reviewer_calls["n"] += 1
                 verdict = "Reject" if reviewer_calls["n"] == 1 else "Accept"
-                yield {"type": "agent_output",
+                yield {"type": "agent_result",
                        "payload": {"outcome": "ok", "status": "Success", "verdict": verdict}}
             else:
-                yield {"type": "agent_output", "payload": {"outcome": "ok", "status": "Success"}}
+                yield {"type": "agent_result", "payload": {"outcome": "ok", "status": "Success"}}
 
         async def interrupt(self) -> None:
             pass
@@ -2659,7 +2663,7 @@ class _FlipRunner:
         self._sink.append(invocation.sandbox_policy.worktree)
         if len(self._sink) == 1:                       # first step = go-live flip
             invocation.quest.project_root = self._wt
-        yield {"type": "agent_output",
+        yield {"type": "agent_result",
                "payload": {"outcome": "ok", "status": "Success"}}
 
     async def interrupt(self) -> None:
@@ -3338,10 +3342,10 @@ async def test_goto_fresh_path_feedback_carries_backstop(tmp_path: Path) -> None
             if invocation.agent_def.name == "reviewer":
                 reviewer_n = len([i for i in invs if i.agent_def.name == "reviewer"])
                 verdict = "rework" if reviewer_n == 1 else "approve"
-                yield {"type": "agent_output",
+                yield {"type": "agent_result",
                        "payload": {"outcome": "ok", "verdict": verdict, "status": "Success"}}
             else:
-                yield {"type": "agent_output",
+                yield {"type": "agent_result",
                        "payload": {"outcome": "ok", "status": "Success"}}
 
         async def interrupt(self) -> None:
@@ -3413,7 +3417,7 @@ async def test_backward_gate_bounce_emits_step_transition(tmp_path: Path) -> Non
     class _Runner:
         async def run(self, invocation: AgentInvocation):
             _persist_initial(invocation)
-            yield {"type": "agent_output",
+            yield {"type": "agent_result",
                    "payload": {"outcome": "ok", "status": "Success"}}
 
         async def interrupt(self) -> None:
@@ -3486,7 +3490,7 @@ async def test_forward_only_run_emits_no_step_transition(tmp_path: Path) -> None
     class _Runner:
         async def run(self, invocation: AgentInvocation):
             _persist_initial(invocation)
-            yield {"type": "agent_output",
+            yield {"type": "agent_result",
                    "payload": {"outcome": "ok", "status": "Success"}}
 
         async def interrupt(self) -> None:
@@ -3539,7 +3543,7 @@ async def test_self_goto_retry_emits_no_step_transition(tmp_path: Path) -> None:
     class _Runner:
         async def run(self, invocation: AgentInvocation):
             _persist_initial(invocation)
-            yield {"type": "agent_output",
+            yield {"type": "agent_result",
                    "payload": {"outcome": "ok", "status": "Success"}}
 
         async def interrupt(self) -> None:
@@ -4022,15 +4026,15 @@ async def test_cross_plan_verify_counter_independent(tmp_path: Path) -> None:
                 # plan-writer) has a non-empty seed and continues to verify.
                 tol = not invocation.initial_messages
                 _persist_initial(invocation)
-                yield {"type": "agent_output",
+                yield {"type": "agent_result",
                        "payload": {"outcome": "ok", "status": "Success", "tol": tol}}
             elif self._name == "check-next-plan":
                 cnp_calls.append(1)
                 more = len(cnp_calls) < PLANS
-                yield {"type": "agent_output",
+                yield {"type": "agent_result",
                        "payload": {"outcome": "ok", "status": "Success", "more": more}}
             else:
-                yield {"type": "agent_output",
+                yield {"type": "agent_result",
                        "payload": {"outcome": "ok", "status": "Success"}}
 
         async def interrupt(self) -> None:
@@ -4110,10 +4114,10 @@ async def test_per_step_counters_do_not_sum(tmp_path: Path) -> None:
             if name in calls:
                 calls[name] += 1
                 verdict = "rework" if calls[name] <= 6 else "approve"
-                yield {"type": "agent_output",
+                yield {"type": "agent_result",
                        "payload": {"outcome": "ok", "status": "Success", "verdict": verdict}}
             else:
-                yield {"type": "agent_output",
+                yield {"type": "agent_result",
                        "payload": {"outcome": "ok", "status": "Success"}}
 
         async def interrupt(self) -> None:

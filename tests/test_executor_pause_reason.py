@@ -198,7 +198,7 @@ async def test_max_loops_pause_reason_unchanged(tmp_path: Path) -> None:
 
     class _ReworkRunner:
         async def run(self, invocation: AgentInvocation) -> AsyncIterator[Event]:
-            yield {"type": "agent_output",
+            yield {"type": "agent_result",
                    "payload": {"outcome": "ok", "status": "Success", "verdict": "rework"}}
 
         async def interrupt(self) -> None:
@@ -242,7 +242,7 @@ async def test_ctrl_d_interrupt_records_interrupt_reason_on_workflow_paused(
     class _InterruptingRunner:
         async def run(self, inv: AgentInvocation) -> AsyncIterator[Event]:
             await coord.signal_pause(reason="ctrl-d")
-            yield {"type": "agent_output",
+            yield {"type": "agent_result",
                    "payload": {"outcome": "ok", "status": "Success"}}
 
         async def interrupt(self) -> None:

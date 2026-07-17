@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from imp.agents.transcript import SkillReply
 
+from imp.agents.runner import Message, TextBlock
 from imp.engine.feedback import COMPLETION_NUDGE
 from imp.engine.types import OutputSchema
 
@@ -147,7 +148,7 @@ def build_continuation_fn(
       2. One-shot disambiguation nudge (schema-bearing, non-interactive-flag agents
          only): the FIRST bare turn-end of a yield returns COMPLETION_NUDGE as
          the next user message — asking the agent to call complete_step or reply
-         WAITING — and emits a completion_nudge event. Fires at most once per
+         WAITING — and emits an `engine_message`/`completion` event. Fires at most once per
          yield; behavior keys only on whether the next turn calls complete_step.
       3. Already nudged, or nudge not applicable (interactive steps, or schema-less
          agents — a true subagent's bare turn-end is its deliverable and never
@@ -178,8 +179,11 @@ def build_continuation_fn(
 
     def _emit_nudge() -> None:
         if event_log is not None:
-            event_log.append(agent_id=agent_id, type="completion_nudge",
-                             payload={"message": COMPLETION_NUDGE})
+            event_log.append_engine_message(
+                agent_id=agent_id,
+                message=Message(role="user",
+                                content=(TextBlock(text=COMPLETION_NUDGE),)),
+                subtype="completion")
 
     nudged = False
     pre_nudge_text = ""

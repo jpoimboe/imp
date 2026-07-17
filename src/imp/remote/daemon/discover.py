@@ -69,7 +69,7 @@ def snapshot(control_root: Path, quest_id: str) -> tuple[str, str, str] | None:
 
 
 def recent_narrative(control_root: Path, quest_id: str, n: int) -> list[dict[str, Any]]:
-    """Last n non-empty llm_response events, oldest-first, augmented for /replay."""
+    """Last n non-empty agent_message events, oldest-first, augmented for /replay."""
     from imp.cli.main import _load_events_for_id
     from imp.remote.curate import EventCurator
     from imp.remote.drivers.telegram import event_body
@@ -80,8 +80,8 @@ def recent_narrative(control_root: Path, quest_id: str, n: int) -> list[dict[str
         return []
     selected = [
         event for event in events
-        if event.get("type") == "llm_response"
-        and event_body("llm_response", event.get("payload") or {}).strip()
+        if event.get("type") == "agent_message"
+        and event_body("agent_message", event.get("payload") or {}).strip()
     ]
     snap = snapshot(control_root, quest_id)
     title = snap[2] if snap is not None else ""

@@ -59,7 +59,7 @@ def test_main_sends_hello_forwards_stdin_and_relays_reply(tmp_path: Path) -> Non
     try:
         out = io.StringIO()
         r_fd, w_fd = os.pipe()
-        event_line = b'{"type": "agent_output", "payload": {"k": "v"}}\n'
+        event_line = b'{"type": "agent_result", "payload": {"k": "v"}}\n'
         os.write(w_fd, event_line)
         os.close(w_fd)   # EOF after the one event line
         with os.fdopen(r_fd) as stdin_pipe:
@@ -69,7 +69,7 @@ def test_main_sends_hello_forwards_stdin_and_relays_reply(tmp_path: Path) -> Non
         assert rc == 0
         assert out.getvalue() == "do the thing\n"
         assert parse_hello(received[0]) == ("2026-06-13-abc", "Add dark mode", False)
-        assert received[1] == '{"type": "agent_output", "payload": {"k": "v"}}'
+        assert received[1] == '{"type": "agent_result", "payload": {"k": "v"}}'
     finally:
         srv.close()
 

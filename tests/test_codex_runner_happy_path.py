@@ -88,7 +88,7 @@ def _build_invocation(
 
 
 @pytest.mark.anyio
-async def test_run_yields_agent_output_when_complete_step_captured(
+async def test_run_yields_agent_result_when_complete_step_captured(
     tmp_path: Path,
 ) -> None:
     _seed_git_and_auth(tmp_path)
@@ -119,8 +119,8 @@ async def test_run_yields_agent_output_when_complete_step_captured(
         events.append(ev)
 
     kinds = [e.get("type") for e in events]
-    assert "agent_output" in kinds, events
-    out = next(e for e in events if e.get("type") == "agent_output")
+    assert "agent_result" in kinds, events
+    out = next(e for e in events if e.get("type") == "agent_result")
     assert out["payload"] == {"answer": "42"}
 
 
@@ -164,7 +164,7 @@ async def test_drive_turns_sweeps_bg_per_event(
     inv = _build_invocation(tmp_path, event_log=elog)
 
     events = [e async for e in runner.run(inv)]
-    assert events[-1]["type"] == "agent_output"
+    assert events[-1]["type"] == "agent_result"
     assert calls["n"] >= 2
 
 
@@ -237,7 +237,7 @@ async def test_response_wait_is_request_bracketed(tmp_path: Path) -> None:
         _build_invocation(tmp_path, event_log=elog), coordinator=coord)
     events = [e async for e in runner.run(inv)]
 
-    assert events[-1]["type"] == "agent_output"
+    assert events[-1]["type"] == "agent_result"
     # request_bracketed arms request_active while awaiting each of the 4 streamed
     # events (thread.started, the agent_message item, the complete_step item,
     # turn.completed).
@@ -272,7 +272,7 @@ async def test_codex_gen_close_runs_teardown(tmp_path: Path) -> None:
     impossible to break at a mid-stream yield and call gen.aclose() from the
     same task. Cancellation is equivalent for the finally assertion.
 
-    Construction mirrored from test_run_yields_agent_output_when_complete_step_captured
+    Construction mirrored from test_run_yields_agent_result_when_complete_step_captured
     (same file): _seed_git_and_auth, _canonical_auth_override, FakeCodex
     client_factory, _build_invocation — adapted to add bash to agent_def.tools.
     """

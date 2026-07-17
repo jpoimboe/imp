@@ -3,13 +3,13 @@
 Loop:
   1. Build messages (transcript or initial_messages)
   2. POST to messages.stream with declared tools; pulse coordinator per event
-  3. Append assistant response to transcript; append llm_response to EventLog
+  3. Append assistant response to transcript; append agent_message to EventLog
   4. For each tool_use block: dispatch tool, append tool_result to EventLog
-  5. complete_step catches StepComplete → validate, emit agent_output, return
+  5. complete_step catches StepComplete → validate, emit agent_result, return
   6. No tool_use in assistant: nudge via continuation_fn; else error
 
-Yields ONLY control signals: agent_output, error.
-All audit events (step_context, user_message, llm_response, tool_call,
+Yields ONLY control signals: agent_result, error.
+All audit events (step_context, user_message, agent_message, tool_call,
 tool_result, thinking, runner_warning, tool_killed) are written via EventLog.
 """
 
@@ -235,7 +235,7 @@ def _message_to_anthropic(msg: Message) -> dict[str, Any]:
 
 
 def _serialize_anthropic_response(response: Any) -> dict[str, Any]:
-    """Serialize a provider response to a plain dict (the llm_response.raw
+    """Serialize a provider response to a plain dict (the agent_message.raw
     value). Prefers SDK pydantic .model_dump() for max fidelity; falls back to
     introspecting .content / .stop_reason / .usage for test fakes. Both paths
     produce {content: [block-dicts], stop_reason, usage, model}."""
@@ -562,7 +562,7 @@ class AnthropicAgentRunner:
                     and classify_resume(messages) is ResumeState.AWAITING_USER):
                 final_text = last_assistant_text(messages)
                 if final_text:
-                    yield {"type": "agent_output",
+                    yield {"type": "agent_result",
                            "payload": {"text": final_text}}
                 return
             # Mid-tool Ctrl+C (spec §6.15) can leave a dangling tool_use when
@@ -654,13 +654,18 @@ class AnthropicAgentRunner:
             elog.append_step_context(
                 agent_id=aid, parent_id_override=invocation.first_event_parent_id,
                 provider=invocation.provider_name, model=self.model,
-                system_prompt=invocation.system_prompt,
                 tools_schema=[_anthropic_tool_schema(t) for t in tools.values()],
                 params={"max_tokens": max_output_tokens},
                 max_tool_calls=invocation.max_tool_calls)
+            elog.append_engine_message(
+                agent_id=aid,
+                message=Message(role="system",
+                                content=(TextBlock(text=invocation.system_prompt),)),
+                subtype="system_prompt")
             for m in invocation.initial_messages:
                 if all(isinstance(b, TextBlock) for b in m.content):
-                    elog.append_user_message(agent_id=aid, message=m, human=False)
+                    elog.append_engine_message(
+                        agent_id=aid, message=m, subtype="agent_prompt")
 
         # max_tool_calls is opt-in; None means no cap. The engine resolves
         # agent_def -> workflow.defaults -> None and passes the result via
@@ -757,7 +762,7 @@ class AnthropicAgentRunner:
             messages.append(assistant_msg)
             transcript.append(assistant_msg)
             usage = raw.get("usage") or {}
-            elog.append_llm_response(
+            elog.append_agent_message(
                 agent_id=aid, provider=invocation.provider_name,
                 model=raw.get("model") or self.model,
                 raw=raw, usage=usage,
@@ -820,7 +825,7 @@ class AnthropicAgentRunner:
                 if invocation.subagent_depth > 0:
                     final_text = last_assistant_text(messages)
                     if final_text:
-                        yield {"type": "agent_output",
+                        yield {"type": "agent_result",
                                "payload": {"text": final_text}}
                     return
                 cont = invocation.continuation_fn
@@ -920,7 +925,7 @@ class AnthropicAgentRunner:
                 hmsg = Message(role="user", content=(TextBlock(text=instr),))
                 messages.append(hmsg)
                 transcript.append(hmsg)
-                elog.append_user_message(agent_id=aid, message=hmsg, human=False)
+                elog.append_engine_message(agent_id=aid, message=hmsg, subtype="continuation")
                 handoff_phase = "instruction_sent"
                 continue
 

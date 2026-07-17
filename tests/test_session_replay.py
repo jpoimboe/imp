@@ -237,7 +237,7 @@ def test_replay_marker_does_not_change_rendering() -> None:
     events = [
         {"type": "quest_created", "payload": {"id": "x", "title": "T"}},
         {"type": "step_started", "payload": {"step": "spec"}},
-        {"type": "agent_output", "payload": {"text": "hi"}},
+        {"type": "agent_result", "payload": {"text": "hi"}},
     ]
     marked = [{**e, "_replay": True} for e in events]
     plain = list(render_tree(build_tree(events), full=False, color=False, width=80))

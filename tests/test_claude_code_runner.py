@@ -120,17 +120,17 @@ async def test_runs_to_complete_step(tmp_path: Path) -> None:
     async for ev in runner.run(inv):
         events.append(ev)
 
-    # After the flip: runners yield ONLY agent_output/error
+    # After the flip: runners yield ONLY agent_result/error
     kinds = [e["type"] for e in events]
-    assert kinds == ["agent_output"], f"expected only agent_output, got {kinds}"
+    assert kinds == ["agent_result"], f"expected only agent_result, got {kinds}"
     assert events[-1]["payload"] == {"status": "Success", "note": "ok"}
 
     # Audit trail is in the event log
     log_events = list(log.read())
     log_types = [e["type"] for e in log_events]
     assert "step_context" in log_types
-    assert "user_message" in log_types
-    assert "llm_response" in log_types
+    assert "engine_message" in log_types
+    assert "agent_message" in log_types
 
     # All events have the right agent_id
     for e in log_events:
@@ -302,7 +302,7 @@ async def test_resume_from_existing_transcript(tmp_path: Path) -> None:
     async for ev in runner.run(inv):
         events.append(ev)
 
-    assert events[-1]["type"] == "agent_output"
+    assert events[-1]["type"] == "agent_result"
     # Initial messages were NOT re-appended: no-store SEND_TO_LLM resumes
     # natively — no manifest turn. The trailing tool_result folds into the store
     # (completed-call boundary), leaving an empty delta, so the native empty-delta
@@ -315,12 +315,12 @@ async def test_resume_from_existing_transcript(tmp_path: Path) -> None:
 @pytest.mark.anyio
 async def test_runs_subagent_via_task(tmp_path: Path) -> None:
     """Verifies the parent's receive-loop dual-write for complete_step and the
-    resulting agent_output payload.
+    resulting agent_result payload.
 
     The fake bypasses the MCP transport, so _impl for sub_agent is never
     invoked and no child runner is created — the child text-deliverable path is
     integration-only. What is exercised: the dual-write at the AssistantMessage
-    tool_use scan (complete_step → state.complete_step_args) and the agent_output
+    tool_use scan (complete_step → state.complete_step_args) and the agent_result
     event that follows.
     """
     (tmp_path / "art").mkdir()
@@ -371,7 +371,7 @@ async def test_runs_subagent_via_task(tmp_path: Path) -> None:
     async for ev in runner.run(inv):
         events.append(ev)
 
-    assert events[-1]["type"] == "agent_output"
+    assert events[-1]["type"] == "agent_result"
     assert events[-1]["payload"] == {"status": "Success"}
 
 
@@ -459,7 +459,7 @@ async def test_sdk_task_result_echo_is_suppressed_and_flips_is_error(
     with _mock.patch.object(cc.LoopGuard, "observe", spy_observe):
         events = [ev async for ev in runner.run(inv)]
 
-    assert events[-1]["type"] == "agent_output"
+    assert events[-1]["type"] == "agent_result"
 
     # (a) Exactly ONE task tool_result in the log: the minted one. The SDK's
     #     toolu_… echo was suppressed (else there would be two).
@@ -532,11 +532,11 @@ async def test_bare_turn_end_resume_delivers_reply_then_continues(
         events.append(ev)
 
     kinds = [e["type"] for e in events]
-    assert kinds[-1] == "agent_output"
+    assert kinds[-1] == "agent_result"
 
     log_types = [e["type"] for e in log.read()]
     assert "awaiting_user_input" in log_types
-    assert log_types.index("user_message") < log_types.index("llm_response")
+    assert log_types.index("user_message") < log_types.index("agent_message")
 
     loaded = t.load()
     assert loaded[2].role == "user"
@@ -574,7 +574,7 @@ async def test_bare_turn_end_resume_no_channel_errors(tmp_path: Path) -> None:
     events = [ev async for ev in runner.run(inv)]
     kinds = [e["type"] for e in events]
 
-    assert "agent_output" not in kinds
+    assert "agent_result" not in kinds
     assert queried["hit"] is False, "no transcript may be streamed to the provider"
     errors = [e for e in events if e["type"] == "error"]
     assert errors and errors[0]["payload"]["kind"] == "no_user_input_fn"
@@ -629,7 +629,7 @@ async def test_thinking_block_emits_thinking_event(tmp_path: Path) -> None:
     # After the flip: thinking is in the log, not yielded
     kinds = [e["type"] for e in events]
     assert "thinking" not in kinds, f"thinking should be in log, not yielded: {kinds}"
-    assert kinds == ["agent_output"], f"expected only agent_output, got {kinds}"
+    assert kinds == ["agent_result"], f"expected only agent_result, got {kinds}"
 
     log_events = list(log.read())
     log_types = [e["type"] for e in log_events]
@@ -794,7 +794,7 @@ async def test_continuation_resumes_then_completes(tmp_path: Path) -> None:
         model_name="claude-sonnet-4-5", client_factory=fake_client_factory,
     )
     events = [e async for e in runner.run(inv)]
-    assert events[-1]["type"] == "agent_output"
+    assert events[-1]["type"] == "agent_result"
 
     # Verify the nudge text was actually sent to the CLI via client.query().
     # fake.queries records every string (or drained async-iterable) passed to
@@ -884,7 +884,7 @@ async def test_requery_across_two_receive_rounds_no_error(tmp_path: Path) -> Non
 
     kinds = [e["type"] for e in events]
     assert "error" not in kinds, f"unexpected error event(s): {events}"
-    assert kinds[-1] == "agent_output"
+    assert kinds[-1] == "agent_result"
 
 
 def test_claude_code_provider_registered_and_resolves() -> None:
@@ -1065,7 +1065,7 @@ async def test_receive_loop_sweeps_bg_per_message(
     runner = ClaudeCodeAgentRunner(
         model_name="claude-sonnet-4-5", client_factory=fake_client_factory)
     events = [e async for e in runner.run(_inv(tmp_path))]
-    assert events[-1]["type"] == "agent_output"
+    assert events[-1]["type"] == "agent_result"
     assert calls["n"] >= 2          # at least one sweep per received message
 
 
@@ -1860,10 +1860,10 @@ async def test_native_folded_tool_result_tail_gets_continuation_nudge(
         model_name="claude-sonnet-4-5", client_factory=factory)
     [ev async for ev in runner.run(inv)]
 
-    # The nudge is journaled as an internal engine_continuation (not a user turn).
-    conts = [e for e in log.read() if e["type"] == "engine_continuation"]
+    # The nudge is journaled as an internal engine_message (not a user turn).
+    conts = [e for e in log.read() if e["type"] == "engine_message"]
     assert len(conts) == 1
-    assert conts[0]["payload"]["text"] == _CONTINUATION_NUDGE
+    assert conts[0]["payload"]["content"][0]["text"] == _CONTINUATION_NUDGE
     # The streamed delta carries exactly that nudge (non-empty).
     assert _user_text_blob(created[0].queries[0]) == _CONTINUATION_NUDGE
 
@@ -2121,7 +2121,7 @@ async def test_rework_resume_delivers_feedback_and_does_not_repark(tmp_path: Pat
     events = [ev async for ev in runner.run(inv)]
 
     # It re-ran and completed — never re-parked on an empty prompt.
-    assert events[-1]["type"] == "agent_output"
+    assert events[-1]["type"] == "agent_result"
     assert not any(e["type"] == "awaiting_user_input" for e in log.read())
     # The feedback reached the model as the is_error complete_step result on the delta.
     tr = created[0].queries[0][0]["message"]["content"][0]
@@ -2173,7 +2173,7 @@ async def test_no_store_dangling_tail_injects_no_manifest(tmp_path: Path) -> Non
     events = [ev async for ev in runner.run(inv)]
 
     # Native resume reached completion — NOT the transcript_invalid abort.
-    assert events[-1]["type"] == "agent_output"
+    assert events[-1]["type"] == "agent_result"
     opts = created[0].opts
     assert opts.resume == resume_session_id("step:p/s")
     assert opts.session_id is None
@@ -2669,7 +2669,7 @@ async def test_dangling_tool_use_resumes_natively(tmp_path: Path) -> None:
     events = [ev async for ev in runner.run(inv)]
 
     # The transcript_invalid abort did NOT fire: the run reached completion.
-    assert events[-1]["type"] == "agent_output"
+    assert events[-1]["type"] == "agent_result"
     assert not any(
         e["type"] == "error"
         and e["payload"].get("kind") == "transcript_invalid"
@@ -2735,7 +2735,7 @@ async def test_dangling_tool_use_without_store_reconstructs_native(tmp_path: Pat
     events = [ev async for ev in runner.run(inv)]
 
     # The transcript_invalid abort did NOT fire: the run reached completion.
-    assert events[-1]["type"] == "agent_output"
+    assert events[-1]["type"] == "agent_result"
     assert not any(
         e["type"] == "error"
         and e["payload"].get("kind") == "transcript_invalid"
@@ -2862,7 +2862,7 @@ async def test_llm_response_enriched_with_context_usage(tmp_path: Path) -> None:
     async for _ev in runner.run(inv):
         pass
 
-    resp = next(e for e in log.read() if e["type"] == "llm_response")
+    resp = next(e for e in log.read() if e["type"] == "agent_message")
     assert resp["payload"]["context_window"] == 1_000_000
     assert resp["payload"]["context_pct"] == 4.2
     assert resp["payload"]["context_tokens"] == 42_000
@@ -2888,8 +2888,8 @@ async def test_context_usage_failure_does_not_break_run(tmp_path: Path) -> None:
         model_name="claude-opus-4-8[1m]", client_factory=factory)
     events = [ev async for ev in runner.run(inv)]
 
-    assert [e["type"] for e in events] == ["agent_output"]
-    resp = next(e for e in log.read() if e["type"] == "llm_response")
+    assert [e["type"] for e in events] == ["agent_result"]
+    resp = next(e for e in log.read() if e["type"] == "agent_message")
     assert "context_window" not in resp["payload"]
     assert "context_pct" not in resp["payload"]
     assert "context_tokens" not in resp["payload"]
@@ -2960,7 +2960,7 @@ async def test_cooperative_interrupt_steer_continues_no_pause(
     await coord.signal_pause()
     await asyncio.wait_for(task, timeout=2)
 
-    assert events[-1]["type"] == "agent_output"
+    assert events[-1]["type"] == "agent_result"
     assert events[-1]["payload"]["status"] == "Success"
     assert not any(e.get("payload", {}).get("kind") == "interrupted"
                    for e in events if e["type"] == "error")
@@ -3086,7 +3086,7 @@ async def test_inflight_tool_interrupt_orders_interrupt_before_reap(
     assert order.index("interrupt") < order.index("terminate_bg")
     # The steer, not a stale tool result, drives the next turn.
     assert holder["c"].queries[-1] == "go look elsewhere"
-    assert events[-1]["type"] == "agent_output"
+    assert events[-1]["type"] == "agent_result"
 
 
 @pytest.mark.anyio
@@ -3625,7 +3625,7 @@ async def test_balance_on_resume_no_store_reconstructs_native(tmp_path: Path) ->
 
 
 @pytest.mark.anyio
-async def test_coalesces_one_llm_response_per_message_id(tmp_path: Path) -> None:
+async def test_coalesces_one_agent_message_per_message_id(tmp_path: Path) -> None:
     (tmp_path / "art").mkdir()
     scripted = [
         # turn m1 streamed as three fragments sharing one message_id
@@ -3653,8 +3653,8 @@ async def test_coalesces_one_llm_response_per_message_id(tmp_path: Path) -> None
     async for _ev in runner.run(inv):
         pass
 
-    resps = [e for e in log.read() if e["type"] == "llm_response"]
-    # AC1/AC3: exactly one llm_response per distinct message_id
+    resps = [e for e in log.read() if e["type"] == "agent_message"]
+    # AC1/AC3: exactly one agent_message per distinct message_id
     assert [r["payload"]["message_id"] for r in resps] == ["m1", "m2"]
     m1 = resps[0]["payload"]
     # AC1: all the group's blocks, in order, in one event
@@ -3678,11 +3678,11 @@ async def test_coalesces_one_llm_response_per_message_id(tmp_path: Path) -> None
 
 
 @pytest.mark.anyio
-async def test_llm_response_precedes_tool_calls_for_prose_and_tool_turn(
+async def test_agent_message_precedes_tool_calls_for_prose_and_tool_turn(
     tmp_path: Path,
 ) -> None:
     # AC (claude_code ordering): for a turn carrying both prose and tool_use,
-    # the coalesced llm_response is emitted BEFORE that turn's tool_call events.
+    # the coalesced agent_message is emitted BEFORE that turn's tool_call events.
     # The prose group flushes at the text->tool_use transition, not at the next
     # message boundary. The coalesced payload is unchanged ([text,tool_use,tool_use]).
     (tmp_path / "art").mkdir()
@@ -3712,16 +3712,16 @@ async def test_llm_response_precedes_tool_calls_for_prose_and_tool_turn(
         pass
 
     events = list(log.read())
-    # Index of the m1 llm_response and of the m1 turn's read_file/grep tool_calls.
+    # Index of the m1 agent_message and of the m1 turn's read_file/grep tool_calls.
     idx_resp = next(
         i for i, e in enumerate(events)
-        if e["type"] == "llm_response" and e["payload"]["message_id"] == "m1")
+        if e["type"] == "agent_message" and e["payload"]["message_id"] == "m1")
     idx_tcs = [
         i for i, e in enumerate(events)
         if e["type"] == "tool_call"
         and e["payload"]["name"] in ("read_file", "grep")]
     assert len(idx_tcs) == 2
-    # Ordering: the coalesced llm_response precedes BOTH of the turn's tool_calls.
+    # Ordering: the coalesced agent_message precedes BOTH of the turn's tool_calls.
     assert all(idx_resp < i for i in idx_tcs)
     # Regression: the flushed payload still carries the whole coalesced group.
     m1 = events[idx_resp]["payload"]
@@ -3753,7 +3753,7 @@ async def test_none_message_id_folds_into_open_group(tmp_path: Path) -> None:
     async for _ev in runner.run(inv):
         pass
 
-    resps = [e for e in log.read() if e["type"] == "llm_response"]
+    resps = [e for e in log.read() if e["type"] == "agent_message"]
     assert len(resps) == 1                      # one group, not two
     assert resps[0]["payload"]["message_id"] == "m1"
     texts = [b.get("text") for b in resps[0]["payload"]["raw"]["content"]
@@ -3784,7 +3784,7 @@ async def test_none_message_id_opens_group_then_adopts_real_key(tmp_path: Path) 
     async for _ev in runner.run(inv):
         pass
 
-    resps = [e for e in log.read() if e["type"] == "llm_response"]
+    resps = [e for e in log.read() if e["type"] == "agent_message"]
     assert len(resps) == 1                      # one group, not two
     assert resps[0]["payload"]["message_id"] == "m1"   # adopted the real key
     texts = [b.get("text") for b in resps[0]["payload"]["raw"]["content"]
@@ -3882,10 +3882,10 @@ async def test_turn_count_matches_message_ids_and_num_turns(tmp_path: Path) -> N
     async for _ev in runner.run(inv):
         pass
 
-    resps = [e for e in log.read() if e["type"] == "llm_response"]
+    resps = [e for e in log.read() if e["type"] == "agent_message"]
     qr = next(e for e in log.read() if e["type"] == "query_result")
     distinct_ids = {r["payload"]["message_id"] for r in resps}
-    # AC3: llm_response count == distinct message_id count == num_turns
+    # AC3: agent_message count == distinct message_id count == num_turns
     assert len(resps) == len(distinct_ids) == qr["payload"]["num_turns"] == 2
 
 
@@ -4040,7 +4040,7 @@ async def test_receive_loop_is_request_bracketed(tmp_path: Path) -> None:
     )
     events = [ev async for ev in runner.run(inv)]
 
-    assert events[-1]["type"] == "agent_output"
+    assert events[-1]["type"] == "agent_result"
     # receive_response() is consumed through request_bracketed, so request_active
     # is armed while awaiting each of the two received SDK messages (the
     # assistant message and the ResultMessage) — >=2 True snapshots.
@@ -4076,7 +4076,7 @@ async def test_subagent_bare_turn_end_resume_returns_deliverable(
         model_name="claude-sonnet-4-5", client_factory=factory)
     yielded = [ev async for ev in runner.run(inv)]
 
-    assert [e["type"] for e in yielded] == ["agent_output"]
+    assert [e["type"] for e in yielded] == ["agent_result"]
     assert yielded[-1]["payload"] == {"text": "the conclusion"}
     # Short-circuited before any SDK client / native-resume session was built.
     assert created == []
@@ -4087,7 +4087,7 @@ async def test_bare_turn_end_retry_continue_uses_engine_continuation_not_user_me
     tmp_path: Path,
 ) -> None:
     """claude_code retry-continue on a bare turn-end: no awaiting_user_input, no
-    user_message; the nudge is an internal engine_continuation event."""
+    user_message; the nudge is an internal engine_message/continuation event."""
     from imp.agents.runner import Message, TextBlock
     from imp.agents.transcript import Transcript
     from imp.engine.agent_run import _CONTINUATION_NUDGE
@@ -4120,14 +4120,16 @@ async def test_bare_turn_end_retry_continue_uses_engine_continuation_not_user_me
         user_input_fn=_must_not_solicit)
 
     events = [ev async for ev in runner.run(inv)]
-    assert events[-1]["type"] == "agent_output"
+    assert events[-1]["type"] == "agent_result"
 
     types = [e["type"] for e in log.read()]
     assert "awaiting_user_input" not in types
     assert "user_message" not in types
-    assert "engine_continuation" in types
-    cont = next(e for e in log.read() if e["type"] == "engine_continuation")
-    assert cont["payload"] == {"text": _CONTINUATION_NUDGE}
+    assert "engine_message" in types
+    cont = next(e for e in log.read() if e["type"] == "engine_message")
+    assert cont["payload"] == {
+        "role": "user", "subtype": "continuation",
+        "content": [{"type": "text", "text": _CONTINUATION_NUDGE}]}
     loaded = t.load()
     assert loaded[2].role == "user"
     assert loaded[2].content[0].text == _CONTINUATION_NUDGE
@@ -4170,7 +4172,7 @@ async def test_stream_event_usage_overrides_partial_assistant_usage(
     async for _ev in runner.run(inv):
         pass
 
-    resps = [e for e in log.read() if e["type"] == "llm_response"]
+    resps = [e for e in log.read() if e["type"] == "agent_message"]
     assert [r["payload"]["message_id"] for r in resps] == ["m1"]
     usage = resps[0]["payload"]["usage"]
     # AC1: finalized cumulative output_tokens from message_delta, not 8 or 1.
@@ -4212,7 +4214,7 @@ async def test_no_stream_events_falls_back_to_assistant_usage(
     async for _ev in runner.run(inv):
         pass
 
-    resps = [e for e in log.read() if e["type"] == "llm_response"]
+    resps = [e for e in log.read() if e["type"] == "agent_message"]
     assert [r["payload"]["message_id"] for r in resps] == ["m1"]
     assert resps[0]["payload"]["usage"]["output_tokens"] == 42
     assert resps[0]["payload"]["usage"]["input_tokens"] == 100
@@ -4226,7 +4228,7 @@ async def test_multi_fragment_group_uses_harvested_usage(
         tmp_path: Path) -> None:
     (tmp_path / "art").mkdir()
     # One streamed API message m1 whose AssistantMessage arrives as two
-    # fragments; the stream trio precedes them. Expect exactly one llm_response
+    # fragments; the stream trio precedes them. Expect exactly one agent_message
     # for m1, both fragments' blocks in order, and the harvested finalized
     # figures (AC5 grouping + AC1/AC2 harvest).
     scripted = [
@@ -4252,8 +4254,8 @@ async def test_multi_fragment_group_uses_harvested_usage(
     async for _ev in runner.run(inv):
         pass
 
-    resps = [e for e in log.read() if e["type"] == "llm_response"]
-    # AC5: exactly one llm_response for the single message_id.
+    resps = [e for e in log.read() if e["type"] == "agent_message"]
+    # AC5: exactly one agent_message for the single message_id.
     assert [r["payload"]["message_id"] for r in resps] == ["m1"]
     # AC5: both fragments' blocks coalesced in order.
     assert [b["type"] for b in resps[0]["payload"]["raw"]["content"]] == \
@@ -4575,12 +4577,12 @@ async def test_prose_llm_response_precedes_concurrent_sub_agent_tool_call(
     get_context_usage() await (holding the flush lock); _impl fires DURING that
     window, calls the plumbed flush, and appends the sub_agent tool_call. The flush
     lock (barrier) must make _impl's flush BLOCK until the in-flight prose flush
-    emits, so the log carries prose llm_response -> sub_agent tool_call, with
-    EXACTLY ONE llm_response.
+    emits, so the log carries prose agent_message -> sub_agent tool_call, with
+    EXACTLY ONE agent_message.
 
     Falsifiability: with a bare no-op guard (or the original unlocked flush),
     _impl's flush either no-ops with no await or passes the still-open guard and
-    emits a SECOND llm_response, and in both cases _impl appends the tool_call
+    emits a SECOND agent_message, and in both cases _impl appends the tool_call
     before caller A emits -> the count==1 and ordering assertions fail. Only the
     completion barrier makes both hold. (Pre-implementation, before _RunState is
     plumbed onto the runner, `runner._state` does not exist; the resulting
@@ -4639,9 +4641,9 @@ async def test_prose_llm_response_precedes_concurrent_sub_agent_tool_call(
                 # Let the _impl task make progress, bounded and wall-clock-free.
                 # With the lock it parks at its flush call and nothing lands, so
                 # the loop runs out; without the lock it emits a duplicate
-                # llm_response / appends the tool_call here (the falsifying window).
+                # agent_message / appends the tool_call here (the falsifying window).
                 for _ in range(200):
-                    if any(e["type"] in ("tool_call", "llm_response")
+                    if any(e["type"] in ("tool_call", "agent_message")
                            for e in log._events):
                         break
                     await asyncio.sleep(0)
@@ -4662,15 +4664,15 @@ async def test_prose_llm_response_precedes_concurrent_sub_agent_tool_call(
     await box["impl_task"]
 
     events = log._events
-    llm_responses = [e for e in events if e["type"] == "llm_response"]
-    assert len(llm_responses) == 1, (
-        f"expected exactly one llm_response, got {len(llm_responses)}")
-    assert llm_responses[0]["payload"]["message_id"] == "m1"
-    i_llm = next(i for i, e in enumerate(events) if e["type"] == "llm_response")
+    agent_messages = [e for e in events if e["type"] == "agent_message"]
+    assert len(agent_messages) == 1, (
+        f"expected exactly one agent_message, got {len(agent_messages)}")
+    assert agent_messages[0]["payload"]["message_id"] == "m1"
+    i_llm = next(i for i, e in enumerate(events) if e["type"] == "agent_message")
     i_sub = next(i for i, e in enumerate(events)
                  if e["type"] == "tool_call"
                  and e["payload"]["name"] == "sub_agent")
-    assert i_llm < i_sub, "prose llm_response must precede the sub_agent tool_call"
+    assert i_llm < i_sub, "prose agent_message must precede the sub_agent tool_call"
     assert cap["tool_call_event_id"] == events[i_sub]["id"], (
         "dispatch received the sub_agent tool_call EVENT id (parent link)")
 
@@ -4681,7 +4683,7 @@ async def test_parallel_sub_agents_emit_single_llm_response_before_both(
 ) -> None:
     """Two parallel sub_agent calls in one turn produce two concurrent _impl
     flush callers during the receive-loop flush's await window. The barrier must
-    serialize them so the prose group emits EXACTLY ONE llm_response, appearing
+    serialize them so the prose group emits EXACTLY ONE agent_message, appearing
     BEFORE both sub_agent tool_calls.
     """
     import asyncio
@@ -4733,7 +4735,7 @@ async def test_parallel_sub_agents_emit_single_llm_response_before_both(
                     for t in ("a", "b")
                 ]
                 for _ in range(200):
-                    if any(e["type"] in ("tool_call", "llm_response")
+                    if any(e["type"] in ("tool_call", "agent_message")
                            for e in log._events):
                         break
                     await asyncio.sleep(0)
@@ -4754,13 +4756,13 @@ async def test_parallel_sub_agents_emit_single_llm_response_before_both(
     await asyncio.gather(*box["impl_tasks"])
 
     events = log._events
-    llm_responses = [e for e in events if e["type"] == "llm_response"]
-    assert len(llm_responses) == 1, (
-        f"expected exactly one llm_response, got {len(llm_responses)}")
-    i_llm = next(i for i, e in enumerate(events) if e["type"] == "llm_response")
+    agent_messages = [e for e in events if e["type"] == "agent_message"]
+    assert len(agent_messages) == 1, (
+        f"expected exactly one agent_message, got {len(agent_messages)}")
+    i_llm = next(i for i, e in enumerate(events) if e["type"] == "agent_message")
     sub_calls = [i for i, e in enumerate(events)
                  if e["type"] == "tool_call"
                  and e["payload"]["name"] == "sub_agent"]
     assert len(sub_calls) == 2, f"expected two sub_agent tool_calls, got {len(sub_calls)}"
     assert all(i_llm < i for i in sub_calls), (
-        "the single llm_response must precede BOTH sub_agent tool_calls")
+        "the single agent_message must precede BOTH sub_agent tool_calls")

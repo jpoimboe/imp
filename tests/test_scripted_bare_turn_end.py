@@ -83,7 +83,7 @@ async def test_scripted_bare_turn_end_solicits_then_continues(
         _inv(tmp_path, event_log=log, user_input_fn=reply))]
 
     kinds = [e["type"] for e in events]
-    assert "agent_output" in kinds                  # run continued past the yield
+    assert "agent_result" in kinds                  # run continued past the yield
     assert received == [""]                          # the channel WAS solicited
     log_types = [e["type"] for e in log.read()]
     assert "awaiting_user_input" in log_types        # the yield event was emitted

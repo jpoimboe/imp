@@ -70,7 +70,7 @@ async def test_coordinator_unsandboxed_synced_to_state_before_pause(
     class _InterruptingRunner:
         async def run(self, invocation: Any) -> Any:
             await coord.signal_pause(reason="ctrl-c")
-            yield {"type": "agent_output",
+            yield {"type": "agent_result",
                    "payload": {"outcome": "ok", "status": "Success"}}
 
         async def interrupt(self) -> None:
@@ -107,7 +107,7 @@ async def test_same_step_pause_and_resume_preserves_override(
     class _InterruptingRunner:
         async def run(self, invocation: Any) -> Any:
             await coord.signal_pause(reason="ctrl-c")
-            yield {"type": "agent_output",
+            yield {"type": "agent_result",
                    "payload": {"outcome": "ok", "status": "Success"}}
 
         async def interrupt(self) -> None:

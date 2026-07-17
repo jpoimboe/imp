@@ -93,7 +93,7 @@ async def test_one_heartbeat_per_arm_plus_post_api(tmp_path: Path) -> None:
     events = [e async for e in runner.run(
         _inv(tmp_path, {"complete_step", "read_file", "sub_agent"}, event_log=log))]
     assert len(_hb(events)) == 6
-    assert events[-1]["type"] == "agent_output"
+    assert events[-1]["type"] == "agent_result"
     # heartbeats carry an empty payload (pinned contract)
     assert all(e["payload"] == {} for e in _hb(events))
 
@@ -141,7 +141,7 @@ async def test_openai_runner_heartbeats_identically(tmp_path: Path) -> None:
                event_log=InMemoryEventLog())
     events = [e async for e in runner.run(inv)]
     assert len(_hb(events)) == 3  # post-API + tu1, then post-API + terminal
-    assert events[-1]["type"] == "agent_output"
+    assert events[-1]["type"] == "agent_result"
 
 
 # --- drive_invocation consumption -------------------------------------------
@@ -172,7 +172,7 @@ def _heartbeat() -> dict[str, Any]:
 
 
 def _output() -> dict[str, Any]:
-    return {"type": "agent_output", "payload": {"status": "Success"}}
+    return {"type": "agent_result", "payload": {"status": "Success"}}
 
 
 class _RecLog:

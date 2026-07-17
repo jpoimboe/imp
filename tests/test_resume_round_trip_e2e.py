@@ -33,10 +33,11 @@ async def test_paused_conversation_round_trips_and_replays_on_resume(
     tdir.mkdir(parents=True)
     Transcript(tdir / "transcript.jsonl").append(
         Message(role="assistant", content=(TextBlock(text="still working"),)))
-    # step_context lets _resume_system_prompt find the stored prompt on resume
+    # engine_message/system_prompt lets _resume_system_prompt find the stored prompt on resume
     ch.event_log().append(
-        agent_id="step:p/s", type="step_context",
-        payload={"system_prompt": "seeded prompt"})
+        agent_id="step:p/s", type="engine_message",
+        payload={"role": "system", "subtype": "system_prompt",
+                 "content": [{"type": "text", "text": "seeded prompt"}]})
     seeded_bytes = (tdir / "transcript.jsonl").read_bytes()
 
     archive_conversation(ch)
@@ -53,13 +54,15 @@ async def test_paused_conversation_round_trips_and_replays_on_resume(
 
     seen_initial_empty: list[bool] = []
     seen_transcript_nonempty: list[bool] = []
+    seen_system_prompt: list[str | None] = []
 
     class _Runner:
         async def run(self, inv: AgentInvocation) -> AsyncIterator[Event]:
             seen_initial_empty.append(len(inv.initial_messages) == 0)
             seen_transcript_nonempty.append(
                 Transcript(restored).exists_and_nonempty())
-            yield {"type": "agent_output",
+            seen_system_prompt.append(inv.system_prompt)
+            yield {"type": "agent_result",
                    "payload": {"outcome": "ok", "status": "Success"}}
 
         async def interrupt(self) -> None:
@@ -80,6 +83,7 @@ async def test_paused_conversation_round_trips_and_replays_on_resume(
     assert result is RunResult.COMPLETED
     assert seen_initial_empty == [True]
     assert seen_transcript_nonempty == [True]
+    assert seen_system_prompt == ["seeded prompt"]   # reconstructed verbatim (AC #6a)
 
     lines = quest.events_path.read_text().splitlines()
     events = [json.loads(ln) for ln in lines if ln.strip()]
