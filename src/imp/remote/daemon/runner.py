@@ -298,6 +298,9 @@ async def _handle_command(
                 f"start) to reply."))
             return
         except LoadError:
+            _log.warning(
+                "reply to @%s failed: quest could not be loaded", handle,
+                exc_info=True)
             responses.put(Notice(
                 f"no such quest `{command.quest_id}` — unknown or pruned"))
             return

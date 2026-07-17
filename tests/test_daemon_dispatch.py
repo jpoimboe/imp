@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from imp.engine.errors import LayoutMismatch
+from imp.engine.errors import LayoutMismatch, LoadError
 from imp.remote.daemon.alert_all import AlertAll
 from imp.remote.daemon.commands import (
     ALERTS_OFF_REPLY,
@@ -388,4 +388,21 @@ async def test_reply_layout_mismatch_enqueues_restart_notice(
     assert responses.empty()
     assert control.replies == [("aaaaaa", "go")]
     # The real cause is logged with a traceback (previously logged nothing).
+    assert any(r.exc_info for r in caplog.records)
+
+
+@pytest.mark.anyio
+async def test_reply_load_error_keeps_unknown_notice_and_logs(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    control = FakeControl(reply_error=LoadError("quest gone"))
+    responses: queue.Queue = queue.Queue()
+    with caplog.at_level("WARNING"):
+        await _handle_command(Reply("aaaaaa", "go"), control, responses)
+    notice = responses.get_nowait()
+    assert isinstance(notice, Notice)
+    assert notice.text == "no such quest `aaaaaa` — unknown or pruned"
+    assert responses.empty()
+    assert control.replies == [("aaaaaa", "go")]
+    # The swallowed cause is now logged with a traceback.
     assert any(r.exc_info for r in caplog.records)
