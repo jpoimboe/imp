@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import uuid
 from typing import Any
 
 
@@ -44,6 +45,27 @@ def migrate_events(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 "subtype": "continuation",
             }
             out.append(new)
+        elif etype == "step_context":
+            has_sys = "system_prompt" in payload
+            new = dict(ev)
+            if has_sys:
+                new["payload"] = {
+                    k: v for k, v in payload.items() if k != "system_prompt"
+                }
+            out.append(new)
+            if has_sys:
+                out.append({
+                    "id": uuid.uuid4().hex,
+                    "parent_id": ev.get("id"),
+                    "agent_id": ev.get("agent_id"),
+                    "timestamp": ev.get("timestamp"),
+                    "type": "engine_message",
+                    "payload": {
+                        "role": "system",
+                        "content": [_text_block(payload["system_prompt"])],
+                        "subtype": "system_prompt",
+                    },
+                })
         else:
             out.append(ev)
     return out
