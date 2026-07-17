@@ -910,7 +910,7 @@ def _record_idea(args: argparse.Namespace, control: Path, base: str) -> int:
 def apply_new(
     control: Path, *, opening: str | None, title: str | None,
     workflow: str | None, base: str | None, idea: str | None,
-    depends_on: list[str] | None,
+    depends_on: list[str] | None, parent: str | None = None,
 ) -> tuple[int, str]:
     """Non-interactive create for the mutation proxy: record a backlog quest or plain draft."""
     try:
@@ -929,7 +929,7 @@ def apply_new(
             Quest.create_draft(
                 control, title=idea, quest_id=quest_id, base_branch=resolved_base,
                 depends_on=deps, workflow=workflow, origin="backlog",
-                seed_opening=seed)
+                seed_opening=seed, parent=parent, defer_seed=True)
         except (LoadError, LoadErrors) as e:
             return 2, f"imp: {e}"
         return 0, (f"imp: recorded backlog quest {quest_id} "
@@ -939,7 +939,7 @@ def apply_new(
         Quest.create_draft(
             control, title=title or "", quest_id=quest_id,
             base_branch=resolved_base, depends_on=deps, workflow=workflow,
-            origin="draft", seed_opening=opening)
+            origin="draft", seed_opening=opening, parent=parent, defer_seed=True)
     except (LoadError, LoadErrors) as e:
         return 2, f"imp: {e}"
     return 0, (f"imp: created draft {quest_id} "

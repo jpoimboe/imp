@@ -16,6 +16,7 @@ from imp.cli.main import (
     _resolve_new_base,
 )
 from imp.engine.quest import Quest
+from imp.engine.state import State
 from tests.conftest import _git, _seed_control
 
 
@@ -193,3 +194,32 @@ def test_apply_new_bad_base_returns_error(tmp_path: Path, monkeypatch) -> None:
         base="no-such-branch", idea=None, depends_on=None)
     assert rc == 2
     assert "does not name an existing branch" in msg
+
+
+def test_apply_new_backlog_defers_seed_and_records_parent(
+        tmp_path: Path, monkeypatch) -> None:
+    _seed_control(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    rc, _msg = main.apply_new(
+        tmp_path, opening="brief", title=None, workflow=None, base=None,
+        idea="Child work", depends_on=None, parent="mom7")
+    assert rc == 0
+    quests = sorted((tmp_path / ".imp" / "quests").iterdir())
+    quest = Quest.load(tmp_path, quests[-1].name)
+    meta = json.loads((quest.quest_dir / "quest.json").read_text())
+    assert meta["parent"] == "mom7"
+    assert State.load(quest.quest_dir / "state").step is None
+
+
+def test_apply_new_draft_defers_seed(tmp_path: Path, monkeypatch) -> None:
+    _seed_control(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    rc, _ = main.apply_new(
+        tmp_path, opening="do it", title="Thing", workflow=None, base=None,
+        idea=None, depends_on=None, parent="pdraft")
+    assert rc == 0
+    quests = sorted((tmp_path / ".imp" / "quests").iterdir())
+    quest = Quest.load(tmp_path, quests[-1].name)
+    assert State.load(quest.quest_dir / "state").step is None
+    meta = json.loads((quest.quest_dir / "quest.json").read_text())
+    assert meta["parent"] == "pdraft"
