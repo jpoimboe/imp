@@ -33,7 +33,6 @@ _log = logging.getLogger(__name__)
 _READ_CHUNK = 65536
 _FLOOR = 0.01  # 10 ms — minimum strictly-positive select() slice (deadline safety)
 _POLL = 0.02  # 20 ms — nominal Phase-1 poll cadence cap
-_GRACE = 0.1  # 100 ms — Phase-2 best-effort sweep margin (latency/flake knob, not correctness)
 _DRAIN_YIELD = 0.002  # 2 ms — gap the background drainer leaves between reads so a
 # tool-call thread waiting on the io lock is never starved by the drainer.
 
@@ -349,13 +348,16 @@ class TerminalSession:
             closes (EOF). Checking poll() each iteration (not only when
             not-readable) is what lets a continuously-streaming, slave-pinning
             grandchild terminate instead of stalling to the hard cap.
-          Phase 2 (child exited) — a time-bounded sweep of the kernel buffer
-            until EOF or the first quiet select, or `grace` expiry. In the
-            normal flood case (no grandchild) the exited child's output is
-            finite and fully buffered, so Phase 2 reaches EOF in microseconds →
-            full capture. A slave-pinning grandchild yields a fast completion
-            instead of a `hard`-length stall (its trailing bytes may be
-            truncated by `grace` — desired; they are the grandchild's).
+          Phase 2 (child exited) — drain the kernel buffer via zero-timeout
+            reads until EOF or the first QUIET, backstopped only by the overall
+            `hard` deadline. In the normal flood case (no grandchild) the exited
+            child's output is finite and fully buffered, so back-to-back
+            zero-timeout reads reach EOF regardless of pyte feed() cost → full
+            capture, with no fixed grace window that could expire mid-drain and
+            drop the trailing sentinel. A slave-pinning grandchild trickles with
+            inter-byte gaps, so its first gap returns QUIET and Phase 2 stops
+            fast instead of stalling to `hard` (its trailing bytes may be
+            truncated — desired; they are the grandchild's).
 
         Returns the child's exit code. Raises subprocess.TimeoutExpired if
         `hard` elapses while the child is STILL ALIVE; the process is left
@@ -373,13 +375,16 @@ class TerminalSession:
                     raise subprocess.TimeoutExpired(self._proc.args, hard)
                 if self._read_step(_select_slice(remaining)) is _StepResult.EOF:
                     break
-            # Phase 2 — child exited: bounded sweep of buffered bytes.
-            grace_deadline = time.monotonic() + _GRACE
-            while True:
-                remaining = grace_deadline - time.monotonic()
-                if remaining <= 0:
-                    break
-                if self._read_step(_select_slice(remaining)) is not _StepResult.DATA:
+            # Phase 2 — child exited: drain every immediately-available chunk via
+            # zero-timeout reads until EOF (full capture) or the first QUIET
+            # (nothing readable right now), backstopped only by the overall `hard`
+            # deadline. The exited child's entire remaining output already sits in
+            # the kernel pty buffer, so back-to-back zero-timeout reads drain it
+            # all to EOF regardless of how long pyte's feed() takes — feed cost is
+            # never waited on, so no fixed window can expire mid-drain and drop the
+            # trailing sentinel.
+            while time.monotonic() < deadline:
+                if self._read_step(0.0) is not _StepResult.DATA:
                     break  # EOF (full capture) or QUIET (nothing more) — done
             # Reap, bounded by the remaining hard budget (floored so a Phase-2 stop
             # right at the deadline can't hand wait() a ~0 timeout and spuriously
