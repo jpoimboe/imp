@@ -50,6 +50,29 @@ def test_hide_clears_every_row_and_lands_on_owned_blank() -> None:
     assert out.getvalue().count("\x1b[1A") == 3    # climb past all rows onto the blank
 
 
+def test_end_run_preserves_owned_blank_by_descending() -> None:
+    out = _TTY()
+    s = LiveStatus(out)
+    s._width_fn = lambda: 80
+    s.update(lambda f: ["activity", "", "position bar"])   # draws owned blank + 3 rows
+    out.truncate(0)
+    out.seek(0)
+    s.end_run()
+    v = out.getvalue()
+    assert v.count("\x1b[K") == 3     # all three footer rows cleared (the _erase)
+    assert v.endswith("\n")           # then descend one line, past the owned blank
+    assert v.count("\n") == 1         # exactly one — the owned blank is preserved, not doubled
+    assert s._compose is None         # compose cleared like reset()
+
+
+def test_end_run_non_tty_writes_nothing() -> None:
+    s = _Pipe()
+    ls = LiveStatus(s)
+    ls.update(lambda f: ["should not appear"])
+    ls.end_run()
+    assert s.getvalue() == ""         # non-TTY teardown adds no blank (parity intact)
+
+
 def test_non_tty_writes_nothing() -> None:
     s = _Pipe()
     ls = LiveStatus(s)

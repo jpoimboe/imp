@@ -417,7 +417,7 @@ class LiveDriver:
         the final block is emitted, then clear the status line."""
         self._builder.finalize()
         self._walk(force=True)
-        self._status.reset()
+        self._status.end_run()
 
     def compose_status(self, frame: int) -> list[str] | None:
         activity = self._builder.current_activity()

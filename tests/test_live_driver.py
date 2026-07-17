@@ -659,6 +659,26 @@ def test_live_prose_then_subagent_header_blank_separated() -> None:
     assert body == _render_body(events)
 
 
+def test_finish_non_tty_adds_no_trailing_blank_after_breadcrumb() -> None:
+    events = [
+        ev("1", "quest_created", quest_id=1, title="x"),
+        ev("3", "step_started", step="spec", kind="agent", phase="design",
+           model="m", provider="anthropic"),
+        ev("4", "agent_message", agent_id="a",
+           raw={"content": [{"type": "text", "text": "the prose"}]}, usage={}),
+        ev("5", "step_completed", step="spec", kind="agent",
+           action={"verb": "continue"}, var_mutations={}),
+    ]
+    drv, out = _driver()               # _Pipe → non-TTY
+    for e in events:
+        drv.on_event(e)
+    drv.finish()
+    body = _body(out)
+    assert any("spec · complete" in ln for ln in body)   # breadcrumb newline-terminated, present
+    assert body == _render_body(events)                  # live/log parity: no extra trailing blank
+    assert not out.getvalue().endswith("\n\n")           # finish() added no non-TTY blank
+
+
 class _TTYPipe(io.StringIO):
     def isatty(self) -> bool:
         return True
@@ -3216,3 +3236,48 @@ def test_frame_suppressed_opening_live_log_parity() -> None:
         drv.on_event(e)
     drv.finish()
     assert _body(out) == _render_body(events)   # live == imp log, byte-for-byte
+
+
+def test_breadcrumb_to_completion_block_has_exactly_one_blank_end_to_end(
+    monkeypatch,
+) -> None:
+    """AC5 end-to-end: the live breadcrumb, the shared teardown, and the printed exit
+    block share one terminal; after the fix exactly one blank row separates them."""
+    import contextlib
+
+    import pyte
+
+    from imp.cli import main
+    from impty.screen import TerminalScreen
+    from impty.view import lines as screen_lines
+
+    class _Quest:
+        id = "2026-06-12-run-x"
+        title = ""
+        base_branch = "master"
+
+    events = [
+        ev("1", "quest_created", quest_id=1, title="x"),
+        ev("3", "step_started", step="merging", kind="agent", phase="integration",
+           model="m", provider="anthropic"),
+        ev("4", "agent_message", agent_id="a",
+           raw={"content": [{"type": "text", "text": "done"}]}, usage={}),
+        ev("5", "step_completed", step="merging", kind="agent",
+           action={"verb": "continue"}, var_mutations={}),
+    ]
+    out = _TTYPipe()                       # isatty() is True → footer draws and owns a blank
+    drv = LiveDriver(stream=out, color=False, width=80, status=LiveStatus(out))
+    for e in events:
+        drv.on_event(e)
+    drv.finish()                           # shared teardown: preserves the one owned blank
+    monkeypatch.setenv("NO_COLOR", "1")    # plain block → clean screen rows
+    with contextlib.redirect_stdout(out):
+        main._emit_completed(_Quest(), merged=True)
+
+    screen = TerminalScreen(80, 16, history=200, ratio=0.5)
+    pyte.ByteStream(screen).feed(out.getvalue().encode())
+    rows = screen_lines(screen)
+    c = next(i for i, r in enumerate(rows) if r.strip() == "merged into master")
+    assert rows[c - 1].strip() == ""            # exactly one blank directly above the block
+    assert rows[c - 2].strip() != ""            # …and not two — the row above the blank has content
+    assert "merging · complete" in rows[c - 2]  # breadcrumb, directly above the blank
