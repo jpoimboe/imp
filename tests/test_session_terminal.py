@@ -366,6 +366,64 @@ async def test_abandon_slash_command_at_gate_sends_control_abandon(
 
 
 @pytest.mark.anyio
+async def test_compact_slash_command_at_gate_forwards_control_and_stays_attached(
+    tmp_path: Path,
+) -> None:
+    sock = str(tmp_path / "s.sock")
+    server_coord = InterruptCoordinator()
+    server = SessionServer(sock, coordinator=server_coord, hibernate=False)
+
+    async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
+        with anyio.fail_after(5):
+            while server.attached_count == 0:
+                await server.wait_for_attach_change()
+        on_event({"type": "awaiting_user_input", "payload": {"steer_hint": "reply?"}})
+        with anyio.fail_after(5):
+            while server_coord.pause_reason != "compact":
+                await anyio.sleep(0.02)
+        server_coord.reset()
+        on_event({"type": "awaiting_user_input", "payload": {"steer_hint": "reply?"}})
+        return await user_chat_input_fn("reply?")
+
+    client_coord = InterruptCoordinator()
+
+    async def _attach(
+        on_event: Callable[[dict[str, Any]], None],
+    ) -> SessionClient:
+        client = SessionClient(sock, "c1", "T", on_event=on_event)
+        await client.connect()
+        return client
+
+    replies = iter(["/compact", "/abandon"])
+
+    async def _solicit(_prompt: str) -> str:
+        return next(replies)
+
+    echoed: list[str] = []
+
+    class _Driver:
+        def on_event(self, _event: dict[str, Any]) -> None: ...
+        def finish(self) -> None: ...
+        def append_committed_reply(self, text: str) -> None:
+            echoed.append(text)
+
+    with anyio.fail_after(10):
+        async with anyio.create_task_group() as tg:
+            await server.open()
+            tg.start_soon(server.serve, run_fn)
+
+            async def _client() -> None:
+                await run_terminal_client(
+                    attach=_attach, driver=_Driver(),
+                    coord=client_coord, solicit=_solicit, quest_id="c1")
+
+            tg.start_soon(_client)
+
+    assert echoed == ["/compact", "/abandon"]
+    assert server.abandoned
+
+
+@pytest.mark.anyio
 async def test_control_command_is_echoed_before_handling(tmp_path: Path) -> None:
     # A control slash command is echoed into the scrollback as a committed,
     # non-reconciling reply node BEFORE it is handled (here /abandon, which then
