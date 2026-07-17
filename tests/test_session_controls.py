@@ -138,6 +138,24 @@ async def test_force_gesture_forwards_interrupt_force_without_detaching(
 
 
 @pytest.mark.anyio
+async def test_retry_now_hook_forwards_retry_now_control() -> None:
+    from imp.remote.session.protocol import CONTROL_RETRY_NOW
+
+    sent: list[tuple[str, str | None]] = []
+
+    class _Client:
+        async def send_control(self, action: str, reason: str | None = None) -> None:
+            sent.append((action, reason))
+
+    coord = InterruptCoordinator()
+    SessionControls(_Client(), coord)
+    # SessionControls registered the retry-now hook; dispatching the gesture
+    # forwards a CONTROL_RETRY_NOW frame instead of latching locally.
+    await coord.dispatch_retry_now()
+    assert sent == [(CONTROL_RETRY_NOW, None)]
+
+
+@pytest.mark.anyio
 async def test_set_model_sends_control_with_arg() -> None:
     from imp.remote.session.protocol import CONTROL_SET_MODEL
 
