@@ -2457,6 +2457,21 @@ def test_replayed_user_message_leaves_optimistic_echo_armed() -> None:
     assert b._pending_reply_node is None
 
 
+def test_replayed_opening_intent_reconciles_into_optimistic_echo() -> None:
+    b = nv.NarrativeBuilder()
+    b.seed_opening_intent("typed text")
+    replay = {"id": "oi", "agent_id": None, "type": "user_message",
+              "payload": {"role": "user", "subtype": "intent",
+                          "content": [{"type": "text", "text": "authoritative text"}]}}
+    replay["_replay"] = True
+    b.add(replay)
+    intents = [c for c in b.tree.root.children if isinstance(c, nv.UserMessageNode)]
+    assert len(intents) == 1
+    assert intents[0].text == "authoritative text"
+    assert intents[0].interactive is True
+    assert b._opening_intent_node is intents[0]
+
+
 def test_append_committed_reply_is_non_reconciling() -> None:
     b = nv.NarrativeBuilder()
     b.add(_ev("s1", "step_started", step="spec", kind="agent", phase="design",
