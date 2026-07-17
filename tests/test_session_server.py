@@ -1812,3 +1812,27 @@ async def test_dispatch_compact_signals_side_effect_pause(tmp_path: Path) -> Non
     assert coord.should_pause
     assert coord.pause_reason == "compact"
     assert pending is not None and pending.is_set()   # the side-effect wake pulse fired
+
+
+@pytest.mark.anyio
+async def test_retry_now_control_latches_when_backoff_armed(tmp_path: Path) -> None:
+    from imp.cli.signals import InterruptCoordinator
+    from imp.remote.session.protocol import CONTROL_RETRY_NOW
+
+    coord = InterruptCoordinator()
+    server = SessionServer(str(tmp_path / "s.sock"), coordinator=coord)
+    coord.begin_backoff_wait()   # the daemon's backoff loop armed the wait
+    await server._dispatch_control(CONTROL_RETRY_NOW)
+    assert coord.retry_now_requested is True
+
+
+@pytest.mark.anyio
+async def test_retry_now_control_is_noop_when_no_backoff_armed(tmp_path: Path) -> None:
+    from imp.cli.signals import InterruptCoordinator
+    from imp.remote.session.protocol import CONTROL_RETRY_NOW
+
+    coord = InterruptCoordinator()
+    server = SessionServer(str(tmp_path / "s.sock"), coordinator=coord)
+    # No backoff wait armed: the daemon's arm-gate leaves a stray `r` a no-op.
+    await server._dispatch_control(CONTROL_RETRY_NOW)
+    assert coord.retry_now_requested is False
