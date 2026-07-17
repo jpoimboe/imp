@@ -898,7 +898,7 @@ def _record_idea(args: argparse.Namespace, control: Path, base: str) -> int:
             control, title=title, quest_id=quest_id, base_branch=base,
             depends_on=list(getattr(args, "depends_on", None) or []),
             workflow=getattr(args, "workflow", None),
-            origin="backlog", seed_opening=seed)
+            origin="backlog", seed_opening=seed, defer_seed=True)
     except (LoadError, LoadErrors) as e:
         print(f"imp: {e}", file=sys.stderr)
         return 2

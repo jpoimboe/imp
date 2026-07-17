@@ -283,3 +283,15 @@ def test_new_rejects_backlog_with_background(capsys) -> None:
         main._build_parser().parse_args(
             ["new", "--backlog", "x", "--background"])
     assert "not allowed with" in capsys.readouterr().err
+
+
+def test_record_idea_defers_seed(tmp_path: Path, monkeypatch) -> None:
+    _seed_control(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    ns = argparse.Namespace(
+        idea="my idea", opening=None, depends_on=None, workflow=None)
+    rc = _record_idea(ns, tmp_path, "main")
+    assert rc == 0
+    ids = [p.name for p in (tmp_path / ".imp" / "quests").iterdir()]
+    quest = Quest.load(tmp_path, ids[0])
+    assert State.load(quest.quest_dir / "state").step is None
