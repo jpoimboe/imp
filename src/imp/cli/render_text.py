@@ -492,14 +492,17 @@ def header_line(node: Any, *, depth: int, color: bool,
     if isinstance(node, nv.SubagentFold):
         return _line(f"· {node.subagent_name}", depth, color,
                      *pal.NODE_COLORS["subagent"], gutters=gutters)
-    label = _step_header_label(node)
+    own_label = _step_header_label(node)
     # The printed scrollback header prepends the owning phase's label (when set),
     # so it reads e.g. `implementation phase · plan 1/1 · task 3/3`; compose_label
     # drops a None phase_label, falling back to the step label alone.
-    label = compose_label([node.phase_label, label])
+    label = compose_label([node.phase_label, own_label])
+    # route_label carries no phase prefix, so compare it against the phase-free own
+    # label: when they match, the edge reason is already the step's label — drop the
+    # duplicate suffix; when they differ (renamed step), keep it as the reason.
     route = (pal.ansi(f" · {node.route_label}", *pal.NODE_COLORS["lifecycle"],
                       enabled=color)
-             if node.route_label else "")
+             if node.route_label and node.route_label != own_label else "")
     if not node.resumed:
         head = pal.ansi(label, *pal.NODE_COLORS["step"], enabled=color)
         if node.model:

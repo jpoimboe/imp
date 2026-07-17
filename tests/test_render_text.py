@@ -2929,3 +2929,33 @@ def test_step_context_full_has_no_system_prompt_line():
     ], full=True))
     assert "system_prompt:" not in out
     assert "tools:" in out
+
+
+def test_header_line_drops_route_suffix_when_equal_to_label() -> None:
+    reason = "addressing spec review feedback"
+    # Forward-routed: label == route_label → reason appears once, no trailing suffix.
+    fwd = nv.StepNode(name="spec", kind="agent", label=reason,
+                      model="claude-opus", route_label=reason)
+    assert rt.header_line(fwd, depth=0, color=False) == \
+        f"{reason} · claude-opus"
+    # Resumed: same equality → reason once, ends at the model after " (resume)".
+    res = nv.StepNode(name="spec", kind="agent", label=reason,
+                      model="claude-opus", resumed=True, route_label=reason)
+    assert rt.header_line(res, depth=0, color=False) == \
+        f"{reason} (resume) · claude-opus"
+    # Color on: the lifecycle-painted route suffix segment is absent in both forms.
+    suffix = pal.ansi(f" · {reason}", *pal.NODE_COLORS["lifecycle"])
+    assert suffix not in rt.header_line(fwd, depth=0, color=True)
+    assert suffix not in rt.header_line(res, depth=0, color=True)
+    # A differing route_label is still rendered as the trailing suffix (preserved).
+    diff = nv.StepNode(name="task-lead", kind="agent", label="task 1/3",
+                       model="claude-opus", route_label=reason)
+    assert rt.header_line(diff, depth=0, color=False) == \
+        f"task 1/3 · claude-opus · {reason}"
+    # With a phase_label set, the header prefixes the phase and still drops the
+    # duplicate route suffix when label == route_label.
+    phased = nv.StepNode(name="spec", kind="agent", label=reason,
+                         model="claude-opus", phase_label="spec phase",
+                         route_label=reason)
+    assert rt.header_line(phased, depth=0, color=False) == \
+        f"spec phase · {reason} · claude-opus"
