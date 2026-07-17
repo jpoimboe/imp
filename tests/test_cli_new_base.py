@@ -246,3 +246,40 @@ def test_apply_new_background_starts_quest(tmp_path: Path, monkeypatch) -> None:
     assert meta["parent"] == "mom3"
     assert started["control"] == tmp_path
     assert State.load(quest.quest_dir / "state").step is None
+
+
+def _new_subparser(parser: argparse.ArgumentParser) -> argparse.ArgumentParser:
+    sub = next(a for a in parser._actions
+               if getattr(a, "choices", None) and "new" in a.choices)
+    return sub.choices["new"]
+
+
+def test_new_parser_accepts_background() -> None:
+    args = main._build_parser().parse_args(["new", "--background", "brief"])
+    assert args.background is True
+
+
+def test_new_background_help_verbatim() -> None:
+    p_new = _new_subparser(main._build_parser())
+    bg = next(a for a in p_new._actions if a.dest == "background")
+    assert bg.help == (
+        "Create the quest and launch it detached in the background, "
+        "running headless and autonomous; it appears in the active list. "
+        "Implies --headless and --autonomous."
+    )
+
+
+def test_new_depends_on_help_mentions_go_live() -> None:
+    p_new = _new_subparser(main._build_parser())
+    dep = next(a for a in p_new._actions if a.dest == "depends_on")
+    assert dep.help == (
+        "A quest id this quest depends on (repeatable). "
+        "Gates go-live until the dep merges; never changes the base branch."
+    )
+
+
+def test_new_rejects_backlog_with_background(capsys) -> None:
+    with pytest.raises(SystemExit):
+        main._build_parser().parse_args(
+            ["new", "--backlog", "x", "--background"])
+    assert "not allowed with" in capsys.readouterr().err

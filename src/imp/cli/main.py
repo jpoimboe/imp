@@ -3992,16 +3992,22 @@ def _build_parser() -> argparse.ArgumentParser:
                        help="Headless reply consumed by the first bare-turn-end prompt; "
                             "pause then resume with another --message. "
                             "Requires --non-interactive.")
-    p_new.add_argument("--backlog", metavar="TITLE", default=None, dest="idea",
-                       help="File an idea for your backlog with this TITLE and "
-                            "exit immediately without running (the positional "
-                            "MESSAGE is an optional longer brief). Start it later "
-                            "with `imp resume <id>`.")
+    new_mode = p_new.add_mutually_exclusive_group()
+    new_mode.add_argument("--backlog", metavar="TITLE", default=None, dest="idea",
+                          help="File an idea for your backlog with this TITLE and "
+                               "exit immediately without running (the positional "
+                               "MESSAGE is an optional longer brief). Start it later "
+                               "with `imp resume <id>`.")
+    new_mode.add_argument("--background", action="store_true",
+                          help="Create the quest and launch it detached in the "
+                               "background, running headless and autonomous; it "
+                               "appears in the active list. Implies --headless "
+                               "and --autonomous.")
     p_new.add_argument("--depends-on", metavar="ID", action="append",
                        default=None, dest="depends_on",
-                       help="A quest id this backlog quest depends on "
-                            "(repeatable). Gates ready/blocked; never changes the "
-                            "base branch.")
+                       help="A quest id this quest depends on (repeatable). "
+                            "Gates go-live until the dep merges; never changes "
+                            "the base branch.")
     p_new.add_argument("--workflow", metavar="NAME", default=None,
                        help="Run this quest on workflow NAME instead of the "
                             "project default. A bundled name needs no commit; a "
