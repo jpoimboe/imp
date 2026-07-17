@@ -16,6 +16,7 @@ import functools
 import json
 import os
 import shutil
+import subprocess
 import sys
 import tempfile
 import traceback
@@ -215,6 +216,50 @@ def _trees_identical(a: Path, b: Path) -> bool:
     )
 
 
+def _tracked_workflow_path(control_root: Path, live: Path) -> str | None:
+    """The workflow source's control-root-relative POSIX path when that path is
+    present in the control root's HEAD (following the imp/workflows symlink to
+    its real target), else None — the signal to fall back to a plain copy for a
+    non-git source (a bundled/static workflow no merge queue mutates). Gating on
+    HEAD (not the index) matches exactly what _capture_workflow_tree archives, so
+    a staged-but-not-committed path never passes the check and then fails the
+    archive."""
+    try:
+        rel = live.resolve().relative_to(control_root.resolve())
+    except (OSError, ValueError):
+        return None
+    posix = rel.as_posix()
+    try:
+        done = subprocess.run(
+            ["git", "-C", str(control_root), "cat-file", "-e", f"HEAD:{posix}"],
+            capture_output=True, check=False,
+        )
+    except OSError:
+        return None
+    return posix if done.returncode == 0 else None
+
+
+def _capture_workflow_tree(control_root: Path, live: Path, dest: Path) -> None:
+    """Populate dest with the workflow tree. When the source is a git-tracked
+    path under control_root, extract it from the control root's HEAD — a
+    committed tree cannot be torn by a concurrent merge and pins exactly to the
+    merge queue's committed state. Otherwise copy the live tree verbatim."""
+    tracked = _tracked_workflow_path(control_root, live)
+    if tracked is None:
+        shutil.copytree(live, dest)
+        return
+    archived = subprocess.run(
+        ["git", "-C", str(control_root), "archive", "--format=tar",
+         f"HEAD:{tracked}"],
+        capture_output=True, check=True,
+    )
+    dest.mkdir(parents=True)
+    subprocess.run(
+        ["tar", "-x", "-f", "-", "-C", str(dest)],
+        input=archived.stdout, check=True,
+    )
+
+
 def _refresh_workflow_snapshot(quest: Quest) -> bool:
     """Re-snapshot the live workflow into quest_dir/workflow at a run_quest
     entry. Returns True only when an EXISTING snapshot's content was replaced
@@ -242,8 +287,10 @@ def _refresh_workflow_snapshot(quest: Quest) -> bool:
     if not live.is_dir():
         return False
 
-    # 3. Build the candidate exactly as the initial snapshot does.
-    shutil.copytree(live, tmp)
+    # 3. Build the candidate exactly as the initial snapshot does — but from a
+    #    git-consistent HEAD view when the source is tracked, so a concurrent
+    #    merge cannot tear it or feed a newer-than-HEAD tree to this loader.
+    _capture_workflow_tree(quest.control_root, live, tmp)
     overlay_global_skills(tmp / "skills")
     overlay_project_skills(quest.project_root, tmp / "skills" / "user")
 

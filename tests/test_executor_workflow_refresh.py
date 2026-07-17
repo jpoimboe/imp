@@ -4,6 +4,8 @@ helpers and the run_quest wiring / workflow_refreshed event."""
 from __future__ import annotations
 
 import os
+import shutil
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -26,6 +28,24 @@ from imp.providers.effective import load_effective_config
 from tests.test_executor import _register_fake, _seed_minimal_workflow
 
 _VSRC = SourceLoc(file=Path("wf"), line=1)
+
+
+def _init_git(root: Path) -> None:
+    for args in (
+        ["init", "-q"],
+        ["config", "user.email", "t@t"],
+        ["config", "user.name", "t"],
+    ):
+        subprocess.run(
+            ["git", "-C", str(root), *args], check=True, capture_output=True)
+
+
+def _git_commit_all(root: Path, msg: str) -> None:
+    subprocess.run(
+        ["git", "-C", str(root), "add", "-A"], check=True, capture_output=True)
+    subprocess.run(
+        ["git", "-C", str(root), "commit", "-qm", msg],
+        check=True, capture_output=True)
 
 
 def _state_with_vars(vars_: dict) -> State:
@@ -517,3 +537,81 @@ def test_snapshot_does_not_copy_the_docs_corpus(tmp_path: Path) -> None:
     # no docs/ copy (contrast with skills/, which IS overlaid).
     assert not (snapshot / "docs").exists()
     assert (snapshot / "skills").is_dir()
+
+
+def test_capture_pins_to_committed_head_ignoring_dirty_worktree(
+        tmp_path: Path) -> None:
+    """AC 2(a): with a git-tracked workflow source, the capture reads the
+    committed HEAD tree, never the working tree. An uncommitted working-tree
+    edit (a merge-queue write mid-flight) is NOT adopted, so the snapshot can
+    never be torn or newer than a single committed HEAD."""
+    quest, _, _ = _seed_minimal_workflow(tmp_path)
+    (tmp_path / ".gitignore").write_text(".imp/\n")
+    _init_git(tmp_path)
+    _git_commit_all(tmp_path, "wf v1")
+    live_yaml = tmp_path / "imp" / "workflows" / "imp" / "workflow.yaml"
+    committed = live_yaml.read_text()
+    live_yaml.write_text(committed + "# uncommitted-merge-write\n")
+
+    assert _refresh_workflow_snapshot(quest) is False        # initial capture
+    snap_yaml = quest.quest_dir / "workflow" / "workflow.yaml"
+    assert "uncommitted-merge-write" not in snap_yaml.read_text()
+    assert snap_yaml.read_text() == committed
+
+
+def test_capture_resolves_workflow_symlink_to_tracked_target(
+        tmp_path: Path) -> None:
+    """The imp self-hosting layout: imp/workflows/imp is a SYMLINK to the real
+    tracked tree (src/imp/assets/workflows/imp). The capture must resolve the
+    symlink to that real path and archive HEAD of the target tree."""
+    quest, _, _ = _seed_minimal_workflow(tmp_path)
+    wf = tmp_path / "imp" / "workflows" / "imp"
+    real = tmp_path / "src" / "wfreal"
+    real.parent.mkdir(parents=True)
+    shutil.move(str(wf), str(real))
+    wf.symlink_to(os.path.relpath(real, wf.parent))
+    (tmp_path / ".gitignore").write_text(".imp/\n")
+    _init_git(tmp_path)
+    _git_commit_all(tmp_path, "wf via symlink")
+    # Dirty the working tree of the real target; capture must pin to HEAD.
+    real_yaml = real / "workflow.yaml"
+    real_yaml.write_text(real_yaml.read_text() + "# dirty\n")
+
+    assert _refresh_workflow_snapshot(quest) is False
+    snap = quest.quest_dir / "workflow"
+    assert (snap / "workflow.yaml").exists()
+    assert "# dirty" not in (snap / "workflow.yaml").read_text()
+    assert (snap / "agents" / "writer.md").exists()
+
+
+def test_capture_non_git_source_uses_plain_copy(tmp_path: Path) -> None:
+    """AC 2(b): a non-git-tracked source (a normal user project's static
+    workflow) falls back to the plain copy, so the snapshot equals the live
+    tree — including a working-tree edit, since there is no HEAD to pin to."""
+    quest, _, _ = _seed_minimal_workflow(tmp_path)   # tmp_path is NOT a git repo
+    live_yaml = tmp_path / "imp" / "workflows" / "imp" / "workflow.yaml"
+    live_yaml.write_text(live_yaml.read_text() + "# live-only\n")
+
+    assert _refresh_workflow_snapshot(quest) is False
+    snap_yaml = quest.quest_dir / "workflow" / "workflow.yaml"
+    assert "# live-only" in snap_yaml.read_text()
+
+
+def test_git_capture_replaces_snapshot_crash_safe(tmp_path: Path) -> None:
+    """AC 5 on the git path: a committed workflow change IS adopted on a fresh
+    capture, and the .tmp/.old swap leaves no crash artifacts behind."""
+    quest, _, _ = _seed_minimal_workflow(tmp_path)
+    (tmp_path / ".gitignore").write_text(".imp/\n")
+    _init_git(tmp_path)
+    _git_commit_all(tmp_path, "wf v1")
+    assert _refresh_workflow_snapshot(quest) is False        # initial git capture
+
+    live_yaml = tmp_path / "imp" / "workflows" / "imp" / "workflow.yaml"
+    live_yaml.write_text(live_yaml.read_text() + "# committed-v2\n")
+    _git_commit_all(tmp_path, "wf v2")
+
+    assert _refresh_workflow_snapshot(quest) is True         # committed change adopted
+    snap = quest.quest_dir / "workflow"
+    assert "# committed-v2" in (snap / "workflow.yaml").read_text()
+    assert not (quest.quest_dir / "workflow.tmp").exists()
+    assert not (quest.quest_dir / "workflow.old").exists()

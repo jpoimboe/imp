@@ -131,6 +131,8 @@ def test_run_quest_restores_cwd_on_error(tmp_path: Path, provider_registry) -> N
     ch = Quest.create(tmp_path, title="x",
                        quest_id="ddd444", base_branch="main")
     (ch.control_workflow_dir / "workflow.yaml").write_text("}{ not yaml")
+    _git(tmp_path, "add", "-A")
+    _git(tmp_path, "commit", "-qm", "break workflow yaml")
 
     cwd_before = os.getcwd()
     with pytest.raises(LoadError):
