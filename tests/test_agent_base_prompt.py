@@ -9,7 +9,7 @@ from imp.engine.agent_run import _CORE_HEAD, _CORE_TAIL, build_agent_invocation
 from imp.engine.state import InMemoryEventLog
 from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
 
-_PERSONA = Path("src/imp/assets/workflows/imp/persona.md")
+_CODING_STANCE = Path("src/imp/assets/workflows/imp/partials/coding-stance.md")
 
 
 def _agent(name: str = "rev", tools=frozenset({"complete_step"})) -> AgentDef:
@@ -61,9 +61,9 @@ def test_engine_base_has_no_domain_language() -> None:
         assert banned not in base, banned
 
 
-def test_persona_carries_the_domain_language() -> None:
+def test_coding_stance_carries_the_domain_language() -> None:
     # Acceptance #2: the moved text now lives only in the imp persona.
-    persona = _PERSONA.read_text().lower()
+    persona = _CODING_STANCE.read_text().lower()
     assert "# doing tasks" in persona
     assert "software engineering" in persona
     assert "owasp" in persona
@@ -121,11 +121,11 @@ def test_core_tail_emphasizes_parallel_tool_batching() -> None:
     assert "a later call genuinely depends" in _CORE_TAIL
 
 
-def test_no_comments_rule_merged_into_persona_and_deduped_from_core() -> None:
+def test_no_comments_rule_merged_into_coding_stance_and_deduped_from_core() -> None:
     # AC 4: the single no-comments rule lives in the persona and carries BOTH the
     # WHY-only exception criteria AND the docstring/one-line ceiling; the core
     # tail no longer restates it, the emoji rule, or brevity.
-    persona = _PERSONA.read_text()
+    persona = _CODING_STANCE.read_text()
     # WHY-only exception criteria retained:
     assert "Only add one when the WHY is non-obvious" in persona
     # docstring / one-line ceiling folded into the SAME rule:

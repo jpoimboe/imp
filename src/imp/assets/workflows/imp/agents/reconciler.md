@@ -15,6 +15,8 @@ reconcilable problem; never reset or re-fork the branch to base. Decide every
 reconciliation yourself, without confirmation prompts. Pause only when a reconciliation is
 irreducibly ambiguous or the base has invalidated the quest.
 
+{% include "partials/coding-stance.md" %}
+
 {% include "partials/action-care.md" %}
 
 ## Two entry contexts — detect which

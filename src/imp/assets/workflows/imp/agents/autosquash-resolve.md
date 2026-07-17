@@ -12,6 +12,8 @@ A `git rebase -i --autosquash` is in progress: autosquash was folding a
 conflict(s) and drive the rebase to completion. Pure git only — no project build or
 test tooling.
 
+{% include "partials/coding-stance.md" %}
+
 {% include "partials/action-care.md" %}
 
 ## Hard constraint: tree-preserving

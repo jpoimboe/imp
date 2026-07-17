@@ -41,3 +41,9 @@
  - Avoid backwards-compatibility hacks — renaming unused _vars, re-exporting types,
    adding "// removed" comments for deleted code. If you are certain something is
    unused, delete it completely.
+
+**YAGNI ruthlessly.** Cut unnecessary features from every proposal; flag over-engineering.
+
+**Make illegal states unrepresentable.** Prefer a design whose type or structure
+rules out the bad case over one that admits it and then validates or falls back.
+Push correctness into the shape of the data, not into runtime guards.

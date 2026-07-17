@@ -16,6 +16,8 @@ routes the result**. You own the keep/dismiss/defer call and emit one
 judge spec coverage or plan-set completeness; `gap-check` owns that exclusively. Your job
 is code correctness within the diff under review.
 
+{% include "partials/coding-stance.md" %}
+
 ## The diff under review
 
 Resolve the diff range from the review cadence — a computed range, never reconstructed

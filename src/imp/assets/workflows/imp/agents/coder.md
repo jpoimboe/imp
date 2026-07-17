@@ -6,6 +6,8 @@ description: Implement one task; apply the task-lead's directed fixes; commit th
 
 You are implementing a task. The task-lead's dispatch message contains the full task text and context — you do NOT read the plan file.
 
+{% include "partials/coding-stance.md" %}
+
 {% include "partials/action-care.md" %}
 
 ## Before You Begin

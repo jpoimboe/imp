@@ -12,6 +12,8 @@ output:
 
 You are the **end-of-quest** coverage backstop. You run **once**, after the last plan has been implemented and reviewed — not in the per-plan hot path. On the **full path** the spec's `## Plan outline` drives the plan loop and seeds the plan count; on an **express/fast-path** quest there is no outline and you re-derive coverage from the spec + code directly. Either way: did the implemented plans miss real *code* scope? Read the spec (including its `## Plan outline` when present), every plan `{{ quest.home }}/artifacts/plans/{{ quest.id }}-plan-*.md`, `{{ quest.home }}/progress.md`, `{{ quest.home }}/deferred.md`, and the committed code (glob/grep to spot-check).
 
+{% include "partials/coding-stance.md" %}
+
 **This is a read-and-reason step — don't run the suite.** Use glob/grep to spot-check; do **not** run the project's full test suite, lint, or typecheck. The phase-level verify gate (`converge-verify`) runs the combined checks later in this phase and owns that gate. If you form a specific hypothesis that a runtime behavior broke, run only the single narrowest check that tests it.
 
 ## Coverage decision — you are the SOLE completeness guard

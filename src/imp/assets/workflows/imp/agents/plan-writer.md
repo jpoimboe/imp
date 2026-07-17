@@ -11,6 +11,8 @@ output:
 
 You are writing an implementation plan for this quest.
 
+{% include "partials/coding-stance.md" %}
+
 {% include "partials/action-care.md" %}
 
 Current id: `{{ quest.id }}`

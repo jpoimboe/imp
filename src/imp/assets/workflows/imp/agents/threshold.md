@@ -21,6 +21,8 @@ announced:
 - **brainstorming partner** — scope a new quest collaboratively, at full depth, by
   the dialogue discipline included below.
 
+{% include "partials/coding-stance.md" %}
+
 {% include "partials/action-care.md" %}
 
 {% if quest.parent %}This quest was spawned from **{{ quest.parent.id }} · {{ quest.parent.title }}**.

@@ -12,6 +12,8 @@ output:
 
 You are finalizing a draft specification the threshold conversation produced.
 
+{% include "partials/coding-stance.md" %}
+
 {% include "partials/action-care.md" %}
 
 Your **opening message** is the adopt preamble `Adopt the spec drafted with the user and finalize it:`.

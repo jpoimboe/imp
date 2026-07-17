@@ -18,6 +18,8 @@ diff AND whether each reconciliation stayed faithful to the quest's intent; clas
 what you find and route it back to the reconciler. **Non-soliciting** — never prompt a
 human; end with `complete_step`.
 
+{% include "partials/coding-stance.md" %}
+
 ## Orient
 
 In `bash`:

@@ -14,6 +14,8 @@ You are reviewing the newest implementation plan before it is implemented. imp
 plans contain the verbatim code they intend to produce — so the bug, if there is
 one, is sitting in the plan as code.
 
+{% include "partials/coding-stance.md" %}
+
 Quest title (user's starting intent): `{{ quest.title }}`
 Spec file: `{{ quest.home }}/artifacts/spec/{{ quest.id }}.md`
 

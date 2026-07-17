@@ -12,8 +12,8 @@ def test_spec_design_principles_carries_judgment_lens_only() -> None:
     assert "improvements to the code this quest touches." in text
     # cover-the-design (the concrete coverage list)
     assert "architecture, components, data flow, error handling, and testing" in text
-    # YAGNI
-    assert "YAGNI ruthlessly" in text
+    # YAGNI moved to coding-stance.md; no longer in spec-design-principles.md
+    assert "YAGNI ruthlessly" not in text
     # It must NOT carry dialogue-conduct prose (that lives in brainstorm-dialogue).
     assert "One question at a time" not in text
     assert "Propose 2" not in text
@@ -109,11 +109,14 @@ def test_brainstorm_dialogue_bare_open_does_not_freeze_concierge_or_scout() -> N
     assert "their reply picks the hat" in low
 
 
-def test_spec_design_principles_carries_illegal_states_principle() -> None:
-    text = (PARTIALS / "spec-design-principles.md").read_text()
-    assert "**Make illegal states unrepresentable.**" in text
-    assert "rules out the bad case over one that admits it and then validates or" in text
-    assert "Push correctness into the shape of the data, not into runtime guards." in text
+def test_illegal_states_principle_moved_to_coding_stance() -> None:
+    # The illegal-states principle moved from spec-design-principles.md to coding-stance.md.
+    sdp = (PARTIALS / "spec-design-principles.md").read_text()
+    assert "**Make illegal states unrepresentable.**" not in sdp
+    coding_stance = (PARTIALS / "coding-stance.md").read_text()
+    assert "**Make illegal states unrepresentable.**" in coding_stance
+    assert "rules out the bad case over one that admits it and then validates or" in coding_stance
+    assert "Push correctness into the shape of the data, not into runtime guards." in coding_stance
 
 
 def test_live_gate_dialogue_carries_door_agnostic_posture_only() -> None:

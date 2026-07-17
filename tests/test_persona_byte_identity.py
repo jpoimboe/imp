@@ -4,10 +4,8 @@ from pathlib import Path
 
 import pytest
 
-from imp.agents.prompts import build_context, render_prompt
 from imp.agents.runner import QuestContext
 from imp.engine.agent_run import build_agent_invocation
-from imp.engine.state import JsonlEventLog
 from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
 
 _ASSET = Path("src/imp/assets/workflows/imp")
@@ -25,18 +23,12 @@ def _agent(tools):
         source=SourceLoc(file=Path("a.md"), line=1), max_tool_calls=None)
 
 
-def _rendered_imp_persona(tmp_path: Path) -> str:
-    log = JsonlEventLog(tmp_path / "events.jsonl")
-    ctx = build_context(quest_title="t", event_log=log)
-    return render_prompt((_ASSET / "persona.md").read_text(), ctx,
-                         workflow_dir=_ASSET)
-
-
 def _build(tmp_path, tools):
     return build_agent_invocation(
         agent_def=_agent(tools), provider_name="anthropic", model_name="m",
         rendered_system_prompt="STEP BODY",
-        rendered_persona=_rendered_imp_persona(tmp_path), initial_messages=(),
+        rendered_persona="",  # imp ships no persona; coding stance is an opt-in partial
+        initial_messages=(),
         quest_context=QuestContext(title="t", project_root=tmp_path,
                                      workflow_dir=_ASSET),
         user_chat_input_fn=None, transcript_dir=tmp_path / "td",
@@ -50,7 +42,7 @@ events_path=tmp_path / "e.jsonl", subagent_defs={},
     (frozenset({"complete_step"}), "imp_base_prompt_nobash.txt"),
     (frozenset({"complete_step", "bash"}), "imp_base_prompt_bash.txt"),
 ])
-def test_imp_assembled_prompt_byte_identical_after_split(
+def test_imp_engine_base_matches_golden(
     tmp_path, tools, golden, monkeypatch,
 ):
     import datetime as _dt

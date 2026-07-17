@@ -6,6 +6,7 @@ from imp.engine.agent_run import _CORE_TAIL
 
 _AGENTS_DIR = Path("src/imp/assets/workflows/imp/agents")
 _PARTIAL = Path("src/imp/assets/workflows/imp/partials/action-care.md")
+_CODING_STANCE_PARTIAL = Path("src/imp/assets/workflows/imp/partials/coding-stance.md")
 
 _ACTION_CARE_AGENTS = {
     "coder.md",
@@ -16,6 +17,25 @@ _ACTION_CARE_AGENTS = {
     "reconciler.md",
     "plan-writer.md",
     "spec-finalizer.md",
+    "threshold.md",
+    "finalize.md",
+}
+
+_CODING_STANCE_AGENTS = {
+    "coder.md",
+    "task-lead.md",
+    "deferred-sweep.md",
+    "spiker.md",
+    "autosquash-resolve.md",
+    "reconciler.md",
+    "code-reviewer.md",
+    "batch-code-reviewer.md",
+    "gap-check.md",
+    "integration-review.md",
+    "plan-writer.md",
+    "plan-reviewer.md",
+    "spec-finalizer.md",
+    "spec-reviewer.md",
     "threshold.md",
     "finalize.md",
 }
@@ -38,3 +58,23 @@ def test_action_care_include_in_exactly_the_right_agents() -> None:
             assert include in text, f"missing include in {path.name}"
         else:
             assert include not in text, f"unexpected include in {path.name}"
+
+
+def test_coding_stance_partial_exists_with_expected_anchors() -> None:
+    assert _CODING_STANCE_PARTIAL.exists(), \
+        f"partial not found: {_CODING_STANCE_PARTIAL}"
+    text = _CODING_STANCE_PARTIAL.read_text()
+    assert "backwards-compatibility hacks" in text
+    assert "YAGNI ruthlessly" in text
+
+
+def test_coding_stance_include_in_exactly_the_right_agents() -> None:
+    include = '{% include "partials/coding-stance.md" %}'
+    for path in _AGENTS_DIR.glob("*.md"):
+        text = path.read_text()
+        if path.name in _CODING_STANCE_AGENTS:
+            assert include in text, \
+                f"missing coding-stance include in {path.name}"
+        else:
+            assert include not in text, \
+                f"unexpected coding-stance include in {path.name}"

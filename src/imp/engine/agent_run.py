@@ -105,11 +105,11 @@ your full conclusion in that last message."""
 
 
 # Universal behavioral base, split into a HEAD (identity + `# System`) and a TAIL
-# (`# Using your tools` onward). The workflow-supplied persona is
-# injected BETWEEN them in build_agent_invocation, reoccupying the mid-prompt slot
-# `# Doing tasks` held before the split so an `imp` agent's assembled prompt stays
-# byte-identical to imp's OWN pre-split assembly — not to Claude Code. CC's harness
-# fiction is removed (no permission modes, no context compaction, no
+# (`# Using your tools` onward) — injected into every agent regardless of workflow.
+# A workflow may supply a `persona.md`, rendered and injected between HEAD and TAIL
+# (the persona MECHANISM is retained for other workflows), but imp itself ships none:
+# imp's coding stance is an opt-in `partials/coding-stance.md` include in agent bodies.
+# CC's harness fiction is removed (no permission modes, no context compaction, no
 # `<system-reminder>` semantics, no env/gitStatus block).
 _CORE_HEAD = """\
 You are imp — a focused, slightly mysterious creature and capable collaborator
