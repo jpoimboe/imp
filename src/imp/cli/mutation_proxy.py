@@ -22,6 +22,19 @@ def run_mutation(control_root: Path, op: str, args: dict[str, Any]) -> dict[str,
         from imp.remote.daemon import spawn
         message = spawn.resume_quest(control_root, args["token"])
         return {"returncode": 0, "message": message}
+    if op == "edit":
+        from imp.cli.main import _iter_quest_ids, apply_edit
+        token = args["token"]
+        matches = [cid for cid in _iter_quest_ids(control_root) if token in cid]
+        if len(matches) != 1:
+            message = (f"imp: no quest matches {token!r}" if not matches
+                       else f"imp: {token!r} is ambiguous: {', '.join(matches)}")
+            return {"returncode": 2, "message": message}
+        rc, msg = apply_edit(
+            control_root, matches[0], title=args["title"], backlog=args["backlog"],
+            active=args["active"], depends_on=args["depends_on"],
+            clear_deps=args["clear_deps"], append_intent=args["append_intent"])
+        return {"returncode": rc, "message": msg or ""}
     raise ValueError(f"unknown mutation op {op!r}")
 
 
