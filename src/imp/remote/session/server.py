@@ -155,6 +155,9 @@ class SessionServer:
 
     async def _chat(self, _query: str) -> str | SkillReply:
         self.set_pending_prompt(self._last_gate_event)
+        # Arm the input latch for the whole solicit: a reply arriving between the
+        # prompt and next_input() opening the gate is latched, not dropped.
+        self._socket.arm_input()
         try:
             got = (await self._hibernation_gate() if self._hibernate
                    else await self._socket.next_input())
@@ -174,6 +177,7 @@ class SessionServer:
         finally:
             self.set_pending_prompt(None)
             self._last_gate_event = None
+            self._socket.disarm_input()
 
     async def _await_first_attach(self) -> bool:
         """Startup-only: block until the first LEASED client attaches, bounded by

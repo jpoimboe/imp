@@ -107,6 +107,10 @@ class SessionSocket:
         self._clients: set[_Client] = set()
         self._listener: SocketListener | None = None
         self._input_send: MemoryObjectSendStream[str | SkillRequest] | None = None
+        # Single-slot latch for a reply that arrives after a solicit armed but
+        # before next_input() opened the gate. Armed only while soliciting.
+        self._pending_input: str | SkillRequest | None = None
+        self._input_armed: bool = False
         self._serve_scope: anyio.CancelScope | None = None
         self._serve_done: anyio.Event | None = None
 
@@ -207,12 +211,25 @@ class SessionSocket:
                 with anyio.move_on_after(_FLUSH_TIMEOUT):
                     await client.pump_done.wait()
 
+    def arm_input(self) -> None:
+        """Latch a reply arriving before the gate opens. Pair with disarm_input()."""
+        self._input_armed = True
+
+    def disarm_input(self) -> None:
+        """Stop expecting a reply; drop any unconsumed latched frame so it can't leak later."""
+        self._input_armed = False
+        self._pending_input = None
+
     async def next_input(self) -> str | SkillRequest:
         if self._input_send is not None:
             raise RuntimeError("next_input called while gate is already open")
         # capacity-1 stream + WouldBlock drop: first write wins, loser not queued for next gate
         send, recv = anyio.create_memory_object_stream[str | SkillRequest](max_buffer_size=1)
         self._input_send = send
+        if self._pending_input is not None:
+            # A reply latched between arm and gate-open; deliver it to this gate.
+            send.send_nowait(self._pending_input)
+            self._pending_input = None
         try:
             return await recv.receive()
         finally:
@@ -221,12 +238,14 @@ class SessionSocket:
             recv.close()
 
     def _dispatch(self, client: _Client, message: object) -> None:
-        if isinstance(message, Input) and self._input_send is not None:
-            with contextlib.suppress(anyio.WouldBlock):
-                self._input_send.send_nowait(message.text)
-        elif isinstance(message, SkillRequest) and self._input_send is not None:
-            with contextlib.suppress(anyio.WouldBlock):
-                self._input_send.send_nowait(message)
+        if isinstance(message, (Input, SkillRequest)):
+            payload = message.text if isinstance(message, Input) else message
+            if self._input_send is not None:
+                with contextlib.suppress(anyio.WouldBlock):
+                    self._input_send.send_nowait(payload)
+            elif self._input_armed and self._pending_input is None:
+                # Latch the first pre-gate reply (first-wins, like the open gate).
+                self._pending_input = payload
         elif isinstance(message, Control) and self._on_control is not None:
             self._on_control(message.action, message.reason)
         elif isinstance(message, SetLease):
