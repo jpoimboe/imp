@@ -745,12 +745,15 @@ def _cmd_init(args: argparse.Namespace) -> int:
     return 0
 
 
-def _run_header_line(quest_id: str, title: str, marker: str,
+def _run_header_line(quest_id: str, title: str, marker: str | None = None,
                      *, color: bool) -> str:
     stripped = title.strip()
-    tail = f" · {stripped} · {marker}" if stripped else f" · {marker}"
-    return (ansi(quest_id, *pal.NODE_COLORS["quest_id"], enabled=color)
-            + ansi(tail, "dim", enabled=color))
+    if marker is None:
+        tail = f" · {stripped}" if stripped else ""
+    else:
+        tail = f" · {stripped} · {marker}" if stripped else f" · {marker}"
+    head = ansi(quest_id, *pal.NODE_COLORS["quest_id"], enabled=color)
+    return head + ansi(tail, "dim", enabled=color) if tail else head
 
 
 def _print_run_header(quest_id: str, title: str, marker: str,

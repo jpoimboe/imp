@@ -40,3 +40,28 @@ def test_print_run_header_emits_marker_then_one_blank_line(capsys) -> None:
 def test_print_run_header_keeps_title_when_named(capsys) -> None:
     _print_run_header("b1f6wi", "Dark mode", "new", color=False)
     assert capsys.readouterr().out == "b1f6wi · Dark mode · new\n\n"
+
+
+def test_marker_omitted_renders_id_and_title_only() -> None:
+    line = _run_header_line("yaitd7", "Add version flag", color=False)
+    assert line == "yaitd7 · Add version flag"
+
+
+def test_marker_omitted_titleless_renders_id_only() -> None:
+    line = _run_header_line("yaitd7", "   ", color=False)
+    assert line == "yaitd7"
+
+
+def test_marker_omitted_color_wraps_id_gold_and_title_dim() -> None:
+    line = _run_header_line("yaitd7", "Add version flag", color=True)
+    assert line == "\x1b[33myaitd7\x1b[0m\x1b[2m · Add version flag\x1b[0m"
+
+
+def test_marker_omitted_titleless_color_is_id_only() -> None:
+    line = _run_header_line("yaitd7", "", color=True)
+    assert line == "\x1b[33myaitd7\x1b[0m"
+
+
+def test_marker_omitted_titleless_whitespace_color_is_id_only() -> None:
+    line = _run_header_line("yaitd7", "   ", color=True)
+    assert line == "\x1b[33myaitd7\x1b[0m"
