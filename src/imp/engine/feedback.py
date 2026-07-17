@@ -59,7 +59,7 @@ def format_script_feedback(
     command: str, exit_code: int, stdout: Any, stderr: Any,
 ) -> str:
     body = _truncate(f"{_coerce(stdout)}{_coerce(stderr)}")
-    detail = f"Gate `{command}` failed (exit {exit_code}).\n{body}"
+    detail = f"Gate `{command}` failed (exit {exit_code})\n{body}"
     return _WRAPPER.format(detail=detail)
 
 

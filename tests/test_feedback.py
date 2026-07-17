@@ -18,6 +18,7 @@ def test_script_feedback_frames_command_and_output() -> None:
     assert out.startswith(_WRAPPER_HEAD)
     assert "Address this, then call" not in out   # tail moved to the backstop
     assert "`./scripts/test.sh` failed (exit 1)" in out
+    assert "failed (exit 1).\n" not in out   # no trailing period on the headline
     assert "PASS a" in out
     assert "FAIL b" in out
 
