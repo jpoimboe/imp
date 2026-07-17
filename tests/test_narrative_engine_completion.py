@@ -7,11 +7,11 @@ from imp.cli.narrative import NarrativeBuilder
 from imp.cli.render_text import render_tree
 
 
-def test_completion_nudge_handler_registered() -> None:
+def test_engine_message_handler_registered() -> None:
     assert "engine_message" in NarrativeBuilder._HANDLERS
 
 
-def test_completion_nudge_renders_nothing() -> None:
+def test_completion_renders_nothing() -> None:
     tree = nv.build_tree([
         {"id": "e1", "parent_id": None, "agent_id": None,
          "type": "engine_message",

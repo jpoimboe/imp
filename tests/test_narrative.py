@@ -70,7 +70,7 @@ def test_malformed_events_become_error_nodes_and_never_abort() -> None:
     assert any(isinstance(c, nv.PhaseNode) for c in tree.root.children)
 
 
-def test_token_totals_accumulate_across_all_llm_responses() -> None:
+def test_token_totals_accumulate_across_all_agent_messages() -> None:
     tree = nv.build_tree([
         {"id": "a", "agent_id": "step:p/s", "type": "agent_message",
          "payload": {"usage": {"input_tokens": 100, "output_tokens": 20}}},
@@ -985,7 +985,7 @@ def test_agent_result_stashes_args_without_emitting_prose_node() -> None:
     assert lits == []          # output fields are not prose blocks (E1)
 
 
-def test_agent_output_skips_whitespace_only_prose_field() -> None:
+def test_agent_result_skips_whitespace_only_prose_field() -> None:
     # A whitespace-only multi-line field passes _is_prose_field (it contains a
     # newline) but must NOT promote to _render_output_args output — the v.strip()
     # guard in _render_output_args skips empty/whitespace values.
@@ -1083,7 +1083,7 @@ def test_same_phase_call_leaves_current_phase_open() -> None:
     assert phases[0].closed is False
 
 
-def test_empty_prose_llm_response_yields_no_agent_text_node() -> None:
+def test_empty_prose_agent_message_yields_no_agent_text_node() -> None:
     # A thinking-only turn (no text block) renders to empty prose. It must NOT
     # produce an AgentTextNode — that would render as an indent-only blank line.
     tree = nv.build_tree([
@@ -1108,7 +1108,7 @@ def test_empty_prose_llm_response_yields_no_agent_text_node() -> None:
     assert nodes[0].text == "real prose"
 
 
-def test_empty_llm_response_between_tools_keeps_burst_open() -> None:
+def test_empty_agent_message_between_tools_keeps_burst_open() -> None:
     # §8: an empty-text llm_response (lone tool_use block, no prose) is a
     # tool-use-turn carrier and must NOT flush an open burst — otherwise
     # consecutive tool_calls each start a fresh burst with count 1.
@@ -2016,7 +2016,7 @@ def test_parallel_batch_folds_ignore_interleaved_parent_chunks() -> None:
         folds["tester"].start_ts, folds["tester"].end_ts) == 19.0
 
 
-def test_opening_intent_stays_at_root_after_first_step() -> None:
+def test_intent_stays_at_root_after_first_step() -> None:
     tree = nv.build_tree([
         {"id": "e1", "agent_id": None, "type": "quest_created",
          "payload": {"handle": "h", "title": "t"}},
@@ -2040,7 +2040,7 @@ def test_opening_intent_stays_at_root_after_first_step() -> None:
     assert root_kinds.index(nv.UserMessageNode) < root_kinds.index(nv.PhaseNode)
 
 
-def test_no_opening_intent_yields_no_user_message_node() -> None:
+def test_no_intent_yields_no_user_message_node() -> None:
     tree = nv.build_tree([
         _ev("e1", "step_started", step="spec", kind="agent", phase="design",
             model="m", provider="anthropic"),
@@ -2051,7 +2051,7 @@ def test_no_opening_intent_yields_no_user_message_node() -> None:
     assert not any(isinstance(c, nv.UserMessageNode) for c in tree.root.children)
 
 
-def test_opening_intent_at_root_not_under_any_step() -> None:
+def test_intent_at_root_not_under_any_step() -> None:
     tree = nv.build_tree([
         {"id": "e1", "agent_id": None, "type": "quest_created",
          "payload": {"handle": "h", "title": "t"}},
@@ -2075,7 +2075,7 @@ def test_opening_intent_at_root_not_under_any_step() -> None:
     assert not any(isinstance(c, nv.UserMessageNode) for c in steps[1].children)
 
 
-def test_opening_intent_stays_at_root_across_resume_reentry() -> None:
+def test_intent_stays_at_root_across_resume_reentry() -> None:
     seed = [
         {"id": "e1", "agent_id": None, "type": "user_message",
          "payload": {"role": "user", "subtype": "intent",
@@ -2206,7 +2206,7 @@ def test_burst_span_brackets_surrounding_prose() -> None:
     assert burst.span_end_ts == "2026-06-03T00:00:10+00:00"
 
 
-def test_tool_use_carrier_llm_response_does_not_split_span() -> None:
+def test_tool_use_carrier_agent_message_does_not_split_span() -> None:
     tree = nv.build_tree([
         ev("s", "step_started", step="s", kind="agent", phase="p",
            model="m", provider="anthropic", timestamp="2026-06-03T00:00:00+00:00"),
@@ -2324,7 +2324,7 @@ def test_latest_prompt_tokens_keeps_last_value_when_usage_absent() -> None:
     assert b.latest_prompt_tokens == 42            # untouched by a usage-less turn
 
 
-def test_subagent_llm_response_does_not_move_latest_prompt_tokens() -> None:
+def test_subagent_agent_message_does_not_move_latest_prompt_tokens() -> None:
     # A subagent turn must NOT flip the context bar to its own prompt count, but
     # its tokens must still fold into the cumulative change total (F2).
     b = nv.NarrativeBuilder()
@@ -2520,7 +2520,7 @@ def test_builder_captures_context_pct_and_window() -> None:
     assert b.latest_context_window == 1_000_000
 
 
-def test_subagent_llm_response_does_not_move_context_pct_or_window() -> None:
+def test_subagent_agent_message_does_not_move_context_pct_or_window() -> None:
     # A subagent turn carries its own session context usage; like prompt tokens,
     # it must NOT flip the top-level context bar to the subagent's values.
     b = nv.NarrativeBuilder()
@@ -2628,7 +2628,7 @@ def test_current_activity_two_running_subagents_show_the_count_not_a_detail() ->
     assert act.detail is None or "+" not in (act.detail or "")   # no "+N subagents" tail
 
 
-def test_claude_code_totals_come_from_query_result_not_llm_response() -> None:
+def test_claude_code_totals_come_from_query_result_not_agent_message() -> None:
     # The coalesced claude_code llm_response usage is streaming-partial and must
     # NOT drive the displayed totals; query_result is authoritative.
     b = nv.NarrativeBuilder()
@@ -2645,7 +2645,7 @@ def test_claude_code_totals_come_from_query_result_not_llm_response() -> None:
     assert tree.tokens.cost == 0.05
 
 
-def test_anthropic_totals_still_sum_from_llm_response() -> None:
+def test_anthropic_totals_still_sum_from_agent_message() -> None:
     # Non-claude_code providers (no query_result) keep summing llm_response usage.
     b = nv.NarrativeBuilder()
     b.add(ev("1", "agent_message", agent_id="step:p/s", provider="anthropic",
@@ -2908,7 +2908,7 @@ def test_current_activity_counter_prefers_pushed_label_for_non_position_step() -
     assert act.counter == "running 42 tests"
 
 
-def test_engine_continuation_folds_into_injected_message_node() -> None:
+def test_continuation_folds_into_injected_message_node() -> None:
     tree = nv.build_tree([
         _ev("1", "step_started", step="s", kind="agent", phase="p"),
         {"id": "2", "agent_id": None, "type": "engine_message",
