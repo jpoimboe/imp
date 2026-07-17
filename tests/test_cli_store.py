@@ -39,7 +39,8 @@ def test_get_events_live_archived_and_unknown(tmp_path: Path) -> None:
     _append_event(ch, {
         "id": "e1", "timestamp": "2026-06-01T00:00:00+00:00",
         "type": "user_message",
-        "payload": {"human": True, "content": [{"type": "text", "text": "hi there"}]}})
+        "payload": {"role": "user", "subtype": "reply",
+                    "content": [{"type": "text", "text": "hi there"}]}})
     store = make_store(tmp_path)
 
     live = store.get_events("liveq")
@@ -87,11 +88,13 @@ def test_scan_homes_digest_fields(tmp_path: Path) -> None:
     ch = Quest.create(tmp_path, title="Scan Me", quest_id="scanq", base_branch="main")
     _append_event(ch, {
         "id": "e1", "timestamp": "2026-06-01T00:00:00+00:00",
-        "type": "opening_intent", "payload": {"text": "wire the widget"}})
+        "type": "user_message",
+        "payload": {"role": "user", "subtype": "intent",
+                    "content": [{"type": "text", "text": "wire the widget"}]}})
     _append_event(ch, {
         "id": "e2", "timestamp": "2026-06-01T00:00:05+00:00",
         "type": "user_message",
-        "payload": {"human": True,
+        "payload": {"role": "user", "subtype": "reply",
                     "content": [{"type": "text", "text": "please wire the widget"}]}})
 
     digs = {d.quest_id: d for d in make_store(tmp_path).scan_homes()}
@@ -122,7 +125,9 @@ def test_quest_card_composes_row_intent_and_summary(tmp_path: Path) -> None:
     ch = Quest.create(tmp_path, title="Card Q", quest_id="cardq", base_branch="main")
     _append_event(ch, {
         "id": "e1", "timestamp": "2026-06-01T00:00:00+00:00",
-        "type": "opening_intent", "payload": {"text": "build the widget"}})
+        "type": "user_message",
+        "payload": {"role": "user", "subtype": "intent",
+                    "content": [{"type": "text", "text": "build the widget"}]}})
     summ = ch.quest_dir / "artifacts" / "summary"
     summ.mkdir(parents=True)
     (summ / "cardq.md").write_text("all done\n")
@@ -143,7 +148,7 @@ def test_search_active_zone(tmp_path: Path) -> None:
     _append_event(ch, {
         "id": "e1", "timestamp": "2026-06-01T00:00:00+00:00",
         "type": "user_message",
-        "payload": {"human": True,
+        "payload": {"role": "user", "subtype": "reply",
                     "content": [{"type": "text", "text": "darkmode toggle"}]}})
     store = make_store(tmp_path)
 

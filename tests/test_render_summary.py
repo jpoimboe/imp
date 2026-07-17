@@ -272,7 +272,7 @@ def _context(agent_id: str, ts: str) -> dict:
 
 def _llm(agent_id: str, ts: str, *, input=0, output=0,
          cache_read=0, cache_creation=0) -> dict:
-    return {"type": "llm_response", "agent_id": agent_id, "timestamp": ts,
+    return {"type": "agent_message", "agent_id": agent_id, "timestamp": ts,
             "payload": {"usage": {"input_tokens": input, "output_tokens": output,
                                   "cache_read_input_tokens": cache_read,
                                   "cache_creation_input_tokens": cache_creation}}}

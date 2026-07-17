@@ -32,7 +32,7 @@ def _indexed(events: list[dict[str, Any]]) -> list[tuple[int, dict[str, Any]]]:
 
 def test_is_suppressed_flags_malformed_and_usage_patch() -> None:
     assert ei.is_suppressed({"_malformed": True, "raw": "{bad"}) is True
-    assert ei.is_suppressed({"type": "llm_response_usage_patch"}) is True
+    assert ei.is_suppressed({"type": "agent_message_usage_patch"}) is True
     assert ei.is_suppressed({"type": "tool_call"}) is False
 
 
@@ -154,7 +154,7 @@ def test_build_index_step_ranges_counts_and_types_histogram() -> None:
         _ev(None, "step_completed", step="spec"),               # 4
         _ev(None, "step_started", step="coder"),                # 5
         _ev("c", "tool_call", agent_id="step:build/coder"),     # 6
-        {"type": "llm_response_usage_patch", "agent_id": "step:build/coder"},  # 7 (suppressed)
+        {"type": "agent_message_usage_patch", "agent_id": "step:build/coder"},  # 7 (suppressed)
         _ev(None, "step_completed", step="coder"),              # 8
     ]
     idx = ei.build_index(_indexed(events), quest_id="q1")
@@ -169,7 +169,7 @@ def test_build_index_step_ranges_counts_and_types_histogram() -> None:
     assert rows["coder"].count == 3  # line 7 excluded from the count
     # types histogram is count-descending; suppressed type absent.
     assert idx.types[0] == ("step_started", 2)
-    assert dict(idx.types).get("llm_response_usage_patch") is None
+    assert dict(idx.types).get("agent_message_usage_patch") is None
 
 
 def test_build_index_marks_loop_and_subagent_fanout() -> None:
@@ -219,7 +219,7 @@ def test_build_step_index_tiles_window_across_own_agent_and_subagents() -> None:
             name="sub_agent", input={"subagent_name": "coder"}),        # 2 own
         _ev("e1", "tool_call", agent_id="sub:D1"),                      # 3 coder-1
         _ev("e2", "tool_result", agent_id="sub:D1"),                   # 4 coder-1
-        _ev("f1", "agent_output", agent_id="step:main/task-lead"),     # 5 own
+        _ev("f1", "agent_result", agent_id="step:main/task-lead"),     # 5 own
         _ev(None, "step_completed", step="task-lead"),                  # 6 own
     ]
     handles = ei.subagent_handle_map(_indexed(events))
@@ -321,11 +321,11 @@ def _selection_fixture() -> list[dict[str, Any]]:
         _ev("D1", "tool_call", agent_id="step:main/task-lead",
             name="sub_agent", input={"subagent_name": "coder"}),        # 2
         _ev("e1", "tool_call", agent_id="sub:D1"),                      # 3
-        _ev("e2", "agent_output", agent_id="sub:D1"),                   # 4
+        _ev("e2", "agent_result", agent_id="sub:D1"),                   # 4
         _ev(None, "step_completed", step="task-lead"),                  # 5
         _ev(None, "step_started", step="review"),                       # 6
         _ev("r1", "tool_call", agent_id="step:review/review"),         # 7
-        {"type": "llm_response_usage_patch", "agent_id": "sub:D1"},      # 8 suppressed
+        {"type": "agent_message_usage_patch", "agent_id": "sub:D1"},      # 8 suppressed
         _ev(None, "step_completed", step="review"),                     # 9
     ]
 
@@ -398,9 +398,9 @@ def test_select_agent_selector_is_exact_not_substring() -> None:
 def test_select_type_or_within_multivalue_set() -> None:
     events = _selection_fixture()
     handles = ei.subagent_handle_map(_indexed(events))
-    # OR within the types set: tool_call (2,3,7) OR agent_output (4).
+    # OR within the types set: tool_call (2,3,7) OR agent_result (4).
     got = ei.select_event_lines(
-        _indexed(events), types={"tool_call", "agent_output"},
+        _indexed(events), types={"tool_call", "agent_result"},
         handle_map=handles)
     assert [o for o, _ in got] == [2, 3, 4, 7]
 

@@ -86,8 +86,9 @@ def test_cmd_status_merges_status_and_renders_bare_backlog(
 def test_cmd_status_shows_intent_for_empty_title(tmp_path: Path, capsys) -> None:
     _seed_control(tmp_path)
     ch = Quest.create(tmp_path, title="", quest_id="alpha", base_branch="main")
-    ch.event_log().append(agent_id=None, type="opening_intent",
-                          payload={"text": "add a dark mode toggle"})
+    ch.event_log().append(agent_id=None, type="user_message",
+                          payload={"role": "user", "subtype": "intent",
+                                   "content": [{"type": "text", "text": "add a dark mode toggle"}]})
     rc = _cmd_status(argparse.Namespace(all=False), tmp_path)
     out = capsys.readouterr().out
     assert rc == 0
@@ -111,7 +112,9 @@ def test_cmd_status_intent_falls_back_to_user_message(tmp_path: Path, capsys) ->
 
 def test_resolve_intent_prefers_opening_intent() -> None:
     events = [
-        {"type": "opening_intent", "payload": {"text": "seeded goal"}},
+        {"type": "user_message",
+         "payload": {"role": "user", "subtype": "intent",
+                     "content": [{"type": "text", "text": "seeded goal"}]}},
         {"type": "awaiting_user_input", "payload": {"prompt": ""}},
         {"type": "user_message",
          "payload": {"role": "user",
@@ -145,8 +148,8 @@ def test_resolve_intent_skips_synthetic_task_prompt() -> None:
     # awaiting_user_input nor tagged by a following user_interjected, so it is
     # not a genuine human turn -> intent resolves to None (card omits opening).
     events = [
-        {"type": "user_message",
-         "payload": {"role": "user",
+        {"type": "engine_message",
+         "payload": {"role": "user", "subtype": "agent_prompt",
                      "content": [{"type": "text",
                                   "text": "## Task\nyou are a coder, do X"}]}},
         {"type": "step_started", "payload": {"step": "coder", "phase": "implement"}},
@@ -216,16 +219,14 @@ def test_cmd_status_renders_draft_in_active(
 
 def _human_msg(text: str) -> dict:
     return {"type": "user_message",
-            "payload": {"role": "user",
-                        "content": [{"type": "text", "text": text}],
-                        "human": True}}
+            "payload": {"role": "user", "subtype": "reply",
+                        "content": [{"type": "text", "text": text}]}}
 
 
 def _synthetic_msg(text: str) -> dict:
-    return {"type": "user_message",
-            "payload": {"role": "user",
-                        "content": [{"type": "text", "text": text}],
-                        "human": False}}
+    return {"type": "engine_message",
+            "payload": {"role": "user", "subtype": "agent_prompt",
+                        "content": [{"type": "text", "text": text}]}}
 
 
 def test_prompt_history_lines_seed_first_then_human_turns_in_order() -> None:

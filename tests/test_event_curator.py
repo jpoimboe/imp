@@ -7,10 +7,10 @@ def test_curate_augments_allowed_event_with_quest_context() -> None:
     curator = EventCurator(
         id="cid", title_provider=lambda: "My Quest", events=("all",))
     out = curator.curate(
-        {"id": "ev1", "type": "agent_output", "payload": {"text": "hi"}})
+        {"id": "ev1", "type": "agent_result", "payload": {"text": "hi"}})
     assert out is not None
     assert out["id"] == "ev1"             # the event's OWN id is not clobbered
-    assert out["type"] == "agent_output"
+    assert out["type"] == "agent_result"
     assert out["quest"] == {
         "id": "cid", "title": "My Quest", "step": None, "status": "running"}
 
@@ -73,9 +73,9 @@ def test_curate_rereads_title_while_empty_then_freezes() -> None:
         return value
 
     curator = EventCurator(id="cid", title_provider=provider, events=("all",))
-    first = curator.curate({"type": "agent_output", "payload": {}})
-    second = curator.curate({"type": "agent_output", "payload": {}})
-    third = curator.curate({"type": "agent_output", "payload": {}})
+    first = curator.curate({"type": "agent_result", "payload": {}})
+    second = curator.curate({"type": "agent_result", "payload": {}})
+    third = curator.curate({"type": "agent_result", "payload": {}})
     assert first is not None and second is not None and third is not None
     assert first["quest"]["title"] == ""            # empty at session start
     assert second["quest"]["title"] == "Real Title"  # picked up the rename

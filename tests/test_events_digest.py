@@ -35,10 +35,10 @@ def test_step_context_digest_drops_prompt_and_schema() -> None:
     assert "SECRET_TOOL_SCHEMA" not in line
 
 
-def test_llm_response_digest_shows_stop_tools_in_out_and_text() -> None:
+def test_agent_message_digest_shows_stop_tools_in_out_and_text() -> None:
     ev = {
         "id": "e3", "parent_id": None, "agent_id": "step:x/y",
-        "timestamp": "2026-07-01T00:00:02+00:00", "type": "llm_response",
+        "timestamp": "2026-07-01T00:00:02+00:00", "type": "agent_message",
         "payload": {
             "provider": "anthropic", "model": "claude-x",
             "stop_reason": "tool_use",
@@ -123,11 +123,11 @@ def test_unknown_type_uses_generic_scalar_fallback() -> None:
 def test_usage_patch_row_missing_envelope_renders_without_error() -> None:
     # agent_message_usage_patch rows are persisted raw: no id/parent_id/timestamp.
     ev = {
-        "type": "llm_response_usage_patch", "agent_id": "step:x/y",
+        "type": "agent_message_usage_patch", "agent_id": "step:x/y",
         "payload": {"usage": {"input_tokens": 7}},
     }
     line = digest_event(ev)
-    assert "llm_response_usage_patch" in line
+    assert "agent_message_usage_patch" in line
     assert "\n" not in line
 
 
@@ -137,10 +137,10 @@ def test_malformed_line_is_recognizable() -> None:
     assert "{not valid json" in line
 
 
-def test_llm_response_with_unparseable_raw_does_not_raise() -> None:
+def test_agent_message_with_unparseable_raw_does_not_raise() -> None:
     ev = {
         "id": "e6", "parent_id": None, "agent_id": "step:x/y",
-        "timestamp": "2026-07-01T00:00:05+00:00", "type": "llm_response",
+        "timestamp": "2026-07-01T00:00:05+00:00", "type": "agent_message",
         "payload": {
             "provider": "no_such_provider", "model": "m",
             "stop_reason": "end_turn",

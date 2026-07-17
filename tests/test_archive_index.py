@@ -88,8 +88,9 @@ def test_ingest_populates_changes_deps(tmp_path: Path) -> None:
 def _prose_events() -> list[dict]:
     return [
         {"id": "e0", "parent_id": None, "agent_id": None,
-         "timestamp": "2026-06-01T00:00:01+00:00", "type": "opening_intent",
-         "payload": {"text": "wire a 300s deadline"}},
+         "timestamp": "2026-06-01T00:00:01+00:00", "type": "user_message",
+         "payload": {"role": "user", "subtype": "intent",
+                     "content": [{"type": "text", "text": "wire a 300s deadline"}]}},
         {"id": "e1", "parent_id": "e0", "agent_id": None,
          "timestamp": "2026-06-01T00:00:02+00:00", "type": "tool_call",
          "payload": {"name": "bash", "input": {"cmd": "SECRETNOISE"}}},
@@ -102,7 +103,7 @@ def test_ingest_populates_content_prose(tmp_path: Path) -> None:
         index.ingest(conn, _sample_record(), _prose_events())
         content = conn.execute(
             "SELECT content FROM quests WHERE id='alpha'").fetchone()[0]
-        assert "300s" in content            # opening_intent prose materialized
+        assert "300s" in content            # user_message/intent prose materialized
         assert "SECRETNOISE" not in content  # tool_call payload excluded
     finally:
         conn.close()

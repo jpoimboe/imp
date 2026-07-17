@@ -26,17 +26,25 @@ def _archive(
 
 def _prose_line(text: str) -> str:
     return json.dumps({
-        "id": "e0", "timestamp": "2026-06-01T00:00:01+00:00", "type": "llm_response",
+        "id": "e0", "timestamp": "2026-06-01T00:00:01+00:00", "type": "agent_message",
         "payload": {"provider": "anthropic", "raw": {
             "content": [{"type": "text", "text": text}],
             "stop_reason": "end_turn",
             "usage": {"input_tokens": 1, "output_tokens": 1}}}}) + "\n"
 
 
-def _user_msg_line(text: str, *, human: bool) -> str:
+def _user_msg_line(text: str) -> str:
     return json.dumps({
         "id": "u0", "timestamp": "2026-06-01T00:00:01+00:00", "type": "user_message",
-        "payload": {"content": [{"type": "text", "text": text}], "human": human}}) + "\n"
+        "payload": {"role": "user", "subtype": "reply",
+                    "content": [{"type": "text", "text": text}]}}) + "\n"
+
+
+def _engine_prompt_line(text: str) -> str:
+    return json.dumps({
+        "id": "u0", "timestamp": "2026-06-01T00:00:01+00:00", "type": "engine_message",
+        "payload": {"role": "user", "subtype": "agent_prompt",
+                    "content": [{"type": "text", "text": text}]}}) + "\n"
 
 
 def test_search_archive_matches_title_substring(tmp_path: Path) -> None:
@@ -136,9 +144,9 @@ def test_search_content_percent_is_literal(tmp_path: Path) -> None:
 
 def test_search_content_surfaces_human_reply_not_injected_prompt(tmp_path: Path) -> None:
     _archive(tmp_path, "reply", "",
-             events_text=_user_msg_line("please use HUMANTERM", human=True))
+             events_text=_user_msg_line("please use HUMANTERM"))
     _archive(tmp_path, "prompt", "",
-             events_text=_user_msg_line("cover-check INJECTEDTERM", human=False))
+             events_text=_engine_prompt_line("cover-check INJECTEDTERM"))
     # The human reply is indexed and searchable (term is in neither id nor title)...
     assert [h[0] for h in
             archive_read.search_archive_content(tmp_path, "HUMANTERM")] == ["reply"]

@@ -510,8 +510,9 @@ def test_show_json_emits_structured_overview(
     ch = _seed_with_artifacts(tmp_path, _ID, "Feat")
     with ch.events_path.open("a", encoding="utf-8") as fh:
         fh.write(json.dumps({
-            "type": "opening_intent", "agent_id": None,
-            "payload": {"text": "wire up the widget"}}) + "\n")
+            "type": "user_message", "agent_id": None,
+            "payload": {"role": "user", "subtype": "intent",
+                        "content": [{"type": "text", "text": "wire up the widget"}]}}) + "\n")
     out = _run(monkeypatch, tmp_path, "show", _ID, "--json")
     data = json.loads(out)
     assert data["id"] == _ID

@@ -20,8 +20,9 @@ def _archive_unnamed(control: Path, cid: str, *, prompt: str | None) -> None:
             fh.write(json.dumps({
                 "id": "open", "agent_id": None,
                 "timestamp": "2026-06-01T00:00:00+00:00",
-                "type": "opening_intent",
-                "payload": {"text": prompt}}) + "\n")
+                "type": "user_message",
+                "payload": {"role": "user", "subtype": "intent",
+                            "content": [{"type": "text", "text": prompt}]}}) + "\n")
     _complete_and_archive(control, cid)
 
 

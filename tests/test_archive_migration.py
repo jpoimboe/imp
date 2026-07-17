@@ -100,7 +100,7 @@ def _seed_prose_change(control: Path, cid: str, body: str) -> None:
     events = control / f"{cid}.jsonl"
     events.write_text(json.dumps({
         "id": f"{cid}-e0", "timestamp": "2026-06-01T00:00:01+00:00",
-        "type": "llm_response",
+        "type": "agent_message",
         "payload": {"provider": "anthropic", "raw": {
             "content": [{"type": "text", "text": body}],
             "stop_reason": "end_turn",
@@ -289,7 +289,7 @@ def test_rebuild_backfills_content_column(tmp_path: Path) -> None:
 
 
 def test_schema_bump_reindexes_and_drops_injected_prompt(tmp_path: Path) -> None:
-    # Archive a change whose events carry an injected (human=False) prompt and a
+    # Archive a change whose events carry an injected (engine_message/agent_prompt) prompt and a
     # genuine human reply, then simulate a pre-bump index: stamp user_version back
     # to 3 and poison the content column with the injected term, as the old
     # unfiltered ingest would have stored it.
@@ -298,15 +298,15 @@ def test_schema_bump_reindexes_and_drops_injected_prompt(tmp_path: Path) -> None
     events = control / f"{cid}.jsonl"
     events.write_text(
         json.dumps({"id": f"{cid}-e0", "timestamp": "2026-06-01T00:00:01+00:00",
-                    "type": "user_message",
-                    "payload": {"content": [{"type": "text",
-                                             "text": "INJECTED cover-check prompt"}],
-                                "human": False}}) + "\n"
+                    "type": "engine_message",
+                    "payload": {"role": "user", "subtype": "agent_prompt",
+                                "content": [{"type": "text",
+                                             "text": "INJECTED cover-check prompt"}]}}) + "\n"
         + json.dumps({"id": f"{cid}-e1", "timestamp": "2026-06-01T00:00:02+00:00",
                       "type": "user_message",
-                      "payload": {"content": [{"type": "text",
-                                               "text": "please use HUMANTERM"}],
-                                  "human": True}}) + "\n")
+                      "payload": {"role": "user", "subtype": "reply",
+                                  "content": [{"type": "text",
+                                               "text": "please use HUMANTERM"}]}}) + "\n")
     quest_json = control / f"{cid}-quest.json"
     quest_json.write_text(json.dumps({
         "id": cid, "title": "", "base_branch": "main",

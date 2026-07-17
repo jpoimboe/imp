@@ -125,10 +125,19 @@ def test_search_archived_filters_by_disposition_and_labels_zone(tmp_path: Path) 
     assert hits[0].zone == "archive"
 
 
-def _user_msg_line(text: str, *, human: bool = True) -> str:
+def _user_msg_line(text: str) -> str:
     return json.dumps({
         "type": "user_message",
-        "payload": {"content": [{"type": "text", "text": text}], "human": human},
+        "payload": {"role": "user", "subtype": "reply",
+                    "content": [{"type": "text", "text": text}]},
+    }) + "\n"
+
+
+def _engine_prompt_line(text: str) -> str:
+    return json.dumps({
+        "type": "engine_message",
+        "payload": {"role": "user", "subtype": "agent_prompt",
+                    "content": [{"type": "text", "text": text}]},
     }) + "\n"
 
 
@@ -148,7 +157,7 @@ def test_search_active_excludes_nonhuman_user_message(tmp_path: Path) -> None:
     _seed_control(tmp_path)
     live = Quest.create(tmp_path, title="Quiet chat", quest_id="liveid",
                          base_branch="main")
-    live.events_path.write_text(_user_msg_line("cover-check injected prompt", human=False))
+    live.events_path.write_text(_engine_prompt_line("cover-check injected prompt"))
     # The term lives only in a non-human (injected) user_message -> not searchable,
     # and it is in neither the id "liveid" nor the title "Quiet chat".
     assert _search_active(tmp_path, "cover-check") == []

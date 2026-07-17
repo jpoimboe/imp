@@ -512,7 +512,7 @@ def test_log_uses_display_width_for_hr_and_term_width_for_wrap(
                                 "model": "m", "provider": "anthropic"}}) + "\n"
         + json.dumps({"id": "e2", "agent_id": "step:p/s",
                       "timestamp": "2026-06-25T10:00:01+00:00",
-                      "type": "llm_response",
+                      "type": "agent_message",
                       "payload": {"provider": "anthropic", "model": "m",
                                   "stop_reason": "end_turn", "usage": {},
                                   "raw": {"content": [{"type": "text",

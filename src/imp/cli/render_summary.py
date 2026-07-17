@@ -81,7 +81,7 @@ def build_summary(events: Iterable[dict[str, Any]]) -> list[StepRow]:
         p = raw if isinstance(raw, dict) else {}
 
         # Map an open step to the agent id of its first non-sub agent event.
-        if (etype in ("step_context", "llm_response")
+        if (etype in ("step_context", "agent_message")
                 and open_row is not None and open_row.end_ts is None
                 and open_row.agent_id is None
                 and isinstance(agent_id, str)
@@ -105,7 +105,7 @@ def build_summary(events: Iterable[dict[str, Any]]) -> list[StepRow]:
             open_row = None
         elif etype == "awaiting_user_input":
             pending_wait_start = ts
-        elif etype == "llm_response":
+        elif etype == "agent_message":
             sub = subs_by_agent.get(agent_id) if isinstance(agent_id, str) else None
             if sub is not None:
                 sub.tokens.add_usage(p.get("usage"))

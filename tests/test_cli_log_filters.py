@@ -12,18 +12,18 @@ from imp.cli.main import _select_log_events, main
 from imp.engine.quest import LAYOUT_VERSION
 from imp.engine.state import JsonlEventLog
 
-# Two steps (spec@1-3, plan@4-6); llm_response authors carry step:<phase>/<name>
+# Two steps (spec@1-3, plan@4-6); agent_message authors carry step:<phase>/<name>
 # agent_ids so agent_display renders "spec" / "plan".
 _EVENTS = [
     {"id": "e1", "type": "step_started", "agent_id": None,
      "payload": {"step": "spec"}},
-    {"id": "e2", "type": "llm_response", "agent_id": "step:design/spec",
+    {"id": "e2", "type": "agent_message", "agent_id": "step:design/spec",
      "payload": {"content": [{"type": "text", "text": "alpha"}]}},
     {"id": "e3", "type": "step_completed", "agent_id": None,
      "payload": {"step": "spec"}},
     {"id": "e4", "type": "step_started", "agent_id": None,
      "payload": {"step": "plan"}},
-    {"id": "e5", "type": "llm_response", "agent_id": "step:build/plan",
+    {"id": "e5", "type": "agent_message", "agent_id": "step:build/plan",
      "payload": {"content": [{"type": "text", "text": "beta"}]}},
     {"id": "e6", "type": "step_completed", "agent_id": None,
      "payload": {"step": "plan"}},
@@ -86,14 +86,14 @@ def test_select_log_events_bad_range_returns_2(
 # ordinals/timestamps are assigned exactly as production does.
 _LOG_EVENTS = [
     {"type": "step_started", "agent_id": None, "payload": {"step": "spec"}},
-    {"type": "llm_response", "agent_id": "step:design/spec",
+    {"type": "agent_message", "agent_id": "step:design/spec",
      "payload": {"provider": "anthropic", "model": "m",
                  "raw": {"content": [{"type": "text", "text": "alpha"}]},
                  "usage": {"input_tokens": 1, "output_tokens": 1},
                  "stop_reason": "end_turn"}},
     {"type": "step_completed", "agent_id": None, "payload": {"step": "spec"}},
     {"type": "step_started", "agent_id": None, "payload": {"step": "plan"}},
-    {"type": "llm_response", "agent_id": "step:build/plan",
+    {"type": "agent_message", "agent_id": "step:build/plan",
      "payload": {"provider": "anthropic", "model": "m",
                  "raw": {"content": [{"type": "text", "text": "beta"}]},
                  "usage": {"input_tokens": 1, "output_tokens": 1},
@@ -165,7 +165,7 @@ def test_log_step_filter_scopes_narrative(tmp_path, monkeypatch) -> None:
     rc, _out, _err = _run_log(monkeypatch, tmp_path, "logf01", "--step", "spec")
     assert rc == 0
     assert [e["type"] for e in cap["events"]] == [
-        "step_started", "llm_response", "step_completed"]
+        "step_started", "agent_message", "step_completed"]
     assert all(e.get("agent_id") != "step:build/plan" for e in cap["events"])
 
 
@@ -174,7 +174,7 @@ def test_log_positional_range_scopes_narrative(tmp_path, monkeypatch) -> None:
     cap = _capture_build_tree(monkeypatch)
     rc, _out, _err = _run_log(monkeypatch, tmp_path, "logf01", "1-2")
     assert rc == 0
-    assert [e["type"] for e in cap["events"]] == ["step_started", "llm_response"]
+    assert [e["type"] for e in cap["events"]] == ["step_started", "agent_message"]
 
 
 def test_log_limit_keeps_last_n(tmp_path, monkeypatch) -> None:
@@ -183,7 +183,7 @@ def test_log_limit_keeps_last_n(tmp_path, monkeypatch) -> None:
     rc, _out, _err = _run_log(monkeypatch, tmp_path, "logf01", "--limit", "2")
     assert rc == 0
     assert [e["type"] for e in cap["events"]] == [
-        "llm_response", "step_completed"]
+        "agent_message", "step_completed"]
 
 
 def test_log_agent_filter_keeps_matching_author(tmp_path, monkeypatch) -> None:
@@ -208,7 +208,7 @@ def test_log_md_export_honors_filters(tmp_path, monkeypatch) -> None:
         monkeypatch, tmp_path, "logf01", "--step", "spec", "--md", "-")
     assert rc == 0
     assert [e["type"] for e in cap["events"]] == [
-        "step_started", "llm_response", "step_completed"]
+        "step_started", "agent_message", "step_completed"]
 
 
 def test_log_step_filter_renders_only_scoped_content(tmp_path, monkeypatch) -> None:
@@ -232,7 +232,7 @@ def test_log_html_export_honors_filters(tmp_path, monkeypatch) -> None:
         monkeypatch, tmp_path, "logf01", "--step", "spec", "--html", "-")
     assert rc == 0
     assert [e["type"] for e in cap["events"]] == [
-        "step_started", "llm_response", "step_completed"]
+        "step_started", "agent_message", "step_completed"]
 
 
 def test_log_no_type_flag(tmp_path, monkeypatch) -> None:
@@ -241,6 +241,6 @@ def test_log_no_type_flag(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
     err = io.StringIO()
     with redirect_stderr(err), pytest.raises(SystemExit) as exc:
-        main(["log", "logf01", "--type", "llm_response"])
+        main(["log", "logf01", "--type", "agent_message"])
     assert exc.value.code == 2
     assert "unrecognized arguments: --type" in err.getvalue()
