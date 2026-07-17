@@ -1148,7 +1148,8 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
         quest = Quest.create_draft(
             control, title=title, quest_id=quest_id, base_branch=base,
             workflow=wf_arg, origin="draft",
-            depends_on=None, seed_opening=None)
+            depends_on=list(getattr(args, "depends_on", None) or []),
+            seed_opening=None)
     except (LoadError, LoadErrors) as e:
         print(f"imp: {e}", file=sys.stderr)
         return 2
