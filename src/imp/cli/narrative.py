@@ -1653,6 +1653,10 @@ def _h_user_message(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, 
             # carrying the human's reply (anthropic/openai/claude_code resume shape).
             text = _summarize_result(block.get("content"))
     if event.get("_replay"):
+        if subtype == "intent" and self._opening_intent_node is not None:
+            # Replayed opening intent with an existing optimistic echo: adopt text in place.
+            self._opening_intent_node.text = text
+            return
         # A replayed user_message never consumes an optimistic echo — only the live turn does.
         node = UserMessageNode(text=text, interactive=True)
         if subtype == "intent":
