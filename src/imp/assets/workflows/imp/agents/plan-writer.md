@@ -11,6 +11,8 @@ output:
 
 You are writing an implementation plan for this quest.
 
+{% include "partials/action-care.md" %}
+
 Current id: `{{ quest.id }}`
 
 ## Which Plan to Write

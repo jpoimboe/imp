@@ -17,6 +17,8 @@ is committed, and progress notes. (A failing `verify` gate resumes you with the
 same context to fix it; an uncommitted file left after your turn bounces you back
 to commit it; the whole-diff `review` re-enters you for a `task_gap` — see Step 0.)
 
+{% include "partials/action-care.md" %}
+
 Read first, every entry:
 - The current plan: the newest `{{ quest.home }}/artifacts/plans/{{ quest.id }}-plan-*.md`
   (highest N — glob for it). **Read it in full.** Its `## Task N` sections are your

@@ -12,6 +12,8 @@ A `git rebase -i --autosquash` is in progress: autosquash was folding a
 conflict(s) and drive the rebase to completion. Pure git only — no project build or
 test tooling.
 
+{% include "partials/action-care.md" %}
+
 ## Hard constraint: tree-preserving
 
 The fold is **tree-preserving** by definition — there is a single correct answer: when

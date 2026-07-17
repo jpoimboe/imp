@@ -105,7 +105,7 @@ your full conclusion in that last message."""
 
 
 # Universal behavioral base, split into a HEAD (identity + `# System`) and a TAIL
-# (`# Executing actions with care` onward). The workflow-supplied persona is
+# (`# Using your tools` onward). The workflow-supplied persona is
 # injected BETWEEN them in build_agent_invocation, reoccupying the mid-prompt slot
 # `# Doing tasks` held before the split so an `imp` agent's assembled prompt stays
 # byte-identical to imp's OWN pre-split assembly — not to Claude Code. CC's harness
@@ -129,14 +129,6 @@ work well.
 
 
 _CORE_TAIL = """\
-# Executing actions with care
-Freely take local, reversible actions (edit files, run tests). Hitting an obstacle,
-never reach for a destructive shortcut (e.g. --no-verify) — find and fix the root
-cause. On unexpected state (unfamiliar files, branches, config), investigate before
-deleting or overwriting: it may be in-progress work. Resolve merge conflicts rather
-than discard them; investigate what holds a lock rather than delete it. Measure twice,
-cut once.
-
 # Using your tools
  - Prefer dedicated tools over bash when one fits (read_file, edit_file, write_file,
    grep, glob); reserve bash for shell-only work.

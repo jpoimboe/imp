@@ -22,6 +22,8 @@ base integration — that **already happened** at the head, where the reconciler
 reconciled the quest against the moved base and the at-head verify and semantic review
 routed any problem back to the reconciler (no human gate).
 
+{% include "partials/action-care.md" %}
+
 {% include "partials/imp-grounding.md" %}
 
 {% include "partials/memory-authoring.md" %}
