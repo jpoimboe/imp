@@ -244,3 +244,22 @@ def test_async_cmd_new_chat_mode_does_not_proxy(
     with pytest.raises(_Stop):
         asyncio.run(main._async_cmd_new(args, leave_mode="chat"))
     assert called is False
+
+
+def test_async_cmd_new_proxy_forwards_background(
+        monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("IMP_SESSION_SOCKET", "/tmp/imp-x/y.sock")
+    seen: dict[str, object] = {}
+
+    async def _fake(op: str, args: dict) -> dict:
+        seen["op"] = op
+        seen["args"] = args
+        return {"returncode": 0, "message": "imp: started quest q9"}
+
+    monkeypatch.setattr(main, "proxy_mutation_async", _fake)
+    args = argparse.Namespace(
+        opening="brief", title="T", workflow=None, base=None, idea=None,
+        depends_on=None, background=True)
+    assert asyncio.run(main._async_cmd_new(args)) == 0
+    assert seen["op"] == "new"
+    assert seen["args"]["background"] is True

@@ -1070,7 +1070,8 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
             "workflow": getattr(args, "workflow", None),
             "base": getattr(args, "base", None),
             "idea": getattr(args, "idea", None),
-            "depends_on": getattr(args, "depends_on", None)}))
+            "depends_on": getattr(args, "depends_on", None),
+            "background": getattr(args, "background", False)}))
     install_process_group()
     from imp.cli.signals import InterruptCoordinator
 
@@ -1087,6 +1088,16 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
     if wf_arg is not None and not validate_workflow_name(wf_arg):
         print(f"imp: invalid workflow name {wf_arg!r}", file=sys.stderr)
         return 2
+
+    if getattr(args, "background", False):
+        rc, message = apply_new(
+            control, opening=getattr(args, "opening", None),
+            title=getattr(args, "title", None), workflow=wf_arg,
+            base=getattr(args, "base", None), idea=None,
+            depends_on=list(getattr(args, "depends_on", None) or []),
+            background=True)
+        print(message, file=sys.stderr if rc else sys.stdout)
+        return rc
 
     if getattr(args, "idea", None) is not None:
         if getattr(args, "title", None):
