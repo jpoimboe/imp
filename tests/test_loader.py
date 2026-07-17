@@ -239,6 +239,32 @@ def test_inline_phase_surface_and_kind_inference(tmp_path: Path) -> None:
     assert wf_obj.vars.defaults() == {"review_done": False}
 
 
+def test_goto_progress_flag_parsed(tmp_path: Path) -> None:
+    wf = _write(tmp_path, """\
+        name: t
+        description: t
+        phases:
+          - name: only
+            steps:
+              - name: writer
+                file: agents/spec-writer.md
+              - name: reviewer
+                file: agents/spec-reviewer.md
+                rules:
+                  - {if: {verdict: rework}, goto: writer, progress: true}
+                  - {if: {verdict: approve}, goto: writer}
+                  - {else: true, continue: true}
+        """, agents={"spec-writer": _WRITER, "spec-reviewer": _REVIEWER})
+    wf_obj = load_workflow(wf)
+    by = {s.name: s for s in wf_obj.flat_steps()}
+    marked = by["reviewer"].rules[0]
+    unmarked = by["reviewer"].rules[1]
+    assert isinstance(marked.action, Goto)
+    assert isinstance(unmarked.action, Goto)
+    assert marked.action.progress is True       # progress: true parsed onto the Goto
+    assert unmarked.action.progress is False     # default when the key is absent
+
+
 def test_if_string_unquoted_identifier_is_load_error(tmp_path: Path) -> None:
     wf = _write(tmp_path, """\
         name: t

@@ -56,6 +56,8 @@ class Goto(Action):
                                  # => forwards nothing on this edge (§6).
     resume: bool = False         # set by the `resume:` verb; continues the transcript
     release: str | None = None   # lane keyword "merge-lane" => pop the held lane on this route
+    progress: bool = False       # backward/self edge to a NEW work unit => reset the
+                                 # source loop counter instead of incrementing it
 
 
 # ── Mutations & rules ─────────────────────────────────────────────────────────

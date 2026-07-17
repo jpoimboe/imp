@@ -30,7 +30,7 @@ vars:
 
 defaults:
   max_retries: 3
-  max_loops: 1000
+  max_loops: 10
   max_tool_calls: 10000
 
 phases:
@@ -52,7 +52,6 @@ phases:
       - name: scope-code-check
         show_label: false
         command: ./scripts/scope-code-check.sh
-        max_loops: 3
         # An exit-0 goto forwards its configured `feedback:` (the hand-off opener) to
         # plan-writer / spec-finalizer; the dirty (exit != 0) resume carries no feedback:,
         # so the engine delivers the script's own stderr to the resumed threshold turn.
@@ -168,7 +167,6 @@ phases:
         interruptible: true
         acquire: test-lane
         label: running tests
-        max_loops: 5
         rules:
           - {if: {exit: 0}, continue: true}
           - {if: {exit: 124}, pause: true}
@@ -182,7 +180,7 @@ phases:
         show_label: false
         rules:
           - {if: {coverage_settled: true}, goto: quest-review}
-          - {if: "var.plan_index < var.plan_total", set: {plan_index: "var.plan_index + 1"}, goto: plan-writer, label: "writing plan"}
+          - {if: "var.plan_index < var.plan_total", set: {plan_index: "var.plan_index + 1"}, goto: plan-writer, progress: true, label: "writing plan"}
           - {else: true, goto: gap-check}
 
   # ── converge: runs ONCE per quest (quest-local, NO lock). The coverage backstop,
@@ -208,7 +206,6 @@ phases:
         file: agents/batch-code-reviewer.md
         tier: high
         label: reviewing entire diff
-        max_loops: 6
         rules:
           - {if: {verdict: task_gap}, goto: task-lead, label: "addressing code review feedback", feedback: "The batch-code-reviewer found an implemented task needs rework. Findings:"}
           - {if: {status: Error}, pause: true}
@@ -231,7 +228,6 @@ phases:
         interruptible: true
         acquire: test-lane
         label: running tests
-        max_loops: 5
         rules:
           - {if: {exit: 0}, goto: wait-for-head}
           - {if: {exit: 124}, pause: true}
@@ -271,7 +267,6 @@ phases:
         interruptible: true
         acquire: test-lane
         label: running tests
-        max_loops: 5
         rules:
           - {if: {exit: 0}, continue: true}
           - {if: {exit: 124}, pause: true}
@@ -281,7 +276,6 @@ phases:
         file: agents/integration-review.md
         tier: high
         label: reviewing merge
-        max_loops: 6
         rules:
           - {if: {blocking: true}, resume: reconciler, label: "addressing integration review feedback", feedback: "Here's review feedback to address:"}
           - {if: {has_minor_findings: true}, resume: reconciler, label: "integrating minor improvements", feedback: "No blocking issues — integrate these minor improvements; a final review follows:"}
@@ -300,10 +294,9 @@ phases:
         tier: high
         label: finalizing
         interactive: true
-        max_loops: 20
         rules:
           - {if: {decision: merge},  goto: cleanup-merge, label: "preparing to merge"}
-          - {if: {decision: rework}, set: {plan_index: "var.plan_index + 1", plan_total: "var.plan_total + 1"}, goto: plan-writer, release: merge-lane, label: "addressing review feedback", feedback: "Here's the feedback to address:"}
+          - {if: {decision: rework}, set: {plan_index: "var.plan_index + 1", plan_total: "var.plan_total + 1"}, goto: plan-writer, progress: true, release: merge-lane, label: "addressing review feedback", feedback: "Here's the feedback to address:"}
           - {else: true, pause: true}
 
       - name: cleanup-merge
@@ -318,7 +311,6 @@ phases:
         file: agents/autosquash-resolve.md
         tier: high
         label: resolving merge fixups
-        max_loops: 6
         clean_tree: false   # operates on an in-progress autosquash rebase whose
                             # legitimate completion may still be mid-rebase
         rules:

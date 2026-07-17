@@ -540,16 +540,22 @@ async def run_quest(
                     state.clear_step_resume()
                     return _complete_or_park(quest, state, log, coordinator)
                 if target_idx <= idx:                            # backward OR self → loop-counted
-                    n = state.loop_counts.get(step.name, 0) + 1
-                    state.loop_counts[step.name] = n
-                    if n > step.max_loops and not coordinator.should_pause:
-                        _evict_if_holding(quest, state, log)
-                        state.status = "paused"
-                        state.save(quest.state_dir)
-                        _emit_paused_event(log, "max_loops", step=step.name)
-                        return RunResult.PAUSED
+                    if action.progress:                          # progress edge → reset
+                        state.loop_counts.pop(step.name, None)
+                    else:
+                        n = state.loop_counts.get(step.name, 0) + 1
+                        state.loop_counts[step.name] = n
+                        if n > step.max_loops and not coordinator.should_pause:
+                            _evict_if_holding(quest, state, log)
+                            state.loop_counts.pop(step.name, None)   # reset-on-pause: resume fresh
+                            state.status = "paused"
+                            state.save(quest.state_dir)
+                            _emit_paused_event(log, "max_loops", step=step.name)
+                            return RunResult.PAUSED
                 else:
-                    state.loop_counts.pop(step.name, None)       # forward goto resets
+                    state.loop_counts.pop(step.name, None)       # forward goto resets source
+                    for leaped in range(idx + 1, target_idx):    # reset every leaped-over step
+                        state.loop_counts.pop(flat[leaped].name, None)
                 state.step = flat[target_idx].name
                 state.step_label = (
                     state.route_label
@@ -1210,6 +1216,7 @@ async def _route_merge_and_exit_worktree(
     if isinstance(match.action, Goto):                # a recovery route
         attempt = state.loop_counts.get(step.name, 0)
         if attempt >= step.max_loops:                 # exhausted — pause one attempt early
+            state.loop_counts.pop(step.name, None)    # reset-on-pause: resume re-enters fresh
             note = (f"imp attempted {step.max_loops} recovery passes and the "
                     "merge still failed.")
             return _merge_blocked_pause(

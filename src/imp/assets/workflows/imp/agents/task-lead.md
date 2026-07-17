@@ -286,7 +286,7 @@ The `verify` source is the discriminator the convergence check greps for.
 Emit `verify_tolerated: true` ONLY on the all-tolerated case above; on EVERY other
 return — a normal task entry or a real-regression fix — emit `verify_tolerated: false`.
 
-A **`max_loops` pause at `verify`** (the gate is capped at 5 fix laps) means the
+A **`max_loops` pause at `verify`** means the
 triage is **non-converging** — an unrecognized flake or a hard regression you could
 not fix in the budget. It escalates to a human; it is not a transient to retry.
 

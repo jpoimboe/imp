@@ -414,7 +414,9 @@ def _parse_verb(raw: dict[str, Any], source: SourceLoc) -> Action:
             "feedback: must be a string preamble (the bool form was removed in §6)",
             source,
         )
-    return Goto(target=target, feedback=feedback, resume=(verb == "resume"))
+    progress = _parse_bool_flag(raw, "progress", source)
+    return Goto(target=target, feedback=feedback,
+                resume=(verb == "resume"), progress=progress)
 
 
 def _parse_rules(

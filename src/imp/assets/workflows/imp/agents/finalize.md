@@ -77,7 +77,7 @@ at the gate. Present them as prose in §2.
 
 ## Non-converging verify triage
 
-A **`max_loops` pause at the `verify` step** (capped at 5 fix laps) means the verify
+A **`max_loops` pause at the `verify` step** means the verify
 triage did **not converge** — an unrecognized flake or a hard regression neither fixed
 nor tolerated. Read it as a non-converging triage needing a human, not a transient.
 

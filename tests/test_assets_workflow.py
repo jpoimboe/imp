@@ -303,11 +303,11 @@ def test_scope_code_check_dirty_resumes_threshold() -> None:
     assert m.action.feedback is None
 
 
-def test_scope_code_check_is_bounded_and_label_suppressed() -> None:
+def test_scope_code_check_rides_default_cap_and_label_suppressed() -> None:
     from imp.assets import bundled_workflow_dir
     wf = load_workflow(bundled_workflow_dir("imp"))
     step = _steps(wf)["scope-code-check"]
-    assert step.max_loops == 3
+    assert step.max_loops == 10   # dropped its explicit cap; rides the convergence default
     assert step.show_label is False
     assert step.command == "./scripts/scope-code-check.sh"
 
@@ -519,12 +519,44 @@ def test_plan_writer_is_first_plan_phase_step() -> None:
     assert plan_phase.steps[0].name == "plan-writer"
 
 
-def test_verify_step_has_max_loops_5() -> None:
+def test_verify_step_rides_default_max_loops() -> None:
     from imp.assets import bundled_workflow_dir
     wf = load_workflow(bundled_workflow_dir("imp"))
-    # A non-converging verify -> task-lead cycle pauses in minutes, overriding the
-    # workflow default of 1000.
-    assert _steps(wf)["verify"].max_loops == 5
+    # verify dropped its bespoke cap and rides the uniform convergence default of 10.
+    assert _steps(wf)["verify"].max_loops == 10
+
+
+def test_max_loops_value_slate() -> None:
+    from imp.assets import bundled_workflow_dir
+    wf = load_workflow(bundled_workflow_dir("imp"))
+    steps = _steps(wf)
+    # Uniform convergence default; every step that dropped its explicit cap rides it.
+    assert wf.defaults.max_loops == 10
+    for name in ("scope-code-check", "verify", "quest-review", "converge-verify",
+                 "integration-verify", "integration-reviewer", "finalize",
+                 "autosquash-resolve-merge"):
+        assert steps[name].max_loops == 10, name
+    # Genuine infra retry keeps its explicit flat cap.
+    assert steps["merge-to-base"].max_loops == 3
+
+
+def test_progress_edges_marked_on_iteration_routes() -> None:
+    from imp.assets import bundled_workflow_dir
+    wf = load_workflow(bundled_workflow_dir("imp"))
+    # check-next-plan's plan-advance edge iterates to a NEW plan -> progress reset.
+    cnp = evaluate_rules(
+        _steps(wf)["check-next-plan"].rules,
+        vars={**_BASE_VARS, "coverage_settled": False, "plan_index": 1, "plan_total": 3},
+        output={})
+    assert isinstance(cnp.action, Goto) and cnp.action.target == "plan-writer"
+    assert cnp.action.progress is True
+    # finalize's human-rework edge routes into a fresh plan cycle -> progress reset.
+    fin = evaluate_rules(
+        _steps(wf)["finalize"].rules,
+        vars=_BASE_VARS,
+        output={"status": "Success", "decision": "rework"})
+    assert isinstance(fin.action, Goto) and fin.action.target == "plan-writer"
+    assert fin.action.progress is True
 
 
 def test_task_lead_declares_verify_tolerated_output() -> None:
@@ -1188,3 +1220,11 @@ def test_wait_for_head_has_no_hold_glyph(tmp_path: Path) -> None:
     step = _steps(wf)["wait-for-head"]
     assert step.acquire == "merge-lane"
     assert step.glyph is None
+
+
+def test_loop_budget_prose_is_de_hardcoded() -> None:
+    base = Path("src/imp/assets/workflows/imp/agents")
+    for fname in ("deferred-sweep.md", "finalize.md", "task-lead.md"):
+        text = (base / fname).read_text()
+        assert "capped at 5 fix laps" not in text, fname
+        assert "5 fix laps" not in text, fname

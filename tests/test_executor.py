@@ -493,8 +493,256 @@ async def test_backward_goto_increments_loop_count_and_trips_max_loops(
 
     state = State.load(quest.state_dir)
     assert state.status == "paused"
-    # max_loops: 2 → loop trips on the 3rd backward goto (n == 3 > 2).
-    assert state.loop_counts["reviewer"] == 3
+    # max_loops: 2 trips on the 3rd backward goto; the pause clears the counter
+    # so a subsequent resume re-enters with a fresh budget.
+    assert state.loop_counts.get("reviewer", 0) == 0
+
+
+@pytest.mark.anyio
+async def test_max_loops_pause_resets_counter_for_fresh_resume(tmp_path: Path) -> None:
+    """After a max_loops pause the persisted counter is cleared, so resuming the
+    parked step runs a full fresh lap-set (cap+1 reviewer runs) before pausing
+    again — not an immediate re-trip on the first backward edge."""
+    wf = tmp_path / "imp" / "workflows" / "imp"
+    (wf / "agents").mkdir(parents=True)
+    (wf / "agents" / "writer.md").write_text(
+        "---\nname: writer\ntools: [complete_step]\n"
+        "output:\n  status: {type: enum, values: [Success, Error]}\n---\ngo\n"
+    )
+    (wf / "agents" / "reviewer.md").write_text(
+        "---\nname: reviewer\ntools: [complete_step]\n"
+        "output:\n  status: {type: enum, values: [Success, Error]}\n"
+        "  verdict: {type: enum, values: [approve, rework]}\n---\ngo\n"
+    )
+    (wf / "workflow.yaml").write_text(
+        "name: t\ndescription: t\n"
+        "defaults: {max_retries: 1, max_loops: 10}\n"
+        "phases:\n"
+        "  - name: work\n"
+        "    steps:\n"
+        "      - {name: writer, file: agents/writer.md, tier: low}\n"
+        "      - name: reviewer\n"
+        "        file: agents/reviewer.md\n"
+        "        tier: low\n"
+        "        max_loops: 2\n"
+        "        rules:\n"
+        "          - {if: {verdict: rework}, goto: writer}\n"
+        "          - {else: true, continue: true}\n"
+    )
+    _write_fake_config(tmp_path)
+    quest = _make_change(tmp_path)
+
+    from imp.providers import resolve
+    resolve.reset_providers_for_tests()
+
+    reviewer_calls: list[int] = []
+
+    class _Runner:
+        def __init__(self, name: str) -> None:
+            self._name = name
+
+        async def run(self, invocation: AgentInvocation) -> AsyncIterator[Event]:
+            if self._name == "reviewer":
+                reviewer_calls.append(1)
+                yield {"type": "agent_output",
+                       "payload": {"outcome": "ok", "status": "Success", "verdict": "rework"}}
+            else:
+                yield {"type": "agent_output",
+                       "payload": {"outcome": "ok", "status": "Success"}}
+
+        async def interrupt(self) -> None:
+            pass
+
+    class _Provider:
+        name = "fake"
+        model = "m"
+
+        def create_runner(self, invocation: AgentInvocation) -> AgentRunner:
+            return _Runner(invocation.agent_def.name)
+
+    resolve.register_provider(
+        "fake", env_check=lambda: True, factory=lambda _m: _Provider(),
+    )
+
+    # First run trips max_loops (cap 2 → reviewer runs 3 times) and pauses.
+    result = await run_quest(quest, on_event=lambda _e: None)
+    assert result is RunResult.PAUSED
+    assert len(reviewer_calls) == 3
+
+    state = State.load(quest.state_dir)
+    assert state.status == "paused"
+    assert state.loop_counts.get("reviewer", 0) == 0    # counter cleared on pause
+    assert state.step == "reviewer"                     # cursor parked on the tripping step
+
+    # Simulate `imp resume`: clear the pause and re-run the parked step.
+    reviewer_calls.clear()
+    state.status = "running"
+    state.save(quest.state_dir)
+    result2 = await run_quest(quest, on_event=lambda _e: None)
+    assert result2 is RunResult.PAUSED
+    # Fresh budget: 3 more reviewer runs (cap+1), not an immediate 1-run re-trip.
+    assert len(reviewer_calls) == 3
+
+
+# ── progress: true on a backward goto resets the counter instead of counting ─
+
+
+@pytest.mark.anyio
+async def test_progress_goto_resets_counter_and_never_trips(tmp_path: Path) -> None:
+    """reviewer loops back 5× via a progress:true goto (cap 2) then approves.
+    Each backward goto resets the source counter, so the run completes (6 reviewer
+    runs) and the counter is 0; an unmarked goto would pause on the 3rd run."""
+    wf = tmp_path / "imp" / "workflows" / "imp"
+    (wf / "agents").mkdir(parents=True)
+    (wf / "agents" / "writer.md").write_text(
+        "---\nname: writer\ntools: [complete_step]\n"
+        "output:\n  status: {type: enum, values: [Success, Error]}\n---\ngo\n"
+    )
+    (wf / "agents" / "reviewer.md").write_text(
+        "---\nname: reviewer\ntools: [complete_step]\n"
+        "output:\n  status: {type: enum, values: [Success, Error]}\n"
+        "  verdict: {type: enum, values: [approve, rework]}\n---\ngo\n"
+    )
+    (wf / "workflow.yaml").write_text(
+        "name: t\ndescription: t\n"
+        "defaults: {max_retries: 1, max_loops: 10}\n"
+        "phases:\n"
+        "  - name: work\n"
+        "    steps:\n"
+        "      - {name: writer, file: agents/writer.md, tier: low}\n"
+        "      - name: reviewer\n"
+        "        file: agents/reviewer.md\n"
+        "        tier: low\n"
+        "        max_loops: 2\n"
+        "        rules:\n"
+        "          - {if: {verdict: rework}, goto: writer, progress: true}\n"
+        "          - {else: true, continue: true}\n"
+    )
+    _write_fake_config(tmp_path)
+    quest = _make_change(tmp_path)
+
+    from imp.providers import resolve
+    resolve.reset_providers_for_tests()
+
+    reviewer_calls: list[int] = []
+
+    class _Runner:
+        def __init__(self, name: str) -> None:
+            self._name = name
+
+        async def run(self, invocation: AgentInvocation) -> AsyncIterator[Event]:
+            if self._name == "reviewer":
+                reviewer_calls.append(1)
+                verdict = "rework" if len(reviewer_calls) <= 5 else "approve"
+                yield {"type": "agent_output",
+                       "payload": {"outcome": "ok", "status": "Success", "verdict": verdict}}
+            else:
+                yield {"type": "agent_output",
+                       "payload": {"outcome": "ok", "status": "Success"}}
+
+        async def interrupt(self) -> None:
+            pass
+
+    class _Provider:
+        name = "fake"
+        model = "m"
+
+        def create_runner(self, invocation: AgentInvocation) -> AgentRunner:
+            return _Runner(invocation.agent_def.name)
+
+    resolve.register_provider(
+        "fake", env_check=lambda: True, factory=lambda _m: _Provider(),
+    )
+
+    result = await run_quest(quest, on_event=lambda _e: None)
+    assert result is RunResult.COMPLETED           # progress edge never trips max_loops
+    assert len(reviewer_calls) == 6                # 5 progress reworks + 1 approve
+    state = State.load(quest.state_dir)
+    assert state.loop_counts.get("reviewer", 0) == 0   # reset to 0 by each progress goto
+
+
+# ── forward goto resets every leaped-over step's counter ─────────────────────
+
+
+@pytest.mark.anyio
+async def test_forward_goto_resets_leaped_over_step_counter(tmp_path: Path) -> None:
+    """`a` gotos forward over `b` to `c`; `b`'s counter (left at 1 by a prior
+    backward goto) must be popped by the leap. Without the fix it stays 1."""
+    wf = tmp_path / "imp" / "workflows" / "imp"
+    (wf / "agents").mkdir(parents=True)
+    for stem in ("a", "c"):
+        (wf / "agents" / f"{stem}.md").write_text(
+            "---\nname: " + stem + "\ntools: [complete_step]\n"
+            "output:\n  status: {type: enum, values: [Success, Error]}\n"
+            "  route: {type: enum, values: [toB, toC]}\n---\ngo\n"
+        )
+    (wf / "workflow.yaml").write_text(
+        "name: t\ndescription: t\n"
+        "defaults: {max_retries: 1, max_loops: 10}\n"
+        "phases:\n"
+        "  - name: work\n"
+        "    steps:\n"
+        "      - name: a\n"
+        "        file: agents/a.md\n"
+        "        tier: low\n"
+        "        rules:\n"
+        "          - {if: {route: toC}, goto: c}\n"
+        "          - {else: true, continue: true}\n"
+        "      - name: b\n"
+        "        command: 'exit 1'\n"
+        "        rules:\n"
+        "          - {if: {exit: 0}, continue: true}\n"
+        "          - {else: true, goto: a}\n"
+        "      - name: c\n"
+        "        file: agents/c.md\n"
+        "        tier: low\n"
+        "        rules:\n"
+        "          - {else: true, continue: true}\n"
+    )
+    _write_fake_config(tmp_path)
+    import subprocess
+    subprocess.run(["git", "init", str(tmp_path)], check=True, capture_output=True)
+    quest = _make_change(tmp_path)
+
+    from imp.providers import resolve
+    resolve.reset_providers_for_tests()
+
+    a_calls: list[int] = []
+
+    class _Runner:
+        def __init__(self, name: str) -> None:
+            self._name = name
+
+        async def run(self, invocation: AgentInvocation) -> AsyncIterator[Event]:
+            if self._name == "a":
+                a_calls.append(1)
+                route = "toB" if len(a_calls) == 1 else "toC"
+                yield {"type": "agent_output",
+                       "payload": {"outcome": "ok", "status": "Success", "route": route}}
+            else:
+                yield {"type": "agent_output",
+                       "payload": {"outcome": "ok", "status": "Success", "route": "toC"}}
+
+        async def interrupt(self) -> None:
+            pass
+
+    class _Provider:
+        name = "fake"
+        model = "m"
+
+        def create_runner(self, invocation: AgentInvocation) -> AgentRunner:
+            return _Runner(invocation.agent_def.name)
+
+    resolve.register_provider(
+        "fake", env_check=lambda: True, factory=lambda _m: _Provider(),
+    )
+
+    result = await run_quest(quest, on_event=lambda _e: None)
+    assert result is RunResult.COMPLETED
+    state = State.load(quest.state_dir)
+    # The leap a→c popped b's counter; the accumulating-leak bug leaves it at 1.
+    assert state.loop_counts.get("b", 0) == 0
+    assert a_calls == [1, 1]                       # a ran twice: continue, then leap
 
 
 # ── goto into an empty trailing phase completes ─────────────────────────────
@@ -3699,3 +3947,189 @@ def test_warn_if_no_overlay_skips_probe_when_home_absent(monkeypatch):
     ex._warn_if_no_overlay(_active_home_policy(home=""), quest, log)
     assert called == []
     assert log.events == []
+
+
+# ── hutu62 shape: cross-plan verify counter does not accumulate ──────────────
+
+
+@pytest.mark.anyio
+async def test_cross_plan_verify_counter_independent(tmp_path: Path) -> None:
+    """Each plan bounces verify once then leaps it via task-lead's forward goto.
+    With the leap-over reset, verify's counter resets per plan and 12 plans
+    complete; the leak bug accumulates it past the cap-10 default and pauses."""
+    import subprocess
+
+    wf = tmp_path / "imp" / "workflows" / "imp"
+    (wf / "agents").mkdir(parents=True)
+    (wf / "agents" / "plan-writer.md").write_text(
+        "---\nname: plan-writer\ntools: [complete_step]\n"
+        "output:\n  status: {type: enum, values: [Success, Error]}\n---\ngo\n"
+    )
+    (wf / "agents" / "task-lead.md").write_text(
+        "---\nname: task-lead\ntools: [complete_step]\n"
+        "output:\n  status: {type: enum, values: [Success, Error]}\n"
+        "  tol: {type: bool}\n---\ngo\n"
+    )
+    (wf / "agents" / "check-next-plan.md").write_text(
+        "---\nname: check-next-plan\ntools: [complete_step]\n"
+        "output:\n  status: {type: enum, values: [Success, Error]}\n"
+        "  more: {type: bool}\n---\ngo\n"
+    )
+    (wf / "workflow.yaml").write_text(
+        "name: t\ndescription: t\n"
+        "defaults: {max_retries: 1, max_loops: 10}\n"
+        "phases:\n"
+        "  - name: work\n"
+        "    steps:\n"
+        "      - {name: plan-writer, file: agents/plan-writer.md, tier: low}\n"
+        "      - name: task-lead\n"
+        "        file: agents/task-lead.md\n"
+        "        tier: low\n"
+        "        rules:\n"
+        "          - {if: {tol: true}, goto: check-next-plan}\n"
+        "          - {else: true, continue: true}\n"
+        "      - name: verify\n"
+        "        command: 'exit 1'\n"
+        "        rules:\n"
+        "          - {if: {exit: 0}, continue: true}\n"
+        "          - {else: true, resume: task-lead}\n"
+        "      - name: check-next-plan\n"
+        "        file: agents/check-next-plan.md\n"
+        "        tier: low\n"
+        "        max_loops: 100\n"
+        "        rules:\n"
+        "          - {if: {more: true}, goto: plan-writer}\n"
+        "          - {else: true, continue: true}\n"
+    )
+    _write_fake_config(tmp_path)
+    subprocess.run(["git", "init", str(tmp_path)], check=True, capture_output=True)
+    quest = _make_change(tmp_path)
+
+    from imp.providers import resolve
+    resolve.reset_providers_for_tests()
+
+    PLANS = 12
+    cnp_calls: list[int] = []
+
+    class _Runner:
+        def __init__(self, name: str) -> None:
+            self._name = name
+
+        async def run(self, invocation: AgentInvocation) -> AsyncIterator[Event]:
+            if self._name == "task-lead":
+                # A verify bounce resumes task-lead with an empty transcript; that
+                # resumed visit tolerates and leaps verify. The fresh visit (from
+                # plan-writer) has a non-empty seed and continues to verify.
+                tol = not invocation.initial_messages
+                _persist_initial(invocation)
+                yield {"type": "agent_output",
+                       "payload": {"outcome": "ok", "status": "Success", "tol": tol}}
+            elif self._name == "check-next-plan":
+                cnp_calls.append(1)
+                more = len(cnp_calls) < PLANS
+                yield {"type": "agent_output",
+                       "payload": {"outcome": "ok", "status": "Success", "more": more}}
+            else:
+                yield {"type": "agent_output",
+                       "payload": {"outcome": "ok", "status": "Success"}}
+
+        async def interrupt(self) -> None:
+            pass
+
+    class _Provider:
+        name = "fake"
+        model = "m"
+
+        def create_runner(self, invocation: AgentInvocation) -> AgentRunner:
+            return _Runner(invocation.agent_def.name)
+
+    resolve.register_provider(
+        "fake", env_check=lambda: True, factory=lambda _m: _Provider(),
+    )
+
+    result = await run_quest(quest, on_event=lambda _e: None)
+    assert result is RunResult.COMPLETED           # no cross-plan max_loops pause
+    assert len(cnp_calls) == PLANS                 # all 12 plans ran
+    state = State.load(quest.state_dir)
+    assert state.loop_counts.get("verify", 0) <= 1  # reset each plan, never accumulates
+
+
+# ── distinct step counters are independent and never sum ─────────────────────
+
+
+@pytest.mark.anyio
+async def test_per_step_counters_do_not_sum(tmp_path: Path) -> None:
+    """r1 loops 6× then approves, r2 loops 6× then approves, cap 10. Each stays
+    under the cap so the run completes; a shared/summing counter would exceed the
+    cap partway through r2 and pause."""
+    wf = tmp_path / "imp" / "workflows" / "imp"
+    (wf / "agents").mkdir(parents=True)
+    for stem in ("w1", "r1", "w2", "r2"):
+        verdict = ("\n  verdict: {type: enum, values: [approve, rework]}"
+                   if stem.startswith("r") else "")
+        (wf / "agents" / f"{stem}.md").write_text(
+            "---\nname: " + stem + "\ntools: [complete_step]\n"
+            "output:\n  status: {type: enum, values: [Success, Error]}"
+            + verdict + "\n---\ngo\n"
+        )
+    (wf / "workflow.yaml").write_text(
+        "name: t\ndescription: t\n"
+        "defaults: {max_retries: 1, max_loops: 10}\n"
+        "phases:\n"
+        "  - name: work\n"
+        "    steps:\n"
+        "      - {name: w1, file: agents/w1.md, tier: low}\n"
+        "      - name: r1\n"
+        "        file: agents/r1.md\n"
+        "        tier: low\n"
+        "        rules:\n"
+        "          - {if: {verdict: rework}, goto: w1}\n"
+        "          - {else: true, continue: true}\n"
+        "      - {name: w2, file: agents/w2.md, tier: low}\n"
+        "      - name: r2\n"
+        "        file: agents/r2.md\n"
+        "        tier: low\n"
+        "        rules:\n"
+        "          - {if: {verdict: rework}, goto: w2}\n"
+        "          - {else: true, continue: true}\n"
+    )
+    _write_fake_config(tmp_path)
+    quest = _make_change(tmp_path)
+
+    from imp.providers import resolve
+    resolve.reset_providers_for_tests()
+
+    calls: dict[str, int] = {"r1": 0, "r2": 0}
+
+    class _Runner:
+        def __init__(self, name: str) -> None:
+            self._name = name
+
+        async def run(self, invocation: AgentInvocation) -> AsyncIterator[Event]:
+            name = self._name
+            if name in calls:
+                calls[name] += 1
+                verdict = "rework" if calls[name] <= 6 else "approve"
+                yield {"type": "agent_output",
+                       "payload": {"outcome": "ok", "status": "Success", "verdict": verdict}}
+            else:
+                yield {"type": "agent_output",
+                       "payload": {"outcome": "ok", "status": "Success"}}
+
+        async def interrupt(self) -> None:
+            pass
+
+    class _Provider:
+        name = "fake"
+        model = "m"
+
+        def create_runner(self, invocation: AgentInvocation) -> AgentRunner:
+            return _Runner(invocation.agent_def.name)
+
+    resolve.register_provider(
+        "fake", env_check=lambda: True, factory=lambda _m: _Provider(),
+    )
+
+    result = await run_quest(quest, on_event=lambda _e: None)
+    assert result is RunResult.COMPLETED           # neither counter tripped the cap
+    assert calls == {"r1": 7, "r2": 7}             # 6 reworks + 1 approve each
