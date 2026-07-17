@@ -574,6 +574,31 @@ def test_reconcile_store_tail_empty_messages_returns_empty() -> None:
     assert out == []
 
 
+def test_clear_removes_the_entire_store_tree(tmp_path: Path) -> None:
+    store = ImpSessionStore(tmp_path / "claude_session")
+    key = _main_key()
+    anyio.run(store.append, key, [{"type": "user", "uuid": "a"}])
+    assert (tmp_path / "claude_session").exists()
+
+    store.clear()
+
+    assert not (tmp_path / "claude_session").exists()
+    # An absent store body reads back as None, which reconcile treats as "rebuild
+    # the whole body from the transcript".
+    assert anyio.run(store.load, key) is None
+
+
+def test_clear_is_a_noop_when_the_store_is_absent(tmp_path: Path) -> None:
+    # The Anthropic/OpenAI providers never create claude_session/, so clear() must
+    # not raise when the directory does not exist.
+    store = ImpSessionStore(tmp_path / "claude_session")
+    assert not (tmp_path / "claude_session").exists()
+
+    store.clear()
+
+    assert not (tmp_path / "claude_session").exists()
+
+
 def test_reconcile_store_tail_strips_error_then_truncates_surplus() -> None:
     from imp.agents.runner import Message, TextBlock
     from imp.providers.claude_code_session_store import (

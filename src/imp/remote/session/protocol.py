@@ -28,11 +28,15 @@ CONTROL_ARCHIVE = "archive"
 CONTROL_DISCARD = "discard"
 CONTROL_SET_MODEL = "set-model"
 CONTROL_SET_SANDBOX = "set-sandbox"
+CONTROL_COMPACT = "compact"
 _CONTROL_ACTIONS = frozenset({
     CONTROL_INTERRUPT, CONTROL_INTERRUPT_LEAVE, CONTROL_INTERRUPT_FORCE,
     CONTROL_DETACH, CONTROL_ABANDON, CONTROL_SAVE, CONTROL_ARCHIVE,
-    CONTROL_DISCARD, CONTROL_SET_MODEL, CONTROL_SET_SANDBOX,
+    CONTROL_DISCARD, CONTROL_SET_MODEL, CONTROL_SET_SANDBOX, CONTROL_COMPACT,
 })
+
+# Pause reasons on the park→mutate→re-enter seam (daemon hold loop, not a runner interrupt).
+SIDE_EFFECT_REASONS = frozenset({"model-override", "compact"})
 
 
 @dataclass(frozen=True, slots=True)

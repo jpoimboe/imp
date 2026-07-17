@@ -150,3 +150,18 @@ async def test_set_model_sends_control_with_arg() -> None:
     controls = SessionControls(_Client(), InterruptCoordinator())
     await controls.set_model("anthropic:claude-fable-5")
     assert sent == [(CONTROL_SET_MODEL, "anthropic:claude-fable-5")]
+
+
+@pytest.mark.anyio
+async def test_compact_sends_compact_control_without_arg() -> None:
+    from imp.remote.session.protocol import CONTROL_COMPACT
+
+    sent: list[tuple[str, str | None]] = []
+
+    class _Client:
+        async def send_control(self, action: str, reason: str | None = None) -> None:
+            sent.append((action, reason))
+
+    controls = SessionControls(_Client(), InterruptCoordinator())
+    await controls.compact()
+    assert sent == [(CONTROL_COMPACT, None)]

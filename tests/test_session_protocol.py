@@ -8,6 +8,7 @@ from imp.remote.session.protocol import (
     CONTROL_ARCHIVE,
     CONTROL_DISCARD,
     CONTROL_SAVE,
+    SIDE_EFFECT_REASONS,
     Attach,
     Control,
     Input,
@@ -231,3 +232,17 @@ def test_encode_and_parse_set_sandbox_control() -> None:
     line = encode_control(CONTROL_SET_SANDBOX, "off")
     assert "\n" not in line
     assert parse_client_message(line) == Control(CONTROL_SET_SANDBOX, "off")
+
+
+def test_side_effect_reasons_holds_model_override_and_compact() -> None:
+    assert frozenset({"model-override", "compact"}) == SIDE_EFFECT_REASONS
+
+
+def test_control_compact_is_registered_and_round_trips() -> None:
+    from imp.remote.session.protocol import _CONTROL_ACTIONS, CONTROL_COMPACT
+
+    assert CONTROL_COMPACT == "compact"
+    assert CONTROL_COMPACT in _CONTROL_ACTIONS
+    line = encode_control(CONTROL_COMPACT)
+    assert "\n" not in line
+    assert parse_client_message(line) == Control(CONTROL_COMPACT, None)

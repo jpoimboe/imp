@@ -10,6 +10,7 @@ from typing import Any
 
 import anyio
 
+from imp.agents.compaction import compact_transcript
 from imp.agents.skills import load_user_skill
 from imp.cli.store_proxy import build_query_handler
 from imp.diagnostics import install_stack_dumper
@@ -26,6 +27,7 @@ from imp.engine.model_override import apply_model_override
 from imp.engine.quest import Quest
 from imp.engine.state import EventLog, LockHeld, ProjectLock, State, lock_is_live
 from imp.remote.session.discover import session_socket_path
+from imp.remote.session.protocol import SIDE_EFFECT_REASONS
 from imp.remote.session.server import _DEFAULT_FIRST_ATTACH_TIMEOUT, SessionServer
 from imp.remote.session.warmup import warm_module_graph
 
@@ -42,9 +44,18 @@ def _is_interrupt_pause(result: Any, coordinator: Any) -> bool:
     return result is RunResult.PAUSED and coordinator.should_pause
 
 
-def _is_model_override_pause(result: Any, coordinator: Any) -> bool:
+def _is_side_effect_pause(result: Any, coordinator: Any) -> bool:
     return (result is RunResult.PAUSED and coordinator.should_pause
-            and coordinator.pause_reason == "model-override")
+            and coordinator.pause_reason in SIDE_EFFECT_REASONS)
+
+
+def _run_compaction(quest: Quest, on_event: Callable[[dict[str, Any]], None]) -> None:
+    """Shed the parked step's tool-result bodies and emit the scrollback confirmation."""
+    state = State.load(quest.state_dir)
+    assert state.current_step is not None
+    n = compact_transcript(state.current_step.transcript_dir)
+    on_event({"type": "script_output",
+              "payload": {"stdout": f"compacted — omitted {n} tool results"}})
 
 
 def _trailing_is_workflow_resumed(log: EventLog) -> bool:
@@ -71,7 +82,7 @@ def _hold_prompt(
     result: Any, coordinator: Any, *, is_script: bool = False,
 ) -> str | None:
     if (_is_interrupt_pause(result, coordinator)
-            and coordinator.pause_reason != "model-override"):
+            and coordinator.pause_reason not in SIDE_EFFECT_REASONS):
         return _SCRIPT_HOLD_PROMPT if is_script else _RESUME_PROMPT
     return None
 
@@ -178,15 +189,18 @@ async def serve_quest_session(
             coordinator.note_yield()  # run_quest returned -> the run has yielded
             prompt = _hold_prompt(result, coordinator, is_script=_paused_is_script())
         while (prompt is not None
-               or _is_model_override_pause(result, coordinator)):
-            if _is_model_override_pause(result, coordinator):
-                # /model mid-conversation: executor parked+saved the step. Apply the
-                # override AFTER that save (no write race), then re-enter the same step.
-                arg = coordinator.take_pending_model()
-                if arg:
-                    state = State.load(quest.state_dir)
-                    assert state.step is not None
-                    apply_model_override(quest, state, arg, step_name=state.step)
+               or _is_side_effect_pause(result, coordinator)):
+            if _is_side_effect_pause(result, coordinator):
+                if coordinator.pause_reason == "model-override":
+                    # /model mid-conversation: executor parked+saved the step. Apply the
+                    # override AFTER that save (no write race), then re-enter the same step.
+                    arg = coordinator.take_pending_model()
+                    if arg:
+                        state = State.load(quest.state_dir)
+                        assert state.step is not None
+                        apply_model_override(quest, state, arg, step_name=state.step)
+                elif coordinator.pause_reason == "compact":
+                    _run_compaction(quest, on_event)
                 coordinator.reset()
             else:
                 on_event({"type": "awaiting_user_input",

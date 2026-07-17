@@ -486,7 +486,11 @@ def test_bash_prepends_shim_dir_to_path(tmp_path: Path) -> None:
     assert out["stdout"].startswith(str(shim) + os.pathsep)
 
 
-def test_bash_no_quest_home_leaves_path_unchanged(tmp_path: Path) -> None:
+def test_bash_no_quest_home_leaves_path_unchanged(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("PATH", os.pathsep.join(
+        p for p in os.environ.get("PATH", "").split(os.pathsep) if "imp-shim" not in p))
     ctx = ToolContext(project_root=tmp_path, events_path=tmp_path / "events.jsonl")
     ctx.quest_context = QuestContext(
         id="test01", title="Test Quest", project_root=tmp_path,

@@ -82,7 +82,9 @@ def _active_policy(worktree: Path, *, home: Path | None = None,
         secret_dirs=secret_dirs,
         secret_files=(),
         setenv=(
-            ("PATH", os.environ.get("PATH", "/usr/bin:/bin")),
+            ("PATH", os.pathsep.join(
+                p for p in os.environ.get("PATH", "/usr/bin:/bin").split(os.pathsep)
+                if "imp-shim" not in p) or "/usr/bin:/bin"),
             ("HOME", str(_home)),
         ),
         network=True,

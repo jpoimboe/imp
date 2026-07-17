@@ -14,6 +14,7 @@ from imp.agents.transcript import SkillReply
 from imp.remote.session.protocol import (
     CONTROL_ABANDON,
     CONTROL_ARCHIVE,
+    CONTROL_COMPACT,
     CONTROL_DETACH,
     CONTROL_DISCARD,
     CONTROL_INTERRUPT,
@@ -22,6 +23,7 @@ from imp.remote.session.protocol import (
     CONTROL_SAVE,
     CONTROL_SET_MODEL,
     CONTROL_SET_SANDBOX,
+    SIDE_EFFECT_REASONS,
     SkillRequest,
 )
 from imp.remote.session.socket_server import ReplaySnapshot, SessionSocket
@@ -87,7 +89,7 @@ class SessionServer:
         self._in_wait_for_turn = False
         # Initialized in open() because anyio.Event needs a running event loop.
         self._attach_changed: anyio.Event | None = None
-        self._model_override_pending: anyio.Event | None = None
+        self._side_effect_pending: anyio.Event | None = None
         self._socket = SessionSocket(
             socket_path,
             on_attach=self._on_attach_pulse,
@@ -111,7 +113,7 @@ class SessionServer:
 
     async def open(self) -> None:
         self._attach_changed = anyio.Event()
-        self._model_override_pending = anyio.Event()
+        self._side_effect_pending = anyio.Event()
         await self._socket.open()
 
     async def serve(self, run_fn: RunFn) -> Any:
@@ -210,13 +212,13 @@ class SessionServer:
                 await self._wait_until_unleased()
                 tg.cancel_scope.cancel()
 
-            async def _await_model_override() -> None:
-                await self._wait_for_model_override()
+            async def _await_side_effect() -> None:
+                await self._wait_for_side_effect()
                 tg.cancel_scope.cancel()
 
             tg.start_soon(_await_input)
             tg.start_soon(_await_hibernate)
-            tg.start_soon(_await_model_override)
+            tg.start_soon(_await_side_effect)
         if "text" not in holder:
             raise AwaitingUserInput()
         return holder["text"]
@@ -247,26 +249,26 @@ class SessionServer:
             evt.set()
             self._attach_changed = anyio.Event()
 
-    def _pulse_model_override(self) -> None:
-        evt = self._model_override_pending
+    def _pulse_side_effect(self) -> None:
+        evt = self._side_effect_pending
         if evt is not None:
             evt.set()
-            self._model_override_pending = anyio.Event()
+            self._side_effect_pending = anyio.Event()
 
-    async def _wait_for_model_override(self) -> None:
-        """Resolve when a model-override pause is pending on the coordinator. The
+    async def _wait_for_side_effect(self) -> None:
+        """Resolve when a side-effect pause is pending on the coordinator. The
         between-turns solicit stays attached and leased, so the unlease arm never
         fires; this arm supplies the concrete cancel that unwinds the parked
         next_input() to AwaitingUserInput without a detach. Snapshots the event
-        before testing the predicate so a set-model frame arriving between the
-        check and the await is not a lost wakeup; the predicate reads committed
-        coordinator state so the wake is level-triggered (fires whether the frame
-        lands before or after gate entry)."""
+        before testing the predicate so a frame arriving between the check and the
+        await is not a lost wakeup; the predicate reads committed coordinator
+        state so the wake is level-triggered (fires whether the frame lands before
+        or after gate entry)."""
         while True:
-            evt = self._model_override_pending
+            evt = self._side_effect_pending
             if (self._coordinator is not None
                     and self._coordinator.should_pause
-                    and self._coordinator.pause_reason == "model-override"):
+                    and self._coordinator.pause_reason in SIDE_EFFECT_REASONS):
                 return
             if evt is None:                  # pre-open(): no event to await
                 await anyio.sleep(0.02)
@@ -409,13 +411,16 @@ class SessionServer:
             await self._coordinator.signal_pause(reason="ctrl-c", via="frame")
         elif action == CONTROL_SET_MODEL and self._coordinator is not None:
             # Non-terminal: stash the arg, pause like ctrl-c; the hibernation gate's
-            # model-override wake arm unwinds the parked between-turns solicit
+            # side-effect wake arm unwinds the parked between-turns solicit
             # (attached + leased, so the unlease arm never fires) and the hold loop
             # applies the pending model on park.
             self._coordinator.set_pending_model(reason or "")
             await self._coordinator.signal_pause(
                 reason="model-override", via="frame")
-            self._pulse_model_override()
+            self._pulse_side_effect()
+        elif action == CONTROL_COMPACT and self._coordinator is not None:
+            await self._coordinator.signal_pause(reason="compact", via="frame")
+            self._pulse_side_effect()
         elif action == CONTROL_SET_SANDBOX and self._coordinator is not None:
             self._coordinator.set_unsandboxed(reason == "off")
             # Transient: broadcast-only via _emit, never the event log, so it can't replay stale.

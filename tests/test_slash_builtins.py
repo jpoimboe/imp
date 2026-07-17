@@ -286,6 +286,36 @@ def test_abandon_pre_session_returns_literal(tmp_path: Path) -> None:
     assert result == "/abandon"
 
 
+def test_compact_builtin_returns_literal_for_the_gate_loop(tmp_path: Path) -> None:
+    # /compact is a built-in (NOT a skill): it returns the literal so the session
+    # gate loop sends CONTROL_COMPACT; it carries no args, like /abandon.
+    # Seeding a compact skill ensures the builtin arm wins over skill-load — the
+    # test fails if the /compact arm is removed from handle_slash_line.
+    skills_user = tmp_path / "skills" / "user"
+    skills_user.mkdir(parents=True)
+    (skills_user / "compact.md").write_text("x")
+    quest = SimpleNamespace(control_root=tmp_path, workflow_dir=tmp_path)
+    out: list[str] = []
+    result = handle_slash_line("/compact", quest=quest, output_fn=out.append)
+    assert result == "/compact"
+    assert not any("no such skill" in line for line in out)
+
+
+def test_compact_is_in_the_help_text() -> None:
+    from imp.cli.slash import _help
+    lines: list[str] = []
+    _help(lines.append, materialized=False)
+    assert any("/compact" in line for line in lines)
+
+
+def test_unknown_command_still_falls_through_after_compact(tmp_path: Path) -> None:
+    # AC7d: adding /compact must not shadow the unknown-command fall-through.
+    quest = SimpleNamespace(workflow_dir=tmp_path, control_root=tmp_path)
+    out: list[str] = []
+    assert handle_slash_line("/nope", quest=quest, output_fn=out.append) == "/nope"
+    assert out == []
+
+
 def test_help_pre_session_omits_leave_trio_keeps_abandon() -> None:
     from imp.cli.slash import _help
     lines: list[str] = []

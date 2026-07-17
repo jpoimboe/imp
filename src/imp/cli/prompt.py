@@ -123,7 +123,7 @@ class SlashCompleter:
 
     _BUILTINS = (
         "help", "skills", "keep", "shelve", "clear", "model", "sandbox",
-        "abandon")
+        "compact", "abandon")
 
     def __init__(
         self, skills_dir: Any,
