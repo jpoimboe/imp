@@ -5,11 +5,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from tests.impty.e2e_support import seed_minimal_repo, write_imp_shim
-
-
-def _scripted_env(script_path: Path) -> dict[str, str]:
-    return {**os.environ, "IMP_SCRIPTED_SCRIPT": str(script_path), "IMP_THEME": "ansi"}
+from tests.impty.e2e_support import clean_env, seed_minimal_repo, write_imp_shim
 
 
 def test_seed_minimal_repo_runs_real_imp_new_to_a_scripted_side_effect(
@@ -28,7 +24,8 @@ def test_seed_minimal_repo_runs_real_imp_new_to_a_scripted_side_effect(
 
     proc = subprocess.run(
         [sys.executable, "-m", "imp", "new", "demo", "--title", "demo change", "--headless"],
-        cwd=tmp_path, env=_scripted_env(script_path),
+        cwd=tmp_path,
+        env=clean_env(IMP_SCRIPTED_SCRIPT=str(script_path), IMP_THEME="ansi"),
         capture_output=True, text=True, timeout=120,
     )
     assert proc.returncode == 0, proc.stderr
