@@ -1,0 +1,152 @@
+from __future__ import annotations
+
+import json
+import sqlite3
+from pathlib import Path
+
+import pytest
+
+from imp.engine import archive
+from imp.engine.archive import record
+from imp.engine.archive.blobstore import LocalBlobStore
+
+_INTENT = "Fix the login bug"
+_FRAMEWORK = "You are the coder agent, follow the plan exactly"
+_MODEL = "Investigating the login flow now"
+_REPLY = "please retry the deploy step"
+
+# A pre-triad (old-schema) event list: opening_intent + a step_context carrying a
+# system_prompt + the human=False first-after-step_context user_message (the
+# framework prompt) + an llm_response model turn + a human=True reply.
+_OLD = [
+    {"id": "i0", "parent_id": None, "agent_id": None, "timestamp": "T0",
+     "type": "opening_intent", "payload": {"text": _INTENT}},
+    {"id": "c1", "parent_id": None, "agent_id": "A", "timestamp": "T1",
+     "type": "step_context",
+     "payload": {"provider": "p", "model": "m", "system_prompt": "sys",
+                 "tools_schema": [], "params": {}, "max_tool_calls": 1}},
+    {"id": "p1", "parent_id": "c1", "agent_id": "A", "timestamp": "T2",
+     "type": "user_message",
+     "payload": {"role": "user", "content": [{"type": "text", "text": _FRAMEWORK}],
+                 "human": False}},
+    {"id": "r1", "parent_id": "p1", "agent_id": "A", "timestamp": "T3",
+     "type": "llm_response",
+     "payload": {"provider": "anthropic", "model": "m",
+                 "raw": {"content": [{"type": "text", "text": _MODEL}]},
+                 "usage": {"input_tokens": 1}, "stop_reason": "end_turn"}},
+    {"id": "a1", "parent_id": "r1", "agent_id": "A", "timestamp": "T4",
+     "type": "awaiting_user_input", "payload": {}},
+    {"id": "u2", "parent_id": "a1", "agent_id": "A", "timestamp": "T5",
+     "type": "user_message",
+     "payload": {"role": "user", "content": [{"type": "text", "text": _REPLY}],
+                 "human": True}},
+]
+
+
+def _jsonl(events: list[dict]) -> bytes:
+    return "".join(json.dumps(e) + "\n" for e in events).encode("utf-8")
+
+
+def _seed_old_archived_quest(control: Path, cid: str, events: list[dict]) -> str:
+    """Construct a pre-migration archived quest directly (not via archive_quest,
+    which would stamp the marker): an old-format blob, a record pointing at it, a
+    rebuilt index — and NO data-version marker (the pre-migration state)."""
+    store = LocalBlobStore(archive.blobs_root(control))
+    events_hash = store.put(_jsonl(events))
+    rec = record.build_record(
+        {"id": cid, "title": "", "base_branch": "main",
+         "created_at": "2026-06-01T00:00:00+00:00", "depends_on": []},
+        {"id": cid, "status": "completed", "step": "finalize"},
+        events_hash)
+    record.write_record(archive.records_root(control), rec)
+    archive.rebuild_index(control)
+    return events_hash
+
+
+def _events_of(control: Path, cid: str) -> list[dict]:
+    rec = record.read_record(archive.records_root(control), cid)
+    assert rec is not None
+    blob = LocalBlobStore(archive.blobs_root(control)).get(rec["events_hash"])
+    assert blob is not None
+    return [json.loads(ln) for ln in blob.decode().splitlines() if ln.strip()]
+
+
+def test_ensure_current_migrates_old_blob_and_bumps_marker(tmp_path: Path) -> None:
+    old_hash = _seed_old_archived_quest(tmp_path, "old001", _OLD)
+    assert not archive.data_version_path(tmp_path).exists()  # pre-migration
+
+    archive.ensure_current(tmp_path)
+
+    rec = record.read_record(archive.records_root(tmp_path), "old001")
+    assert rec is not None
+    assert rec["events_hash"] != old_hash        # blob rewritten, record repointed
+    migrated = _events_of(tmp_path, "old001")
+    assert [e["type"] for e in migrated] == [
+        "user_message", "step_context", "engine_message", "engine_message",
+        "agent_message", "awaiting_user_input", "user_message"]
+    assert migrated[0]["payload"]["subtype"] == "intent"
+    assert migrated[3]["payload"]["subtype"] == "agent_prompt"
+    assert migrated[6]["payload"]["subtype"] == "reply"
+    assert "human" not in migrated[6]["payload"]
+    assert archive.data_version_path(tmp_path).read_text().strip() == str(
+        archive._DATA_VERSION)
+
+
+def test_second_ensure_current_is_a_no_op(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _seed_old_archived_quest(tmp_path, "old002", _OLD)
+    archive.ensure_current(tmp_path)
+    first_hash = record.read_record(
+        archive.records_root(tmp_path), "old002")["events_hash"]
+
+    calls: list[int] = []
+    monkeypatch.setattr(archive, "rebuild_index", lambda _root: calls.append(1))
+    archive.ensure_current(tmp_path)
+
+    assert calls == []                           # marker current -> fast path
+    second_hash = record.read_record(
+        archive.records_root(tmp_path), "old002")["events_hash"]
+    assert second_hash == first_hash             # blob not rewritten a second time
+
+
+def test_index_content_reflects_migrated_events(tmp_path: Path) -> None:
+    _seed_old_archived_quest(tmp_path, "old003", _OLD)
+    archive.ensure_current(tmp_path)
+
+    conn = sqlite3.connect(archive.index_path(tmp_path))
+    try:
+        content = conn.execute(
+            "SELECT content FROM quests WHERE id = ?", ("old003",)).fetchone()[0]
+    finally:
+        conn.close()
+    assert _INTENT in content        # opening intent -> user_message, now rendered
+    assert _MODEL in content         # llm_response -> agent_message, now rendered
+    assert _FRAMEWORK not in content  # framework prompt -> engine_message, excluded
+
+
+def test_archive_quest_stamps_marker_current(tmp_path: Path) -> None:
+    # A quest archived through the normal path is born-current: the marker is
+    # stamped so a later ensure_current fast-paths (no redundant blob pass).
+    events = tmp_path / "born.jsonl"
+    events.write_text(json.dumps({
+        "id": "b-e0", "parent_id": None, "agent_id": None,
+        "timestamp": "2026-06-01T00:00:01+00:00",
+        "type": "user_message",
+        "payload": {"role": "user", "subtype": "intent",
+                    "content": [{"type": "text", "text": "hi"}]}}) + "\n")
+    quest_json = tmp_path / "born-quest.json"
+    quest_json.write_text(json.dumps({
+        "id": "born", "title": "Born", "base_branch": "main",
+        "created_at": "2026-06-01T00:00:00+00:00", "depends_on": []}))
+    state_json = tmp_path / "born-state.json"
+    state_json.write_text(json.dumps({
+        "id": "born", "status": "completed", "step": "finalize"}))
+
+    archive.archive_quest(
+        tmp_path, "born", events_path=events,
+        quest_json_path=quest_json, state_json_path=state_json)
+
+    assert archive.data_version_path(tmp_path).read_text().strip() == str(
+        archive._DATA_VERSION)
+    assert archive._read_data_version(tmp_path) >= archive._DATA_VERSION

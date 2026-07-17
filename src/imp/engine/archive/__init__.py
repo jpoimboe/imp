@@ -16,6 +16,7 @@ import filelock
 
 from imp.engine.archive import index, record
 from imp.engine.archive.blobstore import LocalBlobStore
+from imp.engine.event_migrations import migrate_events
 
 
 def archive_root(control_root: Path) -> Path:
@@ -32,6 +33,10 @@ def records_root(control_root: Path) -> Path:
 
 def index_path(control_root: Path) -> Path:
     return archive_root(control_root) / "index.db"
+
+
+def data_version_path(control_root: Path) -> Path:
+    return archive_root(control_root) / "data_version"
 
 
 def _parse_events(raw: bytes) -> list[dict[str, Any]]:
@@ -79,6 +84,7 @@ def archive_quest(
             index.ingest(conn, rec, _parse_events(events_bytes))
         finally:
             conn.close()
+        _write_data_version(control_root, _DATA_VERSION)
 
 
 @contextlib.contextmanager
@@ -143,16 +149,86 @@ def _read_user_version(control_root: Path) -> int:
         conn.close()
 
 
-def ensure_current(control_root: Path) -> None:
-    """Rebuild the index if its schema version is stale.
+_DATA_VERSION = 1  # archive blob schema: 1 == triad (hutu62); absent marker == pre-triad
 
-    Double-checked locking: a lock-free version read fast-paths the steady state;
-    the one-time migration rebuild runs under the writer lock with a re-check so
-    two processes never rebuild twice.
+
+def _read_data_version(control_root: Path) -> int:
+    """The archive's blob-schema version. No index yet == nothing archived, so
+    trivially current (mirrors _read_user_version). Index present but marker
+    absent == a pre-triad archive predating this migration."""
+    if not index_path(control_root).exists():
+        return _DATA_VERSION
+    marker = data_version_path(control_root)
+    if not marker.exists():
+        return 0
+    try:
+        return int(marker.read_text().strip())
+    except (ValueError, OSError):
+        return 0
+
+
+def _write_data_version(control_root: Path, version: int) -> None:
+    archive_root(control_root).mkdir(parents=True, exist_ok=True)
+    path = data_version_path(control_root)
+    fd, tmp = tempfile.mkstemp(prefix=".data_version-", dir=archive_root(control_root))
+    try:
+        with os.fdopen(fd, "w") as f:
+            f.write(str(version))
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, path)
+    except BaseException:
+        with contextlib.suppress(FileNotFoundError):
+            os.unlink(tmp)
+        raise
+
+
+def _serialize_events(events: list[dict[str, Any]]) -> bytes:
+    """Compact one-JSON-object-per-line bytes — the on-disk events.jsonl shape."""
+    return "".join(json.dumps(ev) + "\n" for ev in events).encode("utf-8")
+
+
+def _migrate_archive_blobs(control_root: Path) -> None:
+    """One-time pass: rewrite each archived pre-triad events blob
+    to the triad schema, repoint each record's events_hash to the new blob, rebuild
+    the index once so its derived columns match, then stamp the data-version marker.
+    A triad blob is left untouched (migrate_events is a no-op on it); old blobs
+    orphan harmlessly (nothing GCs blobs)."""
+    store = LocalBlobStore(blobs_root(control_root))
+    records_dir = records_root(control_root)
+    for cid in record.list_record_ids(records_dir):
+        rec = record.read_record(records_dir, cid)
+        if rec is None:
+            continue
+        blob = store.get(rec["events_hash"])
+        if blob is None:
+            continue
+        events = _parse_events(blob)
+        migrated = migrate_events(events)
+        if migrated == events:
+            continue
+        rec["events_hash"] = store.put(_serialize_events(migrated))
+        record.write_record(records_dir, rec)
+    rebuild_index(control_root)
+    _write_data_version(control_root, _DATA_VERSION)
+
+
+def ensure_current(control_root: Path) -> None:
+    """Bring the archive up to date: migrate pre-triad event blobs to the triad
+    schema (once, gated by the data-version marker) and rebuild the index if its
+    schema version is stale.
+
+    Double-checked locking: lock-free version reads fast-path the steady state;
+    the one-time work runs under the writer lock with a re-check so two processes
+    never do it twice.
     """
-    if _read_user_version(control_root) >= index._SCHEMA_VERSION:
+    if (_read_data_version(control_root) >= _DATA_VERSION
+            and _read_user_version(control_root) >= index._SCHEMA_VERSION):
         return
     with filelock.FileLock(str(index_path(control_root)) + ".filelock"):
+        if _read_data_version(control_root) < _DATA_VERSION:
+            _migrate_archive_blobs(control_root)
+            return
         if _read_user_version(control_root) >= index._SCHEMA_VERSION:
             return
         rebuild_index(control_root)
