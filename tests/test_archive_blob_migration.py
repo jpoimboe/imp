@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import sys
 from pathlib import Path
 
 import pytest
@@ -9,6 +10,29 @@ import pytest
 from imp.engine import archive
 from imp.engine.archive import record
 from imp.engine.archive.blobstore import LocalBlobStore
+
+
+class _FakeStderr:
+    """Records writes; reports isatty() as configured. Stands in for sys.stderr."""
+
+    def __init__(self, tty: bool) -> None:
+        self._tty = tty
+        self.chunks: list[str] = []
+
+    def write(self, s: str) -> int:
+        self.chunks.append(s)
+        return len(s)
+
+    def flush(self) -> None:
+        pass
+
+    def isatty(self) -> bool:
+        return self._tty
+
+    @property
+    def text(self) -> str:
+        return "".join(self.chunks)
+
 
 _INTENT = "Fix the login bug"
 _FRAMEWORK = "You are the coder agent, follow the plan exactly"
@@ -150,3 +174,43 @@ def test_archive_quest_stamps_marker_current(tmp_path: Path) -> None:
     assert archive.data_version_path(tmp_path).read_text().strip() == str(
         archive._DATA_VERSION)
     assert archive._read_data_version(tmp_path) >= archive._DATA_VERSION
+
+
+def test_migrate_emits_dim_inplace_progress_on_tty(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _seed_old_archived_quest(tmp_path, "old004", _OLD)
+    _seed_old_archived_quest(tmp_path, "old005", _OLD)
+
+    # Isolate the migration pass: no-op the reindex so only the migration
+    # progress line is captured.
+    monkeypatch.setattr(archive, "rebuild_index", lambda _root: None)
+    fake = _FakeStderr(tty=True)
+    monkeypatch.setattr(sys, "stderr", fake)
+
+    archive._migrate_archive_blobs(tmp_path)
+
+    out = fake.text
+    assert "Migrating archive... 2/2" in out    # labeled counter, counts to record total
+    assert "Migrating archive... 1/2" in out    # counter emitted per record, not just the last
+    assert "\x1b[2m" in out and "\x1b[0m" in out  # dim SGR wrap
+    assert "\r\x1b[K" in out                       # in-place rewrite idiom
+    assert "Reindexing" not in out                 # migration pass only (reindex no-op'd)
+    assert out.endswith("\r\x1b[K")                # trailing erase after the loop
+
+
+def test_migrate_on_non_tty_emits_nothing_and_migrates(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    old_hash = _seed_old_archived_quest(tmp_path, "old006", _OLD)
+
+    fake = _FakeStderr(tty=False)
+    monkeypatch.setattr(sys, "stderr", fake)
+
+    archive._migrate_archive_blobs(tmp_path)
+
+    assert fake.text == ""  # zero bytes on a non-TTY stream
+
+    rec = record.read_record(archive.records_root(tmp_path), "old006")
+    assert rec is not None
+    assert rec["events_hash"] != old_hash  # blob still rewritten / record repointed

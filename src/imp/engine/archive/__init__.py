@@ -196,19 +196,23 @@ def _migrate_archive_blobs(control_root: Path) -> None:
     orphan harmlessly (nothing GCs blobs)."""
     store = LocalBlobStore(blobs_root(control_root))
     records_dir = records_root(control_root)
-    for cid in record.list_record_ids(records_dir):
-        rec = record.read_record(records_dir, cid)
-        if rec is None:
-            continue
-        blob = store.get(rec["events_hash"])
-        if blob is None:
-            continue
-        events = _parse_events(blob)
-        migrated = migrate_events(events)
-        if migrated == events:
-            continue
-        rec["events_hash"] = store.put(_serialize_events(migrated))
-        record.write_record(records_dir, rec)
+    cids = list(record.list_record_ids(records_dir))
+    total = len(cids)
+    with _progress("Migrating archive...") as emit:
+        for i, cid in enumerate(cids, start=1):
+            emit(i, total)
+            rec = record.read_record(records_dir, cid)
+            if rec is None:
+                continue
+            blob = store.get(rec["events_hash"])
+            if blob is None:
+                continue
+            events = _parse_events(blob)
+            migrated = migrate_events(events)
+            if migrated == events:
+                continue
+            rec["events_hash"] = store.put(_serialize_events(migrated))
+            record.write_record(records_dir, rec)
     rebuild_index(control_root)
     _write_data_version(control_root, _DATA_VERSION)
 
