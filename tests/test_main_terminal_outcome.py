@@ -331,7 +331,7 @@ def test_handle_terminal_outcome_threads_runner_warning_messages(monkeypatch) ->
     captured: dict = {}
     monkeypatch.setattr(
         main, "_emit_completed",
-        lambda ch, *, merged, warnings: captured.update(warnings=warnings))
+        lambda ch, *, merged, warnings, intent: captured.update(warnings=warnings))
     rc = main._handle_terminal_outcome(quest, RunResult.COMPLETED, coord=None)
     assert rc == 0
     assert captured["warnings"] == ["a", "a"]    # ordered messages, not a count
@@ -360,6 +360,7 @@ def test_handle_terminal_outcome_reads_warning_messages_from_archive(monkeypatch
     quest = _Change([])
     quest.control_root = main.Path("/tmp/imp-no-such-worktree-xyz")
     archive_blob = (
+        b'{"type": "opening_intent", "payload": {"text": "resolve me from archive"}}\n'
         b'{"type": "runner_warning", "payload": {"message": "a"}}\n'
         b'{"type": "runner_warning", "payload": {"message": "b"}}\n'
         b'{"type": "step_started", "payload": {"step": "s"}}\n'
@@ -370,10 +371,11 @@ def test_handle_terminal_outcome_reads_warning_messages_from_archive(monkeypatch
     captured: dict = {}
     monkeypatch.setattr(
         main, "_emit_completed",
-        lambda ch, *, merged, warnings: captured.update(warnings=warnings))
+        lambda ch, *, merged, warnings, intent: captured.update(warnings=warnings, intent=intent))
     rc = main._handle_terminal_outcome(quest, RunResult.COMPLETED, coord=None)
     assert rc == 0
     assert captured["warnings"] == ["a", "b"]
+    assert captured["intent"] == "resolve me from archive"
 
 
 class _CtrlDCoord:
@@ -399,6 +401,53 @@ def test_ctrl_d_pause_retains_caret_above_banner(monkeypatch, capsys) -> None:
     assert rc == 1
     ps.assert_called_once()
     assert capsys.readouterr().out == "> \n"   # caret line, then the mocked banner
+
+
+def test_emit_completed_titleless_shows_prompt_fallback(monkeypatch, capsys) -> None:
+    monkeypatch.setattr(main, "should_use_color", lambda stream: False)
+    main._emit_completed(_Change([]), merged=False, intent="add a dark mode toggle")
+    out = capsys.readouterr().out
+    assert "2026-06-12-run-x · > add a dark mode toggle · completed" in out
+    assert "(unnamed)" not in out
+
+
+def test_handle_terminal_outcome_forwards_opening_intent(monkeypatch) -> None:
+    events = [
+        {"type": "opening_intent", "payload": {"text": "add a dark mode toggle"}},
+        {"type": "step_started", "payload": {"step": "s", "kind": "agent"}},
+    ]
+    quest = _Change(events)
+    quest.control_root = main.Path("/tmp/imp-no-such-worktree-xyz")
+    captured: dict = {}
+    monkeypatch.setattr(
+        main, "_emit_completed",
+        lambda ch, *, merged, warnings, intent: captured.update(intent=intent))
+    rc = main._handle_terminal_outcome(quest, RunResult.COMPLETED, coord=None)
+    assert rc == 0
+    assert captured["intent"] == "add a dark mode toggle"
+
+
+def test_emit_merge_blocked_titleless_shows_prompt_fallback(monkeypatch, capsys) -> None:
+    monkeypatch.setattr(main, "should_use_color", lambda stream: False)
+    quest = _Change([{"type": "opening_intent", "payload": {"text": "fix the crash"}}])
+    main._emit_merge_blocked(quest, "worktree_dirty")
+    out = capsys.readouterr().out
+    assert "merge blocked: uncommitted work in the worktree" in out
+    assert "2026-06-12-run-x · > fix the crash" in out   # identity line, prompt fallback
+    assert "(unnamed)" not in out
+
+
+def test_emit_paused_summary_titleless_shows_prompt_fallback(monkeypatch, capsys) -> None:
+    monkeypatch.setattr(main, "should_use_color", lambda stream: False)
+    quest = _Change([
+        {"type": "opening_intent", "payload": {"text": "add a dark mode toggle"}},
+        {"type": "workflow_paused",
+         "payload": {"reason": "interrupt", "interrupt_reason": "interrupt"}},
+    ])
+    main._emit_paused_summary(quest)
+    out = capsys.readouterr().out
+    assert "2026-06-12-run-x · > add a dark mode toggle · interrupt" in out
+    assert "(unnamed)" not in out
 
 
 def test_non_ctrl_d_pause_prints_no_caret(monkeypatch, capsys) -> None:

@@ -83,7 +83,7 @@ def test_pause_facts_unnamed_change_shows_bare_id(tmp_path: Path) -> None:
     quest = Quest(id="qzbscf", title="", base_branch="main",
                     control_root=tmp_path, project_root=tmp_path,
                     quest_dir=tmp_path / ".imp" / "change")
-    name, title, token, _reason = _pause_facts(quest)
+    name, title, token, _reason, _opening = _pause_facts(quest)
     assert name == "qzbscf"
     assert token == "qzbscf"
     assert title == ""
@@ -97,7 +97,7 @@ def test_pause_facts_named_change_shows_bare_id(tmp_path: Path) -> None:
                     base_branch="main", control_root=tmp_path,
                     project_root=tmp_path,
                     quest_dir=tmp_path / ".imp" / "change")
-    name, title, token, _reason = _pause_facts(quest)
+    name, title, token, _reason, _opening = _pause_facts(quest)
     assert name == "qzbscf"          # the bare id, not a slugified handle
     assert token == "qzbscf"
     assert title == "Add version flag"
@@ -259,7 +259,7 @@ def test_pause_facts_stale_with_crash_stderr_renders_unexpected_death_banner(
     quest = Quest(id="mona44", title="", base_branch="main",
                     control_root=tmp_path, project_root=tmp_path,
                     quest_dir=quest_dir)
-    name, _title, token, reason = _pause_facts(quest)
+    name, _title, token, reason, _opening = _pause_facts(quest)
     assert name == "mona44"
     assert token == "mona44"
     assert reason == _PauseInfo("crash", "see .imp/quests/mona44/daemon.stderr")
@@ -288,7 +288,7 @@ def test_pause_facts_stale_clean_detach_renders_calm_interrupt(
     quest = Quest(id="mona44", title="", base_branch="main",
                     control_root=tmp_path, project_root=tmp_path,
                     quest_dir=quest_dir)
-    _name, _title, _token, reason = _pause_facts(quest)
+    _name, _title, _token, reason, _opening = _pause_facts(quest)
     assert reason == _PauseInfo("interrupt", None)
 
 
@@ -314,7 +314,7 @@ def test_pause_facts_stale_empty_stderr_renders_calm_interrupt(tmp_path: Path) -
     quest = Quest(id="mona44", title="", base_branch="main",
                     control_root=tmp_path, project_root=tmp_path,
                     quest_dir=quest_dir)
-    *_, reason = _pause_facts(quest)
+    _name, _title, _token, reason, _opening = _pause_facts(quest)
     assert reason == _PauseInfo("interrupt", None)
 
 
@@ -340,11 +340,33 @@ def test_pause_facts_deliberate_leave_renders_trigger_over_stale(tmp_path: Path)
                     control_root=tmp_path, project_root=tmp_path,
                     quest_dir=quest_dir)
 
-    name, title, token, reason = _pause_facts(quest, leave_trigger="sigterm")
+    name, title, token, reason, _opening = _pause_facts(quest, leave_trigger="sigterm")
     assert name == "krol99"
     assert title == "Leave now"          # title carried on the deliberate-leave path
     assert token == "krol99"
     assert reason == _PauseInfo("sigterm", None)  # the client's trigger, NOT a crash
+
+
+def test_pause_facts_returns_the_opening_prompt(tmp_path: Path) -> None:
+    import json
+
+    from imp.cli.main import _pause_facts, _PauseInfo
+    from imp.engine.quest import Quest
+
+    quest_dir = tmp_path / ".imp" / "quests" / "opn11"
+    quest_dir.mkdir(parents=True)
+    events = [
+        ev("1", "opening_intent", text="add a dark mode toggle"),
+        ev("2", "workflow_paused", reason="interrupt", interrupt_reason="interrupt"),
+    ]
+    (quest_dir / "events.jsonl").write_text(
+        "\n".join(json.dumps(e) for e in events) + "\n")
+    quest = Quest(id="opn11", title="", base_branch="main",
+                  control_root=tmp_path, project_root=tmp_path,
+                  quest_dir=quest_dir)
+    _name, _title, _token, reason, opening = _pause_facts(quest)
+    assert opening == "add a dark mode toggle"
+    assert reason == _PauseInfo("interrupt", None)
 
 
 def test_leave_trigger_returns_reason_only_when_escalated_and_stamped() -> None:
