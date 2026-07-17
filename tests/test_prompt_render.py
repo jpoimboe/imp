@@ -431,3 +431,34 @@ def test_docs_namespace_is_strict_on_unknown_attr(tmp_path: Path) -> None:
     with pytest.raises(PromptRenderError):
         render_prompt("{{ docs.typo }}", ctx)
 
+
+def test_quest_parent_and_depends_on_available_to_templates(tmp_path: Path) -> None:
+    ctx = build_context(
+        quest_title="t", event_log=_log(tmp_path / "e.jsonl", []),
+        parent={"id": "par001", "title": "Parent Quest"},
+        depends_on=[{"id": "dep001", "title": "Dep One", "merged": False},
+                    {"id": "dep002", "title": "Dep Two", "merged": True}],
+    )
+    src = (
+        "{% if quest.parent %}P:{{ quest.parent.id }}/{{ quest.parent.title }};{% endif %}"
+        "{% for d in quest.depends_on %}[{{ d.id }}:{{ 'M' if d.merged else 'U' }}]{% endfor %}"
+        "{% if quest.depends_on | rejectattr('merged') | list %}BLOCKED{% endif %}"
+    )
+    assert render_prompt(src, ctx) == "P:par001/Parent Quest;[dep001:U][dep002:M]BLOCKED"
+
+
+def test_quest_parent_and_depends_on_empty_by_default(tmp_path: Path) -> None:
+    ctx = build_context(quest_title="t", event_log=_log(tmp_path / "e.jsonl", []))
+    src = ("{% if quest.parent %}HASPARENT{% endif %}"
+           "{% if quest.depends_on %}HASDEPS{% endif %}")
+    assert render_prompt(src, ctx) == ""
+
+
+def test_quest_all_merged_deps_are_not_blocked(tmp_path: Path) -> None:
+    ctx = build_context(
+        quest_title="t", event_log=_log(tmp_path / "e.jsonl", []),
+        depends_on=[{"id": "dep001", "title": "Dep One", "merged": True}],
+    )
+    src = "{% if quest.depends_on | rejectattr('merged') | list %}BLOCKED{% else %}CLEAR{% endif %}"
+    assert render_prompt(src, ctx) == "CLEAR"
+
