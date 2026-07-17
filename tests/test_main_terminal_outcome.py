@@ -260,33 +260,52 @@ def test_status_spine_colors_id_gold_and_tail_by_role() -> None:
                     f'{pal.ansi("completed", "green")}')
 
 
-def test_emit_completed_merged_prints_single_green_tail_no_glyph(
+def test_clean_block_titled_gold_headline_and_identity() -> None:
+    from imp.cli import palette as pal
+    lines = main._clean_block("completed", "vahi04", "Real title",
+                              color=True, intent="ignored prompt")
+    assert lines == [
+        pal.ansi("completed", "wordmark"),                       # gold headline, own line
+        f'{pal.ansi("vahi04", "wordmark")} · Real title',        # gold id · plain title
+    ]
+
+
+def test_clean_block_untitled_is_bare_gold_id() -> None:
+    from imp.cli import palette as pal
+    lines = main._clean_block("completed", "vahi04", "", color=True, intent=None)
+    assert lines == [pal.ansi("completed", "wordmark"),
+                     pal.ansi("vahi04", "wordmark")]             # bare gold id, no ` · `
+
+
+def test_emit_completed_merged_prints_gold_block_no_green(
     monkeypatch, capsys,
 ) -> None:
     from imp.cli import palette as pal
     monkeypatch.setattr(main, "should_use_color", lambda stream: True)
     main._emit_completed(_Change([]), merged=True)
     out = capsys.readouterr().out
-    assert not out.startswith("\n")              # no leading blank
-    assert "2026-06-12-run-x" in out
-    assert pal.ansi("merged into master", "green") in out
+    lines = out.split("\n")
+    assert lines[0] == pal.ansi("merged into master", "wordmark")   # gold headline, own line
+    assert lines[1] == pal.ansi("2026-06-12-run-x", "wordmark")  # gold identity, bare id
+    assert pal.ansi("merged into master", "green") not in out       # no green anywhere
+    assert " · " not in out                                         # no crammed id·title·tail spine
     assert "✓" not in out
-    assert "quest 2026-06-12-run-x:" not in out  # the old second line is gone
-    assert "Merged 2026-06-12-run-x into" not in out
+    assert not out.startswith("\n")                                 # no leading blank
     assert out.endswith("\n\n")
     assert not out.endswith("\n\n\n")
 
 
-def test_emit_completed_non_merge_tail_is_completed_green(monkeypatch, capsys) -> None:
+def test_emit_completed_non_merge_headline_is_completed_gold(monkeypatch, capsys) -> None:
     from imp.cli import palette as pal
     monkeypatch.setattr(main, "should_use_color", lambda stream: True)
     main._emit_completed(_Change([]), merged=False)
     out = capsys.readouterr().out
-    # Target the TAIL, not a raw escape scan of the whole line: under the autouse
-    # `ansi` theme the gold id (wordmark) and yellow share `\x1b[33m`, so a
-    # line-wide `yellow not in out` check would fail on the legitimately-gold id.
-    assert pal.ansi("completed", "green") in out
-    assert pal.ansi("completed", "wordmark") not in out   # tail is green, not gold
+    lines = out.split("\n")
+    assert lines[0] == pal.ansi("completed", "wordmark")            # gold headline
+    assert pal.ansi("completed", "green") not in out               # completion no longer green
+    assert lines[1] == pal.ansi("2026-06-12-run-x", "wordmark")  # gold identity, bare id
+    assert out.endswith("\n\n")
+    assert not out.endswith("\n\n\n")
 
 
 def test_emit_completed_warnings_render_plain_deduped_list(monkeypatch, capsys) -> None:
@@ -299,6 +318,7 @@ def test_emit_completed_warnings_render_plain_deduped_list(monkeypatch, capsys) 
     assert "- clamped to 4 (×2)" in out
     assert "- id reused" in out
     assert "(3 warnings)" not in out            # the old count suffix is gone
+    assert out.index("2026-06-12-run-x") < out.index("3 warnings this run")  # identity first
     assert out.index("- clamped to 4 (×2)") < out.index("- id reused")  # first-seen order
 
 
@@ -408,8 +428,12 @@ def test_emit_completed_titleless_shows_prompt_fallback(monkeypatch, capsys) -> 
     monkeypatch.setattr(main, "should_use_color", lambda stream: False)
     main._emit_completed(_Change([]), merged=False, intent="add a dark mode toggle")
     out = capsys.readouterr().out
-    assert "2026-06-12-run-x · > add a dark mode toggle · completed" in out
+    lines = out.split("\n")
+    assert lines[0] == "completed"                                  # headline on its own line
+    assert lines[1] == "2026-06-12-run-x · > add a dark mode toggle"  # identity, prompt fallback
     assert "(unnamed)" not in out
+    assert "· completed" not in out                                 # no crammed spine tail
+    assert "\x1b[" not in out
 
 
 def test_handle_terminal_outcome_forwards_opening_intent(monkeypatch) -> None:
