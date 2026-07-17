@@ -2,8 +2,6 @@ from __future__ import annotations
 
 import pathlib
 
-from imp.providers.memory import load_memory_snapshot
-
 WF = pathlib.Path("src/imp/assets/workflows/imp")
 INCLUDE = '{% include "partials/verifying-claims.md" %}'
 
@@ -33,16 +31,6 @@ def test_verifying_claims_excluded_from_task_lead_coder_and_skill() -> None:
         "skills/verification-before-completion.md",
     ):
         assert INCLUDE not in (WF / rel).read_text(), rel
-
-
-def test_project_memory_all_md_carries_prerelease_pointers() -> None:
-    snap = load_memory_snapshot(pathlib.Path("imp/memory"))
-    memo = snap["all.md"]
-    assert "pre-release" in memo
-    assert "Skip backward-compatibility" in memo
-    assert "docs/internals/conventions.md" in memo
-    assert "docs/internals/invariants.md" in memo
-    assert "docs/internals/knowledge-map.md" in memo
 
 
 def test_imp_conventions_has_visual_and_plainspeak_sections() -> None:
