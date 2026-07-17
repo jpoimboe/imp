@@ -131,9 +131,8 @@ re-raises it.
 **Autonomous run — no human at the gate.** Do not yield or solicit a decision. The §1a
 cover-check has already run, so any verify-family toleration confirmed as tracked
 elsewhere is marked `— covered-by <id>` and is **not** re-seeded. Hand every remaining
-**needs-decision** item (the closed set from §1) to the backlog: call
-`create_quest(title="<short title>", description="<self-contained brief that needs no
-other context>", depends_on=["{{ quest.id }}"])` — group related items into one quest or
+**needs-decision** item (the closed set from §1) to the backlog: run
+`imp new --backlog "<short title>" --depends-on {{ quest.id }} "<self-contained brief that needs no other context>"` — group related items into one quest or
 split unrelated ones, whatever fits. When the item is a verify-family toleration, the
 `description` must embed the failing test's identity (node id / name / signature) so a
 later quest's cover-check matches it instead of seeding a duplicate. Then rewrite each
@@ -182,9 +181,8 @@ take the items in whatever order and grouping the discussion warrants. For each 
   outcomes** — do not present these as a menu:
   - **fix** — fix before merge. Collect it into the rework brief and
     leave its `deferred.md` line `needs-decision` (it rides the rework, re-evaluated next pass).
-  - **defer** — hand it to a new backlog quest. Call
-    `create_quest(title="<short title>", description="<self-contained brief that needs no
-    other context>", depends_on=["{{ quest.id }}"])`, rewrite the line to
+  - **defer** — hand it to a new backlog quest. Run
+    `imp new --backlog "<short title>" --depends-on {{ quest.id }} "<self-contained brief that needs no other context>"`, rewrite the line to
     `- [x] DEFERRED <src>: <desc> [scope: …] — seeded <new-quest-id>`, and tell them it is
     startable via `imp resume <new-quest-id>` once this quest merges. When the item is a
     verify-family toleration, the `description` must embed the failing test's identity

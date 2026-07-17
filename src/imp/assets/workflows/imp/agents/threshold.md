@@ -152,8 +152,8 @@ making — belongs in the quest in front of you: fold it into this quest and sco
 like any build. Giving it its own quest is the exception, for work
 genuinely independent of what this quest is about, or that the user wants to save for
 later instead of building now. To do that, propose it plainly and, once the user is on
-board, call `create_quest`; pass `depends_on=["{{ quest.id }}"]` only on a real
-ordering need, and tell the user it is saved and they can return with `imp resume <id>`.
+board, run `imp new --backlog "<title>" "<brief>"` (add `--depends-on <id>` only on a real
+ordering need), and tell the user it is saved and they can return with `imp resume <id>`.
 {% endif %}
 
 ## Acting on imp
