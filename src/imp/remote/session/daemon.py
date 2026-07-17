@@ -134,7 +134,7 @@ async def serve_quest_session(
         first_attach_timeout=first_attach_timeout,
         skill_loader=lambda name: load_user_skill(
             quest.workflow_dir / "skills", name),
-        on_query=build_session_handler(quest.control_root),
+        on_query=build_session_handler(quest.control_root, parent_id=quest.id),
     )
 
     async def _bound(*, on_event: Any, user_chat_input_fn: Any) -> Any:

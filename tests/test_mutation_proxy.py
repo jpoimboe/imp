@@ -179,6 +179,45 @@ def test_async_cmd_new_proxies_when_socket_set(
     assert seen["args"]["depends_on"] == ["dep1"]
 
 
+def test_run_mutation_new_records_parent(tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+    result = run_mutation(tmp_path, "new", {
+        "opening": "x", "title": None, "workflow": None, "base": None,
+        "idea": "Child", "depends_on": None}, "mom99")
+    assert result["returncode"] == 0
+    quests = sorted((tmp_path / ".imp" / "quests").iterdir())
+    meta = json.loads((quests[-1] / "quest.json").read_text())
+    assert meta["parent"] == "mom99"
+
+
+def test_run_mutation_new_background_starts_quest(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _seed_control(tmp_path)
+    started: dict[str, object] = {}
+    monkeypatch.setattr(
+        spawn_mod, "start_quest",
+        lambda control, qid: started.update(qid=qid))
+    result = run_mutation(tmp_path, "new", {
+        "opening": "brief", "title": "T", "workflow": None, "base": None,
+        "idea": None, "depends_on": None, "background": True})
+    assert result["returncode"] == 0
+    assert "started quest" in result["message"]
+    assert "qid" in started
+
+
+@pytest.mark.anyio
+async def test_build_session_handler_threads_parent_id(tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+    handler = build_session_handler(tmp_path, parent_id="mom7")
+    result = await handler("new", {
+        "opening": "x", "title": None, "workflow": None, "base": None,
+        "idea": "Child", "depends_on": None})
+    assert result["returncode"] == 0
+    quests = sorted((tmp_path / ".imp" / "quests").iterdir())
+    meta = json.loads((quests[-1] / "quest.json").read_text())
+    assert meta["parent"] == "mom7"
+
+
 def test_async_cmd_new_chat_mode_does_not_proxy(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

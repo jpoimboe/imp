@@ -17,7 +17,10 @@ from imp.remote.session.protocol import encode_query, parse_result
 _MUTATION_OPS = frozenset({"resume", "new", "edit"})
 
 
-def run_mutation(control_root: Path, op: str, args: dict[str, Any]) -> dict[str, Any]:
+def run_mutation(
+    control_root: Path, op: str, args: dict[str, Any],
+    parent_id: str | None = None,
+) -> dict[str, Any]:
     if op == "resume":
         from imp.remote.daemon import spawn
         message = spawn.resume_quest(control_root, args["token"])
@@ -40,12 +43,15 @@ def run_mutation(control_root: Path, op: str, args: dict[str, Any]) -> dict[str,
         rc, message = apply_new(
             control_root, opening=args["opening"], title=args["title"],
             workflow=args["workflow"], base=args["base"], idea=args["idea"],
-            depends_on=args["depends_on"])
+            depends_on=args["depends_on"],
+            background=args.get("background", False), parent=parent_id)
         return {"returncode": rc, "message": message}
     raise ValueError(f"unknown mutation op {op!r}")
 
 
-def build_session_handler(control_root: Path) -> Any:
+def build_session_handler(
+    control_root: Path, *, parent_id: str | None = None,
+) -> Any:
     """Daemon on_query: mutation ops -> run_mutation, else -> run_query; both off-loop."""
     from imp.cli import store_proxy
     from imp.cli.store import LocalStore
@@ -54,7 +60,8 @@ def build_session_handler(control_root: Path) -> Any:
 
     async def _on_query(op: str, args: dict[str, Any]) -> Any:
         if op in _MUTATION_OPS:
-            return await anyio.to_thread.run_sync(run_mutation, control_root, op, args)
+            return await anyio.to_thread.run_sync(
+                run_mutation, control_root, op, args, parent_id)
         return await anyio.to_thread.run_sync(store_proxy.run_query, store, op, args)
 
     return _on_query
