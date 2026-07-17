@@ -313,6 +313,43 @@ def test_detail_card_shows_merge_commit_for_archived_quest(tmp_path: Path) -> No
     assert "merge_commit:  beefcafe1234" in card   # read via archive_read.read_state_json
 
 
+def test_detail_card_renders_parent_line(tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+    # Parent quest's live home supplies the resolved title.
+    phome = tmp_path / ".imp" / "quests" / "prnt09"
+    phome.mkdir(parents=True)
+    (phome / "quest.json").write_text(json.dumps(
+        {"id": "prnt09", "title": "Parent Q", "base_branch": "main"}))
+    cdir = tmp_path / ".imp" / "quests" / "2026-06-20-chld09"
+    (cdir / "state").mkdir(parents=True)
+    (cdir / "quest.json").write_text(json.dumps({
+        "id": "2026-06-20-chld09", "title": "Child", "base_branch": "main",
+        "parent": "prnt09",
+        "created_at": "2026-06-20T11:00:00+00:00", "layout_version": LAYOUT_VERSION}))
+    (cdir / "events.jsonl").write_text("")
+    State(id="2026-06-20-chld09", status="paused", step="spec-writer",
+          step_attempt=0).save(cdir / "state")
+    lines = main._detail_card(tmp_path, "2026-06-20-chld09", now=_NOW, color=False)
+    parent_line = next(ln for ln in lines if ln.startswith("parent:"))
+    assert parent_line.endswith("prnt09 · Parent Q")   # id · title, middle dot
+    base_idx = next(i for i, ln in enumerate(lines) if ln.startswith("base_branch:"))
+    assert lines[base_idx + 1].startswith("parent:")   # positioned right after base_branch
+
+
+def test_detail_card_omits_parent_line_when_absent(tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+    cdir = tmp_path / ".imp" / "quests" / "2026-06-20-nop09"
+    (cdir / "state").mkdir(parents=True)
+    (cdir / "quest.json").write_text(json.dumps({
+        "id": "2026-06-20-nop09", "title": "No parent", "base_branch": "main",
+        "created_at": "2026-06-20T11:00:00+00:00", "layout_version": LAYOUT_VERSION}))
+    (cdir / "events.jsonl").write_text("")
+    State(id="2026-06-20-nop09", status="paused", step="spec-writer",
+          step_attempt=0).save(cdir / "state")
+    card = "\n".join(main._detail_card(tmp_path, "2026-06-20-nop09", now=_NOW, color=False))
+    assert "parent:" not in card
+
+
 def test_detail_card_shows_shelved_for_archived_paused_quest(tmp_path: Path) -> None:
     _seed_control(tmp_path)
 

@@ -1782,6 +1782,10 @@ def _quest_card(control: Path, quest_id: str, *, now: datetime,
         "last activity:", quest_row.relative_age(card.last, now=now), 15, color=color))
     if card.base_branch:
         lines.append(_card_field("base_branch:", card.base_branch, 15, color=color))
+    if card.parent:
+        lines.append(_card_field(
+            "parent:", f"{card.parent['id']} · {card.parent['title']}",
+            15, color=color))
     if card.merge_commit:
         lines.append(_card_field("merge_commit:", card.merge_commit, 15, color=color))
     if card.depends_on:
@@ -1818,6 +1822,7 @@ def _quest_json(control: Path, quest_id: str) -> dict[str, Any] | None:
         "created": card.created or None,
         "last_activity": card.last or None,
         "base_branch": card.base_branch,
+        "parent": card.parent,
         "depends_on": card.depends_on,
         "intent": card.intent,
         "summary": None,

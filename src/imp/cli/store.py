@@ -47,6 +47,7 @@ class QuestCard:
     phase_label: str | None
     base_branch: str | None
     merge_commit: str | None
+    parent: dict[str, str] | None
     depends_on: list[str]
     intent: str | None
     summary: bytes | None
@@ -149,6 +150,7 @@ class LocalStore:
             _row_for_id,
             _show_artifact,
         )
+        from imp.engine import quest_refs
         from imp.engine.archive import read as archive_read
         row = _row_for_id(self.control_root, quest_id)
         if row is None:
@@ -165,6 +167,7 @@ class LocalStore:
             created=created, step_label=step_label, phase_label=phase_label,
             base_branch=meta.get("base_branch"),
             merge_commit=state.get("merge_commit"),
+            parent=quest_refs.resolve_parent(self.control_root, meta.get("parent")),
             depends_on=list(meta.get("depends_on", [])),
             intent=_resolve_intent(events),
             summary=_show_artifact(self.control_root, quest_id, f"summary/{quest_id}.md"),

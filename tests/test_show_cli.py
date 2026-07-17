@@ -658,6 +658,24 @@ def test_show_backlog_card_threads_color(
     assert pal.ansi("intent:", "dim") in out             # dim intent header via threaded color
 
 
+def test_show_json_includes_parent_shape(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _seed_control(tmp_path)
+    phome = tmp_path / ".imp" / "quests" / "prnt10"
+    phome.mkdir(parents=True)
+    (phome / "quest.json").write_text(json.dumps(
+        {"id": "prnt10", "title": "Parent Q", "base_branch": "main"}))
+    ch = _seed_with_artifacts(tmp_path, _ID, "Feat")
+    meta_path = ch.quest_dir / "quest.json"
+    meta = json.loads(meta_path.read_text())
+    meta["parent"] = "prnt10"
+    meta_path.write_text(json.dumps(meta))
+    out = _run(monkeypatch, tmp_path, "show", _ID, "--json")
+    data = json.loads(out)
+    assert data["parent"] == {"id": "prnt10", "title": "Parent Q"}
+
+
 def test_log_backlog_card_threads_color(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

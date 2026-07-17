@@ -69,6 +69,7 @@ def _card_to_wire(c: QuestCard | None) -> dict[str, Any] | None:
             "last": c.last, "title": c.title, "created": c.created,
             "step_label": c.step_label, "phase_label": c.phase_label,
             "base_branch": c.base_branch, "merge_commit": c.merge_commit,
+            "parent": c.parent,
             "depends_on": list(c.depends_on), "intent": c.intent,
             "summary": _b64e(c.summary)}
 
@@ -81,6 +82,7 @@ def _card_from_wire(d: dict[str, Any] | None) -> QuestCard | None:
         last=d["last"], title=d["title"], created=d["created"],
         step_label=d["step_label"], phase_label=d["phase_label"],
         base_branch=d["base_branch"], merge_commit=d["merge_commit"],
+        parent=d["parent"],
         depends_on=list(d["depends_on"]), intent=d["intent"],
         summary=_b64d(d["summary"]))
 
