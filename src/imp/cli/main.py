@@ -2406,8 +2406,11 @@ def _cmd_log(args: argparse.Namespace) -> int:
         return 0
 
     tree = narrative.build_tree(events)
-    lines = render_tree(tree, show=show, color=color, width=width,
-                        display_width=_display_width())
+    card = store.quest_card(quest_id)
+    title = card.title if card is not None else ""
+    run_header = _run_header_line(quest_id, title, color=color)
+    lines = [run_header, "", *render_tree(tree, show=show, color=color, width=width,
+                                          display_width=_display_width())]
     _page_or_print(lines, no_pager=args.no_pager, trailing_blank=True)
     return 0
 

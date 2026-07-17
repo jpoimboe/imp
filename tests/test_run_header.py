@@ -65,3 +65,50 @@ def test_marker_omitted_titleless_color_is_id_only() -> None:
 def test_marker_omitted_titleless_whitespace_color_is_id_only() -> None:
     line = _run_header_line("yaitd7", "   ", color=True)
     assert line == "\x1b[33myaitd7\x1b[0m"
+
+
+def _seed_log_quest(control) -> None:
+    from imp.engine.quest import Quest
+    from imp.engine.state import JsonlEventLog
+    from tests.conftest import _seed_control
+
+    _seed_control(control)
+    Quest.create(control, title="A", quest_id="alpha", base_branch="main")
+    log = JsonlEventLog(control / ".imp" / "quests" / "alpha" / "events.jsonl")
+    log.append(agent_id=None, type="step_started", payload={"step": "s"})
+    log.append(agent_id=None, type="step_completed",
+               payload={"step": "s", "status": "Success"})
+
+
+def test_log_snapshot_opens_with_id_title_header_on_tty(
+    tmp_path, monkeypatch, capsys,
+) -> None:
+    import sys
+
+    import imp.cli.main as m
+
+    _seed_log_quest(tmp_path)
+    monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
+    monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
+    monkeypatch.setenv("NO_COLOR", "1")
+    rc = m.main(["log", "alpha", "--no-pager"])
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert out.startswith("alpha · A\n\n")
+
+
+def test_log_snapshot_header_present_when_piped(tmp_path, monkeypatch) -> None:
+    import io
+    from contextlib import redirect_stdout
+
+    import imp.cli.main as m
+
+    _seed_log_quest(tmp_path)
+    monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
+    monkeypatch.setenv("NO_COLOR", "1")
+    buf = io.StringIO()  # StringIO.isatty() is False -> piped semantics
+    with redirect_stdout(buf):
+        rc = m.main(["log", "alpha", "--no-pager"])
+    out = buf.getvalue()
+    assert rc == 0
+    assert out.startswith("alpha · A\n\n")
