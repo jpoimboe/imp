@@ -115,6 +115,10 @@ class ImpSessionStore:
             return
         shutil.rmtree(self._base(key), ignore_errors=True)
 
+    def clear(self) -> None:
+        # sync lifecycle helper; no-op when the root is absent
+        shutil.rmtree(self._root, ignore_errors=True)
+
     async def list_subkeys(self, key: Mapping[str, Any]) -> list[str]:
         base = self._base(key)
         if not base.exists():
