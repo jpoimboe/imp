@@ -17,7 +17,7 @@ import anyio
 
 from imp.diagnostics import install_stack_dumper
 from imp.engine.archive import maintenance as archive_maintenance
-from imp.engine.errors import LoadError
+from imp.engine.errors import LayoutMismatch, LoadError
 from imp.engine.quest import Quest
 from imp.remote.daemon import discover, spawn
 from imp.remote.daemon.alert_all import AlertAll
@@ -288,6 +288,15 @@ async def _handle_command(
         handle = handle_for(command.quest_id)
         try:
             outcome = await control.reply(command.quest_id, command.text)
+        except LayoutMismatch:
+            _log.warning(
+                "reply to @%s failed: daemon runs an older imp than the quest",
+                handle, exc_info=True)
+            responses.put(Notice(
+                f"@{handle}: this remote-control daemon is running an older imp "
+                f"than the quest — restart it (imp remote-control stop, then "
+                f"start) to reply."))
+            return
         except LoadError:
             responses.put(Notice(
                 f"no such quest `{command.quest_id}` — unknown or pruned"))

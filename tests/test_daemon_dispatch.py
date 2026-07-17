@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import queue
 import threading
+from pathlib import Path
 
 import pytest
 
+from imp.engine.errors import LayoutMismatch
 from imp.remote.daemon.alert_all import AlertAll
 from imp.remote.daemon.commands import (
     ALERTS_OFF_REPLY,
@@ -39,6 +41,7 @@ class FakeControl:
         snapshots: dict | None = None, narratives: dict | None = None,
         resident: frozenset[str] | None = None,
         reply_outcome: DeliveryOutcome = DeliveryOutcome.DELIVERED,
+        reply_error: Exception | None = None,
     ) -> None:
         self.replies: list[tuple[str, str]] = []
         self.created: list[str] = []
@@ -49,6 +52,7 @@ class FakeControl:
         self._histories: dict = {}
         self._resident = frozenset(resident or ())
         self._reply_outcome = reply_outcome
+        self._reply_error = reply_error
 
     def full_history(self, quest_id: str) -> list[dict]:
         return self._histories.get(quest_id, [])
@@ -61,6 +65,8 @@ class FakeControl:
 
     async def reply(self, quest_id: str, text: str) -> DeliveryOutcome:
         self.replies.append((quest_id, text))
+        if self._reply_error is not None:
+            raise self._reply_error
         return self._reply_outcome
 
     def create(self, prompt: str) -> None:
@@ -362,3 +368,24 @@ async def test_alerts_on_with_no_parked_changes_sends_only_confirmation() -> Non
     await _handle_command(Alerts(True), control, responses, AlertAll())
     assert responses.get_nowait() == Notice(ALERTS_ON_REPLY)
     assert responses.empty()   # nothing parked -> no extra catch-up
+
+
+@pytest.mark.anyio
+async def test_reply_layout_mismatch_enqueues_restart_notice(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    skew = LayoutMismatch(
+        stored=3, engine=2, imp_commit="abc123", quest_dir=Path("/q/aaaaaa"))
+    control = FakeControl(reply_error=skew)
+    responses: queue.Queue = queue.Queue()
+    with caplog.at_level("WARNING"):
+        await _handle_command(Reply("aaaaaa", "go"), control, responses)
+    notice = responses.get_nowait()
+    assert isinstance(notice, Notice)
+    assert notice.text == (
+        "@aaaaaa: this remote-control daemon is running an older imp than the "
+        "quest — restart it (imp remote-control stop, then start) to reply.")
+    assert responses.empty()
+    assert control.replies == [("aaaaaa", "go")]
+    # The real cause is logged with a traceback (previously logged nothing).
+    assert any(r.exc_info for r in caplog.records)
