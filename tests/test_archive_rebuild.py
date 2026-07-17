@@ -135,7 +135,7 @@ def test_rebuild_emits_dim_inplace_progress_on_tty(tmp_path: Path, monkeypatch) 
     archive.rebuild_index(tmp_path)
 
     out = fake.text
-    assert "Reindexing archive…" in out       # ellipsis-glyph progress text
+    assert "Reindexing archive... " in out      # ASCII-ellipsis progress text
     assert "\x1b[2m" in out and "\x1b[0m" in out    # dim SGR wrap
     assert "\r\x1b[K" in out                         # in-place rewrite idiom
     assert "2/2" in out                              # counts up to record total

@@ -88,14 +88,14 @@ def archive_quest(
 
 
 @contextlib.contextmanager
-def _reindex_progress() -> Iterator[Callable[[int, int], None]]:
+def _progress(label: str) -> Iterator[Callable[[int, int], None]]:
     stream = sys.stderr
     tty = stream.isatty()
 
     def emit(i: int, total: int) -> None:
         if not tty:
             return
-        stream.write(f"\r\x1b[K\x1b[2mReindexing archive… {i}/{total}\x1b[0m")
+        stream.write(f"\r\x1b[K\x1b[2m{label} {i}/{total}\x1b[0m")
         stream.flush()
 
     try:
@@ -121,7 +121,7 @@ def rebuild_index(control_root: Path) -> None:
         try:
             cids = list(record.list_record_ids(records_root(control_root)))
             total = len(cids)
-            with _reindex_progress() as emit:
+            with _progress("Reindexing archive...") as emit:
                 for i, cid in enumerate(cids, start=1):
                     emit(i, total)
                     rec = record.read_record(records_root(control_root), cid)
