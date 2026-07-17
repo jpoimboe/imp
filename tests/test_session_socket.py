@@ -23,10 +23,6 @@ from imp.remote.session.protocol import (
 from imp.remote.session.socket_server import SessionSocket, _Client
 
 
-def _protocol_input(text: str) -> Input:
-    return Input(text)
-
-
 @pytest.fixture
 def anyio_backend() -> str:
     return "asyncio"
@@ -223,19 +219,19 @@ async def test_input_outside_a_gate_is_dropped(tmp_path: Path) -> None:
 def test_arm_input_latches_a_pre_gate_reply_frame() -> None:
     session = SessionSocket("/unused.sock")
     session.arm_input()
-    session._dispatch(SimpleNamespace(), _protocol_input("early"))
+    session._dispatch(SimpleNamespace(), Input("early"))
     assert session._pending_input == "early"
 
 
 def test_disarm_input_drops_an_unconsumed_latched_frame() -> None:
     session = SessionSocket("/unused.sock")
     session.arm_input()
-    session._dispatch(SimpleNamespace(), _protocol_input("early"))
+    session._dispatch(SimpleNamespace(), Input("early"))
     session.disarm_input()
     assert session._pending_input is None
     # A frame arriving while disarmed (type-ahead during a run) is not latched,
     # so it can never leak into a later, unrelated gate.
-    session._dispatch(SimpleNamespace(), _protocol_input("stale"))
+    session._dispatch(SimpleNamespace(), Input("stale"))
     assert session._pending_input is None
 
 
