@@ -96,6 +96,8 @@ def handle_slash_line(
         return REPROMPT
     if cmd == "abandon":
         return "/abandon"
+    if cmd == "compact":
+        return "/compact"
     if cmd in ("keep", "shelve", "clear"):
         if pre_session:
             _echo_command(text, output_fn, color=color)
@@ -167,6 +169,7 @@ def _help(out: Callable[[str], None], *, materialized: bool, pre_session: bool =
         out("  /clear             Shelve this conversation and start a fresh one")
     out("  /model <model>     Switch this step's model (or provider:model)")
     out("  /sandbox [on|off]  Show or set the filesystem sandbox for this session")
+    out("  /compact           Shed old tool results to reclaim context (keeps the narrative)")
     out("  /abandon           Abandon the current quest")
     out("  /<name> [args]     Load a skill (trailing args appended to it)")
     out("")

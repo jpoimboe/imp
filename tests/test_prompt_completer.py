@@ -54,7 +54,7 @@ def test_missing_skills_dir_only_builtins(tmp_path: Path) -> None:
     c = SlashCompleter(tmp_path / "nope")
     assert set(_texts(c, "/")) == {
         "help", "skills", "keep", "shelve", "clear", "model", "sandbox",
-        "abandon"}
+        "abandon", "compact"}
 
 
 def test_async_path_delegates_to_get_completions(tmp_path: Path) -> None:
@@ -95,6 +95,15 @@ def test_user_skill_named_like_builtin_not_duplicated(tmp_path: Path) -> None:
 
 def test_builtins_include_model() -> None:
     assert "model" in SlashCompleter._BUILTINS
+
+
+def test_builtins_include_compact() -> None:
+    assert "compact" in SlashCompleter._BUILTINS
+
+
+def test_compact_completes_by_prefix(tmp_path: Path) -> None:
+    c = SlashCompleter(_skills(tmp_path))
+    assert set(_texts(c, "/comp")) == {"compact"}
 
 
 _ROSTER = [
