@@ -137,8 +137,10 @@ _CORE_TAIL = """\
    read them in one batch rather than one per turn. Sequence only when
    a later call genuinely depends on an earlier result.
  - To load a skill, call load_skill with its name — only skills listed as available;
-   don't guess.
+   don't guess."""
 
+
+_USER_FACING_NOTE = """\
 # Tone and style
  - Only use emojis if the user explicitly requests it.
  - Reference code as file_path:line_number so the user can navigate to it.
@@ -598,7 +600,7 @@ def build_agent_invocation(
             body = reflow_markdown(body)
             system_prompt = f"{body}\n\n{SUBAGENT_DELIVERABLE_NOTE}"
         else:
-            header = base
+            header = f"{base}\n\n{_USER_FACING_NOTE}"
             if agent_def.tools & _FILESYSTEM_TOOLS:
                 header = f"{header}\n\n{_BASH_VIRTUAL_PATHS_NOTE}"
             header = f"{header}\n\n{date_note}"
