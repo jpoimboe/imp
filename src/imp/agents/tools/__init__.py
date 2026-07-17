@@ -124,6 +124,7 @@ _BUILTIN_MODULES = (
     "fs",
     "nav",
     "rename_quest",
+    "save_and_exit",
     "step_label",
     "symbol_outline",
 )
