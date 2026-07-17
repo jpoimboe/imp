@@ -360,7 +360,8 @@ def test_handle_terminal_outcome_reads_warning_messages_from_archive(monkeypatch
     quest = _Change([])
     quest.control_root = main.Path("/tmp/imp-no-such-worktree-xyz")
     archive_blob = (
-        b'{"type": "user_message", "payload": {"subtype": "intent", "content": [{"type": "text", "text": "resolve me from archive"}]}}\n'
+        b'{"type": "user_message", "payload": {"subtype": "intent", '
+        b'"content": [{"type": "text", "text": "resolve me from archive"}]}}\n'
         b'{"type": "runner_warning", "payload": {"message": "a"}}\n'
         b'{"type": "runner_warning", "payload": {"message": "b"}}\n'
         b'{"type": "step_started", "payload": {"step": "s"}}\n'
