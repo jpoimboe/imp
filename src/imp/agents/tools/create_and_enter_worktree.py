@@ -19,7 +19,7 @@ from imp.agents.tools import imp_tool
         "worktree already exists."
     ),
 )
-def create_and_enter_worktree(ctx: Any) -> str:
+async def create_and_enter_worktree(ctx: Any) -> str:
     if ctx.quest_state is None:
         raise RuntimeError(
             "create_and_enter_worktree is only available to top-level quest steps")
