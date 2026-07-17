@@ -88,14 +88,14 @@ def archive_quest(
 
 
 @contextlib.contextmanager
-def _reindex_progress() -> Iterator[Callable[[int, int], None]]:
+def _progress(label: str) -> Iterator[Callable[[int, int], None]]:
     stream = sys.stderr
     tty = stream.isatty()
 
     def emit(i: int, total: int) -> None:
         if not tty:
             return
-        stream.write(f"\r\x1b[K\x1b[2mReindexing archive… {i}/{total}\x1b[0m")
+        stream.write(f"\r\x1b[K\x1b[2m{label} {i}/{total}\x1b[0m")
         stream.flush()
 
     try:
@@ -121,7 +121,7 @@ def rebuild_index(control_root: Path) -> None:
         try:
             cids = list(record.list_record_ids(records_root(control_root)))
             total = len(cids)
-            with _reindex_progress() as emit:
+            with _progress("Reindexing archive...") as emit:
                 for i, cid in enumerate(cids, start=1):
                     emit(i, total)
                     rec = record.read_record(records_root(control_root), cid)
@@ -196,19 +196,23 @@ def _migrate_archive_blobs(control_root: Path) -> None:
     orphan harmlessly (nothing GCs blobs)."""
     store = LocalBlobStore(blobs_root(control_root))
     records_dir = records_root(control_root)
-    for cid in record.list_record_ids(records_dir):
-        rec = record.read_record(records_dir, cid)
-        if rec is None:
-            continue
-        blob = store.get(rec["events_hash"])
-        if blob is None:
-            continue
-        events = _parse_events(blob)
-        migrated = migrate_events(events)
-        if migrated == events:
-            continue
-        rec["events_hash"] = store.put(_serialize_events(migrated))
-        record.write_record(records_dir, rec)
+    cids = list(record.list_record_ids(records_dir))
+    total = len(cids)
+    with _progress("Migrating archive...") as emit:
+        for i, cid in enumerate(cids, start=1):
+            emit(i, total)
+            rec = record.read_record(records_dir, cid)
+            if rec is None:
+                continue
+            blob = store.get(rec["events_hash"])
+            if blob is None:
+                continue
+            events = _parse_events(blob)
+            migrated = migrate_events(events)
+            if migrated == events:
+                continue
+            rec["events_hash"] = store.put(_serialize_events(migrated))
+            record.write_record(records_dir, rec)
     rebuild_index(control_root)
     _write_data_version(control_root, _DATA_VERSION)
 
