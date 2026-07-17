@@ -72,6 +72,19 @@ class LiveStatus:
         self._erase()
         self._compose = None
 
+    def end_run(self) -> None:
+        """Terminal teardown: erase the footer and clear the compose fn like
+        reset(), but when a footer with its own leading blank was visible, descend
+        one line past that blank so it survives as the single separator before the
+        caller's printed exit block. A non-TTY or already-hidden status writes
+        nothing, keeping the live/log scrollback parity intact."""
+        descend = self._enabled and self._visible and self._owns_lead_blank
+        self._erase()
+        self._compose = None
+        if descend:
+            self._stream.write("\n")
+            self._stream.flush()
+
     async def tick(self, interval: float = 0.1) -> None:
         """Background spinner: advance the frame and redraw on an interval."""
         import anyio

@@ -287,11 +287,12 @@ def _print_warnings_block(messages: list[str]) -> None:
 def _emit_completed(quest: Quest, *, merged: bool,
                     warnings: list[str] | None = None,
                     intent: str | None = None) -> None:
-    """The clean-finish line: one green-tailed spine, then the warnings block."""
+    """The clean-finish block: a gold `merged into <base>` / `completed` headline on
+    its own line, the identity line, then the warnings block; one trailing blank."""
     color = should_use_color(sys.stdout)
-    tail = f"merged into {quest.base_branch}" if merged else "completed"
-    print(_status_spine(quest.id, quest.title, tail, "green", color=color,
-                        intent=intent))
+    head = f"merged into {quest.base_branch}" if merged else "completed"
+    for ln in _clean_block(head, quest.id, quest.title, color=color, intent=intent):
+        print(ln)
     _print_warnings_block(warnings or [])
     print()
 
@@ -323,6 +324,27 @@ _ERROR_LABELS: dict[str, str] = {
 }
 
 
+def _identity_line(quest_id: str, title: str, *, color: bool,
+                   intent: str | None = None) -> str:
+    """The shared identity line: gold id, ` · `, then the resolved name — the title,
+    else the dim opening-prompt fallback; a bare gold id only when the quest has
+    neither (kind UNNAMED)."""
+    ident = ansi(quest_id, *pal.NODE_COLORS["quest_id"], enabled=color)
+    name, kind = _spine_name(title, intent, color=color)
+    if kind is not quest_row.NameKind.UNNAMED:
+        ident = f"{ident} · {name}"
+    return ident
+
+
+def _clean_block(head: str, quest_id: str, title: str, *, color: bool,
+                 intent: str | None = None) -> list[str]:
+    """The clean-exit sibling of `_error_block`: a gold `head` line on its own line,
+    then the identity line. No body, no resume line — pause callers append their own
+    resume line."""
+    return [ansi(head, "wordmark", enabled=color),
+            _identity_line(quest_id, title, color=color, intent=intent)]
+
+
 def _error_block(head: str, body: list[str], quest_id: str, title: str,
                  *, color: bool, intent: str | None = None) -> list[str]:
     """The shared three-part error block: a red `head` line, `body` lines in the
@@ -331,11 +353,7 @@ def _error_block(head: str, body: list[str], quest_id: str, title: str,
     quest has neither). No resume line."""
     lines = [ansi(head, "red", enabled=color)]
     lines.extend(body)
-    ident = ansi(quest_id, *pal.NODE_COLORS["quest_id"], enabled=color)
-    name, kind = _spine_name(title, intent, color=color)
-    if kind is not quest_row.NameKind.UNNAMED:
-        ident = f"{ident} · {name}"
-    lines.append(ident)
+    lines.append(_identity_line(quest_id, title, color=color, intent=intent))
     return lines
 
 
@@ -432,9 +450,9 @@ def _pause_lines(
             head = f"{label}: {first}" if first else label
             body = rest
         return _error_block(head, body, name, title, color=color, intent=intent)
-    tail = info.base if info is not None else "paused"
+    head = info.base if info is not None else "paused"
     return [
-        _status_spine(name, title, tail, "wordmark", color=color, intent=intent),
+        *_clean_block(head, name, title, color=color, intent=intent),
         _resume_line(token),
     ]
 
@@ -2149,7 +2167,7 @@ def _follow_log(events: list[dict[str, Any]]) -> int:
         width=_term_width, display_width=_display_width, status=status)
     for event in events:
         driver.on_event(event)
-    driver.finish()
+    driver.finish(exit_block=False)
     return 0
 
 
@@ -2205,7 +2223,7 @@ def _drain_from_archive(driver: LiveDriver, tail: _EventTail,
     if raw is not None:
         for event in _parse_jsonl(raw)[tail.emitted:]:
             driver.on_event(event)
-    driver.finish()
+    driver.finish(exit_block=False)
     return 0
 
 
@@ -2226,7 +2244,7 @@ def _follow_step(driver: LiveDriver, tail: _EventTail, status: LiveStatus,
     if state_status in _FOLLOW_TERMINAL:
         for event in tail.read_new():
             driver.on_event(event)
-        driver.finish()
+        driver.finish(exit_block=False)
         return 0
     if lock_is_live(home / "lock"):
         status.update(driver.compose_status)

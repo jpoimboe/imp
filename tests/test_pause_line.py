@@ -8,39 +8,45 @@ from imp.cli.main import _pause_lines
 from tests._event_fixtures import ev
 
 
-def test_pause_lines_named_reasonless_pause_uses_paused_tail() -> None:
+def test_pause_lines_named_reasonless_pause_uses_paused_headline() -> None:
     lines = _pause_lines("dufa26", "dufa26", title="Add version flag", color=False)
     assert lines == [
-        "dufa26 · Add version flag · paused",
+        "paused",
+        "dufa26 · Add version flag",
         "resume: imp resume dufa26",
     ]
 
 
-def test_pause_lines_titleless_pause_shows_unnamed_middle() -> None:
+def test_pause_lines_titleless_pause_shows_bare_id() -> None:
     lines = _pause_lines("dufa26", "dufa26", color=False)
-    assert lines[0] == "dufa26 · (unnamed) · paused"
-    assert lines[0].count(" · ") == 2
+    assert lines == ["paused", "dufa26", "resume: imp resume dufa26"]
+    assert "(unnamed)" not in "\n".join(lines)
 
 
-def test_pause_lines_reason_becomes_the_tail_no_at_locator_no_parens() -> None:
+def test_pause_lines_reason_becomes_the_headline_no_at_locator_no_parens() -> None:
     from imp.cli.main import _PauseInfo
     lines = _pause_lines("dufa26", "dufa26", title="Add version flag",
                          info=_PauseInfo("interrupt", None), color=False)
-    assert lines[0] == "dufa26 · Add version flag · interrupt"
-    assert " at " not in lines[0]
-    assert "(" not in lines[0]
+    assert lines == [
+        "interrupt",
+        "dufa26 · Add version flag",
+        "resume: imp resume dufa26",
+    ]
+    joined = "\n".join(lines)
+    assert " at " not in joined
+    assert "(" not in joined
 
 
-def test_pause_lines_clean_reason_tail_is_gold_id_gold() -> None:
+def test_pause_lines_clean_reason_headline_is_gold() -> None:
     from imp.cli import palette as pal
     from imp.cli.main import _PauseInfo
     lines = _pause_lines("dufa26", "dufa26", title="T",
                          info=_PauseInfo("interrupt", None), color=True)
-    assert lines[0] == (f'{pal.ansi("dufa26", "wordmark")} · T · '
-                        f'{pal.ansi("interrupt", "wordmark")}')
-    assert lines[1] == "resume: imp resume dufa26"     # resume line stays plain
+    assert lines[0] == pal.ansi("interrupt", "wordmark")            # gold headline, own line
+    assert lines[1] == f'{pal.ansi("dufa26", "wordmark")} · T'      # gold id · plain title
+    assert lines[2] == "resume: imp resume dufa26"                  # resume line stays plain
     assert "⏸" not in lines[0]
-    assert "paused" not in lines[0]                    # a reason replaces the bare word
+    assert "paused" not in lines[0]  # a reason replaces the bare word
 
 
 def test_pause_lines_error_reason_tail_is_red_id_stays_gold() -> None:

@@ -412,12 +412,14 @@ class LiveDriver:
         self._walk()
         self._refresh_status()
 
-    def finish(self) -> None:
-        """Run end / pause / error: force-flush any still-open burst/subagent so
-        the final block is emitted, then clear the status line."""
+    def finish(self, *, exit_block: bool = True) -> None:
+        """Flush the block; exit_block descends past the owned blank (end_run) else resets."""
         self._builder.finalize()
         self._walk(force=True)
-        self._status.reset()
+        if exit_block:
+            self._status.end_run()
+        else:
+            self._status.reset()
 
     def compose_status(self, frame: int) -> list[str] | None:
         activity = self._builder.current_activity()
