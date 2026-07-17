@@ -78,3 +78,14 @@ def test_run_mutation_edit_ambiguous_returns_error(tmp_path: Path) -> None:
         "depends_on": None, "clear_deps": False, "append_intent": None})
     assert result["returncode"] == 2
     assert "is ambiguous" in result["message"]
+
+
+def test_run_mutation_new_records_backlog(tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+    result = run_mutation(tmp_path, "new", {
+        "opening": "brief text", "title": None, "workflow": None, "base": None,
+        "idea": "From the agent", "depends_on": None})
+    assert result["returncode"] == 0
+    assert "recorded backlog quest" in result["message"]
+    quests = sorted((tmp_path / ".imp" / "quests").iterdir())
+    assert Quest.load(tmp_path, quests[-1].name).title == "From the agent"

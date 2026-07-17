@@ -35,6 +35,13 @@ def run_mutation(control_root: Path, op: str, args: dict[str, Any]) -> dict[str,
             active=args["active"], depends_on=args["depends_on"],
             clear_deps=args["clear_deps"], append_intent=args["append_intent"])
         return {"returncode": rc, "message": msg or ""}
+    if op == "new":
+        from imp.cli.main import apply_new
+        rc, message = apply_new(
+            control_root, opening=args["opening"], title=args["title"],
+            workflow=args["workflow"], base=args["base"], idea=args["idea"],
+            depends_on=args["depends_on"])
+        return {"returncode": rc, "message": message}
     raise ValueError(f"unknown mutation op {op!r}")
 
 

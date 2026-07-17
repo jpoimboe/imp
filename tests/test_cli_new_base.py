@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
 from pathlib import Path
 
 import pytest
 
+from imp.cli import main
 from imp.cli.main import (
     BaseResolutionError,
     _async_cmd_new,
@@ -140,3 +142,54 @@ def test_record_idea_uses_passed_base_not_current_branch(
     assert len(ids) == 1, ids
     quest = Quest.load(tmp_path, ids[0])
     assert quest.base_branch == "release/9"
+
+
+def test_apply_new_backlog_records_quest(tmp_path: Path, monkeypatch) -> None:
+    _seed_control(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    rc, msg = main.apply_new(
+        tmp_path, opening="wire the widget", title=None, workflow=None,
+        base=None, idea="Widget work", depends_on=["dep55"])
+    assert rc == 0
+    assert "recorded backlog quest" in msg
+    quests = sorted((tmp_path / ".imp" / "quests").iterdir())
+    quest = Quest.load(tmp_path, quests[-1].name)
+    meta = json.loads((quest.quest_dir / "quest.json").read_text())
+    assert quest.origin == "backlog"
+    assert quest.title == "Widget work"
+    assert meta["depends_on"] == ["dep55"]
+
+
+def test_apply_new_draft_records_quest(tmp_path: Path, monkeypatch) -> None:
+    _seed_control(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    rc, msg = main.apply_new(
+        tmp_path, opening="do the thing", title="Thing", workflow=None,
+        base=None, idea=None, depends_on=None)
+    assert rc == 0
+    assert "created draft" in msg
+    quests = sorted((tmp_path / ".imp" / "quests").iterdir())
+    quest = Quest.load(tmp_path, quests[-1].name)
+    assert quest.origin == "draft"
+    assert quest.title == "Thing"
+    assert quest.seed_opening == "do the thing"
+
+
+def test_apply_new_empty_idea_returns_error(tmp_path: Path, monkeypatch) -> None:
+    _seed_control(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    rc, msg = main.apply_new(
+        tmp_path, opening="x", title=None, workflow=None,
+        base=None, idea="   ", depends_on=None)
+    assert rc == 2
+    assert "non-empty" in msg
+
+
+def test_apply_new_bad_base_returns_error(tmp_path: Path, monkeypatch) -> None:
+    _seed_control(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    rc, msg = main.apply_new(
+        tmp_path, opening="x", title=None, workflow=None,
+        base="no-such-branch", idea=None, depends_on=None)
+    assert rc == 2
+    assert "does not name an existing branch" in msg

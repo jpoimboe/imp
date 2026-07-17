@@ -906,6 +906,45 @@ def _record_idea(args: argparse.Namespace, control: Path, base: str) -> int:
     return 0
 
 
+def apply_new(
+    control: Path, *, opening: str | None, title: str | None,
+    workflow: str | None, base: str | None, idea: str | None,
+    depends_on: list[str] | None,
+) -> tuple[int, str]:
+    """Non-interactive create for the mutation proxy: record a backlog quest or plain draft."""
+    try:
+        resolved_base = _resolve_new_base(control, base)
+    except BaseResolutionError as e:
+        return 2, f"imp: {e}"
+
+    deps = list(depends_on or [])
+    quest_id = new_quest_id(existing_stems=live_stems(control))
+
+    if idea is not None:
+        if not idea.strip():
+            return 2, "imp: --backlog title must be non-empty"
+        seed = backlog.seed_opening({"title": idea, "description": opening or ""})
+        try:
+            Quest.create_draft(
+                control, title=idea, quest_id=quest_id, base_branch=resolved_base,
+                depends_on=deps, workflow=workflow, origin="backlog",
+                seed_opening=seed)
+        except (LoadError, LoadErrors) as e:
+            return 2, f"imp: {e}"
+        return 0, (f"imp: recorded backlog quest {quest_id} "
+                   f"(start it with `imp resume {quest_id}`)")
+
+    try:
+        Quest.create_draft(
+            control, title=title or "", quest_id=quest_id,
+            base_branch=resolved_base, depends_on=deps, workflow=workflow,
+            origin="draft", seed_opening=opening)
+    except (LoadError, LoadErrors) as e:
+        return 2, f"imp: {e}"
+    return 0, (f"imp: created draft {quest_id} "
+               f"(resume with `imp resume {quest_id}`)")
+
+
 def _select_headless(
     args: argparse.Namespace, *, stdin: Any = None, stdout: Any = None,
 ) -> tuple[bool, bool]:
