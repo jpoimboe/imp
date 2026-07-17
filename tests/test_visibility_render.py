@@ -141,3 +141,62 @@ def test_phase_show_label_false_suppresses_phase_header() -> None:
     out = "\n".join(body)
     assert "hello there" in out                 # conversation body survives
     assert "threshold phase" not in out        # phase header suppressed
+
+
+def test_frame_suppressed_opening_collapses_stacked_blanks() -> None:
+    # A log that opens on a frame-suppressed threshold phase+step must show exactly
+    # ONE blank between the opening human turn and the first agent words — matching
+    # the live viewer — not the three stacked blanks the un-guarded batch walk
+    # accumulated from spaces_before(Phase) + the phase prime + the step prime.
+    body = _body([
+        ev("1", "quest_created", quest_id=1, title="x"),
+        ev("2", "user_message", subtype="intent",
+           content=[{"type": "text", "text": "do the thing"}]),
+        ev("3", "step_started", step="threshold", kind="agent", phase="threshold",
+           model="m", provider="anthropic", label="chatting",
+           phase_label="threshold phase", show_label=False, phase_show_label=False),
+        ev("4", "agent_message", agent_id="step:threshold/threshold",
+           provider="anthropic", model="m", stop_reason="end_turn", usage={},
+           raw={"content": [{"type": "text", "text": "I can help with that"}]}),
+        ev("5", "step_completed", step="threshold", kind="agent",
+           action={"verb": "continue"}, var_mutations={}),
+    ])
+    assert body == ["> do the thing", "", "• I can help with that"]
+
+
+def test_frame_suppressed_phase_opens_transcript_on_content() -> None:
+    # With no preceding prose, a suppressed opening phase must NOT assert its
+    # spaces_before blank: the transcript opens directly on the first agent words,
+    # with no leading blank run at the top.
+    body = _body([
+        ev("1", "quest_created", quest_id=1, title="x"),
+        ev("2", "step_started", step="threshold", kind="agent", phase="threshold",
+           model="m", provider="anthropic", label="chatting",
+           phase_label="threshold phase", show_label=False, phase_show_label=False),
+        ev("3", "agent_message", agent_id="step:threshold/threshold",
+           provider="anthropic", model="m", stop_reason="end_turn", usage={},
+           raw={"content": [{"type": "text", "text": "first agent words"}]}),
+        ev("4", "step_completed", step="threshold", kind="agent",
+           action={"verb": "continue"}, var_mutations={}),
+    ])
+    assert body == ["• first agent words"]
+
+
+def test_visible_phase_keeps_lead_in_blank_below_header() -> None:
+    # Regression: a VISIBLE phase still primes its children walk, so a single blank
+    # separates the phase rule from the first step header. This guards the
+    # prime=not suppress change against stripping the lead-in blank of a loud frame.
+    body = _body([
+        ev("1", "quest_created", quest_id=1, title="x"),
+        ev("2", "step_started", step="spec", kind="agent", phase="design",
+           model="m", provider="anthropic", label="drafting",
+           phase_label="design phase", show_label=True, phase_show_label=True),
+        ev("3", "agent_message", agent_id="step:design/spec",
+           provider="anthropic", model="m", stop_reason="end_turn", usage={},
+           raw={"content": [{"type": "text", "text": "the plan"}]}),
+        ev("4", "step_completed", step="spec", kind="agent",
+           action={"verb": "continue"}, var_mutations={}),
+    ])
+    rule = body.index("── design phase ───")
+    assert body[rule + 1] == ""            # lead-in blank below the phase rule
+    assert "drafting" in body[rule + 2]    # step header follows that single blank

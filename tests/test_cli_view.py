@@ -146,12 +146,17 @@ def test_cli_log_pipes_through_narrative(
     rc = main(["log", slug])
     assert rc == 0
     out = capsys.readouterr().out
-    # No slug/title banner — the transcript opens on the first phase.
-    assert "smoke" not in out
+    lines = out.splitlines()
+    # The run header leads with the quest id; the transcript body follows a blank.
+    assert lines[0].startswith("my-smoke")
+    assert lines[1] == ""
+    body = "\n".join(lines[2:])
+    # The transcript body opens on the first phase — no title banner inside it.
+    assert "smoke" not in body
     # Phase rendered by name (derived from step_started.payload.phase)
-    assert "onboard" in out
+    assert "onboard" in body
     # No raw JSON braces in narrative rendering
-    assert "{" not in out
+    assert "{" not in body
 
 
 def test_imp_log_skips_malformed_lines_in_events_jsonl(
@@ -193,11 +198,16 @@ def test_imp_log_skips_malformed_lines_in_events_jsonl(
         rc = main(["log", slug])
     assert rc == 0
     out = buf.getvalue()
-    # Good events still rendered (no title banner; the phase carries the proof)
-    assert "smoke" not in out
-    assert "onboard" in out
+    lines = out.splitlines()
+    # The run header leads with the quest id; the body follows a blank.
+    assert lines[0].startswith("my-smoke")
+    assert lines[1] == ""
+    body = "\n".join(lines[2:])
+    # Good events still rendered (no title banner inside the body; phase is the proof)
+    assert "smoke" not in body
+    assert "onboard" in body
     # Malformed line rendered as an error line (narrative ErrorNode)
-    assert "malformed event" in out
+    assert "malformed event" in body
 
 
 def test_cli_log_subprocess_no_color_on_pipe(tmp_path: Path) -> None:
