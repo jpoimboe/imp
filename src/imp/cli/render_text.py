@@ -692,6 +692,8 @@ def _render(node: Any, *, depth: int, full: bool = False,
         return
 
     if isinstance(node, nv.EngineMessageNode):
+        if live_viewer:
+            return       # live viewer hides internal engine turns even under --full
         # Lean/live: engine turns are hidden. --full ("prompts" in cats): a labeled
         # verbatim block, wrapped to width but never truncated.
         if not ("prompts" in cats and node.text.strip()):
