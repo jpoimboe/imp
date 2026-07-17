@@ -56,6 +56,7 @@ def is_slash_command(text: str) -> bool:
 
 def _echo_command(text: str, out: Callable[[str], None], *, color: bool) -> None:
     out(caret(enabled=color) + text.strip())
+    out("")
 
 
 def _is_materialized(quest: Any) -> bool:
@@ -175,9 +176,10 @@ def _help(out: Callable[[str], None], *, materialized: bool, pre_session: bool =
     out("")
     out("Keybindings:")
     if materialized:
-        out("  Ctrl+C / Ctrl+D    Pause and exit; resume with imp resume <id>")
+        out("  Ctrl+D             Pause and exit; resume with imp resume <id>")
     else:
-        out("  Ctrl+C / Ctrl+D    Leave this conversation; resume with imp resume <id>")
+        out("  Ctrl+D             Leave this conversation; resume with imp resume <id>")
+    out("  Ctrl+C             Clear the typed line, or interrupt a running step")
     out("  Up-arrow           Recall previous input")
     out("  Tab                Complete a /command or skill name")
 
