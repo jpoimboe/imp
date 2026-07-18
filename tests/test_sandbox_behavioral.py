@@ -1190,3 +1190,139 @@ def test_quest_steps_masked_but_artifacts_readable() -> None:
     finally:
         shutil.rmtree(control, ignore_errors=True)
 
+
+# ---------------------------------------------------------------------------
+# B10.11  Siblings + archive invisible in-sandbox; own home read/write (AC 8)
+# ---------------------------------------------------------------------------
+
+def test_siblings_and_archive_invisible_own_home_rw() -> None:
+    """Normal quest (nested worktree): a sibling quest and the archive are invisible
+    inside the sandbox (the .imp tmpfs), while the current quest reads AND writes its
+    own home over the re-bound quest_home."""
+    control = Path(tempfile.mkdtemp(prefix="imp-test-imp-mask-"))
+    try:
+        _init_repo(control)
+        wt_path = wt.create_worktree(control, "q1", "main")
+
+        quest_dir = control / ".imp" / "quests" / "q1"
+        spec_dir = quest_dir / "artifacts" / "spec"
+        spec_dir.mkdir(parents=True)
+        (spec_dir / "q1.md").write_text("OWNSPEC body\n")
+        (quest_dir / "events.jsonl").write_text('{"e":1}\n')
+
+        sib = control / ".imp" / "quests" / "sib"
+        sib.mkdir(parents=True)
+        (sib / "events.jsonl").write_text("SIBSECRET\n")
+
+        archive = control / ".imp" / "archive"
+        (archive / "blobs" / "ab").mkdir(parents=True)
+        (archive / "blobs" / "ab" / "cd").write_text("ARCHSECRET\n")
+        (archive / "records").mkdir()
+        (archive / "records" / "r.json").write_text("ARCHREC\n")
+
+        pol = resolve_policy(
+            worktree=wt_path, control_root=control, quest_id="q1",
+            cfg=SandboxConfig(home=control / "home", uid=os.getuid()),
+            engine_env_result={"IMP_PROJECT_ROOT": str(wt_path)},
+            environ=os.environ, available=True, quest_dir=quest_dir,
+        )
+        ctx = _ctx(wt_path, pol)
+
+        # Sibling + archive secrets must not be reachable on disk in-sandbox.
+        scan = _bash(
+            ctx,
+            f"grep -rn SIBSECRET {control}/.imp 2>/dev/null; "
+            f"grep -rn ARCHSECRET {control}/.imp 2>/dev/null; echo SCAN_DONE")
+        assert "SCAN_DONE" in scan["stdout"]
+        assert "SIBSECRET" not in scan["stdout"], (
+            f"sibling events.jsonl leaked inside sandbox: {scan['stdout']!r}")
+        assert "ARCHSECRET" not in scan["stdout"], (
+            f"archive blob leaked inside sandbox: {scan['stdout']!r}")
+
+        # The quests/ dir shows only the current quest's re-bound home, not the sibling.
+        r_ls = _bash(ctx, f"ls {control}/.imp/quests 2>&1")
+        assert "q1" in r_ls["stdout"], (
+            f"own quest home not visible inside sandbox: {r_ls['stdout']!r}")
+        assert "sib" not in r_ls["stdout"], (
+            f"sibling quest dir visible inside sandbox: {r_ls['stdout']!r}")
+
+        # Own home is fully functional: read the spec, then write a new artifact.
+        r_read = _bash(ctx, f"cat {spec_dir}/q1.md")
+        assert "OWNSPEC" in r_read["stdout"], (
+            f"own spec not readable inside sandbox: {r_read!r}")
+        r_write = _bash(
+            ctx,
+            f"echo WROTE > {quest_dir}/artifacts/new.md && "
+            f"cat {quest_dir}/artifacts/new.md")
+        assert "WROTE" in r_write["stdout"], (
+            f"own artifact write failed inside sandbox: {r_write!r}")
+        # The rw quest_home bind writes through: the artifact persists on the host.
+        assert (quest_dir / "artifacts" / "new.md").read_text() == "WROTE\n"
+    finally:
+        shutil.rmtree(control, ignore_errors=True)
+
+
+# ---------------------------------------------------------------------------
+# B10.12  Draft/degenerate agent (worktree == control_root) masks correctly (AC 9)
+# ---------------------------------------------------------------------------
+
+def test_draft_agent_masks_siblings_and_archive_reads_writes_own_spec() -> None:
+    """Draft/degenerate case (worktree == control_root): the control-root rw bind is
+    an ANCESTOR of .imp, so without the tmpfs AFTER it every sibling would leak. This
+    confirms the sibling + archive are invisible in-sandbox while the draft agent
+    still reads and writes its own artifacts/spec/<id>.md over the quest_home rebind."""
+    control = Path(tempfile.mkdtemp(prefix="imp-test-imp-mask-draft-"))
+    try:
+        _init_repo(control)
+
+        quest_dir = control / ".imp" / "quests" / "draft1"
+        spec_dir = quest_dir / "artifacts" / "spec"
+        spec_dir.mkdir(parents=True)
+        (spec_dir / "draft1.md").write_text("DRAFTSPEC body\n")
+        (quest_dir / "events.jsonl").write_text('{"e":1}\n')
+
+        sib = control / ".imp" / "quests" / "sib"
+        sib.mkdir(parents=True)
+        (sib / "events.jsonl").write_text("DSIBSECRET\n")
+
+        archive = control / ".imp" / "archive"
+        (archive / "blobs" / "ab").mkdir(parents=True)
+        (archive / "blobs" / "ab" / "cd").write_text("DARCHSECRET\n")
+
+        pol = resolve_policy(
+            worktree=control, control_root=control, quest_id="draft1",
+            cfg=SandboxConfig(home=control / "home", uid=os.getuid()),
+            engine_env_result={"IMP_PROJECT_ROOT": str(control)},
+            environ=os.environ, available=True, quest_dir=quest_dir,
+        )
+        ctx = _ctx(control, pol)
+
+        scan = _bash(
+            ctx,
+            f"grep -rn DSIBSECRET {control}/.imp 2>/dev/null; "
+            f"grep -rn DARCHSECRET {control}/.imp 2>/dev/null; echo SCAN_DONE")
+        assert "SCAN_DONE" in scan["stdout"]
+        assert "DSIBSECRET" not in scan["stdout"], (
+            f"draft: sibling events.jsonl leaked in-sandbox: {scan['stdout']!r}")
+        assert "DARCHSECRET" not in scan["stdout"], (
+            f"draft: archive blob leaked in-sandbox: {scan['stdout']!r}")
+
+        r_ls = _bash(ctx, f"ls {control}/.imp/quests 2>&1")
+        assert "draft1" in r_ls["stdout"], (
+            f"draft: own quest home not visible in-sandbox: {r_ls['stdout']!r}")
+        assert "sib" not in r_ls["stdout"], (
+            f"draft: sibling quest dir visible in-sandbox: {r_ls['stdout']!r}")
+
+        r_read = _bash(ctx, f"cat {spec_dir}/draft1.md")
+        assert "DRAFTSPEC" in r_read["stdout"], (
+            f"draft: own spec not readable in-sandbox: {r_read!r}")
+        r_write = _bash(
+            ctx,
+            f"echo DWROTE > {spec_dir}/new.md && cat {spec_dir}/new.md")
+        assert "DWROTE" in r_write["stdout"], (
+            f"draft: own spec write failed in-sandbox: {r_write!r}")
+        # The rw quest_home bind writes through: the artifact persists on the host.
+        assert (spec_dir / "new.md").read_text() == "DWROTE\n"
+    finally:
+        shutil.rmtree(control, ignore_errors=True)
+

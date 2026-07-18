@@ -587,6 +587,7 @@ def test_cmd_log_follow_in_sandbox_degrades_to_snapshot(
     import types
 
     import imp.cli.main as m
+    from imp.cli.store import HomeDigest
     slug = "sandboxed"
     _make_live_home(tmp_path, slug)  # live home exists → would normally _follow_live
     monkeypatch.chdir(tmp_path)
@@ -599,6 +600,7 @@ def test_cmd_log_follow_in_sandbox_degrades_to_snapshot(
         m, "make_store",
         lambda control: types.SimpleNamespace(
             get_events=lambda qid: snapshot,
+            scan_homes=lambda: [HomeDigest(slug, b"{}", None, {}, "", False, "", None)],
             completed_rows=lambda: []))
 
     def _boom(*a: object, **k: object) -> int:

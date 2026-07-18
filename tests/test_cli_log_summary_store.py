@@ -21,6 +21,12 @@ class _FakeStore:
     def completed_rows(self):
         return []
 
+    def scan_homes(self):
+        # _iter_quest_ids resolves live ids through the store; this file's only
+        # seeded live home is "alpha".
+        from imp.cli.store import HomeDigest
+        return [HomeDigest("alpha", b"{}", None, {}, "", False, "", None)]
+
 
 _EVENTS = [
     {"id": "e1", "type": "step_started", "agent_id": None,
