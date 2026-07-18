@@ -35,6 +35,32 @@ reuse `_with_trailing_blank`. Piped/redirected output and machine formats
 (`--json`, `log --html/--md/-`, `wrote <path>` confirmations) stay byte-clean —
 no added blank line. New human subcommands must follow this rule.
 
+## Error and diagnostic output
+
+imp routes error and diagnostic surfaces through two shared sinks — no surface
+styles its own line.
+
+- **Quest-scoped terminal failures → the exit block.** A failure that identifies
+  a quest (agent error, merge blocked, session-daemon startup failure) renders as
+  the gold three-part `_error_block` — red head + body + gold identity line — on
+  **stdout**, via `_emit_merge_blocked` / `_emit_startup_failed`. The exit code
+  carries the error signal for scripts.
+- **Non-quest CLI usage/lookup errors → one `imp:` line.** Bad arguments, no such
+  quest, unknown command, and similar usage errors emit a single
+  `imp: <message>` line on **stderr** via `_emit_cli_error`, which centralizes the
+  prefix so no `main.py` call site hand-rolls it.
+
+Carved out (unchanged): rc-conditional proxy-response relays that print a
+pre-formatted `imp: …` message routed by return code (`_emit_mutation_result`,
+`_cmd_edit`, the `_async_cmd_new` background path, `_abandon`); the SIGTERM
+success line; and daemon-subprocess-internal diagnostics (executor traceback,
+`daemon.py`, `warmup.py`, the archive progress indicator, `loader.py` warnings,
+`validate_memory_cli.py`, `daemon_connector.py`) — a raw Python traceback stays
+raw to keep its diagnostic value, reaching the user via the crash-banner
+mechanism. Not yet unified: the `imp remote-control start`/`stop` error lines in
+`runner.py` still print their own `imp:` prefix directly rather than through the
+sink.
+
 ---
 
 *Part of imp's self-knowledge corpus. Runtime entry point: load the `imp-knowledge` skill (`load_skill(name="imp-knowledge")`), the thin index that maps into this corpus.*
