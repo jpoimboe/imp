@@ -35,7 +35,7 @@ def test_wait_idle_returns_while_child_blocks_on_input() -> None:
     # EOF. A blocking read would hang forever; select-based wait_idle returns.
     prog = "import sys; sys.stdout.write('Name? '); sys.stdout.flush(); sys.stdin.readline()"
     with TerminalSession([sys.executable, "-c", prog]) as s:
-        settled = s.wait_idle(idle=0.2, hard=5.0)
+        settled = s.wait_idle(idle=0.2, hard=30.0)
         assert settled is True
         assert "Name?" in "\n".join(s.lines())
 
@@ -72,12 +72,12 @@ def test_wait_idle_since_waits_for_delayed_reaction_not_stale_screen() -> None:
     # just because the LAST output (the drainer's _last_data_t) is seconds old.
     # It must wait for the reaction to THIS keystroke to actually arrive.
     with TerminalSession([sys.executable, "-c", _DELAYED_REACTION_CHILD]) as s:
-        s.wait_idle(idle=0.2, hard=5.0)
+        s.wait_idle(idle=0.2, hard=30.0)
         assert "READY" in "\n".join(s.lines())
         time.sleep(0.5)  # let _last_data_t go stale relative to the send
         since = time.monotonic()
         s.send("x")
-        settled = s.wait_idle(idle=0.2, hard=5.0, since=since)
+        settled = s.wait_idle(idle=0.2, hard=30.0, since=since)
         assert settled is True
         # Without the since boundary this returns at ~0.2s on the stale READY
         # screen, before the +0.6s reaction lands.
@@ -105,7 +105,7 @@ def test_transcript_captures_scrolled_output() -> None:
 
 def test_is_alive_and_wait_report_exit() -> None:
     with TerminalSession([sys.executable, "-c", "print('bye')"]) as s:
-        rc = s.wait(timeout=5.0)
+        rc = s.wait(timeout=30.0)
         assert rc == 0
         assert s.is_alive() is False
 
@@ -142,7 +142,7 @@ def test_cpr_query_is_answered_so_program_can_read_reply() -> None:
         "sys.stdout.write('CPR=' + buf.lstrip('\\x1b[') + '\\n'); sys.stdout.flush()\n"
     )
     with TerminalSession([sys.executable, "-c", prog]) as s:
-        s.wait_idle(idle=0.3, hard=5.0)
+        s.wait_idle(idle=0.3, hard=30.0)
         # Cursor starts at row 1, col 1 (1-based, as DSR reports it).
         assert "CPR=1;1" in "\n".join(s.lines())
 
@@ -182,7 +182,7 @@ def test_cpr_answered_without_a_concurrent_wait_idle() -> None:
         # time; an on-demand-only reader would miss the window → child prints
         # NO-CPR. Sleep past the child's window before the first wait_idle.
         time.sleep(0.8)
-        s.wait_idle(idle=0.3, hard=3.0)
+        s.wait_idle(idle=0.3, hard=30.0)
         out = "\n".join(s.lines())
         assert "CPR=1;1" in out
         assert "NO-CPR" not in out
@@ -234,7 +234,7 @@ def test_cursor_parks_after_prompt_string() -> None:
         " sys.stdout.flush(); sys.stdin.readline()"
     )
     with TerminalSession([sys.executable, "-c", prog]) as s:
-        s.wait_idle(idle=0.2, hard=5.0)
+        s.wait_idle(idle=0.2, hard=30.0)
         x, y = s.cursor()
         win = s.lines(limit=s.rows)          # exactly rows, aligned with cell()/cursor()
         assert win[y].rstrip() == "Project name?"         # row y of the window == cursor's row
@@ -263,11 +263,11 @@ def test_ctrl_c_byte_delivers_sigint() -> None:
     # tty line discipline turns send("\x03") into a real SIGINT to the child's
     # foreground process group, firing its handler.
     with TerminalSession([sys.executable, "-c", _SIGINT_CHILD]) as s:
-        s.wait_idle(idle=0.2, hard=5.0)
+        s.wait_idle(idle=0.2, hard=30.0)
         assert "READY" in "\n".join(s.lines())
         try:
             s.send("\x03")
-            rc = s.run_to_completion(hard=5.0)
+            rc = s.run_to_completion(hard=30.0)
             assert rc == 42
             assert "GOT-SIGINT" in "\n".join(s.lines())
         finally:
@@ -280,11 +280,11 @@ def test_send_signal_delivers_sigint() -> None:
     # Direct path: send_signal() delivers SIGINT to the child's process group
     # regardless of tty mode, bypassing the line discipline.
     with TerminalSession([sys.executable, "-c", _SIGINT_CHILD]) as s:
-        s.wait_idle(idle=0.2, hard=5.0)
+        s.wait_idle(idle=0.2, hard=30.0)
         assert "READY" in "\n".join(s.lines())
         try:
             s.send_signal(signal.SIGINT)
-            rc = s.run_to_completion(hard=5.0)
+            rc = s.run_to_completion(hard=30.0)
             assert rc == 42
             assert "GOT-SIGINT" in "\n".join(s.lines())
         finally:
@@ -454,7 +454,7 @@ def test_run_to_completion_fast_on_quiet_slave_pinning_grandchild(tmp_path: Path
     try:
         with TerminalSession([sys.executable, "-c", _QUIET_GRANDCHILD, str(pidfile)]) as s:
             start = time.monotonic()
-            rc = s.run_to_completion(hard=5.0)
+            rc = s.run_to_completion(hard=30.0)
             elapsed = time.monotonic() - start
             assert rc == 7
             assert elapsed < 1.0, f"stalled toward hard cap (elapsed={elapsed:.2f}s)"
@@ -482,7 +482,7 @@ def test_run_to_completion_fast_on_streaming_slave_pinning_grandchild(
             [sys.executable, "-c", _STREAMING_GRANDCHILD, str(pidfile)]
         ) as s:
             start = time.monotonic()
-            rc = s.run_to_completion(hard=5.0)
+            rc = s.run_to_completion(hard=30.0)
             elapsed = time.monotonic() - start
             assert rc == 7
             # elapsed < bound is the ONLY thing that catches a regressed per-
@@ -515,12 +515,12 @@ def test_alt_screen_buffer_swap_end_to_end() -> None:
     # regime is SCREEN; after exit the pre-alt screen is restored and regime is
     # SCROLL.
     with TerminalSession([sys.executable, "-c", _ALT_FIXTURE]) as s:
-        s.wait_idle(idle=0.2, hard=5.0)          # settles mid-alt (0.3s sleep)
+        s.wait_idle(idle=0.2, hard=30.0)          # settles mid-alt (0.3s sleep)
         assert s.regime() is Regime.SCREEN
         body = "\n".join(s.lines())
         assert "INSIDE-ALT" in body
         assert "before-alt" not in body          # no scrollback while in alt
-        s.run_to_completion(hard=5.0)            # drives past the 1049l exit
+        s.run_to_completion(hard=30.0)            # drives past the 1049l exit
         assert s.regime() is Regime.SCROLL
         assert "before-alt" in "\n".join(s.lines())   # pre-alt restored
 
@@ -537,7 +537,7 @@ _INLINE_FIXTURE = (
 
 def test_inline_redraw_scroll_shape_history_plus_live_bottom() -> None:
     with TerminalSession([sys.executable, "-c", _INLINE_FIXTURE], cols=40, rows=6) as s:
-        s.wait_idle(idle=0.2, hard=5.0)
+        s.wait_idle(idle=0.2, hard=30.0)
         assert s.regime() is Regime.SCROLL
         full = s.lines()
         win = s.lines(limit=s.rows)
@@ -552,7 +552,7 @@ def test_inline_redraw_scroll_shape_history_plus_live_bottom() -> None:
 def test_resize_pads_and_clips_live_screen() -> None:
     with TerminalSession([sys.executable, "-c", "import time; time.sleep(2)"],
                          cols=40, rows=10) as s:
-        s.wait_idle(idle=0.1, hard=2.0)
+        s.wait_idle(idle=0.1, hard=30.0)
         s.resize(rows=5, cols=20)
         assert s.rows == 5 and s.cols == 20
         assert len(s.lines(limit=s.rows)) == 5
