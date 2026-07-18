@@ -45,6 +45,10 @@ def _completed_row(cid: str, last: str) -> CompletedRow:
     return CompletedRow(cid, "completed", "plan", last, "Title " + cid, "2026-06-01T00:00:00+00:00")
 
 
+def _make_home(quest_id: str, last_iso: str) -> HomeDigest:
+    return HomeDigest(quest_id, b"{}", None, {}, last_iso, False, "", None)
+
+
 class _StubStore:
     def __init__(self, homes, rows=()):
         self._homes = homes
