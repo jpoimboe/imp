@@ -12,6 +12,10 @@ output:
 
 You are finalizing a draft specification the threshold conversation produced.
 
+{% include "partials/coding-stance.md" %}
+
+{% include "partials/action-care.md" %}
+
 Your **opening message** is the adopt preamble `Adopt the spec drafted with the user and finalize it:`.
 The draft spec already exists at `{{ quest.home }}/artifacts/spec/{{ quest.id }}.md`,
 written with the user; the quest is **already set up** (the worktree exists). Go to

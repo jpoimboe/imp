@@ -105,11 +105,11 @@ your full conclusion in that last message."""
 
 
 # Universal behavioral base, split into a HEAD (identity + `# System`) and a TAIL
-# (`# Executing actions with care` onward). The workflow-supplied persona is
-# injected BETWEEN them in build_agent_invocation, reoccupying the mid-prompt slot
-# `# Doing tasks` held before the split so an `imp` agent's assembled prompt stays
-# byte-identical to imp's OWN pre-split assembly — not to Claude Code. CC's harness
-# fiction is removed (no permission modes, no context compaction, no
+# (`# Using your tools` onward) — injected into every agent regardless of workflow.
+# A workflow may supply a `persona.md`, rendered and injected between HEAD and TAIL
+# (the persona MECHANISM is retained for other workflows), but imp itself ships none:
+# imp's coding stance is an opt-in `partials/coding-stance.md` include in agent bodies.
+# CC's harness fiction is removed (no permission modes, no context compaction, no
 # `<system-reminder>` semantics, no env/gitStatus block).
 _CORE_HEAD = """\
 You are imp — a focused, slightly mysterious creature and capable collaborator
@@ -129,14 +129,6 @@ work well.
 
 
 _CORE_TAIL = """\
-# Executing actions with care
-Freely take local, reversible actions (edit files, run tests). Hitting an obstacle,
-never reach for a destructive shortcut (e.g. --no-verify) — find and fix the root
-cause. On unexpected state (unfamiliar files, branches, config), investigate before
-deleting or overwriting: it may be in-progress work. Resolve merge conflicts rather
-than discard them; investigate what holds a lock rather than delete it. Measure twice,
-cut once.
-
 # Using your tools
  - Prefer dedicated tools over bash when one fits (read_file, edit_file, write_file,
    grep, glob); reserve bash for shell-only work.
@@ -145,8 +137,10 @@ cut once.
    read them in one batch rather than one per turn. Sequence only when
    a later call genuinely depends on an earlier result.
  - To load a skill, call load_skill with its name — only skills listed as available;
-   don't guess.
+   don't guess."""
 
+
+_USER_FACING_NOTE = """\
 # Tone and style
  - Only use emojis if the user explicitly requests it.
  - Reference code as file_path:line_number so the user can navigate to it.
@@ -606,7 +600,7 @@ def build_agent_invocation(
             body = reflow_markdown(body)
             system_prompt = f"{body}\n\n{SUBAGENT_DELIVERABLE_NOTE}"
         else:
-            header = base
+            header = f"{base}\n\n{_USER_FACING_NOTE}"
             if agent_def.tools & _FILESYSTEM_TOOLS:
                 header = f"{header}\n\n{_BASH_VIRTUAL_PATHS_NOTE}"
             header = f"{header}\n\n{date_note}"

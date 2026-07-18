@@ -114,11 +114,13 @@ def test_coder_prompt_gates_tdd_on_fast_path(tmp_path: Path) -> None:
         body,
         build_context(quest_title="t", event_log=log,
                       vars={"fast_path": True}),
+        workflow_dir=bundled_workflow_dir("imp"),
     )
     slow = render_prompt(
         body,
         build_context(quest_title="t", event_log=log,
                       vars={"fast_path": False}),
+        workflow_dir=bundled_workflow_dir("imp"),
     )
     # fast-path: no new tests, TDD skill NOT loaded; the coder does NOT run
     # the suite or a lint gate itself — the phase-level verify gate owns that.

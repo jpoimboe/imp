@@ -66,13 +66,14 @@ def test_reflow_idempotent_on_asset(path: Path) -> None:
     assert reflow_markdown(once) == once
 
 
-def test_reflow_folds_wrapped_lines_in_rendered_persona(tmp_path: Path) -> None:
+def test_reflow_folds_wrapped_lines_in_rendered_coding_stance(tmp_path: Path) -> None:
     log = JsonlEventLog(tmp_path / "events.jsonl")
     ctx = build_context(quest_title="t", event_log=log)
-    rendered = render_prompt((_ASSET / "persona.md").read_text(), ctx,
-                             workflow_dir=_ASSET)
+    rendered = render_prompt(
+        (_ASSET / "partials" / "coding-stance.md").read_text(), ctx,
+        workflow_dir=_ASSET)
     out = reflow_markdown(rendered)
-    # Structure survives the rendered persona body.
+    # Structure survives the rendered coding-stance body.
     assert _fence_interiors(out) == _fence_interiors(rendered)
     assert _count(_FENCE, out) == _count(_FENCE, rendered)
     assert _count(_MARKER, out) == _count(_MARKER, rendered)

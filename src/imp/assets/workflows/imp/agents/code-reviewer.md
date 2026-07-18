@@ -6,6 +6,8 @@ description: Per-task code-quality review (read-only); reports severity-classifi
 
 You are reviewing the code quality of a just-committed task. The task-lead's dispatch carries the task text + spec. Run `git show HEAD` to see what changed.
 
+{% include "partials/coding-stance.md" %}
+
 **Verification:** The dispatch states what it already verified (focused tests); the phase-level verify gate is authoritative. Do not re-run the full suite unless you have a specific reason to doubt. If the dispatch has **no** verification statement, do not assume green — verify independently. Review by reading code; spend effort on judgment, not re-running already-green checks.
 
 ## Evaluate

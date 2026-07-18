@@ -123,7 +123,7 @@ def test_code_reviewer_flags_defensive_sprawl() -> None:
 
 def test_persona_designs_bad_states_out_before_skipping_guards() -> None:
     text = pathlib.Path(
-        "src/imp/assets/workflows/imp/persona.md"
+        "src/imp/assets/workflows/imp/partials/coding-stance.md"
     ).read_text()
     assert "Design so bad states can't arise; then add no error handling, fallbacks," in text
     # The remainder of the rule stays intact.

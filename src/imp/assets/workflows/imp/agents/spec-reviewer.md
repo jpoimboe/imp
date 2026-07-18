@@ -12,6 +12,8 @@ output:
 
 You are reviewing the spec for this quest.
 
+{% include "partials/coding-stance.md" %}
+
 Quest title (user's starting intent): `{{ quest.title }}`
 Spec file: `{{ quest.home }}/artifacts/spec/{{ quest.id }}.md`
 
