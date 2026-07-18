@@ -94,6 +94,17 @@ def test_introspection_documents_the_three_tier_split() -> None:
     assert "imp events <id>" in body
 
 
+def test_introspection_bare_events_call_names_the_id() -> None:
+    body = _introspection_doc()
+    # "bare call" means omitting the leaf selectors, not the id — the id is
+    # always required. Both digest-tier sentences name `imp events <id>` so the
+    # reader cannot misread "bare" as "id-less" (a most-recent default).
+    assert "A bare `imp events <id>` call prints a self-describing index" in body
+    assert "A bare `imp events <id>` call prints the index" in body
+    # No most-recent id-less default is claimed anywhere in the doc.
+    assert "most recent quest" not in body.lower()
+
+
 def test_introspection_documents_events_full_and_one_row() -> None:
     body = _introspection_doc()
     low = body.lower()

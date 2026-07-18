@@ -90,7 +90,7 @@ answers the question, and never dump the raw log as your default.
   (no `--type`, which fights the folded narrative) — and those filters carry
   through the `--md`/`--html` exports; `--follow` stays unfiltered. For example,
   `imp log <id> --step threshold` reads just the seed conversation.
-- **Digest** — `imp events <id>`. A bare call prints a self-describing index
+- **Digest** — `imp events <id>`. A bare `imp events <id>` call prints a self-describing index
   (steps + types); add a leaf selector (`--type`, `--subtype`, `--wire`, `--agent`, a `<range>`, or
   `--all`) to get one compact line per event. On a TTY each compact line is
   clipped to one terminal row so the stream stays scannable; add `--full` to
@@ -114,7 +114,7 @@ readable:
   opening intent, and the summary inlined). Add `spec` for the raw spec, or
   `--json` for the card as a structured object.
 - **`imp events <id>`** — the event history, when you need the trace rather than
-  the distilled record. A bare call prints the index; steer into the high-signal
+  the distilled record. A bare `imp events <id>` call prints the index; steer into the high-signal
   types with `--type agent_result` (and away from the `tool_call` / `tool_result`
   / `agent_message` churn), or scope to an author with `--agent`. Resolves live and
   archived quests alike.

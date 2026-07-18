@@ -224,28 +224,6 @@ def test_overview_unchanged_when_piped(
     assert not out.endswith("details.\n\n")
 
 
-def test_show_picker_empty_trailing_blank_on_tty(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-    import imp.cli.main as m
-
-    monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
-    rc = m._show_picker_empty()
-    assert rc == 2
-    assert capsys.readouterr().out == "No quests to show.\n\n"
-
-
-def test_show_picker_empty_unchanged_when_piped(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-    import imp.cli.main as m
-
-    monkeypatch.setattr(sys.stdout, "isatty", lambda: False)
-    rc = m._show_picker_empty()
-    assert rc == 2
-    assert capsys.readouterr().out == "No quests to show.\n"
-
-
 def test_abandon_picker_empty_trailing_blank_on_tty(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -304,48 +282,6 @@ def test_cmd_list_no_quests_precondition_trailing_blank_on_tty(
     monkeypatch.setattr(m, "_control_root", _raise)
     monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
     rc = m._cmd_list(argparse.Namespace())
-    assert rc == 0
-    assert capsys.readouterr().out == m._NO_QUESTS_MESSAGE + "\n\n"
-
-
-def test_log_picker_empty_trailing_blank_on_tty(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-    import imp.cli.main as m
-
-    monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
-    rc = m._log_picker_empty()
-    assert rc == 2
-    assert capsys.readouterr().out == m._NO_QUESTS_MESSAGE + "\n\n"
-
-
-def test_cmd_log_no_default_id_trailing_blank_on_tty(
-    tmp_path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-    import argparse
-
-    import imp.cli.main as m
-
-    monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
-    monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
-    monkeypatch.setattr(sys.stdin, "isatty", lambda: False)
-    rc = m._cmd_log(argparse.Namespace(show=None, hide=None, full=False,
-                                       follow=False, token=None))
-    assert rc == 0
-    assert capsys.readouterr().out == m._NO_QUESTS_MESSAGE + "\n\n"
-
-
-def test_cmd_events_no_default_id_trailing_blank_on_tty(
-    tmp_path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-    import argparse
-
-    import imp.cli.main as m
-
-    monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
-    monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
-    monkeypatch.setattr(sys.stdin, "isatty", lambda: False)
-    rc = m._cmd_events(argparse.Namespace(token=None))
     assert rc == 0
     assert capsys.readouterr().out == m._NO_QUESTS_MESSAGE + "\n\n"
 

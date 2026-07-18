@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from imp.cli.main import _build_parser
+from imp.cli.main import _build_parser, main
 
 
 def _help_for(argv: list[str], capsys: pytest.CaptureFixture[str]) -> str:
@@ -57,3 +57,49 @@ def test_help_lists_model_command() -> None:
 def test_opening_hint_omits_model() -> None:
     from imp.cli.prompt import DEFAULT_HINT
     assert "/model" not in DEFAULT_HINT
+
+
+def test_events_help_documents_the_search_sibling(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
+    # AC 5: `imp events --help` shows a line documenting `imp events search`,
+    # mentioning --type / --agent. Widen the terminal so argparse does not wrap
+    # the phrase mid-string.
+    monkeypatch.setenv("COLUMNS", "200")
+    out = _help_for(["events", "-h"], capsys)
+    assert "imp events search <query>" in out
+    assert "--type / --agent" in out
+
+
+def test_events_help_no_longer_promises_a_most_recent_default(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
+    # AC 8: the events help must not promise that omitting the id targets the
+    # most-recent quest.
+    monkeypatch.setenv("COLUMNS", "200")
+    out = _help_for(["events", "-h"], capsys)
+    assert "most recent" not in out
+
+
+def test_log_help_no_longer_promises_a_most_recent_default(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
+    # AC 8: the log token help must not promise a most-recent default, but the
+    # positional is still documented.
+    monkeypatch.setenv("COLUMNS", "200")
+    out = _help_for(["log", "-h"], capsys)
+    assert "most recent" not in out
+    assert "Quest id or its short token" in out
+
+
+def test_bare_events_lists_the_search_sibling_on_stderr(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
+    # AC 5: bare `imp events` (no id) prints its own help — which now carries the
+    # search-sibling line — to stderr and exits 2. The no-id guard precedes
+    # _control_root(), so no repo/monkeypatch is needed.
+    monkeypatch.setenv("COLUMNS", "200")
+    rc = main(["events"])
+    captured = capsys.readouterr()
+    assert rc == 2
+    assert "imp events search <query>" in captured.err

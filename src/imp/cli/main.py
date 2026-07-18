@@ -1912,29 +1912,14 @@ def _cmd_list(args: argparse.Namespace) -> int:
 
 def _cmd_show(args: argparse.Namespace) -> int:
     token = args.token
-    if token is None and not _interactive():
-        print("imp: 'imp show' needs a quest id — run 'imp list' for an overview",
-              file=sys.stderr)
+    if token is None:
+        args.parser.print_help(sys.stderr)
         return 2
     control = _control_root()
-    if token is None:
-        picked = anyio.run(_pick_show_target, control)
-        if isinstance(picked, int):
-            return picked
-        quest_id = picked
-    else:
-        # Same comprehension as _resolve_id — picker and resolver agree on candidates.
-        matches = [cid for cid in _iter_quest_ids(control) if token in cid]
-        if _interactive() and token.strip() and len(matches) >= 2:
-            picked = anyio.run(_pick_show_matches, control, matches)
-            if isinstance(picked, int):
-                return picked
-            quest_id = picked
-        else:
-            try:
-                quest_id = _resolve_id(control, token)
-            except SystemExit:
-                return 2
+    try:
+        quest_id = _resolve_id(control, token)
+    except SystemExit:
+        return 2
     resource = args.resource
     meta = _unstarted_backlog_meta(control, quest_id)
     if meta is not None:
@@ -2002,55 +1987,7 @@ def _resolve_row_intent(control: Path, r: _Row) -> str | None:
     return _resolve_intent(_load_events_for_id(control, r[0]) or [])
 
 
-def _resolve_default_id(control: Path) -> str | None:
-    """No-arg default: most-recent quest home by its last event ts, else
-    the most-recent archived id (by the index's last_event_ts), else None."""
-    store = make_store(control)
-    homes = store.scan_homes()
-    if homes:
-        return max(homes, key=lambda h: (h.last_iso, h.quest_id)).quest_id
-    dated = [r for r in store.completed_rows() if r.last]
-    if not dated:
-        return None
-    return max(dated, key=lambda r: (r.last, r.quest_id)).quest_id
-
-
 _NO_QUESTS_MESSAGE = "No quests yet — start one with imp new"
-
-
-def _log_picker_empty() -> int:
-    _emit_human([_NO_QUESTS_MESSAGE])
-    return 2
-
-
-_LOG_PICKER_HEADER = (
-    "Show log for which quest?  (↑/↓ to move · enter to select · q to cancel)"
-)
-
-
-async def _pick_full_pool_target(control: Path, *, header: str) -> str | int:
-    """No-token picker over the full pool, shared by the log and events pickers."""
-    rows = _all_quest_rows(control)
-    default_id = _resolve_default_id(control)
-
-    def _non_tty(_rows: list[_Row]) -> str | int:
-        return default_id if default_id is not None else 2
-
-    selected_index = next(
-        (i for i, r in enumerate(rows) if r[0] == default_id), 0)
-
-    return await _pick_quest_target(
-        control=control,
-        rows=rows,
-        header=header,
-        on_empty=_log_picker_empty,
-        on_non_tty=_non_tty,
-        selected_index=selected_index,
-    )
-
-
-async def _pick_log_target(control: Path) -> str | int:
-    return await _pick_full_pool_target(control, header=_LOG_PICKER_HEADER)
 
 
 def _with_trailing_blank(lines: list[str]) -> list[str]:
@@ -2363,22 +2300,14 @@ def _cmd_log(args: argparse.Namespace) -> int:
                   f"argument {conflict}", file=sys.stderr)
             return 2
         args.no_pager = True
-    quest_id: str | None
-    if args.token is not None:
-        try:
-            quest_id = _resolve_id(control, args.token)
-        except SystemExit:
-            return 2
-    elif _interactive():
-        target = anyio.run(_pick_log_target, control)
-        if isinstance(target, int):
-            return target
-        quest_id = target
-    else:
-        quest_id = _resolve_default_id(control)
-    if quest_id is None:
-        _emit_human([_NO_QUESTS_MESSAGE])
-        return 0
+    if args.token is None:
+        args.parser.print_help(sys.stderr)
+        return 2
+    quest_id: str
+    try:
+        quest_id = _resolve_id(control, args.token)
+    except SystemExit:
+        return 2
     meta = _unstarted_backlog_meta(control, quest_id)
     if meta is not None:
         lines: Iterable[str] = _backlog_card(
@@ -2989,92 +2918,6 @@ async def _pick_abandon_matches(
         on_empty=_abandon_picker_empty,
         on_non_tty=_non_tty,
     )
-
-
-_SHOW_PICKER_HEADER = (
-    "Show which quest?  (↑/↓ to move · enter to select · q to cancel)"
-)
-
-
-def _show_picker_empty() -> int:
-    _emit_human(["No quests to show."])
-    return 2
-
-
-def _show_picker_non_tty(rows: list[_Row]) -> int:
-    # Defensive parity only: _cmd_show handles the non-tty no-token case
-    # directly (needs-a-quest-id error), so _pick_show_target is invoked
-    # solely on an interactive tty and this branch is never reached.
-    print("imp: 'imp show' needs a quest id — run 'imp list' for an overview",
-          file=sys.stderr)
-    return 2
-
-
-def _all_quest_rows(control: Path) -> list[_Row]:
-    """Display rows for the full-pool pickers: every _iter_quest_ids id
-    (live homes + backlog + archived), via _row_for_id, unreadable ids
-    dropped, newest-first — the same pool `imp show <exact-id>` reaches."""
-    rows = [r for r in (_row_for_id(control, cid)
-                        for cid in _iter_quest_ids(control)) if r is not None]
-    return _sort_rows_newest_first(rows)
-
-
-async def _pick_show_target(control: Path) -> str | int:
-    return await _pick_quest_target(
-        control=control,
-        rows=_all_quest_rows(control),
-        header=_SHOW_PICKER_HEADER,
-        on_empty=_show_picker_empty,
-        on_non_tty=_show_picker_non_tty,
-    )
-
-
-def _ambiguous_matches_non_tty(rows: list[_Row]) -> int:
-    print("imp: ambiguous token; candidates:", file=sys.stderr)
-    color = should_use_color(sys.stderr)
-    now = datetime.now(UTC)
-    print(quest_row.header_line(color=color), file=sys.stderr)
-    name_w = quest_row.name_budget()
-    for r in rows:
-        print(quest_row.format_quest_line(
-            quest_id=r[0], title=r[4], status=r[1], step=r[2],
-            step_label=r[6], phase_label=r[7], last_iso=r[3], now=now, color=color,
-            name_width=name_w), file=sys.stderr)
-    return 2
-
-
-async def _pick_id_matches(
-    control: Path, matches: list[str], *,
-    header: str, on_empty: Callable[[], int],
-) -> str | int:
-    """Scoped picker over a token's raw _iter_quest_ids matches (>=2)."""
-    rows = _sort_rows_newest_first(
-        [r for r in (_row_for_id(control, cid) for cid in matches)
-         if r is not None])
-    return await _pick_quest_target(
-        control=control, rows=rows, header=header, on_empty=on_empty,
-        on_non_tty=_ambiguous_matches_non_tty)
-
-
-async def _pick_show_matches(control: Path, matches: list[str]) -> str | int:
-    return await _pick_id_matches(
-        control, matches, header=_SHOW_PICKER_HEADER, on_empty=_show_picker_empty)
-
-
-_EVENTS_PICKER_HEADER = (
-    "Show events for which quest?  (↑/↓ to move · enter to select · q to cancel)"
-)
-
-
-async def _pick_events_target(control: Path) -> str | int:
-    """No-token events picker over the shared full pool. `_cmd_events` routes the
-    non-tty no-token case to `_resolve_default_id` directly, so this runs only on a tty."""
-    return await _pick_full_pool_target(control, header=_EVENTS_PICKER_HEADER)
-
-
-async def _pick_events_matches(control: Path, matches: list[str]) -> str | int:
-    return await _pick_id_matches(
-        control, matches, header=_EVENTS_PICKER_HEADER, on_empty=_log_picker_empty)
 
 
 def _cmd_abandon(args: argparse.Namespace) -> int:
@@ -3868,32 +3711,14 @@ class SplitAppend(argparse.Action):
 def _cmd_events(args: argparse.Namespace) -> int:
     from imp.engine import events_index as ei
 
+    if args.token is None:
+        args.parser.print_help(sys.stderr)
+        return 2
     control = _control_root()
-    quest_id: str | None
-    token = args.token
-    if token is not None:
-        # Same comprehension as _resolve_id — picker and resolver agree on candidates.
-        matches = [cid for cid in _iter_quest_ids(control) if token in cid]
-        if _interactive() and token.strip() and len(matches) >= 2:
-            picked = anyio.run(_pick_events_matches, control, matches)
-            if isinstance(picked, int):
-                return picked
-            quest_id = picked
-        else:
-            try:
-                quest_id = _resolve_id(control, token)
-            except SystemExit:
-                return 2
-    elif _interactive():
-        picked = anyio.run(_pick_events_target, control)
-        if isinstance(picked, int):
-            return picked
-        quest_id = picked
-    else:
-        quest_id = _resolve_default_id(control)
-    if quest_id is None:
-        _emit_human([_NO_QUESTS_MESSAGE])
-        return 0
+    try:
+        quest_id = _resolve_id(control, args.token)
+    except SystemExit:
+        return 2
     meta = _unstarted_backlog_meta(control, quest_id)
     if meta is not None:
         _emit_human([f"Quest {quest_id} hasn't started yet — no events to show."])
@@ -4147,7 +3972,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     p_log.add_argument(
         "token", nargs="?",
-        help="Quest id or its short token (omit for the most recent quest).")
+        help="Quest id or its short token.")
     p_log.add_argument(
         "range_pos", nargs="?", default=None, metavar="RANGE",
         help="Ordinal selector, e.g. 42, 59-120, 59-, -80 (like imp events).")
@@ -4204,7 +4029,7 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Export the narrative as a Markdown file "
              "(FILE, or imp-log-<id>.md when omitted; '-' streams to stdout).",
     )
-    p_log.set_defaults(func=_cmd_log)
+    p_log.set_defaults(func=_cmd_log, parser=p_log)
 
     p_events = sub.add_parser(
         "events",
@@ -4214,12 +4039,14 @@ def _build_parser() -> argparse.ArgumentParser:
             "--step <name>: a scoped index for that step's window. "
             "--type / --agent / <range> / --all: compact event lines "
             "(#N ordinal, type, [agent], summary). --json for structured "
-            "output. Omit <id> for the most recent quest."
+            "output. Run imp events search <query> for a case-insensitive "
+            "substring search across event content (tool calls, results, "
+            "reasoning); narrow with --type / --agent."
         ),
     )
     p_events.add_argument(
         "token", nargs="?", default=None,
-        help="Quest id or short token (omit for the most recent quest).")
+        help="Quest id or short token.")
     p_events.add_argument(
         "range_pos", nargs="?", default=None, metavar="RANGE",
         help="Ordinal selector, e.g. 42, 59-120,210-255, 59-, -80.")
@@ -4260,7 +4087,7 @@ def _build_parser() -> argparse.ArgumentParser:
     p_events.add_argument(
         "--no-pager", action="store_true",
         help="Disable the pager even when stdout is a TTY.")
-    p_events.set_defaults(func=_cmd_events)
+    p_events.set_defaults(func=_cmd_events, parser=p_events)
 
     p_list = sub.add_parser(
         "list",
@@ -4323,7 +4150,7 @@ def _build_parser() -> argparse.ArgumentParser:
     p_show.add_argument(
         "--json", action="store_true",
         help="Emit the overview detail card as a structured JSON object.")
-    p_show.set_defaults(func=_cmd_show)
+    p_show.set_defaults(func=_cmd_show, parser=p_show)
 
     p_search = sub.add_parser(
         "search",

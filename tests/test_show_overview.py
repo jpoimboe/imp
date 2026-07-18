@@ -86,13 +86,11 @@ def test_list_all_renders_history_block(tmp_path: Path, monkeypatch) -> None:
     assert "doneid" in out and "merged" in out
 
 
-def test_bare_show_nudges_to_list(capsys) -> None:
+def test_bare_show_prints_help_and_exits_2(capsys) -> None:
     rc = main(["show"])
     assert rc == 2
     err = capsys.readouterr().err
-    assert err == (
-        "imp: 'imp show' needs a quest id — run 'imp list' for an overview\n"
-    )
+    assert "usage: imp show" in err
 
 
 def test_show_rejects_all_flag() -> None:
