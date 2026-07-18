@@ -20,10 +20,22 @@ def test_resume_gone_abandoned(monkeypatch, tmp_path: Path, capsys) -> None:
 def test_resume_gone_completed(monkeypatch, tmp_path: Path, capsys) -> None:
     monkeypatch.setattr(m, "_journal_status", lambda c, i: "completed")
     monkeypatch.setattr(m, "_title_for_id", lambda c, i: "Add version flag")
+    monkeypatch.setattr(m.archive_read, "merge_commit_of", lambda c, i: None)
     rc = m._resume_gone(tmp_path, "2026-06-11-yaitd7")
     out, err = capsys.readouterr()
     assert rc == 0
     assert "Add version flag is already completed; nothing to resume." in out
+    assert err == ""
+
+
+def test_resume_gone_merged(monkeypatch, tmp_path: Path, capsys) -> None:
+    monkeypatch.setattr(m, "_journal_status", lambda c, i: "completed")
+    monkeypatch.setattr(m, "_title_for_id", lambda c, i: "Add version flag")
+    monkeypatch.setattr(m.archive_read, "merge_commit_of", lambda c, i: "abc123def")
+    rc = m._resume_gone(tmp_path, "2026-06-11-yaitd7")
+    out, err = capsys.readouterr()
+    assert rc == 0
+    assert "Add version flag is already merged; nothing to resume." in out
     assert err == ""
 
 

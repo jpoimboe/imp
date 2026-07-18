@@ -1787,7 +1787,10 @@ def _quest_card(control: Path, quest_id: str, *, now: datetime,
     lines = [
         _card_field("id:", card.quest_id, 15, color=color),
         _card_field("title:", card.title.strip() or "(unnamed)", 15, color=color),
-        _card_field("status:", card.status, 15, color=color),
+        _card_field(
+            "status:",
+            "merged" if card.status == "completed" and card.merge_commit else card.status,
+            15, color=color),
     ]
     if card.status in _INFLIGHT and card.step not in ("", "-"):
         step_text = card.step_label or card.step
@@ -2547,7 +2550,8 @@ def _resume_gone(control: Path, quest_id: str) -> int:
         print(f"{title} was abandoned; nothing to resume.")
         return 0
     if status is not None:
-        print(f"{title} is already completed; nothing to resume.")
+        word = "merged" if archive_read.merge_commit_of(control, quest_id) else "completed"
+        print(f"{title} is already {word}; nothing to resume.")
         return 0
     print(f"imp: no quest matches {quest_id!r}", file=sys.stderr)
     return 2

@@ -469,3 +469,71 @@ def test_detail_card_shows_shelved_for_archived_paused_quest(tmp_path: Path) -> 
     status_line_s = next(ln for ln in card_s.splitlines() if ln.startswith("status:"))
     assert "shelved" in status_line_s
     assert not any(ln.startswith("step:") for ln in card_s.splitlines())
+
+
+def test_quest_card_shows_merged_for_merged_quest(tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+    cdir = tmp_path / ".imp" / "quests" / "2026-06-20-mgd01"
+    (cdir / "state").mkdir(parents=True)
+    (cdir / "quest.json").write_text(json.dumps({
+        "id": "2026-06-20-mgd01", "title": "Widget", "base_branch": "main",
+        "created_at": "2026-06-20T11:00:00+00:00", "layout_version": LAYOUT_VERSION}))
+    (cdir / "events.jsonl").write_text("")
+    State(id="2026-06-20-mgd01", status="completed", step="done",
+          merge_commit="deadbeefcafe", step_attempt=0).save(cdir / "state")
+    card = "\n".join(main._detail_card(tmp_path, "2026-06-20-mgd01", now=_NOW, color=False))
+    status_line = next(ln for ln in card.splitlines() if ln.startswith("status:"))
+    assert "merged" in status_line          # merge_commit set -> display word is merged
+    assert "completed" not in status_line    # raw internal word not shown
+
+
+def test_quest_card_shows_completed_when_unmerged(tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+    cdir = tmp_path / ".imp" / "quests" / "2026-06-20-cmp01"
+    (cdir / "state").mkdir(parents=True)
+    (cdir / "quest.json").write_text(json.dumps({
+        "id": "2026-06-20-cmp01", "title": "Widget", "base_branch": "main",
+        "created_at": "2026-06-20T11:00:00+00:00", "layout_version": LAYOUT_VERSION}))
+    (cdir / "events.jsonl").write_text("")
+    State(id="2026-06-20-cmp01", status="completed", step="done",
+          step_attempt=0).save(cdir / "state")   # merge_commit defaults to None
+    card = "\n".join(main._detail_card(tmp_path, "2026-06-20-cmp01", now=_NOW, color=False))
+    status_line = next(ln for ln in card.splitlines() if ln.startswith("status:"))
+    assert "completed" in status_line        # no merge_commit -> stays completed
+    assert "merged" not in status_line
+
+
+def test_quest_json_status_stays_completed_for_merged(tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+    cdir = tmp_path / ".imp" / "quests" / "2026-06-20-mgj01"
+    (cdir / "state").mkdir(parents=True)
+    (cdir / "quest.json").write_text(json.dumps({
+        "id": "2026-06-20-mgj01", "title": "Widget", "base_branch": "main",
+        "created_at": "2026-06-20T11:00:00+00:00", "layout_version": LAYOUT_VERSION}))
+    (cdir / "events.jsonl").write_text("")
+    State(id="2026-06-20-mgj01", status="completed", step="done",
+          merge_commit="deadbeefcafe", step_attempt=0).save(cdir / "state")
+    data = main._quest_json(tmp_path, "2026-06-20-mgj01")
+    assert data is not None
+    assert data["status"] == "completed"     # machine value unchanged even when merged
+
+
+def test_quest_card_shows_merged_for_archived_quest(tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+    events = tmp_path / "arcm.jsonl"
+    events.write_text("")
+    quest_json = tmp_path / "arcm.quest.json"
+    quest_json.write_text(json.dumps({
+        "id": "2026-06-20-arm01", "title": "Archived merged", "base_branch": "main",
+        "created_at": "2026-06-20T11:00:00+00:00", "depends_on": []}))
+    state_json = tmp_path / "arcm.state.json"
+    state_json.write_text(json.dumps({
+        "id": "2026-06-20-arm01", "status": "completed", "step": None,
+        "merge_commit": "beefcafe1234"}))
+    archive.archive_quest(
+        tmp_path, "2026-06-20-arm01", events_path=events,
+        quest_json_path=quest_json, state_json_path=state_json)
+    card = "\n".join(main._detail_card(tmp_path, "2026-06-20-arm01", now=_NOW, color=False))
+    status_line = next(ln for ln in card.splitlines() if ln.startswith("status:"))
+    assert "merged" in status_line          # archived merged quest -> display word is merged
+    assert "completed" not in status_line    # raw internal word not shown
