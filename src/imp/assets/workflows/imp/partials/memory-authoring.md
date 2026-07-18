@@ -24,6 +24,16 @@ Never invent a step name. Read the real names from the running workflow snapshot
 directory name. When the scope is genuinely ambiguous — one step or the whole
 workflow — ask which the user wants rather than guessing.
 
+**Coupled to code you're scoping? Fold it in, don't background it.** If the edit
+must land in lockstep with a code change you're scoping in this same conversation —
+memory and code depend on each other, whichever motivates which — a separate
+background quest would merge on its own schedule and race the code. Instead record
+the edit in this quest's spec as a **Memory changes** item under Scope, naming the
+exact `imp/memory/` file(s) and the verbatim edit (add / change / remove). The
+implementer makes it alongside the code and a validation gate checks the tree before
+merge, so the two land atomically. An edit that stands independent of any code being
+built takes the background route below.
+
 **Resolve the scope with the user, then launch a background quest.** Once the user
 is happy with the target scope, run
 `imp new --workflow memory --background --title "<short title>" "<a clear plain-language intent, including the resolved target scope and whether to add, change, or remove>"`. You pass **intent, not file bytes**: the background `memory`
@@ -32,6 +42,6 @@ tree, and lands it through the merge queue. It appears in the **active** list, s
 tell the user it is running and will merge on its own.
 
 **Guardrails.** Never record memory without the user's agreement, never with a raw
-`git` command, and only ever under `imp/memory/`, never `.imp/`. Recording a
-preference isn't building — the write happens in the background, and a preference
-recorded now takes effect on future runs, not the one you're in.
+`git` command, and only ever under `imp/memory/`, never `.imp/`. A standalone
+preference is written in the background and takes effect on future runs, not the one
+you're in; a coupled edit rides this quest's spec and lands with its code.

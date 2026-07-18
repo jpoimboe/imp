@@ -235,10 +235,14 @@ def test_memory_teaches_the_in_depth_model() -> None:
 def test_memory_teaches_the_authoring_affordance() -> None:
     body = _memory_doc()
     assert "## Building up memory with imp" in body
-    # The affordance names the interactive gates and the background memory
-    # quest, and states imp never auto-writes memory.
+    # The affordance names the interactive gates and both routes (standalone
+    # background quest / coupled edit gated by validate-memory), and rewords the
+    # invariant as consent + path.
     assert "background `memory` quest" in body
-    assert "never auto-writes memory" in body
+    assert "only with the user's explicit agreement and only ever under `imp/memory/`" in body
+    assert "A preference **coupled**" in body
+    assert "`validate-memory` gate" in body
+    assert "atomically" in body
     assert "threshold" in body
     assert "finalize" in body
 
@@ -257,6 +261,7 @@ def test_knowledge_memory_line_uses_background_and_carries_imp_edit_bullet() -> 
     body = load_internal_skill(_skills_dir(), "imp-knowledge")
     # the memory-recording line now launches the memory quest in the background
     assert 'imp new --workflow memory --background "<what to change>"' in body
+    assert "coupled to a code quest rides that quest's spec as a Memory changes item" in body
     assert 'imp new --workflow memory "<what to change>"' not in body
     # the new imp edit cheat-sheet bullet, verbatim in its load-bearing parts
     assert "- `imp edit <id>` — link or annotate a quest that hasn't run yet:" in body
