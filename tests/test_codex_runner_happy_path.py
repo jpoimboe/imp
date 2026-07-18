@@ -15,6 +15,7 @@ from imp.engine.types import (
     SourceLoc,
 )
 from imp.providers.codex_runner import CodexAgentRunner
+from tests.async_wait import wait_until
 from tests.codex_fakes import (
     FakeCodex,
     agent_message,
@@ -354,9 +355,7 @@ async def test_codex_gen_close_runs_teardown(tmp_path: Path) -> None:
             tg.start_soon(_drive)
             # _ctx is set in _run_loop after preflight and ToolContext
             # construction, before the MCP server ping; poll until it appears.
-            with _anyio.fail_after(10):
-                while runner._ctx is None:
-                    await _anyio.sleep(0)
+            await wait_until(lambda: runner._ctx is not None)
             ctx_seen = runner._ctx
             out = await _spawn_bg(runner._ctx)
             bg_pid = out["pid"]

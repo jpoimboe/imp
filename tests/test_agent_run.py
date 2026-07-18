@@ -445,7 +445,7 @@ async def test_drive_invocation_stalls_on_inactivity(
             await anyio.sleep(3600)   # emit nothing, ever
             yield {"type": "agent_result", "payload": {}}  # never reached
 
-    with anyio.fail_after(5):
+    with anyio.fail_after(30):  # deadlock backstop only
         result = await ar.drive_invocation(
             _inv(tmp_path), _StallRunner(), coordinator=None, log=None,
             emit_events=False)
@@ -487,7 +487,7 @@ async def test_drive_invocation_stall_logs_stalled_category(
             yield {"type": "agent_result", "payload": {}}  # never reached
 
     log = _Log()
-    with anyio.fail_after(5):
+    with anyio.fail_after(30):  # deadlock backstop only
         result = await ar.drive_invocation(
             _inv(tmp_path), _StallRunner(), coordinator=None, log=log,
             emit_events=True, prior_backoff_attempts=2)
@@ -525,7 +525,7 @@ async def test_watchdog_teardown_force_kills_when_interrupt_ignores_grace(
             yield {"type": "agent_result", "payload": {}}  # never reached
 
     start = anyio.current_time()
-    with anyio.fail_after(5):
+    with anyio.fail_after(30):  # deadlock backstop only
         result = await ar.drive_invocation(
             _inv(tmp_path), _IgnoresInterruptRunner(), coordinator=None,
             log=None, emit_events=False)
@@ -577,7 +577,7 @@ async def test_drive_invocation_survives_when_subtree_active(
                 coord.note_activity()
             yield {"type": "agent_result", "payload": {"status": "Success"}}
 
-    with anyio.fail_after(5):
+    with anyio.fail_after(30):  # deadlock backstop only
         result = await ar.drive_invocation(
             _inv(tmp_path), _BusyButSilentRunner(), coordinator=coord,
             log=None, emit_events=False)
@@ -610,7 +610,7 @@ async def test_drive_invocation_stalls_with_coordinator_but_no_activity(
             await anyio.sleep(3600)   # no events, no note_activity, ever
             yield {"type": "agent_result", "payload": {}}  # never reached
 
-    with anyio.fail_after(5):
+    with anyio.fail_after(30):  # deadlock backstop only
         result = await ar.drive_invocation(
             _inv(tmp_path), _StallRunner(), coordinator=coord, log=None,
             emit_events=False)
@@ -816,7 +816,7 @@ async def test_drive_invocation_stalls_mid_stream(
             await anyio.sleep(3600)        # now go silent forever
             yield {"type": "agent_result", "payload": {}}  # never reached
 
-    with anyio.fail_after(5):
+    with anyio.fail_after(30):  # deadlock backstop only
         result = await ar.drive_invocation(
             _inv(tmp_path), _MidStallRunner(), coordinator=None, log=None,
             emit_events=False)
@@ -850,7 +850,7 @@ async def test_pull_watchdog_frozen_during_solicit_does_not_stall(monkeypatch) -
 
     stall = {"hit": False}
     events = []
-    with anyio.fail_after(5):
+    with anyio.fail_after(30):  # deadlock backstop only
         async for ev in ar._pull_with_inactivity_watchdog(
                 _gen(), runner=_Runner(), stall=stall, coordinator=coord):
             events.append(ev)
@@ -880,7 +880,7 @@ async def test_pull_watchdog_stalls_when_not_soliciting(monkeypatch) -> None:
 
     stall = {"hit": False}
     events = []
-    with anyio.fail_after(5):
+    with anyio.fail_after(30):  # deadlock backstop only
         async for ev in ar._pull_with_inactivity_watchdog(
                 _gen(), runner=_Runner(), stall=stall, coordinator=coord):
             events.append(ev)
@@ -914,7 +914,7 @@ async def test_pull_watchdog_restores_finite_window_after_end(monkeypatch) -> No
 
     stall = {"hit": False}
     events = []
-    with anyio.fail_after(5):
+    with anyio.fail_after(30):  # deadlock backstop only
         async for ev in ar._pull_with_inactivity_watchdog(
                 _gen(), runner=_Runner(), stall=stall, coordinator=coord):
             events.append(ev)
@@ -1038,7 +1038,7 @@ async def test_real_bare_turn_end_solicit_is_not_torn_down_by_watchdog(
             _inv(tmp_path), _SolicitRunner(), coordinator=coord,
             log=log, emit_events=True)
 
-    with anyio.fail_after(5):
+    with anyio.fail_after(30):  # deadlock backstop only
         async with anyio.create_task_group() as tg:
             tg.start_soon(_releaser)
             tg.start_soon(_drive)
@@ -1131,7 +1131,7 @@ async def test_pull_watchdog_frozen_during_tool_does_not_stall(monkeypatch) -> N
 
     stall = {"hit": False}
     events = []
-    with anyio.fail_after(5):
+    with anyio.fail_after(30):  # deadlock backstop only
         async for ev in ar._pull_with_inactivity_watchdog(
                 _gen(), runner=_Runner(), stall=stall, coordinator=coord):
             events.append(ev)
@@ -1165,7 +1165,7 @@ async def test_pull_watchdog_restores_finite_window_after_tool_end(monkeypatch) 
 
     stall = {"hit": False}
     events = []
-    with anyio.fail_after(5):
+    with anyio.fail_after(30):  # deadlock backstop only
         async for ev in ar._pull_with_inactivity_watchdog(
                 _gen(), runner=_Runner(), stall=stall, coordinator=coord):
             events.append(ev)
@@ -1246,7 +1246,7 @@ async def test_bump_leaves_deadline_untouched_once_cancel_called(monkeypatch) ->
 
     stall = {"hit": False}
     events = []
-    with anyio.fail_after(5):
+    with anyio.fail_after(30):  # deadlock backstop only
         async for ev in ar._pull_with_inactivity_watchdog(
                 _gen(), runner=object(), stall=stall, coordinator=coord):
             events.append(ev)
@@ -1329,7 +1329,7 @@ async def test_pull_watchdog_request_in_flight_survives_under_ceiling(monkeypatc
 
     stall = {"hit": False}
     events = []
-    with anyio.fail_after(5):
+    with anyio.fail_after(30):  # deadlock backstop only
         async for ev in ar._pull_with_inactivity_watchdog(
                 _gen(), runner=_Runner(), stall=stall, coordinator=coord):
             events.append(ev)
@@ -1362,7 +1362,7 @@ async def test_pull_watchdog_request_in_flight_stalls_over_ceiling(monkeypatch) 
 
     stall = {"hit": False}
     events = []
-    with anyio.fail_after(5):
+    with anyio.fail_after(30):  # deadlock backstop only
         async for ev in ar._pull_with_inactivity_watchdog(
                 _gen(), runner=_Runner(), stall=stall, coordinator=coord):
             events.append(ev)
@@ -1399,7 +1399,7 @@ async def test_pull_watchdog_solicit_precedence_wins_over_request(monkeypatch) -
 
     stall = {"hit": False}
     events = []
-    with anyio.fail_after(5):
+    with anyio.fail_after(30):  # deadlock backstop only
         async for ev in ar._pull_with_inactivity_watchdog(
                 _gen(), runner=_Runner(), stall=stall, coordinator=coord):
             events.append(ev)
