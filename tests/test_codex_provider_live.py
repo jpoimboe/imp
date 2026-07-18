@@ -28,6 +28,7 @@ from imp.engine.awaiting_user_input import AwaitingUserInput
 from imp.engine.completion import build_continuation_fn
 from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
 from imp.providers.codex_runner import CodexAgentRunner
+from tests._live import stale_codex_oauth_skip_reason
 
 pytestmark = pytest.mark.live("codex")
 
@@ -132,8 +133,14 @@ async def test_codex_live_round_trip_under_production_flags(tmp_path: Path) -> N
             # record the partial events and retry rather than aborting the test.
             parked_attempts += 1
             last_events = events
+            reason = stale_codex_oauth_skip_reason(events)
+            if reason is not None:
+                pytest.skip(reason)
             continue
         last_events = events
+        reason = stale_codex_oauth_skip_reason(events)
+        if reason is not None:
+            pytest.skip(reason)
         ev_path = adir / "events.jsonl"
         ev_lines = ev_path.read_text().splitlines() if ev_path.exists() else []
         tool_calls = [
@@ -224,6 +231,9 @@ async def test_codex_live_cap_abort_terminates_within_budget(tmp_path: Path) -> 
         # the non-hang invariant exactly as a terminal error event does. A park
         # emits no `error` event, so accept it and skip the error-kind check.
         return
+    reason = stale_codex_oauth_skip_reason(events)
+    if reason is not None:
+        pytest.skip(reason)
     # Terminated — and within the bounded budget (test runner has its own
     # session timeout; reaching here at all means we terminated). The core claim
     # is non-hang under cap pressure; the cap trip (tool_call_ceiling_exceeded)
