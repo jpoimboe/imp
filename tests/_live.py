@@ -186,6 +186,30 @@ def sandbox_sleep_precondition_failed(events_path: Path) -> str | None:
     return None
 
 
+STALE_CODEX_OAUTH_SKIP_REASON = (
+    "codex OAuth credential is stale (refresh token already used); run "
+    "`codex login` to refresh it. External auth-infra failure, not a "
+    "codex-provider regression."
+)
+
+
+def stale_codex_oauth_skip_reason(events) -> str | None:
+    """Return the skip reason when the run's error events carry the codex
+    stale-OAuth (refresh-token-reuse) signature, else None. Keys on the
+    auth-category error that categorize_turn_failed now emits for a consumed
+    refresh token — an external auth-infra condition, skip not fail."""
+    for ev in events:
+        if not isinstance(ev, dict) or ev.get("type") != "error":
+            continue
+        payload = ev.get("payload") or {}
+        message = str(payload.get("message", "")).lower()
+        if payload.get("category") == "auth" and (
+            "already used" in message or "log out and sign in" in message
+        ):
+            return STALE_CODEX_OAUTH_SKIP_REASON
+    return None
+
+
 def build_isolated_venv(
     project_root: Path,
     *,

@@ -1401,6 +1401,7 @@ def categorize_turn_failed(error: dict[str, Any] | Any) -> perr.ProviderError:
 
     Known cases:
       - HTTP 401 / "Unauthorized" → ``AuthError``
+      - OAuth refresh-token reuse ("already used" / "log out and sign in") → ``AuthError``
       - HTTP 400 "model … not supported … ChatGPT account" → ``ConfigError``
       - subprocess network/timeout → ``NetworkError``
       - any other → ``ApiError`` (terminal; maps to Pause).
@@ -1412,6 +1413,8 @@ def categorize_turn_failed(error: dict[str, Any] | Any) -> perr.ProviderError:
     kind = str(error.get("kind", "") or "")
 
     if status == 401 or "unauthorized" in message.lower():
+        return perr.AuthError(f"codex: {message[:200]}")
+    if "already used" in message.lower() or "log out and sign in" in message.lower():
         return perr.AuthError(f"codex: {message[:200]}")
     if status == 400 and "chatgpt account" in message.lower():
         return perr.ConfigError(f"codex: {message[:300]}")

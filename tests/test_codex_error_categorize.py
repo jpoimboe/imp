@@ -27,3 +27,20 @@ def test_subprocess_network_timeout_maps_to_network() -> None:
 def test_unknown_error_falls_back_to_api() -> None:
     err = categorize_turn_failed({"status": 418, "message": "I'm a teapot"})
     assert isinstance(err, perr.ApiError)
+
+
+def test_refresh_token_reuse_maps_to_auth() -> None:
+    err = categorize_turn_failed({
+        "message": "refresh token was already used. "
+                   "Please log out and sign in again.",
+    })
+    assert isinstance(err, perr.AuthError)
+    assert err.args[0] == (
+        "codex: refresh token was already used. "
+        "Please log out and sign in again."
+    )
+
+
+def test_refresh_reuse_partial_signature_maps_to_auth() -> None:
+    err = categorize_turn_failed({"message": "refresh token was already used."})
+    assert isinstance(err, perr.AuthError)
