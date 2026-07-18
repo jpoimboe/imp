@@ -810,8 +810,8 @@ async def _read_intent_line(
                 model_sink["model"] = line.strip()[len("/model "):].strip()
             continue
         if line == "/abandon":
-            # No daemon pre-session; _abandon's rc threads out through SystemExit.
-            raise SystemExit(_abandon(quest.control_root, quest.id))
+            # No daemon pre-session; _abandon_local's rc threads out through SystemExit.
+            raise SystemExit(_abandon_local(quest.control_root, quest.id))
         return line
 
 
@@ -2891,8 +2891,10 @@ def _deliver_abandon_resident(control: Path, quest_id: str) -> None:
     anyio.run(_run)
 
 
-def _abandon(control: Path, quest_id: str) -> int:
-    """Tear down a quest (worktree, branch, state) as one logged operation.
+def _abandon(control: Path, quest_id: str) -> tuple[int, str]:
+    """Tear down a quest (worktree, branch, state) as one logged operation and
+    return (rc, message) without printing, so the host CLI and the daemon proxy
+    share it (mirrors apply_edit).
 
     Order is pinned by git (spec §2): archive the runtime snapshot BEFORE
     worktree removal (records live inside the worktree); `git branch -D` AFTER
@@ -2901,12 +2903,10 @@ def _abandon(control: Path, quest_id: str) -> int:
     try:
         quest = Quest.load(control, quest_id)
     except (LoadError, LoadErrors):
-        # No live or un-materialized quest-home: Quest.load failed because the
-        # home directory is absent (already fully torn down, or never existed).
-        # Idempotent teardown — reap a possibly-orphaned branch and exit 0.
+        # No live or un-materialized quest-home: idempotent teardown — reap a
+        # possibly-orphaned branch and exit 0.
         worktree.delete_branch(control, quest_id)
-        _emit_human([f"quest {quest_id} already gone; ensured branch imp/{quest_id} is removed."])
-        return 0
+        return 0, f"quest {quest_id} already gone; ensured branch imp/{quest_id} is removed."
 
     token = quest.id
     if session_is_resident(control, quest_id):
@@ -2915,16 +2915,24 @@ def _abandon(control: Path, quest_id: str) -> int:
         except OSError:
             pass  # daemon gone, wedged, or startup-window hang (TimeoutError ⊂ OSError)
         else:
-            _emit_human([f"Abandoned {token}."])
-            return 0
+            return 0, f"Abandoned {token}."
     try:
         tear_down_quest(quest)
     except LockHeld as e:
-        print(f"imp: quest {quest_id} is running (pid {e.held_by_pid or '?'}); "
-              f"stop it before abandoning", file=sys.stderr)
-        return 2
-    _emit_human([f"Abandoned {token}."])
-    return 0
+        return 2, (f"imp: quest {quest_id} is running (pid {e.held_by_pid or '?'}); "
+                   f"stop it before abandoning")
+    return 0, f"Abandoned {token}."
+
+
+def _abandon_local(control: Path, quest_id: str) -> int:
+    """Local (host-side) path: run the teardown and print the result —
+    stdout via _emit_human (adds a trailing blank on a tty) on rc 0, stderr on non-zero."""
+    rc, message = _abandon(control, quest_id)
+    if rc == 0:
+        _emit_human([message])
+    else:
+        print(message, file=sys.stderr)
+    return rc
 
 
 def _cmd_remote_control_start(args: argparse.Namespace) -> int:
@@ -3076,15 +3084,15 @@ def _cmd_abandon(args: argparse.Namespace) -> int:
         target = anyio.run(_pick_abandon_target, control)
         if isinstance(target, int):
             return target
-        return _abandon(control, target)
+        return _abandon_local(control, target)
     matches = _abandon_match_rows(control, token)
     if len(matches) >= 2:
         target = anyio.run(_pick_abandon_matches, control, token, matches)
         if isinstance(target, int):
             return target
-        return _abandon(control, target)
+        return _abandon_local(control, target)
     if len(matches) == 1:
-        return _abandon(control, matches[0][0])
+        return _abandon_local(control, matches[0][0])
     try:
         quest_id = _resolve_id(control, token)
     except SystemExit:
@@ -3097,11 +3105,11 @@ def _cmd_abandon(args: argparse.Namespace) -> int:
         hits = [cid for cid in ids if cid == token] or \
                [cid for cid in ids if cid.endswith(token)]
         if len(hits) == 1:
-            return _abandon(control, hits[0])
+            return _abandon_local(control, hits[0])
         # Truly unknown (never existed, or ambiguous) — nothing to reap.
         print(f"imp: no quest matches {token!r}", file=sys.stderr)
         return 2
-    return _abandon(control, quest_id)
+    return _abandon_local(control, quest_id)
 
 
 def apply_edit(

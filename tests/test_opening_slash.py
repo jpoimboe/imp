@@ -59,7 +59,7 @@ async def test_pre_session_abandon_tears_down_and_exits(
         calls["quest_id"] = quest_id
         return 3                       # non-zero proves the rc is threaded, not hardcoded
 
-    monkeypatch.setattr(main, "_abandon", _fake_abandon)
+    monkeypatch.setattr(main, "_abandon_local", _fake_abandon)
 
     with pytest.raises(SystemExit) as excinfo:
         await main._read_intent_line(

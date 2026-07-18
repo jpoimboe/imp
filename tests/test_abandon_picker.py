@@ -98,7 +98,7 @@ def test_cmd_abandon_no_token_routes_through_picker(
         seen["id"] = quest_id
         return 0
 
-    monkeypatch.setattr(m, "_abandon", fake_abandon)
+    monkeypatch.setattr(m, "_abandon_local", fake_abandon)
     rc = m._cmd_abandon(argparse.Namespace(token=None, yes=False))
     assert rc == 0
     assert seen == {"id": "picked"}
@@ -113,7 +113,7 @@ def test_cmd_abandon_no_token_picker_rc_short_circuits(
     def boom_abandon(*a, **k):
         raise AssertionError("_abandon called despite picker rc")
 
-    monkeypatch.setattr(m, "_abandon", boom_abandon)
+    monkeypatch.setattr(m, "_abandon_local", boom_abandon)
     assert m._cmd_abandon(argparse.Namespace(token=None, yes=False)) == 2
 
 
@@ -133,7 +133,7 @@ def test_cmd_abandon_with_token_skips_picker(
         seen["id"] = quest_id
         return 0
 
-    monkeypatch.setattr(m, "_abandon", fake_abandon)
+    monkeypatch.setattr(m, "_abandon_local", fake_abandon)
     rc = m._cmd_abandon(argparse.Namespace(token="resolved", yes=False))
     assert rc == 0
     assert seen["id"] == "resolved"

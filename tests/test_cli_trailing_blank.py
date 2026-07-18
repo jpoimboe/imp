@@ -478,7 +478,7 @@ def test_abandon_already_gone_trailing_blank_on_tty(
 
     _seed_control(tmp_path)
     monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
-    rc = m._abandon(tmp_path, "ghost")
+    rc = m._abandon_local(tmp_path, "ghost")
     out = capsys.readouterr().out
     assert rc == 0
     assert out == "quest ghost already gone; ensured branch imp/ghost is removed.\n\n"
@@ -552,7 +552,7 @@ def test_abandon_already_gone_unchanged_when_piped(
 
     _seed_control(tmp_path)
     monkeypatch.setattr(sys.stdout, "isatty", lambda: False)
-    rc = m._abandon(tmp_path, "ghost")
+    rc = m._abandon_local(tmp_path, "ghost")
     out = capsys.readouterr().out
     assert rc == 0
     assert out == "quest ghost already gone; ensured branch imp/ghost is removed.\n"
@@ -591,7 +591,7 @@ def test_abandon_resident_delivery_trailing_blank_on_tty(
     monkeypatch.setattr(m, "session_is_resident", lambda _ctrl, cid: True)
     monkeypatch.setattr(m, "_deliver_abandon_resident", lambda _ctrl, cid: None)
     monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
-    rc = m._abandon(tmp_path, "feat")
+    rc = m._abandon_local(tmp_path, "feat")
     out = capsys.readouterr().out
     assert rc == 0
     assert out == "Abandoned feat.\n\n"
@@ -607,7 +607,7 @@ def test_abandon_tear_down_trailing_blank_on_tty(
     _seed_control(tmp_path)
     Quest.create(tmp_path, title="x", quest_id="feat", base_branch="main")
     monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
-    rc = m._abandon(tmp_path, "feat")
+    rc = m._abandon_local(tmp_path, "feat")
     out = capsys.readouterr().out
     assert rc == 0
     assert out == "Abandoned feat.\n\n"
