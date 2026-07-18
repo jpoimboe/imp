@@ -78,3 +78,18 @@ def test_coding_stance_include_in_exactly_the_right_agents() -> None:
         else:
             assert include not in text, \
                 f"unexpected coding-stance include in {path.name}"
+
+
+def test_action_care_renders_into_agent_prompt() -> None:
+    from imp.agents.prompts import build_context, render_prompt
+    from imp.engine.loader import parse_agent_file
+    from imp.engine.state import InMemoryEventLog
+
+    agent = parse_agent_file(_AGENTS_DIR / "coder.md")
+    wf = _AGENTS_DIR.parent  # workflow_dir so {% include %} resolves
+    rendered = render_prompt(
+        agent.prompt_template_source,
+        build_context(quest_title="t", event_log=InMemoryEventLog(),
+                      vars={"fast_path": False}),
+        workflow_dir=wf)
+    assert "Measure twice, cut once" in rendered
