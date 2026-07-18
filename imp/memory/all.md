@@ -15,5 +15,4 @@ in the same change. `imp-knowledge` is an agent-facing skill — imp's canonical
 self-knowledge index that agents load, not human docs. Keep it accurate
 whenever you change imp's CLI commands/flags, agent tools, or core
 concepts/vocabulary. When editing agent/skill prose, be maximally succinct —
-every token counts. Before changing user-facing copy or agent prompt text, get
-the user's approval on exact wording, showing before/after.
+every token counts.
