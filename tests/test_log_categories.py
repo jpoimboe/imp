@@ -45,7 +45,8 @@ def test_log_unknown_category_errors(
     rc = main(["log", _ID, "--show", "bogus"])
     assert rc == 2
     err = capsys.readouterr().err
-    assert "unknown category 'bogus'" in err
+    assert "imp: unknown category 'bogus'" in err   # canonical imp: prefix
+    assert "imp log:" not in err                     # divergent prefix gone
 
 
 def test_log_follow_show_conflict(
@@ -53,7 +54,7 @@ def test_log_follow_show_conflict(
 ) -> None:
     rc = main(["log", _ID, "--follow", "--show", "thinking"])
     assert rc == 2
-    assert "not allowed with argument --show/--hide" in capsys.readouterr().err
+    assert "imp: -f/--follow not allowed with --show/--hide" in capsys.readouterr().err
 
 
 def test_log_follow_hide_conflict(
@@ -61,7 +62,7 @@ def test_log_follow_hide_conflict(
 ) -> None:
     rc = main(["log", _ID, "--follow", "--hide", "tiers"])
     assert rc == 2
-    assert "not allowed with argument --show/--hide" in capsys.readouterr().err
+    assert "imp: -f/--follow not allowed with --show/--hide" in capsys.readouterr().err
 
 
 def test_log_threads_computed_show_set(

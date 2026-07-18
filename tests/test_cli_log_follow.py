@@ -254,7 +254,7 @@ def test_main_log_follow_rejects_summary(
     monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
     rc = m.main(["log", "-f", "--summary"])
     assert rc == 2
-    assert "not allowed with argument --summary" in capsys.readouterr().err
+    assert "imp: -f/--follow not allowed with --summary" in capsys.readouterr().err
 
 
 def test_main_log_follow_implies_no_pager_on_tty(
@@ -614,4 +614,6 @@ def test_cmd_log_follow_in_sandbox_degrades_to_snapshot(
     rc = m.main(["log", "-f", slug])
     assert rc == 0
     assert seen["events"] == snapshot  # the store snapshot went to the one-shot path
-    assert "live follow is unavailable inside the sandbox" in capsys.readouterr().err
+    err = capsys.readouterr().err
+    assert "imp: live follow is unavailable inside the sandbox" in err
+    assert "imp log:" not in err

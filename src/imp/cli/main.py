@@ -1605,7 +1605,7 @@ def _resolve_id(control: Path, token: str) -> str:
 
 
 def _exit_ambiguous(token: str, candidates: list[str], control: Path) -> NoReturn:
-    print(f"imp: {token!r} is ambiguous; candidates:", file=sys.stderr)
+    _emit_cli_error(f"{token!r} is ambiguous; candidates:")
     color = should_use_color(sys.stderr)
     now = datetime.now(UTC)
     print(quest_row.header_line(color=color), file=sys.stderr)
@@ -2319,8 +2319,8 @@ def _cmd_log(args: argparse.Namespace) -> int:
     hide_names = args.hide or []
     unknown = sorted((set(show_names) | set(hide_names)) - set(LOG_CATEGORIES))
     if unknown:
-        print(f"imp log: error: unknown category {unknown[0]!r} "
-              f"(choose from: {', '.join(LOG_CATEGORIES)})", file=sys.stderr)
+        _emit_cli_error(f"unknown category {unknown[0]!r} "
+                        f"(choose from: {', '.join(LOG_CATEGORIES)})")
         return 2
     show = _log_show_set(args.full, show_names, hide_names)
 
@@ -2328,8 +2328,7 @@ def _cmd_log(args: argparse.Namespace) -> int:
     if args.follow:
         conflict = _follow_conflict(args)
         if conflict is not None:
-            print(f"imp log: error: argument -f/--follow: not allowed with "
-                  f"argument {conflict}", file=sys.stderr)
+            _emit_cli_error(f"-f/--follow not allowed with {conflict}")
             return 2
         args.no_pager = True
     if args.token is None:
@@ -2355,8 +2354,8 @@ def _cmd_log(args: argparse.Namespace) -> int:
 
     if args.follow:
         if os.environ.get("IMP_SESSION_SOCKET"):
-            print("imp log: live follow is unavailable inside the sandbox; "
-                  "showing a one-shot snapshot.", file=sys.stderr)
+            _emit_cli_error("live follow is unavailable inside the sandbox; "
+                            "showing a one-shot snapshot.")
             return _follow_log(events)
         home = _quest_home(control, quest_id)
         if home.exists():
@@ -2756,7 +2755,7 @@ def _resume_picker_empty(control: Path) -> int:
 def _resume_picker_non_tty(rows: list[_Row]) -> str | int:
     if len(rows) == 1:
         return rows[0][0]
-    print("Multiple resumable quests — pass a token:", file=sys.stderr)
+    _emit_cli_error("multiple resumable quests — pass a token; candidates:")
     color = should_use_color(sys.stderr)
     now = datetime.now(UTC)
     print(quest_row.header_line(color=color), file=sys.stderr)

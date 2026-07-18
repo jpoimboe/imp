@@ -44,6 +44,7 @@ def test_exit_ambiguous_renders_each_candidate_via_formatter(
             "2026-06-04", ["2026-06-04-aaa111", "2026-06-04-bbb222"], tmp_path)
     assert exc.value.code == 2
     err = capsys.readouterr().err
+    assert "imp: " in err
     assert "is ambiguous" in err
     assert "NAME" in err                          # shared header row
     assert "paused" in err                        # STATUS via the formatter

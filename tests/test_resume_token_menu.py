@@ -204,6 +204,17 @@ async def test_real_blank_token_behaves_like_no_token(tmp_path: Path) -> None:
     assert none_res == blank_res == "lodo40"
 
 
+def test_resume_picker_non_tty_header_normalized(capsys) -> None:
+    # AC 5: the no-prefix "Multiple resumable quests" header becomes a canonical
+    # imp: line; the candidate rows still print beneath it.
+    rc = m._resume_picker_non_tty([_row("lodo40"), _row("lodo77")])
+    assert rc == 2
+    err = capsys.readouterr().err
+    assert "imp: multiple resumable quests — pass a token; candidates:" in err
+    assert "Multiple resumable quests" not in err
+    assert "lodo40" in err and "lodo77" in err
+
+
 def test_resolve_id_still_reaches_archive(tmp_path: Path) -> None:
     # AC 16: log/show/search/edit resolve through _resolve_id, which still spans
     # the archive. This plan does not touch _resolve_id.
