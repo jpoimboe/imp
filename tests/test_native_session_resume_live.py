@@ -3,9 +3,9 @@
 Gated behind `--run-live` (claude_code) + the `claude` CLI on PATH. A multi-read
 step is paused mid-bash and resumed; the prior reads must be recalled faithfully
 (no '[Tool result missing…]' placeholder redo) and the resume must complete without
-re-reading either file. A mid-bash SIGINT lands before any `result`, so the SDK
-batcher has flushed no session bytes and the resume takes the stream-json fallback
-(replay + Part-3 manifest); that manifest is what prevents the redo this asserts.
+re-reading either file. A mid-bash SIGINT leaves a dangling bash tool_use, which
+resumes on claude-p's native session path (the store is reconstructed from the
+transcript when absent); that native recall is what prevents the redo this asserts.
 """
 
 from __future__ import annotations
@@ -147,10 +147,11 @@ def _read_paths(events_path: Path) -> list[str]:
 # Serialize the 3 crash-prone resume tests onto one worker (under --dist
 # loadgroup) to cap the peak concurrent claude-CLI footprint they contribute.
 @pytest.mark.xdist_group("live_claude_resume")
-# 600s > this test's ~360-480s internal subprocess-timeout budget, so conftest's
-# 240s live-test backstop can't fire mid-subprocess before imp's own internal
-# timeouts do (which yield real diagnostics instead of a killed worker).
-@pytest.mark.timeout(600)
+# 880s > this test's 752s internal subprocess-timeout budget
+# (30 + 120 + 2 + 60 + 30 + 480 + 30), so conftest's 240s live-test backstop can't
+# fire mid-subprocess before imp's own internal timeouts do (which yield real
+# diagnostics instead of a killed worker).
+@pytest.mark.timeout(880)
 def test_resumed_step_recalls_prior_reads_without_redo_or_400(
     tmp_path: Path,
 ) -> None:
@@ -163,12 +164,13 @@ def test_resumed_step_recalls_prior_reads_without_redo_or_400(
       to tool use concurrency issues`. imp runs standard tool mode
       (ENABLE_TOOL_SEARCH=false) by default on every path, fresh and resume, so
       the MCP tools are always declared up front rather than deferred behind
-      ToolSearch, and the resume-manifest names the prior reads as succeeded so
-      the is_error placeholders don't drive a redo.
+      ToolSearch, and the loaded native session already holds the prior reads as
+      succeeded so no is_error placeholder drives a redo.
 
-    A mid-bash SIGINT lands before any `result`, so the SDK batcher flushed no
-    session bytes and the resume takes the stream-json fallback (replay + Part-3
-    manifest) that backs both invariants.
+    A mid-bash SIGINT leaves a dangling bash tool_use, so the resume takes
+    claude-p's native session path — recalling the prior reads from the loaded
+    session and replaying the deferred-MCP tool_use history — which backs both
+    invariants.
     """
     _seed_multiread_project(tmp_path)
     env = os.environ.copy()
@@ -213,25 +215,25 @@ def test_resumed_step_recalls_prior_reads_without_redo_or_400(
     # Pre-resume sanity: both files were read before the mid-bash interrupt. The
     # imp-owned store is intentionally NOT asserted here — the SDK batcher flushes
     # only at a `result` boundary, so a mid-work interrupt legitimately leaves it
-    # empty and the resume takes the stream-json fallback.
+    # empty and the resume reconstructs the native session from the transcript.
     pre = {Path(p).name for p in _read_paths(events)}
     assert {"a.txt", "b.txt"} <= pre, pre
 
     resume = subprocess.run(
         [sys.executable, "-m", "imp", "resume", slug],
         cwd=tmp_path, env=env,
-        capture_output=True, text=True, timeout=240,
+        capture_output=True, text=True, timeout=480,
     )
     assert resume.returncode == 0, (
         f"resume failed rc={resume.returncode}; stderr={resume.stderr}"
     )
-    final_state = json.loads(state_path.read_text())
-    assert final_state["status"] == "completed"
+    final_status = _wait_for_status(state_path, "completed", 30.0)
+    assert final_status == "completed", final_status
 
     # Part C: the deferred-MCP-tool replay did NOT trip `400 due to tool use
     # concurrency issues` — imp's default standard tool mode (ENABLE_TOOL_SEARCH=
     # false on every path) declares the replayed MCP tool_use blocks up front.
-    # (Assert the behavior, not the manifest text, which lives in a user_message
+    # (Assert the behavior, not the recall prose, which lives in a user_message
     # payload with an em-dash that json.dumps would escape.)
     haystack = resume.stdout + resume.stderr + "\n".join(
         json.dumps(rec) for rec in _iter_events(events))
