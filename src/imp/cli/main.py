@@ -1987,55 +1987,7 @@ def _resolve_row_intent(control: Path, r: _Row) -> str | None:
     return _resolve_intent(_load_events_for_id(control, r[0]) or [])
 
 
-def _resolve_default_id(control: Path) -> str | None:
-    """No-arg default: most-recent quest home by its last event ts, else
-    the most-recent archived id (by the index's last_event_ts), else None."""
-    store = make_store(control)
-    homes = store.scan_homes()
-    if homes:
-        return max(homes, key=lambda h: (h.last_iso, h.quest_id)).quest_id
-    dated = [r for r in store.completed_rows() if r.last]
-    if not dated:
-        return None
-    return max(dated, key=lambda r: (r.last, r.quest_id)).quest_id
-
-
 _NO_QUESTS_MESSAGE = "No quests yet — start one with imp new"
-
-
-def _log_picker_empty() -> int:
-    _emit_human([_NO_QUESTS_MESSAGE])
-    return 2
-
-
-_LOG_PICKER_HEADER = (
-    "Show log for which quest?  (↑/↓ to move · enter to select · q to cancel)"
-)
-
-
-async def _pick_full_pool_target(control: Path, *, header: str) -> str | int:
-    """No-token picker over the full pool, shared by the log and events pickers."""
-    rows = _all_quest_rows(control)
-    default_id = _resolve_default_id(control)
-
-    def _non_tty(_rows: list[_Row]) -> str | int:
-        return default_id if default_id is not None else 2
-
-    selected_index = next(
-        (i for i, r in enumerate(rows) if r[0] == default_id), 0)
-
-    return await _pick_quest_target(
-        control=control,
-        rows=rows,
-        header=header,
-        on_empty=_log_picker_empty,
-        on_non_tty=_non_tty,
-        selected_index=selected_index,
-    )
-
-
-async def _pick_log_target(control: Path) -> str | int:
-    return await _pick_full_pool_target(control, header=_LOG_PICKER_HEADER)
 
 
 def _with_trailing_blank(lines: list[str]) -> list[str]:
@@ -2966,92 +2918,6 @@ async def _pick_abandon_matches(
         on_empty=_abandon_picker_empty,
         on_non_tty=_non_tty,
     )
-
-
-_SHOW_PICKER_HEADER = (
-    "Show which quest?  (↑/↓ to move · enter to select · q to cancel)"
-)
-
-
-def _show_picker_empty() -> int:
-    _emit_human(["No quests to show."])
-    return 2
-
-
-def _show_picker_non_tty(rows: list[_Row]) -> int:
-    # Defensive parity only: _cmd_show handles the non-tty no-token case
-    # directly (needs-a-quest-id error), so _pick_show_target is invoked
-    # solely on an interactive tty and this branch is never reached.
-    print("imp: 'imp show' needs a quest id — run 'imp list' for an overview",
-          file=sys.stderr)
-    return 2
-
-
-def _all_quest_rows(control: Path) -> list[_Row]:
-    """Display rows for the full-pool pickers: every _iter_quest_ids id
-    (live homes + backlog + archived), via _row_for_id, unreadable ids
-    dropped, newest-first — the same pool `imp show <exact-id>` reaches."""
-    rows = [r for r in (_row_for_id(control, cid)
-                        for cid in _iter_quest_ids(control)) if r is not None]
-    return _sort_rows_newest_first(rows)
-
-
-async def _pick_show_target(control: Path) -> str | int:
-    return await _pick_quest_target(
-        control=control,
-        rows=_all_quest_rows(control),
-        header=_SHOW_PICKER_HEADER,
-        on_empty=_show_picker_empty,
-        on_non_tty=_show_picker_non_tty,
-    )
-
-
-def _ambiguous_matches_non_tty(rows: list[_Row]) -> int:
-    print("imp: ambiguous token; candidates:", file=sys.stderr)
-    color = should_use_color(sys.stderr)
-    now = datetime.now(UTC)
-    print(quest_row.header_line(color=color), file=sys.stderr)
-    name_w = quest_row.name_budget()
-    for r in rows:
-        print(quest_row.format_quest_line(
-            quest_id=r[0], title=r[4], status=r[1], step=r[2],
-            step_label=r[6], phase_label=r[7], last_iso=r[3], now=now, color=color,
-            name_width=name_w), file=sys.stderr)
-    return 2
-
-
-async def _pick_id_matches(
-    control: Path, matches: list[str], *,
-    header: str, on_empty: Callable[[], int],
-) -> str | int:
-    """Scoped picker over a token's raw _iter_quest_ids matches (>=2)."""
-    rows = _sort_rows_newest_first(
-        [r for r in (_row_for_id(control, cid) for cid in matches)
-         if r is not None])
-    return await _pick_quest_target(
-        control=control, rows=rows, header=header, on_empty=on_empty,
-        on_non_tty=_ambiguous_matches_non_tty)
-
-
-async def _pick_show_matches(control: Path, matches: list[str]) -> str | int:
-    return await _pick_id_matches(
-        control, matches, header=_SHOW_PICKER_HEADER, on_empty=_show_picker_empty)
-
-
-_EVENTS_PICKER_HEADER = (
-    "Show events for which quest?  (↑/↓ to move · enter to select · q to cancel)"
-)
-
-
-async def _pick_events_target(control: Path) -> str | int:
-    """No-token events picker over the shared full pool. `_cmd_events` routes the
-    non-tty no-token case to `_resolve_default_id` directly, so this runs only on a tty."""
-    return await _pick_full_pool_target(control, header=_EVENTS_PICKER_HEADER)
-
-
-async def _pick_events_matches(control: Path, matches: list[str]) -> str | int:
-    return await _pick_id_matches(
-        control, matches, header=_EVENTS_PICKER_HEADER, on_empty=_log_picker_empty)
 
 
 def _cmd_abandon(args: argparse.Namespace) -> int:
