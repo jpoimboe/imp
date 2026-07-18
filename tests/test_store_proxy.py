@@ -10,7 +10,7 @@ from imp.cli.store import LocalStore, SearchZones, make_store
 from imp.cli.store_proxy import ProxyStore, run_query
 from imp.engine.quest import Quest
 from imp.remote.session.socket_server import SessionSocket
-from tests.conftest import _seed_control
+from tests.conftest import _archive_with_event, _seed_control
 
 
 @pytest.fixture
@@ -36,6 +36,35 @@ def test_make_store_returns_proxy_when_env_set(
 def test_make_store_returns_local_when_env_unset(tmp_path: Path) -> None:
     _seed_control(tmp_path)
     assert isinstance(make_store(tmp_path), LocalStore)
+
+
+@pytest.mark.anyio
+async def test_proxy_store_search_event_candidates_matches_local(tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+    line = json.dumps({
+        "id": "e0", "type": "tool_call",
+        "payload": {"name": "bash", "input": {"cmd": "GREPTARGET"}}}) + "\n"
+    _archive_with_event(tmp_path, "arch01", "Archived one", line)
+
+    local = LocalStore(tmp_path)
+    sock = str(tmp_path / "s.sock")
+
+    async def on_query(op: str, args: dict) -> object:
+        return run_query(local, op, args)
+
+    session = SessionSocket(sock, on_query=on_query)
+    async with anyio.create_task_group() as tg:
+        await session.open()
+        tg.start_soon(session.serve)
+        proxy = ProxyStore(sock)
+
+        p_cands = await anyio.to_thread.run_sync(proxy.search_event_candidates, "GREPTARGET")
+        assert p_cands == local.search_event_candidates("GREPTARGET")
+        assert p_cands == [("arch01", "Archived one", "abandoned", None)]
+        assert all(isinstance(c, tuple) for c in p_cands)
+
+        await session.close()
+        tg.cancel_scope.cancel()
 
 
 @pytest.mark.anyio

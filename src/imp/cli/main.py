@@ -3534,7 +3534,7 @@ def _events_search_archived(
     """Archived quests: index candidates re-scanned to specific matching events."""
     store = make_store(control)
     hits: list[EventSearchHit] = []
-    for cid, title, _status, last in archive_read.search_archive_events_content(control, query):
+    for cid, title, _status, last in store.search_event_candidates(query):
         events = store.get_events(cid) or []
         matched, handle_map = _matched_events(events, query, types=types, agents=agents)
         if matched:

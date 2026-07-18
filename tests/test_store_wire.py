@@ -20,7 +20,7 @@ from imp.cli.store_proxy import (
     run_query,
 )
 from imp.engine.quest import Quest
-from tests.conftest import _seed_control
+from tests.conftest import _archive_with_event, _seed_control
 
 
 def _json_round_trip(value: object) -> object:
@@ -133,6 +133,26 @@ def test_run_query_search_decodes_zones(tmp_path: Path) -> None:
     wire = run_query(LocalStore(tmp_path), "search", {"query": "darkmode", "zones": zones})
     assert [h["quest_id"] for h in wire] == ["liveone"]
     assert wire[0]["zone"] == "active"
+
+
+def test_run_query_search_event_candidates_round_trips_none_last(tmp_path: Path) -> None:
+    from imp.cli.store import LocalStore
+
+    # tool_call event with NO timestamp -> indexed last_event_ts is None.
+    line = json.dumps({
+        "id": "e0", "type": "tool_call",
+        "payload": {"name": "bash", "input": {"cmd": "GREPTARGET"}}}) + "\n"
+    _archive_with_event(tmp_path, "arch01", "Archived one", line)
+    store = LocalStore(tmp_path)
+
+    local = store.search_event_candidates("GREPTARGET")
+    assert local == [("arch01", "Archived one", "abandoned", None)]
+
+    wire = run_query(store, "search_event_candidates", {"query": "GREPTARGET"})
+    assert wire == [["arch01", "Archived one", "abandoned", None]]
+    assert _json_round_trip(wire) == wire
+    rebuilt = [tuple(x) for x in _json_round_trip(wire)]
+    assert rebuilt == local
 
 
 def test_run_query_rejects_unknown_op(tmp_path: Path) -> None:
