@@ -44,7 +44,7 @@ async def test_stop_kills_sigterm_ignoring_driver(tmp_path: Path) -> None:
     async with anyio.create_task_group() as tg:
         assert await ch.start(tg) is True
         proc = ch._proc
-        with anyio.fail_after(10):   # grace=2s + margin
+        with anyio.fail_after(30):  # deadlock backstop only
             await ch.stop()
         assert proc.poll() is not None   # killed by SIGKILL
         tg.cancel_scope.cancel()

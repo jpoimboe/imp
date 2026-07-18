@@ -9,6 +9,7 @@ import pytest
 
 from imp.cli.remote_channel import RemoteChannel
 from tests._remote_fakes import fake_driver_command
+from tests.async_wait import wait_until
 
 
 @pytest.fixture
@@ -30,9 +31,7 @@ async def test_start_spawns_and_feeds_events(tmp_path: Path) -> None:
         assert await ch.start(tg) is True
         # An allowlisted event reaches the driver and is logged (NDJSON framed).
         ch.on_event({"id": "e1", "type": "agent_result", "payload": {"k": "v"}})
-        with anyio.fail_after(5):
-            while not (log.exists() and log.read_text().strip()):
-                await anyio.sleep(0.02)
+        await wait_until(lambda: log.exists() and log.read_text().strip())
         logged = json.loads(log.read_text().splitlines()[0])
         assert logged["type"] == "agent_result"
         assert logged["quest"]["id"] == "2026-06-11-abc"
@@ -52,9 +51,7 @@ async def test_start_drains_stderr_so_driver_stays_unblocked(tmp_path: Path) -> 
         assert await ch.start(tg) is True
         assert ch._proc.stderr is not None       # captured, not inherited onto the tty
         ch.on_event({"id": "e1", "type": "agent_result", "payload": {"k": "v"}})
-        with anyio.fail_after(5):
-            while not (log.exists() and log.read_text().strip()):
-                await anyio.sleep(0.02)
+        await wait_until(lambda: log.exists() and log.read_text().strip())
         assert json.loads(log.read_text().splitlines()[0])["type"] == "agent_result"
         await ch.stop()
         tg.cancel_scope.cancel()

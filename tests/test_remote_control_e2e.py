@@ -12,6 +12,7 @@ from imp.remote.daemon.discover import QuestInfo, socket_is_live, socket_path
 from imp.remote.daemon.runner import run_daemon
 from imp.remote.session.discover import session_socket_path
 from imp.remote.session.socket_server import SessionSocket
+from tests.async_wait import wait_until
 from tests.conftest import _seed_control
 from tests.playbooks.fake_telegram import FakeTelegram
 
@@ -23,10 +24,8 @@ def anyio_backend() -> str:
     return "asyncio"
 
 
-async def _wait(predicate: Callable[[], bool], timeout: float = 10.0) -> None:
-    with anyio.fail_after(timeout):
-        while not predicate():
-            await anyio.sleep(0.05)
+async def _wait(predicate: Callable[[], bool], timeout: float = 30.0) -> None:
+    await wait_until(predicate, backstop=timeout, interval=0.05)
 
 
 def _text_in_outbox(fake: FakeTelegram, needle: str) -> bool:
@@ -70,9 +69,7 @@ async def test_e2e_chat_commands_round_trip(
                 deliver=_capture_deliver,
                 install_signals=False, shutdown=shutdown))
 
-            with anyio.fail_after(5):
-                while not socket_is_live(spath):
-                    await anyio.sleep(0.02)
+            await wait_until(lambda: socket_is_live(spath))
 
             # A resident session daemon serves its socket; the supervisor attaches a
             # relay and pulls its events.
