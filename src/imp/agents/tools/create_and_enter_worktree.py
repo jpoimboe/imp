@@ -29,9 +29,6 @@ async def _await_dependencies(ctx: Any, quest: Any) -> None:
     _, unmerged = backlog.readiness(quest.control_root, deps)
     if not unmerged:
         return
-    if ctx.non_interactive:
-        # No one is attached to watch the wait: park cleanly, resumable later.
-        raise AwaitingUserInput()
     _emit(ctx, "dependency_waiting", {"depends_on": unmerged})
     coord = ctx.coordinator
     while True:
