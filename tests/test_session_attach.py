@@ -9,7 +9,13 @@ import anyio
 import pytest
 
 from imp.engine.quest import Quest
-from imp.remote.session.attach import attach_or_spawn, build_session_attach, spawn_session_daemon
+from imp.remote.session.attach import (
+    DaemonStartupError,
+    _read_stderr_tail,
+    attach_or_spawn,
+    build_session_attach,
+    spawn_session_daemon,
+)
 from imp.remote.session.discover import session_socket_path
 from imp.remote.session.reply import deliver_session_reply
 from imp.remote.session.socket_server import SessionSocket
@@ -129,6 +135,99 @@ async def test_raises_when_spawn_never_creates_the_socket(tmp_path: Path) -> Non
         await attach_or_spawn(
             quest, on_event=lambda _e: None,
             spawn_fn=lambda _ch: None, connect_timeout=0.3)
+
+
+@pytest.mark.anyio
+async def test_attach_crash_fast_when_daemon_exits_before_binding(
+    tmp_path: Path,
+) -> None:
+    quest = _make_change(tmp_path, "2026-06-15-crash")
+    quest.quest_dir.mkdir(parents=True, exist_ok=True)
+    (quest.quest_dir / "daemon.stderr").write_bytes(
+        b"Traceback (most recent call last):\nRuntimeError: boom-on-startup\n")
+
+    class _DeadProc:
+        returncode = 7
+
+        def poll(self) -> int | None:
+            return 7
+
+    with pytest.raises(DaemonStartupError) as excinfo:
+        await attach_or_spawn(
+            quest, on_event=lambda _e: None,
+            spawn_fn=lambda _ch: _DeadProc(), connect_timeout=5)
+
+    err = excinfo.value
+    assert err.exit_code == 7
+    assert err.stderr_path == quest.quest_dir / "daemon.stderr"
+    assert "boom-on-startup" in err.stderr_tail
+    assert quest.id in str(err)
+    assert "7" in str(err)
+
+
+def test_read_stderr_tail_returns_empty_when_file_is_missing(tmp_path: Path) -> None:
+    assert _read_stderr_tail(tmp_path / "does-not-exist.stderr") == ""
+
+
+@pytest.mark.anyio
+async def test_attach_crash_fast_when_stderr_file_is_missing(
+    tmp_path: Path,
+) -> None:
+    quest = _make_change(tmp_path, "2026-06-15-nofile")
+
+    class _DeadProc:
+        returncode = 3
+
+        def poll(self) -> int | None:
+            return 3
+
+    with pytest.raises(DaemonStartupError) as excinfo:
+        await attach_or_spawn(
+            quest, on_event=lambda _e: None,
+            spawn_fn=lambda _ch: _DeadProc(), connect_timeout=5)
+
+    err = excinfo.value
+    assert err.exit_code == 3
+    assert err.stderr_tail == ""
+    assert quest.id in str(err)
+
+
+@pytest.mark.anyio
+async def test_attach_waits_for_alive_daemon_until_socket_appears(
+    tmp_path: Path,
+) -> None:
+    quest = _make_change(tmp_path, "2026-06-15-slow")
+    sock = str(session_socket_path(quest.control_root, quest.id))
+    holder: dict[str, SessionSocket] = {}
+
+    class _LiveProc:
+        returncode = None
+
+        def poll(self) -> None:
+            return None
+
+    async with anyio.create_task_group() as tg:
+        async def _start_server_after_delay() -> None:
+            await anyio.sleep(0.3)
+            server = SessionSocket(sock)
+            await server.open()
+            holder["server"] = server
+            await server.serve()
+
+        def slow_spawn(ch: Quest) -> _LiveProc:
+            tg.start_soon(_start_server_after_delay)
+            return _LiveProc()
+
+        client = await attach_or_spawn(
+            quest, on_event=lambda _e: None,
+            spawn_fn=slow_spawn, connect_timeout=5)
+        with anyio.fail_after(5):
+            while holder.get("server") is None or holder["server"].attached_count != 1:
+                await anyio.sleep(0.02)
+        assert holder["server"].attached_count == 1
+        await client.aclose()
+        await holder["server"].close()
+        tg.cancel_scope.cancel()
 
 
 def test_spawn_session_daemon_includes_resume_flag_when_set(

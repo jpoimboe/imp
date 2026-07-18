@@ -5,6 +5,7 @@ import os
 import subprocess
 import sys
 from collections.abc import Awaitable, Callable
+from pathlib import Path
 from typing import Any
 
 import anyio
@@ -50,12 +51,39 @@ def spawn_session_daemon(
         )
 
 
+class DaemonStartupError(RuntimeError):
+    """A spawned session daemon exited before it bound its socket."""
+
+    def __init__(
+        self, quest_id: str, exit_code: int | None,
+        stderr_path: Path, stderr_tail: str,
+    ) -> None:
+        self.quest_id = quest_id
+        self.exit_code = exit_code
+        self.stderr_path = stderr_path
+        self.stderr_tail = stderr_tail
+        message = (
+            f"session daemon for {quest_id} exited with code {exit_code} "
+            f"before it came up; see {stderr_path}")
+        if stderr_tail:
+            message = f"{message}\n{stderr_tail}"
+        super().__init__(message)
+
+
+def _read_stderr_tail(path: Path, *, max_bytes: int = 4096) -> str:
+    try:
+        data = path.read_bytes()
+    except OSError:
+        return ""
+    return data[-max_bytes:].decode("utf-8", "replace").strip()
+
+
 async def attach_or_spawn(
     quest: Quest,
     *,
     on_event: Callable[[dict[str, Any]], None],
     spawn_fn: SpawnFn = spawn_session_daemon,
-    connect_timeout: float = 10.0,
+    connect_timeout: float = 60.0,
     lease: bool = False,
 ) -> SessionClient:
     socket_path = str(session_socket_path(quest.control_root, quest.id))
@@ -65,13 +93,18 @@ async def attach_or_spawn(
         return client
     except OSError:
         pass
-    spawn_fn(quest)
+    proc = spawn_fn(quest)
     with anyio.fail_after(connect_timeout):
         while True:
             try:
                 await client.connect()
                 return client
             except OSError:
+                if proc is not None and proc.poll() is not None:
+                    stderr_path = quest.quest_dir / "daemon.stderr"
+                    raise DaemonStartupError(
+                        quest.id, proc.returncode,
+                        stderr_path, _read_stderr_tail(stderr_path)) from None
                 await anyio.sleep(0.05)
 
 
