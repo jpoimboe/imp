@@ -222,6 +222,8 @@ dropped before the merge gate; authoring it in reader form means it reaches
 items only — keep deciding the technical calls yourself and recording them in the
 Decisions summary (see **Ask vs. decide**).
 
+> **Unenumerated copy is a non-blocking case of this.** If the design adds new user-facing copy — any string a human sees, or LLM prompt text — whose exact wording the threshold interview never enumerated, do not gate landing on it. Pin a reasonable default as spec content, styled after neighbouring copy, and record the wording as one `— needs-decision:` item so it rides to the merge gate. Never write "approval-gated before it lands" or anything that stalls the headless plan phase.
+
 ## Minors-integration pass (a review follows)
 
 A minors resume is recognized by its preamble — "No blocking issues — integrate
