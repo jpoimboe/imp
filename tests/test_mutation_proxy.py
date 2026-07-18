@@ -262,6 +262,85 @@ def test_async_cmd_new_chat_mode_does_not_proxy(
     assert called is False
 
 
+def test_run_mutation_abandon_tears_down_target(tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+    _draft(tmp_path, "2026-06-24-abn10")
+    result = run_mutation(tmp_path, "abandon", {"token": "abn10"})
+    assert result["returncode"] == 0
+    assert "Abandoned" in result["message"]
+    assert not (tmp_path / ".imp" / "quests" / "2026-06-24-abn10").exists()
+
+
+def test_run_mutation_abandon_no_match_returns_error(tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+    result = run_mutation(tmp_path, "abandon", {"token": "ghost"})
+    assert result["returncode"] == 2
+    assert "no quest matches" in result["message"]
+
+
+def test_run_mutation_abandon_ambiguous_returns_error(tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+    _draft(tmp_path, "2026-06-24-amb10")
+    _draft(tmp_path, "2026-06-24-amb20")
+    result = run_mutation(tmp_path, "abandon", {"token": "amb"})
+    assert result["returncode"] == 2
+    assert "is ambiguous" in result["message"]
+
+
+@pytest.mark.anyio
+async def test_proxy_mutation_abandon_round_trips_over_socket(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _seed_control(tmp_path)
+    _draft(tmp_path, "2026-06-24-abn50")
+    sock = str(tmp_path / "s.sock")
+    monkeypatch.setenv("IMP_SESSION_SOCKET", sock)
+
+    session = SessionSocket(sock, on_query=build_session_handler(tmp_path))
+    async with anyio.create_task_group() as tg:
+        await session.open()
+        tg.start_soon(session.serve)
+
+        result = await anyio.to_thread.run_sync(
+            proxy_mutation, "abandon", {"token": "abn50"})
+        assert result["returncode"] == 0
+        assert not (tmp_path / ".imp" / "quests" / "2026-06-24-abn50").exists()
+
+        await session.close()
+        tg.cancel_scope.cancel()
+
+
+def test_cmd_abandon_proxies_when_socket_set(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("IMP_SESSION_SOCKET", "/tmp/imp-x/y.sock")
+    seen: dict[str, object] = {}
+
+    def _fake(op: str, args: dict) -> dict:
+        seen["op"] = op
+        seen["args"] = args
+        return {"returncode": 0, "message": "Abandoned q1."}
+
+    monkeypatch.setattr(main, "proxy_mutation", _fake)
+    assert main._cmd_abandon(argparse.Namespace(token="q1")) == 0
+    assert seen == {"op": "abandon", "args": {"token": "q1"}}
+
+
+@pytest.mark.parametrize("token", [None, "   "])
+def test_cmd_abandon_missing_token_in_sandbox_errors(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], token: str | None,
+) -> None:
+    monkeypatch.setenv("IMP_SESSION_SOCKET", "/tmp/imp-x/y.sock")
+
+    def _boom(op: str, args: dict) -> dict:
+        raise AssertionError("must not proxy or tear down without a token")
+
+    monkeypatch.setattr(main, "proxy_mutation", _boom)
+    rc = main._cmd_abandon(argparse.Namespace(token=token))
+    assert rc == 2
+    assert "needs a quest token" in capsys.readouterr().err
+
+
 def test_async_cmd_new_proxy_forwards_background(
         monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("IMP_SESSION_SOCKET", "/tmp/imp-x/y.sock")

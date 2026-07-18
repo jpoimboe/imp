@@ -3078,8 +3078,14 @@ async def _pick_events_matches(control: Path, matches: list[str]) -> str | int:
 
 
 def _cmd_abandon(args: argparse.Namespace) -> int:
-    control = _control_root()
     token = args.token
+    if os.environ.get("IMP_SESSION_SOCKET"):
+        if token is None or not token.strip():
+            print("imp: abandon needs a quest token in a sandboxed session",
+                  file=sys.stderr)
+            return 2
+        return _emit_mutation_result(proxy_mutation("abandon", {"token": token}))
+    control = _control_root()
     if token is None or not token.strip():
         target = anyio.run(_pick_abandon_target, control)
         if isinstance(target, int):
