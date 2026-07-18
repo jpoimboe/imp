@@ -934,7 +934,7 @@ def apply_new(
     depends_on: list[str] | None, parent: str | None = None,
     background: bool = False,
 ) -> tuple[int, str]:
-    """Non-interactive create for the mutation proxy: record a backlog quest or plain draft."""
+    """Non-interactive create for the mutation proxy: record a backlog quest."""
     try:
         resolved_base = _resolve_new_base(control, base)
     except BaseResolutionError as e:
@@ -977,11 +977,11 @@ def apply_new(
         Quest.create_draft(
             control, title=title or "", quest_id=quest_id,
             base_branch=resolved_base, depends_on=deps, workflow=workflow,
-            origin="draft", seed_opening=opening, parent=parent, defer_seed=True)
+            origin="backlog", seed_opening=opening, parent=parent, defer_seed=True)
     except (LoadError, LoadErrors) as e:
         return 2, f"imp: {e}"
-    return 0, (f"imp: created draft {quest_id} "
-               f"(resume with `imp resume {quest_id}`)")
+    return 0, (f"imp: recorded backlog quest {quest_id} "
+               f"(start it with `imp resume {quest_id}`)")
 
 
 def _select_headless(
