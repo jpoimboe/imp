@@ -6,7 +6,6 @@ import logging
 import os
 import queue
 import signal
-import sys
 import threading
 import urllib.error
 from collections.abc import Awaitable, Callable, Mapping
