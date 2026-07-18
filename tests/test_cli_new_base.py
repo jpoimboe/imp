@@ -168,10 +168,10 @@ def test_apply_new_draft_records_quest(tmp_path: Path, monkeypatch) -> None:
         tmp_path, opening="do the thing", title="Thing", workflow=None,
         base=None, idea=None, depends_on=None)
     assert rc == 0
-    assert "created draft" in msg
+    assert "recorded backlog quest" in msg
     quests = sorted((tmp_path / ".imp" / "quests").iterdir())
     quest = Quest.load(tmp_path, quests[-1].name)
-    assert quest.origin == "draft"
+    assert quest.origin == "backlog"
     assert quest.title == "Thing"
     assert quest.seed_opening == "do the thing"
 
