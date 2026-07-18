@@ -63,37 +63,50 @@ class SandboxPolicy:
     network: bool                             # True → no --unshare-net
     note: str = "" # "" | "unsandboxed_by_config" | "sandbox_disabled" | "unsandboxed_override"
     quest_home: str = ""                     # <control>/.imp/quests/<id> rw bind ("" → none)
+    control_imp: str = ""                    # <control>/.imp fail-closed tmpfs mask ("" → none)
     readonly_overlays: tuple[str, ...] = ()  # ro subtrees; after git_ro_remask, before caches
     git_ref_reexpose: tuple[str, ...] = ()   # rw re-expose of refs/heads/imp; after git_ro_remask
     disposable_tree: bool = False            # agent runs in a disposable git worktree
     home: str = ""                           # real $HOME ("" → inactive/unresolved)
     home_layer: HomeLayer | None = None      # writable-home layer (None → ro read-through)
 
-    def allows_read(self, path: Path) -> bool:
-        """In-process mirror of the sandbox's read exposure: the whole host is
-        readable (--ro-bind / /) EXCEPT the secret masks — secret_dirs as path
-        prefixes, secret_files as exact paths. Deliberately stricter than bwrap
-        (which serves empties for masked reads); see spec Decisions."""
-        if any(path.is_relative_to(Path(d)) for d in self.secret_dirs):
-            return False
-        return not any(path == Path(f) for f in self.secret_files)
-
     def bind_plan(self) -> list[tuple[str, str]]:
         """The ordered path-covering binds, in bwrap EMIT ORDER — the SINGLE
         source of truth shared by build_sandbox_argv (which formats each entry to
-        argv) and allows_write (which evaluates last-covering-wins). kind is one
-        of rw / ro / mask_dir / mask_file; rw grants write. The order is
+        argv), allows_write, and allows_read (both evaluate last-covering-wins).
+        kind is one of rw / ro / mask_dir / mask_file; rw grants write. The order is
         load-bearing: the ro overlays (git_ro_remask, readonly_overlays, extra_readable)
         are NOT globally last-wins — a later writable bind re-exposes a path they
         cover — only the secret masks are unconditionally last. Add a new bind here
-        and BOTH consumers pick it up; the argv-parity test enforces no drift. The
-        order is load-bearing and last-wins: the home_layer rw bind goes FIRST (so
-        caches/worktree/secrets layered over $HOME win), /tmp next, and the secret
-        masks unconditionally LAST."""
+        and ALL consumers pick it up; the argv-parity test enforces no drift. The
+        home_layer rw bind goes FIRST (so caches/worktree/secrets over $HOME win),
+        /tmp next, and the secret masks unconditionally LAST.
+
+        The <control>/.imp tmpfs (control_imp) is a fail-closed mask over the whole
+        control tree; its position is worktree-relative and LOAD-BEARING. Normal
+        quest: the worktree is nested at .imp/worktrees/<id> (a DESCENDANT of .imp),
+        so the tmpfs precedes the worktree rw bind and last-wins re-exposes the
+        nested worktree on top. Draft/degenerate agent: worktree == control_root (an
+        ANCESTOR of .imp), so the control-root rw bind precedes the tmpfs — the tmpfs
+        re-masks .imp instead of being re-exposed by it — and the worktree is
+        deliberately NOT re-bound after it. In BOTH cases the quest_home rebind and
+        the own steps/events masks come AFTER the tmpfs. Invariant: after the whole
+        plan applies, the exposed set under <control>/.imp is EXACTLY the current
+        quest's own home (minus its own steps/events) plus the current worktree iff
+        the worktree is a descendant of .imp; everything else under .imp is masked.
+        Mis-ordering buries a live quest's own bookkeeping (normal) or leaks every
+        sibling (draft)."""
+        imp_mask = [(self.control_imp, "mask_dir")] if self.control_imp else []
+        nested = bool(self.control_imp) and Path(self.worktree).is_relative_to(
+            Path(self.control_imp))
+        worktree_block = (
+            [*imp_mask, (self.worktree, "rw")] if nested
+            # draft: worktree is an ANCESTOR of .imp, so bind it BEFORE the tmpfs
+            else [(self.worktree, "rw"), *imp_mask])
         return [
             *([(self.home_layer.home, "rw")] if self.home_layer is not None else []),
             ("/tmp", "rw"),
-            (self.worktree, "rw"),
+            *worktree_block,
             (self.git_common_dir, "rw"),
             *([(self.quest_home, "rw")] if self.quest_home else []),
             *[(p, "ro") for p in self.git_ro_remask],
@@ -116,6 +129,19 @@ class SandboxPolicy:
             if path.is_relative_to(Path(bind)):
                 verdict = kind
         return verdict == "rw"
+
+    def allows_read(self, path: Path) -> bool:
+        """In-process mirror of the sandbox's read exposure. Walks bind_plan() in
+        emit order (the shared source of truth with allows_write); the LAST bind
+        covering `path` decides: readable unless that last bind is a mask
+        (mask_dir/mask_file). An uncovered path is readable — the host --ro-bind / /
+        floor. Deliberately stricter than bwrap (which serves an empty for a masked
+        read); see spec Decisions."""
+        verdict: str | None = None
+        for bind, kind in self.bind_plan():
+            if path.is_relative_to(Path(bind)):
+                verdict = kind
+        return verdict not in ("mask_dir", "mask_file")
 
 
 def _is_engine_passthrough(key: str) -> bool:
@@ -502,6 +528,7 @@ def resolve_policy(
         worktree=str(worktree),
         git_common_dir=str(git),
         quest_home=str(quest_dir) if quest_dir is not None else "",
+        control_imp=str(control_root / ".imp"),
         git_ro_remask=tuple(remask),
         git_ref_reexpose=git_ref_reexpose,
         disposable_tree=disposable_tree,

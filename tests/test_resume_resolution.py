@@ -155,13 +155,13 @@ def test_resolve_default_id_all_archived_empty_last_returns_none(
 def test_iter_quest_ids_live_first_then_archived_sorted_deduped(
     monkeypatch, tmp_path: Path,
 ) -> None:
-    # Live order is preserved; archived ids follow sorted; quest-a (in both) appears once.
-    live = ["quest-b", "quest-a"]
+    # Live ids come through the store (scan_homes); their order is preserved, archived
+    # ids follow sorted, and quest-a (in both) appears once.
+    homes = [_make_home("quest-b", ""), _make_home("quest-a", "")]
     rows = [
         _completed_row("quest-a", "2026-06-01T00:00:00+00:00"),  # already live → deduped
         _completed_row("quest-c", "2026-06-01T00:00:00+00:00"),
         _completed_row("quest-d", "2026-06-01T00:00:00+00:00"),
     ]
-    monkeypatch.setattr(m, "_list_quest_homes", lambda _: live)
-    monkeypatch.setattr(m, "make_store", lambda _: _StubStore([], rows))
+    monkeypatch.setattr(m, "make_store", lambda _: _StubStore(homes, rows))
     assert m._iter_quest_ids(tmp_path) == ["quest-b", "quest-a", "quest-c", "quest-d"]

@@ -1455,7 +1455,8 @@ def test_resolve_policy_masks_archive_footguns(tmp_path):
     assert str(archive / "records") not in pol.secret_dirs
     assert pol.allows_read(archive / "blobs" / "ab" / "cd") is False
     assert pol.allows_read(archive / "index.db") is False
-    assert pol.allows_read(archive / "records" / "x.json") is True
+    # records/ is now under the .imp tmpfs too — no longer readable in-sandbox.
+    assert pol.allows_read(archive / "records" / "x.json") is False
 
 
 def test_resolve_policy_archive_mask_is_existence_gated(tmp_path):
@@ -1469,6 +1470,97 @@ def test_resolve_policy_archive_mask_is_existence_gated(tmp_path):
     archive = control / ".imp" / "archive"
     assert str(archive / "blobs") not in pol.secret_dirs
     assert str(archive / "index.db") not in pol.secret_files
+
+
+def test_resolve_policy_sets_control_imp_tmpfs(tmp_path):
+    control, wt = _layout(tmp_path)
+    pol = resolve_policy(
+        worktree=wt, control_root=control, quest_id="abc",
+        cfg=SandboxConfig(), engine_env_result={}, environ={}, available=True,
+    )
+    assert pol.control_imp == str(control / ".imp")
+    assert (str(control / ".imp"), "mask_dir") in pol.bind_plan()
+
+
+def test_bind_plan_imp_tmpfs_before_worktree_for_nested_worktree():
+    # Normal quest: worktree nested at .imp/worktrees/abc, quest home at
+    # .imp/quests/abc. The tmpfs must precede the worktree rw bind, and both the
+    # worktree and quest_home rebinds must follow it (last-wins re-exposes them).
+    p = _policy(control_imp="/ctl/.imp", quest_home="/ctl/.imp/quests/abc")
+    paths = [b for b, _ in p.bind_plan()]
+    i_tmpfs = paths.index("/ctl/.imp")
+    i_wt = paths.index("/ctl/.imp/worktrees/abc")
+    i_home = paths.index("/ctl/.imp/quests/abc")
+    assert i_tmpfs < i_wt < i_home
+    assert p.bind_plan()[i_tmpfs][1] == "mask_dir"
+
+
+def test_bind_plan_imp_tmpfs_after_worktree_for_draft():
+    # Draft/degenerate agent: worktree == control_root (an ANCESTOR of .imp). The
+    # control-root rw bind must precede the tmpfs (so the tmpfs re-masks .imp), the
+    # quest_home rebind must follow it, and the worktree is NOT re-exposed after it.
+    p = _policy(control_imp="/ctl/.imp", worktree="/ctl",
+                quest_home="/ctl/.imp/quests/abc")
+    paths = [b for b, _ in p.bind_plan()]
+    i_wt = paths.index("/ctl")
+    i_tmpfs = paths.index("/ctl/.imp")
+    i_home = paths.index("/ctl/.imp/quests/abc")
+    assert i_wt < i_tmpfs < i_home
+    assert paths.count("/ctl") == 1   # worktree bound once, before the tmpfs only
+
+
+def test_argv_binds_match_bind_plan_with_imp_tmpfs():
+    # Drift guard: the new tmpfs round-trips through the argv parser for BOTH the
+    # nested and draft orderings.
+    p = _policy(control_imp="/ctl/.imp", quest_home="/ctl/.imp/quests/abc")
+    argv = build_sandbox_argv("x", cwd="/wt", policy=p, engine_env={})
+    assert _parse_argv_binds(argv) == p.bind_plan()
+    assert ("/ctl/.imp", "mask_dir") in p.bind_plan()
+
+    pd = _policy(control_imp="/ctl/.imp", worktree="/ctl",
+                 quest_home="/ctl/.imp/quests/abc")
+    argvd = build_sandbox_argv("x", cwd="/ctl", policy=pd, engine_env={})
+    assert _parse_argv_binds(argvd) == pd.bind_plan()
+
+
+def test_allows_read_draft_tmpfs_supersedes_control_root_bind():
+    # AC 5 / AC 9(b): in the draft case the control-root rw bind covers a sibling
+    # path, but the LATER .imp tmpfs supersedes it — siblings, archive, and config
+    # read as denied, while the re-exposed own home reads True and its own
+    # steps/events masks still deny.
+    p = _policy(
+        control_imp="/ctl/.imp", worktree="/ctl",
+        quest_home="/ctl/.imp/quests/abc",
+        secret_dirs=("/ctl/.imp/quests/abc/steps", "/run/user/1000"),
+        secret_files=("/ctl/.imp/quests/abc/events.jsonl",),
+    )
+    assert p.allows_read(Path("/ctl/.imp/quests/other/events.jsonl")) is False
+    assert p.allows_read(Path("/ctl/.imp/archive/blobs/ab/cd")) is False
+    assert p.allows_read(Path("/ctl/.imp/config.yaml")) is False
+    assert p.allows_read(Path("/ctl/.imp/quests/abc/artifacts/spec/abc.md")) is True
+    assert p.allows_read(Path("/ctl/.imp/quests/abc/steps/x")) is False
+    assert p.allows_read(Path("/ctl/.imp/quests/abc/events.jsonl")) is False
+    assert p.allows_write(Path("/ctl/.imp/quests/other/x")) is False
+    assert p.allows_write(Path("/ctl/.imp/quests/abc/artifacts/x.md")) is True
+
+
+def test_allows_read_nested_tmpfs_masks_siblings_and_archive():
+    # Nested (normal) worktree: the .imp tmpfs precedes the worktree rw bind. A
+    # sibling home and the archive read as denied; the re-exposed own home and the
+    # nested worktree read True, while the own steps/events masks still deny.
+    p = _policy(
+        control_imp="/ctl/.imp", worktree="/ctl/.imp/worktrees/abc",
+        quest_home="/ctl/.imp/quests/abc",
+        secret_dirs=("/ctl/.imp/quests/abc/steps", "/run/user/1000"),
+        secret_files=("/ctl/.imp/quests/abc/events.jsonl",),
+    )
+    assert p.allows_read(Path("/ctl/.imp/quests/other/events.jsonl")) is False
+    assert p.allows_read(Path("/ctl/.imp/archive/blobs/ab/cd")) is False
+    assert p.allows_read(Path("/ctl/.imp/config.yaml")) is False
+    assert p.allows_read(Path("/ctl/.imp/quests/abc/artifacts/spec/abc.md")) is True
+    assert p.allows_read(Path("/ctl/.imp/worktrees/abc/src/x.py")) is True
+    assert p.allows_read(Path("/ctl/.imp/quests/abc/steps/x")) is False
+    assert p.allows_read(Path("/ctl/.imp/quests/abc/events.jsonl")) is False
 
 
 def test_resolve_policy_injects_session_socket_marker(tmp_path):

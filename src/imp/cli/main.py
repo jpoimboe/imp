@@ -1523,11 +1523,15 @@ def _quest_home(control: Path, quest_id: str) -> Path:
 
 
 def _iter_quest_ids(control: Path) -> list[str]:
-    """Live homes first, then archived ids not in the live set."""
-    live = _list_quest_homes(control)
+    """Live homes first, then archived ids not in the live set. Live-home ids come
+    through the store (scan_homes), not a raw .imp/quests/ disk scan, so an
+    in-sandbox CLI resolves them via the session daemon: the fail-closed .imp mask
+    hides sibling homes on disk, and the daemon reads them unsandboxed."""
+    store = make_store(control)
+    live = [h.quest_id for h in store.scan_homes()]
     seen = set(live)
     out = list(live)
-    for cid in sorted(r.quest_id for r in make_store(control).completed_rows()):
+    for cid in sorted(r.quest_id for r in store.completed_rows()):
         if cid not in seen:
             out.append(cid)
             seen.add(cid)
