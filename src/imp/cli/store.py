@@ -78,6 +78,7 @@ class Store(Protocol):
     def scan_homes(self) -> list[HomeDigest]: ...
     def quest_card(self, quest_id: str) -> QuestCard | None: ...
     def search(self, query: str, zones: SearchZones) -> list[SearchHit]: ...
+    def search_event_candidates(self, query: str) -> list[tuple[str, str, str, str | None]]: ...
 
 
 class LocalStore:
@@ -194,6 +195,10 @@ class LocalStore:
             hits += _search_archived(
                 self.control_root, query, set(zones.statuses), zones.merged_after)
         return hits
+
+    def search_event_candidates(self, query: str) -> list[tuple[str, str, str, str | None]]:
+        from imp.engine.archive import read as archive_read
+        return archive_read.search_archive_events_content(self.control_root, query)
 
 
 def make_store(control_root: Path) -> Store:

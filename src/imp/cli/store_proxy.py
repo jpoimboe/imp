@@ -122,6 +122,8 @@ def run_query(store: Store, op: str, args: dict[str, Any]) -> Any:
     if op == "search":
         return [_hit_to_wire(h)
                 for h in store.search(args["query"], _zones_from_wire(args["zones"]))]
+    if op == "search_event_candidates":
+        return [list(t) for t in store.search_event_candidates(args["query"])]
     raise ValueError(f"unknown store op {op!r}")
 
 
@@ -177,3 +179,6 @@ class ProxyStore:
     def search(self, query: str, zones: SearchZones) -> list[SearchHit]:
         return [_hit_from_wire(d) for d in self._call(
             "search", {"query": query, "zones": _zones_to_wire(zones)})]
+
+    def search_event_candidates(self, query: str) -> list[tuple[str, str, str, str | None]]:
+        return [tuple(x) for x in self._call("search_event_candidates", {"query": query})]

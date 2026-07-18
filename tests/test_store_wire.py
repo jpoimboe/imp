@@ -135,6 +135,42 @@ def test_run_query_search_decodes_zones(tmp_path: Path) -> None:
     assert wire[0]["zone"] == "active"
 
 
+def _archive_with_event(tmp_path: Path, quest_id: str, title: str, events_text: str) -> None:
+    from imp.engine import archive
+
+    events = tmp_path / f"{quest_id}.jsonl"
+    events.write_text(events_text)
+    quest_json = tmp_path / f"{quest_id}.quest.json"
+    quest_json.write_text(json.dumps({
+        "id": quest_id, "title": title, "base_branch": "main",
+        "created_at": "2026-06-01T00:00:00+00:00", "depends_on": []}))
+    state_json = tmp_path / f"{quest_id}.state.json"
+    state_json.write_text(json.dumps({"id": quest_id, "status": "abandoned", "step": "spec"}))
+    archive.archive_quest(
+        tmp_path, quest_id, events_path=events,
+        quest_json_path=quest_json, state_json_path=state_json)
+
+
+def test_run_query_search_event_candidates_round_trips_none_last(tmp_path: Path) -> None:
+    from imp.cli.store import LocalStore
+
+    # tool_call event with NO timestamp -> indexed last_event_ts is None.
+    line = json.dumps({
+        "id": "e0", "type": "tool_call",
+        "payload": {"name": "bash", "input": {"cmd": "GREPTARGET"}}}) + "\n"
+    _archive_with_event(tmp_path, "arch01", "Archived one", line)
+    store = LocalStore(tmp_path)
+
+    local = store.search_event_candidates("GREPTARGET")
+    assert local == [("arch01", "Archived one", "abandoned", None)]
+
+    wire = run_query(store, "search_event_candidates", {"query": "GREPTARGET"})
+    assert wire == [["arch01", "Archived one", "abandoned", None]]
+    assert _json_round_trip(wire) == wire
+    rebuilt = [tuple(x) for x in _json_round_trip(wire)]
+    assert rebuilt == local
+
+
 def test_run_query_rejects_unknown_op(tmp_path: Path) -> None:
     from imp.cli.store import LocalStore
 
