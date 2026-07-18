@@ -2864,6 +2864,11 @@ def _abandon_local(control: Path, quest_id: str) -> int:
     return rc
 
 
+def _cmd_remote_control(args: argparse.Namespace) -> int:
+    args.parser.print_help(sys.stderr)
+    return 2
+
+
 def _cmd_remote_control_start(args: argparse.Namespace) -> int:
     from imp.remote.daemon.runner import start_daemon
     return start_daemon(_control_root())
@@ -3585,6 +3590,9 @@ def _events_search_json(hits: list[EventSearchHit]) -> list[dict[str, Any]]:
 def _cmd_events_search(
     args: argparse.Namespace, _control: Path | None = None,
 ) -> int:
+    if args.query is None:
+        args.parser.print_help(sys.stderr)
+        return 2
     control = _control if _control is not None else _control_root()
     types = set(args.type) if args.type else None
     agents = set(args.agent) if args.agent else None
@@ -3817,7 +3825,7 @@ def _build_events_search_parser() -> argparse.ArgumentParser:
             "narrow which events match."),
     )
     p.add_argument(
-        "query", metavar="QUERY",
+        "query", metavar="QUERY", nargs="?", default=None,
         help="Substring matched case-insensitively against event content.")
     p.add_argument("--active", action="store_true",
                    help="Search in-flight quests' events.")
@@ -3840,7 +3848,7 @@ def _build_events_search_parser() -> argparse.ArgumentParser:
                    help="Structured output of matched events.")
     p.add_argument("--no-pager", action="store_true",
                    help="Disable the pager even when stdout is a TTY.")
-    p.set_defaults(func=_cmd_events_search)
+    p.set_defaults(func=_cmd_events_search, parser=p)
     return p
 
 
@@ -4035,14 +4043,19 @@ def _build_parser() -> argparse.ArgumentParser:
         "events",
         help="Slice and dice a quest's event log (imp events <id>).",
         description=(
-            "Index and filter a quest's event log. Bare: a steps+types index. "
-            "--step <name>: a scoped index for that step's window. "
-            "--type / --agent / <range> / --all: compact event lines "
-            "(#N ordinal, type, [agent], summary). --json for structured "
-            "output. Run imp events search <query> for a case-insensitive "
-            "substring search across event content (tool calls, results, "
-            "reasoning); narrow with --type / --agent."
+            "Index and filter a quest's event log. Bare (imp events <id>): a\n"
+            "steps+types index. --step <name>: a scoped index for that step's\n"
+            "window. --type / --agent / <range> / --all: compact event lines (#N\n"
+            "ordinal, type, [agent], summary). --json for structured output."
         ),
+        epilog=(
+            "subcommands:\n"
+            "  imp events search <query>\n"
+            "      Substring search across event content (tool calls, results,\n"
+            "      reasoning). Narrow with --type / --agent; full flags with:\n"
+            "      imp events search -h"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     p_events.add_argument(
         "token", nargs="?", default=None,
@@ -4258,7 +4271,8 @@ def _build_parser() -> argparse.ArgumentParser:
         "remote-control",
         help="Run the optional per-repo daemon that relays all quests to one transport.",
     )
-    rc_sub = p_rc.add_subparsers(dest="rc_action", required=True)
+    p_rc.set_defaults(func=_cmd_remote_control, parser=p_rc)
+    rc_sub = p_rc.add_subparsers(dest="rc_action", required=False)
     p_rc_start = rc_sub.add_parser(
         "start", help="Start the remote-control daemon for this repo (foreground).")
     p_rc_start.set_defaults(func=_cmd_remote_control_start)

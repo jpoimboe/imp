@@ -62,13 +62,26 @@ def test_opening_hint_omits_model() -> None:
 def test_events_help_documents_the_search_sibling(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
 ) -> None:
-    # AC 5: `imp events --help` shows a line documenting `imp events search`,
-    # mentioning --type / --agent. Widen the terminal so argparse does not wrap
-    # the phrase mid-string.
+    # `imp events -h` shows a native-looking subcommands block documenting
+    # `imp events search`, mentioning --type / --agent. Widen the terminal so
+    # argparse does not wrap the phrase mid-string.
     monkeypatch.setenv("COLUMNS", "200")
     out = _help_for(["events", "-h"], capsys)
+    assert "subcommands:" in out
     assert "imp events search <query>" in out
     assert "--type / --agent" in out
+
+
+def test_events_help_moves_search_pointer_out_of_the_description(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
+    # The old "Run imp events search <query> …" sentence is gone from the
+    # description; the description still documents the core behaviors.
+    monkeypatch.setenv("COLUMNS", "200")
+    out = _help_for(["events", "-h"], capsys)
+    assert "Run imp events search" not in out
+    assert "a scoped index" in out
+    assert "--json for structured" in out
 
 
 def test_events_help_no_longer_promises_a_most_recent_default(
@@ -92,6 +105,19 @@ def test_log_help_no_longer_promises_a_most_recent_default(
     assert "Quest id or its short token" in out
 
 
+def test_bare_events_search_prints_full_help_on_stderr(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
+    # The no-query guard precedes _control_root(), so no repo is needed.
+    monkeypatch.setenv("COLUMNS", "200")
+    rc = main(["events", "search"])
+    err = capsys.readouterr().err
+    assert rc == 2
+    assert "Case-insensitive substring search" in err
+    assert "--active" in err
+    assert "--agent" in err
+
+
 def test_bare_events_lists_the_search_sibling_on_stderr(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
 ) -> None:
@@ -103,3 +129,17 @@ def test_bare_events_lists_the_search_sibling_on_stderr(
     captured = capsys.readouterr()
     assert rc == 2
     assert "imp events search <query>" in captured.err
+
+
+def test_bare_remote_control_prints_full_help_on_stderr(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
+    # Bare `imp remote-control` (no action) prints its full help — listing the
+    # start and stop actions — to stderr and exits 2, instead of argparse's
+    # terse required-argument error.
+    monkeypatch.setenv("COLUMNS", "200")
+    rc = main(["remote-control"])
+    err = capsys.readouterr().err
+    assert rc == 2
+    assert "start" in err
+    assert "stop" in err
