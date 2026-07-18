@@ -10,7 +10,7 @@ from imp.cli.store import LocalStore, SearchZones, make_store
 from imp.cli.store_proxy import ProxyStore, run_query
 from imp.engine.quest import Quest
 from imp.remote.session.socket_server import SessionSocket
-from tests.conftest import _seed_control
+from tests.conftest import _archive_with_event, _seed_control
 
 
 @pytest.fixture
@@ -36,22 +36,6 @@ def test_make_store_returns_proxy_when_env_set(
 def test_make_store_returns_local_when_env_unset(tmp_path: Path) -> None:
     _seed_control(tmp_path)
     assert isinstance(make_store(tmp_path), LocalStore)
-
-
-def _archive_with_event(tmp_path: Path, quest_id: str, title: str, events_text: str) -> None:
-    from imp.engine import archive
-
-    events = tmp_path / f"{quest_id}.jsonl"
-    events.write_text(events_text)
-    quest_json = tmp_path / f"{quest_id}.quest.json"
-    quest_json.write_text(json.dumps({
-        "id": quest_id, "title": title, "base_branch": "main",
-        "created_at": "2026-06-01T00:00:00+00:00", "depends_on": []}))
-    state_json = tmp_path / f"{quest_id}.state.json"
-    state_json.write_text(json.dumps({"id": quest_id, "status": "abandoned", "step": "spec"}))
-    archive.archive_quest(
-        tmp_path, quest_id, events_path=events,
-        quest_json_path=quest_json, state_json_path=state_json)
 
 
 @pytest.mark.anyio

@@ -20,7 +20,7 @@ from imp.cli.store_proxy import (
     run_query,
 )
 from imp.engine.quest import Quest
-from tests.conftest import _seed_control
+from tests.conftest import _archive_with_event, _seed_control
 
 
 def _json_round_trip(value: object) -> object:
@@ -133,22 +133,6 @@ def test_run_query_search_decodes_zones(tmp_path: Path) -> None:
     wire = run_query(LocalStore(tmp_path), "search", {"query": "darkmode", "zones": zones})
     assert [h["quest_id"] for h in wire] == ["liveone"]
     assert wire[0]["zone"] == "active"
-
-
-def _archive_with_event(tmp_path: Path, quest_id: str, title: str, events_text: str) -> None:
-    from imp.engine import archive
-
-    events = tmp_path / f"{quest_id}.jsonl"
-    events.write_text(events_text)
-    quest_json = tmp_path / f"{quest_id}.quest.json"
-    quest_json.write_text(json.dumps({
-        "id": quest_id, "title": title, "base_branch": "main",
-        "created_at": "2026-06-01T00:00:00+00:00", "depends_on": []}))
-    state_json = tmp_path / f"{quest_id}.state.json"
-    state_json.write_text(json.dumps({"id": quest_id, "status": "abandoned", "step": "spec"}))
-    archive.archive_quest(
-        tmp_path, quest_id, events_path=events,
-        quest_json_path=quest_json, state_json_path=state_json)
 
 
 def test_run_query_search_event_candidates_round_trips_none_last(tmp_path: Path) -> None:

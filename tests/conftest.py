@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 from collections.abc import Generator
@@ -281,6 +282,22 @@ def write_agent_md(path: Path, frontmatter: str, body: str = "prompt body") -> P
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(f"---\n{frontmatter}\n---\n{body}\n")
     return path
+
+
+def _archive_with_event(tmp_path: Path, quest_id: str, title: str, events_text: str) -> None:
+    from imp.engine import archive
+
+    events = tmp_path / f"{quest_id}.jsonl"
+    events.write_text(events_text)
+    quest_json = tmp_path / f"{quest_id}.quest.json"
+    quest_json.write_text(json.dumps({
+        "id": quest_id, "title": title, "base_branch": "main",
+        "created_at": "2026-06-01T00:00:00+00:00", "depends_on": []}))
+    state_json = tmp_path / f"{quest_id}.state.json"
+    state_json.write_text(json.dumps({"id": quest_id, "status": "abandoned", "step": "spec"}))
+    archive.archive_quest(
+        tmp_path, quest_id, events_path=events,
+        quest_json_path=quest_json, state_json_path=state_json)
 
 
 @pytest.fixture
