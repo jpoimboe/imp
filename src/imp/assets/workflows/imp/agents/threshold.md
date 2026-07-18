@@ -170,6 +170,20 @@ If what you've scoped can only be built after another in-flight quest merges, th
 `imp edit {{ quest.id }} --depends-on <id>` (allowed while un-materialized); it then flows
 into the gate above. Keep the work in this quest — don't split it into a child.
 
+## Close redundant backlog quests at approval
+
+When the quest you're scoping clearly supersedes existing **backlog** quests —
+they'd be redundant once this builds — name them to the user as you scope and
+carry them into the go-live proposal: approving the build closes them too. On
+go-live, `imp abandon <id>` each; say plainly the close is permanent (searchable
+afterward, not resumable). Don't defer it to a "close at merge" note in the spec
+— nothing performs that step.
+
+Only **backlog** items. A superseded **in-flight** quest you flag (it may hold
+real work in progress) but never close this way — that's a deliberate call the
+user makes, not a side effect of approving this one. A merged quest is already
+done; nothing to do.
+
 ## Acting on imp
 
 - **Reads and introspection** — listing existing work, showing a quest, searching the

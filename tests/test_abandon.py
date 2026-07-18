@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from imp.cli.main import _abandon, _status_rows
+from imp.cli.main import _abandon, _abandon_local, _status_rows
 from imp.engine import worktree
 from imp.engine.abandon import tear_down_quest
 from imp.engine.quest import Quest
@@ -40,7 +40,7 @@ def test_abandon_happy_path_tears_down_and_archives(tmp_path: Path) -> None:
     _seed_control(tmp_path)
     Quest.create(tmp_path, title="x", quest_id="feat", base_branch="main")
 
-    rc = _abandon(tmp_path, "feat")
+    rc = _abandon_local(tmp_path, "feat")
     assert rc == 0
     assert not (tmp_path / ".imp" / "worktrees" / "feat").exists()       # worktree gone
     assert _git(tmp_path, "branch", "--list", "imp/feat").stdout.strip() == ""  # branch gone
@@ -57,7 +57,7 @@ def test_abandon_happy_path_tears_down_and_archives(tmp_path: Path) -> None:
 def test_abandon_surfaces_as_completed_not_inflight(tmp_path: Path) -> None:
     _seed_control(tmp_path)
     Quest.create(tmp_path, title="x", quest_id="feat", base_branch="main")
-    _abandon(tmp_path, "feat")
+    _abandon_local(tmp_path, "feat")
 
     assert all(r[0] != "feat" for r in _status_rows(tmp_path))           # not in-flight
     from imp.engine.archive import read as archive_read
@@ -71,7 +71,7 @@ def test_abandon_allowed_from_completed_status(tmp_path: Path) -> None:
     st = State.load(ch.state_dir)
     st.status = "completed"          # completed-but-not-merged: abandon is the only verb
     st.save(ch.state_dir)
-    assert _abandon(tmp_path, "feat") == 0
+    assert _abandon_local(tmp_path, "feat") == 0
     assert not (tmp_path / ".imp" / "worktrees" / "feat").exists()
 
 
@@ -79,7 +79,7 @@ def test_abandon_refuses_when_lock_held(tmp_path: Path) -> None:
     _seed_control(tmp_path)
     ch = Quest.create(tmp_path, title="x", quest_id="feat", base_branch="main")
     with ProjectLock(ch.quest_dir / "lock").acquire():     # simulate a live runner
-        rc = _abandon(tmp_path, "feat")
+        rc = _abandon_local(tmp_path, "feat")
     assert rc == 2
     assert (tmp_path / ".imp" / "worktrees" / "feat").exists()  # untouched
 
@@ -92,7 +92,7 @@ def test_abandon_already_gone_is_idempotent_and_reaps_branch(tmp_path: Path) -> 
     worktree.remove_worktree(tmp_path, "feat", force=True)
     assert _git(tmp_path, "branch", "--list", "imp/feat").stdout.strip() != ""  # orphan exists
 
-    rc = _abandon(tmp_path, "feat")
+    rc = _abandon_local(tmp_path, "feat")
     assert rc == 0                                              # not the rc=2 LoadError path
     assert _git(tmp_path, "branch", "--list", "imp/feat").stdout.strip() == ""  # reaped
 
@@ -119,7 +119,7 @@ def test_abandon_resident_routes_through_daemon(
     monkeypatch.setattr(_m, "session_is_resident", lambda _ctrl, cid: True)
     monkeypatch.setattr(_m, "_deliver_abandon_resident",
                         lambda _ctrl, cid: delivered.append(cid))
-    rc = _abandon(tmp_path, "feat")
+    rc = _abandon_local(tmp_path, "feat")
     assert rc == 0
     assert delivered == ["feat"]
 
@@ -141,7 +141,7 @@ def test_abandon_falls_through_when_resident_daemon_never_acks(
     monkeypatch.setattr(main_mod, "_deliver_abandon_resident", _hang)
     monkeypatch.setattr(main_mod, "tear_down_quest", lambda ch: torn.append(ch.id))
 
-    rc = main_mod._abandon(tmp_path, "feat")
+    rc = main_mod._abandon_local(tmp_path, "feat")
     assert rc == 0
     assert torn == ["feat"]  # fell through to direct teardown
 
@@ -172,7 +172,7 @@ def test_abandon_refuses_when_lock_held_on_idea(
                              base_branch="main", origin="idea",
                              seed_opening="An idea\n\ndo a thing")
     with ProjectLock(ch.quest_dir / "lock").acquire():
-        rc = _abandon(tmp_path, "idea1")
+        rc = _abandon_local(tmp_path, "idea1")
     assert rc == 2
     assert (tmp_path / ".imp" / "quests" / "idea1").exists()  # untouched
     assert "stop it before abandoning" in capsys.readouterr().err
@@ -183,7 +183,7 @@ def test_abandon_retires_backlog_item(tmp_path: Path) -> None:
     Quest.create_draft(tmp_path, title="Backlog brief", quest_id="bk1",
                         base_branch="main", origin="followup",
                         seed_opening="Backlog brief\n\ndo a thing")
-    rc = _abandon(tmp_path, "bk1")
+    rc = _abandon_local(tmp_path, "bk1")
     assert rc == 0
     assert not (tmp_path / ".imp" / "quests" / "bk1").exists()
 
@@ -195,7 +195,7 @@ def test_abandon_backlog_reports_message(
     Quest.create_draft(tmp_path, title="Backlog brief", quest_id="bk1",
                         base_branch="main", origin="followup",
                         seed_opening="Backlog brief")
-    rc = _abandon(tmp_path, "bk1")
+    rc = _abandon_local(tmp_path, "bk1")
     assert rc == 0
     assert "Abandoned bk1." in capsys.readouterr().out       # unified message; not "Discarded idea"
     from imp.engine.archive import read as archive_read
@@ -210,7 +210,7 @@ def test_abandon_unknown_id_reaps_branch_and_exits_zero(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     _seed_control(tmp_path)
-    rc = _abandon(tmp_path, "ghost")
+    rc = _abandon_local(tmp_path, "ghost")
     assert rc == 0
     assert "already gone" in capsys.readouterr().out
 
@@ -259,7 +259,7 @@ def test_abandon_draft_no_prompt_on_tty(
         raise AssertionError("abandon must not prompt")
 
     monkeypatch.setattr("builtins.input", _boom)
-    rc = _abandon(tmp_path, "idea1")
+    rc = _abandon_local(tmp_path, "idea1")
     assert rc == 0
     assert not (tmp_path / ".imp" / "quests" / "idea1").exists()  # torn down, no prompt
 
@@ -275,7 +275,7 @@ def test_abandon_materialized_no_prompt_on_tty(
         raise AssertionError("abandon must not prompt")
 
     monkeypatch.setattr("builtins.input", _boom)
-    rc = _abandon(tmp_path, "feat")
+    rc = _abandon_local(tmp_path, "feat")
     assert rc == 0
     assert not (tmp_path / ".imp" / "worktrees" / "feat").exists()  # torn down, no prompt
 
@@ -289,7 +289,7 @@ def test_resume_refuses_abandoned_draft(
     Quest.create_draft(tmp_path, title="An idea", quest_id="idea1",
                         base_branch="main", origin="idea",
                         seed_opening="An idea\n\ndo a thing")
-    assert _abandon(tmp_path, "idea1") == 0
+    assert _abandon_local(tmp_path, "idea1") == 0
     capsys.readouterr()  # drop the abandon output
 
     result = _load_or_rehydrate(tmp_path, "idea1")
@@ -308,7 +308,7 @@ def test_search_finds_abandoned_draft(
     Quest.create_draft(tmp_path, title="Zephyr idea", quest_id="idea1",
                         base_branch="main", origin="idea",
                         seed_opening="Zephyr idea\n\ndo a thing")
-    assert _abandon(tmp_path, "idea1") == 0
+    assert _abandon_local(tmp_path, "idea1") == 0
     capsys.readouterr()  # drop the abandon output
 
     ns = argparse.Namespace(
@@ -320,3 +320,24 @@ def test_search_finds_abandoned_draft(
     assert rc == 0
     assert "idea1" in out            # abandoned draft is found
     assert "· archive ·" in out      # surfaced from the archive zone
+
+
+def test_abandon_returns_rc_and_message_without_printing(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
+    _seed_control(tmp_path)
+    Quest.create(tmp_path, title="x", quest_id="feat", base_branch="main")
+    rc, message = _abandon(tmp_path, "feat")
+    assert rc == 0
+    assert message == "Abandoned feat."
+    assert capsys.readouterr().out == ""        # pure: teardown no longer prints
+
+
+def test_abandon_local_emits_message_and_returns_rc(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
+    _seed_control(tmp_path)
+    Quest.create(tmp_path, title="x", quest_id="feat", base_branch="main")
+    rc = _abandon_local(tmp_path, "feat")
+    assert rc == 0
+    assert "Abandoned feat." in capsys.readouterr().out

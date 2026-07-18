@@ -445,3 +445,44 @@ def test_plan_reviewer_flags_red_leaving_plan_as_major() -> None:
         "**Major** finding: the `verify` gate runs after every plan and will "
         "reject it."
     ) in body
+
+
+def test_threshold_closes_superseded_backlog_at_approval(tmp_path) -> None:
+    body = _agent_prompt("threshold")
+
+    # The section exists with its exact heading, placed AFTER the depends-on
+    # section and BEFORE "## Acting on imp".
+    heading = "## Close redundant backlog quests at approval"
+    assert heading in body
+    depends = body.index("## When the work depends on another quest")
+    acting = body.index("## Acting on imp")
+    here = body.index(heading)
+    assert depends < here < acting
+
+    # Verbatim load-bearing phrases from the agreed copy.
+    assert "clearly supersedes existing **backlog** quests" in body
+    assert "carry them into the go-live proposal: approving the build closes them too" in body
+    assert '`imp abandon <id>` each; say plainly the close is permanent' in body
+    assert 'Don\'t defer it to a "close at merge" note in the spec' in body
+    assert "A superseded **in-flight** quest you flag" in body
+    assert "never close this way" in body
+
+    # NOT autonomy-wrapped: rendering with autonomous=True strips every
+    # `{% if not run.autonomous %}` block, yet this section must survive.
+    log = JsonlEventLog(tmp_path / "threshold-events.jsonl")
+    rendered = render_prompt(
+        body,
+        build_context(
+            quest_title="t",
+            event_log=log,
+            quest_id="abc",
+            quest_home=".imp/quests/abc",
+            autonomous=True,
+            vars={"fast_path": False},
+        ),
+        workflow_dir=bundled_workflow_dir("imp"),
+    )
+    assert heading in rendered
+    # Sanity: the autonomy-guarded section IS stripped in the same render, so a
+    # surviving heading genuinely proves the new section is unwrapped.
+    assert "## Keep discovered work here by default" not in rendered

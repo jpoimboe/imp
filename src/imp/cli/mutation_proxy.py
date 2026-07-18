@@ -14,7 +14,7 @@ import anyio
 
 from imp.remote.session.protocol import encode_query, parse_result
 
-_MUTATION_OPS = frozenset({"resume", "new", "edit"})
+_MUTATION_OPS = frozenset({"resume", "new", "edit", "abandon"})
 
 
 def run_mutation(
@@ -46,6 +46,16 @@ def run_mutation(
             depends_on=args["depends_on"],
             background=args.get("background", False), parent=parent_id)
         return {"returncode": rc, "message": message}
+    if op == "abandon":
+        from imp.cli.main import _abandon, _iter_quest_ids
+        token = args["token"]
+        matches = [cid for cid in _iter_quest_ids(control_root) if token in cid]
+        if len(matches) != 1:
+            message = (f"imp: no quest matches {token!r}" if not matches
+                       else f"imp: {token!r} is ambiguous: {', '.join(matches)}")
+            return {"returncode": 2, "message": message}
+        rc, msg = _abandon(control_root, matches[0])
+        return {"returncode": rc, "message": msg}
     raise ValueError(f"unknown mutation op {op!r}")
 
 
