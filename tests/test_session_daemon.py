@@ -19,6 +19,7 @@ from imp.remote.session.protocol import (
     CONTROL_DISCARD,
     CONTROL_SAVE,
 )
+from tests.async_wait import wait_until
 
 
 @pytest.fixture
@@ -47,9 +48,7 @@ def _make_change(tmp_path: Path, quest_id: str) -> Quest:
 
 
 async def _wait_for_socket(sock: str) -> None:
-    with anyio.fail_after(5):
-        while not Path(sock).exists():
-            await anyio.sleep(0.02)
+    await wait_until(lambda: Path(sock).exists())
 
 
 def _seed_step(quest: Quest, step: str) -> None:
@@ -194,7 +193,7 @@ async def test_zero_client_gate_hibernates_by_default(tmp_path: Path) -> None:
             return "hibernated"
         return "resident"
 
-    with anyio.fail_after(5):
+    with anyio.fail_after(30):   # deadlock backstop only
         result = await serve_quest_session(
             quest, run_fn=fake_run, first_attach_timeout=0.1)
     assert result == "hibernated"
@@ -225,9 +224,7 @@ async def test_lock_is_held_during_run_and_released_after(tmp_path: Path) -> Non
         await anyio.sleep(0.05)  # let serve acquire the lock and enter run_fn
         assert lock_path.exists()  # ProjectLock writes the holder-pid file
         release.set()
-        with anyio.fail_after(5):
-            while "r" not in result:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: "r" in result)
         assert result["r"] == "done"
         assert not lock_path.exists()  # released on serve() return
         tg.cancel_scope.cancel()
@@ -330,9 +327,7 @@ async def test_resident_abandon_runs_teardown(tmp_path: Path) -> None:
                                on_event=lambda _e: None)
         await client.connect()
         await client.send_control(CONTROL_ABANDON)
-        with anyio.fail_after(5):
-            while not torn:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: torn)
         assert torn == [quest]
         await client.aclose()
         tg.cancel_scope.cancel()
@@ -370,23 +365,17 @@ async def test_interrupt_resume_prompt_not_duplicated_on_existing_client(
         c1 = SessionClient(sock, quest.id, quest.title, on_event=seen1.append)
         await c1.connect()
         tg.start_soon(c1.receive_events)
-        with anyio.fail_after(5):
-            while sum(e.get("type") == "awaiting_user_input" for e in seen1) < 1:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: sum(e.get("type") == "awaiting_user_input" for e in seen1) >= 1)
         # Late client attaches at the resume gate.
         seen2: list[dict[str, Any]] = []
         c2 = SessionClient(sock, quest.id, quest.title, on_event=seen2.append)
         await c2.connect()
         tg.start_soon(c2.receive_events)
-        with anyio.fail_after(5):
-            while sum(e.get("type") == "awaiting_user_input" for e in seen2) < 1:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: sum(e.get("type") == "awaiting_user_input" for e in seen2) >= 1)
         await anyio.sleep(0.1)
         assert sum(e.get("type") == "awaiting_user_input" for e in seen1) == 1
         await c2.send_input("go")
-        with anyio.fail_after(5):
-            while "r" not in result:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: "r" in result)
         assert result["r"] is RunResult.COMPLETED
         await c1.aclose()
         await c2.aclose()
@@ -437,14 +426,9 @@ async def test_interrupt_pause_reprompts_and_resumes_in_place(
                                on_event=received.append)
         await client.connect()
         tg.start_soon(client.receive_events)
-        with anyio.fail_after(5):
-            while not any(
-                    e.get("type") == "awaiting_user_input" for e in received):
-                await anyio.sleep(0.02)
+        await wait_until(lambda: any(e.get("type") == "awaiting_user_input" for e in received))
         await client.send_input("go left")
-        with anyio.fail_after(5):
-            while "r" not in result:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: "r" in result)
         assert result["r"] is RunResult.COMPLETED
         assert calls["n"] == 2
         assert {"type": "agent_result",
@@ -469,7 +453,7 @@ async def test_interrupt_pause_hibernates_with_zero_clients(
         await coordinator.signal_pause(reason="ctrl-c")
         return RunResult.PAUSED
 
-    with anyio.fail_after(5):
+    with anyio.fail_after(30):   # deadlock backstop only
         result = await serve_quest_session(
             quest, run_fn=fake_run, hibernate=True, first_attach_timeout=0.1)
     assert result is RunResult.PAUSED
@@ -499,7 +483,7 @@ async def test_resume_journals_workflow_resumed_without_flipping_status(
         seen["status"] = State.load(quest.state_dir).status
         return RunResult.COMPLETED
 
-    with anyio.fail_after(5):
+    with anyio.fail_after(30):   # deadlock backstop only
         result = await serve_quest_session(
             quest, run_fn=fake_run, hibernate=False, resume=True)
 
@@ -541,7 +525,7 @@ async def test_resume_sets_resume_pending_for_a_stale_lock_crash(tmp_path: Path)
         seen["resume_mode"] = st.resume_mode
         return RunResult.COMPLETED
 
-    with anyio.fail_after(5):
+    with anyio.fail_after(30):   # deadlock backstop only
         result = await serve_quest_session(
             quest, run_fn=fake_run, hibernate=False, resume=True)
 
@@ -575,7 +559,7 @@ async def test_resume_with_no_lock_does_not_set_resume_pending(tmp_path: Path) -
         seen["resume_pending"] = State.load(quest.state_dir).resume_pending
         return RunResult.COMPLETED
 
-    with anyio.fail_after(5):
+    with anyio.fail_after(30):   # deadlock backstop only
         result = await serve_quest_session(
             quest, run_fn=fake_run, hibernate=False, resume=True)
 
@@ -604,7 +588,7 @@ async def test_default_spawn_does_no_resume_prep(tmp_path: Path) -> None:
         seen["status"] = State.load(quest.state_dir).status
         return RunResult.COMPLETED
 
-    with anyio.fail_after(5):
+    with anyio.fail_after(30):   # deadlock backstop only
         result = await serve_quest_session(
             quest, run_fn=fake_run, hibernate=False)  # resume defaults False
 
@@ -704,9 +688,7 @@ async def test_two_interrupt_rounds_leave_no_open_pause(tmp_path: Path) -> None:
                     answered += 1
                 await anyio.sleep(0.02)
         tg.start_soon(_answer)
-        with anyio.fail_after(10):
-            while "r" not in result:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: "r" in result)
         assert result["r"] is RunResult.COMPLETED
         types = [e["type"] for e in quest.event_log().read()]
         assert types.count("workflow_paused") == 2
@@ -854,9 +836,7 @@ async def test_resident_abandon_of_unmaterialized_draft_tears_down(
                                on_event=lambda _e: None)
         await client.connect()
         await client.send_control(CONTROL_ABANDON)
-        with anyio.fail_after(5):
-            while not torn:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: torn)
         assert torn == [quest]
         assert archived == []  # the resumable archive path is not taken
         await client.aclose()
@@ -888,7 +868,7 @@ async def test_awaiting_turn_hibernation_exit_drives_now_head(
             agent_id=None, type="workflow_paused", payload={"reason": "awaiting_turn"})
         return RunResult.PAUSED
 
-    with anyio.fail_after(5):
+    with anyio.fail_after(30):   # deadlock backstop only
         result = await serve_quest_session(quest, run_fn=fake_run, hibernate=False)
 
     assert result is RunResult.PAUSED
@@ -919,7 +899,7 @@ async def test_non_awaiting_turn_pause_does_not_drive_head(
             agent_id=None, type="workflow_paused", payload={"reason": "interrupt"})
         return RunResult.PAUSED
 
-    with anyio.fail_after(5):
+    with anyio.fail_after(30):   # deadlock backstop only
         result = await serve_quest_session(quest, run_fn=fake_run, hibernate=False)
 
     assert result is RunResult.PAUSED
@@ -953,9 +933,7 @@ async def test_resident_save_applies_the_save_disposition(tmp_path: Path) -> Non
                                on_event=lambda _e: None)
         await client.connect()
         await client.send_control(CONTROL_SAVE)
-        with anyio.fail_after(5):
-            while not saved:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: saved)
         assert saved == [quest]
         assert torn == []
         await client.aclose()
@@ -1024,7 +1002,7 @@ async def test_script_blocked_pause_exits_terminal(tmp_path: Path) -> None:
                    payload={"reason": "script_blocked"})
         return RunResult.PAUSED
 
-    with anyio.fail_after(5):
+    with anyio.fail_after(30):   # deadlock backstop only
         result = await serve_quest_session(quest, run_fn=fake_run, hibernate=False)
     assert result is RunResult.PAUSED
     assert calls["n"] == 1  # exited terminal — never looped
@@ -1050,7 +1028,7 @@ async def test_script_blocked_pause_hibernates_with_zero_clients(
                    payload={"reason": "script_blocked"})
         return RunResult.PAUSED
 
-    with anyio.fail_after(5):
+    with anyio.fail_after(30):   # deadlock backstop only
         result = await serve_quest_session(
             quest, run_fn=fake_run, hibernate=True, first_attach_timeout=0.1)
     assert result is RunResult.PAUSED
@@ -1083,9 +1061,7 @@ async def test_resident_archive_applies_the_archive_disposition(tmp_path: Path) 
                                on_event=lambda _e: None)
         await client.connect()
         await client.send_control(CONTROL_ARCHIVE)
-        with anyio.fail_after(5):
-            while not archived:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: archived)
         assert archived == [quest]
         assert discarded == []
         await client.aclose()
@@ -1118,9 +1094,7 @@ async def test_resident_discard_applies_the_discard_disposition(tmp_path: Path) 
                                on_event=lambda _e: None)
         await client.connect()
         await client.send_control(CONTROL_DISCARD)
-        with anyio.fail_after(5):
-            while not discarded:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: discarded)
         assert discarded == [quest]
         assert archived == []
         await client.aclose()
@@ -1140,7 +1114,7 @@ async def test_serve_forwards_non_interactive_to_run_quest(tmp_path: Path) -> No
         captured["headless"] = headless
         return "done"
 
-    with anyio.fail_after(5):
+    with anyio.fail_after(30):   # deadlock backstop only
         result = await serve_quest_session(
             quest, run_fn=fake_run, hibernate=False, non_interactive=True)
     assert result == "done"
@@ -1301,13 +1275,9 @@ async def test_resume_loop_under_non_interactive_passes_flag_to_second_run(
                                on_event=received.append)
         await client.connect()
         tg.start_soon(client.receive_events)
-        with anyio.fail_after(5):
-            while not any(e.get("type") == "awaiting_user_input" for e in received):
-                await anyio.sleep(0.02)
+        await wait_until(lambda: any(e.get("type") == "awaiting_user_input" for e in received))
         await client.send_input("redirect")
-        with anyio.fail_after(5):
-            while "r" not in result:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: "r" in result)
         assert result["r"] is RunResult.COMPLETED
         assert received_flags == [True, True]
         await client.aclose()
@@ -1347,13 +1317,9 @@ async def test_resume_loop_under_autonomous_passes_flag_to_second_run(
                                on_event=received.append)
         await client.connect()
         tg.start_soon(client.receive_events)
-        with anyio.fail_after(5):
-            while not any(e.get("type") == "awaiting_user_input" for e in received):
-                await anyio.sleep(0.02)
+        await wait_until(lambda: any(e.get("type") == "awaiting_user_input" for e in received))
         await client.send_input("redirect")
-        with anyio.fail_after(5):
-            while "r" not in result:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: "r" in result)
         assert result["r"] is RunResult.COMPLETED
         assert received_flags == [True, True]
         await client.aclose()
@@ -1404,7 +1370,7 @@ async def test_autonomous_forwarded_to_run_fn(tmp_path: Path) -> None:
         captured["autonomous"] = autonomous
         return RunResult.COMPLETED
 
-    with anyio.fail_after(5):
+    with anyio.fail_after(30):   # deadlock backstop only
         result = await serve_quest_session(
             quest, run_fn=fake_run, hibernate=False, autonomous=True)
     assert result is RunResult.COMPLETED
@@ -1427,7 +1393,7 @@ async def test_detach_at_hold_prompt_stamps_resume_target_prompt(
         await coordinator.signal_pause(reason="ctrl-c")
         return RunResult.PAUSED
 
-    with anyio.fail_after(5):
+    with anyio.fail_after(30):   # deadlock backstop only
         result = await serve_quest_session(
             quest, run_fn=fake_run, hibernate=True, first_attach_timeout=0.1)
 
@@ -1454,7 +1420,7 @@ async def test_detach_after_ctrl_d_midrun_stamps_resume_target_agent(
         await coordinator.signal_pause(reason="ctrl-d")
         return RunResult.PAUSED
 
-    with anyio.fail_after(5):
+    with anyio.fail_after(30):   # deadlock backstop only
         result = await serve_quest_session(
             quest, run_fn=fake_run, hibernate=True, first_attach_timeout=0.1)
 
@@ -1550,7 +1516,7 @@ async def test_resume_agent_target_runs_straight_away(
         seen["ran"] = True
         return RunResult.COMPLETED
 
-    with anyio.fail_after(5):
+    with anyio.fail_after(30):   # deadlock backstop only
         result = await serve_quest_session(
             quest, run_fn=fake_run, hibernate=False, resume=True)
 
@@ -1583,7 +1549,7 @@ async def test_resume_prompt_target_runs_agent_without_interactive_channel(
         return RunResult.COMPLETED
 
     kwargs = {flag: True}
-    with anyio.fail_after(5):
+    with anyio.fail_after(30):   # deadlock backstop only
         result = await serve_quest_session(
             quest, run_fn=fake_run, hibernate=True, resume=True,
             first_attach_timeout=0.1, **kwargs)
@@ -1731,7 +1697,7 @@ async def test_model_override_pause_reenters_without_resume_prompt(
     # A wrong impl (treating the model-override pause as a ctrl-c hold) would emit
     # _RESUME_PROMPT and block on user_chat_input_fn — with no client to answer,
     # that blocks forever, so the deadline concretely enforces the no-prompt path.
-    with anyio.fail_after(5):
+    with anyio.fail_after(30):   # deadlock backstop only
         result = await serve_quest_session(
             quest, run_fn=_run_fn, hibernate=False)
 
@@ -1768,7 +1734,7 @@ async def test_model_override_pause_with_empty_arg_resumes_without_applying(
             return RunResult.PAUSED
         return RunResult.COMPLETED
 
-    with anyio.fail_after(5):
+    with anyio.fail_after(30):   # deadlock backstop only
         result = await serve_quest_session(
             quest, run_fn=_run_fn, hibernate=False)
 
@@ -1851,9 +1817,7 @@ async def test_resident_save_forwards_the_leave_reason(tmp_path: Path) -> None:
                                on_event=lambda _e: None)
         await client.connect()
         await client.send_control(CONTROL_SAVE, "ctrl-d")
-        with anyio.fail_after(5):
-            while not saved:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: saved)
         assert saved == [(quest, "ctrl-d")]
         await client.aclose()
         tg.cancel_scope.cancel()
@@ -1901,33 +1865,25 @@ async def test_script_step_hold_shows_rerun_copy_and_refuses_redirect(
             return [e for e in received
                     if e.get("type") == "awaiting_user_input"]
 
-        with anyio.fail_after(5):
-            while not _awaiting():
-                await anyio.sleep(0.02)
+        await wait_until(lambda: _awaiting())
         # (a) the script hold copy — re-run/detach, no redirect offer
         assert _awaiting()[0]["payload"]["steer_hint"] == (
             "paused — press enter to re-run the gate, or detach to leave it paused")
 
         # (b) a typed message is refused with a plain acknowledgement, not dropped
         await client.send_input("go left")
-        with anyio.fail_after(5):
-            while not any(e.get("type") == "script_output" for e in received):
-                await anyio.sleep(0.02)
+        await wait_until(lambda: any(e.get("type") == "script_output" for e in received))
         refusal = next(e for e in received if e.get("type") == "script_output")
         assert refusal["payload"]["stdout"] == (
             "a verify gate takes no redirect; press enter to re-run or detach to leave it paused")
 
         # (c) stayed at the hold: re-prompted and the gate did NOT re-run
-        with anyio.fail_after(5):
-            while len(_awaiting()) < 2:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: len(_awaiting()) >= 2)
         assert calls["n"] == 1
 
         # press enter (empty line) -> re-run the gate to completion
         await client.send_input("")
-        with anyio.fail_after(5):
-            while "r" not in result:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: "r" in result)
         assert result["r"] is RunResult.COMPLETED
         assert calls["n"] == 2
         assert drained["v"] is None   # the refused message was never enqueued
@@ -1976,17 +1932,13 @@ async def test_agent_step_hold_keeps_redirect_copy_and_consumes_message(
             return [e for e in received
                     if e.get("type") == "awaiting_user_input"]
 
-        with anyio.fail_after(5):
-            while not _awaiting():
-                await anyio.sleep(0.02)
+        await wait_until(lambda: _awaiting())
         # unchanged agent hold copy — offers a redirect
         assert _awaiting()[0]["payload"]["steer_hint"] == (
             "paused — type a message to redirect, or detach to leave it paused")
 
         await client.send_input("go left")
-        with anyio.fail_after(5):
-            while "r" not in result:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: "r" in result)
         assert result["r"] is RunResult.COMPLETED
         assert calls["n"] == 2
         assert drained["v"] == "go left"   # consumed as an interject, as today
@@ -2042,9 +1994,7 @@ async def test_sandbox_control_no_pause_single_dispatch(tmp_path: Path) -> None:
         coordinator: Any, wait_for_turn_fn: Any = None,
     ) -> RunResult:
         run_ready.set()
-        with anyio.fail_after(5):
-            while not coordinator.unsandboxed:   # wait for control to be processed
-                await anyio.sleep(0.02)
+        await wait_until(lambda: coordinator.unsandboxed)
         seen["should_pause"] = coordinator.should_pause
         return RunResult.COMPLETED
 
@@ -2060,12 +2010,10 @@ async def test_sandbox_control_no_pause_single_dispatch(tmp_path: Path) -> None:
         client = SessionClient(sock, quest.id, quest.title,
                                on_event=lambda _e: None)
         await client.connect()
-        with anyio.fail_after(5):
+        with anyio.fail_after(30):   # deadlock backstop only
             await run_ready.wait()
         await client.send_control(CONTROL_SET_SANDBOX, "off")
-        with anyio.fail_after(5):
-            while "r" not in result:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: "r" in result)
         assert result["r"] is RunResult.COMPLETED
         assert seen["should_pause"] is False    # no signal_pause was issued
         await client.aclose()
@@ -2092,7 +2040,7 @@ async def test_resume_restores_unsandboxed_into_coordinator(tmp_path: Path) -> N
         seen["unsandboxed"] = coordinator.unsandboxed
         return RunResult.COMPLETED
 
-    with anyio.fail_after(5):
+    with anyio.fail_after(30):   # deadlock backstop only
         result = await serve_quest_session(
             quest, run_fn=fake_run, hibernate=False, resume=True)
 
@@ -2192,7 +2140,7 @@ async def test_compact_pause_reenters_after_running_compaction(
             return RunResult.PAUSED
         return RunResult.COMPLETED
 
-    with anyio.fail_after(5):
+    with anyio.fail_after(30):   # deadlock backstop only
         result = await serve_quest_session(
             quest, run_fn=_run_fn, hibernate=False)
 
