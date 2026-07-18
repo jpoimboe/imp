@@ -8,6 +8,7 @@ import anyio
 import pytest
 
 from imp.remote.daemon.runner import pid_path, run_daemon
+from tests.async_wait import wait_until
 from tests.conftest import _seed_control
 
 
@@ -51,9 +52,7 @@ async def test_run_daemon_installs_stack_dumper_beside_pidfile(
                 lambda env, submit, subscriptions, alert_all, is_known_quest:
                 _FakeAdapter()),
             install_signals=True, shutdown=shutdown))
-        with anyio.fail_after(5):
-            while not pid_path(tmp_path).exists():
-                await anyio.sleep(0.02)
+        await wait_until(lambda: pid_path(tmp_path).exists())
         shutdown.set()
 
     assert calls == [tmp_path / ".imp" / "remote-control.stack-dump.txt"]

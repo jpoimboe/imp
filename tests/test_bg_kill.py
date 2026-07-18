@@ -26,7 +26,7 @@ async def _read(ctx, id: str) -> dict:
 async def _await_group_dead(pid: int) -> None:
     """Retry briefly: a killed grandchild is reparented to init and reaped
     asynchronously, and a not-yet-reaped zombie still answers killpg(pgid, 0)."""
-    with anyio.fail_after(5):
+    with anyio.fail_after(30):  # deadlock backstop only
         while True:
             try:
                 os.killpg(pid, 0)
@@ -64,7 +64,7 @@ def test_bash_kill_idempotent_on_exited(tmp_path: Path) -> None:
         ctx = _ctx(tmp_path)
         out = await _spawn(ctx, "exit 3")
         bp = ctx.background_processes[out["id"]]
-        with anyio.fail_after(10):
+        with anyio.fail_after(30):  # deadlock backstop only
             await bp.proc.wait()
         r = await _kill(ctx, out["id"])
         # exited entry keeps its terminal state — NOT relabelled killed/agent
@@ -91,7 +91,7 @@ def test_bash_kill_flips_before_signaling(tmp_path: Path) -> None:
         # 0.5 s observer samples after completion, and the mid-grace pin
         # is hollow (a flip-after-signal regression would pass).
         seen_out = ""
-        with anyio.fail_after(10):
+        with anyio.fail_after(30):  # deadlock backstop only
             while "ready" not in seen_out:
                 seen_out += (await _read(ctx, out["id"]))["stdout"]
                 await anyio.sleep(0.05)

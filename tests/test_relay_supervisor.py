@@ -11,6 +11,7 @@ import pytest
 from imp.remote.daemon.relay_supervisor import RelaySupervisor
 from imp.remote.session.discover import session_socket_path
 from imp.remote.session.socket_server import SessionSocket
+from tests.async_wait import wait_until
 
 
 def _make_home(control_root: Path, quest_id: str) -> Path:
@@ -81,14 +82,10 @@ async def test_supervisor_relays_a_resident_sessions_events(
     async with anyio.create_task_group() as tg:
         tg.start_soon(sock.serve)
         tg.start_soon(sup.run)
-        with anyio.fail_after(5):
-            while sock.attached_count == 0:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: sock.attached_count != 0)
         sock.broadcast(
             {"id": "e1", "type": "agent_result", "payload": {"text": "hi"}})
-        with anyio.fail_after(5):
-            while not sink:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: sink)
         tg.cancel_scope.cancel()
     await sock.close()
     assert sink[0]["id"] == "e1"
@@ -117,14 +114,10 @@ async def test_supervisor_multiplexes_two_resident_sessions(
         tg.start_soon(sock_a.serve)
         tg.start_soon(sock_b.serve)
         tg.start_soon(sup.run)
-        with anyio.fail_after(5):
-            while sock_a.attached_count == 0 or sock_b.attached_count == 0:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: sock_a.attached_count != 0 and sock_b.attached_count != 0)
         sock_a.broadcast({"id": "ea", "type": "agent_result", "payload": {}})
         sock_b.broadcast({"id": "eb", "type": "agent_result", "payload": {}})
-        with anyio.fail_after(5):
-            while len(sink) < 2:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: len(sink) >= 2)
         tg.cancel_scope.cancel()
     await sock_a.close()
     await sock_b.close()
@@ -150,20 +143,14 @@ async def test_supervisor_reattaches_after_relay_exits(
         tg.start_soon(sock.serve)
         tg.start_soon(sup.run)
         # Wait for first attach.
-        with anyio.fail_after(5):
-            while sock.attached_count == 0:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: sock.attached_count != 0)
         # Close the socket so the relay exits naturally.
         await sock.close()
-        with anyio.fail_after(5):
-            while sock.attached_count != 0:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: sock.attached_count == 0)
         # Re-open; the supervisor must re-attach.
         await sock.open()
         tg.start_soon(sock.serve)
-        with anyio.fail_after(5):
-            while sock.attached_count == 0:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: sock.attached_count != 0)
         tg.cancel_scope.cancel()
     await sock.close()
 
@@ -183,16 +170,12 @@ async def test_supervisor_keeps_relaying_across_a_gate(tmp_path: Path) -> None:
     async with anyio.create_task_group() as tg:
         tg.start_soon(sock.serve)
         tg.start_soon(sup.run)
-        with anyio.fail_after(5):
-            while sock.attached_count == 0:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: sock.attached_count != 0)
         sock.broadcast(
             {"id": "g1", "type": "awaiting_user_input", "payload": {"prompt": "?"}})
         sock.broadcast(
             {"id": "m1", "type": "user_message", "payload": {"text": "reply"}})
-        with anyio.fail_after(5):
-            while len(sink) < 2:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: len(sink) >= 2)
         assert sock.attached_count == 1   # never detached across the gate
         tg.cancel_scope.cancel()
     await sock.close()
@@ -220,14 +203,10 @@ async def test_supervisor_subscribed_session_drops_lease_at_gate(
     async with anyio.create_task_group() as tg:
         tg.start_soon(sock.serve)
         tg.start_soon(sup.run)
-        with anyio.fail_after(5):
-            while sock.leased_count == 0:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: sock.leased_count != 0)
         sock.broadcast(
             {"type": "awaiting_user_input", "payload": {"prompt": "?"}})
-        with anyio.fail_after(5):
-            while sock.leased_count != 0:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: sock.leased_count == 0)
         assert sock.attached_count == 1   # dropped its lease, kept its attachment
         tg.cancel_scope.cancel()
     await sock.close()
@@ -251,9 +230,7 @@ async def test_supervisor_leases_only_subscribed_changes(
     async with anyio.create_task_group() as tg:
         tg.start_soon(sock.serve)
         tg.start_soon(sup.run)
-        with anyio.fail_after(5):
-            while sock.leased_count == 0:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: sock.leased_count != 0)
         assert sock.leased_count == 1
         tg.cancel_scope.cancel()
     await sock.close()
@@ -278,18 +255,12 @@ async def test_supervisor_reflects_late_title_via_live_provider(
     async with anyio.create_task_group() as tg:
         tg.start_soon(sock.serve)
         tg.start_soon(sup.run)
-        with anyio.fail_after(5):
-            while sock.attached_count == 0:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: sock.attached_count != 0)
         sock.broadcast({"id": "e1", "type": "agent_result", "payload": {}})
-        with anyio.fail_after(5):
-            while len(sink) < 1:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: len(sink) >= 1)
         holder["title"] = "Real Title"
         sock.broadcast({"id": "e2", "type": "agent_result", "payload": {}})
-        with anyio.fail_after(5):
-            while len(sink) < 2:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: len(sink) >= 2)
         tg.cancel_scope.cancel()
     await sock.close()
     assert sink[0]["quest"]["title"] == ""

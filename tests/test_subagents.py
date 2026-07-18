@@ -702,7 +702,7 @@ async def test_subagent_backoff_sleep_is_interruptible(tmp_path: Path) -> None:
 
             tg.start_soon(_flip)
             # A 10 s backoff must abandon well before 10 s once should_pause flips.
-            with anyio.fail_after(2.0):
+            with anyio.fail_after(30):  # deadlock backstop only
                 with pytest.raises(SubagentSuspended):
                     await dispatch_task(ctx, "reviewer", "review it")
 

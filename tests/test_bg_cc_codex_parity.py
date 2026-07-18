@@ -17,6 +17,7 @@ import pytest
 
 from imp.providers import claude_code as cc_mod
 from imp.providers.claude_code import ClaudeCodeAgentRunner
+from tests.async_wait import wait_until
 from tests.test_bg_spawn import _cleanup
 from tests.test_build_tools_wait_for_user import _Inv
 
@@ -203,9 +204,7 @@ async def test_cc_gen_close_runs_teardown(tmp_path: Path) -> None:
             tg.start_soon(_drive)
             # _ctx is set synchronously before the first client.query() call;
             # yield control once so _run_loop can advance to that point.
-            with anyio.fail_after(5):
-                while runner._ctx is None:
-                    await anyio.sleep(0)
+            await wait_until(lambda: runner._ctx is not None)
             out = await _spawn_bg(runner._ctx)
             bg_pid = out["pid"]
             bg_id = out["id"]

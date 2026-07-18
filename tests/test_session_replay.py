@@ -151,17 +151,18 @@ async def test_late_attach_replays_full_disk_prefix_then_live_tail(
         client = await _attach(sock, "c1")
         buf = BufferedByteReceiveStream(client)
         seen: list[dict[str, Any]] = []
-        with anyio.fail_after(5):
+        with anyio.fail_after(30):  # deadlock backstop only
             while len(seen) < 3:
                 seen.append(parse_event(
                     (await buf.receive_until(b"\n", 1 << 20)).decode()))
         assert [s["id"] for s in seen] == ["e0", "e1", "e2"]   # full disk prefix, in order
-        with anyio.fail_after(5):                              # boundary closes the replay
+        # boundary closes the replay
+        with anyio.fail_after(30):  # deadlock backstop only
             boundary = parse_event(
                 (await buf.receive_until(b"\n", 1 << 20)).decode())
         assert boundary == {"type": "replay_complete"}         # arrives before any live event
         attached.set()
-        with anyio.fail_after(5):
+        with anyio.fail_after(30):  # deadlock backstop only
             seen.append(parse_event(
                 (await buf.receive_until(b"\n", 1 << 20)).decode()))
         assert seen[-1]["id"] == "e3"                          # live tail across the seam
@@ -200,17 +201,18 @@ async def test_resume_attach_replays_entire_prior_journal(tmp_path: Path) -> Non
         client = await _attach(sock, "c1")
         buf = BufferedByteReceiveStream(client)
         seen: list[dict[str, Any]] = []
-        with anyio.fail_after(5):
+        with anyio.fail_after(30):  # deadlock backstop only
             while len(seen) < 21:
                 seen.append(parse_event(
                     (await buf.receive_until(b"\n", 1 << 20)).decode()))
         assert [s["id"] for s in seen] == [f"p{i}" for i in range(20)] + ["wr"]
-        with anyio.fail_after(5):                              # boundary closes the replay
+        # boundary closes the replay
+        with anyio.fail_after(30):  # deadlock backstop only
             boundary = parse_event(
                 (await buf.receive_until(b"\n", 1 << 20)).decode())
         assert boundary == {"type": "replay_complete"}         # arrives before any live event
         attached.set()
-        with anyio.fail_after(5):
+        with anyio.fail_after(30):  # deadlock backstop only
             seen.append(parse_event(
                 (await buf.receive_until(b"\n", 1 << 20)).decode()))
         assert seen[-1]["id"] == "n1"

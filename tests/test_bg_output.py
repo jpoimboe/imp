@@ -144,7 +144,7 @@ def test_status_transition_and_returncode_capture(tmp_path: Path) -> None:
         ctx = _ctx(tmp_path)
         out = await _spawn(ctx, "echo done; exit 7")
         bp = ctx.background_processes[out["id"]]
-        with anyio.fail_after(10):
+        with anyio.fail_after(30):  # deadlock backstop only
             await bp.proc.wait()
         r = await _read(ctx, out["id"])
         assert r["status"] == "exited"

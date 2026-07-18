@@ -470,7 +470,7 @@ async def test_interrupt_cancels_in_flight_request(tmp_path: Path) -> None:
         async for ev in runner.run(inv):
             events.append(ev)
 
-    with anyio.fail_after(5):
+    with anyio.fail_after(30):  # deadlock backstop only
         async with anyio.create_task_group() as tg:
             tg.start_soon(_drive)
             await started.wait()

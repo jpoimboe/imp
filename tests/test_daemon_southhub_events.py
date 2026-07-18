@@ -7,6 +7,7 @@ import pytest
 
 from imp.remote.daemon.protocol import make_hello
 from imp.remote.daemon.server import SouthHub
+from tests.async_wait import wait_until
 
 
 @pytest.fixture
@@ -25,9 +26,7 @@ async def test_events_reach_sink_tagged_with_quest_id(tmp_path: Path) -> None:
         client = await anyio.connect_unix(sock)
         await client.send((make_hello("2026-06-13-abc", "T") + "\n").encode())
         await client.send(b'{"type": "agent_result"}\n')
-        with anyio.fail_after(5):
-            while not seen:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: seen)
         assert seen == [("2026-06-13-abc", '{"type": "agent_result"}')]
         await client.aclose()
         await hub.close()
@@ -43,13 +42,9 @@ async def test_closing_a_connection_deregisters_its_quest_id(tmp_path: Path) -> 
         tg.start_soon(hub.serve)
         client = await anyio.connect_unix(sock)
         await client.send((make_hello("2026-06-13-abc", "T") + "\n").encode())
-        with anyio.fail_after(5):
-            while "2026-06-13-abc" not in hub.live_ids():
-                await anyio.sleep(0.02)
+        await wait_until(lambda: "2026-06-13-abc" in hub.live_ids())
         await client.aclose()
-        with anyio.fail_after(5):
-            while hub.live_ids():
-                await anyio.sleep(0.02)
+        await wait_until(lambda: not hub.live_ids())
         assert hub.live_ids() == set()
         await hub.close()
         tg.cancel_scope.cancel()

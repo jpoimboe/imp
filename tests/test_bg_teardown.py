@@ -11,6 +11,7 @@ import pytest
 
 import imp.agents.tools.bash  # noqa: F401
 from imp.agents.tools import get_registry
+from tests.async_wait import wait_until
 from tests.test_bg_spawn import _ctx, _spawn
 
 
@@ -60,7 +61,7 @@ def test_teardown_preserves_terminal_states(tmp_path: Path) -> None:
         ctx = _ctx(tmp_path)
         out = await _spawn(ctx, "exit 4")
         bp = ctx.background_processes[out["id"]]
-        with anyio.fail_after(10):
+        with anyio.fail_after(30):  # deadlock backstop only
             await bp.proc.wait()
         await _sweep_bg(ctx)
         assert bp.status == "exited"
@@ -83,14 +84,14 @@ def test_teardown_sigkills_term_immune_children_of_exited_leader(
         ctx = _ctx(tmp_path)
         out = await _spawn(ctx, "( trap '' TERM; sleep 60 ) & exit 0")
         bp = ctx.background_processes[out["id"]]
-        with anyio.fail_after(10):
+        with anyio.fail_after(30):  # deadlock backstop only
             await bp.proc.wait()
         await _sweep_bg(ctx)
         assert bp.status == "exited"           # leader gone, child lives
         await terminate_background_processes(ctx)
         # Retry briefly: the orphaned child is reparented to init and reaped
         # asynchronously; a zombie still answers killpg(pgid, 0).
-        with anyio.fail_after(5):
+        with anyio.fail_after(30):  # deadlock backstop only
             while True:
                 try:
                     os.killpg(out["pid"], 0)
@@ -125,7 +126,7 @@ def test_teardown_survives_cancellation_mid_grace(tmp_path: Path) -> None:
         # Wait for trap to be installed before triggering teardown:
         # same settle-loop pattern as test_bash_kill_flips_before_signaling.
         seen_out = ""
-        with anyio.fail_after(10):
+        with anyio.fail_after(30):  # deadlock backstop only
             while "ready" not in seen_out:
                 seen_out += (await _read(ctx, out["id"]))["stdout"]
                 await anyio.sleep(0.05)
@@ -137,7 +138,7 @@ def test_teardown_survives_cancellation_mid_grace(tmp_path: Path) -> None:
         ts = json.loads(_tombstone_path(ctx).read_text())
         assert ts[out["id"]]["status"] == "killed"
         assert ts[out["id"]]["kill_reason"] == "interrupted"
-        with anyio.fail_after(5):
+        with anyio.fail_after(30):  # deadlock backstop only
             while True:
                 try:
                     os.killpg(out["pid"], 0)
@@ -203,7 +204,7 @@ def test_unknown_id_after_ungraceful_death_named_residual(tmp_path: Path) -> Non
         out = await _spawn(ctx1, "true")
         assert out["id"] == "bg2"
         bp = ctx1.background_processes["bg2"]
-        with anyio.fail_after(10):
+        with anyio.fail_after(30):  # deadlock backstop only
             await bp.proc.wait()
     anyio.run(main)
 
@@ -248,7 +249,7 @@ def test_concurrent_reap_single_flip(tmp_path: Path) -> None:
         ctx = _ctx(tmp_path)
         out = await _spawn(ctx, "exit 9")
         bp = ctx.background_processes[out["id"]]
-        with anyio.fail_after(10):
+        with anyio.fail_after(30):  # deadlock backstop only
             await bp.proc.wait()
         flips: list[str] = []
 
@@ -348,9 +349,7 @@ def test_teardown_reaps_regrouped_bg_descendant(tmp_path: Path) -> None:
         ctx.background_processes["bg1"] = bp
         ctx._bg_counter = 1
 
-        with anyio.fail_after(10):
-            while not (pidfile.exists() and pidfile.read_text().strip()):
-                await anyio.sleep(0.02)
+        await wait_until(lambda: pidfile.exists() and pidfile.read_text().strip())
         descendant = int(pidfile.read_text().strip())
         os.kill(descendant, 0)  # verify it is alive before teardown
 

@@ -13,6 +13,7 @@ from imp.remote.session.client import SessionClient
 from imp.remote.session.reply import DeliveryOutcome, deliver_session_reply
 from imp.remote.session.server import SessionServer
 from imp.remote.session.socket_server import ReplaySnapshot, SessionSocket
+from tests.async_wait import wait_until
 
 
 @pytest.fixture
@@ -32,9 +33,7 @@ async def test_deliver_session_reply_satisfies_the_daemon_gate(tmp_path: Path) -
         # The delivering client attaches first; only then does the daemon reach its
         # gate. Wait for the attach so the broadcast event is not missed, then mirror
         # production ordering: emit awaiting_user_input, THEN open the gate.
-        with anyio.fail_after(5):
-            while server.attached_count == 0:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: server.attached_count != 0)
         on_event({"type": "awaiting_user_input", "payload": {"prompt": "go?"}})
         reply = await user_chat_input_fn("")
         got.append(reply)
@@ -47,11 +46,9 @@ async def test_deliver_session_reply_satisfies_the_daemon_gate(tmp_path: Path) -
 
     async with anyio.create_task_group() as tg:
         tg.start_soon(server.serve, _run_fn)
-        with anyio.fail_after(5):
+        with anyio.fail_after(30):   # deadlock backstop only
             await deliver_session_reply(cast(Quest, None), "approved", attach=_attach)
-        with anyio.fail_after(5):
-            while not got:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: got)
         assert got == ["approved"]
         tg.cancel_scope.cancel()
 
@@ -70,9 +67,7 @@ async def test_deliver_session_reply_satisfies_gate_when_foreground_client_alrea
 
     async def _run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
         # Wait for the foreground client to attach before reaching the gate.
-        with anyio.fail_after(5):
-            while server.attached_count == 0:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: server.attached_count != 0)
         # Emit the gate event and open the gate — the foreground client is
         # already attached and will receive this broadcast.
         prompt_ev = {"id": "e1", "type": "awaiting_user_input", "payload": {"prompt": "go?"}}
@@ -93,7 +88,7 @@ async def test_deliver_session_reply_satisfies_gate_when_foreground_client_alrea
         on_event: Callable[[dict[str, Any]], None],
     ) -> SessionClient:
         # Wait until the gate event has been broadcast before connecting.
-        with anyio.fail_after(5):
+        with anyio.fail_after(30):   # deadlock backstop only
             await gate_emitted.wait()
         await anyio.sleep(0.01)  # realistic post-broadcast delay; event is on disk for replay
         client = SessionClient(sock, "c2", "T", on_event=on_event)
@@ -104,13 +99,11 @@ async def test_deliver_session_reply_satisfies_gate_when_foreground_client_alrea
     try:
         async with anyio.create_task_group() as tg:
             tg.start_soon(server.serve, _run_fn)
-            with anyio.fail_after(5):
+            with anyio.fail_after(30):   # deadlock backstop only
                 outcome = await deliver_session_reply(
                     cast(Quest, None), "approved", attach=_attach_deliver)
             assert outcome is DeliveryOutcome.DELIVERED
-            with anyio.fail_after(5):
-                while not got:
-                    await anyio.sleep(0.02)
+            await wait_until(lambda: got)
             assert got == ["approved"]
             tg.cancel_scope.cancel()
     finally:
@@ -135,9 +128,7 @@ async def test_deliver_session_reply_ignores_replayed_gate(tmp_path: Path) -> No
         tg.start_soon(socket.serve)
 
         async def _server_gate() -> None:
-            with anyio.fail_after(5):
-                while socket.attached_count == 0:
-                    await anyio.sleep(0.02)
+            await wait_until(lambda: socket.attached_count != 0)
             # A replayed (marked) gate: the delivering client must NOT answer it.
             socket.broadcast({"type": "awaiting_user_input",
                               "payload": {"prompt": "old"}, "_replay": True})
@@ -148,11 +139,9 @@ async def test_deliver_session_reply_ignores_replayed_gate(tmp_path: Path) -> No
             inputs.append(await socket.next_input())
 
         tg.start_soon(_server_gate)
-        with anyio.fail_after(5):
+        with anyio.fail_after(30):   # deadlock backstop only
             await deliver_session_reply(cast(Quest, None), "approved", attach=_attach)
-        with anyio.fail_after(5):
-            while not inputs:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: inputs)
         assert inputs == ["approved"]   # answered the live gate, not the replayed one
         tg.cancel_scope.cancel()
     await socket.close()
@@ -174,21 +163,17 @@ async def test_deliver_returns_delivered_and_sends_input(tmp_path: Path) -> None
         tg.start_soon(socket.serve)
 
         async def _server_gate() -> None:
-            with anyio.fail_after(5):
-                while socket.attached_count == 0:
-                    await anyio.sleep(0.02)
+            await wait_until(lambda: socket.attached_count != 0)
             socket.broadcast({"type": "awaiting_user_input", "payload": {"prompt": "go?"}})
             inputs.append(await socket.next_input())
 
         tg.start_soon(_server_gate)
-        with anyio.fail_after(5):
+        with anyio.fail_after(30):   # deadlock backstop only
             outcome = await deliver_session_reply(
                 cast(Quest, None), "approved", attach=_attach,
                 overall_timeout=2.0, grace=0.5)
         assert outcome is DeliveryOutcome.DELIVERED
-        with anyio.fail_after(5):
-            while not inputs:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: inputs)
         assert inputs == ["approved"]
         tg.cancel_scope.cancel()
     await socket.close()
@@ -212,7 +197,7 @@ async def test_deliver_returns_not_at_gate_after_boundary_with_no_live_gate(
 
     async with anyio.create_task_group() as tg:
         tg.start_soon(socket.serve)
-        with anyio.fail_after(5):
+        with anyio.fail_after(30):   # deadlock backstop only
             outcome = await deliver_session_reply(
                 cast(Quest, None), "approved", attach=_attach,
                 overall_timeout=2.0, grace=0.2)
@@ -242,9 +227,7 @@ async def test_deliver_returns_delivered_when_live_gate_follows_boundary_within_
         tg.start_soon(socket.serve)
 
         async def _server_gate() -> None:
-            with anyio.fail_after(5):
-                while socket.attached_count == 0:
-                    await anyio.sleep(0.02)
+            await wait_until(lambda: socket.attached_count != 0)
             # Sleep briefly so the boundary (replay_complete) arrives first,
             # then broadcast the live gate comfortably within the grace window.
             await anyio.sleep(0.1)
@@ -252,14 +235,12 @@ async def test_deliver_returns_delivered_when_live_gate_follows_boundary_within_
             inputs.append(await socket.next_input())
 
         tg.start_soon(_server_gate)
-        with anyio.fail_after(5):
+        with anyio.fail_after(30):   # deadlock backstop only
             outcome = await deliver_session_reply(
                 cast(Quest, None), "approved", attach=_attach,
                 overall_timeout=2.0, grace=1.0)
         assert outcome is DeliveryOutcome.DELIVERED
-        with anyio.fail_after(5):
-            while not inputs:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: inputs)
         assert inputs == ["approved"]
         tg.cancel_scope.cancel()
     await socket.close()
@@ -280,7 +261,7 @@ async def test_deliver_returns_unreachable_when_handshake_never_completes(
 
     async with anyio.create_task_group() as tg:
         tg.start_soon(socket.serve)
-        with anyio.fail_after(5):
+        with anyio.fail_after(30):   # deadlock backstop only
             outcome = await deliver_session_reply(
                 cast(Quest, None), "approved", attach=_attach,
                 overall_timeout=0.3, grace=0.1)

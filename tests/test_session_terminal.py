@@ -21,6 +21,7 @@ from imp.remote.session.client import SessionClient
 from imp.remote.session.protocol import SkillRequest, encode_attach, encode_input
 from imp.remote.session.server import SessionServer
 from imp.remote.session.socket_server import SessionSocket
+from tests.async_wait import wait_until
 from tests.conftest import _seed_control
 
 
@@ -43,9 +44,7 @@ async def test_terminal_client_renders_events_and_answers_one_gate(
     received: list[str] = []
 
     async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
-        with anyio.fail_after(5):
-            while server.attached_count == 0:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: server.attached_count != 0)
         on_event({"type": "step_started", "payload": {}})
         on_event({"type": "awaiting_user_input",
                    "payload": {"steer_hint": "your name?"}})
@@ -76,7 +75,7 @@ async def test_terminal_client_renders_events_and_answers_one_gate(
         return "imp"
 
     coord = InterruptCoordinator()
-    with anyio.fail_after(10):
+    with anyio.fail_after(30):   # deadlock backstop only
         async with anyio.create_task_group() as tg:
             await server.open()
             tg.start_soon(server.serve, run_fn)
@@ -118,7 +117,7 @@ async def test_terminal_client_forwards_interrupt_gesture_as_a_control_frame(
         def finish(self) -> None: ...
 
     client_returned = anyio.Event()
-    with anyio.fail_after(10):
+    with anyio.fail_after(30):   # deadlock backstop only
         async with anyio.create_task_group() as tg:
             await server.open()
             tg.start_soon(server.serve)
@@ -133,14 +132,14 @@ async def test_terminal_client_forwards_interrupt_gesture_as_a_control_frame(
             # Fire the gesture once the forwarder is attached; before attachment
             # signal_pause has no runner and sends nothing, so retry until the
             # interrupt frame lands on the socket.
-            with anyio.fail_after(5):
+            with anyio.fail_after(30):   # deadlock backstop only
                 while not actions:
                     await coord.signal_pause()
                     await anyio.sleep(0.02)
             assert actions == ["interrupt"]
             assert server.attached_count == 1   # gesture did not detach the client
             await server.close()                # daemon ends → socket drops
-            with anyio.fail_after(5):
+            with anyio.fail_after(30):   # deadlock backstop only
                 await client_returned.wait()
             tg.cancel_scope.cancel()
 
@@ -168,7 +167,7 @@ async def test_terminal_client_detaches_interrupt_forwarder_on_return(
         def finish(self) -> None: ...
 
     returned = anyio.Event()
-    with anyio.fail_after(10):
+    with anyio.fail_after(30):   # deadlock backstop only
         async with anyio.create_task_group() as tg:
             await server.open()
             tg.start_soon(server.serve)
@@ -180,11 +179,9 @@ async def test_terminal_client_detaches_interrupt_forwarder_on_return(
                 returned.set()
 
             tg.start_soon(_client)
-            with anyio.fail_after(5):
-                while server.attached_count != 1:
-                    await anyio.sleep(0.02)
+            await wait_until(lambda: server.attached_count == 1)
             await server.close()              # daemon ends → client returns
-            with anyio.fail_after(5):
+            with anyio.fail_after(30):   # deadlock backstop only
                 await returned.wait()
             # The forwarder must be detached: with it still attached this would
             # call send_control on the now-closed client and raise RuntimeError.
@@ -201,12 +198,12 @@ async def test_force_quit_tears_down_client_and_run_survives(
     survived: list[bool] = []
 
     async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
-        with anyio.fail_after(15):
+        with anyio.fail_after(30):   # deadlock backstop only
             while server.attached_count == 0:
                 await server.wait_for_attach_change()
         on_event({"type": "step_started", "payload": {}})
         # Force-quit tears down the CLIENT here; the run must keep going.
-        with anyio.fail_after(15):
+        with anyio.fail_after(30):   # deadlock backstop only
             while server.attached_count != 0:
                 await server.wait_for_attach_change()
         survived.append(True)
@@ -239,9 +236,10 @@ async def test_force_quit_tears_down_client_and_run_survives(
                     coord=coord, solicit=_solicit)
 
             tg.start_soon(_client)
-            with anyio.fail_after(15):
-                while coord.escalation_event is None or server.attached_count != 1:
-                    await anyio.sleep(0.02)
+            await wait_until(
+                lambda: coord.escalation_event is not None
+                and server.attached_count == 1
+            )
             coord.escalation_event.set()       # force-quit gesture
 
     assert survived == [True]
@@ -256,12 +254,12 @@ async def test_ctrl_backslash_deliberately_detaches_and_run_survives(
     survived: list[bool] = []
 
     async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
-        with anyio.fail_after(5):
+        with anyio.fail_after(30):   # deadlock backstop only
             while server.attached_count == 0:
                 await server.wait_for_attach_change()
         on_event({"type": "step_started", "payload": {}})
         # Ctrl-\ tears down the CLIENT here; the run must keep going.
-        with anyio.fail_after(5):
+        with anyio.fail_after(30):   # deadlock backstop only
             while server.attached_count != 0:
                 await server.wait_for_attach_change()
         survived.append(True)
@@ -287,7 +285,7 @@ async def test_ctrl_backslash_deliberately_detaches_and_run_survives(
                 stepped.set()
         def finish(self) -> None: ...
 
-    with anyio.fail_after(10):
+    with anyio.fail_after(30):   # deadlock backstop only
         async with anyio.create_task_group() as tg:
             await server.open()
             tg.start_soon(server.serve, run_fn)
@@ -298,9 +296,7 @@ async def test_ctrl_backslash_deliberately_detaches_and_run_survives(
                     coord=coord, solicit=_solicit)
 
             tg.start_soon(_client)
-            with anyio.fail_after(5):
-                while server.attached_count != 1:
-                    await anyio.sleep(0.02)
+            await wait_until(lambda: server.attached_count == 1)
             # The client installs its SIGQUIT trap before attaching, so
             # attached_count == 1 proves the trap is live — SIG_DFL here would
             # core-dump the test process; in red (no trap), the assert fires first.
@@ -309,7 +305,7 @@ async def test_ctrl_backslash_deliberately_detaches_and_run_survives(
             # its first attach-wait loop and is parked waiting for the detach.
             # Firing on attached_count == 1 alone lets a load-starved run_fn miss
             # the whole attach->detach round and hang in its first loop (the flake).
-            with anyio.fail_after(5):
+            with anyio.fail_after(30):   # deadlock backstop only
                 await stepped.wait()
             os.kill(os.getpid(), signal.SIGQUIT)   # Ctrl-\ deliberate-detach gesture
 
@@ -324,7 +320,7 @@ async def test_abandon_slash_command_at_gate_sends_control_abandon(
     server = SessionServer(sock, hibernate=False)
 
     async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
-        with anyio.fail_after(5):
+        with anyio.fail_after(30):   # deadlock backstop only
             while server.attached_count == 0:
                 await server.wait_for_attach_change()
         on_event({"type": "awaiting_user_input", "payload": {"steer_hint": "reply?"}})
@@ -350,7 +346,7 @@ async def test_abandon_slash_command_at_gate_sends_control_abandon(
         def finish(self) -> None: ...
         def append_committed_reply(self, _text: str) -> None: ...
 
-    with anyio.fail_after(10):
+    with anyio.fail_after(30):   # deadlock backstop only
         async with anyio.create_task_group() as tg:
             await server.open()
             tg.start_soon(server.serve, run_fn)
@@ -374,13 +370,11 @@ async def test_compact_slash_command_at_gate_forwards_control_and_stays_attached
     server = SessionServer(sock, coordinator=server_coord, hibernate=False)
 
     async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
-        with anyio.fail_after(5):
+        with anyio.fail_after(30):   # deadlock backstop only
             while server.attached_count == 0:
                 await server.wait_for_attach_change()
         on_event({"type": "awaiting_user_input", "payload": {"steer_hint": "reply?"}})
-        with anyio.fail_after(5):
-            while server_coord.pause_reason != "compact":
-                await anyio.sleep(0.02)
+        await wait_until(lambda: server_coord.pause_reason == "compact")
         server_coord.reset()
         on_event({"type": "awaiting_user_input", "payload": {"steer_hint": "reply?"}})
         return await user_chat_input_fn("reply?")
@@ -407,7 +401,7 @@ async def test_compact_slash_command_at_gate_forwards_control_and_stays_attached
         def append_committed_reply(self, text: str) -> None:
             echoed.append(text)
 
-    with anyio.fail_after(10):
+    with anyio.fail_after(30):   # deadlock backstop only
         async with anyio.create_task_group() as tg:
             await server.open()
             tg.start_soon(server.serve, run_fn)
@@ -432,7 +426,7 @@ async def test_control_command_is_echoed_before_handling(tmp_path: Path) -> None
     server = SessionServer(sock, hibernate=False)
 
     async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
-        with anyio.fail_after(5):
+        with anyio.fail_after(30):   # deadlock backstop only
             while server.attached_count == 0:
                 await server.wait_for_attach_change()
         on_event({"type": "awaiting_user_input", "payload": {"steer_hint": "reply?"}})
@@ -458,7 +452,7 @@ async def test_control_command_is_echoed_before_handling(tmp_path: Path) -> None
         def append_committed_reply(self, text: str) -> None:
             echoed.append(text)
 
-    with anyio.fail_after(10):
+    with anyio.fail_after(30):   # deadlock backstop only
         async with anyio.create_task_group() as tg:
             await server.open()
             tg.start_soon(server.serve, run_fn)
@@ -483,12 +477,12 @@ async def test_eoferror_at_gate_detaches_cleanly_and_run_survives(
     survived: list[bool] = []
 
     async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
-        with anyio.fail_after(5):
+        with anyio.fail_after(30):   # deadlock backstop only
             while server.attached_count == 0:
                 await server.wait_for_attach_change()
         on_event({"type": "awaiting_user_input", "payload": {"steer_hint": "reply?"}})
         # The EOFError at the client must detach it; the run must keep going.
-        with anyio.fail_after(5):
+        with anyio.fail_after(30):   # deadlock backstop only
             while server.attached_count != 0:
                 await server.wait_for_attach_change()
         survived.append(True)
@@ -510,7 +504,7 @@ async def test_eoferror_at_gate_detaches_cleanly_and_run_survives(
         def on_event(self, _event: dict[str, Any]) -> None: ...
         def finish(self) -> None: ...
 
-    with anyio.fail_after(15):
+    with anyio.fail_after(30):   # deadlock backstop only
         async with anyio.create_task_group() as tg:
             await server.open()
             tg.start_soon(server.serve, run_fn)
@@ -540,9 +534,7 @@ async def test_replayed_gates_do_not_crash_only_live_gate_solicits(
     result: dict[str, Any] = {}
 
     async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
-        with anyio.fail_after(5):
-            while server.attached_count == 0:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: server.attached_count != 0)
         on_event({"id": "live", "type": "awaiting_user_input",
                   "payload": {"steer_hint": "live?"}})
         return await user_chat_input_fn("live?")
@@ -565,7 +557,7 @@ async def test_replayed_gates_do_not_crash_only_live_gate_solicits(
         def finish(self) -> None: ...
 
     coord = InterruptCoordinator()
-    with anyio.fail_after(10):
+    with anyio.fail_after(30):   # deadlock backstop only
         async with anyio.create_task_group() as tg:
             await server.open()
 
@@ -595,12 +587,12 @@ async def test_save_slash_command_at_gate_records_intent_and_detaches(
     survived: list[bool] = []
 
     async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
-        with anyio.fail_after(5):
+        with anyio.fail_after(30):   # deadlock backstop only
             while server.attached_count == 0:
                 await server.wait_for_attach_change()
         on_event({"type": "awaiting_user_input", "payload": {"steer_hint": "reply?"}})
         # /save detaches the client; the run pauses (survives) — no abandon.
-        with anyio.fail_after(5):
+        with anyio.fail_after(30):   # deadlock backstop only
             while server.attached_count != 0:
                 await server.wait_for_attach_change()
         survived.append(True)
@@ -622,7 +614,7 @@ async def test_save_slash_command_at_gate_records_intent_and_detaches(
         def append_committed_reply(self, _text: str) -> None: ...
 
     leave_state: dict[str, str] = {}
-    with anyio.fail_after(15):
+    with anyio.fail_after(30):   # deadlock backstop only
         async with anyio.create_task_group() as tg:
             await server.open()
             tg.start_soon(server.serve, run_fn)
@@ -648,12 +640,12 @@ async def test_shelve_slash_command_records_shelve_intent(
     survived: list[bool] = []
 
     async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
-        with anyio.fail_after(5):
+        with anyio.fail_after(30):   # deadlock backstop only
             while server.attached_count == 0:
                 await server.wait_for_attach_change()
         on_event({"type": "awaiting_user_input", "payload": {"steer_hint": "reply?"}})
         # /shelve detaches the client; the run pauses (survives) — no abandon.
-        with anyio.fail_after(5):
+        with anyio.fail_after(30):   # deadlock backstop only
             while server.attached_count != 0:
                 await server.wait_for_attach_change()
         survived.append(True)
@@ -675,7 +667,7 @@ async def test_shelve_slash_command_records_shelve_intent(
         def append_committed_reply(self, _text: str) -> None: ...
 
     leave_state: dict[str, str] = {}
-    with anyio.fail_after(15):
+    with anyio.fail_after(30):   # deadlock backstop only
         async with anyio.create_task_group() as tg:
             await server.open()
             tg.start_soon(server.serve, run_fn)
@@ -700,7 +692,7 @@ async def test_abandon_slash_command_records_abandon_intent(
     server = SessionServer(sock, hibernate=False)
 
     async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
-        with anyio.fail_after(5):
+        with anyio.fail_after(30):   # deadlock backstop only
             while server.attached_count == 0:
                 await server.wait_for_attach_change()
         on_event({"type": "awaiting_user_input", "payload": {"steer_hint": "reply?"}})
@@ -724,7 +716,7 @@ async def test_abandon_slash_command_records_abandon_intent(
         def append_committed_reply(self, _text: str) -> None: ...
 
     leave_state: dict[str, str] = {}
-    with anyio.fail_after(10):
+    with anyio.fail_after(30):   # deadlock backstop only
         async with anyio.create_task_group() as tg:
             await server.open()
             tg.start_soon(server.serve, run_fn)
@@ -748,9 +740,7 @@ async def test_title_flips_busy_idle_back_to_busy_and_resets(
     server = SessionServer(sock, hibernate=False)
 
     async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
-        with anyio.fail_after(5):
-            while server.attached_count == 0:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: server.attached_count != 0)
         on_event({"type": "step_started", "payload": {}})
         on_event({"type": "awaiting_user_input",
                    "payload": {"steer_hint": "name?"}})
@@ -777,7 +767,7 @@ async def test_title_flips_busy_idle_back_to_busy_and_resets(
     s = _TTYStream()
     title = TerminalTitle(s, "term1", "My Quest")
     coord = InterruptCoordinator()
-    with anyio.fail_after(10):
+    with anyio.fail_after(30):   # deadlock backstop only
         async with anyio.create_task_group() as tg:
             await server.open()
             tg.start_soon(server.serve, run_fn)
@@ -809,9 +799,7 @@ async def test_replayed_awaiting_does_not_flip_to_idle(
     server = SessionServer(sock, hibernate=False)
 
     async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
-        with anyio.fail_after(5):
-            while server.attached_count == 0:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: server.attached_count != 0)
         on_event({"type": "awaiting_user_input", "_replay": True,
                    "payload": {"steer_hint": "old?"}})
         on_event({"type": "step_started", "payload": {}})
@@ -834,7 +822,7 @@ async def test_replayed_awaiting_does_not_flip_to_idle(
     s = _TTYStream()
     title = TerminalTitle(s, "term1", "My Quest")
     coord = InterruptCoordinator()
-    with anyio.fail_after(10):
+    with anyio.fail_after(30):   # deadlock backstop only
         async with anyio.create_task_group() as tg:
             await server.open()
             tg.start_soon(server.serve, run_fn)
@@ -860,7 +848,7 @@ async def test_abandon_records_materialized_false_for_unmaterialized_draft(
     server = SessionServer(sock, hibernate=False)
 
     async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
-        with anyio.fail_after(5):
+        with anyio.fail_after(30):   # deadlock backstop only
             while server.attached_count == 0:
                 await server.wait_for_attach_change()
         on_event({"type": "awaiting_user_input", "payload": {"steer_hint": "reply?"}})
@@ -882,7 +870,7 @@ async def test_abandon_records_materialized_false_for_unmaterialized_draft(
         def append_committed_reply(self, _text: str) -> None: ...
 
     leave_state: dict[str, str] = {}
-    with anyio.fail_after(10):
+    with anyio.fail_after(30):   # deadlock backstop only
         async with anyio.create_task_group() as tg:
             await server.open()
             tg.start_soon(server.serve, run_fn)
@@ -915,7 +903,7 @@ async def test_abandon_records_materialized_true_for_materialized_change(
     server = SessionServer(sock, hibernate=False)
 
     async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
-        with anyio.fail_after(5):
+        with anyio.fail_after(30):   # deadlock backstop only
             while server.attached_count == 0:
                 await server.wait_for_attach_change()
         on_event({"type": "awaiting_user_input", "payload": {"steer_hint": "reply?"}})
@@ -937,7 +925,7 @@ async def test_abandon_records_materialized_true_for_materialized_change(
         def append_committed_reply(self, _text: str) -> None: ...
 
     leave_state: dict[str, str] = {}
-    with anyio.fail_after(10):
+    with anyio.fail_after(30):   # deadlock backstop only
         async with anyio.create_task_group() as tg:
             await server.open()
             tg.start_soon(server.serve, run_fn)
@@ -964,12 +952,12 @@ async def test_clear_slash_command_at_gate_records_intent_and_detaches(
     survived: list[bool] = []
 
     async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
-        with anyio.fail_after(5):
+        with anyio.fail_after(30):   # deadlock backstop only
             while server.attached_count == 0:
                 await server.wait_for_attach_change()
         on_event({"type": "awaiting_user_input", "payload": {"steer_hint": "reply?"}})
         # /clear detaches the client; the run pauses (survives) — no abandon.
-        with anyio.fail_after(5):
+        with anyio.fail_after(30):   # deadlock backstop only
             while server.attached_count != 0:
                 await server.wait_for_attach_change()
         survived.append(True)
@@ -991,7 +979,7 @@ async def test_clear_slash_command_at_gate_records_intent_and_detaches(
         def append_committed_reply(self, _text: str) -> None: ...
 
     leave_state: dict[str, str] = {}
-    with anyio.fail_after(15):
+    with anyio.fail_after(30):   # deadlock backstop only
         async with anyio.create_task_group() as tg:
             await server.open()
             tg.start_soon(server.serve, run_fn)
@@ -1021,7 +1009,7 @@ async def test_eoferror_leave_sends_archive_frame_and_records_disposition(
     server = SessionServer(sock, hibernate=False)
 
     async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
-        with anyio.fail_after(5):
+        with anyio.fail_after(30):   # deadlock backstop only
             while server.attached_count == 0:
                 await server.wait_for_attach_change()
         on_event({"type": "awaiting_user_input", "payload": {"steer_hint": "reply?"}})
@@ -1042,7 +1030,7 @@ async def test_eoferror_leave_sends_archive_frame_and_records_disposition(
         def finish(self) -> None: ...
 
     leave_state: dict[str, str] = {}
-    with anyio.fail_after(15):
+    with anyio.fail_after(30):   # deadlock backstop only
         async with anyio.create_task_group() as tg:
             await server.open()
             tg.start_soon(server.serve, run_fn)
@@ -1068,7 +1056,7 @@ async def test_natural_completion_sends_no_disposition_frame(tmp_path: Path) -> 
     server = SessionServer(sock, hibernate=False)
 
     async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
-        with anyio.fail_after(5):
+        with anyio.fail_after(30):   # deadlock backstop only
             while server.attached_count == 0:
                 await server.wait_for_attach_change()
         return "done"   # completes without a gate; daemon drops the socket
@@ -1088,7 +1076,7 @@ async def test_natural_completion_sends_no_disposition_frame(tmp_path: Path) -> 
         def finish(self) -> None: ...
 
     leave_state: dict[str, str] = {}
-    with anyio.fail_after(15):
+    with anyio.fail_after(30):   # deadlock backstop only
         async with anyio.create_task_group() as tg:
             await server.open()
             tg.start_soon(server.serve, run_fn)
@@ -1166,9 +1154,7 @@ async def test_ctrl_d_returns_while_daemon_teardown_still_in_progress(
                     archive_left=slow_archive)
 
             tg.start_soon(_serve)
-            with anyio.fail_after(15):
-                while not Path(sock).exists():
-                    await anyio.sleep(0.02)
+            await wait_until(lambda: Path(sock).exists())
 
             async def _client() -> None:
                 await run_terminal_client(
@@ -1281,9 +1267,7 @@ async def test_quest_renamed_updates_terminal_title(tmp_path: Path) -> None:
     server = SessionServer(sock, hibernate=False)
 
     async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
-        with anyio.fail_after(5):
-            while server.attached_count == 0:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: server.attached_count != 0)
         on_event({"type": "step_started", "payload": {}})
         on_event({"type": "quest_renamed",
                    "payload": {"new_title": "Renamed Quest"}})
@@ -1307,7 +1291,7 @@ async def test_quest_renamed_updates_terminal_title(tmp_path: Path) -> None:
     s = _TTYStream()
     title = TerminalTitle(s, "term1", "Old Name")
     coord = InterruptCoordinator()
-    with anyio.fail_after(10):
+    with anyio.fail_after(30):   # deadlock backstop only
         async with anyio.create_task_group() as tg:
             await server.open()
             tg.start_soon(server.serve, run_fn)
@@ -1329,9 +1313,7 @@ async def test_replayed_quest_renamed_does_not_update_title(tmp_path: Path) -> N
     server = SessionServer(sock, hibernate=False)
 
     async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
-        with anyio.fail_after(5):
-            while server.attached_count == 0:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: server.attached_count != 0)
         on_event({"type": "quest_renamed", "_replay": True,
                    "payload": {"new_title": "Renamed Quest"}})
         on_event({"type": "step_started", "payload": {}})
@@ -1355,7 +1337,7 @@ async def test_replayed_quest_renamed_does_not_update_title(tmp_path: Path) -> N
     s = _TTYStream()
     title = TerminalTitle(s, "term1", "Old Name")
     coord = InterruptCoordinator()
-    with anyio.fail_after(10):
+    with anyio.fail_after(30):   # deadlock backstop only
         async with anyio.create_task_group() as tg:
             await server.open()
             tg.start_soon(server.serve, run_fn)
@@ -1377,9 +1359,7 @@ async def test_quest_renamed_invokes_on_title_even_on_replay(tmp_path: Path) -> 
     server = SessionServer(sock, hibernate=False)
 
     async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
-        with anyio.fail_after(5):
-            while server.attached_count == 0:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: server.attached_count != 0)
         on_event({"type": "quest_renamed", "_replay": True,
                    "payload": {"new_title": "First"}})
         on_event({"type": "quest_renamed",
@@ -1403,7 +1383,7 @@ async def test_quest_renamed_invokes_on_title_even_on_replay(tmp_path: Path) -> 
 
     seen: list[str] = []
     coord = InterruptCoordinator()
-    with anyio.fail_after(10):
+    with anyio.fail_after(30):   # deadlock backstop only
         async with anyio.create_task_group() as tg:
             await server.open()
             tg.start_soon(server.serve, run_fn)
@@ -1428,13 +1408,13 @@ async def test_sigterm_detaches_client_as_a_leave_and_run_survives(
     survived: list[bool] = []
 
     async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
-        with anyio.fail_after(5):
+        with anyio.fail_after(30):   # deadlock backstop only
             while server.attached_count == 0:
                 await server.wait_for_attach_change()
         on_event({"type": "step_started", "payload": {}})
         # SIGTERM tears the CLIENT down (a leave); the run keeps going here — the
         # daemon's lease rule, not the client, decides any pause.
-        with anyio.fail_after(5):
+        with anyio.fail_after(30):   # deadlock backstop only
             while server.attached_count != 0:
                 await server.wait_for_attach_change()
         survived.append(True)
@@ -1460,7 +1440,7 @@ async def test_sigterm_detaches_client_as_a_leave_and_run_survives(
                 stepped.set()
         def finish(self) -> None: ...
 
-    with anyio.fail_after(15):
+    with anyio.fail_after(30):   # deadlock backstop only
         async with anyio.create_task_group() as tg:
             await server.open()
             tg.start_soon(server.serve, run_fn)
@@ -1476,19 +1456,17 @@ async def test_sigterm_detaches_client_as_a_leave_and_run_survives(
             # Wait until the client is attached, its escalation hook is wired, AND
             # the coordinator's SIGTERM loop handler is installed — sending the
             # signal before the handler is live would terminate the test process.
-            with anyio.fail_after(5):
-                while (coord.escalation_event is None
-                       or server.attached_count != 1
-                       or signal.SIGTERM not in loop._signal_handlers):
-                    await anyio.sleep(0.02)
+            await wait_until(
+                lambda: coord.escalation_event is not None
+                and server.attached_count == 1
+                and signal.SIGTERM in loop._signal_handlers
+            )
             # ...and until run_fn has emitted step_started, so it is parked in the
             # detach-wait loop and cannot miss the attach->detach round under load.
-            with anyio.fail_after(5):
+            with anyio.fail_after(30):   # deadlock backstop only
                 await stepped.wait()
             os.kill(os.getpid(), signal.SIGTERM)   # leave gesture
-            with anyio.fail_after(5):
-                while not survived:
-                    await anyio.sleep(0.02)
+            await wait_until(lambda: survived)
             tg.cancel_scope.cancel()
 
     assert survived == [True]
@@ -1503,12 +1481,12 @@ async def test_sighup_detaches_client_as_a_leave_and_run_survives(
     survived: list[bool] = []
 
     async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
-        with anyio.fail_after(5):
+        with anyio.fail_after(30):   # deadlock backstop only
             while server.attached_count == 0:
                 await server.wait_for_attach_change()
         on_event({"type": "step_started", "payload": {}})
         # SIGHUP tears the CLIENT down (a leave); the run keeps going here.
-        with anyio.fail_after(5):
+        with anyio.fail_after(30):   # deadlock backstop only
             while server.attached_count != 0:
                 await server.wait_for_attach_change()
         survived.append(True)
@@ -1534,7 +1512,7 @@ async def test_sighup_detaches_client_as_a_leave_and_run_survives(
                 stepped.set()
         def finish(self) -> None: ...
 
-    with anyio.fail_after(15):
+    with anyio.fail_after(30):   # deadlock backstop only
         async with anyio.create_task_group() as tg:
             await server.open()
             tg.start_soon(server.serve, run_fn)
@@ -1547,19 +1525,17 @@ async def test_sighup_detaches_client_as_a_leave_and_run_survives(
 
             tg.start_soon(_client)
             loop = asyncio.get_running_loop()
-            with anyio.fail_after(5):
-                while (coord.escalation_event is None
-                       or server.attached_count != 1
-                       or signal.SIGHUP not in loop._signal_handlers):
-                    await anyio.sleep(0.02)
+            await wait_until(
+                lambda: coord.escalation_event is not None
+                and server.attached_count == 1
+                and signal.SIGHUP in loop._signal_handlers
+            )
             # ...and until run_fn has emitted step_started, so it is parked in the
             # detach-wait loop and cannot miss the attach->detach round under load.
-            with anyio.fail_after(5):
+            with anyio.fail_after(30):   # deadlock backstop only
                 await stepped.wait()
             os.kill(os.getpid(), signal.SIGHUP)   # hangup = leave gesture
-            with anyio.fail_after(5):
-                while not survived:
-                    await anyio.sleep(0.02)
+            await wait_until(lambda: survived)
             tg.cancel_scope.cancel()
 
     assert survived == [True]
@@ -1585,7 +1561,7 @@ async def test_deliberate_leave_sends_interrupt_leave_with_trigger(tmp_path: Pat
         def finish(self) -> None: ...
 
     returned = anyio.Event()
-    with anyio.fail_after(10):
+    with anyio.fail_after(30):   # deadlock backstop only
         async with anyio.create_task_group() as tg:
             await server.open()
             tg.start_soon(server.serve)
@@ -1597,16 +1573,12 @@ async def test_deliberate_leave_sends_interrupt_leave_with_trigger(tmp_path: Pat
                 returned.set()
 
             tg.start_soon(_client)
-            with anyio.fail_after(5):
-                while server.attached_count != 1:
-                    await anyio.sleep(0.02)
+            await wait_until(lambda: server.attached_count == 1)
             # A mid-run Ctrl-D leave: stamps leave_reason and drives the escalation.
             await coord.leave_mid_run(reason="ctrl-d")
-            with anyio.fail_after(5):
+            with anyio.fail_after(30):   # deadlock backstop only
                 await returned.wait()
-            with anyio.fail_after(5):
-                while not actions:
-                    await anyio.sleep(0.02)
+            await wait_until(lambda: actions)
             assert actions == [("interrupt-leave", "ctrl-d")]
             await server.close()
             tg.cancel_scope.cancel()
@@ -1632,7 +1604,7 @@ async def test_leave_without_a_stamped_trigger_sends_no_leave_frame(tmp_path: Pa
         def finish(self) -> None: ...
 
     returned = anyio.Event()
-    with anyio.fail_after(10):
+    with anyio.fail_after(30):   # deadlock backstop only
         async with anyio.create_task_group() as tg:
             await server.open()
             tg.start_soon(server.serve)
@@ -1644,13 +1616,11 @@ async def test_leave_without_a_stamped_trigger_sends_no_leave_frame(tmp_path: Pa
                 returned.set()
 
             tg.start_soon(_client)
-            with anyio.fail_after(5):
-                while server.attached_count != 1:
-                    await anyio.sleep(0.02)
+            await wait_until(lambda: server.attached_count == 1)
             # Escalation with NO stamped trigger (a disposition-style leave):
             # the choke point must not synthesize an interrupt-leave frame.
             coord.escalation_event.set()
-            with anyio.fail_after(5):
+            with anyio.fail_after(30):   # deadlock backstop only
                 await returned.wait()
             await anyio.sleep(0.05)   # give any erroneous frame time to land
             assert actions == []
@@ -1664,9 +1634,7 @@ async def test_lane_acquired_sets_hold_glyph(tmp_path: Path) -> None:
     server = SessionServer(sock, hibernate=False)
 
     async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
-        with anyio.fail_after(5):
-            while server.attached_count == 0:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: server.attached_count != 0)
         on_event({"type": "lane_acquired",
                    "payload": {"base": "main", "step": "wait-for-head",
                                "glyph": "⛙"}})
@@ -1689,7 +1657,7 @@ async def test_lane_acquired_sets_hold_glyph(tmp_path: Path) -> None:
     s = _TTYStream()
     title = TerminalTitle(s, "term1", "My Quest")
     coord = InterruptCoordinator()
-    with anyio.fail_after(10):
+    with anyio.fail_after(30):   # deadlock backstop only
         async with anyio.create_task_group() as tg:
             await server.open()
             tg.start_soon(server.serve, run_fn)
@@ -1711,9 +1679,7 @@ async def test_replayed_lane_acquired_sets_hold_glyph(tmp_path: Path) -> None:
     server = SessionServer(sock, hibernate=False)
 
     async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
-        with anyio.fail_after(5):
-            while server.attached_count == 0:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: server.attached_count != 0)
         on_event({"type": "lane_acquired", "_replay": True,
                    "payload": {"base": "main", "step": "wait-for-head",
                                "glyph": "⛙"}})
@@ -1736,7 +1702,7 @@ async def test_replayed_lane_acquired_sets_hold_glyph(tmp_path: Path) -> None:
     s = _TTYStream()
     title = TerminalTitle(s, "term1", "My Quest")
     coord = InterruptCoordinator()
-    with anyio.fail_after(10):
+    with anyio.fail_after(30):   # deadlock backstop only
         async with anyio.create_task_group() as tg:
             await server.open()
             tg.start_soon(server.serve, run_fn)
@@ -1758,9 +1724,7 @@ async def test_lane_released_clears_hold_glyph(tmp_path: Path) -> None:
     server = SessionServer(sock, hibernate=False)
 
     async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
-        with anyio.fail_after(5):
-            while server.attached_count == 0:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: server.attached_count != 0)
         on_event({"type": "lane_acquired",
                    "payload": {"base": "main", "step": "wait-for-head",
                                "glyph": "⛙"}})
@@ -1770,10 +1734,11 @@ async def test_lane_released_clears_hold_glyph(tmp_path: Path) -> None:
         # else teardown can race ahead of the client processing the release.
         hold_r = "\x1b]2;⛙ term1 · My Quest\x07"
         busy_r = f"\x1b]2;{GLYPH_BUSY} term1 · My Quest\x07"
-        with anyio.fail_after(5):
-            while not (hold_r in s.getvalue() and busy_r in s.getvalue()
-                       and s.getvalue().rindex(busy_r) > s.getvalue().index(hold_r)):
-                await anyio.sleep(0.02)
+        await wait_until(
+            lambda: hold_r in s.getvalue()
+            and busy_r in s.getvalue()
+            and s.getvalue().rindex(busy_r) > s.getvalue().index(hold_r)
+        )
         return "done"
 
     class _Driver:
@@ -1793,7 +1758,7 @@ async def test_lane_released_clears_hold_glyph(tmp_path: Path) -> None:
     s = _TTYStream()
     title = TerminalTitle(s, "term1", "My Quest")
     coord = InterruptCoordinator()
-    with anyio.fail_after(10):
+    with anyio.fail_after(30):   # deadlock backstop only
         async with anyio.create_task_group() as tg:
             await server.open()
             tg.start_soon(server.serve, run_fn)
@@ -1818,9 +1783,7 @@ async def test_lane_evicted_clears_hold_glyph_like_released(tmp_path: Path) -> N
     server = SessionServer(sock, hibernate=False)
 
     async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
-        with anyio.fail_after(5):
-            while server.attached_count == 0:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: server.attached_count != 0)
         on_event({"type": "lane_acquired",
                    "payload": {"base": "main", "step": "wait-for-head",
                                "glyph": "⛙"}})
@@ -1830,10 +1793,11 @@ async def test_lane_evicted_clears_hold_glyph_like_released(tmp_path: Path) -> N
         # else teardown can race ahead of the client processing the eviction.
         hold_r = "\x1b]2;⛙ term1 · My Quest\x07"
         busy_r = f"\x1b]2;{GLYPH_BUSY} term1 · My Quest\x07"
-        with anyio.fail_after(5):
-            while not (hold_r in s.getvalue() and busy_r in s.getvalue()
-                       and s.getvalue().rindex(busy_r) > s.getvalue().index(hold_r)):
-                await anyio.sleep(0.02)
+        await wait_until(
+            lambda: hold_r in s.getvalue()
+            and busy_r in s.getvalue()
+            and s.getvalue().rindex(busy_r) > s.getvalue().index(hold_r)
+        )
         return "done"
 
     class _Driver:
@@ -1853,7 +1817,7 @@ async def test_lane_evicted_clears_hold_glyph_like_released(tmp_path: Path) -> N
     s = _TTYStream()
     title = TerminalTitle(s, "term1", "My Quest")
     coord = InterruptCoordinator()
-    with anyio.fail_after(10):
+    with anyio.fail_after(30):   # deadlock backstop only
         async with anyio.create_task_group() as tg:
             await server.open()
             tg.start_soon(server.serve, run_fn)
@@ -1880,9 +1844,7 @@ async def test_replayed_ordinary_event_does_not_flip_to_busy(
     server = SessionServer(sock, hibernate=False)
 
     async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
-        with anyio.fail_after(5):
-            while server.attached_count == 0:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: server.attached_count != 0)
         on_event({"type": "awaiting_user_input",
                    "payload": {"steer_hint": "name?"}})
         await user_chat_input_fn("name?")
@@ -1907,7 +1869,7 @@ async def test_replayed_ordinary_event_does_not_flip_to_busy(
     s = _TTYStream()
     title = TerminalTitle(s, "term1", "My Quest")
     coord = InterruptCoordinator()
-    with anyio.fail_after(10):
+    with anyio.fail_after(30):   # deadlock backstop only
         async with anyio.create_task_group() as tg:
             await server.open()
             tg.start_soon(server.serve, run_fn)
@@ -1937,9 +1899,7 @@ async def test_remote_answer_tears_down_local_prompt_without_resending(
     gate_reached = anyio.Event()
 
     async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
-        with anyio.fail_after(5):
-            while server.attached_count == 0:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: server.attached_count != 0)
         on_event({"type": "awaiting_user_input", "payload": {"steer_hint": "answer?"}})
         gate_reached.set()
         reply = await user_chat_input_fn("answer?")
@@ -1974,7 +1934,7 @@ async def test_remote_answer_tears_down_local_prompt_without_resending(
         return ""  # unreachable: this prompt only ends by cancellation
 
     coord = InterruptCoordinator()
-    with anyio.fail_after(10):
+    with anyio.fail_after(30):   # deadlock backstop only
         async with anyio.create_task_group() as tg:
             await server.open()
             tg.start_soon(server.serve, run_fn)
@@ -1990,10 +1950,8 @@ async def test_remote_answer_tears_down_local_prompt_without_resending(
             raw = await anyio.connect_unix(sock)
             await raw.send((encode_attach("cB", "T", True) + "\n").encode())
             await raw.send((encode_input("remote-answer") + "\n").encode())
-            with anyio.fail_after(5):
-                while not received:
-                    await anyio.sleep(0.02)
-            with anyio.fail_after(5):
+            await wait_until(lambda: received)
+            with anyio.fail_after(30):   # deadlock backstop only
                 await solicit_cancelled.wait()
             await raw.aclose()
 
@@ -2015,9 +1973,7 @@ async def test_two_sequential_local_answers_no_spurious_self_cancellation(
     received: list[str] = []
 
     async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
-        with anyio.fail_after(5):
-            while server.attached_count == 0:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: server.attached_count != 0)
         on_event({"type": "awaiting_user_input", "payload": {"steer_hint": "g1?"}})
         r1 = await user_chat_input_fn("g1?")
         received.append(r1)
@@ -2050,7 +2006,7 @@ async def test_two_sequential_local_answers_no_spurious_self_cancellation(
         return next(replies)
 
     coord = InterruptCoordinator()
-    with anyio.fail_after(10):
+    with anyio.fail_after(30):   # deadlock backstop only
         async with anyio.create_task_group() as tg:
             await server.open()
             tg.start_soon(server.serve, run_fn)
@@ -2080,9 +2036,7 @@ async def test_awaiting_user_input_resets_client_gesture_latch(
     at_solicit: dict[str, Any] = {}
 
     async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
-        with anyio.fail_after(5):
-            while server.attached_count == 0:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: server.attached_count != 0)
         on_event({"type": "awaiting_user_input", "payload": {"steer_hint": "p?"}})
         return await user_chat_input_fn("p?")
 
@@ -2107,7 +2061,7 @@ async def test_awaiting_user_input_resets_client_gesture_latch(
         at_solicit["first_gesture_at"] = coord._first_gesture_at
         return "x"
 
-    with anyio.fail_after(10):
+    with anyio.fail_after(30):   # deadlock backstop only
         async with anyio.create_task_group() as tg:
             await server.open()
             tg.start_soon(server.serve, run_fn)
@@ -2132,9 +2086,7 @@ async def test_local_echo_invoked_with_reply_on_local_send_path(
     received: list[str] = []
 
     async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
-        with anyio.fail_after(5):
-            while server.attached_count == 0:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: server.attached_count != 0)
         on_event({"type": "awaiting_user_input", "payload": {"steer_hint": "name?"}})
         reply = await user_chat_input_fn("name?")
         received.append(reply)
@@ -2158,7 +2110,7 @@ async def test_local_echo_invoked_with_reply_on_local_send_path(
         return "imp"
 
     coord = InterruptCoordinator()
-    with anyio.fail_after(10):
+    with anyio.fail_after(30):   # deadlock backstop only
         async with anyio.create_task_group() as tg:
             await server.open()
             tg.start_soon(server.serve, run_fn)
@@ -2186,9 +2138,7 @@ async def test_local_echo_not_invoked_when_answered_elsewhere(
     echoed: list[str] = []
 
     async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
-        with anyio.fail_after(5):
-            while server.attached_count == 0:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: server.attached_count != 0)
         on_event({"type": "awaiting_user_input", "payload": {"steer_hint": "answer?"}})
         gate_reached.set()
         reply = await user_chat_input_fn("answer?")
@@ -2212,7 +2162,7 @@ async def test_local_echo_not_invoked_when_answered_elsewhere(
         return ""  # unreachable: cancelled when the gate is answered elsewhere
 
     coord = InterruptCoordinator()
-    with anyio.fail_after(10):
+    with anyio.fail_after(30):   # deadlock backstop only
         async with anyio.create_task_group() as tg:
             await server.open()
             tg.start_soon(server.serve, run_fn)
@@ -2228,9 +2178,7 @@ async def test_local_echo_not_invoked_when_answered_elsewhere(
             raw = await anyio.connect_unix(sock)
             await raw.send((encode_attach("cB", "T", True) + "\n").encode())
             await raw.send((encode_input("remote-answer") + "\n").encode())
-            with anyio.fail_after(5):
-                while not received:
-                    await anyio.sleep(0.02)
+            await wait_until(lambda: received)
             await raw.aclose()
 
     # The remote client answered; the local client never sent nor echoed.
@@ -2252,12 +2200,12 @@ async def test_local_echo_not_invoked_on_leave_command(
     echoed: list[str] = []
 
     async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
-        with anyio.fail_after(5):
+        with anyio.fail_after(30):   # deadlock backstop only
             while server.attached_count == 0:
                 await server.wait_for_attach_change()
         on_event({"type": "awaiting_user_input", "payload": {"steer_hint": "reply?"}})
         # The leave command detaches the client; the run survives — no input frame.
-        with anyio.fail_after(5):
+        with anyio.fail_after(30):   # deadlock backstop only
             while server.attached_count != 0:
                 await server.wait_for_attach_change()
         return "done"
@@ -2279,7 +2227,7 @@ async def test_local_echo_not_invoked_on_leave_command(
 
     coord = InterruptCoordinator()
     leave_state: dict[str, str] = {}
-    with anyio.fail_after(15):
+    with anyio.fail_after(30):   # deadlock backstop only
         async with anyio.create_task_group() as tg:
             await server.open()
             tg.start_soon(server.serve, run_fn)
@@ -2309,7 +2257,7 @@ async def test_local_echo_not_invoked_on_abandon(
     echoed: list[str] = []
 
     async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
-        with anyio.fail_after(5):
+        with anyio.fail_after(30):   # deadlock backstop only
             while server.attached_count == 0:
                 await server.wait_for_attach_change()
         on_event({"type": "awaiting_user_input", "payload": {"steer_hint": "reply?"}})
@@ -2333,7 +2281,7 @@ async def test_local_echo_not_invoked_on_abandon(
         def finish(self) -> None: ...
         def append_committed_reply(self, _text: str) -> None: ...
 
-    with anyio.fail_after(10):
+    with anyio.fail_after(30):   # deadlock backstop only
         async with anyio.create_task_group() as tg:
             await server.open()
             tg.start_soon(server.serve, run_fn)
@@ -2378,7 +2326,7 @@ async def test_mid_conversation_model_sends_control_not_input(
         def finish(self) -> None: ...
         def append_committed_reply(self, _text: str) -> None: ...
 
-    with anyio.fail_after(10):
+    with anyio.fail_after(30):   # deadlock backstop only
         async with anyio.create_task_group() as tg:
             await server.open()
             tg.start_soon(server.serve)
@@ -2390,17 +2338,15 @@ async def test_mid_conversation_model_sends_control_not_input(
 
             tg.start_soon(_client)
 
-            with anyio.fail_after(5):
-                while server.attached_count != 1:
-                    await anyio.sleep(0.02)
+            await wait_until(lambda: server.attached_count == 1)
             # Gate 1: the client answers with /model. It must leave as a
             # set-model control carrying the raw arg, NOT an input frame.
             server.broadcast(
                 {"type": "awaiting_user_input", "payload": {"steer_hint": "q1"}})
-            with anyio.fail_after(5):
-                while (CONTROL_SET_MODEL,
-                       "anthropic:claude-fable-5") not in controls_seen:
-                    await anyio.sleep(0.02)
+            await wait_until(
+                lambda: (CONTROL_SET_MODEL, "anthropic:claude-fable-5")
+                in controls_seen
+            )
             # The control did not tear the client down: it stays attached and
             # answers the next gate through the same loop.
             assert server.attached_count == 1
@@ -2446,7 +2392,7 @@ async def test_save_disposition_leave_sends_reason_on_the_frame(tmp_path: Path) 
         def finish(self) -> None: ...
 
     returned = anyio.Event()
-    with anyio.fail_after(10):
+    with anyio.fail_after(30):   # deadlock backstop only
         async with anyio.create_task_group() as tg:
             await server.open()
             tg.start_soon(server.serve)
@@ -2459,15 +2405,11 @@ async def test_save_disposition_leave_sends_reason_on_the_frame(tmp_path: Path) 
                 returned.set()
 
             tg.start_soon(_client)
-            with anyio.fail_after(5):
-                while server.attached_count != 1:
-                    await anyio.sleep(0.02)
+            await wait_until(lambda: server.attached_count == 1)
             await coord.leave_mid_run(reason="ctrl-d")
-            with anyio.fail_after(5):
+            with anyio.fail_after(30):   # deadlock backstop only
                 await returned.wait()
-            with anyio.fail_after(5):
-                while not actions:
-                    await anyio.sleep(0.02)
+            await wait_until(lambda: actions)
             assert actions == [("save", "ctrl-d")]
             await server.close()
             tg.cancel_scope.cancel()
@@ -2482,7 +2424,7 @@ async def test_skill_request_is_routed_and_command_line_echoed(
     captured: list[object] = []
 
     async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> object:
-        with anyio.fail_after(5):
+        with anyio.fail_after(30):   # deadlock backstop only
             while server.attached_count == 0:
                 await server.wait_for_attach_change()
         on_event({"type": "awaiting_user_input", "payload": {"prompt": "reply?"}})
@@ -2509,7 +2451,7 @@ async def test_skill_request_is_routed_and_command_line_echoed(
         def finish(self) -> None: ...
         def append_committed_reply(self, _text: str) -> None: ...
 
-    with anyio.fail_after(10):
+    with anyio.fail_after(30):   # deadlock backstop only
         async with anyio.create_task_group() as tg:
             await server.open()
             tg.start_soon(server.serve, run_fn)
@@ -2537,7 +2479,7 @@ async def test_sandbox_off_at_gate_forwards_frame_and_daemon_broadcast_lights_ma
     server = SessionServer(sock, hibernate=False, coordinator=server_coord)
 
     async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
-        with anyio.fail_after(5):
+        with anyio.fail_after(30):   # deadlock backstop only
             while server.attached_count == 0:
                 await server.wait_for_attach_change()
         on_event({"type": "awaiting_user_input",
@@ -2572,7 +2514,7 @@ async def test_sandbox_off_at_gate_forwards_frame_and_daemon_broadcast_lights_ma
         def set_unsandboxed(self, value: bool) -> None:
             marker.append(value)
 
-    with anyio.fail_after(10):
+    with anyio.fail_after(30):   # deadlock backstop only
         async with anyio.create_task_group() as tg:
             await server.open()
             tg.start_soon(server.serve, run_fn)
@@ -2585,9 +2527,7 @@ async def test_sandbox_off_at_gate_forwards_frame_and_daemon_broadcast_lights_ma
             tg.start_soon(_client)
             # Wait for the daemon broadcast to round-trip and light the marker
             # client-side (not the server-side flip, which happens earlier).
-            with anyio.fail_after(8):
-                while not marker:
-                    await anyio.sleep(0.02)
+            await wait_until(lambda: marker)
             tg.cancel_scope.cancel()
 
     # Frame forwarded (server flipped) and the marker lit exactly once — via the
@@ -2605,9 +2545,7 @@ async def test_client_intercepts_sandbox_marker_without_routing_to_driver(
     server = SessionServer(sock, hibernate=False)
 
     async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
-        with anyio.fail_after(5):
-            while server.attached_count == 0:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: server.attached_count != 0)
         # Emitted before the gate over an ordered stream, so the client
         # processes the marker first.
         on_event({"type": "sandbox_marker", "payload": {"unsandboxed": True}})
@@ -2638,7 +2576,7 @@ async def test_client_intercepts_sandbox_marker_without_routing_to_driver(
         return "ok"
 
     coord = InterruptCoordinator()
-    with anyio.fail_after(10):
+    with anyio.fail_after(30):   # deadlock backstop only
         async with anyio.create_task_group() as tg:
             await server.open()
             tg.start_soon(server.serve, run_fn)

@@ -19,6 +19,7 @@ from imp.remote.session.attach import (
 from imp.remote.session.discover import session_socket_path
 from imp.remote.session.reply import deliver_session_reply
 from imp.remote.session.socket_server import SessionSocket
+from tests.async_wait import wait_until
 
 
 @pytest.fixture
@@ -81,9 +82,7 @@ async def test_attaches_to_resident_daemon_without_spawning(tmp_path: Path) -> N
         tg.start_soon(server.serve)
         client = await attach_or_spawn(
             quest, on_event=lambda _e: None, spawn_fn=spawned.append)
-        with anyio.fail_after(5):
-            while server.attached_count != 1:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: server.attached_count == 1)
         assert spawned == []        # a resident daemon is attached, never respawned
         await client.aclose()
         await server.close()
@@ -113,15 +112,12 @@ async def test_spawns_then_attaches_when_no_daemon_resident(tmp_path: Path) -> N
         client = await attach_or_spawn(
             quest, on_event=received.append, spawn_fn=fake_spawn)
         assert spawned == [quest]      # no resident daemon -> spawned exactly once
-        with anyio.fail_after(5):
-            while holder.get("server") is None or holder["server"].attached_count != 1:
-                await anyio.sleep(0.02)
+        await wait_until(
+            lambda: holder.get("server") is not None and holder["server"].attached_count == 1)
         tg.start_soon(client.receive_events)
         holder["server"].broadcast(
             {"type": "step_started", "payload": {"step": "plan"}})
-        with anyio.fail_after(5):
-            while not received:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: received)
         assert received == [{"type": "step_started", "payload": {"step": "plan"}}]
         await client.aclose()
         await holder["server"].close()
@@ -221,9 +217,8 @@ async def test_attach_waits_for_alive_daemon_until_socket_appears(
         client = await attach_or_spawn(
             quest, on_event=lambda _e: None,
             spawn_fn=slow_spawn, connect_timeout=5)
-        with anyio.fail_after(5):
-            while holder.get("server") is None or holder["server"].attached_count != 1:
-                await anyio.sleep(0.02)
+        await wait_until(
+            lambda: holder.get("server") is not None and holder["server"].attached_count == 1)
         assert holder["server"].attached_count == 1
         await client.aclose()
         await holder["server"].close()
@@ -274,16 +269,12 @@ async def test_build_session_attach_uses_resident_daemon_without_spawning(
 
         attach = attach_mod.build_session_attach(quest)
         client = await attach(received.append)
-        with anyio.fail_after(5):
-            while server.attached_count != 1:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: server.attached_count == 1)
         assert spawned == []        # resident daemon attached, never respawned
 
         tg.start_soon(client.receive_events)
         server.broadcast({"type": "step_started", "payload": {"step": "plan"}})
-        with anyio.fail_after(5):
-            while not received:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: received)
         assert received == [{"type": "step_started", "payload": {"step": "plan"}}]
 
         await client.aclose()
@@ -323,9 +314,8 @@ async def test_build_session_attach_threads_resume_into_spawn(
         client = await attach(lambda _e: None)
 
         assert captured["resume"] is True
-        with anyio.fail_after(5):
-            while holder.get("server") is None or holder["server"].attached_count != 1:
-                await anyio.sleep(0.02)
+        await wait_until(
+            lambda: holder.get("server") is not None and holder["server"].attached_count == 1)
         await client.aclose()
         await holder["server"].close()
         tg.cancel_scope.cancel()
@@ -364,9 +354,7 @@ async def test_build_session_attach_leases_when_requested(tmp_path: Path) -> Non
         tg.start_soon(server.serve)
         attach = build_session_attach(quest, lease=True)
         client = await attach(lambda _e: None)
-        with anyio.fail_after(5):
-            while not seen:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: seen)
         assert seen[0].lease is True   # the terminal opts in to a keep-alive lease
         await client.aclose()
         await server.close()
@@ -387,9 +375,7 @@ async def test_deliver_session_reply_attaches_lease_less(tmp_path: Path) -> None
         tg.start_soon(server.serve)
 
         async def _gate_once_attached() -> None:
-            with anyio.fail_after(5):
-                while server.attached_count == 0:
-                    await anyio.sleep(0.02)
+            await wait_until(lambda: server.attached_count != 0)
             server.broadcast(
                 {"type": "awaiting_user_input", "payload": {"prompt": "?"}})
 

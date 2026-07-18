@@ -114,7 +114,7 @@ def test_send_signal_delivers_sigint_regardless_of_tty_mode() -> None:
     d = ImptyDriver()
     d.start([sys.executable, "-c", _SIGINT_CHILD])
     try:
-        d.wait(idle=0.2, hard=5.0)
+        d.wait(idle=0.2, hard=30.0)
         screen = d.send_signal(signal.SIGINT)
         assert "GOT-SIGINT" in screen
         # The child handler writes GOT-SIGINT then os._exit(): under load the pty
@@ -211,7 +211,7 @@ def test_send_wait_true_returns_screen_not_sent_marker() -> None:
     d = ImptyDriver()
     d.start([sys.executable, "-c", _ANIMATING_CHILD])
     try:
-        d.wait(idle=0.2, hard=5.0)  # wait for READY
+        d.wait(idle=0.2, hard=30.0)  # wait for READY
         result = d.send("x", wait=True)
         assert result != "[sent]"
         assert result.startswith("[")  # status header
@@ -224,7 +224,7 @@ def test_resize_delivers_sigwinch_and_child_sees_new_width() -> None:
     d = ImptyDriver()
     d.start([sys.executable, "-c", _RESIZE_CHILD], cols=80, rows=24)
     try:
-        d.wait(idle=0.2, hard=5.0)  # wait for READY
+        d.wait(idle=0.2, hard=30.0)  # wait for READY
         screen = d.resize(30, 100)  # rows=30, cols=100
         # The live session reflects the new geometry.
         assert d._require().cols == 100
@@ -255,7 +255,7 @@ def test_resize_wait_true_returns_screen_not_resized_marker() -> None:
     d = ImptyDriver()
     d.start([sys.executable, "-c", _RESIZE_CHILD])
     try:
-        d.wait(idle=0.2, hard=5.0)  # wait for READY
+        d.wait(idle=0.2, hard=30.0)  # wait for READY
         result = d.resize(30, 100, wait=True)
         assert result != "[resized]"
         assert result.startswith("[")  # status header
@@ -268,7 +268,7 @@ def test_resize_numeric_wait_settles_fixed_time() -> None:
     d = ImptyDriver()
     d.start([sys.executable, "-c", _RESIZE_CHILD], cols=80, rows=24)
     try:
-        d.wait(idle=0.2, hard=5.0)  # wait for READY
+        d.wait(idle=0.2, hard=30.0)  # wait for READY
         t = time.monotonic()
         screen = d.resize(30, 100, wait=0.5)  # rows=30, cols=100
         dt = time.monotonic() - t
