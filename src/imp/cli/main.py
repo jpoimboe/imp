@@ -2550,7 +2550,8 @@ def _resume_gone(control: Path, quest_id: str) -> int:
         print(f"{title} was abandoned; nothing to resume.")
         return 0
     if status is not None:
-        print(f"{title} is already completed; nothing to resume.")
+        word = "merged" if archive_read.merge_commit_of(control, quest_id) else "completed"
+        print(f"{title} is already {word}; nothing to resume.")
         return 0
     print(f"imp: no quest matches {quest_id!r}", file=sys.stderr)
     return 2
