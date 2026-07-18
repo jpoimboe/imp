@@ -2149,20 +2149,22 @@ async def test_compact_pause_reenters_after_running_compaction(
     assert ran == [quest.id]
 
 
-def test_leaf_load_error_passes_a_bare_load_error(tmp_path: Path) -> None:
-    """A bare (un-grouped) LoadError is returned unchanged."""
+def test_config_pause_error_passes_a_bare_load_error() -> None:
+    """A bare (un-grouped) LoadError has no crash sibling, so it is returned
+    unchanged and renders the clean config pause (AC 3)."""
     from imp.engine.errors import LoadError
-    from imp.remote.session.daemon import _leaf_load_error
+    from imp.remote.session.daemon import _config_pause_error
 
     exc = LoadError("bad yaml")
-    assert _leaf_load_error(exc) is exc
+    assert _config_pause_error(exc) is exc
 
 
-def test_leaf_load_error_unwraps_real_anyio_group() -> None:
+def test_config_pause_error_unwraps_real_anyio_group() -> None:
     """A LoadError raised inside an anyio task group surfaces as a
-    BaseExceptionGroup (possibly nested); _leaf_load_error extracts the leaf."""
+    BaseExceptionGroup (possibly nested); with only load + cancellation leaves,
+    _config_pause_error yields the load error for the clean pause (AC 2)."""
     from imp.engine.errors import LoadError
-    from imp.remote.session.daemon import _leaf_load_error
+    from imp.remote.session.daemon import _config_pause_error
 
     async def _boom() -> None:
         async with anyio.create_task_group() as outer:
@@ -2175,15 +2177,15 @@ def test_leaf_load_error_unwraps_real_anyio_group() -> None:
 
     with pytest.raises(BaseExceptionGroup) as ei:
         anyio.run(_boom)
-    leaf = _leaf_load_error(ei.value)
+    leaf = _config_pause_error(ei.value)
     assert isinstance(leaf, LoadError)
     assert leaf.message == "phases: required key missing"
 
 
-def test_leaf_load_error_returns_none_for_a_non_load_group() -> None:
+def test_config_pause_error_returns_none_for_a_non_load_group() -> None:
     """A group carrying only a non-LoadError crash yields None, so main
-    re-raises it unchanged (AC 4b: the crash keeps its traceback)."""
-    from imp.remote.session.daemon import _leaf_load_error
+    re-raises it unchanged (AC 3: the crash keeps its traceback)."""
+    from imp.remote.session.daemon import _config_pause_error
 
     async def _boom() -> None:
         async with anyio.create_task_group() as tg:
@@ -2193,7 +2195,40 @@ def test_leaf_load_error_returns_none_for_a_non_load_group() -> None:
 
     with pytest.raises(BaseExceptionGroup) as ei:
         anyio.run(_boom)
-    assert _leaf_load_error(ei.value) is None
+    assert _config_pause_error(ei.value) is None
+
+
+def test_config_pause_error_returns_none_for_a_mixed_group() -> None:
+    """AC 1: a group with both a LoadError leaf and a genuine non-cancellation
+    crash returns None, so main re-raises and the crash's traceback survives.
+    The construction is order-independent: the crash must win regardless."""
+    from imp.engine.errors import LoadError
+    from imp.remote.session.daemon import _config_pause_error
+
+    load_first = BaseExceptionGroup(
+        "eg", [LoadError("phases: required key missing"), RuntimeError("boom")])
+    crash_first = BaseExceptionGroup(
+        "eg", [RuntimeError("boom"), LoadError("phases: required key missing")])
+    assert _config_pause_error(load_first) is None
+    assert _config_pause_error(crash_first) is None
+
+
+def test_config_pause_error_ignores_cancellation_siblings() -> None:
+    """AC 2: a group whose only genuine leaf is a LoadError, accompanied by a
+    cancellation sibling, still yields the LoadError for the clean pause. The
+    cancellation leaf is constructed directly because a real anyio task group
+    swallows the cancelled sibling and yields only `[LoadError]`, so it cannot
+    exercise this branch."""
+    import asyncio
+
+    from imp.engine.errors import LoadError
+    from imp.remote.session.daemon import _config_pause_error
+
+    group = BaseExceptionGroup(
+        "eg", [LoadError("phases: required key missing"), asyncio.CancelledError()])
+    leaf = _config_pause_error(group)
+    assert isinstance(leaf, LoadError)
+    assert leaf.message == "phases: required key missing"
 
 
 def test_main_records_config_error_pause_on_wrapped_load_error(
