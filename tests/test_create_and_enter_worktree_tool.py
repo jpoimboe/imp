@@ -85,5 +85,6 @@ def test_tool_description_mentions_dependency_wait() -> None:
         "If this quest depends on a quest that hasn't merged yet, it first "
         "waits for that merge before forking"
     ) in desc
-    assert "the wait is interruptible (Ctrl-D pauses; a later resume retries)" in desc
+    assert "an attended wait is interruptible (Ctrl-D pauses; a later resume retries)" in desc
+    assert "a background run waits on its own until the dependency lands" in desc
     assert desc.rstrip().endswith("Idempotent — a no-op once the worktree already exists.")
