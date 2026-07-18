@@ -75,6 +75,7 @@ from imp.providers.config import (
     validate_workflow_name,
 )
 from imp.remote.daemon.directory import session_is_resident
+from imp.remote.session.attach import DaemonStartupError
 from imp.remote.session.protocol import SkillRequest
 
 
@@ -559,6 +560,32 @@ def _emit_merge_blocked(
     opening = _resolve_intent(list(quest.event_log().read()))
     for ln in _error_block(f"merge blocked: {summary}", body, cid, quest.title,
                            color=color, intent=opening):
+        print(ln)
+    print()
+
+
+def _emit_startup_failed(quest: Quest, error: DaemonStartupError | None) -> None:
+    """Session daemon died before binding its socket — render the shared three-part
+    error block on stdout (red head + body + gold identity line), matching every
+    other terminal exit block, then one trailing blank. Built from
+    DaemonStartupError's structured fields, not its message string; degrades to a
+    backstop head+body when no error detail is available (the timeout path)."""
+    color = should_use_color(sys.stdout)
+    if error is not None:
+        if error.exit_code is not None:
+            head = (f"startup failed: session daemon exited with code "
+                    f"{error.exit_code} before it came up")
+        else:
+            head = "startup failed: session daemon exited before it came up"
+        body = error.stderr_tail.splitlines() if error.stderr_tail else []
+        body.append(f"see {error.stderr_path}")
+    else:
+        head = "startup failed: session daemon did not come up"
+        body = [f"It may have crashed; see "
+                f"{quest.control_root}/.imp/remote-control.log"]
+    intent = _resolve_intent(list(quest.event_log().read()))
+    for ln in _error_block(head, body, quest.id, quest.title,
+                           color=color, intent=intent):
         print(ln)
     print()
 
