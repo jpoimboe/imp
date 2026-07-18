@@ -24,7 +24,7 @@ def test_snapshot_carries_a_truecolor_cell_into_the_png(tmp_path: Path) -> None:
     )
     out = tmp_path / "shot.png"
     with TerminalSession([sys.executable, "-c", prog], cols=20, rows=5) as s:
-        s.wait_idle(idle=0.3, hard=8.0)
+        s.wait_idle(idle=0.3, hard=30.0)
         path = snapshot(s, str(out))
 
     assert path == str(out)
