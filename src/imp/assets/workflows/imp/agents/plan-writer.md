@@ -179,6 +179,8 @@ dropped before the merge gate. Reader form guarantees it reaches `finalize` whet
 technical calls yourself and recording them in the `## Decisions` section (see "Ask vs.
 decide").
 
+New user-facing copy — any string a human sees, or LLM prompt text — whose wording the spec left unpinned is this same decide-and-record case: implement a sensible default styled after neighbouring copy and ensure one `— needs-decision:` line carries the wording to the gate — never stop mid-plan for copy.
+
 ## Explore the Codebase First
 
 Read the spec at `{{ quest.home }}/artifacts/spec/{{ quest.id }}.md`, then glob and read

@@ -75,11 +75,13 @@ ending your turn rather than presenting the whole at once; small designs confirm
 single pass.
 
 **Enumerate before committing.** Any design element with a user-visible outcome — labels,
-copy, colors, visibility, layout — must have its concrete values enumerated to the user
+colors, visibility, layout — must have its concrete values enumerated to the user
 before the spec is written. Prose batches with recommended defaults the user corrects
 remain the pacing default; what is banned is the *unenumerated deferral* — "I'll audit
 the YAML and fill in the labels later" is not a decision the implementation may inherit.
 Batch the defaults, but show the actual values.
+
+> **Enumerate copy verbatim.** Every fixed string — anything a human will see (labels, messages, error/diagnostic/log output) and any LLM prompt text — has its exact wording shown to the user before the spec is written, not just its intent.
 
 **Walk the whole surface.** When the design changes a user-visible surface — a status
 bar, the scrollback log, a screen — present the complete after-state inventory of that
