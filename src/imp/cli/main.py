@@ -520,6 +520,11 @@ def _emit_paused_summary(quest: Quest, leave_trigger: str | None = None) -> None
     print()
 
 
+def _emit_cli_error(message: str) -> None:
+    """Non-quest CLI error sink: writes `imp: <message>` to stderr."""
+    print(f"imp: {message}", file=sys.stderr)
+
+
 def _emit_merge_blocked(
     quest: Quest, reason: str | None, detail: str | None = None,
     note: str | None = None,
