@@ -747,6 +747,40 @@ async def test_run_session_client_threads_autonomous_into_attach(
     assert captured["autonomous"] is True
 
 
+@pytest.mark.anyio
+async def test_daemon_startup_crash_surfaces_exit_code_and_stderr_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    import imp.cli.session_run as session_run
+    from imp.remote.session.attach import DaemonStartupError
+
+    quest = _make_change(tmp_path, "crashy")
+    (tmp_path / ".imp" / "worktrees" / quest.id).mkdir(parents=True)
+    State(id=quest.id, step="plan", step_attempt=0, status="paused").save(
+        quest.state_dir)
+
+    stderr_path = quest.quest_dir / "daemon.stderr"
+
+    async def _boom(**_kwargs: Any) -> None:
+        raise DaemonStartupError(
+            quest.id, 7, stderr_path, "RuntimeError: boom-on-startup")
+
+    monkeypatch.setattr(session_run, "run_terminal_client", _boom)
+    monkeypatch.setattr("imp.cli.main._handle_terminal_outcome", lambda *_: 1)
+
+    coord = InterruptCoordinator()
+    rc = await session_run.run_session_client(
+        quest, driver=_NullDriver(), coord=coord, solicit=lambda _p: _never())
+
+    assert rc == 3
+    err = capsys.readouterr().err
+    assert quest.id in err
+    assert "code 7" in err
+    assert str(stderr_path) in err
+    assert "boom-on-startup" in err
+
+
 def test_should_run_ctrl_d_reader_requires_interactive_tty(monkeypatch) -> None:
     from imp.cli.session_run import _should_run_ctrl_d_reader
 

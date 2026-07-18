@@ -15,7 +15,7 @@ from imp.cli.terminal_title import TerminalTitle
 from imp.engine.executor import RunResult
 from imp.engine.quest import Quest
 from imp.engine.state import State
-from imp.remote.session.attach import build_session_attach
+from imp.remote.session.attach import DaemonStartupError, build_session_attach
 from imp.remote.session.protocol import SkillRequest
 
 
@@ -57,6 +57,7 @@ async def run_session_client(
         non_interactive=non_interactive, autonomous=autonomous, lease=True,
         model=model)
     startup_failed = False
+    startup_error: DaemonStartupError | None = None
     async with anyio.create_task_group() as tg:
         tg.start_soon(coord.run_signal_receiver)
         if _should_run_ctrl_d_reader(non_interactive=non_interactive):
@@ -76,12 +77,19 @@ async def run_session_client(
             startup_failed = True
             # attach raised before run_terminal_client's teardown finally runs.
             title.reset()
+        except DaemonStartupError as err:
+            startup_failed = True
+            startup_error = err
+            title.reset()
         tg.cancel_scope.cancel()
     if startup_failed and infer_session_result(quest) is not RunResult.COMPLETED:
-        print(
-            f"imp: session daemon for {quest.id} did not come up; "
-            f"it may have crashed (see {quest.control_root}/.imp/remote-control.log)",
-            file=sys.stderr)
+        if startup_error is not None:
+            print(f"imp: {startup_error}", file=sys.stderr)
+        else:
+            print(
+                f"imp: session daemon for {quest.id} did not come up; "
+                f"it may have crashed (see {quest.control_root}/.imp/remote-control.log)",
+                file=sys.stderr)
         return 3
     from imp.cli.main import (
         _print_leave_disposition,
