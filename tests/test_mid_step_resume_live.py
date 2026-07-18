@@ -151,6 +151,26 @@ def _wait_for_paused(state_path: Path, timeout: float) -> dict[str, object]:
     return last
 
 
+def _wait_for_status(state_path: Path, want: str, timeout: float) -> str:
+    """Poll state.json until status == want (or timeout); return the last status.
+
+    `imp resume` runs the engine in a detached session daemon, so the client can
+    return a beat before the daemon persists the terminal status. Reading
+    state.json once right after the client exits races that write; poll instead.
+    """
+    deadline = time.time() + timeout
+    last = ""
+    while time.time() < deadline:
+        try:
+            last = json.loads(state_path.read_text()).get("status", "")
+        except (OSError, json.JSONDecodeError):
+            last = ""
+        if last == want:
+            return last
+        time.sleep(0.2)
+    return last
+
+
 def _skip_or_fail_unpaused(
     events: Path, state: dict[str, object], proc: subprocess.Popen
 ) -> NoReturn:
@@ -331,10 +351,11 @@ def test_ctrl_c_during_bash_pauses_then_resume_completes_openai(
 # Serialize the 3 crash-prone resume tests onto one worker (under --dist
 # loadgroup) to cap the peak concurrent claude-CLI footprint they contribute.
 @pytest.mark.xdist_group("live_claude_resume")
-# 600s > this test's ~360-480s internal subprocess-timeout budget, so conftest's
-# 240s live-test backstop can't fire mid-subprocess before imp's own internal
-# timeouts do (which yield real diagnostics instead of a killed worker).
-@pytest.mark.timeout(600)
+# 880s > this test's 752s internal subprocess-timeout budget
+# (30 + 120 + 2 + 60 + 30 + 480 + 30), so conftest's 240s live-test backstop can't
+# fire mid-subprocess before imp's own internal timeouts do (which yield real
+# diagnostics instead of a killed worker).
+@pytest.mark.timeout(880)
 def test_ctrl_c_during_bash_pauses_then_resume_completes_claude_code(
     tmp_path: Path,
 ) -> None:
@@ -395,8 +416,11 @@ def test_ctrl_c_during_bash_pauses_then_resume_completes_claude_code(
     resume = subprocess.run(
         [sys.executable, "-m", "imp", "resume", slug],
         cwd=tmp_path, env=env,
-        capture_output=True, text=True, timeout=240,
+        capture_output=True, text=True, timeout=480,
     )
     assert resume.returncode == 0, (
         f"resume failed rc={resume.returncode}; stderr={resume.stderr}"
     )
+
+    final_status = _wait_for_status(state_path, "completed", 30.0)
+    assert final_status == "completed", final_status
