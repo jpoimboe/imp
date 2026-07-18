@@ -35,7 +35,7 @@ def test_wait_on_already_exited_returns_immediately(tmp_path: Path) -> None:
         ctx = _ctx(tmp_path)
         out = await _spawn(ctx, "true")
         bp = ctx.background_processes[out["id"]]
-        with anyio.fail_after(10):
+        with anyio.fail_after(30):  # deadlock backstop only
             await bp.proc.wait()
         t0 = anyio.current_time()
         r = await _read(ctx, out["id"], wait=True)

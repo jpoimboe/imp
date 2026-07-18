@@ -12,6 +12,7 @@ from imp.engine.sandbox import (
     OVERLAY_SETUP_FAILED_CODE,
     OVERLAY_SETUP_FAILED_MARKER,
 )
+from tests.async_wait import wait_until
 from tests.test_bg_spawn import _cleanup, _ctx, _spawn
 from tests.test_bg_sweep import _RecLog
 
@@ -24,9 +25,7 @@ _FAIL_CMD = (f"printf '%s\\n' {OVERLAY_SETUP_FAILED_MARKER} >&2; "
 
 async def _wait_exit(ctx, bg_id: str) -> None:
     bp = ctx.background_processes[bg_id]
-    with anyio.fail_after(10):
-        while bp.proc.returncode is None:
-            await anyio.sleep(0.02)
+    await wait_until(lambda: bp.proc.returncode is not None)
 
 
 def test_background_overlay_setup_failure_detected_and_reported(tmp_path: Path) -> None:

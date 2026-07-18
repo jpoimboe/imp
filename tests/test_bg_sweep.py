@@ -10,6 +10,7 @@ import pytest
 
 import imp.agents.tools.bash  # noqa: F401
 from imp.agents.tools import get_registry
+from tests.async_wait import wait_until
 from tests.test_bg_spawn import _cleanup, _ctx, _spawn
 
 FLOODER = "while true; do echo xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx; done"
@@ -58,9 +59,7 @@ def test_finished_unread_process_reaped_at_sweep(tmp_path: Path) -> None:
         ctx = _ctx(tmp_path)
         out = await _spawn(ctx, "true")
         bp = ctx.background_processes[out["id"]]
-        with anyio.fail_after(10):
-            while bp.proc.returncode is None:
-                await anyio.sleep(0.05)
+        await wait_until(lambda: bp.proc.returncode is not None)
         await _sweep_bg(ctx)
         assert bp.status == "exited"
         assert bp.returncode == 0
@@ -155,9 +154,7 @@ def test_forking_server_exited_leader_still_cap_killed(
         out = await _spawn(ctx, f"( {FLOODER} ) & exit 0")
         try:
             bp = ctx.background_processes[out["id"]]
-            with anyio.fail_after(10):
-                while bp.proc.returncode is None:
-                    await anyio.sleep(0.05)
+            await wait_until(lambda: bp.proc.returncode is not None)
             await _sweep_until_killed(ctx, out["id"])
             assert bp.kill_reason == "output-cap"
             assert bp.returncode == 0            # leader's REAL returncode retained

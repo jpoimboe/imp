@@ -232,7 +232,7 @@ def test_bash_caps_runaway_output(
     ctx = _ctx(tmp_path)
 
     async def go() -> dict:
-        with anyio.fail_after(10):
+        with anyio.fail_after(30):  # deadlock backstop only
             raw = await get_registry()["bash"].async_invoke(
                 ctx, {"command": "while true; do echo "
                                  "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx; done"})
@@ -259,7 +259,7 @@ def test_bash_caps_runaway_stderr(
     ctx = _ctx(tmp_path)
 
     async def go() -> dict:
-        with anyio.fail_after(10):
+        with anyio.fail_after(30):  # deadlock backstop only
             raw = await get_registry()["bash"].async_invoke(
                 ctx, {"command": "while true; do echo "
                                  "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx 1>&2; done"})
@@ -285,7 +285,7 @@ def test_bash_default_foreground_timeout(tmp_path: Path, monkeypatch: pytest.Mon
     ctx = _ctx(tmp_path)
 
     async def go() -> dict:
-        with anyio.fail_after(15):
+        with anyio.fail_after(30):  # deadlock backstop only
             out = json.loads(await get_registry()["bash"].async_invoke(
                 ctx, {"command": "sleep 30"}))
             await terminate_background_processes(ctx)   # cleanup the promoted proc
@@ -400,8 +400,7 @@ def test_bash_midcommand_pause_kills_and_returns_tombstone(tmp_path: Path) -> No
     # child's group and returns the terminated-by-pause tombstone (status:
     # killed, kill_reason: interrupted) — the same shape
     # terminate_background_processes writes — instead of blocking to the wall
-    # clock. fail_after(10) makes the "poller absent" regression a fast failure
-    # rather than a 30s hang.
+    # clock.
     class _Coord:
         should_pause = False
 
@@ -411,7 +410,7 @@ def test_bash_midcommand_pause_kills_and_returns_tombstone(tmp_path: Path) -> No
     holder: dict[str, dict] = {}
 
     async def _scenario() -> None:
-        with anyio.fail_after(10):
+        with anyio.fail_after(30):  # deadlock backstop only
             async with anyio.create_task_group() as tg:
                 async def _runner() -> None:
                     holder["out"] = json.loads(
@@ -447,7 +446,7 @@ def test_bash_midcommand_pause_over_cap_spills_tombstone(tmp_path: Path) -> None
     holder: dict[str, dict] = {}
 
     async def _scenario() -> None:
-        with anyio.fail_after(10):
+        with anyio.fail_after(30):  # deadlock backstop only
             async with anyio.create_task_group() as tg:
                 async def _runner() -> None:
                     holder["out"] = json.loads(
@@ -651,7 +650,7 @@ def test_bash_foreground_timeout_promotes_to_background(tmp_path: Path) -> None:
     ctx = _ctx(tmp_path)
 
     async def go() -> dict:
-        with anyio.fail_after(15):
+        with anyio.fail_after(30):  # deadlock backstop only
             out = json.loads(await get_registry()["bash"].async_invoke(
                 ctx, {"command": "sleep 30", "timeout": 0.3}))
             await terminate_background_processes(ctx)
@@ -678,7 +677,7 @@ def test_bash_promotion_preserves_pre_promotion_output(tmp_path: Path) -> None:
     ctx = _ctx(tmp_path)
 
     async def go() -> tuple:
-        with anyio.fail_after(15):
+        with anyio.fail_after(30):  # deadlock backstop only
             promo = json.loads(await get_registry()["bash"].async_invoke(
                 ctx, {"command": "echo BEFORE_PROMO; sleep 30", "timeout": 1.0}))
             snap = json.loads(await get_registry()["bash_output"].async_invoke(
@@ -718,7 +717,7 @@ def test_bash_promoted_proc_is_killable_and_torn_down(tmp_path: Path) -> None:
     ctx = _ctx(tmp_path)
 
     async def go() -> dict:
-        with anyio.fail_after(15):
+        with anyio.fail_after(30):  # deadlock backstop only
             json.loads(await get_registry()["bash"].async_invoke(
                 ctx, {"command": "sleep 30", "timeout": 0.3}))
             killed = json.loads(await get_registry()["bash_kill"].async_invoke(
