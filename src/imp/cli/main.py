@@ -1787,7 +1787,10 @@ def _quest_card(control: Path, quest_id: str, *, now: datetime,
     lines = [
         _card_field("id:", card.quest_id, 15, color=color),
         _card_field("title:", card.title.strip() or "(unnamed)", 15, color=color),
-        _card_field("status:", card.status, 15, color=color),
+        _card_field(
+            "status:",
+            "merged" if card.status == "completed" and card.merge_commit else card.status,
+            15, color=color),
     ]
     if card.status in _INFLIGHT and card.step not in ("", "-"):
         step_text = card.step_label or card.step
