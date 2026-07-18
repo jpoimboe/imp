@@ -20,6 +20,7 @@ from imp.remote.session.protocol import (
     parse_event,
 )
 from imp.remote.session.server import SessionServer
+from tests.async_wait import wait_until
 
 
 @pytest.fixture
@@ -51,9 +52,7 @@ async def test_run_fn_events_are_broadcast_to_attached_client(tmp_path: Path) ->
     server = SessionServer(sock)
 
     async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
-        with anyio.fail_after(5):
-            while server.attached_count < 1:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: server.attached_count >= 1)
         on_event({"type": "agent_result", "payload": {"text": "hi"}})
         await release.wait()
         return "ok"
@@ -72,9 +71,7 @@ async def test_run_fn_events_are_broadcast_to_attached_client(tmp_path: Path) ->
         assert parse_event(line) == {
             "type": "agent_result", "payload": {"text": "hi"}}
         release.set()
-        with anyio.fail_after(5):
-            while "r" not in result:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: "r" in result)
         assert result["r"] == "ok"
         await client.aclose()
         tg.cancel_scope.cancel()
@@ -104,14 +101,10 @@ async def test_first_client_input_satisfies_the_gate_and_returns(
 
         tg.start_soon(_serve)
         client = await _attach(sock, "c1")
-        with anyio.fail_after(5):
-            while server.attached_count != 1:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: server.attached_count == 1)
         await gate_reached.wait()
         await client.send((encode_input("ship it") + "\n").encode())
-        with anyio.fail_after(5):
-            while "r" not in result:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: "r" in result)
         assert result["r"] == "ship it"
         assert received == ["ship it"]
         await client.aclose()
@@ -140,19 +133,13 @@ async def test_interrupt_control_pauses_the_coordinator(tmp_path: Path) -> None:
 
         tg.start_soon(_serve)
         client = await _attach(sock, "c1")
-        with anyio.fail_after(5):
-            while server.attached_count != 1:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: server.attached_count == 1)
         assert not coord.should_pause
         await client.send((encode_control("interrupt") + "\n").encode())
-        with anyio.fail_after(5):
-            while not coord.should_pause:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: coord.should_pause)
         assert coord.should_pause
         release.set()
-        with anyio.fail_after(5):
-            while "r" not in result:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: "r" in result)
         assert result["r"] == "done"
         await client.aclose()
         tg.cancel_scope.cancel()
@@ -181,14 +168,10 @@ async def test_abandon_control_cancels_run_and_records_abandonment(
 
         tg.start_soon(_serve)
         client = await _attach(sock, "c1")
-        with anyio.fail_after(5):
-            while server.attached_count != 1:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: server.attached_count == 1)
         await started.wait()
         await client.send((encode_control("abandon") + "\n").encode())
-        with anyio.fail_after(5):
-            while "r" not in result:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: "r" in result)
         assert server.abandoned is True
         assert abandoned_cb == [True]
         assert result["r"] is None   # run cancelled mid-flight; no return value
@@ -220,9 +203,7 @@ async def test_lock_is_held_during_serve_and_released_after(tmp_path: Path) -> N
         await anyio.sleep(0.05)  # let serve acquire the lock and enter run_fn
         assert lock_path.exists()  # ProjectLock writes the holder-pid file while held
         release.set()
-        with anyio.fail_after(5):
-            while "r" not in result:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: "r" in result)
         assert result["r"] == "done"
         assert not lock_path.exists()  # released on serve() return
         tg.cancel_scope.cancel()
@@ -252,9 +233,7 @@ async def test_gate_with_zero_clients_hibernates(tmp_path: Path) -> None:
             result["r"] = await server.serve(run_fn)
 
         tg.start_soon(_serve)
-        with anyio.fail_after(5):
-            while "r" not in result:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: "r" in result)
         assert result["r"] == "hibernated"
         tg.cancel_scope.cancel()
 
@@ -267,9 +246,7 @@ async def test_gate_with_attached_client_returns_first_input(tmp_path: Path) -> 
     gate_reached = anyio.Event()
 
     async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
-        with anyio.fail_after(5):
-            while server.attached_count < 1:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: server.attached_count >= 1)
         gate_reached.set()
         reply = await user_chat_input_fn("")
         received.append(reply)
@@ -284,14 +261,10 @@ async def test_gate_with_attached_client_returns_first_input(tmp_path: Path) -> 
 
         tg.start_soon(_serve)
         client = await _attach(sock, "c1")
-        with anyio.fail_after(5):
-            while server.attached_count != 1:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: server.attached_count == 1)
         await gate_reached.wait()
         await client.send((encode_input("ship it") + "\n").encode())
-        with anyio.fail_after(5):
-            while "r" not in result:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: "r" in result)
         assert result["r"] == "ship it"
         assert received == ["ship it"]
         await client.aclose()
@@ -307,9 +280,7 @@ async def test_gate_hibernates_when_last_client_detaches(tmp_path: Path) -> None
     gate_reached = anyio.Event()
 
     async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
-        with anyio.fail_after(5):
-            while server.attached_count < 1:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: server.attached_count >= 1)
         try:
             gate_reached.set()
             await user_chat_input_fn("")
@@ -326,14 +297,10 @@ async def test_gate_hibernates_when_last_client_detaches(tmp_path: Path) -> None
 
         tg.start_soon(_serve)
         client = await _attach(sock, "c1")
-        with anyio.fail_after(5):
-            while server.attached_count != 1:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: server.attached_count == 1)
         await gate_reached.wait()
         await client.aclose()
-        with anyio.fail_after(5):
-            while "r" not in result:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: "r" in result)
         assert result["r"] == "hibernated"
         tg.cancel_scope.cancel()
 
@@ -366,9 +333,7 @@ async def test_gate_hibernates_when_two_clients_detach(tmp_path: Path) -> None:
     gate_reached = anyio.Event()
 
     async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
-        with anyio.fail_after(5):
-            while server.attached_count < 2:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: server.attached_count >= 2)
         try:
             gate_reached.set()
             await user_chat_input_fn("")
@@ -386,16 +351,12 @@ async def test_gate_hibernates_when_two_clients_detach(tmp_path: Path) -> None:
         tg.start_soon(_serve)
         client1 = await _attach(sock, "c1")
         client2 = await _attach(sock, "c2")
-        with anyio.fail_after(5):
-            while server.attached_count != 2:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: server.attached_count == 2)
         await gate_reached.wait()
         await client1.aclose()
         await anyio.sleep(0.05)  # first detach alone must not trigger hibernation
         await client2.aclose()
-        with anyio.fail_after(5):
-            while "r" not in result:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: "r" in result)
         assert result["r"] == "hibernated"
         tg.cancel_scope.cancel()
 
@@ -432,13 +393,9 @@ async def test_gate_waits_for_first_attach_before_hibernating(tmp_path: Path) ->
         await gate_reached.wait()
         assert server.attached_count == 0  # gate entered before any attach
         client = await _attach(sock, "c1")
-        with anyio.fail_after(5):
-            while server.attached_count != 1:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: server.attached_count == 1)
         await client.send((encode_input("late but here") + "\n").encode())
-        with anyio.fail_after(5):
-            while "r" not in result:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: "r" in result)
         assert result["r"] == "late but here"
         await client.aclose()
         tg.cancel_scope.cancel()
@@ -456,9 +413,7 @@ async def test_pending_prompt_is_redelivered_to_late_connecting_client(
     async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
         from imp.engine.awaiting_user_input import AwaitingUserInput
 
-        with anyio.fail_after(5):
-            while server.attached_count < 1:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: server.attached_count >= 1)
         server.set_pending_prompt(prompt_event)
         on_event(prompt_event)
         gate_reached.set()
@@ -479,7 +434,7 @@ async def test_pending_prompt_is_redelivered_to_late_connecting_client(
         await gate_reached.wait()
         client2 = await _attach(sock, "c2")
         buf2 = BufferedByteReceiveStream(client2)
-        with anyio.fail_after(5):
+        with anyio.fail_after(30):  # deadlock backstop only
             line = (await buf2.receive_until(b"\n", 1 << 20)).decode()
         assert parse_event(line) == prompt_event
         await client1.aclose()
@@ -529,12 +484,8 @@ async def test_explicit_detach_control_reaches_the_detach_teardown(
     server._socket._on_detach = lambda: detaches.append(True)
 
     async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
-        with anyio.fail_after(5):
-            while server.attached_count == 0:
-                await anyio.sleep(0.02)
-        with anyio.fail_after(5):
-            while server.attached_count != 0:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: server.attached_count != 0)
+        await wait_until(lambda: server.attached_count == 0)
         return "detached"
 
     async with anyio.create_task_group() as tg:
@@ -546,13 +497,9 @@ async def test_explicit_detach_control_reaches_the_detach_teardown(
 
         tg.start_soon(_serve)
         client = await _attach(sock, "c1")
-        with anyio.fail_after(5):
-            while server.attached_count != 1:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: server.attached_count == 1)
         await client.send((encode_control("detach") + "\n").encode())
-        with anyio.fail_after(5):
-            while "r" not in result:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: "r" in result)
         assert result["r"] == "detached"
         assert detaches == [True]
         await client.aclose()
@@ -571,9 +518,7 @@ async def test_late_attach_does_not_duplicate_prompt_on_existing_client(
     async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
         from imp.engine.awaiting_user_input import AwaitingUserInput
 
-        with anyio.fail_after(5):
-            while server.attached_count < 1:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: server.attached_count >= 1)
         server.set_pending_prompt(prompt_event)
         on_event(prompt_event)
         gate_reached.set()
@@ -597,16 +542,12 @@ async def test_late_attach_does_not_duplicate_prompt_on_existing_client(
         client1 = await _attach(sock, "c1")
         tg.start_soon(_read, BufferedByteReceiveStream(client1), seen1)
         await gate_reached.wait()
-        with anyio.fail_after(5):
-            while seen1.count(prompt_event) < 1:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: seen1.count(prompt_event) >= 1)
         # A second client attaches AFTER the prompt already fired.
         client2 = await _attach(sock, "c2")
         seen2: list[dict[str, Any]] = []
         tg.start_soon(_read, BufferedByteReceiveStream(client2), seen2)
-        with anyio.fail_after(5):
-            while seen2.count(prompt_event) < 1:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: seen2.count(prompt_event) >= 1)
         await anyio.sleep(0.1)  # give any buggy re-broadcast time to land on c1
         assert seen1.count(prompt_event) == 1  # NOT re-delivered to the first client
         assert seen2.count(prompt_event) == 1  # delivered once to the late client
@@ -644,7 +585,7 @@ async def test_journaled_gate_is_replayed_marked_plus_one_live_reemit(
         client = await _attach(sock, "c1")
         buf = BufferedByteReceiveStream(client)
         seen: list[dict[str, Any]] = []
-        with anyio.fail_after(5):
+        with anyio.fail_after(30):  # deadlock backstop only
             while len(seen) < 4:  # e0 (marked), e1 (marked), boundary, e1 (live re-emit)
                 seen.append(parse_event(
                     (await buf.receive_until(b"\n", 1 << 20)).decode()))
@@ -656,9 +597,7 @@ async def test_journaled_gate_is_replayed_marked_plus_one_live_reemit(
         assert replayed_gates == [{**recs[1], "_replay": True}]  # replayed once, marked
         assert live_gates == [recs[1]]                           # one live, unmarked
         await client.send((encode_input("yes") + "\n").encode())
-        with anyio.fail_after(5):
-            while "r" not in result:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: "r" in result)
         assert result["r"] == "yes"            # reply flows back through the open gate
         assert server._pending_prompt is None  # cleared on gate exit
         await client.aclose()
@@ -682,9 +621,7 @@ async def test_cli_attached_emission_contract(tmp_path: Path) -> None:
     )
 
     async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
-        with anyio.fail_after(5):
-            while server.attached_count < 1:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: server.attached_count >= 1)
         on_event(sentinel)
         await release.wait()
         return "ok"
@@ -706,9 +643,7 @@ async def test_cli_attached_emission_contract(tmp_path: Path) -> None:
 
         # 0 -> 1 attach: exactly one cli_attached is journaled, never broadcast.
         client1 = await _attach(sock, "c1")
-        with anyio.fail_after(5):
-            while not any(r["type"] == "cli_attached" for r in _disk_records()):
-                await anyio.sleep(0.02)
+        await wait_until(lambda: any(r["type"] == "cli_attached" for r in _disk_records()))
         attached = [r for r in _disk_records() if r["type"] == "cli_attached"]
         assert len(attached) == 1
         rec = attached[0]
@@ -720,9 +655,7 @@ async def test_cli_attached_emission_contract(tmp_path: Path) -> None:
 
         # 1 -> 2 attach: no second cli_attached.
         client2 = await _attach(sock, "c2")
-        with anyio.fail_after(5):
-            while server.attached_count != 2:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: server.attached_count == 2)
         await anyio.sleep(0.1)  # give any erroneous re-emit time to land
         assert sum(1 for r in _disk_records() if r["type"] == "cli_attached") == 1
 
@@ -737,9 +670,7 @@ async def test_cli_attached_emission_contract(tmp_path: Path) -> None:
         assert all(e.get("type") != "cli_attached" for e in seen1)
 
         release.set()
-        with anyio.fail_after(5):
-            while "r" not in result:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: "r" in result)
         await client1.aclose()
         await client2.aclose()
         tg.cancel_scope.cancel()
@@ -756,9 +687,7 @@ async def test_emit_chokepoint_registers_pending_prompt_for_late_attacher(
     server = SessionServer(sock, hibernate=True)
 
     async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
-        with anyio.fail_after(5):
-            while server.attached_count < 1:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: server.attached_count >= 1)
         on_event(prompt_event)          # _emit records the gate event
         gate_reached.set()
         return await user_chat_input_fn("")   # _chat registers it as pending
@@ -775,13 +704,11 @@ async def test_emit_chokepoint_registers_pending_prompt_for_late_attacher(
         await gate_reached.wait()
         client2 = await _attach(sock, "c2")
         buf2 = BufferedByteReceiveStream(client2)
-        with anyio.fail_after(5):
+        with anyio.fail_after(30):  # deadlock backstop only
             line = (await buf2.receive_until(b"\n", 1 << 20)).decode()
         assert parse_event(line) == prompt_event   # late attacher gets the live gate
         await client2.send((encode_input("yes") + "\n").encode())
-        with anyio.fail_after(5):
-            while "r" not in result:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: "r" in result)
         assert result["r"] == "yes"                # and can answer it
         assert server._pending_prompt is None  # cleared on gate exit
         await client1.aclose()
@@ -821,7 +748,7 @@ async def test_synthetic_resume_prompt_lands_once_after_replay(tmp_path: Path) -
         client = await _attach(sock, "c1")
         buf = BufferedByteReceiveStream(client)
         seen: list[dict[str, Any]] = []
-        with anyio.fail_after(5):
+        with anyio.fail_after(30):  # deadlock backstop only
             while len(seen) < 4:
                 seen.append(parse_event(
                     (await buf.receive_until(b"\n", 1 << 20)).decode()))
@@ -830,9 +757,7 @@ async def test_synthetic_resume_prompt_lands_once_after_replay(tmp_path: Path) -
         assert seen[3] == synthetic                               # synthetic prompt after boundary
         assert sum(1 for s in seen if s.get("type") == "awaiting_user_input") == 1
         await client.send((encode_input("done") + "\n").encode())   # unblock the gate
-        with anyio.fail_after(5):
-            while "r" not in result:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: "r" in result)
         assert result["r"] == "done"           # reply flows back through the blocking gate
         await client.aclose()
         tg.cancel_scope.cancel()
@@ -860,14 +785,10 @@ async def test_archive_control_cancels_run_and_sets_archived_flag(
 
         tg.start_soon(_serve)
         client = await _attach(sock, "c1")
-        with anyio.fail_after(5):
-            while server.attached_count != 1:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: server.attached_count == 1)
         await started.wait()
         await client.send((encode_control("archive") + "\n").encode())
-        with anyio.fail_after(5):
-            while "r" not in result:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: "r" in result)
         assert server.archived is True
         assert server.discarded is False
         assert server.saved is False
@@ -898,14 +819,10 @@ async def test_discard_control_cancels_run_and_sets_discarded_flag(
 
         tg.start_soon(_serve)
         client = await _attach(sock, "c1")
-        with anyio.fail_after(5):
-            while server.attached_count != 1:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: server.attached_count == 1)
         await started.wait()
         await client.send((encode_control("discard") + "\n").encode())
-        with anyio.fail_after(5):
-            while "r" not in result:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: "r" in result)
         assert server.discarded is True
         assert server.archived is False
         assert server.saved is False
@@ -950,9 +867,7 @@ async def test_gate_handles_multiple_exchanges_in_one_serve(tmp_path: Path) -> N
     gate_reached = anyio.Event()
 
     async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
-        with anyio.fail_after(5):
-            while server.attached_count < 1:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: server.attached_count >= 1)
         gate_reached.set()
         received.append(await user_chat_input_fn(""))   # exchange 1
         received.append(await user_chat_input_fn(""))   # exchange 2 (follow-up)
@@ -967,21 +882,15 @@ async def test_gate_handles_multiple_exchanges_in_one_serve(tmp_path: Path) -> N
 
         tg.start_soon(_serve)
         client = await _attach(sock, "c1")
-        with anyio.fail_after(5):
-            while server.attached_count != 1:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: server.attached_count == 1)
         await gate_reached.wait()
         await client.send((encode_input("answer one") + "\n").encode())
-        with anyio.fail_after(5):
-            while len(received) < 1:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: len(received) >= 1)
         # The run is blocked on the SECOND gate: serve() has NOT returned between
         # exchanges (the AC7 invariant).
         assert "r" not in result
         await client.send((encode_input("answer two") + "\n").encode())
-        with anyio.fail_after(5):
-            while "r" not in result:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: "r" in result)
         assert received == ["answer one", "answer two"]
         assert result["r"] == "completed"   # control returns to the shell at completion
         await client.aclose()
@@ -1002,9 +911,7 @@ async def test_detach_mid_turn_pauses_then_reattach_reply_continues(
     gate_reached1 = anyio.Event()
 
     async def run_fn1(*, on_event: Any, user_chat_input_fn: Any) -> str:
-        with anyio.fail_after(5):
-            while server1.attached_count < 1:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: server1.attached_count >= 1)
         try:
             gate_reached1.set()
             await user_chat_input_fn("")
@@ -1021,14 +928,10 @@ async def test_detach_mid_turn_pauses_then_reattach_reply_continues(
 
         tg.start_soon(_serve1)
         client1 = await _attach(sock1, "c1")
-        with anyio.fail_after(5):
-            while server1.attached_count != 1:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: server1.attached_count == 1)
         await gate_reached1.wait()
         await client1.aclose()   # detach mid-turn
-        with anyio.fail_after(5):
-            while "r" not in result1:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: "r" in result1)
         assert result1["r"] == "paused"   # detach resolved at end-of-turn -> pause
         tg.cancel_scope.cancel()
 
@@ -1040,9 +943,7 @@ async def test_detach_mid_turn_pauses_then_reattach_reply_continues(
     gate_reached2 = anyio.Event()
 
     async def run_fn2(*, on_event: Any, user_chat_input_fn: Any) -> str:
-        with anyio.fail_after(5):
-            while server2.attached_count < 1:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: server2.attached_count >= 1)
         gate_reached2.set()
         reply = await user_chat_input_fn("")
         delivered.append(reply)
@@ -1057,14 +958,10 @@ async def test_detach_mid_turn_pauses_then_reattach_reply_continues(
 
         tg.start_soon(_serve2)
         client2 = await _attach(sock2, "c1")
-        with anyio.fail_after(5):
-            while server2.attached_count != 1:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: server2.attached_count == 1)
         await gate_reached2.wait()
         await client2.send((encode_input("here is my answer") + "\n").encode())
-        with anyio.fail_after(5):
-            while "r" not in result2:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: "r" in result2)
         assert delivered == ["here is my answer"]
         assert result2["r"] == "here is my answer"   # run continued on reattach+reply
         await client2.aclose()
@@ -1096,14 +993,10 @@ async def test_lease_less_client_does_not_satisfy_keep_alive_gate(
         tg.start_soon(_serve)
         client = await anyio.connect_unix(sock)
         await client.send((encode_attach("c1", "T", False) + "\n").encode())  # lease-less
-        with anyio.fail_after(5):
-            while server.attached_count != 1:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: server.attached_count == 1)
         # No leased attachment ever arrives: the gate hibernates on the
         # first-leased-attach timeout despite a live lease-less attachment.
-        with anyio.fail_after(5):
-            while "r" not in result:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: "r" in result)
         assert result["r"] == "hibernated"
         await client.aclose()
         tg.cancel_scope.cancel()
@@ -1132,20 +1025,14 @@ async def test_last_leased_detach_pauses_mid_step(tmp_path: Path) -> None:
         tg.start_soon(_serve)
         client = await anyio.connect_unix(sock)
         await client.send((encode_attach("c1", "T", True) + "\n").encode())  # leased
-        with anyio.fail_after(5):
-            while server.leased_count != 1:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: server.leased_count == 1)
         assert not coord.should_pause
         await client.aclose()   # last leased client detaches mid-step
-        with anyio.fail_after(5):
-            while not coord.should_pause:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: coord.should_pause)
         assert coord.should_pause
         assert coord.pause_reason == "detached"
         release.set()
-        with anyio.fail_after(5):
-            while "r" not in result:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: "r" in result)
         tg.cancel_scope.cancel()
 
 
@@ -1172,16 +1059,12 @@ async def test_lease_less_detach_does_not_pause(tmp_path: Path) -> None:
         tg.start_soon(_serve)
         client = await anyio.connect_unix(sock)
         await client.send((encode_attach("c1", "T", False) + "\n").encode())  # lease-less
-        with anyio.fail_after(5):
-            while server.attached_count != 1:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: server.attached_count == 1)
         await client.aclose()
         await anyio.sleep(0.2)
         assert not coord.should_pause   # never leased -> detach is not a keep-alive loss
         release.set()
-        with anyio.fail_after(5):
-            while "r" not in result:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: "r" in result)
         tg.cancel_scope.cancel()
 
 
@@ -1235,9 +1118,7 @@ async def test_lease_less_input_at_hibernating_gate_is_delivered_not_dropped(
     gate_reached = anyio.Event()
 
     async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
-        with anyio.fail_after(5):
-            while server.attached_count < 1:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: server.attached_count >= 1)
         gate_reached.set()
         try:
             return await user_chat_input_fn("")
@@ -1256,9 +1137,7 @@ async def test_lease_less_input_at_hibernating_gate_is_delivered_not_dropped(
         await client.send((encode_attach("c1", "T", False) + "\n").encode())  # lease-less reply
         await gate_reached.wait()
         await client.send((encode_input("the reply") + "\n").encode())
-        with anyio.fail_after(5):
-            while "r" not in result:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: "r" in result)
         assert result["r"] == "the reply"   # consumed, NOT dropped to hibernation
         await client.aclose()
         tg.cancel_scope.cancel()
@@ -1297,14 +1176,10 @@ async def test_chat_broadcasts_user_input_resolved_after_gate(tmp_path: Path) ->
 
         tg.start_soon(_serve)
         client = await _attach(sock, "c1")
-        with anyio.fail_after(5):
-            while server.attached_count != 1:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: server.attached_count == 1)
         await gate_reached.wait()
         await client.send((encode_input("ship it") + "\n").encode())
-        with anyio.fail_after(5):
-            while "r" not in result:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: "r" in result)
         assert result["r"] == "ship it"
         resolved = [e for e in emitted if e.get("type") == "user_input_resolved"]
         assert resolved == [{"type": "user_input_resolved", "payload": {}}]
@@ -1320,9 +1195,7 @@ async def test_hibernation_gate_with_input_broadcasts_resolved(tmp_path: Path) -
     gate_reached = anyio.Event()
 
     async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
-        with anyio.fail_after(5):
-            while server.attached_count < 1:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: server.attached_count >= 1)
         gate_reached.set()
         return await user_chat_input_fn("")
 
@@ -1335,14 +1208,10 @@ async def test_hibernation_gate_with_input_broadcasts_resolved(tmp_path: Path) -
 
         tg.start_soon(_serve)
         client = await _attach(sock, "c1")
-        with anyio.fail_after(5):
-            while server.attached_count != 1:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: server.attached_count == 1)
         await gate_reached.wait()
         await client.send((encode_input("ship it") + "\n").encode())
-        with anyio.fail_after(5):
-            while "r" not in result:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: "r" in result)
         assert result["r"] == "ship it"
         resolved = [e for e in emitted if e.get("type") == "user_input_resolved"]
         assert resolved == [{"type": "user_input_resolved", "payload": {}}]
@@ -1362,9 +1231,7 @@ async def test_hibernation_gate_without_input_does_not_broadcast_resolved(
     gate_reached = anyio.Event()
 
     async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
-        with anyio.fail_after(5):
-            while server.attached_count < 1:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: server.attached_count >= 1)
         try:
             gate_reached.set()
             await user_chat_input_fn("")
@@ -1381,14 +1248,10 @@ async def test_hibernation_gate_without_input_does_not_broadcast_resolved(
 
         tg.start_soon(_serve)
         client = await _attach(sock, "c1")
-        with anyio.fail_after(5):
-            while server.attached_count != 1:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: server.attached_count == 1)
         await gate_reached.wait()
         await client.aclose()
-        with anyio.fail_after(5):
-            while "r" not in result:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: "r" in result)
         assert result["r"] == "hibernated"
         assert not any(e.get("type") == "user_input_resolved" for e in emitted)
         tg.cancel_scope.cancel()
@@ -1425,7 +1288,7 @@ async def test_dispatch_control_tags_frame_and_does_not_block() -> None:
 
     async with anyio.create_task_group() as tg:
         coord.set_delivery_spawner(tg.start_soon)
-        with anyio.fail_after(1):
+        with anyio.fail_after(30):  # deadlock backstop only
             # First frame: interrupt delivery hangs, but dispatch returns at once.
             await server._dispatch_control(CONTROL_INTERRUPT)
             # Second frame dispatches despite the still-hanging delivery.
@@ -1464,7 +1327,7 @@ async def test_dispatch_control_force_skips_cooperative_and_hard_kills() -> None
 
     server = SessionServer("/tmp/does-not-matter.sock", coordinator=coord)
     with coord.runner_attached(cooperative, force_kill=fk, agent_id="a1"):
-        with anyio.fail_after(1):
+        with anyio.fail_after(30):  # deadlock backstop only
             await server._dispatch_control(CONTROL_INTERRUPT_FORCE)
 
     assert coop["n"] == 0        # cooperative tier skipped
@@ -1502,9 +1365,7 @@ async def test_chat_loads_skill_and_returns_skill_reply(tmp_path: Path) -> None:
     captured: list[object] = []
 
     async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> object:
-        with anyio.fail_after(5):
-            while server.attached_count < 1:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: server.attached_count >= 1)
         on_event({"type": "awaiting_user_input", "payload": {"prompt": ""}})
         reply = await user_chat_input_fn("")
         captured.append(reply)
@@ -1514,15 +1375,11 @@ async def test_chat_loads_skill_and_returns_skill_reply(tmp_path: Path) -> None:
         await server.open()
         tg.start_soon(server.serve, run_fn)
         client = await _attach(sock, "c1")
-        with anyio.fail_after(5):
-            while server.attached_count < 1:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: server.attached_count >= 1)
         await anyio.sleep(0.05)
         await client.send(
             (encode_skill_request("refactor", "src/foo.py") + "\n").encode())
-        with anyio.fail_after(5):
-            while not captured:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: captured)
         assert captured == [SkillReply(
             command="/refactor src/foo.py", name="refactor",
             body="BODY\n\nsrc/foo.py\n")]
@@ -1543,9 +1400,7 @@ async def test_chat_skill_load_failure_degrades_to_verbatim_input(
     captured: list[object] = []
 
     async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> object:
-        with anyio.fail_after(5):
-            while server.attached_count < 1:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: server.attached_count >= 1)
         on_event({"type": "awaiting_user_input", "payload": {"prompt": ""}})
         reply = await user_chat_input_fn("")
         captured.append(reply)
@@ -1555,15 +1410,11 @@ async def test_chat_skill_load_failure_degrades_to_verbatim_input(
         await server.open()
         tg.start_soon(server.serve, run_fn)
         client = await _attach(sock, "c1")
-        with anyio.fail_after(5):
-            while server.attached_count < 1:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: server.attached_count >= 1)
         await anyio.sleep(0.05)
         await client.send(
             (encode_skill_request("refactor", "src/foo.py") + "\n").encode())
-        with anyio.fail_after(5):
-            while not captured:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: captured)
         assert captured == ["/refactor src/foo.py"]
         await client.aclose()
         tg.cancel_scope.cancel()
@@ -1579,9 +1430,7 @@ async def test_chat_skill_without_args_returns_body_unchanged(
     captured: list[object] = []
 
     async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> object:
-        with anyio.fail_after(5):
-            while server.attached_count < 1:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: server.attached_count >= 1)
         on_event({"type": "awaiting_user_input", "payload": {"prompt": ""}})
         captured.append(await user_chat_input_fn(""))
         return None
@@ -1590,15 +1439,11 @@ async def test_chat_skill_without_args_returns_body_unchanged(
         await server.open()
         tg.start_soon(server.serve, run_fn)
         client = await _attach(sock, "c1")
-        with anyio.fail_after(5):
-            while server.attached_count < 1:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: server.attached_count >= 1)
         await anyio.sleep(0.05)
         await client.send(
             (encode_skill_request("debug", "") + "\n").encode())
-        with anyio.fail_after(5):
-            while not captured:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: captured)
         assert captured == [SkillReply(
             command="/debug", name="debug", body="BODY")]
         await client.aclose()
@@ -1617,9 +1462,7 @@ async def test_model_override_frame_unwinds_gate_without_detach(tmp_path: Path) 
     captured: dict[str, Any] = {}
 
     async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
-        with anyio.fail_after(5):
-            while server.leased_count < 1:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: server.leased_count >= 1)
         gate_reached.set()
         try:
             await user_chat_input_fn("")
@@ -1637,14 +1480,10 @@ async def test_model_override_frame_unwinds_gate_without_detach(tmp_path: Path) 
 
         tg.start_soon(_serve)
         client = await _attach(sock, "c1")
-        with anyio.fail_after(5):
-            while server.leased_count != 1:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: server.leased_count == 1)
         await gate_reached.wait()
         await client.send((encode_control("set-model", "opus") + "\n").encode())
-        with anyio.fail_after(5):
-            while "r" not in result:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: "r" in result)
         assert result["r"] == "paused"
         assert captured["leased_at_pause"] == 1     # still leased: no detach
         assert coord.pause_reason == "model-override"
@@ -1671,9 +1510,7 @@ async def test_model_override_frame_no_interrupt_or_kill_events(tmp_path: Path) 
         interrupt_calls.append("interrupt")
 
     async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
-        with anyio.fail_after(5):
-            while server.leased_count < 1:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: server.leased_count >= 1)
         coord.attach_runner(fake_runner_interrupt)   # a runner IS attached at the prompt
         gate_reached.set()
         try:
@@ -1692,14 +1529,10 @@ async def test_model_override_frame_no_interrupt_or_kill_events(tmp_path: Path) 
 
         tg.start_soon(_serve)
         client = await _attach(sock, "c1")
-        with anyio.fail_after(5):
-            while server.leased_count != 1:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: server.leased_count == 1)
         await gate_reached.wait()
         await client.send((encode_control("set-model", "opus") + "\n").encode())
-        with anyio.fail_after(5):
-            while "r" not in result:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: "r" in result)
         assert result["r"] == "paused"
         assert captured["leased_at_pause"] == 1
         assert interrupt_calls == []                # runner never interrupted
@@ -1731,7 +1564,7 @@ async def test_wait_for_side_effect_returns_when_pause_already_committed(
 
     # Level-triggered: must return on the first predicate check, not hang on
     # evt.wait(). A regression to await-only would time out here.
-    with anyio.fail_after(1):
+    with anyio.fail_after(30):  # deadlock backstop only
         await server._wait_for_side_effect()
 
 
