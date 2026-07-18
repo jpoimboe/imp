@@ -3972,7 +3972,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     p_log.add_argument(
         "token", nargs="?",
-        help="Quest id or its short token (omit for the most recent quest).")
+        help="Quest id or its short token.")
     p_log.add_argument(
         "range_pos", nargs="?", default=None, metavar="RANGE",
         help="Ordinal selector, e.g. 42, 59-120, 59-, -80 (like imp events).")
@@ -4039,12 +4039,14 @@ def _build_parser() -> argparse.ArgumentParser:
             "--step <name>: a scoped index for that step's window. "
             "--type / --agent / <range> / --all: compact event lines "
             "(#N ordinal, type, [agent], summary). --json for structured "
-            "output. Omit <id> for the most recent quest."
+            "output. Run imp events search <query> for a case-insensitive "
+            "substring search across event content (tool calls, results, "
+            "reasoning); narrow with --type / --agent."
         ),
     )
     p_events.add_argument(
         "token", nargs="?", default=None,
-        help="Quest id or short token (omit for the most recent quest).")
+        help="Quest id or short token.")
     p_events.add_argument(
         "range_pos", nargs="?", default=None, metavar="RANGE",
         help="Ordinal selector, e.g. 42, 59-120,210-255, 59-, -80.")
