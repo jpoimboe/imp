@@ -9,6 +9,7 @@ from imp.remote.daemon.protocol import make_hello
 from imp.remote.daemon.runner import _make_on_attach
 from imp.remote.daemon.server import SouthHub
 from imp.remote.daemon.subscriptions import Subscriptions
+from tests.async_wait import wait_until
 
 
 @pytest.fixture
@@ -27,9 +28,7 @@ async def test_autosubscribe_hello_subscribes_and_detach_keeps_it(tmp_path: Path
         tg.start_soon(hub.serve)
         client = await anyio.connect_unix(sock)
         await client.send((make_hello("c1", "T", autosubscribe=True) + "\n").encode())
-        with anyio.fail_after(5):
-            while not subs.contains("c1"):
-                await anyio.sleep(0.02)
+        await wait_until(lambda: subs.contains("c1"))
         assert subs.contains("c1")
         await client.aclose()
         await anyio.sleep(0.1)            # detach has no on_detach wired

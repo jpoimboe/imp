@@ -23,6 +23,7 @@ from imp.remote.daemon.runner import (
 )
 from imp.remote.session.discover import session_socket_path
 from imp.remote.session.socket_server import SessionSocket
+from tests.async_wait import wait_until
 from tests.conftest import _seed_control
 
 
@@ -72,19 +73,13 @@ async def test_run_daemon_relays_a_resident_session_event_and_cleans_up(
             make_adapter=lambda env, submit, subscriptions, alert_all, is_known_quest: adapter,
             install_signals=False, shutdown=shutdown))
 
-        with anyio.fail_after(5):              # daemon up + pidfile written
-            while not (socket_is_live(spath) and pid_path(tmp_path).exists()):
-                await anyio.sleep(0.02)
+        await wait_until(lambda: socket_is_live(spath) and pid_path(tmp_path).exists())
 
         # The supervisor polls the directory and attaches a relay to the session.
-        with anyio.fail_after(5):
-            while sess.attached_count == 0:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: sess.attached_count != 0)
         sess.broadcast(
             {"id": "e1", "type": "agent_result", "payload": {"text": "hi"}})
-        with anyio.fail_after(5):
-            while not adapter.events:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: adapter.events)
         assert adapter.events[0]["type"] == "agent_result"
         assert adapter.events[0]["quest"]["id"] == cid
 
@@ -129,9 +124,7 @@ async def test_run_daemon_logs_start_and_routed_command_to_file(tmp_path: Path) 
             ),
             install_signals=False, shutdown=shutdown))
 
-        with anyio.fail_after(5):
-            while not (log_path.exists() and "routing command" in log_path.read_text()):
-                await anyio.sleep(0.02)
+        await wait_until(lambda: log_path.exists() and "routing command" in log_path.read_text())
         shutdown.set()
 
     text = log_path.read_text()
@@ -148,16 +141,14 @@ async def test_run_daemon_returns_promptly_under_cancellation(tmp_path: Path) ->
 
     start = time.monotonic()
     cancel_time: float = 0.0
-    with anyio.fail_after(10):
+    with anyio.fail_after(30):   # deadlock backstop only
         async with anyio.create_task_group() as tg:
             tg.start_soon(functools.partial(
                 run_daemon, tmp_path, env={},
                 make_adapter=lambda env, submit, subscriptions, alert_all, is_known_quest: adapter,
                 install_signals=False, shutdown=shutdown))
 
-            with anyio.fail_after(5):              # socket comes up
-                while not socket_is_live(spath):
-                    await anyio.sleep(0.02)
+            await wait_until(lambda: socket_is_live(spath))
             assert pid_path(tmp_path).exists()
 
             cancel_time = time.monotonic()
@@ -201,9 +192,7 @@ async def test_workers_run_as_daemon_threads(
                 lambda env, submit, subscriptions, alert_all, is_known_quest: FakeAdapter()
             ),
             install_signals=False, shutdown=shutdown))
-        with anyio.fail_after(5):
-            while not socket_is_live(spath):
-                await anyio.sleep(0.02)
+        await wait_until(lambda: socket_is_live(spath))
         shutdown.set()
 
     workers = [
@@ -228,7 +217,7 @@ async def test_run_daemon_returns_while_poll_worker_is_blocked(tmp_path: Path) -
     spath = socket_path(tmp_path)
     start = time.monotonic()
     try:
-        with anyio.fail_after(5):
+        with anyio.fail_after(30):   # deadlock backstop only
             async with anyio.create_task_group() as tg:
                 tg.start_soon(functools.partial(
                     run_daemon, tmp_path, env={},
@@ -237,9 +226,7 @@ async def test_run_daemon_returns_while_poll_worker_is_blocked(tmp_path: Path) -
                             is_known_quest: BlockingAdapter()
                     ),
                     install_signals=False, shutdown=shutdown))
-                with anyio.fail_after(5):
-                    while not socket_is_live(spath):
-                        await anyio.sleep(0.02)
+                await wait_until(lambda: socket_is_live(spath))
                 shutdown.set()
     finally:
         block.set()   # release the parked daemon thread so it exits cleanly
@@ -304,9 +291,7 @@ async def test_run_daemon_injects_a_default_on_alert_all_into_the_adapter(
         tg.start_soon(functools.partial(
             run_daemon, tmp_path, env={},
             make_adapter=make_adapter, install_signals=False, shutdown=shutdown))
-        with anyio.fail_after(5):
-            while "alert_all" not in captured:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: "alert_all" in captured)
         shutdown.set()
 
     assert isinstance(captured["alert_all"], AlertAll)
@@ -333,9 +318,7 @@ async def test_run_daemon_injects_home_backed_is_known_quest_into_the_adapter(
         tg.start_soon(functools.partial(
             run_daemon, tmp_path, env={},
             make_adapter=make_adapter, install_signals=False, shutdown=shutdown))
-        with anyio.fail_after(5):
-            while "is_known_quest" not in captured:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: "is_known_quest" in captured)
         shutdown.set()
 
     is_known = captured["is_known_quest"]
@@ -378,9 +361,7 @@ async def test_run_daemon_reaps_archived_homes_at_startup(tmp_path: Path) -> Non
             install_signals=False, shutdown=shutdown))
         # The socket only binds AFTER the startup reap runs, so socket-live
         # guarantees the sweep already executed.
-        with anyio.fail_after(5):
-            while not socket_is_live(spath):
-                await anyio.sleep(0.02)
+        await wait_until(lambda: socket_is_live(spath))
         shutdown.set()
 
     assert not home.exists()                       # leaked home reaped at startup
@@ -406,9 +387,7 @@ async def test_run_daemon_reaps_stray_homes_at_startup(tmp_path: Path) -> None:
             install_signals=False, shutdown=shutdown))
         # The socket only binds AFTER the startup sweep runs, so socket-live
         # guarantees the sweep already executed.
-        with anyio.fail_after(5):
-            while not socket_is_live(spath):
-                await anyio.sleep(0.02)
+        await wait_until(lambda: socket_is_live(spath))
         shutdown.set()
 
     assert not stray.exists()                        # empty stray reaped at startup

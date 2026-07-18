@@ -8,6 +8,7 @@ import pytest
 
 from imp.remote.daemon import discover
 from imp.remote.daemon.relay_supervisor import RelaySupervisor
+from tests.async_wait import wait_until
 
 
 @pytest.fixture
@@ -67,8 +68,6 @@ async def test_supervisor_poll_survives_a_scan_error(
         tg.start_soon(sup.run)
         # If the first (raising) poll crashed the task group, this wait would never
         # see further polls and the group would surface the error on exit.
-        with anyio.fail_after(5):
-            while calls["n"] < 3:
-                await anyio.sleep(0.01)
+        await wait_until(lambda: calls["n"] >= 3)
         tg.cancel_scope.cancel()
     assert calls["n"] >= 3  # kept polling after the error

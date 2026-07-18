@@ -7,6 +7,7 @@ import pytest
 
 from imp.remote.daemon.protocol import make_hello
 from imp.remote.daemon.server import SouthHub
+from tests.async_wait import wait_until
 
 
 @pytest.fixture
@@ -31,14 +32,10 @@ async def test_attach_and_detach_hooks_fire_with_correct_args(
         client = await anyio.connect_unix(sock)
         await client.send(
             (make_hello("2026-06-14-abc", "T", autosubscribe=True) + "\n").encode())
-        with anyio.fail_after(5):
-            while not attached:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: attached)
         assert attached == [("2026-06-14-abc", True)]
         await client.aclose()
-        with anyio.fail_after(5):
-            while not detached:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: detached)
         assert detached == ["2026-06-14-abc"]
         await hub.close()
         tg.cancel_scope.cancel()
@@ -56,9 +53,7 @@ async def test_attach_hook_defaults_autosubscribe_false(tmp_path: Path) -> None:
         tg.start_soon(hub.serve)
         client = await anyio.connect_unix(sock)
         await client.send((make_hello("2026-06-14-abc", "T") + "\n").encode())
-        with anyio.fail_after(5):
-            while not attached:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: attached)
         assert attached == [("2026-06-14-abc", False)]
         await client.aclose()
         await hub.close()

@@ -10,6 +10,7 @@ import pytest
 
 from imp.remote.daemon.server import SouthHub
 from imp.remote.drivers.daemon_connector import main as connector_main
+from tests.async_wait import wait_until
 
 
 @pytest.fixture
@@ -47,9 +48,7 @@ async def test_connector_keeps_polling_when_daemon_dies_and_exits_on_stdin_eof(
         worker = threading.Thread(target=run_connector)
         worker.start()
 
-        with anyio.fail_after(5):                 # wait for connector to register via hello
-            while "2026-06-13-abc" not in hub.live_ids():
-                await anyio.sleep(0.02)
+        await wait_until(lambda: "2026-06-13-abc" in hub.live_ids())
 
         # Simulate a daemon that dies for good: drop its socket name so the
         # connector's re-dials fail, then force-close the live connections (the OS
@@ -65,7 +64,7 @@ async def test_connector_keeps_polling_when_daemon_dies_and_exits_on_stdin_eof(
 
         # Now imp tears it down: stdin EOF → the connector exits cleanly.
         os.close(w_fd)
-        with anyio.fail_after(5):
+        with anyio.fail_after(30):   # deadlock backstop only
             await anyio.to_thread.run_sync(lambda: worker.join(5))
         assert not worker.is_alive(), "connector did not exit on stdin EOF"
         assert result["rc"] == 0
