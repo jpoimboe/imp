@@ -1912,29 +1912,14 @@ def _cmd_list(args: argparse.Namespace) -> int:
 
 def _cmd_show(args: argparse.Namespace) -> int:
     token = args.token
-    if token is None and not _interactive():
-        print("imp: 'imp show' needs a quest id — run 'imp list' for an overview",
-              file=sys.stderr)
+    if token is None:
+        args.parser.print_help(sys.stderr)
         return 2
     control = _control_root()
-    if token is None:
-        picked = anyio.run(_pick_show_target, control)
-        if isinstance(picked, int):
-            return picked
-        quest_id = picked
-    else:
-        # Same comprehension as _resolve_id — picker and resolver agree on candidates.
-        matches = [cid for cid in _iter_quest_ids(control) if token in cid]
-        if _interactive() and token.strip() and len(matches) >= 2:
-            picked = anyio.run(_pick_show_matches, control, matches)
-            if isinstance(picked, int):
-                return picked
-            quest_id = picked
-        else:
-            try:
-                quest_id = _resolve_id(control, token)
-            except SystemExit:
-                return 2
+    try:
+        quest_id = _resolve_id(control, token)
+    except SystemExit:
+        return 2
     resource = args.resource
     meta = _unstarted_backlog_meta(control, quest_id)
     if meta is not None:
@@ -4323,7 +4308,7 @@ def _build_parser() -> argparse.ArgumentParser:
     p_show.add_argument(
         "--json", action="store_true",
         help="Emit the overview detail card as a structured JSON object.")
-    p_show.set_defaults(func=_cmd_show)
+    p_show.set_defaults(func=_cmd_show, parser=p_show)
 
     p_search = sub.add_parser(
         "search",
