@@ -105,6 +105,19 @@ def test_log_help_no_longer_promises_a_most_recent_default(
     assert "Quest id or its short token" in out
 
 
+def test_bare_events_search_prints_full_help_on_stderr(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
+    # The no-query guard precedes _control_root(), so no repo is needed.
+    monkeypatch.setenv("COLUMNS", "200")
+    rc = main(["events", "search"])
+    err = capsys.readouterr().err
+    assert rc == 2
+    assert "Case-insensitive substring search" in err
+    assert "--active" in err
+    assert "--agent" in err
+
+
 def test_bare_events_lists_the_search_sibling_on_stderr(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
 ) -> None:

@@ -3585,6 +3585,9 @@ def _events_search_json(hits: list[EventSearchHit]) -> list[dict[str, Any]]:
 def _cmd_events_search(
     args: argparse.Namespace, _control: Path | None = None,
 ) -> int:
+    if args.query is None:
+        args.parser.print_help(sys.stderr)
+        return 2
     control = _control if _control is not None else _control_root()
     types = set(args.type) if args.type else None
     agents = set(args.agent) if args.agent else None
@@ -3817,7 +3820,7 @@ def _build_events_search_parser() -> argparse.ArgumentParser:
             "narrow which events match."),
     )
     p.add_argument(
-        "query", metavar="QUERY",
+        "query", metavar="QUERY", nargs="?", default=None,
         help="Substring matched case-insensitively against event content.")
     p.add_argument("--active", action="store_true",
                    help="Search in-flight quests' events.")
@@ -3840,7 +3843,7 @@ def _build_events_search_parser() -> argparse.ArgumentParser:
                    help="Structured output of matched events.")
     p.add_argument("--no-pager", action="store_true",
                    help="Disable the pager even when stdout is a TTY.")
-    p.set_defaults(func=_cmd_events_search)
+    p.set_defaults(func=_cmd_events_search, parser=p)
     return p
 
 
