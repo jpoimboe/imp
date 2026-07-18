@@ -6,7 +6,6 @@ import json
 import os
 import subprocess
 import sys
-import time
 from contextlib import redirect_stdout
 from pathlib import Path
 
@@ -304,73 +303,6 @@ def test_main_swallows_broken_pipe_on_buffered_flush(monkeypatch) -> None:
     assert rc == 128 + signal.SIGPIPE
 
 
-def test_cmd_log_auto_picks_latest_by_mtime(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """`imp log` (no slug) picks the most-recently-modified worktree's events.jsonl."""
-    import imp.cli.main as m
-
-    slugs_titles = [("first-change", "first"), ("second-change", "second"),
-                    ("tenth-change", "tenth")]
-    for slug, title in slugs_titles:
-        quest_dir = tmp_path / ".imp" / "quests" / slug
-        quest_dir.mkdir(parents=True)
-        (quest_dir / "quest.json").write_text(
-            json.dumps({"id": slug, "title": title, "base_branch": "main",
-                        "layout_version": LAYOUT_VERSION}),
-        )
-        events_path = quest_dir / "events.jsonl"
-        events_path.write_text(
-            json.dumps({
-                "id": "e1", "agent_id": None,
-                "timestamp": "2026-05-27T10:00:00+00:00",
-                "type": "quest_created",
-                "payload": {"title": title},
-            }) + "\n"
-            # A step renders the phase name (the title banner is gone), so use a
-            # per-change phase name to prove WHICH change's log was picked.
-            + json.dumps({
-                "id": "e2", "agent_id": None,
-                "timestamp": "2026-05-27T10:00:01+00:00",
-                "type": "step_started",
-                "payload": {"step": "s", "kind": "agent", "phase": title,
-                            "model": "m", "provider": "anthropic"},
-            }) + "\n",
-        )
-        # Stagger mtimes so the last one is clearly newest
-        time.sleep(0.01)
-
-    monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
-
-    buf = io.StringIO()
-    with redirect_stdout(buf):
-        rc = main(["log"])
-    assert rc == 0
-    out = buf.getvalue()
-    # tenth-change was written last, so its phase should render.
-    assert "tenth" in out
-    assert "first" not in out
-    assert "second" not in out
-
-
-def test_cmd_log_no_changes_yet_returns_rc_0(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture,
-) -> None:
-    """`imp log` in a project with no .imp/worktrees/ returns rc=0 with a
-    friendly stdout message."""
-    import imp.cli.main as m
-
-    monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
-    (tmp_path / ".imp").mkdir()
-    rc = main(["log"])
-    assert rc == 0
-    captured = capsys.readouterr()
-    assert "No quests" in captured.out
-    assert captured.err == ""
-
-
 def test_term_width_floors_to_80_when_columns_nonpositive(monkeypatch) -> None:
     from imp.cli import main as cli_main
 
@@ -449,28 +381,6 @@ def test_log_backlog_id_renders_card(
     assert "Add OAuth" in out
     assert "wire up OAuth login" in out
     assert "no such quest" not in out
-
-
-def test_log_picker_rows_include_backlog(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    import imp.cli.main as m
-    from imp.engine.quest import Quest
-    from tests.conftest import _seed_control
-    _seed_control(tmp_path)
-    Quest.create_draft(
-        tmp_path, title="Add OAuth", quest_id="2026-06-16-bkg111",
-        base_branch="main", origin="idea", seed_opening="Add OAuth")
-    captured: dict = {}
-
-    async def _fake_picker(*, control, rows, header, on_empty, on_non_tty, selected_index):
-        captured["rows"] = rows
-        return 2
-
-    monkeypatch.setattr(m, "_pick_quest_target", _fake_picker)
-    import anyio
-    anyio.run(m._pick_log_target, tmp_path)
-    assert any(r[0] == "2026-06-16-bkg111" for r in captured["rows"])
 
 
 def test_display_width_uses_kernel_winsize_ignoring_columns(monkeypatch) -> None:

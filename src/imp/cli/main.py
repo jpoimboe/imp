@@ -2348,22 +2348,14 @@ def _cmd_log(args: argparse.Namespace) -> int:
                   f"argument {conflict}", file=sys.stderr)
             return 2
         args.no_pager = True
-    quest_id: str | None
-    if args.token is not None:
-        try:
-            quest_id = _resolve_id(control, args.token)
-        except SystemExit:
-            return 2
-    elif _interactive():
-        target = anyio.run(_pick_log_target, control)
-        if isinstance(target, int):
-            return target
-        quest_id = target
-    else:
-        quest_id = _resolve_default_id(control)
-    if quest_id is None:
-        _emit_human([_NO_QUESTS_MESSAGE])
-        return 0
+    if args.token is None:
+        args.parser.print_help(sys.stderr)
+        return 2
+    quest_id: str
+    try:
+        quest_id = _resolve_id(control, args.token)
+    except SystemExit:
+        return 2
     meta = _unstarted_backlog_meta(control, quest_id)
     if meta is not None:
         lines: Iterable[str] = _backlog_card(
@@ -4189,7 +4181,7 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Export the narrative as a Markdown file "
              "(FILE, or imp-log-<id>.md when omitted; '-' streams to stdout).",
     )
-    p_log.set_defaults(func=_cmd_log)
+    p_log.set_defaults(func=_cmd_log, parser=p_log)
 
     p_events = sub.add_parser(
         "events",

@@ -1,134 +1,73 @@
 from __future__ import annotations
 
-import argparse
 from pathlib import Path
 
-import pytest
-
 import imp.cli.main as m
+from imp.cli.main import main
 
 
-@pytest.fixture
-def anyio_backend() -> str:
-    return "asyncio"
-
-
-def _row(cid: str, status: str = "paused",
-         last: str = "2026-06-11T00:00:00+00:00",
-         ) -> tuple[str, str, str, str, str, str, str | None, str | None]:
-    return (cid, status, "plan", last, "Title " + cid,
-            "2026-06-01T00:00:00+00:00", "planning", None)
-
-
-@pytest.mark.anyio
-async def test_log_picker_empty_prints_and_exits_2(
+def test_bare_log_prints_help_to_stderr_exit_2(
     monkeypatch, tmp_path: Path, capsys,
 ) -> None:
-    monkeypatch.setattr(m, "_all_quest_rows", lambda c: [])
-    monkeypatch.setattr(m, "_resolve_default_id", lambda c: None)
-    rc = await m._pick_log_target(tmp_path)
-    out = capsys.readouterr().out
+    # AC 2: bare `imp log` prints its own help to stderr and exits 2 —
+    # no picker, no most-recent default. The no-id check runs after the
+    # --follow conflict guard, so _control_root must resolve.
+    monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
+    rc = main(["log"])
+    captured = capsys.readouterr()
     assert rc == 2
-    assert "No quests yet — start one with imp new" in out
+    assert "usage: imp log" in captured.err
+    assert "--full" in captured.err
+    assert captured.out == ""
 
 
-@pytest.mark.anyio
-async def test_log_picker_preselects_resolve_default_target(
-    monkeypatch, tmp_path: Path,
-) -> None:
-    # in-flight is OLDER; a completed change is NEWER → newest-first puts the
-    # completed change at index 0, but _resolve_default_id prefers the in-flight
-    # one, so the pre-select must land on index 1 (AC #5 mixed case).
-    inflight = _row("2026-06-10-inflit", "paused", "2026-06-10T00:00:00+00:00")
-    completed = _row("2026-06-12-donexx", "completed", "2026-06-12T00:00:00+00:00")
-    monkeypatch.setattr(m, "_all_quest_rows", lambda c: [completed, inflight])
-    monkeypatch.setattr(m, "_resolve_default_id", lambda c: "2026-06-10-inflit")
-    monkeypatch.setattr(m, "_interactive", lambda: True)
-    captured = {}
-
-    async def fake_picker(candidates, *, now, color, header, selected_index):
-        captured["order"] = [c.quest_id for c in candidates]
-        captured["selected_index"] = selected_index
-        return candidates[selected_index].quest_id
-
-    monkeypatch.setattr(m.resume_select, "run_picker", fake_picker)
-    chosen = await m._pick_log_target(tmp_path)
-    assert captured["order"] == ["2026-06-12-donexx", "2026-06-10-inflit"]
-    assert captured["selected_index"] == 1
-    assert chosen == "2026-06-10-inflit"
-
-
-def test_cmd_log_non_tty_keeps_resolve_default(
+def test_bare_log_help_identical_when_interactive(
     monkeypatch, tmp_path: Path, capsys,
 ) -> None:
     monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
-    monkeypatch.setattr(m, "_interactive", lambda: False)
-    monkeypatch.setattr(m, "_resolve_default_id", lambda c: None)
-
-    def boom(*a, **k):
-        raise AssertionError("picker invoked on a non-tty")
-
-    monkeypatch.setattr(m, "_pick_log_target", boom)
-    rc = m._cmd_log(argparse.Namespace(token=None, full=False, follow=False, show=None, hide=None))
-    out = capsys.readouterr().out
-    assert rc == 0
-    assert "No quests yet — start one with imp new" in out
-
-
-def test_cmd_log_tty_no_token_routes_to_picker(
-    monkeypatch, tmp_path: Path,
-) -> None:
-    monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
     monkeypatch.setattr(m, "_interactive", lambda: True)
-
-    async def fake_pick(control):
-        return "2026-06-11-picked"
-
-    monkeypatch.setattr(m, "_pick_log_target", fake_pick)
-    seen: dict[str, str] = {}
-
-    def capture_meta(control, quest_id):
-        seen["id"] = quest_id
-        return None
-
-    monkeypatch.setattr(m, "_unstarted_backlog_meta", capture_meta)
-    rc = m._cmd_log(argparse.Namespace(token=None, full=False, follow=False, show=None, hide=None))
-    assert seen["id"] == "2026-06-11-picked"
+    rc = main(["log"])
+    captured = capsys.readouterr()
     assert rc == 2
+    assert "usage: imp log" in captured.err
+    assert captured.out == ""
 
 
-def test_cmd_log_tty_picker_rc_short_circuits(
-    monkeypatch, tmp_path: Path,
+def test_bare_log_with_quests_present_still_prints_help(
+    monkeypatch, tmp_path: Path, capsys,
 ) -> None:
+    # AC 8: even with resolvable quests, bare `imp log` prints help and exits 2 —
+    # it never silently targets the most-recent quest.
+    monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
+    monkeypatch.setattr(
+        m, "_iter_quest_ids", lambda c: ["2026-06-10-aaa", "2026-06-12-bbb"])
+    rc = main(["log"])
+    captured = capsys.readouterr()
+    assert rc == 2
+    assert "usage: imp log" in captured.err
+
+
+def test_log_ambiguous_token_lists_candidates_exit_2(
+    monkeypatch, tmp_path: Path, capsys,
+) -> None:
+    # An ambiguous token resolves through _resolve_id -> _exit_ambiguous.
     monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
     monkeypatch.setattr(m, "_interactive", lambda: True)
-
-    async def fake_pick(control):
-        return 2
-
-    monkeypatch.setattr(m, "_pick_log_target", fake_pick)
-
-    def boom(*a, **k):
-        raise AssertionError("load attempted despite picker rc")
-
-    monkeypatch.setattr(m, "_load_events_for_id", boom)
-    assert m._cmd_log(argparse.Namespace(
-        token=None, full=False, follow=False, show=None, hide=None)) == 2
+    monkeypatch.setattr(
+        m, "_iter_quest_ids", lambda c: ["2026-06-10-foo", "2026-06-11-foo"])
+    monkeypatch.setattr(m, "_row_for_id", lambda c, cid: None)
+    rc = main(["log", "foo"])
+    err = capsys.readouterr().err
+    assert rc == 2
+    assert "is ambiguous; candidates:" in err
 
 
-def test_cmd_log_with_token_skips_picker(
-    monkeypatch, tmp_path: Path,
+def test_log_unknown_token_errors_exit_2(
+    monkeypatch, tmp_path: Path, capsys,
 ) -> None:
     monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
-
-    def _raise(control, token):
-        raise SystemExit(2)
-
-    monkeypatch.setattr(m, "_resolve_id", _raise)
-
-    def boom(*a, **k):
-        raise AssertionError("picker invoked despite explicit token")
-
-    monkeypatch.setattr(m, "_pick_log_target", boom)
-    assert m._cmd_log(argparse.Namespace(
-        token="bogus", full=False, follow=False, show=None, hide=None)) == 2
+    monkeypatch.setattr(m, "_iter_quest_ids", lambda c: ["2026-06-10-foo"])
+    rc = main(["log", "zzz"])
+    err = capsys.readouterr().err
+    assert rc == 2
+    assert "no quest matches" in err

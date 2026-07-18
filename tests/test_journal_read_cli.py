@@ -97,8 +97,8 @@ def test_log_unknown_slug_returns_rc_2(
     assert "ghost" in capsys.readouterr().err
 
 
-def test_log_no_slug_resolves_archived(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+def test_log_no_slug_prints_help_exit_2(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
 ) -> None:
     import imp.cli.main as m
 
@@ -109,13 +109,12 @@ def test_log_no_slug_resolves_archived(
 
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
-    monkeypatch.delenv("NO_COLOR", raising=False)
 
-    buf = io.StringIO()
-    with redirect_stdout(buf):
-        rc = main(["log"])  # no slug, no in-flight worktrees
-    assert rc == 0
-    assert _MARKER_PHASE in buf.getvalue()
+    rc = main(["log"])  # no slug → own help, exit 2 (no most-recent default)
+    captured = capsys.readouterr()
+    assert rc == 2
+    assert "usage: imp log" in captured.err
+    assert captured.out == ""
 
 
 def test_status_shows_completed_section_from_archive(
