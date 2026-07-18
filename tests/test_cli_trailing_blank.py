@@ -319,21 +319,6 @@ def test_log_picker_empty_trailing_blank_on_tty(
     assert capsys.readouterr().out == m._NO_QUESTS_MESSAGE + "\n\n"
 
 
-def test_cmd_events_no_default_id_trailing_blank_on_tty(
-    tmp_path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-    import argparse
-
-    import imp.cli.main as m
-
-    monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
-    monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
-    monkeypatch.setattr(sys.stdin, "isatty", lambda: False)
-    rc = m._cmd_events(argparse.Namespace(token=None))
-    assert rc == 0
-    assert capsys.readouterr().out == m._NO_QUESTS_MESSAGE + "\n\n"
-
-
 def test_cmd_status_precondition_trailing_blank_on_tty(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:

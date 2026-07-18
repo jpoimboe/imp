@@ -3845,32 +3845,14 @@ class SplitAppend(argparse.Action):
 def _cmd_events(args: argparse.Namespace) -> int:
     from imp.engine import events_index as ei
 
+    if args.token is None:
+        args.parser.print_help(sys.stderr)
+        return 2
     control = _control_root()
-    quest_id: str | None
-    token = args.token
-    if token is not None:
-        # Same comprehension as _resolve_id — picker and resolver agree on candidates.
-        matches = [cid for cid in _iter_quest_ids(control) if token in cid]
-        if _interactive() and token.strip() and len(matches) >= 2:
-            picked = anyio.run(_pick_events_matches, control, matches)
-            if isinstance(picked, int):
-                return picked
-            quest_id = picked
-        else:
-            try:
-                quest_id = _resolve_id(control, token)
-            except SystemExit:
-                return 2
-    elif _interactive():
-        picked = anyio.run(_pick_events_target, control)
-        if isinstance(picked, int):
-            return picked
-        quest_id = picked
-    else:
-        quest_id = _resolve_default_id(control)
-    if quest_id is None:
-        _emit_human([_NO_QUESTS_MESSAGE])
-        return 0
+    try:
+        quest_id = _resolve_id(control, args.token)
+    except SystemExit:
+        return 2
     meta = _unstarted_backlog_meta(control, quest_id)
     if meta is not None:
         _emit_human([f"Quest {quest_id} hasn't started yet — no events to show."])
@@ -4237,7 +4219,7 @@ def _build_parser() -> argparse.ArgumentParser:
     p_events.add_argument(
         "--no-pager", action="store_true",
         help="Disable the pager even when stdout is a TTY.")
-    p_events.set_defaults(func=_cmd_events)
+    p_events.set_defaults(func=_cmd_events, parser=p_events)
 
     p_list = sub.add_parser(
         "list",

@@ -96,10 +96,15 @@ def test_events_comma_and_repeat_type_equivalent(tmp_path, monkeypatch) -> None:
     assert "#2" in comma and "#3" in comma
 
 
-def test_events_default_id_is_most_recent(tmp_path, monkeypatch) -> None:
+def test_events_bare_no_id_prints_help_exit_2(tmp_path, monkeypatch, capsys) -> None:
+    import imp.cli.main as m
     _make_live_quest(tmp_path, "aaa111", _EVENTS)
-    out = _run(monkeypatch, tmp_path, "events")  # no id -> most recent
-    assert "quest aaa111" in out
+    monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
+    rc = main(["events"])
+    captured = capsys.readouterr()
+    assert rc == 2
+    assert "usage: imp events" in captured.err
+    assert "aaa111" not in captured.out
 
 
 def test_events_unknown_quest_errors(tmp_path, monkeypatch) -> None:
