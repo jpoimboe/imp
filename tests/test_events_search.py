@@ -196,6 +196,27 @@ def test_events_search_archived_end_to_end(monkeypatch, tmp_path: Path) -> None:
     assert [o for o, _ in hits[0].events] == [1]
 
 
+def test_events_search_archived_routes_through_store(monkeypatch, tmp_path: Path) -> None:
+    class _FakeStore:
+        def search_event_candidates(self, query):
+            return [("arch01", "Archived one", "completed", "2026-06-11T00:00:00+00:00")]
+
+        def get_events(self, cid):
+            return [_ev("e0", "tool_call", name="bash", input={"cmd": "GREPTARGET"})]
+
+    monkeypatch.setattr(m, "make_store", lambda control: _FakeStore())
+
+    def _boom(*a, **k):
+        raise AssertionError("client path must not open the archive index directly")
+
+    monkeypatch.setattr(m.archive_read, "search_archive_events_content", _boom)
+
+    hits = m._events_search_archived(tmp_path, "greptarget", types=None, agents=None)
+    assert [h.quest_id for h in hits] == ["arch01"]
+    assert hits[0].zone == "archive"
+    assert hits[0].last_activity == "2026-06-11T00:00:00+00:00"
+
+
 def _hit(cid: str, title: str, zone: str, events: list[tuple[int, dict[str, Any]]],
          match_count: int, last: str = "2026-06-11T00:00:00+00:00") -> m.EventSearchHit:
     return m.EventSearchHit(cid, title, zone, last, events, {}, match_count)
