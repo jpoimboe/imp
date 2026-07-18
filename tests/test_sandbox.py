@@ -983,22 +983,29 @@ def test_resolve_policy_binds_quest_home_rw(tmp_path):
     assert f"--bind {home} {home}" in argv
 
 
-def test_resolve_policy_masks_quest_steps_dirs(tmp_path):
+def test_resolve_policy_masks_own_steps_not_siblings(tmp_path):
     control, wt = _layout(tmp_path)
     quest_dir = control / ".imp" / "quests" / "abc"
     (quest_dir / "steps").mkdir(parents=True)
     (quest_dir / "artifacts").mkdir()
-    (quest_dir / "workflow").mkdir()
     (quest_dir / "events.jsonl").write_text("")
     sib_dir = control / ".imp" / "quests" / "sib"
     (sib_dir / "steps").mkdir(parents=True)
+    (sib_dir / "events.jsonl").write_text("")
     pol = resolve_policy(
         worktree=wt, control_root=control, quest_id="abc",
         cfg=SandboxConfig(), engine_env_result={}, environ={},
         available=True, quest_dir=quest_dir,
     )
+    # Own steps masked by fixed name...
     assert str(quest_dir / "steps") in pol.secret_dirs
-    assert str(sib_dir / "steps") in pol.secret_dirs
+    # ...and NO sibling path appears anywhere in the resolved policy.
+    assert str(sib_dir / "steps") not in pol.secret_dirs
+    assert str(sib_dir / "events.jsonl") not in pol.secret_files
+    assert not any("sib" in b for b, _ in pol.bind_plan())
+    # The sibling is nonetheless denied in-mirror by the whole-.imp tmpfs.
+    assert pol.allows_read(sib_dir / "steps" / "x") is False
+    assert pol.allows_read(sib_dir / "events.jsonl") is False
 
 
 def test_resolve_policy_allows_read_reflects_steps_mask(tmp_path):
@@ -1034,7 +1041,7 @@ def test_resolve_policy_steps_mask_is_existence_gated(tmp_path):
     assert str(quest_dir / "steps") not in pol.secret_dirs
 
 
-def test_resolve_policy_masks_quest_events_jsonl(tmp_path):
+def test_resolve_policy_masks_own_events_not_siblings(tmp_path):
     control, wt = _layout(tmp_path)
     quest_dir = control / ".imp" / "quests" / "abc"
     quest_dir.mkdir(parents=True)
@@ -1048,7 +1055,7 @@ def test_resolve_policy_masks_quest_events_jsonl(tmp_path):
         available=True, quest_dir=quest_dir,
     )
     assert str(quest_dir / "events.jsonl") in pol.secret_files
-    assert str(sib_dir / "events.jsonl") in pol.secret_files
+    assert str(sib_dir / "events.jsonl") not in pol.secret_files
     assert pol.allows_read(quest_dir / "events.jsonl") is False
 
 
@@ -1438,7 +1445,7 @@ def test_resolve_policy_omits_workflow_overlay_when_workflow_is_plain_file(tmp_p
     assert pol.readonly_overlays == ()
 
 
-def test_resolve_policy_masks_archive_footguns(tmp_path):
+def test_resolve_policy_archive_hidden_by_imp_tmpfs_not_enumerated(tmp_path):
     control, wt = _layout(tmp_path)
     archive = control / ".imp" / "archive"
     (archive / "blobs").mkdir(parents=True)
@@ -1446,30 +1453,56 @@ def test_resolve_policy_masks_archive_footguns(tmp_path):
     (archive / "records").mkdir()
     pol = resolve_policy(
         worktree=wt, control_root=control, quest_id="abc",
-        cfg=SandboxConfig(), engine_env_result={}, environ={},
-        available=True,
+        cfg=SandboxConfig(), engine_env_result={}, environ={}, available=True,
     )
-    assert str(archive / "blobs") in pol.secret_dirs
-    assert str(archive / "index.db") in pol.secret_files
-    # records/ stays readable — never masked.
-    assert str(archive / "records") not in pol.secret_dirs
+    # No archive path is enumerated into the secret masks anymore...
+    assert str(archive / "blobs") not in pol.secret_dirs
+    assert str(archive / "index.db") not in pol.secret_files
+    assert not any(b.startswith(str(archive)) for b, _ in pol.bind_plan())
+    # ...but the whole-.imp tmpfs denies every archive path in the read mirror,
+    # including records/ (a capability nothing used).
     assert pol.allows_read(archive / "blobs" / "ab" / "cd") is False
     assert pol.allows_read(archive / "index.db") is False
-    # records/ is now under the .imp tmpfs too — no longer readable in-sandbox.
     assert pol.allows_read(archive / "records" / "x.json") is False
 
 
-def test_resolve_policy_archive_mask_is_existence_gated(tmp_path):
+def test_resolve_policy_sibling_appearance_and_removal_are_noop(tmp_path):
+    # AC 7: a sibling quest appearing or vanishing after resolve_policy changes
+    # NOTHING about the current quest's resolved policy or emitted argv — the mask
+    # race is gone by construction (no sibling enumeration).
     control, wt = _layout(tmp_path)
-    # No .imp/archive tree created — the existence-gate must produce no entry.
-    pol = resolve_policy(
-        worktree=wt, control_root=control, quest_id="abc",
-        cfg=SandboxConfig(), engine_env_result={}, environ={},
-        available=True,
-    )
-    archive = control / ".imp" / "archive"
-    assert str(archive / "blobs") not in pol.secret_dirs
-    assert str(archive / "index.db") not in pol.secret_files
+    quest_dir = control / ".imp" / "quests" / "abc"
+    (quest_dir / "steps").mkdir(parents=True)
+    (quest_dir / "artifacts").mkdir()
+    (quest_dir / "events.jsonl").write_text("")
+    # Pre-create refs/heads so resolve_policy is idempotent across calls
+    # (imp_refs.mkdir creates it as a side-effect on the first call otherwise).
+    (control / ".git" / "refs" / "heads").mkdir(parents=True)
+
+    def _resolve():
+        return resolve_policy(
+            worktree=wt, control_root=control, quest_id="abc",
+            cfg=SandboxConfig(), engine_env_result={}, environ={},
+            available=True, quest_dir=quest_dir,
+        )
+
+    pol1 = _resolve()
+    argv1 = build_sandbox_argv("x", cwd=str(wt), policy=pol1, engine_env={})
+
+    # Sibling APPEARS with its own steps/ + events.jsonl.
+    sib = control / ".imp" / "quests" / "other"
+    (sib / "steps").mkdir(parents=True)
+    (sib / "events.jsonl").write_text('{"e":1}\n')
+    pol2 = _resolve()
+    argv2 = build_sandbox_argv("x", cwd=str(wt), policy=pol2, engine_env={})
+    assert pol2 == pol1
+    assert argv2 == argv1
+
+    # Sibling VANISHES.
+    import shutil as _shutil
+    _shutil.rmtree(sib)
+    pol3 = _resolve()
+    assert pol3 == pol1
 
 
 def test_resolve_policy_sets_control_imp_tmpfs(tmp_path):

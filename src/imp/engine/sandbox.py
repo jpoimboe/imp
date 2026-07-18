@@ -256,21 +256,20 @@ def build_sandbox_argv(
 
 
 def prune_missing_masks(policy: SandboxPolicy) -> SandboxPolicy:
-    """Return a copy of `policy` with any mask/ro-bind path that has since
-    vanished dropped. Three of the frozen sets name paths OTHER quests own —
-    secret_dirs (each sibling's `steps/`), secret_files (post-rifa59 each
-    sibling's `events.jsonl`), and git_ro_remask (each sibling worktree's
-    `config.worktree`) — enumerated once at run start by resolve_policy. A
-    long-running quest outlives its siblings: when one finishes mid-run its
-    home and worktree are removed, so those paths disappear from disk. bwrap
-    must still create/bind each over the read-only floor, so a spawn that
-    carries a vanished path dies in sandbox SETUP ("Read-only file system")
-    before the command runs — wedging every later gate and bash call. A mask
-    over a path that no longer exists protects nothing, so existence-gating at
-    spawn is always safe. Own-quest binds (worktree, quest_home, refs) and
-    stable config (caches, extra_*) never churn and are left untouched. Scoped
-    to the spawn argv only; the in-process allows_read/allows_write mirrors keep
-    the unpruned policy (a gone path is denied either way)."""
+    """Return a copy of `policy` with any mask/ro-bind path that has since vanished
+    dropped, existence-gating the frozen spawn argv. After the fail-closed .imp
+    allowlist, secret_dirs/secret_files name only self-owned never-vanishing paths —
+    the current quest's own steps/ + events.jsonl, the home secret dirs/files, and
+    /run/user/$UID — so the prune over those two sets is effectively a no-op. Its
+    remaining job is git_ro_remask: a long-running quest outlives its siblings, and
+    when one finishes its linked worktree's config.worktree disappears from disk;
+    bwrap must still bind each ro path over the read-only floor, so a spawn carrying
+    a vanished path dies in sandbox SETUP ("Read-only file system") before the
+    command runs. A mask over a gone path protects nothing, so existence-gating at
+    spawn is always safe. Own binds (worktree, quest_home, refs) and stable config
+    (caches, extra_*) never churn and are left untouched. Scoped to the spawn argv
+    only; the in-process allows_read/allows_write mirrors keep the unpruned policy
+    (a gone path is denied either way)."""
     if not policy.active:
         return policy
     return replace(
@@ -504,18 +503,17 @@ def resolve_policy(
             secret_files.append(str(p))
     secret_dirs.append(f"/run/user/{uid}")   # H2 — agent sockets; mask even if abs
 
-    # Mask each quest's steps/ + events.jsonl (siblings too): steps/ are overlay-home
-    # mountpoints a raw walk would stall on; events.jsonl is the unbounded footgun log
-    # whose sole in-sandbox reader is the CLI (now routed through the daemon store).
-    quests_root = control_root / ".imp" / "quests"
-    quest_dirs = [p for p in sorted(quests_root.glob("*")) if p.is_dir()]
-    secret_dirs += list(_existing([str(p / "steps") for p in quest_dirs]))
-    secret_files += list(_existing([str(p / "events.jsonl") for p in quest_dirs]))
-
-    # Mask the archive footguns (blob pile + SQLite content index); records/ stays readable.
-    archive = control_root / ".imp" / "archive"
-    secret_dirs += list(_existing([str(archive / "blobs")]))
-    secret_files += list(_existing([str(archive / "index.db")]))
+    # Re-mask the current quest's OWN footguns by fixed name (self-owned, always-
+    # present, never-churning): steps/ is an overlay-home mountpoint a raw walk
+    # would stall on; events.jsonl is the unbounded footgun log whose sole in-
+    # sandbox reader is the CLI (routed through the daemon store). Emitted last (via
+    # secret_dirs/secret_files) so they re-mask on top of the quest_home rebind. The
+    # <control>/.imp tmpfs (control_imp) hides every sibling and the archive for
+    # free — no glob, no enumeration — so a sibling appearing or reaping mid-run
+    # changes nothing: the mask TOCTOU race is gone by construction.
+    if quest_dir is not None:
+        secret_dirs += list(_existing([str(quest_dir / "steps")]))
+        secret_files += list(_existing([str(quest_dir / "events.jsonl")]))
 
     # ro overlay of workflow snapshot — bind_plan emits it after the quest_home rw
     # bind, so last-covering-wins makes only workflow/ read-only.
