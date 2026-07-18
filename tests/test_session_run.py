@@ -428,7 +428,9 @@ async def test_daemon_startup_timeout_surfaces_distinctly(
         solicit=lambda _p: _never())
     assert rc == 3                       # distinct daemon-startup-failure code
     assert summarized == []              # NOT routed through the paused summary
-    assert "daemon" in capsys.readouterr().err.lower()
+    out = capsys.readouterr().out
+    assert "startup failed: session daemon did not come up" in out   # backstop block on stdout
+    assert f"{quest.control_root}/.imp/remote-control.log" in out
 
 
 @pytest.mark.anyio
@@ -456,7 +458,8 @@ async def test_daemon_startup_timeout_is_not_rc3_when_change_already_completed(
         quest, driver=_NullDriver(), coord=coord,
         solicit=lambda _p: _never())
     assert rc == 0                       # NOT rc=3: change already completed
-    assert "daemon" not in capsys.readouterr().err.lower()
+    captured = capsys.readouterr()
+    assert "startup failed" not in (captured.out + captured.err)
 
 
 @pytest.mark.anyio
@@ -767,11 +770,11 @@ async def test_daemon_startup_crash_surfaces_exit_code_and_stderr_path(
         quest, driver=_NullDriver(), coord=coord, solicit=lambda _p: _never())
 
     assert rc == 3
-    err = capsys.readouterr().err
-    assert quest.id in err
-    assert "code 7" in err
-    assert str(stderr_path) in err
-    assert "boom-on-startup" in err
+    out = capsys.readouterr().out
+    assert "startup failed: session daemon exited with code 7 before it came up" in out
+    assert quest.id in out
+    assert str(stderr_path) in out
+    assert "boom-on-startup" in out
 
 
 def test_should_run_ctrl_d_reader_requires_interactive_tty(monkeypatch) -> None:
