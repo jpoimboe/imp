@@ -2864,6 +2864,11 @@ def _abandon_local(control: Path, quest_id: str) -> int:
     return rc
 
 
+def _cmd_remote_control(args: argparse.Namespace) -> int:
+    args.parser.print_help(sys.stderr)
+    return 2
+
+
 def _cmd_remote_control_start(args: argparse.Namespace) -> int:
     from imp.remote.daemon.runner import start_daemon
     return start_daemon(_control_root())
@@ -4266,7 +4271,8 @@ def _build_parser() -> argparse.ArgumentParser:
         "remote-control",
         help="Run the optional per-repo daemon that relays all quests to one transport.",
     )
-    rc_sub = p_rc.add_subparsers(dest="rc_action", required=True)
+    p_rc.set_defaults(func=_cmd_remote_control, parser=p_rc)
+    rc_sub = p_rc.add_subparsers(dest="rc_action", required=False)
     p_rc_start = rc_sub.add_parser(
         "start", help="Start the remote-control daemon for this repo (foreground).")
     p_rc_start.set_defaults(func=_cmd_remote_control_start)

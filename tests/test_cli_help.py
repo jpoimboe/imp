@@ -129,3 +129,17 @@ def test_bare_events_lists_the_search_sibling_on_stderr(
     captured = capsys.readouterr()
     assert rc == 2
     assert "imp events search <query>" in captured.err
+
+
+def test_bare_remote_control_prints_full_help_on_stderr(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
+    # Bare `imp remote-control` (no action) prints its full help — listing the
+    # start and stop actions — to stderr and exits 2, instead of argparse's
+    # terse required-argument error.
+    monkeypatch.setenv("COLUMNS", "200")
+    rc = main(["remote-control"])
+    err = capsys.readouterr().err
+    assert rc == 2
+    assert "start" in err
+    assert "stop" in err
