@@ -534,49 +534,50 @@ async def run_daemon(
 def start_daemon(control_root: Path) -> int:
     """`imp remote-control start`: reject a second live daemon, refuse when no
     remote.driver is configured, then run in foreground."""
+    from imp.cli.main import _emit_cli_error
     from imp.cli.remote_channel import driver_config_from
     from imp.providers.effective import load_effective_config
     from imp.remote.drivers.telegram import ConfigError
     try:
         check_not_running(control_root)
     except DaemonAlreadyRunning:
-        print("imp: a remote-control daemon is already running for this repo",
-              file=sys.stderr)
+        _emit_cli_error("a remote-control daemon is already running for this repo")
         return 2
     config = load_effective_config(
         project_root=control_root, control_root=control_root).config
     _driver_raw = (getattr(config, "remote", None) or {}).get("driver")
     if not _driver_raw:
-        print("imp: remote-control requires a configured remote.driver; add a "
-              "remote.driver block to your config and restart", file=sys.stderr)
+        _emit_cli_error("remote-control requires a configured remote.driver; add a "
+                        "remote.driver block to your config and restart")
         return 2
     if driver_config_from(config) is None:
         _name = _driver_raw.get("name", "<unknown>")
-        print(f"imp: remote-control: driver {_name!r} is not recognised; "
-              "check remote.driver.name in your config", file=sys.stderr)
+        _emit_cli_error(f"remote-control: driver {_name!r} is not recognised; "
+                        "check remote.driver.name in your config")
         return 2
     try:
         anyio.run(run_daemon, control_root)
     except ConfigError as exc:
-        print(f"imp: remote-control not configured: {exc}", file=sys.stderr)
+        _emit_cli_error(f"remote-control not configured: {exc}")
         return 2
     return 0
 
 
 def stop_daemon(control_root: Path) -> int:
     """`imp remote-control stop`: SIGTERM the recorded daemon pid."""
+    from imp.cli.main import _emit_cli_error
     pid = read_pid(control_root)
     if pid is None:
-        print("imp: no remote-control daemon running for this repo", file=sys.stderr)
+        _emit_cli_error("no remote-control daemon running for this repo")
         return 1
     try:
         os.kill(pid, signal.SIGTERM)
     except ProcessLookupError:
         remove_pid(control_root)
-        print("imp: no remote-control daemon running for this repo", file=sys.stderr)
+        _emit_cli_error("no remote-control daemon running for this repo")
         return 1
     except PermissionError:
-        print(f"imp: no permission to signal the daemon (pid {pid})", file=sys.stderr)
+        _emit_cli_error(f"no permission to signal the daemon (pid {pid})")
         return 1
     print(f"Sent SIGTERM to remote-control daemon (pid {pid}).")
     return 0

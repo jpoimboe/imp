@@ -48,7 +48,7 @@ styles its own line.
 - **Non-quest CLI usage/lookup errors → one `imp:` line.** Bad arguments, no such
   quest, unknown command, and similar usage errors emit a single
   `imp: <message>` line on **stderr** via `_emit_cli_error`, which centralizes the
-  prefix so no `main.py` call site hand-rolls it.
+  prefix so no CLI call site hand-rolls it.
 
 Carved out (unchanged): rc-conditional proxy-response relays that print a
 pre-formatted `imp: …` message routed by return code (`_emit_mutation_result`,
@@ -57,9 +57,7 @@ success line; and daemon-subprocess-internal diagnostics (executor traceback,
 `daemon.py`, `warmup.py`, the archive progress indicator, `loader.py` warnings,
 `validate_memory_cli.py`, `daemon_connector.py`) — a raw Python traceback stays
 raw to keep its diagnostic value, reaching the user via the crash-banner
-mechanism. Not yet unified: the `imp remote-control start`/`stop` error lines in
-`runner.py` still print their own `imp:` prefix directly rather than through the
-sink.
+mechanism.
 
 ---
 
