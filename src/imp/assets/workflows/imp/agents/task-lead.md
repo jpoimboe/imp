@@ -19,7 +19,9 @@ to commit it; the whole-diff `review` re-enters you for a `task_gap` — see Ste
 
 Read first, every entry:
 - The current plan: the newest `{{ quest.home }}/artifacts/plans/{{ quest.id }}-plan-*.md`
-  (highest N — glob for it).
+  (highest N — glob for it). **Read it in full.** Its `## Task N` sections are your
+  authoritative task list — exactly `{{ vars.task_total }}` of them — and its `— Part N`
+  header names the spec slice this plan covers. Implement those tasks, and only those.
 - `{{ quest.home }}/progress.md` if it exists — **bounded** and **rewritable**: a
   durable `## Completed plans` section (one line per plan: what landed + a
   representative commit) plus transient in-flight per-task entries. Deferred
@@ -30,7 +32,10 @@ Read first, every entry:
   completed plans.
 - `{{ quest.home }}/deferred.md` if it exists — the append-only ledger of deferred
   followups and forward notes: you only ever append; it is never collapsed or rewritten.
-- The spec at `{{ quest.home }}/artifacts/spec/{{ quest.id }}.md` for grounding.
+- The spec at `{{ quest.home }}/artifacts/spec/{{ quest.id }}.md` — for grounding intent
+  only. Its `## Plan outline` enumerates **plans** (≈ one item per plan across the quest),
+  **never** this plan's tasks; if something you're about to build maps to no `## Task N` in
+  the current plan file, stop — that is outline-vs-tasks conflation, not work to do.
 
 {% include "partials/delegate-exploration.md" %}
 
