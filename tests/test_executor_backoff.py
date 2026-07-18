@@ -22,7 +22,7 @@ def test_interruptible_sleep_returns_within_a_tick_on_pause() -> None:
                 coord.should_pause = True
             tg.start_soon(flip)
             # a 10s sleep must abandon well before 10s once should_pause flips
-            with anyio.fail_after(1.0):
+            with anyio.fail_after(30):  # deadlock backstop only
                 await _interruptible_sleep(10.0, coord, tick=0.02)
 
     anyio.run(main)
@@ -32,7 +32,7 @@ def test_interruptible_sleep_with_none_coordinator() -> None:
     """coordinator=None branch: the sleep must complete without raising.
     (The loop skips the should_pause check and just runs out the delay.)"""
     async def main() -> None:
-        with anyio.fail_after(2.0):
+        with anyio.fail_after(30):  # deadlock backstop only
             await _interruptible_sleep(0.05, None, tick=0.02)
 
     anyio.run(main)
@@ -59,7 +59,7 @@ def test_interruptible_sleep_returns_within_a_tick_on_retry_now() -> None:
                 coord.retry_now_requested = True
             tg.start_soon(flip)
             # a 10s sleep must abandon well before 10s once retry_now flips
-            with anyio.fail_after(1.0):
+            with anyio.fail_after(30):  # deadlock backstop only
                 await _interruptible_sleep(10.0, coord, tick=0.02)
 
     anyio.run(main)

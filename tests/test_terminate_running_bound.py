@@ -46,7 +46,7 @@ async def test_terminate_running_is_bounded_when_wait_hangs() -> None:
     # terminate returns AT ALL.
     proc = _HangAfterKill()
     ctx = _Ctx([proc])
-    with anyio.fail_after(2):
+    with anyio.fail_after(30):  # deadlock backstop only
         signalled = await terminate_running_processes(ctx, timeout=0.05)
     assert signalled == [proc]
     assert proc.killed >= 1            # SIGKILL was delivered

@@ -25,6 +25,7 @@ from imp.cli.signals import (
     install_process_group,
     prompt_sigint_guard,
 )
+from tests.async_wait import wait_until
 
 
 @pytest.fixture
@@ -351,9 +352,7 @@ async def test_ctrl_d_byte_routes_to_leave_path_not_signal_pause(monkeypatch) ->
         async with anyio.create_task_group() as tg:
             await tg.start(reader.run)
             os.write(master, b"\x04")
-            with anyio.fail_after(5):
-                while not coord.should_pause:
-                    await anyio.sleep(0.02)
+            await wait_until(lambda: coord.should_pause)
             tg.cancel_scope.cancel()
         assert coord.should_pause is True
         assert coord.pause_reason == "ctrl-d"
@@ -392,9 +391,7 @@ async def test_tty_quiesced_parks_reader_then_rearms(monkeypatch) -> None:
             # Re-armed to cbreak on exit: a mid-run \x04 is now an ordinary raw
             # byte the reader reads and routes to the leave path.
             os.write(master, b"\x04")
-            with anyio.fail_after(5):
-                while not coord.should_pause:
-                    await anyio.sleep(0.02)
+            await wait_until(lambda: coord.should_pause)
             assert coord.pause_reason == "ctrl-d"
             tg.cancel_scope.cancel()
     finally:
@@ -545,14 +542,10 @@ async def test_r_byte_requests_retry_now_and_keeps_reading(monkeypatch) -> None:
         async with anyio.create_task_group() as tg:
             await tg.start(reader.run)
             os.write(master, b"r")
-            with anyio.fail_after(5):
-                while not coord.retry_now_requested:
-                    await anyio.sleep(0.02)
+            await wait_until(lambda: coord.retry_now_requested)
             # The reader did NOT exit on `r`: a following \x04 still routes to leave.
             os.write(master, b"\x04")
-            with anyio.fail_after(5):
-                while not coord.should_pause:
-                    await anyio.sleep(0.02)
+            await wait_until(lambda: coord.should_pause)
             tg.cancel_scope.cancel()
         assert coord.retry_now_requested is True   # `r` latched the request
         assert coord.pause_reason == "ctrl-d"       # reader kept watching, then left

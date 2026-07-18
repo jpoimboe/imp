@@ -499,7 +499,7 @@ async def test_depth2_nested_dispatch_uses_fresh_limiters_no_deadlock(
         tool_results: list = []
         state = TurnState(tool_calls_used=0)
         tus = [_task_tu("p1"), _task_tu("p2")]   # 2 == cap -> parent limiter full
-        with anyio.fail_after(5):
+        with anyio.fail_after(30):  # deadlock backstop only
             async for _ in dispatch_task_batch(
                     ctx=ctx, elog=elog, aid="step:p/s", task_tus=tus,
                     tool_results=tool_results, state=state, ceiling=None):

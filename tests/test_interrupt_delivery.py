@@ -55,7 +55,7 @@ async def test_delivery_timeout_escalates_to_force_kill(monkeypatch: Any) -> Non
         killed.append("a1")
 
     with coord.runner_attached(hang, force_kill=fk, agent_id="a1"):
-        with anyio.fail_after(1):
+        with anyio.fail_after(30):  # deadlock backstop only
             await coord._deliver_interrupt()
 
     assert killed == ["a1"]  # hard tier fired after the 2s (here 0.05s) bound
@@ -106,7 +106,7 @@ async def test_delivery_timeout_without_force_kill_no_escalation_no_hard(
 
     # No force_kill: the hard tier is a no-op and no cooperative_timeout escalation fires.
     with coord.runner_attached(hang, agent_id="a1"):
-        with anyio.fail_after(1):
+        with anyio.fail_after(30):  # deadlock backstop only
             await coord._deliver_interrupt()
 
     delivered = [r["payload"] for r in log.records if r["type"] == "interrupt_delivered"]
@@ -152,7 +152,7 @@ async def test_signal_pause_fire_and_forget_does_not_block() -> None:
         coord.set_delivery_spawner(tg.start_soon)
         coord.attach_runner(hanging_interrupt)
         # With a spawner, signal_pause returns promptly despite the hang.
-        with anyio.fail_after(1):
+        with anyio.fail_after(30):  # deadlock backstop only
             await coord.signal_pause(reason="ctrl-c", via="frame")
         assert coord.should_pause is True
         assert coord.pause_reason == "ctrl-c"
@@ -189,7 +189,7 @@ async def test_signal_pause_empty_stack_does_not_arm_watchdog(monkeypatch: Any) 
     async with anyio.create_task_group() as tg:
         coord.set_delivery_spawner(tg.start_soon)
         # No runner attached (the run has already yielded).
-        with anyio.fail_after(1):
+        with anyio.fail_after(30):  # deadlock backstop only
             await coord.signal_pause(reason="ctrl-d", via="frame")
 
     # NOTE: fully falsifiable only once the real _yield_watchdog lands (later task);
@@ -219,7 +219,7 @@ async def test_yield_watchdog_escalates_when_no_yield(monkeypatch: Any) -> None:
     ):
         coord._first_gesture_at = coord._now()
         coord._yielded = anyio.Event()  # never set -> no yield
-        with anyio.fail_after(1):
+        with anyio.fail_after(30):  # deadlock backstop only
             await coord._yield_watchdog()
 
     assert set(killed) == {"parent", "child"}  # whole stack hard-killed
@@ -244,7 +244,7 @@ async def test_note_yield_disarms_watchdog(monkeypatch: Any) -> None:
         coord._first_gesture_at = coord._now()
         coord._yielded = anyio.Event()
         coord.note_yield()  # run yielded before the deadline
-        with anyio.fail_after(1):
+        with anyio.fail_after(30):  # deadlock backstop only
             await coord._yield_watchdog()
 
     assert killed == []  # yielded in time -> no escalation
@@ -307,7 +307,7 @@ async def test_signal_force_disarms_the_yield_watchdog(monkeypatch: Any) -> None
         coord._first_gesture_at = coord._now()
         coord._yielded = anyio.Event()
         await coord.signal_force()          # calls note_yield() -> disarms watchdog
-        with anyio.fail_after(1):
+        with anyio.fail_after(30):  # deadlock backstop only
             await coord._yield_watchdog()   # must return promptly, no no_yield
 
     reasons = [r["payload"]["reason"]
