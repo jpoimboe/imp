@@ -114,6 +114,7 @@ class LocalStore:
             _resolve_intent,
         )
         from imp.cli.render_helpers import conversation_prose
+        from imp.engine.quest import LAYOUT_VERSION, migrate
 
         out: list[HomeDigest] = []
         for quest_id in _list_quest_homes(self.control_root):
@@ -123,6 +124,13 @@ class LocalStore:
                 meta = json.loads(quest_json)
             except (FileNotFoundError, json.JSONDecodeError):
                 continue
+            if meta.get("layout_version", 0) != LAYOUT_VERSION:
+                try:
+                    migrate(meta.get("layout_version", 0), LAYOUT_VERSION, cdir)
+                    quest_json = (cdir / "quest.json").read_bytes()
+                    meta = json.loads(quest_json)
+                except Exception:
+                    pass  # fall back to the already-read raw bytes for this home
             try:
                 state_json: bytes | None = (cdir / "state" / "state.json").read_bytes()
             except FileNotFoundError:
