@@ -12,6 +12,7 @@ from imp.cli.store import LocalStore
 from imp.cli.store_proxy import ProxyStore
 from imp.engine.quest import Quest
 from imp.remote.session.server import SessionServer
+from tests.async_wait import wait_until
 from tests.conftest import _seed_control
 
 
@@ -85,8 +86,6 @@ async def test_query_is_served_while_run_fn_is_parked(tmp_path: Path) -> None:
         events = await anyio.to_thread.run_sync(proxy.get_events, "liveq")
         assert events == LocalStore(tmp_path).get_events("liveq")   # served while parked
         release.set()
-        with anyio.fail_after(5):
-            while "r" not in result:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: "r" in result)
         assert result["r"] == "done"
         tg.cancel_scope.cancel()

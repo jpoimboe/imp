@@ -8,6 +8,7 @@ import pytest
 from imp.remote.session.client import SessionClient
 from imp.remote.session.protocol import CONTROL_INTERRUPT, Attach, SkillRequest, encode_set_lease
 from imp.remote.session.socket_server import SessionSocket
+from tests.async_wait import wait_until
 
 
 @pytest.fixture
@@ -26,9 +27,7 @@ async def test_client_attach_sends_quest_id_and_title(tmp_path: Path) -> None:
         await server.open()
         tg.start_soon(server.serve)
         await client.connect()
-        with anyio.fail_after(5):
-            while not seen:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: seen)
         assert seen == [Attach("2026-06-15-xyz", "Add dark mode")]
         await client.aclose()
         await server.close()
@@ -46,13 +45,9 @@ async def test_client_receives_broadcast_event(tmp_path: Path) -> None:
         tg.start_soon(server.serve)
         await client.connect()
         tg.start_soon(client.receive_events)
-        with anyio.fail_after(5):
-            while server.attached_count != 1:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: server.attached_count == 1)
         server.broadcast({"type": "step_started", "payload": {"step": "plan"}})
-        with anyio.fail_after(5):
-            while not received:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: received)
         assert received == [{"type": "step_started", "payload": {"step": "plan"}}]
         await client.aclose()
         await server.close()
@@ -74,14 +69,10 @@ async def test_client_receive_events_returns_cleanly_on_server_close(tmp_path: P
         await server.open()
         tg.start_soon(server.serve)
         await client.connect()
-        with anyio.fail_after(5):
-            while server.attached_count != 1:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: server.attached_count == 1)
         tg.start_soon(_receive)
         await server.close()
-        with anyio.fail_after(5):
-            while not finished:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: finished)
         assert finished == [True]
         await client.aclose()
         tg.cancel_scope.cancel()
@@ -96,13 +87,9 @@ async def test_client_aclose_is_seen_as_detach(tmp_path: Path) -> None:
         await server.open()
         tg.start_soon(server.serve)
         await client.connect()
-        with anyio.fail_after(5):
-            while server.attached_count != 1:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: server.attached_count == 1)
         await client.aclose()
-        with anyio.fail_after(5):
-            while server.attached_count != 0:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: server.attached_count == 0)
         assert server.attached_count == 0
         await server.close()
         tg.cancel_scope.cancel()
@@ -117,9 +104,7 @@ async def test_client_input_satisfies_server_gate(tmp_path: Path) -> None:
         await server.open()
         tg.start_soon(server.serve)
         await client.connect()
-        with anyio.fail_after(5):
-            while server.attached_count != 1:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: server.attached_count == 1)
         got: list[str] = []
 
         async def _gate() -> None:
@@ -128,9 +113,7 @@ async def test_client_input_satisfies_server_gate(tmp_path: Path) -> None:
         tg.start_soon(_gate)
         await anyio.sleep(0.05)  # let the gate open (next_input is awaiting)
         await client.send_input("ship it")
-        with anyio.fail_after(5):
-            while not got:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: got)
         assert got == ["ship it"]
         await client.aclose()
         await server.close()
@@ -147,13 +130,9 @@ async def test_client_control_invokes_server_on_control(tmp_path: Path) -> None:
         await server.open()
         tg.start_soon(server.serve)
         await client.connect()
-        with anyio.fail_after(5):
-            while server.attached_count != 1:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: server.attached_count == 1)
         await client.send_control("interrupt")
-        with anyio.fail_after(5):
-            while not actions:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: actions)
         assert actions == ["interrupt"]
         await client.aclose()
         await server.close()
@@ -169,9 +148,7 @@ async def test_client_send_control_rejects_unknown_action(tmp_path: Path) -> Non
         await server.open()
         tg.start_soon(server.serve)
         await client.connect()
-        with anyio.fail_after(5):
-            while server.attached_count != 1:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: server.attached_count == 1)
         with pytest.raises(ValueError, match="unknown control action"):
             await client.send_control("explode")
         await client.aclose()
@@ -189,9 +166,7 @@ async def test_client_attaches_with_lease_flag(tmp_path: Path) -> None:
         await server.open()
         tg.start_soon(server.serve)
         await client.connect()
-        with anyio.fail_after(5):
-            while not seen:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: seen)
         assert seen == [Attach("c1", "T", True)]
         await client.aclose()
         await server.close()
@@ -208,9 +183,7 @@ async def test_send_set_lease_emits_set_lease_frame(tmp_path: Path) -> None:
         await server.open()
         tg.start_soon(server.serve)
         await client.connect()
-        with anyio.fail_after(5):
-            while server.attached_count != 1:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: server.attached_count == 1)
         real_send = client._stream.send  # type: ignore[union-attr]
 
         async def _capture(data: bytes) -> None:
@@ -236,9 +209,7 @@ async def test_concurrent_send_input_and_control_do_not_collide(tmp_path: Path) 
         await server.open()
         tg.start_soon(server.serve)
         await client.connect()
-        with anyio.fail_after(5):
-            while server.attached_count != 1:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: server.attached_count == 1)
 
         real_send = client._stream.send  # type: ignore[union-attr]
         block = anyio.Event()
@@ -265,9 +236,7 @@ async def test_concurrent_send_input_and_control_do_not_collide(tmp_path: Path) 
             send_tg.start_soon(client.send_control, CONTROL_INTERRUPT)
             await anyio.sleep(0.05)
             block.set()
-        with anyio.fail_after(5):
-            while not (inputs and actions):
-                await anyio.sleep(0.02)
+        await wait_until(lambda: inputs and actions)
         assert max_concurrent == 1, "lock must serialize concurrent sends"
         assert inputs == ["reply"]
         assert actions == ["interrupt"]
@@ -285,9 +254,7 @@ async def test_send_skill_request_reaches_the_gate(tmp_path: Path) -> None:
         await server.open()
         tg.start_soon(server.serve)
         await client.connect()
-        with anyio.fail_after(5):
-            while server.attached_count != 1:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: server.attached_count == 1)
         got: list[object] = []
 
         async def _gate() -> None:
@@ -296,9 +263,7 @@ async def test_send_skill_request_reaches_the_gate(tmp_path: Path) -> None:
         tg.start_soon(_gate)
         await anyio.sleep(0.05)
         await client.send_skill_request("refactor", "src/foo.py")
-        with anyio.fail_after(5):
-            while not got:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: got)
         assert got == [SkillRequest("refactor", "src/foo.py")]
         await client.aclose()
         await server.close()

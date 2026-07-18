@@ -9,6 +9,7 @@ from imp.cli.session_controls import SessionControls
 from imp.cli.signals import InterruptCoordinator
 from imp.remote.session.client import SessionClient
 from imp.remote.session.socket_server import SessionSocket
+from tests.async_wait import wait_until
 
 
 @pytest.fixture
@@ -29,23 +30,17 @@ async def test_interrupt_gesture_forwards_interrupt_control_without_detaching(
         await server.open()
         tg.start_soon(server.serve)
         await client.connect()
-        with anyio.fail_after(5):
-            while server.attached_count != 1:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: server.attached_count == 1)
         SessionControls(client, coord)
         await coord.signal_pause()
-        with anyio.fail_after(5):
-            while not actions:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: actions)
         assert actions == ["interrupt"]
         assert server.attached_count == 1
         # signal_pause is first-wins per round; a repeat gesture forwards again only
         # after the round resets (as it does when the run yields to the prompt).
         coord.reset()
         await coord.signal_pause()
-        with anyio.fail_after(5):
-            while len(actions) != 2:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: len(actions) == 2)
         assert actions == ["interrupt", "interrupt"]
         await client.aclose()
         await server.close()
@@ -63,14 +58,10 @@ async def test_abandon_sends_abandon_control(tmp_path: Path) -> None:
         await server.open()
         tg.start_soon(server.serve)
         await client.connect()
-        with anyio.fail_after(5):
-            while server.attached_count != 1:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: server.attached_count == 1)
         controls = SessionControls(client, coord)
         await controls.abandon()
-        with anyio.fail_after(5):
-            while not actions:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: actions)
         assert actions == ["abandon"]
         assert server.attached_count == 1
         await client.aclose()
@@ -91,14 +82,10 @@ async def test_detach_drops_the_socket_and_daemon_sees_a_detach(
         await server.open()
         tg.start_soon(server.serve)
         await client.connect()
-        with anyio.fail_after(5):
-            while server.attached_count != 1:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: server.attached_count == 1)
         controls = SessionControls(client, coord)
         await controls.detach()
-        with anyio.fail_after(5):
-            while server.attached_count != 0:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: server.attached_count == 0)
         assert server.attached_count == 0
         assert detaches == [True]
         await server.close()
@@ -120,16 +107,12 @@ async def test_force_gesture_forwards_interrupt_force_without_detaching(
         await server.open()
         tg.start_soon(server.serve)
         await client.connect()
-        with anyio.fail_after(5):
-            while server.attached_count != 1:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: server.attached_count == 1)
         SessionControls(client, coord)
         # SessionControls registered the force-forward hook; drive it via the
         # receiver dispatch (the second-gesture path enqueues _FORCE_FORWARD).
         await coord._on_received_signal(_FORCE_FORWARD)
-        with anyio.fail_after(5):
-            while not actions:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: actions)
         assert actions == ["interrupt-force"]
         assert server.attached_count == 1   # client stays attached
         await client.aclose()

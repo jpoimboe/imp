@@ -8,6 +8,7 @@ import pytest
 
 from imp.remote.session.relay import SessionRelay
 from imp.remote.session.socket_server import SessionSocket
+from tests.async_wait import wait_until
 
 
 @pytest.fixture
@@ -29,14 +30,10 @@ async def test_relay_forwards_curated_events_with_quest_context(
     async with anyio.create_task_group() as tg:
         tg.start_soon(socket.serve)
         tg.start_soon(relay.run)
-        with anyio.fail_after(5):
-            while socket.attached_count == 0:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: socket.attached_count != 0)
         socket.broadcast(
             {"id": "e1", "type": "agent_result", "payload": {"text": "hi"}})
-        with anyio.fail_after(5):
-            while not sink:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: sink)
         tg.cancel_scope.cancel()
     await socket.close()
     assert sink[0]["id"] == "e1"
@@ -59,16 +56,12 @@ async def test_relay_stays_attached_at_gate_and_drops_lease(tmp_path: Path) -> N
     async with anyio.create_task_group() as tg:
         tg.start_soon(socket.serve)
         tg.start_soon(relay.run)
-        with anyio.fail_after(5):
-            while socket.leased_count == 0:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: socket.leased_count != 0)
         assert socket.attached_count == 1
         socket.broadcast(
             {"type": "awaiting_user_input", "payload": {"prompt": "go?"}})
         # Gate drops the lease within one poll gap.
-        with anyio.fail_after(5):
-            while socket.leased_count != 0:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: socket.leased_count == 0)
         # ...but the relay is still attached (would have been 0 under detach-at-gate).
         assert socket.attached_count == 1
         assert sink[-1]["type"] == "awaiting_user_input"
@@ -93,24 +86,16 @@ async def test_relay_awaiting_then_live_events_reach_sink_and_toggle_lease(
     async with anyio.create_task_group() as tg:
         tg.start_soon(socket.serve)
         tg.start_soon(relay.run)
-        with anyio.fail_after(5):
-            while socket.leased_count == 0:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: socket.leased_count != 0)
         socket.broadcast(
             {"id": "g1", "type": "awaiting_user_input", "payload": {"prompt": "?"}})
-        with anyio.fail_after(5):          # set-lease false crosses the wire
-            while socket.leased_count != 0:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: socket.leased_count == 0)  # set-lease false crosses the wire
         socket.broadcast(
             {"id": "u1", "type": "user_message", "payload": {"text": "reply"}})
-        with anyio.fail_after(5):          # set-lease true crosses the wire
-            while socket.leased_count != 1:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: socket.leased_count == 1)  # set-lease true crosses the wire
         socket.broadcast(
             {"id": "r1", "type": "agent_message", "payload": {"text": "ok"}})
-        with anyio.fail_after(5):
-            while len(sink) < 3:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: len(sink) >= 3)
         tg.cancel_scope.cancel()
     await socket.close()
     assert [s["type"] for s in sink] == [
@@ -131,18 +116,13 @@ async def test_relay_replayed_gate_does_not_touch_lease(tmp_path: Path) -> None:
     async with anyio.create_task_group() as tg:
         tg.start_soon(socket.serve)
         tg.start_soon(relay.run)
-        with anyio.fail_after(5):
-            while socket.leased_count == 0:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: socket.leased_count != 0)
         socket.broadcast({"type": "awaiting_user_input",
                           "payload": {"prompt": "old"}, "_replay": True})
         # Event-driven: wait until the replayed frame reaches the sink (proves the
         # relay ingested it, so _awaiting is finalized), then give the poll loop
         # several gaps in which a wrongly-set _awaiting would drop the lease.
-        with anyio.fail_after(5):
-            while not any(
-                    s.get("payload", {}).get("prompt") == "old" for s in sink):
-                await anyio.sleep(0.02)
+        await wait_until(lambda: any(s.get("payload", {}).get("prompt") == "old" for s in sink))
         await anyio.sleep(0.1)             # several poll gaps for any wrong lease-drop
         assert socket.leased_count == 1    # lease untouched
         assert socket.attached_count == 1
@@ -172,9 +152,7 @@ async def test_relay_leases_when_subscribed(tmp_path: Path) -> None:
     async with anyio.create_task_group() as tg:
         tg.start_soon(socket.serve)
         tg.start_soon(relay.run)
-        with anyio.fail_after(5):
-            while socket.leased_count == 0:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: socket.leased_count != 0)
         assert socket.leased_count == 1
         tg.cancel_scope.cancel()
     await socket.close()
@@ -191,9 +169,7 @@ async def test_relay_is_lease_less_when_not_subscribed(tmp_path: Path) -> None:
     async with anyio.create_task_group() as tg:
         tg.start_soon(socket.serve)
         tg.start_soon(relay.run)
-        with anyio.fail_after(5):
-            while socket.attached_count == 0:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: socket.attached_count != 0)
         assert socket.leased_count == 0   # attached for observation, but not leased
         tg.cancel_scope.cancel()
     await socket.close()
@@ -211,18 +187,12 @@ async def test_relay_set_lease_tracks_subscription_changes(tmp_path: Path) -> No
     async with anyio.create_task_group() as tg:
         tg.start_soon(socket.serve)
         tg.start_soon(relay.run)
-        with anyio.fail_after(5):
-            while socket.attached_count == 0:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: socket.attached_count != 0)
         assert socket.leased_count == 0
         sub["on"] = True                       # subscribe-while-running
-        with anyio.fail_after(5):
-            while socket.leased_count != 1:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: socket.leased_count == 1)
         sub["on"] = False                      # unsubscribe
-        with anyio.fail_after(5):
-            while socket.leased_count != 0:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: socket.leased_count == 0)
         tg.cancel_scope.cancel()
     await socket.close()
 
@@ -243,18 +213,12 @@ async def test_relay_reflects_title_rename_after_start(tmp_path: Path) -> None:
     async with anyio.create_task_group() as tg:
         tg.start_soon(socket.serve)
         tg.start_soon(relay.run)
-        with anyio.fail_after(5):
-            while socket.attached_count == 0:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: socket.attached_count != 0)
         socket.broadcast({"id": "e1", "type": "agent_result", "payload": {}})
-        with anyio.fail_after(5):
-            while len(sink) < 1:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: len(sink) >= 1)
         holder["title"] = "Real Title"     # rename lands mid-session
         socket.broadcast({"id": "e2", "type": "agent_result", "payload": {}})
-        with anyio.fail_after(5):
-            while len(sink) < 2:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: len(sink) >= 2)
         tg.cancel_scope.cancel()
     await socket.close()
     assert sink[0]["quest"]["title"] == ""            # empty at start

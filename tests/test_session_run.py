@@ -21,6 +21,7 @@ from imp.engine.quest import Quest
 from imp.engine.state import State
 from imp.remote.session.discover import session_socket_path
 from imp.remote.session.server import SessionServer
+from tests.async_wait import wait_until
 from tests.conftest import _seed_control
 
 
@@ -100,9 +101,7 @@ async def test_run_session_client_answers_gate_and_returns_completed_rc(
     answered: list[str] = []
 
     async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
-        with anyio.fail_after(10):
-            while server.attached_count == 0:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: server.attached_count != 0)
         on_event({"type": "awaiting_user_input", "payload": {"prompt": "name?"}})
         answered.append(await user_chat_input_fn("name?"))
         return "completed"
@@ -128,9 +127,7 @@ async def test_run_session_client_answers_gate_and_returns_completed_rc(
                     quest, driver=_Driver(), coord=coord, solicit=_solicit)
 
             tg.start_soon(_go)
-            with anyio.fail_after(15):
-                while "rc" not in rc_holder:
-                    await anyio.sleep(0.02)
+            await wait_until(lambda: "rc" in rc_holder)
             tg.cancel_scope.cancel()
 
     assert answered == ["imp"]
@@ -166,9 +163,7 @@ async def test_run_session_client_starts_status_tick_when_provided(
         def install_startup_status(self) -> None: ...
 
     async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
-        with anyio.fail_after(10):
-            while server.attached_count == 0:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: server.attached_count != 0)
         return "completed"
 
     async def _solicit(_prompt: str) -> str:  # pragma: no cover
@@ -187,9 +182,7 @@ async def test_run_session_client_starts_status_tick_when_provided(
                     solicit=_solicit, status=_Status())
 
             tg.start_soon(_go)
-            with anyio.fail_after(15):
-                while "rc" not in rc_holder:
-                    await anyio.sleep(0.02)
+            await wait_until(lambda: "rc" in rc_holder)
             tg.cancel_scope.cancel()
 
     assert tick_started.is_set()

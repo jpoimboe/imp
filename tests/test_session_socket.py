@@ -21,6 +21,7 @@ from imp.remote.session.protocol import (
     parse_event,
 )
 from imp.remote.session.socket_server import SessionSocket, _Client
+from tests.async_wait import wait_until
 
 
 @pytest.fixture
@@ -45,9 +46,7 @@ async def test_attach_handshake_registers_client_and_reports_attach(
         await session.open()
         tg.start_soon(session.serve)
         client = await _attach(sock, "2026-06-15-abc")
-        with anyio.fail_after(5):
-            while session.attached_count != 1:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: session.attached_count == 1)
         assert attached == [Attach("2026-06-15-abc", "T")]
         await client.aclose()
         await session.close()
@@ -79,9 +78,7 @@ async def test_broadcast_reaches_all_concurrent_clients(tmp_path: Path) -> None:
         tg.start_soon(session.serve)
         a = await _attach(sock, "c1")
         b = await _attach(sock, "c2")
-        with anyio.fail_after(5):
-            while session.attached_count != 2:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: session.attached_count == 2)
         session.broadcast({"type": "agent_result", "payload": {"n": 1}})
         for client in (a, b):
             buf = BufferedByteReceiveStream(client)
@@ -107,13 +104,9 @@ async def test_socket_drop_is_treated_as_detach(tmp_path: Path) -> None:
         await session.open()
         tg.start_soon(session.serve)
         client = await _attach(sock, "c1")
-        with anyio.fail_after(5):
-            while session.attached_count != 1:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: session.attached_count == 1)
         await client.aclose()
-        with anyio.fail_after(5):
-            while session.attached_count != 0:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: session.attached_count == 0)
         assert detaches == 1
         await session.close()
         tg.cancel_scope.cancel()
@@ -127,9 +120,7 @@ async def test_open_gate_resolves_to_the_input_sent(tmp_path: Path) -> None:
         await session.open()
         tg.start_soon(session.serve)
         client = await _attach(sock, "c1")
-        with anyio.fail_after(5):
-            while session.attached_count != 1:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: session.attached_count == 1)
         got: list[str] = []
 
         async def _gate() -> None:
@@ -138,9 +129,7 @@ async def test_open_gate_resolves_to_the_input_sent(tmp_path: Path) -> None:
         tg.start_soon(_gate)
         await anyio.sleep(0.05)
         await client.send((encode_input("ship it") + "\n").encode())
-        with anyio.fail_after(5):
-            while not got:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: got)
         assert got == ["ship it"]
         await client.aclose()
         await session.close()
@@ -156,9 +145,7 @@ async def test_first_input_wins_and_loser_is_not_redelivered(tmp_path: Path) -> 
         tg.start_soon(session.serve)
         a = await _attach(sock, "c1")
         b = await _attach(sock, "c2")
-        with anyio.fail_after(5):
-            while session.attached_count != 2:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: session.attached_count == 2)
         won: list[str] = []
 
         async def _gate() -> None:
@@ -169,9 +156,7 @@ async def test_first_input_wins_and_loser_is_not_redelivered(tmp_path: Path) -> 
         async with anyio.create_task_group() as send_tg:
             send_tg.start_soon(a.send, (encode_input("alpha") + "\n").encode())
             send_tg.start_soon(b.send, (encode_input("beta") + "\n").encode())
-        with anyio.fail_after(5):
-            while not won:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: won)
         assert won[0] in {"alpha", "beta"}
 
         leftover: list[str] = []
@@ -193,9 +178,7 @@ async def test_input_outside_a_gate_is_dropped(tmp_path: Path) -> None:
         await session.open()
         tg.start_soon(session.serve)
         client = await _attach(sock, "c1")
-        with anyio.fail_after(5):
-            while session.attached_count != 1:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: session.attached_count == 1)
         await client.send((encode_input("early") + "\n").encode())
         await anyio.sleep(0.1)
 
@@ -207,9 +190,7 @@ async def test_input_outside_a_gate_is_dropped(tmp_path: Path) -> None:
         tg.start_soon(_gate)
         await anyio.sleep(0.05)
         await client.send((encode_input("now") + "\n").encode())
-        with anyio.fail_after(5):
-            while not got:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: got)
         assert got == ["now"]
         await client.aclose()
         await session.close()
@@ -243,24 +224,18 @@ async def test_next_input_delivers_a_latched_pre_gate_reply(tmp_path: Path) -> N
         await session.open()
         tg.start_soon(session.serve)
         client = await _attach(sock, "c1")
-        with anyio.fail_after(5):
-            while session.attached_count != 1:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: session.attached_count == 1)
         session.arm_input()
         await client.send((encode_input("early") + "\n").encode())
         # The reply arrives before the gate opens; wait until it is latched.
-        with anyio.fail_after(5):
-            while session._pending_input is None:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: session._pending_input is not None)
         got: list[str] = []
 
         async def _gate() -> None:
             got.append(await session.next_input())
 
         tg.start_soon(_gate)
-        with anyio.fail_after(5):
-            while not got:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: got)
         assert got == ["early"]
         await client.aclose()
         await session.close()
@@ -277,25 +252,19 @@ async def test_next_input_delivers_a_latched_pre_gate_skill_request(
         await session.open()
         tg.start_soon(session.serve)
         client = await _attach(sock, "c1")
-        with anyio.fail_after(5):
-            while session.attached_count != 1:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: session.attached_count == 1)
         session.arm_input()
         await client.send(
             (encode_skill_request("refactor", "src/foo.py") + "\n").encode())
         # The skill request arrives before the gate opens; wait until it is latched.
-        with anyio.fail_after(5):
-            while session._pending_input is None:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: session._pending_input is not None)
         got: list[object] = []
 
         async def _gate() -> None:
             got.append(await session.next_input())
 
         tg.start_soon(_gate)
-        with anyio.fail_after(5):
-            while not got:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: got)
         assert got == [SkillRequest("refactor", "src/foo.py")]
         await client.aclose()
         await session.close()
@@ -311,13 +280,9 @@ async def test_control_frame_invokes_on_control(tmp_path: Path) -> None:
         await session.open()
         tg.start_soon(session.serve)
         client = await _attach(sock, "c1")
-        with anyio.fail_after(5):
-            while session.attached_count != 1:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: session.attached_count == 1)
         await client.send((encode_control("interrupt") + "\n").encode())
-        with anyio.fail_after(5):
-            while not actions:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: actions)
         assert actions == ["interrupt"]
         await client.aclose()
         await session.close()
@@ -394,9 +359,7 @@ async def test_leased_count_tracks_attach_lease_flag(tmp_path: Path) -> None:
         tg.start_soon(session.serve)
         leased = await _attach_leased(sock, "c1", True)
         unleased = await _attach_leased(sock, "c2", False)
-        with anyio.fail_after(5):
-            while session.attached_count != 2:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: session.attached_count == 2)
         assert session.leased_count == 1   # only the leased attachment counts
         await leased.aclose()
         await unleased.aclose()
@@ -414,18 +377,12 @@ async def test_set_lease_frame_mutates_only_issuing_client(tmp_path: Path) -> No
         tg.start_soon(session.serve)
         a = await _attach_leased(sock, "c1", False)
         b = await _attach_leased(sock, "c2", True)
-        with anyio.fail_after(5):
-            while session.attached_count != 2:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: session.attached_count == 2)
         assert session.leased_count == 1
         await a.send((encode_set_lease(True) + "\n").encode())    # a: False -> True
-        with anyio.fail_after(5):
-            while session.leased_count != 2:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: session.leased_count == 2)
         await b.send((encode_set_lease(False) + "\n").encode())   # b: True -> False
-        with anyio.fail_after(5):
-            while session.leased_count != 1:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: session.leased_count == 1)
         assert len(changes) == 2   # on_lease_change fired once per live lease mutation
         await a.aclose()
         await b.aclose()
@@ -441,9 +398,7 @@ async def test_open_gate_resolves_to_a_skill_request(tmp_path: Path) -> None:
         await session.open()
         tg.start_soon(session.serve)
         client = await _attach(sock, "c1")
-        with anyio.fail_after(5):
-            while session.attached_count != 1:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: session.attached_count == 1)
         got: list[object] = []
 
         async def _gate() -> None:
@@ -453,9 +408,7 @@ async def test_open_gate_resolves_to_a_skill_request(tmp_path: Path) -> None:
         await anyio.sleep(0.05)
         await client.send(
             (encode_skill_request("refactor", "src/foo.py") + "\n").encode())
-        with anyio.fail_after(5):
-            while not got:
-                await anyio.sleep(0.02)
+        await wait_until(lambda: got)
         assert got == [SkillRequest("refactor", "src/foo.py")]
         await client.aclose()
         await session.close()
