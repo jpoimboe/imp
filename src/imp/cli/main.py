@@ -4035,14 +4035,19 @@ def _build_parser() -> argparse.ArgumentParser:
         "events",
         help="Slice and dice a quest's event log (imp events <id>).",
         description=(
-            "Index and filter a quest's event log. Bare: a steps+types index. "
-            "--step <name>: a scoped index for that step's window. "
-            "--type / --agent / <range> / --all: compact event lines "
-            "(#N ordinal, type, [agent], summary). --json for structured "
-            "output. Run imp events search <query> for a case-insensitive "
-            "substring search across event content (tool calls, results, "
-            "reasoning); narrow with --type / --agent."
+            "Index and filter a quest's event log. Bare (imp events <id>): a\n"
+            "steps+types index. --step <name>: a scoped index for that step's\n"
+            "window. --type / --agent / <range> / --all: compact event lines (#N\n"
+            "ordinal, type, [agent], summary). --json for structured output."
         ),
+        epilog=(
+            "subcommands:\n"
+            "  imp events search <query>\n"
+            "      Substring search across event content (tool calls, results,\n"
+            "      reasoning). Narrow with --type / --agent; full flags with:\n"
+            "      imp events search -h"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     p_events.add_argument(
         "token", nargs="?", default=None,

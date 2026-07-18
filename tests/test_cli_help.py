@@ -62,13 +62,26 @@ def test_opening_hint_omits_model() -> None:
 def test_events_help_documents_the_search_sibling(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
 ) -> None:
-    # AC 5: `imp events --help` shows a line documenting `imp events search`,
-    # mentioning --type / --agent. Widen the terminal so argparse does not wrap
-    # the phrase mid-string.
+    # `imp events -h` shows a native-looking subcommands block documenting
+    # `imp events search`, mentioning --type / --agent. Widen the terminal so
+    # argparse does not wrap the phrase mid-string.
     monkeypatch.setenv("COLUMNS", "200")
     out = _help_for(["events", "-h"], capsys)
+    assert "subcommands:" in out
     assert "imp events search <query>" in out
     assert "--type / --agent" in out
+
+
+def test_events_help_moves_search_pointer_out_of_the_description(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
+    # The old "Run imp events search <query> …" sentence is gone from the
+    # description; the description still documents the core behaviors.
+    monkeypatch.setenv("COLUMNS", "200")
+    out = _help_for(["events", "-h"], capsys)
+    assert "Run imp events search" not in out
+    assert "a scoped index" in out
+    assert "--json for structured" in out
 
 
 def test_events_help_no_longer_promises_a_most_recent_default(
