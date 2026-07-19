@@ -3331,3 +3331,41 @@ def test_finish_default_descends_past_owned_blank() -> None:
     v = out.getvalue()
     assert v.endswith("\n")               # end_run(): descend past the owned blank
     assert status._compose is None
+
+
+def test_resume_echo_keeps_blank_before_first_live_agent_prose() -> None:
+    # Inert-resume: the boot echoes the user's typed reply to screen BEFORE the
+    # suppressed replay, arming the trailing-blank flag (_prev_prose=True,
+    # _emitted_any=True). Crossing into the first live agent node must preserve
+    # that blank so the echoed "> ..." line and the agent's first prose line are
+    # spaced like every other conversational turn (exactly one blank between).
+    out = _Pipe()
+    drv = LiveDriver(stream=out, color=False, width=80, status=LiveStatus(out),
+                     suppress_replay=True)
+    # Submit-time echo: rendered NOW, before any replay boundary.
+    drv.echo_submitted_reply("my answer")
+    # Replay the parked history (suppressed), then the boundary.
+    for e in [
+        ev("1", "quest_created", quest_id=1, title="t"),
+        ev("2", "step_started", step="planner", kind="agent", phase="plan",
+           model="m", provider="anthropic"),
+        ev("2b", "awaiting_user_input", agent_id="step:plan/planner"),
+    ]:
+        e["_replay"] = True
+        drv.on_event(e)
+    drv.on_event({"type": "replay_complete"})
+    # Live turn: the daemon's user_message reconciles the echo in place, then the
+    # agent answers. Prose is held until step_completed (F3 dedup hold).
+    drv.on_event(ev("3", "user_message", agent_id="step:plan/planner", role="user",
+                    content=[{"type": "text", "text": "my answer"}]))
+    drv.on_event(ev("4", "agent_message", agent_id="step:plan/planner",
+                    raw={"content": [{"type": "text", "text": "working on it"}]}, usage={}))
+    drv.on_event(ev("5", "step_completed", step="planner", kind="agent",
+                    action={"verb": "continue"}, var_mutations={}))
+    drv.finish()
+    lines = out.getvalue().split("\n")
+    echo_idx = next(i for i, ln in enumerate(lines) if ln == "> my answer")
+    prose_idx = next(i for i, ln in enumerate(lines) if "working on it" in ln)
+    # Exactly one blank line separates the echoed message from the agent prose.
+    assert prose_idx == echo_idx + 2
+    assert lines[echo_idx + 1] == ""

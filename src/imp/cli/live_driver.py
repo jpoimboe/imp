@@ -569,7 +569,8 @@ class LiveDriver:
         if (self._suppressing and self._replayed_node_ids is not None
                 and id(node) not in self._replayed_node_ids):
             self._suppressing = False
-            self._prev_prose = False
+            # _emitted_any is True only from the boot echo — preserve its armed blank.
+            self._prev_prose = self._emitted_any
 
     def _is_final(self, node: Any, *, container: Any) -> bool:
         if isinstance(node, nv.StepNode) and rt.deferred_leaf(node):
