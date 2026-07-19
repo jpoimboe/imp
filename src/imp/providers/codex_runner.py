@@ -196,7 +196,7 @@ class CodexAgentRunner:
         self._cancel = False
         self._ctx: ToolContext | None = None
         self._abort_controller: Any = None
-        # Test seam: overrides the canonical ~/.codex/auth.json path. Read by
+        # Test seam: overrides the canonical codex auth.json path. Read by
         # `_canonical_auth_path()`; declared here so the attribute the tests set
         # is part of the class contract.
         self._canonical_auth_override: Path | None = None
@@ -432,12 +432,16 @@ class CodexAgentRunner:
                 )
 
     def _canonical_auth_path(self) -> Path:
-        """The user's real `~/.codex/auth.json`. Test seam: a runner attribute
-        can override this for the auth fixture tests."""
+        """The canonical codex `auth.json` — honors $CODEX_HOME (fallback
+        ~/.codex), matching codex_token_refresh._canonical_dir so the pre-spawn
+        refresh freshens exactly the file seed_auth copies from. Test seam: a
+        runner attribute overrides this for the auth fixture tests."""
         override = getattr(self, "_canonical_auth_override", None)
         if override is not None:
             return Path(override)
-        return Path.home() / ".codex" / "auth.json"
+        codex_home = os.environ.get("CODEX_HOME")
+        base = Path(codex_home) if codex_home else Path.home() / ".codex"
+        return base / "auth.json"
 
     def _build_client(
         self, *, codex_home: Path, bearer_token: str,
