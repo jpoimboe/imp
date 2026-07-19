@@ -3,6 +3,7 @@ from __future__ import annotations
 from imp.remote.daemon.commands import (
     HELP_TEXT,
     NEW_USAGE,
+    RESTART_CONFIRMATION,
     RESUME_USAGE,
     ROUTE_HINT,
     UNKNOWN_COMMAND,
@@ -13,6 +14,7 @@ from imp.remote.daemon.commands import (
     ListResult,
     Notice,
     Reply,
+    Restart,
     Resume,
     parse,
 )
@@ -166,3 +168,19 @@ def test_help_text_mentions_subscribe_streams_from_now() -> None:
     assert (
         "/subscribe @handle — follow a quest (streams from now; /replay for history)"
         in HELP_TEXT)
+
+
+def test_slash_restart_parses_to_restart() -> None:
+    assert parse("/restart", None, fake_resolve) == Restart()
+
+
+def test_slash_restart_with_trailing_text_still_parses_to_restart() -> None:
+    assert parse("/restart now please", None, fake_resolve) == Restart()
+
+
+def test_help_text_mentions_restart() -> None:
+    assert "/restart — reload the daemon to run the latest code" in HELP_TEXT
+
+
+def test_restart_confirmation_copy() -> None:
+    assert RESTART_CONFIRMATION == "Restarted — now running the latest code."
