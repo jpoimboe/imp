@@ -85,5 +85,5 @@ def test_finalize_prompt_defers_to_backlog_quest() -> None:
     text = (_ASSETS / "agents/finalize.md").read_text()
     assert "group related items into one quest" in text
     assert "hand it to a new backlog quest." in text
-    assert "a later quest's cover-check" in text
+    assert "a later quest's already-tracked check" in text
     assert "backlog Change" not in text

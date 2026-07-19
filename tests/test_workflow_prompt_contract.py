@@ -844,11 +844,11 @@ def test_finalize_auto_resolves_needs_decision_only_under_autonomy(
         assert "pauses** for a human even under" in autonomous
 
 
-def test_finalize_cover_check_two_stage_funnel() -> None:
+def test_finalize_already_tracked_check_two_stage_funnel() -> None:
     text = FINALIZE.read_text()
     low = text.lower()
-    # A dedicated cover-check runs before §2 decides the gate.
-    assert "cover-check" in low
+    # A dedicated already-tracked check runs before §2 decides the gate.
+    assert "already-tracked check" in low
     # Stage 1: candidate finder — imp search -l over active + backlog, excluding self.
     assert "imp search --active --backlog -l" in text
     # The merged-after-fork dimension is present in the raw template, fork-point gated.
@@ -863,14 +863,14 @@ def test_finalize_cover_check_two_stage_funnel() -> None:
     assert "imp show <id>" in text
     assert "imp show <id> spec" in text
     assert "incidental mention" in low
-    # Only verify-family tolerations are cover-eligible; design/spec ones never are.
+    # Only verify-family tolerations are tracker-eligible; design/spec ones never are.
     assert "verify-family toleration" in low
-    assert "never** cover-checked" in low
+    assert "never** checked for an existing tracker" in low
     assert "spec-finalizer" in low
     assert "plan-writer" in low
 
 
-def test_finalize_cover_check_merged_after_dimension_is_fork_point_gated(tmp_path) -> None:
+def test_finalize_tracked_check_merged_after_dimension_is_fork_point_gated(tmp_path) -> None:
     body = FINALIZE.read_text()
     log = JsonlEventLog(tmp_path / "events.jsonl")
 
@@ -894,16 +894,16 @@ def test_finalize_cover_check_merged_after_dimension_is_fork_point_gated(tmp_pat
     assert "imp search --active --backlog --merged-after" not in without_fork
 
 
-def test_finalize_cover_check_fails_safe_to_surface() -> None:
+def test_finalize_already_tracked_check_fails_safe_to_surface() -> None:
     text = FINALIZE.read_text()
     low = text.lower()
     assert "surface, never suppress" in low
     assert "positively confirmed" in low
-    # A confirmed cover rewrites the line to the covered-by terminal marker,
-    # drops it from open_items, and notes the auto-cover.
-    assert "— covered-by <id>" in text
+    # A confirmed tracker rewrites the line to the tracked-by terminal marker,
+    # drops it from open_items, and notes the already-tracked status.
+    assert "— tracked-by <id>" in text
     assert "drop it from `open_items`" in text
-    assert "note the auto-cover" in low
+    assert "already tracked by quest <id>" in low
 
 
 def test_finalize_seed_paths_embed_test_identity() -> None:
@@ -915,11 +915,11 @@ def test_finalize_seed_paths_embed_test_identity() -> None:
     assert "node id / name / signature" in low
 
 
-def test_finalize_covered_by_is_terminal_marker() -> None:
+def test_finalize_tracked_by_is_terminal_marker() -> None:
     text = FINALIZE.read_text()
     low = text.lower()
-    # The terminal-marker note names covered-by alongside the existing gate markers.
-    assert "`covered-by <id>` are all **terminal**" in text
+    # The terminal-marker note names tracked-by alongside the existing gate markers.
+    assert "`tracked-by <id>` are all **terminal**" in text
     assert "seeded <id>" in low
     assert "ignored-at-gate" in low
 
@@ -940,10 +940,10 @@ def test_finalize_walks_fold_into_existing_backlog_quest_disposition() -> None:
     defer = low.index("**defer** — hand it to a new backlog quest")
     ignore = low.index("**ignore** — drop it")
     assert defer < fold < ignore
-    # It reuses the existing terminal covered-by marker and the cross-quest
+    # It reuses the existing terminal tracked-by marker and the cross-quest
     # intent back-link command — no new marker introduced. Scope these to the
     # fold-bullet span so they guard THIS bullet, not §1a's pre-existing use of
     # the same command/marker elsewhere in the prompt.
     fold_bullet = text[fold:ignore]
     assert "--append-intent" in fold_bullet
-    assert "— covered-by <id>" in fold_bullet
+    assert "— tracked-by <id>" in fold_bullet

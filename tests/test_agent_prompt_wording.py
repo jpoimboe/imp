@@ -338,10 +338,10 @@ def test_deferred_sweep_protects_spec_cited_untagged_items() -> None:
     assert "close it `— fixed <sha>`" in body
 
 
-def test_finalize_cover_check_marks_covered_by() -> None:
+def test_finalize_already_tracked_check_marks_tracked_by() -> None:
     body = _agent_prompt("finalize")
     low = body.lower()
-    # The cover-check consumes imp search's terse -l list across active + backlog.
+    # The already-tracked check consumes imp search's terse -l list across active + backlog.
     assert "imp search --active --backlog -l" in body
     # §1a also searches the merged-after-fork archive subset, fork-point gated.
     assert (
@@ -353,8 +353,8 @@ def test_finalize_cover_check_marks_covered_by() -> None:
     assert "{% if quest.orig_base_head %}" in body
     # The §1a framing names completed quests alongside active and backlog.
     assert "active, backlog, or completed" in body
-    # A confirmed cover writes the covered-by terminal marker.
-    assert "— covered-by <id>" in body
+    # A confirmed tracker writes the tracked-by terminal marker.
+    assert "— tracked-by <id>" in body
     # Fail-safe: only a positively confirmed tracker suppresses the human ask.
     assert "surface, never suppress" in low
     assert "positively confirmed" in low
