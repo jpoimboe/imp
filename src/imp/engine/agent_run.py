@@ -333,6 +333,7 @@ async def _resolve_wait_reply(
     pending_reply: str | None = None,
     last_agent_message: str = "",
     halt_writer: Callable[[], None] | None = None,
+    halt_clearer: Callable[[], None] | None = None,
 ) -> tuple[str | SkillReply, str]:
     """Satisfy a bare-turn-end / AWAITING_USER yield on resume, returning
     (reply, source) where source is
@@ -357,30 +358,39 @@ async def _resolve_wait_reply(
     import inspect
     joined = _join_pending_interjects(coordinator)
     if joined is not None:
-        return joined, "interject"
-    if pending_reply is not None:
-        return pending_reply, "pending_reply"
-    if resume_should_continue:
+        reply: str | SkillReply
+        reply, source = joined, "interject"
+    elif pending_reply is not None:
+        reply, source = pending_reply, "pending_reply"
+    elif resume_should_continue:
+        # Internal continuation, not a human reply: a fresh-process resume already
+        # cleared halt on entry, so leave the flag untouched.
         return _CONTINUATION_NUDGE, "nudge"
-    if halt_writer is not None:
-        halt_writer()
-    elog.append(agent_id=agent_id, type="awaiting_user_input",
-                payload={"steer_hint": "", "last_agent_message": last_agent_message,
-                         "interrupt": False})
-    raw = user_input_fn("")
-    if inspect.isawaitable(raw):
-        # Resume-side blocked solicit (all four providers route here): freeze the
-        # inactivity watchdog for the duration of the await. The finally ALWAYS
-        # restores it. Guard for legacy/test coordinators (None) with no
-        # watchdog to suspend.
-        if coordinator is not None:
-            coordinator.begin_solicit_watchdog()
-        try:
-            raw = await raw
-        finally:
+    else:
+        if halt_writer is not None:
+            halt_writer()
+        elog.append(agent_id=agent_id, type="awaiting_user_input",
+                    payload={"steer_hint": "", "last_agent_message": last_agent_message,
+                             "interrupt": False})
+        raw = user_input_fn("")
+        if inspect.isawaitable(raw):
+            # Resume-side blocked solicit (all four providers route here): freeze the
+            # inactivity watchdog for the duration of the await. The finally ALWAYS
+            # restores it. Guard for legacy/test coordinators (None) with no
+            # watchdog to suspend.
             if coordinator is not None:
-                coordinator.end_solicit_watchdog()
-    return raw, "solicited"
+                coordinator.begin_solicit_watchdog()
+            try:
+                raw = await raw
+            finally:
+                if coordinator is not None:
+                    coordinator.end_solicit_watchdog()
+        reply, source = raw, "solicited"
+    # A reply resumes the agent: drop any "waiting" halt so a live session that is
+    # taking turns again reads running, not waiting.
+    if halt_clearer is not None:
+        halt_clearer()
+    return reply, source
 
 
 def drain_all_interjects_at_resume(
