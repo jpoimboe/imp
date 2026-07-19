@@ -21,6 +21,7 @@ from imp.remote.daemon.commands import (
     Notice,
     Replay,
     Reply,
+    Restart,
     Subscribe,
     Unsubscribe,
 )
@@ -406,3 +407,14 @@ async def test_reply_load_error_keeps_unknown_notice_and_logs(
     assert control.replies == [("aaaaaa", "go")]
     # The swallowed cause is now logged with a traceback.
     assert any(r.exc_info for r in caplog.records)
+
+
+@pytest.mark.anyio
+async def test_restart_invokes_request_restart_and_enqueues_nothing() -> None:
+    calls: list[str] = []
+    responses: queue.Queue = queue.Queue()
+    await _handle_command(
+        Restart(), FakeControl(), responses,
+        request_restart=lambda: calls.append("restart"))
+    assert calls == ["restart"]
+    assert responses.empty()

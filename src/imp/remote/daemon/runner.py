@@ -24,6 +24,7 @@ from imp.remote.daemon.commands import (
     ALERTS_OFF_REPLY,
     ALERTS_ON_REPLY,
     HELP_TEXT,
+    RESTART_CONFIRMATION,
     ROUTE_HINT,
     Alerts,
     Command,
@@ -34,6 +35,7 @@ from imp.remote.daemon.commands import (
     Notice,
     Replay,
     Reply,
+    Restart,
     Response,
     Resume,
     Subscribe,
@@ -281,8 +283,10 @@ def _sender_worker(
 async def _handle_command(
     command: Command, control: ControlPlane, responses: queue.Queue[Response],
     alert_all: AlertAll | None = None,
+    request_restart: Callable[[], None] | None = None,
 ) -> None:
     alert_all = alert_all if alert_all is not None else AlertAll()
+    request_restart = request_restart if request_restart is not None else (lambda: None)
     if isinstance(command, Reply):
         handle = handle_for(command.quest_id)
         try:
@@ -367,6 +371,8 @@ async def _handle_command(
             responses.put(Notice(ALERTS_OFF_REPLY))
     elif isinstance(command, Help):
         responses.put(Notice(HELP_TEXT))
+    elif isinstance(command, Restart):
+        request_restart()
     elif isinstance(command, Notice):
         responses.put(command)
 
@@ -374,6 +380,7 @@ async def _handle_command(
 async def _dispatch_inbound(
     inbound: queue.Queue[Command], control: ControlPlane,
     responses: queue.Queue[Response], stop: threading.Event, alert_all: AlertAll,
+    request_restart: Callable[[], None] | None = None,
 ) -> None:
     def _get() -> Command | None:
         while not stop.is_set():
@@ -389,7 +396,8 @@ async def _dispatch_inbound(
             return
         _log.info("routing command: %r", command)
         try:
-            await _handle_command(command, control, responses, alert_all)
+            await _handle_command(
+                command, control, responses, alert_all, request_restart)
         except Exception:
             _log.warning("command failed: %r", command, exc_info=True)
 
