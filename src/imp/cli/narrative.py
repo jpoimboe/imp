@@ -2069,6 +2069,15 @@ def _h_warning(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any])
     self._append(ErrorNode(message=message, is_warning=True))
 
 
+def _h_sandbox_overlay_unavailable(
+    self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]
+) -> None:
+    # Non-terminal (same invariant as _h_warning): surface + tally, do not flush the burst.
+    message = str(p.get("reason", "?"))
+    self._warnings.append(message)
+    self._append(ErrorNode(message=message, is_warning=True))
+
+
 def _fmt_hm(seconds: float) -> str:
     """`2h 13m` / `45m` compact duration; hours segment shown only when non-zero."""
     total_minutes = int(seconds // 60)
@@ -2160,6 +2169,7 @@ def _h_max_tokens_truncated(
 NarrativeBuilder._HANDLERS["error"] = _h_error
 NarrativeBuilder._HANDLERS["runner_warning"] = _h_runner_warning
 NarrativeBuilder._HANDLERS["warning"] = _h_warning
+NarrativeBuilder._HANDLERS["sandbox_overlay_unavailable"] = _h_sandbox_overlay_unavailable
 NarrativeBuilder._HANDLERS["agent_retry"] = _h_agent_retry
 NarrativeBuilder._HANDLERS["output_validation_nudge"] = _h_output_validation_nudge
 NarrativeBuilder._HANDLERS["script_blocked"] = _h_script_blocked
