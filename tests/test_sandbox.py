@@ -1,6 +1,7 @@
 """Always-on sandbox tests — no bwrap needed (pure argv + policy resolution)."""
 from __future__ import annotations
 
+import dataclasses
 import types as _types
 from pathlib import Path
 
@@ -1673,3 +1674,30 @@ def test_resolve_policy_prepends_shim_dir_when_quest_dir_given(tmp_path):
     path = dict(pol.setenv)["PATH"]
     assert path.startswith(str(qd / "imp-shim") + os.pathsep)
     assert path.endswith("/usr/bin")
+
+
+def test_worktree_swap_flips_exposure_to_new_worktree(tmp_path):
+    # Go-live refreshes the policy with a single dataclasses.replace of `worktree`.
+    # Swapping the draft's control-root worktree for the nested .imp/worktrees/<id>
+    # path must flip exposure from draft-shaped to live-shaped.
+    control, wt = _layout(tmp_path)                 # wt = control/.imp/worktrees/abc
+    quest_dir = control / ".imp" / "quests" / "abc"
+    quest_dir.mkdir(parents=True)
+    draft = resolve_policy(
+        worktree=control, control_root=control, quest_id="abc",
+        cfg=SandboxConfig(), engine_env_result={}, environ={},
+        available=True, quest_dir=quest_dir)
+    live = dataclasses.replace(draft, worktree=str(wt))
+
+    wt_file = wt / "src" / "app.py"
+    # (a) a path inside the new worktree: denied under draft, allowed under live.
+    assert draft.allows_read(wt_file) is False
+    assert draft.allows_write(wt_file) is False
+    assert live.allows_read(wt_file) is True
+    assert live.allows_write(wt_file) is True
+    # (b) the quest home stays allowed after the swap.
+    assert live.allows_read(quest_dir / "artifacts" / "spec.md") is True
+    assert live.allows_write(quest_dir / "artifacts" / "spec.md") is True
+    # (c) a sibling elsewhere under .imp stays masked.
+    sibling = control / ".imp" / "worktrees" / "other" / "f.py"
+    assert live.allows_read(sibling) is False

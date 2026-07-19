@@ -6,6 +6,14 @@ import pytest
 from imp.agents.tools import get_registry
 from imp.agents.tools.context import ToolContext
 from imp.engine.quest import Quest
+from imp.engine.sandbox import (
+    HomeLayer,
+    SandboxConfig,
+    SandboxPolicy,
+    build_sandbox_argv,
+    prune_missing_masks,
+    resolve_policy,
+)
 from imp.engine.state import State
 from tests.conftest import _git, _seed_control
 
@@ -88,3 +96,86 @@ def test_tool_description_mentions_dependency_wait() -> None:
     assert "an attended wait is interruptible (Ctrl-D pauses; a later resume retries)" in desc
     assert "a background run waits on its own until the dependency lands" in desc
     assert desc.rstrip().endswith("Idempotent — a no-op once the worktree already exists.")
+
+
+def _active_policy(worktree: str, **over: object) -> SandboxPolicy:
+    base = dict(
+        active=True, worktree=worktree, git_common_dir="/ctl/.git",
+        git_ro_remask=(), writable_caches=(), extra_readable=(), extra_writable=(),
+        secret_dirs=(), secret_files=(), setenv=(), network=True, note="",
+    )
+    base.update(over)
+    return SandboxPolicy(**base)
+
+
+@pytest.mark.anyio
+async def test_tool_refreshes_sandbox_policy_worktree(tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+    ch = Quest.create_draft(tmp_path, title="X", quest_id="t5", base_branch="main")
+    ctx = _ctx(ch, State.load(ch.state_dir))
+    layer = HomeLayer(home="/home/u")
+    ctx.base_sandbox_policy = _active_policy(
+        str(tmp_path), home_layer=layer, readonly_overlays=("/ro/sub",))
+    tool = get_registry()["create_and_enter_worktree"]
+    await tool.async_invoke(ctx, {})
+    wt = tmp_path / ".imp" / "worktrees" / "t5"
+    assert ctx.base_sandbox_policy.worktree == str(wt)          # repointed at the fork
+    assert ctx.base_sandbox_policy.home_layer is layer          # carried over unchanged
+    assert ctx.base_sandbox_policy.readonly_overlays == ("/ro/sub",)
+
+
+@pytest.mark.anyio
+async def test_tool_policy_refresh_noop_when_unsandboxed(tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+    ch = Quest.create_draft(tmp_path, title="X", quest_id="t6", base_branch="main")
+    ctx = _ctx(ch, State.load(ch.state_dir))
+    assert ctx.base_sandbox_policy is None
+    tool = get_registry()["create_and_enter_worktree"]
+    await tool.async_invoke(ctx, {})                            # must not raise
+    assert ctx.base_sandbox_policy is None
+
+
+@pytest.mark.anyio
+async def test_read_file_succeeds_in_new_worktree_after_go_live(tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+    ch = Quest.create_draft(tmp_path, title="X", quest_id="t7", base_branch="main")
+    ctx = _ctx(ch, State.load(ch.state_dir))
+    ctx.base_sandbox_policy = resolve_policy(
+        worktree=tmp_path, control_root=tmp_path, quest_id="t7",
+        cfg=SandboxConfig(), engine_env_result={}, environ={},
+        available=True, quest_dir=ch.quest_dir)
+    stale = ctx.base_sandbox_policy
+    reg = get_registry()
+    await reg["create_and_enter_worktree"].async_invoke(ctx, {})
+    wt = tmp_path / ".imp" / "worktrees" / "t7"
+    (wt / "app.py").write_text("hello from worktree\n")
+    # Pre-fix the stale control-root policy would have denied this read.
+    assert stale.allows_read(wt / "app.py") is False
+    out = await reg["read_file"].async_invoke(ctx, {"path": "app.py"})
+    assert "hello from worktree" in out
+
+
+@pytest.mark.anyio
+async def test_bash_argv_chdirs_and_reexposes_new_worktree(tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+    ch = Quest.create_draft(tmp_path, title="X", quest_id="t8", base_branch="main")
+    ctx = _ctx(ch, State.load(ch.state_dir))
+    ctx.base_sandbox_policy = resolve_policy(
+        worktree=tmp_path, control_root=tmp_path, quest_id="t8",
+        cfg=SandboxConfig(), engine_env_result={}, environ={},
+        available=True, quest_dir=ch.quest_dir)
+    await get_registry()["create_and_enter_worktree"].async_invoke(ctx, {})
+    wt = tmp_path / ".imp" / "worktrees" / "t8"
+    argv = build_sandbox_argv(
+        "cat app.py", cwd=str(ctx.project_root),
+        policy=prune_missing_masks(ctx.sandbox_policy), engine_env={})
+    # The shell cwd (ctx.project_root) is the new worktree...
+    ci = argv.index("--chdir")
+    assert argv[ci + 1] == str(wt)
+    # ...and the nested worktree is re-exposed AFTER the .imp tmpfs mask, so files
+    # under it are readable. A stale control-root policy emits no such re-bind.
+    control_imp = str(tmp_path / ".imp")
+    ti = argv.index(control_imp)                    # the --tmpfs <.imp> operand
+    binds = [i for i in range(len(argv) - 2)
+             if argv[i] == "--bind" and argv[i + 1] == str(wt) and argv[i + 2] == str(wt)]
+    assert binds and binds[0] > ti

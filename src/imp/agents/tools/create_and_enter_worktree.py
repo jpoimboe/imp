@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import dataclasses
 import json
 from typing import Any
 
@@ -66,5 +67,8 @@ async def create_and_enter_worktree(ctx: Any) -> str:
         await _await_dependencies(ctx, quest)
     head_changed = quest.materialize()
     ctx.project_root = quest.project_root
+    if ctx.base_sandbox_policy is not None:
+        ctx.base_sandbox_policy = dataclasses.replace(
+            ctx.base_sandbox_policy, worktree=str(quest.project_root))
     return (f"materialized worktree at {quest.project_root}; "
             f"head_changed={'true' if head_changed else 'false'}")
