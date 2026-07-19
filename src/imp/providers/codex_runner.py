@@ -449,7 +449,6 @@ class CodexAgentRunner:
                 teardown_codex_home(
                     codex_home=codex_home, mode=auth_mode,
                     canonical_path=canonical_auth,
-                    lock_path=canonical_auth.parent / ".imp-auth.lock",
                 )
 
     def _canonical_auth_path(self) -> Path:
