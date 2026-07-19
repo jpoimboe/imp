@@ -16,6 +16,7 @@ import secrets
 import shutil
 import subprocess
 import tempfile
+import time
 from collections.abc import AsyncGenerator, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -66,6 +67,10 @@ from imp.providers.codex_mcp import (
     ServerHandle,
     start_impty_server,
     start_server,
+)
+from imp.providers.codex_token_refresh import (
+    FAILED_INVALID_GRANT,
+    refresh_canonical_token,
 )
 
 _logger = logging.getLogger(__name__)
@@ -181,6 +186,19 @@ def restore_to_snapshot(cwd: Path, snap: EntrySnapshot) -> None:
 
 
 # ── CodexAgentRunner ──────────────────────────────────────────────────────────
+
+
+def _pre_spawn_token_refresh(elog: Any, aid: str) -> None:
+    """Refresh the canonical codex token before seed_auth; raise AuthError on a dead token."""
+    outcome = refresh_canonical_token(int(time.time() * 1000))
+    payload: dict[str, Any] = {"outcome": outcome.outcome}
+    if outcome.expires_at is not None:
+        payload["expires_at"] = outcome.expires_at
+    elog.append(agent_id=aid, type="token_refresh", payload=payload)
+    if outcome.outcome == FAILED_INVALID_GRANT:
+        raise perr.AuthError(
+            "codex: OAuth refresh token is dead; re-authentication required")
+
 
 class CodexAgentRunner:
     """Drives `codex` via `openai_codex_sdk` (run() filled in by later tasks)."""
@@ -379,6 +397,9 @@ class CodexAgentRunner:
                 impty_bearer_env_var=(
                     "IMP_IMPTY_TOKEN" if impty_handle is not None else None),
             )
+            if auth_mode == "chatgpt":
+                # Refresh canonical auth.json before seed_auth; a dead token raises AuthError.
+                _pre_spawn_token_refresh(elog, aid)
             seed_auth(mode=auth_mode, canonical_path=canonical_auth,
                       codex_home=codex_home, env=os.environ)
 
