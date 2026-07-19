@@ -92,9 +92,9 @@ def test_format_status_color_running():
     assert "\x1b[1mrunning\x1b[0m" in line
 
 
-def test_waiting_status_renders_wordmark():
+def test_waiting_status_renders_bold():
     line = format_quest_line(**_row(status="waiting"), color=True)
-    assert "\x1b[33mwaiting\x1b[0m" in line
+    assert "\x1b[1mwaiting\x1b[0m" in line
 
 
 def test_error_status_renders_red():
@@ -299,7 +299,7 @@ def test_header_line_honors_status_width():
 def test_status_colors_are_meaning_based() -> None:
     from imp.cli.quest_row import STATUS_COLORS
     assert STATUS_COLORS["running"] == ("bold",)
-    assert STATUS_COLORS["waiting"] == ("wordmark",)
+    assert STATUS_COLORS["waiting"] == ("bold",)
     assert STATUS_COLORS["error"] == ("red",)
     assert STATUS_COLORS["merge_blocked"] == ("wordmark",)
     assert "new" not in STATUS_COLORS       # plain, at rest

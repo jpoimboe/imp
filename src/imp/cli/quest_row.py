@@ -72,11 +72,11 @@ NAME_CAP = 70   # cap a long name/intent's pull on the shared width so STATUS ke
 # terminal width remains after this.
 _PREFIX_W = ID_W + STATUS_W + AGE_W + 6
 
-# Meaning-based palette keyed by the resolved word: bold=working, wordmark=attention,
-# red=broke, else plain.
+# Meaning-based palette keyed by the resolved word: bold=running/waiting,
+# wordmark=merge-blocked, red=broke, else plain.
 STATUS_COLORS: dict[str, tuple[str, ...]] = {
     "running": ("bold",),
-    "waiting": ("wordmark",),
+    "waiting": ("bold",),
     "error": ("red",),
     "merge_blocked": ("wordmark",),
 }
