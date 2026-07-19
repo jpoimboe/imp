@@ -150,7 +150,14 @@ def _probe_overlay_at_base() -> bool:
 _OVERLAY_OK = _probe_overlay_at_base()
 requires_overlay = pytest.mark.skipif(
     not _OVERLAY_OK,
-    reason="unprivileged overlayfs unavailable at a non-/tmp base on this host")
+    reason="unprivileged overlayfs probe at /var/tmp failed (read-only base or "
+           "stacked overlay under a nested sandbox)")
+
+
+def test_requires_overlay_skip_reason_is_verbatim() -> None:
+    assert requires_overlay.kwargs["reason"] == (
+        "unprivileged overlayfs probe at /var/tmp failed (read-only base or "
+        "stacked overlay under a nested sandbox)")
 
 
 def _make_overlay_root() -> Path:
