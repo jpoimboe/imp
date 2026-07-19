@@ -20,7 +20,7 @@ import sys
 import time
 from pathlib import Path
 
-from tests.test_mid_step_resume_live import _WORKTREE_SRC, _seed_project
+from tests.conftest import _WORKTREE_SRC, _seed_project
 
 
 def test_startup_sigint_exits_130_never_minus_2(tmp_path: Path) -> None:
