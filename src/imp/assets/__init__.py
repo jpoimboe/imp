@@ -6,6 +6,7 @@ both editable installs and wheel installs.
 
 from __future__ import annotations
 
+import re
 from importlib.resources import files
 from pathlib import Path
 
@@ -14,6 +15,17 @@ def is_bundled_workflow(name: str) -> bool:
     """True iff imp bundles a workflow named `name` (the 'managed' predicate)."""
     resource = files("imp.assets").joinpath("workflows", name)
     return Path(str(resource)).is_dir()
+
+
+def engine_prompt(name: str) -> str:
+    """Read one engine-owned universal prompt block from the bundled
+    engine-prompts/ asset dir, dropping its leading {# … #} doc comment and the
+    surrounding newlines so the value is byte-identical to the former inline
+    literal."""
+    text = (files("imp") / "assets" / "engine-prompts" / name).read_text(
+        encoding="utf-8")
+    text = re.sub(r"\A\{#.*?#\}", "", text, count=1, flags=re.DOTALL)
+    return text.strip("\n")
 
 
 def bundled_skills_dir() -> Path:
