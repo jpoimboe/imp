@@ -72,15 +72,19 @@ NAME_CAP = 60   # cap a long name/intent's pull on the shared width so STATUS ke
 # terminal width remains after this.
 _PREFIX_W = ID_W + STATUS_W + AGE_W + 6
 
+# Meaning-based palette keyed by the resolved word: bold=working, wordmark=attention,
+# red=broke, else plain.
 STATUS_COLORS: dict[str, tuple[str, ...]] = {
-    "running": ("green",),
-    "merged": ("green",),
-    "new": ("cyan",),
-    "paused": ("cyan",),
+    "running": ("bold",),
+    "waiting": ("wordmark",),
+    "error": ("red",),
     "merge_blocked": ("wordmark",),
-    "draft": ("dim",),
-    "backlog": ("dim",),
 }
+
+
+def display_word(resolved: str) -> str:
+    """Two words for `merge_blocked`; else identity (color/membership key on the underscore)."""
+    return "merge blocked" if resolved == "merge_blocked" else resolved
 
 
 def _truncate(text: str, width: int) -> str:
@@ -172,7 +176,8 @@ def format_quest_line(*, quest_id: str, title: str, status: str, step: str,
                        status_width: int = STATUS_W, dim: bool = False,
                        intent: str | None = None) -> str:
     id_pad = f"{quest_id:<{ID_W}}"
-    visible = _status_segment(status, step, step_label,
+    shown = display_word(status)
+    visible = _status_segment(shown, step, step_label,
                               phase_label=phase_label, status_width=status_width)
     status_pad = f"{visible:<{status_width}}"
     age_text = relative_age(last_iso, now=now)   # final column, emitted bare
@@ -192,8 +197,8 @@ def format_quest_line(*, quest_id: str, title: str, status: str, step: str,
     codes = STATUS_COLORS.get(status, ())
     pad = " " * (status_width - len(visible))
     if color:
-        suffix = visible[len(status):]            # " (label)" or ""
-        status_word = pal.ansi(status, *codes, enabled=True) if codes else status
+        suffix = visible[len(shown):]             # " (label)" or ""
+        status_word = pal.ansi(shown, *codes, enabled=True) if codes else shown
         suffix_cell = pal.ansi(suffix, "dim", enabled=True) if suffix else ""
         status_cell = status_word + suffix_cell + pad
     else:

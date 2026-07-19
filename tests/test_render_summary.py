@@ -210,7 +210,7 @@ def test_open_trailing_step_on_paused_change_reflects_status():
 def test_header_status_color_and_workflow_magenta():
     out = render_summary([], header=_HDR, color=True, width=80)
     assert "\x1b[1m\x1b[35mfeature\x1b[0m" in out[0]   # workflow bold magenta
-    assert "\x1b[32mmerged\x1b[0m" in out[0]           # merged status green
+    assert "merged" in out[0]                          # merged status plain (no color)
 
 
 def test_summary_total_is_first_to_last_timestamp():

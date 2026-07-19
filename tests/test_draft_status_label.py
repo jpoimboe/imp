@@ -67,9 +67,6 @@ def test_parked_draft_is_active_and_resumable(tmp_path: Path) -> None:
     assert "drfres" in {r[0] for r in m._resumable_rows(tmp_path)}    # resumable
 
 
-def test_draft_status_has_a_color() -> None:
-    assert "draft" in quest_row.STATUS_COLORS
-
 
 def test_parked_draft_renders_real_status_word(tmp_path: Path) -> None:
     from datetime import UTC, datetime

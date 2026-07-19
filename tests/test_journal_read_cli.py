@@ -492,7 +492,7 @@ def test_status_default_inflight_columns_and_color(
     assert "NAME" in plain_header
     assert "STATUS" in plain_header
     assert "Add version flag" in out
-    assert "\x1b[36mnew\x1b[0m" in out
+    assert "new" in out
     # id leads the row
     assert lines[1].startswith("yaitd7")
 
