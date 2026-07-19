@@ -90,14 +90,34 @@ _LONG_POLL_TIMEOUT = 25   # seconds; getUpdates long-poll window
 _HTTP_TIMEOUT = 35        # seconds; urlopen ceiling, must exceed the long-poll
 
 TELEGRAM_MAX_TEXT = 4096
-_TRUNCATION_MARKER = "\n[truncated]"
 
 
-def clamp_text(text: str) -> str:
+def split_text(text: str) -> list[str]:
+    """Split text into <=TELEGRAM_MAX_TEXT chunks on line boundaries; "".join == text."""
     if len(text) <= TELEGRAM_MAX_TEXT:
-        return text
-    keep = TELEGRAM_MAX_TEXT - len(_TRUNCATION_MARKER)
-    return text[:keep] + _TRUNCATION_MARKER
+        return [text]
+    chunks: list[str] = []
+    current = ""
+    for line in text.splitlines(keepends=True):
+        if len(line) > TELEGRAM_MAX_TEXT:
+            if current:
+                chunks.append(current)
+                current = ""
+            for i in range(0, len(line), TELEGRAM_MAX_TEXT):
+                piece = line[i:i + TELEGRAM_MAX_TEXT]
+                if len(piece) == TELEGRAM_MAX_TEXT:
+                    chunks.append(piece)
+                else:
+                    current = piece
+            continue
+        if len(current) + len(line) > TELEGRAM_MAX_TEXT:
+            chunks.append(current)
+            current = line
+        else:
+            current += line
+    if current:
+        chunks.append(current)
+    return chunks
 
 
 def format_time_of_day(iso: str) -> str:

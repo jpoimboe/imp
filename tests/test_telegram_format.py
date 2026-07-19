@@ -55,20 +55,6 @@ def test_format_loud_body_is_label_only_no_title_bracket() -> None:
     assert imp_telegram.format_event_message(event) == "done"
 
 
-def test_clamp_text_leaves_short_text_unchanged() -> None:
-    from imp.remote.drivers.telegram import TELEGRAM_MAX_TEXT, clamp_text
-    assert TELEGRAM_MAX_TEXT == 4096
-    assert clamp_text("hello") == "hello"
-
-
-def test_clamp_text_truncates_overflow_and_marks_it() -> None:
-    from imp.remote.drivers.telegram import TELEGRAM_MAX_TEXT, clamp_text
-    out = clamp_text("a" * 5000)
-    assert len(out) == TELEGRAM_MAX_TEXT          # never exceeds the protocol limit
-    assert out.startswith("aaa")                  # the head of the original survives
-    assert out.endswith("[truncated]")            # the cut is visible to the reader
-
-
 def test_format_loud_body_is_label_only_even_with_empty_change_block() -> None:
     event = {"type": "quest_merged", "quest": {}, "payload": {}}
     assert imp_telegram.format_event_message(event) == "done"
@@ -83,10 +69,66 @@ def test_format_uses_payload_message_key_as_body() -> None:
     assert imp_telegram.format_event_message(event) == "done\nwrapped up"
 
 
-def test_clamp_text_passes_exactly_max_length_unchanged() -> None:
-    from imp.remote.drivers.telegram import TELEGRAM_MAX_TEXT, clamp_text
+def test_split_text_short_returns_single_chunk() -> None:
+    from imp.remote.drivers.telegram import split_text
+    assert split_text("hello") == ["hello"]
+
+
+def test_split_text_empty_returns_single_empty_chunk() -> None:
+    from imp.remote.drivers.telegram import split_text
+    assert split_text("") == [""]
+
+
+def test_split_text_exactly_max_is_single_chunk() -> None:
+    from imp.remote.drivers.telegram import TELEGRAM_MAX_TEXT, split_text
     text = "x" * TELEGRAM_MAX_TEXT
-    assert clamp_text(text) == text
+    assert split_text(text) == [text]
+
+
+def test_split_text_over_limit_splits_and_preserves_everything() -> None:
+    from imp.remote.drivers.telegram import TELEGRAM_MAX_TEXT, split_text
+    text = "a" * 5000
+    chunks = split_text(text)
+    assert len(chunks) == 2
+    assert all(len(c) <= TELEGRAM_MAX_TEXT for c in chunks)
+    assert "".join(chunks) == text
+
+
+def test_split_text_hard_splits_single_unbroken_long_line() -> None:
+    from imp.remote.drivers.telegram import TELEGRAM_MAX_TEXT, split_text
+    # A single 5000-char line with no newline must still be hard-split so no
+    # chunk exceeds the protocol limit; the first chunk is a full 4096.
+    text = "z" * 5000
+    chunks = split_text(text)
+    assert len(chunks) == 2
+    assert len(chunks[0]) == TELEGRAM_MAX_TEXT
+    assert len(chunks[1]) == 5000 - TELEGRAM_MAX_TEXT
+    assert "".join(chunks) == text
+
+
+def test_split_text_packs_on_line_boundaries_without_mid_line_cut() -> None:
+    from imp.remote.drivers.telegram import TELEGRAM_MAX_TEXT, split_text
+    # 60 lines of 100 chars + '\n' = 6060 chars > 4096, forcing >1 chunk. Each
+    # line fits the limit, so every break lands on a line boundary: no chunk cuts
+    # mid-line, i.e. each non-final chunk ends with '\n'.
+    text = "".join(f"{'x' * 100}\n" for _ in range(60))
+    chunks = split_text(text)
+    assert len(chunks) >= 2
+    assert all(len(c) <= TELEGRAM_MAX_TEXT for c in chunks)
+    assert "".join(chunks) == text
+    for c in chunks[:-1]:
+        assert c.endswith("\n")
+
+
+def test_split_text_mixed_short_and_overlong_lines() -> None:
+    from imp.remote.drivers.telegram import TELEGRAM_MAX_TEXT, split_text
+    text = "hello\n" + "z" * 5000 + "\nworld"
+    chunks = split_text(text)
+    assert all(len(c) <= TELEGRAM_MAX_TEXT for c in chunks)
+    assert "".join(chunks) == text
+    assert chunks[0] == "hello\n"
+    assert chunks[1] == "z" * TELEGRAM_MAX_TEXT
+    assert chunks[2] == "z" * (5000 - TELEGRAM_MAX_TEXT) + "\nworld"
 
 
 @pytest.fixture
