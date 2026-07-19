@@ -83,13 +83,8 @@ async def run_session_client(
             title.reset()
         tg.cancel_scope.cancel()
     if startup_failed and infer_session_result(quest) is not RunResult.COMPLETED:
-        if startup_error is not None:
-            print(f"imp: {startup_error}", file=sys.stderr)
-        else:
-            print(
-                f"imp: session daemon for {quest.id} did not come up; "
-                f"it may have crashed (see {quest.control_root}/.imp/remote-control.log)",
-                file=sys.stderr)
+        from imp.cli.main import _emit_startup_failed
+        _emit_startup_failed(quest, startup_error)
         return 3
     from imp.cli.main import (
         _print_leave_disposition,

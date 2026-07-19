@@ -75,6 +75,7 @@ from imp.providers.config import (
     validate_workflow_name,
 )
 from imp.remote.daemon.directory import session_is_resident
+from imp.remote.session.attach import DaemonStartupError
 from imp.remote.session.protocol import SkillRequest
 
 
@@ -519,6 +520,11 @@ def _emit_paused_summary(quest: Quest, leave_trigger: str | None = None) -> None
     print()
 
 
+def _emit_cli_error(message: str) -> None:
+    """Non-quest CLI error sink: writes `imp: <message>` to stderr."""
+    print(f"imp: {message}", file=sys.stderr)
+
+
 def _emit_merge_blocked(
     quest: Quest, reason: str | None, detail: str | None = None,
     note: str | None = None,
@@ -559,6 +565,32 @@ def _emit_merge_blocked(
     opening = _resolve_intent(list(quest.event_log().read()))
     for ln in _error_block(f"merge blocked: {summary}", body, cid, quest.title,
                            color=color, intent=opening):
+        print(ln)
+    print()
+
+
+def _emit_startup_failed(quest: Quest, error: DaemonStartupError | None) -> None:
+    """Session daemon died before binding its socket — render the shared three-part
+    error block on stdout (red head + body + gold identity line), matching every
+    other terminal exit block, then one trailing blank. Built from
+    DaemonStartupError's structured fields, not its message string; degrades to a
+    backstop head+body when no error detail is available (the timeout path)."""
+    color = should_use_color(sys.stdout)
+    if error is not None:
+        if error.exit_code is not None:
+            head = (f"startup failed: session daemon exited with code "
+                    f"{error.exit_code} before it came up")
+        else:
+            head = "startup failed: session daemon exited before it came up"
+        body = error.stderr_tail.splitlines() if error.stderr_tail else []
+        body.append(f"see {error.stderr_path}")
+    else:
+        head = "startup failed: session daemon did not come up"
+        body = [f"It may have crashed; see "
+                f"{quest.control_root}/.imp/remote-control.log"]
+    intent = _resolve_intent(list(quest.event_log().read()))
+    for ln in _error_block(head, body, quest.id, quest.title,
+                           color=color, intent=intent):
         print(ln)
     print()
 
@@ -750,13 +782,14 @@ def _cmd_init(args: argparse.Namespace) -> int:
     try:
         run_init(project, input_fn=input, output_fn=print)
     except (GitSetupDeclined, IntegrationBranchUnresolved) as e:
-        print(f"imp: {e}", file=sys.stderr)
+        _emit_cli_error(f"{e}")
         return 2
     except FileExistsError as e:
-        print(f"imp: {e}", file=sys.stderr)
+        _emit_cli_error(f"{e}")
         return 2
     except KeyboardInterrupt:
-        print("\nimp: init cancelled", file=sys.stderr)
+        print(file=sys.stderr)
+        _emit_cli_error("init cancelled")
         return 130
     if sys.stdout.isatty():
         print()
@@ -909,7 +942,7 @@ async def _clear_loop(
 def _record_idea(args: argparse.Namespace, control: Path, base: str) -> int:
     title = args.idea
     if not title.strip():
-        print("imp: --backlog title must be non-empty", file=sys.stderr)
+        _emit_cli_error("--backlog title must be non-empty")
         return 2
     description = getattr(args, "opening", None) or ""
     seed = backlog.seed_opening({"title": title, "description": description})
@@ -921,7 +954,7 @@ def _record_idea(args: argparse.Namespace, control: Path, base: str) -> int:
             workflow=getattr(args, "workflow", None),
             origin="backlog", seed_opening=seed, defer_seed=True)
     except (LoadError, LoadErrors) as e:
-        print(f"imp: {e}", file=sys.stderr)
+        _emit_cli_error(f"{e}")
         return 2
     _emit_human([f"imp: recorded backlog quest {quest_id} "
                  f"(start it with `imp resume {quest_id}`)"])
@@ -1008,8 +1041,9 @@ async def _run_fresh_session(
     autonomous = bool(getattr(args, "autonomous", False))
     if headless:
         if auto_headless:
-            print(f"imp: no tty detected — running headless; resume with "
-                  f"`imp resume {quest.id}`", file=sys.stderr)
+            _emit_cli_error(
+                f"no tty detected — running headless; "
+                f"resume with `imp resume {quest.id}`")
         status = LiveStatus(sys.stdout)
         driver = LiveDriver(stream=sys.stdout,
                             color=should_use_color(sys.stdout),
@@ -1102,12 +1136,12 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
     try:
         base = _resolve_new_base(control, getattr(args, "base", None))
     except BaseResolutionError as e:
-        print(f"imp: {e}", file=sys.stderr)
+        _emit_cli_error(f"{e}")
         return 2
 
     wf_arg = getattr(args, "workflow", None)
     if wf_arg is not None and not validate_workflow_name(wf_arg):
-        print(f"imp: invalid workflow name {wf_arg!r}", file=sys.stderr)
+        _emit_cli_error(f"invalid workflow name {wf_arg!r}")
         return 2
 
     if getattr(args, "background", False):
@@ -1122,29 +1156,29 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
 
     if getattr(args, "idea", None) is not None:
         if getattr(args, "title", None):
-            print("imp: --backlog and --title cannot be combined "
-                  "(--backlog is the title)", file=sys.stderr)
+            _emit_cli_error("--backlog and --title cannot be combined (--backlog is the title)")
             return 2
         run_only = _backlog_run_only_flag(args)
         if run_only is not None:
-            print(f"imp: --backlog files an idea instantly and never runs; "
-                  f"{run_only} is for headless\nruns. Drop one. Start a filed "
-                  f"idea later with `imp resume <id>`.", file=sys.stderr)
+            _emit_cli_error(
+                f"--backlog files an idea instantly and never runs; {run_only} "
+                f"is for headless\nruns. Drop one. Start a filed idea later with "
+                f"`imp resume <id>`.")
             return 2
         if not args.idea.strip():
-            print("imp: --backlog title must be non-empty", file=sys.stderr)
+            _emit_cli_error("--backlog title must be non-empty")
             return 2
         return _record_idea(args, control, base)
 
     try:
         seed = resolve_spec_seed(args)
     except (SeedError, ValueError) as e:
-        print(f"imp: {e}", file=sys.stderr)
+        _emit_cli_error(f"{e}")
         return 2
 
     block = _preflight_imp_init(control_root=control, project_root=control)
     if block is not None:
-        print(f"imp: {block}", file=sys.stderr)
+        _emit_cli_error(f"{block}")
         return 2
 
     model_arg = getattr(args, "model", None)
@@ -1157,7 +1191,7 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
         reason = validate_model_available(
             model_arg, available=available_providers(config))
         if reason is not None:
-            print(f"imp: {reason}", file=sys.stderr)
+            _emit_cli_error(f"{reason}")
             return 2
 
     non_interactive = bool(getattr(args, "non_interactive", False))
@@ -1183,7 +1217,7 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
             depends_on=list(getattr(args, "depends_on", None) or []),
             seed_opening=None)
     except (LoadError, LoadErrors) as e:
-        print(f"imp: {e}", file=sys.stderr)
+        _emit_cli_error(f"{e}")
         return 2
 
     # Build the title before the opening prompt so the escape is written at startup,
@@ -1228,8 +1262,9 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
     headless, auto_headless = _select_headless(args)
     if headless:
         if auto_headless:
-            print(f"imp: no tty detected — running headless; resume with "
-                  f"`imp resume {quest.id}`", file=sys.stderr)
+            _emit_cli_error(
+                f"no tty detected — running headless; "
+                f"resume with `imp resume {quest.id}`")
         if not header_printed:
             _print_run_header(
                 quest.id, quest.title, leave_mode, color=should_use_color(sys.stdout))
@@ -1299,8 +1334,9 @@ def _warn_if_blocked(quest: Quest) -> None:
     r = make_store(quest.control_root).backlog_readiness(deps)
     ready, unmerged = r.ready, list(r.blocked_on)
     if not ready:
-        print(f"imp: backlog quest {quest.id} is blocked on unmerged dep(s): "
-              f"{', '.join(unmerged)}; starting anyway.", file=sys.stderr)
+        _emit_cli_error(
+            f"backlog quest {quest.id} is blocked on unmerged dep(s): "
+            f"{', '.join(unmerged)}; starting anyway.")
 
 
 def _build_resume_driver(
@@ -1341,19 +1377,16 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
     # Persisted status is never `running` (it is derived from the lock at display
     # time); a crashed run is left at its resumable at-rest status (new/paused).
     if state.status not in RESUMABLE:
-        print(
-            f"imp: quest {quest.id} status is {state.status!r}; "
-            "nothing to resume",
-            file=sys.stderr,
-        )
+        _emit_cli_error(f"quest {quest.id} status is {state.status!r}; nothing to resume")
         return 2
 
     headless, auto_headless = _select_headless(args)
     autonomous = bool(getattr(args, "autonomous", False))
     if headless:
         if auto_headless:
-            print(f"imp: no tty detected — running headless; resume with "
-                  f"`imp resume {quest.id}`", file=sys.stderr)
+            _emit_cli_error(
+                f"no tty detected — running headless; "
+                f"resume with `imp resume {quest.id}`")
         print(_run_header_line(
             quest.id, quest.title, "resuming", color=should_use_color(sys.stdout)))
         status = LiveStatus(sys.stdout)
@@ -1561,19 +1594,19 @@ def _resolve_id(control: Path, token: str) -> str:
     unambiguous substring of exactly one quest's id. Multiple matches exit
     non-zero listing candidates; none errors."""
     if not token.strip():
-        print(f"imp: no quest matches {token!r}", file=sys.stderr)
+        _emit_cli_error(f"no quest matches {token!r}")
         raise SystemExit(2)
     matches = [cid for cid in _iter_quest_ids(control) if token in cid]
     if len(matches) == 1:
         return matches[0]
     if len(matches) > 1:
         _exit_ambiguous(token, matches, control)
-    print(f"imp: no quest matches {token!r}", file=sys.stderr)
+    _emit_cli_error(f"no quest matches {token!r}")
     raise SystemExit(2)
 
 
 def _exit_ambiguous(token: str, candidates: list[str], control: Path) -> NoReturn:
-    print(f"imp: {token!r} is ambiguous; candidates:", file=sys.stderr)
+    _emit_cli_error(f"{token!r} is ambiguous; candidates:")
     color = should_use_color(sys.stderr)
     now = datetime.now(UTC)
     print(quest_row.header_line(color=color), file=sys.stderr)
@@ -1901,7 +1934,7 @@ def _cmd_list(args: argparse.Namespace) -> int:
     try:
         cutoff = _since_cutoff(args.since, now) if args.since is not None else None
     except ValueError:
-        print(_SINCE_ERROR, file=sys.stderr)
+        _emit_cli_error(_SINCE_ERROR)
         raise SystemExit(2) from None
     selected = dispositions or {"active", "backlog", "merged"}
     lines = _filtered_overview_lines(
@@ -1934,14 +1967,13 @@ def _cmd_show(args: argparse.Namespace) -> int:
                               color=should_use_color(sys.stdout)),
                 no_pager=args.no_pager, trailing_blank=True)
             return 0
-        print(f"imp: {quest_id} is in the backlog (not started); "
-              f"no {resource} yet", file=sys.stderr)
+        _emit_cli_error(f"{quest_id} is in the backlog (not started); no {resource} yet")
         return 2
     if resource is None:
         if args.json:
             card = _quest_json(control, quest_id)
             if card is None:
-                print(f"imp: no such quest {quest_id!r}", file=sys.stderr)
+                _emit_cli_error(f"no such quest {quest_id!r}")
                 return 2
             _page_or_print(json.dumps(card, indent=2).splitlines(),
                            no_pager=args.no_pager)
@@ -1954,7 +1986,7 @@ def _cmd_show(args: argparse.Namespace) -> int:
     if resource == "spec":
         data = make_store(control).get_artifact(quest_id, "spec")
     if data is None:
-        print(f"imp: no {resource} for {quest_id!r}", file=sys.stderr)
+        _emit_cli_error(f"no {resource} for {quest_id!r}")
         return 2
     _page_or_print(data.decode("utf-8", errors="replace").splitlines(),
                    no_pager=args.no_pager, trailing_blank=True)
@@ -2265,13 +2297,13 @@ def _select_log_events(
         for spec in range_specs:
             intervals.extend(ei.parse_range_spec(spec, max_ord))
     except ei.RangeSpecError as exc:
-        print(f"imp: {exc}", file=sys.stderr)
+        _emit_cli_error(f"{exc}")
         return 2
     if steps is not None:
         known = {s.name for s in ei.step_windows(indexed)}
         missing = sorted(steps - known)
         if missing:
-            print(f"imp: no step {missing[0]!r} in {quest_id}", file=sys.stderr)
+            _emit_cli_error(f"no step {missing[0]!r} in {quest_id}")
             return 2
     selected = ei.select_event_lines(
         indexed, agents=agents, ranges=intervals or None,
@@ -2287,8 +2319,8 @@ def _cmd_log(args: argparse.Namespace) -> int:
     hide_names = args.hide or []
     unknown = sorted((set(show_names) | set(hide_names)) - set(LOG_CATEGORIES))
     if unknown:
-        print(f"imp log: error: unknown category {unknown[0]!r} "
-              f"(choose from: {', '.join(LOG_CATEGORIES)})", file=sys.stderr)
+        _emit_cli_error(f"unknown category {unknown[0]!r} "
+                        f"(choose from: {', '.join(LOG_CATEGORIES)})")
         return 2
     show = _log_show_set(args.full, show_names, hide_names)
 
@@ -2296,8 +2328,7 @@ def _cmd_log(args: argparse.Namespace) -> int:
     if args.follow:
         conflict = _follow_conflict(args)
         if conflict is not None:
-            print(f"imp log: error: argument -f/--follow: not allowed with "
-                  f"argument {conflict}", file=sys.stderr)
+            _emit_cli_error(f"-f/--follow not allowed with {conflict}")
             return 2
         args.no_pager = True
     if args.token is None:
@@ -2318,13 +2349,13 @@ def _cmd_log(args: argparse.Namespace) -> int:
     store = make_store(control)
     events = store.get_events(quest_id)
     if events is None:
-        print(f"imp: no such quest {quest_id!r}", file=sys.stderr)
+        _emit_cli_error(f"no such quest {quest_id!r}")
         return 2
 
     if args.follow:
         if os.environ.get("IMP_SESSION_SOCKET"):
-            print("imp log: live follow is unavailable inside the sandbox; "
-                  "showing a one-shot snapshot.", file=sys.stderr)
+            _emit_cli_error("live follow is unavailable inside the sandbox; "
+                            "showing a one-shot snapshot.")
             return _follow_log(events)
         home = _quest_home(control, quest_id)
         if home.exists():
@@ -2486,7 +2517,7 @@ def _resume_gone(control: Path, quest_id: str) -> int:
         word = "merged" if archive_read.merge_commit_of(control, quest_id) else "completed"
         print(f"{title} is already {word}; nothing to resume.")
         return 0
-    print(f"imp: no quest matches {quest_id!r}", file=sys.stderr)
+    _emit_cli_error(f"no quest matches {quest_id!r}")
     return 2
 
 
@@ -2506,7 +2537,7 @@ def _load_or_rehydrate(control: Path, quest_id: str) -> Quest | int:
     try:
         return Quest.load(control, quest_id)
     except LayoutMismatch as e:
-        print(f"imp: {e}", file=sys.stderr)
+        _emit_cli_error(f"{e}")
         return 2
     except (LoadError, LoadErrors):
         quest = _rehydrate_resumable(control, quest_id)
@@ -2724,7 +2755,7 @@ def _resume_picker_empty(control: Path) -> int:
 def _resume_picker_non_tty(rows: list[_Row]) -> str | int:
     if len(rows) == 1:
         return rows[0][0]
-    print("Multiple resumable quests — pass a token:", file=sys.stderr)
+    _emit_cli_error("multiple resumable quests — pass a token; candidates:")
     color = should_use_color(sys.stderr)
     now = datetime.now(UTC)
     print(quest_row.header_line(color=color), file=sys.stderr)
@@ -2885,8 +2916,7 @@ def _abandon_picker_empty() -> int:
 
 
 def _abandon_picker_non_tty(rows: list[_Row]) -> int:
-    print("imp: abandon needs a quest token on a non-interactive terminal",
-          file=sys.stderr)
+    _emit_cli_error("abandon needs a quest token on a non-interactive terminal")
     return 2
 
 
@@ -2912,8 +2942,7 @@ async def _pick_abandon_matches(
     errors with a token-specific message (distinct from the no-token
     `_abandon_picker_non_tty` copy, which reads wrong when a token was given)."""
     def _non_tty(_rows: list[_Row]) -> int:
-        print(f"imp: {token!r} matches multiple quests; pass a more specific token",
-              file=sys.stderr)
+        _emit_cli_error(f"{token!r} matches multiple quests; pass a more specific token")
         return 2
 
     return await _pick_quest_target(
@@ -2929,8 +2958,7 @@ def _cmd_abandon(args: argparse.Namespace) -> int:
     token = args.token
     if os.environ.get("IMP_SESSION_SOCKET"):
         if token is None or not token.strip():
-            print("imp: abandon needs a quest token in a sandboxed session",
-                  file=sys.stderr)
+            _emit_cli_error("abandon needs a quest token in a sandboxed session")
             return 2
         return _emit_mutation_result(proxy_mutation("abandon", {"token": token}))
     control = _control_root()
@@ -2961,7 +2989,7 @@ def _cmd_abandon(args: argparse.Namespace) -> int:
         if len(hits) == 1:
             return _abandon_local(control, hits[0])
         # Truly unknown (never existed, or ambiguous) — nothing to reap.
-        print(f"imp: no quest matches {token!r}", file=sys.stderr)
+        _emit_cli_error(f"no quest matches {token!r}")
         return 2
     return _abandon_local(control, quest_id)
 
@@ -3062,7 +3090,7 @@ def _backlog_rows(control: Path, scanned: list[HomeDigest] | None = None) -> lis
 _HISTORY_CAP = 10
 
 _SINCE_ERROR = (
-    "imp: --since expects 'today' or a number with a unit — "
+    "--since expects 'today' or a number with a unit — "
     "h/d/w/m/y (e.g. 2d, 1w, 3m).")
 
 
@@ -3733,7 +3761,7 @@ def _cmd_events(args: argparse.Namespace) -> int:
         return 0
     events = make_store(control).get_events(quest_id)
     if events is None:
-        print(f"imp: no such quest {quest_id!r}", file=sys.stderr)
+        _emit_cli_error(f"no such quest {quest_id!r}")
         return 2
 
     indexed = list(enumerate(events, start=1))
@@ -3754,14 +3782,14 @@ def _cmd_events(args: argparse.Namespace) -> int:
         for spec in range_specs:
             intervals.extend(ei.parse_range_spec(spec, max_ord))
     except ei.RangeSpecError as exc:
-        print(f"imp: {exc}", file=sys.stderr)
+        _emit_cli_error(f"{exc}")
         return 2
 
     if steps is not None:
         known = {s.name for s in ei.step_windows(indexed)}
         missing = sorted(steps - known)
         if missing:
-            print(f"imp: no step {missing[0]!r} in {quest_id}", file=sys.stderr)
+            _emit_cli_error(f"no step {missing[0]!r} in {quest_id}")
             return 2
 
     leaf = bool(types or subtypes or agents or intervals or args.all
@@ -4297,7 +4325,7 @@ def _help_command(rest: list[str], parser: argparse.ArgumentParser) -> int:
         return 0
     cmd = rest[0]
     if cmd not in _command_names(parser):
-        print(f"imp: unknown command {cmd!r}. Run 'imp help'.", file=sys.stderr)
+        _emit_cli_error(f"unknown command {cmd!r}. Run 'imp help'.")
         return 2
     # `imp help <cmd>` == `imp <cmd> -h`: argparse prints the subparser help and
     # exits 0 (SystemExit), so control never returns past this line.
@@ -4314,7 +4342,7 @@ def _dispatch_meta(args: list[str], parser: argparse.ArgumentParser) -> int | No
         return _help_command(args[1:], parser)
     first = args[0]
     if not first.startswith("-") and first not in _command_names(parser):
-        print(f"imp: unknown command {first!r}. Run 'imp help'.", file=sys.stderr)
+        _emit_cli_error(f"unknown command {first!r}. Run 'imp help'.")
         return 2
     return None
 
@@ -4383,7 +4411,7 @@ def main(argv: list[str] | None = None) -> int:
         sys.stdout.flush()
         return rc
     except worktree.PreconditionError as e:
-        print(f"imp: {e}", file=sys.stderr)
+        _emit_cli_error(f"{e}")
         return 2
     except BrokenPipeError:
         # A reader (e.g. `imp log | less` quit before draining) closed the pipe.

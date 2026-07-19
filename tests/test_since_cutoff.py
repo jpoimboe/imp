@@ -69,5 +69,5 @@ def test_unrecognized_spec_raises_value_error() -> None:
 
 def test_since_error_message() -> None:
     assert _SINCE_ERROR == (
-        "imp: --since expects 'today' or a number with a unit — "
+        "--since expects 'today' or a number with a unit — "
         "h/d/w/m/y (e.g. 2d, 1w, 3m).")
