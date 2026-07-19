@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import base64
 import json
+import httpx
 from collections.abc import Mapping
 from datetime import datetime, timezone
 from typing import Any
@@ -66,3 +67,83 @@ def _needs_refresh(
     if lr_ms is not None:
         return lr_ms <= now_ms - _REFRESH_INTERVAL_DAYS * _DAY_MS
     return True
+
+
+_TOKEN_URL = "https://auth.openai.com/oauth/token"
+_CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann"
+_HTTP_TIMEOUT = 10.0
+
+_DEAD_CODES = frozenset({
+    "refresh_token_expired",
+    "refresh_token_reused",
+    "refresh_token_invalidated",
+})
+
+
+class RefreshTransientError(Exception):
+    """Network error / non-200 / malformed 200 — the existing token may still
+    be valid, so the caller proceeds to spawn."""
+
+
+class RefreshInvalidGrant(Exception):
+    """The refresh token is dead; the caller drives a reauth_needed pause."""
+
+
+def _dead_code(body: dict[str, Any]) -> str | None:
+    """Read codex's error code: nested `error.code` first, then a top-level
+    `error` string, then a top-level `code` string."""
+    err = body.get("error")
+    if isinstance(err, dict):
+        code = err.get("code")
+        if isinstance(code, str):
+            return code
+    if isinstance(err, str):
+        return err
+    code = body.get("code")
+    return code if isinstance(code, str) else None
+
+
+def _is_dead_token(resp: httpx.Response) -> bool:
+    if resp.status_code == 401:
+        return True
+    try:
+        body = resp.json()
+    except ValueError:
+        return False
+    if not isinstance(body, dict):
+        return False
+    return _dead_code(body) in _DEAD_CODES
+
+
+def _request_refresh(refresh_token: str) -> dict[str, Any]:
+    """The single HTTP seam — tests monkeypatch this. Returns
+    {id_token, access_token, refresh_token} (any may be None) on a well-formed
+    200; raises RefreshInvalidGrant on a dead token and RefreshTransientError on
+    any transport error, non-200, or malformed 200."""
+    try:
+        with httpx.Client(timeout=_HTTP_TIMEOUT) as client:
+            resp = client.post(
+                _TOKEN_URL,
+                json={
+                    "client_id": _CLIENT_ID,
+                    "grant_type": "refresh_token",
+                    "refresh_token": refresh_token,
+                },
+            )
+    except httpx.HTTPError as exc:
+        raise RefreshTransientError(str(exc)) from exc
+    if resp.status_code == 200:
+        try:
+            body = resp.json()
+        except ValueError as exc:
+            raise RefreshTransientError("malformed token response") from exc
+        if not isinstance(body, dict):
+            raise RefreshTransientError("malformed token response")
+        return {
+            "id_token": body.get("id_token"),
+            "access_token": body.get("access_token"),
+            "refresh_token": body.get("refresh_token"),
+        }
+    if _is_dead_token(resp):
+        raise RefreshInvalidGrant()
+    raise RefreshTransientError(f"token endpoint returned {resp.status_code}")

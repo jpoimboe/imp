@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import base64
 import json
+import httpx
+import pytest
 from datetime import datetime, timezone
 
 from imp.providers import codex_token_refresh as ctr
@@ -88,3 +90,163 @@ def test_parse_last_refresh_ms_naive_treated_as_utc() -> None:
     utc = ctr._parse_last_refresh_ms("2001-09-09T01:30:00Z")
     assert naive is not None
     assert naive == utc
+
+
+def _client(*, response: object = None, error: BaseException | None = None) -> object:
+    class _FakeClient:
+        def __init__(self, timeout: object = None) -> None:
+            pass
+
+        def __enter__(self) -> "_FakeClient":
+            return self
+
+        def __exit__(self, *a: object) -> bool:
+            return False
+
+        def post(self, url: str, json: object = None) -> object:
+            if error is not None:
+                raise error
+            return response
+
+    return _FakeClient
+
+
+def test_request_refresh_posts_json_grant(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, object] = {}
+
+    class _FakeClient:
+        def __init__(self, timeout: object = None) -> None:
+            pass
+
+        def __enter__(self) -> "_FakeClient":
+            return self
+
+        def __exit__(self, *a: object) -> bool:
+            return False
+
+        def post(self, url: str, json: object = None) -> httpx.Response:
+            captured["url"] = url
+            captured["json"] = json
+            return httpx.Response(
+                200,
+                json={"id_token": "i", "access_token": "a", "refresh_token": "b"},
+                request=httpx.Request("POST", url))
+
+    monkeypatch.setattr(httpx, "Client", _FakeClient)
+    result = ctr._request_refresh("the-refresh-token")
+
+    assert result == {"id_token": "i", "access_token": "a", "refresh_token": "b"}
+    assert captured["url"] == ctr._TOKEN_URL
+    assert captured["json"] == {
+        "client_id": ctr._CLIENT_ID,
+        "grant_type": "refresh_token",
+        "refresh_token": "the-refresh-token",
+    }
+
+
+def test_request_refresh_optional_fields_default_to_none(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    resp = httpx.Response(200, json={"access_token": "a"},
+                          request=httpx.Request("POST", ctr._TOKEN_URL))
+    monkeypatch.setattr(httpx, "Client", _client(response=resp))
+    assert ctr._request_refresh("tok") == {
+        "id_token": None, "access_token": "a", "refresh_token": None}
+
+
+def test_request_refresh_401_is_invalid_grant(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    resp = httpx.Response(401, text="unauthorized",
+                          request=httpx.Request("POST", ctr._TOKEN_URL))
+    monkeypatch.setattr(httpx, "Client", _client(response=resp))
+    with pytest.raises(ctr.RefreshInvalidGrant):
+        ctr._request_refresh("dead")
+
+
+@pytest.mark.parametrize(
+    "code", ["refresh_token_expired", "refresh_token_reused",
+             "refresh_token_invalidated"])
+def test_request_refresh_dead_codes_nested(
+    monkeypatch: pytest.MonkeyPatch, code: str,
+) -> None:
+    resp = httpx.Response(400, json={"error": {"code": code}},
+                          request=httpx.Request("POST", ctr._TOKEN_URL))
+    monkeypatch.setattr(httpx, "Client", _client(response=resp))
+    with pytest.raises(ctr.RefreshInvalidGrant):
+        ctr._request_refresh("dead")
+
+
+@pytest.mark.parametrize(
+    "code", ["refresh_token_expired", "refresh_token_reused",
+             "refresh_token_invalidated"])
+def test_request_refresh_dead_codes_top_level(
+    monkeypatch: pytest.MonkeyPatch, code: str,
+) -> None:
+    # top-level `error` string shape
+    resp = httpx.Response(400, json={"error": code},
+                          request=httpx.Request("POST", ctr._TOKEN_URL))
+    monkeypatch.setattr(httpx, "Client", _client(response=resp))
+    with pytest.raises(ctr.RefreshInvalidGrant):
+        ctr._request_refresh("dead")
+    # top-level `code` string shape
+    resp2 = httpx.Response(400, json={"code": code},
+                           request=httpx.Request("POST", ctr._TOKEN_URL))
+    monkeypatch.setattr(httpx, "Client", _client(response=resp2))
+    with pytest.raises(ctr.RefreshInvalidGrant):
+        ctr._request_refresh("dead")
+
+
+def test_request_refresh_unrecognized_400_is_transient(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    resp = httpx.Response(400, json={"error": "invalid_request"},
+                          request=httpx.Request("POST", ctr._TOKEN_URL))
+    monkeypatch.setattr(httpx, "Client", _client(response=resp))
+    with pytest.raises(ctr.RefreshTransientError):
+        ctr._request_refresh("tok")
+
+
+def test_request_refresh_server_error_is_transient(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    resp = httpx.Response(503, text="busy",
+                          request=httpx.Request("POST", ctr._TOKEN_URL))
+    monkeypatch.setattr(httpx, "Client", _client(response=resp))
+    with pytest.raises(ctr.RefreshTransientError):
+        ctr._request_refresh("tok")
+
+
+def test_request_refresh_network_error_is_transient(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    err = httpx.ConnectError("boom", request=httpx.Request("POST", ctr._TOKEN_URL))
+    monkeypatch.setattr(httpx, "Client", _client(error=err))
+    with pytest.raises(ctr.RefreshTransientError):
+        ctr._request_refresh("tok")
+
+
+def test_request_refresh_malformed_200_is_transient(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # valid JSON but not an object → malformed.
+    resp = httpx.Response(200, json=["not", "an", "object"],
+                          request=httpx.Request("POST", ctr._TOKEN_URL))
+    monkeypatch.setattr(httpx, "Client", _client(response=resp))
+    with pytest.raises(ctr.RefreshTransientError):
+        ctr._request_refresh("tok")
+
+
+def test_request_refresh_non_json_200_is_transient(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    resp = httpx.Response(200, content=b"<html>not json</html>",
+                          request=httpx.Request("POST", ctr._TOKEN_URL))
+    monkeypatch.setattr(httpx, "Client", _client(response=resp))
+    with pytest.raises(ctr.RefreshTransientError):
+        ctr._request_refresh("tok")
+
+
+def test_endpoint_constants_are_pinned() -> None:
+    assert ctr._TOKEN_URL == "https://auth.openai.com/oauth/token"
+    assert ctr._CLIENT_ID == "app_EMoamEEZ73f0CkXaXp7hrann"
