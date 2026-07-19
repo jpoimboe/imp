@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import multiprocessing as mp
+import os
 import signal
 import socket
+import sys
 import unittest.mock
 from pathlib import Path
 from typing import ClassVar
@@ -115,3 +117,50 @@ def test_start_daemon_returns_rc2_for_config_error(
 
     monkeypatch.setattr(runner.anyio, "run", _raise_config_error)
     assert runner.start_daemon(tmp_path) == 2
+
+
+def _write_telegram_config(tmp_path: Path) -> None:
+    (tmp_path / ".imp").mkdir(exist_ok=True)
+    (tmp_path / ".imp" / "config.yaml").write_text(
+        "remote:\n  driver:\n    name: telegram\n")
+
+
+def test_start_daemon_reexecs_when_restart_requested(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _write_telegram_config(tmp_path)
+    fake_environ = dict(os.environ)
+    monkeypatch.setattr(runner.os, "environ", fake_environ)
+    monkeypatch.setattr(runner.anyio, "run", lambda *a, **k: True)
+    execs: list[tuple[str, list[str]]] = []
+    env_at_exec: dict[str, str] = {}
+
+    def fake_execv(path: str, argv: list[str]) -> None:
+        env_at_exec.update(fake_environ)
+        execs.append((path, argv))
+
+    monkeypatch.setattr(runner.os, "execv", fake_execv)
+
+    runner.start_daemon(tmp_path)
+
+    assert len(execs) == 1
+    path, argv = execs[0]
+    assert path == sys.executable
+    assert argv == [sys.executable, "-m", "imp", "remote-control", "start"]
+    assert env_at_exec["IMP_REMOTE_RESTARTED"] == "1"
+
+
+def test_start_daemon_does_not_reexec_on_plain_shutdown(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _write_telegram_config(tmp_path)
+    fake_environ = dict(os.environ)
+    monkeypatch.setattr(runner.os, "environ", fake_environ)
+    monkeypatch.setattr(runner.anyio, "run", lambda *a, **k: False)
+    execs: list[tuple[str, list[str]]] = []
+    monkeypatch.setattr(
+        runner.os, "execv", lambda path, argv: execs.append((path, argv)))
+
+    assert runner.start_daemon(tmp_path) == 0
+    assert execs == []
+    assert "IMP_REMOTE_RESTARTED" not in fake_environ

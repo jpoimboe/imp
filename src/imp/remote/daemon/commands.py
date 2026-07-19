@@ -66,6 +66,11 @@ class Alerts:
 
 
 @dataclass(frozen=True)
+class Restart:
+    pass
+
+
+@dataclass(frozen=True)
 class ListResult:
     quests: list[QuestInfo]
     resident: frozenset[str] = frozenset()
@@ -73,7 +78,7 @@ class ListResult:
 
 Command = (
     Reply | Create | ListQuests | Help | Notice |
-    Subscribe | Unsubscribe | Replay | Resume | Alerts)
+    Subscribe | Unsubscribe | Replay | Resume | Alerts | Restart)
 Response = ListResult | Notice
 
 NEW_USAGE = "Usage: /new <what to build>"
@@ -84,6 +89,7 @@ UNSUBSCRIBE_USAGE = (
 UNKNOWN_COMMAND = "Unknown command. Try /help."
 ALERTS_ON_REPLY = "Alerts: all quests."
 ALERTS_OFF_REPLY = "Alerts: subscribed quests only."
+RESTART_CONFIRMATION = "Restarted — now running the latest code."
 ROUTE_HINT = (
     "Couldn't route that — reply to a quest's message, prefix @handle, or send /list.")
 HELP_TEXT = (
@@ -95,6 +101,7 @@ HELP_TEXT = (
     "/replay [n] (reply or @handle) — re-send last n messages\n"
     "/resume <id or text> — rehydrate and continue a saved/archived conversation\n"
     "/alerts on|off — alert on every quest, not just the ones you follow (default: on)\n"
+    "/restart — reload the daemon to run the latest code\n"
     "/help — this message\n"
     "Reply to a quest's message (or @handle) to answer it.")
 
@@ -156,6 +163,8 @@ def parse(
             if arg == "off":
                 return Alerts(False)
             return Alerts(None)
+        if verb == "restart":
+            return Restart()
         return Notice(UNKNOWN_COMMAND)
     quest_id, body = resolve_lookup(text, reply_to)
     return Reply(quest_id, body) if quest_id is not None else Notice(ROUTE_HINT)

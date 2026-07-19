@@ -12,7 +12,7 @@ import anyio
 import pytest
 
 from imp.remote.daemon.alert_all import AlertAll
-from imp.remote.daemon.commands import Help
+from imp.remote.daemon.commands import RESTART_CONFIRMATION, Help, Notice, Restart
 from imp.remote.daemon.discover import socket_is_live, socket_path
 from imp.remote.daemon.runner import (
     _await_shutdown_signals,
@@ -392,3 +392,119 @@ async def test_run_daemon_reaps_stray_homes_at_startup(tmp_path: Path) -> None:
 
     assert not stray.exists()                        # empty stray reaped at startup
     assert "reaped 1 empty stray" in log_path.read_text()   # INFO count logged
+
+
+class SubmitRestartAdapter:
+    def __init__(self, submit) -> None:
+        self._submit = submit
+        self._done = False
+
+    def on_event(self, event: dict) -> None:
+        pass
+
+    def on_response(self, response: object) -> None:
+        pass
+
+    def poll_once(self) -> None:
+        if not self._done:
+            self._done = True
+            self._submit(Restart())
+        time.sleep(0.01)
+
+
+class RecordingResponseAdapter:
+    def __init__(self) -> None:
+        self.responses: list[object] = []
+
+    def on_event(self, event: dict) -> None:
+        pass
+
+    def on_response(self, response: object) -> None:
+        self.responses.append(response)
+
+    def poll_once(self) -> None:
+        time.sleep(0.01)
+
+
+@pytest.mark.anyio
+async def test_run_daemon_returns_true_when_restart_requested(tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+    with anyio.fail_after(30):   # deadlock backstop only
+        result = await run_daemon(
+            tmp_path, env={},
+            make_adapter=(
+                lambda env, submit, subscriptions, alert_all,
+                    is_known_quest: SubmitRestartAdapter(submit)
+            ),
+            install_signals=False, shutdown=anyio.Event())
+    assert result is True
+
+
+@pytest.mark.anyio
+async def test_run_daemon_returns_false_on_plain_shutdown(tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+    shutdown = anyio.Event()
+    spath = socket_path(tmp_path)
+    holder: dict[str, bool] = {}
+
+    async def _run() -> None:
+        holder["result"] = await run_daemon(
+            tmp_path, env={},
+            make_adapter=(
+                lambda env, submit, subscriptions, alert_all,
+                    is_known_quest: FakeAdapter()
+            ),
+            install_signals=False, shutdown=shutdown)
+
+    async with anyio.create_task_group() as tg:
+        tg.start_soon(_run)
+        await wait_until(lambda: socket_is_live(spath))
+        shutdown.set()
+    assert holder["result"] is False
+
+
+@pytest.mark.anyio
+async def test_run_daemon_enqueues_confirmation_when_restart_marker_set(
+    tmp_path: Path,
+) -> None:
+    _seed_control(tmp_path)
+    env = {"IMP_REMOTE_RESTARTED": "1"}
+    adapter = RecordingResponseAdapter()
+    shutdown = anyio.Event()
+
+    async with anyio.create_task_group() as tg:
+        tg.start_soon(functools.partial(
+            run_daemon, tmp_path, env=env,
+            make_adapter=lambda e, submit, subs, aa, ikq: adapter,
+            install_signals=False, shutdown=shutdown))
+        await wait_until(lambda: any(
+            isinstance(r, Notice)
+            and r.text == RESTART_CONFIRMATION
+            for r in adapter.responses))
+        shutdown.set()
+
+    # Marker cleared after reading, so a later normal start does not re-announce.
+    assert "IMP_REMOTE_RESTARTED" not in env
+
+
+@pytest.mark.anyio
+async def test_run_daemon_sends_no_confirmation_without_the_marker(
+    tmp_path: Path,
+) -> None:
+    _seed_control(tmp_path)
+    adapter = RecordingResponseAdapter()
+    shutdown = anyio.Event()
+    spath = socket_path(tmp_path)
+
+    async with anyio.create_task_group() as tg:
+        tg.start_soon(functools.partial(
+            run_daemon, tmp_path, env={},
+            make_adapter=lambda e, submit, subs, aa, ikq: adapter,
+            install_signals=False, shutdown=shutdown))
+        await wait_until(lambda: socket_is_live(spath))
+        shutdown.set()
+
+    assert not any(
+        isinstance(r, Notice)
+        and r.text == RESTART_CONFIRMATION
+        for r in adapter.responses)

@@ -6,9 +6,10 @@ import logging
 import os
 import queue
 import signal
+import sys
 import threading
 import urllib.error
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Awaitable, Callable, Mapping, MutableMapping
 from pathlib import Path
 from typing import Any
 
@@ -24,6 +25,7 @@ from imp.remote.daemon.commands import (
     ALERTS_OFF_REPLY,
     ALERTS_ON_REPLY,
     HELP_TEXT,
+    RESTART_CONFIRMATION,
     ROUTE_HINT,
     Alerts,
     Command,
@@ -35,6 +37,7 @@ from imp.remote.daemon.commands import (
     Replay,
     Reply,
     Response,
+    Restart,
     Resume,
     Subscribe,
     Unsubscribe,
@@ -281,8 +284,10 @@ def _sender_worker(
 async def _handle_command(
     command: Command, control: ControlPlane, responses: queue.Queue[Response],
     alert_all: AlertAll | None = None,
+    request_restart: Callable[[], None] | None = None,
 ) -> None:
     alert_all = alert_all if alert_all is not None else AlertAll()
+    request_restart = request_restart if request_restart is not None else (lambda: None)
     if isinstance(command, Reply):
         handle = handle_for(command.quest_id)
         try:
@@ -367,6 +372,8 @@ async def _handle_command(
             responses.put(Notice(ALERTS_OFF_REPLY))
     elif isinstance(command, Help):
         responses.put(Notice(HELP_TEXT))
+    elif isinstance(command, Restart):
+        request_restart()
     elif isinstance(command, Notice):
         responses.put(command)
 
@@ -374,6 +381,7 @@ async def _handle_command(
 async def _dispatch_inbound(
     inbound: queue.Queue[Command], control: ControlPlane,
     responses: queue.Queue[Response], stop: threading.Event, alert_all: AlertAll,
+    request_restart: Callable[[], None] | None = None,
 ) -> None:
     def _get() -> Command | None:
         while not stop.is_set():
@@ -389,7 +397,8 @@ async def _dispatch_inbound(
             return
         _log.info("routing command: %r", command)
         try:
-            await _handle_command(command, control, responses, alert_all)
+            await _handle_command(
+                command, control, responses, alert_all, request_restart)
         except Exception:
             _log.warning("command failed: %r", command, exc_info=True)
 
@@ -421,7 +430,7 @@ async def deliver_to_session(
 async def run_daemon(
     control_root: Path,
     *,
-    env: Mapping[str, str] | None = None,
+    env: MutableMapping[str, str] | None = None,
     make_adapter: Callable[
         [Mapping[str, str], Callable[[Command], None], Subscriptions, AlertAll,
          Callable[[str], bool]],
@@ -434,10 +443,18 @@ async def run_daemon(
     resume: Callable[[str], str] | None = None,
     install_signals: bool = True,
     shutdown: anyio.Event | None = None,
-) -> None:
+) -> bool:
     """Run the daemon until shutdown: bind socket, own adapter, relay both directions."""
     env = os.environ if env is None else env
     shutdown = anyio.Event() if shutdown is None else shutdown
+    restarted = env.get("IMP_REMOTE_RESTARTED") == "1"
+    env.pop("IMP_REMOTE_RESTARTED", None)
+    restart_requested: list[bool] = [False]
+
+    def request_restart() -> None:
+        restart_requested[0] = True
+        shutdown.set()
+
     deliver = deliver or (lambda cid, text: deliver_to_session(control_root, cid, text))
     create = create or (lambda prompt: spawn.create_quest(control_root, prompt))
     list_quests = list_quests or (lambda: discover.list_quests(control_root))
@@ -504,10 +521,14 @@ async def run_daemon(
             daemon=True)
         poll_thread.start()
         sender_thread.start()
+        if restarted:
+            responses.put(Notice(RESTART_CONFIRMATION))
         async with anyio.create_task_group() as tg:
             tg.start_soon(hub.serve)
             tg.start_soon(supervisor.run)
-            tg.start_soon(_dispatch_inbound, inbound, control, responses, stop, alert_all)
+            tg.start_soon(
+                _dispatch_inbound, inbound, control, responses, stop, alert_all,
+                request_restart)
             if install_signals:
                 tg.start_soon(_await_shutdown_signals, shutdown)
             try:
@@ -528,6 +549,7 @@ async def run_daemon(
             spath.unlink()
         remove_pid(control_root)
         _remove_file_logging(log_handlers)
+    return restart_requested[0]
 
 
 def start_daemon(control_root: Path) -> int:
@@ -555,10 +577,15 @@ def start_daemon(control_root: Path) -> int:
                         "check remote.driver.name in your config")
         return 2
     try:
-        anyio.run(run_daemon, control_root)
+        restart = anyio.run(run_daemon, control_root)
     except ConfigError as exc:
         _emit_cli_error(f"remote-control not configured: {exc}")
         return 2
+    if restart:
+        os.environ["IMP_REMOTE_RESTARTED"] = "1"
+        os.execv(
+            sys.executable,
+            [sys.executable, "-m", "imp", "remote-control", "start"])
     return 0
 
 
