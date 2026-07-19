@@ -2569,11 +2569,12 @@ def resolve_display_status(
     return status
 
 
-# Row = (id, status, step, last_activity, title, created_at, step_label, phase_label).
-# created_at is the trailing sort key only; step_label + phase_label feed the
-# merged STATUS cell's ` (phase · step)` suffix (see quest_row). The step slot
-# stays the RAW step name so imp list keeps printing it.
-_Row = tuple[str, str, str, str, str, str, str | None, str | None]
+# Row = (id, status, step, last_activity, title, created_at, step_label,
+# phase_label, started_at). created_at is a sort key; started_at (persisted,
+# may be None) keys the in-flight ascending sort. step_label + phase_label feed
+# the merged STATUS cell's ` (phase · step)` suffix (see quest_row). The step
+# slot stays the RAW step name so imp list keeps printing it.
+_Row = tuple[str, str, str, str, str, str, str | None, str | None, str | None]
 
 
 
@@ -2611,7 +2612,7 @@ def _status_row(quest_id: str, state_json: bytes, quest_json: bytes,
         meta = json.loads(quest_json)
         return (quest_id, st["status"], st.get("step") or "-", last_activity,
                 meta["title"], meta["created_at"], st.get("step_label"),
-                st.get("phase_label"))
+                st.get("phase_label"), st.get("started_at"))
     except (json.JSONDecodeError, KeyError, TypeError):
         return None
 
@@ -2678,7 +2679,7 @@ def _completed_rows(control: Path, live_ids: set[str] | None = None) -> list[_Ro
     for r in make_store(control).completed_rows():
         if r.quest_id in live or r.status in _INFLIGHT:
             continue
-        rows.append((r.quest_id, r.status, r.step, r.last, r.title, r.created, None, None))
+        rows.append((r.quest_id, r.status, r.step, r.last, r.title, r.created, None, None, None))
     return rows
 
 
@@ -2686,7 +2687,7 @@ def _shelved_rows(control: Path, live_ids: set[str] | None = None) -> list[_Row]
     """Shelved conversations — archived final status `paused` with no live home —
     for the `--all` history block. Mirrors _completed_rows' live-id dedup."""
     live = {r[0] for r in _status_rows(control)} if live_ids is None else live_ids
-    return [(r.quest_id, r.status, r.step, r.last, r.title, r.created, None, None)
+    return [(r.quest_id, r.status, r.step, r.last, r.title, r.created, None, None, None)
             for r in make_store(control).completed_rows()
             if r.status == "paused" and r.quest_id not in live]
 
@@ -3084,7 +3085,7 @@ def _backlog_rows(control: Path, scanned: list[HomeDigest] | None = None) -> lis
         created = meta.get("created_at", "")
         blocked = "" if ready else "blocked"
         rows.append((h.quest_id, origin, blocked, h.last_iso,
-                     meta.get("title") or "", created, blocked or None, None))
+                     meta.get("title") or "", created, blocked or None, None, None))
     return rows
 
 

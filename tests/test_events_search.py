@@ -109,9 +109,9 @@ class _FakeStore:
 
 
 def _row(cid: str, title: str, last: str = "2026-06-11T00:00:00+00:00",
-         ) -> tuple[str, str, str, str, str, str, str | None, str | None]:
+         ) -> tuple[str, str, str, str, str, str, str | None, str | None, str | None]:
     return (cid, "planning", "spec", last, title,
-            "2026-06-01T00:00:00+00:00", None, None)
+            "2026-06-01T00:00:00+00:00", None, None, None)
 
 
 def test_events_search_active_includes_only_quests_with_matching_events(

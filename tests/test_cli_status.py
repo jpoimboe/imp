@@ -52,7 +52,7 @@ def test_status_row_carries_step_label_as_seventh_element(tmp_path: Path) -> Non
     _seed_control(tmp_path)
     Quest.create(tmp_path, title="A", quest_id="alpha", base_branch="main")
     row = next(r for r in _status_rows(tmp_path) if r[0] == "alpha")
-    assert len(row) == 8
+    assert len(row) == 9
     assert row[6] is None      # stub step has no label → step_label honestly None
     assert row[7] is None      # stub step has no phase label
 

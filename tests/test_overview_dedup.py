@@ -176,7 +176,7 @@ def test_status_row_carries_phase_label() -> None:
                         "phase_label": "P"}).encode()
     quest = json.dumps({"title": "T", "created_at": "2026-06-20T11:00:00+00:00"}).encode()
     row = m._status_row("cid", state, quest, "2026-06-20T11:00:00+00:00")
-    assert len(row) == 8
+    assert len(row) == 9
     assert row[7] == "P"
 
 
@@ -189,7 +189,7 @@ def test_completed_rows_pad_phase_label_slot(tmp_path: Path, monkeypatch) -> Non
         lambda control: [("cid", "completed", "-", "iso", "Title", "created", None)])
     monkeypatch.setattr(m, "_status_rows", lambda control: [])
     rows = m._completed_rows(tmp_path)
-    assert rows == [("cid", "completed", "-", "iso", "Title", "created", None, None)]
+    assert rows == [("cid", "completed", "-", "iso", "Title", "created", None, None, None)]
 
 
 def test_history_rows_threads_live_ids(tmp_path: Path) -> None:
