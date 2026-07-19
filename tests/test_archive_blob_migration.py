@@ -214,3 +214,48 @@ def test_migrate_on_non_tty_emits_nothing_and_migrates(
     rec = record.read_record(archive.records_root(tmp_path), "old006")
     assert rec is not None
     assert rec["events_hash"] != old_hash  # blob still rewritten / record repointed
+
+
+# A triad-schema (already-migrated) event list: migrate_events is a no-op on it,
+# so the migrated==events guard would `continue` — the started_at backfill must
+# still run for it.
+_TRIAD = [
+    {"id": "t0", "parent_id": None, "agent_id": None, "timestamp": "2026-06-02T00:00:00+00:00",
+     "type": "quest_created", "payload": {"id": "x", "title": ""}},
+    {"id": "t1", "parent_id": None, "agent_id": "A", "timestamp": "2026-06-02T03:00:00+00:00",
+     "type": "user_message",
+     "payload": {"role": "user", "subtype": "intent",
+                 "content": [{"type": "text", "text": "hi"}]}},
+]
+
+
+def _final_state_of(control: Path, cid: str) -> dict:
+    rec = record.read_record(archive.records_root(control), cid)
+    assert rec is not None
+    return rec["final_state"]
+
+
+def test_migrate_backfills_started_at_into_final_state(tmp_path: Path) -> None:
+    _seed_old_archived_quest(tmp_path, "sa001", _OLD)
+
+    archive.ensure_current(tmp_path)
+
+    fs = _final_state_of(tmp_path, "sa001")
+    # First user_message in the triad-migrated _OLD blob is the opening intent (T0).
+    assert fs["started_at"] == "T0"
+    assert archive.data_version_path(tmp_path).read_text().strip() == str(
+        archive._DATA_VERSION)
+
+
+def test_backfill_runs_for_already_triad_record_past_the_guards(tmp_path: Path) -> None:
+    # An already-triad blob: migrate_events is a no-op (migrated == events), so the
+    # existing guard would skip it. The started_at backfill must still land.
+    _seed_old_archived_quest(tmp_path, "sa002", _TRIAD)
+
+    archive._migrate_archive_blobs(tmp_path)
+
+    assert _final_state_of(tmp_path, "sa002")["started_at"] == "2026-06-02T03:00:00+00:00"
+
+
+def test_data_version_bumped_to_two(tmp_path: Path) -> None:
+    assert archive._DATA_VERSION == 2
