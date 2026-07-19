@@ -418,3 +418,23 @@ async def test_restart_invokes_request_restart_and_enqueues_nothing() -> None:
         request_restart=lambda: calls.append("restart"))
     assert calls == ["restart"]
     assert responses.empty()
+
+
+@pytest.mark.anyio
+async def test_dispatch_inbound_threads_request_restart_to_handler() -> None:
+    stop = threading.Event()
+    inbound: queue.Queue = queue.Queue()
+    inbound.put(Restart())
+    control = FakeControl()
+    responses: queue.Queue = queue.Queue()
+    calls: list[str] = []
+
+    def request_restart() -> None:
+        calls.append("restart")
+        stop.set()
+
+    await _dispatch_inbound(
+        inbound, control, responses, stop, AlertAll(), request_restart)
+
+    assert calls == ["restart"]
+    assert responses.empty()
