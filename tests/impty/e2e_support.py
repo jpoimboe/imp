@@ -8,6 +8,9 @@ import sys
 from pathlib import Path
 from typing import Any
 
+# Outer subprocess cap, just under the 240s pytest-timeout ceiling: connect 240 >= 235 < 240.
+E2E_SUBPROCESS_TIMEOUT = 235
+
 
 def can_pty() -> bool:
     try:
@@ -24,6 +27,8 @@ def clean_env(**overrides: str) -> dict[str, str]:
     """Inherited env with outer ``IMP_*`` stripped (so an imp-on-imp run can't leak
     its engine vars into the spawned child), plus the given overrides."""
     env = {k: v for k, v in os.environ.items() if not k.startswith("IMP_")}
+    # Baked before overrides so an explicit caller override still wins.
+    env["IMP_SESSION_CONNECT_TIMEOUT"] = "240"
     env.update(overrides)
     return env
 

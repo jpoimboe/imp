@@ -5,7 +5,12 @@ import subprocess
 import sys
 from pathlib import Path
 
-from tests.impty.e2e_support import clean_env, seed_minimal_repo, write_imp_shim
+from tests.impty.e2e_support import (
+    E2E_SUBPROCESS_TIMEOUT,
+    clean_env,
+    seed_minimal_repo,
+    write_imp_shim,
+)
 
 
 def test_seed_minimal_repo_runs_real_imp_new_to_a_scripted_side_effect(
@@ -75,3 +80,18 @@ def test_seed_default_repo_installs_the_real_default_workflow(tmp_path: Path) ->
     assert (wf / "scripts" / "cleanup.sh").is_file()
     assert (wf / "scripts" / "run-verify.sh").is_file()
     assert (wf / "agents" / "spec-finalizer.md").is_file()
+
+
+def test_clean_env_bakes_the_connect_budget() -> None:
+    env = clean_env()
+    assert env["IMP_SESSION_CONNECT_TIMEOUT"] == "240"
+
+
+def test_clean_env_explicit_connect_override_wins() -> None:
+    env = clean_env(IMP_SESSION_CONNECT_TIMEOUT="5")
+    assert env["IMP_SESSION_CONNECT_TIMEOUT"] == "5"
+
+
+def test_e2e_subprocess_timeout_is_below_the_pytest_ceiling() -> None:
+    # 235 < the 240s pytest-timeout ceiling, so the child is killed with captured output.
+    assert E2E_SUBPROCESS_TIMEOUT == 235
