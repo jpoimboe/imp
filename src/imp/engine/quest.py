@@ -18,10 +18,10 @@ from imp.engine import worktree
 from imp.engine.errors import LayoutMismatch, LoadError, LoadErrors
 from imp.engine.event_migrations import migrate_events
 from imp.engine.seed import seed_workflow_start
-from imp.engine.state import JsonlEventLog, State, parse_events_jsonl
+from imp.engine.state import JsonlEventLog, State, classify_pause_halt, parse_events_jsonl
 from imp.engine.types import SourceLoc
 
-LAYOUT_VERSION = 7  # bump in the SAME commit as any breaking quest-home layout/schema change
+LAYOUT_VERSION = 8  # bump in the SAME commit as any breaking quest-home layout/schema change
 
 
 def _write_quest_json(meta_path: Path, meta: dict[str, Any]) -> None:
@@ -152,6 +152,21 @@ def _rewrite_events_jsonl(path: Path, events: list[dict[str, Any]]) -> None:
         raise
 
 
+def _rewrite_state_json(state_path: Path, data: dict[str, Any]) -> None:
+    """Atomically rewrite state.json (tmp file, fsync, os.replace); mirrors State.save."""
+    fd, tmp_name = tempfile.mkstemp(prefix=".state-", dir=state_path.parent)
+    try:
+        with os.fdopen(fd, "w") as f:
+            json.dump(data, f, indent=2, sort_keys=True)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp_name, state_path)
+    except BaseException:
+        with contextlib.suppress(FileNotFoundError):
+            os.unlink(tmp_name)
+        raise
+
+
 def _migrate_v5_to_v6(quest_dir: Path) -> None:
     """v5->v6: rewrite events.jsonl from the pre-triad schema to the triad schema
     (hutu62) via migrate_events, then stamp layout_version. The event rewrite
@@ -189,6 +204,44 @@ def _migrate_v6_to_v7(quest_dir: Path) -> None:
     _write_quest_json(meta_path, meta)
 
 
+def _backfill_halt_condition(events_path: Path) -> str | None:
+    """The last workflow_paused reason -> halt-condition, via the shared
+    classifier (interrupt_reason wins -> clean). None when there is no such event."""
+    if not events_path.exists():
+        return None
+    last: dict[str, Any] | None = None
+    for ev in parse_events_jsonl(events_path.read_bytes()):
+        if ev.get("type") == "workflow_paused":
+            last = ev
+    if last is None:
+        return None
+    payload = last.get("payload") or {}
+    return classify_pause_halt(payload.get("reason", ""), payload.get("interrupt_reason"))
+
+
+def _migrate_v7_to_v8(quest_dir: Path) -> None:
+    """v7->v8: state.json gained `halt_condition`. Backfill it for a paused live
+    home from the last workflow_paused reason so a not-live failure reads `error`
+    and a clean stop leaves it None (displayed as paused); a human interrupt reads
+    clean regardless of the engine reason. Non-paused homes need no backfill (the
+    field auto-defaults None). The state rewrite precedes the version stamp so a
+    partial failure re-runs. The archive is deliberately untouched — archived
+    display derives from final_state.status, never the halt-condition."""
+    state_path = quest_dir / "state" / "state.json"
+    if state_path.exists():
+        state_data = json.loads(state_path.read_text())
+        if (state_data.get("status") == "paused"
+                and state_data.get("halt_condition") is None):
+            halt = _backfill_halt_condition(quest_dir / "events.jsonl")
+            if halt is not None:
+                state_data["halt_condition"] = halt
+                _rewrite_state_json(state_path, state_data)
+    meta_path = quest_dir / "quest.json"
+    meta = json.loads(meta_path.read_text())
+    meta["layout_version"] = 8
+    _write_quest_json(meta_path, meta)
+
+
 _MIGRATIONS: dict[tuple[int, int], Callable[[Path], None]] = {
     (1, 2): _migrate_v1_to_v2,
     (2, 3): _migrate_v2_to_v3,
@@ -196,6 +249,7 @@ _MIGRATIONS: dict[tuple[int, int], Callable[[Path], None]] = {
     (4, 5): _migrate_v4_to_v5,
     (5, 6): _migrate_v5_to_v6,
     (6, 7): _migrate_v6_to_v7,
+    (7, 8): _migrate_v7_to_v8,
 }
 
 
