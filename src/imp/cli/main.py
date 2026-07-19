@@ -1054,6 +1054,7 @@ async def _run_fresh_session(
         return await run_session_client(
             quest, driver=driver, coord=coord, solicit=solicit,
             status=status, non_interactive=True,
+            leave_mode=quest.create_mode,
             autonomous=autonomous)
 
     async def _first(leave_state: dict[str, str]) -> int:
@@ -1070,6 +1071,7 @@ async def _run_fresh_session(
         return await run_session_client(
             quest, driver=driver, coord=coord, solicit=solicit,
             status=status, leave_state=leave_state,
+            leave_mode=quest.create_mode,
             autonomous=autonomous)
 
     return await _clear_loop(quest.control_root, first=_first)
@@ -1279,6 +1281,7 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
             quest, driver=driver, coord=coord, solicit=solicit,
             status=status,
             title=term_title,
+            leave_mode=leave_mode,
             non_interactive=True, autonomous=autonomous, model=opening_model)
 
     if not header_printed:
@@ -1397,7 +1400,8 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
         solicit = make_headless_solicit(getattr(args, "message", None), coord)
         return await run_session_client(
             quest, driver=driver, coord=coord, solicit=solicit,
-            resume=True, status=status, non_interactive=True, autonomous=autonomous)
+            resume=True, status=status, non_interactive=True,
+            leave_mode=quest.create_mode, autonomous=autonomous)
     if not getattr(args, "message", None):
         question = bare_turn_end_question(quest)
         if question is not None:
@@ -1421,6 +1425,7 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
         return await run_session_client(
             quest, driver=driver, coord=coord, solicit=solicit,
             resume=True, status=status, leave_state=leave_state,
+            leave_mode=quest.create_mode,
             autonomous=autonomous)
 
     return await _clear_loop(quest.control_root, first=_first)
@@ -1497,6 +1502,7 @@ async def _resume_inert(
             return await run_session_client(
                 quest, driver=driver, coord=coord, solicit=solicit,
                 resume=True, status=status, leave_state=leave_state,
+                leave_mode=quest.create_mode,
                 title=term_title, autonomous=autonomous)
 
         return await _clear_loop(quest.control_root, first=_first)

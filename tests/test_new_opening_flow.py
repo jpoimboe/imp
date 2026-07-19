@@ -510,3 +510,33 @@ async def test_create_draft_receives_create_mode_from_leave_mode(
 
     assert rc == 0
     assert captured["create_mode"] == expected
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("leave_mode", ["chat", "new"])
+async def test_headless_new_threads_leave_mode_to_run_session_client(
+    stub_new, monkeypatch, leave_mode,
+) -> None:
+    m = stub_new
+    monkeypatch.setattr(m, "_select_headless", lambda args: (True, False))
+    monkeypatch.setattr(m, "_print_run_header", lambda *a, **k: None)
+    monkeypatch.setattr(m, "make_headless_solicit", lambda *a, **k: None)
+    monkeypatch.setattr(m, "LiveStatus", lambda *a, **k: SimpleNamespace())
+    monkeypatch.setattr(m, "LiveDriver", lambda *a, **k: SimpleNamespace())
+
+    captured: dict[str, object] = {}
+
+    async def _cap(*a: object, **k: object) -> int:
+        captured.update(k)
+        return 0
+
+    monkeypatch.setattr(m, "run_session_client", _cap)
+
+    args = Namespace(
+        description=None, idea=None, workflow=None, non_interactive=True,
+        title=None, opening="build it", message=None, base=None,
+        background=False, depends_on=None)
+    rc = await m._async_cmd_new(args, leave_mode=leave_mode)
+
+    assert rc == 0
+    assert captured["leave_mode"] == leave_mode
