@@ -85,12 +85,12 @@ A **`max_loops` pause at the `verify` step** means the verify
 triage did **not converge** — an unrecognized flake or a hard regression neither fixed
 nor tolerated. Read it as a non-converging triage needing a human, not a transient.
 
-## 1a. Cover-check — drop a redundant ask already tracked elsewhere
+## 1a. Already-tracked check — drop a redundant ask already tracked elsewhere
 
-Before §2 decides, run a **cover-check** over the **verify-family tolerations** in the
+Before §2 decides, run an **already-tracked check** over the **verify-family tolerations** in the
 §1 surfaced set — the `— needs-decision:` lines whose source is `verify` /
 `converge-verify` / `integration-verify`. Design/spec `— needs-decision:` items authored
-by `spec-finalizer` / `plan-writer` are **never** cover-checked; they always surface.
+by `spec-finalizer` / `plan-writer` are **never** checked for an existing tracker; they always surface.
 Per toleration, ask: is the failing test **already tracked or fixed by another
 active, backlog, or completed quest**? If so, re-asking a human is redundant. A **two-stage funnel**:
 
@@ -102,7 +102,7 @@ active, backlog, or completed quest**? If so, re-asking a human is redundant. A 
    the fork point is set, the search also scopes the completed
    zone with `--merged-after`, which the CLI keeps to only completed quests whose merge landed
    **after** the fork point (a fix that predates it was already in this quest's tree when
-   verify saw the flake, so it is not a valid cover); when the fork point is empty, it
+   verify saw the flake, so it is not a valid tracker); when the fork point is empty, it
    falls back to the active + backlog search only and the flake surfaces, safely.
 2. **Confirm intent.** For each candidate, read its stated purpose — `imp show <id>` for
    a backlog or completed quest's title + description (which now also shows the quest's
@@ -110,22 +110,22 @@ active, backlog, or completed quest**? If so, re-asking a human is redundant. A 
    genuinely **about fixing or tracking this specific test's flakiness**, matched on identity,
    not an incidental mention.
 
-**Fail safe = surface, never suppress.** The cover-check only ever *removes* a human ask,
+**Fail safe = surface, never suppress.** The already-tracked check only ever *removes* a human ask,
 so its default is *not* to remove one. Only a **positively confirmed** tracker counts: no candidate,
-an ambiguous one, or one you cannot verify → the item stays uncovered and is surfaced as
-an untracked toleration. On a **confirmed cover**, rewrite the line to
-`- [x] DEFERRED <src>: <desc> [scope: …] — covered-by <id>`, drop it from `open_items`,
-neither present it at the gate nor seed a quest for it, and note the auto-cover in
-`comments`.
+an ambiguous one, or one you cannot verify → the item stays untracked and is surfaced as
+an untracked toleration. On a **confirmed tracker**, rewrite the line to
+`- [x] DEFERRED <src>: <desc> [scope: …] — tracked-by <id>`, drop it from `open_items`,
+neither present it at the gate nor seed a quest for it, and note in `comments` that the
+failing test is already tracked by quest <id>.
 
-**Back-link the cover.** When the cover target is a **backlog quest**, record the
+**Back-link the tracker.** When the tracker is a **backlog quest**, record the
 linkage on it so its future owner sees the corroborating hit:
 `imp edit <id> --append-intent "[{{ quest.id }}] <note>"`, where `<note>` is just
 a few plain words naming the shared failure (e.g. `also hit this failing test`).
 Best-effort: never block the merge; if rejected, note it in `comments`. Since
-`— covered-by` is terminal (below), the back-link is written at most once.
+`— tracked-by` is terminal (below), the back-link is written at most once.
 
-`— covered-by <id>` is **terminal**, joining `— seeded <id>` / `— ignored-at-gate` /
+`— tracked-by <id>` is **terminal**, joining `— seeded <id>` / `— ignored-at-gate` /
 `— dismissed`: a later `deferred-sweep` or `finalize` pass treats it as inert and never
 re-raises it.
 
@@ -133,13 +133,13 @@ re-raises it.
 
 {% if run.autonomous %}
 **Autonomous run — no human at the gate.** Do not yield or solicit a decision. The §1a
-cover-check has already run, so any verify-family toleration confirmed as tracked
-elsewhere is marked `— covered-by <id>` and is **not** re-seeded. Hand every remaining
+already-tracked check has already run, so any verify-family toleration confirmed as tracked
+elsewhere is marked `— tracked-by <id>` and is **not** re-seeded. Hand every remaining
 **needs-decision** item (the closed set from §1) to the backlog: run
 `imp new --backlog "<short title>" --depends-on {{ quest.id }} "<self-contained brief that needs no other context>"` — group related items into one quest or
 split unrelated ones, whatever fits. When the item is a verify-family toleration,
 the brief must embed the failing test's identity (node id / name / signature) so a
-later quest's cover-check matches it instead of seeding a duplicate. Then rewrite each
+later quest's already-tracked check matches it instead of seeding a duplicate. Then rewrite each
 `deferred.md` line to `- [x] DEFERRED <src>: <desc> [scope: …] — seeded <new-quest-id>`.
 With every item now trusted-and-merged or seeded, take the **merge** disposition. The one
 exception is an **unrecoverable problem** (e.g. the non-converging verify-triage case
@@ -148,7 +148,7 @@ Then route on the dispositions below.
 {% else %}
 {% if vars.auto_merge %}
 **Auto-merge — this run merges clean quests without asking.** When the §1
-**needs-decision** closed set — already reduced by the §1a cover-check — is empty AND
+**needs-decision** closed set — already reduced by the §1a already-tracked check — is empty AND
 there is no unrecoverable problem (e.g. the non-converging verify-triage case above), do
 **not** open the live gate or solicit a decision: take the **merge** disposition directly
 and route on the dispositions below. Still emit the full audit record (`verify_status` /
@@ -190,17 +190,17 @@ take the items in whatever order and grouping the discussion warrants. For each 
     `- [x] DEFERRED <src>: <desc> [scope: …] — seeded <new-quest-id>`, and tell them it is
     startable via `imp resume <new-quest-id>` once this quest merges. When the item is a
     verify-family toleration, the brief must embed the failing test's identity
-    (node id / name / signature) so a later quest's cover-check can match it.
+    (node id / name / signature) so a later quest's already-tracked check can match it.
   - **fold into existing backlog quest** — the item belongs with an existing
     backlog quest already tracking this class of work. Get its id, append a
     linking note to its intent
     (`imp edit <id> --append-intent "[{{ quest.id }}] <note>"`, `<note>` a few
     plain words naming the shared work), and rewrite the line to
-    `- [x] DEFERRED <src>: <desc> [scope: …] — covered-by <id>`. Best-effort
+    `- [x] DEFERRED <src>: <desc> [scope: …] — tracked-by <id>`. Best-effort
     append — never block the merge; if rejected, note it in `comments`. Reach for
     this over **defer** when a home already exists (not distinct new work); it is
-    the human-gate counterpart to the §1a auto-cover, for items §1a did not
-    positively confirm — a design/spec item (never cover-checked) or a
+    the human-gate counterpart to the §1a already-tracked check, for items §1a did not
+    positively confirm — a design/spec item (never checked for an existing tracker) or a
     verify-family toleration whose §1a identity match was inconclusive.
   - **ignore** — drop it. Rewrite the line to
     `- [x] DEFERRED <src>: <desc> [scope: …] — ignored-at-gate`.
@@ -211,7 +211,7 @@ take the items in whatever order and grouping the discussion warrants. For each 
   not minimize it ("negligible", "within normal noise") or argue it down to defend your
   recommendation. One restrained line.
 
-`seeded <id>`, `ignored-at-gate`, and `covered-by <id>` are all **terminal**: a later
+`seeded <id>`, `ignored-at-gate`, and `tracked-by <id>` are all **terminal**: a later
 `deferred-sweep` or `finalize` pass treats them like `dismissed` and never re-raises
 them, so a rework re-surfaces only the fix-now work — no double-seeding, no re-asking.
 

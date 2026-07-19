@@ -104,13 +104,13 @@ def test_deferred_sweep_triage_is_single_source() -> None:
     assert "wired in a later change" not in low
 
 
-def test_deferred_sweep_treats_covered_by_as_terminal() -> None:
+def test_deferred_sweep_treats_tracked_by_as_terminal() -> None:
     body = SWEEP.read_text()
     low = body.lower()
     # The gate's third terminal marker joins seeded / ignored-at-gate.
     assert "three further terminal markers" in low
-    assert "— covered-by <quest-id>" in body
+    assert "— tracked-by <quest-id>" in body
     # It is listed in the drain-only-untagged invariant's terminal-tag set.
-    assert "`— ignored-at-gate` / `— covered-by`)" in body
+    assert "`— ignored-at-gate` / `— tracked-by`)" in body
     # Like the sibling gate markers, it is inert to the sweep.
     assert "inert" in low

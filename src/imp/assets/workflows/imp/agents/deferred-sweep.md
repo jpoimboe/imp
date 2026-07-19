@@ -27,13 +27,13 @@ Each deferred item is a task-list line under a `## Deferred Followups` heading, 
 
 Parse only lines beginning `- [ ] DEFERRED `. Leave **malformed entries exactly as-is** — fail-safe: the item stays surfaced, never silently dropped; never reformat or delete a line you cannot parse. The `[scope: …]` tag is preserved metadata, not a ceiling — it does not constrain what you may fix.
 
-Three further terminal markers appear on already-checked lines, written by the `finalize` merge gate: `— seeded <quest-id>` (handed to a follow-up backlog quest), `— ignored-at-gate` (dropped by a human), and `— covered-by <quest-id>` (another active or backlog quest already tracks the failing test). Like `— dismissed`, they are **inert** to this sweep — they sit on `- [x]` lines, so the `- [ ] DEFERRED ` parse skips them.
+Three further terminal markers appear on already-checked lines, written by the `finalize` merge gate: `— seeded <quest-id>` (handed to a follow-up backlog quest), `— ignored-at-gate` (dropped by a human), and `— tracked-by <quest-id>` (another active or backlog quest already tracks the failing test). Like `— dismissed`, they are **inert** to this sweep — they sit on `- [x]` lines, so the `- [ ] DEFERRED ` parse skips them.
 
 ## Pre-classified human-decision items — pass through untouched
 
 A `- [ ] DEFERRED ` line already carrying a `— needs-decision: <why>` marker is a **pre-classified human decision** — authored by `spec-finalizer`/`plan-writer`, recorded by a prior sweep pass, or born as a **toleration** at a gate. **Leave the line exactly as-is**: do not re-evaluate it on the risk gate, do not fix it, and **never dismiss it**. It must survive verbatim to the `finalize` merge gate's per-item walk.
 
-**Drain-only-untagged invariant.** This sweep drains **only entries with no disposition tag** — a `- [ ] DEFERRED ` line with NO trailing `— …` marker. Any line carrying `— needs-decision:` (including a toleration) or a terminal tag (`— fixed` / `— dismissed` / `— seeded` / `— ignored-at-gate` / `— covered-by`) is already triaged; leave it untouched. Pinned so no future pruning rule can silently sweep a toleration out mid-gate.
+**Drain-only-untagged invariant.** This sweep drains **only entries with no disposition tag** — a `- [ ] DEFERRED ` line with NO trailing `— …` marker. Any line carrying `— needs-decision:` (including a toleration) or a terminal tag (`— fixed` / `— dismissed` / `— seeded` / `— ignored-at-gate` / `— tracked-by`) is already triaged; leave it untouched. Pinned so no future pruning rule can silently sweep a toleration out mid-gate.
 
 ## Per item — gate on risk, not scope
 
