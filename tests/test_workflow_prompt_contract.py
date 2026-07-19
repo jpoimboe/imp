@@ -922,3 +922,28 @@ def test_finalize_covered_by_is_terminal_marker() -> None:
     assert "`covered-by <id>` are all **terminal**" in text
     assert "seeded <id>" in low
     assert "ignored-at-gate" in low
+
+
+def test_finalize_walks_fold_into_existing_backlog_quest_disposition() -> None:
+    text = FINALIZE.read_text()
+    low = text.lower()
+    # The human-gate walk now names four internal outcomes, not three. The phrase
+    # wraps across a newline in the prompt, so normalize whitespace before matching
+    # (a continuous-string assert spanning the break would never match).
+    normalized = " ".join(text.split())
+    assert "one of four **internal outcomes**" in normalized
+    assert "one of three **internal outcomes**" not in normalized
+    # The new fourth disposition is present, placed after the defer bullet.
+    assert "**fold into existing backlog quest**" in text
+    # Ordering: fold appears after defer and before ignore in the walk.
+    fold = low.index("fold into existing backlog quest")
+    defer = low.index("**defer** — hand it to a new backlog quest")
+    ignore = low.index("**ignore** — drop it")
+    assert defer < fold < ignore
+    # It reuses the existing terminal covered-by marker and the cross-quest
+    # intent back-link command — no new marker introduced. Scope these to the
+    # fold-bullet span so they guard THIS bullet, not §1a's pre-existing use of
+    # the same command/marker elsewhere in the prompt.
+    fold_bullet = text[fold:ignore]
+    assert "--append-intent" in fold_bullet
+    assert "— covered-by <id>" in fold_bullet

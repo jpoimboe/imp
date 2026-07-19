@@ -181,7 +181,7 @@ the conversation however reads best — there is no required one-item-per-turn c
 take the items in whatever order and grouping the discussion warrants. For each item:
 
 - Present the item in detail and give your **recommendation** — what you would do, and why.
-- Engage the human's natural-language response and map it onto one of three **internal
+- Engage the human's natural-language response and map it onto one of four **internal
   outcomes** — do not present these as a menu:
   - **fix** — fix before merge. Collect it into the rework brief and
     leave its `deferred.md` line `needs-decision` (it rides the rework, re-evaluated next pass).
@@ -191,6 +191,17 @@ take the items in whatever order and grouping the discussion warrants. For each 
     startable via `imp resume <new-quest-id>` once this quest merges. When the item is a
     verify-family toleration, the brief must embed the failing test's identity
     (node id / name / signature) so a later quest's cover-check can match it.
+  - **fold into existing backlog quest** — the item belongs with an existing
+    backlog quest already tracking this class of work. Get its id, append a
+    linking note to its intent
+    (`imp edit <id> --append-intent "[{{ quest.id }}] <note>"`, `<note>` a few
+    plain words naming the shared work), and rewrite the line to
+    `- [x] DEFERRED <src>: <desc> [scope: …] — covered-by <id>`. Best-effort
+    append — never block the merge; if rejected, note it in `comments`. Reach for
+    this over **defer** when a home already exists (not distinct new work); it is
+    the human-gate counterpart to the §1a auto-cover, for items §1a did not
+    positively confirm — a design/spec item (never cover-checked) or a
+    verify-family toleration whose §1a identity match was inconclusive.
   - **ignore** — drop it. Rewrite the line to
     `- [x] DEFERRED <src>: <desc> [scope: …] — ignored-at-gate`.
 - **Clarifying questions are first-class.** When the human asks to understand something
