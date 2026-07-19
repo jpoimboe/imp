@@ -62,3 +62,44 @@ def test_startup_sigint_exits_130_never_minus_2(tmp_path: Path) -> None:
         "KeyboardInterrupt was unhandled instead of exiting 130"
     )
     assert rc == 130, f"expected clean SIGINT exit 130, got {rc}"
+
+
+def test_console_script_startup_sigint_exits_130_never_minus_2(tmp_path: Path) -> None:
+    # Exercises the installed console-script entry-point *import* path
+    # (`from imp.__main__ import main; sys.exit(main())`), distinct from runpy's
+    # `-m imp` path. Hermetic: synthesizes the setuptools/hatch-style stub rather
+    # than depending on a pipx/editable-installed `imp` binary.
+    _seed_project(tmp_path)
+    env = os.environ.copy()
+    env["ANTHROPIC_API_KEY"] = "sk-ant-startup-sigint-stub"
+    _pypath = env.get("PYTHONPATH", "")
+    env["PYTHONPATH"] = _WORKTREE_SRC + (os.pathsep + _pypath if _pypath else "")
+
+    stub = tmp_path / "imp_console_stub.py"
+    stub.write_text(
+        "import sys\nfrom imp.__main__ import main\nsys.exit(main())\n",
+        encoding="utf-8",
+    )
+
+    proc = subprocess.Popen(
+        [sys.executable, str(stub), "new", "startup-sigint"],
+        cwd=tmp_path,
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        start_new_session=True,
+    )
+    try:
+        time.sleep(0.1)
+        os.killpg(proc.pid, signal.SIGINT)
+        rc = proc.wait(timeout=30)
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+            proc.wait()
+
+    assert rc != -2, (
+        "console-script process reaped killed-by-SIGINT (wait status -2): the "
+        "startup-window KeyboardInterrupt was unhandled instead of exiting 130"
+    )
+    assert rc == 130, f"expected clean SIGINT exit 130, got {rc}"

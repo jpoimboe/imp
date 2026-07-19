@@ -40,7 +40,7 @@ dev = [
 ]
 
 [project.scripts]
-imp = "imp.cli.main:main"
+imp = "imp.__main__:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/imp", "src/impty"]
