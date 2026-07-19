@@ -12,7 +12,7 @@ import anyio
 import pytest
 
 from imp.remote.daemon.alert_all import AlertAll
-from imp.remote.daemon.commands import Help, Notice, RESTART_CONFIRMATION, Restart
+from imp.remote.daemon.commands import RESTART_CONFIRMATION, Help, Notice, Restart
 from imp.remote.daemon.discover import socket_is_live, socket_path
 from imp.remote.daemon.runner import (
     _await_shutdown_signals,

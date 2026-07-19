@@ -36,8 +36,8 @@ from imp.remote.daemon.commands import (
     Notice,
     Replay,
     Reply,
-    Restart,
     Response,
+    Restart,
     Resume,
     Subscribe,
     Unsubscribe,
@@ -577,10 +577,15 @@ def start_daemon(control_root: Path) -> int:
                         "check remote.driver.name in your config")
         return 2
     try:
-        anyio.run(run_daemon, control_root)
+        restart = anyio.run(run_daemon, control_root)
     except ConfigError as exc:
         _emit_cli_error(f"remote-control not configured: {exc}")
         return 2
+    if restart:
+        os.environ["IMP_REMOTE_RESTARTED"] = "1"
+        os.execv(
+            sys.executable,
+            [sys.executable, "-m", "imp", "remote-control", "start"])
     return 0
 
 
