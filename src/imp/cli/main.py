@@ -62,7 +62,6 @@ from imp.engine.abandon import (
     tear_down_quest,
 )
 from imp.engine.archive import read as archive_read
-from imp.engine.awaiting_user_input import AwaitingUserInput
 from imp.engine.errors import LayoutMismatch, LoadError, LoadErrors
 from imp.engine.executor import RunResult
 from imp.engine.project_root import find_project_root
@@ -195,37 +194,26 @@ class SeedResolution(NamedTuple):
 
 
 def resolve_spec_seed(args: argparse.Namespace) -> SeedResolution:
-    """Resolve the first-turn seed source for `imp new`.
+    """Resolve the opening seed for `imp new`/`imp chat`.
 
-    A non-empty positional MESSAGE becomes the user's verbatim opening intent
-    (delivered unwrapped); otherwise there is no seed. A spec is named in the
-    positional MESSAGE and read by the workflow's opening step itself, never inlined here."""
+    The positional MESSAGE and --message are interchangeable aliases: either,
+    when non-empty, becomes the user's verbatim opening intent (delivered
+    unwrapped). Whitespace-only values are treated as absent. If both are
+    non-empty, raise SeedError. A spec is named in the opening message and read
+    by the workflow's opening step itself, never inlined here."""
     title = getattr(args, "title", None)
     opening = getattr(args, "opening", None)
+    message = getattr(args, "message", None)
 
-    if opening is not None and opening.strip():
-        return SeedResolution(title, opening)
+    opening = opening if (opening and opening.strip()) else None
+    message = message if (message and message.strip()) else None
 
-    return SeedResolution(title, None)
+    if opening is not None and message is not None:
+        raise SeedError(
+            "Pass the opening message once — as the positional argument or "
+            "--message, not both.")
 
-
-def make_message_reply_fn(message: str | None) -> Callable[[], Awaitable[str]]:
-    """Headless reply channel: yield the single --message once, then pause.
-
-    The first bare-turn-end solicit (live opener OR the awaiting_user_input
-    resume) consumes `message`; any later solicit in the same
-    invocation raises AwaitingUserInput, unwinding to a clean pause the operator
-    continues with another `imp resume <id> --message "..."`."""
-    delivered = False
-
-    async def _reply(*_a: object, **_k: object) -> str:
-        nonlocal delivered
-        if message is not None and not delivered:
-            delivered = True
-            return message
-        raise AwaitingUserInput()
-
-    return _reply
+    return SeedResolution(title, opening or message)
 
 
 # -- end-of-run status lines ------------------------------------------------
@@ -1276,7 +1264,7 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
                             width=_term_width, display_width=_display_width, status=status,
                             quest_id=quest.id, title=quest.title)
         coord = InterruptCoordinator()
-        solicit = make_headless_solicit(getattr(args, "message", None), coord)
+        solicit = make_headless_solicit(None, coord)
         return await run_session_client(
             quest, driver=driver, coord=coord, solicit=solicit,
             status=status,
@@ -3931,21 +3919,20 @@ def _build_parser() -> argparse.ArgumentParser:
         "opening", nargs="?", metavar="MESSAGE",
         help="Opening intent handed verbatim to the workflow's opening step "
              "as its first message; omit to start with an interactive prompt. "
-             "Distinct from --message, which is a headless reply to the first solicit.")
+             "May also be supplied via --message.")
     p_new.add_argument("--title", metavar="TEXT", default=None,
                        help="Set the quest title explicitly; the workflow's "
                             "opening step names the quest if omitted.")
     p_new.add_argument("--headless", action="store_true", dest="non_interactive",
-                       help="Run headless: no live prompt; supply the first reply "
-                            "via --message.")
+                       help="Run headless: no live prompt; supply the opening "
+                            "message via the positional argument or --message.")
     p_new.add_argument("--autonomous", action="store_true",
                        help="Auto-take the recommendation at recommendation-bearing "
                             "gates instead of confirming each; genuine intent-forks "
                             "still pause for a human. Independent of --headless.")
     p_new.add_argument("--message", metavar="TEXT", default=None,
-                       help="Headless reply consumed by the first bare-turn-end prompt; "
-                            "pause then resume with another --message. "
-                            "Requires --headless.")
+                       help="Alias for the positional opening message (seeds the "
+                            "opening step); convenient for headless/remote callers.")
     new_mode = p_new.add_mutually_exclusive_group()
     new_mode.add_argument("--backlog", metavar="TITLE", default=None, dest="idea",
                           help="File an idea for your backlog with this TITLE and "
@@ -3984,14 +3971,14 @@ def _build_parser() -> argparse.ArgumentParser:
         "opening", nargs="?", metavar="MESSAGE",
         help="Optional opening message; omit to start with an interactive prompt.")
     p_chat.add_argument("--headless", action="store_true", dest="non_interactive",
-                        help="Headless: no live prompt; supply the reply via --message.")
+                        help="Headless: no live prompt; supply the opening message "
+                             "via the positional argument or --message.")
     p_chat.add_argument("--autonomous", action="store_true",
                         help="Auto-take the recommendation at recommendation-bearing "
                              "gates instead of confirming each; genuine intent-forks "
                              "still pause for a human. Independent of --headless.")
     p_chat.add_argument("--message", metavar="TEXT", default=None,
-                        help="Headless reply consumed by the first bare-turn-end prompt; "
-                             "requires --headless.")
+                        help="Alias for the positional opening message.")
     p_chat.add_argument("--model", metavar="ARG", default=None, type=_model_arg_type,
                         help="Run the opening step under a chosen model "
                              "(provider:model or bare model); the same override as "

@@ -131,6 +131,21 @@ def test_bare_events_lists_the_search_sibling_on_stderr(
     assert "imp events search <query>" in captured.err
 
 
+def test_new_message_help_is_seed_alias(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setenv("COLUMNS", "200")
+    out = _help_for(["new", "-h"], capsys)
+    assert "Requires --headless" not in out
+    assert "Alias for the positional opening message" in out
+    assert "seeds the opening step" in out
+    assert "supply the opening message via the positional argument or --message" in out
+
+    chat_out = _help_for(["chat", "-h"], capsys)
+    assert "Alias for the positional opening message" in chat_out
+    assert "supply the opening message via the positional argument or --message" in chat_out
+
+
 def test_bare_remote_control_prints_full_help_on_stderr(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
 ) -> None:
