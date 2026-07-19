@@ -1,165 +1,108 @@
 # Code Review Reception
 
-## Overview
-
-Code review requires technical evaluation, not emotional performance.
-
-**Core principle:** Verify before implementing. Ask before assuming. Technical correctness over social comfort.
+Code review is technical evaluation, not emotional performance. **Verify before implementing, ask before assuming, technical correctness over social comfort.**
 
 ## Role in imp
 
-In imp's workflow, the `task-lead` agent acts as the adjudicator: it evaluates which reviewer findings are technically valid for this codebase and decides what to apply. The coder only applies findings that the task-lead has accepted. This skill governs that evaluation process — not rubber-stamping review feedback, but subjecting it to technical rigor.
+The `task-lead` adjudicates: it decides which reviewer findings are technically valid for this codebase and what to apply; the coder applies only accepted findings. This skill governs that evaluation — subject feedback to technical rigor, don't rubber-stamp it.
 
 ## The Response Pattern
 
 ```
-WHEN receiving code review feedback:
-
-1. READ: Complete feedback without reacting
-2. UNDERSTAND: Restate requirement in own words (or ask)
-3. VERIFY: Check against codebase reality
-4. EVALUATE: Technically sound for THIS codebase?
-5. RESPOND: Technical acknowledgment or reasoned pushback
-6. IMPLEMENT: One item at a time, test each
+1. READ: complete feedback without reacting
+2. UNDERSTAND: restate the requirement in your own words (or ask)
+3. VERIFY: check against codebase reality
+4. EVALUATE: technically sound for THIS codebase?
+5. RESPOND: technical acknowledgment or reasoned pushback
+6. IMPLEMENT: one item at a time, test each
 ```
 
 ## Forbidden Responses
 
-**NEVER:**
-- "You're absolutely right!" (performative, no technical content)
-- "Great point!" / "Excellent feedback!" (performative)
-- "Let me implement that now" (before verification)
+Never — performative, no technical content:
+- ❌ "You're absolutely right!"
+- ❌ "Great point!" / "Excellent feedback!"
+- ❌ "Let me implement that now" (before verification)
+- ❌ any gratitude — "Thanks for catching that!", "Thanks for [anything]"
 
-**INSTEAD:**
-- Restate the technical requirement
-- Ask clarifying questions
-- Push back with technical reasoning if wrong
-- Just start working (actions > words)
+Instead: restate the technical requirement, ask clarifying questions, push back with technical reasoning if wrong, or just start working. Actions > words — the code itself shows you heard the feedback.
 
 ## Handling Unclear Feedback
 
-```
-IF any item is unclear:
-  STOP - do not implement anything yet
-  ASK for clarification on unclear items
+If ANY item is unclear, STOP — implement nothing yet, ask for clarification on the unclear items. Items may be related; partial understanding produces wrong implementation.
 
-WHY: Items may be related. Partial understanding = wrong implementation.
 ```
-
-**Example:**
-```
-Reviewer: "Fix 1-6"
-You understand 1,2,3,6. Unclear on 4,5.
-
-❌ WRONG: Implement 1,2,3,6 now, ask about 4,5 later
-✅ RIGHT: "I understand items 1,2,3,6. Need clarification on 4 and 5 before proceeding."
+Reviewer: "Fix items 1-6", you understand 1,2,3,6, unclear on 4,5.
+❌ implement 1,2,3,6 now, ask 4,5 later
+✅ "Understand 1,2,3,6. Need clarification on 4 and 5 before implementing."
 ```
 
 ## Source-Specific Handling
 
-### From the user
-- **Trusted** - implement after understanding
-- **Still ask** if scope unclear
-- **No performative agreement**
-- **Skip to action** or technical acknowledgment
+**From the user** — trusted; implement after understanding. Still ask if scope is unclear. No performative agreement — skip to action or a technical acknowledgment.
 
-### From External Reviewers
+**From external reviewers** — be skeptical, but check carefully. Before implementing, check:
+- technically correct for THIS codebase?
+- breaks existing functionality?
+- is there a reason for the current implementation?
+- works on all platforms/versions?
+- does the reviewer understand the full context?
 
-```
-BEFORE implementing:
-  1. Check: Technically correct for THIS codebase?
-  2. Check: Breaks existing functionality?
-  3. Check: Reason for current implementation?
-  4. Check: Works on all platforms/versions?
-  5. Check: Does reviewer understand full context?
+Then escalate:
+- suggestion seems wrong → push back with technical reasoning
+- can't easily verify → "I can't verify this without [X]. Should I [investigate/ask/proceed]?"
+- conflicts with the user's prior decisions → stop and discuss with the user first
 
-IF suggestion seems wrong:
-  Push back with technical reasoning
+## YAGNI Check
 
-IF can't easily verify:
-  Say so: "I can't verify this without [X]. Should I [investigate/ask/proceed]?"
+When a reviewer suggests "implementing properly", grep the codebase for actual usage:
+- unused → "This endpoint isn't called. Remove it (YAGNI)?"
+- used → implement properly
 
-IF conflicts with the user's prior decisions:
-  Stop and discuss with the user first
-```
-
-**Rule:** "External feedback — be skeptical, but check carefully."
-
-## YAGNI Check for "Professional" Features
+You and the reviewer both report to the user; if the feature isn't needed, don't add it. **Scope:** YAGNI targets *speculative* unused features or abstractions, NOT a cheap defensive guard or assertion that hardens existing reachable code — that guard is cheap insurance, not a speculative feature.
 
 ```
-IF reviewer suggests "implementing properly":
-  grep codebase for actual usage
-
-  IF unused: "This endpoint isn't called. Remove it (YAGNI)?"
-  IF used: Then implement properly
+Reviewer: "Implement proper metrics tracking (DB, date filters, CSV export)"
+✅ "Grepped codebase — nothing calls this endpoint. Remove it (YAGNI)? Or is there usage I'm missing?"
 ```
-
-**Rule:** "You and reviewer both report to the user. If we don't need this feature, don't add it."
-
-**Scope:** YAGNI targets *unused features or abstractions you would build speculatively* — it does **not** cover a cheap defensive guard or assertion that hardens existing reachable code; that guard is cheap insurance, not a speculative feature.
 
 ## Implementation Order
 
 ```
-FOR multi-item feedback:
-  1. Clarify anything unclear FIRST
-  2. Then implement in this order:
-     - Blocking issues (breaks, security)
-     - Simple fixes (typos, imports)
-     - Complex fixes (refactoring, logic)
-  3. Test each fix individually
-  4. Verify no regressions
+Multi-item feedback:
+1. Clarify anything unclear FIRST
+2. Implement in order: blocking issues (breaks, security) → simple fixes (typos, imports) → complex fixes (refactoring, logic)
+3. Test each fix individually
+4. Verify no regressions
 ```
 
 ## When To Push Back
 
-Push back when:
-- Suggestion breaks existing functionality
-- Reviewer lacks full context
-- Violates YAGNI (unused feature)
-- Technically incorrect for this stack
-- Legacy/compatibility reasons exist
-- Conflicts with the user's architectural decisions
+Push back when the suggestion: breaks existing functionality; comes from a reviewer lacking full context; violates YAGNI (unused feature); is technically incorrect for this stack; conflicts with legacy/compatibility constraints; conflicts with the user's architectural decisions.
 
-**How to push back:**
-- Use technical reasoning, not defensiveness
-- Ask specific questions
-- Reference working tests/code
-- Involve the user if architectural
+How: technical reasoning not defensiveness; ask specific questions; reference working tests/code; involve the user if the matter is architectural.
+
+```
+Reviewer: "Remove legacy code"
+✅ "Checking... build target is 10.15+, this API needs 13+ — need legacy for backward compat. Fix the wrong bundle ID or drop pre-13 support?"
+```
 
 ## Acknowledging Correct Feedback
 
-When feedback IS correct:
-```
-✅ "Fixed. [Brief description of what changed]"
-✅ "Good catch - [specific issue]. Fixed in [location]."
-✅ [Just fix it and show in the code]
+State the fix, no gratitude (see Forbidden Responses):
+- ✅ "Fixed. [what changed]"
+- ✅ "Good catch — [issue]. Fixed in [location]."
+- ✅ just fix it and show it in the code
 
-❌ "You're absolutely right!"
-❌ "Great point!"
-❌ "Thanks for catching that!"
-❌ "Thanks for [anything]"
-❌ ANY gratitude expression
-```
-
-**Why no thanks:** Actions speak. Just fix it. The code itself shows you heard the feedback.
-
-**If you catch yourself about to write "Thanks":** DELETE IT. State the fix instead.
+If you catch yourself about to write "Thanks", delete it and state the fix instead.
 
 ## Gracefully Correcting Your Pushback
 
-If you pushed back and were wrong:
-```
-✅ "You were right - I checked [X] and it does [Y]. Implementing now."
-✅ "Verified this and you're correct. My initial understanding was wrong because [reason]. Fixing."
+If you pushed back and were wrong, state it factually:
+- ✅ "You were right — I checked [X] and it does [Y]. Implementing now."
+- ✅ "Verified this and you're correct. My initial understanding was wrong because [reason]. Fixing."
 
-❌ Long apology
-❌ Defending why you pushed back
-❌ Over-explaining
-```
-
-State the correction factually and move on.
+No long apology, no defending why you pushed back, no over-explaining — state the correction and move on.
 
 ## Common Mistakes
 
@@ -168,44 +111,11 @@ State the correction factually and move on.
 | Performative agreement | State requirement or just act |
 | Blind implementation | Verify against codebase first |
 | Batch without testing | One at a time, test each |
-| Assuming reviewer is right | Check if breaks things |
+| Assuming reviewer is right | Check if it breaks things |
 | Avoiding pushback | Technical correctness > comfort |
 | Partial implementation | Clarify all items first |
 | Can't verify, proceed anyway | State limitation, ask for direction |
 
-## Real Examples
-
-**Performative Agreement (Bad):**
-```
-Reviewer: "Remove legacy code"
-❌ "You're absolutely right! Let me remove that..."
-```
-
-**Technical Verification (Good):**
-```
-Reviewer: "Remove legacy code"
-✅ "Checking... build target is 10.15+, this API needs 13+. Need legacy for backward compat.
-    Current impl has wrong bundle ID - fix it or drop pre-13 support?"
-```
-
-**YAGNI (Good):**
-```
-Reviewer: "Implement proper metrics tracking with database, date filters, CSV export"
-✅ "Grepped codebase - nothing calls this endpoint. Remove it (YAGNI)?
-    Or is there usage I'm missing?"
-```
-
-**Unclear Item (Good):**
-```
-Reviewer: "Fix items 1-6"
-You understand 1,2,3,6. Unclear on 4,5.
-✅ "Understand 1,2,3,6. Need clarification on 4 and 5 before implementing."
-```
-
 ## The Bottom Line
 
-**External feedback = suggestions to evaluate, not orders to follow.**
-
-Verify. Question. Then implement.
-
-No performative agreement. Technical rigor always.
+External feedback is suggestions to evaluate, not orders to follow — verify, question, then implement. No performative agreement; technical rigor always.
