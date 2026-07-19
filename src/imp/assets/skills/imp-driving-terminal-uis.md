@@ -3,12 +3,12 @@
 ## Overview
 
 Some work changes how a program behaves *on a terminal* — its on-screen output,
-a full-screen TUI, or an interactive prompt. You can't judge that from the source
-alone. Drive the real program on a pseudo-terminal and look at what it renders.
+a full-screen TUI, or an interactive prompt. You can't judge that from source
+alone; drive the real program on a pty and look at what it renders.
 
 You hold the impty tools (`mcp__impty__*`); their descriptions are one-liners and
-this skill is their manual. They share one live terminal session across your turns,
-so you can spawn a program, watch it, type into it, and watch it react.
+this skill is their manual. They share one live terminal session across your turns
+— don't respawn between steps.
 
 ## When to use
 
@@ -17,8 +17,8 @@ so you can spawn a program, watch it, type into it, and watch it react.
 - An interactive prompt or wizard that reacts to keystrokes.
 - Any "does it actually look/behave right?" only running it can answer.
 
-For a program that prints and exits, one `start` + `snapshot` is enough. Reserve
-the send/react loop for interactive programs.
+For print-and-exit programs, one `start` + `snapshot` is enough. Reserve the
+send/react loop for interactive programs.
 
 ## The tools
 
@@ -49,6 +49,4 @@ the send/react loop for interactive programs.
 3. Decide the next keystroke from what you saw; `send` it.
 4. Repeat; `stop` when done.
 
-The session is stateful and persists across your tool calls — don't respawn between
-steps. `snapshot`'s PNG goes to a temp dir, so it works even where the worktree is
-read-only.
+Snapshots work even where the worktree is read-only.
