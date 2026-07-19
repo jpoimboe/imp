@@ -6,9 +6,10 @@ import logging
 import os
 import queue
 import signal
+import sys
 import threading
 import urllib.error
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Awaitable, Callable, Mapping, MutableMapping
 from pathlib import Path
 from typing import Any
 
@@ -429,7 +430,7 @@ async def deliver_to_session(
 async def run_daemon(
     control_root: Path,
     *,
-    env: Mapping[str, str] | None = None,
+    env: MutableMapping[str, str] | None = None,
     make_adapter: Callable[
         [Mapping[str, str], Callable[[Command], None], Subscriptions, AlertAll,
          Callable[[str], bool]],
@@ -442,10 +443,18 @@ async def run_daemon(
     resume: Callable[[str], str] | None = None,
     install_signals: bool = True,
     shutdown: anyio.Event | None = None,
-) -> None:
+) -> bool:
     """Run the daemon until shutdown: bind socket, own adapter, relay both directions."""
     env = os.environ if env is None else env
     shutdown = anyio.Event() if shutdown is None else shutdown
+    restarted = env.get("IMP_REMOTE_RESTARTED") == "1"
+    env.pop("IMP_REMOTE_RESTARTED", None)
+    restart_requested: list[bool] = [False]
+
+    def request_restart() -> None:
+        restart_requested[0] = True
+        shutdown.set()
+
     deliver = deliver or (lambda cid, text: deliver_to_session(control_root, cid, text))
     create = create or (lambda prompt: spawn.create_quest(control_root, prompt))
     list_quests = list_quests or (lambda: discover.list_quests(control_root))
@@ -512,10 +521,14 @@ async def run_daemon(
             daemon=True)
         poll_thread.start()
         sender_thread.start()
+        if restarted:
+            responses.put(Notice(RESTART_CONFIRMATION))
         async with anyio.create_task_group() as tg:
             tg.start_soon(hub.serve)
             tg.start_soon(supervisor.run)
-            tg.start_soon(_dispatch_inbound, inbound, control, responses, stop, alert_all)
+            tg.start_soon(
+                _dispatch_inbound, inbound, control, responses, stop, alert_all,
+                request_restart)
             if install_signals:
                 tg.start_soon(_await_shutdown_signals, shutdown)
             try:
@@ -536,6 +549,7 @@ async def run_daemon(
             spath.unlink()
         remove_pid(control_root)
         _remove_file_logging(log_handlers)
+    return restart_requested[0]
 
 
 def start_daemon(control_root: Path) -> int:
