@@ -75,7 +75,13 @@ from imp.engine.sandbox import (
 from imp.engine.schema import validate_agent_output
 from imp.engine.seed import seed_workflow_start
 from imp.engine.shim import imp_shim_dir, write_imp_shim
-from imp.engine.state import CurrentStep, EventLog, JsonlEventLog, State
+from imp.engine.state import (
+    CurrentStep,
+    EventLog,
+    JsonlEventLog,
+    State,
+    classify_pause_halt,
+)
 from imp.engine.types import (
     Action,
     Continue,
@@ -387,6 +393,10 @@ async def run_quest(
         ).config
         state = State.load(quest.state_dir)
         quest.relink_home()
+        if state.halt_condition is not None:
+            # Work is resuming: drop a stale gate/error halt so the run reads running.
+            state.halt_condition = None
+            state.save(quest.state_dir)
         # Transient: re-set on EVERY run_quest entry (fresh + resume) so the
         # Tier A handoff watch always sees the configured threshold without
         # persisting it (the resolved_tiers block below is skipped on resume).
@@ -502,6 +512,7 @@ async def run_quest(
                 # (corruption, or a refresh that dropped this step). Never
                 # silent-merge: pause with an error instead of calling _complete.
                 state.status = "paused"
+                state.halt_condition = "error"
                 state.save(quest.state_dir)
                 _emit_paused_event(log, "unknown_step", step=state.step)
                 return RunResult.PAUSED
@@ -583,14 +594,18 @@ async def run_quest(
                             or action.reason in ("retry_ceiling", "reauth_needed"))
                         else "solicit")
                 reason = action.reason or "interrupt"
+                interrupt_reason = (coordinator.pause_reason
+                                    if coordinator.should_pause else None)
                 state.status = (
                     "merge_blocked" if reason == "merge_blocked" else "paused")
+                state.halt_condition = (
+                    classify_pause_halt(reason, interrupt_reason)
+                    if state.status == "paused" else None)
                 state.unsandboxed = coordinator.unsandboxed
                 state.save(quest.state_dir)
                 _emit_paused_event(
                     log, reason, kind=action.kind,
-                    interrupt_reason=(coordinator.pause_reason
-                                      if coordinator.should_pause else None))
+                    interrupt_reason=interrupt_reason)
                 return RunResult.PAUSED
 
             target_idx = None
@@ -628,6 +643,7 @@ async def run_quest(
                             _evict_if_holding(quest, state, log)
                             state.loop_counts.pop(step.name, None)   # reset-on-pause: resume fresh
                             state.status = "paused"
+                            state.halt_condition = "error"
                             state.save(quest.state_dir)
                             _emit_paused_event(log, "max_loops", step=step.name)
                             return RunResult.PAUSED
@@ -709,11 +725,13 @@ async def run_quest(
                 else:
                     _evict_if_holding(quest, state, log)
                 state.status = "paused"
+                state.halt_condition = None
                 state.unsandboxed = coordinator.unsandboxed
                 state.save(quest.state_dir)
                 _emit_paused_event(
                     log, "interrupt", interrupt_reason=coordinator.pause_reason)
                 return RunResult.PAUSED
+            state.halt_condition = None
             state.unsandboxed = coordinator.unsandboxed
             state.save(quest.state_dir)
     except Exception as exc:
@@ -738,6 +756,7 @@ async def run_quest(
             _emit_paused_event(log, "internal_error", kind=kind)
             state.arm_step_resume(mode="solicit")
             state.status = "paused"
+            state.halt_condition = "error"
             state.unsandboxed = coordinator.unsandboxed
             state.save(quest.state_dir)
         except Exception:
@@ -768,6 +787,7 @@ def _complete_or_park(
     if coordinator.should_pause:
         state.completion_pending = True
         state.status = "paused"
+        state.halt_condition = None
         state.unsandboxed = coordinator.unsandboxed
         state.save(quest.state_dir)
         _emit_paused_event(log, "interrupt", interrupt_reason=coordinator.pause_reason)
