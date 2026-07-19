@@ -72,12 +72,17 @@ in-flight quest; the change takes effect next run.
 The user needn't hand-author these files. In the interactive gates — the
 `threshold` chat and the `finalize` merge gate — when the user voices a standing,
 cross-quest preference ("always show me exact prose at threshold", "always run X
-before planning"), imp offers to record it: it works out the narrowest correct
-target scope with the user, then launches a background `memory` quest that edits the
-file(s) off a fresh base tip, validates the tree, and merges the change through the
-normal queue. imp never auto-writes memory and never writes outside `imp/memory/`.
-The recording runs in the background and appears in the active list, so a user grows
-memory over time instead of composing the markdown by hand.
+before planning"), imp offers to record it, working out the narrowest correct target
+scope with the user. There are two routes. A **standalone** preference, independent
+of any code being built, launches a background `memory` quest that edits the file(s)
+off a fresh base tip, validates the tree, and merges through the normal queue,
+appearing in the active list — so the user grows memory over time without composing
+the markdown by hand. A preference **coupled** to a code change being scoped in the
+same conversation is instead folded into that quest's spec as a Memory changes item;
+the code quest's implementer makes the edit and a `validate-memory` gate checks the
+tree, so the memory and the code land atomically instead of racing. imp writes memory
+only with the user's explicit agreement and only ever under `imp/memory/`, never
+`.imp/`.
 
 ---
 

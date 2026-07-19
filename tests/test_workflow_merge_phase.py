@@ -20,7 +20,7 @@ def test_integrate_phase_step_ordering_and_layering() -> None:
     names = [s.name for s in _phase(wf, "integrate").steps]
     assert names == [
         "wait-for-head", "integrate-rebase", "reconciler",
-        "integration-verify", "integration-reviewer",
+        "validate-memory", "integration-verify", "integration-reviewer",
         "summarizer", "finalize",
         "cleanup-merge", "autosquash-resolve-merge",
         "assert-stamped", "merge-to-base",
@@ -38,11 +38,11 @@ def test_integrate_rebase_routing_into_summarizer_and_gate() -> None:
     assert isinstance(m.action, Goto) and m.action.target == "summarizer"
     assert m.var_mutations == {}
     m = evaluate_rules(rules, vars={}, output={"exit": 0, "stdout": "forkSHA"})
-    assert isinstance(m.action, Goto) and m.action.target == "integration-verify"
+    assert isinstance(m.action, Goto) and m.action.target == "validate-memory"
     assert "review_base" not in m.var_mutations
     assert m.var_mutations.get("integration_fork") == "forkSHA"
     m = evaluate_rules(rules, vars={}, output={"exit": 7, "stdout": "forkSHA"})
-    assert isinstance(m.action, Goto) and m.action.target == "integration-verify"
+    assert isinstance(m.action, Goto) and m.action.target == "validate-memory"
     assert m.var_mutations.get("integration_fork") == "forkSHA"
     m = evaluate_rules(rules, vars={}, output={"exit": 6, "stdout": "forkSHA"})
     assert isinstance(m.action, Continue)
@@ -183,6 +183,24 @@ def test_merge_to_base_recovery_rules_and_cap() -> None:
 
     m = evaluate_rules(rules, vars={}, output={"merge": "SOMETHING_ELSE"})
     assert isinstance(m.action, Pause)
+
+
+def test_validate_memory_gates_post_rebase() -> None:
+    wf = load_workflow(WF)
+    names = [s.name for s in _phase(wf, "integrate").steps]
+    assert names.index("validate-memory") == names.index("reconciler") + 1
+    assert names.index("validate-memory") == names.index("integration-verify") - 1
+    step = next(s for s in wf.flat_steps() if s.name == "validate-memory")
+    assert step.kind == "script"
+    assert step.command == (
+        'python3 -m imp.providers.validate_memory_cli "$IMP_PROJECT_ROOT"')
+    assert step.max_loops == 6
+    m0 = evaluate_rules(step.rules, vars={}, output={"exit": 0})
+    assert isinstance(m0.action, Goto) and m0.action.target == "integration-verify"
+    m1 = evaluate_rules(step.rules, vars={}, output={"exit": 1})
+    assert isinstance(m1.action, Goto) and m1.action.target == "reconciler"
+    assert m1.action.resume is True
+    assert "invalid against the rebased workflows" in m1.action.feedback
 
 
 def test_finalize_merge_routes_to_cleanup_merge() -> None:

@@ -22,6 +22,9 @@ def test_memory_authoring_partial_has_pinned_prose() -> None:
     assert "imp new --workflow memory --background" in text
     assert "intent, not file bytes" in text
     assert "never `.imp/`" in text
+    assert "Coupled to code you're scoping? Fold it in, don't background it." in text
+    assert "preference is written in the background and takes effect on future runs" in text
+    assert "a coupled edit rides this quest's spec and lands with its code." in text
 
 
 def _render_agent(name: str, vars: dict) -> str:

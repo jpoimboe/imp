@@ -249,8 +249,8 @@ phases:
         command: ./scripts/integrate-rebase.sh "{{ vars.slow_verify_tolerated }}"
         rules:
           - {if: {exit: 2}, goto: summarizer}
-          - {if: {exit: 0}, set: {integration_fork: output.stdout}, goto: integration-verify}
-          - {if: {exit: 7}, set: {integration_fork: output.stdout}, goto: integration-verify}
+          - {if: {exit: 0}, set: {integration_fork: output.stdout}, goto: validate-memory}
+          - {if: {exit: 7}, set: {integration_fork: output.stdout}, goto: validate-memory}
           - {if: {exit: 6}, set: {integration_fork: output.stdout}, continue: true}
           - {else: true, pause: true}
 
@@ -261,6 +261,18 @@ phases:
         rules:
           - {if: {stuck: true}, pause: true}
           - {else: true, continue: true}
+
+      # Post-rebase memory gate: re-runs imp's own load-time memory validation over
+      # the fully-merged worktree (quest changes + latest base) against the rebased
+      # workflow defs. Byte-identical command to the memory workflow's gate.
+      - name: validate-memory
+        show_label: false
+        command: python3 -m imp.providers.validate_memory_cli "$IMP_PROJECT_ROOT"
+        max_loops: 6
+        rules:
+          - {if: {exit: 0}, goto: integration-verify}
+          - {else: true, resume: reconciler,
+             feedback: "The imp/memory/ tree is invalid against the rebased workflows. Fix the memory file paths:"}
 
       - name: integration-verify
         command: ./scripts/run-verify.sh slow

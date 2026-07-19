@@ -29,9 +29,6 @@ async def _await_dependencies(ctx: Any, quest: Any) -> None:
     _, unmerged = backlog.readiness(quest.control_root, deps)
     if not unmerged:
         return
-    if ctx.non_interactive:
-        # No one is attached to watch the wait: park cleanly, resumable later.
-        raise AwaitingUserInput()
     _emit(ctx, "dependency_waiting", {"depends_on": unmerged})
     coord = ctx.coordinator
     while True:
@@ -54,8 +51,9 @@ async def _await_dependencies(ctx: Any, quest: Any) -> None:
         "whether the base branch advanced since the draft was created "
         "(head_changed) so you can re-ground the spec against current code. If "
         "this quest depends on a quest that hasn't merged yet, it first waits "
-        "for that merge before forking — the wait is interruptible (Ctrl-D "
-        "pauses; a later resume retries). Idempotent — a no-op once the "
+        "for that merge before forking — an attended wait is interruptible "
+        "(Ctrl-D pauses; a later resume retries), and a background run waits "
+        "on its own until the dependency lands. Idempotent — a no-op once the "
         "worktree already exists."
     ),
 )

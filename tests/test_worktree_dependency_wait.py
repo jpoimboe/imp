@@ -138,22 +138,35 @@ async def test_ctrl_d_during_wait_pauses_for_retry(
 
 
 @pytest.mark.anyio
-async def test_headless_parks_when_dep_unmerged(
+async def test_headless_waits_for_unmerged_dep_then_materializes(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _seed_control(tmp_path)
     q = _draft(tmp_path, "dep5", ["a"])
-    monkeypatch.setattr(backlog, "readiness", lambda cr, deps: (False, ["a"]))
+    calls = {"n": 0}
+
+    def _readiness(cr: Path, deps: list[str]) -> tuple[bool, list[str]]:
+        calls["n"] += 1
+        return (True, []) if calls["n"] >= 3 else (False, ["a"])
+
+    monkeypatch.setattr(backlog, "readiness", _readiness)
+    slept = {"n": 0}
+
+    async def _sleep(delay: float, coord: Any) -> None:
+        slept["n"] += 1
+
+    monkeypatch.setattr(cew, "interruptible_sleep", _sleep)
     log = _RecordingLog()
     ctx = _ctx(q, coordinator=_Coord(), event_log=log, non_interactive=True)
     tool = get_registry()["create_and_enter_worktree"]
 
-    with pytest.raises(AwaitingUserInput) as ei:
-        await tool.async_invoke(ctx, {})
+    await tool.async_invoke(ctx, {})
 
-    assert ei.value.interrupt is False
-    assert q.materialized is False
-    assert log.events == []
+    wt = tmp_path / ".imp" / "worktrees" / "dep5"
+    assert ctx.project_root == wt and q.materialized is True
+    assert slept["n"] == 1
+    assert [t for t, _ in log.events] == ["dependency_waiting", "dependency_ready"]
+    assert log.events[0][1]["depends_on"] == ["a"]
 
 
 @pytest.mark.anyio
