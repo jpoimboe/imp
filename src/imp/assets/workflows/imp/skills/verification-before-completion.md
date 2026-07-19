@@ -1,12 +1,6 @@
 # Verification Before Completion
 
-## Overview
-
-Claiming work is complete without verification is dishonesty, not efficiency.
-
-**Core principle:** Evidence before claims, always.
-
-**Violating the letter of this rule is violating the spirit of this rule.**
+Claiming work complete without verification is dishonesty, not efficiency — evidence before claims, always. Violating the letter violates the spirit: dodging the exact phrase does not dodge the rule. It binds exact phrases, paraphrases, synonyms, implications of success, and ANY communication suggesting completion or correctness.
 
 ## The Iron Law
 
@@ -14,120 +8,70 @@ Claiming work is complete without verification is dishonesty, not efficiency.
 NO COMPLETION CLAIMS WITHOUT FRESH VERIFICATION EVIDENCE
 ```
 
-If you haven't run the verification command in this message, you cannot claim it passes.
-
-This applies equally to calling `complete_step` with a success status — you must have run the verification command and confirmed its output in the current step before marking work done.
+Not run the verification command this step? You cannot claim it passes. Calling `complete_step` with success IS a completion claim — run the command and confirm its output before marking done.
 
 ## The Gate Function
 
+Before claiming any status or calling `complete_step` with success:
+
 ```
-BEFORE claiming any status or calling complete_step with success:
-
-1. IDENTIFY: What command proves this claim?
-2. RUN: Execute the FULL command (fresh, complete) via bash
-3. READ: Full output, check exit code, count failures
-4. VERIFY: Does output confirm the claim?
-   - If NO: State actual status with evidence
-   - If YES: State claim WITH evidence
-5. ONLY THEN: Make the claim or call complete_step
-
+1. IDENTIFY the command that proves the claim
+2. RUN it full, fresh, complete via bash
+3. READ the output — exit code, count failures
+4. VERIFY it confirms the claim:
+     NO  → state actual status + evidence
+     YES → state the claim + evidence
+5. ONLY THEN claim, or call complete_step
 Skip any step = lying, not verifying
 ```
 
-## Common Failures
+## Evidence Required
 
-| Claim | Requires | Not Sufficient |
-|-------|----------|----------------|
-| Tests pass | Test command output: 0 failures | Previous run, "should pass" |
+| Claim | Sufficient | NOT sufficient |
+|-------|-----------|----------------|
+| Tests pass | Test output: 0 failures | Previous run, "should pass" |
 | Linter clean | Linter output: 0 errors | Partial check, extrapolation |
-| Build succeeds | Build command: exit 0 | Linter passing, logs look good |
-| Bug fixed | Test original symptom: passes | Code changed, assumed fixed |
-| Regression test works | Red-green cycle verified | Test passes once |
-| Agent completed | VCS diff shows changes | Agent reports "success" |
+| Build succeeds | Build command: exit 0 | Linter passing (doesn't check compilation), logs "look good" |
+| Bug fixed | Original symptom re-tested: passes | Code changed, assumed fixed |
+| Regression test works | Verified red-green cycle | Passes once |
+| Agent completed | VCS diff shows the changes | Agent's "success" report |
 | Requirements met | Line-by-line checklist | Tests passing |
 
-## Red Flags - STOP
+## Patterns
 
-- Using "should", "probably", "seems to"
-- Expressing satisfaction before verification ("Great!", "Perfect!", "Done!", etc.)
-- About to call `complete_step` or `commit` without verification
+- **Regression (TDD red-green):** ✅ write → run (pass) → revert fix → run (MUST FAIL) → restore → run (pass). ❌ "I've written a regression test" without the cycle.
+- **Requirements:** ✅ re-read plan → build checklist → verify each item → report gaps or completion. ❌ "Tests pass, phase complete".
+- **Agent delegation:** ✅ report → check VCS diff → verify changes → report actual state. ❌ trust the report.
+
+## Red Flags — STOP
+
+- Hedges: "should", "probably", "seems to"
+- Premature satisfaction: "Great!", "Perfect!", "Done!"
+- About to call `complete_step`/`commit` unverified
 - Trusting agent success reports
 - Relying on partial verification
-- Thinking "just this once"
-- Tired and wanting work over
+- "just this once"
+- Tired and wanting the work over
 - **ANY wording implying success without having run verification**
 
-## Rationalization Prevention
+## Rationalizations
 
 | Excuse | Reality |
 |--------|---------|
-| "Should work now" | RUN the verification |
 | "I'm confident" | Confidence ≠ evidence |
 | "Just this once" | No exceptions |
-| "Linter passed" | Linter ≠ compiler |
-| "Agent said success" | Verify independently |
 | "I'm tired" | Exhaustion ≠ excuse |
 | "Partial check is enough" | Partial proves nothing |
-| "Different words so rule doesn't apply" | Spirit over letter |
+| "Different words, rule doesn't apply" | Spirit over letter |
 
-## Key Patterns
+## Why It Matters
 
-**Tests:**
-```
-✅ [Run test command via bash] [See: 34/34 pass] "All tests pass"
-❌ "Should pass now" / "Looks correct"
-```
+Unverified completion ships undefined functions (crash) and missing requirements (incomplete features), and burns time on false completion → redirect → rework.
 
-**Regression tests (TDD Red-Green):**
-```
-✅ Write → Run (pass) → Revert fix → Run (MUST FAIL) → Restore → Run (pass)
-❌ "I've written a regression test" (without red-green verification)
-```
+## Always Verify Before
 
-**Build:**
-```
-✅ [Run build via bash] [See: exit 0] "Build passes"
-❌ "Linter passed" (linter doesn't check compilation)
-```
+Any success/completion claim, any satisfaction, any positive statement about work state, calling `commit`/`complete_step` or starting PR creation, moving to the next task, delegating to agents.
 
-**Requirements:**
-```
-✅ Re-read plan → Create checklist → Verify each → Report gaps or completion
-❌ "Tests pass, phase complete"
-```
+## Bottom Line
 
-**Agent delegation:**
-```
-✅ Agent reports success → Check VCS diff → Verify changes → Report actual state
-❌ Trust agent report
-```
-
-## Why This Matters
-
-- Undefined functions shipped — would crash
-- Missing requirements shipped — incomplete features
-- Time wasted on false completion → redirect → rework
-
-## When To Apply
-
-**ALWAYS before:**
-- ANY variation of success/completion claims
-- ANY expression of satisfaction
-- ANY positive statement about work state
-- Calling `commit`, `complete_step`, or initiating PR creation
-- Moving to next task
-- Delegating to agents
-
-**Rule applies to:**
-- Exact phrases
-- Paraphrases and synonyms
-- Implications of success
-- ANY communication suggesting completion/correctness
-
-## The Bottom Line
-
-**No shortcuts for verification.**
-
-Run the command via `bash`. Read the output. THEN claim the result or call `complete_step`.
-
-This is non-negotiable.
+No shortcuts: run the command via `bash`, read the output, THEN claim the result or call `complete_step`. Non-negotiable.
