@@ -48,12 +48,13 @@ def test_format_columns_plain():
     assert "15m" in line                    # relative AGE
 
 
-def test_name_is_final_column():
+def test_name_is_second_column():
     line = format_quest_line(**_row(), color=False)
-    # NAME now trails every other column.
-    assert line.index("Add version flag") > line.index("running")
-    assert line.index("Add version flag") > line.index("code")
-    assert line.index("Add version flag") > line.index("15m")
+    # NAME now sits right after ID, before STATUS and UPDATED.
+    assert line.index("Add version flag") < line.index("running")
+    assert line.index("Add version flag") < line.index("code")
+    assert line.index("Add version flag") < line.index("15m")
+    assert line.index("yaitd7") < line.index("Add version flag")
 
 
 def test_format_unnamed_shows_id_and_unnamed_label():
@@ -62,10 +63,12 @@ def test_format_unnamed_shows_id_and_unnamed_label():
     assert "(unnamed)" in line
 
 
-def test_header_line_leads_with_id_ends_with_name():
-    h = header_line(color=False)
+def test_header_line_leads_with_id_ends_with_updated():
+    h = header_line(color=False, name_width=40)
     assert h.startswith("ID")
-    assert h.rstrip().endswith("NAME")
+    assert h.rstrip().endswith("UPDATED")
+    assert "NAME" in h            # NAME is the second column now
+    assert h.index("NAME") < h.index("STATUS")
     assert "TITLE" not in h
     assert "HANDLE" not in h
     assert "STEP" not in h        # STEP column is merged into STATUS
@@ -96,6 +99,12 @@ def test_format_dim_wraps_whole_row():
     assert "\x1b[32m" not in line
 
 
+def test_dim_row_column_order():
+    # history (dim) path preserves the same column order: NAME then STATUS then UPDATED.
+    line = format_quest_line(**_row(status="completed"), color=False, dim=True)
+    assert line.index("Add version flag") < line.index("completed") < line.index("15m")
+
+
 def test_merged_status_renders_green():
     line = format_quest_line(**_row(status="merged"), color=True)
     assert "\x1b[32mmerged\x1b[0m" in line
@@ -113,7 +122,7 @@ def test_name_budget_fills_remaining_width(monkeypatch):
 
 
 def test_header_column_reads_updated_not_age():
-    h = header_line(color=False)
+    h = header_line(color=False, name_width=40)
     assert "UPDATED" in h
     assert "AGE" not in h
 
@@ -259,9 +268,9 @@ def test_status_subfloor_drops_suffix_no_overflow():
 
 def test_header_line_honors_status_width():
     from imp.cli.quest_row import ID_W
-    h = header_line(color=False, status_width=25)
-    # UPDATED starts after ID + gap + STATUS(25) + gap.
-    assert h.index("UPDATED") == ID_W + 2 + 25 + 2
+    h = header_line(color=False, name_width=30, status_width=25)
+    # UPDATED starts after ID + gap + NAME(30) + gap + STATUS(25) + gap.
+    assert h.index("UPDATED") == ID_W + 2 + 30 + 2 + 25 + 2
 
 
 def test_status_colors_have_new_and_no_errored() -> None:
@@ -427,3 +436,17 @@ def test_resolve_display_name_title_wins_over_intent():
     r = resolve_display_name("Real title", "some intent")
     assert r.text == "Real title"
     assert r.kind is NameKind.TITLE
+
+
+def test_name_column_right_padded_so_status_aligns():
+    from imp.cli.quest_row import ID_W
+    # Short title, fixed name_width -> STATUS starts at a deterministic offset:
+    # ID_W + 2 (gap) + name_width + 2 (gap).
+    line = format_quest_line(**_row(title="abc"), color=False, name_width=20)
+    assert line.index("running") == ID_W + 2 + 20 + 2
+
+
+def test_updated_is_final_column_no_trailing_whitespace():
+    line = format_quest_line(**_row(), color=False)
+    assert line == line.rstrip()          # UPDATED trails with no padding
+    assert line.rstrip().endswith("15m")  # the relative age is the last cell

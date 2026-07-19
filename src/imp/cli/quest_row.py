@@ -126,9 +126,10 @@ def overview_widths(
     return status_width, name_width
 
 
-def header_line(*, color: bool, status_width: int = STATUS_W) -> str:
-    text = (f"{'ID':<{ID_W}}  {'STATUS':<{status_width}}  "
-            f"{'UPDATED':<{AGE_W}}  NAME")
+def header_line(*, color: bool, name_width: int,
+                status_width: int = STATUS_W) -> str:
+    text = (f"{'ID':<{ID_W}}  {'NAME':<{name_width}}  "
+            f"{'STATUS':<{status_width}}  UPDATED")
     return pal.ansi(text, "dim", enabled=color)
 
 
@@ -174,7 +175,7 @@ def format_quest_line(*, quest_id: str, title: str, status: str, step: str,
     visible = _status_segment(status, step, step_label,
                               phase_label=phase_label, status_width=status_width)
     status_pad = f"{visible:<{status_width}}"
-    age_pad = f"{relative_age(last_iso, now=now):<{AGE_W}}"
+    age_text = relative_age(last_iso, now=now)   # final column, emitted bare
     # PROMPT fallback gets the `> ` prefix and dim, clipped to name_width.
     resolved = resolve_display_name(title, intent)
     if resolved.kind is NameKind.PROMPT:
@@ -182,9 +183,10 @@ def format_quest_line(*, quest_id: str, title: str, status: str, step: str,
                                               name_width - len(PROMPT_PREFIX))
     else:
         name_text = _truncate(resolved.text, name_width)
+    name_pad = " " * (name_width - len(name_text))   # right-pad NAME so STATUS aligns
     is_fallback = resolved.kind is not NameKind.TITLE
     if dim:
-        line = f"{id_pad}  {status_pad}  {age_pad}  {name_text}"
+        line = f"{id_pad}  {name_text}{name_pad}  {status_pad}  {age_text}"
         return pal.ansi(line, "dim", enabled=color)
     name_cell = pal.ansi(name_text, "dim", enabled=color) if is_fallback else name_text
     codes = STATUS_COLORS.get(status, ())
@@ -196,4 +198,4 @@ def format_quest_line(*, quest_id: str, title: str, status: str, step: str,
         status_cell = status_word + suffix_cell + pad
     else:
         status_cell = status_pad
-    return f"{id_pad}  {status_cell}  {age_pad}  {name_cell}"
+    return f"{id_pad}  {name_cell}{name_pad}  {status_cell}  {age_text}"

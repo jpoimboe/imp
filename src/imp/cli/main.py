@@ -1609,7 +1609,8 @@ def _exit_ambiguous(token: str, candidates: list[str], control: Path) -> NoRetur
     _emit_cli_error(f"{token!r} is ambiguous; candidates:")
     color = should_use_color(sys.stderr)
     now = datetime.now(UTC)
-    print(quest_row.header_line(color=color), file=sys.stderr)
+    name_w = quest_row.name_budget()
+    print(quest_row.header_line(color=color, name_width=name_w), file=sys.stderr)
     for cid in sorted(candidates):
         row = _row_for_id(control, cid)
         if row is None:
@@ -1618,7 +1619,7 @@ def _exit_ambiguous(token: str, candidates: list[str], control: Path) -> NoRetur
         print(quest_row.format_quest_line(
             quest_id=row[0], title=row[4], status=row[1], step=row[2],
             step_label=row[6], last_iso=row[3], now=now, color=color,
-            name_width=quest_row.name_budget()), file=sys.stderr)
+            name_width=name_w), file=sys.stderr)
     raise SystemExit(2)
 
 
@@ -2758,8 +2759,8 @@ def _resume_picker_non_tty(rows: list[_Row]) -> str | int:
     _emit_cli_error("multiple resumable quests — pass a token; candidates:")
     color = should_use_color(sys.stderr)
     now = datetime.now(UTC)
-    print(quest_row.header_line(color=color), file=sys.stderr)
     name_w = quest_row.name_budget()
+    print(quest_row.header_line(color=color, name_width=name_w), file=sys.stderr)
     for r in rows:
         print(quest_row.format_quest_line(
             quest_id=r[0], title=r[4], status=r[1], step=r[2], step_label=r[6],
@@ -3181,7 +3182,8 @@ def _overview_body(inflight: list[_Row], backlog_rows: list[_Row],
 
     status_width, name_width = quest_row.overview_widths(specs)
 
-    lines = [quest_row.header_line(color=color, status_width=status_width)]
+    lines = [quest_row.header_line(color=color, name_width=name_width,
+                                   status_width=status_width)]
     for r in inflight:
         lines.append(quest_row.format_quest_line(
             quest_id=r[0], title=r[4], status=r[1], step=r[2], step_label=r[6],
