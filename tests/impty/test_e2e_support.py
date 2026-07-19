@@ -31,9 +31,9 @@ def test_seed_minimal_repo_runs_real_imp_new_to_a_scripted_side_effect(
         [sys.executable, "-m", "imp", "new", "demo", "--title", "demo change", "--headless"],
         cwd=tmp_path,
         env=clean_env(IMP_SCRIPTED_SCRIPT=str(script_path), IMP_THEME="ansi"),
-        capture_output=True, text=True, timeout=120,
+        capture_output=True, text=True, timeout=E2E_SUBPROCESS_TIMEOUT,
     )
-    assert proc.returncode == 0, proc.stderr
+    assert proc.returncode == 0, proc.stdout + proc.stderr
 
     # The scripted bash ran as a REAL side effect on the change branch in the worktree.
     markers = list(tmp_path.glob(".imp/worktrees/*/src/marker.py"))
