@@ -5,12 +5,14 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import textwrap
 from collections.abc import Generator
 from pathlib import Path
 
 import pytest
 
 FIXTURES = Path(__file__).parent / "fixtures"
+_WORKTREE_SRC = str(Path(__file__).parent.parent / "src")
 
 # Live-API tests (the `*_live.py` convention, excluding the unrelated
 # `test_live_*` UI tests) drive real provider round-trips that take tens of
@@ -246,6 +248,58 @@ def _init_repo(root: Path) -> None:
     (root / "README.md").write_text("seed\n")
     _git(root, "add", "-A")
     _git(root, "commit", "-qm", "seed")
+
+
+def _seed_project(tmp_path: Path) -> None:
+    """Produce the committed imp/ layout the worktree model requires.
+
+    imp new needs >=1 commit with HEAD on a branch (worktree.check_preconditions)
+    and reads the workflow + config from the control root's WORKING TREE
+    (Quest.create copies imp/workflows/imp; the runtime reads the merged
+    config from imp/project.yaml — the project layer of load_effective_config).
+    Committing them is the clean choice. _init_repo already commits a README +
+    .gitignore with `.imp/`, so .imp/ is durably ignored and `imp new` won't add
+    an extra gitignore commit.
+    """
+    _init_repo(tmp_path)
+    wf = tmp_path / "imp" / "workflows" / "imp"
+    (wf / "agents").mkdir(parents=True)
+    (wf / "agents" / "writer.md").write_text(textwrap.dedent("""\
+        ---
+        name: writer
+        description: A test agent that calls bash then complete_step.
+        tools: [complete_step, bash]
+        output:
+          status: {type: enum, values: [Success, Error]}
+        ---
+        Run this shell command via bash: `sleep 30`. After bash returns
+        (even if it was interrupted), call complete_step with status=Success.
+        Do not call any other tool.
+    """))
+    (wf / "workflow.yaml").write_text(textwrap.dedent("""\
+        name: t
+        description: t
+        defaults: {max_retries: 2, max_loops: 6, on_max_retries: {pause: true}}
+        phases:
+          - name: only
+            steps:
+              - {name: w, file: agents/writer.md, tier: low}
+    """))
+    (tmp_path / "imp" / "project.yaml").write_text(textwrap.dedent("""\
+        default-workflow: imp
+        default-base: main
+        providers: [anthropic]
+        tiers:
+          low: {anthropic: claude-haiku-4-5-20251001}
+          medium: {anthropic: claude-haiku-4-5-20251001}
+          high: {anthropic: claude-haiku-4-5-20251001}
+    """))
+    subprocess.run(["git", "add", "-A"], cwd=tmp_path, check=True)
+    subprocess.run(
+        ["git", "-c", "user.email=t@t", "-c", "user.name=t",
+         "commit", "-qm", "imp setup"],
+        cwd=tmp_path, check=True,
+    )
 
 
 def _seed_control(root: Path) -> None:
