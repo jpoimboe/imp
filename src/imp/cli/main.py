@@ -1827,7 +1827,7 @@ def _quest_card(control: Path, quest_id: str, *, now: datetime,
         _card_field("title:", card.title.strip() or "(unnamed)", 15, color=color),
         _card_field(
             "status:",
-            "merged" if card.status == "completed" and card.merge_commit else card.status,
+            quest_row.display_word(card.status),
             15, color=color),
     ]
     if card.status in _INFLIGHT and card.step not in ("", "-"):
@@ -3220,7 +3220,7 @@ def _overview_body(inflight: list[_Row], backlog_rows: list[_Row],
             lines.append(quest_row.format_quest_line(
                 quest_id=r[0], title=r[4], status=_DISPOSITION[r[1]], step="-",
                 last_iso=r[3], now=now, color=color, name_width=name_width,
-                status_width=status_width, dim=True, intent=intents.get(r[0])))
+                status_width=status_width, intent=intents.get(r[0])))
     return lines
 
 

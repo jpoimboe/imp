@@ -710,3 +710,47 @@ def test_log_backlog_card_threads_color(
     out = _run(monkeypatch, tmp_path, "log", "2026-06-16-bkg444")
     assert pal.ansi("id:", "dim") in out                 # label dimmed via _cmd_log call site
     assert pal.ansi("intent:", "dim") in out             # dim intent header via _cmd_log call site
+
+
+def test_show_card_renders_merge_blocked_two_words(tmp_path: Path) -> None:
+    from datetime import UTC, datetime
+
+    from imp.cli.main import _quest_card
+    _seed_control(tmp_path)
+    ch = Quest.create(tmp_path, title="Gate", quest_id="mbk01", base_branch="main")
+    st = State.load(ch.state_dir)
+    st.status = "merge_blocked"
+    st.save(ch.state_dir)
+    card = "\n".join(_quest_card(tmp_path, "mbk01", now=datetime.now(UTC), color=False))
+    status_line = next(ln for ln in card.splitlines() if ln.startswith("status:"))
+    assert "merge blocked" in status_line
+    assert "merge_blocked" not in status_line
+
+
+def test_show_json_keeps_merge_blocked_underscore(tmp_path: Path) -> None:
+    from imp.cli.main import _quest_json
+    _seed_control(tmp_path)
+    ch = Quest.create(tmp_path, title="Gate", quest_id="mbk02", base_branch="main")
+    st = State.load(ch.state_dir)
+    st.status = "merge_blocked"
+    st.save(ch.state_dir)
+    data = _quest_json(tmp_path, "mbk02")
+    assert data is not None
+    assert data["status"] == "merge_blocked"   # byte-clean machine value
+
+
+def test_show_card_step_line_shows_for_error(tmp_path: Path) -> None:
+    from datetime import UTC, datetime
+
+    from imp.cli.main import _quest_card
+    _seed_control(tmp_path)
+    ch = Quest.create(tmp_path, title="Broke", quest_id="err02", base_branch="main")
+    st = State.load(ch.state_dir)
+    st.status = "paused"
+    st.step = "task-lead"
+    st.halt_condition = "error"
+    st.save(ch.state_dir)
+    card = "\n".join(_quest_card(tmp_path, "err02", now=datetime.now(UTC), color=False))
+    status_line = next(ln for ln in card.splitlines() if ln.startswith("status:"))
+    assert "error" in status_line
+    assert any(ln.startswith("step:") for ln in card.splitlines())   # error is in-flight

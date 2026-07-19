@@ -271,12 +271,12 @@ def test_status_no_ansi_when_NO_COLOR_set(
     assert "merged" in out
 
 
-def test_status_all_dims_completed_section(
+def test_status_all_history_completed_not_dim(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """With --all and color forced, the completed past section is rendered dim
-    (whole-row), so a completed row sits inside a dim SGR span."""
+    """With --all and color forced, a completed history row renders in normal text
+    (no whole-row dim SGR wrap)."""
     import imp.cli.main as m
 
     _seed_control(tmp_path)
@@ -292,7 +292,8 @@ def test_status_all_dims_completed_section(
     assert rc == 0
     out = capsys.readouterr().out
     row = next(ln for ln in out.splitlines() if "merged" in ln)
-    assert row.startswith("\x1b[2m") and row.endswith("\x1b[0m")
+    assert not row.startswith("\x1b[2m")
+    assert "merged" in row
 
 
 def test_overview_default_shows_merged_disposition(
@@ -445,11 +446,12 @@ def test_overview_only_history_not_reported_empty(
     assert "done" in out and "merged" in out
 
 
-def test_status_all_dims_abandoned_section(
+def test_status_all_history_abandoned_not_dim(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """An abandoned row also lands in the dim past section under --all."""
+    """With --all and color forced, an abandoned history row renders in normal text
+    (no whole-row dim SGR wrap)."""
     import imp.cli.main as m
 
     _seed_control(tmp_path)
@@ -465,7 +467,8 @@ def test_status_all_dims_abandoned_section(
     assert rc == 0
     out = capsys.readouterr().out
     row = next(ln for ln in out.splitlines() if "abandoned" in ln)
-    assert row.startswith("\x1b[2m") and row.endswith("\x1b[0m")
+    assert not row.startswith("\x1b[2m")
+    assert "abandoned" in row
 
 
 def test_status_default_inflight_columns_and_color(
