@@ -62,7 +62,6 @@ from imp.engine.abandon import (
     tear_down_quest,
 )
 from imp.engine.archive import read as archive_read
-from imp.engine.awaiting_user_input import AwaitingUserInput
 from imp.engine.errors import LayoutMismatch, LoadError, LoadErrors
 from imp.engine.executor import RunResult
 from imp.engine.project_root import find_project_root
@@ -215,25 +214,6 @@ def resolve_spec_seed(args: argparse.Namespace) -> SeedResolution:
             "--message, not both.")
 
     return SeedResolution(title, opening or message)
-
-
-def make_message_reply_fn(message: str | None) -> Callable[[], Awaitable[str]]:
-    """Headless reply channel: yield the single --message once, then pause.
-
-    The first bare-turn-end solicit (live opener OR the awaiting_user_input
-    resume) consumes `message`; any later solicit in the same
-    invocation raises AwaitingUserInput, unwinding to a clean pause the operator
-    continues with another `imp resume <id> --message "..."`."""
-    delivered = False
-
-    async def _reply(*_a: object, **_k: object) -> str:
-        nonlocal delivered
-        if message is not None and not delivered:
-            delivered = True
-            return message
-        raise AwaitingUserInput()
-
-    return _reply
 
 
 # -- end-of-run status lines ------------------------------------------------
