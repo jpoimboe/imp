@@ -214,13 +214,13 @@ def test_status_spine_prompt_fallback_dim_and_prefixed_color() -> None:
     assert "(unnamed)" not in line
 
 
-def test_status_spine_prompt_fallback_flattens_and_caps_at_60() -> None:
+def test_status_spine_prompt_fallback_flattens_and_caps_at_70() -> None:
     line = main._status_spine("z1", "   ", "shelved", "wordmark", color=False,
                               intent="add a\n   dark   mode\ttoggle " + "y" * 80)
-    # flattened to single spaces, then "> " (2) + 57 chars + "…" = 60 display cols
+    # flattened to single spaces, then "> " (2) + 67 chars + "…" = 70 display cols
     body = "add a dark mode toggle " + "y" * 80
-    assert "> " + body[:57] + "…" in line
-    assert "> " + body[:58] not in line
+    assert "> " + body[:67] + "…" in line
+    assert "> " + body[:68] not in line
 
 
 def test_status_spine_unnamed_has_no_prompt_prefix() -> None:
