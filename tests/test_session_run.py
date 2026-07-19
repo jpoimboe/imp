@@ -124,7 +124,8 @@ async def test_run_session_client_answers_gate_and_returns_completed_rc(
 
             async def _go() -> None:
                 rc_holder["rc"] = await run_session_client(
-                    quest, driver=_Driver(), coord=coord, solicit=_solicit)
+                    quest, driver=_Driver(), coord=coord, solicit=_solicit,
+                    leave_mode="new")
 
             tg.start_soon(_go)
             await wait_until(lambda: "rc" in rc_holder)
@@ -179,7 +180,7 @@ async def test_run_session_client_starts_status_tick_when_provided(
             async def _go() -> None:
                 rc_holder["rc"] = await run_session_client(
                     quest, driver=_Driver(), coord=coord,
-                    solicit=_solicit, status=_Status())
+                    solicit=_solicit, status=_Status(), leave_mode="new")
 
             tg.start_soon(_go)
             await wait_until(lambda: "rc" in rc_holder)
@@ -220,7 +221,8 @@ async def test_run_session_client_returns_130_when_user_interrupted(
     # this test fails if the exit-code guard regresses to reading should_pause.
     coord._interrupted = True
     rc = await run_session_client(
-        quest, driver=_Driver(), coord=coord, solicit=_solicit)
+        quest, driver=_Driver(), coord=coord, solicit=_solicit,
+        leave_mode="new")
     assert rc == 130
 
 
@@ -381,7 +383,8 @@ async def test_run_session_client_threads_resume_into_attach(
 
     coord = InterruptCoordinator()
     rc = await run_session_client(
-        quest, driver=_Driver(), coord=coord, solicit=_solicit, resume=True)
+        quest, driver=_Driver(), coord=coord, solicit=_solicit, resume=True,
+        leave_mode="new")
 
     assert captured["resume"] is True
     assert captured["lease"] is True   # the terminal path leases
@@ -425,7 +428,7 @@ async def test_daemon_startup_timeout_surfaces_distinctly(
     coord = InterruptCoordinator()
     rc = await session_run.run_session_client(
         quest, driver=_NullDriver(), coord=coord,
-        solicit=lambda _p: _never())
+        solicit=lambda _p: _never(), leave_mode="new")
     assert rc == 3                       # distinct daemon-startup-failure code
     assert summarized == []              # NOT routed through the paused summary
     out = capsys.readouterr().out
@@ -456,7 +459,7 @@ async def test_daemon_startup_timeout_is_not_rc3_when_change_already_completed(
     coord = InterruptCoordinator()
     rc = await session_run.run_session_client(
         quest, driver=_NullDriver(), coord=coord,
-        solicit=lambda _p: _never())
+        solicit=lambda _p: _never(), leave_mode="new")
     assert rc == 0                       # NOT rc=3: change already completed
     captured = capsys.readouterr()
     assert "startup failed" not in (captured.out + captured.err)
@@ -543,7 +546,8 @@ async def test_run_session_client_passes_terminal_title_from_quest_title(
 
     coord = InterruptCoordinator()
     rc = await run_session_client(
-        quest, driver=_NullDriver(), coord=coord, solicit=lambda _p: _never())
+        quest, driver=_NullDriver(), coord=coord, solicit=lambda _p: _never(),
+        leave_mode="new")
 
     title = captured["title"]
     assert isinstance(title, TerminalTitle)
@@ -571,7 +575,8 @@ async def test_run_session_client_passes_control_root(
 
     coord = InterruptCoordinator()
     rc = await run_session_client(
-        quest, driver=_NullDriver(), coord=coord, solicit=lambda _p: _never())
+        quest, driver=_NullDriver(), coord=coord, solicit=lambda _p: _never(),
+        leave_mode="new")
 
     assert captured["control_root"] == quest.control_root
     assert rc == 0
@@ -613,7 +618,8 @@ async def test_run_session_client_resets_title_on_daemon_startup_failure(
 
     coord = InterruptCoordinator()
     rc = await run_session_client(
-        quest, driver=_NullDriver(), coord=coord, solicit=lambda _p: _never())
+        quest, driver=_NullDriver(), coord=coord, solicit=lambda _p: _never(),
+        leave_mode="new")
 
     assert rc == 3
     assert reset_calls == ["reset"]
@@ -646,7 +652,7 @@ async def test_run_session_client_threads_provided_leave_state(
     ls: dict[str, str] = {}
     rc = await run_session_client(
         quest, driver=_NullDriver(), coord=coord, solicit=lambda _p: _never(),
-        leave_state=ls)
+        leave_state=ls, leave_mode="new")
 
     assert ls["intent"] == "clear"        # the caller's dict surfaced the signal
     assert seen["leave_state"] is ls      # same dict fed to the disposition
@@ -691,7 +697,7 @@ async def test_run_session_client_reuses_passed_in_title(
     coord = InterruptCoordinator()
     rc = await run_session_client(
         quest, driver=_NullDriver(), coord=coord,
-        solicit=lambda _p: _never(), title=sentinel)
+        solicit=lambda _p: _never(), title=sentinel, leave_mode="new")
 
     assert captured["title"] is sentinel   # the exact instance flowed through
     assert rc == 0
@@ -738,7 +744,8 @@ async def test_run_session_client_threads_autonomous_into_attach(
 
     coord = InterruptCoordinator()
     rc = await run_session_client(
-        quest, driver=_Driver(), coord=coord, solicit=_solicit, autonomous=True)
+        quest, driver=_Driver(), coord=coord, solicit=_solicit, autonomous=True,
+        leave_mode="new")
     assert rc == 0
     assert captured["autonomous"] is True
 
@@ -767,7 +774,8 @@ async def test_daemon_startup_crash_surfaces_exit_code_and_stderr_path(
 
     coord = InterruptCoordinator()
     rc = await session_run.run_session_client(
-        quest, driver=_NullDriver(), coord=coord, solicit=lambda _p: _never())
+        quest, driver=_NullDriver(), coord=coord, solicit=lambda _p: _never(),
+        leave_mode="new")
 
     assert rc == 3
     out = capsys.readouterr().out
@@ -846,7 +854,8 @@ async def test_run_session_client_wires_seed_pending_reply_as_local_echo(
     driver = _NullDriver()
     coord = InterruptCoordinator()
     rc = await run_session_client(
-        quest, driver=driver, coord=coord, solicit=lambda _p: _never())
+        quest, driver=driver, coord=coord, solicit=lambda _p: _never(),
+        leave_mode="new")
 
     assert captured["local_echo"] == driver.seed_pending_reply
     assert rc == 0
@@ -875,7 +884,8 @@ async def test_run_session_client_installs_startup_status(
 
     coord = InterruptCoordinator()
     rc = await run_session_client(
-        quest, driver=_Driver(), coord=coord, solicit=lambda _p: _never())
+        quest, driver=_Driver(), coord=coord, solicit=lambda _p: _never(),
+        leave_mode="new")
 
     assert installed == [True]           # called exactly once
     assert rc == 0
@@ -919,7 +929,13 @@ async def test_run_session_client_threads_model(
     coord = InterruptCoordinator()
     rc = await run_session_client(
         quest, driver=_Driver(), coord=coord, solicit=_solicit,
-        model="anthropic:claude-fable-5")
+        model="anthropic:claude-fable-5", leave_mode="new")
 
     assert rc == 0
     assert captured["model"] == "anthropic:claude-fable-5"
+
+
+def test_run_session_client_leave_mode_is_required() -> None:
+    import inspect
+    p = inspect.signature(run_session_client).parameters["leave_mode"]
+    assert p.default is inspect.Parameter.empty

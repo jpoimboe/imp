@@ -61,11 +61,11 @@ def test_save_intent_saves_even_with_zero_exchange(tmp_path: Path) -> None:
     assert leave_control_action(ch, "chat", "save") == "save"
 
 
-def test_save_intent_with_no_leave_mode_still_saves(tmp_path: Path) -> None:
-    # Explicit /save is exempt from the leave_mode-None early-return guard.
+def test_save_intent_overrides_chat_mode(tmp_path: Path) -> None:
+    # Explicit /save wins over the chat-mode archive default.
     _seed_control(tmp_path)
     ch = _draft(tmp_path, "sn1", exchange=True)
-    assert leave_control_action(ch, None, "save") == "save"
+    assert leave_control_action(ch, "chat", "save") == "save"
 
 
 def test_clear_intent_with_exchange_archives_even_for_new_mode(tmp_path: Path) -> None:
@@ -85,12 +85,6 @@ def test_abandon_intent_returns_none(tmp_path: Path) -> None:
     _seed_control(tmp_path)
     ch = _draft(tmp_path, "a1", exchange=True)
     assert leave_control_action(ch, "chat", "abandon") is None
-
-
-def test_no_leave_mode_no_intent_returns_none(tmp_path: Path) -> None:
-    _seed_control(tmp_path)
-    ch = _draft(tmp_path, "h1", exchange=True)
-    assert leave_control_action(ch, None, None) is None
 
 
 def test_materialized_change_returns_none(tmp_path: Path) -> None:
