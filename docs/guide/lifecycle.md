@@ -14,9 +14,22 @@ prompts, partials, scripts, and skills that drove it.
 ## Statuses
 
 A quest carries one at-rest status: `new`, `paused`, `saved`, `completed`,
-`merge_blocked`, `abandoned`. `running` is **derived** — a live process holds
-the quest's lock — and is never stored. A `new` or `paused` quest that has not
-been built yet (un-materialized) is shown to the user as a **draft**.
+`merge_blocked`, `abandoned`. The word `imp list` shows is **derived** from that
+at-rest status plus two runtime facts — whether a live process holds the quest's
+lock, and a durable **halt-condition** recorded on `state.json`:
+
+- `running` — a live process holds the lock and is working.
+- `waiting` — a live process is parked at a human input gate (halt-condition
+  `waiting`).
+- `error` — not live, the last halt was a failure (halt-condition `error`).
+- `merge blocked` — the merge gate needs a decision (stored `merge_blocked`).
+- `paused` — not live, a clean stop (a yield or interrupt).
+- `new` — created, never started.
+
+`running`, `waiting`, and `error` are derived and never stored. There is no
+`draft` status word: an un-materialized quest shows its real derived status
+(`new`/`paused`), with its `(threshold)` step marking that it is still being
+scoped.
 
 ## Zones: active list, backlog, archive
 
@@ -24,8 +37,8 @@ Where a quest appears is **derived** — never a separate status string. Two fac
 decide it: whether it has been **materialized**, and its **origin**.
 
 - **active list** — quests in flight, plus un-materialized **drafts**: a fresh
-  `imp new` draft has `origin: draft`, so it shows here relabeled `draft`, not
-  in the backlog.
+  `imp new` draft has `origin: draft`, so it appears in the active list, not the
+  backlog.
 - **backlog** — un-materialized backlog items (`origin: backlog`) parked for
   later; pick one up when you are ready.
 - **archive** — finished (`completed`/`abandoned`) and shelved conversations,
@@ -40,8 +53,8 @@ draft is just a conversation and its artifacts on disk.
 
 ## Entry points
 
-- `imp new` — start a fresh quest; a left draft stays in the active list, shown
-  as a `draft` (not the backlog), resumable later.
+- `imp new` — start a fresh quest; a left draft stays in the active list (not the
+  backlog), resumable later.
 - `imp chat` — open the threshold conversation.
 - `imp resume <id>` — pick a parked or left quest back up.
 
@@ -52,15 +65,15 @@ When a phase-0 conversation is left, its fate depends on what happened:
 - **Never answered / no real exchange** → `discard_conversation` (it goes away).
 - **`imp new`, an explicit `/save`, or the quest was renamed (a design formed)**
   → `save_as_draft`: `origin` stays `draft`, so it remains in the active list,
-  shown as a **draft**, resumable later. It does **not** move to the backlog.
+  resumable later. It does **not** move to the backlog.
 - **Otherwise** (an un-renamed `imp chat` conversation) → `archive_conversation`:
   it leaves the active list but stays resumable (shelved) via `imp resume` or
   findable with `imp search`.
 
 This is the exact point **training data** gets wrong — it once claimed `imp new`
 "archives a draft as resumable"; it does not. `imp new` runs `save_as_draft`, so
-the draft stays in your active list, shown as a `draft`, rather than being
-archived. Likewise, a renamed `imp chat` conversation is kept as an active draft,
+the draft stays in your active list, rather than being archived. Likewise, a renamed
+`imp chat` conversation is kept as an active draft,
 not archived — the rename (a design formed), not the entry point, is what keeps
 it in the active list; and `save_as_draft` never moves anything to the backlog.
 
