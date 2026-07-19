@@ -201,7 +201,7 @@ def test_create_seeds_raw_templated_label(tmp_path: Path) -> None:
     assert st.step_label == "seeding {{ vars.k }}"
 
 
-def test_cmd_status_renders_draft_in_active(
+def test_cmd_status_renders_unmaterialized_as_new_in_active(
     tmp_path: Path, capsys,
 ) -> None:
     _seed_control(tmp_path)
@@ -212,7 +212,7 @@ def test_cmd_status_renders_draft_in_active(
     assert rc == 0
     assert "backlog" not in out          # a lone draft creates no backlog section
     d1_line = next(ln for ln in out.splitlines() if ln.startswith("d1"))
-    assert "draft" in d1_line          # a fresh un-materialized draft shows draft in Active
+    assert "new" in d1_line  # a fresh un-materialized quest shows its real status in Active
 
 
 def _human_msg(text: str) -> dict:

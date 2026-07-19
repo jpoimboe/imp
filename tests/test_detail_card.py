@@ -428,8 +428,8 @@ def test_detail_card_shows_shelved_for_archived_paused_quest(tmp_path: Path) -> 
     assert "draft" not in status_line_m
 
     # Un-materialized case: quest.json has "materialized": false.
-    # Row status would be "draft" (resolve_display_status maps paused+unmaterialized->draft);
-    # card must still show "shelved" because the raw final_state.status is "paused".
+    # The archived card must show "shelved" from the raw final_state.status "paused"
+    # (archived homes never consult the halt-condition).
     events_u = tmp_path / "arc_u.jsonl"
     events_u.write_text("")
     quest_json_u = tmp_path / "arc_u.quest.json"
@@ -487,7 +487,7 @@ def test_quest_card_shows_merged_for_merged_quest(tmp_path: Path) -> None:
     assert "completed" not in status_line    # raw internal word not shown
 
 
-def test_quest_card_shows_completed_when_unmerged(tmp_path: Path) -> None:
+def test_quest_card_shows_merged_for_completed_unmerged(tmp_path: Path) -> None:
     _seed_control(tmp_path)
     cdir = tmp_path / ".imp" / "quests" / "2026-06-20-cmp01"
     (cdir / "state").mkdir(parents=True)
@@ -499,11 +499,11 @@ def test_quest_card_shows_completed_when_unmerged(tmp_path: Path) -> None:
           step_attempt=0).save(cdir / "state")   # merge_commit defaults to None
     card = "\n".join(main._detail_card(tmp_path, "2026-06-20-cmp01", now=_NOW, color=False))
     status_line = next(ln for ln in card.splitlines() if ln.startswith("status:"))
-    assert "completed" in status_line        # no merge_commit -> stays completed
-    assert "merged" not in status_line
+    assert "merged" in status_line           # completed folds to the display word merged
+    assert "completed" not in status_line
 
 
-def test_quest_json_status_stays_completed_for_merged(tmp_path: Path) -> None:
+def test_quest_json_status_is_merged_for_completed(tmp_path: Path) -> None:
     _seed_control(tmp_path)
     cdir = tmp_path / ".imp" / "quests" / "2026-06-20-mgj01"
     (cdir / "state").mkdir(parents=True)
@@ -515,7 +515,7 @@ def test_quest_json_status_stays_completed_for_merged(tmp_path: Path) -> None:
           merge_commit="deadbeefcafe", step_attempt=0).save(cdir / "state")
     data = main._quest_json(tmp_path, "2026-06-20-mgj01")
     assert data is not None
-    assert data["status"] == "completed"     # machine value unchanged even when merged
+    assert data["status"] == "merged"        # --json emits the resolved display word
 
 
 def test_quest_card_shows_merged_for_archived_quest(tmp_path: Path) -> None:

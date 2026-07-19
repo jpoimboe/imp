@@ -2548,24 +2548,29 @@ def _load_or_rehydrate(control: Path, quest_id: str) -> Quest | int:
 
 
 # Spec §10: in-flight statuses; completed quests live in the archive.
-_INFLIGHT = ("running", "new", "paused", "merge_blocked", "draft")
-RESUMABLE = ("new", "paused", "merge_blocked", "draft", "saved")
+_INFLIGHT = ("running", "waiting", "error", "new", "paused", "merge_blocked")
+RESUMABLE = ("new", "paused", "error", "merge_blocked", "saved")
 
 
 def resolve_display_status(
-    status: str, quest_dir: Path, *, materialized: bool
+    status: str, quest_dir: Path, *, halt_condition: str | None = None
 ) -> str:
-    """The one map from persisted (at-rest) status to display status.
+    """The one total map from persisted state to the resolved display word.
 
-    `running` is derived, never persisted: a live process holds quest_dir/lock
-    with its pid inside for its whole run. A stale lock (file present, pid dead)
-    reads as not-running, so the quest shows its resumable at-rest status — no
-    manufactured `errored`. An un-materialized new/paused quest shows as
-    `draft`, generalizing the already-accepted draft synthesis."""
+    Lock-liveness governs staleness (like the `lock` file): a live process holds
+    quest_dir/lock with its pid inside. Live + a `waiting` halt-condition reads
+    `waiting` (parked at a human gate); live otherwise reads `running`. Not live,
+    an `error` halt-condition reads `error`; a stored `completed` folds to the
+    disposition word `merged`; every other stored word passes through (an at-rest
+    `paused`/`new`/`merge_blocked`, or a not-live gate-yield that collapses to its
+    stored `paused`). The resolved word is what the membership gates and the
+    STATUS_COLORS key consume, so `merge_blocked` stays underscored here."""
     if lock_is_live(quest_dir / "lock"):
-        return "running"
-    if status in ("new", "paused") and not materialized:
-        return "draft"
+        return "waiting" if halt_condition == "waiting" else "running"
+    if halt_condition == "error":
+        return "error"
+    if status == "completed":
+        return "merged"
     return status
 
 
@@ -2619,11 +2624,12 @@ def _status_row(quest_id: str, state_json: bytes, quest_json: bytes,
 
 def _row_for_id(control: Path, quest_id: str) -> _Row | None:
     cdir = _quest_home(control, quest_id)
+    live_home = (cdir / "quest.json").exists()
     # archive_read returns bytes | None; the live quest-home branch always finds
     # the files. Annotate so the None-guard below stays reachable (not dead code).
     state_json: bytes | None
     quest_json: bytes | None
-    if (cdir / "quest.json").exists():
+    if live_home:
         # A quest home mid-creation has quest.json written but state.json not
         # yet (Quest.create is not atomic across the two files). The daemon's
         # scan loop can hit that window, so tolerate it like scan_homes
@@ -2643,8 +2649,10 @@ def _row_for_id(control: Path, quest_id: str) -> _Row | None:
     row = _status_row(quest_id, state_json, quest_json, last)
     if row is None:
         return None
-    materialized = json.loads(quest_json).get("materialized", True)
-    status = resolve_display_status(row[1], cdir, materialized=materialized)
+    # Archived homes derive their word from the stored status via the disposition
+    # mapping and never consult the halt-condition (readers stay single-version).
+    halt_condition = json.loads(state_json).get("halt_condition") if live_home else None
+    status = resolve_display_status(row[1], cdir, halt_condition=halt_condition)
     return (row[0], status, *row[2:])
 
 
@@ -2661,8 +2669,8 @@ def _status_rows(control: Path, scanned: list[HomeDigest] | None = None) -> list
         row = _status_row(h.quest_id, h.state_json, h.quest_json, h.last_iso)
         if row is None:
             continue
-        status = resolve_display_status(
-            row[1], cdir, materialized=h.meta.get("materialized", True))
+        halt_condition = json.loads(h.state_json).get("halt_condition")
+        status = resolve_display_status(row[1], cdir, halt_condition=halt_condition)
         row = (row[0], status, *row[2:])
         if row[1] not in _INFLIGHT:
             continue

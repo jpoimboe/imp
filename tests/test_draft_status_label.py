@@ -40,12 +40,12 @@ def _park_draft(tmp_path: Path, cid: str) -> Quest:
     return ch
 
 
-def test_row_for_id_labels_parked_draft(tmp_path: Path) -> None:
+def test_row_for_id_labels_parked_draft_as_paused(tmp_path: Path) -> None:
     _seed_control(tmp_path)
     _park_draft(tmp_path, "drflbl")
     row = m._row_for_id(tmp_path, "drflbl")
     assert row is not None
-    assert row[1] == "draft"
+    assert row[1] == "paused"
 
 
 def test_materialized_paused_change_is_not_labeled_draft(tmp_path: Path) -> None:
@@ -71,7 +71,7 @@ def test_draft_status_has_a_color() -> None:
     assert "draft" in quest_row.STATUS_COLORS
 
 
-def test_parked_draft_renders_draft_status_word(tmp_path: Path) -> None:
+def test_parked_draft_renders_real_status_word(tmp_path: Path) -> None:
     from datetime import UTC, datetime
     _seed_control(tmp_path)
     _park_draft(tmp_path, "drbare")
@@ -79,4 +79,4 @@ def test_parked_draft_renders_draft_status_word(tmp_path: Path) -> None:
     line = quest_row.format_quest_line(
         quest_id=row[0], title=row[4], status=row[1], step=row[2],
         step_label=row[6], last_iso=row[3], now=datetime.now(UTC), color=False)
-    assert "draft" in line
+    assert "paused" in line
