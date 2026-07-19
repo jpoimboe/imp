@@ -19,6 +19,7 @@ workflow
 clean_tree_bounces
 completion_pending
 current_step
+halt_condition
 has_started
 held_acquire_step
 held_lane
