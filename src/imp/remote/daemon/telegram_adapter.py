@@ -11,7 +11,6 @@ from imp.remote.daemon.commands import Command, ListResult, Notice, Response, pa
 from imp.remote.daemon.subscriptions import Subscriptions
 from imp.remote.drivers.telegram import (
     api_call,
-    clamp_text,
     curate,
     event_body,
     format_event_message,
@@ -19,6 +18,7 @@ from imp.remote.drivers.telegram import (
     load_config,
     make_get_updates,
     send_message_params,
+    split_text,
     step_divider,
 )
 
@@ -137,12 +137,15 @@ def render_response(
 
 
 def send_message(token: str, chat_id: int, text: str, *, silent: bool) -> int | None:
-    """POST one sendMessage and return the created message's id, or None if absent."""
-    response = api_call(token, "sendMessage", send_message_params(
-        chat_id, clamp_text(text), silent=silent))
-    result = response.get("result") or {}
-    message_id = result.get("message_id")
-    return message_id if isinstance(message_id, int) else None
+    """POST one sendMessage per chunk, return the last chunk's message id or None."""
+    message_id: int | None = None
+    for chunk in split_text(text):
+        response = api_call(token, "sendMessage", send_message_params(
+            chat_id, chunk, silent=silent))
+        result = response.get("result") or {}
+        raw = result.get("message_id")
+        message_id = raw if isinstance(raw, int) else None
+    return message_id
 
 
 class TelegramNorthAdapter:

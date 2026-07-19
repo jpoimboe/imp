@@ -52,18 +52,23 @@ def test_send_message_returns_none_when_response_has_no_message_id(
     assert send_message("tok", 4242, "hello", silent=True) is None
 
 
-def test_send_message_clamps_overlong_text(monkeypatch: Any) -> None:
-    captured: dict[str, Any] = {}
+def test_send_message_splits_overlong_text_into_ordered_sends(
+    monkeypatch: Any,
+) -> None:
+    calls: list[dict] = []
 
     def fake_api_call(token: str, method: str, params: dict) -> dict:
-        captured["params"] = params
-        return {"ok": True, "result": {"message_id": 1}}
+        calls.append(params)
+        return {"ok": True, "result": {"message_id": len(calls)}}
 
     monkeypatch.setattr(telegram_adapter, "api_call", fake_api_call)
-    send_message("tok", 4242, "a" * 5000, silent=False)
-    sent = captured["params"]["text"]
-    assert len(sent) == 4096
-    assert sent.endswith("\n[truncated]")
+    body = "a" * 5000
+    send_message("tok", 4242, body, silent=False)
+    assert len(calls) == 2
+    assert all(len(c["text"]) <= 4096 for c in calls)
+    assert "".join(c["text"] for c in calls) == body
+    assert all("[truncated]" not in c["text"] for c in calls)
+    assert all(c["disable_notification"] is False for c in calls)
 
 
 def test_send_message_leaves_short_text_unchanged(monkeypatch: Any) -> None:
@@ -76,6 +81,33 @@ def test_send_message_leaves_short_text_unchanged(monkeypatch: Any) -> None:
     monkeypatch.setattr(telegram_adapter, "api_call", fake_api_call)
     send_message("tok", 4242, "short", silent=False)
     assert captured["params"]["text"] == "short"
+
+
+def test_send_message_returns_last_chunk_message_id(monkeypatch: Any) -> None:
+    ids = iter([101, 202])
+
+    def fake_api_call(token: str, method: str, params: dict) -> dict:
+        return {"ok": True, "result": {"message_id": next(ids)}}
+
+    monkeypatch.setattr(telegram_adapter, "api_call", fake_api_call)
+    # A 5000-char body splits into two sends; the returned id is the LAST send's.
+    assert send_message("tok", 4242, "a" * 5000, silent=True) == 202
+
+
+def test_send_message_returns_none_when_final_chunk_has_no_id(
+    monkeypatch: Any,
+) -> None:
+    responses = iter([
+        {"ok": True, "result": {"message_id": 101}},
+        {"ok": False},
+    ])
+
+    def fake_api_call(token: str, method: str, params: dict) -> dict:
+        return next(responses)
+
+    monkeypatch.setattr(telegram_adapter, "api_call", fake_api_call)
+    # Final chunk yields no message id → None, even though an earlier chunk had one.
+    assert send_message("tok", 4242, "a" * 5000, silent=True) is None
 
 
 def test_format_outbound_signature_has_no_body_override() -> None:
