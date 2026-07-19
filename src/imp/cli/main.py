@@ -195,18 +195,26 @@ class SeedResolution(NamedTuple):
 
 
 def resolve_spec_seed(args: argparse.Namespace) -> SeedResolution:
-    """Resolve the first-turn seed source for `imp new`.
+    """Resolve the opening seed for `imp new`/`imp chat`.
 
-    A non-empty positional MESSAGE becomes the user's verbatim opening intent
-    (delivered unwrapped); otherwise there is no seed. A spec is named in the
-    positional MESSAGE and read by the workflow's opening step itself, never inlined here."""
+    The positional MESSAGE and --message are interchangeable aliases: either,
+    when non-empty, becomes the user's verbatim opening intent (delivered
+    unwrapped). Whitespace-only values are treated as absent. If both are
+    non-empty, raise SeedError. A spec is named in the opening message and read
+    by the workflow's opening step itself, never inlined here."""
     title = getattr(args, "title", None)
     opening = getattr(args, "opening", None)
+    message = getattr(args, "message", None)
 
-    if opening is not None and opening.strip():
-        return SeedResolution(title, opening)
+    opening = opening if (opening and opening.strip()) else None
+    message = message if (message and message.strip()) else None
 
-    return SeedResolution(title, None)
+    if opening is not None and message is not None:
+        raise SeedError(
+            "Pass the opening message once — as the positional argument or "
+            "--message, not both.")
+
+    return SeedResolution(title, opening or message)
 
 
 def make_message_reply_fn(message: str | None) -> Callable[[], Awaitable[str]]:
@@ -1276,7 +1284,7 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
                             width=_term_width, display_width=_display_width, status=status,
                             quest_id=quest.id, title=quest.title)
         coord = InterruptCoordinator()
-        solicit = make_headless_solicit(getattr(args, "message", None), coord)
+        solicit = make_headless_solicit(None, coord)
         return await run_session_client(
             quest, driver=driver, coord=coord, solicit=solicit,
             status=status,

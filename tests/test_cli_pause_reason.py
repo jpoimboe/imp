@@ -21,9 +21,10 @@ def test_new_non_interactive_routes_through_session_client(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Headless `imp new` is a thin session-client: it routes through
-    run_session_client (the daemon owns the worktree + lock), binds a headless
-    deliver-once solicit from --message, threads the seed, and never runs the
-    agent loop in-process nor spawns an ESC reader."""
+    run_session_client (the daemon owns the worktree + lock), passes None to the
+    headless solicit (--message is the seed, not a pre-queued reply), persists
+    the seed via set_seed_opening, and never runs the agent loop in-process nor
+    spawns an ESC reader."""
     _seed_control(tmp_path)
     monkeypatch.chdir(tmp_path)
 
@@ -63,8 +64,12 @@ def test_new_non_interactive_routes_through_session_client(
         title="ni", non_interactive=True, message="do it"))
 
     assert rc == 7
-    assert made["message"] == "do it"
+    # --message is now the seed, not a pre-queued first reply: nothing is
+    # threaded into the headless solicit, and the message is persisted as the
+    # quest's opening seed.
+    assert made["message"] is None
     assert captured["seed_opening"] is None
+    assert Quest.load(tmp_path, captured["quest_id"]).seed_opening == "do it"
 
 
 

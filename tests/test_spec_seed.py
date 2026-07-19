@@ -142,33 +142,23 @@ def test_new_title_flag_sets_quest_title(
     assert captured["change"].title == "dark mode"  # type: ignore[union-attr]
 
 
-def test_new_positional_with_message_legal(
-        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    _seed_control(tmp_path)
-    monkeypatch.chdir(tmp_path)
+def test_resolve_message_alone_is_seed() -> None:
+    res = cli_main.resolve_spec_seed(_new_args(message="build X"))
+    assert res == cli_main.SeedResolution(title=None, seed_text="build X")
 
-    captured: dict[str, object] = {}
 
-    async def _fake_client(quest: object, *, driver: object, coord: object,
-                           solicit: object,
-                           leave_mode: object = None,
-                           status: object = None,
-                           title: object = None,
-                           non_interactive: object = False,
-                           autonomous: object = False,
-                           model: str | None = None) -> int:
-        captured["change"] = quest
-        captured["reply"] = await solicit("")  # type: ignore[operator]
-        return 0
+def test_resolve_whitespace_only_message_is_empty() -> None:
+    res = cli_main.resolve_spec_seed(_new_args(message="   "))
+    assert res == cli_main.SeedResolution(title=None, seed_text=None)
 
-    monkeypatch.setattr(cli_main, "run_session_client", _fake_client)
 
-    args = _new_args(opening="add dark mode", non_interactive=True, message="reply")
-    rc = anyio.run(cli_main._async_cmd_new, args)
-
-    assert rc == 0
-    assert captured["change"].seed_opening == "add dark mode"  # type: ignore[union-attr]
-    assert captured["reply"] == "reply"
+def test_resolve_both_positional_and_message_raises() -> None:
+    with pytest.raises(cli_main.SeedError) as excinfo:
+        cli_main.resolve_spec_seed(
+            _new_args(opening="build X", message="build X"))
+    assert str(excinfo.value) == (
+        "Pass the opening message once — as the positional argument or "
+        "--message, not both.")
 
 
 def test_threshold_opening_conditioned_on_message(tmp_path) -> None:
