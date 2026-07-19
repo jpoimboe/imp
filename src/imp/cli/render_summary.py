@@ -6,7 +6,7 @@ from typing import Any
 
 from imp.cli import palette as pal
 from imp.cli.narrative import TokenTotals, elapsed_seconds
-from imp.cli.quest_row import STATUS_COLORS
+from imp.cli.quest_row import STATUS_COLORS, display_word
 from imp.cli.render_text import fmt_seconds
 
 
@@ -219,7 +219,7 @@ def summary_total(events: list[dict[str, Any]]) -> float | None:
 def _header_line(h: SummaryHeader, work_seconds: float | None,
                  tokens: int, cost: float, *, color: bool) -> str:
     workflow = pal.ansi(h.workflow, *pal.NODE_COLORS["workflow"], enabled=color)
-    status = pal.ansi(h.status, *STATUS_COLORS.get(h.status, ()), enabled=color)
+    status = pal.ansi(display_word(h.status), *STATUS_COLORS.get(h.status, ()), enabled=color)
     total = _dur_text(work_seconds)
     tok = _fmt_tokens(tokens)
     cst = _fmt_cost(cost)

@@ -89,7 +89,23 @@ def test_format_truncates_name_past_budget():
 
 def test_format_status_color_running():
     line = format_quest_line(**_row(status="running"), color=True)
-    assert "\x1b[32mrunning\x1b[0m" in line
+    assert "\x1b[1mrunning\x1b[0m" in line
+
+
+def test_waiting_status_renders_wordmark():
+    line = format_quest_line(**_row(status="waiting"), color=True)
+    assert "\x1b[33mwaiting\x1b[0m" in line
+
+
+def test_error_status_renders_red():
+    line = format_quest_line(**_row(status="error"), color=True)
+    assert "\x1b[31merror\x1b[0m" in line
+
+
+def test_merge_blocked_renders_two_words_on_underscore_color_key():
+    line = format_quest_line(**_row(status="merge_blocked"), color=True)
+    assert "\x1b[33mmerge blocked\x1b[0m" in line   # wordmark color, two-word text
+    assert "merge_blocked" not in line
 
 
 def test_format_dim_wraps_whole_row():
@@ -105,9 +121,10 @@ def test_dim_row_column_order():
     assert line.index("Add version flag") < line.index("completed") < line.index("15m")
 
 
-def test_merged_status_renders_green():
+def test_merged_status_renders_plain():
     line = format_quest_line(**_row(status="merged"), color=True)
-    assert "\x1b[32mmerged\x1b[0m" in line
+    assert "merged" in line
+    assert "\x1b[3" not in line
 
 
 def test_name_budget_fills_remaining_width(monkeypatch):
@@ -135,16 +152,12 @@ def test_name_budget_floors_at_minimum(monkeypatch):
     assert name_budget() == NAME_MIN
 
 
-def test_backlog_status_renders_dim():
-    from imp.cli.quest_row import STATUS_COLORS
-    assert STATUS_COLORS["backlog"] == ("dim",)
-
 
 def test_status_cell_merges_step_label_as_dim_suffix():
     line = format_quest_line(**_row(status="running", step="write_spec"),
                               step_label="writing spec", color=True)
     # status word keeps its color; the label suffix is dim and parenthesized.
-    assert "\x1b[32mrunning\x1b[0m" in line
+    assert "\x1b[1mrunning\x1b[0m" in line
     assert "\x1b[2m (writing spec)\x1b[0m" in line
 
 
@@ -171,9 +184,8 @@ def test_draft_status_renders_step_suffix():
     assert "draft (blocked)" in line
 
 
-def test_provenance_status_is_backlog_only():
+def test_provenance_words_absent_from_palette():
     from imp.cli.quest_row import STATUS_COLORS
-    assert STATUS_COLORS["backlog"] == ("dim",)
     assert "idea" not in STATUS_COLORS
     assert "followup" not in STATUS_COLORS
 
@@ -182,7 +194,7 @@ def test_status_word_never_truncated_only_label_is():
     line = format_quest_line(
         **_row(status="merge_blocked", step="x"),
         step_label="resolving deferred items", color=False)
-    assert "merge_blocked" in line               # status word intact
+    assert "merge blocked" in line               # status word intact
     assert "…" in line                           # label was truncated
     assert "resolving deferred items" not in line  # full label did not fit
 
@@ -196,7 +208,7 @@ def test_merge_blocked_status_word_is_wordmark_under_dark_theme() -> None:
         pal.set_theme("ansi")
     wordmark = pal.theme_escapes("dark")["wordmark"]   # \x1b[38;2;255;154;60m
     yellow = pal.theme_escapes("dark")["yellow"]        # \x1b[38;2;199;151;106m
-    assert wordmark + "merge_blocked" in line           # status word painted wordmark
+    assert wordmark + "merge blocked" in line           # status word painted wordmark
     assert yellow not in line                           # not the muted yellow role
 
 
@@ -273,10 +285,17 @@ def test_header_line_honors_status_width():
     assert h.index("UPDATED") == ID_W + 2 + 30 + 2 + 25 + 2
 
 
-def test_status_colors_have_new_and_no_errored() -> None:
+def test_status_colors_are_meaning_based() -> None:
     from imp.cli.quest_row import STATUS_COLORS
-    assert "new" in STATUS_COLORS
-    assert "errored" not in STATUS_COLORS
+    assert STATUS_COLORS["running"] == ("bold",)
+    assert STATUS_COLORS["waiting"] == ("wordmark",)
+    assert STATUS_COLORS["error"] == ("red",)
+    assert STATUS_COLORS["merge_blocked"] == ("wordmark",)
+    assert "new" not in STATUS_COLORS       # plain, at rest
+    assert "paused" not in STATUS_COLORS
+    assert "merged" not in STATUS_COLORS
+    assert "backlog" not in STATUS_COLORS
+    assert "draft" not in STATUS_COLORS
 
 
 @pytest.mark.parametrize(
@@ -298,7 +317,7 @@ def test_status_cell_phase_label_color_path():
     line = format_quest_line(**_row(status="running", step="write_spec"),
                               step_label="writing spec",
                               phase_label="spec phase", color=True)
-    assert "\x1b[32mrunning\x1b[0m" in line
+    assert "\x1b[1mrunning\x1b[0m" in line
     assert "\x1b[2m (spec phase · writing spec)\x1b[0m" in line
 
 

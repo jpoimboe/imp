@@ -44,3 +44,15 @@ def test_lifecycle_carries_the_training_data_correction() -> None:
     assert "training data" in body.lower()
     # pin the correction paragraph itself: the wrong claim it explicitly rebuts
     assert "archives a draft as resumable" in body
+
+
+def test_lifecycle_documents_waiting_error_and_no_draft_word() -> None:
+    body = DOC.read_text()
+    assert "waiting" in body
+    assert "error" in body
+    # running/waiting/error are derived from the lock + the durable halt-condition
+    assert "halt-condition" in body or "halt condition" in body
+    # the false "shown as a `draft`" display-word phrasing is gone
+    assert "shown as a `draft`" not in body
+    assert "relabeled `draft`" not in body
+    assert "shown as a **draft**" not in body

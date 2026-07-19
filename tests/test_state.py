@@ -621,3 +621,31 @@ def test_derive_started_at_falls_back_to_first_event_then_created_at() -> None:
     assert derive_started_at(
         [{"_malformed": True, "raw": "x"},
          {"type": "step_started", "timestamp": "FIRST"}], "CREATED") == "FIRST"
+
+
+def test_state_halt_condition_defaults_none(tmp_path: Path) -> None:
+    s = State(id="c1", step=None, step_attempt=0, status="new")
+    assert s.halt_condition is None
+    s.save(tmp_path)
+    raw = json.loads((tmp_path / "state.json").read_text())
+    assert raw["halt_condition"] is None
+    assert State.load(tmp_path).halt_condition is None
+
+
+def test_state_halt_condition_round_trips(tmp_path: Path) -> None:
+    s = State(id="c1", step="w", step_attempt=0, status="paused",
+              halt_condition="error")
+    s.save(tmp_path)
+    raw = json.loads((tmp_path / "state.json").read_text())
+    assert raw["halt_condition"] == "error"
+    assert State.load(tmp_path).halt_condition == "error"
+
+
+def test_state_load_forward_compatible_without_halt_condition(tmp_path: Path) -> None:
+    # A state.json written before this field existed loads with halt_condition=None.
+    (tmp_path / "state.json").write_text(json.dumps({
+        "id": "c1", "step": "w", "step_attempt": 0, "status": "paused",
+        "vars": {}, "loop_counts": {}, "current_step": None,
+        "retry_feedback": None,
+    }))
+    assert State.load(tmp_path).halt_condition is None

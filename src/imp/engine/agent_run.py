@@ -332,6 +332,7 @@ async def _resolve_wait_reply(
     agent_id: str,
     pending_reply: str | None = None,
     last_agent_message: str = "",
+    halt_writer: Callable[[], None] | None = None,
 ) -> tuple[str | SkillReply, str]:
     """Satisfy a bare-turn-end / AWAITING_USER yield on resume, returning
     (reply, source) where source is
@@ -361,6 +362,8 @@ async def _resolve_wait_reply(
         return pending_reply, "pending_reply"
     if resume_should_continue:
         return _CONTINUATION_NUDGE, "nudge"
+    if halt_writer is not None:
+        halt_writer()
     elog.append(agent_id=agent_id, type="awaiting_user_input",
                 payload={"steer_hint": "", "last_agent_message": last_agent_message,
                          "interrupt": False})
@@ -537,6 +540,11 @@ def build_agent_invocation(
             if feedback_lead:
                 task = f"{feedback_lead}\n\n{task}"
             messages = (Message(role="user", content=(TextBlock(text=task),)),)
+    def _mark_waiting() -> None:
+        quest_state.halt_condition = "waiting"
+        quest_state.save(quest.state_dir)
+    halt_writer = (
+        _mark_waiting if (quest_state is not None and quest is not None) else None)
     continuation_fn = build_continuation_fn(
         user_input_fn=user_chat_input_fn,
         coordinator=coordinator,
@@ -545,6 +553,7 @@ def build_agent_invocation(
         headless=headless,
         interactive=interactive,
         has_schema=has_schema,
+        halt_writer=halt_writer,
     )
     return AgentInvocation(
         agent_def=agent_def,
@@ -563,6 +572,7 @@ def build_agent_invocation(
         event_log=event_log,
         quest_state=quest_state,
         quest=quest,
+        halt_writer=halt_writer,
         first_event_parent_id=first_event_parent_id,
         retry_feedback=retry_feedback,
         balance_on_resume=balance_on_resume,

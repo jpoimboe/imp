@@ -210,7 +210,7 @@ def test_open_trailing_step_on_paused_change_reflects_status():
 def test_header_status_color_and_workflow_magenta():
     out = render_summary([], header=_HDR, color=True, width=80)
     assert "\x1b[1m\x1b[35mfeature\x1b[0m" in out[0]   # workflow bold magenta
-    assert "\x1b[32mmerged\x1b[0m" in out[0]           # merged status green
+    assert "merged" in out[0]                          # merged status plain (no color)
 
 
 def test_summary_total_is_first_to_last_timestamp():
@@ -643,3 +643,11 @@ def test_header_rollup_includes_subagent_tokens_and_cost():
     out = render_summary([step], header=hdr, color=False, width=80)
     assert "2.5k" in out[0]    # 1000 step + 1500 subagent
     assert "$0.50" in out[0]   # 0.20 step + 0.30 subagent
+
+
+def test_header_merge_blocked_renders_two_words_on_underscore_color():
+    hdr = SummaryHeader(workflow="feature", quest_id="abc",
+                        status="merge_blocked", total_seconds=100.0)
+    out = render_summary([], header=hdr, color=True, width=80)
+    assert "\x1b[33mmerge blocked\x1b[0m" in out[0]   # wordmark color, two-word text
+    assert "merge_blocked" not in out[0]

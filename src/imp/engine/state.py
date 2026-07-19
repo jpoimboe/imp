@@ -36,6 +36,33 @@ Status = Literal[
 ]
 ResumeMode = Literal["solicit", "continue"]
 
+# Durable halt/gate condition written to state.json. `waiting` = live, parked at
+# a human input gate; `error` = a not-live failure halt; None = working / clean
+# at rest. Only these two non-null values are observable — a clean yield or human
+# interrupt reads None (display-equivalent to at-rest when not live).
+HaltCondition = Literal["waiting", "error"]
+
+# workflow_paused reasons that are NOT failures: a bare-turn-end yield, a lane
+# turn-wait, or an interrupt. Every other reason (internal_error, retry_ceiling,
+# reauth_needed, max_loops, unknown_step, provider error categories, …) is a
+# failure halt. Defaulting the non-clean case keeps the mapping total with no
+# error-reason list to maintain.
+_CLEAN_PAUSE_REASONS = frozenset({"awaiting_user", "awaiting_turn", "interrupt"})
+
+
+def classify_pause_halt(
+        reason: str, interrupt_reason: str | None) -> HaltCondition | None:
+    """Map a workflow_paused (reason, interrupt_reason) to the durable
+    halt-condition. A human interrupt (interrupt_reason set) or a clean
+    yield/turn-wait reads clean (None); every other reason is a failure (error).
+    Shared by the runtime pause write and the migration backfill so both agree."""
+    if interrupt_reason is not None:
+        return None
+    if reason in _CLEAN_PAUSE_REASONS:
+        return None
+    return "error"
+
+
 # Pre-release coercion of legacy persisted values: `running` was the old birth
 # status (now `new`); `errored` was a derived crash label that no longer persists
 # (a crash is resumable → `paused`).
@@ -157,6 +184,10 @@ class State:
     # here (restored into the coordinator on resume, cleared at step advance).
     route_label: str | None = None  # rule label threaded to the next step_started (consume-on-read)
     started_at: str | None = None  # durable: ISO-8601 UTC instant work began; None until first run
+    # Durable halt/gate condition (state.json). Written eagerly at a human gate
+    # (waiting), at pause (error vs clean), cleared when work resumes and on
+    # normal step advance. Staleness is governed by lock liveness like `lock`.
+    halt_condition: HaltCondition | None = None
     has_started: bool = False  # durable: True once >=1 step has begun executing
     completion_pending: bool = False  # §3: navigation ran off the end under an
     # in-flight interrupt; re-entry finalizes via _complete (no dispatch/wipe).
@@ -234,6 +265,7 @@ class State:
             "started_at": self.started_at,
             "step_attempt": self.step_attempt,
             "status": self.status,
+            "halt_condition": self.halt_condition,
             "has_started": self.has_started,
             "vars": self.vars,
             "loop_counts": self.loop_counts,

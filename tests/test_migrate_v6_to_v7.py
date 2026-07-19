@@ -73,6 +73,6 @@ def test_load_migrates_and_stamps_v7(tmp_path: Path) -> None:
     Quest.load(tmp_path, "mig704")                  # load() triggers the hop chain
 
     meta = json.loads((_quest_dir(tmp_path, "mig704") / "quest.json").read_text())
-    assert meta["layout_version"] == LAYOUT_VERSION == 7
+    assert meta["layout_version"] == LAYOUT_VERSION
     started = State.load(_quest_dir(tmp_path, "mig704") / "state").started_at
     assert started == "2026-06-01T01:00:00+00:00"

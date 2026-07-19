@@ -17,22 +17,22 @@ def _park_draft(tmp_path: Path, cid: str, origin: str = "draft") -> Quest:
     return ch
 
 
-def test_paused_draft_is_active_labeled_draft(tmp_path: Path) -> None:
+def test_paused_draft_is_active_labeled_paused(tmp_path: Path) -> None:
     _seed_control(tmp_path)
     _park_draft(tmp_path, "pdraft")
     row = next((r for r in m._status_rows(tmp_path) if r[0] == "pdraft"), None)
     assert row is not None
-    assert row[1] == "draft"
+    assert row[1] == "paused"
     assert "pdraft" not in {r[0] for r in m._backlog_rows(tmp_path)}
 
 
-def test_live_draft_is_active_labeled_draft(tmp_path: Path) -> None:
+def test_fresh_draft_is_active_labeled_new(tmp_path: Path) -> None:
     _seed_control(tmp_path)
     Quest.create_draft(tmp_path, title="X", quest_id="ldraft",
-                        base_branch="main")   # fresh, un-materialized, no lock ⇒ draft
+                        base_branch="main")   # fresh, un-materialized, no lock ⇒ new
     row = next((r for r in m._status_rows(tmp_path) if r[0] == "ldraft"), None)
     assert row is not None
-    assert row[1] == "draft"
+    assert row[1] == "new"
     assert "ldraft" not in {r[0] for r in m._backlog_rows(tmp_path)}
 
 
