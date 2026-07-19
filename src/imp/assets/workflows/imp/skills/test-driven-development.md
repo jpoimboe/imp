@@ -4,24 +4,17 @@
 
 Write the test first. Watch it fail. Write minimal code to pass.
 
-**Core principle:** If you didn't watch the test fail, you don't know if it tests the right thing.
+**Core principle:** if you didn't watch the test fail, you don't know it tests the right thing.
 
-**Violating the letter of the rules is violating the spirit of the rules.**
+**Violating the letter of the rules is violating the spirit.**
 
 ## When to Use
 
-**Always:**
-- New features
-- Bug fixes
-- Refactoring
-- Behavior changes
+**Always:** new features, bug fixes, refactoring, behavior changes.
 
-**Exceptions (ask the user):**
-- Throwaway prototypes
-- Generated code
-- Configuration files
+**Exceptions (ask the user):** throwaway prototypes, generated code, config files.
 
-Thinking "skip TDD just this once"? Stop. That's rationalization.
+Thinking "skip TDD just this once"? Stop — that's rationalization.
 
 ## The Iron Law
 
@@ -29,614 +22,165 @@ Thinking "skip TDD just this once"? Stop. That's rationalization.
 NO PRODUCTION CODE WITHOUT A FAILING TEST FIRST
 ```
 
-Write code before the test? Delete it. Start over.
-
-**No exceptions:**
-- Don't keep it as "reference"
-- Don't "adapt" it while writing tests
-- Don't look at it
-- Delete means delete
-
-Implement fresh from tests. Period.
+Wrote code before its test? Delete it, start over. No exceptions: don't keep it "for reference", don't "adapt" it, don't even look at it. Delete means delete — implement fresh from the tests.
 
 ## Red-Green-Refactor
 
-### RED - Write Failing Test
+### RED — write a failing test
 
-Write one minimal test showing what should happen.
+Write one minimal test showing what should happen: one behavior, a clear name, real code (mocks only if unavoidable).
 
-**Good example:**
+A clear name testing real behavior beats a vague name testing the mock:
+
 ```python
+# GOOD — clear name, real behavior, one thing
 def test_retries_failed_operations_3_times():
     attempts = []
-    def operation():
+    def op():
         attempts.append(1)
-        if len(attempts) < 3:
-            raise RuntimeError('fail')
+        if len(attempts) < 3: raise RuntimeError('fail')
         return 'success'
-
-    result = retry_operation(operation)
-
-    assert result == 'success'
+    assert retry_operation(op) == 'success'
     assert len(attempts) == 3
-```
-Clear name, tests real behavior, one thing.
 
-**Bad example:**
-```python
+# BAD — vague name, asserts the mock's call_count, not behavior
 def test_retry_works():
-    mock_fn = Mock(side_effect=[RuntimeError(), RuntimeError(), 'success'])
-    retry_operation(mock_fn)
-    assert mock_fn.call_count == 3
-```
-Vague name, tests mock not code.
-
-**Requirements:**
-- One behavior
-- Clear name
-- Real code (no mocks unless unavoidable)
-
-### Verify RED - Watch It Fail
-
-**MANDATORY. Never skip.**
-
-```bash
-pytest path/to/test_file.py::test_name
+    m = Mock(side_effect=[RuntimeError(), RuntimeError(), 'success'])
+    retry_operation(m)
+    assert m.call_count == 3
 ```
 
-Confirm:
-- Test fails (not errors)
-- Failure message is expected
-- Fails because feature missing (not typos)
+### Verify RED — watch it fail (MANDATORY, never skip)
 
-**Test passes?** You're testing existing behavior. Fix test.
+Run the focused test. Confirm it **fails** (not errors), the failure message is the one you expect, and it fails because the feature is missing (not a typo).
 
-**Test errors?** Fix error, re-run until it fails correctly.
+- **Passes already?** You're testing existing behavior — fix the test.
+- **Errors?** Fix the error, rerun until it fails correctly.
 
-### GREEN - Minimal Code
+### GREEN — minimal code
 
-Write simplest code to pass the test.
+Write the simplest code that passes. Don't add features, refactor other code, or improve beyond the test (YAGNI) — no extra `backoff`/`jitter`/`timeout` params "for later".
 
-**Good example:**
-```python
-def retry_operation(fn, max_retries=3):
-    for i in range(max_retries):
-        try:
-            return fn()
-        except Exception:
-            if i == max_retries - 1:
-                raise
-```
-Just enough to pass.
+### Verify GREEN — watch it pass (MANDATORY)
 
-**Bad example:**
-```python
-def retry_operation(
-    fn,
-    max_retries=3,
-    backoff='linear',
-    on_retry=None,
-    jitter=True,
-    timeout=None,
-):
-    # YAGNI
-```
-Over-engineered.
+Run the tests. Confirm the test passes, other tests still pass, and output is pristine (no errors or warnings).
 
-Don't add features, refactor other code, or "improve" beyond the test.
+- **Test fails?** Fix the code, not the test.
+- **Other tests fail?** Fix them now.
 
-### Verify GREEN - Watch It Pass
+### REFACTOR — clean up (after green only)
 
-**MANDATORY.**
-
-```bash
-pytest path/to/test_file.py
-```
-
-Confirm:
-- Test passes
-- Other tests still pass
-- Output pristine (no errors, warnings)
-
-**Test fails?** Fix code, not test.
-
-**Other tests fail?** Fix now.
-
-### REFACTOR - Clean Up
-
-After green only:
-- Remove duplication
-- Improve names
-- Extract helpers
-
-Keep tests green. Don't add behavior.
+Remove duplication, improve names, extract helpers. Keep tests green; add no behavior.
 
 ### Repeat
 
-Next failing test for next feature.
+Write the next failing test for the next feature.
 
 ## Good Tests
 
-| Quality | Good | Bad |
-|---------|------|-----|
-| **Minimal** | One thing. "and" in name? Split it. | `test_validates_email_and_domain_and_whitespace` |
-| **Clear** | Name describes behavior | `test_1` |
-| **Shows intent** | Demonstrates desired API | Obscures what code should do |
+- **Minimal** — one thing. An "and" in the name (`test_validates_email_and_domain`) means split it.
+- **Clear name** — describes the behavior, not `test_1`.
+- **Shows intent** — demonstrates the desired API.
 
 ## Acceptance Test Oracles
 
-Acceptance tests have **one authoritative oracle**, asserted strictly (the assertion
-that proves the feature works). Corroborating signals that depend on non-determinism —
-commit counts, agent counts in multi-task runs — use bounds (`>= N`), never exact
-equality. Keep the oracle strict; relax only the corroborating counts.
+An acceptance test has **one authoritative oracle** — the assertion that proves the feature works — asserted strictly. Corroborating signals that depend on non-determinism (commit counts, agent counts in multi-task runs) use bounds (`>= N`), never exact equality. Keep the oracle strict; relax only the corroborating counts.
 
-## Why Order Matters
+## Rationalizations
 
-**"I'll write tests after to verify it works"**
-
-Tests written after code pass immediately. Passing immediately proves nothing:
-- Might test wrong thing
-- Might test implementation, not behavior
-- Might miss edge cases you forgot
-- You never saw it catch the bug
-
-Test-first forces you to see the test fail, proving it actually tests something.
-
-**"I already manually tested all the edge cases"**
-
-Manual testing is ad-hoc. You think you tested everything but:
-- No record of what you tested
-- Can't re-run when code changes
-- Easy to forget cases under pressure
-- "It worked when I tried it" ≠ comprehensive
-
-Automated tests are systematic. They run the same way every time.
-
-**"Deleting X hours of work is wasteful"**
-
-Sunk cost fallacy. The time is already gone. Your choice now:
-- Delete and rewrite with TDD (X more hours, high confidence)
-- Keep it and add tests after (30 min, low confidence, likely bugs)
-
-The "waste" is keeping code you can't trust. Working code without real tests is technical debt.
-
-**"TDD is dogmatic, being pragmatic means adapting"**
-
-TDD IS pragmatic:
-- Finds bugs before commit (faster than debugging after)
-- Prevents regressions (tests catch breaks immediately)
-- Documents behavior (tests show how to use code)
-- Enables refactoring (change freely, tests catch breaks)
-
-"Pragmatic" shortcuts = debugging in production = slower.
-
-**"Tests after achieve the same goals - it's spirit not ritual"**
-
-No. Tests-after answer "What does this do?" Tests-first answer "What should this do?"
-
-Tests-after are biased by your implementation. You test what you built, not what's required. You verify remembered edge cases, not discovered ones.
-
-Tests-first force edge case discovery before implementing. Tests-after verify you remembered everything (you didn't).
-
-30 minutes of tests after ≠ TDD. You get coverage, lose proof tests work.
-
-## Common Rationalizations
+Every excuse for skipping test-first, and its reality:
 
 | Excuse | Reality |
 |--------|---------|
-| "Too simple to test" | Simple code breaks. Test takes 30 seconds. |
-| "I'll test after" | Tests passing immediately prove nothing. |
-| "Tests after achieve same goals" | Tests-after = "what does this do?" Tests-first = "what should this do?" |
-| "Already manually tested" | Ad-hoc ≠ systematic. No record, can't re-run. |
-| "Deleting X hours is wasteful" | Sunk cost fallacy. Keeping unverified code is technical debt. |
-| "Keep as reference, write tests first" | You'll adapt it. That's testing after. Delete means delete. |
-| "Need to explore first" | Fine. Throw away exploration, start with TDD. |
-| "Test hard = design unclear" | Listen to test. Hard to test = hard to use. |
-| "TDD will slow me down" | TDD faster than debugging. Pragmatic = test-first. |
-| "Manual test faster" | Manual doesn't prove edge cases. You'll re-test every change. |
-| "Existing code has no tests" | You're improving it. Add tests for existing code. |
+| "I'll test after" | Tests written after pass immediately — proving nothing. You never saw them catch the bug. |
+| "Tests after achieve the same goals — spirit not ritual" | Tests-after ask "what does this do?"; tests-first ask "what should this do?" Tests-after are biased by the implementation you already wrote. |
+| "Already manually tested it" | Ad-hoc, no record, can't re-run when code changes. |
+| "Deleting X hours is wasteful" | Sunk cost — the time is gone. Unverified code is technical debt, not an asset. |
+| "TDD is dogmatic, I'm being pragmatic" | TDD *is* pragmatic: finds bugs before commit, prevents regressions, documents behavior, enables refactoring. |
+| "Too simple to test" | Simple code breaks; the test costs 30 seconds. |
+| "Need to explore first" | Fine — throw the exploration away and start with TDD. |
+| "Hard to test = design unclear" | Hard to test = hard to use. Listen to the test. |
+| "Manual is faster" | Manual doesn't prove edge cases, and you re-test by hand on every change. |
+| "Existing code has no tests" | You're improving it — add tests as you go. |
+| "Keep it as reference" | You'll adapt it — that's testing after. Delete means delete. |
 
-## Red Flags - STOP and Start Over
-
-- Code before test
-- Test after implementation
-- Test passes immediately
-- Can't explain why test failed
-- Tests added "later"
-- Rationalizing "just this once"
-- "I already manually tested it"
-- "Tests after achieve the same purpose"
-- "It's about spirit not ritual"
-- "Keep as reference" or "adapt existing code"
-- "Already spent X hours, deleting is wasteful"
-- "TDD is dogmatic, I'm being pragmatic"
-- "This is different because..."
-
-**All of these mean: Delete code. Start over with TDD.**
+**Red flags** — code before test, a test that passes immediately, "tests added later", "can't explain why it failed", "this is different because…", "just this once". All resolve to the same action: **delete the code, start over with TDD.**
 
 ## Example: Bug Fix
 
-**Bug:** Empty email accepted
+**Bug:** empty email accepted. (Illustrative.)
 
-**RED**
 ```python
+# RED — failing test
 def test_rejects_empty_email():
-    result = submit_form({'email': ''})
-    assert result['error'] == 'Email required'
-```
+    assert submit_form({'email': ''})['error'] == 'Email required'
 
-**Verify RED**
-```bash
-$ pytest
-FAIL: AssertionError: 'Email required' != None
-```
+# Verify RED: run the focused test →
+#   FAIL: AssertionError: 'Email required' != None
 
-**GREEN**
-```python
+# GREEN — simplest code to pass
 def submit_form(data):
     if not data.get('email', '').strip():
         return {'error': 'Email required'}
-    # ...
-```
+    ...
 
-**Verify GREEN**
-```bash
-$ pytest
-PASSED
-```
+# Verify GREEN: run the tests → PASSED
 
-**REFACTOR**
-Extract validation for multiple fields if needed.
+# REFACTOR: extract shared field validation only if a second field needs it.
+```
 
 ## Verification Checklist
 
-Before calling `complete_step` with a success status:
+Before a success `complete_step`, confirm all of these — if you can't check every box, you skipped TDD, so start over:
 
-- [ ] Every new function/method has a test
-- [ ] Watched each test fail before implementing
-- [ ] Each test failed for expected reason (feature missing, not typo)
-- [ ] Wrote minimal code to pass each test
-- [ ] All tests pass
-- [ ] Output pristine (no errors, warnings)
-- [ ] Tests use real code (mocks only if unavoidable)
-- [ ] Edge cases and errors covered
-- [ ] Each test would fail if the behavior were wrong — not just if the plan were not transcribed
-
-Can't check all boxes? You skipped TDD. Start over.
+- [ ] Every new function/method has a test.
+- [ ] You watched each test fail first, for the expected reason (feature missing, not a typo).
+- [ ] You wrote minimal code to pass.
+- [ ] All tests pass; output is pristine (no errors or warnings).
+- [ ] Tests use real code (mocks only if unavoidable); edge cases and errors are covered.
+- [ ] Each test would fail if the behavior were wrong — not merely if the plan were not transcribed.
 
 ## When Stuck
 
 | Problem | Solution |
 |---------|----------|
-| Don't know how to test | Write wished-for API. Write assertion first. Ask the user. |
-| Test too complicated | Design too complicated. Simplify interface. |
-| Must mock everything | Code too coupled. Use dependency injection. |
-| Test setup huge | Extract helpers. Still complex? Simplify design. |
+| Don't know how to test | Write the wished-for API / assertion first; ask the user. |
+| Test too complicated | The design is too complicated — simplify the interface. |
+| Must mock everything | Too coupled — use dependency injection. |
+| Test setup huge | Extract helpers; still complex → simplify the design. |
 
 ## Debugging Integration
 
-Bug found? Write failing test reproducing it. Follow TDD cycle. Test proves fix and prevents regression.
+Found a bug? Write a failing test reproducing it, then follow the cycle. Never fix a bug without a test.
 
-Never fix bugs without a test.
-
-A known bug you cannot fix in the same quest goes in as a committed repro marked
-`@pytest.mark.xfail(strict=True, reason="...")`. Master stays green, and the moment the
-fix lands the test xpasses — strict mode turns that into a failure, auto-flipping the
-repro into a regression guard.
+A known bug you can't fix in the same quest ships as a committed repro marked `@pytest.mark.xfail(strict=True, reason="...")`. Master stays green; when the fix lands the test xpasses, strict mode flips that into a failure, and the repro auto-converts into a regression guard.
 
 ## Testing Anti-Patterns
 
-### The Iron Laws
+**Iron laws:** never test mock behavior; never add test-only methods to production classes; never mock without understanding dependencies.
 
-```
-1. NEVER test mock behavior
-2. NEVER add test-only methods to production classes
-3. NEVER mock without understanding dependencies
-```
+**AP1 — testing mock behavior.** Asserting a component *is* its mock's return value (`assert result is mock.find_by_id.return_value`) tests the mock, not the code. Fix: assert the real returned value (`assert result == {'id': 1, 'name': 'Alice'}`). Gate: before asserting on any mock element, ask "real behavior or just mock existence?" — if existence, delete the assertion or unmock.
 
-### Anti-Pattern 1: Testing Mock Behavior
+**AP2 — test-only methods in production.** A method only tests use (e.g. `destroy()`) pollutes production and violates YAGNI/separation of concerns. Fix: move it to test utilities. Gate: before adding a method to a production class, ask "only used by tests?" (→ test utilities) and "does this class own this resource's lifecycle?" (if no, wrong class).
 
-**The violation:**
-```python
-# BAD: Testing that the mock itself was configured
-def test_get_user_returns_data():
-    mock_repo = Mock()
-    mock_repo.find_by_id.return_value = {'id': 1, 'name': 'Alice'}
-    service = UserService(repo=mock_repo)
+**AP3 — mocking without understanding.** Mocking a method whose side effect the test depends on breaks the test silently (mock away the config write and a duplicate-detection test can never fire). Fix: mock at the correct lower level (the slow/external operation), not the high-level method the test needs. Gate: before mocking, ask what side effects the real method has and whether the test depends on them; if unsure, run with the real implementation first, then add minimal mocking.
 
-    result = service.get_user(1)
+**AP4 — incomplete mocks.** A partial mock with only the fields your immediate test uses fails silently downstream when code reads an omitted field. Fix: mock the COMPLETE data structure as it exists in reality. Gate: before creating a mock response, check the real schema and include every field the system might consume.
 
-    assert result is mock_repo.find_by_id.return_value  # testing the mock, not behavior
-```
+**AP5 — integration tests as afterthought.** "Implementation complete, tests to follow" is wrong — testing is part of implementation. Gate: you can't claim complete without tests.
 
-**Why this is wrong:**
-- You're verifying the mock works, not that the service works
-- Test passes as long as mock is wired up, fails when it's not
-- Tells you nothing about real behavior
+**AP6 — tautological / plan-echo tests.** An `expected` copied from the code under test verifies transcription, not behavior, and stays green even when the feature is broken (revert the impl, return a wrong value — a plan-echo test still passes). Fix: derive `expected` from the requirement so it encodes an observable consequence a broken impl can't fake. Gate: before committing a test, ask "if I broke the feature, would THIS test fail?" — if no, it pins transcription; rewrite it. `expected` is justified by the requirement, never copied from the implementation.
 
-**The fix:**
-```python
-# GOOD: Test real behavior — what the unit actually returns/does
-def test_get_user_returns_data():
-    mock_repo = Mock()
-    mock_repo.find_by_id.return_value = {'id': 1, 'name': 'Alice'}
-    service = UserService(repo=mock_repo)
+### When mocks get too complex
 
-    result = service.get_user(1)
+Setup longer than the test, mocking everything, mocks missing methods the real components have, tests that break when the mock changes — prefer integration tests with real components.
 
-    assert result == {'id': 1, 'name': 'Alice'}  # test real behavior
-```
-
-**Gate Function:**
-```
-BEFORE asserting on any mock element:
-  Ask: "Am I testing real component behavior or just mock existence?"
-
-  IF testing mock existence:
-    STOP - Delete the assertion or unmock the component
-
-  Test real behavior instead
-```
-
-### Anti-Pattern 2: Test-Only Methods in Production
-
-**The violation:**
-```python
-# BAD: destroy() only used in tests
-class Session:
-    def destroy(self):  # Looks like production API!
-        self._workspace_manager.destroy_workspace(self.id)
-        # ... cleanup
-
-# In tests
-def teardown():
-    session.destroy()
-```
-
-**Why this is wrong:**
-- Production class polluted with test-only code
-- Dangerous if accidentally called in production
-- Violates YAGNI and separation of concerns
-
-**The fix:**
-```python
-# GOOD: Test utilities handle test cleanup
-# Session has no destroy() - it's stateless in production
-
-# In test utilities:
-def cleanup_session(session):
-    workspace = session.get_workspace_info()
-    if workspace:
-        workspace_manager.destroy_workspace(workspace.id)
-
-# In tests:
-def teardown():
-    cleanup_session(session)
-```
-
-**Gate Function:**
-```
-BEFORE adding any method to production class:
-  Ask: "Is this only used by tests?"
-
-  IF yes:
-    STOP - Don't add it
-    Put it in test utilities instead
-
-  Ask: "Does this class own this resource's lifecycle?"
-
-  IF no:
-    STOP - Wrong class for this method
-```
-
-### Anti-Pattern 3: Mocking Without Understanding
-
-**The violation:**
-```python
-# BAD: Mock breaks test logic
-def test_detects_duplicate_server():
-    # Mock prevents config write that test depends on!
-    mock_catalog = Mock()
-    mock_catalog.discover_and_cache_tools.return_value = None
-
-    add_server(config)
-    add_server(config)  # Should throw - but won't!
-```
-
-**Why this is wrong:**
-- Mocked method had side effect test depended on (writing config)
-- Over-mocking to "be safe" breaks actual behavior
-- Test passes for wrong reason or fails mysteriously
-
-**The fix:**
-```python
-# GOOD: Mock at correct level
-def test_detects_duplicate_server():
-    # Mock the slow part, preserve behavior test needs
-    with mock.patch('server_manager.MCPServerManager'):  # Just mock slow startup
-        add_server(config)    # Config written
-        add_server(config)    # Duplicate detected ✓
-```
-
-**Gate Function:**
-```
-BEFORE mocking any method:
-  STOP - Don't mock yet
-
-  1. Ask: "What side effects does the real method have?"
-  2. Ask: "Does this test depend on any of those side effects?"
-  3. Ask: "Do I fully understand what this test needs?"
-
-  IF depends on side effects:
-    Mock at lower level (the actual slow/external operation)
-    OR use test doubles that preserve necessary behavior
-    NOT the high-level method the test depends on
-
-  IF unsure what test depends on:
-    Run test with real implementation FIRST
-    Observe what actually needs to happen
-    THEN add minimal mocking at the right level
-
-  Red flags:
-    - "I'll mock this to be safe"
-    - "This might be slow, better mock it"
-    - Mocking without understanding the dependency chain
-```
-
-### Anti-Pattern 4: Incomplete Mocks
-
-**The violation:**
-```python
-# BAD: Partial mock - only fields you think you need
-mock_response = {
-    'status': 'success',
-    'data': {'user_id': '123', 'name': 'Alice'}
-    # Missing: metadata that downstream code uses
-}
-# Later: breaks when code accesses response['metadata']['request_id']
-```
-
-**Why this is wrong:**
-- Partial mocks hide structural assumptions
-- Downstream code may depend on fields you didn't include
-- Tests pass but integration fails
-
-**The Iron Rule:** Mock the COMPLETE data structure as it exists in reality, not just fields your immediate test uses.
-
-**The fix:**
-```python
-# GOOD: Mirror real API completeness
-mock_response = {
-    'status': 'success',
-    'data': {'user_id': '123', 'name': 'Alice'},
-    'metadata': {'request_id': 'req-789', 'timestamp': 1234567890}
-    # All fields real API returns
-}
-```
-
-**Gate Function:**
-```
-BEFORE creating mock responses:
-  Check: "What fields does the real API response contain?"
-
-  Actions:
-    1. Examine actual API response from docs/examples
-    2. Include ALL fields system might consume downstream
-    3. Verify mock matches real response schema completely
-
-  Critical:
-    If you're creating a mock, you must understand the ENTIRE structure
-    Partial mocks fail silently when code depends on omitted fields
-
-  If uncertain: Include all documented fields
-```
-
-### Anti-Pattern 5: Integration Tests as Afterthought
-
-**The violation:**
-```
-✅ Implementation complete
-❌ No tests written
-"Ready for testing"
-```
-
-**Why this is wrong:**
-- Testing is part of implementation, not optional follow-up
-- TDD would have caught this
-- Can't claim complete without tests
-
-**The fix:**
-```
-TDD cycle:
-1. Write failing test
-2. Implement to pass
-3. Refactor
-4. THEN claim complete
-```
-
-### Anti-Pattern 6: Tautological / Plan-Echo Tests
-
-**The violation:**
-```python
-# BAD: expected is just the literal the implementation returns
-def test_label_is_built():
-    result = build_label(item)
-    assert result == "ready"   # ...and the impl is literally `return "ready"`
-```
-
-**Why this is wrong:**
-- The test's `expected` value was copied from (or co-authored with) the code under
-  test, so it verifies *transcription*, not behavior.
-- It stays green even if the feature is broken — revert the implementation, return a
-  wrong value, or skip the step, and a plan-echo test still passes.
-- This is especially dangerous when a plan emits the test and the implementation in
-  the same pass, hand-crafted to agree: the RED step never genuinely fails.
-
-**The fix:**
-```python
-# GOOD: expected is derived from the requirement and encodes observable behavior
-def test_label_reflects_item_state():
-    item = make_item(status="done", retries=2)
-    result = build_label(item)
-    assert result == "done (2 retries)"   # a consequence a broken impl can't fake
-```
-
-**Gate Function:**
-```
-BEFORE committing a test:
-  Ask: "If I broke the feature — reverted the implementation, returned a wrong
-        value, skipped the step — would THIS test fail?"
-
-  IF no:
-    STOP - the test pins transcription, not behavior
-    Rewrite it to assert an observable consequence the broken version cannot produce
-
-  The `expected` value must be justified by the requirement,
-  NEVER copied from the code under test.
-```
-
-### When Mocks Become Too Complex
-
-**Warning signs:**
-- Mock setup longer than test logic
-- Mocking everything to make test pass
-- Mocks missing methods real components have
-- Test breaks when mock changes
-
-**Consider:** Integration tests with real components often simpler than complex mocks.
-
-### Anti-Patterns Quick Reference
-
-| Anti-Pattern | Fix |
-|--------------|-----|
-| Assert on mock elements | Test real component or unmock it |
-| Test-only methods in production | Move to test utilities |
-| Mock without understanding | Understand dependencies first, mock minimally |
-| Incomplete mocks | Mirror real API completely |
-| Tests as afterthought | TDD - tests first |
-| Over-complex mocks | Consider integration tests |
-| Tautological / plan-echo test | Derive `expected` from the spec, not the implementation |
-
-### Anti-Patterns Red Flags
-
-- Assertion checks for `*-mock` test IDs
-- Methods only called in test files
-- Mock setup is >50% of test
-- Test fails when you remove mock
-- Can't explain why mock is needed
-- Mocking "just to be safe"
-- Test's expected value lifted from the implementation it's testing → plan-echo / tautology
-
-**Mocks are tools to isolate, not things to test.**
-
-If TDD reveals you're testing mock behavior, you've gone wrong.
-
-Fix: Test real behavior or question why you're mocking at all.
+**Mocks are tools to isolate, not things to test.** If TDD reveals you're testing mock behavior, you've gone wrong: test real behavior, or question why you're mocking at all.
 
 ## Final Rule
 
 ```
-Production code → test exists and failed first
+Production code → a test exists and failed first
 Otherwise → not TDD
 ```
 
