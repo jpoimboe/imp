@@ -2,9 +2,10 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 import functools
 import sys
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Iterator
 from pathlib import Path
 from typing import Any
 
@@ -272,16 +273,26 @@ async def serve_quest_session(
     return result
 
 
-def _leaf_load_error(exc: BaseException) -> LoadError | LoadErrors | None:
-    """Return a LoadError/LoadErrors leaf inside exc or a nested BaseExceptionGroup, else None."""
-    if isinstance(exc, (LoadError, LoadErrors)):
-        return exc
+def _iter_leaves(exc: BaseException) -> Iterator[BaseException]:
+    """Yield every non-group leaf of exc, recursing through nested groups."""
     if isinstance(exc, BaseExceptionGroup):
         for sub in exc.exceptions:
-            found = _leaf_load_error(sub)
-            if found is not None:
-                return found
-    return None
+            yield from _iter_leaves(sub)
+    else:
+        yield exc
+
+
+def _config_pause_error(exc: BaseException) -> LoadError | LoadErrors | None:
+    """Return the load error for a clean config pause, or None if any genuine
+    (non-cancellation) crash leaf is present."""
+    found: LoadError | LoadErrors | None = None
+    for leaf in _iter_leaves(exc):
+        if isinstance(leaf, (LoadError, LoadErrors)):
+            if found is None:
+                found = leaf
+        elif not isinstance(leaf, asyncio.CancelledError):
+            return None
+    return found
 
 
 def _record_load_failure(quest: Quest, exc: LoadError | LoadErrors) -> int:
@@ -335,7 +346,7 @@ def main(argv: list[str] | None = None) -> int:
     except (LoadError, LoadErrors) as exc:
         return _record_load_failure(quest, exc)
     except BaseExceptionGroup as eg:
-        load_exc = _leaf_load_error(eg)
+        load_exc = _config_pause_error(eg)
         if load_exc is None:
             raise
         return _record_load_failure(quest, load_exc)
