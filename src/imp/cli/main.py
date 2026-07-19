@@ -1929,7 +1929,8 @@ def _cmd_list(args: argparse.Namespace) -> int:
     color = should_use_color(sys.stdout)
     dispositions = _selected_list_dispositions(args)
     if not dispositions and args.since is None:
-        lines = _overview_lines(control, show_all=args.all, now=now, color=color)
+        lines = _overview_lines(control, show_all=args.all, now=now, color=color,
+                                name_cap=quest_row.NAME_CAP)
         _page_or_print(lines, no_pager=args.no_pager, trailing_blank=True)
         return 0
     try:
@@ -3174,7 +3175,7 @@ def _history_rows(control: Path, *, show_all: bool,
 def _overview_body(inflight: list[_Row], backlog_rows: list[_Row],
                    history: list[_Row], *, intents: dict[str, str | None],
                    history_label: str, now: datetime,
-                   color: bool) -> list[str]:
+                   color: bool, name_cap: int | None) -> list[str]:
     """Render the sectioned overview for already-gathered rows."""
 
     def _name_text(r: _Row) -> str:
@@ -3194,7 +3195,7 @@ def _overview_body(inflight: list[_Row], backlog_rows: list[_Row],
     for r in history:
         specs.append((_DISPOSITION[r[1]], None, _name_text(r)))
 
-    status_width, name_width = quest_row.overview_widths(specs)
+    status_width, name_width = quest_row.overview_widths(specs, name_cap=name_cap)
 
     lines = [quest_row.header_line(color=color, name_width=name_width,
                                    status_width=status_width)]
@@ -3225,7 +3226,7 @@ def _overview_body(inflight: list[_Row], backlog_rows: list[_Row],
 
 
 def _overview_lines(control: Path, *, show_all: bool, now: datetime,
-                    color: bool) -> list[str]:
+                    color: bool, name_cap: int | None = None) -> list[str]:
     """Overview lines across all zones, sharing one content-sized STATUS/NAME width."""
     scanned = make_store(control).scan_homes()
     status_rows = _status_rows(control, scanned)
@@ -3241,7 +3242,8 @@ def _overview_lines(control: Path, *, show_all: bool, now: datetime,
         if not r[4].strip() and r[0] not in intents:
             intents[r[0]] = _resolve_row_intent(control, r)
     return _overview_body(inflight, backlog_rows, history, intents=intents,
-                          history_label=label, now=now, color=color)
+                          history_label=label, now=now, color=color,
+                          name_cap=name_cap)
 
 
 _NO_FILTER_MATCH_MESSAGE = "No quests match that filter."
@@ -3290,7 +3292,8 @@ def _filtered_overview_lines(control: Path, *, dispositions: set[str],
         if not r[4].strip() and r[0] not in intents:
             intents[r[0]] = _resolve_row_intent(control, r)
     return _overview_body(inflight, backlog_rows, history, intents=intents,
-                          history_label="history:", now=now, color=color)
+                          history_label="history:", now=now, color=color,
+                          name_cap=quest_row.NAME_CAP)
 
 
 def _cmd_status(args: argparse.Namespace, _control: Path | None = None) -> int:
