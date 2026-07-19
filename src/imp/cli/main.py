@@ -3919,21 +3919,20 @@ def _build_parser() -> argparse.ArgumentParser:
         "opening", nargs="?", metavar="MESSAGE",
         help="Opening intent handed verbatim to the workflow's opening step "
              "as its first message; omit to start with an interactive prompt. "
-             "Distinct from --message, which is a headless reply to the first solicit.")
+             "May also be supplied via --message.")
     p_new.add_argument("--title", metavar="TEXT", default=None,
                        help="Set the quest title explicitly; the workflow's "
                             "opening step names the quest if omitted.")
     p_new.add_argument("--headless", action="store_true", dest="non_interactive",
-                       help="Run headless: no live prompt; supply the first reply "
-                            "via --message.")
+                       help="Run headless: no live prompt; supply the opening "
+                            "message via the positional argument or --message.")
     p_new.add_argument("--autonomous", action="store_true",
                        help="Auto-take the recommendation at recommendation-bearing "
                             "gates instead of confirming each; genuine intent-forks "
                             "still pause for a human. Independent of --headless.")
     p_new.add_argument("--message", metavar="TEXT", default=None,
-                       help="Headless reply consumed by the first bare-turn-end prompt; "
-                            "pause then resume with another --message. "
-                            "Requires --headless.")
+                       help="Alias for the positional opening message (seeds the "
+                            "opening step); convenient for headless/remote callers.")
     new_mode = p_new.add_mutually_exclusive_group()
     new_mode.add_argument("--backlog", metavar="TITLE", default=None, dest="idea",
                           help="File an idea for your backlog with this TITLE and "
@@ -3972,14 +3971,14 @@ def _build_parser() -> argparse.ArgumentParser:
         "opening", nargs="?", metavar="MESSAGE",
         help="Optional opening message; omit to start with an interactive prompt.")
     p_chat.add_argument("--headless", action="store_true", dest="non_interactive",
-                        help="Headless: no live prompt; supply the reply via --message.")
+                        help="Headless: no live prompt; supply the opening message "
+                             "via the positional argument or --message.")
     p_chat.add_argument("--autonomous", action="store_true",
                         help="Auto-take the recommendation at recommendation-bearing "
                              "gates instead of confirming each; genuine intent-forks "
                              "still pause for a human. Independent of --headless.")
     p_chat.add_argument("--message", metavar="TEXT", default=None,
-                        help="Headless reply consumed by the first bare-turn-end prompt; "
-                             "requires --headless.")
+                        help="Alias for the positional opening message.")
     p_chat.add_argument("--model", metavar="ARG", default=None, type=_model_arg_type,
                         help="Run the opening step under a chosen model "
                              "(provider:model or bare model); the same override as "
