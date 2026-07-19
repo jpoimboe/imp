@@ -42,7 +42,7 @@ async def run_session_client(
     solicit: Callable[[str], Awaitable[str | SkillRequest]],
     status: Any = None,
     resume: bool = False,
-    leave_mode: str | None = None,
+    leave_mode: str,
     leave_state: dict[str, str] | None = None,
     title: TerminalTitle | None = None,
     non_interactive: bool = False,

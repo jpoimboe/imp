@@ -43,7 +43,7 @@ async def run_terminal_client(
     quest_id: str = "",
     control_root: Path | None = None,
     leave_state: dict[str, str] | None = None,
-    leave_mode: str | None = None,
+    leave_mode: str,
     title: TerminalTitle | None = None,
     local_echo: Callable[[str], None] | None = None,
     on_title: Callable[[str], None] | None = None,
@@ -252,10 +252,18 @@ async def run_terminal_client(
             if (coord.escalation_event is not None
                     and coord.escalation_event.is_set()):
                 action = None
-                if leave_state is not None and control_root is not None:
+                intent = (
+                    leave_state.get("intent") if leave_state is not None
+                    else None)
+                # A bare interrupt-pause (mid-run SIGINT with no leave gesture) trips
+                # escalation via the headless detach but sets no leave_reason: it must
+                # pause, not resolve a save/archive disposition. Resolve only for a
+                # genuine leave (leave_reason set) or an explicit /save|/shelve|/clear.
+                if (leave_state is not None and control_root is not None
+                        and (intent is not None
+                             or coord.leave_reason is not None)):
                     action = resolve_leave_action(
-                        control_root, quest_id, leave_mode,
-                        leave_state.get("intent"))
+                        control_root, quest_id, leave_mode, intent)
                 if action is not None and leave_state is not None:
                     _sent = False
                     with contextlib.suppress(

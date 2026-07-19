@@ -1,10 +1,11 @@
-# LAYOUT_VERSION: 8
+# LAYOUT_VERSION: 9
 [paths]
 events.jsonl
 quest.json
 state/state.json
 [quest.json]
 base_branch
+create_mode
 created_at
 cur_base_head
 depends_on

@@ -94,6 +94,7 @@ def test_new_positional_delivers_verbatim_seed(
 
     async def _fake_client(quest: object, *, driver: object, coord: object,
                            solicit: object,
+                           leave_mode: object = None,
                            status: object = None,
                            title: object = None,
                            non_interactive: object = False,
@@ -122,6 +123,7 @@ def test_new_title_flag_sets_quest_title(
 
     async def _fake_client(quest: object, *, driver: object, coord: object,
                            solicit: object,
+                           leave_mode: object = None,
                            status: object = None,
                            title: object = None,
                            non_interactive: object = False,
@@ -149,6 +151,7 @@ def test_new_positional_with_message_legal(
 
     async def _fake_client(quest: object, *, driver: object, coord: object,
                            solicit: object,
+                           leave_mode: object = None,
                            status: object = None,
                            title: object = None,
                            non_interactive: object = False,
@@ -320,6 +323,7 @@ def test_new_creates_unmaterialized_draft(
 
     async def _fake_client(quest: object, *, driver: object, coord: object,
                            solicit: object,
+                           leave_mode: object = None,
                            status: object = None,
                            title: object = None,
                            non_interactive: object = False,

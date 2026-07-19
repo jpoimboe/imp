@@ -29,7 +29,7 @@ def _was_renamed(log: object) -> bool:
 
 
 def leave_control_action(
-    quest: Quest, leave_mode: str | None, intent: str | None,
+    quest: Quest, leave_mode: str, intent: str | None,
 ) -> str | None:
     """Which daemon disposition frame a phase-0 leave should send.
 
@@ -41,8 +41,6 @@ def leave_control_action(
         return None
     explicit_save = intent == "save"
     is_archive = intent in ("clear", "shelve")
-    if leave_mode is None and not explicit_save and not is_archive:
-        return None
     if quest.materialized:
         return None
     if not explicit_save and not _had_exchange(quest.event_log()):
@@ -59,7 +57,7 @@ def leave_control_action(
 
 
 def resolve_leave_action(
-    control_root: Path, quest_id: str, leave_mode: str | None, intent: str | None,
+    control_root: Path, quest_id: str, leave_mode: str, intent: str | None,
 ) -> str | None:
     """Reload the quest and decide its leave control action, or None if gone."""
     try:
