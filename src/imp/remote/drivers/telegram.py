@@ -90,14 +90,6 @@ _LONG_POLL_TIMEOUT = 25   # seconds; getUpdates long-poll window
 _HTTP_TIMEOUT = 35        # seconds; urlopen ceiling, must exceed the long-poll
 
 TELEGRAM_MAX_TEXT = 4096
-_TRUNCATION_MARKER = "\n[truncated]"
-
-
-def clamp_text(text: str) -> str:
-    if len(text) <= TELEGRAM_MAX_TEXT:
-        return text
-    keep = TELEGRAM_MAX_TEXT - len(_TRUNCATION_MARKER)
-    return text[:keep] + _TRUNCATION_MARKER
 
 
 def split_text(text: str) -> list[str]:

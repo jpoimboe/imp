@@ -55,20 +55,6 @@ def test_format_loud_body_is_label_only_no_title_bracket() -> None:
     assert imp_telegram.format_event_message(event) == "done"
 
 
-def test_clamp_text_leaves_short_text_unchanged() -> None:
-    from imp.remote.drivers.telegram import TELEGRAM_MAX_TEXT, clamp_text
-    assert TELEGRAM_MAX_TEXT == 4096
-    assert clamp_text("hello") == "hello"
-
-
-def test_clamp_text_truncates_overflow_and_marks_it() -> None:
-    from imp.remote.drivers.telegram import TELEGRAM_MAX_TEXT, clamp_text
-    out = clamp_text("a" * 5000)
-    assert len(out) == TELEGRAM_MAX_TEXT          # never exceeds the protocol limit
-    assert out.startswith("aaa")                  # the head of the original survives
-    assert out.endswith("[truncated]")            # the cut is visible to the reader
-
-
 def test_format_loud_body_is_label_only_even_with_empty_change_block() -> None:
     event = {"type": "quest_merged", "quest": {}, "payload": {}}
     assert imp_telegram.format_event_message(event) == "done"
@@ -81,12 +67,6 @@ def test_format_uses_payload_message_key_as_body() -> None:
         "payload": {"message": "wrapped up"},
     }
     assert imp_telegram.format_event_message(event) == "done\nwrapped up"
-
-
-def test_clamp_text_passes_exactly_max_length_unchanged() -> None:
-    from imp.remote.drivers.telegram import TELEGRAM_MAX_TEXT, clamp_text
-    text = "x" * TELEGRAM_MAX_TEXT
-    assert clamp_text(text) == text
 
 
 def test_split_text_short_returns_single_chunk() -> None:
