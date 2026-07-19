@@ -1840,9 +1840,9 @@ def _warn_if_no_overlay(policy: Any, quest: Quest, log: EventLog) -> None:
     if policy.active and policy.home and not overlay_available(
             quest.quest_dir, Path(policy.home)):
         _emit(log, "sandbox_overlay_unavailable",
-              {"reason": "unprivileged overlayfs unavailable; $HOME is a writable "
-                         "bind of the real home (home isolation lost; secrets "
-                         "still masked)"},
+              {"reason": "sandbox: unprivileged overlayfs unavailable — $HOME is "
+                         "a writable bind of your real home, so agent writes to "
+                         "$HOME persist (secrets are still masked)"},
               agent_id=None)
 
 

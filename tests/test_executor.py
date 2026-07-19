@@ -3913,6 +3913,19 @@ def test_warn_if_no_overlay_silent_when_available(monkeypatch):
     assert log.events == []
 
 
+def test_warn_if_no_overlay_emits_verbatim_reason(monkeypatch):
+    from imp.engine import executor as ex
+    monkeypatch.setattr(ex, "overlay_available", lambda _base, _home: False)
+    log = _CapLog()
+    quest = types.SimpleNamespace(quest_dir=Path("/x"))
+    ex._warn_if_no_overlay(_active_home_policy(), quest, log)
+    (_, payload), = log.events
+    assert payload["reason"] == (
+        "sandbox: unprivileged overlayfs unavailable — $HOME is a writable bind "
+        "of your real home, so agent writes to $HOME persist (secrets are still "
+        "masked)")
+
+
 def test_attach_home_layer_threads_resolved_home(tmp_path, monkeypatch):
     from imp.engine import executor as ex
     seen: dict = {}
