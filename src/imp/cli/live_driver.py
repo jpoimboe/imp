@@ -113,7 +113,7 @@ def compose_position_bar(*, activity: nv.Activity, quest_id: str | None,
                          checkpoint_threshold: float | int | None = None,
                          pad_band: bool = True) -> str:
     """Position bar: id · title · position · model context-bar (no spinner, no elapsed)."""
-    bg = pal.user_bg_open(enabled=color)
+    bg = pal.toolbar_bg_open(enabled=color)
     over = bool(bg)
     id_seg = _paint(quest_id, "wordmark", color=color, over_bg=over) if quest_id else None
     title_seg = title if title else None
@@ -150,7 +150,7 @@ def compose_identity_toolbar(*, quest_id: str | None, title: str, color: bool,
     """Minimal id · title identity bar for the opening prompt, before any activity exists."""
     if not quest_id:
         return None
-    bg = pal.user_bg_open(enabled=color)
+    bg = pal.toolbar_bg_open(enabled=color)
     over = bool(bg)
     id_seg = _paint(quest_id, "wordmark", color=color, over_bg=over)
     title_seg = title if title else None
@@ -167,7 +167,7 @@ def compose_position_row(*, activity: nv.Activity, quest_id: str | None,
                          unsandboxed: bool = False) -> str:
     """Row 3 of the live footer: one flat, left-aligned line ordered
     id · title · phase · plan · counter · model context-bar."""
-    bg = pal.user_bg_open(enabled=color)
+    bg = pal.toolbar_bg_open(enabled=color)
     over = bool(bg)
     id_seg = _paint(quest_id, "wordmark", color=color, over_bg=over) if quest_id else None
     title_seg = title if title else None
@@ -218,7 +218,7 @@ def compose_subagent_rows(builder: nv.NarrativeBuilder, *, color: bool,
         counts[f.subagent_name] = counts.get(f.subagent_name, 0) + 1
     seen: dict[str, int] = {}
     rows: list[str] = []
-    bg = pal.user_bg_open(enabled=color)
+    bg = pal.toolbar_bg_open(enabled=color)
     over = bool(bg)
     for f in folds:
         name = f.subagent_name

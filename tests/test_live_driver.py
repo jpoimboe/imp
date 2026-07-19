@@ -1760,9 +1760,23 @@ def test_compose_activity_status_spinner_uses_wordmark_not_cyan() -> None:
             # No background prefix on the activity line (background is on the position bar).
             assert pal._ANSI["wordmark"] in line             # wordmark spinner present
             assert pal._ANSI["cyan"] not in line             # no longer cyan
-            bg = pal.user_bg_open(enabled=True)
+            bg = pal.toolbar_bg_open(enabled=True)
             if bg:  # only check when the theme has a bg color
                 assert not line.startswith(bg)               # no bg prefix on activity line
+    finally:
+        pal.set_theme("ansi")
+
+
+def test_position_bar_paints_toolbar_band_not_user_scrollback_band() -> None:
+    from imp.cli import palette as pal
+    from imp.cli.live_driver import compose_position_bar
+    pal.set_theme("dark")
+    try:
+        act = nv.Activity(position="implementation phase", model="sonnet")
+        line = compose_position_bar(activity=act, quest_id="z9gixx", title="t",
+                                    prompt_tokens=26000, color=True, width=120)
+        assert line.startswith(pal.toolbar_bg_open(enabled=True))   # cool blue-gray band
+        assert pal.user_bg_open(enabled=True) not in line           # never the amber band
     finally:
         pal.set_theme("ansi")
 
@@ -1955,7 +1969,7 @@ def test_compose_identity_toolbar_carries_slate_and_padding_under_dark_theme() -
     finally:
         pal.set_theme("ansi")
     assert bar is not None
-    assert bar.startswith("\x1b[48;2;67;56;40m")   # same warm band open as the position row
+    assert bar.startswith("\x1b[48;2;43;47;58m")   # same cool blue-gray band as the position row
     assert bar.endswith("\x1b[0m")
     assert pal.display_width(bar) == 118           # padded to width-2, aligned with the footer
 
@@ -2052,7 +2066,7 @@ def test_compose_position_bar_slate_survives_livestatus_clip_under_dark_theme() 
                                     prompt_tokens=1000, color=True, width=120)
     finally:
         pal.set_theme("ansi")
-    assert line.startswith("\x1b[48;2;67;56;40m")
+    assert line.startswith("\x1b[48;2;43;47;58m")
     assert line.endswith("\x1b[0m")
     assert pal.display_width(line) == 118
     clipped = pal.clip_display(line, 120 - 1)
@@ -2554,7 +2568,7 @@ def test_compose_subagent_rows_carry_the_slate_and_align_under_dark_theme() -> N
     finally:
         pal.set_theme("ansi")
     assert len(rows) == 1
-    assert rows[0].startswith("\x1b[48;2;67;56;40m")   # the position row's warm band open
+    assert rows[0].startswith("\x1b[48;2;43;47;58m")   # the position row's cool blue-gray band open
     assert rows[0].endswith("\x1b[0m")
     assert pal.display_width(rows[0]) == 118           # padded to width-2, aligned with parent
 
