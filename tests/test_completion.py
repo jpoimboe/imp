@@ -486,3 +486,22 @@ def test_inline_solicit_passes_skill_reply_through_async() -> None:
     inline = build_inline_solicit(user_input_fn=_fn)
     result = anyio.run(inline, "last")
     assert result == reply_obj
+
+
+def test_inline_solicit_no_channel_invokes_halt_writer() -> None:
+    from imp.engine.completion import build_inline_solicit
+    calls: list[int] = []
+    inline = build_inline_solicit(halt_writer=lambda: calls.append(1))
+    with pytest.raises(AwaitingUserInput):
+        import anyio
+        anyio.run(inline, "last prose")
+    assert calls == [1]
+
+
+def test_continuation_no_channel_park_invokes_halt_writer() -> None:
+    from imp.engine.completion import build_continuation_fn
+    calls: list[int] = []
+    fn = build_continuation_fn(halt_writer=lambda: calls.append(1))
+    with pytest.raises(AwaitingUserInput):
+        fn("the final question")
+    assert calls == [1]

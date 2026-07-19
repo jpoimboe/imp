@@ -1829,3 +1829,63 @@ async def test_resolve_wait_reply_pending_reply_wins_over_solicit() -> None:
     assert (reply, source) == ("use config.py", "pending_reply")
     assert "awaiting_user_input" not in [e["type"] for e in log.read()]
     assert coord.events == []
+
+
+def _build_minimal_invocation(fn, *, quest_state, quest, tmp_path: Path = Path(".")):
+    return fn(
+        agent_def=_agent(), provider_name="anthropic", model_name="m",
+        rendered_system_prompt="B", initial_messages=(),
+        quest_context=_cc(tmp_path), user_chat_input_fn=None,
+        transcript_dir=tmp_path / "td",
+        events_path=tmp_path / "e.jsonl", subagent_defs={}, tiers=(),
+        max_tool_calls=None, agent_id="step:p/s", event_log=None,
+        quest_state=quest_state, first_event_parent_id=None,
+        resolved_tiers=None, coordinator=None, quest=quest,
+    )
+
+
+@pytest.mark.anyio
+async def test_resolve_wait_reply_invokes_halt_writer_when_soliciting(
+    anyio_backend: str,
+) -> None:
+    from imp.engine.agent_run import _resolve_wait_reply
+    from imp.engine.state import InMemoryEventLog
+    calls: list[int] = []
+    _reply, source = await _resolve_wait_reply(
+        None, lambda _p: "hi", False,
+        elog=InMemoryEventLog(), agent_id="a1",
+        halt_writer=lambda: calls.append(1))
+    assert source == "solicited"
+    assert calls == [1]
+
+
+@pytest.mark.anyio
+async def test_resolve_wait_reply_skips_halt_writer_on_continue_nudge(
+    anyio_backend: str,
+) -> None:
+    from imp.engine.agent_run import _resolve_wait_reply
+    from imp.engine.state import InMemoryEventLog
+    calls: list[int] = []
+    _reply, source = await _resolve_wait_reply(
+        None, lambda _p: "hi", True,
+        elog=InMemoryEventLog(), agent_id="a1",
+        halt_writer=lambda: calls.append(1))
+    assert source == "nudge"
+    assert calls == []
+
+
+def test_build_agent_invocation_halt_writer_marks_waiting(tmp_path: Path) -> None:
+    from imp.engine.agent_run import build_agent_invocation
+    from imp.engine.state import State
+
+    class _Q:
+        state_dir = tmp_path
+
+    st = State(id="c1", step="w", step_attempt=0, status="new")
+    st.save(tmp_path)
+    inv = _build_minimal_invocation(
+        build_agent_invocation, quest_state=st, quest=_Q(), tmp_path=tmp_path)
+    assert inv.halt_writer is not None
+    inv.halt_writer()
+    from imp.engine.state import State as _S
+    assert _S.load(tmp_path).halt_condition == "waiting"

@@ -64,6 +64,7 @@ def build_inline_solicit(
     agent_id: str | None = None,
     steer_prompt: str = "",
     interrupt: bool = False,
+    halt_writer: Callable[[], None] | None = None,
 ) -> Callable[[str], Awaitable[str | SkillReply]]:
     """The turn-end yield-to-human tail, shared by BOTH the bare-turn-end
     continuation (build_continuation_fn) and the cooperative-interrupt steer.
@@ -78,6 +79,8 @@ def build_inline_solicit(
     from imp.engine.awaiting_user_input import AwaitingUserInput
 
     def _emit_awaiting(last_text: str) -> None:
+        if halt_writer is not None:
+            halt_writer()
         if event_log is not None:
             event_log.append(agent_id=agent_id, type="awaiting_user_input",
                              payload={"steer_hint": steer_prompt,
@@ -136,6 +139,7 @@ def build_continuation_fn(
     headless: bool = False,
     interactive: bool = False,
     has_schema: bool = False,
+    halt_writer: Callable[[], None] | None = None,
 ) -> Callable[[str], tuple[str | SkillReply | Awaitable[str | SkillReply], bool]]:
     """End-of-turn handler for a bare turn-end (assistant text, no
     complete_step). Whether that is a question to the human or a forgotten
@@ -169,9 +173,11 @@ def build_continuation_fn(
 
     inline = build_inline_solicit(
         user_input_fn=user_input_fn, coordinator=coordinator,
-        event_log=event_log, agent_id=agent_id)
+        event_log=event_log, agent_id=agent_id, halt_writer=halt_writer)
 
     def _emit_awaiting(last_text: str) -> None:
+        if halt_writer is not None:
+            halt_writer()
         if event_log is not None:
             event_log.append(agent_id=agent_id, type="awaiting_user_input",
                              payload={"steer_hint": "", "last_agent_message": last_text,
