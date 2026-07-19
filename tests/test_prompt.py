@@ -91,25 +91,34 @@ def test_build_session_forces_24bit_depth_on_truecolor_theme() -> None:
         pal.set_theme("ansi")
 
 
-def test_build_session_has_no_full_height_filler_after_toolbar() -> None:
-    """The layout's last child is the bottom-toolbar container
-    itself — there is NO trailing high-weight filler Window. The removed filler
-    forced the app to claim (and repaint) the full terminal height every
-    keystroke once the input wrapped; without it the toolbar reverts to the
-    known-good bottom-pinned position and the wrap-lag is gone."""
+def test_build_session_gated_filler_after_toolbar() -> None:
+    """The layout's last child is a ConditionalContainer wrapping a high-weight
+    filler Window, appended AFTER the bottom-toolbar container. The renderer's
+    forced full-height fill lands in the filler so the toolbar hugs the input
+    instead of sinking to the screen bottom. The filler is gated (a
+    ConditionalContainer, not a bare Window) so it is active only while the input
+    is a single unwrapped visual row — a wrapped input never claims full terminal
+    height (the condition that lagged every keystroke)."""
     from prompt_toolkit.layout.containers import ConditionalContainer, Window
 
     from imp.cli.prompt import _build_session
 
     children = _build_session(None).layout.container.children
 
-    # The LAST child is the bottom-toolbar ConditionalContainer, not a filler
-    # Window. (Before this change the last child was a plain high-weight Window.)
-    last = children[-1]
-    assert isinstance(last, ConditionalContainer)
-    assert isinstance(last.content, Window)
-    assert last.content.style == "class:bottom-toolbar"
-    assert last.content.dont_extend_height() is True
+    # LAST child: the gated filler — a ConditionalContainer wrapping a Window
+    # whose height weight dominates the renderer's slack space.
+    filler = children[-1]
+    assert isinstance(filler, ConditionalContainer)
+    assert isinstance(filler.content, Window)
+    assert filler.content.height.weight >= 1000
+
+    # Child BEFORE the filler: the bottom-toolbar container, whose Window keeps
+    # its own content height (dont_extend_height=True).
+    toolbar_cc = children[-2]
+    assert isinstance(toolbar_cc, ConditionalContainer)
+    assert isinstance(toolbar_cc.content, Window)
+    assert toolbar_cc.content.style == "class:bottom-toolbar"
+    assert toolbar_cc.content.dont_extend_height() is True
 
 
 def test_default_caret_is_the_gold_arrow() -> None:

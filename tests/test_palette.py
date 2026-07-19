@@ -268,3 +268,16 @@ def test_display_width_ignores_sgr_and_counts_wide_chars() -> None:
     assert pal.display_width("\x1b[33mabc\x1b[0m") == 3          # escapes excluded
     assert pal.display_width("世界") == 4                        # 2 wide chars
     assert pal.display_width("\x1b[90m世\x1b[0m x") == 4         # 2 + space + 1
+
+
+def test_toolbar_bg_open_is_cool_blue_gray_distinct_from_user_band() -> None:
+    pal.set_theme("dark")
+    assert pal.toolbar_bg_open(enabled=True) == "\x1b[48;2;43;47;58m"      # #2B2F3A
+    assert pal.toolbar_bg_open(enabled=False) == ""   # early return, regardless of theme
+    assert pal.toolbar_bg_open(enabled=True) != pal.user_bg_open(enabled=True)
+    pal.set_theme("light")
+    assert pal.toolbar_bg_open(enabled=True) == "\x1b[48;2;228;234;242m"   # #E4EAF2
+    assert pal.toolbar_bg_open(enabled=True) != pal.user_bg_open(enabled=True)
+    pal.set_theme("ansi")
+    assert pal.toolbar_bg_open(enabled=True) == ""      # no subtle band in 16-color
+    assert pal.toolbar_bg_open(enabled=False) == ""     # color off

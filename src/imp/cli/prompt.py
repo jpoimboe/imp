@@ -99,15 +99,41 @@ def _build_session(skills_dir: Any | None = None, *, editing_mode: str = "emacs"
 
     completer = (
         SlashCompleter(skills_dir, roster_models) if skills_dir is not None else None)
+    from prompt_toolkit.application import get_app
+    from prompt_toolkit.filters import Condition
+    from prompt_toolkit.layout.containers import ConditionalContainer, Window
+    from prompt_toolkit.layout.dimension import Dimension
     from prompt_toolkit.output import ColorDepth
 
     from imp.cli import palette as pal
 
+    @Condition
+    def _input_is_single_visual_row() -> bool:
+        # False once input wraps to 2+ rows so the filler never claims full height
+        # (per-keystroke repaint). Previous-frame render_info; None = first frame.
+        info = get_app().layout.current_window.render_info
+        if info is None:
+            return True
+        content = info.ui_content
+        return sum(info.get_height_for_line(i)
+                   for i in range(content.line_count)) <= 1
+
+    class _FloatingToolbarSession(PromptSession[str]):
+        """Ends the layout with a gated high-weight filler after the toolbar, so the
+        renderer's forced full-height fill lands there and the toolbar hugs the input."""
+
+        def _create_layout(self) -> Any:
+            layout = super()._create_layout()
+            layout.container.children.append(  # type: ignore[attr-defined]
+                ConditionalContainer(
+                    Window(height=Dimension(weight=100000)),
+                    filter=_input_is_single_visual_row))
+            return layout
+
     # prompt_toolkit defaults to 8-bit and ignores COLORTERM; force 24-bit on truecolor themes.
     color_depth = ColorDepth.DEPTH_24_BIT if pal.active_theme() in ("dark", "light") else None
     # No app bg + reserve_space_for_menu=0: terminal default, no slate bleed; slash menu still pops.
-    # Filler removed: it forced a full-terminal repaint on every keystroke once input wrapped.
-    session: Any = PromptSession(
+    session: Any = _FloatingToolbarSession(
         history=history, key_bindings=kb, completer=completer,  # type: ignore[arg-type]
         editing_mode=mode, erase_when_done=True,
         multiline=True, reserve_space_for_menu=0, color_depth=color_depth)
