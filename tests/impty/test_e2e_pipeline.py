@@ -8,6 +8,7 @@ import pytest
 
 from impty import TerminalSession
 from tests.impty.e2e_support import (
+    E2E_SUBPROCESS_TIMEOUT,
     can_pty,
     clean_env,
     default_workflow_script,
@@ -38,7 +39,7 @@ def test_scripted_default_workflow_run_passes_the_dogfood_invariants(
         [sys.executable, "-m", "imp", "new", "--title", "demo change", "--headless"],
         cwd=str(clone), env=env, cols=100, rows=40,
     ) as s:
-        rc = s.run_to_completion(hard=180.0)
+        rc = s.run_to_completion(hard=E2E_SUBPROCESS_TIMEOUT)
     assert rc == 0, "\n".join(s.lines())                  # completed + merged
 
     # The worktree is gone once the merge gate fired (completion finalized it).
@@ -49,7 +50,7 @@ def test_scripted_default_workflow_run_passes_the_dogfood_invariants(
     checked = subprocess.run(
         [sys.executable, str(_CHECKER), str(clone), sentinel,
          "--base", base_sha, "--imp", shim],
-        env=env, capture_output=True, text=True, timeout=120,
+        env=env, capture_output=True, text=True, timeout=E2E_SUBPROCESS_TIMEOUT,
     )
     assert checked.returncode == 0, (
         f"dogfood invariants FAILED:\n{checked.stdout}\n{checked.stderr}")

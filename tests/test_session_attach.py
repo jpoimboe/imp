@@ -12,6 +12,7 @@ from imp.engine.quest import Quest
 from imp.remote.session.attach import (
     DaemonStartupError,
     _read_stderr_tail,
+    _resolve_connect_timeout,
     attach_or_spawn,
     build_session_attach,
     spawn_session_daemon,
@@ -461,3 +462,17 @@ def test_spawn_session_daemon_returns_the_popen_handle(
     monkeypatch.setattr(subprocess, "Popen", lambda argv, **kw: sentinel)
 
     assert spawn_session_daemon(quest) is sentinel
+
+
+def test_resolve_connect_timeout_reads_env_when_arg_omitted(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("IMP_SESSION_CONNECT_TIMEOUT", "12.5")
+    assert _resolve_connect_timeout(None) == 12.5
+
+
+def test_resolve_connect_timeout_defaults_to_60_when_env_unset(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("IMP_SESSION_CONNECT_TIMEOUT", raising=False)
+    assert _resolve_connect_timeout(None) == 60.0

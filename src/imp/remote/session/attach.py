@@ -78,12 +78,19 @@ def _read_stderr_tail(path: Path, *, max_bytes: int = 4096) -> str:
     return data[-max_bytes:].decode("utf-8", "replace").strip()
 
 
+def _resolve_connect_timeout(connect_timeout: float | None) -> float:
+    if connect_timeout is not None:
+        return connect_timeout
+    raw = os.environ.get("IMP_SESSION_CONNECT_TIMEOUT")  # env override; defaults to 60.0 when unset
+    return float(raw) if raw is not None else 60.0
+
+
 async def attach_or_spawn(
     quest: Quest,
     *,
     on_event: Callable[[dict[str, Any]], None],
     spawn_fn: SpawnFn = spawn_session_daemon,
-    connect_timeout: float = 60.0,
+    connect_timeout: float | None = None,
     lease: bool = False,
 ) -> SessionClient:
     socket_path = str(session_socket_path(quest.control_root, quest.id))
@@ -94,7 +101,7 @@ async def attach_or_spawn(
     except OSError:
         pass
     proc = spawn_fn(quest)
-    with anyio.fail_after(connect_timeout):
+    with anyio.fail_after(_resolve_connect_timeout(connect_timeout)):
         while True:
             try:
                 await client.connect()
