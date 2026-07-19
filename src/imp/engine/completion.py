@@ -65,6 +65,7 @@ def build_inline_solicit(
     steer_prompt: str = "",
     interrupt: bool = False,
     halt_writer: Callable[[], None] | None = None,
+    halt_clearer: Callable[[], None] | None = None,
 ) -> Callable[[str], Awaitable[str | SkillReply]]:
     """The turn-end yield-to-human tail, shared by BOTH the bare-turn-end
     continuation (build_continuation_fn) and the cooperative-interrupt steer.
@@ -115,7 +116,7 @@ def build_inline_solicit(
         _emit_awaiting(last_text)
         if user_input_fn is not None:
             try:
-                return await _solicit()
+                reply = await _solicit()
             except AwaitingUserInput as e:
                 # The headless hibernation gate raises its own AwaitingUserInput
                 # (interrupt=False) when the solicit blocks then detaches; for the
@@ -125,6 +126,10 @@ def build_inline_solicit(
                 if interrupt and not e.interrupt:
                     raise AwaitingUserInput(e.prompt, interrupt=True) from None
                 raise
+            # A reply resumes the agent: drop the "waiting" halt _emit_awaiting stamped.
+            if halt_clearer is not None:
+                halt_clearer()
+            return reply
         raise AwaitingUserInput(last_text, interrupt=interrupt)
 
     return _inline
@@ -140,6 +145,7 @@ def build_continuation_fn(
     interactive: bool = False,
     has_schema: bool = False,
     halt_writer: Callable[[], None] | None = None,
+    halt_clearer: Callable[[], None] | None = None,
 ) -> Callable[[str], tuple[str | SkillReply | Awaitable[str | SkillReply], bool]]:
     """End-of-turn handler for a bare turn-end (assistant text, no
     complete_step). Whether that is a question to the human or a forgotten
@@ -173,7 +179,8 @@ def build_continuation_fn(
 
     inline = build_inline_solicit(
         user_input_fn=user_input_fn, coordinator=coordinator,
-        event_log=event_log, agent_id=agent_id, halt_writer=halt_writer)
+        event_log=event_log, agent_id=agent_id, halt_writer=halt_writer,
+        halt_clearer=halt_clearer)
 
     def _emit_awaiting(last_text: str) -> None:
         if halt_writer is not None:
