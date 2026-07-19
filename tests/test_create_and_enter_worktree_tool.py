@@ -7,6 +7,7 @@ from imp.agents.tools import get_registry
 from imp.agents.tools.context import ToolContext
 from imp.engine.quest import Quest
 from imp.engine.state import State
+from imp.engine.sandbox import HomeLayer, SandboxPolicy
 from tests.conftest import _git, _seed_control
 
 
@@ -88,3 +89,40 @@ def test_tool_description_mentions_dependency_wait() -> None:
     assert "an attended wait is interruptible (Ctrl-D pauses; a later resume retries)" in desc
     assert "a background run waits on its own until the dependency lands" in desc
     assert desc.rstrip().endswith("Idempotent — a no-op once the worktree already exists.")
+
+
+def _active_policy(worktree: str, **over: object) -> SandboxPolicy:
+    base = dict(
+        active=True, worktree=worktree, git_common_dir="/ctl/.git",
+        git_ro_remask=(), writable_caches=(), extra_readable=(), extra_writable=(),
+        secret_dirs=(), secret_files=(), setenv=(), network=True, note="",
+    )
+    base.update(over)
+    return SandboxPolicy(**base)
+
+
+@pytest.mark.anyio
+async def test_tool_refreshes_sandbox_policy_worktree(tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+    ch = Quest.create_draft(tmp_path, title="X", quest_id="t5", base_branch="main")
+    ctx = _ctx(ch, State.load(ch.state_dir))
+    layer = HomeLayer(home="/home/u")
+    ctx.base_sandbox_policy = _active_policy(
+        str(tmp_path), home_layer=layer, readonly_overlays=("/ro/sub",))
+    tool = get_registry()["create_and_enter_worktree"]
+    await tool.async_invoke(ctx, {})
+    wt = tmp_path / ".imp" / "worktrees" / "t5"
+    assert ctx.base_sandbox_policy.worktree == str(wt)          # repointed at the fork
+    assert ctx.base_sandbox_policy.home_layer is layer          # carried over unchanged
+    assert ctx.base_sandbox_policy.readonly_overlays == ("/ro/sub",)
+
+
+@pytest.mark.anyio
+async def test_tool_policy_refresh_noop_when_unsandboxed(tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+    ch = Quest.create_draft(tmp_path, title="X", quest_id="t6", base_branch="main")
+    ctx = _ctx(ch, State.load(ch.state_dir))
+    assert ctx.base_sandbox_policy is None
+    tool = get_registry()["create_and_enter_worktree"]
+    await tool.async_invoke(ctx, {})                            # must not raise
+    assert ctx.base_sandbox_policy is None
