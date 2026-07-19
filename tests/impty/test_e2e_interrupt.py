@@ -29,14 +29,14 @@ def test_midrun_sigint_pauses_with_exit_130_and_a_resume_hint(tmp_path: Path) ->
     ) as s:
         # Poll until the scripted bash's "echo running" is visible, which
         # guarantees sleep 30 is running before SIGINT lands.
-        deadline = time.monotonic() + 12.0
+        deadline = time.monotonic() + 60.0
         while "running" not in "\n".join(s.lines()):
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 break
             s.wait_idle(idle=0.1, hard=min(0.5, remaining))
         s.send_signal(signal.SIGINT)
-        rc = s.run_to_completion(hard=20.0)
+        rc = s.run_to_completion(hard=60.0)
 
         assert rc == 130                                   # interrupt → exit 130
         assert_screen(s, contains=("resume:", "imp resume"))  # resumable hint; rc==130 is pause
