@@ -1889,3 +1889,49 @@ def test_build_agent_invocation_halt_writer_marks_waiting(tmp_path: Path) -> Non
     inv.halt_writer()
     from imp.engine.state import State as _S
     assert _S.load(tmp_path).halt_condition == "waiting"
+
+
+def test_build_agent_invocation_wires_halt_clearer(tmp_path: Path) -> None:
+    # With both quest_state and quest present, the builder binds a clearer to the
+    # live state; calling it persists halt_condition=None.
+    from imp.engine.agent_run import build_agent_invocation
+    from imp.engine.state import State
+
+    st = State(id="c1", step="w", step_attempt=0, status="new")
+    st.halt_condition = "waiting"
+    st.save(tmp_path)
+
+    class _Quest:
+        state_dir = tmp_path
+
+    inv = build_agent_invocation(
+        agent_def=_agent(), provider_name="anthropic", model_name="m",
+        rendered_system_prompt="BODY", initial_messages=(),
+        quest_context=_cc(tmp_path), user_chat_input_fn=None,
+        transcript_dir=tmp_path / "td",
+        events_path=tmp_path / "e.jsonl", subagent_defs={}, tiers=(),
+        max_tool_calls=None, agent_id="step:p/s", event_log=None,
+        quest_state=st, quest=_Quest(), first_event_parent_id=None,
+        resolved_tiers=None, coordinator=None)
+
+    assert inv.halt_clearer is not None
+    inv.halt_clearer()
+    assert State.load(tmp_path).halt_condition is None
+
+
+def test_build_agent_invocation_halt_clearer_none_without_state(
+    tmp_path: Path,
+) -> None:
+    from imp.engine.agent_run import build_agent_invocation
+
+    inv = build_agent_invocation(
+        agent_def=_agent(), provider_name="anthropic", model_name="m",
+        rendered_system_prompt="BODY", initial_messages=(),
+        quest_context=_cc(tmp_path), user_chat_input_fn=None,
+        transcript_dir=tmp_path / "td",
+        events_path=tmp_path / "e.jsonl", subagent_defs={}, tiers=(),
+        max_tool_calls=None, agent_id="step:p/s", event_log=None,
+        quest_state=None, first_event_parent_id=None,
+        resolved_tiers=None, coordinator=None)
+
+    assert inv.halt_clearer is None

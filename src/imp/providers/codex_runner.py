@@ -557,7 +557,8 @@ class CodexAgentRunner:
                     invocation.resume_should_continue,
                     elog=elog, agent_id=aid, pending_reply=pending,
                     last_agent_message=last_agent_text,
-                    halt_writer=invocation.halt_writer)
+                    halt_writer=invocation.halt_writer,
+                    halt_clearer=invocation.halt_clearer)
                 if source == "nudge":
                     assert isinstance(reply, str)
                     # Internal continuation, not a human turn: emit an

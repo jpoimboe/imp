@@ -553,8 +553,12 @@ def build_agent_invocation(
     def _mark_waiting() -> None:
         quest_state.halt_condition = "waiting"
         quest_state.save(quest.state_dir)
-    halt_writer = (
-        _mark_waiting if (quest_state is not None and quest is not None) else None)
+    def _clear_waiting() -> None:
+        quest_state.halt_condition = None
+        quest_state.save(quest.state_dir)
+    _have_state = quest_state is not None and quest is not None
+    halt_writer = _mark_waiting if _have_state else None
+    halt_clearer = _clear_waiting if _have_state else None
     continuation_fn = build_continuation_fn(
         user_input_fn=user_chat_input_fn,
         coordinator=coordinator,
@@ -564,6 +568,7 @@ def build_agent_invocation(
         interactive=interactive,
         has_schema=has_schema,
         halt_writer=halt_writer,
+        halt_clearer=halt_clearer,
     )
     return AgentInvocation(
         agent_def=agent_def,
@@ -583,6 +588,7 @@ def build_agent_invocation(
         quest_state=quest_state,
         quest=quest,
         halt_writer=halt_writer,
+        halt_clearer=halt_clearer,
         first_event_parent_id=first_event_parent_id,
         retry_feedback=retry_feedback,
         balance_on_resume=balance_on_resume,

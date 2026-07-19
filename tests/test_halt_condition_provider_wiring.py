@@ -127,3 +127,23 @@ def test_every_provider_call_forwards_halt_writer() -> None:
     import imp.providers.openai as o
     for mod in (a, o, cx, c):
         assert "invocation.halt_writer" in inspect.getsource(mod), mod.__name__
+
+
+def test_agent_invocation_has_halt_clearer_field() -> None:
+    from dataclasses import fields
+
+    from imp.agents.runner import AgentInvocation
+    names = {f.name for f in fields(AgentInvocation)}
+    assert "halt_clearer" in names
+
+
+def test_every_provider_call_forwards_halt_clearer() -> None:
+    # Structural guard: each provider's _resolve_wait_reply call site and the
+    # claude-code steer must reference invocation.halt_clearer, mirroring the
+    # halt_writer guard, so a dropped forward is caught without a full round-trip.
+    import imp.providers.anthropic as a
+    import imp.providers.claude_code as c
+    import imp.providers.codex_runner as cx
+    import imp.providers.openai as o
+    for mod in (a, o, cx, c):
+        assert "invocation.halt_clearer" in inspect.getsource(mod), mod.__name__
