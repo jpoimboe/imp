@@ -940,10 +940,10 @@ def test_finalize_walks_fold_into_existing_backlog_quest_disposition() -> None:
     defer = low.index("**defer** — hand it to a new backlog quest")
     ignore = low.index("**ignore** — drop it")
     assert defer < fold < ignore
-    # It reuses the existing terminal covered-by marker and the cross-quest
+    # It reuses the existing terminal tracked-by marker and the cross-quest
     # intent back-link command — no new marker introduced. Scope these to the
     # fold-bullet span so they guard THIS bullet, not §1a's pre-existing use of
     # the same command/marker elsewhere in the prompt.
     fold_bullet = text[fold:ignore]
     assert "--append-intent" in fold_bullet
-    assert "— covered-by <id>" in fold_bullet
+    assert "— tracked-by <id>" in fold_bullet
