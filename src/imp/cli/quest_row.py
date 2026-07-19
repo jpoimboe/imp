@@ -107,13 +107,17 @@ def name_budget(*, indent: int = 0) -> int:
 
 def overview_widths(
     rows: list[tuple[str, str | None, str]],
+    *,
+    name_cap: int | None = None,
 ) -> tuple[int, int]:
     """Compute (status_width, name_width) for the overview from its rendered
     rows. Each row is (status_word, inner_label_or_None, name_text). STATUS and
     NAME share the flexible region left after the fixed ID/UPDATED columns and
     the three 2-space gaps; NAME is the first claimant (capped at NAME_CAP for
     sizing) and STATUS takes the leftover, floored at the status-word width and
-    grown only up to the width its own content needs."""
+    grown only up to the width its own content needs. When `name_cap` is not
+    None, the final NAME width is clamped down to it (STATUS is not grown to
+    absorb the freed space)."""
     cols = shutil.get_terminal_size((80, 24)).columns
     region = cols - (ID_W + AGE_W + 6)     # three 2-space gaps
 
@@ -127,6 +131,8 @@ def overview_widths(
     status_width = min(max(region - name_content, status_floor), status_content)
     status_width = min(status_width, max(status_floor, region - NAME_MIN))
     name_width = max(NAME_MIN, region - status_width)
+    if name_cap is not None:
+        name_width = min(name_cap, name_width)
     return status_width, name_width
 
 

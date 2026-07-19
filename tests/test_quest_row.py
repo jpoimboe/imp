@@ -469,3 +469,29 @@ def test_updated_is_final_column_no_trailing_whitespace():
     line = format_quest_line(**_row(), color=False)
     assert line == line.rstrip()          # UPDATED trails with no padding
     assert line.rstrip().endswith("15m")  # the relative age is the last cell
+
+
+def test_overview_widths_name_cap_clamps_name_width(monkeypatch):
+    from imp.cli.quest_row import overview_widths
+    _term(monkeypatch, 200)
+    # region = 200 - 19 = 181; uncapped NAME would be 131. name_cap clamps it to 60.
+    status_w, name_w = overview_widths([("running", "x" * 40, "y" * 80)], name_cap=60)
+    assert name_w == 60
+    assert status_w == 50          # STATUS sizing is untouched by the cap
+
+
+def test_overview_widths_name_cap_none_matches_uncapped(monkeypatch):
+    from imp.cli.quest_row import overview_widths
+    _term(monkeypatch, 200)
+    rows = [("running", "x" * 40, "y" * 80)]
+    assert overview_widths(rows, name_cap=None) == overview_widths(rows)
+    _status_w, name_w = overview_widths(rows)
+    assert name_w == 131           # uncapped, byte-for-byte today's behavior
+
+
+def test_overview_widths_name_cap_inert_when_name_already_narrow(monkeypatch):
+    from imp.cli.quest_row import overview_widths
+    _term(monkeypatch, 80)
+    # region = 61; NAME is already 20 (< 60), so name_cap=60 is inert.
+    rows = [("running", "x" * 40, "y" * 20)]
+    assert overview_widths(rows, name_cap=60) == overview_widths(rows)
