@@ -1215,7 +1215,7 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
             control, title=title, quest_id=quest_id, base_branch=base,
             workflow=wf_arg, origin="draft",
             depends_on=list(getattr(args, "depends_on", None) or []),
-            seed_opening=None)
+            seed_opening=None, create_mode=leave_mode)
     except (LoadError, LoadErrors) as e:
         _emit_cli_error(f"{e}")
         return 2

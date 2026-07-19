@@ -472,3 +472,41 @@ async def test_new_background_error_prints_to_stderr(
     err = capsys.readouterr()
     assert "imp: boom" in err.err
     assert "imp: boom" not in err.out
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("leave_mode,expected", [("chat", "chat"), ("new", "new")])
+async def test_create_draft_receives_create_mode_from_leave_mode(
+    stub_new, monkeypatch, tmp_path, leave_mode, expected,
+) -> None:
+    m = stub_new
+    monkeypatch.delenv("IMP_SESSION_SOCKET", raising=False)
+    monkeypatch.setattr(m, "_print_opening", lambda *a, **k: None)
+    monkeypatch.setattr(m, "_print_run_header", lambda *a, **k: None)
+
+    captured: dict[str, object] = {}
+
+    def _cap(*a: object, **k: object) -> SimpleNamespace:
+        captured.update(k)
+        return SimpleNamespace(
+            id="z9y8x7", title="", workflow_dir=tmp_path, seed_opening=None,
+            set_seed_opening=lambda text: None)
+
+    monkeypatch.setattr(m.Quest, "create_draft", staticmethod(_cap))
+
+    async def _ok(*a: object, **k: object) -> int:
+        return 0
+
+    monkeypatch.setattr(m, "run_session_client", _ok)
+    monkeypatch.setattr(m, "make_interactive_solicit", lambda *a, **k: None)
+    monkeypatch.setattr(m, "LiveStatus", lambda *a, **k: SimpleNamespace())
+    monkeypatch.setattr(m, "LiveDriver", lambda *a, **k: SimpleNamespace())
+
+    args = Namespace(
+        description=None, idea=None, workflow=None, non_interactive=False,
+        title=None, opening="build it", message=None, base=None,
+        background=False, depends_on=None)
+    rc = await m._async_cmd_new(args, leave_mode=leave_mode)
+
+    assert rc == 0
+    assert captured["create_mode"] == expected
