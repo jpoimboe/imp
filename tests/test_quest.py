@@ -66,7 +66,7 @@ def test_quest_json_has_no_slug_or_auto_titled(tmp_path: Path) -> None:
     ch = Quest.create(tmp_path, title="X", quest_id="zzz999", base_branch="main")
     meta = json.loads((ch.quest_dir / "quest.json").read_text())
     assert set(meta) == {"id", "title", "base_branch", "created_at",
-                         "depends_on", "project_root", "materialized",
+                         "create_mode", "depends_on", "project_root", "materialized",
                          "cur_base_head", "layout_version", "imp_commit",
                          "workflow"}
 
@@ -752,3 +752,26 @@ def test_set_depends_on_updates_in_memory_field(tmp_path: Path) -> None:
     # In-memory field tracks the write (no reload needed).
     assert q.depends_on == ["dep009"]
     assert Quest.load(tmp_path, "chld03").depends_on == ["dep009"]
+
+
+def test_create_draft_persists_create_mode_chat(tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+    Quest.create_draft(tmp_path, title="X", quest_id="cmode1",
+                       base_branch="main", create_mode="chat")
+    meta = json.loads(
+        (tmp_path / ".imp" / "quests" / "cmode1" / "quest.json").read_text())
+    assert meta["create_mode"] == "chat"
+    assert Quest.load(tmp_path, "cmode1").create_mode == "chat"
+
+
+def test_create_draft_defaults_create_mode_new(tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+    Quest.create_draft(tmp_path, title="X", quest_id="cmode2", base_branch="main")
+    assert Quest.load(tmp_path, "cmode2").create_mode == "new"
+
+
+def test_create_writes_create_mode_new(tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+    ch = Quest.create(tmp_path, title="X", quest_id="cmode3", base_branch="main")
+    meta = json.loads((ch.quest_dir / "quest.json").read_text())
+    assert meta["create_mode"] == "new"

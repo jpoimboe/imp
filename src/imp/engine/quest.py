@@ -21,7 +21,7 @@ from imp.engine.seed import seed_workflow_start
 from imp.engine.state import JsonlEventLog, State, classify_pause_halt, parse_events_jsonl
 from imp.engine.types import SourceLoc
 
-LAYOUT_VERSION = 8  # bump in the SAME commit as any breaking quest-home layout/schema change
+LAYOUT_VERSION = 9  # bump in the SAME commit as any breaking quest-home layout/schema change
 
 
 def _write_quest_json(meta_path: Path, meta: dict[str, Any]) -> None:
@@ -242,6 +242,20 @@ def _migrate_v7_to_v8(quest_dir: Path) -> None:
     _write_quest_json(meta_path, meta)
 
 
+def _migrate_v8_to_v9(quest_dir: Path) -> None:
+    """v8->v9: quest.json gained `create_mode` ("new"|"chat"). Backfill an existing
+    home to "new" so nothing already in the active list gains shelve-on-leave, then
+    stamp the version. Both keys land in one atomic quest.json rewrite (os.replace),
+    so a partial failure leaves the home at v8 and the hop re-runs on next load. The
+    archive is deliberately untouched — create_mode is never read from an archived
+    blob; a resurrected shelved home is backfilled by the load-time migrate() path."""
+    meta_path = quest_dir / "quest.json"
+    meta = json.loads(meta_path.read_text())
+    meta["create_mode"] = "new"
+    meta["layout_version"] = 9
+    _write_quest_json(meta_path, meta)
+
+
 _MIGRATIONS: dict[tuple[int, int], Callable[[Path], None]] = {
     (1, 2): _migrate_v1_to_v2,
     (2, 3): _migrate_v2_to_v3,
@@ -250,6 +264,7 @@ _MIGRATIONS: dict[tuple[int, int], Callable[[Path], None]] = {
     (5, 6): _migrate_v5_to_v6,
     (6, 7): _migrate_v6_to_v7,
     (7, 8): _migrate_v7_to_v8,
+    (8, 9): _migrate_v8_to_v9,
 }
 
 
@@ -285,6 +300,7 @@ class Quest:
     cur_base_head: str = ""      # the SHA the branch is currently planted on (the fork)
     workflow: str | None = None  # per-quest workflow name; None = project default
     origin: str = "draft"        # provenance: draft | backlog (Backlog only)
+    create_mode: str = "new"     # how the conversation was started: new | chat (leave disposition)
     seed_opening: str | None = None  # title+description seed for a fresh resume open
     parent: str | None = None  # parent quest id (create_draft provenance); None when standalone
     depends_on: list[str] = field(default_factory=list)  # dependency quest ids (gates go-live)
@@ -422,6 +438,7 @@ class Quest:
         (quest_dir / "quest.json").write_text(json.dumps({
             "id": quest_id, "title": title, "base_branch": base_branch,
             "created_at": datetime.now(UTC).isoformat(),
+            "create_mode": "new",
             "depends_on": list(depends_on or []),
             "project_root": str(wt_path),
             "materialized": True,
@@ -479,6 +496,7 @@ class Quest:
         depends_on: list[str] | None = None, workflow: str | None = None,
         origin: str = "draft", seed_opening: str | None = None,
         parent: str | None = None, defer_seed: bool = False,
+        create_mode: str = "new",
     ) -> Quest:
         """An un-materialized draft: NO branch, NO worktree. State is seeded at the
         permanent home; project_root points at the main checkout so the spec
@@ -498,6 +516,7 @@ class Quest:
         (quest_dir / "quest.json").write_text(json.dumps({
             "id": quest_id, "title": title, "base_branch": base_branch,
             "created_at": datetime.now(UTC).isoformat(),
+            "create_mode": create_mode,
             "depends_on": list(depends_on or []),
             "project_root": str(control_root),
             "materialized": False,
@@ -549,8 +568,9 @@ class Quest:
             id=quest_id, title=title, base_branch=base_branch,
             control_root=control_root, project_root=control_root,
             quest_dir=quest_dir, materialized=False, orig_base_head=orig_base_head,
-            workflow=workflow, origin=origin, seed_opening=seed_opening,
-            parent=parent, depends_on=list(depends_on or []),
+            workflow=workflow, origin=origin, create_mode=create_mode,
+            seed_opening=seed_opening, parent=parent,
+            depends_on=list(depends_on or []),
         )
         quest.event_log().append(
             agent_id=None, type="quest_created",
@@ -581,6 +601,7 @@ class Quest:
             cur_base_head=meta.get("cur_base_head", ""),
             workflow=meta.get("workflow"),
             origin=meta.get("origin", "draft"),
+            create_mode=meta.get("create_mode", "new"),
             seed_opening=meta.get("seed_opening"),
             parent=meta.get("parent"),
             depends_on=list(meta.get("depends_on") or []),
