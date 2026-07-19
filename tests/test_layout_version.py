@@ -7,8 +7,8 @@ from imp.engine.quest import LAYOUT_VERSION, Quest, _imp_commit
 from tests.conftest import _git, _seed_control
 
 
-def test_layout_version_constant_is_six() -> None:
-    assert LAYOUT_VERSION == 6
+def test_layout_version_constant_is_seven() -> None:
+    assert LAYOUT_VERSION == 7
 
 
 def test_create_stamps_version_and_imp_commit(tmp_path: Path) -> None:
@@ -16,7 +16,7 @@ def test_create_stamps_version_and_imp_commit(tmp_path: Path) -> None:
     head = _git(tmp_path, "rev-parse", "HEAD").stdout.strip()
     ch = Quest.create(tmp_path, title="X", quest_id="lv1", base_branch="main")
     meta = json.loads((ch.quest_dir / "quest.json").read_text())
-    assert meta["layout_version"] == 6
+    assert meta["layout_version"] == 7
     assert meta["imp_commit"] == head
 
 
@@ -25,7 +25,7 @@ def test_create_draft_stamps_version_and_imp_commit(tmp_path: Path) -> None:
     head = _git(tmp_path, "rev-parse", "HEAD").stdout.strip()
     ch = Quest.create_draft(tmp_path, title="X", quest_id="lv2", base_branch="main")
     meta = json.loads((ch.quest_dir / "quest.json").read_text())
-    assert meta["layout_version"] == 6
+    assert meta["layout_version"] == 7
     assert meta["imp_commit"] == head
 
 

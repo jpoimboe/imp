@@ -5,6 +5,7 @@ import contextlib
 import json
 import types
 from collections.abc import AsyncGenerator, AsyncIterator
+from datetime import datetime
 from pathlib import Path
 
 import pytest
@@ -4171,3 +4172,36 @@ async def test_unknown_tool_grant_surfaces_as_warning_event(tmp_path: Path) -> N
         "writer: allow_tools lists 'bogus_allow', unknown to this engine "
         "— ignoring (workflow/engine version skew?)",
     ]
+
+
+@pytest.mark.anyio
+async def test_run_quest_stamps_started_at_once_at_first_dispatch(tmp_path: Path) -> None:
+    quest, _, _ = _seed_minimal_workflow(tmp_path)
+    assert State.load(quest.state_dir).started_at is None   # never-run seed
+    _register_fake({"status": "Success"})
+
+    await run_quest(quest, on_event=lambda _e: None)
+
+    stamped = State.load(quest.state_dir).started_at
+    assert stamped is not None                              # stamped when a step ran
+    # ISO-8601 UTC (datetime.now(UTC).isoformat()) -> parses and is tz-aware.
+    parsed = datetime.fromisoformat(stamped)
+    assert parsed.tzinfo is not None
+
+
+@pytest.mark.anyio
+async def test_started_at_not_overwritten_on_a_second_run(tmp_path: Path) -> None:
+    quest, _, _ = _seed_minimal_workflow(tmp_path)
+    _register_fake({"status": "Success"})
+    # Pre-stamp a sentinel start time as if the quest had already begun earlier.
+    s = State.load(quest.state_dir)
+    s.started_at = "2020-01-01T00:00:00+00:00"
+    s.has_started = False          # force the transition block to run again
+    s.save(quest.state_dir)
+
+    await run_quest(quest, on_event=lambda _e: None)
+
+    # The transition fired (has_started flipped) but started_at was preserved.
+    reloaded = State.load(quest.state_dir)
+    assert reloaded.has_started is True
+    assert reloaded.started_at == "2020-01-01T00:00:00+00:00"

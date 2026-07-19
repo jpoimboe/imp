@@ -27,7 +27,7 @@ def test_row_for_id_from_archive(tmp_path: Path) -> None:
     row = m._row_for_id(tmp_path, "2026-06-01-xyz999")
     assert row == ("2026-06-01-xyz999", "completed", "merge",
                    "2026-06-05T00:00:00+00:00", "Done", "2026-06-01T00:00:00+00:00",
-                   None, None)
+                   None, None, None)
 
 
 def test_exit_ambiguous_renders_each_candidate_via_formatter(

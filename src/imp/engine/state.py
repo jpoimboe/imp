@@ -156,6 +156,7 @@ class State:
     unsandboxed: bool = False  # step-scoped /sandbox off override; durable truth
     # here (restored into the coordinator on resume, cleared at step advance).
     route_label: str | None = None  # rule label threaded to the next step_started (consume-on-read)
+    started_at: str | None = None  # durable: ISO-8601 UTC instant work began; None until first run
     has_started: bool = False  # durable: True once >=1 step has begun executing
     completion_pending: bool = False  # §3: navigation ran off the end under an
     # in-flight interrupt; re-entry finalizes via _complete (no dispatch/wipe).
@@ -230,6 +231,7 @@ class State:
             "step_label": self.step_label,
             "phase_label": self.phase_label,
             "route_label": self.route_label,
+            "started_at": self.started_at,
             "step_attempt": self.step_attempt,
             "status": self.status,
             "has_started": self.has_started,
@@ -638,6 +640,20 @@ def parse_events_jsonl(raw: bytes) -> list[dict[str, Any]]:
         except json.JSONDecodeError:
             out.append({"_malformed": True, "raw": line})
     return out
+
+
+def derive_started_at(events: list[dict[str, Any]], created_at: str) -> str:
+    """First user_message timestamp, else first event, else created_at."""
+    first_event_ts: str | None = None
+    for e in events:
+        ts: str | None = e.get("timestamp")
+        if not ts:
+            continue
+        if e.get("type") == "user_message":
+            return ts
+        if first_event_ts is None:
+            first_event_ts = ts
+    return first_event_ts or created_at
 
 
 class JsonlEventLog(_BaseEventLog):

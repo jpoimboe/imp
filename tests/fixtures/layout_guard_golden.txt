@@ -1,4 +1,4 @@
-# LAYOUT_VERSION: 6
+# LAYOUT_VERSION: 7
 [paths]
 events.jsonl
 quest.json
@@ -40,6 +40,7 @@ resume_pending
 resume_target
 retry_feedback
 route_label
+started_at
 status
 step
 step_attempt

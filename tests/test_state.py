@@ -564,3 +564,60 @@ def test_state_load_forward_compatible_without_unsandboxed(tmp_path: Path) -> No
         "retry_feedback": None,
     }))
     assert State.load(tmp_path).unsandboxed is False
+
+
+def test_state_started_at_defaults_none_and_round_trips(tmp_path: Path) -> None:
+    s = State(id="c1", step=None, step_attempt=0, status="new")
+    assert s.started_at is None                       # not-yet-started quest
+    s.save(tmp_path)
+    raw = json.loads((tmp_path / "state.json").read_text())
+    assert raw["started_at"] is None                  # written into the payload
+    assert State.load(tmp_path).started_at is None
+
+    s.started_at = "2026-06-01T00:00:00+00:00"
+    s.save(tmp_path)
+    raw = json.loads((tmp_path / "state.json").read_text())
+    assert raw["started_at"] == "2026-06-01T00:00:00+00:00"
+    assert State.load(tmp_path).started_at == "2026-06-01T00:00:00+00:00"
+
+
+def test_state_load_forward_compatible_without_started_at(tmp_path: Path) -> None:
+    # A state.json written before this field existed loads with started_at=None.
+    (tmp_path / "state.json").write_text(json.dumps({
+        "id": "c1", "step": "coder", "step_attempt": 0, "status": "new",
+        "vars": {}, "loop_counts": {}, "current_step": None,
+        "retry_feedback": None,
+    }))
+    assert State.load(tmp_path).started_at is None
+
+
+def test_derive_started_at_prefers_first_user_message() -> None:
+    from imp.engine.state import derive_started_at
+    events = [
+        {"type": "quest_created", "timestamp": "T0"},
+        {"type": "step_context", "timestamp": "T1"},
+        {"type": "user_message", "timestamp": "T2"},
+        {"type": "user_message", "timestamp": "T3"},
+    ]
+    assert derive_started_at(events, "CREATED") == "T2"
+
+
+def test_derive_started_at_falls_back_to_first_event_then_created_at() -> None:
+    from imp.engine.state import derive_started_at
+    # No user_message anywhere -> first event of any type.
+    events = [
+        {"type": "quest_created", "timestamp": "E0"},
+        {"type": "step_started", "timestamp": "E1"},
+    ]
+    assert derive_started_at(events, "CREATED") == "E0"
+    # No events at all -> created_at.
+    assert derive_started_at([], "CREATED") == "CREATED"
+    # Malformed sentinels (no timestamp) are skipped, not treated as first event.
+    assert derive_started_at(
+        [{"_malformed": True, "raw": "x"},
+         {"type": "user_message", "timestamp": "U"}], "CREATED") == "U"
+    # A malformed (timestamp-less) row is skipped, so the following non-user_message
+    # event becomes the first-event fallback (not created_at).
+    assert derive_started_at(
+        [{"_malformed": True, "raw": "x"},
+         {"type": "step_started", "timestamp": "FIRST"}], "CREATED") == "FIRST"

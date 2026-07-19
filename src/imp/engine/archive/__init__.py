@@ -17,6 +17,7 @@ import filelock
 from imp.engine.archive import index, record
 from imp.engine.archive.blobstore import LocalBlobStore
 from imp.engine.event_migrations import migrate_events
+from imp.engine.state import derive_started_at
 
 
 def archive_root(control_root: Path) -> Path:
@@ -149,7 +150,7 @@ def _read_user_version(control_root: Path) -> int:
         conn.close()
 
 
-_DATA_VERSION = 1  # archive blob schema: 1 == triad (hutu62); absent marker == pre-triad
+_DATA_VERSION = 2  # blob schema: 2 == started_at backfilled; 1 == triad; absent == pre-triad
 
 
 def _read_data_version(control_root: Path) -> int:
@@ -189,11 +190,12 @@ def _serialize_events(events: list[dict[str, Any]]) -> bytes:
 
 
 def _migrate_archive_blobs(control_root: Path) -> None:
-    """One-time pass: rewrite each archived pre-triad events blob
-    to the triad schema, repoint each record's events_hash to the new blob, rebuild
-    the index once so its derived columns match, then stamp the data-version marker.
-    A triad blob is left untouched (migrate_events is a no-op on it); old blobs
-    orphan harmlessly (nothing GCs blobs)."""
+    """One-time pass: rewrite each archived pre-triad events blob to the triad schema,
+    repoint each record's events_hash to the new blob; also backfill `started_at` into
+    each record's `final_state` when absent (first user_message ts → else first event
+    ts → else created_at). Rebuilds the index once so its derived columns match, then
+    stamps the data-version marker. A triad blob is left untouched (migrate_events is a
+    no-op on it); old blobs orphan harmlessly (nothing GCs blobs)."""
     store = LocalBlobStore(blobs_root(control_root))
     records_dir = records_root(control_root)
     cids = list(record.list_record_ids(records_dir))
@@ -205,14 +207,20 @@ def _migrate_archive_blobs(control_root: Path) -> None:
             if rec is None:
                 continue
             blob = store.get(rec["events_hash"])
-            if blob is None:
-                continue
-            events = _parse_events(blob)
+            events = _parse_events(blob) if blob is not None else []
             migrated = migrate_events(events)
-            if migrated == events:
-                continue
-            rec["events_hash"] = store.put(_serialize_events(migrated))
-            record.write_record(records_dir, rec)
+            dirty = False
+            if blob is not None and migrated != events:
+                rec["events_hash"] = store.put(_serialize_events(migrated))
+                dirty = True
+            final_state = rec.get("final_state") or {}
+            if final_state.get("started_at") is None:
+                final_state["started_at"] = derive_started_at(
+                    migrated, rec.get("created_at", ""))
+                rec["final_state"] = final_state
+                dirty = True
+            if dirty:
+                record.write_record(records_dir, rec)
     rebuild_index(control_root)
     _write_data_version(control_root, _DATA_VERSION)
 

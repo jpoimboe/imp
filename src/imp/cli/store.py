@@ -164,7 +164,7 @@ class LocalStore:
         row = _row_for_id(self.control_root, quest_id)
         if row is None:
             return None
-        _id, status, step, last, title, created, step_label, phase_label = row
+        _id, status, step, last, title, created, step_label, phase_label = row[:8]
         if (not (_quest_home(self.control_root, quest_id) / "quest.json").exists()
                 and archive_read.status_of(self.control_root, quest_id) == "paused"):
             status = _DISPOSITION["paused"]

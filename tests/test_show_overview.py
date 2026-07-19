@@ -198,8 +198,8 @@ def test_overview_header_aligns_with_rows(tmp_path, monkeypatch) -> None:
     lines = m._overview_lines(tmp_path, show_all=False, now=_NOW, color=False)
     header = lines[0]
     row = next(ln for ln in lines if ln.startswith("algn01"))
-    # Same computed status_width -> NAME column starts at the same offset.
-    assert header.index("NAME") == row.index("ZZZ")
+    # STATUS offset depends on name_width; both header and row receive it from overview_widths.
+    assert header.index("STATUS") == row.index("running")
 
 
 def test_overview_subfloor_drops_suffix_no_overflow(tmp_path, monkeypatch) -> None:
@@ -214,4 +214,5 @@ def test_overview_subfloor_drops_suffix_no_overflow(tmp_path, monkeypatch) -> No
     row = next(ln for ln in lines if ln.startswith("subf01"))
     assert "spec phase" not in row                    # suffix dropped
     assert "(" not in row.split("please")[0]          # no ` (…)` before NAME
-    assert header.index("NAME") == row.index("> please")  # `> ` cell starts at status_width
+    # NAME starts right after ID; the `> ` prefix is part of the NAME cell.
+    assert header.index("NAME") == row.index("> please")

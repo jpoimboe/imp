@@ -17,9 +17,9 @@ def anyio_backend() -> str:
 
 # _Row = (id, status, step, last_iso, title, created_at, step_label)
 def _row(cid: str, last: str = "2026-06-11T00:00:00+00:00",
-         ) -> tuple[str, str, str, str, str, str, str | None, str | None]:
+         ) -> tuple[str, str, str, str, str, str, str | None, str | None, str | None]:
     return (cid, "paused", "plan", last, "Title " + cid,
-            "2026-06-01T00:00:00+00:00", None, None)
+            "2026-06-01T00:00:00+00:00", None, None, None)
 
 
 def test_abandon_match_rows_filters_by_token(tmp_path: Path) -> None:

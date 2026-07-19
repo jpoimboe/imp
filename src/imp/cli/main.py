@@ -1609,7 +1609,8 @@ def _exit_ambiguous(token: str, candidates: list[str], control: Path) -> NoRetur
     _emit_cli_error(f"{token!r} is ambiguous; candidates:")
     color = should_use_color(sys.stderr)
     now = datetime.now(UTC)
-    print(quest_row.header_line(color=color), file=sys.stderr)
+    name_w = quest_row.name_budget()
+    print(quest_row.header_line(color=color, name_width=name_w), file=sys.stderr)
     for cid in sorted(candidates):
         row = _row_for_id(control, cid)
         if row is None:
@@ -1618,7 +1619,7 @@ def _exit_ambiguous(token: str, candidates: list[str], control: Path) -> NoRetur
         print(quest_row.format_quest_line(
             quest_id=row[0], title=row[4], status=row[1], step=row[2],
             step_label=row[6], last_iso=row[3], now=now, color=color,
-            name_width=quest_row.name_budget()), file=sys.stderr)
+            name_width=name_w), file=sys.stderr)
     raise SystemExit(2)
 
 
@@ -2568,11 +2569,12 @@ def resolve_display_status(
     return status
 
 
-# Row = (id, status, step, last_activity, title, created_at, step_label, phase_label).
-# created_at is the trailing sort key only; step_label + phase_label feed the
-# merged STATUS cell's ` (phase · step)` suffix (see quest_row). The step slot
-# stays the RAW step name so imp list keeps printing it.
-_Row = tuple[str, str, str, str, str, str, str | None, str | None]
+# Row = (id, status, step, last_activity, title, created_at, step_label,
+# phase_label, started_at). created_at is a sort key; started_at (persisted,
+# may be None) keys the in-flight ascending sort. step_label + phase_label feed
+# the merged STATUS cell's ` (phase · step)` suffix (see quest_row). The step
+# slot stays the RAW step name so imp list keeps printing it.
+_Row = tuple[str, str, str, str, str, str, str | None, str | None, str | None]
 
 
 
@@ -2610,7 +2612,7 @@ def _status_row(quest_id: str, state_json: bytes, quest_json: bytes,
         meta = json.loads(quest_json)
         return (quest_id, st["status"], st.get("step") or "-", last_activity,
                 meta["title"], meta["created_at"], st.get("step_label"),
-                st.get("phase_label"))
+                st.get("phase_label"), st.get("started_at"))
     except (json.JSONDecodeError, KeyError, TypeError):
         return None
 
@@ -2677,7 +2679,7 @@ def _completed_rows(control: Path, live_ids: set[str] | None = None) -> list[_Ro
     for r in make_store(control).completed_rows():
         if r.quest_id in live or r.status in _INFLIGHT:
             continue
-        rows.append((r.quest_id, r.status, r.step, r.last, r.title, r.created, None, None))
+        rows.append((r.quest_id, r.status, r.step, r.last, r.title, r.created, None, None, None))
     return rows
 
 
@@ -2685,13 +2687,18 @@ def _shelved_rows(control: Path, live_ids: set[str] | None = None) -> list[_Row]
     """Shelved conversations — archived final status `paused` with no live home —
     for the `--all` history block. Mirrors _completed_rows' live-id dedup."""
     live = {r[0] for r in _status_rows(control)} if live_ids is None else live_ids
-    return [(r.quest_id, r.status, r.step, r.last, r.title, r.created, None, None)
+    return [(r.quest_id, r.status, r.step, r.last, r.title, r.created, None, None, None)
             for r in make_store(control).completed_rows()
             if r.status == "paused" and r.quest_id not in live]
 
 
 def _sort_rows_newest_first(rows: list[_Row]) -> list[_Row]:
     return sorted(rows, key=lambda r: (r[3], r[5]), reverse=True)
+
+
+def _sort_rows_started_first(rows: list[_Row]) -> list[_Row]:
+    """In-flight order: earliest started_at first, falling back to created_at then id."""
+    return sorted(rows, key=lambda r: (r[8] or r[5], r[5], r[0]))
 
 
 def _resumable_rows(control: Path) -> list[_Row]:
@@ -2758,8 +2765,8 @@ def _resume_picker_non_tty(rows: list[_Row]) -> str | int:
     _emit_cli_error("multiple resumable quests — pass a token; candidates:")
     color = should_use_color(sys.stderr)
     now = datetime.now(UTC)
-    print(quest_row.header_line(color=color), file=sys.stderr)
     name_w = quest_row.name_budget()
+    print(quest_row.header_line(color=color, name_width=name_w), file=sys.stderr)
     for r in rows:
         print(quest_row.format_quest_line(
             quest_id=r[0], title=r[4], status=r[1], step=r[2], step_label=r[6],
@@ -3083,7 +3090,7 @@ def _backlog_rows(control: Path, scanned: list[HomeDigest] | None = None) -> lis
         created = meta.get("created_at", "")
         blocked = "" if ready else "blocked"
         rows.append((h.quest_id, origin, blocked, h.last_iso,
-                     meta.get("title") or "", created, blocked or None, None))
+                     meta.get("title") or "", created, blocked or None, None, None))
     return rows
 
 
@@ -3181,7 +3188,8 @@ def _overview_body(inflight: list[_Row], backlog_rows: list[_Row],
 
     status_width, name_width = quest_row.overview_widths(specs)
 
-    lines = [quest_row.header_line(color=color, status_width=status_width)]
+    lines = [quest_row.header_line(color=color, name_width=name_width,
+                                   status_width=status_width)]
     for r in inflight:
         lines.append(quest_row.format_quest_line(
             quest_id=r[0], title=r[4], status=r[1], step=r[2], step_label=r[6],
@@ -3213,7 +3221,7 @@ def _overview_lines(control: Path, *, show_all: bool, now: datetime,
     """Overview lines across all zones, sharing one content-sized STATUS/NAME width."""
     scanned = make_store(control).scan_homes()
     status_rows = _status_rows(control, scanned)
-    inflight = _sort_rows_newest_first(status_rows)
+    inflight = _sort_rows_started_first(status_rows)
     backlog_rows = _sort_rows_newest_first(_backlog_rows(control, scanned))
     history = _history_rows(control, show_all=show_all,
                             live_ids={r[0] for r in status_rows})
@@ -3254,7 +3262,7 @@ def _filtered_overview_lines(control: Path, *, dispositions: set[str],
     scanned = make_store(control).scan_homes()
     status_rows = _status_rows(control, scanned)
     live_ids = {r[0] for r in status_rows}
-    inflight = (_sort_rows_newest_first(status_rows)
+    inflight = (_sort_rows_started_first(status_rows)
                 if "active" in dispositions else [])
     backlog_rows = (_sort_rows_newest_first(_backlog_rows(control, scanned))
                     if "backlog" in dispositions else [])

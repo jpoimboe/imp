@@ -21,6 +21,7 @@ import sys
 import tempfile
 import traceback
 from collections.abc import Awaitable, Callable
+from datetime import UTC, datetime
 from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -531,6 +532,8 @@ async def run_quest(
             # now (before dispatch) so even a crash mid-step leaves it set.
             if not state.has_started:
                 state.has_started = True
+                if state.started_at is None:
+                    state.started_at = datetime.now(UTC).isoformat()
                 state.save(quest.state_dir)
             action, feedback_text, _var_mutations = await _dispatch_step(
                 step, workflow, quest, state, log, is_resume=is_resume,
