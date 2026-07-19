@@ -2696,6 +2696,11 @@ def _sort_rows_newest_first(rows: list[_Row]) -> list[_Row]:
     return sorted(rows, key=lambda r: (r[3], r[5]), reverse=True)
 
 
+def _sort_rows_started_first(rows: list[_Row]) -> list[_Row]:
+    """In-flight order: earliest started_at first, falling back to created_at then id."""
+    return sorted(rows, key=lambda r: (r[8] or r[5], r[5], r[0]))
+
+
 def _resumable_rows(control: Path) -> list[_Row]:
     rows = [r for r in _status_rows(control) if r[1] in RESUMABLE]
     rows += _backlog_rows(control)
@@ -3216,7 +3221,7 @@ def _overview_lines(control: Path, *, show_all: bool, now: datetime,
     """Overview lines across all zones, sharing one content-sized STATUS/NAME width."""
     scanned = make_store(control).scan_homes()
     status_rows = _status_rows(control, scanned)
-    inflight = _sort_rows_newest_first(status_rows)
+    inflight = _sort_rows_started_first(status_rows)
     backlog_rows = _sort_rows_newest_first(_backlog_rows(control, scanned))
     history = _history_rows(control, show_all=show_all,
                             live_ids={r[0] for r in status_rows})
@@ -3257,7 +3262,7 @@ def _filtered_overview_lines(control: Path, *, dispositions: set[str],
     scanned = make_store(control).scan_homes()
     status_rows = _status_rows(control, scanned)
     live_ids = {r[0] for r in status_rows}
-    inflight = (_sort_rows_newest_first(status_rows)
+    inflight = (_sort_rows_started_first(status_rows)
                 if "active" in dispositions else [])
     backlog_rows = (_sort_rows_newest_first(_backlog_rows(control, scanned))
                     if "backlog" in dispositions else [])
