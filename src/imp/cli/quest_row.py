@@ -99,10 +99,11 @@ def name_budget(*, indent: int = 0) -> int:
     `indent` accounts for any prefix a caller prints before the row (e.g. the
     resume picker's selection marker). Falls back to an 80-col terminal when
     stdout isn't a tty (pipes, the remote/telegram path), keeping piped output
-    stable, and never shrinks below NAME_MIN.
+    stable, capped at NAME_CAP so wide terminals stay compact, and never below
+    NAME_MIN.
     """
     cols = shutil.get_terminal_size((80, 24)).columns
-    return max(NAME_MIN, cols - _PREFIX_W - indent)
+    return max(NAME_MIN, min(NAME_CAP, cols - _PREFIX_W - indent))
 
 
 def overview_widths(

@@ -131,11 +131,22 @@ def test_name_budget_fills_remaining_width(monkeypatch):
     import os
 
     monkeypatch.setattr("shutil.get_terminal_size",
-                        lambda fallback=(80, 24): os.terminal_size((120, 24)))
-    # 120 cols - 54 fixed prefix = 66 left for the name.
-    assert name_budget() == 66
+                        lambda fallback=(80, 24): os.terminal_size((100, 24)))
+    # 100 cols - 54 fixed prefix = 46 left for the name (below the 60 cap).
+    assert name_budget() == 46
     # An indent (e.g. the resume picker's marker) shrinks the budget.
-    assert name_budget(indent=2) == 64
+    assert name_budget(indent=2) == 44
+
+
+def test_name_budget_caps_at_name_cap(monkeypatch):
+    import os
+
+    monkeypatch.setattr("shutil.get_terminal_size",
+                        lambda fallback=(80, 24): os.terminal_size((200, 24)))
+    # 200 - 54 = 146 available, but the NAME column is capped at NAME_CAP (60).
+    assert name_budget() == 60
+    # The indent is applied before the cap; here it is still absorbed by the cap.
+    assert name_budget(indent=2) == 60
 
 
 def test_header_column_reads_updated_not_age():
