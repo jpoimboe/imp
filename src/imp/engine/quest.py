@@ -21,7 +21,7 @@ from imp.engine.seed import seed_workflow_start
 from imp.engine.state import JsonlEventLog, State, parse_events_jsonl
 from imp.engine.types import SourceLoc
 
-LAYOUT_VERSION = 6  # bump in the SAME commit as any breaking quest-home layout/schema change
+LAYOUT_VERSION = 7  # bump in the SAME commit as any breaking quest-home layout/schema change
 
 
 def _write_quest_json(meta_path: Path, meta: dict[str, Any]) -> None:
@@ -167,12 +167,35 @@ def _migrate_v5_to_v6(quest_dir: Path) -> None:
     _write_quest_json(meta_path, meta)
 
 
+def _migrate_v6_to_v7(quest_dir: Path) -> None:
+    """v6->v7: backfill state.json's `started_at` (added this release) from the
+    quest's events.jsonl — first user_message ts, else first event, else the
+    quest's created_at. A home without a state.json (un-materialized seed) is
+    skipped for the backfill; it gets started_at stamped live at first run. The
+    backfill precedes the version stamp so a failed hop re-runs on next load."""
+    from imp.engine.state import derive_started_at
+    meta_path = quest_dir / "quest.json"
+    meta = json.loads(meta_path.read_text())
+    state_dir = quest_dir / "state"
+    if (state_dir / "state.json").exists():
+        events_path = quest_dir / "events.jsonl"
+        events = (parse_events_jsonl(events_path.read_bytes())
+                  if events_path.exists() else [])
+        state = State.load(state_dir)
+        if state.started_at is None:
+            state.started_at = derive_started_at(events, meta.get("created_at", ""))
+            state.save(state_dir)
+    meta["layout_version"] = 7
+    _write_quest_json(meta_path, meta)
+
+
 _MIGRATIONS: dict[tuple[int, int], Callable[[Path], None]] = {
     (1, 2): _migrate_v1_to_v2,
     (2, 3): _migrate_v2_to_v3,
     (3, 4): _migrate_v3_to_v4,
     (4, 5): _migrate_v4_to_v5,
     (5, 6): _migrate_v5_to_v6,
+    (6, 7): _migrate_v6_to_v7,
 }
 
 

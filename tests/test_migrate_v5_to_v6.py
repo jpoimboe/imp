@@ -37,14 +37,14 @@ def _seed_old_quest(control: Path, cid: str) -> Quest:
     return ch
 
 
-def test_load_migrates_events_and_stamps_v6(tmp_path: Path) -> None:
+def test_load_migrates_events_and_stamps_current_version(tmp_path: Path) -> None:
     _seed_control(tmp_path)
     _seed_old_quest(tmp_path, "mig001")
 
     Quest.load(tmp_path, "mig001")
 
     meta = json.loads((_quest_dir(tmp_path, "mig001") / "quest.json").read_text())
-    assert meta["layout_version"] == LAYOUT_VERSION == 6
+    assert meta["layout_version"] == LAYOUT_VERSION == 7
     lines = (_quest_dir(tmp_path, "mig001") / "events.jsonl").read_text().splitlines()
     migrated = [json.loads(ln) for ln in lines if ln.strip()]
     assert [e["type"] for e in migrated] == [
@@ -65,7 +65,7 @@ def test_second_load_is_a_no_op(tmp_path: Path) -> None:
 
     assert events_file.read_bytes() == after_first
     meta = json.loads((_quest_dir(tmp_path, "mig002") / "quest.json").read_text())
-    assert meta["layout_version"] == 6
+    assert meta["layout_version"] == 7
 
 
 def test_migration_leaves_no_temp_and_writes_compact_lines(tmp_path: Path) -> None:
