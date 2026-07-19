@@ -7,15 +7,32 @@ RefreshOutcome. No token material is ever returned or logged.
 from __future__ import annotations
 
 import base64
+import contextlib
 import json
-import httpx
-from collections.abc import Mapping
-from datetime import datetime, timezone
+import os
+import stat
+import tempfile
+from collections.abc import Iterator, Mapping
+from dataclasses import dataclass
+from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
+
+import filelock
+import httpx
 
 _BUFFER_MS = 5 * 60 * 1000
 _REFRESH_INTERVAL_DAYS = 8
 _DAY_MS = 24 * 60 * 60 * 1000
+
+REFRESHED = "refreshed"
+SKIPPED_FRESH = "skipped_fresh"
+NOT_APPLICABLE = "not_applicable"
+FAILED_TRANSIENT = "failed_transient"
+FAILED_INVALID_GRANT = "failed_invalid_grant"
+
+_LOCK_FILE = ".imp-codex-token-refresh.lock"
+_LOCK_TIMEOUT = 30.0
 
 
 def _jwt_exp_ms(access_token: object) -> int | None:
@@ -50,7 +67,7 @@ def _parse_last_refresh_ms(last_refresh: object) -> int | None:
     except ValueError:
         return None
     if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
+        dt = dt.replace(tzinfo=UTC)
     return int(dt.timestamp() * 1000)
 
 
@@ -147,3 +164,134 @@ def _request_refresh(refresh_token: str) -> dict[str, Any]:
     if _is_dead_token(resp):
         raise RefreshInvalidGrant()
     raise RefreshTransientError(f"token endpoint returned {resp.status_code}")
+
+
+class LockTimeout(Exception):
+    """The refresh lock could not be acquired within its timeout."""
+
+
+@dataclass(frozen=True)
+class RefreshOutcome:
+    outcome: str
+    expires_at: int | None = None
+
+
+def _canonical_dir(env: Mapping[str, str]) -> Path:
+    override = env.get("CODEX_HOME")
+    return Path(override) if override else Path.home() / ".codex"
+
+
+def _load_auth(auth_path: Path) -> dict[str, Any] | None:
+    try:
+        data = json.loads(auth_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def _is_apikey(data: dict[str, Any], env: Mapping[str, str]) -> bool:
+    if data.get("auth_mode") == "apikey":
+        return True
+    return bool(data.get("OPENAI_API_KEY") or env.get("OPENAI_API_KEY"))
+
+
+def _refresh_token_of(tokens: Mapping[str, Any]) -> str | None:
+    rt = tokens.get("refresh_token")
+    return rt if isinstance(rt, str) and rt else None
+
+
+def _rfc3339_now() -> str:
+    return datetime.now(UTC).isoformat().replace("+00:00", "Z")
+
+
+@contextlib.contextmanager
+def _token_lock(lock_path: Path, *, timeout: float) -> Iterator[None]:
+    fl = filelock.FileLock(str(lock_path))
+    try:
+        fl.acquire(timeout=timeout)
+    except filelock.Timeout as exc:
+        raise LockTimeout() from exc
+    try:
+        yield
+    finally:
+        fl.release()
+
+
+def _atomic_write_auth(auth_path: Path, data: dict[str, Any]) -> None:
+    payload = json.dumps(data, indent=2).encode("utf-8")
+    fd, tmp_name = tempfile.mkstemp(dir=auth_path.parent, prefix=".auth-")
+    tmp = Path(tmp_name)
+    try:
+        with os.fdopen(fd, "wb") as fh:
+            fh.write(payload)
+        os.chmod(tmp, stat.S_IRUSR | stat.S_IWUSR)
+        os.replace(tmp, auth_path)
+    except BaseException:
+        with contextlib.suppress(OSError):
+            tmp.unlink()
+        raise
+
+
+def _applicable_tokens(
+    data: dict[str, Any] | None, env: Mapping[str, str],
+) -> tuple[dict[str, Any], str] | None:
+    """Return (tokens, refresh_token) when `data` is a live chatgpt-mode bundle
+    with a usable refresh token, else None."""
+    if data is None or _is_apikey(data, env):
+        return None
+    tokens = data.get("tokens")
+    if not isinstance(tokens, dict):
+        return None
+    refresh_token = _refresh_token_of(tokens)
+    if refresh_token is None:
+        return None
+    return tokens, refresh_token
+
+
+def refresh_canonical_token(
+    now_ms: int, *, env: Mapping[str, str] | None = None,
+) -> RefreshOutcome:
+    env = os.environ if env is None else env
+    try:
+        base = _canonical_dir(env)
+    except RuntimeError:
+        return RefreshOutcome(NOT_APPLICABLE)
+    auth_path = base / "auth.json"
+
+    data = _load_auth(auth_path)
+    applicable = _applicable_tokens(data, env)
+    if data is None or applicable is None:
+        return RefreshOutcome(NOT_APPLICABLE)
+    tokens, _ = applicable
+    if not _needs_refresh(tokens, data.get("last_refresh"), now_ms):
+        return RefreshOutcome(SKIPPED_FRESH)
+
+    try:
+        with _token_lock(base / _LOCK_FILE, timeout=_LOCK_TIMEOUT):
+            data = _load_auth(auth_path)
+            applicable = _applicable_tokens(data, env)
+            if data is None or applicable is None:
+                return RefreshOutcome(NOT_APPLICABLE)
+            tokens, refresh_token = applicable
+            if not _needs_refresh(tokens, data.get("last_refresh"), now_ms):
+                return RefreshOutcome(SKIPPED_FRESH)
+            try:
+                new_tokens = _request_refresh(refresh_token)
+            except RefreshInvalidGrant:
+                return RefreshOutcome(FAILED_INVALID_GRANT)
+            except RefreshTransientError:
+                return RefreshOutcome(FAILED_TRANSIENT)
+            merged_tokens = dict(tokens)
+            for key in ("id_token", "access_token", "refresh_token"):
+                if new_tokens.get(key) is not None:
+                    merged_tokens[key] = new_tokens[key]
+            merged = dict(data)
+            merged["tokens"] = merged_tokens
+            merged["last_refresh"] = _rfc3339_now()
+            _atomic_write_auth(auth_path, merged)
+            return RefreshOutcome(
+                REFRESHED, _jwt_exp_ms(merged_tokens.get("access_token")))
+    except LockTimeout:
+        return RefreshOutcome(FAILED_TRANSIENT)
+    except OSError:
+        return RefreshOutcome(FAILED_TRANSIENT)
