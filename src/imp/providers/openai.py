@@ -597,7 +597,8 @@ class OpenAIAgentRunner:
                     invocation.resume_should_continue,
                     elog=elog, agent_id=aid,
                     last_agent_message=last_assistant_text(messages),
-                    halt_writer=invocation.halt_writer)
+                    halt_writer=invocation.halt_writer,
+                    halt_clearer=invocation.halt_clearer)
                 if source == "nudge":
                     assert isinstance(reply, str)
                     deliver_engine_continuation(

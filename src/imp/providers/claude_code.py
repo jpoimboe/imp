@@ -1764,7 +1764,8 @@ class ClaudeCodeAgentRunner:
                     invocation.resume_should_continue,
                     elog=elog, agent_id=aid,
                     last_agent_message=last_assistant_text(messages),
-                    halt_writer=invocation.halt_writer)
+                    halt_writer=invocation.halt_writer,
+                    halt_clearer=invocation.halt_clearer)
                 if source == "nudge":
                     assert isinstance(reply, str)
                     deliver_engine_continuation(
@@ -2327,7 +2328,8 @@ class ClaudeCodeAgentRunner:
                                 event_log=elog, agent_id=aid,
                                 steer_prompt=INTERRUPT_STEER_HINT,
                                 interrupt=True,
-                                halt_writer=invocation.halt_writer)
+                                halt_writer=invocation.halt_writer,
+                                halt_clearer=invocation.halt_clearer)
                             # Raises AwaitingUserInput when no human is attached;
                             # the balanced session makes a resume continue with no 400.
                             reply = await steer(last_text)

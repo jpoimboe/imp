@@ -505,3 +505,61 @@ def test_continuation_no_channel_park_invokes_halt_writer() -> None:
     with pytest.raises(AwaitingUserInput):
         fn("the final question")
     assert calls == [1]
+
+
+@pytest.mark.anyio
+async def test_inline_solicit_clears_halt_on_resuming_reply(
+    anyio_backend: str,
+) -> None:
+    cleared = {"n": 0}
+
+    async def reply_fn(_q: str) -> str:
+        return "keep going"
+
+    inline = build_inline_solicit(
+        user_input_fn=reply_fn, coordinator=InterruptCoordinator(),
+        halt_clearer=lambda: cleared.__setitem__("n", cleared["n"] + 1))
+    reply = await inline("which database?")
+    assert reply == "keep going"
+    assert cleared["n"] == 1
+
+
+@pytest.mark.anyio
+async def test_inline_solicit_does_not_clear_halt_on_park(
+    anyio_backend: str,
+) -> None:
+    cleared = {"n": 0}
+
+    async def gate(_q: str) -> str:
+        raise AwaitingUserInput("gate prompt")
+
+    inline = build_inline_solicit(
+        user_input_fn=gate, coordinator=InterruptCoordinator(),
+        halt_clearer=lambda: cleared.__setitem__("n", cleared["n"] + 1))
+    with pytest.raises(AwaitingUserInput):
+        await inline("still prose")
+    assert cleared["n"] == 0
+
+
+@pytest.mark.anyio
+async def test_continuation_fn_clears_halt_on_attended_reply(
+    anyio_backend: str,
+) -> None:
+    cleared = {"n": 0}
+
+    async def reply_fn(_q: str) -> str:
+        return "use postgres"
+
+    fn = build_continuation_fn(
+        user_input_fn=reply_fn, coordinator=InterruptCoordinator(),
+        headless=False,
+        halt_clearer=lambda: cleared.__setitem__("n", cleared["n"] + 1))
+    text, human = fn("which database should I use?")
+    assert human is True
+    assert await text == "use postgres"
+    assert cleared["n"] == 1
+
+
+def test_build_continuation_fn_has_halt_clearer_param() -> None:
+    params = inspect.signature(build_continuation_fn).parameters
+    assert "halt_clearer" in params

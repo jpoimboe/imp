@@ -180,6 +180,8 @@ class AgentInvocation:
     # it — invoked at the awaiting_user_input gate so a live session at a gate
     # reads waiting, not running. None for subagents / legacy tests (no state).
     halt_writer: Callable[[], None] | None = None
+    # Clears halt_condition on resume; symmetric to halt_writer. None for subagents/legacy.
+    halt_clearer: Callable[[], None] | None = None
     # parent_id override for this agent's FIRST emitted event (step_context):
     # the spawning step_started id (steps/gates) or task tool_call id (subagents).
     first_event_parent_id: str | None = None

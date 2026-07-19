@@ -651,3 +651,10 @@ def test_header_merge_blocked_renders_two_words_on_underscore_color():
     out = render_summary([], header=hdr, color=True, width=80)
     assert "\x1b[33mmerge blocked\x1b[0m" in out[0]   # wordmark color, two-word text
     assert "merge_blocked" not in out[0]
+
+
+def test_header_waiting_renders_bold():
+    hdr = SummaryHeader(workflow="feature", quest_id="abc",
+                        status="waiting", total_seconds=100.0)
+    out = render_summary([], header=hdr, color=True, width=80)
+    assert "\x1b[1mwaiting\x1b[0m" in out[0]   # bold, like running
