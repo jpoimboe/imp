@@ -132,7 +132,7 @@ def test_name_budget_fills_remaining_width(monkeypatch):
 
     monkeypatch.setattr("shutil.get_terminal_size",
                         lambda fallback=(80, 24): os.terminal_size((100, 24)))
-    # 100 cols - 54 fixed prefix = 46 left for the name (below the 60 cap).
+    # 100 cols - 54 fixed prefix = 46 left for the name (below the 70 cap).
     assert name_budget() == 46
     # An indent (e.g. the resume picker's marker) shrinks the budget.
     assert name_budget(indent=2) == 44
@@ -143,10 +143,10 @@ def test_name_budget_caps_at_name_cap(monkeypatch):
 
     monkeypatch.setattr("shutil.get_terminal_size",
                         lambda fallback=(80, 24): os.terminal_size((200, 24)))
-    # 200 - 54 = 146 available, but the NAME column is capped at NAME_CAP (60).
-    assert name_budget() == 60
+    # 200 - 54 = 146 available, but the NAME column is capped at NAME_CAP (70).
+    assert name_budget() == 70
     # The indent is applied before the cap; here it is still absorbed by the cap.
-    assert name_budget(indent=2) == 60
+    assert name_budget(indent=2) == 70
 
 
 def test_header_column_reads_updated_not_age():
@@ -365,8 +365,8 @@ def test_overview_widths_wide_terminal_shows_full_status(monkeypatch):
 
 def test_overview_widths_name_cap_protects_status(monkeypatch):
     from imp.cli.quest_row import overview_widths
-    _term(monkeypatch, 130)
-    # An 80-char name is capped at 60 for sizing, so STATUS still gets its 50.
+    _term(monkeypatch, 140)
+    # region = 121; an 80-char name is capped at 70 for sizing, so STATUS still gets its 50.
     status_w, _name_w = overview_widths([("running", "x" * 40, "y" * 80)])
     assert status_w == 50
 
@@ -374,7 +374,7 @@ def test_overview_widths_name_cap_protects_status(monkeypatch):
 def test_overview_widths_subfloor_floors_status_to_word(monkeypatch):
     from imp.cli.quest_row import overview_widths
     _term(monkeypatch, 80)
-    # region = 61; a long intent hits the 60 cap so STATUS floors to the word (7).
+    # region = 61; the tiny region floors STATUS to the word (7) regardless of the 70 cap.
     status_w, name_w = overview_widths([("running", "x" * 40, "i" * 80)])
     assert (status_w, name_w) == (7, 54)
 

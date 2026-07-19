@@ -66,7 +66,7 @@ ID_W = 6        # bare 6-char quest id
 STATUS_W = 35   # merged status + " (step-label)"; preserves the old 13+2+20 budget
 AGE_W = 7       # header "UPDATED" (7) aligns with the ≤4-char relative-age data
 NAME_MIN = 10   # never shrink the trailing NAME column below this
-NAME_CAP = 60   # cap a long name/intent's pull on the shared width so STATUS keeps its content
+NAME_CAP = 70   # cap a long name/intent's pull on the shared width so STATUS keeps its content
 
 # Fixed columns plus their three 2-space gaps; the NAME column gets whatever
 # terminal width remains after this.
