@@ -45,8 +45,11 @@ def test_error_reason_backfills_error(tmp_path: Path) -> None:
     qd = _seed_v7(tmp_path, "m1", status="paused",
                   paused_events=[_paused("internal_error")])
     Quest.load(tmp_path, "m1")
-    assert _halt(qd) == "error"
-    assert json.loads((qd / "quest.json").read_text())["layout_version"] == 9
+    # v7→v8 backfills halt_condition="error"; v9→v10 then promotes it to status="error"
+    state = json.loads((qd / "state" / "state.json").read_text())
+    assert state["status"] == "error"
+    assert _halt(qd) is None
+    assert json.loads((qd / "quest.json").read_text())["layout_version"] == 10
 
 
 def test_clean_reason_backfills_none(tmp_path: Path) -> None:
@@ -55,7 +58,7 @@ def test_clean_reason_backfills_none(tmp_path: Path) -> None:
                   paused_events=[_paused("awaiting_user")])
     Quest.load(tmp_path, "m2")
     assert _halt(qd) is None
-    assert json.loads((qd / "quest.json").read_text())["layout_version"] == 9
+    assert json.loads((qd / "quest.json").read_text())["layout_version"] == 10
 
 
 def test_interrupt_over_error_reason_backfills_none(tmp_path: Path) -> None:
@@ -106,4 +109,4 @@ def test_migration_leaves_no_temp_file(tmp_path: Path) -> None:
                   paused_events=[_paused("max_loops")])
     _migrate_v7_to_v8(qd)
     assert not list((qd / "state").glob(".state-*"))
-    assert LAYOUT_VERSION == 9
+    assert LAYOUT_VERSION == 10
