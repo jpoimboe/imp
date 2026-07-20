@@ -22,7 +22,7 @@ def _seed_change(control: Path, cid: str, last_ts: str) -> None:
         "created_at": "2026-06-01T00:00:00+00:00", "depends_on": []}))
     state_json = control / f"{cid}-state.json"
     state_json.write_text(json.dumps({
-        "id": cid, "status": "completed", "step": "finalize"}))
+        "id": cid, "status": "merged", "step": "finalize"}))
     archive.archive_quest(
         control, cid, events_path=events,
         quest_json_path=quest_json, state_json_path=state_json)
@@ -111,7 +111,7 @@ def _seed_prose_change(control: Path, cid: str, body: str) -> None:
         "created_at": "2026-06-01T00:00:00+00:00", "depends_on": []}))
     state_json = control / f"{cid}-state.json"
     state_json.write_text(json.dumps({
-        "id": cid, "status": "completed", "step": "finalize"}))
+        "id": cid, "status": "merged", "step": "finalize"}))
     archive.archive_quest(
         control, cid, events_path=events,
         quest_json_path=quest_json, state_json_path=state_json)
@@ -239,7 +239,7 @@ def test_concurrent_migration_reads_and_ingest_lose_nothing(tmp_path: Path) -> N
         "created_at": "2026-06-02T00:00:00+00:00", "depends_on": []}))
     w_state = control / "writer-state.json"
     w_state.write_text(json.dumps({
-        "id": "writer", "status": "completed", "step": "finalize"}))
+        "id": "writer", "status": "merged", "step": "finalize"}))
 
     start = threading.Barrier(6)  # 5 readers + 1 writer start together
     missing_db: list[bool] = []
@@ -313,7 +313,7 @@ def test_schema_bump_reindexes_and_drops_injected_prompt(tmp_path: Path) -> None
         "created_at": "2026-06-01T00:00:00+00:00", "depends_on": []}))
     state_json = control / f"{cid}-state.json"
     state_json.write_text(json.dumps({
-        "id": cid, "status": "completed", "step": "finalize"}))
+        "id": cid, "status": "merged", "step": "finalize"}))
     archive.archive_quest(
         control, cid, events_path=events,
         quest_json_path=quest_json, state_json_path=state_json)
@@ -355,7 +355,7 @@ def test_rebuild_backfills_events_content_column(tmp_path: Path) -> None:
         "created_at": "2026-06-01T00:00:00+00:00", "depends_on": []}))
     state_json = control / f"{cid}-state.json"
     state_json.write_text(json.dumps({
-        "id": cid, "status": "completed", "step": "finalize"}))
+        "id": cid, "status": "merged", "step": "finalize"}))
     archive.archive_quest(
         control, cid, events_path=events,
         quest_json_path=quest_json, state_json_path=state_json)
