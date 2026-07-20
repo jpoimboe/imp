@@ -4349,6 +4349,10 @@ def _build_parser() -> argparse.ArgumentParser:
     p_rc = sub.add_parser(
         "remote-control",
         help="Run the optional per-repo daemon that relays all quests to one transport.",
+        description=(
+            "Run the optional per-repo daemon that relays every quest's activity "
+            "to a single chat transport (e.g. Telegram) so you can watch and steer "
+            "runs remotely. start launches it; stop shuts it down."),
     )
     p_rc.set_defaults(func=_cmd_remote_control, parser=p_rc)
     rc_sub = p_rc.add_subparsers(dest="rc_action", required=False)
