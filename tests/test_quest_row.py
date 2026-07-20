@@ -89,7 +89,8 @@ def test_format_truncates_name_past_budget():
 
 def test_format_status_color_running():
     line = format_quest_line(**_row(status="running"), color=True)
-    assert "\x1b[1mrunning\x1b[0m" in line
+    assert "\x1b[1mrunning\x1b[0m" not in line   # no longer bold
+    assert "running" in line                       # renders plain
 
 
 def test_waiting_status_renders_bold():
@@ -167,8 +168,9 @@ def test_name_budget_floors_at_minimum(monkeypatch):
 def test_status_cell_merges_step_label_as_dim_suffix():
     line = format_quest_line(**_row(status="running", step="write_spec"),
                               step_label="writing spec", color=True)
-    # status word keeps its color; the label suffix is dim and parenthesized.
-    assert "\x1b[1mrunning\x1b[0m" in line
+    # status word renders plain; the label suffix is still dim and parenthesized.
+    assert "\x1b[1mrunning\x1b[0m" not in line
+    assert "running" in line
     assert "\x1b[2m (writing spec)\x1b[0m" in line
 
 
@@ -298,7 +300,7 @@ def test_header_line_honors_status_width():
 
 def test_status_colors_are_meaning_based() -> None:
     from imp.cli.quest_row import STATUS_COLORS
-    assert STATUS_COLORS["running"] == ("bold",)
+    assert "running" not in STATUS_COLORS    # plain, no longer bold
     assert STATUS_COLORS["waiting"] == ("bold",)
     assert STATUS_COLORS["error"] == ("red",)
     assert STATUS_COLORS["merge_blocked"] == ("wordmark",)
@@ -328,7 +330,8 @@ def test_status_cell_phase_label_color_path():
     line = format_quest_line(**_row(status="running", step="write_spec"),
                               step_label="writing spec",
                               phase_label="spec phase", color=True)
-    assert "\x1b[1mrunning\x1b[0m" in line
+    assert "\x1b[1mrunning\x1b[0m" not in line
+    assert "running" in line
     assert "\x1b[2m (spec phase · writing spec)\x1b[0m" in line
 
 
