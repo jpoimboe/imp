@@ -1,59 +1,31 @@
-"""Heuristic detection of a project's import roots for the PYTHONPATH shadow.
+"""Agent-backed detection of a project's import roots for the PYTHONPATH shadow.
 
-Proposes an `imp/project.yaml` `pythonpath` value at `imp init` (config-birth):
-worktree-relative directories prepended to gate/agent subprocess PYTHONPATH so an
-editable-installed package resolves to the worktree under test, not a stale main
-checkout. Suggestions only — the user accepts, edits, or skips.
+At `imp init`, a sandboxed one-shot agent reads the project's declared packaging
+and confirms the layout on disk; the reported roots are validated here before
+being written to `imp/project.yaml` as the worktree-relative `pythonpath` — dirs
+prepended to gate/agent subprocess PYTHONPATH so an editable-installed package
+resolves to the worktree under test, not a stale main checkout.
 """
 
 from __future__ import annotations
 
+import functools
 import json
-from collections.abc import Callable
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from pathlib import Path
 
+import anyio
+
+from imp.agents.detached import (
+    DetachedEnvironmentFailure,
+    DetachedSuccess,
+    DetachedTransientFailure,
+    run_detached_agent,
+)
+from imp.engine.loader import parse_agent_file
+from imp.engine.sandbox import SandboxConfig
 from imp.providers.effective import load_effective_config
 from imp.providers.resolve import available_providers
-
-
-def detect_pythonpath(project_root: Path) -> list[str] | None:
-    """Propose import root(s) for `project_root`, or None when it is not a
-    Python package imp should shadow.
-
-    - a `src/` directory containing a Python package (`*/__init__.py` under
-      `src/`) => `["src"]` (src-layout);
-    - else a root `pyproject.toml` (flat-layout package) => `["."]`;
-    - else None.
-    """
-    src = project_root / "src"
-    if src.is_dir() and any(src.glob("*/__init__.py")):
-        return ["src"]
-    if (project_root / "pyproject.toml").is_file():
-        return ["."]
-    return None
-
-
-def resolve_pythonpath_choice(
-    suggested: list[str],
-    input_fn: Callable[[str], str],
-    output_fn: Callable[[str], None],
-) -> list[str] | None:
-    """Present a detected pythonpath for accept / edit / skip. Returns the
-    accepted (or edited) roots, or None when the user skips."""
-    output_fn(
-        f"Detected import root(s) {suggested} — prepend to the worktree's "
-        "PYTHONPATH so the test gate runs the worktree, not a stale editable "
-        "install? [Y / edit / skip]"
-    )
-    ans = input_fn("").strip().lower()
-    if ans in ("e", "edit"):
-        entered = input_fn("pythonpath dirs (space-separated): ").split()
-        return entered or suggested
-    if ans in ("s", "skip", "n", "no"):
-        return None
-    return suggested
-
 
 _PACKAGING_FILES = ("pyproject.toml", "setup.py", "setup.cfg")
 
@@ -107,6 +79,63 @@ def validate_detected_roots(project_root: Path, roots: list[str]) -> list[str]:
         if (project_root / norm).is_dir():
             out.append(norm)
     return out
+
+
+_KICKOFF = (
+    "Determine the Python import root(s) for the project at the repository root "
+    "and report them via complete_step."
+)
+
+
+@dataclass(frozen=True, slots=True)
+class DetectedRoots:
+    roots: list[str]  # validated, worktree-relative; empty => no importable package
+
+
+@dataclass(frozen=True, slots=True)
+class DetectionFailed:
+    kind: str  # "credential" | "transient"
+    detail: str
+
+
+def detect_pythonpath_via_agent(
+    project_root: Path,
+    workflow_dir: Path,
+    provider_name: str,
+    model_name: str,
+    sandbox_cfg: SandboxConfig,
+) -> DetectedRoots | DetectionFailed:
+    """Run the bundled init-pythonpath agent and validate its answer against
+    disk. Assumes `project_root` is a Python-packaging project (init pre-checks
+    with `is_python_packaging_project`)."""
+    agent_def = parse_agent_file(workflow_dir / "agents" / "init-pythonpath.md")
+    result = anyio.run(functools.partial(
+        run_detached_agent,
+        agent_def=agent_def,
+        provider_name=provider_name,
+        model_name=model_name,
+        initial_message=_KICKOFF,
+        project_root=project_root,
+        workflow_dir=workflow_dir,
+        sandbox_cfg=sandbox_cfg,
+        title="pythonpath detection",
+        tier="medium",
+        max_tool_calls=25,
+        timeout_s=60.0,
+    ))
+    if isinstance(result, DetachedEnvironmentFailure):
+        kind = "credential" if result.category in ("auth", "config") else "transient"
+        return DetectionFailed(kind, result.detail)
+    if isinstance(result, DetachedTransientFailure):
+        return DetectionFailed("transient", f"{result.category}: {result.detail}")
+    assert isinstance(result, DetachedSuccess)
+    if result.output.get("status") == "Error":
+        return DetectionFailed("transient", "packaging unreadable")
+    raw = list((result.output.get("pythonpath") or {}).get("roots", []))
+    validated = validate_detected_roots(project_root, raw)
+    if raw and not validated:
+        return DetectionFailed("transient", "detected roots not found on disk")
+    return DetectedRoots(validated)
 
 
 def format_pythonpath_yaml(dirs: list[str]) -> str:
