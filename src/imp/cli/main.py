@@ -643,8 +643,10 @@ def _handle_terminal_outcome(
         _emit_merge_blocked(quest, mb_reason, mb_detail, mb_note)
         return 1  # friendly block already carries the resume command; skip redundant summary
     trigger = _leave_trigger(coord)
-    if trigger == "ctrl-d":
-        print(pal.caret(enabled=should_use_color(sys.stdout)))
+    if trigger in _LEAVE_KEYSTROKES:
+        color = should_use_color(sys.stdout)
+        print(pal.caret(enabled=color)
+              + ansi(_LEAVE_DISPLAY[trigger], "dim", enabled=color))
     _emit_paused_summary(quest, trigger)
     return 1
 
