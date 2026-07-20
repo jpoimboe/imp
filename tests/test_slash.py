@@ -76,13 +76,31 @@ def test_skills_listing_shows_description_when_present(tmp_path: Path) -> None:
     assert debug_line.strip() == "/debug"        # bare name when no description
 
 
-def test_unknown_command_passes_through_verbatim(tmp_path: Path) -> None:
-    # A /-line matching no builtin and no skill is no longer an error: it is
-    # returned verbatim and submitted as ordinary input (no print, no REPROMPT).
+def test_unknown_command_shaped_slash_errors_and_reprompts(tmp_path: Path) -> None:
+    # A command-shaped `/name` matching no builtin and no skill is now a real
+    # error: echo the line, print the unknown-command message, and REPROMPT
+    # (nothing is submitted to the model).
     quest = _FakeChange(tmp_path)
     out: list[str] = []
     result = handle_slash_line("/nope", quest=quest, output_fn=out.append)
-    assert result == "/nope"
+    assert result is REPROMPT
+    assert any("Unknown command: /nope — /help for the list" in line for line in out)
+
+
+def test_unknown_command_shaped_with_args_uses_first_token(tmp_path: Path) -> None:
+    quest = _FakeChange(tmp_path)
+    out: list[str] = []
+    result = handle_slash_line("/skils extra", quest=quest, output_fn=out.append)
+    assert result is REPROMPT
+    assert any("Unknown command: /skils — /help for the list" in line for line in out)
+
+
+def test_dotted_path_shaped_slash_passes_through(tmp_path: Path) -> None:
+    # A first token containing `.` is path-shaped: submitted verbatim, no print.
+    quest = _FakeChange(tmp_path)
+    out: list[str] = []
+    result = handle_slash_line("/foo.py", quest=quest, output_fn=out.append)
+    assert result == "/foo.py"
     assert out == []
 
 
@@ -287,14 +305,15 @@ def test_solicit_flushes_on_slash_reprompt(tmp_path: Path) -> None:
 
 def test_continue_is_no_longer_a_verb(tmp_path: Path) -> None:
     # /continue is removed: it falls through to the skill resolver, matches no
-    # skill, and is now submitted verbatim as ordinary input (resume by typing an
-    # ordinary line instead).
+    # skill; now command-shaped so it returns REPROMPT with an unknown-command
+    # message (resume by typing an ordinary line instead).
     quest = _FakeChange(tmp_path)
     out: list[str] = []
     result = handle_slash_line("/continue", quest=quest, output_fn=out.append)
-    assert result == "/continue"
+    assert result is REPROMPT
     joined = "\n".join(out)
     assert "resumes a paused run" not in joined
+    assert "Unknown command: /continue" in joined
 
 
 def test_help_does_not_mention_continue(tmp_path: Path) -> None:

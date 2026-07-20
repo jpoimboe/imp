@@ -1,13 +1,16 @@
 """Slash command dispatcher for interactive steps (spec §4).
 
-Flat namespace: built-ins (/help, /skills) take precedence; every other
-/<name> resolves a skill from the quest's tracked workflow dir and is submitted AS the
-user's input line (human-attributed). The skill name is untrusted and
-sanitized by agents.skills."""
+Flat namespace: built-ins (/help, /skills) take precedence; a /<name> that
+matches a known skill is submitted AS the user's input line (human-attributed).
+An unmatched /<name> splits by the first token's shape: command-shaped
+(identifier-like) is a real "Unknown command" error, while path-shaped (the token
+holds a / or .) is submitted verbatim so a pasted path is not misread. The skill
+name is untrusted and sanitized by agents.skills."""
 
 from __future__ import annotations
 
 import contextlib
+import re
 from collections.abc import Callable
 from typing import Any
 
@@ -50,6 +53,12 @@ PRE_SESSION_LEAVE_REDIRECT = (
     "(resume with imp resume {qid}), or /abandon to tear it down.")
 
 
+# A command-shaped first token: identifier-like, no `/` and no `.`. Anything
+# that fails this (a path-shaped token holding a `/` or `.`, or any other
+# non-identifier token) submits verbatim rather than erroring.
+_COMMAND_SHAPED = re.compile(r"^[A-Za-z][A-Za-z0-9_-]*$")
+
+
 def is_slash_command(text: str) -> bool:
     return text.lstrip().startswith("/")
 
@@ -80,9 +89,11 @@ def handle_slash_line(
     """Dispatch a /-line. Returns REPROMPT for /help, /skills, and builtins that
     print usage (each prints via output_fn). Returns a SkillRequest(name, args)
     for a /<name> that matches a known user skill — the daemon loads the body.
-    A /-line that matches no builtin and no known skill is returned verbatim
-    (str) and submitted as ordinary input — so a pasted path like
-    `/home/user/foo.py` is not misread as a command."""
+    An unmatched /-line splits by the first token's shape: a command-shaped token
+    (identifier-like — no / or .) prints "Unknown command: /<cmd>" and returns
+    REPROMPT; a path-shaped token (holds a / or .) is returned verbatim (str) and
+    submitted as ordinary input, so a pasted path like `/home/user/foo.py` is not
+    misread as a command."""
     tokens = text.lstrip().lstrip("/").split(None, 1)
     cmd = tokens[0] if tokens else ""
     args = tokens[1].strip() if len(tokens) > 1 else ""
@@ -144,9 +155,13 @@ def handle_slash_line(
     known = {name for name, _ in list_user_skills(quest.workflow_dir / "skills")}
     if cmd in known:
         return SkillRequest(cmd, args)
-    # Not a builtin or known skill: submit the line verbatim as ordinary input,
-    # so a pasted absolute path like `/home/user/foo.py` reaches the agent
-    # unchanged instead of being misread as a command.
+    if _COMMAND_SHAPED.match(cmd):
+        # A command-shaped typo like `/list`: a real error, not model input.
+        _echo_command(text, output_fn, color=color)
+        output_fn(f"Unknown command: /{cmd} — /help for the list")
+        return REPROMPT
+    # Path-shaped (first token holds a `/` or `.`): submit the line verbatim, so a
+    # pasted absolute path like `/home/user/foo.py` reaches the agent unchanged.
     return text
 
 
