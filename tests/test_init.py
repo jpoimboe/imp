@@ -20,6 +20,25 @@ def _picks(*selected: str) -> object:
     return lambda _available: list(selected)
 
 
+def _py_project(root: Path) -> None:
+    (root / "pyproject.toml").write_text("[project]\nname = 'x'\n")
+    pkg = root / "src" / "x"
+    pkg.mkdir(parents=True)
+    (pkg / "__init__.py").write_text("")
+
+
+def _stub_gate(monkeypatch, *, provider=("anthropic", "m"), outcome=None):
+    import imp.cli.init as initmod
+    from imp.cli.pythonpath_detect import DetectedRoots
+    monkeypatch.setattr(initmod, "sandbox_available", lambda: True, raising=False)
+    monkeypatch.setattr(initmod, "resolve_detection_provider",
+                        lambda _providers: provider, raising=False)
+    monkeypatch.setattr(
+        initmod, "detect_pythonpath_via_agent",
+        lambda *a, **k: outcome if outcome is not None else DetectedRoots(["src"]),
+        raising=False)
+
+
 @pytest.fixture(autouse=True)
 def _isolate_user_config(monkeypatch, tmp_path):
     # init bootstraps ~/.config/imp/config.yaml — pin XDG into the tmp tree so a
@@ -350,65 +369,145 @@ def test_picker_cursor_uses_render_safe_caret() -> None:
     assert inactive.startswith("  ")
 
 
-def test_init_writes_pythonpath_on_accept(tmp_path: Path) -> None:
-    run_init(
-        tmp_path, input_fn=_inputs("y"), output_fn=lambda _m: None,
-        picker_fn=_picks("anthropic"),
-        detect_verify_fn=lambda _root: None,
-        detect_pythonpath_fn=lambda _root: ["src"],
-    )
+def test_python_project_sets_pythonpath_and_informs(tmp_path, monkeypatch):
+    from imp.cli.pythonpath_detect import DetectedRoots
+    _py_project(tmp_path)
+    _stub_gate(monkeypatch, outcome=DetectedRoots(["src"]))
+    msgs: list[str] = []
+    run_init(tmp_path, picker_fn=_picks("anthropic"), input_fn=_inputs(),
+             output_fn=msgs.append, detect_verify_fn=lambda _r: None)
     data = yaml.safe_load((tmp_path / "imp" / "project.yaml").read_text())
     assert data["pythonpath"] == ["src"]
+    blob = "\n".join(msgs)
+    assert "Set pythonpath: ['src'] in imp/project.yaml." in blob
+    assert "Review your configuration with `imp config`" in blob
 
 
-def test_init_writes_edited_pythonpath(tmp_path: Path) -> None:
-    run_init(
-        tmp_path, input_fn=_inputs("edit", "lib vendor"), output_fn=lambda _m: None,
-        picker_fn=_picks("anthropic"),
-        detect_verify_fn=lambda _root: None,
-        detect_pythonpath_fn=lambda _root: ["src"],
-    )
-    data = yaml.safe_load((tmp_path / "imp" / "project.yaml").read_text())
-    assert data["pythonpath"] == ["lib", "vendor"]
-
-
-def test_init_writes_teaching_hint_on_skip(tmp_path: Path) -> None:
-    run_init(
-        tmp_path, input_fn=_inputs("skip"), output_fn=lambda _m: None,
-        picker_fn=_picks("anthropic"),
-        detect_verify_fn=lambda _root: None,
-        detect_pythonpath_fn=lambda _root: ["src"],
-    )
-    text = (tmp_path / "imp" / "project.yaml").read_text()
-    # Skipped => no field written, but the commented hint teaches the remedy.
-    assert yaml.safe_load(text).get("pythonpath") is None
-    assert "# pythonpath:" in text
-    assert "editable" in text
-
-
-def test_init_writes_teaching_hint_when_detector_returns_none(tmp_path: Path) -> None:
-    run_init(
-        tmp_path, input_fn=_inputs("y"), output_fn=lambda _m: None,
-        picker_fn=_picks("anthropic"),
-        detect_verify_fn=lambda _root: None,
-        detect_pythonpath_fn=lambda _root: None,
-    )
+def test_python_project_empty_roots_leaves_unset(tmp_path, monkeypatch):
+    from imp.cli.pythonpath_detect import DetectedRoots
+    _py_project(tmp_path)
+    _stub_gate(monkeypatch, outcome=DetectedRoots([]))
+    msgs: list[str] = []
+    run_init(tmp_path, picker_fn=_picks("anthropic"), input_fn=_inputs(),
+             output_fn=msgs.append, detect_verify_fn=lambda _r: None)
     text = (tmp_path / "imp" / "project.yaml").read_text()
     assert yaml.safe_load(text).get("pythonpath") is None
-    assert "# pythonpath:" in text
-    assert "[src]" in text and "[.]" in text
+    assert "No installable Python package detected" in "\n".join(msgs)
 
 
-def test_init_sequences_both_detector_prompts(tmp_path: Path) -> None:
-    # Both detectors fire: the test-cmd prompt is answered first, the
-    # pythonpath prompt second. Guards the two prompt blocks' ordering.
-    run_init(
-        tmp_path, input_fn=_inputs("y", "y"), output_fn=lambda _m: None,
-        picker_fn=_picks("anthropic"),
-        detect_verify_fn=lambda _root: "make check",
-        detect_pythonpath_fn=lambda _root: ["src"],
-    )
+def test_no_usable_credential_stops_without_project_yaml(tmp_path, monkeypatch):
+    import imp.cli.init as initmod
+    _py_project(tmp_path)
+    monkeypatch.setattr(initmod, "sandbox_available", lambda: True, raising=False)
+    monkeypatch.setattr(initmod, "resolve_detection_provider",
+                        lambda _p: None, raising=False)
+    msgs: list[str] = []
+    run_init(tmp_path, picker_fn=_picks("anthropic"), input_fn=_inputs(),
+             output_fn=msgs.append, detect_verify_fn=lambda _r: None)
+    assert not (tmp_path / "imp" / "project.yaml").exists()
+    assert "usable credential" in "\n".join(msgs)
+    # Persisted so a re-run skips the picker.
+    user = tmp_path / "xdg" / "imp" / "config.yaml"
+    assert yaml.safe_load(user.read_text())["providers"] == ["anthropic"]
+
+
+def test_configured_providers_skip_picker(tmp_path, monkeypatch):
+    from imp.cli.pythonpath_detect import DetectedRoots
+    _py_project(tmp_path)
+    cfg_dir = tmp_path / "xdg" / "imp"
+    cfg_dir.mkdir(parents=True)
+    (cfg_dir / "config.yaml").write_text("providers: [anthropic]\ntheme: dark\n")
+    _stub_gate(monkeypatch, outcome=DetectedRoots(["src"]))
+
+    def _boom(_available):
+        raise AssertionError("picker must not run when providers are configured")
+
+    run_init(tmp_path, picker_fn=_boom, input_fn=_inputs(),
+             output_fn=lambda _m: None, detect_verify_fn=lambda _r: None)
+    assert yaml.safe_load(
+        (tmp_path / "imp" / "project.yaml").read_text())["pythonpath"] == ["src"]
+
+
+def test_bwrap_missing_offer_accept_continues(tmp_path, monkeypatch):
+    import imp.cli.init as initmod
+    from imp.cli.pythonpath_detect import DetectedRoots
+    _py_project(tmp_path)
+    monkeypatch.setattr(initmod, "sandbox_available", lambda: False, raising=False)
+    monkeypatch.setattr(initmod, "resolve_detection_provider",
+                        lambda _p: ("anthropic", "m"), raising=False)
+    monkeypatch.setattr(initmod, "detect_pythonpath_via_agent",
+                        lambda *a, **k: DetectedRoots(["src"]), raising=False)
+    msgs: list[str] = []
+    run_init(tmp_path, picker_fn=_picks("anthropic"), input_fn=_inputs("y"),
+             output_fn=msgs.append, detect_verify_fn=lambda _r: None)
+    assert yaml.safe_load(
+        (tmp_path / "imp" / "project.yaml").read_text())["pythonpath"] == ["src"]
+    assert "Running without an OS sandbox." in "\n".join(msgs)
+    user = yaml.safe_load((tmp_path / "xdg" / "imp" / "config.yaml").read_text())
+    assert user["sandbox"]["allow_unsandboxed"] is True
+
+
+def test_bwrap_missing_offer_decline_stops(tmp_path, monkeypatch):
+    import imp.cli.init as initmod
+    _py_project(tmp_path)
+    monkeypatch.setattr(initmod, "sandbox_available", lambda: False, raising=False)
+    monkeypatch.setattr(initmod, "resolve_detection_provider",
+                        lambda _p: ("anthropic", "m"), raising=False)
+    msgs: list[str] = []
+    run_init(tmp_path, picker_fn=_picks("anthropic"), input_fn=_inputs("n"),
+             output_fn=msgs.append, detect_verify_fn=lambda _r: None)
+    assert not (tmp_path / "imp" / "project.yaml").exists()
+    assert "Install bubblewrap for a real filesystem boundary" in "\n".join(msgs)
+
+
+def test_detection_credential_rejected_stops(tmp_path, monkeypatch):
+    import imp.cli.init as initmod
+    from imp.cli.pythonpath_detect import DetectionFailed
+    _py_project(tmp_path)
+    monkeypatch.setattr(initmod, "sandbox_available", lambda: True, raising=False)
+    monkeypatch.setattr(initmod, "resolve_detection_provider",
+                        lambda _p: ("claude_code", "m"), raising=False)
+    monkeypatch.setattr(initmod, "detect_pythonpath_via_agent",
+                        lambda *a, **k: DetectionFailed("credential", "rejected"),
+                        raising=False)
+    msgs: list[str] = []
+    run_init(tmp_path, picker_fn=_picks("claude_code"), input_fn=_inputs(),
+             output_fn=msgs.append, detect_verify_fn=lambda _r: None)
+    assert not (tmp_path / "imp" / "project.yaml").exists()
+    assert "the credential was rejected" in "\n".join(msgs)
+    user = tmp_path / "xdg" / "imp" / "config.yaml"
+    assert user.exists()
+
+
+def test_detection_transient_failure_stops(tmp_path, monkeypatch):
+    import imp.cli.init as initmod
+    from imp.cli.pythonpath_detect import DetectionFailed
+    _py_project(tmp_path)
+    monkeypatch.setattr(initmod, "sandbox_available", lambda: True, raising=False)
+    monkeypatch.setattr(initmod, "resolve_detection_provider",
+                        lambda _p: ("anthropic", "m"), raising=False)
+    monkeypatch.setattr(initmod, "detect_pythonpath_via_agent",
+                        lambda *a, **k: DetectionFailed("transient", "timeout: slow"),
+                        raising=False)
+    msgs: list[str] = []
+    run_init(tmp_path, picker_fn=_picks("anthropic"), input_fn=_inputs(),
+             output_fn=msgs.append, detect_verify_fn=lambda _r: None)
+    assert not (tmp_path / "imp" / "project.yaml").exists()
+    assert "couldn't finish detecting" in "\n".join(msgs)
+    user = tmp_path / "xdg" / "imp" / "config.yaml"
+    assert user.exists()
+
+
+def test_non_python_project_skips_detection_and_writes_hint(tmp_path, monkeypatch):
+    import imp.cli.init as initmod
+
+    def _boom(*a, **k):
+        raise AssertionError("detection must not run for a non-Python project")
+
+    monkeypatch.setattr(initmod, "detect_pythonpath_via_agent", _boom, raising=False)
+    monkeypatch.setattr(initmod, "resolve_detection_provider", _boom, raising=False)
+    run_init(tmp_path, picker_fn=_picks("anthropic"), input_fn=_inputs(),
+             output_fn=lambda _m: None, detect_verify_fn=lambda _r: None)
     text = (tmp_path / "imp" / "project.yaml").read_text()
-    data = yaml.safe_load(text)
-    assert data["test_cmd_fast"] == "make check"
-    assert data["pythonpath"] == ["src"]
+    assert yaml.safe_load(text).get("pythonpath") is None
+    assert "# pythonpath:" in text
