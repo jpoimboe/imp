@@ -28,7 +28,13 @@ import pytest
 from impty import TerminalSession
 from tests._live import _await_change_dir, sandbox_sleep_precondition_failed
 from tests.conftest import _init_repo
-from tests.impty.e2e_support import E2E_POLL_TIMEOUT, _event_types, _flock_free, _poll
+from tests.impty.e2e_support import (
+    E2E_POLL_TIMEOUT,
+    E2E_RENDER_POLL_TIMEOUT,
+    _event_types,
+    _flock_free,
+    _poll,
+)
 
 _WORKTREE_SRC = str(Path(__file__).parent.parent / "src")
 _CC_STARTUP_GRACE = 2.0  # seconds to allow the CC subprocess to start
@@ -222,9 +228,16 @@ def test_relay_hibernate_then_resume_reengages(tmp_path: Path) -> None:
 
         # The tty must still paint the hint once the gate genuinely engaged: this
         # guards the pty render path, so a real render regression fails here — now
-        # distinguishable from the overlay-mount precondition handled above.
+        # distinguishable from the overlay-mount precondition handled above. That
+        # repaint trails the durable gate event by an extra cross-process relay ->
+        # prompt_toolkit render (3 async hops over a socket), which -n auto CPU
+        # saturation can stretch past the base ceiling. Give this one render-bound
+        # poll the generous E2E_RENDER_POLL_TIMEOUT budget so a late repaint under
+        # load is not misread as a hang — render variance, not a hang; the 240s
+        # per-test outer timeout stays the single backstop for a genuine no-paint.
         if not _poll(
-            lambda: "type to redirect" in "\n".join(s.lines()).lower(), timeout=E2E_POLL_TIMEOUT
+            lambda: "type to redirect" in "\n".join(s.lines()).lower(),
+            timeout=E2E_RENDER_POLL_TIMEOUT,
         ):
             _relay_skip_or_fail(
                 "steer gate engaged (durable event present) but the pty never "

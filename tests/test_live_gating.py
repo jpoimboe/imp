@@ -443,6 +443,13 @@ def test_e2e_poll_timeout_default_is_60():
     assert E2E_POLL_TIMEOUT == 60.0
 
 
+def test_render_poll_timeout_is_knob_derived_double():
+    from tests.impty.e2e_support import E2E_POLL_TIMEOUT, E2E_RENDER_POLL_TIMEOUT
+    assert E2E_RENDER_POLL_TIMEOUT == E2E_POLL_TIMEOUT * 2
+    assert E2E_RENDER_POLL_TIMEOUT > E2E_POLL_TIMEOUT
+    assert E2E_RENDER_POLL_TIMEOUT == 120.0  # base default 60.0 doubled
+
+
 def test_e2e_poll_timeout_overridable_via_env():
     env = {**os.environ, "IMP_E2E_POLL_TIMEOUT": "90"}
     env["PYTHONPATH"] = (
@@ -502,6 +509,7 @@ def test_live_sibling_routes_inner_polls_through_knob():
     import tests.test_relay_hibernation_live as live
     src = Path(live.__file__).read_text()
     assert "timeout=E2E_POLL_TIMEOUT" in src   # inner polls adopt the knob
+    assert "timeout=E2E_RENDER_POLL_TIMEOUT" in src  # render poll gets the generous budget
     assert "timeout=60.0" not in src           # no bare 60s inner poll survives
     assert "timeout=120.0" in src              # real-provider round-trip stays explicit
     assert "timeout=30.0" in src              # _await_change_dir setup poll stays explicit
