@@ -203,13 +203,14 @@ def test_provenance_words_absent_from_palette():
     assert "followup" not in STATUS_COLORS
 
 
-def test_status_word_never_truncated_only_label_is():
+def test_oversized_label_dropped_not_truncated():
     line = format_quest_line(
         **_row(status="merge_blocked", step="x"),
         step_label="resolving deferred items", color=False)
     assert "merge blocked" in line               # status word intact
-    assert "…" in line                           # label was truncated
-    assert "resolving deferred items" not in line  # full label did not fit
+    assert "…" not in line                       # no partial ellipsis
+    assert "(" not in line                       # whole parenthetical dropped
+    assert "resolving deferred items" not in line
 
 
 def test_merge_blocked_status_word_is_bold_theme_independent() -> None:
@@ -271,11 +272,14 @@ def test_status_cell_omits_phase_when_none():
     assert "·" not in line
 
 
-def test_status_width_narrows_label_budget():
-    # status_width 20 -> budget 20-7-3 = 10, so a 30-char label is clipped.
+def test_status_width_drops_oversized_label():
+    # status_width 20 -> budget 20-7-3 = 10; a 30-char label does not fit and is
+    # dropped whole, leaving the bare status word (never a partial `(…)`).
     line = format_quest_line(**_row(status="running", step="x"),
                               step_label="a" * 30, status_width=20, color=False)
-    assert "…" in line
+    assert "running" in line
+    assert "…" not in line
+    assert "(" not in line
     assert "a" * 30 not in line
 
 
@@ -288,6 +292,21 @@ def test_status_subfloor_drops_suffix_no_overflow():
     assert "running" in line
     assert "(" not in line            # suffix dropped entirely
     assert "a very long label" not in line
+
+
+def test_status_label_fits_at_budget_boundary():
+    # status_width 20 -> budget 10; a label of exactly 10 chars still fits in full.
+    line = format_quest_line(**_row(status="running", step="x"),
+                              step_label="b" * 10, status_width=20, color=False)
+    assert "running (" + "b" * 10 + ")" in line
+
+
+def test_status_label_drops_one_char_over_budget():
+    # status_width 20 -> budget 10; an 11-char label is one over and is dropped whole.
+    line = format_quest_line(**_row(status="running", step="x"),
+                              step_label="b" * 11, status_width=20, color=False)
+    assert "running" in line
+    assert "(" not in line
 
 
 def test_header_line_honors_status_width():
