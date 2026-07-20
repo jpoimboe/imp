@@ -168,3 +168,34 @@ async def test_config_error_is_environment_failure(tmp_path, provider_registry):
     assert isinstance(result, DetachedEnvironmentFailure)
     assert result.category == "config"
     assert result.detail == "rejected"
+
+
+@pytest.mark.anyio
+async def test_network_error_is_transient_with_category(
+        tmp_path, provider_registry):
+    _register(provider_registry, [
+        {"type": "error",
+         "payload": {"category": "network", "kind": "reset", "message": "no"}},
+    ])
+    result = await _run(tmp_path, cfg=SandboxConfig(allow_unsandboxed=True))
+    assert isinstance(result, DetachedTransientFailure)
+    assert result.category == "network"
+
+
+@pytest.mark.anyio
+async def test_no_output_is_transient(tmp_path, provider_registry):
+    _register(provider_registry, [])  # runner yields nothing terminal
+    result = await _run(tmp_path, cfg=SandboxConfig(allow_unsandboxed=True))
+    assert isinstance(result, DetachedTransientFailure)
+    assert result.category == "no_output"
+
+
+@pytest.mark.anyio
+async def test_timeout_is_transient(tmp_path, provider_registry):
+    _register(provider_registry, [
+        {"type": "agent_result", "payload": {"status": "Success", "root": "src"}},
+    ], sleep_before=10.0)
+    result = await _run(
+        tmp_path, cfg=SandboxConfig(allow_unsandboxed=True), timeout_s=0.1)
+    assert isinstance(result, DetachedTransientFailure)
+    assert result.category == "timeout"

@@ -118,8 +118,14 @@ async def run_detached_agent(
             sandbox_policy=policy,
         )
         runner = provider.create_runner(invocation)
-        result = await drive_invocation(
-            invocation, runner, coordinator=None, log=None, emit_events=False)
+        try:
+            with anyio.fail_after(timeout_s):
+                result = await drive_invocation(
+                    invocation, runner, coordinator=None, log=None,
+                    emit_events=False)
+        except TimeoutError:
+            return DetachedTransientFailure(
+                "timeout", f"agent run exceeded {timeout_s:g}s")
 
     return _classify(result)
 
@@ -130,4 +136,6 @@ def _classify(result: AgentRunResult) -> DetachedResult:
     err = result.error
     if err is not None and err.category in ("auth", "config"):
         return DetachedEnvironmentFailure(err.category, err.kind or "")
+    if err is not None:
+        return DetachedTransientFailure(err.category, err.kind or "")
     return DetachedTransientFailure("no_output", "agent produced no output")
