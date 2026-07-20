@@ -4766,3 +4766,60 @@ async def test_parallel_sub_agents_emit_single_llm_response_before_both(
     assert len(sub_calls) == 2, f"expected two sub_agent tool_calls, got {len(sub_calls)}"
     assert all(i_llm < i for i in sub_calls), (
         "the single agent_message must precede BOTH sub_agent tool_calls")
+
+
+@pytest.mark.anyio
+async def test_cooperative_interrupt_steer_empty_reply_delivers_nudge(
+    tmp_path: Path,
+) -> None:
+    """An empty steer reply continues the interrupted turn via the continuation
+    nudge — never an empty human user turn (which would risk a provider 400)."""
+    import asyncio
+
+    from imp.cli.signals import InterruptCoordinator
+    from imp.engine.agent_run import _CONTINUATION_NUDGE
+    from tests.cc_fakes import CooperativeClient
+
+    (tmp_path / "art").mkdir()
+    coord = InterruptCoordinator()
+    after_steer = [
+        assistant(text("continuing"),
+                  tool_use("c1", "complete_step", {"status": "Success"})),
+        result(),
+    ]
+    holder: dict[str, CooperativeClient] = {}
+
+    def factory(opts: Any) -> CooperativeClient:
+        c = CooperativeClient(opts, after_steer=after_steer)
+        holder["c"] = c
+        return c
+
+    runner = ClaudeCodeAgentRunner(
+        model_name="claude-sonnet-4-5", client_factory=factory,
+        user_input_fn=lambda _prompt: "")      # empty Enter → continue
+    inv = replace(_inv(tmp_path), coordinator=coord)
+    coord.attach_runner(runner.interrupt)
+
+    events: list[dict[str, Any]] = []
+
+    async def drive() -> None:
+        async for ev in runner.run(inv):
+            events.append(ev)
+
+    task = asyncio.create_task(drive())
+    for _ in range(1000):
+        if "c" in holder:
+            break
+        await asyncio.sleep(0)
+    await asyncio.sleep(0.02)
+
+    await coord.signal_pause()
+    await asyncio.wait_for(task, timeout=2)
+
+    assert events[-1]["type"] == "agent_result"
+    assert events[-1]["payload"]["status"] == "Success"
+    assert not any(e.get("payload", {}).get("kind") == "interrupted"
+                   for e in events if e["type"] == "error")
+    assert holder["c"].disconnected is False
+    # The empty reply became the engine continuation nudge, not an empty user turn.
+    assert holder["c"].queries[-1] == _CONTINUATION_NUDGE
