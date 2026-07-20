@@ -21,6 +21,7 @@ from imp.engine.abandon import (
     save_as_draft,
     tear_down_quest,
 )
+from imp.engine.completion import steer_hint
 from imp.engine.errors import LoadError, LoadErrors
 from imp.engine.executor import RunResult, run_quest
 from imp.engine.merge_queue import ensure_head_driven
@@ -34,11 +35,11 @@ from imp.remote.session.warmup import warm_module_graph
 
 RunFn = Callable[..., Awaitable[Any]]
 
-_RESUME_PROMPT = "paused — type a message to redirect, or detach to leave it paused"
-_SCRIPT_HOLD_PROMPT = (
-    "paused — press enter to re-run the gate, or detach to leave it paused")
+_RESUME_PROMPT = steer_hint("paused")
+_RESUME_INTERRUPTED_PROMPT = steer_hint("interrupted")
+_SCRIPT_HOLD_PROMPT = "paused · enter to re-run the gate · Ctrl-D to leave"
 _SCRIPT_REDIRECT_REFUSED = (
-    "a verify gate takes no redirect; press enter to re-run or detach to leave it paused")
+    "a verify gate takes no redirect; press enter to re-run or Ctrl-D to leave")
 
 
 def _is_interrupt_pause(result: Any, coordinator: Any) -> bool:
@@ -167,17 +168,23 @@ async def serve_quest_session(
             run_kwargs["autonomous"] = True
         if model is not None:
             run_kwargs["opening_model"] = model
-        if resume_target == "prompt" and not (non_interactive or autonomous):
+        if (resume_target in ("prompt-interrupted", "prompt-paused")
+                and not (non_interactive or autonomous)):
             # Resume back to the resteer hold prompt the user left from, before
             # any agent run: a typed reply then interjects and runs the agent;
-            # a detach re-leaves it paused, re-stamping "prompt".
+            # a detach re-leaves it paused, re-stamping the same tell.
             # Only an interactive resume can answer the prompt; a headless or
             # autonomous resume has no channel to type a redirect, so honoring it
             # would re-pause without progress. Fall through to run the agent — it
             # replays the interrupted step (§6.15 mid-step ctrl-c resume).
             result: Any = RunResult.PAUSED
-            prompt: str | None = (
-                _SCRIPT_HOLD_PROMPT if _paused_is_script() else _RESUME_PROMPT)
+            prompt: str | None
+            if _paused_is_script():
+                prompt = _SCRIPT_HOLD_PROMPT
+            elif resume_target == "prompt-interrupted":
+                prompt = _RESUME_INTERRUPTED_PROMPT
+            else:
+                prompt = _RESUME_PROMPT
         else:
             result = await run_fn(
                 quest,
@@ -220,8 +227,14 @@ async def serve_quest_session(
                     if coordinator.pause_reason == "ctrl-d":
                         state.resume_target = "agent"
                         state.arm_step_resume(mode="continue")
+                    elif state.resume_mode == "continue":
+                        # The executor armed the interrupt disposition (mid-turn
+                        # Ctrl-C steer, Pause(interrupt=True)): preserve its
+                        # `continue` arming and reproduce `interrupted ·` on
+                        # resume. Re-arming solicit here would drop both.
+                        state.resume_target = "prompt-interrupted"
                     else:
-                        state.resume_target = "prompt"
+                        state.resume_target = "prompt-paused"
                         state.arm_step_resume(mode="solicit")
                     state.save(quest.state_dir)
                     return result

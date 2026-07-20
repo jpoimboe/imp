@@ -13,6 +13,7 @@ from imp.engine.completion import build_continuation_fn
 from imp.engine.state import InMemoryEventLog
 from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
 from imp.providers.scripted import ScriptedAgentRunner
+from imp.remote.session.protocol import SkillRequest
 
 
 @pytest.fixture
@@ -55,14 +56,14 @@ async def test_resumed_run_supports_multiple_exchanges_to_completion(
     log = InMemoryEventLog()
     inner_calls: list[str] = []
 
-    async def inner(prompt: str) -> str:
+    async def inner(prompt: str, _interrupt: bool = False) -> str:
         inner_calls.append(prompt)
         return "follow-up answer"
 
     # The buffered solicit delivers the resume first line, then delegates every
     # later solicit to the interactive reader — the exact mechanism a resumed
     # run relies on to stay live across exchanges.
-    solicit: Callable[[str], Awaitable[str]] = make_buffered_solicit(
+    solicit: Callable[[str, bool], Awaitable[str | SkillRequest]] = make_buffered_solicit(
         "first reply", inner)
     cont = build_continuation_fn(
         user_input_fn=solicit,

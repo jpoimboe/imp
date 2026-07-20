@@ -257,5 +257,41 @@ def test_backfill_runs_for_already_triad_record_past_the_guards(tmp_path: Path) 
     assert _final_state_of(tmp_path, "sa002")["started_at"] == "2026-06-02T03:00:00+00:00"
 
 
-def test_data_version_bumped_to_three(tmp_path: Path) -> None:
-    assert archive._DATA_VERSION == 3
+def test_data_version_bumped_to_four() -> None:
+    assert archive._DATA_VERSION == 4
+
+
+def test_migrate_remaps_resume_target_prompt_to_prompt_paused(tmp_path: Path) -> None:
+    store = LocalBlobStore(archive.blobs_root(tmp_path))
+    events_hash = store.put(_jsonl(_OLD))
+    rec = record.build_record(
+        {"id": "rt1", "title": "", "base_branch": "main",
+         "created_at": "2026-06-01T00:00:00+00:00", "depends_on": []},
+        {"id": "rt1", "status": "completed", "step": "finalize",
+         "resume_target": "prompt"},
+        events_hash)
+    record.write_record(archive.records_root(tmp_path), rec)
+    archive.rebuild_index(tmp_path)
+
+    archive._migrate_archive_blobs(tmp_path)
+
+    assert _final_state_of(tmp_path, "rt1")["resume_target"] == "prompt-paused"
+    assert archive.data_version_path(tmp_path).read_text().strip() == str(
+        archive._DATA_VERSION)
+
+
+def test_migrate_leaves_agent_resume_target_unchanged(tmp_path: Path) -> None:
+    store = LocalBlobStore(archive.blobs_root(tmp_path))
+    events_hash = store.put(_jsonl(_OLD))
+    rec = record.build_record(
+        {"id": "rt2", "title": "", "base_branch": "main",
+         "created_at": "2026-06-01T00:00:00+00:00", "depends_on": []},
+        {"id": "rt2", "status": "completed", "step": "finalize",
+         "resume_target": "agent"},
+        events_hash)
+    record.write_record(archive.records_root(tmp_path), rec)
+    archive.rebuild_index(tmp_path)
+
+    archive._migrate_archive_blobs(tmp_path)
+
+    assert _final_state_of(tmp_path, "rt2")["resume_target"] == "agent"

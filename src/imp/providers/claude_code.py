@@ -2340,8 +2340,16 @@ class ClaudeCodeAgentRunner:
                             # Brake holds until reply is in hand: clear only now.
                             if invocation.coordinator is not None:
                                 invocation.coordinator.clear_pause()
-                            next_query = deliver_continuation_reply(
-                                messages, transcript, elog, aid, reply, human=True)
+                            if isinstance(reply, str) and not reply.strip():
+                                # Empty Enter continues the interrupted turn via
+                                # an engine nudge — never an empty human turn.
+                                deliver_engine_continuation(
+                                    messages, transcript, elog, aid,
+                                    _CONTINUATION_NUDGE)
+                                next_query = _CONTINUATION_NUDGE
+                            else:
+                                next_query = deliver_continuation_reply(
+                                    messages, transcript, elog, aid, reply, human=True)
                             requery = True
                             break
                         elif (self._handoff_requested or self._steer_requested

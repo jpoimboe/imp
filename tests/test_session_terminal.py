@@ -70,7 +70,7 @@ async def test_terminal_client_renders_events_and_answers_one_gate(
         await client.connect()
         return client
 
-    async def _solicit(prompt: str) -> str:
+    async def _solicit(prompt: str, _interrupt: bool = False) -> str:
         prompts.append(prompt)
         return "imp"
 
@@ -109,7 +109,7 @@ async def test_terminal_client_forwards_interrupt_gesture_as_a_control_frame(
         await client.connect()
         return client
 
-    async def _solicit(_prompt: str) -> str:
+    async def _solicit(_prompt: str, _interrupt: bool = False) -> str:
         raise AssertionError("no gate fired; solicit must not be called")
 
     class _Driver:
@@ -159,7 +159,7 @@ async def test_terminal_client_detaches_interrupt_forwarder_on_return(
         await client.connect()
         return client
 
-    async def _solicit(_prompt: str) -> str:
+    async def _solicit(_prompt: str, _interrupt: bool = False) -> str:
         raise AssertionError("no gate fired; solicit must not be called")
 
     class _Driver:
@@ -218,7 +218,7 @@ async def test_force_quit_tears_down_client_and_run_survives(
         await client.connect()
         return client
 
-    async def _solicit(_prompt: str) -> str:
+    async def _solicit(_prompt: str, _interrupt: bool = False) -> str:
         raise AssertionError("no gate fired; solicit must not be called")
 
     class _Driver:
@@ -274,7 +274,7 @@ async def test_ctrl_backslash_deliberately_detaches_and_run_survives(
         await client.connect()
         return client
 
-    async def _solicit(_prompt: str) -> str:
+    async def _solicit(_prompt: str, _interrupt: bool = False) -> str:
         raise AssertionError("no gate fired; solicit must not be called")
 
     stepped = anyio.Event()
@@ -338,7 +338,7 @@ async def test_abandon_slash_command_at_gate_sends_control_abandon(
 
     replies = iter(["/abandon"])
 
-    async def _solicit(_prompt: str) -> str:
+    async def _solicit(_prompt: str, _interrupt: bool = False) -> str:
         return next(replies)
 
     class _Driver:
@@ -390,7 +390,7 @@ async def test_compact_slash_command_at_gate_forwards_control_and_stays_attached
 
     replies = iter(["/compact", "/abandon"])
 
-    async def _solicit(_prompt: str) -> str:
+    async def _solicit(_prompt: str, _interrupt: bool = False) -> str:
         return next(replies)
 
     echoed: list[str] = []
@@ -441,7 +441,7 @@ async def test_control_command_is_echoed_before_handling(tmp_path: Path) -> None
         await client.connect()
         return client
 
-    async def _solicit(_prompt: str) -> str:
+    async def _solicit(_prompt: str, _interrupt: bool = False) -> str:
         return "/abandon"
 
     echoed: list[str] = []
@@ -497,7 +497,7 @@ async def test_eoferror_at_gate_detaches_cleanly_and_run_survives(
         await client.connect()
         return client
 
-    async def _solicit(_prompt: str) -> str:
+    async def _solicit(_prompt: str, _interrupt: bool = False) -> str:
         raise EOFError
 
     class _Driver:
@@ -546,7 +546,7 @@ async def test_replayed_gates_do_not_crash_only_live_gate_solicits(
         await client.connect()
         return client
 
-    async def _solicit(prompt: str) -> str:
+    async def _solicit(prompt: str, _interrupt: bool = False) -> str:
         prompts.append(prompt)
         return "answer"
 
@@ -605,7 +605,7 @@ async def test_save_slash_command_at_gate_records_intent_and_detaches(
         await client.connect()
         return client
 
-    async def _solicit(_prompt: str) -> str:
+    async def _solicit(_prompt: str, _interrupt: bool = False) -> str:
         return "/save"
 
     class _Driver:
@@ -658,7 +658,7 @@ async def test_shelve_slash_command_records_shelve_intent(
         await client.connect()
         return client
 
-    async def _solicit(_prompt: str) -> str:
+    async def _solicit(_prompt: str, _interrupt: bool = False) -> str:
         return "/shelve"
 
     class _Driver:
@@ -707,7 +707,7 @@ async def test_abandon_slash_command_records_abandon_intent(
 
     replies = iter(["/abandon"])
 
-    async def _solicit(_prompt: str) -> str:
+    async def _solicit(_prompt: str, _interrupt: bool = False) -> str:
         return next(replies)
 
     class _Driver:
@@ -761,7 +761,7 @@ async def test_title_flips_busy_idle_back_to_busy_and_resets(
         await client.connect()
         return client
 
-    async def _solicit(prompt: str) -> str:
+    async def _solicit(prompt: str, _interrupt: bool = False) -> str:
         return "imp"
 
     s = _TTYStream()
@@ -816,7 +816,9 @@ async def test_replayed_awaiting_does_not_flip_to_idle(
         await client.connect()
         return client
 
-    async def _solicit(prompt: str) -> str:  # pragma: no cover - no gate fires
+    async def _solicit(
+        prompt: str, _interrupt: bool = False
+    ) -> str:  # pragma: no cover - no gate fires
         raise AssertionError("a replayed gate must not solicit")
 
     s = _TTYStream()
@@ -861,7 +863,7 @@ async def test_abandon_records_materialized_false_for_unmaterialized_draft(
         await client.connect()
         return client
 
-    async def _solicit(_prompt: str) -> str:
+    async def _solicit(_prompt: str, _interrupt: bool = False) -> str:
         return "/abandon"
 
     class _Driver:
@@ -916,7 +918,7 @@ async def test_abandon_records_materialized_true_for_materialized_change(
         await client.connect()
         return client
 
-    async def _solicit(_prompt: str) -> str:
+    async def _solicit(_prompt: str, _interrupt: bool = False) -> str:
         return "/abandon"
 
     class _Driver:
@@ -970,7 +972,7 @@ async def test_clear_slash_command_at_gate_records_intent_and_detaches(
         await client.connect()
         return client
 
-    async def _solicit(_prompt: str) -> str:
+    async def _solicit(_prompt: str, _interrupt: bool = False) -> str:
         return "/clear"
 
     class _Driver:
@@ -1022,7 +1024,7 @@ async def test_eoferror_leave_sends_archive_frame_and_records_disposition(
         await client.connect()
         return client
 
-    async def _solicit(_prompt: str) -> str:
+    async def _solicit(_prompt: str, _interrupt: bool = False) -> str:
         raise EOFError
 
     class _Driver:
@@ -1068,7 +1070,7 @@ async def test_natural_completion_sends_no_disposition_frame(tmp_path: Path) -> 
         await client.connect()
         return client
 
-    async def _solicit(_prompt: str) -> str:
+    async def _solicit(_prompt: str, _interrupt: bool = False) -> str:
         raise AssertionError("no gate fired; solicit must not be called")
 
     class _Driver:
@@ -1137,7 +1139,7 @@ async def test_ctrl_d_returns_while_daemon_teardown_still_in_progress(
         await client.connect()
         return client
 
-    async def _solicit(_prompt: str) -> str:
+    async def _solicit(_prompt: str, _interrupt: bool = False) -> str:
         raise EOFError
 
     class _Driver:
@@ -1211,7 +1213,7 @@ async def test_duplicate_live_gates_coalesce_to_one_solicit_without_wouldblock(
         await client.connect()
         return client
 
-    async def _solicit(prompt: str) -> str:
+    async def _solicit(prompt: str, _interrupt: bool = False) -> str:
         # The single real gate drives this one solicit. Block here until the
         # scenario has injected the duplicate re-announce frames, so they are
         # provably buffered in the client's gate stream while this solicit is
@@ -1285,7 +1287,9 @@ async def test_quest_renamed_updates_terminal_title(tmp_path: Path) -> None:
         await client.connect()
         return client
 
-    async def _solicit(prompt: str) -> str:  # pragma: no cover - no gate fires
+    async def _solicit(
+        prompt: str, _interrupt: bool = False
+    ) -> str:  # pragma: no cover - no gate fires
         raise AssertionError("no gate fired; solicit must not be called")
 
     s = _TTYStream()
@@ -1331,7 +1335,9 @@ async def test_replayed_quest_renamed_does_not_update_title(tmp_path: Path) -> N
         await client.connect()
         return client
 
-    async def _solicit(prompt: str) -> str:  # pragma: no cover - no gate fires
+    async def _solicit(
+        prompt: str, _interrupt: bool = False
+    ) -> str:  # pragma: no cover - no gate fires
         raise AssertionError("no gate fired; solicit must not be called")
 
     s = _TTYStream()
@@ -1378,7 +1384,9 @@ async def test_quest_renamed_invokes_on_title_even_on_replay(tmp_path: Path) -> 
         await client.connect()
         return client
 
-    async def _solicit(prompt: str) -> str:  # pragma: no cover - no gate fires
+    async def _solicit(
+        prompt: str, _interrupt: bool = False
+    ) -> str:  # pragma: no cover - no gate fires
         raise AssertionError("no gate fired; solicit must not be called")
 
     seen: list[str] = []
@@ -1429,7 +1437,7 @@ async def test_sigterm_detaches_client_as_a_leave_and_run_survives(
         await client.connect()
         return client
 
-    async def _solicit(_prompt: str) -> str:
+    async def _solicit(_prompt: str, _interrupt: bool = False) -> str:
         raise AssertionError("no gate fired; solicit must not be called")
 
     stepped = anyio.Event()
@@ -1501,7 +1509,7 @@ async def test_sighup_detaches_client_as_a_leave_and_run_survives(
         await client.connect()
         return client
 
-    async def _solicit(_prompt: str) -> str:
+    async def _solicit(_prompt: str, _interrupt: bool = False) -> str:
         raise AssertionError("no gate fired; solicit must not be called")
 
     stepped = anyio.Event()
@@ -1553,7 +1561,7 @@ async def test_deliberate_leave_sends_interrupt_leave_with_trigger(tmp_path: Pat
         await client.connect()
         return client
 
-    async def _solicit(_prompt: str) -> str:
+    async def _solicit(_prompt: str, _interrupt: bool = False) -> str:
         raise AssertionError("no gate fired; solicit must not be called")
 
     class _Driver:
@@ -1596,7 +1604,7 @@ async def test_leave_without_a_stamped_trigger_sends_no_leave_frame(tmp_path: Pa
         await client.connect()
         return client
 
-    async def _solicit(_prompt: str) -> str:
+    async def _solicit(_prompt: str, _interrupt: bool = False) -> str:
         raise AssertionError("no gate fired; solicit must not be called")
 
     class _Driver:
@@ -1651,7 +1659,9 @@ async def test_lane_acquired_sets_hold_glyph(tmp_path: Path) -> None:
         await client.connect()
         return client
 
-    async def _solicit(prompt: str) -> str:  # pragma: no cover - no gate fires
+    async def _solicit(
+        prompt: str, _interrupt: bool = False
+    ) -> str:  # pragma: no cover - no gate fires
         raise AssertionError("no gate should fire")
 
     s = _TTYStream()
@@ -1696,7 +1706,9 @@ async def test_replayed_lane_acquired_sets_hold_glyph(tmp_path: Path) -> None:
         await client.connect()
         return client
 
-    async def _solicit(prompt: str) -> str:  # pragma: no cover - no gate fires
+    async def _solicit(
+        prompt: str, _interrupt: bool = False
+    ) -> str:  # pragma: no cover - no gate fires
         raise AssertionError("no gate should fire")
 
     s = _TTYStream()
@@ -1752,7 +1764,9 @@ async def test_lane_released_clears_hold_glyph(tmp_path: Path) -> None:
         await client.connect()
         return client
 
-    async def _solicit(prompt: str) -> str:  # pragma: no cover - no gate fires
+    async def _solicit(
+        prompt: str, _interrupt: bool = False
+    ) -> str:  # pragma: no cover - no gate fires
         raise AssertionError("no gate should fire")
 
     s = _TTYStream()
@@ -1811,7 +1825,9 @@ async def test_lane_evicted_clears_hold_glyph_like_released(tmp_path: Path) -> N
         await client.connect()
         return client
 
-    async def _solicit(prompt: str) -> str:  # pragma: no cover - no gate fires
+    async def _solicit(
+        prompt: str, _interrupt: bool = False
+    ) -> str:  # pragma: no cover - no gate fires
         raise AssertionError("no gate should fire")
 
     s = _TTYStream()
@@ -1863,7 +1879,7 @@ async def test_replayed_ordinary_event_does_not_flip_to_busy(
         await client.connect()
         return client
 
-    async def _solicit(prompt: str) -> str:
+    async def _solicit(prompt: str, _interrupt: bool = False) -> str:
         return "imp"
 
     s = _TTYStream()
@@ -1925,7 +1941,7 @@ async def test_remote_answer_tears_down_local_prompt_without_resending(
         await client.connect()
         return client
 
-    async def _solicit_a(_prompt: str) -> str:
+    async def _solicit_a(_prompt: str, _interrupt: bool = False) -> str:
         try:
             await anyio.sleep_forever()
         except anyio.get_cancelled_exc_class():
@@ -2002,7 +2018,7 @@ async def test_two_sequential_local_answers_no_spurious_self_cancellation(
 
     replies = iter(["one", "two"])
 
-    async def _solicit(_prompt: str) -> str:
+    async def _solicit(_prompt: str, _interrupt: bool = False) -> str:
         return next(replies)
 
     coord = InterruptCoordinator()
@@ -2056,7 +2072,7 @@ async def test_awaiting_user_input_resets_client_gesture_latch(
     coord._should_pause = True
     coord._first_gesture_at = 100.0
 
-    async def _solicit(prompt: str) -> str:
+    async def _solicit(prompt: str, _interrupt: bool = False) -> str:
         at_solicit["should_pause"] = coord.should_pause
         at_solicit["first_gesture_at"] = coord._first_gesture_at
         return "x"
@@ -2106,7 +2122,7 @@ async def test_local_echo_invoked_with_reply_on_local_send_path(
         await client.connect()
         return client
 
-    async def _solicit(_prompt: str) -> str:
+    async def _solicit(_prompt: str, _interrupt: bool = False) -> str:
         return "imp"
 
     coord = InterruptCoordinator()
@@ -2157,7 +2173,7 @@ async def test_local_echo_not_invoked_when_answered_elsewhere(
         await client.connect()
         return client
 
-    async def _solicit(_prompt: str) -> str:
+    async def _solicit(_prompt: str, _interrupt: bool = False) -> str:
         await anyio.sleep_forever()
         return ""  # unreachable: cancelled when the gate is answered elsewhere
 
@@ -2222,7 +2238,7 @@ async def test_local_echo_not_invoked_on_leave_command(
         await client.connect()
         return client
 
-    async def _solicit(_prompt: str) -> str:
+    async def _solicit(_prompt: str, _interrupt: bool = False) -> str:
         return command
 
     coord = InterruptCoordinator()
@@ -2273,7 +2289,7 @@ async def test_local_echo_not_invoked_on_abandon(
         await client.connect()
         return client
 
-    async def _solicit(_prompt: str) -> str:
+    async def _solicit(_prompt: str, _interrupt: bool = False) -> str:
         return "/abandon"
 
     class _Driver:
@@ -2318,7 +2334,7 @@ async def test_mid_conversation_model_sends_control_not_input(
 
     replies = iter(["/model anthropic:claude-fable-5", "done"])
 
-    async def _solicit(_prompt: str) -> str:
+    async def _solicit(_prompt: str, _interrupt: bool = False) -> str:
         return next(replies)
 
     class _Driver:
@@ -2384,7 +2400,7 @@ async def test_save_disposition_leave_sends_reason_on_the_frame(tmp_path: Path) 
         await client.connect()
         return client
 
-    async def _solicit(_prompt: str) -> str:
+    async def _solicit(_prompt: str, _interrupt: bool = False) -> str:
         raise AssertionError("no gate fired; solicit must not be called")
 
     class _Driver:
@@ -2441,7 +2457,7 @@ async def test_skill_request_is_routed_and_command_line_echoed(
         await client.connect()
         return client
 
-    async def _solicit(_prompt: str) -> SkillRequest:
+    async def _solicit(_prompt: str, _interrupt: bool = False) -> SkillRequest:
         return SkillRequest("refactor", "src/foo.py")
 
     echoed: list[str] = []
@@ -2499,7 +2515,7 @@ async def test_sandbox_off_at_gate_forwards_frame_and_daemon_broadcast_lights_ma
 
     replies = iter(["/sandbox off"])
 
-    async def _solicit(_prompt: str) -> str:
+    async def _solicit(_prompt: str, _interrupt: bool = False) -> str:
         try:
             return next(replies)
         except StopIteration:
@@ -2572,7 +2588,7 @@ async def test_client_intercepts_sandbox_marker_without_routing_to_driver(
         await client.connect()
         return client
 
-    async def _solicit(_prompt: str) -> str:
+    async def _solicit(_prompt: str, _interrupt: bool = False) -> str:
         return "ok"
 
     coord = InterruptCoordinator()
@@ -2622,7 +2638,7 @@ async def test_interrupt_pause_sends_no_disposition_frame(tmp_path: Path) -> Non
         await client.connect()
         return client
 
-    async def _solicit(_prompt: str) -> str:
+    async def _solicit(_prompt: str, _interrupt: bool = False) -> str:
         raise AssertionError("no gate fired; solicit must not be called")
 
     class _Driver:
@@ -2677,7 +2693,7 @@ async def test_interrupt_then_save_intent_still_saves(tmp_path: Path) -> None:
         await client.connect()
         return client
 
-    async def _solicit(_prompt: str) -> str:
+    async def _solicit(_prompt: str, _interrupt: bool = False) -> str:
         raise AssertionError("no gate fired; solicit must not be called")
 
     class _Driver:
@@ -2708,3 +2724,52 @@ async def test_interrupt_then_save_intent_still_saves(tmp_path: Path) -> None:
             assert actions == [("save", None)]   # explicit intent honored despite interrupt
             await server.close()
             tg.cancel_scope.cancel()
+
+
+@pytest.mark.anyio
+async def test_terminal_client_threads_interrupt_and_skips_empty_echo(
+    tmp_path: Path,
+) -> None:
+    sock = str(tmp_path / "s.sock")
+    server = SessionServer(sock, hibernate=False)
+    got: dict[str, Any] = {}
+
+    async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
+        await wait_until(lambda: server.attached_count != 0)
+        on_event({"type": "awaiting_user_input",
+                   "payload": {"steer_hint": "interrupted · x", "interrupt": True}})
+        got["reply"] = await user_chat_input_fn("interrupted · x")
+        return got["reply"]
+
+    class _Driver:
+        def on_event(self, event: dict[str, Any]) -> None: ...
+        def finish(self) -> None: ...
+
+    async def _attach(on_event: Callable[[dict[str, Any]], None]) -> SessionClient:
+        client = SessionClient(sock, "c1", "T", on_event=on_event)
+        await client.connect()
+        return client
+
+    seen_interrupt: list[bool] = []
+
+    async def _solicit(_prompt: str, interrupt: bool = False) -> str:
+        seen_interrupt.append(interrupt)
+        return ""      # empty Enter → continue
+
+    echoed: list[str] = []
+    coord = InterruptCoordinator()
+    with anyio.fail_after(30):
+        async with anyio.create_task_group() as tg:
+            await server.open()
+            tg.start_soon(server.serve, run_fn)
+
+            async def _client() -> None:
+                await run_terminal_client(
+                    attach=_attach, driver=_Driver(), coord=coord,
+                    solicit=_solicit, local_echo=echoed.append, leave_mode="new")
+
+            tg.start_soon(_client)
+
+    assert seen_interrupt == [True]      # the gate's interrupt flag reached solicit
+    assert got["reply"] == ""            # empty reply delivered to the daemon
+    assert echoed == []                  # no blank "> " line echoed for an empty reply

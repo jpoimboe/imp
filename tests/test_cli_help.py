@@ -146,6 +146,12 @@ def test_new_message_help_is_seed_alias(
     assert "supply the opening message via the positional argument or --message" in chat_out
 
 
+def test_resume_help_drops_replay_claim(capsys: pytest.CaptureFixture[str]) -> None:
+    out = " ".join(_help_for(["resume", "-h"], capsys).split())
+    assert "replaying its narrative" not in out
+    assert "continuing the workflow where it stopped" in out
+
+
 def test_bare_remote_control_prints_full_help_on_stderr(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
 ) -> None:

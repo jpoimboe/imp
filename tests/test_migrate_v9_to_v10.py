@@ -88,7 +88,7 @@ def test_load_migrates_v9_home_end_to_end(tmp_path: Path) -> None:
     qd = _seed_v9(tmp_path, "mig7", status="completed")
     Quest.load(tmp_path, "mig7")             # triggers the migration chain on load
     assert _state(qd)["status"] == "merged"
-    assert _meta(qd)["layout_version"] == 10
+    assert _meta(qd)["layout_version"] == 11
 
 
 def test_hop_is_idempotent_and_pins_layout_version(tmp_path: Path) -> None:
@@ -98,4 +98,4 @@ def test_hop_is_idempotent_and_pins_layout_version(tmp_path: Path) -> None:
     _migrate_v9_to_v10(qd)                   # second run must not corrupt or re-change
     assert _state(qd)["status"] == "merged"
     assert not list(qd.glob(".state-*")) and not list(qd.glob(".quest-*"))
-    assert LAYOUT_VERSION == 10
+    assert LAYOUT_VERSION == 11

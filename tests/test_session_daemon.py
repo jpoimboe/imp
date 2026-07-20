@@ -1429,9 +1429,42 @@ async def test_detach_at_hold_prompt_stamps_resume_target_prompt(
 
     assert result is RunResult.PAUSED
     state = State.load(quest.state_dir)
-    assert state.resume_target == "prompt"
+    assert state.resume_target == "prompt-paused"
     assert state.resume_pending == "code"    # non-ctrl-d branch arms solicit on state.step
     assert state.resume_mode == "solicit"    # detaching at the hold prompt re-solicits
+
+
+@pytest.mark.anyio
+async def test_detach_at_interrupt_steer_stamps_prompt_interrupted(
+    tmp_path: Path,
+) -> None:
+    quest = _make_change(tmp_path, "2026-06-15-dis")
+    st = State.load(quest.state_dir)
+    st.step = "code"               # the active step at detach time
+    st.save(quest.state_dir)
+
+    async def fake_run(
+        quest: Quest, *, on_event: Any, user_chat_input_fn: Any,
+        coordinator: Any, wait_for_turn_fn: Any = None,
+    ) -> RunResult:
+        # The executor arms the interrupt disposition before unwinding to the
+        # daemon hold (mid-turn Ctrl-C steer: Pause(interrupt=True) ->
+        # arm_step_resume(mode="continue")).
+        s = State.load(quest.state_dir)
+        s.arm_step_resume(mode="continue")
+        s.save(quest.state_dir)
+        await coordinator.signal_pause(reason="ctrl-c")
+        return RunResult.PAUSED
+
+    with anyio.fail_after(30):   # deadlock backstop only
+        result = await serve_quest_session(
+            quest, run_fn=fake_run, hibernate=True, first_attach_timeout=0.1)
+
+    assert result is RunResult.PAUSED
+    state = State.load(quest.state_dir)
+    assert state.resume_target == "prompt-interrupted"
+    assert state.resume_pending == "code"    # executor's arming is preserved
+    assert state.resume_mode == "continue"   # NOT overwritten with solicit
 
 
 @pytest.mark.anyio
@@ -1462,15 +1495,19 @@ async def test_detach_after_ctrl_d_midrun_stamps_resume_target_agent(
 
 
 @pytest.mark.timeout(240)  # raise the 60s cap so inner backstops can't false-fire under -n auto
+@pytest.mark.parametrize("target,prompt_attr", [
+    ("prompt-paused", "_RESUME_PROMPT"),
+    ("prompt-interrupted", "_RESUME_INTERRUPTED_PROMPT"),
+])
 @pytest.mark.anyio
 async def test_resume_prompt_target_holds_before_running_agent(
-    tmp_path: Path,
+    tmp_path: Path, target: str, prompt_attr: str,
 ) -> None:
     import imp.remote.session.daemon as daemon
 
     quest = _make_change(tmp_path, "2026-06-15-rpt")
     st = State.load(quest.state_dir)
-    st.resume_target = "prompt"
+    st.resume_target = target
     st.save(quest.state_dir)
     sock = str(session_socket_path(quest.control_root, quest.id))
 
@@ -1513,7 +1550,7 @@ async def test_resume_prompt_target_holds_before_running_agent(
         assert calls["n"] == 0
         gates = [e for e in received if e.get("type") == "awaiting_user_input"]
         prompts = [e["payload"]["steer_hint"] for e in gates]
-        assert prompts[-1] == daemon._RESUME_PROMPT
+        assert prompts[-1] == getattr(daemon, prompt_attr)
         # The hold-loop resteer prompt is self-inflicted: flag it so Telegram
         # curation silences it instead of buzzing the operator.
         assert gates[-1]["payload"]["interrupt"] is True
@@ -1555,16 +1592,17 @@ async def test_resume_agent_target_runs_straight_away(
 
 @pytest.mark.anyio
 @pytest.mark.parametrize("flag", ["non_interactive", "autonomous"])
+@pytest.mark.parametrize("target", ["prompt-interrupted", "prompt-paused"])
 async def test_resume_prompt_target_runs_agent_without_interactive_channel(
-    tmp_path: Path, flag: str,
+    tmp_path: Path, flag: str, target: str,
 ) -> None:
-    """A resume_target=='prompt' resteer hold only makes sense when a human can
+    """A prompt-* resteer hold only makes sense when a human can
     type. A headless or autonomous resume has no channel to answer the prompt, so
     honoring it would re-pause without progress — it must continue the agent
     instead (§6.15 mid-step ctrl-c resume completes the interrupted step)."""
     quest = _make_change(tmp_path, "2026-06-15-rph")
     st = State.load(quest.state_dir)
-    st.resume_target = "prompt"
+    st.resume_target = target
     st.save(quest.state_dir)
 
     seen: dict[str, bool] = {"ran": False}
@@ -1897,14 +1935,14 @@ async def test_script_step_hold_shows_rerun_copy_and_refuses_redirect(
         await wait_until(lambda: _awaiting())
         # (a) the script hold copy — re-run/detach, no redirect offer
         assert _awaiting()[0]["payload"]["steer_hint"] == (
-            "paused — press enter to re-run the gate, or detach to leave it paused")
+            "paused · enter to re-run the gate · Ctrl-D to leave")
 
         # (b) a typed message is refused with a plain acknowledgement, not dropped
         await client.send_input("go left")
         await wait_until(lambda: any(e.get("type") == "script_output" for e in received))
         refusal = next(e for e in received if e.get("type") == "script_output")
         assert refusal["payload"]["stdout"] == (
-            "a verify gate takes no redirect; press enter to re-run or detach to leave it paused")
+            "a verify gate takes no redirect; press enter to re-run or Ctrl-D to leave")
 
         # (c) stayed at the hold: re-prompted and the gate did NOT re-run
         await wait_until(lambda: len(_awaiting()) >= 2)
@@ -1964,7 +2002,7 @@ async def test_agent_step_hold_keeps_redirect_copy_and_consumes_message(
         await wait_until(lambda: _awaiting())
         # unchanged agent hold copy — offers a redirect
         assert _awaiting()[0]["payload"]["steer_hint"] == (
-            "paused — type a message to redirect, or detach to leave it paused")
+            "paused · enter to continue · type to redirect · Ctrl-D to leave")
 
         await client.send_input("go left")
         await wait_until(lambda: "r" in result)
@@ -2300,3 +2338,71 @@ def test_main_records_config_error_pause_on_wrapped_load_error(
 
     assert State.load(quest.state_dir).status == "paused"
     assert "Traceback (most recent call last):" not in capsys.readouterr().err
+
+
+def test_steer_copy_is_verbatim_and_shared() -> None:
+    from imp.engine.completion import INTERRUPT_STEER_HINT, steer_hint
+    from imp.remote.session.daemon import (
+        _RESUME_PROMPT,
+        _SCRIPT_HOLD_PROMPT,
+        _SCRIPT_REDIRECT_REFUSED,
+    )
+
+    assert steer_hint("interrupted") == (
+        "interrupted · enter to continue · type to redirect · Ctrl-D to leave")
+    assert steer_hint("paused") == (
+        "paused · enter to continue · type to redirect · Ctrl-D to leave")
+    # The two agent prompts are built from the one shared constructor.
+    assert steer_hint("interrupted") == INTERRUPT_STEER_HINT
+    assert steer_hint("paused") == _RESUME_PROMPT
+    # Script surfaces name Ctrl-D, not "detach".
+    assert _SCRIPT_HOLD_PROMPT == (
+        "paused · enter to re-run the gate · Ctrl-D to leave")
+    assert _SCRIPT_REDIRECT_REFUSED == (
+        "a verify gate takes no redirect; press enter to re-run or Ctrl-D to leave")
+
+
+@pytest.mark.anyio
+async def test_agent_step_hold_empty_reply_continues_without_interject(
+    tmp_path: Path,
+) -> None:
+    quest = _make_change(tmp_path, "2026-06-15-agt-empty")
+    _seed_step(quest, "task-lead")
+    sock = str(session_socket_path(quest.control_root, quest.id))
+    calls = {"n": 0}
+    drained: dict[str, Any] = {}
+
+    async def fake_run(
+        quest: Quest, *, on_event: Any, user_chat_input_fn: Any,
+        coordinator: Any, wait_for_turn_fn: Any = None,
+    ) -> RunResult:
+        calls["n"] += 1
+        if calls["n"] == 1:
+            await coordinator.signal_pause(reason="ctrl-c")
+            return RunResult.PAUSED
+        drained["v"] = coordinator.drain_interject()
+        return RunResult.COMPLETED
+
+    async with anyio.create_task_group() as tg:
+        result: dict[str, Any] = {}
+
+        async def _serve() -> None:
+            result["r"] = await serve_quest_session(
+                quest, run_fn=fake_run, hibernate=False)
+
+        tg.start_soon(_serve)
+        await _wait_for_socket(sock)
+        received: list[dict[str, Any]] = []
+        client = SessionClient(sock, quest.id, quest.title,
+                               on_event=received.append)
+        await client.connect()
+        tg.start_soon(client.receive_events)
+        await wait_until(
+            lambda: any(e.get("type") == "awaiting_user_input" for e in received))
+        await client.send_input("")       # empty Enter → continue
+        await wait_until(lambda: "r" in result)
+        assert result["r"] is RunResult.COMPLETED
+        assert calls["n"] == 2
+        assert drained["v"] is None        # empty was never enqueued as an interject
+        await client.aclose()
+        tg.cancel_scope.cancel()

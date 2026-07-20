@@ -39,7 +39,7 @@ async def run_terminal_client(
     attach: AttachFn,
     driver: Any,
     coord: InterruptCoordinator,
-    solicit: Callable[[str], Awaitable[str | SkillRequest]],
+    solicit: Callable[[str, bool], Awaitable[str | SkillRequest]],
     quest_id: str = "",
     control_root: Path | None = None,
     leave_state: dict[str, str] | None = None,
@@ -48,7 +48,7 @@ async def run_terminal_client(
     local_echo: Callable[[str], None] | None = None,
     on_title: Callable[[str], None] | None = None,
 ) -> None:
-    gate_send, gate_recv = anyio.create_memory_object_stream[str](
+    gate_send, gate_recv = anyio.create_memory_object_stream[tuple[str, bool]](
         max_buffer_size=math.inf)
     resolved_send, resolved_recv = anyio.create_memory_object_stream[None](
         max_buffer_size=math.inf)
@@ -79,7 +79,8 @@ async def run_terminal_client(
             # Reset the client gesture latch so the next ctrl-c is a fresh round.
             coord.end_gesture_round()
             prompt = (event.get("payload") or {}).get("steer_hint") or ""
-            gate_send.send_nowait(prompt)
+            interrupt = bool((event.get("payload") or {}).get("interrupt"))
+            gate_send.send_nowait((prompt, interrupt))
             if title is not None:
                 title.idle()
         elif etype == "quest_renamed" and not replay:
@@ -118,13 +119,13 @@ async def run_terminal_client(
 
                 async def _answer_gates() -> None:
                     try:
-                        async for prompt in gate_recv:
+                        async for prompt, interrupt in gate_recv:
                             gate_state["elsewhere"] = False
                             reply: str | SkillRequest = ""
                             with anyio.CancelScope() as scope:
                                 gate_state["scope"] = scope
                                 try:
-                                    reply = await solicit(prompt)
+                                    reply = await solicit(prompt, interrupt)
                                 finally:
                                     gate_state["scope"] = None
                             if gate_state["elsewhere"]:
@@ -191,7 +192,7 @@ async def run_terminal_client(
                             if reply.strip() == "/compact":
                                 await controls.compact()
                                 continue
-                            if local_echo is not None:
+                            if local_echo is not None and reply.strip():
                                 local_echo(reply)
                             await client.send_input(reply)
                     except EOFError:

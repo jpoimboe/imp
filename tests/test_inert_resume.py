@@ -132,9 +132,11 @@ def test_bare_turn_end_question_none_when_message_empty(tmp_path: Path) -> None:
 @pytest.mark.anyio
 async def test_make_buffered_solicit_delivers_first_line_then_delegates() -> None:
     calls: list[str] = []
+    seen_flags: list[bool] = []
 
-    async def inner(prompt: str) -> str:
+    async def inner(prompt: str, _interrupt: bool = False) -> str:
         calls.append(prompt)
+        seen_flags.append(_interrupt)
         return "from-tty"
 
     solicit = make_buffered_solicit("typed line", inner)
@@ -147,9 +149,11 @@ async def test_make_buffered_solicit_delivers_first_line_then_delegates() -> Non
     assert second == "from-tty"
     assert calls == ["prompt-2"]        # later replies delegate to inner
 
-    third = await solicit("prompt-3")
+    # A delegate-path call forwards the gate interrupt flag to inner.
+    third = await solicit("prompt-3", True)
     assert third == "from-tty"
     assert calls == ["prompt-2", "prompt-3"]   # every later reply delegates
+    assert seen_flags == [False, True]         # the interrupt flag reaches inner
 
 
 def test_render_inert_question_prefixes_turn_bullet() -> None:

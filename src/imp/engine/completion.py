@@ -43,11 +43,12 @@ def completion_instruction(schema: OutputSchema) -> str:
     )
 
 
-# Placeholder shown at the cooperative-interrupt steer gate (Ctrl-C mid-turn).
-# The bare turn-end yield keeps an empty prompt — its preceding prose IS the
-# question — but an interrupt has no such framing, so it needs to orient the
-# human: redirect inline, or detach (Ctrl-D) to leave the run paused.
-INTERRUPT_STEER_HINT = "interrupted — type to redirect, or Ctrl-D to leave it paused"
+# One agent interrupt-steer line; `tell` is the leading state word (`interrupted`/`paused`).
+def steer_hint(tell: str) -> str:
+    return f"{tell} · enter to continue · type to redirect · Ctrl-D to leave"
+
+
+INTERRUPT_STEER_HINT = steer_hint("interrupted")
 
 
 def _cancelled_exc() -> type[BaseException]:

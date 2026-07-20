@@ -615,3 +615,24 @@ def test_ask_line_with_slash_empty_line_reprompts_silently(
     line = anyio.run(ask_line_with_slash, prompt, _NullStatus(), quest)
     assert line == "real input"
     assert capsys.readouterr().out == ""
+
+
+def test_ask_line_with_slash_allow_empty_returns_blank(tmp_path: Path) -> None:
+    import functools
+
+    from imp.cli.slash import ask_line_with_slash
+    quest = _FakeChange(tmp_path)
+    prompt = _FakePrompt([""])
+    line = anyio.run(functools.partial(
+        ask_line_with_slash, prompt, _NullStatus(), quest, allow_empty=True))
+    assert line == ""
+
+
+def test_ask_line_with_slash_empty_loops_when_not_allowed(tmp_path: Path) -> None:
+    # Default (bare-turn-end): an empty line is a no-op — it re-prompts and the
+    # next non-empty line is returned.
+    from imp.cli.slash import ask_line_with_slash
+    quest = _FakeChange(tmp_path)
+    prompt = _FakePrompt(["", "real input"])
+    line = anyio.run(ask_line_with_slash, prompt, _NullStatus(), quest)
+    assert line == "real input"

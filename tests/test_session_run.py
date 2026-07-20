@@ -112,7 +112,7 @@ async def test_run_session_client_answers_gate_and_returns_completed_rc(
         def seed_pending_reply(self, _text: str) -> None: ...
         def install_startup_status(self) -> None: ...
 
-    async def _solicit(_prompt: str) -> str:
+    async def _solicit(_prompt: str, _interrupt: bool = False) -> str:
         return "imp"
 
     coord = InterruptCoordinator()
@@ -167,7 +167,7 @@ async def test_run_session_client_starts_status_tick_when_provided(
         await wait_until(lambda: server.attached_count != 0)
         return "merged"
 
-    async def _solicit(_prompt: str) -> str:  # pragma: no cover
+    async def _solicit(_prompt: str, _interrupt: bool = False) -> str:  # pragma: no cover
         return ""
 
     coord = InterruptCoordinator()
@@ -212,7 +212,7 @@ async def test_run_session_client_returns_130_when_user_interrupted(
         def seed_pending_reply(self, _text: str) -> None: ...
         def install_startup_status(self) -> None: ...
 
-    async def _solicit(_prompt: str) -> str:  # pragma: no cover
+    async def _solicit(_prompt: str, _interrupt: bool = False) -> str:  # pragma: no cover
         return ""
 
     coord = InterruptCoordinator()
@@ -280,13 +280,14 @@ async def test_make_interactive_solicit_returns_typed_line_and_threads_run_objec
     async def _fake_ask(
         prompt: object, status: object, ch: object, *,
         color: bool, width: int, coord: object, driver: object,
-        hint: str | None = None,
+        hint: str | None = None, allow_empty: bool = False,
     ) -> str:
         captured["change"] = ch
         captured["status"] = status
         captured["driver"] = driver
         captured["coord"] = coord
         captured["hint"] = hint
+        captured["allow_empty"] = allow_empty
         return "user typed this"
 
     monkeypatch.setattr("imp.cli.session_run.ask_line_with_slash", _fake_ask)
@@ -297,14 +298,19 @@ async def test_make_interactive_solicit_returns_typed_line_and_threads_run_objec
     solicit = make_interactive_solicit(
         quest, status=status, driver=driver, coord=coord)
 
-    line = await solicit("daemon wait_for_user prompt text")
-
+    # An interrupt gate (interrupt=True) threads allow_empty=True.
+    line = await solicit("daemon wait_for_user prompt text", True)
     assert line == "user typed this"
     assert captured["change"] is quest
     assert captured["status"] is status
     assert captured["driver"] is driver
     assert captured["coord"] is coord
     assert captured["hint"] == "daemon wait_for_user prompt text"
+    assert captured["allow_empty"] is True
+
+    # A bare-turn-end gate (interrupt=False) leaves allow_empty=False.
+    await solicit("bare turn end", False)
+    assert captured["allow_empty"] is False
 
 
 def test_make_interactive_solicit_seeds_prompt_history_from_record(
@@ -378,7 +384,7 @@ async def test_run_session_client_threads_resume_into_attach(
         def seed_pending_reply(self, _text: str) -> None: ...
         def install_startup_status(self) -> None: ...
 
-    async def _solicit(_prompt: str) -> str:  # pragma: no cover
+    async def _solicit(_prompt: str, _interrupt: bool = False) -> str:  # pragma: no cover
         return ""
 
     coord = InterruptCoordinator()
@@ -739,7 +745,7 @@ async def test_run_session_client_threads_autonomous_into_attach(
         def seed_pending_reply(self, _text: str) -> None: ...
         def install_startup_status(self) -> None: ...
 
-    async def _solicit(_prompt: str) -> str:  # pragma: no cover
+    async def _solicit(_prompt: str, _interrupt: bool = False) -> str:  # pragma: no cover
         return ""
 
     coord = InterruptCoordinator()
@@ -923,7 +929,7 @@ async def test_run_session_client_threads_model(
         def seed_pending_reply(self, _text: str) -> None: ...
         def install_startup_status(self) -> None: ...
 
-    async def _solicit(_prompt: str) -> str:  # pragma: no cover
+    async def _solicit(_prompt: str, _interrupt: bool = False) -> str:  # pragma: no cover
         return ""
 
     coord = InterruptCoordinator()
