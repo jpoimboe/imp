@@ -170,7 +170,7 @@ async def test_real_lone_archived_terminal_falls_through_to_resume_gone(
     # through to _resolve_id, and _load_or_rehydrate then prints the friendly
     # "already completed" message (rc 0), not a flat no-match error.
     _seed_control(tmp_path)
-    _archive_terminal(tmp_path, "done40", "completed")
+    _archive_terminal(tmp_path, "done40", "merged")
     target = await m._resolve_resume_target(
         tmp_path, "done40", non_interactive=True)
     assert target == "done40"
@@ -219,5 +219,5 @@ def test_resolve_id_still_reaches_archive(tmp_path: Path) -> None:
     # AC 16: log/show/search/edit resolve through _resolve_id, which still spans
     # the archive. This plan does not touch _resolve_id.
     _seed_control(tmp_path)
-    _archive_terminal(tmp_path, "arch40", "completed")
+    _archive_terminal(tmp_path, "arch40", "merged")
     assert m._resolve_id(tmp_path, "arch40") == "arch40"

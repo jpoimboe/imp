@@ -66,11 +66,11 @@ def test_merge_step_merges_then_complete_archives_and_removes(tmp_path: Path) ->
     from imp.engine.archive import index, record
     rec = record.read_record(archive.records_root(tmp_path), "feat")
     assert rec is not None
-    assert rec["final_state"]["status"] == "completed"
+    assert rec["final_state"]["status"] == "merged"
     conn = index.connect(archive.index_path(tmp_path))
     try:
         assert conn.execute(
-            "SELECT status FROM quests WHERE id='feat'").fetchone() == ("completed",)
+            "SELECT status FROM quests WHERE id='feat'").fetchone() == ("merged",)
         assert conn.execute(
             "SELECT last_event_ts FROM quests WHERE id='feat'"
         ).fetchone()[0] is not None
@@ -278,7 +278,7 @@ def test_complete_merged_reaps_whole_home(tmp_path: Path) -> None:
     from imp.engine.archive import record
     rec = record.read_record(archive.records_root(tmp_path), "feat")
     assert rec is not None
-    assert rec["final_state"]["status"] == "completed"
+    assert rec["final_state"]["status"] == "merged"
 
 
 def test_decisions_body_extracts_summary_section(tmp_path: Path) -> None:

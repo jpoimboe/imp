@@ -16,7 +16,7 @@ def _quest_meta() -> dict:
 
 
 def _final_state() -> dict:
-    return {"id": "alpha", "status": "completed", "step": "finalize",
+    return {"id": "alpha", "status": "merged", "step": "finalize",
             "vars": {"k": 1}, "merge_commit": "abc123"}
 
 

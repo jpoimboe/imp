@@ -40,7 +40,7 @@ def test_list_quests_excludes_terminal_changes(tmp_path: Path) -> None:
     # should not surface them (only in-flight Quests a user can still act on).
     _seed_control(tmp_path)
     live = Quest.create(tmp_path, title="Live", quest_id="live", base_branch="main")
-    for terminal in ("completed", "abandoned", "merged"):
+    for terminal in ("abandoned", "merged"):
         ch = Quest.create(
             tmp_path, title=terminal.title(), quest_id=terminal, base_branch="main")
         st = State.load(ch.state_dir)

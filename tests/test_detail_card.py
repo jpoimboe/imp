@@ -216,7 +216,7 @@ def test_detail_card_shows_merge_commit_for_live_quest(tmp_path: Path) -> None:
         "id": "2026-06-20-mrg01", "title": "Widget", "base_branch": "main",
         "created_at": "2026-06-20T11:00:00+00:00", "layout_version": LAYOUT_VERSION}))
     (cdir / "events.jsonl").write_text("")
-    State(id="2026-06-20-mrg01", status="completed", step="done",
+    State(id="2026-06-20-mrg01", status="merged", step="done",
           merge_commit="deadbeefcafe", step_attempt=0).save(cdir / "state")
     lines = main._detail_card(tmp_path, "2026-06-20-mrg01", now=_NOW, color=False)
     card = "\n".join(lines)
@@ -304,7 +304,7 @@ def test_detail_card_shows_merge_commit_for_archived_quest(tmp_path: Path) -> No
         "created_at": "2026-06-20T11:00:00+00:00", "depends_on": []}))
     state_json = tmp_path / "arc.state.json"
     state_json.write_text(json.dumps({
-        "id": "2026-06-20-arc01", "status": "completed", "step": None,
+        "id": "2026-06-20-arc01", "status": "merged", "step": None,
         "merge_commit": "beefcafe1234"}))
     archive.archive_quest(
         tmp_path, "2026-06-20-arc01", events_path=events,
@@ -360,7 +360,7 @@ def _archive_dep(control: Path, qid: str, title: str) -> None:
         "created_at": "2026-06-20T11:00:00+00:00", "depends_on": []}))
     sj = control / f"{qid}.state.json"
     sj.write_text(json.dumps({
-        "id": qid, "status": "completed", "step": None, "merge_commit": "abc123"}))
+        "id": qid, "status": "merged", "step": None, "merge_commit": "abc123"}))
     archive.archive_quest(control, qid, events_path=events,
                           quest_json_path=qj, state_json_path=sj)
 
@@ -416,7 +416,7 @@ def test_detail_card_shows_shelved_for_archived_paused_quest(tmp_path: Path) -> 
         "created_at": "2026-06-20T11:00:00+00:00", "depends_on": []}))
     state_json_m = tmp_path / "arc_m.state.json"
     state_json_m.write_text(json.dumps({
-        "id": "2026-06-20-shv01", "status": "paused", "step": None}))
+        "id": "2026-06-20-shv01", "status": "shelved", "step": None}))
     archive.archive_quest(
         tmp_path, "2026-06-20-shv01", events_path=events_m,
         quest_json_path=quest_json_m, state_json_path=state_json_m)
@@ -428,8 +428,8 @@ def test_detail_card_shows_shelved_for_archived_paused_quest(tmp_path: Path) -> 
     assert "draft" not in status_line_m
 
     # Un-materialized case: quest.json has "materialized": false.
-    # The archived card must show "shelved" from the raw final_state.status "paused"
-    # (archived homes never consult the halt-condition).
+    # The archived card must show "shelved" from the stored status "shelved"
+    # (stored == displayed for archived homes).
     events_u = tmp_path / "arc_u.jsonl"
     events_u.write_text("")
     quest_json_u = tmp_path / "arc_u.quest.json"
@@ -439,7 +439,7 @@ def test_detail_card_shows_shelved_for_archived_paused_quest(tmp_path: Path) -> 
         "materialized": False}))
     state_json_u = tmp_path / "arc_u.state.json"
     state_json_u.write_text(json.dumps({
-        "id": "2026-06-20-shv02", "status": "paused", "step": None}))
+        "id": "2026-06-20-shv02", "status": "shelved", "step": None}))
     archive.archive_quest(
         tmp_path, "2026-06-20-shv02", events_path=events_u,
         quest_json_path=quest_json_u, state_json_path=state_json_u)
@@ -460,7 +460,7 @@ def test_detail_card_shows_shelved_for_archived_paused_quest(tmp_path: Path) -> 
         "created_at": "2026-06-20T11:00:00+00:00", "depends_on": []}))
     state_json_s = tmp_path / "arc_s.state.json"
     state_json_s.write_text(json.dumps({
-        "id": "2026-06-20-shv03", "status": "paused", "step": "spec-writer"}))
+        "id": "2026-06-20-shv03", "status": "shelved", "step": "spec-writer"}))
     archive.archive_quest(
         tmp_path, "2026-06-20-shv03", events_path=events_s,
         quest_json_path=quest_json_s, state_json_path=state_json_s)
@@ -479,7 +479,7 @@ def test_quest_card_shows_merged_for_merged_quest(tmp_path: Path) -> None:
         "id": "2026-06-20-mgd01", "title": "Widget", "base_branch": "main",
         "created_at": "2026-06-20T11:00:00+00:00", "layout_version": LAYOUT_VERSION}))
     (cdir / "events.jsonl").write_text("")
-    State(id="2026-06-20-mgd01", status="completed", step="done",
+    State(id="2026-06-20-mgd01", status="merged", step="done",
           merge_commit="deadbeefcafe", step_attempt=0).save(cdir / "state")
     card = "\n".join(main._detail_card(tmp_path, "2026-06-20-mgd01", now=_NOW, color=False))
     status_line = next(ln for ln in card.splitlines() if ln.startswith("status:"))
@@ -495,11 +495,11 @@ def test_quest_card_shows_merged_for_completed_unmerged(tmp_path: Path) -> None:
         "id": "2026-06-20-cmp01", "title": "Widget", "base_branch": "main",
         "created_at": "2026-06-20T11:00:00+00:00", "layout_version": LAYOUT_VERSION}))
     (cdir / "events.jsonl").write_text("")
-    State(id="2026-06-20-cmp01", status="completed", step="done",
+    State(id="2026-06-20-cmp01", status="merged", step="done",
           step_attempt=0).save(cdir / "state")   # merge_commit defaults to None
     card = "\n".join(main._detail_card(tmp_path, "2026-06-20-cmp01", now=_NOW, color=False))
     status_line = next(ln for ln in card.splitlines() if ln.startswith("status:"))
-    assert "merged" in status_line           # completed folds to the display word merged
+    assert "merged" in status_line           # stored word merged displays as merged
     assert "completed" not in status_line
 
 
@@ -511,7 +511,7 @@ def test_quest_json_status_is_merged_for_completed(tmp_path: Path) -> None:
         "id": "2026-06-20-mgj01", "title": "Widget", "base_branch": "main",
         "created_at": "2026-06-20T11:00:00+00:00", "layout_version": LAYOUT_VERSION}))
     (cdir / "events.jsonl").write_text("")
-    State(id="2026-06-20-mgj01", status="completed", step="done",
+    State(id="2026-06-20-mgj01", status="merged", step="done",
           merge_commit="deadbeefcafe", step_attempt=0).save(cdir / "state")
     data = main._quest_json(tmp_path, "2026-06-20-mgj01")
     assert data is not None
@@ -528,7 +528,7 @@ def test_quest_card_shows_merged_for_archived_quest(tmp_path: Path) -> None:
         "created_at": "2026-06-20T11:00:00+00:00", "depends_on": []}))
     state_json = tmp_path / "arcm.state.json"
     state_json.write_text(json.dumps({
-        "id": "2026-06-20-arm01", "status": "completed", "step": None,
+        "id": "2026-06-20-arm01", "status": "merged", "step": None,
         "merge_commit": "beefcafe1234"}))
     archive.archive_quest(
         tmp_path, "2026-06-20-arm01", events_path=events,

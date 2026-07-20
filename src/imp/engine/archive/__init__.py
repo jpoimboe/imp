@@ -150,7 +150,9 @@ def _read_user_version(control_root: Path) -> int:
         conn.close()
 
 
-_DATA_VERSION = 2  # blob schema: 2 == started_at backfilled; 1 == triad; absent == pre-triad
+# blob schema versions: 3 == final_state.status realigned; 2 == started_at
+# backfilled; 1 == triad; absent == pre-triad
+_DATA_VERSION = 3
 
 
 def _read_data_version(control_root: Path) -> int:
@@ -193,9 +195,11 @@ def _migrate_archive_blobs(control_root: Path) -> None:
     """One-time pass: rewrite each archived pre-triad events blob to the triad schema,
     repoint each record's events_hash to the new blob; also backfill `started_at` into
     each record's `final_state` when absent (first user_message ts → else first event
-    ts → else created_at). Rebuilds the index once so its derived columns match, then
-    stamps the data-version marker. A triad blob is left untouched (migrate_events is a
-    no-op on it); old blobs orphan harmlessly (nothing GCs blobs)."""
+    ts → else created_at). Also remap each record's final_state.status to the realigned
+    vocabulary (completed->merged, paused->shelved). Rebuilds the index once so its
+    derived columns match, then stamps the data-version marker. A triad blob is left
+    untouched (migrate_events is a no-op on it); old blobs orphan harmlessly (nothing
+    GCs blobs)."""
     store = LocalBlobStore(blobs_root(control_root))
     records_dir = records_root(control_root)
     cids = list(record.list_record_ids(records_dir))
@@ -217,6 +221,13 @@ def _migrate_archive_blobs(control_root: Path) -> None:
             if final_state.get("started_at") is None:
                 final_state["started_at"] = derive_started_at(
                     migrated, rec.get("created_at", ""))
+                rec["final_state"] = final_state
+                dirty = True
+            old_status = final_state.get("status")
+            remapped = ({"completed": "merged", "paused": "shelved"}.get(old_status)
+                        if isinstance(old_status, str) else None)
+            if remapped is not None:
+                final_state["status"] = remapped
                 rec["final_state"] = final_state
                 dirty = True
             if dirty:

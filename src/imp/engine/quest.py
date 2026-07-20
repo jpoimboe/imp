@@ -21,7 +21,7 @@ from imp.engine.seed import seed_workflow_start
 from imp.engine.state import JsonlEventLog, State, classify_pause_halt, parse_events_jsonl
 from imp.engine.types import SourceLoc
 
-LAYOUT_VERSION = 9  # bump in the SAME commit as any breaking quest-home layout/schema change
+LAYOUT_VERSION = 10  # bump in the SAME commit as any breaking quest-home layout/schema change
 
 
 def _write_quest_json(meta_path: Path, meta: dict[str, Any]) -> None:
@@ -256,6 +256,34 @@ def _migrate_v8_to_v9(quest_dir: Path) -> None:
     _write_quest_json(meta_path, meta)
 
 
+def _migrate_v9_to_v10(quest_dir: Path) -> None:
+    """v9->v10: the persisted Status vocabulary was realigned to the display words.
+    Rewrite a live home's state.json: completed->merged; saved->paused (defensive,
+    expected count zero); a paused failure carrying halt_condition="error"->error with
+    the halt cleared; any residual halt_condition="error"->None (the halt-condition no
+    longer carries error). The state rewrite precedes the version stamp so a partial
+    failure re-runs. A home without state.json (un-materialized seed) advances only the
+    version stamp. The archive migrates separately via _DATA_VERSION 2->3."""
+    state_path = quest_dir / "state" / "state.json"
+    if state_path.exists():
+        data = json.loads(state_path.read_text())
+        status = data.get("status")
+        if status == "completed":
+            data["status"] = "merged"
+        elif status == "saved":
+            data["status"] = "paused"
+        elif status == "paused" and data.get("halt_condition") == "error":
+            data["status"] = "error"
+            data["halt_condition"] = None
+        if data.get("halt_condition") == "error":
+            data["halt_condition"] = None
+        _rewrite_state_json(state_path, data)
+    meta_path = quest_dir / "quest.json"
+    meta = json.loads(meta_path.read_text())
+    meta["layout_version"] = 10
+    _write_quest_json(meta_path, meta)
+
+
 _MIGRATIONS: dict[tuple[int, int], Callable[[Path], None]] = {
     (1, 2): _migrate_v1_to_v2,
     (2, 3): _migrate_v2_to_v3,
@@ -265,6 +293,7 @@ _MIGRATIONS: dict[tuple[int, int], Callable[[Path], None]] = {
     (6, 7): _migrate_v6_to_v7,
     (7, 8): _migrate_v7_to_v8,
     (8, 9): _migrate_v8_to_v9,
+    (9, 10): _migrate_v9_to_v10,
 }
 
 

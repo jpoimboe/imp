@@ -122,7 +122,7 @@ async def test_auth_retry_recovers_through_backoff_loop(
     out = await run_quest(quest)
 
     assert out is RunResult.COMPLETED
-    assert State.load(quest.state_dir).status == "completed"
+    assert State.load(quest.state_dir).status == "merged"
     assert calls["n"] == 2
 
     log_types = [e["type"] for e in quest.event_log().read()]
@@ -170,7 +170,7 @@ async def test_concurrency_400_retry_recovers_through_backoff_loop(
     out = await run_quest(quest)
 
     assert out is RunResult.COMPLETED
-    assert State.load(quest.state_dir).status == "completed"
+    assert State.load(quest.state_dir).status == "merged"
     assert calls["n"] == 2
 
     log_types = [e["type"] for e in quest.event_log().read()]

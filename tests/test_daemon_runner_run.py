@@ -338,7 +338,7 @@ async def test_run_daemon_reaps_archived_homes_at_startup(tmp_path: Path) -> Non
         "id": cid, "title": cid, "base_branch": "main",
         "created_at": "2026-06-01T00:00:00+00:00"}))
     (home / "state" / "state.json").write_text(json.dumps({
-        "id": cid, "status": "completed", "step": None}))
+        "id": cid, "status": "merged", "step": None}))
     (home / "events.jsonl").write_text(
         '{"id":"e0","parent_id":null,"agent_id":null,'
         '"timestamp":"2026-06-01T00:00:01+00:00","type":"quest_created",'

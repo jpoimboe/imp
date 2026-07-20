@@ -23,7 +23,7 @@ def _setup_change(control: Path) -> tuple[Path, Path, Path]:
         "created_at": "2026-06-01T00:00:00+00:00", "depends_on": ["beta"]}))
     state_json = control / "state.json"
     state_json.write_text(json.dumps({
-        "id": "alpha", "status": "completed", "step": "finalize",
+        "id": "alpha", "status": "merged", "step": "finalize",
         "merge_commit": "abc123"}))
     return events, quest_json, state_json
 
@@ -45,14 +45,14 @@ def test_archive_quest_writes_blob_record_and_index(tmp_path: Path) -> None:
     assert rec is not None
     assert rec["events_hash"] == expected_hash
     assert rec["base"] == "main"
-    assert rec["final_state"]["status"] == "completed"
+    assert rec["final_state"]["status"] == "merged"
 
     # Index has the change row + one row per event line.
     conn = index.connect(archive.index_path(tmp_path))
     try:
         assert conn.execute(
             "SELECT status, events_hash FROM quests WHERE id='alpha'"
-        ).fetchone() == ("completed", expected_hash)
+        ).fetchone() == ("merged", expected_hash)
     finally:
         conn.close()
 

@@ -20,7 +20,7 @@ def test_row_for_id_from_archive(tmp_path: Path) -> None:
         "created_at": "2026-06-01T00:00:00+00:00", "depends_on": []}))
     sj = tmp_path / "s.json"
     sj.write_text(json.dumps({
-        "id": "2026-06-01-xyz999", "status": "completed", "step": "merge"}))
+        "id": "2026-06-01-xyz999", "status": "merged", "step": "merge"}))
     archive.archive_quest(
         tmp_path, "2026-06-01-xyz999", events_path=events,
         quest_json_path=cj, state_json_path=sj)

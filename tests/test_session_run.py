@@ -44,7 +44,7 @@ def _make_change(tmp_path: Path, quest_id: str) -> Quest:
 def test_infer_session_result_completed_when_merged_no_worktree(tmp_path: Path) -> None:
     # A merged change prunes the worktree but its state survives at the root home.
     quest = _make_change(tmp_path, "2026-06-15-merged")
-    State(id=quest.id, step=None, step_attempt=0, status="completed").save(
+    State(id=quest.id, step=None, step_attempt=0, status="merged").save(
         quest.state_dir)
     assert infer_session_result(quest) is RunResult.COMPLETED
 
@@ -60,7 +60,7 @@ def test_infer_session_result_paused_for_parked_draft_no_worktree(tmp_path: Path
 def test_infer_session_result_completed_when_status_completed(tmp_path: Path) -> None:
     quest = _make_change(tmp_path, "2026-06-15-done")
     (tmp_path / ".imp" / "worktrees" / quest.id).mkdir(parents=True)
-    State(id=quest.id, step=None, step_attempt=0, status="completed").save(
+    State(id=quest.id, step=None, step_attempt=0, status="merged").save(
         quest.state_dir)
     assert infer_session_result(quest) is RunResult.COMPLETED
 
@@ -88,7 +88,7 @@ async def test_run_session_client_answers_gate_and_returns_completed_rc(
     quest = _make_change(tmp_path, "2026-06-15-run")
     # The on-disk terminal state the client reads once the daemon exits.
     (tmp_path / ".imp" / "worktrees" / quest.id).mkdir(parents=True)
-    State(id=quest.id, step=None, step_attempt=0, status="completed").save(
+    State(id=quest.id, step=None, step_attempt=0, status="merged").save(
         quest.state_dir)
 
     # No real subprocess: in-process server stands in; spawn is a no-op.
@@ -104,7 +104,7 @@ async def test_run_session_client_answers_gate_and_returns_completed_rc(
         await wait_until(lambda: server.attached_count != 0)
         on_event({"type": "awaiting_user_input", "payload": {"prompt": "name?"}})
         answered.append(await user_chat_input_fn("name?"))
-        return "completed"
+        return "merged"
 
     class _Driver:
         def on_event(self, _event: dict[str, Any]) -> None: ...
@@ -141,7 +141,7 @@ async def test_run_session_client_starts_status_tick_when_provided(
 ) -> None:
     quest = _make_change(tmp_path, "2026-06-15-tick")
     (tmp_path / ".imp" / "worktrees" / quest.id).mkdir(parents=True)
-    State(id=quest.id, step=None, step_attempt=0, status="completed").save(
+    State(id=quest.id, step=None, step_attempt=0, status="merged").save(
         quest.state_dir)
 
     monkeypatch.setattr(
@@ -165,7 +165,7 @@ async def test_run_session_client_starts_status_tick_when_provided(
 
     async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
         await wait_until(lambda: server.attached_count != 0)
-        return "completed"
+        return "merged"
 
     async def _solicit(_prompt: str) -> str:  # pragma: no cover
         return ""
@@ -347,7 +347,7 @@ async def test_run_session_client_threads_resume_into_attach(
     quest = _make_change(tmp_path, "2026-06-15-resume")
     # On-disk terminal state read after the (stubbed) daemon "exits".
     (tmp_path / ".imp" / "worktrees" / quest.id).mkdir(parents=True)
-    State(id=quest.id, step=None, step_attempt=0, status="completed").save(
+    State(id=quest.id, step=None, step_attempt=0, status="merged").save(
         quest.state_dir)
 
     captured: dict[str, object] = {}
@@ -445,7 +445,7 @@ async def test_daemon_startup_timeout_is_not_rc3_when_change_already_completed(
 
     quest = _make_change(tmp_path, "fast-feat")
     # State is completed but no worktree: daemon finished before the client connected.
-    State(id=quest.id, step=None, step_attempt=0, status="completed").save(
+    State(id=quest.id, step=None, step_attempt=0, status="merged").save(
         quest.state_dir)
 
     async def _boom(**_kwargs: Any) -> None:
@@ -533,7 +533,7 @@ async def test_run_session_client_passes_terminal_title_from_quest_title(
 
     quest = _make_change(tmp_path, "2026-06-15-title")   # _make_change sets title="T"
     (tmp_path / ".imp" / "worktrees" / quest.id).mkdir(parents=True)
-    State(id=quest.id, step=None, step_attempt=0, status="completed").save(
+    State(id=quest.id, step=None, step_attempt=0, status="merged").save(
         quest.state_dir)
 
     captured: dict[str, object] = {}
@@ -562,7 +562,7 @@ async def test_run_session_client_passes_control_root(
 ) -> None:
     quest = _make_change(tmp_path, "2026-06-15-cr")
     (tmp_path / ".imp" / "worktrees" / quest.id).mkdir(parents=True)
-    State(id=quest.id, step=None, step_attempt=0, status="completed").save(
+    State(id=quest.id, step=None, step_attempt=0, status="merged").save(
         quest.state_dir)
 
     captured: dict[str, object] = {}
@@ -631,7 +631,7 @@ async def test_run_session_client_threads_provided_leave_state(
 ) -> None:
     quest = _make_change(tmp_path, "2026-06-15-ls")
     (tmp_path / ".imp" / "worktrees" / quest.id).mkdir(parents=True)
-    State(id=quest.id, step=None, step_attempt=0, status="completed").save(
+    State(id=quest.id, step=None, step_attempt=0, status="merged").save(
         quest.state_dir)
 
     async def _capture(**kwargs: object) -> None:
@@ -665,7 +665,7 @@ async def test_run_session_client_reuses_passed_in_title(
 ) -> None:
     # A completed change with no worktree → infer_session_result COMPLETED, rc 0.
     quest = _make_change(tmp_path, "2026-06-15-reuse")
-    State(id=quest.id, step=None, step_attempt=0, status="completed").save(
+    State(id=quest.id, step=None, step_attempt=0, status="merged").save(
         quest.state_dir)
 
     # If run_session_client builds its own title despite one being passed, this fires.
@@ -709,7 +709,7 @@ async def test_run_session_client_threads_autonomous_into_attach(
 ) -> None:
     quest = _make_change(tmp_path, "2026-06-15-aut")
     (tmp_path / ".imp" / "worktrees" / quest.id).mkdir(parents=True)
-    State(id=quest.id, step=None, step_attempt=0, status="completed").save(
+    State(id=quest.id, step=None, step_attempt=0, status="merged").save(
         quest.state_dir)
 
     captured: dict[str, object] = {}
@@ -820,7 +820,7 @@ def test_infer_session_result_completed_from_archive_when_home_reaped(tmp_path: 
         "id": quest_id, "title": "Reaped", "base_branch": "main",
         "created_at": "2026-06-01T00:00:00+00:00", "depends_on": []}))
     state_json = tmp_path / f"{quest_id}-state.json"
-    state_json.write_text(json.dumps({"id": quest_id, "status": "completed", "step": None}))
+    state_json.write_text(json.dumps({"id": quest_id, "status": "merged", "step": None}))
     archive.archive_quest(
         tmp_path, quest_id, events_path=events_file,
         quest_json_path=quest_json, state_json_path=state_json)
@@ -867,7 +867,7 @@ async def test_run_session_client_installs_startup_status(
 ) -> None:
     quest = _make_change(tmp_path, "2026-06-15-startup")
     (tmp_path / ".imp" / "worktrees" / quest.id).mkdir(parents=True)
-    State(id=quest.id, step=None, step_attempt=0, status="completed").save(
+    State(id=quest.id, step=None, step_attempt=0, status="merged").save(
         quest.state_dir)
 
     async def _noop(**_kwargs: object) -> None:
@@ -897,7 +897,7 @@ async def test_run_session_client_threads_model(
 ) -> None:
     quest = _make_change(tmp_path, "2026-06-15-model")
     (tmp_path / ".imp" / "worktrees" / quest.id).mkdir(parents=True)
-    State(id=quest.id, step=None, step_attempt=0, status="completed").save(
+    State(id=quest.id, step=None, step_attempt=0, status="merged").save(
         quest.state_dir)
 
     captured: dict[str, object] = {}

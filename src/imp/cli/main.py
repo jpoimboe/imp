@@ -2211,7 +2211,7 @@ class _EventTail:
         return events
 
 
-_FOLLOW_TERMINAL = frozenset({"completed", "abandoned", "saved"})
+_FOLLOW_TERMINAL = frozenset({"merged", "abandoned", "shelved"})
 
 
 def _follow_paused_status(quest_id: str) -> Callable[[int], list[str]]:
@@ -2577,7 +2577,7 @@ def _load_or_rehydrate(control: Path, quest_id: str) -> Quest | int:
 
 # Spec §10: in-flight statuses; completed quests live in the archive.
 _INFLIGHT = ("running", "waiting", "error", "new", "paused", "merge_blocked")
-RESUMABLE = ("new", "paused", "error", "merge_blocked", "saved")
+RESUMABLE = ("new", "paused", "error", "merge_blocked", "shelved")
 
 
 def resolve_display_status(
@@ -2588,17 +2588,11 @@ def resolve_display_status(
     Lock-liveness governs staleness (like the `lock` file): a live process holds
     quest_dir/lock with its pid inside. Live + a `waiting` halt-condition reads
     `waiting` (parked at a human gate); live otherwise reads `running`. Not live,
-    an `error` halt-condition reads `error`; a stored `completed` folds to the
-    disposition word `merged`; every other stored word passes through (an at-rest
-    `paused`/`new`/`merge_blocked`, or a not-live gate-yield that collapses to its
-    stored `paused`). The resolved word is what the membership gates and the
-    STATUS_COLORS key consume, so `merge_blocked` stays underscored here."""
+    every stored word passes through unchanged (stored == displayed). The resolved
+    word is what the membership gates and the STATUS_COLORS key consume, so
+    `merge_blocked` stays underscored here."""
     if lock_is_live(quest_dir / "lock"):
         return "waiting" if halt_condition == "waiting" else "running"
-    if halt_condition == "error":
-        return "error"
-    if status == "completed":
-        return "merged"
     return status
 
 
@@ -2677,8 +2671,8 @@ def _row_for_id(control: Path, quest_id: str) -> _Row | None:
     row = _status_row(quest_id, state_json, quest_json, last)
     if row is None:
         return None
-    # Archived homes derive their word from the stored status via the disposition
-    # mapping and never consult the halt-condition (readers stay single-version).
+    # Archived homes pass the stored status through unchanged and never consult the
+    # halt-condition (readers stay single-version).
     halt_condition = json.loads(state_json).get("halt_condition") if live_home else None
     status = resolve_display_status(row[1], cdir, halt_condition=halt_condition)
     return (row[0], status, *row[2:])
@@ -2713,19 +2707,19 @@ def _completed_rows(control: Path, live_ids: set[str] | None = None) -> list[_Ro
     live = {r[0] for r in _status_rows(control)} if live_ids is None else live_ids
     rows: list[_Row] = []
     for r in make_store(control).completed_rows():
-        if r.quest_id in live or r.status in _INFLIGHT:
-            continue
+        if r.quest_id in live or r.status in _INFLIGHT or r.status == "shelved":
+            continue  # shelved rows come only from _shelved_rows (never double-listed)
         rows.append((r.quest_id, r.status, r.step, r.last, r.title, r.created, None, None, None))
     return rows
 
 
 def _shelved_rows(control: Path, live_ids: set[str] | None = None) -> list[_Row]:
-    """Shelved conversations — archived final status `paused` with no live home —
+    """Shelved conversations — archived final status `shelved` with no live home —
     for the `--all` history block. Mirrors _completed_rows' live-id dedup."""
     live = {r[0] for r in _status_rows(control)} if live_ids is None else live_ids
     return [(r.quest_id, r.status, r.step, r.last, r.title, r.created, None, None, None)
             for r in make_store(control).completed_rows()
-            if r.status == "paused" and r.quest_id not in live]
+            if r.status == "shelved" and r.quest_id not in live]
 
 
 def _sort_rows_newest_first(rows: list[_Row]) -> list[_Row]:
@@ -3184,18 +3178,15 @@ def _selected_list_dispositions(args: argparse.Namespace) -> set[str]:
     return picked
 
 
-# Display-only disposition word for the overview history block.
-_DISPOSITION = {"completed": "merged", "abandoned": "abandoned", "paused": "shelved"}
-
-
 def _history_rows(control: Path, *, show_all: bool,
                   live_ids: set[str] | None = None) -> list[_Row]:
-    """History-block rows: completed/abandoned, plus shelved (paused) rows under --all."""
-    rows = [r for r in _completed_rows(control, live_ids) if r[1] in _DISPOSITION]
+    """History-block rows: merged/abandoned, plus shelved rows under --all."""
+    rows = [r for r in _completed_rows(control, live_ids)
+            if r[1] in {"merged", "abandoned", "shelved"}]
     if show_all:
         rows += _shelved_rows(control, live_ids)
     else:
-        rows = [r for r in rows if r[1] == "completed"]
+        rows = [r for r in rows if r[1] == "merged"]
     return _sort_rows_newest_first(rows)
 
 
@@ -3220,7 +3211,7 @@ def _overview_body(inflight: list[_Row], backlog_rows: list[_Row],
         specs.append((r[1], quest_row.compose_status_label(r[2], r[6], None),
                       _name_text(r)))
     for r in history:
-        specs.append((_DISPOSITION[r[1]], None, _name_text(r)))
+        specs.append((r[1], None, _name_text(r)))
 
     status_width, name_width = quest_row.overview_widths(specs, name_cap=name_cap)
 
@@ -3246,7 +3237,7 @@ def _overview_body(inflight: list[_Row], backlog_rows: list[_Row],
         lines.append(pal.ansi(history_label, "dim", enabled=color))
         for r in history:
             lines.append(quest_row.format_quest_line(
-                quest_id=r[0], title=r[4], status=_DISPOSITION[r[1]], step="-",
+                quest_id=r[0], title=r[4], status=r[1], step="-",
                 last_iso=r[3], now=now, color=color, name_width=name_width,
                 status_width=status_width, intent=intents.get(r[0])))
     return lines
@@ -3275,10 +3266,6 @@ def _overview_lines(control: Path, *, show_all: bool, now: datetime,
 
 _NO_FILTER_MATCH_MESSAGE = "No quests match that filter."
 
-# Disposition token -> archived final-state status.
-_ARCHIVE_STATUS = {"merged": "completed", "abandoned": "abandoned",
-                   "shelved": "paused"}
-
 
 def _row_since(r: _Row, cutoff: datetime | None) -> bool:
     """True when the row's last-activity timestamp is at or after the cutoff."""
@@ -3303,8 +3290,7 @@ def _filtered_overview_lines(control: Path, *, dispositions: set[str],
                 if "active" in dispositions else [])
     backlog_rows = (_sort_rows_newest_first(_backlog_rows(control, scanned))
                     if "backlog" in dispositions else [])
-    wanted = {_ARCHIVE_STATUS[d]
-              for d in dispositions & {"merged", "abandoned", "shelved"}}
+    wanted = dispositions & {"merged", "abandoned", "shelved"}
     history_all = _completed_rows(control, live_ids) + _shelved_rows(control, live_ids)
     history = _sort_rows_newest_first([r for r in history_all if r[1] in wanted])
 
@@ -3342,17 +3328,17 @@ def _selected_search(args: argparse.Namespace) -> tuple[bool, bool, set[str]]:
     """(search_active, search_backlog, archive_statuses) from the search flags."""
     statuses: set[str] = set()
     if args.merged:
-        statuses.add("completed")
+        statuses.add("merged")
     if args.abandoned:
         statuses.add("abandoned")
     if args.shelved:
-        statuses.add("paused")
+        statuses.add("shelved")
     if args.archived:
-        statuses |= {"completed", "abandoned", "paused"}
+        statuses |= {"merged", "abandoned", "shelved"}
     if args.merged_after is not None:
-        statuses.add("completed")
+        statuses.add("merged")
     if not (args.active or args.backlog or statuses):
-        return True, True, {"completed", "abandoned", "paused"}
+        return True, True, {"merged", "abandoned", "shelved"}
     return args.active, args.backlog, statuses
 
 
@@ -3400,7 +3386,7 @@ def _search_archived(control: Path, query: str, statuses: set[str],
             control, query):
         if status not in statuses:
             continue
-        if (status == "completed" and merged_after is not None
+        if (status == "merged" and merged_after is not None
                 and not _merged_after(control, cid, merged_after)):
             continue
         hits.append(SearchHit(cid, title, "archive", content, last))

@@ -196,7 +196,7 @@ def test_ctrl_c_during_bash_pauses_then_resume_completes(tmp_path: Path) -> None
             proc.wait()
 
     # Resume by slug; the minimal workflow never goes live, so it completes as a
-    # draft and state.json reads "completed" from the change home (no journal needed).
+    # draft and state.json reads "merged" from the change home (no journal needed).
     resume = subprocess.run(
         [sys.executable, "-m", "imp", "resume", slug],
         cwd=tmp_path, env=env,
@@ -207,7 +207,7 @@ def test_ctrl_c_during_bash_pauses_then_resume_completes(tmp_path: Path) -> None
     )
 
     final_state = json.loads(state_path.read_text())
-    assert final_state["status"] == "completed"
+    assert final_state["status"] == "merged"
 
 
 @pytest.mark.live("openai")
@@ -366,5 +366,5 @@ def test_ctrl_c_during_bash_pauses_then_resume_completes_claude_code(
         f"resume failed rc={resume.returncode}; stderr={resume.stderr}"
     )
 
-    final_status = _wait_for_status(state_path, "completed", 30.0)
-    assert final_status == "completed", final_status
+    final_status = _wait_for_status(state_path, "merged", 30.0)
+    assert final_status == "merged", final_status

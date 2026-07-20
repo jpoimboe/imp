@@ -44,7 +44,7 @@ def test_readiness_resolves_from_archive_index(tmp_path: Path) -> None:
         "id": "dep1", "title": "Dep", "base_branch": "main",
         "created_at": "2026-06-01T00:00:00+00:00", "depends_on": []}))
     sj = tmp_path / "s.json"
-    sj.write_text(_json.dumps({"id": "dep1", "status": "completed", "step": None}))
+    sj.write_text(_json.dumps({"id": "dep1", "status": "merged", "step": None}))
     archive.archive_quest(
         tmp_path, "dep1", events_path=events,
         quest_json_path=cj, state_json_path=sj)

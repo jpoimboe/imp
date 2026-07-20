@@ -252,7 +252,7 @@ async def test_run_quest_completes_minimal_workflow(tmp_path: Path) -> None:
     assert result is RunResult.COMPLETED
 
     state = State.load(quest.state_dir)
-    assert state.status == "completed"
+    assert state.status == "merged"
     assert state.step is None
 
 
@@ -497,7 +497,7 @@ async def test_backward_goto_increments_loop_count_and_trips_max_loops(
     assert result is RunResult.PAUSED
 
     state = State.load(quest.state_dir)
-    assert state.status == "paused"
+    assert state.status == "error"
     # max_loops: 2 trips on the 3rd backward goto; the pause clears the counter
     # so a subsequent resume re-enters with a fresh budget.
     assert state.loop_counts.get("reviewer", 0) == 0
@@ -575,7 +575,7 @@ async def test_max_loops_pause_resets_counter_for_fresh_resume(tmp_path: Path) -
     assert len(reviewer_calls) == 3
 
     state = State.load(quest.state_dir)
-    assert state.status == "paused"
+    assert state.status == "error"
     assert state.loop_counts.get("reviewer", 0) == 0    # counter cleared on pause
     assert state.step == "reviewer"                     # cursor parked on the tripping step
 
@@ -884,7 +884,7 @@ async def test_fatal_tool_error_pauses_without_retry(tmp_path: Path) -> None:
     events: list[dict] = []
     result = await run_quest(quest, on_event=events.append)
     assert result is RunResult.PAUSED
-    assert State.load(quest.state_dir).status == "paused"
+    assert State.load(quest.state_dir).status == "error"
     assert runner.run_count == 1
 
     fatal_events = [e for e in events
@@ -939,7 +939,7 @@ async def test_fatal_error_pauses_without_burning_retries(tmp_path: Path) -> Non
     result = await run_quest(quest, on_event=lambda _e: None)
     assert result is RunResult.PAUSED
     assert runner.run_count == 1
-    assert State.load(quest.state_dir).status == "paused"
+    assert State.load(quest.state_dir).status == "error"
 
 
 class _RateLimitThenSuccessRunner:
@@ -1868,7 +1868,7 @@ async def test_script_pause_emits_script_blocked_event(tmp_path: Path) -> None:
 
     assert result is RunResult.PAUSED
     state = State.load(quest.state_dir)
-    assert state.status == "paused"
+    assert state.status == "error"
 
     evs = [e for e in quest.event_log().read() if e.get("type") == "script_blocked"]
     assert evs, "expected at least one script_blocked event"
@@ -1907,7 +1907,7 @@ async def test_script_pause_emits_workflow_paused_with_script_blocked_reason(
     result = await run_quest(quest, on_event=lambda _e: None)
 
     assert result is RunResult.PAUSED
-    assert State.load(quest.state_dir).status == "paused"
+    assert State.load(quest.state_dir).status == "error"
     paused = [e for e in quest.event_log().read()
               if e.get("type") == "workflow_paused"]
     assert paused, "expected a workflow_paused event"
@@ -2019,7 +2019,7 @@ async def test_none_step_resolves_to_complete(tmp_path: Path) -> None:
     result = await run_quest(quest, on_event=lambda _e: None)
 
     assert result is RunResult.COMPLETED
-    assert State.load(quest.state_dir).status == "completed"
+    assert State.load(quest.state_dir).status == "merged"
 
 
 @pytest.mark.anyio
@@ -2036,7 +2036,7 @@ async def test_unknown_step_pauses_without_silent_merge(tmp_path: Path) -> None:
 
     assert result is RunResult.PAUSED
     reloaded = State.load(quest.state_dir)
-    assert reloaded.status == "paused"
+    assert reloaded.status == "error"
     assert reloaded.step == "ghost-step"          # cursor untouched, not nulled
     events = list(quest.event_log().read())  # read() is a single-use generator
     paused = [e for e in events if e.get("type") == "workflow_paused"]

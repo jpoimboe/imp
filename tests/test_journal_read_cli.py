@@ -44,7 +44,7 @@ def _seed_marker_phase(control: Path, slug: str) -> None:
         }) + "\n")
 
 
-def _complete_and_archive(control: Path, slug: str, status: str = "completed") -> None:
+def _complete_and_archive(control: Path, slug: str, status: str = "merged") -> None:
     """Flip the Quest to <status>, archive its runtime snapshot, then remove the
     worktree — the exact post-merge state imp log/status/show read from."""
     ch = Quest.load(control, slug)
@@ -117,7 +117,7 @@ def test_log_no_slug_prints_help_exit_2(
     assert captured.out == ""
 
 
-def test_status_shows_completed_section_from_archive(
+def test_status_shows_merged_section_from_archive(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
@@ -177,9 +177,9 @@ def test_sort_rows_newest_first() -> None:
     import imp.cli.main as m
     # (id, status, step, last_iso, title, created_at)
     rows = [
-        ("old", "completed", "-", "2024-01-01T00:00:00+00:00", "Old", "2024-01-01T00:00:00+00:00"),
-        ("new", "completed", "-", "2026-01-01T00:00:00+00:00", "New", "2026-01-01T00:00:00+00:00"),
-        ("mid", "completed", "-", "2025-01-01T00:00:00+00:00", "Mid", "2025-01-01T00:00:00+00:00"),
+        ("old", "merged", "-", "2024-01-01T00:00:00+00:00", "Old", "2024-01-01T00:00:00+00:00"),
+        ("new", "merged", "-", "2026-01-01T00:00:00+00:00", "New", "2026-01-01T00:00:00+00:00"),
+        ("mid", "merged", "-", "2025-01-01T00:00:00+00:00", "Mid", "2025-01-01T00:00:00+00:00"),
     ]
     assert [r[0] for r in m._sort_rows_newest_first(rows)] == ["new", "mid", "old"]
 
@@ -271,7 +271,7 @@ def test_status_no_ansi_when_NO_COLOR_set(
     assert "merged" in out
 
 
-def test_status_all_history_completed_not_dim(
+def test_status_all_history_merged_not_dim(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
@@ -598,7 +598,7 @@ def test_log_reads_events_from_archive_blob(tmp_path: Path, monkeypatch) -> None
         "id": "logtest", "title": "Log Test", "base_branch": "main",
         "created_at": "2026-06-01T00:00:00+00:00", "depends_on": []}))
     sj = tmp_path / "s.json"
-    sj.write_text(json.dumps({"id": "logtest", "status": "completed", "step": None}))
+    sj.write_text(json.dumps({"id": "logtest", "status": "merged", "step": None}))
     archive.archive_quest(
         tmp_path, "logtest", events_path=events,
         quest_json_path=cj, state_json_path=sj)
@@ -727,7 +727,7 @@ def test_status_all_lists_archived(tmp_path, monkeypatch) -> None:
         "id": "arch01", "title": "Archived One", "base_branch": "main",
         "created_at": "2026-06-02T00:00:00+00:00", "depends_on": []}))
     sj = tmp_path / "s.json"
-    sj.write_text(json.dumps({"id": "arch01", "status": "completed", "step": None}))
+    sj.write_text(json.dumps({"id": "arch01", "status": "merged", "step": None}))
     archive.archive_quest(
         tmp_path, "arch01", events_path=events,
         quest_json_path=cj, state_json_path=sj)

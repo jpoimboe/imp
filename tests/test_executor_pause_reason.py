@@ -156,7 +156,7 @@ async def test_fatal_error_records_reason_and_kind_on_workflow_paused(
     assert paused[0]["payload"]["kind"] == "TerminatedError"
 
     state = State.load(quest.state_dir)
-    assert state.status == "paused"
+    assert state.status == "error"
 
 
 @pytest.mark.anyio

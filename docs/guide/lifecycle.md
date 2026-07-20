@@ -13,23 +13,26 @@ prompts, partials, scripts, and skills that drove it.
 
 ## Statuses
 
-A quest carries one at-rest status: `new`, `paused`, `saved`, `completed`,
-`merge_blocked`, `abandoned`. The word `imp list` shows is **derived** from that
+A quest carries one at-rest status: `new`, `paused`, `merge_blocked`, `merged`,
+`shelved`, `abandoned`, `error`. The word `imp list` shows is **derived** from that
 at-rest status plus two runtime facts — whether a live process holds the quest's
 lock, and a durable **halt-condition** recorded on `state.json`:
 
 - `running` — a live process holds the lock and is working.
 - `waiting` — a live process is parked at a human input gate (halt-condition
   `waiting`).
-- `error` — not live, the last halt was a failure (halt-condition `error`).
+- `error` — a not-live failure halt (stored `error`).
+- `merged` — merged into its base branch (stored `merged`).
+- `shelved` — an archived, resumable conversation (stored `shelved`).
 - `merge blocked` — the merge gate needs a decision (stored `merge_blocked`).
 - `paused` — not live, a clean stop (a yield or interrupt).
 - `new` — created, never started.
 
-`running`, `waiting`, and `error` are derived and never stored. There is no
-`draft` status word: an un-materialized quest shows its real derived status
-(`new`/`paused`), with its `(threshold)` step marking that it is still being
-scoped.
+Only `running` and `waiting` are derived and never stored; every other word is
+stored verbatim and shown as-is (only `merge_blocked` renders with a space).
+There is no `draft` status word: an
+un-materialized quest shows its real derived status (`new`/`paused`), with its
+`(threshold)` step marking that it is still being scoped.
 
 ## Zones: active list, backlog, archive
 
@@ -41,7 +44,7 @@ decide it: whether it has been **materialized**, and its **origin**.
   backlog.
 - **backlog** — un-materialized backlog items (`origin: backlog`) parked for
   later; pick one up when you are ready.
-- **archive** — finished (`completed`/`abandoned`) and shelved conversations,
+- **archive** — finished (`merged`/`abandoned`) and shelved conversations,
   reachable by search.
 
 ## Materialize / go-live

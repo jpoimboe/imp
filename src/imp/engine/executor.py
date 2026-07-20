@@ -511,8 +511,8 @@ async def run_quest(
                 # The cursor names a step absent from the loaded workflow
                 # (corruption, or a refresh that dropped this step). Never
                 # silent-merge: pause with an error instead of calling _complete.
-                state.status = "paused"
-                state.halt_condition = "error"
+                state.status = "error"
+                state.halt_condition = None
                 state.save(quest.state_dir)
                 _emit_paused_event(log, "unknown_step", step=state.step)
                 return RunResult.PAUSED
@@ -596,11 +596,13 @@ async def run_quest(
                 reason = action.reason or "interrupt"
                 interrupt_reason = (coordinator.pause_reason
                                     if coordinator.should_pause else None)
-                state.status = (
-                    "merge_blocked" if reason == "merge_blocked" else "paused")
-                state.halt_condition = (
-                    classify_pause_halt(reason, interrupt_reason)
-                    if state.status == "paused" else None)
+                if reason == "merge_blocked":
+                    state.status = "merge_blocked"
+                elif classify_pause_halt(reason, interrupt_reason) == "error":
+                    state.status = "error"
+                else:
+                    state.status = "paused"
+                state.halt_condition = None
                 state.unsandboxed = coordinator.unsandboxed
                 state.save(quest.state_dir)
                 _emit_paused_event(
@@ -642,8 +644,8 @@ async def run_quest(
                         if n > step.max_loops and not coordinator.should_pause:
                             _evict_if_holding(quest, state, log)
                             state.loop_counts.pop(step.name, None)   # reset-on-pause: resume fresh
-                            state.status = "paused"
-                            state.halt_condition = "error"
+                            state.status = "error"
+                            state.halt_condition = None
                             state.save(quest.state_dir)
                             _emit_paused_event(log, "max_loops", step=step.name)
                             return RunResult.PAUSED
@@ -755,8 +757,8 @@ async def run_quest(
             )
             _emit_paused_event(log, "internal_error", kind=kind)
             state.arm_step_resume(mode="solicit")
-            state.status = "paused"
-            state.halt_condition = "error"
+            state.status = "error"
+            state.halt_condition = None
             state.unsandboxed = coordinator.unsandboxed
             state.save(quest.state_dir)
         except Exception:
@@ -803,7 +805,7 @@ def _complete(quest: Quest, state: State, log: EventLog) -> RunResult:
       base ref durably advanced): finalize — mark completed, archive the final
       snapshot. Ordering is crash-safe: status is written + saved BEFORE archive,
       so a crash mid-finalize leaves the merge durable. Recovery: a crash AFTER
-      status='completed' is already done; a crash in the window between
+      status='merged' is already done; a crash in the window between
       _route_merge_and_exit_worktree recording merge_commit and this status write
       leaves status='running' — re-running re-enters the merge step, which
       short-circuits on state.merge_commit (idempotent, no second merge) and
@@ -821,13 +823,13 @@ def _complete(quest: Quest, state: State, log: EventLog) -> RunResult:
     from imp.engine import merge_queue
     if not state.merge_commit:
         merge_queue.pop_and_wake(quest.control_root, quest.id, quest.base_branch)
-        state.status = "completed"
+        state.status = "merged"
         state.save(quest.state_dir)
         _emit(log, "workflow_completed", {})
         shutil.rmtree(quest.quest_dir / "steps", ignore_errors=True)
         return RunResult.COMPLETED
 
-    state.status = "completed"
+    state.status = "merged"
     state.save(quest.state_dir)
     _emit(log, "quest_merged",
           {"base": quest.base_branch, "commit": state.merge_commit})

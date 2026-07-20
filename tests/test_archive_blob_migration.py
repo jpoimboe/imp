@@ -257,5 +257,5 @@ def test_backfill_runs_for_already_triad_record_past_the_guards(tmp_path: Path) 
     assert _final_state_of(tmp_path, "sa002")["started_at"] == "2026-06-02T03:00:00+00:00"
 
 
-def test_data_version_bumped_to_two(tmp_path: Path) -> None:
-    assert archive._DATA_VERSION == 2
+def test_data_version_bumped_to_three(tmp_path: Path) -> None:
+    assert archive._DATA_VERSION == 3
