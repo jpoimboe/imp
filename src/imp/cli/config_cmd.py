@@ -26,11 +26,17 @@ def _label(src_file: Path) -> str:
     return _elide(src_file)
 
 
-def _emit_section(out: TextIO, rows: list[tuple[str, str, str]]) -> None:
+def _annotation(label: str, *, color: bool) -> str:
+    """The `← <source>` provenance annotation, dimmed when color is on."""
+    text = f"← {label}"
+    return pal.ansi(text, "dim") if color else text
+
+
+def _emit_section(out: TextIO, rows: list[tuple[str, str, str]], *, color: bool = False) -> None:
     """Emit rows with the value column sized to the section's widest value so arrows align."""
     width = max([24, *(len(value) for _, value, _ in rows)])
     for key, value, label in rows:
-        out.write(f"  {key:<28} {value:<{width}} ← {label}\n")
+        out.write(f"  {key:<28} {value:<{width}} {_annotation(label, color=color)}\n")
 
 
 def render_config(eff: EffectiveConfig, out: TextIO, *, color: bool = False,
@@ -46,7 +52,7 @@ def render_config(eff: EffectiveConfig, out: TextIO, *, color: bool = False,
             src = prov.get(("tiers", tier, vendor), FLOOR_SRC)
             tier_rows.append(
                 (f"{tier} {vendor}", cfg.tiers[tier][vendor], _label(src.file)))
-    _emit_section(out, tier_rows)
+    _emit_section(out, tier_rows, color=color)
     out.write("\nsettings:\n")
     setting_rows: list[tuple[str, str, str]] = []
     for key, val in (
@@ -66,7 +72,7 @@ def render_config(eff: EffectiveConfig, out: TextIO, *, color: bool = False,
         leaf_src = prov.get((key,))
         label = _label(leaf_src.file) if leaf_src is not None else "default"
         setting_rows.append((key, val, label))
-    _emit_section(out, setting_rows)
+    _emit_section(out, setting_rows, color=color)
 
     out.write("\nprovider keys (local check):\n")
     defaults = iter_provider_defaults()

@@ -333,3 +333,49 @@ def test_provenance_path_is_elided_to_fit_80_cols(
     assert "…/imp/config.yaml" in theme_line   # elided to trailing dir/file
     assert str(tmp_path) not in theme_line      # full absolute path is gone
     assert len(theme_line) <= 80                 # fits an 80-col terminal, no wrap
+
+
+def test_config_dims_tiers_block_provenance_when_color(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    eff = _eff(tmp_path, monkeypatch)   # providers: [openai]
+    out = io.StringIO()
+    render_config(eff, out, color=True, show_all=True)
+    tier_line = next(ln for ln in out.getvalue().splitlines()
+                     if ln.lstrip().startswith("high openai"))
+    assert "\x1b[2m←" in tier_line       # provenance arrow+label dimmed
+    assert tier_line.rstrip().endswith("\x1b[0m")   # dim closed with a reset
+
+
+def test_config_dims_settings_block_provenance_when_color(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    eff = _eff(tmp_path, monkeypatch)   # theme: light is a user-set leaf
+    out = io.StringIO()
+    render_config(eff, out, color=True)
+    theme_line = next(ln for ln in out.getvalue().splitlines()
+                      if ln.lstrip().startswith("theme "))
+    assert "\x1b[2m←" in theme_line      # settings-block provenance dimmed
+
+
+def test_config_leaves_marks_and_values_plain_when_color(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    eff = _eff(tmp_path, monkeypatch)
+    out = io.StringIO()
+    render_config(eff, out, color=True)
+    lines = out.getvalue().splitlines()
+    mark_line = next(ln for ln in lines if "✓" in ln or "✗" in ln)
+    assert "\x1b[" not in mark_line      # provider-key marks carry no SGR
+    theme_line = next(ln for ln in lines if ln.lstrip().startswith("theme "))
+    value_part = theme_line.split("\x1b[2m")[0]   # everything left of the dim annotation
+    assert "\x1b[" not in value_part     # key + value stay plain
+
+
+def test_config_no_color_is_byte_clean(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    eff = _eff(tmp_path, monkeypatch)
+    out = io.StringIO()
+    render_config(eff, out, color=False, show_all=True)
+    assert "\x1b[" not in out.getvalue()   # piped/NO_COLOR output stays byte-clean
