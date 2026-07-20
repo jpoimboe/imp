@@ -436,3 +436,40 @@ def test_hook_does_not_add_timeout_to_ordinary_top_level_file():
     item = _StubItem("tests/test_ordinary.py")
     pytest_collection_modifyitems(_StubConfig(None), [item])
     assert [d for d in item.added if d.mark.name == "timeout"] == []
+
+
+def test_e2e_poll_timeout_default_is_60():
+    from tests.impty.e2e_support import E2E_POLL_TIMEOUT
+    assert E2E_POLL_TIMEOUT == 60.0
+
+
+def test_e2e_poll_timeout_overridable_via_env():
+    env = {**os.environ, "IMP_E2E_POLL_TIMEOUT": "90"}
+    env["PYTHONPATH"] = (
+        str(_REPO_ROOT / "src") + os.pathsep + env.get("PYTHONPATH", "")
+    )
+    proc = subprocess.run(
+        [sys.executable, "-c",
+         "from tests.impty.e2e_support import E2E_POLL_TIMEOUT; "
+         "print(E2E_POLL_TIMEOUT)"],
+        cwd=_REPO_ROOT, env=env, capture_output=True, text=True, timeout=60,
+    )
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert proc.stdout.strip() == "90.0"
+
+
+def test_shared_poll_helpers_defined_once_in_e2e_support():
+    import tests.impty.e2e_support as sup
+    import tests.test_relay_hibernation_live as live
+    assert live._poll is sup._poll
+    assert live._flock_free is sup._flock_free
+    assert live._event_types is sup._event_types
+
+
+def test_e2e_support_event_types_parses_types_in_order(tmp_path):
+    from tests.impty.e2e_support import _event_types
+    ev = tmp_path / "events.jsonl"
+    ev.write_text(
+        '{"type": "a"}\n\n{"type": "b"}\nnot-json\n{"no_type": 1}\n{"type": "c"}\n'
+    )
+    assert _event_types(ev) == ["a", "b", "c"]

@@ -25,10 +25,10 @@ from pathlib import Path
 
 import pytest
 
-from imp.engine.state import LockHeld, ProjectLock
 from impty import TerminalSession
 from tests._live import _await_change_dir, sandbox_sleep_precondition_failed
 from tests.conftest import _init_repo
+from tests.impty.e2e_support import _event_types, _flock_free, _poll
 
 _WORKTREE_SRC = str(Path(__file__).parent.parent / "src")
 _CC_STARTUP_GRACE = 2.0  # seconds to allow the CC subprocess to start
@@ -96,37 +96,6 @@ def _wait_for_bash_tool_call(events_path: Path, timeout: float) -> bool:
                     return True
         time.sleep(0.2)
     return False
-
-
-def _flock_free(lock_path: Path) -> bool:
-    try:
-        with ProjectLock(lock_path).acquire(timeout=0):
-            return True
-    except LockHeld:
-        return False
-
-
-def _poll(predicate, timeout: float) -> bool:
-    deadline = time.time() + timeout
-    while time.time() < deadline:
-        if predicate():
-            return True
-        time.sleep(0.2)
-    return False
-
-
-def _event_types(events_path: Path) -> list[str]:
-    if not events_path.exists():
-        return []
-    out: list[str] = []
-    for line in events_path.read_text().splitlines():
-        if not line.strip():
-            continue
-        try:
-            out.append(json.loads(line)["type"])
-        except (json.JSONDecodeError, KeyError):
-            continue
-    return out
 
 
 def _interrupt_gate_engaged(events_path: Path) -> bool:

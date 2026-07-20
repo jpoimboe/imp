@@ -5,11 +5,47 @@ import os
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 from typing import Any
 
+from imp.engine.state import LockHeld, ProjectLock
+
 # Outer subprocess cap, just under the 240s pytest-timeout ceiling: connect 240 >= 235 < 240.
 E2E_SUBPROCESS_TIMEOUT = 235
+# Shared inner-poll ceiling; a loaded host lifts every adopting test via IMP_E2E_POLL_TIMEOUT.
+E2E_POLL_TIMEOUT = float(os.environ.get("IMP_E2E_POLL_TIMEOUT", "60"))
+
+
+def _poll(predicate, timeout: float) -> bool:
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if predicate():
+            return True
+        time.sleep(0.2)
+    return False
+
+
+def _flock_free(lock_path: Path) -> bool:
+    try:
+        with ProjectLock(lock_path).acquire(timeout=0):
+            return True
+    except LockHeld:
+        return False
+
+
+def _event_types(events_path: Path) -> list[str]:
+    if not events_path.exists():
+        return []
+    out: list[str] = []
+    for line in events_path.read_text().splitlines():
+        if not line.strip():
+            continue
+        try:
+            out.append(json.loads(line)["type"])
+        except (json.JSONDecodeError, KeyError):
+            continue
+    return out
 
 
 def can_pty() -> bool:
