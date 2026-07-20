@@ -78,7 +78,12 @@ def test_no_orphan_agent_files() -> None:
     referenced = {s.file.stem for p in wf.phases for s in p.steps
                   if s.kind == "agent" and s.file}
     referenced |= {name for a in wf.agents.values() for name in a.subagents}
+    # Agents invoked programmatically outside the workflow graph (e.g. imp init's
+    # detached pythonpath detector, run via run_detached_agent) are legitimately
+    # unreferenced by any step or subagent — exclude them from the orphan check.
+    OUT_OF_WORKFLOW = {"init-pythonpath"}
     on_disk = {p.stem for p in (bundled_workflow_dir("imp") / "agents").glob("*.md")}
+    on_disk -= OUT_OF_WORKFLOW
     assert on_disk == referenced, (
         f"orphan agent files: {on_disk - referenced}; "
         f"missing files: {referenced - on_disk}"

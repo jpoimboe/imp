@@ -46,6 +46,7 @@ def render_config(eff: EffectiveConfig, out: TextIO, *, color: bool = False,
         ("providers", ", ".join(cfg.providers) or "(none)"),
         ("theme", cfg.theme),
         ("editing_mode", cfg.editing_mode),
+        ("pythonpath", ", ".join(cfg.pythonpath) or "(unset)"),
         ("test_cmd_fast", "(disabled)" if cfg.test_cmd_fast == ""
          else (cfg.test_cmd_fast or "(unset)")),
         ("test_cmd_slow", "(disabled)" if cfg.test_cmd_slow == ""

@@ -10,7 +10,11 @@ Committed config+workflows live under imp/ (tracked by git).
 Runtime state (quests, locks, etc.) lives under .imp/ (gitignored wholesale).
 
 Tier→model bindings come from the provider-code floor now, so init asks no
-model question — it just records the enabled providers + detected theme.
+model question — it just records the enabled providers + detected theme. For a
+Python-packaging project it also runs a one-shot sandboxed agent to detect the
+import root, so a fresh init there needs a working provider plus an OS sandbox
+(or an accepted unsandboxed offer) and stops with an actionable message if
+either is missing; non-Python projects skip that gate entirely.
 """
 
 from __future__ import annotations
@@ -22,10 +26,14 @@ from typing import Any
 
 import yaml
 
+from imp.assets import resolve_workflow_dir
 from imp.cli.pythonpath_detect import (
-    detect_pythonpath,
+    DetectedRoots,
+    DetectionFailed,
+    detect_pythonpath_via_agent,
     format_pythonpath_yaml,
-    resolve_pythonpath_choice,
+    is_python_packaging_project,
+    resolve_detection_provider,
 )
 from imp.cli.verify_detect import (
     detect_test_command,
@@ -33,7 +41,7 @@ from imp.cli.verify_detect import (
     resolve_test_cmd_choice,
 )
 from imp.engine import worktree
-from imp.engine.sandbox import sandbox_available
+from imp.engine.sandbox import SandboxConfig, sandbox_available
 from imp.remote.drivers import REGISTRY
 
 _DEFAULT_WORKFLOW = "imp"
@@ -241,6 +249,41 @@ def _build_user_config(providers: list[str]) -> dict[str, Any]:
     }
 
 
+_CREDENTIAL_HINTS: dict[str, str] = {
+    "claude_code": "install the Claude CLI and run `claude login`",
+    "anthropic": "set ANTHROPIC_API_KEY in your environment",
+    "openai": "set OPENAI_API_KEY in your environment",
+    "codex": "install the Codex CLI and run `codex login`",
+}
+
+
+def _read_user_config(user_path: Path) -> dict[str, Any] | None:
+    if not user_path.exists():
+        return None
+    try:
+        return yaml.safe_load(user_path.read_text()) or {}
+    except yaml.YAMLError:
+        return {}
+
+
+def _bootstrap_user_config(
+    user_path: Path, providers: list[str], theme: str, *, allow_unsandboxed: bool,
+) -> None:
+    """Write the machine user config once; no-op if it exists, never clobbering a hand-edit."""
+    if user_path.exists():
+        return
+    user_path.parent.mkdir(parents=True, exist_ok=True)
+    sandbox_block = (
+        "sandbox:\n  allow_unsandboxed: true\n" if allow_unsandboxed else "")
+    user_path.write_text(
+        yaml.safe_dump(_build_user_config(providers),
+                       sort_keys=False, default_flow_style=False)
+        + f"theme: {theme}  # dark | light | ansi\n"
+        + "editing_mode: emacs  # emacs | vi\n"
+        + sandbox_block
+        + _remote_hint())
+
+
 def _facts_hint() -> str:
     return (
         "\n# Project facts: human-authored values any agent prompt can read via\n"
@@ -394,7 +437,6 @@ def run_init(
     picker_fn: Callable[[list[str]], list[str]] | None = None,
     detect_theme_fn: Callable[[], str] | None = None,
     detect_verify_fn: Callable[[Path], str | None] | None = None,
-    detect_pythonpath_fn: Callable[[Path], list[str] | None] | None = None,
 ) -> None:
     from imp.providers.effective import user_config_path
 
@@ -407,48 +449,127 @@ def run_init(
 
     output_fn(f"Setting up imp in {project_root}")
 
-    available = list(_PROVIDER_DISPLAY_ORDER)
-    pick = picker_fn or _interactive_provider_picker
-    providers = pick(available)
-    if not providers:
-        # The interactive picker enforces ≥1; a custom picker_fn might not.
-        raise ValueError("at least one provider must be selected")
-    output_fn(f"Enabled: {', '.join(providers)}")
+    user_path = user_config_path()
+    wrote_user_config = not user_path.exists()
 
-    # Confirm the conventional env-var name per HTTP provider (names, never
-    # secrets). The floor owns env names now, so there is nothing to *collect* —
-    # just confirm, no input round-trip (finding M3). `input_fn` stays in the
-    # signature for callers/tests but is no longer used for key names.
+    # --- providers + theme: skip the picker when the user config already
+    #     declares providers (a re-run must not re-ask) ---
+    existing_cfg = _read_user_config(user_path)
+    if existing_cfg and existing_cfg.get("providers"):
+        providers = [str(p) for p in existing_cfg["providers"]]
+        theme = str(existing_cfg.get("theme", "ansi"))
+        picked_this_run = False
+    else:
+        pick = picker_fn or _interactive_provider_picker
+        providers = pick(list(_PROVIDER_DISPLAY_ORDER))
+        if not providers:
+            # The interactive picker enforces ≥1; a custom picker_fn might not.
+            raise ValueError("at least one provider must be selected")
+        theme = (detect_theme_fn or _default_detect_theme)()
+        picked_this_run = True
+    output_fn(f"Enabled: {', '.join(providers)}")
     for prov in providers:
         if prov in _PROVIDERS_WITHOUT_ENV:
             continue
         output_fn(f"  {prov} → {prov.upper()}_API_KEY (set this env var)")
-
-    # Detect the terminal theme now (interactive, TTY available) and persist it,
-    # so the runtime never has to re-query the terminal. Falls back to 'ansi'.
-    detect = detect_theme_fn or _default_detect_theme
-    theme = detect()
-    if theme != "ansi":
+    # Theme message after Enabled/env, matching the pre-reorder output order.
+    if picked_this_run and theme != "ansi":
         output_fn(f"Detected a {theme} terminal — colors tuned to match.")
 
-    # --- sandbox posture (spec B.7): probe bwrap, surface if unavailable ---
-    if not sandbox_available():
-        output_fn("")
-        output_fn("WARNING: bubblewrap (bwrap) not found — imp can't OS-sandbox the agent's")
-        output_fn("   shell. Install it for a real filesystem boundary:")
-        output_fn("     Fedora:  sudo dnf install bubblewrap")
-        output_fn("     Debian:  sudo apt install bubblewrap")
-        output_fn("   Until then, set `sandbox.allow_unsandboxed: true` in your")
-        output_fn(f"   user config ({user_config_path()}) to run without a boundary,")
-        output_fn("   or runs will hard-fail. (You can also re-run init after installing.)")
-        output_fn("")
+    # --- readiness gate + agent detection (fresh init on a Python-packaging
+    #     project only); otherwise keep today's behavior ---
+    detected_roots: list[str] | None = None   # None/[] => write the teaching hint
+    run_gate = (not already_initialized
+                and is_python_packaging_project(project_root))
+
+    if not run_gate:
+        if not sandbox_available():
+            output_fn("")
+            output_fn("WARNING: bubblewrap (bwrap) not found — imp can't OS-sandbox the agent's")
+            output_fn("   shell. Install it for a real filesystem boundary:")
+            output_fn("     Fedora:  sudo dnf install bubblewrap")
+            output_fn("     Debian:  sudo apt install bubblewrap")
+            output_fn("   Until then, set `sandbox.allow_unsandboxed: true` in your")
+            output_fn(f"   user config ({user_path}) to run without a boundary,")
+            output_fn("   or runs will hard-fail. (You can also re-run init after installing.)")
+            output_fn("")
+    else:
+        # 1. Credential check (offline) over the picked providers.
+        resolved = resolve_detection_provider(providers)
+        if resolved is None:
+            if wrote_user_config:
+                _bootstrap_user_config(
+                    user_path, providers, theme, allow_unsandboxed=False)
+            width = max(len(p) for p in providers)
+            output_fn(
+                "imp needs a working model provider to finish setting up this project.")
+            output_fn("None of the providers you enabled has a usable credential yet:")
+            for prov in providers:
+                hint = _CREDENTIAL_HINTS.get(prov, "set up its credential")
+                output_fn(f"  {prov:<{width}} → {hint}")
+            output_fn("Set one up, then re-run `imp init`.")
+            return
+        provider_name, model_name = resolved
+
+        # 2. Sandbox check.
+        allow_unsandboxed = False
+        if not sandbox_available():
+            answer = input_fn(
+                "bubblewrap (bwrap) isn't installed, so imp can't OS-sandbox the "
+                "commands its agents run.\n"
+                "Run imp without that sandbox for now? Agent shell commands won't be "
+                "isolated from your machine. [y/N] "
+            ).strip().lower()
+            if answer in ("y", "yes"):
+                allow_unsandboxed = True
+                output_fn(
+                    "Running without an OS sandbox. Install bubblewrap later and "
+                    "remove sandbox.allow_unsandboxed to re-enable it.")
+            else:
+                if wrote_user_config:
+                    _bootstrap_user_config(
+                        user_path, providers, theme, allow_unsandboxed=False)
+                output_fn(
+                    "Install bubblewrap for a real filesystem boundary, then "
+                    "re-run `imp init`:")
+                output_fn("  Fedora:  sudo dnf install bubblewrap")
+                output_fn("  Debian:  sudo apt install bubblewrap")
+                output_fn(
+                    f"Or set `sandbox.allow_unsandboxed: true` in {user_path} to "
+                    "proceed without one.")
+                return
+
+        # 3. Persist the user config before running the agent (so a re-run never
+        #    re-asks the questions already answered).
+        if wrote_user_config:
+            _bootstrap_user_config(
+                user_path, providers, theme, allow_unsandboxed=allow_unsandboxed)
+
+        # 4. Run the agent detection.
+        output_fn(
+            "Inspecting your project's packaging to find its Python import root "
+            f"(via {provider_name})…")
+        workflow_dir = resolve_workflow_dir(project_root, _DEFAULT_WORKFLOW)
+        outcome = detect_pythonpath_via_agent(
+            project_root, workflow_dir, provider_name, model_name,
+            SandboxConfig(allow_unsandboxed=allow_unsandboxed))
+        if isinstance(outcome, DetectionFailed):
+            if outcome.kind == "credential":
+                output_fn(
+                    f"imp reached {provider_name} but the credential was rejected.")
+                hint = _CREDENTIAL_HINTS.get(provider_name, "check its credential")
+                output_fn(f"{hint[0].upper()}{hint[1:]}, then re-run `imp init`.")
+            else:
+                output_fn(
+                    "imp couldn't finish detecting your Python import root "
+                    f"({outcome.detail}).")
+                output_fn("Re-run `imp init` once your environment is ready.")
+            return
+        assert isinstance(outcome, DetectedRoots)
+        detected_roots = outcome.roots
 
     # --- committed project file (idempotent: never overwrite an existing one) ---
     if not already_initialized:
-        # Establish the mandatory integration branch first: origin/HEAD when it
-        # resolves, the current/unborn branch on fresh setup, else a prompt.
-        # Resolving before mkdir keeps the non-TTY failure path from creating any
-        # imp/ artifact.
         default_base = _resolve_init_base(
             project_root, git_created=git_created, input_fn=input_fn)
         output_fn(f"Integration branch: {default_base}")
@@ -470,37 +591,30 @@ def run_init(
                 "# test_cmd_slow_timeout.\n"
                 + format_test_cmd_fast_yaml(chosen)
             )
-        detect_pp = detect_pythonpath_fn or detect_pythonpath
-        suggested_pp = detect_pp(project_root)
-        chosen_pp = (
-            resolve_pythonpath_choice(suggested_pp, input_fn, output_fn)
-            if suggested_pp is not None else None
-        )
-        if chosen_pp:
+        if detected_roots:
             pythonpath_block = (
                 "\n# Worktree-relative import roots prepended to gate/agent\n"
                 "# subprocess PYTHONPATH, so an editable-installed package resolves\n"
                 "# to the worktree under test, not the stale main checkout.\n"
-                + format_pythonpath_yaml(chosen_pp)
+                + format_pythonpath_yaml(detected_roots)
             )
+            output_fn(f"Set pythonpath: {detected_roots} in imp/project.yaml.")
+            output_fn(
+                "Review your configuration with `imp config`; edit "
+                "imp/project.yaml to change it.")
         else:
             pythonpath_block = _pythonpath_hint()
+            if run_gate:
+                output_fn(
+                    "No installable Python package detected — leaving pythonpath "
+                    "unset.")
         project_file.write_text(
             body + test_block + pythonpath_block + _facts_hint())
         _write_memory_scaffold(imp_dir)
 
-    # --- bootstrap user config (only if the machine has none) ---
-    user_path = user_config_path()
-    wrote_user_config = not user_path.exists()
+    # --- bootstrap user config (only if the machine still has none) ---
     if wrote_user_config:
-        user_path.parent.mkdir(parents=True, exist_ok=True)
-        user_path.write_text(
-            yaml.safe_dump(
-                _build_user_config(providers),
-                sort_keys=False, default_flow_style=False)
-            + f"theme: {theme}  # dark | light | ansi\n"
-            + "editing_mode: emacs  # emacs | vi\n"
-            + _remote_hint())
+        _bootstrap_user_config(user_path, providers, theme, allow_unsandboxed=False)
 
     # --- ensure .imp/ is gitignored (control-root state lives there) ---
     project_gi = project_root / ".gitignore"
