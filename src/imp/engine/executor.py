@@ -1079,7 +1079,9 @@ async def _route_script(
     abort = _abort if step.interruptible else None
     output_path = None
     if step.output_schema is not None:
-        fd, tmp = tempfile.mkstemp(prefix="imp-output-", suffix=".json")
+        quest.tmp_dir.mkdir(parents=True, exist_ok=True)
+        fd, tmp = tempfile.mkstemp(prefix="imp-output-", suffix=".json",
+                                   dir=quest.tmp_dir)
         os.close(fd)
         output_path = Path(tmp)
     slot_fd: int | None = None
