@@ -373,3 +373,14 @@ def test_under_lock_recheck_skips_when_peer_refreshed(
     monkeypatch.setattr(ctr, "_request_refresh", _no_http)
     out = ctr.refresh_canonical_token(NOW, env=_env(tmp_path))
     assert out.outcome == ctr.SKIPPED_FRESH
+
+
+def test_unresolvable_home_is_not_applicable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def _boom() -> Path:
+        raise RuntimeError("Could not determine home directory.")
+
+    monkeypatch.setattr(ctr.Path, "home", staticmethod(_boom))
+    out = ctr.refresh_canonical_token(NOW, env={})
+    assert out.outcome == ctr.NOT_APPLICABLE

@@ -16,6 +16,7 @@ import secrets
 import shutil
 import subprocess
 import tempfile
+import time
 from collections.abc import AsyncGenerator, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -66,6 +67,10 @@ from imp.providers.codex_mcp import (
     ServerHandle,
     start_impty_server,
     start_server,
+)
+from imp.providers.codex_token_refresh import (
+    FAILED_INVALID_GRANT,
+    refresh_canonical_token,
 )
 
 _logger = logging.getLogger(__name__)
@@ -182,6 +187,19 @@ def restore_to_snapshot(cwd: Path, snap: EntrySnapshot) -> None:
 
 # ── CodexAgentRunner ──────────────────────────────────────────────────────────
 
+
+def _pre_spawn_token_refresh(elog: Any, aid: str) -> None:
+    """Refresh the canonical codex token before seed_auth; raise AuthError on a dead token."""
+    outcome = refresh_canonical_token(int(time.time() * 1000))
+    payload: dict[str, Any] = {"outcome": outcome.outcome}
+    if outcome.expires_at is not None:
+        payload["expires_at"] = outcome.expires_at
+    elog.append(agent_id=aid, type="token_refresh", payload=payload)
+    if outcome.outcome == FAILED_INVALID_GRANT:
+        raise perr.AuthError(
+            "codex: OAuth refresh token is dead; re-authentication required")
+
+
 class CodexAgentRunner:
     """Drives `codex` via `openai_codex_sdk` (run() filled in by later tasks)."""
 
@@ -196,7 +214,7 @@ class CodexAgentRunner:
         self._cancel = False
         self._ctx: ToolContext | None = None
         self._abort_controller: Any = None
-        # Test seam: overrides the canonical ~/.codex/auth.json path. Read by
+        # Test seam: overrides the canonical codex auth.json path. Read by
         # `_canonical_auth_path()`; declared here so the attribute the tests set
         # is part of the class contract.
         self._canonical_auth_override: Path | None = None
@@ -379,6 +397,9 @@ class CodexAgentRunner:
                 impty_bearer_env_var=(
                     "IMP_IMPTY_TOKEN" if impty_handle is not None else None),
             )
+            if auth_mode == "chatgpt":
+                # Refresh canonical auth.json before seed_auth; a dead token raises AuthError.
+                _pre_spawn_token_refresh(elog, aid)
             seed_auth(mode=auth_mode, canonical_path=canonical_auth,
                       codex_home=codex_home, env=os.environ)
 
@@ -428,16 +449,19 @@ class CodexAgentRunner:
                 teardown_codex_home(
                     codex_home=codex_home, mode=auth_mode,
                     canonical_path=canonical_auth,
-                    lock_path=canonical_auth.parent / ".imp-auth.lock",
                 )
 
     def _canonical_auth_path(self) -> Path:
-        """The user's real `~/.codex/auth.json`. Test seam: a runner attribute
-        can override this for the auth fixture tests."""
+        """The canonical codex `auth.json` — honors $CODEX_HOME (fallback
+        ~/.codex), matching codex_token_refresh._canonical_dir so the pre-spawn
+        refresh freshens exactly the file seed_auth copies from. Test seam: a
+        runner attribute overrides this for the auth fixture tests."""
         override = getattr(self, "_canonical_auth_override", None)
         if override is not None:
             return Path(override)
-        return Path.home() / ".codex" / "auth.json"
+        codex_home = os.environ.get("CODEX_HOME")
+        base = Path(codex_home) if codex_home else Path.home() / ".codex"
+        return base / "auth.json"
 
     def _build_client(
         self, *, codex_home: Path, bearer_token: str,

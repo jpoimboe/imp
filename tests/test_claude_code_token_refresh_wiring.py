@@ -137,3 +137,32 @@ async def test_native_resume_refreshes_without_materializing(
     events = [e for e in log.read() if e["type"] == "token_refresh"]
     assert len(events) == 1
     assert events[0]["payload"] == {"outcome": "skipped_fresh"}
+
+
+@pytest.mark.anyio
+async def test_dead_token_raises_auth_error_without_materializing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    (tmp_path / "art").mkdir()
+
+    def _dead(now_ms: int, *, env: Any = None) -> ctr.RefreshOutcome:
+        return ctr.RefreshOutcome(ctr.FAILED_INVALID_GRANT)
+
+    def _fake_materialize() -> Path:
+        raise AssertionError("dead token must short-circuit before config copy")
+
+    monkeypatch.setattr(claude_code, "refresh_canonical_token", _dead)
+    monkeypatch.setattr(
+        claude_code, "materialize_fresh_config_dir", _fake_materialize)
+
+    log = InMemoryEventLog()
+    runner = ClaudeCodeAgentRunner(
+        model_name="claude-sonnet-4-5", client_factory=_complete_step_client)
+    events = [ev async for ev in runner.run(_inv(tmp_path, log))]
+
+    err = events[-1]
+    assert err["type"] == "error"
+    assert err["payload"]["category"] == "auth"
+    # Config dir was never materialized — no claude -p spawn was built.
+    refreshes = [e for e in log.read() if e["type"] == "token_refresh"]
+    assert refreshes[0]["payload"] == {"outcome": "failed_invalid_grant"}

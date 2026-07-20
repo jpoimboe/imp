@@ -156,7 +156,10 @@ def refresh_canonical_token(
     env = os.environ if env is None else env
     if env.get("ANTHROPIC_API_KEY") or env.get("CLAUDE_CODE_OAUTH_TOKEN"):
         return RefreshOutcome(NOT_APPLICABLE)
-    base = _canonical_dir(env)
+    try:
+        base = _canonical_dir(env)
+    except RuntimeError:
+        return RefreshOutcome(NOT_APPLICABLE)
     creds_path = base / ".credentials.json"
     oauth = _oauth_of(_load_credentials(creds_path))
     if oauth is None or _refresh_token_of(oauth) is None:
