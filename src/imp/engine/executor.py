@@ -827,6 +827,7 @@ def _complete(quest: Quest, state: State, log: EventLog) -> RunResult:
         state.save(quest.state_dir)
         _emit(log, "workflow_completed", {})
         shutil.rmtree(quest.quest_dir / "steps", ignore_errors=True)
+        shutil.rmtree(quest.tmp_dir, ignore_errors=True)
         return RunResult.COMPLETED
 
     state.status = "merged"
@@ -842,6 +843,7 @@ def _complete(quest: Quest, state: State, log: EventLog) -> RunResult:
         state_json_path=quest.state_dir / "state.json",
     )
     shutil.rmtree(quest.quest_dir, ignore_errors=True)
+    shutil.rmtree(quest.tmp_dir, ignore_errors=True)
     return RunResult.COMPLETED
 
 
