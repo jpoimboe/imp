@@ -36,7 +36,7 @@ def test_rehydrate_resumable_rebuilds_and_loads(tmp_path: Path) -> None:
     assert loaded is not None
     assert loaded.id == "conv"
     assert (tmp_path / ".imp" / "quests" / "conv").exists()   # live home rebuilt
-    assert State.load(loaded.state_dir).status == "paused"     # the resumable resting status
+    assert State.load(loaded.state_dir).status == "shelved"     # the resumable resting status
 
 
 def test_rehydrate_resumable_returns_none_for_terminal_record(tmp_path: Path) -> None:

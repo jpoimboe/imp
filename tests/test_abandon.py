@@ -69,7 +69,7 @@ def test_abandon_allowed_from_completed_status(tmp_path: Path) -> None:
     _seed_control(tmp_path)
     ch = Quest.create(tmp_path, title="x", quest_id="feat", base_branch="main")
     st = State.load(ch.state_dir)
-    st.status = "completed"          # completed-but-not-merged: abandon is the only verb
+    st.status = "merged"              # merged-but-not-archived: abandon is the only verb
     st.save(ch.state_dir)
     assert _abandon_local(tmp_path, "feat") == 0
     assert not (tmp_path / ".imp" / "worktrees" / "feat").exists()

@@ -349,11 +349,13 @@ def test_state_hold_mark_defaults_none(tmp_path: Path) -> None:
     assert loaded.held_acquire_step is None
 
 
-def test_saved_is_a_status_value() -> None:
+def test_error_is_a_status_value() -> None:
     from typing import get_args
 
     from imp.engine.state import Status
-    assert "saved" in get_args(Status)
+    assert "error" in get_args(Status)
+    assert "saved" not in get_args(Status)
+    assert "completed" not in get_args(Status)
 
 
 def test_reincarnation_counter_bumps_independently_per_session() -> None:
@@ -634,11 +636,11 @@ def test_state_halt_condition_defaults_none(tmp_path: Path) -> None:
 
 def test_state_halt_condition_round_trips(tmp_path: Path) -> None:
     s = State(id="c1", step="w", step_attempt=0, status="paused",
-              halt_condition="error")
+              halt_condition="waiting")
     s.save(tmp_path)
     raw = json.loads((tmp_path / "state.json").read_text())
-    assert raw["halt_condition"] == "error"
-    assert State.load(tmp_path).halt_condition == "error"
+    assert raw["halt_condition"] == "waiting"
+    assert State.load(tmp_path).halt_condition == "waiting"
 
 
 def test_state_load_forward_compatible_without_halt_condition(tmp_path: Path) -> None:

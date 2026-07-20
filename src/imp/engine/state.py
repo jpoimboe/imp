@@ -32,15 +32,15 @@ from imp.engine.errors import StateDecodeError
 from imp.engine.pagecache import drop_page_cache
 
 Status = Literal[
-    "new", "paused", "merge_blocked", "completed", "saved", "abandoned"
+    "new", "paused", "merge_blocked", "merged", "shelved", "abandoned", "error"
 ]
 ResumeMode = Literal["solicit", "continue"]
 
-# Durable halt/gate condition written to state.json. `waiting` = live, parked at
-# a human input gate; `error` = a not-live failure halt; None = working / clean
-# at rest. Only these two non-null values are observable — a clean yield or human
-# interrupt reads None (display-equivalent to at-rest when not live).
-HaltCondition = Literal["waiting", "error"]
+# Durable live-gate marker written to state.json. `waiting` = live, parked at a
+# human input gate; None = working / clean at rest. A not-live failure halt is now
+# the first-class stored status `error` (not a halt-condition). Governed by lock
+# liveness like `lock`.
+HaltCondition = Literal["waiting"]
 
 # workflow_paused reasons that are NOT failures: a bare-turn-end yield, a lane
 # turn-wait, or an interrupt. Every other reason (internal_error, retry_ceiling,
@@ -51,7 +51,7 @@ _CLEAN_PAUSE_REASONS = frozenset({"awaiting_user", "awaiting_turn", "interrupt"}
 
 
 def classify_pause_halt(
-        reason: str, interrupt_reason: str | None) -> HaltCondition | None:
+        reason: str, interrupt_reason: str | None) -> Literal["error"] | None:
     """Map a workflow_paused (reason, interrupt_reason) to the durable
     halt-condition. A human interrupt (interrupt_reason set) or a clean
     yield/turn-wait reads clean (None); every other reason is a failure (error).

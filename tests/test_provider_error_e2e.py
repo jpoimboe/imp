@@ -143,7 +143,7 @@ async def test_fatal_failure_pauses_immediately_with_diagnostic(
     assert payload["detail"].get("request_id") == "req_01abc"
 
     state = State.load(quest.state_dir)
-    assert state.status == "paused"
+    assert state.status == "error"
     assert state.step_attempt == 0
 
 

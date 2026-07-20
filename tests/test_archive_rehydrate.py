@@ -29,7 +29,7 @@ def test_rehydrate_restores_loadable_draft_from_archive(tmp_path: Path) -> None:
     assert loaded.materialized is False
     assert loaded.orig_base_head == orig_head
     state = State.load(loaded.state_dir)
-    assert state.status == "paused"  # the shelved-conversation resting status
+    assert state.status == "shelved"  # the shelved-conversation resting status
     events = (quest_dir / "events.jsonl").read_bytes()
     assert b"quest_created" in events  # the original conversation events survive
 
@@ -54,7 +54,7 @@ def _archive_with_steps(control: Path, cid: str, steps: Path, *, resumable: bool
     quest_json.write_text(json.dumps(
         {"id": cid, "title": "C", "base_branch": "main", "materialized": False}))
     state_json = control / f"{cid}-state.json"
-    state_json.write_text(json.dumps({"id": cid, "status": "paused", "step": "s"}))
+    state_json.write_text(json.dumps({"id": cid, "status": "shelved", "step": "s"}))
     archive.archive_quest(
         control, cid, events_path=events,
         quest_json_path=quest_json, state_json_path=state_json,

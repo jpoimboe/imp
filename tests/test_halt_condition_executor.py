@@ -76,7 +76,8 @@ async def test_fatal_error_pause_writes_error_halt(tmp_path: Path) -> None:
     _register(_FatalRunner)
     result = await run_quest(quest, on_event=lambda _e: None)
     assert result is RunResult.PAUSED
-    assert State.load(quest.state_dir).halt_condition == "error"
+    assert State.load(quest.state_dir).status == "error"
+    assert State.load(quest.state_dir).halt_condition is None
 
 
 @pytest.mark.anyio

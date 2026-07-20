@@ -49,7 +49,7 @@ def archive_conversation(quest: Quest) -> None:
     materialized = quest.materialized
     with ProjectLock(quest.quest_dir / "lock").acquire():  # raises LockHeld if runner is live
         state = State.load(quest.state_dir)
-        state.status = "paused"
+        state.status = "shelved"
         state.arm_step_resume(mode="solicit")
         state.save(quest.state_dir)
         quest.event_log().append(
