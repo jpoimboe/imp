@@ -126,6 +126,67 @@ def test_dispatch_task_surfaces_stalled_kind(tmp_path: Path) -> None:
     assert "[stalled]" in str(ei.value)
 
 
+def test_dispatch_task_suspend_handback_on_budget_ceiling(tmp_path: Path) -> None:
+    # PRODUCER: when the retry-budget ceiling is hit during subagent backoff and no
+    # human pause is pending (coordinator.should_pause is False), dispatch_task hands
+    # the child back as a RuntimeError whose body carries the literal [suspended]
+    # marker and the transcript pointer — it no longer raises SubagentSuspended.
+    import anyio
+
+    from imp.engine.agent_run import AgentRunResult, ErrorInfo
+
+    ctx = _dispatch_ctx(tmp_path)
+    assert ctx.coordinator.should_pause is False
+
+    async def _fake_drive(*_a, **_k):
+        # delay far exceeds budget_for("auth") (1800s) -> ceiling on the first pass.
+        return AgentRunResult(output=None, errored=True, paused=False,
+                              fatal=False, delay=1e9,
+                              error=ErrorInfo("auth", None))
+
+    import imp.agents.subagents as sub_mod
+    orig = sub_mod.drive_invocation
+    sub_mod.drive_invocation = _fake_drive  # type: ignore[assignment]
+    try:
+        with pytest.raises(RuntimeError) as ei:
+            anyio.run(dispatch_task, ctx, "reviewer", "do x")
+    finally:
+        sub_mod.drive_invocation = orig  # type: ignore[assignment]
+    body = str(ei.value)
+    assert "[suspended]" in body
+    assert "[interrupted]" not in body
+    assert "transcript.jsonl" in body
+
+
+def test_dispatch_task_interrupt_handback_on_pause(tmp_path: Path) -> None:
+    # PRODUCER: with a human pause pending (coordinator.should_pause True) and the
+    # child's drive returning paused, dispatch_task hands back a RuntimeError whose
+    # body carries the [interrupted] marker and the transcript pointer.
+    import anyio
+
+    from imp.engine.agent_run import AgentRunResult
+
+    ctx = _dispatch_ctx(tmp_path)
+    ctx.coordinator._should_pause = True
+
+    async def _fake_drive(*_a, **_k):
+        return AgentRunResult(output=None, errored=False, paused=True,
+                              fatal=False, delay=None, error=None)
+
+    import imp.agents.subagents as sub_mod
+    orig = sub_mod.drive_invocation
+    sub_mod.drive_invocation = _fake_drive  # type: ignore[assignment]
+    try:
+        with pytest.raises(RuntimeError) as ei:
+            anyio.run(dispatch_task, ctx, "reviewer", "do x")
+    finally:
+        sub_mod.drive_invocation = orig  # type: ignore[assignment]
+    body = str(ei.value)
+    assert "[interrupted]" in body
+    assert "[suspended]" not in body
+    assert "transcript.jsonl" in body
+
+
 def test_task_tool_invoke_raises_sentinel(tmp_path: Path) -> None:
     """`.invoke()` must never be called — runner special-cases name=='task'."""
     ctx = ToolContext(
@@ -630,10 +691,9 @@ async def test_subagent_backs_off_on_rate_limit(tmp_path: Path, monkeypatch) -> 
 
 @pytest.mark.anyio
 async def test_subagent_pause_raises_suspended(tmp_path: Path) -> None:
-    """A coordinator pause during a subagent drive raises SubagentSuspended
-    (the unwind signal), not a RuntimeError."""
-    from imp.agents.subagents import SubagentSuspended
-
+    """A coordinator pause during a subagent drive hands the child back as a
+    RuntimeError carrying the [interrupted] marker (should_pause is set), not a
+    SubagentSuspended unwind."""
     coord = InterruptCoordinator()
 
     def _trip():
@@ -650,7 +710,7 @@ async def test_subagent_pause_raises_suspended(tmp_path: Path) -> None:
                                          on_run=_trip)
     ctx.quest_context = QuestContext(id="c", title="C", project_root=tmp_path,
                                        workflow_dir=tmp_path / "wf")
-    with pytest.raises(SubagentSuspended):
+    with pytest.raises(RuntimeError, match=r"\[interrupted\]"):
         await dispatch_task(ctx, "reviewer", "review it")
 
 
@@ -663,11 +723,10 @@ async def test_subagent_backoff_sleep_is_interruptible(tmp_path: Path) -> None:
     instead of blocking the full delay. Mirrors test_executor_backoff.py."""
     import anyio
 
-    from imp.agents.subagents import SubagentSuspended
-
     # Verify the backoff loop uses interruptible_sleep, not anyio.sleep directly.
     # We do this by confirming that a coordinator pause during a long backoff
-    # raises SubagentSuspended well before the delay would expire.
+    # hands the child back (a RuntimeError carrying [interrupted]) well before the
+    # delay would expire.
     coord = InterruptCoordinator()
 
     calls = {"n": 0}
@@ -703,7 +762,7 @@ async def test_subagent_backoff_sleep_is_interruptible(tmp_path: Path) -> None:
             tg.start_soon(_flip)
             # A 10 s backoff must abandon well before 10 s once should_pause flips.
             with anyio.fail_after(30):  # deadlock backstop only
-                with pytest.raises(SubagentSuspended):
+                with pytest.raises(RuntimeError, match=r"\[interrupted\]"):
                     await dispatch_task(ctx, "reviewer", "review it")
 
     await main()
@@ -712,11 +771,11 @@ async def test_subagent_backoff_sleep_is_interruptible(tmp_path: Path) -> None:
 @pytest.mark.anyio
 async def test_subagent_backoff_hits_per_category_budget(tmp_path: Path,
                                                          monkeypatch) -> None:
-    """Per-category budget: subagent backoff stops at the budget and raises
-    SubagentSuspended — in interactive runs too (mode-independent)."""
+    """Per-category budget: subagent backoff stops at the budget and hands the
+    child back as a RuntimeError ([suspended]) — in interactive runs too
+    (mode-independent)."""
     import imp.agents.subagents as subagents_mod
     import imp.engine.error_policy as ep_mod
-    from imp.agents.subagents import SubagentSuspended
 
     # dispatch_task lazily does `from imp.engine.error_policy import budget_for`,
     # which reads the attribute off the module at call time, so patching it here
@@ -750,7 +809,7 @@ async def test_subagent_backoff_hits_per_category_budget(tmp_path: Path,
     ctx.quest_context = QuestContext(id="c", title="C", project_root=tmp_path,
                                        workflow_dir=tmp_path / "wf")
 
-    with pytest.raises(SubagentSuspended, match="retry ceiling"):
+    with pytest.raises(RuntimeError, match=r"\[suspended\]"):
         await dispatch_task(ctx, "reviewer", "review it")
 
     # The budget check fires BEFORE the sleep on the first retry, so only 1 spawn.
@@ -913,14 +972,13 @@ def test_make_task_tool_description_has_parallel_guidance() -> None:
 
 
 @pytest.mark.anyio
-async def test_subagent_auth_budget_suspend_reads_as_reauth(tmp_path: Path,
-                                                            monkeypatch) -> None:
-    """AC-B: an auth-category subagent budget exhaustion raises a
-    SubagentSuspended whose message reflects the auth category (re-auth), not a
-    generic retry ceiling."""
+async def test_subagent_auth_budget_hands_back_suspended(tmp_path: Path,
+                                                         monkeypatch) -> None:
+    """An auth-category subagent budget exhaustion routes through the same
+    parent-handback seam as any other category: a RuntimeError carrying the
+    generic [suspended] body (no category-specific messaging)."""
     import imp.agents.subagents as subagents_mod
     import imp.engine.error_policy as ep_mod
-    from imp.agents.subagents import SubagentSuspended
 
     monkeypatch.setattr(ep_mod, "budget_for", lambda category: 10.0)
 
@@ -951,9 +1009,8 @@ async def test_subagent_auth_budget_suspend_reads_as_reauth(tmp_path: Path,
     ctx.quest_context = QuestContext(id="c", title="C", project_root=tmp_path,
                                        workflow_dir=tmp_path / "wf")
 
-    with pytest.raises(SubagentSuspended, match="re-authentication needed") as exc:
+    with pytest.raises(RuntimeError, match=r"\[suspended\]"):
         await dispatch_task(ctx, "reviewer", "review it")
-    assert "category=auth" in str(exc.value)
     assert calls["n"] == 1
 
 
@@ -1020,7 +1077,6 @@ async def test_subagent_fourth_hinted_sleep_is_budgeted(tmp_path: Path,
     """The 4th hinted subagent sleep falls back to budgeted (cap=3): a 7200s hint
     exceeds the 1800s budget, so the loop suspends after exactly 3 hinted retries."""
     import imp.agents.subagents as subagents_mod
-    from imp.agents.subagents import SubagentSuspended
     from imp.engine.state import InMemoryEventLog
 
     async def _no_sleep(delay, coordinator, *, tick=0.1):
@@ -1048,7 +1104,7 @@ async def test_subagent_fourth_hinted_sleep_is_budgeted(tmp_path: Path,
     ctx.quest_context = QuestContext(id="c", title="C", project_root=tmp_path,
                                        workflow_dir=tmp_path / "wf")
 
-    with pytest.raises(SubagentSuspended, match="retry ceiling"):
+    with pytest.raises(RuntimeError, match=r"\[suspended\]"):
         await dispatch_task(ctx, "reviewer", "review it")
     assert calls["n"] == 4
     retries = [e for e in log.read() if e["type"] == "agent_retry"]

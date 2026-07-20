@@ -230,6 +230,37 @@ def test_repair_dangling_tool_use_appends_durability_note(tmp_path: Path) -> Non
                for b in t.load()[-1].content if isinstance(b, TextBlock))
 
 
+def test_repair_dangling_sub_agent_tool_use_resumes_cleanly(tmp_path: Path) -> None:
+    """Backward-compat: a quest paused mid-subagent under the PRE-CHANGE code left
+    the parent transcript with a dangling `sub_agent` tool_use (the old
+    SubagentSuspended unwound before any tool_result was committed). Under the new
+    code the existing resume-repair synthesizes a placeholder is_error tool_result,
+    balancing the transcript so the parent resumes without error — no migration."""
+    t = Transcript(tmp_path / "transcript.jsonl")
+    msgs = [
+        Message(role="user", content=(TextBlock(text="go"),)),
+        Message(role="assistant", content=(
+            ToolUseBlock(id="s1", name="sub_agent",
+                         input={"subagent_name": "worker",
+                                "task_description": "do x"}),)),
+    ]
+    for m in msgs:
+        t.append(m)
+
+    synth = repair_dangling_tool_use_on_resume(msgs, t)
+
+    assert synth is not None
+    assert [b.tool_use_id for b in synth] == ["s1"]
+    assert synth[0].is_error is True
+    assert "[interrupted]" in synth[0].content
+    texts = [b.text for b in msgs[-1].content if isinstance(b, TextBlock)]
+    assert texts == [RESUME_DURABILITY_NOTE]
+    # Every tool_use now has a matching tool_result, so the reloaded transcript is
+    # well-formed and resumable (SEND_TO_LLM), not a 400-inducing dangling turn.
+    reloaded = Transcript(tmp_path / "transcript.jsonl").load()
+    assert classify_resume(reloaded) is ResumeState.SEND_TO_LLM
+
+
 def test_repair_balances_trailing_interrupt_user_turn(tmp_path: Path) -> None:
     """'…, assistant(tool_use X), user("[Request interrupted by user]")' — the
     repair injects the synthetic tool_result INTO that trailing user turn (not a

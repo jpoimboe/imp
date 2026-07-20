@@ -1227,6 +1227,20 @@ def test_close_subagent_derives_stalled_from_real_failure_message():
     assert fold.is_error is True
 
 
+def test_close_subagent_derives_suspended_from_handback_message():
+    # SEAM: the exact content the provider builds from dispatch_task's suspend
+    # RuntimeError (f"{type(e).__name__}: {e}"). The bracketed [suspended] marker
+    # in the is_error content must classify the fold as terminal_state="suspended".
+    exc = RuntimeError("subagent 'reviewer' was suspended before finishing — "
+                       "its provider or retry budget ran out. [suspended]")
+    content = f"{type(exc).__name__}: {exc}"
+    fold = nv.SubagentFold(subagent_name="reviewer", event_id="e", block_id="b",
+                           nested=nv.NarrativeBuilder())
+    nv._close_subagent_fold(fold, {"content": content, "error": True})
+    assert fold.terminal_state == "suspended"
+    assert fold.is_error is True
+
+
 def test_close_subagent_prefers_explicit_kind():
     fold = nv.SubagentFold(subagent_name="x", event_id="e", block_id="b",
                            nested=nv.NarrativeBuilder())

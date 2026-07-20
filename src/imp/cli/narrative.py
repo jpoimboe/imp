@@ -318,8 +318,9 @@ class SubagentFold:
                                        # end_ts and drop the run duration live).
     outcome: str | None = None         # result summary when task tool_result lands
     is_error: bool = False
-    terminal_state: str | None = None  # 'stalled' or 'interrupted' (both providers
-                                       # now emit it via kind= or [bracket]); else None
+    terminal_state: str | None = None  # 'stalled'/'interrupted'/'context_exhausted'/
+                                       # 'suspended' (both providers now emit it via
+                                       # kind= or [bracket]); else None
     start_ts: str | None = None        # parent `task` tool_call.timestamp
     end_ts: str | None = None          # parent `task` tool_result.timestamp
     label: str | None = None
@@ -1800,15 +1801,15 @@ def _close_subagent_fold(fold: SubagentFold, p: dict[str, Any],
     # "... [interrupted]" — the codex degraded-pause path appends the latter).
     # The brackets keep the match precise (low false-positive).
     kind = p.get("kind")
-    if kind not in ("stalled", "interrupted", "context_exhausted"):
+    if kind not in ("stalled", "interrupted", "context_exhausted", "suspended"):
         # The bracketed marker only originates from the failure path; a
         # SUCCESSFUL subagent's content is agent-controlled JSON that may
         # legitimately contain "[stalled]". Gate the scan on is_error so such
         # text can't false-positive into a terminal state.
         text = fold.outcome if fold.is_error else ""
-        _kinds = ("stalled", "interrupted", "context_exhausted")
+        _kinds = ("stalled", "interrupted", "context_exhausted", "suspended")
         kind = next((s for s in _kinds if f"[{s}]" in (text or "")), None)
-    if kind in ("stalled", "interrupted", "context_exhausted"):
+    if kind in ("stalled", "interrupted", "context_exhausted", "suspended"):
         fold.terminal_state = kind
 
 

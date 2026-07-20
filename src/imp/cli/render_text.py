@@ -569,6 +569,8 @@ def subagent_status_row(sub: nv.SubagentFold, *, depth: int, color: bool,
         parts.append(pal.ansi(" · interrupted", "wordmark", enabled=color))
     elif sub.terminal_state == "context_exhausted":
         parts.append(pal.ansi(" · context exhausted", "wordmark", enabled=color))
+    elif sub.terminal_state == "suspended":
+        parts.append(pal.ansi(" · suspended", "wordmark", enabled=color))
     elif sub.is_error:
         parts.append(pal.ansi(" · failed", "wordmark", enabled=color))
     return _gutter_indent(depth, gutters, color) + "".join(parts)
