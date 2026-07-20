@@ -248,6 +248,7 @@ async def ask_line_with_slash(
     prompt: Any, status: Any | None, quest: Any, *, color: bool = False, width: int = 80,
     coord: Any = None, driver: Any = None, hint: str | None = None,
     pre_session: bool = False, toolbar_override: str | None = None,
+    allow_empty: bool = False,
 ) -> str | SkillRequest:
     """Read one interactive line, intercepting slash commands. /help, /skills,
     unknown, and not-found commands print and re-prompt; /<name> that matches a
@@ -342,6 +343,8 @@ async def ask_line_with_slash(
                             raise EOFError
                         if not is_slash_command(line):
                             if not line.strip():
+                                if allow_empty:
+                                    return ""
                                 continue
                             return line
                         current_unsandboxed = bool(
