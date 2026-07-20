@@ -1112,17 +1112,18 @@ def test_prose_then_subagent_header_separated_by_blank() -> None:
     assert out[hdr_i - 1].strip() == ""
 
 
-def test_user_message_orange_caret_then_text_color_on() -> None:
-    """The user turn renders at the node's own depth (depth=1 → a 2-space indent).
-    First line: a brand-orange `>` caret (outside any band) + one space + the body.
-    Continuation lines drop the caret (a blank column in its place) so the body
-    aligns under the first line's text. No background fill in the ansi theme."""
+def test_user_message_reverse_emphasis_ansi_color_on() -> None:
+    """Under the `ansi` 16-color theme the scrolled-back user turn carries
+    reverse-video emphasis (no truecolor band): a brand-orange `>` caret sits
+    OUTSIDE the bar, then \x1b[7m hugs the separating space + body and closes at
+    text end. Continuation lines drop the caret (blank column) but keep the bar."""
+    pal.set_theme("ansi")
     node = nv.UserMessageNode(text="line one\nline two", interactive=True)
     out = list(rt._render(node, depth=1, full=False, color=True, width=80))
     assert len(out) == 2
-    assert out[0] == "  \x1b[33m>\x1b[0m line one"
-    assert out[1] == "    line two"               # caret column blank, body aligned
-    assert "\x1b[48;2;" not in out[0] and "\x1b[104m" not in out[0]   # no bg
+    assert out[0] == "  \x1b[33m>\x1b[0m\x1b[7m line one\x1b[0m"
+    assert out[1] == "   \x1b[7m line two\x1b[0m"
+    assert "\x1b[48;2;" not in out[0]              # no truecolor band under ansi
 
 
 def test_user_message_caret_with_subtle_bg_in_truecolor_theme() -> None:
