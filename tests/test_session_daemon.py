@@ -1897,14 +1897,14 @@ async def test_script_step_hold_shows_rerun_copy_and_refuses_redirect(
         await wait_until(lambda: _awaiting())
         # (a) the script hold copy — re-run/detach, no redirect offer
         assert _awaiting()[0]["payload"]["steer_hint"] == (
-            "paused — press enter to re-run the gate, or detach to leave it paused")
+            "paused · enter to re-run the gate · Ctrl-D to leave")
 
         # (b) a typed message is refused with a plain acknowledgement, not dropped
         await client.send_input("go left")
         await wait_until(lambda: any(e.get("type") == "script_output" for e in received))
         refusal = next(e for e in received if e.get("type") == "script_output")
         assert refusal["payload"]["stdout"] == (
-            "a verify gate takes no redirect; press enter to re-run or detach to leave it paused")
+            "a verify gate takes no redirect; press enter to re-run or Ctrl-D to leave")
 
         # (c) stayed at the hold: re-prompted and the gate did NOT re-run
         await wait_until(lambda: len(_awaiting()) >= 2)
@@ -1964,7 +1964,7 @@ async def test_agent_step_hold_keeps_redirect_copy_and_consumes_message(
         await wait_until(lambda: _awaiting())
         # unchanged agent hold copy — offers a redirect
         assert _awaiting()[0]["payload"]["steer_hint"] == (
-            "paused — type a message to redirect, or detach to leave it paused")
+            "paused · enter to continue · type to redirect · Ctrl-D to leave")
 
         await client.send_input("go left")
         await wait_until(lambda: "r" in result)
@@ -2300,3 +2300,25 @@ def test_main_records_config_error_pause_on_wrapped_load_error(
 
     assert State.load(quest.state_dir).status == "paused"
     assert "Traceback (most recent call last):" not in capsys.readouterr().err
+
+
+def test_steer_copy_is_verbatim_and_shared() -> None:
+    from imp.engine.completion import INTERRUPT_STEER_HINT, steer_hint
+    from imp.remote.session.daemon import (
+        _RESUME_PROMPT,
+        _SCRIPT_HOLD_PROMPT,
+        _SCRIPT_REDIRECT_REFUSED,
+    )
+
+    assert steer_hint("interrupted") == (
+        "interrupted · enter to continue · type to redirect · Ctrl-D to leave")
+    assert steer_hint("paused") == (
+        "paused · enter to continue · type to redirect · Ctrl-D to leave")
+    # The two agent prompts are built from the one shared constructor.
+    assert steer_hint("interrupted") == INTERRUPT_STEER_HINT
+    assert steer_hint("paused") == _RESUME_PROMPT
+    # Script surfaces name Ctrl-D, not "detach".
+    assert _SCRIPT_HOLD_PROMPT == (
+        "paused · enter to re-run the gate · Ctrl-D to leave")
+    assert _SCRIPT_REDIRECT_REFUSED == (
+        "a verify gate takes no redirect; press enter to re-run or Ctrl-D to leave")

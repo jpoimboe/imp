@@ -358,7 +358,7 @@ def _awaiting(interrupt):
     return {
         "type": "awaiting_user_input",
         "payload": {
-            "steer_hint": "interrupted — type to redirect, or Ctrl-D to leave it paused",
+            "steer_hint": "interrupted · enter to continue · type to redirect · Ctrl-D to leave",
             "interrupt": interrupt,
         },
     }

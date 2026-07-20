@@ -268,7 +268,10 @@ def test_interrupt_awaiting_user_input_is_silent() -> None:
 
 def test_interrupt_awaiting_user_input_is_silent_with_prompt() -> None:
     # The flag, not the prompt string, drives the tier.
-    payload = {"steer_hint": "interrupted — type to redirect", "interrupt": True}
+    payload = {
+        "steer_hint": "interrupted · enter to continue · type to redirect · Ctrl-D to leave",
+        "interrupt": True,
+    }
     assert imp_telegram.curate("awaiting_user_input", payload) == "silent"
 
 

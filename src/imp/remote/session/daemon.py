@@ -21,6 +21,7 @@ from imp.engine.abandon import (
     save_as_draft,
     tear_down_quest,
 )
+from imp.engine.completion import steer_hint
 from imp.engine.errors import LoadError, LoadErrors
 from imp.engine.executor import RunResult, run_quest
 from imp.engine.merge_queue import ensure_head_driven
@@ -34,11 +35,10 @@ from imp.remote.session.warmup import warm_module_graph
 
 RunFn = Callable[..., Awaitable[Any]]
 
-_RESUME_PROMPT = "paused — type a message to redirect, or detach to leave it paused"
-_SCRIPT_HOLD_PROMPT = (
-    "paused — press enter to re-run the gate, or detach to leave it paused")
+_RESUME_PROMPT = steer_hint("paused")
+_SCRIPT_HOLD_PROMPT = "paused · enter to re-run the gate · Ctrl-D to leave"
 _SCRIPT_REDIRECT_REFUSED = (
-    "a verify gate takes no redirect; press enter to re-run or detach to leave it paused")
+    "a verify gate takes no redirect; press enter to re-run or Ctrl-D to leave")
 
 
 def _is_interrupt_pause(result: Any, coordinator: Any) -> bool:

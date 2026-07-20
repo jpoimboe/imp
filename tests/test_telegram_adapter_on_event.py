@@ -308,7 +308,10 @@ def test_replayed_event_marks_alert_all_seen_even_when_alert_all_is_off() -> Non
 
 INTERRUPT_GATE = {
     "id": "I1", "type": "awaiting_user_input", "timestamp": TS,
-    "payload": {"steer_hint": "interrupted — type to redirect", "interrupt": True},
+    "payload": {
+        "steer_hint": "interrupted · enter to continue · type to redirect · Ctrl-D to leave",
+        "interrupt": True,
+    },
     "quest": {"id": "k3f9qa", "title": "Dark mode"},
 }
 
