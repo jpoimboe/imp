@@ -496,3 +496,12 @@ def test_gate_file_has_no_sub_knob_poll_literals():
     for lit in ("timeout=10.0", "timeout=30.0", "timeout=60.0"):
         assert lit not in src
     assert "E2E_POLL_TIMEOUT" in src
+
+
+def test_live_sibling_routes_inner_polls_through_knob():
+    import tests.test_relay_hibernation_live as live
+    src = Path(live.__file__).read_text()
+    assert "timeout=E2E_POLL_TIMEOUT" in src   # inner polls adopt the knob
+    assert "timeout=60.0" not in src           # no bare 60s inner poll survives
+    assert "timeout=120.0" in src              # real-provider round-trip stays explicit
+    assert "timeout=30.0" in src              # _await_change_dir setup poll stays explicit
