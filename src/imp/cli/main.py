@@ -312,6 +312,17 @@ _ERROR_LABELS: dict[str, str] = {
     "crash": "crash",
 }
 
+# Deliberate-leave trigger -> its capitalized banner display form. Internal reason
+# strings stay lowercase; only the banner display is transformed.
+_LEAVE_DISPLAY: dict[str, str] = {
+    "ctrl-d": "Ctrl-D",
+    "sigterm": "SIGTERM",
+    "sighup": "SIGHUP",
+    "sigquit": "SIGQUIT",
+}
+# The single keystroke leave; signals get no caret shadow (nothing was typed).
+_LEAVE_KEYSTROKES: frozenset[str] = frozenset({"ctrl-d"})
+
 
 def _identity_line(quest_id: str, title: str, *, color: bool,
                    intent: str | None = None) -> str:
@@ -439,6 +450,15 @@ def _pause_lines(
             head = f"{label}: {first}" if first else label
             body = rest
         return _error_block(head, body, name, title, color=color, intent=intent)
+    if info is not None and info.base in _LEAVE_DISPLAY:
+        display = _LEAVE_DISPLAY[info.base]
+        head_line = (ansi("paused", "wordmark", enabled=color)
+                     + ansi(f" · {display}", "dim", enabled=color))
+        return [
+            head_line,
+            _identity_line(name, title, color=color, intent=intent),
+            _resume_line(token),
+        ]
     head = info.base if info is not None else "paused"
     return [
         *_clean_block(head, name, title, color=color, intent=intent),

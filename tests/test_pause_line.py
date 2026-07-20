@@ -74,12 +74,45 @@ def test_pause_lines_internal_error_reason_tail_is_red() -> None:
     assert lines[0] == pal.ansi("internal error: project has no fact 'guidance'", "red")
 
 
-def test_pause_lines_deliberate_leave_trigger_tail_is_gold() -> None:
+def test_pause_lines_keystroke_leave_head_is_paused_with_dim_display() -> None:
     from imp.cli import palette as pal
-    from imp.cli.main import _PauseInfo
-    lines = _pause_lines("dufa26", "dufa26", info=_PauseInfo("ctrl-d", None),
-                         color=True)
-    assert pal.ansi("ctrl-d", "wordmark") in lines[0]  # a clean leave stays gold
+    from imp.cli.main import _pause_lines, _PauseInfo
+    lines = _pause_lines("dufa26", "dufa26", title="T",
+                         info=_PauseInfo("ctrl-d", None), color=True)
+    assert lines == [
+        pal.ansi("paused", "wordmark") + pal.ansi(" · Ctrl-D", "dim"),
+        f'{pal.ansi("dufa26", "wordmark")} · T',
+        "resume: imp resume dufa26",
+    ]
+
+
+@pytest.mark.parametrize("reason,display", [
+    ("sigterm", "SIGTERM"),
+    ("sighup", "SIGHUP"),
+    ("sigquit", "SIGQUIT"),
+])
+def test_pause_lines_signal_leave_head_plain_is_paused_dot_display(
+    reason: str, display: str,
+) -> None:
+    from imp.cli.main import _pause_lines, _PauseInfo
+    lines = _pause_lines("dufa26", "dufa26", title="T",
+                         info=_PauseInfo(reason, None), color=False)
+    assert lines == [
+        f"paused · {display}",
+        "dufa26 · T",
+        "resume: imp resume dufa26",
+    ]
+
+
+def test_pause_lines_non_leave_head_stays_bare_gold_reason() -> None:
+    # Guard: a non-leave interrupt head is unchanged — a bare gold reason, not the
+    # `paused · <Display>` leave head.
+    from imp.cli import palette as pal
+    from imp.cli.main import _pause_lines, _PauseInfo
+    lines = _pause_lines("dufa26", "dufa26", title="T",
+                         info=_PauseInfo("interrupt", None), color=True)
+    assert lines[0] == pal.ansi("interrupt", "wordmark")
+    assert "paused · " not in "\n".join(lines)
 
 
 def test_pause_facts_unnamed_change_shows_bare_id(tmp_path: Path) -> None:
