@@ -204,18 +204,17 @@ def test_task_dispatch_returns_output_and_appends_no_tool_call(
 def test_task_dispatch_suspension_propagates(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """quest 1: a subagent-origin pause propagates out of dispatch_tool so FastMCP
-    wraps it as an isError tool result — dispatch_tool no longer captures it."""
-    from imp.engine.agent_run import SubagentSuspended
-
+    """A subagent handback propagates out of dispatch_tool so FastMCP wraps it as an
+    isError tool result — dispatch_tool no longer captures it."""
     async def _fake(ctx2: Any, name: str, desc: str, *, tier: Any = None) -> str:
-        raise SubagentSuspended("paused")
+        raise RuntimeError("subagent 'impl' was suspended before finishing — "
+                           "its provider or retry budget ran out. [suspended]")
 
     monkeypatch.setattr("imp.agents.subagents.dispatch_task", _fake)
     ctx = _ctx(tmp_path)
     ctx.event_log = InMemoryEventLog()  # type: ignore[attr-defined]
     state = RunState(cap=100)
-    with pytest.raises(SubagentSuspended):
+    with pytest.raises(RuntimeError):
         asyncio.run(dispatch_tool(
             tool=make_task_tool(),
             args={"subagent_name": "impl", "task_description": "x"},
@@ -225,22 +224,22 @@ def test_task_dispatch_suspension_propagates(
 def test_task_dispatch_suspension_marks_interrupted(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """SubagentSuspended re-raised with [interrupted] marker for renderer classification."""
-    from imp.engine.agent_run import SubagentSuspended
-
+    """The handback body's [interrupted] marker propagates UNCHANGED so FastMCP
+    surfaces it for renderer classification — the handler no longer adds it."""
     async def _fake(ctx2: Any, name: str, desc: str, *, tier: Any = None) -> str:
-        raise SubagentSuspended("subagent paused")
+        raise RuntimeError("subagent 'impl' was interrupted before finishing — "
+                           "the run was paused. [interrupted]")
 
     monkeypatch.setattr("imp.agents.subagents.dispatch_task", _fake)
     ctx = _ctx(tmp_path)
     ctx.event_log = InMemoryEventLog()  # type: ignore[attr-defined]
     state = RunState(cap=100)
-    with pytest.raises(SubagentSuspended) as ei:
+    with pytest.raises(RuntimeError) as ei:
         asyncio.run(dispatch_tool(
             tool=make_task_tool(),
             args={"subagent_name": "impl", "task_description": "x"},
             ctx=ctx, state=state))
-    assert "[interrupted]" in str(ei.value)
+    assert str(ei.value).count("[interrupted]") == 1
 
 
 def test_task_dispatch_generic_failure_propagates(
