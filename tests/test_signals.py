@@ -321,10 +321,12 @@ def _can_pty() -> bool:
 def _patch_dev_tty(monkeypatch, slave_fd: int) -> None:
     real_open = os.open
 
-    def fake_open(path: str, flags: int, mode: int = 0o777) -> int:
+    def fake_open(
+        path: str, flags: int, mode: int = 0o777, *, dir_fd: int | None = None
+    ) -> int:
         if path == "/dev/tty":
             return os.dup(slave_fd)
-        return real_open(path, flags, mode)
+        return real_open(path, flags, mode, dir_fd=dir_fd)
 
     monkeypatch.setattr(os, "open", fake_open)
 
