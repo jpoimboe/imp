@@ -51,7 +51,7 @@ async def test_resume_routes_to_inert_for_bare_turn_end(
     monkeypatch.setattr(m, "bare_turn_end_question", lambda quest: "Pending Q?")
     seen: dict[str, str] = {}
 
-    async def fake_inert(quest, question, *, autonomous=False):
+    async def fake_inert(quest, question, *, marker=None, notice=None, autonomous=False):
         seen["question"] = question
         return 0
 
@@ -71,7 +71,7 @@ async def test_resume_skips_inert_when_not_bare_turn_end(
     monkeypatch.setattr(m, "_print_splash_banner", lambda **k: False)
     monkeypatch.setattr(m, "bare_turn_end_question", lambda quest: None)
 
-    async def boom_inert(quest, question):
+    async def boom_inert(quest, question, *, marker=None, notice=None, autonomous=False):
         raise AssertionError("inert branch taken for a non-bare-turn-end resume")
 
     monkeypatch.setattr(m, "_resume_inert", boom_inert)
@@ -94,7 +94,7 @@ async def test_resume_skips_inert_when_message_supplied(
     monkeypatch.setattr(m, "_print_splash_banner", lambda **k: False)
     monkeypatch.setattr(m, "bare_turn_end_question", lambda quest: "Pending Q?")
 
-    async def boom_inert_msg(quest, question):
+    async def boom_inert_msg(quest, question, *, marker=None, notice=None, autonomous=False):
         raise AssertionError("inert branch taken despite message being set")
 
     monkeypatch.setattr(m, "_resume_inert", boom_inert_msg)
@@ -126,7 +126,7 @@ async def test_resume_routes_to_inert_reading_recorded_message(
     _patch_common(monkeypatch, tmp_path, ch)
     seen: dict[str, str] = {}
 
-    async def fake_inert(quest, question, *, autonomous=False):
+    async def fake_inert(quest, question, *, marker=None, notice=None, autonomous=False):
         seen["question"] = question
         return 0
 
@@ -212,7 +212,7 @@ async def test_resume_inert_composes_position_row_for_prompt(
 
     monkeypatch.setattr(m, "run_inert_resume", _fake_run_inert)
 
-    rc = await m._resume_inert(ch, "Which DB should I use?")
+    rc = await m._resume_inert(ch, "Which DB should I use?", marker="resuming", notice=None)
 
     assert rc == 0
     assert captured["toolbar"] == "POS-ROW"      # the composed row reached the reader
@@ -267,7 +267,7 @@ async def test_resume_inert_receives_autonomous(
     monkeypatch.setattr(m, "bare_turn_end_question", lambda quest: "Pending Q?")
     seen: dict[str, object] = {}
 
-    async def fake_inert(quest, question, *, autonomous=False):
+    async def fake_inert(quest, question, *, marker=None, notice=None, autonomous=False):
         seen["autonomous"] = autonomous
         return 0
 
@@ -343,7 +343,7 @@ async def test_resume_inert_ctrl_d_retains_caret_parks_and_returns_zero(
     monkeypatch.setattr(m, "_term_width", lambda: 80)
     monkeypatch.setattr(m, "Prompt", lambda **kw: _RaisingPrompt(exc, **kw))
 
-    rc = await m._resume_inert(ch, "Which DB should I use?")
+    rc = await m._resume_inert(ch, "Which DB should I use?", marker="resuming", notice=None)
 
     assert rc == 0
     after = ch.events_path.read_bytes() if ch.events_path.exists() else b""
@@ -430,7 +430,7 @@ async def test_inert_resume_echoes_reply_before_session_boot(
 
     monkeypatch.setattr(m, "_clear_loop", _fake_loop)
 
-    rc = await m._resume_inert(ch, "Which DB should I use?")
+    rc = await m._resume_inert(ch, "Which DB should I use?", marker="resuming", notice=None)
 
     assert rc == 0
     assert echoed == ["my answer"]                 # echoed at submit
@@ -477,7 +477,7 @@ async def test_inert_resume_carries_idle_terminal_title_into_boot(
 
     monkeypatch.setattr(m, "_clear_loop", _fake_loop)
 
-    rc = await m._resume_inert(ch, "Which DB should I use?")
+    rc = await m._resume_inert(ch, "Which DB should I use?", marker="resuming", notice=None)
 
     assert rc == 0
     assert isinstance(seen["title"], TerminalTitle)
