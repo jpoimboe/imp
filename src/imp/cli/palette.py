@@ -11,8 +11,9 @@ import re
 from typing import Any
 from unicodedata import east_asian_width
 
-# Weight/reset are theme-independent (not hue), so they live outside the themes.
-_ATTRS: dict[str, str] = {"dim": "\x1b[2m", "bold": "\x1b[1m", "reset": "\x1b[0m"}
+# These non-hue attributes are theme-independent, so they live outside the themes.
+_ATTRS: dict[str, str] = {"dim": "\x1b[2m", "bold": "\x1b[1m",
+                          "reverse": "\x1b[7m", "reset": "\x1b[0m"}
 
 # The `ansi` theme: the 16 named SGR colors. The terminal paints these from its
 # OWN palette, so they adapt to any background — the safe, universal default and

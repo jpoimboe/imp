@@ -281,3 +281,16 @@ def test_toolbar_bg_open_is_cool_blue_gray_distinct_from_user_band() -> None:
     pal.set_theme("ansi")
     assert pal.toolbar_bg_open(enabled=True) == ""      # no subtle band in 16-color
     assert pal.toolbar_bg_open(enabled=False) == ""     # color off
+
+
+def test_reverse_attr_wraps_with_sgr_7() -> None:
+    assert pal._ATTRS["reverse"] == "\x1b[7m"
+    assert pal.ansi("hi", "reverse", enabled=True) == "\x1b[7mhi\x1b[0m"
+    assert pal.ansi("hi", "reverse", enabled=False) == "hi"
+
+
+def test_reverse_attr_is_theme_independent() -> None:
+    for theme in ("ansi", "dark", "light"):
+        pal.set_theme(theme)
+        assert pal._ANSI["reverse"] == "\x1b[7m"
+        assert pal.ansi("x", "reverse", enabled=True) == "\x1b[7mx\x1b[0m"
