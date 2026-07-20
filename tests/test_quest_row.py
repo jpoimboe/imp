@@ -98,14 +98,14 @@ def test_waiting_status_renders_bold():
     assert "\x1b[1mwaiting\x1b[0m" in line
 
 
-def test_error_status_renders_red():
+def test_error_status_renders_bold():
     line = format_quest_line(**_row(status="error"), color=True)
-    assert "\x1b[31merror\x1b[0m" in line
+    assert "\x1b[1merror\x1b[0m" in line
 
 
-def test_merge_blocked_renders_two_words_on_underscore_color_key():
+def test_merge_blocked_renders_two_words_bold():
     line = format_quest_line(**_row(status="merge_blocked"), color=True)
-    assert "\x1b[33mmerge blocked\x1b[0m" in line   # wordmark color, two-word text
+    assert "\x1b[1mmerge blocked\x1b[0m" in line   # bold weight, two-word text
     assert "merge_blocked" not in line
 
 
@@ -212,7 +212,7 @@ def test_status_word_never_truncated_only_label_is():
     assert "resolving deferred items" not in line  # full label did not fit
 
 
-def test_merge_blocked_status_word_is_wordmark_under_dark_theme() -> None:
+def test_merge_blocked_status_word_is_bold_theme_independent() -> None:
     from imp.cli import palette as pal
     try:
         pal.set_theme("dark")
@@ -220,9 +220,8 @@ def test_merge_blocked_status_word_is_wordmark_under_dark_theme() -> None:
     finally:
         pal.set_theme("ansi")
     wordmark = pal.theme_escapes("dark")["wordmark"]   # \x1b[38;2;255;154;60m
-    yellow = pal.theme_escapes("dark")["yellow"]        # \x1b[38;2;199;151;106m
-    assert wordmark + "merge blocked" in line           # status word painted wordmark
-    assert yellow not in line                           # not the muted yellow role
+    assert "\x1b[1mmerge blocked" in line               # bold weight, not hued
+    assert wordmark not in line                         # no warm-gold hue survives
 
 
 def test_intent_fallback_for_empty_title():
@@ -302,8 +301,8 @@ def test_status_colors_are_meaning_based() -> None:
     from imp.cli.quest_row import STATUS_COLORS
     assert "running" not in STATUS_COLORS    # plain, no longer bold
     assert STATUS_COLORS["waiting"] == ("bold",)
-    assert STATUS_COLORS["error"] == ("red",)
-    assert STATUS_COLORS["merge_blocked"] == ("wordmark",)
+    assert STATUS_COLORS["error"] == ("bold",)
+    assert STATUS_COLORS["merge_blocked"] == ("bold",)
     assert "new" not in STATUS_COLORS       # plain, at rest
     assert "paused" not in STATUS_COLORS
     assert "merged" not in STATUS_COLORS
