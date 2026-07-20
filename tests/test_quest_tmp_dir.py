@@ -4,8 +4,10 @@ import os
 import tempfile
 from pathlib import Path
 
+import pytest
+
 from imp.engine.quest import Quest
-from imp.remote.session.attach import ensure_quest_tmp_dir
+from imp.remote.session.attach import ensure_quest_tmp_dir, spawn_session_daemon
 from imp.remote.session.discover import session_socket_path
 from tests.conftest import _seed_control
 
@@ -50,3 +52,43 @@ def test_ensure_quest_tmp_dir_creates_0o700_parent_and_leaf(tmp_path: Path) -> N
     assert leaf.is_dir()
     assert leaf.stat().st_mode & 0o777 == 0o700
     assert leaf.parent.stat().st_mode & 0o777 == 0o700
+
+
+def test_quest_scratch_root_prefers_imp_quest_tmp_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from imp.engine.env import quest_scratch_root
+
+    monkeypatch.setenv("IMP_QUEST_TMP", "/some/quest/tmp")
+    assert quest_scratch_root() == Path("/some/quest/tmp")
+    monkeypatch.delenv("IMP_QUEST_TMP", raising=False)
+    assert quest_scratch_root() == Path(tempfile.gettempdir())
+
+
+def test_spawn_session_daemon_exports_quest_tmp_without_poisoning_tmpdir(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The daemon is spawned with IMP_QUEST_TMP=<quest.tmp_dir> so codex/claude
+    homes land under the per-quest dir — but TMPDIR is NOT repointed at the
+    per-quest leaf: the daemon's tempfile.gettempdir() also derives
+    session_socket_path and Quest.tmp_dir, so poisoning it would double-nest the
+    socket and break attach."""
+    from imp.remote.session import attach as attach_mod
+
+    _seed_control(tmp_path)
+    ch = Quest.create(tmp_path, title="T", quest_id="tmpdirq", base_branch="main")
+
+    captured: dict[str, dict[str, str]] = {}
+
+    def fake_popen(argv, **kwargs):  # type: ignore[no-untyped-def]
+        captured["env"] = kwargs["env"]
+        return object()
+
+    monkeypatch.setattr(attach_mod.subprocess, "Popen", fake_popen)
+
+    spawn_session_daemon(ch)
+
+    assert captured["env"]["IMP_QUEST_TMP"] == str(ch.tmp_dir)
+    # Regression guard for the Critical: TMPDIR must NOT be set to the per-quest
+    # leaf (that is exactly what double-nests session_socket_path in the daemon).
+    assert captured["env"].get("TMPDIR") != str(ch.tmp_dir)

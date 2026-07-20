@@ -10,7 +10,7 @@ from typing import Any
 
 import anyio
 
-from imp.engine.env import overlay_engine_env
+from imp.engine.env import QUEST_TMP_ENV, overlay_engine_env
 from imp.engine.quest import Quest
 from imp.remote.session.client import SessionClient
 from imp.remote.session.discover import session_socket_path
@@ -46,6 +46,7 @@ def spawn_session_daemon(
         argv += ["--model", model]
     env = overlay_engine_env(os.environ, {})
     env.pop("IMP_REMOTE_CONTROL_SOCK", None)
+    env[QUEST_TMP_ENV] = str(quest.tmp_dir)
     quest.quest_dir.mkdir(parents=True, exist_ok=True)
     ensure_quest_tmp_dir(quest)
     with open(quest.quest_dir / "daemon.stderr", "wb") as stderr_file:
