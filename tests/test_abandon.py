@@ -4,7 +4,7 @@ import pytest
 
 from imp.cli.main import _abandon, _abandon_local, _status_rows
 from imp.engine import worktree
-from imp.engine.abandon import tear_down_quest
+from imp.engine.abandon import discard_conversation, tear_down_quest
 from imp.engine.quest import Quest
 from imp.engine.state import ProjectLock, State
 from tests.conftest import _git, _seed_control
@@ -341,3 +341,26 @@ def test_abandon_local_emits_message_and_returns_rc(
     rc = _abandon_local(tmp_path, "feat")
     assert rc == 0
     assert "Abandoned feat." in capsys.readouterr().out
+
+
+def test_tear_down_quest_reaps_per_quest_tmp_dir(tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+    ch = Quest.create(tmp_path, title="x", quest_id="feat", base_branch="main")
+    ch.tmp_dir.mkdir(parents=True, exist_ok=True)
+    (ch.tmp_dir / "session.sock").write_bytes(b"")   # scratch that must be reaped
+
+    tear_down_quest(ch)
+
+    assert not ch.tmp_dir.exists()                   # per-quest scratch gone
+
+
+def test_discard_conversation_reaps_per_quest_tmp_dir(tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+    ch = Quest.create(tmp_path, title="x", quest_id="feat", base_branch="main")
+    ch.tmp_dir.mkdir(parents=True, exist_ok=True)
+    (ch.tmp_dir / "session.sock").write_bytes(b"")
+
+    discard_conversation(ch)
+
+    assert not ch.tmp_dir.exists()
+    assert not (tmp_path / ".imp" / "quests" / "feat").exists()   # live home dropped too

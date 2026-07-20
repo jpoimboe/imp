@@ -39,6 +39,7 @@ def tear_down_quest(quest: Quest) -> None:
         worktree.remove_worktree(control, quest_id, force=True)
         worktree.delete_branch(control, quest_id)
     shutil.rmtree(quest.quest_dir, ignore_errors=True)
+    shutil.rmtree(quest.tmp_dir, ignore_errors=True)
 
 
 def archive_conversation(quest: Quest) -> None:
@@ -68,6 +69,7 @@ def archive_conversation(quest: Quest) -> None:
         worktree.remove_worktree(control, quest_id, force=True)
         worktree.delete_branch(control, quest_id)
     shutil.rmtree(quest.quest_dir, ignore_errors=True)
+    shutil.rmtree(quest.tmp_dir, ignore_errors=True)
 
 
 def save_as_draft(quest: Quest, reason: str | None = None) -> None:
@@ -91,3 +93,4 @@ def discard_conversation(quest: Quest) -> None:
     with ProjectLock(quest.quest_dir / "lock").acquire():
         pass
     shutil.rmtree(quest.quest_dir, ignore_errors=True)
+    shutil.rmtree(quest.tmp_dir, ignore_errors=True)
