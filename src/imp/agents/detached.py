@@ -127,4 +127,7 @@ async def run_detached_agent(
 def _classify(result: AgentRunResult) -> DetachedResult:
     if result.output is not None and not result.errored and not result.paused:
         return DetachedSuccess(result.output)
+    err = result.error
+    if err is not None and err.category in ("auth", "config"):
+        return DetachedEnvironmentFailure(err.category, err.kind or "")
     return DetachedTransientFailure("no_output", "agent produced no output")

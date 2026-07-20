@@ -134,3 +134,37 @@ async def test_initial_message_delivered_in_user_turn(tmp_path, provider_registr
     assert invocation.initial_messages, "no user-turn messages in invocation"
     user_turn_text = invocation.initial_messages[0].content[0].text
     assert "KICKOFF-DETECT-MARKER" in user_turn_text
+
+
+@pytest.mark.anyio
+async def test_missing_sandbox_is_environment_failure(tmp_path, monkeypatch):
+    import imp.agents.detached as detached
+    monkeypatch.setattr(detached, "sandbox_available", lambda: False)
+    # enabled sandbox required (allow_unsandboxed=False) but bwrap unavailable.
+    result = await _run(tmp_path, cfg=SandboxConfig(allow_unsandboxed=False))
+    assert isinstance(result, DetachedEnvironmentFailure)
+    assert result.category == "sandbox"
+
+
+@pytest.mark.anyio
+async def test_auth_error_is_environment_failure(tmp_path, provider_registry):
+    _register(provider_registry, [
+        {"type": "error",
+         "payload": {"category": "auth", "kind": "bad_key", "message": "no"}},
+    ])
+    result = await _run(tmp_path, cfg=SandboxConfig(allow_unsandboxed=True))
+    assert isinstance(result, DetachedEnvironmentFailure)
+    assert result.category == "auth"
+    assert result.detail == "bad_key"
+
+
+@pytest.mark.anyio
+async def test_config_error_is_environment_failure(tmp_path, provider_registry):
+    _register(provider_registry, [
+        {"type": "error",
+         "payload": {"category": "config", "kind": "rejected", "message": "no"}},
+    ])
+    result = await _run(tmp_path, cfg=SandboxConfig(allow_unsandboxed=True))
+    assert isinstance(result, DetachedEnvironmentFailure)
+    assert result.category == "config"
+    assert result.detail == "rejected"
