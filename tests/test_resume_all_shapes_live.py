@@ -40,6 +40,44 @@ from tests.conftest import _init_repo
 
 _MODEL = "claude-haiku-4-5-20251001"
 
+# Test-specific nudge, not production's COMPLETION_NUDGE whose WAITING branch could loop haiku.
+_AUTO_NUDGE_TEXT = (
+    "Your turn ended without calling complete_step. There is no human to "
+    "wait for — call complete_step now with status=Success."
+)
+
+
+def _auto_nudge_continuation():
+    """Nudge continuation_fn: cap 2 bare turn-ends, then raise so a broken model fails loud."""
+    remaining = 2
+
+    def _cont(_last_text: str) -> tuple[str, bool]:
+        nonlocal remaining
+        if remaining <= 0:
+            raise AssertionError(
+                "live model failed to call complete_step after 2 auto-nudges "
+                "(3 attempts) — genuinely broken, not a transient slip")
+        remaining -= 1
+        return (_AUTO_NUDGE_TEXT, False)
+
+    return _cont
+
+
+def test_auto_nudge_continuation_caps_at_two_then_raises():
+    cont = _auto_nudge_continuation()
+    # First two bare-turn-ends each yield the verbatim nudge as an engine
+    # continuation (human=False), never a solicit.
+    assert cont("prose only, no complete_step") == (_AUTO_NUDGE_TEXT, False)
+    assert cont("still prose") == (_AUTO_NUDGE_TEXT, False)
+    # The nudge text is the exact verbatim string the spec pins.
+    assert _AUTO_NUDGE_TEXT == (
+        "Your turn ended without calling complete_step. There is no human to "
+        "wait for — call complete_step now with status=Success."
+    )
+    # Third bare-turn-end exhausts the cap: fail loudly, do not loop forever.
+    with pytest.raises(AssertionError):
+        cont("third bare turn end")
+
 
 def _live_inv(tmp_path: Path) -> AgentInvocation:
     """A read_file+complete_step invocation rooted at a real git repo, with a
@@ -77,6 +115,8 @@ def _live_inv(tmp_path: Path) -> AgentInvocation:
         # Ignored on the resume path (the runner uses the seeded transcript); a
         # required field, so a placeholder turn.
         initial_messages=(Message(role="user", content=(TextBlock(text="go"),)),),
+        # Completion-nudge safety net production always wires (else a lone prose-only turn fails).
+        continuation_fn=_auto_nudge_continuation(),
         quest_context=QuestContext(
             title="Test", project_root=tmp_path,
             workflow_dir=tmp_path / ".imp" / "change" / "workflow",
@@ -166,7 +206,7 @@ async def test_send_to_llm_store_backed_native_resume(
     # turn (the folded tool_result is NOT in the delta), not the whole transcript
     # (which a replay fallback would send).
     from imp.engine.agent_run import _CONTINUATION_NUDGE
-    assert len(streamed) == 1, streamed
+    assert len(streamed) >= 1, streamed
     assert len(streamed[0]) == 1 and streamed[0][0].role == "user", streamed[0]
     assert not any(isinstance(b, ToolResultBlock) for b in streamed[0][0].content)
     assert any(isinstance(b, TextBlock) and b.text == _CONTINUATION_NUDGE
@@ -235,7 +275,7 @@ async def test_dangling_tool_use_store_backed_native_resume(
     assert events[-1]["type"] == "agent_result", events[-1]
     # The synthesized tool_result for t1 was streamed as the delta (not an empty
     # query): one trailing user turn carrying a tool_result.
-    assert len(streamed) == 1, streamed
+    assert len(streamed) >= 1, streamed
     assert len(streamed[0]) == 1 and streamed[0][0].role == "user", streamed[0]
     assert any(isinstance(b, ToolResultBlock) for b in streamed[0][0].content)
     assert not any(
@@ -282,6 +322,7 @@ def _corrective_live_inv(tmp_path: Path) -> AgentInvocation:
             "status=Success now."
         ),
         initial_messages=(Message(role="user", content=(TextBlock(text="go"),)),),
+        continuation_fn=_auto_nudge_continuation(),
         quest_context=QuestContext(
             title="Test", project_root=tmp_path,
             workflow_dir=tmp_path / ".imp" / "change" / "workflow",
@@ -341,7 +382,7 @@ async def test_complete_step_handback_native_resume(
     # The handback is the single streamed delta turn — the is_error complete_step
     # result whose content IS the feedback (the dangling call is left in the loaded
     # session and this result pairs it).
-    assert len(streamed) == 1, streamed
+    assert len(streamed) >= 1, streamed
     assert len(streamed[0]) == 1 and streamed[0][0].role == "user", streamed[0]
     results = [b for b in streamed[0][0].content if isinstance(b, ToolResultBlock)]
     assert len(results) == 1 and results[0].tool_use_id == "c0"
@@ -425,7 +466,7 @@ async def test_step_completed_native_resume_redrives_with_feedback(
     assert "runner_warning" not in log_types
     # Native single-turn delta: the first query streamed exactly the delivered
     # feedback turn, not the whole transcript a replay fallback would send.
-    assert len(streamed) == 1, streamed
+    assert len(streamed) >= 1, streamed
     assert len(streamed[0]) == 1 and streamed[0][0].role == "user", streamed[0]
     block = streamed[0][0].content[0]
     assert isinstance(block, TextBlock)
@@ -504,7 +545,7 @@ async def test_midrun_interrupt_resume_continues_agent(
     assert "awaiting_user_input" not in log_types, log_types
     # The continuation nudge drove the resume: the single streamed delta is exactly
     # the nudge user turn (not the whole-transcript replay, not an empty query).
-    assert len(streamed) == 1, streamed
+    assert len(streamed) >= 1, streamed
     assert len(streamed[0]) == 1 and streamed[0][0].role == "user", streamed[0]
     assert any(isinstance(b, TextBlock) and b.text == _CONTINUATION_NUDGE
                for b in streamed[0][0].content), streamed[0][0]
