@@ -61,7 +61,9 @@ def test_run_mutation_edit_sets_depends_on(tmp_path: Path) -> None:
     result = run_mutation(tmp_path, "edit", {
         "token": "mut10", "title": None, "backlog": False, "active": False,
         "depends_on": ["dep77"], "clear_deps": False, "append_intent": None})
-    assert result == {"returncode": 0, "message": ""}
+    assert result == {
+        "returncode": 0,
+        "message": "edited 2026-06-24-mut10 · depends on dep77"}
     assert _meta(tmp_path, "2026-06-24-mut10")["depends_on"] == ["dep77"]
 
 
@@ -131,7 +133,9 @@ async def test_proxy_mutation_edit_round_trips_over_socket(
                 "token": "mut50", "title": "Renamed via socket", "backlog": False,
                 "active": False, "depends_on": None, "clear_deps": False,
                 "append_intent": None})
-        assert result == {"returncode": 0, "message": ""}
+        assert result == {
+            "returncode": 0,
+            "message": 'edited 2026-06-24-mut50 · title → "Renamed via socket"'}
         assert Quest.load(tmp_path, "2026-06-24-mut50").title == "Renamed via socket"
 
         await session.close()

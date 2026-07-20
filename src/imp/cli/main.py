@@ -3059,6 +3059,10 @@ def apply_edit(
             return 2, (f"imp: {quest_id} has already started; --append-intent only "
                        "applies before a quest is picked up")
 
+    prior_origin = quest.origin
+    prior_deps = list(quest.depends_on)
+    title_changed = title is not None and title != quest.title
+
     if title is not None and title != quest.title:
         if quest.materialized:
             quest.rename(title, log=quest.event_log())
@@ -3078,7 +3082,23 @@ def apply_edit(
             quest.set_seed_opening(existing + "\n\n" + append_intent)
         else:
             quest.set_seed_opening(append_intent)
-    return 0, None
+
+    fragments: list[str] = []
+    if title_changed:
+        fragments.append(f'title → "{title}"')
+    if backlog and prior_origin != "backlog":
+        fragments.append("moved to backlog")
+    elif active and prior_origin != "draft":
+        fragments.append("moved to active")
+    if depends_on is not None and depends_on and depends_on != prior_deps:
+        fragments.append(f'depends on {", ".join(depends_on)}')
+    elif (clear_deps or (depends_on is not None and not depends_on)) and prior_deps:
+        fragments.append("cleared dependencies")
+    if append_intent is not None:
+        fragments.append("appended to intent")
+
+    changes = "; ".join(fragments) if fragments else "no changes"
+    return 0, f"edited {quest_id} · {changes}"
 
 
 def _emit_mutation_result(result: dict[str, Any]) -> int:
