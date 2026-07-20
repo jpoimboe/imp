@@ -11,8 +11,9 @@ import re
 from typing import Any
 from unicodedata import east_asian_width
 
-# Weight/reset are theme-independent (not hue), so they live outside the themes.
-_ATTRS: dict[str, str] = {"dim": "\x1b[2m", "bold": "\x1b[1m", "reset": "\x1b[0m"}
+# These non-hue attributes are theme-independent, so they live outside the themes.
+_ATTRS: dict[str, str] = {"dim": "\x1b[2m", "bold": "\x1b[1m",
+                          "reverse": "\x1b[7m", "reset": "\x1b[0m"}
 
 # The `ansi` theme: the 16 named SGR colors. The terminal paints these from its
 # OWN palette, so they adapt to any background — the safe, universal default and
@@ -151,8 +152,8 @@ def caret(*, enabled: bool) -> str:
 # that marks a SUBMITTED (scrolled-back) user turn and ties visually to the gold
 # `>` caret. Only the reprinted turn carries it; the live input field stays
 # unpainted while typing. The `ansi` 16-color theme has no good subtle band, so
-# it gets none there (the │ bar marks the turn). dark: a warm amber above the
-# #1e1e1e surface; light: a pale warm cream.
+# it uses reverse-video emphasis there instead (see user_bg_open). dark: a warm
+# amber above the #1e1e1e surface; light: a pale warm cream.
 _USER_BG_RGB: dict[str, tuple[int, int, int]] = {
     "dark": (0x43, 0x38, 0x28),
     "light": (0xF1, 0xE9, 0xDB),
@@ -160,10 +161,13 @@ _USER_BG_RGB: dict[str, tuple[int, int, int]] = {
 
 
 def user_bg_open(*, enabled: bool) -> str:
-    """The opening SGR for the entered-input background, or '' when color is off
-    or the active theme is `ansi` (no subtle band in 16 colors)."""
+    """The opening SGR for the entered-input emphasis: a warm background band in a
+    truecolor theme, or reverse-video under `ansi` (16-color has no subtle band).
+    '' when color is off."""
     if not enabled:
         return ""
+    if _active_theme == "ansi":
+        return _ATTRS["reverse"]
     rgb = _USER_BG_RGB.get(_active_theme)
     if rgb is None:
         return ""
@@ -173,8 +177,9 @@ def user_bg_open(*, enabled: bool) -> str:
 # Cool blue-gray "toolbar/footer" background, per truecolor theme — the band
 # behind the interactive prompt's bottom toolbar and the live-status footer.
 # Split from the warmer user-scrollback band (_USER_BG_RGB) so the two surfaces
-# color independently. The `ansi` 16-color theme has no band, matching
-# user_bg_open. dark: #2B2F3A; light: #E4EAF2.
+# color independently. The `ansi` 16-color theme gets no toolbar band (unlike
+# user_bg_open, the toolbar has no reverse-video treatment). dark: #2B2F3A;
+# light: #E4EAF2.
 _TOOLBAR_BG_RGB: dict[str, tuple[int, int, int]] = {
     "dark": (0x2B, 0x2F, 0x3A),
     "light": (0xE4, 0xEA, 0xF2),

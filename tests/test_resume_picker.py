@@ -146,3 +146,26 @@ async def test_picker_constructs_application_with_erase_when_done(monkeypatch) -
         pipe.send_text("q")                          # cancel; we only assert construction
         await run_picker(_cands(), now=_NOW, color=False, header=_HEADER)
     assert captured.get("erase_when_done") is True
+
+
+def test_render_selected_row_carries_reverse_bar_color_on() -> None:
+    lines = ResumePicker(_cands(), now=_NOW, color=True, header=_HEADER).render().splitlines()
+    assert lines[0].startswith("\x1b[7m")          # selected row wrapped in reverse
+    assert lines[0].endswith("\x1b[0m")            # bar closed with a reset
+    assert "▸ " in lines[0]                        # the marker sits inside the bar
+    assert "\x1b[7m" not in lines[1]               # unselected row has no reverse bar
+
+
+def test_render_selected_bar_has_no_inner_sgr_color_on() -> None:
+    # Inner line built color-off, so the only escapes are the outer reverse + reset.
+    cands = [Candidate(quest_id="2026-06-11-err999", title="Boom",
+                       status="error", step="plan", step_label="p1",
+                       last_iso="2026-06-11T11:45:00+00:00")]
+    line = ResumePicker(cands, now=_NOW, color=True, header=_HEADER).render().splitlines()[0]
+    assert line.count("\x1b[") == 2
+
+
+def test_render_no_reverse_bar_color_off() -> None:
+    lines = ResumePicker(_cands(), now=_NOW, color=False, header=_HEADER).render().splitlines()
+    assert "\x1b[7m" not in lines[0]               # color off → no escape at all
+    assert lines[0].startswith("▸ ")               # the ▸ alone marks the row

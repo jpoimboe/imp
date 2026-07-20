@@ -72,12 +72,12 @@ NAME_CAP = 70   # cap a long name/intent's pull on the shared width so STATUS ke
 # terminal width remains after this.
 _PREFIX_W = ID_W + STATUS_W + AGE_W + 6
 
-# Meaning-based palette keyed by the resolved word: bold=waiting,
-# wordmark=merge-blocked, red=broke, else plain.
+# Meaning-based palette keyed by the resolved word: bold weight for
+# waiting / error / merge_blocked; every other status renders plain.
 STATUS_COLORS: dict[str, tuple[str, ...]] = {
     "waiting": ("bold",),
-    "error": ("red",),
-    "merge_blocked": ("wordmark",),
+    "error": ("bold",),
+    "merge_blocked": ("bold",),
 }
 
 
@@ -159,18 +159,17 @@ def _status_segment(status: str, step: str, step_label: str | None,
                     status_width: int = STATUS_W) -> str:
     """Status word plus dim ` (label)` suffix; bare word for stepless rows.
 
-    When the cell is squeezed so tight there is no room for a ` (…)` suffix
-    (budget < 1), the suffix is dropped and the bare status word is returned,
-    so the segment length is always <= status_width and the cell never spills.
+    When the full ` (label)` suffix does not fit the cell — either no room for
+    the framing (budget < 1) or the label itself is longer than the budget —
+    the whole parenthetical is dropped and the bare status word is returned,
+    never a partial `(…)`; the segment length is always <= status_width.
     """
     label = compose_status_label(step, step_label, phase_label)
     if label is None:
         return status
     budget = status_width - len(status) - 3   # one space + "(" + ")"
-    if budget < 1:
+    if budget < 1 or len(label) > budget:
         return status
-    if len(label) > budget:
-        label = _truncate(label, budget)
     return f"{status} ({label})"
 
 

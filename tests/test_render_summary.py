@@ -645,11 +645,11 @@ def test_header_rollup_includes_subagent_tokens_and_cost():
     assert "$0.50" in out[0]   # 0.20 step + 0.30 subagent
 
 
-def test_header_merge_blocked_renders_two_words_on_underscore_color():
+def test_header_merge_blocked_renders_two_words_bold():
     hdr = SummaryHeader(workflow="feature", quest_id="abc",
                         status="merge_blocked", total_seconds=100.0)
     out = render_summary([], header=hdr, color=True, width=80)
-    assert "\x1b[33mmerge blocked\x1b[0m" in out[0]   # wordmark color, two-word text
+    assert "\x1b[1mmerge blocked\x1b[0m" in out[0]   # bold weight, two-word text
     assert "merge_blocked" not in out[0]
 
 

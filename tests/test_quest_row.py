@@ -98,14 +98,14 @@ def test_waiting_status_renders_bold():
     assert "\x1b[1mwaiting\x1b[0m" in line
 
 
-def test_error_status_renders_red():
+def test_error_status_renders_bold():
     line = format_quest_line(**_row(status="error"), color=True)
-    assert "\x1b[31merror\x1b[0m" in line
+    assert "\x1b[1merror\x1b[0m" in line
 
 
-def test_merge_blocked_renders_two_words_on_underscore_color_key():
+def test_merge_blocked_renders_two_words_bold():
     line = format_quest_line(**_row(status="merge_blocked"), color=True)
-    assert "\x1b[33mmerge blocked\x1b[0m" in line   # wordmark color, two-word text
+    assert "\x1b[1mmerge blocked\x1b[0m" in line   # bold weight, two-word text
     assert "merge_blocked" not in line
 
 
@@ -203,16 +203,17 @@ def test_provenance_words_absent_from_palette():
     assert "followup" not in STATUS_COLORS
 
 
-def test_status_word_never_truncated_only_label_is():
+def test_oversized_label_dropped_not_truncated():
     line = format_quest_line(
         **_row(status="merge_blocked", step="x"),
         step_label="resolving deferred items", color=False)
     assert "merge blocked" in line               # status word intact
-    assert "…" in line                           # label was truncated
-    assert "resolving deferred items" not in line  # full label did not fit
+    assert "…" not in line                       # no partial ellipsis
+    assert "(" not in line                       # whole parenthetical dropped
+    assert "resolving deferred items" not in line
 
 
-def test_merge_blocked_status_word_is_wordmark_under_dark_theme() -> None:
+def test_merge_blocked_status_word_is_bold_theme_independent() -> None:
     from imp.cli import palette as pal
     try:
         pal.set_theme("dark")
@@ -220,9 +221,8 @@ def test_merge_blocked_status_word_is_wordmark_under_dark_theme() -> None:
     finally:
         pal.set_theme("ansi")
     wordmark = pal.theme_escapes("dark")["wordmark"]   # \x1b[38;2;255;154;60m
-    yellow = pal.theme_escapes("dark")["yellow"]        # \x1b[38;2;199;151;106m
-    assert wordmark + "merge blocked" in line           # status word painted wordmark
-    assert yellow not in line                           # not the muted yellow role
+    assert "\x1b[1mmerge blocked" in line               # bold weight, not hued
+    assert wordmark not in line                         # no warm-gold hue survives
 
 
 def test_intent_fallback_for_empty_title():
@@ -272,11 +272,14 @@ def test_status_cell_omits_phase_when_none():
     assert "·" not in line
 
 
-def test_status_width_narrows_label_budget():
-    # status_width 20 -> budget 20-7-3 = 10, so a 30-char label is clipped.
+def test_status_width_drops_oversized_label():
+    # status_width 20 -> budget 20-7-3 = 10; a 30-char label does not fit and is
+    # dropped whole, leaving the bare status word (never a partial `(…)`).
     line = format_quest_line(**_row(status="running", step="x"),
                               step_label="a" * 30, status_width=20, color=False)
-    assert "…" in line
+    assert "running" in line
+    assert "…" not in line
+    assert "(" not in line
     assert "a" * 30 not in line
 
 
@@ -291,6 +294,21 @@ def test_status_subfloor_drops_suffix_no_overflow():
     assert "a very long label" not in line
 
 
+def test_status_label_fits_at_budget_boundary():
+    # status_width 20 -> budget 10; a label of exactly 10 chars still fits in full.
+    line = format_quest_line(**_row(status="running", step="x"),
+                              step_label="b" * 10, status_width=20, color=False)
+    assert "running (" + "b" * 10 + ")" in line
+
+
+def test_status_label_drops_one_char_over_budget():
+    # status_width 20 -> budget 10; an 11-char label is one over and is dropped whole.
+    line = format_quest_line(**_row(status="running", step="x"),
+                              step_label="b" * 11, status_width=20, color=False)
+    assert "running" in line
+    assert "(" not in line
+
+
 def test_header_line_honors_status_width():
     from imp.cli.quest_row import ID_W
     h = header_line(color=False, name_width=30, status_width=25)
@@ -302,8 +320,8 @@ def test_status_colors_are_meaning_based() -> None:
     from imp.cli.quest_row import STATUS_COLORS
     assert "running" not in STATUS_COLORS    # plain, no longer bold
     assert STATUS_COLORS["waiting"] == ("bold",)
-    assert STATUS_COLORS["error"] == ("red",)
-    assert STATUS_COLORS["merge_blocked"] == ("wordmark",)
+    assert STATUS_COLORS["error"] == ("bold",)
+    assert STATUS_COLORS["merge_blocked"] == ("bold",)
     assert "new" not in STATUS_COLORS       # plain, at rest
     assert "paused" not in STATUS_COLORS
     assert "merged" not in STATUS_COLORS

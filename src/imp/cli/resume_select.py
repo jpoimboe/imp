@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
+from imp.cli import palette as pal
 from imp.cli import quest_row
 
 
@@ -45,12 +46,20 @@ class ResumePicker:
         out = []
         name_w = quest_row.name_budget(indent=2)  # the 2-char selection marker
         for i, c in enumerate(self.candidates):
-            marker = "▸ " if i == self.index else "  "
-            out.append(marker + quest_row.format_quest_line(
-                quest_id=c.quest_id, title=c.title,
-                status=c.status, step=c.step, step_label=c.step_label,
-                phase_label=c.phase_label, last_iso=c.last_iso, intent=c.intent,
-                now=self.now, color=self.color, name_width=name_w))
+            if i == self.index:
+                # Inner line built color-off so no inner reset breaks the reverse bar.
+                inner = "▸ " + quest_row.format_quest_line(
+                    quest_id=c.quest_id, title=c.title,
+                    status=c.status, step=c.step, step_label=c.step_label,
+                    phase_label=c.phase_label, last_iso=c.last_iso, intent=c.intent,
+                    now=self.now, color=False, name_width=name_w)
+                out.append(pal.ansi(inner, "reverse", enabled=self.color))
+            else:
+                out.append("  " + quest_row.format_quest_line(
+                    quest_id=c.quest_id, title=c.title,
+                    status=c.status, step=c.step, step_label=c.step_label,
+                    phase_label=c.phase_label, last_iso=c.last_iso, intent=c.intent,
+                    now=self.now, color=self.color, name_width=name_w))
         return "\n".join(out)
 
 
@@ -65,8 +74,6 @@ async def run_picker(candidates: list[Candidate], *, now: datetime,
     from prompt_toolkit.layout import Layout
     from prompt_toolkit.layout.containers import HSplit, Window
     from prompt_toolkit.layout.controls import FormattedTextControl
-
-    from imp.cli import palette as pal
 
     model = ResumePicker(candidates, now=now, color=color, header=header,
                          selected_index=selected_index)

@@ -281,3 +281,24 @@ def test_toolbar_bg_open_is_cool_blue_gray_distinct_from_user_band() -> None:
     pal.set_theme("ansi")
     assert pal.toolbar_bg_open(enabled=True) == ""      # no subtle band in 16-color
     assert pal.toolbar_bg_open(enabled=False) == ""     # color off
+
+
+def test_reverse_attr_wraps_with_sgr_7() -> None:
+    assert pal._ATTRS["reverse"] == "\x1b[7m"
+    assert pal.ansi("hi", "reverse", enabled=True) == "\x1b[7mhi\x1b[0m"
+    assert pal.ansi("hi", "reverse", enabled=False) == "hi"
+
+
+def test_reverse_attr_is_theme_independent() -> None:
+    for theme in ("ansi", "dark", "light"):
+        pal.set_theme(theme)
+        assert pal._ANSI["reverse"] == "\x1b[7m"
+        assert pal.ansi("x", "reverse", enabled=True) == "\x1b[7mx\x1b[0m"
+
+
+def test_user_bg_open_reverse_under_ansi_band_under_truecolor() -> None:
+    pal.set_theme("ansi")
+    assert pal.user_bg_open(enabled=True) == "\x1b[7m"          # 16-color emphasis
+    pal.set_theme("dark")
+    assert pal.user_bg_open(enabled=True) == "\x1b[48;2;67;56;40m"   # warm band kept
+    assert pal.user_bg_open(enabled=False) == ""               # color off, any theme
