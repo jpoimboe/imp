@@ -16,3 +16,8 @@ self-knowledge index that agents load, not human docs. Keep it accurate
 whenever you change imp's CLI commands/flags, agent tools, or core
 concepts/vocabulary. When editing agent/skill prose, be maximally succinct —
 every token counts.
+
+Flaky tests under load are a major problem. Write tests to tolerate
+timing/load variance: poll for the actual signal instead of fixed sleeps, give
+inner waits generous budgets that never false-fire under saturated `-n auto`
+CI, and rely on a single outer timeout to catch genuine hangs.
