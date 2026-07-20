@@ -48,7 +48,37 @@ def _make_change(tmp_path: Path, quest_id: str) -> Quest:
 
 
 async def _wait_for_socket(sock: str) -> None:
-    await wait_until(lambda: Path(sock).exists())
+    with anyio.fail_after(30):  # deadlock backstop only, never a tuned window
+        while True:
+            try:
+                stream = await anyio.connect_unix(sock)
+            except (FileNotFoundError, ConnectionRefusedError, OSError):
+                await anyio.sleep(0.02)
+                continue
+            await stream.aclose()
+            return
+
+
+@pytest.mark.anyio
+async def test_wait_for_socket_returns_when_listener_accepting(
+    tmp_path: Path,
+) -> None:
+    sock = str(tmp_path / "ready.sock")
+    listener = await anyio.create_unix_listener(sock)
+    async with listener:
+        with anyio.fail_after(5):
+            await _wait_for_socket(sock)
+
+
+@pytest.mark.anyio
+async def test_wait_for_socket_waits_when_file_exists_but_no_listener(
+    tmp_path: Path,
+) -> None:
+    sock = str(tmp_path / "bare.sock")
+    Path(sock).write_bytes(b"")  # file exists, but nothing is listening
+    with pytest.raises(TimeoutError):
+        with anyio.fail_after(0.3):
+            await _wait_for_socket(sock)
 
 
 def _seed_step(quest: Quest, step: str) -> None:
