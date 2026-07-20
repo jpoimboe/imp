@@ -26,8 +26,11 @@ def _label(src_file: Path) -> str:
     return _elide(src_file)
 
 
-def _arrow(out: TextIO, key: str, value: str, src_file: Path) -> None:
-    out.write(f"  {key:<28} {value:<24} ← {_label(src_file)}\n")
+def _emit_section(out: TextIO, rows: list[tuple[str, str, str]]) -> None:
+    """Emit rows with the value column sized to the section's widest value so arrows align."""
+    width = max([24, *(len(value) for _, value, _ in rows)])
+    for key, value, label in rows:
+        out.write(f"  {key:<28} {value:<{width}} ← {label}\n")
 
 
 def render_config(eff: EffectiveConfig, out: TextIO, *, color: bool = False,
@@ -35,13 +38,17 @@ def render_config(eff: EffectiveConfig, out: TextIO, *, color: bool = False,
     cfg, prov = eff.config, eff.provenance
     out.write("tiers:\n")
     configured = set(cfg.providers)
+    tier_rows: list[tuple[str, str, str]] = []
     for tier in sorted(cfg.tiers):
         for vendor in sorted(cfg.tiers[tier]):
             if not show_all and configured and vendor not in configured:
                 continue
             src = prov.get(("tiers", tier, vendor), FLOOR_SRC)
-            _arrow(out, f"{tier} {vendor}", cfg.tiers[tier][vendor], src.file)
+            tier_rows.append(
+                (f"{tier} {vendor}", cfg.tiers[tier][vendor], _label(src.file)))
+    _emit_section(out, tier_rows)
     out.write("\nsettings:\n")
+    setting_rows: list[tuple[str, str, str]] = []
     for key, val in (
         ("providers", ", ".join(cfg.providers) or "(none)"),
         ("theme", cfg.theme),
@@ -58,7 +65,8 @@ def render_config(eff: EffectiveConfig, out: TextIO, *, color: bool = False,
     ):
         leaf_src = prov.get((key,))
         label = _label(leaf_src.file) if leaf_src is not None else "default"
-        out.write(f"  {key:<28} {val:<24} ← {label}\n")
+        setting_rows.append((key, val, label))
+    _emit_section(out, setting_rows)
 
     out.write("\nprovider keys (local check):\n")
     defaults = iter_provider_defaults()

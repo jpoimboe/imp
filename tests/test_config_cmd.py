@@ -284,6 +284,33 @@ def test_render_shows_configured_pythonpath(
     assert line is not None and "src, lib" in line
 
 
+def test_config_settings_arrows_align_with_a_long_value(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    xdg = tmp_path / "xdg" / "imp"
+    xdg.mkdir(parents=True)
+    (xdg / "config.yaml").write_text(
+        "providers: [openai]\n"
+        "test_cmd_fast: make check\n"
+        "test_cmd_slow: make check && make test-live\n"   # 28 chars, exceeds 24
+    )
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+    eff = load_effective_config(project_root=None, control_root=None)
+    out = io.StringIO()
+    render_config(eff, out, color=False)
+    lines = out.getvalue().splitlines()
+    start = lines.index("settings:")
+    section: list[str] = []
+    for ln in lines[start + 1:]:
+        if ln == "":
+            break
+        section.append(ln)
+    arrow_cols = [ln.index("←") for ln in section if "←" in ln]
+    assert len(arrow_cols) >= 2
+    assert len(set(arrow_cols)) == 1          # every ← aligned within the section
+    assert "make check && make test-live" in out.getvalue()   # not truncated
+
+
 def test_render_shows_unset_pythonpath(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

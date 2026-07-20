@@ -12,23 +12,24 @@ from tests.conftest import _seed_control
 
 
 def test_ls_is_unknown_after_rename(tmp_path: Path) -> None:
-    # `/ls` matches no builtin: it falls through the skill lookup and, with no
-    # `ls` skill present, is submitted verbatim rather than erroring.
+    # `/ls` matches no builtin and no skill; command-shaped, so it is a real
+    # "Unknown command" error rather than being submitted verbatim.
     quest = SimpleNamespace(control_root=tmp_path, workflow_dir=tmp_path)
     out: list[str] = []
     result = handle_slash_line("/ls", quest=quest, output_fn=out.append)
-    assert result == "/ls"
-    assert out == []
+    assert result is REPROMPT
+    assert any("Unknown command: /ls — /help for the list" in line for line in out)
 
 
-def test_removed_builtins_fall_through_as_ordinary_input(tmp_path: Path) -> None:
-    # /list, /search, /resume are no longer builtins: each falls through the
-    # skill resolver, matches no skill, and is submitted verbatim as input.
+def test_removed_builtins_error_as_unknown_command(tmp_path: Path) -> None:
+    # /list, /search, /resume are no longer builtins: each matches no skill and,
+    # being command-shaped, is a real "Unknown command" error.
     quest = SimpleNamespace(workflow_dir=tmp_path, control_root=tmp_path)
-    for line in ("/list", "/search dark", "/resume conv1"):
+    for line, cmd in (("/list", "list"), ("/search dark", "search"),
+                      ("/resume conv1", "resume")):
         out: list[str] = []
-        assert handle_slash_line(line, quest=quest, output_fn=out.append) == line
-        assert out == []
+        assert handle_slash_line(line, quest=quest, output_fn=out.append) is REPROMPT
+        assert any(f"Unknown command: /{cmd} — /help for the list" in o for o in out)
 
 
 def test_help_omits_removed_builtins() -> None:
@@ -308,12 +309,13 @@ def test_compact_is_in_the_help_text() -> None:
     assert any("/compact" in line for line in lines)
 
 
-def test_unknown_command_still_falls_through_after_compact(tmp_path: Path) -> None:
-    # AC7d: adding /compact must not shadow the unknown-command fall-through.
+def test_unknown_command_errors_after_compact(tmp_path: Path) -> None:
+    # AC7d: adding /compact must not shadow the unknown-command handling.
     quest = SimpleNamespace(workflow_dir=tmp_path, control_root=tmp_path)
     out: list[str] = []
-    assert handle_slash_line("/nope", quest=quest, output_fn=out.append) == "/nope"
-    assert out == []
+    result = handle_slash_line("/nope", quest=quest, output_fn=out.append)
+    assert result is REPROMPT
+    assert any("Unknown command: /nope — /help for the list" in line for line in out)
 
 
 def test_help_pre_session_omits_leave_trio_keeps_abandon() -> None:

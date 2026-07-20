@@ -190,6 +190,8 @@ def test_latest_phase_label_helper_removed() -> None:
 
 
 def test_detail_card_created_trims_microseconds_and_offset(tmp_path: Path) -> None:
+    import os
+    import time
     _seed_control(tmp_path)
     cdir = tmp_path / ".imp" / "quests" / "2026-06-20-tsx001"
     (cdir / "state").mkdir(parents=True)
@@ -200,9 +202,20 @@ def test_detail_card_created_trims_microseconds_and_offset(tmp_path: Path) -> No
     (cdir / "events.jsonl").write_text("")
     State(id="2026-06-20-tsx001", status="paused", step="spec-writer",
           step_attempt=0).save(cdir / "state")
-    card = "\n".join(main._detail_card(tmp_path, "2026-06-20-tsx001", now=_NOW, color=False))
+    saved = os.environ.get("TZ")
+    os.environ["TZ"] = "America/New_York"   # June → EDT (UTC-4): 11:00 UTC → 07:00
+    time.tzset()
+    try:
+        card = "\n".join(
+            main._detail_card(tmp_path, "2026-06-20-tsx001", now=_NOW, color=False))
+    finally:
+        if saved is None:
+            os.environ.pop("TZ", None)
+        else:
+            os.environ["TZ"] = saved
+        time.tzset()
     created_line = next(ln for ln in card.splitlines() if ln.startswith("created:"))
-    assert "2026-06-20 11:00:00" in created_line   # trimmed to seconds, space-separated
+    assert "2026-06-20 07:00:00" in created_line   # rendered in local zone, seconds
     assert ".123456" not in created_line            # microseconds dropped
     assert "+00:00" not in created_line              # tz offset dropped
     assert "(" in created_line and ")" in created_line   # friendly age still present

@@ -146,7 +146,7 @@ def test_edit_depends_on_and_clear_deps_are_mutually_exclusive() -> None:
             ["edit", "2026-06-24-x", "--depends-on", "A", "--clear-deps"])
 
 
-def test_edit_title_is_silent_on_success(
+def test_edit_title_prints_confirmation(
         tmp_path: Path, monkeypatch, capsys) -> None:
     _seed_control(tmp_path)
     monkeypatch.chdir(tmp_path)
@@ -154,7 +154,8 @@ def test_edit_title_is_silent_on_success(
     rc = main._cmd_edit(_edit_args("2026-06-24-edit10", title="Renamed"))
     assert rc == 0
     assert Quest.load(tmp_path, "2026-06-24-edit10").title == "Renamed"
-    assert capsys.readouterr().out == ""
+    assert capsys.readouterr().out.strip() == \
+        'edited 2026-06-24-edit10 · title → "Renamed"'
 
 
 def test_edit_append_intent_first_note_multiparagraph(
@@ -170,7 +171,8 @@ def test_edit_append_intent_first_note_multiparagraph(
     assert rc == 0
     assert Quest.load(tmp_path, "2026-06-24-edit20").seed_opening == \
         "Title\n\nDescription body\n\nhello"
-    assert capsys.readouterr().out == ""
+    assert capsys.readouterr().out.strip() == \
+        "edited 2026-06-24-edit20 · appended to intent"
 
 
 def test_edit_append_intent_first_note_single_line(
@@ -277,7 +279,8 @@ def test_apply_edit_sets_title_and_returns_ok(tmp_path: Path, monkeypatch) -> No
     rc, msg = main.apply_edit(
         tmp_path, "2026-06-24-edit90", title="Renamed", backlog=False,
         active=False, depends_on=None, clear_deps=False, append_intent=None)
-    assert (rc, msg) == (0, None)
+    assert rc == 0
+    assert msg == 'edited 2026-06-24-edit90 · title → "Renamed"'
     assert Quest.load(tmp_path, "2026-06-24-edit90").title == "Renamed"
 
 
@@ -290,6 +293,121 @@ def test_apply_edit_no_fields_returns_usage_error(tmp_path: Path, monkeypatch) -
         active=False, depends_on=None, clear_deps=False, append_intent=None)
     assert rc == 2
     assert msg is not None and "at least one of" in msg
+
+
+def test_apply_edit_title_noop_reports_no_changes(tmp_path: Path, monkeypatch) -> None:
+    _seed_control(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    _make_draft(tmp_path, "2026-06-24-edit92")  # fixture title is "Original"
+    rc, msg = main.apply_edit(
+        tmp_path, "2026-06-24-edit92", title="Original", backlog=False,
+        active=False, depends_on=None, clear_deps=False, append_intent=None)
+    assert (rc, msg) == (0, "edited 2026-06-24-edit92 · no changes")
+
+
+def test_apply_edit_moved_to_backlog_fragment(tmp_path: Path, monkeypatch) -> None:
+    _seed_control(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    _make_draft(tmp_path, "2026-06-24-edit93", origin="draft")
+    rc, msg = main.apply_edit(
+        tmp_path, "2026-06-24-edit93", title=None, backlog=True,
+        active=False, depends_on=None, clear_deps=False, append_intent=None)
+    assert (rc, msg) == (0, "edited 2026-06-24-edit93 · moved to backlog")
+
+
+def test_apply_edit_backlog_noop_reports_no_changes(tmp_path: Path, monkeypatch) -> None:
+    _seed_control(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    _make_draft(tmp_path, "2026-06-24-edit94", origin="backlog")
+    rc, msg = main.apply_edit(
+        tmp_path, "2026-06-24-edit94", title=None, backlog=True,
+        active=False, depends_on=None, clear_deps=False, append_intent=None)
+    assert (rc, msg) == (0, "edited 2026-06-24-edit94 · no changes")
+
+
+def test_apply_edit_moved_to_active_fragment(tmp_path: Path, monkeypatch) -> None:
+    _seed_control(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    _make_draft(tmp_path, "2026-06-24-edit95", origin="idea")
+    rc, msg = main.apply_edit(
+        tmp_path, "2026-06-24-edit95", title=None, backlog=False,
+        active=True, depends_on=None, clear_deps=False, append_intent=None)
+    assert (rc, msg) == (0, "edited 2026-06-24-edit95 · moved to active")
+
+
+def test_apply_edit_active_noop_reports_no_changes(tmp_path: Path, monkeypatch) -> None:
+    _seed_control(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    _make_draft(tmp_path, "2026-06-24-edita2", origin="draft")  # already draft
+    rc, msg = main.apply_edit(
+        tmp_path, "2026-06-24-edita2", title=None, backlog=False,
+        active=True, depends_on=None, clear_deps=False, append_intent=None)
+    assert (rc, msg) == (0, "edited 2026-06-24-edita2 · no changes")
+
+
+def test_apply_edit_depends_on_fragment(tmp_path: Path, monkeypatch) -> None:
+    _seed_control(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    _make_draft(tmp_path, "2026-06-24-edit96")
+    rc, msg = main.apply_edit(
+        tmp_path, "2026-06-24-edit96", title=None, backlog=False,
+        active=False, depends_on=["A", "B"], clear_deps=False, append_intent=None)
+    assert (rc, msg) == (0, "edited 2026-06-24-edit96 · depends on A, B")
+
+
+def test_apply_edit_depends_on_noop_reports_no_changes(tmp_path: Path, monkeypatch) -> None:
+    _seed_control(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    quest = _make_draft(tmp_path, "2026-06-24-edit97")
+    quest.set_depends_on(["A"])
+    rc, msg = main.apply_edit(
+        tmp_path, "2026-06-24-edit97", title=None, backlog=False,
+        active=False, depends_on=["A"], clear_deps=False, append_intent=None)
+    assert (rc, msg) == (0, "edited 2026-06-24-edit97 · no changes")
+
+
+def test_apply_edit_cleared_dependencies_fragment(tmp_path: Path, monkeypatch) -> None:
+    _seed_control(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    quest = _make_draft(tmp_path, "2026-06-24-edit98")
+    quest.set_depends_on(["A"])
+    rc, msg = main.apply_edit(
+        tmp_path, "2026-06-24-edit98", title=None, backlog=False,
+        active=False, depends_on=None, clear_deps=True, append_intent=None)
+    assert (rc, msg) == (0, "edited 2026-06-24-edit98 · cleared dependencies")
+
+
+def test_apply_edit_clear_deps_noop_reports_no_changes(tmp_path: Path, monkeypatch) -> None:
+    _seed_control(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    _make_draft(tmp_path, "2026-06-24-edit99")  # deps already empty
+    rc, msg = main.apply_edit(
+        tmp_path, "2026-06-24-edit99", title=None, backlog=False,
+        active=False, depends_on=None, clear_deps=True, append_intent=None)
+    assert (rc, msg) == (0, "edited 2026-06-24-edit99 · no changes")
+
+
+def test_apply_edit_appended_to_intent_fragment(tmp_path: Path, monkeypatch) -> None:
+    _seed_control(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    _make_draft(tmp_path, "2026-06-24-edita0")
+    rc, msg = main.apply_edit(
+        tmp_path, "2026-06-24-edita0", title=None, backlog=False,
+        active=False, depends_on=None, clear_deps=False, append_intent="a note")
+    assert (rc, msg) == (0, "edited 2026-06-24-edita0 · appended to intent")
+
+
+def test_apply_edit_combined_fragments_join_with_semicolons(
+        tmp_path: Path, monkeypatch) -> None:
+    _seed_control(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    _make_draft(tmp_path, "2026-06-24-edita1", origin="draft")
+    rc, msg = main.apply_edit(
+        tmp_path, "2026-06-24-edita1", title="Combined", backlog=True,
+        active=False, depends_on=["X"], clear_deps=False, append_intent=None)
+    assert rc == 0
+    assert msg == ('edited 2026-06-24-edita1 · title → "Combined"; '
+                   "moved to backlog; depends on X")
 
 
 def test_apply_edit_depends_on_rejected_for_materialized(
