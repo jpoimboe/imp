@@ -10,7 +10,11 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable
+from dataclasses import replace
 from pathlib import Path
+
+from imp.providers.effective import load_effective_config
+from imp.providers.resolve import available_providers
 
 
 def detect_pythonpath(project_root: Path) -> list[str] | None:
@@ -49,6 +53,30 @@ def resolve_pythonpath_choice(
     if ans in ("s", "skip", "n", "no"):
         return None
     return suggested
+
+
+_PACKAGING_FILES = ("pyproject.toml", "setup.py", "setup.cfg")
+
+
+def is_python_packaging_project(project_root: Path) -> bool:
+    """True when the project declares Python packaging (a pyproject.toml,
+    setup.py, or setup.cfg exists). Gates init's agent detection + readiness
+    checks; a project without any of these keeps init's non-Python behavior."""
+    return any((project_root / name).is_file() for name in _PACKAGING_FILES)
+
+
+def resolve_detection_provider(
+    providers: list[str], *, tier: str = "medium",
+) -> tuple[str, str] | None:
+    """The first provider in `providers` (pick order) with a usable credential,
+    paired with its `tier` model. None when no picked provider is usable — the
+    offline credential check for init's readiness gate."""
+    cfg = load_effective_config().config
+    usable = available_providers(replace(cfg, providers=tuple(providers)))
+    if not usable:
+        return None
+    provider = usable[0]
+    return provider, cfg.tiers[tier][provider]
 
 
 def format_pythonpath_yaml(dirs: list[str]) -> str:
