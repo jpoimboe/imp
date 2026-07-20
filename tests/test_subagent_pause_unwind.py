@@ -104,8 +104,8 @@ async def test_batched_child_suspension_degrades_to_is_error(tmp_path) -> None:
                                                   tools={"complete_step"})},
         agent_id="step:p/s", coordinator=coord)
 
-    # The batched child's SubagentSuspended is degraded to an is_error tool_result;
-    # run() completes normally rather than propagating the exception.
+    # The batched child's suspend is degraded to an is_error tool_result carrying the
+    # [interrupted] handback body (should_pause is set); run() completes normally.
     async for _ in runner.run(inv):
         pass
 
@@ -114,9 +114,9 @@ async def test_batched_child_suspension_degrades_to_is_error(tmp_path) -> None:
         e for e in events
         if e["type"] == "tool_result"
         and e["payload"].get("error") is True
-        and "SubagentSuspended" in (e["payload"].get("content") or "")
+        and "[interrupted]" in (e["payload"].get("content") or "")
     ]
-    assert error_results, "expected an is_error tool_result containing SubagentSuspended"
+    assert error_results, "expected an is_error tool_result carrying the [interrupted] handback"
 
 
 def _seed_single_step(root: Path) -> Quest:

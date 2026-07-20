@@ -53,11 +53,7 @@ class TaskMustBeAwaited(Exception):
 
 
 def raise_if_suspended(exc: BaseException) -> None:
-    """The thinnest shared per-provider surface: each provider's `task`
-    wrapper calls this as the first line of its generic `except`, so a
-    SubagentSuspended unwinds (re-raised) instead of being swallowed into an
-    is_error tool_result. dispatch_task raises SubagentSuspended on a
-    subagent-origin pause; this keeps the three triplicated wrappers honest."""
+    """Inert seam: dispatch_task hands the child back as a RuntimeError, not SubagentSuspended."""
     if isinstance(exc, SubagentSuspended):
         raise exc
 
@@ -222,6 +218,26 @@ def _attach_isolated_home(
         use_overlay=overlay_available(quest_dir, Path(policy.home)),
     )
     return dataclasses.replace(policy, home_layer=layer), cleanup
+
+
+def _suspend_handback_body(
+    subagent_name: str, target_dir: Path, *, interrupted: bool
+) -> str:
+    """Parent-handback body for a suspended/interrupted subagent."""
+    # _close_subagent_fold scans is_error content for the [suspended]/[interrupted] marker.
+    tx = target_dir / "transcript.jsonl"
+    if interrupted:
+        header = (f"subagent {subagent_name!r} was interrupted before finishing — "
+                  f"the run was paused. [interrupted]")
+    else:
+        header = (f"subagent {subagent_name!r} was suspended before finishing — "
+                  f"its provider or retry budget ran out. [suspended]")
+    return (
+        f"{header}\n\n"
+        f"Full prior transcript: {tx}\n\n"
+        f"You decide what happens next — re-dispatch a fresh subagent "
+        f"(pointed at the transcript above to continue), or carry on from what "
+        f"you have.")
 
 
 async def dispatch_task(
@@ -400,8 +416,8 @@ async def dispatch_task(
         #   1. Interruptible sleep — each tick checks should_pause so Ctrl-C returns
         #      within one tick (100 ms default) instead of blocking for the full delay.
         #   2. Per-category budget — when cumulative backoff would exceed
-        #      budget_for(category), stop retrying and raise SubagentSuspended
-        #      (unwinds as a clean pause), identical in interactive and headless runs.
+        #      budget_for(category), stop retrying and raise RuntimeError
+        #      (parent-handback), identical in interactive and headless runs.
 
         # Width cap (design Decision 5): acquire THIS invocation's CapacityLimiter
         # around the whole drive loop — the single drift-proof site that bounds all
@@ -432,8 +448,7 @@ async def dispatch_task(
                 # Per-category wall-clock budget (checked BEFORE sleeping,
                 # matching executor). category comes from the plumbed ErrorInfo,
                 # defaulting to "unknown" when absent. On exhaustion raise
-                # SubagentSuspended — this path's own clean-pause unwind (it
-                # cannot return an executor Pause).
+                # RuntimeError — parent-handback (cannot return an executor Pause).
                 category = result.error.category if result.error else "unknown"
                 # A hinted delay is an announced reset wait, not blind retrying:
                 # exempt it from the budget and don't accrue it, capped at 3 such
@@ -442,10 +457,13 @@ async def dispatch_task(
                 if not hinted:
                     budget = budget_for(category)
                     if budget is not None and cumulative_backoff + result.delay > budget:
-                        detail = ("re-authentication needed" if category == "auth"
-                                  else "retry ceiling reached")
-                        raise SubagentSuspended(
-                            f"{detail} during subagent backoff (category={category})")
+                        # Hand the child back to the parent instead of unwinding the
+                        # turn: a RuntimeError body the dispatch layer appends as an
+                        # is_error tool_result. Marker keyed off should_pause.
+                        raise RuntimeError(_suspend_handback_body(
+                            subagent_name, target_dir,
+                            interrupted=(ctx.coordinator is not None
+                                         and ctx.coordinator.should_pause)))
                 backoff += 1
                 # Surface the subagent backoff so a self-healed retry isn't silent.
                 if ctx.event_log is not None:
@@ -475,11 +493,16 @@ async def dispatch_task(
                 else:
                     cumulative_backoff += result.delay
                 if coord is not None and coord.should_pause:
-                    raise SubagentSuspended("paused during subagent backoff")
+                    raise RuntimeError(_suspend_handback_body(
+                        subagent_name, target_dir, interrupted=True))
 
             if result.paused:
-                # Unwind to the executor; resume restarts the subagent subtree fresh.
-                raise SubagentSuspended("subagent paused")
+                # Hand back through the same seam as context-exhaustion; the marker
+                # is keyed off should_pause (a human stop -> [interrupted]).
+                raise RuntimeError(_suspend_handback_body(
+                    subagent_name, target_dir,
+                    interrupted=(ctx.coordinator is not None
+                                 and ctx.coordinator.should_pause)))
 
             # Context-ceiling handback: the subagent reached its window — it wrote a
             # handoff as it approached, or hit the hard context_window error. Instead
