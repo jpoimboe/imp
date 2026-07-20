@@ -505,3 +505,12 @@ def test_live_sibling_routes_inner_polls_through_knob():
     assert "timeout=60.0" not in src           # no bare 60s inner poll survives
     assert "timeout=120.0" in src              # real-provider round-trip stays explicit
     assert "timeout=30.0" in src              # _await_change_dir setup poll stays explicit
+
+
+def test_interrupt_e2e_routes_gate_budget_through_knob():
+    import tests.impty.test_e2e_interrupt as it
+    src = Path(it.__file__).read_text()
+    assert "E2E_POLL_TIMEOUT" in src            # the knob is adopted
+    assert "+ 60.0" not in src                  # monotonic gate deadline no longer bare
+    assert "hard=60.0" not in src               # run_to_completion routed through knob
+    assert "hard=min(0.5, remaining)" in src    # inner clamp unchanged
