@@ -77,3 +77,14 @@ def test_archive_conversation_arms_resume_pending(tmp_path: Path) -> None:
     assert persisted["resume_pending"] == step                 # armed to the step on leave
     assert persisted["resume_mode"] == "solicit"               # clean yield re-solicits
     assert "interrupt_pending" not in persisted
+
+
+def test_archive_conversation_reaps_per_quest_tmp_dir(tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+    ch = Quest.create(tmp_path, title="x", quest_id="conv", base_branch="main")
+    ch.tmp_dir.mkdir(parents=True, exist_ok=True)
+    (ch.tmp_dir / "session.sock").write_bytes(b"")
+
+    archive_conversation(ch)
+
+    assert not ch.tmp_dir.exists()                   # per-quest scratch gone

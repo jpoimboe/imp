@@ -12,6 +12,7 @@ host. Tool paths are worktree-relative.
 from __future__ import annotations
 
 import os
+import tempfile
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -109,6 +110,16 @@ def overlay_engine_env(
                 if p and p not in prefix_entries]
         env["PYTHONPATH"] = os.pathsep.join([*prefix_entries, *rest])
     return env
+
+
+QUEST_TMP_ENV = "IMP_QUEST_TMP"
+
+
+def quest_scratch_root() -> Path:
+    """Host-side provisioning-scratch base from IMP_QUEST_TMP (else system temp); NOT
+    via TMPDIR, which would double-nest the daemon's socket path and break attach."""
+    override = os.environ.get(QUEST_TMP_ENV)
+    return Path(override) if override else Path(tempfile.gettempdir())
 
 
 def engine_env(

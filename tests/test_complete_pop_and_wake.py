@@ -102,3 +102,31 @@ def test_complete_without_merge_emits_workflow_completed(tmp_path, monkeypatch) 
     assert "quest_merged" not in types
     completed = [e for e in log.read() if e.get("type") == "workflow_completed"]
     assert completed and completed[0].get("payload") == {}
+
+
+def test_complete_without_merge_reaps_quest_tmp_dir(tmp_path, monkeypatch) -> None:
+    _seed_control(tmp_path)
+    ch = Quest.create(tmp_path, title="x", quest_id="feat", base_branch="main")
+    mq.enqueue_if_absent(tmp_path, "feat", "main")
+    monkeypatch.setattr(attach_mod, "spawn_session_daemon", lambda *a, **k: None)
+    ch.tmp_dir.mkdir(parents=True, exist_ok=True)
+    (ch.tmp_dir / "session.sock").write_bytes(b"")   # scratch that must be reaped
+    state = State.load(ch.state_dir)                 # merge_commit is None → no-merge branch
+    _complete(ch, state, JsonlEventLog(ch.events_path))
+    assert not ch.tmp_dir.exists()                   # per-quest scratch gone
+
+
+def test_complete_after_merge_reaps_quest_tmp_dir(tmp_path, monkeypatch) -> None:
+    _seed_control(tmp_path)
+    a = Quest.create(tmp_path, title="a", quest_id="aaa", base_branch="main")
+    (a.project_root / "f.txt").write_text("hi")
+    _git(a.project_root, "add", "-A")
+    _git(a.project_root, "commit", "-qm", "a")
+    mq.enqueue_if_absent(tmp_path, "aaa", "main")
+    monkeypatch.setattr(attach_mod, "spawn_session_daemon", lambda *a, **k: None)
+    a.tmp_dir.mkdir(parents=True, exist_ok=True)
+    (a.tmp_dir / "session.sock").write_bytes(b"")
+    state = State.load(a.state_dir)
+    state.merge_commit = "deadbeef"  # mark the merge already durable → finalize branch
+    _complete(a, state, JsonlEventLog(a.events_path))
+    assert not a.tmp_dir.exists()                    # per-quest scratch gone on the merge path too

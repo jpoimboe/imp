@@ -221,7 +221,7 @@ def test_route_script_does_not_block_event_loop(tmp_path) -> None:
     quest = types.SimpleNamespace(
         workflow_dir=tmp_path, project_root=tmp_path,
         id="test-id", handle="test", title="Test",
-        quest_dir=tmp_path / ".imp" / "change",
+        quest_dir=tmp_path / ".imp" / "change", tmp_dir=tmp_path,
     )
 
     async def main() -> None:
@@ -269,7 +269,7 @@ def test_route_script_goto_exit0_suppresses_feedback(tmp_path) -> None:
     quest = types.SimpleNamespace(
         workflow_dir=tmp_path, project_root=tmp_path,
         id="test-id", handle="test", title="Test",
-        quest_dir=tmp_path / ".imp" / "change",
+        quest_dir=tmp_path / ".imp" / "change", tmp_dir=tmp_path,
     )
     step = Step(
         name="autosquash", phase="p", kind="script",
@@ -300,7 +300,7 @@ def test_route_script_goto_nonzero_keeps_feedback(tmp_path) -> None:
     quest = types.SimpleNamespace(
         workflow_dir=tmp_path, project_root=tmp_path,
         id="test-id", handle="test", title="Test",
-        quest_dir=tmp_path / ".imp" / "change",
+        quest_dir=tmp_path / ".imp" / "change", tmp_dir=tmp_path,
     )
     step = Step(
         name="check", phase="p", kind="script",
@@ -333,7 +333,7 @@ def test_route_script_goto_exit0_forwards_configured_feedback(tmp_path) -> None:
     quest = types.SimpleNamespace(
         workflow_dir=tmp_path, project_root=tmp_path,
         id="test-id", handle="test", title="Test",
-        quest_dir=tmp_path / ".imp" / "change",
+        quest_dir=tmp_path / ".imp" / "change", tmp_dir=tmp_path,
     )
     step = Step(
         name="scope-code-check", phase="p", kind="script",
@@ -369,7 +369,7 @@ def test_route_script_nonzero_synthesizes_despite_configured_feedback(tmp_path) 
     quest = types.SimpleNamespace(
         workflow_dir=tmp_path, project_root=tmp_path,
         id="test-id", handle="test", title="Test",
-        quest_dir=tmp_path / ".imp" / "change",
+        quest_dir=tmp_path / ".imp" / "change", tmp_dir=tmp_path,
     )
     preamble = "Integration tests failed on the merged tree. Adjudicate fix-vs-tolerate:"
     step = Step(
@@ -460,7 +460,7 @@ def test_route_script_merges_declared_output_into_rules(tmp_path) -> None:
     quest = types.SimpleNamespace(
         workflow_dir=tmp_path, project_root=tmp_path,
         id="test-id", handle="test", title="Test",
-        quest_dir=tmp_path / ".imp" / "change",
+        quest_dir=tmp_path / ".imp" / "change", tmp_dir=tmp_path,
     )
     schema = OutputSchema(
         fields=(OutputField(name="task_total", type="int"),), source=loc())
@@ -496,7 +496,7 @@ def test_route_script_pauses_on_malformed_output(tmp_path) -> None:
     quest = types.SimpleNamespace(
         workflow_dir=tmp_path, project_root=tmp_path,
         id="test-id", handle="test", title="Test",
-        quest_dir=tmp_path / ".imp" / "change",
+        quest_dir=tmp_path / ".imp" / "change", tmp_dir=tmp_path,
     )
     schema = OutputSchema(
         fields=(OutputField(name="task_total", type="int"),), source=loc())
@@ -532,7 +532,7 @@ def test_route_script_pauses_on_type_mismatch(tmp_path) -> None:
     quest = types.SimpleNamespace(
         workflow_dir=tmp_path, project_root=tmp_path,
         id="test-id", handle="test", title="Test",
-        quest_dir=tmp_path / ".imp" / "change",
+        quest_dir=tmp_path / ".imp" / "change", tmp_dir=tmp_path,
     )
     schema = OutputSchema(
         fields=(OutputField(name="task_total", type="int"),), source=loc())
@@ -569,7 +569,7 @@ def test_route_script_without_output_schema_unchanged(tmp_path) -> None:
     quest = types.SimpleNamespace(
         workflow_dir=tmp_path, project_root=tmp_path,
         id="test-id", handle="test", title="Test",
-        quest_dir=tmp_path / ".imp" / "change",
+        quest_dir=tmp_path / ".imp" / "change", tmp_dir=tmp_path,
     )
     step = Step(
         name="plain", phase="p", kind="script",
@@ -603,7 +603,7 @@ def test_route_script_cleans_up_output_path_on_run_script_error(tmp_path) -> Non
     quest = types.SimpleNamespace(
         workflow_dir=tmp_path, project_root=tmp_path,
         id="test-id", handle="test", title="Test",
-        quest_dir=tmp_path / ".imp" / "change",
+        quest_dir=tmp_path / ".imp" / "change", tmp_dir=tmp_path,
     )
     schema = OutputSchema(
         fields=(OutputField(name="task_total", type="int"),), source=loc())
@@ -848,7 +848,7 @@ def test_route_script_interrupt_returns_pause_no_script_blocked(tmp_path) -> Non
     quest = types.SimpleNamespace(
         workflow_dir=tmp_path, project_root=tmp_path,
         id="test-id", handle="test", title="Test",
-        quest_dir=tmp_path / ".imp" / "change",
+        quest_dir=tmp_path / ".imp" / "change", tmp_dir=tmp_path,
     )
     step = Step(
         name="verify", phase="p", kind="script",
@@ -890,7 +890,7 @@ def test_route_script_builds_abort_for_interruptible_step(tmp_path) -> None:
     quest = types.SimpleNamespace(
         workflow_dir=tmp_path, project_root=tmp_path,
         id="test-id", handle="test", title="Test",
-        quest_dir=tmp_path / ".imp" / "change",
+        quest_dir=tmp_path / ".imp" / "change", tmp_dir=tmp_path,
     )
     step = Step(
         name="verify", phase="p", kind="script",
@@ -935,7 +935,7 @@ def test_route_script_non_interruptible_passes_no_abort(tmp_path) -> None:
     quest = types.SimpleNamespace(
         workflow_dir=tmp_path, project_root=tmp_path,
         id="test-id", handle="test", title="Test",
-        quest_dir=tmp_path / ".imp" / "change",
+        quest_dir=tmp_path / ".imp" / "change", tmp_dir=tmp_path,
     )
     step = Step(
         name="mutating-gate", phase="p", kind="script",
@@ -1073,3 +1073,51 @@ def test_run_script_no_shim_dir_leaves_path_untouched(tmp_path) -> None:
     out = run_script(step, cwd=tmp_path)
     expected = overlay_engine_env(os.environ, {}).get("PATH", "")
     assert out["stdout"] == expected
+
+
+def test_route_script_output_tempfile_created_under_quest_tmp_dir(tmp_path, monkeypatch) -> None:
+    """The declared-output tempfile ($IMP_OUTPUT) is created under quest.tmp_dir,
+    not the ambient system temp — so its host path is under the per-quest dir (and
+    thus /tmp/<basename> in-sandbox through the bind)."""
+    import tempfile as _tempfile
+    import types
+
+    import anyio
+
+    from imp.engine import executor
+    from imp.engine.executor import _route_script
+    from imp.engine.state import InMemoryEventLog
+    from imp.engine.types import OutputField, OutputSchema
+
+    qtmp = tmp_path / "qtmp"          # deliberately NOT created — the executor must mkdir it
+    quest = types.SimpleNamespace(
+        workflow_dir=tmp_path, project_root=tmp_path,
+        id="test-id", handle="test", title="Test",
+        quest_dir=tmp_path / ".imp" / "change", tmp_dir=qtmp,
+    )
+    schema = OutputSchema(
+        fields=(OutputField(name="task_total", type="int"),), source=loc())
+    step = Step(
+        name="announce", phase="p", kind="script",
+        rules=(_rule(None, Continue()),),
+        on_max_retries=Pause(), max_loops=10, source=loc(),
+        command=r"""printf '{"task_total": 5}' > "$IMP_OUTPUT" """,
+        output_schema=schema,
+    )
+
+    captured: dict[str, object] = {}
+    real_mkstemp = _tempfile.mkstemp
+
+    def spy(*a, **k):
+        captured["dir"] = k.get("dir")
+        return real_mkstemp(*a, **k)
+
+    monkeypatch.setattr(executor.tempfile, "mkstemp", spy)
+
+    async def main() -> None:
+        state = types.SimpleNamespace(vars={"n": 0}, route_label=None)
+        await _route_script(step, quest, state, InMemoryEventLog())
+
+    anyio.run(main)
+    assert captured["dir"] == qtmp   # explicit dir=quest.tmp_dir, not ambient temp
+    assert qtmp.is_dir()             # executor created it idempotently

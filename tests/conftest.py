@@ -4,8 +4,11 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
+import tempfile
 import textwrap
+import uuid
 from collections.abc import Generator
 from pathlib import Path
 
@@ -176,6 +179,41 @@ def _isolate_user_config(
 def _isolate_session_socket(monkeypatch: pytest.MonkeyPatch) -> None:
     """Drop ambient IMP_SESSION_SOCKET so make_store uses LocalStore, not a live daemon."""
     monkeypatch.delenv("IMP_SESSION_SOCKET", raising=False)
+
+
+@pytest.fixture(autouse=True)
+def _isolate_quest_tmp_root(
+    tmp_path_factory: pytest.TempPathFactory,
+    monkeypatch: pytest.MonkeyPatch,
+) -> Generator[None, None, None]:
+    """Give every test its own short, unique per-quest tmp/socket root.
+
+    session_socket_path now derives from quest_id ALONE
+    (<tmpdir>/imp-<uid>/<quest_id>/session.sock); the old path hashed the unique
+    per-test control_root, which is what kept tests reusing hardcoded ids
+    ("feat", "live-one", ...) from sharing one socket. Redirect the tmp root
+    in-process (tempfile.tempdir) and for spawned session daemons (TMPDIR) to a
+    short unique dir under the real system temp — short enough to keep the
+    AF_UNIX socket within the 108-byte limit — restoring that per-test
+    uniqueness. Under Part 1's identity-/tmp sandbox bind the redirected root is
+    still under /tmp, so an in-sandbox client reaching the host socket path
+    (injected via IMP_SESSION_SOCKET) still resolves it.
+
+    Realize pytest's session basetemp FIRST: getbasetemp() derives (and caches)
+    the basetemp from tempfile.gettempdir(), so patching tempfile.tempdir before
+    it resolves would nest the basetemp inside our per-test root and the teardown
+    rmtree would delete it — breaking every later test's tmp_path in serial runs
+    (`make test XDIST=`, `-n0`, a bare multi-test `pytest <file>`). It is invisible
+    under `-n auto` because xdist workers get a pre-resolved basetemp, so the
+    verify gate would not catch it.
+    """
+    tmp_path_factory.getbasetemp()
+    root = Path(tempfile.gettempdir()) / f"imp-t-{uuid.uuid4().hex[:12]}"
+    root.mkdir(mode=0o700)
+    monkeypatch.setattr(tempfile, "tempdir", str(root))
+    monkeypatch.setenv("TMPDIR", str(root))
+    yield
+    shutil.rmtree(root, ignore_errors=True)
 
 
 @pytest.fixture(autouse=True)

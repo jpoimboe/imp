@@ -827,6 +827,7 @@ def _complete(quest: Quest, state: State, log: EventLog) -> RunResult:
         state.save(quest.state_dir)
         _emit(log, "workflow_completed", {})
         shutil.rmtree(quest.quest_dir / "steps", ignore_errors=True)
+        shutil.rmtree(quest.tmp_dir, ignore_errors=True)
         return RunResult.COMPLETED
 
     state.status = "merged"
@@ -842,6 +843,7 @@ def _complete(quest: Quest, state: State, log: EventLog) -> RunResult:
         state_json_path=quest.state_dir / "state.json",
     )
     shutil.rmtree(quest.quest_dir, ignore_errors=True)
+    shutil.rmtree(quest.tmp_dir, ignore_errors=True)
     return RunResult.COMPLETED
 
 
@@ -1079,7 +1081,9 @@ async def _route_script(
     abort = _abort if step.interruptible else None
     output_path = None
     if step.output_schema is not None:
-        fd, tmp = tempfile.mkstemp(prefix="imp-output-", suffix=".json")
+        quest.tmp_dir.mkdir(parents=True, exist_ok=True)
+        fd, tmp = tempfile.mkstemp(prefix="imp-output-", suffix=".json",
+                                   dir=quest.tmp_dir)
         os.close(fd)
         output_path = Path(tmp)
     slot_fd: int | None = None
@@ -1876,4 +1880,10 @@ def _build_sandbox_policy(quest: Quest, config: Any, log: EventLog) -> Any:
     if not policy.active:
         _emit(log, "sandbox_inactive", {"reason": policy.note}, agent_id=None)
     _warn_if_no_overlay(policy, quest, log)
+    if policy.active and policy.quest_tmp_dir:
+        # quest_tmp_dir is the bwrap SOURCE for the namespace /tmp; bwrap uses
+        # --bind (not --bind-try), so it must exist before any sandboxed spawn.
+        # In production spawn_session_daemon already created it 0o700; this makes
+        # direct-run paths (no daemon) safe too.
+        Path(policy.quest_tmp_dir).mkdir(parents=True, exist_ok=True)
     return policy

@@ -1598,16 +1598,15 @@ def test_allows_read_nested_tmpfs_masks_siblings_and_archive():
 
 
 def test_resolve_policy_injects_session_socket_marker(tmp_path):
-    from imp.remote.session.discover import session_socket_path
-
     control, wt = _layout(tmp_path)
     pol = resolve_policy(
         worktree=wt, control_root=control, quest_id="abc",
         cfg=SandboxConfig(), engine_env_result={}, environ={"PATH": "/usr/bin"},
         available=True,
     )
-    expected = str(session_socket_path(control, "abc"))
-    assert ("IMP_SESSION_SOCKET", expected) in pol.setenv
+    # In-sandbox value is rebased onto the namespace /tmp (the per-quest dir is
+    # bound there); host-side clients keep the real <quest.tmp_dir>/session.sock.
+    assert ("IMP_SESSION_SOCKET", "/tmp/session.sock") in pol.setenv
 
 
 def test_session_socket_marker_absent_when_inactive(tmp_path):
@@ -1628,8 +1627,6 @@ def test_session_socket_marker_absent_when_inactive(tmp_path):
 
 
 def test_session_socket_marker_reaches_bwrap_setenv(tmp_path):
-    from imp.remote.session.discover import session_socket_path
-
     control, wt = _layout(tmp_path)
     pol = resolve_policy(
         worktree=wt, control_root=control, quest_id="abc",
@@ -1639,7 +1636,7 @@ def test_session_socket_marker_reaches_bwrap_setenv(tmp_path):
     argv = build_sandbox_argv("x", cwd=str(wt), policy=pol, engine_env={})
     i = argv.index("IMP_SESSION_SOCKET")
     assert argv[i - 1] == "--setenv"
-    assert argv[i + 1] == str(session_socket_path(control, "abc"))
+    assert argv[i + 1] == "/tmp/session.sock"
 
 
 def test_build_setenv_prepends_shim_dir_to_path():
@@ -1701,3 +1698,78 @@ def test_worktree_swap_flips_exposure_to_new_worktree(tmp_path):
     # (c) a sibling elsewhere under .imp stays masked.
     sibling = control / ".imp" / "worktrees" / "other" / "f.py"
     assert live.allows_read(sibling) is False
+
+
+def test_resolve_policy_sets_quest_tmp_dir(tmp_path):
+    from imp.remote.session.discover import session_socket_path
+    control, wt = _layout(tmp_path)
+    pol = resolve_policy(
+        worktree=wt, control_root=control, quest_id="abc",
+        cfg=SandboxConfig(), engine_env_result={}, environ={}, available=True,
+    )
+    assert pol.quest_tmp_dir == str(session_socket_path(control, "abc").parent)
+
+
+def test_per_quest_tmp_dir_bound_as_slash_tmp():
+    pol = _policy(quest_tmp_dir="/t/imp-1000/abc")
+    flat = " ".join(build_sandbox_argv("x", cwd="/wt", policy=pol, engine_env={}))
+    assert "--bind /t/imp-1000/abc /tmp" in flat   # per-quest dir bound onto /tmp
+    assert "--bind /tmp /tmp" not in flat          # real /tmp no longer identity-bound
+
+
+def test_per_quest_tmp_bind_ordered_after_ro_floor_before_worktree():
+    pol = _policy(quest_tmp_dir="/t/imp-1000/abc")
+    argv = build_sandbox_argv("x", cwd="/wt", policy=pol, engine_env={})
+    i_ro = argv.index("/")                          # ro-floor src
+    i_tmp = argv.index("/t/imp-1000/abc")           # per-quest /tmp bind src
+    i_wt = argv.index("/ctl/.imp/worktrees/abc")    # worktree src (default _policy worktree)
+    i_remask = argv.index("/ctl/.git/hooks")        # first git RO remask
+    assert i_ro < i_tmp < i_wt
+    assert i_tmp < i_remask
+
+
+def test_per_quest_tmp_mirror_keeps_tmp_writable():
+    # bind_plan stays DEST-keyed on /tmp (the agent's in-sandbox path), so the
+    # in-process mirror still reports /tmp writable even though argv binds the
+    # per-quest host dir as the source.
+    pol = _policy(quest_tmp_dir="/t/imp-1000/abc")
+    assert pol.allows_write(Path("/tmp/scratch.txt")) is True
+    assert ("/tmp", "rw") in pol.bind_plan()
+
+
+def test_build_setenv_rebases_session_socket_under_quest_tmp_dir():
+    from imp.engine.sandbox import _build_setenv
+    setenv = dict(_build_setenv(
+        {}, {"PATH": "/usr/bin"}, (),
+        session_socket="/real/imp-1000/abc/session.sock",
+        quest_tmp_dir="/real/imp-1000/abc"))
+    assert setenv["IMP_SESSION_SOCKET"] == "/tmp/session.sock"
+
+
+def test_build_setenv_no_rebase_when_quest_tmp_dir_empty():
+    from imp.engine.sandbox import _build_setenv
+    setenv = dict(_build_setenv(
+        {}, {"PATH": "/usr/bin"}, (),
+        session_socket="/real/imp-1000/abc/session.sock"))
+    assert setenv["IMP_SESSION_SOCKET"] == "/real/imp-1000/abc/session.sock"
+
+
+def test_imp_output_env_rebased_onto_tmp():
+    pol = _policy(quest_tmp_dir="/t/imp-1000/abc")
+    flat = " ".join(build_sandbox_argv(
+        "x", cwd="/wt", policy=pol,
+        engine_env={"IMP_OUTPUT": "/t/imp-1000/abc/imp-output-XY.json",
+                    "IMP_PROJECT_ROOT": "/ctl/.imp/worktrees/abc"}))
+    assert "--setenv IMP_OUTPUT /tmp/imp-output-XY.json" in flat   # under quest_tmp_dir → rebased
+    assert "--setenv IMP_PROJECT_ROOT /ctl/.imp/worktrees/abc" in flat  # not under it → untouched
+
+
+def test_rebase_does_not_rebase_sibling_with_common_prefix():
+    from imp.engine.sandbox import _rebase_into_sandbox_tmp
+    # /t/imp-1000/abcd shares the string prefix "/t/imp-1000/abc" but is a sibling,
+    # not a child, so it must pass through unchanged (segment-aware, not startswith).
+    assert _rebase_into_sandbox_tmp(
+        "/t/imp-1000/abcd/out.json", "/t/imp-1000/abc") == "/t/imp-1000/abcd/out.json"
+    # A genuine child IS rebased.
+    assert _rebase_into_sandbox_tmp(
+        "/t/imp-1000/abc/out.json", "/t/imp-1000/abc") == "/tmp/out.json"

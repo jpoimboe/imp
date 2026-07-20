@@ -43,3 +43,23 @@ def test_seeds_redacted_credentials_from_source(
         assert "refreshToken" not in seeded["claudeAiOauth"]
     finally:
         shutil.rmtree(cfg, ignore_errors=True)
+
+
+def test_fresh_config_dir_routes_under_imp_quest_tmp(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """With IMP_QUEST_TMP set (the session-daemon case), the ephemeral config dir
+    lands under the per-quest dir — so it is reaped with the quest — instead of the
+    ambient system temp."""
+    src = tmp_path / "empty_home"
+    src.mkdir()
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(src))
+    qtmp = tmp_path / "qtmp"
+    qtmp.mkdir()  # daemon creates quest.tmp_dir before provisioning
+    monkeypatch.setenv("IMP_QUEST_TMP", str(qtmp))
+
+    cfg = materialize_fresh_config_dir()
+    try:
+        assert cfg.parent == qtmp                  # under the per-quest dir, not ambient temp
+    finally:
+        shutil.rmtree(cfg, ignore_errors=True)

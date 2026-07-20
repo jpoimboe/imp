@@ -15,7 +15,6 @@ import os
 import secrets
 import shutil
 import subprocess
-import tempfile
 import time
 from collections.abc import AsyncGenerator, Mapping
 from dataclasses import dataclass, field
@@ -49,6 +48,7 @@ from imp.agents.tools.context import (
 from imp.agents.transcript import deliver_continuation_reply
 from imp.engine.agent_run import _resolve_wait_reply
 from imp.engine.awaiting_user_input import AwaitingUserInput
+from imp.engine.env import quest_scratch_root
 from imp.engine.state import JsonlEventLog
 from imp.engine.types import AgentDef
 from imp.providers import errors as perr
@@ -328,7 +328,7 @@ class CodexAgentRunner:
         }
 
         # 3. Stale-CODEX_HOME sweep (best-effort).
-        tmp_root = Path(tempfile.gettempdir())
+        tmp_root = quest_scratch_root()
         sweep_stale_codex_homes(tmp_root=tmp_root, max_age_seconds=24 * 3600)
 
         # 4. Take entry snapshot for the fail-closed revert mechanism.

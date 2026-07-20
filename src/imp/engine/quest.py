@@ -446,6 +446,11 @@ class Quest:
     def events_path(self) -> Path:
         return self.quest_dir / "events.jsonl"
 
+    @property
+    def tmp_dir(self) -> Path:
+        """Per-quest scratch root /tmp/imp-<uid>/<id>/, reaped at quest end."""
+        return Path(tempfile.gettempdir()) / f"imp-{os.getuid()}" / self.id
+
     def event_log(self) -> JsonlEventLog:
         return JsonlEventLog(self.events_path)
 

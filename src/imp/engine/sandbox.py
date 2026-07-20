@@ -69,6 +69,7 @@ class SandboxPolicy:
     disposable_tree: bool = False            # agent runs in a disposable git worktree
     home: str = ""                           # real $HOME ("" → inactive/unresolved)
     home_layer: HomeLayer | None = None      # writable-home layer (None → ro read-through)
+    quest_tmp_dir: str = ""      # per-quest dir bound onto /tmp ("" → identity fallback)
 
     def bind_plan(self) -> list[tuple[str, str]]:
         """The ordered path-covering binds, in bwrap EMIT ORDER — the SINGLE
@@ -204,8 +205,12 @@ def build_sandbox_argv(
     for bind, kind in policy.bind_plan():
         if kind == "rw":
             hl = policy.home_layer
-            src = (hl.merged if (hl is not None and hl.is_overlay
-                                 and bind == hl.home) else bind)
+            if hl is not None and hl.is_overlay and bind == hl.home:
+                src = hl.merged                       # overlay merged view onto $HOME
+            elif bind == "/tmp" and policy.quest_tmp_dir:
+                src = policy.quest_tmp_dir             # per-quest host dir onto namespace /tmp
+            else:
+                src = bind
             argv += ["--bind", src, bind]
         elif kind == "ro":
             argv += ["--ro-bind", bind, bind]
@@ -227,7 +232,7 @@ def build_sandbox_argv(
     setenv = dict(policy.setenv)
     for k, v in engine_env.items():
         if _is_engine_passthrough(k):
-            setenv[k] = v
+            setenv[k] = _rebase_into_sandbox_tmp(v, policy.quest_tmp_dir)
     argv += ["--clearenv"]
     for k, v in setenv.items():
         argv += ["--setenv", k, v]
@@ -521,6 +526,9 @@ def resolve_policy(
     if quest_dir is not None and (quest_dir / "workflow").is_dir():
         readonly_overlays = (str(quest_dir / "workflow"),)
 
+    session_sock = session_socket_path(control_root, quest_id)
+    quest_tmp_dir = str(session_sock.parent)
+
     return SandboxPolicy(
         active=True,
         worktree=str(worktree),
@@ -537,9 +545,10 @@ def resolve_policy(
         extra_writable=tuple(cfg.extra_writable),
         secret_dirs=tuple(secret_dirs),
         secret_files=tuple(secret_files),
+        quest_tmp_dir=quest_tmp_dir,
         setenv=_build_setenv(
             engine_env_result, environ, cfg.env_passthrough,
-            session_socket=str(session_socket_path(control_root, quest_id)),
+            session_socket=str(session_sock), quest_tmp_dir=quest_tmp_dir,
             shim_dir=str(imp_shim_dir(quest_dir)) if quest_dir is not None else ""),
         network=cfg.network,
         note="",
@@ -554,10 +563,20 @@ def _inactive(*, note: str) -> SandboxPolicy:
     )
 
 
+def _rebase_into_sandbox_tmp(value: str, quest_tmp_dir: str) -> str:
+    """Rebase a host path under quest_tmp_dir onto /tmp; leave anything else untouched."""
+    if not quest_tmp_dir:
+        return value
+    p = Path(value)
+    if p.is_relative_to(quest_tmp_dir):
+        return str(Path("/tmp") / p.relative_to(quest_tmp_dir))
+    return value
+
+
 def _build_setenv(
     engine_env_result: Mapping[str, str], environ: Mapping[str, str],
     env_passthrough: tuple[str, ...], session_socket: str = "",
-    shim_dir: str = "",
+    shim_dir: str = "", quest_tmp_dir: str = "",
 ) -> tuple[tuple[str, str], ...]:
     """Env allowlist (spec B.4). IMP_* and PYTHONPATH come from engine_env_result
     (authoritative, M2-r5; PYTHONPATH is the single deliberate non-IMP_ exception
@@ -582,9 +601,9 @@ def _build_setenv(
             d[k] = environ[k]
     for k, v in engine_env_result.items():
         if _is_engine_passthrough(k):
-            d[k] = v
+            d[k] = _rebase_into_sandbox_tmp(v, quest_tmp_dir)
     if session_socket:
-        d["IMP_SESSION_SOCKET"] = session_socket   # in-sandbox signal + daemon target
+        d["IMP_SESSION_SOCKET"] = _rebase_into_sandbox_tmp(session_socket, quest_tmp_dir)
     if shim_dir:
         d["PATH"] = (shim_dir + os.pathsep + d["PATH"]) if d.get("PATH") else shim_dir
     d["TMPDIR"] = "/tmp"   # forced last — wins over any ambient/env_passthrough value
