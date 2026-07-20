@@ -10,7 +10,11 @@ Committed config+workflows live under imp/ (tracked by git).
 Runtime state (quests, locks, etc.) lives under .imp/ (gitignored wholesale).
 
 Tier→model bindings come from the provider-code floor now, so init asks no
-model question — it just records the enabled providers + detected theme.
+model question — it just records the enabled providers + detected theme. For a
+Python-packaging project it also runs a one-shot sandboxed agent to detect the
+import root, so a fresh init there needs a working provider plus an OS sandbox
+(or an accepted unsandboxed offer) and stops with an actionable message if
+either is missing; non-Python projects skip that gate entirely.
 """
 
 from __future__ import annotations
