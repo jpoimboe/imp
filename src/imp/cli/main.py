@@ -312,6 +312,17 @@ _ERROR_LABELS: dict[str, str] = {
     "crash": "crash",
 }
 
+# Deliberate-leave trigger -> its capitalized banner display form. Internal reason
+# strings stay lowercase; only the banner display is transformed.
+_LEAVE_DISPLAY: dict[str, str] = {
+    "ctrl-d": "Ctrl-D",
+    "sigterm": "SIGTERM",
+    "sighup": "SIGHUP",
+    "sigquit": "SIGQUIT",
+}
+# The single keystroke leave; signals get no caret shadow (nothing was typed).
+_LEAVE_KEYSTROKES: frozenset[str] = frozenset({"ctrl-d"})
+
 
 def _identity_line(quest_id: str, title: str, *, color: bool,
                    intent: str | None = None) -> str:
@@ -439,6 +450,15 @@ def _pause_lines(
             head = f"{label}: {first}" if first else label
             body = rest
         return _error_block(head, body, name, title, color=color, intent=intent)
+    if info is not None and info.base in _LEAVE_DISPLAY:
+        display = _LEAVE_DISPLAY[info.base]
+        head_line = (ansi("paused", "wordmark", enabled=color)
+                     + ansi(f" · {display}", "dim", enabled=color))
+        return [
+            head_line,
+            _identity_line(name, title, color=color, intent=intent),
+            _resume_line(token),
+        ]
     head = info.base if info is not None else "paused"
     return [
         *_clean_block(head, name, title, color=color, intent=intent),
@@ -623,8 +643,10 @@ def _handle_terminal_outcome(
         _emit_merge_blocked(quest, mb_reason, mb_detail, mb_note)
         return 1  # friendly block already carries the resume command; skip redundant summary
     trigger = _leave_trigger(coord)
-    if trigger == "ctrl-d":
-        print(pal.caret(enabled=should_use_color(sys.stdout)))
+    if trigger in _LEAVE_KEYSTROKES:
+        color = should_use_color(sys.stdout)
+        print(pal.caret(enabled=color)
+              + ansi(_LEAVE_DISPLAY[trigger], "dim", enabled=color))
     _emit_paused_summary(quest, trigger)
     return 1
 
@@ -648,7 +670,7 @@ def _print_leave_disposition(
         return 0
     disposition = leave_state.get("disposition")
     if disposition == "save":
-        print(_status_spine(quest.id, quest.title, "kept as draft", "wordmark",
+        print(_status_spine(quest.id, quest.title, "saved as draft", "wordmark",
                             color=color, intent=opening))
         print(_resume_line(quest.id))
         print()
@@ -660,6 +682,9 @@ def _print_leave_disposition(
         print()
         return 0
     if disposition == "discard":
+        print(_status_spine(quest.id, quest.title, "discarded", "wordmark",
+                            color=color, intent=opening))
+        print()
         return 0
     if leave_state.get("send_failed"):
         print(_status_spine(quest.id, quest.title, "left running", "wordmark",
@@ -883,7 +908,8 @@ async def _run_cleared_session(
         except (EOFError, KeyboardInterrupt):
             if term_title is not None:
                 term_title.reset()
-            print(pal.caret(enabled=color))
+            print(_status_spine(quest.id, quest.title, "discarded", "wordmark",
+                                color=color))
             print()
             return 130
         _session_started = True
@@ -1234,9 +1260,10 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
         except (EOFError, KeyboardInterrupt):
             if term_title is not None:
                 term_title.reset()
-            discard_conversation(quest)   # drop the just-minted draft on cancel
-            print(pal.caret(enabled=color))
+            print(_status_spine(quest.id, quest.title, "discarded", "wordmark",
+                                color=color))
             print()
+            discard_conversation(quest)   # drop the just-minted draft on cancel
             return 130
         header_printed = True
         # An empty reply falls back to the unseeded path (the opening step

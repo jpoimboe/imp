@@ -171,13 +171,12 @@ async def test_cancel_at_opening_prompt_discards_the_minted_draft(
 
 @pytest.mark.anyio
 @pytest.mark.parametrize("exc", [EOFError, KeyboardInterrupt])
-async def test_cancel_at_opening_prompt_retains_caret_and_says_nothing(
+async def test_cancel_at_opening_prompt_emits_discarded_spine(
     stub_new, monkeypatch, capsys, exc,
 ) -> None:
-    # AC5: Ctrl-D at the opening prompt leaves the gold `> ` caret and one
-    # trailing blank on screen, prints no message after it (no `imp: cancelled`),
-    # and exits 130. stub_new forces should_use_color -> False, so the caret is
-    # the plain "> " (see tests/test_palette.py: pal.caret(enabled=False) == "> ").
+    # No exchange at the opening prompt (Ctrl-D/Ctrl-C) -> the discarded spine
+    # `<id> · (unnamed) · discarded`, one trailing blank, no caret line, exit 130.
+    # stub_new forces should_use_color -> False, so the spine renders plain.
     m = stub_new
     monkeypatch.setattr(m, "_print_run_header", lambda *a, **k: None)
     monkeypatch.setattr(m, "discard_conversation", lambda quest: None)
@@ -194,9 +193,10 @@ async def test_cancel_at_opening_prompt_retains_caret_and_says_nothing(
 
     assert rc == 130
     out = capsys.readouterr().out
-    assert out.endswith("> \n\n")          # retained caret + exactly one trailing blank
-    assert not out.endswith("> \n\n\n")    # not two trailing blanks
-    assert "cancelled" not in out          # no `imp: cancelled` message anywhere in the output
+    assert out.endswith("z9y8x7 · (unnamed) · discarded\n\n")
+    assert not out.endswith("discarded\n\n\n")   # exactly one trailing blank
+    assert "> " not in out                       # no bare caret line
+    assert "cancelled" not in out
 
 
 @pytest.mark.anyio

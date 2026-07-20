@@ -427,7 +427,34 @@ def test_ctrl_d_pause_retains_caret_above_banner(monkeypatch, capsys) -> None:
         rc = main._handle_terminal_outcome(quest, RunResult.PAUSED, _CtrlDCoord())
     assert rc == 1
     ps.assert_called_once()
-    assert capsys.readouterr().out == "> \n"   # caret line, then the mocked banner
+    assert capsys.readouterr().out == "> Ctrl-D\n"   # keystroke shadow only (banner mocked out)
+
+
+class _SigtermCoord:
+    leave_reason = "sigterm"
+
+    class _Evt:
+        def is_set(self) -> bool:
+            return True
+
+    escalation_event = _Evt()
+
+
+def test_sigterm_leave_prints_no_caret_and_paused_display_head(monkeypatch, capsys) -> None:
+    # A signal leave renders NO caret line and a `paused · SIGTERM` head above the
+    # unchanged identity and resume lines.
+    monkeypatch.setattr(main, "should_use_color", lambda stream: False)
+    quest = _Change([])
+    with patch.object(main, "State") as State:
+        State.load.return_value = _State("paused", step=None)
+        rc = main._handle_terminal_outcome(quest, RunResult.PAUSED, _SigtermCoord())
+    assert rc == 1
+    out = capsys.readouterr().out
+    lines = out.split("\n")
+    assert lines[0] == "paused · SIGTERM"                       # state-first head, no caret above
+    assert not out.startswith("> ")                            # signals get no caret shadow
+    assert lines[1] == "2026-06-12-run-x"                      # identity, bare id (untitled)
+    assert lines[2] == "resume: imp resume 2026-06-12-run-x"   # resume line unchanged
 
 
 def test_emit_completed_titleless_shows_prompt_fallback(monkeypatch, capsys) -> None:
