@@ -4055,9 +4055,9 @@ def _build_parser() -> argparse.ArgumentParser:
         "resume",
         help="Resume a paused or interrupted quest by id or token.",
         description=(
-            "Resume a paused or interrupted quest, replaying its narrative and "
-            "continuing the workflow where it stopped. With no token on a tty, "
-            "pick from a list of resumable quests."))
+            "Resume a paused or interrupted quest, continuing the workflow where "
+            "it stopped. With no token on a tty, pick from a list of resumable "
+            "quests."))
     p_resume.add_argument(
         "token", nargs="?",
         help="Quest id or resume token identifying which quest to resume.")
