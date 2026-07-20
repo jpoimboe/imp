@@ -106,7 +106,7 @@ def test_print_leave_disposition_archive_is_lock_free(
     assert not out.endswith("\n\n\n")
 
 
-def test_print_leave_disposition_save_prints_kept_as_draft_spine(
+def test_print_leave_disposition_save_prints_saved_as_draft_spine(
     tmp_path: Path, capsys: pytest.CaptureFixture[str],
 ) -> None:
     _seed_control(tmp_path)
@@ -114,7 +114,8 @@ def test_print_leave_disposition_save_prints_kept_as_draft_spine(
     rc = m._print_leave_disposition(ch, {"disposition": "save"})
     assert rc == 0
     out = capsys.readouterr().out
-    assert "· kept as draft" in out
+    assert "· saved as draft" in out
+    assert "kept as draft" not in out
     assert "saved to backlog" not in out
     assert "resume: imp resume bk1" in out
     assert not out.startswith("\n")
@@ -246,5 +247,5 @@ def test_leave_disposition_titleless_no_prompt_shows_unnamed(
     rc = m._print_leave_disposition(ch, {"disposition": "save"})
     assert rc == 0
     out = capsys.readouterr().out
-    assert "tl2 · (unnamed) · kept as draft" in out
+    assert "tl2 · (unnamed) · saved as draft" in out
     assert "> (unnamed)" not in out

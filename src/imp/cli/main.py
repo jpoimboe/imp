@@ -648,7 +648,7 @@ def _print_leave_disposition(
         return 0
     disposition = leave_state.get("disposition")
     if disposition == "save":
-        print(_status_spine(quest.id, quest.title, "kept as draft", "wordmark",
+        print(_status_spine(quest.id, quest.title, "saved as draft", "wordmark",
                             color=color, intent=opening))
         print(_resume_line(quest.id))
         print()
