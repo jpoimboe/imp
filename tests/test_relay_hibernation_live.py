@@ -25,10 +25,10 @@ from pathlib import Path
 
 import pytest
 
-from imp.engine.state import LockHeld, ProjectLock
 from impty import TerminalSession
 from tests._live import _await_change_dir, sandbox_sleep_precondition_failed
 from tests.conftest import _init_repo
+from tests.impty.e2e_support import E2E_POLL_TIMEOUT, _event_types, _flock_free, _poll
 
 _WORKTREE_SRC = str(Path(__file__).parent.parent / "src")
 _CC_STARTUP_GRACE = 2.0  # seconds to allow the CC subprocess to start
@@ -96,37 +96,6 @@ def _wait_for_bash_tool_call(events_path: Path, timeout: float) -> bool:
                     return True
         time.sleep(0.2)
     return False
-
-
-def _flock_free(lock_path: Path) -> bool:
-    try:
-        with ProjectLock(lock_path).acquire(timeout=0):
-            return True
-    except LockHeld:
-        return False
-
-
-def _poll(predicate, timeout: float) -> bool:
-    deadline = time.time() + timeout
-    while time.time() < deadline:
-        if predicate():
-            return True
-        time.sleep(0.2)
-    return False
-
-
-def _event_types(events_path: Path) -> list[str]:
-    if not events_path.exists():
-        return []
-    out: list[str] = []
-    for line in events_path.read_text().splitlines():
-        if not line.strip():
-            continue
-        try:
-            out.append(json.loads(line)["type"])
-        except (json.JSONDecodeError, KeyError):
-            continue
-    return out
 
 
 def _interrupt_gate_engaged(events_path: Path) -> bool:
@@ -244,7 +213,7 @@ def test_relay_hibernate_then_resume_reengages(tmp_path: Path) -> None:
         # interrupt a live turn (the cooperative interrupt then times out ~2002ms
         # and escalates to a hard-kill paused). _relay_skip_or_fail SKIPs on that
         # precondition and otherwise fails with diagnostics.
-        if not _poll(lambda: _interrupt_gate_engaged(events), timeout=60.0):
+        if not _poll(lambda: _interrupt_gate_engaged(events), timeout=E2E_POLL_TIMEOUT):
             _relay_skip_or_fail(
                 "cooperative interrupt-steer gate never engaged "
                 "(no durable awaiting_user_input{interrupt: true} event)",
@@ -255,7 +224,7 @@ def test_relay_hibernate_then_resume_reengages(tmp_path: Path) -> None:
         # guards the pty render path, so a real render regression fails here — now
         # distinguishable from the overlay-mount precondition handled above.
         if not _poll(
-            lambda: "type to redirect" in "\n".join(s.lines()).lower(), timeout=60.0
+            lambda: "type to redirect" in "\n".join(s.lines()).lower(), timeout=E2E_POLL_TIMEOUT
         ):
             _relay_skip_or_fail(
                 "steer gate engaged (durable event present) but the pty never "
@@ -275,8 +244,8 @@ def test_relay_hibernate_then_resume_reengages(tmp_path: Path) -> None:
             except PermissionError:
                 return False
 
-        assert _poll(_pid_gone, timeout=60.0), "daemon pid did not exit on detach"
-        assert _poll(lambda: _flock_free(lock_path), timeout=60.0), "flock not released"
+        assert _poll(_pid_gone, timeout=E2E_POLL_TIMEOUT), "daemon pid did not exit on detach"
+        assert _poll(lambda: _flock_free(lock_path), timeout=E2E_POLL_TIMEOUT), "flock not released"
         assert json.loads(state_path.read_text())["status"] == "paused"
     finally:
         s.close()
@@ -288,10 +257,10 @@ def test_relay_hibernate_then_resume_reengages(tmp_path: Path) -> None:
     )
     try:
         assert _poll(
-            lambda: "workflow_resumed" in _event_types(events), timeout=60.0
+            lambda: "workflow_resumed" in _event_types(events), timeout=E2E_POLL_TIMEOUT
         ), "resume never appended workflow_resumed"
         assert _poll(
-            lambda: not _flock_free(lock_path), timeout=60.0
+            lambda: not _flock_free(lock_path), timeout=E2E_POLL_TIMEOUT
         ), "fresh daemon never re-acquired the flock"
         fresh_pid = int(lock_path.read_text().strip())
         assert fresh_pid != daemon_pid   # a NEW daemon process owns the resume

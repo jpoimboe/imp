@@ -436,3 +436,81 @@ def test_hook_does_not_add_timeout_to_ordinary_top_level_file():
     item = _StubItem("tests/test_ordinary.py")
     pytest_collection_modifyitems(_StubConfig(None), [item])
     assert [d for d in item.added if d.mark.name == "timeout"] == []
+
+
+def test_e2e_poll_timeout_default_is_60():
+    from tests.impty.e2e_support import E2E_POLL_TIMEOUT
+    assert E2E_POLL_TIMEOUT == 60.0
+
+
+def test_e2e_poll_timeout_overridable_via_env():
+    env = {**os.environ, "IMP_E2E_POLL_TIMEOUT": "90"}
+    env["PYTHONPATH"] = (
+        str(_REPO_ROOT / "src") + os.pathsep + env.get("PYTHONPATH", "")
+    )
+    proc = subprocess.run(
+        [sys.executable, "-c",
+         "from tests.impty.e2e_support import E2E_POLL_TIMEOUT; "
+         "print(E2E_POLL_TIMEOUT)"],
+        cwd=_REPO_ROOT, env=env, capture_output=True, text=True, timeout=60,
+    )
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert proc.stdout.strip() == "90.0"
+
+
+def test_shared_poll_helpers_defined_once_in_e2e_support():
+    import tests.impty.e2e_support as sup
+    import tests.test_relay_hibernation_live as live
+    assert live._poll is sup._poll
+    assert live._flock_free is sup._flock_free
+    assert live._event_types is sup._event_types
+
+
+def test_e2e_support_event_types_parses_types_in_order(tmp_path):
+    from tests.impty.e2e_support import _event_types
+    ev = tmp_path / "events.jsonl"
+    ev.write_text(
+        '{"type": "a"}\n\n{"type": "b"}\nnot-json\n{"no_type": 1}\n{"type": "c"}\n'
+    )
+    assert _event_types(ev) == ["a", "b", "c"]
+
+
+def test_renamed_gate_file_inherits_impty_e2e_timeout():
+    from tests.conftest import _IMPTY_E2E_TIMEOUT, pytest_collection_modifyitems
+    item = _StubItem("tests/impty/test_e2e_relay_hibernation_gate.py")
+    pytest_collection_modifyitems(_StubConfig(None), [item])
+    timeouts = [d for d in item.added if d.mark.name == "timeout"]
+    assert timeouts and timeouts[0].mark.args[0] == _IMPTY_E2E_TIMEOUT
+
+
+def test_attach_poll_seq_derived_from_poll_timeout():
+    from tests.impty.e2e_support import E2E_POLL_TIMEOUT
+    from tests.impty.test_e2e_relay_hibernation_gate import _ATTACH_POLL
+    assert f"seq {int(E2E_POLL_TIMEOUT / 0.1)}" in _ATTACH_POLL
+    assert "seq 200" not in _ATTACH_POLL
+
+
+def test_gate_file_has_no_sub_knob_poll_literals():
+    import tests.impty.test_e2e_relay_hibernation_gate as gate
+    src = Path(gate.__file__).read_text()
+    for lit in ("timeout=10.0", "timeout=30.0", "timeout=60.0"):
+        assert lit not in src
+    assert "E2E_POLL_TIMEOUT" in src
+
+
+def test_live_sibling_routes_inner_polls_through_knob():
+    import tests.test_relay_hibernation_live as live
+    src = Path(live.__file__).read_text()
+    assert "timeout=E2E_POLL_TIMEOUT" in src   # inner polls adopt the knob
+    assert "timeout=60.0" not in src           # no bare 60s inner poll survives
+    assert "timeout=120.0" in src              # real-provider round-trip stays explicit
+    assert "timeout=30.0" in src              # _await_change_dir setup poll stays explicit
+
+
+def test_interrupt_e2e_routes_gate_budget_through_knob():
+    import tests.impty.test_e2e_interrupt as it
+    src = Path(it.__file__).read_text()
+    assert "E2E_POLL_TIMEOUT" in src            # the knob is adopted
+    assert "+ 60.0" not in src                  # monotonic gate deadline no longer bare
+    assert "hard=60.0" not in src               # run_to_completion routed through knob
+    assert "hard=min(0.5, remaining)" in src    # inner clamp unchanged
