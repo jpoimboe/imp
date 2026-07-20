@@ -886,7 +886,8 @@ async def _run_cleared_session(
         except (EOFError, KeyboardInterrupt):
             if term_title is not None:
                 term_title.reset()
-            print(pal.caret(enabled=color))
+            print(_status_spine(quest.id, quest.title, "discarded", "wordmark",
+                                color=color))
             print()
             return 130
         _session_started = True
@@ -1237,9 +1238,10 @@ async def _async_cmd_new(args: argparse.Namespace, *, leave_mode: str = "new") -
         except (EOFError, KeyboardInterrupt):
             if term_title is not None:
                 term_title.reset()
-            discard_conversation(quest)   # drop the just-minted draft on cancel
-            print(pal.caret(enabled=color))
+            print(_status_spine(quest.id, quest.title, "discarded", "wordmark",
+                                color=color))
             print()
+            discard_conversation(quest)   # drop the just-minted draft on cancel
             return 130
         header_printed = True
         # An empty reply falls back to the unseeded path (the opening step
