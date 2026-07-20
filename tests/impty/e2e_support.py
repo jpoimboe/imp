@@ -15,6 +15,12 @@ from imp.engine.state import LockHeld, ProjectLock
 E2E_SUBPROCESS_TIMEOUT = 235
 # Shared inner-poll ceiling; a loaded host lifts every adopting test via IMP_E2E_POLL_TIMEOUT.
 E2E_POLL_TIMEOUT = float(os.environ.get("IMP_E2E_POLL_TIMEOUT", "60"))
+# The pty repaint of the interrupt-steer hint trails the durable gate event by an
+# extra cross-process relay -> prompt_toolkit render (3 async hops over a socket),
+# which -n auto CPU saturation can stretch past the base poll ceiling. Give that one
+# render-bound poll a generous multiple so it never false-fires on scheduling lag;
+# the 240s per-test outer timeout stays the single backstop for a genuine no-paint.
+E2E_RENDER_POLL_TIMEOUT = E2E_POLL_TIMEOUT * 2
 
 
 def _poll(predicate, timeout: float) -> bool:
