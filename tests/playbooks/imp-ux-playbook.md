@@ -142,16 +142,23 @@ to score).
 - **Every subcommand** the live `imp --help` lists, **plus each `imp <cmd> -h`** — alignment,
   headers, color, empty-state wording, helpfulness of `-h`. Known commands and what to look at
   (snapshot list — the live `--help` wins; flag drift):
-  - `imp init` — first-run bootstrap (run in a *fresh* clone with no `.imp/config.yaml`);
-    it's interactive — judge its prompts and the theme detection.
-  - `imp new -h` — the flag surface (`--backlog`, `--depends-on`, `--workflow`,
-    `--autonomous`, `--non-interactive`/`--message`): can a new user tell which they need?
+  - `imp init` — first-run bootstrap. A clone of an already-init'd imp repo (or a machine
+    that already has `~/.config/imp/config.yaml`) short-circuits to "already set up"; to see
+    the real interactive path, run in a **fresh non-imp git repo** with `XDG_CONFIG_HOME`
+    pointed at an empty dir. Only the **provider multi-select** is interactive — theme is
+    **auto-detected silently** (no prompt; under a non-truecolor pty it picks `ansi`).
+  - `imp new -h` — the flag surface (`--backlog`, `--background`, `--depends-on`,
+    `--workflow`, `--autonomous`, `--headless`/`--message`, `--base`, `--model`): can a new
+    user tell which they need?
   - `imp chat` — the conversation surface (own item below).
   - `imp list` — the overview: zones (in-flight / backlog / merged) legible? ids vs
-    titles? Then `imp show <id>` (detail card) and one artifact view (e.g.
-    `imp show <id> status`), plus `imp list -a`.
+    titles? Then `imp show <id>` (detail card) and the artifact view `imp show <id> spec`
+    (`spec` is the only artifact resource — a bare name like `status` errors), plus
+    `imp list -a`.
   - `imp log <id>` — a readable story or a wall of internals? Also `imp log <id> --summary`
     (the per-step timeline) and `--full`.
+  - `imp events <id>` — the event-log index/filter surface (`--type`, `--wire`, `--range`,
+    `imp events search`): expert-oriented, but read its `-h` and a bare invocation.
   - `imp search <query>` — both a hit and a miss: is the no-match wording helpful?
   - `imp config` / `imp config --explain high` — layer/source arrows legible? precedence clear?
   - `imp abandon <id>` — teardown wording clear? confirmation/affordance?
@@ -164,23 +171,29 @@ to score).
   the screen (send `"q"` to quit); `--no-pager` prints straight through (use it or
   `view(full=True)` when *you* need to read). Judge that paging feels intentional, not broken.
 - **Slash commands at the interactive prompt** — at any imp prompt, including the opening
-  `imp new` / `imp chat` intent prompt and the post-`/clear` prompt: the full nine-command
-  client-side set — `/help` (readable, and does it match reality?), `/skills`, `/list [-a]`,
-  `/search <q>`, `/resume <id>`, `/save`, `/shelve`, `/clear`, `/abandon` — each handled client-side
-  without spending a model turn; Tab completion covers all nine (`send("/sk\t")` →
-  `/skills`, `send("/li\t")` → `/list`), so an unambiguous prefix fills and an ambiguous one
-  lists candidates; Up-arrow recalls your previous input; Alt+Enter (`send("\x1b\r")`) inserts
-  a newline instead of submitting; Ctrl-C at the prompt clears the buffer (and hints at Ctrl-D
-  once); and paste a bare path like `/home/user/foo.py` — it must submit as ordinary input,
-  **not** error as an unknown command.
+  `imp new` / `imp chat` intent prompt and the post-`/clear` prompt. The live `/help` is
+  authoritative (read it and check it matches reality). The real client-side set is smaller
+  than a "full nine": `/help`, `/skills`, `/model <m>`, `/sandbox [on|off]`, `/compact`,
+  `/abandon`, and `/<skill>` at **every** prompt; `imp chat` (and any pre-materialized
+  conversation) additionally has `/save`, `/shelve`, `/clear`. **There is no `/list`,
+  `/search`, or `/resume`** client-side. Each is handled without spending a model turn; Tab
+  completion covers them (`send("/sk\t")` → `/skills`), an unambiguous prefix fills and an
+  ambiguous one lists candidates; Up-arrow recalls previous input; Alt+Enter (`send("\x1b\r")`)
+  inserts a newline; Ctrl-C clears the buffer (and hints Ctrl-D once). **Note** (see
+  `slash.py`): an unknown `/<name>` is **not** rejected client-side — it is submitted to the
+  model verbatim (so a pasted path like `/home/user/foo.py` reaches the agent unchanged, and
+  a command-shaped typo like `/list` becomes model input — at `imp new` it may be read as the
+  quest intent, in chat the model may reply conversationally). Test that a pasted path submits
+  as ordinary input; treat any "unknown command" text as a model reply, not client output.
 - **`imp chat`** — the lightweight conversation surface: open it, exchange a couple of turns
   (ask something about the repo), then `/save` — is the kept-as-draft messaging clear? Try
   `/clear` (parks the chat, starts fresh). Also compare Ctrl-D dispositions: after an
   exchange (saves) vs in a brand-new chat with no exchange (cancels). Does chat read as a
   distinct, lighter thing than `imp new`?
 - **Inline pickers** — no-arg `imp resume` and no-arg `imp abandon` open an arrow-key picker:
-  `send("\x1b[B")` / `send("\x1b[A")` to move, Enter selects, ESC cancels (escape-flush
-  caveat, §2). Judge the candidate rows: enough context to pick confidently?
+  `send("\x1b[B")` / `send("\x1b[A")` to move, Enter selects. The picker **advertises `q` to
+  cancel** (a bare `q` keystroke); ESC also cancels (escape-flush caveat, §2). Judge the
+  candidate rows: enough context to pick confidently?
 - **backlog flow** — `imp new --backlog "some idea"` files an idea and exits: does the
   message tell you how to start it later? Confirm it appears in `imp list`'s backlog zone.
 - **Empty states** — `imp list` / `imp log` before any Change exists.
