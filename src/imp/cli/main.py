@@ -660,6 +660,9 @@ def _print_leave_disposition(
         print()
         return 0
     if disposition == "discard":
+        print(_status_spine(quest.id, quest.title, "discarded", "wordmark",
+                            color=color, intent=opening))
+        print()
         return 0
     if leave_state.get("send_failed"):
         print(_status_spine(quest.id, quest.title, "left running", "wordmark",

@@ -123,14 +123,16 @@ def test_print_leave_disposition_save_prints_saved_as_draft_spine(
     assert not out.endswith("\n\n\n")
 
 
-def test_print_leave_disposition_discard_is_silent(
+def test_print_leave_disposition_discard_prints_discarded_spine(
     tmp_path: Path, capsys: pytest.CaptureFixture[str],
 ) -> None:
     _seed_control(tmp_path)
-    ch = _draft_with_exchange(tmp_path, "dx1")
+    ch = _draft_with_exchange(tmp_path, "dx1")   # title="Draft"
     rc = m._print_leave_disposition(ch, {"disposition": "discard"})
     assert rc == 0
-    assert capsys.readouterr().out == ""
+    out = capsys.readouterr().out
+    assert out == "dx1 · Draft · discarded\n\n"
+    assert "imp resume" not in out
 
 
 def test_print_leave_disposition_none_without_recorded_disposition(
