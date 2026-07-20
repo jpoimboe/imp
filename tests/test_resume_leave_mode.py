@@ -160,6 +160,7 @@ async def test_inert_resume_threads_create_mode(
 
     monkeypatch.setattr(m, "run_inert_resume", _fake_run_inert)
     monkeypatch.setattr(m, "_clear_loop", _fake_loop)
-    rc = await m._resume_inert(quest, "the question?", autonomous=False)
+    rc = await m._resume_inert(
+        quest, "the question?", marker="resuming", notice=None, autonomous=False)
     assert rc == 0
     assert captured["leave_mode"] == create_mode

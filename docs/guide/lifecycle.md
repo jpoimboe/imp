@@ -56,7 +56,8 @@ draft is just a conversation and its artifacts on disk.
 - `imp new` — start a fresh quest; a left draft stays in the active list (not the
   backlog), resumable later.
 - `imp chat` — open the threshold conversation.
-- `imp resume <id>` — pick a parked or left quest back up.
+- `imp resume <id>` — pick a parked or left quest back up; resuming one whose
+  session is still live attaches to (joins) that live run.
 
 ## What happens to a left draft
 

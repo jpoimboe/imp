@@ -1343,6 +1343,33 @@ def _build_resume_driver(
         quest_id=quest.id, title=quest.title)
 
 
+def _resume_live_framing(
+    quest_id: str, *, lock_live: bool, halt_condition: str | None,
+) -> tuple[str, str | None]:
+    """Marker + optional notice for a resume. A live lock means we are joining an
+    already-running session, not restarting a stopped one; the running/waiting
+    split matches resolve_display_status (imp list) so the wording agrees."""
+    if not lock_live:
+        return "resuming", None
+    if halt_condition == "waiting":
+        return (
+            "already waiting",
+            f"quest {quest_id} is already waiting for input"
+            " — attaching to answer it.")
+    return (
+        "already running",
+        f"quest {quest_id} is already running in a live session"
+        " — attaching to it.")
+
+
+def _print_resume_opening(
+    quest: Quest, marker: str, notice: str | None, *, color: bool,
+) -> None:
+    print(_run_header_line(quest.id, quest.title, marker, color=color))
+    if notice is not None:
+        print(ansi(notice, "dim", enabled=color))
+
+
 async def _async_cmd_resume(args: argparse.Namespace) -> int:
     if os.environ.get("IMP_SESSION_SOCKET"):
         return _emit_mutation_result(
@@ -1371,6 +1398,10 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
         _emit_cli_error(f"quest {quest.id} status is {state.status!r}; nothing to resume")
         return 2
 
+    marker, live_notice = _resume_live_framing(
+        quest.id, lock_live=lock_is_live(quest.quest_dir / "lock"),
+        halt_condition=state.halt_condition)
+
     headless, auto_headless = _select_headless(args)
     autonomous = bool(getattr(args, "autonomous", False))
     if headless:
@@ -1378,12 +1409,11 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
             _emit_cli_error(
                 f"no tty detected — running headless; "
                 f"resume with `imp resume {quest.id}`")
-        print(_run_header_line(
-            quest.id, quest.title, "resuming", color=should_use_color(sys.stdout)))
+        color = should_use_color(sys.stdout)
+        _print_resume_opening(quest, marker, live_notice, color=color)
         status = LiveStatus(sys.stdout)
         driver = _build_resume_driver(
-            quest=quest, state=state, status=status,
-            color=should_use_color(sys.stdout))
+            quest=quest, state=state, status=status, color=color)
         coord = InterruptCoordinator()
         solicit = make_headless_solicit(getattr(args, "message", None), coord)
         return await run_session_client(
@@ -1393,12 +1423,14 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
     if not getattr(args, "message", None):
         question = bare_turn_end_question(quest)
         if question is not None:
-            return await _resume_inert(quest, question, autonomous=autonomous)
+            return await _resume_inert(
+                quest, question, marker=marker, notice=live_notice,
+                autonomous=autonomous)
 
     # Interactive resume: a thin session-client; the daemon owns the worktree +
     # lock and runs resume prep + the agent loop.
     color = should_use_color(sys.stdout)
-    print(_run_header_line(quest.id, quest.title, "resuming", color=color))
+    _print_resume_opening(quest, marker, live_notice, color=color)
     splash_shown = _print_splash_banner(interactive=_is_interactive(
         non_interactive=bool(getattr(args, "non_interactive", False))))
 
@@ -1459,7 +1491,8 @@ async def _inert_ask_line(quest: Quest, *, toolbar: str | None = None) -> str | 
 
 
 async def _resume_inert(
-    quest: Quest, question: str, *, autonomous: bool = False,
+    quest: Quest, question: str, *, marker: str, notice: str | None,
+    autonomous: bool = False,
 ) -> int:
     """AC8 inert resume: show the pending question, wait for a reply, launch live session."""
     from imp.cli.signals import InterruptCoordinator
@@ -1473,7 +1506,7 @@ async def _resume_inert(
         step_label=state.step_label, model=_prelaunch_position_model(quest, state),
         quest_id=quest.id, title=quest.title,
         color=color, width=_term_width(), unsandboxed=state.unsandboxed)
-    print(_run_header_line(quest.id, quest.title, "resuming", color=color))
+    _print_resume_opening(quest, marker, notice, color=color)
     question = render_inert_question(question, width=_term_width(), color=color)
 
     async def _launch(line: str) -> int:

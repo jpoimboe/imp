@@ -130,7 +130,7 @@ async def test_inert_resume_derives_verb_and_passes_display_width(
 
     monkeypatch.setattr(m, "_clear_loop", _fake_loop)
 
-    rc = await m._resume_inert(ch, "Pending Q?")
+    rc = await m._resume_inert(ch, "Pending Q?", marker="resuming", notice=None)
 
     assert rc == 0
     assert captured["startup_verb"] == "writing plan"       # labeled step → its label
