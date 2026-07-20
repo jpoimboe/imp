@@ -14,8 +14,8 @@ def test_lifecycle_doc_exists_and_is_nonempty() -> None:
 
 def test_lifecycle_names_the_full_status_set_with_derived_running() -> None:
     body = DOC.read_text()
-    for status in ("new", "paused", "saved", "completed",
-                   "merge_blocked", "abandoned"):
+    for status in ("new", "paused", "merge_blocked", "merged",
+                   "shelved", "abandoned", "error"):
         assert status in body, status
     # running is derived, never stored
     assert "running" in body
@@ -50,7 +50,7 @@ def test_lifecycle_documents_waiting_error_and_no_draft_word() -> None:
     body = DOC.read_text()
     assert "waiting" in body
     assert "error" in body
-    # running/waiting/error are derived from the lock + the durable halt-condition
+    # running and waiting are derived from the lock + the durable halt-condition
     assert "halt-condition" in body or "halt condition" in body
     # the false "shown as a `draft`" display-word phrasing is gone
     assert "shown as a `draft`" not in body
