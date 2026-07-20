@@ -4,10 +4,13 @@ Each test builds a REAL active SandboxPolicy, runs a real bash command under
 bwrap, and asserts the OS-level outcome (write-confinement, secret masking,
 /tmp persistence, network argv, git commit + escape-vector blocking).
 
-Sandbox worktrees use the default temp directory (/tmp). The real /tmp is
-bound rw by identity (--bind /tmp /tmp emitted right after the ro-floor), so
-a worktree under /tmp is NOT shadowed inside the namespace — --chdir works
-and /tmp files are visible inside and outside the sandbox.
+Sandbox worktrees use the default temp directory (/tmp). A resolved policy binds
+its per-quest <quest.tmp_dir> onto the namespace /tmp; a hand-built policy that
+leaves quest_tmp_dir="" (as the helpers here do, except where a test sets it)
+falls back to the real-/tmp identity bind (--bind /tmp /tmp right after the
+ro-floor). Either way /tmp is rw inside the namespace and a worktree under the
+bound source is NOT shadowed — --chdir works and the bound /tmp is visible inside
+and outside the sandbox.
 """
 from __future__ import annotations
 
@@ -18,6 +21,7 @@ import os
 import shutil
 import subprocess
 import tempfile
+import uuid
 from pathlib import Path
 
 import anyio
@@ -51,8 +55,8 @@ pytestmark = pytest.mark.skipif(
 def _make_root(prefix: str = "imp-test-beh-") -> Path:
     """Create a sandbox root under the default temp dir (/tmp).
 
-    The real /tmp identity bind means the worktree is not shadowed inside the
-    namespace — no /var/tmp workaround needed.
+    The worktree is bound rw after the /tmp bind, so it is not shadowed inside
+    the namespace — no /var/tmp workaround needed.
     """
     return Path(tempfile.mkdtemp(prefix=prefix))
 
@@ -63,8 +67,8 @@ def _active_policy(worktree: Path, *, home: Path | None = None,
 
     Uses PATH from the real environment so git, cat, echo, etc. resolve.
     HOME is set to a dir under the worktree root (or the provided `home`).
-    The real /tmp is bound rw by identity in build_sandbox_argv — no per-test
-    tmp dir setup is needed.
+    This hand-built policy leaves quest_tmp_dir="", so /tmp is bound rw by
+    identity in build_sandbox_argv — no per-test tmp dir setup is needed.
     """
     git = worktree / ".git"
     git.mkdir(exist_ok=True)
@@ -108,6 +112,13 @@ def _ctx(worktree: Path, policy: SandboxPolicy) -> ToolContext:
 
 def _bash(ctx: ToolContext, cmd: str) -> dict[str, object]:
     """Run cmd under ctx's sandbox policy; return parsed JSON {stdout, stderr, returncode}."""
+    pol = getattr(ctx, "base_sandbox_policy", None)
+    if pol is not None and getattr(pol, "quest_tmp_dir", ""):
+        # quest_tmp_dir is the bwrap SOURCE for the namespace /tmp. In production
+        # spawn_session_daemon creates it before any sandboxed spawn; these direct-
+        # resolve tests bypass that, so create it here or bwrap setup aborts on the
+        # missing --bind source. No-op for hand-built policies (quest_tmp_dir == "").
+        Path(pol.quest_tmp_dir).mkdir(parents=True, exist_ok=True)
     async def _run() -> str:
         return await get_registry()["bash"].async_invoke(ctx, {"command": cmd})
     return json.loads(anyio.run(_run))
@@ -1332,4 +1343,24 @@ def test_draft_agent_masks_siblings_and_archive_reads_writes_own_spec() -> None:
         assert (spec_dir / "new.md").read_text() == "DWROTE\n"
     finally:
         shutil.rmtree(control, ignore_errors=True)
+
+
+def test_per_quest_tmp_dir_is_the_sandbox_tmp() -> None:
+    """A write to /tmp inside the sandbox lands in the per-quest host dir, and the
+    real host /tmp is untouched (AC2a, end-to-end through bwrap)."""
+    root = _make_root()
+    qtmp = Path(tempfile.mkdtemp(prefix="imp-qtmp-"))
+    marker = f"beh-{uuid.uuid4().hex}"
+    try:
+        pol = dataclasses.replace(_active_policy(root), quest_tmp_dir=str(qtmp))
+        ctx = _ctx(root, pol)
+        r = _bash(ctx, f"echo hi > /tmp/{marker} && echo ok")
+        assert r["returncode"] == 0, r
+        # The write landed in the per-quest host dir (the bound source of /tmp)...
+        assert (qtmp / marker).read_text().strip() == "hi"
+        # ...and NOT in the real host /tmp.
+        assert not (Path("/tmp") / marker).exists()
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+        shutil.rmtree(qtmp, ignore_errors=True)
 
