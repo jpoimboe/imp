@@ -116,7 +116,7 @@ def test_state_round_trip_without_current_step(tmp_path: Path) -> None:
     from imp.engine.state import State
     s = State(
         id="c5", step=None, step_attempt=0,
-        status="completed",
+        status="merged",
     )
     s.save(tmp_path)
     loaded = State.load(tmp_path)

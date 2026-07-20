@@ -150,9 +150,7 @@ class LocalStore:
 
     def quest_card(self, quest_id: str) -> QuestCard | None:
         from imp.cli.main import (
-            _DISPOSITION,
             _load_events_for_id,
-            _quest_home,
             _quest_meta,
             _quest_state,
             _resolve_intent,
@@ -160,14 +158,10 @@ class LocalStore:
             _show_artifact,
         )
         from imp.engine import quest_refs
-        from imp.engine.archive import read as archive_read
         row = _row_for_id(self.control_root, quest_id)
         if row is None:
             return None
         _id, status, step, last, title, created, step_label, phase_label = row[:8]
-        if (not (_quest_home(self.control_root, quest_id) / "quest.json").exists()
-                and archive_read.status_of(self.control_root, quest_id) == "paused"):
-            status = _DISPOSITION["paused"]
         events = _load_events_for_id(self.control_root, quest_id) or []
         meta = _quest_meta(self.control_root, quest_id) or {}
         state = _quest_state(self.control_root, quest_id) or {}

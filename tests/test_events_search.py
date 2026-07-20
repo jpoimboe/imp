@@ -166,7 +166,7 @@ def test_events_search_backlog_skipped_when_type_filter_present(
 
 
 def _archive_events(tmp_path: Path, quest_id: str, title: str,
-                    events_text: str, status: str = "completed") -> None:
+                    events_text: str, status: str = "merged") -> None:
     events = tmp_path / f"{quest_id}.jsonl"
     events.write_text(events_text)
     (tmp_path / f"{quest_id}.quest.json").write_text(_json.dumps({
@@ -199,7 +199,7 @@ def test_events_search_archived_end_to_end(monkeypatch, tmp_path: Path) -> None:
 def test_events_search_archived_routes_through_store(monkeypatch, tmp_path: Path) -> None:
     class _FakeStore:
         def search_event_candidates(self, query):
-            return [("arch01", "Archived one", "completed", "2026-06-11T00:00:00+00:00")]
+            return [("arch01", "Archived one", "merged", "2026-06-11T00:00:00+00:00")]
 
         def get_events(self, cid):
             return [_ev("e0", "tool_call", name="bash", input={"cmd": "GREPTARGET"})]

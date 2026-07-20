@@ -132,7 +132,7 @@ def test_follow_step_live_footer_uses_compose_status(tmp_path: Path) -> None:
     status.update.assert_called_with(driver.compose_status)
 
 
-@pytest.mark.parametrize("terminal", ["completed", "abandoned", "saved"])
+@pytest.mark.parametrize("terminal", ["merged", "abandoned", "shelved"])
 def test_follow_step_terminal_drains_and_finishes(
     tmp_path: Path, terminal: str,
 ) -> None:
@@ -364,7 +364,7 @@ def test_follow_step_second_drain_catches_late_append(
     tail = _EventTail(home / "events.jsonl")
 
     class _TerminalState:
-        status = "completed"
+        status = "merged"
 
     def _load_and_append(state_dir: Path) -> _TerminalState:
         with (home / "events.jsonl").open("a") as f:
@@ -498,7 +498,7 @@ def test_follow_matches_live_session_capture(tmp_path: Path) -> None:
     with (home / "events.jsonl").open("a") as f:
         for e in events[split:]:
             f.write(json.dumps(e) + "\n")
-    _write_state(home, status="completed", slug=slug)
+    _write_state(home, status="merged", slug=slug)
 
     # Poll 2: drain the tail, finish(), exit 0 — output equals the live capture,
     # and finish() is independently pinned (byte-identical with/without it here).

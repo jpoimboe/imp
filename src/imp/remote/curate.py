@@ -50,4 +50,4 @@ class EventCurator:
         elif etype == "merge_blocked":
             self._status = "merge_blocked"
         elif etype == "quest_merged":
-            self._status = "completed"
+            self._status = "merged"

@@ -122,12 +122,12 @@ def test_search_content_matches_title_only_when_body_lacks_term(tmp_path: Path) 
 
 
 def test_search_content_returns_quads_with_status(tmp_path: Path) -> None:
-    _archive(tmp_path, "alpha", "Dark mode toggle", status="completed")
+    _archive(tmp_path, "alpha", "Dark mode toggle", status="merged")
     hits = archive_read.search_archive_content(tmp_path, "dark")
     assert [h[0] for h in hits] == ["alpha"]
     assert hits[0][1] == "Dark mode toggle"
     assert len(hits[0]) == 5                  # (id, title, content, status, last_activity)
-    assert hits[0][3] == "completed"          # status carried for disposition filtering
+    assert hits[0][3] == "merged"             # status carried for disposition filtering
 
 
 def test_search_content_missing_index_returns_empty(tmp_path: Path) -> None:

@@ -91,7 +91,7 @@ def _archive_completed(control: Path, cid: str) -> None:
         "materialized": True}))
     state_json = control / f"{cid}-state.json"
     state_json.write_text(json.dumps({
-        "id": cid, "status": "completed", "step": None, "merge_commit": "c0ffee"}))
+        "id": cid, "status": "merged", "step": None, "merge_commit": "c0ffee"}))
     archive.archive_quest(
         control, cid, events_path=events,
         quest_json_path=quest_json, state_json_path=state_json)
@@ -112,7 +112,7 @@ def _archive_paused(
         "materialized": False}))
     state_json = control / f"{cid}-state.json"
     state_json.write_text(json.dumps({
-        "id": cid, "status": "paused", "step": None}))
+        "id": cid, "status": "shelved", "step": None}))
     archive.archive_quest(
         control, cid, events_path=events,
         quest_json_path=quest_json, state_json_path=state_json)
@@ -133,7 +133,7 @@ def test_shelved_rows_selects_paused_not_live(tmp_path: Path) -> None:
     # one is NOT (this pins the `paused` filter — dropping it would surface epsilon).
     shelved = m._shelved_rows(tmp_path)
     assert {r[0] for r in shelved} == {"delta"}
-    assert all(r[1] == "paused" for r in shelved)
+    assert all(r[1] == "shelved" for r in shelved)
     # The completed change is a completed row, not a shelved row (AC 4).
     assert {r[0] for r in m._completed_rows(tmp_path)} == {"epsilon"}
     # A resumed (now live) shelved conversation drops out via live_ids (AC 3).
@@ -149,7 +149,7 @@ def test_shelved_conversation_only_in_all_history(tmp_path: Path) -> None:
     # the older merged gamma).
     all_hist = m._history_rows(tmp_path, show_all=True)
     assert [r[0] for r in all_hist] == ["delta", "gamma"]
-    assert dict((r[0], r[1]) for r in all_hist)["delta"] == "paused"
+    assert dict((r[0], r[1]) for r in all_hist)["delta"] == "shelved"
 
     # AC 2: plain imp show never lists the shelved conversation.
     plain_hist = m._history_rows(tmp_path, show_all=False)
@@ -186,10 +186,10 @@ def test_completed_rows_pad_phase_label_slot(tmp_path: Path, monkeypatch) -> Non
     _seed_control(tmp_path)
     monkeypatch.setattr(
         m.archive_read, "completed_rows",
-        lambda control: [("cid", "completed", "-", "iso", "Title", "created", None)])
+        lambda control: [("cid", "merged", "-", "iso", "Title", "created", None)])
     monkeypatch.setattr(m, "_status_rows", lambda control: [])
     rows = m._completed_rows(tmp_path)
-    assert rows == [("cid", "completed", "-", "iso", "Title", "created", None, None, None)]
+    assert rows == [("cid", "merged", "-", "iso", "Title", "created", None, None, None)]
 
 
 def test_history_rows_threads_live_ids(tmp_path: Path) -> None:

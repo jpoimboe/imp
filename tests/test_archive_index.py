@@ -46,7 +46,7 @@ def _sample_record() -> dict:
         "base": "main",
         "created_at": "2026-06-01T00:00:00+00:00",
         "depends_on": ["beta", "gamma"],
-        "final_state": {"status": "completed", "step": "finalize"},
+        "final_state": {"status": "merged", "step": "finalize"},
         "events_hash": "deadbeef",
     }
 
@@ -72,7 +72,7 @@ def test_ingest_populates_changes_deps(tmp_path: Path) -> None:
             " last_event_ts FROM quests").fetchall()
         assert crow == [(
             "alpha", "Alpha", "main", "2026-06-01T00:00:00+00:00",
-            "completed", "finalize", "deadbeef", "2026-06-01T00:00:02+00:00")]
+            "merged", "finalize", "deadbeef", "2026-06-01T00:00:02+00:00")]
         assert conn.execute(
             "SELECT ingested_at FROM quests WHERE id='alpha'"
         ).fetchone()[0] is not None
@@ -206,11 +206,11 @@ def test_completed_rows_reads_denormalized_last_event_ts(tmp_path: Path) -> None
         conn.execute(
             "INSERT INTO quests (id, status, step, title, created_at,"
             " last_event_ts) VALUES (?, ?, ?, ?, ?, ?)",
-            ("alpha", "completed", "finalize", "Alpha",
+            ("alpha", "merged", "finalize", "Alpha",
              "2026-06-01T00:00:00+00:00", "2026-06-01T09:00:00+00:00"))
         conn.commit()
         assert index.completed_rows(conn) == [(
-            "alpha", "completed", "finalize", "2026-06-01T09:00:00+00:00",
+            "alpha", "merged", "finalize", "2026-06-01T09:00:00+00:00",
             "Alpha", "2026-06-01T00:00:00+00:00", None)]
     finally:
         conn.close()
@@ -332,7 +332,7 @@ def test_search_events_content_matches_structured_events_only(tmp_path: Path) ->
         assert index.search_events_content(conn, "alpha") == []   # id not searched
         assert index.search_events_content(conn, "Alpha") == []   # title not searched
         assert index.search_events_content(conn, "GREPTARGET")[0] == (
-            "alpha", "Alpha", "completed", None)
+            "alpha", "Alpha", "merged", None)
     finally:
         conn.close()
 

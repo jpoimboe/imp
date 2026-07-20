@@ -39,7 +39,7 @@ def test_rehydrate_recreates_home_under_quests(tmp_path: Path) -> None:
         "created_at": "2026-07-01T00:00:00+00:00", "depends_on": []}))
     state_json = tmp_path / f"{cid}-state.json"
     state_json.write_text(json.dumps({
-        "id": cid, "status": "completed", "step": "finalize"}))
+        "id": cid, "status": "merged", "step": "finalize"}))
     archive.archive_quest(
         tmp_path, cid, events_path=events,
         quest_json_path=quest_json, state_json_path=state_json)

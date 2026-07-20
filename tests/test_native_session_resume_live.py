@@ -229,8 +229,8 @@ def test_resumed_step_recalls_prior_reads_without_redo_or_400(
     assert resume.returncode == 0, (
         f"resume failed rc={resume.returncode}; stderr={resume.stderr}"
     )
-    final_status = _wait_for_status(state_path, "completed", 30.0)
-    assert final_status == "completed", final_status
+    final_status = _wait_for_status(state_path, "merged", 30.0)
+    assert final_status == "merged", final_status
 
     # Part C: the deferred-MCP-tool replay did NOT trip `400 due to tool use
     # concurrency issues` — imp's default standard tool mode (ENABLE_TOOL_SEARCH=

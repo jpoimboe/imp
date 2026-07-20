@@ -400,7 +400,7 @@ def test_show_spec_from_wip_ref_when_home_absent(
         )
     )
     sj = tmp_path / "ghost-state.json"
-    sj.write_text(json.dumps({"id": "ghost01", "status": "completed", "step": None}))
+    sj.write_text(json.dumps({"id": "ghost01", "status": "merged", "step": None}))
     archive.archive_quest(
         tmp_path, "ghost01", events_path=events, quest_json_path=cj, state_json_path=sj
     )
@@ -517,7 +517,7 @@ def test_show_json_emits_structured_overview(
         "created_at": "2026-06-20T11:00:00+00:00", "depends_on": []}))
     dep_sj = tmp_path / "dep.state.json"
     dep_sj.write_text(json.dumps({
-        "id": "depa01", "status": "completed", "step": None,
+        "id": "depa01", "status": "merged", "step": None,
         "merge_commit": "abc123"}))
     archive.archive_quest(tmp_path, "depa01", events_path=dep_events,
                           quest_json_path=dep_qj, state_json_path=dep_sj)
@@ -746,9 +746,8 @@ def test_show_card_step_line_shows_for_error(tmp_path: Path) -> None:
     _seed_control(tmp_path)
     ch = Quest.create(tmp_path, title="Broke", quest_id="err02", base_branch="main")
     st = State.load(ch.state_dir)
-    st.status = "paused"
+    st.status = "error"
     st.step = "task-lead"
-    st.halt_condition = "error"
     st.save(ch.state_dir)
     card = "\n".join(_quest_card(tmp_path, "err02", now=datetime.now(UTC), color=False))
     status_line = next(ln for ln in card.splitlines() if ln.startswith("status:"))

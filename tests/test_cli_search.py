@@ -63,7 +63,7 @@ def test_search_archived_hit_carries_last_activity(tmp_path: Path) -> None:
     _archive_conv(tmp_path, "darkid", "Dark mode", "2026-06-10T00:00:00+00:00",
                   "a dark note")
     hits = _search_archived(tmp_path, "dark",
-                            {"completed", "abandoned", "paused"}, None)
+                            {"merged", "abandoned", "shelved"}, None)
     assert len(hits) == 1
     assert hits[0].last_activity == "2026-06-10T00:00:00+00:00"
 
@@ -227,7 +227,7 @@ def test_cmd_search_composes_two_zone_flags(tmp_path: Path, capsys) -> None:
 
 
 def test_cmd_search_merged_filters_to_completed(tmp_path: Path, capsys) -> None:
-    _archive(tmp_path, "alpha", "Dark mode toggle", status="completed")
+    _archive(tmp_path, "alpha", "Dark mode toggle", status="merged")
     _archive(tmp_path, "beta", "Dark login flow", status="abandoned")
     rc = _cmd_search(_ns("dark", merged=True, list=True), tmp_path)
     out = capsys.readouterr().out
@@ -237,8 +237,8 @@ def test_cmd_search_merged_filters_to_completed(tmp_path: Path, capsys) -> None:
 
 
 def test_cmd_search_shelved_filters_to_paused(tmp_path: Path, capsys) -> None:
-    _archive(tmp_path, "shlv", "Dark shelved chat", status="paused")
-    _archive(tmp_path, "done", "Dark merged work", status="completed")
+    _archive(tmp_path, "shlv", "Dark shelved chat", status="shelved")
+    _archive(tmp_path, "done", "Dark merged work", status="merged")
     rc = _cmd_search(_ns("dark", shelved=True, list=True), tmp_path)
     out = capsys.readouterr().out
     assert rc == 0
@@ -248,7 +248,7 @@ def test_cmd_search_shelved_filters_to_paused(tmp_path: Path, capsys) -> None:
 
 def test_cmd_search_merged_after_alone_enables_merged(tmp_path: Path, capsys) -> None:
     # No guard, no exit: --merged-after self-enables the merged disposition.
-    _archive(tmp_path, "alpha", "Dark mode toggle", status="completed")
+    _archive(tmp_path, "alpha", "Dark mode toggle", status="merged")
     rc = _cmd_search(_ns("dark", merged_after="deadbeef", list=True), tmp_path)
     out = capsys.readouterr().out
     assert rc == 0
@@ -259,7 +259,7 @@ def test_cmd_search_merged_after_alone_enables_merged(tmp_path: Path, capsys) ->
 def test_cmd_search_merged_after_returns_completed_hit_when_resolvable(
         tmp_path: Path, capsys) -> None:
     sha_a, sha_b = _init_git_commits(tmp_path)
-    _archive(tmp_path, "alpha", "Dark mode toggle", status="completed",
+    _archive(tmp_path, "alpha", "Dark mode toggle", status="merged",
              merge_commit=sha_b)
     rc = _cmd_search(_ns("dark", merged_after=sha_a, list=True), tmp_path)
     out = capsys.readouterr().out

@@ -110,7 +110,7 @@ def test_merge_blocked_renders_two_words_on_underscore_color_key():
 
 
 def test_format_dim_wraps_whole_row():
-    line = format_quest_line(**_row(status="completed"), color=True, dim=True)
+    line = format_quest_line(**_row(status="merged"), color=True, dim=True)
     assert line.startswith("\x1b[2m")
     assert line.endswith("\x1b[0m")
     assert "\x1b[32m" not in line
@@ -118,8 +118,8 @@ def test_format_dim_wraps_whole_row():
 
 def test_dim_row_column_order():
     # history (dim) path preserves the same column order: NAME then STATUS then UPDATED.
-    line = format_quest_line(**_row(status="completed"), color=False, dim=True)
-    assert line.index("Add version flag") < line.index("completed") < line.index("15m")
+    line = format_quest_line(**_row(status="merged"), color=False, dim=True)
+    assert line.index("Add version flag") < line.index("merged") < line.index("15m")
 
 
 def test_merged_status_renders_plain():
@@ -183,9 +183,9 @@ def test_status_cell_falls_back_to_step_name_without_label():
 def test_status_cell_bare_when_step_empty():
     # The default _row title ("Add version flag") has no paren, so a clean line
     # has none at all when the STATUS cell carries no ` (label)` suffix.
-    line = format_quest_line(**_row(status="completed", step="-"),
+    line = format_quest_line(**_row(status="merged", step="-"),
                               step_label=None, color=False)
-    assert "completed" in line
+    assert "merged" in line
     assert "(" not in line                     # no suffix in the STATUS cell
 
 

@@ -34,7 +34,7 @@ def test_resolver_live_gate_is_waiting(tmp_path: Path) -> None:
 
 def test_resolver_not_live_error_is_error(tmp_path: Path) -> None:
     (tmp_path / "lock").write_text(str(_dead_pid()))
-    assert m.resolve_display_status("paused", tmp_path, halt_condition="error") == "error"
+    assert m.resolve_display_status("error", tmp_path, halt_condition=None) == "error"
 
 
 def test_resolver_not_live_clean_is_at_rest_status(tmp_path: Path) -> None:
@@ -46,8 +46,8 @@ def test_resolver_absent_lock_keeps_at_rest_status(tmp_path: Path) -> None:
     assert m.resolve_display_status("new", tmp_path, halt_condition=None) == "new"
 
 
-def test_resolver_completed_folds_to_merged(tmp_path: Path) -> None:
-    assert m.resolve_display_status("completed", tmp_path, halt_condition=None) == "merged"
+def test_resolver_merged_passes_through(tmp_path: Path) -> None:
+    assert m.resolve_display_status("merged", tmp_path, halt_condition=None) == "merged"
 
 
 def test_membership_gates_reflect_derived_words() -> None:
@@ -56,6 +56,7 @@ def test_membership_gates_reflect_derived_words() -> None:
     assert "error" in m.RESUMABLE          # a failed quest stays resumable
     assert "waiting" not in m.RESUMABLE    # live-only, never a resume target
     assert "draft" not in m.RESUMABLE
+    assert "shelved" in m.RESUMABLE        # a shelved conversation rehydrates and resumes
 
 
 def test_resumable_and_inflight_include_new_not_errored() -> None:
@@ -89,8 +90,7 @@ def test_status_rows_not_live_error_is_error_and_resumable(tmp_path: Path) -> No
     _seed_control(tmp_path)
     ch = Quest.create(tmp_path, title="Broke", quest_id="err01", base_branch="main")
     st = State.load(ch.state_dir)
-    st.status = "paused"
-    st.halt_condition = "error"
+    st.status = "error"
     st.save(ch.state_dir)
     rows = {r[0]: r for r in m._status_rows(tmp_path)}
     assert rows["err01"][1] == "error"

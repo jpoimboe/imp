@@ -45,7 +45,7 @@ def test_journal_last_iso_returns_last_activity(tmp_path: Path):
         "id": "some-id", "title": "Some", "base_branch": "main",
         "created_at": "2026-06-01T00:00:00+00:00", "depends_on": []}))
     sj = tmp_path / "s.json"
-    sj.write_text(json.dumps({"id": "some-id", "status": "completed", "step": None}))
+    sj.write_text(json.dumps({"id": "some-id", "status": "merged", "step": None}))
     archive.archive_quest(
         tmp_path, "some-id", events_path=events,
         quest_json_path=cj, state_json_path=sj)
@@ -70,7 +70,7 @@ def test_journal_last_iso_reads_index_not_blob(tmp_path: Path, monkeypatch) -> N
         "id": "some-id", "title": "Some", "base_branch": "main",
         "created_at": "2026-06-01T00:00:00+00:00", "depends_on": []}))
     sj = tmp_path / "s.json"
-    sj.write_text(json.dumps({"id": "some-id", "status": "completed", "step": None}))
+    sj.write_text(json.dumps({"id": "some-id", "status": "merged", "step": None}))
     archive.archive_quest(
         tmp_path, "some-id", events_path=events,
         quest_json_path=cj, state_json_path=sj)
