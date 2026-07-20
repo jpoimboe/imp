@@ -269,6 +269,32 @@ def test_explain_plain_unchanged_under_no_color(
     assert "anthropic" in text and "←" in text
 
 
+def test_render_shows_configured_pythonpath(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    xdg = tmp_path / "xdg" / "imp"
+    xdg.mkdir(parents=True)
+    (xdg / "config.yaml").write_text("providers: [openai]\npythonpath: [src, lib]\n")
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+    eff = load_effective_config(project_root=None, control_root=None)
+    out = io.StringIO()
+    render_config(eff, out, color=False)
+    line = next((ln.strip() for ln in out.getvalue().splitlines()
+                 if ln.strip().startswith("pythonpath ")), None)
+    assert line is not None and "src, lib" in line
+
+
+def test_render_shows_unset_pythonpath(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    eff = _eff(tmp_path, monkeypatch)  # config with no pythonpath
+    out = io.StringIO()
+    render_config(eff, out, color=False)
+    line = next((ln.strip() for ln in out.getvalue().splitlines()
+                 if ln.strip().startswith("pythonpath ")), None)
+    assert line is not None and "(unset)" in line
+
+
 def test_provenance_path_is_elided_to_fit_80_cols(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
