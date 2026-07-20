@@ -1243,6 +1243,23 @@ def test_subagent_status_row_tag_follows_elapsed() -> None:
         == "  reviewer · 42s · stalled"
 
 
+def test_subagent_status_row_suspended_tag() -> None:
+    from imp.cli import narrative as nv
+    from imp.cli.render_text import subagent_status_row
+
+    def row(color=False, **kw):
+        f = nv.SubagentFold(subagent_name="s", event_id="e", block_id="b",
+                            nested=nv.NarrativeBuilder(), running=False)
+        for k, v in kw.items():
+            setattr(f, k, v)
+        return subagent_status_row(f, depth=0, color=color, gutters=())
+
+    assert row(is_error=True, terminal_state="suspended") == "  s · suspended"
+    assert "(" not in row(is_error=True, terminal_state="suspended")
+    assert pal.ansi(" · suspended", "wordmark") \
+        in row(color=True, is_error=True, terminal_state="suspended")
+
+
 def test_full_subagent_unchanged_shows_children() -> None:
     # --full still recurses (regression guard).
     from imp.cli import narrative as nv
