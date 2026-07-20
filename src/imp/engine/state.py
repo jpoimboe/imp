@@ -165,7 +165,8 @@ class State:
     current_step: CurrentStep | None = None
     retry_feedback: dict[str, Any] | None = None
     resume_pending: str | None = None
-    resume_target: str | None = None  # "agent"|"prompt"; absent/None ⇒ "agent".
+    # "agent" | "prompt-interrupted" | "prompt-paused"; absent/None ⇒ agent.
+    resume_target: str | None = None
     # Disposition for resume_pending; armed and cleared with it via the two
     # writers below, so it is non-None exactly when resume_pending is set.
     resume_mode: ResumeMode | None = None

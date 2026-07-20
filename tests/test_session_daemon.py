@@ -1429,9 +1429,42 @@ async def test_detach_at_hold_prompt_stamps_resume_target_prompt(
 
     assert result is RunResult.PAUSED
     state = State.load(quest.state_dir)
-    assert state.resume_target == "prompt"
+    assert state.resume_target == "prompt-paused"
     assert state.resume_pending == "code"    # non-ctrl-d branch arms solicit on state.step
     assert state.resume_mode == "solicit"    # detaching at the hold prompt re-solicits
+
+
+@pytest.mark.anyio
+async def test_detach_at_interrupt_steer_stamps_prompt_interrupted(
+    tmp_path: Path,
+) -> None:
+    quest = _make_change(tmp_path, "2026-06-15-dis")
+    st = State.load(quest.state_dir)
+    st.step = "code"               # the active step at detach time
+    st.save(quest.state_dir)
+
+    async def fake_run(
+        quest: Quest, *, on_event: Any, user_chat_input_fn: Any,
+        coordinator: Any, wait_for_turn_fn: Any = None,
+    ) -> RunResult:
+        # The executor arms the interrupt disposition before unwinding to the
+        # daemon hold (mid-turn Ctrl-C steer: Pause(interrupt=True) ->
+        # arm_step_resume(mode="continue")).
+        s = State.load(quest.state_dir)
+        s.arm_step_resume(mode="continue")
+        s.save(quest.state_dir)
+        await coordinator.signal_pause(reason="ctrl-c")
+        return RunResult.PAUSED
+
+    with anyio.fail_after(30):   # deadlock backstop only
+        result = await serve_quest_session(
+            quest, run_fn=fake_run, hibernate=True, first_attach_timeout=0.1)
+
+    assert result is RunResult.PAUSED
+    state = State.load(quest.state_dir)
+    assert state.resume_target == "prompt-interrupted"
+    assert state.resume_pending == "code"    # executor's arming is preserved
+    assert state.resume_mode == "continue"   # NOT overwritten with solicit
 
 
 @pytest.mark.anyio
@@ -1462,15 +1495,19 @@ async def test_detach_after_ctrl_d_midrun_stamps_resume_target_agent(
 
 
 @pytest.mark.timeout(240)  # raise the 60s cap so inner backstops can't false-fire under -n auto
+@pytest.mark.parametrize("target,prompt_attr", [
+    ("prompt-paused", "_RESUME_PROMPT"),
+    ("prompt-interrupted", "_RESUME_INTERRUPTED_PROMPT"),
+])
 @pytest.mark.anyio
 async def test_resume_prompt_target_holds_before_running_agent(
-    tmp_path: Path,
+    tmp_path: Path, target: str, prompt_attr: str,
 ) -> None:
     import imp.remote.session.daemon as daemon
 
     quest = _make_change(tmp_path, "2026-06-15-rpt")
     st = State.load(quest.state_dir)
-    st.resume_target = "prompt"
+    st.resume_target = target
     st.save(quest.state_dir)
     sock = str(session_socket_path(quest.control_root, quest.id))
 
@@ -1513,7 +1550,7 @@ async def test_resume_prompt_target_holds_before_running_agent(
         assert calls["n"] == 0
         gates = [e for e in received if e.get("type") == "awaiting_user_input"]
         prompts = [e["payload"]["steer_hint"] for e in gates]
-        assert prompts[-1] == daemon._RESUME_PROMPT
+        assert prompts[-1] == getattr(daemon, prompt_attr)
         # The hold-loop resteer prompt is self-inflicted: flag it so Telegram
         # curation silences it instead of buzzing the operator.
         assert gates[-1]["payload"]["interrupt"] is True
@@ -1555,16 +1592,17 @@ async def test_resume_agent_target_runs_straight_away(
 
 @pytest.mark.anyio
 @pytest.mark.parametrize("flag", ["non_interactive", "autonomous"])
+@pytest.mark.parametrize("target", ["prompt-interrupted", "prompt-paused"])
 async def test_resume_prompt_target_runs_agent_without_interactive_channel(
-    tmp_path: Path, flag: str,
+    tmp_path: Path, flag: str, target: str,
 ) -> None:
-    """A resume_target=='prompt' resteer hold only makes sense when a human can
+    """A prompt-* resteer hold only makes sense when a human can
     type. A headless or autonomous resume has no channel to answer the prompt, so
     honoring it would re-pause without progress — it must continue the agent
     instead (§6.15 mid-step ctrl-c resume completes the interrupted step)."""
     quest = _make_change(tmp_path, "2026-06-15-rph")
     st = State.load(quest.state_dir)
-    st.resume_target = "prompt"
+    st.resume_target = target
     st.save(quest.state_dir)
 
     seen: dict[str, bool] = {"ran": False}

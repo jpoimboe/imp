@@ -408,13 +408,13 @@ def test_state_resume_target_defaults_to_none_and_round_trips(tmp_path: Path) ->
     (tmp_path / "state.json").write_text(json.dumps(raw))
     assert State.load(tmp_path).resume_target is None
 
-    # An explicitly stamped "prompt" survives a save() -> load() cycle and is
+    # An explicitly stamped tell value survives a save() -> load() cycle and is
     # written into the on-disk payload.
-    s.resume_target = "prompt"
+    s.resume_target = "prompt-interrupted"
     s.save(tmp_path)
-    assert State.load(tmp_path).resume_target == "prompt"
+    assert State.load(tmp_path).resume_target == "prompt-interrupted"
     raw = json.loads((tmp_path / "state.json").read_text())
-    assert raw["resume_target"] == "prompt"
+    assert raw["resume_target"] == "prompt-interrupted"
 
 
 def test_state_save_cancellation_cleans_temp_file(tmp_path: Path, monkeypatch) -> None:

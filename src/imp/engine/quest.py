@@ -21,7 +21,7 @@ from imp.engine.seed import seed_workflow_start
 from imp.engine.state import JsonlEventLog, State, classify_pause_halt, parse_events_jsonl
 from imp.engine.types import SourceLoc
 
-LAYOUT_VERSION = 10  # bump in the SAME commit as any breaking quest-home layout/schema change
+LAYOUT_VERSION = 11  # bump in the SAME commit as any breaking quest-home layout/schema change
 
 
 def _write_quest_json(meta_path: Path, meta: dict[str, Any]) -> None:
@@ -284,6 +284,26 @@ def _migrate_v9_to_v10(quest_dir: Path) -> None:
     _write_quest_json(meta_path, meta)
 
 
+def _migrate_v10_to_v11(quest_dir: Path) -> None:
+    """v10->v11: the resume_target vocabulary split the single `prompt` value into
+    `prompt-interrupted`/`prompt-paused` (the persisted steer tell). Rewrite a live
+    home's state.json: resume_target == "prompt" -> "prompt-paused" (a pre-split
+    leave carries no recoverable tell, so it defaults to the boundary `paused`
+    surface); "agent"/absent are unchanged. The state rewrite precedes the version
+    stamp so a partial failure re-runs. A home without state.json advances only the
+    version stamp. The archive migrates separately via _DATA_VERSION 3->4."""
+    state_path = quest_dir / "state" / "state.json"
+    if state_path.exists():
+        data = json.loads(state_path.read_text())
+        if data.get("resume_target") == "prompt":
+            data["resume_target"] = "prompt-paused"
+        _rewrite_state_json(state_path, data)
+    meta_path = quest_dir / "quest.json"
+    meta = json.loads(meta_path.read_text())
+    meta["layout_version"] = 11
+    _write_quest_json(meta_path, meta)
+
+
 _MIGRATIONS: dict[tuple[int, int], Callable[[Path], None]] = {
     (1, 2): _migrate_v1_to_v2,
     (2, 3): _migrate_v2_to_v3,
@@ -294,6 +314,7 @@ _MIGRATIONS: dict[tuple[int, int], Callable[[Path], None]] = {
     (7, 8): _migrate_v7_to_v8,
     (8, 9): _migrate_v8_to_v9,
     (9, 10): _migrate_v9_to_v10,
+    (10, 11): _migrate_v10_to_v11,
 }
 
 
