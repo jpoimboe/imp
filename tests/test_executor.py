@@ -4218,3 +4218,46 @@ async def test_started_at_not_overwritten_on_a_second_run(tmp_path: Path) -> Non
     reloaded = State.load(quest.state_dir)
     assert reloaded.has_started is True
     assert reloaded.started_at == "2020-01-01T00:00:00+00:00"
+
+
+def test_build_sandbox_policy_creates_active_bind_source(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    """_build_sandbox_policy must mkdir quest_tmp_dir when the policy is active;
+    bwrap uses --bind (not --bind-try), so the source must exist before any spawn."""
+    import types
+
+    from imp.engine import executor
+    from imp.engine.state import InMemoryEventLog
+    from imp.providers.effective import load_effective_config
+
+    wf = tmp_path / "imp" / "workflows" / "imp"
+    wf.mkdir(parents=True)
+    (wf / "workflow.yaml").write_text(
+        "name: t\ndescription: t\n"
+        "defaults: {max_retries: 1, max_loops: 6}\n"
+        "phases:\n"
+        "  - name: only\n"
+        "    steps:\n"
+        "      - name: s\n"
+        "        command: 'true'\n"
+        "        rules:\n"
+        "          - {else: true, pause: true}\n"
+    )
+    _write_fake_config(tmp_path)
+    quest = _make_change(tmp_path)
+    config = load_effective_config(project_root=tmp_path, control_root=tmp_path).config
+
+    quest_tmp_src = tmp_path / "qtmp_src"
+    assert not quest_tmp_src.exists()
+
+    stub_policy = types.SimpleNamespace(
+        active=True, quest_tmp_dir=str(quest_tmp_src), note="", home="",
+    )
+    monkeypatch.setattr(executor, "resolve_policy", lambda **kw: stub_policy)
+    monkeypatch.setattr(executor, "_warn_if_no_overlay", lambda *a, **kw: None)
+
+    log = InMemoryEventLog()
+    executor._build_sandbox_policy(quest, config, log)
+
+    assert quest_tmp_src.is_dir()

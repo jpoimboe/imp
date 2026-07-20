@@ -1876,4 +1876,10 @@ def _build_sandbox_policy(quest: Quest, config: Any, log: EventLog) -> Any:
     if not policy.active:
         _emit(log, "sandbox_inactive", {"reason": policy.note}, agent_id=None)
     _warn_if_no_overlay(policy, quest, log)
+    if policy.active and policy.quest_tmp_dir:
+        # quest_tmp_dir is the bwrap SOURCE for the namespace /tmp; bwrap uses
+        # --bind (not --bind-try), so it must exist before any sandboxed spawn.
+        # In production spawn_session_daemon already created it 0o700; this makes
+        # direct-run paths (no daemon) safe too.
+        Path(policy.quest_tmp_dir).mkdir(parents=True, exist_ok=True)
     return policy

@@ -1701,3 +1701,40 @@ def test_worktree_swap_flips_exposure_to_new_worktree(tmp_path):
     # (c) a sibling elsewhere under .imp stays masked.
     sibling = control / ".imp" / "worktrees" / "other" / "f.py"
     assert live.allows_read(sibling) is False
+
+
+def test_resolve_policy_sets_quest_tmp_dir(tmp_path):
+    from imp.remote.session.discover import session_socket_path
+    control, wt = _layout(tmp_path)
+    pol = resolve_policy(
+        worktree=wt, control_root=control, quest_id="abc",
+        cfg=SandboxConfig(), engine_env_result={}, environ={}, available=True,
+    )
+    assert pol.quest_tmp_dir == str(session_socket_path(control, "abc").parent)
+
+
+def test_per_quest_tmp_dir_bound_as_slash_tmp():
+    pol = _policy(quest_tmp_dir="/t/imp-1000/abc")
+    flat = " ".join(build_sandbox_argv("x", cwd="/wt", policy=pol, engine_env={}))
+    assert "--bind /t/imp-1000/abc /tmp" in flat   # per-quest dir bound onto /tmp
+    assert "--bind /tmp /tmp" not in flat          # real /tmp no longer identity-bound
+
+
+def test_per_quest_tmp_bind_ordered_after_ro_floor_before_worktree():
+    pol = _policy(quest_tmp_dir="/t/imp-1000/abc")
+    argv = build_sandbox_argv("x", cwd="/wt", policy=pol, engine_env={})
+    i_ro = argv.index("/")                          # ro-floor src
+    i_tmp = argv.index("/t/imp-1000/abc")           # per-quest /tmp bind src
+    i_wt = argv.index("/ctl/.imp/worktrees/abc")    # worktree src (default _policy worktree)
+    i_remask = argv.index("/ctl/.git/hooks")        # first git RO remask
+    assert i_ro < i_tmp < i_wt
+    assert i_tmp < i_remask
+
+
+def test_per_quest_tmp_mirror_keeps_tmp_writable():
+    # bind_plan stays DEST-keyed on /tmp (the agent's in-sandbox path), so the
+    # in-process mirror still reports /tmp writable even though argv binds the
+    # per-quest host dir as the source.
+    pol = _policy(quest_tmp_dir="/t/imp-1000/abc")
+    assert pol.allows_write(Path("/tmp/scratch.txt")) is True
+    assert ("/tmp", "rw") in pol.bind_plan()
