@@ -79,6 +79,36 @@ def resolve_detection_provider(
     return provider, cfg.tiers[tier][provider]
 
 
+def _normalize_root(entry: str) -> str | None:
+    """Normalize one reported root to a worktree-relative form, or None when it
+    is malformed (absolute, or escaping the worktree with `..`)."""
+    e = entry.strip().replace("\\", "/")
+    if e.startswith("/"):
+        return None
+    e = e.rstrip("/")
+    while e.startswith("./"):
+        e = e[2:]
+    if e in ("", "."):
+        return "."
+    if ".." in Path(e).parts:
+        return None
+    return e
+
+
+def validate_detected_roots(project_root: Path, roots: list[str]) -> list[str]:
+    """Normalize and confirm each reported root against disk: existing dirs
+    under `project_root` only, no absolute paths, no `..`, de-duplicated. `"."`
+    (the repo root) is always valid. Entries that fail are dropped."""
+    out: list[str] = []
+    for entry in roots:
+        norm = _normalize_root(entry)
+        if norm is None or norm in out:
+            continue
+        if (project_root / norm).is_dir():
+            out.append(norm)
+    return out
+
+
 def format_pythonpath_yaml(dirs: list[str]) -> str:
     """Serialize a `pythonpath:` YAML line matching `format_test_cmd_fast_yaml`'s
     json.dumps idiom, e.g. `["src"]` => `pythonpath: ["src"]\\n`."""

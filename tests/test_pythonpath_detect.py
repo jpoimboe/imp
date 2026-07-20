@@ -102,6 +102,7 @@ def test_format_multi_root() -> None:
 from imp.cli.pythonpath_detect import (  # noqa: E402
     is_python_packaging_project,
     resolve_detection_provider,
+    validate_detected_roots,
 )
 from imp.providers.config import Config  # noqa: E402
 from imp.providers.effective import EffectiveConfig  # noqa: E402
@@ -150,3 +151,30 @@ def test_resolve_detection_provider_none_when_no_usable(
         pp, "load_effective_config",
         lambda: EffectiveConfig(config=cfg, provenance={}))
     assert resolve_detection_provider(["nocred"]) is None
+
+
+
+def test_validate_keeps_existing_dirs_and_normalizes(tmp_path: Path) -> None:
+    (tmp_path / "src").mkdir()
+    (tmp_path / "lib").mkdir()
+    assert validate_detected_roots(tmp_path, ["./src", "lib/"]) == ["src", "lib"]
+
+
+def test_validate_normalizes_root_markers_to_dot(tmp_path: Path) -> None:
+    assert validate_detected_roots(tmp_path, ["", "./", ".", ".//"]) == ["."]
+
+
+def test_validate_drops_missing_absolute_and_escaping_entries(tmp_path: Path) -> None:
+    (tmp_path / "src").mkdir()
+    result = validate_detected_roots(
+        tmp_path, ["src", "nope", "/etc", "../outside", "a/../b"])
+    assert result == ["src"]
+
+
+def test_validate_deduplicates(tmp_path: Path) -> None:
+    (tmp_path / "src").mkdir()
+    assert validate_detected_roots(tmp_path, ["src", "./src", "src/"]) == ["src"]
+
+
+def test_validate_empty_input_returns_empty(tmp_path: Path) -> None:
+    assert validate_detected_roots(tmp_path, []) == []
