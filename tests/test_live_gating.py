@@ -473,3 +473,26 @@ def test_e2e_support_event_types_parses_types_in_order(tmp_path):
         '{"type": "a"}\n\n{"type": "b"}\nnot-json\n{"no_type": 1}\n{"type": "c"}\n'
     )
     assert _event_types(ev) == ["a", "b", "c"]
+
+
+def test_renamed_gate_file_inherits_impty_e2e_timeout():
+    from tests.conftest import _IMPTY_E2E_TIMEOUT, pytest_collection_modifyitems
+    item = _StubItem("tests/impty/test_e2e_relay_hibernation_gate.py")
+    pytest_collection_modifyitems(_StubConfig(None), [item])
+    timeouts = [d for d in item.added if d.mark.name == "timeout"]
+    assert timeouts and timeouts[0].mark.args[0] == _IMPTY_E2E_TIMEOUT
+
+
+def test_attach_poll_seq_derived_from_poll_timeout():
+    from tests.impty.e2e_support import E2E_POLL_TIMEOUT
+    from tests.impty.test_e2e_relay_hibernation_gate import _ATTACH_POLL
+    assert f"seq {int(E2E_POLL_TIMEOUT / 0.1)}" in _ATTACH_POLL
+    assert "seq 200" not in _ATTACH_POLL
+
+
+def test_gate_file_has_no_sub_knob_poll_literals():
+    import tests.impty.test_e2e_relay_hibernation_gate as gate
+    src = Path(gate.__file__).read_text()
+    for lit in ("timeout=10.0", "timeout=30.0", "timeout=60.0"):
+        assert lit not in src
+    assert "E2E_POLL_TIMEOUT" in src

@@ -34,13 +34,21 @@ import pytest
 from imp.engine.quest import Quest
 from impty import TerminalSession
 from tests._live import _await_worktree
-from tests.impty.e2e_support import _MINIMAL_CONFIG, _git, can_pty, clean_env
-from tests.test_relay_hibernation_live import _event_types, _flock_free, _poll
+from tests.impty.e2e_support import (
+    _MINIMAL_CONFIG,
+    E2E_POLL_TIMEOUT,
+    _event_types,
+    _flock_free,
+    _git,
+    _poll,
+    can_pty,
+    clean_env,
+)
 
 _WORKTREE_SRC = str(Path(__file__).parent.parent.parent / "src")
 
-# Bounded poll (~20s ceiling, then exit 0) on the change's events.jsonl for a
-# cli_attached marker that is FRESH for the current daemon instance. The journal
+# Bounded poll (E2E_POLL_TIMEOUT-derived ceiling, ~60s at the default, then exit 0) on the change's
+# events.jsonl for a cli_attached marker that is FRESH for the current daemon instance. The journal
 # is at $IMP_QUEST_DIR/events.jsonl (the permanent control-root home).
 #
 # cli_attached is written to the PERSISTENT journal and survives hibernation, so
@@ -66,7 +74,7 @@ _WORKTREE_SRC = str(Path(__file__).parent.parent.parent / "src")
 # `: ?` tolerates either json separator spacing.
 _ATTACH_POLL = (
     'J="${IMP_QUEST_DIR}/events.jsonl"; '
-    "for _ in $(seq 200); do "
+    f"for _ in $(seq {int(E2E_POLL_TIMEOUT / 0.1)}); do "
     "base=$(grep -nE '\"type\": ?\"workflow_resumed\"' \"$J\" 2>/dev/null "
     "| tail -1 | cut -d: -f1); base=${base:-0}; "
     "tail -n +$((base + 1)) \"$J\" 2>/dev/null "
@@ -141,7 +149,7 @@ def test_relay_hibernate_gate_then_resume_reengages(tmp_path: Path) -> None:
         cwd=str(tmp_path), env=env, cols=80, rows=24,
     )
     try:
-        wt = _await_worktree(tmp_path, timeout=30.0)
+        wt = _await_worktree(tmp_path, timeout=E2E_POLL_TIMEOUT)
         slug = wt.name
         quest = Quest.load(tmp_path, slug)
         events = quest.quest_dir / "events.jsonl"
@@ -151,15 +159,15 @@ def test_relay_hibernate_gate_then_resume_reengages(tmp_path: Path) -> None:
         # The daemon journals cli_attached on the 0 -> 1 attach; the scripted
         # bash step blocks on that marker, so the provider only reaches
         # the bare-turn-end yield once attached_count > 0 (no fixed-sleep race).
-        assert _wait_for_event(events, "cli_attached", timeout=30.0), (
+        assert _wait_for_event(events, "cli_attached", timeout=E2E_POLL_TIMEOUT), (
             "daemon never journaled cli_attached after the CLI attached"
         )
         # The run reaches the natural bare-turn-end gate while attended: the
         # daemon emits awaiting_user_input and holds the change flock there.
-        assert _wait_for_event(events, "awaiting_user_input", timeout=30.0), (
+        assert _wait_for_event(events, "awaiting_user_input", timeout=E2E_POLL_TIMEOUT), (
             "never reached the bare-turn-end gate"
         )
-        assert _poll(lambda: not _flock_free(lock_path), timeout=10.0), (
+        assert _poll(lambda: not _flock_free(lock_path), timeout=E2E_POLL_TIMEOUT), (
             "daemon never held the change flock at the gate"
         )
         daemon_pid = int(lock_path.read_text().strip())  # holder PID, before detach
@@ -177,8 +185,8 @@ def test_relay_hibernate_gate_then_resume_reengages(tmp_path: Path) -> None:
             except PermissionError:
                 return False
 
-        assert _poll(_pid_gone, timeout=30.0), "daemon pid did not exit on detach"
-        assert _poll(lambda: _flock_free(lock_path), timeout=30.0), "flock not released"
+        assert _poll(_pid_gone, timeout=E2E_POLL_TIMEOUT), "daemon pid did not exit on detach"
+        assert _poll(lambda: _flock_free(lock_path), timeout=E2E_POLL_TIMEOUT), "flock not released"
         assert json.loads(state_path.read_text())["status"] == "paused"
     finally:
         s.close()
@@ -194,16 +202,16 @@ def test_relay_hibernate_gate_then_resume_reengages(tmp_path: Path) -> None:
         # The inert branch prints the pending question and blocks at the prompt.
         # Poll until the question renders, then send a line to re-engage.
         assert _poll(
-            lambda: any("waiting for you" in ln for ln in r.lines()), timeout=30.0
+            lambda: any("waiting for you" in ln for ln in r.lines()), timeout=E2E_POLL_TIMEOUT
         ), "inert resume never rendered the pending question"
         r.wait_idle()
         r.send("continue\r")
 
         assert _poll(
-            lambda: "workflow_resumed" in _event_types(events), timeout=60.0
+            lambda: "workflow_resumed" in _event_types(events), timeout=E2E_POLL_TIMEOUT
         ), "resume never appended workflow_resumed"
         assert _poll(
-            lambda: not _flock_free(lock_path), timeout=60.0
+            lambda: not _flock_free(lock_path), timeout=E2E_POLL_TIMEOUT
         ), "fresh daemon never re-acquired the flock"
         fresh_pid = int(lock_path.read_text().strip())
         assert fresh_pid != daemon_pid   # a NEW daemon process owns the resume
