@@ -1343,6 +1343,25 @@ def _build_resume_driver(
         quest_id=quest.id, title=quest.title)
 
 
+def _resume_live_framing(
+    quest_id: str, *, lock_live: bool, halt_condition: str | None,
+) -> tuple[str, str | None]:
+    """Marker + optional notice for a resume. A live lock means we are joining an
+    already-running session, not restarting a stopped one; the running/waiting
+    split matches resolve_display_status (imp list) so the wording agrees."""
+    if not lock_live:
+        return "resuming", None
+    if halt_condition == "waiting":
+        return (
+            "already waiting",
+            f"quest {quest_id} is already waiting for input"
+            " — attaching to answer it.")
+    return (
+        "already running",
+        f"quest {quest_id} is already running in a live session"
+        " — attaching to it.")
+
+
 async def _async_cmd_resume(args: argparse.Namespace) -> int:
     if os.environ.get("IMP_SESSION_SOCKET"):
         return _emit_mutation_result(
