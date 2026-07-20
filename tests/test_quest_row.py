@@ -311,19 +311,33 @@ def test_status_colors_are_meaning_based() -> None:
     assert "draft" not in STATUS_COLORS
 
 
-@pytest.mark.parametrize(
-    "iso, expected",
-    [
-        ("2026-06-20T11:00:00.123456+00:00", "2026-06-20 11:00:00"),  # micros + offset dropped
-        ("2026-06-20T11:00:00+00:00", "2026-06-20 11:00:00"),         # already second-precision
-        (None, "-"),
-        ("", "-"),
-        ("not-a-date", "-"),
-    ],
-)
-def test_format_timestamp_trims_to_seconds(iso, expected):
+@pytest.mark.parametrize("iso", [None, "", "not-a-date"])
+def test_format_timestamp_returns_dash_for_unparseable(iso):
     from imp.cli.quest_row import format_timestamp
-    assert format_timestamp(iso) == expected
+    assert format_timestamp(iso) == "-"
+
+
+def test_format_timestamp_renders_local_time():
+    import os
+    import time
+
+    from imp.cli.quest_row import format_timestamp
+    saved = os.environ.get("TZ")
+    os.environ["TZ"] = "America/New_York"   # June → EDT (UTC-4), no DST ambiguity
+    time.tzset()
+    try:
+        # Stored value is UTC-aware; 11:00 UTC renders as 07:00 local, seconds
+        # precision, no zone label. Micros + offset are dropped by strftime.
+        assert format_timestamp(
+            "2026-06-20T11:00:00.123456+00:00") == "2026-06-20 07:00:00"
+        assert format_timestamp(
+            "2026-06-20T11:00:00+00:00") == "2026-06-20 07:00:00"
+    finally:
+        if saved is None:
+            os.environ.pop("TZ", None)
+        else:
+            os.environ["TZ"] = saved
+        time.tzset()
 
 
 def test_status_cell_phase_label_color_path():

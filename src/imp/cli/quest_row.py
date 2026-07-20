@@ -57,7 +57,7 @@ def format_timestamp(iso: str | None) -> str:
     if not iso:
         return "-"
     try:
-        return datetime.fromisoformat(iso).strftime("%Y-%m-%d %H:%M:%S")
+        return datetime.fromisoformat(iso).astimezone().strftime("%Y-%m-%d %H:%M:%S")
     except ValueError:
         return "-"
 
