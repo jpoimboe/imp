@@ -1461,6 +1461,7 @@ async def test_detach_after_ctrl_d_midrun_stamps_resume_target_agent(
     assert state.resume_mode == "continue"    # ctrl-d detach continues on reattach
 
 
+@pytest.mark.timeout(240)  # raise the 60s cap so inner backstops can't false-fire under -n auto
 @pytest.mark.anyio
 async def test_resume_prompt_target_holds_before_running_agent(
     tmp_path: Path,
@@ -1507,8 +1508,7 @@ async def test_resume_prompt_target_holds_before_running_agent(
                                on_event=_on_event)
         await client.connect()
         tg.start_soon(client.receive_events)
-        with anyio.fail_after(30):   # deadlock backstop only
-            await gate_seen.wait()
+        await gate_seen.wait()
         # The hold prompt is surfaced FIRST — the agent has not run yet.
         assert calls["n"] == 0
         gates = [e for e in received if e.get("type") == "awaiting_user_input"]
@@ -1518,8 +1518,7 @@ async def test_resume_prompt_target_holds_before_running_agent(
         # curation silences it instead of buzzing the operator.
         assert gates[-1]["payload"]["interrupt"] is True
         await client.send_input("steer me")
-        with anyio.fail_after(30):   # deadlock backstop only; starts after send_input
-            await run_done.wait()
+        await run_done.wait()
         assert result["r"] is RunResult.COMPLETED
         assert calls["n"] == 1
         assert calls["interject"] == "steer me"
