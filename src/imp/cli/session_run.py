@@ -39,7 +39,7 @@ async def run_session_client(
     *,
     driver: Any,
     coord: InterruptCoordinator,
-    solicit: Callable[[str], Awaitable[str | SkillRequest]],
+    solicit: Callable[[str, bool], Awaitable[str | SkillRequest]],
     status: Any = None,
     resume: bool = False,
     leave_mode: str,
@@ -98,11 +98,11 @@ async def run_session_client(
 
 def make_headless_solicit(
     message: str | None, coord: InterruptCoordinator,
-) -> Callable[[str], Awaitable[str]]:
+) -> Callable[[str, bool], Awaitable[str]]:
     """Headless solicit: deliver `message` once, then signal a clean detach and block."""
     delivered = False
 
-    async def _solicit(_prompt: str) -> str:
+    async def _solicit(_prompt: str, _interrupt: bool = False) -> str:
         nonlocal delivered
         if message is not None and not delivered:
             delivered = True
@@ -123,7 +123,7 @@ def make_interactive_solicit(
     status: Any,
     driver: Any,
     coord: InterruptCoordinator,
-) -> Callable[[str], Awaitable[str | SkillRequest]]:
+) -> Callable[[str, bool], Awaitable[str | SkillRequest]]:
     """Return a solicit callback that reads one slash-aware line from the tty as the gate reply."""
     # Lazy import: imp.cli.main imports this module, so a
     # module-level import of these helpers would be circular.
@@ -136,13 +136,15 @@ def make_interactive_solicit(
     prompt.seed_history(
         _prompt_history_lines(quest.seed_opening, quest.event_log().read()))
 
-    async def _solicit(_prompt: str) -> str | SkillRequest:
+    async def _solicit(_prompt: str, interrupt: bool = False) -> str | SkillRequest:
         # The gate's prompt (the interrupt-steer hint, or the daemon's resume
         # prompt) surfaces as the field placeholder; an empty prompt — the bare
         # turn-end yield — falls back to the shared DEFAULT_HINT placeholder.
+        # An interrupt gate allows an empty line to return "" (continue).
         return await ask_line_with_slash(
             prompt, status, quest,
             color=should_use_color(sys.stdout), width=_term_width(),
-            coord=coord, driver=driver, hint=_prompt or None)
+            coord=coord, driver=driver, hint=_prompt or None,
+            allow_empty=interrupt)
 
     return _solicit

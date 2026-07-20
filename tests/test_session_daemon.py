@@ -2322,3 +2322,49 @@ def test_steer_copy_is_verbatim_and_shared() -> None:
         "paused · enter to re-run the gate · Ctrl-D to leave")
     assert _SCRIPT_REDIRECT_REFUSED == (
         "a verify gate takes no redirect; press enter to re-run or Ctrl-D to leave")
+
+
+@pytest.mark.anyio
+async def test_agent_step_hold_empty_reply_continues_without_interject(
+    tmp_path: Path,
+) -> None:
+    quest = _make_change(tmp_path, "2026-06-15-agt-empty")
+    _seed_step(quest, "task-lead")
+    sock = str(session_socket_path(quest.control_root, quest.id))
+    calls = {"n": 0}
+    drained: dict[str, Any] = {}
+
+    async def fake_run(
+        quest: Quest, *, on_event: Any, user_chat_input_fn: Any,
+        coordinator: Any, wait_for_turn_fn: Any = None,
+    ) -> RunResult:
+        calls["n"] += 1
+        if calls["n"] == 1:
+            await coordinator.signal_pause(reason="ctrl-c")
+            return RunResult.PAUSED
+        drained["v"] = coordinator.drain_interject()
+        return RunResult.COMPLETED
+
+    async with anyio.create_task_group() as tg:
+        result: dict[str, Any] = {}
+
+        async def _serve() -> None:
+            result["r"] = await serve_quest_session(
+                quest, run_fn=fake_run, hibernate=False)
+
+        tg.start_soon(_serve)
+        await _wait_for_socket(sock)
+        received: list[dict[str, Any]] = []
+        client = SessionClient(sock, quest.id, quest.title,
+                               on_event=received.append)
+        await client.connect()
+        tg.start_soon(client.receive_events)
+        await wait_until(
+            lambda: any(e.get("type") == "awaiting_user_input" for e in received))
+        await client.send_input("")       # empty Enter → continue
+        await wait_until(lambda: "r" in result)
+        assert result["r"] is RunResult.COMPLETED
+        assert calls["n"] == 2
+        assert drained["v"] is None        # empty was never enqueued as an interject
+        await client.aclose()
+        tg.cancel_scope.cancel()
