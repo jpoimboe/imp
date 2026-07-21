@@ -8,19 +8,19 @@ import anyio
 
 import imp.agents.tools.bash  # noqa: F401
 from imp.agents.tools import get_registry
-from imp.engine.sandbox import (
-    OVERLAY_SETUP_FAILED_CODE,
-    OVERLAY_SETUP_FAILED_MARKER,
-)
+from imp.engine.sandbox import SANDBOX_ENTERED_MARKER
 from tests.async_wait import wait_until
 from tests.test_bg_spawn import _cleanup, _ctx, _spawn
 from tests.test_bg_sweep import _RecLog
 
-# Mimics build_sandbox_argv's fail-loud wrapper WITHOUT needing a real overlay:
-# print the sentinel to stderr and exit the reserved code, never running a real
-# command. This is exactly what the bg tool must classify as a setup failure.
-_FAIL_CMD = (f"printf '%s\\n' {OVERLAY_SETUP_FAILED_MARKER} >&2; "
-             f"exit {OVERLAY_SETUP_FAILED_CODE}")
+# A sandboxed spawn that FAILED TO ENTER: exits nonzero and never emits the entry
+# sentinel. The bg tool records sandbox_active from ctx.sandbox_policy (None in a
+# bare test ctx -> False), so each test forces bp.sandbox_active = True to model a
+# spawn where the sandbox WAS active.
+_FAIL_CMD = "exit 3"
+# A healthy sandboxed command: emits the entry sentinel (as the real argv builder
+# would) then real output.
+_OK_CMD = f"printf '%s\\n' {SANDBOX_ENTERED_MARKER} >&2; echo real >&2; echo out"
 
 
 async def _wait_exit(ctx, bg_id: str) -> None:
@@ -28,39 +28,39 @@ async def _wait_exit(ctx, bg_id: str) -> None:
     await wait_until(lambda: bp.proc.returncode is not None)
 
 
-def test_background_overlay_setup_failure_detected_and_reported(tmp_path: Path) -> None:
+def _mark_sandboxed(ctx, bg_id: str) -> None:
+    ctx.background_processes[bg_id].sandbox_active = True
+
+
+def test_background_spawn_failure_detected_and_reported(tmp_path: Path) -> None:
     async def main() -> None:
         from imp.agents.tools.bg import _sweep_bg
         ctx = _ctx(tmp_path)
         log = _RecLog()
         ctx.event_log = log
         out = await _spawn(ctx, _FAIL_CMD)
+        _mark_sandboxed(ctx, out["id"])
         try:
             await _wait_exit(ctx, out["id"])
             await _sweep_bg(ctx)
             bp = ctx.background_processes[out["id"]]
             assert bp.overlay_setup_failed is True
-            # emitted exactly once with the distinct reason
             [w] = log.warnings()
             assert w["reason"] == "overlay-setup-failed"
             assert w["id"] == out["id"]
-            # a later sweep must NOT re-emit
+            # a later sweep must NOT re-emit or re-read
             await _sweep_bg(ctx)
             assert len(log.warnings()) == 1
-            # the live snapshot surfaces the distinct sandbox-setup failure
             r = json.loads(await get_registry()["bash_output"].async_invoke(
                 ctx, {"id": out["id"]}))
             assert r["status"] == "sandbox_setup_failed"
             assert "did NOT run" in r["error"]
-            assert r["returncode"] == OVERLAY_SETUP_FAILED_CODE
         finally:
             await _cleanup(ctx)
     anyio.run(main)
 
 
-def test_background_overlay_setup_failure_survives_teardown(tmp_path: Path) -> None:
-    # Flag set via a prior sweep, then persisted through teardown and surfaced
-    # on resume from the PERSISTED tombstone.
+def test_background_spawn_failure_survives_teardown(tmp_path: Path) -> None:
     async def main() -> None:
         from imp.agents.tools.bg import (
             _sweep_bg,
@@ -69,11 +69,10 @@ def test_background_overlay_setup_failure_survives_teardown(tmp_path: Path) -> N
         ctx = _ctx(tmp_path)
         ctx.event_log = _RecLog()
         out = await _spawn(ctx, _FAIL_CMD)
+        _mark_sandboxed(ctx, out["id"])
         await _wait_exit(ctx, out["id"])
         await _sweep_bg(ctx)                          # flag set via sweep
         await terminate_background_processes(ctx)     # writes the tombstone file
-        # Resume: a FRESH ToolContext (same agent_id + run dir) has an empty
-        # registry, so bash_output resolves the PERSISTED tombstone.
         ctx2 = _ctx(tmp_path)
         r = json.loads(await get_registry()["bash_output"].async_invoke(
             ctx2, {"id": out["id"]}))
@@ -82,15 +81,13 @@ def test_background_overlay_setup_failure_survives_teardown(tmp_path: Path) -> N
     anyio.run(main)
 
 
-def test_background_overlay_setup_failure_detected_in_teardown(tmp_path: Path) -> None:
-    # No sweep/snapshot ever ran — teardown itself must catch the failure while
-    # the stderr file still exists (step 1 runs before the step-4 file delete),
-    # else the tombstone masquerades as an ordinary exit-122 result (AC 6).
+def test_background_spawn_failure_detected_in_teardown(tmp_path: Path) -> None:
     async def main() -> None:
         from imp.agents.tools.bg import terminate_background_processes
         ctx = _ctx(tmp_path)
         ctx.event_log = _RecLog()
         out = await _spawn(ctx, _FAIL_CMD)
+        _mark_sandboxed(ctx, out["id"])
         await _wait_exit(ctx, out["id"])
         await terminate_background_processes(ctx)     # NO prior sweep
         ctx2 = _ctx(tmp_path)
@@ -101,25 +98,76 @@ def test_background_overlay_setup_failure_detected_in_teardown(tmp_path: Path) -
     anyio.run(main)
 
 
-def test_snapshot_backstop_sets_flag_without_prior_sweep(tmp_path: Path) -> None:
-    # The _snapshot backstop must classify a setup failure even when NO sweep
-    # ran first: call _snapshot directly on an exited proc whose flag is still
-    # False. If this path is deleted, this test goes red.
+def test_snapshot_does_not_flag_spawn_failure(tmp_path: Path) -> None:
+    # Detection lives ONLY in _detect_overlay_setup_failure now; _snapshot never
+    # sets the flag (a naive per-page swap would read True on later pages once the
+    # marker scrolled past the cursor). If per-page detection is re-added, this
+    # goes red.
     async def main() -> None:
         from imp.agents.tools.bg import _reap, _snapshot
         ctx = _ctx(tmp_path)
         out = await _spawn(ctx, _FAIL_CMD)
+        _mark_sandboxed(ctx, out["id"])
         try:
             await _wait_exit(ctx, out["id"])
             bp = ctx.background_processes[out["id"]]
-            # Reap so returncode/status settle, but do NOT sweep (no detector run).
             _reap(bp)
-            assert bp.overlay_setup_failed is False   # nothing has set it yet
             r = json.loads(_snapshot(ctx, bp))
-            # The backstop alone set the flag and overrode the status.
-            assert bp.overlay_setup_failed is True
-            assert r["status"] == "sandbox_setup_failed"
-            assert "did NOT run" in r["error"]
+            assert bp.overlay_setup_failed is False    # snapshot did NOT detect
+            assert r["status"] == "exited"
+        finally:
+            await _cleanup(ctx)
+    anyio.run(main)
+
+
+def test_healthy_sandboxed_background_strips_marker(tmp_path: Path) -> None:
+    # A healthy sandboxed command emits the sentinel as its first stderr line; the
+    # agent-visible stderr must NOT carry it, and it is NOT a spawn failure.
+    async def main() -> None:
+        from imp.agents.tools.bg import _sweep_bg
+        ctx = _ctx(tmp_path)
+        out = await _spawn(ctx, _OK_CMD)
+        _mark_sandboxed(ctx, out["id"])
+        try:
+            await _wait_exit(ctx, out["id"])
+            await _sweep_bg(ctx)
+            r = json.loads(await get_registry()["bash_output"].async_invoke(
+                ctx, {"id": out["id"]}))
+            assert r["status"] != "sandbox_setup_failed"
+            assert SANDBOX_ENTERED_MARKER not in r["stderr"]
+            assert "real" in r["stderr"]
+        finally:
+            await _cleanup(ctx)
+    anyio.run(main)
+
+
+def test_healthy_terminal_bg_stderr_read_at_most_once(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    # The one-shot check guard: dropping the reserved-code short-circuit must NOT
+    # re-read a healthy terminal proc's whole err_path on every sweep.
+    async def main() -> None:
+        from imp.agents.tools.bg import _sweep_bg
+        ctx = _ctx(tmp_path)
+        out = await _spawn(ctx, _OK_CMD)
+        _mark_sandboxed(ctx, out["id"])
+        try:
+            bp = ctx.background_processes[out["id"]]
+            await _wait_exit(ctx, out["id"])
+            calls = {"n": 0}
+            real = Path.read_text
+
+            def counting(self, *a, **k):
+                if self == bp.err_path:
+                    calls["n"] += 1
+                return real(self, *a, **k)
+
+            monkeypatch.setattr(Path, "read_text", counting)
+            await _sweep_bg(ctx)
+            await _sweep_bg(ctx)
+            assert calls["n"] == 1                      # whole-file read runs once
+            assert bp.overlay_setup_failed is False
+            assert bp.overlay_reported is True          # guard marked it checked
         finally:
             await _cleanup(ctx)
     anyio.run(main)

@@ -47,9 +47,9 @@ from imp.agents.tools.limits import (
     tool_checkpoint,
 )
 from imp.engine.sandbox import (
-    OVERLAY_SETUP_FAILED_CODE,
-    OVERLAY_SETUP_FAILED_MESSAGE,
-    overlay_setup_failed,
+    SANDBOX_SPAWN_FAILED_MESSAGE,
+    sandbox_spawn_failed,
+    strip_sandbox_marker,
 )
 
 _CMD_TRUNC = 200      # command excerpt in warnings + tombstones (multi-KB sh -c
@@ -72,8 +72,9 @@ class BgProc:
     status: str = "running"         # running | exited | killed
     kill_reason: str | None = None  # interrupted | output-cap | agent
     returncode: int | None = None
-    overlay_setup_failed: bool = False  # stderr carried the overlay-mount sentinel
-    overlay_reported: bool = False      # setup-failure warning emitted once
+    overlay_setup_failed: bool = False  # stderr lacked the entry sentinel (spawn failed)
+    overlay_reported: bool = False      # setup-failure warning emitted / terminal proc checked
+    sandbox_active: bool = False        # sandbox was active for this spawn (recorded at spawn)
 
 
 def _bg_dir(ctx: ToolContext) -> Path:
@@ -189,15 +190,16 @@ def _read_page(bp: BgProc, which: str) -> tuple[str, int]:
 def _snapshot(ctx: ToolContext, bp: BgProc, *, wait_ended: str | None = None) -> str:
     out_text, out_rem = _read_page(bp, "out")
     err_text, err_rem = _read_page(bp, "err")
-    if not bp.overlay_setup_failed and overlay_setup_failed(err_text):
-        bp.overlay_setup_failed = True
+    # Display-only strip: the sentinel sits at byte 0, so this removes it from the
+    # first page and is a no-op on later pages (does NOT disturb err_rem/cursor).
+    err_text = strip_sandbox_marker(err_text)
     result: dict[str, Any] = {
         "stdout": out_text, "stderr": err_text,
         "status": bp.status, "returncode": bp.returncode,
     }
     if bp.overlay_setup_failed:
         result["status"] = "sandbox_setup_failed"
-        result["error"] = OVERLAY_SETUP_FAILED_MESSAGE
+        result["error"] = SANDBOX_SPAWN_FAILED_MESSAGE
     if bp.kill_reason is not None:
         result["kill_reason"] = bp.kill_reason
     if wait_ended is not None:
@@ -231,7 +233,7 @@ def _snapshot_or_tombstone(
                                   "returncode": bp.returncode}
         if bp.overlay_setup_failed:
             result["status"] = "sandbox_setup_failed"
-            result["error"] = OVERLAY_SETUP_FAILED_MESSAGE
+            result["error"] = SANDBOX_SPAWN_FAILED_MESSAGE
         if bp.kill_reason is not None:
             result["kill_reason"] = bp.kill_reason
         if wait_ended is not None:
@@ -250,7 +252,7 @@ def _tombstone_result(ctx: ToolContext, bg_id: str) -> str | None:
     }
     if ts.get("overlay_setup_failed"):
         result["status"] = "sandbox_setup_failed"
-        result["error"] = OVERLAY_SETUP_FAILED_MESSAGE
+        result["error"] = SANDBOX_SPAWN_FAILED_MESSAGE
     if ts.get("kill_reason") is not None:
         result["kill_reason"] = ts.get("kill_reason")
     return json.dumps(result, ensure_ascii=False)
@@ -415,26 +417,26 @@ def _emit_overlay_setup_warning(ctx: ToolContext, bp: BgProc) -> None:
         ctx.event_log.append(
             agent_id=ctx.agent_id, type="runner_warning",
             payload={
-                "message": (f"background process {bp.id} ({cmd}) sandbox home "
-                            "overlay mount failed; the command did not run"),
+                "message": (f"background process {bp.id} ({cmd}) — the OS sandbox "
+                            "could not start the command; it did not run"),
                 "id": bp.id, "command": cmd, "reason": "overlay-setup-failed",
             })
 
 
 def _detect_overlay_setup_failure(ctx: ToolContext, bp: BgProc) -> None:
-    """Once-only: flag + emit for a bg proc whose reserved-code exit carries the sentinel."""
+    """Once per terminal proc: read the WHOLE reaped stderr and flag a sandbox
+    spawn failure (entry sentinel absent, guarded by bp.sandbox_active recorded at
+    spawn). overlay_reported doubles as the one-shot read guard."""
     if bp.overlay_reported or bp.status == "running":
-        return
-    if bp.returncode != OVERLAY_SETUP_FAILED_CODE:
         return
     try:
         stderr = bp.err_path.read_text("utf-8", "replace")
     except OSError:
         return
-    if not overlay_setup_failed(stderr):
+    bp.overlay_reported = True
+    if not sandbox_spawn_failed(stderr, sandbox_active=bp.sandbox_active):
         return
     bp.overlay_setup_failed = True
-    bp.overlay_reported = True
     _emit_overlay_setup_warning(ctx, bp)
 
 
@@ -664,7 +666,9 @@ async def spawn_background(
     proc = await _spawn_to_files(
         argv, out_path=out_path, err_path=err_path, cwd=cwd, env=env)
     bp = BgProc(id=bg_id, proc=proc, out_path=out_path, err_path=err_path,
-                command=command)
+                command=command,
+                sandbox_active=(ctx.sandbox_policy is not None
+                                and ctx.sandbox_policy.active))
     ctx.background_processes[bg_id] = bp
     root = ctx.project_root.resolve()
     return json.dumps({
