@@ -4290,7 +4290,7 @@ def test_build_sandbox_policy_creates_var_tmp_bind_source(
         "          - {else: true, pause: true}\n"
     )
     _write_fake_config(tmp_path)
-    quest = _make_change(tmp_path)
+    quest = _make_quest(tmp_path)
     config = load_effective_config(project_root=tmp_path, control_root=tmp_path).config
 
     # Nest the leaf so its parent is a dir the provisioning itself creates (the
