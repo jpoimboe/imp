@@ -612,8 +612,6 @@ def _handle_terminal_outcome(
     (no summary); every other pause falls through to the dim paused summary (rc 1).
     Shared by `new`/`resume` (relocated verbatim from the post-run `else` arm)."""
     if result is RunResult.COMPLETED:
-        # Worktree gone = the merge gate was exercised.
-        wt_path = quest.control_root / ".imp" / "worktrees" / quest.id
         _ep = getattr(quest, 'events_path', None)
         if _ep is not None and not _ep.exists():
             events: list[dict[str, Any]] = []
@@ -625,7 +623,8 @@ def _handle_terminal_outcome(
         warning_msgs = [
             str((ev.get("payload") or {}).get("message", "?"))
             for ev in events if ev.get("type") == "runner_warning"]
-        _emit_completed(quest, merged=not wt_path.exists(), warnings=warning_msgs,
+        merged = any(ev.get("type") == "quest_merged" for ev in events)
+        _emit_completed(quest, merged=merged, warnings=warning_msgs,
                         intent=_resolve_intent(events))
         return 0
     # PAUSED — surface merge_blocked; every other pause falls through to the summary.

@@ -528,3 +528,42 @@ def test_non_ctrl_d_pause_prints_no_caret(monkeypatch, capsys) -> None:
     assert rc == 1
     ps.assert_called_once()
     assert capsys.readouterr().out == ""
+
+
+def test_handle_terminal_outcome_merged_event_yields_merged_true(
+    monkeypatch, tmp_path,
+) -> None:
+    # The worktree dir is still present at render time (the queued / cross-process
+    # case). Pre-fix, the wt_path probe would read merged=False; the event wins now.
+    wt = tmp_path / ".imp" / "worktrees" / "2026-06-12-run-x"
+    wt.mkdir(parents=True)
+    events = [
+        {"type": "quest_merged", "payload": {"base": "master", "commit": "abc123"}},
+        {"type": "step_started", "payload": {"step": "s", "kind": "agent"}},
+    ]
+    quest = _Change(events)
+    quest.control_root = tmp_path
+    captured: dict = {}
+    monkeypatch.setattr(
+        main, "_emit_completed",
+        lambda ch, *, merged, warnings, intent: captured.update(merged=merged))
+    rc = main._handle_terminal_outcome(quest, RunResult.COMPLETED, coord=None)
+    assert rc == 0
+    assert captured["merged"] is True
+
+
+def test_handle_terminal_outcome_no_merged_event_yields_merged_false(
+    monkeypatch,
+) -> None:
+    events = [
+        {"type": "workflow_completed", "payload": {}},
+        {"type": "step_started", "payload": {"step": "s", "kind": "agent"}},
+    ]
+    quest = _Change(events)
+    captured: dict = {}
+    monkeypatch.setattr(
+        main, "_emit_completed",
+        lambda ch, *, merged, warnings, intent: captured.update(merged=merged))
+    rc = main._handle_terminal_outcome(quest, RunResult.COMPLETED, coord=None)
+    assert rc == 0
+    assert captured["merged"] is False
