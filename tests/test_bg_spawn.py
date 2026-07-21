@@ -14,6 +14,7 @@ import imp.agents.tools.bash  # noqa: F401  (registers bash + bg builtins)
 from imp.agents.runner import QuestContext
 from imp.agents.tools import get_registry
 from imp.agents.tools.context import ToolContext
+from tests._dac import dac_enforced
 
 
 def _ctx(tmp_path: Path, agent_id: str = "step:t/coder") -> ToolContext:
@@ -103,7 +104,6 @@ def test_stdin_is_devnull_so_reader_sees_eof(tmp_path: Path) -> None:
     anyio.run(main)
 
 
-@pytest.mark.skipif(os.geteuid() == 0, reason="chmod fault injection needs non-root")
 def test_pre_spawn_open_failure_registers_nothing(tmp_path: Path) -> None:
     """Forced post-dir-creation open failure aborts BEFORE the spawn: no child,
     nothing registered. The fault must NOT be a bgN.out/bgN.err-shaped
@@ -116,7 +116,7 @@ def test_pre_spawn_open_failure_registers_nothing(tmp_path: Path) -> None:
         d.mkdir(parents=True)
         os.chmod(d, 0o555)             # open(bg1.out, "wb") -> PermissionError
         try:
-            with pytest.raises(OSError):
+            with dac_enforced(), pytest.raises(OSError):
                 await _spawn(ctx, "echo hi")
         finally:
             os.chmod(d, 0o755)
