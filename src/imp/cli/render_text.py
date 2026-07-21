@@ -713,16 +713,18 @@ def _render(node: Any, *, depth: int, full: bool = False,
         if not node.interactive:
             return                       # invariant: user_message is always a human turn
         # A brand-orange `>` caret marks the human turn on the first line only; it
-        # sits OUTSIDE the slate. The separating space + the wrapped text sit ON the
-        # slate so the band hugs the text. Continuation lines carry a blank caret
+        # sits OUTSIDE the slate. One separating space follows the caret column and
+        # is also OUTSIDE the slate (unpainted); the wrapped text sits ON the slate
+        # so the band hugs the text exactly. Continuation lines carry a blank caret
         # column (no repeated caret) and align under the first line's text (two
         # columns past the caret), with the slate band continuing.
         #
         # On a truecolor theme the reprinted (scrolled-back) turn carries a subtle
-        # entered-input background, opened AFTER the caret column so the highlight
-        # covers the separating space + the typed text and closes at text end (no
-        # full-width fill → clean copy/paste). Blank separator lines stay unpainted.
-        # The live input field is painted by prompt.py, not here.
+        # entered-input background, opened AFTER the caret AND its separating space
+        # so the highlight covers only the typed text and closes at text end (no
+        # full-width fill → clean copy/paste). The band's left and right edges both
+        # hug the text (symmetric). Blank separator lines stay unpainted. The live
+        # input field is painted by prompt.py, not here.
         indent = _gutter_indent(depth, gutters, color)
         caret = pal.ansi(">", "wordmark", enabled=color)
         bg = pal.user_bg_open(enabled=color)
@@ -735,7 +737,7 @@ def _render(node: Any, *, depth: int, full: bool = False,
                 continue
             for line in textwrap.wrap(para, width=avail) or [""]:
                 lead = caret if first else " "
-                yield indent + lead + bg + " " + line + end
+                yield indent + lead + " " + bg + line + end
                 first = False
         return
 
