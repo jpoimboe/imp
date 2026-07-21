@@ -4823,3 +4823,26 @@ async def test_cooperative_interrupt_steer_empty_reply_delivers_nudge(
     assert holder["c"].disconnected is False
     # The empty reply became the engine continuation nudge, not an empty user turn.
     assert holder["c"].queries[-1] == _CONTINUATION_NUDGE
+
+
+@pytest.mark.anyio
+async def test_cc_run_aclose_cascades_to_run_loop(tmp_path: Path) -> None:
+    """Closing run() mid-stream must synchronously close the inner _run_loop
+    generator (contextlib.aclosing), not abandon it to GC finalization."""
+    closed: list[bool] = []
+
+    async def _fake_loop(invocation: object):  # type: ignore[no-untyped-def]
+        try:
+            yield {"type": "a"}
+            yield {"type": "b"}
+        finally:
+            closed.append(True)
+
+    runner = ClaudeCodeAgentRunner(model_name="claude-sonnet-4-5")
+    runner._run_loop = _fake_loop  # type: ignore[assignment]  # test seam: bypass SDK client setup
+
+    gen = runner.run(_inv(tmp_path))
+    first = await gen.__anext__()
+    assert first == {"type": "a"}
+    await gen.aclose()
+    assert closed == [True]

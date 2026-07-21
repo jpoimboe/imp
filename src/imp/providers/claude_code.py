@@ -1443,8 +1443,9 @@ class ClaudeCodeAgentRunner:
     async def run(self, invocation: AgentInvocation) -> AsyncGenerator[Event, None]:
         try:
             try:
-                async for ev in self._run_loop(invocation):
-                    yield ev
+                async with contextlib.aclosing(self._run_loop(invocation)) as loop:
+                    async for ev in loop:
+                        yield ev
             except perr.ProviderError as exc:
                 yield perr.make_error_event(exc)
                 return
@@ -1969,584 +1970,589 @@ class ClaudeCodeAgentRunner:
                 await client.query(next_query)
                 requery = False
 
-                async for sdk_msg in request_bracketed(
-                        invocation.coordinator, client.receive_response()):
-                    if self._cancel:
-                        yield {"type": "error", "payload": {
-                            "category": "config",
-                            "kind": "interrupted",
-                            "message": "runner cancelled by interrupt",
-                        }}
-                        return
+                async with contextlib.aclosing(request_bracketed(
+                        invocation.coordinator, client.receive_response())) as _stream:
+                    async for sdk_msg in _stream:
+                        if self._cancel:
+                            yield {"type": "error", "payload": {
+                                "category": "config",
+                                "kind": "interrupted",
+                                "message": "runner cancelled by interrupt",
+                            }}
+                            return
 
-                    if invocation.coordinator is not None:
-                        invocation.coordinator.note_activity()
+                        if invocation.coordinator is not None:
+                            invocation.coordinator.note_activity()
 
-                    # Post-API-site analog (Decision 10): one sweep per
-                    # received SDK message — the model-API/CLI latency between
-                    # messages is the longest registry-blind gap under this
-                    # provider. Cancel check stays first (interrupt priority).
-                    await _bg._sweep_bg(ctx)
+                        # Post-API-site analog (Decision 10): one sweep per
+                        # received SDK message — the model-API/CLI latency between
+                        # messages is the longest registry-blind gap under this
+                        # provider. Cancel check stays first (interrupt priority).
+                        await _bg._sweep_bg(ctx)
 
-                    cls_name = type(sdk_msg).__name__
-                    if cls_name == "StreamEvent":
-                        # message_start carries accurate input/cache tokens (and
-                        # a priming output_tokens) plus the streaming message id;
-                        # message_delta overlays the finalized cumulative
-                        # output_tokens and the real stop_reason; message_stop
-                        # finalizes the message into stream_usage_by_msg. The
-                        # message id is tracked from message_start because the
-                        # delta/stop events do not repeat it.
-                        ev = getattr(sdk_msg, "event", None)
-                        ev = ev if isinstance(ev, dict) else {}
-                        etype = ev.get("type")
-                        if etype == "message_start":
-                            start_msg = ev.get("message")
-                            start_msg = start_msg if isinstance(start_msg, dict) else {}
-                            stream_cur_msg_id = start_msg.get("id")
-                            u = start_msg.get("usage")
-                            stream_cur_usage = dict(u) if isinstance(u, dict) else {}
-                            stream_cur_stop_reason = None
-                        elif etype == "message_delta":
-                            u = ev.get("usage")
-                            if isinstance(u, dict):
-                                stream_cur_usage.update(u)
-                            delta = ev.get("delta")
-                            if isinstance(delta, dict) and delta.get("stop_reason") is not None:
-                                stream_cur_stop_reason = delta.get("stop_reason")
-                        elif etype == "message_stop":
-                            if stream_cur_msg_id is not None:
-                                stream_usage_by_msg[stream_cur_msg_id] = (
-                                    stream_cur_usage, stream_cur_stop_reason)
-                            stream_cur_msg_id = None
-                            stream_cur_usage = {}
-                            stream_cur_stop_reason = None
-                    imp_msg, warns, thinkings = _sdk_message_to_imp(sdk_msg)
-                    for content in thinkings:
-                        elog.append(agent_id=aid, type="thinking",
-                                    payload={"content": content})
-                    for w in warns:
-                        elog.append(agent_id=aid, type="runner_warning",
-                                    payload={"message": w})
-                    if imp_msg is not None:
-                        messages.append(imp_msg)
-                        transcript.append(imp_msg)
+                        cls_name = type(sdk_msg).__name__
+                        if cls_name == "StreamEvent":
+                            # message_start carries accurate input/cache tokens (and
+                            # a priming output_tokens) plus the streaming message id;
+                            # message_delta overlays the finalized cumulative
+                            # output_tokens and the real stop_reason; message_stop
+                            # finalizes the message into stream_usage_by_msg. The
+                            # message id is tracked from message_start because the
+                            # delta/stop events do not repeat it.
+                            ev = getattr(sdk_msg, "event", None)
+                            ev = ev if isinstance(ev, dict) else {}
+                            etype = ev.get("type")
+                            if etype == "message_start":
+                                start_msg = ev.get("message")
+                                start_msg = start_msg if isinstance(start_msg, dict) else {}
+                                stream_cur_msg_id = start_msg.get("id")
+                                u = start_msg.get("usage")
+                                stream_cur_usage = dict(u) if isinstance(u, dict) else {}
+                                stream_cur_stop_reason = None
+                            elif etype == "message_delta":
+                                u = ev.get("usage")
+                                if isinstance(u, dict):
+                                    stream_cur_usage.update(u)
+                                delta = ev.get("delta")
+                                if isinstance(delta, dict) and delta.get("stop_reason") is not None:
+                                    stream_cur_stop_reason = delta.get("stop_reason")
+                            elif etype == "message_stop":
+                                if stream_cur_msg_id is not None:
+                                    stream_usage_by_msg[stream_cur_msg_id] = (
+                                        stream_cur_usage, stream_cur_stop_reason)
+                                stream_cur_msg_id = None
+                                stream_cur_usage = {}
+                                stream_cur_stop_reason = None
+                        imp_msg, warns, thinkings = _sdk_message_to_imp(sdk_msg)
+                        for content in thinkings:
+                            elog.append(agent_id=aid, type="thinking",
+                                        payload={"content": content})
+                        for w in warns:
+                            elog.append(agent_id=aid, type="runner_warning",
+                                        payload={"message": w})
+                        if imp_msg is not None:
+                            messages.append(imp_msg)
+                            transcript.append(imp_msg)
 
-                        if imp_msg.role == "assistant":
-                            turn_text = "".join(
-                                b.text for b in imp_msg.content
-                                if isinstance(b, TextBlock))
-                            if turn_text:
-                                pending_text = (
-                                    pending_text + turn_text if pending_text else turn_text)
-                            if cls_name == "AssistantMessage":
-                                mid = getattr(sdk_msg, "message_id", None)
-                                if (llm_group_open and mid is not None
-                                        and llm_group_key is not None
-                                        and mid != llm_group_key):
-                                    await _flush_llm_group()
-                                frag = _serialize_claude_code_message(sdk_msg)
-                                if not llm_group_open:
-                                    llm_group_open = True
-                                    llm_group_key = mid
-                                elif llm_group_key is None and mid is not None:
-                                    llm_group_key = mid
-                                llm_blocks.extend(frag["content"])
-                                served = getattr(sdk_msg, "model", None)
-                                if served is not None and llm_model is None:
-                                    llm_model = served
-                                if (frag.get("stop_reason") is not None
-                                        and llm_stop_reason is None):
-                                    llm_stop_reason = frag["stop_reason"]
-                                if frag.get("usage"):
-                                    llm_usage = frag["usage"]
-                                # Tier A proactive handoff (Mechanism 3): on the
-                                # configured context-threshold crossing, route
-                                # through the cooperative-interrupt path — signal the
-                                # running query and let the SDK close this turn
-                                # balanced, then continue the live session with a
-                                # plain handoff-instruction increment (handled at the
-                                # generalized balanced-close site below). Do NOT
-                                # re-stream history here: interrupt() does not
-                                # disconnect the subprocess, so a replay would append
-                                # on top of the already-near-full context and double
-                                # it. complete_step_called is set later (per-block
-                                # loop), so detect the completing turn from blocks
-                                # here, canonicalizing the name: the SDK presents it
-                                # as mcp__imp__complete_step, so a bare compare would
-                                # miss it and wrongly preempt it.
-                                if (handoff_phase is None
-                                        and invocation.checkpoint_threshold is not None):
-                                    completing = any(
-                                        isinstance(b, ToolUseBlock)
-                                        and _canon_tool_name(b.name) == "complete_step"
-                                        for b in imp_msg.content)
-                                    cu_fields = await _context_usage_fields(client)
-                                    if (not completing
-                                            and sdk_context_threshold_crossed(
-                                                cu_fields.get("context_tokens"),
-                                                cu_fields.get("context_window"),
-                                                invocation.checkpoint_threshold)):
-                                        # Flush the crossing turn's LLM group, signal
-                                        # the interrupt, and mark the phase so the
-                                        # watchdog cannot re-fire while the interrupt
-                                        # settles. `continue` (not break) skips this
-                                        # crossing message's remaining blocks but keeps
-                                        # the receive loop iterating, so the balanced
-                                        # error_during_execution ResultMessage reaches
-                                        # the generalized close handler below — exactly
-                                        # as the steer path's external interrupt does.
+                            if imp_msg.role == "assistant":
+                                turn_text = "".join(
+                                    b.text for b in imp_msg.content
+                                    if isinstance(b, TextBlock))
+                                if turn_text:
+                                    pending_text = (
+                                        pending_text + turn_text if pending_text else turn_text)
+                                if cls_name == "AssistantMessage":
+                                    mid = getattr(sdk_msg, "message_id", None)
+                                    if (llm_group_open and mid is not None
+                                            and llm_group_key is not None
+                                            and mid != llm_group_key):
                                         await _flush_llm_group()
-                                        self._handoff_requested = True
-                                        handoff_phase = "interrupt_requested"
-                                        with contextlib.suppress(Exception):
-                                            await client.interrupt()
-                                        continue
-                            # Close the coalesced prose group at the text->tool_use
-                            # transition: emit its agent_message BEFORE this fragment's
-                            # tool_calls, so narration renders above the tools it
-                            # introduced. Guard on tool-bearing fragments only — a
-                            # pure-text fragment must not flush (its text is still
-                            # accumulating toward one agent_message). The flush is a
-                            # no-op when the group is already closed.
-                            if any(isinstance(b, ToolUseBlock)
-                                   for b in imp_msg.content):
-                                await _flush_llm_group()
-                            for b in imp_msg.content:
-                                if isinstance(b, ToolUseBlock):
-                                    # Web builtins (§5.2): server/CLI-side, already
-                                    # executed. Short-circuit the ENTIRE ceiling
-                                    # block — emit a normalized tool_call, record
-                                    # the id for citation parsing, and do NOT
-                                    # increment tool_calls_used.
-                                    if b.name in CC_WEB_BUILTIN_TO_NORM:
-                                        norm = CC_WEB_BUILTIN_TO_NORM[b.name]
-                                        web_calls[b.id] = (norm, b.input)
-                                        elog.append_tool_call(
-                                            agent_id=aid,
-                                            block=ToolUseBlock(id=b.id, name=norm,
-                                                               input=b.input))
-                                        continue
-                                    # Dual-write: test fakes don't drive the MCP wrapper; production
-                                    # wrapper also sets these — idempotent. SDK presents the tool as
-                                    # mcp__imp__complete_step so canonicalize before comparing.
-                                    if _canon_tool_name(b.name) == "complete_step":
-                                        state.complete_step_called = True
-                                        state.complete_step_args = b.input
-                                        # Part A: complete_step is terminal — re-emit
-                                        # the result-less tool_call (parity with
-                                        # anthropic/openai), then preempt the trailing
-                                        # turn via interrupt (args already captured from
-                                        # b.input; `continue` skips the normal append
-                                        # path, re-emitted here).
-                                        if not self._complete_requested:
-                                            elog.append_tool_call(
-                                                agent_id=aid,
-                                                block=ToolUseBlock(
-                                                    id=b.id, name="complete_step",
-                                                    input=b.input))
+                                    frag = _serialize_claude_code_message(sdk_msg)
+                                    if not llm_group_open:
+                                        llm_group_open = True
+                                        llm_group_key = mid
+                                    elif llm_group_key is None and mid is not None:
+                                        llm_group_key = mid
+                                    llm_blocks.extend(frag["content"])
+                                    served = getattr(sdk_msg, "model", None)
+                                    if served is not None and llm_model is None:
+                                        llm_model = served
+                                    if (frag.get("stop_reason") is not None
+                                            and llm_stop_reason is None):
+                                        llm_stop_reason = frag["stop_reason"]
+                                    if frag.get("usage"):
+                                        llm_usage = frag["usage"]
+                                    # Tier A proactive handoff (Mechanism 3): on the
+                                    # configured context-threshold crossing, route
+                                    # through the cooperative-interrupt path — signal the
+                                    # running query and let the SDK close this turn
+                                    # balanced, then continue the live session with a
+                                    # plain handoff-instruction increment (handled at the
+                                    # generalized balanced-close site below). Do NOT
+                                    # re-stream history here: interrupt() does not
+                                    # disconnect the subprocess, so a replay would append
+                                    # on top of the already-near-full context and double
+                                    # it. complete_step_called is set later (per-block
+                                    # loop), so detect the completing turn from blocks
+                                    # here, canonicalizing the name: the SDK presents it
+                                    # as mcp__imp__complete_step, so a bare compare would
+                                    # miss it and wrongly preempt it.
+                                    if (handoff_phase is None
+                                            and invocation.checkpoint_threshold is not None):
+                                        completing = any(
+                                            isinstance(b, ToolUseBlock)
+                                            and _canon_tool_name(b.name) == "complete_step"
+                                            for b in imp_msg.content)
+                                        cu_fields = await _context_usage_fields(client)
+                                        if (not completing
+                                                and sdk_context_threshold_crossed(
+                                                    cu_fields.get("context_tokens"),
+                                                    cu_fields.get("context_window"),
+                                                    invocation.checkpoint_threshold)):
+                                            # Flush the crossing turn's LLM group, signal
+                                            # the interrupt, and mark the phase so the
+                                            # watchdog cannot re-fire while the interrupt
+                                            # settles. `continue` (not break) skips this
+                                            # crossing message's remaining blocks but keeps
+                                            # the receive loop iterating, so the balanced
+                                            # error_during_execution ResultMessage reaches
+                                            # the generalized close handler below — exactly
+                                            # as the steer path's external interrupt does.
                                             await _flush_llm_group()
-                                            self._complete_requested = True
+                                            self._handoff_requested = True
+                                            handoff_phase = "interrupt_requested"
                                             with contextlib.suppress(Exception):
                                                 await client.interrupt()
                                             continue
-                                    # Ceiling guard: observational here. With
-                                    # Claude Code we can't prevent the (K+1)th
-                                    # tool dispatch — MCP invocation is async
-                                    # claude-side, decoupled from this iteration
-                                    # loop. The ceiling becomes a *post hoc* fatal
-                                    # check after the ResultMessage.
-                                    if ceiling is not None and tool_calls_used >= ceiling:
-                                        ceil_msg = (
-                                            f"tool_call_ceiling_exceeded (ceiling={ceiling})"
-                                        )
-                                        elog.append_tool_result(
+                                # Close the coalesced prose group at the text->tool_use
+                                # transition: emit its agent_message BEFORE this fragment's
+                                # tool_calls, so narration renders above the tools it
+                                # introduced. Guard on tool-bearing fragments only — a
+                                # pure-text fragment must not flush (its text is still
+                                # accumulating toward one agent_message). The flush is a
+                                # no-op when the group is already closed.
+                                if any(isinstance(b, ToolUseBlock)
+                                       for b in imp_msg.content):
+                                    await _flush_llm_group()
+                                for b in imp_msg.content:
+                                    if isinstance(b, ToolUseBlock):
+                                        # Web builtins (§5.2): server/CLI-side, already
+                                        # executed. Short-circuit the ENTIRE ceiling
+                                        # block — emit a normalized tool_call, record
+                                        # the id for citation parsing, and do NOT
+                                        # increment tool_calls_used.
+                                        if b.name in CC_WEB_BUILTIN_TO_NORM:
+                                            norm = CC_WEB_BUILTIN_TO_NORM[b.name]
+                                            web_calls[b.id] = (norm, b.input)
+                                            elog.append_tool_call(
+                                                agent_id=aid,
+                                                block=ToolUseBlock(id=b.id, name=norm,
+                                                                   input=b.input))
+                                            continue
+                                        # Dual-write: test fakes don't drive the MCP
+                                        # wrapper; production wrapper also sets these —
+                                        # idempotent. SDK presents the tool as
+                                        # mcp__imp__complete_step so canonicalize before
+                                        # comparing.
+                                        if _canon_tool_name(b.name) == "complete_step":
+                                            state.complete_step_called = True
+                                            state.complete_step_args = b.input
+                                            # Part A: complete_step is terminal — re-emit
+                                            # the result-less tool_call (parity with
+                                            # anthropic/openai), then preempt the trailing
+                                            # turn via interrupt (args already captured from
+                                            # b.input; `continue` skips the normal append
+                                            # path, re-emitted here).
+                                            if not self._complete_requested:
+                                                elog.append_tool_call(
+                                                    agent_id=aid,
+                                                    block=ToolUseBlock(
+                                                        id=b.id, name="complete_step",
+                                                        input=b.input))
+                                                await _flush_llm_group()
+                                                self._complete_requested = True
+                                                with contextlib.suppress(Exception):
+                                                    await client.interrupt()
+                                                continue
+                                        # Ceiling guard: observational here. With
+                                        # Claude Code we can't prevent the (K+1)th
+                                        # tool dispatch — MCP invocation is async
+                                        # claude-side, decoupled from this iteration
+                                        # loop. The ceiling becomes a *post hoc* fatal
+                                        # check after the ResultMessage.
+                                        if ceiling is not None and tool_calls_used >= ceiling:
+                                            ceil_msg = (
+                                                f"tool_call_ceiling_exceeded (ceiling={ceiling})"
+                                            )
+                                            elog.append_tool_result(
+                                                agent_id=aid,
+                                                block=ToolResultBlock(b.id, ceil_msg,
+                                                                      is_error=True))
+                                            continue
+                                        tool_calls_used += 1
+                                        canon = _canon_tool_name(b.name)
+                                        # Accumulate for the loop guard BEFORE the task
+                                        # early-continue so task turns are still tracked.
+                                        # is_error defaults True until the following
+                                        # UserMessage tool_result lands and flips it.
+                                        if canon == "complete_step":
+                                            pending_complete = True
+                                        pending_tools[b.id] = ToolOutcome(
+                                            name=canon, tool_use_id=b.id,
+                                            input=b.input, is_error=True)
+                                        if canon == "sub_agent":
+                                            # tool_call for task is appended inside the
+                                            # MCP wrapper (_impl) keyed on a minted uuid
+                                            # block id (see :356-362), race-free. Don't
+                                            # double-append here.
+                                            continue
+                                        elog.append_tool_call(
                                             agent_id=aid,
-                                            block=ToolResultBlock(b.id, ceil_msg,
-                                                                  is_error=True))
-                                        continue
-                                    tool_calls_used += 1
-                                    canon = _canon_tool_name(b.name)
-                                    # Accumulate for the loop guard BEFORE the task
-                                    # early-continue so task turns are still tracked.
-                                    # is_error defaults True until the following
-                                    # UserMessage tool_result lands and flips it.
-                                    if canon == "complete_step":
-                                        pending_complete = True
-                                    pending_tools[b.id] = ToolOutcome(
-                                        name=canon, tool_use_id=b.id,
-                                        input=b.input, is_error=True)
-                                    if canon == "sub_agent":
-                                        # tool_call for task is appended inside the
-                                        # MCP wrapper (_impl) keyed on a minted uuid
-                                        # block id (see :356-362), race-free. Don't
-                                        # double-append here.
-                                        continue
-                                    elog.append_tool_call(
-                                        agent_id=aid,
-                                        block=ToolUseBlock(id=b.id, name=canon,
-                                                           input=b.input))
-                        elif imp_msg.role == "user":
-                            await _flush_llm_group()
-                            # ToolResultBlocks generated by claude calling our MCP
-                            # tools. Append the corresponding tool_result events.
-                            for b in imp_msg.content:
-                                if isinstance(b, ToolResultBlock):
-                                    if b.tool_use_id in web_calls:
-                                        norm, call_input = web_calls[b.tool_use_id]
-                                        cites = _parse_cc_web_citations(
-                                            norm, call_input, b.content)
-                                        elog.append_tool_result(
-                                            agent_id=aid, block=b, citations=cites,
-                                            duration_ms=state.tool_durations.pop(
-                                                b.tool_use_id, None))
-                                        continue
-                                    # SUPPRESS the SDK's duplicate `task` result.
-                                    # _impl already appended the canonical
-                                    # outcome-carrying result keyed on the minted
-                                    # block id; this incoming toolu_… result is the
-                                    # SAME logical close in the SDK id-space. Appending
-                                    # it too would double the tool_result (and feed
-                                    # narrative a second, fold-less close). Identify
-                                    # it by its tool_use_id ∈ pending_tools with
-                                    # name=="sub_agent" (canon tracked at the tool_use
-                                    # site). Still flip is_error on the task outcome
-                                    # below so a failed dispatch doesn't leave the
-                                    # ToolOutcome is_error=True → LoopGuard
-                                    # repeated_failure on identical re-dispatches.
-                                    pend = pending_tools.get(b.tool_use_id)
-                                    is_task = pend is not None and pend.name == "sub_agent"
-                                    if not is_task:
-                                        elog.append_tool_result(
-                                            agent_id=aid, block=b,
-                                            duration_ms=state.tool_durations.pop(
-                                                b.tool_use_id, None))
-                                    if pend is not None:
-                                        pend.is_error = b.is_error
-                                        pend.result_preview = \
-                                            _result_preview(b.content)
+                                            block=ToolUseBlock(id=b.id, name=canon,
+                                                               input=b.input))
+                            elif imp_msg.role == "user":
+                                await _flush_llm_group()
+                                # ToolResultBlocks generated by claude calling our MCP
+                                # tools. Append the corresponding tool_result events.
+                                for b in imp_msg.content:
+                                    if isinstance(b, ToolResultBlock):
+                                        if b.tool_use_id in web_calls:
+                                            norm, call_input = web_calls[b.tool_use_id]
+                                            cites = _parse_cc_web_citations(
+                                                norm, call_input, b.content)
+                                            elog.append_tool_result(
+                                                agent_id=aid, block=b, citations=cites,
+                                                duration_ms=state.tool_durations.pop(
+                                                    b.tool_use_id, None))
+                                            continue
+                                        # SUPPRESS the SDK's duplicate `task` result.
+                                        # _impl already appended the canonical
+                                        # outcome-carrying result keyed on the minted
+                                        # block id; this incoming toolu_… result is the
+                                        # SAME logical close in the SDK id-space. Appending
+                                        # it too would double the tool_result (and feed
+                                        # narrative a second, fold-less close). Identify
+                                        # it by its tool_use_id ∈ pending_tools with
+                                        # name=="sub_agent" (canon tracked at the tool_use
+                                        # site). Still flip is_error on the task outcome
+                                        # below so a failed dispatch doesn't leave the
+                                        # ToolOutcome is_error=True → LoopGuard
+                                        # repeated_failure on identical re-dispatches.
+                                        pend = pending_tools.get(b.tool_use_id)
+                                        is_task = pend is not None and pend.name == "sub_agent"
+                                        if not is_task:
+                                            elog.append_tool_result(
+                                                agent_id=aid, block=b,
+                                                duration_ms=state.tool_durations.pop(
+                                                    b.tool_use_id, None))
+                                        if pend is not None:
+                                            pend.is_error = b.is_error
+                                            pend.result_preview = \
+                                                _result_preview(b.content)
 
-                    # Drain any bash kills detected by the MCP wrapper.
-                    while state.killed_tool_uses:
-                        info = state.killed_tool_uses.pop(0)
-                        elog.append(agent_id=aid, type="tool_killed", payload=info)
+                        # Drain any bash kills detected by the MCP wrapper.
+                        while state.killed_tool_uses:
+                            info = state.killed_tool_uses.pop(0)
+                            elog.append(agent_id=aid, type="tool_killed", payload=info)
 
-                    # A tool raised FatalToolError → bail out instead of letting
-                    # Claude burn more LLM calls trying to work around a runtime
-                    # misconfiguration.
-                    if state.fatal_tool_error is not None:
-                        tool_name, msg = state.fatal_tool_error
-                        yield {"type": "error", "payload": {
-                            "category": "config",
-                            "kind": "fatal_tool_error",
-                            "tool": tool_name,
-                            "message": msg,
-                        }}
-                        return
+                        # A tool raised FatalToolError → bail out instead of letting
+                        # Claude burn more LLM calls trying to work around a runtime
+                        # misconfiguration.
+                        if state.fatal_tool_error is not None:
+                            tool_name, msg = state.fatal_tool_error
+                            yield {"type": "error", "payload": {
+                                "category": "config",
+                                "kind": "fatal_tool_error",
+                                "tool": tool_name,
+                                "message": msg,
+                            }}
+                            return
 
-                    if cls_name == "ResultMessage":
-                        await _flush_llm_group(
-                            backstop_stop_reason=getattr(
-                                sdk_msg, "stop_reason", None))
-                        elog.append_query_result(
-                            agent_id=aid,
-                            total_cost_usd=getattr(sdk_msg, "total_cost_usd", None),
-                            duration_ms=getattr(sdk_msg, "duration_ms", None),
-                            duration_api_ms=getattr(sdk_msg, "duration_api_ms", None),
-                            num_turns=getattr(sdk_msg, "num_turns", None),
-                            stop_reason=getattr(sdk_msg, "stop_reason", None),
-                            subtype=getattr(sdk_msg, "subtype", None),
-                            is_error=bool(getattr(sdk_msg, "is_error", False)),
-                            usage=getattr(sdk_msg, "usage", None) or {},
-                            model_usage=getattr(sdk_msg, "model_usage", None) or {},
-                            api_error_status=getattr(sdk_msg, "api_error_status", None),
-                            permission_denials=getattr(sdk_msg, "permission_denials", None),
-                            errors=getattr(sdk_msg, "errors", None))
-                        if (self._complete_requested
-                                and getattr(sdk_msg, "subtype", None)
-                                == "error_during_execution"):
-                            # Part A: interrupt landed — fall through to agent_result;
-                            # deliberately do NOT balance the tail so the dangling
-                            # result-less complete_step stays the persisted tail (parity
-                            # with anthropic/openai; the Part B resume relies on it).
-                            self._complete_requested = False
-                            _flush_pending()
-                        elif ((self._steer_requested or self._handoff_requested)
-                                and getattr(sdk_msg, "subtype", None)
-                                == "error_during_execution"):
-                            if self._handoff_requested:
-                                # Tier A proactive handoff: the SDK closed the
-                                # crossing turn balanced. Continue the LIVE (now
-                                # balanced) session with a plain handoff-instruction
-                                # increment — NOT a _stream_history replay, which
-                                # would double the already-near-full context.
-                                self._handoff_requested = False
-                                # Discard the interrupted turn's partial accumulators
-                                # so they don't bleed into the handoff requery's loop
-                                # guard (mirrors the steer cleanup below).
+                        if cls_name == "ResultMessage":
+                            await _flush_llm_group(
+                                backstop_stop_reason=getattr(
+                                    sdk_msg, "stop_reason", None))
+                            elog.append_query_result(
+                                agent_id=aid,
+                                total_cost_usd=getattr(sdk_msg, "total_cost_usd", None),
+                                duration_ms=getattr(sdk_msg, "duration_ms", None),
+                                duration_api_ms=getattr(sdk_msg, "duration_api_ms", None),
+                                num_turns=getattr(sdk_msg, "num_turns", None),
+                                stop_reason=getattr(sdk_msg, "stop_reason", None),
+                                subtype=getattr(sdk_msg, "subtype", None),
+                                is_error=bool(getattr(sdk_msg, "is_error", False)),
+                                usage=getattr(sdk_msg, "usage", None) or {},
+                                model_usage=getattr(sdk_msg, "model_usage", None) or {},
+                                api_error_status=getattr(sdk_msg, "api_error_status", None),
+                                permission_denials=getattr(sdk_msg, "permission_denials", None),
+                                errors=getattr(sdk_msg, "errors", None))
+                            if (self._complete_requested
+                                    and getattr(sdk_msg, "subtype", None)
+                                    == "error_during_execution"):
+                                # Part A: interrupt landed — fall through to agent_result;
+                                # deliberately do NOT balance the tail so the dangling
+                                # result-less complete_step stays the persisted tail (parity
+                                # with anthropic/openai; the Part B resume relies on it).
+                                self._complete_requested = False
                                 _flush_pending()
-                                # Balance the crossing turn's dangling tool_use in
-                                # imp's in-memory messages/transcript (used by the
-                                # later transcript stash); it no longer feeds a live
-                                # replay.
-                                repair_dangling_tool_use_on_resume(
-                                    messages, transcript,
-                                    captured=_load_captured_tool_results(invocation.transcript_dir))
-                                instr = handoff_instruction(handoff_path)
-                                instr_msg = Message(
-                                    role="user",
-                                    content=(TextBlock(text=instr),))
-                                messages.append(instr_msg)
-                                transcript.append(instr_msg)
-                                elog.append_engine_message(
-                                    agent_id=aid, message=instr_msg, subtype="continuation")
-                                next_query = instr
-                                handoff_phase = "instruction_sent"
+                            elif ((self._steer_requested or self._handoff_requested)
+                                    and getattr(sdk_msg, "subtype", None)
+                                    == "error_during_execution"):
+                                if self._handoff_requested:
+                                    # Tier A proactive handoff: the SDK closed the
+                                    # crossing turn balanced. Continue the LIVE (now
+                                    # balanced) session with a plain handoff-instruction
+                                    # increment — NOT a _stream_history replay, which
+                                    # would double the already-near-full context.
+                                    self._handoff_requested = False
+                                    # Discard the interrupted turn's partial accumulators
+                                    # so they don't bleed into the handoff requery's loop
+                                    # guard (mirrors the steer cleanup below).
+                                    _flush_pending()
+                                    # Balance the crossing turn's dangling tool_use in
+                                    # imp's in-memory messages/transcript (used by the
+                                    # later transcript stash); it no longer feeds a live
+                                    # replay.
+                                    repair_dangling_tool_use_on_resume(
+                                        messages, transcript,
+                                        captured=_load_captured_tool_results(invocation.transcript_dir))
+                                    instr = handoff_instruction(handoff_path)
+                                    instr_msg = Message(
+                                        role="user",
+                                        content=(TextBlock(text=instr),))
+                                    messages.append(instr_msg)
+                                    transcript.append(instr_msg)
+                                    elog.append_engine_message(
+                                        agent_id=aid, message=instr_msg, subtype="continuation")
+                                    next_query = instr
+                                    handoff_phase = "instruction_sent"
+                                    requery = True
+                                    break
+                                # Cooperative interrupt landed: the SDK closed this
+                                # turn balanced. Unblock the waiting interrupt() and
+                                # route into the attended inline-yield instead of
+                                # treating the error result as a termination.
+                                self._steer_unblocked.set()
+                                self._steer_requested = False
+                                # Discard the interrupted turn's partial accumulators
+                                # so they don't bleed into the next turn's loop-guard.
+                                _flush_pending()
+                                # Reap leaked subprocesses only AFTER interrupt():
+                                # a killed-process tool_result must not race the stop.
+                                from imp.agents.tools.bg import terminate_background_processes
+                                from imp.agents.tools.context import terminate_running_processes
+                                await terminate_running_processes(ctx)
+                                await terminate_background_processes(ctx)
+                                last_text = ""
+                                for prev in reversed(messages):
+                                    if prev.role == "assistant":
+                                        last_text = _text_of(prev)
+                                        break
+                                steer = build_inline_solicit(
+                                    user_input_fn=self._user_input_fn,
+                                    coordinator=invocation.coordinator,
+                                    event_log=elog, agent_id=aid,
+                                    steer_prompt=INTERRUPT_STEER_HINT,
+                                    interrupt=True,
+                                    halt_writer=invocation.halt_writer,
+                                    halt_clearer=invocation.halt_clearer)
+                                # Raises AwaitingUserInput when no human is attached;
+                                # the balanced session makes a resume continue with no 400.
+                                reply = await steer(last_text)
+                                if self._interrupted():
+                                    return
+                                # Brake holds until reply is in hand: clear only now.
+                                if invocation.coordinator is not None:
+                                    invocation.coordinator.clear_pause()
+                                if isinstance(reply, str) and not reply.strip():
+                                    # Empty Enter continues the interrupted turn via
+                                    # an engine nudge — never an empty human turn.
+                                    deliver_engine_continuation(
+                                        messages, transcript, elog, aid,
+                                        _CONTINUATION_NUDGE)
+                                    next_query = _CONTINUATION_NUDGE
+                                else:
+                                    next_query = deliver_continuation_reply(
+                                        messages, transcript, elog, aid, reply, human=True)
                                 requery = True
                                 break
-                            # Cooperative interrupt landed: the SDK closed this
-                            # turn balanced. Unblock the waiting interrupt() and
-                            # route into the attended inline-yield instead of
-                            # treating the error result as a termination.
-                            self._steer_unblocked.set()
-                            self._steer_requested = False
-                            # Discard the interrupted turn's partial accumulators
-                            # so they don't bleed into the next turn's loop-guard.
-                            _flush_pending()
-                            # Reap leaked subprocesses only AFTER interrupt():
-                            # a killed-process tool_result must not race the stop.
-                            from imp.agents.tools.bg import terminate_background_processes
-                            from imp.agents.tools.context import terminate_running_processes
-                            await terminate_running_processes(ctx)
-                            await terminate_background_processes(ctx)
+                            elif (self._handoff_requested or self._steer_requested
+                                    or self._complete_requested):
+                                # Non-error_during_execution close while a flag was set:
+                                # the cooperative interrupt() did not land. Reset both flags
+                                # so neither bleeds into a later unrelated
+                                # error_during_execution result.
+                                if self._handoff_requested:
+                                    self._handoff_requested = False
+                                    handoff_phase = None
+                                self._steer_requested = False
+                                self._complete_requested = False
+
+                            # Loop guard: ResultMessage is the true end-of-turn
+                            # marker, so flush the accumulated turn here EXACTLY ONCE
+                            # (a turn ending in complete_step set pending_complete →
+                            # progress → never trips). Observe before the end-of-turn
+                            # handling so a detected loop wins over a nudge.
+                            # A complete_step turn is fed to the guard EXACTLY ONCE by
+                            # validate_output_or_nudge below. Skip the flush-observe
+                            # here so a malformed complete_step turn is not observed a
+                            # second time (double-feed would skew no-progress counters).
+                            flushed = _flush_pending()
+                            if flushed is not None and not state.complete_step_called:
+                                loop_err = guard.observe(flushed)
+                                if loop_err is not None:
+                                    yield perr.make_error_event(
+                                        loop_err, kind=getattr(loop_err, "kind", ""))
+                                    return
+
+                            if handoff_phase == "instruction_sent":
+                                # The handoff-writing turn completed: signal the
+                                # captured handoff and stop. drive_invocation maps
+                                # this to AgentRunResult.handoff_path; the engine
+                                # stashes the transcript and reincarnates the session
+                                # seeded from the note. Wins over a stray
+                                # complete_step on this turn.
+                                write_handoff_note(
+                                    handoff_path,
+                                    most_recent_assistant_text(messages))
+                                yield {"type": "handoff",
+                                       "payload": {"handoff_path": str(handoff_path)}}
+                                return
+
+                            # End-of-turn:
+                            #   a) complete_step captured → emit agent_result, return
+                            #   b) nudge via continuation_fn → send another query
+                            #   c) no complete_step and no nudge → error
+                            if state.complete_step_called:
+                                res = validate_output_or_nudge(
+                                    state.complete_step_args,
+                                    invocation.agent_def.output_schema, guard)
+                                if isinstance(res, Ok):
+                                    # Observe the flush-skipped TurnRecord so co-turn
+                                    # tool outcomes remain visible to the guard. Result
+                                    # is safely discarded: the invocation returns
+                                    # immediately and guard state is thrown away.
+                                    if flushed is not None:
+                                        guard.observe(flushed)
+                                    if res.recovered is not None:
+                                        ev = make_recovery_event(res)
+                                        elog.append(agent_id=aid, type=ev["type"],
+                                                    payload=ev["payload"])
+                                    yield {"type": "agent_result",
+                                           "payload": res.payload}
+                                    return
+                                if isinstance(res, Nudge):
+                                    ev = make_nudge_event(res)
+                                    elog.append(agent_id=aid, type=ev["type"],
+                                                payload=ev["payload"])
+                                    # Re-query the SAME session with the nudge so the
+                                    # agent re-emits. Reset capture and interrupt-preempt
+                                    # flag so next turn's complete_step is detected fresh.
+                                    state.complete_step_called = False
+                                    state.complete_step_args = {}
+                                    self._complete_requested = False
+                                    nudge_msg = Message(
+                                        role="user",
+                                        content=(TextBlock(text=res.message),))
+                                    messages.append(nudge_msg)
+                                    transcript.append(nudge_msg)
+                                    elog.append_engine_message(
+                                        agent_id=aid, message=nudge_msg, subtype="continuation")
+                                    next_query = res.message
+                                    requery = True
+                                    break
+                                # LoopError: pause-to-human.
+                                yield perr.make_error_event(
+                                    res, kind=getattr(res, "kind", ""))
+                                return
+
+                            if (ceiling is not None and tool_calls_used >= ceiling
+                                    and not state.complete_step_called):
+                                yield {"type": "error", "payload": {
+                                    "category": "config",
+                                    "kind": "tool_call_ceiling_exceeded",
+                                    "ceiling": ceiling,
+                                }}
+                                return
+
                             last_text = ""
+                            # Walk backward through the messages we appended to find
+                            # the most recent assistant message — that's where the
+                            # terminal CLI message lives.
                             for prev in reversed(messages):
                                 if prev.role == "assistant":
                                     last_text = _text_of(prev)
                                     break
-                            steer = build_inline_solicit(
-                                user_input_fn=self._user_input_fn,
-                                coordinator=invocation.coordinator,
-                                event_log=elog, agent_id=aid,
-                                steer_prompt=INTERRUPT_STEER_HINT,
-                                interrupt=True,
-                                halt_writer=invocation.halt_writer,
-                                halt_clearer=invocation.halt_clearer)
-                            # Raises AwaitingUserInput when no human is attached;
-                            # the balanced session makes a resume continue with no 400.
-                            reply = await steer(last_text)
-                            if self._interrupted():
-                                return
-                            # Brake holds until reply is in hand: clear only now.
-                            if invocation.coordinator is not None:
-                                invocation.coordinator.clear_pause()
-                            if isinstance(reply, str) and not reply.strip():
-                                # Empty Enter continues the interrupted turn via
-                                # an engine nudge — never an empty human turn.
-                                deliver_engine_continuation(
-                                    messages, transcript, elog, aid,
-                                    _CONTINUATION_NUDGE)
-                                next_query = _CONTINUATION_NUDGE
-                            else:
-                                next_query = deliver_continuation_reply(
-                                    messages, transcript, elog, aid, reply, human=True)
-                            requery = True
-                            break
-                        elif (self._handoff_requested or self._steer_requested
-                                or self._complete_requested):
-                            # Non-error_during_execution close while a flag was set:
-                            # the cooperative interrupt() did not land. Reset both flags
-                            # so neither bleeds into a later unrelated
-                            # error_during_execution result.
-                            if self._handoff_requested:
-                                self._handoff_requested = False
-                                handoff_phase = None
-                            self._steer_requested = False
-                            self._complete_requested = False
 
-                        # Loop guard: ResultMessage is the true end-of-turn
-                        # marker, so flush the accumulated turn here EXACTLY ONCE
-                        # (a turn ending in complete_step set pending_complete →
-                        # progress → never trips). Observe before the end-of-turn
-                        # handling so a detected loop wins over a nudge.
-                        # A complete_step turn is fed to the guard EXACTLY ONCE by
-                        # validate_output_or_nudge below. Skip the flush-observe
-                        # here so a malformed complete_step turn is not observed a
-                        # second time (double-feed would skew no-progress counters).
-                        flushed = _flush_pending()
-                        if flushed is not None and not state.complete_step_called:
-                            loop_err = guard.observe(flushed)
-                            if loop_err is not None:
+                            # P2: a ResultMessage flagged is_error (or a nonzero
+                            # subprocess exit) is a termination, not a benign
+                            # missing-complete_step. Report it typed-or-unknown with
+                            # every structured field — before the substring fallback
+                            # and never through the nudge path.
+                            term = _termination_from_result(
+                                sdk_msg, last_text,
+                                {**_subprocess_diag(client),
+                                 "stderr_tail": self._stderr_sink.tail()},
+                                config_dir=config_dir)
+                            if term is not None:
+                                _roll_back_error_turn(messages, transcript)
                                 yield perr.make_error_event(
-                                    loop_err, kind=getattr(loop_err, "kind", ""))
+                                    term, kind=getattr(term, "kind", ""))
                                 return
 
-                        if handoff_phase == "instruction_sent":
-                            # The handoff-writing turn completed: signal the
-                            # captured handoff and stop. drive_invocation maps
-                            # this to AgentRunResult.handoff_path; the engine
-                            # stashes the transcript and reincarnates the session
-                            # seeded from the note. Wins over a stray
-                            # complete_step on this turn.
-                            write_handoff_note(handoff_path, most_recent_assistant_text(messages))
-                            yield {"type": "handoff",
-                                   "payload": {"handoff_path": str(handoff_path)}}
-                            return
-
-                        # End-of-turn:
-                        #   a) complete_step captured → emit agent_result, return
-                        #   b) nudge via continuation_fn → send another query
-                        #   c) no complete_step and no nudge → error
-                        if state.complete_step_called:
-                            res = validate_output_or_nudge(
-                                state.complete_step_args,
-                                invocation.agent_def.output_schema, guard)
-                            if isinstance(res, Ok):
-                                # Observe the flush-skipped TurnRecord so co-turn
-                                # tool outcomes remain visible to the guard. Result
-                                # is safely discarded: the invocation returns
-                                # immediately and guard state is thrown away.
-                                if flushed is not None:
-                                    guard.observe(flushed)
-                                if res.recovered is not None:
-                                    ev = make_recovery_event(res)
-                                    elog.append(agent_id=aid, type=ev["type"],
-                                                payload=ev["payload"])
-                                yield {"type": "agent_result",
-                                       "payload": res.payload}
+                            # Classify before the nudge: a surfaced provider error
+                            # (auth/quota) must win over a pointless nudge. This runs
+                            # on each nudge turn (up to N+1), not just the terminal one
+                            # — intentional, so an auth failure surfaces on turn 1
+                            # instead of after N nudges.
+                            classified = _classify_agent_text(last_text)
+                            if classified is not None:
+                                # Carry the offending prose so the narrative can
+                                # match-and-drop the held auth text (same [:500]
+                                # truncation the _termination_from_result path uses).
+                                classified.detail["last_agent_text"] = last_text[:500]
+                                _roll_back_error_turn(messages, transcript)
+                                yield perr.make_error_event(
+                                    classified, kind=getattr(classified, "kind", ""))
                                 return
-                            if isinstance(res, Nudge):
-                                ev = make_nudge_event(res)
-                                elog.append(agent_id=aid, type=ev["type"],
-                                            payload=ev["payload"])
-                                # Re-query the SAME session with the nudge so the
-                                # agent re-emits. Reset capture and interrupt-preempt
-                                # flag so next turn's complete_step is detected fresh.
-                                state.complete_step_called = False
-                                state.complete_step_args = {}
-                                self._complete_requested = False
-                                nudge_msg = Message(
-                                    role="user",
-                                    content=(TextBlock(text=res.message),))
-                                messages.append(nudge_msg)
-                                transcript.append(nudge_msg)
-                                elog.append_engine_message(
-                                    agent_id=aid, message=nudge_msg, subtype="continuation")
-                                next_query = res.message
+
+                            if invocation.subagent_depth > 0:
+                                final_text = last_assistant_text(messages)
+                                if final_text:
+                                    yield {"type": "agent_result",
+                                           "payload": {"text": final_text}}
+                                return
+
+                            cont = invocation.continuation_fn
+                            if cont is not None:
+                                next_text, human = cont(last_text)
+                                if inspect.isawaitable(next_text):
+                                    next_text = await next_text
+                                if self._interrupted():
+                                    # The interrupt landed while we were resolving the
+                                    # continuation. Don't nudge the model to keep going
+                                    # after a Ctrl-C — pause at the turn boundary.
+                                    # Without this the nudge + re-query proceeds and the
+                                    # cancel is only caught later at the no-result
+                                    # fallthrough, after a wasted round-trip that
+                                    # surfaces a spurious `network` warning.
+                                    yield {"type": "error", "payload": {
+                                        "category": "config",
+                                        "kind": "interrupted",
+                                        "message": "runner cancelled by interrupt",
+                                    }}
+                                    return
+                                next_query = deliver_continuation_reply(
+                                    messages, transcript, elog, aid, next_text,
+                                    human=human)
+                                # Turn boundary: this is the only point where THIS
+                                # runner sets up the next SDK query (the SDK owns the
+                                # in-query tool loop). Deliver any queued human
+                                # interject as a user_message/interject event and fold
+                                # its text into the next query string so the SDK
+                                # actually sees it on this re-query. Reached only after
+                                # the turn's tool results are flushed — S4 holds.
+                                interject_msg = _drain_interject_message(
+                                    invocation.coordinator, elog, aid)
+                                if interject_msg is not None:
+                                    messages.append(interject_msg)
+                                    transcript.append(interject_msg)
+                                    elog.append_user_message(
+                                        agent_id=aid, message=interject_msg,
+                                        subtype="interject")
+                                    next_query = f"{next_query}\n\n{_text_of(interject_msg)}"
+                                # Re-query on a FRESH receive_response() (issue 7):
+                                # break the inner loop so the outer while restarts.
                                 requery = True
                                 break
-                            # LoopError: pause-to-human.
-                            yield perr.make_error_event(
-                                res, kind=getattr(res, "kind", ""))
-                            return
 
-                        if (ceiling is not None and tool_calls_used >= ceiling
-                                and not state.complete_step_called):
                             yield {"type": "error", "payload": {
-                                "category": "config",
-                                "kind": "tool_call_ceiling_exceeded",
-                                "ceiling": ceiling,
+                                "category": "agent_output_missing",
+                                "kind": "no_complete_step",
+                                "message": "agent finished without calling complete_step",
+                                "detail": {"last_agent_text": last_text[:500]},
                             }}
                             return
-
-                        last_text = ""
-                        # Walk backward through the messages we appended to find
-                        # the most recent assistant message — that's where the
-                        # terminal CLI message lives.
-                        for prev in reversed(messages):
-                            if prev.role == "assistant":
-                                last_text = _text_of(prev)
-                                break
-
-                        # P2: a ResultMessage flagged is_error (or a nonzero
-                        # subprocess exit) is a termination, not a benign
-                        # missing-complete_step. Report it typed-or-unknown with
-                        # every structured field — before the substring fallback
-                        # and never through the nudge path.
-                        term = _termination_from_result(
-                            sdk_msg, last_text,
-                            {**_subprocess_diag(client),
-                             "stderr_tail": self._stderr_sink.tail()},
-                            config_dir=config_dir)
-                        if term is not None:
-                            _roll_back_error_turn(messages, transcript)
-                            yield perr.make_error_event(
-                                term, kind=getattr(term, "kind", ""))
-                            return
-
-                        # Classify before the nudge: a surfaced provider error
-                        # (auth/quota) must win over a pointless nudge. This runs
-                        # on each nudge turn (up to N+1), not just the terminal one
-                        # — intentional, so an auth failure surfaces on turn 1
-                        # instead of after N nudges.
-                        classified = _classify_agent_text(last_text)
-                        if classified is not None:
-                            # Carry the offending prose so the narrative can
-                            # match-and-drop the held auth text (same [:500]
-                            # truncation the _termination_from_result path uses).
-                            classified.detail["last_agent_text"] = last_text[:500]
-                            _roll_back_error_turn(messages, transcript)
-                            yield perr.make_error_event(
-                                classified, kind=getattr(classified, "kind", ""))
-                            return
-
-                        if invocation.subagent_depth > 0:
-                            final_text = last_assistant_text(messages)
-                            if final_text:
-                                yield {"type": "agent_result",
-                                       "payload": {"text": final_text}}
-                            return
-
-                        cont = invocation.continuation_fn
-                        if cont is not None:
-                            next_text, human = cont(last_text)
-                            if inspect.isawaitable(next_text):
-                                next_text = await next_text
-                            if self._interrupted():
-                                # The interrupt landed while we were resolving the
-                                # continuation. Don't nudge the model to keep going
-                                # after a Ctrl-C — pause at the turn boundary.
-                                # Without this the nudge + re-query proceeds and the
-                                # cancel is only caught later at the no-result
-                                # fallthrough, after a wasted round-trip that
-                                # surfaces a spurious `network` warning.
-                                yield {"type": "error", "payload": {
-                                    "category": "config",
-                                    "kind": "interrupted",
-                                    "message": "runner cancelled by interrupt",
-                                }}
-                                return
-                            next_query = deliver_continuation_reply(
-                                messages, transcript, elog, aid, next_text,
-                                human=human)
-                            # Turn boundary: this is the only point where THIS
-                            # runner sets up the next SDK query (the SDK owns the
-                            # in-query tool loop). Deliver any queued human
-                            # interject as a user_message/interject event and fold
-                            # its text into the next query string so the SDK
-                            # actually sees it on this re-query. Reached only after
-                            # the turn's tool results are flushed — S4 holds.
-                            interject_msg = _drain_interject_message(
-                                invocation.coordinator, elog, aid)
-                            if interject_msg is not None:
-                                messages.append(interject_msg)
-                                transcript.append(interject_msg)
-                                elog.append_user_message(
-                                    agent_id=aid, message=interject_msg,
-                                    subtype="interject")
-                                next_query = f"{next_query}\n\n{_text_of(interject_msg)}"
-                            # Re-query on a FRESH receive_response() (issue 7):
-                            # break the inner loop so the outer while restarts.
-                            requery = True
-                            break
-
-                        yield {"type": "error", "payload": {
-                            "category": "agent_output_missing",
-                            "kind": "no_complete_step",
-                            "message": "agent finished without calling complete_step",
-                            "detail": {"last_agent_text": last_text[:500]},
-                        }}
-                        return
 
                 # INVARIANT: any `break` from the inner async-for that intends to
                 # re-query MUST set requery=True first. A bare break falls through
