@@ -54,16 +54,29 @@ class _RecLog:
         return [p for t, p in self.events if t == "runner_warning"]
 
 
-def test_bash_reports_overlay_setup_failure_distinctly(tmp_path: Path) -> None:
-    from imp.engine.sandbox import (
-        OVERLAY_SETUP_FAILED_CODE,
-        OVERLAY_SETUP_FAILED_MARKER,
-    )
-    cmd = f"printf '%s\\n' {OVERLAY_SETUP_FAILED_MARKER} >&2; exit {OVERLAY_SETUP_FAILED_CODE}"
-    out = json.loads(_run_bash(_ctx(tmp_path), {"command": cmd}))
-    # A distinct sandbox-setup failure — NOT a plain command result with rc 122.
+def _active_policy(tmp_path: Path):
+    from imp.engine.sandbox import SandboxPolicy
+    return SandboxPolicy(
+        active=True, worktree=str(tmp_path),
+        git_common_dir=str(tmp_path / ".git"), git_ro_remask=(),
+        writable_caches=(), extra_readable=(), extra_writable=(),
+        secret_dirs=(), secret_files=(), setenv=(), network=True, note="")
+
+
+def test_bash_reports_sandbox_spawn_failure_distinctly(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import imp.agents.tools.bash as bashmod
+    # Simulate a sandboxed spawn that failed to ENTER: an argv that exits nonzero
+    # and never emits the entry sentinel (no real bwrap).
+    monkeypatch.setattr(bashmod, "build_sandbox_argv",
+                        lambda command, **kw: ["sh", "-c", "exit 3"])
+    ctx = _ctx(tmp_path)
+    ctx.base_sandbox_policy = _active_policy(tmp_path)
+    out = json.loads(_run_bash(ctx, {"command": "x"}))
     assert out["status"] == "sandbox_setup_failed"
     assert "did NOT run" in out["error"]
+    assert out["returncode"] == 3
 
 
 def test_bash_exit_122_without_marker_is_a_plain_result(tmp_path: Path) -> None:
@@ -74,18 +87,54 @@ def test_bash_exit_122_without_marker_is_a_plain_result(tmp_path: Path) -> None:
     assert out["returncode"] == 122
 
 
-def test_bash_overlay_setup_failure_emits_event(tmp_path: Path) -> None:
-    from imp.engine.sandbox import (
-        OVERLAY_SETUP_FAILED_CODE,
-        OVERLAY_SETUP_FAILED_MARKER,
-    )
+def test_bash_sandbox_spawn_failure_emits_event(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import imp.agents.tools.bash as bashmod
+    monkeypatch.setattr(bashmod, "build_sandbox_argv",
+                        lambda command, **kw: ["sh", "-c", "exit 3"])
     ctx = _ctx(tmp_path)
-    log = _RecLog()
-    ctx.event_log = log
-    cmd = f"printf '%s\\n' {OVERLAY_SETUP_FAILED_MARKER} >&2; exit {OVERLAY_SETUP_FAILED_CODE}"
-    json.loads(_run_bash(ctx, {"command": cmd}))
-    [w] = log.warnings()
+    ctx.base_sandbox_policy = _active_policy(tmp_path)
+    ctx.event_log = _RecLog()
+    json.loads(_run_bash(ctx, {"command": "x"}))
+    [w] = ctx.event_log.warnings()
     assert w["reason"] == "overlay-setup-failed"
+
+
+def test_bash_healthy_sandboxed_command_strips_marker(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import imp.agents.tools.bash as bashmod
+    from imp.engine.sandbox import SANDBOX_ENTERED_MARKER
+    monkeypatch.setattr(
+        bashmod, "build_sandbox_argv",
+        lambda command, **kw: ["sh", "-c",
+            f"printf '%s\\n' {SANDBOX_ENTERED_MARKER} >&2; echo real >&2; echo out"])
+    ctx = _ctx(tmp_path)
+    ctx.base_sandbox_policy = _active_policy(tmp_path)
+    out = json.loads(_run_bash(ctx, {"command": "x"}))
+    assert "status" not in out                          # healthy result
+    assert SANDBOX_ENTERED_MARKER not in out["stderr"]  # marker stripped
+    assert "real" in out["stderr"]
+    assert out["returncode"] == 0
+
+
+def test_bash_bare_command_never_flagged_spawn_failure(tmp_path: Path) -> None:
+    # No policy -> bare -> sandbox_active False -> a nonzero exit is a plain result.
+    out = json.loads(_run_bash(_ctx(tmp_path), {"command": "exit 3"}))
+    assert "status" not in out
+    assert out["returncode"] == 3
+
+
+def test_bash_inactive_policy_never_flagged_spawn_failure(tmp_path: Path) -> None:
+    # policy present but active=False -> guard is False -> nonzero exit is a plain result.
+    import dataclasses
+    pol = dataclasses.replace(_active_policy(tmp_path), active=False)
+    ctx = _ctx(tmp_path)
+    ctx.base_sandbox_policy = pol
+    out = json.loads(_run_bash(ctx, {"command": "exit 3"}))
+    assert "status" not in out
+    assert out["returncode"] == 3
 
 
 def test_bash_default_cwd_is_project_root(tmp_path: Path) -> None:

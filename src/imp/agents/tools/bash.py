@@ -32,11 +32,11 @@ from imp.agents.tools.limits import (
 from imp.agents.tools.spill import spill_tool_output
 from imp.engine.env import engine_env, overlay_engine_env
 from imp.engine.sandbox import (
-    OVERLAY_SETUP_FAILED_CODE,
-    OVERLAY_SETUP_FAILED_MESSAGE,
+    SANDBOX_SPAWN_FAILED_MESSAGE,
     build_sandbox_argv,
-    overlay_setup_failed,
     prune_missing_masks,
+    sandbox_spawn_failed,
+    strip_sandbox_marker,
 )
 from imp.engine.shim import imp_shim_dir
 
@@ -56,7 +56,7 @@ def _emit_overlay_setup_warning(ctx: ToolContext, command: str) -> None:
         ctx.event_log.append(
             agent_id=ctx.agent_id, type="runner_warning",
             payload={
-                "message": ("sandbox home overlay mount failed; the command did "
+                "message": ("the OS sandbox could not start the command; it did "
                             "not run (sandbox-setup failure, not a command exit)"),
                 "command": command[:_EVENT_COMMAND_PREVIEW_LEN], "reason": "overlay-setup-failed",
             })
@@ -264,17 +264,21 @@ async def bash(
             p.unlink()
     stdout = out_bytes.decode("utf-8", "replace")
     stderr = err_bytes.decode("utf-8", "replace")
-    if overlay_setup_failed(stderr):
-        # Mount-setup failure: the command never ran; report it distinctly. An
-        # overlay-setup failure exits immediately, so it never reaches promotion.
+    # Detect BEFORE stripping (marker absence is the signal), guarded on whether
+    # the sandbox was active for THIS spawn, then strip so no agent sees the marker.
+    spawn_failed = sandbox_spawn_failed(
+        stderr, sandbox_active=policy is not None and policy.active)
+    stderr = strip_sandbox_marker(stderr)
+    if spawn_failed:
+        # The sandbox never entered the inner command; report it distinctly. Such
+        # a failure exits immediately, so it never reaches promotion.
         _emit_overlay_setup_warning(ctx, command)
         return json.dumps({
             "stdout": stdout,
             "stderr": stderr,
             "status": "sandbox_setup_failed",
-            "error": OVERLAY_SETUP_FAILED_MESSAGE,
-            "returncode": (proc.returncode if proc.returncode is not None
-                           else OVERLAY_SETUP_FAILED_CODE),
+            "error": SANDBOX_SPAWN_FAILED_MESSAGE,
+            "returncode": proc.returncode,
         }, ensure_ascii=False)
     if paused:
         # A pause landed mid-command: the poller SIGKILL'd the group. Return the
