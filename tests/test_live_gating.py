@@ -530,3 +530,12 @@ def test_interrupt_e2e_routes_gate_budget_through_knob():
     assert "hard=60.0" not in src               # run_to_completion routed through knob
     assert "hard=min(0.5, remaining)" in src    # inner clamp unchanged
     assert "hard=E2E_EXIT_POLL_TIMEOUT" in src  # post-SIGINT exit wait uses the exit budget
+
+
+def test_pipeline_e2e_threads_one_shared_deadline():
+    import tests.impty.test_e2e_pipeline as pipe
+    src = Path(pipe.__file__).read_text()
+    assert "deadline = time.monotonic() + E2E_SUBPROCESS_TIMEOUT" in src  # single shared budget
+    assert "hard=E2E_SUBPROCESS_TIMEOUT" not in src  # no independent run_to_completion budget
+    assert "timeout=E2E_SUBPROCESS_TIMEOUT" not in src  # no independent checker budget
+    assert "E2E_SUBPROCESS_TIMEOUT" in src  # shared budget constant still referenced
