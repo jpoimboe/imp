@@ -21,6 +21,11 @@ E2E_POLL_TIMEOUT = float(os.environ.get("IMP_E2E_POLL_TIMEOUT", "60"))
 # render-bound poll a generous multiple so it never false-fires on scheduling lag;
 # the 240s per-test outer timeout stays the single backstop for a genuine no-paint.
 E2E_RENDER_POLL_TIMEOUT = E2E_POLL_TIMEOUT * 2
+# Flushing quest state and reaching exit after a SIGINT can exceed the base poll
+# under -n auto CPU/disk starvation; give that one process-exit wait a generous
+# multiple so it never false-fires before the 240s outer catches a genuine hang.
+# Distinct from E2E_RENDER_POLL_TIMEOUT (same value; pty repaint vs. process exit).
+E2E_EXIT_POLL_TIMEOUT = E2E_POLL_TIMEOUT * 2
 
 
 def _poll(predicate, timeout: float) -> bool:

@@ -12,6 +12,7 @@ from impty import TerminalSession
 from tests._live import _await_change_dir
 from tests.impty.e2e_support import (
     _MINIMAL_CONFIG,
+    E2E_EXIT_POLL_TIMEOUT,
     E2E_POLL_TIMEOUT,
     _git,
     _poll,
@@ -46,7 +47,7 @@ def test_midrun_sigint_pauses_with_exit_130_and_a_resume_hint(tmp_path: Path) ->
                 break
             s.wait_idle(idle=0.1, hard=min(0.5, remaining))
         s.send_signal(signal.SIGINT)
-        rc = s.run_to_completion(hard=E2E_POLL_TIMEOUT)
+        rc = s.run_to_completion(hard=E2E_EXIT_POLL_TIMEOUT)
 
         assert rc == 130                                   # interrupt → exit 130
         assert_screen(s, contains=("resume:", "imp resume"))  # resumable hint; rc==130 is pause

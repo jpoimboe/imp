@@ -450,6 +450,13 @@ def test_render_poll_timeout_is_knob_derived_double():
     assert E2E_RENDER_POLL_TIMEOUT == 120.0  # base default 60.0 doubled
 
 
+def test_exit_poll_timeout_is_knob_derived_double():
+    from tests.impty.e2e_support import E2E_EXIT_POLL_TIMEOUT, E2E_POLL_TIMEOUT
+    assert E2E_EXIT_POLL_TIMEOUT == E2E_POLL_TIMEOUT * 2
+    assert E2E_EXIT_POLL_TIMEOUT > E2E_POLL_TIMEOUT
+    assert E2E_EXIT_POLL_TIMEOUT == 120.0  # base default 60.0 doubled
+
+
 def test_e2e_poll_timeout_overridable_via_env():
     env = {**os.environ, "IMP_E2E_POLL_TIMEOUT": "90"}
     env["PYTHONPATH"] = (
@@ -522,3 +529,4 @@ def test_interrupt_e2e_routes_gate_budget_through_knob():
     assert "+ 60.0" not in src                  # monotonic gate deadline no longer bare
     assert "hard=60.0" not in src               # run_to_completion routed through knob
     assert "hard=min(0.5, remaining)" in src    # inner clamp unchanged
+    assert "hard=E2E_EXIT_POLL_TIMEOUT" in src  # post-SIGINT exit wait uses the exit budget
