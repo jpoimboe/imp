@@ -337,7 +337,8 @@ def test_bash_wraps_with_active_policy(tmp_path: Path, monkeypatch: pytest.Monke
     with pytest.raises(RuntimeError):
         _run_bash(ctx, {"command": "echo hi"})
     assert captured["argv"][0] == "bwrap"
-    assert captured["argv"][-3:] == ["sh", "-c", "echo hi"]
+    assert captured["argv"][-3:-1] == ["sh", "-c"]
+    assert captured["argv"][-1].endswith("; echo hi")
 
 
 def test_bash_bare_when_no_policy(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

@@ -44,17 +44,32 @@ def _policy(**over) -> SandboxPolicy:
 
 
 def test_inactive_policy_returns_bare_argv():
+    from imp.engine.sandbox import SANDBOX_ENTERED_MARKER
     argv = build_sandbox_argv("echo hi", cwd="/ctl/.imp/worktrees/abc",
                               policy=_policy(active=False), engine_env={})
     assert argv == ["sh", "-c", "echo hi"]
+    assert SANDBOX_ENTERED_MARKER not in argv[-1]
 
 
 def test_active_policy_wraps_with_bwrap():
     argv = build_sandbox_argv("echo hi", cwd="/ctl/.imp/worktrees/abc",
                               policy=_policy(), engine_env={})
     assert argv[0] == "bwrap"
-    assert argv[-3:] == ["sh", "-c", "echo hi"]
+    assert argv[-3:-1] == ["sh", "-c"]
+    assert argv[-1].endswith("; echo hi")          # sentinel-prefixed inner command
     assert argv[1:4] == ["--ro-bind", "/", "/"]   # ro-floor first
+
+
+def test_active_policy_emits_entry_sentinel_in_tail():
+    import shlex
+
+    from imp.engine.sandbox import SANDBOX_ENTERED_MARKER
+    argv = build_sandbox_argv("echo hi", cwd="/ctl/.imp/worktrees/abc",
+                              policy=_policy(), engine_env={})
+    assert argv[-3:-1] == ["sh", "-c"]
+    expected_tail = (
+        f"printf '%s\\n' {shlex.quote(SANDBOX_ENTERED_MARKER)} >&2; echo hi")
+    assert argv[-1] == expected_tail
 
 
 def test_worktree_and_git_are_rw_bound_at_real_path():
@@ -947,11 +962,11 @@ def test_overlay_home_wraps_bwrap_with_unshare_mount():
     assert ("mount -t overlay overlay -o "
             "lowerdir=/home/u,upperdir=/up/upper,workdir=/up/work "
             "/up/merged") in script
-    # Fail-loud: on mount failure the wrapper prints the sentinel + exits the
-    # reserved code WITHOUT running the command; on success it execs bwrap
-    # (exec, not a child bwrap, keeps pgid == pid so signals reach the tree).
+    # Fail-loud: on mount failure the wrapper exits nonzero BEFORE the exec,
+    # WITHOUT running the command (sentinel absence is the signal); on success it
+    # execs bwrap (exec, not a child bwrap, keeps pgid == pid so signals reach the tree).
     assert " && exec" not in script
-    assert "|| {" in script
+    assert "|| exit" in script
     assert "exec bwrap" in script
     # merged view bound onto the real home: source == merged, dest == home.
     assert "--bind /up/merged /home/u" in script
@@ -1025,26 +1040,21 @@ def test_overlay_setup_failed_keys_on_marker():
     assert overlay_setup_failed("") is False
 
 
-def test_overlay_wrapper_fails_loud_without_running_command():
-    from imp.engine.sandbox import (
-        OVERLAY_SETUP_FAILED_CODE,
-        OVERLAY_SETUP_FAILED_MARKER,
-    )
+def test_overlay_wrapper_omits_sentinel_on_mount_failure():
+    from imp.engine.sandbox import SANDBOX_ENTERED_MARKER
     hl = HomeLayer(home="/home/u", merged="/up/merged",
                    upper="/up/upper", work="/up/work")
     pol = _policy(home="/home/u", home_layer=hl)
     argv = build_sandbox_argv("echo hi", cwd="/wt", policy=pol, engine_env={})
+    assert argv[:6] == ["unshare", "--user", "--map-root-user", "--mount",
+                        "sh", "-c"]
     script = argv[6]
-    # On mount FAILURE: print the sentinel marker to stderr, exit the reserved
-    # code, and do NOT run the command (no `&&`-guarded exec that could still
-    # fall through to bwrap over an empty $HOME).
     assert " && exec" not in script
-    assert script.count("|| {") == 1
-    assert OVERLAY_SETUP_FAILED_MARKER in script
-    assert f"exit {OVERLAY_SETUP_FAILED_CODE}" in script
-    assert ">&2" in script
-    # On mount SUCCESS the command still runs via exec (not a child bwrap).
+    assert "|| exit" in script
     assert "exec bwrap" in script
+    assert ">&2" in script
+    assert SANDBOX_ENTERED_MARKER in script
+    assert script.index("exec bwrap") < script.index(SANDBOX_ENTERED_MARKER)
 
 
 def test_make_home_layer_overlay_builds_dirs_and_cleanup(tmp_path):

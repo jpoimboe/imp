@@ -274,18 +274,24 @@ def build_sandbox_argv(
     # 15. optional network isolation
     if not policy.network:
         argv += ["--unshare-net"]
-    # 16. the command
-    argv += ["sh", "-c", command]
+    # 16. the command, prefixed with the entry sentinel: the inner sh's first act
+    # emits the marker to stderr, so marker PRESENCE proves the inner command ran
+    # and ABSENCE proves the sandbox failed to enter it. printf runs in this outer
+    # sh, so it cannot trip a gate script's own set -e.
+    wrapped = (
+        f"printf '%s\\n' {shlex.quote(SANDBOX_ENTERED_MARKER)} >&2; {command}")
+    argv += ["sh", "-c", wrapped]
     hl = policy.home_layer
     if hl is not None and hl.is_overlay:
-        # Fail loud on mount failure: print the marker, exit the reserved code, skip the cmd.
+        # Fail loud on mount failure: exit nonzero BEFORE the exec, so the inner
+        # command (and its sentinel) never runs — sentinel ABSENCE is the sole
+        # signal, so no bespoke marker/code is needed.
         mount = (
             f"mount -t overlay overlay -o "
             f"lowerdir={shlex.quote(hl.home)},"
             f"upperdir={shlex.quote(hl.upper)},"
             f"workdir={shlex.quote(hl.work)} {shlex.quote(hl.merged)} "
-            f"|| {{ printf '%s\\n' {shlex.quote(OVERLAY_SETUP_FAILED_MARKER)} >&2; "
-            f"exit {OVERLAY_SETUP_FAILED_CODE}; }}; "
+            f"|| exit 1; "
             f"exec {shlex.join(argv)}"
         )
         return ["unshare", "--user", "--map-root-user", "--mount",
