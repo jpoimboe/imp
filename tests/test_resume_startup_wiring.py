@@ -135,4 +135,4 @@ async def test_inert_resume_derives_verb_and_passes_display_width(
     assert rc == 0
     assert captured["startup_verb"] == "writing plan"       # labeled step → its label
     assert captured["display_width"] is m._display_width     # item 7: inert now passes width
-    assert captured["preceded_by_blank"] is True
+    assert captured["preceded_by_blank"] is False
