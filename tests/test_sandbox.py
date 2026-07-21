@@ -574,7 +574,13 @@ def _fake_quest(tmp_path):
     return _types.SimpleNamespace(
         project_root=wt, control_root=control, id="abc",
         handle="abc-slug", title="Abc Title",
-        quest_dir=wt / ".imp" / "change")
+        quest_dir=control / ".imp" / "quests" / "abc")
+
+
+def test_fake_quest_home_roots_at_control_root(tmp_path):
+    quest = _fake_quest(tmp_path)
+    assert quest.quest_dir == quest.control_root / ".imp" / "quests" / "abc"
+    assert ".imp/worktrees" not in str(quest.quest_dir)
 
 
 def _fake_config(**over):
