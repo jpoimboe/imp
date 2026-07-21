@@ -1115,22 +1115,24 @@ def test_prose_then_subagent_header_separated_by_blank() -> None:
 def test_user_message_reverse_emphasis_ansi_color_on() -> None:
     """Under the `ansi` 16-color theme the scrolled-back user turn carries
     reverse-video emphasis (no truecolor band): a brand-orange `>` caret sits
-    OUTSIDE the bar, then \x1b[7m hugs the separating space + body and closes at
-    text end. Continuation lines drop the caret (blank column) but keep the bar."""
+    OUTSIDE the bar, then one separating space (also outside) precedes \x1b[7m,
+    which hugs only the body and closes at text end. Continuation lines drop the
+    caret (blank column) but keep the bar."""
     pal.set_theme("ansi")
     node = nv.UserMessageNode(text="line one\nline two", interactive=True)
     out = list(rt._render(node, depth=1, full=False, color=True, width=80))
     assert len(out) == 2
-    assert out[0] == "  \x1b[33m>\x1b[0m\x1b[7m line one\x1b[0m"
-    assert out[1] == "   \x1b[7m line two\x1b[0m"
+    assert out[0] == "  \x1b[33m>\x1b[0m \x1b[7mline one\x1b[0m"
+    assert out[1] == "    \x1b[7mline two\x1b[0m"
     assert "\x1b[48;2;" not in out[0]              # no truecolor band under ansi
 
 
 def test_user_message_caret_with_subtle_bg_in_truecolor_theme() -> None:
     """The reprinted (scrolled-back) user turn carries a subtle entered-input
-    background in a truecolor theme, opened AFTER the caret: the `>` sits outside
-    the band; the separating space + the text sit on it, and it closes at text end
-    (no full-width fill → clean copy/paste)."""
+    background in a truecolor theme, opened AFTER the caret and its separating
+    space: the `>` and the one separating space both sit outside the band; only
+    the text sits on it, and it closes at text end (no full-width fill → clean
+    copy/paste)."""
     pal.set_theme("dark")
     try:
         node = nv.UserMessageNode(text="hello", interactive=True)
@@ -1140,7 +1142,7 @@ def test_user_message_caret_with_subtle_bg_in_truecolor_theme() -> None:
     assert len(out) == 1
     caret = "\x1b[38;2;255;154;60m>\x1b[0m"   # truecolor brand-orange caret
     bg = "\x1b[48;2;67;56;40m"                 # warm amber band (#433828) after the caret
-    assert out[0] == caret + bg + " hello\x1b[0m"   # space + text on the bg, reset at end
+    assert out[0] == caret + " " + bg + "hello\x1b[0m"   # space unpainted, band hugs the text
 
 
 def test_user_message_multiline_continuation_carries_slate_no_caret() -> None:
@@ -1155,8 +1157,28 @@ def test_user_message_multiline_continuation_carries_slate_no_caret() -> None:
     assert len(out) == 2
     caret = "\x1b[38;2;255;154;60m>\x1b[0m"
     bg = "\x1b[48;2;67;56;40m"
-    assert out[0] == caret + bg + " one\x1b[0m"   # caret outside, band hugs the text
-    assert out[1] == " " + bg + " two\x1b[0m"     # blank caret column, band continues
+    assert out[0] == caret + " " + bg + "one\x1b[0m"   # caret + unpainted space, band at text
+    assert out[1] == "  " + bg + "two\x1b[0m"          # blank caret col + unpainted space
+
+
+def test_user_message_band_left_edge_hugs_text_both_lines() -> None:
+    """The truecolor band opens at the FIRST character of the text on both the
+    first line (after the `>` caret) and continuation lines (after the blank
+    caret column): the one separating space stays present but sits OUTSIDE the
+    band (unpainted), matching the already-tight right edge."""
+    pal.set_theme("dark")
+    try:
+        node = nv.UserMessageNode(text="hi\nyo", interactive=True)
+        out = list(rt._render(node, depth=0, full=False, color=True, width=80))
+    finally:
+        pal.set_theme("ansi")
+    assert len(out) == 2
+    caret = "\x1b[38;2;255;154;60m>\x1b[0m"
+    bg = "\x1b[48;2;67;56;40m"
+    assert out[0] == caret + " " + bg + "hi\x1b[0m"   # first line: caret + space, band at text
+    assert out[1] == "  " + bg + "yo\x1b[0m"          # continuation: blank caret + space
+    # the separating space is never painted (band never opens before a space)
+    assert bg + " " not in out[0] and bg + " " not in out[1]
 
 
 def test_user_message_no_color_plain_caret() -> None:
