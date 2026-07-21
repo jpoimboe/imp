@@ -18,6 +18,16 @@ from imp.engine.quest import Quest
 from imp.engine.state import State
 
 
+@pytest.fixture
+def _bare_sandbox(monkeypatch: pytest.MonkeyPatch) -> None:
+    # bwrap user namespaces flake under -n auto load, misrouted as gate results; pin bare.
+    import imp.engine.executor as ex
+    from imp.engine.sandbox import _inactive
+    monkeypatch.setattr(
+        ex, "_build_sandbox_policy",
+        lambda quest, config, log: _inactive(note="executor_test_bare"))
+
+
 def _persist_initial(invocation: AgentInvocation) -> None:
     """Mimic the real providers' fresh-entry persistence (claude_code.py: the
     empty-transcript branch appends initial_messages to transcript.jsonl AND
@@ -1839,7 +1849,9 @@ async def test_resume_keep_branch_passes_empty_initial_messages(
 
 @pytest.mark.anyio
 @pytest.mark.timeout(300)
-async def test_script_pause_emits_script_blocked_event(tmp_path: Path) -> None:
+async def test_script_pause_emits_script_blocked_event(
+    tmp_path: Path, _bare_sandbox: None,
+) -> None:
     """A script step that exits non-zero and matches a {else: true, pause: true}
     rule must journal a script_blocked event carrying the step name, exit code,
     and stderr text.  Previously the pause was bare (no reason) and all stderr
@@ -1960,7 +1972,7 @@ async def test_snapshot_copy_cleans_stale_tmp_dir(tmp_path: Path) -> None:
 @pytest.mark.timeout(240)
 @pytest.mark.anyio
 async def test_resume_runs_frozen_snapshot_after_live_workflow_deleted(
-    tmp_path: Path,
+    tmp_path: Path, _bare_sandbox: None,
 ) -> None:
     """A resume reuses the existing snapshot and never re-copies: even after the
     entire live workflow dir (script + step) is deleted mid-run, the resume still
@@ -3461,7 +3473,9 @@ async def test_backward_gate_bounce_emits_step_transition(tmp_path: Path) -> Non
 
 @pytest.mark.timeout(240)
 @pytest.mark.anyio
-async def test_forward_only_run_emits_no_step_transition(tmp_path: Path) -> None:
+async def test_forward_only_run_emits_no_step_transition(
+    tmp_path: Path, _bare_sandbox: None,
+) -> None:
     """A run with only forward Continue/goto edges emits no `step_transition`."""
     import subprocess
 
