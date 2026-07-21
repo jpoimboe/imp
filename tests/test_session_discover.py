@@ -1,33 +1,28 @@
 from __future__ import annotations
 
-import os
-import tempfile
 from pathlib import Path
 
-from imp.engine.quest import Quest
+import pytest
+
 from imp.remote.session.discover import session_socket_path
-from tests.conftest import _seed_control
 
 
-def test_session_socket_path_is_per_quest_tmp_subdir() -> None:
-    path = session_socket_path(Path("/tmp/proj"), "2026-06-15-abc")
-    expected = (Path(tempfile.gettempdir()) / f"imp-{os.getuid()}"
-                / "2026-06-15-abc" / "session.sock")
-    assert path == expected
+def test_session_socket_path_is_under_quest_home() -> None:
+    path = session_socket_path(Path("/ctl"), "2026-06-15-abc")
+    assert path == Path("/ctl/.imp/quests/2026-06-15-abc/session.sock")
 
 
 def test_session_socket_path_differs_per_quest() -> None:
-    root = Path("/tmp/proj")
+    root = Path("/ctl")
     assert session_socket_path(root, "c1") != session_socket_path(root, "c2")
 
 
-def test_session_socket_path_is_control_root_independent() -> None:
-    a = session_socket_path(Path("/tmp/a"), "c1")
-    b = session_socket_path(Path("/tmp/b"), "c1")
-    assert a == b
+def test_session_socket_path_depends_on_control_root() -> None:
+    a = session_socket_path(Path("/ctl/a"), "c1")
+    b = session_socket_path(Path("/ctl/b"), "c1")
+    assert a != b
 
 
-def test_session_socket_path_equals_quest_tmp_dir_join(tmp_path: Path) -> None:
-    _seed_control(tmp_path)
-    ch = Quest.create(tmp_path, title="T", quest_id="sockq1", base_branch="main")
-    assert session_socket_path(ch.control_root, ch.id) == ch.tmp_dir / "session.sock"
+def test_session_socket_path_over_length_limit_raises() -> None:
+    with pytest.raises(ValueError, match="AF_UNIX"):
+        session_socket_path(Path("/some/control/root"), "x" * 200)

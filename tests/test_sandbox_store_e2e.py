@@ -201,7 +201,11 @@ async def _serve_and_run(
     policy = resolve_policy(
         worktree=control, control_root=control, quest_id=CUR, cfg=cfg,
         engine_env_result=engine_env, environ=dict(os.environ),
-        available=True, disposable_tree=True)
+        available=True, disposable_tree=True,
+        quest_dir=control / ".imp" / "quests" / CUR)
+    # Mirror executor._build_sandbox_policy: create quest_var_tmp_dir before bwrap.
+    if policy.quest_var_tmp_dir:
+        Path(policy.quest_var_tmp_dir).mkdir(parents=True, exist_ok=True, mode=0o700)
     # Mirror the real spawn path (bash.py / gates.py): existence-gate the frozen
     # masks before handing them to bwrap, so a mask over a path absent on this host
     # (e.g. /run/user/$UID when there is no live user session) doesn't die in sandbox

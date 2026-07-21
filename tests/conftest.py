@@ -58,6 +58,20 @@ def pytest_addoption(parser: pytest.Parser) -> None:
     )
 
 
+def pytest_configure(config: pytest.Config) -> None:
+    # Socket paths now live under control_root (pytest's tmp_path). The default
+    # basetemp (<gettempdir>/pytest-of-<user>/pytest-<N>/popen-gw<k>/...) is long
+    # enough that <tmp_path>/.imp/quests/<id>/session.sock exceeds the 108-byte
+    # AF_UNIX limit under -n auto. Point the whole run at one very short unique
+    # basetemp (`<gettempdir>/ip<6hex>`) so `<tmp_path>/.imp/quests/<id>/session.sock`
+    # stays well under 107 bytes even with a 30-char test name + a ~20-char quest id
+    # under `popen-gw<k>`. Skip when the user set --basetemp explicitly,
+    # and on xdist workers (they inherit the controller's basetemp via xdist).
+    if not config.option.basetemp and "PYTEST_XDIST_WORKER" not in os.environ:
+        config.option.basetemp = os.path.join(
+            tempfile.gettempdir(), f"ip{uuid.uuid4().hex[:6]}")
+
+
 def pytest_collection_modifyitems(
     config: pytest.Config, items: list[pytest.Item],
 ) -> None:
@@ -191,16 +205,10 @@ def _isolate_quest_tmp_root(
 ) -> Generator[None, None, None]:
     """Give every test its own short, unique per-quest tmp/socket root.
 
-    session_socket_path now derives from quest_id ALONE
-    (<tmpdir>/imp-<uid>/<quest_id>/session.sock); the old path hashed the unique
-    per-test control_root, which is what kept tests reusing hardcoded ids
-    ("feat", "live-one", ...) from sharing one socket. Redirect the tmp root
-    in-process (tempfile.tempdir) and for spawned session daemons (TMPDIR) to a
-    short unique dir under the real system temp — short enough to keep the
-    AF_UNIX socket within the 108-byte limit — restoring that per-test
-    uniqueness. Under Part 1's identity-/tmp sandbox bind the redirected root is
-    still under /tmp, so an in-sandbox client reaching the host socket path
-    (injected via IMP_SESSION_SOCKET) still resolves it.
+    The session socket now lives under the quest home
+    (<control_root>/.imp/quests/<id>/session.sock), independent of this tmp root;
+    the fixture keeps redirecting tempfile.tempdir + TMPDIR so Quest.tmp_dir and
+    spawned session daemons land in a short unique per-test dir.
 
     Realize pytest's session basetemp FIRST: getbasetemp() derives (and caches)
     the basetemp from tempfile.gettempdir(), so patching tempfile.tempdir before

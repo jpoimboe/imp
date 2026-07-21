@@ -1077,8 +1077,8 @@ def test_run_script_no_shim_dir_leaves_path_untouched(tmp_path) -> None:
 
 def test_route_script_output_tempfile_created_under_quest_tmp_dir(tmp_path, monkeypatch) -> None:
     """The declared-output tempfile ($IMP_OUTPUT) is created under quest.tmp_dir,
-    not the ambient system temp — so its host path is under the per-quest dir (and
-    thus /tmp/<basename> in-sandbox through the bind)."""
+    not the ambient system temp — and carries that same real host path into the
+    sandbox (no rewriting)."""
     import tempfile as _tempfile
     import types
 
