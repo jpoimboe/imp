@@ -26,9 +26,7 @@ def _policy(**over) -> SandboxPolicy:
         active=True,
         worktree="/ctl/.imp/worktrees/abc",
         git_common_dir="/ctl/.git",
-        git_ro_remask=("/ctl/.git/hooks", "/ctl/.git/config",
-                       "/ctl/.git/worktrees/abc/config.worktree",
-                       "/ctl/.git/worktrees/sib/config.worktree"),
+        git_ro_remask=("/ctl/.git/hooks", "/ctl/.git/config"),
         writable_caches=("/home/u/.cache", "/home/u/.cargo"),
         extra_readable=(),
         extra_writable=(),
@@ -64,18 +62,17 @@ def test_worktree_and_git_are_rw_bound_at_real_path():
     assert "--bind /ctl/.git /ctl/.git" in argv
 
 
-def test_git_escape_vectors_are_remasked_ro_including_siblings():
+def test_git_escape_vectors_are_remasked_ro():
     argv = " ".join(build_sandbox_argv("x", cwd="/wt", policy=_policy(), engine_env={}))
     assert "--ro-bind /ctl/.git/hooks /ctl/.git/hooks" in argv
     assert "--ro-bind /ctl/.git/config /ctl/.git/config" in argv
-    assert "--ro-bind /ctl/.git/worktrees/sib/config.worktree" in argv  # sibling (M1)
 
 
 def test_prune_missing_masks_drops_vanished_sibling_paths(tmp_path):
-    # A long-running quest outlives a sibling: the sibling's steps/ (secret_dirs),
-    # events.jsonl (secret_files), and config.worktree (git_ro_remask) are enumerated
-    # at run start, then vanish when the sibling finishes. bwrap would fail creating
-    # each over the ro floor; prune drops them so later spawns keep running.
+    # A long-running quest outlives a sibling: existence-gated paths captured at run
+    # start (steps/ in secret_dirs, events.jsonl in secret_files, a stale path in
+    # git_ro_remask) can vanish mid-run. bwrap would fail creating each over the ro
+    # floor; prune drops them so later spawns keep running.
     live_steps = tmp_path / "live" / "steps"
     live_steps.mkdir(parents=True)
     gone_steps = tmp_path / "gone" / "steps"          # never created
@@ -242,15 +239,86 @@ def test_resolve_policy_active_when_enabled_and_available(tmp_path):
     assert ("TMPDIR", "/tmp") in pol.setenv
 
 
-def test_resolve_policy_binds_sibling_config_worktree(tmp_path):
-    control, wt = _layout(tmp_path)
+def test_resolve_policy_masks_worktrees_not_sibling_config(tmp_path):
+    control, wt = _layout(tmp_path)               # wt basename == "abc"
     sib = control / ".git" / "worktrees" / "sib"
     sib.mkdir(parents=True)
     (sib / "config.worktree").write_text("")
     pol = resolve_policy(worktree=wt, control_root=control, quest_id="abc",
-                         cfg=SandboxConfig(), engine_env_result={},
-                         environ={}, available=True)
-    assert str(sib / "config.worktree") in pol.git_ro_remask
+                         cfg=SandboxConfig(), engine_env_result={}, environ={},
+                         available=True,
+                         quest_dir=control / ".imp" / "quests" / "abc")
+    # The sibling config.worktree is NO LONGER enumerated into git_ro_remask...
+    assert str(sib / "config.worktree") not in pol.git_ro_remask
+    # ...it is hidden wholesale by the .git/worktrees tmpfs mask; the sibling is
+    # unreadable while self's admin dir stays writable.
+    assert pol.git_worktrees_mask == str(control / ".git" / "worktrees")
+    assert pol.allows_read(sib / "config.worktree") is False
+    assert pol.allows_write(control / ".git" / "worktrees" / "abc" / "HEAD") is True
+
+
+def test_resolve_policy_masks_worktrees_and_reexposes_self(tmp_path):
+    control, wt = _layout(tmp_path)               # wt basename == "abc"
+    pol = resolve_policy(worktree=wt, control_root=control, quest_id="abc",
+                         cfg=SandboxConfig(), engine_env_result={}, environ={},
+                         available=True,
+                         quest_dir=control / ".imp" / "quests" / "abc")
+    git = control / ".git"
+    assert pol.git_worktrees_mask == str(git / "worktrees")
+    assert pol.git_worktree_self == str(git / "worktrees" / "abc")
+    assert pol.allows_write(git / "worktrees" / "abc" / "index") is True
+    assert pol.allows_read(git / "worktrees" / "other" / "gitdir") is False
+
+
+def test_resolve_policy_draft_masks_worktrees_without_self(tmp_path):
+    # Draft concierge: worktree IS the control root, quest_dir=None. The mask is
+    # emitted (prune vector closed) but there is NO self re-expose — the main
+    # checkout is never registered under .git/worktrees, and a self re-expose of a
+    # nonexistent path would fail bwrap setup.
+    control, _wt = _layout(tmp_path)
+    pol = resolve_policy(worktree=control, control_root=control, quest_id="abc",
+                         cfg=SandboxConfig(), engine_env_result={}, environ={},
+                         available=True, quest_dir=None)
+    git = control / ".git"
+    assert pol.git_worktrees_mask == str(git / "worktrees")
+    assert pol.git_worktree_self == ""
+    assert pol.allows_read(git / "worktrees" / "abc" / "HEAD") is False
+
+
+def test_resolve_policy_unmaterialized_draft_masks_worktrees_without_self(tmp_path):
+    # An un-materialized draft quest has a REAL quest_dir but its worktree IS the
+    # control root (no registered worktree under .git/worktrees yet — the executor
+    # resolves this policy during the brainstorm phase, before go-live). Gating the
+    # self re-expose on `quest_dir is not None` ALONE would emit a nonexistent
+    # .git/worktrees/<root-basename> rw bind that fails bwrap setup; the added
+    # `worktree != control_root` clause leaves it empty here.
+    control, _wt = _layout(tmp_path)
+    pol = resolve_policy(worktree=control, control_root=control, quest_id="abc",
+                         cfg=SandboxConfig(), engine_env_result={}, environ={},
+                         available=True,
+                         quest_dir=control / ".imp" / "quests" / "abc")
+    git = control / ".git"
+    assert pol.git_worktrees_mask == str(git / "worktrees")
+    assert pol.git_worktree_self == ""
+    assert pol.allows_read(git / "worktrees" / "abc" / "HEAD") is False
+
+
+def test_prune_missing_masks_keeps_worktrees_mask_even_if_absent(tmp_path):
+    # The mask + self re-expose are retained unconditionally by prune_missing_masks
+    # (like control_imp / git_ref_reexpose), NOT existence-gated like git_ro_remask,
+    # so the mask cannot silently drop mid-run. Contrast a vanished git_ro_remask
+    # entry, which IS dropped.
+    gone = tmp_path / "nope" / ".git" / "worktrees"
+    gone_ro = tmp_path / "gone.worktree"
+    p = _policy(
+        git_worktrees_mask=str(gone),
+        git_worktree_self=str(gone / "self"),
+        git_ro_remask=(str(gone_ro),),
+    )
+    pruned = prune_missing_masks(p)
+    assert pruned.git_ro_remask == ()
+    assert pruned.git_worktrees_mask == str(gone)
+    assert pruned.git_worktree_self == str(gone / "self")
 
 
 def test_resolve_policy_only_existing_caches_and_secrets(tmp_path):

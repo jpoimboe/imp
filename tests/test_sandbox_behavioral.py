@@ -522,26 +522,28 @@ def test_git_commit_works_but_escape_vectors_blocked() -> None:
       - git commit INSIDE the sandbox succeeds and persists to the host (.git rw bind).
       - Writing .git/hooks/post-commit is BLOCKED (.git/hooks is remasked RO).
       - git config core.hooksPath /tmp/evil is BLOCKED (.git/config is remasked RO).
-      - git config --worktree core.hooksPath /tmp/evil is BLOCKED (config.worktree remasked RO).
-      - Writing a SIBLING worktree's config.worktree is BLOCKED (sibling remasked by
-        resolve_policy).
+      - git config --worktree core.hooksPath /tmp/evil is BLOCKED (.git/config remasked RO).
+      - Writing a SIBLING worktree's config.worktree is BLOCKED (the whole
+        .git/worktrees tree is masked; only self is re-exposed).
       - Writing .git/info/attributes succeeds but the filter DRIVER config write is BLOCKED.
     """
     control = Path(tempfile.mkdtemp(prefix="imp-test-gitesc-"))
     try:
         # --- repo setup ---
         _init_repo(control)
-        # Create a sibling linked worktree BEFORE resolving policy so the sibling's
-        # config.worktree appears in git_ro_remask (spec M1-r5).
+        # Create a sibling linked worktree BEFORE resolving policy. Its admin dir
+        # (and any config.worktree under it) is hidden by the .git/worktrees tmpfs
+        # mask; only self (esc1) is re-exposed.
         wt.create_worktree(control, "sib", "main")
-        # git only creates config.worktree when 'git config --worktree' writes to it.
-        # We create it explicitly so resolve_policy includes it in git_ro_remask
-        # (the policy scans for existing config.worktree files).
+        # Create the sibling's config.worktree explicitly so vector 5 has a concrete
+        # sibling path to attempt a write against (the mask makes it unreachable).
         sib_config_wt = control / ".git" / "worktrees" / "sib" / "config.worktree"
         sib_config_wt.write_text("[core]\n\textensions = worktreeConfig\n")
         wt_path = wt.create_worktree(control, "esc1", "main")
         # control/.imp/tmp/esc1 is created by create_worktree (B4).
 
+        quest_dir = control / ".imp" / "quests" / "esc1"
+        quest_dir.mkdir(parents=True)
         pol = resolve_policy(
             worktree=wt_path,
             control_root=control,
@@ -553,6 +555,7 @@ def test_git_commit_works_but_escape_vectors_blocked() -> None:
             engine_env_result={"IMP_PROJECT_ROOT": str(wt_path)},
             environ=os.environ,
             available=True,
+            quest_dir=quest_dir,
         )
         ctx = ToolContext(
             project_root=wt_path,
@@ -613,13 +616,12 @@ def test_git_commit_works_but_escape_vectors_blocked() -> None:
 
         # ------------------------------------------------------------------
         # 4. git config --worktree core.hooksPath /tmp/evil FAILS
-        #    esc1's OWN config.worktree does not exist at resolve-time (git only
-        #    creates it on first --worktree write), so it is not in git_ro_remask.
-        #    The escape is still blocked transitively: `git config --worktree`
-        #    requires extensions.worktreeConfig in .git/config first, and .git/config
-        #    is remasked RO — so git refuses (rc=128, "worktreeConfig not enabled")
-        #    and never reaches a writable hooksPath. (Any EXISTING config.worktree,
-        #    incl. siblings, IS remasked RO — see vector 5.)
+        #    The escape is blocked transitively: `git config --worktree` requires
+        #    extensions.worktreeConfig in .git/config first, and .git/config is
+        #    remasked RO — so git refuses (rc=128, "worktreeConfig not enabled")
+        #    and never reaches a writable hooksPath. self's own config.worktree is
+        #    now writable (under the self re-expose) but this ro-mask still blocks it;
+        #    sibling config.worktree files are unreachable behind the tmpfs (vector 5).
         # ------------------------------------------------------------------
         r4 = _bash(
             ctx,
@@ -631,8 +633,8 @@ def test_git_commit_works_but_escape_vectors_blocked() -> None:
 
         # ------------------------------------------------------------------
         # 5. Writing a SIBLING worktrees/sib/config.worktree FAILS
-        #    resolve_policy scans .git/worktrees/* and adds every existing
-        #    config.worktree (including siblings) to git_ro_remask (spec M1-r5).
+        #    .git/worktrees is masked by a tmpfs and only self (esc1) is
+        #    re-exposed, so the sibling path is not present inside the sandbox.
         # ------------------------------------------------------------------
         sib_config = control / ".git" / "worktrees" / "sib" / "config.worktree"
         assert sib_config.exists(), (
@@ -763,13 +765,17 @@ def _refprot_repo(prefix: str) -> tuple[Path, Path]:
 def _refprot_ctx(control: Path, worktree: Path) -> tuple[ToolContext, SandboxPolicy]:
     """Resolve the REAL policy for `worktree` under `control` and wrap it in a
     ToolContext the `bash` tool can drive. worktree != control → the git-ref
-    guard is active (Part 1). Used for the change worktree and, with a different
-    `worktree`, for the spike worktree."""
+    guard is active (Part 1); a materialized quest_dir makes the .git/worktrees
+    self re-expose emit so the linked worktree's own admin dir stays writable.
+    Used for the change worktree and, with a different `worktree`, for the spike
+    worktree."""
+    quest_dir = control / ".imp" / "quests" / "esc1"
+    quest_dir.mkdir(parents=True, exist_ok=True)
     pol = resolve_policy(
         worktree=worktree, control_root=control, quest_id="esc1",
         cfg=SandboxConfig(home=control / "home", uid=os.getuid()),
         engine_env_result={"IMP_PROJECT_ROOT": str(worktree)},
-        environ=os.environ, available=True,
+        environ=os.environ, available=True, quest_dir=quest_dir,
     )
     ctx = ToolContext(
         project_root=worktree, events_path=worktree / "events.jsonl")

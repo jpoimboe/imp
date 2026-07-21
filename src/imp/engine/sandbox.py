@@ -53,7 +53,7 @@ class SandboxPolicy:
     active: bool                              # True → wrap with bwrap; False → bare sh -c
     worktree: str                             # rw bind at REAL path
     git_common_dir: str                       # <control>/.git rw bind
-    git_ro_remask: tuple[str, ...]            # .git/hooks, .git/config, every config.worktree (ro)
+    git_ro_remask: tuple[str, ...]  # .git: hooks, config, refs/heads, refs/stash, index (ro)
     writable_caches: tuple[str, ...]          # rw toolchain cache dirs (existing only)
     extra_readable: tuple[str, ...]           # config extra_readable (ro)
     extra_writable: tuple[str, ...]           # config extra_writable (rw)
@@ -283,8 +283,9 @@ def prune_missing_masks(policy: SandboxPolicy) -> SandboxPolicy:
     allowlist, secret_dirs/secret_files name only self-owned never-vanishing paths —
     the current quest's own steps/ + events.jsonl, the home secret dirs/files, and
     /run/user/$UID — so the prune over those two sets is effectively a no-op. Its
-    remaining job is git_ro_remask: a long-running quest outlives its siblings, and
-    when one finishes its linked worktree's config.worktree disappears from disk;
+    remaining job is git_ro_remask: its existence-gated refs/index masks
+    (refs/heads, refs/stash, index) can vanish mid-run — e.g. a branch or the
+    stash ref is deleted after policy creation;
     bwrap must still bind each ro path over the read-only floor, so a spawn carrying
     a vanished path dies in sandbox SETUP ("Read-only file system") before the
     command runs. A mask over a gone path protects nothing, so existence-gating at
@@ -481,11 +482,6 @@ def resolve_policy(
 
     git = control_root / ".git"
     remask = [str(git / "hooks"), str(git / "config")]
-    # Every existing worktrees/*/config.worktree — incl. siblings (M1-r5).
-    wt_dir = git / "worktrees"
-    if wt_dir.is_dir():
-        remask += [str(p / "config.worktree") for p in sorted(wt_dir.iterdir())
-                   if (p / "config.worktree").exists()]
 
     # Git-ref foot-gun guard: RO-mask the crown-jewel shared paths (all of
     # refs/heads, refs/stash, the main index) via the existing git_ro_remask
@@ -558,6 +554,10 @@ def resolve_policy(
         control_imp=str(control_root / ".imp"),
         git_ro_remask=tuple(remask),
         git_ref_reexpose=git_ref_reexpose,
+        git_worktrees_mask=str(git / "worktrees"),
+        git_worktree_self=(
+            str(git / "worktrees" / Path(worktree).name)
+            if quest_dir is not None and worktree != control_root else ""),
         disposable_tree=disposable_tree,
         home=str(home),
         readonly_overlays=readonly_overlays,
