@@ -7,9 +7,9 @@ from pathlib import Path
 
 from imp.cli.store import LocalStore, SearchZones, make_store
 from imp.engine import archive, worktree
-from imp.engine.quest import Quest
+from imp.engine.quest import LAYOUT_VERSION, Quest
 from imp.engine.state import State
-from tests.conftest import _seed_control
+from tests.conftest import _seed_control, held_lock
 
 
 def _append_event(quest: Quest, event: dict) -> None:
@@ -300,3 +300,45 @@ def test_scan_homes_reports_lock_live(tmp_path: Path) -> None:
     homes = {h.quest_id: h for h in LocalStore(tmp_path).scan_homes()}
     assert homes["liveq"].lock_live is True
     assert homes["deadq"].lock_live is False
+
+
+def _seed_v11_store(control: Path, cid: str) -> Quest:
+    q = Quest.create(control, title="T", quest_id=cid, base_branch="main")
+    (q.state_dir / "state.json").write_text(json.dumps({
+        "id": cid, "step": "code", "step_attempt": 0, "status": "paused",
+        "resume_pending": "code", "resume_mode": "continue",
+        "vars": {}, "loop_counts": {}, "current_step": None, "retry_feedback": None,
+    }, indent=2, sort_keys=True))
+    meta_path = q.quest_dir / "quest.json"
+    meta = json.loads(meta_path.read_text())
+    meta["layout_version"] = 11
+    meta_path.write_text(json.dumps(meta, indent=2, sort_keys=True))
+    return q
+
+
+def _digest_version(control: Path, cid: str) -> int:
+    return int(json.loads((_quest_dir(control, cid) / "quest.json").read_text())["layout_version"])
+
+
+def _quest_dir(control: Path, cid: str) -> Path:
+    return control / ".imp" / "quests" / cid
+
+
+def test_scan_homes_migrates_idle_stale_home(tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+    _seed_v11_store(tmp_path, "idles")
+    homes = make_store(tmp_path).scan_homes()
+    digest = next(h for h in homes if h.quest_id == "idles")
+    assert digest.meta["layout_version"] == LAYOUT_VERSION
+    assert _digest_version(tmp_path, "idles") == LAYOUT_VERSION
+
+
+def test_scan_homes_skips_migration_under_held_lock(tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+    q = _seed_v11_store(tmp_path, "lives")
+    with held_lock(q.quest_dir / "lock"):
+        homes = make_store(tmp_path).scan_homes()
+        digest = next(h for h in homes if h.quest_id == "lives")
+        assert digest.meta["layout_version"] == 11
+        assert digest.lock_live is True
+        assert _digest_version(tmp_path, "lives") == 11

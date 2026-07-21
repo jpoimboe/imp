@@ -117,7 +117,7 @@ class LocalStore:
         )
         from imp.cli.render_helpers import conversation_prose
         from imp.engine.quest import LAYOUT_VERSION, migrate
-        from imp.engine.state import lock_is_live
+        from imp.engine.state import ProjectLock, lock_is_live
 
         out: list[HomeDigest] = []
         for quest_id in _list_quest_homes(self.control_root):
@@ -129,11 +129,12 @@ class LocalStore:
                 continue
             if meta.get("layout_version", 0) != LAYOUT_VERSION:
                 try:
-                    migrate(meta.get("layout_version", 0), LAYOUT_VERSION, cdir)
+                    with ProjectLock(cdir / "lock").acquire(timeout=0.0):
+                        migrate(meta.get("layout_version", 0), LAYOUT_VERSION, cdir)
                     quest_json = (cdir / "quest.json").read_bytes()
                     meta = json.loads(quest_json)
                 except Exception:
-                    pass  # fall back to the already-read raw bytes for this home
+                    pass  # LockHeld (live) or migration error: keep raw quest.json bytes
             try:
                 state_json: bytes | None = (cdir / "state" / "state.json").read_bytes()
             except FileNotFoundError:
