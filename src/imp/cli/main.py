@@ -1665,15 +1665,16 @@ def _exit_ambiguous(token: str, candidates: list[str], control: Path) -> NoRetur
     now = datetime.now(UTC)
     name_w = quest_row.name_budget()
     print(quest_row.header_line(color=color, name_width=name_w), file=sys.stderr)
+    store = make_store(control)
     for cid in sorted(candidates):
-        row = _row_for_id(control, cid)
-        if row is None:
+        card = store.quest_card(cid)
+        if card is None:
             print(f"  {cid}", file=sys.stderr)
             continue
         print(quest_row.format_quest_line(
-            quest_id=row[0], title=row[4], status=row[1], step=row[2],
-            step_label=row[6], last_iso=row[3], now=now, color=color,
-            name_width=name_w), file=sys.stderr)
+            quest_id=card.quest_id, title=card.title, status=card.status,
+            step=card.step, step_label=card.step_label, last_iso=card.last,
+            now=now, color=color, name_width=name_w), file=sys.stderr)
     raise SystemExit(2)
 
 
