@@ -15,7 +15,11 @@ from imp.cli.terminal_title import TerminalTitle
 from imp.engine.executor import RunResult
 from imp.engine.quest import Quest
 from imp.engine.state import State
-from imp.remote.session.attach import DaemonStartupError, build_session_attach
+from imp.remote.session.attach import (
+    LAYOUT_MISMATCH_EXIT,
+    DaemonStartupError,
+    build_session_attach,
+)
 from imp.remote.session.protocol import SkillRequest
 
 
@@ -83,6 +87,9 @@ async def run_session_client(
             title.reset()
         tg.cancel_scope.cancel()
     if startup_failed and infer_session_result(quest) is not RunResult.COMPLETED:
+        if startup_error is not None and startup_error.exit_code == LAYOUT_MISMATCH_EXIT:
+            print(startup_error.stderr_tail, file=sys.stderr)
+            return 2
         from imp.cli.main import _emit_startup_failed
         _emit_startup_failed(quest, startup_error)
         return 3

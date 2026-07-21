@@ -945,3 +945,39 @@ def test_run_session_client_leave_mode_is_required() -> None:
     import inspect
     p = inspect.signature(run_session_client).parameters["leave_mode"]
     assert p.default is inspect.Parameter.empty
+
+
+@pytest.mark.anyio
+async def test_daemon_layout_downgrade_surfaces_message_directly(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    import imp.cli.session_run as session_run
+    from imp.remote.session.attach import LAYOUT_MISMATCH_EXIT, DaemonStartupError
+
+    quest = _make_quest(tmp_path, "stale")
+    (tmp_path / ".imp" / "worktrees" / quest.id).mkdir(parents=True)
+    State(id=quest.id, step="plan", step_attempt=0, status="paused").save(
+        quest.state_dir)
+
+    stderr_path = quest.quest_dir / "daemon.stderr"
+    downgrade_msg = (
+        "imp: stale's data is at layout v13, newer than this imp (v12) — "
+        "this install is older than the data that wrote it. "
+        "Update imp to v13 or newer to run this quest.")
+
+    async def _boom(**_kwargs: Any) -> None:
+        raise DaemonStartupError(
+            quest.id, LAYOUT_MISMATCH_EXIT, stderr_path, downgrade_msg)
+
+    monkeypatch.setattr(session_run, "run_terminal_client", _boom)
+
+    coord = InterruptCoordinator()
+    rc = await session_run.run_session_client(
+        quest, driver=_NullDriver(), coord=coord, solicit=lambda _p: _never(),
+        leave_mode="new")
+
+    assert rc == 2                                       # clean user error, not the crash rc 3
+    captured = capsys.readouterr()
+    assert "Update imp to v13 or newer" in captured.err  # message surfaced directly
+    assert "startup failed" not in captured.out          # NOT the generic crash block
