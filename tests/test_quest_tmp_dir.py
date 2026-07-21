@@ -65,6 +65,17 @@ def test_quest_scratch_root_prefers_imp_quest_tmp_env(
     assert quest_scratch_root() == Path(tempfile.gettempdir())
 
 
+def test_quest_var_tmp_root_prefers_imp_quest_var_tmp_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from imp.engine.env import quest_var_tmp_root
+
+    monkeypatch.setenv("IMP_QUEST_VAR_TMP", "/some/var/tmp")
+    assert quest_var_tmp_root() == Path("/some/var/tmp")
+    monkeypatch.delenv("IMP_QUEST_VAR_TMP", raising=False)
+    assert quest_var_tmp_root() == Path("/var/tmp")
+
+
 def test_spawn_session_daemon_exports_quest_tmp_without_poisoning_tmpdir(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:

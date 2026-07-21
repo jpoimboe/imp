@@ -122,6 +122,16 @@ def quest_scratch_root() -> Path:
     return Path(override) if override else Path(tempfile.gettempdir())
 
 
+QUEST_VAR_TMP_ENV = "IMP_QUEST_VAR_TMP"
+
+
+def quest_var_tmp_root() -> Path:
+    """Overlay-capable scratch base from IMP_QUEST_VAR_TMP (else /var/tmp); must stay on
+    real disk since overlayfs refuses a tmpfs upperdir."""
+    override = os.environ.get(QUEST_VAR_TMP_ENV)
+    return Path(override) if override else Path("/var/tmp")
+
+
 def engine_env(
     *, project_root: Path, quest_id: str, quest_title: str,
     quest_dir: Path | None = None,
