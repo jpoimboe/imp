@@ -6,24 +6,26 @@ from imp.engine.errors import LayoutMismatch, LoadError
 
 
 def test_layout_mismatch_subclasses_loaderror() -> None:
-    exc = LayoutMismatch(stored=0, engine=1, imp_commit="cafef00d",
+    exc = LayoutMismatch(stored=13, engine=12, imp_commit="cafef00d",
                          quest_dir=Path("/ctl/.imp/quests/abc"))
     assert isinstance(exc, LoadError)
 
 
-def test_message_carries_versions_commit_dir_and_recipe() -> None:
-    exc = LayoutMismatch(stored=0, engine=3, imp_commit="cafef00d",
+def test_message_names_quest_versions_and_update_advice() -> None:
+    exc = LayoutMismatch(stored=13, engine=12, imp_commit="cafef00d",
                          quest_dir=Path("/ctl/.imp/quests/abc"))
     msg = str(exc)
-    assert "0" in msg and "3" in msg                       # stored + engine versions
-    assert "cafef00d" in msg                               # imp_commit breadcrumb
-    assert "/ctl/.imp/quests/abc" in msg                  # quest_dir
-    assert "abandon" in msg                                # recovery recipe
-    assert "imp log" in msg
-    assert not msg.startswith("imp:")                      # caller adds the imp: prefix
+    assert "abc" in msg                          # quest id (quest_dir.name), not the full path
+    assert "/ctl/.imp/quests/abc" not in msg     # only quest_dir.name, not the full path
+    assert "v13" in msg and "v12" in msg         # stored + engine versions
+    assert "Update imp to v13 or newer" in msg   # advice points at updating imp
+    assert "newer than this imp" in msg
+    assert not msg.startswith("imp:")            # caller adds the imp: prefix
 
 
-def test_unknown_commit_renders_placeholder_not_empty() -> None:
-    msg = str(LayoutMismatch(stored=0, engine=1, imp_commit="",
+def test_message_omits_internal_breadcrumbs() -> None:
+    """The corrected wording drops the old imp_commit / recover-recipe noise."""
+    msg = str(LayoutMismatch(stored=13, engine=12, imp_commit="cafef00d",
                              quest_dir=Path("/ctl/.imp/quests/abc")))
-    assert "(unknown)" in msg
+    assert "cafef00d" not in msg
+    assert "refusing to resume" not in msg

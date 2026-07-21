@@ -3,13 +3,16 @@
 from __future__ import annotations
 
 import json
+import multiprocessing as mp
 import os
 import shutil
 import subprocess
 import tempfile
 import textwrap
+import time
 import uuid
 from collections.abc import Generator
+from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
@@ -414,3 +417,36 @@ def provider_registry():
 
     yield register
     resolve.reset_providers_for_tests()
+
+
+def _spin_hold_lock(lock_path: str, release_flag: str, ready_flag: str) -> None:
+    from imp.engine.state import ProjectLock
+    with ProjectLock(Path(lock_path)).acquire():
+        Path(ready_flag).touch()
+        while not Path(release_flag).exists():
+            time.sleep(0.05)
+
+
+@contextmanager
+def held_lock(lock_path: Path) -> Generator[None, None, None]:
+    """Spawn a subprocess holding ProjectLock(lock_path) for the with-block, so
+    code under test sees a live daemon's lock. Polls for the real 'acquired'
+    signal (generous 10s inner budget) rather than sleeping a fixed interval."""
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    release_flag = lock_path.parent / f"{lock_path.name}.release"
+    ready_flag = lock_path.parent / f"{lock_path.name}.ready"
+    proc = mp.get_context("spawn").Process(
+        target=_spin_hold_lock,
+        args=(str(lock_path), str(release_flag), str(ready_flag)))
+    proc.start()
+    try:
+        deadline = time.monotonic() + 10.0
+        while not ready_flag.exists():
+            if time.monotonic() > deadline:
+                raise AssertionError("lock holder never signaled ready within 10s")
+            time.sleep(0.05)
+        yield
+    finally:
+        release_flag.touch()
+        proc.join(timeout=5)
+        assert not proc.is_alive()  # surface a wedged holder instead of leaking a spawn

@@ -22,12 +22,13 @@ from imp.engine.abandon import (
     tear_down_quest,
 )
 from imp.engine.completion import steer_hint
-from imp.engine.errors import LoadError, LoadErrors
+from imp.engine.errors import LayoutMismatch, LoadError, LoadErrors
 from imp.engine.executor import RunResult, run_quest
 from imp.engine.merge_queue import ensure_head_driven
 from imp.engine.model_override import apply_model_override
 from imp.engine.quest import Quest
 from imp.engine.state import EventLog, LockHeld, ProjectLock, State, lock_is_live
+from imp.remote.session.attach import LAYOUT_MISMATCH_EXIT
 from imp.remote.session.discover import session_socket_path
 from imp.remote.session.protocol import SIDE_EFFECT_REASONS
 from imp.remote.session.server import _DEFAULT_FIRST_ATTACH_TIMEOUT, SessionServer
@@ -339,6 +340,9 @@ def main(argv: list[str] | None = None) -> int:
     warm_module_graph()
     try:
         quest = Quest.load(Path(ns.control_root), ns.quest_id)
+    except LayoutMismatch as exc:
+        print(f"imp: {exc}", file=sys.stderr)
+        return LAYOUT_MISMATCH_EXIT
     except LoadError as exc:
         print(f"imp: {exc}", file=sys.stderr)
         return 2

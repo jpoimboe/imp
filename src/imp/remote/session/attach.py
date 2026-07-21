@@ -16,6 +16,7 @@ from imp.remote.session.client import SessionClient
 from imp.remote.session.discover import session_socket_path
 
 SpawnFn = Callable[[Quest], "subprocess.Popen[bytes] | None"]
+LAYOUT_MISMATCH_EXIT = 78  # sysexits EX_CONFIG: daemon hit a version downgrade, not a crash
 
 
 def ensure_quest_tmp_dir(quest: Quest) -> None:

@@ -15,10 +15,17 @@ from pathlib import Path
 from typing import Any
 
 from imp.engine import worktree
-from imp.engine.errors import LayoutMismatch, LoadError, LoadErrors
+from imp.engine.errors import LayoutMismatch, LoadError, LoadErrors, MigrationLockHeld
 from imp.engine.event_migrations import migrate_events
 from imp.engine.seed import seed_workflow_start
-from imp.engine.state import JsonlEventLog, State, classify_pause_halt, parse_events_jsonl
+from imp.engine.state import (
+    JsonlEventLog,
+    LockHeld,
+    ProjectLock,
+    State,
+    classify_pause_halt,
+    parse_events_jsonl,
+)
 from imp.engine.types import SourceLoc
 
 LAYOUT_VERSION = 12  # bump in the SAME commit as any breaking quest-home layout/schema change
@@ -668,14 +675,22 @@ class Quest:
         return quest
 
     @classmethod
-    def load(cls, control_root: Path, quest_id: str) -> Quest:
+    def load(cls, control_root: Path, quest_id: str, *,
+             migrate_if_lockable: bool = False) -> Quest:
         quest_dir = control_root / ".imp" / "quests" / quest_id
         if not (quest_dir / "quest.json").is_file():
             raise LoadError(f"no such quest {quest_id!r}", SourceLoc(file=quest_dir, line=1))
         meta = json.loads((quest_dir / "quest.json").read_text())
         stored = meta.get("layout_version", 0)
         if stored != LAYOUT_VERSION:
-            migrate(stored, LAYOUT_VERSION, quest_dir)
+            if migrate_if_lockable:
+                try:
+                    with ProjectLock(quest_dir / "lock").acquire(timeout=0.0):
+                        migrate(stored, LAYOUT_VERSION, quest_dir)
+                except LockHeld:
+                    raise MigrationLockHeld(quest_dir=quest_dir) from None
+            else:
+                migrate(stored, LAYOUT_VERSION, quest_dir)
             meta = json.loads((quest_dir / "quest.json").read_text())
         project_root = (
             Path(meta["project_root"]) if meta.get("project_root")
