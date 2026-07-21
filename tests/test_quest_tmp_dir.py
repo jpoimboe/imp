@@ -139,3 +139,26 @@ def test_var_tmp_dir_equals_resolve_policy_source_even_with_injected_uid(
         engine_env_result={}, environ={}, available=True, quest_dir=ch.quest_dir)
     assert pol.quest_var_tmp_dir == str(ch.var_tmp_dir)
     assert "imp-99999" not in pol.quest_var_tmp_dir
+
+
+def test_resolve_policy_var_tmp_derives_from_quest_var_tmp_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import imp.engine.sandbox as sandbox_mod
+    from imp.engine.sandbox import SandboxConfig, resolve_policy
+
+    _seed_control(tmp_path)
+    ch = Quest.create(tmp_path, title="T", quest_id="qvt4", base_branch="main")
+    monkeypatch.setenv("IMP_QUEST_VAR_TMP", "/custom/vroot")
+    real_access = os.access
+    monkeypatch.setattr(
+        sandbox_mod.os, "access",
+        lambda p, m: True if str(p) == "/custom/vroot" else real_access(p, m))
+    pol = resolve_policy(
+        worktree=ch.project_root, control_root=ch.control_root,
+        quest_id=ch.id, cfg=SandboxConfig(uid=99999),
+        engine_env_result={}, environ={}, available=True, quest_dir=ch.quest_dir)
+    assert pol.quest_var_tmp_dir == str(
+        Path("/custom/vroot") / f"imp-{os.getuid()}" / "qvt4")
+    assert pol.quest_var_tmp_dir == str(ch.var_tmp_dir)
+    assert "imp-99999" not in pol.quest_var_tmp_dir

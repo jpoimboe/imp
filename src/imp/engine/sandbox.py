@@ -27,7 +27,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
-from imp.engine.env import HEADLESS_ENV
+from imp.engine.env import HEADLESS_ENV, quest_var_tmp_root
 from imp.engine.shim import imp_shim_dir
 from imp.remote.session.discover import session_socket_path
 
@@ -541,9 +541,10 @@ def resolve_policy(
 
     session_sock = session_socket_path(control_root, quest_id)
     quest_tmp_dir = str(session_sock.parent)
+    var_tmp_root = quest_var_tmp_root()
     quest_var_tmp_dir = (
-        f"/var/tmp/imp-{os.getuid()}/{quest_id}"
-        if quest_dir is not None and os.access("/var/tmp", os.W_OK)
+        str(var_tmp_root / f"imp-{os.getuid()}" / quest_id)
+        if quest_dir is not None and os.access(var_tmp_root, os.W_OK)
         else "")
 
     return SandboxPolicy(
