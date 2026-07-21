@@ -613,3 +613,45 @@ async def test_forcekill_escalation_arms_continue(tmp_path: Path) -> None:
     state = State.load(quest.state_dir)
     assert state.resume_pending == state.step   # escalation park keeps the transcript
     assert state.resume_should_continue is True      # durable-latch interrupt continues
+
+
+@pytest.mark.anyio
+async def test_compact_side_effect_pause_arms_solicit(tmp_path: Path) -> None:
+    """A between-turns /compact fires signal_pause(reason="compact") while the
+    run is parked at the awaiting-user solicit, then the turn yields your-turn
+    (AwaitingUserInput, interrupt=False). It must arm resume_should_continue=False
+    (return to the prompt), NOT True (the stray agent turn). Seed a stale
+    continue to prove the solicit arm overwrites it."""
+    quest = _seed_single_agent(tmp_path)
+    s = State.load(quest.state_dir)
+    s.arm_step_resume(should_continue=True)   # stale; the solicit arm must overwrite it
+    s.save(quest.state_dir)
+
+    from imp.providers import resolve
+    resolve.reset_providers_for_tests()
+    from imp.cli.signals import InterruptCoordinator
+    from imp.engine.awaiting_user_input import AwaitingUserInput
+    coord = InterruptCoordinator()
+
+    class _CompactRunner:
+        async def run(self, inv: AgentInvocation) -> AsyncIterator[Event]:
+            await coord.signal_pause(reason="compact")
+            raise AwaitingUserInput("nothing more to do", interrupt=False)
+            yield {}  # unreachable; marks run() as an async generator
+
+        async def interrupt(self) -> None:
+            pass
+
+    class _P:
+        name = "fake"
+        model = "m"
+        def create_runner(self, _i: AgentInvocation) -> AgentRunner:
+            return _CompactRunner()
+
+    resolve.register_provider("fake", env_check=lambda: True, factory=lambda _m: _P())
+
+    result = await run_quest(quest, coordinator=coord)
+    assert result is RunResult.PAUSED
+    state = State.load(quest.state_dir)
+    assert state.resume_pending == state.step   # side-effect park keeps the transcript
+    assert state.resume_should_continue is False  # returns to prompt, no stray turn
