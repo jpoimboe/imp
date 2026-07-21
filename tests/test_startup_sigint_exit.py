@@ -97,7 +97,10 @@ def _run_startup_sigint(tmp_path: Path, argv: list[str]) -> int:
     finally:
         if proc.poll() is None:
             proc.kill()
-            proc.wait()
+            try:
+                proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                pass
 
 
 def test_startup_sigint_exits_130_never_minus_2(tmp_path: Path) -> None:
