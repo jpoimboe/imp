@@ -111,6 +111,15 @@ def test_var_tmp_dir_is_per_quest_subdir_of_var_tmp_imp_uid(tmp_path: Path) -> N
     assert ch.var_tmp_dir == Path("/var/tmp") / f"imp-{os.getuid()}" / "qvt1"
 
 
+def test_var_tmp_dir_derives_from_quest_var_tmp_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _seed_control(tmp_path)
+    ch = Quest.create(tmp_path, title="T", quest_id="qvt3", base_branch="main")
+    monkeypatch.setenv("IMP_QUEST_VAR_TMP", "/custom/vroot")
+    assert ch.var_tmp_dir == Path("/custom/vroot") / f"imp-{os.getuid()}" / "qvt3"
+
+
 def test_var_tmp_dir_equals_resolve_policy_source_even_with_injected_uid(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
