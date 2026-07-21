@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import os
+import subprocess
 from pathlib import Path
 
 from imp.cli.store import LocalStore, SearchZones, make_store
@@ -285,3 +287,16 @@ def test_scan_homes_tolerates_future_layout_version(tmp_path: Path) -> None:
     assert "futq" in digs
     assert "goodq" in digs
     assert digs["goodq"].intent_title == "some intent"
+
+
+def test_scan_homes_reports_lock_live(tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+    live = Quest.create(tmp_path, title="Live", quest_id="liveq", base_branch="main")
+    dead = Quest.create(tmp_path, title="Dead", quest_id="deadq", base_branch="main")
+    (live.quest_dir / "lock").write_text(str(os.getpid()))          # a living holder pid
+    p = subprocess.Popen(["true"])
+    p.wait()
+    (dead.quest_dir / "lock").write_text(str(p.pid))               # a dead holder pid
+    homes = {h.quest_id: h for h in LocalStore(tmp_path).scan_homes()}
+    assert homes["liveq"].lock_live is True
+    assert homes["deadq"].lock_live is False

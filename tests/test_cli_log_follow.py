@@ -600,7 +600,7 @@ def test_cmd_log_follow_in_sandbox_degrades_to_snapshot(
         m, "make_store",
         lambda control: types.SimpleNamespace(
             get_events=lambda qid: snapshot,
-            scan_homes=lambda: [HomeDigest(slug, b"{}", None, {}, "", False, "", None)],
+            scan_homes=lambda: [HomeDigest(slug, b"{}", None, {}, "", False, "", None, False)],
             completed_rows=lambda: []))
 
     def _boom(*a: object, **k: object) -> int:
