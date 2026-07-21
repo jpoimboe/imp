@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from imp.engine import worktree
+from imp.engine.env import quest_var_tmp_root
 from imp.engine.errors import LayoutMismatch, LoadError, LoadErrors, MigrationLockHeld
 from imp.engine.event_migrations import migrate_events
 from imp.engine.seed import seed_workflow_start
@@ -508,8 +509,8 @@ class Quest:
 
     @property
     def var_tmp_dir(self) -> Path:
-        """Per-quest overlay-capable scratch root /var/tmp/imp-<uid>/<id>/, reaped at quest end."""
-        return Path("/var/tmp") / f"imp-{os.getuid()}" / self.id
+        """Per-quest overlay scratch root <var-tmp-root>/imp-<uid>/<id>/, reaped at quest end."""
+        return quest_var_tmp_root() / f"imp-{os.getuid()}" / self.id
 
     def event_log(self) -> JsonlEventLog:
         return JsonlEventLog(self.events_path)

@@ -215,8 +215,13 @@ def _isolate_quest_tmp_root(
     root.mkdir(mode=0o700)
     monkeypatch.setattr(tempfile, "tempdir", str(root))
     monkeypatch.setenv("TMPDIR", str(root))
+    # real-disk /var/tmp twin (overlayfs refuses tmpfs upperdir); unique per test
+    var_root = Path("/var/tmp") / f"imp-t-{uuid.uuid4().hex[:12]}"
+    var_root.mkdir(mode=0o700)
+    monkeypatch.setenv("IMP_QUEST_VAR_TMP", str(var_root))
     yield
     shutil.rmtree(root, ignore_errors=True)
+    shutil.rmtree(var_root, ignore_errors=True)
 
 
 @pytest.fixture(autouse=True)
