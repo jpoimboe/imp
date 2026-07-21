@@ -4330,3 +4330,148 @@ def test_build_sandbox_policy_creates_var_tmp_bind_source(
     assert var_tmp_src.is_dir()
     assert var_tmp_src.stat().st_mode & 0o777 == 0o700
     assert var_tmp_src.parent.stat().st_mode & 0o777 == 0o700  # imp-<uid> parent also 0o700
+
+
+@pytest.mark.anyio
+async def test_step_advance_wipes_quest_scratch(tmp_path: Path, monkeypatch) -> None:
+    """A genuine advance to a DIFFERENT step empties Quest.tmp_dir before that step
+    dispatches; the run's first dispatch never wipes (AC6)."""
+    from imp.engine import executor
+    from imp.engine.types import Continue
+
+    wf = tmp_path / "imp" / "workflows" / "imp"
+    wf.mkdir(parents=True)
+    (wf / "workflow.yaml").write_text(
+        "name: t\ndescription: t\n"
+        "defaults: {max_retries: 1, max_loops: 6}\n"
+        "phases:\n"
+        "  - name: only\n"
+        "    steps:\n"
+        "      - name: s1\n"
+        "        command: 'true'\n"
+        "        rules:\n"
+        "          - {else: true, continue: true}\n"
+        "      - name: s2\n"
+        "        command: 'true'\n"
+        "        rules:\n"
+        "          - {else: true, continue: true}\n"
+    )
+    _write_fake_config(tmp_path)
+    _register_fake({"status": "Success"})
+    quest = _make_quest(tmp_path)
+
+    quest.tmp_dir.mkdir(parents=True, exist_ok=True)
+    (quest.tmp_dir / "preseed").write_text("x")
+
+    snaps: dict[str, list[str]] = {}
+
+    async def _fake_dispatch(step, workflow, quest_, state, log, **kw):
+        snaps[state.step] = sorted(p.name for p in quest_.tmp_dir.iterdir())
+        (quest_.tmp_dir / f"{state.step}.litter").write_text("x")
+        return (Continue(), None, {})
+
+    monkeypatch.setattr(executor, "_dispatch_step", _fake_dispatch)
+
+    result = await run_quest(quest, on_event=lambda _e: None)
+    assert result is RunResult.COMPLETED
+
+    assert "preseed" in snaps["s1"]          # first dispatch: NOT wiped
+    assert snaps["s2"] == []                 # advance wiped preseed + s1.litter
+
+
+@pytest.mark.anyio
+async def test_resume_does_not_wipe_quest_scratch(tmp_path: Path, monkeypatch) -> None:
+    """A resumed step (new process → in-memory tracker starts empty) does NOT wipe:
+    the run's first dispatch never wipes, so scratch survives across the pause/resume
+    boundary (AC6)."""
+    from imp.engine import executor
+    from imp.engine.types import Continue, Pause
+
+    wf = tmp_path / "imp" / "workflows" / "imp"
+    wf.mkdir(parents=True)
+    (wf / "workflow.yaml").write_text(
+        "name: t\ndescription: t\n"
+        "defaults: {max_retries: 1, max_loops: 6}\n"
+        "phases:\n"
+        "  - name: only\n"
+        "    steps:\n"
+        "      - name: s1\n"
+        "        command: 'true'\n"
+        "        rules:\n"
+        "          - {else: true, continue: true}\n"
+    )
+    _write_fake_config(tmp_path)
+    _register_fake({"status": "Success"})
+    quest = _make_quest(tmp_path)
+
+    quest.tmp_dir.mkdir(parents=True, exist_ok=True)
+    (quest.tmp_dir / "preseed").write_text("x")
+
+    calls = {"n": 0}
+    snaps: list[list[str]] = []
+
+    async def _fake_dispatch(step, workflow, quest_, state, log, **kw):
+        snaps.append(sorted(p.name for p in quest_.tmp_dir.iterdir()))
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return (Pause(), None, {})       # first run pauses on s1
+        return (Continue(), None, {})        # resumed run completes
+
+    monkeypatch.setattr(executor, "_dispatch_step", _fake_dispatch)
+
+    r1 = await run_quest(quest, on_event=lambda _e: None)
+    assert r1 is RunResult.PAUSED
+    r2 = await run_quest(quest, on_event=lambda _e: None)   # resume: new run, fresh tracker
+    assert r2 is RunResult.COMPLETED
+
+    # Both dispatches are their run's FIRST dispatch, so neither wiped: the
+    # pre-seeded litter survives the resume.
+    assert "preseed" in snaps[0]
+    assert "preseed" in snaps[1]
+
+
+@pytest.mark.anyio
+async def test_self_loop_does_not_wipe_quest_scratch(tmp_path: Path, monkeypatch) -> None:
+    """A same-step self-loop (Goto back to the same step) does NOT wipe: the tracker
+    stays equal to step.name across the re-entry, so scratch survives (AC6)."""
+    from imp.engine import executor
+    from imp.engine.types import Continue, Goto
+
+    wf = tmp_path / "imp" / "workflows" / "imp"
+    wf.mkdir(parents=True)
+    (wf / "workflow.yaml").write_text(
+        "name: t\ndescription: t\n"
+        "defaults: {max_retries: 1, max_loops: 6}\n"
+        "phases:\n"
+        "  - name: only\n"
+        "    steps:\n"
+        "      - name: s1\n"
+        "        command: 'true'\n"
+        "        rules:\n"
+        "          - {else: true, continue: true}\n"
+    )
+    _write_fake_config(tmp_path)
+    _register_fake({"status": "Success"})
+    quest = _make_quest(tmp_path)
+
+    quest.tmp_dir.mkdir(parents=True, exist_ok=True)
+    (quest.tmp_dir / "preseed").write_text("x")
+
+    calls = {"n": 0}
+    snaps: list[list[str]] = []
+
+    async def _fake_dispatch(step, workflow, quest_, state, log, **kw):
+        snaps.append(sorted(p.name for p in quest_.tmp_dir.iterdir()))
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return (Goto("s1"), None, {})    # self-loop back to s1
+        return (Continue(), None, {})
+
+    monkeypatch.setattr(executor, "_dispatch_step", _fake_dispatch)
+
+    result = await run_quest(quest, on_event=lambda _e: None)
+    assert result is RunResult.COMPLETED
+
+    # Two dispatches of s1 (self-loop, then complete); neither wiped.
+    assert "preseed" in snaps[0]
+    assert "preseed" in snaps[1]
