@@ -53,7 +53,7 @@ class SandboxPolicy:
     active: bool                              # True → wrap with bwrap; False → bare sh -c
     worktree: str                             # rw bind at REAL path
     git_common_dir: str                       # <control>/.git rw bind
-    git_ro_remask: tuple[str, ...]            # .git/hooks, .git/config, every config.worktree (ro)
+    git_ro_remask: tuple[str, ...]  # .git: hooks, config, refs/heads, refs/stash, index (ro)
     writable_caches: tuple[str, ...]          # rw toolchain cache dirs (existing only)
     extra_readable: tuple[str, ...]           # config extra_readable (ro)
     extra_writable: tuple[str, ...]           # config extra_writable (rw)
@@ -71,6 +71,8 @@ class SandboxPolicy:
     home_layer: HomeLayer | None = None      # writable-home layer (None → ro read-through)
     quest_tmp_dir: str = ""      # per-quest dir bound onto /tmp ("" → identity fallback)
     quest_var_tmp_dir: str = ""  # per-quest dir onto /var/tmp ("" → no bind; host ro)
+    git_worktrees_mask: str = ""  # <control>/.git/worktrees tmpfs mask ("" → none)
+    git_worktree_self: str = ""   # rw re-expose of .git/worktrees/<self> ("" → none)
 
     def bind_plan(self) -> list[tuple[str, str]]:
         """The ordered path-covering binds, in bwrap EMIT ORDER — the SINGLE
@@ -99,7 +101,14 @@ class SandboxPolicy:
         quest's own home (minus its own steps/events) plus the current worktree iff
         the worktree is a descendant of .imp; everything else under .imp is masked.
         Mis-ordering buries a live quest's own bookkeeping (normal) or leaks every
-        sibling (draft)."""
+        sibling (draft).
+
+        The .git/worktrees mask (git_worktrees_mask) + self re-expose
+        (git_worktree_self) are emitted AFTER git_ref_reexpose, the same last-wins
+        shape as control_imp: the tmpfs hides every sibling admin dir under
+        .git/worktrees, then the self re-expose (emitted only for a materialized
+        worktree) re-binds the current quest's own .git/worktrees/<self> on top so
+        its HEAD/index/logs stay writable."""
         imp_mask = [(self.control_imp, "mask_dir")] if self.control_imp else []
         nested = bool(self.control_imp) and Path(self.worktree).is_relative_to(
             Path(self.control_imp))
@@ -116,6 +125,8 @@ class SandboxPolicy:
             *([(self.quest_home, "rw")] if self.quest_home else []),
             *[(p, "ro") for p in self.git_ro_remask],
             *[(p, "rw") for p in self.git_ref_reexpose],
+            *([(self.git_worktrees_mask, "mask_dir")] if self.git_worktrees_mask else []),
+            *([(self.git_worktree_self, "rw")] if self.git_worktree_self else []),
             *[(p, "ro") for p in self.readonly_overlays],
             *[(c, "rw") for c in self.writable_caches],
             *[(r, "ro") for r in self.extra_readable],
@@ -272,8 +283,9 @@ def prune_missing_masks(policy: SandboxPolicy) -> SandboxPolicy:
     allowlist, secret_dirs/secret_files name only self-owned never-vanishing paths —
     the current quest's own steps/ + events.jsonl, the home secret dirs/files, and
     /run/user/$UID — so the prune over those two sets is effectively a no-op. Its
-    remaining job is git_ro_remask: a long-running quest outlives its siblings, and
-    when one finishes its linked worktree's config.worktree disappears from disk;
+    remaining job is git_ro_remask: its existence-gated refs/index masks
+    (refs/heads, refs/stash, index) can vanish mid-run — e.g. a branch or the
+    stash ref is deleted after policy creation;
     bwrap must still bind each ro path over the read-only floor, so a spawn carrying
     a vanished path dies in sandbox SETUP ("Read-only file system") before the
     command runs. A mask over a gone path protects nothing, so existence-gating at
@@ -470,11 +482,6 @@ def resolve_policy(
 
     git = control_root / ".git"
     remask = [str(git / "hooks"), str(git / "config")]
-    # Every existing worktrees/*/config.worktree — incl. siblings (M1-r5).
-    wt_dir = git / "worktrees"
-    if wt_dir.is_dir():
-        remask += [str(p / "config.worktree") for p in sorted(wt_dir.iterdir())
-                   if (p / "config.worktree").exists()]
 
     # Git-ref foot-gun guard: RO-mask the crown-jewel shared paths (all of
     # refs/heads, refs/stash, the main index) via the existing git_ro_remask
@@ -547,6 +554,10 @@ def resolve_policy(
         control_imp=str(control_root / ".imp"),
         git_ro_remask=tuple(remask),
         git_ref_reexpose=git_ref_reexpose,
+        git_worktrees_mask=str(git / "worktrees"),
+        git_worktree_self=(
+            str(git / "worktrees" / Path(worktree).name)
+            if quest_dir is not None and worktree != control_root else ""),
         disposable_tree=disposable_tree,
         home=str(home),
         readonly_overlays=readonly_overlays,

@@ -179,3 +179,28 @@ async def test_bash_argv_chdirs_and_reexposes_new_worktree(tmp_path: Path) -> No
     binds = [i for i in range(len(argv) - 2)
              if argv[i] == "--bind" and argv[i + 1] == str(wt) and argv[i + 2] == str(wt)]
     assert binds and binds[0] > ti
+
+
+@pytest.mark.anyio
+async def test_tool_recomputes_git_worktree_self_after_go_live(tmp_path: Path) -> None:
+    # Go-live must recompute git_worktree_self, else the new worktree's own admin dir stays masked.
+    _seed_control(tmp_path)
+    ch = Quest.create_draft(tmp_path, title="X", quest_id="t9", base_branch="main")
+    ctx = _ctx(ch, State.load(ch.state_dir))
+    ctx.base_sandbox_policy = resolve_policy(
+        worktree=tmp_path, control_root=tmp_path, quest_id="t9",
+        cfg=SandboxConfig(), engine_env_result={}, environ={},
+        available=True, quest_dir=ch.quest_dir)
+    # Draft policy: mask present, no self re-expose (worktree == control root).
+    assert ctx.base_sandbox_policy.git_worktrees_mask == str(tmp_path / ".git" / "worktrees")
+    assert ctx.base_sandbox_policy.git_worktree_self == ""
+    await get_registry()["create_and_enter_worktree"].async_invoke(ctx, {})
+    wt = tmp_path / ".imp" / "worktrees" / "t9"
+    pol = ctx.base_sandbox_policy
+    assert pol.worktree == str(wt)
+    assert pol.git_worktree_self == str(tmp_path / ".git" / "worktrees" / "t9")
+    assert pol.git_worktrees_mask == str(tmp_path / ".git" / "worktrees")
+    # The new worktree's own admin dir is writable again...
+    assert pol.allows_write(tmp_path / ".git" / "worktrees" / "t9" / "HEAD") is True
+    # ...while a sibling admin dir stays masked.
+    assert pol.allows_write(tmp_path / ".git" / "worktrees" / "other" / "HEAD") is False
