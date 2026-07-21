@@ -20,8 +20,9 @@ def test_quest_context_field(tmp_path: Path) -> None:
     from imp.agents.runner import QuestContext
     ctx = _ctx(tmp_path)
     assert ctx.quest_context is None
-    ctx.quest_context = QuestContext(title="Test change", project_root=tmp_path,
-                                       workflow_dir=tmp_path / ".imp" / "change" / "workflow")
+    ctx.quest_context = QuestContext(
+        title="Test change", project_root=tmp_path,
+        workflow_dir=tmp_path / ".imp" / "quests" / "test-quest" / "workflow")
     assert ctx.quest_context.project_root == tmp_path
 
 

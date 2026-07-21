@@ -10,7 +10,7 @@ import pytest
 
 from imp.engine.executor import RunResult, run_quest
 from tests.test_executor_hinted_retry import _ScriptProvider
-from tests.test_executor_retry_continue import _SINGLE_WF, _WRITER, _make_change
+from tests.test_executor_retry_continue import _SINGLE_WF, _WRITER, _make_quest
 
 
 @pytest.fixture
@@ -22,7 +22,7 @@ def anyio_backend() -> str:
 async def test_backoff_loop_arms_wait_and_consumes_retry_now(
     tmp_path: Path, provider_registry: Any, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    quest = _make_change(
+    quest = _make_quest(
         tmp_path, agents={"writer.md": _WRITER}, workflow_yaml=_SINGLE_WF)
     # One blind (hint-less) rate_limit failure, then success on the re-drive.
     provider = _ScriptProvider([(True, None)])
@@ -51,7 +51,7 @@ async def test_backoff_loop_arms_wait_and_consumes_retry_now(
 async def test_backoff_wait_disarmed_even_when_sleep_raises(
     tmp_path: Path, provider_registry: Any, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    quest = _make_change(
+    quest = _make_quest(
         tmp_path, agents={"writer.md": _WRITER}, workflow_yaml=_SINGLE_WF)
     provider = _ScriptProvider([(True, None)])
     provider_registry("fake", env_check=lambda: True, factory=lambda _m: provider)

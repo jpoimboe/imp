@@ -47,8 +47,9 @@ def test_quest_home_lives_at_control_root_outside_worktree(tmp_path: Path) -> No
     _seed_control(tmp_path)
     ch = Quest.create(tmp_path, title="X", quest_id="hom123", base_branch="main")
     assert ch.quest_dir == tmp_path / ".imp" / "quests" / "hom123"
-    # The home is OUTSIDE the worktree: no inner .imp/change/ is created there.
-    assert not (ch.project_root / ".imp" / "change").exists()
+    # The physical home lives at the control root, OUTSIDE the worktree: the
+    # worktree holds only an id-scoped symlink pointer, not the real directory.
+    assert (ch.project_root / ".imp" / "quests" / ch.id).is_symlink()
     assert (ch.quest_dir / "quest.json").exists()
     assert (ch.quest_dir / "state" / "state.json").exists()
 

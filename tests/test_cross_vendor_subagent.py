@@ -124,7 +124,7 @@ async def test_cross_vendor_subagent_runs_on_child_vendor(
         initial_messages=(Message(role="user", content=(TextBlock(text="go"),)),),
         quest_context=QuestContext(
             title="Test", project_root=tmp_path,
-            workflow_dir=tmp_path / ".imp" / "change" / "workflow"),
+            workflow_dir=tmp_path / ".imp" / "quests" / "test-quest" / "workflow"),
         transcript_dir=tmp_path / "step",
         events_path=tmp_path / "events.jsonl",
         agent_id="step:p/s",

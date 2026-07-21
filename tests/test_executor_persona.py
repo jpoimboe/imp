@@ -7,7 +7,7 @@ import pytest
 from imp.agents.reflow import reflow_markdown
 from imp.engine.agent_run import _CORE_HEAD, _CORE_TAIL
 from imp.engine.executor import RunResult, run_quest
-from tests.test_executor import _make_change, _register_invocation_capturing
+from tests.test_executor import _make_quest, _register_invocation_capturing
 
 
 @pytest.fixture
@@ -39,7 +39,7 @@ def _seed(root: Path, *, persona: str | None) -> object:
     (root / "imp" / "project.yaml").write_text("default-workflow: imp\n")
     (root / ".imp").mkdir(parents=True, exist_ok=True)
     (root / ".imp" / "config.yaml").write_text(_FAKE_CONFIG)
-    return _make_change(root, title="My Quest")
+    return _make_quest(root, title="My Quest")
 
 
 @pytest.mark.anyio

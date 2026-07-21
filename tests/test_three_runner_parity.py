@@ -78,7 +78,7 @@ def _shared_invocation(tmp_path: Path, provider_name: str, model: str) -> AgentI
         initial_messages=(Message(role="user", content=(TextBlock(text="go"),)),),
         quest_context=QuestContext(
             title="Test", project_root=tmp_path,
-            workflow_dir=tmp_path / ".imp" / "change" / "workflow",
+            workflow_dir=tmp_path / ".imp" / "quests" / "test-quest" / "workflow",
         ),
         transcript_dir=tmp_path / f"step-{provider_name}",
         events_path=tmp_path / "events.jsonl",

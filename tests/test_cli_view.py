@@ -24,7 +24,7 @@ def test_replay_current_step_removed() -> None:
     )
 
 
-def _make_change_worktree(control: Path, quest_id: str, title: str,
+def _make_quest_worktree(control: Path, quest_id: str, title: str,
                            status: str = "paused") -> Path:
     """Create a minimal on-disk Quest home (no real git worktree needed —
     Quest.load only reads the permanent .imp/quests/<id>/ directory)."""
@@ -51,7 +51,7 @@ def test_resume_accepts_merge_blocked_status(tmp_path, monkeypatch) -> None:
 
     import imp.cli.main as m
 
-    _make_change_worktree(tmp_path, "mb-test", "mb-test", status="merge_blocked")
+    _make_quest_worktree(tmp_path, "mb-test", "mb-test", status="merge_blocked")
 
     called: list[str] = []
 
@@ -80,7 +80,7 @@ def test_resume_accepts_crashed_at_rest_status(tmp_path, monkeypatch) -> None:
 
     import imp.cli.main as m
 
-    _make_change_worktree(tmp_path, "crashed", "crashed", status="new")
+    _make_quest_worktree(tmp_path, "crashed", "crashed", status="new")
 
     called: list[str] = []
 

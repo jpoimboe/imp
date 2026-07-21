@@ -69,7 +69,7 @@ def _spawn(events, *, on_run=None, capture=None):
     return _s
 
 
-def _make_change(tmp_path: Path) -> Quest:
+def _make_quest(tmp_path: Path) -> Quest:
     _seed_control(tmp_path)
     return Quest.create(tmp_path, title="T", quest_id="prb001",
                          base_branch="main")
@@ -101,7 +101,7 @@ def test_isolated_dispatch_runs_in_throwaway_with_distinct_policy(
     # inspected as pure data.
     monkeypatch.setattr("imp.engine.sandbox.sandbox_available", lambda: True)
     monkeypatch.setattr("imp.engine.sandbox.overlay_available", lambda _b, _h: False)
-    quest = _make_change(tmp_path)
+    quest = _make_quest(tmp_path)
     capture: dict = {}
     ctx = _ctx(tmp_path, quest, name="prober", agent=_isolated_agent("prober"),
                spawn=_spawn([{"type": "agent_result", "payload": {"text": "ok"}}],
@@ -129,7 +129,7 @@ def test_isolated_dispatch_parks_artifact_surviving_teardown(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("imp.engine.sandbox.sandbox_available", lambda: True)
     monkeypatch.setattr("imp.engine.sandbox.overlay_available", lambda _b, _h: False)
-    quest = _make_change(tmp_path)
+    quest = _make_quest(tmp_path)
 
     seen: dict = {}
 
@@ -162,7 +162,7 @@ def test_isolated_dispatch_tears_down_on_error(
 
     monkeypatch.setattr("imp.engine.sandbox.sandbox_available", lambda: True)
     monkeypatch.setattr("imp.engine.sandbox.overlay_available", lambda _b, _h: False)
-    quest = _make_change(tmp_path)
+    quest = _make_quest(tmp_path)
 
     # Spy on teardown so the test proves it ran with the spike's id+discriminator
     # (a bare "worktree is absent" check can't tell "never created" from
@@ -201,7 +201,7 @@ def test_isolated_dispatch_overlay_home_torn_down_on_error(
     # home_cleanup() is ever moved out of finally into the try body.
     monkeypatch.setattr("imp.engine.sandbox.sandbox_available", lambda: True)
     monkeypatch.setattr("imp.engine.sandbox.overlay_available", lambda _b, _h: True)
-    quest = _make_change(tmp_path)
+    quest = _make_quest(tmp_path)
 
     async def _spawn_boom(_inv):
         raise RuntimeError("spike spawn failed")
@@ -222,7 +222,7 @@ def test_isolated_dispatch_overlay_home_torn_down_on_error(
 
 
 def test_non_isolated_subagent_inherits_parent_policy(tmp_path: Path) -> None:
-    quest = _make_change(tmp_path)
+    quest = _make_quest(tmp_path)
     capture: dict = {}
     sentinel = object()
     ctx = _ctx(tmp_path, quest, name="rev", agent=_plain_agent("rev"),
@@ -240,7 +240,7 @@ def test_non_isolated_subagent_inherits_parent_policy(tmp_path: Path) -> None:
 
 
 def test_dispatch_task_forwards_ctx_pythonpath_to_invocation(tmp_path: Path) -> None:
-    quest = _make_change(tmp_path)
+    quest = _make_quest(tmp_path)
     capture: dict = {}
     ctx = _ctx(tmp_path, quest, name="rev", agent=_plain_agent("rev"),
                spawn=_spawn([{"type": "agent_result", "payload": {"text": "ok"}}],
@@ -258,7 +258,7 @@ def test_inactive_spike_policy_emits_sandbox_inactive_event(
     monkeypatch.setattr(
         "imp.agents.subagents._build_isolated_policy", lambda *_a, **_kw: inactive_policy)
 
-    quest = _make_change(tmp_path)
+    quest = _make_quest(tmp_path)
     ctx = _ctx(tmp_path, quest, name="prober", agent=_isolated_agent("prober"),
                spawn=_spawn([{"type": "agent_result", "payload": {"text": "ok"}}]))
     ctx.agent_id = "prober"
@@ -470,7 +470,7 @@ def test_isolated_dispatch_overlay_home_torn_down_with_worktree(
     # worktree; the outer finally removes the overlay dirs with the worktree.
     monkeypatch.setattr("imp.engine.sandbox.sandbox_available", lambda: True)
     monkeypatch.setattr("imp.engine.sandbox.overlay_available", lambda _b, _h: True)
-    quest = _make_change(tmp_path)
+    quest = _make_quest(tmp_path)
     capture: dict = {}
     ctx = _ctx(tmp_path, quest, name="prober", agent=_isolated_agent("prober"),
                spawn=_spawn([{"type": "agent_result", "payload": {"text": "ok"}}],
@@ -498,9 +498,9 @@ def test_isolated_dispatch_honors_network_off(tmp_path, monkeypatch):
 
     monkeypatch.setattr("imp.engine.sandbox.sandbox_available", lambda: True)
     monkeypatch.setattr("imp.engine.sandbox.overlay_available", lambda _b, _h: False)
-    # _make_change uses load_effective_config internally; patch it AFTER so
+    # _make_quest uses load_effective_config internally; patch it AFTER so
     # Quest.create gets the real config object (which has tier_names() etc.).
-    quest = _make_change(tmp_path)
+    quest = _make_quest(tmp_path)
     monkeypatch.setattr(
         "imp.providers.effective.load_effective_config",
         lambda **kw: SimpleNamespace(

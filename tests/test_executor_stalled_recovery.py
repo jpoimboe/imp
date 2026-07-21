@@ -24,7 +24,7 @@ def anyio_backend() -> str:
     return "asyncio"
 
 
-def _make_change(root: Path) -> Quest:
+def _make_quest(root: Path) -> Quest:
     from imp.engine.loader import load_workflow
     from imp.providers.effective import load_effective_config
 
@@ -49,7 +49,7 @@ def _make_change(root: Path) -> Quest:
         "providers: [fake]\ntiers:\n  low: {fake: m}\n  medium: {fake: m}\n  high: {fake: m}\n"
     )
 
-    quest_dir = root / ".imp" / "change"
+    quest_dir = root / ".imp" / "quests" / "test-quest"
     quest_dir.mkdir(parents=True, exist_ok=True)
     (quest_dir / "state").mkdir(exist_ok=True)
     (quest_dir / "quest.json").write_text(json.dumps(
@@ -111,7 +111,7 @@ class _StallThenSucceedProvider:
 async def test_stalled_retries_with_backoff_without_burning_step_attempt(
     tmp_path: Path, provider_registry: Any, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    quest = _make_change(tmp_path)
+    quest = _make_quest(tmp_path)
 
     provider = _StallThenSucceedProvider(stalls=3)
     provider_registry("fake", env_check=lambda: True, factory=lambda _m: provider)
@@ -158,7 +158,7 @@ class _AlwaysStallProvider:
 async def test_stalled_backoff_pauses_as_retry_ceiling_on_budget_exhaustion(
     tmp_path: Path, provider_registry: Any, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    quest = _make_change(tmp_path)
+    quest = _make_quest(tmp_path)
     provider_registry("fake", env_check=lambda: True, factory=lambda _m: _AlwaysStallProvider())
 
     async def _no_sleep(_delay: float, _coordinator: Any) -> None:

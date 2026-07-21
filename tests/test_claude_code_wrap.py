@@ -34,7 +34,7 @@ def _ctx(tmp_path: Path) -> ToolContext:
     )
     ctx.quest_context = QuestContext(
         title="Test Quest", project_root=tmp_path,
-        workflow_dir=tmp_path / ".imp" / "change" / "workflow",
+        workflow_dir=tmp_path / ".imp" / "quests" / "test-quest" / "workflow",
     )
     return ctx
 
@@ -145,7 +145,7 @@ async def test_wrap_task_routes_to_dispatch_task(tmp_path: Path) -> None:
     ctx.parent_transcript_dir = tmp_path / "parent"
     ctx.quest_context = QuestContext(
         title="Test Quest", project_root=tmp_path,
-        workflow_dir=tmp_path / ".imp" / "change" / "workflow",
+        workflow_dir=tmp_path / ".imp" / "quests" / "test-quest" / "workflow",
     )
 
     class _FakeRunner:
@@ -198,7 +198,7 @@ async def test_wrap_task_emits_matching_call_and_result(tmp_path: Path) -> None:
     ctx.parent_transcript_dir = tmp_path / "parent"
     ctx.quest_context = QuestContext(
         title="Test Quest", project_root=tmp_path,
-        workflow_dir=tmp_path / ".imp" / "change" / "workflow",
+        workflow_dir=tmp_path / ".imp" / "quests" / "test-quest" / "workflow",
     )
     elog = InMemoryEventLog()
     ctx.event_log = elog
@@ -815,7 +815,7 @@ async def test_impl_flushes_llm_group_before_appending_sub_agent_call(
     ctx.subagent_defs = {"sub": sub_def}
     ctx.quest_context = QuestContext(
         title="Test Quest", project_root=tmp_path,
-        workflow_dir=tmp_path / ".imp" / "change" / "workflow",
+        workflow_dir=tmp_path / ".imp" / "quests" / "test-quest" / "workflow",
     )
     elog = InMemoryEventLog()
     ctx.event_log = elog

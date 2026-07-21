@@ -158,7 +158,7 @@ def default_workflow_script(sentinel: str) -> dict[str, Any]:
             ]}],
             "spec-finalizer": [{"text": "spec", "tools": [
                 done(phase="written",
-                     spec_path=".imp/change/artifacts/spec/SCRIPTED-STUB.md",
+                     spec_path=".imp/quests/test-quest/artifacts/spec/SCRIPTED-STUB.md",
                      complexity="trivial"),
             ]}],
             "spec-reviewer": [{"text": "review", "tools": [
@@ -166,7 +166,7 @@ def default_workflow_script(sentinel: str) -> dict[str, Any]:
             ]}],
             "plan-writer": [{"text": "plan", "tools": [
                 bash(plan_cmd),
-                done(plan_path=".imp/change/artifacts/plans/SCRIPTED-STUB-plan-1.md",
+                done(plan_path=".imp/quests/test-quest/artifacts/plans/SCRIPTED-STUB-plan-1.md",
                      plan_number=1, plan_total=1),
             ]}],
             "task-lead": [{"text": "implement", "tools": [

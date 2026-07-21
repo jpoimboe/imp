@@ -43,14 +43,14 @@ class _BlockingPrompt:
         await anyio.sleep_forever()  # an open prompt, never submitted
 
 
-def _fake_change(tmp_path: Path):
+def _fake_quest(tmp_path: Path):
     from imp.engine.state import JsonlEventLog
 
     class _FC:
         def __init__(self) -> None:
             self.id = "abcd12"
             self.title = "Fake change"
-            self.workflow_dir = tmp_path / ".imp" / "change" / "workflow"
+            self.workflow_dir = tmp_path / ".imp" / "quests" / "test-quest" / "workflow"
             (self.workflow_dir / "skills").mkdir(parents=True)
             self._events = tmp_path / "events.jsonl"
 
@@ -100,7 +100,7 @@ async def test_exit_event_cancels_open_prompt(tmp_path: Path) -> None:
 
     with pytest.raises(KeyboardInterrupt):
         await ask_line_with_slash(
-            _BlockingPrompt(), _FakeStatus(), _fake_change(tmp_path), coord=coord)
+            _BlockingPrompt(), _FakeStatus(), _fake_quest(tmp_path), coord=coord)
     # The synthesized KBI routes through D2's catch → request_exit (the
     # pause-and-exit handoff the CLI arm finalizes). The reason is "ctrl-c" to
     # match _reason_for_signal(SIGINT) and the _dispatch_signal exit routing.
@@ -139,7 +139,7 @@ async def test_no_exit_event_leaves_prompt_intact(tmp_path: Path) -> None:
 
     coord = _FakeCoord(None)
     line = await ask_line_with_slash(
-        _LinePrompt(), _FakeStatus(), _fake_change(tmp_path), coord=coord)
+        _LinePrompt(), _FakeStatus(), _fake_quest(tmp_path), coord=coord)
     assert line == "hello"
 
 

@@ -128,13 +128,13 @@ def _openai_step_aware(**kwargs):
     return resp_response(resp_function_call("c0", "complete_step", json.dumps(fields)))
 
 
-def _make_change(root: Path, *, quest_id: str = "test-change", title: str = "t") -> Quest:
+def _make_quest(root: Path, *, quest_id: str = "test-quest", title: str = "t") -> Quest:
     """Construct a Quest directly on disk without git worktrees."""
     from imp.engine.loader import load_workflow
     from imp.providers.effective import load_effective_config
 
     src_wf = root / "imp" / "workflows" / "imp"
-    quest_dir = root / ".imp" / "change"
+    quest_dir = root / ".imp" / "quests" / quest_id
     quest_dir.mkdir(parents=True, exist_ok=True)
     (quest_dir / "state").mkdir(exist_ok=True)
     (quest_dir / "quest.json").write_text(json.dumps({
@@ -223,10 +223,10 @@ def _seed_default_workflow(tmp_path: Path) -> Quest:
     # Create the imp/<slug> branch and a git worktree at the expected path so
     # merge_to_base and remove_worktree both succeed.
     (tmp_path / ".imp" / "worktrees").mkdir(parents=True, exist_ok=True)
-    _git(tmp_path, "worktree", "add", "-q", "-b", "imp/test-change",
-         ".imp/worktrees/test-change", "main")
+    _git(tmp_path, "worktree", "add", "-q", "-b", "imp/test-quest",
+         ".imp/worktrees/test-quest", "main")
 
-    return _make_change(tmp_path, title="e2e-default-workflow")
+    return _make_quest(tmp_path, title="e2e-default-workflow")
 
 
 def _rewrite_config(tmp_path: Path, *replacements: tuple[str, str]) -> None:

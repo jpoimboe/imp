@@ -9,7 +9,7 @@ from typing import Any
 import pytest
 
 from imp.engine.executor import RunResult, run_quest
-from tests.test_executor_retry_continue import _SINGLE_WF, _WRITER, _make_change
+from tests.test_executor_retry_continue import _SINGLE_WF, _WRITER, _make_quest
 
 
 @pytest.fixture
@@ -64,7 +64,7 @@ class _ScriptProvider:
 async def test_hinted_delay_is_budget_exempt_and_completes(
     tmp_path: Path, provider_registry: Any, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    quest = _make_change(
+    quest = _make_quest(
         tmp_path, agents={"writer.md": _WRITER}, workflow_yaml=_SINGLE_WF)
     # Three hinted (7200s > 1800s rate_limit budget) failures, then success.
     # Without the exemption the first 7200s delay blows the budget and pauses on
@@ -90,7 +90,7 @@ async def test_hinted_delay_is_budget_exempt_and_completes(
 async def test_fourth_hinted_sleep_falls_back_to_budgeted(
     tmp_path: Path, provider_registry: Any, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    quest = _make_change(
+    quest = _make_quest(
         tmp_path, agents={"writer.md": _WRITER}, workflow_yaml=_SINGLE_WF)
     # Six hinted 7200s failures available. The first three are exempt; the fourth
     # is budgeted (cap=3) and 7200s > the 1800s budget, so the loop pauses at the
@@ -117,7 +117,7 @@ async def test_fourth_hinted_sleep_falls_back_to_budgeted(
 async def test_blind_retries_after_hinted_sleep_still_reach_ceiling(
     tmp_path: Path, provider_registry: Any, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    quest = _make_change(
+    quest = _make_quest(
         tmp_path, agents={"writer.md": _WRITER}, workflow_yaml=_SINGLE_WF)
     # One hinted 7200s failure (exempt, NOT added to cumulative_backoff), then
     # blind (hint-less) rate_limit failures. With a tiny 5s budget the blind

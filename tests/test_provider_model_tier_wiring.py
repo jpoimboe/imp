@@ -26,7 +26,7 @@ def _invocation(tmp_path: Path, provider: str) -> AgentInvocation:
         system_prompt="hi",
         initial_messages=(Message(role="user", content=(TextBlock(text="go"),)),),
         quest_context=QuestContext(
-            tmp_path, tmp_path, tmp_path / ".imp" / "change" / "workflow"),
+            tmp_path, tmp_path, tmp_path / ".imp" / "quests" / "test-quest" / "workflow"),
         transcript_dir=tmp_path / "t",
         events_path=tmp_path / "events.jsonl",
         tiers=("low", "high"))

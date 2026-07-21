@@ -10,14 +10,14 @@ from imp.cli.slash import REPROMPT, handle_slash_line, is_slash_command
 from imp.remote.session.protocol import SkillRequest
 
 
-class _FakeChange:
+class _FakeQuest:
     """Minimal stand-in: handle_slash_line needs .workflow_dir and
     .event_log().append(...); ask_line_with_slash needs .id/.title."""
 
     def __init__(self, tmp_path: Path) -> None:
         self.id = "abcd12"
         self.title = "Fake change"
-        self.workflow_dir = tmp_path / ".imp" / "change" / "workflow"
+        self.workflow_dir = tmp_path / ".imp" / "quests" / "test-quest" / "workflow"
         user = self.workflow_dir / "skills" / "user"
         user.mkdir(parents=True)
         (user / "refactor.md").write_text("# Refactor\nstep one\n")
@@ -37,7 +37,7 @@ def test_is_slash_command() -> None:
 
 
 def test_name_returns_skill_request_and_emits_no_event(tmp_path: Path) -> None:
-    quest = _FakeChange(tmp_path)
+    quest = _FakeQuest(tmp_path)
     out: list[str] = []
     result = handle_slash_line("/refactor", quest=quest, output_fn=out.append)
     assert result == SkillRequest("refactor", "")
@@ -47,14 +47,14 @@ def test_name_returns_skill_request_and_emits_no_event(tmp_path: Path) -> None:
 
 
 def test_help_reprompts_and_prints(tmp_path: Path) -> None:
-    quest = _FakeChange(tmp_path)
+    quest = _FakeQuest(tmp_path)
     out: list[str] = []
     assert handle_slash_line("/help", quest=quest, output_fn=out.append) is REPROMPT
     assert any("/help" in line for line in out)
 
 
 def test_skills_lists_names(tmp_path: Path) -> None:
-    quest = _FakeChange(tmp_path)
+    quest = _FakeQuest(tmp_path)
     out: list[str] = []
     assert handle_slash_line("/skills", quest=quest, output_fn=out.append) is REPROMPT
     joined = "\n".join(out)
@@ -62,7 +62,7 @@ def test_skills_lists_names(tmp_path: Path) -> None:
 
 
 def test_skills_listing_shows_description_when_present(tmp_path: Path) -> None:
-    quest = _FakeChange(tmp_path)
+    quest = _FakeQuest(tmp_path)
     (quest.workflow_dir / "skills" / "user" / "refactor.md").write_text(
         "---\ndescription: Refactor helper\n---\n# Refactor\nstep one\n"
     )
@@ -80,7 +80,7 @@ def test_unknown_command_shaped_slash_errors_and_reprompts(tmp_path: Path) -> No
     # A command-shaped `/name` matching no builtin and no skill is now a real
     # error: echo the line, print the unknown-command message, and REPROMPT
     # (nothing is submitted to the model).
-    quest = _FakeChange(tmp_path)
+    quest = _FakeQuest(tmp_path)
     out: list[str] = []
     result = handle_slash_line("/nope", quest=quest, output_fn=out.append)
     assert result is REPROMPT
@@ -88,7 +88,7 @@ def test_unknown_command_shaped_slash_errors_and_reprompts(tmp_path: Path) -> No
 
 
 def test_unknown_command_shaped_with_args_uses_first_token(tmp_path: Path) -> None:
-    quest = _FakeChange(tmp_path)
+    quest = _FakeQuest(tmp_path)
     out: list[str] = []
     result = handle_slash_line("/skils extra", quest=quest, output_fn=out.append)
     assert result is REPROMPT
@@ -97,7 +97,7 @@ def test_unknown_command_shaped_with_args_uses_first_token(tmp_path: Path) -> No
 
 def test_dotted_path_shaped_slash_passes_through(tmp_path: Path) -> None:
     # A first token containing `.` is path-shaped: submitted verbatim, no print.
-    quest = _FakeChange(tmp_path)
+    quest = _FakeQuest(tmp_path)
     out: list[str] = []
     result = handle_slash_line("/foo.py", quest=quest, output_fn=out.append)
     assert result == "/foo.py"
@@ -107,7 +107,7 @@ def test_dotted_path_shaped_slash_passes_through(tmp_path: Path) -> None:
 def test_pasted_absolute_path_passes_through(tmp_path: Path) -> None:
     # The reported bug: a pasted absolute path was misread as `no such skill:
     # /home/...`. It must now reach the agent verbatim, slash and all.
-    quest = _FakeChange(tmp_path)
+    quest = _FakeQuest(tmp_path)
     out: list[str] = []
     path = "/home/jpoimboe/imp/src/foo.py"
     result = handle_slash_line(path, quest=quest, output_fn=out.append)
@@ -118,7 +118,7 @@ def test_pasted_absolute_path_passes_through(tmp_path: Path) -> None:
 
 
 def test_skills_builtin_cannot_be_shadowed(tmp_path: Path) -> None:
-    quest = _FakeChange(tmp_path)
+    quest = _FakeQuest(tmp_path)
     (quest.workflow_dir / "skills" / "user" / "skills.md").write_text("SHADOW\n")
     out: list[str] = []
     # /skills resolves to the builtin listing, never the skill body.
@@ -152,7 +152,7 @@ class _NullStatus:
 
 
 def test_bare_slash_reprompts_with_help(tmp_path: Path) -> None:
-    quest = _FakeChange(tmp_path)
+    quest = _FakeQuest(tmp_path)
     out: list[str] = []
     assert handle_slash_line("/", quest=quest, output_fn=out.append) is REPROMPT
     assert any("/help" in line for line in out)
@@ -160,7 +160,7 @@ def test_bare_slash_reprompts_with_help(tmp_path: Path) -> None:
 
 def test_ask_line_with_slash_passes_through_plain_text(tmp_path: Path) -> None:
     from imp.cli.slash import ask_line_with_slash
-    quest = _FakeChange(tmp_path)
+    quest = _FakeQuest(tmp_path)
     prompt = _FakePrompt(["just a message"])
     line = anyio.run(ask_line_with_slash, prompt, _NullStatus(), quest)
     assert line == "just a message"
@@ -170,7 +170,7 @@ def test_ask_line_with_slash_tolerates_none_status(tmp_path: Path) -> None:
     # The pre-session opening prompt has no live status to suspend; a None status
     # must be a no-op, not an AttributeError on None.suspend().
     from imp.cli.slash import ask_line_with_slash
-    quest = _FakeChange(tmp_path)
+    quest = _FakeQuest(tmp_path)
     prompt = _FakePrompt(["plain intent"])
     line = anyio.run(ask_line_with_slash, prompt, None, quest)
     assert line == "plain intent"
@@ -178,7 +178,7 @@ def test_ask_line_with_slash_tolerates_none_status(tmp_path: Path) -> None:
 
 def test_ask_line_with_slash_loops_on_help_then_returns(tmp_path: Path) -> None:
     from imp.cli.slash import ask_line_with_slash
-    quest = _FakeChange(tmp_path)
+    quest = _FakeQuest(tmp_path)
     prompt = _FakePrompt(["/help", "real input"])
     line = anyio.run(ask_line_with_slash, prompt, _NullStatus(), quest)
     assert line == "real input"
@@ -186,14 +186,14 @@ def test_ask_line_with_slash_loops_on_help_then_returns(tmp_path: Path) -> None:
 
 def test_ask_line_with_slash_returns_skill_request(tmp_path: Path) -> None:
     from imp.cli.slash import ask_line_with_slash
-    quest = _FakeChange(tmp_path)
+    quest = _FakeQuest(tmp_path)
     prompt = _FakePrompt(["/refactor src/foo.py"])
     line = anyio.run(ask_line_with_slash, prompt, _NullStatus(), quest)
     assert line == SkillRequest("refactor", "src/foo.py")
 
 
 def test_skill_args_ride_the_skill_request(tmp_path: Path) -> None:
-    quest = _FakeChange(tmp_path)
+    quest = _FakeQuest(tmp_path)
     out: list[str] = []
     result = handle_slash_line(
         "/refactor src/foo.py", quest=quest, output_fn=out.append)
@@ -201,7 +201,7 @@ def test_skill_args_ride_the_skill_request(tmp_path: Path) -> None:
 
 
 def test_skill_args_preserve_internal_spacing_strip_edges(tmp_path: Path) -> None:
-    quest = _FakeChange(tmp_path)
+    quest = _FakeQuest(tmp_path)
     out: list[str] = []
     result = handle_slash_line(
         "/refactor   keep  this   ", quest=quest, output_fn=out.append)
@@ -215,7 +215,7 @@ def test_exit_and_quit_words_request_save_and_exit(tmp_path: Path) -> None:
     from imp.cli.slash import ask_line_with_slash
 
     for i, word in enumerate(("exit", "quit", "  EXIT  ")):   # case/space-insensitive
-        quest = _FakeChange(tmp_path / str(i))
+        quest = _FakeQuest(tmp_path / str(i))
         prompt = _FakePrompt([word])
         with pytest.raises(EOFError):
             anyio.run(ask_line_with_slash, prompt, _NullStatus(), quest)
@@ -229,7 +229,7 @@ def test_no_chrome_printed_around_the_submitted_prompt(
     with the subtle background. So a plain submit produces no stdout here."""
     from imp.cli.slash import ask_line_with_slash
     prompt = _FakePrompt(["hello"])
-    line = anyio.run(ask_line_with_slash, prompt, _NullStatus(), _FakeChange(tmp_path))
+    line = anyio.run(ask_line_with_slash, prompt, _NullStatus(), _FakeQuest(tmp_path))
     assert line == "hello"
     assert capsys.readouterr().out == ""
 
@@ -272,7 +272,7 @@ def test_solicit_prepares_then_flushes_once(tmp_path: Path) -> None:
     from imp.cli.slash import ask_line_with_slash
     drv = _RecDriver()
     status = _CountStatus()
-    quest = _FakeChange(tmp_path)
+    quest = _FakeQuest(tmp_path)
     prompt = _FakePrompt(["just a line"])
 
     async def _run() -> str:
@@ -289,7 +289,7 @@ def test_solicit_flushes_on_slash_reprompt(tmp_path: Path) -> None:
     from imp.cli.slash import ask_line_with_slash
     drv = _RecDriver()
     status = _CountStatus()
-    quest = _FakeChange(tmp_path)
+    quest = _FakeQuest(tmp_path)
     # /help reprompts, then "real input" returns
     prompt = _FakePrompt(["/help", "real input"])
 
@@ -307,7 +307,7 @@ def test_continue_is_no_longer_a_verb(tmp_path: Path) -> None:
     # /continue is removed: it falls through to the skill resolver, matches no
     # skill; now command-shaped so it returns REPROMPT with an unknown-command
     # message (resume by typing an ordinary line instead).
-    quest = _FakeChange(tmp_path)
+    quest = _FakeQuest(tmp_path)
     out: list[str] = []
     result = handle_slash_line("/continue", quest=quest, output_fn=out.append)
     assert result is REPROMPT
@@ -317,14 +317,14 @@ def test_continue_is_no_longer_a_verb(tmp_path: Path) -> None:
 
 
 def test_help_does_not_mention_continue(tmp_path: Path) -> None:
-    quest = _FakeChange(tmp_path)
+    quest = _FakeQuest(tmp_path)
     out: list[str] = []
     handle_slash_line("/help", quest=quest, output_fn=out.append)
     assert not any("/continue" in line for line in out)
 
 
 def test_hint_and_help_describe_ctrlc_leave_without_esc(tmp_path: Path) -> None:
-    quest = _FakeChange(tmp_path)
+    quest = _FakeQuest(tmp_path)
     out: list[str] = []
     handle_slash_line("/help", quest=quest, output_fn=out.append)
     ctrl_d_line = next(line for line in out if "Ctrl+D" in line)
@@ -365,7 +365,7 @@ def test_help_ctrlc_and_ctrld_are_separate_lines(tmp_path: Path) -> None:
 def test_echo_command_followed_by_one_blank_line(tmp_path: Path) -> None:
     # _echo_command must emit the caret echo AND a trailing blank so the output
     # body is separated from the echoed command by exactly one blank line.
-    quest = _FakeChange(tmp_path)
+    quest = _FakeQuest(tmp_path)
     out: list[str] = []
     handle_slash_line("/help", quest=quest, output_fn=out.append)
     # out[0] = "> /help" (echo), out[1] = "" (blank), out[2] = first help line
@@ -390,7 +390,7 @@ def test_ask_line_with_slash_pins_driver_toolbar_below_the_prompt(tmp_path: Path
         def compose_toolbar_static(self) -> str:
             return "z9gixx · implement · task-lead · 13%"
 
-    quest = _FakeChange(tmp_path)
+    quest = _FakeQuest(tmp_path)
     prompt = _FakePrompt(["real input"])
 
     async def _run() -> str:
@@ -435,7 +435,7 @@ def test_ask_line_with_slash_forwards_toolbar_through_raced_path(tmp_path: Path)
         def compose_toolbar_static(self) -> str:
             return "z9gixx · implement · task-lead · 13%"
 
-    quest = _FakeChange(tmp_path)
+    quest = _FakeQuest(tmp_path)
     prompt = _FakePrompt(["real input"])
 
     async def _run() -> str:
@@ -450,7 +450,7 @@ def test_ask_line_with_slash_forwards_toolbar_through_raced_path(tmp_path: Path)
 
 def test_ask_line_with_slash_composes_identity_toolbar_when_no_driver(tmp_path: Path) -> None:
     from imp.cli.slash import ask_line_with_slash
-    quest = _FakeChange(tmp_path)
+    quest = _FakeQuest(tmp_path)
     prompt = _FakePrompt(["hi"])
     line = anyio.run(ask_line_with_slash, prompt, _NullStatus(), quest)
     assert line == "hi"
@@ -460,7 +460,7 @@ def test_ask_line_with_slash_composes_identity_toolbar_when_no_driver(tmp_path: 
 def test_slash_model_valid_returns_literal(tmp_path, monkeypatch) -> None:
     import imp.cli.slash as slash
     monkeypatch.setattr(slash, "validate_model_arg", lambda arg, *, quest: None)
-    quest = _FakeChange(tmp_path)
+    quest = _FakeQuest(tmp_path)
     out: list[str] = []
     result = slash.handle_slash_line(
         "/model anthropic:claude-fable-5", quest=quest, output_fn=out.append)
@@ -472,7 +472,7 @@ def test_slash_model_invalid_reprompts(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(
         slash, "validate_model_arg",
         lambda arg, *, quest: "provider 'openai' is not available")
-    quest = _FakeChange(tmp_path)
+    quest = _FakeQuest(tmp_path)
     out: list[str] = []
     result = slash.handle_slash_line(
         "/model openai:gpt-5", quest=quest, output_fn=out.append)
@@ -490,7 +490,7 @@ def test_slash_model_bare_prints_roster(tmp_path, monkeypatch) -> None:
         output_fn("Current: claude_code · opus   (this step)")
 
     monkeypatch.setattr(slash, "print_model_roster", _fake)
-    quest = _FakeChange(tmp_path)
+    quest = _FakeQuest(tmp_path)
     out: list[str] = []
     result = slash.handle_slash_line("/model", quest=quest, output_fn=out.append)
     assert result is slash.REPROMPT
@@ -500,7 +500,7 @@ def test_slash_model_bare_prints_roster(tmp_path, monkeypatch) -> None:
 
 def test_sandbox_no_arg_reports_state(tmp_path: Path) -> None:
     from imp.cli.slash import SANDBOX_STATE_OFF, SANDBOX_STATE_ON, handle_slash_line
-    quest = _FakeChange(tmp_path)
+    quest = _FakeQuest(tmp_path)
     out: list[str] = []
     assert handle_slash_line("/sandbox", quest=quest, output_fn=out.append,
                              unsandboxed=False) is REPROMPT
@@ -513,7 +513,7 @@ def test_sandbox_no_arg_reports_state(tmp_path: Path) -> None:
 
 def test_sandbox_on_from_off_returns_literal(tmp_path: Path) -> None:
     from imp.cli.slash import SANDBOX_ON_FROM_OFF, handle_slash_line
-    quest = _FakeChange(tmp_path)
+    quest = _FakeQuest(tmp_path)
     out: list[str] = []
     result = handle_slash_line("/sandbox on", quest=quest, output_fn=out.append,
                                unsandboxed=True)
@@ -524,7 +524,7 @@ def test_sandbox_on_from_off_returns_literal(tmp_path: Path) -> None:
 
 def test_sandbox_on_when_already_on_reprompts(tmp_path: Path) -> None:
     from imp.cli.slash import SANDBOX_ALREADY_ON, handle_slash_line
-    quest = _FakeChange(tmp_path)
+    quest = _FakeQuest(tmp_path)
     out: list[str] = []
     result = handle_slash_line("/sandbox on", quest=quest, output_fn=out.append,
                                unsandboxed=False)
@@ -534,7 +534,7 @@ def test_sandbox_on_when_already_on_reprompts(tmp_path: Path) -> None:
 
 def test_sandbox_off_when_on_returns_literal_and_prints_confirmed(tmp_path: Path) -> None:
     from imp.cli.slash import SANDBOX_OFF_CONFIRMED, handle_slash_line
-    quest = _FakeChange(tmp_path)
+    quest = _FakeQuest(tmp_path)
     out: list[str] = []
     result = handle_slash_line("/sandbox off", quest=quest, output_fn=out.append,
                                unsandboxed=False)
@@ -545,7 +545,7 @@ def test_sandbox_off_when_on_returns_literal_and_prints_confirmed(tmp_path: Path
 
 def test_sandbox_off_when_already_off_reprompts(tmp_path: Path) -> None:
     from imp.cli.slash import SANDBOX_ALREADY_OFF, handle_slash_line
-    quest = _FakeChange(tmp_path)
+    quest = _FakeQuest(tmp_path)
     out: list[str] = []
     result = handle_slash_line("/sandbox off", quest=quest, output_fn=out.append,
                                unsandboxed=True)
@@ -555,7 +555,7 @@ def test_sandbox_off_when_already_off_reprompts(tmp_path: Path) -> None:
 
 def test_sandbox_invalid_arg_prints_usage(tmp_path: Path) -> None:
     from imp.cli.slash import SANDBOX_USAGE, handle_slash_line
-    quest = _FakeChange(tmp_path)
+    quest = _FakeQuest(tmp_path)
     out: list[str] = []
     result = handle_slash_line("/sandbox maybe", quest=quest, output_fn=out.append)
     assert result is REPROMPT
@@ -586,7 +586,7 @@ def test_sandbox_copy_strings_are_verbatim() -> None:
 def test_sandbox_off_applies_immediately_with_no_prompt(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     from imp.cli.slash import SANDBOX_OFF_CONFIRMED, ask_line_with_slash
-    quest = _FakeChange(tmp_path)
+    quest = _FakeQuest(tmp_path)
     prompt = _FakePrompt(["/sandbox off"])
     line = anyio.run(ask_line_with_slash, prompt, _NullStatus(), quest)
     assert line == "/sandbox off"
@@ -610,7 +610,7 @@ def test_ask_line_with_slash_empty_line_reprompts_silently(
     # A bare Enter and a whitespace-only line each silently re-prompt; only the
     # real line is returned, and nothing is printed for the skipped blanks.
     from imp.cli.slash import ask_line_with_slash
-    quest = _FakeChange(tmp_path)
+    quest = _FakeQuest(tmp_path)
     prompt = _FakePrompt(["", "   ", "real input"])
     line = anyio.run(ask_line_with_slash, prompt, _NullStatus(), quest)
     assert line == "real input"
@@ -621,7 +621,7 @@ def test_ask_line_with_slash_allow_empty_returns_blank(tmp_path: Path) -> None:
     import functools
 
     from imp.cli.slash import ask_line_with_slash
-    quest = _FakeChange(tmp_path)
+    quest = _FakeQuest(tmp_path)
     prompt = _FakePrompt([""])
     line = anyio.run(functools.partial(
         ask_line_with_slash, prompt, _NullStatus(), quest, allow_empty=True))
@@ -632,7 +632,7 @@ def test_ask_line_with_slash_empty_loops_when_not_allowed(tmp_path: Path) -> Non
     # Default (bare-turn-end): an empty line is a no-op — it re-prompts and the
     # next non-empty line is returned.
     from imp.cli.slash import ask_line_with_slash
-    quest = _FakeChange(tmp_path)
+    quest = _FakeQuest(tmp_path)
     prompt = _FakePrompt(["", "real input"])
     line = anyio.run(ask_line_with_slash, prompt, _NullStatus(), quest)
     assert line == "real input"

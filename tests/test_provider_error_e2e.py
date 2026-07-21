@@ -13,13 +13,13 @@ from imp.engine.quest import Quest
 from imp.engine.state import State
 
 
-def _make_change(root: Path, *, quest_id: str = "test-change", title: str = "t") -> Quest:
+def _make_quest(root: Path, *, quest_id: str = "test-quest", title: str = "t") -> Quest:
     """Construct a Quest directly on disk without git worktrees."""
     from imp.engine.loader import load_workflow
     from imp.providers.effective import load_effective_config
 
     src_wf = root / "imp" / "workflows" / "imp"
-    quest_dir = root / ".imp" / "change"
+    quest_dir = root / ".imp" / "quests" / quest_id
     quest_dir.mkdir(parents=True, exist_ok=True)
     (quest_dir / "state").mkdir(exist_ok=True)
     (quest_dir / "quest.json").write_text(json.dumps({
@@ -97,7 +97,7 @@ def _seed_workflow_with_max_retries_3(root: Path) -> Quest:
     (root / "imp" / "project.yaml").write_text("default-workflow: imp\n")
     (root / ".imp").mkdir(parents=True, exist_ok=True)
     (root / ".imp" / "config.yaml").write_text(_cfg)
-    return _make_change(root)
+    return _make_quest(root)
 
 
 @pytest.mark.anyio

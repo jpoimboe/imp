@@ -53,7 +53,7 @@ def _inv(tmp_path: Path, tools=None, *, event_log=None, agent_id="step:p/s",
         initial_messages=(Message(role="user", content=(TextBlock(text="go"),)),),
         quest_context=QuestContext(
             title="Test", project_root=tmp_path,
-            workflow_dir=tmp_path / ".imp" / "change" / "workflow"),
+            workflow_dir=tmp_path / ".imp" / "quests" / "test-quest" / "workflow"),
         transcript_dir=tmp_path / "step",
         events_path=tmp_path / "events.jsonl",
         agent_id=agent_id,
@@ -236,7 +236,7 @@ async def test_resume_with_retry_feedback_injects_and_continues(tmp_path: Path) 
         initial_messages=(Message(role="user", content=(TextBlock(text="go"),)),),
         quest_context=QuestContext(
             title="Test", project_root=tmp_path,
-            workflow_dir=tmp_path / ".imp" / "change" / "workflow"),
+            workflow_dir=tmp_path / ".imp" / "quests" / "test-quest" / "workflow"),
         transcript_dir=inv_dir,
         events_path=tmp_path / "events.jsonl",
         agent_id="step:p/s", event_log=log,

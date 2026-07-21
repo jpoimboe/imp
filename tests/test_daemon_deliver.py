@@ -19,7 +19,7 @@ async def test_deliver_to_session_loads_the_change_and_injects_the_reply(
 ) -> None:
     sentinel = object()
 
-    class _FakeChange:
+    class _FakeQuest:
         @classmethod
         def load(cls, control_root: Path, quest_id: str) -> object:
             assert control_root == tmp_path
@@ -33,7 +33,7 @@ async def test_deliver_to_session_loads_the_change_and_injects_the_reply(
         captured["text"] = text
         return DeliveryOutcome.NOT_AT_GATE
 
-    monkeypatch.setattr(runner, "Quest", _FakeChange)
+    monkeypatch.setattr(runner, "Quest", _FakeQuest)
     monkeypatch.setattr(runner, "deliver_session_reply", _fake_deliver)
 
     outcome = await runner.deliver_to_session(tmp_path, "2026-06-13-abc", "approved")

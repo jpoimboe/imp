@@ -17,14 +17,14 @@ from imp.agents.tools.context import ToolContext
 
 
 def _ctx(tmp_path: Path, agent_id: str = "step:t/coder") -> ToolContext:
-    run_dir = tmp_path / ".imp" / "change"
+    run_dir = tmp_path / ".imp" / "quests" / "test-quest"
     run_dir.mkdir(parents=True, exist_ok=True)
     ctx = ToolContext(project_root=tmp_path,
                       events_path=run_dir / "events.jsonl", agent_id=agent_id,
                       background_enabled=True)
     ctx.quest_context = QuestContext(
         title="T", project_root=tmp_path,
-        workflow_dir=tmp_path / ".imp" / "change" / "workflow")
+        workflow_dir=tmp_path / ".imp" / "quests" / "test-quest" / "workflow")
     return ctx
 
 

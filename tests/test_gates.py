@@ -221,7 +221,7 @@ def test_route_script_does_not_block_event_loop(tmp_path) -> None:
     quest = types.SimpleNamespace(
         workflow_dir=tmp_path, project_root=tmp_path,
         id="test-id", handle="test", title="Test",
-        quest_dir=tmp_path / ".imp" / "change", tmp_dir=tmp_path,
+        quest_dir=tmp_path / ".imp" / "quests" / "test-quest", tmp_dir=tmp_path,
     )
 
     async def main() -> None:
@@ -269,7 +269,7 @@ def test_route_script_goto_exit0_suppresses_feedback(tmp_path) -> None:
     quest = types.SimpleNamespace(
         workflow_dir=tmp_path, project_root=tmp_path,
         id="test-id", handle="test", title="Test",
-        quest_dir=tmp_path / ".imp" / "change", tmp_dir=tmp_path,
+        quest_dir=tmp_path / ".imp" / "quests" / "test-quest", tmp_dir=tmp_path,
     )
     step = Step(
         name="autosquash", phase="p", kind="script",
@@ -300,7 +300,7 @@ def test_route_script_goto_nonzero_keeps_feedback(tmp_path) -> None:
     quest = types.SimpleNamespace(
         workflow_dir=tmp_path, project_root=tmp_path,
         id="test-id", handle="test", title="Test",
-        quest_dir=tmp_path / ".imp" / "change", tmp_dir=tmp_path,
+        quest_dir=tmp_path / ".imp" / "quests" / "test-quest", tmp_dir=tmp_path,
     )
     step = Step(
         name="check", phase="p", kind="script",
@@ -333,7 +333,7 @@ def test_route_script_goto_exit0_forwards_configured_feedback(tmp_path) -> None:
     quest = types.SimpleNamespace(
         workflow_dir=tmp_path, project_root=tmp_path,
         id="test-id", handle="test", title="Test",
-        quest_dir=tmp_path / ".imp" / "change", tmp_dir=tmp_path,
+        quest_dir=tmp_path / ".imp" / "quests" / "test-quest", tmp_dir=tmp_path,
     )
     step = Step(
         name="scope-code-check", phase="p", kind="script",
@@ -369,7 +369,7 @@ def test_route_script_nonzero_synthesizes_despite_configured_feedback(tmp_path) 
     quest = types.SimpleNamespace(
         workflow_dir=tmp_path, project_root=tmp_path,
         id="test-id", handle="test", title="Test",
-        quest_dir=tmp_path / ".imp" / "change", tmp_dir=tmp_path,
+        quest_dir=tmp_path / ".imp" / "quests" / "test-quest", tmp_dir=tmp_path,
     )
     preamble = "Integration tests failed on the merged tree. Adjudicate fix-vs-tolerate:"
     step = Step(
@@ -427,7 +427,7 @@ def test_route_script_renders_command_template(tmp_path) -> None:
         workflow_dir=tmp_path, project_root=tmp_path,
         id="test-id", handle="test", title="Test",
         cur_base_head="basesha", orig_base_head="basesha",
-        quest_dir=tmp_path / ".imp" / "change",
+        quest_dir=tmp_path / ".imp" / "quests" / "test-quest",
     )
     step = Step(
         name="g", phase="p", kind="script",
@@ -460,7 +460,7 @@ def test_route_script_merges_declared_output_into_rules(tmp_path) -> None:
     quest = types.SimpleNamespace(
         workflow_dir=tmp_path, project_root=tmp_path,
         id="test-id", handle="test", title="Test",
-        quest_dir=tmp_path / ".imp" / "change", tmp_dir=tmp_path,
+        quest_dir=tmp_path / ".imp" / "quests" / "test-quest", tmp_dir=tmp_path,
     )
     schema = OutputSchema(
         fields=(OutputField(name="task_total", type="int"),), source=loc())
@@ -496,7 +496,7 @@ def test_route_script_pauses_on_malformed_output(tmp_path) -> None:
     quest = types.SimpleNamespace(
         workflow_dir=tmp_path, project_root=tmp_path,
         id="test-id", handle="test", title="Test",
-        quest_dir=tmp_path / ".imp" / "change", tmp_dir=tmp_path,
+        quest_dir=tmp_path / ".imp" / "quests" / "test-quest", tmp_dir=tmp_path,
     )
     schema = OutputSchema(
         fields=(OutputField(name="task_total", type="int"),), source=loc())
@@ -532,7 +532,7 @@ def test_route_script_pauses_on_type_mismatch(tmp_path) -> None:
     quest = types.SimpleNamespace(
         workflow_dir=tmp_path, project_root=tmp_path,
         id="test-id", handle="test", title="Test",
-        quest_dir=tmp_path / ".imp" / "change", tmp_dir=tmp_path,
+        quest_dir=tmp_path / ".imp" / "quests" / "test-quest", tmp_dir=tmp_path,
     )
     schema = OutputSchema(
         fields=(OutputField(name="task_total", type="int"),), source=loc())
@@ -569,7 +569,7 @@ def test_route_script_without_output_schema_unchanged(tmp_path) -> None:
     quest = types.SimpleNamespace(
         workflow_dir=tmp_path, project_root=tmp_path,
         id="test-id", handle="test", title="Test",
-        quest_dir=tmp_path / ".imp" / "change", tmp_dir=tmp_path,
+        quest_dir=tmp_path / ".imp" / "quests" / "test-quest", tmp_dir=tmp_path,
     )
     step = Step(
         name="plain", phase="p", kind="script",
@@ -603,7 +603,7 @@ def test_route_script_cleans_up_output_path_on_run_script_error(tmp_path) -> Non
     quest = types.SimpleNamespace(
         workflow_dir=tmp_path, project_root=tmp_path,
         id="test-id", handle="test", title="Test",
-        quest_dir=tmp_path / ".imp" / "change", tmp_dir=tmp_path,
+        quest_dir=tmp_path / ".imp" / "quests" / "test-quest", tmp_dir=tmp_path,
     )
     schema = OutputSchema(
         fields=(OutputField(name="task_total", type="int"),), source=loc())
@@ -648,7 +648,7 @@ def test_route_script_emits_script_output_on_show_output_success(tmp_path) -> No
     quest = types.SimpleNamespace(
         workflow_dir=tmp_path, project_root=tmp_path,
         id="test-id", handle="test", title="Test",
-        quest_dir=tmp_path / ".imp" / "change")
+        quest_dir=tmp_path / ".imp" / "quests" / "test-quest")
     step = Step(
         name="announce", phase="p", kind="script",
         rules=(_rule(None, Continue()),),
@@ -678,7 +678,7 @@ def test_route_script_no_script_output_on_nonzero_exit(tmp_path) -> None:
     quest = types.SimpleNamespace(
         workflow_dir=tmp_path, project_root=tmp_path,
         id="test-id", handle="test", title="Test",
-        quest_dir=tmp_path / ".imp" / "change")
+        quest_dir=tmp_path / ".imp" / "quests" / "test-quest")
     step = Step(
         name="announce", phase="p", kind="script",
         rules=(_rule(None, Continue()),),
@@ -848,7 +848,7 @@ def test_route_script_interrupt_returns_pause_no_script_blocked(tmp_path) -> Non
     quest = types.SimpleNamespace(
         workflow_dir=tmp_path, project_root=tmp_path,
         id="test-id", handle="test", title="Test",
-        quest_dir=tmp_path / ".imp" / "change", tmp_dir=tmp_path,
+        quest_dir=tmp_path / ".imp" / "quests" / "test-quest", tmp_dir=tmp_path,
     )
     step = Step(
         name="verify", phase="p", kind="script",
@@ -890,7 +890,7 @@ def test_route_script_builds_abort_for_interruptible_step(tmp_path) -> None:
     quest = types.SimpleNamespace(
         workflow_dir=tmp_path, project_root=tmp_path,
         id="test-id", handle="test", title="Test",
-        quest_dir=tmp_path / ".imp" / "change", tmp_dir=tmp_path,
+        quest_dir=tmp_path / ".imp" / "quests" / "test-quest", tmp_dir=tmp_path,
     )
     step = Step(
         name="verify", phase="p", kind="script",
@@ -935,7 +935,7 @@ def test_route_script_non_interruptible_passes_no_abort(tmp_path) -> None:
     quest = types.SimpleNamespace(
         workflow_dir=tmp_path, project_root=tmp_path,
         id="test-id", handle="test", title="Test",
-        quest_dir=tmp_path / ".imp" / "change", tmp_dir=tmp_path,
+        quest_dir=tmp_path / ".imp" / "quests" / "test-quest", tmp_dir=tmp_path,
     )
     step = Step(
         name="mutating-gate", phase="p", kind="script",
@@ -1093,7 +1093,7 @@ def test_route_script_output_tempfile_created_under_quest_tmp_dir(tmp_path, monk
     quest = types.SimpleNamespace(
         workflow_dir=tmp_path, project_root=tmp_path,
         id="test-id", handle="test", title="Test",
-        quest_dir=tmp_path / ".imp" / "change", tmp_dir=qtmp,
+        quest_dir=tmp_path / ".imp" / "quests" / "test-quest", tmp_dir=qtmp,
     )
     schema = OutputSchema(
         fields=(OutputField(name="task_total", type="int"),), source=loc())

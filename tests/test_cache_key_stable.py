@@ -15,7 +15,7 @@ from imp.providers.openai import _prompt_cache_key
 def _cc(title: str) -> QuestContext:
     return QuestContext(
         id="fff666", title=title,
-        project_root=Path("/wt"), workflow_dir=Path("/wt/.imp/change/workflow"),
+        project_root=Path("/wt"), workflow_dir=Path("/wt/.imp/quests/test-quest/workflow"),
     )
 
 

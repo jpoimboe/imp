@@ -56,14 +56,14 @@ def _bg_ctx(tmp_path: Path):
     """A ToolContext shaped like the CC runner's, with bg enabled."""
     from imp.agents.runner import QuestContext
     from imp.agents.tools.context import ToolContext
-    run_dir = tmp_path / ".imp" / "change"
+    run_dir = tmp_path / ".imp" / "quests" / "test-quest"
     run_dir.mkdir(parents=True, exist_ok=True)
     ctx = ToolContext(project_root=tmp_path,
                       events_path=run_dir / "events.jsonl",
                       agent_id="step:t/coder", background_enabled=True)
     ctx.quest_context = QuestContext(
         title="T", project_root=tmp_path,
-        workflow_dir=tmp_path / ".imp" / "change" / "workflow")
+        workflow_dir=tmp_path / ".imp" / "quests" / "test-quest" / "workflow")
     return ctx
 
 

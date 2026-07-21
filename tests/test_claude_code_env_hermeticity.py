@@ -39,7 +39,7 @@ def _invocation(project_root: Path, tier: str | None = None) -> AgentInvocation:
         quest_context=QuestContext(
             title="Test",
             project_root=project_root,
-            workflow_dir=project_root / ".imp" / "change" / "workflow",
+            workflow_dir=project_root / ".imp" / "quests" / "test-quest" / "workflow",
         ),
         transcript_dir=project_root / ".imp" / "steps",
         events_path=project_root / "events.jsonl",

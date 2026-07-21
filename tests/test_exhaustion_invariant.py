@@ -23,7 +23,7 @@ from imp.engine.quest import Quest
 from imp.engine.state import State
 
 
-def _make_change(root: Path, *, quest_id: str = "test-change", title: str = "t") -> Quest:
+def _make_quest(root: Path, *, quest_id: str = "test-quest", title: str = "t") -> Quest:
     """Construct a Quest directly on disk without git worktrees. The workflow is
     read from root/imp/workflows/imp (the branch-dir model — workflow_dir =
     project_root/imp/workflows/imp), so there is no snapshot copy to make."""
@@ -31,7 +31,7 @@ def _make_change(root: Path, *, quest_id: str = "test-change", title: str = "t")
     from imp.providers.effective import load_effective_config
 
     wf_dir = root / "imp" / "workflows" / "imp"
-    quest_dir = root / ".imp" / "change"
+    quest_dir = root / ".imp" / "quests" / quest_id
     quest_dir.mkdir(parents=True, exist_ok=True)
     (quest_dir / "state").mkdir(exist_ok=True)
     (quest_dir / "quest.json").write_text(json.dumps({
@@ -123,7 +123,7 @@ async def test_exhausted_step_emits_single_pause_completion(tmp_path: Path) -> N
         "fake", env_check=lambda: True, factory=lambda _m: _NoOutputProvider(),
     )
 
-    quest = _make_change(tmp_path)
+    quest = _make_quest(tmp_path)
 
     result = await run_quest(quest, on_event=lambda _e: None)
     assert result is RunResult.PAUSED

@@ -45,7 +45,7 @@ def _ctx(tmp_path: Path) -> ToolContext:
     ctx.event_log = None
     ctx.quest_context = QuestContext(
         title="C", project_root=tmp_path,
-        workflow_dir=tmp_path / ".imp" / "change" / "workflow")
+        workflow_dir=tmp_path / ".imp" / "quests" / "test-quest" / "workflow")
     return ctx
 
 

@@ -90,7 +90,7 @@ def test_find_control_root_from_inside_worktree(tmp_path: Path) -> None:
     _init_repo(tmp_path)
     wpath = wt.create_worktree(tmp_path, "feat", "main")
     assert wt.find_control_root(wpath) == tmp_path.resolve()
-    sub = wpath / ".imp" / "change"
+    sub = wpath / ".imp" / "quests" / "test-quest"
     sub.mkdir(parents=True)
     assert wt.find_control_root(sub) == tmp_path.resolve()
 
@@ -251,7 +251,7 @@ def _make_worktree_and_check(root, slug="probe") -> bool:
     """True iff a fresh worktree off base HEAD ignores .imp/."""
     wt.create_worktree(root, slug, "main")
     wpath = root / ".imp" / "worktrees" / slug
-    return _git(wpath, "check-ignore", ".imp/change").returncode == 0
+    return _git(wpath, "check-ignore", ".imp/quests").returncode == 0
 
 
 def test_ensure_imp_ignored_committed_rule_noop(tmp_path: Path) -> None:

@@ -14,17 +14,17 @@ def anyio_backend() -> str:
     return "asyncio"
 
 
-def _fake_change(tmp_path: Path):
+def _fake_quest(tmp_path: Path):
     """Minimal Quest stand-in: ask_line_with_slash needs .workflow_dir (for
     handle_slash_line) and .event_log().append(...) (for skill_load events).
-    Mirrors the _FakeChange from test_slash.py."""
+    Mirrors the _FakeQuest from test_slash.py."""
     from imp.engine.state import JsonlEventLog
 
     class _FC:
         def __init__(self) -> None:
             self.id = "abcd12"
             self.title = "Fake change"
-            self.workflow_dir = tmp_path / ".imp" / "change" / "workflow"
+            self.workflow_dir = tmp_path / ".imp" / "quests" / "test-quest" / "workflow"
             skills = self.workflow_dir / "skills"
             skills.mkdir(parents=True)
             self._events = tmp_path / "events.jsonl"
@@ -68,7 +68,7 @@ async def test_out_of_band_sigint_routes_to_exit(tmp_path: Path) -> None:
     coord = _FakeCoord()
     with pytest.raises(KeyboardInterrupt):
         await ask_line_with_slash(
-            _KbiPrompt(), _FakeStatus(), _fake_change(tmp_path), coord=coord)
+            _KbiPrompt(), _FakeStatus(), _fake_quest(tmp_path), coord=coord)
     assert coord.exit_reason == "ctrl-c"
 
 
@@ -78,7 +78,7 @@ async def test_out_of_band_sigint_reraises_without_coord(tmp_path: Path) -> None
     # finalizes), and the guard must not crash trying to call request_exit.
     with pytest.raises(KeyboardInterrupt):
         await ask_line_with_slash(
-            _KbiPrompt(), _FakeStatus(), _fake_change(tmp_path), coord=None)
+            _KbiPrompt(), _FakeStatus(), _fake_quest(tmp_path), coord=None)
 
 
 class _LinePrompt:
@@ -103,7 +103,7 @@ async def test_at_prompt_set_then_reset_on_normal_return(tmp_path: Path) -> None
     # return so a SIGINT during a subsequent RUN takes the signal_pause path.
     coord = _FakeCoord()
     line = await ask_line_with_slash(
-        _LinePrompt(), _FakeStatus(), _fake_change(tmp_path), coord=coord)
+        _LinePrompt(), _FakeStatus(), _fake_quest(tmp_path), coord=coord)
     assert line == "hello"
     assert coord.at_prompt_calls == [True, False]   # set entering, reset in finally
 
@@ -116,7 +116,7 @@ async def test_at_prompt_reset_on_exception_path(tmp_path: Path) -> None:
     coord = _FakeCoord()
     with pytest.raises(EOFError):
         await ask_line_with_slash(
-            _EofPrompt(), _FakeStatus(), _fake_change(tmp_path), coord=coord)
+            _EofPrompt(), _FakeStatus(), _fake_quest(tmp_path), coord=coord)
     assert coord.at_prompt_calls == [True, False]
 
 
@@ -143,6 +143,6 @@ class _QuiesceCoord(_FakeCoord):
 async def test_solicit_prompt_runs_inside_tty_quiesced(tmp_path: Path) -> None:
     coord = _QuiesceCoord()
     line = await ask_line_with_slash(
-        _LinePrompt(), _FakeStatus(), _fake_change(tmp_path), coord=coord)
+        _LinePrompt(), _FakeStatus(), _fake_quest(tmp_path), coord=coord)
     assert line == "hello"
     assert coord.quiesced == ["enter", "exit"]

@@ -8,7 +8,7 @@ import pytest
 from imp.agents.runner import AgentInvocation, AgentRunner, Event
 from imp.engine.executor import RunResult, run_quest
 from imp.engine.state import State
-from tests.test_executor_pause_reason import _make_change, _seed_single_agent
+from tests.test_executor_pause_reason import _make_quest, _seed_single_agent
 
 
 def _seed_merge_step(root: Path):
@@ -37,7 +37,7 @@ def _seed_merge_step(root: Path):
     (root / ".imp" / "config.yaml").write_text(
         "providers: [fake]\ntiers:\n  low: {fake: m}\n  medium: {fake: m}\n  high: {fake: m}\n"
     )
-    return _make_change(root)
+    return _make_quest(root)
 
 
 @pytest.fixture

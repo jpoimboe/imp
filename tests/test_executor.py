@@ -44,11 +44,11 @@ def _persist_initial(invocation: AgentInvocation) -> None:
             subtype="system_prompt")
 
 
-def _make_change(root: Path, *, quest_id: str = "test-change", title: str = "t") -> Quest:
+def _make_quest(root: Path, *, quest_id: str = "test-quest", title: str = "t") -> Quest:
     """Construct a Quest directly on disk without git worktrees.
 
     The test sets up the workflow under root/imp/workflows/imp BEFORE
-    calling _make_change; this helper seeds the State so run_quest can be
+    calling _make_quest; this helper seeds the State so run_quest can be
     invoked immediately (no snapshot copy needed — workflow_dir resolves to
     root/imp/workflows/imp directly).
     """
@@ -56,7 +56,7 @@ def _make_change(root: Path, *, quest_id: str = "test-change", title: str = "t")
     from imp.providers.effective import load_effective_config
 
     src_wf = root / "imp" / "workflows" / "imp"
-    quest_dir = root / ".imp" / "change"
+    quest_dir = root / ".imp" / "quests" / quest_id
     quest_dir.mkdir(parents=True, exist_ok=True)
     (quest_dir / "state").mkdir(exist_ok=True)
 
@@ -236,7 +236,7 @@ def _seed_minimal_workflow(
         f"      - {{name: {step_name}, file: agents/{agent_stem}.md, tier: low}}\n"
     )
     _write_fake_config(root)
-    quest = _make_change(root)
+    quest = _make_quest(root)
     return quest, phase_name, step_name
 
 
@@ -306,7 +306,7 @@ async def test_set_mutation_persists_to_state_vars(tmp_path: Path) -> None:
         "          - {else: true, continue: true, set: {review_done: true}}\n"
     )
     _write_fake_config(tmp_path)
-    quest = _make_change(tmp_path)
+    quest = _make_quest(tmp_path)
     _register_fake({"status": "Success"})
 
     result = await run_quest(quest, on_event=lambda _e: None)
@@ -349,7 +349,7 @@ def _seed_branch_loop_workflow(root: Path) -> Quest:
         "    steps: []\n"
     )
     _write_fake_config(root)
-    return _make_change(root)
+    return _make_quest(root)
 
 
 @pytest.mark.anyio
@@ -406,7 +406,7 @@ def _seed_lane_release_workflow(root: Path) -> Quest:
         "        tier: low\n"
     )
     _write_fake_config(root)
-    return _make_change(root)
+    return _make_quest(root)
 
 
 @pytest.mark.anyio
@@ -463,7 +463,7 @@ async def test_backward_goto_increments_loop_count_and_trips_max_loops(
         "          - {else: true, continue: true}\n"
     )
     _write_fake_config(tmp_path)
-    quest = _make_change(tmp_path)
+    quest = _make_quest(tmp_path)
 
     from imp.providers import resolve
     resolve.reset_providers_for_tests()
@@ -535,7 +535,7 @@ async def test_max_loops_pause_resets_counter_for_fresh_resume(tmp_path: Path) -
         "          - {else: true, continue: true}\n"
     )
     _write_fake_config(tmp_path)
-    quest = _make_change(tmp_path)
+    quest = _make_quest(tmp_path)
 
     from imp.providers import resolve
     resolve.reset_providers_for_tests()
@@ -624,7 +624,7 @@ async def test_progress_goto_resets_counter_and_never_trips(tmp_path: Path) -> N
         "          - {else: true, continue: true}\n"
     )
     _write_fake_config(tmp_path)
-    quest = _make_change(tmp_path)
+    quest = _make_quest(tmp_path)
 
     from imp.providers import resolve
     resolve.reset_providers_for_tests()
@@ -707,7 +707,7 @@ async def test_forward_goto_resets_leaped_over_step_counter(tmp_path: Path) -> N
     _write_fake_config(tmp_path)
     import subprocess
     subprocess.run(["git", "init", str(tmp_path)], check=True, capture_output=True)
-    quest = _make_change(tmp_path)
+    quest = _make_quest(tmp_path)
 
     from imp.providers import resolve
     resolve.reset_providers_for_tests()
@@ -777,7 +777,7 @@ async def test_goto_empty_trailing_phase_completes(tmp_path: Path) -> None:
         "    steps: []\n"
     )
     _write_fake_config(tmp_path)
-    quest = _make_change(tmp_path)
+    quest = _make_quest(tmp_path)
     _register_fake({"status": "Success"})
 
     result = await run_quest(quest, on_event=lambda _e: None)
@@ -1242,7 +1242,7 @@ async def test_system_prompt_carries_completion_instruction_and_continuation(
         "      - {name: w, file: agents/writer.md, tier: low}\n"
     )
     _write_fake_config(tmp_path)
-    quest = _make_change(tmp_path)
+    quest = _make_quest(tmp_path)
 
     captured: dict[str, AgentInvocation] = {}
 
@@ -1322,7 +1322,7 @@ async def test_goto_feedback_resumes_target_with_wrapper(tmp_path: Path) -> None
         "          - {else: true, continue: true}\n"
     )
     _write_fake_config(tmp_path)
-    quest = _make_change(tmp_path)
+    quest = _make_quest(tmp_path)
 
     from imp.providers import resolve
     resolve.reset_providers_for_tests()
@@ -1508,7 +1508,7 @@ def _seed_back_edge_workflow(
         f"          - {{if: {{verdict: rework}}, {verb}: coder{feedback_fragment}}}\n"
         "          - {else: true, continue: true}\n")
     _write_fake_config(root)
-    return _make_change(root)
+    return _make_quest(root)
 
 
 def _register_capturing(coder_behavior, reviewer_verdicts: list[str], runs: list) -> None:
@@ -1861,7 +1861,7 @@ async def test_script_pause_emits_script_blocked_event(tmp_path: Path) -> None:
     # The sandbox policy binds control_root/.git; git init ensures bwrap finds it.
     import subprocess
     subprocess.run(["git", "init", str(tmp_path)], check=True, capture_output=True)
-    quest = _make_change(tmp_path)
+    quest = _make_quest(tmp_path)
     _register_fake({"status": "Success"})  # resolve_run needs a registered provider
 
     result = await run_quest(quest, on_event=lambda _e: None)
@@ -1901,7 +1901,7 @@ async def test_script_pause_emits_workflow_paused_with_script_blocked_reason(
     _write_fake_config(tmp_path)
     import subprocess
     subprocess.run(["git", "init", str(tmp_path)], check=True, capture_output=True)
-    quest = _make_change(tmp_path)
+    quest = _make_quest(tmp_path)
     _register_fake({"status": "Success"})
 
     result = await run_quest(quest, on_event=lambda _e: None)
@@ -1921,7 +1921,7 @@ async def test_script_pause_emits_workflow_paused_with_script_blocked_reason(
 @pytest.mark.anyio
 async def test_first_run_snapshots_the_workflow(tmp_path: Path) -> None:
     """The first run copies the live workflow dir into the gitignored per-Quest
-    snapshot at .imp/change/workflow/ (taken once, at run-start)."""
+    snapshot at .imp/quests/test-quest/workflow/ (taken once, at run-start)."""
     quest, _, _ = _seed_minimal_workflow(tmp_path)
     _register_fake({"status": "Success"})
     snapshot = quest.quest_dir / "workflow"
@@ -1982,7 +1982,7 @@ async def test_resume_runs_frozen_snapshot_after_live_workflow_deleted(
     _write_fake_config(tmp_path)
     # The sandbox policy binds control_root/.git; git init ensures bwrap finds it.
     subprocess.run(["git", "init", str(tmp_path)], check=True, capture_output=True)
-    quest = _make_change(tmp_path)
+    quest = _make_quest(tmp_path)
     _register_fake({"status": "Success"})  # resolve_run needs a registered provider
 
     r1 = await run_quest(quest, on_event=lambda _e: None)
@@ -2049,7 +2049,7 @@ async def test_unknown_step_pauses_without_silent_merge(tmp_path: Path) -> None:
 async def test_frozen_script_runs_from_snapshot_cwd_with_live_project_root(
     tmp_path: Path,
 ) -> None:
-    """A script gate runs with cwd under .imp/change/workflow/ (the snapshot,
+    """A script gate runs with cwd under .imp/quests/test-quest/workflow/ (the snapshot,
     sandbox binding intact) while IMP_PROJECT_ROOT still points at the worktree, so
     git ops act on the change's real tree. Exit 0 -> continue -> COMPLETED."""
     import subprocess
@@ -2063,7 +2063,8 @@ async def test_frozen_script_runs_from_snapshot_cwd_with_live_project_root(
         "  - name: only\n"
         "    steps:\n"
         "      - name: probe\n"
-        "        command: 'case \"$(pwd)\" in */.imp/change/workflow) ;; *) exit 9;; esac;"
+        "        command: 'case \"$(pwd)\" in */.imp/quests/test-quest/workflow)"
+        " ;; *) exit 9;; esac;"
         " cd \"$IMP_PROJECT_ROOT\"; git rev-parse --is-inside-work-tree'\n"
         "        rules:\n"
         "          - {if: {exit: 0}, continue: true}\n"
@@ -2071,7 +2072,7 @@ async def test_frozen_script_runs_from_snapshot_cwd_with_live_project_root(
     )
     _write_fake_config(tmp_path)
     subprocess.run(["git", "init", str(tmp_path)], check=True, capture_output=True)
-    quest = _make_change(tmp_path)
+    quest = _make_quest(tmp_path)
     _register_fake({"status": "Success"})
 
     result = await run_quest(quest, on_event=lambda _e: None)
@@ -2099,7 +2100,7 @@ async def test_facts_render_into_main_agent_prompt(tmp_path: Path) -> None:
     (tmp_path / "imp" / "project.yaml").write_text(
         "default-workflow: imp\nfacts:\n  test_command: make check\n"
     )
-    quest = _make_change(tmp_path)
+    quest = _make_quest(tmp_path)
     sink: list = []
     _register_invocation_capturing({"status": "Success"}, sink)
 
@@ -2157,7 +2158,7 @@ async def test_tolerated_forward_advance_resets_gate_loop_counter(
     _write_fake_config(tmp_path)
     # git init: the sandbox policy binds control_root/.git.
     subprocess.run(["git", "init", str(tmp_path)], check=True, capture_output=True)
-    quest = _make_change(tmp_path)
+    quest = _make_quest(tmp_path)
 
     from imp.providers import resolve
     resolve.reset_providers_for_tests()
@@ -2302,7 +2303,7 @@ async def test_rework_reentry_injects_prior_attempts(tmp_path: Path) -> None:
         "          - {if: {verdict: rework}, goto: writer}\n"
         "          - {else: true, continue: true}\n")
     _write_fake_config(tmp_path)
-    quest = _make_change(tmp_path)
+    quest = _make_quest(tmp_path)
 
     writer_openings: list[str] = []
     review_count = [0]
@@ -2379,7 +2380,7 @@ async def test_step_lap_render_var_increments_across_bounce(tmp_path: Path) -> N
         "          - {if: {verdict: rework}, goto: writer}\n"
         "          - {else: true, continue: true}\n")
     _write_fake_config(tmp_path)
-    quest = _make_change(tmp_path)
+    quest = _make_quest(tmp_path)
 
     writer_prompts: list[str] = []
     review_count = [0]
@@ -2442,7 +2443,7 @@ async def test_step_completed_payload_carries_rule_label(tmp_path: Path) -> None
         "    steps: []\n"
     )
     _write_fake_config(tmp_path)
-    quest = _make_change(tmp_path)
+    quest = _make_quest(tmp_path)
     _register_fake({"status": "Success"})
 
     events: list[dict] = []
@@ -2490,7 +2491,7 @@ async def test_step_completed_unlabeled_rule_emits_none(tmp_path: Path) -> None:
         "    steps: []\n"
     )
     _write_fake_config(tmp_path)
-    quest = _make_change(tmp_path)
+    quest = _make_quest(tmp_path)
     _register_fake({"status": "Success"})
 
     events: list[dict] = []
@@ -2533,7 +2534,7 @@ async def test_step_started_payload_carries_label_and_resumed(tmp_path: Path) ->
         "          - {else: true, continue: true}\n"
     )
     _write_fake_config(tmp_path)
-    quest = _make_change(tmp_path)
+    quest = _make_quest(tmp_path)
 
     from imp.providers import resolve
     resolve.reset_providers_for_tests()
@@ -2608,7 +2609,7 @@ async def test_step_started_restarted_true_when_resumed_transcript_empty(tmp_pat
         "          - {else: true, continue: true}\n"
     )
     _write_fake_config(tmp_path)
-    quest = _make_change(tmp_path)
+    quest = _make_quest(tmp_path)
 
     from imp.providers import resolve
     resolve.reset_providers_for_tests()
@@ -2710,7 +2711,7 @@ def _seed_two_step_workflow(root: Path) -> Quest:
         "      - {name: s2, file: agents/writer.md, tier: low}\n"
     )
     _write_fake_config(root)
-    return _make_change(root)
+    return _make_quest(root)
 
 
 @pytest.mark.anyio
@@ -2766,7 +2767,7 @@ async def test_continue_writes_target_step_label(tmp_path: Path) -> None:
     _write_fake_config(tmp_path)
     import subprocess
     subprocess.run(["git", "init", str(tmp_path)], check=True, capture_output=True)
-    quest = _make_change(tmp_path)
+    quest = _make_quest(tmp_path)
     _register_fake({"status": "Success"})
 
     result = await run_quest(quest, on_event=lambda _e: None)
@@ -2807,7 +2808,7 @@ async def test_complete_clears_step_label(tmp_path: Path) -> None:
         "          - {else: true, continue: true}\n"
     )
     _write_fake_config(tmp_path)
-    quest = _make_change(tmp_path)
+    quest = _make_quest(tmp_path)
     _register_fake({"status": "Success"})
 
     result = await run_quest(quest, on_event=lambda _e: None)
@@ -2846,7 +2847,7 @@ async def test_goto_writes_target_step_label(tmp_path: Path) -> None:
         "          - {else: true, pause: true}\n"
     )
     _write_fake_config(tmp_path)
-    quest = _make_change(tmp_path)
+    quest = _make_quest(tmp_path)
     _register_fake({"status": "Success"})
 
     result = await run_quest(quest, on_event=lambda _e: None)
@@ -2904,7 +2905,7 @@ async def test_executor_passes_autonomous_to_prompt(tmp_path: Path) -> None:
         "      - {name: w, file: agents/writer.md, tier: low}\n"
     )
     _write_fake_config(tmp_path)
-    quest = _make_change(tmp_path)
+    quest = _make_quest(tmp_path)
     sink: list = []
     _register_invocation_capturing({"status": "Success"}, sink)
 
@@ -2933,7 +2934,7 @@ async def test_quest_home_renders_worktree_relative(tmp_path: Path) -> None:
         "      - {name: w, file: agents/writer.md, tier: low}\n"
     )
     _write_fake_config(tmp_path)
-    quest = _make_change(tmp_path)
+    quest = _make_quest(tmp_path)
     sink: list = []
     _register_invocation_capturing({"status": "Success"}, sink)
 
@@ -2941,8 +2942,8 @@ async def test_quest_home_renders_worktree_relative(tmp_path: Path) -> None:
     assert result is RunResult.COMPLETED
 
     inv = sink[0]
-    assert inv.quest_context.quest_home == ".imp/quests/test-change"
-    assert "home=.imp/quests/test-change" in inv.initial_messages[0].content[0].text
+    assert inv.quest_context.quest_home == ".imp/quests/test-quest"
+    assert "home=.imp/quests/test-quest" in inv.initial_messages[0].content[0].text
     # worktree-anchored: relative, never absolute, never a parent escape.
     assert not inv.quest_context.quest_home.startswith("/")
     assert ".." not in inv.quest_context.quest_home
@@ -2974,7 +2975,7 @@ async def test_route_label_threads_to_next_step_started(tmp_path: Path) -> None:
         "      - {name: third, file: agents/writer.md, tier: low}\n"
     )
     _write_fake_config(tmp_path)
-    quest = _make_change(tmp_path)
+    quest = _make_quest(tmp_path)
     _register_fake({"status": "Success"})
 
     events: list[dict] = []
@@ -3025,7 +3026,7 @@ async def test_continue_renders_templated_target_label(tmp_path: Path) -> None:
     _write_fake_config(tmp_path)
     import subprocess
     subprocess.run(["git", "init", str(tmp_path)], check=True, capture_output=True)
-    quest = _make_change(tmp_path)
+    quest = _make_quest(tmp_path)
     _register_fake({"status": "Success"})
 
     result = await run_quest(quest, on_event=lambda _e: None)
@@ -3067,7 +3068,7 @@ async def test_goto_renders_templated_target_label(tmp_path: Path) -> None:
         "          - {else: true, pause: true}\n"
     )
     _write_fake_config(tmp_path)
-    quest = _make_change(tmp_path)
+    quest = _make_quest(tmp_path)
     _register_fake({"status": "Success"})
 
     result = await run_quest(quest, on_event=lambda _e: None)
@@ -3411,7 +3412,7 @@ async def test_backward_gate_bounce_emits_step_transition(tmp_path: Path) -> Non
     )
     _write_fake_config(tmp_path)
     subprocess.run(["git", "init", str(tmp_path)], check=True, capture_output=True)
-    quest = _make_change(tmp_path)
+    quest = _make_quest(tmp_path)
 
     from imp.providers import resolve
     resolve.reset_providers_for_tests()
@@ -3484,7 +3485,7 @@ async def test_forward_only_run_emits_no_step_transition(tmp_path: Path) -> None
     )
     _write_fake_config(tmp_path)
     subprocess.run(["git", "init", str(tmp_path)], check=True, capture_output=True)
-    quest = _make_change(tmp_path)
+    quest = _make_quest(tmp_path)
 
     from imp.providers import resolve
     resolve.reset_providers_for_tests()
@@ -3537,7 +3538,7 @@ async def test_self_goto_retry_emits_no_step_transition(tmp_path: Path) -> None:
     )
     _write_fake_config(tmp_path)
     subprocess.run(["git", "init", str(tmp_path)], check=True, capture_output=True)
-    quest = _make_change(tmp_path)
+    quest = _make_quest(tmp_path)
 
     from imp.providers import resolve
     resolve.reset_providers_for_tests()
@@ -3601,7 +3602,7 @@ async def test_continue_writes_target_phase_label(tmp_path: Path) -> None:
     _write_fake_config(tmp_path)
     import subprocess
     subprocess.run(["git", "init", str(tmp_path)], check=True, capture_output=True)
-    quest = _make_change(tmp_path)
+    quest = _make_quest(tmp_path)
     _register_fake({"status": "Success"})
 
     result = await run_quest(quest, on_event=lambda _e: None)
@@ -3643,7 +3644,7 @@ async def test_goto_writes_target_phase_label(tmp_path: Path) -> None:
         "          - {else: true, pause: true}\n"
     )
     _write_fake_config(tmp_path)
-    quest = _make_change(tmp_path)
+    quest = _make_quest(tmp_path)
     _register_fake({"status": "Success"})
 
     result = await run_quest(quest, on_event=lambda _e: None)
@@ -3687,7 +3688,7 @@ async def test_complete_clears_phase_label(tmp_path: Path) -> None:
         "          - {else: true, continue: true}\n"
     )
     _write_fake_config(tmp_path)
-    quest = _make_change(tmp_path)
+    quest = _make_quest(tmp_path)
     _register_fake({"status": "Success"})
 
     result = await run_quest(quest, on_event=lambda _e: None)
@@ -3728,7 +3729,7 @@ async def test_route_label_seeds_step_label_on_continue(tmp_path: Path) -> None:
         "          - {else: true, pause: true}\n"
     )
     _write_fake_config(tmp_path)
-    quest = _make_change(tmp_path)
+    quest = _make_quest(tmp_path)
     _register_fake({"status": "Success"})
 
     result = await run_quest(quest, on_event=lambda _e: None)
@@ -3769,7 +3770,7 @@ async def test_route_label_seeds_step_label_on_goto(tmp_path: Path) -> None:
         "          - {else: true, pause: true}\n"
     )
     _write_fake_config(tmp_path)
-    quest = _make_change(tmp_path)
+    quest = _make_quest(tmp_path)
     _register_fake({"status": "Success"})
 
     result = await run_quest(quest, on_event=lambda _e: None)
@@ -4022,7 +4023,7 @@ async def test_cross_plan_verify_counter_independent(tmp_path: Path) -> None:
     )
     _write_fake_config(tmp_path)
     subprocess.run(["git", "init", str(tmp_path)], check=True, capture_output=True)
-    quest = _make_change(tmp_path)
+    quest = _make_quest(tmp_path)
 
     from imp.providers import resolve
     resolve.reset_providers_for_tests()
@@ -4113,7 +4114,7 @@ async def test_per_step_counters_do_not_sum(tmp_path: Path) -> None:
         "          - {else: true, continue: true}\n"
     )
     _write_fake_config(tmp_path)
-    quest = _make_change(tmp_path)
+    quest = _make_quest(tmp_path)
 
     from imp.providers import resolve
     resolve.reset_providers_for_tests()
@@ -4245,7 +4246,7 @@ def test_build_sandbox_policy_creates_active_bind_source(
         "          - {else: true, pause: true}\n"
     )
     _write_fake_config(tmp_path)
-    quest = _make_change(tmp_path)
+    quest = _make_quest(tmp_path)
     config = load_effective_config(project_root=tmp_path, control_root=tmp_path).config
 
     quest_tmp_src = tmp_path / "qtmp_src"

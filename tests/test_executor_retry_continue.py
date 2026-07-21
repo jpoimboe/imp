@@ -35,7 +35,7 @@ _SINGLE_WF = (
 )
 
 
-def _make_change(root: Path, *, agents: dict[str, str], workflow_yaml: str) -> Quest:
+def _make_quest(root: Path, *, agents: dict[str, str], workflow_yaml: str) -> Quest:
     from imp.engine.loader import load_workflow
     from imp.providers.effective import load_effective_config
 
@@ -53,7 +53,7 @@ def _make_change(root: Path, *, agents: dict[str, str], workflow_yaml: str) -> Q
         "  low: {fake: m}\n  medium: {fake: m}\n  high: {fake: m}\n"
     )
 
-    quest_dir = root / ".imp" / "change"
+    quest_dir = root / ".imp" / "quests" / "test-quest"
     quest_dir.mkdir(parents=True, exist_ok=True)
     (quest_dir / "state").mkdir(exist_ok=True)
     (quest_dir / "quest.json").write_text(json.dumps(
@@ -116,7 +116,7 @@ class _StallThenSucceedProvider:
 async def test_backoff_persists_resume_continue_before_sleep(
     tmp_path: Path, provider_registry: Any, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    quest = _make_change(
+    quest = _make_quest(
         tmp_path, agents={"writer.md": _WRITER}, workflow_yaml=_SINGLE_WF)
     provider = _StallThenSucceedProvider(stalls=1)
     provider_registry("fake", env_check=lambda: True, factory=lambda _m: provider)
@@ -158,7 +158,7 @@ class _RecordingProvider:
 async def test_backoff_respawn_receives_resume_should_continue(
     tmp_path: Path, provider_registry: Any, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    quest = _make_change(
+    quest = _make_quest(
         tmp_path, agents={"writer.md": _WRITER}, workflow_yaml=_SINGLE_WF)
     provider = _RecordingProvider(stalls=1)
     provider_registry("fake", env_check=lambda: True, factory=lambda _m: provider)
@@ -240,7 +240,7 @@ class _ReworkProvider:
 async def test_completion_clears_resume_pair(
     tmp_path: Path, provider_registry: Any, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    quest = _make_change(
+    quest = _make_quest(
         tmp_path, agents={"writer.md": _WRITER}, workflow_yaml=_SINGLE_WF)
     _prov = _StallThenSucceedProvider(stalls=1)
     provider_registry(
@@ -264,7 +264,7 @@ async def test_completion_clears_resume_pair(
 async def test_forward_advance_clears_resume_pair(
     tmp_path: Path, provider_registry: Any,
 ) -> None:
-    quest = _make_change(
+    quest = _make_quest(
         tmp_path, agents={"a.md": _A}, workflow_yaml=_TWO_STEP_WF)
     # Seed a stale continue; the forward Continue (s1 → s2) must clear it.
     s = State.load(quest.state_dir)
@@ -293,7 +293,7 @@ async def test_forward_advance_clears_resume_pair(
 async def test_resume_goto_arms_solicit(
     tmp_path: Path, provider_registry: Any,
 ) -> None:
-    quest = _make_change(
+    quest = _make_quest(
         tmp_path, agents={"rev.md": _REV}, workflow_yaml=_RESUME_GOTO_WF)
     # Seed a stale continue; the resume-Goto branch must overwrite it.
     s = State.load(quest.state_dir)
@@ -348,7 +348,7 @@ class _FatalProvider:
 async def test_retry_ceiling_pause_preserves_marker(
     tmp_path: Path, provider_registry: Any, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    quest = _make_change(
+    quest = _make_quest(
         tmp_path, agents={"writer.md": _WRITER}, workflow_yaml=_SINGLE_WF)
     provider_registry("fake", env_check=lambda: True, factory=lambda _m: _AlwaysStallProvider())
 
@@ -374,7 +374,7 @@ async def test_retry_ceiling_pause_preserves_marker(
 async def test_fatal_pause_clears_marker(
     tmp_path: Path, provider_registry: Any,
 ) -> None:
-    quest = _make_change(
+    quest = _make_quest(
         tmp_path, agents={"writer.md": _WRITER}, workflow_yaml=_SINGLE_WF)
     # Seed a stale continue (as if a prior backoff had armed it).
     s = State.load(quest.state_dir)
@@ -394,7 +394,7 @@ async def test_fatal_pause_clears_marker(
 async def test_ctrl_c_park_arms_continue(
     tmp_path: Path, provider_registry: Any,
 ) -> None:
-    quest = _make_change(
+    quest = _make_quest(
         tmp_path, agents={"writer.md": _WRITER}, workflow_yaml=_SINGLE_WF)
     # Seed a stale continue; a Ctrl-C park during a transient backoff re-arms it.
     s = State.load(quest.state_dir)

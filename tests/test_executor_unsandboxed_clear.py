@@ -13,7 +13,7 @@ from tests.test_executor_retry_continue import (
     _SINGLE_WF,
     _TWO_STEP_WF,
     _WRITER,
-    _make_change,
+    _make_quest,
     _SuccessProvider,
 )
 
@@ -27,7 +27,7 @@ def anyio_backend() -> str:
 async def test_advance_to_different_step_clears_override_and_broadcasts_marker(
     tmp_path: Path, provider_registry: Any,
 ) -> None:
-    quest = _make_change(tmp_path, agents={"a.md": _A}, workflow_yaml=_TWO_STEP_WF)
+    quest = _make_quest(tmp_path, agents={"a.md": _A}, workflow_yaml=_TWO_STEP_WF)
     # Enter with the override live on both the coordinator and persisted State.
     s = State.load(quest.state_dir)
     s.unsandboxed = True
@@ -62,7 +62,7 @@ async def test_coordinator_unsandboxed_synced_to_state_before_pause(
     pause must persist coordinator.unsandboxed so that a leave-and-resume
     restores the toggle correctly.
     """
-    quest = _make_change(tmp_path, agents={"writer.md": _WRITER}, workflow_yaml=_SINGLE_WF)
+    quest = _make_quest(tmp_path, agents={"writer.md": _WRITER}, workflow_yaml=_SINGLE_WF)
     # State file starts with unsandboxed=False (factory default); coordinator is True.
     coord = InterruptCoordinator()
     coord.set_unsandboxed(True)
@@ -96,7 +96,7 @@ async def test_coordinator_unsandboxed_synced_to_state_before_pause(
 async def test_same_step_pause_and_resume_preserves_override(
     tmp_path: Path, provider_registry: Any,
 ) -> None:
-    quest = _make_change(tmp_path, agents={"writer.md": _WRITER},
+    quest = _make_quest(tmp_path, agents={"writer.md": _WRITER},
                          workflow_yaml=_SINGLE_WF)
     s = State.load(quest.state_dir)
     s.unsandboxed = True
