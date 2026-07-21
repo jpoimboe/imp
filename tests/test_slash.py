@@ -594,7 +594,7 @@ def test_sandbox_pre_session_reprompts_then_returns_real_line(
     from functools import partial
 
     from imp.cli.slash import SANDBOX_PRE_SESSION, ask_line_with_slash
-    quest = _FakeChange(tmp_path)
+    quest = _FakeQuest(tmp_path)
     prompt = _FakePrompt([command, "build the thing"])
     line = anyio.run(
         partial(ask_line_with_slash, prompt, _NullStatus(), quest,
