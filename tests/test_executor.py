@@ -2063,7 +2063,7 @@ async def test_unknown_step_pauses_without_silent_merge(tmp_path: Path) -> None:
 @pytest.mark.timeout(240)
 @pytest.mark.anyio
 async def test_frozen_script_runs_from_snapshot_cwd_with_live_project_root(
-    tmp_path: Path,
+    tmp_path: Path, _bare_sandbox: None,
 ) -> None:
     """A script gate runs with cwd under .imp/quests/test-quest/workflow/ (the snapshot,
     sandbox binding intact) while IMP_PROJECT_ROOT still points at the worktree, so
