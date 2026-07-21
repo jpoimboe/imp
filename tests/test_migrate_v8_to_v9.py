@@ -36,7 +36,7 @@ def test_load_migrates_v8_home_and_reads_create_mode_new(tmp_path: Path) -> None
     qd = _seed_v8(tmp_path, "mig902")
     q = Quest.load(tmp_path, "mig902")
     assert q.create_mode == "new"
-    assert _meta(qd)["layout_version"] == 11
+    assert _meta(qd)["layout_version"] == 12
 
 
 def test_hop_is_idempotent_and_leaves_no_temp_file(tmp_path: Path) -> None:
@@ -47,4 +47,4 @@ def test_hop_is_idempotent_and_leaves_no_temp_file(tmp_path: Path) -> None:
     assert _meta(qd)["create_mode"] == "new"
     assert _meta(qd)["layout_version"] == 9
     assert not list(qd.glob(".quest-*"))
-    assert LAYOUT_VERSION == 11
+    assert LAYOUT_VERSION == 12

@@ -64,7 +64,7 @@ def _seed_interactive_change(root: Path, *, armed: bool, started: bool = True):
                vars=dict(workflow.vars.defaults()), loop_counts={})
     st.has_started = started
     if armed:
-        st.arm_step_resume(mode="solicit")
+        st.arm_step_resume(should_continue=False)
     st.save(quest_dir / "state")
     quest = Quest(id="c", title="t", base_branch="main",
                     control_root=root, project_root=root, quest_dir=quest_dir,

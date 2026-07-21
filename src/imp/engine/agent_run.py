@@ -135,7 +135,7 @@ class AgentRunResult:
     awaiting_user: bool = False
     # True when the awaiting_user pause came from the cooperative-interrupt steer
     # (Ctrl-C mid-turn), not a genuine bare-turn-end yield. The executor arms
-    # State.resume_mode = "continue" so a no-message resume continues the step.
+    # State.resume_should_continue = True so a no-message resume continues the step.
     interrupt: bool = False
     # Tier A proactive handoff: the runner captured an agent-authored handoff
     # note at this path before stopping. The executor reincarnates the session
@@ -688,7 +688,7 @@ async def drive_invocation(
                         kind = payload.get("kind")
                         # An interrupt-caused teardown pauses cleanly with
                         # interrupt=True so the resume CONTINUES the step (the
-                        # executor arms State.resume_mode = "continue"), NOT
+                        # executor arms State.resume_should_continue = True), NOT
                         # classified by the error's own category. Classify off the
                         # DURABLE coordinator.interrupted latch, not the racy
                         # should_pause: end_gesture_round clears should_pause the
@@ -751,7 +751,7 @@ async def drive_invocation(
         # turn closed normally, so the steer was lost) while the durable
         # coordinator.interrupted latch is still True — end_gesture_round clears
         # should_pause but never interrupted. Classify off that durable latch so
-        # interrupt=True arms State.resume_mode = "continue" and a no-message
+        # interrupt=True arms State.resume_should_continue = True and a no-message
         # resume continues the step instead of parking at a phantom gate.
         # This cannot leak a false interrupt=True onto an ordinary resumed run:
         # clear_pause() runs before any resume and resets interrupted, so the

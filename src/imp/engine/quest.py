@@ -21,7 +21,7 @@ from imp.engine.seed import seed_workflow_start
 from imp.engine.state import JsonlEventLog, State, classify_pause_halt, parse_events_jsonl
 from imp.engine.types import SourceLoc
 
-LAYOUT_VERSION = 11  # bump in the SAME commit as any breaking quest-home layout/schema change
+LAYOUT_VERSION = 12  # bump in the SAME commit as any breaking quest-home layout/schema change
 
 
 def _write_quest_json(meta_path: Path, meta: dict[str, Any]) -> None:
@@ -304,6 +304,32 @@ def _migrate_v10_to_v11(quest_dir: Path) -> None:
     _write_quest_json(meta_path, meta)
 
 
+def _migrate_v11_to_v12(quest_dir: Path) -> None:
+    """v11->v12: the resume disposition field `resume_mode`
+    (Literal["solicit","continue"] | None) was folded to a plain
+    `resume_should_continue: bool`. Rewrite a live home's state.json: when the
+    old resume_mode key is present, set resume_should_continue =
+    (resume_mode == "continue") and drop resume_mode. The key-presence guard
+    makes the hop a true no-op on re-run (once resume_mode is gone the bool is
+    left untouched) so a partial failure — state rewritten, version stamp not yet
+    written — re-runs without flipping an armed continue-resume back to False.
+    The state rewrite precedes the version stamp so a partial failure re-runs. A
+    home without state.json (un-materialized seed) advances
+    only the version stamp. The archive is untouched (_DATA_VERSION unchanged):
+    resume_mode is always null in a completed/merged quest and is never read
+    from an archived blob."""
+    state_path = quest_dir / "state" / "state.json"
+    if state_path.exists():
+        data = json.loads(state_path.read_text())
+        if "resume_mode" in data:
+            data["resume_should_continue"] = data.pop("resume_mode") == "continue"
+        _rewrite_state_json(state_path, data)
+    meta_path = quest_dir / "quest.json"
+    meta = json.loads(meta_path.read_text())
+    meta["layout_version"] = 12
+    _write_quest_json(meta_path, meta)
+
+
 _MIGRATIONS: dict[tuple[int, int], Callable[[Path], None]] = {
     (1, 2): _migrate_v1_to_v2,
     (2, 3): _migrate_v2_to_v3,
@@ -315,6 +341,7 @@ _MIGRATIONS: dict[tuple[int, int], Callable[[Path], None]] = {
     (8, 9): _migrate_v8_to_v9,
     (9, 10): _migrate_v9_to_v10,
     (10, 11): _migrate_v10_to_v11,
+    (11, 12): _migrate_v11_to_v12,
 }
 
 

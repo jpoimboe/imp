@@ -7,8 +7,8 @@ from imp.engine.quest import LAYOUT_VERSION, Quest, _imp_commit
 from tests.conftest import _git, _seed_control
 
 
-def test_layout_version_constant_is_eleven() -> None:
-    assert LAYOUT_VERSION == 11
+def test_layout_version_constant_is_twelve() -> None:
+    assert LAYOUT_VERSION == 12
 
 
 def test_create_stamps_version_and_imp_commit(tmp_path: Path) -> None:

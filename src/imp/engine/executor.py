@@ -589,10 +589,9 @@ async def run_quest(
                     evicted = _evict_if_holding(quest, state, log)
                 if not evicted and step.kind == "agent":
                     state.arm_step_resume(
-                        mode="continue" if (
+                        should_continue=(
                             interrupt_caused
-                            or action.reason in ("retry_ceiling", "reauth_needed"))
-                        else "solicit")
+                            or action.reason in ("retry_ceiling", "reauth_needed")))
                 reason = action.reason or "interrupt"
                 interrupt_reason = (coordinator.pause_reason
                                     if coordinator.should_pause else None)
@@ -669,7 +668,7 @@ async def run_quest(
                     # internal retries, so resetting per entry would let a
                     # persistent error retry forever.
                     state.step_attempt = 0
-                    state.arm_step_resume(mode="solicit")
+                    state.arm_step_resume(should_continue=False)
                 else:
                     state.clear_step_resume()
             else:
@@ -756,7 +755,7 @@ async def run_quest(
                 },
             )
             _emit_paused_event(log, "internal_error", kind=kind)
-            state.arm_step_resume(mode="solicit")
+            state.arm_step_resume(should_continue=False)
             state.status = "error"
             state.halt_condition = None
             state.unsandboxed = coordinator.unsandboxed
@@ -1497,7 +1496,7 @@ async def _route_agent(
                 return pause, None, {}
         backoff += 1
         # Persist before sleep so a kill/crash during backoff leaves the intent on disk.
-        state.arm_step_resume(mode="continue")
+        state.arm_step_resume(should_continue=True)
         state.save(quest.state_dir)
         # Self-healed-retry visibility (agent_retry): surface the backoff so a
         # transient network/rate_limit error that recovers doesn't look like a
@@ -1530,8 +1529,7 @@ async def _route_agent(
             # reload keeps the transcript (the agent's last text is what the
             # AWAITING_USER resume delivers a reply to). Mirrors the resume:
             # edge's marker; cleared on the next forward Continue.
-            state.arm_step_resume(
-                mode="continue" if result.interrupt else "solicit")
+            state.arm_step_resume(should_continue=result.interrupt)
             state.save(quest.state_dir)
         # A genuine your-turn yield gets its own reason so it stops sharing the
         # "interrupt" token; a real interrupt (interrupt=True) or a
@@ -1799,7 +1797,7 @@ async def _run_agent_invocation(
         balance_on_resume=balance_on_resume,
         resume_should_continue=(
             state.resume_pending == state.step
-            and state.resume_mode == "continue"),
+            and state.resume_should_continue),
         log=log,
         test_gates=test_gates,
         pythonpath=pythonpath,

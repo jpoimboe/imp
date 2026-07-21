@@ -51,7 +51,7 @@ def archive_conversation(quest: Quest) -> None:
     with ProjectLock(quest.quest_dir / "lock").acquire():  # raises LockHeld if runner is live
         state = State.load(quest.state_dir)
         state.status = "shelved"
-        state.arm_step_resume(mode="solicit")
+        state.arm_step_resume(should_continue=False)
         state.save(quest.state_dir)
         quest.event_log().append(
             agent_id=None, type="conversation_archived", payload={})
@@ -81,7 +81,7 @@ def save_as_draft(quest: Quest, reason: str | None = None) -> None:
     with ProjectLock(quest.quest_dir / "lock").acquire():
         state = State.load(quest.state_dir)
         state.status = "paused"
-        state.arm_step_resume(mode="solicit")
+        state.arm_step_resume(should_continue=False)
         state.save(quest.state_dir)
         payload = {"interrupt_reason": reason} if reason else {}
         quest.event_log().append(

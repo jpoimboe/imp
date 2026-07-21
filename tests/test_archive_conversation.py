@@ -75,7 +75,7 @@ def test_archive_conversation_arms_resume_pending(tmp_path: Path) -> None:
     assert raw is not None
     persisted = json.loads(raw)
     assert persisted["resume_pending"] == step                 # armed to the step on leave
-    assert persisted["resume_mode"] == "solicit"               # clean yield re-solicits
+    assert persisted["resume_should_continue"] is False               # clean yield re-solicits
     assert "interrupt_pending" not in persisted
 
 

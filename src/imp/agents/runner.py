@@ -196,7 +196,7 @@ class AgentInvocation:
     # wrapper text appended on that balancing user turn"; None = balance only.
     balance_on_resume: bool = False
     # True when a resume/respawn should deliver the continuation nudge (computed
-    # by the executor from State.resume_mode == "continue") rather than solicit
+    # by the executor from State.resume_should_continue) rather than solicit
     # an empty reply and park.
     resume_should_continue: bool = False
     # tier name → ProviderModel, the run's tier map. Threaded by the executor

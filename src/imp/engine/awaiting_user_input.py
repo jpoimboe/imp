@@ -16,7 +16,7 @@ class AwaitingUserInput(Exception):
 
     `interrupt` is True only when the pause came from the cooperative-interrupt
     steer (Ctrl-C mid-turn) rather than a genuine bare-turn-end yield; the
-    executor arms State.resume_mode = "continue" so a no-message resume
+    executor arms State.resume_should_continue = True so a no-message resume
     continues the interrupted step instead of soliciting."""
 
     def __init__(self, prompt: str = "", *, interrupt: bool = False) -> None:
