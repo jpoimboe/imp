@@ -30,6 +30,17 @@ def test_quest_tmp_root_is_isolated_per_test() -> None:
     assert str(sock).startswith(tmpdir)
 
 
+def test_var_tmp_root_is_isolated_per_test() -> None:
+    # Fixture redirects /var/tmp to a unique real-disk per-test dir (overlayfs needs real disk).
+    from imp.engine.env import quest_var_tmp_root
+
+    root = quest_var_tmp_root()
+    assert root != Path("/var/tmp")
+    assert root.parent == Path("/var/tmp")
+    assert root.name.startswith("imp-t-")
+    assert root.is_dir()
+
+
 def test_ensure_quest_tmp_dir_creates_0o700_parent_and_leaf(tmp_path: Path) -> None:
     # The autouse _isolate_quest_tmp_root fixture already points the tmp root at a
     # short unique per-test dir, so the created tree is hermetic and auto-cleaned.
@@ -106,9 +117,11 @@ def test_spawn_session_daemon_exports_quest_tmp_without_poisoning_tmpdir(
 
 
 def test_var_tmp_dir_is_per_quest_subdir_of_var_tmp_imp_uid(tmp_path: Path) -> None:
+    from imp.engine.env import quest_var_tmp_root
+
     _seed_control(tmp_path)
     ch = Quest.create(tmp_path, title="T", quest_id="qvt1", base_branch="main")
-    assert ch.var_tmp_dir == Path("/var/tmp") / f"imp-{os.getuid()}" / "qvt1"
+    assert ch.var_tmp_dir == quest_var_tmp_root() / f"imp-{os.getuid()}" / "qvt1"
 
 
 def test_var_tmp_dir_derives_from_quest_var_tmp_root(
@@ -125,14 +138,16 @@ def test_var_tmp_dir_equals_resolve_policy_source_even_with_injected_uid(
 ) -> None:
     # AC4: quest.var_tmp_dir equals resolve_policy's bound source (both use os.getuid()).
     import imp.engine.sandbox as sandbox_mod
+    from imp.engine.env import quest_var_tmp_root
     from imp.engine.sandbox import SandboxConfig, resolve_policy
 
     _seed_control(tmp_path)
     ch = Quest.create(tmp_path, title="T", quest_id="qvt2", base_branch="main")
+    root = quest_var_tmp_root()
     real_access = os.access
     monkeypatch.setattr(
         sandbox_mod.os, "access",
-        lambda p, m: True if str(p) == "/var/tmp" else real_access(p, m))
+        lambda p, m: True if str(p) == str(root) else real_access(p, m))
     pol = resolve_policy(
         worktree=ch.project_root, control_root=ch.control_root,
         quest_id=ch.id, cfg=SandboxConfig(uid=99999),
