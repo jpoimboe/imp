@@ -68,9 +68,11 @@ def test_bash_reports_sandbox_spawn_failure_distinctly(
 ) -> None:
     import imp.agents.tools.bash as bashmod
     # Simulate a sandboxed spawn that failed to ENTER: an argv that exits nonzero
-    # and never emits the entry sentinel (no real bwrap).
+    # and never emits the entry sentinel (no real bwrap). Every attempt fails, so
+    # the tool retries to exhaustion and returns the setup-failure result.
     monkeypatch.setattr(bashmod, "build_sandbox_argv",
                         lambda command, **kw: ["sh", "-c", "exit 3"])
+    monkeypatch.setattr(bashmod, "sandbox_spawn_backoff_delay", lambda attempt: 0.0)
     ctx = _ctx(tmp_path)
     ctx.base_sandbox_policy = _active_policy(tmp_path)
     out = json.loads(_run_bash(ctx, {"command": "x"}))
@@ -93,12 +95,56 @@ def test_bash_sandbox_spawn_failure_emits_event(
     import imp.agents.tools.bash as bashmod
     monkeypatch.setattr(bashmod, "build_sandbox_argv",
                         lambda command, **kw: ["sh", "-c", "exit 3"])
+    monkeypatch.setattr(bashmod, "sandbox_spawn_backoff_delay", lambda attempt: 0.0)
     ctx = _ctx(tmp_path)
     ctx.base_sandbox_policy = _active_policy(tmp_path)
     ctx.event_log = _RecLog()
     json.loads(_run_bash(ctx, {"command": "x"}))
-    [w] = ctx.event_log.warnings()
-    assert w["reason"] == "overlay-setup-failed"
+    warns = ctx.event_log.warnings()
+    # 4 retry breadcrumbs (attempts 2..5) then the terminal setup-failure warning.
+    assert [w["reason"] for w in warns] == (
+        ["sandbox-spawn-failed"] * 4 + ["overlay-setup-failed"])
+    assert "retrying (2/5)" in warns[0]["message"]
+    assert "retrying (5/5)" in warns[3]["message"]
+
+
+def test_bash_retries_then_succeeds(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # `bash()` builds `argv` ONCE (above the retry region) and the
+    # loop re-spawns that same argv on each attempt — exactly as production absorbs
+    # a transient bwrap userns failure. So the retry variation must be driven
+    # through the seam the loop re-invokes (the spawn itself), NOT build_sandbox_argv
+    # (off the retry path — called once). A stateful counter-file argv makes the
+    # fixed command fail (no marker, exit 3) on the first two spawns and enter the
+    # sandbox (emit the marker) on the 3rd.
+    import shlex
+
+    import imp.agents.tools.bash as bashmod
+    from imp.engine.sandbox import SANDBOX_ENTERED_MARKER
+    counter = tmp_path / "spawn-count"
+    q = shlex.quote(str(counter))
+    script = (
+        f"n=$(cat {q} 2>/dev/null || echo 0); n=$((n+1)); "
+        f'echo "$n" > {q}; '
+        f'if [ "$n" -ge 3 ]; then '
+        f"printf '%s\\n' {SANDBOX_ENTERED_MARKER} >&2; echo done; "
+        f"else exit 3; fi")
+    monkeypatch.setattr(bashmod, "build_sandbox_argv",
+                        lambda command, **kw: ["sh", "-c", script])
+    monkeypatch.setattr(bashmod, "sandbox_spawn_backoff_delay", lambda attempt: 0.0)
+    ctx = _ctx(tmp_path)
+    ctx.base_sandbox_policy = _active_policy(tmp_path)
+    ctx.event_log = _RecLog()
+    out = json.loads(_run_bash(ctx, {"command": "x"}))
+    assert "status" not in out                           # healthy on the 3rd attempt
+    assert out["returncode"] == 0
+    assert "done" in out["stdout"]
+    assert counter.read_text().strip() == "3"            # 2 failed spawns + 1 success
+    warns = ctx.event_log.warnings()
+    assert [w["reason"] for w in warns] == ["sandbox-spawn-failed"] * 2
+    assert "retrying (2/5)" in warns[0]["message"]
+    assert "retrying (3/5)" in warns[1]["message"]
 
 
 def test_bash_healthy_sandboxed_command_strips_marker(
