@@ -1027,19 +1027,6 @@ def test_strip_sandbox_marker_removes_single_line():
     assert strip_sandbox_marker("just output\n") == "just output\n"
 
 
-def test_overlay_setup_failed_keys_on_marker():
-    from imp.engine.sandbox import (
-        OVERLAY_SETUP_FAILED_MARKER,
-        overlay_setup_failed,
-    )
-    # True only when the controlled sentinel is present — NOT on the kernel's
-    # own mount-error text (which the wrapper also lets through to stderr).
-    assert overlay_setup_failed(f"noise\n{OVERLAY_SETUP_FAILED_MARKER}\nmore") is True
-    assert overlay_setup_failed(
-        "mount: wrong fs type, bad option, bad superblock on overlay") is False
-    assert overlay_setup_failed("") is False
-
-
 def test_overlay_wrapper_omits_sentinel_on_mount_failure():
     from imp.engine.sandbox import SANDBOX_ENTERED_MARKER
     hl = HomeLayer(home="/home/u", merged="/up/merged",
@@ -2002,3 +1989,10 @@ def test_argv_binds_match_bind_plan_with_worktrees_mask():
     assert _parse_argv_binds(argv) == p.bind_plan()
     assert ("/ctl/.git/worktrees", "mask_dir") in p.bind_plan()
     assert ("/ctl/.git/worktrees/abc", "rw") in p.bind_plan()
+
+
+def test_retired_overlay_symbols_are_gone():
+    import imp.engine.sandbox as sb
+    for name in ("OVERLAY_SETUP_FAILED_MARKER", "OVERLAY_SETUP_FAILED_CODE",
+                 "OVERLAY_SETUP_FAILED_MESSAGE", "overlay_setup_failed"):
+        assert not hasattr(sb, name), f"{name} should be deleted"
