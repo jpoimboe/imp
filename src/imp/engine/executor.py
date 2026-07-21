@@ -1896,4 +1896,13 @@ def _build_sandbox_policy(quest: Quest, config: Any, log: EventLog) -> Any:
         # In production spawn_session_daemon already created it 0o700; this makes
         # direct-run paths (no daemon) safe too.
         Path(policy.quest_tmp_dir).mkdir(parents=True, exist_ok=True)
+    if policy.active and policy.quest_var_tmp_dir:
+        # The bwrap SOURCE for the namespace /var/tmp; --bind (not --bind-try)
+        # requires it to exist before any sandboxed spawn. Chmod the imp-<uid> parent
+        # to 0o700 too (mkdir -p leaves it at umask perms, and /var/tmp is a
+        # world-writable sticky dir); the chmods also correct a pre-existing wrong mode.
+        var_tmp_leaf = Path(policy.quest_var_tmp_dir)
+        var_tmp_leaf.mkdir(parents=True, exist_ok=True, mode=0o700)
+        var_tmp_leaf.chmod(0o700)
+        var_tmp_leaf.parent.chmod(0o700)
     return policy

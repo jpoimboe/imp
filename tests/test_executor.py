@@ -4253,7 +4253,8 @@ def test_build_sandbox_policy_creates_active_bind_source(
     assert not quest_tmp_src.exists()
 
     stub_policy = types.SimpleNamespace(
-        active=True, quest_tmp_dir=str(quest_tmp_src), note="", home="",
+        active=True, quest_tmp_dir=str(quest_tmp_src), quest_var_tmp_dir="",
+        note="", home="",
     )
     monkeypatch.setattr(executor, "resolve_policy", lambda **kw: stub_policy)
     monkeypatch.setattr(executor, "_warn_if_no_overlay", lambda *a, **kw: None)
@@ -4262,3 +4263,51 @@ def test_build_sandbox_policy_creates_active_bind_source(
     executor._build_sandbox_policy(quest, config, log)
 
     assert quest_tmp_src.is_dir()
+
+
+def test_build_sandbox_policy_creates_var_tmp_bind_source(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    """_build_sandbox_policy must mkdir quest_var_tmp_dir (0o700) when the policy is
+    active; bwrap uses --bind (not --bind-try), so the source must exist first."""
+    import types
+
+    from imp.engine import executor
+    from imp.engine.state import InMemoryEventLog
+    from imp.providers.effective import load_effective_config
+
+    wf = tmp_path / "imp" / "workflows" / "imp"
+    wf.mkdir(parents=True)
+    (wf / "workflow.yaml").write_text(
+        "name: t\ndescription: t\n"
+        "defaults: {max_retries: 1, max_loops: 6}\n"
+        "phases:\n"
+        "  - name: only\n"
+        "    steps:\n"
+        "      - name: s\n"
+        "        command: 'true'\n"
+        "        rules:\n"
+        "          - {else: true, pause: true}\n"
+    )
+    _write_fake_config(tmp_path)
+    quest = _make_change(tmp_path)
+    config = load_effective_config(project_root=tmp_path, control_root=tmp_path).config
+
+    # Nest the leaf so its parent is a dir the provisioning itself creates (the
+    # imp-<uid> parent in production), not pytest's tmp_path.
+    var_tmp_src = tmp_path / "imp-uid" / "vt_src"
+    assert not var_tmp_src.exists()
+
+    stub_policy = types.SimpleNamespace(
+        active=True, quest_tmp_dir="", quest_var_tmp_dir=str(var_tmp_src),
+        note="", home="",
+    )
+    monkeypatch.setattr(executor, "resolve_policy", lambda **kw: stub_policy)
+    monkeypatch.setattr(executor, "_warn_if_no_overlay", lambda *a, **kw: None)
+
+    log = InMemoryEventLog()
+    executor._build_sandbox_policy(quest, config, log)
+
+    assert var_tmp_src.is_dir()
+    assert var_tmp_src.stat().st_mode & 0o777 == 0o700
+    assert var_tmp_src.parent.stat().st_mode & 0o777 == 0o700  # imp-<uid> parent also 0o700
