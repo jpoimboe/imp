@@ -173,3 +173,23 @@ def test_after_replacement_bare_header_matches_no_startup_layout() -> None:
         committed="feat · demo · resuming\n", preceded_by_blank=False,
         startup_verb=None)
     assert _trimmed(with_startup) == _trimmed(no_startup)
+
+
+# ---- echoed reply → spinner: one blank via the real echo seam --------------
+
+def test_echoed_reply_then_spinner_one_blank() -> None:
+    # Inert-resume wiring: no committed scrollback, footer owns its leading blank.
+    drv, out, _status = _build(
+        committed="", preceded_by_blank=False, startup_verb="resuming")
+    # Drive the reply through the real echo seam (walks via _walk), not a
+    # hardcoded committed string.
+    drv.echo_submitted_reply("sandbox is off, go ahead and try")
+    drv.install_startup_status()
+    _status._frame += 1
+    _status._draw()                                  # one spinner tick, no live event
+    screen = Screen()
+    screen.feed(out.getvalue())
+    lines = screen.lines
+    i = _spinner_index(lines)
+    assert lines[i - 1] == ""                                        # the footer's own blank
+    assert lines[i - 2].strip() == "> sandbox is off, go ahead and try"
