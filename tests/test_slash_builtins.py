@@ -287,6 +287,52 @@ def test_abandon_pre_session_returns_literal(tmp_path: Path) -> None:
     assert result == "/abandon"
 
 
+SANDBOX_PRE_SESSION = (
+    "/sandbox applies to a running step — there's nothing to toggle yet. "
+    "It's on by default once the quest starts; run /sandbox off then to lift it.")
+
+
+@pytest.mark.parametrize("command", ["/sandbox on", "/sandbox off",
+                                     "/sandbox", "/sandbox maybe"])
+def test_sandbox_pre_session_intercepted_for_every_form(
+    tmp_path: Path, command: str,
+) -> None:
+    # Pre-session: no running step, no daemon. Every /sandbox form must echo the
+    # caret line, print the explanatory copy, and re-prompt — never return a
+    # /sandbox command string that would become the opening message.
+    quest = SimpleNamespace(id="pre9", control_root=tmp_path, workflow_dir=tmp_path)
+    out: list[str] = []
+    result = handle_slash_line(
+        command, quest=quest, output_fn=out.append, pre_session=True)
+    assert result is REPROMPT
+    assert out[0] == f"> {command}"
+    assert any(SANDBOX_PRE_SESSION in line for line in out)
+
+
+def test_sandbox_pre_session_copy_is_verbatim() -> None:
+    from imp.cli import slash
+    assert slash.SANDBOX_PRE_SESSION == SANDBOX_PRE_SESSION
+
+
+@pytest.mark.parametrize("command,expected", [
+    ("/sandbox on", "/sandbox on"),
+    ("/sandbox off", "/sandbox off"),
+])
+def test_sandbox_mid_session_accept_paths_unchanged(
+    tmp_path: Path, command: str, expected: str,
+) -> None:
+    # With pre_session False the toggle accept paths still return the literal
+    # command (unsandboxed matched to the requested direction), unaffected by the
+    # new pre-session branch.
+    quest = SimpleNamespace(id="c1", control_root=tmp_path, workflow_dir=tmp_path)
+    out: list[str] = []
+    result = handle_slash_line(
+        command, quest=quest, output_fn=out.append,
+        unsandboxed=(command == "/sandbox on"))
+    assert result == expected
+    assert out == []
+
+
 def test_compact_builtin_returns_literal_for_the_gate_loop(tmp_path: Path) -> None:
     # /compact is a built-in (NOT a skill): it returns the literal so the session
     # gate loop sends CONTROL_COMPACT; it carries no args, like /abandon.

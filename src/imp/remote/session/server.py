@@ -36,6 +36,15 @@ RunFn = Callable[..., Awaitable[Any]]
 _CONTROL_QUEUE_DEPTH = 64
 _INTERNAL_PAUSE = "__detach_pause__"  # server-internal: never a client frame action
 
+# Emitted from the CONTROL_SET_SANDBOX handler as script_output scrollback, mirroring
+# _run_compaction's "compacted — …". Wording is byte-identical to the former client copy.
+SANDBOX_OFF_CONFIRMED = (
+    "Sandbox off — this step is now unsandboxed. It re-enables when the "
+    "step finishes; run /sandbox on to re-enable it now.")
+SANDBOX_ON_FROM_OFF = (
+    "Sandbox on. Shell and file tools are confined to the worktree again. "
+    "Processes already started while unsandboxed keep their current access.")
+
 # Startup grace: how long a hibernation gate waits for the FIRST client to attach
 # before falling back to hibernation. The spawning client (interactive or remote
 # reply delivery) attaches a beat after the daemon starts resuming, so a
@@ -438,6 +447,13 @@ class SessionServer:
             # Transient: broadcast-only via _emit, never the event log, so it can't replay stale.
             self._emit({"type": "sandbox_marker",
                         "payload": {"unsandboxed": reason == "off"}})
+            self._emit({"type": "script_output",
+                        "payload": {"stdout": SANDBOX_OFF_CONFIRMED if reason == "off"
+                                    else SANDBOX_ON_FROM_OFF}})
+            # Re-open the parked between-turns prompt so the client's _answer_gates loop,
+            # blocked on gate_recv after set_sandbox, receives a gate — no stray spinner.
+            if self._pending_prompt is not None:
+                self._emit(self._pending_prompt)
         elif action == CONTROL_INTERRUPT_LEAVE and self._coordinator is not None:
             await self._coordinator.signal_pause(reason=reason or "ctrl-d", via="frame")
         elif action == CONTROL_INTERRUPT_FORCE and self._coordinator is not None:

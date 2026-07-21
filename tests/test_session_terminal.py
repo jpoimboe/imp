@@ -2554,6 +2554,84 @@ async def test_sandbox_off_at_gate_forwards_frame_and_daemon_broadcast_lights_ma
 
 
 @pytest.mark.anyio
+async def test_sandbox_toggle_reprompts_with_confirmation_after_caret(
+    tmp_path: Path,
+) -> None:
+    from imp.remote.session.server import SANDBOX_OFF_CONFIRMED
+
+    sock = str(tmp_path / "s.sock")
+    server_coord = InterruptCoordinator()
+    server = SessionServer(sock, hibernate=False, coordinator=server_coord)
+
+    async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
+        await wait_until(lambda: server.attached_count != 0)
+        on_event({"type": "awaiting_user_input",
+                   "payload": {"steer_hint": "reply?"}})
+        # Park on the chat gate so _pending_prompt is set to the awaiting gate.
+        return await user_chat_input_fn("reply?")
+
+    coord = InterruptCoordinator()
+
+    async def _attach(
+        on_event: Callable[[dict[str, Any]], None],
+    ) -> SessionClient:
+        client = SessionClient(sock, "c1", "T", on_event=on_event)
+        await client.connect()
+        return client
+
+    replies = iter(["/sandbox off", "done"])
+    solicit_calls: list[str] = []
+
+    async def _solicit(_prompt: str, _interrupt: bool = False) -> str:
+        solicit_calls.append(_prompt)
+        try:
+            return next(replies)
+        except StopIteration:
+            await anyio.sleep_forever()
+
+    log: list[str] = []
+
+    class _Driver:
+        def on_event(self, event: dict[str, Any]) -> None:
+            if event.get("type") == "script_output":
+                log.append("confirm:" + event["payload"]["stdout"])
+
+        def finish(self) -> None: ...
+
+        def append_committed_reply(self, text: str) -> None:
+            log.append("caret:" + text)
+
+        def set_unsandboxed(self, value: bool) -> None: ...
+
+    result: dict[str, Any] = {}
+    with anyio.fail_after(30):   # deadlock backstop only
+        async with anyio.create_task_group() as tg:
+            await server.open()
+
+            async def _run() -> None:
+                result["ret"] = await server.serve(run_fn)
+
+            tg.start_soon(_run)
+
+            async def _client() -> None:
+                await run_terminal_client(
+                    attach=_attach, driver=_Driver(),
+                    coord=coord, solicit=_solicit, quest_id="c1", leave_mode="new")
+
+            tg.start_soon(_client)
+            await wait_until(lambda: "ret" in result)
+            tg.cancel_scope.cancel()
+
+    # The run only returns once the SECOND solicit's real reply resolved the gate —
+    # proving the toggle re-opened the prompt instead of hanging on a stray spinner.
+    assert result["ret"] == "done"
+    assert solicit_calls == ["reply?", "reply?"]
+    # Caret echo is committed before the daemon's confirmation lands.
+    assert log == ["caret:/sandbox off", "confirm:" + SANDBOX_OFF_CONFIRMED]
+    assert server_coord.unsandboxed is True
+
+
+@pytest.mark.anyio
 async def test_client_intercepts_sandbox_marker_without_routing_to_driver(
     tmp_path: Path,
 ) -> None:

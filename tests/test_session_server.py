@@ -1606,6 +1606,78 @@ async def test_set_sandbox_control_broadcasts_transient_marker(
     assert [m["payload"]["unsandboxed"] for m in markers] == [True, False]
 
 
+def test_sandbox_toggle_confirmations_verbatim() -> None:
+    from imp.remote.session import server
+    assert server.SANDBOX_OFF_CONFIRMED == (
+        "Sandbox off — this step is now unsandboxed. It re-enables when the "
+        "step finishes; run /sandbox on to re-enable it now.")
+    assert server.SANDBOX_ON_FROM_OFF == (
+        "Sandbox on. Shell and file tools are confined to the worktree again. "
+        "Processes already started while unsandboxed keep their current access.")
+
+
+@pytest.mark.anyio
+async def test_set_sandbox_emits_confirmation_scrollback(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from imp.cli.signals import InterruptCoordinator
+    from imp.remote.session.protocol import CONTROL_SET_SANDBOX
+    from imp.remote.session.server import SANDBOX_OFF_CONFIRMED, SANDBOX_ON_FROM_OFF
+
+    coord = InterruptCoordinator()
+    server = SessionServer(str(tmp_path / "s.sock"), coordinator=coord)
+    broadcasts: list[dict[str, Any]] = []
+    monkeypatch.setattr(server._socket, "broadcast", broadcasts.append)
+
+    await server._dispatch_control(CONTROL_SET_SANDBOX, "off")
+    await server._dispatch_control(CONTROL_SET_SANDBOX, "on")
+
+    outputs = [e["payload"]["stdout"]
+               for e in broadcasts if e.get("type") == "script_output"]
+    assert outputs == [SANDBOX_OFF_CONFIRMED, SANDBOX_ON_FROM_OFF]
+
+
+@pytest.mark.anyio
+async def test_set_sandbox_reemits_pending_prompt_after_confirmation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from imp.cli.signals import InterruptCoordinator
+    from imp.remote.session.protocol import CONTROL_SET_SANDBOX
+
+    coord = InterruptCoordinator()
+    server = SessionServer(str(tmp_path / "s.sock"), coordinator=coord)
+    gate = {"type": "awaiting_user_input", "payload": {"steer_hint": "reply?"}}
+    server.set_pending_prompt(gate)
+    broadcasts: list[dict[str, Any]] = []
+    monkeypatch.setattr(server._socket, "broadcast", broadcasts.append)
+
+    await server._dispatch_control(CONTROL_SET_SANDBOX, "off")
+
+    types = [e.get("type") for e in broadcasts]
+    assert types.index("sandbox_marker") < types.index("script_output")
+    assert types.index("script_output") < types.index("awaiting_user_input")
+    assert broadcasts[types.index("awaiting_user_input")] is gate
+
+
+@pytest.mark.anyio
+async def test_set_sandbox_emits_no_prompt_when_pending_none(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from imp.cli.signals import InterruptCoordinator
+    from imp.remote.session.protocol import CONTROL_SET_SANDBOX
+
+    coord = InterruptCoordinator()
+    server = SessionServer(str(tmp_path / "s.sock"), coordinator=coord)
+    assert server._pending_prompt is None
+    broadcasts: list[dict[str, Any]] = []
+    monkeypatch.setattr(server._socket, "broadcast", broadcasts.append)
+
+    await server._dispatch_control(CONTROL_SET_SANDBOX, "off")
+
+    assert not any(e.get("type") == "awaiting_user_input" for e in broadcasts)
+    assert any(e.get("type") == "script_output" for e in broadcasts)
+
+
 def test_attach_pulse_seeds_marker_when_unsandboxed(tmp_path: Path) -> None:
     from imp.cli.signals import InterruptCoordinator
 
