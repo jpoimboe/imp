@@ -155,7 +155,7 @@ async def serve_quest_session(
             # prior run died mid-step, so replay the interrupted step instead of
             # re-burning it. A clean pause (no lock) leaves resume_pending unset.
             if crashed:
-                state.arm_step_resume(mode="continue")
+                state.arm_step_resume(should_continue=True)
             state.save(quest.state_dir)
             coordinator.set_unsandboxed(state.unsandboxed)
             # A crash replays the interrupted agent step, so it always lands in
@@ -226,16 +226,17 @@ async def serve_quest_session(
                     state = State.load(quest.state_dir)
                     if coordinator.pause_reason == "ctrl-d":
                         state.resume_target = "agent"
-                        state.arm_step_resume(mode="continue")
-                    elif state.resume_mode == "continue":
+                        state.arm_step_resume(should_continue=True)
+                    elif state.resume_should_continue:
                         # The executor armed the interrupt disposition (mid-turn
                         # Ctrl-C steer, Pause(interrupt=True)): preserve its
-                        # `continue` arming and reproduce `interrupted ·` on
-                        # resume. Re-arming solicit here would drop both.
+                        # continue-resume arming (resume_should_continue=True) and
+                        # reproduce `interrupted ·` on resume. Re-arming a
+                        # no-continue resume here would drop both.
                         state.resume_target = "prompt-interrupted"
                     else:
                         state.resume_target = "prompt-paused"
-                        state.arm_step_resume(mode="solicit")
+                        state.arm_step_resume(should_continue=False)
                     state.save(quest.state_dir)
                     return result
                 coordinator.reset()

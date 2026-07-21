@@ -121,7 +121,7 @@ async def test_restart_resume_reinterpolates_opening_from_durable_field(
     quest.seed_opening = "add a --json flag"
     state = State.load(quest.state_dir)
     state.step = "w"
-    state.arm_step_resume(mode="solicit")      # resume_pending == step -> is_resume
+    state.arm_step_resume(should_continue=False)      # resume_pending == step -> is_resume
     state.save(quest.state_dir)                # no transcript written -> restart
     sink: list = []
     _register_invocation_capturing({"status": "Success"}, sink)
@@ -149,7 +149,7 @@ async def test_opening_not_delivered_to_downstream_step(tmp_path: Path) -> None:
     quest.seed_opening = "add a --json flag"
     state = State.load(quest.state_dir)
     state.step = "b"                            # start at the downstream step
-    state.arm_step_resume(mode="solicit")
+    state.arm_step_resume(should_continue=False)
     state.save(quest.state_dir)
     sink: list = []
     _register_invocation_capturing({"status": "Success"}, sink)

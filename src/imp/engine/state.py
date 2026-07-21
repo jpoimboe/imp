@@ -34,7 +34,6 @@ from imp.engine.pagecache import drop_page_cache
 Status = Literal[
     "new", "paused", "merge_blocked", "merged", "shelved", "abandoned", "error"
 ]
-ResumeMode = Literal["solicit", "continue"]
 
 # Durable live-gate marker written to state.json. `waiting` = live, parked at a
 # human input gate; None = working / clean at rest. A not-live failure halt is now
@@ -167,9 +166,11 @@ class State:
     resume_pending: str | None = None
     # "agent" | "prompt-interrupted" | "prompt-paused"; absent/None ⇒ agent.
     resume_target: str | None = None
-    # Disposition for resume_pending; armed and cleared with it via the two
-    # writers below, so it is non-None exactly when resume_pending is set.
-    resume_mode: ResumeMode | None = None
+    # Resume-continue disposition for resume_pending: True ⇒ native resume + a
+    # continuation nudge, False ⇒ resume without a nudge. Meaningful only while
+    # resume_pending is set; armed and cleared with it via the two writers below,
+    # so the pair can never tear (every read already guards on resume_pending).
+    resume_should_continue: bool = False
     resolved_tiers: dict[str, ProviderModel] | None = None
     resolved_steps: dict[str, ProviderModel] | None = None
     project_facts: dict[str, str] | None = None
@@ -275,7 +276,7 @@ class State:
             "retry_feedback": self.retry_feedback,
             "resume_pending": self.resume_pending,
             "resume_target": self.resume_target,
-            "resume_mode": self.resume_mode,
+            "resume_should_continue": self.resume_should_continue,
             "resolved_tiers": (
                 {t: {"provider": pm.provider, "model": pm.model}
                  for t, pm in self.resolved_tiers.items()}
@@ -311,16 +312,16 @@ class State:
                 os.unlink(tmp_name)
             raise
 
-    def arm_step_resume(self, *, mode: ResumeMode) -> None:
-        """Sole arm writer for the (resume_pending, resume_mode) pair: mark the
-        current step resumable with an explicit disposition."""
+    def arm_step_resume(self, *, should_continue: bool) -> None:
+        """Sole arm writer for the (resume_pending, resume_should_continue) pair:
+        mark the current step resumable with an explicit continue disposition."""
         self.resume_pending = self.step
-        self.resume_mode = mode
+        self.resume_should_continue = should_continue
 
     def clear_step_resume(self) -> None:
         """Sole clear writer: drop the pair together so it can never tear."""
         self.resume_pending = None
-        self.resume_mode = None
+        self.resume_should_continue = False
 
     def reincarnation_count(self, key: str) -> int:
         return self.reincarnations.get(key, 0)

@@ -356,7 +356,7 @@ async def test_mid_turn_interrupt_arms_continue(tmp_path: Path) -> None:
     assert result is RunResult.PAUSED
     state = State.load(quest.state_dir)
     assert state.resume_pending == state.step
-    assert state.resume_mode == "continue"   # interrupt park continues on resume
+    assert state.resume_should_continue is True   # interrupt park continues on resume
 
 
 @pytest.mark.anyio
@@ -364,12 +364,12 @@ async def test_non_interrupt_pause_arms_solicit(
     tmp_path: Path,
 ) -> None:
     """A non-interrupt park (here: a fatal agent error, should_pause == False)
-    runs the same Pause handler and must arm resume_mode = "solicit",
+    runs the same Pause handler and must arm resume_should_continue = False,
     overwriting a stale continue from a prior interrupt that triggered a nudge."""
     quest = _seed_single_agent(tmp_path)
     # Seed a stale continue (as if a prior interrupt+nudge had armed it).
     s = State.load(quest.state_dir)
-    s.arm_step_resume(mode="continue")   # stale continue from a prior interrupt+nudge
+    s.arm_step_resume(should_continue=True)   # stale continue from a prior interrupt+nudge
     s.save(quest.state_dir)
 
     from imp.providers import resolve
@@ -395,7 +395,7 @@ async def test_non_interrupt_pause_arms_solicit(
     assert result is RunResult.PAUSED
     state = State.load(quest.state_dir)
     assert state.resume_pending == state.step   # fatal park keeps the transcript
-    assert state.resume_mode == "solicit"        # overwrote the stale continue
+    assert state.resume_should_continue is False        # overwrote the stale continue
 
 
 @pytest.mark.anyio
@@ -420,7 +420,7 @@ async def test_interrupt_after_complete_clears_resume_pair(tmp_path: Path) -> No
 
     # Seed a stale continue; the forward Continue must clear it.
     s = State.load(quest.state_dir)
-    s.arm_step_resume(mode="continue")   # stale; the forward Continue must clear it
+    s.arm_step_resume(should_continue=True)   # stale; the forward Continue must clear it
     s.save(quest.state_dir)
 
     from imp.providers import resolve
@@ -455,13 +455,13 @@ async def test_interrupt_after_complete_clears_resume_pair(tmp_path: Path) -> No
     state = State.load(quest.state_dir)
     assert state.step == "s2"
     assert state.resume_pending is None
-    assert state.resume_mode is None   # Continue cleared the pair
+    assert state.resume_should_continue is False   # Continue cleared the pair
 
 
 @pytest.mark.anyio
 async def test_interrupt_on_resume_goto_arms_solicit(tmp_path: Path) -> None:
     """The resume-Goto branch repoints resume_pending at its target and re-arms
-    resume_mode = "solicit", overwriting a stale continue so it does not carry
+    resume_should_continue = False, overwriting a stale continue so it does not carry
     forward onto the goto-resume target. Seed a stale continue (a single
     self-resume-goto step, so no preceding Continue masks it), drive one rework
     self-resume-goto, and assert the re-armed solicit persists."""
@@ -486,7 +486,7 @@ async def test_interrupt_on_resume_goto_arms_solicit(tmp_path: Path) -> None:
 
     # Seed a stale continue; the resume-Goto branch must overwrite it.
     s = State.load(quest.state_dir)
-    s.arm_step_resume(mode="continue")   # stale; the resume-Goto must overwrite it
+    s.arm_step_resume(should_continue=True)   # stale; the resume-Goto must overwrite it
     s.save(quest.state_dir)
 
     from imp.providers import resolve
@@ -522,7 +522,7 @@ async def test_interrupt_on_resume_goto_arms_solicit(tmp_path: Path) -> None:
     state = State.load(quest.state_dir)
     assert state.step == "review"
     assert state.resume_pending == "review"   # resume-goto target preserved
-    assert state.resume_mode == "solicit"      # a rework re-entry solicits
+    assert state.resume_should_continue is False      # a rework re-entry solicits
 
 
 @pytest.mark.anyio
@@ -531,7 +531,7 @@ async def test_lost_steer_race_arms_continue(tmp_path: Path) -> None:
     the turn closed normally (bare-turn-end AwaitingUserInput with
     interrupt=False) AND end_gesture_round already cleared should_pause. The
     durable coordinator.interrupted latch is still True, so classification must
-    key off it and persist resume_mode == "continue" (not "solicit")."""
+    key off it and persist resume_should_continue is True (not False)."""
     quest = _seed_single_agent(tmp_path)
     from imp.providers import resolve
     resolve.reset_providers_for_tests()
@@ -566,7 +566,7 @@ async def test_lost_steer_race_arms_continue(tmp_path: Path) -> None:
     assert result is RunResult.PAUSED
     state = State.load(quest.state_dir)
     assert state.resume_pending == state.step
-    assert state.resume_mode == "continue"   # lost-steer interrupt still continues
+    assert state.resume_should_continue is True   # lost-steer interrupt still continues
 
 
 @pytest.mark.anyio
@@ -576,7 +576,7 @@ async def test_forcekill_escalation_arms_continue(tmp_path: Path) -> None:
     SubagentSuspended-shaped unwind), while end_gesture_round has already
     cleared should_pause. The durable coordinator.interrupted latch is still
     True, so the executor's arm decision must key off it and persist
-    resume_mode == "continue" (not "solicit"). Fails pre-fix (arms solicit),
+    resume_should_continue is True (not False). Fails pre-fix (arms no-continue),
     passes after."""
     quest = _seed_single_agent(tmp_path)
     from imp.providers import resolve
@@ -612,4 +612,4 @@ async def test_forcekill_escalation_arms_continue(tmp_path: Path) -> None:
     assert result is RunResult.PAUSED
     state = State.load(quest.state_dir)
     assert state.resume_pending == state.step   # escalation park keeps the transcript
-    assert state.resume_mode == "continue"      # durable-latch interrupt continues
+    assert state.resume_should_continue is True      # durable-latch interrupt continues

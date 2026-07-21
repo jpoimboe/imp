@@ -170,7 +170,7 @@ def test_save_as_draft_arms_resume_pending(tmp_path: Path) -> None:
 
     reloaded = State.load(ch.state_dir)                         # home kept, reload in place
     assert reloaded.resume_pending == step                     # armed to the step on leave
-    assert reloaded.resume_mode == "solicit"                   # clean yield re-solicits
+    assert reloaded.resume_should_continue is False                   # clean yield re-solicits
 
 
 def test_save_as_draft_stamps_interrupt_reason_when_reason_given(tmp_path: Path) -> None:

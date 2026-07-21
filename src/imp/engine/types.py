@@ -44,7 +44,7 @@ class Pause(Action):
     reason: str | None = None
     kind: str | None = None
     # True when this pause is a cooperative-interrupt steer (Ctrl-C mid-turn)
-    # that unwound as an awaiting_user pause; arms State.resume_mode = "continue".
+    # that unwound as an awaiting_user pause; arms State.resume_should_continue = True.
     interrupt: bool = False
 
 

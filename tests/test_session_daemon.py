@@ -552,7 +552,7 @@ async def test_resume_sets_resume_pending_for_a_stale_lock_crash(tmp_path: Path)
     ) -> RunResult:
         st = State.load(quest.state_dir)
         seen["resume_pending"] = st.resume_pending
-        seen["resume_mode"] = st.resume_mode
+        seen["resume_should_continue"] = st.resume_should_continue
         return RunResult.COMPLETED
 
     with anyio.fail_after(30):   # deadlock backstop only
@@ -561,7 +561,7 @@ async def test_resume_sets_resume_pending_for_a_stale_lock_crash(tmp_path: Path)
 
     assert result is RunResult.COMPLETED
     assert seen["resume_pending"] == "review"
-    assert seen["resume_mode"] == "continue"   # crash recovery continues the step
+    assert seen["resume_should_continue"] is True   # crash recovery continues the step
 
 
 @pytest.mark.anyio
@@ -1431,7 +1431,7 @@ async def test_detach_at_hold_prompt_stamps_resume_target_prompt(
     state = State.load(quest.state_dir)
     assert state.resume_target == "prompt-paused"
     assert state.resume_pending == "code"    # non-ctrl-d branch arms solicit on state.step
-    assert state.resume_mode == "solicit"    # detaching at the hold prompt re-solicits
+    assert state.resume_should_continue is False    # detaching at the hold prompt re-solicits
 
 
 @pytest.mark.anyio
@@ -1449,9 +1449,9 @@ async def test_detach_at_interrupt_steer_stamps_prompt_interrupted(
     ) -> RunResult:
         # The executor arms the interrupt disposition before unwinding to the
         # daemon hold (mid-turn Ctrl-C steer: Pause(interrupt=True) ->
-        # arm_step_resume(mode="continue")).
+        # arm_step_resume(should_continue=True)).
         s = State.load(quest.state_dir)
-        s.arm_step_resume(mode="continue")
+        s.arm_step_resume(should_continue=True)
         s.save(quest.state_dir)
         await coordinator.signal_pause(reason="ctrl-c")
         return RunResult.PAUSED
@@ -1464,7 +1464,7 @@ async def test_detach_at_interrupt_steer_stamps_prompt_interrupted(
     state = State.load(quest.state_dir)
     assert state.resume_target == "prompt-interrupted"
     assert state.resume_pending == "code"    # executor's arming is preserved
-    assert state.resume_mode == "continue"   # NOT overwritten with solicit
+    assert state.resume_should_continue is True   # NOT overwritten with solicit
 
 
 @pytest.mark.anyio
@@ -1491,7 +1491,7 @@ async def test_detach_after_ctrl_d_midrun_stamps_resume_target_agent(
     state = State.load(quest.state_dir)
     assert state.resume_target == "agent"
     assert state.resume_pending == "review"   # arm_step_resume(step) → native resume
-    assert state.resume_mode == "continue"    # ctrl-d detach continues on reattach
+    assert state.resume_should_continue is True    # ctrl-d detach continues on reattach
 
 
 @pytest.mark.timeout(240)  # raise the 60s cap so inner backstops can't false-fire under -n auto

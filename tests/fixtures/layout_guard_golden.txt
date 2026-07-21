@@ -1,4 +1,4 @@
-# LAYOUT_VERSION: 11
+# LAYOUT_VERSION: 12
 [paths]
 events.jsonl
 quest.json
@@ -37,8 +37,8 @@ project_facts
 reincarnations
 resolved_steps
 resolved_tiers
-resume_mode
 resume_pending
+resume_should_continue
 resume_target
 retry_feedback
 route_label

@@ -1,4 +1,4 @@
-"""Part 2: the transient-error retry arms resume_mode="continue", feeds it into
+"""Part 2: the transient-error retry arms resume_should_continue=True, feeds it into
 resume_should_continue at the consume site, clears the pair on forward progress,
 and sets its disposition from the pause reason."""
 
@@ -121,11 +121,11 @@ async def test_backoff_persists_resume_continue_before_sleep(
     provider = _StallThenSucceedProvider(stalls=1)
     provider_registry("fake", env_check=lambda: True, factory=lambda _m: provider)
 
-    seen_on_disk: list[tuple[str | None, str | None]] = []
+    seen_on_disk: list[tuple[str | None, bool]] = []
 
     async def _capture_sleep(_delay: float, _coord: Any) -> None:
         st = State.load(quest.state_dir)
-        seen_on_disk.append((st.resume_pending, st.resume_mode))
+        seen_on_disk.append((st.resume_pending, st.resume_should_continue))
 
     monkeypatch.setattr("imp.engine.executor._interruptible_sleep", _capture_sleep)
 
@@ -133,7 +133,7 @@ async def test_backoff_persists_resume_continue_before_sleep(
     assert result is RunResult.COMPLETED
     assert provider.drives == 2               # one stall + one success
     # The pair was armed AND persisted to disk BEFORE the backoff sleep ran.
-    assert seen_on_disk == [("w", "continue")]
+    assert seen_on_disk == [("w", True)]
 
 
 class _RecordingProvider:
@@ -172,7 +172,7 @@ async def test_backoff_respawn_receives_resume_should_continue(
     assert result is RunResult.COMPLETED
     # First drive: fresh state, not armed → resume_should_continue False.
     # Second drive (respawn after backoff): the live read
-    # resume_pending == state.step with resume_mode=="continue" → True.
+    # resume_pending == state.step with resume_should_continue → True.
     assert provider.seen == [False, True]
 
 
@@ -257,7 +257,7 @@ async def test_completion_clears_resume_pair(
     # The in-loop arm left the pair set; the terminal Continue must clear it.
     st = State.load(quest.state_dir)
     assert st.resume_pending is None
-    assert st.resume_mode is None
+    assert st.resume_should_continue is False
 
 
 @pytest.mark.anyio
@@ -268,7 +268,7 @@ async def test_forward_advance_clears_resume_pair(
         tmp_path, agents={"a.md": _A}, workflow_yaml=_TWO_STEP_WF)
     # Seed a stale continue; the forward Continue (s1 → s2) must clear it.
     s = State.load(quest.state_dir)
-    s.arm_step_resume(mode="continue")   # stale continue the forward move must clear
+    s.arm_step_resume(should_continue=True)   # stale continue the forward move must clear
     s.save(quest.state_dir)
 
     from imp.cli.signals import InterruptCoordinator
@@ -286,7 +286,7 @@ async def test_forward_advance_clears_resume_pair(
     state = State.load(quest.state_dir)
     assert state.step == "s2"
     assert state.resume_pending is None    # Continue cleared the pair
-    assert state.resume_mode is None
+    assert state.resume_should_continue is False
 
 
 @pytest.mark.anyio
@@ -297,7 +297,7 @@ async def test_resume_goto_arms_solicit(
         tmp_path, agents={"rev.md": _REV}, workflow_yaml=_RESUME_GOTO_WF)
     # Seed a stale continue; the resume-Goto branch must overwrite it.
     s = State.load(quest.state_dir)
-    s.arm_step_resume(mode="continue")   # stale; the resume-Goto must overwrite it
+    s.arm_step_resume(should_continue=True)   # stale; the resume-Goto must overwrite it
     s.save(quest.state_dir)
 
     from imp.cli.signals import InterruptCoordinator
@@ -315,7 +315,7 @@ async def test_resume_goto_arms_solicit(
     state = State.load(quest.state_dir)
     assert state.step == "review"
     assert state.resume_pending == "review"   # resume-goto re-armed the target
-    assert state.resume_mode == "solicit"      # a rework re-entry solicits
+    assert state.resume_should_continue is False      # a rework re-entry solicits
 
 
 class _AlwaysStallProvider:
@@ -353,7 +353,7 @@ async def test_retry_ceiling_pause_preserves_marker(
     provider_registry("fake", env_check=lambda: True, factory=lambda _m: _AlwaysStallProvider())
 
     # Force a FIRST-attempt ceiling (budget 0). The backoff loop arms
-    # resume_mode="continue" only AFTER the budget check passes, so with a
+    # resume_should_continue=True only AFTER the budget check passes, so with a
     # zero budget that arm never runs and the pair is still unset when the
     # retry_ceiling Pause is returned — isolating the Pause handler's disposition
     # line as the sole cause of the armed continue. Drop that line and this fails.
@@ -367,7 +367,7 @@ async def test_retry_ceiling_pause_preserves_marker(
     # Not armed at ceiling time; the retry_ceiling disposition armed continue.
     st = State.load(quest.state_dir)
     assert st.resume_pending == st.step
-    assert st.resume_mode == "continue"   # retry_ceiling give-up continues on resume
+    assert st.resume_should_continue is True   # retry_ceiling give-up continues on resume
 
 
 @pytest.mark.anyio
@@ -378,7 +378,7 @@ async def test_fatal_pause_clears_marker(
         tmp_path, agents={"writer.md": _WRITER}, workflow_yaml=_SINGLE_WF)
     # Seed a stale continue (as if a prior backoff had armed it).
     s = State.load(quest.state_dir)
-    s.arm_step_resume(mode="continue")   # stale from a prior backoff
+    s.arm_step_resume(should_continue=True)   # stale from a prior backoff
     s.save(quest.state_dir)
 
     provider_registry("fake", env_check=lambda: True, factory=lambda _m: _FatalProvider())
@@ -387,7 +387,7 @@ async def test_fatal_pause_clears_marker(
     assert result is RunResult.PAUSED
     state = State.load(quest.state_dir)
     assert state.resume_pending == state.step   # fatal park keeps the transcript
-    assert state.resume_mode == "solicit"        # non-retry park solicits on resume
+    assert state.resume_should_continue is False        # non-retry park solicits on resume
 
 
 @pytest.mark.anyio
@@ -398,7 +398,7 @@ async def test_ctrl_c_park_arms_continue(
         tmp_path, agents={"writer.md": _WRITER}, workflow_yaml=_SINGLE_WF)
     # Seed a stale continue; a Ctrl-C park during a transient backoff re-arms it.
     s = State.load(quest.state_dir)
-    s.arm_step_resume(mode="continue")
+    s.arm_step_resume(should_continue=True)
     s.save(quest.state_dir)
 
     from imp.cli.signals import InterruptCoordinator
@@ -426,4 +426,4 @@ async def test_ctrl_c_park_arms_continue(
     assert result is RunResult.PAUSED
     state = State.load(quest.state_dir)
     assert state.resume_pending == state.step
-    assert state.resume_mode == "continue"   # Ctrl-C park continues on resume
+    assert state.resume_should_continue is True   # Ctrl-C park continues on resume

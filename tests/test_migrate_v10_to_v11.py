@@ -68,7 +68,7 @@ def test_load_migrates_v10_home_end_to_end(tmp_path: Path) -> None:
     qd = _seed_v10(tmp_path, "mv5", resume_target="prompt")
     Quest.load(tmp_path, "mv5")               # triggers the migration chain on load
     assert _state(qd)["resume_target"] == "prompt-paused"
-    assert _meta(qd)["layout_version"] == 11
+    assert _meta(qd)["layout_version"] == 12
 
 
 def test_hop_is_idempotent_and_pins_layout_version(tmp_path: Path) -> None:
@@ -78,4 +78,4 @@ def test_hop_is_idempotent_and_pins_layout_version(tmp_path: Path) -> None:
     _migrate_v10_to_v11(qd)                   # second run must not corrupt or re-change
     assert _state(qd)["resume_target"] == "prompt-paused"
     assert not list((qd / "state").glob(".state-*")) and not list(qd.glob(".quest-*"))
-    assert LAYOUT_VERSION == 11
+    assert LAYOUT_VERSION == 12

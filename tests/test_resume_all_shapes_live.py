@@ -491,7 +491,7 @@ async def test_midrun_interrupt_resume_continues_agent(
     (tmp_path / "a.txt").write_text("ALPHA-CONTENT\n")
     inv = _live_inv(tmp_path)
     # The ctrl-d arming's runtime shape: resume_should_continue=True (computed by the
-    # executor from State.resume_mode == "continue") + the kept-transcript balance flag, and
+    # executor from State.resume_should_continue) + the kept-transcript balance flag, and
     # a REAL solicit channel that must never fire on the continue path.
     inv = replace(
         inv, balance_on_resume=True, resume_should_continue=True,
