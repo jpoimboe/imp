@@ -68,15 +68,24 @@ def _split_frontmatter(text: str) -> tuple[str | None, str]:
     return description, body
 
 
+def resolve_internal_skill(skills_dir: Path, name: str) -> tuple[str, bool]:
+    """Internal path: resolve <skills_dir>/<name>.md, falling back to
+    <skills_dir>/user/<name>.md. Return (body, from_user_fallback) with any
+    leading frontmatter stripped. from_user_fallback is True only when the
+    primary skills_dir had no match and the user/ copy resolved it.
+    Raises SkillNameError for a bad name, SkillNotFound if neither file exists."""
+    for base, from_user in ((skills_dir, False), (skills_dir / "user", True)):
+        path = _safe_skill_path(base, name)
+        if path.is_file():
+            return _split_frontmatter(path.read_text())[1], from_user
+    raise SkillNotFound(f"no such skill {name!r}")
+
+
 def load_internal_skill(skills_dir: Path, name: str) -> str:
     """Internal path: resolve <skills_dir>/<name>.md, falling back to
     <skills_dir>/user/<name>.md. Strip any leading frontmatter from the body.
     Raises SkillNameError for a bad name, SkillNotFound if neither file exists."""
-    for base in (skills_dir, skills_dir / "user"):
-        path = _safe_skill_path(base, name)
-        if path.is_file():
-            return _split_frontmatter(path.read_text())[1]
-    raise SkillNotFound(f"no such skill {name!r}")
+    return resolve_internal_skill(skills_dir, name)[0]
 
 
 def load_user_skill(skills_dir: Path, name: str) -> str:

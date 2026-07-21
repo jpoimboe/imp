@@ -55,6 +55,17 @@ def test_render_error_raises_and_emits_no_skill_load_event(tmp_path: Path) -> No
     assert not any(e.get("type") == "skill_load" for e in events)
 
 
+def test_agent_loaded_user_fallback_skill_stays_raw(tmp_path: Path) -> None:
+    ctx = _ctx(tmp_path)
+    wf = ctx.quest_context.workflow_dir
+    (wf / "skills" / "user").mkdir(parents=True)
+    (wf / "skills" / "user" / "proj.md").write_text("Literal {{ docs.path }} stays.\n")
+    out = make_load_skill_tool().invoke(ctx, {"name": "proj"})
+    assert out == "Literal {{ docs.path }} stays.\n"
+    events = list(JsonlEventLog(tmp_path / "events.jsonl").read())
+    assert any(e.get("type") == "skill_load" for e in events)
+
+
 def test_all_bundled_skills_render_without_residual_placeholders() -> None:
     from imp.agents.prompts import build_context, render_prompt
     from imp.agents.skills import load_internal_skill
