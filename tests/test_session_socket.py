@@ -486,3 +486,25 @@ async def test_query_frame_is_dropped_when_no_on_query_handler(tmp_path: Path) -
         assert session.attached_count == 0     # never registered as a client
         await session.close()
         tg.cancel_scope.cancel()
+
+
+@pytest.mark.anyio
+async def test_close_unlinks_socket_file(tmp_path: Path) -> None:
+    sock = str(tmp_path / "s.sock")
+    session = SessionSocket(sock)
+    await session.open()
+    assert Path(sock).exists()
+    await session.close()
+    assert not Path(sock).exists()
+
+
+@pytest.mark.anyio
+async def test_close_is_idempotent_when_socket_already_gone(tmp_path: Path) -> None:
+    sock = str(tmp_path / "s.sock")
+    session = SessionSocket(sock)
+    await session.open()
+    await session.close()
+    assert not Path(sock).exists()
+    # Second close (listener already None, file already gone) must not raise.
+    await session.close()
+    assert not Path(sock).exists()

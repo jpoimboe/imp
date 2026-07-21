@@ -126,10 +126,12 @@ class SessionSocket:
         # mkdir's mode= is ignored on existing dirs; enforce it explicitly.
         if st.st_mode & 0o777 != 0o700:
             parent.chmod(0o700)
-        # MUST NOT pre-unlink self._path before binding. A non-pre-unlink bind is
-        # what makes the concurrent double-spawn race safe: the second binder fails
-        # with EADDRINUSE instead of stealing the live socket. A stale .sock is
-        # handled on teardown, not by pre-unlinking here.
+        # anyio.create_unix_listener pre-unlinks any existing socket file before
+        # binding, so a second binder would replace the path, not get EADDRINUSE.
+        # The concurrent double-spawn race is instead made safe by the per-quest
+        # ProjectLock (daemon.py serve_quest_session): a racing spawn raises
+        # LockHeld and exits without binding. The stale .sock is removed by
+        # close() on teardown, so no pre-unlink is needed here.
         self._listener = await anyio.create_unix_listener(self._path)
 
     async def serve(self) -> None:
@@ -337,3 +339,7 @@ class SessionSocket:
         if self._listener is not None:
             await self._listener.aclose()
             self._listener = None
+        # aclose() only closes the fd; unlink the pathname socket so clean
+        # teardown does not leak a stale .sock. Unconditional (every close path)
+        # and idempotent so a second close / already-rmtree'd dir is safe.
+        Path(self._path).unlink(missing_ok=True)
