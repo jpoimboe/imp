@@ -1433,3 +1433,98 @@ def test_var_tmp_supports_overlay_upperdir() -> None:
         shutil.rmtree(root, ignore_errors=True)
         shutil.rmtree(qvtmp, ignore_errors=True)
 
+
+def test_worktrees_mask_sibling_survives_in_sandbox_prune() -> None:
+    """Incident shape: with A's policy resolved, an in-sandbox `git worktree prune`
+    in A's worktree leaves sibling B's .git/worktrees/B admin dir intact, A's own
+    `git worktree list` shows only main + A, and an in-sandbox commit in A lands."""
+    control = Path(tempfile.mkdtemp(prefix="imp-test-wtmask-"))
+    try:
+        _init_repo(control)
+        wt_a = wt.create_worktree(control, "A", "main")
+        wt.create_worktree(control, "B", "main")
+        quest_dir = control / ".imp" / "quests" / "A"
+        quest_dir.mkdir(parents=True)
+        sib_admin = control / ".git" / "worktrees" / "B"
+        assert sib_admin.is_dir(), "sibling B admin dir missing — setup error"
+
+        pol = resolve_policy(
+            worktree=wt_a, control_root=control, quest_id="A",
+            cfg=SandboxConfig(home=control / "home", uid=os.getuid()),
+            engine_env_result={"IMP_PROJECT_ROOT": str(wt_a)},
+            environ=os.environ, available=True, quest_dir=quest_dir,
+        )
+        ctx = ToolContext(project_root=wt_a, events_path=wt_a / "events.jsonl")
+        ctx.quest_context = QuestContext(
+            title="Prune Test", project_root=wt_a,
+            workflow_dir=wt_a / ".imp" / "wf")
+        ctx.base_sandbox_policy = pol
+
+        # (a) an in-sandbox prune must NOT reap sibling B (it is hidden, not orphaned).
+        r_prune = _bash(ctx, "git worktree prune 2>&1; echo rc=$?")
+        assert "rc=0" in str(r_prune["stdout"]), r_prune
+        assert sib_admin.is_dir(), (
+            f"sibling B admin dir deleted by in-sandbox prune: {r_prune}")
+
+        # (b) `git worktree list` succeeds and shows only main + self (B absent).
+        r_list = _bash(ctx, "git worktree list 2>&1; echo rc=$?")
+        out = str(r_list["stdout"])
+        assert "rc=0" in out, r_list
+        assert "worktrees/A" in out and "worktrees/B" not in out, r_list
+
+        # self's git ops still work: commit + rebase autosquash + rev-parse tree.
+        # GIT_SEQUENCE_EDITOR=true keeps the todo list unchanged so `rebase -i`
+        # runs non-interactively; each step is &&-chained so OPS_OK requires ALL
+        # three to succeed (a masked-away self admin dir would break the commit).
+        r_commit = _bash(
+            ctx,
+            "echo x > f.txt && git add f.txt && "
+            "git -c user.email=t@t -c user.name=t commit -qm w && "
+            "GIT_SEQUENCE_EDITOR=true GIT_EDITOR=true "
+            "git -c user.email=t@t -c user.name=t rebase -i --autosquash HEAD~1 "
+            "  >/dev/null 2>&1 && "
+            "git rev-parse HEAD^{tree} >/dev/null 2>&1 && echo OPS_OK")
+        assert "OPS_OK" in str(r_commit["stdout"]), r_commit
+        assert "w" in _git(wt_a, "log", "--oneline").stdout, "commit not on host"
+    finally:
+        for q in ("A", "B"):
+            with contextlib.suppress(Exception):
+                wt.remove_worktree(control, q, force=True)
+        shutil.rmtree(control, ignore_errors=True)
+
+
+def test_worktrees_mask_draft_concierge_prune_spares_siblings() -> None:
+    """Draft concierge (worktree == control_root, quest_dir=None): the mask is
+    emitted with NO self re-expose, and an in-sandbox `git worktree prune` in the
+    main checkout still leaves every sibling admin dir intact — the concierge
+    prune vector is closed too."""
+    control = Path(tempfile.mkdtemp(prefix="imp-test-wtdraft-"))
+    try:
+        _init_repo(control)
+        wt.create_worktree(control, "B", "main")
+        sib_admin = control / ".git" / "worktrees" / "B"
+        assert sib_admin.is_dir(), "sibling B admin dir missing — setup error"
+
+        pol = resolve_policy(
+            worktree=control, control_root=control, quest_id="draft",
+            cfg=SandboxConfig(home=control / "home", uid=os.getuid()),
+            engine_env_result={"IMP_PROJECT_ROOT": str(control)},
+            environ=os.environ, available=True, quest_dir=None,
+        )
+        assert pol.git_worktrees_mask == str(control / ".git" / "worktrees")
+        assert pol.git_worktree_self == ""
+        ctx = ToolContext(project_root=control, events_path=control / "events.jsonl")
+        ctx.quest_context = QuestContext(
+            title="Draft Prune", project_root=control,
+            workflow_dir=control / ".imp" / "wf")
+        ctx.base_sandbox_policy = pol
+
+        r_prune = _bash(ctx, "git worktree prune 2>&1; echo rc=$?")
+        assert "rc=0" in str(r_prune["stdout"]), r_prune
+        assert sib_admin.is_dir(), (
+            f"sibling B admin dir deleted by draft-concierge prune: {r_prune}")
+    finally:
+        with contextlib.suppress(Exception):
+            wt.remove_worktree(control, "B", force=True)
+        shutil.rmtree(control, ignore_errors=True)
+
