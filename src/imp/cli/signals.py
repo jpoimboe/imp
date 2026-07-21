@@ -39,6 +39,7 @@ from anyio.abc import TaskStatus
 
 from imp.engine.quest import Quest
 from imp.engine.state import State
+from imp.remote.session.protocol import SIDE_EFFECT_REASONS
 
 _suppress = contextlib.suppress
 
@@ -740,7 +741,11 @@ class InterruptCoordinator:
             if self._first_gesture_at is None:
                 self._first_gesture_at = self._now()
         self._should_pause = True
-        self._interrupted = True
+        # A side-effect pause (compact / model-override) is not an interrupt
+        # gesture: leave the durable latch off so resume solicits instead of
+        # continuing a stray turn. Genuine gestures (ctrl-c, etc.) still latch.
+        if reason not in SIDE_EFFECT_REASONS:
+            self._interrupted = True
         if not first:
             return
         import anyio

@@ -401,6 +401,28 @@ def test_pending_model_survives_reset_and_gesture_round() -> None:
     assert coord.take_pending_model() == "anthropic:claude-fable-5"
 
 
+@pytest.mark.anyio
+async def test_signal_pause_side_effect_reasons_do_not_latch_interrupted() -> None:
+    # A between-turns /compact or /model is a side-effect pause, NOT an interrupt
+    # gesture: it must set should_pause (the daemon loop + mid-generation path
+    # rely on it) but must leave the durable interrupted latch False, so the
+    # resume machinery solicits the user instead of continuing a stray turn.
+    for reason in ("compact", "model-override"):
+        coord = InterruptCoordinator()
+        await coord.signal_pause(reason=reason)
+        assert coord.should_pause is True
+        assert coord.interrupted is False
+
+
+@pytest.mark.anyio
+async def test_signal_pause_genuine_reason_latches_interrupted() -> None:
+    # A genuine interrupt/leave gesture still sets the durable latch.
+    coord = InterruptCoordinator()
+    await coord.signal_pause(reason="ctrl-c")
+    assert coord.should_pause is True
+    assert coord.interrupted is True
+
+
 def test_backoff_wait_arm_gates_retry_now_latch() -> None:
     coord = InterruptCoordinator()
     # Not armed: a retry-now request is ignored, never stored.
@@ -489,3 +511,15 @@ async def test_dispatch_retry_now_local_fallback_respects_arm_gate() -> None:
     # No hook and no armed wait: the local fallback is a no-op (stray `r`).
     await coord.dispatch_retry_now()
     assert coord.retry_now_requested is False
+
+
+@pytest.mark.anyio
+async def test_signal_pause_ctrl_c_after_side_effect_still_latches() -> None:
+    # A genuine ctrl-c arriving AFTER a prior side-effect pause must still latch
+    # the durable interrupted flag — the gate keys on the current call's reason,
+    # not the first pause reason.
+    coord = InterruptCoordinator()
+    await coord.signal_pause(reason="compact")
+    assert coord.interrupted is False
+    await coord.signal_pause(reason="ctrl-c")
+    assert coord.interrupted is True
