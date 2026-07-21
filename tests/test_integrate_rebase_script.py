@@ -80,6 +80,20 @@ def test_bad_base_ref_exits_3(tmp_path: Path) -> None:
         json.dumps({"id": "x", "title": "t", "base_branch": "nonexistent"}))
     r = _run(pr)
     assert r.returncode == 3
+    assert r.stderr.strip() != ""
+    assert "base ref" in r.stderr
+
+
+def test_empty_base_branch_exits_5_with_diagnostic(tmp_path: Path) -> None:
+    pr = tmp_path / "wt"
+    _seed(pr, base_ahead=False, conflict=False)
+    cd = _home(pr)
+    (cd / "quest.json").write_text(
+        json.dumps({"id": "x", "title": "t", "base_branch": ""}))
+    r = _run(pr)
+    assert r.returncode == 5
+    assert r.stderr.strip() != ""
+    assert "base_branch is empty" in r.stderr
 
 
 def test_leftover_rebase_exits_5(tmp_path: Path) -> None:
