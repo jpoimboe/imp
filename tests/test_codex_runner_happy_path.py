@@ -423,3 +423,27 @@ async def test_codex_bridges_stderr_warning_into_runner_warning(
     assert any(
         e["payload"]["message"] == "codex stderr: Warning: nested config drift detected"
         for e in warns), warns
+
+
+@pytest.mark.anyio
+async def test_codex_run_aclose_cascades_to_run_loop(tmp_path: Path) -> None:
+    """Closing run() mid-stream must synchronously close the inner _run_loop
+    generator (contextlib.aclosing), not abandon it to GC finalization."""
+    closed: list[bool] = []
+
+    async def _fake_loop(invocation: object):  # type: ignore[no-untyped-def]
+        try:
+            yield {"type": "a"}
+            yield {"type": "b"}
+        finally:
+            closed.append(True)
+
+    runner = CodexAgentRunner(model_name="gpt-5.5")
+    runner._run_loop = _fake_loop  # type: ignore[assignment]  # test seam: bypass preflight/MCP
+
+    gen = runner.run(_build_invocation(tmp_path))
+    first = await gen.__anext__()
+    assert first == {"type": "a"}
+    await gen.aclose()
+    # Deterministic: the finally ran INSIDE aclose(), not on a later GC pass.
+    assert closed == [True]
