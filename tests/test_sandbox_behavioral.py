@@ -119,6 +119,11 @@ def _bash(ctx: ToolContext, cmd: str) -> dict[str, object]:
         # resolve tests bypass that, so create it here or bwrap setup aborts on the
         # missing --bind source. No-op for hand-built policies (quest_tmp_dir == "").
         Path(pol.quest_tmp_dir).mkdir(parents=True, exist_ok=True)
+    if pol is not None and getattr(pol, "quest_var_tmp_dir", ""):
+        # Same rationale for the /var/tmp bind SOURCE: the executor provisions it
+        # before real spawns; direct-resolve tests must create it here or bwrap
+        # aborts on the missing --bind source. No-op when quest_var_tmp_dir == "".
+        Path(pol.quest_var_tmp_dir).mkdir(parents=True, exist_ok=True)
     async def _run() -> str:
         return await get_registry()["bash"].async_invoke(ctx, {"command": cmd})
     return json.loads(anyio.run(_run))
