@@ -447,6 +447,13 @@ class SessionServer:
             # Transient: broadcast-only via _emit, never the event log, so it can't replay stale.
             self._emit({"type": "sandbox_marker",
                         "payload": {"unsandboxed": reason == "off"}})
+            self._emit({"type": "script_output",
+                        "payload": {"stdout": SANDBOX_OFF_CONFIRMED if reason == "off"
+                                    else SANDBOX_ON_FROM_OFF}})
+            # Re-open the parked between-turns prompt so the client's _answer_gates loop,
+            # blocked on gate_recv after set_sandbox, receives a gate — no stray spinner.
+            if self._pending_prompt is not None:
+                self._emit(self._pending_prompt)
         elif action == CONTROL_INTERRUPT_LEAVE and self._coordinator is not None:
             await self._coordinator.signal_pause(reason=reason or "ctrl-d", via="frame")
         elif action == CONTROL_INTERRUPT_FORCE and self._coordinator is not None:
