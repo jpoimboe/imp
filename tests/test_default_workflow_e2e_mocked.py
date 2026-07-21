@@ -33,6 +33,16 @@ from tests.openai_fakes import resp_function_call, resp_response
 pytestmark = [pytest.mark.timeout(300)]
 
 
+@pytest.fixture(autouse=True)
+def _force_bare_sandbox(monkeypatch):
+    # Force bare sandbox: bwrap namespaces flake under -n auto, misrouted as gate rejections.
+    import imp.engine.executor as ex
+    from imp.engine.sandbox import _inactive
+    monkeypatch.setattr(
+        ex, "_build_sandbox_policy",
+        lambda quest, config, log: _inactive(note="e2e_mocked_bare"))
+
+
 def _run_events(quest):
     """Post-run events read the way production does: home first, archive second."""
     from imp.cli.main import _load_events_for_id
