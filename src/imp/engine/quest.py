@@ -521,6 +521,7 @@ class Quest:
         quest_dir = control_root / ".imp" / "quests" / quest_id
         quest_dir.mkdir(parents=True)
         (quest_dir / "state").mkdir()
+        (quest_dir / "steps").mkdir()
 
         (quest_dir / "quest.json").write_text(json.dumps({
             "id": quest_id, "title": title, "base_branch": base_branch,
@@ -594,6 +595,7 @@ class Quest:
         quest_dir = control_root / ".imp" / "quests" / quest_id
         quest_dir.mkdir(parents=True)
         (quest_dir / "state").mkdir()
+        (quest_dir / "steps").mkdir()
         try:
             orig_base_head = worktree.head_of(control_root, base_branch)
         except RuntimeError:
