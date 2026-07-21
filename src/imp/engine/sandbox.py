@@ -71,6 +71,8 @@ class SandboxPolicy:
     home_layer: HomeLayer | None = None      # writable-home layer (None → ro read-through)
     quest_tmp_dir: str = ""      # per-quest dir bound onto /tmp ("" → identity fallback)
     quest_var_tmp_dir: str = ""  # per-quest dir onto /var/tmp ("" → no bind; host ro)
+    git_worktrees_mask: str = ""  # <control>/.git/worktrees tmpfs mask ("" → none)
+    git_worktree_self: str = ""   # rw re-expose of .git/worktrees/<self> ("" → none)
 
     def bind_plan(self) -> list[tuple[str, str]]:
         """The ordered path-covering binds, in bwrap EMIT ORDER — the SINGLE
@@ -99,7 +101,14 @@ class SandboxPolicy:
         quest's own home (minus its own steps/events) plus the current worktree iff
         the worktree is a descendant of .imp; everything else under .imp is masked.
         Mis-ordering buries a live quest's own bookkeeping (normal) or leaks every
-        sibling (draft)."""
+        sibling (draft).
+
+        The .git/worktrees mask (git_worktrees_mask) + self re-expose
+        (git_worktree_self) are emitted AFTER git_ref_reexpose, the same last-wins
+        shape as control_imp: the tmpfs hides every sibling admin dir under
+        .git/worktrees, then the self re-expose (emitted only for a materialized
+        worktree) re-binds the current quest's own .git/worktrees/<self> on top so
+        its HEAD/index/logs stay writable."""
         imp_mask = [(self.control_imp, "mask_dir")] if self.control_imp else []
         nested = bool(self.control_imp) and Path(self.worktree).is_relative_to(
             Path(self.control_imp))
@@ -116,6 +125,8 @@ class SandboxPolicy:
             *([(self.quest_home, "rw")] if self.quest_home else []),
             *[(p, "ro") for p in self.git_ro_remask],
             *[(p, "rw") for p in self.git_ref_reexpose],
+            *([(self.git_worktrees_mask, "mask_dir")] if self.git_worktrees_mask else []),
+            *([(self.git_worktree_self, "rw")] if self.git_worktree_self else []),
             *[(p, "ro") for p in self.readonly_overlays],
             *[(c, "rw") for c in self.writable_caches],
             *[(r, "ro") for r in self.extra_readable],

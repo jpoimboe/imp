@@ -1888,3 +1888,53 @@ def test_resolve_policy_no_var_tmp_for_draft_without_quest_dir(tmp_path, monkeyp
         cfg=SandboxConfig(), engine_env_result={}, environ={},
         available=True, quest_dir=None)
     assert pol.quest_var_tmp_dir == ""
+
+
+def test_bind_plan_emits_worktrees_mask_then_self_after_ref_reexpose():
+    # The mask (mask_dir) and the self re-expose (rw) are emitted AFTER the
+    # git_ref_reexpose entry, in that order — load-bearing so last-wins hides
+    # siblings then re-exposes self.
+    p = _policy(
+        git_ref_reexpose=("/ctl/.git/refs/heads/imp",),
+        git_worktrees_mask="/ctl/.git/worktrees",
+        git_worktree_self="/ctl/.git/worktrees/abc",
+    )
+    plan = p.bind_plan()
+    i_ref = plan.index(("/ctl/.git/refs/heads/imp", "rw"))
+    i_mask = plan.index(("/ctl/.git/worktrees", "mask_dir"))
+    i_self = plan.index(("/ctl/.git/worktrees/abc", "rw"))
+    assert i_ref < i_mask < i_self
+
+
+def test_worktrees_mask_hides_siblings_reexposes_self():
+    # Without the new binds, git_common_dir's rw bind would make every admin dir
+    # under .git/worktrees writable. The mask hides siblings; the self re-expose
+    # keeps self's admin dir writable.
+    p = _policy(
+        git_worktrees_mask="/ctl/.git/worktrees",
+        git_worktree_self="/ctl/.git/worktrees/abc",
+    )
+    assert p.allows_write(Path("/ctl/.git/worktrees/abc/HEAD")) is True
+    assert p.allows_write(Path("/ctl/.git/worktrees/sib/HEAD")) is False
+    assert p.allows_read(Path("/ctl/.git/worktrees/sib/gitdir")) is False
+
+
+def test_worktrees_mask_only_masks_self_too():
+    # Draft-concierge shape: mask set, self empty → the whole worktrees tree is
+    # hidden (no re-expose), including the would-be self admin dir.
+    p = _policy(git_worktrees_mask="/ctl/.git/worktrees", git_worktree_self="")
+    assert p.allows_read(Path("/ctl/.git/worktrees/abc/HEAD")) is False
+    assert p.allows_write(Path("/ctl/.git/worktrees/abc/HEAD")) is False
+
+
+def test_argv_binds_match_bind_plan_with_worktrees_mask():
+    # Drift guard: the new mask_dir + rw binds round-trip through the argv parser,
+    # so build_sandbox_argv picks them up with no edit to build_sandbox_argv.
+    p = _policy(
+        git_worktrees_mask="/ctl/.git/worktrees",
+        git_worktree_self="/ctl/.git/worktrees/abc",
+    )
+    argv = build_sandbox_argv("x", cwd="/wt", policy=p, engine_env={})
+    assert _parse_argv_binds(argv) == p.bind_plan()
+    assert ("/ctl/.git/worktrees", "mask_dir") in p.bind_plan()
+    assert ("/ctl/.git/worktrees/abc", "rw") in p.bind_plan()
