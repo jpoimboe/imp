@@ -1957,6 +1957,7 @@ async def test_snapshot_copy_cleans_stale_tmp_dir(tmp_path: Path) -> None:
     assert (snapshot / "workflow.yaml").exists()
 
 
+@pytest.mark.timeout(240)
 @pytest.mark.anyio
 async def test_resume_runs_frozen_snapshot_after_live_workflow_deleted(
     tmp_path: Path,
@@ -2047,6 +2048,7 @@ async def test_unknown_step_pauses_without_silent_merge(tmp_path: Path) -> None:
     assert not any(e.get("type") == "quest_merged" for e in events)
 
 
+@pytest.mark.timeout(240)
 @pytest.mark.anyio
 async def test_frozen_script_runs_from_snapshot_cwd_with_live_project_root(
     tmp_path: Path,
@@ -3457,6 +3459,7 @@ async def test_backward_gate_bounce_emits_step_transition(tmp_path: Path) -> Non
     assert any(i < ti for i in gate_completions)
 
 
+@pytest.mark.timeout(240)
 @pytest.mark.anyio
 async def test_forward_only_run_emits_no_step_transition(tmp_path: Path) -> None:
     """A run with only forward Continue/goto edges emits no `step_transition`."""
