@@ -357,6 +357,13 @@ def _backfill_var_defaults(state: State, decls: Vars) -> list[str]:
     return sorted(added)
 
 
+def _wipe_step_scratch(quest: Quest) -> None:
+    """Empty Quest.tmp_dir and recreate it 0o700; called only on a genuine step advance."""
+    from imp.remote.session.attach import ensure_quest_tmp_dir
+    shutil.rmtree(quest.tmp_dir, ignore_errors=True)
+    ensure_quest_tmp_dir(quest)
+
+
 async def run_quest(
     quest: Quest,
     *,
@@ -501,6 +508,8 @@ async def run_quest(
                 _evict_if_holding(quest, state, log)
                 state.save(quest.state_dir)
 
+        # In-memory, never persisted: last step this run dispatched (a resume never wipes).
+        last_dispatched: str | None = None
         while True:
             if state.completion_pending:
                 # §3: re-entry after an interrupt parked at the completion
@@ -548,6 +557,10 @@ async def run_quest(
                 if state.started_at is None:
                     state.started_at = datetime.now(UTC).isoformat()
                 state.save(quest.state_dir)
+            if last_dispatched is not None and last_dispatched != step.name:
+                # Genuine advance to a different step: start it with a clean TMPDIR.
+                _wipe_step_scratch(quest)
+            last_dispatched = step.name
             action, feedback_text, _var_mutations = await _dispatch_step(
                 step, workflow, quest, state, log, is_resume=is_resume,
                 user_chat_input_fn=user_chat_input_fn, coordinator=coordinator,
@@ -1893,12 +1906,12 @@ def _build_sandbox_policy(quest: Quest, config: Any, log: EventLog) -> Any:
     if not policy.active:
         _emit(log, "sandbox_inactive", {"reason": policy.note}, agent_id=None)
     _warn_if_no_overlay(policy, quest, log)
-    if policy.active and policy.quest_tmp_dir:
-        # quest_tmp_dir is the bwrap SOURCE for the namespace /tmp; bwrap uses
-        # --bind (not --bind-try), so it must exist before any sandboxed spawn.
-        # In production spawn_session_daemon already created it 0o700; this makes
-        # direct-run paths (no daemon) safe too.
-        Path(policy.quest_tmp_dir).mkdir(parents=True, exist_ok=True)
+    if policy.active:
+        # TMPDIR points at Quest.tmp_dir; ensure it exists 0o700 for the sandboxed
+        # agent + host provisioning scratch (spawn_session_daemon does this too — the
+        # call is idempotent and covers direct-run paths with no daemon).
+        from imp.remote.session.attach import ensure_quest_tmp_dir
+        ensure_quest_tmp_dir(quest)
     if policy.active and policy.quest_var_tmp_dir:
         # The bwrap SOURCE for the namespace /var/tmp; --bind (not --bind-try)
         # requires it to exist before any sandboxed spawn. Chmod the imp-<uid> parent

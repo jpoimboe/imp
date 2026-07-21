@@ -116,8 +116,9 @@ QUEST_TMP_ENV = "IMP_QUEST_TMP"
 
 
 def quest_scratch_root() -> Path:
-    """Host-side provisioning-scratch base from IMP_QUEST_TMP (else system temp); NOT
-    via TMPDIR, which would double-nest the daemon's socket path and break attach."""
+    """Host-side provisioning-scratch base from IMP_QUEST_TMP (else system temp).
+    Read directly (not via TMPDIR): the session daemon derives its own paths and
+    must not repoint TMPDIR."""
     override = os.environ.get(QUEST_TMP_ENV)
     return Path(override) if override else Path(tempfile.gettempdir())
 
