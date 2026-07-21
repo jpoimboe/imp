@@ -4240,11 +4240,11 @@ async def test_started_at_not_overwritten_on_a_second_run(tmp_path: Path) -> Non
     assert reloaded.started_at == "2020-01-01T00:00:00+00:00"
 
 
-def test_build_sandbox_policy_creates_active_bind_source(
+def test_build_sandbox_policy_ensures_quest_tmp_dir(
     tmp_path: Path, monkeypatch,
 ) -> None:
-    """_build_sandbox_policy must mkdir quest_tmp_dir when the policy is active;
-    bwrap uses --bind (not --bind-try), so the source must exist before any spawn."""
+    """_build_sandbox_policy must ensure Quest.tmp_dir exists (0o700) when the
+    policy is active — TMPDIR points there and the sandboxed agent writes into it."""
     import types
 
     from imp.engine import executor
@@ -4268,12 +4268,10 @@ def test_build_sandbox_policy_creates_active_bind_source(
     quest = _make_quest(tmp_path)
     config = load_effective_config(project_root=tmp_path, control_root=tmp_path).config
 
-    quest_tmp_src = tmp_path / "qtmp_src"
-    assert not quest_tmp_src.exists()
+    assert not quest.tmp_dir.exists()
 
     stub_policy = types.SimpleNamespace(
-        active=True, quest_tmp_dir=str(quest_tmp_src), quest_var_tmp_dir="",
-        note="", home="",
+        active=True, quest_var_tmp_dir="", note="", home="",
     )
     monkeypatch.setattr(executor, "resolve_policy", lambda **kw: stub_policy)
     monkeypatch.setattr(executor, "_warn_if_no_overlay", lambda *a, **kw: None)
@@ -4281,7 +4279,9 @@ def test_build_sandbox_policy_creates_active_bind_source(
     log = InMemoryEventLog()
     executor._build_sandbox_policy(quest, config, log)
 
-    assert quest_tmp_src.is_dir()
+    assert quest.tmp_dir.is_dir()
+    assert quest.tmp_dir.stat().st_mode & 0o777 == 0o700
+    assert quest.tmp_dir.parent.stat().st_mode & 0o777 == 0o700
 
 
 def test_build_sandbox_policy_creates_var_tmp_bind_source(
@@ -4318,7 +4318,7 @@ def test_build_sandbox_policy_creates_var_tmp_bind_source(
     assert not var_tmp_src.exists()
 
     stub_policy = types.SimpleNamespace(
-        active=True, quest_tmp_dir="", quest_var_tmp_dir=str(var_tmp_src),
+        active=True, quest_var_tmp_dir=str(var_tmp_src),
         note="", home="",
     )
     monkeypatch.setattr(executor, "resolve_policy", lambda **kw: stub_policy)

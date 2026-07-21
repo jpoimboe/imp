@@ -4,13 +4,10 @@ Each test builds a REAL active SandboxPolicy, runs a real bash command under
 bwrap, and asserts the OS-level outcome (write-confinement, secret masking,
 /tmp persistence, network argv, git commit + escape-vector blocking).
 
-Sandbox worktrees use the default temp directory (/tmp). A resolved policy binds
-its per-quest <quest.tmp_dir> onto the namespace /tmp; a hand-built policy that
-leaves quest_tmp_dir="" (as the helpers here do, except where a test sets it)
-falls back to the real-/tmp identity bind (--bind /tmp /tmp right after the
-ro-floor). Either way /tmp is rw inside the namespace and a worktree under the
-bound source is NOT shadowed — --chdir works and the bound /tmp is visible inside
-and outside the sandbox.
+Sandbox worktrees use the default temp directory (/tmp). /tmp is bound rw to
+the real host /tmp (identity bind, right after the ro-floor). A worktree under
+/tmp is NOT shadowed — --chdir works and /tmp is visible inside and outside the
+sandbox.
 """
 from __future__ import annotations
 
@@ -67,8 +64,8 @@ def _active_policy(worktree: Path, *, home: Path | None = None,
 
     Uses PATH from the real environment so git, cat, echo, etc. resolve.
     HOME is set to a dir under the worktree root (or the provided `home`).
-    This hand-built policy leaves quest_tmp_dir="", so /tmp is bound rw by
-    identity in build_sandbox_argv — no per-test tmp dir setup is needed.
+    This hand-built policy sets no /tmp source, so /tmp is bound rw by identity in
+    build_sandbox_argv — no per-test tmp dir setup is needed.
     """
     git = worktree / ".git"
     git.mkdir(exist_ok=True)
@@ -113,16 +110,10 @@ def _ctx(worktree: Path, policy: SandboxPolicy) -> ToolContext:
 def _bash(ctx: ToolContext, cmd: str) -> dict[str, object]:
     """Run cmd under ctx's sandbox policy; return parsed JSON {stdout, stderr, returncode}."""
     pol = getattr(ctx, "base_sandbox_policy", None)
-    if pol is not None and getattr(pol, "quest_tmp_dir", ""):
-        # quest_tmp_dir is the bwrap SOURCE for the namespace /tmp. In production
-        # spawn_session_daemon creates it before any sandboxed spawn; these direct-
-        # resolve tests bypass that, so create it here or bwrap setup aborts on the
-        # missing --bind source. No-op for hand-built policies (quest_tmp_dir == "").
-        Path(pol.quest_tmp_dir).mkdir(parents=True, exist_ok=True)
     if pol is not None and getattr(pol, "quest_var_tmp_dir", ""):
-        # Same rationale for the /var/tmp bind SOURCE: the executor provisions it
-        # before real spawns; direct-resolve tests must create it here or bwrap
-        # aborts on the missing --bind source. No-op when quest_var_tmp_dir == "".
+        # The /var/tmp bind SOURCE: the executor provisions it before real spawns;
+        # direct-resolve tests must create it here or bwrap aborts on the missing
+        # --bind source. No-op when quest_var_tmp_dir == "".
         Path(pol.quest_var_tmp_dir).mkdir(parents=True, exist_ok=True)
     async def _run() -> str:
         return await get_registry()["bash"].async_invoke(ctx, {"command": cmd})
@@ -1356,24 +1347,21 @@ def test_draft_agent_masks_siblings_and_archive_reads_writes_own_spec() -> None:
         shutil.rmtree(control, ignore_errors=True)
 
 
-def test_per_quest_tmp_dir_is_the_sandbox_tmp() -> None:
-    """A write to /tmp inside the sandbox lands in the per-quest host dir, and the
-    real host /tmp is untouched (AC2a, end-to-end through bwrap)."""
+def test_slash_tmp_is_the_real_host_tmp() -> None:
+    """AC3: /tmp inside the sandbox is the real host /tmp (identity bind); a write
+    to /tmp/<name> inside the sandbox appears at the same path on the host."""
     root = _make_root()
-    qtmp = Path(tempfile.mkdtemp(prefix="imp-qtmp-"))
     marker = f"beh-{uuid.uuid4().hex}"
+    host_path = Path("/tmp") / marker
     try:
-        pol = dataclasses.replace(_active_policy(root), quest_tmp_dir=str(qtmp))
+        pol = _active_policy(root)
         ctx = _ctx(root, pol)
         r = _bash(ctx, f"echo hi > /tmp/{marker} && echo ok")
         assert r["returncode"] == 0, r
-        # The write landed in the per-quest host dir (the bound source of /tmp)...
-        assert (qtmp / marker).read_text().strip() == "hi"
-        # ...and NOT in the real host /tmp.
-        assert not (Path("/tmp") / marker).exists()
+        assert host_path.read_text().strip() == "hi"
     finally:
+        host_path.unlink(missing_ok=True)
         shutil.rmtree(root, ignore_errors=True)
-        shutil.rmtree(qtmp, ignore_errors=True)
 
 
 # ---------------------------------------------------------------------------

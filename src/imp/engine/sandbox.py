@@ -8,9 +8,10 @@ The flag ORDER in build_sandbox_argv is load-bearing: bwrap is last-wins, so the
 writable-home bind (when a home_layer is present) and then the /tmp bind are
 emitted EARLY (right after the ro-floor, before worktree/git/remask) and the
 secret masks MUST be emitted AFTER every bind (incl. extra_writable), else
-a config-driven bind could re-expose a masked secret dir (spec L1-r5). No
---unshare-pid / --die-with-parent / --new-session — all three break the runner's
-interrupt grace (spec B.9); reaping is via the process group.
+a config-driven bind could re-expose a masked secret dir (spec L1-r5). /tmp is
+an identity bind to the real host /tmp. No --unshare-pid / --die-with-parent /
+--new-session — all three break the runner's interrupt grace (spec B.9); reaping
+is via the process group.
 """
 
 from __future__ import annotations
@@ -21,6 +22,7 @@ import platform
 import shlex
 import shutil
 import subprocess
+import tempfile
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
 from functools import lru_cache
@@ -69,7 +71,6 @@ class SandboxPolicy:
     disposable_tree: bool = False            # agent runs in a disposable git worktree
     home: str = ""                           # real $HOME ("" → inactive/unresolved)
     home_layer: HomeLayer | None = None      # writable-home layer (None → ro read-through)
-    quest_tmp_dir: str = ""      # per-quest dir bound onto /tmp ("" → identity fallback)
     quest_var_tmp_dir: str = ""  # per-quest dir onto /var/tmp ("" → no bind; host ro)
     git_worktrees_mask: str = ""  # <control>/.git/worktrees tmpfs mask ("" → none)
     git_worktree_self: str = ""   # rw re-expose of .git/worktrees/<self> ("" → none)
@@ -215,19 +216,17 @@ def build_sandbox_argv(
     # 2-10. path-covering binds, in emit order from policy.bind_plan() (the single
     #    source shared with allows_write). Emit order is load-bearing and last-wins:
     #    the home_layer rw bind (when present) goes FIRST so caches/worktree/secrets
-    #    over $HOME win; /tmp goes next (before the worktree/git binds and secret
-    #    masks) as the agent's scratch; secret masks go LAST.
+    #    over $HOME win; /tmp goes next (identity bind to the real host /tmp) before
+    #    the worktree/git binds and secret masks; secret masks go LAST.
     for bind, kind in policy.bind_plan():
         if kind == "rw":
             hl = policy.home_layer
             if hl is not None and hl.is_overlay and bind == hl.home:
                 src = hl.merged                       # overlay merged view onto $HOME
-            elif bind == "/tmp" and policy.quest_tmp_dir:
-                src = policy.quest_tmp_dir             # per-quest host dir onto namespace /tmp
             elif bind == "/var/tmp" and policy.quest_var_tmp_dir:
                 src = policy.quest_var_tmp_dir         # per-quest host dir onto namespace /var/tmp
             else:
-                src = bind
+                src = bind                            # identity — /tmp is the real host /tmp
             argv += ["--bind", src, bind]
         elif kind == "ro":
             argv += ["--ro-bind", bind, bind]
@@ -249,7 +248,7 @@ def build_sandbox_argv(
     setenv = dict(policy.setenv)
     for k, v in engine_env.items():
         if _is_engine_passthrough(k):
-            setenv[k] = _rebase_into_sandbox_tmp(v, policy.quest_tmp_dir)
+            setenv[k] = v
     argv += ["--clearenv"]
     for k, v in setenv.items():
         argv += ["--setenv", k, v]
@@ -540,7 +539,10 @@ def resolve_policy(
         readonly_overlays = (str(quest_dir / "workflow"),)
 
     session_sock = session_socket_path(control_root, quest_id)
-    quest_tmp_dir = str(session_sock.parent)
+    # TMPDIR: per-quest scratch dir, derived EXACTLY like Quest.tmp_dir
+    # (Path(tempfile.gettempdir()) / imp-<uid> / <id>) so it tracks the conftest
+    # temp-redirect fixture and points at the dir the executor creates/wipes.
+    quest_tmp = Path(tempfile.gettempdir()) / f"imp-{os.getuid()}" / quest_id
     var_tmp_root = quest_var_tmp_root()
     quest_var_tmp_dir = (
         str(var_tmp_root / f"imp-{os.getuid()}" / quest_id)
@@ -567,11 +569,10 @@ def resolve_policy(
         extra_writable=tuple(cfg.extra_writable),
         secret_dirs=tuple(secret_dirs),
         secret_files=tuple(secret_files),
-        quest_tmp_dir=quest_tmp_dir,
         quest_var_tmp_dir=quest_var_tmp_dir,
         setenv=_build_setenv(
             engine_env_result, environ, cfg.env_passthrough,
-            session_socket=str(session_sock), quest_tmp_dir=quest_tmp_dir,
+            session_socket=str(session_sock), tmpdir=str(quest_tmp),
             shim_dir=str(imp_shim_dir(quest_dir)) if quest_dir is not None else ""),
         network=cfg.network,
         note="",
@@ -586,31 +587,20 @@ def _inactive(*, note: str) -> SandboxPolicy:
     )
 
 
-def _rebase_into_sandbox_tmp(value: str, quest_tmp_dir: str) -> str:
-    """Rebase a host path under quest_tmp_dir onto /tmp; leave anything else untouched."""
-    if not quest_tmp_dir:
-        return value
-    p = Path(value)
-    if p.is_relative_to(quest_tmp_dir):
-        return str(Path("/tmp") / p.relative_to(quest_tmp_dir))
-    return value
-
-
 def _build_setenv(
     engine_env_result: Mapping[str, str], environ: Mapping[str, str],
     env_passthrough: tuple[str, ...], session_socket: str = "",
-    shim_dir: str = "", quest_tmp_dir: str = "",
+    shim_dir: str = "", tmpdir: str = "",
 ) -> tuple[tuple[str, str], ...]:
     """Env allowlist (spec B.4). IMP_* and PYTHONPATH come from engine_env_result
-    (authoritative, M2-r5; PYTHONPATH is the single deliberate non-IMP_ exception
-    — the imp-on-imp import shadow); generic + LC_* + env_passthrough pass through
-    from `environ`; TMPDIR=/tmp. Ambient non-engine IMP_* vars are NOT passed
-    through — the only IMP_* an agent sees is the engine-managed set from
-    engine_env_result, plus anything a user explicitly names in env_passthrough.
+    (authoritative; PYTHONPATH is the single deliberate non-IMP_ exception — the
+    imp-on-imp import shadow); generic + LC_* + env_passthrough pass through from
+    `environ`. With the socket and every IMP_* path now identical inside and outside
+    the sandbox, nothing is rewritten — real host paths pass through verbatim.
 
     Dedup: accumulated into a dict (insertion-ordered); re-assigning a key updates
-    its value in place (first-seen position, last value wins). TMPDIR is assigned
-    last so the forced /tmp override beats any ambient or env_passthrough value.
+    its value in place (first-seen position, last value wins). TMPDIR (the per-quest
+    scratch dir) is assigned last so it wins over any ambient or env_passthrough value.
     """
     d: dict[str, str] = {}
     for k in _GENERIC_ENV:
@@ -624,10 +614,11 @@ def _build_setenv(
             d[k] = environ[k]
     for k, v in engine_env_result.items():
         if _is_engine_passthrough(k):
-            d[k] = _rebase_into_sandbox_tmp(v, quest_tmp_dir)
+            d[k] = v
     if session_socket:
-        d["IMP_SESSION_SOCKET"] = _rebase_into_sandbox_tmp(session_socket, quest_tmp_dir)
+        d["IMP_SESSION_SOCKET"] = session_socket
     if shim_dir:
         d["PATH"] = (shim_dir + os.pathsep + d["PATH"]) if d.get("PATH") else shim_dir
-    d["TMPDIR"] = "/tmp"   # forced last — wins over any ambient/env_passthrough value
+    if tmpdir:
+        d["TMPDIR"] = tmpdir   # per-quest scratch; last → wins over ambient/env_passthrough
     return tuple(d.items())
