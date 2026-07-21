@@ -4,6 +4,7 @@ site-packages, so the host's editable `imp` cannot shadow the copy
 
 from __future__ import annotations
 
+import os
 import subprocess
 from pathlib import Path
 
@@ -32,11 +33,15 @@ def test_isolated_venv_has_no_host_site_packages(tmp_path: Path) -> None:
 
     venv_python = build_isolated_venv(pkg)
 
+    # Scrub PYTHONPATH so a host-side entry (e.g. pytest) can't leak into the probes.
+    probe_env = {k: v for k, v in os.environ.items() if k != "PYTHONPATH"}
+
     # The stub resolves to the copy we installed.
     probe = subprocess.run(
         [str(venv_python), "-c",
          "import impstub, sys; sys.stdout.write(impstub.__file__)"],
         capture_output=True, text=True, check=True,
+        env=probe_env,
     )
     resolved = Path(probe.stdout.strip()).resolve()
     assert str(resolved).startswith(str(pkg.resolve())), (
@@ -49,6 +54,7 @@ def test_isolated_venv_has_no_host_site_packages(tmp_path: Path) -> None:
     blocked = subprocess.run(
         [str(venv_python), "-c", "import pytest"],
         capture_output=True, text=True,
+        env=probe_env,
     )
     assert blocked.returncode != 0, (
         "host site-packages leaked into the isolated venv; "
