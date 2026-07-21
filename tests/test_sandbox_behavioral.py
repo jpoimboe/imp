@@ -1364,3 +1364,61 @@ def test_per_quest_tmp_dir_is_the_sandbox_tmp() -> None:
         shutil.rmtree(root, ignore_errors=True)
         shutil.rmtree(qtmp, ignore_errors=True)
 
+
+# ---------------------------------------------------------------------------
+# B10.13  Per-quest /var/tmp: writable, isolated from host root, overlay-capable
+# ---------------------------------------------------------------------------
+
+@pytest.mark.skipif(not os.access("/var/tmp", os.W_OK), reason="requires writable /var/tmp")
+def test_var_tmp_writable_and_per_quest_isolated() -> None:
+    """AC1: inside the sandbox /var/tmp is writable and IS the per-quest source —
+    the host's real /var/tmp root is not visible, and in-sandbox writes land in the
+    per-quest source dir, not the host root."""
+    root = _make_root()
+    qvtmp = Path(tempfile.mkdtemp(prefix="imp-qvtmp-", dir="/var/tmp"))
+    host_marker = Path("/var/tmp") / f"host-{uuid.uuid4().hex}"
+    in_marker = f"beh-{uuid.uuid4().hex}"
+    try:
+        host_marker.write_text("host\n")   # sits in the real /var/tmp root
+        pol = dataclasses.replace(_active_policy(root), quest_var_tmp_dir=str(qvtmp))
+        ctx = _ctx(root, pol)
+        r = _bash(
+            ctx,
+            f"echo hi > /var/tmp/{in_marker} && "
+            f"( test -e /var/tmp/{host_marker.name} "
+            f"&& echo HOSTVISIBLE || echo hostmasked )")
+        assert r["returncode"] == 0, r
+        assert "hostmasked" in r["stdout"]        # host /var/tmp root shadowed inside
+        assert "HOSTVISIBLE" not in r["stdout"]
+        # the in-sandbox write landed in the per-quest source, NOT the host root
+        assert (qvtmp / in_marker).read_text().strip() == "hi"
+        assert not (Path("/var/tmp") / in_marker).exists()
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+        shutil.rmtree(qvtmp, ignore_errors=True)
+        host_marker.unlink(missing_ok=True)
+
+
+@requires_overlay
+def test_var_tmp_supports_overlay_upperdir() -> None:
+    """An unprivileged overlay upperdir mounts successfully under /var/tmp inside
+    the sandbox — the reason /var/tmp (a real disk fs) is bound rather than tmpfs
+    /tmp, which many kernels reject as an overlay upperdir."""
+    root = _make_root()
+    qvtmp = Path(tempfile.mkdtemp(prefix="imp-qvtmp-ovl-", dir="/var/tmp"))
+    try:
+        pol = dataclasses.replace(_active_policy(root), quest_var_tmp_dir=str(qvtmp))
+        ctx = _ctx(root, pol)
+        r = _bash(
+            ctx,
+            "d=/var/tmp/ovl; mkdir -p $d/l $d/u $d/w $d/m && "
+            "unshare --user --map-root-user --mount sh -c '"
+            "mount -t overlay overlay -o "
+            "lowerdir=/var/tmp/ovl/l,upperdir=/var/tmp/ovl/u,workdir=/var/tmp/ovl/w "
+            "/var/tmp/ovl/m && echo OVL_OK || echo OVL_FAIL'")
+        assert r["returncode"] == 0, r
+        assert "OVL_OK" in r["stdout"], r        # upperdir under /var/tmp mounted
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+        shutil.rmtree(qvtmp, ignore_errors=True)
+
