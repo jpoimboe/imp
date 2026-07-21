@@ -785,7 +785,7 @@ def test_allows_read_masks_secrets_allows_rest():
 
 
 def _parse_argv_binds(argv: list[str]) -> list[tuple[str, str]]:
-    """Recover the (path, kind) path-covering binds from a real build_sandbox_argv
+    """Recover the dest-keyed (path, kind) path-covering binds from a real build_sandbox_argv
     emission — the inverse of build_sandbox_argv's kind→flag map. Scans the bind
     block between the step-1 ro-floor (--ro-bind / /) and step-11 (--proc),
     classifying each flag back to a bind_plan kind."""
@@ -795,7 +795,7 @@ def _parse_argv_binds(argv: list[str]) -> list[tuple[str, str]]:
     while i < stop:
         flag = argv[i]
         if flag == "--bind":
-            out.append((argv[i + 1], "rw"))
+            out.append((argv[i + 2], "rw"))   # DEST-keyed (src != dest for /tmp, /var/tmp)
             i += 3
         elif flag == "--tmpfs":
             out.append((argv[i + 1], "mask_dir"))
@@ -1808,6 +1808,20 @@ def test_no_var_tmp_bind_when_unset():
     assert pol.allows_write(Path("/var/tmp/x")) is False # uncovered → read-only floor
     assert pol.allows_read(Path("/var/tmp/x")) is True   # readable via the ro floor
     assert _parse_argv_binds(argv) == pol.bind_plan()    # argv/plan agree (no drift)
+
+
+def test_argv_binds_match_bind_plan_with_nonidentity_tmp_sources():
+    # Drift guard for the NON-identity binds: /tmp and /var/tmp bind a per-quest
+    # host SOURCE onto their namespace DEST (source != dest). The parse-back is
+    # dest-keyed, so it still equals bind_plan() (dest-keyed) — a wrong DEST in
+    # argv would surface here as drift.
+    pol = _policy(quest_tmp_dir="/t/imp-1000/abc",
+                  quest_var_tmp_dir="/vt/imp-1000/abc")
+    argv = build_sandbox_argv("x", cwd="/wt", policy=pol, engine_env={})
+    flat = " ".join(argv)
+    assert "--bind /t/imp-1000/abc /tmp" in flat        # non-identity /tmp source
+    assert "--bind /vt/imp-1000/abc /var/tmp" in flat   # non-identity /var/tmp source
+    assert _parse_argv_binds(argv) == pol.bind_plan()
 
 
 def test_var_tmp_source_not_identity_fallback():
