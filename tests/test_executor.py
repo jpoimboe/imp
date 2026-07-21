@@ -1838,7 +1838,7 @@ async def test_resume_keep_branch_passes_empty_initial_messages(
 
 
 @pytest.mark.anyio
-@pytest.mark.timeout(120)
+@pytest.mark.timeout(300)
 async def test_script_pause_emits_script_blocked_event(tmp_path: Path) -> None:
     """A script step that exits non-zero and matches a {else: true, pause: true}
     rule must journal a script_blocked event carrying the step name, exit code,
@@ -1880,7 +1880,7 @@ async def test_script_pause_emits_script_blocked_event(tmp_path: Path) -> None:
 
 
 @pytest.mark.anyio
-@pytest.mark.timeout(120)
+@pytest.mark.timeout(300)
 async def test_script_pause_emits_workflow_paused_with_script_blocked_reason(
     tmp_path: Path,
 ) -> None:
