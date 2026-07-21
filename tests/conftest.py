@@ -244,17 +244,20 @@ def _sandbox_fallback_without_bwrap(
     sandbox. On a host WITHOUT bwrap it forces the executor's policy build to
     inactive so the run proceeds bare. Tests marked `real_sandbox_policy` (the
     unit tests asserting the raw three-way posture) opt out and see the real fn.
+    Tests marked `bare_sandbox` force the policy inactive even on a bwrap host, so
+    a gate-routing test never flakes on a transient bwrap spawn failure.
     """
     if request.node.get_closest_marker("real_sandbox_policy"):
         return
-    from imp.engine.sandbox import sandbox_available
-    if sandbox_available():
+    from imp.engine.sandbox import _inactive, sandbox_available
+    force_bare = request.node.get_closest_marker("bare_sandbox") is not None
+    if not force_bare and sandbox_available():
         return
     import imp.engine.executor as ex
-    from imp.engine.sandbox import _inactive
+    note = "bare_sandbox_marker" if force_bare else "test_fallback_no_bwrap"
     monkeypatch.setattr(
         ex, "_build_sandbox_policy",
-        lambda quest, config, log: _inactive(note="test_fallback_no_bwrap"),
+        lambda quest, config, log: _inactive(note=note),
     )
 
 
