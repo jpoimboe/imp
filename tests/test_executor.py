@@ -56,7 +56,7 @@ def _make_quest(root: Path, *, quest_id: str = "test-quest", title: str = "t") -
     from imp.providers.effective import load_effective_config
 
     src_wf = root / "imp" / "workflows" / "imp"
-    quest_dir = root / ".imp" / "change"
+    quest_dir = root / ".imp" / "quests" / quest_id
     quest_dir.mkdir(parents=True, exist_ok=True)
     (quest_dir / "state").mkdir(exist_ok=True)
 
@@ -1921,7 +1921,7 @@ async def test_script_pause_emits_workflow_paused_with_script_blocked_reason(
 @pytest.mark.anyio
 async def test_first_run_snapshots_the_workflow(tmp_path: Path) -> None:
     """The first run copies the live workflow dir into the gitignored per-Quest
-    snapshot at .imp/change/workflow/ (taken once, at run-start)."""
+    snapshot at .imp/quests/test-quest/workflow/ (taken once, at run-start)."""
     quest, _, _ = _seed_minimal_workflow(tmp_path)
     _register_fake({"status": "Success"})
     snapshot = quest.quest_dir / "workflow"
@@ -2049,7 +2049,7 @@ async def test_unknown_step_pauses_without_silent_merge(tmp_path: Path) -> None:
 async def test_frozen_script_runs_from_snapshot_cwd_with_live_project_root(
     tmp_path: Path,
 ) -> None:
-    """A script gate runs with cwd under .imp/change/workflow/ (the snapshot,
+    """A script gate runs with cwd under .imp/quests/test-quest/workflow/ (the snapshot,
     sandbox binding intact) while IMP_PROJECT_ROOT still points at the worktree, so
     git ops act on the change's real tree. Exit 0 -> continue -> COMPLETED."""
     import subprocess
@@ -2063,7 +2063,8 @@ async def test_frozen_script_runs_from_snapshot_cwd_with_live_project_root(
         "  - name: only\n"
         "    steps:\n"
         "      - name: probe\n"
-        "        command: 'case \"$(pwd)\" in */.imp/change/workflow) ;; *) exit 9;; esac;"
+        "        command: 'case \"$(pwd)\" in */.imp/quests/test-quest/workflow)"
+        " ;; *) exit 9;; esac;"
         " cd \"$IMP_PROJECT_ROOT\"; git rev-parse --is-inside-work-tree'\n"
         "        rules:\n"
         "          - {if: {exit: 0}, continue: true}\n"

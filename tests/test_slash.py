@@ -17,7 +17,7 @@ class _FakeQuest:
     def __init__(self, tmp_path: Path) -> None:
         self.id = "abcd12"
         self.title = "Fake change"
-        self.workflow_dir = tmp_path / ".imp" / "change" / "workflow"
+        self.workflow_dir = tmp_path / ".imp" / "quests" / "test-quest" / "workflow"
         user = self.workflow_dir / "skills" / "user"
         user.mkdir(parents=True)
         (user / "refactor.md").write_text("# Refactor\nstep one\n")

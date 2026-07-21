@@ -64,7 +64,7 @@ def _inv(provider, model, tmp_path):
         agent_def=_agent("rev"), provider_name=provider, model_name=model,
         system_prompt="", initial_messages=(),
         quest_context=QuestContext(
-            tmp_path, tmp_path, tmp_path / ".imp" / "change" / "workflow"),
+            tmp_path, tmp_path, tmp_path / ".imp" / "quests" / "test-quest" / "workflow"),
         transcript_dir=tmp_path,
         events_path=tmp_path / "e.jsonl")
 

@@ -37,7 +37,7 @@ def _make_quest(tmp_path: Path, quest_id: str) -> Quest:
         base_branch="main",
         control_root=tmp_path,
         project_root=tmp_path,
-        quest_dir=tmp_path / ".imp" / "change",
+        quest_dir=tmp_path / ".imp" / "quests" / quest_id,
     )
 
 

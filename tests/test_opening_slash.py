@@ -34,7 +34,7 @@ class _FakeQuest:
         self.id = "z9y8x7"
         self.title = ""
         self.control_root = tmp_path
-        self.workflow_dir = tmp_path / ".imp" / "change" / "workflow"
+        self.workflow_dir = tmp_path / ".imp" / "quests" / "test-quest" / "workflow"
         (self.workflow_dir / "skills" / "user").mkdir(parents=True, exist_ok=True)
         self._events = tmp_path / "events.jsonl"
 

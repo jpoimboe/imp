@@ -6,7 +6,7 @@ from imp.agents.tools.context import ToolContext
 
 
 def _ctx(tmp_path: Path, agent_id: str = "step:plan/coder") -> ToolContext:
-    run = tmp_path / ".imp" / "change"
+    run = tmp_path / ".imp" / "quests" / "test-quest"
     run.mkdir(parents=True, exist_ok=True)
     return ToolContext(
         project_root=tmp_path,

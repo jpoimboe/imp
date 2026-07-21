@@ -11,7 +11,7 @@ from imp.engine.state import State
 
 
 def _draft(control: Path, *, has_started: bool) -> Quest:
-    quest_dir = control / ".imp" / "change"
+    quest_dir = control / ".imp" / "quests" / "test-quest"
     (quest_dir / "state").mkdir(parents=True, exist_ok=True)
     State(id="c", step="chat", step_attempt=0, status="new",
           has_started=has_started).save(quest_dir / "state")

@@ -65,7 +65,7 @@ def _inv(tmp_path: Path, log: InMemoryEventLog) -> AgentInvocation:
         initial_messages=(Message(role="user", content=(TextBlock(text="go"),)),),
         quest_context=QuestContext(
             title="T", project_root=tmp_path,
-            workflow_dir=tmp_path / ".imp" / "change" / "workflow"),
+            workflow_dir=tmp_path / ".imp" / "quests" / "test-quest" / "workflow"),
         transcript_dir=tmp_path / "step", events_path=tmp_path / "events.jsonl",
         agent_id="step:p/s", event_log=log)
 
@@ -116,7 +116,7 @@ async def test_anthropic_handoff_injection_emits_engine_message_continuation(
         initial_messages=(Message(role="user", content=(TextBlock(text="go"),)),),
         quest_context=QuestContext(
             title="T", project_root=tmp_path,
-            workflow_dir=tmp_path / ".imp" / "change" / "workflow"),
+            workflow_dir=tmp_path / ".imp" / "quests" / "test-quest" / "workflow"),
         transcript_dir=tmp_path / "step", events_path=tmp_path / "events.jsonl",
         agent_id="step:p/h", event_log=log,
         checkpoint_threshold=0.8)
@@ -150,7 +150,7 @@ async def test_openai_fresh_entry_emits_triad_order(tmp_path: Path) -> None:
         initial_messages=(Message(role="user", content=(TextBlock(text="go"),)),),
         quest_context=QuestContext(
             id="test", title="T", project_root=tmp_path,
-            workflow_dir=tmp_path / ".imp" / "change" / "workflow"),
+            workflow_dir=tmp_path / ".imp" / "quests" / "test-quest" / "workflow"),
         transcript_dir=tmp_path / "step", events_path=tmp_path / "events.jsonl",
         agent_id="step:p/s", event_log=log)
     async for _ in runner.run(inv):
@@ -183,7 +183,7 @@ def _cc_drive(
         initial_messages=(Message(role="user", content=(TextBlock(text="go"),)),),
         quest_context=QuestContext(
             title="T", project_root=tmp_path,
-            workflow_dir=tmp_path / ".imp" / "change" / "workflow"),
+            workflow_dir=tmp_path / ".imp" / "quests" / "test-quest" / "workflow"),
         transcript_dir=tmp_path / "step", events_path=tmp_path / "events.jsonl",
         agent_id="step:p/s", event_log=log)
     return runner, inv
@@ -222,7 +222,7 @@ def _scripted_drive(
         initial_messages=(Message(role="user", content=(TextBlock(text="go"),)),),
         quest_context=QuestContext(
             title="T", project_root=tmp_path,
-            workflow_dir=tmp_path / ".imp" / "change" / "workflow"),
+            workflow_dir=tmp_path / ".imp" / "quests" / "test-quest" / "workflow"),
         transcript_dir=tmp_path / "step", events_path=tmp_path / "events.jsonl",
         agent_id="step:p/s", event_log=log)
     return runner, inv

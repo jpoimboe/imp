@@ -14,7 +14,7 @@ from imp.engine.state import JsonlEventLog
 
 
 def _ctx(tmp_path: Path) -> ToolContext:
-    wf = tmp_path / ".imp" / "change" / "workflow"
+    wf = tmp_path / ".imp" / "quests" / "test-quest" / "workflow"
     (wf / "skills" / "user").mkdir(parents=True)
     (wf / "skills" / "refactor.md").write_text("# Refactor\ndo the thing\n")
     ctx = ToolContext(

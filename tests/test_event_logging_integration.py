@@ -41,7 +41,7 @@ def _make_quest(root: Path, *, quest_id: str = "test-quest", title: str = "t") -
     from imp.providers.effective import load_effective_config
 
     src_wf = root / "imp" / "workflows" / "imp"
-    quest_dir = root / ".imp" / "change"
+    quest_dir = root / ".imp" / "quests" / quest_id
     quest_dir.mkdir(parents=True, exist_ok=True)
     (quest_dir / "state").mkdir(exist_ok=True)
     (quest_dir / "quest.json").write_text(json.dumps({
@@ -132,7 +132,7 @@ def _inv(
         initial_messages=(Message(role="user", content=(TextBlock(text="go"),)),),
         quest_context=QuestContext(
             title="Test", project_root=tmp_path,
-            workflow_dir=tmp_path / ".imp" / "change" / "workflow"),
+            workflow_dir=tmp_path / ".imp" / "quests" / "test-quest" / "workflow"),
         transcript_dir=tmp_path / "step",
         events_path=tmp_path / "events.jsonl",
         agent_id=agent_id,

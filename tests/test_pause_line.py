@@ -121,7 +121,7 @@ def test_pause_facts_unnamed_change_shows_bare_id(tmp_path: Path) -> None:
 
     quest = Quest(id="qzbscf", title="", base_branch="main",
                     control_root=tmp_path, project_root=tmp_path,
-                    quest_dir=tmp_path / ".imp" / "change")
+                    quest_dir=tmp_path / ".imp" / "quests" / "test-quest")
     name, title, token, _reason, _opening = _pause_facts(quest)
     assert name == "qzbscf"
     assert token == "qzbscf"
@@ -135,7 +135,7 @@ def test_pause_facts_named_change_shows_bare_id(tmp_path: Path) -> None:
     quest = Quest(id="qzbscf", title="Add version flag",
                     base_branch="main", control_root=tmp_path,
                     project_root=tmp_path,
-                    quest_dir=tmp_path / ".imp" / "change")
+                    quest_dir=tmp_path / ".imp" / "quests" / "test-quest")
     name, title, token, _reason, _opening = _pause_facts(quest)
     assert name == "qzbscf"          # the bare id, not a slugified handle
     assert token == "qzbscf"

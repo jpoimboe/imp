@@ -9,7 +9,7 @@ from imp.agents.tools.spill import spill_tool_output
 
 
 def _ctx(tmp_path: Path) -> ToolContext:
-    run_dir = tmp_path / ".imp" / "change"
+    run_dir = tmp_path / ".imp" / "quests" / "test-quest"
     run_dir.mkdir(parents=True, exist_ok=True)
     return ToolContext(project_root=tmp_path,
                        events_path=run_dir / "events.jsonl")
@@ -22,7 +22,7 @@ def test_preview_bytes_default_is_2000() -> None:
 def test_spill_writes_full_content_to_tool_results(tmp_path: Path) -> None:
     ctx = _ctx(tmp_path)
     spill_tool_output(ctx, "abc.txt", "hello world")
-    spilled = tmp_path / ".imp" / "change" / "tool-results" / "abc.txt"
+    spilled = tmp_path / ".imp" / "quests" / "test-quest" / "tool-results" / "abc.txt"
     assert spilled.read_text(encoding="utf-8") == "hello world"
 
 
@@ -30,7 +30,7 @@ def test_notice_carries_project_root_relative_path(tmp_path: Path) -> None:
     ctx = _ctx(tmp_path)
     result = spill_tool_output(ctx, "abc.txt", "x" * 60_000, preview_bytes=0)
     # relpath is from project_root (tmp_path), NOT absolute
-    assert ".imp/change/tool-results/abc.txt" in result
+    assert ".imp/quests/test-quest/tool-results/abc.txt" in result
     assert str(tmp_path) not in result
     assert "read with read_file offset=1" in result
 

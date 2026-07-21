@@ -120,7 +120,7 @@ async def _run_anthropic(
         initial_messages=(Message(role="user", content=(TextBlock(text="go"),)),),
         quest_context=QuestContext(
             title="Test", project_root=tmp_path,
-            workflow_dir=tmp_path / ".imp" / "change" / "workflow",
+            workflow_dir=tmp_path / ".imp" / "quests" / "test-quest" / "workflow",
         ),
         transcript_dir=inv_dir,
         events_path=tmp_path / "events.jsonl",
@@ -216,7 +216,7 @@ async def test_claude_code_interrupt_resume_appends_continuation_nudge(
         initial_messages=(Message(role="user", content=(TextBlock(text="go"),)),),
         quest_context=QuestContext(
             title="Test", project_root=tmp_path,
-            workflow_dir=tmp_path / ".imp" / "change" / "workflow",
+            workflow_dir=tmp_path / ".imp" / "quests" / "test-quest" / "workflow",
         ),
         transcript_dir=inv_dir,
         events_path=tmp_path / "events.jsonl",
@@ -295,7 +295,7 @@ async def test_claude_code_pending_human_tail_suppresses_nudge(
         initial_messages=(Message(role="user", content=(TextBlock(text="go"),)),),
         quest_context=QuestContext(
             title="Test", project_root=tmp_path,
-            workflow_dir=tmp_path / ".imp" / "change" / "workflow",
+            workflow_dir=tmp_path / ".imp" / "quests" / "test-quest" / "workflow",
         ),
         transcript_dir=inv_dir,
         events_path=tmp_path / "events.jsonl",
@@ -387,7 +387,7 @@ async def _run_openai(
         initial_messages=(Message(role="user", content=(TextBlock(text="go"),)),),
         quest_context=QuestContext(
             title="Test", project_root=tmp_path,
-            workflow_dir=tmp_path / ".imp" / "change" / "workflow",
+            workflow_dir=tmp_path / ".imp" / "quests" / "test-quest" / "workflow",
         ),
         transcript_dir=inv_dir,
         events_path=tmp_path / "events.jsonl",

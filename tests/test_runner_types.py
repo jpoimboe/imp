@@ -78,8 +78,9 @@ def test_agent_invocation_audit_fields_default_safely(tmp_path) -> None:
             source=SourceLoc(file=Path("a.md"), line=1)),
         provider_name="anthropic", model_name="m", system_prompt="s",
         initial_messages=(Message(role="user", content=(TextBlock(text="x"),)),),
-        quest_context=QuestContext(title="Test", project_root=tmp_path,
-                                     workflow_dir=tmp_path / ".imp" / "change" / "workflow"),
+        quest_context=QuestContext(
+            title="Test", project_root=tmp_path,
+            workflow_dir=tmp_path / ".imp" / "quests" / "test-quest" / "workflow"),
         transcript_dir=tmp_path,
         events_path=tmp_path / "events.jsonl",
     )
@@ -108,8 +109,9 @@ def test_agent_invocation_has_continuation_fn_default_none() -> None:
         agent_def=agent_def, provider_name="anthropic", model_name="m",
         system_prompt="x",
         initial_messages=(Message(role="user", content=(TextBlock(text="go"),)),),
-        quest_context=QuestContext(title="Test", project_root=Path("."),
-                                     workflow_dir=Path(".") / ".imp" / "change" / "workflow"),
+        quest_context=QuestContext(
+            title="Test", project_root=Path("."),
+            workflow_dir=Path(".") / ".imp" / "quests" / "test-quest" / "workflow"),
         transcript_dir=Path("."),
 events_path=Path("e.jsonl"),
     )
@@ -120,8 +122,9 @@ events_path=Path("e.jsonl"),
         agent_def=agent_def, provider_name="anthropic", model_name="m",
         system_prompt="x",
         initial_messages=(Message(role="user", content=(TextBlock(text="go"),)),),
-        quest_context=QuestContext(title="Test", project_root=Path("."),
-                                     workflow_dir=Path(".") / ".imp" / "change" / "workflow"),
+        quest_context=QuestContext(
+            title="Test", project_root=Path("."),
+            workflow_dir=Path(".") / ".imp" / "quests" / "test-quest" / "workflow"),
         transcript_dir=Path("."),
 events_path=Path("e.jsonl"),
         continuation_fn=lambda last: captured.append(last) or "nudge",
@@ -165,8 +168,9 @@ def test_agent_invocation_resolved_tiers_defaults_none():
     inv = AgentInvocation(
         agent_def=a, provider_name="p", model_name="m", system_prompt="",
         initial_messages=(),
-        quest_context=QuestContext(title="x", project_root=Path("."),
-                                     workflow_dir=Path(".") / ".imp" / "change" / "workflow"),
+        quest_context=QuestContext(
+            title="x", project_root=Path("."),
+            workflow_dir=Path(".") / ".imp" / "quests" / "test-quest" / "workflow"),
         transcript_dir=Path("."),
         events_path=Path("e.jsonl"))
     assert inv.resolved_tiers is None

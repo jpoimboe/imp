@@ -52,7 +52,7 @@ def _seed_single_agent(root: Path) -> Quest:
         "  high: {fake: m}\n"
     )
 
-    quest_dir = root / ".imp" / "change"
+    quest_dir = root / ".imp" / "quests" / "test-quest"
     quest_dir.mkdir(parents=True, exist_ok=True)
     (quest_dir / "state").mkdir(exist_ok=True)
     (quest_dir / "quest.json").write_text(json.dumps(
