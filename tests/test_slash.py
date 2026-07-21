@@ -512,14 +512,14 @@ def test_sandbox_no_arg_reports_state(tmp_path: Path) -> None:
 
 
 def test_sandbox_on_from_off_returns_literal(tmp_path: Path) -> None:
-    from imp.cli.slash import SANDBOX_ON_FROM_OFF, handle_slash_line
+    from imp.cli.slash import handle_slash_line
     quest = _FakeQuest(tmp_path)
     out: list[str] = []
     result = handle_slash_line("/sandbox on", quest=quest, output_fn=out.append,
                                unsandboxed=True)
     assert result == "/sandbox on"
-    assert any(SANDBOX_ON_FROM_OFF in line for line in out)
-    assert not any(line.strip().startswith(">") and "/sandbox on" in line for line in out)
+    # The confirmation now comes from the daemon, not the client.
+    assert not any("Sandbox on" in line for line in out)
 
 
 def test_sandbox_on_when_already_on_reprompts(tmp_path: Path) -> None:
@@ -532,15 +532,14 @@ def test_sandbox_on_when_already_on_reprompts(tmp_path: Path) -> None:
     assert any(SANDBOX_ALREADY_ON in line for line in out)
 
 
-def test_sandbox_off_when_on_returns_literal_and_prints_confirmed(tmp_path: Path) -> None:
-    from imp.cli.slash import SANDBOX_OFF_CONFIRMED, handle_slash_line
+def test_sandbox_off_when_on_returns_literal_without_printing(tmp_path: Path) -> None:
+    from imp.cli.slash import handle_slash_line
     quest = _FakeQuest(tmp_path)
     out: list[str] = []
     result = handle_slash_line("/sandbox off", quest=quest, output_fn=out.append,
                                unsandboxed=False)
     assert result == "/sandbox off"
-    assert any(SANDBOX_OFF_CONFIRMED in line for line in out)
-    assert not any(line.strip().startswith(">") and "/sandbox off" in line for line in out)
+    assert not any("Sandbox off" in line for line in out)
 
 
 def test_sandbox_off_when_already_off_reprompts(tmp_path: Path) -> None:
@@ -572,12 +571,6 @@ def test_sandbox_copy_strings_are_verbatim() -> None:
         "tools run as you: your home directory and secrets are readable and "
         "writes are unconfined. It re-enables when the step finishes; run "
         "/sandbox on to re-enable it now.")
-    assert slash.SANDBOX_OFF_CONFIRMED == (
-        "Sandbox off — this step is now unsandboxed. It re-enables when the "
-        "step finishes; run /sandbox on to re-enable it now.")
-    assert slash.SANDBOX_ON_FROM_OFF == (
-        "Sandbox on. Shell and file tools are confined to the worktree again. "
-        "Processes already started while unsandboxed keep their current access.")
     assert slash.SANDBOX_ALREADY_ON == "Sandbox is already on."
     assert slash.SANDBOX_ALREADY_OFF == "Sandbox is already off."
     assert slash.SANDBOX_USAGE == "Usage: /sandbox [on|off]"
@@ -585,12 +578,13 @@ def test_sandbox_copy_strings_are_verbatim() -> None:
 
 def test_sandbox_off_applies_immediately_with_no_prompt(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    from imp.cli.slash import SANDBOX_OFF_CONFIRMED, ask_line_with_slash
+    from imp.cli.slash import ask_line_with_slash
     quest = _FakeQuest(tmp_path)
     prompt = _FakePrompt(["/sandbox off"])
     line = anyio.run(ask_line_with_slash, prompt, _NullStatus(), quest)
     assert line == "/sandbox off"
-    assert SANDBOX_OFF_CONFIRMED in capsys.readouterr().out
+    # Confirmation now emitted daemon-side, so the client prints nothing here.
+    assert "Sandbox off" not in capsys.readouterr().out
 
 
 def test_help_lists_sandbox() -> None:

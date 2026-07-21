@@ -1606,6 +1606,16 @@ async def test_set_sandbox_control_broadcasts_transient_marker(
     assert [m["payload"]["unsandboxed"] for m in markers] == [True, False]
 
 
+def test_sandbox_toggle_confirmations_verbatim() -> None:
+    from imp.remote.session import server
+    assert server.SANDBOX_OFF_CONFIRMED == (
+        "Sandbox off — this step is now unsandboxed. It re-enables when the "
+        "step finishes; run /sandbox on to re-enable it now.")
+    assert server.SANDBOX_ON_FROM_OFF == (
+        "Sandbox on. Shell and file tools are confined to the worktree again. "
+        "Processes already started while unsandboxed keep their current access.")
+
+
 def test_attach_pulse_seeds_marker_when_unsandboxed(tmp_path: Path) -> None:
     from imp.cli.signals import InterruptCoordinator
 

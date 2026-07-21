@@ -32,12 +32,6 @@ SANDBOX_STATE_OFF = (
     "tools run as you: your home directory and secrets are readable and "
     "writes are unconfined. It re-enables when the step finishes; run "
     "/sandbox on to re-enable it now.")
-SANDBOX_OFF_CONFIRMED = (
-    "Sandbox off — this step is now unsandboxed. It re-enables when the "
-    "step finishes; run /sandbox on to re-enable it now.")
-SANDBOX_ON_FROM_OFF = (
-    "Sandbox on. Shell and file tools are confined to the worktree again. "
-    "Processes already started while unsandboxed keep their current access.")
 SANDBOX_ALREADY_ON = "Sandbox is already on."
 SANDBOX_ALREADY_OFF = "Sandbox is already off."
 SANDBOX_USAGE = "Usage: /sandbox [on|off]"
@@ -137,14 +131,12 @@ def handle_slash_line(
                 _echo_command(text, output_fn, color=color)
                 output_fn(SANDBOX_ALREADY_ON)
                 return REPROMPT
-            output_fn(SANDBOX_ON_FROM_OFF)
             return "/sandbox on"
         if args == "off":
             if unsandboxed:
                 _echo_command(text, output_fn, color=color)
                 output_fn(SANDBOX_ALREADY_OFF)
                 return REPROMPT
-            output_fn(SANDBOX_OFF_CONFIRMED)
             return "/sandbox off"
         _echo_command(text, output_fn, color=color)
         if args == "":
