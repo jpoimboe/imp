@@ -288,10 +288,14 @@ def test_sigterm_reaches_inner_child_through_overlay_wrapper() -> None:
         assert ctx.running_processes == []          # registry drained
         assert len(out_holder["killed"]) >= 1       # >=1 process was signalled
         inner_pid = out_holder["inner_pid"]
-        # The recorded inner child is terminated. Poll a generous budget tolerating
-        # the brief zombie window; failure here proves the signal did NOT reach the
-        # child through the layers (it survived as an orphan) -- the crux falsifier.
-        deadline = time.monotonic() + 10.0
+        # The recorded inner child is terminated. Poll a generous-but-bounded budget:
+        # a SIGKILL'd process becomes a zombie within milliseconds once scheduled, so
+        # 60 s never false-fires even under saturated -n auto CI, yet stays bounded so a
+        # genuinely unreached signal still fails with the diagnostic below rather than
+        # hanging. Tolerates the brief zombie window; failure here proves the signal did
+        # NOT reach the child through the layers (it survived as an orphan) -- the crux
+        # falsifier.
+        deadline = time.monotonic() + 60.0
         while not _pid_gone_or_zombie(inner_pid):
             if time.monotonic() > deadline:
                 raise AssertionError(
