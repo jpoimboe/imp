@@ -70,6 +70,7 @@ class SandboxPolicy:
     home: str = ""                           # real $HOME ("" → inactive/unresolved)
     home_layer: HomeLayer | None = None      # writable-home layer (None → ro read-through)
     quest_tmp_dir: str = ""      # per-quest dir bound onto /tmp ("" → identity fallback)
+    quest_var_tmp_dir: str = ""  # per-quest dir onto /var/tmp ("" → no bind; host ro)
 
     def bind_plan(self) -> list[tuple[str, str]]:
         """The ordered path-covering binds, in bwrap EMIT ORDER — the SINGLE
@@ -81,7 +82,9 @@ class SandboxPolicy:
         cover — only the secret masks are unconditionally last. Add a new bind here
         and ALL consumers pick it up; the argv-parity test enforces no drift. The
         home_layer rw bind goes FIRST (so caches/worktree/secrets over $HOME win),
-        /tmp next, and the secret masks unconditionally LAST.
+        /tmp next, then the per-quest read-write /var/tmp scratch bind (emitted only
+        when quest_var_tmp_dir is set; empty → no /var/tmp bind, host /var/tmp stays
+        on the read-only floor), and the secret masks unconditionally LAST.
 
         The <control>/.imp tmpfs (control_imp) is a fail-closed mask over the whole
         control tree; its position is worktree-relative and LOAD-BEARING. Normal
@@ -107,6 +110,7 @@ class SandboxPolicy:
         return [
             *([(self.home_layer.home, "rw")] if self.home_layer is not None else []),
             ("/tmp", "rw"),
+            *([("/var/tmp", "rw")] if self.quest_var_tmp_dir else []),
             *worktree_block,
             (self.git_common_dir, "rw"),
             *([(self.quest_home, "rw")] if self.quest_home else []),
@@ -209,6 +213,8 @@ def build_sandbox_argv(
                 src = hl.merged                       # overlay merged view onto $HOME
             elif bind == "/tmp" and policy.quest_tmp_dir:
                 src = policy.quest_tmp_dir             # per-quest host dir onto namespace /tmp
+            elif bind == "/var/tmp" and policy.quest_var_tmp_dir:
+                src = policy.quest_var_tmp_dir         # per-quest host dir onto namespace /var/tmp
             else:
                 src = bind
             argv += ["--bind", src, bind]
@@ -528,6 +534,10 @@ def resolve_policy(
 
     session_sock = session_socket_path(control_root, quest_id)
     quest_tmp_dir = str(session_sock.parent)
+    quest_var_tmp_dir = (
+        f"/var/tmp/imp-{os.getuid()}/{quest_id}"
+        if quest_dir is not None and os.access("/var/tmp", os.W_OK)
+        else "")
 
     return SandboxPolicy(
         active=True,
@@ -546,6 +556,7 @@ def resolve_policy(
         secret_dirs=tuple(secret_dirs),
         secret_files=tuple(secret_files),
         quest_tmp_dir=quest_tmp_dir,
+        quest_var_tmp_dir=quest_var_tmp_dir,
         setenv=_build_setenv(
             engine_env_result, environ, cfg.env_passthrough,
             session_socket=str(session_sock), quest_tmp_dir=quest_tmp_dir,

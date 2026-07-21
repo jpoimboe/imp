@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import dataclasses
+import os
 import types as _types
 from pathlib import Path
 
@@ -784,7 +785,7 @@ def test_allows_read_masks_secrets_allows_rest():
 
 
 def _parse_argv_binds(argv: list[str]) -> list[tuple[str, str]]:
-    """Recover the (path, kind) path-covering binds from a real build_sandbox_argv
+    """Recover the dest-keyed (path, kind) path-covering binds from a real build_sandbox_argv
     emission — the inverse of build_sandbox_argv's kind→flag map. Scans the bind
     block between the step-1 ro-floor (--ro-bind / /) and step-11 (--proc),
     classifying each flag back to a bind_plan kind."""
@@ -794,7 +795,7 @@ def _parse_argv_binds(argv: list[str]) -> list[tuple[str, str]]:
     while i < stop:
         flag = argv[i]
         if flag == "--bind":
-            out.append((argv[i + 1], "rw"))
+            out.append((argv[i + 2], "rw"))   # DEST-keyed (src != dest for /tmp, /var/tmp)
             i += 3
         elif flag == "--tmpfs":
             out.append((argv[i + 1], "mask_dir"))
@@ -1779,3 +1780,111 @@ def test_rebase_does_not_rebase_sibling_with_common_prefix():
     # A genuine child IS rebased.
     assert _rebase_into_sandbox_tmp(
         "/t/imp-1000/abc/out.json", "/t/imp-1000/abc") == "/tmp/out.json"
+
+
+def test_var_tmp_bind_source_and_position():
+    # Set case: the per-quest source is bound onto /var/tmp, positioned in
+    # bind_plan immediately AFTER the /tmp scratch entry and before the worktree.
+    pol = _policy(quest_var_tmp_dir="/vt/imp-1000/abc")
+    flat = " ".join(build_sandbox_argv("x", cwd="/wt", policy=pol, engine_env={}))
+    assert "--bind /vt/imp-1000/abc /var/tmp" in flat   # per-quest source → /var/tmp
+    argv = build_sandbox_argv("x", cwd="/wt", policy=pol, engine_env={})
+    i_tmp = argv.index("/tmp")                    # first "/tmp" is the /tmp bind source
+    i_vt = argv.index("/vt/imp-1000/abc")         # the /var/tmp bind source
+    i_wt = argv.index("/ctl/.imp/worktrees/abc")  # worktree src (default _policy worktree)
+    assert i_tmp < i_vt < i_wt
+    bp = pol.bind_plan()
+    assert bp[bp.index(("/tmp", "rw")) + 1] == ("/var/tmp", "rw")  # right after /tmp
+    assert pol.allows_write(Path("/var/tmp/scratch")) is True
+
+
+def test_no_var_tmp_bind_when_unset():
+    # Negative: empty quest_var_tmp_dir emits NO /var/tmp bind — host /var/tmp
+    # stays on the read-only floor (no identity fallback). Drift guard still holds.
+    pol = _policy()   # quest_var_tmp_dir defaults to ""
+    argv = build_sandbox_argv("x", cwd="/wt", policy=pol, engine_env={})
+    assert "/var/tmp" not in argv                       # no bind dest emitted at all
+    assert ("/var/tmp", "rw") not in pol.bind_plan()
+    assert pol.allows_write(Path("/var/tmp/x")) is False # uncovered → read-only floor
+    assert pol.allows_read(Path("/var/tmp/x")) is True   # readable via the ro floor
+    assert _parse_argv_binds(argv) == pol.bind_plan()    # argv/plan agree (no drift)
+
+
+def test_argv_binds_match_bind_plan_with_nonidentity_tmp_sources():
+    # Drift guard for the NON-identity binds: /tmp and /var/tmp bind a per-quest
+    # host SOURCE onto their namespace DEST (source != dest). The parse-back is
+    # dest-keyed, so it still equals bind_plan() (dest-keyed) — a wrong DEST in
+    # argv would surface here as drift.
+    pol = _policy(quest_tmp_dir="/t/imp-1000/abc",
+                  quest_var_tmp_dir="/vt/imp-1000/abc")
+    argv = build_sandbox_argv("x", cwd="/wt", policy=pol, engine_env={})
+    flat = " ".join(argv)
+    assert "--bind /t/imp-1000/abc /tmp" in flat        # non-identity /tmp source
+    assert "--bind /vt/imp-1000/abc /var/tmp" in flat   # non-identity /var/tmp source
+    assert _parse_argv_binds(argv) == pol.bind_plan()
+
+
+def test_var_tmp_source_not_identity_fallback():
+    # An empty quest_var_tmp_dir must NEVER degrade to --bind /var/tmp /var/tmp
+    # (which would expose the host's real /var/tmp read-write).
+    flat = " ".join(build_sandbox_argv(
+        "x", cwd="/wt", policy=_policy(), engine_env={}))
+    assert "--bind /var/tmp /var/tmp" not in flat
+
+
+def test_var_tmp_mirror_keeps_var_tmp_writable_dest_keyed():
+    # bind_plan stays DEST-keyed on /var/tmp (the in-sandbox path) even though argv
+    # binds the per-quest host source, so allows_write reports /var/tmp writable.
+    pol = _policy(quest_var_tmp_dir="/vt/imp-1000/abc")
+    assert ("/var/tmp", "rw") in pol.bind_plan()
+    assert pol.allows_write(Path("/var/tmp/a/b")) is True
+
+
+def test_resolve_policy_sets_var_tmp_when_writable(tmp_path, monkeypatch):
+    import imp.engine.sandbox as sandbox_mod
+    control, wt = _layout(tmp_path)
+    qd = tmp_path / "qd"
+    qd.mkdir()
+    real_access = os.access
+    monkeypatch.setattr(
+        sandbox_mod.os, "access",
+        lambda p, m: True if str(p) == "/var/tmp" else real_access(p, m))
+    pol = resolve_policy(
+        worktree=wt, control_root=control, quest_id="abc",
+        cfg=SandboxConfig(uid=99999),        # injected uid must be IGNORED for /var/tmp
+        engine_env_result={}, environ={}, available=True, quest_dir=qd)
+    # uid comes from os.getuid() unconditionally, NOT cfg.uid=99999
+    assert pol.quest_var_tmp_dir == f"/var/tmp/imp-{os.getuid()}/abc"
+    assert "imp-99999" not in pol.quest_var_tmp_dir
+    assert ("/var/tmp", "rw") in pol.bind_plan()   # bind emitted
+
+
+def test_resolve_policy_no_var_tmp_when_unwritable(tmp_path, monkeypatch):
+    import imp.engine.sandbox as sandbox_mod
+    control, wt = _layout(tmp_path)
+    qd = tmp_path / "qd"
+    qd.mkdir()
+    real_access = os.access
+    monkeypatch.setattr(
+        sandbox_mod.os, "access",
+        lambda p, m: False if str(p) == "/var/tmp" else real_access(p, m))
+    pol = resolve_policy(
+        worktree=wt, control_root=control, quest_id="abc",
+        cfg=SandboxConfig(), engine_env_result={}, environ={},
+        available=True, quest_dir=qd)
+    assert pol.quest_var_tmp_dir == ""
+    assert ("/var/tmp", "rw") not in pol.bind_plan()
+
+
+def test_resolve_policy_no_var_tmp_for_draft_without_quest_dir(tmp_path, monkeypatch):
+    import imp.engine.sandbox as sandbox_mod
+    control, wt = _layout(tmp_path)
+    real_access = os.access
+    monkeypatch.setattr(          # /var/tmp writable, but quest_dir is None (draft)
+        sandbox_mod.os, "access",
+        lambda p, m: True if str(p) == "/var/tmp" else real_access(p, m))
+    pol = resolve_policy(
+        worktree=wt, control_root=control, quest_id="abc",
+        cfg=SandboxConfig(), engine_env_result={}, environ={},
+        available=True, quest_dir=None)
+    assert pol.quest_var_tmp_dir == ""

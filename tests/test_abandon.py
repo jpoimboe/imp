@@ -1,3 +1,6 @@
+import os
+import shutil
+import uuid
 from pathlib import Path
 
 import pytest
@@ -8,6 +11,11 @@ from imp.engine.abandon import discard_conversation, tear_down_quest
 from imp.engine.quest import Quest
 from imp.engine.state import ProjectLock, State
 from tests.conftest import _git, _seed_control
+
+_var_tmp_writable = pytest.mark.skipif(
+    not os.access("/var/tmp", os.W_OK),
+    reason="requires writable /var/tmp",
+)
 
 
 def test_remove_worktree_force_tolerates_dirty_tree(tmp_path: Path) -> None:
@@ -364,3 +372,48 @@ def test_discard_conversation_reaps_per_quest_tmp_dir(tmp_path: Path) -> None:
 
     assert not ch.tmp_dir.exists()
     assert not (tmp_path / ".imp" / "quests" / "feat").exists()   # live home dropped too
+
+
+@_var_tmp_writable
+def test_tear_down_quest_force_reaps_per_quest_var_tmp_dir(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import imp.engine.sandbox as sandbox_mod
+    _seed_control(tmp_path)
+    qid = f"vt{uuid.uuid4().hex[:8]}"
+    ch = Quest.create(tmp_path, title="x", quest_id=qid, base_branch="main")
+    # Simulate overlay residue: non-empty mode-000 work/work that plain rmtree leaves.
+    residue = ch.var_tmp_dir / "work" / "work"
+    residue.mkdir(parents=True, exist_ok=True)
+    (residue / "file.txt").write_text("x")  # write file before chmod 000
+    (ch.var_tmp_dir / "scratch").write_text("x")
+    residue.chmod(0o000)
+    # Spy installed just before teardown so setup chmods don't appear in recording.
+    real_chmod = os.chmod
+    chmodded: list[str] = []
+    def _spy_chmod(p, mode, *a, **k):
+        chmodded.append(str(p))
+        return real_chmod(p, mode, *a, **k)
+    monkeypatch.setattr(sandbox_mod.os, "chmod", _spy_chmod)
+    try:
+        tear_down_quest(ch)
+        assert not ch.var_tmp_dir.exists()
+        assert str(residue) in chmodded  # proves _force_rmtree's chmod walk ran
+    finally:
+        if residue.exists():
+            residue.chmod(0o700)
+        shutil.rmtree(ch.var_tmp_dir, ignore_errors=True)
+
+
+@_var_tmp_writable
+def test_discard_conversation_reaps_per_quest_var_tmp_dir(tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+    qid = f"vt{uuid.uuid4().hex[:8]}"
+    ch = Quest.create(tmp_path, title="x", quest_id=qid, base_branch="main")
+    ch.var_tmp_dir.mkdir(parents=True, exist_ok=True)
+    (ch.var_tmp_dir / "scratch").write_text("x")
+    try:
+        discard_conversation(ch)
+        assert not ch.var_tmp_dir.exists()
+    finally:
+        shutil.rmtree(ch.var_tmp_dir, ignore_errors=True)
