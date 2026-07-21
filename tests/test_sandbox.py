@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import dataclasses
+import os
 import types as _types
 from pathlib import Path
 
@@ -1823,3 +1824,53 @@ def test_var_tmp_mirror_keeps_var_tmp_writable_dest_keyed():
     pol = _policy(quest_var_tmp_dir="/vt/imp-1000/abc")
     assert ("/var/tmp", "rw") in pol.bind_plan()
     assert pol.allows_write(Path("/var/tmp/a/b")) is True
+
+
+def test_resolve_policy_sets_var_tmp_when_writable(tmp_path, monkeypatch):
+    import imp.engine.sandbox as sandbox_mod
+    control, wt = _layout(tmp_path)
+    qd = tmp_path / "qd"
+    qd.mkdir()
+    real_access = os.access
+    monkeypatch.setattr(
+        sandbox_mod.os, "access",
+        lambda p, m: True if str(p) == "/var/tmp" else real_access(p, m))
+    pol = resolve_policy(
+        worktree=wt, control_root=control, quest_id="abc",
+        cfg=SandboxConfig(uid=99999),        # injected uid must be IGNORED for /var/tmp
+        engine_env_result={}, environ={}, available=True, quest_dir=qd)
+    # uid comes from os.getuid() unconditionally, NOT cfg.uid=99999
+    assert pol.quest_var_tmp_dir == f"/var/tmp/imp-{os.getuid()}/abc"
+    assert "imp-99999" not in pol.quest_var_tmp_dir
+    assert ("/var/tmp", "rw") in pol.bind_plan()   # bind emitted
+
+
+def test_resolve_policy_no_var_tmp_when_unwritable(tmp_path, monkeypatch):
+    import imp.engine.sandbox as sandbox_mod
+    control, wt = _layout(tmp_path)
+    qd = tmp_path / "qd"
+    qd.mkdir()
+    real_access = os.access
+    monkeypatch.setattr(
+        sandbox_mod.os, "access",
+        lambda p, m: False if str(p) == "/var/tmp" else real_access(p, m))
+    pol = resolve_policy(
+        worktree=wt, control_root=control, quest_id="abc",
+        cfg=SandboxConfig(), engine_env_result={}, environ={},
+        available=True, quest_dir=qd)
+    assert pol.quest_var_tmp_dir == ""
+    assert ("/var/tmp", "rw") not in pol.bind_plan()
+
+
+def test_resolve_policy_no_var_tmp_for_draft_without_quest_dir(tmp_path, monkeypatch):
+    import imp.engine.sandbox as sandbox_mod
+    control, wt = _layout(tmp_path)
+    real_access = os.access
+    monkeypatch.setattr(          # /var/tmp writable, but quest_dir is None (draft)
+        sandbox_mod.os, "access",
+        lambda p, m: True if str(p) == "/var/tmp" else real_access(p, m))
+    pol = resolve_policy(
+        worktree=wt, control_root=control, quest_id="abc",
+        cfg=SandboxConfig(), engine_env_result={}, environ={},
+        available=True, quest_dir=None)
+    assert pol.quest_var_tmp_dir == ""

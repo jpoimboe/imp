@@ -534,6 +534,10 @@ def resolve_policy(
 
     session_sock = session_socket_path(control_root, quest_id)
     quest_tmp_dir = str(session_sock.parent)
+    quest_var_tmp_dir = (
+        f"/var/tmp/imp-{os.getuid()}/{quest_id}"
+        if quest_dir is not None and os.access("/var/tmp", os.W_OK)
+        else "")
 
     return SandboxPolicy(
         active=True,
@@ -552,6 +556,7 @@ def resolve_policy(
         secret_dirs=tuple(secret_dirs),
         secret_files=tuple(secret_files),
         quest_tmp_dir=quest_tmp_dir,
+        quest_var_tmp_dir=quest_var_tmp_dir,
         setenv=_build_setenv(
             engine_env_result, environ, cfg.env_passthrough,
             session_socket=str(session_sock), quest_tmp_dir=quest_tmp_dir,
