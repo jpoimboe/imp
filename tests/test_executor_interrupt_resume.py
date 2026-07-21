@@ -18,7 +18,7 @@ def anyio_backend() -> str:
     return "asyncio"
 
 
-def _make_change(root: Path, *, quest_id: str = "c", title: str = "t") -> Quest:
+def _make_quest(root: Path, *, quest_id: str = "c", title: str = "t") -> Quest:
     """Construct a Quest directly on disk without git worktrees."""
     from imp.engine.loader import load_workflow
     from imp.providers.effective import load_effective_config
@@ -76,7 +76,7 @@ def _seed_single_agent(root: Path) -> Quest:
     (root / ".imp" / "config.yaml").write_text(
         "providers: [fake]\ntiers:\n  low: {fake: m}\n  medium: {fake: m}\n  high: {fake: m}\n"
     )
-    return _make_change(root)
+    return _make_quest(root)
 
 
 @pytest.mark.anyio
@@ -131,7 +131,7 @@ async def test_interrupt_after_step_completed_advances_then_pauses(tmp_path: Pat
     (tmp_path / ".imp").mkdir(parents=True, exist_ok=True)
     (tmp_path / ".imp" / "config.yaml").write_text(
         "providers: [fake]\ntiers:\n  low: {fake: m}\n  medium: {fake: m}\n  high: {fake: m}\n")
-    quest = _make_change(tmp_path)
+    quest = _make_quest(tmp_path)
 
     from imp.providers import resolve
     resolve.reset_providers_for_tests()
@@ -197,7 +197,7 @@ async def test_interrupt_does_not_override_resume_goto_target(tmp_path: Path) ->
     (tmp_path / ".imp").mkdir(parents=True, exist_ok=True)
     (tmp_path / ".imp" / "config.yaml").write_text(
         "providers: [fake]\ntiers:\n  low: {fake: m}\n  medium: {fake: m}\n  high: {fake: m}\n")
-    quest = _make_change(tmp_path)
+    quest = _make_quest(tmp_path)
 
     from imp.providers import resolve
     resolve.reset_providers_for_tests()
@@ -416,7 +416,7 @@ async def test_interrupt_after_complete_clears_resume_pair(tmp_path: Path) -> No
     (tmp_path / ".imp").mkdir(parents=True, exist_ok=True)
     (tmp_path / ".imp" / "config.yaml").write_text(
         "providers: [fake]\ntiers:\n  low: {fake: m}\n  medium: {fake: m}\n  high: {fake: m}\n")
-    quest = _make_change(tmp_path)
+    quest = _make_quest(tmp_path)
 
     # Seed a stale continue; the forward Continue must clear it.
     s = State.load(quest.state_dir)
@@ -482,7 +482,7 @@ async def test_interrupt_on_resume_goto_arms_solicit(tmp_path: Path) -> None:
     (tmp_path / ".imp").mkdir(parents=True, exist_ok=True)
     (tmp_path / ".imp" / "config.yaml").write_text(
         "providers: [fake]\ntiers:\n  low: {fake: m}\n  medium: {fake: m}\n  high: {fake: m}\n")
-    quest = _make_change(tmp_path)
+    quest = _make_quest(tmp_path)
 
     # Seed a stale continue; the resume-Goto branch must overwrite it.
     s = State.load(quest.state_dir)

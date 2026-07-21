@@ -11,7 +11,7 @@ import pytest
 
 from imp.engine.executor import RunResult, run_quest
 from imp.engine.state import JsonlEventLog, State
-from tests.test_executor import _make_change, _register_invocation_capturing
+from tests.test_executor import _make_quest, _register_invocation_capturing
 
 _FAKE_CONFIG_WITH_VAR = (
     "providers: [fake]\n"
@@ -27,7 +27,7 @@ def anyio_backend():
 
 def _seed_var_workflow(root: Path) -> object:
     """A one-agent-step workflow: var `n` (default 7, config-overridden to 42),
-    phase label `P`, body echoing `vars.n`. _make_change seeds an EAGER State that
+    phase label `P`, body echoing `vars.n`. _make_quest seeds an EAGER State that
     the caller overwrites with the unseeded deferred-draft shape before running."""
     wf = root / "imp" / "workflows" / "imp"
     (wf / "agents").mkdir(parents=True)
@@ -46,7 +46,7 @@ def _seed_var_workflow(root: Path) -> object:
     (root / "imp" / "project.yaml").write_text("default-workflow: imp\n")
     (root / ".imp").mkdir(parents=True, exist_ok=True)
     (root / ".imp" / "config.yaml").write_text(_FAKE_CONFIG_WITH_VAR)
-    return _make_change(root)
+    return _make_quest(root)
 
 
 def _task_text(inv: object) -> str:
@@ -57,7 +57,7 @@ def _task_text(inv: object) -> str:
 @pytest.mark.anyio
 async def test_first_resume_bootstraps_deferred_draft(tmp_path: Path) -> None:
     quest = _seed_var_workflow(tmp_path)
-    # Overwrite _make_change's eager State with the shape create_draft(defer_seed=
+    # Overwrite _make_quest's eager State with the shape create_draft(defer_seed=
     # True) writes: null cursor, never started, no vars.
     State(id=quest.id, step=None, step_attempt=0, status="new").save(quest.state_dir)
 

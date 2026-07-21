@@ -33,7 +33,7 @@ def _stub_stack_dumper(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(daemon, "install_stack_dumper", lambda p: None)
 
 
-def _make_change(tmp_path: Path, quest_id: str) -> Quest:
+def _make_quest(tmp_path: Path, quest_id: str) -> Quest:
     quest = Quest(
         id=quest_id,
         title="T",
@@ -91,7 +91,7 @@ def _seed_step(quest: Quest, step: str) -> None:
 async def test_serves_on_per_change_socket_and_bridges_run_quest_seams(
     tmp_path: Path,
 ) -> None:
-    quest = _make_change(tmp_path, "2026-06-15-abc")
+    quest = _make_quest(tmp_path, "2026-06-15-abc")
     sock = str(session_socket_path(quest.control_root, quest.id))
 
     async def fake_run(
@@ -153,7 +153,7 @@ async def test_serves_on_per_change_socket_and_bridges_run_quest_seams(
 async def test_client_attached_at_completion_receives_final_agent_output(
     tmp_path: Path,
 ) -> None:
-    quest = _make_change(tmp_path, "2026-06-15-flush")
+    quest = _make_quest(tmp_path, "2026-06-15-flush")
     sock = str(session_socket_path(quest.control_root, quest.id))
     client_ready = anyio.Event()
 
@@ -210,7 +210,7 @@ async def test_client_attached_at_completion_receives_final_agent_output(
 async def test_zero_client_gate_hibernates_by_default(tmp_path: Path) -> None:
     from imp.engine.awaiting_user_input import AwaitingUserInput
 
-    quest = _make_change(tmp_path, "2026-06-15-def")
+    quest = _make_quest(tmp_path, "2026-06-15-def")
 
     async def fake_run(
         quest: Quest, *, on_event: Any, user_chat_input_fn: Any,
@@ -231,7 +231,7 @@ async def test_zero_client_gate_hibernates_by_default(tmp_path: Path) -> None:
 
 @pytest.mark.anyio
 async def test_lock_is_held_during_run_and_released_after(tmp_path: Path) -> None:
-    quest = _make_change(tmp_path, "2026-06-15-ghi")
+    quest = _make_quest(tmp_path, "2026-06-15-ghi")
     lock_path = quest.quest_dir / "lock"
     release = anyio.Event()
 
@@ -264,7 +264,7 @@ async def test_lock_is_held_during_run_and_released_after(tmp_path: Path) -> Non
 async def test_interrupt_control_pauses_the_shared_coordinator(
     tmp_path: Path,
 ) -> None:
-    quest = _make_change(tmp_path, "2026-06-15-jkl")
+    quest = _make_quest(tmp_path, "2026-06-15-jkl")
     sock = str(session_socket_path(quest.control_root, quest.id))
 
     run_returned = anyio.Event()
@@ -333,7 +333,7 @@ def test_main_loads_named_change_and_serves_it(
 
 @pytest.mark.anyio
 async def test_resident_abandon_runs_teardown(tmp_path: Path) -> None:
-    quest = _make_change(tmp_path, "2026-06-15-aba")
+    quest = _make_quest(tmp_path, "2026-06-15-aba")
     sock = str(session_socket_path(quest.control_root, quest.id))
     torn: list[Quest] = []
 
@@ -367,7 +367,7 @@ async def test_resident_abandon_runs_teardown(tmp_path: Path) -> None:
 async def test_interrupt_resume_prompt_not_duplicated_on_existing_client(
     tmp_path: Path,
 ) -> None:
-    quest = _make_change(tmp_path, "2026-06-15-dup")
+    quest = _make_quest(tmp_path, "2026-06-15-dup")
     sock = str(session_socket_path(quest.control_root, quest.id))
     calls = {"n": 0}
 
@@ -424,7 +424,7 @@ def test_is_interrupt_pause_true_only_for_paused_with_should_pause() -> None:
 async def test_interrupt_pause_reprompts_and_resumes_in_place(
     tmp_path: Path,
 ) -> None:
-    quest = _make_change(tmp_path, "2026-06-15-rzm")
+    quest = _make_quest(tmp_path, "2026-06-15-rzm")
     sock = str(session_socket_path(quest.control_root, quest.id))
     calls = {"n": 0}
 
@@ -471,7 +471,7 @@ async def test_interrupt_pause_reprompts_and_resumes_in_place(
 async def test_interrupt_pause_hibernates_with_zero_clients(
     tmp_path: Path,
 ) -> None:
-    quest = _make_change(tmp_path, "2026-06-15-rzh")
+    quest = _make_quest(tmp_path, "2026-06-15-rzh")
     calls = {"n": 0}
 
     async def fake_run(
@@ -677,7 +677,7 @@ def test_append_workflow_resumed_is_idempotent_when_trailing(tmp_path: Path) -> 
 async def test_two_interrupt_rounds_leave_no_open_pause(tmp_path: Path) -> None:
     from imp.cli.signals import _open_pause_exists
 
-    quest = _make_change(tmp_path, "2026-06-15-bal")
+    quest = _make_quest(tmp_path, "2026-06-15-bal")
     calls = {"n": 0}
 
     async def fake_run(
@@ -938,7 +938,7 @@ async def test_non_awaiting_turn_pause_does_not_drive_head(
 
 @pytest.mark.anyio
 async def test_resident_save_applies_the_save_disposition(tmp_path: Path) -> None:
-    quest = _make_change(tmp_path, "2026-06-15-sav")
+    quest = _make_quest(tmp_path, "2026-06-15-sav")
     sock = str(session_socket_path(quest.control_root, quest.id))
     saved: list[Quest] = []
     torn: list[Quest] = []
@@ -1016,7 +1016,7 @@ def test_hold_prompt_none_for_awaiting_turn(tmp_path: Path) -> None:
 
 @pytest.mark.anyio
 async def test_script_blocked_pause_exits_terminal(tmp_path: Path) -> None:
-    quest = _make_change(tmp_path, "2026-06-15-scb")
+    quest = _make_quest(tmp_path, "2026-06-15-scb")
     calls = {"n": 0}
 
     async def fake_run(
@@ -1042,7 +1042,7 @@ async def test_script_blocked_pause_exits_terminal(tmp_path: Path) -> None:
 async def test_script_blocked_pause_hibernates_with_zero_clients(
     tmp_path: Path,
 ) -> None:
-    quest = _make_change(tmp_path, "2026-06-15-sch")
+    quest = _make_quest(tmp_path, "2026-06-15-sch")
     calls = {"n": 0}
 
     async def fake_run(
@@ -1067,7 +1067,7 @@ async def test_script_blocked_pause_hibernates_with_zero_clients(
 
 @pytest.mark.anyio
 async def test_resident_archive_applies_the_archive_disposition(tmp_path: Path) -> None:
-    quest = _make_change(tmp_path, "2026-06-15-arc")
+    quest = _make_quest(tmp_path, "2026-06-15-arc")
     sock = str(session_socket_path(quest.control_root, quest.id))
     archived: list[Quest] = []
     discarded: list[Quest] = []
@@ -1100,7 +1100,7 @@ async def test_resident_archive_applies_the_archive_disposition(tmp_path: Path) 
 
 @pytest.mark.anyio
 async def test_resident_discard_applies_the_discard_disposition(tmp_path: Path) -> None:
-    quest = _make_change(tmp_path, "2026-06-15-dis")
+    quest = _make_quest(tmp_path, "2026-06-15-dis")
     sock = str(session_socket_path(quest.control_root, quest.id))
     archived: list[Quest] = []
     discarded: list[Quest] = []
@@ -1133,7 +1133,7 @@ async def test_resident_discard_applies_the_discard_disposition(tmp_path: Path) 
 
 @pytest.mark.anyio
 async def test_serve_forwards_non_interactive_to_run_quest(tmp_path: Path) -> None:
-    quest = _make_change(tmp_path, "2026-06-15-nint")
+    quest = _make_quest(tmp_path, "2026-06-15-nint")
     captured: dict[str, Any] = {}
 
     async def fake_run(
@@ -1158,7 +1158,7 @@ def test_spawn_session_daemon_emits_non_interactive_flag(
 
     import imp.remote.session.attach as attach_mod
 
-    quest = _make_change(tmp_path, "2026-06-15-spwn")
+    quest = _make_quest(tmp_path, "2026-06-15-spwn")
     captured: dict[str, Any] = {}
 
     class _FakePopen:
@@ -1177,7 +1177,7 @@ def test_spawn_session_daemon_omits_flag_when_interactive(
 
     import imp.remote.session.attach as attach_mod
 
-    quest = _make_change(tmp_path, "2026-06-15-spwi")
+    quest = _make_quest(tmp_path, "2026-06-15-spwi")
     captured: dict[str, Any] = {}
 
     class _FakePopen:
@@ -1217,7 +1217,7 @@ def test_build_session_attach_forwards_non_interactive(
 ) -> None:
     import imp.remote.session.attach as attach_mod
 
-    quest = _make_change(tmp_path, "2026-06-15-bsa")
+    quest = _make_quest(tmp_path, "2026-06-15-bsa")
     captured: dict[str, Any] = {}
 
     def fake_spawn(quest: Quest, **kw: Any) -> None:
@@ -1247,7 +1247,7 @@ def test_build_session_attach_forwards_autonomous(
 ) -> None:
     import imp.remote.session.attach as attach_mod
 
-    quest = _make_change(tmp_path, "2026-06-15-bsa-auto")
+    quest = _make_quest(tmp_path, "2026-06-15-bsa-auto")
     captured: dict[str, Any] = {}
 
     def fake_spawn(quest: Quest, **kw: Any) -> None:
@@ -1276,7 +1276,7 @@ def test_build_session_attach_forwards_autonomous(
 async def test_resume_loop_under_non_interactive_passes_flag_to_second_run(
     tmp_path: Path,
 ) -> None:
-    quest = _make_change(tmp_path, "2026-06-15-nirl")
+    quest = _make_quest(tmp_path, "2026-06-15-nirl")
     sock = str(session_socket_path(quest.control_root, quest.id))
     received_flags: list[bool] = []
 
@@ -1318,7 +1318,7 @@ async def test_resume_loop_under_non_interactive_passes_flag_to_second_run(
 async def test_resume_loop_under_autonomous_passes_flag_to_second_run(
     tmp_path: Path,
 ) -> None:
-    quest = _make_change(tmp_path, "2026-06-15-arl")
+    quest = _make_quest(tmp_path, "2026-06-15-arl")
     sock = str(session_socket_path(quest.control_root, quest.id))
     received_flags: list[bool] = []
 
@@ -1390,7 +1390,7 @@ def test_main_forwards_autonomous_via_partial(
 
 @pytest.mark.anyio
 async def test_autonomous_forwarded_to_run_fn(tmp_path: Path) -> None:
-    quest = _make_change(tmp_path, "2026-06-15-aut")
+    quest = _make_quest(tmp_path, "2026-06-15-aut")
     captured: dict[str, Any] = {}
 
     async def fake_run(
@@ -1411,7 +1411,7 @@ async def test_autonomous_forwarded_to_run_fn(tmp_path: Path) -> None:
 async def test_detach_at_hold_prompt_stamps_resume_target_prompt(
     tmp_path: Path,
 ) -> None:
-    quest = _make_change(tmp_path, "2026-06-15-dph")
+    quest = _make_quest(tmp_path, "2026-06-15-dph")
     st = State.load(quest.state_dir)
     st.step = "code"               # the active step at detach time
     st.save(quest.state_dir)
@@ -1438,7 +1438,7 @@ async def test_detach_at_hold_prompt_stamps_resume_target_prompt(
 async def test_detach_at_interrupt_steer_stamps_prompt_interrupted(
     tmp_path: Path,
 ) -> None:
-    quest = _make_change(tmp_path, "2026-06-15-dis")
+    quest = _make_quest(tmp_path, "2026-06-15-dis")
     st = State.load(quest.state_dir)
     st.step = "code"               # the active step at detach time
     st.save(quest.state_dir)
@@ -1471,7 +1471,7 @@ async def test_detach_at_interrupt_steer_stamps_prompt_interrupted(
 async def test_detach_after_ctrl_d_midrun_stamps_resume_target_agent(
     tmp_path: Path,
 ) -> None:
-    quest = _make_change(tmp_path, "2026-06-15-cda")
+    quest = _make_quest(tmp_path, "2026-06-15-cda")
     st = State.load(quest.state_dir)
     st.step = "review"
     st.save(quest.state_dir)
@@ -1505,7 +1505,7 @@ async def test_resume_prompt_target_holds_before_running_agent(
 ) -> None:
     import imp.remote.session.daemon as daemon
 
-    quest = _make_change(tmp_path, "2026-06-15-rpt")
+    quest = _make_quest(tmp_path, "2026-06-15-rpt")
     st = State.load(quest.state_dir)
     st.resume_target = target
     st.save(quest.state_dir)
@@ -1568,7 +1568,7 @@ async def test_resume_prompt_target_holds_before_running_agent(
 async def test_resume_agent_target_runs_straight_away(
     tmp_path: Path, target: str | None,
 ) -> None:
-    quest = _make_change(tmp_path, "2026-06-15-rat")
+    quest = _make_quest(tmp_path, "2026-06-15-rat")
     st = State.load(quest.state_dir)
     st.resume_target = target
     st.save(quest.state_dir)
@@ -1600,7 +1600,7 @@ async def test_resume_prompt_target_runs_agent_without_interactive_channel(
     type. A headless or autonomous resume has no channel to answer the prompt, so
     honoring it would re-pause without progress — it must continue the agent
     instead (§6.15 mid-step ctrl-c resume completes the interrupted step)."""
-    quest = _make_change(tmp_path, "2026-06-15-rph")
+    quest = _make_quest(tmp_path, "2026-06-15-rph")
     st = State.load(quest.state_dir)
     st.resume_target = target
     st.save(quest.state_dir)
@@ -1738,7 +1738,7 @@ async def test_model_override_pause_reenters_without_resume_prompt(
 ) -> None:
     import imp.remote.session.daemon as daemon_mod
 
-    quest = _make_change(tmp_path, "2026-06-15-mdl")
+    quest = _make_quest(tmp_path, "2026-06-15-mdl")
 
     applied: list[tuple[str, str]] = []
     monkeypatch.setattr(
@@ -1779,7 +1779,7 @@ async def test_model_override_pause_with_empty_arg_resumes_without_applying(
 ) -> None:
     import imp.remote.session.daemon as daemon_mod
 
-    quest = _make_change(tmp_path, "2026-06-15-emp")
+    quest = _make_quest(tmp_path, "2026-06-15-emp")
 
     applied: list[tuple[str, str]] = []
     monkeypatch.setattr(
@@ -1822,7 +1822,7 @@ async def test_serve_threads_opening_model_to_run_fn(tmp_path) -> None:
         return RunResult.COMPLETED
 
     await serve_quest_session(
-        _make_change(tmp_path, "2026-07-10-mdl"), run_fn=_run_fn, hibernate=False,
+        _make_quest(tmp_path, "2026-07-10-mdl"), run_fn=_run_fn, hibernate=False,
         model="anthropic:claude-fable-5")
     assert captured["opening_model"] == "anthropic:claude-fable-5"
 
@@ -1861,7 +1861,7 @@ def test_main_forwards_model_to_serve(
 
 @pytest.mark.anyio
 async def test_resident_save_forwards_the_leave_reason(tmp_path: Path) -> None:
-    quest = _make_change(tmp_path, "2026-06-15-svr")
+    quest = _make_quest(tmp_path, "2026-06-15-svr")
     sock = str(session_socket_path(quest.control_root, quest.id))
     saved: list[tuple[Quest, str | None]] = []
 
@@ -1894,9 +1894,9 @@ async def test_resident_save_forwards_the_leave_reason(tmp_path: Path) -> None:
 async def test_script_step_hold_shows_rerun_copy_and_refuses_redirect(
     tmp_path: Path,
 ) -> None:
-    # A bare _make_change quest resolves its workflow to the bundled `imp`
+    # A bare _make_quest quest resolves its workflow to the bundled `imp`
     # workflow (parse_default_workflow -> "imp"), where "verify" is a script step.
-    quest = _make_change(tmp_path, "2026-06-15-scr")
+    quest = _make_quest(tmp_path, "2026-06-15-scr")
     _seed_step(quest, "verify")
     sock = str(session_socket_path(quest.control_root, quest.id))
     calls = {"n": 0}
@@ -1963,7 +1963,7 @@ async def test_agent_step_hold_keeps_redirect_copy_and_consumes_message(
     tmp_path: Path,
 ) -> None:
     # "task-lead" is an agent step in the bundled `imp` workflow.
-    quest = _make_change(tmp_path, "2026-06-15-agt")
+    quest = _make_quest(tmp_path, "2026-06-15-agt")
     _seed_step(quest, "task-lead")
     sock = str(session_socket_path(quest.control_root, quest.id))
     calls = {"n": 0}
@@ -2019,7 +2019,7 @@ def test_resolve_step_kind_maps_step_names_to_kinds(tmp_path: Path) -> None:
 
     # Bare quest resolves to the bundled `imp` workflow: "verify" is a verify-gate
     # script step, "task-lead" is an agent step, and an unset step is None.
-    quest = _make_change(tmp_path, "2026-06-15-rsk")
+    quest = _make_quest(tmp_path, "2026-06-15-rsk")
     st = State.load(quest.state_dir)
 
     st.step = "verify"
@@ -2051,7 +2051,7 @@ async def test_sandbox_control_no_pause_single_dispatch(tmp_path: Path) -> None:
     """
     from imp.remote.session.protocol import CONTROL_SET_SANDBOX
 
-    quest = _make_change(tmp_path, "2026-06-15-sbx")
+    quest = _make_quest(tmp_path, "2026-06-15-sbx")
     sock = str(session_socket_path(quest.control_root, quest.id))
     run_ready = anyio.Event()
     seen: dict[str, Any] = {}
@@ -2159,7 +2159,7 @@ def test_run_compaction_slims_transcript_and_emits_confirmation(
     from imp.engine.state import CurrentStep, State
     from imp.remote.session.daemon import _run_compaction
 
-    quest = _make_change(tmp_path, "2026-06-15-cmp")
+    quest = _make_quest(tmp_path, "2026-06-15-cmp")
     tdir = tmp_path / "steps" / "brainstorm"
     tdir.mkdir(parents=True)
     t = Transcript(tdir / "transcript.jsonl")
@@ -2186,7 +2186,7 @@ async def test_compact_pause_reenters_after_running_compaction(
 ) -> None:
     import imp.remote.session.daemon as daemon_mod
 
-    quest = _make_change(tmp_path, "2026-06-15-cmp2")
+    quest = _make_quest(tmp_path, "2026-06-15-cmp2")
 
     ran: list[str] = []
     monkeypatch.setattr(
@@ -2366,7 +2366,7 @@ def test_steer_copy_is_verbatim_and_shared() -> None:
 async def test_agent_step_hold_empty_reply_continues_without_interject(
     tmp_path: Path,
 ) -> None:
-    quest = _make_change(tmp_path, "2026-06-15-agt-empty")
+    quest = _make_quest(tmp_path, "2026-06-15-agt-empty")
     _seed_step(quest, "task-lead")
     sock = str(session_socket_path(quest.control_root, quest.id))
     calls = {"n": 0}

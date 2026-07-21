@@ -16,7 +16,7 @@ from imp.engine.state import State
 from imp.engine.types import Continue, Goto, Pause
 
 
-def _make_change(root: Path, *, quest_id: str = "test-change", title: str = "t") -> Quest:
+def _make_quest(root: Path, *, quest_id: str = "test-quest", title: str = "t") -> Quest:
     """Construct a Quest directly on disk without git worktrees."""
     from imp.engine.loader import load_workflow
     from imp.providers.effective import load_effective_config
@@ -109,7 +109,7 @@ def _seed_single_agent(root: Path) -> Quest:
     (root / ".imp" / "config.yaml").write_text(
         "providers: [fake]\ntiers:\n  low: {fake: m}\n  medium: {fake: m}\n  high: {fake: m}\n"
     )
-    return _make_change(root)
+    return _make_quest(root)
 
 
 @pytest.mark.anyio
@@ -191,7 +191,7 @@ async def test_max_loops_pause_reason_unchanged(tmp_path: Path) -> None:
     (tmp_path / ".imp" / "config.yaml").write_text(
         "providers: [fake]\ntiers:\n  low: {fake: m}\n  medium: {fake: m}\n  high: {fake: m}\n"
     )
-    quest = _make_change(tmp_path)
+    quest = _make_quest(tmp_path)
 
     from imp.providers import resolve
     resolve.reset_providers_for_tests()

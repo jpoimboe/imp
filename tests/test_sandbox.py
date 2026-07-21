@@ -566,7 +566,7 @@ def test_resolve_policy_uid_zero_masks_run_user_0(tmp_path):
 # ── _build_sandbox_policy unit tests (B.7) ───────────────────────────────────
 
 
-def _fake_change(tmp_path):
+def _fake_quest(tmp_path):
     control = tmp_path / "ctl"
     wt = control / ".imp" / "worktrees" / "abc"
     wt.mkdir(parents=True, exist_ok=True)
@@ -619,7 +619,7 @@ def test_build_sandbox_policy_hard_fails_when_unavailable(tmp_path, monkeypatch)
     from imp.engine import sandbox as _sb
     _sb.sandbox_available.cache_clear()
 
-    quest = _fake_change(tmp_path)
+    quest = _fake_quest(tmp_path)
     config = _fake_config(sandbox={})      # enabled defaults True, allow_unsandboxed False
     log = _CaptureLog()
     with pytest.raises(SandboxUnavailable):
@@ -634,7 +634,7 @@ def test_build_sandbox_policy_bare_when_allow_unsandboxed(tmp_path, monkeypatch)
     from imp.engine import sandbox as _sb
     _sb.sandbox_available.cache_clear()
 
-    quest = _fake_change(tmp_path)
+    quest = _fake_quest(tmp_path)
     config = _fake_config(sandbox={"allow_unsandboxed": True})
     log = _CaptureLog()
     pol = ex._build_sandbox_policy(quest, config, log)
@@ -655,7 +655,7 @@ def test_build_sandbox_policy_active_path_builds_policy_silently(tmp_path, monke
     from imp.engine import sandbox as _sb
     _sb.sandbox_available.cache_clear()
 
-    quest = _fake_change(tmp_path)
+    quest = _fake_quest(tmp_path)
     config = _fake_config(sandbox={})
     log = _CaptureLog()
     pol = ex._build_sandbox_policy(quest, config, log)
@@ -676,7 +676,7 @@ def test_build_sandbox_policy_threads_pythonpath_to_setenv(tmp_path, monkeypatch
     from imp.engine import sandbox as _sb
     _sb.sandbox_available.cache_clear()
 
-    quest = _fake_change(tmp_path)
+    quest = _fake_quest(tmp_path)
     config = _fake_config(pythonpath=("src",))
     log = _CaptureLog()
     pol = ex._build_sandbox_policy(quest, config, log)
@@ -698,7 +698,7 @@ def test_build_sandbox_policy_writes_run_shim(tmp_path, monkeypatch):
     from imp.engine import sandbox as _sb
     _sb.sandbox_available.cache_clear()
 
-    quest = _fake_change(tmp_path)
+    quest = _fake_quest(tmp_path)
     config = _fake_config(sandbox={"allow_unsandboxed": True})
     ex._build_sandbox_policy(quest, config, _CaptureLog())
     shim = quest.quest_dir / "imp-shim" / "imp"

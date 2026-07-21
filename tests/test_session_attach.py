@@ -28,7 +28,7 @@ def anyio_backend() -> str:
     return "asyncio"
 
 
-def _make_change(tmp_path: Path, quest_id: str) -> Quest:
+def _make_quest(tmp_path: Path, quest_id: str) -> Quest:
     return Quest(
         id=quest_id,
         title="T",
@@ -42,7 +42,7 @@ def _make_change(tmp_path: Path, quest_id: str) -> Quest:
 def test_spawn_session_daemon_launches_detached_module_entry(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    quest = _make_change(tmp_path, "2026-06-15-abc")
+    quest = _make_quest(tmp_path, "2026-06-15-abc")
     captured: dict[str, Any] = {}
 
     def fake_popen(argv: list[str], **kwargs: Any) -> object:
@@ -74,7 +74,7 @@ def test_spawn_session_daemon_launches_detached_module_entry(
 
 @pytest.mark.anyio
 async def test_attaches_to_resident_daemon_without_spawning(tmp_path: Path) -> None:
-    quest = _make_change(tmp_path, "2026-06-15-res")
+    quest = _make_quest(tmp_path, "2026-06-15-res")
     sock = str(session_socket_path(quest.control_root, quest.id))
     server = SessionSocket(sock)
     spawned: list[Quest] = []
@@ -92,7 +92,7 @@ async def test_attaches_to_resident_daemon_without_spawning(tmp_path: Path) -> N
 
 @pytest.mark.anyio
 async def test_spawns_then_attaches_when_no_daemon_resident(tmp_path: Path) -> None:
-    quest = _make_change(tmp_path, "2026-06-15-hib")
+    quest = _make_quest(tmp_path, "2026-06-15-hib")
     sock = str(session_socket_path(quest.control_root, quest.id))
     received: list[dict[str, Any]] = []
     holder: dict[str, SessionSocket] = {}
@@ -127,7 +127,7 @@ async def test_spawns_then_attaches_when_no_daemon_resident(tmp_path: Path) -> N
 
 @pytest.mark.anyio
 async def test_raises_when_spawn_never_creates_the_socket(tmp_path: Path) -> None:
-    quest = _make_change(tmp_path, "2026-06-15-dead")
+    quest = _make_quest(tmp_path, "2026-06-15-dead")
     with pytest.raises(TimeoutError):
         await attach_or_spawn(
             quest, on_event=lambda _e: None,
@@ -138,7 +138,7 @@ async def test_raises_when_spawn_never_creates_the_socket(tmp_path: Path) -> Non
 async def test_attach_crash_fast_when_daemon_exits_before_binding(
     tmp_path: Path,
 ) -> None:
-    quest = _make_change(tmp_path, "2026-06-15-crash")
+    quest = _make_quest(tmp_path, "2026-06-15-crash")
     quest.quest_dir.mkdir(parents=True, exist_ok=True)
     (quest.quest_dir / "daemon.stderr").write_bytes(
         b"Traceback (most recent call last):\nRuntimeError: boom-on-startup\n")
@@ -170,7 +170,7 @@ def test_read_stderr_tail_returns_empty_when_file_is_missing(tmp_path: Path) -> 
 async def test_attach_crash_fast_when_stderr_file_is_missing(
     tmp_path: Path,
 ) -> None:
-    quest = _make_change(tmp_path, "2026-06-15-nofile")
+    quest = _make_quest(tmp_path, "2026-06-15-nofile")
 
     class _DeadProc:
         returncode = 3
@@ -193,7 +193,7 @@ async def test_attach_crash_fast_when_stderr_file_is_missing(
 async def test_attach_waits_for_alive_daemon_until_socket_appears(
     tmp_path: Path,
 ) -> None:
-    quest = _make_change(tmp_path, "2026-06-15-slow")
+    quest = _make_quest(tmp_path, "2026-06-15-slow")
     sock = str(session_socket_path(quest.control_root, quest.id))
     holder: dict[str, SessionSocket] = {}
 
@@ -229,7 +229,7 @@ async def test_attach_waits_for_alive_daemon_until_socket_appears(
 def test_spawn_session_daemon_includes_resume_flag_when_set(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    quest = _make_change(tmp_path, "2026-06-15-abc")
+    quest = _make_quest(tmp_path, "2026-06-15-abc")
     captured: dict[str, Any] = {}
 
     def fake_popen(argv: list[str], **kwargs: Any) -> object:
@@ -254,7 +254,7 @@ async def test_build_session_attach_uses_resident_daemon_without_spawning(
 ) -> None:
     from imp.remote.session import attach as attach_mod
 
-    quest = _make_change(tmp_path, "2026-06-15-warm")
+    quest = _make_quest(tmp_path, "2026-06-15-warm")
     sock = str(session_socket_path(quest.control_root, quest.id))
     spawned: list[Quest] = []
     monkeypatch.setattr(
@@ -289,7 +289,7 @@ async def test_build_session_attach_threads_resume_into_spawn(
 ) -> None:
     from imp.remote.session import attach as attach_mod
 
-    quest = _make_change(tmp_path, "2026-06-15-rsm")
+    quest = _make_quest(tmp_path, "2026-06-15-rsm")
     sock = str(session_socket_path(quest.control_root, quest.id))
     captured: dict[str, Any] = {}
     holder: dict[str, SessionSocket] = {}
@@ -325,7 +325,7 @@ async def test_build_session_attach_threads_resume_into_spawn(
 def test_spawn_session_daemon_includes_autonomous_when_set(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    quest = _make_change(tmp_path, "2026-06-15-abc")
+    quest = _make_quest(tmp_path, "2026-06-15-abc")
     captured: dict[str, Any] = {}
     monkeypatch.setattr(subprocess, "Popen",
                         lambda argv, **kw: captured.update(argv=argv) or object())
@@ -336,7 +336,7 @@ def test_spawn_session_daemon_includes_autonomous_when_set(
 def test_spawn_session_daemon_omits_autonomous_when_false(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    quest = _make_change(tmp_path, "2026-06-15-abc")
+    quest = _make_quest(tmp_path, "2026-06-15-abc")
     captured: dict[str, Any] = {}
     monkeypatch.setattr(subprocess, "Popen",
                         lambda argv, **kw: captured.update(argv=argv) or object())
@@ -346,7 +346,7 @@ def test_spawn_session_daemon_omits_autonomous_when_false(
 
 @pytest.mark.anyio
 async def test_build_session_attach_leases_when_requested(tmp_path: Path) -> None:
-    quest = _make_change(tmp_path, "2026-06-15-lz")
+    quest = _make_quest(tmp_path, "2026-06-15-lz")
     sock = str(session_socket_path(quest.control_root, quest.id))
     seen: list[Any] = []
     server = SessionSocket(sock, on_attach=lambda hello, _send: seen.append(hello))
@@ -367,7 +367,7 @@ async def test_deliver_session_reply_attaches_lease_less(tmp_path: Path) -> None
     # A remote reply goes through the DEFAULT attach (build_session_attach with no
     # lease=). It must NOT hold a keep-alive lease, or a reply that rehydrates a
     # hibernated change would pause the run the instant it detaches.
-    quest = _make_change(tmp_path, "2026-06-15-rep")
+    quest = _make_quest(tmp_path, "2026-06-15-rep")
     sock = str(session_socket_path(quest.control_root, quest.id))
     seen: list[Any] = []
     server = SessionSocket(sock, on_attach=lambda hello, _send: seen.append(hello))
@@ -390,7 +390,7 @@ async def test_deliver_session_reply_attaches_lease_less(tmp_path: Path) -> None
 def test_spawn_session_daemon_captures_child_stderr_to_file(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    quest = _make_change(tmp_path, "2026-06-15-err")
+    quest = _make_quest(tmp_path, "2026-06-15-err")
 
     def fake_popen(argv: list[str], *, stderr: Any, **kw: Any) -> object:
         stderr.write(b"Traceback (most recent call last):\nBoom\n")
@@ -409,7 +409,7 @@ def test_spawn_session_daemon_captures_child_stderr_to_file(
 def test_spawn_session_daemon_truncates_stderr_file_on_respawn(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    quest = _make_change(tmp_path, "2026-06-15-trunc")
+    quest = _make_quest(tmp_path, "2026-06-15-trunc")
 
     def first(argv: list[str], *, stderr: Any, **kw: Any) -> object:
         stderr.write(b"first-segment-crash\n")
@@ -433,7 +433,7 @@ def test_spawn_session_daemon_truncates_stderr_file_on_respawn(
 def test_spawn_session_daemon_appends_model_arg(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    quest = _make_change(tmp_path, "2026-06-15-model")
+    quest = _make_quest(tmp_path, "2026-06-15-model")
     captured: dict[str, Any] = {}
     monkeypatch.setattr(subprocess, "Popen",
                         lambda argv, **kw: captured.update(argv=argv) or object())
@@ -446,7 +446,7 @@ def test_spawn_session_daemon_appends_model_arg(
 def test_spawn_session_daemon_omits_model_when_none(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    quest = _make_change(tmp_path, "2026-06-15-abc")
+    quest = _make_quest(tmp_path, "2026-06-15-abc")
     captured: dict[str, Any] = {}
     monkeypatch.setattr(subprocess, "Popen",
                         lambda argv, **kw: captured.update(argv=argv) or object())
@@ -457,7 +457,7 @@ def test_spawn_session_daemon_omits_model_when_none(
 def test_spawn_session_daemon_returns_the_popen_handle(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    quest = _make_change(tmp_path, "2026-06-15-handle")
+    quest = _make_quest(tmp_path, "2026-06-15-handle")
     sentinel = object()
     monkeypatch.setattr(subprocess, "Popen", lambda argv, **kw: sentinel)
 

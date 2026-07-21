@@ -35,7 +35,7 @@ from imp.providers.anthropic import AnthropicAgentRunner
 from tests.anthropic_fakes import FakeAsyncAnthropic, response, text, tool_use
 
 
-def _make_change(root: Path, *, quest_id: str = "test-change", title: str = "t") -> Quest:
+def _make_quest(root: Path, *, quest_id: str = "test-quest", title: str = "t") -> Quest:
     """Construct a Quest directly on disk without git worktrees."""
     from imp.engine.loader import load_workflow
     from imp.providers.effective import load_effective_config
@@ -301,7 +301,7 @@ async def test_backward_goto_emits_step_started_each_iteration(tmp_path: Path) -
     (tmp_path / ".imp" / "config.yaml").write_text(
         "providers: [fake]\ntiers:\n  low: {fake: m}\n  medium: {fake: m}\n  high: {fake: m}\n"
     )
-    quest = _make_change(tmp_path)
+    quest = _make_quest(tmp_path)
 
     # Sequence: work succeeds, check → rework (goto work), work again, check → approve
     call_num = [0]

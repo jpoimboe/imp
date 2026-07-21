@@ -11,7 +11,7 @@ from imp.engine.state import JsonlEventLog, State
 from imp.providers.config import ProviderModel
 from tests.test_executor import (
     _CapturingProvider,
-    _make_change,
+    _make_quest,
     _register_invocation_capturing,
     _register_prompt_capturing,
 )
@@ -55,7 +55,7 @@ def _seed_render(root: Path) -> object:
     (root / "imp" / "project.yaml").write_text("default-workflow: imp\n")
     (root / ".imp").mkdir(parents=True, exist_ok=True)
     (root / ".imp" / "config.yaml").write_text(_FAKE_CONFIG)
-    return _make_change(root)
+    return _make_quest(root)
 
 
 def _seed_two_step(root: Path) -> object:
@@ -74,7 +74,7 @@ def _seed_two_step(root: Path) -> object:
     (root / "imp" / "project.yaml").write_text("default-workflow: imp\n")
     (root / ".imp").mkdir(parents=True, exist_ok=True)
     (root / ".imp" / "config.yaml").write_text(_FAKE_CONFIG)
-    return _make_change(root)
+    return _make_quest(root)
 
 
 def _seed(root: Path) -> object:
@@ -94,7 +94,7 @@ def _seed(root: Path) -> object:
     (root / "imp" / "project.yaml").write_text("default-workflow: imp\n")
     (root / ".imp").mkdir(parents=True, exist_ok=True)
     (root / ".imp" / "config.yaml").write_text(_FAKE_CONFIG)
-    return _make_change(root)
+    return _make_quest(root)
 
 
 @pytest.mark.anyio

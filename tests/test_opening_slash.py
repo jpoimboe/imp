@@ -25,7 +25,7 @@ class _QueuePrompt:
         return self._lines.pop(0)
 
 
-class _FakeChange:
+class _FakeQuest:
     """Minimal Quest stand-in for the opening-prompt slash path: carries the id/
     title _print_opening needs plus the workflow_dir/event_log handle_slash_line
     touches."""
@@ -43,15 +43,15 @@ class _FakeChange:
         return JsonlEventLog(self._events)
 
 
-def _fake_change(tmp_path: Path) -> _FakeChange:
-    return _FakeChange(tmp_path)
+def _fake_quest(tmp_path: Path) -> _FakeQuest:
+    return _FakeQuest(tmp_path)
 
 
 @pytest.mark.anyio
 async def test_pre_session_abandon_tears_down_and_exits(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    quest = _fake_change(tmp_path)
+    quest = _fake_quest(tmp_path)
     calls: dict[str, object] = {}
 
     def _fake_abandon(control, quest_id):
@@ -138,7 +138,7 @@ async def test_read_intent_line_captures_model_and_reprompts(
     import imp.cli.slash as slash
 
     prompt = _QueuePrompt(["/model anthropic:claude-fable-5", "brainstorm this"])
-    quest = _fake_change(tmp_path)
+    quest = _fake_quest(tmp_path)
     monkeypatch.setattr(slash, "validate_model_arg", lambda arg, *, quest: None)
     sink: dict[str, str] = {}
 
@@ -154,7 +154,7 @@ async def test_read_opening_message_threads_sink(tmp_path, monkeypatch) -> None:
     import imp.cli.slash as slash
 
     monkeypatch.setattr(slash, "validate_model_arg", lambda arg, *, quest: None)
-    quest = _fake_change(tmp_path)
+    quest = _fake_quest(tmp_path)
     sink: dict[str, str] = {}
 
     reply = await main._read_opening_message(
@@ -307,7 +307,7 @@ async def test_opening_toolbar_id_only_when_title_empty() -> None:
 async def test_opening_prompt_skill_name_loads_body_as_message(
     tmp_path: Path,
 ) -> None:
-    quest = _fake_change(tmp_path)
+    quest = _fake_quest(tmp_path)
     (quest.workflow_dir / "skills" / "user" / "refactor.md").write_text(
         "# Refactor\nstep one\n")
     line = await main._read_intent_line(

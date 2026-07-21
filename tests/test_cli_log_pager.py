@@ -359,7 +359,7 @@ def test_keyboard_interrupt_in_wait_does_not_raise(
     assert proc.wait.call_count == 2
 
 
-def _make_change_worktree(control: Path, slug: str, title: str) -> Path:
+def _make_quest_worktree(control: Path, slug: str, title: str) -> Path:
     """Create a minimal on-disk Quest home under control/.imp/quests/<slug>
     with one rendered step (phase "spec") so the narrative reaches output."""
     quest_dir = control / ".imp" / "quests" / slug
@@ -402,7 +402,7 @@ def test_main_log_invokes_pager_on_tty(
     import imp.cli.main as m
 
     slug = "my-smoke"
-    _make_change_worktree(tmp_path, slug, "smoke")
+    _make_quest_worktree(tmp_path, slug, "smoke")
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
     monkeypatch.delenv("NO_COLOR", raising=False)
@@ -436,7 +436,7 @@ def test_main_log_no_pager_flag_skips_pager_on_tty(
     import imp.cli.main as m
 
     slug = "my-smoke"
-    _make_change_worktree(tmp_path, slug, "smoke")
+    _make_quest_worktree(tmp_path, slug, "smoke")
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
     monkeypatch.delenv("NO_COLOR", raising=False)
@@ -461,7 +461,7 @@ def test_main_log_non_tty_prints_inline(
     import imp.cli.main as m
 
     slug = "my-smoke"
-    _make_change_worktree(tmp_path, slug, "smoke")
+    _make_quest_worktree(tmp_path, slug, "smoke")
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
     monkeypatch.delenv("NO_COLOR", raising=False)
@@ -487,7 +487,7 @@ def test_main_log_summary_routes_through_pager(
     import imp.cli.main as m
 
     slug = "my-smoke"
-    _make_change_worktree(tmp_path, slug, "smoke")
+    _make_quest_worktree(tmp_path, slug, "smoke")
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
     monkeypatch.delenv("NO_COLOR", raising=False)

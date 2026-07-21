@@ -16,7 +16,7 @@ from imp.engine.state import State
 from imp.engine.types import Goto
 
 
-def _make_change(root: Path, *, quest_id: str = "test-change", title: str = "t") -> Quest:
+def _make_quest(root: Path, *, quest_id: str = "test-quest", title: str = "t") -> Quest:
     """Construct a Quest directly on disk without git worktrees."""
     from imp.engine.loader import load_workflow
     from imp.providers.effective import load_effective_config
@@ -145,7 +145,7 @@ def _seed_resume_loop_workflow(root: Path) -> Quest:
     (root / ".imp" / "config.yaml").write_text(
         "providers: [fake]\ntiers:\n  low: {fake: m}\n  medium: {fake: m}\n  high: {fake: m}\n"
     )
-    return _make_change(root)
+    return _make_quest(root)
 
 
 @pytest.mark.anyio
@@ -251,7 +251,7 @@ async def test_resumed_step_persistent_error_still_terminates(
     (tmp_path / ".imp" / "config.yaml").write_text(
         "providers: [fake]\ntiers:\n  low: {fake: m}\n  medium: {fake: m}\n  high: {fake: m}\n"
     )
-    quest = _make_change(tmp_path)
+    quest = _make_quest(tmp_path)
 
     checker_invocations = {"n": 0}
     _CAP = 50  # bound: a per-retry-reset regression would loop forever.

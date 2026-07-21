@@ -9,7 +9,7 @@ import pytest
 from imp.engine.errors import LoadError
 from imp.engine.executor import RunResult, run_quest
 from imp.engine.state import State
-from tests.test_executor import _make_change, _register_invocation_capturing
+from tests.test_executor import _make_quest, _register_invocation_capturing
 
 
 @pytest.fixture
@@ -42,7 +42,7 @@ def _seed(root: Path, *, facts_yaml: str, memory: str | None = None):
         (root / "imp" / "memory" / "all.md").write_text(memory)
     (root / ".imp").mkdir(parents=True, exist_ok=True)
     (root / ".imp" / "config.yaml").write_text(_FAKE_CONFIG)
-    return _make_change(root)
+    return _make_quest(root)
 
 
 @pytest.mark.anyio
