@@ -92,8 +92,8 @@ def test_build_session_forces_24bit_depth_on_truecolor_theme() -> None:
 
 
 def test_build_session_gated_filler_after_toolbar() -> None:
-    """The layout's last child is a ConditionalContainer wrapping a high-weight
-    filler Window, appended AFTER the bottom-toolbar container. The renderer's
+    """The layout's last child is a ConditionalContainer wrapping a filler
+    Window, appended AFTER the bottom-toolbar container. The renderer's
     forced full-height fill lands in the filler so the toolbar hugs the input
     instead of sinking to the screen bottom. The filler is gated (a
     ConditionalContainer, not a bare Window) so it is active only while the input
@@ -106,11 +106,12 @@ def test_build_session_gated_filler_after_toolbar() -> None:
     children = _build_session(None).layout.container.children
 
     # LAST child: the gated filler — a ConditionalContainer wrapping a Window
-    # whose height weight dominates the renderer's slack space.
+    # whose height weight dominates the input window's weight of 1 while staying
+    # modest enough not to make take_using_weights slow (see test_prompt_paste_render).
     filler = children[-1]
     assert isinstance(filler, ConditionalContainer)
     assert isinstance(filler.content, Window)
-    assert filler.content.height.weight >= 1000
+    assert 10 <= filler.content.height.weight <= 1000
 
     # Child BEFORE the filler: the bottom-toolbar container, whose Window keeps
     # its own content height (dont_extend_height=True).

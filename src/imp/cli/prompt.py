@@ -119,14 +119,20 @@ def _build_session(skills_dir: Any | None = None, *, editing_mode: str = "emacs"
                    for i in range(content.line_count)) <= 1
 
     class _FloatingToolbarSession(PromptSession[str]):
-        """Ends the layout with a gated high-weight filler after the toolbar, so the
+        """Ends the layout with a gated filler after the toolbar, so the
         renderer's forced full-height fill lands there and the toolbar hugs the input."""
 
         def _create_layout(self) -> Any:
             layout = super()._create_layout()
             layout.container.children.append(  # type: ignore[attr-defined]
                 ConditionalContainer(
-                    Window(height=Dimension(weight=100000)),
+                    # take_using_weights costs ~weight x visual rows per render, so
+                    # the weight must stay modest while still dominating the input
+                    # window's weight of 1 (a huge value made a multi-line paste
+                    # render take ~20s). At 100 the input gets zero extra rows on
+                    # any terminal up to ~100 rows tall (appearance identical);
+                    # above that a single-line input may gain one cosmetic blank row.
+                    Window(height=Dimension(weight=100)),
                     filter=_input_is_single_visual_row))
             return layout
 
