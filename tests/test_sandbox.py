@@ -1779,3 +1779,47 @@ def test_rebase_does_not_rebase_sibling_with_common_prefix():
     # A genuine child IS rebased.
     assert _rebase_into_sandbox_tmp(
         "/t/imp-1000/abc/out.json", "/t/imp-1000/abc") == "/tmp/out.json"
+
+
+def test_var_tmp_bind_source_and_position():
+    # Set case: the per-quest source is bound onto /var/tmp, positioned in
+    # bind_plan immediately AFTER the /tmp scratch entry and before the worktree.
+    pol = _policy(quest_var_tmp_dir="/vt/imp-1000/abc")
+    flat = " ".join(build_sandbox_argv("x", cwd="/wt", policy=pol, engine_env={}))
+    assert "--bind /vt/imp-1000/abc /var/tmp" in flat   # per-quest source → /var/tmp
+    argv = build_sandbox_argv("x", cwd="/wt", policy=pol, engine_env={})
+    i_tmp = argv.index("/tmp")                    # first "/tmp" is the /tmp bind source
+    i_vt = argv.index("/vt/imp-1000/abc")         # the /var/tmp bind source
+    i_wt = argv.index("/ctl/.imp/worktrees/abc")  # worktree src (default _policy worktree)
+    assert i_tmp < i_vt < i_wt
+    bp = pol.bind_plan()
+    assert bp[bp.index(("/tmp", "rw")) + 1] == ("/var/tmp", "rw")  # right after /tmp
+    assert pol.allows_write(Path("/var/tmp/scratch")) is True
+
+
+def test_no_var_tmp_bind_when_unset():
+    # Negative: empty quest_var_tmp_dir emits NO /var/tmp bind — host /var/tmp
+    # stays on the read-only floor (no identity fallback). Drift guard still holds.
+    pol = _policy()   # quest_var_tmp_dir defaults to ""
+    argv = build_sandbox_argv("x", cwd="/wt", policy=pol, engine_env={})
+    assert "/var/tmp" not in argv                       # no bind dest emitted at all
+    assert ("/var/tmp", "rw") not in pol.bind_plan()
+    assert pol.allows_write(Path("/var/tmp/x")) is False # uncovered → read-only floor
+    assert pol.allows_read(Path("/var/tmp/x")) is True   # readable via the ro floor
+    assert _parse_argv_binds(argv) == pol.bind_plan()    # argv/plan agree (no drift)
+
+
+def test_var_tmp_source_not_identity_fallback():
+    # An empty quest_var_tmp_dir must NEVER degrade to --bind /var/tmp /var/tmp
+    # (which would expose the host's real /var/tmp read-write).
+    flat = " ".join(build_sandbox_argv(
+        "x", cwd="/wt", policy=_policy(), engine_env={}))
+    assert "--bind /var/tmp /var/tmp" not in flat
+
+
+def test_var_tmp_mirror_keeps_var_tmp_writable_dest_keyed():
+    # bind_plan stays DEST-keyed on /var/tmp (the in-sandbox path) even though argv
+    # binds the per-quest host source, so allows_write reports /var/tmp writable.
+    pol = _policy(quest_var_tmp_dir="/vt/imp-1000/abc")
+    assert ("/var/tmp", "rw") in pol.bind_plan()
+    assert pol.allows_write(Path("/var/tmp/a/b")) is True
