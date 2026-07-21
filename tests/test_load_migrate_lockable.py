@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from imp.engine.errors import LayoutMismatch
+from imp.engine.errors import MigrationLockHeld
 from imp.engine.quest import LAYOUT_VERSION, Quest
 from tests.conftest import _seed_control, held_lock
 
@@ -42,7 +42,7 @@ def test_lockable_load_skips_migration_under_held_lock(tmp_path: Path) -> None:
     _seed_control(tmp_path)
     q = _seed_v11(tmp_path, "live1")
     with held_lock(q.quest_dir / "lock"):
-        with pytest.raises(LayoutMismatch):
+        with pytest.raises(MigrationLockHeld):
             Quest.load(tmp_path, "live1", migrate_if_lockable=True)
         assert _stored_version(q.quest_dir) == 11
     assert _stored_version(q.quest_dir) == 11

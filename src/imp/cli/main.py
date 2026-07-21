@@ -62,7 +62,7 @@ from imp.engine.abandon import (
     tear_down_quest,
 )
 from imp.engine.archive import read as archive_read
-from imp.engine.errors import LayoutMismatch, LoadError, LoadErrors
+from imp.engine.errors import LayoutMismatch, LoadError, LoadErrors, MigrationLockHeld
 from imp.engine.executor import RunResult
 from imp.engine.project_root import find_project_root
 from imp.engine.quest import Quest, live_quest_ids, live_stems
@@ -2059,7 +2059,7 @@ def _load_events_for_id(control: Path, quest_id: str) -> list[dict[str, Any]] | 
     harmlessly returns identical content."""
     try:
         quest = Quest.load(control, quest_id, migrate_if_lockable=True)
-    except LayoutMismatch:
+    except (LayoutMismatch, MigrationLockHeld):
         ev_path = _quest_home(control, quest_id) / "events.jsonl"
         if ev_path.exists():
             return _parse_jsonl(ev_path.read_bytes())

@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from imp.engine import worktree
-from imp.engine.errors import LayoutMismatch, LoadError, LoadErrors
+from imp.engine.errors import LayoutMismatch, LoadError, LoadErrors, MigrationLockHeld
 from imp.engine.event_migrations import migrate_events
 from imp.engine.seed import seed_workflow_start
 from imp.engine.state import (
@@ -688,9 +688,7 @@ class Quest:
                     with ProjectLock(quest_dir / "lock").acquire(timeout=0.0):
                         migrate(stored, LAYOUT_VERSION, quest_dir)
                 except LockHeld:
-                    raise LayoutMismatch(
-                        stored=stored, engine=LAYOUT_VERSION,
-                        imp_commit=meta.get("imp_commit", ""), quest_dir=quest_dir) from None
+                    raise MigrationLockHeld(quest_dir=quest_dir) from None
             else:
                 migrate(stored, LAYOUT_VERSION, quest_dir)
             meta = json.loads((quest_dir / "quest.json").read_text())

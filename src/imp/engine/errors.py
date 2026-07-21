@@ -65,6 +65,17 @@ class LayoutMismatch(LoadError):
         )
 
 
+class MigrationLockHeld(LoadError):
+    """Read-path signal: a live daemon holds the quest lock, so migration is deferred."""
+
+    def __init__(self, *, quest_dir: Path) -> None:
+        self.quest_dir = quest_dir
+        super().__init__(
+            f"{quest_dir.name} is live (a daemon holds its lock); "
+            f"layout migration deferred until it next runs."
+        )
+
+
 class StateDecodeError(LoadError):
     """Raised when `State.load` cannot parse `state.json`."""
 
