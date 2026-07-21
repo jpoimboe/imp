@@ -46,7 +46,7 @@ def _completed_row(cid: str, last: str) -> CompletedRow:
 
 
 def _make_home(quest_id: str, last_iso: str) -> HomeDigest:
-    return HomeDigest(quest_id, b"{}", None, {}, last_iso, False, "", None)
+    return HomeDigest(quest_id, b"{}", None, {}, last_iso, False, "", None, False)
 
 
 class _StubStore:

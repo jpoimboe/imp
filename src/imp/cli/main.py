@@ -1665,15 +1665,16 @@ def _exit_ambiguous(token: str, candidates: list[str], control: Path) -> NoRetur
     now = datetime.now(UTC)
     name_w = quest_row.name_budget()
     print(quest_row.header_line(color=color, name_width=name_w), file=sys.stderr)
+    store = make_store(control)
     for cid in sorted(candidates):
-        row = _row_for_id(control, cid)
-        if row is None:
+        card = store.quest_card(cid)
+        if card is None:
             print(f"  {cid}", file=sys.stderr)
             continue
         print(quest_row.format_quest_line(
-            quest_id=row[0], title=row[4], status=row[1], step=row[2],
-            step_label=row[6], last_iso=row[3], now=now, color=color,
-            name_width=name_w), file=sys.stderr)
+            quest_id=card.quest_id, title=card.title, status=card.status,
+            step=card.step, step_label=card.step_label, last_iso=card.last,
+            now=now, color=color, name_width=name_w), file=sys.stderr)
     raise SystemExit(2)
 
 
@@ -2608,19 +2609,17 @@ RESUMABLE = ("new", "paused", "error", "merge_blocked", "shelved")
 
 
 def resolve_display_status(
-    status: str, quest_dir: Path, *, halt_condition: str | None = None
+    status: str, *, lock_live: bool, halt_condition: str | None = None
 ) -> str:
     """The one total map from persisted state to the resolved display word.
 
-    Lock-liveness governs staleness (like the `lock` file): a live process holds
-    quest_dir/lock with its pid inside. Live + a `waiting` halt-condition reads
+    Liveness is resolved by the caller (daemon-side, where the lock is visible)
+    and handed in as `lock_live`: live + a `waiting` halt-condition reads
     `waiting` (parked at a human gate); live otherwise reads `running`. Not live,
     every stored word passes through unchanged (stored == displayed). The resolved
     word is what the membership gates and the STATUS_COLORS key consume, so
     `merge_blocked` stays underscored here."""
-    if lock_is_live(quest_dir / "lock"):
-        return "waiting" if halt_condition == "waiting" else "running"
-    return status
+    return ("waiting" if halt_condition == "waiting" else "running") if lock_live else status
 
 
 # Row = (id, status, step, last_activity, title, created_at, step_label,
@@ -2698,10 +2697,11 @@ def _row_for_id(control: Path, quest_id: str) -> _Row | None:
     row = _status_row(quest_id, state_json, quest_json, last)
     if row is None:
         return None
+    lock_live = lock_is_live(cdir / "lock")
     # Archived homes pass the stored status through unchanged and never consult the
     # halt-condition (readers stay single-version).
     halt_condition = json.loads(state_json).get("halt_condition") if live_home else None
-    status = resolve_display_status(row[1], cdir, halt_condition=halt_condition)
+    status = resolve_display_status(row[1], lock_live=lock_live, halt_condition=halt_condition)
     return (row[0], status, *row[2:])
 
 
@@ -2711,15 +2711,15 @@ def _status_rows(control: Path, scanned: list[HomeDigest] | None = None) -> list
     for h in homes:
         if h.state_json is None:
             continue
-        cdir = _quest_home(control, h.quest_id)
         if _is_backlog_home(h.meta, conversed=h.has_user_message,
-                            lock_live=lambda: lock_is_live(cdir / "lock")):  # noqa: B023
+                            lock_live=lambda: h.lock_live):  # noqa: B023
             continue  # un-materialized, never-conversed, unlocked seed -> Backlog
         row = _status_row(h.quest_id, h.state_json, h.quest_json, h.last_iso)
         if row is None:
             continue
         halt_condition = json.loads(h.state_json).get("halt_condition")
-        status = resolve_display_status(row[1], cdir, halt_condition=halt_condition)
+        status = resolve_display_status(
+            row[1], lock_live=h.lock_live, halt_condition=halt_condition)
         row = (row[0], status, *row[2:])
         if row[1] not in _INFLIGHT:
             continue
@@ -3158,9 +3158,8 @@ def _backlog_rows(control: Path, scanned: list[HomeDigest] | None = None) -> lis
     rows: list[_Row] = []
     for h in homes:
         meta = h.meta
-        cdir = _quest_home(control, h.quest_id)
         if not _is_backlog_home(meta, conversed=h.has_user_message,
-                                lock_live=lambda: lock_is_live(cdir / "lock")):  # noqa: B023
+                                lock_live=lambda: h.lock_live):  # noqa: B023
             continue  # materialized / draft-origin / conversed / lock-live -> Active
         origin = meta.get("origin", "draft")
         ready = make_store(control).backlog_readiness(meta.get("depends_on", [])).ready

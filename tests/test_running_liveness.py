@@ -1,16 +1,18 @@
-"""The display word is derived from the lock plus the durable `halt_condition`:
-a live lock ⇒ `running` (or `waiting` at a gate), a stale lock (dead pid) or
-absent lock ⇒ the at-rest status (`error` when the last halt was a failure, else
-the stored word) — never `errored`. There is no `draft` display word: an
+"""The display word is derived from daemon-resolved liveness plus the durable
+`halt_condition`: a live quest ⇒ `running` (or `waiting` at a gate), a not-live
+quest ⇒ the at-rest status (`error` when the last halt was a failure, else the
+stored word) — never `errored`. There is no `draft` display word: an
 un-materialized new/paused change shows its real status (`new`/`paused`)."""
 
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 from pathlib import Path
 
 import imp.cli.main as m
+from imp.cli.store import HomeDigest
 from imp.engine.quest import Quest
 from imp.engine.state import State
 from tests.conftest import _seed_control
@@ -22,32 +24,28 @@ def _dead_pid() -> int:
     return p.pid
 
 
-def test_resolver_live_working_is_running(tmp_path: Path) -> None:
-    (tmp_path / "lock").write_text(str(os.getpid()))
-    assert m.resolve_display_status("paused", tmp_path, halt_condition=None) == "running"
+def test_resolver_live_working_is_running() -> None:
+    assert m.resolve_display_status("paused", lock_live=True, halt_condition=None) == "running"
 
 
-def test_resolver_live_gate_is_waiting(tmp_path: Path) -> None:
-    (tmp_path / "lock").write_text(str(os.getpid()))
-    assert m.resolve_display_status("paused", tmp_path, halt_condition="waiting") == "waiting"
+def test_resolver_live_gate_is_waiting() -> None:
+    assert m.resolve_display_status("paused", lock_live=True, halt_condition="waiting") == "waiting"
 
 
-def test_resolver_not_live_error_is_error(tmp_path: Path) -> None:
-    (tmp_path / "lock").write_text(str(_dead_pid()))
-    assert m.resolve_display_status("error", tmp_path, halt_condition=None) == "error"
+def test_resolver_not_live_error_is_error() -> None:
+    assert m.resolve_display_status("error", lock_live=False, halt_condition=None) == "error"
 
 
-def test_resolver_not_live_clean_is_at_rest_status(tmp_path: Path) -> None:
-    (tmp_path / "lock").write_text(str(_dead_pid()))
-    assert m.resolve_display_status("paused", tmp_path, halt_condition=None) == "paused"
+def test_resolver_not_live_clean_is_at_rest_status() -> None:
+    assert m.resolve_display_status("paused", lock_live=False, halt_condition=None) == "paused"
 
 
-def test_resolver_absent_lock_keeps_at_rest_status(tmp_path: Path) -> None:
-    assert m.resolve_display_status("new", tmp_path, halt_condition=None) == "new"
+def test_resolver_absent_lock_keeps_at_rest_status() -> None:
+    assert m.resolve_display_status("new", lock_live=False, halt_condition=None) == "new"
 
 
-def test_resolver_merged_passes_through(tmp_path: Path) -> None:
-    assert m.resolve_display_status("merged", tmp_path, halt_condition=None) == "merged"
+def test_resolver_merged_passes_through() -> None:
+    assert m.resolve_display_status("merged", lock_live=False, halt_condition=None) == "merged"
 
 
 def test_membership_gates_reflect_derived_words() -> None:
@@ -95,3 +93,54 @@ def test_status_rows_not_live_error_is_error_and_resumable(tmp_path: Path) -> No
     rows = {r[0]: r for r in m._status_rows(tmp_path)}
     assert rows["err01"][1] == "error"
     assert "err01" in {r[0] for r in m._resumable_rows(tmp_path)}
+
+
+def _digest(quest_id: str, status: str, *, lock_live: bool) -> HomeDigest:
+    meta = {"title": "Masked", "created_at": "2026-06-11T00:00:00+00:00",
+            "materialized": True}
+    return HomeDigest(
+        quest_id=quest_id,
+        quest_json=json.dumps({**meta, "id": quest_id}).encode(),
+        state_json=json.dumps({"status": status, "step": "plan"}).encode(),
+        meta=meta,
+        last_iso="2026-06-11T11:00:00+00:00",
+        has_user_message=True,
+        prose="",
+        intent_title=None,
+        lock_live=lock_live,
+    )
+
+
+def test_status_rows_uses_daemon_liveness_when_lock_absent(tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+    d = _digest("masked1", "paused", lock_live=True)   # no lock file on disk
+    rows = {r[0]: r for r in m._status_rows(tmp_path, scanned=[d])}
+    assert rows["masked1"][1] == "running"             # digest bit wins over masked lock
+
+
+def test_status_rows_lock_live_false_preserves_stored_status(tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+    d = _digest("masked2", "paused", lock_live=False)
+    rows = {r[0]: r for r in m._status_rows(tmp_path, scanned=[d])}
+    assert rows["masked2"][1] == "paused"              # not live -> stored word passes through
+
+
+def test_lock_live_backlog_seed_promoted_to_active(tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+    meta = {"title": "Seed", "created_at": "2026-06-11T00:00:00+00:00",
+            "materialized": False, "origin": "backlog"}
+    d = HomeDigest(
+        quest_id="seed1",
+        quest_json=json.dumps({**meta, "id": "seed1"}).encode(),
+        state_json=json.dumps({"status": "new", "step": "plan"}).encode(),
+        meta=meta,
+        last_iso="2026-06-11T11:00:00+00:00",
+        has_user_message=False,
+        prose="",
+        intent_title=None,
+        lock_live=True,                                # a live sibling seed
+    )
+    active = {r[0]: r for r in m._status_rows(tmp_path, scanned=[d])}
+    backlog = {r[0] for r in m._backlog_rows(tmp_path, scanned=[d])}
+    assert active["seed1"][1] == "running"             # promoted out of Backlog into Active
+    assert "seed1" not in backlog                      # no longer classified as a backlog seed

@@ -52,14 +52,15 @@ def _home_to_wire(h: HomeDigest) -> dict[str, Any]:
     return {"quest_id": h.quest_id, "quest_json": _b64e(h.quest_json),
             "state_json": _b64e(h.state_json), "meta": h.meta,
             "last_iso": h.last_iso, "has_user_message": h.has_user_message,
-            "prose": h.prose, "intent_title": h.intent_title}
+            "prose": h.prose, "intent_title": h.intent_title,
+            "lock_live": h.lock_live}
 
 
 def _home_from_wire(d: dict[str, Any]) -> HomeDigest:
     return HomeDigest(
         d["quest_id"], base64.b64decode(d["quest_json"]), _b64d(d["state_json"]),
         d["meta"], d["last_iso"], d["has_user_message"], d["prose"],
-        d["intent_title"])
+        d["intent_title"], d["lock_live"])
 
 
 def _card_to_wire(c: QuestCard | None) -> dict[str, Any] | None:

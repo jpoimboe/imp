@@ -33,6 +33,7 @@ class HomeDigest(NamedTuple):
     has_user_message: bool
     prose: str
     intent_title: str | None
+    lock_live: bool
 
 
 @dataclass(frozen=True)
@@ -116,6 +117,7 @@ class LocalStore:
         )
         from imp.cli.render_helpers import conversation_prose
         from imp.engine.quest import LAYOUT_VERSION, migrate
+        from imp.engine.state import lock_is_live
 
         out: list[HomeDigest] = []
         for quest_id in _list_quest_homes(self.control_root):
@@ -145,7 +147,8 @@ class LocalStore:
                 parsed = []
             out.append(HomeDigest(
                 quest_id, quest_json, state_json, meta, last_iso, has_um,
-                conversation_prose(parsed), _resolve_intent(parsed)))
+                conversation_prose(parsed), _resolve_intent(parsed),
+                lock_is_live(cdir / "lock")))
         return out
 
     def quest_card(self, quest_id: str) -> QuestCard | None:

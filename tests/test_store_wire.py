@@ -37,6 +37,7 @@ def test_home_digest_survives_json_round_trip_including_bytes() -> None:
         has_user_message=True,
         prose="hello",
         intent_title="do the thing",
+        lock_live=True,
     )
     assert _home_from_wire(_json_round_trip(_home_to_wire(home))) == home
 

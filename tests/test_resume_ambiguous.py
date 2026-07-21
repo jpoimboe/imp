@@ -30,15 +30,24 @@ def test_row_for_id_from_archive(tmp_path: Path) -> None:
                    None, None, None)
 
 
-def test_exit_ambiguous_renders_each_candidate_via_formatter(
+def test_exit_ambiguous_renders_each_candidate_via_quest_card(
     monkeypatch, tmp_path: Path, capsys,
 ) -> None:
-    def fake_row(control, cid):
-        # _Row = (id, status, step, last_iso, title, created_at, step_label, phase_label)
-        return (cid, "paused", "plan", "2026-06-11T11:45:00+00:00",
-                "Title " + cid[-3:], "2026-06-11T00:00:00+00:00", None, None)
+    from imp.cli.store import QuestCard
 
-    monkeypatch.setattr(m, "_row_for_id", fake_row)
+    def fake_card(cid: str) -> QuestCard:
+        return QuestCard(
+            quest_id=cid, status="paused", step="plan",
+            last="2026-06-11T11:45:00+00:00", title="Title " + cid[-3:],
+            created="2026-06-11T00:00:00+00:00", step_label=None, phase_label=None,
+            base_branch=None, merge_commit=None, parent=None, depends_on=[],
+            intent=None, summary=None)
+
+    class FakeStore:
+        def quest_card(self, cid: str) -> QuestCard:
+            return fake_card(cid)
+
+    monkeypatch.setattr(m, "make_store", lambda control: FakeStore())
     with pytest.raises(SystemExit) as exc:
         m._exit_ambiguous(
             "2026-06-04", ["2026-06-04-aaa111", "2026-06-04-bbb222"], tmp_path)
@@ -47,5 +56,5 @@ def test_exit_ambiguous_renders_each_candidate_via_formatter(
     assert "imp: " in err
     assert "is ambiguous" in err
     assert "NAME" in err                          # shared header row
-    assert "paused" in err                        # STATUS via the formatter
+    assert "paused" in err                        # STATUS via card.status
     assert "aaa111" in err and "bbb222" in err    # resume tokens, one row each

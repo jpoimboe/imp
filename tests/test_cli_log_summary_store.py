@@ -25,7 +25,7 @@ class _FakeStore:
         # _iter_quest_ids resolves live ids through the store; this file's only
         # seeded live home is "alpha".
         from imp.cli.store import HomeDigest
-        return [HomeDigest("alpha", b"{}", None, {}, "", False, "", None)]
+        return [HomeDigest("alpha", b"{}", None, {}, "", False, "", None, False)]
 
 
 _EVENTS = [
