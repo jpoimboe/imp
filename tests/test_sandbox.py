@@ -986,6 +986,32 @@ def test_rw_fallback_home_layer_is_not_wrapped():
     assert argv[0] == "bwrap"
 
 
+def test_sandbox_spawn_failed_marker_absence_guarded():
+    from imp.engine.sandbox import (
+        SANDBOX_ENTERED_MARKER,
+        sandbox_spawn_failed,
+    )
+    present = f"noise\n{SANDBOX_ENTERED_MARKER}\nmore"
+    # marker present -> the inner command ran -> not a failure
+    assert sandbox_spawn_failed(present, sandbox_active=True) is False
+    # marker absent + sandbox active -> the sandbox never entered -> a failure
+    assert sandbox_spawn_failed("boom", sandbox_active=True) is True
+    assert sandbox_spawn_failed("", sandbox_active=True) is True
+    # bare (inactive) spawn: no marker is ever emitted, so absence is NORMAL
+    assert sandbox_spawn_failed("boom", sandbox_active=False) is False
+    assert sandbox_spawn_failed(present, sandbox_active=False) is False
+
+
+def test_strip_sandbox_marker_removes_single_line():
+    from imp.engine.sandbox import SANDBOX_ENTERED_MARKER, strip_sandbox_marker
+    raw = f"{SANDBOX_ENTERED_MARKER}\nreal line\nsecond"
+    assert strip_sandbox_marker(raw) == "real line\nsecond"
+    # idempotent: a second strip (marker already gone) is a no-op
+    assert strip_sandbox_marker(strip_sandbox_marker(raw)) == "real line\nsecond"
+    # no marker present -> unchanged
+    assert strip_sandbox_marker("just output\n") == "just output\n"
+
+
 def test_overlay_setup_failed_keys_on_marker():
     from imp.engine.sandbox import (
         OVERLAY_SETUP_FAILED_MARKER,

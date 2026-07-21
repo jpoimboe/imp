@@ -185,6 +185,23 @@ def overlay_setup_failed(stderr: str) -> bool:
     return OVERLAY_SETUP_FAILED_MARKER in stderr
 
 
+SANDBOX_ENTERED_MARKER = "__IMP_SANDBOX_ENTERED__"
+SANDBOX_SPAWN_FAILED_MESSAGE = (
+    "the OS sandbox could not start your command; it did NOT run "
+    "(a transient sandbox-setup failure, not your command's own exit)"
+)
+
+
+def sandbox_spawn_failed(stderr: str, *, sandbox_active: bool) -> bool:
+    """True iff sandbox was active but the entry sentinel is absent (command never ran)."""
+    return sandbox_active and SANDBOX_ENTERED_MARKER not in stderr
+
+
+def strip_sandbox_marker(stderr: str) -> str:
+    """Remove the single entry-sentinel line from captured stderr (display-only, idempotent)."""
+    return stderr.replace(SANDBOX_ENTERED_MARKER + "\n", "", 1)
+
+
 def build_sandbox_argv(
     command: str, *, cwd: str, policy: SandboxPolicy,
     engine_env: Mapping[str, str],
