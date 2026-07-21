@@ -3,7 +3,6 @@
 replace_all, atomic write-back. Return/refusal texts are pinned."""
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 import anyio
@@ -13,6 +12,7 @@ import imp.agents.tools.fs as fs_tools  # noqa: F401  triggers registration
 from imp.agents.tools import get_registry
 from imp.agents.tools.context import ToolContext
 from imp.agents.tools.limits import FILE_READ_CAP_BYTES
+from tests._dac import dac_enforced
 
 
 def _ctx(tmp_path: Path) -> ToolContext:
@@ -196,7 +196,6 @@ def test_replace_all_single_occurrence_message_pinned(tmp_path: Path) -> None:
     assert out == "replaced 1 occurrences in x.py"
 
 
-@pytest.mark.skipif(os.geteuid() == 0, reason="root bypasses directory permissions")
 def test_readonly_directory_refused_with_curated_error(tmp_path: Path) -> None:
     # mkstemp in a non-writable directory must not leak a raw temp path; the
     # error names the user's file and the recovery, on-pattern with the
@@ -207,7 +206,7 @@ def test_readonly_directory_refused_with_curated_error(tmp_path: Path) -> None:
     p.write_text("a = 1\n")
     d.chmod(0o555)
     try:
-        with pytest.raises(
+        with dac_enforced(), pytest.raises(
             PermissionError, match=r"directory of ro/x\.py is read-only for this step"
         ):
             _edit(_ctx(tmp_path), path="ro/x.py", old="a = 1", new="a = 2")

@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 import json
-import os
 from pathlib import Path
 
 import pytest
 
 from imp.engine.errors import LoadError, StateDecodeError
 from imp.engine.state import State
+from tests._dac import dac_enforced
 
 
 def test_state_decode_error_subclasses_loaderror() -> None:
@@ -89,12 +89,11 @@ def test_invalid_utf8_state_raises_with_sidecar(tmp_path: Path) -> None:
     assert sidecars[0].read_bytes() == bad
 
 
-@pytest.mark.skipif(os.geteuid() == 0, reason="chmod fault injection needs non-root")
 def test_readonly_state_dir_swallows_sidecar_write(tmp_path: Path) -> None:
     (tmp_path / "state.json").write_bytes(_TORN)
     tmp_path.chmod(0o500)  # read+exec only: state.json still readable, dir not writable
     try:
-        with pytest.raises(StateDecodeError) as ei:
+        with dac_enforced(), pytest.raises(StateDecodeError) as ei:
             State.load(tmp_path)
     finally:
         tmp_path.chmod(0o700)  # restore so tmp_path cleanup can run

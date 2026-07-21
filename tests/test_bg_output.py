@@ -10,6 +10,7 @@ import pytest
 import imp.agents.tools.bash  # noqa: F401
 from imp.agents.tools import get_registry
 from imp.agents.tools.bg import BgProc
+from tests._dac import dac_enforced
 from tests.test_bg_spawn import _cleanup, _ctx, _spawn
 
 
@@ -169,16 +170,12 @@ def test_non_teardown_read_error_surfaces_as_tool_error(tmp_path: Path) -> None:
     """Spec error-handling: scratch-file read errors OTHER THAN the teardown
     race (FileNotFoundError) surface as tool errors, consistent with existing
     tools — only the teardown race gets the tombstone fallthrough."""
-    import os as _os
-    if _os.geteuid() == 0:
-        pytest.skip("chmod fault injection needs non-root")
-
     async def main() -> None:
         ctx = _ctx(tmp_path)
         bp = _fake_bp(tmp_path, ctx, b"data")
         bp.out_path.chmod(0o000)
         try:
-            with pytest.raises(PermissionError):
+            with dac_enforced(), pytest.raises(PermissionError):
                 await _read(ctx)
         finally:
             bp.out_path.chmod(0o644)
