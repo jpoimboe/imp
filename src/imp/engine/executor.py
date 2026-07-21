@@ -95,6 +95,7 @@ from imp.engine.types import (
 )
 from imp.providers.effective import load_effective_config, validate_project_memory
 from imp.providers.resolve import provider_from_model, resolve_run
+from imp.remote.session.protocol import SIDE_EFFECT_REASONS
 
 if TYPE_CHECKING:
     from imp.providers.config import Config
@@ -578,6 +579,15 @@ async def run_quest(
                 interrupt_caused = (
                     coordinator.should_pause or coordinator.interrupted
                     or action.interrupt)
+                # A between-turns side-effect pause (compact / model-override)
+                # resumes in place exactly like an interrupt — interrupt_caused
+                # stays True so `retain` below keeps the held lane and the
+                # transcript — but it is NOT an interrupt gesture, so its resume
+                # disposition is a solicit (return to the prompt), never a
+                # continue (the stray agent turn).
+                side_effect_pause = (
+                    coordinator.should_pause
+                    and coordinator.pause_reason in SIDE_EFFECT_REASONS)
                 # Retain the held lane on an interrupt or transient give-up: the
                 # step resumes in place on an untouched tree.
                 retain = (interrupt_caused
@@ -590,8 +600,10 @@ async def run_quest(
                 if not evicted and step.kind == "agent":
                     state.arm_step_resume(
                         should_continue=(
-                            interrupt_caused
-                            or action.reason in ("retry_ceiling", "reauth_needed")))
+                            not side_effect_pause
+                            and (interrupt_caused
+                                 or action.reason
+                                 in ("retry_ceiling", "reauth_needed"))))
                 reason = action.reason or "interrupt"
                 interrupt_reason = (coordinator.pause_reason
                                     if coordinator.should_pause else None)

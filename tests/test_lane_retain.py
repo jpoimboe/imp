@@ -311,3 +311,45 @@ async def test_retained_lane_resume_does_not_reevict_at_entry(
     assert "lane_evicted" not in _types(ch)           # entry guard did NOT evict
     assert disk_flag_at_dispatch["value"] is False    # cleared + persisted first
     assert State.load(ch.state_dir).lane_retained is False
+
+
+@pytest.mark.anyio
+async def test_side_effect_pause_in_held_region_keeps_lane_and_solicits(
+    tmp_path: Path, provider_registry: Any,
+) -> None:
+    """A between-turns /compact at an agent step in the held merge region must
+    KEEP the lane and resume in place (exactly like an interrupt) — proving the
+    fix does not evict via `retain` — while arming resume_should_continue=False
+    (return to the prompt), not True. This is the finalize-gate regression guard:
+    finalize holds merge-lane and a /compact there must not rewind the quest."""
+    from imp.engine.awaiting_user_input import AwaitingUserInput
+    coord = InterruptCoordinator()
+
+    class _CompactRunner:
+        async def run(self, _inv: AgentInvocation) -> AsyncIterator[Event]:
+            # Between-turns /compact: a side-effect pause fires, then the turn
+            # yields your-turn (AwaitingUserInput, interrupt=False).
+            await coord.signal_pause(reason="compact")
+            raise AwaitingUserInput("nothing more to do", interrupt=False)
+            yield {}  # unreachable; marks run() as an async generator
+
+        async def interrupt(self) -> None:
+            pass
+
+    provider_registry("fake", env_check=lambda: True,
+                      factory=lambda _m: _provider(_CompactRunner))
+    _seed_wf(tmp_path, _AGENT_HELD_WF)
+    ch = Quest.create(tmp_path, title="x", quest_id="feat", base_branch="main")
+
+    result = await run_quest(ch, coordinator=coord)
+
+    assert result is RunResult.PAUSED
+    st = State.load(ch.state_dir)
+    assert "lane_evicted" not in _types(ch)          # NOT evicted (retain intact)
+    assert st.held_lane == "main"                    # lane still held
+    assert st.held_acquire_step == "lane"            # acquire step unchanged
+    assert st.step == "held"                          # cursor NOT rewound to "lane"
+    assert st.resume_pending == "held"               # armed for in-place resume
+    assert st.lane_retained is True
+    assert st.resume_should_continue is False        # return to prompt, no stray turn
+    assert mq.is_head(tmp_path, "feat", "main")      # still queue head
