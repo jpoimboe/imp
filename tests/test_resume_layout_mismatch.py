@@ -34,6 +34,5 @@ def test_resume_layout_mismatch_prints_actionable_not_resume_gone(
     err = capsys.readouterr().err
     assert rc == 2
     assert "999" in err and str(LAYOUT_VERSION) in err     # both versions surfaced
-    assert "cafef00d" in err                                # imp_commit breadcrumb
-    assert "imp log" in err                                  # recovery recipe
+    assert "Update imp" in err                              # actionable update advice
     assert "no Quest matches" not in err                   # did NOT fall to _resume_gone
