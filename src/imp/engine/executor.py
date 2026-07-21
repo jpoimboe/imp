@@ -66,6 +66,7 @@ from imp.engine.quest import Quest
 from imp.engine.reincarnation import reincarnation_seed, stash_transcript
 from imp.engine.sandbox import (
     SandboxUnavailable,
+    _force_rmtree,
     make_home_layer,
     overlay_available,
     resolve_policy,
@@ -839,6 +840,7 @@ def _complete(quest: Quest, state: State, log: EventLog) -> RunResult:
         _emit(log, "workflow_completed", {})
         shutil.rmtree(quest.quest_dir / "steps", ignore_errors=True)
         shutil.rmtree(quest.tmp_dir, ignore_errors=True)
+        _force_rmtree(quest.var_tmp_dir)
         return RunResult.COMPLETED
 
     state.status = "merged"
@@ -855,6 +857,7 @@ def _complete(quest: Quest, state: State, log: EventLog) -> RunResult:
     )
     shutil.rmtree(quest.quest_dir, ignore_errors=True)
     shutil.rmtree(quest.tmp_dir, ignore_errors=True)
+    _force_rmtree(quest.var_tmp_dir)
     return RunResult.COMPLETED
 
 

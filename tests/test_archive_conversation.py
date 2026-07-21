@@ -1,7 +1,12 @@
 from __future__ import annotations
 
 import json
+import os
+import shutil
+import uuid
 from pathlib import Path
+
+import pytest
 
 from imp.engine.abandon import archive_conversation
 from imp.engine.archive import read as archive_read
@@ -88,3 +93,17 @@ def test_archive_conversation_reaps_per_quest_tmp_dir(tmp_path: Path) -> None:
     archive_conversation(ch)
 
     assert not ch.tmp_dir.exists()                   # per-quest scratch gone
+
+
+@pytest.mark.skipif(not os.access("/var/tmp", os.W_OK), reason="requires writable /var/tmp")
+def test_archive_conversation_reaps_per_quest_var_tmp_dir(tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+    qid = f"vt{uuid.uuid4().hex[:8]}"
+    ch = Quest.create(tmp_path, title="x", quest_id=qid, base_branch="main")
+    ch.var_tmp_dir.mkdir(parents=True, exist_ok=True)
+    (ch.var_tmp_dir / "scratch").write_text("x")
+    try:
+        archive_conversation(ch)
+        assert not ch.var_tmp_dir.exists()
+    finally:
+        shutil.rmtree(ch.var_tmp_dir, ignore_errors=True)

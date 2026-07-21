@@ -6,6 +6,7 @@ import shutil
 
 from imp.engine import merge_queue, worktree
 from imp.engine.quest import Quest
+from imp.engine.sandbox import _force_rmtree
 from imp.engine.state import ProjectLock, State
 
 
@@ -40,6 +41,7 @@ def tear_down_quest(quest: Quest) -> None:
         worktree.delete_branch(control, quest_id)
     shutil.rmtree(quest.quest_dir, ignore_errors=True)
     shutil.rmtree(quest.tmp_dir, ignore_errors=True)
+    _force_rmtree(quest.var_tmp_dir)
 
 
 def archive_conversation(quest: Quest) -> None:
@@ -70,6 +72,7 @@ def archive_conversation(quest: Quest) -> None:
         worktree.delete_branch(control, quest_id)
     shutil.rmtree(quest.quest_dir, ignore_errors=True)
     shutil.rmtree(quest.tmp_dir, ignore_errors=True)
+    _force_rmtree(quest.var_tmp_dir)
 
 
 def save_as_draft(quest: Quest, reason: str | None = None) -> None:
@@ -94,3 +97,4 @@ def discard_conversation(quest: Quest) -> None:
         pass
     shutil.rmtree(quest.quest_dir, ignore_errors=True)
     shutil.rmtree(quest.tmp_dir, ignore_errors=True)
+    _force_rmtree(quest.var_tmp_dir)

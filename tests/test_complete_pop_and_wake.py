@@ -1,8 +1,11 @@
 
+import os
 import shutil
+import uuid
 from pathlib import Path
 
 import anyio
+import pytest
 
 import imp.remote.session.attach as attach_mod
 from imp.engine import merge_queue as mq
@@ -130,3 +133,41 @@ def test_complete_after_merge_reaps_quest_tmp_dir(tmp_path, monkeypatch) -> None
     state.merge_commit = "deadbeef"  # mark the merge already durable → finalize branch
     _complete(a, state, JsonlEventLog(a.events_path))
     assert not a.tmp_dir.exists()                    # per-quest scratch gone on the merge path too
+
+
+@pytest.mark.skipif(not os.access("/var/tmp", os.W_OK), reason="requires writable /var/tmp")
+def test_complete_without_merge_reaps_per_quest_var_tmp_dir(tmp_path, monkeypatch) -> None:
+    _seed_control(tmp_path)
+    qid = f"vt{uuid.uuid4().hex[:8]}"
+    ch = Quest.create(tmp_path, title="x", quest_id=qid, base_branch="main")
+    mq.enqueue_if_absent(tmp_path, qid, "main")
+    monkeypatch.setattr(attach_mod, "spawn_session_daemon", lambda *a, **k: None)
+    ch.var_tmp_dir.mkdir(parents=True, exist_ok=True)
+    (ch.var_tmp_dir / "scratch").write_text("x")
+    try:
+        state = State.load(ch.state_dir)     # merge_commit is None → no-merge branch
+        _complete(ch, state, JsonlEventLog(ch.events_path))
+        assert not ch.var_tmp_dir.exists()
+    finally:
+        shutil.rmtree(ch.var_tmp_dir, ignore_errors=True)
+
+
+@pytest.mark.skipif(not os.access("/var/tmp", os.W_OK), reason="requires writable /var/tmp")
+def test_complete_after_merge_reaps_per_quest_var_tmp_dir(tmp_path, monkeypatch) -> None:
+    _seed_control(tmp_path)
+    qid = f"vt{uuid.uuid4().hex[:8]}"
+    a = Quest.create(tmp_path, title="a", quest_id=qid, base_branch="main")
+    (a.project_root / "f.txt").write_text("hi")
+    _git(a.project_root, "add", "-A")
+    _git(a.project_root, "commit", "-qm", "a")
+    mq.enqueue_if_absent(tmp_path, qid, "main")
+    monkeypatch.setattr(attach_mod, "spawn_session_daemon", lambda *a, **k: None)
+    a.var_tmp_dir.mkdir(parents=True, exist_ok=True)
+    (a.var_tmp_dir / "scratch").write_text("x")
+    try:
+        state = State.load(a.state_dir)
+        state.merge_commit = "deadbeef"      # mark merge durable → finalize branch
+        _complete(a, state, JsonlEventLog(a.events_path))
+        assert not a.var_tmp_dir.exists()
+    finally:
+        shutil.rmtree(a.var_tmp_dir, ignore_errors=True)
