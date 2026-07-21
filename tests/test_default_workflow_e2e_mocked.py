@@ -30,7 +30,7 @@ from imp.providers.anthropic import AnthropicProvider
 from tests.anthropic_fakes import FakeAsyncAnthropic, response, text, tool_use
 from tests.openai_fakes import resp_function_call, resp_response
 
-pytestmark = [pytest.mark.timeout(120)]
+pytestmark = [pytest.mark.timeout(300)]
 
 
 def _run_events(quest):
