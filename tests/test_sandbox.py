@@ -1027,6 +1027,24 @@ def test_strip_sandbox_marker_removes_single_line():
     assert strip_sandbox_marker("just output\n") == "just output\n"
 
 
+def test_sandbox_spawn_backoff_bounds_and_cap():
+    from imp.engine.sandbox import (
+        SANDBOX_SPAWN_MAX_ATTEMPTS,
+        sandbox_spawn_backoff_delay,
+    )
+    assert SANDBOX_SPAWN_MAX_ATTEMPTS == 5
+    # Full-jitter exponential ceiling per retry: 50ms → 100 → 200 → 400ms.
+    ceilings = [0.05, 0.1, 0.2, 0.4]
+    for attempt, ceiling in enumerate(ceilings, start=1):
+        samples = [sandbox_spawn_backoff_delay(attempt) for _ in range(64)]
+        assert all(0.0 <= s <= ceiling for s in samples)      # never exceeds the ceiling
+        assert len({round(s, 6) for s in samples}) > 1        # jitter, not a constant
+    # The ceiling caps at 400ms — no further doubling is exposed past the 4th retry.
+    assert all(sandbox_spawn_backoff_delay(9) <= 0.4 for _ in range(32))
+    # Worst-case total added latency before a pause stays under ~1s (4 retries).
+    assert sum(ceilings) < 1.0
+
+
 def test_overlay_wrapper_omits_sentinel_on_mount_failure():
     from imp.engine.sandbox import SANDBOX_ENTERED_MARKER
     hl = HomeLayer(home="/home/u", merged="/up/merged",

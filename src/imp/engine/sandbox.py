@@ -19,6 +19,7 @@ from __future__ import annotations
 import contextlib
 import os
 import platform
+import random
 import shlex
 import shutil
 import subprocess
@@ -186,6 +187,21 @@ def sandbox_spawn_failed(stderr: str, *, sandbox_active: bool) -> bool:
 def strip_sandbox_marker(stderr: str) -> str:
     """Remove the single entry-sentinel line from captured stderr (display-only, idempotent)."""
     return stderr.replace(SANDBOX_ENTERED_MARKER + "\n", "", 1)
+
+
+SANDBOX_SPAWN_MAX_ATTEMPTS = 5   # 1 initial + 4 retries
+_SANDBOX_SPAWN_BACKOFF_BASE_S = 0.05
+_SANDBOX_SPAWN_BACKOFF_CAP_S = 0.4
+
+
+def sandbox_spawn_backoff_delay(attempt: int) -> float:
+    """Full-jitter exponential backoff (seconds) BEFORE retry `attempt` (1-based):
+    a uniform sample in [0, min(cap, base * 2**(attempt-1))]. base 50ms doubling
+    to a 400ms cap. Retry is provably safe (the inner command never ran), so full
+    jitter — not equal jitter — spreads a thundering herd of concurrent gates."""
+    ceiling = min(_SANDBOX_SPAWN_BACKOFF_CAP_S,
+                  _SANDBOX_SPAWN_BACKOFF_BASE_S * (2 ** (attempt - 1)))
+    return random.uniform(0.0, ceiling)
 
 
 def build_sandbox_argv(
