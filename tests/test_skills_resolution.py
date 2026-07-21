@@ -64,6 +64,7 @@ def test_load_internal_skill_root_shadows_user(tmp_path: Path) -> None:
     assert load_internal_skill(skills, "dup") == "ROOT\n"
 
 
+@pytest.mark.timeout(240)  # wall-clock SIGALRM can false-fire under -n auto saturation
 def test_load_internal_skill_strips_frontmatter_on_user_fallback(tmp_path: Path) -> None:
     skills = _skills(tmp_path)
     (skills / "user" / "shared.md").write_text(

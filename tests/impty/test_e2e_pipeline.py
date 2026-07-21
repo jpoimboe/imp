@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -34,12 +35,16 @@ def test_scripted_default_workflow_run_passes_the_dogfood_invariants(
         check=True, capture_output=True, text=True).stdout.strip()
     env = clean_env(IMP_SCRIPTED_SCRIPT=str(script_path), IMP_THEME="ansi")
 
+    # One shared budget: the pty phase and the checker subprocess draw from a
+    # single 235s deadline so their inner waits never sum past the 240s outer.
+    deadline = time.monotonic() + E2E_SUBPROCESS_TIMEOUT
+
     # Drive the real binary through impty to completion + merge.
     with TerminalSession(
         [sys.executable, "-m", "imp", "new", "--title", "demo change", "--headless"],
         cwd=str(clone), env=env, cols=100, rows=40,
     ) as s:
-        rc = s.run_to_completion(hard=E2E_SUBPROCESS_TIMEOUT)
+        rc = s.run_to_completion(hard=deadline - time.monotonic())
     assert rc == 0, "\n".join(s.lines())                  # completed + merged
 
     # The worktree is gone once the merge gate fired (completion finalized it).
@@ -50,7 +55,8 @@ def test_scripted_default_workflow_run_passes_the_dogfood_invariants(
     checked = subprocess.run(
         [sys.executable, str(_CHECKER), str(clone), sentinel,
          "--base", base_sha, "--imp", shim],
-        env=env, capture_output=True, text=True, timeout=E2E_SUBPROCESS_TIMEOUT,
+        env=env, capture_output=True, text=True,
+        timeout=max(1.0, deadline - time.monotonic()),
     )
     assert checked.returncode == 0, (
         f"dogfood invariants FAILED:\n{checked.stdout}\n{checked.stderr}")

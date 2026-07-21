@@ -66,6 +66,7 @@ def test_archive_conversation_captures_steps_subtree(tmp_path: Path) -> None:
     assert rec["step_blobs"].get("p/s/transcript.jsonl") is not None
 
 
+@pytest.mark.timeout(240)  # ~13 git subprocesses incl. worktree add/remove starve under -n auto
 def test_archive_conversation_arms_resume_pending(tmp_path: Path) -> None:
     _seed_control(tmp_path)
     ch = Quest.create(tmp_path, title="x", quest_id="armed", base_branch="main")

@@ -419,6 +419,7 @@ def test_make_task_tool_openai_strict_round_trip() -> None:
     assert set(strict["required"]) == {"subagent_name", "task_description", "tier"}
 
 
+@pytest.mark.timeout(240)  # wall-clock SIGALRM can false-fire under -n auto saturation
 @pytest.mark.anyio
 async def test_dispatch_task_runtime_tier_overrides_frontmatter(tmp_path: Path) -> None:
     """A runtime tier= wins over the subagent's static tier: frontmatter."""
