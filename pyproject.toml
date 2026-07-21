@@ -51,6 +51,10 @@ addopts = "-ra --strict-markers"
 pythonpath = ["src"]
 timeout = 60
 timeout_method = "signal"
+# Keep tmp_path dirs only for failing tests. A full run leaves ~136k inodes
+# across ~17k tmp_path dirs; the default (retain all, last 3 runs) multiplied
+# by every concurrent sandbox's private /tmp exhausts tmpfs's 1M inode cap.
+tmp_path_retention_policy = "failed"
 markers = [
     "real_sandbox_policy: opt out of the no-bwrap sandbox fallback fixture (tests asserting the raw sandbox posture)",
     "codex_parallel: codex parallel-MCP-dispatch concurrency probe; XFAIL on codex builds that serialize MCP sub_agent dispatch. Deselected from the default test-live via -m 'not codex_parallel'; run on demand with `make test-live-codex-parallel`.",
