@@ -2058,7 +2058,12 @@ def _load_events_for_id(control: Path, quest_id: str) -> list[dict[str, Any]] | 
     removal), so the only overlap is a crash mid-sequence where worktree-first
     harmlessly returns identical content."""
     try:
-        quest = Quest.load(control, quest_id)
+        quest = Quest.load(control, quest_id, migrate_if_lockable=True)
+    except LayoutMismatch:
+        ev_path = _quest_home(control, quest_id) / "events.jsonl"
+        if ev_path.exists():
+            return _parse_jsonl(ev_path.read_bytes())
+        quest = None
     except LoadError:
         quest = None
     if quest is not None:
