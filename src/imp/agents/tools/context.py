@@ -14,7 +14,7 @@ import contextlib
 import dataclasses
 import os
 import signal as _signal
-from collections.abc import AsyncIterator, Iterable, Iterator
+from collections.abc import AsyncGenerator, Iterable, Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
@@ -220,7 +220,7 @@ def suspend_inactivity_watchdog(ctx: ToolContext | None) -> Iterator[None]:
 
 async def request_bracketed(
     coordinator: Any, aiter: Any
-) -> AsyncIterator[Any]:
+) -> AsyncGenerator[Any, None]:
     """Yield items from `aiter` while holding the coordinator's
     provider-request watchdog state across each await for the NEXT item — and
     only across that await, never across the yield.
@@ -239,17 +239,23 @@ async def request_bracketed(
     begin = getattr(coordinator, "begin_request_watchdog", None)
     end = getattr(coordinator, "end_request_watchdog", None)
     it = aiter.__aiter__()
-    while True:
-        if begin is not None:
-            begin()
-        try:
-            item = await it.__anext__()
-        except StopAsyncIteration:
-            return
-        finally:
-            if end is not None:
-                end()
-        yield item
+    try:
+        while True:
+            if begin is not None:
+                begin()
+            try:
+                item = await it.__anext__()
+            except StopAsyncIteration:
+                return
+            finally:
+                if end is not None:
+                    end()
+            yield item
+    finally:
+        aclose = getattr(it, "aclose", None)
+        if aclose is not None:
+            with contextlib.suppress(Exception):
+                await aclose()
 
 
 def quest_home_path(quest_home: str | None) -> Path | None:
