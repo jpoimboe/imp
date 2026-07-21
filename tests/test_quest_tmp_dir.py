@@ -92,3 +92,30 @@ def test_spawn_session_daemon_exports_quest_tmp_without_poisoning_tmpdir(
     # Regression guard for the Critical: TMPDIR must NOT be set to the per-quest
     # leaf (that is exactly what double-nests session_socket_path in the daemon).
     assert captured["env"].get("TMPDIR") != str(ch.tmp_dir)
+
+
+def test_var_tmp_dir_is_per_quest_subdir_of_var_tmp_imp_uid(tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+    ch = Quest.create(tmp_path, title="T", quest_id="qvt1", base_branch="main")
+    assert ch.var_tmp_dir == Path("/var/tmp") / f"imp-{os.getuid()}" / "qvt1"
+
+
+def test_var_tmp_dir_equals_resolve_policy_source_even_with_injected_uid(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # AC4: quest.var_tmp_dir equals resolve_policy's bound source (both use os.getuid()).
+    import imp.engine.sandbox as sandbox_mod
+    from imp.engine.sandbox import SandboxConfig, resolve_policy
+
+    _seed_control(tmp_path)
+    ch = Quest.create(tmp_path, title="T", quest_id="qvt2", base_branch="main")
+    real_access = os.access
+    monkeypatch.setattr(
+        sandbox_mod.os, "access",
+        lambda p, m: True if str(p) == "/var/tmp" else real_access(p, m))
+    pol = resolve_policy(
+        worktree=ch.project_root, control_root=ch.control_root,
+        quest_id=ch.id, cfg=SandboxConfig(uid=99999),
+        engine_env_result={}, environ={}, available=True, quest_dir=ch.quest_dir)
+    assert pol.quest_var_tmp_dir == str(ch.var_tmp_dir)
+    assert "imp-99999" not in pol.quest_var_tmp_dir

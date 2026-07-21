@@ -499,6 +499,11 @@ class Quest:
         """Per-quest scratch root /tmp/imp-<uid>/<id>/, reaped at quest end."""
         return Path(tempfile.gettempdir()) / f"imp-{os.getuid()}" / self.id
 
+    @property
+    def var_tmp_dir(self) -> Path:
+        """Per-quest overlay-capable scratch root /var/tmp/imp-<uid>/<id>/, reaped at quest end."""
+        return Path("/var/tmp") / f"imp-{os.getuid()}" / self.id
+
     def event_log(self) -> JsonlEventLog:
         return JsonlEventLog(self.events_path)
 
