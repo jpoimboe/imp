@@ -165,6 +165,7 @@ def test_leave_command_on_materialized_quest_is_rejected(
     assert any(expected in line for line in out)
 
 
+@pytest.mark.timeout(240)  # ~9 git subprocesses starve under -n auto saturation
 @pytest.mark.parametrize("command", ["/save", "/shelve", "/clear"])
 def test_leave_command_on_prelive_quest_returns_literal(
     tmp_path: Path, command: str,
