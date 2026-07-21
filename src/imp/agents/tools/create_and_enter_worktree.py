@@ -69,6 +69,10 @@ async def create_and_enter_worktree(ctx: Any) -> str:
     ctx.project_root = quest.project_root
     if ctx.base_sandbox_policy is not None:
         ctx.base_sandbox_policy = dataclasses.replace(
-            ctx.base_sandbox_policy, worktree=str(quest.project_root))
+            ctx.base_sandbox_policy,
+            worktree=str(quest.project_root),
+            git_worktree_self=str(
+                quest.control_root / ".git" / "worktrees" / quest.project_root.name),
+        )
     return (f"materialized worktree at {quest.project_root}; "
             f"head_changed={'true' if head_changed else 'false'}")
