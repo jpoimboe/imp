@@ -32,7 +32,7 @@ async def test_provider_run_reraises_subagent_suspended(
     SubagentSuspended, not swallow it into a classified error event.
     (Both runners share `__init__(model_name, *, client_factory=None,
     user_input_fn=None)`; the inner loop is stubbed so the client is never used
-    — anthropic patches `run_agent_loop`, openai still patches `_run_loop`.)"""
+    — both patch `run_agent_loop`.)"""
     mod = importlib.import_module(provider_mod)
     base = getattr(mod, runner_cls)
     runner = base(model_name="m")
@@ -42,15 +42,12 @@ async def test_provider_run_reraises_subagent_suspended(
         raise SubagentSuspended("nested pause")
         yield  # makes this an async generator
 
-    if runner_cls == "AnthropicAgentRunner":
-        # anthropic.run() delegates to run_agent_loop(invocation, session);
-        # AnthropicSession.__init__ only stores refs, so the uninitialized inv
-        # is never dereferenced before the patched loop raises. run()'s
-        # `except Exception` -> raise_if_suspended re-raises SubagentSuspended.
-        monkeypatch.setattr(mod, "run_agent_loop",
-                            lambda invocation, session: _suspend())
-    else:
-        monkeypatch.setattr(runner, "_run_loop", lambda _inv: _suspend())
+    # Both runners delegate run() to run_agent_loop(invocation, session); the
+    # Session __init__ only stores refs, so the uninitialized inv is never
+    # dereferenced before the patched loop raises. run()'s `except Exception`
+    # -> raise_if_suspended re-raises SubagentSuspended.
+    monkeypatch.setattr(mod, "run_agent_loop",
+                        lambda invocation, session: _suspend())
 
     with pytest.raises(SubagentSuspended):
         async for _ in runner.run(inv):
