@@ -560,7 +560,16 @@ async def dispatch_task(
                 # content for the literal "[<kind>]" marker (only on is_error closes).
                 # Keep the bracketed format and kind vocabulary in sync with that scan.
                 suffix = f" [{kind}]" if kind else ""
-                raise RuntimeError(f"subagent {subagent_name!r} failed ({cat}){suffix}")
+                # Point the parent at the prior transcript so it can re-dispatch a
+                # fresh subagent that continues the child's work instead of starting
+                # empty (mirrors _suspend_handback_body / the context-ceiling path).
+                tx = target_dir / "transcript.jsonl"
+                raise RuntimeError(
+                    f"subagent {subagent_name!r} failed ({cat}){suffix}\n\n"
+                    f"Full prior transcript: {tx}\n\n"
+                    f"You decide what happens next — re-dispatch a fresh subagent "
+                    f"(pointed at the transcript above to continue), or carry on "
+                    f"from what you have.")
             return cast(str, result.output["text"])
     finally:
         if home_cleanup is not None:
