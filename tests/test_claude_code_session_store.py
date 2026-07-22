@@ -624,4 +624,34 @@ def test_reconcile_store_tail_strips_error_then_truncates_surplus() -> None:
     assert out == store_body[:1]
 
 
+def test_reconcile_store_tail_anchors_past_trailing_metadata_records() -> None:
+    from imp.providers.claude_code_session_store import (
+        message_to_session_records,
+        reconcile_store_tail,
+    )
+
+    messages = _three_message_transcript()
+    store_body = message_to_session_records(
+        messages[:2], parent_uuid=None, session_id="sid", cwd="/p",
+        model="m", start_index=0)
+    # The real CLI ends its session transcript with uuid-less metadata records;
+    # the appended tail must skip past them and anchor to the last real turn.
+    metadata = [
+        {"type": "last-prompt", "prompt": "go", "sessionId": "sid"},
+        {"type": "ai-title", "title": "x", "sessionId": "sid"},
+    ]
+    store_with_metadata = store_body + metadata
+
+    out = reconcile_store_tail(
+        messages, store_with_metadata, session_id="sid", cwd="/p", model="m")
+
+    tail = out[-1]
+    assert tail["type"] == "user"
+    assert tail["message"]["content"][0]["type"] == "tool_result"
+    # The crux: anchored to the last uuid-bearing turn, never None.
+    assert tail["parentUuid"] == store_body[-1]["uuid"]
+    assert tail["parentUuid"] is not None
+    # Trailing metadata records are preserved, not dropped.
+    assert metadata[0] in out and metadata[1] in out
+
 

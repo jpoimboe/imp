@@ -275,7 +275,8 @@ def reconcile_store_tail(
     missing = messages[body_count:]
     if not missing:
         return kept
-    parent = kept[-1].get("uuid") if kept else None
+    parent = next((e["uuid"] for e in reversed(kept)
+                   if isinstance(e, dict) and e.get("uuid")), None)
     tail = message_to_session_records(
         missing, parent_uuid=parent, session_id=session_id, cwd=cwd,
         model=model, start_index=body_count)
