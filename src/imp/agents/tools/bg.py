@@ -429,11 +429,11 @@ def _detect_overlay_setup_failure(ctx: ToolContext, bp: BgProc) -> None:
     spawn). overlay_reported doubles as the one-shot read guard."""
     if bp.overlay_reported or bp.status == "running":
         return
+    bp.overlay_reported = True
     try:
         stderr = bp.err_path.read_text("utf-8", "replace")
     except OSError:
         return
-    bp.overlay_reported = True
     if not sandbox_spawn_failed(stderr, sandbox_active=bp.sandbox_active):
         return
     bp.overlay_setup_failed = True
