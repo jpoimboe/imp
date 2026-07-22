@@ -110,3 +110,32 @@ async def test_multi_round_tools(pair: str, tmp_path: Path) -> None:
     log_types = [e["type"] for e in driven.log.read()]
     assert log_types.count("tool_call") >= 2  # read_file round + complete_step
     check_golden(f"multiround__{pair}", record(driven))
+
+
+def _nudge_script(pair: str):
+    if pair == "anthropic":
+        return [a_response(a_text("here is my answer in prose"), stop_reason="end_turn"),
+                a_response(a_tool_use("c1", "complete_step", _OK))]
+    if pair == "openai":
+        return [resp_response(resp_message("prose, no tool call")),
+                resp_response(resp_function_call(
+                    "c1", "complete_step", '{"status": "Success", "note": "ok"}'))]
+    if pair == "claude_code":
+        return [cc_assistant(cc_text("prose, no tool")), cc_result(),
+                cc_assistant(cc_tool_use("c1", "complete_step", _OK)), cc_result()]
+    return [[cx_start("thr-1"), cx_msg("prose, no tool"), cx_done()],
+            [cx_call(name="complete_step", args=_OK, result="ok", item_id="cs-1"),
+             cx_done()]]
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("pair", PAIRS)
+async def test_nudge_then_complete(pair: str, tmp_path: Path) -> None:
+    driven = await run_scenario(
+        pair, tmp_path, _nudge_script(pair),
+        continuation_fn=lambda _last: ("please call complete_step", False))
+    # Reaching agent_result proves the continuation drove a recovery turn.
+    assert driven.control[-1]["type"] == "agent_result"
+    assert driven.control[-1]["payload"] == _OK
+    assert "error" not in [e["type"] for e in driven.control]
+    check_golden(f"nudge__{pair}", record(driven))
