@@ -9,25 +9,15 @@ from pathlib import Path
 
 import pytest
 
+from imp.agents.loop_guard import DEFAULT_REPEAT_K
 from imp.engine.completion import build_continuation_fn
-
-from tests.conformance_adapters import (
-    OBSERVE,
-    PAIRS,
-    PUSH,
-    build,
-    drive,
-    run_scenario,
-)
-from tests.conformance_record import check_golden, record
+from tests.anthropic_fakes import response as a_response
+from tests.anthropic_fakes import text as a_text
+from tests.anthropic_fakes import tool_use as a_tool_use
 from tests.cc_fakes import assistant as cc_assistant
 from tests.cc_fakes import result as cc_result
 from tests.cc_fakes import text as cc_text
 from tests.cc_fakes import tool_use as cc_tool_use
-from tests.anthropic_fakes import response as a_response
-from tests.anthropic_fakes import text as a_text
-from tests.anthropic_fakes import tool_use as a_tool_use
-from tests.openai_fakes import resp_function_call, resp_message, resp_response
 from tests.codex_fakes import (
     agent_message as cx_msg,
 )
@@ -40,6 +30,16 @@ from tests.codex_fakes import (
 from tests.codex_fakes import (
     turn_completed as cx_done,
 )
+from tests.conformance_adapters import (
+    OBSERVE,
+    PAIRS,
+    PUSH,
+    build,
+    drive,
+    run_scenario,
+)
+from tests.conformance_record import check_golden, record
+from tests.openai_fakes import resp_function_call, resp_message, resp_response
 
 
 @pytest.fixture
@@ -401,3 +401,53 @@ async def test_resume_emits_no_step_context_codex(tmp_path: Path) -> None:
 
     assert sum(1 for e in driven.log.read() if e["type"] == "step_context") == 0
     check_golden("resume_step_context__codex", record(driven))
+
+
+@pytest.mark.anyio
+async def test_cross_session_terminal_type_and_payload_and_step_context(
+    tmp_path: Path,
+) -> None:
+    """AC #2(a) identical terminal type; (c) step_context exactly once; plus the
+    happy-path agent_result payload parity that test_three_runner_parity pinned."""
+    terminals, payloads = set(), []
+    for pair in PAIRS:
+        root = tmp_path / pair
+        root.mkdir()
+        driven = await run_scenario(pair, root, _happy_script(pair))
+        terminals.add(driven.control[-1]["type"])
+        payloads.append(driven.control[-1]["payload"])
+        assert sum(1 for e in driven.log.read()
+                   if e["type"] == "step_context") == 1
+    assert terminals == {"agent_result"}
+    assert all(p == _OK for p in payloads)
+
+
+def _repeated_invalid_script(pair: str):
+    n = DEFAULT_REPEAT_K + 2
+    if pair == "anthropic":
+        return [a_response(a_tool_use(f"c{i}", "complete_step", {"note": "no status"}))
+                for i in range(n)]
+    if pair == "openai":
+        return [resp_response(resp_function_call(
+                    f"c{i}", "complete_step", '{"note": "no status"}')) for i in range(n)]
+    if pair == "claude_code":
+        out = []
+        for i in range(n):
+            out += [cc_assistant(cc_tool_use(f"c{i}", "complete_step", {"note": "no status"})),
+                    cc_result()]
+        return out
+    return [[cx_start("thr-1"),
+             cx_call(name="complete_step", args={"note": "no status"}, result="x"),
+             cx_done()] for _ in range(n)]
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("pair", PAIRS)
+async def test_cross_session_error_kind_identical(pair: str, tmp_path: Path) -> None:
+    """AC #2(b): the same (category, kind) error pair across all four Sessions on
+    a shared error scenario (repeated malformed complete_step -> loop guard)."""
+    driven = await run_scenario(pair, tmp_path, _repeated_invalid_script(pair))
+    assert driven.control[-1]["type"] == "error"
+    assert (driven.control[-1]["payload"]["category"],
+            driven.control[-1]["payload"]["kind"]) == ("loop", "repeated_failure")
+    check_golden(f"repeated_invalid__{pair}", record(driven))
