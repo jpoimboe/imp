@@ -8,6 +8,8 @@ from pathlib import Path
 
 import pytest
 
+from imp.engine.completion import build_continuation_fn
+
 from tests.conformance_adapters import (
     OBSERVE,
     PAIRS,
@@ -173,3 +175,35 @@ async def test_invalid_then_recovers(pair: str, tmp_path: Path) -> None:
     assert log_types.count("output_validation_nudge") == 1
     assert "error" not in [e["type"] for e in driven.control]
     check_golden(f"invalid__{pair}", record(driven))
+
+
+def _park_script(pair: str):
+    if pair == "anthropic":
+        return [a_response(a_text("prose"), stop_reason="end_turn"),
+                a_response(a_text("prose"), stop_reason="end_turn")]
+    if pair == "openai":
+        return [resp_response(resp_message("prose")),
+                resp_response(resp_message("prose"))]
+    if pair == "claude_code":
+        return [cc_assistant(cc_text("prose")), cc_result(),
+                cc_assistant(cc_text("prose")), cc_result()]
+    return [[cx_start("thr-1"), cx_msg("prose"), cx_done()],
+            [cx_msg("prose"), cx_done()]]
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("pair", PAIRS)
+async def test_park_on_nudge_exhaustion(pair: str, tmp_path: Path) -> None:
+    from imp.engine.awaiting_user_input import AwaitingUserInput
+    from imp.engine.state import InMemoryEventLog
+
+    log = InMemoryEventLog()
+    # user_input_fn=None + has_schema=True: first bare turn gets the one-shot
+    # nudge, the second bare turn parks (raises AwaitingUserInput) — no human.
+    cont = build_continuation_fn(
+        user_input_fn=None, event_log=log, agent_id="step:p/s", has_schema=True)
+    driven = await run_scenario(
+        pair, tmp_path, _park_script(pair), event_log=log, continuation_fn=cont)
+    assert isinstance(driven.raised, AwaitingUserInput)
+    assert "agent_result" not in [e["type"] for e in driven.control]
+    check_golden(f"park__{pair}", record(driven))

@@ -1,0 +1,18 @@
+{
+  "agent_result": null,
+  "control_types": [],
+  "errors": [],
+  "log_types": [
+    "token_refresh",
+    "step_context",
+    "engine_message",
+    "agent_message",
+    "engine_message",
+    "engine_message",
+    "agent_message",
+    "awaiting_user_input"
+  ],
+  "raised": "AwaitingUserInput",
+  "step_context_count": 1,
+  "terminal": null
+}
