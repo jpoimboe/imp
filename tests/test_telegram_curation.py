@@ -84,6 +84,11 @@ def test_nonterminal_interrupt_error_is_dropped() -> None:
         "error", {"category": "config", "kind": "interrupted"}) is None
 
 
+def test_audit_error_is_dropped_not_buzzed() -> None:
+    assert imp_telegram.curate(
+        "error", {"category": "terminated", "kind": "budget_exhausted", "audit": True}) is None
+
+
 def test_errored_is_not_a_buzz_event_or_label() -> None:
     assert "errored" not in imp_telegram._BUZZ
     assert "errored" not in imp_telegram._EVENT_LABELS
