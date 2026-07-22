@@ -118,14 +118,13 @@ async def test_interject_reply_clears_waiting_halt(tmp_path: Path) -> None:
 
 
 def test_every_provider_call_forwards_halt_writer() -> None:
-    # Structural guard: each provider's _resolve_wait_reply call site and the
-    # claude-code steer must reference invocation.halt_writer, so a dropped
-    # forward is caught without a full provider round-trip.
-    import imp.providers.anthropic as a
+    # Structural guard: the wait-reply resolution must forward invocation.halt_writer.
+    # anthropic/openai share the PushSession base (their forwarding lives there once);
+    # codex_runner and claude_code forward directly.
     import imp.providers.claude_code as c
     import imp.providers.codex_runner as cx
-    import imp.providers.openai as o
-    for mod in (a, o, cx, c):
+    import imp.providers.push_session as ps
+    for mod in (ps, cx, c):
         assert "invocation.halt_writer" in inspect.getsource(mod), mod.__name__
 
 
@@ -138,12 +137,12 @@ def test_agent_invocation_has_halt_clearer_field() -> None:
 
 
 def test_every_provider_call_forwards_halt_clearer() -> None:
-    # Structural guard: each provider's _resolve_wait_reply call site and the
-    # claude-code steer must reference invocation.halt_clearer, mirroring the
-    # halt_writer guard, so a dropped forward is caught without a full round-trip.
-    import imp.providers.anthropic as a
+    # Structural guard: the wait-reply resolution must forward invocation.halt_clearer,
+    # mirroring the halt_writer guard, so a dropped forward is caught without a full round-trip.
+    # anthropic/openai share the PushSession base (their forwarding lives there once);
+    # codex_runner and claude_code forward directly.
     import imp.providers.claude_code as c
     import imp.providers.codex_runner as cx
-    import imp.providers.openai as o
-    for mod in (a, o, cx, c):
+    import imp.providers.push_session as ps
+    for mod in (ps, cx, c):
         assert "invocation.halt_clearer" in inspect.getsource(mod), mod.__name__

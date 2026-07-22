@@ -25,20 +25,33 @@ def anyio_backend():
     ("imp.providers.openai", "OpenAIAgentRunner"),
 ])
 @pytest.mark.anyio
-async def test_provider_run_reraises_subagent_suspended(provider_mod, runner_cls) -> None:
+async def test_provider_run_reraises_subagent_suspended(
+    provider_mod, runner_cls, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Each generator-based provider's outer run() must PROPAGATE
     SubagentSuspended, not swallow it into a classified error event.
     (Both runners share `__init__(model_name, *, client_factory=None,
-    user_input_fn=None)`; _run_loop is overridden so the client is never used.)"""
-    base = getattr(importlib.import_module(provider_mod), runner_cls)
+    user_input_fn=None)`; the inner loop is stubbed so the client is never used
+    — anthropic patches `run_agent_loop`, openai still patches `_run_loop`.)"""
+    mod = importlib.import_module(provider_mod)
+    base = getattr(mod, runner_cls)
+    runner = base(model_name="m")
+    inv = object.__new__(AgentInvocation)  # fields unused; the loop is stubbed
 
-    class _Runner(base):  # type: ignore[misc,valid-type]
-        async def _run_loop(self, invocation):
-            raise SubagentSuspended("nested pause")
-            yield  # makes this an async generator
+    async def _suspend(*_a, **_k):
+        raise SubagentSuspended("nested pause")
+        yield  # makes this an async generator
 
-    runner = _Runner(model_name="m")
-    inv = object.__new__(AgentInvocation)  # fields unused; _run_loop is stubbed
+    if runner_cls == "AnthropicAgentRunner":
+        # anthropic.run() delegates to run_agent_loop(invocation, session);
+        # AnthropicSession.__init__ only stores refs, so the uninitialized inv
+        # is never dereferenced before the patched loop raises. run()'s
+        # `except Exception` -> raise_if_suspended re-raises SubagentSuspended.
+        monkeypatch.setattr(mod, "run_agent_loop",
+                            lambda invocation, session: _suspend())
+    else:
+        monkeypatch.setattr(runner, "_run_loop", lambda _inv: _suspend())
+
     with pytest.raises(SubagentSuspended):
         async for _ in runner.run(inv):
             pass
