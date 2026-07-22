@@ -66,9 +66,20 @@ _POLICY: dict[str, _Policy] = {
     "api":                  _Policy(Pause, None),
     "loop":                 _Policy(Pause, None),
     "agent_output_missing": _Policy(RetryNow, None),
-    "terminated":           _Policy(Pause, None),
-    "unknown":              _Policy(Pause, None),
+    # Ambiguous transients: Pause when cold (prior_backoff_attempts == 0), but
+    # decide() upgrades them to a budgeted backoff retry once a transient window
+    # is already open. The 1800s budget bounds that window (matches network /
+    # rate_limit); decision stays Pause so is_retry_with_backoff reports False.
+    "terminated":           _Policy(Pause, 1800.0),
+    "unknown":              _Policy(Pause, 1800.0),
 }
+
+
+# Ambiguous categories a dying provider CLI most plausibly emits mid-outage.
+# Inside an open transient window they ride out rather than pausing; a genuine
+# interrupt/teardown is caught before classification (in drive_invocation), so
+# these are safe to auto-retry.
+_STICKY_CATEGORIES: frozenset[str] = frozenset({"terminated", "unknown"})
 
 
 def budget_for(category: str) -> float | None:
@@ -107,10 +118,13 @@ def decide(
     the caller — there is no attempt cap here.
     """
     policy = _POLICY.get(category)
-    if policy is None or policy.decision is Pause:
-        return Pause()
-    if policy.decision is RetryNow:
-        return RetryNow()
+    sticky = (
+        category in _STICKY_CATEGORIES and prior_backoff_attempts >= 1)
+    if not sticky:
+        if policy is None or policy.decision is Pause:
+            return Pause()
+        if policy.decision is RetryNow:
+            return RetryNow()
     delay = max(min(60.0, 2.0 ** prior_backoff_attempts), hint_delay_seconds or 0.0)
     hinted = (hint_delay_seconds or 0.0) > 60.0
     return RetryWithBackoff(delay, hinted=hinted)
