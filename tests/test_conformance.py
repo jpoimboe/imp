@@ -4,6 +4,7 @@ pinned to a committed golden captured from the pre-refactor runner."""
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -369,3 +370,34 @@ async def test_dangling_tool_use_repair_claude_code(tmp_path: Path) -> None:
     assert streamed[0]["message"]["content"][0]["type"] == "tool_result"
     assert streamed[0]["message"]["content"][0]["tool_use_id"] == "t1"
     check_golden("dangling__claude_code", record(driven))
+
+
+@pytest.mark.anyio
+async def test_resume_emits_no_step_context_codex(tmp_path: Path) -> None:
+    from imp.providers.codex_runner import CodexAgentRunner
+    from tests.codex_fakes import FakeCodex
+
+    # Seed a saved thread + rollout so balance_on_resume restores + resumes.
+    _runner_unused, inv = build("codex", tmp_path, [], balance_on_resume=True)
+    rel = "sessions/2026/06/05/rollout-2026-06-05T00-00-00-thr-resume-1.jsonl"
+    (tmp_path / "tx" / "codex_thread.json").write_text(
+        json.dumps({"thread_id": "thr-resume-1", "rollout_relpath": rel}))
+    saved = tmp_path / "tx" / "codex_rollout" / rel
+    saved.parent.mkdir(parents=True, exist_ok=True)
+    saved.write_text('{"id": "thr-resume-1"}\n')
+
+    scripted = [[
+        cx_start("thr-resume-1"),
+        cx_msg("resumed; calling complete_step"),
+        cx_call(name="complete_step", args=_OK, result="ok", item_id="cs-1"),
+        cx_done(input_tokens=1, output_tokens=1),
+    ]]
+    fake = FakeCodex(scripted_turns=scripted)
+    runner = CodexAgentRunner(
+        model_name="gpt-5.5", client_factory=lambda options=None: fake)
+    runner._canonical_auth_override = tmp_path / "auth.json"
+
+    driven = await drive(runner, inv)
+
+    assert sum(1 for e in driven.log.read() if e["type"] == "step_context") == 0
+    check_golden("resume_step_context__codex", record(driven))
