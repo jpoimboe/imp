@@ -318,3 +318,54 @@ async def test_fatal_tool_error_codex(tmp_path: Path, monkeypatch) -> None:
     assert driven.control[-1]["payload"]["category"] == "config"
     assert driven.control[-1]["payload"]["kind"] == "fatal_tool_error"
     check_golden("fatal__codex", record(driven))
+
+
+@pytest.mark.anyio
+async def test_dangling_tool_use_repair_claude_code(tmp_path: Path) -> None:
+    from imp.agents.runner import Message, TextBlock, ToolResultBlock, ToolUseBlock
+    from imp.agents.transcript import Transcript
+    from imp.engine.state import InMemoryEventLog
+    from imp.providers.claude_code import ClaudeCodeAgentRunner
+    from imp.providers.claude_code_session_store import resume_session_id
+    from tests.conformance_adapters import build, drive
+
+    (tmp_path / "art").mkdir(exist_ok=True)
+    log = InMemoryEventLog()
+    # Build inv via the adapter but supply our own capturing factory below.
+    _runner_unused, inv = build("claude_code", tmp_path, [], event_log=log,
+                                agent_id="step:p/s")
+    inv.transcript_dir.mkdir(parents=True, exist_ok=True)
+
+    t = Transcript(inv.transcript_dir / "transcript.jsonl")
+    t.append(Message(role="user", content=(TextBlock(text="go"),)))
+    t.append(Message(role="assistant", content=(
+        ToolUseBlock(id="t0", name="mcp__imp__read_file", input={"path": "a.txt"}),)))
+    t.append(Message(role="user", content=(
+        ToolResultBlock(tool_use_id="t0", content="ALPHA", is_error=False),)))
+    # Mid-tool interrupt: a bare assistant tool_use with NO tool_result.
+    t.append(Message(role="assistant", content=(
+        ToolUseBlock(id="t1", name="mcp__imp__read_file", input={"path": "b.txt"}),)))
+
+    from tests.cc_fakes import FakeClaudeSDKClient
+    scripted = [cc_assistant(cc_tool_use("c1", "complete_step", _OK)), cc_result()]
+    created: list[FakeClaudeSDKClient] = []
+
+    def factory(opts):
+        c = FakeClaudeSDKClient(opts, scripted_messages=scripted)
+        created.append(c)
+        return c
+
+    runner = ClaudeCodeAgentRunner(model_name="claude-sonnet-4-5", client_factory=factory)
+    driven = await drive(runner, inv)
+
+    # transcript_invalid abort did NOT fire; the run completed.
+    assert driven.control[-1]["type"] == "agent_result"
+    assert not any(e["type"] == "error"
+                   and e["payload"].get("kind") == "transcript_invalid"
+                   for e in driven.control)
+    assert created[0].opts.resume == resume_session_id("step:p/s")
+    # DANGLING native resume STREAMS a synth tool_result for t1.
+    streamed = created[0].queries[0]
+    assert streamed[0]["message"]["content"][0]["type"] == "tool_result"
+    assert streamed[0]["message"]["content"][0]["tool_use_id"] == "t1"
+    check_golden("dangling__claude_code", record(driven))

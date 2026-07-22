@@ -1,0 +1,20 @@
+{
+  "agent_result": {
+    "note": "ok",
+    "status": "Success"
+  },
+  "control_types": [
+    "agent_result"
+  ],
+  "errors": [],
+  "log_types": [
+    "token_refresh",
+    "tool_result",
+    "agent_message",
+    "tool_call",
+    "query_result"
+  ],
+  "raised": null,
+  "step_context_count": 0,
+  "terminal": "agent_result"
+}
