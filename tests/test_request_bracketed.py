@@ -138,3 +138,25 @@ async def test_partial_coordinator_lacking_methods_passes_through() -> None:
 
     got = [item async for item in request_bracketed(_PartialCoord(), _plain())]
     assert got == [1, 2]
+
+
+@pytest.mark.anyio
+async def test_closes_underlying_iterator_on_gen_aclose() -> None:
+    closed: list[bool] = []
+
+    class _Closable:
+        def __aiter__(self) -> _Closable:
+            return self
+
+        async def __anext__(self) -> int:
+            return 1
+
+        async def aclose(self) -> None:
+            closed.append(True)
+
+    gen = request_bracketed(None, _Closable())
+    first = await gen.__anext__()
+    assert first == 1
+    # Abandon consumption mid-stream, then close the request_bracketed generator.
+    await gen.aclose()
+    assert closed == [True]

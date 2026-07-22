@@ -226,8 +226,9 @@ class CodexAgentRunner:
     async def run(self, invocation: AgentInvocation) -> AsyncGenerator[Event, None]:
         try:
             try:
-                async for ev in self._run_loop(invocation):
-                    yield ev
+                async with contextlib.aclosing(self._run_loop(invocation)) as loop:
+                    async for ev in loop:
+                        yield ev
             except PreflightError as exc:
                 yield {"type": "error", "payload": {
                     "category": exc.category, "kind": "preflight",
@@ -408,13 +409,14 @@ class CodexAgentRunner:
                 codex_home=codex_home, bearer_token=bearer_token,
                 impty_bearer_token=(impty_bearer if impty_handle is not None
                                     else None))
-            async for ev in self._drive_turns(
+            async with contextlib.aclosing(self._drive_turns(
                 client=client, invocation=invocation, elog=elog,
                 aid=aid, ctx=ctx, state=state, proc_state=proc_state,
                 entry_snapshot=entry_snapshot, server_handle=server_handle,
                 codex_home=codex_home,
-            ):
-                yield ev
+            )) as turns:
+                async for ev in turns:
+                    yield ev
         finally:
             # 8. Lifecycle teardown — runs on EVERY exit (success, error,
             #    abort, interrupt, AND a ping/provision/seed failure). The
@@ -665,198 +667,199 @@ class CodexAgentRunner:
             need_nudge = False  # set when turn ends without complete_step
             handoff_turn_queued = False  # set when a Tier A handoff turn is queued
             nudge_requery = False  # set when a malformed complete_step re-drives
-            async for event in request_bracketed(
-                    invocation.coordinator, streamed.events):
-                # Dead-server poll: if the MCP server task has ended, bail
-                # immediately rather than letting codex's retry-loop be
-                # misread as "missing complete_step".
-                if server_handle.task.done():
-                    exc = (server_handle.task.exception()
-                           if not server_handle.task.cancelled() else None)
-                    yield {"type": "error", "payload": {
-                        "category": "network", "kind": "mcp_server_died",
-                        "message": "MCP server task ended mid-turn",
-                        "detail": {"server_error": str(exc) if exc else ""}}}
-                    return
-                if self._cancel:
-                    yield {"type": "error", "payload": {
-                        "category": "config", "kind": "interrupted",
-                        "message": "runner cancelled by interrupt"}}
-                    return
-                if invocation.coordinator is not None:
-                    invocation.coordinator.note_activity()
-                # Post-API-site analog (Decision 10): one sweep per streamed
-                # SDK event. Dead-server/cancel checks stay first.
-                await _bg._sweep_bg(ctx)
-                etype = getattr(event, "type", None)
-                process_event(event, elog=elog, agent_id=aid, state=proc_state,
-                              provider=invocation.provider_name,
-                              model=self.model, run_state=state,
-                              subagent_defs=invocation.subagent_defs)
-
-                # Cap trip from inside the MCP wrapper → abort the SDK + bail.
-                if state.abort_requested:
-                    if self._abort_controller is not None:
-                        with contextlib.suppress(Exception):
-                            self._abort_controller.abort()
-                    await terminate_running_processes(ctx)
-                    yield {"type": "error", "payload": {
-                        "category": "config",
-                        "kind": "tool_call_ceiling_exceeded",
-                        "ceiling": state.cap,
-                        "message":
-                            f"codex tool dispatch cap ({state.cap}) "
-                            f"exceeded"}}
-                    return
-
-                if state.fatal_tool_error is not None:
-                    if self._abort_controller is not None:
-                        with contextlib.suppress(Exception):
-                            self._abort_controller.abort()
-                    tool_name, msg = state.fatal_tool_error
-                    # Same payload shape as claude_code.py fatal_tool_error:
-                    # `tool` at the top level, `message` is the raw fatal-tool
-                    # message.
-                    yield {"type": "error", "payload": {
-                        "category": "config", "kind": "fatal_tool_error",
-                        "tool": tool_name, "message": msg}}
-                    return
-
-                # Drain any bash kills detected by the MCP wrapper (non-terminal).
-                # tool_killed is an AUDIT event — persisted once via elog.append,
-                # NOT yielded. drive_invocation re-appends every yielded event to
-                # the same log, so yielding would cause a double-write.
-                while state.killed_tool_uses:
-                    info = state.killed_tool_uses.pop(0)
-                    elog.append(agent_id=aid, type="tool_killed", payload=info)
-
-                # Native-tool violation → fail-closed. AC #18: unconditional
-                # revert + bail.
-                if proc_state.get("native_violation") is not None:
-                    detail = proc_state["native_violation"]
-                    restore_to_snapshot(ctx.project_root, entry_snapshot)
-                    yield {"type": "error", "payload": {
-                        "category": "config", "kind": "native_tool_violation",
-                        "message": (
-                            f"codex used a native {detail['kind']} tool; "
-                            "worktree reverted to entry state."),
-                        "detail": {**detail, "kept_bytes": False}}}
-                    return
-
-                # Mirror complete_step_args from the shared state into
-                # proc_state so the across-turn check below sees them at the
-                # next boundary.
-                if state.complete_step_called:
-                    proc_state["complete_step_called"] = True
-                    proc_state["complete_step_args"] = dict(
-                        state.complete_step_args)
-
-                # turn.failed → categorize + bail.
-                if etype == "turn.failed":
-                    exc = categorize_turn_failed(
-                        getattr(event, "error", {}) or {})
-                    yield perr.make_error_event(exc)
-                    return
-
-                if etype == "turn.completed":
-                    if not proc_state.get("complete_step_called"):
-                        # Only NON-complete turns are observed here. A malformed
-                        # complete_step turn is fed to the guard exactly once by
-                        # validate_output_or_nudge below (as non-progress);
-                        # observing has_complete_step=True here would reset the
-                        # streak and the malformed loop would never trip.
-                        record = TurnRecord(
-                            assistant_text=proc_state.get("last_agent_text", "")
-                            or "",
-                            tools=list(proc_state.get("turn_tool_outcomes", [])),
-                            has_complete_step=False,
-                        )
-                        loop_err = guard.observe(record)
-                        if loop_err is not None:
-                            yield perr.make_error_event(
-                                loop_err, kind=getattr(loop_err, "kind", ""))
-                            return
-                    if handoff_phase == "instruction_sent":
-                        # Handoff wins over a stray complete_step on this turn.
-                        write_handoff_note(handoff_path, proc_state.get("last_agent_text", ""))
-                        yield {"type": "handoff",
-                               "payload": {"handoff_path": str(handoff_path)}}
+            async with contextlib.aclosing(request_bracketed(
+                    invocation.coordinator, streamed.events)) as _events:
+                async for event in _events:
+                    # Dead-server poll: if the MCP server task has ended, bail
+                    # immediately rather than letting codex's retry-loop be
+                    # misread as "missing complete_step".
+                    if server_handle.task.done():
+                        exc = (server_handle.task.exception()
+                               if not server_handle.task.cancelled() else None)
+                        yield {"type": "error", "payload": {
+                            "category": "network", "kind": "mcp_server_died",
+                            "message": "MCP server task ended mid-turn",
+                            "detail": {"server_error": str(exc) if exc else ""}}}
                         return
-                    if proc_state.get("complete_step_called"):
-                        args = proc_state.get("complete_step_args") or {}
-                        res = validate_output_or_nudge(
-                            args, invocation.agent_def.output_schema, guard)
-                        if isinstance(res, Ok):
-                            if res.recovered is not None:
-                                ev = make_recovery_event(res)
+                    if self._cancel:
+                        yield {"type": "error", "payload": {
+                            "category": "config", "kind": "interrupted",
+                            "message": "runner cancelled by interrupt"}}
+                        return
+                    if invocation.coordinator is not None:
+                        invocation.coordinator.note_activity()
+                    # Post-API-site analog (Decision 10): one sweep per streamed
+                    # SDK event. Dead-server/cancel checks stay first.
+                    await _bg._sweep_bg(ctx)
+                    etype = getattr(event, "type", None)
+                    process_event(event, elog=elog, agent_id=aid, state=proc_state,
+                                  provider=invocation.provider_name,
+                                  model=self.model, run_state=state,
+                                  subagent_defs=invocation.subagent_defs)
+
+                    # Cap trip from inside the MCP wrapper → abort the SDK + bail.
+                    if state.abort_requested:
+                        if self._abort_controller is not None:
+                            with contextlib.suppress(Exception):
+                                self._abort_controller.abort()
+                        await terminate_running_processes(ctx)
+                        yield {"type": "error", "payload": {
+                            "category": "config",
+                            "kind": "tool_call_ceiling_exceeded",
+                            "ceiling": state.cap,
+                            "message":
+                                f"codex tool dispatch cap ({state.cap}) "
+                                f"exceeded"}}
+                        return
+
+                    if state.fatal_tool_error is not None:
+                        if self._abort_controller is not None:
+                            with contextlib.suppress(Exception):
+                                self._abort_controller.abort()
+                        tool_name, msg = state.fatal_tool_error
+                        # Same payload shape as claude_code.py fatal_tool_error:
+                        # `tool` at the top level, `message` is the raw fatal-tool
+                        # message.
+                        yield {"type": "error", "payload": {
+                            "category": "config", "kind": "fatal_tool_error",
+                            "tool": tool_name, "message": msg}}
+                        return
+
+                    # Drain any bash kills detected by the MCP wrapper (non-terminal).
+                    # tool_killed is an AUDIT event — persisted once via elog.append,
+                    # NOT yielded. drive_invocation re-appends every yielded event to
+                    # the same log, so yielding would cause a double-write.
+                    while state.killed_tool_uses:
+                        info = state.killed_tool_uses.pop(0)
+                        elog.append(agent_id=aid, type="tool_killed", payload=info)
+
+                    # Native-tool violation → fail-closed. AC #18: unconditional
+                    # revert + bail.
+                    if proc_state.get("native_violation") is not None:
+                        detail = proc_state["native_violation"]
+                        restore_to_snapshot(ctx.project_root, entry_snapshot)
+                        yield {"type": "error", "payload": {
+                            "category": "config", "kind": "native_tool_violation",
+                            "message": (
+                                f"codex used a native {detail['kind']} tool; "
+                                "worktree reverted to entry state."),
+                            "detail": {**detail, "kept_bytes": False}}}
+                        return
+
+                    # Mirror complete_step_args from the shared state into
+                    # proc_state so the across-turn check below sees them at the
+                    # next boundary.
+                    if state.complete_step_called:
+                        proc_state["complete_step_called"] = True
+                        proc_state["complete_step_args"] = dict(
+                            state.complete_step_args)
+
+                    # turn.failed → categorize + bail.
+                    if etype == "turn.failed":
+                        exc = categorize_turn_failed(
+                            getattr(event, "error", {}) or {})
+                        yield perr.make_error_event(exc)
+                        return
+
+                    if etype == "turn.completed":
+                        if not proc_state.get("complete_step_called"):
+                            # Only NON-complete turns are observed here. A malformed
+                            # complete_step turn is fed to the guard exactly once by
+                            # validate_output_or_nudge below (as non-progress);
+                            # observing has_complete_step=True here would reset the
+                            # streak and the malformed loop would never trip.
+                            record = TurnRecord(
+                                assistant_text=proc_state.get("last_agent_text", "")
+                                or "",
+                                tools=list(proc_state.get("turn_tool_outcomes", [])),
+                                has_complete_step=False,
+                            )
+                            loop_err = guard.observe(record)
+                            if loop_err is not None:
+                                yield perr.make_error_event(
+                                    loop_err, kind=getattr(loop_err, "kind", ""))
+                                return
+                        if handoff_phase == "instruction_sent":
+                            # Handoff wins over a stray complete_step on this turn.
+                            write_handoff_note(handoff_path, proc_state.get("last_agent_text", ""))
+                            yield {"type": "handoff",
+                                   "payload": {"handoff_path": str(handoff_path)}}
+                            return
+                        if proc_state.get("complete_step_called"):
+                            args = proc_state.get("complete_step_args") or {}
+                            res = validate_output_or_nudge(
+                                args, invocation.agent_def.output_schema, guard)
+                            if isinstance(res, Ok):
+                                if res.recovered is not None:
+                                    ev = make_recovery_event(res)
+                                    elog.append(agent_id=aid, type=ev["type"],
+                                                payload=ev["payload"])
+                                yield {"type": "agent_result", "payload": res.payload}
+                                return
+                            if isinstance(res, Nudge):
+                                ev = make_nudge_event(res)
                                 elog.append(agent_id=aid, type=ev["type"],
                                             payload=ev["payload"])
-                            yield {"type": "agent_result", "payload": res.payload}
+                                elog.append_engine_message(
+                                    agent_id=aid,
+                                    message=Message(
+                                        role="user",
+                                        content=(TextBlock(text=res.message),)),
+                                    subtype="continuation")
+                                # Re-drive this session with the nudge as the next
+                                # prompt (per-turn proc_state reset at the loop top
+                                # clears the stale capture).
+                                next_prompt = res.message
+                                nudge_requery = True
+                                break
+                            # LoopError: pause-to-human.
+                            yield perr.make_error_event(
+                                res, kind=getattr(res, "kind", ""))
                             return
-                        if isinstance(res, Nudge):
-                            ev = make_nudge_event(res)
-                            elog.append(agent_id=aid, type=ev["type"],
-                                        payload=ev["payload"])
+                        # Tier A watch: this turn crossed the checkpoint threshold
+                        # while still working (no complete_step). Inject the
+                        # handoff instruction as the next turn prompt and capture
+                        # the note on the following turn.
+                        if (handoff_phase is None
+                                and invocation.checkpoint_threshold is not None
+                                and context_threshold_crossed(
+                                    proc_state.get("pending_usage"), self.model,
+                                    invocation.checkpoint_threshold)):
+                            instr = handoff_instruction(handoff_path)
                             elog.append_engine_message(
                                 agent_id=aid,
-                                message=Message(
-                                    role="user",
-                                    content=(TextBlock(text=res.message),)),
+                                message=Message(role="user",
+                                                content=(TextBlock(text=instr),)),
                                 subtype="continuation")
-                            # Re-drive this session with the nudge as the next
-                            # prompt (per-turn proc_state reset at the loop top
-                            # clears the stale capture).
-                            next_prompt = res.message
-                            nudge_requery = True
+                            next_prompt = instr
+                            handoff_phase = "instruction_sent"
+                            handoff_turn_queued = True
                             break
-                        # LoopError: pause-to-human.
-                        yield perr.make_error_event(
-                            res, kind=getattr(res, "kind", ""))
+                        # Not captured: classified provider-error text wins over
+                        # both nudge and `no_complete_step`. Auth/quota substrings
+                        # must short-circuit nudge attempts (a nudge to a quota'd
+                        # account just burns more).
+                        last_text = proc_state.get("last_agent_text", "") or ""
+                        from imp.providers.claude_code import _classify_agent_text
+                        classified = _classify_agent_text(last_text)
+                        if classified is not None:
+                            yield perr.make_error_event(
+                                classified, kind=getattr(classified, "kind", ""))
+                            return
+                        if invocation.subagent_depth > 0:
+                            if last_text:
+                                yield {"type": "agent_result",
+                                       "payload": {"text": last_text}}
+                            return
+                        # Turn ended without complete_step. If a continuation_fn is
+                        # wired, cross to the outer loop for the autonomous nudge.
+                        if invocation.continuation_fn is not None:
+                            need_nudge = True
+                            break  # exit inner for; outer while handles nudge
+                        # No continuation_fn (degenerate top-level): the inline return
+                        # below ends the run, and drive_invocation surfaces the
+                        # errored (no agent_result) result.
                         return
-                    # Tier A watch: this turn crossed the checkpoint threshold
-                    # while still working (no complete_step). Inject the
-                    # handoff instruction as the next turn prompt and capture
-                    # the note on the following turn.
-                    if (handoff_phase is None
-                            and invocation.checkpoint_threshold is not None
-                            and context_threshold_crossed(
-                                proc_state.get("pending_usage"), self.model,
-                                invocation.checkpoint_threshold)):
-                        instr = handoff_instruction(handoff_path)
-                        elog.append_engine_message(
-                            agent_id=aid,
-                            message=Message(role="user",
-                                            content=(TextBlock(text=instr),)),
-                            subtype="continuation")
-                        next_prompt = instr
-                        handoff_phase = "instruction_sent"
-                        handoff_turn_queued = True
-                        break
-                    # Not captured: classified provider-error text wins over
-                    # both nudge and `no_complete_step`. Auth/quota substrings
-                    # must short-circuit nudge attempts (a nudge to a quota'd
-                    # account just burns more).
-                    last_text = proc_state.get("last_agent_text", "") or ""
-                    from imp.providers.claude_code import _classify_agent_text
-                    classified = _classify_agent_text(last_text)
-                    if classified is not None:
-                        yield perr.make_error_event(
-                            classified, kind=getattr(classified, "kind", ""))
-                        return
-                    if invocation.subagent_depth > 0:
-                        if last_text:
-                            yield {"type": "agent_result",
-                                   "payload": {"text": last_text}}
-                        return
-                    # Turn ended without complete_step. If a continuation_fn is
-                    # wired, cross to the outer loop for the autonomous nudge.
-                    if invocation.continuation_fn is not None:
-                        need_nudge = True
-                        break  # exit inner for; outer while handles nudge
-                    # No continuation_fn (degenerate top-level): the inline return
-                    # below ends the run, and drive_invocation surfaces the
-                    # errored (no agent_result) result.
-                    return
             # Stream ended (possibly silently) after a cancel without the
             # in-loop check firing — classify it as a clean interrupt.
             if self._is_cancelled():

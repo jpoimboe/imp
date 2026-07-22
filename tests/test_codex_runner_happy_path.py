@@ -423,3 +423,192 @@ async def test_codex_bridges_stderr_warning_into_runner_warning(
     assert any(
         e["payload"]["message"] == "codex stderr: Warning: nested config drift detected"
         for e in warns), warns
+
+
+@pytest.mark.anyio
+async def test_codex_run_aclose_cascades_to_run_loop(tmp_path: Path) -> None:
+    """Closing run() mid-stream must synchronously close the inner _run_loop
+    generator (contextlib.aclosing), not abandon it to GC finalization."""
+    closed: list[bool] = []
+
+    async def _fake_loop(invocation: object):  # type: ignore[no-untyped-def]
+        try:
+            yield {"type": "a"}
+            yield {"type": "b"}
+        finally:
+            closed.append(True)
+
+    runner = CodexAgentRunner(model_name="gpt-5.5")
+    runner._run_loop = _fake_loop  # type: ignore[assignment]  # test seam: bypass preflight/MCP
+
+    gen = runner.run(_build_invocation(tmp_path))
+    first = await gen.__anext__()
+    assert first == {"type": "a"}
+    await gen.aclose()
+    # Deterministic: the finally ran INSIDE aclose(), not on a later GC pass.
+    assert closed == [True]
+
+
+@pytest.mark.anyio
+async def test_run_loop_aclose_cascades_to_drive_turns(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Closing run() mid-stream must synchronously close the inner _drive_turns
+    generator via _run_loop's contextlib.aclosing wrapper (site 2).
+
+    All heavy preflight seams are monkeypatched to lightweight in-memory fakes so
+    no real MCP server, socket, subprocess, or filesystem access is needed.
+    runner._drive_turns is replaced with a fake async generator whose finally
+    records closure; the test asserts that finally ran deterministically inside
+    gen.aclose(), not on a later GC pass.
+    """
+    from imp.engine.state import InMemoryEventLog
+    from imp.providers.codex_runner import EntrySnapshot
+
+    drive_turns_closed: list[bool] = []
+
+    async def _fake_drive_turns(**_kw: object) -> object:  # type: ignore[misc]
+        try:
+            yield {"type": "from_drive_turns"}
+        finally:
+            drive_turns_closed.append(True)
+
+    class _FakeServerHandle:
+        url = "http://127.0.0.1:1"
+        host = "127.0.0.1"
+        port = 1
+
+        async def shutdown(self) -> None:
+            pass
+
+    class _FakeStderrSink:
+        def close(self) -> None:
+            pass
+
+        def tail(self) -> str:
+            return ""
+
+    async def _fake_start_server(**_kw: object) -> _FakeServerHandle:
+        return _FakeServerHandle()
+
+    async def _fake_ping(**_kw: object) -> None:
+        pass
+
+    import imp.providers.codex_runner as _cr
+    import imp.providers.stderr_sink as _ss
+
+    monkeypatch.setattr(_cr, "preflight", lambda **_kw: "api_key")
+    monkeypatch.setattr(_cr, "quest_scratch_root", lambda: tmp_path)
+    monkeypatch.setattr(_cr, "sweep_stale_codex_homes", lambda **_kw: None)
+    monkeypatch.setattr(_cr, "take_snapshot", lambda _cwd: EntrySnapshot(stash_sha=""))
+    monkeypatch.setattr(_cr, "start_server", _fake_start_server)
+    monkeypatch.setattr(_ss, "build_stderr_sink", lambda *_a, **_kw: _FakeStderrSink())
+    monkeypatch.setattr(_cr, "_ping_mcp_server", _fake_ping)
+    monkeypatch.setattr(_cr, "provision_codex_home", lambda **_kw: tmp_path / "ch")
+    monkeypatch.setattr(_cr, "seed_auth", lambda **_kw: None)
+    monkeypatch.setattr(_cr, "teardown_codex_home", lambda **_kw: None)
+
+    elog = InMemoryEventLog()
+    inv = _build_invocation(tmp_path, event_log=elog)
+    runner = CodexAgentRunner(model_name="gpt-5.5")
+    runner._canonical_auth_override = tmp_path / "auth.json"
+    runner._client_factory = lambda options=None: object()
+    runner._drive_turns = _fake_drive_turns  # type: ignore[assignment]
+
+    gen = runner.run(inv)
+    first = await gen.__anext__()
+    assert first == {"type": "from_drive_turns"}
+    await gen.aclose()
+    # Deterministic: aclosing(_drive_turns) in _run_loop closed it inside aclose().
+    assert drive_turns_closed == [True]
+
+
+@pytest.mark.anyio
+async def test_drive_turns_aclose_cascades_to_events(tmp_path: Path) -> None:
+    """Closing _drive_turns mid-stream must synchronously aclose() the inner
+    request_bracketed(streamed.events) generator via the aclosing wrapper at
+    codex_runner.py:670 — proving the site-3 cascade.
+
+    Mechanism: _drive_turns yields the mcp_server_died error (dead-server check
+    at line 676), suspending at line 679 INSIDE the
+    `async with aclosing(request_bracketed(...)) as _events` block with _events
+    still open. gen.aclose() throws GeneratorExit there; the aclosing
+    wrapper's __aexit__ deterministically calls _events.aclose() →
+    request_bracketed.finally → streamed.events.aclose().
+
+    Falsifiable: without the aclosing wrapper, async-for does not auto-close its
+    iterator on GeneratorExit, so aclose_called stays [] and the test fails.
+    """
+    import types
+
+    from imp.agents.tools.context import ToolContext
+    from imp.engine.state import InMemoryEventLog
+    from imp.providers.codex_mcp import RunState
+    from imp.providers.codex_runner import EntrySnapshot
+
+    aclose_called: list[bool] = []
+
+    class _FakeEvents:
+        def __aiter__(self) -> _FakeEvents:
+            return self
+
+        async def __anext__(self) -> object:
+            return types.SimpleNamespace(type="thread.started")
+
+        async def aclose(self) -> None:
+            aclose_called.append(True)
+
+    class _FakeThread:
+        async def run_streamed(
+            self, prompt: object, options: object = None,
+        ) -> object:
+            class _Streamed:
+                events = _FakeEvents()
+
+            return _Streamed()
+
+    class _FakeClient:
+        def start_thread(self, options: object = None) -> _FakeThread:
+            return _FakeThread()
+
+    class _FakeTask:
+        def done(self) -> bool:
+            return True
+
+        def cancelled(self) -> bool:
+            return False
+
+        def exception(self) -> object:
+            return None
+
+    class _FakeServerHandle:
+        task = _FakeTask()
+
+    elog = InMemoryEventLog()
+    inv = _build_invocation(tmp_path, event_log=elog)
+    runner = CodexAgentRunner(model_name="gpt-5.5")
+
+    gen = runner._drive_turns(
+        client=_FakeClient(),
+        invocation=inv,
+        elog=elog,
+        aid="step:t",
+        ctx=ToolContext(project_root=tmp_path, events_path=tmp_path / "events.jsonl"),
+        state=RunState(cap=1000, agent_id="step:t"),
+        proc_state={},
+        entry_snapshot=EntrySnapshot(stash_sha=""),
+        server_handle=_FakeServerHandle(),
+        codex_home=tmp_path,
+    )
+    # Pull the first event: _drive_turns enters the async for, gets one event
+    # from _FakeEvents, hits the dead-server check (server_handle.task.done()),
+    # and yields the mcp_server_died error — suspending at line 679 inside the
+    # aclosing(request_bracketed(...)) block with _events still open.
+    first = await gen.__anext__()
+    assert first["type"] == "error"
+    assert first["payload"]["kind"] == "mcp_server_died"
+
+    # gen.aclose() throws GeneratorExit at the suspended yield; the aclosing
+    # wrapper calls _events.aclose() → request_bracketed.finally → leaf.aclose().
+    await gen.aclose()
+    assert aclose_called == [True]
