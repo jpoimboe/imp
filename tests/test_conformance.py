@@ -74,3 +74,39 @@ async def test_happy_path(pair: str, tmp_path: Path) -> None:
     assert {"step_context", "engine_message", "agent_message"} <= log_type_set
     assert sum(1 for e in driven.log.read() if e["type"] == "step_context") == 1
     check_golden(f"happy__{pair}", record(driven))
+
+
+def _multiround_script(pair: str):
+    if pair == "anthropic":
+        return [a_response(a_tool_use("u1", "read_file", {"path": "/project/data.txt"})),
+                a_response(a_tool_use("c1", "complete_step", _OK))]
+    if pair == "openai":
+        return [resp_response(resp_function_call(
+                    "u1", "read_file", '{"path": "/project/data.txt"}')),
+                resp_response(resp_function_call(
+                    "c1", "complete_step", '{"status": "Success", "note": "ok"}'))]
+    if pair == "claude_code":
+        # Both tool calls are in one SDK session (one receive_response() call):
+        # read_file observed first, then complete_step terminates the session.
+        return [cc_assistant(cc_tool_use("u1", "read_file", {"path": "/project/data.txt"})),
+                cc_assistant(cc_tool_use("c1", "complete_step", _OK)),
+                cc_result()]
+    # codex: both MCP calls in one run_streamed() turn; no continuation_fn needed.
+    return [[cx_start("thr-1"),
+             cx_call(name="read_file", args={"path": "/project/data.txt"},
+                     result="payload", item_id="u1"),
+             cx_call(name="complete_step", args=_OK, result="ok", item_id="cs-1"),
+             cx_done()]]
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("pair", PAIRS)
+async def test_multi_round_tools(pair: str, tmp_path: Path) -> None:
+    driven = await run_scenario(
+        pair, tmp_path, _multiround_script(pair),
+        tools=frozenset({"complete_step", "read_file"}))
+    assert driven.control[-1]["type"] == "agent_result"
+    assert driven.control[-1]["payload"] == _OK
+    log_types = [e["type"] for e in driven.log.read()]
+    assert log_types.count("tool_call") >= 2  # read_file round + complete_step
+    check_golden(f"multiround__{pair}", record(driven))

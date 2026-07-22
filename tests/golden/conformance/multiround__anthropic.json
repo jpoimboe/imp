@@ -1,0 +1,23 @@
+{
+  "agent_result": {
+    "note": "ok",
+    "status": "Success"
+  },
+  "control_types": [
+    "agent_result"
+  ],
+  "errors": [],
+  "log_types": [
+    "step_context",
+    "engine_message",
+    "engine_message",
+    "agent_message",
+    "tool_call",
+    "tool_result",
+    "agent_message",
+    "tool_call"
+  ],
+  "raised": null,
+  "step_context_count": 1,
+  "terminal": "agent_result"
+}
