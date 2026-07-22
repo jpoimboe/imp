@@ -3188,6 +3188,281 @@ async def test_step_reincarnates_on_context_window_then_pauses_at_cap(tmp_path):
 
 
 @pytest.mark.anyio
+async def test_resume_resets_reincarnation_budget(tmp_path):
+    """A step whose reincarnation counter is AT the cap, resumed by a
+    human/process (resume_pending set at process entry), re-enters with a FRESH
+    budget: it can reincarnate again instead of immediately re-pausing at the cap."""
+    from imp.providers import resolve
+
+    quest, phase, step = _seed_minimal_workflow(tmp_path)
+    (tmp_path / "imp" / "project.yaml").write_text(
+        "default-workflow: imp\ncontext:\n  max_reincarnations: 1\n")
+
+    key = f"step:{phase}/{step}"
+    state = State.load(quest.state_dir)
+    state.step = step
+    state.has_started = True
+    state.resume_pending = step           # a prior process paused here
+    state.reincarnations = {key: 1}       # already AT the cap (max == 1)
+    state.save(quest.state_dir)
+
+    calls = {"n": 0}
+
+    class _Runner:
+        async def run(self, invocation: AgentInvocation) -> AsyncIterator[Event]:
+            _persist_initial(invocation)
+            calls["n"] += 1
+            if calls["n"] == 1:
+                yield {"type": "error", "payload": {
+                    "category": "context_window", "kind": "prompt_too_long",
+                    "message": "prompt is too long"}}
+            else:
+                yield {"type": "agent_result",
+                       "payload": {"outcome": "ok", "status": "Success"}}
+
+        async def interrupt(self) -> None:
+            pass
+
+    class _Provider:
+        name = "fake"
+
+        def __init__(self, model: str = "m") -> None:
+            self.model = model
+
+        def create_runner(self, invocation: AgentInvocation) -> _Runner:
+            return _Runner()
+
+    resolve.reset_providers_for_tests()
+    resolve.register_provider(
+        "fake", env_check=lambda: True, factory=lambda model: _Provider(model))
+
+    events: list[dict] = []
+    result = await run_quest(quest, on_event=events.append)
+
+    reincarnating = [e for e in events if e["type"] == "reincarnating"]
+    assert len(reincarnating) == 1        # fresh budget allowed one reincarnation
+    assert result is RunResult.COMPLETED  # succeeded on the reborn session
+
+
+@pytest.mark.anyio
+async def test_reincarnation_cap_still_fires_without_resume(tmp_path):
+    """Absent a human/process resume (fresh run, resume_pending unset), the cap
+    is unchanged: a step under persistent context pressure reincarnates up to
+    max_reincarnations, then pauses — no spurious reset, counter retained at cap."""
+    from imp.providers import resolve
+
+    quest, phase, step = _seed_minimal_workflow(tmp_path)
+    (tmp_path / "imp" / "project.yaml").write_text(
+        "default-workflow: imp\ncontext:\n  max_reincarnations: 1\n")
+    key = f"step:{phase}/{step}"
+
+    class _Runner:
+        async def run(self, invocation: AgentInvocation) -> AsyncIterator[Event]:
+            _persist_initial(invocation)
+            yield {"type": "error", "payload": {
+                "category": "context_window", "kind": "prompt_too_long",
+                "message": "prompt is too long"}}
+
+        async def interrupt(self) -> None:
+            pass
+
+    class _Provider:
+        name = "fake"
+
+        def __init__(self, model: str = "m") -> None:
+            self.model = model
+
+        def create_runner(self, invocation: AgentInvocation) -> _Runner:
+            return _Runner()
+
+    resolve.reset_providers_for_tests()
+    resolve.register_provider(
+        "fake", env_check=lambda: True, factory=lambda model: _Provider(model))
+
+    events: list[dict] = []
+    result = await run_quest(quest, on_event=events.append)
+
+    assert result is RunResult.PAUSED
+    reincarnating = [e for e in events if e["type"] == "reincarnating"]
+    assert len(reincarnating) == 1                       # exactly the cap, then pause
+    assert State.load(quest.state_dir).reincarnation_count(key) == 1  # NOT reset
+
+
+@pytest.mark.anyio
+async def test_resume_reincarnation_reset_is_single_shot(tmp_path):
+    """The resume reset fires EXACTLY once per process (process-entry dispatch of
+    the resumed step); a later in-process re-arm (a workflow `resume:` edge — the
+    same arm_step_resume the clean-tree bounce uses) does NOT re-trigger it.
+
+    A genuine resume enters `w` with the counter at the cap; the process-entry
+    reset zeroes it; `w` reincarnates once (counter -> 1); a `resume: w` edge
+    re-enters `w` at the loop top. The counter observed at each `w` invocation
+    must be [0, 1, 1]: 0 proves the entry reset fired, and the final 1 proves the
+    in-process re-arm did NOT re-fire it (a per-iteration or is_resume-gated reset
+    would observe 0 there)."""
+    from imp.providers import resolve
+
+    wf = tmp_path / "imp" / "workflows" / "imp"
+    (wf / "agents").mkdir(parents=True)
+    (wf / "agents" / "w.md").write_text(
+        "---\nname: w\ntools: [complete_step]\n"
+        "output:\n  status: {type: enum, values: [Success, Error]}\n---\ngo\n"
+    )
+    (wf / "workflow.yaml").write_text(
+        "name: t\ndescription: t\n"
+        "vars: {resumed: {type: bool, default: false}}\n"
+        "defaults: {max_retries: 1, max_loops: 6}\n"
+        "phases:\n"
+        "  - name: work\n"
+        "    steps:\n"
+        "      - name: w\n"
+        "        file: agents/w.md\n"
+        "        tier: low\n"
+        "        rules:\n"
+        "          - {else: true, continue: true}\n"
+        "      - name: route\n"
+        "        rules:\n"
+        "          - {if: 'resumed', continue: true}\n"
+        "          - {else: true, resume: w, set: {resumed: true}}\n"
+        "  - name: done\n"
+        "    steps: []\n"
+    )
+    (tmp_path / "imp" / "project.yaml").write_text("default-workflow: imp\n")
+    (tmp_path / ".imp").mkdir(parents=True, exist_ok=True)
+    (tmp_path / ".imp" / "config.yaml").write_text(
+        "providers: [fake]\ntiers:\n  low: {fake: m}\n"
+        "  medium: {fake: m}\n  high: {fake: m}\n")
+    quest = _make_quest(tmp_path)
+
+    key = "step:work/w"
+    state = State.load(quest.state_dir)
+    state.step = "w"
+    state.has_started = True
+    state.resume_pending = "w"            # a prior process paused here
+    state.reincarnations = {key: 2}       # at the default cap (max_reincarnations == 2)
+    state.save(quest.state_dir)
+
+    recorded: list[int] = []
+
+    class _Runner:
+        def __init__(self, invocation: AgentInvocation) -> None:
+            self._name = invocation.agent_def.name
+
+        async def run(self, invocation: AgentInvocation) -> AsyncIterator[Event]:
+            _persist_initial(invocation)
+            if self._name == "w":
+                recorded.append(State.load(quest.state_dir).reincarnation_count(key))
+                if len(recorded) == 1:
+                    yield {"type": "error", "payload": {
+                        "category": "context_window", "kind": "prompt_too_long",
+                        "message": "prompt is too long"}}
+                    return
+            yield {"type": "agent_result",
+                   "payload": {"outcome": "ok", "status": "Success"}}
+
+        async def interrupt(self) -> None:
+            pass
+
+    class _Provider:
+        name = "fake"
+
+        def __init__(self, model: str = "m") -> None:
+            self.model = model
+
+        def create_runner(self, invocation: AgentInvocation) -> _Runner:
+            return _Runner(invocation)
+
+    resolve.reset_providers_for_tests()
+    resolve.register_provider(
+        "fake", env_check=lambda: True, factory=lambda model: _Provider(model))
+
+    result = await run_quest(quest, on_event=lambda _e: None)
+
+    assert result is RunResult.COMPLETED
+    assert recorded == [0, 1, 1], recorded
+
+
+@pytest.mark.anyio
+async def test_clean_tree_bounce_does_not_refill_reincarnation_budget(tmp_path):
+    """A step that carries reincarnation consumption and then completes with a
+    dirty worktree (triggering a Goto(resume=True) clean-tree bounce) does NOT get
+    its reincarnation counter reset by the bounce: across the bounce the counter
+    stays put. The bounce re-arms resume_pending mid-run, but the process-entry
+    capture saw resume_pending unset, so the reset never fires."""
+    from imp.providers import resolve
+    from tests.conftest import _git, _seed_control
+
+    _seed_control(tmp_path)
+    wf = tmp_path / "imp" / "workflows" / "imp"
+    (wf / "agents" / "editor.md").write_text(
+        "---\nname: editor\ntools: [complete_step]\n"
+        "output:\n  status: {type: enum, values: [Success, Error]}\n---\ngo\n"
+    )
+    (wf / "workflow.yaml").write_text(
+        "name: t\ndescription: t\n"
+        "defaults: {max_retries: 1, max_loops: 6}\n"
+        "phases:\n"
+        "  - name: work\n"
+        "    steps:\n"
+        "      - name: editor\n"
+        "        file: agents/editor.md\n"
+        "        tier: low\n"
+        "        rules:\n"
+        "          - {else: true, pause: true}\n"
+    )
+    # Deterministic gate across environments (mirrors the lane-eviction harness).
+    (tmp_path / ".imp" / "config.yaml").write_text(
+        (tmp_path / ".imp" / "config.yaml").read_text()
+        + "sandbox:\n  enabled: false\n")
+    _git(tmp_path, "add", "-A")
+    _git(tmp_path, "commit", "-qm", "bounce workflow")
+
+    ch = Quest.create(tmp_path, title="x", quest_id="feat", base_branch="main")
+
+    key = "step:work/editor"
+    state = State.load(ch.state_dir)
+    state.reincarnations = {key: 1}       # prior consumption under context pressure
+    state.save(ch.state_dir)
+
+    calls = {"n": 0}
+    recorded: list[int] = []
+    dirty = ch.project_root / "dirty.txt"
+
+    class _Runner:
+        async def run(self, invocation: AgentInvocation) -> AsyncIterator[Event]:
+            _persist_initial(invocation)
+            calls["n"] += 1
+            if calls["n"] == 1:
+                dirty.write_text("uncommitted\n")   # leave the tree dirty -> bounce
+            else:
+                recorded.append(State.load(ch.state_dir).reincarnation_count(key))
+                dirty.unlink()                       # clean the tree -> rule pause
+            yield {"type": "agent_result",
+                   "payload": {"outcome": "ok", "status": "Success"}}
+
+        async def interrupt(self) -> None:
+            pass
+
+    class _Provider:
+        name = "anthropic"
+
+        def __init__(self, model: str = "m") -> None:
+            self.model = model
+
+        def create_runner(self, invocation: AgentInvocation) -> _Runner:
+            return _Runner()
+
+    resolve.reset_providers_for_tests()
+    resolve.register_provider(
+        "anthropic", env_check=lambda: True, factory=lambda model: _Provider(model))
+
+    result = await run_quest(ch, on_event=lambda _e: None)
+
+    assert result is RunResult.PAUSED
+    assert recorded == [1], recorded      # bounce did NOT refill the budget
+
+
+@pytest.mark.anyio
 async def test_run_quest_threads_checkpoint_threshold_to_invocation(tmp_path):
     """run_quest re-derives config.context_checkpoint_threshold() onto State on
     every entry (transient, not persisted) and the executor carries it onto each

@@ -514,6 +514,8 @@ async def run_quest(
 
         # In-memory, never persisted: last step this run dispatched (a resume never wipes).
         last_dispatched: str | None = None
+        # Captured at process entry (not is_resume): an in-process bounce can't refill.
+        resumed_step = state.resume_pending
         while True:
             if state.completion_pending:
                 # §3: re-entry after an interrupt parked at the completion
@@ -565,6 +567,11 @@ async def run_quest(
                 # Genuine advance to a different step: start it with a clean TMPDIR.
                 _wipe_step_scratch(quest)
             last_dispatched = step.name
+            if (resumed_step is not None and step.name == resumed_step
+                    and step.kind == "agent"):
+                # Single-shot: nulled below so no in-process re-arm refills the budget.
+                state.reset_reincarnation(f"step:{step.phase}/{step.name}")
+                resumed_step = None
             action, feedback_text, _var_mutations = await _dispatch_step(
                 step, workflow, quest, state, log, is_resume=is_resume,
                 user_chat_input_fn=user_chat_input_fn, coordinator=coordinator,
