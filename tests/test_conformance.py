@@ -1,0 +1,76 @@
+"""Parametrized provider conformance suite (spec §2). Each scenario runs
+against only the pairs whose seam produces it; each pair's normalized record is
+pinned to a committed golden captured from the pre-refactor runner."""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+import pytest
+
+from tests.conformance_adapters import (
+    OBSERVE,
+    PAIRS,
+    PUSH,
+    run_scenario,
+)
+from tests.conformance_record import check_golden, record
+from tests.cc_fakes import assistant as cc_assistant
+from tests.cc_fakes import result as cc_result
+from tests.cc_fakes import text as cc_text
+from tests.cc_fakes import tool_use as cc_tool_use
+from tests.anthropic_fakes import response as a_response
+from tests.anthropic_fakes import text as a_text
+from tests.anthropic_fakes import tool_use as a_tool_use
+from tests.openai_fakes import resp_function_call, resp_message, resp_response
+from tests.codex_fakes import (
+    agent_message as cx_msg,
+)
+from tests.codex_fakes import (
+    mcp_call as cx_call,
+)
+from tests.codex_fakes import (
+    thread_started as cx_start,
+)
+from tests.codex_fakes import (
+    turn_completed as cx_done,
+)
+
+
+@pytest.fixture
+def anyio_backend() -> str:
+    return "asyncio"
+
+
+_OK = {"status": "Success", "note": "ok"}
+
+
+def _happy_script(pair: str):
+    if pair == "anthropic":
+        return [a_response(a_text("calling complete_step"),
+                           a_tool_use("c1", "complete_step", _OK))]
+    if pair == "openai":
+        return [resp_response(
+            resp_message("calling complete_step"),
+            resp_function_call("c1", "complete_step",
+                               '{"status": "Success", "note": "ok"}'))]
+    if pair == "claude_code":
+        return [cc_assistant(cc_text("calling complete_step"),
+                             cc_tool_use("c1", "complete_step", _OK)),
+                cc_result()]
+    return [[cx_start("thr-1"), cx_msg("calling complete_step"),
+             cx_call(name="complete_step", args=_OK, result="ok", item_id="cs-1"),
+             cx_done(input_tokens=1, output_tokens=1)]]
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("pair", PAIRS)
+async def test_happy_path(pair: str, tmp_path: Path) -> None:
+    driven = await run_scenario(pair, tmp_path, _happy_script(pair))
+    # Falsifiable invariants (hold now; guard the refactor):
+    assert driven.control[-1]["type"] == "agent_result"
+    assert driven.control[-1]["payload"] == _OK
+    log_type_set = {e["type"] for e in driven.log.read()}
+    assert {"step_context", "engine_message", "agent_message"} <= log_type_set
+    assert sum(1 for e in driven.log.read() if e["type"] == "step_context") == 1
+    check_golden(f"happy__{pair}", record(driven))
