@@ -55,7 +55,9 @@ class StepRow:
 
 def _is_nonterminal_error(p: dict[str, Any]) -> bool:
     # Audit-only records are queryable but silent; interrupt marker is not a terminal failure.
-    return bool(p.get("audit")) or (p.get("category") == "config" and p.get("kind") == "interrupted")
+    if p.get("audit"):
+        return True
+    return p.get("category") == "config" and p.get("kind") == "interrupted"
 
 
 def build_summary(events: Iterable[dict[str, Any]]) -> list[StepRow]:
