@@ -307,3 +307,259 @@ async def test_subagent_interrupted_teardown_is_not_sticky_retried(
     # Only the network retry; the interrupted `unknown` teardown is not retried.
     assert [r["payload"]["category"] for r in retries] == ["network"]
     assert all(r["agent_id"].startswith("sub:") for r in retries)
+
+
+@pytest.mark.anyio
+async def test_subagent_failed_handback_emits_audit_error(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A subagent whose drive fails a hard-stop category (config) reaches the
+    failed/fatal handback, which appends exactly one audit `error` event under
+    the subagent's agent_id carrying category/kind/message — queryable via the
+    same filter `imp events --type error --agent sub:<id>` uses."""
+    from imp.engine import events_index as ei
+    from imp.providers import resolve
+    from imp.providers.anthropic import AnthropicAgentRunner
+    from tests.anthropic_fakes import FakeAsyncAnthropic, response, tool_use
+
+    resolve.reset_providers_for_tests()
+
+    async def _no_sleep(_delay: float, _coordinator: Any) -> None:
+        return None
+    monkeypatch.setattr("imp.agents.subagents._interruptible_sleep", _no_sleep)
+
+    class _ConfigFailRunner:
+        async def run(self, inv):
+            from imp.agents.transcript import Transcript
+            Transcript(inv.transcript_dir / "transcript.jsonl").append(
+                Message(role="user", content=(TextBlock(text="work"),)))
+            yield {"type": "error", "payload": {
+                "category": "config", "kind": "config", "message": "bad config"}}
+
+        async def interrupt(self) -> None:
+            ...
+
+    class _SubProvider:
+        name = "fake"
+        model = "m"
+
+        def create_runner(self, _inv):
+            return _ConfigFailRunner()
+
+    resolve.register_provider("fake", env_check=lambda: True,
+                              factory=lambda _m: _SubProvider())
+
+    fake = FakeAsyncAnthropic([
+        response(tool_use("t1", "sub_agent",
+                          {"subagent_name": "coder", "task_description": "edit"})),
+        response(tool_use("c1", "complete_step",
+                          {"status": "Success", "outcome": "done"})),
+    ])
+    runner = AnthropicAgentRunner(model_name="m", client_factory=lambda: fake)
+
+    async for _ in runner.run(_lead_inv(tmp_path, fake)):
+        pass
+
+    events = [json.loads(line)
+              for line in (tmp_path / "events.jsonl").read_text().splitlines()
+              if line]
+    audit = [e for e in events
+             if e["type"] == "error" and e["payload"].get("audit")]
+    assert len(audit) == 1
+    ev = audit[0]
+    assert ev["agent_id"].startswith("sub:")
+    assert ev["payload"]["category"] == "config"
+    assert ev["payload"]["kind"] == "config"
+    assert f"failed ({ev['payload']['category']})" in ev["payload"]["message"]
+    # Queryable through the exact filter path `imp events --type error --agent` runs.
+    indexed = list(enumerate(events, start=1))
+    handle_map = ei.subagent_handle_map(indexed)
+    selected = ei.select_event_lines(
+        indexed, types={"error"}, agents={ev["agent_id"]}, handle_map=handle_map)
+    assert any(e["payload"].get("audit") for _, e in selected)
+
+
+@pytest.mark.anyio
+async def test_subagent_budget_exhaustion_emits_audit_error(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A persistent network flap that exceeds the backoff budget hands back via
+    the budget-exhaustion path, which appends exactly one audit `error` event
+    under the subagent's agent_id carrying the flapping category and a
+    ceiling-marking kind/message. The single retry before exhaustion still emits
+    its agent_retry."""
+    import imp.engine.error_policy as ep
+    from imp.providers import resolve
+    from imp.providers.anthropic import AnthropicAgentRunner
+    from tests.anthropic_fakes import FakeAsyncAnthropic, response, tool_use
+
+    resolve.reset_providers_for_tests()
+
+    async def _no_sleep(_delay: float, _coordinator: Any) -> None:
+        return None
+    monkeypatch.setattr("imp.agents.subagents._interruptible_sleep", _no_sleep)
+    # Admit the first 1.0s network retry (cum 1.0) then cap the 2.0s second delay
+    # (1.0 + 2.0 = 3.0 > 1.5) so the flap exhausts the budget on drive 2.
+    monkeypatch.setattr(ep, "budget_for", lambda category: 1.5)
+
+    class _NetworkFlapRunner:
+        async def run(self, inv):
+            from imp.agents.transcript import Transcript
+            Transcript(inv.transcript_dir / "transcript.jsonl").append(
+                Message(role="user", content=(TextBlock(text="work"),)))
+            yield {"type": "error", "payload": {
+                "category": "network", "kind": "network",
+                "message": "connection refused"}}
+
+        async def interrupt(self) -> None:
+            ...
+
+    class _SubProvider:
+        name = "fake"
+        model = "m"
+
+        def create_runner(self, _inv):
+            return _NetworkFlapRunner()
+
+    resolve.register_provider("fake", env_check=lambda: True,
+                              factory=lambda _m: _SubProvider())
+
+    fake = FakeAsyncAnthropic([
+        response(tool_use("t1", "sub_agent",
+                          {"subagent_name": "coder", "task_description": "edit"})),
+        response(tool_use("c1", "complete_step",
+                          {"status": "Success", "outcome": "done"})),
+    ])
+    runner = AnthropicAgentRunner(model_name="m", client_factory=lambda: fake)
+
+    async for _ in runner.run(_lead_inv(tmp_path, fake)):
+        pass
+
+    events = [json.loads(line)
+              for line in (tmp_path / "events.jsonl").read_text().splitlines()
+              if line]
+    audit = [e for e in events
+             if e["type"] == "error" and e["payload"].get("audit")]
+    assert len(audit) == 1
+    ev = audit[0]
+    assert ev["agent_id"].startswith("sub:")
+    assert ev["payload"]["category"] == "network"
+    # kind/message mark ceiling exhaustion (distinct from a per-attempt retry).
+    assert ev["payload"]["kind"] == "budget_exhausted"
+    assert "budget" in ev["payload"]["message"]
+    # The single retry before exhaustion still emitted its agent_retry.
+    retries = [e for e in events if e["type"] == "agent_retry"]
+    assert [r["payload"]["category"] for r in retries] == ["network"]
+
+
+@pytest.mark.anyio
+async def test_subagent_interrupted_pause_emits_no_audit_error(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A human-pause handback (interrupted teardown) appends NO audit error: a
+    pause is not an error give-up, and result.error there is a stale retryable
+    category."""
+    from imp.providers import resolve
+    from imp.providers.anthropic import AnthropicAgentRunner
+    from tests.anthropic_fakes import FakeAsyncAnthropic, response, tool_use
+
+    resolve.reset_providers_for_tests()
+
+    async def _no_sleep(_delay: float, _coordinator: Any) -> None:
+        return None
+    monkeypatch.setattr("imp.agents.subagents._interruptible_sleep", _no_sleep)
+
+    class _InterruptedTeardownRunner:
+        async def run(self, inv):
+            from imp.agents.transcript import Transcript
+            Transcript(inv.transcript_dir / "transcript.jsonl").append(
+                Message(role="user", content=(TextBlock(text="work"),)))
+            # kind == "interrupted" -> drive returns paused=True (interrupt=True),
+            # so the loop breaks into the result.paused suspend handback.
+            yield {"type": "error", "payload": {
+                "category": "network", "kind": "interrupted",
+                "message": "torn down mid-outage"}}
+
+        async def interrupt(self) -> None:
+            ...
+
+    class _SubProvider:
+        name = "fake"
+        model = "m"
+
+        def create_runner(self, _inv):
+            return _InterruptedTeardownRunner()
+
+    resolve.register_provider("fake", env_check=lambda: True,
+                              factory=lambda _m: _SubProvider())
+
+    fake = FakeAsyncAnthropic([
+        response(tool_use("t1", "sub_agent",
+                          {"subagent_name": "coder", "task_description": "edit"})),
+        response(tool_use("c1", "complete_step",
+                          {"status": "Success", "outcome": "done"})),
+    ])
+    runner = AnthropicAgentRunner(model_name="m", client_factory=lambda: fake)
+
+    async for _ in runner.run(_lead_inv(tmp_path, fake)):
+        pass
+
+    events = [json.loads(line)
+              for line in (tmp_path / "events.jsonl").read_text().splitlines()
+              if line]
+    assert not any(e["type"] == "error" and e["payload"].get("audit")
+                   for e in events)
+
+
+@pytest.mark.anyio
+async def test_subagent_context_ceiling_emits_no_audit_error(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A context-ceiling handback appends NO audit error: its terminal state is
+    already captured by the [context_exhausted] marker."""
+    from imp.providers import resolve
+    from imp.providers.anthropic import AnthropicAgentRunner
+    from tests.anthropic_fakes import FakeAsyncAnthropic, response, tool_use
+
+    resolve.reset_providers_for_tests()
+
+    async def _no_sleep(_delay: float, _coordinator: Any) -> None:
+        return None
+    monkeypatch.setattr("imp.agents.subagents._interruptible_sleep", _no_sleep)
+
+    class _ContextWindowRunner:
+        async def run(self, inv):
+            from imp.agents.transcript import Transcript
+            Transcript(inv.transcript_dir / "transcript.jsonl").append(
+                Message(role="user", content=(TextBlock(text="work"),)))
+            # context_window Pauses -> fatal result; the subagent loop routes it to
+            # the context-ceiling handback (fatal and category == "context_window").
+            yield {"type": "error", "payload": {
+                "category": "context_window", "kind": "context_window",
+                "message": "context limit reached"}}
+
+        async def interrupt(self) -> None:
+            ...
+
+    class _SubProvider:
+        name = "fake"
+        model = "m"
+
+        def create_runner(self, _inv):
+            return _ContextWindowRunner()
+
+    resolve.register_provider("fake", env_check=lambda: True,
+                              factory=lambda _m: _SubProvider())
+
+    fake = FakeAsyncAnthropic([
+        response(tool_use("t1", "sub_agent",
+                          {"subagent_name": "coder", "task_description": "edit"})),
+        response(tool_use("c1", "complete_step",
+                          {"status": "Success", "outcome": "done"})),
+    ])
+    runner = AnthropicAgentRunner(model_name="m", client_factory=lambda: fake)
+
+    async for _ in runner.run(_lead_inv(tmp_path, fake)):
+        pass
+
+    events = [json.loads(line)
+              for line in (tmp_path / "events.jsonl").read_text().splitlines()
+              if line]
+    assert not any(e["type"] == "error" and e["payload"].get("audit")
+                   for e in events)

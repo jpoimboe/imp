@@ -1298,3 +1298,46 @@ def test_dispatch_task_failed_handback_omits_kind_suffix_when_kind_none(
     assert "subagent 'reviewer' failed (network)" in body
     assert "failed (network) [" not in body   # no kind bracket
     assert "Full prior transcript: " in body
+
+
+def test_dispatch_task_midloop_pause_emits_no_audit_error(tmp_path: Path) -> None:
+    # PRODUCER: a human pause signaled DURING the backoff sleep hits the mid-loop
+    # should_pause handback (subagents.py:495-497), which hands back via
+    # _suspend_handback_body ([interrupted] marker) and — like every pause path —
+    # emits NO audit `error` event. The real event_log + the emitted agent_retry
+    # make a leaked audit observable (a falsifiable negative).
+    import anyio
+
+    from imp.engine.agent_run import AgentRunResult, ErrorInfo
+    from imp.engine.state import InMemoryEventLog
+
+    ctx = _dispatch_ctx(tmp_path)
+    ctx.event_log = InMemoryEventLog()   # real WRITE log so a leaked audit is observable
+
+    async def _fake_drive(*_a, **_k):
+        # A retryable transient opens a backoff sleep; the mid-loop pause fires
+        # AFTER the sleep, before any re-drive.
+        return AgentRunResult(output=None, errored=True, paused=False,
+                              fatal=False, delay=1.0,
+                              error=ErrorInfo("network", "network"))
+
+    async def _pause_during_sleep(_delay, coordinator):
+        coordinator._should_pause = True
+
+    import imp.agents.subagents as sub_mod
+    orig_drive = sub_mod.drive_invocation
+    orig_sleep = sub_mod._interruptible_sleep
+    sub_mod.drive_invocation = _fake_drive              # type: ignore[assignment]
+    sub_mod._interruptible_sleep = _pause_during_sleep  # type: ignore[assignment]
+    try:
+        with pytest.raises(RuntimeError) as ei:
+            anyio.run(dispatch_task, ctx, "reviewer", "do x")
+    finally:
+        sub_mod.drive_invocation = orig_drive           # type: ignore[assignment]
+        sub_mod._interruptible_sleep = orig_sleep       # type: ignore[assignment]
+    body = str(ei.value)
+    assert "[interrupted]" in body                      # mid-loop pause handback
+    events = list(ctx.event_log.read())
+    assert any(e["type"] == "agent_retry" for e in events)          # log is live
+    assert not any(e["type"] == "error" and e["payload"].get("audit")
+                   for e in events)                    # no audit on the pause path
