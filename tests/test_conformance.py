@@ -14,6 +14,8 @@ from tests.conformance_adapters import (
     OBSERVE,
     PAIRS,
     PUSH,
+    build,
+    drive,
     run_scenario,
 )
 from tests.conformance_record import check_golden, record
@@ -257,3 +259,62 @@ async def test_classify_before_nudge(pair: str, tmp_path: Path) -> None:
     # The classified Error short-circuits BEFORE the pointless nudge.
     assert consulted["hit"] is False
     check_golden(f"classify__{pair}", record(driven))
+
+
+@pytest.mark.anyio
+async def test_tool_killed_event_codex(tmp_path: Path, monkeypatch) -> None:
+    import imp.providers.codex_runner as cr
+
+    orig = cr.process_event
+
+    def _patched(*a, **k):
+        rs = k.get("run_state")
+        ev = a[0]
+        if (rs is not None and getattr(ev, "type", None) == "item.completed"
+                and getattr(getattr(ev, "item", None), "tool", None) == "bash"):
+            rs.killed_tool_uses.append({"id": "kill-1", "name": "bash", "signal": 9})
+        return orig(*a, **k)
+
+    monkeypatch.setattr(cr, "process_event", _patched)
+
+    scripted = [[cx_start("thr-1"),
+                 cx_call(name="bash", args={"command": "sleep 1"}, result="", item_id="b1"),
+                 cx_call(name="complete_step", args=_OK, result="ok", item_id="cs-1"),
+                 cx_done()]]
+    runner, inv = build("codex", tmp_path, scripted,
+                        tools=frozenset({"complete_step", "bash"}))
+    driven = await drive(runner, inv)
+
+    log = list(driven.log.read())
+    killed = [e for e in log if e["type"] == "tool_killed"]
+    assert killed and killed[0]["payload"]["name"] == "bash"
+    assert killed[0]["payload"]["signal"] == 9
+    # tool_killed is an audit-log event, never a yielded control signal.
+    assert "tool_killed" not in [e["type"] for e in driven.control]
+    assert driven.control[-1]["type"] == "agent_result"
+    check_golden("toolkill__codex", record(driven))
+
+
+@pytest.mark.anyio
+async def test_fatal_tool_error_codex(tmp_path: Path, monkeypatch) -> None:
+    import imp.providers.codex_runner as cr
+
+    orig = cr.process_event
+
+    def _patched(*a, **k):
+        rs = k.get("run_state")
+        if rs is not None and getattr(a[0], "type", None) == "turn.completed":
+            rs.fatal_tool_error = ("lint", "config missing")
+        return orig(*a, **k)
+
+    monkeypatch.setattr(cr, "process_event", _patched)
+
+    scripted = [[cx_start("thr-1"), cx_msg("calling lint"), cx_done(output_tokens=1)],
+                [cx_msg("should never run"), cx_done()]]
+    runner, inv = build("codex", tmp_path, scripted)
+    driven = await drive(runner, inv)
+
+    assert driven.control[-1]["type"] == "error"
+    assert driven.control[-1]["payload"]["category"] == "config"
+    assert driven.control[-1]["payload"]["kind"] == "fatal_tool_error"
+    check_golden("fatal__codex", record(driven))
