@@ -3188,6 +3188,63 @@ async def test_step_reincarnates_on_context_window_then_pauses_at_cap(tmp_path):
 
 
 @pytest.mark.anyio
+async def test_resume_resets_reincarnation_budget(tmp_path):
+    """A step whose reincarnation counter is AT the cap, resumed by a
+    human/process (resume_pending set at process entry), re-enters with a FRESH
+    budget: it can reincarnate again instead of immediately re-pausing at the cap."""
+    from imp.providers import resolve
+
+    quest, phase, step = _seed_minimal_workflow(tmp_path)
+    (tmp_path / "imp" / "project.yaml").write_text(
+        "default-workflow: imp\ncontext:\n  max_reincarnations: 1\n")
+
+    key = f"step:{phase}/{step}"
+    state = State.load(quest.state_dir)
+    state.step = step
+    state.has_started = True
+    state.resume_pending = step           # a prior process paused here
+    state.reincarnations = {key: 1}       # already AT the cap (max == 1)
+    state.save(quest.state_dir)
+
+    calls = {"n": 0}
+
+    class _Runner:
+        async def run(self, invocation: AgentInvocation) -> AsyncIterator[Event]:
+            _persist_initial(invocation)
+            calls["n"] += 1
+            if calls["n"] == 1:
+                yield {"type": "error", "payload": {
+                    "category": "context_window", "kind": "prompt_too_long",
+                    "message": "prompt is too long"}}
+            else:
+                yield {"type": "agent_result",
+                       "payload": {"outcome": "ok", "status": "Success"}}
+
+        async def interrupt(self) -> None:
+            pass
+
+    class _Provider:
+        name = "fake"
+
+        def __init__(self, model: str = "m") -> None:
+            self.model = model
+
+        def create_runner(self, invocation: AgentInvocation) -> _Runner:
+            return _Runner()
+
+    resolve.reset_providers_for_tests()
+    resolve.register_provider(
+        "fake", env_check=lambda: True, factory=lambda model: _Provider(model))
+
+    events: list[dict] = []
+    result = await run_quest(quest, on_event=events.append)
+
+    reincarnating = [e for e in events if e["type"] == "reincarnating"]
+    assert len(reincarnating) == 1        # fresh budget allowed one reincarnation
+    assert result is RunResult.COMPLETED  # succeeded on the reborn session
+
+
+@pytest.mark.anyio
 async def test_run_quest_threads_checkpoint_threshold_to_invocation(tmp_path):
     """run_quest re-derives config.context_checkpoint_threshold() onto State on
     every entry (transient, not persisted) and the executor carries it onto each
