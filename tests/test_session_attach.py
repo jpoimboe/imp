@@ -20,7 +20,7 @@ from imp.remote.session.attach import (
 from imp.remote.session.discover import session_socket_path
 from imp.remote.session.reply import deliver_session_reply
 from imp.remote.session.socket_server import SessionSocket
-from tests.async_wait import wait_until
+from tests.async_wait import HANG_BACKSTOP, wait_until
 
 
 @pytest.fixture
@@ -152,7 +152,7 @@ async def test_attach_crash_fast_when_daemon_exits_before_binding(
     with pytest.raises(DaemonStartupError) as excinfo:
         await attach_or_spawn(
             quest, on_event=lambda _e: None,
-            spawn_fn=lambda _ch: _DeadProc(), connect_timeout=5)
+            spawn_fn=lambda _ch: _DeadProc(), connect_timeout=HANG_BACKSTOP)
 
     err = excinfo.value
     assert err.exit_code == 7
@@ -181,7 +181,7 @@ async def test_attach_crash_fast_when_stderr_file_is_missing(
     with pytest.raises(DaemonStartupError) as excinfo:
         await attach_or_spawn(
             quest, on_event=lambda _e: None,
-            spawn_fn=lambda _ch: _DeadProc(), connect_timeout=5)
+            spawn_fn=lambda _ch: _DeadProc(), connect_timeout=HANG_BACKSTOP)
 
     err = excinfo.value
     assert err.exit_code == 3
@@ -217,7 +217,7 @@ async def test_attach_waits_for_alive_daemon_until_socket_appears(
 
         client = await attach_or_spawn(
             quest, on_event=lambda _e: None,
-            spawn_fn=slow_spawn, connect_timeout=5)
+            spawn_fn=slow_spawn, connect_timeout=HANG_BACKSTOP)
         await wait_until(
             lambda: holder.get("server") is not None and holder["server"].attached_count == 1)
         assert holder["server"].attached_count == 1
