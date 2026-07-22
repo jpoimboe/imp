@@ -251,7 +251,7 @@ async def test_lock_is_held_during_run_and_released_after(tmp_path: Path) -> Non
                 quest, run_fn=fake_run, hibernate=False)
 
         tg.start_soon(_serve)
-        await anyio.sleep(0.05)  # let serve acquire the lock and enter run_fn
+        await wait_until(lambda: lock_path.exists())  # poll the holder-pid file
         assert lock_path.exists()  # ProjectLock writes the holder-pid file
         release.set()
         await wait_until(lambda: "r" in result)
