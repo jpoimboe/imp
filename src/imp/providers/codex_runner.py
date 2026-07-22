@@ -404,6 +404,17 @@ class CodexAgentRunner:
             seed_auth(mode=auth_mode, canonical_path=canonical_auth,
                       codex_home=codex_home, env=os.environ)
 
+            # Fresh-entry audit scaffolding: step_context exactly once per
+            # agent_id. Resume (balance_on_resume) re-enters and emits nothing.
+            if not invocation.balance_on_resume:
+                elog.append_step_context(
+                    agent_id=aid,
+                    parent_id_override=invocation.first_event_parent_id,
+                    provider=invocation.provider_name, model=self.model,
+                    tools_schema=[{"name": n} for n in tools],
+                    params={"env.CODEX_HOME": str(codex_home)},
+                    max_tool_calls=invocation.max_tool_calls)
+
             # 7. Run the SDK turn(s) and consume events.
             client = self._build_client(
                 codex_home=codex_home, bearer_token=bearer_token,
