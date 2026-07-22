@@ -510,9 +510,11 @@ async def test_run_loop_aclose_cascades_to_drive_turns(
 
     elog = InMemoryEventLog()
     inv = _build_invocation(tmp_path, event_log=elog)
-    runner = CodexAgentRunner(model_name="gpt-5.5")
+    runner = CodexAgentRunner(
+        model_name="gpt-5.5",
+        client_factory=lambda options=None: object(),
+    )
     runner._canonical_auth_override = tmp_path / "auth.json"
-    runner._client_factory = lambda options=None: object()
     runner._drive_turns = _fake_drive_turns  # type: ignore[assignment]
 
     gen = runner.run(inv)
