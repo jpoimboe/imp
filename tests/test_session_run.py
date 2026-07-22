@@ -21,7 +21,7 @@ from imp.engine.quest import Quest
 from imp.engine.state import State
 from imp.remote.session.discover import session_socket_path
 from imp.remote.session.server import SessionServer
-from tests.async_wait import wait_until
+from tests.async_wait import HANG_BACKSTOP, wait_until
 from tests.conftest import _seed_control
 
 
@@ -117,7 +117,7 @@ async def test_run_session_client_answers_gate_and_returns_completed_rc(
 
     coord = InterruptCoordinator()
     rc_holder: dict[str, int] = {}
-    with anyio.fail_after(30):
+    with anyio.fail_after(HANG_BACKSTOP):
         async with anyio.create_task_group() as tg:
             await server.open()
             tg.start_soon(server.serve, run_fn)
@@ -172,7 +172,7 @@ async def test_run_session_client_starts_status_tick_when_provided(
 
     coord = InterruptCoordinator()
     rc_holder: dict[str, int] = {}
-    with anyio.fail_after(30):
+    with anyio.fail_after(HANG_BACKSTOP):
         async with anyio.create_task_group() as tg:
             await server.open()
             tg.start_soon(server.serve, run_fn)
@@ -237,11 +237,18 @@ async def test_make_headless_solicit_delivers_message_once_then_signals_detach()
     assert not coord.escalation_event.is_set()
 
     # Second gate: no more input — the solicit must NOT return a (stray) reply; it
-    # signals a clean detach and blocks. move_on_after fires only because it blocked.
-    with anyio.move_on_after(0.2) as scope:
-        await solicit("second gate?")
-    assert scope.cancelled_caught
-    assert coord.escalation_event.is_set()
+    # signals a clean detach and blocks. Run it as a task, wait for the detach signal,
+    # confirm no reply was produced, then cancel the parked solicit.
+    reply: dict[str, str] = {}
+
+    async def _second_gate() -> None:
+        reply["r"] = await solicit("second gate?")
+
+    async with anyio.create_task_group() as tg:
+        tg.start_soon(_second_gate)
+        await wait_until(lambda: coord.escalation_event.is_set())
+        assert "r" not in reply
+        tg.cancel_scope.cancel()
 
 
 @pytest.mark.anyio
@@ -251,11 +258,18 @@ async def test_make_headless_solicit_with_no_message_signals_detach_immediately(
     solicit = make_headless_solicit(None, coord)
 
     # No message at all (e.g. a resume parked at a gate with nothing to inject):
-    # the very first gate signals a detach and blocks.
-    with anyio.move_on_after(0.2) as scope:
-        await solicit("gate?")
-    assert scope.cancelled_caught
-    assert coord.escalation_event.is_set()
+    # the very first gate signals a detach and blocks. Run it as a task, wait for the
+    # detach signal, confirm no reply was produced, then cancel the parked solicit.
+    reply: dict[str, str] = {}
+
+    async def _first_gate() -> None:
+        reply["r"] = await solicit("gate?")
+
+    async with anyio.create_task_group() as tg:
+        tg.start_soon(_first_gate)
+        await wait_until(lambda: coord.escalation_event.is_set())
+        assert "r" not in reply
+        tg.cancel_scope.cancel()
 
 
 @pytest.mark.anyio
