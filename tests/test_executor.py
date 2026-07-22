@@ -3383,6 +3383,86 @@ async def test_resume_reincarnation_reset_is_single_shot(tmp_path):
 
 
 @pytest.mark.anyio
+async def test_clean_tree_bounce_does_not_refill_reincarnation_budget(tmp_path):
+    """A step that carries reincarnation consumption and then completes with a
+    dirty worktree (triggering a Goto(resume=True) clean-tree bounce) does NOT get
+    its reincarnation counter reset by the bounce: across the bounce the counter
+    stays put. The bounce re-arms resume_pending mid-run, but the process-entry
+    capture saw resume_pending unset, so the reset never fires."""
+    from imp.providers import resolve
+    from tests.conftest import _git, _seed_control
+
+    _seed_control(tmp_path)
+    wf = tmp_path / "imp" / "workflows" / "imp"
+    (wf / "agents" / "editor.md").write_text(
+        "---\nname: editor\ntools: [complete_step]\n"
+        "output:\n  status: {type: enum, values: [Success, Error]}\n---\ngo\n"
+    )
+    (wf / "workflow.yaml").write_text(
+        "name: t\ndescription: t\n"
+        "defaults: {max_retries: 1, max_loops: 6}\n"
+        "phases:\n"
+        "  - name: work\n"
+        "    steps:\n"
+        "      - name: editor\n"
+        "        file: agents/editor.md\n"
+        "        tier: low\n"
+        "        rules:\n"
+        "          - {else: true, pause: true}\n"
+    )
+    # Deterministic gate across environments (mirrors the lane-eviction harness).
+    (tmp_path / ".imp" / "config.yaml").write_text(
+        (tmp_path / ".imp" / "config.yaml").read_text()
+        + "sandbox:\n  enabled: false\n")
+    _git(tmp_path, "add", "-A")
+    _git(tmp_path, "commit", "-qm", "bounce workflow")
+
+    ch = Quest.create(tmp_path, title="x", quest_id="feat", base_branch="main")
+
+    key = "step:work/editor"
+    state = State.load(ch.state_dir)
+    state.reincarnations = {key: 1}       # prior consumption under context pressure
+    state.save(ch.state_dir)
+
+    calls = {"n": 0}
+    recorded: list[int] = []
+    dirty = ch.project_root / "dirty.txt"
+
+    class _Runner:
+        async def run(self, invocation: AgentInvocation) -> AsyncIterator[Event]:
+            _persist_initial(invocation)
+            calls["n"] += 1
+            if calls["n"] == 1:
+                dirty.write_text("uncommitted\n")   # leave the tree dirty -> bounce
+            else:
+                recorded.append(State.load(ch.state_dir).reincarnation_count(key))
+                dirty.unlink()                       # clean the tree -> rule pause
+            yield {"type": "agent_result",
+                   "payload": {"outcome": "ok", "status": "Success"}}
+
+        async def interrupt(self) -> None:
+            pass
+
+    class _Provider:
+        name = "anthropic"
+
+        def __init__(self, model: str = "m") -> None:
+            self.model = model
+
+        def create_runner(self, invocation: AgentInvocation) -> _Runner:
+            return _Runner()
+
+    resolve.reset_providers_for_tests()
+    resolve.register_provider(
+        "anthropic", env_check=lambda: True, factory=lambda model: _Provider(model))
+
+    result = await run_quest(ch, on_event=lambda _e: None)
+
+    assert result is RunResult.PAUSED
+    assert recorded == [1], recorded      # bounce did NOT refill the budget
+
+
+@pytest.mark.anyio
 async def test_run_quest_threads_checkpoint_threshold_to_invocation(tmp_path):
     """run_quest re-derives config.context_checkpoint_threshold() onto State on
     every entry (transient, not persisted) and the executor carries it onto each
