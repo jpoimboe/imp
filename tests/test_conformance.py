@@ -230,3 +230,30 @@ async def test_ceiling_trip(pair: str, tmp_path: Path) -> None:
     assert driven.control[-1]["payload"]["category"] == "config"
     assert driven.control[-1]["payload"]["kind"] == "tool_call_ceiling_exceeded"
     check_golden(f"ceiling__{pair}", record(driven))
+
+
+def _classify_script(pair: str):
+    if pair == "claude_code":
+        return [cc_assistant(cc_text("Invalid API key — got 401. Cannot continue.")),
+                cc_result()]
+    return [[cx_start("thr-1"),
+             cx_msg("Invalid API key — got 401. Cannot continue."),
+             cx_done()]]
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("pair", OBSERVE)
+async def test_classify_before_nudge(pair: str, tmp_path: Path) -> None:
+    consulted = {"hit": False}
+
+    def cont(_last: str):
+        consulted["hit"] = True
+        return "nudge", False
+
+    driven = await run_scenario(
+        pair, tmp_path, _classify_script(pair), continuation_fn=cont)
+    assert driven.control[-1]["type"] == "error"
+    assert driven.control[-1]["payload"]["category"] == "auth"
+    # The classified Error short-circuits BEFORE the pointless nudge.
+    assert consulted["hit"] is False
+    check_golden(f"classify__{pair}", record(driven))
