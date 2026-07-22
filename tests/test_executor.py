@@ -3289,6 +3289,100 @@ async def test_reincarnation_cap_still_fires_without_resume(tmp_path):
 
 
 @pytest.mark.anyio
+async def test_resume_reincarnation_reset_is_single_shot(tmp_path):
+    """The resume reset fires EXACTLY once per process (process-entry dispatch of
+    the resumed step); a later in-process re-arm (a workflow `resume:` edge — the
+    same arm_step_resume the clean-tree bounce uses) does NOT re-trigger it.
+
+    A genuine resume enters `w` with the counter at the cap; the process-entry
+    reset zeroes it; `w` reincarnates once (counter -> 1); a `resume: w` edge
+    re-enters `w` at the loop top. The counter observed at each `w` invocation
+    must be [0, 1, 1]: 0 proves the entry reset fired, and the final 1 proves the
+    in-process re-arm did NOT re-fire it (a per-iteration or is_resume-gated reset
+    would observe 0 there)."""
+    from imp.providers import resolve
+
+    wf = tmp_path / "imp" / "workflows" / "imp"
+    (wf / "agents").mkdir(parents=True)
+    (wf / "agents" / "w.md").write_text(
+        "---\nname: w\ntools: [complete_step]\n"
+        "output:\n  status: {type: enum, values: [Success, Error]}\n---\ngo\n"
+    )
+    (wf / "workflow.yaml").write_text(
+        "name: t\ndescription: t\n"
+        "vars: {resumed: {type: bool, default: false}}\n"
+        "defaults: {max_retries: 1, max_loops: 6}\n"
+        "phases:\n"
+        "  - name: work\n"
+        "    steps:\n"
+        "      - name: w\n"
+        "        file: agents/w.md\n"
+        "        tier: low\n"
+        "        rules:\n"
+        "          - {else: true, continue: true}\n"
+        "      - name: route\n"
+        "        rules:\n"
+        "          - {if: 'resumed', continue: true}\n"
+        "          - {else: true, resume: w, set: {resumed: true}}\n"
+        "  - name: done\n"
+        "    steps: []\n"
+    )
+    (tmp_path / "imp" / "project.yaml").write_text("default-workflow: imp\n")
+    (tmp_path / ".imp").mkdir(parents=True, exist_ok=True)
+    (tmp_path / ".imp" / "config.yaml").write_text(
+        "providers: [fake]\ntiers:\n  low: {fake: m}\n"
+        "  medium: {fake: m}\n  high: {fake: m}\n")
+    quest = _make_quest(tmp_path)
+
+    key = "step:work/w"
+    state = State.load(quest.state_dir)
+    state.step = "w"
+    state.has_started = True
+    state.resume_pending = "w"            # a prior process paused here
+    state.reincarnations = {key: 2}       # at the default cap (max_reincarnations == 2)
+    state.save(quest.state_dir)
+
+    recorded: list[int] = []
+
+    class _Runner:
+        def __init__(self, invocation: AgentInvocation) -> None:
+            self._name = invocation.agent_def.name
+
+        async def run(self, invocation: AgentInvocation) -> AsyncIterator[Event]:
+            _persist_initial(invocation)
+            if self._name == "w":
+                recorded.append(State.load(quest.state_dir).reincarnation_count(key))
+                if len(recorded) == 1:
+                    yield {"type": "error", "payload": {
+                        "category": "context_window", "kind": "prompt_too_long",
+                        "message": "prompt is too long"}}
+                    return
+            yield {"type": "agent_result",
+                   "payload": {"outcome": "ok", "status": "Success"}}
+
+        async def interrupt(self) -> None:
+            pass
+
+    class _Provider:
+        name = "fake"
+
+        def __init__(self, model: str = "m") -> None:
+            self.model = model
+
+        def create_runner(self, invocation: AgentInvocation) -> _Runner:
+            return _Runner(invocation)
+
+    resolve.reset_providers_for_tests()
+    resolve.register_provider(
+        "fake", env_check=lambda: True, factory=lambda model: _Provider(model))
+
+    result = await run_quest(quest, on_event=lambda _e: None)
+
+    assert result is RunResult.COMPLETED
+    assert recorded == [0, 1, 1], recorded
+
+
+@pytest.mark.anyio
 async def test_run_quest_threads_checkpoint_threshold_to_invocation(tmp_path):
     """run_quest re-derives config.context_checkpoint_threshold() onto State on
     every entry (transient, not persisted) and the executor carries it onto each
