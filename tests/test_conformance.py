@@ -207,3 +207,26 @@ async def test_park_on_nudge_exhaustion(pair: str, tmp_path: Path) -> None:
     assert isinstance(driven.raised, AwaitingUserInput)
     assert "agent_result" not in [e["type"] for e in driven.control]
     check_golden(f"park__{pair}", record(driven))
+
+
+def _ceiling_script(pair: str):
+    if pair == "anthropic":
+        return [a_response(a_tool_use("u1", "read_file", {"path": "/project/x"})),
+                a_response(a_tool_use("u2", "read_file", {"path": "/project/y"})),
+                a_response(a_tool_use("u3", "read_file", {"path": "/project/z"}))]
+    return [resp_response(resp_function_call("c1", "read_file", '{"path": "/project/x"}'),
+                          resp_function_call("c2", "read_file", '{"path": "/project/y"}')),
+            resp_response(resp_function_call("c3", "read_file", '{"path": "/project/z"}'),
+                          resp_function_call("c4", "read_file", '{"path": "/project/w"}'))]
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("pair", PUSH)
+async def test_ceiling_trip(pair: str, tmp_path: Path) -> None:
+    driven = await run_scenario(
+        pair, tmp_path, _ceiling_script(pair),
+        tools=frozenset({"complete_step", "read_file"}), max_tool_calls=2)
+    assert driven.control[-1]["type"] == "error"
+    assert driven.control[-1]["payload"]["category"] == "config"
+    assert driven.control[-1]["payload"]["kind"] == "tool_call_ceiling_exceeded"
+    check_golden(f"ceiling__{pair}", record(driven))
