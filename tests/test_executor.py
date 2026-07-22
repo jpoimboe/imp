@@ -3245,6 +3245,50 @@ async def test_resume_resets_reincarnation_budget(tmp_path):
 
 
 @pytest.mark.anyio
+async def test_reincarnation_cap_still_fires_without_resume(tmp_path):
+    """Absent a human/process resume (fresh run, resume_pending unset), the cap
+    is unchanged: a step under persistent context pressure reincarnates up to
+    max_reincarnations, then pauses — no spurious reset, counter retained at cap."""
+    from imp.providers import resolve
+
+    quest, phase, step = _seed_minimal_workflow(tmp_path)
+    (tmp_path / "imp" / "project.yaml").write_text(
+        "default-workflow: imp\ncontext:\n  max_reincarnations: 1\n")
+    key = f"step:{phase}/{step}"
+
+    class _Runner:
+        async def run(self, invocation: AgentInvocation) -> AsyncIterator[Event]:
+            _persist_initial(invocation)
+            yield {"type": "error", "payload": {
+                "category": "context_window", "kind": "prompt_too_long",
+                "message": "prompt is too long"}}
+
+        async def interrupt(self) -> None:
+            pass
+
+    class _Provider:
+        name = "fake"
+
+        def __init__(self, model: str = "m") -> None:
+            self.model = model
+
+        def create_runner(self, invocation: AgentInvocation) -> _Runner:
+            return _Runner()
+
+    resolve.reset_providers_for_tests()
+    resolve.register_provider(
+        "fake", env_check=lambda: True, factory=lambda model: _Provider(model))
+
+    events: list[dict] = []
+    result = await run_quest(quest, on_event=events.append)
+
+    assert result is RunResult.PAUSED
+    reincarnating = [e for e in events if e["type"] == "reincarnating"]
+    assert len(reincarnating) == 1                       # exactly the cap, then pause
+    assert State.load(quest.state_dir).reincarnation_count(key) == 1  # NOT reset
+
+
+@pytest.mark.anyio
 async def test_run_quest_threads_checkpoint_threshold_to_invocation(tmp_path):
     """run_quest re-derives config.context_checkpoint_threshold() onto State on
     every entry (transient, not persisted) and the executor carries it onto each
