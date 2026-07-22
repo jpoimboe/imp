@@ -32,3 +32,16 @@ async def test_wait_until_returns_immediately_when_already_true() -> None:
 async def test_wait_until_raises_timeout_when_never_true() -> None:
     with pytest.raises(TimeoutError):
         await wait_until(lambda: False, backstop=0.05, interval=0.001)
+
+
+def test_hang_backstop_is_120() -> None:
+    from tests.async_wait import HANG_BACKSTOP
+    assert HANG_BACKSTOP == 120.0
+
+
+def test_wait_until_defaults_backstop_to_hang_backstop() -> None:
+    import inspect
+
+    from tests.async_wait import HANG_BACKSTOP
+    default = inspect.signature(wait_until).parameters["backstop"].default
+    assert default == HANG_BACKSTOP
