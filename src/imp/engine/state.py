@@ -331,6 +331,9 @@ class State:
         self.reincarnations[key] = n
         return n
 
+    def reset_reincarnation(self, key: str) -> None:
+        self.reincarnations.pop(key, None)
+
     def clean_tree_bounce_count(self, key: str) -> int:
         return self.clean_tree_bounces.get(key, 0)
 
