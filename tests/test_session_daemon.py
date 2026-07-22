@@ -402,11 +402,11 @@ async def test_interrupt_resume_prompt_not_duplicated_on_existing_client(
         await c2.connect()
         tg.start_soon(c2.receive_events)
         await wait_until(lambda: sum(e.get("type") == "awaiting_user_input" for e in seen2) >= 1)
-        await anyio.sleep(0.1)
-        assert sum(e.get("type") == "awaiting_user_input" for e in seen1) == 1
         await c2.send_input("go")
         await wait_until(lambda: "r" in result)
         assert result["r"] is RunResult.COMPLETED
+        # No duplicate reached the existing client (ordered socket closes the window).
+        assert sum(e.get("type") == "awaiting_user_input" for e in seen1) == 1
         await c1.aclose()
         await c2.aclose()
         tg.cancel_scope.cancel()
