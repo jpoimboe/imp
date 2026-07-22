@@ -539,3 +539,44 @@ def test_pipeline_e2e_threads_one_shared_deadline():
     assert "hard=E2E_SUBPROCESS_TIMEOUT" not in src  # no independent run_to_completion budget
     assert "timeout=E2E_SUBPROCESS_TIMEOUT" not in src  # no independent checker budget
     assert "E2E_SUBPROCESS_TIMEOUT" in src  # shared budget constant still referenced
+
+
+def test_session_socket_timeout_exceeds_global_cap():
+    # The global ini timeout is 60s (signal). The session-socket ceiling MUST
+    # exceed it, else the marker override is a no-op against the SIGALRM cap; it
+    # sits at 2x the 120s inner HANG_BACKSTOP so the inner backstop trips first.
+    from tests.conftest import _SESSION_SOCKET_TEST_TIMEOUT
+    assert _SESSION_SOCKET_TEST_TIMEOUT == 240
+    assert _SESSION_SOCKET_TEST_TIMEOUT > 60
+
+
+def test_hook_adds_raised_timeout_to_session_socket_files():
+    from tests.conftest import _SESSION_SOCKET_TEST_TIMEOUT, pytest_collection_modifyitems
+    for fname in (
+        "test_session_daemon.py", "test_session_run.py", "test_session_attach.py",
+    ):
+        item = _StubItem(f"tests/{fname}")
+        pytest_collection_modifyitems(_StubConfig(None), [item])
+        timeouts = [d for d in item.added if d.mark.name == "timeout"]
+        assert timeouts and timeouts[0].mark.args[0] == _SESSION_SOCKET_TEST_TIMEOUT
+        assert timeouts[0].mark.args[0] > 60  # overrides the global SIGALRM cap
+
+
+def test_hook_preserves_explicit_timeout_on_session_socket_item():
+    # An item that declares its own timeout marker (e.g. the resume test at
+    # test_session_daemon.py:1497 with @pytest.mark.timeout(240)) keeps it — the
+    # hook must not add a second timeout marker.
+    from tests.conftest import pytest_collection_modifyitems
+    item = _StubItem("tests/test_session_daemon.py")
+    item._markers["timeout"] = pytest.mark.timeout(999).mark
+    pytest_collection_modifyitems(_StubConfig(None), [item])
+    assert [d for d in item.added if d.mark.name == "timeout"] == []
+
+
+def test_hook_ignores_unlisted_session_file():
+    # Only the three evidence-based files get the bump; other test_session_*.py
+    # keep the global 60s cap.
+    from tests.conftest import pytest_collection_modifyitems
+    item = _StubItem("tests/test_session_hibernate.py")
+    pytest_collection_modifyitems(_StubConfig(None), [item])
+    assert [d for d in item.added if d.mark.name == "timeout"] == []

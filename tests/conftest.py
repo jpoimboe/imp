@@ -40,6 +40,19 @@ _LIVE_TEST_TIMEOUT = 240
 # much of it is used. Independent of _LIVE_TEST_TIMEOUT (different rationale)
 # though it currently shares the value.
 _IMPTY_E2E_TIMEOUT = 240
+# The session-daemon/socket test family (test_session_daemon.py,
+# test_session_run.py, test_session_attach.py) drives a faked run_fn over a real
+# AF_UNIX socket — no provider stream. Under `-n auto` oversubscription pure
+# scheduling starvation can push a structurally-sound test past the global
+# timeout = 60 (signal method, pyproject.toml) and SIGALRM kills it. Grant this
+# family the same generous liveness ceiling the live/impty families get; at 2x
+# the 120s inner HANG_BACKSTOP the inner backstop trips first on a genuine
+# deadlock and the outer cap only ever catches a true hang. Scoped to these
+# three evidence-based files — other test_session_*.py keep the 60s cap.
+_SESSION_SOCKET_TEST_TIMEOUT = 240
+_SESSION_SOCKET_TEST_FILES = frozenset({
+    "test_session_daemon.py", "test_session_run.py", "test_session_attach.py",
+})
 
 
 def pytest_addoption(parser: pytest.Parser) -> None:
@@ -76,12 +89,13 @@ def pytest_collection_modifyitems(
     config: pytest.Config, items: list[pytest.Item],
 ) -> None:
     """Two jobs at collection: (1) raise the per-test timeout for the slow
-    liveness families — live-API `*_live.py` files (see _LIVE_TEST_TIMEOUT) and
-    impty PTY e2e `tests/impty/test_e2e_*.py` files (see _IMPTY_E2E_TIMEOUT) —
-    each keeping its own explicit `timeout` marker if it declares one (e.g. the
-    resume tests that pick 240); and (2) gate every
-    `@pytest.mark.live(<provider>)` test behind --run-live (see tests/_live.py's
-    live_skip_reason)."""
+    liveness families — live-API `*_live.py` files (see _LIVE_TEST_TIMEOUT),
+    impty PTY e2e `tests/impty/test_e2e_*.py` files (see _IMPTY_E2E_TIMEOUT), and
+    the session-daemon/socket family (see _SESSION_SOCKET_TEST_FILES /
+    _SESSION_SOCKET_TEST_TIMEOUT) — each keeping its own explicit `timeout`
+    marker if it declares one (e.g. the resume tests that pick 240); and (2) gate
+    every `@pytest.mark.live(<provider>)` test behind --run-live (see
+    tests/_live.py's live_skip_reason)."""
     from tests._live import live_skip_reason, parse_run_live
 
     requested = parse_run_live(config.getoption("--run-live"))
@@ -94,6 +108,9 @@ def pytest_collection_modifyitems(
         is_impty_e2e = path.parent.name == "impty" and name.startswith("test_e2e_")
         if is_impty_e2e and item.get_closest_marker("timeout") is None:
             item.add_marker(pytest.mark.timeout(_IMPTY_E2E_TIMEOUT))
+        is_session_socket = name in _SESSION_SOCKET_TEST_FILES
+        if is_session_socket and item.get_closest_marker("timeout") is None:
+            item.add_marker(pytest.mark.timeout(_SESSION_SOCKET_TEST_TIMEOUT))
         marker = item.get_closest_marker("live")
         if marker is None:
             continue
