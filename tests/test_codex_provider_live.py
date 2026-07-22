@@ -15,6 +15,7 @@ are detected on this machine (capability detection at collection).
 
 from __future__ import annotations
 
+import contextlib
 import dataclasses
 import json
 import subprocess
@@ -122,10 +123,11 @@ async def test_codex_live_round_trip_under_production_flags(tmp_path: Path) -> N
         )
         events: list[Any] = []
         try:
-            async for ev in runner.run(inv):
-                events.append(ev)
-                if ev.get("type") == "agent_result":
-                    break
+            async with contextlib.aclosing(runner.run(inv)) as _run:
+                async for ev in _run:
+                    events.append(ev)
+                    if ev.get("type") == "agent_result":
+                        break
         except AwaitingUserInput:
             # Headless nudge-then-park backstop fired: the model ended two turns
             # without complete_step. That is a non-completing attempt — the same
