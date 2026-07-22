@@ -21,7 +21,7 @@ from imp.engine.quest import Quest
 from imp.engine.state import State
 from imp.remote.session.discover import session_socket_path
 from imp.remote.session.server import SessionServer
-from tests.async_wait import wait_until
+from tests.async_wait import HANG_BACKSTOP, wait_until
 from tests.conftest import _seed_control
 
 
@@ -117,7 +117,7 @@ async def test_run_session_client_answers_gate_and_returns_completed_rc(
 
     coord = InterruptCoordinator()
     rc_holder: dict[str, int] = {}
-    with anyio.fail_after(30):
+    with anyio.fail_after(HANG_BACKSTOP):
         async with anyio.create_task_group() as tg:
             await server.open()
             tg.start_soon(server.serve, run_fn)
@@ -172,7 +172,7 @@ async def test_run_session_client_starts_status_tick_when_provided(
 
     coord = InterruptCoordinator()
     rc_holder: dict[str, int] = {}
-    with anyio.fail_after(30):
+    with anyio.fail_after(HANG_BACKSTOP):
         async with anyio.create_task_group() as tg:
             await server.open()
             tg.start_soon(server.serve, run_fn)
