@@ -23,6 +23,7 @@ def anyio_backend():
 @pytest.mark.parametrize("provider_mod, runner_cls", [
     ("imp.providers.anthropic", "AnthropicAgentRunner"),
     ("imp.providers.openai", "OpenAIAgentRunner"),
+    ("imp.providers.claude_code", "ClaudeCodeAgentRunner"),
 ])
 @pytest.mark.anyio
 async def test_provider_run_reraises_subagent_suspended(
@@ -30,9 +31,9 @@ async def test_provider_run_reraises_subagent_suspended(
 ) -> None:
     """Each generator-based provider's outer run() must PROPAGATE
     SubagentSuspended, not swallow it into a classified error event.
-    (Both runners share `__init__(model_name, *, client_factory=None,
+    (The runners share `__init__(model_name, *, client_factory=None,
     user_input_fn=None)`; the inner loop is stubbed so the client is never used
-    — both patch `run_agent_loop`.)"""
+    — all three patch `run_agent_loop`.)"""
     mod = importlib.import_module(provider_mod)
     base = getattr(mod, runner_cls)
     runner = base(model_name="m")

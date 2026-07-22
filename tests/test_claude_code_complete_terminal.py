@@ -74,7 +74,8 @@ async def test_completing_turn_is_interrupted_then_completes(tmp_path: Path) -> 
     events = [ev async for ev in runner.run(_inv(tmp_path, log))]
 
     assert holder["client"].interrupts == 1
-    assert [e["type"] for e in events] == ["agent_result"]
+    assert [e["type"] for e in events
+            if e["type"] != "tool_heartbeat"] == ["agent_result"]
     assert events[-1]["payload"] == {"status": "Success"}
     assert not [e for e in events if e["type"] in ("error", "handoff")]
     # The complete arm falls through to agent_output — it never requeries
@@ -111,7 +112,8 @@ async def test_completing_turn_interrupt_is_unconditional(tmp_path: Path) -> Non
     events = [ev async for ev in runner.run(_inv(tmp_path, log, threshold=None))]
 
     assert holder["client"].interrupts == 1
-    assert [e["type"] for e in events] == ["agent_result"]
+    assert [e["type"] for e in events
+            if e["type"] != "tool_heartbeat"] == ["agent_result"]
     assert events[-1]["payload"] == {"status": "Success"}
     # The interrupt branch re-emits the result-less complete_step tool_call to
     # the event log (the `continue` skips the normal append path).

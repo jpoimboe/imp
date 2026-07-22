@@ -43,7 +43,7 @@ async def test_malformed_complete_step_nudged_then_recovers(
                                    client_factory=factory)
     events = [e async for e in runner.run(_inv(tmp_path, event_log=log))]
 
-    kinds = [e["type"] for e in events]
+    kinds = [e["type"] for e in events if e["type"] != "tool_heartbeat"]
     assert kinds == ["agent_result"], kinds
     assert events[-1]["payload"] == {"status": "Success", "note": "ok"}
     log_types = [e["type"] for e in log.read()]
