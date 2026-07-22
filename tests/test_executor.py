@@ -4486,3 +4486,120 @@ async def test_self_loop_does_not_wipe_quest_scratch(tmp_path: Path, monkeypatch
     # Two dispatches of s1 (self-loop, then complete); neither wiped.
     assert "preseed" in snaps[0]
     assert "preseed" in snaps[1]
+
+
+class _NetworkThenUnknownThenSuccessRunner:
+    """Drive 1 fails `network` (opens the transient window), drive 2 fails
+    `unknown` (must sticky-retry, not pause), drive 3 succeeds."""
+    def __init__(self, output: dict) -> None:
+        self._output = output
+        self.run_count = 0
+
+    async def run(self, invocation: AgentInvocation) -> AsyncIterator[Event]:
+        self.run_count += 1
+        if self.run_count == 1:
+            yield {"type": "error", "payload": {
+                "category": "network", "kind": "network",
+                "message": "connection refused"}}
+            return
+        if self.run_count == 2:
+            yield {"type": "error", "payload": {
+                "category": "unknown", "kind": "terminated",
+                "message": "provider CLI died mid-outage"}}
+            return
+        yield {"type": "agent_result",
+               "payload": {"outcome": "ok", **self._output}}
+
+    async def interrupt(self) -> None:
+        pass
+
+
+@pytest.mark.anyio
+async def test_step_level_sticky_retry_rides_out_unknown(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    from imp.engine import executor
+    async def _instant_sleep(delay, coordinator, *, tick=0.1):  # type: ignore[misc]
+        pass
+    monkeypatch.setattr(executor, "_interruptible_sleep", _instant_sleep)
+
+    quest, _, _ = _seed_minimal_workflow(tmp_path)
+    from imp.providers import resolve
+    resolve.reset_providers_for_tests()
+
+    runner = _NetworkThenUnknownThenSuccessRunner({"status": "Success"})
+
+    class _P:
+        name = "fake"
+        model = "m"
+
+        def create_runner(self, invocation: AgentInvocation) -> AgentRunner:
+            return runner
+
+    resolve.register_provider(
+        "fake", env_check=lambda: True, factory=lambda _m: _P(),
+    )
+
+    events: list[dict] = []
+    result = await run_quest(quest, on_event=events.append)
+    # Without the sticky upgrade, drive 2's `unknown` pauses after the single
+    # network retry (run_count == 2, PAUSED). Riding it out reaches success.
+    assert result is RunResult.COMPLETED
+    assert runner.run_count == 3
+    assert not any(e["type"] == "workflow_paused" for e in events)
+
+
+class _NetworkThenUnknownFlapRunner:
+    """Drive 1 fails `network`, then `unknown` forever — a persistent flap."""
+    def __init__(self) -> None:
+        self.run_count = 0
+
+    async def run(self, invocation: AgentInvocation) -> AsyncIterator[Event]:
+        self.run_count += 1
+        cat = "network" if self.run_count == 1 else "unknown"
+        yield {"type": "error", "payload": {
+            "category": cat, "kind": cat, "message": f"{cat} down"}}
+
+    async def interrupt(self) -> None:
+        pass
+
+
+@pytest.mark.anyio
+async def test_step_level_sticky_flap_gives_up_at_budget(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    from imp.engine import executor
+    # Budget admits the 1.0s network retry (cum 1.0) and the 2.0s sticky retry
+    # (cum 3.0), then caps the 4.0s third delay (3.0 + 4.0 = 7.0 > 3.5).
+    monkeypatch.setattr(executor, "budget_for", lambda category: 3.5)
+    async def _instant_sleep(delay, coordinator, *, tick=0.1):  # type: ignore[misc]
+        pass
+    monkeypatch.setattr(executor, "_interruptible_sleep", _instant_sleep)
+
+    quest, _, _ = _seed_minimal_workflow(tmp_path)
+    from imp.providers import resolve
+    resolve.reset_providers_for_tests()
+
+    runner = _NetworkThenUnknownFlapRunner()
+
+    class _P:
+        name = "fake"
+        model = "m"
+
+        def create_runner(self, invocation: AgentInvocation) -> AgentRunner:
+            return runner
+
+    resolve.register_provider(
+        "fake", env_check=lambda: True, factory=lambda _m: _P(),
+    )
+
+    events: list[dict] = []
+    result = await run_quest(quest, on_event=events.append)
+    # drive 1 network (retry) + drive 2 unknown (sticky retry) + drive 3 unknown
+    # (budget exceeded -> pause). A non-sticky unknown would pause on drive 2
+    # (run_count == 2). run_count == 3 proves the sticky retry happened AND the
+    # budget then terminated it.
+    assert result is RunResult.PAUSED
+    assert runner.run_count == 3
+    paused = [e for e in events if e["type"] == "workflow_paused"]
+    assert paused and paused[0]["payload"]["reason"] == "retry_ceiling"
