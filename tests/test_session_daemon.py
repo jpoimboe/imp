@@ -19,7 +19,7 @@ from imp.remote.session.protocol import (
     CONTROL_DISCARD,
     CONTROL_SAVE,
 )
-from tests.async_wait import wait_until
+from tests.async_wait import HANG_BACKSTOP, wait_until
 
 
 @pytest.fixture
@@ -48,7 +48,7 @@ def _make_quest(tmp_path: Path, quest_id: str) -> Quest:
 
 
 async def _wait_for_socket(sock: str) -> None:
-    with anyio.fail_after(30):  # deadlock backstop only, never a tuned window
+    with anyio.fail_after(HANG_BACKSTOP):  # deadlock backstop only, never a tuned window
         while True:
             try:
                 stream = await anyio.connect_unix(sock)
@@ -66,7 +66,7 @@ async def test_wait_for_socket_returns_when_listener_accepting(
     sock = str(tmp_path / "ready.sock")
     listener = await anyio.create_unix_listener(sock)
     async with listener:
-        with anyio.fail_after(5):
+        with anyio.fail_after(HANG_BACKSTOP):
             await _wait_for_socket(sock)
 
 
@@ -131,13 +131,13 @@ async def test_serves_on_per_change_socket_and_bridges_run_quest_seams(
         client = SessionClient(sock, quest.id, quest.title, on_event=_on_event)
         await client.connect()
         tg.start_soon(client.receive_events)
-        with anyio.fail_after(30):   # deadlock backstop only
+        with anyio.fail_after(HANG_BACKSTOP):   # deadlock backstop only
             await gate_seen.wait()   # the gate is armed; the reply cannot be lost
         await client.send_input("ship it")
-        with anyio.fail_after(30):   # deadlock backstop only; starts after send
+        with anyio.fail_after(HANG_BACKSTOP):   # deadlock backstop only; starts after send
             await run_done.wait()
         assert result["r"] == "ship it"
-        with anyio.fail_after(30):   # deadlock backstop only
+        with anyio.fail_after(HANG_BACKSTOP):   # deadlock backstop only
             await output_seen.wait()
         assert received[0] == {"type": "replay_complete"}  # boundary leads the attach stream
         assert [e for e in received
@@ -193,13 +193,13 @@ async def test_client_attached_at_completion_receives_final_agent_output(
         client = SessionClient(sock, quest.id, quest.title, on_event=_on_event)
         await client.connect()
         tg.start_soon(client.receive_events)
-        with anyio.fail_after(30):   # deadlock backstop only
+        with anyio.fail_after(HANG_BACKSTOP):   # deadlock backstop only
             await attached.wait()    # client fully attached (got replay boundary)
         client_ready.set()           # now fake_run may emit its final event + return
-        with anyio.fail_after(30):   # deadlock backstop only
+        with anyio.fail_after(HANG_BACKSTOP):   # deadlock backstop only
             await output_seen.wait()
         assert {"type": "agent_output", "payload": {"reply": "final"}} in received
-        with anyio.fail_after(30):   # deadlock backstop only
+        with anyio.fail_after(HANG_BACKSTOP):   # deadlock backstop only
             await run_done.wait()
         assert result["r"] == "done"
         await client.aclose()
@@ -223,7 +223,7 @@ async def test_zero_client_gate_hibernates_by_default(tmp_path: Path) -> None:
             return "hibernated"
         return "resident"
 
-    with anyio.fail_after(30):   # deadlock backstop only
+    with anyio.fail_after(HANG_BACKSTOP):   # deadlock backstop only
         result = await serve_quest_session(
             quest, run_fn=fake_run, first_attach_timeout=0.1)
     assert result == "hibernated"
@@ -298,7 +298,7 @@ async def test_interrupt_control_pauses_the_shared_coordinator(
                                on_event=lambda _e: None)
         await client.connect()
         await client.send_control("interrupt")
-        with anyio.fail_after(30):   # deadlock backstop only; starts after send
+        with anyio.fail_after(HANG_BACKSTOP):   # deadlock backstop only; starts after send
             await run_returned.wait()
         assert result["r"] == "paused"
         await client.aclose()
@@ -483,7 +483,7 @@ async def test_interrupt_pause_hibernates_with_zero_clients(
         await coordinator.signal_pause(reason="ctrl-c")
         return RunResult.PAUSED
 
-    with anyio.fail_after(30):   # deadlock backstop only
+    with anyio.fail_after(HANG_BACKSTOP):   # deadlock backstop only
         result = await serve_quest_session(
             quest, run_fn=fake_run, hibernate=True, first_attach_timeout=0.1)
     assert result is RunResult.PAUSED
@@ -513,7 +513,7 @@ async def test_resume_journals_workflow_resumed_without_flipping_status(
         seen["status"] = State.load(quest.state_dir).status
         return RunResult.COMPLETED
 
-    with anyio.fail_after(30):   # deadlock backstop only
+    with anyio.fail_after(HANG_BACKSTOP):   # deadlock backstop only
         result = await serve_quest_session(
             quest, run_fn=fake_run, hibernate=False, resume=True)
 
@@ -555,7 +555,7 @@ async def test_resume_sets_resume_pending_for_a_stale_lock_crash(tmp_path: Path)
         seen["resume_should_continue"] = st.resume_should_continue
         return RunResult.COMPLETED
 
-    with anyio.fail_after(30):   # deadlock backstop only
+    with anyio.fail_after(HANG_BACKSTOP):   # deadlock backstop only
         result = await serve_quest_session(
             quest, run_fn=fake_run, hibernate=False, resume=True)
 
@@ -589,7 +589,7 @@ async def test_resume_with_no_lock_does_not_set_resume_pending(tmp_path: Path) -
         seen["resume_pending"] = State.load(quest.state_dir).resume_pending
         return RunResult.COMPLETED
 
-    with anyio.fail_after(30):   # deadlock backstop only
+    with anyio.fail_after(HANG_BACKSTOP):   # deadlock backstop only
         result = await serve_quest_session(
             quest, run_fn=fake_run, hibernate=False, resume=True)
 
@@ -618,7 +618,7 @@ async def test_default_spawn_does_no_resume_prep(tmp_path: Path) -> None:
         seen["status"] = State.load(quest.state_dir).status
         return RunResult.COMPLETED
 
-    with anyio.fail_after(30):   # deadlock backstop only
+    with anyio.fail_after(HANG_BACKSTOP):   # deadlock backstop only
         result = await serve_quest_session(
             quest, run_fn=fake_run, hibernate=False)  # resume defaults False
 
@@ -898,7 +898,7 @@ async def test_awaiting_turn_hibernation_exit_drives_now_head(
             agent_id=None, type="workflow_paused", payload={"reason": "awaiting_turn"})
         return RunResult.PAUSED
 
-    with anyio.fail_after(30):   # deadlock backstop only
+    with anyio.fail_after(HANG_BACKSTOP):   # deadlock backstop only
         result = await serve_quest_session(quest, run_fn=fake_run, hibernate=False)
 
     assert result is RunResult.PAUSED
@@ -929,7 +929,7 @@ async def test_non_awaiting_turn_pause_does_not_drive_head(
             agent_id=None, type="workflow_paused", payload={"reason": "interrupt"})
         return RunResult.PAUSED
 
-    with anyio.fail_after(30):   # deadlock backstop only
+    with anyio.fail_after(HANG_BACKSTOP):   # deadlock backstop only
         result = await serve_quest_session(quest, run_fn=fake_run, hibernate=False)
 
     assert result is RunResult.PAUSED
@@ -1032,7 +1032,7 @@ async def test_script_blocked_pause_exits_terminal(tmp_path: Path) -> None:
                    payload={"reason": "script_blocked"})
         return RunResult.PAUSED
 
-    with anyio.fail_after(30):   # deadlock backstop only
+    with anyio.fail_after(HANG_BACKSTOP):   # deadlock backstop only
         result = await serve_quest_session(quest, run_fn=fake_run, hibernate=False)
     assert result is RunResult.PAUSED
     assert calls["n"] == 1  # exited terminal — never looped
@@ -1058,7 +1058,7 @@ async def test_script_blocked_pause_hibernates_with_zero_clients(
                    payload={"reason": "script_blocked"})
         return RunResult.PAUSED
 
-    with anyio.fail_after(30):   # deadlock backstop only
+    with anyio.fail_after(HANG_BACKSTOP):   # deadlock backstop only
         result = await serve_quest_session(
             quest, run_fn=fake_run, hibernate=True, first_attach_timeout=0.1)
     assert result is RunResult.PAUSED
@@ -1144,7 +1144,7 @@ async def test_serve_forwards_non_interactive_to_run_quest(tmp_path: Path) -> No
         captured["headless"] = headless
         return "done"
 
-    with anyio.fail_after(30):   # deadlock backstop only
+    with anyio.fail_after(HANG_BACKSTOP):   # deadlock backstop only
         result = await serve_quest_session(
             quest, run_fn=fake_run, hibernate=False, non_interactive=True)
     assert result == "done"
@@ -1400,7 +1400,7 @@ async def test_autonomous_forwarded_to_run_fn(tmp_path: Path) -> None:
         captured["autonomous"] = autonomous
         return RunResult.COMPLETED
 
-    with anyio.fail_after(30):   # deadlock backstop only
+    with anyio.fail_after(HANG_BACKSTOP):   # deadlock backstop only
         result = await serve_quest_session(
             quest, run_fn=fake_run, hibernate=False, autonomous=True)
     assert result is RunResult.COMPLETED
@@ -1423,7 +1423,7 @@ async def test_detach_at_hold_prompt_stamps_resume_target_prompt(
         await coordinator.signal_pause(reason="ctrl-c")
         return RunResult.PAUSED
 
-    with anyio.fail_after(30):   # deadlock backstop only
+    with anyio.fail_after(HANG_BACKSTOP):   # deadlock backstop only
         result = await serve_quest_session(
             quest, run_fn=fake_run, hibernate=True, first_attach_timeout=0.1)
 
@@ -1456,7 +1456,7 @@ async def test_detach_at_interrupt_steer_stamps_prompt_interrupted(
         await coordinator.signal_pause(reason="ctrl-c")
         return RunResult.PAUSED
 
-    with anyio.fail_after(30):   # deadlock backstop only
+    with anyio.fail_after(HANG_BACKSTOP):   # deadlock backstop only
         result = await serve_quest_session(
             quest, run_fn=fake_run, hibernate=True, first_attach_timeout=0.1)
 
@@ -1483,7 +1483,7 @@ async def test_detach_after_ctrl_d_midrun_stamps_resume_target_agent(
         await coordinator.signal_pause(reason="ctrl-d")
         return RunResult.PAUSED
 
-    with anyio.fail_after(30):   # deadlock backstop only
+    with anyio.fail_after(HANG_BACKSTOP):   # deadlock backstop only
         result = await serve_quest_session(
             quest, run_fn=fake_run, hibernate=True, first_attach_timeout=0.1)
 
@@ -1582,7 +1582,7 @@ async def test_resume_agent_target_runs_straight_away(
         seen["ran"] = True
         return RunResult.COMPLETED
 
-    with anyio.fail_after(30):   # deadlock backstop only
+    with anyio.fail_after(HANG_BACKSTOP):   # deadlock backstop only
         result = await serve_quest_session(
             quest, run_fn=fake_run, hibernate=False, resume=True)
 
@@ -1616,7 +1616,7 @@ async def test_resume_prompt_target_runs_agent_without_interactive_channel(
         return RunResult.COMPLETED
 
     kwargs = {flag: True}
-    with anyio.fail_after(30):   # deadlock backstop only
+    with anyio.fail_after(HANG_BACKSTOP):   # deadlock backstop only
         result = await serve_quest_session(
             quest, run_fn=fake_run, hibernate=True, resume=True,
             first_attach_timeout=0.1, **kwargs)
@@ -1764,7 +1764,7 @@ async def test_model_override_pause_reenters_without_resume_prompt(
     # A wrong impl (treating the model-override pause as a ctrl-c hold) would emit
     # _RESUME_PROMPT and block on user_chat_input_fn — with no client to answer,
     # that blocks forever, so the deadline concretely enforces the no-prompt path.
-    with anyio.fail_after(30):   # deadlock backstop only
+    with anyio.fail_after(HANG_BACKSTOP):   # deadlock backstop only
         result = await serve_quest_session(
             quest, run_fn=_run_fn, hibernate=False)
 
@@ -1801,7 +1801,7 @@ async def test_model_override_pause_with_empty_arg_resumes_without_applying(
             return RunResult.PAUSED
         return RunResult.COMPLETED
 
-    with anyio.fail_after(30):   # deadlock backstop only
+    with anyio.fail_after(HANG_BACKSTOP):   # deadlock backstop only
         result = await serve_quest_session(
             quest, run_fn=_run_fn, hibernate=False)
 
@@ -2077,7 +2077,7 @@ async def test_sandbox_control_no_pause_single_dispatch(tmp_path: Path) -> None:
         client = SessionClient(sock, quest.id, quest.title,
                                on_event=lambda _e: None)
         await client.connect()
-        with anyio.fail_after(30):   # deadlock backstop only
+        with anyio.fail_after(HANG_BACKSTOP):   # deadlock backstop only
             await run_ready.wait()
         await client.send_control(CONTROL_SET_SANDBOX, "off")
         await wait_until(lambda: "r" in result)
@@ -2107,7 +2107,7 @@ async def test_resume_restores_unsandboxed_into_coordinator(tmp_path: Path) -> N
         seen["unsandboxed"] = coordinator.unsandboxed
         return RunResult.COMPLETED
 
-    with anyio.fail_after(30):   # deadlock backstop only
+    with anyio.fail_after(HANG_BACKSTOP):   # deadlock backstop only
         result = await serve_quest_session(
             quest, run_fn=fake_run, hibernate=False, resume=True)
 
@@ -2207,7 +2207,7 @@ async def test_compact_pause_reenters_after_running_compaction(
             return RunResult.PAUSED
         return RunResult.COMPLETED
 
-    with anyio.fail_after(30):   # deadlock backstop only
+    with anyio.fail_after(HANG_BACKSTOP):   # deadlock backstop only
         result = await serve_quest_session(
             quest, run_fn=_run_fn, hibernate=False)
 
