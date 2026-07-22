@@ -2001,6 +2001,9 @@ NarrativeBuilder._HANDLERS["step_label_updated"] = _h_step_label_updated
 
 
 def _h_error(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
+    if p.get("audit"):
+        # Audit-only record: stay fully silent (pre-burst return, no node).
+        return
     self._flush_burst()
     if p.get("category") == "config" and p.get("kind") == "interrupted":
         if self._step_stack:
