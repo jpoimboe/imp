@@ -8,7 +8,7 @@ from imp.providers.errors import Category
 
 def test_pause_categories_return_pause_regardless_of_attempts() -> None:
     for cat in ("config", "quota", "content_filter",
-                "context_window", "unknown"):
+                "context_window"):
         for attempts in (0, 1, 2, 99):
             assert isinstance(
                 ep.decide(cat, prior_backoff_attempts=attempts), ep.Pause,
@@ -142,8 +142,7 @@ def test_budget_for_auth_is_1800() -> None:
 
 def test_budget_for_pause_and_retry_now_categories_is_none() -> None:
     for cat in ("config", "quota", "content_filter", "context_window",
-                "api", "loop", "terminated", "unknown",
-                "agent_output_missing"):
+                "api", "loop", "agent_output_missing"):
         assert ep.budget_for(cat) is None
 
 
@@ -229,8 +228,66 @@ def test_is_retry_with_backoff_false_for_unrecognized_category() -> None:
     assert ep.is_retry_with_backoff("not_a_category") is False
 
 
+def test_sticky_ambiguous_retries_inside_transient_window() -> None:
+    # A transient retry is already in progress (prior_backoff_attempts >= 1):
+    # the ambiguous pair upgrades to a budgeted backoff retry on the same
+    # 60s-capped exponential schedule (2**n): attempt 1 -> 2.0, attempt 2 -> 4.0.
+    for cat in ("unknown", "terminated"):
+        d1 = ep.decide(cat, prior_backoff_attempts=1)
+        assert isinstance(d1, ep.RetryWithBackoff)
+        assert d1.delay_seconds == 2.0
+        d2 = ep.decide(cat, prior_backoff_attempts=2)
+        assert isinstance(d2, ep.RetryWithBackoff)
+        assert d2.delay_seconds == 4.0
+
+
+def test_cold_ambiguous_still_pauses() -> None:
+    # Outside a transient window (prior_backoff_attempts == 0) the ambiguous pair
+    # pauses exactly as today.
+    for cat in ("unknown", "terminated"):
+        assert isinstance(
+            ep.decide(cat, prior_backoff_attempts=0), ep.Pause)
+
+
+def test_hard_stops_not_upgraded_inside_window() -> None:
+    # The hard-stop categories never sticky-upgrade, even mid-window.
+    for cat in ("config", "quota", "content_filter",
+                "context_window", "loop", "api"):
+        assert isinstance(
+            ep.decide(cat, prior_backoff_attempts=1), ep.Pause)
+
+
+def test_budget_for_sticky_categories_is_1800() -> None:
+    # The sticky window is bounded by the same 1800s budget the transient
+    # categories use, so a persistent flap still gives up.
+    assert ep.budget_for("unknown") == 1800.0
+    assert ep.budget_for("terminated") == 1800.0
+
+
+def test_sticky_categories_stay_non_backoff_in_is_retry_with_backoff() -> None:
+    # The upgrade lives in decide(), not the _Policy.decision field, so the
+    # sticky pair keeps decision=Pause and is_retry_with_backoff stays False.
+    assert ep.is_retry_with_backoff("unknown") is False
+    assert ep.is_retry_with_backoff("terminated") is False
+
+
 def test_is_retry_with_backoff_matches_policy_table() -> None:
     for cat, policy in ep._POLICY.items():
         assert ep.is_retry_with_backoff(cat) is (
             policy.decision is ep.RetryWithBackoff
         )
+
+
+def test_sticky_ambiguous_honors_hint_delay() -> None:
+    # On the sticky path, a hint > 60s wins the delay outright and flags hinted;
+    # a hint <= 60s stays inside the capped/budgeted regime. Same formula as any
+    # other backoff category.
+    for cat in ("unknown", "terminated"):
+        big = ep.decide(cat, prior_backoff_attempts=1, hint_delay_seconds=999.0)
+        assert isinstance(big, ep.RetryWithBackoff)
+        assert big.delay_seconds == 999.0
+        assert big.hinted is True
+        small = ep.decide(cat, prior_backoff_attempts=1, hint_delay_seconds=30.0)
+        assert isinstance(small, ep.RetryWithBackoff)
+        assert small.delay_seconds == 30.0
+        assert small.hinted is False

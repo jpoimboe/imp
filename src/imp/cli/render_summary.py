@@ -54,7 +54,9 @@ class StepRow:
 
 
 def _is_nonterminal_error(p: dict[str, Any]) -> bool:
-    # Executor's interrupt marker is not a terminal failure; narrative._h_error same shape.
+    # Audit-only records are queryable but silent; interrupt marker is not a terminal failure.
+    if p.get("audit"):
+        return True
     return p.get("category") == "config" and p.get("kind") == "interrupted"
 
 

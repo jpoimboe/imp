@@ -457,6 +457,19 @@ async def dispatch_task(
                 if not hinted:
                     budget = budget_for(category)
                     if budget is not None and cumulative_backoff + result.delay > budget:
+                        # Record why this subagent gave up — invisible otherwise
+                        # (the subagent loop drives with emit_events=False). Silent
+                        # in the live narrative via the `audit` marker; queryable
+                        # via `imp events --type error --agent sub:<id>`.
+                        if ctx.event_log is not None:
+                            ctx.event_log.append(
+                                agent_id=sub_inv.agent_id, type="error",
+                                payload={
+                                    "category": category,
+                                    "kind": "budget_exhausted",
+                                    "message": (f"gave up after the {budget:.0f}s "
+                                                f"backoff budget on {category}"),
+                                    "audit": True})
                         # Hand the child back to the parent instead of unwinding the
                         # turn: a RuntimeError body the dispatch layer appends as an
                         # is_error tool_result. Marker keyed off should_pause.
@@ -560,7 +573,27 @@ async def dispatch_task(
                 # content for the literal "[<kind>]" marker (only on is_error closes).
                 # Keep the bracketed format and kind vocabulary in sync with that scan.
                 suffix = f" [{kind}]" if kind else ""
-                raise RuntimeError(f"subagent {subagent_name!r} failed ({cat}){suffix}")
+                # Record why this subagent gave up — invisible otherwise (the
+                # subagent loop drives with emit_events=False). Silent in the live
+                # narrative via the `audit` marker; queryable via
+                # `imp events --type error --agent sub:<id>`.
+                if ctx.event_log is not None:
+                    ctx.event_log.append(
+                        agent_id=sub_inv.agent_id, type="error",
+                        payload={
+                            "category": cat, "kind": kind,
+                            "message": f"subagent {subagent_name!r} failed ({cat})",
+                            "audit": True})
+                # Point the parent at the prior transcript so it can re-dispatch a
+                # fresh subagent that continues the child's work instead of starting
+                # empty (mirrors _suspend_handback_body / the context-ceiling path).
+                tx = target_dir / "transcript.jsonl"
+                raise RuntimeError(
+                    f"subagent {subagent_name!r} failed ({cat}){suffix}\n\n"
+                    f"Full prior transcript: {tx}\n\n"
+                    f"You decide what happens next — re-dispatch a fresh subagent "
+                    f"(pointed at the transcript above to continue), or carry on "
+                    f"from what you have.")
             return cast(str, result.output["text"])
     finally:
         if home_cleanup is not None:

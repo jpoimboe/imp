@@ -2001,6 +2001,9 @@ NarrativeBuilder._HANDLERS["step_label_updated"] = _h_step_label_updated
 
 
 def _h_error(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
+    if p.get("audit"):
+        # Audit-only record: stay fully silent (pre-burst return, no node).
+        return
     self._flush_burst()
     if p.get("category") == "config" and p.get("kind") == "interrupted":
         if self._step_stack:
@@ -2105,6 +2108,17 @@ def _h_agent_retry(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, A
     # Non-terminal: a transient error was retried with backoff. Render inline so
     # a self-healed network/rate_limit blip doesn't look like a failure.
     cat = p.get("category", "?")
+    # A step-level sticky retry (unknown/terminated ridden out) logs its streamed
+    # provider error first; that hard red line is now misleading because the loop
+    # rode the transient out. Drop the immediately-preceding same-category
+    # non-warning ErrorNode so a sticky retry renders like every other backoff
+    # retry. No-op for network/auth/rate_limit — _h_error already suppressed those.
+    container = self._container()
+    if (container.children
+            and isinstance(container.children[-1], ErrorNode)
+            and not container.children[-1].is_warning
+            and container.children[-1].category == cat):
+        del container.children[-1]
     # lazy import keeps narrative.py module-level-import-free.
     from imp.engine.error_policy import is_retry_with_backoff
     backoff = is_retry_with_backoff(str(cat))

@@ -1232,3 +1232,112 @@ def test_dispatch_task_missing_handoff_note_degrades_to_transcript(
     assert "[context_exhausted]" in body
     assert "It hit the hard context limit without writing a handoff." in body
     assert "It wrote this handoff before stopping:" not in body
+
+
+def test_dispatch_task_failed_handback_carries_transcript_pointer(
+        tmp_path: Path) -> None:
+    # PRODUCER: the failed/fatal handback (result.errored, delay=None so no budget
+    # ceiling, not paused, no handoff -> not context-ceiling) now hands back a body
+    # that carries the transcript pointer + re-dispatch prose so the task-lead can
+    # point a fresh subagent at the prior transcript, while preserving the
+    # "failed (<cat>) [<kind>]" marker line the _close_subagent_fold scan reads.
+    import anyio
+
+    from imp.engine.agent_run import AgentRunResult, ErrorInfo
+
+    ctx = _dispatch_ctx(tmp_path)
+
+    async def _fake_drive(*_a, **_k):
+        return AgentRunResult(output=None, errored=True, paused=False,
+                              fatal=False, delay=None,
+                              error=ErrorInfo("network", "network"))
+
+    import imp.agents.subagents as sub_mod
+    orig = sub_mod.drive_invocation
+    sub_mod.drive_invocation = _fake_drive  # type: ignore[assignment]
+    try:
+        with pytest.raises(RuntimeError) as ei:
+            anyio.run(dispatch_task, ctx, "reviewer", "do x")
+    finally:
+        sub_mod.drive_invocation = orig  # type: ignore[assignment]
+    body = str(ei.value)
+    # Marker line preserved (name, category, [kind]).
+    assert "subagent 'reviewer' failed (network) [network]" in body
+    # New: the work-preserving transcript pointer + re-dispatch prose.
+    assert "Full prior transcript: " in body
+    assert "transcript.jsonl" in body
+    assert "re-dispatch a fresh subagent" in body
+    assert "carry on from what you have" in body
+
+
+def test_dispatch_task_failed_handback_omits_kind_suffix_when_kind_none(
+        tmp_path: Path) -> None:
+    # When result.error.kind is None the marker suffix is empty ("failed (network)"
+    # with no bracket), but the transcript pointer + re-dispatch prose are still
+    # present — the work-preserving lines are unconditional, the [kind] marker is not.
+    import anyio
+
+    from imp.engine.agent_run import AgentRunResult, ErrorInfo
+
+    ctx = _dispatch_ctx(tmp_path)
+
+    async def _fake_drive(*_a, **_k):
+        return AgentRunResult(output=None, errored=True, paused=False,
+                              fatal=False, delay=None,
+                              error=ErrorInfo("network", None))
+
+    import imp.agents.subagents as sub_mod
+    orig = sub_mod.drive_invocation
+    sub_mod.drive_invocation = _fake_drive  # type: ignore[assignment]
+    try:
+        with pytest.raises(RuntimeError) as ei:
+            anyio.run(dispatch_task, ctx, "reviewer", "do x")
+    finally:
+        sub_mod.drive_invocation = orig  # type: ignore[assignment]
+    body = str(ei.value)
+    assert "subagent 'reviewer' failed (network)" in body
+    assert "failed (network) [" not in body   # no kind bracket
+    assert "Full prior transcript: " in body
+
+
+def test_dispatch_task_midloop_pause_emits_no_audit_error(tmp_path: Path) -> None:
+    # PRODUCER: a human pause signaled DURING the backoff sleep hits the mid-loop
+    # should_pause handback (subagents.py:495-497), which hands back via
+    # _suspend_handback_body ([interrupted] marker) and — like every pause path —
+    # emits NO audit `error` event. The real event_log + the emitted agent_retry
+    # make a leaked audit observable (a falsifiable negative).
+    import anyio
+
+    from imp.engine.agent_run import AgentRunResult, ErrorInfo
+    from imp.engine.state import InMemoryEventLog
+
+    ctx = _dispatch_ctx(tmp_path)
+    ctx.event_log = InMemoryEventLog()   # real WRITE log so a leaked audit is observable
+
+    async def _fake_drive(*_a, **_k):
+        # A retryable transient opens a backoff sleep; the mid-loop pause fires
+        # AFTER the sleep, before any re-drive.
+        return AgentRunResult(output=None, errored=True, paused=False,
+                              fatal=False, delay=1.0,
+                              error=ErrorInfo("network", "network"))
+
+    async def _pause_during_sleep(_delay, coordinator):
+        coordinator._should_pause = True
+
+    import imp.agents.subagents as sub_mod
+    orig_drive = sub_mod.drive_invocation
+    orig_sleep = sub_mod._interruptible_sleep
+    sub_mod.drive_invocation = _fake_drive              # type: ignore[assignment]
+    sub_mod._interruptible_sleep = _pause_during_sleep  # type: ignore[assignment]
+    try:
+        with pytest.raises(RuntimeError) as ei:
+            anyio.run(dispatch_task, ctx, "reviewer", "do x")
+    finally:
+        sub_mod.drive_invocation = orig_drive           # type: ignore[assignment]
+        sub_mod._interruptible_sleep = orig_sleep       # type: ignore[assignment]
+    body = str(ei.value)
+    assert "[interrupted]" in body                      # mid-loop pause handback
+    events = list(ctx.event_log.read())
+    assert any(e["type"] == "agent_retry" for e in events)          # log is live
+    assert not any(e["type"] == "error" and e["payload"].get("audit")
+                   for e in events)                    # no audit on the pause path

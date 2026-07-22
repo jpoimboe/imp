@@ -109,6 +109,15 @@ def test_interrupt_config_error_does_not_mark_errored():
     assert rows[-1].errored is False
 
 
+def test_audit_error_does_not_mark_errored():
+    rows = build_summary([
+        _started("task-lead", "implement", "2026-01-01T00:00:00+00:00"),
+        {"type": "error", "timestamp": "2026-01-01T00:00:05+00:00",
+         "payload": {"audit": True, "category": "terminated", "kind": "budget_exhausted"}},
+    ])
+    assert rows[-1].errored is False
+
+
 def _row(phase, step, secs, *, wait=0.0, errored=False, open_=False):
     start = "2026-01-01T00:00:00+00:00"
     end = None if open_ else f"2026-01-01T00:{secs // 60:02d}:{secs % 60:02d}+00:00"
