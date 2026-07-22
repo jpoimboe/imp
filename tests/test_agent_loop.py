@@ -35,9 +35,12 @@ class TrippingGuard:
 
 class FakeSession:
     def __init__(self, turns, *, subagent_depth=0, invocation=None, elog=None,
-                 guard=None, handoff_before=None, handoff_after=("none", None)):
+                 guard=None, handoff_before=None, handoff_after=("none", None),
+                 captured_turns=None, posthoc_ceiling=False):
         self._turns = list(turns)
         self._i = 0
+        self._captured_turns = captured_turns   # list | None, one entry per turn
+        self._posthoc = posthoc_ceiling
         self.subagent_depth = subagent_depth
         self.invocation = invocation
         self.elog = elog or InMemoryEventLog()
@@ -86,6 +89,23 @@ class FakeSession:
 
     def handoff_after_tools(self):
         return self._handoff_after
+
+    def captured_complete_step(self):
+        if self._captured_turns is None:
+            return None
+        idx = self._i - 1                        # events() already advanced _i
+        return self._captured_turns[idx] if 0 <= idx < len(self._captured_turns) else None
+
+    def posthoc_ceiling_tripped(self):
+        return self._posthoc
+
+    def observe_bare_turn(self, last_text):
+        # FakeSession models the PUSH contract: events() never self-observes, so
+        # the bare-turn LoopGuard feed happens here (prose-only, tools=[]), exactly
+        # as PushSession does. (An observe Session overrides this to return None.)
+        from imp.agents.loop_guard import TurnRecord
+        return self.guard.observe(TurnRecord(
+            assistant_text=last_text, tools=[], has_complete_step=False))
 
 
 @pytest.mark.anyio
@@ -375,3 +395,123 @@ async def test_awaitable_continuation_is_awaited():
     evs = [e async for e in run_agent_loop(inv, sess)]
     assert sess.sent == [("async continue", False)]
     assert evs[-1]["payload"]["kind"] == "interrupted"
+
+
+@pytest.mark.anyio
+async def test_observe_captured_complete_step_yields_agent_result(monkeypatch):
+    from imp.agents.output_guard import Ok
+    monkeypatch.setattr(
+        "imp.agents.agent_loop.validate_output_or_nudge",
+        lambda args, schema, guard: Ok(payload={"status": "Success"}, recovered=None))
+    inv = SimpleNamespace(continuation_fn=None,
+                          agent_def=SimpleNamespace(output_schema=object()))
+    sess = FakeSession([[EndOfTurn(last_text="done")]], invocation=inv,
+                       captured_turns=[{"status": "Success"}])
+    evs = [e async for e in run_agent_loop(inv, sess)]
+    non_hb = [e for e in evs if e["type"] != "tool_heartbeat"]
+    assert non_hb == [{"type": "agent_result", "payload": {"status": "Success"}}]
+
+
+@pytest.mark.anyio
+async def test_observe_captured_recovered_appends_event_then_yields_agent_result(monkeypatch):
+    from imp.agents.output_guard import Ok, RecoveryInfo
+    monkeypatch.setattr(
+        "imp.agents.agent_loop.validate_output_or_nudge",
+        lambda args, schema, guard: Ok(
+            payload={"status": "Success"},
+            recovered=RecoveryInfo(container="c", fields=("f",))))
+    elog = InMemoryEventLog()
+    inv = SimpleNamespace(continuation_fn=None,
+                          agent_def=SimpleNamespace(output_schema=object()))
+    sess = FakeSession([[EndOfTurn(last_text="done")]], invocation=inv, elog=elog,
+                       captured_turns=[{"status": "Success"}])
+    evs = [e async for e in run_agent_loop(inv, sess)]
+    assert any(e["type"] == "output_recovered" for e in elog.read())  # recovery event appended
+    non_hb = [e for e in evs if e["type"] != "tool_heartbeat"]
+    assert non_hb == [{"type": "agent_result", "payload": {"status": "Success"}}]
+
+
+@pytest.mark.anyio
+async def test_observe_captured_nudge_records_event_resends_and_loops(monkeypatch):
+    from imp.agents.output_guard import Nudge
+    monkeypatch.setattr(
+        "imp.agents.agent_loop.validate_output_or_nudge",
+        lambda args, schema, guard: Nudge(message="try again",
+                                          reason="missing status", attempt=1))
+    elog = InMemoryEventLog()
+    inv = SimpleNamespace(continuation_fn=None,
+                          agent_def=SimpleNamespace(output_schema=object()))
+    sess = FakeSession(
+        [[EndOfTurn(last_text="bad")],
+         [Error(payload={"category": "config", "kind": "interrupted", "message": "x"})]],
+        invocation=inv, elog=elog,
+        captured_turns=[{"note": "no status"}, None])
+    evs = [e async for e in run_agent_loop(inv, sess)]
+    assert sess.sent == [("try again", False)]          # re-queried with the nudge
+    assert any(e["type"] == "output_validation_nudge" for e in elog.read())
+    assert evs[-1]["payload"]["kind"] == "interrupted"  # second turn's Error terminates
+
+
+@pytest.mark.anyio
+async def test_observe_captured_loop_error_yields_error(monkeypatch):
+    sentinel = {"type": "error", "payload": {"category": "loop", "kind": "repeated_failure"}}
+    monkeypatch.setattr(
+        "imp.agents.agent_loop.validate_output_or_nudge",
+        lambda args, schema, guard: SimpleNamespace(kind="repeated_failure"))
+    monkeypatch.setattr("imp.providers.errors.make_error_event",
+                        lambda err, kind="": sentinel)
+    inv = SimpleNamespace(continuation_fn=None,
+                          agent_def=SimpleNamespace(output_schema=object()))
+    sess = FakeSession([[EndOfTurn(last_text="bad")]], invocation=inv,
+                       captured_turns=[{"x": 1}])
+    evs = [e async for e in run_agent_loop(inv, sess)]
+    assert evs[-1] == sentinel
+
+
+@pytest.mark.anyio
+async def test_observe_posthoc_ceiling_yields_config_error():
+    inv = SimpleNamespace(continuation_fn=None,
+                          agent_def=SimpleNamespace(output_schema=object()))
+    sess = FakeSession([[EndOfTurn(last_text="over")]], invocation=inv,
+                       posthoc_ceiling=True)
+    sess.ceiling = 7
+    evs = [e async for e in run_agent_loop(inv, sess)]
+    assert evs[-1] == {"type": "error", "payload": {
+        "category": "config", "kind": "tool_call_ceiling_exceeded", "ceiling": 7}}
+
+
+@pytest.mark.anyio
+async def test_observe_seam_bare_turn_not_double_fed_by_driver():
+    feeds = []
+    class ObserveLikeSession(FakeSession):
+        def observe_bare_turn(self, last_text):
+            return None  # already fed the tools-bearing record inside events()
+    inv = SimpleNamespace(continuation_fn=lambda last: ("go on", False))
+    guard = SimpleNamespace(observe=lambda rec: feeds.append(rec) or None)
+    sess = ObserveLikeSession(
+        [[EndOfTurn(last_text="need info")],
+         [Error(payload={"category": "config", "kind": "interrupted", "message": "x"})]],
+        invocation=inv, guard=guard)
+    evs = [e async for e in run_agent_loop(inv, sess)]
+    # driver delegated to observe_bare_turn, did NOT self-feed
+    assert feeds == []
+    assert sess.sent == [("go on", False)]  # continuation still delivered
+    assert evs[-1]["payload"]["kind"] == "interrupted"
+
+
+@pytest.mark.anyio
+async def test_cancel_during_continuation_pauses_without_writing_continuation():
+    class CancelSession(FakeSession):
+        def cancelled(self):
+            return getattr(self, "_flag", False)  # False at the while-gate, True after cont()
+    inv = SimpleNamespace(continuation_fn=None)
+    sess = CancelSession([[EndOfTurn(last_text="need info")]], invocation=inv)
+    def cont(last):
+        sess._flag = True                         # interrupt lands during resolution
+        return ("keep going", False)
+    inv.continuation_fn = cont
+    evs = [e async for e in run_agent_loop(inv, sess)]
+    assert sess.sent == []                         # continuation NOT delivered after cancel
+    assert evs[-1] == {"type": "error", "payload": {
+        "category": "config", "kind": "interrupted",
+        "message": "runner cancelled by interrupt"}}

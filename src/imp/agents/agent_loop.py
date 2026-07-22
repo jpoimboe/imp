@@ -14,6 +14,13 @@ from imp.agents.loop_items import (
     ToolRequested,
     Warning,
 )
+from imp.agents.output_guard import (
+    Nudge,
+    Ok,
+    make_nudge_event,
+    make_recovery_event,
+    validate_output_or_nudge,
+)
 from imp.agents.runner import ToolUseBlock
 
 
@@ -114,6 +121,36 @@ async def run_agent_loop(
         if path is not None:
             yield {"type": "handoff", "payload": {"handoff_path": path}}
             return
+        # Observe terminal decisions (spec §3 terminal point b), written once
+        # for every observe Session. Inert for push: PushSession.captured_complete_step()
+        # is None and posthoc_ceiling_tripped() is False, so an anthropic/openai
+        # EndOfTurn falls straight through to the subagent/continuation branches below.
+        captured = session.captured_complete_step()
+        if captured is not None:
+            res = validate_output_or_nudge(
+                captured, invocation.agent_def.output_schema, session.guard)
+            if isinstance(res, Ok):
+                if res.recovered is not None:
+                    recovery_ev = make_recovery_event(res)
+                    session.elog.append(agent_id=session.aid, type=recovery_ev["type"],
+                                        payload=recovery_ev["payload"])
+                yield {"type": "agent_result", "payload": res.payload}
+                return
+            if isinstance(res, Nudge):
+                nudge_ev = make_nudge_event(res)
+                session.elog.append(agent_id=session.aid, type=nudge_ev["type"],
+                                    payload=nudge_ev["payload"])
+                session.send(res.message, human=False)
+                continue
+            yield perr.make_error_event(res, kind=getattr(res, "kind", ""))
+            return
+        if session.posthoc_ceiling_tripped():
+            yield {"type": "error", "payload": {
+                "category": "config",
+                "kind": "tool_call_ceiling_exceeded",
+                "ceiling": session.ceiling,
+            }}
+            return
         if session.subagent_depth > 0:
             # Subagent bare-turn-end deliverable: last_assistant_text walks back
             # over empty trailing turns (anthropic.py:828), unlike this turn's
@@ -127,9 +164,18 @@ async def run_agent_loop(
             next_text, human = cont(last_text)
             if inspect.isawaitable(next_text):
                 next_text = await next_text
+            if session.cancelled():
+                # An interrupt landed while resolving the continuation: pause at
+                # the turn boundary instead of writing a continuation the agent
+                # was Ctrl-C'd out of (old claude_code.py:2511-2524).
+                yield {"type": "error", "payload": {
+                    "category": "config",
+                    "kind": "interrupted",
+                    "message": "runner cancelled by interrupt",
+                }}
+                return
             session.send(next_text, human=human)
-            loop_err = session.guard.observe(TurnRecord(
-                assistant_text=last_text, tools=[], has_complete_step=False))
+            loop_err = session.observe_bare_turn(last_text)
             if loop_err is not None:
                 yield perr.make_error_event(loop_err, kind=getattr(loop_err, "kind", ""))
                 return

@@ -14,7 +14,7 @@ from collections.abc import AsyncIterator
 from typing import Any
 
 from imp.agents.classify import ResumeState, _contains_tool_result, classify_resume
-from imp.agents.loop_guard import LoopGuard
+from imp.agents.loop_guard import LoopGuard, TurnRecord
 from imp.agents.loop_items import (
     AwaitingToolResults,
     EndOfTurn,
@@ -315,6 +315,17 @@ class PushSession:
 
     def handoff_after_tools(self) -> tuple[str, str | None]:
         return ("none", None)
+
+    def captured_complete_step(self) -> dict[str, Any] | None:
+        return None
+
+    def posthoc_ceiling_tripped(self) -> bool:
+        return False
+
+    def observe_bare_turn(self, last_text: str) -> Any:
+        assert self.guard is not None
+        return self.guard.observe(TurnRecord(
+            assistant_text=last_text, tools=[], has_complete_step=False))
 
     # --- shared record helper used by events() --------------------------
     def _record_agent_message(self, raw: dict[str, Any], request_id: str | None,
